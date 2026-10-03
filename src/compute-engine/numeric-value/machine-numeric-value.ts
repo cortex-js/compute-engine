@@ -14,8 +14,8 @@ import {
   isOutsideNormalDoubleRange,
   machineNthRoot,
 } from '../numerics/numeric.js';
-import { chopComplexDust } from './roundoff.js';
-import { complexQuotient } from '../numerics/numeric-complex.js';
+import { Complex } from 'complex-esm';
+import { complexPow, complexQuotient } from '../numerics/numeric-complex.js';
 
 export class MachineNumericValue extends NumericValue {
   declare __brand: 'MachineNumericValue';
@@ -505,18 +505,14 @@ export class MachineNumericValue extends NumericValue {
         // dropping both the imaginary part of the base and the magnitude
         // factor — correct only for positive real z.
         if (this.isZero) return re > 0 ? this.clone(0) : this.clone(NaN);
-        const a = this.decimal;
-        const b = this.im;
-        const lnMod = 0.5 * Math.log(a * a + b * b);
-        const arg = Math.atan2(b, a);
-        const realExp = re * lnMod - im * arg;
-        const imagExp = re * arg + im * lnMod;
-        const mag = Math.exp(realExp);
-        // A part is dust only when it is small compared with the modulus of
-        // the result (see `chopComplexDust()`).
-        return this.clone(
-          chopComplexDust(mag * Math.cos(imagExp), mag * Math.sin(imagExp))
+        // `complexPow()` computes this formula without forming `|z|`, and
+        // removes no part: a small part of the value is kept
+        // (`2^{10^{-100}i}` is `1 + 6.93·10^{-101}i`).
+        const z = complexPow(
+          new Complex(this.decimal, this.im),
+          new Complex(re, im)
         );
+        return this.clone({ re: z.re, im: z.im });
       }
     }
 
@@ -551,22 +547,15 @@ export class MachineNumericValue extends NumericValue {
 
     if (!this.isComplex) return this.clone(this.decimal ** exponent);
 
-    const a = this.decimal;
-    const b = this.im;
-    const modulus = Math.sqrt(a * a + b * b);
-    const argument = Math.atan2(b, a);
-    const newModulus = modulus ** exponent;
-    // De Moivre: zⁿ = |z|ⁿ · (cos(n·arg) + i·sin(n·arg)). The new argument is
-    // n·arg, not argⁿ.
-    const newArgument = argument * exponent;
-    // A part is dust only when it is small compared with the modulus of the
-    // result (see `chopComplexDust()`): `i^2` is `-1`, not `-1 + 1.2e-16i`.
-    return this.clone(
-      chopComplexDust(
-        newModulus * Math.cos(newArgument),
-        newModulus * Math.sin(newArgument)
-      )
+    // `complexPow()` has an exact power of a Gaussian integer for a small
+    // integer exponent (`i^2` is `-1`, where the polar form gives
+    // `-1 + 1.2e-16i`), takes the angle of a base on an axis or a diagonal
+    // exactly, and removes no part.
+    const z = complexPow(
+      new Complex(this.decimal, this.im),
+      new Complex(exponent, 0)
     );
+    return this.clone({ re: z.re, im: z.im });
   }
 
   root(exponent: number): NumericValue {
@@ -596,23 +585,13 @@ export class MachineNumericValue extends NumericValue {
       return this.clone(machineNthRoot(this.decimal, exponent));
     }
 
-    // Complex root:
-    // z^(1/n) = (r^(1/n)) * (cos(θ/n) + i * sin(θ/n))
-    const a = this.decimal;
-    const b = this.im;
-    const modulus = Math.hypot(a, b);
-    const argument = Math.atan2(b, a);
-    const newModulus = Math.pow(modulus, 1 / exponent);
-    const newArgument = argument / exponent;
-
-    // A part is dust only when it is small compared with the modulus of the
-    // result (see `chopComplexDust()`).
-    return this.clone(
-      chopComplexDust(
-        newModulus * Math.cos(newArgument),
-        newModulus * Math.sin(newArgument)
-      )
+    // Complex root: the principal value of z^(1/n). `complexPow()` takes the
+    // angle of a base on an axis or a diagonal exactly, and removes no part.
+    const z = complexPow(
+      new Complex(this.decimal, this.im),
+      new Complex(1 / exponent, 0)
     );
+    return this.clone({ re: z.re, im: z.im });
   }
 
   sqrt(): NumericValue {
@@ -752,12 +731,15 @@ export class MachineNumericValue extends NumericValue {
     if (this.isComplex) {
       // Complex exponential:
       // exp(a + bi) = exp(a) * (cos(b) + i * sin(b))
-      // A part is dust only when it is small compared with the modulus of
-      // the result, e^a (see `chopComplexDust()`): e^{iπ} is -1.
+      // No part is removed: `e^{3.141592653589793i}` is
+      // `-1 + 1.22·10^{-16}i`, the value at that double. An exact `e^{iπ}`
+      // is reduced exactly before it becomes a float (`exactEulerN`,
+      // `boxed-expression/arithmetic-power.ts`).
       const e = Math.exp(this.decimal);
-      return this.clone(
-        chopComplexDust(e * Math.cos(this.im), e * Math.sin(this.im))
-      );
+      return this.clone({
+        re: e * Math.cos(this.im),
+        im: e * Math.sin(this.im),
+      });
     }
     return this.clone(Math.exp(this.decimal));
   }

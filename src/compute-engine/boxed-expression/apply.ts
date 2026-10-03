@@ -7,11 +7,7 @@ import { MachineNumericValue } from '../numeric-value/machine-numeric-value.js';
 import type { NumericValue } from '../numeric-value/types.js';
 import { bignumPreferred, boxBignumResult } from './utils.js';
 import { isNumber } from './type-guards.js';
-import {
-  isGaussianIntegerValue,
-  isImaginaryPartNaN,
-} from './imaginary-part.js';
-import { chopComplexDust } from '../numeric-value/roundoff.js';
+import { isImaginaryPartNaN } from './imaginary-part.js';
 
 /**
  * Box a kernel result that is a plain JS double.
@@ -54,22 +50,15 @@ function boxMachineNumber(
 
 /**
  * True if a number literal has no exactness to lose under D2's "inexact
- * argument numericizes" rule — the counterpart of `NumberLiteralInterface`'s
- * `isExact`, patched for one architectural wrinkle.
+ * argument numericizes" rule — the `isExact` property of a number literal.
  *
- * A number's `isExact` getter is authoritative, and since D12-A
- * `ExactNumericValue` represents exact complex values directly (Gaussian
- * rationals like `1+i`, `1/2+i`; pure-imaginary radicals like `√2·i`), so
- * those literals report `isExact === true` on their own. However a complex
- * literal can still arrive through the inexact `Big`/`MachineNumericValue`
- * lane with exactly-representable components — a float-lane computation whose
- * result happens to land on a Gaussian integer, e.g. `(0.5+0.5i)·2` or
- * `ce.number(new Complex(2, 3))`, both of which box inexact. Treat such a
- * value with an *integer* real part and an *integer* imaginary part (a
- * Gaussian integer) as exact too, so exact Gaussian arithmetic (`(1+i)^2 = 2i`, WP-2.16) and
- * symbolic-stay identities keyed on an exact complex argument (e.g. an
- * Eisenstein series at τ = i) are preserved. A non-Gaussian complex float
- * (`1.5+2i`) still numericizes — it never was representable exactly.
+ * A number's `isExact` getter is authoritative. `ExactNumericValue`
+ * represents exact complex values directly (Gaussian rationals like `1+i`,
+ * `1/2+i`; pure-imaginary radicals like `√2·i`), and a complex value from
+ * the host with integer parts (`ce.number(new Complex(2, 3))`) is stored
+ * exact when it is created. A complex float is inexact even when both its
+ * parts are integers (`1.0+1.0i`, or the result `(0.5+0.5i)·2`): it is not
+ * read as exact from the values of its parts.
  *
  * Non-number-literal expressions (symbols like `Pi`, unevaluated functions)
  * are treated as exact here: they have no float to lose, and any exact
@@ -77,8 +66,7 @@ function boxMachineNumber(
  */
 export function isExactNumber(x: Expression): boolean {
   if (!isNumber(x)) return true;
-  if (x.isExact) return true;
-  return x.isComplex && isGaussianIntegerValue(x.numericValue);
+  return x.isExact;
 }
 
 /**
@@ -145,8 +133,14 @@ function boxKernelResult(
  * `-1`, as `boxMachineNumber()` makes a real result a float.
  * `_numericValue()` makes a safe-integer `{re, im: 0}` exact, which is what
  * a caller that builds exact data wants, so the float is made here with the
- * inexact factory of the engine. Otherwise the value is boxed as
- * `_numericValue()` boxes it: exact when it is a Gaussian integer.
+ * inexact factory of the engine.
+ *
+ * Otherwise (every argument is exact) a real result (`im === 0`) that is a
+ * safe integer is exact, as `boxMachineNumber()` makes a real result exact.
+ * A result with a nonzero imaginary part is a float, even when both its
+ * parts are integers: it is boxed from the plain data `{re, im}`, never from
+ * a `Complex`, which `_numericValue()` reads as a value from the host and
+ * makes exact when its parts are integers.
  */
 export function boxComplexKernelResult(
   ce: IComputeEngine,
@@ -164,7 +158,7 @@ export function boxComplexKernelResult(
         im: value.im === 0 ? 0 : value.im,
       })
     );
-  return ce.number(ce._numericValue(value));
+  return ce.number(ce._numericValue({ re: value.re, im: value.im }));
 }
 
 /**
@@ -279,6 +273,52 @@ export function apply(
 }
 
 /**
+ * The value of a function at a point iy of the imaginary axis, computed from
+ * REAL kernels: `fn(y)` (and `bigFn(y)` above machine precision) give the
+ * real and imaginary parts `[re, im]` of the value.
+ *
+ * Several functions are, on the imaginary axis, a real function of y times
+ * `i`, plus a constant: erf(iy) = i·erfi(y), erfc(iy) = 1 − i·erfi(y),
+ * Si(iy) = i·Shi(y), Ci(iy) = Chi(|y|) ± iπ/2. The complex kernel of such a
+ * function leaves a roundoff residue in the part that is a constant (it
+ * gives `erf(i)` as `2.2·10⁻¹⁶ + 1.65i`), and computes the other part in
+ * doubles at every precision. The real kernels give the constant part exactly and,
+ * when there is a big-decimal kernel, the other part at the working
+ * precision.
+ *
+ * Returns `undefined` when `expr` is not a number on the imaginary axis (a
+ * complex number with a real part of exactly 0, exact or float): the caller
+ * then uses its general route. Returns `null` when a part of the value is
+ * not finite: the value is past the number range, and the caller leaves the
+ * expression unevaluated. A complex value that is too large has a direction
+ * that no infinity of the engine holds (the rule of `Gamma`, see
+ * `boxExpOfComplexLog()`): `erf(27i)` at machine precision, `Si(1000i)`.
+ */
+export function applyOnImaginaryAxis(
+  expr: Expression,
+  fn: (y: number) => [re: number, im: number],
+  bigFn?: (y: BigDecimal) => [re: BigDecimal | number, im: BigDecimal | number]
+): Expression | null | undefined {
+  if (!isNumber(expr) || !expr.isComplex) return undefined;
+  if (expr.re !== 0 || (expr.bignumRe !== undefined && !expr.bignumRe.isZero()))
+    return undefined;
+  const ce = expr.engine;
+  if (Number.isNaN(expr.im) || isImaginaryPartNaN(expr)) return undefined;
+
+  if (bigFn && bignumPreferred(ce)) {
+    const [re, im] = bigFn(expr.bignumIm ?? ce.bignum(expr.im));
+    const isFinite = (x: BigDecimal | number) =>
+      typeof x === 'number' ? Number.isFinite(x) : x.isFinite();
+    if (!isFinite(re) || !isFinite(im)) return null;
+    return ce.number(ce._inexactNumericValue({ re, im }));
+  }
+
+  const [re, im] = fn(expr.im);
+  if (!Number.isFinite(re) || !Number.isFinite(im)) return null;
+  return boxComplexKernelResult(ce, { re, im }, [expr]);
+}
+
+/**
  * N-ary kernel dispatcher for special functions.
  *
  * Routing:
@@ -339,16 +379,10 @@ export function applyN(
   if (result === undefined) return undefined;
   if (result instanceof Complex) {
     if (Number.isNaN(result.re) || Number.isNaN(result.im)) return undefined;
-    // Remove kernel roundoff dust at the machine-roundoff scale, NOT
-    // `ce.tolerance`: whether a component is noise from the complex kernel is
-    // a property of the arithmetic, not of the user's comparison tolerance.
-    // The test is RELATIVE to the modulus of the result, so a small result
-    // (`(10^{-10} i)^2 = -10^{-20}`) keeps both parts.
-    return boxComplexKernelResult(
-      ce,
-      chopComplexDust(result.re, result.im),
-      ops
-    );
+    // No part is removed: a small part of the value of a float argument is
+    // kept, as in `apply` (ARCHITECTURE.md, "Chopping and the `im === 0`
+    // convention").
+    return boxComplexKernelResult(ce, result, ops);
   }
   if (typeof result === 'number') {
     if (Number.isNaN(result)) return undefined;
@@ -435,16 +469,11 @@ export function apply2(
 
   if (result === undefined) return undefined;
   if (result instanceof Complex)
-    // Relative roundoff scale, not `ce.tolerance`: see the first branch.
-    return boxComplexKernelResult(ce, chopComplexDust(result.re, result.im), [
-      expr1,
-      expr2,
-    ]);
+    // No part is removed, as in `apply` and `applyN`.
+    return boxComplexKernelResult(ce, result, [expr1, expr2]);
   // Do not chop a real result: a legitimately-small value (e.g. 10^-100 from
   // `Power(10, -100)`) is not roundoff noise, and chopping it to 0 is both
-  // wrong and inconsistent with the single-argument `apply` above. (The
-  // complex branch removes a component only when it is tiny compared with
-  // the modulus, which is typically trig roundoff.)
+  // wrong and inconsistent with the single-argument `apply` above.
   if (typeof result === 'number')
     return boxMachineNumber(ce, result, [expr1, expr2]);
   return boxKernelResult(ce, result, [expr1, expr2]);

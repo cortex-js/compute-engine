@@ -19,6 +19,7 @@ import {
   isTensorValue,
   packTensor,
   packStructural,
+  tensorCellExpression,
 } from '../boxed-expression/tensor-view.js';
 import { totalDegree } from '../boxed-expression/polynomial-degree.js';
 import {
@@ -33,6 +34,7 @@ import {
   isPointListValue,
   isTuple,
   isTextAtom,
+  isWalkableFiniteCollection,
 } from '../collection-utils.js';
 import {
   Expression,
@@ -297,19 +299,56 @@ const MAX_SINGULAR_VALUE_RANGE_EXPONENT = 290;
  * an integer-valued `x` above `2^53`, so the result is a float with the
  * digits the kernel computed (`1e200`, not the 200 digits of the binary
  * value of the double, `99999999999999996973…`).
+ *
+ * When `inexact` is true (the input matrix has a float entry, see
+ * `hasFloatEntry()`), the result is a float, even when its value is an
+ * integer. Otherwise an integer value is exact, as before: a matrix of exact
+ * entries keeps the results it had.
  */
 function scaledNumber(
   ce: ComputeEngine,
   x: number,
-  exponent: number = 0
+  exponent: number = 0,
+  inexact: boolean = false
 ): Expression {
   if (!Number.isFinite(x)) return ce.number(x);
   // Every double above `2^53` is an integer.
   if (exponent === 0 && Math.abs(x) <= Number.MAX_SAFE_INTEGER)
-    return ce.number(x);
+    return matrixRoutineNumber(ce, x, inexact);
   const big = new BigDecimal(String(x));
-  if (exponent === 0) return boxBignumResult(ce, big);
-  return boxBignumResult(ce, big.mul(new BigDecimal(`1e${exponent}`)));
+  const value = exponent === 0 ? big : big.mul(new BigDecimal(`1e${exponent}`));
+  // A big decimal is a float in `_numericValue()`, even when it is an integer
+  if (inexact) return ce.number(ce._numericValue(value));
+  return boxBignumResult(ce, value);
+}
+
+/**
+ * True when a number entry of the matrix (or vector) `M` is a float.
+ *
+ * The numeric matrix routines (the QR algorithm, the SVD kernel, the QR
+ * decomposition) compute in doubles. Their result is a float when the input
+ * has a float entry, even when its value is an integer
+ * (`matrixRoutineNumber()`). For an input of exact entries they keep the
+ * boxing they had: an integer value is exact.
+ */
+function hasFloatEntry(M: Expression): boolean {
+  if (isNumber(M)) return !M.isExact;
+  if (isFunction(M, 'List')) return M.ops.some(hasFloatEntry);
+  return false;
+}
+
+/** The double `x` computed by a numeric matrix routine, as a number literal:
+ * a float when `inexact` is true (the input has a float entry, see
+ * `hasFloatEntry()`), otherwise exact when its value is an integer. `+ 0`
+ * turns a -0 into 0. */
+function matrixRoutineNumber(
+  ce: ComputeEngine,
+  x: number,
+  inexact: boolean
+): Expression {
+  if (inexact && Number.isFinite(x))
+    return ce.number(ce._inexactNumericValue(x + 0));
+  return ce.number(x + 0);
 }
 
 /**
@@ -535,7 +574,7 @@ function spectralMatrixNorm(
   if (allExact && !numericApproximation) return undefined;
 
   const { re, im, exponent } = scaledMachineMatrix(numericValues, m, n);
-  return scaledNumber(ce, spectralNorm(re, im), exponent);
+  return scaledNumber(ce, spectralNorm(re, im), exponent, !allExact);
 }
 
 /**
@@ -693,7 +732,8 @@ function maxAbsoluteLineSum(
     }
     let bestSum = -Infinity;
     for (const sum of machineSums) if (sum > bestSum) bestSum = sum;
-    return ce.number(bestSum);
+    // A sum of floats is a float, even when its value is an integer
+    return ce.number(ce._inexactNumericValue(bestSum + 0));
   }
 
   // The machine sums discard the lines that are clearly smaller than the
@@ -1881,7 +1921,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
             if (!op1Tensor) return undefined;
             // Return first element as scalar
             const flatData = op1Tensor.flatten();
-            return flatData.length > 0 ? ce.expr(flatData[0]) : ce.Zero;
+            return flatData.length > 0
+              ? tensorCellExpression(ce, flatData[0])
+              : ce.Zero;
           }
           return undefined;
         }
@@ -1916,7 +1958,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           // Flatten tensor data and reshape with cycling
           // Use tensor.flatten() to get all scalar elements
           const flatData = op1Tensor.flatten();
-          const flatElements = flatData.map((x) => ce.expr(x));
+          const flatElements = flatData.map((x) => tensorCellExpression(ce, x));
           return reshapeWithCycling(ce, flatElements, targetShape);
         }
 
@@ -1965,7 +2007,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           if (isString(op1)) return ce.expr(['List', op1]);
           if (!isFiniteIndexedCollection(op1) && !isTensorValue(op1))
             return undefined;
-          return ce.function('List', flattenToDepth(op1, depth));
+          const items = flattenToDepth(op1, depth);
+          if (items === undefined) return undefined;
+          return ce.function('List', items);
         }
 
         // Handle scalar - return single-element list
@@ -1980,7 +2024,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           if (!op1Tensor) return undefined;
           return ce.expr([
             'List',
-            ...op1Tensor.flatten().map((x) => ce.expr(x)),
+            ...op1Tensor.flatten().map((x) => tensorCellExpression(ce, x)),
           ]);
         }
 
@@ -1990,8 +2034,11 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         // is a no-op on a ragged/non-uniform nested list (e.g.
         // `Flatten([[1, x], [2]])`). Uniform tensors keep the `tensor.flatten()`
         // fast path above.
-        if (isFiniteIndexedCollection(op1))
-          return ce.function('List', flattenToDepth(op1, Infinity));
+        if (isFiniteIndexedCollection(op1)) {
+          const items = flattenToDepth(op1, Infinity);
+          if (items === undefined) return undefined;
+          return ce.function('List', items);
+        }
 
         return undefined;
       },
@@ -2501,7 +2548,8 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           if (typeof result === 'boolean') return result ? ce.True : ce.False;
 
           // Check if it's a primitive value that needs boxing
-          if (!('expression' in result)) return ce.expr(result);
+          if (!('expression' in result))
+            return tensorCellExpression(ce, result);
 
           // For tensor result (rank > 2), return the expression
           return result.expression;
@@ -2677,7 +2725,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           for (let i = 0; i < n; i++) {
             const aVal = aTensor.at(i + 1) ?? ce.Zero;
             const bVal = bTensor.at(i + 1) ?? ce.Zero;
-            terms.push(ce.expr(aVal).mul(ce.expr(bVal)));
+            terms.push(
+              tensorCellExpression(ce, aVal).mul(tensorCellExpression(ce, bVal))
+            );
           }
           return add(...terms).evaluate();
         }
@@ -2701,7 +2751,11 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
             for (let k = 0; k < n; k++) {
               const aVal = aTensor.at(i + 1, k + 1) ?? ce.Zero;
               const bVal = bTensor.at(k + 1) ?? ce.Zero;
-              terms.push(ce.expr(aVal).mul(ce.expr(bVal)));
+              terms.push(
+                tensorCellExpression(ce, aVal).mul(
+                  tensorCellExpression(ce, bVal)
+                )
+              );
             }
             result.push(add(...terms).evaluate());
           }
@@ -2728,7 +2782,11 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
             for (let k = 0; k < m; k++) {
               const aVal = aTensor.at(k + 1) ?? ce.Zero;
               const bVal = bTensor.at(k + 1, j + 1) ?? ce.Zero;
-              terms.push(ce.expr(aVal).mul(ce.expr(bVal)));
+              terms.push(
+                tensorCellExpression(ce, aVal).mul(
+                  tensorCellExpression(ce, bVal)
+                )
+              );
             }
             result.push(add(...terms).evaluate());
           }
@@ -2763,7 +2821,11 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
               for (let k = 0; k < n; k++) {
                 const aVal = aTensor.at(i + 1, k + 1) ?? ce.Zero;
                 const bVal = bTensor.at(k + 1, j + 1) ?? ce.Zero;
-                terms.push(ce.expr(aVal).mul(ce.expr(bVal)));
+                terms.push(
+                  tensorCellExpression(ce, aVal).mul(
+                    tensorCellExpression(ce, bVal)
+                  )
+                );
               }
               row.push(add(...terms).evaluate());
             }
@@ -3378,12 +3440,12 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
             'cross product requires two 3-vectors'
           );
 
-        const a1 = ce.expr(aTensor.at(1) ?? ce.Zero);
-        const a2 = ce.expr(aTensor.at(2) ?? ce.Zero);
-        const a3 = ce.expr(aTensor.at(3) ?? ce.Zero);
-        const b1 = ce.expr(bTensor.at(1) ?? ce.Zero);
-        const b2 = ce.expr(bTensor.at(2) ?? ce.Zero);
-        const b3 = ce.expr(bTensor.at(3) ?? ce.Zero);
+        const a1 = tensorCellExpression(ce, aTensor.at(1) ?? ce.Zero);
+        const a2 = tensorCellExpression(ce, aTensor.at(2) ?? ce.Zero);
+        const a3 = tensorCellExpression(ce, aTensor.at(3) ?? ce.Zero);
+        const b1 = tensorCellExpression(ce, bTensor.at(1) ?? ce.Zero);
+        const b2 = tensorCellExpression(ce, bTensor.at(2) ?? ce.Zero);
+        const b3 = tensorCellExpression(ce, bTensor.at(3) ?? ce.Zero);
 
         return ce
           .function(head, [
@@ -3547,7 +3609,10 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         for (let i = 0; i < n; i++) {
           const row: Expression[] = [];
           for (let j = 0; j < n; j++) {
-            const entry = ce.expr(aTensor.at(i + 1, j + 1) ?? ce.Zero);
+            const entry = tensorCellExpression(
+              ce,
+              aTensor.at(i + 1, j + 1) ?? ce.Zero
+            );
             row.push(i === j ? x.sub(entry) : entry.neg());
           }
           rows.push(ce.function('List', row));
@@ -3649,7 +3714,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
             const minDim = Math.min(m, n);
             const diagonal: Expression[] = [];
             for (let i = 0; i < minDim; i++) {
-              diagonal.push(ce.expr(op1Tensor.at(i + 1, i + 1) ?? ce.Zero));
+              diagonal.push(
+                tensorCellExpression(ce, op1Tensor.at(i + 1, i + 1) ?? ce.Zero)
+              );
             }
             return ce.expr(['List', ...diagonal]);
           }
@@ -4137,7 +4204,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         if (isPointListValue(x)) {
           // A symbolic (valueless) or unbounded operand stays symbolic: the
           // point-list type alone is not a value to broadcast over.
-          const count = x.isFiniteCollection === true ? x.count : undefined;
+          const count = isWalkableFiniteCollection(x) ? x.count : undefined;
           if (count === undefined || count > MAX_POINT_LIST_NORM)
             return undefined;
           const norms: Expression[] = [];
@@ -4244,7 +4311,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           const n = shape[0];
           for (let i = 0; i < n; i++) {
             const val = xTensor.at(i + 1);
-            elements.push(val !== undefined ? ce.expr(val) : ce.Zero);
+            elements.push(
+              val !== undefined ? tensorCellExpression(ce, val) : ce.Zero
+            );
           }
           return vectorNorm(elements);
         }
@@ -4272,7 +4341,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           for (let i = 0; i < m; i++)
             for (let j = 0; j < n; j++) {
               const val = xTensor.at(i + 1, j + 1);
-              entries.push(val !== undefined ? ce.expr(val) : ce.Zero);
+              entries.push(
+                val !== undefined ? tensorCellExpression(ce, val) : ce.Zero
+              );
             }
 
           // Every matrix norm below is dominated by an infinite entry: the
@@ -4331,7 +4402,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         if (normType === 2) {
           const entries = xTensor
             .flatten()
-            .map((v) => (v !== undefined ? ce.expr(v) : ce.Zero));
+            .map((v) =>
+              v !== undefined ? tensorCellExpression(ce, v) : ce.Zero
+            );
           // An infinite entry dominates the sum of squares, exactly as it
           // does at rank 1 and rank 2, so the scan runs before any folding.
           if (hasInfiniteMagnitudeComponent(entries))
@@ -4381,7 +4454,10 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         // Special case: 1×1 matrix
         if (n === 1) {
           const val = mTensor.at(1, 1);
-          return ce.expr(['List', val !== undefined ? ce.expr(val) : ce.Zero]);
+          return ce.expr([
+            'List',
+            val !== undefined ? tensorCellExpression(ce, val) : ce.Zero,
+          ]);
         }
 
         // Check if matrix is diagonal or triangular (eigenvalues are diagonal elements)
@@ -4390,7 +4466,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           const eigenvalues: Expression[] = [];
           for (let i = 0; i < n; i++) {
             const val = mTensor.at(i + 1, i + 1);
-            eigenvalues.push(val !== undefined ? ce.expr(val) : ce.Zero);
+            eigenvalues.push(
+              val !== undefined ? tensorCellExpression(ce, val) : ce.Zero
+            );
           }
           return ce.expr(['List', ...eigenvalues]);
         }
@@ -4439,8 +4517,11 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           return numericApproximation ? values?.N() : values;
         }
 
-        // For larger matrices: use numeric QR algorithm
-        return computeEigenvaluesQR(M, n, ce);
+        // For larger matrices: use numeric QR algorithm. Its exact
+        // eigenvalues (`verifiedRationalEigenvalue()`) are approximated
+        // under `N()`, as for the 3×3 case.
+        const values = computeEigenvaluesQR(M, n, ce);
+        return numericApproximation ? values?.N() : values;
       },
     },
 
@@ -4745,7 +4826,11 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           .slice()
           .sort((a, b) => b - a)
           .slice(0, Math.min(m, n));
-        return ce.expr(['List', ...vals.map((v) => scaledNumber(ce, v))]);
+        const inexact = hasFloatEntry(M);
+        return ce.expr([
+          'List',
+          ...vals.map((v) => scaledNumber(ce, v, 0, inexact)),
+        ]);
       },
     },
   },
@@ -4927,14 +5012,17 @@ function computeQR(
     }
   }
 
-  // Build result matrices
+  // Build result matrices: floats when the input has a float entry
+  // (`matrixRoutineNumber()`)
+  const inexact = hasFloatEntry(M);
+  const box = (x: number) => matrixRoutineNumber(ce, x, inexact);
   const QExpr = ce.expr([
     'List',
-    ...Q.map((row) => ce.expr(['List', ...row.map((x) => ce.number(x))])),
+    ...Q.map((row) => ce.expr(['List', ...row.map(box)])),
   ]);
   const RExpr = ce.expr([
     'List',
-    ...R.map((row) => ce.expr(['List', ...row.map((x) => ce.number(x))])),
+    ...R.map((row) => ce.expr(['List', ...row.map(box)])),
   ]);
 
   return { Q: QExpr, R: RExpr };
@@ -5069,20 +5157,23 @@ function computeSVD(
     S[i][i] = singularValues[i];
   }
 
-  // Build result matrices. `+ 0` turns a -0 into 0.
+  // Build result matrices: floats when the input has a float entry
+  // (`matrixRoutineNumber()`)
+  const inexact = hasFloatEntry(M);
+  const box = (x: number) => matrixRoutineNumber(ce, x, inexact);
   const UExpr = ce.expr([
     'List',
-    ...U.map((row) => ce.expr(['List', ...row.map((x) => ce.number(x + 0))])),
+    ...U.map((row) => ce.expr(['List', ...row.map(box)])),
   ]);
   const SExpr = ce.expr([
     'List',
     ...S.map((row) =>
-      ce.expr(['List', ...row.map((x) => scaledNumber(ce, x))])
+      ce.expr(['List', ...row.map((x) => scaledNumber(ce, x, 0, inexact))])
     ),
   ]);
   const VExpr = ce.expr([
     'List',
-    ...V.map((row) => ce.expr(['List', ...row.map((x) => ce.number(x + 0))])),
+    ...V.map((row) => ce.expr(['List', ...row.map(box)])),
   ]);
 
   return { U: UExpr, S: SExpr, V: VExpr, singularValues };
@@ -5120,7 +5211,9 @@ function numericSingularValues(
   const { re, im, exponent } = scaled;
   return ce.expr([
     'List',
-    ...singularValues(re, im).map((v) => scaledNumber(ce, v, exponent)),
+    ...singularValues(re, im).map((v) =>
+      scaledNumber(ce, v, exponent, hasFloatEntry(M))
+    ),
   ]);
 }
 
@@ -5151,7 +5244,7 @@ function numericMachineMatrix(
   let allExact = true;
   for (let i = 0; i < m; i++)
     for (let j = 0; j < n; j++) {
-      const entry = ce.box(packed.at(i + 1, j + 1) as Expression);
+      const entry = tensorCellExpression(ce, packed.at(i + 1, j + 1));
       if (isNumber(entry) && !entry.isExact) allExact = false;
       const v = entry.N();
       if (!isNumber(v)) return undefined;
@@ -5209,9 +5302,15 @@ function computeComplexSVD(
     completeOrthonormalColumns(sRe, sIm);
     return { re: sRe, im: sIm };
   };
-  // `+ 0` turns a -0 into 0.
+  // An entry is computed in doubles. A complex entry is a float, even when
+  // both its parts are integers (`ce.complex()` would box such a value
+  // exact). A real entry is boxed by `matrixRoutineNumber()`: a float when
+  // the input has a float entry. `+ 0` turns a -0 into 0.
+  const inexact = hasFloatEntry(M);
   const entry = (x: number, y: number) =>
-    y === 0 ? ce.number(x + 0) : ce.number(ce.complex(x + 0, y));
+    y === 0
+      ? matrixRoutineNumber(ce, x, inexact)
+      : ce.number(ce._inexactNumericValue({ re: x + 0, im: y + 0 }));
   const matrix = (q: { re: number[][]; im: number[][] }) =>
     ce.expr([
       'List',
@@ -5225,7 +5324,9 @@ function computeComplexSVD(
     S.push([]);
     for (let j = 0; j < n; j++)
       S[i].push(
-        i === j ? scaledNumber(ce, svd.sigma[i], exponent) : ce.number(0)
+        i === j
+          ? scaledNumber(ce, svd.sigma[i], exponent, inexact)
+          : matrixRoutineNumber(ce, 0, inexact)
       );
   }
 
@@ -5254,10 +5355,10 @@ function matrixSqrt2x2Exact(
   const aTensor = packTensor(ce, A);
   if (!aTensor) return undefined;
 
-  const a = ce.box(aTensor.at(1, 1) as Expression);
-  const b = ce.box(aTensor.at(1, 2) as Expression);
-  const c = ce.box(aTensor.at(2, 1) as Expression);
-  const d = ce.box(aTensor.at(2, 2) as Expression);
+  const a = tensorCellExpression(ce, aTensor.at(1, 1));
+  const b = tensorCellExpression(ce, aTensor.at(1, 2));
+  const c = tensorCellExpression(ce, aTensor.at(2, 1));
+  const d = tensorCellExpression(ce, aTensor.at(2, 2));
 
   const tr = ce.function('Add', [a, d]).evaluate();
   const det = ce
@@ -5488,7 +5589,7 @@ function exactComplexSingularValues(
   for (let i = 0; i < m; i++) {
     const row: Expression[] = [];
     for (let j = 0; j < n; j++) {
-      const entry = ce.box(packed.at(i + 1, j + 1) as Expression);
+      const entry = tensorCellExpression(ce, packed.at(i + 1, j + 1));
       if (!isNumber(entry) || !entry.isExact) return undefined;
       row.push(entry);
     }
@@ -5541,7 +5642,7 @@ function getElement(
   const mTensor = packTensor(ce, M);
   if (!mTensor) return ce.Zero;
   const val = mTensor.at(i, j);
-  return val !== undefined ? ce.expr(val) : ce.Zero;
+  return val !== undefined ? tensorCellExpression(ce, val) : ce.Zero;
 }
 
 /**
@@ -5753,10 +5854,17 @@ function computeEigenvalues3x3(
   // Solve using Cardano's formula or trigonometric method
   const eigenvalues = solveCubic(p, q, trace / 3);
 
+  // An eigenvalue computed in doubles: a complex one is a float, even when
+  // both its parts are integers; a real one is boxed by
+  // `matrixRoutineNumber()`, a float when the input has a float entry.
+  // `+ 0` turns a -0 into 0.
+  const inexact = hasFloatEntry(M);
   return ce.expr([
     'List',
     ...eigenvalues.map((r) =>
-      typeof r === 'number' ? ce.number(r) : ce.number(ce.complex(r[0], r[1]))
+      typeof r === 'number'
+        ? matrixRoutineNumber(ce, r, inexact)
+        : ce.number(ce._inexactNumericValue({ re: r[0] + 0, im: r[1] + 0 }))
     ),
   ]);
 }
@@ -5833,11 +5941,81 @@ function computeEigenvaluesQR(
   const spectrum = hessenbergEigenvalues(A, n);
   if (spectrum === undefined) return undefined;
 
-  const eigenvalues: Expression[] = spectrum.map((r) =>
-    typeof r === 'number' ? ce.number(r) : ce.number(ce.complex(r[0], r[1]))
-  );
+  // An eigenvalue computed in doubles: a complex one is a float, even when
+  // both its parts are integers. For a matrix of exact rationals, a real
+  // eigenvalue near a rational is checked with exact arithmetic
+  // (`verifiedRationalEigenvalue()`): when the check succeeds, the rational
+  // is exactly an eigenvalue and it is returned exact, so `Eigenvectors`
+  // then takes its exact path; a real eigenvalue that the check does not
+  // confirm is a float. Without the check (a float entry, a matrix larger
+  // than `MAX_EXACT_EIGENVALUE_CHECK_SIZE`), a real eigenvalue is boxed by
+  // `matrixRoutineNumber()`: a float when the input has a float entry.
+  // `+ 0` turns a -0 into 0.
+  const inexact = hasFloatEntry(M);
+  const exactA =
+    !inexact && n <= MAX_EXACT_EIGENVALUE_CHECK_SIZE
+      ? tensorToRationalMatrix(M, n, n)
+      : undefined;
+  const eigenvalues: Expression[] = spectrum.map((r) => {
+    if (typeof r !== 'number')
+      return ce.number(ce._inexactNumericValue({ re: r[0] + 0, im: r[1] + 0 }));
+    const exact =
+      exactA !== undefined ? verifiedRationalEigenvalue(exactA, r) : undefined;
+    if (exact !== undefined) return ce.number(exact);
+    // A value that the exact check did not confirm is a float
+    return matrixRoutineNumber(ce, r, inexact || exactA !== undefined);
+  });
 
   return ce.expr(['List', ...eigenvalues]);
+}
+
+/** The largest matrix for which `computeEigenvaluesQR()` checks each real
+ * eigenvalue with exact arithmetic: the check is an exact row reduction of
+ * an n×n matrix of rationals for each eigenvalue, so its cost grows as n⁴. */
+const MAX_EXACT_EIGENVALUE_CHECK_SIZE = 16;
+
+/**
+ * The rational `p/q` that is exactly an eigenvalue of the exact rational
+ * matrix `A` and is close to the double `x` (an eigenvalue computed by the
+ * QR algorithm), or `undefined` when there is none.
+ *
+ * The candidates are the integer nearest `x`, then the convergents of the
+ * continued fraction of `x` with a denominator up to 1000. A candidate must
+ * be within `10^-6·max(1, |x|)` of `x`: the QR algorithm gives a repeated
+ * eigenvalue of a defective matrix with an error of about the square root
+ * of the machine epsilon (`4 ± 2.6·10^-8`). A candidate is accepted only
+ * when `A − λI` is singular, which the exact row reduction decides, so a
+ * candidate that is only close to an eigenvalue is never accepted.
+ */
+function verifiedRationalEigenvalue(
+  A: BigRat[][],
+  x: number
+): [bigint, bigint] | undefined {
+  if (!Number.isFinite(x)) return undefined;
+  const tol = 1e-6 * Math.max(1, Math.abs(x));
+  const candidates: [number, number][] = [[Math.round(x), 1]];
+  // Convergents of the continued fraction of x
+  let [h0, h1, k0, k1] = [1, Math.floor(x), 0, 1];
+  let rest = x - Math.floor(x);
+  while (rest > 1e-12) {
+    const y = 1 / rest;
+    const a = Math.floor(y);
+    rest = y - a;
+    [h0, h1] = [h1, a * h1 + h0];
+    [k0, k1] = [k1, a * k1 + k0];
+    if (k1 > 1000) break;
+    candidates.push([h1, k1]);
+  }
+  const n = A.length;
+  for (const [p, q] of candidates) {
+    if (!Number.isSafeInteger(p) || Math.abs(x - p / q) > tol) continue;
+    const lambda: BigRat = [BigInt(p), BigInt(q)];
+    const shifted = A.map((row, i) =>
+      row.map((v, j) => (i === j ? ratSub(v, lambda) : v))
+    );
+    if (exactRationalRref(shifted).pivotCols.length < n) return lambda;
+  }
+  return undefined;
 }
 
 /**
@@ -6152,7 +6330,12 @@ function computeEigenvector(
   const eigenvector = solveNullSpace(AminusLambdaI, n, index);
   if (!eigenvector) return undefined;
 
-  return ce.expr(['List', ...eigenvector.map((x) => ce.number(x))]);
+  // A float when M or λ is a float (`matrixRoutineNumber()`)
+  const inexact = hasFloatEntry(M) || (isNumber(lambda) && !lambda.isExact);
+  return ce.expr([
+    'List',
+    ...eigenvector.map((x) => matrixRoutineNumber(ce, x, inexact)),
+  ]);
 }
 
 /**
@@ -6459,7 +6642,7 @@ function tensorToRationalMatrix(
         tensor.rank === 1
           ? tensorPacked.at(j + 1)
           : tensorPacked.at(i + 1, j + 1);
-      const boxed = ce.box(value as Expression);
+      const boxed = tensorCellExpression(ce, value);
       if (!isNumber(boxed) || !boxed.isExact) return undefined;
       const r = asRational(boxed);
       if (r === undefined) return undefined;
@@ -6494,7 +6677,7 @@ function decimalRationalMatrix(
   for (let i = 0; i < rows; i++) {
     const row: BigRat[] = [];
     for (let j = 0; j < cols; j++) {
-      const boxed = ce.box(packed.at(i + 1, j + 1) as Expression);
+      const boxed = tensorCellExpression(ce, packed.at(i + 1, j + 1));
       if (!isNumber(boxed) || boxed.isComplex) return undefined;
       if (boxed.isExact) {
         const r = asRational(boxed);
@@ -6866,17 +7049,37 @@ function buildNestedList(
  * Return the elements of the collection `xs` flattened up to `depth` nesting
  * levels (Wolfram `Flatten[list, n]`). At `depth` 0 the elements are returned
  * as-is; each level splices the contents of collection-valued elements.
+ *
+ * Return `undefined` when an element to splice is a finite indexed
+ * collection whose elements cannot be computed (`Linspace(a, 1, 3)` with a
+ * symbolic `a`). Such an element cannot be spliced, and keeping it as a leaf
+ * gives a list with the wrong elements and the wrong count, so the caller
+ * must leave the `Flatten` unevaluated.
  */
-function flattenToDepth(xs: Expression, depth: number): Expression[] {
+function flattenToDepth(
+  xs: Expression,
+  depth: number
+): Expression[] | undefined {
   const result: Expression[] = [];
   for (const e of xs.each()) {
     // A STRING is a LEAF, never descended into, at any depth: a string is an
     // indexed collection of its characters, but `Flatten(["ab", "cd"])` is
     // `["ab", "cd"]`, not `["a", "b", "c", "d"]` — the choice users expect
     // (`docs/STRING_ROADMAP.md`, design constraint 6).
-    if (depth >= 1 && isFiniteIndexedCollection(e) && !isString(e))
-      result.push(...flattenToDepth(e, depth - 1));
-    else result.push(e);
+    if (depth >= 1 && isFiniteIndexedCollection(e) && !isString(e)) {
+      const items = flattenToDepth(e, depth - 1);
+      if (items === undefined) return undefined;
+      result.push(...items);
+    } else if (
+      depth >= 1 &&
+      e.isFiniteCollection === true &&
+      e.isIndexedCollection &&
+      !isString(e)
+    ) {
+      // A finite indexed collection that `isFiniteIndexedCollection()`
+      // rejects: its elements cannot be computed.
+      return undefined;
+    } else result.push(e);
   }
   return result;
 }

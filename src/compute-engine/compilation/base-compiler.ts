@@ -38,6 +38,7 @@ import {
   isValueDef,
   collectBinderNames,
   freeSymbolNames,
+  getImaginaryFactor,
 } from '../boxed-expression/utils.js';
 import {
   broadcastableParamSlots,
@@ -115,6 +116,7 @@ import {
 } from '../boxed-expression/type-guards.js';
 import { isTensorValue } from '../boxed-expression/tensor-view.js';
 import { asRational } from '../boxed-expression/numerics.js';
+import { realPowerBranchTerms } from '../boxed-expression/arithmetic-power.js';
 import {
   isTimeoutCancellation,
   throwIfCallerCancellation,
@@ -4040,6 +4042,113 @@ export class BaseCompiler {
     return undefined;
   }
 
+  /**
+   * The real root of a NEGATIVE base under a FLOAT exponent. The
+   * interpreter recovers the rational `p/q` that a float exponent came from
+   * (`realPowerBranchTerms()`), and when `q` is odd the value is the real
+   * root `±|x|^e`, negative when `p` is odd: `(−8)^{0.4}` is `2.297` and
+   * `(−8)^{0.3333333333333333}` is `−2` at machine precision and
+   * `−1.99999999999999986137` at 21 digits. The power of a target
+   * (`Math.pow`, `**`, the shader `pow`) gives `NaN` or the principal complex
+   * value there. Returns:
+   * - `undefined` when the rule does not apply: the base is provably
+   *   non-negative, the exponent is provably an integer or is an exact
+   *   number (`realPowerExponent` lowers an exact rational), or the exponent
+   *   is a float constant whose recovered denominator is even or absent (the
+   *   principal value, which the power of the target gives);
+   * - `{ value, oddNumerator }` for a float constant exponent with an odd
+   *   recovered denominator, decided now, in the shape `realPowerExponent`
+   *   returns;
+   * - `'runtime'` for an exponent with an unknown: the rule needs its value.
+   */
+  static negativeBaseFloatPower(
+    args: ReadonlyArray<Expression>
+  ): { value: number; oddNumerator: boolean } | 'runtime' | undefined {
+    if (args.length !== 2) return undefined;
+    const [base, exponent] = args;
+    if (base.isNonNegative === true) return undefined;
+    if (exponent.isInteger === true) return undefined;
+    // A constant exponent that is not a number literal (`π`, `√2`) is read
+    // as its numeric value, as the interpreter reads it under `.N()`. An
+    // exponent that is not pure (`Random()`) is not evaluated now: it would
+    // draw when the code is generated, and the draw would be frozen into the
+    // code. It is decided at run time.
+    const literal =
+      isNumber(exponent) ||
+      exponent.unknowns.length > 0 ||
+      exponent.isPure !== true
+        ? exponent
+        : exponent.N();
+    if (isNumber(literal)) {
+      if (literal === exponent && literal.isExact) return undefined;
+      if (literal.isComplex) return undefined;
+      const value = literal.re;
+      if (!Number.isFinite(value) || Number.isInteger(value)) return undefined;
+      const terms = realPowerBranchTerms(undefined, value);
+      if (terms === undefined || terms[1] % 2 === 0) return undefined;
+      return { value, oddNumerator: terms[0] % 2 !== 0 };
+    }
+    return exponent.unknowns.length > 0 || exponent.isPure !== true
+      ? 'runtime'
+      : undefined;
+  }
+
+  /**
+   * `u` when the real-valued expression `x` is `π·u`: the symbol `Pi` as one
+   * factor of a product whose other factors have no `Pi` and are real
+   * (`Pi` itself is `π·1`). The targets lower `sin(π·u)`, `cos(π·u)`,
+   * `tan(π·u)` and `e^{iπ·u}` with the angle in half-turns, `u`, reduced
+   * exactly (`cosSinPi()`, `numerics/numeric-complex.ts`), so that the value
+   * at an integer or a half-integer `u` has an exact zero part: `sin(πx)` at
+   * `x = 2` is `0`, where `Math.sin(Math.PI * 2)` is `−2.4·10⁻¹⁶`, and
+   * `e^{iπx}` at `x = 1` is `−1`, as in the interpreter for the exact `x`.
+   * Returns `undefined` for any other expression.
+   */
+  /**
+   * The exponent of `e` split as `a + iπu`, with `u` real (`piMultiple`)
+   * and `a` the sum of the other terms, real, or `undefined` when there is
+   * none. The targets lower `e^{a + iπu}` as `e^a·(cos πu + i·sin πu)` with
+   * the angle in half-turns, so `e^{x + iπ}` is `−e^x` with no imaginary
+   * part. Returns `undefined` for any other exponent.
+   */
+  static eulerPiSplit(
+    exponent: Expression
+  ): { a: Expression | undefined; u: Expression } | undefined {
+    const terms = isFunction(exponent, 'Add') ? exponent.ops : [exponent];
+    let u: Expression | undefined = undefined;
+    const real: Expression[] = [];
+    for (const term of terms) {
+      const theta = getImaginaryFactor(term);
+      const v =
+        theta !== undefined ? BaseCompiler.piMultiple(theta) : undefined;
+      if (v !== undefined && u === undefined) u = v;
+      else if (BaseCompiler.isComplexValued(term)) return undefined;
+      else real.push(term);
+    }
+    if (u === undefined) return undefined;
+    const ce = exponent.engine;
+    const a =
+      real.length === 0
+        ? undefined
+        : real.length === 1
+          ? real[0]
+          : ce.function('Add', real);
+    return { a, u };
+  }
+
+  static piMultiple(x: Expression): Expression | undefined {
+    const ce = x.engine;
+    if (isSymbol(x, 'Pi')) return ce.One;
+    if (!isFunction(x, 'Multiply')) return undefined;
+    const index = x.ops.findIndex((op) => isSymbol(op, 'Pi'));
+    if (index < 0) return undefined;
+    const rest = x.ops.filter((_, i) => i !== index);
+    if (rest.some((op) => op.symbols.includes('Pi'))) return undefined;
+    const u = rest.length === 1 ? rest[0] : ce.function('Multiply', rest);
+    if (BaseCompiler.isComplexValued(u)) return undefined;
+    return u;
+  }
+
   /** An exact noninteger exponent whose reduced denominator permits a real root. */
   static realPowerExponent(
     args: ReadonlyArray<Expression>
@@ -6161,8 +6270,7 @@ export class BaseCompiler {
     // `{re: ∞, im: ∞}` object the value itself carries. Emitting the complex
     // object instead hands a parent that lowered real arithmetic an object
     // to add, which stringifies (`1 + {…}` → `"1[object Object]"`). A node
-    // that really is complex-valued keeps the object, so `~oo` reached
-    // through complex-emitting operands is unchanged.
+    // that really is complex-valued folds to the complex pole (see below).
     // `isInfinity` with a non-zero imaginary part is the `~oo` test: a real
     // ±∞ has `im === 0`, and an exact value whose imaginary part merely
     // OVERFLOWS the float projection is not infinite, so it answers `false`
@@ -6182,6 +6290,20 @@ export class BaseCompiler {
         target,
         prec
       );
+
+    // `~oo` on a node that IS complex-valued folds to the complex lane's
+    // spelling of the pole, `{re: ∞, im: ∞}` (`complexPole()` in
+    // `javascript-target.ts`), the value the run-time complex routines give
+    // at a pole (`cot 0`, `arctan i`). The number literal emission below
+    // would spell it `Infinity`, a real value, so the value would depend on
+    // whether the argument was a constant.
+    if (
+      isNumber(value) &&
+      value.isInfinity &&
+      value.isComplex &&
+      target.complex !== undefined
+    )
+      return target.complex(Infinity, Infinity);
 
     // Emit through the ordinary number-literal path so the target's own
     // spelling applies (float formatting, complex support, negative-literal
@@ -8703,11 +8825,15 @@ export class BaseCompiler {
     // Handle operators
     const op = target.operators?.(h);
 
+    // A Python power that may need the real root of a negative base (an
+    // exact rational or a float exponent, see `negativeBaseFloatPower`)
+    // goes to the `Power` function lowering instead of the `**` operator.
     const realPythonPower =
       target.language === 'python' &&
       h === 'Power' &&
       op?.[0] === '**' &&
-      BaseCompiler.realPowerExponent(args) !== undefined;
+      (BaseCompiler.realPowerExponent(args) !== undefined ||
+        BaseCompiler.negativeBaseFloatPower(args) !== undefined);
     if (op !== undefined && !realPythonPower) {
       // Skip infix operators for complex operands — fall through to function
       // dispatch. An operand the D2 runtime rule has bound to a real
@@ -11582,6 +11708,29 @@ export class BaseCompiler {
   ): string | null {
     const def = engine.lookupDefinition(h);
     if (!isOperatorDef(def) || def.operator.broadcastable !== true) return null;
+
+    // `sin(πu)`, `cos(πu)` and `tan(πu)` over a collection `u` in JavaScript:
+    // each element takes the half-turn kernel (`_SYS.sinpi`, `_SYS.cospi`,
+    // `_SYS.tanpi`, see `piMultiple`), as a scalar `u` does, so `sin(πL)` at
+    // an integer element is `0`. The generic closure below would multiply
+    // the element by `Math.PI` first.
+    if (
+      target.language === 'javascript' &&
+      args.length === 1 &&
+      (h === 'Sin' || h === 'Cos' || h === 'Tan')
+    ) {
+      const u = BaseCompiler.piMultiple(args[0]);
+      if (u !== undefined && u.type.matches('collection<any>')) {
+        const kernel =
+          h === 'Sin'
+            ? '_SYS.sinpi'
+            : h === 'Cos'
+              ? '_SYS.cospi'
+              : '_SYS.tanpi';
+        const p = BaseCompiler.tempVar(target);
+        return `_SYS.bcast((${p}) => ${kernel}(${p}), ${BaseCompiler.compile(u, target)})`;
+      }
+    }
 
     // A definition may EXEMPT operand shapes from generic broadcasting
     // (`broadcastExemptions`): the interpreter then gives those shapes

@@ -28,7 +28,11 @@ import {
   erfInv,
 } from '../numerics/special-functions.js';
 import { erfComplex, erfiComplex } from '../numerics/numeric-complex.js';
-import { apply, shouldNumericize } from '../boxed-expression/apply.js';
+import {
+  apply,
+  applyOnImaginaryAxis,
+  shouldNumericize,
+} from '../boxed-expression/apply.js';
 import { floatIfFloatOperand } from '../boxed-expression/float-result.js';
 import { infinitePoint } from '../boxed-expression/infinite-point.js';
 import {
@@ -46,6 +50,7 @@ import {
   canEnumerateFiniteSource,
   groundEnumerationOperand,
   typeCouldBeCollection,
+  isWalkableFiniteCollection,
 } from '../collection-utils.js';
 import {
   enumerationDeclinedAfterWalk,
@@ -165,7 +170,7 @@ function computeBinning(
   | { binEdges: number[]; counts: number[]; rejected?: undefined }
   | { rejected: { value: Expression; constraint: DataConstraint } }
   | undefined {
-  if (!xs.isFiniteCollection) return undefined;
+  if (!isWalkableFiniteCollection(xs)) return undefined;
 
   const elements = Array.from(xs.each()) as Expression[];
   if (!elements.every(isNumber)) return undefined;
@@ -410,6 +415,14 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           if (x.isInfinity) return x.isPositive ? ce.One : ce.NegativeOne;
         }
         if (!shouldNumericize(numericApproximation, x)) return undefined;
+        // On the imaginary axis erf(iy) = i·erfi(y): the real part is
+        // exactly 0, and the real kernels of erfi compute the other part.
+        const onAxis = applyOnImaginaryAxis(
+          x,
+          (y) => [0, erfi(y)],
+          (y) => [0, bigErfi(ce, y)]
+        );
+        if (onAxis !== undefined) return onAxis ?? undefined;
         // Real args use the machine/bignum kernel; complex args the
         // Γ(1/2, ·)-based kernel.
         return apply(
@@ -458,6 +471,14 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           if (x.isInfinity) return x.isPositive ? ce.Zero : ce.number(2);
         }
         if (!shouldNumericize(numericApproximation, x)) return undefined;
+        // On the imaginary axis erfc(iy) = 1 − i·erfi(y): the real part is
+        // exactly 1, and the real kernels of erfi compute the other part.
+        const onAxis = applyOnImaginaryAxis(
+          x,
+          (y) => [1, -erfi(y)],
+          (y) => [1, bigErfi(ce, y).neg()]
+        );
+        if (onAxis !== undefined) return onAxis ?? undefined;
         // Real args use the machine/bignum kernel; a complex argument uses
         // `erfc(z) = 1 − erf(z)` with the complex `Erf` kernel, as the
         // compiled Python target does.
@@ -598,6 +619,14 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
             return x.isPositive ? ce.PositiveInfinity : ce.NegativeInfinity;
         }
         if (!shouldNumericize(numericApproximation, x)) return undefined;
+        // On the imaginary axis erfi(ix) = i·erf(x): the real part is
+        // exactly 0, and the real kernels of erf compute the other part.
+        const onAxis = applyOnImaginaryAxis(
+          x,
+          (y) => [0, erf(y)],
+          (y) => [0, bigErf(ce, y)]
+        );
+        if (onAxis !== undefined) return onAxis ?? undefined;
         // Real args use the machine/bignum kernel; complex args the
         // Γ(1/2, ·)-based kernel.
         return apply(
@@ -1418,7 +1447,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         'SlidingWindow("abcd", 2)  // Returns ["ab", "bc", "cd"]',
       ],
       evaluate: ([xs, winArg, stepArg], { engine: ce }) => {
-        if (!xs.isFiniteCollection) return undefined;
+        if (!isWalkableFiniteCollection(xs)) return undefined;
         // Small finite sources materialize eagerly (all existing semantics);
         // larger — or unknown-length — sources stay symbolic and are served
         // lazily by the `collection` handlers below (Tycho item 52).
@@ -1498,7 +1527,9 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           context.engine._typeResolver
         ),
       evaluate: (ops, { engine: ce, numericApproximation }) =>
-        evaluateCovariance(ce, ops, !!numericApproximation, false),
+        hasUnwalkableDataCollection(ops)
+          ? undefined
+          : evaluateCovariance(ce, ops, !!numericApproximation, false),
     },
 
     PopulationCovariance: {
@@ -1528,7 +1559,9 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           context.engine._typeResolver
         ),
       evaluate: (ops, { engine: ce, numericApproximation }) =>
-        evaluateCovariance(ce, ops, !!numericApproximation, true),
+        hasUnwalkableDataCollection(ops)
+          ? undefined
+          : evaluateCovariance(ce, ops, !!numericApproximation, true),
     },
 
     Correlation: {
@@ -1564,7 +1597,9 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           context.engine._typeResolver
         ),
       evaluate: (ops, { engine: ce, numericApproximation }) =>
-        evaluateCorrelation(ce, ops, !!numericApproximation),
+        hasUnwalkableDataCollection(ops)
+          ? undefined
+          : evaluateCorrelation(ce, ops, !!numericApproximation),
     },
 
     //
@@ -1588,7 +1623,9 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           context.engine._typeResolver
         ),
       evaluate: (ops, { engine: ce, numericApproximation }) =>
-        evaluateLinearRegression(ce, ops, !!numericApproximation),
+        hasUnwalkableDataCollection(ops)
+          ? undefined
+          : evaluateLinearRegression(ce, ops, !!numericApproximation),
     },
 
     PolynomialFit: {
@@ -1605,7 +1642,9 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           context.engine._typeResolver
         ),
       evaluate: (ops, { engine: ce, numericApproximation }) =>
-        evaluatePolynomialFit(ce, ops, !!numericApproximation),
+        hasUnwalkableDataCollection(ops)
+          ? undefined
+          : evaluatePolynomialFit(ce, ops, !!numericApproximation),
     },
 
     FindFit: {
@@ -2299,6 +2338,24 @@ function allExact(vals: ReadonlyArray<Expression>): boolean {
 }
 
 /**
+ * True when a data operand is a collection that is not known to be infinite
+ * but whose elements cannot be walked now: a `Range(1, n)` with no value for
+ * `n`, or a `Linspace(a, 1, 3)` with a symbolic `a`, which has a count but no
+ * computable elements. The paired statistics and the fits then stay
+ * unevaluated. Without this test the walk found no data, and the operand was
+ * reported as mis-shaped, or as two collections of different lengths, while
+ * the input was correct and only its values were not known yet.
+ */
+function hasUnwalkableDataCollection(ops: ReadonlyArray<Expression>): boolean {
+  return ops.some(
+    (op) =>
+      op.isCollection &&
+      op.isFiniteCollection !== false &&
+      !isWalkableFiniteCollection(op)
+  );
+}
+
+/**
  * Extract paired samples from the two accepted conventions: two equal-length
  * collections (`[xs, ys]`), or one collection of 2-element (x, y) pairs. Returns
  * `null` if the shape is not one of these (the caller turns that into an error).
@@ -2339,11 +2396,11 @@ function extractPairs(
     isNumber(v) || (admitAbsent && isAbsentValue(v));
   if (ops.length === 1) {
     const arg = ops[0];
-    if (!arg.isFiniteCollection) return null;
+    if (!isWalkableFiniteCollection(arg)) return null;
     const xs: Expression[] = [];
     const ys: Expression[] = [];
     for (const el of arg.each()) {
-      if (!el.isFiniteCollection) {
+      if (!isWalkableFiniteCollection(el)) {
         walked?.push(el);
         return null;
       }
@@ -2358,7 +2415,8 @@ function extractPairs(
   }
   if (ops.length === 2) {
     const [a, b] = ops;
-    if (!a.isFiniteCollection || !b.isFiniteCollection) return null;
+    if (!isWalkableFiniteCollection(a) || !isWalkableFiniteCollection(b))
+      return null;
     const xs = [...a.each()];
     const ys = [...b.each()];
     walked?.push(...xs, ...ys);

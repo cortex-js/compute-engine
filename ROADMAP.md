@@ -498,19 +498,56 @@ bracket group (for example `\left[ … \right]` with one operand), which
 changes what that spelling gives today. Writer: the `Delimiter` serializer in
 `latex-syntax/dictionary/definitions-core.ts`.
 
-### Compiled JavaScript removes a small part of a complex result that the interpreter keeps (OPEN, small — found 2026-10-01 by the fix for inverse trigonometric functions at large arguments)
+### A shader `x^y` with a variable exponent has no value for a negative base (OPEN, decision — found 2026-10-02 by the parity of the real root of a negative base)
 
-The compiled complex helpers (`toRI()`, `compilation/javascript-target.ts`)
-set to 0 a part not larger than `10⁻¹⁴` and not larger than `10⁻¹⁴` times the
-modulus of the result (`chopKernelDust()`, `numeric-value/roundoff.ts`).
-The interpreter's one-argument kernels (`apply()`,
-`boxed-expression/apply.ts`) do not remove anything, so `arcoth(10⁻¹⁰⁰)` is
-`10⁻¹⁰⁰ − (π/2)i` in the interpreter and `−(π/2)i` compiled. The removal is
-there because some `complex-esm` kernels leave a residual part of about
-`10⁻¹⁶` (`Complex(0.5, 0).asin()` had `im = 5.55e-17`), and the compiled
-result convention tests `im === 0` exactly. Options: remove the dust in the
-kernels that produce it and stop removing it in `toRI()`, or remove it in the
-interpreter's one-argument `apply()` too.
+For a negative base under a float exponent, the interpreter recovers the
+rational `p/q` that the double came from (`realPowerBranchTerms()`,
+`boxed-expression/arithmetic-power.ts`) and gives the real root when `q` is
+odd: `(−8)^{0.4}` is `2.297`. Compiled JavaScript (`_SYS.pow`, `_SYS.cpow`)
+and Python `compileFunction` (the helper `_ce_pow`) do the same, and GLSL and
+WGSL do it for a CONSTANT exponent (`BaseCompiler.negativeBaseFloatPower`).
+For a VARIABLE exponent, GLSL and WGSL keep `pow(x, y)`, which the shading
+languages leave undefined for a negative base, and Python `compileLambda`
+keeps `x ** y` (the principal value; a bare lambda has no place for the
+module helper). Options for the shaders: (a) a run-time helper that recovers
+`p/q` from the exponent — it reads an f32 (about 7 digits), so it cannot
+decide the same `p/q` as the interpreter for every exponent, and it adds a
+continued-fraction loop to every power; (b) fail closed when the base may be
+negative and the exponent may be a float — this breaks the pinned emissions
+`pow(x, y)` and `pow(x, p)` of `tycho-item-231-gpu-vectorized-power.test.ts`
+and `tycho-item-286-unrolled-literal-call-fold.test.ts` and every shader
+`x^y` of an undeclared base. Kept as is (2026-10-02): `pow`.
+
+### A float matrix gives exact results when a value is an integer (OPEN, decision — found 2026-10-02 by the change that makes a complex number from the host with integer parts exact)
+
+A matrix whose entries are numbers is packed into cells of doubles
+(`float64` for real entries, `complex128` for complex entries) before
+`Determinant`, `Trace`, `Transpose` and the other matrix operators compute.
+A cell does not record whether its entry was exact. When a cell is read back
+as an expression, a real value that is an integer is boxed exact
+(`TensorFieldNumber.expression()` and `complexCellExpression()`,
+`tensor/tensor-fields.ts`), so a float result or entry becomes exact when its
+value is an integer. Measured 2026-10-02:
+`\det([[1.5,0],[0,2]])` is the exact `3` (it must be `3.0`),
+`\operatorname{Trace}([[1.5,0],[0,2.5]])` is the exact `4`,
+`\operatorname{Transpose}([[2.0,1.5],[3,4]])` changes the entry `2.0` to the
+exact `2`, and `\det([[1.0+1.0i,0],[0,1.0-1.0i]])` is the exact `2`. A
+complex cell with a nonzero imaginary part is already read back as a float.
+The exactness contract (a float operand makes a numeric result a float) is
+broken for these inputs. Options: (a) keep exact integers out of the cells of
+doubles when the matrix also holds a float — such a matrix uses the
+`expression` dtype, so its exact entries stay exact and its results follow
+the arithmetic of expressions (float contagion), but every matrix that mixes
+floats and integers (`[[1.5, 0], [0, 2]]`) is computed with expressions,
+which is slower, and its `0` entries stay exact; then a cell of doubles holds
+only floats and is always read back as a float. (b) record the exactness of
+each cell (for example a parallel array of flags) and read an integer cell
+back exact only when its entry was exact — the fast numeric computation is
+kept, but every operator that computes a new cell must set its flag (a cell
+computed from a float is a float), and the packing code and the tensor
+kernels change. With either option, results of real float matrices that are
+integers become floats (`3.0` instead of `3`), which changes printed results
+and can change test expectations.
 
 ### `list<integer^(2x0)>` reduces to `vector<integer^2>` (OPEN, decision — found 2026-09-29 by the review of the dimension-variables round)
 
@@ -5068,6 +5105,32 @@ recurring bug class (A3, G3, the sets/Union/Range contains family, NaN
 comparisons); validation-by-corpus (the Fungrim harness) found 15 engine bugs
 that targeted review missed — keep running it.
 
+### A list broadcast against a set is cut to the shorter length (OPEN, found 2026-10-03)
+
+`Power([1, 2, 3], Set(1, 2))` evaluates to `[1, 4]`: the set is zipped with
+the list as if it were a list, and the result is cut to the shorter length.
+Two lists of different lengths give an error instead
+(`Add([1, 2, 3], [1, 2])` is `Error("incompatible-dimensions", "2 vs 3")`),
+so the set operand skips the length check. A set has no order, so it should
+not be zipped by position at all: the broadcast should decline or give an
+error.
+
+### `Shape` and `Rank` of a lazy collection or a set are `()` and `0` (OPEN, found 2026-10-03)
+
+`Shape(Range(1, 3))` is `()` and `Rank(Range(1, 3))` is `0`, while
+`Shape([1, 2, 3])` is `(3)`. `Shape(Set(1, 2))` is also `()`. A rank of 0
+means a scalar, which these are not. A finite lazy collection should give
+its count as the shape (`(3)`), and a set should give a shape that is not
+the scalar one (decline, or a documented answer).
+
+### `Solve` of a collection operand gives an empty list (OPEN, found 2026-10-03)
+
+`Solve(Linspace(a, 0, 3))` and `Solve(Linspace(a, 1, 3))` evaluate to `[]`.
+`Solve` reads its operand as an equation in `a` and reports no solution,
+but the operand is a list, not an equation. A decision is needed: a
+collection operand is either a type error, or it is read element by element
+as a system of equations, each equal to 0.
+
 ### Load-sensitive test flakes under a full-suite run (observed 2026-08-31)
 
 Three suites failed under a 6-worker full-suite run and pass cleanly — at bare
@@ -5082,7 +5145,16 @@ them before blaming the change under test. Added 2026-09-22:
 `elementwise-which.test.ts` "perf smoke › the 3-clause × 900-element witness
 evaluates promptly" — a canary-normalized timing assertion (limit 5000 canary
 units) read 6251 in a six-worker full run on a box at load 4 and passed alone
-(70 of 70), while the same tree's other timing pins held.
+(70 of 70), while the same tree's other timing pins held. Added 2026-10-02, at
+HEAD `33444a04` on a box at load average 43 to 55 on 8 cores, two-worker runs:
+`item-395-dirichlet-l.test.ts` "DirichletL(997, 500, 1.5) at precision 300 is
+fast and a double" read 22,514 ms against a raw `Date.now()` limit of 5000 ms.
+This limit is a wall-clock time, not a canary-normalized one, so it can fail
+on any loaded box. `integration-rules-substitutions.test.ts` failed 1 test
+(R30 `∫Tanh(x)²/(a+b·Tanh(x))`) in one run and 5 tests (R29, R30, R8 and their
+`RUBI_NO_*` gating tests) in another: a closed form was expected and the
+integral stayed inert, which agrees with the 10-second rule-engine time limit
+running out under contention. Neither suite was run on an idle box.
 
 ### `LerchPhi` past |z| = 1 still declines for a complex `a` whose shift terms dwarf the value (OPEN — residue of the two 2026-09-30 rounds, #340, #353)
 

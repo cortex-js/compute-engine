@@ -129,12 +129,21 @@ describe('real branches of exact rational powers', () => {
     );
   });
 
-  test('an inexact exponent does not acquire an exact rational branch', () => {
+  test('an inexact exponent gets the real root of the interpreter at run time', () => {
+    // The compiler does not read `5/3` from the double `1.6666666666666667`:
+    // the node takes the complex power `_SYS.cpow`. At run time that power
+    // recovers the rational from the double as the interpreter does
+    // (`negativeBaseRealPow()`), so at `x = -2` both give the real root.
     const ce = realEngine();
     const expr = ce.box(['Power', 'x', 5 / 3]);
     const result = compile(expr, { constantFold: false });
     expect(result.success).toBe(true);
-    expect(typeof result.run!({ x: -2 })).toBe('object');
+    expect(result.code).toContain('_SYS.cpow(');
+    const want = expr.subs({ x: ce.number(-2) }).N();
+    expect(want.im).toBe(0);
+    const out = result.run!({ x: -2 });
+    expect(typeof out).toBe('number');
+    close(out, want.re);
   });
 
   test.each(['glsl', 'wgsl'] as const)(

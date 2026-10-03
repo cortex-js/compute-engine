@@ -44,6 +44,7 @@ import {
   windowedCollectionOps,
   collectionSourceOperands,
   type WindowedParams,
+  isWalkableFiniteCollection,
 } from '../collection-utils.js';
 import {
   isAbstractCollectionTypeOf,
@@ -444,8 +445,8 @@ function sequenceSearchOperands(
   xs: Expression,
   needle: Expression
 ): [subject: Expression[], pattern: Expression[]] | undefined {
-  if (xs.isFiniteCollection !== true) return undefined;
-  if (needle.isFiniteCollection !== true) return undefined;
+  if (!isWalkableFiniteCollection(xs)) return undefined;
+  if (!isWalkableFiniteCollection(needle)) return undefined;
   return [
     Array.from(xs.each()) as Expression[],
     Array.from(needle.each()) as Expression[],
@@ -4151,7 +4152,10 @@ function isProvablyNonIntegerIndex(index: Expression): boolean {
  * - the collection's length is a known number, finite or infinite: the
  *   handler then knows its own extent, so its miss is authoritative (the last
  *   element of an infinite collection, the first element of a `Range` with an
- *   infinite lower bound);
+ *   infinite lower bound). A finite collection whose elements cannot be
+ *   computed (`Linspace(a, 1, 3)` with a symbolic `a`) is the exception: its
+ *   handler misses inside its range too, so only an index outside the length
+ *   decides the miss;
  * - the length is not known but the collection is both FINITE and
  *   enumerable: the handler walked all the elements and ran out, so the
  *   position does not exist.
@@ -4182,6 +4186,17 @@ function isProvablyOutOfRange(xs: Expression, index: number): boolean {
     return false;
   if (xs.isEmptyCollection === true) return true;
   const count = xs.count;
+  // A finite collection whose elements cannot be computed
+  // (`Linspace(a, 1, 3)` with a symbolic `a`) knows its length, but its
+  // handler misses at every position, inside the range too. Only a position
+  // outside the length is a proof.
+  if (
+    count !== undefined &&
+    Number.isFinite(count) &&
+    xs.isFiniteCollection === true &&
+    !isWalkableFiniteCollection(xs)
+  )
+    return index > count || index < -count;
   if (count !== undefined && !Number.isNaN(count)) return true;
   return xs.isFiniteCollection === true && xs.isEnumerableCollection === true;
 }
@@ -4218,7 +4233,7 @@ function absenceMarker(ce: ComputeEngine, xs?: Expression): Expression {
   // large or unknown-length source just to pick a marker.
   const count = xs.count;
   if (
-    xs.isFiniteCollection === true &&
+    isWalkableFiniteCollection(xs) &&
     count !== undefined &&
     count <= MAX_SIZE_EAGER_COLLECTION
   ) {
@@ -4542,7 +4557,7 @@ function runtimePointArity(xs: Expression): number | undefined {
     (isFunction(xs) && xs.operator === 'Tuple')
   )
     return concretePointArity(xs);
-  if (xs.isFiniteCollection === true) {
+  if (isWalkableFiniteCollection(xs)) {
     const first = firstPresentElement(xs);
     if (first !== undefined) return concretePointArity(first);
   }
@@ -4731,6 +4746,10 @@ function pointComponentAt(
     // `projectLazyPointList`).
     const projected = projectLazyPointList(xs, position, numericApproximation);
     if (projected !== undefined) return projected;
+    // A finite collection whose elements cannot be computed
+    // (`Linspace(a, 1, 3)` with a symbolic `a`) has no first element to
+    // peek, and it is not empty: the read stays unevaluated.
+    if (!isWalkableFiniteCollection(xs)) return undefined;
     // Peek via `each()` rather than `at(1)`: a non-indexed collection (a `Set`)
     // has no `at()`, so `at(1)` is `undefined` and a non-empty Set of points
     // was misread as empty (→ a silently-wrong `[]`). `each()` yields the first
@@ -5364,11 +5383,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     evaluate: (ops, { engine, numericApproximation, materialization }) => {
       // Eager materialization: flatten and materialize lazy sub-collections.
       if (materialization) {
+        const items = enlist(ops);
+        if (items === undefined) return undefined;
         return engine._fn(
           'List',
           // `Nothing` is an ERASURE marker: an element that *evaluates* to
           // `Nothing` is spliced out (`enlist` already drops syntactic ones).
-          enlist(ops)
+          items
             .map((op) => op.evaluate({ numericApproximation, materialization }))
             .filter((op) => !isSymbol(op, 'Nothing'))
         );
@@ -5417,8 +5438,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         }
         return result;
       };
-      if (materialization)
-        return engine._fn('List', await evaluated(enlist(ops)));
+      if (materialization) {
+        const items = enlist(ops);
+        if (items === undefined) return undefined;
+        return engine._fn('List', await evaluated(items));
+      }
       if (
         ops.every((op) => isEvaluatedElement(op, numericApproximation ?? false))
       )
@@ -8192,7 +8216,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // Handle negative indexes by materialising the filtered sequence
         if (index < 0) {
           // Need a definite end to count from the back
-          if (!expr.op1.isFiniteCollection) return undefined;
+          if (!isWalkableFiniteCollection(expr.op1)) return undefined;
 
           const data = Array.from(expr.each()); // already filtered
           const i = data.length + index + 1; // convert ‑N to 1‑based
@@ -8893,7 +8917,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const expr = engine._fn('FlatMap', ops);
       // Only materialize when the source is finite; an infinite source stays
       // lazy (consumers can still bound it with Take).
-      if (!ops[0].isFiniteCollection) return undefined;
+      if (!isWalkableFiniteCollection(ops[0])) return undefined;
       return engine._fn('List', Array.from(expr.each()) as Expression[]);
     },
     collection: {
@@ -10260,7 +10284,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         }
 
         // Case B: finite collection index — boolean mask or integer list.
-        if (opAtIndex.isCollection && opAtIndex.isFiniteCollection) {
+        if (opAtIndex.isCollection && isWalkableFiniteCollection(opAtIndex)) {
           const indices = Array.from(opAtIndex.each()) as Expression[];
           // An EMPTY index list is a gather that yields the empty list (not a
           // mask — that would require a length-0 collection). `every` on an
@@ -11248,7 +11272,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     missingStrip: [0],
     signature: '(indexed_collection<T>, integer, T) -> list<T> where T',
     evaluate: ([xs, idx, value], { engine: ce }) => {
-      if (!xs.isFiniteCollection) return undefined;
+      if (!isWalkableFiniteCollection(xs)) return undefined;
       // Small finite sources materialize eagerly (all existing semantics);
       // larger — or unknown-length — sources stay symbolic and are served
       // lazily by the `collection` handlers below (Tycho item 52).
@@ -11374,7 +11398,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     signature:
       '((T, integer) -> T where T: string) & ((indexed_collection<T>, integer) -> list<T> where T)',
     evaluate: ([xs, idx], { engine: ce }) => {
-      if (!xs.isFiniteCollection) return undefined;
+      if (!isWalkableFiniteCollection(xs)) return undefined;
       // Small finite sources materialize eagerly; larger — or unknown-length —
       // sources stay symbolic and are served lazily by the `collection`
       // handlers below (Tycho item 52).
@@ -11489,7 +11513,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     missingStrip: [0],
     signature: '(indexed_collection<T>, integer, T) -> list<T> where T',
     evaluate: ([xs, idx, value], { engine: ce }) => {
-      if (!xs.isFiniteCollection) return undefined;
+      if (!isWalkableFiniteCollection(xs)) return undefined;
       // Small finite sources materialize eagerly; larger — or unknown-length —
       // sources stay symbolic and are served lazily by the `collection`
       // handlers below (Tycho item 52).
@@ -12229,7 +12253,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // Eager collection results rebuild as `List`, never the source's head
       // (a `Range`/`Linspace` head would reinterpret the sorted elements as
       // lo/hi/step). Stay inert on non-finite or unknown-length input.
-      if (xs.isFiniteCollection !== true) return undefined;
+      if (!isWalkableFiniteCollection(xs)) return undefined;
       // The sort reads its source by position. A value that is not indexed (a
       // `Set` held by a symbol declared with the abstract type
       // `collection<T>`, which the signature admits) has no positions:
@@ -12286,7 +12310,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         context.engine._typeResolver
       ),
     evaluate: ([xs, fn], { engine: ce }) => {
-      if (!xs.isFiniteCollection) return undefined;
+      if (!isWalkableFiniteCollection(xs)) return undefined;
       const f = applicable(fn);
       return run(
         extremumBy(xs, f, ce, 'max', 'element'),
@@ -12326,7 +12350,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         context.engine._typeResolver
       ),
     evaluate: ([xs, fn], { engine: ce }) => {
-      if (!xs.isFiniteCollection) return undefined;
+      if (!isWalkableFiniteCollection(xs)) return undefined;
       const f = applicable(fn);
       return run(
         extremumBy(xs, f, ce, 'min', 'element'),
@@ -12376,7 +12400,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       return engine._fn('ArgMax', [collection, fn]);
     },
     evaluate: ([xs, fn], { engine: ce }) => {
-      if (!xs.isFiniteCollection) return undefined;
+      if (!isWalkableFiniteCollection(xs)) return undefined;
       const f = fn ? applicable(fn) : undefined;
       return run(
         extremumBy(xs, f, ce, 'max', 'index'),
@@ -12417,7 +12441,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       return engine._fn('ArgMin', [collection, fn]);
     },
     evaluate: ([xs, fn], { engine: ce }) => {
-      if (!xs.isFiniteCollection) return undefined;
+      if (!isWalkableFiniteCollection(xs)) return undefined;
       const f = fn ? applicable(fn) : undefined;
       return run(
         extremumBy(xs, f, ce, 'min', 'index'),
@@ -12483,10 +12507,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // An INFINITE collection can never be shuffled: error loudly, matching
       // `Random`/`RandomSample` (`out-of-range`, "a finite collection").
       // Only an INDETERMINATE finiteness stays symbolic — that is a "not yet
-      // known", not a "cannot".
+      // known", not a "cannot". A finite collection whose elements cannot be
+      // walked (`Linspace(a, 1, 3)` with a symbolic `a`) stays symbolic too:
+      // the walk would read it as empty.
       if (xs.isFiniteCollection === false)
         return ce.error(['out-of-range', 'a finite collection', xs.toString()]);
-      if (xs.isFiniteCollection === undefined) return undefined;
+      if (!isWalkableFiniteCollection(xs)) return undefined;
 
       // A permutation needs every element, so materializing is inherent —
       // but `Shuffle(Range(1, 10^9))` would then try to allocate a billion
@@ -12728,7 +12754,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // not cheaply decidable, so never `true` — see `canEnumerateFiniteSource`.
     canEnumerate: canEnumerateFiniteSource,
     evaluate: (ops, { engine: ce }) => {
-      if (!ops[0].isFiniteCollection) return undefined;
+      if (!isWalkableFiniteCollection(ops[0])) return undefined;
       const [values, counts] = tally(ops[0]!);
       return ce.tuple(ce.function('List', values), ce.function('List', counts));
     },
@@ -12762,7 +12788,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // not cheaply decidable, so never `true` — see `canEnumerateFiniteSource`.
     canEnumerate: canEnumerateFiniteSource,
     evaluate: (ops, { engine: ce }) => {
-      if (!ops[0].isFiniteCollection) return undefined;
+      if (!isWalkableFiniteCollection(ops[0])) return undefined;
       const [values, _counts] = tally(ops[0]!);
       // The string arm: `Unique` is eager and has no lazy collection handlers,
       // so the join happens here rather than in
@@ -12996,7 +13022,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'Partition', ops, 1, PER_ELEMENT_SUPPLY),
     evaluate: ([xs, arg, stepArg], { engine: ce }) => {
-      if (!xs.isFiniteCollection) return undefined;
+      if (!isWalkableFiniteCollection(xs)) return undefined;
 
       // A settled size that is a number but not an integer (`Partition(xs,
       // h(3))` with `h(3) = 1.5`) is the same type error `Chunk` answers
@@ -13184,14 +13210,17 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       if (!isFunction(expr)) return undefined;
       if (expr.op1.isFiniteCollection !== true) return undefined;
       const k = toInteger(expr.op2);
-      // Mirrors the evaluate guard, cap included: a count evaluation declines
-      // must not be promised here.
+      // Mirrors the evaluate guard on `k`, cap included: a count evaluation
+      // declines must not be promised here. The evaluate guard also requires
+      // that the elements of the source can be walked; this handler does not,
+      // because the number of groups is `k` whatever the elements are.
       if (k === null || k <= 0 || k > MAX_CHUNK_COUNT) return undefined;
       return k;
     },
     evaluate: ([xs, n], { engine: ce }) => {
       const k = toInteger(n);
-      if (!xs.isFiniteCollection || k === null || k <= 0) return undefined;
+      if (!isWalkableFiniteCollection(xs) || k === null || k <= 0)
+        return undefined;
       // One (possibly empty) group per requested chunk: the loop scales with
       // the VALUE of `k`, not with the source, so past the cap the chunking
       // stays symbolic.
@@ -13242,7 +13271,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'ChunkBy', ops, 1, PER_ELEMENT_SUPPLY),
     evaluate: ([xs, fn], { engine: ce }) => {
-      if (!xs.isFiniteCollection) return undefined;
+      if (!isWalkableFiniteCollection(xs)) return undefined;
       // Small finite sources materialize eagerly (all existing semantics);
       // larger — or unknown-length — sources stay symbolic and are served
       // lazily by the `collection` handlers below (Tycho item 52).
@@ -13417,7 +13446,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // see `canEnumerateFiniteSource`.
     canEnumerate: canEnumerateFiniteSource,
     evaluate: ([xs, fn], { engine: ce }) => {
-      if (!xs.isFiniteCollection) return undefined;
+      if (!isWalkableFiniteCollection(xs)) return undefined;
       const f = applicable(fn);
       if (!f) return undefined;
 
@@ -13914,7 +13943,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           if (typeCouldBeCollection(xs.type.type)) return undefined;
           elements.push(xs);
         } else {
-          if (!xs.isFiniteCollection) return undefined;
+          if (!isWalkableFiniteCollection(xs)) return undefined;
           // One `push` per element: spreading the whole array into one call
           // passes each element as an argument, and a collection of a few
           // hundred thousand elements exceeded the argument limit
@@ -14006,7 +14035,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           if (typeCouldBeCollection(xs.type.type)) return undefined;
           elements.push(xs);
         } else {
-          if (!xs.isFiniteCollection) return undefined;
+          if (!isWalkableFiniteCollection(xs)) return undefined;
           // One `push` per element, as in `ListFrom`: a spread of the whole
           // array exceeds the argument limit for a very large collection.
           for (const x of xs.each()) elements.push(x);
@@ -14037,7 +14066,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           if (typeCouldBeCollection(xs.type.type)) return undefined;
           elements.push(xs);
         } else {
-          if (!xs.isFiniteCollection) return undefined;
+          if (!isWalkableFiniteCollection(xs)) return undefined;
           // One `push` per element, as in `ListFrom`: a spread of the whole
           // array exceeds the argument limit for a very large collection.
           for (const x of xs.each()) elements.push(x);
@@ -14073,7 +14102,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
       // Stay inert on non-finite or unknown-length input: building the
       // dictionary requires walking every entry.
-      if (!xs.isFiniteCollection) return undefined;
+      if (!isWalkableFiniteCollection(xs)) return undefined;
 
       const entries: Expression[] = [];
       for (const keyValue of xs.each()) {
@@ -16719,9 +16748,14 @@ function computeSliceBounds(
  * Flatten an array of BoxedExpressions (possibly lazy collections),
  * handling Sequence and Nothing
  *
+ * Return `undefined` when a finite lazy sub-collection has elements that
+ * cannot be computed (`Linspace(a, 1, 3)` with a symbolic `a`). Such a
+ * collection cannot be spread, and it is not one element either, so the
+ * caller must leave the list unevaluated.
+ *
  */
 
-function enlist(xs: ReadonlyArray<Expression>): Expression[] {
+function enlist(xs: ReadonlyArray<Expression>): Expression[] | undefined {
   if (xs.length === 0) return [];
 
   const result: Expression[] = [];
@@ -16741,19 +16775,28 @@ function enlist(xs: ReadonlyArray<Expression>): Expression[] {
     // }
 
     if (isFunction(x, 'Sequence')) {
-      result.push(...enlist([...x.ops]));
+      const items = enlist([...x.ops]);
+      if (items === undefined) return undefined;
+      result.push(...items);
     } else if (isString(x)) {
       // A string is a collection (of strings), but we don't want to iterate it recursively
       // if (s === undefined) s = '';
       // s += x.string;
       result.push(x);
-    } else if (x.isLazyCollection && x.isFiniteCollection === true) {
+    } else if (x.isLazyCollection && isWalkableFiniteCollection(x)) {
       // Only flatten and materialize finite lazy sub-collections (e.g. a
       // `Range`). Eager literals (a `Tuple`, a nested `List`) are structural
       // elements and must be preserved as-is; an infinite lazy child (e.g. a
       // `Cycle`) is kept as an element rather than spread (which would burn
       // the evaluation deadline).
-      result.push(...enlist([...x.each()]));
+      const items = enlist([...x.each()]);
+      if (items === undefined) return undefined;
+      result.push(...items);
+    } else if (x.isLazyCollection && x.isFiniteCollection === true) {
+      // A finite lazy sub-collection whose elements cannot be computed: it
+      // has `count` elements, so keeping it as one element gives a list with
+      // the wrong length.
+      return undefined;
     } else {
       result.push(x);
     }

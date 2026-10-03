@@ -1003,8 +1003,11 @@ export class BoxedNumber
     // relies on the numeric-value `ln` handling the negative-real branch.
     if (typeof this._value === 'number') {
       const lnBase = base !== undefined ? Math.log(base.re) : 1;
-      if (this._value < 0)
-        return ce.number(ce.complex(this._value).log().div(lnBase));
+      if (this._value < 0) {
+        // A float, even when both its parts are integers
+        const z = ce.complex(this._value).log().div(lnBase);
+        return ce.number(ce._inexactNumericValue({ re: z.re, im: z.im }));
+      }
       // A base of 10 or 2 uses its own primitive, as the `N()` route and
       // `MachineNumericValue.ln()` do: `Math.log(1000) / Math.log(10)` is
       // `2.9999999999999996`, `Math.log10(1000)` is `3`.
@@ -1896,7 +1899,8 @@ export function canonicalNumber(
     if (!value.isFinite() && value.im === 0)
       return value.re > 0 ? +Infinity : -Infinity;
 
-    return ce._numericValue({ re: value.re, im: value.im });
+    // Exact when both parts are safe integers (see `_numericValue()`)
+    return ce._numericValue(value);
   }
 
   if (typeof value === 'object' && 'num' in value) {

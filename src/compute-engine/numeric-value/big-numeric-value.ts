@@ -302,21 +302,24 @@ export class BigNumericValue extends NumericValue {
     // `0`, and `1/(1e-200 + 1e-200i)` is `5e199 − 5e199i`, not `~oo`.
     const b = this.imDecimal;
     if (this.decimal.isFinite() && b.isFinite()) {
-      const bigD = this.decimal.mul(this.decimal).add(b.mul(b));
+      const bigD = this.decimal.mul(this.decimal).addBounded(b.mul(b));
       return this.clone({
         re: this.decimal.div(bigD),
         im: b.neg().div(bigD),
       });
     }
     const d = this.re * this.re + this.im * this.im;
-    const bigD = this.decimal.mul(this.decimal).add(this.im * this.im);
+    const bigD = this.decimal.mul(this.decimal).addBounded(this.im * this.im);
     return this.clone({ re: this.decimal.div(bigD), im: -this.im / d });
   }
 
   add(other: number | NumericValue): NumericValue {
     if (typeof other === 'number') {
       if (other === 0) return this;
-      return this.clone({ re: this.decimal.add(other), im: this.imDecimal });
+      return this.clone({
+        re: this.decimal.addBounded(other),
+        im: this.imDecimal,
+      });
     }
 
     if (other.isZero) return this;
@@ -335,10 +338,10 @@ export class BigNumericValue extends NumericValue {
     // The imaginary parts are added as big decimals: an imaginary part can be
     // too small or too large for a double.
     return this.clone({
-      re: this.decimal.add(other.bignumRe ?? other.re),
+      re: this.decimal.addBounded(other.bignumRe ?? other.re),
       im:
         this.isComplex || other.isComplex
-          ? this.imDecimal.add(bigImaginaryPart(other))
+          ? this.imDecimal.addBounded(bigImaginaryPart(other))
           : 0,
     });
   }
@@ -506,8 +509,8 @@ export class BigNumericValue extends NumericValue {
     const c = other.bignumRe ?? new BigDecimal(other.re);
     const d = bigImaginaryPart(other);
     return this.clone({
-      re: this.decimal.mul(c).sub(b.mul(d)),
-      im: this.decimal.mul(d).add(b.mul(c)),
+      re: this.decimal.mul(c).subBounded(b.mul(d)),
+      im: this.decimal.mul(d).addBounded(b.mul(c)),
     });
   }
 
@@ -554,18 +557,18 @@ export class BigNumericValue extends NumericValue {
       bigB.isFinite() &&
       bigD.isFinite()
     ) {
-      const denominator = bigC.mul(bigC).add(bigD.mul(bigD));
+      const denominator = bigC.mul(bigC).addBounded(bigD.mul(bigD));
       return this.clone({
-        re: this.decimal.mul(bigC).add(bigB.mul(bigD)).div(denominator),
-        im: bigB.mul(bigC).sub(this.decimal.mul(bigD)).div(denominator),
+        re: this.decimal.mul(bigC).addBounded(bigB.mul(bigD)).div(denominator),
+        im: bigB.mul(bigC).subBounded(this.decimal.mul(bigD)).div(denominator),
       });
     }
     const denominator = c * c + d * d;
-    const bigDenominator = bigC.mul(bigC).add(d * d);
+    const bigDenominator = bigC.mul(bigC).addBounded(d * d);
     return this.clone({
       re: this.decimal
         .mul(bigC)
-        .add(b * d)
+        .addBounded(b * d)
         .div(bigDenominator),
       im: (b * c - a * d) / denominator,
     });
@@ -648,11 +651,11 @@ export class BigNumericValue extends NumericValue {
         // is only rounding noise is removed (see `polarResult()`).
         return polarResult(
           this,
-          guardDigits(bigRe.abs().add(bigIm.abs())),
+          guardDigits(bigRe.abs().addBounded(bigIm.abs())),
           () => {
             const lnMod = modulus(a, b).ln();
             const arg = BigDecimal.atan2(b, a);
-            const realExp = lnMod.mul(bigRe).sub(arg.mul(bigIm));
+            const realExp = lnMod.mul(bigRe).subBounded(arg.mul(bigIm));
             const angle1 = arg.mul(bigRe);
             const angle2 = lnMod.mul(bigIm);
             // When both terms of the angle are small, the angle is not the
@@ -662,7 +665,7 @@ export class BigNumericValue extends NumericValue {
             const small = (t: BigDecimal) =>
               t.isZero() || isSmallBeside(t, BigDecimal.ONE);
             const smallAngle = small(angle1) && small(angle2);
-            return [realExp.exp(), angle1.add(angle2), smallAngle];
+            return [realExp.exp(), angle1.addBounded(angle2), smallAngle];
           }
         );
       }
@@ -751,8 +754,8 @@ export class BigNumericValue extends NumericValue {
         const sinSmall = isSmallBeside(b, a, weight)
           ? smallAngle
           : smallAngle.sin();
-        re = mag.mul(c.mul(cosSmall).sub(s.mul(sinSmall)));
-        im = mag.mul(s.mul(cosSmall).add(c.mul(sinSmall)));
+        re = mag.mul(c.mul(cosSmall).subBounded(s.mul(sinSmall)));
+        im = mag.mul(s.mul(cosSmall).addBounded(c.mul(sinSmall)));
       } finally {
         BigDecimal.precision = saved;
       }
@@ -897,10 +900,10 @@ export class BigNumericValue extends NumericValue {
       return guarded(this, () => {
         const m = modulus(a, b);
         if (!a.isNegative()) {
-          const realPart = a.add(m).div(2).sqrt();
+          const realPart = a.addBounded(m).div(2).sqrt();
           return [realPart, b.div(realPart.mul(2))];
         }
-        const imMagnitude = m.sub(a).div(2).sqrt();
+        const imMagnitude = m.subBounded(a).div(2).sqrt();
         return [
           b.abs().div(imMagnitude.mul(2)),
           b.isNegative() ? imMagnitude.neg() : imMagnitude,
@@ -1165,7 +1168,7 @@ function isSmallBeside(x: BigDecimal, y: BigDecimal, weight = 1): boolean {
 function modulus(a: BigDecimal, b: BigDecimal): BigDecimal {
   if (b.isZero() || isSmallBeside(b, a)) return a.abs();
   if (a.isZero() || isSmallBeside(a, b)) return b.abs();
-  return a.mul(a).add(b.mul(b)).sqrt();
+  return a.mul(a).addBounded(b.mul(b)).sqrt();
 }
 
 /** The number of guard digits of a polar computation whose angle is
@@ -1230,8 +1233,8 @@ function integerPower(
       [x0, x1]: [BigDecimal, BigDecimal],
       [y0, y1]: [BigDecimal, BigDecimal]
     ): [BigDecimal, BigDecimal] => [
-      roundToPrecision(x0.mul(y0).sub(x1.mul(y1))),
-      roundToPrecision(x0.mul(y1).add(x1.mul(y0))),
+      roundToPrecision(x0.mul(y0).subBounded(x1.mul(y1))),
+      roundToPrecision(x0.mul(y1).addBounded(x1.mul(y0))),
     ];
     let result: [BigDecimal, BigDecimal] | undefined;
     let base: [BigDecimal, BigDecimal] = [a, b];

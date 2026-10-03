@@ -820,7 +820,9 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
               imRadical: op.imRadical,
             })
           );
-        return ce.number(ce.complex(op.re, -op.im));
+        // The conjugate of a float is a float, even when both its parts are
+        // integers: `ce.complex()` would box such a value exact
+        return ce.number(ce._inexactNumericValue({ re: op.re, im: -op.im }));
       },
     },
 
@@ -931,7 +933,13 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
         return ce.function(
           'List',
           roots.map((r) =>
-            ce.number(r[1] !== 0 ? ce.complex(r[0], r[1]) : r[0])
+            // A root computed in doubles is a float, even when its value
+            // (or each part of its value) is an integer
+            ce.number(
+              r[1] !== 0
+                ? ce._inexactNumericValue({ re: r[0] + 0, im: r[1] + 0 })
+                : ce._inexactNumericValue(r[0] + 0)
+            )
           )
         );
       },

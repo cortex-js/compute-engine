@@ -18,7 +18,11 @@ import type {
   TensorDataType,
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
-import { isTensorValue, packTensor } from './tensor-view.js';
+import {
+  isTensorValue,
+  packTensor,
+  tensorCellExpression,
+} from './tensor-view.js';
 import {
   isNumber,
   isFunction,
@@ -33,7 +37,6 @@ import {
   isImaginaryPartSafeInteger,
   isRealPartZero,
 } from './imaginary-part.js';
-import { isGaussianInteger } from '../numeric-value/gaussian-integer.js';
 import {
   isBroadcastCollectionType,
   isNumericTupleCarrier,
@@ -221,18 +224,6 @@ export function canonicalAdd(
         if (typeof nv === 'number' || nv.isExact) {
           exactNumerics.push(
             typeof nv === 'number' ? ce._numericValue(nv) : nv
-          );
-          continue;
-        }
-        // A machine/big Gaussian integer (e.g. the literal `3i`, whose
-        // NumericValue lives in the inexact lane) is exactly representable:
-        // fold it as an exact value so `Add(2, 3i)` stays exact (CORR #11).
-        if (nv.isComplex && isGaussianInteger(nv)) {
-          exactNumerics.push(
-            ce._numericValue({
-              rational: [nv.re, 1],
-              imRational: [nv.im, 1],
-            })
           );
           continue;
         }
@@ -929,7 +920,7 @@ function addTensors(
       for (const tensor of tensors) {
         // tensor.at() uses 1-based indexing for vectors
         const val = tensor.at(i + 1) ?? ce.Zero;
-        sum = sum.add(ce.expr(val));
+        sum = sum.add(tensorCellExpression(ce, val));
       }
       result.push(sum.evaluate());
     }
@@ -947,7 +938,7 @@ function addTensors(
         for (const tensor of tensors) {
           // tensor.at(row, col) uses 1-based indexing
           const val = tensor.at(i + 1, j + 1) ?? ce.Zero;
-          sum = sum.add(ce.expr(val));
+          sum = sum.add(tensorCellExpression(ce, val));
         }
         row.push(sum.evaluate());
       }

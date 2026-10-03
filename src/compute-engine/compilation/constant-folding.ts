@@ -14,7 +14,7 @@ import {
 } from '../boxed-expression/type-guards.js';
 import { BaseCompiler } from './base-compiler.js';
 import { asRational } from '../boxed-expression/numerics.js';
-import { realPowerBranchTerms } from '../boxed-expression/arithmetic-power.js';
+import { negativeBaseRealPowFromRational } from '../numerics/real-power.js';
 import {
   factorial,
   tanWithPole,
@@ -39,8 +39,8 @@ import {
   complexAtan,
   complexAtanh,
   complexDivide,
+  complexSqrt,
 } from '../numerics/numeric-complex.js';
-import { chopKernelDust } from '../numeric-value/roundoff.js';
 
 /**
  * The shader spelling of a NON-FINITE value (`NaN`, `±∞`).
@@ -181,43 +181,11 @@ export function negativeBaseRealPow(
   exp: Expression | null | undefined,
   expValue: number
 ): number | undefined {
-  if (!(base < 0) || !Number.isFinite(base)) return undefined;
-  if (!Number.isFinite(expValue) || Number.isInteger(expValue))
-    return undefined;
-
-  // The branch is decided by the exponent's EXACT rational when it has one,
-  // and only otherwise by the (ulp-tolerant) float reconstruction — sharing
-  // `realPowerBranchTerms` with the interpreter so the two can never disagree.
-  const exact = exp ? asRational(exp) : undefined;
-  const isExactRational = exact !== undefined;
-  const terms = realPowerBranchTerms(exact, expValue);
-  if (terms === undefined) return undefined;
-  const [p, q] = terms;
-  if (q % 2 === 0) return undefined;
-
-  // The magnitude is |base|^(p/q), evaluated the way the INTERPRETER evaluates
-  // this node — the two paths round differently and the fold must match
-  // whichever one the uncompiled expression takes:
-  //
-  // - An exact rational of SMALL terms goes through the interpreter's exact
-  //   arithmetic, which lands on clean values. Mirror it by taking the q-th
-  //   ROOT first and then the p-th power: `Math.pow(8, 1/3)` is exactly `2`, so
-  //   `(−8)^(2/3)` folds to exactly `4`, where a direct `Math.pow(8, 2/3)`
-  //   leaves `3.9999999999999996`.
-  // - Everything else — a float exponent, or an exact rational with terms too
-  //   large for the root-then-power split to stay accurate — goes through the
-  //   interpreter's float path. Match it with the DIRECT power: for a
-  //   continued-fraction reconstruction like `√2 ≈ 54608393/38613965` the split
-  //   compounds rounding over a huge `p` and drifts ~1e-9 off the interpreter,
-  //   while the direct form agrees to the last ulp.
-  const useSplit = isExactRational && Math.abs(p) <= 64 && q <= 64;
-  let magnitude = useSplit
-    ? Math.pow(Math.pow(-base, 1 / q), p)
-    : Math.pow(-base, expValue);
-  // A large `p` can overflow the split form where the direct one does not.
-  if (!Number.isFinite(magnitude)) magnitude = Math.pow(-base, expValue);
-  if (!Number.isFinite(magnitude)) return undefined;
-  return p % 2 === 0 ? magnitude : -magnitude;
+  return negativeBaseRealPowFromRational(
+    base,
+    exp ? asRational(exp) : undefined,
+    expValue
+  );
 }
 
 /**
@@ -1006,19 +974,29 @@ function variadicFold(
 
 /**
  * The `_SYS` complex routines whose body is one kernel followed by the
- * kernel-roundoff chop (`toRI` in `javascript-target.ts`), listed as
- * `<runtime name>: <kernel>`. The kernel is a `complex-esm` method, or for
- * the inverse functions the function of `numerics/numeric-complex.ts` that
- * the routine calls (`complexAsin()` and the others).
+ * conversion to a `{re, im}` object (`kernelResult` in
+ * `javascript-target.ts`, which removes nothing and makes a `-0` part `+0`),
+ * listed as `<runtime name>: <kernel>`. The kernel is a `complex-esm` method,
+ * or for the square root and the inverse functions the function of
+ * `numerics/numeric-complex.ts` that the routine calls (`complexSqrt()`,
+ * `complexAsin()` and the others).
  *
  * Every entry here is evaluated by calling that same kernel and applying that
- * same chop (`chopKernelDust()`), so a folded literal is what the run-time
- * call returns, digit for digit. The routines with a hand-written body —
- * `csign`, `clog10`, `clog2`, `cinvhav`, the ring operations `cneg` and
- * `cconj` — are deliberately absent: each would need its own transcription,
- * and a transcription that drifts from the runtime is a compiled value that
- * contradicts the interpreter.
+ * same conversion, so a folded literal is what the run-time call returns,
+ * digit for digit. `cpow` is not listed: it takes two operands. The routines
+ * with a hand-written body — `csign`, `clog10`, `clog2`, `cinvhav`, the ring
+ * operations `cneg` and `cconj` — are deliberately absent: each would need
+ * its own transcription, and a transcription that drifts from the runtime is
+ * a compiled value that contradicts the interpreter.
  */
+/** Is `z` exactly `i` or `−i`? */
+function atImaginaryUnit(z: Complex): boolean {
+  return z.re === 0 && Math.abs(z.im) === 1;
+}
+
+/** The complex lane's spelling of the unsigned pole `~oo`. */
+const COMPLEX_POLE = new Complex(Infinity, Infinity);
+
 const JAVASCRIPT_COMPLEX_KERNELS: Readonly<
   Record<string, (z: Complex) => Complex>
 > = {
@@ -1027,11 +1005,12 @@ const JAVASCRIPT_COMPLEX_KERNELS: Readonly<
   '_SYS.ctan': (z) => z.tan(),
   '_SYS.casin': complexAsin,
   '_SYS.cacos': complexAcos,
-  '_SYS.catan': complexAtan,
+  // `catan` and `cacot` answer the complex pole at ±i as the runtime routines do.
+  '_SYS.catan': (z) => (atImaginaryUnit(z) ? COMPLEX_POLE : complexAtan(z)),
   '_SYS.csinh': (z) => z.sinh(),
   '_SYS.ccosh': (z) => z.cosh(),
   '_SYS.ctanh': (z) => z.tanh(),
-  '_SYS.csqrt': (z) => z.sqrt(),
+  '_SYS.csqrt': complexSqrt,
   '_SYS.cexp': (z) => z.exp(),
   '_SYS.cln': (z) => z.log(),
   '_SYS.ccot': (z) => z.cot(),
@@ -1040,7 +1019,7 @@ const JAVASCRIPT_COMPLEX_KERNELS: Readonly<
   '_SYS.ccoth': (z) => z.coth(),
   '_SYS.csech': (z) => z.sech(),
   '_SYS.ccsch': (z) => z.csch(),
-  '_SYS.cacot': complexAcot,
+  '_SYS.cacot': (z) => (atImaginaryUnit(z) ? COMPLEX_POLE : complexAcot(z)),
   // `casec`, `cacsc` and `casech` answer at 0 as the runtime routines do.
   '_SYS.casec': (z) => (z.isZero() ? new Complex(NaN, NaN) : complexAsec(z)),
   '_SYS.cacsc': (z) => (z.isZero() ? new Complex(NaN, NaN) : complexAcsc(z)),
@@ -1060,7 +1039,7 @@ const JAVASCRIPT_COMPLEX_CALLS: Readonly<
     name,
     (re: number, im: number) => {
       const r = kernel(new Complex(re, im));
-      return chopKernelDust(r.re, r.im);
+      return { re: r.re === 0 ? 0 : r.re, im: r.im === 0 ? 0 : r.im };
     },
   ])
 );

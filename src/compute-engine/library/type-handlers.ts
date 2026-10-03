@@ -2098,16 +2098,13 @@ export function adjoinType(ops: ReadonlyArray<OperandDescriptor>): Type {
  * `QuotientRing(R, m)` — the quotient of the ring `R` by the ideal generated
  * by `m` (`ℤ_n` = `ℤ/nℤ`).
  *
- * The residues are represented by elements of the base ring, so the element
- * type is the base's: `QuotientRing(Integers, n)` is a `set<integer>`.
- * The quotient is never larger than the base, so this is an upper bound in
- * both directions and introduces no non-finite value.
+ * An element is a residue class, which no element of the base represents
+ * (7 and 2 are one element of ℤ/5ℤ, so `set<integer>` would be wrong), and
+ * the engine has no value for a residue class. The element type is therefore
+ * `unknown`, as for an `Adjoin` adjunct the engine cannot type.
  */
-export function quotientRingType(ops: ReadonlyArray<OperandDescriptor>): Type {
-  const base = ops[0];
-  const elements =
-    (base ? collectionElementType(base.type) : undefined) ?? 'unknown';
-  return { kind: 'set', elements };
+export function quotientRingType(_ops: ReadonlyArray<OperandDescriptor>): Type {
+  return { kind: 'set', elements: 'unknown' };
 }
 
 /**

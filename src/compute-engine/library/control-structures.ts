@@ -37,6 +37,7 @@ import {
   typeCouldBeCollection,
   typeCouldBeUnkeyedCollection,
   isCollectionShaped,
+  isWalkableFiniteCollection,
 } from '../collection-utils.js';
 import { parseType } from '../../common/type/parse.js';
 import {
@@ -708,7 +709,7 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         // masks element-by-element (one masked branch per element). This
         // mirrors the boolean-mask branch of `At` in `collections.ts`. Lazy
         // operators bypass the generic broadcast machinery, so handle it here.
-        if (c.isCollection && c.isFiniteCollection) {
+        if (c.isCollection && isWalkableFiniteCollection(c)) {
           const conds = Array.from(c.each()) as Expression[];
           // A cell is a boolean condition when it types `boolean` — or
           // `broadcastable<boolean>`, the type of a comparison whose broadcast
@@ -785,13 +786,25 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
             } else if (
               !atomic &&
               ev.isCollection &&
-              ev.isFiniteCollection === true
+              isWalkableFiniteCollection(ev)
             ) {
               // An unordered finite carrier (a finite set), or a carrier
               // whose static type is not ordered but whose value is a finite
               // collection: every element is read.
               elems = Array.from(ev.each()) as Expression[];
               zip = true;
+            } else if (
+              !atomic &&
+              ev.isCollection &&
+              ev.isFiniteCollection === true
+            ) {
+              // A finite carrier whose elements cannot be computed
+              // (`QuotientRing(Integers, 5)`, `Linspace(a, 1, 3)` with a
+              // symbolic `a`). It is a collection of elements, so the scalar
+              // lifting below does not apply, and its elements cannot be
+              // zipped with the mask: hold the restriction unevaluated, as
+              // the ordered-carrier branch above does.
+              return ce._fn('When', [expr, c]);
             }
             const n = zip ? Math.min(conds.length, elems.length) : conds.length;
             const result: Expression[] = [];
@@ -1635,7 +1648,7 @@ const CONDITION_CELL_TYPE = parseType('boolean | missing');
  */
 function conditionCells(c: Expression): Expression[] | undefined {
   if (!isBroadcastableCollection(c)) return undefined;
-  if (c.isFiniteCollection !== true) return undefined;
+  if (!isWalkableFiniteCollection(c)) return undefined;
   const n = c.count;
   if (n === undefined || !Number.isFinite(n)) return undefined;
   const cells = Array.from(c.each()) as Expression[];
@@ -1774,7 +1787,7 @@ function evaluateElementwiseSelection(
     // materializing it, so an unbounded arm errors rather than hanging.
     const armMismatch = broadcastLengthMismatch(ce, [...participants, value]);
     if (armMismatch) return armMismatch;
-    if (value.isFiniteCollection !== true) return undefined;
+    if (!isWalkableFiniteCollection(value)) return undefined;
     const cells = Array.from(value.each()) as Expression[];
     // The arm's length may only have become known by materializing it (a
     // `Filter` reports `count === undefined`): re-check through the shared

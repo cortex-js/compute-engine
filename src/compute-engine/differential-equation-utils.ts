@@ -1,6 +1,11 @@
 import type { Expression, IComputeEngine } from './global-types.js';
 import { implicitCompileNumeric } from './implicit-compile.js';
-import { isFunction, isSymbol, sym } from './boxed-expression/type-guards.js';
+import {
+  isFunction,
+  isNumber,
+  isSymbol,
+  sym,
+} from './boxed-expression/type-guards.js';
 import {
   rk45System,
   rk45Sample,
@@ -414,6 +419,14 @@ function prepareODE(
   };
 }
 
+/** True when the bound `which` of `limits` (a `Limits` expression) is an
+ * exact number literal. */
+function isExactLimit(limits: Expression, which: 'op2' | 'op3'): boolean {
+  if (!isFunction(limits, 'Limits')) return false;
+  const bound = limits[which];
+  return isNumber(bound) && bound.isExact;
+}
+
 export function nDSolve(
   equation: Expression,
   dependent: Expression,
@@ -439,15 +452,27 @@ export function nDSolve(
   const samples = solveOnGrid(f, x0, y0, x1, steps, ce._deadline);
   if (!samples) return undefined;
 
+  // A grid point is computed in doubles, so it is a float, even when its
+  // value is an integer. The first and the last point are the limits: when
+  // a limit is an exact number, that point is the limit itself, as
+  // `ce.number()` boxes it (`0` and `1` for the limits `0` and `1`).
+  const last = samples.length - 1;
+  const gridPoint = (x: number, k: number) => {
+    if (k === 0 && isExactLimit(limits, 'op2')) return ce.number(x0);
+    if (k === last && isExactLimit(limits, 'op3')) return ce.number(x1);
+    return ce.number(ce._inexactNumericValue(x + 0));
+  };
+
   if (vector)
     return ce._fn(
       'List',
-      samples.map(([x, y]) =>
+      samples.map(([x, y], k) =>
         ce._fn('List', [
-          ce.number(x),
+          gridPoint(x, k),
           ce._fn(
             'List',
-            y.map((yi) => ce.number(yi))
+            // A computed value is a float, even when it is an integer
+            y.map((yi) => ce.number(ce._inexactNumericValue(yi + 0)))
           ),
         ])
       )
@@ -455,7 +480,13 @@ export function nDSolve(
 
   return ce._fn(
     'List',
-    samples.map(([x, y]) => ce._fn('List', [ce.number(x), ce.number(y[0])]))
+    samples.map(([x, y], k) =>
+      ce._fn('List', [
+        gridPoint(x, k),
+        // A computed value is a float, even when it is an integer
+        ce.number(ce._inexactNumericValue(y[0] + 0)),
+      ])
+    )
   );
 }
 
@@ -485,17 +516,22 @@ export function nDSolveFunction(
   const solution = rk45System(f, x0, y0, x1, { deadline: ce._deadline });
   if (!solution || solution.steps.length === 0) return undefined;
 
+  // The rows of the table are computed in doubles, so their values are
+  // floats, even when they are integers. The first point is the lower limit:
+  // when that limit is an exact number, it is the limit itself, as
+  // `ce.number()` boxes it.
+  const float = (v: number) => ce.number(ce._inexactNumericValue(v + 0));
   const data = ce._fn(
     'List',
-    solution.steps.map((s) =>
+    solution.steps.map((s, k) =>
       ce._fn('List', [
-        ce.number(s.x),
-        ce.number(s.h),
-        ce.number(s.r1[0]),
-        ce.number(s.r2[0]),
-        ce.number(s.r3[0]),
-        ce.number(s.r4[0]),
-        ce.number(s.r5[0]),
+        k === 0 && isExactLimit(limits, 'op2') ? ce.number(x0) : float(s.x),
+        float(s.h),
+        float(s.r1[0]),
+        float(s.r2[0]),
+        float(s.r3[0]),
+        float(s.r4[0]),
+        float(s.r5[0]),
       ])
     )
   );

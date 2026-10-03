@@ -50,13 +50,21 @@ describe('PYTHON TARGET', () => {
     // REVIEW.md E13: `**` is right-associative in Python, so the left operand
     // of a nested power needs parentheses — `(a^b)^c` must not emit
     // `a ** b ** c` (which Python parses as `a ** (b ** c)`).
+    // A base that may be negative under an exponent that may be a float
+    // compiles to the helper `_ce_pow` (the real root of the interpreter), so
+    // the grouping is the one of the calls. `(a^b)^c` keeps its nested form
+    // only when `a` may be negative, which is that case.
     it('should parenthesize the left base of a nested power', () => {
       const expr = ce.expr(['Power', ['Power', 'a', 'b'], 'c']);
-      expect(python.compile(expr).code).toBe('(a ** b) ** c');
+      const code = python.compile(expr).code;
+      expect(code.split('\n').pop()).toBe('_ce_pow(_ce_pow(a, b), c)');
     });
 
     it('should not parenthesize a right-nested power (already right-assoc)', () => {
-      const expr = ce.expr(['Power', 'a', ['Power', 'b', 'c']]);
+      const engine = new ComputeEngine();
+      engine.assume(engine.box(['Greater', 'a', 0]));
+      engine.assume(engine.box(['Greater', 'b', 0]));
+      const expr = engine.box(['Power', 'a', ['Power', 'b', 'c']]);
       expect(python.compile(expr).code).toBe('a ** b ** c');
     });
   });
@@ -577,7 +585,7 @@ describe('PYTHON TARGET', () => {
     it('should use cmath.atan for complex arctan', () => {
       const expr = ce.expr(['Arctan', ['Complex', 1, 1]]);
       expect(src(expr)).toBe(
-        "(lambda _tv1: (complex(0.0, _tv1.imag * float('inf')) if _tv1.real == 0 and abs(_tv1.imag) == 1 else cmath.atan((complex(-0.0 if _tv1.imag < 0 else 0.0, _tv1.imag) if _tv1.real == 0 else _tv1))))(complex(1, 1))"
+        "(lambda _tv1: (complex(float('inf'), float('inf')) if _tv1.real == 0 and abs(_tv1.imag) == 1 else cmath.atan((complex(-0.0 if _tv1.imag < 0 else 0.0, _tv1.imag) if _tv1.real == 0 else _tv1))))(complex(1, 1))"
       );
     });
 
@@ -737,10 +745,13 @@ describe('PYTHON TARGET', () => {
   // Regressions for the WP-2.8 compilation P0 cluster (Python target side).
   describe('WP-2.8 P0 regressions', () => {
     it('parenthesizes a negative base under ** (P0-46)', () => {
-      // `-2 ** x` parses as `-(2 ** x)` in Python — sign-flipped. Must emit
-      // `(-2) ** x`.
-      const code = python.compile(ce.box(['Power', -2, 'x'])).code;
-      expect(code).toBe('(-2) ** x');
+      // `-2 ** n` parses as `-(2 ** n)` in Python — sign-flipped. Must emit
+      // `(-2) ** n`. The exponent is an integer: under an exponent that may
+      // be a float, a negative base compiles to the helper `_ce_pow`.
+      const engine = new ComputeEngine();
+      engine.declare('n', 'integer');
+      const code = python.compile(engine.box(['Power', -2, 'n'])).code;
+      expect(code).toBe('(-2) ** n');
     });
 
     it('Remainder is round-to-nearest, not np.remainder (P0-7)', () => {

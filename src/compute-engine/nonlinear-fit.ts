@@ -334,13 +334,20 @@ function buildRecord(
   phase: FitPhase = 'solve'
 ): Expression {
   const paramEntries = paramNames.map((name, j) =>
-    ce.tuple(ce.string(name), ce.number(result.theta[j]))
+    // A fitted value is a float, even when it is an integer
+    ce.tuple(
+      ce.string(name),
+      ce.number(ce._inexactNumericValue(result.theta[j] + 0))
+    )
   );
   const paramsDict = ce.function('Dictionary', paramEntries);
   const entries = [
     ce.tuple(ce.string('parameters'), paramsDict),
     ce.tuple(ce.string('converged'), result.converged ? TRUE_(ce) : FALSE_(ce)),
-    ce.tuple(ce.string('residualNorm'), ce.number(result.residualNorm)),
+    ce.tuple(
+      ce.string('residualNorm'),
+      ce.number(ce._inexactNumericValue(result.residualNorm + 0))
+    ),
     ce.tuple(ce.string('iterations'), ce.number(result.iterations)),
   ];
   // Present ONLY when the call was cut short by an evaluation deadline

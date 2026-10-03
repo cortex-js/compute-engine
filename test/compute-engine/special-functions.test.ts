@@ -553,25 +553,26 @@ describe('LAMBERT W FUNCTION', () => {
     expect(Math.abs(wVal * Math.exp(wVal) - x)).toBeLessThan(1e-14);
   });
 
-  test('W stays symbolic outside a branch\'s real domain (both real branches)', () => {
+  test('W is complex outside a branch\'s real domain (both real branches)', () => {
     // x >= 0 is outside W₋₁'s real domain, and −1 < −1/e is outside W₀'s.
-    // The value there is a finite COMPLEX number (W₀(−1) = −0.318 + 1.337i)
-    // that the real kernels cannot compute, so the application stays
-    // symbolic (ruled 2026-09-01; it used to answer NaN, which misreports
-    // a capability gap as an indeterminate value).
-    expect(ce.expr(['LambertW', { num: '0.5' }, -1]).N().operator).toBe(
-      'LambertW'
-    );
-    expect(ce.expr(['LambertW', -1]).N().operator).toBe('LambertW');
+    // The value there is a finite COMPLEX number, which the complex kernel
+    // computes (mpmath: lambertw(0.5, -1) = −2.2592 − 4.2210i,
+    // lambertw(-1) = −0.3181 + 1.3372i). The exact argument −1 stays
+    // symbolic under evaluate().
+    const a = ce.expr(['LambertW', { num: '0.5' }, -1]).N();
+    expect(a.re).toBeCloseTo(-2.2591588985336064, 14);
+    expect(a.im).toBeCloseTo(-4.220960969266197, 14);
+    const b = ce.expr(['LambertW', -1]).N();
+    expect(b.re).toBeCloseTo(-0.31813150520476413, 14);
+    expect(b.im).toBeCloseTo(1.3372357014306895, 14);
     expect(ce.expr(['LambertW', -1]).evaluate().operator).toBe('LambertW');
   });
 
-  test('LambertW stays inert for unsupported / symbolic branch indices', () => {
-    // Only the real branches 0 and −1 are implemented; any other integer
-    // branch keeps the expression symbolic.
-    expect(ce.expr(['LambertW', { num: '-0.1' }, 2]).N().operator).toBe(
-      'LambertW'
-    );
+  test('LambertW on every integer branch; inert for a symbolic branch index', () => {
+    // mpmath: lambertw(-0.1, 2) = −4.9880 + 13.7901i.
+    const w = ce.expr(['LambertW', { num: '-0.1' }, 2]).N();
+    expect(w.re).toBeCloseTo(-4.9880136260605825, 13);
+    expect(w.im).toBeCloseTo(13.790098563656866, 13);
     // A symbolic branch index keeps the expression inert.
     expect(ce.expr(['LambertW', { num: '-0.1' }, 'k']).N().operator).toBe(
       'LambertW'

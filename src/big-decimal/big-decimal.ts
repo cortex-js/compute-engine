@@ -396,7 +396,9 @@ export class BigDecimal {
 
   /**
    * Add this value to another.
-   * Aligns exponents, adds significands. The result is exact.
+   * Aligns exponents, adds significands. The result is exact. For a value
+   * that is an approximation at the working precision, `addBounded()` avoids
+   * building a significand of the size of the exponent gap.
    */
   add(other: BigDecimal | number): BigDecimal {
     if (typeof other === 'number') other = new BigDecimal(other);
@@ -406,19 +408,13 @@ export class BigDecimal {
 
     // NaN/Infinity: exponents are NaN or ±Infinity; finite exponents go to fast path
     if (Number.isFinite(thisExp) && Number.isFinite(otherExp)) {
+      // A zero has the exponent 0: aligning it with `10^n` would build an
+      // n-digit significand.
+      if (other.significand === 0n) return this;
+      if (this.significand === 0n) return other;
       if (thisExp === otherExp)
         return fromRaw(this.significand + other.significand, thisExp);
-
-      const diff = thisExp - otherExp;
-      if (diff > 0)
-        return fromRaw(
-          this.significand * pow10(diff) + other.significand,
-          otherExp
-        );
-      return fromRaw(
-        this.significand + other.significand * pow10(-diff),
-        thisExp
-      );
+      return alignedSum(this, other, Infinity);
     }
 
     // Slow path: handle NaN, Infinity
@@ -452,19 +448,11 @@ export class BigDecimal {
     const otherExp = other.exponent;
 
     if (Number.isFinite(thisExp) && Number.isFinite(otherExp)) {
+      if (other.significand === 0n) return this;
+      if (this.significand === 0n) return other.neg();
       if (thisExp === otherExp)
         return fromRaw(this.significand - other.significand, thisExp);
-
-      const diff = thisExp - otherExp;
-      if (diff > 0)
-        return fromRaw(
-          this.significand * pow10(diff) - other.significand,
-          otherExp
-        );
-      return fromRaw(
-        this.significand - other.significand * pow10(-diff),
-        thisExp
-      );
+      return alignedSum(this, other.neg(), Infinity);
     }
 
     // Slow path: handle NaN, Infinity
@@ -485,6 +473,36 @@ export class BigDecimal {
     return other.significand > 0n
       ? BigDecimal.NEGATIVE_INFINITY
       : BigDecimal.POSITIVE_INFINITY;
+  }
+
+  /**
+   * The sum `this + other` for values that are approximations at the working
+   * precision. It is `add()`, except when the smaller operand is more than
+   * `maxExactGap()` digits below the last digit of the larger one: then the
+   * exact sum would need a significand of the size of that gap (a billion
+   * digits for `10^(10⁹) + 1`, more than a bigint can hold), and
+   * `alignedSum()` gives a sum that rounds as the exact one does at every
+   * precision up to that gap. Not for a caller that needs the exact digits
+   * of a sum: `(10^20000 + 1) − 10^20000` with `addBounded`/`subBounded` is
+   * not `1`.
+   */
+  addBounded(other: BigDecimal | number): BigDecimal {
+    if (typeof other === 'number') other = new BigDecimal(other);
+    if (
+      !Number.isFinite(this.exponent) ||
+      !Number.isFinite(other.exponent) ||
+      this.significand === 0n ||
+      other.significand === 0n ||
+      this.exponent === other.exponent
+    )
+      return this.add(other);
+    return alignedSum(this, other, maxExactGap());
+  }
+
+  /** `this − other`, with the bound of `addBounded()`. */
+  subBounded(other: BigDecimal | number): BigDecimal {
+    if (typeof other === 'number') other = new BigDecimal(other);
+    return this.addBounded(other.neg());
   }
 
   /**
@@ -1441,6 +1459,42 @@ export function fromRaw(sig: bigint, exp: number): BigDecimal {
   (bd as { significand: bigint }).significand = normSig;
   (bd as { exponent: number }).exponent = normExp;
   return bd;
+}
+
+/**
+ * The largest number of digits, below the last digit of the larger operand,
+ * at which `addBounded` and `subBounded` still place the smaller operand
+ * exactly. At least 10,000 digits, and 4 times the working precision plus
+ * 100 above that.
+ */
+function maxExactGap(): number {
+  return Math.max(10_000, 4 * BigDecimal.precision + 100);
+}
+
+/**
+ * The sum of two finite, nonzero values with different exponents.
+ *
+ * The exact sum aligns the significands: the one with the larger exponent is
+ * multiplied by 10^(difference of the exponents). For `10^(10⁹) + 1` that is
+ * a significand of a billion digits, which a JavaScript bigint cannot hold.
+ *
+ * With a finite `limit`, when ALL the digits of the smaller operand are more
+ * than `limit` digits below the last digit of the larger one, the smaller
+ * operand is replaced by a value of the same sign, `±1` at `limit` digits
+ * below that last digit. The exact sum and this sum are both strictly
+ * between the larger operand and its neighbour one digit above that
+ * position, so they round to the same value at any precision lower than the
+ * number of digits of the larger operand plus `limit − 1`. With an infinite
+ * `limit` the sum is exact.
+ */
+function alignedSum(a: BigDecimal, b: BigDecimal, limit: number): BigDecimal {
+  let [high, low] = a.exponent > b.exponent ? [a, b] : [b, a];
+  if (high.exponent - (low.exponent + low._digitCount()) > limit)
+    low = fromRaw(low.significand > 0n ? 1n : -1n, high.exponent - limit);
+  return fromRaw(
+    high.significand * pow10(high.exponent - low.exponent) + low.significand,
+    low.exponent
+  );
 }
 
 /**

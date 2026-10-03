@@ -308,17 +308,20 @@ describe('B23: complex arguments (kernel vs still-symbolic)', () => {
 
   // Erf/Erfi gained a Γ(1/2, ·)-based complex kernel (RUBI R24), so a complex
   // argument now numericizes correctly under N() (mpmath erf(1+i) =
-  // 1.316151… + 0.190453…i). Sinc and FresnelS still have no complex kernel
-  // and stay symbolic. (Previously Erf(1+i) silently used erf(Re z), which was
-  // incorrect.)
-  test('Erf(1+i) numericizes; Sinc(i), FresnelS(i) stay symbolic', () => {
+  // 1.316151… + 0.190453…i). Sinc and FresnelS numericize on the imaginary
+  // axis from their real kernels: sinc(i) = sinh(1) = 1.1752…, and
+  // FresnelS(i) = −i·FresnelS(1) = −0.43826…i (mpmath). (Previously Erf(1+i)
+  // silently used erf(Re z), which was incorrect.)
+  test('Erf(1+i), Sinc(i) and FresnelS(i) numericize', () => {
     const erf = ce.expr(['Erf', ['Complex', 1, 1]]).N();
     expect(Math.abs(erf.re - 1.3161512816979476449)).toBeLessThan(1e-11);
     expect(Math.abs(erf.im - 0.19045346923783468628)).toBeLessThan(1e-11);
-    expect(ce.expr(['Sinc', ['Complex', 0, 1]]).N().operator).toBe('Sinc');
-    expect(ce.expr(['FresnelS', ['Complex', 0, 1]]).N().operator).toBe(
-      'FresnelS'
-    );
+    const sinc = ce.expr(['Sinc', ['Complex', 0, 1]]).N();
+    expect(Math.abs(sinc.re - 1.175201193643801456882382)).toBeLessThan(1e-15);
+    expect(sinc.im).toBe(0);
+    const s = ce.expr(['FresnelS', ['Complex', 0, 1]]).N();
+    expect(s.re).toBe(0);
+    expect(Math.abs(s.im + 0.4382591473903547660767567)).toBeLessThan(1e-15);
   });
 });
 

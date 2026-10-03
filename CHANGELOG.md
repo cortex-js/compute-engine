@@ -2,6 +2,195 @@
 
 ### Behavior Changes
 
+- **Error functions and trigonometric integrals on the imaginary axis.**
+  `Erf`, `Erfc`, `Erfi`, `SinIntegral`, `SinhIntegral`, `CosIntegral` and
+  `CoshIntegral` of an argument exactly on the imaginary axis (an exact
+  imaginary number such as `2i`, or a float complex number with a real part
+  of `0`) are computed with the identities `erf(iy) = i·erfi(y)`,
+  `erfc(iy) = 1 − i·erfi(y)`, `erfi(iy) = i·erf(y)`, `Si(iy) = i·Shi(y)`,
+  `Shi(iy) = i·Si(y)`, `Ci(iy) = Chi(|y|) ± iπ/2` and
+  `Chi(iy) = Ci(|y|) ± iπ/2`, from the real kernels:
+  - The part that is a constant is exact. `Erf(i).N()` was
+    `2.22e-16 + 1.6504i`, it is now `1.6504i`; `Erfc(i).N()` was
+    `0.9999999999999998 − 1.6504i`, it is now `1 − 1.6504i`.
+  - Above machine precision, the other part of `Erf`, `Erfc` and `Erfi` has
+    the working precision: at 50 digits `Erf(i).N()` is
+    `1.650425758797542876025337729561362443895679874874i`, was a double.
+  - A value past the number range stays unevaluated instead of `NaN`: a
+    complex value that is too large has a direction that no infinity of the
+    engine holds, the rule `Gamma` already follows. This applies to
+    `Erf(27i)` and `Si(1000i)` at machine precision, `Ci(1000i)`, and
+    `Erf(10^{10}i)` at every precision. A real overflow is still `+∞`
+    (`Erfi(27)`).
+
+- **Bessel and Airy functions of a complex argument.** `BesselJ`,
+  `BesselY`, `BesselI`, `BesselK` (integer order) and `AiryAi`, `AiryBi`,
+  `AiryAiPrime`, `AiryBiPrime` compute a value at a complex argument under
+  `.N()`, and under `evaluate()` when the argument is a float. They stayed
+  symbolic: `BesselJ(3, 0.7i).N()` was `BesselJ(3, 0.7i)`, it is now
+  `-0.007367373607628006i`. `BesselY` and `BesselK` also have a value on the
+  negative real axis, their branch cut: the limit from above, as for
+  `Ln(-2)` (`BesselY(0, -2).N()` is `0.5103756726497453 + 0.4477815582824712i`).
+  On the imaginary axis `J_n(iy) = iⁿ·I_n(y)` and `I_n(iy) = iⁿ·J_n(y)`, so
+  one part is exactly `0`. Measured against mpmath at more than 2,000 points:
+  a relative error of at most `7·10⁻¹⁴` for J, I and K, `4·10⁻¹⁴` for Y away
+  from its zeros, `5·10⁻¹⁴` for the Airy functions up to `|z| = 40` and
+  `3·10⁻¹³` at `|z| = 120` (the conditioning of the function there). A
+  non-integer order stays symbolic. The result type of `BesselY` and
+  `BesselK` of a real argument that is not positive is now `number`, not
+  `real`. Compiled code computes these functions for a real argument only:
+  a complex operand is refused (compiled `BesselI(0, z)` gave `1` at
+  `z = 1 + i`).
+- **`LambertW` on every branch, and `Sinc`, `FresnelS`, `FresnelC` of a
+  complex argument.** `.N()` (and `evaluate()` of a float argument)
+  computes `W_k(z)` for every integer branch `k` and every complex `z`, with
+  the branch cuts of mpmath's `lambertw` (on a cut, the limit from above, as
+  for `Ln`). A real argument outside the real domain of a branch has its
+  complex value: `LambertW(-1).N()` is `-0.31813 + 1.33724i` and
+  `LambertW(0.5, -1).N()` is `-2.25916 - 4.22096i` (they stayed symbolic).
+  `W_k(0) = -∞` for `k ≠ 0`. `Sinc(1+2i).N()` is `1.41700 - 0.87439i`. On
+  the imaginary axis `Sinc(iy) = sinh(y)/y`, `FresnelS(iy) = -i·FresnelS(y)`
+  and `FresnelC(iy) = i·FresnelC(y)`, with the constant part exact. Against
+  mpmath, the largest relative error is `6.6·10⁻¹⁶` for `LambertW` (31,000
+  points, branches −3 to 3) and `4.3·10⁻¹⁶` for `Sinc`; for the Fresnel
+  integrals it is `4·10⁻¹⁶` for `|z| < 1` and `5·10⁻¹⁴` for `|z| < 10`, and
+  further out it follows the condition number `π|z|²`.
+- **`LambertW(-1/e)` and `LambertW(-1/e, -1)` are exactly `-1`**, under
+  `evaluate()` as well as `.N()`, at every precision. `evaluate()` left them
+  unevaluated. At machine precision `.N()` gives `-1`, not the complex value
+  of the double just below `-1/e`.
+- **The type of `LambertW(x)` for a real `x` is `real` only when the branch
+  and the range of `x` prove it** (`W₀` on `[−1/e, ∞]`, `W₋₁` on
+  `[−1/e, 0)`). Otherwise it is `number`: `LambertW(-1)` was typed `real`.
+- **`solve` keeps a root from a `LambertW` template only when it is real.**
+  The templates that solve `x·eˣ = b` and the related shapes give the real
+  roots: `W₀` when its argument is in `[−1/e, ∞)`, and `W₋₁` for the second
+  real root when its argument is in `[−1/e, 0)`. Outside these intervals
+  `W₀` and `W₋₁` now have complex values, which are two of infinitely many
+  complex roots: `solve` returns the real roots of these equations, as it
+  does for `sin(x) = 2`. So `x·eˣ = 3` still solves to `W(3)` only, and
+  `x·eˣ = -1` has no root.
+
+### Improvements
+
+- **More accurate `erf`, `erfc` and `erfi` in doubles.** The machine kernels
+  of the error functions, which compiled JavaScript also uses, are now
+  W. J. Cody's rational approximations (`erfi` through the Dawson integral),
+  evaluated with compensated arithmetic. Measured against mpmath on 7,100
+  points in [0, 30], the largest error went from 15 to 1 unit in the last
+  place for `erf`, from 889 to 2 for `erfc`, and from 502 to 2 for `erfi`
+  (3 next to its overflow at 26.71). They take about the same time per call
+  as before.
+- **`Erfi` of a large argument above machine precision finishes.**
+  `Erfi(1000).N()` at 50 digits did not finish; the big-decimal kernel now
+  uses the asymptotic series once it is accurate to the working precision.
+- **Complex `Erf` and `SinIntegral` near 0.** The relative error of
+  `Erf(10^{-8}(1 + i)).N()` was `10⁻⁸`, and of `SinIntegral` at
+  `10⁻⁶(1 + i)` `10⁻¹⁰`: the kernels subtracted two values close to each
+  other. Both now use their Maclaurin series for `|z| ≤ 1`, with a relative
+  error below `2·2⁻⁵²`.
+- **`SinhIntegral` and `CoshIntegral` near 0.** `SinhIntegral(10^{-10}).N()`
+  was `9.99982e-11`, it is now `1e-10`. The real kernels of `Shi` and `Chi`
+  use their Maclaurin series for `|x| ≤ 2`.
+
+- **More accurate `SinIntegral`, `CosIntegral`, `SinhIntegral`,
+  `CoshIntegral` and `ExpIntegralEi` in doubles, mostly as fast or faster.**
+  Measured against mpmath on more than 30,000 points from 0.12 to 10³⁰⁰, the
+  largest error is now 0.74 unit in the last place for `SinIntegral` (21
+  before), 1.5 for `CosIntegral` away from its zeros (73 before), and for
+  `SinhIntegral`, `CoshIntegral` and `ExpIntegralEi` 1 for `2 ≤ x < 50` and 2
+  above (11 before); `CoshIntegral` below 2 is within 1.6 away from its zero
+  (4 before). `CosIntegral` gave wrong values past 10¹⁵, and
+  `SinhIntegral`, `CoshIntegral` and `ExpIntegralEi` gave `+∞` from 716; they
+  are finite up to their overflow (717.05 and 716.36). `SinIntegral` and
+  `CosIntegral` are up to 3 times faster for `2 ≤ x ≤ 16`; `CoshIntegral`
+  below 2 is about 2 times slower. Compiled JavaScript uses the same kernels.
+- **`.N()` of a sum or product with a very large exponent gap finishes.**
+  `(10^{10^9} + 1).N()`, `(10^{10^9}·i).N()` and `Erf(10^{10^9}·i).N()` did
+  not finish at a precision of 50 digits, or failed with "Maximum BigInt size
+  exceeded": the exact sum aligned the operands to a billion-digit
+  significand. Now they take a few milliseconds. In the arithmetic of
+  approximate values above machine precision, an operand that is more than
+  10,000 digits (or 4 times the precision) below the other is replaced by a
+  value of the same sign just under that limit, which rounds the same way at
+  every precision up to that limit. Exact arithmetic is not changed.
+
+### Issues Resolved
+
+- **`QuotientRing(Integers, n)` is a finite collection of `n` residue
+  classes, not a set of integers** (#399, contributed by
+  [enumeratio](https://github.com/enumeratio)). `\mathbb{Z}/5\mathbb{Z}` and
+  `\mathbb{Z}_5` had no count (`count` was `undefined`, and `Count(…)` stayed
+  unevaluated), and their type was `set<integer>`, although 7 and 2 are the
+  same element of ℤ/5ℤ. For a positive integer literal `n`, the collection
+  now has the count `n`, is finite and is not empty, and `Count` evaluates:
+  `Count(\mathbb{Z}/5\mathbb{Z})` is `5`. A symbolic, zero or negative
+  modulus, or a base other than `Integers`, stays inert. The type is
+  `set<unknown>`, as for an `Adjoin` adjunct that the engine cannot type. The
+  engine has no value for a residue class, so the classes are not listed and
+  membership is not decided.
+
+- **A finite collection whose elements cannot be computed no longer reads as
+  empty.** `Linspace(a, 1, 3)` with a symbolic `a` has the count 3 but no
+  elements that can be computed, and so does ℤ/5ℤ. Many operators checked
+  only that a collection was finite and then walked its elements, so they
+  read it as empty and gave a wrong answer with no diagnostic:
+  `Union(Linspace(a, 1, 3), {1})` was `Set(1)`, `Unique(…)` was `[]`,
+  `Tally(…)` was `([], [])`, `Intersection(…, {1})` was `EmptySet`,
+  `SetMinus(Set(1), …)` was `Set(1)`, `First(…)` was `NaN`,
+  `Flatten([[1], Linspace(a, 1, 3)])` was `[1]`,
+  `Equal(Linspace(a, 1, 3), [1, 2, 3])` was `True`, and `Sort(…)` gave an
+  `internal-error`. These operators now stay unevaluated, and `Equal`,
+  `IdenticallyEqual` and `.isEqual()` are undecided. An empty collection
+  still gives a definite answer: `Union(Linspace(a, 1, 0), Set(1))` is
+  `Set(1)`. An element-wise function of such a collection gives the lazy
+  form that it already gives for `Range(1, n)`: `Sin(Linspace(a, 1, 3))` is
+  `Map((_) => sin(_), Linspace(a, 1, 3))`.
+
+- **`EvaluateAt` with one operand no longer throws.** `EvaluateAt(x^2)`
+  threw a `TypeError`. It now stays unevaluated.
+
+- **`BesselY` and `BesselJ` of a real argument are accurate.** `BesselY`
+  computed `Y₀` and `Y₁` from a series that loses about `x/2.3` digits, then
+  recurred: `BesselY(12, 40).N()` was `-1.83` instead of `-0.0236`, and
+  `BesselY(30, 200).N()` was `-5.5·10⁷⁶` instead of `-0.0224`. `BesselJ`
+  started its backward recurrence too low for a large argument:
+  `BesselJ(12, 95)` had a relative error of `10⁻⁸`, and `BesselJ(80, 80)` was
+  `1.98` instead of `0.104`. `Y₀` and `Y₁`
+  now come from Steed's continued fractions for `2 < x ≤ 30`, and the
+  recurrence of `J` starts high enough. Against mpmath at orders 0 to 80 and
+  `x` up to 240, both are within `1·10⁻¹⁴` of the size of the function. The
+  asymptotic expansions also reduce the phase `x − (2n+1)π/4` exactly
+  (`BesselY(0, 1000)` had an error of `3·10⁻¹⁴`). Compiled JavaScript uses
+  the same kernels.
+- **`FresnelS` and `FresnelC` of a real argument between 1.6 and 4.5 are
+  accurate to `7·10⁻¹⁶`.** One coefficient of the auxiliary function was
+  wrong: the relative error was up to `4.5·10⁻¹²` (`FresnelS(2.5)` was
+  `0.61918175581901`, it is `0.6191817558195929`). The GLSL and WGSL
+  lowerings had the same coefficient (with no visible effect in 32-bit
+  floats); it is corrected there too.
+- **`LambertW` next to `-1/e` is accurate.** The real kernels returned
+  exactly `-1` for an argument within `10⁻¹⁵` of `-1/e`, also above machine
+  precision: at 50 digits, `LambertW(-1/e + 10^{-20})` had an error of
+  `2·10⁻¹⁰`. They now use the series about the branch point, with `1/e`
+  held to more than double precision, and above machine precision Halley's
+  iteration with extra digits.
+
+
+- **In Epsil, `f(x) := body` defines `f` as `f(x) = body` does** (#400,
+  contributed by [enumeratio](https://github.com/enumeratio)). As a statement,
+  `f(x) := x^2 + a` parsed to `Assign(f(x), x^2 + a)`, which evaluates to
+  itself with no diagnostic and leaves `f` undefined, so `f(3)` was `f(3)`. It
+  now parses to `DefineFunction(f, Function(x^2 + a, x))`, and `f(3)` is
+  `a + 9`. The two spellings are synonyms for every function head: typed,
+  rest and wildcard parameters, a return type, a definition inside a block,
+  and literal-pattern clauses. So `f(0) := 1` followed by `f(n) := n*f(n-1)`
+  defines the factorial, and `f(5)` is `120`. `Assign` itself is unchanged.
+
+## 0.147.0 _2026-10-02_
+
+### Behavior Changes
+
 - **`Totient` and `NPartition` evaluate for zero and negative integers.**
   `Totient(0)` is `0` and `Totient(-n)` is `Totient(n)` (`Totient(-12)` is
   `4`); `NPartition(n)` is `0` for a negative integer `n`. These are the
@@ -92,6 +281,134 @@
   (`ce.withTimeLimit`): the Bernoulli table it builds (about 30 s at
   `ce.precision = 3000`) checks the deadline at every step instead of every
   256 steps, and the Stirling series checks it at every term.
+
+- **A small part of a complex result of a float input is kept.** The machine
+  kernels of the interpreter (`.N()` at machine precision; and at every
+  precision the kernels of the special functions and a complex power, root
+  or exponential with a machine operand) set to 0 a part below 10⁻¹⁴ times
+  the modulus of the result, and the compiled complex helpers set to 0 a
+  part below 10⁻¹⁴ and below 10⁻¹⁴ times the modulus. That part is the
+  value at the float input, and is now kept: at machine precision
+  `e^{3.141592653589793i}.N()` is `−1 + 1.22·10⁻¹⁶i` (was `−1`) and
+  `2^{10^{-100}i}.N()` is `1 + 6.93·10⁻¹⁰¹i` (was `1`); compiled with
+  folding off, `e^{\ln(−2)}` is `−2 + 2.45·10⁻¹⁶i` (was `−2`). The `Chop`
+  operator removes such a part. An exact input has no such part (next
+  entry): `e^{iπ}` and `e^{\ln(−2)}` evaluate to `−1` and `−2`.
+
+- **An exact multiple of π is reduced exactly under `.N()` and in compiled
+  code.** The multiple of π is reduced in half-turns with bigints, so no
+  rounding of π reaches a part whose value is `0` or `±1/2`. At machine
+  precision, `sin(π).N()` is `0` (was `1.22·10⁻¹⁶`), `cos(π/2).N()` is `0`
+  (was `6.1·10⁻¹⁷`), `cos(2π/3).N()` is `−0.5` (was `−0.4999999999999998`)
+  and `sin(π/6).N()` is `0.5` (was `0.49999999999999994`). At every
+  precision and in every angular unit, `e^{2iπ/3}.N()` is `−0.5 + 0.866i`
+  with a real part of exactly `−0.5` (was `−0.4999999999999998` at machine
+  precision and `−0.500000000000000000001` at 21 digits),
+  `e^{i·10^{20}π}.N()` is `1` (was `0.919 − 0.394i` at machine precision),
+  `sinh(iπ).N()` and `cosh(iπ/2).N()` are `0` (were `1.22·10⁻¹⁶i` and
+  `6.1·10⁻¹⁷`), and `tanh(iπ/2).N()`, `coth(iπ).N()`, `csch(iπ).N()` and
+  `sech(iπ/2).N()` are `~oo` (were `NaN`, `±8.2·10¹⁵i` and `1.6·10¹⁶`).
+  Compiled JavaScript, Python, GLSL and WGSL lower `sin(πu)`, `cos(πu)`,
+  `tan(πu)` and `e^{a + iπu}` with the angle `u` in half-turns (JavaScript
+  also over a list, `sin(πL)`), so the value at an integer or a
+  half-integer `u` has an exact zero part, `+0`: compiled `sin(πx)` at
+  `x = 2` is `0` (was `−2.45·10⁻¹⁶`), `e^{iπx}` at `x = 1` is the plain real
+  `−1`, and `e^{x + iπ}` is `−e^x`. A compiled `sin(πx)` costs about 25% more
+  per call in JavaScript than `Math.sin(Math.PI * x)`.
+
+- **A negative real base with a float exponent has the interpreter's real
+  root in compiled code.** The interpreter reads the rational `p/q` that the
+  double came from, and a `q` that is odd gives the real root: `(−8)^{0.4}`
+  is `2.297` and `(−8)^{0.3333333333333333}` is `−2` at machine precision
+  (`−1.99999999999999986137` at 21 digits). The compiled complex power gave
+  the principal value (`0.710 + 2.185i` and `1 + 1.732i`), the compiled
+  JavaScript real power `x^y` of two real variables gave `NaN`, and Python
+  gave the principal value or `nan`. Now JavaScript and Python give the real
+  root (`−2` for the example) for a constant or a variable exponent (Python
+  `compileFunction` through a helper `_ce_pow`; a bare lambda of
+  `compileLambda` has no place for it and keeps `x ** y`, the principal
+  value, for a variable exponent); GLSL and WGSL give it for a constant
+  exponent, and keep `pow` for a variable one, which a shader holds as an
+  f32 and cannot read to 17 digits. An even `q`, or no rational
+  (`(−3)^{√2}`), keeps the principal value (in Python with an exact angle:
+  `(−1)^{0.5}` is `i`, was `6.1·10⁻¹⁷ + i`), and `NaN` on the JavaScript and
+  shader real lanes.
+
+- **An exact complex number divided by an exact number is an exact number
+  literal, and a float complex literal stays inexact.** The canonical form
+  and its MathJSON and LaTeX change:
+  - `\frac{i}{3}` was `["Divide", ["Complex", 0, 1], 3]`; it is now the
+    literal `(1/3)i`, `["Complex", 0, ["Rational", 1, 3]]`, as
+    `\frac{1}{3}i` already was. Its LaTeX is now `\frac{1}{3}\imaginaryI`.
+  - `\frac{3+i}{2}` is `3/2 + (1/2)i`, `\frac{i}{\sqrt2}` is `(√2/2)i`, and
+    `\frac{i}{3}\cdot 3` is `i`.
+  - A complex divisor folds too: `\frac{2}{i}` is `-2i` and
+    `\frac{3+i}{1-i}` is `1+2i`.
+  - A float complex literal is no longer read as an exact value when its
+    parts are integers. `\frac{1.0i}{3}` and `\frac{3}{1.0i}` keep the
+    `Divide`, `1.0i\cdot 3` and `(2.0+1.0i)\cdot 3` keep the `Multiply`, and
+    `1.0i+3` is the inexact `3.0+1.0i`. Before, the products and the sum
+    folded to the exact `3i`, `6+3i` and `3+i`. This is the rule for a real
+    float, where `\frac{1.0}{3}` keeps the `Divide`.
+  - The same rule applies to arithmetic on number values: a sum, product or
+    quotient of an exact value and a float complex value is a float, also
+    when the parts of the float are integers. `\frac{1}{3}+1.0i`,
+    `\frac{1}{3}\cdot(2.0+1.0i)`, `\frac{3}{1.0i}` and
+    `\sum_{k=1}^{3}\frac{k}{2}\cdot 1.0i` evaluate to floats (they were
+    exact), as do `ce.number([1,3]).add(ce.parse('1.0i'))` and the product
+    of `(1+i).N()` with the exact `1-i`.
+
+  An imaginary factor inside a `Divide` was not seen by the exact reduction
+  of an imaginary multiple of π, so `\tanh(\frac{i}{3}\cdot\frac{3}{2}\pi)`
+  and `\coth(\frac{i}{3}\cdot\frac{3}{2}\pi)` gave `NaN` under `.N()`.
+  They now give `~oo` and `0`, as `\tanh(\frac{i\pi}{2})` and
+  `\coth(\frac{i\pi}{2})` do. A symbolic divisor (`\frac{i}{x}`) keeps the
+  division.
+
+- **A complex number from the host with integer parts is exact; a complex
+  float is never read as exact.** `ce.number(new Complex(2, 3))`,
+  `ce.number({ re: 2, im: 3 })` and `ce.box(new Complex(2, 3))` are now the
+  exact `2+3i` (`isExact` is `true`, the MathJSON is `["Complex", 2, 3]`;
+  it was `["Complex", {num: "2.0"}, {num: "3.0"}]`), as `ce.number(2)` is the
+  exact `2`. Integer-valued `BigDecimal` parts are exact too. A part with a
+  fraction (`new Complex(2.5, 3)`) gives a float, as before. In return, a
+  float whose parts are integers is no longer taken for an exact value in a
+  computation, so a float operand makes the result a float:
+  - `\frac{1}{3}\cdot 1.0i` and `\sqrt2\cdot 1.0i` evaluate to floats (they
+    were the exact `(1/3)i` and `√2·i`).
+  - `(1.0+1.0i)^2` is the float `2.0i` (it was the exact `2i`); `(1+i)^2`
+    stays the exact `2i`.
+  - `\Gamma(1.0i)` and `\cos(1.0i\pi)` evaluate to floats under `evaluate()`
+    (they stayed symbolic, as `\Gamma(i)` does).
+  - A float multiple of π that is a special angle stays exact:
+    `e^{1.0i\pi}` is `-1`, as before.
+
+  The complex results of the numeric routines stay floats: the conjugate of
+  a float, an even root of a negative number under `.N()`, the complex
+  kernels (`\Gamma(1.0+1.0i)`), and the complex entries of a matrix that
+  holds a complex float (`Trace`, `Transpose`, `MatrixMultiply`,
+  `Determinant` of `[[1.0+1.0i, 0], [0, 1.0+1.0i]]`).
+
+  The results of the numeric routines are now floats also when they are
+  real integers (they were exact): `NIntegrate(1, 0, 2)` is `2.0` (it was
+  `2`), as are the values of `NLimit`, `ND`, `NDSolve` (the inner grid
+  points too; an end point that is an exact limit stays exact), the
+  fitted parameters of `FindFit` and `FindRoot`, and the roots that
+  `ComplexRoots` computes for a float (`ComplexRoots(1.0, 4)` starts with
+  `1.0`). For a matrix with a float entry, the results of `Eigenvalues`,
+  `Eigenvectors`, `SingularValues`, `SVD`, `QRDecomposition` and the
+  spectral norm are floats (`SingularValues([[3.0, 0], [0, 4.0]])` is
+  `[4.0, 3.0]`, it was `[4, 3]`); a matrix of exact entries keeps the
+  results it had.
+
+  The eigenvalues of an exact matrix larger than 3×3 (computed by the QR
+  algorithm) are checked with exact arithmetic: an eigenvalue close to a
+  rational number that makes `A − λI` singular is returned exact, and
+  `Eigenvectors` then gives exact vectors. A double eigenvalue of a
+  defective matrix, which the QR algorithm gives with an error of about
+  `10^{-8}`, is now exact: the eigenvalues of
+  `[[5,4,2,1],[0,1,-1,-1],[-1,-1,3,0],[1,1,-1,2]]` are `[4, 4, 2, 1]` (they
+  were `[4.0000000258, 3.9999999742, 2, 1]`), with exact eigenvectors.
 
 ### New Features
 
@@ -288,6 +605,40 @@
   precision `\sin(10^{400}+i)` reached the double kernel with an infinite
   real part, and the `NaN` imaginary part of its value failed an internal
   assertion. The value is now `NaN`.
+
+- **Compiled JavaScript keeps a small part of a complex result, as the
+  interpreter does.** The compiled complex functions set to 0 a part below
+  10⁻¹⁴ and below 10⁻¹⁴ times the modulus of the result, so
+  `arcoth(10⁻¹⁰⁰)` was `−(π/2)i` compiled and `10⁻¹⁰⁰ − (π/2)i` in the
+  interpreter, `2^{10⁻¹⁰⁰i}` was `1` compiled and `1 + 6.93·10⁻¹⁰¹i` in the
+  interpreter, and `sin(π + i)` at the double `π` lost its real part
+  `1.9·10⁻¹⁶`. Every compiled complex function now keeps every part: the
+  kernels give an exact 0 for a part whose value is 0, so a real argument in
+  the real domain still gives a plain real number. The complex power is
+  computed by repeated squaring for a small integer exponent, and with the
+  angle `cos(πt) + i·sin(πt)` exact at the multiples of `π/2` for a base on
+  an axis or a diagonal, so it has an exact 0 part without a removal
+  (`(−2.0)^3` is `−8`, was `−7.999999999999998`). `e^z` compiles to the
+  exponential, as the interpreter computes it: `Math.E^z` lost digits
+  (`e^{40}` had a relative error of 2·10⁻¹⁵). The compiled complex square
+  root no longer loses a small argument: `√(10⁻³⁰⁰·i)` was `0` and is
+  `7.07·10⁻¹⁵¹·(1 + i)`.
+
+- **In degrees, an inverse trigonometric value keeps a small imaginary
+  part.** The conversion of the angle to the angular unit set to 0 an
+  imaginary part below 10⁻¹⁴: `arcsin(10^{-200}i).N()` in degrees was `0`,
+  and is `5.73·10⁻¹⁹⁹i`; `arctan(10^{-50}i)` was `0`, and is `5.73·10⁻⁴⁹i`.
+
+- **The compiled `~oo` is `∞ + ∞i` on the complex lane, at run time and in a
+  folded constant.** `arctan(±i)` and `arccot(±i)`, which are `~oo` in the
+  interpreter, gave `0 ± ∞i` at run time (JavaScript, Python and GLSL/WGSL)
+  and the real `Infinity` when the argument was a constant. A constant that
+  evaluates to `~oo` on a node whose value is complex folded to `Infinity`
+  too. Both now give `∞ + ∞i`, the value `cot 0` and `csc 0` already gave
+  on the complex lane. The outputs that change: `arctan(±i)`, `arccot(±i)`,
+  `arctan(i)^2` and `(1 + i) + ~oo` compiled with a constant argument (were
+  `Infinity`). A `~oo` on a node whose value is real still compiles to
+  `Infinity` (`1/0`, `Γ(−2)`).
 
 ## 0.146.0 _2026-10-02_
 

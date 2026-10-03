@@ -1,4 +1,5 @@
 import { engine as ce } from '../utils';
+import { ComputeEngine } from '../../src/compute-engine';
 import { BaseCompiler } from '../../src/compute-engine/compilation/base-compiler';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
@@ -132,20 +133,18 @@ describe('COMPILE COMPLEX - _SYS helpers (execution)', () => {
   });
 
   it('should execute cexp', () => {
-    // exp(i*pi) = -1 + 0i
+    // exp(i·π) at the double nearest to π
     // `constantFold: false`: this suite exercises the emitted `_SYS` helper at
     // run time. With folding on, the whole (variable-free) expression is
     // evaluated at compile time and emitted as a real literal, so the helper
     // never runs and the result is a bare number rather than `{re, im}`.
     const expr = ce.expr(['Exp', ['Complex', 0, Math.PI]]);
     const result = compile(expr, { fallback: false, constantFold: false });
-    expect(result.code).toContain('_SYS.cpow(Math.E, ');
-    // Result convention (design §5, 2026-08-16): the kernel chops its own
-    // roundoff dust (`im = 1.22e-16` → 0), and a value whose imaginary part
-    // is exactly zero comes back as a plain NUMBER, never `{re, im: 0}`.
-    const val = result.run!();
-    expect(typeof val).toBe('number');
-    expect(val).toBeCloseTo(-1, 10);
+    expect(result.code).toContain('_SYS.cexp(');
+    // The kernel removes no part: at the double `Math.PI` the value is
+    // `−1 + sin(Math.PI)·i`, `sin(Math.PI)` being `1.22e-16`, as the
+    // interpreter gives it at machine precision.
+    expect(result.run!()).toEqual({ re: -1, im: Math.sin(Math.PI) });
   });
 
   it('should execute cabs', () => {
@@ -425,13 +424,11 @@ describe('COMPILE COMPLEX - integration', () => {
     // emitted complex arithmetic; folding this variable-free expression at
     // compile time would emit a real literal instead.
     const result = compile(expr, { fallback: false, constantFold: false });
-    // The emitted arithmetic is complex (`_SYS.cpow`); the RESULT is real, so
-    // by the result convention (design §5) it is a plain number: the kernel
-    // chops its roundoff dust and an exactly-zero imaginary part is dropped.
-    expect(result.code).toContain('_SYS.cpow(Math.E, ');
-    const val = result.run!();
-    expect(typeof val).toBe('number');
-    expect(val).toBeCloseTo(0, 10);
+    // The emitted arithmetic is complex (`_SYS.cexp`). The kernel removes no
+    // part, so the imaginary part is `sin(Math.PI)`, `1.22e-16`: the value at
+    // the double nearest to π, not at π.
+    expect(result.code).toContain('_SYS.cexp(');
+    expect(result.run!()).toEqual({ re: 0, im: Math.sin(Math.PI) });
   });
 });
 
@@ -2432,4 +2429,178 @@ describe('COMPILE COMPLEX - a tuple element that folds to a real number broadcas
     expect(v[0].im).toBeCloseTo(2 * Math.sqrt(7), 12);
     expect(v[1]).toBe(0);
   });
+});
+
+describe('COMPILE COMPLEX - the complex power agrees with the interpreter', () => {
+  // The compiled power removes no part. The polar form used to leave
+  // roundoff in a part whose value is 0, and a chop then also removed a
+  // small part that is the value (`2^(10⁻¹⁰⁰·i)` was `1`).
+  // [base re, base im, exponent re, exponent im, expected re, expected im]
+  const CASES: [number, number, number, number, number, number][] = [
+    [-2, 0, 2, 0, 4, 0],
+    [-2, 0, 3, 0, -8, 0],
+    [-1, 0, 0.5, 0, 0, 1],
+    [-4, 0, 1.5, 0, 0, -8],
+    [1, 1, 2, 0, 0, 2],
+    [0, 1, 2, 0, -1, 0],
+    [1, 1, -2, 0, 0, -0.5],
+    [-1, -1, 3, 0, 2, -2],
+    [1.5, 0.5, 3, 0, 2.25, 3.25],
+    [0, 1e-10, 2, 0, -1e-20, 0],
+    [0, 2, 0.5, 0, 1, 1],
+    [1, 1, 0.5, 0, 1.09868411346781, 0.45508986056222734],
+    // A negative real base and a float exponent: the interpreter recovers
+    // the rational `p/q` from the double, and an odd `q` has a real root.
+    [-8, 0, 0.3333333333333333, 0, -2, 0],
+    [-8, 0, 0.4, 0, 2.2973967099940701, 0],
+    [-8, 0, 0.25, 0, 1.189207115002721, 1.189207115002721],
+    [-3, 0, Math.SQRT2, 0, -1.2590694297305961, -4.5581065267880988],
+    // A small part that is the value is kept.
+    [2, 0, 0, 1e-100, 1, 6.9314718055994531e-101],
+    [1e-10, 0, 0, 1e-100, 1, -2.3025850929940457e-99],
+    [3, 4, 0.5, 0.5, 0.4188989398077784, 1.3426225685938751],
+  ];
+
+  function close(a: number, b: number): boolean {
+    return a === b || Math.abs(a - b) <= 2e-15 * Math.abs(b);
+  }
+
+  // The interpreter computes a complex power with big decimals at its
+  // default precision, and with `complexPow()`, the kernel of the compiled
+  // power, at machine precision (`complexPowN()`,
+  // `boxed-expression/arithmetic-power.ts`); neither removes a part, so
+  // `2^(10⁻¹⁰⁰·i)` is `1 + 6.93·10⁻¹⁰¹i` at both.
+  for (const precision of [21, 'machine'] as const) {
+    test.each(CASES)(
+      `precision ${precision}: (%p + %pi)^(%p + %pi)`,
+      (zr, zi, wr, wi, expRe, expIm) => {
+        const engine = new ComputeEngine();
+        engine.precision = precision;
+        engine.declare('z', 'complex');
+        engine.declare('w', 'complex');
+        const result = compile(engine.box(['Power', 'z', 'w']), {
+          fallback: false,
+        });
+        expect(result.code).toContain('_SYS.cpow(');
+        const out = result.run!({
+          z: { re: zr, im: zi },
+          w: { re: wr, im: wi },
+        }) as number | { re: number; im: number };
+        const c = typeof out === 'number' ? { re: out, im: 0 } : out;
+        const num = (re: number, im: number) =>
+          engine.number(im === 0 ? re : engine.complex(re, im));
+        const i = engine
+          .function('Power', [num(zr, zi), num(wr, wi)], {
+            form: 'structural',
+          })
+          .N();
+        // A part is 0 in one exactly when it is 0 in the other, and a value
+        // with an imaginary part of 0 is a plain number.
+        expect([c.re === 0, c.im === 0]).toEqual([i.re === 0, i.im === 0]);
+        expect(typeof out === 'number').toBe(i.im === 0);
+        expect(close(c.re, i.re) && close(c.im, i.im)).toBe(true);
+        expect(close(c.re, expRe) && close(c.im, expIm)).toBe(true);
+      }
+    );
+  }
+
+  test('the real lane gives the real root of a negative base', () => {
+    const engine = new ComputeEngine();
+    engine.declare('x', 'real');
+    engine.declare('y', 'real');
+    const result = compile(engine.box(['Power', 'x', 'y']), {
+      fallback: false,
+    });
+    expect(result.code).toContain('_SYS.pow(');
+    for (const [x, y, expected] of [
+      [-8, 0.3333333333333333, -2],
+      [-8, 0.4, 2.2973967099940701],
+      [-2, 3, -8],
+      [2, 0.5, Math.SQRT2],
+      // No real value: the interpreter's value is complex.
+      [-8, 0.25, NaN],
+      [-1, 0.5, NaN],
+    ] as const) {
+      const out = result.run!({ x, y }) as number;
+      if (Number.isNaN(expected)) {
+        expect(out).toBeNaN();
+        expect(engine.box(['Power', x, y]).N().im === 0).toBe(false);
+      } else {
+        expect(close(out, expected)).toBe(true);
+        const i = engine
+          .function('Power', [engine.number(x), engine.number(y)], {
+            form: 'structural',
+          })
+          .N();
+        expect(i.im).toBe(0);
+        expect(close(out, i.re)).toBe(true);
+      }
+    }
+  });
+
+  test('e^z is the exponential, as in the interpreter', () => {
+    // `Math.E^40` has a relative error of 2·10⁻¹⁵; the exponential kernel
+    // gives `e^40` to the last digit.
+    const engine = new ComputeEngine();
+    engine.declare('z', 'complex');
+    const result = compile(engine.box(['Exp', 'z']), { fallback: false });
+    expect(result.code).toContain('_SYS.cexp(');
+    const out = result.run!({ z: { re: 40, im: 1e-18 } }) as {
+      re: number;
+      im: number;
+    };
+    expect(out).toEqual({ re: Math.exp(40), im: Math.exp(40) * 1e-18 });
+  });
+});
+
+describe('COMPILE COMPLEX - a power of a base on a diagonal near the ends of the double range', () => {
+  // `|z|^a` of a base on a diagonal was `m^a · 2^{a/2}`, and a factor
+  // underflowed or overflowed where the modulus does not:
+  // `(0.5 + 0.5i)^{2000}` was `0`. Values of mpmath at 30 digits.
+  const CASES: [number, number, number, number, number][] = [
+    [0.5, 0.5, 2000, 9.33263618503218879e-302, 0],
+    [0.5, 0.5, 2000.5, 7.25040360669699528e-302, 3.00321550657269916e-302],
+    [-0.5, 0.5, 1999, -9.33263618503218879e-302, -9.33263618503218879e-302],
+    [0.5, 0.5, -2000, 1.07150860718626732e301, 0],
+  ];
+  const close = (a: number, b: number) =>
+    a === b || Math.abs(a - b) <= 1e-12 * Math.abs(b);
+  test.each(CASES)('(%p + %pi)^%p', (x, y, a, expRe, expIm) => {
+    const engine = new ComputeEngine();
+    engine.precision = 'machine';
+    engine.declare('z', 'complex');
+    engine.declare('w', 'complex');
+    const out = compile(engine.box(['Power', 'z', 'w']), {
+      fallback: false,
+    }).run!({ z: { re: x, im: y }, w: { re: a, im: 0 } }) as
+      number | { re: number; im: number };
+    const c = typeof out === 'number' ? { re: out, im: 0 } : out;
+    expect(close(c.re, expRe) && close(c.im, expIm)).toBe(true);
+    const i = engine
+      .function('Power', [
+        engine.number(engine.complex(x, y)),
+        engine.number(a),
+      ])
+      .N();
+    expect(close(i.re, expRe) && close(i.im, expIm)).toBe(true);
+  });
+});
+
+test('COMPILE COMPLEX - (2i)^0.5 is exactly 1 + i', () => {
+  // At an odd multiple of π/4 each part is the modulus divided by √2:
+  // `√2 · (√2/2)` is `1.0000000000000002`.
+  const engine = new ComputeEngine();
+  engine.precision = 'machine';
+  engine.declare('z', 'complex');
+  const out = compile(engine.box(['Power', 'z', 0.5]), {
+    fallback: false,
+  }).run!({ z: { re: 0, im: 2 } });
+  expect(out).toEqual({ re: 1, im: 1 });
+  const i = engine
+    .function('Power', [
+      engine.number(engine.complex(0, 2)),
+      engine.number(0.5),
+    ])
+    .N();
+  expect([i.re, i.im]).toEqual([1, 1]);
 });

@@ -57,8 +57,78 @@ import {
  */
 export const MAX_SIZE_EAGER_COLLECTION = 100;
 
+/**
+ * True when `col` is a finite indexed collection whose elements can be
+ * walked. A finite collection whose elements cannot be computed (see
+ * {@link isWalkableFiniteCollection}) is excluded, because most callers of
+ * this predicate read the elements with `at()` or `each()`, and they would
+ * read such a collection as empty.
+ *
+ * Some callers do not walk `col` when this predicate is `false`: they keep
+ * `col` as one element instead (`flattenToDepth()` keeps a scalar as a
+ * leaf). Such a caller must not keep a finite collection with no computable
+ * elements as a leaf, because it would give a list with the wrong elements
+ * and the wrong count. It must test for that case itself and decline.
+ */
 export function isFiniteIndexedCollection(col: Expression): boolean {
-  return (col.isFiniteCollection ?? false) && col.isIndexedCollection;
+  return isWalkableFiniteCollection(col) && col.isIndexedCollection;
+}
+
+/**
+ * True when `col` is a finite collection whose elements can be walked.
+ *
+ * A finite collection can know its size and still have no computable
+ * elements. `Linspace(a, 1, 3)` with a symbolic `a` has `count` 3 and
+ * `isFiniteCollection === true`, but its elements are not numbers yet, so it
+ * has no iterator and `isEnumerableCollection === false`. The ring
+ * `QuotientRing(Integers, 5)` (ℤ/5ℤ) is the same: it has 5 elements, but they
+ * are residue classes that the engine does not list. For such a collection
+ * `each()` yields nothing, `at()` returns `undefined` and `tally()` is empty.
+ * A consumer that gates only on `isFiniteCollection` and then walks the
+ * elements reads the collection as EMPTY and gives a wrong answer with no
+ * diagnostic (`Union(Linspace(a, 1, 3), Set(1))` gave `Set(1)`).
+ *
+ * Use this predicate, not `isFiniteCollection`, before a walk of the
+ * elements (`each()`, `tally()`, an `at()` loop, a spread, a
+ * materialization). When it is `false`, the operator must decline (stay
+ * unevaluated). An `isEnumerableCollection` of `undefined` (an eager
+ * collection operator that is not evaluated yet) does not decline: the walk
+ * evaluates the source itself, which is the behavior these consumers always
+ * had.
+ *
+ * A finite collection that is provably empty (`isEmptyCollection === true`)
+ * is always walkable, even if `isEnumerableCollection` is `false`: the walk
+ * yields no elements, and that is the correct answer. `Linspace(a, 1, 0)`
+ * with a symbolic `a` has no elements, so `Union(Linspace(a, 1, 0), Set(1))`
+ * is `Set(1)`.
+ *
+ * `isEmptyCollection` is read only when `isEnumerableCollection` is `false`.
+ * For a lazy view, `isEmptyCollection` can compute the first element: the
+ * `isEmpty` handler of `Filter` applies the predicate until one element
+ * passes. This predicate is called while an expression is canonicalized
+ * (`isFiniteIndexedCollection`, from the argument checks of a numeric
+ * operator), where a predicate over a symbol without a value cannot answer
+ * and throws. With `C := [1, 2, 3]`, the definition
+ * `s(n) := Filter(C, Z ↦ n < |Z|) + s(n - 1)` then did not canonicalize.
+ * A collection that cannot be enumerated (`Linspace(a, 1, 3)`) has no
+ * elements to compute, so its `isEmptyCollection` is read from its count.
+ *
+ * This predicate is different from {@link isEnumerableSource}. This
+ * predicate is cheap: it reads the `isFiniteCollection`,
+ * `isEnumerableCollection` and, for a collection that cannot be enumerated,
+ * `isEmptyCollection` flags, and never evaluates. It accepts an
+ * `isEnumerableCollection` of `undefined`. `isEnumerableSource` evaluates
+ * the source to decide that `undefined` case, so it can tell
+ * `Characters("abc")` from `Characters(s)` with a valueless `s`. Use this
+ * predicate in an evaluate handler, where the operands are already evaluated
+ * and a walk of the source evaluates it again. Use `isEnumerableSource` in a
+ * lazy collection handler, where the source can still be unevaluated and an
+ * incorrect `true` gives an incorrect value.
+ */
+export function isWalkableFiniteCollection(col: Expression): boolean {
+  if (col.isFiniteCollection !== true) return false;
+  if (col.isEnumerableCollection !== false) return true;
+  return col.isEmptyCollection === true;
 }
 
 /**
@@ -232,11 +302,17 @@ export function canEnumerateFiniteSource(
  * finite source at `op1` (`Sort`, `Ordering`, `RandomShuffle`): its result has
  * exactly as many elements as its source.
  *
- * Gated on the source being a definitively FINITE collection, mirroring those
- * operators' evaluate guards: on an infinite or unknown-finiteness source they
- * decline (or error), so there is no result to count and the honest answer is
- * `undefined` — not the source's `Infinity` (Tycho item-169 ruling: a count
- * nobody can walk is worse than no count).
+ * Gated on the source being a definitively FINITE collection, mirroring the
+ * finiteness part of those operators' evaluate guards: on an infinite or
+ * unknown-finiteness source they decline (or error), so there is no result to
+ * count and the honest answer is `undefined` — not the source's `Infinity`
+ * (Tycho item-169 ruling: a count nobody can walk is worse than no count).
+ *
+ * The evaluate guards also require that the elements can be walked
+ * ({@link isWalkableFiniteCollection}), but this handler does not. A count
+ * does not depend on the elements, so the count of a source whose elements
+ * cannot be computed (`Linspace(a, 1, 3)` with a symbolic `a`) is still
+ * correct.
  *
  * Evaluation-free and draw-free: `RandomShuffle` uses it without touching the
  * random stream.
@@ -378,12 +454,15 @@ export function isTupleBroadcastParticipant(x: Expression): boolean {
  * (`zip` treats an undefined count as `1`) — so a broadcast over them must
  * produce the lazy `Map` form. Note that `Filter` reports `isFiniteCollection
  * === true` yet `count === undefined`, so the `count === undefined` clause is
- * load-bearing, not redundant.
+ * load-bearing, not redundant. A finite collection whose elements cannot be
+ * walked (`Linspace(a, 1, 3)` with a symbolic `a`, see
+ * {@link isWalkableFiniteCollection}) is in this class too: it has a count,
+ * but the eager loops would read it as empty.
  */
 export function isUnknownLengthBroadcast(x: Expression): boolean {
   return (
     isBroadcastableCollection(x) &&
-    (x.isFiniteCollection !== true || x.count === undefined)
+    (!isWalkableFiniteCollection(x) || x.count === undefined)
   );
 }
 
@@ -2583,8 +2662,11 @@ export function lazyBroadcastMapIfNeeded(
     if (!isBroadcastOperand(x, k)) continue;
     hasBroadcast = true;
     const c = x.count;
+    // A finite collection whose elements cannot be walked
+    // (`Linspace(a, 1, 3)` with a symbolic `a`) counts as unknown: the eager
+    // zip would read it as empty, so the broadcast takes the lazy form.
     if (
-      x.isFiniteCollection === true &&
+      isWalkableFiniteCollection(x) &&
       typeof c === 'number' &&
       Number.isFinite(c) &&
       c >= 0
@@ -2874,8 +2956,15 @@ export function repeat(
  * A broadcast arm that decides which operands supply cells and then hands the
  * operands to `zip` must therefore gate on THIS predicate, or an operand it
  * meant to lift whole silently supplies cells instead.
+ *
+ * A finite collection whose elements cannot be walked (`QuotientRing(Integers,
+ * 5)`, see {@link isWalkableFiniteCollection}) does not supply cells either:
+ * it would supply none, and the zip would end at once with no rows. It is
+ * lifted whole instead.
  */
 export function zipParticipates(x: Expression): boolean {
+  if (x.isFiniteCollection === true && !isWalkableFiniteCollection(x))
+    return false;
   return x.isCollection && !isTextAtom(x);
 }
 
@@ -2956,6 +3045,20 @@ export function zip(items: ReadonlyArray<Expression>): Iterator<Expression[]> {
   const shortest = Math.min(
     ...items.map((x) => (zipParticipates(x) ? (x.count ?? 1) : Infinity))
   );
+
+  // When no item supplies cells, every item is repeated and the zip would
+  // never end. Yield one row that holds each item whole, as for a single
+  // item that does not supply cells.
+  if (shortest === Infinity) {
+    let done = false;
+    return {
+      next() {
+        if (done) return { done, value: undefined };
+        done = true;
+        return { done: false, value: [...items] };
+      },
+    };
+  }
 
   // If the shortest collection is empty, return an empty iterator
   if (shortest === 0) {
@@ -3163,7 +3266,7 @@ export function collectionSubset(
     // actually holds. Fall through to the elementwise walk.
   }
 
-  if (a.isFiniteCollection !== true) return undefined;
+  if (!isWalkableFiniteCollection(a)) return undefined;
   // Walking an enormous `a` (`Range(1, 10^9)`) would cost more than the answer
   // is worth; leave it undecided rather than spend unbounded time.
   const aSize = a.count;
@@ -3182,6 +3285,7 @@ export function collectionSubset(
   if (strict) {
     // An infinite `b` cannot be exhausted by a finite `a`.
     if (b.isFiniteCollection === false) return true;
+    if (!isWalkableFiniteCollection(b)) return undefined;
     const bSize = b.count;
     if (bSize === undefined || bSize > MAX_SIZE_EAGER_COLLECTION)
       return undefined;
@@ -3270,7 +3374,7 @@ function collectionContains(
   expr: Expression,
   target: Expression
 ): boolean | undefined {
-  if (expr.isFiniteCollection !== true) return undefined;
+  if (!isWalkableFiniteCollection(expr)) return undefined;
 
   // For indexed collections, we can use the indexWhere method
   if (expr.isIndexedCollection)

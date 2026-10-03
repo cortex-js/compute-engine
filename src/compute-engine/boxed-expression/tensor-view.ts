@@ -26,8 +26,11 @@ import type {
   DataTypeMap,
 } from '../global-types.js';
 
+import { Complex } from 'complex-esm';
+
 import { isSubtype } from '../../common/type/subtype.js';
 import {
+  complexCellExpression,
   getExpressionDatatype,
   getSupertype,
   makeTensorField,
@@ -35,6 +38,24 @@ import {
 import { makeTensor } from '../tensor/tensors.js';
 
 import { isFunction, isTensor } from './type-guards.js';
+
+/**
+ * The value of a cell of a packed tensor (a value from `AbstractTensor.at()`
+ * or `flatten()`) as an expression.
+ *
+ * A cell of a `complex128` tensor is a `Complex` computed in doubles: it is
+ * a float, even when both its parts are integers
+ * (`complexCellExpression()`). `ce.expr()` of a `Complex` would make such a
+ * value exact, as it does for a value from the host. Any other cell (a
+ * double, a boolean, an expression) is boxed by `ce.expr()`.
+ */
+export function tensorCellExpression(
+  ce: ComputeEngine,
+  cell: unknown
+): Expression {
+  if (cell instanceof Complex) return complexCellExpression(ce, cell);
+  return ce.expr(cell as Parameters<ComputeEngine['expr']>[0]);
+}
 
 /**
  * O(rank) candidate shape: descend the first-child chain of literal `List`

@@ -675,30 +675,35 @@ describe('COMPLEX RESULTS WITH A SMALL MODULUS', () => {
       expectComplex(v, re, im);
     });
 
-    test('dust is removed when it is small compared with the modulus', () => {
+    test('a part whose value is 0 is exactly 0', () => {
       expect(e.parse('i^2').N().toString()).toBe('-1');
       expect(e.parse('\\sqrt{-4}').N().toString()).toBe('2i');
       expect(e.parse('(2i)^2').N().toString()).toBe('-4');
       expectComplex(e._numericValue({ re: 0, im: 1.5 }).pow(3), 0, -3.375);
-      // π at the working precision of the engine: `e^{iπ}` is `-1`, and the
-      // imaginary part (about 10^{-precision}) is rounding noise.
+      // π at the working precision of the engine, a float. At the default
+      // precision the big-decimal kernel removes a part below
+      // 10^(2−precision) times the modulus, and `e^{iπ}` is `-1`. At machine
+      // precision no part is removed: the value is `-1 + sin(Math.PI)·i`,
+      // the value at that double (an exact `e^{iπ}` is reduced exactly
+      // before it becomes a float, and is `-1`).
       const pi = e.symbol('Pi').N();
       expectComplex(
         e._numericValue({ re: 0, im: pi.bignumRe ?? pi.re }).exp(),
         -1,
-        0
+        engineName === 'machine precision' ? Math.sin(Math.PI) : 0
       );
     });
 
     // `Math.PI` is the decimal 3.141592653589793, which is π − 2.38·10^{-16}.
-    // At machine precision, sin of it is rounding noise and is removed. At
-    // the default precision (21 digits) the big-decimal kernel computes
-    // sin(3.141592653589793) = 2.38462643383279502884·10^{-16} (Python
-    // `mpmath`), which is not noise at 21 digits, so it is kept: the noise
-    // ratio is 10^(2−precision), not the 10^{-14} of a double.
+    // At machine precision, `e^{i·Math.PI}` is computed with the double
+    // `Math.PI`, whose sine is `1.2246467991473532e-16`, and the part is
+    // kept. At the default precision (21 digits) the big-decimal kernel
+    // reads the decimal and computes sin(3.141592653589793) =
+    // 2.38462643383279502884·10^{-16} (Python `mpmath`).
     test('e^{i·3.141592653589793}', () => {
       const r = e._numericValue({ re: 0, im: Math.PI }).exp();
-      if (engineName === 'machine precision') expectComplex(r, -1, 0);
+      if (engineName === 'machine precision')
+        expectComplex(r, -1, Math.sin(Math.PI));
       else expectComplex(r, -1, 2.384626433832795e-16);
     });
 
@@ -917,21 +922,20 @@ describe('EXACT IMAGINARY PART OUTSIDE THE FLOAT64 RANGE', () => {
     } else throw new Error('expected a numeric value');
   });
 
-  // §2.2, `_liftComplex`: an inexact complex value with integer parts is
-  // lifted to an exact value when it meets an exact value. A double cannot
-  // hold `10^{-800}i`, so the inexact imaginary part is tested with `0.5i`
-  // (not an integer: no lift) and `2i` (an integer: lift). The real part,
-  // which can be a big decimal, is tested with `10^{-800}`, whose double
-  // projection is the integer `0`: it must not be lifted to an exact zero.
-  test('only a Gaussian integer is lifted to an exact value', () => {
+  // §2.2: an inexact complex value makes a product or a sum with an exact
+  // value inexact, also when its parts are integers (`2i` held as a float).
+  // It was lifted to an exact value when its parts were integers. The real
+  // part, which can be a big decimal, is tested with `10^{-800}`, whose
+  // double projection is the integer `0`: it must not become an exact zero.
+  test('an inexact complex value is never lifted to an exact value', () => {
     const third = ce._numericValue({ rational: [1, 3] });
     const half = third.mul(ce._numericValue({ re: 0, im: 0.5 }));
     expect(half.isExact).toBe(false);
     expect(half.im).toBeCloseTo(1 / 6, 15);
 
     const two = third.mul(ce._numericValue({ re: 0, im: 2 }));
-    expect(two.isExact).toBe(true);
-    expect(two.toString()).toBe('2/3i');
+    expect(two.isExact).toBe(false);
+    expect(two.im).toBeCloseTo(2 / 3, 15);
 
     const tinyRe = ce._numericValue({ re: new BigDecimal('1e-800'), im: 2 });
     expect(tinyRe.re).toBe(0);
@@ -1020,18 +1024,18 @@ describe('EXACT IMAGINARY PART OUTSIDE THE FLOAT64 RANGE', () => {
     }
   });
 
-  // `ExactNumericValue.sum` treats an inexact Gaussian integer as exact, and
-  // decides this with `isGaussianInteger()`, the rule `_liftComplex` uses.
+  // `ExactNumericValue.sum` treats an inexact complex value as inexact, also
+  // when its parts are integers (it was read as an exact Gaussian integer).
   // A real part too small for a double (`10^{-800}`, projection 0) does not
   // make the value a Gaussian integer.
-  test('the exact sum treats only a Gaussian integer as exact', () => {
+  test('the exact sum treats an inexact Gaussian integer as inexact', () => {
     const half = ce._numericValue({ rational: [1, 2] });
     const [gauss] = ExactNumericValue.sum(
       [half, ce._numericValue({ re: 0, im: 3 })],
       (x) => ce._numericValue(x)
     ).filter((x) => !x.isZero);
-    expect(gauss.isExact).toBe(true);
-    expect(gauss.toString()).toBe('(1/2 + 3i)');
+    expect(gauss.isExact).toBe(false);
+    expect(gauss.toString()).toBe('(0.5 + 3i)');
 
     const tinyRe = ce._numericValue({ re: ce.bignum('1e-800'), im: 3 });
     expect(isGaussianInteger(tinyRe)).toBe(false);

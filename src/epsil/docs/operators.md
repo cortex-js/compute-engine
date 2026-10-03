@@ -739,7 +739,7 @@ logical implication: it is the mapsto arrow (see
 
 Three spellings, two meanings:
 
-- **`:=` always assigns.**
+- **`:=` always assigns.** It never compares.
 - **`==` always compares** (and `===` is `Same`, structural identity).
   A third comparison tier asks the prover whether the two sides are equal
   for **every** value of their free variables:
@@ -776,7 +776,12 @@ As a comparison, `=` binds at the relational tier (60) like `==`, so
 `if x = 5 && y` groups as `(x = 5) && y`. As an assignment it binds loosest
 (10), taking the whole right-hand side.
 
-Two consequences worth knowing:
+Three consequences worth knowing:
+
+**A function head defines the function.** As a statement, `f(x) = body`
+defines the function `f`, and `f(x) := body` is the same definition. This also
+applies to typed parameters, a return type and literal-pattern clauses
+(`f(0) := 1`).
 
 **A non-binding left side compares, even as a statement.** `x^2 = 4` on its own
 line is the equation, because `x^2` is not a name. A bare name always assigns,

@@ -6,7 +6,12 @@ import type { LatexString } from '../latex-syntax/types.js';
 
 import { apply } from './apply.js';
 
-import { bignumPreferred, boxBignumResult, canonicalAngle } from './utils.js';
+import {
+  bignumPreferred,
+  boxBignumResult,
+  canonicalAngle,
+  getImaginaryFactor,
+} from './utils.js';
 
 import type {
   AngularUnit,
@@ -17,11 +22,7 @@ import type {
 import { asLatexString } from '../latex-syntax/utils.js';
 import { parse as parseLatex } from '../latex-syntax/latex-syntax.js';
 import { isNumber, isSymbol, isFunction } from './type-guards.js';
-import {
-  chop,
-  isMachineTrigPole,
-  ROUNDOFF_TOLERANCE,
-} from '../numerics/numeric.js';
+import { isMachineTrigPole } from '../numerics/numeric.js';
 import { gcd as bigGcd } from '../numerics/numeric-bigint.js';
 import {
   complexAcos,
@@ -37,8 +38,13 @@ import {
   complexAtan,
   complexAtanh,
   complexInverse,
+  cosSinPiRational,
+  reduceHalfTurns,
 } from '../numerics/numeric-complex.js';
 import { asRational } from './numerics.js';
+import { isRealPartZero } from './imaginary-part.js';
+import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
+import { isZero as isZeroRational } from '../numerics/rationals.js';
 import {
   type InverseTrigHead,
   complexInverseTrig,
@@ -411,8 +417,17 @@ function integerPartDigits([p, q]: BigRational): number {
  * multiple of π is `2` or more in magnitude, or when the rational part has an
  * integer part of 3 digits or more (an integer only when it has more digits
  * than the working precision: a shorter integer is exact at that precision).
+ * With `anyMultiple`, it also applies to an angle with any nonzero multiple
+ * of π: at machine precision `applyAngle` uses it so that `sin(π)`,
+ * `cos(π/2)` and `cos(2π/3)` are computed from the exact angle, which the
+ * big-decimal kernel and `chopBignumDust` reduce to `0`, `0` and `−0.5`,
+ * where the double `Math.PI` gives `1.2·10⁻¹⁶`, `6.1·10⁻¹⁷` and
+ * `−0.4999999999999998`.
  */
-function exactLargeAngle(raw: Expression): BigDecimal | undefined {
+function exactLargeAngle(
+  raw: Expression,
+  anyMultiple = false
+): BigDecimal | undefined {
   const ce = raw.engine;
   if (raw.unknowns.length > 0) return undefined;
   const parts = exactAngleParts(raw);
@@ -482,7 +497,8 @@ function exactLargeAngle(raw: Expression): BigDecimal | undefined {
   const largeMultiple = (cp < 0n ? -cp : cp) >= 2n * cq;
   const tDigits = integerPartDigits(t);
   const largeRational = tq === 1n ? tDigits > ce.precision : tDigits >= 3;
-  if (!largeMultiple && !largeRational) return undefined;
+  if (!largeMultiple && !largeRational && !(anyMultiple && cp !== 0n))
+    return undefined;
 
   // (cp/cq)·π modulo 2π is ((cp mod 2cq)/cq)·π exactly
   const cReduced = cp % (2n * cq);
@@ -527,13 +543,17 @@ function applyAngle(
       let r: BigDecimal | Complex | number | Expression | undefined;
       try {
         BigDecimal.precision = Math.max(saved, 20);
-        const big = exactLargeAngle(raw);
+        const big = exactLargeAngle(raw, true);
         if (big !== undefined) r = bigFn(big);
       } finally {
         BigDecimal.precision = saved;
       }
-      if (r instanceof BigDecimal) return ce.number(r.toNumber());
-      if (typeof r === 'number') return ce.number(r);
+      // The value is a float, as a value of `.N()` is, even when it is an
+      // integer: `sin(π)` is the float `0`.
+      if (r instanceof BigDecimal)
+        return ce.number(ce._inexactNumericValue(r.toNumber() || 0));
+      if (typeof r === 'number')
+        return ce.number(ce._inexactNumericValue(r || 0));
       if (r !== undefined && !(r instanceof Complex)) return r;
     }
   }
@@ -620,10 +640,14 @@ export function radiansToAngle(
   // The unit conversion is linear, so it applies to the whole complex value:
   // reading only `.re` silently returned a wrong REAL angle for a complex
   // one (`arcsin(2.5)` in deg mode gave `90`, dropping the imaginary part).
-  // A dust-sized imaginary part (kernel roundoff, not `ce.tolerance`) chops
-  // to the real path.
-  if (!Number.isNaN(n.im) && chop(n.im, ROUNDOFF_TOLERANCE) !== 0)
-    return ce.number(ce.complex(theta * scale, n.im * scale));
+  // No part is removed: the inverse kernels give an exact zero imaginary
+  // part on their real domain, and a small one is the value
+  // (`arcsin(10^{-200}i)` in degrees is `5.7·10^{-199}i`; it was `0`).
+  if (!Number.isNaN(n.im) && n.im !== 0)
+    // A converted angle is a float, even when both its parts are integers
+    return ce.number(
+      ce._inexactNumericValue({ re: theta * scale, im: n.im * scale })
+    );
   return ce.number(theta * scale);
 }
 
@@ -1148,6 +1172,11 @@ export function evalTrig(
 ): Expression | undefined {
   if (!op) return undefined;
   const ce = op.engine;
+
+  const exact =
+    hyperbolicOfImaginaryAngle(name, raw) ??
+    circularOfExactAngle(ce, name, raw);
+  if (exact !== undefined) return exact;
 
   switch (name) {
     case 'Arccos':
@@ -2032,4 +2061,372 @@ export function arctan2AtInfinity(
   if (y.isPositive === true) return halfTurn.div(2);
   if (y.isNegative === true) return halfTurn.div(-2);
   return undefined;
+}
+
+/**
+ * The angle `raw` in half-turns, as an exact rational `[p, q]` with `q > 0`:
+ * - in radians, an exact rational multiple of π with no other term
+ *   (`2π/3` is `[2, 3]`, `10^{20}π` is `[10^{20}, 1]`);
+ * - in another angular unit, an exact rational number of units (`30`
+ *   degrees is `[1, 6]`).
+ * The angle is read by `exactAngleParts`, so a large multiple is exact.
+ * Returns `undefined` for any other angle, and for an angle with an unknown.
+ */
+export function exactHalfTurns(
+  raw: Expression,
+  unit: AngularUnit = raw.engine.angularUnit
+): BigRational | undefined {
+  if (cannotBeExactAngle(raw, unit === 'rad')) return undefined;
+  if (raw.unknowns.length > 0) return undefined;
+  const parts = exactAngleParts(raw);
+  if (!parts) return undefined;
+  const [c, t] = parts;
+  if (unit === 'rad') return t[0] === 0n ? reduceRational(c) : undefined;
+  if (c[0] !== 0n) return undefined;
+  if (unit === 'deg') return reduceRational([t[0], t[1] * 180n]);
+  if (unit === 'grad') return reduceRational([t[0], t[1] * 200n]);
+  if (unit === 'turn') return reduceRational([2n * t[0], t[1]]);
+  return undefined;
+}
+
+/** The rational `p/q` with a positive denominator and no common factor. */
+function reduceRational([p, q]: BigRational): BigRational {
+  if (q < 0n) [p, q] = [-p, -q];
+  const g = bigGcd(p < 0n ? -p : p, q);
+  return g > 1n ? [p / g, q / g] : [p, q];
+}
+
+/** The operators that `exactAngleParts` reads. */
+const EXACT_ANGLE_OPERATORS = new Set([
+  'Negate',
+  'Add',
+  'Multiply',
+  'Divide',
+  'Power',
+]);
+
+/**
+ * `true` when `exactHalfTurns` of `x` is certainly `undefined`, found without
+ * an allocation, so that an ordinary angle (`sin(2)`, `sin(1/3)`, `sin(√2)`)
+ * is rejected at a low cost:
+ * - a node that `exactAngleParts` does not read: a float, an operator
+ *   other than `Negate`, `Add`, `Multiply`, `Divide` and `Power`, or one of
+ *   these with a wrong number of operands. `exactAngleParts` gives
+ *   `undefined` for the whole angle when any node gives `undefined`;
+ * - in radians (`radians` is `true`), a number literal that is not zero:
+ *   it has no π term, and a nonzero rational part is not a multiple of π.
+ * A symbol can hold a value, so it is not rejected. `false` means that the
+ * full reading is necessary.
+ */
+function cannotBeExactAngle(
+  x: Expression,
+  radians: boolean,
+  depth = 0
+): boolean {
+  if (isNumber(x)) {
+    if (x.isExact !== true) return true;
+    if (!radians) return false;
+    const nv = x.numericValue;
+    return typeof nv === 'number' ? nv !== 0 : !nv.isZero;
+  }
+  if (!isFunction(x)) return false;
+  const op = x.operator;
+  if (!EXACT_ANGLE_OPERATORS.has(op)) return true;
+  const n = x.nops;
+  if (
+    op === 'Negate' ? n !== 1 : (op === 'Divide' || op === 'Power') && n !== 2
+  )
+    return true;
+  // `exactAngleParts` stops at depth 16. Below that, this check gives `false`.
+  if (depth >= 16) return false;
+  for (const operand of x.ops)
+    if (cannotBeExactAngle(operand, false, depth + 1)) return true;
+  return false;
+}
+
+/**
+ * The exact angle `θ` in half-turns for an operand `i·θ` of `e^{iθ}` or of
+ * a hyperbolic function, read from the structure of `raw` without building
+ * an expression. The result is the result of `exactHalfTurns` in radians of
+ * the imaginary factor of `raw` (`getImaginaryFactor`):
+ * - a rational `[p, q]`: `raw` is `i·(p/q)·π`, as the product of an exact
+ *   imaginary rational literal, `π` and exact rational literals (the
+ *   canonical form of `iπ/7` is `Multiply(Complex(0, 1/7), Pi)`);
+ * - `undefined`: the slower route also gives `undefined`. This is the case
+ *   for a number literal that is not zero, a number literal with a nonzero
+ *   real part, and a product of rationals and `i` with no `π`;
+ * - `null`: this function cannot decide. The caller then uses
+ *   `getImaginaryFactor` and `exactHalfTurns`.
+ */
+export function imaginaryHalfTurns(
+  raw: Expression
+): BigRational | undefined | null {
+  if (isNumber(raw)) {
+    const nv = raw.numericValue;
+    // `getImaginaryFactor` gives `undefined` for a nonzero real part. A
+    // nonzero imaginary part is a factor with no π term, and only the
+    // zero angle is a multiple of π.
+    if (!isRealPartZero(nv)) return undefined;
+    if (typeof nv !== 'number' && nv.im !== 0) return undefined;
+    return null;
+  }
+  if (!isFunction(raw, 'Multiply')) return null;
+  let imaginary: BigRational | undefined;
+  let piCount = 0;
+  let p = 1n;
+  let q = 1n;
+  for (const op of raw.ops) {
+    if (isSymbol(op, 'Pi')) {
+      piCount += 1;
+      continue;
+    }
+    if (!isNumber(op) || op.isExact !== true) return null;
+    const nv = op.numericValue;
+    let r: BigRational;
+    if (typeof nv === 'number') {
+      // An integer: a real factor
+      if (!Number.isInteger(nv) || nv === 0) return null;
+      r = [BigInt(nv), 1n];
+    } else {
+      if (!(nv instanceof ExactNumericValue) || nv.radical !== 1) return null;
+      if (isZeroRational(nv.rational)) {
+        // An imaginary factor `bi`, with `b` an exact nonzero rational
+        if (!op.isComplex || nv.imRadical !== 1) return null;
+        if (imaginary !== undefined) return null;
+        imaginary = [BigInt(nv.imRational[0]), BigInt(nv.imRational[1])];
+        if (imaginary[0] === 0n) return null;
+        r = imaginary;
+      } else {
+        // A real factor: an exact nonzero rational
+        if (nv.isComplex) return null;
+        r = [BigInt(nv.rational[0]), BigInt(nv.rational[1])];
+      }
+    }
+    p *= r[0];
+    q *= r[1];
+  }
+  if (imaginary === undefined || piCount > 1) return null;
+  // With no π, `θ` is a nonzero rational: not a multiple of π.
+  if (piCount === 0) return undefined;
+  return reduceRational([p, q]);
+}
+
+/**
+ * `cos(πp/q)` and `sin(πp/q)` for an exact rational `p/q`: doubles at
+ * machine precision (`cosSinPiRational()`), big decimals at the working
+ * precision above it. The angle is reduced with bigints to `n·(π/2) + t·π`
+ * with `|t| ≤ 1/4`, so any multiple of π is exact, and at `t = 0`, `±1/4` and
+ * `±1/6` the value is computed from `1`, `√2/2`, `√3/2` and `1/2`: `cos(π/2)`
+ * is `0` and `cos(2π/3)` is `−0.5`, with no rounding of π.
+ */
+function cosSinHalfTurns(
+  ce: ComputeEngine,
+  [p, q]: BigRational,
+  /** The values that the caller reads. A big-decimal value that is not
+   * read is not computed, and is `0` in the result. */
+  need: 'cos' | 'sin' | 'both' = 'both'
+): [number, number] | [BigDecimal, BigDecimal] {
+  if (!bignumPreferred(ce)) return cosSinPiRational(p, q);
+  const {
+    n,
+    t: [tn, td],
+  } = reduceHalfTurns(p, q);
+  const at = tn < 0n ? -tn : tn;
+  // The cosine of `t·π` gives the value read when `need` is `cos` and `n` is
+  // even, or `need` is `sin` and `n` is odd: `cos(nπ/2 + tπ)` and
+  // `sin(nπ/2 + tπ)` are `±cos(tπ)` or `±sin(tπ)`.
+  const odd = n === 1 || n === 3;
+  const needC = need === 'both' || (need === 'cos') !== odd;
+  const needS = need === 'both' || (need === 'sin') !== odd;
+  let c: BigDecimal = BigDecimal.ZERO;
+  let s: BigDecimal = BigDecimal.ZERO;
+  if (tn === 0n) {
+    c = BigDecimal.ONE;
+    s = BigDecimal.ZERO;
+  } else if (at * 4n === td) {
+    c = BigDecimal.TWO.sqrt().div(BigDecimal.TWO);
+    s = tn < 0n ? c.neg() : c;
+  } else if (at * 6n === td) {
+    if (needC) c = new BigDecimal(3).sqrt().div(BigDecimal.TWO);
+    s = tn < 0n ? BigDecimal.HALF.neg() : BigDecimal.HALF;
+  } else {
+    const angle = BigDecimal.PI.mul(new BigDecimal(tn)).div(new BigDecimal(td));
+    if (needC) c = angle.cos();
+    if (needS) s = angle.sin();
+  }
+  if (n === 0) return [c, s];
+  if (n === 1) return [s.neg(), c];
+  if (n === 2) return [c.neg(), s.neg()];
+  return [s, c.neg()];
+}
+
+/** A zero of either kind of number. */
+function isZeroPart(x: number | BigDecimal): boolean {
+  return typeof x === 'number' ? x === 0 : x.isZero();
+}
+
+/** `−x` and `1/x` for a double or a big decimal. */
+function negPart(x: number | BigDecimal): number | BigDecimal {
+  return typeof x === 'number' ? -x : x.neg();
+}
+function divPart(
+  a: number | BigDecimal,
+  b: number | BigDecimal
+): number | BigDecimal {
+  if (typeof a === 'number' && typeof b === 'number') return a / b;
+  const big = (x: number | BigDecimal) =>
+    typeof x === 'number' ? new BigDecimal(x) : x;
+  return big(a).div(big(b));
+}
+
+/** Box a complex value whose parts are doubles or big decimals, as a float. */
+function boxParts(
+  ce: ComputeEngine,
+  re: number | BigDecimal,
+  im: number | BigDecimal
+): Expression {
+  return ce.number(
+    ce._inexactNumericValue({
+      re: isZeroPart(re) ? 0 : re,
+      im: isZeroPart(im) ? 0 : im,
+    })
+  );
+}
+
+/**
+ * The numeric value of `e^{iθ}`, `cos θ + i·sin θ`, as a float, when `θ` is
+ * an exact rational multiple of π (`exactHalfTurns` in radians): `e^{iπ}` is
+ * `−1`, `e^{2iπ/3}` is `−0.5 + 0.866i`, `e^{i·10^{20}π}` is `1`. Returns
+ * `undefined` for any other `θ`.
+ */
+export function exactUnitCircle(theta: Expression): Expression | undefined {
+  const turns = exactHalfTurns(theta, 'rad');
+  if (turns === undefined) return undefined;
+  return unitCircleOfHalfTurns(theta.engine, turns);
+}
+
+/** `e^{iπp/q}`, `cos(πp/q) + i·sin(πp/q)`, as a float. */
+export function unitCircleOfHalfTurns(
+  ce: ComputeEngine,
+  turns: BigRational
+): Expression {
+  const [c, s] = cosSinHalfTurns(ce, turns);
+  return boxParts(ce, c, s);
+}
+
+/** The circular functions that `circularOfExactAngle` computes. */
+const CIRCULAR_HEADS = new Set(['Sin', 'Cos', 'Tan', 'Cot', 'Sec', 'Csc']);
+
+/**
+ * At machine precision, the value of a circular function of an exact angle
+ * that is a rational number of half-turns (`exactHalfTurns`): `sin(π)` is
+ * `0`, `cos(2π/3)` is `−0.5`, `tan(π/2)` is `~oo`. The angle is reduced with
+ * bigints and the value computed in doubles (`cosSinPiRational()`), with no
+ * big-decimal kernel. Returns `undefined` for any other function or angle.
+ */
+function circularOfExactAngle(
+  ce: ComputeEngine,
+  name: string,
+  raw: Expression | undefined
+): Expression | undefined {
+  if (raw === undefined || !CIRCULAR_HEADS.has(name) || bignumPreferred(ce))
+    return undefined;
+  if (!(raw.isCanonical || raw.isStructural)) return undefined;
+  const turns = exactHalfTurns(raw);
+  if (turns === undefined) return undefined;
+  const [c, s] = cosSinPiRational(turns[0], turns[1]);
+  let v: number;
+  switch (name) {
+    case 'Sin':
+      v = s;
+      break;
+    case 'Cos':
+      v = c;
+      break;
+    case 'Tan':
+      if (c === 0) return ce.ComplexInfinity;
+      v = s / c;
+      break;
+    case 'Cot':
+      if (s === 0) return ce.ComplexInfinity;
+      v = c / s;
+      break;
+    case 'Sec':
+      if (c === 0) return ce.ComplexInfinity;
+      v = 1 / c;
+      break;
+    default:
+      if (s === 0) return ce.ComplexInfinity;
+      v = 1 / s;
+  }
+  return ce.number(ce._inexactNumericValue(v === 0 ? 0 : v));
+}
+
+/**
+ * The value of a hyperbolic function of `i·θ` from the circular functions
+ * of `θ`, as `[re, im]`, or `'pole'`: `sinh(iθ) = i·sin θ`,
+ * `cosh(iθ) = cos θ`, `tanh(iθ) = i·tan θ`, `csch(iθ) = −i·csc θ`,
+ * `sech(iθ) = sec θ`, `coth(iθ) = −i·cot θ`.
+ */
+const HYPERBOLIC_OF_IMAGINARY: Record<
+  string,
+  (
+    c: number | BigDecimal,
+    s: number | BigDecimal
+  ) => [number | BigDecimal, number | BigDecimal] | 'pole'
+> = {
+  Sinh: (_c, s) => [0, s],
+  Cosh: (c) => [c, 0],
+  Tanh: (c, s) => (isZeroPart(c) ? 'pole' : [0, divPart(s, c)]),
+  Csch: (_c, s) => (isZeroPart(s) ? 'pole' : [0, negPart(divPart(1, s))]),
+  Sech: (c) => (isZeroPart(c) ? 'pole' : [divPart(1, c), 0]),
+  Coth: (c, s) => (isZeroPart(s) ? 'pole' : [0, negPart(divPart(c, s))]),
+};
+
+/** The circular functions of `θ` that each entry of
+ * `HYPERBOLIC_OF_IMAGINARY` reads. */
+const HYPERBOLIC_OF_IMAGINARY_NEEDS: Record<string, 'cos' | 'sin' | 'both'> = {
+  Sinh: 'sin',
+  Cosh: 'cos',
+  Tanh: 'both',
+  Csch: 'sin',
+  Sech: 'cos',
+  Coth: 'both',
+};
+
+/**
+ * The numeric value of a hyperbolic function of `i·θ`, with `θ` an EXACT
+ * rational multiple of π (`exactHalfTurns` in radians), from the circular
+ * functions of the exact angle (`HYPERBOLIC_OF_IMAGINARY`): `sinh(iπ)` and
+ * `cosh(iπ/2)` are `0`, and `tanh(iπ/2)`, `coth(iπ)`, `csch(iπ)` and
+ * `sech(iπ/2)` are `~oo`. The complex kernel at the double nearest to `iπ`
+ * gave `1.2·10⁻¹⁶i` and `6.1·10⁻¹⁷` for the first two, `NaN` and very large
+ * values for the poles. `raw` is the operand before its numeric evaluation.
+ * Returns `undefined` for any other function or operand.
+ */
+function hyperbolicOfImaginaryAngle(
+  name: string,
+  raw: Expression | undefined
+): Expression | undefined {
+  const value = HYPERBOLIC_OF_IMAGINARY[name];
+  if (value === undefined || raw === undefined) return undefined;
+  if (!(raw.isCanonical || raw.isStructural)) return undefined;
+  // The structure is read first, with no expression built
+  // (`imaginaryHalfTurns`); `null` means it could not decide.
+  let turns = imaginaryHalfTurns(raw);
+  if (turns === null) {
+    const theta = getImaginaryFactor(raw);
+    if (theta === undefined) return undefined;
+    turns = exactHalfTurns(theta, 'rad');
+  }
+  if (turns === undefined) return undefined;
+  const ce = raw.engine;
+  const [c, s] = cosSinHalfTurns(
+    ce,
+    turns,
+    HYPERBOLIC_OF_IMAGINARY_NEEDS[name]
+  );
+  const result = value(c, s);
+  if (result === 'pole') return ce.ComplexInfinity;
+  return boxParts(ce, result[0], result[1]);
 }

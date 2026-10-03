@@ -10,10 +10,29 @@ import {
   reducedRational,
 } from '../numerics/rationals.js';
 import type { Rational } from '../numerics/types.js';
+import {
+  COINCIDENCE_BUDGET,
+  realPowerBranchTerms,
+  realPowerReconstructionDigits,
+} from '../numerics/real-power.js';
+
+// Engine-free, so the standalone JavaScript runtime shares it.
+export {
+  COINCIDENCE_BUDGET,
+  realPowerBranchTerms,
+  realPowerReconstructionDigits,
+};
 
 import { asRational } from './numerics.js';
 import { bignumPreferred, getImaginaryFactor } from './utils.js';
-import { halfTurnAngle, halfTurns, radiansToAngle } from './trigonometry.js';
+import {
+  exactUnitCircle,
+  halfTurnAngle,
+  halfTurns,
+  imaginaryHalfTurns,
+  radiansToAngle,
+  unitCircleOfHalfTurns,
+} from './trigonometry.js';
 import {
   apply,
   apply2,
@@ -28,10 +47,9 @@ import {
   indeterminateFormAnswer,
   numericValue,
 } from './type-guards.js';
-import { realExponentValue, isGaussianIntegerValue } from './imaginary-part.js';
-import { isGaussianInteger } from '../numeric-value/gaussian-integer.js';
+import { realExponentValue } from './imaginary-part.js';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
-import { chopComplexDust } from '../numeric-value/roundoff.js';
+import { complexPow } from '../numerics/numeric-complex.js';
 import { asFloat, hasFloatOperand } from './float-result.js';
 
 /** Is the expression statically a MATRIX — a shape decision, so the bottom
@@ -194,191 +212,6 @@ function maximalPerfectPower(
       return { base, exponent };
   }
   return undefined;
-}
-
-/**
- * Ceiling on the expected number of reduced rationals with denominator ≤ `q`
- * inside `realPowerBranchTerms`' admission window — i.e. the odds that a
- * reconstruction is a coincidence rather than the rational the double was
- * rounded from. See `realPowerBranchTerms`.
- */
-const COINCIDENCE_BUDGET = 1e-4;
-
-/** A `Rational` term as an exact integer, or `undefined` if it is not one. */
-function asBigInteger(n: number | bigint): bigint | undefined {
-  if (typeof n === 'bigint') return n;
-  return Number.isInteger(n) ? BigInt(n) : undefined;
-}
-
-/**
- * `n` as a double with the SAME PARITY — which is the only property of these
- * terms the branch decision reads (an odd `q` is the real branch, an odd `p`
- * its negative sign).
- *
- * Parity and magnitude cannot both survive the narrowing: EVERY double at or
- * above 2^53 is an even integer, so an odd term that large has no faithful
- * double at all. `Number(66052794534767279n)` is `…280`, which turned an odd
- * numerator even and — for the denominator — reported a real value complex.
- * Parity wins; a term that big is returned as a same-signed, same-parity
- * sentinel instead. Nothing downstream reads the magnitude except the compiled
- * fold's root-then-power split, which is gated at 64 and so declines the
- * sentinel exactly as it would decline the true term.
- */
-function parityFaithful(n: bigint): number {
-  const v = Number(n);
-  // Safe range: the narrowing is exact, parity included.
-  if (Number.isSafeInteger(v)) return v;
-  const isOdd = n % 2n !== 0n;
-  // Above the safe range every double is even, so an even term still narrows
-  // faithfully — unless it overflows to Infinity, whose parity is NaN.
-  if (!isOdd && Number.isFinite(v)) return v;
-  const sentinel = isOdd
-    ? Number.MAX_SAFE_INTEGER
-    : Number.MAX_SAFE_INTEGER - 1;
-  return n < 0n ? -sentinel : sentinel;
-}
-
-/**
- * The reduced terms `[p, q]` of a real exponent, for deciding the branch of a
- * NEGATIVE base — or `undefined` when no faithful rational is available.
- *
- * CE's convention: `p/q` in lowest terms with an **odd** `q` has a real
- * principal value (`(−8)^(2/3) = 4`, matching `Root(−8, 3) = −2`); an even `q`
- * — or an exponent that is not a rational at all — takes the principal complex
- * value.
- *
- * The decision is made from the EXACT rational whenever the caller has one.
- * Recovering `p/q` from the double instead is not equivalent: `100/3` rounds to
- * a double whose continued-fraction expansion terminates at the dyadic
- * `4691249611844267/140737488355328`, whose denominator is EVEN — so a
- * float-first decision reports `(−2)^(100/3)` complex even though the exact
- * exponent has an odd denominator and the value is real.
- *
- * When only the double is available — under `.N()` the exponent reaches the
- * numeric path already numericized — the reconstruction is given a tolerance
- * scaled to the precision the double was PRODUCED at, so a double that IS an
- * exact rational rounded at that precision recovers that rational
- * (`33.333333333333336` → `100/3`) while a genuine decimal (`0.3333333333`)
- * stays at its own, far-from-`1/3`, terms. That keeps the two routes — and the
- * compiled constant fold, which shares this helper — deciding the same branch
- * for the same node.
- *
- * The window is scaled to `BigDecimal.precision` — the PROCESS-GLOBAL working
- * precision, which is the value that actually governed the rounding, NOT the
- * `precision` of whichever engine happens to be asking. The two diverge,
- * because constructing any engine writes the global: create a default engine
- * and THEN a machine one, and the first still reports `precision` 21 while its
- * `.N()` now rounds at 15. Sizing the window off the engine then computed a
- * 17-digit tolerance for a 15-digit double, lost the reconstruction, and
- * resurrected the exact bug this helper exists to fix — with the outcome
- * depending on engine CREATION ORDER. Reading the global also makes every lane
- * agree by construction, since there is only one of it.
- *
- * Precision matters because numericizing an exact rational rounds to that many
- * digits BEFORE the double is formed: at precision 15, `100/3` becomes
- * `33.3333333333333`, which is ~1.5e5 ulp from `100/3` and reconstructs to
- * `335089257988833/10052677739665` — an ODD denominator with an ODD numerator,
- * so `(−2)^(100/3)` came out NEGATIVE where a correctly-rounded double returns
- * the correct positive value. A tolerance of one unit in the last KEPT digit
- * absorbs that rounding; it never shrinks below the 4-ulp floor, so a lane at
- * precision ≥ 17 is unaffected.
- *
- * Closeness alone is NOT enough to accept a reconstruction, at ANY tolerance.
- * Every irrational has continued-fraction convergents with `|x − p/q| ~ 1/q²`,
- * so once `q` grows past `1/√tol` SOME convergent falls inside the window: `π`
- * lands on `5419351/1725033` (odd `q` ⇒ real branch) and `√2` on
- * `9369319/6625109`, which is how `(−2)^π` and `(−2)^(√2)` used to come back
- * REAL. Widening or narrowing the tolerance only moves which convergent is
- * picked — and, because the two lanes use different tolerances, makes them
- * disagree.
- *
- * So the reconstruction must also be UNLIKELY TO BE A COINCIDENCE. The reduced
- * rationals with denominator ≤ q have density `(6/π²)·q²` per unit length, so
- * the expected number of them inside the `±tol` admission window is
- * `(6/π²)·q²·(2·tol)`. Requiring that expectation to stay under
- * `COINCIDENCE_BUDGET` (1e-4) caps `q` at `~0.009/√tol`. The same cap subsumes
- * Legendre uniqueness (`2·tol·q² < 1`), which by itself is ~10⁴ times too
- * permissive to separate the two populations.
- *
- * What that criterion guarantees is a coincidence RATE, and it is worth stating
- * without varnish in both directions:
- *
- * - It is not a proof of irrationality. `COINCIDENCE_BUDGET` is an upper bound
- *   on a rate that is genuinely spent: ~5e-5 of arbitrary doubles drawn from
- *   (0, 10) still reconstruct to something, ~3e-5 of them onto the REAL branch,
- *   at denominators of 1e4–7e5. Those ARE accepted coincidences sitting just
- *   under budget. The criterion buys ~10⁴:1 odds per query, not impossibility.
- * - It is not exhaustive for rationals either. A `p/q` is recoverable from its
- *   double only while `q ≲ 0.009/√tol` — for `|value| ≈ 1` that is ~9e4 at 15
- *   digits and ~3e5 at 17 (the cap loosens as `1/√|value|`, since `tol` is
- *   relative). That covers the terms a `.N()` round-trip realistically carries,
- *   but genuine odd-`q` rationals ABOVE the cap are REJECTED and take the
- *   complex branch — a `(3q+1)/q` ladder reaching `q ~ 10⁶` is declined for
- *   most of its rungs. This is not a defect to be tuned away: past the cap the
- *   exponent is, at double precision, indistinguishable from an irrational, and
- *   no tolerance admits those without admitting the convergents of `π`
- *   alongside them.
- *
- * Callers with the EXACT rational in hand never pay either price: the float
- * path is a fallback for an exponent that has already been numericized.
- */
-export function realPowerBranchTerms(
-  exact: Rational | undefined,
-  value: number
-): [p: number, q: number] | undefined {
-  if (exact !== undefined) {
-    const [rp, rq] = reducedRational(exact);
-    const p = asBigInteger(rp);
-    const q = asBigInteger(rq);
-    if (p === undefined || q === undefined || q === 0n) return undefined;
-    return [parityFaithful(p), parityFaithful(q)];
-  }
-
-  if (!Number.isFinite(value)) return undefined;
-  // The GLOBAL working precision is what rounded `value`, so it — not any
-  // engine's `precision` — sizes the window. See the note above.
-  //
-  // A double never carries more than 17 significant digits, and the branch
-  // decision must not depend on a precision configured BELOW machine
-  // precision: `new ComputeEngine({ precision: 3 })` writes a global of 3,
-  // bypassing the MACHINE_PRECISION floor that `setPrecision` applies, and a
-  // 1%-wide window snaps essentially any float to a small rational. Clamp to
-  // [15, 17] regardless.
-  const precision = BigDecimal.precision;
-  const digits = Number.isFinite(precision)
-    ? Math.max(15, Math.min(17, Math.trunc(precision)))
-    : 17;
-  const tol = Math.max(
-    Number.MIN_VALUE,
-    Math.abs(value) * 4 * Number.EPSILON,
-    Math.abs(value) * Math.pow(10, 1 - digits)
-  );
-  const r = rationalize(value, tol);
-  if (!Array.isArray(r)) return undefined;
-  const [p, q] = r;
-  if (!Number.isFinite(p) || !Number.isFinite(q) || q === 0) return undefined;
-  // Only a faithful reconstruction is trusted, measured at EXACTLY the width
-  // the coincidence budget below is charged for. `rationalize` can fall out of
-  // its convergent loop on its own internal 1e-15 guard and return terms it
-  // never checked against `tol`, so this is a real gate, not a formality.
-  //
-  // The width is `tol` alone: an earlier `Math.max(1e-12, tol)` accepted at one
-  // bound while charging the budget at the other, and for |value| < 100 the
-  // 1e-12 floor dominated — admitting e.g. `0.0249… → 24737/993426` (21x
-  // outside its own 2.2e-17 tolerance) for a charge of 2.7e-5 when its true
-  // expected-coincidence count was 1.2, i.e. a certainty. The floor is also
-  // dead weight: a p/q rounded at `digits` lands within 0.47·tol at worst
-  // (measured over the exercised terms, and the bound is scale-invariant since
-  // both are relative), so no legitimate reconstruction ever needed it —
-  // including the `1000001/3` → `333333.666666667` case that motivated it,
-  // whose 2.9e-10 error sits inside a 3.3e-9 tolerance.
-  if (Math.abs(p / q - value) > tol) return undefined;
-  // ...and only a reconstruction that cannot plausibly be a coincidence. See
-  // the note above: `(6/π²)·q²·(2·tol)` is the expected number of reduced
-  // rationals with denominator ≤ q inside the admission window; past the
-  // budget the hit says nothing about where the double came from.
-  if ((12 / Math.PI ** 2) * q * q * tol > COINCIDENCE_BUDGET) return undefined;
-  return [p, q];
 }
 
 // If the expression is of the form
@@ -983,8 +816,8 @@ function exactLog10Modulus(v: ExactNumericValue): number {
 /**
  * `x^e` for an integer exponent `e` and an EXACT base `x`, computed exactly:
  *  - integer / rational base → exact bigint rational power;
- *  - complex base (an exact Gaussian rational / pure-imaginary radical, or a
- *    Gaussian-integer literal from the inexact lane) → `ExactNumericValue.pow`
+ *  - complex base (an exact Gaussian rational / pure-imaginary radical)
+ *    → `ExactNumericValue.pow`
  *    (exact binary powering of the components — no `exp`/`ln` round-trip, so
  *    no float residue: `(1+i)^2 = 2i`, `(2+i)^3 = 2+11i`; a negative exponent
  *    yields an exact Gaussian rational, e.g. `(1+i)^-2 = -i/2`);
@@ -999,21 +832,16 @@ function exactIntegerPow(x: Expression, e: number): Expression | undefined {
   if (!isNumber(x) || !Number.isSafeInteger(e)) return undefined;
 
   //
-  // Complex base: an exact complex value, or a machine/big Gaussian integer
+  // Complex base: an exact complex value
   //
   if (x.isComplex) {
     const nv = x.numericValue;
     if (typeof nv === 'number') return undefined; // a JS number is never complex
-    let exact: ExactNumericValue | undefined;
-    if (nv instanceof ExactNumericValue) exact = nv;
-    else if (isGaussianInteger(nv))
-      // A Gaussian-integer literal from the inexact lane is exactly
-      // representable: lift it so the powering is exact (WP-2.16)
-      exact = ce._numericValue({
-        rational: [nv.re, 1],
-        imRational: [nv.im, 1],
-      }) as ExactNumericValue;
-    if (exact === undefined) return undefined;
+    // Only an exact value is powered exactly. A complex float is not
+    // lifted to an exact value even when both its parts are integers: a
+    // float operand makes the result a float.
+    if (!(nv instanceof ExactNumericValue)) return undefined;
+    const exact = nv;
 
     // Magnitude guard: |z^e| = |z|^e — keep pathological powers symbolic
     // rather than materializing huge exact components. The modulus is read
@@ -1175,6 +1003,58 @@ function eulerSplit(
   return numericApproximation ? result.N() : result;
 }
 
+/**
+ * The numeric value of `e^{iθ}` or `e^{a + iθ}` when the imaginary term `θ`
+ * is an EXACT rational multiple of π (`π`, `2π/3`, `10^{20}π`), by Euler's
+ * formula `e^a·(cos θ + i·sin θ)`, with `cos θ` and `sin θ` computed from
+ * the exact angle in half-turns (`exactUnitCircle`,
+ * `boxed-expression/trigonometry.ts`): `e^{iπ}` is `−1`, `e^{2iπ/3}` is
+ * `−0.5 + 0.866i` and `e^{i·10^{20}π}` is `1`, at every precision and in
+ * every angular unit (the exponent of `e` is in radians). With the double
+ * nearest to `θ`, the polar form leaves roundoff in a part whose value is
+ * `0` or an exact rational (`e^{iπ}` was `−1 + 1.2·10⁻¹⁶i`). `raw` is the
+ * exponent before its numeric evaluation. Returns `undefined` for any other
+ * exponent: a float angle (`e^{3.14159i}`) is the value at that float.
+ */
+function exactEulerN(raw: Expression): Expression | undefined {
+  if (!(raw.isCanonical || raw.isStructural)) return undefined;
+  const ce = raw.engine;
+  // An exponent with a single term is read first from its structure, with
+  // no expression built (`imaginaryHalfTurns`); `null` means it could not
+  // decide.
+  if (!isFunction(raw, 'Add')) {
+    const turns = imaginaryHalfTurns(raw);
+    if (turns === undefined) return undefined;
+    if (turns !== null) return unitCircleOfHalfTurns(ce, turns);
+  }
+  const real: Expression[] = [];
+  const imaginary: Expression[] = [];
+  for (const term of isFunction(raw, 'Add') ? raw.ops : [raw]) {
+    const factor = getImaginaryFactor(term);
+    if (factor !== undefined) imaginary.push(factor);
+    else if (term.unknowns.length === 0 && term.type.matches('real'))
+      real.push(term);
+    else return undefined;
+  }
+  if (imaginary.length === 0) return undefined;
+  const theta =
+    imaginary.length === 1 ? imaginary[0] : ce.function('Add', imaginary);
+  const euler = exactUnitCircle(theta);
+  if (euler === undefined || !isNumber(euler)) return undefined;
+  if (real.length === 0) return euler;
+  const magnitude = ce
+    .function('Exp', [real.length === 1 ? real[0] : ce.function('Add', real)])
+    .N();
+  if (!isNumber(magnitude)) return undefined;
+  const m = magnitude.numericValue;
+  const e = euler.numericValue;
+  return ce.number(
+    (typeof m === 'number' ? ce._inexactNumericValue(m) : m).mul(
+      typeof e === 'number' ? ce._inexactNumericValue(e) : e
+    )
+  );
+}
+
 /** Whether `x` holds a float (an inexact number literal) at any depth. */
 function hasInexactLiteral(x: Expression): boolean {
   if (isNumber(x)) return !x.isExact;
@@ -1186,9 +1066,12 @@ function hasInexactLiteral(x: Expression): boolean {
  * The numeric value of `x^exp` for a complex base or a complex exponent,
  * computed with the complex kernel.
  *
- * The roundoff dust of the kernel is removed with a test that is relative to
- * the modulus of the result (`chopComplexDust()`), so that a small result is
- * kept: `(10^{-10}i)^2` is `-10^{-20}`, and `(10^{-6}i)^3` is `-10^{-18}i`.
+ * The kernel (`complexPow()`) gives an exact `0` for a part whose value is
+ * `0` (`(1 + i)^{2.0}` is `2i`, `i^{2.0}` is `-1`), so no part is removed,
+ * and a small part of a float input is kept: `2^{10^{-100}i}` is
+ * `1 + 6.93·10^{-101}i`, and `e^{3.141592653589793i}` is
+ * `-1 + 1.22·10^{-16}i`, the value at that double. An exact multiple of π
+ * in an exponent of `e` is reduced exactly before this (`exactEulerN`).
  */
 function complexPowN(
   x: Expression & NumberLiteralInterface,
@@ -1215,9 +1098,10 @@ function complexPowN(
     (base, exponent) => base.pow(exponent)
   );
   if (viaNumericValue !== undefined) return viaNumericValue;
-  let z: { re: number; im: number } = ce
-    .complex(x.re, x.im)
-    .pow(ce.complex(expRe, expIm));
+  let z: { re: number; im: number } = complexPow(
+    ce.complex(x.re, x.im),
+    ce.complex(expRe, expIm)
+  );
   // The complex kernel can give a NaN part for finite operands when an
   // intermediate value overflows or underflows: `(10^{-200} + 10^{-200}i)^{-0.5}`
   // and `(10^{300} + 10^{300}i)^{0.3}` give `NaN + NaN·i`. Then compute the
@@ -1258,7 +1142,7 @@ function complexPowN(
   // A float operand makes the result a float (`i^{2.0}` is the float `-1`).
   return boxComplexKernelResult(
     ce,
-    chopComplexDust(z.re, z.im),
+    z,
     typeof exp === 'number' ? [x] : [x, exp]
   );
 }
@@ -1359,6 +1243,18 @@ export function pow(
       // doubles, where reading `E.N()` resolves a symbol: every numeric power
       // passes here, and nearly none has the base `e`.
       const ce = x.engine;
+      // `e^{iθ}` and `e^{a + iθ}` with `θ` an EXACT rational multiple of π
+      // (`exactEulerN`). The raw exponent is read, since `exp` has been
+      // numericized by now and holds the double nearest to `θ`.
+      if (
+        x.re > 2.718 &&
+        x.re < 2.719 &&
+        x === ce.E.N() &&
+        rawExponent !== undefined
+      ) {
+        const euler = exactEulerN(rawExponent);
+        if (euler !== undefined) return euler;
+      }
       if (x.re > 2.718 && x.re < 2.719 && x === ce.E.N()) {
         if (typeof exp === 'number')
           return ce.number(ce._numericValue(exp).exp());
@@ -1760,12 +1656,11 @@ export function pow(
   if (isNumber(x) && Number.isInteger(e)) {
     // x^e with an integer exponent.
     //
-    // An EXACT base (integer/rational/radical, or a Gaussian integer) must
+    // An EXACT base (integer/rational/radical, or an exact complex) must
     // yield an EXACT result — never a rounded bignum (`Power(2,127)`), a float
     // (`Power(2,-2)`), or a float residue (`(1+i)^2`). That's the exactness
     // contract: numericizing an exact argument is the `.N()` path's job.
-    const isGaussianInt = x.isComplex && isGaussianIntegerValue(x.numericValue);
-    if (x.isExact || isGaussianInt) {
+    if (x.isExact) {
       const exact = exactIntegerPow(x, e!);
       if (exact !== undefined) return exact;
       // The exact result is too large to materialize (magnitude guard) or is
@@ -1774,7 +1669,7 @@ export function pow(
       return ce._fn('Power', [x, ce.expr(exp)]);
     }
 
-    // An inexact base (a float, or a non-Gaussian complex) numericizes — an
+    // An inexact base (a real or a complex float) numericizes — an
     // inexact argument is allowed to produce a float under `evaluate()`.
     const n = x.numericValue;
     if (typeof n === 'number') {
@@ -1923,8 +1818,13 @@ export function root(
         const n = b.re;
         const mod = Math.pow(-a.re, 1 / n);
         const angle = Math.PI / n;
+        // The root is computed in doubles: it is a float, even when both
+        // its parts are integers
         return a.engine.number(
-          a.engine.complex(mod * Math.cos(angle), mod * Math.sin(angle))
+          a.engine._inexactNumericValue({
+            re: mod * Math.cos(angle),
+            im: mod * Math.sin(angle),
+          })
         );
       }
       if (isNegative) a = a.neg();
@@ -2053,3 +1953,4 @@ export function root(
 
   return a.engine._fn('Root', [a, b]);
 }
+

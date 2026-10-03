@@ -133,7 +133,7 @@ symbolic. `N` then gives the complex principal value:
 
 ```epsil
 [arcsin(2), N(arcsin(2))]
-// ➔ [arcsin(2), (1.5707963267948966 - 1.3169578969248166i)]
+// ➔ [arcsin(2), (1.57079632679489661923 - 1.31695789692481670863i)]
 ```
 
 `inverseFunction` returns the inverse of a function:
@@ -311,7 +311,7 @@ arcsin(1/2)
 
 ```epsil
 N(arcsin(2))
-// ➔ (1.5707963267948966 - 1.3169578969248166i)
+// ➔ (1.57079632679489661923 - 1.31695789692481670863i)
 ```
 
 ### arctan
@@ -445,7 +445,7 @@ Hyperbolic cosine integral: γ + ln|x| + ∫₀ˣ (cosh(t)−1)/t dt.
 
 ```epsil
 N(coshIntegral(1))
-// ➔ 0.8378669409802084
+// ➔ 0.8378669409802082
 ```
 
 ### cot

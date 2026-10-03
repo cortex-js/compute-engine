@@ -1647,8 +1647,10 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
 
     // LambertW: `W₀(+∞) = +∞` folds under evaluate() (it folded only under
     // N()); `W₀(−∞)` follows Ln(−∞) — symbolic under evaluate(), `∞ + iπ`
-    // under N() (N() used to answer −∞); `W(~oo) = ~oo`; outside a real
-    // branch the application stays symbolic (it used to answer NaN).
+    // under N() (N() used to answer −∞); `W(~oo) = ~oo`. Outside a real
+    // branch an exact argument stays symbolic under evaluate(), and N()
+    // gives the complex value (mpmath `lambertw`); at −∞ the −1 branch
+    // gives `∞ − iπ` under N().
     both(['LambertW', POS], isPos);
     expect(ce2.box(['LambertW', NEG]).evaluate().operator).toBe('LambertW');
     const wNeg = ce2.box(['LambertW', NEG]).N();
@@ -1656,17 +1658,29 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     expect(wNeg.im).toBeCloseTo(Math.PI, 12);
     both(['LambertW', COO], isCoo);
     both(['LambertW', ANON], isNaNv);
-    both(['LambertW', -1], symbolic('LambertW'));
-    both(['LambertW', ['Rational', 1, 2], -1], symbolic('LambertW'));
-    both(['LambertW', NEG, -1], symbolic('LambertW'));
+    for (const expr of [
+      ['LambertW', -1],
+      ['LambertW', ['Rational', 1, 2], -1],
+      ['LambertW', NEG, -1],
+    ])
+      expect(ce2.box(expr).evaluate().operator).toBe('LambertW');
+    const wm1 = ce2.box(['LambertW', -1]).N();
+    expect(wm1.re).toBeCloseTo(-0.31813150520476413, 14);
+    expect(wm1.im).toBeCloseTo(1.3372357014306895, 14);
+    const wHalf = ce2.box(['LambertW', ['Rational', 1, 2], -1]).N();
+    expect(wHalf.re).toBeCloseTo(-2.2591588985336064, 14);
+    expect(wHalf.im).toBeCloseTo(-4.220960969266197, 14);
+    const wNegM1 = ce2.box(['LambertW', NEG, -1]).N();
+    expect(wNegM1.re).toBe(Infinity);
+    expect(wNegM1.im).toBeCloseTo(-Math.PI, 12);
 
     // Bessel: the ORDER slot is finite-only (a boxing error at ±∞ and ~oo);
     // the argument slot has the verified limits, `~oo` for K at −∞ (the
     // value tends to −i·∞), the poles of Y and K at 0, and NaN at ~oo.
-    // The kernels are real, integer-order kernels: a non-integer order, a
-    // non-real argument and a negative real argument for Y/K stay
-    // symbolic (they answered NaN; a complex argument was evaluated at its
-    // real part).
+    // The kernels are integer-order kernels: a non-integer order stays
+    // symbolic. A non-real argument and a negative real argument for Y/K
+    // (a complex value) stay symbolic under `evaluate()` when they are
+    // exact, and `.N()` computes the complex value.
     expect(ce2.box(['BesselJ', POS, 1]).isValid).toBe(false);
     expect(ce2.box(['BesselI', COO, 1]).isValid).toBe(false);
     for (const h of ['BesselJ', 'BesselY']) {
@@ -1686,11 +1700,16 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
       both([h, 0, COO], isIndet);
       both([h, 0, ANON], isNaNv);
       both([h, 0, 'NaN'], isNaNv);
-      both([h, 0, ['Complex', 1, 2]], symbolic(h));
+      expect(symbolic(h)(ce2.box([h, 0, ['Complex', 1, 2]]).evaluate())).toBe(
+        true
+      );
+      expect(ce2.box([h, 0, ['Complex', 1, 2]]).N().isNumberLiteral).toBe(true);
       both([h, ['Rational', 1, 2], 1], symbolic(h));
     }
-    both(['BesselY', 0, -1], symbolic('BesselY'));
-    both(['BesselK', 0, -1], symbolic('BesselK'));
+    for (const h of ['BesselY', 'BesselK']) {
+      expect(symbolic(h)(ce2.box([h, 0, -1]).evaluate())).toBe(true);
+      expect(ce2.box([h, 0, -1]).N().im).not.toBe(0);
+    }
 
     // Airy: Ai/Ai′ decay at +∞ and Bi/Bi′ grow; at −∞ Ai and Bi decay
     // (amplitude |x|^(−1/4)) while Ai′/Bi′ oscillate with a growing

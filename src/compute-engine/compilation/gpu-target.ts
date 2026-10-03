@@ -2302,6 +2302,18 @@ function gpuIsComponentwise(code: string, vector?: string): string | undefined {
  * every complex lowering look like a shape error. This is the same ordering
  * the fan-out and selection lowerings depend on.
  */
+/**
+ * `u` when the real expression `x` is `π·u` with a scalar `u`
+ * (`BaseCompiler.piMultiple`): the shader lowers `sin(πu)`, `cos(πu)`,
+ * `tan(πu)` and `e^{iπu}` with the angle in half-turns (`_gpu_cossinpi`).
+ * A vector `u` keeps the componentwise built-in.
+ */
+function gpuPiMultiple(x: Expression | null): Expression | undefined {
+  if (x === null) return undefined;
+  const u = BaseCompiler.piMultiple(x);
+  return u !== undefined && gpuOperandShape(u) === 'scalar' ? u : undefined;
+}
+
 export function gpuOperandShape(
   expr: Expression
 ): 'scalar' | 'matrix' | 'array' | 2 | 3 | 4 {
@@ -6129,6 +6141,8 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   Cos: (args, compile) => {
     if (BaseCompiler.isComplexValued(args[0]))
       return `_gpu_ccos(${compile(args[0])})`;
+    const u = gpuPiMultiple(args[0]);
+    if (u !== undefined) return `_gpu_cospi(${compile(u)})`;
     return `cos(${compile(args[0])})`;
   },
   // In radian mode CE's `Degrees` converts degrees→radians (Degrees(180) =
@@ -6407,15 +6421,39 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     const exp = args[1];
     if (base === null)
       throw new Error('Could not compile `Power`: no argument');
+    // A base that may be negative under an exponent that may be a float:
+    // the interpreter gives the real root when the rational recovered from
+    // the exponent has an odd denominator (`BaseCompiler.negativeBaseFloatPower`).
+    // A constant exponent is decided now. A variable one cannot be decided
+    // in the shader (the recovery reads the exponent to 15 to 17 digits,
+    // and a shader holds an f32), and keeps the lowering below: `pow`, with
+    // no value for a negative base, as before.
+    const negativeBase = BaseCompiler.negativeBaseFloatPower(args);
     if (
       BaseCompiler.isComplexValued(base) ||
       BaseCompiler.isComplexValued(exp)
     ) {
-      if (isSymbol(base, 'ExponentialE')) return `_gpu_cexp(${compile(exp)})`;
+      if (isSymbol(base, 'ExponentialE')) {
+        // `e^{a + iπu}` with real scalar `a` and `u`: the angle in
+        // half-turns, reduced exactly (`_gpu_cossinpi`), so `e^{iπx}` at
+        // `x = 1` is `−1` and `e^{x + iπ}` is `−e^x`.
+        const split = exp !== null ? BaseCompiler.eulerPiSplit(exp) : undefined;
+        if (
+          split !== undefined &&
+          gpuOperandShape(split.u) === 'scalar' &&
+          (split.a === undefined || gpuOperandShape(split.a) === 'scalar')
+        )
+          return split.a === undefined
+            ? `_gpu_cossinpi(${compile(split.u)})`
+            : `(exp(${compile(split.a)}) * _gpu_cossinpi(${compile(split.u)}))`;
+        return `_gpu_cexp(${compile(exp)})`;
+      }
       const v2 = gpuVec2(target);
       const bCode = BaseCompiler.isComplexValued(base)
         ? compile(base)
         : `${v2}(${compile(base)}, 0.0)`;
+      if (typeof negativeBase === 'object')
+        return `_gpu_cpowrr(${bCode}, ${formatFloat(negativeBase.value, target.language)}, ${negativeBase.oddNumerator ? '-1.0' : '1.0'})`;
       const eCode = BaseCompiler.isComplexValued(exp)
         ? compile(exp)
         : `${v2}(${compile(exp)}, 0.0)`;
@@ -6447,7 +6485,9 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       }
       return formatFloat(r, target.language);
     }
-    const realPower = BaseCompiler.realPowerExponent(args);
+    const realPower =
+      BaseCompiler.realPowerExponent(args) ??
+      (typeof negativeBase === 'object' ? negativeBase : undefined);
     if (realPower !== undefined) {
       const code = gpuOperandOnce('Power', base, compile, target);
       const width = gpuBinaryVectorWidth(base, exp);
@@ -6661,6 +6701,8 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   Sin: (args, compile) => {
     if (BaseCompiler.isComplexValued(args[0]))
       return `_gpu_csin(${compile(args[0])})`;
+    const u = gpuPiMultiple(args[0]);
+    if (u !== undefined) return `_gpu_sinpi(${compile(u)})`;
     return `sin(${compile(args[0])})`;
   },
   Smoothstep: 'smoothstep',
@@ -6697,6 +6739,8 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   Tan: (args, compile) => {
     if (BaseCompiler.isComplexValued(args[0]))
       return `_gpu_ctan(${compile(args[0])})`;
+    const u = gpuPiMultiple(args[0]);
+    if (u !== undefined) return `_gpu_tanpi(${compile(u)})`;
     return `tan(${compile(args[0])})`;
   },
   Truncate: (args, compile, target) => {
@@ -11579,7 +11623,7 @@ float _gpu_fresnelC(float x_in) {
       1.0, 1.47495759925128324529,
       3.37748989120019970451e-1, 2.53603741420338795122e-2,
       8.14679107184306179049e-4, 1.27545075667729118702e-5,
-      1.04314589657571990585e-7, 4.60680728515232032307e-10,
+      1.04314589657571990585e-7, 4.60680728146520428211e-10,
       1.10273215066240270757e-12, 1.38796531259578871258e-15,
       8.39158816283118707363e-19, 1.86958710162783236342e-22
     );
@@ -11654,7 +11698,7 @@ fn _gpu_fresnelC(x_in: f32) -> f32 {
       1.0, 1.47495759925128324529,
       3.37748989120019970451e-1, 2.53603741420338795122e-2,
       8.14679107184306179049e-4, 1.27545075667729118702e-5,
-      1.04314589657571990585e-7, 4.60680728515232032307e-10,
+      1.04314589657571990585e-7, 4.60680728146520428211e-10,
       1.10273215066240270757e-12, 1.38796531259578871258e-15,
       8.39158816283118707363e-19, 1.86958710162783236342e-22
     );
@@ -11729,7 +11773,7 @@ float _gpu_fresnelS(float x_in) {
       1.0, 1.47495759925128324529,
       3.37748989120019970451e-1, 2.53603741420338795122e-2,
       8.14679107184306179049e-4, 1.27545075667729118702e-5,
-      1.04314589657571990585e-7, 4.60680728515232032307e-10,
+      1.04314589657571990585e-7, 4.60680728146520428211e-10,
       1.10273215066240270757e-12, 1.38796531259578871258e-15,
       8.39158816283118707363e-19, 1.86958710162783236342e-22
     );
@@ -11804,7 +11848,7 @@ fn _gpu_fresnelS(x_in: f32) -> f32 {
       1.0, 1.47495759925128324529,
       3.37748989120019970451e-1, 2.53603741420338795122e-2,
       8.14679107184306179049e-4, 1.27545075667729118702e-5,
-      1.04314589657571990585e-7, 4.60680728515232032307e-10,
+      1.04314589657571990585e-7, 4.60680728146520428211e-10,
       1.10273215066240270757e-12, 1.38796531259578871258e-15,
       8.39158816283118707363e-19, 1.86958710162783236342e-22
     );
@@ -13168,6 +13212,22 @@ const GPU_COMPLEX_FUNCTIONS: Record<string, ComplexFunctionDef> = {
   return _gpu_cexp(_gpu_cmul(w, _gpu_cln(z)));
 }`,
   },
+  // `z^e` for a real exponent `e` whose recovered rational has an odd
+  // denominator, decided when the shader is generated
+  // (`BaseCompiler.negativeBaseFloatPower`): a negative real `z` has the real
+  // root `s·|z|^e` (`s` is `−1.0` for an odd numerator), as in the
+  // interpreter, and any other `z` the principal value.
+  _gpu_cpowrr: {
+    deps: ['_gpu_cpow'],
+    glsl: `vec2 _gpu_cpowrr(vec2 z, float e, float s) {
+  if (z.y == 0.0 && z.x < 0.0) return vec2(s * pow(-z.x, e), 0.0);
+  return _gpu_cpow(z, vec2(e, 0.0));
+}`,
+    wgsl: `fn _gpu_cpowrr(z: vec2f, e: f32, s: f32) -> vec2f {
+  if (z.y == 0.0 && z.x < 0.0) { return vec2f(s * pow(-z.x, e), 0.0); }
+  return _gpu_cpow(z, vec2f(e, 0.0));
+}`,
+  },
   _gpu_csqrt: {
     deps: [],
     glsl: `vec2 _gpu_csqrt(vec2 z) {
@@ -13491,15 +13551,18 @@ const GPU_COMPLEX_FUNCTIONS: Record<string, ComplexFunctionDef> = {
   // atan z = −i·atanh(iz), with iz = −y + ix. A zero x takes the sign of y:
   // the side right of the imaginary axis for y > 1, left of it for y < −1
   // (`atan(−2i)` is `−π/2 − 0.549i`, so atan is odd on the cut). At the
-  // poles ±i the interpreter gives the unsigned infinity `~oo`; a `vec2`
-  // cannot hold `~oo`, so `0 ± ∞i` is its form of a complex infinity.
+  // poles ±i the interpreter gives the unsigned infinity `~oo`, which a
+  // `vec2` holds as `(∞, ∞)`, as the JavaScript target does (`complexPole()`
+  // in `javascript-target.ts`).
   _gpu_catan: {
-    deps: ['_gpu_catanh_core'],
+    deps: ['_gpu_catanh_core', '_gpu_inf'],
     glsl: `vec2 _gpu_catan(vec2 z) {
+  if (z.x == 0.0 && abs(z.y) == 1.0) return vec2(_gpu_inf(), _gpu_inf());
   vec2 r = _gpu_catanh_core(-z.y, z.x, z.y < 0.0 ? -1.0 : 1.0);
   return vec2(r.y, -r.x);
 }`,
     wgsl: `fn _gpu_catan(z: vec2f) -> vec2f {
+  if (z.x == 0.0 && abs(z.y) == 1.0) { return vec2f(_gpu_inf(), _gpu_inf()); }
   let r = _gpu_catanh_core(-z.y, z.x, select(1.0, -1.0, z.y < 0.0));
   return vec2f(r.y, -r.x);
 }`,
@@ -14009,6 +14072,69 @@ fn _gpu_powi(x: f32, n: f32) -> f32 {
   let r = pow(abs(x), n);
   if (x < 0.0 && (abs(n) % 2.0) == 1.0) { return -r; }
   return r;
+}
+`;
+
+/**
+ * `cos(πu)` and `sin(πu)` (GLSL syntax), with the angle `u` in half-turns
+ * reduced exactly before the multiplication by π, as `cosSinPi()`
+ * (`numerics/numeric-complex.ts`) does: `u` is written `t + q/2` with
+ * `|t| ≤ 1/4`, both steps exact in floating point, so the value at an
+ * integer or a half-integer `u` has an exact zero part. `sin(πx)` at `x = 2`
+ * is `0`, where `sin(3.14159274 * 2.0)` is not. A zero part is `+0.0`
+ * (`1/sin(πx)` at `x = 1` is `+∞`). `_gpu_cossinpi(u)` is also `e^{iπu}` as
+ * a `vec2`. See `BaseCompiler.piMultiple`.
+ */
+const GPU_PI_TRIG_PREAMBLE_GLSL = `
+vec2 _gpu_cossinpi(float u) {
+  float r = u - 2.0 * floor(u / 2.0 + 0.5);
+  float q = floor(2.0 * r + 0.5);
+  float t = r - q / 2.0;
+  float c = cos(3.141592653589793 * t);
+  float s = sin(3.141592653589793 * t);
+  float k = q + 4.0 - 4.0 * floor((q + 4.0) / 4.0);
+  vec2 v = vec2(s, -c);
+  if (k == 0.0) v = vec2(c, s);
+  if (k == 1.0) v = vec2(-s, c);
+  if (k == 2.0) v = vec2(-c, -s);
+  return vec2(v.x == 0.0 ? 0.0 : v.x, v.y == 0.0 ? 0.0 : v.y);
+}
+float _gpu_sinpi(float u) {
+  return _gpu_cossinpi(u).y;
+}
+float _gpu_cospi(float u) {
+  return _gpu_cossinpi(u).x;
+}
+float _gpu_tanpi(float u) {
+  vec2 cs = _gpu_cossinpi(u);
+  return cs.y == 0.0 ? 0.0 : cs.y / cs.x;
+}
+`;
+
+/** `cos(πu)` and `sin(πu)` (WGSL syntax). See `GPU_PI_TRIG_PREAMBLE_GLSL`. */
+const GPU_PI_TRIG_PREAMBLE_WGSL = `
+fn _gpu_cossinpi(u: f32) -> vec2f {
+  let r = u - 2.0 * floor(u / 2.0 + 0.5);
+  let q = floor(2.0 * r + 0.5);
+  let t = r - q / 2.0;
+  let c = cos(3.141592653589793 * t);
+  let s = sin(3.141592653589793 * t);
+  let k = q + 4.0 - 4.0 * floor((q + 4.0) / 4.0);
+  var v = vec2f(s, -c);
+  if (k == 0.0) { v = vec2f(c, s); }
+  if (k == 1.0) { v = vec2f(-s, c); }
+  if (k == 2.0) { v = vec2f(-c, -s); }
+  return vec2f(select(v.x, 0.0, v.x == 0.0), select(v.y, 0.0, v.y == 0.0));
+}
+fn _gpu_sinpi(u: f32) -> f32 {
+  return _gpu_cossinpi(u).y;
+}
+fn _gpu_cospi(u: f32) -> f32 {
+  return _gpu_cossinpi(u).x;
+}
+fn _gpu_tanpi(u: f32) -> f32 {
+  let cs = _gpu_cossinpi(u);
+  return select(cs.y / cs.x, 0.0, cs.y == 0.0);
 }
 `;
 
@@ -15931,6 +16057,10 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     preamble += gpuLibrarySubset(
       code,
       isWGSL ? GPU_ROUND_PREAMBLE_WGSL : GPU_ROUND_PREAMBLE_GLSL
+    );
+    preamble += gpuLibrarySubset(
+      code,
+      isWGSL ? GPU_PI_TRIG_PREAMBLE_WGSL : GPU_PI_TRIG_PREAMBLE_GLSL
     );
     // `_gpu_zeta` calls `_gpu_gamma` from its own body for the s < 0
     // functional-equation branch, and every other zeta entry point

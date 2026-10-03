@@ -875,21 +875,45 @@ integer, also for a float operand (`Floor(2.7)` is the integer `2`).
 There are two distinct "is this zero?" questions in the engine, and they call
 for two different tolerances:
 
-1. **Roundoff dust** — is this tiny value floating-point noise? A
-   transcendental kernel evaluated over `Complex` produces a
-   mathematically-real result with a dust-sized imaginary part (e.g.
-   `Complex(0.5, 0).asin()` → `im: 5.55e-17`, from the complex log/sqrt
-   formulation). Whether that is noise is a property of the _arithmetic_ — the
-   scale is the rounding error of the kernel — and does not depend on any
-   user setting. The test is RELATIVE: a component is dust only when it is
-   at most a fixed ratio times the modulus of the result. For the machine
-   kernels (`chopComplexDust`, `numeric-value/roundoff.ts`) the ratio is
-   `1e-14`. For the big-decimal kernels of `BigNumericValue`
-   (`isComplexDust`, `complexNoiseRatio`) it is `10^(2−precision)`, where
-   `precision` is the working precision, because these kernels compute at
-   the working precision, not at the precision of a double. An absolute cut
-   erased small results: `(10^{-10} i)^2` gave 0 instead of `-10^{-20}`
-   until 2026-09-26.
+1. **Roundoff** — is this tiny value floating-point noise? The rule (user
+   decision 2026-10-02) depends on where the value comes from:
+   - An EXACT input is reduced exactly before any float is formed, so its
+     roundoff never appears. An exact rational multiple of π in `sin`,
+     `cos`, `tan`, `sec`, `csc`, `cot`, in `e^{iθ}` and in a hyperbolic
+     function of `iθ` is reduced in half-turns with bigints
+     (`exactHalfTurns`, `reduceHalfTurns`), so a large multiple is exact
+     too: in the interpreter by `circularOfExactAngle` (machine precision),
+     `applyAngle`/`exactLargeAngle` (above it, and for an angle with a
+     rational term), `exactEulerN` (`boxed-expression/arithmetic-power.ts`)
+     and `hyperbolicOfImaginaryAngle`; in compiled code by `cosSinPi()`
+     (`numerics/numeric-complex.ts`) through `_SYS.sinpi`/`cospi`/`tanpi`/
+     `cexppi`, `_gpu_cossinpi` and an inline NumPy form for Python, for an
+     angle `π·u` and an exponent `a + iπu` written with the symbol `Pi`.
+     So `sin(π).N()` is `0` and `e^{iπ}.N()` is `−1` at every precision.
+     Only these functions are covered: another kernel at an exact argument
+     can still leave roundoff in a part whose value is `0` (`erf(i).N()`
+     has a real part of `2.2·10⁻¹⁶`; ROADMAP).
+   - The machine kernels give an exact zero part where the value has one:
+     the inverse trigonometric and hyperbolic functions use the formulas of
+     W. Kahan (`complexAsin()` and the others), `complexPow()` uses
+     repeated squaring for an integer exponent up to 64 and an exact angle
+     for a base on an axis or a diagonal, and `complexSqrt()` scales its
+     operand. No machine kernel, in the interpreter or in compiled code,
+     removes a part of its result.
+   - A small part of the value of a FLOAT input is the value at that float
+     and is kept, on every route: `e^{3.141592653589793i}` is
+     `−1 + 1.22·10⁻¹⁶i` at machine precision (`sin(Math.PI)`), and
+     `2^{10^{-100}i}` is `1 + 6.93·10^{-101}i`. The `Chop` operator removes
+     such a part on request, with `ce.tolerance`.
+   - Two places still remove a part, because their kernel cannot avoid the
+     roundoff: the big-decimal kernels of `BigNumericValue` remove a part at
+     most `10^(2−precision)` times the modulus (`isComplexDust`,
+     `complexNoiseRatio`, `numeric-value/roundoff.ts`): their polar form
+     uses π at the working precision, so `i^{3.0}` at 21 digits would have
+     a real part of about `10^{-21}`. And the big-decimal `sin`/`cos` remove
+     real noise of the same size (`chopBignumDust`). An absolute cut erased
+     small results: `(10^{-10} i)^2` gave 0 instead of `-10^{-20}` until
+     2026-09-26.
 2. **Comparison tolerance** — should two values be considered equal _for the
    user_? That is `ce.tolerance` (default `1e-10`, user-configurable), used by
    `Equal`, the relational operators, `.is()`, and the `Chop` operator. It
@@ -908,12 +932,12 @@ for two different tolerances:
 
 The invariant for complex values:
 
-- **Chop dust at creation, at kernel boundaries only.** Every path that
-  manufactures a complex float from a transcendental kernel chops the dust
-  components before the value escapes: `boxed-expression/apply.ts`
-  (`apply`/`apply2`/`applyN`), the `pow`/`root`/`exp` complex branches of
-  `MachineNumericValue`/`BigNumericValue`, and the compiled JavaScript
-  target's `wrapRealOnly` projection.
+- **No part is removed after the fact, except by the big-decimal kernels.**
+  The machine kernels (`boxed-expression/apply.ts`, the `pow`/`root`/`exp`
+  complex branches of `MachineNumericValue`, the compiled complex helpers)
+  return their value as computed; an exact input is reduced exactly before
+  it reaches them (see above). The complex branches of `BigNumericValue`
+  remove noise as described next.
 - **In `BigNumericValue`, a legitimately small component does not reach the
   chop, except in one case named below.** Magnitude alone cannot tell rounding noise from a small correct
   component: `e^{iπ}` computes `-1 + 1.2e-21i` at 21 digits (noise), and
@@ -945,8 +969,9 @@ The invariant for complex values:
   Only transcendental kernels produce dust at a known scale. (See the comment
   in `apply2` in `boxed-expression/apply.ts` for the real-part version of this
   principle: a legitimately small real result is not chopped either.)
-- **Read sites compare exactly.** Because dust is removed where it is created,
-  a stored `im ≠ 0` is significant by construction. The many library dispatch
+- **Read sites compare exactly.** Because a kernel gives an exact zero part
+  where the value has one, and an exact input is reduced exactly, a stored
+  `im ≠ 0` is significant by construction. The many library dispatch
   checks (`x.im === 0` / `x.im !== 0`) are therefore correct as written — do
   not "fix" them to `ce.chop(x.im)`. A read-time chop would make a value
   dispatch as real while still typing, printing, and serializing as complex,
@@ -954,13 +979,12 @@ The invariant for complex values:
   (`ce._numericValue`'s exact `im === 0` collapse to a real value is likewise
   correct by construction.)
 
-The roundoff scale of the machine kernels is `ROUNDOFF_TOLERANCE` (`1e-14`)
-in `numerics/numeric.ts` — these complex kernels run at machine precision
-regardless of `ce.precision`, so their dust is machine-scale. The machine
-kernel-boundary chops use it (`apply.ts`, the angular-unit conversion in
-`boxed-expression/trigonometry.ts`, `MachineNumericValue`). The big-decimal
-kernels of `BigNumericValue` use `10^(2−precision)` instead, as described
-above. Using `ce.tolerance` there miscoupled the user knob
+The machine kernels remove no part (until 2026-10-02 they removed a part at
+most `1e-14` times the modulus, `ROUNDOFF_TOLERANCE` in `numerics/numeric.ts`,
+which also removed a correct small part: `arcoth(10⁻¹⁰⁰)` compiled was
+`−(π/2)i`, and in degrees `arcsin(10^{-200}i)` was `0`). The big-decimal
+kernels of `BigNumericValue` use `10^(2−precision)`, as described above.
+Using `ce.tolerance` for a kernel chop miscoupled the user knob
 — tightening it below dust scale re-introduced the 2026-07-30 regression where
 the compiled `arcsin`, projected to the real lane, returned `NaN` across its
 whole domain, and loosening it silently projected genuinely complex results to
@@ -976,8 +1000,11 @@ Two related cases that are neither kernel dust nor comparison:
   10^(2−precision) (`chopBignumDust` in `boxed-expression/trigonometry.ts`) —
   a chop at `ce.tolerance` here destroyed legitimately-computed small results
   (`sin(3.141592653588793)` ≈ 1.0e−12 returned 0; the #231 failure class).
-  The machine path does not chop (`Sin(3.141592653589793).N()` →
-  `1.22e-16`, matching Mathematica's `Sin[N[π]]`).
+  The machine path does not chop a float argument
+  (`Sin(3.141592653589793).N()` → `1.22e-16`, matching Mathematica's
+  `Sin[N[π]]`); an EXACT rational multiple of π at machine precision is
+  reduced with bigints and computed in doubles (`circularOfExactAngle`), so
+  `Sin(π).N()` is `0` at every precision.
 - **Numeric-algorithm residual cleanup** — `NullSpace`/eigenvector results in
   `library/linear-algebra.ts` chop components at `ce.tolerance`. Elimination
   residuals scale with the algorithm and conditioning, not machine eps, and

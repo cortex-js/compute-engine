@@ -53,6 +53,7 @@ import type { Expression, ExpressionInput } from '../types-expression.js';
 import type { BoxedSubstitution } from '../types-serialization.js';
 import type { Rule, RuleStep } from '../types-evaluation.js';
 import type { RulePurpose } from '../types-kernel-evaluation.js';
+import { isFunction, isNumber } from '../boxed-expression/type-guards.js';
 
 import type {
   CompiledFungrimRule,
@@ -341,6 +342,35 @@ function solveNoCaptureFilter(sub: BoxedSubstitution): boolean {
   return true;
 }
 
+/** True when `expr` has a `LambertW`. */
+function hasLambertW(expr: Expression): boolean {
+  if (!isFunction(expr)) return false;
+  if (expr.operator === 'LambertW') return true;
+  return expr.ops.some(hasLambertW);
+}
+
+/** Filter for a solve template whose root uses `LambertW`: the template
+ *  fires only when that root is not a provably non-real number.
+ *
+ *  The templates (`x·eˣ = b`, `eˣ + a·x + b = 0`, …) give the REAL roots:
+ *  W₀ when its argument is in [−1/e, ∞), and W₋₁ for the second real root
+ *  when its argument is in [−1/e, 0). Outside those intervals W₀ and W₋₁
+ *  have complex values, and these values are roots, but only two of the
+ *  infinitely many complex roots `W_k(…)`: `solve` returns the real roots
+ *  of such a transcendental equation, as it does for `sin(x) = 2` (no root)
+ *  or `x³ = 1` (the real root only). A root that is not a number literal
+ *  after `N()` (a parametric offset) is kept; `validateRoots()` decides
+ *  it. */
+function realBranchRootFilter(
+  replace: Expression
+): (sub: BoxedSubstitution) => boolean {
+  return (sub) => {
+    const root = replace.subs(sub).N();
+    if (!isNumber(root)) return true;
+    return !root.isComplex;
+  };
+}
+
 function boxCompiledRule(
   ce: IComputeEngine,
   rule: CompiledFungrimRule,
@@ -405,6 +435,12 @@ function boxCompiledRule(
           ? solveNoCaptureFilter
           : (sub: BoxedSubstitution): boolean =>
               solveNoCaptureFilter(sub) && guardCondition(sub);
+      if (hasLambertW(replace)) {
+        const solveCondition = condition;
+        const realRoot = realBranchRootFilter(replace);
+        condition = (sub: BoxedSubstitution): boolean =>
+          solveCondition(sub) && realRoot(sub);
+      }
     }
 
     return {

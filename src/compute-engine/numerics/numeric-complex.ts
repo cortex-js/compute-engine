@@ -448,6 +448,142 @@ function imaginaryAxisZero(y: number): number {
   return y < 0 ? -0 : 0;
 }
 
+/**
+ * The principal square root of `z`. A zero imaginary part is read as `+0`,
+ * so a negative real `z` has a root on the positive imaginary axis
+ * (`√−4 = 2i`), as in the interpreter, which does not keep the sign of a
+ * zero. The `complex-esm` method loses a small `|z|`: `√(10⁻³⁰⁰·i)` was `0`
+ * and `√(10⁻³⁰⁰ + 10⁻³⁰⁰·i)` was `7.07·10⁻¹⁵¹·(1 + i)` instead of
+ * `1.099·10⁻¹⁵⁰ + 4.55·10⁻¹⁵¹·i`. A value with an infinite or NaN part
+ * uses the `complex-esm` method.
+ */
+export function complexSqrt(z: Complex): Complex {
+  if (!isFiniteComplex(z.re, z.im)) return z.sqrt();
+  const [re, im] = sqrtParts(z.re, z.im === 0 ? 0 : z.im);
+  return new Complex(re, im);
+}
+
+/**
+ * The principal value of `z^w` for a nonzero `z`, with an exact `0` for a
+ * part whose value is `0`, and no part removed.
+ *
+ * The `complex-esm` power computes every case in polar form,
+ * `|z|^w·(cos θ + i·sin θ)`, which leaves roundoff in a part whose value is
+ * `0` (`(−2)²` gave `4 − 9.8·10⁻¹⁶i`, `(1 + i)²` gave `1.2·10⁻¹⁶ + 2i`,
+ * `(−1)^0.5` gave `6.1·10⁻¹⁷ + i`) and loses digits for an integer exponent
+ * (`(−2)³` gave `−7.999999999999998`). Here:
+ * - an integer exponent of a real base is `Math.pow`, and a small integer
+ *   exponent (`|n| ≤ 64`) of a complex base is computed by repeated
+ *   squaring, so a Gaussian integer has an exact power. For a larger `|n|`
+ *   the rounding error of each product grows with the number of products
+ *   that follow it: `(1 + 10⁻⁹i)^(10⁹)` had a relative error of 10⁻⁹ by
+ *   squaring, and the polar form below is used instead;
+ * - a real exponent of a base on an axis or a diagonal, whose angle is a
+ *   multiple of `π/4`, takes the angle from `cosSinPi()`, which is exact at
+ *   the multiples of `π/2` and gives `√2/2` at the odd multiples of `π/4`
+ *   (a part is then the modulus divided by `√2`: `(2i)^{0.5}` is `1 + i`);
+ * - otherwise the polar form is used, with `ln|z|` computed without forming
+ *   `|z|`, so a small part that is the value is kept
+ *   (`2^(10⁻¹⁰⁰·i)` is `1 + 6.93·10⁻¹⁰¹i`).
+ * A zero base, or a value with an infinite or NaN part, uses the
+ * `complex-esm` method.
+ */
+export function complexPow(z: Complex, w: Complex): Complex {
+  const x = z.re;
+  const y = z.im;
+  const a = w.re;
+  const b = w.im;
+  if (!isFiniteComplex(x, y) || !isFiniteComplex(a, b) || (x === 0 && y === 0))
+    return z.pow(w);
+  if (b === 0) {
+    if (Number.isInteger(a) && y === 0) return new Complex(Math.pow(x, a), 0);
+    if (Number.isInteger(a) && Math.abs(a) <= 64) {
+      const p = integerPower(x, y, Math.abs(a));
+      if (p !== undefined) {
+        if (a >= 0) return p;
+        const r = complexInverse(p);
+        if (isFiniteComplex(r.re, r.im) && !r.isZero()) return r;
+      }
+    }
+    if (y === 0 && x > 0) return new Complex(Math.pow(x, a), 0);
+    // A base on an axis or a diagonal: its angle is `t·π`, with `t` one of
+    // `±1/4`, `±1/2`, `±3/4` and `1`. `a·t` is exact for `t = ±1/4, ±1/2, 1`
+    // (a power of 2). For `t = ±3/4` it can round when `3a` has more digits
+    // than a double holds, but then `a·3/4` is not a multiple of `1/4`, the
+    // value has no exact zero part, and the rounding is below the error of
+    // the modulus.
+    const ax = Math.abs(x);
+    const ay = Math.abs(y);
+    let t: number | undefined = undefined;
+    if (y === 0) t = 1;
+    else if (x === 0) t = y > 0 ? 0.5 : -0.5;
+    else if (ax === ay) t = (x > 0 ? 0.25 : 0.75) * (y > 0 ? 1 : -1);
+    if (t !== undefined) {
+      const m = Math.max(ax, ay);
+      // `|z|^a`, with `|z| = m·√2` on a diagonal. The product of the two
+      // powers can overflow or underflow in a factor where the modulus does
+      // not (`(0.5 + 0.5i)^{2000}` is `9.33·10⁻³⁰²`, and `0.5^{2000}` is
+      // `0`): then the modulus is `e^{a·(ln m + ½·ln 2)}`.
+      let modulus = Math.pow(m, a);
+      if (ax === ay) {
+        const half = Math.pow(2, a / 2);
+        const normal = (v: number) =>
+          Number.isFinite(v) && Math.abs(v) >= 2.2250738585072014e-308;
+        modulus =
+          normal(modulus) && normal(half)
+            ? modulus * half
+            : Math.exp(a * (Math.log(m) + 0.5 * Math.LN2));
+      }
+      const [c, s] = cosSinPi(a * t);
+      // At an odd multiple of `π/4`, each part is `±modulus/√2`, computed
+      // as a quotient: `√2 · √2/2` is `1.0000000000000002`, not `1`.
+      if (Math.abs(c) === Math.SQRT1_2 && Math.abs(s) === Math.SQRT1_2) {
+        const part = modulus / Math.SQRT2;
+        return new Complex(c < 0 ? -part : part, s < 0 ? -part : part);
+      }
+      return new Complex(c === 0 ? 0 : modulus * c, s === 0 ? 0 : modulus * s);
+    }
+  }
+  // Polar form: z^w = e^{w·ln z}, with ln z = ln|z| + i·θ.
+  const m = Math.max(Math.abs(x), Math.abs(y));
+  const n = Math.min(Math.abs(x), Math.abs(y));
+  const lnModulus = Math.log(m) + 0.5 * Math.log1p((n / m) ** 2);
+  const theta = Math.atan2(y, x);
+  // For a positive real base, `Math.pow` gives the modulus more accurately
+  // than `e^{a·ln x}`.
+  const modulus =
+    y === 0 && x > 0 ? Math.pow(x, a) : Math.exp(a * lnModulus - b * theta);
+  const angle = b * lnModulus + a * theta;
+  return new Complex(modulus * Math.cos(angle), modulus * Math.sin(angle));
+}
+
+/**
+ * `(x + iy)^n` for an integer `n ≥ 0`, by repeated squaring. Returns
+ * `undefined` when a part of an intermediate value is not finite.
+ */
+function integerPower(x: number, y: number, n: number): Complex | undefined {
+  let re = 1;
+  let im = 0;
+  let br = x;
+  let bi = y;
+  let k = n;
+  while (k > 0) {
+    if (k % 2 === 1) {
+      const r = re * br - im * bi;
+      im = re * bi + im * br;
+      re = r;
+    }
+    k = Math.floor(k / 2);
+    if (k > 0) {
+      const r = br * br - bi * bi;
+      bi = 2 * br * bi;
+      br = r;
+    }
+    if (!isFiniteComplex(re, im) || !isFiniteComplex(br, bi)) return undefined;
+  }
+  return new Complex(re === 0 ? 0 : re, im === 0 ? 0 : im);
+}
+
 /** The principal value of `arcsin z`. Accurate for a large or a small `|z|`. */
 export function complexAsin(z: Complex): Complex {
   if (!isFiniteComplex(z.re, z.im)) return z.asin();
@@ -759,23 +895,109 @@ export function complexAcot(z: Complex): Complex {
  *  relative to its value), and `Math.cos(Math.PI / 2)` is 6e-17, not 0.
  *  Here x is reduced to x = t + q/2 with |t| ≤ 1/4 (both steps are exact in
  *  floating point), so the values are exact at multiples of 1/2 and
- *  accurate to a few ulps elsewhere. */
+ *  accurate to a few ulps elsewhere. A zero part is `+0`, never `−0`
+ *  (`1/sin(π)` would otherwise be `−∞`). */
 export function cosSinPi(x: number): [number, number] {
   const r = x - 2 * Math.round(x / 2); // r ∈ [−1, 1], same angle
   const q = Math.round(2 * r); // −2 … 2
   const t = r - q / 2; // |t| ≤ 1/4
-  const c = Math.cos(Math.PI * t);
-  const s = t === 0 ? 0 : Math.sin(Math.PI * t);
-  switch ((q + 4) % 4) {
-    case 0:
-      return [c, s];
-    case 1:
-      return [-s, c];
-    case 2:
-      return [-c, -s];
-    default:
-      return [s, -c];
+  return quarterTurns(q, t);
+}
+
+/** The correctly rounded double of `√3/2` (`cos(π/6)`). */
+const SQRT3_2 = Math.sqrt(3) / 2;
+
+/**
+ * cos(πx) and sin(πx) for `x = q/2 + t`, with `q` an integer and
+ * `|t| ≤ 1/4`. At `|t| = 1/4` and `|t| = 1/6` the values are the correctly
+ * rounded doubles of `√2/2`, `√3/2` and `1/2` (`Math.sin(Math.PI / 6)` is
+ * `0.49999999999999994`). A zero part is `+0`.
+ */
+function quarterTurns(q: number, t: number): [number, number] {
+  let c: number;
+  let s: number;
+  const at = Math.abs(t);
+  if (t === 0) {
+    c = 1;
+    s = 0;
+  } else if (at === 0.25) {
+    c = Math.SQRT1_2;
+    s = t < 0 ? -Math.SQRT1_2 : Math.SQRT1_2;
+  } else if (at === 1 / 6) {
+    c = SQRT3_2;
+    s = t < 0 ? -0.5 : 0.5;
+  } else {
+    c = Math.cos(Math.PI * t);
+    s = Math.sin(Math.PI * t);
   }
+  let r: [number, number];
+  switch (((q % 4) + 4) % 4) {
+    case 0:
+      r = [c, s];
+      break;
+    case 1:
+      r = [-s, c];
+      break;
+    case 2:
+      r = [-c, -s];
+      break;
+    default:
+      r = [s, -c];
+  }
+  return [r[0] === 0 ? 0 : r[0], r[1] === 0 ? 0 : r[1]];
+}
+
+/** `floor(a / b)` for bigints, with `b > 0`. */
+function floorDiv(a: bigint, b: bigint): bigint {
+  return a >= 0n ? a / b : -((-a + b - 1n) / b);
+}
+
+/**
+ * The reduction of the exact angle `(p/q)·π`, with `q > 0`, to
+ * `n·(π/2) + t·π` with `n` an integer and `|t| ≤ 1/4`, in bigints: `n` is
+ * `n mod 4`, and `t` is `[numerator, denominator]`, exact. Any multiple of π
+ * is reduced without a rounding (`10^{20}π` is `0·(π/2)`).
+ */
+export function reduceHalfTurns(
+  p: bigint,
+  q: bigint
+): { n: number; t: [bigint, bigint] } {
+  const n = floorDiv(4n * p + q, 2n * q); // round(2p/q)
+  return {
+    n: Number(((n % 4n) + 4n) % 4n),
+    t: [2n * p - n * q, 2n * q],
+  };
+}
+
+/**
+ * cos(πp/q) and sin(πp/q) for an EXACT rational `p/q` (`q > 0`), in doubles.
+ * The angle is reduced with bigints (`reduceHalfTurns`), so any multiple of
+ * π is exact (`e^{i·10^{20}π}` is `1`), and a value at a multiple of `π/4`
+ * or `π/6` is the correctly rounded double (`cos(2π/3)` is `−0.5`).
+ */
+export function cosSinPiRational(p: bigint, q: bigint): [number, number] {
+  const { n, t } = reduceHalfTurns(p, q);
+  let [tn, td] = t;
+  // A denominator above the double range is scaled down: t is at most 1/4,
+  // and both terms lose the same power of 2.
+  const excess = td.toString(2).length - 1000;
+  if (excess > 0) {
+    tn >>= BigInt(excess);
+    td >>= BigInt(excess);
+  }
+  // `t` exactly ±1/4 or ±1/6 is recognized before it is rounded.
+  const at = tn < 0n ? -tn : tn;
+  const tValue =
+    at * 4n === td
+      ? tn < 0n
+        ? -0.25
+        : 0.25
+      : at * 6n === td
+        ? tn < 0n
+          ? -1 / 6
+          : 1 / 6
+        : Number(tn) / Number(td);
+  return quarterTurns(n, tValue);
 }
 
 /** sin(πz) for complex z, with the real part of the argument reduced by
@@ -1612,6 +1834,10 @@ export function expIntegralEiComplex(z: Complex): Complex {
  */
 export function sinIntegralComplex(z: Complex): Complex {
   if (z.isNaN()) return C_NAN;
+  // Near 0 the E₁ formula below is π/2 plus a value close to −π/2, and the
+  // difference loses digits (a relative error of 2·10⁻⁵ at 10⁻¹¹·(1 + i)).
+  // The Maclaurin series has no such cancellation for |z| ≤ 1.
+  if (z.abs() <= 1) return sinIntegralSeries(z);
   // Reflect into the right half-plane (Si(−z) = −Si(z)).
   if (z.re < 0 || (z.re === 0 && z.im < 0))
     return sinIntegralComplex(z.neg()).neg();
@@ -1620,6 +1846,26 @@ export function sinIntegralComplex(z: Complex): Complex {
     .sub(e1ViaGamma(iz.neg()))
     .div(new Complex(0, 2)) // /(2i)
     .add(new Complex(Math.PI / 2, 0));
+}
+
+/**
+ * Si(z) = Σ_{n≥0} (−1)ⁿ z^{2n+1} / ((2n+1)·(2n+1)!) (DLMF 6.6.5), for
+ * |z| ≤ 1, where the terms decrease at least 18 times at each step.
+ * Measured against mpmath on circles of radius 10⁻¹² to 1: a relative error
+ * of at most 1.1·ε (ε = 2⁻⁵²).
+ */
+function sinIntegralSeries(z: Complex): Complex {
+  const z2 = z.mul(z);
+  // power = (−1)ⁿ z^{2n+1}/(2n+1)!
+  let power = z;
+  let sum = z;
+  for (let n = 1; n < 30; n++) {
+    power = power.mul(z2).div(-(2 * n) * (2 * n + 1));
+    const term = power.div(2 * n + 1);
+    sum = sum.add(term);
+    if (term.abs() <= 1e-17 * sum.abs()) break;
+  }
+  return sum;
 }
 
 /**
@@ -3697,6 +3943,10 @@ const SQRT_PI = Math.sqrt(Math.PI);
 /** Gauss error function erf(z) for complex z. */
 export function erfComplex(z: Complex): Complex {
   if (z.isNaN()) return C_NAN;
+  // Near 0, 1 − Γ(1/2, z²)/√π below subtracts two values close to 1 (a
+  // relative error of 10⁻⁸ at 10⁻⁸·(1 + i)). The Maclaurin series has no
+  // such cancellation for |z| ≤ 1.
+  if (z.abs() <= 1) return erfSeries(z);
   // Reflect into the right half-plane (erf is odd and entire).
   if (z.re < 0 || (z.re === 0 && z.im < 0)) return erfComplex(z.neg()).neg();
   let zsq = z.mul(z);
@@ -3704,6 +3954,26 @@ export function erfComplex(z: Complex): Complex {
   if (zsq.im === 0) zsq = new Complex(zsq.re, 0);
   const g = incompleteGammaUpperComplex(new Complex(0.5, 0), zsq);
   return C_ONE.sub(g.div(new Complex(SQRT_PI, 0)));
+}
+
+/**
+ * erf(z) = (2/√π) Σ_{n≥0} (−1)ⁿ z^{2n+1} / (n!·(2n+1)) (DLMF 7.6.1), for
+ * |z| ≤ 1, where the terms decrease at least 3 times at each step.
+ * Measured against mpmath on circles of radius 10⁻¹² to 1: a relative error
+ * of at most 1.9·ε (ε = 2⁻⁵²).
+ */
+function erfSeries(z: Complex): Complex {
+  const z2 = z.mul(z);
+  // power = (−1)ⁿ z^{2n+1}/n!
+  let power = z;
+  let sum = z;
+  for (let n = 1; n < 40; n++) {
+    power = power.mul(z2).div(-n);
+    const term = power.div(2 * n + 1);
+    sum = sum.add(term);
+    if (term.abs() <= 1e-17 * sum.abs()) break;
+  }
+  return sum.mul(2 / SQRT_PI);
 }
 
 /** Imaginary error function erfi(z) = −i·erf(i·z) for complex z. */

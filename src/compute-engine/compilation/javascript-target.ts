@@ -3219,7 +3219,13 @@ const JS_REAL_ONLY_LOWERINGS: ReadonlySet<string> = new Set([
   'Sinc',
   'FresnelC',
   'FresnelS',
+  // The four Bessel heads have complex values in the interpreter (a complex
+  // argument, and a negative real one for `BesselY`/`BesselK`), but the
+  // function-codegen lowerings below call the real kernels.
   'BesselJ',
+  'BesselY',
+  'BesselI',
+  'BesselK',
   'Zeta',
   'HurwitzZeta',
   // `PolyGamma` has a complex kernel in the interpreter (`polygammaComplex`,
@@ -3754,6 +3760,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Cos: (args, compile, target) => {
     if (BaseCompiler.isComplexValued(args[0]))
       return complexUnary(target, '_SYS.ccos', compile(args[0]));
+    const u = BaseCompiler.piMultiple(args[0]);
+    if (u !== undefined) return `_SYS.cospi(${compile(u)})`;
     return `Math.cos(${compile(args[0])})`;
   },
   Cosh: (args, compile, target) => {
@@ -6446,6 +6454,21 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         const result = pow(eInt);
         return boundJSResult(target, stmts.join(' '), result);
       }
+      // `e^z` (`Exp(z)` canonicalizes to this power) is the exponential
+      // kernel, as in the interpreter, which computes it with the value of
+      // `e`, not with the double `Math.E`: `Math.E^40` has a relative error
+      // of 2·10⁻¹⁵, 40 times the error of `Math.E`.
+      if (isSymbol(base, 'ExponentialE') && exp !== null) {
+        // `e^{a + iπu}` with real `a` and `u`: the angle in half-turns,
+        // reduced exactly (`_SYS.cexppi`), so `e^{iπx}` at `x = 1` is `−1`
+        // and `e^{x + iπ}` is `−e^x`.
+        const split = BaseCompiler.eulerPiSplit(exp);
+        if (split !== undefined)
+          return split.a === undefined
+            ? `_SYS.cexppi(${compile(split.u)})`
+            : `_SYS.cexppi(${compile(split.u)}, ${compile(split.a)})`;
+        return complexUnary(target, '_SYS.cexp', compile(exp));
+      }
       return spliceJSValues(
         target,
         [compile(base), compile(exp)],
@@ -6914,6 +6937,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Sin: (args, compile, target) => {
     if (BaseCompiler.isComplexValued(args[0]))
       return complexUnary(target, '_SYS.csin', compile(args[0]));
+    const u = BaseCompiler.piMultiple(args[0]);
+    if (u !== undefined) return `_SYS.sinpi(${compile(u)})`;
     return `Math.sin(${compile(args[0])})`;
   },
   Sinh: (args, compile, target) => {
@@ -6958,6 +6983,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Tan: (args, compile, target) => {
     if (BaseCompiler.isComplexValued(args[0]))
       return complexUnary(target, '_SYS.ctan', compile(args[0]));
+    const u = BaseCompiler.piMultiple(args[0]);
+    if (u !== undefined) return `_SYS.tanpi(${compile(u)})`;
     return `_SYS.tan(${compile(args[0])})`;
   },
   Tanh: (args, compile, target) => {

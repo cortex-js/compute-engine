@@ -65,6 +65,8 @@ import {
   apply,
   apply2,
   applyN,
+  applyOnImaginaryAxis,
+  boxComplexKernelResult,
   shouldNumericize,
   isExactNumber,
 } from '../boxed-expression/apply.js';
@@ -143,6 +145,17 @@ import {
   airyBiPrime,
 } from '../numerics/special-functions.js';
 import {
+  type ComplexPair,
+  besselJComplex,
+  besselYComplex,
+  besselIComplex,
+  besselKComplex,
+  airyAiComplex,
+  airyBiComplex,
+  airyAiPrimeComplex,
+  airyBiPrimeComplex,
+} from '../numerics/bessel-complex.js';
+import {
   factorial2,
   gcd,
   lcm,
@@ -153,6 +166,7 @@ import {
   MACHINE_PRECISION,
 } from '../numerics/numeric.js';
 import { rationalize } from '../numerics/rationals.js';
+import { lambertWComplex } from '../numerics/lambert-w-complex.js';
 import type { NumberLiteralInterface } from '../types-expression.js';
 import { isComposite, isPrime } from '../boxed-expression/predicates.js';
 
@@ -223,6 +237,7 @@ import {
   positiveSign,
 } from '../boxed-expression/sgn.js';
 import {
+  EXTENDED_REAL_TYPE,
   INDEXED_COLLECTION_SHAPE_TYPE,
   SIGNED_INFINITY_TYPE,
 } from '../../common/type/primitive.js';
@@ -400,6 +415,7 @@ import {
   isShapedNumericType,
   resolveShapedTypeAlias,
   unionHasGenuineScalarBranch,
+  isWalkableFiniteCollection,
 } from '../collection-utils.js';
 import { signFromAssumedPart } from './complex.js';
 import { complexParts } from './complex-parts.js';
@@ -2421,13 +2437,36 @@ function besselValueAtExceptionalPoint(
 }
 
 /**
+ * Box the value `[re, im]` of a complex Bessel or Airy kernel. A part that
+ * is not finite means that the value is past the range of a double: a
+ * complex value that is too large has a direction that no infinity of the
+ * engine holds (the rule of `Gamma`, see `applyOnImaginaryAxis()`), so the
+ * expression stays unevaluated (`undefined`).
+ */
+function boxBesselAiryComplexValue(
+  ce: ComputeEngine,
+  value: ComplexPair,
+  args: ReadonlyArray<Expression>
+): Expression | undefined {
+  if (!Number.isFinite(value[0]) || !Number.isFinite(value[1]))
+    return undefined;
+  return boxComplexKernelResult(ce, { re: value[0], im: value[1] }, args);
+}
+
+/**
  * The shared evaluate handler of the four Bessel heads. The order must be
- * a known integer and the argument a real literal for the kernels to run;
- * the exceptional points of the argument are answered first, on both
- * routes (`besselValueAtExceptionalPoint`). Everything the real
- * integer-order kernels cannot compute — a non-integer order, a non-real
- * argument, a negative real argument for `Y`/`K` (a complex value there) —
- * stays symbolic.
+ * a known integer for the kernels to run (a non-integer order stays
+ * symbolic); the exceptional points of the argument are answered first, on
+ * both routes (`besselValueAtExceptionalPoint`).
+ *
+ * A real argument uses the real kernels, except a negative one for `Y`/`K`,
+ * where the value is complex. That argument and a non-real argument use the
+ * complex kernels of `bessel-complex.ts`, which compute in doubles at every
+ * engine precision. On the negative real axis (the branch cut of `Y` and
+ * `K`) the value is the limit from above, as for `Ln`:
+ * `Y₀(−2) = Y₀(2) + 2i·J₀(2)`. On the imaginary axis, `J_n(iy) = iⁿ·I_n(y)`
+ * and `I_n(iy) = iⁿ·J_n(y)` (verified with mpmath for negative `y` and `n`
+ * too), so the real kernels give one part and the other part is exactly 0.
  */
 function evaluateBessel(
   kind: 'J' | 'Y' | 'I' | 'K',
@@ -2441,18 +2480,59 @@ function evaluateBessel(
   if (order === null) return undefined;
   const special = besselValueAtExceptionalPoint(kind, order, x, ce, n);
   if (special !== undefined) return special;
-  if (!isRealLiteral(x)) return undefined;
-  if ((kind === 'Y' || kind === 'K') && x.isNegative === true) return undefined;
   if (!shouldNumericize(numericApproximation, n, x)) return undefined;
+  if (
+    isRealLiteral(x) &&
+    !((kind === 'Y' || kind === 'K') && x.isNegative === true)
+  ) {
+    const kernel =
+      kind === 'J'
+        ? besselJ
+        : kind === 'Y'
+          ? besselY
+          : kind === 'I'
+            ? besselI
+            : besselK;
+    return apply2(n, x, kernel);
+  }
+  if (kind === 'J' || kind === 'I') {
+    const onAxis = applyOnImaginaryAxis(x, (y) => {
+      const v = kind === 'J' ? besselI(order, y) : besselJ(order, y);
+      // iⁿ·v
+      switch (((order % 4) + 4) % 4) {
+        case 0:
+          return [v, 0];
+        case 1:
+          return [0, v];
+        case 2:
+          return [-v, 0];
+        default:
+          return [0, -v];
+      }
+    });
+    if (onAxis !== undefined) {
+      if (onAxis !== null) return onAxis;
+      // Past the double range. For an even order, J_n(iy) = iⁿ·I_n(y) is
+      // real, and I_n(y) > 0 for an even n: a real overflow is a signed
+      // infinity, as for `BesselI(n, y)` (`BesselJ(0, 1000i)` is +∞). For an
+      // odd order the value is imaginary: no infinity of the engine holds
+      // it, so the expression stays unevaluated.
+      if (kind === 'J' && order % 2 === 0)
+        return ((order % 4) + 4) % 4 === 0
+          ? ce.PositiveInfinity
+          : ce.NegativeInfinity;
+      return undefined;
+    }
+  }
   const kernel =
     kind === 'J'
-      ? besselJ
+      ? besselJComplex
       : kind === 'Y'
-        ? besselY
+        ? besselYComplex
         : kind === 'I'
-          ? besselI
-          : besselK;
-  return apply2(n, x, kernel);
+          ? besselIComplex
+          : besselKComplex;
+  return boxBesselAiryComplexValue(ce, kernel(order, [x.re, x.im]), [n, x]);
 }
 
 /**
@@ -2485,6 +2565,43 @@ function airyValueAtInfinity(
       ? ce.Zero
       : indeterminateFormAnswer(ce, [x]);
   return indeterminateFormAnswer(ce, [x]);
+}
+
+/**
+ * The shared evaluate handler of the four Airy heads: the values at the
+ * infinite points first (`airyValueAtInfinity`), then the real kernels for
+ * a real argument and the complex kernels of `bessel-complex.ts` for a
+ * non-real one (doubles at every engine precision).
+ */
+function evaluateAiry(
+  kind: 'Ai' | 'Bi' | 'AiPrime' | 'BiPrime',
+  x: Expression,
+  ce: ComputeEngine,
+  numericApproximation: boolean | undefined
+): Expression | undefined {
+  const special = airyValueAtInfinity(kind, x, ce);
+  if (special !== undefined) return special;
+  if (!shouldNumericize(numericApproximation, x)) return undefined;
+  if (isNumber(x) && x.isComplex) {
+    const kernel =
+      kind === 'Ai'
+        ? airyAiComplex
+        : kind === 'Bi'
+          ? airyBiComplex
+          : kind === 'AiPrime'
+            ? airyAiPrimeComplex
+            : airyBiPrimeComplex;
+    return boxBesselAiryComplexValue(ce, kernel([x.re, x.im]), [x]);
+  }
+  const kernel =
+    kind === 'Ai'
+      ? airyAi
+      : kind === 'Bi'
+        ? airyBi
+        : kind === 'AiPrime'
+          ? airyAiPrime
+          : airyBiPrime;
+  return apply(x, kernel);
 }
 
 /**
@@ -2624,6 +2741,68 @@ function specialFunctionType(
   return numericTypeHandlerOnTypes(
     ops.filter((d): d is OperandDescriptor => d !== undefined)
   );
+}
+
+/**
+ * The result type of a Bessel head (`kind` is `J`, `Y`, `I` or `K`).
+ * `specialFunctionType` claims `real` when both operands are real, which
+ * holds only where the value is real:
+ *
+ * - `Y_n(x)` and `K_n(x)` are complex for `x < 0` (the branch cut:
+ *   `Y₀(−2) = 0.51 + 0.45i`) and have a pole at `x = 0`, so the claim needs
+ *   a positive argument.
+ * - `J_ν(x)` and `I_ν(x)` of a non-integer order are complex for `x < 0`
+ *   too (`J_{1/2}(−1)` is imaginary) and have a pole at 0 for a negative
+ *   order, so the claim needs an integer order or a positive argument.
+ *
+ * Otherwise the claim widens to `number`.
+ */
+function besselResultType(
+  kind: 'J' | 'Y' | 'I' | 'K',
+  ops: ReadonlyArray<OperandDescriptor | undefined>
+): Type | undefined {
+  const t = specialFunctionType(ops);
+  if (t !== 'real') return t;
+  const [n, x] = ops;
+  if (x !== undefined && positiveSign(x.facts.sgn) === true) return t;
+  if (
+    (kind === 'J' || kind === 'I') &&
+    n !== undefined &&
+    factsOf(n.type).integer
+  )
+    return t;
+  return 'number';
+}
+
+/**
+ * Result type of `LambertW`. W_k(x) is real only on the real branches, for
+ * an argument in their real domain: W₀ on [−1/e, ∞] and W₋₁ on [−1/e, 0).
+ * Everywhere else on the real line the value is complex (`W₀(−1)`,
+ * `W₋₁(0.5)`, `W₁(x)` for every real x). So a real claim of
+ * `specialFunctionType` stands only when the branch and the argument range
+ * prove it; otherwise an argument that is real gives `number`.
+ *
+ * The argument is read as ONE element, as the result-typing code re-adds
+ * the shape of a collection operand: its type is the element type, and the
+ * sign of the operand is not used for a collection.
+ */
+function lambertWType(
+  ops: ReadonlyArray<OperandDescriptor | undefined>
+): Type | undefined {
+  const t = specialFunctionType(ops);
+  const [x, k] = ops;
+  if (t === undefined || x === undefined) return t;
+  const element: OperandDescriptor =
+    x.facts.collection === true
+      ? { type: broadcastOperandType(x), facts: { ...x.facts, sgn: undefined } }
+      : x;
+  if (!isSubtype(element.type, EXTENDED_REAL_TYPE)) return t;
+  const branch = k === undefined ? 0 : operandTypeValue(k);
+  const isReal =
+    (branch === 0 || branch === -1) &&
+    provablyGreaterEqualOnTypes(element, -1 / Math.E) &&
+    (branch === 0 || provablyLessOnTypes(element, 0));
+  return isReal ? t : 'number';
 }
 
 /** `Sign`'s result on the extended real line: exactly {−1, 0, 1}. Off that
@@ -2788,7 +2967,9 @@ function gammaOfRealShifted(x: Expression): Expression | undefined {
       x,
       (v) => gamma(1 + v),
       (v) => bigGamma(ce, v.add(1))
-    ) ?? ce.number(gamma(1 + x.re))
+    ) ??
+      // The double kernel gives a float, even when its value is an integer
+      ce.number(ce._inexactNumericValue(gamma(1 + x.re)))
   );
 }
 
@@ -2849,7 +3030,11 @@ function gammaOfComplex(
 ): Expression | undefined {
   const big = boxExpOfComplexLog(engine, logGammaComplex(z));
   if (big === null) return undefined;
-  return big ?? engine.number(gammaComplex(z));
+  if (big !== undefined) return big;
+  // The double from `gammaComplex` is a float, even when both its parts are
+  // integers
+  const g = gammaComplex(z);
+  return engine.number(engine._inexactNumericValue({ re: g.re, im: g.im }));
 }
 
 /**
@@ -5706,56 +5891,80 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // (|W(z)| grows without bound in every direction); an anonymous
       // infinity is `NaN`. The `~oo` and anonymous-infinity answers hold
       // for every branch (`W_k(z) ≈ ln z + 2πik` has an infinite modulus
-      // in every direction on every branch); the `±∞` values are the
-      // PRINCIPAL branch's, and the −1 branch stays symbolic at the two
-      // real infinities (its values there are other complex infinities
-      // that are not verified). Outside a
-      // branch's real domain (`W₀(−1)`, `W₋₁(0.5)`) the value is a finite
-      // complex number the real kernels cannot compute, so the application
-      // stays SYMBOLIC: `NaN` there would misreport a capability gap as
-      // an indeterminate value. `NaN` propagates (explicit: the carrier is
-      // not a subtype of `complex`).
+      // in every direction on every branch). On a branch k ≠ 0 the real
+      // infinities follow the `W₀(−∞)` treatment: `W_k(x) ≈ ln x + 2πik`
+      // for x → +∞ and `W_k(−x) ≈ ln x + (2k + 1)πi` for x → +∞
+      // (W₁(10³⁰⁰) = 684.3 + 6.27i, W₋₁(−10¹²⁶) = 285.0 − 3.13i), so
+      // `.N()` answers `∞ + 2πki` and `∞ + (2k + 1)πi`, the values of
+      // mpmath's `lambertw`, and `evaluate()` stays symbolic. `NaN`
+      // propagates (explicit: the carrier is not a subtype of `complex`).
+      //
+      // A finite argument outside a branch's real domain (`W₀(−1)`,
+      // `W₋₁(0.5)`, every real argument on a branch k ∉ {0, −1}) and a
+      // complex argument use the complex kernel `lambertWComplex`, which
+      // computes in doubles at every precision. Its branch cuts and its
+      // values on a cut (the limit from above, as for `Ln`) are those of
+      // mpmath's `lambertw(z, k)`. `W_k(0) = −∞` for k ≠ 0, as `Ln(0)`
+      // (and mpmath). An argument where the iteration of the kernel does not
+      // converge stays symbolic: `NaN` there would misreport a capability
+      // gap as an indeterminate value.
       // No `canonical` handler, so a proven off-carrier operand is rejected
       // at boxing.
       signature: '(complex | infinity, number?) -> number',
       examples: ['[LambertW(1), N(LambertW(1))]'],
       nanBehavior: 'propagate',
       type: (ops, context) =>
-        BoxedType.forResult(
-          specialFunctionType(ops),
-          context.engine._typeResolver
-        ),
-      evaluate: (ops, { numericApproximation, engine }) => {
+        BoxedType.forResult(lambertWType(ops), context.engine._typeResolver),
+      evaluate: (ops, { numericApproximation, engine, expression }) => {
         const x = ops[0];
-        // Branch index: default 0 (principal W₀). Only the real branches 0
-        // and −1 are implemented; a symbolic, non-integer, or otherwise
-        // unsupported branch keeps the expression inert.
+        // Branch index: default 0 (principal W₀). A symbolic or non-integer
+        // branch keeps the expression inert.
         let branch = 0;
         if (ops[1] !== undefined) {
           const k = asSmallInteger(ops[1]);
-          if (k === null || (k !== 0 && k !== -1)) return undefined;
+          if (k === null) return undefined;
           branch = k;
         }
         const point = infinitePoint(x);
         if (point !== undefined) {
           if (point === 'anonymous') return engine.NaN;
           if (point === '~oo') return engine.ComplexInfinity;
-          if (branch !== 0) return undefined;
-          if (point === '+oo') return engine.PositiveInfinity;
-          return numericApproximation
-            ? engine.number(engine.complex(Infinity, Math.PI))
-            : undefined;
+          if (point === '+oo' && branch === 0) return engine.PositiveInfinity;
+          if (!numericApproximation) return undefined;
+          const im =
+            point === '+oo' ? 2 * Math.PI * branch : (2 * branch + 1) * Math.PI;
+          return engine.number(engine.complex(Infinity, im));
         }
+        // W_k(0) = −∞ on a branch k ≠ 0 (W₀(0) = 0 comes from the kernels).
+        if (branch !== 0 && isNumber(x) && x.isSame(0))
+          return engine.NegativeInfinity;
+        // The branch point: W₀(−1/e) = W₋₁(−1/e) = −1, exactly. It is read
+        // on the operand BEFORE its numeric evaluation (under `.N()` the
+        // handler receives a float): −1/e rounded to a double is just below
+        // −1/e, outside the real domain, and the kernels would give
+        // −1 ± 8.2·10⁻⁹i for it. The test is on x·e, which canonicalizes to
+        // −1 for each spelling of −1/e (`-e^(-1)`, `-1/e`, `-exp(-1)`).
+        const raw =
+          isFunction(expression) && expression.nops >= 1 ? expression.op1 : x;
+        if (
+          (branch === 0 || branch === -1) &&
+          !isNumber(raw) &&
+          raw.mul(engine.E).isSame(-1)
+        )
+          return engine.NegativeOne;
         if (!shouldNumericize(numericApproximation, x)) return undefined;
+        // The real kernels give `NaN` outside the real domain of the branch,
+        // and `apply()` then uses the complex kernel.
         const result = apply(
           x,
           (v) => lambertW(v, branch),
-          (v) => bigLambertW(engine, v, branch)
+          (v) => bigLambertW(engine, v, branch),
+          (z) => lambertWComplex(z, branch)
         );
-        // A `NaN` from the kernel means "outside this branch's real
-        // domain" (the argument itself is never NaN here: the dispatch
-        // gate propagated it before the handler ran), and the value there
-        // is complex — stay symbolic rather than report `NaN`.
+        // A `NaN` from the complex kernel means that its iteration did not
+        // converge (the argument itself is never NaN here: the dispatch
+        // gate propagated it before the handler ran) — stay symbolic rather
+        // than report `NaN`.
         if (result !== undefined && result.isNaN === true) return undefined;
         return result;
       },
@@ -5772,10 +5981,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     // batch 8). The ARGUMENT slot is the carrier `complex | infinity`,
     // with the values at its exceptional points in
     // `besselValueAtExceptionalPoint`, answered on both routes. The
-    // kernels are real, integer-order kernels: a non-integer order, a
-    // non-real argument, and a negative real argument for `Y`/`K` (whose
-    // value is complex there) all stay SYMBOLIC — capability gaps, not
-    // off-carrier points. `NaN` propagates (explicit: the argument
+    // kernels are integer-order kernels, real and complex (`evaluateBessel`):
+    // a non-integer order stays SYMBOLIC — a capability gap, not an
+    // off-carrier point. `NaN` propagates (explicit: the argument
     // carrier is not a subtype of `complex`). No
     // `canonical` handler, so the order slot is enforced at BOXING.
     BesselJ: {
@@ -5788,7 +5996,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       nanBehavior: 'propagate',
       type: (ops, context) =>
         BoxedType.forResult(
-          specialFunctionType(ops),
+          besselResultType('J', ops),
           context.engine._typeResolver
         ),
       evaluate: ([n, x], { numericApproximation, engine }) =>
@@ -5808,7 +6016,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       nanBehavior: 'propagate',
       type: (ops, context) =>
         BoxedType.forResult(
-          specialFunctionType(ops),
+          besselResultType('Y', ops),
           context.engine._typeResolver
         ),
       evaluate: ([n, x], { numericApproximation, engine }) =>
@@ -5827,7 +6035,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       nanBehavior: 'propagate',
       type: (ops, context) =>
         BoxedType.forResult(
-          specialFunctionType(ops),
+          besselResultType('I', ops),
           context.engine._typeResolver
         ),
       evaluate: ([n, x], { numericApproximation, engine }) =>
@@ -5848,7 +6056,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       nanBehavior: 'propagate',
       type: (ops, context) =>
         BoxedType.forResult(
-          specialFunctionType(ops),
+          besselResultType('K', ops),
           context.engine._typeResolver
         ),
       evaluate: ([n, x], { numericApproximation, engine }) =>
@@ -5866,7 +6074,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // `complex | infinity` (an entire function has a value at every
       // finite complex point, and the infinite points are decided in
       // `airyValueAtInfinity`, answered on both routes). A non-real finite
-      // argument stays symbolic: no complex kernel, a capability gap.
+      // argument uses the complex kernels (`evaluateAiry`).
       // `NaN` propagates (explicit: the carrier is not a subtype of
       // `complex`). No `canonical` handler, so a proven off-carrier
       // operand is rejected at boxing.
@@ -5879,10 +6087,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           context.engine._typeResolver
         ),
       evaluate: ([x], { numericApproximation, engine }) =>
-        airyValueAtInfinity('Ai', x, engine) ??
-        (shouldNumericize(numericApproximation, x)
-          ? apply(x, airyAi)
-          : undefined),
+        evaluateAiry('Ai', x, engine, numericApproximation),
     },
 
     // Airy function of the second kind Bi(x)
@@ -5901,10 +6106,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           context.engine._typeResolver
         ),
       evaluate: ([x], { numericApproximation, engine }) =>
-        airyValueAtInfinity('Bi', x, engine) ??
-        (shouldNumericize(numericApproximation, x)
-          ? apply(x, airyBi)
-          : undefined),
+        evaluateAiry('Bi', x, engine, numericApproximation),
     },
 
     // Derivative of the Airy function of the first kind Ai'(x)
@@ -5923,10 +6125,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           context.engine._typeResolver
         ),
       evaluate: ([x], { numericApproximation, engine }) =>
-        airyValueAtInfinity('AiPrime', x, engine) ??
-        (shouldNumericize(numericApproximation, x)
-          ? apply(x, airyAiPrime)
-          : undefined),
+        evaluateAiry('AiPrime', x, engine, numericApproximation),
     },
 
     // Derivative of the Airy function of the second kind Bi'(x)
@@ -5945,10 +6144,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           context.engine._typeResolver
         ),
       evaluate: ([x], { numericApproximation, engine }) =>
-        airyValueAtInfinity('BiPrime', x, engine) ??
-        (shouldNumericize(numericApproximation, x)
-          ? apply(x, airyBiPrime)
-          : undefined),
+        evaluateAiry('BiPrime', x, engine, numericApproximation),
     },
 
     Ln: {
@@ -8693,7 +8889,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           if (big !== undefined) {
             const r = withDoubleDigits(() => big.abs().sqrt());
             if (!big.isNegative()) return boxBignumResult(engine, r);
-            return engine.number(engine.complex(0, r.toNumber()));
+            // The root is a float, even when it is an integer
+            return engine.number(
+              engine._inexactNumericValue({ re: 0, im: r.toNumber() })
+            );
           }
         }
 
@@ -10929,7 +11128,7 @@ function pointOperand(x: Expression): readonly Expression[] | undefined {
   // Any finite indexed collection of numbers — a `List` literal, a `Range`,
   // a lazy `Map` — is the flat spelling. The count bound keeps a large domain
   // from materializing here (an oversized operand stays symbolic).
-  if (x.isFiniteCollection !== true || x.isIndexedCollection !== true)
+  if (!isWalkableFiniteCollection(x) || x.isIndexedCollection !== true)
     return undefined;
   const count = x.count;
   if (count === undefined || count === 0 || count > MAX_DISTANCE_BROADCAST)
@@ -10971,7 +11170,7 @@ function isCoordinate(x: Expression): boolean {
 function pointListOperand(
   xs: Expression
 ): readonly (readonly Expression[] | Expression)[] | undefined {
-  if (xs.isFiniteCollection !== true || xs.isIndexedCollection !== true)
+  if (!isWalkableFiniteCollection(xs) || xs.isIndexedCollection !== true)
     return undefined;
   const count = xs.count;
   if (count === undefined || count > MAX_DISTANCE_BROADCAST) return undefined;

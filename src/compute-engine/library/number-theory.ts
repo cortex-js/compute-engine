@@ -11,6 +11,7 @@ import { rationalize } from '../numerics/rationals.js';
 import {
   canEnumerateOperand,
   groundEnumerationOperand,
+  isWalkableFiniteCollection,
 } from '../collection-utils.js';
 import {
   gcd,
@@ -178,7 +179,7 @@ const MAX_ENUMERATED_ELEMENTS = 1_000_000;
 function finiteElements(
   op: Expression | undefined
 ): Expression[] | undefined {
-  if (op === undefined || op.isFiniteCollection !== true) return undefined;
+  if (op === undefined || !isWalkableFiniteCollection(op)) return undefined;
   const elements: Expression[] = [];
   for (const x of op.each()) {
     if (elements.length >= MAX_ENUMERATED_ELEMENTS) return undefined;
@@ -2262,7 +2263,13 @@ function dirichletLResult(
 ): Expression | undefined {
   if (value === undefined || !Number.isFinite(value.re + value.im))
     return undefined;
-  return ce.number(value.im === 0 ? value.re : ce.complex(value.re, value.im));
+  // A complex value computed in doubles is a float, even when both its parts
+  // are integers
+  return ce.number(
+    value.im === 0
+      ? value.re
+      : ce._inexactNumericValue({ re: value.re + 0, im: value.im + 0 })
+  );
 }
 
 /**

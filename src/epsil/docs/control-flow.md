@@ -22,6 +22,8 @@ f(x) = x + 1
 f(x, y) = x + y
 ```
 
+`:=` is a synonym of `=` here: `f(x) := x + 1` is the same definition.
+
 The **block style** wraps the body in a statement block, whose value is its
 last expression:
 
