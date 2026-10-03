@@ -486,6 +486,7 @@ describe('the resolution pass', () => {
       .sort();
     expect(binders).toEqual([
       'Comprehension',
+      'ContourIntegrate',
       'D',
       'Exists',
       'ExistsUnique',
@@ -499,6 +500,15 @@ describe('the resolution pass', () => {
       'Series',
       'Sum',
     ]);
+  });
+
+  test('contour integration binds a variable that spells a library constant', () => {
+    const ce = new ComputeEngine();
+    const result = executeEpsil(
+      ce,
+      'contourIntegrate(1/pi, pi, circleContour(0, 2))'
+    );
+    expect(result.value.N().im).toBeCloseTo(2 * Math.PI, 11);
   });
 
   test('an engine-bound name is not a library name', () => {

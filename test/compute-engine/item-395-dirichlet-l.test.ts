@@ -1,4 +1,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
+import { BigDecimal } from '../../src/big-decimal';
+import * as specialFunctions from '../../src/compute-engine/numerics/special-functions';
 
 // Item #395: DirichletCharacter and DirichletL. Wolfram's character indexing is
 // not documented as a formula; the table below is read off Wolfram's kernel
@@ -798,16 +800,28 @@ describe('DirichletL of a real character next to s = 1', () => {
 
 describe('DirichletL of a complex character at a high precision', () => {
   // mpmath: 997^(−s) Σ χ(r) ζ(s, r/997), the value is a machine number.
-  test('DirichletL(997, 500, 1.5) at precision 300 is fast and a double', () => {
+  test('DirichletL(997, 500, 1.5) bounds working precision for a double result', () => {
     const precision = ce.precision;
     ce.precision = 300;
+    const workingPrecisions: number[] = [];
+    const hurwitz = specialFunctions.bigHurwitzZeta;
+    const spy = jest
+      .spyOn(specialFunctions, 'bigHurwitzZeta')
+      .mockImplementation((...args) => {
+        workingPrecisions.push(BigDecimal.precision);
+        return hurwitz(...args);
+      });
     try {
-      const start = Date.now();
       const v = ce.box(['DirichletL', 997, 500, 1.5]).N();
-      expect(Date.now() - start).toBeLessThan(5000);
+      // A double result must not compute every Hurwitz term at the user's
+      // 300-digit precision. This checks that cost directly, independent of
+      // machine speed and concurrent CI jobs.
+      expect(workingPrecisions.length).toBeGreaterThan(0);
+      expect(Math.max(...workingPrecisions)).toBeLessThan(100);
       expect(v.re).toBeCloseTo(1.04649962645262583, 15);
       expect(v.im).toBeCloseTo(-0.313517916008437163, 15);
     } finally {
+      spy.mockRestore();
       ce.precision = precision;
     }
   });

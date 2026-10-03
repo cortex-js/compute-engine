@@ -186,6 +186,8 @@ import type {
 import { isValidSymbol } from '../math-json/symbols.js';
 
 import { getFunctionProperties } from './function-properties/index.js';
+import { contourIntegrate as contourIntegrateImpl } from './symbolic/contour-integrate.js';
+import type { ContourInput, ContourIntegralResult } from './types-contour.js';
 import type { FunctionProperties } from './function-properties/index.js';
 
 import {
@@ -2747,6 +2749,18 @@ export class ComputeEngine implements IComputeEngine {
    */
   functionProperties(name: string): FunctionProperties | undefined {
     return getFunctionProperties(this, name);
+  }
+
+  /** Integrate over a supported contour or the full real line and report
+   * residue-theorem intermediate results. Boundary poles require explicit
+   * principal-value interpretation on the real line; undecidable cases have
+   * no value. */
+  contourIntegrate(
+    integrand: ExpressionInput,
+    variable: string,
+    contour: ContourInput
+  ): ContourIntegralResult {
+    return contourIntegrateImpl(this, integrand, variable, contour);
   }
 
   /**
