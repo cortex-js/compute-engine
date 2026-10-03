@@ -45,6 +45,18 @@
   was `9.99982e-11`, it is now `1e-10`. The real kernels of `Shi` and `Chi`
   use their Maclaurin series for `|x| ≤ 2`.
 
+### Issues Resolved
+
+- **In Epsil, `f(x) := body` defines `f` as `f(x) = body` does** (#400,
+  contributed by [enumeratio](https://github.com/enumeratio)). As a statement,
+  `f(x) := x^2 + a` parsed to `Assign(f(x), x^2 + a)`, which evaluates to
+  itself with no diagnostic and leaves `f` undefined, so `f(3)` was `f(3)`. It
+  now parses to `DefineFunction(f, Function(x^2 + a, x))`, and `f(3)` is
+  `a + 9`. The two spellings are synonyms for every function head: typed,
+  rest and wildcard parameters, a return type, a definition inside a block,
+  and literal-pattern clauses. So `f(0) := 1` followed by `f(n) := n*f(n-1)`
+  defines the factorial, and `f(5)` is `120`. `Assign` itself is unchanged.
+
 ## 0.147.0 _2026-10-02_
 
 ### Behavior Changes

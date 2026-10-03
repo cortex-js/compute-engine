@@ -445,7 +445,7 @@ Hyperbolic cosine integral: γ + ln|x| + ∫₀ˣ (cosh(t)−1)/t dt.
 
 ```epsil
 N(coshIntegral(1))
-// ➔ 0.8378669409802084
+// ➔ 0.8378669409802082
 ```
 
 ### cot

@@ -5232,7 +5232,10 @@ export class Parser {
       pos += m[0].length;
 
       skipSpace();
-      if (src[pos] === ':') {
+      // A `:` starts a bound, but the `:` of `:=` does not: in
+      // `f(x: T) -> T where T := x` the `:=` ends the definition head, as
+      // `=` does in `where T = x`.
+      if (src[pos] === ':' && src[pos + 1] !== '=') {
         pos += 1;
         try {
           // Extent only — the bound's MEANING is validated on the assembled
@@ -5285,7 +5288,8 @@ export class Parser {
 
   /** Whether the statement at the cursor is a math-style function definition
    * `f( … ) = …` or `f( … ) -> Type = …`: a bare symbol, an abutting `(`, its
-   * matching `)`, then either `=` or an `-> Type =` return ascription. An
+   * matching `)`, then either `=` or an `-> Type =` return ascription (`:=`
+   * is accepted everywhere `=` is, with the same meaning). An
    * effect specifier may precede the arrow (`f(x) random -> integer = …`) but
    * only WITH it: `f(x) random = 5` stays an expression. A lookahead only — it
    * consumes nothing. */
@@ -5316,12 +5320,14 @@ export class Parser {
     const after = this.tokens[k];
     if (after === undefined) return false;
     // The bare `=` form is claimed only WITHOUT a specifier: `f(x) random = 5`
-    // is an expression (an invisible multiply), not a definition.
-    if (k === i + 1 && after.type === 'OPERATOR' && after.text === '=')
-      return true;
-    // Optional return type `-> Type =`: past `->`, scan for the `=` that ends
-    // the (type) prefix. Type spellings never contain a top-level `=`, so the
-    // first `=` at bracket depth 0 closes the definition head.
+    // is an expression (an invisible multiply), not a definition. `:=` is
+    // claimed in every position where `=` is, so that the two spellings define
+    // the same function, literal-pattern clauses (`f(0) := 1`) included.
+    if (k === i + 1 && isDefinitionEquals(after)) return true;
+    // Optional return type `-> Type =`: past `->`, scan for the `=` or `:=`
+    // that ends the (type) prefix. Type spellings never contain a top-level
+    // `=` or `:=`, so the first one at bracket depth 0 closes the definition
+    // head.
     //
     // A line break ENDS the scan only when it happens at depth 0, where it is
     // a statement boundary: the head and its `=` must start on the same line,
@@ -5365,7 +5371,8 @@ export class Parser {
             break;
           case 'OPERATOR':
             angleDepth = this.angleDepthAfter(j, angleDepth);
-            if (depth === 0 && angleDepth === 0 && t.text === '=') return true;
+            if (depth === 0 && angleDepth === 0 && isDefinitionEquals(t))
+              return true;
             break;
         }
       }
@@ -5373,7 +5380,7 @@ export class Parser {
     return false;
   }
 
-  /** Math-style `f(x) = expr` →
+  /** Math-style `f(x) = expr` (or `f(x) := expr`) →
    * `["DefineFunction", "f", ["Function", expr, …params]]` (definition
    * statements accumulate clauses — see {@link parseFunctionDefinition}).
    * Typed params
@@ -5491,7 +5498,7 @@ export class Parser {
           )
         : params;
 
-    if (!(this.check('OPERATOR') && this.current.text === '=')) {
+    if (!isDefinitionEquals(this.current)) {
       this.error(
         ['unexpected-symbol', this.current.text],
         this.current.start,
@@ -5499,7 +5506,7 @@ export class Parser {
       );
       return null;
     }
-    this.advance(); // '='
+    this.advance(); // '=' or ':='
     // The right-hand side is a function body: a `break`/`continue` BOUNDARY.
     const rhs = this.inLoopContext(0, () => this.parseExpression(0));
     if (rhs === null) {
@@ -9146,6 +9153,12 @@ function symbolNameOf(expr: MathJsonExpression): string | null {
   )
     return (expr as { sym: string }).sym;
   return null;
+}
+
+/** Whether a token ends a math-style definition head: `f(x) = body` and
+ * `f(x) := body` define `f` identically. */
+function isDefinitionEquals(t: Token): boolean {
+  return t.type === 'OPERATOR' && (t.text === '=' || t.text === ':=');
 }
 
 /**

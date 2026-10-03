@@ -5163,7 +5163,16 @@ them before blaming the change under test. Added 2026-09-22:
 `elementwise-which.test.ts` "perf smoke › the 3-clause × 900-element witness
 evaluates promptly" — a canary-normalized timing assertion (limit 5000 canary
 units) read 6251 in a six-worker full run on a box at load 4 and passed alone
-(70 of 70), while the same tree's other timing pins held.
+(70 of 70), while the same tree's other timing pins held. Added 2026-10-02, at
+HEAD `33444a04` on a box at load average 43 to 55 on 8 cores, two-worker runs:
+`item-395-dirichlet-l.test.ts` "DirichletL(997, 500, 1.5) at precision 300 is
+fast and a double" read 22,514 ms against a raw `Date.now()` limit of 5000 ms.
+This limit is a wall-clock time, not a canary-normalized one, so it can fail
+on any loaded box. `integration-rules-substitutions.test.ts` failed 1 test
+(R30 `∫Tanh(x)²/(a+b·Tanh(x))`) in one run and 5 tests (R29, R30, R8 and their
+`RUBI_NO_*` gating tests) in another: a closed form was expected and the
+integral stayed inert, which agrees with the 10-second rule-engine time limit
+running out under contention. Neither suite was run on an idle box.
 
 ### `LerchPhi` past |z| = 1 still declines for a complex `a` whose shift terms dwarf the value (OPEN — residue of the two 2026-09-30 rounds, #340, #353)
 
