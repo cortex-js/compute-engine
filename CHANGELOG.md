@@ -95,6 +95,36 @@
   does for `sin(x) = 2`. So `x·eˣ = 3` still solves to `W(3)` only, and
   `x·eˣ = -1` has no root.
 
+### New Features
+
+- **Contour integration by the residue theorem.** `ce.contourIntegrate(f, z,
+  contour)` and the `ContourIntegrate` operator integrate over a circle, a
+  rectangle or a simple polygon (`CircleContour`, `RectangleContour`,
+  `PolygonContour`), and `\oint_{|z-c|=r}` now evaluates. The report gives
+  each pole with its location, order, residue and leading Laurent coefficient,
+  the sum of the residues and the value. Supported integrands are rational
+  functions, entire numerators, products of `sin`/`cos` of a real affine
+  argument in the denominator, and `P(z)·exp(c/(z−a))` with an essential
+  singularity. An input that cannot be certified exactly stays unevaluated,
+  and a pole on the contour gives `Indeterminate`. A call has a step budget,
+  so the point where it gives up does not depend on the machine. See
+  `docs/CONTOUR-INTEGRATION.md`. Contributed in PR #410.
+
+- **Real integrals by residues.** `Integrate` gives an exact value over
+  `(−∞, ∞)` for a rational function, or a rational function times `cos`,
+  `sin` or `exp(i·a·x)`; over `[0, ∞)` for such an even integrand; and over
+  `[0, 2π]` or `[0, π]` for a rational function of `sin x` and `cos x`. For
+  example, `∫ sin(x)/x dx` over `(−∞, ∞)` is `π`, and `∫₀^{2π} dx/(2 + cos x)`
+  is `2π/√3`. `.N()` uses the exact value: before, `.N()` of the sinc
+  integral was `7.1 ± 7.3`. A Cauchy principal value is never assumed;
+  `RealLineContour(True)` asks for one.
+
+- **A pole on the path of a real integral gives `+∞`, `−∞` or no value.**
+  `∫ dx/x²` over `(−∞, ∞)` was `0` and is now `+∞`, and
+  `∫₀^{2π} dx/(1 + cos x)` is `+∞`. `∫ (1/x² − 1/(x−1)²) dx` over
+  `(−∞, ∞)` was `0` and is now `Indeterminate`: the integrand tends to `+∞`
+  at 0 and to `−∞` at 1.
+
 ### Improvements
 
 - **More accurate `erf`, `erfc` and `erfi` in doubles.** The machine kernels

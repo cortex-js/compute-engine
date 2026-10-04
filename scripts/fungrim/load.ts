@@ -55,7 +55,9 @@ export function loadCorpus(dir: string): Corpus {
   const topics: string[] = [];
   for (const file of fs.readdirSync(corpusDir).sort()) {
     if (!file.endsWith('.json')) continue;
-    const data = JSON.parse(fs.readFileSync(path.join(corpusDir, file), 'utf8'));
+    const data = JSON.parse(
+      fs.readFileSync(path.join(corpusDir, file), 'utf8')
+    );
     topics.push(data.topic);
     for (const e of data.entries) entries.push({ ...e, topic: data.topic });
   }
@@ -112,9 +114,16 @@ export const COMPAT_OVERRIDES: Record<string, string> = {
   Binomial: '(complex, complex) -> complex',
   Fibonacci: '(complex) -> complex',
   HilbertMatrix: '(integer) -> matrix',
+  // Fungrim uses Conrey-indexed characters, including a function-valued
+  // two-argument form, and L(s, chi). CE's numeric built-ins instead use
+  // Wolfram indexing and L(k, j, s). Keep these corpus forms uninterpreted
+  // during representability checks; they are not numeric API aliases.
+  DirichletCharacter: '(integer, integer, integer?) -> any',
+  DirichletL: '(complex, any) -> complex',
   // Corrected shell signatures
   CongruentMod: '(any, any, integer) -> boolean',
-  Hypergeometric3F2: '(complex, complex, complex, complex, complex, complex) -> complex',
+  Hypergeometric3F2:
+    '(complex, complex, complex, complex, complex, complex) -> complex',
   ModularLambda: '(number) -> complex',
   EisensteinG: '(integer, number) -> complex',
   // Integer-domain built-ins widened for Stage-1 boxing
@@ -316,11 +325,7 @@ function refineTypesFromIntegerSlots(
  * colliding with a CE built-in constant) are tolerated: boxing still works,
  * the built-in semantics apply.
  */
-export function withEntryScope<T>(
-  ce: ComputeEngine,
-  e: Entry,
-  fn: () => T
-): T {
+export function withEntryScope<T>(ce: ComputeEngine, e: Entry, fn: () => T): T {
   ce.pushScope();
   try {
     const types = variableTypes(e);

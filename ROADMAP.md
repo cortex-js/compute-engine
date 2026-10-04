@@ -109,6 +109,39 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
+### Contour integration does not certify the complex roots of most polynomials of degree 3 or more (OPEN, small — found 2026-10-04 by the review of PR #410)
+
+`ce.contourIntegrate()` needs every root of a denominator in exact form. For
+a polynomial of degree 3 or more that is not even, it uses `solve()`, which
+returns only the real roots. The pole set is then not certified and the
+status is `unsupported`: `1/(z³ − 2)` and `z/(z⁷ − 1)` on `|z| = 2` stay
+unevaluated. An attempt that wrote the roots of `zⁿ − c` as
+`|c|^(1/n)(cos θ + i sin θ)` gave correct values, but took 1.2 s to 1.5 s for
+`n = 3` and reached the 5 s time limit for `n = 5` and `n = 7`. Most of the
+time goes to the exact sign tests and the Laurent expansions at points that
+contain `cos(2π/n)`. A fix needs a cheaper residue at a simple pole of
+`h(z)/(zⁿ − c)`, which is `h(p)·p/(n·c)`, computed before the Laurent kernel
+runs, and a measurement of where the remaining time goes.
+
+### Residue sums and real integrals are not always in a simple form (OPEN, small — found 2026-10-04 by the review of PR #410)
+
+The values are correct, but `simplify()` does not reduce them.
+`cos z/(z² + 1)²` on `|z| = 2` gives
+`2iπ(¼ sin(−i) + ¼ sin(i) − ¼i cos(i) + ¼i cos(−i))`, which is 0:
+`sin(−i) + sin(i)` is not combined, because the odd-function rule does not
+read the complex literal `−i` as a negation. `∫ (x² − 1)/((x − 1)(x⁴ + 1)) dx`
+over `(−∞, ∞)` gives `π/(2(2 − √2)) − π/(2(2 + √2))` instead of `π/√2`.
+
+### `∫ dx/x` over `(−∞, ∞)` stays unevaluated (OPEN, small — found 2026-10-04 by the review of PR #410; present before)
+
+The integral has no value: the integrand changes sign at its simple pole at
+0. The residue route declines because the integrand decays only like `1/x`,
+so it cannot prove that the closing arc contributes nothing. The other routes
+give no answer, and `.N()` is `NaN`. A pole of odd order on the path makes the
+integral have no value whatever the behavior at infinity, so the pole
+classification (`realPathDivergence()` in `symbolic/contour-integrate.ts`)
+could also run when the decay test fails.
+
 ### Quadrature loops run 25 to 70 times slower under jest than under `tsx` (OPEN, small — found 2026-10-01 by the closing fixes of the integration round)
 
 The same numeric integral takes 7 ms under `tsx` and 185 ms under jest (one

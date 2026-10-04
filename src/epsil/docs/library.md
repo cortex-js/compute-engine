@@ -11,7 +11,7 @@ date: Last Modified
 ---
 # Epsil Standard Library
 
-The 698 functions and constants of the standard library, by category.
+The 703 functions and constants of the standard library, by category.
 Each row gives a name, its signature (for a function) or its kind and type
 (for a constant or variable), and the first sentence of its description —
 the same description `epsil doc <name>` prints in full and the editor
@@ -32,7 +32,7 @@ To search the library by concept rather than by name, use
 - [Arithmetic](#arithmetic) — 101 definitions · [full reference](/epsil/reference/arithmetic/)
 - [Fractals](#fractals) — 2 definitions · [full reference](/epsil/reference/fractals/)
 - [Trigonometry](#trigonometry) — 42 definitions · [full reference](/epsil/reference/trigonometry/)
-- [Calculus](#calculus) — 19 definitions · [full reference](/epsil/reference/calculus/)
+- [Calculus](#calculus) — 24 definitions · [full reference](/epsil/reference/calculus/)
 - [Polynomials](#polynomials) — 17 definitions · [full reference](/epsil/reference/polynomials/)
 - [Combinatorics](#combinatorics) — 11 definitions · [full reference](/epsil/reference/combinatorics/)
 - [Number theory](#number-theory) — 60 definitions · [full reference](/epsil/reference/number-theory/)
@@ -595,7 +595,9 @@ The [Calculus reference](/epsil/reference/calculus/) has the full description an
 | Epsil | MathJSON | Signature | Summary |
 |:------|:---------|:----------|:--------|
 | `bigO` | `BigO` | `(value) -> number` | Landau big-O remainder term. |
-| `circularIntegrate` | `CircularIntegrate` | `(function, limits+) -> number` | Contour (closed-path) integral. |
+| `circleContour` | `CircleContour` | `(center: complex, radius: real, orientation: integer?) -> expression` | Closed circle: center, positive radius, optional orientation (+1 or -1). |
+| `circularIntegrate` | `CircularIntegrate` | `(function, limits+) -> number` | Closed-path integral. |
+| `contourIntegrate` | `ContourIntegrate` | `(expression, variable: symbol, contour: expression) -> number` | Symbolic integral over an explicit closed contour, using the residue theorem. |
 | — | `D` | `(expression, variables: symbol*) -> expression` | Symbolic partial derivative with respect to one or more variables. |
 | `dSolve` | `DSolve` | `(expression, symbol, symbol) -> expression` | Symbolic differential equation solver. |
 | `derivative` | `Derivative` | `(function, order: number*) -> function` | Derivative operator that returns a derivative function. |
@@ -610,7 +612,10 @@ The [Calculus reference](/epsil/reference/calculus/) has the full description an
 | `nIntegrate` | `NIntegrate` | `(function, lower: number, upper: number) -> number` | Numerical approximation of a definite integral. |
 | `nLimit` | `NLimit` | `(function, point: number, direction: number?) -> number` | Numerical approximation of the limit of a function |
 | `normal` | `Normal` | `(value) -> value` | Strip Big-O remainder terms from a series, yielding the truncated polynomial. |
+| `polygonContour` | `PolygonContour` | `(vertices: list<complex>, orientation: integer?) -> expression` | Simple closed polygon: a list of complex vertices in traversal order, with optional orientation override (+1 or -1). |
 | `rSolve` | `RSolve` | `(expression, symbol, symbol) -> expression` | Symbolic recurrence equation solver. |
+| `realLineContour` | `RealLineContour` | `(principalValue: boolean?) -> expression` | The real axis from minus infinity to infinity. |
+| `rectangleContour` | `RectangleContour` | `(lowerLeft: complex, upperRight: complex, orientation: integer?) -> expression` | Closed rectangle: lower-left and upper-right complex corners, optional orientation (+1 or -1). |
 | `residue` | `Residue` | `(expression, variable: symbol, point: value) -> number` | Residue of a function at a point (the coefficient of (x-a)⁻¹ in its Laurent expansion) |
 | `series` | `Series` | `(expression, variable: symbol?, point: value?, order: number?) -> number` | Taylor series expansion of an expression about a point (or an asymptotic expansion at ±∞), including Laurent, Puiseux (fractional-power), and log-aware expansions at poles and branch points. |
 

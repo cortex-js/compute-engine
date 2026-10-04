@@ -31,7 +31,7 @@
     "symbolic": 1315
   },
   "headBuckets": {
-    "Multiply": 298,
+    "Multiply": 299,
     "Add": 239,
     "Divide": 99,
     "Apply": 63,
@@ -40,7 +40,7 @@
     "CarlsonRJ": 35,
     "CarlsonRF": 24,
     "GCD": 24,
-    "Negate": 23,
+    "Negate": 22,
     "HurwitzZeta": 20,
     "CarlsonRD": 19,
     "Sin": 19,

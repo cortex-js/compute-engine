@@ -1243,6 +1243,18 @@
       ]
     },
     {
+      "name": "CircleContour",
+      "category": "Calculus",
+      "arity": "optional",
+      "signature": "(center:complex, radius:real, orientation:integer?) -> expression",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Closed circle: center, positive radius, optional orientation (+1 or -1)."
+    },
+    {
       "name": "CircularIntegrate",
       "category": "Calculus",
       "arity": "variadic",
@@ -1252,7 +1264,7 @@
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "Contour (closed-path) integral. Inert: never evaluated."
+      "description": "Closed-path integral. Evaluates supported explicit contours by the residue theorem."
     },
     {
       "name": "Clamp",
@@ -1632,6 +1644,18 @@
       "examples": [
         "ContinuedFraction(43/19)  // [2, 3, 1, 4]"
       ]
+    },
+    {
+      "name": "ContourIntegrate",
+      "category": "Calculus",
+      "arity": "3",
+      "signature": "(expression, variable:symbol, contour:expression) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "Symbolic integral over an explicit closed contour, using the residue theorem."
     },
     {
       "name": "ContrastingColor",
@@ -6276,6 +6300,18 @@
       ]
     },
     {
+      "name": "PolygonContour",
+      "category": "Calculus",
+      "arity": "optional",
+      "signature": "(vertices:list<complex>, orientation:integer?) -> expression",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Simple closed polygon: a list of complex vertices in traversal order, with optional orientation override (+1 or -1)."
+    },
+    {
       "name": "PolyLog",
       "category": "special-functions",
       "arity": "2",
@@ -7090,6 +7126,30 @@
       "examples": [
         "Real(3 + 4i)"
       ]
+    },
+    {
+      "name": "RealLineContour",
+      "category": "Calculus",
+      "arity": "optional",
+      "signature": "(principalValue:boolean?) -> expression",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "The real axis from minus infinity to infinity. Pass True to explicitly request a Cauchy principal value."
+    },
+    {
+      "name": "RectangleContour",
+      "category": "Calculus",
+      "arity": "optional",
+      "signature": "(lowerLeft:complex, upperRight:complex, orientation:integer?) -> expression",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "Closed rectangle: lower-left and upper-right complex corners, optional orientation (+1 or -1)."
     },
     {
       "name": "Reduce",
