@@ -84,9 +84,10 @@
   draws outside any `WithRandomSeed` frame and of the integrals' Monte-Carlo
   samples (`null` denies draws, and a draw then throws a `CapabilityDeniedError`,
   a different class in each bundle, so test `e.name`, not `instanceof`);
-  `frame` is the frame of an interpreted `WithRandomSeed` the code is called
-  from (`{ seedLo, seedHi, next }` or `{ seed, next }`), and `runtime.frame.next`
-  is the advanced counter after the call; `iterationLimit` caps the lazy-stream
+  `frame` (or `runtime.setFrame()`) is the frame of an interpreted
+  `WithRandomSeed` the code is called from (`{ seedLo, seedHi, next }` or
+  `{ seed, next }`), and `runtime.frame.next` is the advanced counter after the
+  call; `iterationLimit` caps the lazy-stream
   walks (default 1024, and `Infinity` when set to 0 or less, as
   `ce.iterationLimit`) and `deadline` is an optional time after which the
   shuffle and choice loops throw. A seeded program gives the same values
@@ -96,7 +97,15 @@
   constant list, a memo) once, as `run()` does, from the new
   `CompilationResult.preambleOnce`, `preamblePerCall` and `callCode`, so a
   `At(L, Floor(x))` with a 1,000-element `L` no longer rebuilds `L` on every
-  call. `CompilationResult.runtimeVersion` and `runtime.runtimeVersion` are the
+  call. `load()` also applies the input conversions `run()` does, from the new
+  `CompilationResult.entryPlan`: a real given to a complex-declared symbol is
+  lifted (`z^2 + z` at `z = 2` is 6 from both, where `load()` gave a complex
+  NaN), and a `Float64Array` for a list symbol is copied. The digits a negative
+  base's exponent is read to, `(-2)^x` at `x = 33.3333333333333`, are fixed in
+  `CompilationResult.reconstructionDigits`, since the runtime's own number
+  library cannot tell a machine-precision engine from the default (10822639409.68
+  from `run()`, NaN from the runtime before).
+  `CompilationResult.runtimeVersion` and `runtime.runtimeVersion` are the
   version of the helper set; `load()` throws when they differ or when the
   stored code has none. Functions passed in the `functions` or `imports`
   compile options are copied into the code as source (`toString()`), so a

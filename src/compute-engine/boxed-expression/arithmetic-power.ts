@@ -4,11 +4,7 @@ import { BigDecimal } from '../../big-decimal/index.js';
 import type { Expression, NumberLiteralInterface } from '../global-types.js';
 import { SMALL_INTEGER, machineNthRoot } from '../numerics/numeric.js';
 import { bigintMaximalPerfectPower } from '../numerics/bigint.js';
-import {
-  rationalize,
-  reduceRationalRoot,
-  reducedRational,
-} from '../numerics/rationals.js';
+import { reduceRationalRoot } from '../numerics/rationals.js';
 import type { Rational } from '../numerics/types.js';
 import {
   COINCIDENCE_BUDGET,

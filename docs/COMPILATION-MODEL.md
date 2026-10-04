@@ -112,17 +112,24 @@ The code of a JavaScript compilation result reads only `_SYS` and `_`.
 `@cortex-js/compute-engine/runtime` exports `createJavaScriptRuntime(options)`,
 the `_SYS` that `run()` uses, with no engine behind it, so code compiled in one
 place (a worker, a build) runs in another with only the numerics it calls. Its
-type exposes `load`, `frame`, `iterationLimit`, `deadline` and `runtimeVersion`;
+type exposes `load`, `frame` (set with `setFrame`), `iterationLimit`, `deadline`
+and `runtimeVersion`;
 the helper table is internal and may change in any release. `load()` evaluates
 the definitions that read nothing per call (`preambleOnce`) once, as `run()`
-does, and the rest (`preamblePerCall`) on every call. The
+does, and the rest (`preamblePerCall`) on every call, and applies the input
+conversions of `run()` from `entryPlan` (a real given to a complex-declared
+symbol is lifted, a typed array for a list symbol is copied, a complex value for
+a real symbol is refused). The
 engine-bound helpers take their state as options: `random` (draws outside a
 `WithRandomSeed` frame and the integrals' Monte-Carlo samples; `null` denies),
-`frame` (the enclosing frame, read back from `runtime.frame.next`),
+`frame` (the enclosing frame, set with `setFrame()` and read back from
+`runtime.frame.next`),
 `iterationLimit` (`Infinity` when 0 or less) and `deadline`. A denied draw
 throws a `CapabilityDeniedError`, a different class in each bundle: test
-`e.name`, not `instanceof`. Tolerance and angular unit are fixed into the
-code at compile time, and compiled code always uses machine floats.
+`e.name`, not `instanceof`. Tolerance, angular unit and the digits a negative
+base's float exponent is read to (`reconstructionDigits`, 15 to 17 by the
+engine's precision) are fixed at compile time, and compiled code always uses
+machine floats.
 
 The result and the runtime both carry `runtimeVersion`; a mismatch means the
 code was compiled by another release, and `runtime.load()` refuses it, as it

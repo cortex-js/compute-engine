@@ -159,9 +159,9 @@ describe('limits are options of the runtime', () => {
 
   test('a limit of 0 or less reads back as no cap, as `ce.iterationLimit` does', () => {
     for (const n of [0, -5]) {
-      expect(createJavaScriptRuntime({ iterationLimit: n }).iterationLimit).toBe(
-        Infinity
-      );
+      expect(
+        createJavaScriptRuntime({ iterationLimit: n }).iterationLimit
+      ).toBe(Infinity);
     }
     const saved = ce.iterationLimit;
     ce.iterationLimit = 0;
@@ -171,9 +171,9 @@ describe('limits are options of the runtime', () => {
 
   test('the frame accepts a seed and a counter, and reads back the folded frame', () => {
     const rt = createJavaScriptRuntime();
-    rt.frame = { seed: 7, next: 3 };
+    rt.setFrame({ seed: 7, next: 3 });
     expect(rt.frame!.next).toBe(3);
-    rt.frame = undefined;
+    rt.setFrame(undefined);
     expect(rt.frame).toBeUndefined();
   });
 
@@ -354,5 +354,85 @@ describe('the entry point has no engine in it', () => {
     const viaEngine = withRandomSeedFrame(ce, 7, () => stored.run!());
     expect(rt.load(stored)()).toEqual(viaEngine);
     expect(rt.runtimeVersion).toBe(stored.runtimeVersion);
+  });
+});
+
+describe('load() applies the input conversions of run()', () => {
+  const typed = new ComputeEngine();
+  typed.declare('z', 'complex');
+  typed.declare('L', 'list<real>');
+
+  const cases: [string, any, Record<string, unknown>, unknown][] = [
+    [
+      'a real for a complex symbol, z^2 + z at z = 2',
+      ['Add', ['Power', 'z', 2], 'z'],
+      { z: 2 },
+      6,
+    ],
+    [
+      'a Float64Array for a list symbol, the sum of L',
+      ['Sum', ['At', 'L', 'i'], ['Limits', 'i', 1, 3]],
+      { L: new Float64Array([1, 2, 3]) },
+      6,
+    ],
+  ];
+  for (const [name, json, vars, expected] of cases) {
+    test(`${name}: run() = load() = ${expected}`, () => {
+      const result = compile(typed.box(json), { fallback: false })!;
+      expect(result.success).toBe(true);
+      const viaRun = result.run!(vars as any);
+      const viaLoad = createJavaScriptRuntime().load(result)(vars);
+      expect(viaRun).toEqual(expected);
+      expect(viaLoad).toEqual(expected);
+    });
+  }
+
+  test('a complex value for a real symbol is refused by load() as by run()', () => {
+    const result = compile(ce.box(['Add', 'q', 1]), { fallback: false })!;
+    const vars = { q: { re: 1, im: 1 } };
+    expect(() => result.run!(vars as any)).toThrow(TypeError);
+    expect(() => createJavaScriptRuntime().load(result)(vars)).toThrow(
+      TypeError
+    );
+  });
+
+  test('the plan survives JSON storage', () => {
+    const result = compile(typed.box(cases[0][1]), { fallback: false })!;
+    const stored = JSON.parse(JSON.stringify(result));
+    expect(createJavaScriptRuntime().load(stored)({ z: 2 })).toEqual(6);
+  });
+});
+
+describe('the reconstruction digits of a negative base travel with the result', () => {
+  const x = 33.3333333333333;
+  const power = ['Power', -2, 'x'];
+
+  test('(-2)^x at x = 33.3333333333333 reads the exponent to 15 digits at machine precision', () => {
+    const saved = ce.precision;
+    try {
+      ce.precision = 'machine';
+      const result = compile(ce.box(power), { fallback: false })!;
+      expect(result.reconstructionDigits).toBe(15);
+      const viaRun = result.run!({ x });
+      expect(viaRun).toBeCloseTo(10822639409.68, 1);
+      // The runtime reads the digits from the result, not from whatever
+      // precision the number library holds when the code is called.
+      ce.precision = 300;
+      expect(result.reconstructionDigits).toBe(15);
+      expect(createJavaScriptRuntime().load(result)({ x })).toBe(viaRun);
+    } finally {
+      ce.precision = saved;
+    }
+  });
+
+  test('the digits are 17 at the default precision and when absent', () => {
+    const result = compile(ce.box(power), { fallback: false })!;
+    expect(result.reconstructionDigits).toBe(17);
+    expect(
+      createJavaScriptRuntime().load({
+        ...result,
+        reconstructionDigits: undefined,
+      })({ x })
+    ).toEqual(createJavaScriptRuntime().load(result)({ x }));
   });
 });

@@ -56,4 +56,47 @@ const viaRun = JSON.stringify(result.run());
 const viaRuntime = JSON.stringify(createJavaScriptRuntime().load(result)());
 if (viaRun !== viaRuntime) fail(`${viaRun} !== ${viaRuntime}`);
 
+// The bundles have separate number libraries: what depends on the engine's
+// precision or declarations must travel with the result.
+const same = (what, a, b) => {
+  if (JSON.stringify(a) !== JSON.stringify(b))
+    fail(`${what}: run() ${JSON.stringify(a)}, runtime ${JSON.stringify(b)}`);
+};
+
+// A negative base's float exponent is read to 15 digits at machine precision;
+// the runtime's own precision would pick 17.
+const machine = new ComputeEngine();
+machine.precision = 'machine';
+const power = compile(machine.box(['Power', -2, 'x']), { fallback: false });
+if (!power?.success) fail('(-2)^x did not compile');
+const x = 33.3333333333333;
+const powerViaRun = power.run({ x });
+if (!Number.isFinite(powerViaRun)) fail(`(-2)^x via run(): ${powerViaRun}`);
+same('(-2)^x', powerViaRun, createJavaScriptRuntime().load(power)({ x }));
+
+// The conversions run() applies at entry: a real for a complex symbol, a
+// typed array for a list symbol.
+const typed = new ComputeEngine();
+typed.declare('z', 'complex');
+typed.declare('L', 'list<real>');
+const square = compile(typed.parse('z^2+z'), { fallback: false });
+same(
+  'z^2+z',
+  square.run({ z: 2 }),
+  createJavaScriptRuntime().load(square)({ z: 2 })
+);
+const total = compile(
+  typed.box(['Sum', ['At', 'L', 'i'], ['Limits', 'i', 1, 3]]),
+  {
+    fallback: false,
+  }
+);
+if (!total?.success) fail('the list sum did not compile');
+const list = new Float64Array([1, 2, 3]);
+same(
+  'list sum',
+  total.run({ L: list }),
+  createJavaScriptRuntime().load(total)({ L: list })
+);
+
 console.log('js-runtime-smoke: OK');

@@ -2477,6 +2477,20 @@ export interface CompiledRunner<R = CompiledValue, V = number> {
  * py.code; // string
  * ```
  */
+/** The entry plan of a compiled JavaScript result, as plain data. */
+export type StoredEntryPlan = {
+  /** `vars`: keyed by symbol name; `args`: keyed by parameter index. */
+  kind: 'vars' | 'args';
+  real: (string | number)[];
+  complex: (string | number)[];
+  lists: (string | number)[];
+  /** The per-binding entry checks of the collection-valued bindings. */
+  entries: [
+    string | number,
+    { numbers: boolean; depth: number; label: string },
+  ][];
+};
+
 export type CompilationResult<
   T extends string = string,
   R = DefaultRunnerResult<T>,
@@ -2499,6 +2513,24 @@ export type CompilationResult<
    * release. Set by the JavaScript target only.
    */
   runtimeVersion?: string;
+
+  /**
+   * JavaScript only. How `run()` checks and converts its inputs before the
+   * code reads them: a complex-declared symbol given a real is lifted to
+   * `{re, im: 0}`, a numeric typed array bound to a list symbol is copied to a
+   * plain array, a complex value bound to a real symbol is refused. A runtime
+   * that loads the stored code applies the same plan. Absent when there is
+   * nothing to check.
+   */
+  entryPlan?: StoredEntryPlan;
+
+  /**
+   * JavaScript only. The significant digits `run()` reads the float exponent
+   * of a negative base to, to tell `(-8)^(1/3)` from an irrational power
+   * (`realPowerReconstructionDigits()`), fixed when the code is compiled. A
+   * runtime has its own number library, so it cannot recompute it.
+   */
+  reconstructionDigits?: number;
 
   /**
    * Identifiers the generated `code` references that the caller must supply at

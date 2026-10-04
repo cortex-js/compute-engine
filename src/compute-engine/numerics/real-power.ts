@@ -130,7 +130,8 @@ function parityFaithful(n: bigint): number {
  */
 export function realPowerBranchTerms(
   exact: Rational | undefined,
-  value: number
+  value: number,
+  digits: number = realPowerReconstructionDigits()
 ): [p: number, q: number] | undefined {
   if (exact !== undefined) {
     const [rp, rq] = reducedRational(exact);
@@ -150,7 +151,6 @@ export function realPowerBranchTerms(
   // bypassing the MACHINE_PRECISION floor that `setPrecision` applies, and a
   // 1%-wide window snaps essentially any float to a small rational. Clamp to
   // [15, 17] regardless.
-  const digits = realPowerReconstructionDigits();
   const tol = Math.max(
     Number.MIN_VALUE,
     Math.abs(value) * 4 * Number.EPSILON,
@@ -184,14 +184,15 @@ export function realPowerBranchTerms(
   return [p, q];
 }
 
-
 /**
  * The number of significant digits that `realPowerBranchTerms` reads a float
  * exponent to: the global working precision (`BigDecimal.precision`), which
  * is what rounded the exponent, clamped to [15, 17] (a double never carries
  * more than 17 significant digits, and a precision configured below machine
  * precision must not widen the window). The compiled Python helper `_ce_pow`
- * is given this value when the code is generated.
+ * is given this value when the code is generated, and a compiled JavaScript
+ * result carries it as `reconstructionDigits`: the runtime has its own
+ * `BigDecimal`, whose precision says nothing about the engine's.
  */
 export function realPowerReconstructionDigits(): number {
   const precision = BigDecimal.precision;
@@ -230,7 +231,8 @@ export function realPowerReconstructionDigits(): number {
 export function negativeBaseRealPowFromRational(
   base: number,
   exact: Rational | null | undefined,
-  expValue: number
+  expValue: number,
+  digits?: number
 ): number | undefined {
   if (!(base < 0) || !Number.isFinite(base)) return undefined;
   if (!Number.isFinite(expValue) || Number.isInteger(expValue))
@@ -240,7 +242,7 @@ export function negativeBaseRealPowFromRational(
   // and only otherwise by the (ulp-tolerant) float reconstruction — sharing
   // `realPowerBranchTerms` with the interpreter so the two can never disagree.
   const isExactRational = exact != null;
-  const terms = realPowerBranchTerms(exact ?? undefined, expValue);
+  const terms = realPowerBranchTerms(exact ?? undefined, expValue, digits);
   if (terms === undefined) return undefined;
   const [p, q] = terms;
   if (q % 2 === 0) return undefined;

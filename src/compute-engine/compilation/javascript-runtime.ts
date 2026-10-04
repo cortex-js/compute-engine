@@ -114,8 +114,29 @@ import {
 } from '../numerics/statistics.js';
 import { monteCarloEstimate } from '../numerics/monte-carlo.js';
 import { rangeCount } from '../numerics/range-count.js';
+import { negativeBaseRealPowFromRational } from '../numerics/real-power.js';
+import type { Rational } from '../numerics/types.js';
+
+/**
+ * The digits the exponent of a negative base is read to, for the code being
+ * called through `load()`: the value compiled into the result, which a
+ * runtime cannot recompute (its `BigDecimal` is not the engine's). Unset for
+ * `run()`, which reads the engine's own.
+ */
+let loadedReconstructionDigits: number | undefined;
+
 // The helpers below call it as `negativeBaseRealPow`, as in the compiler.
-import { negativeBaseRealPowFromRational as negativeBaseRealPow } from '../numerics/real-power.js';
+const negativeBaseRealPow = (
+  base: number,
+  exact: Rational | null | undefined,
+  expValue: number
+): number | undefined =>
+  negativeBaseRealPowFromRational(
+    base,
+    exact,
+    expValue,
+    loadedReconstructionDigits
+  );
 import {
   complexAcos,
   complexAcosh,
@@ -163,6 +184,7 @@ import type {
   CompiledColor,
   CompiledColorSpace,
   ComplexResult,
+  StoredEntryPlan,
 } from './types.js';
 
 /**
@@ -5247,6 +5269,356 @@ export function copyToPlainArray(x: ArrayLike<number>): number[] {
 }
 
 /**
+ * The D3 ENTRY CHECK of a compiled JavaScript runner (design §8 D3,
+ * `docs/COMPILATION-MODEL.md`): the one runtime input the
+ * static analysis cannot see is the value a caller binds at `run()` time, so
+ * each free symbol (expression route) or positional parameter (lambda route)
+ * is checked against the SHAPE the compilation analyzed it as:
+ *
+ * - analyzed REAL: a `{re, im}` object THROWS a `TypeError` naming the symbol
+ *   — the compiled code reads it as a number, and every arithmetic on it
+ *   would be silently wrong (`NaN`, or `"[object Object]1"` under `+`). The
+ *   one exception is the unsigned pole `~oo`, which is PROJECTED to
+ *   `Infinity` instead of throwing (see `isUnsignedPole` below);
+ * - analyzed COMPLEX (a `complex`-typed symbol or annotated parameter): a
+ *   plain number is LIFTED to `{re, im: 0}` — a real IS a complex, and the
+ *   compiled code reads `.re`/`.im` off it;
+ * - analyzed as a LIST (a binding whose declared type proves a JS array): a
+ *   plain `Array` passes as it is, with no copy, and a numeric typed array
+ *   (`Float64Array`, `Int32Array`, ...) is COPIED into a fresh plain `Array`,
+ *   because the compiled body reads plain arrays only. Any other value passes
+ *   UNTOUCHED and the lowerings dispatch on its runtime shape, as before: a
+ *   scalar there is not an error, because the declared type is routinely wider
+ *   than the value a caller binds and several lowerings project on the runtime
+ *   shape. The element-wise big-operator lane is the witness — a `list`-typed
+ *   summand bound to a number gives the scalar sum, not `NaN` (see
+ *   `test/compute-engine/compile-elementwise-bigop.test.ts`). Carrier contract:
+ *   `docs/plans/2026-09-07-numeric-list-store-and-typed-array-boundary.md`;
+ * - analyzed as a collection whose ENTRIES are read on the real lane (a
+ *   declared type with a collection member and no complex leaf, in `strict`
+ *   or `auto` mode, or a type that proves every entry real, in any mode —
+ *   `BaseCompiler.realLaneEntryCheck`): when the value is a plain `Array`,
+ *   every entry is visited, through nested arrays, and a `{re, im}` entry
+ *   THROWS a `TypeError` that names the binding and the entry. When the type
+ *   proves every entry a number, any other entry that is not a number (a
+ *   string, `null`) throws too, except `undefined`, an absent cell. The linear-algebra heads read a
+ *   `matrix<number>` operand as real in these modes, and would otherwise
+ *   give `NaN` or a wrong number for a complex entry;
+ * - anything else (a string, a boolean, an array, `undefined`) is left to
+ *   today's behavior.
+ *
+ * One `typeof` per checked binding per call, plus one per entry of each
+ * collection whose entries are checked. The vars object is never mutated (a
+ * lifted copy is built only when a lift or a typed-array copy is needed).
+ */
+export type EntryPlan =
+  | {
+      kind: 'vars';
+      real: string[];
+      complex: string[];
+      lists: string[];
+      entries: Map<string, RealEntryCheck>;
+    }
+  | {
+      kind: 'args';
+      real: number[];
+      complex: number[];
+      lists: number[];
+      entries: Map<number, RealEntryCheck>;
+    };
+
+/**
+ * The entry check of one collection-valued binding read on the real lane,
+ * keyed in `EntryPlan.entries` by the name of the free symbol or the index
+ * of the parameter: `numbers` is whether every entry must be a number
+ * (otherwise only a `{re, im}` entry is refused), and `label` the binding
+ * and its declared type as the diagnostic shows them. Every key of
+ * `entries` is also in `real`, `complex` or `lists`, and the check runs in
+ * that loop, on the value it has read: the vars object is read once per
+ * binding (a getter on it runs once).
+ */
+export type RealEntryCheck = { numbers: boolean; depth: number; label: string };
+
+/**
+ * Run the entry check `check` of a binding on its value `x`, when `x` is a
+ * plain array, and return the value the compiled code reads: `x` itself, or,
+ * when an entry of `x` at any depth is a numeric typed array (a
+ * `Float64Array` row of a matrix), a copy of `x` in which each such typed
+ * array is replaced by a plain `Array`. The compiled code reads plain arrays
+ * only: the `det` helper, for one, answers `NaN` for a typed-array row. A
+ * top-level typed array is not an `Array` and is returned unchanged; the
+ * list rule of `checkEntry` copies it.
+ */
+function checkBindingEntries(
+  check: RealEntryCheck | undefined,
+  x: unknown
+): unknown {
+  if (check === undefined || !Array.isArray(x)) return x;
+  sawTypedArrayEntry = false;
+  checkRealEntries(x, check.numbers, check.depth, check.label);
+  return sawTypedArrayEntry ? copyNestedTypedArrays(x) : x;
+}
+
+/**
+ * Set by `realEntryAdmitted` when it admits a numeric typed array as an
+ * entry, and reset by `checkBindingEntries` before each walk. A flag, and
+ * not a return value of the walk, so that the walk of an array of numbers
+ * (the common case) does no extra work.
+ */
+let sawTypedArrayEntry = false;
+
+/** A copy of the array `x` in which each numeric typed array, at any depth,
+ * is a plain `Array`. A hole of `x` stays a hole. */
+function copyNestedTypedArrays(x: unknown[]): unknown[] {
+  return x.map((e) =>
+    Array.isArray(e)
+      ? copyNestedTypedArrays(e)
+      : isNumericTypedArray(e)
+        ? copyToPlainArray(e)
+        : e
+  );
+}
+
+/**
+ * Throw when an entry of the array `x`, at any depth, is a `{re, im}` object
+ * or, when `numbers` is set, anything that is not a number or `undefined`
+ * (`realEntryAdmitted`). `label` names the binding. The walk goes into an
+ * array at ANY depth and never refuses one: a declared type constrains what
+ * the engine assigns, not what a caller supplies, and a caller may pass a
+ * matrix where a point was declared (the compiled code then hands the value
+ * to the run-time helper, which reads its rank; pinned in
+ * `compile-static-point-components.test.ts`). `depth` is kept for the
+ * diagnostic path only.
+ *
+ * The walk is split in two functions that call each other, one for the
+ * arrays at an even depth and one for the arrays at an odd depth, so that
+ * the element read of each function sees one kind of array in a vector or a
+ * matrix: the outer array of a matrix holds arrays, and its rows hold
+ * numbers. A single recursive function that read both kinds made the `det`
+ * helper that ran next on the same matrix more than twice as slow (100×100:
+ * 320 → 720 µs, measured 2026-09-24 on Node, reproducible in a separate
+ * process), while this form leaves it at 320 µs and walks the matrix in
+ * about 1.4 µs. The entry path of the diagnostic is found by a second walk
+ * (`realEntryError`), only when the check fails.
+ */
+function checkRealEntries(
+  x: unknown[],
+  numbers: boolean,
+  depth: number,
+  label: string
+): void {
+  if (!realEntriesEven(x, numbers, depth))
+    throw realEntryError(x, numbers, depth, label);
+}
+
+function realEntriesEven(
+  x: unknown[],
+  numbers: boolean,
+  depth: number
+): boolean {
+  const n = x.length;
+  for (let i = 0; i < n; i++) {
+    const e = x[i];
+    if (typeof e === 'number') continue;
+    if (Array.isArray(e)) {
+      if (!realEntriesOdd(e, numbers, depth - 1)) return false;
+    } else if (!realEntryAdmitted(e, numbers)) return false;
+  }
+  return true;
+}
+
+function realEntriesOdd(
+  x: unknown[],
+  numbers: boolean,
+  depth: number
+): boolean {
+  const n = x.length;
+  for (let i = 0; i < n; i++) {
+    const e = x[i];
+    if (typeof e === 'number') continue;
+    if (Array.isArray(e)) {
+      if (!realEntriesEven(e, numbers, depth - 1)) return false;
+    } else if (!realEntryAdmitted(e, numbers)) return false;
+  }
+  return true;
+}
+
+/** Whether an entry that is neither a number nor an array is admitted: never
+ * a `{re, im}` object; `undefined` always, because an absent cell (a hole,
+ * or a written `Missing`) is read by the lowerings that accept one (the
+ * numeric selection fusion tests every cell for it); a typed array of
+ * numbers at any depth, recorded in `sawTypedArrayEntry` so that the value
+ * is copied to plain arrays; anything else only when `numbers` is not
+ * set. */
+function realEntryAdmitted(e: unknown, numbers: boolean): boolean {
+  if (e === undefined) return true;
+  if (isComplexObject(e)) return false;
+  if (isNumericTypedArray(e)) {
+    sawTypedArrayEntry = true;
+    return true;
+  }
+  return !numbers;
+}
+
+/** The diagnostic of `checkRealEntries`: the first entry of `x` that is not
+ * admitted, with its path (`[1][0]`). */
+function realEntryError(
+  x: unknown[],
+  numbers: boolean,
+  depth: number,
+  label: string,
+  path = ''
+): TypeError {
+  for (let i = 0; i < x.length; i++) {
+    const e = x[i];
+    if (typeof e === 'number') continue;
+    const at = `${path}[${i}]`;
+    if (Array.isArray(e)) {
+      const error = realEntryError(e, numbers, depth - 1, label, at);
+      if (error.message !== '') return error;
+      continue;
+    }
+    if (isComplexObject(e))
+      return new TypeError(
+        `${label} was compiled with real entries, but its entry ${at} is a complex {re, im} value. Declare complex entries (for example \`matrix<complex>\` or \`list<complex>\`), or compile with \`mode: 'complex'\`.`
+      );
+    if (!realEntryAdmitted(e, numbers))
+      return new TypeError(
+        `${label} was compiled with number entries, but its entry ${at} is ${e === null ? 'null' : typeof e === 'object' ? 'an object' : `a ${typeof e}`}, not a number.`
+      );
+  }
+  return new TypeError('');
+}
+
+function entryCheckError(binding: string): TypeError {
+  return new TypeError(
+    `${binding} was compiled as a real number but received a complex {re, im} value. Declare it complex, or compile with \`mode: 'complex'\`.`
+  );
+}
+
+export function checkEntry(
+  plan: EntryPlan,
+  argumentsList: unknown[]
+): unknown[] {
+  if (plan.kind === 'vars') {
+    const vars = argumentsList[0];
+    if (typeof vars !== 'object' || vars === null) return argumentsList;
+    const v = vars as Record<string, unknown>;
+    let lifted: Record<string, unknown> | undefined;
+    // A `~oo` argument is PROJECTED to `Infinity` rather than refused: the
+    // compiled body has no value for the unsigned pole, and `Infinity` is the
+    // spelling it already gives a pole it PRODUCES itself, so projecting here
+    // gives one pole one spelling on both routes. The projection keeps the
+    // magnitude and drops the direction `~oo` never had — the same trade the
+    // constant-folding path makes for an embedded `~oo` literal. Every other
+    // complex value still throws: reading `3 + 4i` as a number would be
+    // silently wrong, while reading `~oo` as `Infinity` is the documented
+    // float encoding of it.
+    for (const id of plan.real) {
+      const x = v[id];
+      const read = checkBindingEntries(plan.entries.get(id), x);
+      if (read !== x) {
+        lifted ??= { ...v };
+        lifted[id] = read;
+        continue;
+      }
+      if (!isComplexObject(x)) continue;
+      if (!isUnsignedPole(x)) throw entryCheckError(`"${id}"`);
+      lifted ??= { ...v };
+      lifted[id] = Infinity;
+    }
+    for (const id of plan.complex) {
+      const x = v[id];
+      const read = checkBindingEntries(plan.entries.get(id), x);
+      if (read !== x) {
+        lifted ??= { ...v };
+        lifted[id] = read;
+      } else if (typeof x === 'number') {
+        lifted ??= { ...v };
+        lifted[id] = { re: x, im: 0 };
+      }
+    }
+    // A numeric typed array on a list-declared symbol is copied into a plain
+    // one, which is what the compiled body reads. Every other value passes
+    // untouched, including a scalar: the lowerings dispatch on the runtime
+    // shape, so a narrower declaration is not enforced here.
+    for (const id of plan.lists) {
+      const x = v[id];
+      const read = checkBindingEntries(plan.entries.get(id), x);
+      if (read !== x) {
+        lifted ??= { ...v };
+        lifted[id] = read;
+        continue;
+      }
+      if (!isNumericTypedArray(x)) continue;
+      lifted ??= { ...v };
+      lifted[id] = copyToPlainArray(x);
+    }
+    return lifted === undefined ? argumentsList : [lifted];
+  }
+  let lifted: unknown[] | undefined;
+  // The positional-parameter route makes the same `~oo` projection as the
+  // free-symbol route above.
+  for (const i of plan.real) {
+    const x = argumentsList[i];
+    const read = checkBindingEntries(plan.entries.get(i), x);
+    if (read !== x) {
+      lifted ??= [...argumentsList];
+      lifted[i] = read;
+      continue;
+    }
+    if (!isComplexObject(x)) continue;
+    if (!isUnsignedPole(x)) throw entryCheckError(`argument ${i + 1}`);
+    lifted ??= [...argumentsList];
+    lifted[i] = Infinity;
+  }
+  for (const i of plan.complex) {
+    const x = argumentsList[i];
+    const read = checkBindingEntries(plan.entries.get(i), x);
+    if (read !== x) {
+      lifted ??= [...argumentsList];
+      lifted[i] = read;
+    } else if (typeof x === 'number') {
+      lifted ??= [...argumentsList];
+      lifted[i] = { re: x, im: 0 };
+    }
+  }
+  // The positional-parameter route applies the same list rule as the
+  // free-symbol route above.
+  for (const i of plan.lists) {
+    const x = argumentsList[i];
+    const read = checkBindingEntries(plan.entries.get(i), x);
+    if (read !== x) {
+      lifted ??= [...argumentsList];
+      lifted[i] = read;
+      continue;
+    }
+    if (!isNumericTypedArray(x)) continue;
+    lifted ??= [...argumentsList];
+    lifted[i] = copyToPlainArray(x);
+  }
+  return lifted ?? argumentsList;
+}
+
+/** The plan as plain data, for a compilation result that is stored. */
+export function storeEntryPlan(plan: EntryPlan): StoredEntryPlan {
+  return {
+    kind: plan.kind,
+    real: plan.real,
+    complex: plan.complex,
+    lists: plan.lists,
+    entries: [...plan.entries],
+  };
+}
+
+function restoreEntryPlan(stored: StoredEntryPlan): EntryPlan {
+  return {
+    ...stored,
+    entries: new Map(stored.entries),
+  } as EntryPlan;
+}
+
+/**
  * The compiled JavaScript runner's RESULT CONVENTION (design §5,
  * `docs/COMPILATION-MODEL.md`), applied at the boundary
  * of every `run()` call: a value whose imaginary part is EXACTLY zero comes
@@ -5327,8 +5699,7 @@ export const RUNTIME_VERSION = '{{SDK_VERSION}}';
  * counter (`{ seedLo, seedHi, next }`, what the engine holds), or the seed
  * itself and the index of the next draw (default 0). */
 export type RuntimeFrameInput =
-  | RandomSeedFrame
-  | { seed: number | string; next?: number };
+  RandomSeedFrame | { seed: number | string; next?: number };
 
 export type JavaScriptRuntimeOptions = {
   /** The source of draws outside any `WithRandomSeed` frame, and of the
@@ -5363,6 +5734,10 @@ export type StoredJavaScript = {
   /** For a lambda with `preambleOnce`: `code` without those definitions. */
   callCode?: string;
   calling?: 'expression' | 'lambda';
+  /** The digits a negative base's float exponent is read to; 17 when absent. */
+  reconstructionDigits?: number;
+  /** The input checks and conversions `run()` applies; `load()` applies them. */
+  entryPlan?: StoredEntryPlan;
   /** Required by `load()`. */
   runtimeVersion?: string;
 };
@@ -5376,17 +5751,17 @@ export interface JavaScriptRuntime {
   readonly runtimeVersion: string;
   /** The active frame. Its `next` is the draw counter: read it after a call
    * to hand the advanced counter back to the host that owns the frame. */
-  get frame(): RandomSeedFrame | undefined;
-  set frame(f: RuntimeFrameInput | undefined);
+  readonly frame: RandomSeedFrame | undefined;
+  /** Set the active frame, from a folded frame or a seed (`undefined` clears). */
+  setFrame(f: RuntimeFrameInput | undefined): void;
   /** The cap on lazy-stream walks: `Infinity` when set to 0 or less. */
   iterationLimit: number;
   deadline: number | undefined;
   /** The function the stored code denotes: `(vars?) => value` for code
    * compiled from an expression, `(...args) => value` for a lambda. Throws if
    * `runtimeVersion` is missing or differs. The definitions that read no
-   * per-call value are evaluated once, here, as `run()` does. The run-time
-   * input checks of `CompilationResult.run` (a complex value bound to a real
-   * symbol) are not applied. */
+   * per-call value are evaluated once, here, as `run()` does. The inputs are
+   * checked and converted by `entryPlan`, as `run()` does. */
   load(stored: StoredJavaScript): (...args: unknown[]) => unknown;
 }
 
@@ -5442,9 +5817,9 @@ export function createSysRuntime(
 
   Object.defineProperties(sys, {
     runtimeVersion: { value: RUNTIME_VERSION, enumerable: true },
-    frame: {
-      get: () => frame,
-      set: (f: RuntimeFrameInput | undefined) => {
+    frame: { get: () => frame, enumerable: true },
+    setFrame: {
+      value: (f: RuntimeFrameInput | undefined): void => {
         frame = toFrame(f);
       },
       enumerable: true,
@@ -5474,26 +5849,53 @@ export function createSysRuntime(
             `The code was compiled for runtime ${stored.runtimeVersion}, this is runtime ${RUNTIME_VERSION}`
           );
         const once = stored.preambleOnce ?? '';
+        const plan = stored.entryPlan && restoreEntryPlan(stored.entryPlan);
+        const digits = stored.reconstructionDigits ?? 17;
+        // Every call, and the evaluation of the once-only definitions, reads
+        // the exponent of a negative base to the digits the code was compiled
+        // with.
+        const withDigits = <T>(f: () => T): T => {
+          const previous = loadedReconstructionDigits;
+          loadedReconstructionDigits = digits;
+          try {
+            return f();
+          } finally {
+            loadedReconstructionDigits = previous;
+          }
+        };
         if (stored.calling === 'lambda') {
-          const fn = twoStageRunner(
-            sys,
-            once,
-            [],
-            `return (${stored.callCode ?? stored.code});`
-          )() as (...args: unknown[]) => unknown;
-          return (...args) => normalizeRunResult(fn(...args));
+          const fn = withDigits(
+            () =>
+              twoStageRunner(
+                sys,
+                once,
+                [],
+                `return (${stored.callCode ?? stored.code});`
+              )() as (...args: unknown[]) => unknown
+          );
+          return (...args) =>
+            withDigits(() =>
+              normalizeRunResult(fn(...(plan ? checkEntry(plan, args) : args)))
+            );
         }
         const split =
           stored.preambleOnce !== undefined ||
           stored.preamblePerCall !== undefined;
         const perCall = split ? stored.preamblePerCall : stored.preamble;
-        const fn = twoStageRunner(
-          sys,
-          once,
-          ['_'],
-          `${perCall ?? ''}\nreturn ${stored.code};`
+        const fn = withDigits(() =>
+          twoStageRunner(
+            sys,
+            once,
+            ['_'],
+            `${perCall ?? ''}\nreturn ${stored.code};`
+          )
         );
-        return (vars = {}) => normalizeRunResult(fn(vars));
+        return (vars = {}) =>
+          withDigits(() =>
+            normalizeRunResult(
+              fn(...(plan ? checkEntry(plan, [vars]) : [vars]))
+            )
+          );
       },
     },
   });
