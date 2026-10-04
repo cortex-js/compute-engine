@@ -34,6 +34,7 @@ import {
   isProvablyStringComparisonParticipant,
   isProvablyStringOperand,
   isProvablyTupleParticipant,
+  shapeOperandRefusal,
   statementBodyHead,
   unfaithfulComparisonAggregate,
 } from './base-compiler.js';
@@ -3991,8 +3992,17 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   // interpreter's `MatrixPower`.
   MatrixPower: 'np.linalg.matrix_power',
   // CE `Rank` is the TENSOR rank (number of axes), NOT the linear-algebra rank
-  // — `np.ndim` matches (scalar 0, vector 1, matrix 2, …).
-  Rank: 'np.ndim',
+  // — `np.ndim` matches (scalar 0, vector 1, matrix 2, …). An operand that can
+  // be a set has no shape in the interpreter, so the compilation declines for
+  // it (`shapeOperandRefusal`).
+  Rank: (args, compile) => {
+    if (args[0] == null)
+      throw new Error('Could not compile `Rank`: missing argument');
+    const refusal = shapeOperandRefusal(args[0]);
+    if (refusal !== undefined)
+      throw new Error(`Could not compile \`Rank\`: the operand ${refusal}.`);
+    return `np.ndim(${compile(args[0])})`;
+  },
   // Reduced row echelon form — NumPy has no built-in, so route through the
   // injected `_ce_rref` runtime helper (Gauss–Jordan with partial pivoting).
   RowReduce: (args, compile) => `_ce_rref(${compile(args[0])})`,
@@ -4867,6 +4877,9 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   Shape: (args, compile) => {
     if (args[0] == null)
       throw new Error('Could not compile `Shape`: missing argument');
+    const refusal = shapeOperandRefusal(args[0]);
+    if (refusal !== undefined)
+      throw new Error(`Could not compile \`Shape\`: the operand ${refusal}.`);
     return `list(np.shape(${compile(args[0])}))`;
   },
   // Cyclic padding (np.resize repeats the source), like the interpreter.

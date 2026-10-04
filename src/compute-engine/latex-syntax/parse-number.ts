@@ -266,7 +266,7 @@ function detectRepetend(digits: string): [string, string] | null {
 /** Check if upcoming tokens might represent repeating digits notation. */
 function mayBeRepeatingDigits(parser: Parser): boolean {
   const peek = parser.peek;
-  if (peek === '\\overline') return true;
+  if (peek === '\\overline' || peek === '\\bar') return true;
   if (peek === '\\overset') return true;
   if (peek === '\\wideparen' || peek === '\\overarc') return true;
   if (peek === '(') return true;
@@ -306,7 +306,11 @@ export function parseRepeatingDecimal(
   parser.index = start;
   if (
     (format === 'auto' || format === 'vinculum') &&
-    parser.matchAll([`\\overline`, '<{>'])
+    // `\bar` is accepted as a vinculum too: `0.\bar{3}` is `0.\overline{3}`,
+    // which is 1/3. Elsewhere, `\bar` over a number is the conjugate, as
+    // `\overline` is, so without this `0.\bar{3}` read as `0 · Conjugate(3)`.
+    (parser.matchAll([`\\overline`, '<{>']) ||
+      parser.matchAll([`\\bar`, '<{>']))
   ) {
     repeatingDecimals = parseDecimalDigits(parser, fmt, 'fraction');
     if (repeatingDecimals && parser.match('<}>'))

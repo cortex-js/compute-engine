@@ -1351,6 +1351,37 @@ describe('SOLVING LINEAR INEQUALITY SYSTEMS', () => {
     expect(result).toBeNull();
   });
 
+  // An unbounded region is not described by its corners: `x < 1, y > 0` has
+  // the single corner (1, 0), which the solver returned before.
+  test('should return null for unbounded regions', () => {
+    for (const latex of [
+      '\\begin{cases}x<1\\\\y>0\\end{cases}',
+      '\\begin{cases}x\\geq 0\\\\y\\geq 0\\end{cases}',
+      '\\begin{cases}x\\geq 0\\\\y\\geq 0\\\\x+y\\geq 2\\end{cases}',
+      '\\begin{cases}x\\geq 0\\\\x\\leq 5\\\\y\\geq 0\\end{cases}',
+    ])
+      expect(expr(latex).solve(['x', 'y'])).toBeNull();
+    expect(
+      engine
+        .box(['List', ['Less', 'x', 1], ['Greater', 'y', 0]])
+        .solve(['x', 'y'])
+    ).toBeNull();
+  });
+
+  // A bounded region whose edges are not parallel to the axes.
+  test('should solve a bounded wedge: y>=x, y>=-x, y<=3', () => {
+    const e = expr(
+      '\\begin{cases}y\\geq x\\\\y\\geq -x\\\\y\\leq 3\\end{cases}'
+    );
+    const result = e.solve(['x', 'y']) as Array<Record<string, any>>;
+    expect(result).not.toBeNull();
+    const vertices = result.map((r) => ({ x: r.x.json, y: r.y.json }));
+    expect(vertices.length).toBe(3);
+    expect(vertices).toContainEqual({ x: 0, y: 0 });
+    expect(vertices).toContainEqual({ x: 3, y: 3 });
+    expect(vertices).toContainEqual({ x: -3, y: 3 });
+  });
+
   // Test non-linear inequality returns null
   test('should return null for non-linear inequalities: x^2+y<=10', () => {
     const e = expr(

@@ -2,6 +2,30 @@
 
 ### Behavior Changes
 
+- **A set is never paired by position in an element-wise operation.** A set
+  has no order, but beside a list it supplied elements by position and the
+  result was cut to the shorter length: `Power([1, 2, 3], Set(1, 2))` was
+  `[1, 4]`. A set at a number parameter now gives the `incompatible-type`
+  error that `Power(Set(1, 2), 2)` already gave. At a parameter that is not a
+  number, the set is used whole in each element: `String([1, 2], Set(3, 4))`
+  is a list of two strings, and `Less([1, 2, 3], Set(1, 2))` is a list of
+  three comparisons that stay unevaluated. `Power([1, 2], Interval(0, 1))`
+  gave `[1, 1.189…]` from the endpoints of the interval, and it is now the
+  same error.
+
+- **Numeric functions give a type error for a set operand.** `Power` and `Sin`
+  gave `incompatible-type` for a set, but 82 other numeric functions, such as
+  `Floor`, `Mod`, `Arctan2`, `Gamma` and `Zeta`, stayed unevaluated, and
+  `IsPrime(Set(1, 2))` was `False`. They all give the error now. A list still
+  broadcasts: `Floor([1.5, 2.5])` is `[1, 2]`.
+
+- **`Solve` of a computed collection is a type error.** `Solve(Range(1, 3), x)`
+  and `Solve(Linspace(a, 0, 3))` were `[]`, a false statement that there is no
+  solution. A first operand that is a collection but is not a written list,
+  set or tuple of equations (`Range`, `Linspace`, `Map`, a symbol that holds a
+  list) now gives an `incompatible-type` error. A written list is a system of
+  equations, as before.
+
 - **Error functions and trigonometric integrals on the imaginary axis.**
   `Erf`, `Erfc`, `Erfi`, `SinIntegral`, `SinhIntegral`, `CosIntegral` and
   `CoshIntegral` of an argument exactly on the imaginary axis (an exact
@@ -116,6 +140,40 @@
   every precision up to that limit. Exact arithmetic is not changed.
 
 ### Issues Resolved
+
+- **`Shape` and `Rank` of a lazy collection.** `Shape(Range(1, 3))` was `()`
+  and `Rank(Range(1, 3))` was `0`, the answer for a scalar. A finite indexed
+  collection now gives the answer of the list with the same elements:
+  `Shape(Range(1, 3))` is `(3)` and `Rank(Range(1, 3))` is `1`. A set, a
+  dictionary, an infinite collection, and a symbol with a collection type
+  and no value stay unevaluated. Compiled `Shape` and `Rank` decline to
+  compile for an operand whose type is a set, a dictionary, a tuple or a
+  string, where the compiled answer was different from the evaluated one.
+
+- **`Solve` of a list of equations.**
+  - A list of several plain expressions is a system of equations, each equal
+    to 0, as the `=` spelling is: `Solve([x + y - 1, x - y], [x, y])` is
+    `[(1/2, 1/2)]`. It stayed unevaluated.
+  - A list of several equations in one unknown gives the roots that all the
+    equations share: `Solve([x = 1, x^2 = 1], x)` is `[1]` and
+    `Solve([\sin(2x) = 0, \cos(x) = -1], x)` is `[π, -π]`. Both were `[]`.
+    For periodic equations, when no principal root is common, `Solve` stays
+    unevaluated instead of saying that there is no solution.
+  - A list of inequalities with no equation stays unevaluated. Its solution
+    set is a region: `Solve([x < 1, y > 0], [x, y])` was `[(1, 0)]`, a point
+    that does not satisfy `x < 1`.
+  - A domain given as an argument applies to a list of equations:
+    `Solve([x + y = 3, x - y = 1], x ∈ 0..5, y ∈ 0..5)` is `[(2, 1)]`. It was
+    `[]`.
+  - `Solve([x = 1, 2x = 2], x)` threw a `TypeError` (`roots is not
+    iterable`). It is now `[1]`.
+  - `expr.solve()` of a system of linear inequalities gives `null` for an
+    unbounded region, as documented. It gave a corner point of the region.
+
+- **`\bar` over a number.** `\bar{7}` was an `unexpected-command` error. It now
+  parses to `Conjugate(7)`, as `\overline{7}` does, and `0.\bar{3}` is the
+  repeating decimal `1/3`, as `0.\overline{3}` is. `\bar{x}` is still
+  `Mean(x)`.
 
 - **`QuotientRing(Integers, n)` is a finite collection of `n` residue
   classes, not a set of integers** (#399, contributed by

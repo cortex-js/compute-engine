@@ -64,6 +64,45 @@ function isSideConditionPredicate(item: Expression): boolean {
 }
 
 /**
+ * Whether `item` of a `Solve` equation list is a plain expression that is
+ * read as `item = 0`: an expression of type `number` that is not an `Equal`.
+ * The single-equation case uses the same test on its equation. A relation or
+ * a predicate has type `boolean`, so it is not a plain expression.
+ */
+function isPlainEquationExpression(item: Expression): boolean {
+  return item.operator !== 'Equal' && item.type.matches('number');
+}
+
+/**
+ * In a `List`, `Set` or `Tuple` of equations, read each plain expression `e`
+ * (see `isPlainEquationExpression`) as the equation `e = 0`, as `Solve` does
+ * when the expression is the only equation. The system solver accepts only
+ * `Equal` items, and an `And` of the items accepts only boolean items. Thus
+ * `Solve([x + y - 1, x - y], [x, y])` and `Solve([x + y = 1, x - y = 0],
+ * [x, y])` have the same solution. A relation or another boolean item (an
+ * inequality, a congruence, an `Element` domain constraint) is not a number
+ * and is kept as written. Another expression is returned unchanged.
+ */
+function plainItemsAsEquations(ce: ComputeEngine, eq: Expression): Expression {
+  if (
+    !isFunction(eq, 'List') &&
+    !isFunction(eq, 'Set') &&
+    !isFunction(eq, 'Tuple')
+  )
+    return eq;
+  const items = eq.ops;
+  if (!items.some((item) => isPlainEquationExpression(item))) return eq;
+  return ce.function(
+    eq.operator,
+    items.map((item) =>
+      isPlainEquationExpression(item)
+        ? ce.function('Equal', [item, ce.Zero])
+        : item
+    )
+  );
+}
+
+/**
  * Evaluate the shared (multi-unknown) side-condition predicates at a concrete
  * substitution. Returns `false` only when some predicate reduces to a definite
  * `False` (the conservative Kleene posture: `True` and undecidable keep the
@@ -337,6 +376,99 @@ function emptyRootsAnswer(
   return undefined;
 }
 
+/**
+ * The roots that several equations in the one unknown `x` have in common.
+ *
+ * The candidates are the roots of one equation of the list (the source). A
+ * candidate is kept when every other equation, with `x` replaced by the
+ * candidate, evaluates to `True`, and it is rejected when one of them
+ * evaluates to `False`.
+ *
+ * A polynomial equation is tried first, because the root finder gives all of
+ * its roots. Its kept roots are a decision: the answer `[]` states that there
+ * is no common root.
+ *
+ * For another equation, the root finder can give only the principal roots
+ * (`sin(x) = 0` gives `[0, π]`), and a common root can be outside that list:
+ * `[sin(2x) = 0, cos(x) = -1]` has the root `π`, which is not a principal
+ * root of `sin(2x) = 0`. Thus each equation that is not a polynomial is a
+ * source, and the answer is the union of their kept roots. The answer then
+ * does not depend on the order of the equations. When this union is empty,
+ * the answer is `'undecided'`, because a common root can be outside all the
+ * principal root lists.
+ *
+ * An equation whose root list is empty, or has a symbol that is not in the
+ * equations (the parameter of a root family), gives no candidates.
+ *
+ * Returns `undefined` when no equation gives candidates; the caller then
+ * uses the system solver. Returns `'undecided'` when an equation evaluates
+ * to neither `True` nor `False` for a candidate: the caller stays inert,
+ * because a list without that candidate could be wrong.
+ */
+function commonRoots(
+  ce: ComputeEngine,
+  equations: ReadonlyArray<Expression>,
+  x: string
+): Expression[] | 'undecided' | undefined {
+  const symbols = new Set(equations.flatMap((eq) => eq.unknowns));
+  const isPolynomial = (eq: Expression) =>
+    isFunction(eq, 'Equal') &&
+    polynomialDegree(eq.op1, x) >= 0 &&
+    polynomialDegree(eq.op2, x) >= 0;
+  // The kept roots of `source`, `undefined` when it gives no candidates, or
+  // `'undecided'`.
+  const keptRoots = (
+    source: Expression
+  ): Expression[] | 'undecided' | undefined => {
+    const candidates = filterRootsByAssumptions(
+      ce,
+      findUnivariateRoots(source, x),
+      x
+    );
+    if (
+      candidates.length === 0 ||
+      !candidates.every((root) =>
+        root.unknowns.every((u) => u !== x && symbols.has(u))
+      )
+    )
+      return undefined;
+
+    const others = equations.filter((eq) => eq !== source);
+    const kept: Expression[] = [];
+    for (const root of candidates) {
+      let keep = true;
+      for (const eq of others) {
+        const value = sym(eq.subs({ [x]: root }).evaluate());
+        if (value === 'False') {
+          keep = false;
+          break;
+        }
+        if (value !== 'True') return 'undecided';
+      }
+      if (keep) kept.push(root);
+    }
+    return kept;
+  };
+
+  for (const source of equations.filter((eq) => isPolynomial(eq))) {
+    const kept = keptRoots(source);
+    if (kept !== undefined) return kept;
+  }
+
+  let hasCandidates = false;
+  const union: Expression[] = [];
+  for (const source of equations.filter((eq) => !isPolynomial(eq))) {
+    const kept = keptRoots(source);
+    if (kept === undefined) continue;
+    if (kept === 'undecided') return 'undecided';
+    hasCandidates = true;
+    for (const root of kept)
+      if (!union.some((r) => r.isSame(root))) union.push(root);
+  }
+  if (!hasCandidates) return undefined;
+  return union.length > 0 ? union : 'undecided';
+}
+
 export function evaluateSolve(
   ce: ComputeEngine,
   ops: ReadonlyArray<Expression>
@@ -372,6 +504,37 @@ export function evaluateSolve(
   // `w := 9`): resolving `s` re-introduces `w`, which is still valueless here.
   let ceq = reduceWithUnknownsShielded(ce, eq, specs);
 
+  // The canonical form of the held operand can contain an error, for example
+  // a `Map` whose operands have the wrong types. Such an operand is not an
+  // equation, and the solver finds no root in it: an empty root list would
+  // state that there is no solution. Return the operand with its error.
+  if (!ceq.isValid) return ce._fn('Solve', [ceq, ...ops.slice(1)]);
+
+  // The first operand can be a collection only when it is written as a
+  // `List`, `Set` or `Tuple` of equations, or as an `And` of equations. A
+  // collection of other form is not an equation: a `Range`, a `Linspace`, a
+  // `Map`, an `Interval` or a symbol that holds a list. The solver finds no
+  // root in such a collection, and an empty root list would state that there
+  // is no solution. Report an `incompatible-type` error on the operand. A
+  // string is also a collection, but it is a literal value and not a
+  // computed collection: `Solve` of a string stays unevaluated.
+  if (
+    !isFunction(ceq, 'List') &&
+    !isFunction(ceq, 'Set') &&
+    !isFunction(ceq, 'Tuple') &&
+    !isFunction(ceq, 'And') &&
+    ceq.isCollection &&
+    !ceq.type.matches('string')
+  )
+    return ce._fn('Solve', [
+      ce.typeError(
+        { kind: 'union', types: ['boolean', 'number'] },
+        ceq.type,
+        ceq
+      ),
+      ...ops.slice(1),
+    ]);
+
   // Shared (multi-unknown) side-condition predicates lifted out of a constraint
   // set (e.g. `a < b` in `Solve(\{a+b=5, a<b\}, \{a,b\})`). Single-unknown side
   // conditions merge into their spec's `condition` slot instead; these are the
@@ -389,6 +552,10 @@ export function evaluateSolve(
   // pick a single unknown out of a multi-unknown constraint set. A bare `_`
   // pipeline placeholder is a plain symbol (never a collection head), so this
   // guard never intercepts it and the `_` handling stays intact.
+  //
+  // Each plain expression item is first changed to an equation, because the
+  // items can be rebuilt below as an `And`, which accepts only boolean items.
+  ceq = plainItemsAsEquations(ce, ceq);
   if (
     isFunction(ceq, 'Set') ||
     isFunction(ceq, 'List') ||
@@ -429,9 +596,13 @@ export function evaluateSolve(
       remaining.push(item);
     }
 
+    // A `List` with a domain spec in argument position is rewritten too: the
+    // domain solvers accept one equation or predicate, not a `List`, so its
+    // equations become an `And` that is tested for each candidate.
     if (
       lifted.length > 0 ||
       !wasList ||
+      specs.some((s) => s.domain !== undefined) ||
       (specs.length === 1 &&
         (remaining.length === 1 ||
           remaining.some((item) => isSideConditionPredicate(item))))
@@ -561,6 +732,9 @@ export function evaluateSolve(
     specs = [{ unknown }];
   }
 
+  // The `_` placeholder resolved above can give a new `List` of equations.
+  ceq = plainItemsAsEquations(ce, ceq);
+
   // A symbol bound to an expression that *contains* the unknown hides it:
   // `Solve(s = 2, w)` with `s := (9 - w²)/4` saw an equation with no `w` and
   // returned `[]` — "proven no solutions". Resolve such bindings, protecting
@@ -576,19 +750,39 @@ export function evaluateSolve(
   // No domains: existing behavior.
   if (domainSpecs.length === 0) {
     const names = specs.map((s) => s.unknown);
+    // A list of inequalities with no `Equal` has a region as its solution
+    // set. A list of points cannot show a region: for a bounded region, the
+    // list of its vertices is not the solution set. Thus `Solve` stays
+    // unevaluated. When the list also has an `Equal`, the inequalities filter
+    // the solutions of the equations, and that answer is a list of points.
+    if (
+      isFunction(ceq, 'List') &&
+      !ceq.ops.some((item) => isFunction(item, 'Equal')) &&
+      ceq.ops.some((item) => INEQUALITY_OPERATORS.includes(item.operator))
+    )
+      return undefined;
     // A single (string) unknown always yields the univariate root list
     // (`Expression[]`), never the system-solve `Record` shapes.
     if (names.length === 1) {
       // A univariate inequality (`Solve(x^2 < 4, x)`) has no root list.
       // `ceq.solve()` returns `[]`, which would serialize as "no solutions" —
       // misleading, since the request is simply unsupported. Stay inert
-      // instead so the caller sees the unevaluated `Solve(...)`. (Linear
-      // inequality *systems* are handled by the multi-variable path.)
+      // instead so the caller sees the unevaluated `Solve(...)`.
       if (INEQUALITY_OPERATORS.includes(ceq.operator ?? '')) return undefined;
       const conditioned =
         specs[0].condition !== undefined || sideConditions.length > 0;
       let roots: ReadonlyArray<Expression> | null;
-      if (isFunction(ceq, 'Equal') || ceq.type.matches('number')) {
+      // Several equations in one unknown: the roots common to all of them.
+      const common =
+        isFunction(ceq, 'List') &&
+        ceq.nops >= 2 &&
+        ceq.ops.every((item) => isFunction(item, 'Equal'))
+          ? commonRoots(ce, ceq.ops, names[0])
+          : undefined;
+      if (common === 'undecided') return undefined;
+      if (common !== undefined) {
+        roots = common;
+      } else if (isFunction(ceq, 'Equal') || ceq.type.matches('number')) {
         // An equation (or a bare expression read as `= 0`): the same two
         // steps as `ceq.solve()`, with the candidate statistics kept. An
         // empty root list is a decision only in some cases, see
@@ -602,7 +796,26 @@ export function evaluateSolve(
         if (roots.length === 0)
           return emptyRootsAnswer(ce, ceq, names[0], stats, conditioned);
       } else {
-        roots = ceq.solve(names[0]) as ReadonlyArray<Expression> | null;
+        // For a `List` of equations, `ceq.solve()` uses the system solver,
+        // which can return a record (`{x: 1}` for `[x = 1, 2x = 2]`) or an
+        // array of records also for one unknown. Read the value of the
+        // unknown from each record. A record without the unknown leaves the
+        // unknown free, which a root list cannot show: stay inert.
+        const sol = ceq.solve(names[0]);
+        if (sol === null) roots = null;
+        else {
+          const items = Array.isArray(sol) ? sol : [sol];
+          const values: Expression[] = [];
+          for (const item of items) {
+            if (isExpression(item)) values.push(item);
+            else {
+              const value = (item as Record<string, Expression>)[names[0]];
+              if (value === undefined) return undefined;
+              values.push(value);
+            }
+          }
+          roots = values;
+        }
       }
       // `null`: the solver does not handle this input, which does not prove
       // that there is no solution.

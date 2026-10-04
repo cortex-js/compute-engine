@@ -1303,6 +1303,10 @@ export function solveLinearInequalitySystem(
 
   if (vertices.length === 0) return null;
 
+  // An unbounded region has a corner list that does not describe it: for
+  // `x < 1, y > 0` the only corner is `(1, 0)`. Return null for it.
+  if (isUnboundedRegion(constraints)) return null;
+
   // Remove duplicate vertices
   const uniqueVertices = removeDuplicatePoints(vertices);
 
@@ -1429,6 +1433,41 @@ function extractLinearConstraint(
     return null;
 
   return { a, b, c, strict };
+}
+
+/**
+ * Whether a non-empty region `a·x + b·y + c ≤ 0` (for each constraint) is
+ * unbounded.
+ *
+ * A non-empty convex region is unbounded if and only if there is a direction
+ * `d ≠ 0` with `a·d.x + b·d.y ≤ 0` for every constraint: from a point of the
+ * region, the half-line in the direction `d` stays in the region. These
+ * directions make a convex cone. When the cone is not only `{0}`, one of its
+ * edges is on the boundary line `a·d.x + b·d.y = 0` of some constraint, so it
+ * is sufficient to test the two directions `(-b, a)` and `(b, -a)` of each
+ * constraint. Strict and non-strict constraints have the same directions.
+ */
+function isUnboundedRegion(
+  constraints: ReadonlyArray<LinearConstraint>
+): boolean {
+  const normals = constraints.filter((c) => c.a !== 0 || c.b !== 0);
+  // No constraint limits x or y: the region is the whole plane.
+  if (normals.length === 0) return true;
+  for (const c of normals) {
+    for (const [dx, dy] of [
+      [-c.b, c.a],
+      [c.b, -c.a],
+    ]) {
+      const scale = Math.hypot(dx, dy);
+      if (
+        normals.every(
+          (k) => (k.a * dx + k.b * dy) / (scale * Math.hypot(k.a, k.b)) <= 1e-12
+        )
+      )
+        return true;
+    }
+  }
+  return false;
 }
 
 /**

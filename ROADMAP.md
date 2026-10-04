@@ -5105,32 +5105,6 @@ recurring bug class (A3, G3, the sets/Union/Range contains family, NaN
 comparisons); validation-by-corpus (the Fungrim harness) found 15 engine bugs
 that targeted review missed — keep running it.
 
-### A list broadcast against a set is cut to the shorter length (OPEN, found 2026-10-03)
-
-`Power([1, 2, 3], Set(1, 2))` evaluates to `[1, 4]`: the set is zipped with
-the list as if it were a list, and the result is cut to the shorter length.
-Two lists of different lengths give an error instead
-(`Add([1, 2, 3], [1, 2])` is `Error("incompatible-dimensions", "2 vs 3")`),
-so the set operand skips the length check. A set has no order, so it should
-not be zipped by position at all: the broadcast should decline or give an
-error.
-
-### `Shape` and `Rank` of a lazy collection or a set are `()` and `0` (OPEN, found 2026-10-03)
-
-`Shape(Range(1, 3))` is `()` and `Rank(Range(1, 3))` is `0`, while
-`Shape([1, 2, 3])` is `(3)`. `Shape(Set(1, 2))` is also `()`. A rank of 0
-means a scalar, which these are not. A finite lazy collection should give
-its count as the shape (`(3)`), and a set should give a shape that is not
-the scalar one (decline, or a documented answer).
-
-### `Solve` of a collection operand gives an empty list (OPEN, found 2026-10-03)
-
-`Solve(Linspace(a, 0, 3))` and `Solve(Linspace(a, 1, 3))` evaluate to `[]`.
-`Solve` reads its operand as an equation in `a` and reports no solution,
-but the operand is a list, not an equation. A decision is needed: a
-collection operand is either a type error, or it is read element by element
-as a system of equations, each equal to 0.
-
 ### Load-sensitive test flakes under a full-suite run (observed 2026-08-31)
 
 Three suites failed under a 6-worker full-suite run and pass cleanly — at bare

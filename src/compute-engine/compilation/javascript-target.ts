@@ -609,6 +609,7 @@ import {
   isProvablyTupleParticipant,
   installUnrolledBigOpLane,
   pointHasBroadcastComponent,
+  shapeOperandRefusal,
   unfaithfulComparisonAggregate,
   unionAdmitsIndexedCollection,
   type LoopInvariantBinding,
@@ -6314,14 +6315,22 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // CE `Rank` is the TENSOR rank — the number of axes (scalar 0, vector 1,
   // matrix 2, …), NOT the linear-algebra (row) rank. It is the nesting depth of
   // the compiled value, so it lowers for any operand (a scalar gives 0).
+  // An operand that can be a set has no shape in the interpreter, so the
+  // compilation declines for it (`shapeOperandRefusal`).
   Rank: (args, compile) => {
     if (args[0] == null)
       throw new Error('Could not compile `Rank`: missing argument');
+    const refusal = shapeOperandRefusal(args[0]);
+    if (refusal !== undefined)
+      throw new Error(`Could not compile \`Rank\`: the operand ${refusal}.`);
     return `(_SYS.shape(${compile(args[0])}).length)`;
   },
   Shape: (args, compile) => {
     if (args[0] == null)
       throw new Error('Could not compile `Shape`: missing argument');
+    const refusal = shapeOperandRefusal(args[0]);
+    if (refusal !== undefined)
+      throw new Error(`Could not compile \`Shape\`: the operand ${refusal}.`);
     return `_SYS.shape(${compile(args[0])})`;
   },
   // Flatten to a flat list (native `.flat`), or by an explicit number of
