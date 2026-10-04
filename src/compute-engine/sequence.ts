@@ -1913,6 +1913,16 @@ export function getSequenceCache(
 // Generate Sequence Terms (SUB-8)
 // ============================================================================
 
+/** True when `value` is the unevaluated term `Subscript(name, …)` of the
+ * sequence `name`: the handler declined the term. */
+function isDeclinedTerm(value: Expression, name: string): boolean {
+  return (
+    isFunction(value, 'Subscript') &&
+    isSymbol(value.op1) &&
+    value.op1.symbol === name
+  );
+}
+
 /**
  * Generate a list of sequence terms from start to end (inclusive).
  *
@@ -1921,7 +1931,10 @@ export function getSequenceCache(
  * @param start - Starting index (inclusive)
  * @param end - Ending index (inclusive)
  * @param step - Step size (default: 1)
- * @returns Array of BoxedExpressions for each term, or undefined if not a sequence
+ * @returns Array of BoxedExpressions for each term, or undefined if `name`
+ *   is not a sequence or if a term in the range has no value. Each term is
+ *   its value under `evaluate()`: a number, or an exact expression such as
+ *   `1 + 3√2`.
  *
  * @example
  * ```typescript
@@ -1954,16 +1967,26 @@ export function generateSequenceTerms(
 
   // Generate terms by evaluating subscripted expressions
   for (let n = start; step > 0 ? n <= end : n >= end; n += step) {
-    const expr = ce.parse(`${name}_{${n}}`)!;
-    const value = expr.evaluate();
+    // The term is built as `Subscript(name, n)`, not parsed from LaTeX: a
+    // name such as `alpha` or `fib` written as `alpha_{0}` parses as a
+    // product of letters.
+    const value = ce
+      .function('Subscript', [ce.symbol(name), ce.number(n)])
+      .evaluate();
 
-    // Only include if we got a valid numeric result
-    if (isNumber(value)) {
-      terms.push(value);
-    } else {
-      // If any term fails to evaluate, return undefined
+    // A term is its value under `evaluate()`: a number, or an exact term
+    // that is not a number literal (`1 + 3√2`, `x(x + 1) + 1`). A term that
+    // is declined stays the expression `Subscript(name, n)`. An invalid
+    // term, or a value that is not a number (`Undefined`, a string, a list,
+    // possibly from a base value), is not a term: then the list has no
+    // value.
+    if (
+      !value.isValid ||
+      isDeclinedTerm(value, name) ||
+      !value.type.matches('number')
+    )
       return undefined;
-    }
+    terms.push(value);
   }
 
   return terms;

@@ -173,6 +173,23 @@ decision). These cases stay unevaluated although a complete answer exists:
   that misses a root, except a root inside the window around a listed
   root.)
 
+### An unevaluated `Solve` from a parse keeps parse forms in its MathJSON (OPEN, small — found 2026-10-04)
+
+`Solve` holds its arguments, and `canonicalSolve()`
+(`boxed-expression/solve-domain.ts`) keeps the equation operand as written,
+on purpose. When `Solve` cannot give a complete list, it stays unevaluated,
+and the result holds that operand as it came from the parser:
+`ce.parse('\operatorname{Solve}((x-2)(x+e^x)=0, x)').evaluate().json` is
+`["Solve", ["Equal", ["InvisibleOperator", ["Delimiter", …], ["Delimiter",
+…]], 0], "x"]`. The same input from `ce.box(...)` gives
+`["Multiply", …]`. The LaTeX is the same on both routes, but a host that
+reads the MathJSON sees `InvisibleOperator` and `Delimiter`. A canonical form
+of an equation stays an equation (`x - x = 0` keeps its `Equal`), so a
+possible fix is to return `Solve` with the canonical equation when the solver
+gives no answer. Before that change, find why the comment in
+`canonicalSolve()` says not to canonicalize the equation (for example, a
+symbol declared too early, before the domain spec is read).
+
 ### `Solve` over a bounded domain does not see a root that is very near a listed root (OPEN, medium — found 2026-10-04 by the interval proof of complete lists)
 
 Since 2026-10-04, interval arithmetic proves that a root list over a bounded

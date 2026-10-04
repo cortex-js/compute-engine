@@ -2180,6 +2180,8 @@ export interface IComputeEngine {
    * @param end - Ending index (inclusive)
    * @param step - Step size (default: 1)
    * @returns Array of BoxedExpressions, or undefined if not a sequence
+   * or if a term in the range has no value. Each term is its value under
+   * `evaluate()`: a number, or an exact expression such as `1 + 3√2`.
    *
    * @example
    * ```typescript

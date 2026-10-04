@@ -813,7 +813,19 @@
   also returned: for `c_n = x·c_{n−1} + 1`, `c_0 = 1`, `c_3.evaluate()` is
   `x(x(x + 1) + 1) + 1`. A term with more than 250 nodes stays unevaluated
   (`c_62` is returned, `c_63` is not), and so does a term whose type is not
-  a number. `ce.getSequenceCache()` returns only the exact
+  a number. `ce.getSequenceTerms()` returns these terms too:
+  `getSequenceTerms('a', 0, 3)` was `undefined`, and it is now
+  `[1, 1 + √2, 1 + 2√2, 1 + 3√2]`; it is still `undefined` when a term in
+  the range has no value, or when a term is not a number (`Undefined`).
+  The terms of a sequence whose name is not one letter (`alpha`, `fib`)
+  are read correctly: `getSequenceTerms()` read `alpha_{0}` as a product
+  of letters. `ce.checkSequenceOEIS()` looks up the numeric values of the
+  terms, from the first index of the domain of the sequence. It reports an
+  error when a term has no numeric value (a term with a free symbol), when
+  a term is complex or not an integer (`i·Z_{n−1}`, `a_{n−1} + √2`: OEIS
+  holds integer sequences, and the real part was sent), and when a term of
+  a defined sequence has no value (it reported that the sequence was not
+  defined). `ce.getSequenceCache()` returns only the exact
   terms, with the index as the key: after `F_6.N()` it held the terms
   `F_2` … `F_6` that `.N()` computed, and it is now empty. The terms that `.N()` computes are
   kept apart, for each precision, and `ce.clearSequenceCache()` clears them

@@ -523,6 +523,77 @@ describe('DECLARATIVE SEQUENCE DEFINITIONS', () => {
       expect(ce.getSequenceTerms('N', 0, 5.5)).toBeUndefined();
     });
 
+    test('getSequenceTerms includes exact terms that are not numbers', () => {
+      // Each term is its value under `evaluate()`. Before, a term that was
+      // not a number literal made the whole list `undefined`.
+      const ce = new ComputeEngine();
+      ce.declareSequence('a', {
+        base: { 0: 1 },
+        recurrence: 'a_{n-1} + \\sqrt{2}',
+      });
+      const terms = ce.getSequenceTerms('a', 0, 3);
+      expect(terms?.map((t) => t.toString())).toEqual([
+        '1',
+        '1 + sqrt(2)',
+        '1 + 2sqrt(2)',
+        '1 + 3sqrt(2)',
+      ]);
+      for (const [i, t] of (terms ?? []).entries())
+        expect(t.N().re).toBeCloseTo(1 + i * Math.SQRT2, 14);
+
+      ce.declareSequence('c', {
+        base: { 0: 1 },
+        recurrence: 'x c_{n-1} + 1',
+      });
+      expect(ce.getSequenceTerms('c', 0, 2)?.map((t) => t.toString())).toEqual(
+        ['1', 'x + 1', 'x * (x + 1) + 1']
+      );
+    });
+
+    test('getSequenceTerms is undefined when a term in the range has no value', () => {
+      const ce = new ComputeEngine();
+      ce.declareSequence('P', {
+        base: { 1: 1 },
+        recurrence: 'P_{n-1} + 1',
+        domain: { min: 1 },
+      });
+      // P_0 is below the domain: it stays unevaluated.
+      expect(ce.getSequenceTerms('P', 0, 3)).toBeUndefined();
+      expect(ce.getSequenceTerms('P', 1, 3)?.map((t) => t.re)).toEqual([
+        1, 2, 3,
+      ]);
+    });
+
+    test('getSequenceTerms reads a sequence whose name is not one letter', () => {
+      // The terms are built as `Subscript(name, n)`: the LaTeX `alpha_{0}`
+      // would parse as a product of letters.
+      const ce = new ComputeEngine();
+      ce.declareSequence('alpha', {
+        base: { 0: 1 },
+        recurrence: '\\alpha_{n-1} + 1',
+      });
+      expect(ce.getSequenceTerms('alpha', 0, 3)?.map((t) => t.re)).toEqual([
+        1, 2, 3, 4,
+      ]);
+      ce.declareSequence('fib', {
+        base: { 0: 0, 1: 1 },
+        recurrence:
+          '\\operatorname{fib}_{n-1} + \\operatorname{fib}_{n-2}',
+      });
+      expect(ce.getSequenceTerms('fib', 0, 6)?.map((t) => t.re)).toEqual([
+        0, 1, 1, 2, 3, 5, 8,
+      ]);
+    });
+
+    test('getSequenceTerms is undefined when a term is not a number', () => {
+      const ce = new ComputeEngine();
+      ce.declareSequence('U', {
+        base: { 0: ce.box('Undefined') },
+        recurrence: 'U_{n-1} + 1',
+      });
+      expect(ce.getSequenceTerms('U', 0, 0)).toBeUndefined();
+    });
+
     test('getSequenceTerms returns undefined for invalid step', () => {
       const ce = new ComputeEngine();
       ce.declareSequence('S', {

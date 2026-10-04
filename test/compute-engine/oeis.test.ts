@@ -133,4 +133,46 @@ describe('OEIS Integration (offline)', () => {
       "'x' is not a defined sequence"
     );
   });
+
+  test('checkSequenceOEIS throws when a term has no numeric value', async () => {
+    // An exact term with a free symbol has no numeric value: it cannot be
+    // looked up. The error comes before any request to OEIS.
+    const ce = new ComputeEngine();
+    ce.declareSequence('c', {
+      base: { 0: 1 },
+      recurrence: 'x c_{n-1} + 1',
+    });
+    await expect(ce.checkSequenceOEIS('c', 5)).rejects.toThrow(
+      "'c' has terms that are not numbers"
+    );
+  });
+
+  test('checkSequenceOEIS throws for a complex or a non-integer term', async () => {
+    // OEIS holds integer sequences. A complex term is not sent as its real
+    // part, and an irrational term is not sent as a float. The error comes
+    // before any request to OEIS.
+    const ce = new ComputeEngine();
+    ce.declareSequence('Z', { base: { 0: 1 }, recurrence: 'i Z_{n-1}' });
+    await expect(ce.checkSequenceOEIS('Z', 4)).rejects.toThrow(
+      'OEIS lookup requires integer terms'
+    );
+    ce.declareSequence('a', {
+      base: { 0: 1 },
+      recurrence: 'a_{n-1} + \\sqrt{2}',
+    });
+    await expect(ce.checkSequenceOEIS('a', 4)).rejects.toThrow(
+      'OEIS lookup requires integer terms'
+    );
+  });
+
+  test('checkSequenceOEIS reports a defined sequence with a term that has no value', async () => {
+    const ce = new ComputeEngine();
+    ce.declareSequence('U', {
+      base: { 0: ce.box('Undefined') },
+      recurrence: 'U_{n-1} + 1',
+    });
+    await expect(ce.checkSequenceOEIS('U', 3)).rejects.toThrow(
+      "'U' has a term with no value"
+    );
+  });
 });

@@ -315,13 +315,36 @@ export async function checkSequence(
   matches: OEISSequenceInfo[];
   terms: number[];
 }> {
-  // Generate terms using the existing getSequenceTerms function
-  const termExprs = ce.getSequenceTerms(name, 0, count - 1);
-  if (!termExprs) {
+  if (!ce.isSequence(name)) {
     throw new Error(`'${name}' is not a defined sequence`);
   }
+  // The terms start at the first index of the domain of the sequence
+  // (0 when the domain has no lower bound).
+  const info = ce.getSequence(name);
+  const domain = info?.isMultiIndex
+    ? undefined
+    : (info?.domain as { min?: number } | undefined);
+  const start = domain?.min ?? 0;
+  const termExprs = ce.getSequenceTerms(name, start, start + count - 1);
+  if (!termExprs) {
+    throw new Error(`'${name}' has a term with no value`);
+  }
 
-  const terms = termExprs.map((t) => t.re);
+  // A term can be exact and not a number literal (`1 + 3√2`): its numeric
+  // value is the term to look up. A term with a free symbol has no numeric
+  // value, and the sequence cannot be looked up. OEIS holds integer
+  // sequences: a complex term or a term that is not an integer is an error,
+  // as in `lookupSequence()`, and is not sent as its real part.
+  const terms = termExprs.map((t) => {
+    const value = t.N();
+    if (!Number.isFinite(value.re) || !Number.isFinite(value.im)) {
+      throw new Error(`'${name}' has terms that are not numbers`);
+    }
+    if (value.im !== 0 || !Number.isInteger(value.re)) {
+      throw new Error('OEIS lookup requires integer terms');
+    }
+    return value.re;
+  });
 
   // Look up in OEIS
   const matches = await lookupOEISByTerms(terms, options);
