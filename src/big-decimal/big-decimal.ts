@@ -1488,7 +1488,8 @@ function maxExactGap(): number {
  * `limit` the sum is exact.
  */
 function alignedSum(a: BigDecimal, b: BigDecimal, limit: number): BigDecimal {
-  let [high, low] = a.exponent > b.exponent ? [a, b] : [b, a];
+  const high = a.exponent > b.exponent ? a : b;
+  let low = high === a ? b : a;
   if (high.exponent - (low.exponent + low._digitCount()) > limit)
     low = fromRaw(low.significand > 0n ? 1n : -1n, high.exponent - limit);
   return fromRaw(

@@ -176,9 +176,7 @@ const MAX_ENUMERATED_ELEMENTS = 1_000_000;
  * an infinite or very long collection would exhaust memory, so the caller
  * stays unevaluated instead.
  */
-function finiteElements(
-  op: Expression | undefined
-): Expression[] | undefined {
+function finiteElements(op: Expression | undefined): Expression[] | undefined {
   if (op === undefined || !isWalkableFiniteCollection(op)) return undefined;
   const elements: Expression[] = [];
   for (const x of op.each()) {
