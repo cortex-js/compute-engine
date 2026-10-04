@@ -1,7 +1,6 @@
 import { BoxedType } from '../../common/type/boxed-type.js';
 import {
   EXTENDED_REAL_TYPE,
-  INDEXED_COLLECTION_SHAPE_TYPE,
   SIGNED_INFINITY_TYPE,
 } from '../../common/type/primitive.js';
 import { parseType } from '../../common/type/parse.js';
@@ -27,6 +26,8 @@ import {
   checkArity,
 } from '../boxed-expression/validate.js';
 import {
+  broadcastLengthMismatch,
+  broadcastingComponentKind,
   canEnumerateFiniteSource,
   hasAccessibleComponents,
   isFiniteIndexedCollection,
@@ -49,7 +50,10 @@ import {
   Sign,
   TypeHandlerContext,
 } from '../global-types.js';
-import { describeType } from '../boxed-expression/operand-descriptor.js';
+import {
+  describe,
+  describeType,
+} from '../boxed-expression/operand-descriptor.js';
 import { hasErrorTypedOperand, operandLiteralValue } from './type-handlers.js';
 import {
   isAbsentSymbol,
@@ -932,28 +936,30 @@ function isPointOperand(d: OperandDescriptor, engine: PureEngineView): boolean {
  * Does the point BROADCAST — does one of its components carry a collection,
  * so that the norm is one norm per element rather than a scalar? The
  * descriptor-shape reading of `pointNormBroadcasts` (`library/utils.ts`).
+ * The answer is `'gated-list'` when a broadcasting component may be absent,
+ * `'list'` when none may be, and `undefined` when the point does not
+ * broadcast.
  */
 function pointNormBroadcastsOperand(
   d: OperandDescriptor,
   engine: PureEngineView
-): boolean {
+): 'list' | 'gated-list' | undefined {
+  // A component typed `list<…> | missing` (a restricted list) broadcasts
+  // too (`broadcastingComponentKind`).
   const components = operandOperands(d);
-  if (components !== undefined)
-    return components.some(
-      (c) =>
-        isSubtype(c.type, INDEXED_COLLECTION_SHAPE_TYPE) &&
-        !isTupleOperand(c, engine)
-    );
-  const t = d.type;
-  return (
-    typeof t !== 'string' &&
-    t.kind === 'tuple' &&
-    t.elements.some((el) => {
-      const et = el.type;
-      if (typeof et !== 'string' && et.kind === 'tuple') return false;
-      return isSubtype(et, INDEXED_COLLECTION_SHAPE_TYPE);
-    })
-  );
+  const kinds =
+    components !== undefined
+      ? components.map((c) =>
+          isTupleOperand(c, engine)
+            ? undefined
+            : broadcastingComponentKind(c.type)
+        )
+      : typeof d.type !== 'string' && d.type.kind === 'tuple'
+        ? d.type.elements.map((el) => broadcastingComponentKind(el.type))
+        : [];
+  if (kinds.includes('gated-list')) return 'gated-list';
+  if (kinds.includes('list')) return 'list';
+  return undefined;
 }
 
 /**
@@ -983,7 +989,12 @@ function euclideanNormTypeOf(
  * broadcasts. Only a literal point exposes the components the scalar claim
  * is derived from; a tuple-TYPED symbol keeps the wide `number`. */
 function pointNormTypeOf(d: OperandDescriptor, engine: PureEngineView): string {
-  if (pointNormBroadcastsOperand(d, engine)) return 'list<number>';
+  // A list component that may be absent gives one norm per element when it
+  // is present, and `NaN` (the norm of a point with an absent coordinate)
+  // when it is absent.
+  const broadcast = pointNormBroadcastsOperand(d, engine);
+  if (broadcast === 'gated-list') return 'list<number> | nan';
+  if (broadcast === 'list') return 'list<number>';
   const components = operandOperands(d);
   if (components === undefined) return 'number';
   return euclideanNormTypeOf(components);
@@ -4038,7 +4049,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       },
       evaluate: (
         ops,
-        { engine: ce, numericApproximation }
+        { engine: ce, numericApproximation, expression }
       ): Expression | undefined => {
         const x = ops[0];
         const normTypeExpr = ops.length > 1 ? ops[1] : undefined;
@@ -4155,6 +4166,18 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           }
           if (hasAbsent) return ce.NaN;
 
+          // The broadcasting components zip element by element, so they must
+          // have one length, as the operands of `Add` and `Hypot` must: a
+          // different length is the `incompatible-dimensions` error. This
+          // test comes before the empty-component test below, because an
+          // EMPTY component against a non-empty one (`‖([1, 2, 3], [])‖`) is
+          // a mismatch too (3 vs 0), not a broadcast over zero points. It
+          // also comes before the folds, so that every order gives the same
+          // error: the L∞ branch below does not zip its components, and it
+          // left a mismatch inert.
+          const mismatch = broadcastLengthMismatch(ce, elements);
+          if (mismatch !== undefined) return mismatch;
+
           // A broadcasting component that is EMPTY zips zero points, so the
           // norm is the empty list — one norm per point, of no points — the
           // answer an empty LIST of points gets below. Decided before the
@@ -4209,13 +4232,61 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           }
 
           if (normType === 'infinity') {
-            // L∞ norm: the largest magnitude. A broadcasting component
-            // evaluates to a List: the scalar maximum cannot represent the
-            // per-element result, so the norm stays symbolic rather than
-            // return a wrong scalar. A NaN magnitude makes the norm NaN, the
-            // answer the matrix branches below give. A magnitude with no
-            // numeric value (`|x|` for an unassigned `x`) leaves the norm
-            // undecided.
+            // L∞ norm: the largest magnitude.
+            //
+            // A point with a broadcasting component is one point per element
+            // of its list components: `([1, -5], 3)` is the points `(1, 3)`
+            // and `(-5, 3)`. Its norm is one maximum per point, so the
+            // components are zipped and each point takes this norm. The
+            // other orders get the same result from their folds, which zip
+            // the lists. The maximum does not zip, so this branch zips
+            // first. The lengths agree here, and an empty component has
+            // returned `[]`, both tested above. A nested TUPLE component is
+            // one coordinate of each point, not a source. A source whose
+            // elements cannot be read one by one (a length that is not
+            // known, or more than `MAX_POINT_LIST_NORM` elements) leaves the
+            // norm undecided.
+            const isSource = (el: Expression): boolean =>
+              isCollectionComponent(el) && !isTuple(el);
+            if (elements.some(isSource)) {
+              const columns: (Expression[] | undefined)[] = [];
+              let count = 0;
+              for (const el of elements) {
+                if (!isSource(el)) {
+                  columns.push(undefined);
+                  continue;
+                }
+                const n =
+                  el.isFiniteCollection === true &&
+                  el.isIndexedCollection === true
+                    ? el.count
+                    : undefined;
+                if (n === undefined || n > MAX_POINT_LIST_NORM)
+                  return undefined;
+                const column = [...el.each()];
+                if (column.length !== n) return undefined;
+                count = n;
+                columns.push(column);
+              }
+              const norms: Expression[] = [];
+              for (let i = 0; i < count; i++) {
+                const n = vectorNorm(
+                  elements.map((el, j) => {
+                    const column = columns[j];
+                    return column === undefined ? el : column[i];
+                  })
+                );
+                if (n === undefined) return undefined;
+                if (isFunction(n, 'Error')) return n;
+                norms.push(n);
+              }
+              return ce.function('List', norms);
+            }
+
+            // A NaN magnitude makes the norm NaN, the answer the matrix
+            // branches below give. A magnitude with no numeric value (`|x|`
+            // for an unassigned `x`) leaves the norm undecided, and so does
+            // a magnitude that is still a collection.
             const magnitudes = elements.map((el) =>
               ce.expr(['Abs', el]).evaluate()
             );
@@ -4320,7 +4391,28 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         // branch below never reaches it for `[]`: an empty list carries no
         // shape, so `isTensorValue` refuses it and the application stayed
         // inert on a question it can decide.
-        if (x.isFiniteCollection === true && x.count === 0) return ce.Zero;
+        //
+        // An empty LIST OF POINTS is different: its norm is one norm per
+        // point, of no points, so the empty list `[]`. `PointList(L, M)` with
+        // an empty `M` zips to the shortest component and evaluates to `[]`,
+        // which is the same value as an empty vector. Thus the test reads the
+        // operand BEFORE evaluation (`expression.ops`), with the same
+        // predicates the `type` handler above uses, so that the value and the
+        // type (`list<number>`) agree. When the operands of `expression` do
+        // not match the evaluated operands one for one, there is no such
+        // information and the empty vector reading applies.
+        if (x.isFiniteCollection === true && x.count === 0) {
+          const raw =
+            isFunction(expression) && expression.nops === ops.length
+              ? expression.ops[0]
+              : undefined;
+          if (raw !== undefined) {
+            const d = describe(raw);
+            if (!isTupleOperand(d, ce) && isPointListOperand(d, ce))
+              return ce.function('List', []);
+          }
+          return ce.Zero;
+        }
 
         // A finite collection that is not a tensor — a lazy `Map`, which is
         // what a broadcast over more than a hundred elements answers, or a

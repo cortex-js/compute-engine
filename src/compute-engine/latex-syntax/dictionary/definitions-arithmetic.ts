@@ -235,11 +235,75 @@ function parseRootGlyph(parser: Parser): MathJsonExpression | null {
       if (args !== null && args.length === 1) return ['Sqrt', args[0]];
     }
     parser.index = start;
+    const radicand = parseRadicandNumber(parser, glyph);
+    if (radicand !== null) {
+      const result: MathJsonExpression = ['Sqrt', radicand];
+      emitRadicalAmbiguity(parser, glyph);
+      return result;
+    }
+    parser.index = start;
   }
   const result = parseRoot(parser);
   if (parser.options.strict === false && result !== null)
     emitRadicalAmbiguity(parser, glyph);
   return result;
+}
+
+/**
+ * In non-strict mode, read a number directly after the square root glyph
+ * `√` at token `glyph` as the whole radicand: `√12` is `Sqrt(12)` and
+ * `√2.5` is `Sqrt(2.5)`, as `sqrt12` and `sqrt2.5` are. The number is a run
+ * of digits with an optional decimal part (`12`, `2.5`, `.5`), after
+ * optional white space. The number ends the radicand: `√12x` is `√12·x`.
+ *
+ * In TeX a radicand without braces is one token: `\sqrt12` is `\sqrt{1}2`,
+ * and the strict grammar keeps that reading. So a number of more than one
+ * token reports `ambiguous-radical`: a person who writes LaTeX without
+ * braces can mean `√1·2`. The span is the glyph and the number. A number
+ * after white space is reported too: `√1 000` is `√1·0`, and a person can
+ * mean `√1000`.
+ *
+ * Return `null`, with the index unchanged, when no number follows.
+ */
+function parseRadicandNumber(
+  parser: Parser,
+  glyph: number
+): MathJsonExpression | null {
+  const start = parser.index;
+  const token = (i: number) => parser.latex(i, i + 1);
+  const isDigit = (i: number) => /^[0-9]$/.test(token(i));
+  parser.skipSpace();
+  const first = parser.index;
+  let end = first;
+  while (isDigit(end)) end += 1;
+  if (token(end) === '.' && isDigit(end + 1)) {
+    end += 1;
+    while (isDigit(end)) end += 1;
+  }
+  if (end === first || (end === first + 1 && token(first) === '.')) {
+    parser.index = start;
+    return null;
+  }
+  // The number reader is not used: it also reads digit groups (`1 000`)
+  // and exponents (`1e3`), which are not part of the radicand here.
+  const text = parser.latex(first, end);
+  parser.index = end;
+  // An operand or a `^` after the number is reported by
+  // `emitRadicalAmbiguity()`, with a span that holds it (`√12x`).
+  const next = token(end);
+  // White space then a digit: `√1 000` is `√1·0`, and a person can mean
+  // `√1000`, a number with digit groups. This span holds the number, so a
+  // number of more than one token before the white space (`√12 000`) is
+  // reported once, with this span.
+  let j = end;
+  while (token(j) === ' ') j += 1;
+  if (j > end && isDigit(j)) {
+    let k = j;
+    while (isDigit(k)) k += 1;
+    parser._emitAmbiguity?.('ambiguous-radical', glyph, k);
+  } else if (end - first > 1 && next !== '^' && !isOperandStartToken(next))
+    parser._emitAmbiguity?.('ambiguous-radical', glyph, end);
+  return { num: text.startsWith('.') ? '0' + text : text };
 }
 
 /**
@@ -300,8 +364,16 @@ function emitRadicalAmbiguity(parser: Parser, glyph: number): void {
   // reported (`√2 x` is `√2·x`), as a number exponent is not (`x^2 y`). A
   // word of two or more letters after the white space is not reported
   // either: a function name (`√x sin x`), a differential (`√x dx`) or the
-  // word `in`.
-  if (next !== ' ' || parser.index !== glyph + 2) return;
+  // word `in`. A letter with an unbraced subscript of digits or letters is
+  // one name, as one letter is: `√a_1 b` is `√a_1·b`.
+  if (next !== ' ') return;
+  const subscripted =
+    token(glyph + 2) === '_' &&
+    parser.index > glyph + 3 &&
+    Array.from({ length: parser.index - glyph - 3 }, (_, k) =>
+      token(glyph + 3 + k)
+    ).every((t) => /^[a-zA-Z0-9]$/.test(t));
+  if (parser.index !== glyph + 2 && !subscripted) return;
   if (!isLetterToken(radicand) && !isLetterToken(letterOf(radicand))) return;
   let j = parser.index;
   while (token(j) === ' ') j += 1;
@@ -764,7 +836,7 @@ function serializeAdd(
         result =
           wrapAddTerm(serializer, second) +
           '-' +
-          wrapAddTerm(serializer, first);
+          wrapSubtractedTerm(serializer, first);
         serializer.level += 1;
         return result;
       }
@@ -784,7 +856,10 @@ function serializeAdd(
       arg = ops[i];
       if (serializer.options.prettify) {
         const [newArg, sign] = unsign(arg);
-        const term = wrapAddTerm(serializer, newArg);
+        const term =
+          sign > 0
+            ? wrapAddTerm(serializer, newArg)
+            : wrapSubtractedTerm(serializer, newArg);
         if (sign > 0) {
           if (term.startsWith('+') || term.startsWith('-')) result += term;
           else result += '+' + term;
@@ -805,6 +880,22 @@ function serializeAdd(
   serializer.level += 1;
 
   return result;
+}
+
+/**
+ * Serialize a term that follows a minus sign in a sum. A sum or a difference
+ * after a minus sign must be in parentheses: `y-(a+b)`, `y-(-1-x)`. Without
+ * them, the minus sign applies to the first term only, and `y-a+b` is a
+ * different value. Any other term is serialized as by `wrapAddTerm()`.
+ */
+function wrapSubtractedTerm(
+  serializer: Serializer,
+  term: MathJsonExpression
+): string {
+  const h = operator(term);
+  if (h === 'Add' || h === 'Subtract')
+    return serializer.wrap(term, ADDITION_PRECEDENCE + 3);
+  return wrapAddTerm(serializer, term);
 }
 
 /**
@@ -968,10 +1059,11 @@ function serializeMultiply(
     }
   }
   let prevWasNumber = false;
-  // Track a bare-symbol factor (its serialized name, or null): juxtaposed with
-  // a following parenthesized group it can re-parse as a function CALL (see the
-  // join logic).
-  let prevSymbol: string | null = null;
+  // What the text of the previous factor ends with, when that end changes
+  // how a following parenthesized group parses (see `factorEnd()` and the
+  // join logic): a symbol name (`v(x+1)` reads as a CALL) or a decimal
+  // number (`1.5(2)` reads as a repeating decimal).
+  let prevEnd: 'name' | 'decimal' | null = null;
   for (let i = 1; i < count; i++) {
     arg = xs[i - 1];
     if (arg === null) continue;
@@ -993,7 +1085,7 @@ function serializeMultiply(
         else result = latexTemplate(serializer.options.multiply, result, term);
       }
       prevWasNumber = true;
-      prevSymbol = null;
+      prevEnd = /\.\d+$/.test(term) ? 'decimal' : null;
       continue;
     }
 
@@ -1014,7 +1106,7 @@ function serializeMultiply(
             result = latexTemplate(serializer.options.multiply, result, root);
           else result += root;
           prevWasNumber = false;
-          prevSymbol = null;
+          prevEnd = null;
           continue;
         }
       }
@@ -1031,7 +1123,7 @@ function serializeMultiply(
       else result = latexTemplate(serializer.options.multiply, result, term);
 
       prevWasNumber = true;
-      prevSymbol = null;
+      prevEnd = null;
       continue;
     }
 
@@ -1104,23 +1196,27 @@ function serializeMultiply(
       else if (prevWasNumber && /^\\overline\{\d/.test(term)) {
         result = latexTemplate(serializer.options.multiply, result, term);
       }
-      // A bare symbol juxtaposed with a parenthesized group re-parses as a
+      // A symbol juxtaposed with a parenthesized group re-parses as a
       // function CALL, not as a product: `s(x+1)` reads as `s` applied to
       // `x+1` when `s` has no type information (`canonicalInvisibleOperator`),
       // `s(1,2,3)` reads as a call whatever `s` is (Tycho item 50), and a
       // single uppercase letter reads as a predicate application whatever it
       // resolves to (Tycho item 71). The serialized form must re-parse as the
       // product in ANY engine, including one where `s` is not declared, so
-      // every symbol before a parenthesized group gets an explicit
-      // multiplication separator. The group may open with a sized
-      // parenthesis (`\left(`, `\Bigl(`, … — `OPEN_DELIMITER_PREFIX`). A
-      // library constant (`\pi(x+1)`) is declared in every engine and always
-      // multiplies, so it keeps the juxtaposition.
-      else if (
-        prevSymbol !== null &&
-        !ALWAYS_DECLARED_CONSTANTS.has(prevSymbol) &&
-        OPENING_PARENTHESIS.test(term)
-      ) {
+      // when the text of the previous factor ends with a symbol name, a
+      // parenthesized group gets an explicit multiplication separator. This
+      // includes a nested product whose text ends with a symbol: `2v(x+1)`
+      // reads as `2` times a call of `v`, so it is written `2v\times(x+1)`.
+      // The group may open with a sized parenthesis (`\left(`, `\Bigl(`, … —
+      // `OPEN_DELIMITER_PREFIX`). A library constant (`\pi(x+1)`) is declared
+      // in every engine and always multiplies, so it keeps the juxtaposition.
+      else if (prevEnd === 'name' && OPENING_PARENTHESIS.test(term)) {
+        result = latexTemplate(serializer.options.multiply, result, term);
+      }
+      // A decimal number juxtaposed with a parenthesized group that starts
+      // with a digit re-parses as a repeating decimal: `1.5(2)` is
+      // `1.5222…`, not `1.5·2`.
+      else if (prevEnd === 'decimal' && OPENING_PARENTHESIS_DIGIT.test(term)) {
         result = latexTemplate(serializer.options.multiply, result, term);
       }
       // A factor that serializes as an index bracket (`\left[…\right]`, the
@@ -1148,13 +1244,64 @@ function serializeMultiply(
       }
     }
     prevWasNumber = false;
-    prevSymbol = !isContinuation ? symbol(arg) : null;
+    prevEnd =
+      arg !== null && !isContinuation ? factorEnd(serializer, arg, term) : null;
   }
 
   // Restore the level
   serializer.level += 1;
 
   return isNegative ? '-' + result : result;
+}
+
+/** A parenthesized group, plain or sized, that starts with a digit. */
+const OPENING_PARENTHESIS_DIGIT = /^(\\(left|bigl|Bigl|biggl|Biggl))?\(\d/;
+
+/**
+ * What the LaTeX `text` of the product factor `factor` ends with, when that
+ * end changes how a parenthesized group written right after it parses:
+ *  - `'name'`: the name of a symbol. A symbol before a group parses as a
+ *    function call: `v(x+1)` is `v` applied to `x+1`. A library constant
+ *    (`\pi`) is declared in every engine and always multiplies, so it does
+ *    not count.
+ *  - `'decimal'`: a decimal number. A decimal number before a group of
+ *    digits parses as a repeating decimal: `1.5(2)` is `1.5222…`.
+ *
+ * The factor can be a nested product (`2v`, `-2v`, `0.03v_{einO}`) whose text
+ * ends with its last factor. The search goes through `Multiply`,
+ * `InvisibleOperator` and `Negate`, which write their operands one after the
+ * other. Their operands can be reordered when written (`Multiply(v, 2)` is
+ * `2v`), so a candidate counts only when `text` ends with its own
+ * serialization.
+ */
+function factorEnd(
+  serializer: Serializer,
+  factor: MathJsonExpression,
+  text: string
+): 'name' | 'decimal' | null {
+  const candidates: MathJsonExpression[] = [];
+  const collect = (x: MathJsonExpression) => {
+    const h = operator(x);
+    if (h === 'Multiply' || h === 'InvisibleOperator' || h === 'Negate')
+      for (const op of operands(x)) collect(op);
+    else candidates.push(x);
+  };
+  collect(factor);
+  for (const candidate of candidates) {
+    const name = symbol(candidate);
+    if (name !== null) {
+      if (
+        name === 'ContinuationPlaceholder' ||
+        ALWAYS_DECLARED_CONSTANTS.has(name)
+      )
+        continue;
+      if (text.endsWith(serializer.serialize(candidate))) return 'name';
+    } else if (isNumberExpression(candidate)) {
+      const latex = serializer.serialize(candidate);
+      if (/\.\d+$/.test(latex) && text.endsWith(latex)) return 'decimal';
+    }
+  }
+  return null;
 }
 
 /** Parse a single `\frac`/`\binom` argument. In TeX, each argument is
@@ -1624,6 +1771,43 @@ function stripGroupingParentheses(
   return body;
 }
 
+/**
+ * Write the numerator of a fraction in the `reciprocal` style, followed by
+ * `reciprocal`, the inverse power of the denominator (`(y^2+z^2)^{-1}`).
+ *
+ * The numerator gets parentheses only when it needs them: a sum and a
+ * negative value (`(x+1)(y^2+z^2)^{-1}`, `(-y)(y^2+z^2)^{-1}`). An integer, a
+ * library constant or a numerator in parentheses is juxtaposed with the
+ * inverse power (`2(y^2+z^2)^{-1}`, `\pi(y^2+z^2)^{-1}`). Any other
+ * numerator gets an explicit multiplication sign (`x\times(y^2+z^2)^{-1}`):
+ *  - a symbol before a parenthesized group parses back as a function call:
+ *    `x(y^2+z^2)^{-1}` reads as the inverse of `x` applied to `y^2+z^2`;
+ *  - a decimal number before a parenthesized group parses back as a
+ *    repeating decimal: `1.5(2)^{-1}` reads as `(1.5222…)^{-1}`.
+ */
+function serializeReciprocalProduct(
+  serializer: Serializer,
+  numer: MathJsonExpression,
+  reciprocal: string
+): string {
+  const value = machineValue(numer);
+  const isNegative =
+    operator(numer) === 'Negate' || (value !== null && value < 0);
+  const numerLatex = isNegative
+    ? serializer.wrap(numer)
+    : serializer.wrap(numer, MULTIPLICATION_PRECEDENCE);
+  const name = symbol(numer);
+  const juxtapose =
+    !/^\d/.test(reciprocal) &&
+    (isNegative ||
+      operator(numer) === 'Add' ||
+      operator(numer) === 'Subtract' ||
+      /^\d+$/.test(numerLatex) ||
+      (name !== null && ALWAYS_DECLARED_CONSTANTS.has(name)));
+  if (juxtapose) return joinLatex([numerLatex, reciprocal]);
+  return latexTemplate(serializer.options.multiply, numerLatex, reciprocal);
+}
+
 function serializeFraction(
   serializer: Serializer,
   expr: MathJsonExpression | null
@@ -1668,9 +1852,9 @@ function serializeFraction(
     if (style === 'inline-solidus') return `${sign}${numerStr}/${denomStr}`;
     return `${sign}{}^{${numerStr}}\\!\\!/\\!{}_{${denomStr}}`;
   } else if (style === 'reciprocal') {
-    if (machineValue(numer) === 1)
-      return sign + serializer.wrap(denom) + '^{-1}';
-    return sign + serializer.wrap(numer) + serializer.wrap(denom) + '^{-1}';
+    const reciprocal = serializer.wrap(denom) + '^{-1}';
+    if (machineValue(numer) === 1) return sign + reciprocal;
+    return sign + serializeReciprocalProduct(serializer, numer, reciprocal);
   } else if (style === 'factor') {
     if (machineValue(denom) === 1) return sign + serializer.wrap(numer);
     return (
@@ -2165,7 +2349,10 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     kind: 'symbol',
     latexTrigger: ['\\pi'],
   },
-  { latexTrigger: ['π'], parse: 'Pi' },
+  // `π` is a symbol entry, as `\pi` is, so that a subscript on it has the
+  // same reading as on `\pi`: `π_{01}` is the symbol `Pi_01`, as `\pi_{01}`
+  // is, and not `Pi_1`.
+  { kind: 'symbol', latexTrigger: ['π'], parse: 'Pi' },
   {
     name: 'ExponentialE',
     standaloneSymbol: true,
@@ -3646,11 +3833,18 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
       return ['Subtract', lhs, rhs] as MathJsonExpression;
     },
     serialize: (serializer, expr) => {
-      const lhs = wrapAddTerm(
-        serializer,
-        operand(expr, 1)!,
-        ADDITION_PRECEDENCE + 2
-      );
+      // A negative number at the start of a difference needs no
+      // parentheses: `-1-x`, not `(-1)-x`. A parent that writes the
+      // difference after other material puts the whole difference in
+      // parentheses (a product `2(-1-x)`, a power base `(-1-x)^2`, a term
+      // after a minus sign `y-(-1-x)`). A sum adds it after a plus sign
+      // without them, `y-1-x`, which has the same value.
+      const first = operand(expr, 1)!;
+      const firstValue = machineValue(first);
+      const lhs =
+        isNumberExpression(first) && firstValue !== null && firstValue < 0
+          ? serializer.serialize(first)
+          : wrapAddTerm(serializer, first, ADDITION_PRECEDENCE + 2);
       let rhs = wrapAddTerm(
         serializer,
         operand(expr, 2)!,
@@ -4185,14 +4379,22 @@ function parseLog(command: string, parser: Parser): MathJsonExpression | null {
 
   // The natural log and the base-`b` log have well-defined inverses:
   // `\ln^{-1} x` → `exp(x)`, `\log_b^{-1} x` → `b^x` (with `b` defaulting to
-  // 10, the base of a bare `\log`).
+  // 10, the base of a bare `\log`). A base on `\ln` replaces `e`:
+  // `\ln_3^{-1} x` → `3^x`, as `\ln_3 x` is `\log_3 x`.
+  //
+  // Arguments after the first are kept, so that the canonical form reports
+  // them as unexpected arguments: `\ln_3(x, y)` is `Log(x, 3, y)`. They were
+  // dropped with no error.
+  const extra = args.slice(1);
   const inverse = (): MathJsonExpression =>
-    command === 'Ln'
-      ? (['Exp', args[0]] as MathJsonExpression)
-      : (['Power', sub ?? 10, args[0]] as MathJsonExpression);
+    command === 'Ln' && sub === null
+      ? (['Exp', ...args] as MathJsonExpression)
+      : (['Power', sub ?? 10, ...args] as MathJsonExpression);
 
   let applied: MathJsonExpression;
   if (sub === null) applied = [command, ...args] as MathJsonExpression;
+  else if (extra.length > 0)
+    applied = ['Log', args[0], sub, ...extra] as MathJsonExpression;
   else if (sub === 10) applied = ['Log', args[0]] as MathJsonExpression;
   else if (sub === 2) applied = ['Lb', ...args] as MathJsonExpression;
   else applied = ['Log', args[0], sub] as MathJsonExpression;

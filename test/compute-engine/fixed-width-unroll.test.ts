@@ -198,6 +198,56 @@ describe('FIXED-WIDTH UNROLL — Map over a literal list', () => {
     ]);
     expect(unrollFixedWidthCollections(expr)).toBe(expr);
   });
+
+  // The shader targets set `unrollComprehensions`. They have no `Map`
+  // lowering, so for them a `Map` over a list of ANY static width is written
+  // out, and the source can be a list built by element-wise arithmetic or a
+  // literal range.
+  const shader = (json: any) =>
+    unrollFixedWidthCollections(ce.box(json), { unrollComprehensions: true });
+
+  it('writes out a NARROW list for a shader target', () => {
+    expect(
+      shader(['Map', ['Function', ['Square', '_'], '_'], ['List', 'a', 'b']])
+        .json
+    ).toEqual(['List', ['Power', 'a', 2], ['Power', 'b', 2]]);
+  });
+
+  it('writes out an element-wise source of static width for a shader target', () => {
+    // `x + [0, 4, 2]` has the width 3, which its structure proves.
+    expect(
+      shader([
+        'Min',
+        [
+          'Map',
+          ['Function', ['Square', '_'], '_'],
+          ['Add', 'x', ['List', 0, 4, 2]],
+        ],
+      ]).json
+    ).toEqual([
+      'Min',
+      ['Power', 'x', 2],
+      ['Power', ['Add', 'x', 4], 2],
+      ['Power', ['Add', 'x', 2], 2],
+    ]);
+  });
+
+  it('writes out a literal range for a shader target', () => {
+    expect(
+      shader([
+        'Map',
+        ['Function', ['Multiply', '_', 'x'], '_'],
+        ['Range', 1, 3],
+      ]).json
+    ).toEqual(['List', 'x', ['Multiply', 2, 'x'], ['Multiply', 3, 'x']]);
+  });
+
+  it('leaves a list of unknown length untouched for a shader target', () => {
+    const expr = ce.box(['Map', ['Function', ['Square', '_'], '_'], 'L']);
+    expect(
+      unrollFixedWidthCollections(expr, { unrollComprehensions: true })
+    ).toBe(expr);
+  });
 });
 
 describe('FIXED-WIDTH UNROLL — Map with a bare user-function head', () => {

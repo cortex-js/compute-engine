@@ -235,12 +235,22 @@ import {
   isPointListReading,
   isTupleShapedType,
   broadcastLengthMismatch,
-  hasUnresolvedCollectionOperand,
   isBroadcastableCollection,
   lazyBroadcastMapIfNeeded,
   zipBroadcast,
   isWalkableFiniteCollection,
 } from '../collection-utils.js';
+import { abstractCollectionCell } from '../boxed-expression/broadcast-lift-type.js';
+import { validatedLiteralApplicationOperands } from '../boxed-expression/box.js';
+import {
+  annotateBroadcastErrors,
+  declaredScalarParams,
+  declaredScalarTupleCells,
+  declaredScalarTupleType,
+  isDeclaredScalarType,
+  isUnresolvedMappableOperand,
+  refusedLiteralArgumentError,
+} from '../boxed-expression/boxed-function.js';
 import { numericDerivativeOfApply } from './calculus.js';
 import {
   isNumber,
@@ -527,8 +537,12 @@ function pipeStageWithImplicitTopic(
  * destructuring pattern `((p, q)) ↦ …` infers: a point is atomic, so a list
  * of points maps point by point, and binding the list whole to a tuple
  * parameter would be a type error. A generic signature binds whole.
+ *
+ * The shader targets use the same test for an `Apply` they compile
+ * (`gpuAppliedBody` in `compilation/gpu-target.ts`), so that the compiled
+ * code and the interpreter give a result of the same shape.
  */
-function literalParamsMap(sig: Type): boolean {
+export function literalParamsMap(sig: Type): boolean {
   if (typeof sig !== 'object' || sig.kind !== 'signature') return false;
   if (isPolymorphicType(sig)) return false;
   const params = [
@@ -578,7 +592,16 @@ function applyLiteralMaps(
   // on the named route: its type parameter is solved against the whole
   // argument (`literalParamsMap`).
   if (!literalParamsMap(fn.type.type)) return false;
-  return args.some((a) => isBroadcastableCollection(a));
+  // A collection argument with no value yet (a symbol declared
+  // `list<real>`) also takes this route, and `applyLiteralMapped` holds the
+  // application. The type handler (`applyLiteralMapType`) types the call as
+  // the mapped collection, so binding the symbol whole would give a value
+  // of a different shape: `Apply(u ↦ 7, v)` gave `7`. A set or a
+  // dictionary is never mapped over, so an argument of such a type does not
+  // take this route (`isUnresolvedMappableOperand`).
+  return args.some(
+    (a) => isBroadcastableCollection(a) || isUnresolvedMappableOperand(a)
+  );
 }
 
 /**
@@ -613,7 +636,16 @@ function literalCellType(
   }
   const r = resolveTypeAlias(leaf);
   if (typeof r === 'object' && r.kind === 'union') return undefined;
-  return pipeStageBodyType(context, st.body, param.name, leaf);
+  // A parameter with a declared type is bound to that type, as the named
+  // routes type each cell with the signature of the function: with
+  // `(u: integer) ↦ u + 1` over a list of reals, each cell is `integer` (or
+  // the error that a non-integer element gives).
+  return pipeStageBodyType(
+    context,
+    st.body,
+    param.name,
+    param.annotated ?? leaf
+  );
 }
 
 /**
@@ -628,7 +660,19 @@ function applyLiteralMapType(
   args: ReadonlyArray<OperandDescriptor>,
   context?: TypeHandlerContext
 ): Type | undefined {
-  if (fn.structureOf?.()?.kind !== 'function-literal') return undefined;
+  const st = fn.structureOf?.();
+  if (st?.kind !== 'function-literal') return undefined;
+  // A tuple argument at a parameter declared as a scalar maps over its
+  // components, as at evaluation (`declaredScalarTupleCells`), whatever the
+  // other parameters are: the call is typed as the tuple of the results
+  // (`declaredScalarTupleType`).
+  const tupleMapped = declaredScalarTupleType(
+    (i) => isDeclaredScalarType(st.parameters[i]?.annotated),
+    args.map((a) => a.type),
+    functionResult(fn.type) ?? 'unknown',
+    literalParamsMap(fn.type)
+  );
+  if (tupleMapped !== undefined) return tupleMapped;
   if (!literalParamsMap(fn.type)) return undefined;
   const mapsOver = (t: Type): boolean =>
     isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE) &&
@@ -665,7 +709,32 @@ function applyLiteralMapType(
         t.types.some((m) => mapsOver(m))
       );
     });
-    if (union === undefined) return undefined;
+    if (union === undefined) {
+      // An argument of an abstract collection type (`collection<real>`) or
+      // of a `broadcastable<T>` type can hold a list, which the call maps
+      // over, or a value it does not map over (a set, a scalar). The call
+      // is typed `broadcastable<R>`, as on the named routes
+      // (`lambdaBroadcastType` in `boxed-function.ts`).
+      const maybeMapped = args.some((a) => {
+        const t = resolveTypeAlias(a.type);
+        const broadcastable = (x: Type) => {
+          const r = resolveTypeAlias(x);
+          return typeof r === 'object' && r.kind === 'broadcastable';
+        };
+        return (
+          broadcastable(t) ||
+          (typeof t === 'object' &&
+            t.kind === 'union' &&
+            t.types.some(broadcastable)) ||
+          abstractCollectionCell(t) !== undefined
+        );
+      });
+      if (!maybeMapped) return undefined;
+      return {
+        kind: 'broadcastable',
+        elements: functionResult(fn.type) ?? 'unknown',
+      };
+    }
     const cell = functionResult(fn.type) ?? 'unknown';
     return reduceType({
       kind: 'union',
@@ -718,8 +787,11 @@ function applyLiteralMapped(
   // A collection argument with no value yet (a symbol declared `list<…>`)
   // holds the application, as the named route does: mapping now would lift
   // it whole into every cell, and assigning it later could not recover the
-  // element-wise result.
-  if (hasUnresolvedCollectionOperand(args, isBroadcastableCollection))
+  // element-wise result. This is also true when that argument is the only
+  // collection: binding it whole would give a value of a different shape
+  // than the mapped type of the call. Evaluating the held application again
+  // after the symbol has a value maps it.
+  if (args.some((x) => !mapped(x) && isUnresolvedMappableOperand(x)))
     return ce._fn('Apply', [fn, ...args]);
   const lazy = lazyBroadcastMapIfNeeded(
     ce,
@@ -738,7 +810,41 @@ function applyLiteralMapped(
       ce._fn('Apply', [fn, ...value]).evaluate({ numericApproximation })
     );
   }
-  return ce._fn('List', results);
+  // An element that fails says that the application was element-wise, as
+  // on the named routes (`annotateBroadcastErrors`).
+  return ce._fn('List', annotateBroadcastErrors('Apply', results));
+}
+
+/**
+ * The value of `Apply(fn, …args)` when `fn` is a function literal with a
+ * parameter declared as a scalar and the argument there is a TUPLE: the
+ * tuple of the values of `Apply(fn, …)` at each component
+ * (`declaredScalarTupleCells`). A symbol with no value and a tuple type at
+ * such a parameter holds the application. `undefined` when the
+ * application does not map over a tuple.
+ */
+function applyLiteralOverTuples(
+  ce: ComputeEngine,
+  fn: Expression,
+  args: ReadonlyArray<Expression>,
+  numericApproximation: boolean | undefined
+): Expression | undefined {
+  if (!isFunction(fn, 'Function')) return undefined;
+  const isScalarParam = declaredScalarParams(fn);
+  if (isScalarParam === undefined) return undefined;
+  const cells = declaredScalarTupleCells(ce, isScalarParam, args);
+  if (cells === undefined) return undefined;
+  if (cells === 'hold') return ce._fn('Apply', [fn, ...args]);
+  if (!Array.isArray(cells)) return cells;
+  return ce._fn(
+    'Tuple',
+    annotateBroadcastErrors(
+      'Apply',
+      cells.map((cell) =>
+        ce._fn('Apply', [fn, ...cell]).evaluate({ numericApproximation })
+      )
+    )
+  );
 }
 
 /**
@@ -1973,10 +2079,27 @@ function randomListType(
  *   a set. The lazy value is stored, and the failure is reported when the
  *   collection is read, as before.
  *
+ * A lazy collection that is an element of a list or tuple literal
+ * (`let r = [Map(h, xs)]`) is replaced in the same way, at every depth of
+ * nested list and tuple literals. Without this, `h = g` after the statement
+ * changed `r[1]`, while the compiled code and the same list written with
+ * calls (`[[h(1), h(2)]]`) keep the values computed with the first `h`.
+ *
  * The host function `ce.assign()` is not changed: a host that defines one
  * name from another with an expression wants the live view.
  */
 function assignedValue(ce: ComputeEngine, value: Expression): Expression {
+  if (
+    value.isValid &&
+    (isFunction(value, 'List') || isFunction(value, 'Tuple')) &&
+    !value.isLazyCollection &&
+    value._numericStore === undefined
+  ) {
+    const ops = value.ops;
+    const next = ops.map((op) => assignedValue(ce, op));
+    if (next.every((op, i) => op === ops[i])) return value;
+    return ce.function(value.operator, next);
+  }
   if (!value.isValid || !value.isLazyCollection) return value;
   if (!isWalkableFiniteCollection(value)) return value;
   // The kind of the stored value: a list for an indexed collection, read
@@ -4234,9 +4357,15 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // from a literal one, and erasing it would make `Apply(f, g())` —
         // and therefore `g() |> f`, which `Pipe` holds — differ from
         // `f(g())`, which binds it. §3 pins `x |> f ≡ f(x)`.
+        const callArgs = args.slice(1).filter((x) => !isSymbol(x, 'Nothing'));
+        // An argument that certainly does not match a parameter the literal
+        // annotates is its `incompatible-type` error, as for a call of a
+        // named function assigned the same literal
+        // (`validatedLiteralApplicationOperands`).
         return ce._fn('Apply', [
           args[0],
-          ...args.slice(1).filter((x) => !isSymbol(x, 'Nothing')),
+          ...(validatedLiteralApplicationOperands(ce, args[0], callArgs) ??
+            callArgs),
         ]);
       },
       evaluate: (ops, { numericApproximation, engine }) => {
@@ -4261,7 +4390,41 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           );
           if (mapped !== undefined) return mapped;
         }
+        // An argument of a function literal that is an error (refused when
+        // the call was boxed, `validatedLiteralApplicationOperands`, or an
+        // error when evaluated) is the value of the application, with the
+        // breadcrumb frame of this `Apply` and the position of the argument,
+        // as a call of a named function gives it (`ErrorFrame('h', 1)`).
+        if (isFunction(ops[0], 'Function')) {
+          for (let k = 1; k < ops.length; k++) {
+            const err = errorValue(ops[k], { operator: 'Apply', index: k + 1 });
+            if (err !== undefined) return err;
+          }
+        }
+        // A function literal maps over a TUPLE argument at a parameter
+        // declared as a scalar, as the named routes do
+        // (`declaredScalarTupleCells`, user decision 2026-10-03):
+        // `Apply((u: real) ↦ 2u, (a, b))` is `(2a, 2b)`.
+        const tupleMapped = applyLiteralOverTuples(
+          engine,
+          ops[0],
+          ops.slice(1),
+          numericApproximation
+        );
+        if (tupleMapped !== undefined) return tupleMapped;
         const result = apply(ops[0], ops.slice(1));
+        // An argument that the literal refuses (a parameter declared `real`
+        // and a string argument) is the value of the application, as for a
+        // call of a named function (`_refusedArgumentError` in
+        // `boxed-function.ts`). `apply()` marks the argument with the error
+        // in an inert `Apply`, and that form is not kept here.
+        const refused = refusedLiteralArgumentError(
+          result,
+          ops.slice(1),
+          'Apply',
+          1
+        );
+        if (refused !== undefined) return refused;
         if (!numericApproximation) return result;
         // N(f(x)) = N of the applied result: without this, e.g.
         // `Apply(Derivative(LambertW), 0.5).N()` returned the symbolic
@@ -7367,10 +7530,12 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // runs, but the held operand must still be canonicalized (bound) here:
         // `op.canonical` is value-safe, and an unbound operand breaks
         // consumers that read the node structurally — the map-fusion lowering
-        // reads the body of an `N`-wrapped broadcast `Map` mapping function
-        // (`lazyBroadcastMap`, `lazyMapNumericApproximation`), and binding is
-        // what makes it canonicalize inside the function literal's parameter
-        // scope rather than at first evaluation.
+        // reads the body of a user-written `N` in a `Map` mapping function,
+        // and binding is what makes it canonicalize inside the function
+        // literal's parameter scope rather than at first evaluation. (The
+        // `.N()` method of a lazy `Map` wraps the body in the engine-internal
+        // `NumericApproximation` instead, which binds its operand the same
+        // way.)
         const xs = ops.map((op) => op.canonical);
 
         // An inner `Evaluate` is subsumed by `N` (`x.N()` already evaluates),
@@ -7394,12 +7559,13 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         const x = ops[0];
 
         // Single-argument form: evaluate at the engine's current precision.
-        if (ops.length < 2) return x.canonical.N();
+        if (ops.length < 2) return inexactResult(ce, x.canonical.N());
 
         // Optional precision argument: the requested number of significant
         // digits. Resolve it numerically (it may be `2 + 3` or a bound symbol).
         let p = ops[1].canonical.N().re;
-        if (!Number.isFinite(p) || p < 1) return x.canonical.N();
+        if (!Number.isFinite(p) || p < 1)
+          return inexactResult(ce, x.canonical.N());
         p = Math.min(Math.trunc(p), 1000); // cap to avoid runaway precision
 
         // The requested digits reach every `evaluate` handler run inside this
@@ -7415,18 +7581,54 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             // raised. Recompute the (still raw) operand at the new precision
             // so constants like `Pi` materialize to `p` digits.
             ce.precision = p;
-            return x.canonical.N();
+            return inexactResult(ce, x.canonical.N(), p);
           }
 
           // `p <= global`: leave the global precision untouched and round the
           // result down to `p` significant digits (precision has a
           // machine-digit floor, so lowering the global precision can't reach
           // small `p`).
-          return roundToSignificantDigits(x.canonical.N(), p);
+          return inexactResult(
+            ce,
+            roundToSignificantDigits(x.canonical.N(), p),
+            p
+          );
         } finally {
           ce._requestedPrecision = enclosingRequest;
         }
       },
+    },
+
+    // Engine-internal: the numeric marker of a lazy `Map`. When the `.N()`
+    // method is applied to a lazy `Map`, it puts this operator around the
+    // body of the mapping function (`lazyBroadcastMap` and
+    // `lazyMapNumericApproximation` in `collection-utils.ts`), so that each
+    // element is evaluated numerically when it is read. The marker evaluates
+    // its operand with the `.N()` method, and gives the same result: an
+    // integer stays exact (`.N()` of the element `Sec(0)` is the exact `1`).
+    // The `N` operator is different: its result is always inexact
+    // (`inexactResult()`). Thus a user-written `N` in a `Map` body is not
+    // this marker, and the marker is not a user-written `N`.
+    NumericApproximation: {
+      description:
+        'Numerically evaluate an expression, as the `.N()` method does (engine-internal).',
+      lazy: true,
+      signature: '(any) -> unknown',
+      type: ([x], context) =>
+        BoxedType.forResult(x.type, context.engine._typeResolver),
+      canonical: (ops, { engine: ce }) => {
+        if (ops.length !== 1)
+          return ce._fn('NumericApproximation', checkArity(ce, ops, 1));
+        // `lazy` keeps the operand from being evaluated before the handler
+        // runs, but the operand must be canonicalized (bound) here. The
+        // map-fusion lowering reads the body under the marker
+        // (`lazyBroadcastMap`), and binding makes the body canonicalize in
+        // the parameter scope of the function literal.
+        return ce._fn('NumericApproximation', [ops[0].canonical]);
+      },
+      // The operand is held unbound: `.N()` of an unbound expression does
+      // nothing, so canonicalize (bind) it first.
+      evaluate: ([x]) => x.canonical.N(),
     },
 
     // One draw from a DOMAIN. There is no seed argument anywhere in the
@@ -7769,8 +7971,13 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         const op2 = ops[1];
         // Save the raw symbol name BEFORE canonicalization, so that
         // `i` stays `i` (not `ImaginaryUnit`) and `e` stays `e`
-        // (not `ExponentialE`) when creating compound symbols.
-        const rawName = sym(op1);
+        // (not `ExponentialE`) when creating compound symbols. A symbol in
+        // parentheses is the symbol: `(x)_0` is `x_0`, as `x_0` is.
+        const rawName =
+          sym(op1) ??
+          (isFunction(op1, 'Delimiter') && op1.nops === 1
+            ? sym(op1.op1)
+            : undefined);
 
         op1 = op1.canonical;
         // Is it a string in a base form:
@@ -7827,14 +8034,20 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         }
 
         // Is it a compound symbol `x_\operatorname{max}`, `\mu_0`
-        // Use rawName (pre-canonical) so `i_A` doesn't become `ImaginaryUnit_A`
-        if (rawName) {
+        // Use rawName (pre-canonical) so `i_A` doesn't become `ImaginaryUnit_A`.
+        // A base that canonicalizes to a symbol is a symbol base too:
+        // `Subscript(Subscript(x, 2), 1)` is `x_2_1`. The type handler above
+        // reads the canonical base, and gives the type `symbol` for each of
+        // these. A `Subscript` kept with that type was not a number, so
+        // `(x)_0·y` became a `Tuple` and `x2_1 + y` a type error.
+        const baseName = rawName ?? op1Name;
+        if (baseName) {
           const subStr =
             (isString(op2) ? op2.string : undefined) ??
             sym(op2) ??
             compoundIndexDigits(asSmallInteger(op2));
 
-          if (subStr) return ce.symbol(rawName + '_' + subStr);
+          if (subStr) return ce.symbol(baseName + '_' + subStr);
 
           // If subscript is an InvisibleOperator of symbols/numbers (not wrapped
           // in a Delimiter), concatenate them to form a compound symbol name.
@@ -7845,7 +8058,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
               (x) => sym(x) ?? compoundIndexDigits(asSmallInteger(x))
             );
             if (parts.every((p) => p !== undefined && p !== null)) {
-              return ce.symbol(rawName + '_' + parts.join(''));
+              return ce.symbol(baseName + '_' + parts.join(''));
             }
           }
         }
@@ -9316,16 +9529,91 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
 ];
 
 /**
+ * Make the exact number literals in a result of `N` inexact.
+ *
+ * `N` asks for a numeric approximation, thus a number that it returns is a
+ * float, also when the value is an integer: `N(2)` is the float `2.0`, not
+ * the exact integer `2`. Thus exact arithmetic does not use the value as
+ * exact later: `N(2)/3` is `0.666…`, not `2/3`. Only the evaluate handler of
+ * the `N` operator calls this function: the `.N()` method of a number literal
+ * keeps an integer exact (`ce.box(6).N()` is the exact `6`).
+ *
+ * The elements of a `List` or `Tuple` result are made inexact in the same
+ * way, also in nested lists and tuples.
+ *
+ * These results stay as they are:
+ * - An infinity: it is an exact value and it has no different float form.
+ * - A symbolic result, such as `x + 1`: the exact constants in it stay exact.
+ *   (A float constant in a symbolic result, such as `x + 1.0`, is a larger
+ *   change to canonicalization and arithmetic.)
+ * - Any other result, such as a string or a boolean.
+ *
+ * A lazy indexed collection (`Range(1, 4)`, a lazy `Map`) is not walked: its
+ * elements are computed when they are read, and the collection can be
+ * infinite. The result is the lazy collection `Map(_1 ↦ N(_1), xs)`, or
+ * `Map(_1 ↦ N(_1, digits), xs)` when `digits` is given, so each element is
+ * made inexact (and rounded) when it is read: `N(Range(1, 4))/3` is
+ * `[0.333…, 0.666…, 1.0, 1.333…]`, not a list of exact thirds. The body is the
+ * `N` operator, not the internal marker `NumericApproximation` of the `.N()`
+ * method, because the marker keeps an integer exact.
+ *
+ * The float follows the working precision of the engine when this function
+ * is called: a big decimal above machine precision, else a machine float.
+ */
+function inexactResult(
+  ce: ComputeEngine,
+  value: Expression,
+  digits?: number
+): Expression {
+  if (isNumber(value)) {
+    if (!value.isExact || value.isFinite !== true) return value;
+    const re = value.bignumRe ?? value.re;
+    const im = value.im;
+    return ce.number(
+      ce._inexactNumericValue(im === 0 ? re : { re: value.re, im })
+    );
+  }
+  if (isFunction(value, 'List') || isFunction(value, 'Tuple')) {
+    let changed = false;
+    const ops = value.ops.map((op) => {
+      const result = inexactResult(ce, op, digits);
+      if (result !== op) changed = true;
+      return result;
+    });
+    return changed ? ce.function(value.operator, ops) : value;
+  }
+  if (value.isLazyCollection && value.isIndexedCollection) {
+    const body =
+      digits === undefined
+        ? (['N', '_1'] as const)
+        : (['N', '_1', digits] as const);
+    return ce.function('Map', [ce.box(['Function', body, '_1']), value]);
+  }
+  return value;
+}
+
+/**
  * Round a numeric result to `p` significant digits at the *value* level, so
  * the returned number genuinely carries `p` digits (independent of whatever
  * precision a downstream consumer serializes at). Used by `N(expr, p)` when
  * the requested precision is at or below the engine's working precision.
  *
- * Non-numeric results (symbolic expressions, collections) are returned
- * unchanged.
+ * Each element of a `List` or `Tuple` result is rounded in the same way, also
+ * in nested lists and tuples: `N([1/3, Pi], 4)` is `[0.3333, 3.142]`.
+ * Other results (symbolic expressions, lazy collections, strings) are
+ * returned unchanged.
  */
 function roundToSignificantDigits(value: Expression, p: number): Expression {
   const ce = value.engine;
+  if (isFunction(value, 'List') || isFunction(value, 'Tuple')) {
+    let changed = false;
+    const ops = value.ops.map((op) => {
+      const result = roundToSignificantDigits(op, p);
+      if (result !== op) changed = true;
+      return result;
+    });
+    return changed ? ce.function(value.operator, ops) : value;
+  }
   const re = value.re;
   const im = value.im;
   // Only round concrete finite numbers; leave symbolic results / non-numbers

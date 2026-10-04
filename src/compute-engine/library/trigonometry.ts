@@ -1,7 +1,11 @@
 import { BoxedType } from '../../common/type/boxed-type.js';
 import { BigDecimal } from '../../big-decimal/index.js';
 
-import { euclideanNormType, pointNormBroadcasts } from './utils.js';
+import {
+  euclideanNormType,
+  pointNormBroadcasts,
+  pointNormType,
+} from './utils.js';
 import { bignumPreferred, boxBignumResult } from '../boxed-expression/utils.js';
 import {
   asFloat,
@@ -59,6 +63,7 @@ import { nonNegativeSign } from '../boxed-expression/sgn.js';
 import { EXTENDED_REAL_TYPE } from '../../common/type/primitive.js';
 import { parseType } from '../../common/type/parse.js';
 import { isTuple, isTupleShapedType } from '../collection-utils.js';
+import { shadowsLibraryName } from '../library-shadowing.js';
 // Every `type` handler in this file is on the `'types'` (operand-descriptor)
 // shape, so the helpers all come from the descriptor-shape module. The
 // `OnTypes` suffixes are kept while the expression-shape module still
@@ -76,6 +81,7 @@ import {
 } from './type-handlers.js';
 import { isMeasurement, measurementTrig } from './measurement-arithmetic.js';
 import { trigExpand, trigToExp, trigReduce } from '../symbolic/trig-rewrite.js';
+import { angularChainFactor } from '../symbolic/angular-unit.js';
 import { getUnitScale } from './unit-data.js';
 import {
   bigFresnelC,
@@ -287,6 +293,23 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         if (ce.angularUnit !== 'rad')
           return arg.mul(halfTurnAngle(ce).div(180));
 
+        // An exact angle in radians is a multiple of π. When a user binding
+        // gives the name `Pi` another value, the call stays `Degrees(d)`
+        // (`holdsShadowedPi()`). The user value is not used in place of π:
+        // `30°` is the angle π/6 whatever the user calls `Pi`, and
+        // `Degrees(90)` must stay a right angle. `.N()` of the call is the
+        // angle in radians, from the library value of π. This is only for a
+        // real argument: the signature of `Degrees` is `(real) -> real`, so
+        // `Degrees(i)` kept as a call is an `incompatible-type` error when it
+        // is evaluated.
+        if (
+          arg.isExact &&
+          arg.im === 0 &&
+          !arg.isSame(0) &&
+          shadowsLibraryName(ce, 'Pi')
+        )
+          return ce._fn('Degrees', ops);
+
         const fArg = arg.re;
 
         if (Number.isNaN(fArg)) return arg.mul(ce.Pi).div(180);
@@ -341,9 +364,13 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         // Faithful linear conversion to the engine's `angularUnit` (`d·π/180`
         // in radians), matching the canonical handler (no mod-360 reduction —
         // see the note there).
-        return ops[0]
+        const result = ops[0]
           .mul(halfTurnAngle(options.engine).div(180))
           .evaluate(options);
+        // An exact result holds π: with a user value of `Pi`, the call stays
+        // symbolic (`holdsShadowedPi()`).
+        if (holdsShadowedPi(options.engine, result)) return undefined;
+        return result;
       },
     },
 
@@ -427,8 +454,12 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         const degrees =
           rational !== null ? ce.number(rational) : ce.number(totalSec / 3600);
         if (ce.angularUnit === 'deg') return degrees;
-        // Convert to the engine's `angularUnit`, as `Degrees` does.
-        return degrees.div(180).mul(halfTurnAngle(ce)).evaluate(options);
+        // Convert to the engine's `angularUnit`, as `Degrees` does. An exact
+        // result holds π: with a user value of `Pi`, the angle stays
+        // `Degrees(d)`, as the `Degrees` handlers do (`holdsShadowedPi()`).
+        const angle = degrees.div(180).mul(halfTurnAngle(ce)).evaluate(options);
+        if (holdsShadowedPi(ce, angle)) return ce._fn('Degrees', [degrees]);
+        return angle;
       },
     },
 
@@ -479,12 +510,17 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         // hypotenuse (`hasErrorTypedOperand`).
         if (hasErrorTypedOperand([x, y]))
           return BoxedType.forResult('error', context.engine._typeResolver);
-        if (
-          (x && isTupleShapedType(x.type) && pointNormBroadcasts(x)) ||
-          (y && isTupleShapedType(y.type) && pointNormBroadcasts(y))
-        )
+        // A leg whose broadcasting component is a restricted list can be
+        // absent, and the hypotenuse is then `NaN` (`pointNormType`).
+        const broadcastLegs = [x, y].filter(
+          (leg) =>
+            leg && isTupleShapedType(leg.type) && pointNormBroadcasts(leg)
+        );
+        if (broadcastLegs.length > 0)
           return BoxedType.forResult(
-            'list<number>',
+            broadcastLegs.some((leg) => pointNormType(leg) !== 'list<number>')
+              ? 'list<number> | nan'
+              : 'list<number>',
             context.engine._typeResolver
           );
         // Both operands enter ONE sum of squares — a fixed-arity point
@@ -702,7 +738,10 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         if (x.isInfinity && (x.isPositive || x.isNegative)) {
           const half = halfTurnAngle(engine);
           const v = x.isPositive ? half.div(2) : half.div(-2);
-          return numericApproximation ? v.N() : v;
+          if (numericApproximation) return v.N();
+          // With a user value of `Pi`, the call stays symbolic
+          // (`holdsShadowedPi()`).
+          return holdsShadowedPi(engine, v) ? undefined : v;
         }
         if (numericApproximation) return evalTrig('Arctan', x);
         const a = constructibleValues('Arctan', x);
@@ -739,6 +778,40 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
           numericTypeHandlerOnTypes(ops),
           context.engine._typeResolver
         ),
+      // The partial derivatives of atan2(y, x), in radians:
+      //
+      //     ∂/∂y atan2(y, x) =  x / (x² + y²)
+      //     ∂/∂x atan2(y, x) = −y / (x² + y²)
+      //
+      // They are the same in all four quadrants: the quadrant correction of
+      // `evaluate` adds a constant (0 or ±π) to `arctan(y/x)`, and the
+      // derivative of `arctan(y/x)` simplifies to the forms above. They are
+      // undefined at the origin. On the branch cut (the negative x-axis)
+      // atan2 has a jump of 2π, so it has no derivative there; the forms
+      // above give the derivative on each side of the cut, which is the same
+      // on both sides.
+      //
+      // The result of atan2 is an angle in the engine's `angularUnit`, so in
+      // a non-radian unit the partials are divided by the unit-to-radian
+      // factor (`π/180` in degree mode). `Arctan` does the same in
+      // `scaleForAngularUnit` (`symbolic/derivative.ts`).
+      //
+      // The `derivative` key serves `D` (with the chain rule for composite
+      // arguments) and the multi-index form `Derivative(Arctan2, 1, 0)`.
+      derivative: (ops, { engine: ce, argument }) => {
+        if (ops.length !== 2) return undefined;
+        const [y, x] = ops;
+        const r2 = ce.function('Add', [
+          ce.function('Power', [x, ce.number(2)]),
+          ce.function('Power', [y, ce.number(2)]),
+        ]);
+        const partial = ce.function('Divide', [
+          argument === 0 ? x : ce.function('Negate', [y]),
+          r2,
+        ]);
+        if (ce.angularUnit === 'rad') return partial;
+        return ce.function('Divide', [partial, angularChainFactor(ce)]);
+      },
       evaluate: ([y, x], { engine: ce, numericApproximation }) => {
         // NaN in → NaN out, in BOTH the evaluate and the N() paths. A NaN
         // operand is not finite, so without this early return it would slip
@@ -769,8 +842,11 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         // corners): fold them first, numericized under `.N()`.
         if (y.isFinite === false || x.isFinite === false) {
           const v = arctan2AtInfinity(y, x, halfTurn, ce);
-          if (v !== undefined) return numericApproximation ? v.N() : v;
-          return undefined;
+          if (v === undefined) return undefined;
+          if (numericApproximation) return v.N();
+          // With a user value of `Pi`, the call stays symbolic
+          // (`holdsShadowedPi()`).
+          return holdsShadowedPi(ce, v) ? undefined : v;
         }
 
         // A float operand makes the angle a float, as `Arctan(0.5)` is:
@@ -785,6 +861,12 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         // Three-valued discipline throughout: only act on an === true / ===
         // false sign, never on an undefined one (which stays symbolic).
         if (y.isSame(0) && x.isSame(0)) return ce.Zero;
+        // Each exact value below holds `halfTurn`, except when `x > 0`: then
+        // the value is `0` or `Arctan(y/x)`, and `Arctan` has its own rule for
+        // a user value of `Pi`. When `halfTurn` is π and a user binding gives
+        // `Pi` another value, the call stays symbolic (`holdsShadowedPi()`).
+        if (x.isPositive !== true && holdsShadowedPi(ce, halfTurn))
+          return undefined;
         if (y.isSame(0)) {
           if (x.isPositive === true) return ce.Zero;
           if (x.isNegative === true) return halfTurn;
@@ -1197,13 +1279,23 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
           isFunction(expression) && expression.nops === 1 ? expression.op1 : x;
         // Not at 0 (the evaluated operand): `sinc(0) = 1` below, where
         // sin(x)/x would be 0/0 — as when a bound index `n` is 0 in a sum.
+        // `Sinc` does not depend on the angular unit: its operand is always
+        // in radians. But `Sin` reads its operand in `ce.angularUnit`, so
+        // convert `raw` radians to that unit first (divide by the radians per
+        // unit, `π/180` in degrees). Without this conversion, in degrees
+        // `Sinc(10·Floor(π))` would use `Sin(30) = 1/2` and give 1/60 instead
+        // of sin(30)/30 = −0.0329.
         if (
           !isNumber(raw) &&
           !(isNumber(x) && x.isSame(0)) &&
           raw.unknowns.length === 0 &&
           raw.type.matches('real')
         ) {
-          const s = ce.function('Sin', [raw]).evaluate();
+          const s = ce
+            .function('Sin', [
+              ce.function('Divide', [raw, angularChainFactor(ce)]),
+            ])
+            .evaluate();
           if (isNumber(s) && s.isExact) {
             const exact = ce.function('Divide', [s, raw]).evaluate();
             return numericApproximation ? exact.N() : exact;
@@ -1375,7 +1467,10 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         const point = infinitePoint(x);
         if (point === '+oo' || point === '-oo') {
           const v = point === '+oo' ? ce.Pi.div(2) : ce.Pi.div(-2);
-          return numericApproximation ? v.N() : v;
+          if (numericApproximation) return v.N();
+          // With a user value of `Pi`, the call stays symbolic
+          // (`holdsShadowedPi()`).
+          return holdsShadowedPi(ce, v) ? undefined : v;
         }
         // No limit at `~oo`: the indeterminate form (`NaN` for an anonymous
         // infinity such as `∞ + i`, a float literal).
@@ -1448,7 +1543,10 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         if (point === '+oo') return ce.Zero;
         if (point === '-oo') {
           const v = ce.I.mul(ce.Pi);
-          return numericApproximation ? v.N() : v;
+          if (numericApproximation) return v.N();
+          // With a user value of `Pi`, the call stays symbolic
+          // (`holdsShadowedPi()`).
+          return holdsShadowedPi(ce, v) ? undefined : v;
         }
         // No limit at `~oo`: the indeterminate form (`NaN` for an anonymous
         // infinity such as `∞ + i`, a float literal).
@@ -1755,6 +1853,20 @@ function foldableDMSComponents(ops: ReadonlyArray<Expression>): boolean {
 }
 
 /**
+ * True when the exact value `v` holds the symbol `Pi` and a user binding
+ * gives the name `Pi` another value in the current scope
+ * (`ce.declare('Pi', { value: 3 })`). Then `evaluate()` does not return `v`,
+ * and the call stays symbolic. The reason: `v` is built with `ce.Pi`, which
+ * is bound to the library constant π, so `v.N()` is correct. But the
+ * MathJSON of `v` names `Pi`, and when it is boxed again, `Pi` is the user
+ * value: the value of `v` changes on a round trip through MathJSON. `.N()`
+ * of the call is not changed, because a float holds no `Pi`.
+ */
+function holdsShadowedPi(ce: IComputeEngine, v: Expression): boolean {
+  return v.has('Pi') && shadowsLibraryName(ce, 'Pi');
+}
+
+/**
  * The genuine value of a trig-factory head at an in-carrier infinity, or
  * `undefined` when the point has no closed form under the current route.
  * Consulted only from the factory's evaluate seam, AFTER the carrier
@@ -1969,7 +2081,10 @@ function trigFunction(
           (carrier === 'complex | signed_infinity' && signed);
         if (!admitted) return engine.typeError(carrierType, x.type, x);
         const v = nonFiniteTrigValue(operator, x, engine, numericApproximation);
-        if (v !== undefined) return numericApproximation ? v.N() : v;
+        if (v !== undefined && numericApproximation) return v.N();
+        // With a user value of `Pi`, a value that holds π is not returned
+        // (`holdsShadowedPi()`).
+        if (v !== undefined && !holdsShadowedPi(engine, v)) return v;
         return engine._fn(operator, [x]);
       }
       // Measurement error propagation (Sin/Cos/Tan only; other operators fall

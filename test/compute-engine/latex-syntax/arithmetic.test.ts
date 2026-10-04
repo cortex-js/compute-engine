@@ -815,3 +815,163 @@ describe('BINOMIAL parsing', () => {
     );
   });
 });
+
+describe('SUBTRACTION serialization', () => {
+  // A negative number at the start of a difference has no parentheses, and a
+  // sum or a difference after a minus sign has parentheses. Each output
+  // parses back, in a new engine, to the same canonical expression.
+  const roundTrip = (input: Expression | string): string => {
+    const ce1 = new ComputeEngine();
+    const expr =
+      typeof input === 'string'
+        ? ce1.parse(input)
+        : ce1.box(input, { form: 'raw' });
+    const out = expr.latex;
+    const ce2 = new ComputeEngine();
+    const canonical = typeof input === 'string' ? expr : ce2.box(expr.json);
+    // Compare the values at a sample point: the canonical form of a raw
+    // `Negate` of a sum is not always the same as the canonical form of the
+    // parsed output.
+    const point = { x: 0.7, y: 1.3, a: 2.1, b: 0.6 };
+    const back = ce2.parse(out);
+    if (typeof input === 'string') expect(back.json).toEqual(canonical.json);
+    expect(back.subs(point).N().re).toBeCloseTo(
+      expr.subs(point).N().re as number,
+      12
+    );
+    return out;
+  };
+
+  test.each([
+    ['-1-x', '-x-1'],
+    ['-2-x', '-x-2'],
+    ['-x-1', '-x-1'],
+    ['-(x+1)', '-(x+1)'],
+    ['-\\frac12-x', '-x-\\frac{1}{2}'],
+    ['-1.5-x', '-x-1.5'],
+    ['(-1)^2-x', '1-x'],
+    ['\\frac{-x-1}{y}', '\\frac{-x-1}{y}'],
+    ['2(-1-x)', '2(-x-1)'],
+    ['(-1-x)^2', '(-x-1)^2'],
+  ])('%s', (input, expected) => {
+    expect(roundTrip(input)).toBe(expected);
+  });
+
+  test.each([
+    [['Subtract', -1, 'x'], '-1-x'],
+    [['Subtract', -1.5, 'x'], '-1.5-x'],
+    [['Subtract', 'x', -1], 'x-(-1)'],
+    [['Subtract', -1, -2], '-1-(-2)'],
+    [['Subtract', ['Power', -1, 2], 'x'], '(-1)^2-x'],
+    [['Subtract', ['Subtract', -1, 'x'], 'y'], '-1-x-y'],
+    [['Subtract', 'y', ['Subtract', -1, 'x']], 'y-(-1-x)'],
+    [['Negate', ['Subtract', -1, 'x']], '-(-1-x)'],
+    [['Add', 'y', ['Subtract', -1, 'x']], 'y-1-x'],
+    [['Add', 'y', ['Negate', ['Subtract', 'a', 'b']]], 'y-(a-b)'],
+    [['Add', 'y', ['Negate', ['Subtract', -1, 'x']]], 'y-(-1-x)'],
+    [['Add', 'y', ['Negate', ['Add', 'a', 'b']]], 'y-(a+b)'],
+    [['Add', ['Negate', ['Add', 'a', 'b']], 'y'], 'y-(a+b)'],
+    [['Add', 'y', ['Negate', ['Multiply', 2, 'a']]], 'y-2a'],
+  ] as [Expression, string][])('raw %j', (input, expected) => {
+    expect(roundTrip(input)).toBe(expected);
+  });
+
+  test('the other fraction styles', () => {
+    const expr = new ComputeEngine().parse('\\frac{-x-1}{y}');
+    expect(expr.toLatex({ fractionStyle: 'inline-solidus' })).toBe('(-x-1)/y');
+    expect(expr.toLatex({ fractionStyle: 'factor' })).toBe(
+      '\\frac{1}{y}(-x-1)'
+    );
+    expect(expr.toLatex({ fractionStyle: 'reciprocal' })).toBe(
+      '(-x-1)(y)^{-1}'
+    );
+  });
+});
+
+describe('PRODUCT before a parenthesized group', () => {
+  // When the text before a parenthesized factor ends with a symbol name, the
+  // product gets an explicit `\times`: juxtaposed, `2v(x+1)` reads as `2`
+  // times a CALL of `v`. A nested product (`InvisibleOperator(2, v)`,
+  // `Multiply(0.03, v)`) ends with a symbol as well as a bare symbol does.
+  // When the text ends with a decimal number and the group starts with a
+  // digit, the product also gets a `\times`: `1.5(2)` reads as the repeating
+  // decimal `1.5222…`. Each output parses back, in a new engine, to the
+  // canonical form of the input.
+  const SUM = ['Sum', 'k', ['Limits', 'k', 0, 3]];
+  test.each([
+    [
+      ['Multiply', 'a', ['InvisibleOperator', 0.03, 'v'], SUM],
+      'a\\times0.03v\\times(\\sum_{k=0}^3k)',
+    ],
+    [
+      ['Multiply', ['InvisibleOperator', 2, 'v'], ['Add', 'x', 1]],
+      '2v\\times(x+1)',
+    ],
+    [
+      ['Multiply', ['InvisibleOperator', ['Negate', 2], 'v'], ['Add', 'x', 1]],
+      '-2v\\times(x+1)',
+    ],
+    [
+      ['Multiply', ['Multiply', 0.03, 'v'], ['Add', 'x', 1]],
+      '0.03v\\times(x+1)',
+    ],
+    [
+      ['Multiply', ['InvisibleOperator', 'u', 'v'], ['Tuple', 1, 2]],
+      'uv\\times(1,2)',
+    ],
+    [
+      ['Multiply', ['InvisibleOperator', 2, 'v_einO'], ['Add', 'x', 1]],
+      '2v_{einO}\\times(x+1)',
+    ],
+    [
+      ['Multiply', ['InvisibleOperator', 2, 'alpha'], ['Add', 'x', 1]],
+      '2\\alpha\\times(x+1)',
+    ],
+    [
+      ['Multiply', ['Multiply', 'u', ['Multiply', 2, 'v']], ['Add', 'x', 1]],
+      'u\\times2v\\times(x+1)',
+    ],
+    [['Multiply', 1.5, ['Delimiter', 2]], '1.5\\times(2)'],
+    // A library constant, a power and a function call before the group
+    // keep the juxtaposition: they read back as a product.
+    [
+      ['Multiply', ['InvisibleOperator', 2, 'Pi'], ['Add', 'x', 1]],
+      '2\\pi(x+1)',
+    ],
+    [
+      [
+        'Multiply',
+        ['InvisibleOperator', 2, ['Power', 'v', 2]],
+        ['Add', 'x', 1],
+      ],
+      '2v^2(x+1)',
+    ],
+    [
+      ['Multiply', ['InvisibleOperator', 2, ['Sin', 'v']], ['Add', 'x', 1]],
+      '2\\sin(v)(x+1)',
+    ],
+    [['Multiply', 1.5, ['Add', 'x', 1]], '1.5(x+1)'],
+  ] as [Expression, string][])('%j', (input, expected) => {
+    for (const form of ['raw', 'structural'] as const) {
+      const latex = new ComputeEngine().box(input, { form }).latex;
+      expect(latex).toBe(expected);
+      expect(new ComputeEngine().parse(latex).json).toEqual(
+        new ComputeEngine().box(input).json
+      );
+    }
+  });
+
+  test('canonical products', () => {
+    for (const [input, expected] of [
+      [['Multiply', 2, 'v', ['Add', 'x', 1]], '2v\\times(x+1)'],
+      [
+        ['Multiply', 'V_einColor', ['InvisibleOperator', 0.03, 'v_einO'], SUM],
+        '0.03V_{einColor}v_{einO}\\times(\\sum_{k=0}^3k)',
+      ],
+    ] as [Expression, string][]) {
+      const expr = new ComputeEngine().box(input);
+      expect(expr.latex).toBe(expected);
+      expect(new ComputeEngine().parse(expr.latex).json).toEqual(expr.json);
+    }
+  });
+});

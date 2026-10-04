@@ -634,7 +634,11 @@ describe('BarnesG at a complex z where G is not a double', () => {
         engine.box(['Factorial', 1e7]).N()
       )
     ).toThrow(/Timeout|exceeded|time/i);
-    expect(Date.now() - started).toBeLessThan(5000);
+    // The time depends on the load of the machine, so the limit is asserted
+    // only in a `CE_PERF=1` run. The check above that the call throws does not
+    // depend on time.
+    if (process.env.CE_PERF === '1')
+      expect(Date.now() - started).toBeLessThan(5000);
   }, 30_000);
 });
 

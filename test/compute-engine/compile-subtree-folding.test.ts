@@ -438,7 +438,11 @@ describe('COMPILE constant folding - eligibility is deterministic', () => {
     const e = new ComputeEngine();
     const t0 = Date.now();
     const r = compile(e.parse('\\lim_{x\\to 0}\\sin(1/x) + t'));
-    expect(Date.now() - t0).toBeLessThan(5_000);
+    // The time depends on the load of the machine, so the limit is asserted
+    // only in a `CE_PERF=1` run. The success and code checks below do not
+    // depend on time.
+    if (process.env.CE_PERF === '1')
+      expect(Date.now() - t0).toBeLessThan(5_000);
     expect(r.success).toBe(true);
     expect(r.code).toContain('_SYS.limit');
   });

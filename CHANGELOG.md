@@ -2,6 +2,115 @@
 
 ### Behavior Changes
 
+- **A `Solve` result list holds all the solutions, on every route.** An empty
+  list states that there is no solution. When the solver cannot show that
+  its list is complete, `Solve` stays unevaluated, `expr.solve()` returns
+  `null`, and `expr.explain('solve')` ends with the step
+  `solve.incomplete-…` and the unevaluated `Solve` as its result. Over ℝ, ℂ
+  or with no domain, a periodic trig equation gives its principal roots: a
+  finite list whose translates by the period give every root. These results
+  change:
+  - `expr.solve()` and `explain('solve')` returned `[]` where `Solve` stayed
+    unevaluated: `e^x = x + 2`, `x^2 = 2^x`, `cos x = x`, `arsinh(x) = 1`,
+    `(x + e^x)(x − e^{−x}) = 0`, `x^5 + ax + 1 = 0` now give `null` (new
+    step `solve.incomplete-no-roots`). Thus `Solve(x = 1 ∨ e^x = x + 2, x)`
+    was `[1]` and now stays unevaluated. An `Or` whose alternatives all have
+    no root gives `[]` (`e^x = −1 ∨ e^x = −2`), where it gave `null`. An
+    identity (`x = x`) gives a list with one free parameter, as `Solve` does.
+    A candidate of a root template that the host added to `ce.solveRules`
+    that the check rejects no longer gives `[]`, and it does not show that a
+    factor of a product has no root: with the template `BesselJ(0, x) → 0`,
+    `(x − 1)·BesselJ(0, x) = 0` was `[1]`, and now has no answer.
+  - A trig function of an argument that is not linear in the unknown gives
+    no answer: `sin(e^x) = 0` was `[]` (`ln π` is a root), `sin(x^2) = 0` was
+    `[0]`, `sin(√x) = 0` `[0]`, `sin(ln x) = 0` `[1]`, `cos(2^x) = 0` one
+    root, `sin(1/x) = 0` `[+∞, ~∞]`. The harmonization rules
+    `sin(f) → f`, `cos(f) → f − π/2` and `tan(f) → f`, which gave one
+    branch only, are removed. `sin(sin x) = 0` (was `[0, π]`) also has no
+    answer now.
+  - An infinite value is never a root: `1/x = 0` was `[+∞, ~∞]`, it is `[]`.
+  - A trig function of a linear argument `a·x + b` gives all its principal
+    roots: `sin(2x) = 0` was `[0]`, it is `[0, π/2]`; `cos(2x) = 0` was
+    `[π/4]`, it is `[π/4, −π/4]`; `sin(x + 1) = 0` was `[−1]`, it is
+    `[−1, π − 1]`; `cos(2x + 10) = 0` in degrees was `[40]`, it is
+    `[40, −50]`. `tan(2x) = 1`, `sin(2x) = 1/2` and `cos(3x − 1) = 1/2`,
+    which had no answer, now have one. `a·sin x + b·cos x = 0` gives its
+    second root: `sin x = cos x` was `[π/4]`, it is `[π/4, 5π/4]`.
+  - An even power under a logarithm or a rational power keeps both signs:
+    `ln(x^2) = 2` was `[e]`, it is `[−e, e]` (also over `[−5, 5]`);
+    `x^(2/3) = 4` was `[8]`, it is `[8, −8]` (the engine gives the real
+    value `(−8)^(2/3) = 4`); `x^(4/3) = 16` was `[8]`, it is `[8, −8]`.
+    A logarithm of such a power is solved as it is given, not from its
+    simplified form `(2/3)·ln(x)`: `ln(x^(2/3)) = 2` was `[e^3]`, it is
+    `[e^3, −e^3]` (also over `[−30, 30]`); `ln(x^(4/3)) = 4` is
+    `[e^3, −e^3]` and `ln(x^(−2/3)) = 2` is `[e^−3, −e^−3]`.
+    `ln(x^(3/2)) = 3` is still `[e^2]`.
+  - A logarithm or an exponential of a linear argument is solved:
+    `ln(x + 1) = 2` is `[e^2 − 1]`, `ln(2x + 1) = 1` is `[(e − 1)/2]`,
+    `−3ln(x + 1) = 6` is `[e^−2 − 1]`, `log_10(x + 1) = 2` is `[99]`,
+    `ln(x + 1) + 1 = 0` is `[1/e − 1]`, `e^(x + 1) = 2` is `[ln(2) − 1]`
+    and `10^(x + 1) = 5` is `[log_10(5) − 1]`; they were `[]`. An
+    exponential with a positive base has no real root when the other side
+    is not positive: `e^(x + 1) = −2` is `[]`.
+  - A constant times an absolute value is solved: `2|x| = 1` is
+    `[1/2, −1/2]`, `3|x| − 6 = 0` is `[2, −2]`, `|x| = e^−1` is
+    `[1/e, −1/e]` and `ln(x^−2) = 2` is `[1/e, −1/e]`; they had no answer.
+    `2|x| + 1 = 0` is `[]`.
+  - A substitution no longer uses a symbol of the equation as its temporary
+    unknown. A symbol with a value was used: with `u := 1/2`,
+    `sin(2x) + u = 0` gave `[]` from `expr.solve()`, and it is now
+    `[−π/12, 7π/12]`; `e^(2x) − 3e^x + 4u = 0`, `x^4 + x^2 − 2u = 0` and
+    `x·√(x^2 + 1) = 2u` were `null` or `[]`, and they now have their
+    roots. A type of the same name no longer applies to the temporary
+    unknown: with `u: integer`, `2√x + 3·⁴√x = 2` gave `[]`, and it is now
+    `[1/16]`.
+  - A list that a recursive strategy made from a partial list is not an
+    answer: `ln((x − 2)(x + e^x) + e) = 1` was `[2]`. A polynomial factor
+    with a symbolic coefficient that gives no root is not shown to have
+    none: `(e^x − 2)(x^3 + ax + 1) = 0` was `[ln 2]`.
+  - Over a bounded domain, a list that is known to be partial is accepted
+    only when the numeric scan resolves each root it finds:
+    `sin(x)·(x + e^x − 1 − 10^−8) = 0` over `[−1, 1]` was `[0]` (the root
+    near `5·10^−9` was missing) and now stays unevaluated. Each periodic
+    factor of a product gives its family in the domain:
+    `(x − 1)·cos(x) = 0` over `[0, 5]` is `[1, π/2, 3π/2]`,
+    `e^x·sin(x) = 0` over `[−1, 7]` is `[0, π, 2π]`, and
+    `x·sin(x) = 0` over `[−10, 10]` gives the seven multiples of π; they
+    stayed unevaluated.
+  - A system of congruences with no solution (`x ≡ 1 (mod 4)`,
+    `x ≡ 2 (mod 8)`) gives `[]` from the system solver; before, the `[]`
+    came from the univariate solver, which now gives `null` there.
+
+- [#409](https://github.com/cortex-js/compute-engine/issues/409) **The `N`
+  operator gives an inexact result.** A number that `N` returns is a float,
+  also when its value is an integer. `["N", 2]` evaluated to the exact integer
+  `2`, thus `N(2)/3` was the exact rational `2/3`, and
+  `["Mean", ["N", ["List", 1, 2, 3, 4], 30]]` was `5/2`. Now `["N", 2]`
+  evaluates to the float `2`, which serializes as `{"num": "2.0"}` (the same
+  value as `ce.box({num: "2.0"})`), `N(2)/3` is `0.666…` and the mean is the
+  float `2.5`. The elements of a list or tuple result are floats too:
+  `["N", ["List", 1, 2], 30]` is `["List", {"num": "1.0"}, {"num": "2.0"}]`.
+  With a precision above machine precision, the float is a big decimal.
+  `N` of a lazy collection is lazy, and each element is a float when it is
+  read: `N(Range(1, 4))/3` was `[1/3, 2/3, 1, 4/3]`, it is now
+  `[0.333…, 0.666…, 1.0, 1.333…]`.
+  These results do not change: an infinity, and a symbolic result (the `1`
+  in `N(x + 1)` stays exact). An `N` in the body of a `Map` gives inexact
+  elements, also when the `Map` is compiled: `Map(x ↦ N(x^2), [1, 2, 3])`
+  is `[1.0, 4.0, 9.0]`. The `.N()` method of an expression is not changed:
+  `ce.box(6).N()` is still the exact `6`, and the elements of the `.N()` of
+  a lazy `Map` keep the values of `.N()`. The serialization of the `.N()` of
+  a lazy `Map` changes: the body of its function is in the engine-internal
+  marker `NumericApproximation`, not in `N`, for example
+  `["Map", ["Function", ["Block", ["NumericApproximation", ["Sin", "_1"]]],
+  "_1"], ["Range", 1, 200]]`.
+
+- **`N(list, p)` rounds each element.** With a precision `p` at or below the
+  working precision, `N` rounded a number result to `p` significant digits,
+  but not the elements of a list or tuple result: `N([1/3, Pi], 4)` was
+  `[0.333333333333333333333, 3.14159265358979323846]`. It is now
+  `[0.3333, 3.142]`, also in nested lists and tuples.
+
 - **A set is never paired by position in an element-wise operation.** A set
   has no order, but beside a list it supplied elements by position and the
   result was cut to the shorter length: `Power([1, 2, 3], Set(1, 2))` was
@@ -46,7 +155,6 @@
     `Erf(27i)` and `Si(1000i)` at machine precision, `Ci(1000i)`, and
     `Erf(10^{10}i)` at every precision. A real overflow is still `+∞`
     (`Erfi(27)`).
-
 - **Bessel and Airy functions of a complex argument.** `BesselJ`,
   `BesselY`, `BesselI`, `BesselK` (integer order) and `AiryAi`, `AiryBi`,
   `AiryAiPrime`, `AiryBiPrime` compute a value at a complex argument under
@@ -94,6 +202,428 @@
   complex roots: `solve` returns the real roots of these equations, as it
   does for `sin(x) = 2`. So `x·eˣ = 3` still solves to `W(3)` only, and
   `x·eˣ = -1` has no root.
+- **A parameter declared as a scalar maps over a tuple argument.**
+  `Apply((u: real) ↦ 2u, (a, b))` was an `incompatible-type` error. It is now
+  `(2a, 2b)`, as `Sin((a, b))` is `(sin(a), sin(b))`, and
+  `Apply((u: real) ↦ 7, (a, b))` is the tuple `(7, 7)`. A scalar is a number
+  type or `boolean`, as `Not((True, False))` is `(False, True)`:
+  `(p: boolean) ↦ ¬p` applied to `(True, False)` is `(False, True)`. A
+  parameter declared `string` binds a tuple whole. The rule is the same
+  for a function assigned the literal with no declaration, and for a
+  function declared `function` and then assigned. A signature declared for
+  the function also declares its parameters: `k` declared `(real) -> real`
+  and assigned `u ↦ 7` gives `k((a, b)) = (7, 7)`. A list of tuples maps
+  over the list, then over each tuple, and a tuple of tuples maps at each
+  level. A component that does not match the declared type is an error in
+  its own cell: `(n: integer) ↦ n + 1` applied to `(1.5, 2)` gives
+  `(Error(incompatible-type, …), 3)`. A tuple with a list component
+  (`([1, 2], [3, 4])`) is an `incompatible-type` error, as for `Sin`. A symbol
+  declared as a tuple with no value holds the call, as a list symbol does,
+  and the call maps when the symbol gets a value. The type of the call is
+  the tuple of the results (`tuple<real, real>`). A parameter with no
+  declared type (`u ↦ 7`) still binds the tuple whole. The compiled code
+  computes the same tuple: an array in JavaScript, an array of enclosures on
+  the interval target, and a `vecN` on GLSL and WGSL (a tuple of booleans is
+  declined there, because a shader vector holds numbers). Before, these
+  targets declined the call, and `k((a, b))` for `k` declared
+  `(real) -> real` and assigned `u ↦ 2u` compiled to `NaN` in JavaScript and
+  to an empty interval on the interval target. A list beside the tuple, at a
+  parameter declared as a collection, is bound whole in each cell:
+  `(u: real, w: list<real>) ↦ u + Length(w)` applied to `(1, 2)` and
+  `[10, 20]` is `(3, 4)`, typed as a tuple, and the JavaScript target
+  compiles it. A failing component carries the same "while applying …
+  element-wise" note as a failing element of a list.
+
+- **The norm of a point with list components of different lengths is an
+  error, and the norm of an empty point list is `[]`.** With `L = [1, 2, 3]`
+  and `M = []`, `Norm((L, M))` and `Abs((L, M))` are the
+  `incompatible-dimensions` error that `Hypot(L, M)` and `L + M` give. Before,
+  they were `[]`, as if the empty component made the other list not count.
+  The L∞ norm of such a point, which stayed unevaluated for any length
+  mismatch, gives the same error. `PointList(L, M)` zips to the shortest
+  component and is a list of zero points, so `Norm(PointList(L, M))` is now
+  `[]`, one norm per point, as its type `list<number>` says. Before, it was
+  `0`, the norm of an empty vector.
+
+- **A function literal applied to a list symbol with no value stays
+  unevaluated.** With `v` declared `list<real^2>` and no value,
+  `Apply(u ↦ 7, v)` has the type of a list of two numbers, but it evaluated
+  to `7`, and `Apply((u: real) ↦ 2u, v)` was an `incompatible-type` error.
+  Both now stay unevaluated, as they do when `v` is one of several
+  arguments. When `v` gets a value, the application maps over it:
+  `v := [3, 4]` gives `[7, 7]` and `[6, 8]`.
+
+- **A declared user function applied to a list with no value stays
+  unevaluated.** With `f` declared `(real) -> real` and assigned `u ↦ 7`, and
+  `w` declared `list<real>` with no value, `f(w)` evaluated to `7` while its
+  type was `list<real>`. A body that reads its parameter (`u ↦ u + 1`) gave
+  `w + 1`. The call now stays `f(w)`, as it does for a function assigned with
+  no declaration and for a function literal (`Apply(u ↦ 7, w)`). After
+  `w := [1, 2]`, it evaluates to `[7, 7]`. A scalar argument is applied as
+  before.
+
+- **A function assigned without a declaration holds a call on an argument that
+  can still become a list.** With `h := u ↦ 7` and `q` declared
+  `real | list<real>` with no value, `h(q)` evaluated to `7`, which is wrong
+  after `q := [1, 2]` (the call then gives `[7, 7]`). The call is now held, as
+  `f(q)` for a function `f` declared `function` and `Apply(u ↦ 7, q)` already
+  were, and it maps when `q` gets a list value. A `q` declared `real`, or with
+  a scalar value, is applied at once, as before.
+
+- **A call on a set or a dictionary with no value is no longer held.** With
+  `s` declared `set<real>` (or `dictionary<real>`) and no value,
+  `Apply(u ↦ 7, s)` and `f(s)` for a function `f` declared `function` and
+  assigned `u ↦ 7` stayed unevaluated, while `h(s)` for `h := u ↦ 7` gave
+  `7`. A call is held only so that it can map over the argument when the
+  argument gets a list value, and a set or a dictionary is never mapped over.
+  The three calls now give `7`, and with `u ↦ u + 1` or a `real` parameter
+  they give the same `incompatible-type` error. An argument that can still be
+  a list (`list<real>`, `real | list<real>`, `broadcastable<real>`,
+  `collection<real>`) is held on all three routes, as before.
+
+- **`Apply` of a function literal gives the error for an argument that its
+  parameter refuses.** `Apply((u: real) ↦ 7, "abc")` evaluated to the inert
+  `Apply((u) => 7, Error(incompatible-type, …))`, while `h("abc")` for
+  `h := (u: real) ↦ 7` gave the error itself. The `Apply` now gives the same
+  `Error(incompatible-type, …)`, for a string, a boolean or a set. A cell of
+  a list mapped by a function declared `function` and assigned such a
+  literal also gives the error, not the inert `Apply`.
+
+- **A string or a boolean at a declared `real` parameter makes the call
+  invalid on every route.** `h("abc")` for `h := (u: real) ↦ 7` was refused
+  when it was boxed, typed `error`, while `f("abc")` for `f` declared
+  `function` and `Apply((u: real) ↦ 7, "abc")` were typed `integer` until
+  they were evaluated. The three calls are now refused when they are boxed.
+
+- **The type of `Apply(u ↦ 7, s)` for `s` declared `collection<real>` or
+  `broadcastable<real>` is `broadcastable<…>`.** The call is held until `s`
+  has a value, and it maps over a list value, but it was typed as one value
+  (`number`). The named calls `h(s)` and `f(s)` were already typed
+  `broadcastable<…>`, and now the three agree.
+
+- **`Derivative(f)` is a function literal also when its closed form holds the
+  derivative of another function.** With `h(x) := g(x)·x` and `g` not
+  defined, `Derivative(h)` evaluated to the expression
+  `_ · Apply(Derivative(g, 1), _) + g(_)` in the hole `_`, where
+  `Derivative(Sin)` evaluates to `(x) ↦ cos(x)`. It now evaluates to
+  `(x) ↦ x · Apply(Derivative(g, 1), x) + g(x)`. The derivative of a function
+  literal (`Derivative((x) ↦ x·g(x))`) gave the body alone, with `x` free; it
+  now gives the literal too. `h'(t)`, `Apply(Derivative(h), t)` and their
+  value once `g` is defined do not change. The derivative of a recursive
+  function (`f(x) := x·f(x−1)`), whose closed form holds `Derivative(f)`
+  itself, stays the inert `Derivative(f)`: as a function literal, its body
+  would evaluate `Derivative(f)` again at each application.
+
+- **A short numerator over a long denominator serializes as `\frac`.**
+  `\frac{x}{y^2+z^2}` serialized as `(x)(y^2+z^2)^{-1}`, and
+  `\frac{1}{(x+1)(x+2)}` as `((x+1)(x+2))^{-1}`. The default fraction style
+  wrote an inverse power when the numerator had at most two leaves and the
+  denominator more than five. With a numerator other than 1, that output
+  parsed back to `Multiply(x, Divide(1, …))`, not to `Divide(x, …)`. The
+  default style now writes `\frac{x}{y^2+z^2}` and
+  `\frac{1}{(x+1)(x+2)}`. A power `-1` of a long base serializes the same
+  way: `\frac{1}{x-\frac{\pi}{2}}`, not `(x-\frac{\pi}{2})^{-1}`. The
+  `reciprocal` fraction style still writes the inverse power when a caller
+  selects it. In that style, the numerator gets parentheses only when it
+  needs them (a sum, a negative value): `x\times(y^2+z^2)^{-1}`,
+  `2(y^2+z^2)^{-1}`, `(x+1)(y^2+z^2)^{-1}`, `(-y)(y^2+z^2)^{-1}`, not
+  `(x)(y^2+z^2)^{-1}` or `(2)(y^2+z^2)^{-1}`. A symbol or a decimal number
+  before the inverse power gets an explicit `\times`: `x(y^2+z^2)^{-1}` parses
+  as a call of `x`, and `1.5(2)^{-1}` as the inverse of the repeating decimal
+  `1.5222…`. The output parses back to `Multiply(x, Divide(1, y^2+z^2))`, which
+  evaluates to the same expression as `Divide(x, y^2+z^2)`.
+
+- **A negative number at the start of a difference has no parentheses.**
+  `-x-1` serialized as `(-1)-x`, and `\frac{-x-1}{y}` as `\frac{(-1)-x}{y}`.
+  They now serialize as `-x-1` and `\frac{-x-1}{y}`: the terms also keep
+  their order, and the prettified MathJSON of `-x-1` is
+  `["Subtract", ["Negate", "x"], 1]`, not `["Subtract", -1, "x"]`. A raw
+  `["Subtract", -1, "x"]` serializes as `-1-x`. A negative number after a
+  minus sign keeps its parentheses (`x-(-1)`). A sum or a difference
+  subtracted inside a sum now has parentheses: `Add(y, Negate(Add(a, b)))`
+  serialized as `y-a+b`, which is a different value, and now serializes as
+  `y-(a+b)`. `toString()` keeps the order too: `-x - 1`, not `-1 - x`. Only a
+  positive constant moves in front of a negated term (`1 - x`).
+
+- **The `timeLimitMs` option of `loadIntegrationRules` also sets the time
+  limits of the rule driver's sub-searches.** The step budget decides when the
+  driver gives up, and the time limits only guard against a hang. But the two
+  sub-searches of the driver (the native rational fallback and the clean-up of
+  an expansion result) had a fixed limit of 5 s. On a slow or loaded machine,
+  that limit could stop a sub-search that the step budget allowed, and a
+  caller could not raise it. Each sub-search now gets one sixth of
+  `timeLimitMs`: 5 s for the default of 30 s, as before. On a heavily loaded
+  machine, a caller can raise `timeLimitMs` so that no time limit decides the
+  result. For example, `∫(3+2x)³·csc(1+2x)/(1+sin(1+2x)) dx` needs about
+  64,000 of the 300,000 steps and takes about 4 s on an idle machine; with a
+  load average of 300 on 8 cores, the 30 s limit stopped it and the integral
+  stayed unevaluated.
+
+- **The integration rules wait longer before they give up on the clock.** The
+  default `timeLimitMs` of `loadIntegrationRules()` is now 120 s (it was 30 s),
+  and each of the two bounded sub-searches of the rule driver gets one sixth of
+  it (20 s). The step budget, which does not depend on time, decides when the
+  driver gives up; the clock is only a guard against a hang. With 30 s, a
+  machine 2 to 3 times slower than an idle desktop, or a loaded one, could stop
+  a search that the step budget allows, and the integral stayed unevaluated
+  there while it closed on a faster machine: for example
+  `\int(3+2x)^3\csc(1+2x)/(1+\sin(1+2x))\,dx` needs about 4 s on an idle
+  machine. A real hang now blocks for up to 2 minutes before the integral is
+  given up; set a lower `timeLimitMs` to change that.
+
+- **In the lenient grammar, a number after `√` is the whole radicand.**
+  `√12` was read as `√1·2` and `√2.5` as `√2·0.5`, the TeX reading of a
+  radicand without braces. They are now `√(12)` and `√(2.5)`, as `sqrt12`
+  and `sqrt2.5` are. The number ends the radicand: `√12x` is `√12·x`.
+  Because the TeX reading differs, a number of more than one token reports
+  `ambiguous-radical` (`√2` does not). The strict grammar keeps the TeX
+  reading: `\sqrt12` and `√12` are `\sqrt{1}2`.
+
+- **In the lenient grammar, an unbraced subscript of digits is the whole
+  run of digits on every base.** `π_12` was `π_1·2` and `(x)_12` was
+  `(x)_1·2`, while `x_12` was `x_{12}`. They are now `π_{12}` and
+  `(x)_{12}`, and `2748_16` is the number 2748 in base 16. On a base that
+  is not a symbol, a run that starts with `0` keeps the one-token reading,
+  because the number value drops the zero: `(x)_01` is `(x)_0·1`, and it
+  reports `ambiguous-implicit-subscript`. A symbol keeps the text: `π_01`
+  is `Pi_01`, as `x_01` is `x_01`.
+
+- **More `ambiguous-*` parse diagnostics in the lenient grammar.** These
+  inputs were read with no diagnostic, although a person can mean a second
+  reading. The reading does not change, and the strict grammar reports none
+  of these codes:
+  - `ambiguous-letter-decimal`: a period and digits after an operand that
+    is not a letter (`√b.5`, `e^f.5`, `(x+1).5`, `|x|.5`), and after a
+    superscript of digits (`x².5`, `x^{2}.5`). The Desmos spellings
+    `t^{i}.4` and `\left(1-t\right).9` are not reported.
+  - `ambiguous-implicit-subscript`: a Greek base (`Δ_a2`, as `x_a2`), and
+    a constant or a group (`π_a2`, `π_1y`, `(x)_a2`). Also an unbraced
+    subscript of two letters that is split because a script or a digit
+    follows it: `x_ab^2` is `x_a·b^2` and `a_kx^k` is `a_k·x^k`, and a
+    person can mean `x_{ab}^2`, the reading of `x^2_ab`.
+  - `ambiguous-radical`: a number after `√`, white space and a number
+    (`√1 000` is `√1·0`).
+  - `ambiguous-number-notation`: a number with a subscript of digits as the
+    argument of a function name with no parentheses (`min3_12` is
+    `min(BaseForm(3, 12))`, `sin2_8`), as `10111_2` is reported.
+  - `ambiguous-factorial`: a radicand or an exponent with a subscript
+    (`√i_1!`, as `√i!`), and a `!` after white space after the argument of
+    a function name (`αtanπ !` is `α·(tan π)!`, while `tan x!` is
+    `tan(x!)`).
+  - `ambiguous-radical`: a radicand with a subscript then white space
+    (`√a_1 b`, as `√a b`), and a run of letters read one letter at a time
+    before `√` (`xy√i`, as `y√i`).
+  - `ambiguous-exponent-end`: `√` after an exponent (`e^θ√z`, `x^√θ√g`),
+    and a function name after an exponent and white space when the
+    exponent is not signed (`e^x cos(x)`, `e^x sin x`). Before, a function
+    name was reported only after a signed exponent (`e^-x sin x`); the
+    same rule now applies to every operand after the exponent.
+    `x^2 sin x` and `e^{x} cos(x)` are not reported.
+  - `ambiguous-function-subscript`: a base of `log` that is the `0` of a
+    longer run of digits (`log_01(x)`, `log012(x)`). The base is `0`, as in
+    the strict grammar `\log_01(x)`, and a person never means base 0.
+
+  See `docs/plans/2026-10-01-lenient-ambiguity-codes.md`, section 5.
+
+- **In the lenient grammar, a braced `-1` on a function name is the
+  inverse function**, as the unbraced `-1` is and as `\sin^{-1}` is in
+  LaTeX. `sin^{-1}(x)` and `sin⁻¹(x)` (the tokenizer reads `⁻¹` as
+  `^{-1}`) were `1/sin(x)`. They are now `arcsin(x)`, and they report
+  `ambiguous-inverse-function`, as `sin^-1(x)` does.
+
+- **In the lenient grammar, the inverse of a logarithm is a power**, as in
+  the strict grammar. `ln^-1(x)` was `Apply(InverseFunction(Ln), x)`, which
+  does not simplify, and is now `exp(x)`; `log^-1(x)` and `lg^-1(x)` are now
+  `10^x`. The code `ambiguous-inverse-function` is still reported.
+
+- **In the lenient grammar, a letter followed by digits that start with `0`
+  keeps the digits.** `x01` was `x_1` and `x012` was `x_12`: the number
+  value of the digits dropped the zero. They are now the symbols `x_01` and
+  `x_012`, as `x_01` is. A run with more digits than a JavaScript number
+  holds exactly is kept the same way: `x123456789012345678901` is the
+  symbol `x_123456789012345678901`. These still report
+  `ambiguous-implicit-subscript`.
+
+- **A subscript on `cbrt` or `nPr` keeps the meaning of the name**, in the
+  lenient grammar. `cbrt_2(x)` was `Apply(Subscript(Root, 2), x)`, which
+  lost the index 3 of the cube root, and is now
+  `Apply(Subscript(Root, 2), x, 3)`. `nPr_2(5, 2)` was
+  `Permutations_2(5, 2)`, a subscript on the collection of the
+  arrangements, and is now `Subscript(Binomial(5, 2)·2!, 2)`, a subscript
+  on the count. Both still report `ambiguous-function-subscript`.
+
+- **`Argument` (`Arg`) gives the angle in the engine's angular unit**, as the
+  inverse trigonometric functions do. With `ce.angularUnit = 'deg'`,
+  `Argument(-1)` was `π` (a value in radians) while `Argument(i)` was `90`,
+  and the compiled `Argument` always returned radians. Now `Argument(-1)` is
+  `180` in degrees, `200` in grads and `1/2` in turns, for `evaluate()`,
+  `.N()` and a float operand (`Argument(-5.1)` is `180`), and `AbsArg` takes
+  the same angle. The compiled code on the `javascript`, `interval-js`,
+  `glsl`, `wgsl` and `python` targets multiplies the radian result by the
+  unit factor, so it agrees with `.N()`. Radian mode does not change, and
+  neither do `Ln`, `Sqrt` and `ComplexRoots` of a complex value, which
+  compute their angle in radians.
+
+- **A `Solve` over a bounded domain whose list of roots would be too long to
+  give now stays unevaluated**, instead of returning a part of the list.
+  When the domain holds more than 1000 periods of a trigonometric equation,
+  the solver does not expand the roots. It returned the principal roots that
+  are in the domain: `Solve(sin(x) = 0, x ∈ [0, 10^9])` was `[0, π]`,
+  `Solve(cos(3x) = 1/2, x ∈ [0, 10^7])` was `[π/9]`, and
+  `Solve(sin(x) = 0, x ∈ [10^8, 10^9])` was `[]`, a false statement that
+  there is no root. These now stay unevaluated. An integer `Range` that is
+  small enough is enumerated instead: `sin(x) = 0` over `-10^4..10^4` is
+  still `[0]`. The same rule applies to an equation that has the unknown
+  also outside a trigonometric function of a linear argument: its list of
+  roots is given only when a numeric scan of the domain finds no other root.
+  `Solve(x·sin(x) = 0, x ∈ [-10, 10])` was `[0, π]` and
+  `Solve(sin(x^2) = 0, x ∈ [0, 5])` was `[0]`; both now stay unevaluated,
+  while `Solve(x·sin(x) = 0, x ∈ [0, 3])` is still `[0]`. Over the real
+  line (`x ∈ ℝ`) and the complex numbers, `Solve` still gives the principal
+  roots. Over another domain that is not bounded, the principal roots were
+  given as if they were all the roots: `Solve(sin(πx) = 0, x ∈ ℤ)` was `[0]`,
+  but each integer is a root. Such a `Solve` (over `ℤ`, a half-line such as
+  `[0, ∞)`, or a union) now stays unevaluated, and a finite set is
+  enumerated: `Solve(sin(πx) = 0, x ∈ {0, 1/2, 1})` was `[0]` and is now
+  `[0, 1]`. An equation with the unknown in a function that the solver
+  cannot invert, and that the numeric scan cannot check, also stays
+  unevaluated over a bounded domain: over `[0.5, 20]`,
+  `(x - 1)·Haversine(x) = 0` and `(x - 1)·Sinc(x) = 0` were `[1]`, and
+  over `[0.5, 10]`, `(x - 1)·BesselJ(0, x) = 0` was `[1]`. The functions
+  that the solver inverts are the arithmetic operations, powers and
+  radicals, exponentials and logarithms, `Abs`, the hyperbolic functions
+  and the inverse trigonometric functions. The haversine is now a periodic
+  term, as `sin` is: `(x - 1)·Haversine(x) = 0` is `[1]` over `[0.5, 6]`,
+  and `(x - 1)·Haversine(πx) = 0` over `-4..4` was `[1]` and is now
+  `[-4, -2, 0, 1, 2, 4]`.
+
+- **`Solve` no longer gives a part of the roots as the answer, also without
+  a domain and over ℝ.** The principal roots are the answer only for a
+  trigonometric equation, because they represent its periodic families of
+  roots. For a function that the solver cannot invert and that is not
+  periodic, the list of the solver is only a part of the roots:
+  `Solve((x - 1)·BesselJ(0, x) = 0, x)` was `[1]`, and now stays
+  unevaluated, also with `x ∈ ℝ`. A product is solved factor by factor, and
+  a factor that gives no root can have roots that the solver does not
+  find: `Solve((x - 2)(x + e^x) = 0, x)` was `[2]`, but `x + e^x = 0` has
+  the root `−W(1) ≈ −0.567`. Such a `Solve` now stays unevaluated, without
+  a domain, over ℝ and over `[−1, 3]`. A factor that is shown to have no
+  real root does not change the answer: a polynomial (`x^2 + 1`), a power
+  of a constant (`e^x`), or a function of known sign (`e^x + 1`). Thus
+  `(x - 2)(x + 3)`, `(x - 2)·e^x`, `(x - 2)(x^2 + 1)` and `x·ln(x)` give
+  `[2, −3]`, `[2]`, `[2]` and `[1]` as before. Over a bounded domain, the
+  numeric scan can still show that the list is complete:
+  `(x - 1)·Haversine(x) = 0` over `[0.5, 6]` is `[1]`. The method
+  `expr.solve()` follows the same rule and returns `null` for these
+  equations: `.solve("x")` of `(x - 1)·BesselJ(0, x)` returned `[1]`, and
+  of `(x - 2)(x + e^x)` it returned `[2]`. For a list of equations in one
+  unknown, `Solve` keeps the candidates that are roots of every equation;
+  when each equation gives only a part of its roots, it now stays
+  unevaluated: `Solve([(x - 2)(x + e^x) = 0, (x - 2)(x + e^x)(x + 5) = 0], x)`
+  was `[2]`, but `−W(1)` is also a common root. `expr.solve()` of an `Or`
+  returns `null` when one of its alternatives has no answer: the union of
+  the other lists is not an answer (`x = 3 ∨ (x - 1)·BesselJ(0, x) = 0`
+  was `[3, 1]`). `expr.explain('solve')` gives the same result: for these
+  equations its last step is "No complete answer", with the reason (a
+  factor gave no solution, or the unknown is in a function that the solver
+  cannot invert), and its `result` is the unevaluated `Solve`. A root
+  template that you add to `ce.solveRules` is your claim of a solution, and
+  its roots are still returned for a function that the solver cannot
+  invert: with a template `BesselJ(1, x) → 0`,
+  `Solve((x - 1)·BesselJ(1, x) = 0, x)` is `[1, 0]`.
+
+- **In the lenient grammar, a Greek name written without a backslash takes
+  a subscript into its name**, as the backslash spelling does. `alpha_{01}`
+  was `alpha_1` and is now the symbol `alpha_01`, as `\alpha_{01}` is.
+  `alpha_max` was `alpha_m·a·x` and is now `alpha_max`. `pi_01` was
+  `Pi_0·1` and is now `Pi_01`. The order of the scripts does not change the
+  reading: `alpha^2_{01}` and `alpha_{01}^2` are both `alpha_01^2`. The
+  rules and the diagnostics are the same as for the backslash spelling: a
+  run of two letters before a script is split (`alpha_ab^2` is
+  `alpha_a·b^2`, and reports `ambiguous-implicit-subscript`), and white
+  space before the `_` stops the join (`alpha _{01}` is `alpha_1`). The
+  ASCII names of constants keep the subscript outside the name:
+  `oo_{01}` is still `Subscript(PositiveInfinity, 1)`. The strict grammar
+  does not change.
+
+- **In the lenient grammar, a spelled-out name is a whole unbraced exponent
+  also when a `_` or a digit follows it**, as the command spelling is.
+  `x^alpha_1` and `e^alpha_1` were read one letter at a time
+  (`x^a·l·p·h·a_1`), and are now `x^{alpha_1}` and `e^{alpha_1}`, as
+  `x^\alpha_1` is. `x^alpha2` is `x^alpha·2` and `x^oo_1` is `x_1^∞`, as
+  `x^\alpha2` and `x^\infty_1` are. An operand after the exponent reports
+  `ambiguous-exponent-end` (`x^alpha_1 t`), as after `x^\alpha_1 t`.
+
+- **In the lenient grammar, a script, a prime or a digit after a run of
+  letters belongs to the last part of the run** when the run holds a
+  spelled-out name, as after a run of single letters (`xy_1` is `x·y_1`,
+  `xy2` is `x·y_2`). `xalpha_1` was `Subscript(x·alpha, 1)` and is now
+  `x·alpha_1`, as `x\alpha_1` is; `xalpha^2` was `(x·alpha)^2` and is now
+  `x·alpha^2`; `alphax_1` is `alpha·x_1`. `xalpha2` was `x·alpha·2` and is
+  now `x·alpha_2`, as `x\alpha2` and `alpha2` are, and `xalpha01` was
+  `x·alpha·1` and is now `x·alpha_01`. The run still reports
+  `ambiguous-letter-run`, and a digit subscript reports
+  `ambiguous-implicit-subscript`.
+
+- **In the lenient grammar, a spelled-out Greek name directly after an
+  argument of one letter is read as the name**, as after a letter in a run
+  of letters. The argument is an unbraced exponent, radicand or argument of
+  `\frac`. `e^xalpha_1` was `e^x·a·l·p·h·a_1` and is now `e^x·alpha_1`, as
+  `e^x\alpha_1` is; `\sqrt xalpha_1` is `\sqrt{x}·alpha_1`; `e^xpi` was
+  `e^x·p·i` (with the imaginary unit) and is now `e^x·π`. The codes do not
+  change: `e^xalpha_1` reports `ambiguous-exponent-end` and
+  `ambiguous-letter-run`. A bare function name after the argument is read
+  as the function, as after white space: `e^xsin(t)` was `e^x·s·i·n(t)` and
+  is now `e^x·sin(t)`, with `ambiguous-exponent-end`, as `e^x sin(t)` is.
+  A word that starts at the argument is not split: `\sqrt beta` stays
+  `\sqrt{b}·e·t·a`, `x^foo` stays `x^f·o·o` and `x^acos t` stays
+  `x^a·c·o·s·t`.
+
+- **A symbol whose subscript a dictionary entry reads has the same reading
+  in each order of the scripts**, in both grammars. `\delta^2_{01}` was
+  `delta_01^2` and `\mu^2_0` was `mu_0^2`; they are now
+  `KroneckerDelta(0, 1)^2` and `Mu0^2`, as `\delta_{01}^2` and `\mu_0^2`
+  are. `\varepsilon^2_0` is `VacuumPermittivity^2`. The same applies to the
+  set notations with a subscript: `\R^2_-` was a syntax error and
+  `\mathbb{R}^2_{>0}` was `Subscript(RealNumbers, Error)^2`; they are now
+  `NegativeNumbers^2` and `PositiveNumbers^2`, as `\R_-^2` and
+  `\mathbb{R}_{>0}^2` are. White space before the `_` does not change
+  this reading, as LaTeX ignores it: `\R^2 _-` was a syntax error and
+  `\mu^2 _0` was `mu_0^2`; they are now `NegativeNumbers^2` and `Mu0^2`.
+  (White space before the `_` still stops the join of a subscript to a
+  symbol name: `x^2 _{01}` is `x_1^2`.) A script or a prime after
+  `\delta_{ij}` now applies to `KroneckerDelta(i, j)`: `\delta_{01}^2` was
+  a syntax error.
+
+- **`\delta_{11}` is `KroneckerDelta(1, 1)`.** A subscript of
+  `KroneckerDelta` that is a run of digits with no separator is one index
+  for each digit, as a run of letters is (`\delta_{ij}` is
+  `KroneckerDelta(i, j)`). The run was one number: `\delta_{11}` was
+  `KroneckerDelta(11)`, which evaluates to 0 (δ₁₁ is 1), `\delta_{01}` was
+  `KroneckerDelta(1)` (the 0 was lost) and `\delta_{12}` was
+  `KroneckerDelta(12)`. They are now `KroneckerDelta(1, 1)`,
+  `KroneckerDelta(0, 1)` and `KroneckerDelta(1, 2)`. A subscript with a
+  separator keeps its numbers: `\delta_{10, 2}` is `KroneckerDelta(10, 2)`,
+  and `KroneckerDelta(10, 2)` serializes to `\delta_{10, 2}`. One index of
+  two or more digits serializes in a second group, which reads back as one
+  index: `KroneckerDelta(11)` is `\delta_{{11}}`. A group of letters and
+  digits is one index for each, in both grammars: `\delta_{n0}` is
+  `KroneckerDelta(n, 0)`; in the lenient grammar it was
+  `KroneckerDelta(n_0)`, and `\delta_{nm}` no longer reports
+  `ambiguous-letter-run`. A command that is a symbol is one index:
+  `\delta_{\pi1}` is `KroneckerDelta(Pi, 1)` in both grammars (in the
+  lenient grammar it was `KroneckerDelta(Pi_1)`). In the lenient grammar, a
+  spelled-out Greek name is one index, as its command is: `\delta_{nalpha}`
+  was `KroneckerDelta(n·alpha)` and is now `KroneckerDelta(n, alpha)`, with
+  `ambiguous-letter-run`; `\delta_{pi1}` was `KroneckerDelta(Pi_1)` and is
+  now `KroneckerDelta(Pi, 1)`. The strict grammar reads one index for each
+  letter. In the lenient
+  grammar, an unbraced run of digits is the whole subscript, as `x_11` is
+  `x_{11}`, and is read as the braced run: `\delta_11` was
+  `KroneckerDelta(1)·1` and is now `KroneckerDelta(1, 1)`; `\delta_01` was
+  the symbol `delta_01` and is now `KroneckerDelta(0, 1)`. The strict
+  grammar reads one token, as TeX does. `\delta_0` was the symbol `delta_0`
+  and is now `KroneckerDelta(0)`, as `\delta_1` is `KroneckerDelta(1)`.
 
 ### New Features
 
@@ -184,7 +714,6 @@
 - **`SinhIntegral` and `CoshIntegral` near 0.** `SinhIntegral(10^{-10}).N()`
   was `9.99982e-11`, it is now `1e-10`. The real kernels of `Shi` and `Chi`
   use their Maclaurin series for `|x| ≤ 2`.
-
 - **More accurate `SinIntegral`, `CosIntegral`, `SinhIntegral`,
   `CoshIntegral` and `ExpIntegralEi` in doubles, mostly as fast or faster.**
   Measured against mpmath on more than 30,000 points from 0.12 to 10³⁰⁰, the
@@ -212,6 +741,57 @@
 - **`simplify()` of a list quotient or difference keeps the list.**
   `[x]/[x]` simplified to `1` and `[x] − [x]` to `0`. They now give `[1]` and
   `[0]`, as `evaluate()` does.
+
+- **The identities of `loadIdentities()` that contain an angle apply only in
+  radians.** They are written for radians, but they applied in every angular
+  unit. With `ce.angularUnit = 'deg'` and the identities loaded,
+  `Sin(Pi).simplify()` was `0`, but `sin(π°)` is `0.0548…`, the value of
+  `.N()`. `Argument(i)` was `π/2`, not `90`, and `Im(ln z)` became
+  `Argument(z)`, an angle in degrees. Now an identity with a trigonometric
+  or inverse trigonometric function, `Argument` or `AbsArg` in its sides or
+  its conditions applies only when `ce.angularUnit` is `'rad'`. The unit is
+  read each time the identity is tried, so a change of the unit after the
+  load is taken into account. The other identities, which include the
+  identities of the hyperbolic functions, apply in every unit.
+
+- **The inverse of a logarithm with a base.** `\ln_3^{-1}(x)` was `exp(x)`:
+  the base 3 was dropped. In the lenient grammar, `ln_3^-1(x)` was
+  `1/log₃(x)`, a reciprocal, and `log_3^-1(x)` was
+  `Apply(InverseFunction(Log), x, 3)`. All three are now `3^x`, the inverse
+  of `log₃`, as `\log_3^{-1}(x)` already was. The lenient readings report
+  `ambiguous-inverse-function`.
+
+- **The arguments of a logarithm with a base are kept**, in both grammars.
+  The arguments after the first were dropped with no error: `ln_3(x, y)`,
+  `\ln_3(x, y)` and `log_3(x, y)` were `Log(x, 3)`. In the lenient grammar,
+  `log_10(x, y)` was `Log(x, y)`, the logarithm in base `y`. They are now
+  `Log(x, 3, y)` and `Log(x, 10, y)`, and the canonical form reports
+  `y` as an unexpected argument.
+
+- **A run of digits keeps its digits in the lenient grammar.** A long run
+  lost precision: `π_123456789012345678901` was
+  `Subscript(Pi, 123456789012345680000)`, `(x)_9007199254740993` had the
+  subscript `9007199254740992`, and a longer run gave `Infinity`. The same
+  was true of a base of `log` (`log_12345678901234567890(x)`) and of an
+  unbraced exponent (`x^123456789012345678901`). A run that a JavaScript
+  number cannot hold exactly is now a number string, with all its digits.
+  A leading zero was dropped: `π_01` was `π_1`, `[1,2,3]_01` was
+  `At([1,2,3], 1)`, `1_000` was `Subscript(1, 0)`, `x^2_01` was `x_1^2` and
+  `tan_01x` was `tan_1(x)`. After `_` on a base that is not a symbol, a
+  run that starts with `0` is now the one token `0`, as in the strict
+  grammar (`[1,2,3]_01` is `[1,2,3]_0·1`), and the reading reports
+  `ambiguous-implicit-subscript` (or `ambiguous-function-subscript` on a
+  function name). A symbol keeps the text: `π_01` is `Pi_01` and
+  `x^2_01` is `x_01^2`.
+
+- **A subscript on a symbol in parentheses is a compound symbol**, in both
+  grammars. `(x)_0` was `Subscript(x, 0)` with the type `symbol`, so a
+  product with it was a `Tuple`: `(x)_0 y` was `(Subscript(x, 0), y)`, and
+  `(x)_0 \cdot 1` was a type error. The same was true of a base that
+  becomes a symbol: `x2_1 + y` (`Subscript(x_2, 1) + y`) was a type error.
+  `(x)_0` is now the symbol `x_0`, as `x_0` is, and `x2_1` is `x_2_1`, so
+  `(x)_0 y` is the product `x_0·y`. A base that is not a symbol keeps its
+  subscript: `(x+1)_0` is `Subscript(x + 1, 0)`.
 
 - **`Shape` and `Rank` of a lazy collection.** `Shape(Range(1, 3))` was `()`
   and `Rank(Range(1, 3))` was `0`, the answer for a scalar. A finite indexed
@@ -246,6 +826,83 @@
   parses to `Conjugate(7)`, as `\overline{7}` does, and `0.\bar{3}` is the
   repeating decimal `1/3`, as `0.\overline{3}` is. `\bar{x}` is still
   `Mean(x)`.
+
+- [#405](https://github.com/cortex-js/compute-engine/issues/405) **The error of
+  a numeric integral covers its true error.**
+  - A semi-infinite oscillatory integral took as its error the difference of the
+    last two accelerated values of its lobe sums. When the lobes have a part of
+    one sign (the lobes of an integrand with two frequencies whose ratio is
+    rational repeat a pattern), the accelerated values move slowly toward the
+    integral and two of them agree long before they reach it:
+    `∫₀^∞ sin(t/2)·cos 2t/t dt = 0` was `-0.00000000681 ± 0.00000000089`, and
+    `∫₀^∞ sin t·cos 3t/t dt = 0` was `0.00001183017 ± 0.00000000075`. The error
+    now also covers the values from the last four lobe sums and from the first
+    half of the lobe sums, and the Levin u-transform of the sums of one period
+    of lobes gives a second value. The two integrals are now
+    `0.0000000000000 ± 0.0000000000059` and `0.0000000033 ± 0.0000000071`, and
+    `∫₀^∞ sin t·(2 + cos t)/t dt = 5π/4`, which was `4.037 ± 0.065`, is
+    `3.926990818 ± 0.000000010`.
+  - When the lobes shrink but no method finds the integral, the result is `NaN`,
+    not a Monte-Carlo value: `∫₀^∞ sin t·cos(√2·t)/t dt = 0` was
+    `0.072 ± 0.018`.
+  - The lobes are integrated by Gauss–Kronrod instead of adaptive Simpson, and
+    the values are more accurate with fewer evaluations: `∫₀^∞ sin t/t dt` was
+    `4.2e-11` from `π/2` with an error of `2.5e-10`, after 9634 evaluations. It
+    is now `1.570796326795 ± 0.000000000012`, `7e-16` from `π/2`, after 2387
+    evaluations.
+  - The error of a lobe whose panels are not resolved (a singularity inside the
+    lobe) is added to the error of the result. `∫₀^∞ sin t/(t − 5)² dt`, which
+    diverges, was `-217023352.094 ± 0.0013`. It is now `NaN`. A divergent
+    integral whose lobes have a part of one sign that decreases too slowly to
+    have a sum (`∫₁^∞ sin t·(1 + sin t)/√t dt`, which was `-0.14277 ± 0.000069`)
+    is also `NaN`.
+  - A lobe with an integrable singularity is integrated again in two parts, with
+    the singular point at an end of each part, and a lobe ends at a pole of the
+    integrand, not `10⁻¹⁴` before it. `∫₀^∞ sin t/√|t − 5| dt` was
+    `-1.96685088 ± 0.00000000066`, `2.7e-4` from the integral
+    (`-1.9671167915329387`). It is now `-1.967116791534 ± 0.000000000046`.
+    `∫₀^∞ sin t/|t − π|^1.5 dt` was `1.25699002 ± 0.0000000008`, and is now
+    `0.144840978411 ± 0.000000000065` (the integral is `0.14484097841008…`).
+    `∫₀^∞ sin t·ln|t − 5|/t dt` is now `2.929478525094 ± 0.000000000014` (the
+    integral is `2.92947852509409…`).
+  - `∫₀^∞ sin t·cos 6t/√t dt` and other integrals whose lobes repeat a pattern
+    with several lobes of the same width were `NaN`. They now have a value:
+    `-0.04339550 ± 0.00000011` (the integral is `-0.04339545…`).
+  - The error of the adaptive Gauss–Kronrod quadrature is at least four units in
+    the last place of the sum of the magnitudes of its panels: the integrand is
+    evaluated in doubles. `∫₁² ln³t/(t − 1) dt` was
+    `0.1425141979357109345283 ± 0.0000000000000000000031`, with a true error of
+    `1.9e-17`, and is now `0.14251419793571093 ± 0.00000000000000013`.
+
+- [#409](https://github.com/cortex-js/compute-engine/issues/409) **Exact
+  values of `Arcosh`, `Arcoth`, `EllipticK` and `EllipticE` at 0.** Under
+  `evaluate()`, `Arcosh(0)` and `Arcoth(0)` are now `iπ/2`, and
+  `EllipticK(0)` and `EllipticE(0)` are now `π/2`. They stayed unevaluated,
+  and only `.N()` gave the value. More generally, `Arcosh(x)` for an exact `x`
+  in `[−1, 1]` is `i·Arccos(x)` when `Arccos(x)` is a special angle:
+  `Arcosh(1/2)` is `iπ/3`, `Arcosh(−1)` is `iπ`, `Arcosh(√3/2)` is `iπ/6`
+  (they stayed unevaluated). `simplify()` gives the same values for `Arcosh`
+  and `Arcoth`. A float argument (`Arcosh(0.0)`, `EllipticK(0.0)`) still gives
+  a float.
+
+- [#409](https://github.com/cortex-js/compute-engine/issues/409) **Inverse
+  trigonometric functions of other spellings of the special values.** The
+  table of special angles holds one spelling of each value, for example
+  `\frac{\sqrt{10-2\sqrt5}}{4}` for `sin(π/5)`. A value written another way
+  stayed unevaluated. Now `Arcsin`, `Arccos`, `Arctan`, `Arccot`, `Arcsec` and
+  `Arccsc` also find the special angle when the square of the argument is
+  exactly the square of a value of the table:
+  `Arcsin(√2/4·√(5 − √5))` was unevaluated, it is now `π/5`;
+  `Arcsin(√(10 + 2√5)/4)` is `2π/5`; `Arctan(√(1 − 2√5/5))` is `π/10`;
+  `Arcsin(√(2 − √3)/2)` is `π/12`; `Arccos(−√2/4·√(5 − √5))` is `7π/10`. The
+  test is exact: a value that is only near a special value
+  (`Arccos((1 + √5)/4 + 10⁻³⁰)`) stays unevaluated.
+
+- [#409](https://github.com/cortex-js/compute-engine/issues/409) **A term
+  whose radical coefficients cancel is dropped from a sum.**
+  `(√2/4·x).sub(√2/4·x)` was the product `0·x`, not `0`. This also made the
+  difference of two equal radical expressions such as `√2/4·√(5 − √5)` read
+  as not zero.
 
 - **`QuotientRing(Integers, n)` is a finite collection of `n` residue
   classes, not a set of integers** (#399, contributed by
@@ -305,7 +962,6 @@
   held to more than double precision, and above machine precision Halley's
   iteration with extra digits.
 
-
 - **In Epsil, `f(x) := body` defines `f` as `f(x) = body` does** (#400,
   contributed by [enumeratio](https://github.com/enumeratio)). As a statement,
   `f(x) := x^2 + a` parsed to `Assign(f(x), x^2 + a)`, which evaluates to
@@ -315,6 +971,480 @@
   rest and wildcard parameters, a return type, a definition inside a block,
   and literal-pattern clauses. So `f(0) := 1` followed by `f(n) := n*f(n-1)`
   defines the factorial, and `f(5)` is `120`. `Assign` itself is unchanged.
+
+- **The GLSL and WGSL targets compile the prime of a function.** `\sin'(t)`
+  is `Apply(Derivative(Sin, 1), t)`, and the shader targets declined it
+  ("Could not compile `Apply`"), also inside a function body
+  (`h(x) := x^3 + \sin x`, then `f := t \mapsto h'(t)` and `f(x)`). A shader
+  has no function values, so the argument is now substituted into the
+  closed form of the derivative: `\sin'(t)` compiles to `cos(t)`, and `f`
+  to `float _fn_f(float t) { return 3.0 * (t * t) + cos(t); }`. The interval
+  target uses the same closed form. A derivative with no closed form, or with
+  a closed form too large to write out, still declines, with a message that
+  says so.
+- **The GLSL and WGSL targets compile a `Map` whose source has a length known
+  at compile time.** `Min(Map(k \mapsto k^2, x + [0, 4, 2]))` declined on the
+  shader targets ("Could not compile `Map`"). The `Map` is now written out
+  element by element: `min(min((x * x), _gpu_pow2(x + 4.0)),
+  _gpu_pow2(x + 2.0))`. This applies under `Min`, `Max`, `Sum` and `Product`,
+  and a `Map` alone is a vector value (`vec3(…)` in GLSL, `vec3f(…)` in
+  WGSL). The source can be a literal list, a literal range, or a list built
+  from them by element-wise arithmetic, with up to 64 elements. A `Map` over a
+  list of unknown length still declines.
+- **The norm of a point whose component is a list compiles on the
+  `interval-js`, `glsl` and `wgsl` targets.** `\left|(x+[\frac12,1],y)\right|`
+  is one point per element of the list, so its norm is one number per
+  element. The `javascript` target compiled it to the list of norms; the
+  other targets declined it ("the interval target requires a fixed-arity
+  point operand", "component 1 is collection-valued … scalar components
+  only"). They now compile it as `√(c₁² + … + cₙ²)`, element by element,
+  with the same code as the norm written by hand: on `glsl`,
+  `sqrt(_gpu_pow2_v2(x + vec2(0.5, 1.0)) + (y * y))`, and on `interval-js`
+  an array of one enclosure per element. This applies when the list
+  components have one length that is known at compile time. When the lists
+  have different lengths, or a length known only at run time, `interval-js`
+  zips the points to the length of the shortest list, as `javascript` does
+  (`|(x+[1,2],y+[3,4,5])|` is two norms), and `glsl` and `wgsl` decline with
+  a message that gives the lengths. A point of scalars compiles as before
+  (`length(vec2(x, y))`, `_IA.hypot(_.x, _.y)`). On `interval-js`, `Abs` of
+  a `PointList` of scalars also compiles now; it declined before.
+
+- **The compiled norm of a point with a restricted list component is one
+  number per element.** A restricted list `L\{c\}` has the type
+  `list<…> | missing`, and its `missing` part hid the list from the tests
+  that decide whether a coordinate is a list. On the `javascript` target,
+  `|(L\{0<t\}, y)|` with `L = [1, 2, 3]` and `y = 3` was `√23`, one norm of
+  the vector `(1, 2, 3, 3)`. It is now `[√10, √13, √18]`, as in the
+  interpreter, and `NaN` when the condition fails. `Hypot` of such a point
+  is corrected in the same way. The `Abs` of a restricted list of points,
+  `|([1,2]\{0<t\}, y)|`, was `[[1, 3], [2, 3]]` (the absolute value of each
+  coordinate). It is now `[√10, √13]`, and `undefined` (the interpreter's
+  `Missing`) when the condition fails; `interval-js` now compiles it too. The
+  type of such a norm is `list<number> | number`, not `number`.
+
+- **`Arctan2` has a symbolic derivative.** `D(Arctan2(y, x), x)` is
+  `-y / (x^2 + y^2)` and `D(Arctan2(y, x), y)` is `x / (x^2 + y^2)`, with the
+  chain rule for composite arguments (`D(Arctan2(t^2, cos t), t)` has a closed
+  form). The multi-index form also has a closed form:
+  `Apply(Derivative(Arctan2, 1, 0), y, x)` is `x / (x^2 + y^2)`. In a non-radian
+  angular unit the partial derivatives are divided by the unit factor, as for
+  `Arctan`: in degree mode, `D(Arctan2(y, x), x)` is `-180y / (π(x^2 + y^2))`.
+  Before, the derivative stayed `Apply(Derivative("Arctan2", 0, 1), y, x)`: the
+  JavaScript target compiled it to a numeric derivative, and the `interval-js`,
+  GLSL and WGSL targets did not compile it. The closed forms now compile on all
+  targets.
+- **`Derivative(F, k₁, …, kₙ)` of a library operator has a closed form.** The
+  multi-index form applies the same rules as `D`:
+  `Apply(Derivative(Log, 0, 1), x, b)` is `-ln(x) / (b * ln(b)^2)`,
+  `Apply(Derivative(Power, 1, 0), x, n)` is `n * x^(n - 1)` and
+  `Apply(Derivative(Mod, 0, 1), x, m)` is `-floor(x / m)`. Before, these stayed
+  unevaluated although `D` of the same expression had a closed form. A partial
+  derivative with no closed form (`BesselJ` in its order) stays unevaluated.
+  Evaluating `Derivative(F, k₁, …, kₙ)` no longer declares the symbols `_1`,
+  `_2`, … in the caller's scope.
+- **`D` of `Mod` in the modulus, of `Round` with a digit count and of the upper
+  incomplete gamma function.** `D(Mod(x, m), m)` is `-floor(x / m)`, and when
+  both operands depend on the variable, `D(Mod(u, c), v)` is
+  `u' - floor(u / c) * c'`. `D(Round(x, 2), x)` is `0`, as for `Round(x)`.
+  `D(Gamma(s, z), z)` is `-(e^(-z) * z^(s - 1))`; the partial derivative in `s`
+  has no closed form and stays symbolic. Before, these derivatives stayed
+  unevaluated.
+- **A univariate `Derivative` of a two-argument operator with a `derivative` key
+  stays symbolic.** `Derivative(F)` for a user operator `F(x, y)` declared with
+  a `derivative` key threw "Not canonical". It now stays unevaluated, as
+  `Derivative(Arctan2)` does.
+- **The L∞ norm of a point with list components is one maximum per point.**
+  With `L = [1, -5, 3]` and `K = [-4, 2, 1]`, `Norm((L, K), "Infinity")` is
+  `[4, 5, 3]`, as the compiled JavaScript code already answered and as the
+  other orders give one norm per point. Before, the interpreter left it
+  unevaluated.
+- **The string order `"Infinity"` of `Norm` compiles to JavaScript.**
+  `Norm(v, "Infinity")` compiles as `Norm(v, +∞)`, for a vector, a matrix, a
+  point, a point with list components and a list of points. Before, it did
+  not compile ("the "Infinity" norm has no compiled form"), while the
+  interpreter answered it. The GLSL, WGSL and interval targets compile only
+  the default order, and refuse both spellings with the same message.
+- **The GLSL and WGSL targets check the arguments of an applied function
+  literal against the declared parameter types.** An argument whose type
+  does not match the declared type of its parameter is an `incompatible-type`
+  error under `evaluate()`: `Apply((u: real, w: list<real>) ↦ u + Length(w),
+  V, V)` for `V: list<real^2>`. The shader targets now decline such an
+  application, and the message names the parameter and the two types. (A
+  mismatch that the types already prove, as for `V` here, now makes the
+  application invalid when it is boxed, so it is declined as an invalid
+  expression.) A parameter with no declared type is not checked. A tuple at a parameter
+  declared as a scalar is not a mismatch: the application maps over its
+  components (see "A parameter declared as a scalar maps over a tuple
+  argument" under Behavior Changes).
+- **The GLSL and WGSL targets compile the square of a vector.** A structural
+  `Square([1, x])` declined because the scalar helper `_gpu_pow2` was chosen
+  for a `vec2`. It now compiles to `_gpu_pow2_v2(vec2(1.0, x))`, as
+  `[1, x]^2` does.
+- **An applied derivative of a function of several arguments compiles on all
+  targets.** `Apply(Derivative(F, k₁, …, kₙ), a₁, …, aₙ)` compiles from the
+  closed form of the derivative on the `interval-js`, GLSL and WGSL targets:
+  `Apply(Derivative(Power, 0, 1), x, n)` is `log(x) * pow(x, n)` in GLSL, and
+  the partial derivatives of `Arctan2` and of a user function `h(u, w)` compile
+  in the same way, also in degree mode. Before, these targets declined the
+  application ("only a function-literal callee compiles on the interval
+  target"); the JavaScript target already compiled the closed form. A
+  derivative with no closed form (`BesselJ` in its order) is still declined.
+  A derivative of a user function of several arguments whose body is large is
+  declined before it is differentiated, with the size limit that a function of
+  one argument has (the size of the body and the total order `k₁ + … + kₙ`):
+  the mixed derivative `(2, 1)` of a four-deep nested radical in two variables
+  takes about 24 seconds to compute and has a closed form of more than 20,000
+  nodes. The decline messages now give
+  the true reason on all four targets: the derivative has no closed form, its
+  closed form is too large to write out, or the number of arguments is not the
+  number of parameters of the closed form. Before, the GLSL and WGSL targets
+  said "no closed form small enough to write out" in all three cases, and the
+  JavaScript target said that the `Derivative` compile handler had no lowering.
+- **The JavaScript target declines an `Apply` with the wrong number of
+  arguments.** The interpreter curries `((a, b) ↦ a + b)(x)` into a function of
+  one argument and rejects `(a ↦ a + 1)(x, y)`. The compiled code answered
+  `NaN` for the first and `x + 1` for the second. The application is now
+  declined, as on the other targets, and the compilation falls back to the
+  interpreter.
+- **The JavaScript target declines an `Apply` whose argument does not match a
+  declared parameter type.** In a strict engine, an argument whose type does
+  not match the declared type of its parameter (a string, a boolean or a set
+  at `u: real`, or an element of such a type in a mapped list) is an
+  `incompatible-type` error under `evaluate()`. The compiled code did not
+  make this check. The application is now declined with the reason, as on
+  the GLSL and WGSL targets, which use the same check. A tuple at a
+  parameter declared as a scalar is not a mismatch: the application maps
+  over its components (see Behavior Changes).
+- **The text form of a power keeps the parentheses of its base.**
+  `ce.box(['Power', ['Power', 't', 2], ['Rational', -3, 10]]).toString()` was
+  `t^2^(-3/10)`, which reads as `t^(2^(-3/10))`. It is now `(t^2)^(-3/10)`.
+  The same fix wraps other bases that are not one unit: a rational or radical
+  number (`(3/4)^x`, not `3/4^x`), an imaginary number or a number in
+  exponent notation (`(2i)^x`, `(1e+30)^x`), a quantity (`(5 m)^2`, not
+  `5 m^2`), a measurement, a sum, an integral, a limit and a restriction
+  (`(x {0 < x})^2`). A power with the exponent `1` that is not in canonical
+  form keeps the parentheses of its base in a product: `(a + b) * c`, not
+  `a + b * c`. The LaTeX form was already correct.
+- **Evaluating a `Derivative` declares nothing in the caller's scope.**
+  `Derivative(Sin)` evaluates to `(x) => cos(x)`. To make it, the handler
+  declared the symbols `x` and `_` in the caller's scope, with the type
+  `number`. A later use of `x` was then checked against that type: `x && True`
+  gave an `incompatible-type` error. The multi-index form
+  `Derivative(Arctan2, 1, 0)` declared its parameters `x_1`, `x_2` in the same
+  way. The symbols are now declared in a scope that is discarded, and a caller
+  binding of the same names (such as `x_1` declared as a string) does not
+  change the result.
+- **A derivative with respect to a function stays symbolic.** `D(f(x), f)` was
+  `0`, and `Derivative(Apply, 1, 0)` evaluated to `(x_1, x_2) => 0`: the
+  rules took the application `f(x)` as a constant, because the variable was
+  its function and not one of its arguments. There is no closed form, so they
+  now stay unevaluated.
+- **`Derivative(Exp)` has no `ln(e)` factor.** It evaluated to
+  `(x) => ln(e) * e^x`. It is now `(x) => e^x`.
+- **A compiled call of a named function checks the declared parameter type.**
+  With `k` assigned `(u: real) ↦ 2u`, a call whose argument does not match
+  `real` (a string, a boolean, a set) is an `incompatible-type` error under
+  `evaluate()`. Such a call is now declined with the reason on the
+  JavaScript, GLSL, WGSL and interval targets, with the check that the
+  compiled `Apply` of a function literal uses. A tuple argument maps over its
+  components instead (see Behavior Changes).
+- **The cells of `Apply` over a list are typed with the declared parameter
+  type.** `Apply((u: integer) ↦ u + 1, [1.5, 2])` was typed
+  `vector<real^2>`, from the type of the elements, while the named calls
+  were typed `vector<integer^2>`. The three agree now. Each failing cell of
+  such a map carries the "while applying 'Apply' element-wise" note, as on
+  the named routes.
+- **The JavaScript target binds a tuple whole at a parameter with no
+  declared type.** The compiled code mapped a function over any array at
+  run time, and a point is an array, so `Apply(u ↦ 7, (a, b))` gave
+  `[7, 7]` and `g(P)`, `Apply(u ↦ 7, P)` and `Map(g, P)` for a list of points
+  `P` gave `[[7, 7], [7, 7]]`, where `evaluate()` gives `7` and `[7, 7]`.
+  They now give the same values as `evaluate()`.
+- **The JavaScript target compiles `h(P)` for a list of points `P`.** With
+  `h := (u: real) ↦ 2u`, the call was declined as "a broadcastable head over
+  a possibly list-valued operand", while `f(P)` for `f` declared `function`
+  and `Apply` of the literal compiled. It now compiles to the value of
+  `evaluate()`, `[[2, 4], [6, 8]]` for `P = [(1, 2), (3, 4)]`.
+- **A block that declares a function, assigns it, and calls it now
+  compiles.** `["Block", ["Declare", "k", "'function'"], ["Assign", "k",
+  ["Function", ["Multiply", 2, "u"], "u"]], ["k", "x"]]` — also the parse of
+  `k(u) \coloneq 2u; k(x)` — evaluated to `6` for `x = 3`, but the JavaScript
+  and interval targets declined it with ``Unknown operator `k` ``. The call
+  now compiles the same way as for `const k = (u) => 2u`: with the run-time
+  broadcast over a list argument, the arity check, recursion, and the fold of
+  a call with constant arguments. An `Assign` with no `Declare` compiles too.
+  A call of a block-local function that is assigned again now uses the
+  function the interpreter uses at that point: `let h = (k) => k + 1;
+  h := (k) => k + 2; h(3)` compiled to `4` (the old function), where the
+  interpreter gives `5`, and a reassignment inside a loop body gave `4` for
+  `13`. On the JavaScript target such a call (after a second assignment, an
+  assignment inside a branch or a loop body, or from a function body) reads
+  the variable at run time and is not folded. It declines with the reason
+  when the assigned functions do not have the same signature, or when the
+  name is also assigned a value that is not a function. The interval target
+  declines a call of a function that is assigned more than once, with the
+  reason. The arity decline now states the interpreter's behaviour
+  correctly: a call with fewer arguments than parameters is a partial
+  application (a function value), and a call with more is an error.
+- **The index form of a partial derivative costs no more than nested `D`.**
+  `Apply(Derivative(Arctan2, 3, 3), y, x)` took about 2.2 times as long as
+  the same derivative written as six nested `D`. The index form now evaluates
+  that nested `D` over fresh symbols and gives the same expression. The time
+  went to deriving the types of the intermediate expressions, not to the
+  differentiation rules. The same evaluation runs for `.N()` of an applied
+  partial derivative.
+- **A partial derivative is computed once across evaluation points.**
+  `Apply(Derivative(f, k₁, …, kₙ), x, y).N()` sampled at many points, as a
+  plot does, computed the partial derivative again at each point (about 0.5 s
+  at each point for `Derivative(Arctan2, 3, 3)`). The result is now cached
+  per function and order vector, as `Derivative(f, n)` already was. A new
+  definition of the function or of a function that it calls, an assignment
+  to a free symbol of its body, and a change of the assumptions or of the
+  configuration make the next request compute it again.
+- **A product whose text ends with a symbol keeps a `\times` before a
+  parenthesized factor.** `Multiply(InvisibleOperator(2, v), Add(x, 1))`
+  serialized as `2v(x+1)`, and a new engine read it as `2` times a call of
+  `v` (and declared `v` a function). The same happened with a nested
+  `Multiply(0.03, v)`, with `-2v`, with `uv` before a tuple, and with the
+  Desmos shape `V_{einColor}\cdot0.03v_{einO}\cdot\sum…`, in the raw and
+  structural forms. A bare symbol already got the sign. Now any factor whose
+  text ends with a symbol name gets it: `2v\times(x+1)`. A decimal number
+  before a group that starts with a digit gets it too: `Multiply(1.5,
+  Delimiter(2))` serialized as `1.5(2)`, which reads as the repeating decimal
+  `1.5222…`, and now serializes as `1.5\times(2)`.
+- **A lazy collection that is the value of a block or of a function call reads
+  the locals of that block or call.** A `Map` or a `Filter` computes its
+  elements when they are read, and it found its function and its sources by
+  name at that time. After the block or the call had ended, its locals did not
+  resolve: `let r = do { let h = (k) => k + 1; map(h, [1, 2]) }` stored
+  `[h(1), h(2)]`, and the same with `function f() { … }; f()`, with a local
+  source list, or with an element of an infinite source read after the block.
+  The compiled code gave `[2, 3]`. When the collection leaves the block or the
+  call, each local that it reads is now replaced with its value, and the
+  collection stays lazy: the value is `Map(k ↦ k + 1, [1, 2])`, which gives
+  `[2, 3]`. A function or a source of an enclosing scope is not replaced, and
+  the collection continues to read it by name.
+- **An assignment stores a lazy collection inside a list literal as the list
+  of its elements.** With `let r = [map(h, [1, 2])]` followed by
+  `h = (k) => k * 10`, `r[1]` gave `[10, 20]`, while the compiled code and the
+  list written with calls (`[[h(1), h(2)]]`) gave `[2, 3]`. An assignment
+  already stored a finite lazy collection that reads a variable as the list of
+  its elements; this now also applies to such a collection in a list or tuple
+  literal, at every depth.
+- **A constant factor in the numerator of a quotient no longer stops an
+  integral.** `∫ a·sin(t)/t dt` stayed unevaluated, while
+  `∫ a·(sin(t)/t) dt` gave `a·Si(t)`. The integrator now moves the factors
+  of the numerator that do not depend on the variable out of the integral, as
+  it already did for a product and for the denominator. `∫ a·sin(t)/t dt` is
+  now `a·Si(t)`, `∫₋₁¹ a·sin(t)/t dt` is `a·Si(1) − a·Si(−1)`, and
+  `∫ a·eᵗ/t dt`, `∫ a·cos(t)/t dt`, `∫ a/ln(t) dt` and `∫ −a·sin(t)/t dt`
+  also close. This applies when the integration rules package is not loaded;
+  with it, these integrals already closed.
+- **An integral with an `xˣ` factor no longer runs without end.**
+  `∫ eˣ·xˣ dx` overflowed the stack, `∫ cos(x)·xˣ dx` did not finish in
+  minutes, and `DSolve` of `y'' + y = xˣ` did not finish in 300 s. Integration
+  by parts chose u = xˣ, whose derivative `xˣ + ln(x)·xˣ` contains xˣ again,
+  and recursed with no progress. It also accepted a result that was a sum
+  with an unevaluated integral in it, and the evaluation of that integral
+  started the same integration by parts again. Integration by parts now
+  declines both. These integrals stay unevaluated in less than a second, and
+  `y' + y = xˣ` gives the quadrature `y = (c₁ + ∫ eˣ·xˣ dx)/eˣ`.
+- **The derivative of `PolyLog(s, z)` in `z` has a closed form.**
+  `D(PolyLog(s, z), z)` stayed `Apply(Derivative("PolyLog", 0, 1), s, z)`,
+  which `N()` cannot evaluate. It is now `PolyLog(s − 1, z)/z`, which reduces
+  where the engine has a closed form: for `s = 1` it is `1/(1 − z)`, and for
+  `s = 2` it is `−ln(1 − z)/z`. The chain rule applies to the second argument:
+  `D(PolyLog(2, x²), x)` is `−2 ln(1 − x²)/x`. The derivative in `s` has no
+  closed form and stays `Apply(Derivative("PolyLog", 1, 0), s, z)`.
+- **`simplify()` cancels the terms of a sum that differ only by the sign of
+  the argument of an odd or even function.** `simplify()` moved the sign out
+  of `sin(-x)` and `cos(-x)`, but not out of a negative number such as
+  `sin(-1)`, and not for the other odd functions. Also, in a sum it did not
+  simplify a hyperbolic or special function term. So
+  `sin(1) - sin(-1)`, `Si(1) - Si(-1)`, `sinh(x) + sinh(-x)` and
+  `Erf(-x) + Erf(x)` stayed as they were. Now `simplify()` uses
+  f(-x) = -f(x) for the odd functions `Sin`, `Tan`, `Cot`, `Csc`, `Sinh`,
+  `Tanh`, `Coth`, `Csch`, `Arcsin`, `Arctan`, `Arccsc`, `Arsinh`, `Artanh`,
+  `Arcsch`, `SinIntegral`, `SinhIntegral`, `Erf`, `Erfi`, `FresnelS` and
+  `FresnelC`,
+  and f(-x) = f(x) for the even functions `Cos`, `Sec`, `Cosh` and `Sech`,
+  when the argument is `-x` or a negative real number. `sin(1) - sin(-1)`
+  simplifies to `2sin(1)`, `Si(1) - Si(-1)` to `2Si(1)`, `cos(-2) - cos(2)`
+  and `Erf(-x) + Erf(x)` to `0`, and the value of `∫₋₁¹ a·sin(t)/t dt`
+  simplifies to `2a·Si(1)`. `evaluate()` does not change: it keeps `sin(-1)`
+  and `Si(-1)` as they are.
+
+- **The lenient grammar no longer drops a subscript on a function name.**
+  Only `log` used its subscript (its base, `log_2(8)`). On another function
+  name the subscript was dropped with no diagnostic: `tan_1x` was `tan(x)`,
+  `ln_3(x)` was `ln(x)` and `sqrt _110theta` was `sqrt(theta)`. The
+  subscript is now kept as the strict grammar keeps it: `ln_3(x)` is
+  `Log(x, 3)`, as `\ln_3(x)` is, and `tan_1x` is
+  `Apply(Subscript(Tan, 1), x)`, as `\tan_1 x` is. A person can mean a name
+  such as `tan_1`, so the reading reports the new code
+  `ambiguous-function-subscript`.
+
+- **A `^` after a postfix operand is no longer dropped**, in both grammars.
+  `x^g.5^` was read as `(x^g)^{0.5}` and `x^g.5^2` as `(x^g)^{0.5}·2`: the
+  parser read the two factors of the product `x^g·0.5` as a base and an
+  exponent, and dropped the `^`. The same fault dropped an operator that
+  had no right operand: `g=^Δ` was `g^{(missing)}·Δ`, with no `=`. A script
+  after a postfix operator now applies to the whole result, as it does
+  when the operand has no script: `x^g.5^2` is `(x^g·0.5)²`, as `x.5^2` is
+  `(x·0.5)²`, and `x^2!^3` is `(x^2!)^3` (it was `(x^2)^{(missing)}·3`). A
+  `^` with no exponent holds an `Error` (`x^g.5^`, `g=^Δ`). The scripts
+  after an unknown LaTeX command apply to its error, and the parse
+  continues after them: `\foo^2 + y` is `Power(Error, 2) + y`, and
+  `\intop_0^1\sin x dx` keeps the integrand.
+
+- **More Unicode superscript characters are read as a superscript**, in
+  both grammars: `⁺`, `⁽`, `⁾` and the modifier letters `ˣ` and `ʸ`. `e⁻ˣ`
+  was `e^{-}` (the postfix `Superminus`) times the string `ˣ`; it is now
+  `e^{-x}`, as `e⁻ⁿ` is `e^{-n}`. `x⁻⁽¹⁾` and `x⁽ⁿ⁺¹⁾` were errors.
+
+- **`simplify()` no longer applies a library identity to a user function
+  that has a library name.** With `Sin` and `Cos` defined by the user as
+  `t ↦ t + 1`, `sin(0)` simplified to `0`, `sin(π/6)` to `1/2` and
+  `sin(x)² + cos(x)²` to `1`, while `evaluate()` gave `1`, `π/6 + 1` and
+  `2(x + 1)²`. The same fault changed the value of a user `Ln`, `Log`,
+  `Exp`, `Abs`, `Sqrt`, `Root`, `Tan`, `Csc`, `Cot`, `Sinh`, `Tanh`,
+  `Arsinh`, `Factorial` or `Binomial`: `ln(1) → 0`, `√4 → 2`,
+  `|−2| → 2`, `(n + 1)!/n! → n + 1`. `simplify()` now replaces each call
+  of a shadowed library name by an opaque symbol before the rules apply,
+  and puts the calls back after. So no library identity applies to such a
+  call, also when the call is in a sum or a product, and the `fu`
+  strategy does the same. A rewrite that uses the calls only as values
+  still applies (`Sin(x)·Sin(x)` is `Sin(x)²`), and `√x·(√x + 1)` keeps
+  its value with a user `Sqrt`. The `trig` strategy does not write
+  `cos θ + i·sin θ` where a user definition, a parameter or a block local
+  shadows `Cos` or `Sin`. The same is true for a function parameter or a
+  block local with a library name: `((Sin) ↦ Sin(0) + Sin(x))(t ↦ t + 1)`
+  simplified its body to `Sin(x)`. When no library name is shadowed,
+  `simplify()` does not change.
+
+- **A user value of `Pi` is no longer read as π by `evaluate()`.** With
+  `ce.declare('Pi', { value: 3 })`, `sin(π)` evaluated to `0`, `cos(π)` to
+  `-1`, `sin(π/6)` to `1/2` and `e^{iπ}` to `-1`, while `.N()` gave
+  `sin(3)`, `cos(3)` and `sin(1/2)` (and `e^{iπ}.N()` was also `-1`). The
+  code that finds a multiple of π in an angle now recognizes only the
+  library constant, so these are `sin(3)`, `cos(3)`, `sin(1/2)` and
+  `cos(3) + i·sin(3)`.
+
+  An exact result that holds the library π is also no longer returned when
+  a user binding gives `Pi` another value. Its `.N()` was correct, but its
+  MathJSON names `Pi`, and boxed again it had the user value: with `Pi`
+  equal to 3, `Argument(-1)` evaluated to `π` and boxed again to 3, and
+  `Degrees(30)` gave `π/6`, which boxed again to `0.5`. These calls now stay
+  symbolic under `evaluate()`, and `.N()` gives the same value as before:
+  `Argument` of a negative number or of `i`, `Arctan2` when its exact value
+  holds π, `Degrees` and `DMS` of an exact angle in radians, the values
+  at an infinite argument of `Arctan`, `Arctan2`, `Arccot`, `Arcsec`,
+  `Artanh`, `Arsech`, `SinIntegral` and `CosIntegral`, `ComplexRoots` when a
+  root is not a closed form (`ComplexRoots(1, 4)` is still `[1, i, −1, −i]`),
+  and `e^{iθ}` in degrees, grads or turns. The degree conversion does not use
+  the user value: `30°` is the angle π/6 whatever the name `Pi` holds. Also,
+  `ce.Pi.mul(0)` is `0` again: with a user value of `Pi` it was held as the
+  product `0·π`, as for a variable with a value. With `Pi` equal to 3,
+  `LogGamma(1/2)` evaluated to `ln(3)/2` and now stays symbolic, as do
+  `EllipticK(0)` and `EllipticE(0)` (`π/2`, which boxed again to 1.5),
+  `ClausenCl(2, Pi)` was `0` (the value at π) and is now `ClausenCl(2, 3)`,
+  and a periodic equation solved over a bounded interval
+  (`Solve(sin(x) = 0, x ∈ [0, 10])`) gave only some of its roots (`[0]`) and
+  now stays unevaluated. A `Solve` over a domain also stays unevaluated when
+  a root in the domain holds π: `Solve(x·sin(x) = 0, x ∈ [0, 4])` was
+  `[0, π]` and `Solve(sin(x) = 0, x ∈ ℝ)` was `[0, π]`, which boxed again
+  to `[0, 3]`. A root list with no π is still given:
+  `Solve((x - 1)·sin(x) = 0, x ∈ [0.5, 2])` is `[1]`, and in degrees
+  `Solve(sin(x) = 0, x ∈ [0, 360])` is `[0, 180, 360]` (it stayed
+  unevaluated).
+
+- **The order of the scripts no longer changes the reading of a
+  subscript.** A subscript before the superscript joins the symbol name
+  and keeps its text: `x_{01}^2` is `x_01^2`. A subscript after the
+  superscript was read as a number, so `x^2_{01}` was `x_1^2`, in both
+  grammars. In the lenient grammar, `\alpha^2_01` and `θ^2_01` were
+  `alpha_0^2·1` and `theta_0^2·1`, while `\alpha_01^2` is `alpha_01^2`,
+  and `x^2_max` was `x_m^2·a·x`. A subscript after a superscript now joins
+  the symbol name as it does before it, on a letter, a Greek letter, a
+  command (`\operatorname{speed}`), a constant and a primed symbol
+  (`x'^2_{01}` is `(x_01')^2`), with each spelling of the prime marks:
+  `x^{\prime}^2_{01}` (the spelling of the serializer) was
+  `Subscript(x', 1)^2` and is now `(x_01')^2`, as are `x^\prime^2_{01}` and
+  `x^{\doubleprime}^2_{01}` (with `x_01''`). It reports the diagnostics of
+  the other
+  order. The same rules apply: a base that evaluates its subscript
+  (`\gamma`) and an indexed collection keep the subscript as before. The
+  constant `π` now has the reading of `\pi`: `π_{01}` was `Pi_1` and is
+  `Pi_01`, as `\pi_{01}` is. In the lenient grammar, `π_01` was `π_0·1`
+  with `ambiguous-implicit-subscript`, while `\pi_01` was `Pi_01`; both
+  are now `Pi_01`, as `x_01` is `x_01`. The strict grammar reads one token
+  after an unbraced `_` in each order, as TeX does: `\pi_01` is `π_0·1`.
+  White space directly before the `_` stops the join in each order:
+  `x _{01}^2` and `x^2 _{01}` are both `x_1^2`, as `x _{01}` is `x_1`.
+  White space before the superscript does not: `x ^2_{01}` is `x_01^2`.
+  A spacing command before a script is white space, in both grammars:
+  `x\,_{01}` was `Nothing_1·x` (the space was the base of the subscript)
+  and is now `x_1`, as `x _{01}` is; the same applies to `\;`, `\quad`,
+  `\hspace{…}` and to `x\,^2`, which is now `x^2`. A subscript after prime
+  marks reports the joined name: `x'_{01}` reported `undeclared-symbol`
+  for `x`, and now reports `x_01`, as `x_{01}'` does.
+
+- **A trigonometric equation solved over a bounded interval gets all its
+  roots.** The solver added multiples of the period of the equation to its
+  principal roots, but the roots can be closer together than that period.
+  `Solve(sin(x) + cos(x) = 0, x ∈ [0, 7])` was `[7π/4]`, without `3π/4`:
+  the period is 2π, but the roots are π apart. The same error gave
+  `[0, π, 2π]` for `sin(2x) = 0` (without `π/2` and `3π/2`), `[0, 2π]` for
+  `sin(x)cos(x) = 0`, and `[2π - 1]` for `sin(x + 1) = 0`. The roots are
+  now expanded with their own spacing (π for `sin(x) + cos(x)`, because
+  `f(x + π) = -f(x)`), and a numeric scan of the interval checks the list.
+  When the scan finds a root that is not in the list, `Solve` stays
+  unevaluated: `sin(13x)cos(x) = 0` over `[0.05, 2]` was `[π/2]`, one of
+  its nine roots. The scan also finds a root where the function touches
+  zero next to an end of the interval, and a root at the edge of a region
+  where the function is not real: `Solve(x·√(cos(x) + 99/100) = 0, x ∈
+  [3.1, 7])` was `[]`, but `2π − arccos(−0.99) ≈ 3.2831` is a root. Near a
+  large `x`, two values are the same root only when they are much closer
+  than the samples of the scan: `Solve(sin(13x)cos(x) = 0, x ∈ [10^8, 10^8 +
+  7])` was a list of 3 of its roots. These now stay unevaluated. When the
+  scan finds no root, the answer is the empty list: `Solve(sin(x) = 0, x ∈
+  [0.1, 0.2])` and `Solve(sin(x) = 2, x ∈ [0, 7])` stayed unevaluated, and
+  are now `[]`. `Solve(sin(x) = 0, x ∈ [10^17, 10^17 + 64])` did not stop,
+  and now stays unevaluated. Two principal roots that are very near each
+  other are no longer taken as one family of roots: over `[0, 7]`,
+  `(sin(x) - 1/2)(sin(x) - 1/2 - 10^-10) = 0` was a list of 3 of its 6
+  roots, because `π/6` and `arcsin(1/2 + 10^-10)` are only `1.15·10^-10`
+  apart. Two roots are in the same family only when their difference is
+  an exact multiple of the spacing; when the numeric values cannot show
+  it, `Solve` stays unevaluated. A root of high multiplicity no longer
+  makes the scan reject a complete list: `Solve(sin(x)^10 = 0, x ∈ [0, 2π])`
+  stayed unevaluated and is now `[0, π, 2π]`, and
+  `Solve((x - 1)^9·sin(x) = 0, x ∈ [0.5, 4])` is now `[1, π]`.
+
+- **`Solve` gives the roots of a trigonometric equation in the angular unit
+  of the engine.** In degree mode, `Solve(sin(x) = 1/2, x)` was `[30]`: the
+  second root was `π − arcsin(1/2)`, which is not a root when the angle is
+  in degrees. It is now `[30, 150]` (in grads `[100/3, 500/3]`, in turns
+  `[1/12, 5/12]`). `Solve(cos(x^2) = 0, x)` was `[]` in degree mode, and is
+  now `[3√10, −3√10]`. Over a bounded interval, the period of the equation
+  is now in the angular unit: `Solve(sin(x) = 1/2, x ∈ [0, 720])` was `[30]`
+  in degree mode, and is now `[30, 150, 390, 510]`.
+
+- **`Integrate` no longer integrates a user function as the library function
+  of the same name.** With `Sin := t ↦ t + 1`, `∫₀¹ Sin(x) dx` evaluated to
+  `1 − cos(1)` (`.N()` gave 1.5) and `∫ x·Sin(x) dx` to `−x cos x + sin x`.
+  The body of the user function now replaces the call, as `D` does: these
+  are `3/2` and `x³/3 + x²/2`. When the body cannot replace the call (an
+  `evaluate` handler, a block local or a parameter with a library name, a
+  body that reads a symbol with the name of the integration variable), the
+  integral stays unevaluated.
+- **`Sinc` gives the same value in every angular unit.** `Sinc(x)` is
+  `sin(x)/x` with `x` read as a number, not as an angle, but its exact branch
+  computed `Sin` of the operand, which reads the operand in the current
+  angular unit. In degree mode, `Sinc(10⌊π⌋)` evaluated to `1/60`; the value
+  is `sin(30)/30 ≈ −0.0329`. The exact branch now converts the operand from
+  radians to the current unit before it computes `Sin`, so the exact values
+  `Sinc(π) = 0` and `Sinc(π/2) = 2/π` are the same in every unit.
 
 ## 0.147.0 _2026-10-02_
 

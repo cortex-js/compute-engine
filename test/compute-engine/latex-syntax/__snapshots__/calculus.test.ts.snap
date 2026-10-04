@@ -120,16 +120,19 @@ int_(D)(f(x, y) dx  dy)
 `;
 
 exports[`EXOTIC INTEGRALS \\intop 1`] = `
-(\\mathrm{Baseform}(\\text{unexpected-command}, \\error{\\blacksquare}),0,\\sin(dxx))
-(Baseform("unexpected-command", Error(ErrorCode("invalid-base", "\\"\\\\intop\\""))), 0, sin(d * x * x))
+(\\error{\\intop}_{0}^1,\\sin(dxx))
+(Subscript(Error("unexpected-command", "\\intop"), 0), sin(d * x * x))
 [
   "Tuple",
   [
-    "Baseform",
-    "unexpected-command",
-    ["Error", ["ErrorCode", "invalid-base", ""\\intop""]]
+    "Power",
+    [
+      "Subscript",
+      ["Error", "unexpected-command", ["LatexString", "\\intop"]],
+      0
+    ],
+    1
   ],
-  0,
   ["Sin", ["Multiply", "d", "x", "x"]]
 ]
 `;
@@ -147,16 +150,19 @@ CircularIntegrate(f, Limits("Nothing", C, "Nothing"))
 `;
 
 exports[`EXOTIC INTEGRALS \\smallint 1`] = `
-(\\mathrm{Baseform}(\\text{unexpected-command}, \\error{\\blacksquare}),0,\\sin(dxx))
-(Baseform("unexpected-command", Error(ErrorCode("invalid-base", "\\"\\\\smallint\\""))), 0, sin(d * x * x))
+(\\error{\\smallint}_{0}^1,\\sin(dxx))
+(Subscript(Error("unexpected-command", "\\smallint"), 0), sin(d * x * x))
 [
   "Tuple",
   [
-    "Baseform",
-    "unexpected-command",
-    ["Error", ["ErrorCode", "invalid-base", ""\\smallint""]]
+    "Power",
+    [
+      "Subscript",
+      ["Error", "unexpected-command", ["LatexString", "\\smallint"]],
+      0
+    ],
+    1
   ],
-  0,
   ["Sin", ["Multiply", "d", "x", "x"]]
 ]
 `;

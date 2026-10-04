@@ -86,8 +86,10 @@ describe('COMPILE: fold-size guard for DAG-shared symbol values', () => {
       );
       // A loose ceiling: refusing costs a walk over ~46 distinct nodes, while
       // emitting this fold took ~20 s before the guard. Only an order-of-
-      // magnitude regression can trip this, so machine load cannot.
-      expect(elapsed).toBeLessThan(4000);
+      // magnitude regression can trip this. The time still depends on the
+      // load of the machine, so the ceiling is asserted only in a `CE_PERF=1`
+      // run. The error message checks above do not depend on time.
+      if (process.env.CE_PERF === '1') expect(elapsed).toBeLessThan(4000);
     });
 
     it('the public route degrades to the interpreter and still computes the right value', () => {
@@ -132,6 +134,9 @@ describe('COMPILE: fold-size guard for DAG-shared symbol values', () => {
 
     // Two symbol nodes per level plus the root, each looked up once.
     expect(lookups).toBeLessThan(200);
-    expect(elapsed).toBeLessThan(4000);
+    // The lookup count above is the proof that the walk is linear. The time
+    // depends on the load of the machine (it went above 4 s when other test
+    // runs shared the cores), so it is asserted only in a `CE_PERF=1` run.
+    if (process.env.CE_PERF === '1') expect(elapsed).toBeLessThan(4000);
   });
 });

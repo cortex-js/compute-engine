@@ -311,7 +311,12 @@ export function broadcastContextMessage(
       ? ''
       : ` over ${length} element${length === 1 ? '' : 's'}`;
   const at = index === undefined ? '' : ` (element ${index})`;
-  return `while applying '${operator}' element-wise${over}${at}`;
+  // A frame recorded by `Apply` comes from an anonymous function literal
+  // (`Apply(x ↦ √x, list)`, or the pipe `list |> x => sqrt(x)`): the user
+  // never wrote `Apply`, so the literal is named by what it is.
+  const applied =
+    operator === 'Apply' ? 'the function literal' : `'${operator}'`;
+  return `while applying ${applied} element-wise${over}${at}`;
 }
 
 /** The broadcast entries of an `Error` value's breadcrumb, outermost

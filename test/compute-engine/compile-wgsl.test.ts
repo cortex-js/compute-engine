@@ -1044,3 +1044,258 @@ describe('WGSL ContrastingColor uses select, never a ternary', () => {
     expect(code).not.toContain('?');
   });
 });
+
+// A shader has no function values. The parse of `f'(x)` is
+// `Apply(Derivative(f, 1), x)`, so the target substitutes the argument into
+// the closed form of the derivative. A `Map` has no lowering either: one over
+// a list whose width is known at compile time is written out element by
+// element, before the target sees it.
+describe('WGSL APPLIED DERIVATIVE AND MAP', () => {
+  const ce = new ComputeEngine();
+  ce.parse('h(x) := x^3 + \\sin x').evaluate();
+  ce.parse("f := t \\mapsto h'(t)").evaluate();
+  ce.declare('L', 'list<real>');
+
+  it('compiles the prime of a library function from its closed form', () => {
+    expect(wgsl.compile(ce.parse("\\sin'(t)")).code).toBe('cos(t)');
+  });
+
+  it('compiles a function whose body is the prime of a user function', () => {
+    const result = wgsl.compile(ce.parse('f(x)'));
+    expect(result.code).toBe('_fn_f(x)');
+    expect(result.preamble).toContain(
+      'fn _fn_f(t: f32) -> f32 {\n  return 3.0 * (t * t) + cos(t);\n}'
+    );
+  });
+
+  it('declines a derivative with no closed form', () => {
+    expect(() => wgsl.compile(ce.parse("g'(t)"))).toThrow(
+      /Could not compile `Apply`: the derivative has no closed form/
+    );
+    expect(() =>
+      wgsl.compile(ce.box(['Apply', ['Derivative', 'BesselJ', 1, 0], 'n', 'x']))
+    ).toThrow(/Could not compile `Apply`: the derivative has no closed form/);
+  });
+
+  it('compiles a partial derivative of a function of two arguments', () => {
+    const code = (f: string, k1: number, k2: number) =>
+      wgsl.compile(ce.box(['Apply', ['Derivative', f, k1, k2], 'x', 'y'])).code;
+    expect(code('Power', 1, 0)).toBe('y * pow(x, y + -1.0)');
+    expect(code('Power', 0, 1)).toBe('log(x) * pow(x, y)');
+    expect(code('Arctan2', 1, 0)).toBe('y / ((x * x) + (y * y))');
+    expect(code('Arctan2', 0, 1)).toBe('-x / ((x * x) + (y * y))');
+    expect(code('Mod', 0, 1)).toBe('-floor(x / y)');
+  });
+
+  const SQUARE = ['Function', ['Square', 'k'], 'k'];
+  const SOURCE = ['Add', 'x', ['List', 0, 4, 2]];
+
+  it('writes out a Map of static width under a reduction', () => {
+    expect(wgsl.compile(ce.box(['Min', ['Map', SQUARE, SOURCE]])).code).toBe(
+      'min(min((x * x), _gpu_pow2(x + 4.0)), _gpu_pow2(x + 2.0))'
+    );
+  });
+
+  it('writes out a narrow Map as a vector value', () => {
+    expect(wgsl.compile(ce.box(['Map', SQUARE, SOURCE])).code).toBe(
+      'vec3f((x * x), _gpu_pow2(x + 4.0), _gpu_pow2(x + 2.0))'
+    );
+  });
+
+  it('declines a Map over a list of unknown length', () => {
+    expect(() => wgsl.compile(ce.box(['Min', ['Map', SQUARE, 'L']]))).toThrow(
+      /Could not compile `Map`/
+    );
+  });
+
+  // A function literal with a scalar parameter applies to each element of a
+  // list argument, as in the interpreter: `Apply(u ↦ 7, [a, b])` is
+  // `[7, 7]`, not `7`.
+  const CONSTANT = ['Function', 7, ['Typed', 'u', 'real']];
+  const DOUBLE = ['Function', ['Multiply', 2, 'u'], ['Typed', 'u', 'real']];
+
+  it('applies a constant body to each element of a list argument', () => {
+    const expr = ce.box(['Apply', CONSTANT, ['List', 'a', 'b']]);
+    expect(expr.evaluate().toString()).toBe('[7,7]');
+    expect(wgsl.compile(expr, NO_FOLD).code).toBe('vec2f(7.0, 7.0)');
+  });
+
+  it('applies a body that reads the parameter to each element', () => {
+    expect(
+      wgsl.compile(ce.box(['Apply', DOUBLE, ['List', 'a', 'b']]), NO_FOLD).code
+    ).toBe('vec2f(2.0 * a, 2.0 * b)');
+  });
+
+  it('applies the prime of a function to each element', () => {
+    const expr = ce.box([
+      'Apply',
+      ['Derivative', 'Sin', 1],
+      ['List', 'a', 'b'],
+    ]);
+    expect(expr.evaluate().toString()).toBe('[cos(a),cos(b)]');
+    expect(wgsl.compile(expr, NO_FOLD).code).toBe('vec2f(cos(a), cos(b))');
+  });
+
+  it('substitutes a scalar argument whole', () => {
+    expect(wgsl.compile(ce.box(['Apply', DOUBLE, 'a']), NO_FOLD).code).toBe(
+      '2.0 * a'
+    );
+  });
+
+  it('declines a list argument with no static length', () => {
+    expect(() => wgsl.compile(ce.box(['Apply', CONSTANT, 'L']))).toThrow(
+      /Could not compile `Apply`: the function applies to each element/
+    );
+  });
+
+  // A parameter declared as a scalar (a number or a boolean) maps over a
+  // tuple argument, in the interpreter (`Apply((u: real) ↦ 2u, (a, b))` is `(2a, 2b)`, user
+  // decision 2026-10-03) and in the shader: the result is a vector of the
+  // values at each component. An argument that does not match the declared
+  // type of its parameter is declined, as the interpreter gives an
+  // `incompatible-type` error for it.
+  it('maps a tuple at a parameter declared as a scalar (a number or a boolean)', () => {
+    ce.declare('P', 'tuple<real, real>');
+    ce.declare('V', 'list<real^2>');
+    const tuple = ce.box(['Apply', DOUBLE, ['Tuple', 'a', 'b']]);
+    expect(tuple.evaluate().toString()).toBe('(2a, 2b)');
+    expect(wgsl.compile(tuple, NO_FOLD).code).toBe('vec2f(2.0 * a, 2.0 * b)');
+    expect(wgsl.compile(ce.box(['Apply', DOUBLE, 'P']), NO_FOLD).code).toBe(
+      'vec2f(2.0 * P.x, 2.0 * P.y)'
+    );
+    // A list of tuples maps over the list, then over each tuple.
+    expect(
+      wgsl.compile(
+        ce.box(['Apply', DOUBLE, ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]]])
+      ).code
+    ).toBe('array<vec2f, 2>(vec2f(2.0, 4.0), vec2f(6.0, 8.0))');
+    // A tuple with a list component is data, not a point: an error in the
+    // interpreter, declined here.
+    expect(() =>
+      wgsl.compile(
+        ce.box([
+          'Apply',
+          DOUBLE,
+          ['Tuple', ['List', 1, 2], ['List', 3, 4]],
+        ])
+      )
+    ).toThrow(/has a component that is a collection/);
+    // A vector argument is bound whole when another parameter is a
+    // collection, so the literal does not map. The mismatch is certain, so
+    // the call is refused when it is boxed, as a call of a named function
+    // is, and the expression is invalid.
+    const whole = [
+      'Function',
+      ['Add', 'u', ['Length', 'w']],
+      ['Typed', 'u', 'real'],
+      ['Typed', 'w', 'list<real>'],
+    ];
+    expect(() => wgsl.compile(ce.box(['Apply', whole, 'V', 'V']))).toThrow(
+      /invalid expression.*incompatible-type.*vector<real\^2>/
+    );
+    // A parameter with no declared type accepts the tuple, as in the
+    // interpreter.
+    expect(
+      wgsl.compile(
+        ce.box([
+          'Apply',
+          ['Function', ['Multiply', 2, 'u'], 'u'],
+          ['Tuple', 'a', 'b'],
+        ]),
+        NO_FOLD
+      ).code
+    ).toBe('2.0 * vec2f(a, b)');
+  });
+});
+
+describe('WGSL - NORM OF A POINT WITH A LIST COMPONENT', () => {
+  // `|(x + [1/2, 1], y)|` is one point per element of the list component, so
+  // its norm is one number per element. It compiles as the explicit
+  // `√(Σ cᵢ²)`, the same code as the norm written by hand.
+  const ceN = new ComputeEngine();
+  const code = (latex: string) => {
+    const r = wgsl.compile(ceN.parse(latex), { fallback: false });
+    expect(r.success).toBe(true);
+    return r.code;
+  };
+
+  it('a list in the first component is the written norm', () => {
+    expect(
+      code('\\left|\\left(x+\\left[\\frac{1}{2},1\\right],y\\right)\\right|')
+    ).toBe('sqrt(_gpu_pow2_v2(x + vec2f(0.5, 1.0)) + (y * y))');
+    expect(code('\\sqrt{(x+[1/2,1])^2+y^2}')).toBe(
+      'sqrt(_gpu_pow2_v2(x + vec2f(0.5, 1.0)) + (y * y))'
+    );
+  });
+
+  it('a list in the second component', () => {
+    expect(code('\\left|\\left(x,y+[1,2]\\right)\\right|')).toBe(
+      'sqrt((x * x) + _gpu_pow2_v2(y + vec2f(1.0, 2.0)))'
+    );
+  });
+
+  it('two lists of the same length', () => {
+    expect(code('\\left|\\left(x+[1,2],y+[3,4]\\right)\\right|')).toBe(
+      'sqrt(_gpu_pow2_v2(x + vec2f(1.0, 2.0)) + _gpu_pow2_v2(y + vec2f(3.0, 4.0)))'
+    );
+  });
+
+  it('a point with three components', () => {
+    expect(code('\\left|\\left(x+[1,2],y,z\\right)\\right|')).toBe(
+      'sqrt(_gpu_pow2_v2(x + vec2f(1.0, 2.0)) + (y * y) + (z * z))'
+    );
+  });
+
+  it('a point of scalars keeps length()', () => {
+    expect(code('\\left|\\left(x,y\\right)\\right|')).toBe(
+      'length(vec2f(x, y))'
+    );
+  });
+
+  it('lists of different lengths decline', () => {
+    expect(() =>
+      wgsl.compile(
+        ceN.parse('\\left|\\left(x+[1,2],y+[3,4,5]\\right)\\right|'),
+        { fallback: false }
+      )
+    ).toThrow('different lengths (2 and 3)');
+  });
+});
+
+// A structural `Square` of a vector is a broadcast of the head over the
+// vector. It uses the `vecN` helper, as the canonical form `Power(c, 2)`
+// does. It used to decline because the scalar helper `_gpu_pow2` was
+// chosen for the vector.
+describe('WGSL - SQUARE OF A VECTOR', () => {
+  const ce = new ComputeEngine();
+  ce.declare('V', 'list<real^2>');
+  const square = (arg: unknown) =>
+    ce.function('Square', [ce.box(arg as never)], { form: 'structural' });
+
+  it('uses the vector helper for a vector literal', () => {
+    expect(wgsl.compile(square(['List', 1, 'x'])).code).toBe(
+      '_gpu_pow2_v2(vec2f(1.0, x))'
+    );
+    expect(wgsl.compile(ce.box(['Power', ['List', 1, 'x'], 2])).code).toBe(
+      '_gpu_pow2_v2(vec2f(1.0, x))'
+    );
+    expect(wgsl.compile(square(['List', 'y', 'x', 'z'])).code).toBe(
+      '_gpu_pow2_v3(vec3f(y, x, z))'
+    );
+  });
+
+  it('multiplies a vector symbol by itself', () => {
+    expect(wgsl.compile(square('V')).code).toBe('(V * V)');
+  });
+
+  // A list of more than four elements has no vector type. It is written as
+  // an array, one square per element, on GLSL as on WGSL.
+  it('writes a list of more than four elements as an array', () => {
+    const list = ['List', 1, 2, 3, 4, 'x'];
+    const expected = 'array<f32, 5>(1.0, 4.0, 9.0, 16.0, (x * x))';
+    expect(wgsl.compile(square(list)).code).toBe(expected);
+    expect(wgsl.compile(ce.box(['Power', list, 2] as never)).code).toBe(
+      expected
+    );
+  });
+});

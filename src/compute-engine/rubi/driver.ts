@@ -99,9 +99,27 @@ const MAX_DEPTH = 40;
 export const RUBI_STEP_BUDGET = 300_000;
 const NATIVE_FALLBACK_STEP_BUDGET = 100_000;
 const CLEAN_EXPANSION_STEP_BUDGET = 100_000;
-/** The wall-clock guard of each sub-search, the former 5 s slice: only code
- * that counts few steps (a polynomial GCD on big coefficients) reaches it. */
-const SUB_SEARCH_HANG_MS = 5000;
+/**
+ * The default wall-clock guard of one top-level `int()` call, in ms. The step
+ * budget allows about 10 to 15 s of work on an idle machine (about 20 to 30
+ * steps per millisecond), so the guard is about 8 times above that: the step
+ * budget, not the clock, decides the result on a machine up to about 8 times
+ * slower or more loaded. A real hang in code that does not count steps blocks
+ * for up to this time before the integral is given up.
+ */
+export const DEFAULT_TIME_LIMIT_MS = 120_000;
+/**
+ * The wall-clock guard of each sub-search is the per-call guard
+ * (`timeLimitMs`) divided by this number: 20 s for the default 120 s. Only code
+ * that counts few steps (a polynomial GCD on big coefficients) reaches it.
+ *
+ * The guard is a fraction of `timeLimitMs`, not a fixed time, so a caller
+ * that raises the per-call guard for a slow or loaded machine raises the
+ * guards of the sub-searches too. With a fixed sub-search guard, a loaded
+ * machine can stop a sub-search that its step budget allows, and the answer
+ * then depends on the load.
+ */
+const SUB_SEARCH_HANG_DIVISOR = 6;
 
 // RUBI_DEBUG_FLOAT: report the first rule whose result contains an inexact
 // machine-float literal while its integrand was float-free (i.e. the rule
@@ -280,6 +298,13 @@ export type DriverStats = {
   /** The steps the last top-level `int()` call spent (see
    * `RUBI_STEP_BUDGET`). */
   steps?: number;
+  /** The labels of the spans whose wall-clock guard stopped work in the last
+   * top-level `int()` call: `rubi:integrate` (the whole call),
+   * `rubi:native-fallback` or `rubi:clean-expansion` (a sub-search). Empty
+   * when only step budgets decided. A wall-clock stop makes the answer
+   * depend on the speed and the load of the machine, so a non-empty list
+   * marks an answer that another machine can give differently. */
+  hangs?: string[];
 };
 
 /** Decide whether a caught error at a Rubi span (labelled `localLabel`) is a
@@ -529,9 +554,10 @@ export class RubiDriver {
       // hang. The `catch` below runs outside that span, so it can tell
       // Rubi's own spent budget from a caller's.
       if (reentrant) return body();
+      this.stats.hangs = [];
       return this.ce._withBudget(
         {
-          ms: this.options.timeLimitMs ?? 30_000,
+          ms: this.options.timeLimitMs ?? DEFAULT_TIME_LIMIT_MS,
           steps: this.options.stepBudget ?? RUBI_STEP_BUDGET,
           label: 'rubi:integrate',
         },
@@ -575,6 +601,7 @@ export class RubiDriver {
           )
         )
           throw e;
+        if (!reentrant) this.noteHang(e, 'rubi:integrate');
         return null;
       }
       throw e;
@@ -589,6 +616,22 @@ export class RubiDriver {
       }
       this.records = savedRecords;
     }
+  }
+
+  /** The wall-clock guard of a sub-search (see `SUB_SEARCH_HANG_DIVISOR`). */
+  private subSearchHangMs(): number {
+    return (
+      (this.options.timeLimitMs ?? DEFAULT_TIME_LIMIT_MS) /
+      SUB_SEARCH_HANG_DIVISOR
+    );
+  }
+
+  /** Record in `stats.hangs` that the wall-clock guard of the span `label`
+   * stopped work. A spent step budget (cause `step-budget`) is not a hang,
+   * and is not recorded. */
+  private noteHang(e: unknown, label: string): void {
+    if ((e as { cause?: unknown }).cause === 'timeout')
+      this.stats.hangs?.push(label);
   }
 
   /** Engine-native antiderivative fallback for a rational integrand the Rubi
@@ -616,13 +659,13 @@ export class RubiDriver {
     // (high-degree numeric denominators it cannot factor), so the budget is
     // well under the driver budget, to avoid spending all of it on a dead
     // end. The steps also count against the `rubi:integrate` budget. The
-    // 5 s limit is a guard against the factoring code, which counts few
-    // steps; it keeps the former worst case of this fallback.
+    // wall-clock limit is a guard against the factoring code, which counts
+    // few steps (see `SUB_SEARCH_HANG_DIVISOR`).
     this.inNativeFallback = true;
     try {
       return ce._withBudget(
         {
-          ms: SUB_SEARCH_HANG_MS,
+          ms: this.subSearchHangMs(),
           steps: NATIVE_FALLBACK_STEP_BUDGET,
           label: 'rubi:native-fallback',
         },
@@ -643,7 +686,12 @@ export class RubiDriver {
       // timeout, even when that span has no label (its error then has no
       // attribution, as Rubi's own errors).
       throwIfCallerCancellation(e, ce._deadlineFrame);
-      if (isRubiOwnedCancellation(e, 'rubi:native-fallback')) return null;
+      if (isRubiOwnedCancellation(e, 'rubi:native-fallback')) {
+        // The fallback declines and the search goes on. When the wall clock
+        // stopped it, the decline depends on the machine: record it.
+        this.noteHang(e, 'rubi:native-fallback');
+        return null;
+      }
       throw e;
     } finally {
       this.inNativeFallback = false;
@@ -2101,7 +2149,7 @@ export class RubiDriver {
     try {
       simplified = ce._withBudget(
         {
-          ms: SUB_SEARCH_HANG_MS,
+          ms: this.subSearchHangMs(),
           steps: CLEAN_EXPANSION_STEP_BUDGET,
           label: 'rubi:clean-expansion',
         },
@@ -2115,6 +2163,7 @@ export class RubiDriver {
       throwIfCallerCancellation(e, ce._deadlineFrame);
       if (!isRubiOwnedCancellation(e, 'rubi:clean-expansion')) throw e;
       // budget spent — keep the unsimplified form
+      this.noteHang(e, 'rubi:clean-expansion');
     }
     return foldLnExponentialE(ce, simplified);
   }

@@ -562,11 +562,13 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
     parse: parseQuantifier('NotExists'),
   },
 
+  // An expression entry, not a prefix operator: the parser then reads the
+  // scripts and the primes after it, as after a symbol. `\delta_{ij}^2` is
+  // `KroneckerDelta(i, j)^2`. As a prefix operator, the `^2` had no base and
+  // was a syntax error.
   {
     name: 'KroneckerDelta',
-    kind: 'prefix',
     latexTrigger: ['\\delta', '_'],
-    precedence: 200,
     serialize: (serializer: Serializer, expr: MathJsonExpression) => {
       const args = operands(expr);
       if (args.length === 0) return '\\delta';
@@ -578,16 +580,90 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
           .map((arg) => serializer.serialize(arg))
           .join('')}}`;
 
-      // Otherwise, use commas
+      // Otherwise, use commas. One index of two or more digits is in a
+      // second group: `\delta_{11}` is two indices (see the parser below),
+      // so `KroneckerDelta(11)` is `\delta_{{11}}`.
+      if (args.length === 1) {
+        const index = serializer.serialize(args[0]);
+        if (/^[0-9]{2,}$/.test(index)) return `\\delta_{{${index}}}`;
+      }
       return `\\delta_{${args
         .map((arg) => serializer.serialize(arg))
         .join(', ')}}`;
     },
-    parse: (parser) => {
+    parse: (parser: Parser): MathJsonExpression | null => {
+      // \\delta_{11}, \\delta_{n0}: a group that holds only letters and
+      // digits, with no separator, is one index for each letter or digit,
+      // in both grammars. So `\delta_{11}` is `KroneckerDelta(1, 1)`,
+      // `\delta_{01}` is `KroneckerDelta(0, 1)` and `\delta_{n0}` is
+      // `KroneckerDelta(n, 0)`. Read as one number, `\delta_{11}` was
+      // `KroneckerDelta(11)` and `\delta_{01}` was `KroneckerDelta(1)`. In
+      // the non-strict grammar, `\delta_{n0}` was `KroneckerDelta(n_0)`:
+      // the letter and the digits were an implicit subscript. A group with
+      // a separator keeps its numbers: `\delta_{10, 2}`. A group in the
+      // group is one index: `\delta_{{11}}` is `KroneckerDelta(11)`.
+      // A command that is a symbol is one index too: `\delta_{\pi1}` is
+      // `KroneckerDelta(Pi, 1)` in both grammars (in the non-strict
+      // grammar it was `KroneckerDelta(Pi_1)`).
+      // In the non-strict grammar, a spelled-out Greek name is one index,
+      // as its command is: `\delta_{nalpha}` is `KroneckerDelta(n, alpha)`,
+      // as `\delta_{n\alpha}` is, and `\delta_{pi1}` is
+      // `KroneckerDelta(Pi, 1)`. A run of letters split around a name
+      // reports `ambiguous-letter-run`, as other letter runs do. The strict
+      // grammar has no spelled-out names: one index for each letter.
+      const start = parser.index;
+      if (parser.match('<{>')) {
+        const indexes: MathJsonExpression[] = [];
+        parser.skipSpace();
+        while (
+          /^[0-9a-zA-Z]$/.test(parser.peek) ||
+          parser.peek.startsWith('\\')
+        ) {
+          if (/^[0-9]$/.test(parser.peek)) {
+            indexes.push(parseInt(parser.nextToken(), 10));
+          } else {
+            const parts = /^[a-zA-Z]$/.test(parser.peek)
+              ? parser._parseLetterRunParts()
+              : null;
+            if (parts !== null) indexes.push(...parts);
+            else {
+              // Read the letter or the command as a symbol, with its
+              // diagnostics. Stop if it is not a symbol or if the symbol
+              // parser reads more than the one token.
+              const before = parser.index;
+              const index = parser.parseToken();
+              if (typeof index !== 'string' || parser.index !== before + 1)
+                break;
+              indexes.push(index);
+            }
+          }
+          parser.skipSpace();
+        }
+        if (indexes.length > 1 && parser.match('<}>'))
+          return ['KroneckerDelta', ...indexes];
+        parser.index = start;
+      }
+
+      // \\delta_11: in non-strict mode, an unbraced run of digits is the
+      // whole subscript, as `x_11` is `x_{11}`, and it is read as the
+      // braced run: `\delta_11` is `KroneckerDelta(1, 1)` and `\delta_01`
+      // is `KroneckerDelta(0, 1)`. The strict grammar reads one token, as
+      // TeX does: `\delta_11` is `KroneckerDelta(1)·1`.
+      if (parser.options.strict === false && /^[0-9]$/.test(parser.peek)) {
+        const runStart = parser.index;
+        const digits: number[] = [];
+        while (/^[0-9]$/.test(parser.peek))
+          digits.push(parseInt(parser.nextToken(), 10));
+        if (digits.length > 1) return ['KroneckerDelta', ...digits];
+        parser.index = runStart;
+      }
+
       const group = parser.parseGroup();
       if (group === null) {
         const token = parser.parseToken();
-        if (!token) return null;
+        // The number 0 is a token: `\delta_0` is `KroneckerDelta(0)`, as
+        // `\delta_1` is `KroneckerDelta(1)`. It was the symbol `delta_0`.
+        if (token === null || token === undefined) return null;
         // \\delta_n
         return ['KroneckerDelta', token];
       }

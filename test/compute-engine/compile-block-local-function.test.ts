@@ -136,11 +136,19 @@ describe('COMPILE a block-local function definition', () => {
   });
 
   it('fails closed on an ARITY mismatch', () => {
+    // With fewer arguments than parameters the interpreter makes a partial
+    // application, a function value, which the compiled call does not build:
     // JavaScript would bind the missing parameter to `undefined` and compute
-    // NaN; the interpreter reports an error, so the compilation must not
-    // silently disagree.
+    // NaN. With more arguments the interpreter reports an error. Either way
+    // the compilation must not silently disagree.
+    expect(
+      program('const h = (a, b) => a + b\nh(1)').evaluate().toString()
+    ).toBe('(_) => _ + 1');
     expect(() => both('const h = (a, b) => a + b\nh(1)')).toThrow(
-      /declared with 2 parameters but called with 1/
+      /declared with 2 parameters but called with 1\. The interpreter reads a call with fewer arguments than parameters as a partial application/
+    );
+    expect(() => both('const h = (a, b) => a + b\nh(1, 2, 3)')).toThrow(
+      /declared with 2 parameters but called with 3\. The interpreter reports an error/
     );
   });
 
@@ -386,5 +394,639 @@ describe('COMPILE a block-local function — other targets are unchanged', () =>
     expect(() =>
       both('const h = (k) => k + 1\nh(3)', { to: 'python' })
     ).toThrow(/Unknown operator `h`/);
+  });
+});
+
+describe('COMPILE a `Declare` followed by an `Assign` of a function literal', () => {
+  // `Declare(k, "function")` then `Assign(k, Function(…))` is the shape the
+  // LaTeX parser makes for `k(u) \coloneq 2u; k(x)`. The block-local scope
+  // read only a `Declare` that carries its value (the `const`/`let` shape),
+  // so the call `k(x)` failed with ``Unknown operator `k` `` although the
+  // interpreter answers it.
+  const F = (body: unknown, ...params: string[]) => [
+    'Function',
+    body,
+    ...params,
+  ];
+  const twice = F(['Multiply', 2, 'u'], 'u');
+  const thrice = F(['Multiply', 3, 'u'], 'u');
+
+  /** The compiled result for `vars`, and `evaluate()` with `vars` assigned. */
+  function compareJson(
+    json: unknown,
+    vars: Record<string, number | number[]> = {}
+  ): { compiled: unknown; interpreted: string; code: string } {
+    const result = compile(ce.box(json as never), {
+      to: 'javascript',
+      fallback: false,
+    } as never)!;
+    const ce2 = new ComputeEngine();
+    for (const [k, v] of Object.entries(vars))
+      ce2.assign(k, Array.isArray(v) ? ce2.box(['List', ...v]) : v);
+    return {
+      compiled: result.run!(vars as never),
+      interpreted: ce2
+        .box(json as never)
+        .evaluate()
+        .toString(),
+      code: result.code as string,
+    };
+  }
+
+  it('compiles the call (the reported program)', () => {
+    const r = compareJson(
+      [
+        'Block',
+        ['Declare', 'k', "'function'"],
+        ['Assign', 'k', twice],
+        ['k', 'x'],
+      ],
+      { x: 3 }
+    );
+    expect(r.compiled).toBe(6);
+    expect(r.interpreted).toBe('6');
+    expect(r.code).toContain('_SYS.bcastFn(k, _.x)');
+  });
+
+  it('folds a call with a constant argument', () => {
+    const r = compareJson([
+      'Block',
+      ['Declare', 'k', "'function'"],
+      ['Assign', 'k', twice],
+      ['k', 3],
+    ]);
+    expect(r.compiled).toBe(6);
+    expect(r.interpreted).toBe('6');
+    expect(r.code).toContain('return 6');
+  });
+
+  it('compiles an `Assign` with no `Declare`', () => {
+    const r = compareJson(['Block', ['Assign', 'k', twice], ['k', 'x']], {
+      x: 3,
+    });
+    expect(r.compiled).toBe(6);
+    expect(r.interpreted).toBe('6');
+  });
+
+  it('compiles with a declared signature', () => {
+    const block = (arg: unknown) => [
+      'Block',
+      ['Declare', 'k', "'(real) -> real'"],
+      ['Assign', 'k', twice],
+      ['k', arg],
+    ];
+    expect(compareJson(block('x'), { x: 3 })).toMatchObject({
+      compiled: 6,
+      interpreted: '6',
+    });
+    expect(compareJson(block(['List', 1, 2, 3]))).toMatchObject({
+      compiled: [2, 4, 6],
+      interpreted: '[2,4,6]',
+    });
+  });
+
+  it('BROADCASTS over a collection argument', () => {
+    const r = compareJson(
+      [
+        'Block',
+        ['Declare', 'k', "'function'"],
+        ['Assign', 'k', twice],
+        ['k', 'xs'],
+      ],
+      { xs: [1, 2, 3] }
+    );
+    expect(r.code).toContain('_SYS.bcastFn');
+    expect(r.compiled).toEqual([2, 4, 6]);
+    expect(r.interpreted).toBe('[2,4,6]');
+  });
+
+  it('recurses through its own binding', () => {
+    const fact = F(
+      [
+        'If',
+        ['LessEqual', 'n', 1],
+        1,
+        ['Multiply', 'n', ['f', ['Subtract', 'n', 1]]],
+      ],
+      'n'
+    );
+    const r = compareJson(
+      [
+        'Block',
+        ['Declare', 'f', "'function'"],
+        ['Assign', 'f', fact],
+        ['f', 'x'],
+      ],
+      { x: 5 }
+    );
+    expect(r.compiled).toBe(120);
+    expect(r.interpreted).toBe('120');
+  });
+
+  it('fails closed on an ARITY mismatch', () => {
+    expect(() =>
+      compareJson(
+        [
+          'Block',
+          ['Declare', 'k', "'function'"],
+          ['Assign', 'k', F(['Add', 'a', 'b'], 'a', 'b')],
+          ['k', 'x'],
+        ],
+        { x: 3 }
+      )
+    ).toThrow(/declared with 2 parameters but called with 1/);
+  });
+
+  it('a top-level REASSIGNMENT is followed: each call uses the current literal', () => {
+    const r = compareJson(
+      [
+        'Block',
+        ['Declare', 'k', "'function'"],
+        ['Assign', 'k', twice],
+        ['Declare', 'a', "'unknown'"],
+        ['Assign', 'a', ['k', 'x']],
+        ['Assign', 'k', thrice],
+        ['Add', 'a', ['k', 'x']],
+      ],
+      { x: 3 }
+    );
+    expect(r.compiled).toBe(15); // 2·3 + 3·3
+    expect(r.interpreted).toBe('15');
+  });
+
+  // A function whose value can change while the block runs is called through
+  // its run-time binding, so each call uses the value the interpreter uses
+  // at that point.
+  const inBranch = [
+    'Block',
+    ['Declare', 'k', "'function'"],
+    ['Assign', 'k', twice],
+    ['If', ['Greater', 'x', 0], ['Assign', 'k', thrice]],
+    ['k', 'x'],
+  ];
+
+  it('a reassignment INSIDE a branch is read at run time', () => {
+    for (const x of [3, -3])
+      expect(compareJson(inBranch, { x })).toMatchObject({
+        compiled: x > 0 ? 3 * x : 2 * x,
+        interpreted: String(x > 0 ? 3 * x : 2 * x),
+      });
+    // A rebound function is not folded, even with a constant argument: the
+    // literal the compiler sees is not always the one the call runs.
+    const constant = compareJson([...inBranch.slice(0, -1), ['k', 2]], {
+      x: 3,
+    });
+    expect(constant).toMatchObject({ compiled: 6, interpreted: '6' });
+    expect(constant.code).not.toContain('return 4');
+    // …and it still broadcasts over a list.
+    expect(
+      compareJson([...inBranch.slice(0, -1), ['k', 'xs']], {
+        x: 3,
+        xs: [1, 2, 3],
+      })
+    ).toMatchObject({ compiled: [3, 6, 9], interpreted: '[3,6,9]' });
+  });
+
+  it('a reassignment INSIDE a loop body is read at run time', () => {
+    const r = compareJson([
+      'Block',
+      ['Declare', 'k', "'function'"],
+      ['Assign', 'k', twice],
+      ['Declare', 's', "'unknown'"],
+      ['Assign', 's', 0],
+      [
+        'Loop',
+        [
+          'Block',
+          ['Assign', 's', ['Add', 's', ['k', 1]]],
+          ['Assign', 'k', thrice],
+        ],
+        ['Element', 'j', ['Range', 1, 3]],
+      ],
+      's',
+    ]);
+    expect(r.compiled).toBe(8); // 2 + 3 + 3
+    expect(r.interpreted).toBe('8');
+  });
+
+  it('a lambda body that calls a name assigned TWICE reads it at run time', () => {
+    const r = compareJson(
+      [
+        'Block',
+        ['Declare', 'k', "'function'"],
+        ['Assign', 'k', twice],
+        ['Declare', 'g', "'function'"],
+        ['Assign', 'g', F(['k', 'v'], 'v')],
+        ['Declare', 'a', "'unknown'"],
+        ['Assign', 'a', ['g', 'x']],
+        ['Assign', 'k', thrice],
+        ['Add', 'a', ['g', 'x']],
+      ],
+      { x: 3 }
+    );
+    expect(r.compiled).toBe(15); // 2·3 + 3·3
+    expect(r.interpreted).toBe('15');
+  });
+
+  it('an inner `Declare` of the same name is a different binding', () => {
+    const outer = (inner: unknown[]) => [
+      'Block',
+      ['Declare', 'k', "'function'"],
+      ['Assign', 'k', twice],
+      ['Declare', 'a', "'unknown'"],
+      ['Assign', 'a', ['Block', ...inner]],
+      ['Add', 'a', ['k', 'x']],
+    ];
+    // The inner `k` is a function: 3·3 + 2·3.
+    expect(
+      compareJson(
+        outer([
+          ['Declare', 'k', "'function'"],
+          ['Assign', 'k', thrice],
+          ['k', 'x'],
+        ]),
+        { x: 3 }
+      )
+    ).toMatchObject({ compiled: 15, interpreted: '15' });
+    // The inner `k` is a number: 5·3 + 2·3. The outer `k` is not rebound.
+    expect(
+      compareJson(
+        outer([
+          ['Declare', 'k', "'unknown'"],
+          ['Assign', 'k', 5],
+          ['Multiply', 'k', 'x'],
+        ]),
+        { x: 3 }
+      )
+    ).toMatchObject({ compiled: 21, interpreted: '21' });
+    // With no inner `Declare`, the inner block writes the OUTER `k`: 3·3 + 3·3.
+    expect(
+      compareJson(
+        outer([
+          ['Assign', 'k', thrice],
+          ['k', 'x'],
+        ]),
+        { x: 3 }
+      )
+    ).toMatchObject({ compiled: 18, interpreted: '18' });
+  });
+
+  it('recurses through a reassigned name', () => {
+    const recursive = (step: unknown) =>
+      F(
+        [
+          'If',
+          ['LessEqual', 'n', 1],
+          1,
+          [step, 'n', ['f', ['Subtract', 'n', 1]]],
+        ],
+        'n'
+      );
+    const r = compareJson([
+      'Block',
+      ['Declare', 'f', "'function'"],
+      ['Assign', 'f', recursive('Multiply')],
+      ['Declare', 'a', "'unknown'"],
+      ['Assign', 'a', ['f', 5]],
+      ['Assign', 'f', recursive('Add')],
+      ['Add', 'a', ['f', 5]],
+    ]);
+    expect(r.compiled).toBe(135); // 5! + (5 + 4 + 3 + 2 + 1)
+    expect(r.interpreted).toBe('135');
+  });
+
+  it('fails closed, with the reason, when the values do not share a signature', () => {
+    // The call site needs the arity and the parameter types of the callee,
+    // and these differ between the two values `k` can hold.
+    expect(() =>
+      compareJson(
+        [
+          'Block',
+          ['Declare', 'k', "'function'"],
+          ['Assign', 'k', twice],
+          [
+            'If',
+            ['Greater', 'x', 0],
+            ['Assign', 'k', F(['Add', 'a', 'b'], 'a', 'b')],
+          ],
+          ['k', 'x'],
+        ],
+        { x: 3 }
+      )
+    ).toThrow(/is assigned functions with different signatures/);
+    expect(() =>
+      compareJson(
+        [
+          'Block',
+          ['Declare', 'k', "'unknown'"],
+          ['Assign', 'k', twice],
+          ['If', ['Greater', 'x', 0], ['Assign', 'k', 5]],
+          ['k', 'x'],
+        ],
+        { x: -3 }
+      )
+    ).toThrow(/also assigned a value that is not a function literal/);
+  });
+
+  it('the interval target declines a rebound function with the reason', () => {
+    // A top-level reassignment: the `if` of `inBranch` declines earlier on
+    // this target, on its own else-less branch.
+    const result = compile(
+      ce.box([
+        'Block',
+        ['Declare', 'k', "'function'"],
+        ['Assign', 'k', twice],
+        ['Declare', 'a', "'unknown'"],
+        ['Assign', 'a', ['k', 'x']],
+        ['Assign', 'k', thrice],
+        ['Add', 'a', ['k', 'x']],
+      ] as never),
+      { to: 'interval-js', fallback: false } as never
+    )!;
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(
+      /`k` is assigned more than once or inside a nested statement.*compiles a call of a block-local function only when the function is assigned once/
+    );
+  });
+
+  it('compiles the LaTeX spelling', () => {
+    for (const latex of [
+      'k(u) \\coloneq 2u; k(x)',
+      'k \\coloneq u \\mapsto 2u; k(x)',
+    ]) {
+      const result = compile(ce.parse(latex), {
+        to: 'javascript',
+        fallback: false,
+      } as never)!;
+      expect(result.run!({ x: 3 } as never)).toBe(6);
+      const ce2 = new ComputeEngine();
+      ce2.assign('x', 3);
+      expect(ce2.parse(latex).evaluate().toString()).toBe('6');
+    }
+  });
+
+  it('the interval target compiles it as it compiles the `const` form', () => {
+    const result = compile(
+      ce.box([
+        'Block',
+        ['Declare', 'k', "'function'"],
+        ['Assign', 'k', twice],
+        ['k', 'x'],
+      ] as never),
+      { to: 'interval-js', fallback: false } as never
+    )!;
+    expect(result.success).toBe(true);
+    expect(result.run!({ x: 3 } as never)).toEqual({
+      kind: 'interval',
+      value: { lo: 6, hi: 6 },
+    });
+  });
+
+  it('the GPU targets and Python fail closed, as for the `const` form', () => {
+    const json = [
+      'Block',
+      ['Declare', 'k', "'function'"],
+      ['Assign', 'k', twice],
+      ['k', 'x'],
+    ];
+    for (const to of ['glsl', 'wgsl', 'python'])
+      expect(() =>
+        compile(ce.box(json as never), { to, fallback: false } as never)
+      ).toThrow();
+    // The GPU targets say why: they have no function values.
+    for (const to of ['glsl', 'wgsl'])
+      expect(() =>
+        compile(ce.box(inBranch as never), { to, fallback: false } as never)
+      ).toThrow(/Anonymous functions \(Function\) are not supported/);
+  });
+});
+
+describe('COMPILE a REASSIGNED `let`-bound lambda', () => {
+  // The `let` binding was resolved from its declaration only, so a call after
+  // `h := …` folded with the OLD literal: these programs compiled to 4, 8 and
+  // 4 where the interpreter answers 5, 9 and 13.
+  it('a call after a top-level reassignment uses the new literal', () => {
+    expect(both('let h = (k) => k + 1\nh := (k) => k + 2\nh(3)')).toMatchObject(
+      { compiled: 5, interpreted: '5' }
+    );
+    expect(
+      both('let h = (k) => k + 1\nlet a = h(3)\nh := (k) => k + 2\na + h(3)')
+    ).toMatchObject({ compiled: 9, interpreted: '9' });
+  });
+
+  it('a reassignment inside a loop body is read at run time', () => {
+    expect(
+      both(
+        'let h = (k) => k + 1\nlet s = 0\nfor j in 1..2 { s := s + h(1)\n h := (k) => k + 10 }\ns'
+      )
+    ).toMatchObject({ compiled: 13, interpreted: '13' }); // 2 + 11
+  });
+
+  it('a reassignment inside an `if` is read at run time', () => {
+    const src = 'let h = (k) => k + 1\nif n > 0 { h := (k) => k + 10 }\nh(1)';
+    for (const n of [1, -1]) {
+      const { compiled } = both(src, { vars: { n } });
+      expect(compiled).toBe(n > 0 ? 11 : 2);
+    }
+    expect(program(`let n = 1\n${src}`).evaluate().toString()).toBe('11');
+  });
+
+  it('a lambda that calls a reassigned local reads it at run time', () => {
+    expect(
+      both(
+        'let h = (k) => k + 1\nconst g = (m) => h(m) * 2\nlet a = g(1)\nh := (k) => k + 10\na + g(1)'
+      )
+    ).toMatchObject({ compiled: 26, interpreted: '26' }); // 4 + 22
+  });
+});
+
+describe('COMPILE a call of a block-local function with a tuple argument', () => {
+  // The interpreter binds a tuple whole at a parameter with no declared type,
+  // applies the function to each tuple of a list of tuples, and maps a call
+  // over the components of a tuple at a parameter declared as a scalar. The
+  // JavaScript code bound the local under its run-time broadcast, which maps
+  // into a point too (`(v) => 7` applied to `p` gave `[7, 7]`), and a local
+  // that shadows an engine-level function was declined, or compiled with the
+  // engine-level function.
+  const F = (body: unknown, ...params: unknown[]) => [
+    'Function',
+    body,
+    ...params,
+  ];
+  const constForm = (literal: unknown, call: unknown) => [
+    'Block',
+    [
+      'Declare',
+      'g',
+      [
+        'Dictionary',
+        ['KeyValuePair', 'value', literal],
+        ['KeyValuePair', 'constant', 'True'],
+      ],
+    ],
+    call,
+  ];
+  const assignForm = (literal: unknown, call: unknown) => [
+    'Block',
+    ['Declare', 'g', "'function'"],
+    ['Assign', 'g', literal],
+    call,
+  ];
+  const reboundForm = (literal: unknown, call: unknown) => [
+    'Block',
+    ['Declare', 'g', "'function'"],
+    ['Assign', 'g', literal],
+    ['If', ['Greater', 'n', 0], ['Assign', 'g', literal]],
+    call,
+  ];
+  const VALUES = {
+    p: [5, 6],
+    P: [
+      [1, 2],
+      [3, 4],
+    ],
+    n: 1,
+  };
+  const engine = (shadow: boolean) => {
+    const e = new ComputeEngine();
+    e.declare('p', 'tuple<real, real>');
+    e.declare('P', 'list<tuple<real, real>>');
+    e.declare('n', 'real');
+    if (shadow)
+      e.assign('g', e.box(F(['Multiply', 2, 'u'], ['Typed', 'u', 'real'])));
+    return e;
+  };
+  const jsValueOf = (json: unknown): unknown =>
+    Array.isArray(json) && (json[0] === 'Tuple' || json[0] === 'List')
+      ? json.slice(1).map(jsValueOf)
+      : json;
+  /** The compiled value, and the value of `evaluate()`, of `json`. */
+  const compare = (json: unknown, shadow = false) => {
+    const result = compile(engine(shadow).box(json as never), {
+      to: 'javascript',
+      fallback: false,
+    } as never)!;
+    const e = engine(shadow);
+    e.assign('p', e.box(['Tuple', 5, 6]));
+    e.assign('P', e.box(['List', ['Tuple', 1, 2], ['Tuple', 3, 4]]));
+    e.assign('n', 1);
+    return {
+      compiled: result.run!(VALUES as never),
+      interpreted: jsValueOf(
+        e
+          .box(json as never)
+          .evaluate({ materialization: true })
+          .json
+      ),
+    };
+  };
+  const ARGS: [string, unknown, unknown][] = [
+    ['a tuple symbol', 'p', 7],
+    ['a list-of-tuples symbol', 'P', [7, 7]],
+    ['a list literal of tuples', ['List', 'p', ['Tuple', 'n', 2]], [7, 7]],
+  ];
+
+  describe.each([
+    ['`const`', constForm],
+    ['`Declare` and `Assign`', assignForm],
+  ])('the %s form', (_, form) => {
+    test.each(ARGS)(
+      'an untyped parameter takes %s whole',
+      (_, arg, expected) => {
+        for (const shadow of [false, true]) {
+          const r = compare(form(F(7, 'v'), ['g', arg]), shadow);
+          expect(r).toEqual({ compiled: expected, interpreted: expected });
+        }
+      }
+    );
+
+    test('a local shadows an engine-level function with the same name', () => {
+      const r = compare(
+        form(F(['Add', ['At', 'v', 1], 10], 'v'), ['g', 'p']),
+        true
+      );
+      expect(r).toEqual({ compiled: 15, interpreted: 15 });
+      const typed = compare(
+        form(F(['Add', 'v', 10], ['Typed', 'v', 'real']), ['g', 'P']),
+        true
+      );
+      expect(typed).toEqual({
+        compiled: [
+          [11, 12],
+          [13, 14],
+        ],
+        interpreted: [
+          [11, 12],
+          [13, 14],
+        ],
+      });
+    });
+
+    test('an argument with an effect is evaluated once', () => {
+      const literal = F('w', ['Typed', 'u', 'real'], ['Typed', 'w', 'real']);
+      const { compiled, interpreted } = compare(
+        form(literal, ['g', ['Tuple', 1, 2], ['Random']])
+      );
+      for (const v of [compiled, interpreted] as number[][]) {
+        expect(v.length).toBe(2);
+        expect(v[0]).toBe(v[1]);
+      }
+    });
+
+    // The component calls were boxed with the ENGINE-level `g`, so with
+    // `g: (string) -> number` declared in the engine each component became
+    // an `incompatible-type` error and the compilation failed. With no
+    // engine-level `g`, boxing them declared `g` in the engine.
+    test('the component calls of a local are not checked against an engine-level function', () => {
+      const literal = F(['Multiply', 2, 'u'], ['Typed', 'u', 'real']);
+      const CASES: [unknown, unknown][] = [
+        [['Tuple', 1, 2], [2, 4]],
+        [
+          ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]],
+          [
+            [2, 4],
+            [6, 8],
+          ],
+        ],
+      ];
+      for (const [arg, expected] of CASES) {
+        const json = form(literal, ['g', arg]);
+        for (const declared of [true, false]) {
+          const e = new ComputeEngine();
+          if (declared) e.declare('g', '(string) -> number');
+          const result = compile(e.box(json as never), {
+            to: 'javascript',
+            fallback: false,
+          } as never)!;
+          expect(result.run!({} as never)).toEqual(expected);
+          if (!declared) expect(e.lookupDefinition('g')).toBeUndefined();
+          expect(jsValueOf(e.box(json as never).evaluate().json)).toEqual(
+            expected
+          );
+        }
+      }
+    });
+  });
+
+  test('a reassigned local with a scalar parameter maps over the tuple', () => {
+    const r = compare(
+      reboundForm(F(['Add', 'v', 10], ['Typed', 'v', 'real']), ['g', 'p']),
+      true
+    );
+    expect(r).toEqual({ compiled: [15, 16], interpreted: [15, 16] });
+  });
+
+  test('a reassigned local with an untyped parameter fails closed, with the reason', () => {
+    const json = reboundForm(F(7, 'v'), ['g', 'p']);
+    expect(() =>
+      compile(engine(false).box(json as never), {
+        to: 'javascript',
+        fallback: false,
+      } as never)
+    ).toThrow(/its value is known only at run time/);
+    const e = engine(false);
+    e.assign('p', e.box(['Tuple', 5, 6]));
+    e.assign('n', 1);
+    expect(e.box(json as never).evaluate().json).toBe(7);
   });
 });

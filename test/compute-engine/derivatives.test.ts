@@ -87,6 +87,27 @@ describe('Derivative', () => {
     expect(result.latex).toMatchInlineSnapshot(`x\\mapsto\\cos(x)`);
   });
 
+  it('declares nothing in the caller scope', () => {
+    // The hole `_` and the parameter `x` of the result are declared in a
+    // scope that is discarded. If they were declared in the caller's scope,
+    // `x` kept the type `number` that `Sin` inferred for it, and a later
+    // boolean use of `x` was an error.
+    const ce = new ComputeEngine();
+    const result = ce.box(['Derivative', 'Sin']).evaluate();
+    expect(result.toString()).toBe('(x) => cos(x)');
+    expect(ce.box(['Apply', result, 0.5]).N().re).toBeCloseTo(Math.cos(0.5));
+    expect(ce.lookupDefinition('x')).toBeUndefined();
+    expect(ce.lookupDefinition('_')).toBeUndefined();
+    expect(ce.box(['And', 'x', 'True']).evaluate().toString()).toBe('x');
+  });
+
+  it('the derivative of Exp has no ln(e) factor', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(['Derivative', 'Exp']).evaluate().toString()).toBe(
+      '(x) => e^x'
+    );
+  });
+
   it('should compute higher order derivatives', () => {
     const expr = engine.expr([
       'Derivative',
@@ -124,6 +145,21 @@ describe('Symbolic output for exponential derivatives', () => {
     const expr = D('3^x', 'x');
     const result = expr.evaluate();
     expect(result.toString()).toMatchInlineSnapshot(`ln(3) * 3^x`);
+  });
+
+  // The factor ln(e) = 1 is dropped only for the library constant. A user
+  // declaration can give the name `ExponentialE` another value, and then the
+  // factor ln(ExponentialE) stays.
+  it('keeps ln(base) when ExponentialE is declared with another value', () => {
+    const ce = new ComputeEngine();
+    ce.declare('ExponentialE', { value: 3 });
+    const expr = ce.expr(['D', ['Power', 'ExponentialE', 'x'], 'x']);
+    expect(expr.evaluate().toString()).toBe('ln(3) * 3^x');
+  });
+
+  it('drops ln(e) for the library constant ExponentialE', () => {
+    const expr = engine.expr(['D', ['Power', 'ExponentialE', 'x'], 'x']);
+    expect(expr.evaluate().toString()).toBe('e^x');
   });
 });
 
@@ -854,6 +890,285 @@ describe('Multi-argument function derivatives', () => {
     });
   });
 
+  describe('Upper incomplete gamma Gamma(s, z)', () => {
+    const gammaN = (s: number, z: number) => engine.box(['Gamma', s, z]).N().re;
+    const slope = (f: (t: number) => number, t: number) =>
+      (f(t + 1e-6) - f(t - 1e-6)) / 2e-6;
+
+    it('d/dz Gamma(s, z) = -z^(s-1) e^(-z)', () => {
+      const result = engine.expr(['D', ['Gamma', 's', 'z'], 'z']).evaluate();
+      expect(result.toString()).toMatchInlineSnapshot(`-(e^(-z) * z^(s - 1))`);
+      for (const s of [2.5, 0.7, -1.5])
+        for (const z of [0.4, 1.1, 2.7])
+          expect(result.subs({ s, z }).N().re).toBeCloseTo(
+            slope((t) => gammaN(s, t), z),
+            6
+          );
+    });
+
+    it('d/ds Gamma(s, z) has no closed form and stays symbolic', () => {
+      expect(
+        engine
+          .expr(['D', ['Gamma', 's', 'z'], 's'])
+          .evaluate()
+          .toString()
+      ).toMatchInlineSnapshot(`Apply(Derivative(Gamma, 1, 0), s, z)`);
+    });
+  });
+
+  describe('Polylogarithm PolyLog(s, z)', () => {
+    // Li_s(z) at a complex point, as a [re, im] pair.
+    const liN = (s: number, re: number, im: number) => {
+      const v = engine
+        .box(['PolyLog', s, engine.number(engine.complex(re, im))])
+        .N();
+      return [v.re, v.im];
+    };
+
+    it('d/dz PolyLog(s, z) = PolyLog(s - 1, z) / z', () => {
+      expect(
+        engine.expr(['D', ['PolyLog', 's', 'z'], 'z']).evaluate().toString()
+      ).toMatchInlineSnapshot(`PolyLog(s - 1, z) / z`);
+    });
+
+    it('the closed forms of PolyLog(0, z) and PolyLog(1, z) apply', () => {
+      const d = (s: number) =>
+        engine.expr(['D', ['PolyLog', s, 'z'], 'z']).evaluate().toString();
+      expect(d(1)).toMatchInlineSnapshot(`1 / (1 - z)`);
+      expect(d(2)).toMatchInlineSnapshot(`-ln(1 - z) / z`);
+      expect(d(3)).toMatchInlineSnapshot(`PolyLog(2, z) / z`);
+    });
+
+    it('agrees with a central difference at real and complex z', () => {
+      const h = 1e-6;
+      for (const s of [1, 2, 3, 2.5]) {
+        const dLi = engine.expr(['D', ['PolyLog', s, 'z'], 'z']).evaluate();
+        for (const [re, im] of [
+          [0.3, 0],
+          [-0.7, 0],
+          [0.9, 0],
+          [0.2, 0.5],
+          [-0.4, -0.6],
+          [2, 0.5],
+        ]) {
+          const [pRe, pIm] = liN(s, re + h, im);
+          const [mRe, mIm] = liN(s, re - h, im);
+          const v = dLi.subs({ z: engine.number(engine.complex(re, im)) }).N();
+          expect(v.re).toBeCloseTo((pRe - mRe) / (2 * h), 5);
+          expect(v.im).toBeCloseTo((pIm - mIm) / (2 * h), 5);
+        }
+      }
+    });
+
+    it('the chain rule applies to the second argument', () => {
+      expect(
+        engine
+          .expr(['D', ['PolyLog', 2, ['Square', 'x']], 'x'])
+          .evaluate()
+          .toString()
+      ).toMatchInlineSnapshot(`(-2ln(1 - x^2)) / x`);
+    });
+
+    it('d/ds PolyLog(s, z) has no closed form and stays symbolic', () => {
+      expect(
+        engine.expr(['D', ['PolyLog', 's', 'z'], 's']).evaluate().toString()
+      ).toMatchInlineSnapshot(`Apply(Derivative("PolyLog", 1, 0), s, z)`);
+    });
+  });
+
+  describe('Derivative(F, k1, ..., kn) of a library operator', () => {
+    // The multi-index form differentiates F(t1, ..., tn) k_i times in t_i,
+    // with the same rules as D, and applies the result to the arguments.
+    const applied = (head: string, orders: number[], ...args: any[]) =>
+      engine
+        .box(['Apply', ['Derivative', head, ...orders], ...args])
+        .evaluate()
+        .toString();
+
+    it('Log', () => {
+      expect(applied('Log', [1, 0], 'x', 'b')).toMatchInlineSnapshot(
+        `1 / (x * ln(b))`
+      );
+      expect(applied('Log', [0, 1], 'x', 'b')).toMatchInlineSnapshot(
+        `-ln(x) / (b * ln(b)^2)`
+      );
+    });
+
+    it('Power', () => {
+      expect(applied('Power', [1, 0], 'x', 'n')).toMatchInlineSnapshot(
+        `n * x^(n - 1)`
+      );
+      expect(applied('Power', [0, 1], 'x', 'n')).toMatchInlineSnapshot(
+        `ln(x) * x^n`
+      );
+    });
+
+    it('Mod', () => {
+      expect(applied('Mod', [1, 0], 'x', 'm')).toMatchInlineSnapshot(`1`);
+      expect(applied('Mod', [0, 1], 'x', 'm')).toMatchInlineSnapshot(
+        `-floor(x / m)`
+      );
+    });
+
+    it('a partial without a closed form stays inert', () => {
+      expect(applied('BesselJ', [1, 0], 'n', 'x')).toMatchInlineSnapshot(
+        `Apply(Derivative("BesselJ", 1, 0), n, x)`
+      );
+      // `Sin` takes one argument
+      expect(applied('Sin', [1, 0], 'x', 'y')).toMatchInlineSnapshot(
+        `Apply(Derivative(sin, 1, 0), x, y)`
+      );
+    });
+
+    it('a user function of two arguments', () => {
+      const ce = new ComputeEngine();
+      ce.parse('h(u, w) \\coloneq u^2 \\sin(w)').evaluate();
+      ce.declare('g', '(real, real) -> real');
+      const at = (head: string, orders: number[]) =>
+        ce
+          .box(['Apply', ['Derivative', head, ...orders], 'a', 'b'])
+          .evaluate()
+          .toString();
+      expect(at('h', [1, 0])).toBe('2a * sin(b)');
+      expect(at('h', [1, 1])).toBe('2a * cos(b)');
+      expect(at('g', [1, 0])).toBe('Apply(Derivative(g, 1, 0), a, b)');
+    });
+
+    it('declares nothing in the caller scope', () => {
+      const ce = new ComputeEngine();
+      ce.box(['Apply', ['Derivative', 'Arctan2', 1, 0], 'y', 'x']).evaluate();
+      ce.box(['Apply', ['Derivative', 'Power', 0, 1], 'x', 'n']).evaluate();
+      expect(ce.lookupDefinition('_1')).toBeUndefined();
+      expect(ce.lookupDefinition('_2')).toBeUndefined();
+      // The parameters of the function literal are not declared there either
+      expect(ce.lookupDefinition('x_1')).toBeUndefined();
+      expect(ce.lookupDefinition('x_2')).toBeUndefined();
+    });
+
+    it('a caller binding of a parameter name does not change the result', () => {
+      const ce = new ComputeEngine();
+      ce.declare('x_1', 'string');
+      const result = ce.box(['Derivative', 'Arctan2', 1, 0]).evaluate();
+      expect(result.isValid).toBe(true);
+      expect(ce.box(['Apply', result, 1, 2]).N().re).toBeCloseTo(2 / 5);
+      expect(ce.box('x_1').type.toString()).toBe('string');
+      expect(ce.lookupDefinition('x_2')).toBeUndefined();
+    });
+
+    it('gives the same result as nested D', () => {
+      // The index form is evaluated as the nested `D` over fresh symbols, so
+      // the two forms give the same expression.
+      const ce = new ComputeEngine();
+      ce.parse('u(a, b) \\coloneq \\sin(a b) e^{a + b^2}').evaluate();
+      for (const head of ['Arctan2', 'Power', 'u']) {
+        const index = ce
+          .box(['Apply', ['Derivative', head, 2, 1], 'y', 'x'])
+          .evaluate();
+        const nested = ce
+          .box(['D', ['D', ['D', [head, 'y', 'x'], 'y'], 'y'], 'x'])
+          .evaluate();
+        expect(index.isSame(nested)).toBe(true);
+      }
+      expect(ce.lookupDefinition('_1')).toBeUndefined();
+      expect(ce.lookupDefinition('_2')).toBeUndefined();
+    });
+
+    it('a derivative with respect to the callee of Apply stays inert', () => {
+      // The callee is a function, not a number: there is no closed form.
+      // Before, the rules took `_1(_2)` as a constant in `_1` and gave 0.
+      expect(
+        engine.box(['Derivative', 'Apply', 1, 0]).evaluate().toString()
+      ).toBe('Derivative("Apply", 1, 0)');
+      expect(
+        engine.box(['Derivative', 'Apply', 1, 1]).evaluate().toString()
+      ).toBe('Derivative("Apply", 1, 1)');
+      const ce = new ComputeEngine();
+      expect(
+        ce.box(['D', ['Apply', 'g', 'x'], 'g']).evaluate().toString()
+      ).toBe('D(g(x), g)');
+    });
+  });
+
+  describe('Arctan2 partial derivatives', () => {
+    // ∂/∂y atan2(y, x) = x/(x² + y²) and ∂/∂x atan2(y, x) = −y/(x² + y²),
+    // in all four quadrants. Each closed form is also checked against a
+    // central difference of `Arctan2(…).N()`.
+    const at2 = (y: number, x: number) => engine.box(['Arctan2', y, x]).N().re;
+    const h = 1e-6;
+    const POINTS = [
+      [1.3, 0.7],
+      [0.6, -1.1],
+      [-0.8, 1.7],
+      [-1.4, -0.9],
+    ];
+
+    it('d/dx Arctan2(y, x) = -y/(x^2 + y^2)', () => {
+      const result = engine.expr(['D', ['Arctan2', 'y', 'x'], 'x']).evaluate();
+      expect(result.toString()).toMatchInlineSnapshot(`-y / (x^2 + y^2)`);
+      for (const [x, y] of POINTS) {
+        const fd = (at2(y, x + h) - at2(y, x - h)) / (2 * h);
+        expect(result.subs({ x, y }).N().re).toBeCloseTo(fd, 6);
+      }
+    });
+
+    it('d/dy Arctan2(y, x) = x/(x^2 + y^2)', () => {
+      const result = engine.expr(['D', ['Arctan2', 'y', 'x'], 'y']).evaluate();
+      expect(result.toString()).toMatchInlineSnapshot(`x / (x^2 + y^2)`);
+      for (const [x, y] of POINTS) {
+        const fd = (at2(y + h, x) - at2(y - h, x)) / (2 * h);
+        expect(result.subs({ x, y }).N().re).toBeCloseTo(fd, 6);
+      }
+    });
+
+    it('d/dt Arctan2(t^2, cos t) closes by the chain rule', () => {
+      const result = engine
+        .expr(['D', ['Arctan2', ['Power', 't', 2], ['Cos', 't']], 't'])
+        .evaluate();
+      expect(result.has('Derivative')).toBe(false);
+      expect(result.has('D')).toBe(false);
+      const f = (t: number) => at2(t * t, Math.cos(t));
+      for (const t of [0.4, 1.2, 2.3, -0.7, 3.5]) {
+        const fd = (f(t + h) - f(t - h)) / (2 * h);
+        expect(result.subs({ t }).N().re).toBeCloseTo(fd, 6);
+      }
+    });
+
+    it('d/dx Arctan2(y, 3) = 0', () => {
+      const result = engine.expr(['D', ['Arctan2', 'y', 3], 'x']).evaluate();
+      expect(result.toString()).toMatchInlineSnapshot(`0`);
+    });
+
+    it('the multi-index Derivative of Arctan2 closes', () => {
+      expect(
+        engine
+          .box(['Apply', ['Derivative', 'Arctan2', 1, 0], 'y', 'x'])
+          .evaluate()
+          .toString()
+      ).toMatchInlineSnapshot(`x / (x^2 + y^2)`);
+      expect(
+        engine
+          .box(['Apply', ['Derivative', 'Arctan2', 0, 1], 'y', 'x'])
+          .evaluate()
+          .toString()
+      ).toMatchInlineSnapshot(`-y / (x^2 + y^2)`);
+      expect(
+        engine
+          .box(['Apply', ['Derivative', 'Arctan2', 1, 1], 'y', 'x'])
+          .evaluate()
+          .toString()
+      ).toMatchInlineSnapshot(`(-x^2 + y^2) / (x^2 + y^2)^2`);
+    });
+
+    it('a bare Derivative of Arctan2 is the partial in the first argument', () => {
+      // Arctan2 takes two arguments, so a bare `Derivative(Arctan2)` is
+      // padded with order 0 to `Derivative(Arctan2, 1, 0)`, as for a user
+      // function of two parameters: ∂/∂y atan2(y, x) = x / (x² + y²).
+      expect(
+        engine.box(['Derivative', 'Arctan2']).evaluate().toString()
+      ).toMatchInlineSnapshot(`("x_1", "x_2") => "x_2" / ("x_1"^2 + "x_2"^2)`);
+    });
+  });
+
   describe('Discrete functions (step functions)', () => {
     // CORRECTNESS_FINDINGS.md CR-P1-1: CE's Mod is the real sawtooth
     // ((u mod c) + c) mod c, piecewise-linear with slope u' almost
@@ -886,10 +1201,45 @@ describe('Multi-argument function derivatives', () => {
       expect(result.toString()).toMatchInlineSnapshot(`2x`);
     });
 
-    it('d/dx mod(x, x^2) stays symbolic (modulus depends on x)', () => {
+    // Mod(u, c) = u − c·floor(u/c) (floored: the result has the sign of c),
+    // so between two jumps d/dv Mod(u, c) = u′ − floor(u/c)·c′. Checked
+    // against a central difference of `Mod(…).N()` away from the jumps.
+    const modN = (x: number, m: number) => engine.box(['Mod', x, m]).N().re;
+    const slope = (f: (t: number) => number, t: number) =>
+      (f(t + 1e-6) - f(t - 1e-6)) / 2e-6;
+
+    it('d/dm mod(x, m) = -floor(x/m), for both signs of x and m', () => {
+      const result = engine.expr(['D', ['Mod', 'x', 'm'], 'm']).evaluate();
+      expect(result.toString()).toMatchInlineSnapshot(`-floor(x / m)`);
+      for (const x of [5.5, -5.5, 7.3])
+        for (const m of [2, -2, 2.4, -2.4, 0.7])
+          expect(result.subs({ x, m }).N().re).toBeCloseTo(
+            slope((t) => modN(x, t), m),
+            5
+          );
+    });
+
+    it('d/dx mod(x, x^2) = 1 - 2x floor(1/x) (modulus depends on x)', () => {
       const expr = engine.expr(['D', ['Mod', 'x', ['Square', 'x']], 'x']);
       const result = expr.evaluate();
-      expect(result.operator).toBe('D');
+      expect(result.toString()).toMatchInlineSnapshot(`-2x * floor(1 / x) + 1`);
+      for (const x of [0.3, 0.7, 1.7, -0.3, -1.6, 2.5])
+        expect(result.subs({ x }).N().re).toBeCloseTo(
+          slope((t) => modN(t, t * t), x),
+          5
+        );
+    });
+
+    it('d/dx round(x, 2) = 0, and stays symbolic in the digit count', () => {
+      expect(
+        engine
+          .expr(['D', ['Round', 'x', 2], 'x'])
+          .evaluate()
+          .toString()
+      ).toMatchInlineSnapshot(`0`);
+      expect(
+        engine.expr(['D', ['Round', 2.5, 'n'], 'n']).evaluate().operator
+      ).toBe('D');
     });
 
     it('d/dx gcd(x, 6) = 0', () => {
@@ -983,6 +1333,79 @@ describe('User-defined function derivatives', () => {
   it('f(3) should evaluate to 6', () => {
     const result = ce.parse('f(3)').evaluate();
     expect(result.toString()).toMatchInlineSnapshot(`6`);
+  });
+});
+
+describe('Derivative(f) when the closed form holds the Derivative of another function', () => {
+  it('is a function literal, as a complete closed form is', () => {
+    const ce = new ComputeEngine();
+    ce.parse('h(x) := g(x) \\cdot x').evaluate();
+    const result = ce.box(['Derivative', 'h']).evaluate();
+    expect(result.json).toMatchInlineSnapshot(`
+      [
+        Function,
+        [
+          Block,
+          [
+            Add,
+            [
+              Multiply,
+              x,
+              [
+                Apply,
+                [
+                  Derivative,
+                  g,
+                  1,
+                ],
+                x,
+              ],
+            ],
+            [
+              g,
+              x,
+            ],
+          ],
+        ],
+        x,
+      ]
+    `);
+    expect(ce.lookupDefinition('_')).toBeUndefined();
+
+    const applied = 't * Apply(Derivative(g, 1), t) + g(t)';
+    expect(
+      ce.box(['Apply', ['Derivative', 'h'], 't']).evaluate().toString()
+    ).toBe(applied);
+    expect(ce.parse("h'(t)").evaluate().toString()).toBe(applied);
+
+    // Once `g` is defined, the application has a value: h'(x) = 3x².
+    ce.parse('g(x) := x^2').evaluate();
+    expect(ce.box(['Apply', ['Derivative', 'h'], 2]).N().re).toBe(12);
+    expect(ce.parse("h'(2)").N().re).toBe(12);
+  });
+
+  it('a function literal operand keeps its parameter', () => {
+    const ce = new ComputeEngine();
+    const result = ce
+      .box(['Derivative', ['Function', ['Multiply', 'x', ['g', 'x']], 'x']])
+      .evaluate();
+    expect(result.operator).toBe('Function');
+    expect(result.toString()).toMatchInlineSnapshot(
+      `(x) => x * Apply(Derivative(g, 1), x) + g(x)`
+    );
+  });
+
+  it('the derivative of a recursive function stays inert', () => {
+    // The closed form holds `Derivative(f, 1)`. As a function literal, its
+    // body would evaluate `Derivative(f)` again at each application.
+    const ce = new ComputeEngine();
+    ce.parse('f(x) := x f(x-1)').evaluate();
+    expect(ce.box(['Derivative', 'f']).evaluate().toString()).toBe(
+      'Derivative(f)'
+    );
+    expect(
+      ce.box(['Apply', ['Derivative', 'f'], 't']).evaluate().toString()
+    ).toBe('Apply(Derivative(f), t)');
   });
 });
 
@@ -1492,6 +1915,217 @@ describe('Derivative order operand', () => {
         .evaluate()
         .toString()
     ).toBe('(x) => x^2');
+  });
+
+  test('an order that is not a non-negative integer stays inert', () => {
+    // Each order was rounded down, so `Derivative(Power, -1, 1)` was
+    // evaluated as `Derivative(Power, 0, 1)` and `Derivative(Sin, 1.5)` as
+    // the first derivative. `D(f, {x, n})` already stays inert for such `n`.
+    const ce = new ComputeEngine();
+    for (const orders of [
+      [-1, 1],
+      [1.5, 1],
+      [0.5, 0],
+      ['n', 1],
+    ]) {
+      expect(ce.box(['Derivative', 'Power', ...orders]).evaluate().json).toEqual(
+        ['Derivative', 'Power', ...orders]
+      );
+      expect(
+        ce.box(['Apply', ['Derivative', 'Power', ...orders], 2, 3]).evaluate()
+          .json
+      ).toEqual(['Apply', ['Derivative', 'Power', ...orders], 2, 3]);
+    }
+    expect(ce.box(['Derivative', 'Sin', 1.5]).evaluate().json).toEqual([
+      'Derivative',
+      'Sin',
+      1.5,
+    ]);
+    expect(ce.box(['Derivative', 'Sin', -1]).evaluate().json).toEqual([
+      'Derivative',
+      'Sin',
+      -1,
+    ]);
+  });
+
+  test('the number of orders must agree with the number of arguments', () => {
+    const ce = new ComputeEngine();
+    // More orders than arguments: `differentiate()` truncated the order
+    // vector, so `D(g^{(1,1)}(x), x)` gave `g''(x)`.
+    for (const expr of [
+      ['D', ['Apply', ['Derivative', 'g', 1, 1], 'x'], 'x'],
+      ['D', ['Apply', ['Derivative', 'g', 1, 0], 'x'], 'x'],
+    ])
+      expect(ce.box(expr).evaluate().json).toEqual(expr);
+    // A bare `Derivative(g)` is order 1 in the first argument. It was read
+    // as order 0 when there were several arguments.
+    expect(
+      ce.box(['D', ['Apply', ['Derivative', 'g'], 'x', 'y'], 'x']).evaluate()
+        .json
+    ).toEqual(['Apply', ['Derivative', 'g', 2, 0], 'x', 'y']);
+    // Fewer orders than arguments are padded with order 0.
+    expect(
+      ce.box(['D', ['Apply', ['Derivative', 'g', 1], 'x', 'y'], 'x']).evaluate()
+        .json
+    ).toEqual(['Apply', ['Derivative', 'g', 2, 0], 'x', 'y']);
+
+    // The evaluate handler: more orders than parameters threw "Too many
+    // arguments"; now the node stays inert.
+    ce.assign('h', ce.parse('(x, y) \\mapsto x^2 y'));
+    expect(ce.box(['Derivative', 'h', 1, 0, 0]).evaluate().json).toEqual([
+      'Derivative',
+      'h',
+      1,
+      0,
+      0,
+    ]);
+    expect(
+      ce.box(['Apply', ['Derivative', 'h', 1, 0, 0], 2, 3]).evaluate().json
+    ).toEqual(['Apply', ['Derivative', 'h', 1, 0, 0], 2, 3]);
+    // The same when every order is 0: the check of the number of orders
+    // comes first. `Derivative(Sin, 0, 0)` was `Sin`.
+    for (const d of [
+      ['Derivative', 'Sin', 0, 0],
+      ['Derivative', 'h', 0, 0, 0],
+      ['Derivative', ['Function', ['Power', 'x', 2], 'x'], 0, 0],
+    ])
+      expect(ce.box(d).evaluate().json).toEqual(ce.box(d).json);
+    expect(ce.box(['Derivative', 'Sin', 0]).evaluate().json).toEqual('Sin');
+    expect(ce.box(['Derivative', 'h', 0, 0]).evaluate().json).toEqual('h');
+    // One order on a symbol bound to a bivariate literal is the partial in
+    // the first parameter. It gave `(x) => x^2` and its application threw.
+    // ∂/∂x x²y = 2xy and ∂²/∂x² x²y = 2y.
+    expect(ce.box(['Derivative', 'h', 1]).evaluate().toString()).toBe(
+      '(x, y) => 2x * y'
+    );
+    expect(ce.parse("h'(2, 3)").evaluate().toString()).toBe('12');
+    expect(ce.parse("h''(2, 3)").evaluate().toString()).toBe('6');
+    // Two orders on a function of three parameters: the third is order 0.
+    // ∂²/∂a∂b a²·b·c³ = 2a·c³, which is 500 at (2, 3, 5).
+    ce.parse('u(a, b, c) \\coloneq a^2 b c^3').evaluate();
+    expect(
+      ce.box(['Apply', ['Derivative', 'u', 1, 1], 2, 3, 5]).evaluate().toString()
+    ).toBe('500');
+  });
+
+  test('a single order on an operator of two arguments is padded', () => {
+    // `Derivative(Arctan2, 1)` and a bare `Derivative(Arctan2)` are
+    // `Derivative(Arctan2, 1, 0)`: ∂/∂y atan2(y, x) = x / (x² + y²). They
+    // stayed inert, while the explicit multi-index evaluated.
+    const ce = new ComputeEngine();
+    for (const d of [
+      ['Derivative', 'Arctan2'],
+      ['Derivative', 'Arctan2', 1],
+      ['Derivative', 'Arctan2', 1, 0],
+    ]) {
+      expect(ce.box(['Apply', d, 'y', 'x']).evaluate().toString()).toBe(
+        'x / (x^2 + y^2)'
+      );
+      // Against a central difference of atan2 in its first argument.
+      const [y, x, h] = [0.7, -1.3, 1e-6];
+      const fd = (Math.atan2(y + h, x) - Math.atan2(y - h, x)) / (2 * h);
+      expect(ce.box(['Apply', d, y, x]).N().re).toBeCloseTo(fd, 8);
+    }
+    // More orders than arguments stay inert.
+    expect(ce.box(['Derivative', 'Arctan2', 1, 0, 0]).evaluate().json).toEqual(
+      ['Derivative', 'Arctan2', 1, 0, 0]
+    );
+    // A one-argument operator is unchanged.
+    expect(ce.box(['Derivative', 'Sin', 1]).evaluate().toString()).toBe(
+      '(x) => cos(x)'
+    );
+    expect(ce.box(['Derivative', 'Sin']).evaluate().toString()).toBe(
+      '(x) => cos(x)'
+    );
+  });
+
+  test('D of an applied Derivative with an invalid order stays inert', () => {
+    // The chain rule over `Apply(Derivative(f, α), …)` bumps one order of
+    // the multi-index. Each order was rounded down first, so
+    // `D(f^{(1.5)}(x), x)` gave `f''(x)` and `D(f^{(-1)}(x), x)` gave
+    // `Derivative(f, 0)(x)`.
+    const ce = new ComputeEngine();
+    for (const o of [-1, 1.5, 'n']) {
+      for (const expr of [
+        ['D', ['Apply', ['Derivative', 'f', o], 'x'], 'x'],
+        ['D', ['Apply', ['Derivative', 'g', 1, o], 'x', 'y'], 'y'],
+      ])
+        expect(ce.box(expr).evaluate().json).toEqual(expr);
+    }
+    // A valid order is still bumped.
+    expect(
+      ce.box(['D', ['Apply', ['Derivative', 'g', 1, 2], 'x', 'y'], 'y'])
+        .evaluate().json
+    ).toEqual(['Apply', ['Derivative', 'g', 1, 3], 'x', 'y']);
+  });
+
+  test('a very large order stays inert', () => {
+    // The work and the memory scale with the value of the order: the
+    // multi-index arm built a nested `D` tree of one node for each unit of
+    // order, and `Derivative(Power, 1000000000, 0)` used up the heap.
+    const ce = new ComputeEngine();
+    const huge = 1000000000;
+    expect(ce.box(['Derivative', 'Power', huge, 0]).evaluate().json).toEqual([
+      'Derivative',
+      'Power',
+      huge,
+      0,
+    ]);
+    expect(
+      ce.box(['Apply', ['Derivative', 'Power', huge, 0], 2, 3]).evaluate().json
+    ).toEqual(['Apply', ['Derivative', 'Power', huge, 0], 2, 3]);
+    expect(
+      ce.box(['Apply', ['Derivative', 'Power', huge, 0], 2, 3]).N().json
+    ).toEqual(['Apply', ['Derivative', 'Power', huge, 0], 2, 3]);
+    expect(ce.box(['Derivative', 'Sin', huge]).evaluate().json).toEqual([
+      'Derivative',
+      'Sin',
+      huge,
+    ]);
+    expect(
+      ce
+        .box([
+          'Derivative',
+          ['Function', ['Multiply', 'x', 'y'], 'x', 'y'],
+          huge,
+          0,
+        ])
+        .evaluate().operator
+    ).toBe('Derivative');
+    // The evaluation of the nested `D` tree recursed once for each unit of
+    // order and overflowed the call stack near 500.
+    expect(ce.box(['Derivative', 'Power', 500, 0]).evaluate().json).toEqual([
+      'Derivative',
+      'Power',
+      500,
+      0,
+    ]);
+  });
+
+  test('a partial of a function literal with no closed form stays inert', () => {
+    // `differentiate()` leaves a `D` where it has no rule. Made a function
+    // literal, that `D` kept the differentiation variable free, so an
+    // application lost that argument: `Apply(Derivative(f, 0, 1), 1.5, 2)`
+    // gave `D(Round(1.5, y), y)`.
+    const ce = new ComputeEngine();
+    ce.parse('f(x, y) \\coloneq \\operatorname{Round}(x, y)').evaluate();
+    expect(ce.box(['Derivative', 'f', 0, 1]).evaluate().json).toEqual([
+      'Derivative',
+      'f',
+      0,
+      1,
+    ]);
+    expect(
+      ce.box(['Apply', ['Derivative', 'f', 0, 1], 1.5, 2]).evaluate().json
+    ).toEqual(['Apply', ['Derivative', 'f', 0, 1], 1.5, 2]);
+    // An inline literal: the partial of `PolyGamma(x, y)` in its order `x`.
+    const g = ['Function', ['PolyGamma', 'x', 'y'], 'x', 'y'];
+    expect(ce.box(['Derivative', g, 1, 0]).evaluate().operator).toBe(
+      'Derivative'
+    );
+    expect(
+      ce.box(['Apply', ['Derivative', g, 1, 0], 1, 2]).evaluate().operator
+    ).toBe('Apply');
   });
 });
 

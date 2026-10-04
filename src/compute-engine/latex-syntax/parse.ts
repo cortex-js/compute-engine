@@ -318,6 +318,58 @@ const TEX_UNIT_TOKENS: readonly string[][] = [
   'nd',
 ].map((unit) => [...unit]);
 
+/**
+ * The number of a run of decimal digits, with no loss: a run that a
+ * JavaScript number cannot hold exactly (`9007199254740993`) is a number
+ * string, `{ num: digits }`.
+ */
+function digitRunNumber(digits: string): MathJsonExpression {
+  const value = Number(digits);
+  return Number.isSafeInteger(value) ? value : { num: digits };
+}
+
+/**
+ * Whether the tokens `tokens` are only prime marks and white space, in any
+ * spelling that the parser reads as a prime: `'`, `\prime`, `\doubleprime`,
+ * `\tripleprime`, a `^` followed by one of these commands (`^\prime`), or a
+ * `^` followed by a braced run of these commands (`^{\prime}`,
+ * `^{\prime\prime}`, `^{\doubleprime}`). The serializer writes a prime as
+ * `^{\prime}`.
+ */
+function isPrimeMarkSpan(tokens: readonly LatexToken[]): boolean {
+  const isPrimeCommand = (t: LatexToken | undefined) =>
+    t === '\\prime' || t === '\\doubleprime' || t === '\\tripleprime';
+  let i = 0;
+  const skipSpace = () => {
+    while (tokens[i] === '<space>') i++;
+  };
+  while (i < tokens.length) {
+    const t = tokens[i];
+    if (t === '<space>' || t === "'" || isPrimeCommand(t)) {
+      i++;
+      continue;
+    }
+    if (t !== '^') return false;
+    i++;
+    skipSpace();
+    if (isPrimeCommand(tokens[i])) {
+      i++;
+      continue;
+    }
+    if (tokens[i] !== '<{>') return false;
+    i++;
+    skipSpace();
+    if (!isPrimeCommand(tokens[i])) return false;
+    while (isPrimeCommand(tokens[i])) {
+      i++;
+      skipSpace();
+    }
+    if (tokens[i] !== '<}>') return false;
+    i++;
+  }
+  return true;
+}
+
 /** Map of common bare function names (e.g. `sin(x)` without a backslash,
  * accepted in non-strict mode) to their MathJSON operator.
  * See `tryParseBareFunction()`. */
@@ -924,7 +976,8 @@ export class _Parser implements Parser {
       expr,
       (code, start, end, detail) =>
         this._emitAmbiguity(code, start, end, detail),
-      skippedTail
+      skippedTail,
+      (word) => Object.prototype.hasOwnProperty.call(BARE_FUNCTION_MAP, word)
     );
   }
 
@@ -1053,6 +1106,34 @@ export class _Parser implements Parser {
   // step of `parsePrimary()`. The span of the `ambiguous-exponent-end`
   // diagnostic starts there.
   private _scriptBaseStart = -1;
+
+  // The last symbol read by `parseSymbol()` from a spelling that takes a
+  // subscript into the symbol name (`x_1`, `\alpha_{01}`, `\pi_0`): its
+  // token span, its name, and the diagnostics sequence numbers before and
+  // after it was read (see `_diagnosticsCheckpoint()`). `parseSupsub()`
+  // uses it to read a subscript after a superscript (`x^2_{01}`) as the
+  // symbol parser reads a subscript before it (`x_{01}^2`).
+  private _subscriptableSymbol: {
+    start: number;
+    end: number;
+    id: string;
+    seqStart: number;
+    seqEnd: number;
+  } | null = null;
+
+  // The token index of a spelled-out name at the end of a run of letters,
+  // which `tryParseBareRun()` did not read because a script follows it
+  // (`alpha` in `xalpha_1`), or of the letters after an argument of one
+  // letter that `parseToken()` read (`alpha` in `e^xalpha_1`), or -1.
+  // `tryParseBareSymbol()` reads a name at this index although a letter
+  // comes before it.
+  private _bareNameStart = -1;
+
+  // The token index of the letters after an argument of one letter that
+  // `parseToken()` read, when these letters are a bare function name
+  // (`sin` in `e^xsin(t)`), or -1. `tryParseBareFunction()` reads a name at
+  // this index although a letter comes before it.
+  private _bareFunctionStart = -1;
 
   // The bracket nesting level of each token (see `layoutOf()` in
   // `lenient-ambiguity.ts`), computed on first use. The token stream does
@@ -1668,6 +1749,21 @@ export class _Parser implements Parser {
     return found;
   }
 
+  /**
+   * Skip the white space before a script. A spacing command (`\,`, `\;`,
+   * `\quad`, `\hspace{1em}`) is skipped only when a `_` or a `^` follows it:
+   * it is then white space before the script, and not the base of the
+   * script. So `x\,_{01}` is read as `x _{01}`, not as a subscript of the
+   * space. Otherwise the index does not move past the spacing command.
+   */
+  private skipSpaceBeforeScript(): void {
+    this.skipSpace();
+    const start = this.index;
+    this.skipVisualSpace();
+    if (this.peek !== '_' && this.peek !== '^' && !this.atDoubleStar())
+      this.index = start;
+  }
+
   skipVisualSpace(): void {
     if (!this.options.skipSpace) return;
 
@@ -2063,7 +2159,53 @@ export class _Parser implements Parser {
     // Note: `x^23` is `x^{2}3`, not x^{23}
     if (/^[0-9]$/.test(this.peek)) return parseInt(this.nextToken(), 10);
 
-    return this.parseGenericExpression() ?? this.parseSymbol();
+    const start = this.index;
+    const result = this.parseGenericExpression() ?? this.parseSymbol();
+    // In non-strict mode, a spelled-out Greek name directly after an
+    // argument of one letter is read as a name (see `_bareNameStart`), as
+    // `tryParseBareRun()` splits a run of letters: `e^xalpha_1` is
+    // `e^x·alpha_1` and `\sqrt xalpha_1` is `\sqrt{x}·alpha_1`, as
+    // `xalpha_1` is `x·alpha_1`. Before, the name was read one letter at a
+    // time: `e^x·a·l·p·h·a_1`. The letter and the letters after it must
+    // split there with the rule of `tryParseBareRun()`: the letters after
+    // the argument are one Greek name, and no Greek name starts at the
+    // argument. So `\sqrt beta` stays `\sqrt{b}·e·t·a`, not
+    // `\sqrt{b}·eta`, and `x^foo` stays `x^f·o·o`, not `x^f·∞` (`oo` is
+    // not a Greek name).
+    // The same applies to a bare function name (see `_bareFunctionStart`):
+    // `e^xsin(t)` is `e^x·sin(t)`, as `e^x sin(t)` is. It was
+    // `e^x·s·i·n(t)`. `tryParseBareFunction()` reads the name only when a
+    // parenthesis or an argument follows it. A word that a function name
+    // starts at the argument is not split either: `x^acos t` stays as it
+    // was.
+    if (
+      result !== null &&
+      this.options.strict === false &&
+      this.index === start + 1 &&
+      /^[a-zA-Z]$/.test(this._tokens[start]) &&
+      /^[a-zA-Z]$/.test(this.peek)
+    ) {
+      let run = '';
+      let end = start;
+      while (/^[a-zA-Z]$/.test(this._tokens[end] ?? ''))
+        run += this._tokens[end++];
+      const names = _Parser.SEGMENTABLE_SYMBOLS;
+      const isFunctionName = (word: string) =>
+        BARE_FUNCTION_MAP[word] !== undefined ||
+        (PARENTHESIZED_BARE_FUNCTION_MAP[word] !== undefined &&
+          this.parenthesisFollows(end));
+      let nameAtStart = false;
+      for (let n = 2; n <= run.length && !nameAtStart; n++)
+        nameAtStart =
+          names[run.slice(0, n)] !== undefined ||
+          isFunctionName(run.slice(0, n));
+      const rest = run.slice(1);
+      if (!nameAtStart && names[rest] !== undefined)
+        this._bareNameStart = this.index;
+      else if (!nameAtStart && isFunctionName(rest))
+        this._bareFunctionStart = this.index;
+    }
+    return result;
   }
 
   /**
@@ -2997,6 +3139,7 @@ export class _Parser implements Parser {
     if (this.atTerminator(until)) return null;
 
     const start = this.index;
+    const seqStart = this._diagnosticsCheckpoint();
 
     //
     // Is there a custom parser for this symbol?
@@ -3044,9 +3187,16 @@ export class _Parser implements Parser {
             !this.resolveSymbol(joined)?.type.matches('error')
           )
             this.emitSymbolReference(joined, start, this.index);
+          // The end of an unbraced letter subscript has a second reading
+          // here as it has on a Latin base: `Δ_a2` is `Δ_a·2`, as `x_a2` is
+          // `x_a·2`.
+          if (joined !== result) this.emitSubscriptEndAmbiguity(joined, start);
+          this.recordSubscriptableSymbol(joined, start, seqStart);
           return joined;
         }
       }
+      if (typeof result === 'string')
+        this.recordSubscriptableSymbol(result, start, seqStart);
       return result;
     }
 
@@ -3071,12 +3221,146 @@ export class _Parser implements Parser {
           text: id,
         });
       this.emitSubscriptEndAmbiguity(id, start);
+      // A single letter takes a subscript into its name, and so does any
+      // other spelling that is not the name of a function (see
+      // `parseSymbol()` in `parse-symbol.ts`).
+      if (
+        /^[a-zA-Z]$/.test(this._tokens[start]) ||
+        /^\p{XIDS}$/u.test(this._tokens[start]) ||
+        !this.isFunctionTriggerName(id)
+      )
+        this.recordSubscriptableSymbol(id, start, seqStart);
       return id;
     }
 
     // This was a symbol, but not a valid symbol. Backtrack
     this.index = start;
     return null;
+  }
+
+  /**
+   * Record that the symbol `id`, read from the token `start` to the index,
+   * takes a subscript into its name. `seqStart` is the diagnostics
+   * checkpoint taken before the symbol was read. See
+   * `_subscriptableSymbol`.
+   */
+  private recordSubscriptableSymbol(
+    id: string,
+    start: number,
+    seqStart: number
+  ): void {
+    this._subscriptableSymbol = {
+      start,
+      end: this.index,
+      id,
+      seqStart,
+      seqEnd: this._diagnosticsCheckpoint(),
+    };
+  }
+
+  /**
+   * The symbol spelled by the tokens `base` was read, then a superscript,
+   * and the index is at a `_`. When a symbol or expression entry of the
+   * dictionary has a trigger made of `base` and the tokens at the index
+   * (`\delta` `_` for `KroneckerDelta`, `\mu` `_` `0` for `Mu0`), read
+   * that entry as the parser reads it when the subscript comes first, and
+   * return its result with the index after it. The longest trigger has the
+   * first priority. Otherwise, return `null` with the index unchanged.
+   */
+  private parseSubscriptTriggerAfterBase(
+    base: LatexToken[]
+  ): MathJsonExpression | null {
+    const start = this.index;
+    if (base.length === 0) return null;
+    const max = Math.min(
+      (this._dictionary.triggerStartMax.get(base[0]) ?? 0) - base.length,
+      this._tokens.length - start
+    );
+    for (let n = max; n >= 1; n--) {
+      const trigger = tokensToString([
+        ...base,
+        ...this._tokens.slice(start, start + n),
+      ]);
+      for (const def of [
+        ...(this._dictionary.symbolByTrigger.get(trigger) ?? []),
+        ...(this._dictionary.expressionByTrigger.get(trigger) ?? []),
+      ]) {
+        this.index = start + n;
+        const result =
+          typeof def.parse === 'function'
+            ? def.parse(this, undefined)
+            : (def.name ?? null);
+        if (result !== null) return result;
+      }
+    }
+    this.index = start;
+    return null;
+  }
+
+  /**
+   * Remove the `undeclared-symbol` diagnostic that `parseSymbol()` recorded
+   * for the symbol `base` (see `_subscriptableSymbol`). Use it when a later
+   * step joins subscripts to the name: the symbol is then the joined name,
+   * not the base.
+   */
+  private removeSymbolReference(base: {
+    id: string;
+    seqStart: number;
+    seqEnd: number;
+  }): void {
+    if (this.diagnostics === null) return;
+    const d = this.diagnostics;
+    let w = 0;
+    for (const e of d)
+      if (
+        e.code !== 'undeclared-symbol' ||
+        e.detail?.name !== base.id ||
+        e._seq < base.seqStart ||
+        e._seq >= base.seqEnd
+      )
+        d[w++] = e;
+    d.length = w;
+  }
+
+  /**
+   * The symbol `base`, with prime marks after it, took the subscripts from
+   * the token `subscriptStart` to the index into the name `joined`:
+   * `x'_{01}` is the derivative of `x_01`. Report the symbol as the symbol
+   * parser reports `x_{01}'`: an `undeclared-symbol` diagnostic for
+   * `joined`, not for `base`. The diagnostic of `base` is removed when
+   * `base` is the last symbol that `parseSymbol()` read and only prime
+   * marks come between it and `subscriptStart`. The span of the new
+   * diagnostic then starts at `base`, else at `subscriptStart`.
+   */
+  _reportJoinedSymbol(
+    base: string,
+    joined: string,
+    subscriptStart: number
+  ): void {
+    const symbolBase = this._subscriptableSymbol;
+    let start = subscriptStart;
+    if (
+      symbolBase !== null &&
+      symbolBase.id === base &&
+      this._tokens
+        .slice(symbolBase.end, subscriptStart)
+        .every((token) =>
+          [
+            "'",
+            '\\prime',
+            '\\doubleprime',
+            '\\tripleprime',
+            '^',
+            '<{>',
+            '<}>',
+          ].includes(token)
+        )
+    ) {
+      start = symbolBase.start;
+      this.removeSymbolReference(symbolBase);
+    }
+    if (!this.resolveSymbol(joined)?.type.matches('error'))
+      this.emitSymbolReference(joined, start, this.index);
   }
 
   /**
@@ -3180,8 +3464,15 @@ export class _Parser implements Parser {
     const start = this.index;
 
     // Word boundary: if the preceding token is a letter, we're in the
-    // middle of a word that was partially consumed — don't match.
-    if (start > 0 && /^[a-zA-Z]$/.test(this._tokens[start - 1])) return null;
+    // middle of a word that was partially consumed — don't match. The
+    // exception is a name after an argument of one letter (`sin` in
+    // `e^xsin(t)`, see `_bareFunctionStart`).
+    if (
+      start > 0 &&
+      /^[a-zA-Z]$/.test(this._tokens[start - 1]) &&
+      start !== this._bareFunctionStart
+    )
+      return null;
 
     // Collect consecutive letter tokens to form a potential function name
     let name = '';
@@ -3252,6 +3543,9 @@ export class _Parser implements Parser {
 
     // Check for optional subscript: log_2(x) or log_{10}(x)
     let subscript: MathJsonExpression | null = null;
+    // True when the subscript or the base of `log` is the `0` of a longer
+    // run of digits (`log_01(x)`, `log012(x)`)
+    let zeroRun = false;
     if (this.peek === '_') {
       this.index++; // skip '_'
       subscript = this.parseGroup();
@@ -3261,12 +3555,15 @@ export class _Parser implements Parser {
           subscript = this.peek;
           this.index++;
         } else {
+          // A run of digits that starts with `0` gives only the `0`, as in
+          // the strict grammar: the number value of `01` drops the zero.
           let digits = '';
-          while (!this.atEnd && /^[0-9]$/.test(this.peek)) {
+          while (!this.atEnd && /^[0-9]$/.test(this.peek) && digits !== '0') {
             digits += this.peek;
             this.index++;
           }
-          if (digits) subscript = parseInt(digits);
+          if (digits) subscript = digitRunNumber(digits);
+          zeroRun = digits === '0' && /^[0-9]$/.test(this.peek);
         }
         if (subscript === null) {
           this.index = start;
@@ -3288,12 +3585,14 @@ export class _Parser implements Parser {
       /^[0-9]$/.test(this.peek)
     ) {
       const digitsStart = this.index;
+      // As for a subscript (see above), a leading `0` is the whole base.
       let digits = '';
-      while (!this.atEnd && /^[0-9]$/.test(this.peek)) {
+      while (!this.atEnd && /^[0-9]$/.test(this.peek) && digits !== '0') {
         digits += this.peek;
         this.index++;
       }
-      subscript = parseInt(digits);
+      subscript = digitRunNumber(digits);
+      zeroRun = digits === '0' && /^[0-9]$/.test(this.peek);
       // `log 2 x` is read as the base-2 logarithm of `x`, and a person can
       // mean the logarithm of `2x`. Report it once the call is read (see
       // below). `log2 x` and `log2(x)`, with no white space, are the base-2
@@ -3321,8 +3620,7 @@ export class _Parser implements Parser {
           this.index++;
         }
         if (digits) {
-          const num = parseInt(digits);
-          exponent = neg ? -num : num;
+          exponent = digitRunNumber(neg ? '-' + digits : digits);
         } else {
           // Not a valid exponent, backtrack entirely
           this.index = start;
@@ -3368,6 +3666,18 @@ export class _Parser implements Parser {
         function: name,
       });
 
+    // The base of `log` is the `0` of a longer run of digits: `log_01(x)`
+    // and `log012(x)` are read as the logarithm in base 0 of `1(x)` and of
+    // `12(x)`, as the strict `\log_01(x)` is. A person never means base 0:
+    // the digits are a base with a leading zero, or a typing error. The
+    // code is the one of a subscript on another function name (`tan_01x`,
+    // reported below). The span is the call.
+    if (zeroRun && name === 'log')
+      this._emitAmbiguity('ambiguous-function-subscript', start, this.index, {
+        name,
+        subscript,
+      });
+
     // `log(x, 2)` is read as the logarithm of `x` in base 2, with the base
     // second as in Python and in spreadsheets, and other tools put the base
     // first (`log(2, x)`). Every `log` with two arguments in parentheses and
@@ -3403,6 +3713,18 @@ export class _Parser implements Parser {
         this._emitAmbiguity('ambiguous-function-argument', start, argEnd, {
           function: name,
         });
+      // A `!` after the argument and white space applies to the call:
+      // `tan x !` and `αtanπ !` are `(tan x)!` and `α·(tan π)!`, while
+      // `tan x!` is `tan(x!)`. A person can mean `tan(x!)`. The same holds
+      // for `!!`. `tan x != 0` is not a factorial and is not reported.
+      let bang = argEnd;
+      while (this._tokens[bang] === '<space>') bang++;
+      if (
+        bang > argEnd &&
+        this._tokens[bang] === '!' &&
+        this._tokens[bang + 1] !== '='
+      )
+        this._emitAmbiguity('ambiguous-factorial', start, bang + 1);
       let depth = 0;
       for (let k = plusSign ? argEnd : argStart; k < argEnd; k++) {
         const tok = this._tokens[k];
@@ -3446,6 +3768,78 @@ export class _Parser implements Parser {
         });
     }
 
+    // An exponent `-1`, unbraced (`sin^-1`) or braced (`sin^{-1}`, and
+    // `sin⁻¹`, which the tokenizer reads as `sin^{-1}`)
+    const inverseExponent =
+      exponent === -1 ||
+      (operator(exponent) === 'Negate' && operand(exponent, 1) === 1);
+
+    // A subscript on a function name other than `log` is kept as the strict
+    // grammar keeps it: `ln_3(x)` is `Log(x, 3)` as `\ln_3(x)` is, and
+    // `tan_1x` is `Apply(Subscript(Tan, 1), x)` as `\tan_1 x` is. Before,
+    // the subscript was read and then dropped (`tan_1x` was `tan(x)`). A
+    // person can mean another reading (`tan_1` as a name, or `ln` with no
+    // base), so the reading is reported.
+    if (subscript !== null && name !== 'log')
+      this._emitAmbiguity('ambiguous-function-subscript', start, this.index, {
+        name,
+        subscript,
+      });
+
+    // The inverse of a logarithm is a power, as in the strict grammar (see
+    // `parseLog()`): `ln^-1(x)` is `exp(x)`, `log^-1(x)` and `lg^-1(x)` are
+    // `10^x`, and a base replaces `e` or 10: `ln_3^-1(x)` and `log_3^-1(x)`
+    // are `3^x`. In plain text a person also writes `^-1` for the
+    // reciprocal `1/ln(x)`, so the reading is reported.
+    if (
+      inverseExponent &&
+      (name === 'ln' || name === 'log' || (name === 'lg' && subscript === null))
+    ) {
+      this._emitAmbiguity('ambiguous-inverse-function', start, this.index, {
+        name,
+      });
+      return name === 'ln' && subscript === null
+        ? ['Exp', ...args]
+        : ['Power', subscript ?? 10, ...args];
+    }
+
+    if (subscript !== null && name !== 'log') {
+      // Arguments after the first argument of `ln` are kept, so that the
+      // canonical form reports them as unexpected arguments: `ln_3(x, y)`
+      // is `Log(x, 3, y)`.
+      //
+      // A name read as a special form keeps that form: the subscript goes on
+      // the head of the form, `cbrt_2(x)` is
+      // `Apply(Subscript(Root, 2), x, 3)`. The count `nPr` has no head (see
+      // below), so the subscript goes on the count: `nPr_2(5, 2)` is
+      // `Subscript(Binomial(5, 2)·2!, 2)`. The name of `nPr` in the
+      // function table, `Permutations`, is the collection of the
+      // arrangements, not their count.
+      let call: MathJsonExpression;
+      if (name === 'ln')
+        call = ['Log', args[0] ?? 'Nothing', subscript, ...args.slice(1)];
+      else if (name === 'cbrt')
+        call = [
+          'Apply',
+          ['Subscript', fnName, subscript],
+          args[0] ?? 'Nothing',
+          3,
+          ...args.slice(1),
+        ];
+      else if (name === 'nPr')
+        call = [
+          'Subscript',
+          [
+            'Multiply',
+            ['Binomial', args[0] ?? 'Nothing', args[1] ?? 'Nothing'],
+            ['Factorial', args[1] ?? 'Nothing'],
+          ],
+          subscript,
+        ];
+      else call = ['Apply', ['Subscript', fnName, subscript], ...args];
+      return exponent !== null ? ['Power', call, exponent] : call;
+    }
+
     // Special case: cbrt(x) -> ['Root', x, 3]
     if (name === 'cbrt') {
       const result: MathJsonExpression = ['Root', args[0] ?? 'Nothing', 3];
@@ -3466,8 +3860,14 @@ export class _Parser implements Parser {
     // Special case: log with subscript base (matches \log_b behavior)
     // log_2(x) -> ['Lb', x], log_10(x) -> ['Log', x], log_b(x) -> ['Log', x, b]
     let result: MathJsonExpression;
+    // Arguments after the first are kept, so that the canonical form reports
+    // them as unexpected arguments: `log_3(x, y)` is `Log(x, 3, y)`. Before,
+    // `y` was dropped, and `log_10(x, y)` was `Log(x, y)`, the logarithm
+    // in base `y`.
     if (name === 'log' && subscript !== null) {
-      if (subscript === 2) result = ['Lb', ...args];
+      if (args.length > 1)
+        result = ['Log', args[0], subscript, ...args.slice(1)];
+      else if (subscript === 2) result = ['Lb', ...args];
       else if (subscript === 10) result = ['Log', ...args];
       else result = ['Log', args[0], subscript];
     } else {
@@ -3479,7 +3879,7 @@ export class _Parser implements Parser {
     // hyperbolic functions this canonicalizes to `Arcsin`, `Arsinh`, … so
     // `sin^-1 1` → `Arcsin(1)` (not `1/sin(1)`). Other exponents (e.g. `-2`)
     // stay a reciprocal power, matching strict `\sin^{-2}`.
-    if (exponent === -1 && Array.isArray(result)) {
+    if (inverseExponent && Array.isArray(result)) {
       // In plain text a person also writes `sin^-1(x)` for the reciprocal
       // `1/sin(x)`, so the inverse reading is reported as a choice with a
       // second common reading. The span is the whole call.
@@ -3550,8 +3950,15 @@ export class _Parser implements Parser {
     const start = this.index;
 
     // Word boundary: if the preceding token is a letter, we're in the
-    // middle of a word that was partially consumed — don't match.
-    if (start > 0 && /^[a-zA-Z]$/.test(this._tokens[start - 1])) return null;
+    // middle of a word that was partially consumed — don't match. The
+    // exception is the last part of a run that `tryParseBareRun()` left for
+    // this step because a script follows it (`xalpha_1`).
+    if (
+      start > 0 &&
+      /^[a-zA-Z]$/.test(this._tokens[start - 1]) &&
+      start !== this._bareNameStart
+    )
+      return null;
 
     // Collect consecutive letter tokens
     let name = '';
@@ -3571,11 +3978,45 @@ export class _Parser implements Parser {
       return null;
     }
 
-    // Route the mapped name through the shared emission point: a spelled-out
+    // A spelled-out Greek name takes a subscript into its name, as the
+    // backslash spelling does: `alpha_{01}` is `alpha_01` and `alpha_max` is
+    // `alpha_max`, as `\alpha_{01}` and `\alpha_max` are. The join is the
+    // join of the symbol parser (`absorbSubscripts()`), with its rules for an
+    // unbraced subscript (a run of digits keeps its text, a run of two
+    // letters before a script is split) and its diagnostics. The
+    // requirements of the symbol parser apply: a base that evaluates its
+    // subscript (`subscriptEvaluate`) or whose name is a function trigger of
+    // the LaTeX dictionary keeps the subscript, and an indexed collection
+    // base takes only a declared joined name. White space before the `_` stops the join, as
+    // it does after a letter: `alpha _1` is the subscript `1` of `alpha`.
+    // The ASCII names of constants (`oo`, `inf`, `infinity`, `ii`) do not
+    // take a subscript into their name, as `\infty` does not.
+    const seqStart = this._diagnosticsCheckpoint();
+    const isGreekName = _Parser.SEGMENTABLE_SYMBOLS[name] !== undefined;
+    let id: string = symbolName;
+    if (
+      isGreekName &&
+      this.peek === '_' &&
+      !this.isFunctionTriggerName(symbolName)
+    ) {
+      const info = this.resolveSymbol(symbolName);
+      if (!info?.subscriptEvaluate)
+        id = absorbSubscripts(
+          this,
+          symbolName,
+          info?.type.matches('indexed_collection<any>') ?? false
+        );
+    }
+
+    // Route the symbol through the shared emission point: a spelled-out
     // name that maps to an undeclared symbol (e.g. `alpha` under `strict:false`)
     // is a symbol reference that would otherwise bypass diagnostics. Mapped
     // constants (`oo`→`PositiveInfinity`, `pi`→`Pi`, …) are declared → no-op.
-    this.emitSymbolReference(symbolName, start, this.index);
+    // A name with a joined subscript is reported by its joined name.
+    this.emitSymbolReference(id, start, this.index);
+    // The end of an unbraced letter subscript has a second reading, as on
+    // the backslash spelling: `alpha_max2` is `alpha_max·2`.
+    if (id !== symbolName) this.emitSubscriptEndAmbiguity(id, start);
 
     // `ii` is read as the imaginary unit, and a person can mean the product
     // `i·i`.
@@ -3584,7 +4025,12 @@ export class _Parser implements Parser {
         name: symbolName,
       });
 
-    return this.parseBareApplicationCandidate(symbolName, start) ?? symbolName;
+    // A subscript after a superscript joins the name too, as on the
+    // backslash spelling: `alpha^2_{01}` is `alpha_01^2` (see
+    // `parseSupsub()`).
+    if (isGreekName) this.recordSubscriptableSymbol(id, start, seqStart);
+
+    return this.parseBareApplicationCandidate(id, start) ?? id;
   }
 
   /** Named constants that may be recognized *inside* a longer letter run by
@@ -3612,6 +4058,46 @@ export class _Parser implements Parser {
   private static readonly SEGMENTABLE_SYMBOL_VALUES: Set<string> = new Set(
     Object.values(_Parser.SEGMENTABLE_SYMBOLS)
   );
+
+  /**
+   * In non-strict mode, read the run of letters at the index as its parts:
+   * the longest spelled-out Greek names, as `tryParseBareRun()` segments a
+   * run, and single letters between them. `nalpha` is `n`, `alpha` and
+   * `pi` is `Pi`. Each part is reported as a symbol reference. A run read
+   * as more than one part with a name in it reports `ambiguous-letter-run`,
+   * as `tryParseBareRun()` does. The `KroneckerDelta` entry uses it to
+   * read a group of indices (`\delta_{nalpha}`). Return `null`, with the
+   * index unchanged, in strict mode or when no letter is at the index.
+   */
+  _parseLetterRunParts(): MathJsonExpression[] | null {
+    if (this.options.strict !== false) return null;
+    const start = this.index;
+    let name = '';
+    while (!this.atEnd && /^[a-zA-Z]$/.test(this.peek)) {
+      name += this.peek;
+      this.index++;
+    }
+    if (!name) return null;
+    const symbols = _Parser.SEGMENTABLE_SYMBOLS;
+    const parts: MathJsonExpression[] = [];
+    let matchedName = false;
+    let i = 0;
+    while (i < name.length) {
+      let len = Math.min(name.length - i, _Parser.MAX_SEGMENTABLE_LENGTH);
+      while (len >= 2 && symbols[name.slice(i, i + len)] === undefined) len--;
+      let part: string = name[i];
+      if (len >= 2) {
+        part = symbols[name.slice(i, i + len)];
+        matchedName = true;
+      } else len = 1;
+      parts.push(part);
+      this.emitSymbolReference(part, start + i, start + i + len);
+      i += len;
+    }
+    if (matchedName && parts.length > 1)
+      this.emitLetterRunSplit(name, start, parts);
+    return parts;
+  }
 
   /**
    * In non-strict mode, handle a multi-letter run that is not itself a whole
@@ -3744,10 +4230,31 @@ export class _Parser implements Parser {
       return null;
     }
 
+    // A script, a prime or a digit directly after the run belongs to the
+    // last part, as after a run of single letters (`xy_1` is `x·y_1`, `xy2`
+    // is `x·y_2`) and after a command (`x\alpha_1` is `x·alpha_1`):
+    // `xalpha_1` is `x·alpha_1`, `alphax^2` is `alpha·x^2` and `xalpha2` is
+    // `x·alpha_2`. Before, the script applied to the product of the parts
+    // (`(x·alpha)_1`), and the digit was a factor (`x·alpha·2`). The last
+    // part is not read here: the index stops at its start, so that the next
+    // primary reads it with its scripts, as `x` or as a spelled-out name
+    // (see `_bareNameStart`).
+    const lastLength = (segments[segments.length - 1] as string).length;
+    const lastStart = start + name.length - lastLength;
+    const splitLast =
+      segments.length > 1 &&
+      (this.peek === '_' ||
+        this.peek === '^' ||
+        this.peek === "'" ||
+        this.peek === '\\prime' ||
+        /^[0-9]$/.test(this.peek));
+
     // Each leftover letter is a single token, so its span is
-    // `[start+i, start+i+1)`.
+    // `[start+i, start+i+1)`. A last part that the next primary reads is
+    // reported there.
     for (const k of leftoverLetters)
-      this.emitSymbolReference(name[k], start + k, start + k + 1);
+      if (!splitLast || start + k < lastStart)
+        this.emitSymbolReference(name[k], start + k, start + k + 1);
     if (segments.length > 1) this.emitLetterRunSplit(name, start, segments);
     // `Deltax` is `Δ·x`, and a person can mean the one symbol "change in x"
     // (see `emitJuxtapositionAmbiguity()` for `Δx`).
@@ -3764,7 +4271,13 @@ export class _Parser implements Parser {
       // has as many letters as its spelling (`pi` is `Pi`).
       offset += segment.length;
     }
-    return segments.length === 1 ? segments[0] : ['Multiply', ...segments];
+    // (A copy: the `ambiguous-letter-run` diagnostic keeps `segments`.)
+    const parts = splitLast ? segments.slice(0, -1) : segments;
+    if (splitLast) {
+      this.index = lastStart;
+      if (lastLength > 1) this._bareNameStart = lastStart;
+    }
+    return parts.length === 1 ? parts[0] : ['Multiply', ...parts];
   }
 
   /**
@@ -3871,15 +4384,15 @@ export class _Parser implements Parser {
    * index is at the end of the exponent. Three cases are reported:
    *
    * - an operand directly after the exponent: `e^2pi` is `e^2·π`, and a
-   *   person can mean `e^{2π}`. When the exponent is one letter and a letter
+   *   person can mean `e^{2π}`. The radical glyph `√` starts an operand
+   *   (`e^θ√z`, `x^√θ√g`). When the exponent is one letter and a letter
    *   follows (`x^xy`), the `ambiguous-letter-run` diagnostic of
    *   `_emitScriptLetterRunSplit()` reports the run too;
    * - an operand after white space, when the exponent is a name, is signed,
-   *   or the base is `e`: `e^i pi`, `e^-x y`, `e^2 pi i`. A number exponent
-   *   on another base is not reported: `x^2 y` is `x^2·y`. A bare function
-   *   name after an exponent that is not signed (`e^x sin x`), the word `in`
-   *   and a differential (`e^x dx`) after the white space are not reported.
-   *   A function name after a signed exponent is reported (`e^-x sin x`);
+   *   or the base is `e`: `e^i pi`, `e^-x y`, `e^2 pi i`, and a function
+   *   call: `e^x cos(x)`, `e^-x sin x`. A number exponent on another base
+   *   is not reported: `x^2 y` is `x^2·y`. The word `in` and a differential
+   *   (`e^x dx`) after the white space are not reported;
    * - a `/` directly after an exponent that is a name, is signed or is the
    *   number 1: `e^x/2`, `x^1/2`. A `/` after another number is not
    *   reported: `x^3/2` is `x^3/2` by convention, `^` binds tighter than
@@ -3917,19 +4430,24 @@ export class _Parser implements Parser {
       typeof sup === 'string' && !sup.startsWith("'") && !signed;
     const caret = supStart - 1;
     const spanStart = baseStart >= 0 && baseStart < caret ? baseStart : caret;
-    // The span ends after the operand that starts at token `operandStart`.
+    // The span ends after the operand that starts at token `operandStart`:
+    // for the radical glyph `√`, after its radicand.
     const report = (operandStart: number) =>
       this._emitAmbiguity(
         'ambiguous-exponent-end',
         spanStart,
-        operandEnd((k) => t[k], operandStart),
+        t[operandStart] === '√'
+          ? operandEnd((k) => t[k], operandStart + 1)
+          : operandEnd((k) => t[k], operandStart),
         { exponent },
         caret
       );
 
-    // An operand directly after the exponent
+    // An operand directly after the exponent. The radical glyph `√` starts
+    // an operand too: `e^θ√z` is `e^θ·√z`, and a person can mean
+    // `e^{θ√z}`.
     const next = t[end];
-    if (isOperandStartToken(next)) {
+    if (isOperandStartToken(next) || next === '√') {
       // `e^xy` is also reported as a letter run (see above). The span of
       // this diagnostic ends after the whole run.
       report(end);
@@ -3948,13 +4466,12 @@ export class _Parser implements Parser {
     if (!exponentIsName && !signed && !baseIsE) return;
     let j = end;
     while (t[j] === '<space>') j++;
-    if (!isOperandStartToken(t[j])) return;
+    if (!isOperandStartToken(t[j]) && t[j] !== '√') return;
     let word = '';
     for (let k = j; isLetter(k); k++) word += t[k];
-    // A function name after a signed exponent is reported: in `e^-x sin x`
-    // the sign shows that the exponent is an expression typed without
-    // braces, and a person can mean `e^{-x sin x}`.
-    if (BARE_FUNCTION_MAP[word] !== undefined && !signed) return;
+    // A function name is an operand as another name is: `e^x cos(x)` is
+    // `e^x·cos(x)`, and a person can mean `e^{x cos(x)}`, as `e^x y` can
+    // mean `e^{xy}` and `e^-x sin x` can mean `e^{-x sin x}`.
     if (word === 'in') return;
     if (word.length === 2 && word[0] === 'd') return;
     report(j);
@@ -4039,6 +4556,24 @@ export class _Parser implements Parser {
     // The start of the base, read before the scripts: the parse of a script
     // can change `_scriptBaseStart` while it runs.
     const baseStart = this._scriptBaseStart;
+    // The base is a symbol whose spelling takes a subscript into its name
+    // (`x`, `\alpha`, `θ`, `\pi`), read just before the scripts, or such a
+    // symbol with prime marks (`x'`, `f''`, `x^{\prime}`). Read it here: the
+    // parse of a script reads other symbols.
+    const symbolBase = this._subscriptableSymbol;
+    const primed =
+      (operator(lhs) === 'Prime' || operator(lhs) === 'Derivative') &&
+      typeof operand(lhs, 1) === 'string';
+    const between =
+      symbolBase === null ? [] : this._tokens.slice(symbolBase.end, index);
+    const isSymbolBase =
+      (typeof lhs === 'string' || primed) &&
+      symbolBase !== null &&
+      symbolBase.id === (primed ? operand(lhs, 1) : lhs) &&
+      symbolBase.start === baseStart &&
+      (primed
+        ? isPrimeMarkSpan(between)
+        : between.every((token) => token === '<space>'));
 
     // In non-strict mode, a single letter immediately followed by one or more
     // digits is treated as an implicit *subscript*: `x2 → x_2`, `x1 → x_1`,
@@ -4075,16 +4610,29 @@ export class _Parser implements Parser {
           index - baseStart < lhs.length
         )
           baseStart--;
+      // The digits keep their text when their number value does not:
+      // `x01` is the symbol `x_01`, as `x_01` is, and not `x_1`. So is a
+      // run that a JavaScript number cannot hold exactly.
+      const value = Number(digits);
+      const keepText =
+        (digits.length > 1 && digits[0] === '0') ||
+        !Number.isSafeInteger(value);
       this._emitAmbiguity(
         'ambiguous-implicit-subscript',
         baseStart,
         this.index,
-        { base: lhs, subscript: parseInt(digits) }
+        { base: lhs, subscript: keepText ? digits : value }
       );
-      return this.parseSupsub(['Subscript', lhs, parseInt(digits)]);
+      return this.parseSupsub(
+        keepText ? `${lhs}_${digits}` : ['Subscript', lhs, value]
+      );
     }
 
-    this.skipSpace();
+    // The end of the last script that was read, before the white space after
+    // it. A subscript whose `_` is not at this index has white space before
+    // it.
+    let scriptEnd = this.index;
+    this.skipSpaceBeforeScript();
 
     //
     // 1/ Gather possible superscript/subscripts
@@ -4094,7 +4642,98 @@ export class _Parser implements Parser {
       : [];
     const subscripts: MathJsonExpression[] = [];
     let subIndex = index;
+    // True when a subscript run was joined to the base symbol name (`lhs`)
+    let joinedBase = false;
     while (this.peek === '_' || this.peek === '^' || this.atDoubleStar()) {
+      // A subscript after a superscript on a symbol base has the reading
+      // that the symbol parser gives to a subscript before the superscript,
+      // in both grammars: the subscript joins the symbol name. So
+      // `x^2_{01}` is `x_01^2`, as `x_{01}^2` is (the number value of the
+      // group `{01}` drops the zero). `\alpha^2_01` is `alpha_01^2` in the
+      // non-strict grammar, as `\alpha_01^2` is. On a primed symbol, the
+      // subscript joins the name under the prime: `x'^2_{01}` is
+      // `(x_01')^2`, as `x_{01}'^2` is. The requirements of the symbol
+      // parser apply: a base with `subscriptEvaluate` keeps its subscript,
+      // and an indexed collection base takes only a declared joined name.
+      // White space directly before the `_` stops the join, as it does when
+      // the subscript comes first: the symbol parser does not join `x _{01}`,
+      // which is the subscript `1` of `x`. So `x^2 _{01}` is `x_1^2`, as
+      // `x _{01}^2` is. White space before the superscript does not stop
+      // the join: `x ^2_{01}` is `x_01^2`, as `x_{01} ^2` is.
+      //
+      // A dictionary entry whose trigger is the base with the subscript has
+      // the first priority, as it has when the subscript comes first:
+      // `\delta^2_{ij}` is `KroneckerDelta(i, j)^2` and `\mu^2_0` is
+      // `Mu0^2`, as `\delta_{ij}^2` and `\mu_0^2` are. Before, the subscript
+      // joined the name: `delta_ij^2` and `mu_0^2`. The base can also be a
+      // set that a dictionary entry reads: `\R^2_-` is `NegativeNumbers^2`
+      // and `\mathbb{R}^2_{>0}` is `PositiveNumbers^2`, as `\R_-^2` and
+      // `\mathbb{R}_{>0}^2` are. Before, they were a syntax error and
+      // `Subscript(RealNumbers, Error)^2`. The tokens of the base are the
+      // tokens from the start of the primary to the first script. White
+      // space before the `_` does not stop a dictionary entry: LaTeX
+      // ignores it, so `\mu^2 _0` is `Mu0^2` and `\R^2 _-` is
+      // `NegativeNumbers^2`, as `\mu^2_0` and `\R^2_-` are. Before, they
+      // were `mu_0^2` and a syntax error. (The tokenizer drops the space
+      // after a command, so `\mu _0^2` has no white space before the `_`.)
+      // White space stops only the join of the subscript to a symbol name.
+      if (
+        typeof lhs === 'string' &&
+        baseStart >= 0 &&
+        baseStart < index &&
+        !joinedBase &&
+        this.peek === '_' &&
+        superscripts.length > 0 &&
+        subscripts.length === 0
+      ) {
+        let baseEnd = index;
+        while (baseEnd > baseStart && this._tokens[baseEnd - 1] === '<space>')
+          baseEnd--;
+        const triggered = this.parseSubscriptTriggerAfterBase(
+          this._tokens.slice(baseStart, baseEnd)
+        );
+        if (triggered !== null) {
+          lhs = triggered;
+          joinedBase = true;
+          subIndex = this.index;
+          this.skipSpaceBeforeScript();
+          continue;
+        }
+      }
+      if (
+        isSymbolBase &&
+        !joinedBase &&
+        this.peek === '_' &&
+        this.index === scriptEnd &&
+        superscripts.length > 0 &&
+        subscripts.length === 0
+      ) {
+        const id = symbolBase!.id;
+        const info = this.resolveSymbol(id);
+        const joined = info?.subscriptEvaluate
+          ? id
+          : absorbSubscripts(
+              this,
+              id,
+              info?.type.matches('indexed_collection<any>') ?? false
+            );
+        if (joined !== id) {
+          // The symbol is the joined name, not the base: replace the
+          // `undeclared-symbol` diagnostic of the base, as the symbol
+          // parser reports only the joined name.
+          this.removeSymbolReference(symbolBase!);
+          if (!this.resolveSymbol(joined)?.type.matches('error'))
+            this.emitSymbolReference(joined, baseStart, this.index);
+          this.emitSubscriptEndAmbiguity(joined, baseStart);
+          lhs = primed
+            ? [operator(lhs), joined, ...operands(lhs).slice(1)]
+            : joined;
+          joinedBase = true;
+          subIndex = this.index;
+          this.skipSpaceBeforeScript();
+          continue;
+        }
+      }
       if (this.match('_')) {
         subIndex = this.index;
         if (this.match('_') || this.match('^'))
@@ -4104,20 +4743,35 @@ export class _Parser implements Parser {
           // In non-strict mode, consume consecutive digits as subscript
           // before parseToken(), which would only consume a single digit
           if (sub === null && this.options.strict === false) {
+            // A run that starts with `0` gives only the `0`, as in the
+            // strict grammar: the number value of `01` drops the zero.
+            // `(x)^2_01` is `(x)_0^2·1`, and a person can mean
+            // `(x)_{01}^2`. A symbol base keeps the run as text (see above).
             let digits = '';
-            while (!this.atEnd && /^[0-9]$/.test(this.peek)) {
+            while (!this.atEnd && /^[0-9]$/.test(this.peek) && digits !== '0') {
               digits += this.peek;
               this.index++;
             }
-            if (digits) sub = parseInt(digits);
+            if (digits) sub = digitRunNumber(digits);
+            const base = symbol(lhs) !== null ? { base: symbol(lhs) } : {};
             // `x_1y` is read as `x_1·y`, and a person can mean `x_{1y}`.
             if (digits && /^\p{L}$/u.test(this.peek))
               this._emitAmbiguity(
                 'ambiguous-implicit-subscript',
                 subIndex - 1,
                 this.index + 1,
-                { subscript: parseInt(digits) }
+                { ...base, subscript: sub }
               );
+            else if (digits === '0' && /^[0-9]$/.test(this.peek)) {
+              let end = this.index;
+              while (/^[0-9]$/.test(this._tokens[end] ?? '')) end++;
+              this._emitAmbiguity(
+                'ambiguous-implicit-subscript',
+                subIndex - 1,
+                end,
+                { ...base, subscript: 0 }
+              );
+            }
           }
           sub ??= this.parseToken();
           // In non-strict mode, also accept parenthesized expressions
@@ -4159,11 +4813,12 @@ export class _Parser implements Parser {
         }
       }
       subIndex = this.index;
-      this.skipSpace();
+      scriptEnd = this.index;
+      this.skipSpaceBeforeScript();
     }
 
     if (superscripts.length === 0 && subscripts.length === 0) {
-      this.index = index;
+      if (!joinedBase) this.index = index;
       return lhs;
     }
 
@@ -4471,7 +5126,7 @@ export class _Parser implements Parser {
         this.index = start;
       }
       this.index = i;
-      return [parseInt(digits), true];
+      return [digitRunNumber(digits), true];
     }
 
     if (!/^[a-zA-Z]$/.test(this.peek)) return null;
@@ -4482,11 +5137,12 @@ export class _Parser implements Parser {
     if (word.length < 2) return null;
     const next = this._tokens[end];
     let expr: MathJsonExpression | null = null;
-    if (
-      _Parser.BARE_SYMBOL_MAP[word] !== undefined &&
-      next !== '_' &&
-      !isDigit(next)
-    )
+    // A known name is the operand also when a `_` or a digit follows it, as
+    // the command spelling is: `x^alpha_1` is `x^{alpha_1}`, as `x^\alpha_1`
+    // is (`tryParseBareSymbol()` joins the subscript to the name), and
+    // `x^alpha2` is `x^alpha·2`, as `x^\alpha2` is. Before, the name was
+    // read one letter at a time: `x^a·l·p·h·a_1`.
+    if (_Parser.BARE_SYMBOL_MAP[word] !== undefined)
       expr = this.tryParseBareSymbol();
     else if (BARE_FUNCTION_MAP[word] !== undefined && next === '(')
       expr = this.tryParseBareFunction();
@@ -4959,19 +5615,42 @@ export class _Parser implements Parser {
     // 8. Are there postfix operators after subsup?
     //    (e.g. `[x,y]^{2}.max` where `.max` is a postfix applied after `^{2}`)
     //
+    //    A script after these postfix operators applies to the whole result:
+    //    `x^2!^3` is `(x^2!)^3`, and `x^g.5^2` is `(x^g·0.5)^2`, as `x.5^2`
+    //    is `(x·0.5)^2`. Without this step, the `^` reached the generic
+    //    infix loop, where the `^` entry has no reading for it.
     if (result !== null) {
-      let postfix: MathJsonExpression | null = null;
-      let index = this.index;
+      const scriptBaseStart = this._scriptBaseStart;
+      this._scriptBaseStart = start;
+      let consumed = false;
       do {
-        postfix = this.parsePostfixOperator(result, until);
-        if (postfix !== null) this._applicationPolicy?.suffix(result, postfix);
-        result = postfix ?? result;
-        if (this.index === index && postfix !== null) {
-          console.assert(this.index !== index, 'No token consumed');
-          break;
+        consumed = false;
+        if (result === null) break;
+        let postfix: MathJsonExpression | null = null;
+        let index = this.index;
+        do {
+          postfix = this.parsePostfixOperator(result, until);
+          if (postfix !== null)
+            this._applicationPolicy?.suffix(result, postfix);
+          result = postfix ?? result;
+          if (this.index === index && postfix !== null) {
+            console.assert(this.index !== index, 'No token consumed');
+            break;
+          }
+          if (postfix !== null) consumed = true;
+          index = this.index;
+        } while (postfix !== null);
+        if (consumed) {
+          const before = this.index;
+          const scripted = this.parseSupsub(result);
+          if (scripted !== null)
+            this._applicationPolicy?.suffix(result, scripted);
+          result = scripted;
+          // Read more postfix operators only after a script: `x^g.5^2!`
+          consumed = this.index !== before && result !== null;
         }
-        index = this.index;
-      } while (postfix !== null);
+      } while (consumed);
+      this._scriptBaseStart = scriptBaseStart;
     }
 
     if (result === null) {
@@ -5001,9 +5680,14 @@ export class _Parser implements Parser {
           this.index = saved;
         }
         // We've encountered an unknown LaTeX command. May be a typo.
-        // Gobble it.
+        // Gobble it. The scripts after it apply to the error, so that the
+        // parse continues after them: `\foo^2 + y` is `Error^2 + y`.
         this.nextToken();
         result = this.error('unexpected-command', start);
+        const scriptBaseStart = this._scriptBaseStart;
+        this._scriptBaseStart = start;
+        result = this.parseSupsub(result) ?? result;
+        this._scriptBaseStart = scriptBaseStart;
       }
     }
 

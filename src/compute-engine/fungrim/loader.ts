@@ -54,6 +54,10 @@ import type { BoxedSubstitution } from '../types-serialization.js';
 import type { Rule, RuleStep } from '../types-evaluation.js';
 import type { RulePurpose } from '../types-kernel-evaluation.js';
 import { isFunction, isNumber } from '../boxed-expression/type-guards.js';
+import {
+  DIRECT_TRIG_OPERATORS,
+  INVERSE_TRIG_OPERATORS,
+} from '../symbolic/angular-unit.js';
 
 import type {
   CompiledFungrimRule,
@@ -116,6 +120,43 @@ const CMP_TO_OPERATOR: Record<'gt' | 'ge' | 'lt' | 'le', string> = {
   lt: 'Less',
   le: 'LessEqual',
 };
+
+/** The heads of the operators that take an angle or give an angle: the
+ *  trigonometric and inverse trigonometric functions and the phase angle of
+ *  a complex number. `evaluate()` and `.N()` read and give these angles in
+ *  `ce.angularUnit`. Hyperbolic functions are not in this set: their
+ *  argument is not an angle. */
+function isAngularHead(name: string): boolean {
+  return (
+    DIRECT_TRIG_OPERATORS.has(name) ||
+    INVERSE_TRIG_OPERATORS.has(name) ||
+    name === 'Arg' ||
+    name === 'AbsArg'
+  );
+}
+
+/**
+ * True when the identity has an angle operator in its match, its replacement
+ * or one of its guards.
+ *
+ * The Fungrim identities are written for angles in radians: `sin(π) = 0`,
+ * `arg(i) = π/2`. In another angular unit they give wrong values, for example
+ * `sin(π)` in degrees is about 0.0548, not 0. The loader applies such an
+ * identity only when `ce.angularUnit` is `'rad'`. The other identities do not
+ * depend on the unit.
+ */
+function usesAngles(rule: CompiledFungrimRule): boolean {
+  const names = collectSymbols(rule.match);
+  collectSymbols(rule.replace, names);
+  for (const g of rule.guards) {
+    collectSymbols(guardJson(g), names);
+    // A part comparison keeps its operator in `g.part`, not in its MathJSON.
+    if (g.k === 'part-cmp' && isAngularHead(PART_TO_OPERATOR[g.part]))
+      return true;
+  }
+  for (const name of names) if (isAngularHead(name)) return true;
+  return false;
+}
 
 // ---------------------------------------------------------------------------
 // Guard-spec → tri-valued condition closures (§2.2 runtime half)
@@ -441,6 +482,18 @@ function boxCompiledRule(
         condition = (sub: BoxedSubstitution): boolean =>
           solveCondition(sub) && realRoot(sub);
       }
+    }
+
+    // An identity with an angle operator is correct only in radians (see
+    // `usesAngles()`). The unit is read each time the rule is tried, not at
+    // load time, because the host can change `ce.angularUnit` after the load.
+    // The unit is checked before the guards, so a rule that does not apply
+    // in this unit does not call the `onGuardUndecided` hook.
+    if (usesAngles(rule)) {
+      const otherCondition = condition;
+      condition = (sub: BoxedSubstitution): boolean =>
+        ce.angularUnit === 'rad' &&
+        (otherCondition === undefined || otherCondition(sub));
     }
 
     return {

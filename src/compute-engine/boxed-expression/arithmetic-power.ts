@@ -35,6 +35,7 @@ import {
   indeterminateFormAnswer,
   numericValue,
 } from './type-guards.js';
+import { isShadowedSymbol, shadowsLibraryName } from '../library-shadowing.js';
 import { realExponentValue } from './imaginary-part.js';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
 import { complexPow } from '../numerics/numeric-complex.js';
@@ -1122,7 +1123,8 @@ function rawRational(exp: Expression): Rational | undefined {
 function eulerQuarterTurn(theta: Expression): number | undefined {
   if (!isFunction(theta, 'Multiply') || theta.nops !== 2) return undefined;
   const [c, pi] = theta.ops;
-  if (!isSymbol(pi, 'Pi')) return undefined;
+  // A user binding of the name `Pi` is not π (`isShadowedSymbol()`).
+  if (!isSymbol(pi, 'Pi') || isShadowedSymbol(pi)) return undefined;
   if (!isNumber(c) || c.isExact || c.isComplex) return undefined;
   const twice = (c.bignumRe ?? new BigDecimal(c.re)).mul(2);
   if (!twice.isFinite() || !twice.isInteger()) return undefined;
@@ -1695,6 +1697,15 @@ export function pow(
       // integer. In radians the angle is passed as it is, and `Cos` and
       // `Sin` reduce and round an angle that is not special at the working
       // precision.
+      //
+      // The exact conversion divides by the library constant π (`ce.Pi`).
+      // When a user binding gives the name `Pi` another value
+      // (`ce.declare('Pi', { value: 3 })`), `evaluate()` does not convert
+      // the angle and `e^{iθ}` stays symbolic. The reason: the MathJSON of
+      // the result names `Pi`, and when it is boxed again, `Pi` is the user
+      // value, so the value of the result changes. The user value cannot be
+      // used in its place: `θ` is in radians, and `θ·180/3` is not the angle
+      // `θ` in degrees.
       const theta =
         ce.angularUnit === 'rad'
           ? angle
@@ -1702,10 +1713,12 @@ export function pow(
             ? angle.unknowns.length === 0
               ? radiansToAngle(angle.N())
               : undefined
-            : ce.function('Divide', [
-                ce.function('Multiply', [angle, halfTurnAngle(ce)]),
-                ce.Pi,
-              ]);
+            : !numericApproximation && shadowsLibraryName(ce, 'Pi')
+              ? undefined
+              : ce.function('Divide', [
+                  ce.function('Multiply', [angle, halfTurnAngle(ce)]),
+                  ce.Pi,
+                ]);
       // Euler's formula e^{iθ} = cos θ + i·sin θ — but only adopt it for a
       // CONSTANT angle (`e^{iπ/2}→i`, `e^{iπ}→-1`): there the trig reduces to a
       // closed-form value and this is a genuine evaluation. For a SYMBOLIC

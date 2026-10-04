@@ -1207,17 +1207,18 @@ describe('NARROW RETURN TYPES — COMPLEX RESULTS, TUPLE CALLS, POLE SYMBOLS', (
     expect(ce.box(json as never).type.toString()).toBe(expected);
   });
 
-  test('a tuple argument at a scalar parameter is not typed by the scalar result', () => {
-    // The body decides the shape (`2x` gives a tuple, `|x|` a scalar), and
-    // the declared result describes a scalar argument, so the call is `any`.
+  test('a tuple argument at a parameter declared as a scalar (a number or a boolean) is typed as the tuple of the results', () => {
+    // The declared signature makes the parameter a number, so the call maps
+    // over the components of the tuple (user decision 2026-10-03), and the
+    // declared result describes each component.
     const ce = new ComputeEngine();
     ce.declare('h', '(real) -> real');
     ce.assign('h', ce.parse('x \\mapsto 2x'));
     ce.declare('T', 'tuple<real, real>');
     const call = ce.box(['h', ['Tuple', 1, 2]]);
-    expect(call.type.toString()).toBe('any');
+    expect(call.type.toString()).toBe('tuple<real, real>');
     expect(call.evaluate().toString()).toBe('(2, 4)');
-    expect(ce.box(['h', 'T']).type.toString()).toBe('any');
+    expect(ce.box(['h', 'T']).type.toString()).toBe('tuple<real, real>');
   });
 
   test('a Sum index is typed by its range only when nothing else writes it', () => {

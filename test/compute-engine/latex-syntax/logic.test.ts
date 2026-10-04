@@ -1068,6 +1068,129 @@ describe('Kronecker Delta', () => {
       ]
     `);
   });
+
+  // A run of digits with no separator is one index for each digit, as a
+  // run of letters is. It was one number: `\delta_{11}` was
+  // `KroneckerDelta(11)`, which is 0, and `\delta_{01}` was
+  // `KroneckerDelta(1)`.
+  it('should read a run of digits as one index for each digit', () => {
+    expect(ce.parse('\\delta_{11}').json).toEqual(['KroneckerDelta', 1, 1]);
+    expect(ce.parse('\\delta_{01}').json).toEqual(['KroneckerDelta', 0, 1]);
+    expect(ce.parse('\\delta_{12}').json).toEqual(['KroneckerDelta', 1, 2]);
+    expect(ce.parse('\\delta_{11}').evaluate().json).toBe(1);
+    expect(ce.parse('\\delta_{12}').evaluate().json).toBe(0);
+  });
+
+  it('should keep the numbers of a run with a separator', () => {
+    expect(ce.parse('\\delta_{1,1}').json).toEqual(['KroneckerDelta', 1, 1]);
+    expect(ce.parse('\\delta_{10, 2}').json).toEqual(['KroneckerDelta', 10, 2]);
+    expect(ce.parse('\\delta_{1}').json).toEqual(['KroneckerDelta', 1]);
+  });
+
+  // One index of two or more digits is written in a second group
+  // (`\delta_{{11}}`): `\delta_{11}` is two indices.
+  it('should round-trip number indices', () => {
+    for (const json of [
+      ['KroneckerDelta', 1, 1],
+      ['KroneckerDelta', 10, 2],
+      ['KroneckerDelta', 0, 1],
+      ['KroneckerDelta', 11],
+      ['KroneckerDelta', 10],
+      ['KroneckerDelta', 12],
+      ['KroneckerDelta', 1],
+    ]) {
+      const latex = ce.box(json).latex;
+      expect(latex).not.toBe('\\delta_{102}');
+      for (const strict of [true, false])
+        expect(ce.parse(latex, { strict }).json).toEqual(json);
+    }
+    expect(ce.box(['KroneckerDelta', 11]).latex).toBe('\\delta_{{11}}');
+  });
+
+  // A group of letters and digits with no separator is one index for each
+  // letter or digit, in both grammars. In the lenient grammar,
+  // `\delta_{n0}` was `KroneckerDelta(n_0)`.
+  it('should read a group of letters and digits as one index for each', () => {
+    for (const strict of [true, false]) {
+      const parse = (s: string) => ce.parse(s, { strict, form: 'raw' }).json;
+      expect(parse('\\delta_{n0}')).toEqual(['KroneckerDelta', 'n', 0]);
+      expect(parse('\\delta_{i1}')).toEqual(['KroneckerDelta', 'i', 1]);
+      expect(parse('\\delta_{0n}')).toEqual(['KroneckerDelta', 0, 'n']);
+      expect(parse('\\delta_{n1x}')).toEqual(['KroneckerDelta', 'n', 1, 'x']);
+      expect(parse('\\delta_{{11}}')).toEqual(['KroneckerDelta', 11]);
+      // A command that is a symbol is one index. In the lenient grammar,
+      // `\delta_{\pi1}` was `KroneckerDelta(Pi_1)`.
+      expect(parse('\\delta_{\\pi1}')).toEqual(['KroneckerDelta', 'Pi', 1]);
+      expect(parse('\\delta_{n\\alpha}')).toEqual([
+        'KroneckerDelta',
+        'n',
+        'alpha',
+      ]);
+    }
+  });
+
+  // In the lenient grammar, a spelled-out Greek name is one index, as its
+  // command is. A run split around a name reports `ambiguous-letter-run`.
+  // The strict grammar has one index for each letter.
+  it('should read a spelled-out Greek name as one index', () => {
+    const parse = (s: string, strict: boolean) => {
+      const e = ce.parse(s, { strict, form: 'raw', diagnostics: true });
+      return {
+        json: e.json,
+        codes: (e.parseDiagnostics ?? [])
+          .filter((d) => d.code.startsWith('ambiguous-'))
+          .map((d) => d.code),
+      };
+    };
+    expect(parse('\\delta_{nalpha}', false)).toEqual({
+      json: ['KroneckerDelta', 'n', 'alpha'],
+      codes: ['ambiguous-letter-run'],
+    });
+    expect(parse('\\delta_{pi1}', false)).toEqual({
+      json: ['KroneckerDelta', 'Pi', 1],
+      codes: [],
+    });
+    expect(parse('\\delta_{alphabeta}', false).json).toEqual([
+      'KroneckerDelta',
+      'alpha',
+      'beta',
+    ]);
+    expect(parse('\\delta_{nm}', false)).toEqual({
+      json: ['KroneckerDelta', 'n', 'm'],
+      codes: [],
+    });
+    expect(parse('\\delta_{pi1}', true).json).toEqual([
+      'KroneckerDelta',
+      'p',
+      'i',
+      1,
+    ]);
+  });
+
+  // The number 0 is an index, as 1 is. `\delta_0` was the symbol `delta_0`.
+  it('should read the index 0', () => {
+    expect(ce.parse('\\delta_0').json).toEqual(['KroneckerDelta', 0]);
+    expect(ce.parse('\\delta_0^2').json).toEqual([
+      'Power',
+      ['KroneckerDelta', 0],
+      2,
+    ]);
+  });
+
+  // In the lenient grammar, an unbraced run of digits is the whole
+  // subscript, as `x_11` is `x_{11}`. It was one digit: `\delta_11` was
+  // `KroneckerDelta(1)·1`. The strict grammar reads one token, as TeX does.
+  it('should read an unbraced run of digits in the lenient grammar', () => {
+    const lenient = (s: string) => ce.parse(s, { strict: false }).json;
+    expect(lenient('\\delta_11')).toEqual(['KroneckerDelta', 1, 1]);
+    expect(lenient('\\delta_01')).toEqual(['KroneckerDelta', 0, 1]);
+    expect(lenient('\\delta_1')).toEqual(['KroneckerDelta', 1]);
+    expect(ce.parse('\\delta_11', { form: 'raw' }).json).toEqual([
+      'InvisibleOperator',
+      ['KroneckerDelta', 1],
+      1,
+    ]);
+  });
 });
 
 describe('Iverson Bracket', () => {

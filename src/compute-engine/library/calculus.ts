@@ -9,6 +9,7 @@ import type {
 } from '../global-types.js';
 
 import type { Type } from '../../common/type/types.js';
+import type { MathJsonExpression } from '../../math-json/types.js';
 import { functionResult, isPointElementType } from '../../common/type/utils.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import { checkType } from '../boxed-expression/validate.js';
@@ -68,6 +69,7 @@ import {
   derivative,
   differentiate,
   memoizedDerivativeResult,
+  memoizedPartialDerivative,
 } from '../symbolic/derivative.js';
 import {
   typeCouldBeNumericCollection,
@@ -110,6 +112,10 @@ import { computeSeries, normalStrip } from '../symbolic/series.js';
 import { canonicalLimits, canonicalLimitsSequence } from './utils.js';
 import { implicitCompile } from '../implicit-compile.js';
 import { containsResidueClass } from '../boxed-expression/residue-class.js';
+import {
+  libraryNamesShadowedIn,
+  shadowedLibraryNames,
+} from '../library-shadowing.js';
 
 /**
  * The highest order the `D(f, {x, n})` spelling expands into `n` repeated
@@ -118,6 +124,18 @@ import { containsResidueClass } from '../boxed-expression/residue-class.js';
  * constant, as for the other value-scaled caps.
  */
 const MAX_DERIVATIVE_ORDER = 1000;
+
+/**
+ * The highest total order for which the multi-index `Derivative` of an
+ * operator (`Derivative(Power, k₁, k₂)`) builds its nested `D` expression,
+ * one `D` for each unit of order. The evaluation of that expression recurses
+ * once for each `D`, and near 500 levels it overflows the call stack (a
+ * `RangeError` escaped the handler). A larger total order stays inert. The
+ * cap loses few closed forms: measured, `Power` closes at order 32 but
+ * stays inert at 64 after about 2 s of work, and `Arctan2` stays inert at
+ * 64. `Multiply`, whose high partials are 0, is the exception.
+ */
+const MAX_NESTED_PARTIAL_ORDER = 64;
 
 //
 // ── Improper-integral endpoint limits (conditional-values Phase 3a) ──────
@@ -966,6 +984,47 @@ function constantFactorPoleVerdict(
 const NINTEGRATE_VARIABLE = 'NIntegrateVariable';
 
 /**
+ * The function literal `(p_1, …, p_n) ↦ body`, where the parameter named
+ * `params[i]` replaces each occurrence of the symbol named `holes[i]` in
+ * `body`. Returns `undefined` when a parameter cannot be made.
+ *
+ * The parameter symbols are declared in a scope that is discarded before the
+ * literal is made. The literal then binds its parameters in the scope of its
+ * own body (`bindParameterOperands`, `function-utils.ts`). A parameter made
+ * with `ce.symbol()` is declared in the caller's scope instead, with the type
+ * that the body infers for it, and that type then applies to every later use
+ * of the same name in the caller's scope.
+ */
+function functionLiteralOverHoles(
+  ce: ComputeEngine,
+  body: Expression,
+  holes: ReadonlyArray<string>,
+  params: ReadonlyArray<string>
+): Expression | undefined {
+  const symbols: Expression[] = [];
+  let lifted: Expression;
+  ce.pushScope();
+  try {
+    for (const name of params) {
+      ce.declare(name, 'unknown');
+      const param = ce._bindingSymbol(name, ce.context.lexicalScope);
+      if (param === undefined) return undefined;
+      symbols.push(param);
+    }
+    const subs: Record<string, Expression> = {};
+    holes.forEach((hole, i) => {
+      subs[hole] = symbols[i];
+    });
+    lifted = body.subs(subs);
+  } finally {
+    ce.popScope();
+  }
+  // `ce.function()` (not `_fn`): the canonical handler wraps the body in the
+  // scoped Block that `makeLambda` requires.
+  return ce.function('Function', [lifted, ...symbols]);
+}
+
+/**
  * The interior-pole verdict of `NIntegrate(f, lower, upper)` (see
  * `interiorPoleVerdict`), or `undefined` when no pole was proven. With
  * `check` set to `endpointPoleVerdict`, the verdict for a pole AT a bound.
@@ -1096,12 +1155,19 @@ function integrateRealPart(
     const sign = lower > upper ? -1 : 1;
     const lo = Math.min(lower, upper);
     const hi = Math.max(lower, upper);
+    // An integrand that did not compile is slower to evaluate, so the
+    // adaptive quadrature that the routine tries last over the whole
+    // interval gets the smaller panel budget `INTERPRETED_QUADRATURE_PANELS`.
+    const oscOptions = options.compiled
+      ? undefined
+      : { maxIntervals: INTERPRETED_QUADRATURE_PANELS };
     const osc = !isFinite(hi)
-      ? integrateSemiInfiniteOscillatory(jsf, lo, ce._deadlineFrame)
+      ? integrateSemiInfiniteOscillatory(jsf, lo, ce._deadlineFrame, oscOptions)
       : integrateSemiInfiniteOscillatory(
           (t) => jsf(-t),
           -hi,
-          ce._deadlineFrame
+          ce._deadlineFrame,
+          oscOptions
         );
     if (osc) return { estimate: sign * osc.estimate, error: osc.error };
   }
@@ -1943,6 +2009,130 @@ function transitiveUnknowns(
 
 /** No names are bound: used at a definition boundary that binds none. */
 const NO_BOUND_NAMES: ReadonlySet<string> = new Set<string>();
+
+/**
+ * Find the calls in `expr` of a user function that has the name of a library
+ * function (`Sin`, `Exp`, `Ln`, …). `names` holds the library names that a
+ * user definition in the current scope chain shadows
+ * (`shadowedLibraryNames()`). Inside a function literal, its parameters with
+ * a library name are added, and inside an expression with a local scope (a
+ * function body, a block), the library names that the bindings of this
+ * scope shadow are added (`libraryNamesShadowedIn()`). These local scopes
+ * are not in the current scope chain while the integral is evaluated.
+ *
+ * Return `'local'` when a call is of a name that a local scope shadows,
+ * `'call'` when the calls are all of names in `names`, and `'none'` when
+ * there is no such call.
+ */
+function shadowedCallsIn(
+  ce: ComputeEngine,
+  expr: Expression,
+  names: ReadonlySet<string>
+): 'none' | 'call' | 'local' {
+  const system = ce.contextStack[0]?.lexicalScope;
+  let result: 'none' | 'call' | 'local' = 'none';
+  const scan = (x: Expression, local: ReadonlySet<string>): void => {
+    if (result === 'local' || !isFunction(x)) return;
+    if (isOperatorDef(system?.bindings.get(x.operator))) {
+      if (local.has(x.operator)) result = 'local';
+      else if (names.has(x.operator)) result = 'call';
+    }
+    let inner = local;
+    const add = (name: string) => {
+      if (inner.has(name) || system?.bindings.get(name) === undefined) return;
+      inner = new Set([...inner, name]);
+    };
+    if (x.operator === 'Function')
+      for (const p of x.ops.slice(1)) {
+        const name = sym(p);
+        if (name) add(name);
+      }
+    if (x.localScope !== undefined)
+      for (const name of libraryNamesShadowedIn(ce, x.localScope)) add(name);
+    for (const op of x.ops) scan(op, inner);
+  };
+  scan(expr, NO_BOUND_NAMES);
+  return result;
+}
+
+/**
+ * The integrand `integrand` of an `Integrate` (a lifted integrand, see
+ * `liftIntegrand()`), with each call of a user function that has the name
+ * of a library function replaced by the body of the user function.
+ *
+ * The antiderivative, the integration rules and the residue method select
+ * a function by its NAME. With a user definition `Sin := t ↦ t + 1`, the
+ * library rule `∫ sin x dx = −cos x` is false for a call of `Sin`. When the
+ * body of the user function replaces the call, the integral is the integral
+ * of the body, and these methods give its closed form, as `D` does when it
+ * differentiates the body of a user function.
+ *
+ * The caller has found such a call (`shadowedCallsIn()` is `'call'`).
+ * Return `undefined` when a call cannot be replaced, and the integral must
+ * stay unevaluated:
+ * - the user function is not a function literal (an `evaluate` handler);
+ * - the evaluated body still has a call of a shadowed name (a recursive
+ *   function), or is not valid;
+ * - the body has a free symbol with the name of an integration variable in
+ *   `bound`. The integral binds this name, so the body would read the
+ *   integration variable instead of the symbol of the user function.
+ */
+function inlineShadowedCalls(
+  ce: ComputeEngine,
+  integrand: Expression,
+  names: ReadonlySet<string>,
+  bound: ReadonlyArray<string>
+): Expression | undefined {
+  // A function literal that `liftIntegrand()` did not unwrap would be
+  // canonicalized again when its body changes, which wraps the body again.
+  if (integrand.operator === 'Function') return undefined;
+
+  const system = ce.contextStack[0]?.lexicalScope;
+  const bodyOf = (call: Expression): Expression | undefined => {
+    if (!isFunction(call)) return undefined;
+    const def = ce.lookupDefinition(call.operator);
+    const isLiteral = isOperatorDef(def)
+      ? def.operator.lambda !== undefined
+      : isValueDef(def) && isFunction(def.value.value, 'Function');
+    if (!isLiteral) return undefined;
+    // The body of the user function, with wildcard parameters, then with
+    // the arguments of the call.
+    const wildcards =
+      call.nops === 1
+        ? [ce.symbol('_')]
+        : call.ops.map((_, i) => ce.symbol(`_${i + 1}`));
+    let body: Expression;
+    try {
+      body = ce.function(call.operator, wildcards).evaluate();
+    } catch (e) {
+      if (e instanceof Error && e.name === 'CancellationError') throw e;
+      return undefined;
+    }
+    if (!body.isValid || shadowedCallsIn(ce, body, names) !== 'none')
+      return undefined;
+    const parameters = wildcards.map((w) => sym(w)!);
+    if (body.symbols.some((s) => !parameters.includes(s) && bound.includes(s)))
+      return undefined;
+    const substitution: Record<string, Expression> = {};
+    parameters.forEach((p, i) => (substitution[p] = call.ops[i]));
+    return body.subs(substitution);
+  };
+
+  let failed = false;
+  const result = integrand.map((x) => {
+    if (
+      failed ||
+      !isFunction(x) ||
+      !names.has(x.operator) ||
+      !isOperatorDef(system?.bindings.get(x.operator))
+    )
+      return x;
+    const body = bodyOf(x);
+    if (body === undefined) failed = true;
+    return body ?? x;
+  });
+  return failed ? undefined : result;
+}
 
 /**
  * The shape gate `list<any>` that `JacobianMatrix`'s type handler asks its
@@ -2868,11 +3058,68 @@ volumes
       },
       evaluate: (ops, { engine: ce }) => {
         const op = ops[0].evaluate();
-        const orders = ops.slice(1).map((o) => Math.floor(o.N().re));
+        let orders = ops.slice(1).map((o) => o.N().re);
         // An order that is not a number yet (`Derivative(f, n)` with `n`
         // unassigned) has no closed form: stay inert. Reading it as 1 silently
         // made `f^{(n)}` the FIRST derivative.
-        if (orders.some((n) => !Number.isFinite(n))) return undefined;
+        // A negative or fractional order is not an order of differentiation
+        // (fractional calculus and antiderivatives are not implemented), so
+        // the node stays inert too, as `D(f, {x, n})` does for such an `n`.
+        // Rounding the order down gave a derivative of the wrong order:
+        // `Derivative(Power, -1, 1)` was read as `Derivative(Power, 0, 1)`
+        // and `Derivative(g, 1.5)` as `Derivative(g, 1)`.
+        if (orders.some((n) => !Number.isInteger(n) || n < 0)) return undefined;
+        // Each unit of order is one differentiation pass, and each pass keeps
+        // its result (the iterates of `derivative()`, the nested `D` tree of
+        // the multi-index arm). The work and the memory thus scale with the
+        // VALUE of the orders: `Derivative(Power, 1000000000, 0)` used up the
+        // heap before any deadline check ran. Above the cap that
+        // `D(f, {x, n})` also uses, the node stays inert.
+        if (orders.reduce((sum, n) => sum + n, 0) > MAX_DERIVATIVE_ORDER)
+          return undefined;
+
+        // The number of orders must agree with the number of parameters of
+        // the function: the parameters of the function literal that `op` is,
+        // or that it is bound to, or else the fixed number of arguments of
+        // the signature of the operator `op` names (an operator with optional
+        // or variadic arguments, such as `Log` or `Add`, has no fixed number
+        // and is not checked). More orders than parameters name no partial
+        // derivative: the node stays inert. Before, the operator branch below
+        // applied the function to one fresh symbol for each order and the
+        // application threw ("Too many arguments") for
+        // `Derivative(h, 1, 0, 0)` with `h(x, y)`.
+        //
+        // Fewer orders than parameters are padded with order 0, the same
+        // convention that `differentiate()` uses for
+        // `Apply(Derivative(f, α), …)`: `g'(x, y)` parses to
+        // `Apply(Derivative(g, 1), x, y)`, the partial in the first
+        // argument. A bare `Derivative(g)` is order 1 in the first argument.
+        // For a symbol bound to a literal of several parameters, the
+        // univariate arm applied the symbol to one hole and gave a wrong
+        // closed form: `(x) => x^2` for `h(x, y) := x^2 y`. For an operator
+        // of several arguments (`Arctan2`, `Power`, an operator with a
+        // `derivative` key for each of two parameters), the univariate arm
+        // has no derivative and the node stayed inert, while
+        // `Derivative(Arctan2, 1, 0)` evaluated. An inline literal with one
+        // order already differentiates in its first parameter in the
+        // univariate arm, so it is not padded.
+        const keyed =
+          isSymbol(op) && op.operatorDefinition?.derivative !== undefined;
+        const literal = isSymbol(op) ? functionLiteralOf(ce, op.symbol) : op;
+        let arity: number | undefined;
+        if (isFunction(literal, 'Function')) arity = literal.nops - 1;
+        else if (isSymbol(op)) {
+          const sig = op.operatorDefinition?.signature.type;
+          if (
+            sig !== undefined &&
+            typeof sig !== 'string' &&
+            sig.kind === 'signature' &&
+            sig.optArgs === undefined &&
+            sig.variadicArg === undefined
+          )
+            arity = sig.args?.length ?? 0;
+        }
+        if (arity !== undefined && orders.length > arity) return undefined;
         // Differentiating zero times in every position is the function
         // itself — univariate `Derivative(g, 0)` and multi-index
         // `Derivative(g, 0, 0)` alike. Left to the lifting below, a head that
@@ -2880,8 +3127,22 @@ volumes
         // operator-defined name such as `Sin`) came back as the constant
         // function returning that head (`Derivative(g, 0)` → `(x) ↦ g`): the
         // order-0 "derivative" is the head itself, which the univariate arm
-        // then re-parameterized over its value's parameters.
+        // then re-parameterized over its value's parameters. This check
+        // comes after the arity check above: `Derivative(Sin, 0, 0)` has
+        // more orders than `Sin` has arguments and stays inert, it is not
+        // `Sin`.
         if (orders.length >= 1 && orders.every((n) => n === 0)) return op;
+        let padded = false;
+        if (
+          arity !== undefined &&
+          arity >= 2 &&
+          orders.length < arity &&
+          (orders.length >= 2 || isSymbol(op))
+        ) {
+          const given = orders.length === 0 ? [1] : orders;
+          orders = [...given, ...new Array(arity - given.length).fill(0)];
+          padded = true;
+        }
 
         // Univariate (bare or single order): ordinary n-th derivative.
         //
@@ -2889,8 +3150,10 @@ volumes
         // literal (P1-19c): a bare hole-form (`cos(_)`) typed `number`,
         // so a stored `let g = Derivative(f)` was not callable. The historical
         // blockers are addressed by construction:
-        // - a result still carrying a `Derivative` stays bare — wrapping it
-        //   would re-enter this handler when the body evaluates;
+        // - a result that holds a `Derivative` of the same function stays
+        //   inert — as a literal, its body would evaluate this node again at
+        //   each application. A result that holds the `Derivative` of
+        //   another function is lifted like any other closed form;
         // - the hole is renamed to a real parameter, so no `_` reaches the
         //   serializers (the `()\mapsto…` mis-rendering) or the
         //   `denotesFunction` wildcard gate.
@@ -2899,10 +3162,25 @@ volumes
         // declares its parameter, and that declaration makes the cache of
         // `derivative()` miss on the next request (see
         // `memoizedDerivativeResult`).
+        //
+        // The hole `_` that `derivative()` applies an operator symbol to, and
+        // the parameter that replaces it, are declared in a scope that is
+        // discarded afterwards. Without that scope, `derivative()` and
+        // `ce.symbol()` declared them in the caller's scope, with the type
+        // that the operator inferred (`number` for the argument of `Sin`).
+        // That type then applied to every later use of `x` and `_`: after
+        // `Derivative(Sin)` was evaluated, `x && True` was an error.
         if (orders.length <= 1) {
           const order = orders[0] ?? 1;
           return memoizedDerivativeResult(op, order, () => {
-            const r = derivative(op, order);
+            ce.pushScope();
+            let r: Expression | undefined;
+            try {
+              ce.declare('_', 'unknown');
+              r = derivative(op, order);
+            } finally {
+              ce.popScope();
+            }
             if (r === undefined) return undefined;
             // Order 0 (or an already-lifted result) is the function itself.
             if (isFunction(r, 'Function')) return r;
@@ -2920,7 +3198,22 @@ volumes
             // body may hold a legitimate `Apply(Derivative(f, 2), t)` beside
             // the unresolved `D`.)
             if (holdsUnresolvedD(r)) return undefined;
-            if (r.operator === 'Derivative' || r.has('Derivative')) return r;
+            if (r.operator === 'Derivative') return r;
+            // A closed form that holds a `Derivative` of the function itself
+            // (`Apply(Derivative(f, 1), _)` for a recursive `f`) stays
+            // inert. As a function literal, its body would evaluate this
+            // node again at each application, without end.
+            if (
+              r
+                .getSubexpressions('Derivative')
+                .some((d) => isFunction(d) && d.op1.isSame(op))
+            )
+              return undefined;
+            // A closed form that holds the `Derivative` of another function
+            // (`x·g′(x) + g(x)` for `h(x) := x·g(x)` with `g` not defined) is
+            // made a function literal below, as a complete closed form is.
+            // Its body evaluates that other `Derivative` when the literal is
+            // applied.
 
             // A named-parameter function literal: the derivative was taken with
             // respect to its own (first) parameter, so the body is already in
@@ -2946,8 +3239,7 @@ volumes
                 i += 1;
               name = `x_${i}`;
             }
-            const param = ce.symbol(name);
-            return ce.function('Function', [r.subs({ _: param }), param]);
+            return functionLiteralOverHoles(ce, r, ['_'], [name]);
           });
         }
 
@@ -2961,57 +3253,134 @@ volumes
         // assigned bivariate `g` while `Derivative(g, 1)` evaluated.
         // An operator whose definition has a `derivative` key is handled by
         // the next block: the key has precedence over its function literal.
-        const keyed =
-          isSymbol(op) && op.operatorDefinition?.derivative !== undefined;
-        const literal = isSymbol(op) ? functionLiteralOf(ce, op.symbol) : op;
-        if (!keyed && isFunction(literal, 'Function')) {
-          const params = literal.ops
-            .slice(1)
-            .map((p) => functionLiteralParameterName(p));
-          if (params.length === orders.length && params.every((p) => !!p)) {
-            let body: Expression | undefined = literal.op1;
-            for (let i = 0; i < orders.length && body; i++)
-              for (let d = 0; d < orders[i] && body; d++)
-                body = differentiate(body, params[i]!);
-            // `ce.function()` (not `_fn`): the canonical handler wraps the
-            // body in the scoped Block that `makeLambda` requires — a bare
-            // `_fn` literal throws on application.
-            if (body)
-              return ce.function('Function', [body, ...literal.ops.slice(1)]);
-          }
-        }
-
-        // An operator whose definition has a `derivative` key (see
-        // `OperatorDerivative`, types-definitions.ts): differentiate an
-        // application of the operator to placeholder arguments, which uses
-        // the key, then make the result a function literal of fresh
-        // parameters. A result that still holds a `Derivative` (a partial
-        // that the key does not give) or an unresolved `D` stays inert, as
-        // in the univariate branch above.
-        if (keyed && isSymbol(op)) {
-          const holes = orders.map((_, i) => ce.symbol(`_${i + 1}`));
-          let body: Expression | undefined = ce.function(op.symbol, holes);
-          for (let i = 0; i < orders.length && body; i++)
-            for (let d = 0; d < orders[i] && body; d++)
-              body = differentiate(body, `_${i + 1}`);
-          if (body && !holdsUnresolvedD(body) && !body.has('Derivative')) {
-            const binders = collectBinderNames(body);
-            const used = (name: string) => body!.has(name) || binders.has(name);
-            const params: Expression[] = [];
-            let k = 1;
-            for (let i = 0; i < holes.length; i++) {
-              while (used(`x_${k}`)) k += 1;
-              params.push(ce.symbol(`x_${k}`));
-              k += 1;
+        // The arm is memoized per function and order vector, as the
+        // univariate arm is (see `memoizedPartialDerivative`).
+        const partial = memoizedPartialDerivative(
+          op,
+          keyed ? undefined : literal,
+          orders,
+          () => {
+            if (!keyed && isFunction(literal, 'Function')) {
+              const params = literal.ops
+                .slice(1)
+                .map((p) => functionLiteralParameterName(p));
+              if (params.length === orders.length && params.every((p) => !!p)) {
+                let body: Expression | undefined = literal.op1;
+                for (let i = 0; i < orders.length && body; i++)
+                  for (let d = 0; d < orders[i] && body; d++)
+                    body = differentiate(body, params[i]!);
+                // A body that holds a `D` the symbolic differentiator could
+                // not resolve (the partial of `Round(x, y)` in `y`) is no
+                // closed form: the node stays inert, as in the univariate arm
+                // and the operator branch below. Made a function literal, the
+                // `D` kept its variable free: an application substituted the
+                // other arguments and lost the one of the differentiation
+                // variable (`D(Round(1.5, y), y)` for the arguments 1.5, 2).
+                if (body && holdsUnresolvedD(body)) return undefined;
+                // `ce.function()` (not `_fn`): the canonical handler wraps the
+                // body in the scoped Block that `makeLambda` requires — a bare
+                // `_fn` literal throws on application.
+                if (body)
+                  return ce.function('Function', [
+                    body,
+                    ...literal.ops.slice(1),
+                  ]);
+              }
             }
-            const subs: Record<string, Expression> = {};
-            holes.forEach((_, i) => {
-              subs[`_${i + 1}`] = params[i];
-            });
-            return ce.function('Function', [body.subs(subs), ...params]);
-          }
-        }
 
+            // Any other operator: a library operator (`Log`, `Power`, `Mod`,
+            // `Arctan2`, …), or an operator whose definition has a `derivative`
+            // key (see `OperatorDerivative`, types-definitions.ts). Apply the
+            // operator to one fresh symbol for each argument, differentiate the
+            // application with `D` (which uses the rules of `differentiate()` for
+            // the library operators, and the key when there is one) the requested
+            // number of times in each symbol, then make the result a function
+            // literal of fresh parameters. This is the n-argument form of the
+            // univariate arm above, which differentiates the application `f(_)`.
+            //
+            // When a partial derivative does not close (the result still holds a
+            // `Derivative`, such as the derivative of `BesselJ` in its order, or
+            // an unresolved `D`), or the operator does not take this number of
+            // arguments, the node stays inert. A lazy operator holds its operands
+            // (they are conditions, bodies or bound indexes, not arguments), so
+            // it has no partial derivatives and stays inert too. `Add` and
+            // `Multiply` are the exceptions: they are lazy only so that they
+            // canonicalize their own operands, which are ordinary values, and
+            // `differentiate()` has the sum and product rules for them.
+            //
+            // The fresh symbols are declared in scopes that are discarded
+            // afterwards: the scope of each `D`, and the scope pushed below.
+            // Without these scopes, they were declared in the caller's
+            // scope, with the type that the first operator applied to them
+            // inferred (`real` for the arguments of `Arctan2`). That type then
+            // applied to every later use of these names.
+            const opDef = isSymbol(op) ? op.operatorDefinition : undefined;
+            if (
+              isSymbol(op) &&
+              opDef !== undefined &&
+              (!opDef.lazy || op.symbol === 'Add' || op.symbol === 'Multiply') &&
+              orders.reduce((sum, n) => sum + n, 0) <= MAX_NESTED_PARTIAL_ORDER
+            ) {
+              const names = orders.map((_, i) => `_${i + 1}`);
+              let body: Expression | undefined;
+              // The partial derivative is computed as the nested `D` expression
+              // `D(…D(D(f(_1, …, _n), _1), _1)…, _n)`, one `D` for each
+              // differentiation, the first symbol innermost. It is boxed from
+              // MathJSON, so each `D` declares its variable in its own scope, and
+              // the free symbols of the inner application refer to those
+              // declarations. The result is then the same as for the nested `D`
+              // that a user writes, and the cost is the same too. Each `D`
+              // evaluates its result before the next `D` differentiates it.
+              //
+              // A chain of `differentiate()` calls on symbols declared in the
+              // scope below gives the same closed form at about 2 to 2.5 times
+              // the cost (`Derivative(Arctan2, 3, 3)`): the
+              // time went to deriving the types of the new intermediate
+              // expressions (union-type reductions and subtype tests), not to the
+              // differentiation rules.
+              let nested: MathJsonExpression = [op.symbol, ...names];
+              for (let i = 0; i < orders.length; i++)
+                for (let d = 0; d < orders[i]; d++)
+                  nested = ['D', nested, names[i]];
+              ce.pushScope();
+              try {
+                const node = ce.box(nested);
+                if (node.isValid) body = node.evaluate();
+              } finally {
+                ce.popScope();
+              }
+              if (
+                body &&
+                body.isValid &&
+                !holdsUnresolvedD(body) &&
+                !body.has('Derivative')
+              ) {
+                const binders = collectBinderNames(body);
+                const used = (name: string) =>
+                  body!.has(name) || binders.has(name);
+                const params: string[] = [];
+                let k = 1;
+                for (let i = 0; i < names.length; i++) {
+                  while (used(`x_${k}`)) k += 1;
+                  params.push(`x_${k}`);
+                  k += 1;
+                }
+                const literal = functionLiteralOverHoles(
+                  ce,
+                  body,
+                  names,
+                  params
+                );
+                if (literal !== undefined) return literal;
+              }
+            }
+            return undefined;
+          }
+        );
+        if (partial !== undefined) return partial;
+
+        // A padded order vector is not written back: the node stays as given.
+        if (padded) return undefined;
         return ce._fn('Derivative', [op, ...orders.map((n) => ce.number(n))]);
       },
       compile: (args, compile, context) =>
@@ -3754,9 +4123,41 @@ volumes
           if (lo.isSame(hi)) return ce.Zero;
         }
 
+        // A call of a user function that has the name of a library function
+        // (`Sin := t ↦ t + 1`): the residue method and the symbolic route
+        // below select a function by its name and would integrate the
+        // library function. Under `evaluate()`, the integral of the body of
+        // the user function is computed instead. When the body cannot
+        // replace the call (a name that a local scope of the integrand
+        // shadows, a user function that is not a function literal), the
+        // integral stays unevaluated. The numeric route compiles the user
+        // function and is correct, so under `N()` only the residue method is
+        // not used.
+        const names = shadowedLibraryNames(ce);
+        const shadowedCalls = shadowedCallsIn(ce, ops[0].canonical, names);
+        if (shadowedCalls !== 'none' && !numericApproximation) {
+          const inlined =
+            shadowedCalls === 'call'
+              ? inlineShadowedCalls(
+                  ce,
+                  liftIntegrand(ops[0].canonical),
+                  names,
+                  intVarNames
+                )
+              : undefined;
+          if (inlined === undefined) return undefined;
+          return ce
+            .function('Integrate', [inlined, ...ops.slice(1)])
+            .evaluate();
+        }
+
         // Use the exact residue result for both `evaluate()` and `.N()`, after
         // the real-line driver has verified the closing arc and all poles.
-        if (ops.length === 2 && isFunction(ops[1], 'Limits')) {
+        if (
+          shadowedCalls === 'none' &&
+          ops.length === 2 &&
+          isFunction(ops[1], 'Limits')
+        ) {
           const [x, lo, hi] = ops[1].ops;
           const variable = sym(x);
           if (

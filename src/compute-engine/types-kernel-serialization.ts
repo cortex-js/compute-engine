@@ -86,6 +86,10 @@ export type Hold = 'none' | 'all' | 'first' | 'rest' | 'last' | 'most';
  *     `sin(xy)`), or `log` and a number after white space (`log 2 x` →
  *     `log_2(x)`), or an argument with no parentheses that starts with `+`
  *     (`ln+1` → `ln(1)`). `detail: { function }`.
+ *   - `"ambiguous-function-subscript"` — a bare function name other than
+ *     `log` with a subscript, read as the strict grammar reads it:
+ *     `ln_3(x)` → `Log(x, 3)`, `tan_1x` → `Apply(Subscript(Tan, 1), x)`.
+ *     A person can mean a name such as `tan_1`. `detail: { name, subscript }`.
  *   - `"ambiguous-function-without-parentheses"` — a symbol declared as a
  *     function followed by an operand: `f x` → `f·x`. `detail: { name }`.
  *   - `"ambiguous-name-then-number"` — a name, white space, a number:

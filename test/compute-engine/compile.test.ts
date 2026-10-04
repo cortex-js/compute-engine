@@ -7,6 +7,11 @@ import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
 import { IntervalJavaScriptTarget } from '../../src/compute-engine/compilation/interval-javascript-target';
 import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
+import { execFileSync } from 'child_process';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { TEST_PYTHON } from './test-python';
 
 describe('COMPILE', () => {
   describe('Expressions', () => {
@@ -5887,5 +5892,775 @@ describe('the expression-only Python route declines statement bodies', () => {
     const python = new PythonTarget();
     expect(python.compile(engineWithX().box(ASSIGN_ONLY)).code).toBe('s = x');
     expect(python.compile(engineWithX().box(DECLARE_ONLY)).code).toBe('');
+  });
+});
+
+// A parameter declared as a scalar (a number or a boolean) maps over a TUPLE
+// argument, as `Sin` does (user decision 2026-10-03): `Apply((u: real) ↦ 2u, (a, b))` is `(2a, 2b)`
+// under `evaluate()`, and each target computes the same tuple (an array in
+// JavaScript, an array of enclosures on the interval target, a `vecN` on a
+// shader). An argument that does not match the declared type of its
+// parameter (a string, a boolean, a set) is still declined, because the
+// interpreter gives an `incompatible-type` error for it.
+
+/** The JavaScript value of an evaluated number, tuple or list. */
+const jsValueOf = (json: unknown): unknown =>
+  Array.isArray(json) && (json[0] === 'Tuple' || json[0] === 'List')
+    ? json.slice(1).map(jsValueOf)
+    : json;
+
+/** The midpoint of each interval in a compiled interval result. */
+const intervalMidpoints = (v: unknown): unknown => {
+  if (Array.isArray(v)) return v.map(intervalMidpoints);
+  const x = v as { lo?: number; hi?: number; value?: unknown };
+  if (x.value !== undefined) return intervalMidpoints(x.value);
+  return ((x.lo ?? NaN) + (x.hi ?? NaN)) / 2;
+};
+
+const TUPLE_ARGUMENTS = [
+  ['a tuple literal', ['Tuple', 'a', 'b']],
+  ['a tuple symbol', 'p'],
+  ['a list of tuples', ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]]],
+  ['a list-of-tuples symbol', 'P'],
+] as [string, MathJsonExpression][];
+
+const TUPLE_VALUES = {
+  a: 3,
+  b: 4,
+  p: [5, 6],
+  P: [
+    [1, 2],
+    [3, 4],
+  ],
+};
+
+/** Assign the values of `TUPLE_VALUES` to the engine. */
+const assignTupleValues = (ce: ComputeEngine) => {
+  ce.assign('a', 3);
+  ce.assign('b', 4);
+  ce.assign('p', ce.box(['Tuple', 5, 6]));
+  ce.assign('P', ce.box(['List', ['Tuple', 1, 2], ['Tuple', 3, 4]]));
+};
+
+describe('COMPILE Apply maps a tuple at a parameter declared as a scalar (a number or a boolean)', () => {
+  const engine = () => {
+    const ce = new ComputeEngine();
+    ce.declare('a', 'real');
+    ce.declare('b', 'real');
+    ce.declare('p', 'tuple<real, real>');
+    ce.declare('P', 'list<tuple<real, real>>');
+    return ce;
+  };
+
+  describe.each([
+    ['2u', ['Multiply', 2, 'u']],
+    ['7', 7],
+  ] as [string, MathJsonExpression][])('body %s', (_, body) => {
+    const literal: MathJsonExpression = [
+      'Function',
+      body,
+      ['Typed', 'u', 'real'],
+    ];
+    test.each(TUPLE_ARGUMENTS)(
+      'compiles %s to the value of evaluate()',
+      (_, arg) => {
+        const ce = engine();
+        const expr = ce.box(['Apply', literal, arg]);
+        const js = new JavaScriptTarget().compile(expr).run!(
+          TUPLE_VALUES as never
+        );
+        const interval = new IntervalJavaScriptTarget().compile(expr);
+        // The length of `P` is not known at compile time, which the interval
+        // and shader targets require.
+        if (arg !== 'P') {
+          expect(interval.success).toBe(true);
+          new GLSLTarget().compile(expr);
+          new WGSLTarget().compile(expr);
+        }
+        const run = interval.success
+          ? intervalMidpoints(interval.run!(TUPLE_VALUES as never))
+          : undefined;
+        assignTupleValues(ce);
+        const value = jsValueOf(expr.evaluate().json);
+        expect(js).toEqual(value);
+        if (run !== undefined) expect(run).toEqual(value);
+      }
+    );
+  });
+
+  test('declines an argument that does not match the parameter type', () => {
+    const ce = engine();
+    ce.declare('s', 'set<real>');
+    const DOUBLE: MathJsonExpression = [
+      'Function',
+      ['Multiply', 2, 'u'],
+      ['Typed', 'u', 'real'],
+    ];
+    // A string or a boolean is refused when the call is boxed, so the
+    // expression is invalid; a set is refused by the compile check.
+    for (const arg of ["'abc'", 'True', 's'] as MathJsonExpression[]) {
+      const expr = ce.box(['Apply', DOUBLE, arg]);
+      expect(() => new JavaScriptTarget().compile(expr)).toThrow(
+        arg === 's'
+          ? /does not match the type `real` of the parameter `u`/
+          : /Could not compile invalid expression.*incompatible-type/
+      );
+      expect(expr.evaluate().toString()).toMatch(/incompatible-type/);
+    }
+    // A tuple with a list component is data, not a point.
+    const data = ce.box([
+      'Apply',
+      DOUBLE,
+      ['Tuple', ['List', 1, 2], ['List', 3, 4]],
+    ]);
+    expect(() => new JavaScriptTarget().compile(data)).toThrow(
+      /has a component that is a collection/
+    );
+    expect(data.evaluate().toString()).toMatch(/incompatible-type/);
+  });
+
+  // A parameter with no declared type binds a tuple whole, and a list of
+  // tuples maps over the list, each tuple bound whole. The JavaScript code
+  // mapped a function over any array at run time, and a point is an array,
+  // so `Apply(u ↦ 7, (a, b))` gave `[7, 7]` and `g(P)` gave
+  // `[[7, 7], [7, 7]]`.
+  describe.each([
+    ['7', 7],
+    ['2u', ['Multiply', 2, 'u']],
+  ] as [string, MathJsonExpression][])(
+    'a parameter with no declared type, body %s',
+    (_, body) => {
+      const untyped: MathJsonExpression = ['Function', body, 'u'];
+      test.each([
+        ['Apply of the literal', (arg: MathJsonExpression) => ['Apply', untyped, arg]],
+        ['a function declared `function`', (arg: MathJsonExpression) => ['g', arg]],
+        ['a function with no declaration', (arg: MathJsonExpression) => ['h', arg]],
+        ['Map of the literal', (arg: MathJsonExpression) => ['Map', untyped, arg]],
+        ['Map of `g`', (arg: MathJsonExpression) => ['Map', 'g', arg]],
+        ['Map of `h`', (arg: MathJsonExpression) => ['Map', 'h', arg]],
+      ] as [string, (arg: MathJsonExpression) => MathJsonExpression][])(
+        '%s: JavaScript gives the value of evaluate()',
+        (_, call) => {
+          for (const arg of [['Tuple', 'a', 'b'], 'p', 'P'] as MathJsonExpression[]) {
+            // `Map` takes a collection.
+            if (arg !== 'P' && (call(arg) as unknown[])[0] === 'Map') continue;
+            const ce = engine();
+            ce.declare('g', 'function');
+            ce.assign('g', ce.box(untyped));
+            ce.assign('h', ce.box(untyped));
+            const expr = ce.box(call(arg));
+            const js = new JavaScriptTarget().compile(expr).run!(
+              TUPLE_VALUES as never
+            );
+            assignTupleValues(ce);
+            // A `Map` evaluates to a lazy collection: materialize it.
+            const value = expr.evaluate({ materialization: true }).json;
+            expect([arg, js]).toEqual([arg, jsValueOf(value)]);
+          }
+        }
+      );
+    }
+  );
+
+  // "Scalar" in the ruling means a number or a boolean, as the library
+  // functions map over a tuple of booleans (`Not((True, False))`).
+  test('a parameter declared `boolean` maps over a tuple of booleans', () => {
+    const ce = engine();
+    ce.declare('A', 'boolean');
+    ce.declare('B', 'boolean');
+    const literal: MathJsonExpression = [
+      'Function',
+      ['Not', 'p'],
+      ['Typed', 'p', 'boolean'],
+    ];
+    const expr = ce.box(['Apply', literal, ['Tuple', 'A', 'B']]);
+    expect(expr.type.toString()).toBe('tuple<boolean, boolean>');
+    expect(
+      new JavaScriptTarget().compile(expr).run!({ A: true, B: false } as never)
+    ).toEqual([false, true]);
+    // A shader vector holds numbers, not booleans.
+    expect(() => new GLSLTarget().compile(expr)).toThrow(
+      /tuple of booleans, which target 'glsl' cannot represent/
+    );
+    ce.assign('A', true);
+    ce.assign('B', false);
+    expect(expr.evaluate().json).toEqual(['Tuple', 'False', 'True']);
+  });
+
+  // A list at a parameter declared as a collection is bound whole in each
+  // cell of the map over the tuple: the call is a tuple.
+  test('a tuple beside a list bound whole', () => {
+    const ce = engine();
+    ce.declare('V', 'list<real^2>');
+    const literal: MathJsonExpression = [
+      'Function',
+      ['Add', 'u', ['Length', 'w']],
+      ['Typed', 'u', 'real'],
+      ['Typed', 'w', 'list<real>'],
+    ];
+    const expr = ce.box(['Apply', literal, ['Tuple', 1, 2], 'V']);
+    expect(expr.type.toString()).toMatch(/^tuple</);
+    expect(
+      new JavaScriptTarget().compile(expr).run!({ V: [10, 20] } as never)
+    ).toEqual([3, 4]);
+    ce.assign('V', ce.box(['List', 10, 20]));
+    expect(expr.evaluate().toString()).toBe('(3, 4)');
+  });
+});
+
+describe('COMPILE a call of a named function maps a tuple at a parameter declared as a scalar (a number or a boolean)', () => {
+  // The same rule as the `Apply` of a function literal above, for a named
+  // function. The parameter is declared by the literal (`(u: real) ↦ …`) or
+  // by the signature of the function (`k: (real) -> real` assigned
+  // `u ↦ …`). Before, the JavaScript target gave `NaN` for the second
+  // spelling (the scalar body applied to the array of the point), and the
+  // interval target gave an empty interval.
+  const engine = (declared: string, literal: MathJsonExpression) => {
+    const ce = new ComputeEngine();
+    ce.declare('a', 'real');
+    ce.declare('b', 'real');
+    ce.declare('p', 'tuple<real, real>');
+    ce.declare('P', 'list<tuple<real, real>>');
+    if (declared !== 'none') ce.declare('k', declared);
+    ce.assign('k', ce.box(literal));
+    return ce;
+  };
+  const typed = (body: MathJsonExpression): MathJsonExpression => [
+    'Function',
+    body,
+    ['Typed', 'u', 'real'],
+  ];
+  const untyped = (body: MathJsonExpression): MathJsonExpression => [
+    'Function',
+    body,
+    'u',
+  ];
+
+  describe.each([
+    ['not declared, a typed literal', 'none', typed],
+    ['declared `function`, a typed literal', 'function', typed],
+    ['declared `(real) -> real`, a typed literal', '(real) -> real', typed],
+    ['declared `(real) -> real`, an untyped literal', '(real) -> real', untyped],
+  ] as [string, string, typeof typed][])('k %s', (_, declared, literalOf) => {
+    test.each([
+      ['2u', ['Multiply', 2, 'u']],
+      ['7', 7],
+    ] as [string, MathJsonExpression][])('body %s', (_, body) => {
+      for (const [, arg] of TUPLE_ARGUMENTS) {
+        const ce = engine(declared, literalOf(body));
+        const expr = ce.box(['k', arg]);
+        const js = new JavaScriptTarget().compile(expr).run!(
+          TUPLE_VALUES as never
+        );
+        const interval = new IntervalJavaScriptTarget().compile(expr);
+        if (arg !== 'P') {
+          expect(interval.success).toBe(true);
+          for (const target of [new GLSLTarget(), new WGSLTarget()])
+            expect(target.compile(expr).code).toMatch(
+              /^(vec2f?|vec2\[2\]|array<vec2f, 2>)\(/
+            );
+        }
+        const run = interval.success
+          ? intervalMidpoints(interval.run!(TUPLE_VALUES as never))
+          : undefined;
+        assignTupleValues(ce);
+        const value = jsValueOf(expr.evaluate().json);
+        expect(js).toEqual(value);
+        if (run !== undefined) expect(run).toEqual(value);
+      }
+    });
+  });
+
+  test('compiles a scalar and a list of numbers', () => {
+    const ce = engine('(real) -> real', typed(['Multiply', 2, 'u']));
+    const js = new JavaScriptTarget();
+    const run = (e: MathJsonExpression) =>
+      js.compile(ce.box(e)).run!({ a: 3, b: 4 } as never);
+    expect(run(['k', 'a'])).toBe(6);
+    expect(run(['k', ['List', 1, 2]])).toEqual([2, 4]);
+    expect(new GLSLTarget().compile(ce.box(['k', 'a'])).code).toBe(
+      '_fn_k(a)'
+    );
+  });
+});
+
+describe('COMPILE the tuple-call rewrites keep the meaning of evaluate()', () => {
+  // A block-local function shadows an engine-level function with the same
+  // name. The rewrite of a call with a tuple argument read the engine-level
+  // function, which declares a scalar parameter, and the JavaScript code
+  // called the local function with each component: `[h(5), h(6)]` ran to
+  // `[null, null]`.
+  test('a block-local function that shadows an engine-level function', () => {
+    const ce = new ComputeEngine();
+    ce.assign(
+      'h',
+      ce.box(['Function', ['Multiply', 2, 'u'], ['Typed', 'u', 'real']])
+    );
+    const expr = ce.box([
+      'Block',
+      ['Declare', 'h', "'function'"],
+      ['Assign', 'h', ['Function', ['Add', ['At', 'v', 1], 10], 'v']],
+      ['h', ['Tuple', 5, 6]],
+    ]);
+    expect(expr.evaluate().json).toBe(15);
+    const interval = new IntervalJavaScriptTarget().compile(expr);
+    expect(interval.success).toBe(true);
+    expect(intervalMidpoints(interval.run!({} as never))).toBe(15);
+    expect(new JavaScriptTarget().compile(expr).run!({} as never)).toBe(15);
+  });
+
+  // The interpreter evaluates an argument once, then maps the call over the
+  // components of the tuple. The rewrite wrote the argument that is not
+  // mapped into each component call, so `Random()` was drawn once per
+  // component.
+  test('an argument with an effect is evaluated once', () => {
+    const ce = new ComputeEngine();
+    const literal: MathJsonExpression = [
+      'Function',
+      'w',
+      ['Typed', 'u', 'real'],
+      ['Typed', 'w', 'real'],
+    ];
+    const tuple = ce.box(['Apply', literal, ['Tuple', 1, 2], ['Random']]);
+    const list = ce.box([
+      'Apply',
+      literal,
+      ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]],
+      ['Random'],
+    ]);
+    for (const expr of [tuple, list]) {
+      const value = jsValueOf(expr.evaluate().json) as unknown[];
+      const js = new JavaScriptTarget().compile(expr).run!({} as never);
+      const draws = (v: unknown): unknown[] =>
+        Array.isArray(v) ? v.flatMap(draws) : [v];
+      expect(new Set(draws(value)).size).toBe(1);
+      expect(draws(js).length).toBe(draws(value).length);
+      expect(new Set(draws(js)).size).toBe(1);
+    }
+  });
+
+  // A `Tuple` or `List` literal at a position that is not mapped (a
+  // parameter with no declared type, or a `list<…>` parameter) is written
+  // whole into each component call. Such a literal was not bound to a
+  // temporary, so its `Random()` was drawn once per component.
+  test('a tuple or list literal that is not mapped is evaluated once', () => {
+    const ce = new ComputeEngine();
+    const untyped = ce.box([
+      'Apply',
+      ['Function', 'w', ['Typed', 'u', 'real'], 'w'],
+      ['Tuple', 1, 2],
+      ['Tuple', ['Random'], 0],
+    ]);
+    const list = ce.box([
+      'Apply',
+      [
+        'Function',
+        ['At', 'w', 1],
+        ['Typed', 'u', 'real'],
+        ['Typed', 'w', 'list<real>'],
+      ],
+      ['Tuple', 1, 2],
+      ['List', ['Random']],
+    ]);
+    const draws = (v: unknown): unknown[] =>
+      Array.isArray(v) ? v.flatMap(draws) : [v];
+    for (const expr of [untyped, list]) {
+      const value = jsValueOf(expr.evaluate().json) as unknown[];
+      const js = new JavaScriptTarget().compile(expr).run!(
+        {} as never
+      ) as unknown[];
+      expect(js.length).toBe(2);
+      expect(draws(js).length).toBe(draws(value).length);
+      // One draw: the two components hold the same value.
+      expect(value[0]).toEqual(value[1]);
+      expect(js[0]).toEqual(js[1]);
+    }
+  });
+
+  // The interpreter evaluates all the arguments, in order, before it maps the
+  // call. The parts of a mapped `Tuple` or `List` literal were not bound, so
+  // the compiled code drew the argument that is not mapped (`w`) first, and
+  // each part of the literal inside its own component call. Under a seed,
+  // the draws then went to different parameters than under `evaluate()`.
+  test('the arguments with an effect are evaluated in order', () => {
+    const ce = new ComputeEngine();
+    const literal: MathJsonExpression = [
+      'Function',
+      ['Subtract', 'w', 'u'],
+      ['Typed', 'u', 'real'],
+      ['Typed', 'w', 'real'],
+    ];
+    const R: MathJsonExpression = ['Random'];
+    const reOf = (e: ReturnType<ComputeEngine['box']>): unknown =>
+      e.operator === 'Tuple' || e.operator === 'List'
+        ? e.ops!.map(reOf)
+        : e.re;
+    for (const args of [
+      [['Tuple', R, R], R],
+      [['List', ['Tuple', R, R], ['Tuple', R, 1]], R],
+      [['Tuple', R, R], ['Tuple', R, R]],
+    ] as MathJsonExpression[][]) {
+      const expr = ce.box(['WithRandomSeed', 42, ['Apply', literal, ...args]]);
+      const r = compile(expr, { fallback: false, constantFold: false })!;
+      expect(r.success).toBe(true);
+      // The interpreter subtracts with more precision, so the last digit can
+      // differ. A draw read by the wrong parameter differs by much more.
+      const flat = (v: unknown): number[] =>
+        Array.isArray(v) ? v.flatMap(flat) : [v as number];
+      const got = flat(r.run!({} as never));
+      const want = flat(reOf(expr.evaluate()));
+      expect(got.length).toBe(want.length);
+      got.forEach((v, i) => expect(v).toBeCloseTo(want[i], 12));
+    }
+  });
+
+  // A tuple bound whole to a parameter with no declared type was put in
+  // place of the parameter with `subs`, which does not avoid capture: in
+  // `Apply(u ↦ Sum(k·u[1], k=1..3), (k, 2))` the index `k` captured the
+  // outer `k`, and the JavaScript code ran to 14 at `k = 10` where
+  // `evaluate()` gives `6k`. A nested function literal that rebinds the
+  // parameter had the same problem. Such a call is declined.
+  test('a tuple bound whole is not captured by a binder of the body', () => {
+    const ce = new ComputeEngine();
+    ce.declare('k', 'real');
+    const sum = ce.box([
+      'Apply',
+      [
+        'Function',
+        ['Sum', ['Multiply', 'k', ['At', 'u', 1]], ['Limits', 'k', 1, 3]],
+        'u',
+      ],
+      ['Tuple', 'k', 2],
+    ]);
+    expect(() => new JavaScriptTarget().compile(sum)).toThrow(
+      /the body of the function binds `k`/
+    );
+    const nested = ce.box([
+      'Apply',
+      [
+        'Function',
+        ['Apply', ['Function', ['At', 'u', 1], 'u'], ['Tuple', 7, 8]],
+        'u',
+      ],
+      ['Tuple', 'k', 2],
+    ]);
+    expect(() => new JavaScriptTarget().compile(nested)).toThrow(
+      /the body of the function binds `u`/
+    );
+    // The public `compile()` falls back to the interpreter.
+    ce.assign('k', 10);
+    expect(sum.evaluate().json).toBe(60);
+    expect(nested.evaluate().json).toBe(7);
+  });
+});
+
+describe('COMPILE a `Return` as the last statement of a block', () => {
+  // The JavaScript code of a block is an IIFE that returns the value of the
+  // last statement. A last statement that is a `Return` is already emitted
+  // as `return <value>`, so the code was `return return x`, and a lone
+  // `Return` was unwrapped to `return x` in an expression position. Both
+  // threw a `SyntaxError` ("Unexpected token 'return'") on the JavaScript
+  // and interval targets. The `Return` now gives the value of the block, as
+  // an earlier `Return` in the block does.
+  const engine = () => {
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    return ce;
+  };
+  const midpoint = (v: unknown): number => {
+    const x = v as { lo?: number; hi?: number; value?: unknown };
+    if (x.value !== undefined) return midpoint(x.value);
+    return ((x.lo ?? NaN) + (x.hi ?? NaN)) / 2;
+  };
+
+  test.each([
+    ['at the compilation root', ['Block', ['Assign', 'z', 1], ['Return', 'x']], 3],
+    ['alone at the compilation root', ['Block', ['Return', 'x']], 3],
+    [
+      'in a function body',
+      [
+        'Apply',
+        ['Function', ['Block', ['Assign', 'z', 1], ['Return', ['Add', 'y', 1]]], 'y'],
+        'x',
+      ],
+      4,
+    ],
+    [
+      'alone in a function body',
+      ['Apply', ['Function', ['Block', ['Return', ['Add', 'y', 1]]], 'y'], 'x'],
+      4,
+    ],
+  ] as [string, MathJsonExpression, number][])('%s', (_, json, want) => {
+    const ce = engine();
+    for (const to of ['javascript', 'interval-js'] as const) {
+      const r = compile(ce.box(json), { to, fallback: false });
+      expect(r.success).toBe(true);
+      const value = r.run!({ x: 3 } as never);
+      expect(to === 'javascript' ? value : midpoint(value)).toBe(want);
+    }
+  });
+});
+
+describe('COMPILE a `Return` in a tail position gives its value, on every statement target', () => {
+  // A `Return` was written in place as a statement. In an expression it was
+  // a syntax error on the JavaScript and interval targets: a bare root
+  // `Return(x)` became the expression `return x`, and an `If` whose branches
+  // return became `c ? return 1 : return 5`. On Python, a block whose last
+  // statement is a `Return` became `return return x`, and `compileFunction()`
+  // wrote `return return x` for a body that is a `Return`. In a tail position
+  // (the compilation root, or the last statement of a block whose value is
+  // used), a `Return` now gives its value, and an `If` whose branches return
+  // is the conditional of the branch values.
+  const Y1: MathJsonExpression = ['Add', 'y', 1];
+  const IF: MathJsonExpression = [
+    'If',
+    ['Greater', 'y', 0],
+    ['Return', 1],
+    ['Return', 5],
+  ];
+  const BODIES: [string, MathJsonExpression][] = [
+    ['a block ending with a Return', ['Block', ['Assign', 'z', 1], ['Return', Y1]]],
+    ['a block of one Return', ['Block', ['Return', Y1]]],
+    ['a bare Return', ['Return', Y1]],
+    ['a block ending with an If whose branches return', ['Block', ['Assign', 'z', 1], IF]],
+    ['a block of one If whose branches return', ['Block', IF]],
+    ['a bare If whose branches return', IF],
+    [
+      'a block ending with an If with one returning branch',
+      ['Block', ['Assign', 'z', 1], ['If', ['Greater', 'y', 0], ['Return', 1], 5]],
+    ],
+  ];
+  // An `If` whose branches return, before the last statement: an early
+  // return, in statement form.
+  const EARLY: MathJsonExpression = ['Block', ['Assign', 'z', 1], IF, 7];
+  const SAMPLES = [3, -2];
+
+  const engine = () => {
+    const ce = new ComputeEngine();
+    ce.declare('y', 'real');
+    return ce;
+  };
+  /** The value of `body` as the body of a function of `y`, at `y`. */
+  const interpreted = (body: MathJsonExpression, y: number): unknown =>
+    new ComputeEngine()
+      .box(['Apply', ['Function', body, 'y'], y])
+      .evaluate().json;
+  const midpoint = (v: unknown): number => {
+    const x = v as { lo?: number; hi?: number; value?: unknown };
+    if (x.value !== undefined) return midpoint(x.value);
+    return ((x.lo ?? NaN) + (x.hi ?? NaN)) / 2;
+  };
+
+  test.each([...BODIES, ['an early return', EARLY]] as [
+    string,
+    MathJsonExpression,
+  ][])('JavaScript: %s', (_, body) => {
+    const r = compile(engine().box(body), { to: 'javascript', fallback: false });
+    expect(r.success).toBe(true);
+    for (const y of SAMPLES)
+      expect(r.run!({ y } as never)).toBe(interpreted(body, y));
+  });
+
+  test.each(BODIES)('interval-js: %s', (_, body) => {
+    const r = compile(engine().box(body), { to: 'interval-js', fallback: false });
+    expect(r.success).toBe(true);
+    for (const y of SAMPLES)
+      expect(midpoint(r.run!({ y } as never))).toBe(interpreted(body, y));
+  });
+
+  // The interval target has no correct statement form for a conditional
+  // (the condition of a statement `if` reads an interval as a boolean), so
+  // an early return declines there, with the reason.
+  test('interval-js declines an early return in a branch', () => {
+    const r = compile(engine().box(EARLY), { to: 'interval-js', fallback: false });
+    expect(r.success).toBe(false);
+    expect(r.error).toMatch(
+      /Could not compile `If`: a branch returns early \(`Return`\) from a statement that is not the last one of the block/
+    );
+  });
+
+  // A `Return` in an operand of an expression is not in a tail position.
+  // The interpreter keeps it as a held value (`If(0 < y, Return(1), 2) + 1`),
+  // which no target can write as an expression.
+  test('a Return in an operand declines on every target', () => {
+    const operand: MathJsonExpression = [
+      'Add',
+      ['If', ['Greater', 'y', 0], ['Return', 1], 2],
+      1,
+    ];
+    const reason =
+      /Could not compile `Return`: a `Return` that is an operand of an expression has no lowering/;
+    expect(() =>
+      compile(engine().box(operand), { to: 'javascript', fallback: false })
+    ).toThrow(reason);
+    const interval = compile(engine().box(operand), {
+      to: 'interval-js',
+      fallback: false,
+    });
+    expect(interval.success).toBe(false);
+    expect(interval.error).toMatch(reason);
+    expect(() =>
+      new PythonTarget().compileFunction(engine().box(operand), 'f', ['y'])
+    ).toThrow(/Could not compile `If`: a multi-statement construct/);
+  });
+
+  test('Python: the code has one `return` per path', () => {
+    const python = new PythonTarget();
+    const code = (body: MathJsonExpression) =>
+      python.compileFunction(engine().box(body), 'f', ['y'], undefined, {
+        constantFold: false,
+      });
+    expect(code(BODIES[0][1])).toBe('def f(y):\n    z = 1\n    return y + 1\n');
+    expect(code(BODIES[2][1])).toBe('def f(y):\n    return y + 1\n');
+    for (const [, body] of [...BODIES, ['', EARLY]] as [
+      string,
+      MathJsonExpression,
+    ][])
+      expect(code(body)).not.toMatch(/return\s+return/);
+  });
+
+  const pythonRuns = (() => {
+    try {
+      if (TEST_PYTHON === undefined) return false;
+      execFileSync(TEST_PYTHON, ['-c', 'import numpy'], { stdio: 'ignore' });
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+
+  (pythonRuns ? test : test.skip)(
+    'Python: the compiled functions give the value of evaluate()',
+    () => {
+      const python = new PythonTarget();
+      const cases = [...BODIES, ['an early return', EARLY]] as [
+        string,
+        MathJsonExpression,
+      ][];
+      let src = 'import numpy as np\nimport json\n\n';
+      cases.forEach(([, body], i) => {
+        src += `${python.compileFunction(engine().box(body), `f${i}`, ['y'], undefined, { constantFold: false })}\n`;
+      });
+      src += `print(json.dumps([[float(f(y)) for y in ${JSON.stringify(SAMPLES)}] for f in [${cases.map((_, i) => `f${i}`).join(', ')}]]))\n`;
+      const file = path.join(os.tmpdir(), `ce-py-return-${process.pid}.py`);
+      fs.writeFileSync(file, src);
+      let out = '';
+      try {
+        out = execFileSync(TEST_PYTHON!, [file], { encoding: 'utf8' });
+      } finally {
+        fs.unlinkSync(file);
+      }
+      expect(JSON.parse(out)).toEqual(
+        cases.map(([, body]) => SAMPLES.map((y) => interpreted(body, y)))
+      );
+    }
+  );
+});
+
+describe('COMPILE a call of a block local or a parameter with a library name', () => {
+  // The check for a user definition that shadows a library operator reads
+  // the scope chain of the engine only. A block local
+  // (`Declare(Ln, "function"); Ln ≔ t ↦ t + 1; Ln(x)`) or a parameter
+  // (`(Ln, y) ↦ Ln(y)`) is not entered there, so the call compiled as the
+  // library operator: `Ln(x)` became `_SYS.cln(x)`, and
+  // `∫₁² Block(…, Ln(x)) dx` gave 0.386 instead of 2.5.
+  const INC: MathJsonExpression = ['Function', ['Add', 't', 1], 't'];
+  const engine = () => {
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    return ce;
+  };
+  const valueAt3 = (json: MathJsonExpression): unknown => {
+    const ce = new ComputeEngine();
+    ce.assign('x', 3);
+    return ce.box(json).evaluate().json;
+  };
+  const midpoint = (v: unknown): number => {
+    const x = v as { lo?: number; hi?: number; value?: unknown };
+    if (x.value !== undefined) return midpoint(x.value);
+    return ((x.lo ?? NaN) + (x.hi ?? NaN)) / 2;
+  };
+
+  describe.each(['Ln', 'Sin', 'Sqrt'])('%s', (name) => {
+    const local: MathJsonExpression = [
+      'Block',
+      ['Declare', name, "'function'"],
+      ['Assign', name, INC],
+      [name, 'x'],
+    ];
+    const inBody: MathJsonExpression = [
+      'Apply',
+      ['Function', ['Block', ...(local as unknown[]).slice(1, 3), [name, 'y']], 'y'],
+      'x',
+    ] as MathJsonExpression;
+    const param: MathJsonExpression = [
+      'Apply',
+      ['Function', [name, 'y'], name, 'y'],
+      INC,
+      'x',
+    ];
+
+    test('a block local compiles as a call of the local', () => {
+      for (const json of [local, inBody]) {
+        expect(valueAt3(json)).toBe(4);
+        const js = compile(engine().box(json), { to: 'javascript', fallback: false });
+        expect(js.run!({ x: 3 } as never)).toBe(4);
+        const interval = compile(engine().box(json), {
+          to: 'interval-js',
+          fallback: false,
+        });
+        expect(interval.success).toBe(true);
+        expect(midpoint(interval.run!({ x: 3 } as never))).toBe(4);
+      }
+      // Python binds the local as a value but has no call of it; the GPU
+      // targets have no function values.
+      expect(() =>
+        compile(engine().box(local), { to: 'python', fallback: false })
+      ).toThrow(new RegExp(`\`${name}\` is bound in this compilation`));
+      expect(() =>
+        compile(engine().box(local), { to: 'glsl', fallback: false })
+      ).toThrow();
+    });
+
+    test('a parameter declines on every target', () => {
+      expect(valueAt3(param)).toBe(4);
+      const reason = new RegExp(
+        `the parameter \`${name}\` of the function is called in its body`
+      );
+      for (const to of ['javascript', 'glsl', 'wgsl', 'python'] as const)
+        expect(() =>
+          compile(engine().box(param), { to, fallback: false })
+        ).toThrow(reason);
+      const interval = compile(engine().box(param), {
+        to: 'interval-js',
+        fallback: false,
+      });
+      expect(interval.success).toBe(false);
+      expect(interval.error).toMatch(reason);
+    });
+
+    // With no `Declare`, the block writes the global binding, and the
+    // interpreter still calls the library operator.
+    test('an assignment with no declaration keeps the library operator', () => {
+      const json: MathJsonExpression = ['Block', ['Assign', name, INC], [name, 'x']];
+      const js = compile(engine().box(json), { to: 'javascript', fallback: false });
+      expect(js.run!({ x: 3 } as never)).toBeCloseTo(
+        new ComputeEngine().box([name, 3]).N().re,
+        12
+      );
+      expect(valueAt3(json)).toEqual(
+        new ComputeEngine().box([name, 3]).evaluate().json
+      );
+    });
+
+    test('the numeric integral reads the local', () => {
+      const ce = new ComputeEngine();
+      const integral = ce.box([
+        'Integrate',
+        ['Function', local, 'x'],
+        ['Limits', 'x', 1, 2],
+      ]);
+      expect(integral.N().re).toBeCloseTo(2.5, 10);
+    });
   });
 });

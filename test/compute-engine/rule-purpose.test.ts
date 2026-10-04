@@ -103,7 +103,7 @@ describe('cost gate: no rewrite may make the expression more expensive', () => {
     // -(x+1) is cost 9, -1-x is cost 10: distributing trades one Negate for
     // one per term, so it never passes the gate on cost. It is tagged
     // `purpose: 'transform'` on the `negation` rule instead.
-    expect(ce.parse('-(x+1)').simplify().toString()).toBe('-1 - x');
+    expect(ce.parse('-(x+1)').simplify().toString()).toBe('-x - 1');
     expect(ce.parse('-(a+b+c)').simplify().toString()).toBe('-a - b - c');
   });
 
@@ -115,7 +115,7 @@ describe('cost gate: no rewrite may make the expression more expensive', () => {
     // the `transform` tag was dropped and the gate discarded the result.
     // `expand` now declines a negated sum. A negated *product* must still
     // reach `expand`.
-    expect(ce.parse('-(x+1)').simplify().toString()).toBe('-1 - x');
+    expect(ce.parse('-(x+1)').simplify().toString()).toBe('-x - 1');
     expect(ce.parse('-(x(y+1))').simplify().toString()).toBe('-x * y - x');
   });
 

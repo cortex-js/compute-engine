@@ -897,6 +897,475 @@ describe('Rules: Hyperbolic Trig (arccoth repeat)', () => {
     ));
 });
 
+describe('Rules: odd and even functions of a negated argument', () => {
+  // simplify() moves the sign out of the argument of an odd or even function,
+  // for a negative number as for `Negate(x)`, so that the terms of a sum
+  // cancel. evaluate() keeps `f(-1)` exact and unchanged.
+  const cases: [Expression, string, string][] = [
+    [
+      ['Subtract', ['SinIntegral', 1], ['SinIntegral', -1]],
+      '2SinIntegral(1)',
+      '-SinIntegral(-1) + SinIntegral(1)',
+    ],
+    [['Subtract', ['Sin', 1], ['Sin', -1]], '2sin(1)', '-sin(-1) + sin(1)'],
+    [['Add', ['Erf', ['Negate', 'x']], ['Erf', 'x']], '0', 'Erf(x) + Erf(-x)'],
+    [['Subtract', ['Cos', -2], ['Cos', 2]], '0', '-cos(2) + cos(-2)'],
+    [['Subtract', ['Cosh', -2], ['Cosh', 2]], '0', '-cosh(2) + cosh(-2)'],
+    [
+      ['Subtract', ['Sinh', 1], ['Sinh', -1]],
+      '2sinh(1)',
+      '-sinh(-1) + sinh(1)',
+    ],
+    [
+      ['Add', ['Arctan', ['Rational', -1, 2]], ['Arctan', ['Rational', 1, 2]]],
+      '0',
+      'arctan(-1/2) + arctan(1/2)',
+    ],
+    [
+      [
+        'Add',
+        ['FresnelS', -3],
+        ['FresnelS', 3],
+        ['FresnelC', -3],
+        ['FresnelC', 3],
+        ['Erfi', -1],
+        ['Erfi', 1],
+        ['SinhIntegral', -1],
+        ['SinhIntegral', 1],
+      ],
+      '0',
+      'SinhIntegral(-1) + SinhIntegral(1) + FresnelS(-3) + FresnelS(3) + FresnelC(-3) + FresnelC(3) + Erfi(-1) + Erfi(1)',
+    ],
+    [
+      [
+        'Add',
+        ['Arcsin', ['Negate', 'y']],
+        ['Arcsin', 'y'],
+        ['Arsinh', -2],
+        ['Arsinh', 2],
+        ['Artanh', ['Negate', 'y']],
+        ['Artanh', 'y'],
+      ],
+      '0',
+      'arcsin(y) + arcsin(-y) + artanh(y) + artanh(-y) + arsinh(-2) + arsinh(2)',
+    ],
+    [
+      [
+        'Add',
+        ['Arccsc', -2],
+        ['Arccsc', 2],
+        ['Arccsc', ['Negate', 'y']],
+        ['Arccsc', 'y'],
+        ['Arcsch', ['Rational', -1, 2]],
+        ['Arcsch', ['Rational', 1, 2]],
+        ['Arcsch', ['Negate', 'y']],
+        ['Arcsch', 'y'],
+      ],
+      '0',
+      // evaluate() folds the special values arccsc(∓2) = ∓π/6, which cancel
+      'arccsc(y) + arccsc(-y) + arcsch(y) + arcsch(-y) + arcsch(-1/2) + arcsch(1/2)',
+    ],
+  ];
+  for (const [input, simplified, evaluated] of cases) {
+    test(`simplify ${JSON.stringify(input)}`, () => {
+      const expr = ce.expr(input);
+      expect(expr.simplify().toString()).toBe(simplified);
+      expect(expr.evaluate().toString()).toBe(evaluated);
+    });
+  }
+
+  test('a negative rational moves out although the cost grows', () =>
+    expect(
+      ce
+        .expr(['Sin', ['Rational', -1, 3]])
+        .simplify()
+        .toString()
+    ).toBe('-sin(1/3)'));
+
+  test('the definite integral of a·sin(t)/t over [−1, 1]', () =>
+    expect(
+      ce
+        .parse('\\int_{-1}^1 \\frac{a\\sin t}{t}\\,dt')
+        .evaluate()
+        .simplify()
+        .toString()
+    ).toBe('2a * SinIntegral(1)'));
+
+  test('a complex argument keeps its form', () =>
+    expect(
+      ce
+        .expr(['Erf', ['Complex', -1, 1]])
+        .simplify()
+        .toString()
+    ).toBe('Erf((-1 + i))'));
+
+  // A user definition that shadows a library function has another value, so
+  // the sign rules of the library function must not apply to it. With
+  // `f(t) := t^3 + 1`, `f(-x)` is 1 - x^3: the odd rule f(-x) -> -f(x) would
+  // give -x^3 - 1, and the even rule f(-x) -> f(x) would give x^3 + 1. Each
+  // case uses its own engine: the definition stays in the scope.
+  for (const name of ['Erf', 'Arctan', 'Sinh', 'Sin', 'Cos', 'Cosh']) {
+    test(`a shadowed ${name} keeps its value`, () => {
+      const engine = new ComputeEngine();
+      engine.declare(name, 'function');
+      engine.assign(name, engine.parse('t \\mapsto t^3 + 1'));
+      const negated = engine.expr([name, ['Negate', 'x']]).simplify();
+      expect(negated.evaluate().toString()).toBe('1 - x^3');
+      expect(engine.expr([name, -2]).simplify().evaluate().toString()).toBe(
+        '-7'
+      );
+      expect(
+        engine
+          .expr(['Add', [name, 'x'], [name, ['Negate', 'x']]])
+          .simplify()
+          .evaluate()
+          .toString()
+      ).toBe('2');
+    });
+  }
+});
+
+// A user definition that shadows a library function has another value, so no
+// identity of the library function applies to its calls: not the special
+// values (`sin(0) = 0`), and not the identities that select the function
+// inside a sum or a product (`sin²x + cos²x = 1`). For each case, the
+// functions in the first column are defined by the user, and `simplify()`
+// must keep the value that `evaluate()` gives. Each case uses its own
+// engine: the definitions stay in the scope.
+describe('SIMPLIFY a call of a shadowed library function', () => {
+  const X = 'x';
+  const cases: [string[], string, Expression[]][] = [
+    [
+      ['Sin'],
+      't \\mapsto t+1',
+      [
+        ['Sin', 0],
+        ['Sin', 'Pi'],
+        ['Sin', ['Divide', 'Pi', 6]],
+        ['Multiply', 2, ['Sin', X], ['Cos', X]],
+      ],
+    ],
+    [
+      ['Sin', 'Cos'],
+      't \\mapsto t+1',
+      [
+        ['Add', ['Power', ['Sin', X], 2], ['Power', ['Cos', X], 2]],
+        ['Subtract', 1, ['Power', ['Sin', X], 2]],
+        ['Multiply', 2, ['Sin', X], ['Cos', X]],
+      ],
+    ],
+    [
+      ['Cos'],
+      't \\mapsto t+1',
+      [
+        ['Cos', 'Pi'],
+        ['Add', ['Power', ['Sin', X], 2], ['Power', ['Cos', X], 2]],
+        ['Subtract', 1, ['Power', ['Cos', X], 2]],
+      ],
+    ],
+    [['Tan'], 't \\mapsto t+1', [['Tan', 0], ['Tan', ['Divide', 'Pi', 4]]]],
+    [
+      ['Csc', 'Cot'],
+      't \\mapsto t+1',
+      [
+        ['Csc', ['Divide', 'Pi', 2]],
+        ['Cot', ['Divide', 'Pi', 4]],
+      ],
+    ],
+    [['Sinh', 'Tanh'], 't \\mapsto t+1', [['Sinh', 0], ['Tanh', 0]]],
+    [['Arsinh'], 't \\mapsto t+1', [['Arsinh', 0]]],
+    [
+      ['Ln'],
+      't \\mapsto t+1',
+      [
+        ['Ln', 1],
+        ['Ln', 'ExponentialE'],
+        ['Ln', ['Exp', X]],
+        ['Ln', ['Power', X, 2]],
+        ['Exp', ['Ln', X]],
+      ],
+    ],
+    [
+      ['Log'],
+      't \\mapsto t+1',
+      [
+        ['Log', 100],
+        ['Log', ['Power', 10, X]],
+        ['Log', ['Power', X, 2]],
+      ],
+    ],
+    [
+      ['Exp', 'Ln'],
+      't \\mapsto t+1',
+      [
+        ['Ln', ['Exp', X]],
+        ['Add', ['Ln', ['Exp', X]], 1],
+      ],
+    ],
+    [
+      ['Abs'],
+      't \\mapsto t+1',
+      [
+        ['Abs', -2],
+        ['Abs', ['Negate', X]],
+        ['Abs', ['Multiply', X, 'y']],
+        ['Power', ['Abs', X], 2],
+      ],
+    ],
+    [
+      ['Sqrt'],
+      't \\mapsto t+1',
+      [
+        ['Sqrt', 4],
+        ['Sqrt', 8],
+        ['Sqrt', ['Power', X, 2]],
+        ['Power', ['Sqrt', X], 2],
+        ['Multiply', ['Sqrt', 2], ['Sqrt', 3]],
+      ],
+    ],
+    [
+      ['Root'],
+      '(t,n) \\mapsto t+n',
+      [
+        ['Root', 8, 3],
+        ['Power', ['Root', X, 3], 3],
+      ],
+    ],
+    [
+      ['Factorial'],
+      't \\mapsto t+1',
+      [['Divide', ['Factorial', ['Add', 'n', 1]], ['Factorial', 'n']]],
+    ],
+    [
+      ['Binomial'],
+      '(a,b) \\mapsto a+b',
+      [
+        ['Binomial', 'n', 0],
+        ['Binomial', 'n', 1],
+      ],
+    ],
+  ];
+  for (const [names, body, inputs] of cases) {
+    for (const input of inputs) {
+      test(`${names.join(', ')}: ${JSON.stringify(input)}`, () => {
+        const engine = new ComputeEngine();
+        for (const name of names) {
+          engine.declare(name, 'function');
+          engine.assign(name, engine.parse(body));
+        }
+        const expr = engine.expr(input);
+        expect(expr.simplify().evaluate().toString()).toBe(
+          expr.evaluate().toString()
+        );
+      });
+    }
+  }
+
+  // A rewrite that keeps the calls of the user function, and uses them only
+  // as values, still applies.
+  test('a rewrite that keeps the calls applies', () => {
+    const engine = new ComputeEngine();
+    engine.declare('Sin', 'function');
+    engine.assign('Sin', engine.parse('t \\mapsto t+1'));
+    expect(
+      engine
+        .expr(['Multiply', ['Sin', 'x'], ['Sin', 'x']])
+        .simplify()
+        .toString()
+    ).toBe('sin(x)^2');
+  });
+
+  // The arguments of a call of the user function stay visible to the rules.
+  // In a sum or a product, the summand `Sin(k)` depends on the index `k`, so
+  // the sum must not be done as the sum of a constant: `3sin(k)` or
+  // `n·sin(k)` has the index as a free variable. The value at n = 3 is
+  // compared too, because `evaluate()` keeps a sum to `n` symbolic.
+  const binders: Expression[] = [
+    ['Sum', ['Sin', 'k'], ['Limits', 'k', 1, 3]],
+    ['Sum', ['Sin', 'k'], ['Limits', 'k', 1, 'n']],
+    ['Sum', ['Multiply', 'k', ['Sin', 'k']], ['Limits', 'k', 1, 'n']],
+    ['Product', ['Sin', 'k'], ['Limits', 'k', 1, 'n']],
+  ];
+  for (const input of binders) {
+    test(`a binder keeps its index: ${JSON.stringify(input)}`, () => {
+      const engine = new ComputeEngine();
+      engine.declare('Sin', 'function');
+      engine.assign('Sin', engine.parse('t \\mapsto t+1'));
+      const expr = engine.expr(input);
+      const simplified = expr.simplify();
+      expect(simplified.unknowns).not.toContain('k');
+      expect(simplified.evaluate().toString()).toBe(expr.evaluate().toString());
+      const at3 = (e: typeof expr) => e.subs({ n: 3 }).evaluate().toString();
+      expect(at3(simplified)).toBe(at3(expr));
+    });
+  }
+
+  // The rules must see each call of the user function, not only the
+  // different calls: `sin(x)² + cos(x)² + sin(x) + cos(x)` has the same
+  // different calls as `sin(x) + cos(x) + 1`, but not the same value. The
+  // two values are compared at x = 2.
+  const counted: [string[], Expression][] = [
+    [
+      ['Sin', 'Cos'],
+      [
+        'Add',
+        ['Power', ['Sin', 'x'], 2],
+        ['Power', ['Cos', 'x'], 2],
+        ['Sin', 'x'],
+        ['Cos', 'x'],
+      ],
+    ],
+    [['Sqrt'], ['Multiply', ['Sqrt', 'x'], ['Add', ['Sqrt', 'x'], 1]]],
+    [
+      ['Sqrt'],
+      ['Add', ['Multiply', ['Sqrt', 'x'], ['Sqrt', 'x']], ['Sqrt', 'x']],
+    ],
+  ];
+  for (const [names, input] of counted) {
+    test(`each call counts: ${JSON.stringify(input)}`, () => {
+      const engine = new ComputeEngine();
+      for (const name of names) {
+        engine.declare(name, 'function');
+        engine.assign(name, engine.parse('t \\mapsto t+1'));
+      }
+      const expr = engine.expr(input);
+      const at2 = (e: typeof expr) => e.subs({ x: 2 }).evaluate().toString();
+      expect(at2(expr.simplify())).toBe(at2(expr));
+    });
+  }
+
+  test('the Fu and trig strategies keep the user function', () => {
+    const engine = new ComputeEngine();
+    for (const name of ['Sin', 'Cos']) {
+      engine.declare(name, 'function');
+      engine.assign(name, engine.parse('t \\mapsto t+1'));
+    }
+    const pythagorean = engine.parse('\\sin(x)^2+\\cos(x)^2');
+    expect(pythagorean.simplify({ strategy: 'fu' }).toString()).toBe(
+      'sin(x)^2 + cos(x)^2'
+    );
+    expect(
+      engine
+        .parse('e^{ix}')
+        .simplify({ strategy: 'trig' })
+        .toString()
+    ).toBe('e^(i * x)');
+  });
+
+  // A function parameter or a block local can also have a library name. It
+  // is bound in the local scope of the function body or of the block.
+  const user: Expression = ['Function', ['Add', 't', 1], 't'];
+  const locals: [string, Expression][] = [
+    [
+      'a parameter Sin',
+      [
+        'Apply',
+        ['Function', ['Add', ['Sin', 0], ['Sin', 'x']], 'Sin'],
+        user,
+      ],
+    ],
+    [
+      'the parameters Sin and Cos',
+      [
+        'Apply',
+        [
+          'Function',
+          ['Add', ['Power', ['Sin', 'x'], 2], ['Power', ['Cos', 'x'], 2]],
+          'Sin',
+          'Cos',
+        ],
+        user,
+        user,
+      ],
+    ],
+    [
+      'a block local Ln',
+      [
+        'Block',
+        ['Declare', 'Ln', "'function'"],
+        ['Assign', 'Ln', user],
+        ['Ln', 1],
+      ],
+    ],
+  ];
+  for (const [label, input] of locals) {
+    test(label, () => {
+      const engine = new ComputeEngine();
+      const expr = engine.expr(input);
+      expect(expr.simplify().evaluate().toString()).toBe(
+        expr.evaluate().toString()
+      );
+    });
+  }
+
+  test('a function literal with a parameter Sin keeps its body', () => {
+    const engine = new ComputeEngine();
+    expect(
+      engine
+        .expr(['Function', ['Add', ['Sin', 0], ['Sin', 'x']], 'Sin'])
+        .simplify()
+        .toString()
+    ).toBe('(sin) => sin(x) + sin(0)');
+  });
+
+  // The Fu strategy must not apply `sin² + cos² = 1` to the calls of a
+  // parameter or a block local named `Sin` and `Cos`.
+  const fuLocals: [string, Expression][] = [
+    [
+      'the parameters Sin and Cos',
+      [
+        'Apply',
+        [
+          'Function',
+          ['Add', ['Power', ['Sin', 'x'], 2], ['Power', ['Cos', 'x'], 2]],
+          'Sin',
+          'Cos',
+        ],
+        user,
+        user,
+      ],
+    ],
+    [
+      'the block locals Sin and Cos',
+      [
+        'Block',
+        ['Declare', 'Sin', "'function'"],
+        ['Declare', 'Cos', "'function'"],
+        ['Assign', 'Sin', user],
+        ['Assign', 'Cos', user],
+        ['Add', ['Power', ['Sin', 'x'], 2], ['Power', ['Cos', 'x'], 2]],
+      ],
+    ],
+  ];
+  for (const [label, input] of fuLocals) {
+    test(`the Fu strategy keeps ${label}`, () => {
+      const engine = new ComputeEngine();
+      const expr = engine.expr(input);
+      expect(expr.simplify({ strategy: 'fu' }).evaluate().toString()).toBe(
+        expr.evaluate().toString()
+      );
+    });
+  }
+
+  // In `(Sin) ↦ e^{ix}`, the trig strategy must not write `cos(x) +
+  // i·sin(x)`: in the function body, `Sin` is the parameter. The boxed
+  // result could still hold a call of the library `Sin`, so the test reads
+  // its MathJSON again, where `Sin` is bound to the parameter.
+  test('the trig strategy does not write a call of a parameter', () => {
+    const engine = new ComputeEngine();
+    const fn = engine.expr([
+      'Function',
+      ['Power', 'ExponentialE', ['Multiply', 'ImaginaryUnit', 'x']],
+      'Sin',
+    ]);
+    const applied = (f: Expression) =>
+      engine.expr(['Apply', f, user]).evaluate().toString();
+    expect(applied(fn.simplify({ strategy: 'trig' }).json)).toBe(
+      applied(fn.json)
+    );
+  });
+});
+
 describe('Rules: Trig identities', () => {
   test('sin(-x) = -sin(x)', () => checkSimplify('\\sin(-x)', '-\\sin(x)'));
   test('cos(-x) = cos(x)', () => checkSimplify('\\cos(-x)', '\\cos(x)'));

@@ -1076,6 +1076,17 @@ export interface Parser {
     script: MathJsonExpression
   ): void;
 
+  /** @internal With diagnostics on, report the symbol `joined` that a
+   * primed symbol `base` became when it took the subscripts from the token
+   * `subscriptStart` to the index into its name (`x'_{01}` is the
+   * derivative of `x_01`). The `undeclared-symbol` diagnostic of `base` is
+   * replaced by one for `joined`. Called by the prime entries. */
+  _reportJoinedSymbol?(
+    base: string,
+    joined: string,
+    subscriptStart: number
+  ): void;
+
   /** @internal In non-strict mode, with diagnostics on, record a diagnostic
    * whose code starts with `ambiguous-` for the tokens
    * `[startToken, endToken)`: the text has a second common reading. A
@@ -1161,6 +1172,18 @@ export interface Parser {
    * product) so the head no longer reports a spurious multiplication.
    */
   _pruneJuxtaposition(name: string, checkpoint: number): void;
+
+  /**
+   * @internal
+   * In non-strict mode, read the run of letters at the index as its parts,
+   * with the rule of the other letter runs: the longest spelled-out Greek
+   * names, and single letters between them (`nalpha` is `n`, `alpha`; `pi`
+   * is `Pi`). Each part is reported as a symbol reference, and a run read
+   * as more than one part with a name in it reports `ambiguous-letter-run`.
+   * Return `null`, with the index unchanged, in strict mode or when no
+   * letter is at the index.
+   */
+  _parseLetterRunParts(): MathJsonExpression[] | null;
 
   /**
    * @internal

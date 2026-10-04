@@ -486,20 +486,38 @@ describe('GPU USER FUNCTIONS — fail closed', () => {
     ).toThrow(/no runtime broadcast dispatch/);
   });
 
-  it('an argument whose shape disagrees with a DECLARED parameter fails closed', () => {
+  it('a tuple at a parameter DECLARED as a number maps over its components', () => {
+    // A parameter declared as a scalar (a number or a boolean) maps over a
+    // tuple argument (user decision 2026-10-03), so `f((1, 2))` is `(f(1), f(2))`, and the shader
+    // computes the `vec2` of the two calls. Constant folding is off so that
+    // the calls are not reduced to a literal pair.
     const ce = new ComputeEngine();
     ce.declare('f', '(number) -> number');
     ce.assign('f', ce.parse('x \\mapsto \\sin x + x^2'));
-    // Constant folding is off for the same reason as the broadcast test
-    // above: `f((1, 2))` binds the point whole to `x`, and the body's own
-    // component-wise arithmetic (`sin` and the square of a tuple both map
-    // over the components) then reduces the call to a literal pair, which
-    // would never reach the shape gate under test.
-    expect(() =>
-      glsl.compile(ce.expr(['f', ['Tuple', 1, 2]]), { constantFold: false })
-    ).toThrow(
-      /argument 1 `\(1, 2\)` lowers to "vec2" but parameter "x" is declared "float"/
+    const call = ce.expr(['f', ['Tuple', 1, 2]]);
+    expect(glsl.compile(call, { constantFold: false }).code).toBe(
+      'vec2(_fn_f(1.0), _fn_f(2.0))'
     );
+    expect(call.evaluate().toString()).toBe('(1 + sin(1), 4 + sin(2))');
+  });
+
+  it('an argument that does not match a DECLARED number parameter fails closed', () => {
+    const ce = new ComputeEngine();
+    ce.declare('f', '(number) -> number');
+    ce.assign('f', ce.parse('x \\mapsto \\sin x + x^2'));
+    // A boolean, and a tuple of booleans: the interpreter gives an
+    // `incompatible-type` error for the argument, or for each component.
+    for (const arg of ['True', ['Tuple', 'True', 'False']])
+      expect(() =>
+        glsl.compile(ce.expr(['f', arg] as never), { constantFold: false })
+      ).toThrow(/incompatible-type/);
+    // A tuple with list components is data, not a point.
+    expect(() =>
+      glsl.compile(
+        ce.expr(['f', ['Tuple', ['List', 1, 2], ['List', 3, 4]]]),
+        { constantFold: false }
+      )
+    ).toThrow(/has a component that is a collection/);
   });
 
   it('a point bound to an untyped parameter uses a shared componentwise helper', () => {

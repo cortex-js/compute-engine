@@ -1025,8 +1025,9 @@ export interface IComputeEngine {
    * 1. `ce.precision === 'machine'`. At the default bignum-preferred
    *    precision the float tier never attempts — correctly, since at bignum
    *    the interpreter produces digits float64 cannot match.
-   * 2. A numeric route: `.N()`, or `.evaluate()` on an `N(…)`-marked body. A
-   *    bare `.evaluate()` reports zero at any drain size.
+   * 2. A numeric route: `.N()`, or `.evaluate()` on a body marked with
+   *    `NumericApproximation(…)` or `N(…)`. A bare `.evaluate()` reports zero
+   *    at any drain size.
    * 3. The lazy result must actually be CONSUMED. `.N()` on a `Map` returns a
    *    lazy collection; if nothing iterates it, nothing compiles.
    *

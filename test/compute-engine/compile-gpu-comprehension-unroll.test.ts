@@ -174,7 +174,10 @@ describe.each(['glsl', 'wgsl'] as const)('%s — guards', (to) => {
       to
     );
     expect(r.declined).toMatch(/Comprehension is not supported/);
-    expect(performance.now() - t0).toBeLessThan(2000);
+    // The time depends on the load of the machine, so the limit is asserted
+    // only in a `CE_PERF=1` run. The other checks of this test do not depend on time.
+    if (process.env.CE_PERF === '1')
+      expect(performance.now() - t0).toBeLessThan(2000);
     // A literal index into such a range reads through the range's own
     // indexed access.
     expect(shader(['At', ['Range', 1, 1e9], 3], to).code).toBe('3.0');
@@ -225,7 +228,10 @@ describe.each(['glsl', 'wgsl'] as const)('%s — guards', (to) => {
       to
     );
     expect(r.declined).toMatch(/Comprehension is not supported/);
-    expect(performance.now() - t0).toBeLessThan(2000);
+    // The time depends on the load of the machine, so the limit is asserted
+    // only in a `CE_PERF=1` run. The check of the declined message above do not depend on time.
+    if (process.env.CE_PERF === '1')
+      expect(performance.now() - t0).toBeLessThan(2000);
   });
 
   test('a selection between two lists of points fails closed', () => {

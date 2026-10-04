@@ -1,5 +1,6 @@
 import type { Expression, RuleStep } from '../global-types.js';
 import { isFunction } from '../boxed-expression/type-guards.js';
+import { negatedArgument, oddEvenStep } from './simplify-trig.js';
 
 /**
  * Hyperbolic trig simplification rules consolidated from simplify-rules.ts.
@@ -30,6 +31,11 @@ const ODD_HYPERBOLIC = new Set(['Sinh', 'Tanh', 'Coth', 'Csch']);
 
 // Even hyperbolic functions: f(-x) = f(x)
 const EVEN_HYPERBOLIC = new Set(['Cosh', 'Sech']);
+
+// Odd inverse hyperbolic functions: f(-x) = -f(x). This is true on the
+// principal branches for every complex x, also on the branch cuts of Artanh
+// and Arcsch.
+const ODD_INVERSE_HYPERBOLIC = new Set(['Arsinh', 'Artanh', 'Arcsch']);
 
 // Inverse hyperbolic functions
 const INVERSE_HYPERBOLIC = new Set([
@@ -85,25 +91,13 @@ export function simplifyHyperbolic(x: Expression): RuleStep | undefined {
       }
     }
 
-    // Odd/even function properties with negation
-    if (isFunction(arg, 'Negate')) {
-      const innerArg = arg.op1;
-      if (innerArg) {
-        // Odd functions: f(-x) = -f(x)
-        if (ODD_HYPERBOLIC.has(op)) {
-          return {
-            value: ce._fn(op, [innerArg]).neg(),
-            because: `${op}(-x) -> -${op}(x)`,
-          };
-        }
-        // Even functions: f(-x) = f(x)
-        if (EVEN_HYPERBOLIC.has(op)) {
-          return {
-            value: ce._fn(op, [innerArg]),
-            because: `${op}(-x) -> ${op}(x)`,
-          };
-        }
-      }
+    // Odd/even function properties with negation: f(-x) = -f(x) for an odd
+    // function, f(-x) = f(x) for an even function. The argument is
+    // `Negate(x)` or a negative number.
+    const negated = negatedArgument(arg);
+    if (negated) {
+      if (ODD_HYPERBOLIC.has(op)) return oddEvenStep(op, negated, true, ce);
+      if (EVEN_HYPERBOLIC.has(op)) return oddEvenStep(op, negated, false, ce);
     }
 
     // Note: sinh/cosh -> exponential conversions are expansions, not
@@ -116,6 +110,12 @@ export function simplifyHyperbolic(x: Expression): RuleStep | undefined {
   if (INVERSE_HYPERBOLIC.has(op) && isFunction(x)) {
     const arg = x.op1;
     if (!arg) return undefined;
+
+    // arsinh(-x) = -arsinh(x), artanh(-x) = -artanh(x), arcsch(-x) = -arcsch(x)
+    if (ODD_INVERSE_HYPERBOLIC.has(op)) {
+      const negated = negatedArgument(arg);
+      if (negated) return oddEvenStep(op, negated, true, ce);
+    }
 
     // Inverse hyperbolic with infinity
     if (op === 'Arsinh') {

@@ -710,9 +710,155 @@ export function memoizedDerivativeResult(
   byOrder.set(order, {
     generation: after,
     value,
-    deps: accounted ? cache.lastFinishedDeps : undefined,
+    deps: accounted ? restampDisposed(cache.lastFinishedDeps) : undefined,
   });
   return value;
+}
+
+/**
+ * The cached partial derivatives of the multi-index arm of the `Derivative`
+ * evaluate handler (see {@link memoizedPartialDerivative}). The outer map is
+ * keyed by the engine. The inner map is keyed by the function literal that is
+ * differentiated or, for an operator with no such literal, by the operator
+ * definition. A library operator definition can be shared by several
+ * engines, and an entry holds expressions of one engine, so the engine is
+ * part of the key.
+ */
+const partialDerivativeChains = new WeakMap<
+  object,
+  WeakMap<object, DerivativeChainCache>
+>();
+
+/** The entry of {@link partialDerivativeChains} for `key`, emptied when the
+ * engine's semantic version moved (see {@link derivativeChainCache}). */
+function partialDerivativeCache(
+  ce: Expression['engine'],
+  key: object
+): DerivativeChainCache {
+  let byKey = partialDerivativeChains.get(ce);
+  if (byKey === undefined) {
+    byKey = new WeakMap();
+    partialDerivativeChains.set(ce, byKey);
+  }
+  const version = ce._semanticVersion;
+  let entry = byKey.get(key);
+  if (entry === undefined || entry.semanticVersion !== version) {
+    entry = {
+      semanticVersion: version,
+      iterates: new Map(),
+      results: new Map(),
+    };
+    byKey.set(key, entry);
+  }
+  return entry;
+}
+
+/**
+ * Memoize the result of `compute`, the multi-index arm of the `Derivative`
+ * evaluate handler (`Derivative(f, k₁, …, kₙ)`), per function and order
+ * vector. `source` is the function literal that `compute` differentiates, or
+ * `undefined` when `fn` is an operator with no such literal (a library
+ * operator such as `Arctan2`, or an operator with a `derivative` key).
+ *
+ * The univariate arm has the same memo ({@link memoizedDerivativeResult}).
+ * Without it, an application `Apply(Derivative(f, 1, 0), x, y)` sampled at
+ * many points computed the partial derivative again at each point: about
+ * 0.5 s at each point for `Derivative(Arctan2, 3, 3)`.
+ *
+ * An entry is valid under the same rule as a finished result of
+ * {@link derivative} (see `DerivativeChainCache`): the semantic version of
+ * the engine is unchanged (a new definition of `f` or of a function that `f`
+ * calls changes it, and a new definition of `f` also replaces the literal
+ * that is the key), the fact-suppression bit is the same, and each free
+ * symbol of `source` and of the result is bound to the same definition with
+ * the same `_writeVersion`. The free symbols of `source` are recorded
+ * because the evaluation of the partial derivative substitutes their values:
+ * such a symbol does not occur in the result. When a free symbol reads its
+ * value from a definition other than the one it is bound to (a captured
+ * parameter inside a call of a user function), the entry is valid only at
+ * the generation it was recorded at.
+ *
+ * The result of an impure function or operator is not memoized.
+ */
+export function memoizedPartialDerivative(
+  fn: Expression,
+  source: Expression | undefined,
+  orders: ReadonlyArray<number>,
+  compute: () => Expression | undefined
+): Expression | undefined {
+  const def = isSymbol(fn) ? fn.operatorDefinition : undefined;
+  let key: object | undefined;
+  if (isFunction(source, 'Function')) key = source.isPure ? source : undefined;
+  else if (def !== undefined && def.pure) key = def;
+  if (key === undefined) return compute();
+  const ce = fn.engine;
+  const cache = partialDerivativeCache(ce, key);
+  const subKey = `result:partial:${orders.join(',')}`;
+  const finished = finishedDerivative(ce, cache, subKey, 0);
+  if (finished !== undefined) return finished.value;
+  const value = compute();
+  // A definition changed during `compute`: the entry no longer describes
+  // the state of the engine.
+  if (ce._semanticVersion !== cache.semanticVersion) return value;
+  let byOrder = cache.results.get(subKey);
+  if (byOrder === undefined) {
+    byOrder = new Map();
+    cache.results.set(subKey, byOrder);
+  }
+  byOrder.set(0, {
+    generation: ce._cacheGeneration(),
+    value,
+    deps: restampDisposed(
+      symbolDependencies(...freeSymbolNodes(source), ...freeSymbolNodes(value))
+    ),
+  });
+  return value;
+}
+
+/**
+ * The symbol nodes of `expr` other than the parameters of `expr` when it is
+ * a function literal. The parameters are bound by the literal: they are not
+ * a state of the engine that a cached result depends on.
+ */
+function freeSymbolNodes(expr: Expression | undefined): Expression[] {
+  if (expr === undefined) return [];
+  let body = expr;
+  const params = new Set<string>();
+  if (isFunction(expr, 'Function')) {
+    body = expr.op1;
+    for (const p of expr.ops.slice(1)) {
+      const name = functionLiteralParameterName(p);
+      if (name) params.add(name);
+    }
+  }
+  const nodes: Expression[] = [];
+  const visit = (e: Expression) => {
+    if (isSymbol(e)) {
+      if (!params.has(e.symbol)) nodes.push(e);
+    } else if (isFunction(e)) e.ops.forEach(visit);
+  };
+  visit(body);
+  return nodes;
+}
+
+/**
+ * `deps`, with the version of each disposed definition read again.
+ *
+ * The `Derivative` handler declares the hole `_` of `compute` in a scope that
+ * it discards before `compute` returns. The discard disposes the definition
+ * of the hole, and that advances its `_writeVersion` after `derivative()`
+ * recorded it, so the entry would never validate again. A disposed
+ * definition receives no more writes, so the version it has now is the
+ * version to validate by.
+ */
+function restampDisposed(
+  deps: SymbolDependency[] | undefined
+): SymbolDependency[] | undefined {
+  return deps?.map(([node, def, version]) =>
+    (def as { disposed?: boolean }).disposed === true
+      ? [node, def, (def as { _writeVersion?: number })._writeVersion ?? 0]
+      : [node, def, version]
+  );
 }
 
 /**
@@ -765,7 +911,16 @@ export function derivative(
     // a function-literal `evaluate` handler. Differentiate the unevaluated
     // application `f(_)`: `differentiate()` then uses the key. Evaluating
     // `f(_)`, as the branch below does, would give the body of the literal.
+    //
+    // A univariate derivative is defined only for an operator that takes one
+    // argument. For an operator that needs more (`Arctan2`, or a user
+    // operator with two parameters), the application `f(_)` is invalid: the
+    // missing argument becomes an `Error` operand. Differentiating that
+    // application gives an `Error("missing")` result (`Arctan2`), or throws
+    // "Not canonical" (a user operator with an array `derivative` key).
+    // There is no univariate derivative, so stay symbolic.
     fn = ce.function(fn.symbol, [ce.symbol('_')]);
+    if (!fn.isValid) return undefined;
     appliedForm = true;
   } else if (isSymbol(fn) && fn.operatorDefinition) {
     // Look up a finished result BEFORE the normalization below. The
@@ -868,12 +1023,15 @@ export function derivative(
 
 /**
  * Read the multi-index of differentiation orders from a
- * `Derivative(f, n₁, …, n_k)` expression, padded/truncated to `arity` slots.
+ * `Derivative(f, n₁, …, n_k)` expression, padded with order 0 to `arity`
+ * slots.
  *
  * Each order is the number of times `f` is differentiated with respect to the
- * argument in that position. A bare `Derivative(f)` applied to a single
- * argument denotes a first derivative. Returns `undefined` if any order is not
- * a finite integer.
+ * argument in that position. A bare `Derivative(f)` is a first derivative in
+ * the first argument, as `Derivative(f, 1)` is. Returns `undefined` if any order is not
+ * a non-negative integer: a symbol, a negative or a fractional order is not
+ * rounded down, so `D(f^{(1.5)}(x), x)` stays inert instead of `f''(x)`, as
+ * the evaluate handler of `Derivative` keeps such an order inert.
  */
 function derivativeOrders(
   derivativeFn: Expression,
@@ -881,16 +1039,22 @@ function derivativeOrders(
 ): number[] | undefined {
   if (!isFunction(derivativeFn)) return undefined;
   const raw = derivativeFn.ops.slice(1);
+  // More orders than arguments name no partial derivative. Truncated, the
+  // extra orders were ignored: `D(Apply(Derivative(g, 1, 1), x), x)` gave
+  // `Apply(Derivative(g, 2), x)`.
+  if (raw.length > arity) return undefined;
   const orders: number[] = [];
   for (let i = 0; i < arity; i++) {
     if (i < raw.length) {
-      const n = Math.floor(raw[i].N().re);
-      if (Number.isNaN(n)) return undefined;
+      const n = raw[i].N().re;
+      if (!Number.isInteger(n) || n < 0) return undefined;
       orders.push(n);
     } else {
-      // No explicit order for this slot: a bare `Derivative(f)` on a single
-      // argument means a first derivative; any other missing slot is order 0.
-      orders.push(raw.length === 0 && arity === 1 ? 1 : 0);
+      // No explicit order for this slot: a bare `Derivative(f)` means a first
+      // derivative in the first argument; any other missing slot is order 0.
+      // The first slot was order 0 when there were several arguments, so
+      // `Apply(Derivative(g), x, y)` was read as `g(x, y)` itself.
+      orders.push(raw.length === 0 && i === 0 ? 1 : 0);
     }
   }
   return orders;
@@ -1028,6 +1192,25 @@ export function differentiate(
   }
 }
 
+/**
+ * True when `base` is the symbol `ExponentialE` bound to the library
+ * definition of Euler's number, so that ln(base) = 1. A user declaration can
+ * give the name `ExponentialE` another value
+ * (`ce.declare('ExponentialE', { value: 3 })`). Then ln(base) is not 1, and
+ * the symbol is bound to a definition other than the one in the system
+ * scope, where the standard library is installed.
+ */
+function isLibraryExponentialE(base: Expression): boolean {
+  if (!isSymbol(base) || base.symbol !== 'ExponentialE') return false;
+  const library =
+    base.engine.contextStack[0]?.lexicalScope.bindings.get('ExponentialE');
+  return (
+    library !== undefined &&
+    'value' in library &&
+    library.value === base.valueDefinition
+  );
+}
+
 /** The differentiation rules themselves. Always reached through
  * `differentiate()`, which applies the depth and size guards. */
 function differentiateNode(
@@ -1084,6 +1267,13 @@ function differentiateNode(
   if (!expr.operator || !isFunction(expr)) return undefined;
 
   // From here on, expr is narrowed to Expression & FunctionInterface
+
+  // The variable is the function of this application (`f(x)` with respect
+  // to `f`). There is no closed form for a derivative with respect to a
+  // function. `expr.has(v)` does not see the operator name, so without this
+  // test the rules below took `f(x)` as a constant and returned 0: `D(f(x),
+  // f)` was 0, and `Derivative(Apply, 1, 0)` was `(x_1, x_2) ↦ 0`.
+  if (expr.operator === v) return undefined;
 
   // The rules below select an operator by its NAME. A user definition that
   // shadows a library operator (`Sinh(x) := 3x`), or a caller library that
@@ -1359,7 +1549,7 @@ function differentiateNode(
       // (base.ln() evaluates to a numeric value).
       recordD(trace, expr, v, 'derivative.exponential-rule', () =>
         // For base e, ln(e) = 1 — show the textbook (eᵘ)′ = eᵘ·u′
-        isSymbol(base) && base.symbol === 'ExponentialE'
+        isLibraryExponentialE(base)
           ? ce.function('Multiply', [expr, dPlaceholder(exponent, v)])
           : ce.function('Multiply', [
               expr,
@@ -1370,7 +1560,12 @@ function differentiateNode(
       const gPrime =
         differentiate(exponent, v, depth + 1, trace) ??
         ce._fn('D', [exponent, ce.symbol(v)]);
-      const lnBase = ce._fn('Ln', [base]);
+      // For base e, the factor ln(e) is 1. `Ln(ExponentialE)` does not fold
+      // at canonicalization, and a first derivative is not simplified, so
+      // without this test `Derivative(Exp)` evaluated to `x ↦ ln(e)·e^x`.
+      const lnBase = isLibraryExponentialE(base)
+        ? ce.One
+        : ce._fn('Ln', [base]);
       return simplifyDerivative(expr.mul(lnBase).mul(gPrime));
     }
 
@@ -1464,22 +1659,48 @@ function differentiateNode(
     return differentiate(rewritten, v, depth + 1, trace);
   }
 
-  // Mod(u, c): CE's Mod is the real sawtooth ((u mod c) + c) mod c, which is
-  // piecewise-*linear* in u with slope 1 (jump discontinuities where u
-  // crosses a multiple of c). So d/dx Mod(u, c) = u' almost everywhere,
-  // provided the modulus c does not itself depend on the differentiation
-  // variable. If both operands depend on v there is no clean a.e. closed
-  // form (the jump locations themselves move with v) — stay symbolic.
+  // Mod(u, c): CE's Mod is the FLOORED remainder, the real sawtooth
+  // ((u mod c) + c) mod c, whose result has the sign of c:
+  //
+  //     Mod(u, c) = u − c·floor(u/c)
+  //
+  // Between two jumps (where u/c is not an integer) floor(u/c) is constant,
+  // so the derivative there is
+  //
+  //     d/dv Mod(u, c) = u′ − floor(u/c)·c′
+  //
+  // This holds also when the jump locations move with v: the formula is the
+  // derivative at every point that is not on a jump. At a jump Mod has no
+  // derivative. The result is u′ when c does not depend on v, and
+  // −floor(u/c)·c′ when u does not depend on v.
   if (expr.operator === 'Mod' && expr.nops === 2) {
     const [u, c] = expr.ops;
-    if (c.has(v)) return undefined;
-    if (!u.has(v)) return ce.Zero;
-    recordD(trace, expr, v, 'derivative.known-derivative', () =>
-      dPlaceholder(u, v)
-    );
-    const uPrime =
-      differentiate(u, v, depth + 1, trace) ?? ce._fn('D', [u, ce.symbol(v)]);
-    return simplifyDerivative(uPrime);
+    const uHasV = u.has(v);
+    const cHasV = c.has(v);
+    if (!uHasV && !cHasV) return ce.Zero;
+    const floorQ = ce.function('Floor', [ce.function('Divide', [u, c])]);
+    recordD(trace, expr, v, 'derivative.known-derivative', () => {
+      const terms: Expression[] = [];
+      if (uHasV) terms.push(dPlaceholder(u, v));
+      if (cHasV)
+        terms.push(
+          ce.function('Negate', [
+            ce.function('Multiply', [floorQ, dPlaceholder(c, v)]),
+          ])
+        );
+      return terms.length === 1 ? terms[0] : ce.function('Add', terms);
+    });
+    const terms: Expression[] = [];
+    if (uHasV)
+      terms.push(
+        differentiate(u, v, depth + 1, trace) ?? ce._fn('D', [u, ce.symbol(v)])
+      );
+    if (cHasV) {
+      const cPrime =
+        differentiate(c, v, depth + 1, trace) ?? ce._fn('D', [c, ce.symbol(v)]);
+      terms.push(floorQ.mul(cPrime).neg());
+    }
+    return simplifyDerivative(add(...terms));
   }
 
   // Discrete functions: GCD, LCM
@@ -1488,6 +1709,100 @@ function differentiateNode(
   if (['GCD', 'LCM'].includes(expr.operator)) {
     recordD(trace, expr, v, 'derivative.zero', () => ce.Zero);
     return ce.Zero;
+  }
+
+  // Round(u, n) rounds u to n digits: it is a step function of u, so its
+  // derivative is 0 almost everywhere, as for the one-argument `Round` of
+  // the table. The digit count n is an integer, a discrete parameter: if n
+  // depends on v there is no derivative, so stay symbolic.
+  if (expr.operator === 'Round' && expr.nops === 2) {
+    const [u, n] = expr.ops;
+    if (n.has(v)) return ce._fn('D', [expr, ce.symbol(v)]);
+    if (u.has(v)) recordD(trace, expr, v, 'derivative.zero', () => ce.Zero);
+    return ce.Zero;
+  }
+
+  // Gamma(s, z) is the upper incomplete gamma function ∫_z^∞ tˢ⁻¹ e⁻ᵗ dt.
+  // Its partial derivative in z is −z^(s−1)·e^(−z) (the fundamental theorem
+  // of calculus). Its partial derivative in s has no elementary closed form:
+  // keep it symbolic as Apply(Derivative(Gamma, 1, 0), s, z), times s′.
+  if (expr.operator === 'Gamma' && expr.nops === 2) {
+    const [s, z] = expr.ops;
+    const sHasV = s.has(v);
+    const zHasV = z.has(v);
+    if (!sHasV && !zHasV) return ce.Zero;
+    const dz = ce
+      .function('Multiply', [
+        ce.function('Power', [z, ce.function('Subtract', [s, ce.One])]),
+        ce.function('Exp', [ce.function('Negate', [z])]),
+      ])
+      .neg();
+    const dsApplied = ce._fn('Apply', [
+      ce._fn('Derivative', [ce.symbol('Gamma'), ce.One, ce.Zero]),
+      s,
+      z,
+    ]);
+    recordD(trace, expr, v, 'derivative.known-derivative', () => {
+      const terms: Expression[] = [];
+      if (sHasV)
+        terms.push(ce.function('Multiply', [dsApplied, dPlaceholder(s, v)]));
+      if (zHasV) terms.push(ce.function('Multiply', [dz, dPlaceholder(z, v)]));
+      return terms.length === 1 ? terms[0] : ce.function('Add', terms);
+    });
+    const terms: Expression[] = [];
+    if (sHasV) {
+      const sPrime =
+        differentiate(s, v, depth + 1, trace) ?? ce._fn('D', [s, ce.symbol(v)]);
+      terms.push(dsApplied.mul(sPrime));
+    }
+    if (zHasV) {
+      const zPrime =
+        differentiate(z, v, depth + 1, trace) ?? ce._fn('D', [z, ce.symbol(v)]);
+      terms.push(dz.mul(zPrime));
+    }
+    return simplifyDerivative(add(...terms));
+  }
+
+  // PolyLog(s, z) is the polylogarithm Li_s(z) = Σ_{k≥1} z^k/k^s. Its partial
+  // derivative in z is Li_{s−1}(z)/z: term by term, z·d/dz (z^k/k^s) is
+  // z^k/k^(s−1). The analytic continuation outside the unit disk keeps this
+  // identity. Li_{s−1} then reduces where the engine has a closed form:
+  // s = 2 gives −ln(1 − z)/z, and s = 1 gives Li_0(z)/z = 1/(1 − z). The
+  // partial derivative in s has no closed form: keep it symbolic as
+  // Apply(Derivative(PolyLog, 1, 0), s, z), times s′.
+  if (expr.operator === 'PolyLog' && expr.nops === 2) {
+    const [s, z] = expr.ops;
+    const sHasV = s.has(v);
+    const zHasV = z.has(v);
+    if (!sHasV && !zHasV) return ce.Zero;
+    const dz = ce.function('Divide', [
+      ce.function('PolyLog', [ce.function('Subtract', [s, ce.One]), z]),
+      z,
+    ]);
+    const dsApplied = ce._fn('Apply', [
+      ce._fn('Derivative', [ce.symbol('PolyLog'), ce.One, ce.Zero]),
+      s,
+      z,
+    ]);
+    recordD(trace, expr, v, 'derivative.known-derivative', () => {
+      const terms: Expression[] = [];
+      if (sHasV)
+        terms.push(ce.function('Multiply', [dsApplied, dPlaceholder(s, v)]));
+      if (zHasV) terms.push(ce.function('Multiply', [dz, dPlaceholder(z, v)]));
+      return terms.length === 1 ? terms[0] : ce.function('Add', terms);
+    });
+    const terms: Expression[] = [];
+    if (sHasV) {
+      const sPrime =
+        differentiate(s, v, depth + 1, trace) ?? ce._fn('D', [s, ce.symbol(v)]);
+      terms.push(dsApplied.mul(sPrime));
+    }
+    if (zHasV) {
+      const zPrime =
+        differentiate(z, v, depth + 1, trace) ?? ce._fn('D', [z, ce.symbol(v)]);
+      terms.push(dz.mul(zPrime));
+    }
+    return simplifyDerivative(add(...terms));
   }
 
   // PolyGamma(m, u): d/du ψ⁽ᵐ⁾(u) = ψ⁽ᵐ⁺¹⁾(u), so the derivative climbs the

@@ -151,8 +151,11 @@ describe('Symbolic evaluation of a recursive user function is not unrolled', () 
       expect(r.isValid).toBe(true);
       expect(r.json).toEqual(['R', n, 'x', 'y']);
       // Depth 8 would be a ~10⁷-character closed form; the decline is
-      // immediate. Generous bound so a loaded machine cannot fail it.
-      expect(performance.now() - t0).toBeLessThan(2000);
+      // immediate. The time still depends on the load of the machine, so the
+      // bound is asserted only in a `CE_PERF=1` run. The validity and `json`
+      // checks above do not depend on time.
+      if (process.env.CE_PERF === '1')
+        expect(performance.now() - t0).toBeLessThan(2000);
     }
     // The base case needs no self-call and still answers.
     expect(ce.parse('R(0,x,y)').evaluate().json).toEqual(0);

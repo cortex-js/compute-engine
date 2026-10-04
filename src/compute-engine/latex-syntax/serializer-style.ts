@@ -54,19 +54,12 @@ export function getFractionStyle(
     // `\frac{1}{\sqrt{x}}(...)`) takes this path instead.
     if (n > 5 && isSinglePowerDenominator(op2)) return 'inline-solidus';
     if (d <= 2 && n > 5) return 'factor';
-    const denomOp = operator(op2);
-    // Prefer quotient over reciprocal when denominator is Sqrt/Root
-    // so that 1/sqrt(x) displays as \frac{1}{\sqrt{x}} not \sqrt{x}^{-1}.
-    // Same for a parenthesized denominator (raw `1/(1+x^2)`): it displays as
-    // \frac{1}{1+x^2}, not (1+x^2)^{-1}.
-    if (
-      n <= 2 &&
-      d > 5 &&
-      denomOp !== 'Sqrt' &&
-      denomOp !== 'Root' &&
-      denomOp !== 'Delimiter'
-    )
-      return 'reciprocal';
+    // A short numerator over a long denominator is a quotient too:
+    // `\frac{x}{y^2+z^2}` and `\frac{1}{(x+1)(x+2)}`. The default style never
+    // writes an inverse power (`(x)(y^2+z^2)^{-1}`). That form is not the
+    // usual notation, and with a numerator other than 1 it parses back to a
+    // different expression, `Multiply(x, Divide(1, …))` instead of
+    // `Divide(x, …)`. A caller can still select the `reciprocal` style.
   }
   return 'quotient';
 }

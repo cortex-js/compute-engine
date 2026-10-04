@@ -782,7 +782,7 @@ containing a string:
 ```epsil
 let inputs = [16, -4, "banana", 81]
 inputs |> x => sqrt(x)
-// ➔ [4, 2i, Error(ErrorCode("incompatible-type", "complex | infinity", "string"), "banana"), 9]
+// ➔ [4, 2i, Error(ErrorCode("incompatible-type", "complex | infinity", "string"), "banana", "while applying the function literal element-wise over 4 elements (element 3)"), 9]
 ```
 
 ## Linear Algebra

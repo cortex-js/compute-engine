@@ -2075,3 +2075,182 @@ describe('INTERVAL JS - CONSTANT ARRAYS ARE BOUND ONCE PER ARTIFACT', () => {
     expect(a[0]).not.toBe(b[0]);
   });
 });
+
+describe('INTERVAL JS - NORM OF A POINT WITH A LIST COMPONENT', () => {
+  // `|(x + [1/2, 1], y)|` is one point per element of the list component, so
+  // its norm is one number per element. The JavaScript target answers that
+  // list. This target answers the array of one enclosure per element, written
+  // as the explicit `√(Σ cᵢ²)` when the lists have one known length, and as a
+  // run-time zip of the points otherwise.
+  const ceN = new ComputeEngine();
+  ceN.declare('L', 'list<real>');
+
+  const samples = [
+    { x: 0, y: 0 },
+    { x: 1, y: 2 },
+    { x: -0.75, y: 0.3 },
+    { x: 3.5, y: -2.25 },
+  ];
+
+  /** Compile `latex` on both targets and check that, at every sample, each
+   *  interval of the interval target encloses the JavaScript value. */
+  function agreesWithJavaScript(latex: string, L?: number[]): string {
+    const expr = ceN.parse(latex);
+    const js = compile(expr, { to: 'javascript', fallback: false });
+    const iv = compile(expr, { to: 'interval-js', fallback: false });
+    expect(js.success).toBe(true);
+    expect(iv.success).toBe(true);
+    for (const { x, y } of samples) {
+      const expected = js.run!({ x, y, L }) as number[];
+      // An element is an interval, or a result that carries one.
+      const actual = (iv.run!({ x, y, L }) as any[]).map(
+        (r) =>
+          (r.kind === 'interval' ? r.value : r) as { lo: number; hi: number }
+      );
+      expect(actual).toHaveLength(expected.length);
+      expected.forEach((v, i) => {
+        expect(actual[i].lo).toBeLessThanOrEqual(v);
+        expect(actual[i].hi).toBeGreaterThanOrEqual(v);
+        expect(actual[i].hi - actual[i].lo).toBeLessThan(1e-12);
+      });
+    }
+    return iv.code;
+  }
+
+  test('a list in the first component', () => {
+    const code = agreesWithJavaScript(
+      '\\left|\\left(x+\\left[\\frac{1}{2},1\\right],y\\right)\\right|'
+    );
+    // The code of the norm written by hand, `\sqrt{(x+[1/2,1])^2+y^2}`,
+    // with `y²` computed once.
+    expect(code).toBe(
+      '(() => { const _cse1 = _IA.square(_.y); return [' +
+        '_IA.sqrt(_IA.add(_IA.square(_IA.add(_.x, _k1)), _cse1)), ' +
+        '_IA.sqrt(_IA.add(_IA.square(_IA.add(_.x, _k2)), _cse1))]; })()'
+    );
+    expect(
+      compile(ceN.parse('\\sqrt{(x+[1/2,1])^2+y^2}'), { to: 'interval-js' })
+        .code
+    ).toBe(code);
+  });
+
+  test('a list in the second component', () => {
+    agreesWithJavaScript('\\left|\\left(x,y+[1,2]\\right)\\right|');
+  });
+
+  test('two lists of the same length', () => {
+    agreesWithJavaScript('\\left|\\left(x+[1,2],y+[3,4]\\right)\\right|');
+  });
+
+  test('a point with three components', () => {
+    agreesWithJavaScript('\\left|\\left(x+[1,2],y,x-y\\right)\\right|');
+  });
+
+  test('lists of different lengths zip to the shortest, as on JavaScript', () => {
+    const code = agreesWithJavaScript(
+      '\\left|\\left(x+[1,2],y+[3,4,5]\\right)\\right|'
+    );
+    expect(code).toContain('_IA.pointList(');
+  });
+
+  test('a list whose length is known only at run time zips at run time', () => {
+    const code = agreesWithJavaScript(
+      '\\left|\\left(L,y\\right)\\right|',
+      [1, -2, 0.5]
+    );
+    expect(code).toContain('_IA.pointList(');
+  });
+
+  test('a Tuple whose lists have different lengths still declines', () => {
+    // A `Tuple` broadcasts its lists element-wise, which requires one length;
+    // it does not zip to the shortest list as a `PointList` does.
+    const fn = compile(
+      ceN.box([
+        'Abs',
+        [
+          'Tuple',
+          ['Add', 'x', ['List', 1, 2]],
+          ['Add', 'y', ['List', 3, 4, 5]],
+        ],
+      ]),
+      { to: 'interval-js', fallback: false }
+    );
+    expect(fn.success).toBe(false);
+  });
+
+  test('a point of scalars keeps the scalar norm', () => {
+    const tuple = compile(ceN.parse('\\left|\\left(x,y\\right)\\right|'), {
+      to: 'interval-js',
+      fallback: false,
+    });
+    expect(tuple.success).toBe(true);
+    expect(tuple.code).toBe('_IA.hypot(_.x, _.y)');
+    // An all-scalar `PointList` is one point too.
+    const pointList = compile(ceN.box(['Abs', ['PointList', 'x', 'y']]), {
+      to: 'interval-js',
+      fallback: false,
+    });
+    expect(pointList.success).toBe(true);
+    expect(pointList.code).toBe('_IA.hypot(_.x, _.y)');
+  });
+});
+
+describe('INTERVAL JS - APPLIED DERIVATIVE OF A FUNCTION OF TWO ARGUMENTS', () => {
+  // `Apply(Derivative(F, k₁, k₂), a, b)` compiles from the closed form of the
+  // derivative, which the `Derivative` evaluate handler computes.
+  const ceD = new ComputeEngine();
+  ceD.declare('h', 'function');
+  ceD.assign('h', ceD.parse('(u, w) \\mapsto u^2 \\sin(w)'));
+
+  function compiled(f: string, k1: number, k2: number) {
+    return compile(ceD.box(['Apply', ['Derivative', f, k1, k2], 'x', 'y']), {
+      to: 'interval-js',
+      fallback: false,
+    });
+  }
+
+  test('the closed form is the callee', () => {
+    expect(compiled('Power', 0, 1).code).toBe(
+      '(((x_1, x_2) => _IA.mul(_IA.ln(x_1), _IA.powInterval(x_1, x_2))))(_.x, _.y)'
+    );
+    expect(compiled('Arctan2', 1, 0).code).toBe(
+      '(((x_1, x_2) => _IA.div(x_2, _IA.add(_IA.square(x_1), _IA.square(x_2)))))(_.x, _.y)'
+    );
+    expect(compiled('h', 1, 1).code).toBe(
+      '(((u, w) => _IA.mul(_IA.scale(_k1, u), _IA.cos(w))))(_.x, _.y)'
+    );
+  });
+
+  test('the enclosure contains the value of the closed form', () => {
+    for (const [f, k1, k2] of [
+      ['Power', 1, 0],
+      ['Log', 0, 1],
+      ['Arctan2', 0, 1],
+      ['Mod', 0, 1],
+      ['h', 1, 1],
+    ] as const) {
+      const run = compiled(f, k1, k2).run!;
+      const closedForm = ceD
+        .box(['Apply', ['Derivative', f, k1, k2], 'x', 'y'])
+        .evaluate();
+      for (const [x, y] of [
+        [1.7, 2.3],
+        [0.4, 3.1],
+      ]) {
+        const expected = closedForm.subs({ x, y }).N().re;
+        const r = run({ x, y }) as any;
+        const v = r.kind === 'interval' ? r.value : r;
+        expect(v.lo).toBeLessThanOrEqual(expected);
+        expect(v.hi).toBeGreaterThanOrEqual(expected);
+      }
+    }
+  });
+
+  test('a derivative with no closed form declines', () => {
+    const r = compiled('BesselJ', 1, 0);
+    expect(r.success).toBe(false);
+    expect(r.error).toMatch(
+      /Could not compile `Apply`: the derivative has no closed form/
+    );
+  });
+});

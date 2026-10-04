@@ -56,7 +56,7 @@ describe('solveRules', () => {
   it('pushed root template makes a previously-unsolvable equation solvable', () => {
     const ce = new ComputeEngine();
     // Not solvable by default
-    expect(ce.parse('\\coth(x) - 3 = 0').solve('x')).toEqual([]);
+    expect(ce.parse('\\coth(x) - 3 = 0').solve('x')).toBeNull();
 
     ce.solveRules.push(COTH_ROOT_RULE);
 
@@ -91,7 +91,7 @@ describe('solveRules', () => {
     const linear = ce
       .expr(['Add', ['Multiply', 5, 'x'], -10])
       .solve('x') as any[];
-    expect(linear).toEqual([]);
+    expect(linear).toBeNull();
   });
 
   //
@@ -100,7 +100,7 @@ describe('solveRules', () => {
   it('cache invalidation when pushing after a prior solve()', () => {
     const ce = new ComputeEngine();
     // Trigger caching of the boxed 'solve-univariate' rule set
-    expect(ce.parse('\\coth(x) - 3 = 0').solve('x')).toEqual([]);
+    expect(ce.parse('\\coth(x) - 3 = 0').solve('x')).toBeNull();
 
     // Now push a new rule: it must be picked up despite the cached set
     ce.solveRules.push(COTH_ROOT_RULE);
@@ -121,7 +121,7 @@ describe('solveRules', () => {
     const linear = ce
       .expr(['Add', ['Multiply', 5, 'x'], -10])
       .solve('x') as any[];
-    expect(linear).toEqual([]);
+    expect(linear).toBeNull();
   });
 
   //
@@ -138,7 +138,7 @@ describe('solveRules', () => {
     // ce1 can solve, ce2 cannot
     const r1 = ce1.parse('\\coth(x) - 3 = 0').solve('x') as any[];
     expect(r1?.length).toBe(1);
-    expect(ce2.parse('\\coth(x) - 3 = 0').solve('x')).toEqual([]);
+    expect(ce2.parse('\\coth(x) - 3 = 0').solve('x')).toBeNull();
   });
 
   //
@@ -154,7 +154,7 @@ describe('solveRules', () => {
       replace: 42,
       condition: (sub) => !sub.__b.has('_x'),
     });
-    expect(ce.parse('\\coth(x) - 3 = 0').solve('x')).toEqual([]);
+    expect(ce.parse('\\coth(x) - 3 = 0').solve('x')).toBeNull();
   });
 
   //
@@ -168,7 +168,7 @@ describe('solveRules', () => {
       replace: ['Arcoth', ['Negate', '__b']],
       condition: () => false,
     });
-    expect(ce.parse('\\coth(x) - 3 = 0').solve('x')).toEqual([]);
+    expect(ce.parse('\\coth(x) - 3 = 0').solve('x')).toBeNull();
   });
 });
 
@@ -218,7 +218,7 @@ describe('harmonizationRules', () => {
   it('pushed harmonization rule feeds root finding', () => {
     const ce = new ComputeEngine();
     // Not solvable by default
-    expect(ce.parse('\\coth(x) - 3 = 0').solve('x')).toEqual([]);
+    expect(ce.parse('\\coth(x) - 3 = 0').solve('x')).toBeNull();
 
     pushHarmonizationScenario(ce);
 
@@ -234,7 +234,7 @@ describe('harmonizationRules', () => {
   //
   it('pushed harmonization rule feeds built-in pattern root rules', () => {
     const ce = new ComputeEngine();
-    expect(ce.parse('\\coth(x) - 3 = 0').solve('x')).toEqual([]);
+    expect(ce.parse('\\coth(x) - 3 = 0').solve('x')).toBeNull();
 
     ce.harmonizationRules.push({
       match: ['Add', ['Coth', '_x'], '__b'],
@@ -269,7 +269,7 @@ describe('harmonizationRules', () => {
 
     // ...but not without them
     ce.harmonizationRules = [];
-    expect(ce.parse('\\ln(x^2 + 1) = 0').solve('x')).toEqual([]);
+    expect(ce.parse('\\ln(x^2 + 1) = 0').solve('x')).toBeNull();
   });
 
   //
@@ -292,7 +292,7 @@ describe('harmonizationRules', () => {
     const ce = new ComputeEngine();
     // Trigger caching of the boxed 'harmonization' rule set (the
     // harmonization pass runs when pattern root-finding fails)
-    expect(ce.parse('\\coth(x) - 3 = 0').solve('x')).toEqual([]);
+    expect(ce.parse('\\coth(x) - 3 = 0').solve('x')).toBeNull();
 
     pushHarmonizationScenario(ce);
 
@@ -316,7 +316,7 @@ describe('harmonizationRules', () => {
     // Remove all harmonization rules: the equation becomes unsolvable
     // again (the functional root rule alone can't match the raw equation)
     ce.harmonizationRules = [];
-    expect(ce.parse('\\coth(x) - 3 = 0').solve('x')).toEqual([]);
+    expect(ce.parse('\\coth(x) - 3 = 0').solve('x')).toBeNull();
   });
 
   //

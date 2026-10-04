@@ -5,6 +5,7 @@ import {
 } from '../common/debug-hook.js';
 import { cmp } from './boxed-expression/compare.js';
 import {
+  bindingInContext,
   evaluateInOwnBindings,
   markActivation,
   rebindToBindings,
@@ -52,6 +53,7 @@ import {
 } from './boxed-expression/function-literal.js';
 import { collectTuplePattern } from './boxed-expression/tuple-pattern.js';
 import { errorValue } from './boxed-expression/error-value.js';
+import { canonicalFailureOf } from './boxed-expression/canonical-failure.js';
 import {
   listRecursionPlan,
   evaluateListRecursion,
@@ -789,14 +791,28 @@ export function canonicalFunctionLiteralArguments(
     ce._popShadowedParameters();
   }
 
-  console.assert(block.isScoped);
+  // The body has no scope when the `canonical` handler of `Block` threw: the
+  // engine then logs the exception and boxes the block NON-canonical, with no
+  // scope. The literal cannot declare its parameters without that scope, so
+  // throw the exception of the handler again: the caller gets the original
+  // message, not a failure on the missing scope. Through `ce.box()`, the
+  // `Function` operator's own catch then logs that message and boxes the
+  // literal non-canonical, as for any other failed `canonical` handler.
+  const blockScope = block.isScoped ? block.localScope : undefined;
+  if (blockScope === undefined) {
+    const failure = canonicalFailureOf(block);
+    if (failure !== undefined) throw failure.error;
+    throw new Error(
+      `The body of the function literal could not be canonicalized: ${block.toString()}`
+    );
+  }
   // Declare the arguments in the scope of the body of the function, for any
   // parameter that was not already auto-declared during body canonicalization
   // (e.g. a parameter unreferenced in the body). Annotated parameters get
   // their declared type, non-inferred.
   for (const param of params) {
     for (const name of functionLiteralParameterNames(param)) {
-      if (block.localScope!.bindings.has(name)) continue;
+      if (blockScope.bindings.has(name)) continue;
       // A destructuring pattern's leaves carry no annotation of their own, so
       // they are always declared with the inferred `unknown` type below.
       const t = isDestructuringParameter(param)
@@ -826,19 +842,19 @@ export function canonicalFunctionLiteralArguments(
         // the window writes into a scope the window must be able to rewind.
         journalCheckpointMapEntry(
           ce,
-          block.localScope!.bindings,
+          blockScope.bindings,
           name,
           name,
           'declare'
         );
-        block.localScope!.bindings.set(name, shared);
+        blockScope.bindings.set(name, shared);
       } else if (t !== undefined)
-        ce.declare(name, { inferred: false, type: t }, block.localScope);
+        ce.declare(name, { inferred: false, type: t }, blockScope);
       else
         ce.declare(
           name,
           { inferred: true, type: inferredHints?.get(name) ?? 'unknown' },
-          block.localScope
+          blockScope
         );
     }
   }
@@ -2226,7 +2242,8 @@ function restoreBodyScopeParams(
  * If `expr` is a bare symbol bound to a user-defined function literal (an
  * operator definition created by `helper(x) = …`), return the underlying
  * `Function` literal so the function can escape its defining scope as a
- * first-class value. Otherwise return `expr` unchanged.
+ * first-class value. Otherwise return `expr`, with the locals that its lazy
+ * collections read replaced by their values (`bindEscapingLocals`).
  *
  * Must be called while the defining call frame is still pushed, so the
  * operator definition is reachable via `lookupDefinition`.
@@ -2235,7 +2252,7 @@ export function resolveEscapingLambda(
   ce: ComputeEngine,
   expr: Expression
 ): Expression {
-  if (!isSymbol(expr)) return expr;
+  if (!isSymbol(expr)) return bindEscapingLocals(ce, expr);
   const def = ce.lookupDefinition(expr.symbol);
   if (def && 'operator' in def) {
     const literal = (def.operator as { _lambdaLiteral?: Expression })
@@ -2247,6 +2264,107 @@ export function resolveEscapingLambda(
       return captureNestedLocals(ce, literal) ?? literal;
   }
   return expr;
+}
+
+/**
+ * Replace, in the lazy collections of `expr`, each symbol that reads a local
+ * of the current lexical scope with the value of that local. Call it at the
+ * end of a block or of a function call, before the scope is popped: `expr`
+ * is the value that leaves the scope.
+ *
+ * A lazy collection (`Map`, `Filter`, …) computes its elements when they are
+ * read, and it finds its function and its sources by name in the scope chain
+ * of that read. When the collection leaves the block or the call that
+ * declared those names, the read happens outside that scope, and the names
+ * do not resolve: `do { let h = (k) => k + 1; Map(h, [1, 2]) }` stored in a
+ * variable gave `[h(1), h(2)]`. When this scope is popped, nothing can read
+ * or write its locals again, so their values at this point are the values
+ * that the collection would have read. The result keeps the collection lazy:
+ * `Map(h, [1, 2])` becomes `Map(k ↦ k + 1, [1, 2])`.
+ *
+ * Only these occurrences are replaced:
+ * - A symbol inside a lazy collection. A symbol outside one has already been
+ *   evaluated, and a symbol without a value stays a symbol.
+ * - A symbol that resolves now to a binding of the current scope. A name
+ *   that resolves to an enclosing scope still resolves after the pop, and
+ *   the collection continues to read it by name when its elements are read.
+ * - A symbol that is not inside a `Function` literal or inside an operator
+ *   that binds names (a comprehension, a `Sum`). Those make their own scope
+ *   when they are applied, whose parent chain includes the current scope,
+ *   so they continue to read the local. This also keeps a write to a local
+ *   in a function body (`c = c + 1`) a write to the binding.
+ *
+ * A parameter of the function being applied is not replaced here: the call
+ * replaces it with its argument after this (`bindingKeyedSubs`).
+ *
+ * A local that holds a function defined with `h(k) = …` (an operator
+ * definition) is replaced with its function literal, as
+ * `resolveEscapingLambda` does for a bare symbol.
+ */
+function bindEscapingLocals(ce: ComputeEngine, expr: Expression): Expression {
+  if (!isFunction(expr)) return expr;
+  const scope = ce.context.lexicalScope;
+  const names: string[] = [];
+  for (const [name, binding] of scope.bindings) {
+    if ('operator' in binding) names.push(name);
+    else if (
+      'value' in binding &&
+      binding.value.value !== undefined &&
+      (binding.value as { _activationOf?: unknown })._activationOf ===
+        undefined &&
+      scope.binderNames?.has(name) !== true
+    )
+      names.push(name);
+  }
+  if (names.length === 0 || !expr.has(names)) return expr;
+
+  // The bindings already replaced on the current branch of the walk: a value
+  // that reads its own local (directly or through another local) is left as
+  // a symbol at the second visit, so the walk ends.
+  const visiting = new Set<BoxedDefinition>();
+
+  const localValue = (
+    s: Expression & { symbol: string }
+  ): Expression | undefined => {
+    const binding = scope.bindings.get(s.symbol);
+    if (binding === undefined || !names.includes(s.symbol)) return undefined;
+    const own = s.valueDefinition ?? s.operatorDefinition;
+    if (bindingInContext(ce, s.symbol, own) !== binding) return undefined;
+    if ('operator' in binding) {
+      const literal = (binding.operator as { _lambdaLiteral?: Expression })
+        ._lambdaLiteral;
+      if (literal === undefined) return undefined;
+      return captureNestedLocals(ce, literal) ?? literal;
+    }
+    if (visiting.has(binding)) return undefined;
+    const value = binding.value.value;
+    if (value === undefined) return undefined;
+    visiting.add(binding);
+    try {
+      return walk(value, true);
+    } finally {
+      visiting.delete(binding);
+    }
+  };
+
+  const walk = (e: Expression, inLazy: boolean): Expression => {
+    if (isSymbol(e)) return inLazy ? (localValue(e) ?? e) : e;
+    if (!isFunction(e) || e.operator === 'Function') return e;
+    // A store-backed list holds numbers only, and reading its `ops` would
+    // box every element.
+    if (e._numericStore !== undefined) return e;
+    if (boundVariableNames(e).length > 0) return e;
+    const lazy = inLazy || e.isLazyCollection;
+    const ops = e.ops;
+    const next = ops.map((op) => walk(op, lazy));
+    if (next.every((op, i) => op === ops[i])) return e;
+    return ce.function(e.operator, next, {
+      form: e.isCanonical ? 'canonical' : e.isStructural ? 'structural' : 'raw',
+      scope: e.localScope,
+    });
+  };
+
+  return walk(expr, false);
 }
 
 /**
@@ -3460,7 +3578,10 @@ function makeLambda(
 
       // Validate the applied prefix against the declared parameter types
       // (§6.4/§6.5). On mismatch, return the inert application with the
-      // error-marked arguments (§13 decision 6).
+      // error-marked arguments. This form is internal: each route that
+      // calls a literal gives the error itself as the value of the call
+      // (`refusedLiteralArgumentError` and `_refusedArgumentError`,
+      // `boxed-expression/boxed-function.ts`; `docs/ERROR-MODEL.md`).
       if (ce.strict && hasAnnotatedParam && _validateArguments) {
         const fullSig = acceptNaNAtNumericParams(
           relaxBareParams(fnExpr.type.type),
@@ -3634,8 +3755,11 @@ function makeLambda(
     //     literal's declared parameter types (only when the literal carries at
     //     least one annotated parameter — untyped literals skip this entirely,
     //     §6.4). On mismatch, return the inert application carrying the
-    //     error-marked arguments (§13 decision 6), matching the named-`Declare`
-    //     path so broadcast consumers (`Map`, …) surface the same diagnostic.
+    //     error-marked arguments. This form is internal: each route that
+    //     calls a literal (`Apply`, a named call, a mapped list cell) gives
+    //     the error itself as the value of the call
+    //     (`refusedLiteralArgumentError` and `_refusedArgumentError`,
+    //     `boxed-expression/boxed-function.ts`; `docs/ERROR-MODEL.md`).
     //
     if (ce.strict && validateApplication && _validateArguments) {
       const validated = _validateArguments(

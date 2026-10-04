@@ -1,5 +1,6 @@
 import type { MathJsonExpression } from '../../math-json/types.js';
 import {
+  isNumberExpression,
   nops,
   operand,
   operands,
@@ -289,13 +290,16 @@ function isLabelContent(
  * Report the reading choices of the lenient grammar that a check of the
  * whole line finds. `tokens` is the token stream of the adopted parse and
  * `expr` its raw MathJSON result. `skippedTail` is the text that the
- * trailing-noise recovery of the parse removed, if any.
+ * trailing-noise recovery of the parse removed, if any. `isFunctionName`
+ * is true for a word that the lenient grammar reads as a function name with
+ * no parentheses (`sin`, `min`).
  */
 export function reportLineAmbiguities(
   tokens: readonly string[],
   expr: MathJsonExpression | null,
   emit: EmitAmbiguity,
-  skippedTail?: string
+  skippedTail?: string,
+  isFunctionName?: (word: string) => boolean
 ): void {
   const n = tokens.length;
   if (n === 0) return;
@@ -305,6 +309,7 @@ export function reportLineAmbiguities(
   reportFactorial(tokens, expr, emit, outside);
   reportFactorialOperand(tokens, expr, emit, outside);
   reportMissingBase(tokens, expr, emit, outside);
+  reportRadicalAfterLetterRun(tokens, expr, emit, outside);
   reportArrow(tokens, expr, emit, outside);
   reportEqualChain(tokens, expr, emit, layout);
   reportElement(tokens, expr, emit, layout);
@@ -312,7 +317,7 @@ export function reportLineAmbiguities(
   reportEquationNumber(tokens, expr, emit, outside);
   reportComma(tokens, expr, emit, layout);
   reportListLabel(tokens, emit, outside);
-  reportNumberNotation(tokens, emit, outside);
+  reportNumberNotation(tokens, expr, emit, outside, isFunctionName);
   reportDate(tokens, emit, outside);
 }
 
@@ -400,8 +405,30 @@ function reportFactorialOperand(
         )
           start -= 1;
       }
+      // When the operand of the `!` is an exponent (`x^2!^3` is
+      // `((x^2)!)^3`), the span starts at the base of that exponent: the
+      // base is one letter or digit, or a group in brackets. Else the span
+      // starts at the `^`.
+      let caret = -1;
+      if (tokens[start - 1] === '^') caret = start - 1;
+      else if (
+        (tokens[start - 1] === '-' || tokens[start - 1] === '+') &&
+        tokens[start - 2] === '^'
+      )
+        caret = start - 2;
+      if (caret >= 0) {
+        start = caret;
+        const base = tokens[caret - 1];
+        if (isLetter(base) || isDigit(base)) start = caret - 1;
+        else if (MATCH_CLOSE.has(base)) {
+          const open = matchingBracket(at, caret - 1);
+          if (open >= 0) start = open;
+        }
+      }
       emit('ambiguous-factorial', start, operandEnd(at, i + 1));
-      continue;
+      // The `!` of an exponent is also reported as the `!` of `x^2!` is
+      // (see below): `x^2!^3` can also mean `x^{2!}`.
+      if (caret < 0) continue;
     }
     if (!ofScript) continue;
 
@@ -416,6 +443,9 @@ function reportFactorialOperand(
     } else if (isLetter(tokens[k]) || isDigit(tokens[k])) {
       const sameKind = isDigit(tokens[k]) ? isDigit : isLetter;
       while (k > 0 && sameKind(tokens[k - 1])) k -= 1;
+      // A radicand or an exponent that is a letter with an unbraced
+      // subscript: `√i_1!` is `(√i_1)!`, as `√i!` is `(√i)!`.
+      if (tokens[k - 1] === '_' && isLetter(tokens[k - 2])) k -= 2;
       if (tokens[k - 1] === '√') script = k - 1;
       else if (tokens[k - 1] === '^') script = k - 1;
       else if (
@@ -456,6 +486,63 @@ function reportMissingBase(
     const next = tokens[i + 1];
     const scripted = next === '<{>' || isDigit(next) || isLetter(next);
     emit('ambiguous-missing-base', i, scripted ? operandEnd(at, i) : i + 1);
+  }
+}
+
+/**
+ * `ambiguous-radical`: a run of Latin letters directly before the radical
+ * glyph `√`, read one letter at a time: `xy√i` is `x·y·√i`, and a person can
+ * mean the root of index `y`, as for `y√i` (see `emitRadicalAmbiguity()`
+ * in `definitions-arithmetic.ts`, which reports a single letter before the
+ * glyph). The raw result must hold the reading: a juxtaposition in which
+ * each letter of the run is a symbol, in order, directly followed by a
+ * `Sqrt`. So a function name (`sin√x` is `sin(√x)`) or a constant (`pi√2`,
+ * `xpi√2`) is not reported, also when another glyph of the line has a
+ * letter before it (`n√2 + sin√x`, `i√3 + pi√2`). A run after `_`, `^` or a command is a script or a command
+ * name, and is not reported. The span is the glyph and its radicand.
+ */
+function reportRadicalAfterLetterRun(
+  tokens: readonly string[],
+  expr: MathJsonExpression | null,
+  emit: EmitAmbiguity,
+  outside: (i: number) => boolean
+): void {
+  // The operands of each juxtaposition that holds a `Sqrt`
+  const lists: (readonly MathJsonExpression[])[] = [];
+  someNode(expr, (x) => {
+    if (
+      operator(x) === 'InvisibleOperator' &&
+      operands(x).some((y) => operator(y) === 'Sqrt')
+    )
+      lists.push(operands(x));
+    return false;
+  });
+  if (lists.length === 0) return;
+  // True when the raw result reads each letter of `run` as a symbol, in
+  // order, directly before a `Sqrt`. The test is made for each glyph with
+  // its own run of letters: in `n√2 + sin√x`, `n·√2` does not make the
+  // run `sin` before the second glyph a reading of one letter at a time.
+  const readByLetter = (run: readonly string[]) =>
+    lists.some((xs) => {
+      for (let j = run.length; j < xs.length; j++) {
+        if (operator(xs[j]) !== 'Sqrt') continue;
+        if (run.every((c, m) => symbol(xs[j - run.length + m]) === c))
+          return true;
+      }
+      return false;
+    });
+  const latin = (t: string | undefined) =>
+    t !== undefined && /^[a-zA-Z]$/.test(t);
+  const at = (k: number) => tokens[k];
+  for (let i = 2; i < tokens.length; i++) {
+    if (tokens[i] !== '√' || !outside(i)) continue;
+    if (!latin(tokens[i - 1]) || !latin(tokens[i - 2])) continue;
+    let k = i - 2;
+    while (latin(tokens[k - 1])) k -= 1;
+    const prev = tokens[k - 1];
+    if (prev === '_' || prev === '^' || isCommand(prev)) continue;
+    if (!readByLetter(tokens.slice(k, i))) continue;
+    emit('ambiguous-radical', i, operandEnd(at, i + 1));
   }
 }
 
@@ -810,19 +897,43 @@ function reportListLabel(
  * `ambiguous-number-notation`: a notation of a programming language for a
  * number. `1_000` (digit grouping) is read as a subscript and a product,
  * `0x10` (hexadecimal) as `0·x_10`. The span is the whole notation.
+ *
+ * The digits can follow a function name with no parentheses: `min3_12` and
+ * `sin2_8` read the number with its subscript as the argument
+ * (`min(BaseForm(3, 12))`). After another letter, the digits are a
+ * subscript of the letter (`x2_1` is `x_2` and more). So a number after a
+ * letter is reported only when the run of Latin letters before it is a
+ * function name (`isFunctionName`), and the raw result holds a number with
+ * a subscript (a `BaseForm`, or a `Subscript` of a number). The name is
+ * tested for each number: in `x2_1 + min3_12`, only `3_12` is reported.
  */
 function reportNumberNotation(
   tokens: readonly string[],
+  expr: MathJsonExpression | null,
   emit: EmitAmbiguity,
-  outside: (i: number) => boolean
+  outside: (i: number) => boolean,
+  isFunctionName?: (word: string) => boolean
 ): void {
   const n = tokens.length;
+  let numberSubscript: boolean | undefined;
   for (let s = 0; s < n; s++) {
     if (!isDigit(tokens[s]) || !outside(s)) continue;
     const prev = tokens[s - 1];
+    if (isLetter(prev)) {
+      let w = s;
+      while (w > 0 && /^[a-zA-Z]$/.test(tokens[w - 1])) w -= 1;
+      if (!(isFunctionName?.(tokens.slice(w, s).join('')) ?? false)) continue;
+      numberSubscript ??= someNode(
+        expr,
+        (x) =>
+          operator(x) === 'BaseForm' ||
+          (operator(x) === 'Subscript' &&
+            isNumberExpression(operand(x, 1)))
+      );
+      if (!numberSubscript) continue;
+    }
     if (
       isDigit(prev) ||
-      isLetter(prev) ||
       prev === '.' ||
       prev === '_' ||
       prev === '^' ||

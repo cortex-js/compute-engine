@@ -58,6 +58,7 @@ import {
   MAX_SIZE_EAGER_COLLECTION,
   broadcastLengthMismatch,
   hasUnresolvedCollectionOperand,
+  isUnresolvedCollectionOperand,
   isTupleShapedType,
   isBroadcastableCollection,
   isBroadcastCollectionType,
@@ -139,7 +140,11 @@ import { BoxedType } from '../../common/type/boxed-type.js';
 import { parseType } from '../../common/type/parse.js';
 import { boundTypeSize } from '../../common/type/size-cap.js';
 import { internType, isInternedType } from '../../common/type/intern.js';
-import { isSubtype, resolveTypeReference } from '../../common/type/subtype.js';
+import {
+  couldMatch,
+  isSubtype,
+  resolveTypeReference,
+} from '../../common/type/subtype.js';
 import {
   COLLECTION_SHAPE_TYPE,
   EXTENDED_REAL_TYPE,
@@ -179,7 +184,11 @@ import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
 import type { BigDecimal } from '../../big-decimal/index.js';
 
 import { findUnivariateRoots } from './solve.js';
-import { filterRootsByAssumptions } from './solve-domain.js';
+import {
+  emptyRootsAnswer,
+  filterRootsByAssumptions,
+  partialRootListReason,
+} from './solve-domain.js';
 import { solveSystem, solveOr } from './solve-system.js';
 import { solveCongruence } from './solve-congruence.js';
 import { replace } from './rules.js';
@@ -265,7 +274,10 @@ import {
   settledAbsentableValue,
 } from './validate.js';
 import { functionLiteralSignatureType } from './effects-inference.js';
-import { isScalarType } from './function-literal.js';
+import {
+  functionLiteralParameterType,
+  isScalarType,
+} from './function-literal.js';
 import { signatureParamsAreScalar } from './callback-broadcast-admission.js';
 import { applicationEffects, publicEffects } from './effects-of.js';
 import type { ComputedEffects } from '../../common/type/effects.js';
@@ -532,6 +544,112 @@ export class BoxedFunction
    * resolution records that decision, not a recomputable view.
    * @internal */
   _resolvedOverload: OverloadResolution | undefined = undefined;
+
+  /** The operands of this call before validation replaced one of them with
+   * an `incompatible-type` error. The construction site (`box.ts`) sets it
+   * only when the callee is a function that a later assignment can replace:
+   * a user function (`h := (u: real) ↦ 7`) or a name declared `function`
+   * that holds a function literal. The error states what the callee was
+   * when the call was boxed, so the evaluation and the type of the call
+   * box these operands again against the function the name holds now
+   * (`_recheckedCall()`).
+   * @internal */
+  _refusedOps: ReadonlyArray<Expression> | undefined = undefined;
+
+  /** The call boxed again from `_refusedOps` against the function its name
+   * holds now, when the answer is not this call: a later assignment
+   * replaced the callee, and the new callee accepts the operand that the
+   * old one refused, or refuses it with a different error. `undefined`
+   * otherwise.
+   * @internal */
+  _recheckedCall(): Expression | undefined {
+    const ops = this._refusedOps;
+    if (ops === undefined) return undefined;
+    const call = this.engine.function(this._operator, ops);
+    return call.isSame(this) ? undefined : call;
+  }
+
+  /** The cached answer of `_holdsRefusedCall()`. The operands of a node do
+   * not change, and the construction site sets `_refusedOps` on a call
+   * before the call becomes the operand of another node, so the answer is
+   * computed once. */
+  private _refusedCallInOperands: boolean | undefined;
+
+  /** True when an invalid operand of this node is, or contains, a call that
+   * its callee refused when it was boxed (`_refusedOps`).
+   *
+   * The `Error` of such a call states what the name held when the call was
+   * boxed. A later assignment can replace the callee, and the call is then
+   * checked again (`_recheckedCall()`). Thus the error is only a possible
+   * value of this node:
+   *
+   * - When the callee was replaced before this node is evaluated, the node
+   *   is boxed again from the checked calls and that node is evaluated in
+   *   its place (`_recheckedTree()`, `_canonicalToEvaluate()`):
+   *   `h("a") + 1` is `8` after `h := u ↦ 7` replaced `h := (u: real) ↦ 7`.
+   * - Otherwise an operand can still replace the callee before the call is
+   *   evaluated (`Block(Assign(h, u ↦ 7), h("a") + 1)`). So the handler of
+   *   the node runs, and the error that the boxed call holds is not bubbled
+   *   before it (`_invalidValue()`, `_absorbsErrorAfterHandler()`). An error
+   *   in the result is absorbed after the handler.
+   *
+
+   * The walk goes through invalid operands only, and does not go into an
+   * `Error`. It uses an explicit stack, because an invalid tree can be as
+   * deep as its input is long.
+   * @internal */
+  _holdsRefusedCall(): boolean {
+    if (this._refusedCallInOperands !== undefined)
+      return this._refusedCallInOperands;
+    let found = false;
+    const stack: Expression[] = [...this._ops];
+    while (!found && stack.length > 0) {
+      const x = stack.pop()!;
+      if (x.isValid || !(x instanceof BoxedFunction)) continue;
+      if (x._operator === 'Error') continue;
+      if (x._refusedOps !== undefined) found = true;
+      else stack.push(...x._ops);
+    }
+    this._refusedCallInOperands = found;
+    return found;
+  }
+
+  /** True when the operand `i` of `tail` is the operand of this node as it
+   * was boxed, not evaluated, and that operand is, or contains, a call that
+   * its callee refused when it was boxed. A lazy operator holds its operands
+   * and its handler evaluates them. The error of such an operand is
+   * therefore not certain before the handler runs, because the call is
+   * checked again when it is evaluated (`_holdsRefusedCall()`). */
+  private _holdsRefusedOperand(
+    tail: ReadonlyArray<Expression>,
+    i: number
+  ): boolean {
+    const op = tail[i];
+    return (
+      op === this._ops[i] &&
+      op instanceof BoxedFunction &&
+      (op._refusedOps !== undefined || op._holdsRefusedCall())
+    );
+  }
+
+  /** This node boxed again, with each call in its invalid operands that its
+   * callee refused when it was boxed replaced by the same call checked
+   * against the function that the name holds now (`_recheckedCall()`).
+   * Returns this node itself when no such call changed: the callee was not
+   * replaced, or it refuses the operand with the same error.
+   * @internal */
+  _recheckedTree(): Expression {
+    if (this._refusedOps !== undefined) return this._recheckedCall() ?? this;
+    if (this.isValid || !this._holdsRefusedCall()) return this;
+    let changed = false;
+    const ops = this._ops.map((x) => {
+      if (!(x instanceof BoxedFunction)) return x;
+      const y = x._recheckedTree();
+      if (y !== x) changed = true;
+      return y;
+    });
+    return changed ? this.engine.function(this._operator, ops) : this;
+  }
 
   // Validity depends only on the (immutable) structure — the operator and
   // the operands' own validity — so it is computed once and cached. Without
@@ -3323,6 +3441,13 @@ export class BoxedFunction
    * this from recursing forever.
    */
   private _canonicalToEvaluate(): Expression | undefined {
+    // A call that its callee refused when it was boxed is evaluated with the
+    // function that the name holds now, at the top of the expression or in
+    // an operand at any depth (`_recheckedTree()`).
+    if (!this.isValid) {
+      const rechecked = this._recheckedTree();
+      if (rechecked !== this) return rechecked;
+    }
     // Only the two non-canonical TIERS are routed. `isCanonical` is false for
     // a third shape — an expression that WAS canonicalized but whose operator
     // has no definition (`_def === undefined`) — and re-canonicalizing that
@@ -3381,14 +3506,38 @@ export class BoxedFunction
         );
     }
 
-    const roots = findUnivariateRoots(this, varNames[0]);
+    // A list of roots that is only a part of the roots is not an answer:
+    // `null`, as for an equation the solver cannot solve. This is the case
+    // when the unknown is in a function that the root finder cannot invert
+    // and that is not periodic (`(x - 1)·BesselJ(0, x) = 0` gives only `1`),
+    // and when a factor of a product gives no root and is not shown to have
+    // none (`(x - 2)(x + e^x) = 0` gives only `2`). A root template that the
+    // host added to `ce.solveRules` is accepted. See
+    // `partialRootListReason()`.
+    const stats = { candidates: false, undecided: false };
+    const roots = findUnivariateRoots(this, varNames[0], 0, undefined, stats);
     if (roots === null) return null;
+    if (partialRootListReason(this, varNames[0], roots, stats) !== undefined)
+      return null;
     // Route in-scope bound assumptions on the unknown through the same root
     // filter the domain pipeline uses: `assume(n > 0)` should drop the negative
     // root of `n^2 = 16`. Applied at this OUTER boundary (not inside the
     // recursive `findUnivariateRoots`, which re-enters with substituted
     // variables) so both `expr.solve('n')` and the `Solve` operator benefit.
-    return filterRootsByAssumptions(this.engine, roots, varNames[0]);
+    const kept = filterRootsByAssumptions(this.engine, roots, varNames[0]);
+    if (kept.length > 0) return kept;
+    // An empty list states that there is no root. It is the answer only when
+    // the `Solve` operator gives it too (`emptyRootsAnswer()`): `e^x = x + 2`
+    // has roots that the root finder cannot find, and the answer is `null`.
+    // An identity (`x = x`) gives a list with one free parameter.
+    const answer = emptyRootsAnswer(
+      this.engine,
+      this,
+      varNames[0],
+      stats,
+      false
+    );
+    return answer === undefined ? null : isFunction(answer) ? answer.ops : [];
   }
 
   get isCollection(): boolean {
@@ -4322,6 +4471,16 @@ export class BoxedFunction
     const def = this._def ?? undefined;
     if (def === undefined) return this;
 
+    // An operand holds a call that its callee refused when it was boxed, and
+    // the callee was not replaced yet (else `_canonicalToEvaluate()` would
+    // have evaluated the node boxed again in this place). An operand can
+    // still replace the callee before the handler evaluates the call
+    // (`Block(Assign(h, u ↦ 7), h("a") + 1)`), so the error is not certain
+    // yet (`_holdsRefusedCall()`). Run the handler, and absorb an error from
+    // its result (`_absorbsErrorAfterHandler()`). A collection keeps the
+    // error of a cell in place, as before.
+    if (this._holdsRefusedCall() && !isCollectionHead(this)) return undefined;
+
     if (isValueDef(def)) {
       // A value-def head is a callee only when its value is a FUNCTION — the
       // same test `applyFunctionLiteral` makes. When it is not (`a := 5;
@@ -4410,7 +4569,7 @@ export class BoxedFunction
     if (def === undefined) return false;
     if (isOperatorDef(def) && def.operator.inspectsErrors) return false;
     if (isCollectionHead(this)) return false;
-    if (this._defersErrorAbsorption()) return true;
+    if (this._defersErrorAbsorption() || this._holdsRefusedCall()) return true;
     return this._operandErrorDisposition() === 'evaluate';
   }
 
@@ -4551,6 +4710,28 @@ export class BoxedFunction
     return { operator: this._operator, index: 1 };
   }
 
+  /**
+   * The component-wise map over TUPLE arguments of a user function whose
+   * parameters are declared as scalars (`declaredScalarTupleCells`), for
+   * the evaluated arguments `tail` of this application. The declared types
+   * are the annotations of the function literal and, when the signature of
+   * the definition was declared and not inferred, that signature.
+   * `undefined` for an operator that is not a function literal.
+   */
+  private _declaredScalarTupleCells(
+    def: BoxedOperatorDefinition | undefined,
+    tail: ReadonlyArray<Expression>
+  ): ReturnType<typeof declaredScalarTupleCells> {
+    const literal = lambdaLiteralOf(def);
+    if (def === undefined || literal === undefined) return undefined;
+    const isScalarParam = declaredScalarParams(
+      literal,
+      def.inferredSignature ? undefined : def.signature?.type
+    );
+    if (isScalarParam === undefined) return undefined;
+    return declaredScalarTupleCells(this.engine, isScalarParam, tail);
+  }
+
   _computeValue(options?: Partial<EvaluateOptions>): () => Expression {
     const compute = this._computeValueUnabsorbed(options);
     if (this.isValid) {
@@ -4588,8 +4769,30 @@ export class BoxedFunction
     if (!this._absorbsErrorAfterHandler()) return compute;
     return () => {
       const result = compute();
-      return this._resultError(result) ?? result;
+      return this._errorAfterHandler(result) ?? result;
     };
+  }
+
+  /** The error that bubbles from the result of the handler of an invalid
+   * node (`_absorbsErrorAfterHandler()`), or `undefined`.
+   *
+   * A node that holds a call its callee refused when it was boxed runs its
+   * handler (`_invalidValue()`). When the callee is the same after the
+   * handler, the call is still refused, and the value of the node is the
+   * error of its operands, as when the handler does not run. The breadcrumb
+   * then names the operands of this node, and not the internal form of the
+   * handler result (the `Multiply` handler can answer a `Divide`). */
+  private _errorAfterHandler(result: Expression): Expression | undefined {
+    if (
+      !result.isValid &&
+      this._holdsRefusedCall() &&
+      !this._defersErrorAbsorption() &&
+      this._recheckedTree() === this
+    ) {
+      const err = this._firstOperandError();
+      if (err !== undefined) return err;
+    }
+    return this._resultError(result);
   }
 
   private _computeValueUnabsorbed(
@@ -5012,7 +5215,7 @@ export class BoxedFunction
         : this._absorbsErrorAfterHandler() && !this._defersErrorAbsorption();
       if (absorbsOperandErrors) {
         for (let i = 0; i < tail.length; i++) {
-          if (tail[i].isValid) continue;
+          if (tail[i].isValid || this._holdsRefusedOperand(tail, i)) continue;
           const err = errorValue(tail[i], {
             operator: this._operator,
             index: i + 1,
@@ -5425,6 +5628,33 @@ export class BoxedFunction
       }
 
       //
+      // 4t-user/ A user function maps over a TUPLE argument at a parameter
+      // declared as a scalar, as `Sin` does in step 4t
+      // (`declaredScalarTupleCells`, user decision 2026-10-03): with
+      // `h := (u: real) ↦ 2u`, `h((a, b))` is `(2a, 2b)`. A parameter with
+      // no declared type binds the tuple whole.
+      //
+      {
+        const userCells = this._declaredScalarTupleCells(def, tail);
+        if (userCells === 'hold')
+          return this._withParseScope(() =>
+            this.engine.function(this.operator, tail)
+          );
+        if (userCells !== undefined) {
+          if (!Array.isArray(userCells)) return userCells;
+          return this.engine._fn(
+            'Tuple',
+            annotateBroadcastErrors(
+              this.operator,
+              userCells.map((cell) =>
+                this.engine._fn(this.operator, cell).evaluate(options)
+              )
+            )
+          );
+        }
+      }
+
+      //
       // 4b-decl/ The post-evaluation twin of step 2c: a DECLARED
       // `broadcastable<T>` slot whose argument only BECAME a finite indexed
       // collection after evaluation (`f(lst(3))`). `tail` is already evaluated,
@@ -5703,7 +5933,7 @@ export class BoxedFunction
     if (!this._absorbsErrorAfterHandler()) return compute;
     return async () => {
       const result = await compute();
-      return this._resultError(result) ?? result;
+      return this._errorAfterHandler(result) ?? result;
     };
   }
 
@@ -6053,7 +6283,7 @@ export class BoxedFunction
         : this._absorbsErrorAfterHandler() && !this._defersErrorAbsorption();
       if (absorbsOperandErrors) {
         for (let i = 0; i < tail.length; i++) {
-          if (tail[i].isValid) continue;
+          if (tail[i].isValid || this._holdsRefusedOperand(tail, i)) continue;
           const err = errorValue(tail[i], {
             operator: this._operator,
             index: i + 1,
@@ -6411,6 +6641,29 @@ export class BoxedFunction
             )
           );
           return this.engine._fn('Tuple', resolved);
+        }
+      }
+
+      //
+      // 3t-user/ The async twin of the sync step 4t-user.
+      //
+      {
+        const userCells = this._declaredScalarTupleCells(def, tail);
+        if (userCells === 'hold')
+          return this._withParseScope(() =>
+            this.engine.function(this.operator, tail)
+          );
+        if (userCells !== undefined) {
+          if (!Array.isArray(userCells)) return userCells;
+          const resolved = await Promise.all(
+            userCells.map((cell) =>
+              this.engine._fn(this.operator, cell).evaluateAsync(options)
+            )
+          );
+          return this.engine._fn(
+            'Tuple',
+            annotateBroadcastErrors(this.operator, resolved)
+          );
         }
       }
 
@@ -6997,8 +7250,12 @@ function exactJumpLazyBroadcastOperands(
  * Cost on the happy path is a single `isValid` read per element — the value
  * the enclosing `_fn('List', …)` computes for each element anyway (it is
  * memoized on the node), so a successful broadcast pays nothing extra.
+ *
+ * The map over the components of a tuple (`declaredScalarTupleCells`) and
+ * the map of `Apply` over a list (`applyLiteralMapped`, `library/core.ts`)
+ * record it too.
  */
-function annotateBroadcastErrors(
+export function annotateBroadcastErrors(
   operator: string,
   results: ReadonlyArray<Expression>
 ): ReadonlyArray<Expression> {
@@ -7735,7 +7992,14 @@ function lambdaBroadcastType(
 }
 
 function type(expr: BoxedFunction): Type | BoxedType {
-  if (!expr.isValid) return 'error';
+  // A call that its callee refused when it was boxed has the type of the
+  // same call boxed against the function that the name holds now, as its
+  // value has, at the top of the expression or in an operand at any depth
+  // (`_recheckedTree()`).
+  if (!expr.isValid) {
+    const rechecked = expr._recheckedTree();
+    return rechecked === expr ? 'error' : rechecked.type;
+  }
 
   // Is this a 'Function' expression?
   // The arrow — parameters, result AND effect specifier — is built by the
@@ -8282,6 +8546,22 @@ function type(expr: BoxedFunction): Type | BoxedType {
         sigResult
       );
       if (pointType !== undefined) return applyContractB(pointType);
+      // A tuple at a parameter declared as a scalar: the application maps
+      // over the components (`declaredScalarTupleCells`) and answers the
+      // tuple of the results (`declaredScalarTupleType`).
+      const isScalarParam = declaredScalarParams(
+        lambdaLiteralOf(def),
+        def.inferredSignature ? undefined : def.signature?.type
+      );
+      const tupleType =
+        isScalarParam &&
+        declaredScalarTupleType(
+          isScalarParam,
+          expr.ops.map((x) => x.type.type),
+          sigResult,
+          paramsAreScalar(def)
+        );
+      if (tupleType) return applyContractB(tupleType);
     }
 
     if (
@@ -8390,6 +8670,23 @@ function type(expr: BoxedFunction): Type | BoxedType {
       sigResult
     );
     if (pointType !== undefined) return pointType;
+    // A tuple at a parameter declared as a scalar, as on the
+    // operator-definition route above.
+    const isScalarParam = declaredScalarParams(
+      expr.valueDefinition.value ?? undefined,
+      expr.valueDefinition.inferredType || isWildcardFunctionType(declaredType)
+        ? undefined
+        : declaredType
+    );
+    const tupleType =
+      isScalarParam &&
+      declaredScalarTupleType(
+        isScalarParam,
+        expr.ops.map((x) => x.type.type),
+        sigResult,
+        threadable
+      );
+    if (tupleType) return tupleType;
     if (threadable) {
       // The shared broadcast typing (`lambdaBroadcastType`) is the same one
       // the operator-def lambda route above applies; `sigResult` is already
@@ -8593,6 +8890,15 @@ function applyFunctionLiteral(
     ops.some(
       (x) => isFiniteBroadcastParticipant(x) || isUnknownLengthBroadcast(x)
     ) && paramsAreScalar(broadcastGateType);
+  // The parameters declared as scalars, by the literal's annotations or by
+  // the DECLARED signature (an inferred one does not count): a tuple
+  // argument there maps over its components (`declaredScalarParams`).
+  const isScalarParam = declaredScalarParams(
+    value,
+    def.inferredType || declaredType === undefined
+      ? undefined
+      : (def._signatureSkeleton ?? declaredType)
+  );
   // As at the operator-def broadcast steps: a collection-TYPED argument with
   // no collection value yet must not be bound as a per-element scalar
   // (`hasUnresolvedCollectionOperand`). Skipping the broadcast is not enough on
@@ -8605,9 +8911,21 @@ function applyFunctionLiteral(
   // evaluated arguments instead, the way the declined application at the end of
   // this function does, so re-evaluating it once the argument resolves
   // broadcasts.
+  // The hold does not need a sibling that already has a collection value. A
+  // function with scalar parameters applied to a valueless `w: list<real>`
+  // alone is typed as the mapped collection (`list<real>`), so binding `w`
+  // whole gives a value of a different shape: `f(w)` for `f := u ↦ 7`
+  // declared `(real) -> real` gave `7`. The operator-definition route
+  // (step 2b of `_computeValue`) and the function-literal route
+  // (`applyLiteralMapped`, `library/core.ts`) hold this application too.
+  // An argument whose type cannot hold an indexed collection (a set or a
+  // dictionary) is not held, because it is never mapped over
+  // (`isUnresolvedMappableOperand`).
   if (
-    broadcastsElementwise &&
-    hasUnresolvedCollectionOperand(ops, isBroadcastableCollection)
+    paramsAreScalar(broadcastGateType) &&
+    ops.some(
+      (x) => !isBroadcastableCollection(x) && isUnresolvedMappableOperand(x)
+    )
   ) {
     // A length disagreement among the arguments that DO have values is
     // DEFINITE — no assignment to the unresolved one can reconcile 2 elements
@@ -8648,6 +8966,14 @@ function applyFunctionLiteral(
       // through a named value definition, so an anonymous literal never gets
       // here. A THROWN element failure aborts the broadcast and cannot carry a
       // breadcrumb, so its message is enriched instead.
+      // A cell whose element the literal refuses is that error, as on the
+      // operator-definition route, not the inert `Apply` of the literal
+      // (`refusedLiteralArgumentError`).
+      const appliedOrRefused = (
+        result: Expression,
+        cell: ReadonlyArray<Expression>
+      ) =>
+        refusedLiteralArgumentError(result, cell, expr.operator, 0) ?? result;
       try {
         while (true) {
           const { done, value: zipped } = items.next();
@@ -8659,10 +8985,18 @@ function applyFunctionLiteral(
           // `_fn(operator, …).evaluate()`). Applying the literal to the row
           // directly would bind the whole row to a scalar parameter and stop at
           // rank 1, disagreeing with the D10 leaf-rank typing.
+          // A row with a tuple at a parameter declared as a scalar is
+          // re-dispatched too, so that the tuple maps over its components
+          // (`declaredScalarTupleCells`, below).
           results.push(
-            zipped.some((x) => isFiniteBroadcastParticipant(x))
+            zipped.some(
+              (x, i) =>
+                isFiniteBroadcastParticipant(x) ||
+                (isScalarParam?.(i) === true && isTupleBroadcastParticipant(x))
+            )
               ? expr.engine._fn(expr.operator, zipped).evaluate(options)
-              : (scalarConformance(zipped) ?? apply(value, zipped, options))
+              : (scalarConformance(zipped) ??
+                  appliedOrRefused(apply(value, zipped, options), zipped))
           );
         }
       } catch (e) {
@@ -8676,6 +9010,32 @@ function applyFunctionLiteral(
       return expr.engine._fn(
         'List',
         annotateBroadcastErrors(expr.operator, results)
+      );
+    }
+  }
+
+  // A TUPLE argument at a parameter declared as a scalar maps over its
+  // components (`declaredScalarTupleCells`, user decision 2026-10-03): the
+  // value-definition twin of `_computeValue`'s step 4t-user. With `f`
+  // declared `function` and assigned `(u: real) ↦ 7`, `f((a, b))` is
+  // `(7, 7)`. A call with a symbol that has no value and a tuple type is
+  // held.
+  if (isScalarParam !== undefined) {
+    const cells = declaredScalarTupleCells(expr.engine, isScalarParam, ops);
+    if (cells === 'hold')
+      return expr._withParseScope(() =>
+        expr.engine.function(expr.operator, ops)
+      );
+    if (cells !== undefined) {
+      if (!Array.isArray(cells)) return cells;
+      return expr.engine._fn(
+        'Tuple',
+        annotateBroadcastErrors(
+          expr.operator,
+          cells.map((cell) =>
+            expr.engine._fn(expr.operator, cell).evaluate(options)
+          )
+        )
       );
     }
   }
@@ -8864,39 +9224,310 @@ function operandRequirement(t: Type): Type | undefined {
 }
 
 /**
- * A symbol declared with an indexed-collection type that has no value yet,
- * such as `xs` after `ce.declare('xs', 'list<integer>')`. A user function
- * with scalar parameters applied to such a symbol is HELD by steps 2b of
- * `_computeValue` and of its asynchronous twin: the argument maps
- * element-wise as soon as it has a value, so neither an `incompatible-type`
- * refusal nor an inlined body is an honest answer before then.
+ * A symbol that can hold a collection but has no collection value yet, such
+ * as `xs` after `ce.declare('xs', 'list<integer>')`, or `q` after
+ * `ce.declare('q', 'real | list<real>')`. A user function with scalar
+ * parameters applied to such a symbol is HELD by steps 2b of `_computeValue`
+ * and of its asynchronous twin: if the symbol later gets a list value, the
+ * argument maps element-wise, so neither an `incompatible-type` refusal nor
+ * a value computed from the whole symbol is an honest answer before then.
+ * With `h := u ↦ 7` and a valueless `q: real | list<real>`, `h(q)` gave `7`,
+ * which is wrong once `q := [1, 2]` (the call then gives `[7, 7]`).
  *
- * The shape rule is the one the value-side broadcast applies
- * (`isFiniteBroadcastParticipant`): an indexed collection — a list, with or
- * without a fixed shape, an indexed collection, a range — that is neither a
- * tuple (a point, bound whole to the parameter) nor text (atomic under
- * broadcast). A set- or dictionary-typed symbol is never mapped over, so it
- * is not held and is refused now, as it would be with a value.
+ * The test is the one that the function-literal routes apply
+ * (`isUnresolvedMappableOperand`): `Apply(u ↦ 7, q)` in `library/core.ts`
+ * and a declared function assigned a literal (`applyFunctionLiteral`), so
+ * that these routes hold the same calls. A type that only ADMITS a
+ * collection (a union with a list branch, `broadcastable<T>`, `collection`)
+ * counts. A tuple and a string do not count, because each is bound whole to
+ * the parameter.
  *
- * A symbol whose value is another symbol carries no value of its own until
- * that symbol has one (`xs := ys` with `ys` declared but unassigned), so the
- * chain is followed; a symbol that already holds a value is decided on that
- * value.
+ * A type that cannot hold an indexed collection (a set, a dictionary, or a
+ * union of a scalar and a set) does not count either: such a value is never
+ * mapped over, so the call is applied now, and it gives the same result
+ * (an `incompatible-type` error for a `real` parameter, for example) as it
+ * gives when the symbol has a value.
+ *
+ * Only a SYMBOL is tested: an operand that becomes a collection only when
+ * it is evaluated (`k(lst(3))`) is left to the post-evaluation broadcast
+ * (step 4b).
+ *
+ * A symbol that holds a value other than a symbol is decided on that value
+ * by the other steps, and is not held here. The type of such a symbol is its
+ * declared type, so the type test alone would hold `h(q)` when `q` holds `3`
+ * under a `real | list<real>` declaration. The function-literal routes do
+ * not need this check, because they test the arguments after evaluation.
  */
 function isValuelessCollectionSymbol(x: Expression): boolean {
-  if (!isSymbol(x) || x.isCollection) return false;
-  if (!x.type.matches(INDEXED_COLLECTION_SHAPE_TYPE)) return false;
-  const t = x.type.type;
-  const resolved = resolveTypeReference(t) ?? t;
-  if (isTupleShapedType(resolved) || isSubtype(resolved, 'string'))
-    return false;
-  const seen = new Set<string>([x.symbol]);
-  let v = x.value;
-  while (v !== undefined && isSymbol(v) && !seen.has(v.symbol)) {
-    seen.add(v.symbol);
-    v = v.value;
+  if (!isSymbol(x)) return false;
+  const v = x.value;
+  if (v !== undefined && !isSymbol(v)) return false;
+  return isUnresolvedMappableOperand(x);
+}
+
+/**
+ * An operand that has no collection value yet
+ * (`isUnresolvedCollectionOperand`) and whose type can hold an indexed
+ * collection, so that a later value can make a function with scalar
+ * parameters map over it. A call of such a function with this operand is
+ * HELD, and evaluating it again after the operand has a value maps it.
+ *
+ * A set or a dictionary is never mapped over. Thus an operand of such a
+ * type (also a union of a scalar and a set) is not held: the call is
+ * applied now and gives the result that it gives when the operand has a
+ * value, for example an `incompatible-type` error for a `real` parameter.
+ *
+ * All three routes of a call use this test, so that they hold the same
+ * calls: step 2b of `_computeValue` (through `isValuelessCollectionSymbol`),
+ * a declared function assigned a literal (`applyFunctionLiteral`), and
+ * `Apply` of a function literal (`applyLiteralMaps` and
+ * `applyLiteralMapped` in `library/core.ts`).
+ */
+export function isUnresolvedMappableOperand(x: Expression): boolean {
+  return (
+    isUnresolvedCollectionOperand(x) &&
+    couldMatch(x.type.type, INDEXED_COLLECTION_SHAPE_TYPE)
+  );
+}
+
+/** Is `t` a declared parameter type that makes a tuple argument map over its
+ * components: a number type (`real`, `integer`, `number`, ...) or `boolean`,
+ * other than the empty types. A `string` is not one: a string is a
+ * collection of characters, not a scalar. */
+export function isDeclaredScalarType(t: Type | undefined): boolean {
+  if (t === undefined || t === 'never' || t === 'nothing') return false;
+  return isSubtype(t, 'number') || isSubtype(t, 'boolean');
+}
+
+/**
+ * For each parameter position of a user function, whether its author
+ * DECLARED the parameter as a scalar, a number or a boolean
+ * (`isDeclaredScalarType`): the function literal annotates it (`u: real`,
+ * `n: integer`, `p: boolean`), or the signature declared for a named
+ * function (`ce.declare('k', '(real) -> real')`) gives such a type at that
+ * position. `literal` is the function literal, and `declared` is the
+ * declared signature, when there is one. The answer is `undefined` when no
+ * parameter is declared as a scalar.
+ *
+ * A TUPLE argument at such a parameter maps over its components
+ * (`declaredScalarTupleCells`), as the library functions do: `Sin((a, b))`
+ * gives `(sin(a), sin(b))` and `Not((True, False))` gives `(False, True)`.
+ * So `Apply((u: real) ↦ 2u, (a, b))` gives `(2a, 2b)` (user decisions
+ * 2026-10-03). A parameter whose type is only inferred from the body (`u ↦
+ * 2u` infers `u: number`) is not declared, and it binds a tuple argument
+ * whole, as before.
+ */
+export function declaredScalarParams(
+  literal: Expression | undefined,
+  declared?: Type
+): ((i: number) => boolean) | undefined {
+  const slots: boolean[] = [];
+  if (typeof declared === 'object' && declared.kind === 'signature') {
+    [...(declared.args ?? []), ...(declared.optArgs ?? [])].forEach(
+      (arg, i) => {
+        if (isDeclaredScalarType(arg.type)) slots[i] = true;
+      }
+    );
   }
-  return v === undefined || isSymbol(v);
+  if (literal !== undefined && isFunction(literal, 'Function')) {
+    literal.ops.slice(1).forEach((param, i) => {
+      if (isDeclaredScalarType(functionLiteralParameterType(param)))
+        slots[i] = true;
+    });
+  }
+  if (!slots.some((x) => x === true)) return undefined;
+  return (i) => slots[i] === true;
+}
+
+/**
+ * Is `x` a symbol with no value whose type is a tuple, or a union with a
+ * tuple branch (`p: tuple<real, real>`)? At a parameter declared as a
+ * number, a call with such an argument is HELD, as a call with a list symbol
+ * that has no value is held (`isUnresolvedMappableOperand`): when the symbol
+ * gets a tuple value, the call maps over its components, so a value
+ * computed now from the whole symbol would have a different shape (`7`
+ * where `(7, 7)` is the answer for `(u: real) ↦ 7`).
+ */
+function isValuelessTupleSymbol(x: Expression): boolean {
+  if (!isSymbol(x) || x.value !== undefined) return false;
+  const tupleShaped = (t: Type) =>
+    isTupleShapedType(resolveTypeReference(t) ?? t);
+  const t = resolveTypeReference(x.type.type) ?? x.type.type;
+  if (tupleShaped(t)) return true;
+  return typeof t === 'object' && t.kind === 'union' && t.types.some(tupleShaped);
+}
+
+/**
+ * The component-wise map of a user function over its TUPLE arguments at
+ * parameters declared as scalars (`declaredScalarParams`). `ops` are the
+ * evaluated arguments. The answer is one of these:
+ *
+ * - `undefined`: no such argument is a tuple. The arguments are bound as
+ *   before.
+ * - `'hold'`: such an argument is a symbol with no value whose type is a
+ *   tuple (`isValuelessTupleSymbol`). The caller keeps the call
+ *   unevaluated.
+ * - an error expression: two such tuples have different lengths
+ *   (`incompatible-dimensions`, as for two lists), or a tuple has a list
+ *   coordinate (`([1, 2], [3, 4])` is data, not a point; the same error
+ *   `Sin(([1, 2], [3, 4]))` gives, `listCoordinateTupleOperandError`).
+ * - the argument lists of the cells: cell `k` has the component `k` of each
+ *   mapped tuple, and every other argument whole. The caller applies the
+ *   function to each cell, and the result is the tuple of these values. A
+ *   component that is itself a tuple maps again when its cell is applied.
+ *
+ * A list argument is not mapped here: the list broadcast, which runs first,
+ * maps it, and each of its cells can then map over a tuple.
+ */
+export function declaredScalarTupleCells(
+  ce: ComputeEngine,
+  isScalarParam: (i: number) => boolean,
+  ops: ReadonlyArray<Expression>
+): Expression[][] | Expression | 'hold' | undefined {
+  if (ops.some((x, i) => isScalarParam(i) && isValuelessTupleSymbol(x)))
+    return 'hold';
+  const maps = (x: Expression, i: number) =>
+    isScalarParam(i) && isTupleBroadcastParticipant(x);
+  if (!ops.some(maps)) return undefined;
+  const tuples = ops.filter(maps);
+  const listTuple = listCoordinateTupleOperandError(ce, tuples);
+  if (listTuple !== undefined) return listTuple;
+  let length: number | undefined;
+  for (const x of tuples) {
+    const n = x.count;
+    if (n === undefined) return undefined;
+    if (length === undefined) length = n;
+    else if (n !== length)
+      return ce.error('incompatible-dimensions', `${length} vs ${n}`);
+  }
+  if (length === undefined || length === 0) return undefined;
+  const components = ops.map((x, i) =>
+    maps(x, i) ? [...(x.each() ?? [])] : undefined
+  );
+  if (components.some((c) => c !== undefined && c.length !== length))
+    return undefined;
+  return Array.from({ length }, (_, k) =>
+    ops.map((x, i) => components[i]?.[k] ?? x)
+  );
+}
+
+/**
+ * The error of an argument that a function literal refused, when `result`
+ * is the inert application that `apply()` (`function-utils.ts`) returns for
+ * it: an `Apply` of the literal whose argument `k` is now an `Error`, where
+ * the argument `args[k - 1]` given to the literal was valid. The error is
+ * the value of the call, with the breadcrumb frame `operator` and the
+ * position `k + offset` of the argument in that call, as a call of a named
+ * function gives it (`_refusedArgumentError`). `undefined` for any other
+ * result.
+ *
+ * An argument that was already invalid (a list with a failed cell) is not
+ * changed: such an application stays as it is written.
+ */
+export function refusedLiteralArgumentError(
+  result: Expression,
+  args: ReadonlyArray<Expression>,
+  operator: string,
+  offset: number
+): Expression | undefined {
+  if (!isFunction(result, 'Apply') || result.isValid) return undefined;
+  if (!isFunction(result.op1, 'Function')) return undefined;
+  const ops = result.ops;
+  for (let k = 1; k < ops.length; k++) {
+    if (!isFunction(ops[k], 'Error')) continue;
+    const arg = args[k - 1];
+    if (arg === undefined || !arg.isValid) continue;
+    return errorValue(ops[k], { operator, index: k + offset });
+  }
+  return undefined;
+}
+
+/**
+ * The type of a call of a user function whose arguments map over TUPLES at
+ * parameters declared as scalars (`declaredScalarTupleCells`), or
+ * `undefined` when no argument type at such a parameter is a tuple or a list
+ * of tuples. `cellResult` is the type of the function's value for one
+ * component.
+ *
+ * A tuple type gives a tuple of the same length, with `cellResult` for each
+ * number component and the same rule again for a tuple component:
+ * `tuple<real, real>` gives `tuple<R, R>`. A list of tuples gives the list
+ * of these tuples, because the list broadcast maps each tuple in turn. The
+ * answer is `any` when two arguments have different shapes, or when a tuple
+ * has a component that is not a number or a tuple (the call is then an
+ * error).
+ *
+ * `listsMap` says whether the function maps over a list argument (its
+ * parameters are all scalars). When it does, a list beside the tuple
+ * supplies cells of its own, and the answer is `any`. When it does not, the
+ * list is bound whole in each cell, and the call is the tuple of the cells:
+ * `(u: real, w: list<real>) ↦ u + Length(w)` applied to `(1, 2)` and a list
+ * is `tuple<real, real>`.
+ */
+export function declaredScalarTupleType(
+  isScalarParam: (i: number) => boolean,
+  argTypes: ReadonlyArray<Type>,
+  cellResult: Type,
+  listsMap = true
+): Type | undefined {
+  const resolve = (t: Type) => resolveTypeReference(t) ?? t;
+  const hasTuple = (t: Type, depth = 0): boolean => {
+    const r = resolve(t);
+    if (typeof r !== 'object' || depth > 8) return false;
+    if (r.kind === 'tuple') return true;
+    if (r.kind !== 'list') return false;
+    return hasTuple(r.elements, depth + 1);
+  };
+  // `inTuple`: a list inside a tuple is a list coordinate, and the call is
+  // then an error, not a map.
+  const mapped = (t: Type, depth = 0, inTuple = false): Type | undefined => {
+    const r = resolve(t);
+    if (depth > 8) return undefined;
+    if (typeof r === 'object' && r.kind === 'tuple') {
+      const elements: { type: Type }[] = [];
+      for (const e of r.elements) {
+        const m = mapped(e.type, depth + 1, true);
+        if (m === undefined) return undefined;
+        elements.push({ type: m });
+      }
+      return { kind: 'tuple', elements };
+    }
+    if (typeof r === 'object' && r.kind === 'list') {
+      if (inTuple) return undefined;
+      const m = mapped(r.elements, depth + 1);
+      return m === undefined ? undefined : { ...r, elements: m };
+    }
+    // A component of unknown type (`(a, b)` for undeclared `a`, `b`) is
+    // applied as a scalar, and typed as such a call is typed.
+    return isSubtype(r, 'number') ||
+      isSubtype(r, 'boolean') ||
+      r === 'unknown' ||
+      r === 'any'
+      ? cellResult
+      : undefined;
+  };
+  const shapes = argTypes.filter(
+    (t, i) => isScalarParam(i) && hasTuple(t)
+  );
+  if (shapes.length === 0) return undefined;
+  // Another argument that is a collection supplies cells of its own, when
+  // the function maps over a list, and the shape of the result then depends
+  // on both.
+  if (
+    listsMap &&
+    argTypes.some(
+      (t, i) =>
+        !(isScalarParam(i) && hasTuple(t)) &&
+        isSubtype(resolve(t), INDEXED_COLLECTION_SHAPE_TYPE) &&
+        !isTupleShapedType(resolve(t))
+    )
+  )
+    return 'any';
+  const result = mapped(shapes[0]);
+  if (result === undefined) return 'any';
+  if (shapes.slice(1).some((t) => !isSubtype(mapped(t) ?? 'any', result)))
+    return 'any';
+  return result;
 }
 
 export function paramsAreScalar(

@@ -133,6 +133,30 @@ describe('a variable assigned a lazy collection over another variable', () => {
   });
 });
 
+// A lazy collection inside a list literal is stored in the same way. With
+// `h` assigned again after the statement, the list read `h` by name and gave
+// `[10,20]`, while the compiled code and the list written with calls
+// (`[[h(1), h(2)]]`) give `[2,3]`.
+describe('a lazy collection inside a list literal', () => {
+  test.each([
+    [
+      'at the top level',
+      'let h = (k) => k + 1\nlet r = [map(h, [1, 2])]\nh = (k) => k * 10\nr[1]',
+    ],
+    [
+      'in a block',
+      'let r = do { let h = (k) => k + 1; let r = [map(h, [1, 2])]; h = (k) => k * 10; r }\nr[1]',
+    ],
+    [
+      'eagerly built',
+      'let h = (k) => k + 1\nlet r = [[h(1), h(2)]]\nh = (k) => k * 10\nr[1]',
+    ],
+  ])('%s uses the function at the statement', (_label, src) => {
+    expect(run(src)).toBe('[2,3]');
+    expect(compiled(src)).toEqual([2, 3]);
+  });
+});
+
 describe('what stays lazy', () => {
   test('a collection that is not known to be finite', () => {
     const ce = new ComputeEngine();

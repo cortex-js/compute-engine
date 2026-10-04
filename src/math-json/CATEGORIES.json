@@ -386,6 +386,7 @@
       "N",
       "NamedArgument",
       "NumberFrom",
+      "NumericApproximation",
       "Object",
       "OverParen",
       "PadEnd",

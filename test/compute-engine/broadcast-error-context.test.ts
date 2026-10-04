@@ -166,11 +166,13 @@ describe('BROADCAST ERROR CONTEXT — value-definition route', () => {
     // The VALUE is unchanged: still a 3-element list with the failure in place.
     expect(result.operator).toBe('List');
     expect(result.nops).toBe(3);
-    expect(broadcastFrames(result.ops![1].ops![1])).toEqual([
+    // The failed cell is the error itself, as on the operator-definition
+    // route, not the inert `Apply` of the literal with the argument marked.
+    expect(broadcastFrames(result.ops![1])).toEqual([
       { operator: 'bump', index: 2, length: 3 },
     ]);
     expect(result.toString()).toBe(
-      `[2,Apply((n) => n + 1, Error(ErrorCode("incompatible-type", "integer", "string"), "b", "while applying 'bump' element-wise over 3 elements (element 2)")),4]`
+      `[2,Error(ErrorCode("incompatible-type", "integer", "string"), "b", "while applying 'bump' element-wise over 3 elements (element 2)"),4]`
     );
   });
 

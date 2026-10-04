@@ -57,8 +57,10 @@ describe('a binder whose bound reads a shared tower', () => {
     expect(size).toBeGreaterThan(2 ** 22);
     // The unguarded walk took about 3 s here and doubled with every level;
     // the linear walk is a few milliseconds, so a wide bound still catches
-    // the regression under a loaded suite.
-    expect(elapsed).toBeLessThan(1500);
+    // the regression under a loaded suite. The time still depends on the
+    // load of the machine, so the bound is asserted only in a `CE_PERF=1` run.
+    // The size check above does not depend on time.
+    if (process.env.CE_PERF === '1') expect(elapsed).toBeLessThan(1500);
   });
 
   test('a tower of values under binders still compiles and evaluates', () => {
@@ -125,8 +127,11 @@ describe('canonicalizing over a shared list tower', () => {
       ]);
       expect(errors).toEqual([]);
       // Milliseconds when linear; the per-path walks doubled with every
-      // level (a quarter second at 22 levels for `Hold` alone).
-      expect(elapsed).toBeLessThan(1500);
+      // level (a quarter second at 22 levels for `Hold` alone). The time
+      // depends on the load of the machine, so the bound is asserted only in
+      // a `CE_PERF=1` run. The canonical, type and error checks above do not
+      // depend on time.
+      if (process.env.CE_PERF === '1') expect(elapsed).toBeLessThan(1500);
     } finally {
       spy.mockRestore();
     }

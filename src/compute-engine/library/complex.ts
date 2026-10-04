@@ -46,6 +46,7 @@ import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
 import { neg } from '../numerics/rationals.js';
 import { measurementLipschitzUnary } from './measurement-arithmetic.js';
 import { halfTurnAngle } from '../boxed-expression/trigonometry.js';
+import { shadowsLibraryName } from '../library-shadowing.js';
 import {
   functionLiteralParameterName,
   isRestParameter,
@@ -58,6 +59,55 @@ import { checkNumericArgs } from '../boxed-expression/validate.js';
  * A dedicated per-file constant, as for the other value-scaled caps.
  */
 const MAX_COMPLEX_ROOTS = 10_000;
+
+/**
+ * The angle of root `k` of `ComplexRoots(z, n)` for an exact real `z`:
+ * `(2k + 1)/n` half turns when `z < 0` (the argument of `z` is a half turn),
+ * `2k/n` half turns otherwise. `halfTurn` is the half turn in the engine's
+ * angular unit (`halfTurnAngle`), because `Cos`/`Sin` read their argument in
+ * that unit.
+ */
+function exactRootAngle(
+  ce: ComputeEngine,
+  negative: boolean,
+  n: number,
+  k: number,
+  halfTurn: Expression
+): Expression {
+  return ce
+    .function('Multiply', [
+      ce.number([(negative ? 1 : 0) + 2 * k, n]),
+      halfTurn,
+    ])
+    .evaluate();
+}
+
+/**
+ * True when an exact root of `ComplexRoots(z, n)`, for an exact real `z`,
+ * holds the symbol `Pi`. This occurs when the cosine or the sine of the
+ * angle of a root has no closed form (`cos(2π/7)`). The angles hold `Pi`
+ * only in radians: in the other units the half turn is a number (`180` in
+ * degrees). When `z` is 0, every root is 0 and holds no `Pi`.
+ *
+ * The `ComplexRoots` evaluate handler declines such roots when a user binding
+ * gives `Pi` another value, and its `canEnumerate` handler uses this test to
+ * give the same answer. The loop stops at the first root that holds `Pi`:
+ * for most orders `n`, this is the root at `k = 1`.
+ */
+function exactRootsHoldPi(
+  ce: ComputeEngine,
+  z: Expression,
+  n: number
+): boolean {
+  const halfTurn = halfTurnAngle(ce);
+  if (!halfTurn.has('Pi') || z.isSame(0)) return false;
+  for (let k = 0; k < n; k++) {
+    const theta = exactRootAngle(ce, z.re < 0, n, k, halfTurn);
+    if (ce.function('Cos', [theta]).evaluate().has('Pi')) return true;
+    if (ce.function('Sin', [theta]).evaluate().has('Pi')) return true;
+  }
+  return false;
+}
 
 /**
  * Assumption-based sign fallback for the part extractors
@@ -614,7 +664,8 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
     },
 
     Argument: {
-      description: 'Complex argument (phase angle) of a number.',
+      description:
+        "Complex argument (phase angle) of a number, in the engine's angular unit.",
       broadcastable: true,
       complexity: 1200,
       // Top numeric result for the same reason as `Real`: the handler
@@ -627,6 +678,14 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
       // handled by `evaluate`
       sgn: ([op], { engine: ce }) => signFromAssumedPart(ce, op, 'arg'),
       evaluate: (ops, { engine: ce, numericApproximation }) => {
+        // The result is an angle in the engine's `angularUnit`, as for the
+        // inverse trigonometric functions: `Argument(-1)` is `π` in radians,
+        // `180` in degrees, `200` in grads and `1/2` in turns. The real-axis
+        // branches use `halfTurnAngle` for the angle of a negative value, and
+        // the other branches use `Arctan2`, which follows the unit. Internal
+        // code that needs the angle in radians (`Ln`, `Sqrt` and
+        // `ComplexRoots` of a complex value) does not call this operator.
+        //
         // A constant sum (`1 + √2·i`) is split into its exact parts (see
         // `Real`), and its angle is `Arctan2(im, re)`.
         if (!isNumber(ops[0])) {
@@ -647,8 +706,16 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
                   ? -1
                   : exactOrder(re, ce.Zero);
             if (sign === undefined || sign === 0) return undefined;
-            const result = sign > 0 ? ce.Zero : ce.Pi;
-            return numericApproximation ? result.N() : result;
+            const result = sign > 0 ? ce.Zero : halfTurnAngle(ce);
+            if (numericApproximation) return result.N();
+            // `ce.Pi` is bound to the library constant π, but its MathJSON
+            // names `Pi`. When a user binding gives `Pi` another value
+            // (`ce.declare('Pi', { value: 3 })`), the result boxed again
+            // would have the user value, so the call stays symbolic. Only
+            // the radian half turn holds `Pi`.
+            if (result.has('Pi') && shadowsLibraryName(ce, 'Pi'))
+              return undefined;
+            return result;
           }
           return ce
             .function('Arctan2', [im, re])
@@ -671,12 +738,17 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
         const op = ops[0].numericValue;
         if (typeof op === 'number' || !op.isComplex) {
           const isNonNegative = typeof op === 'number' ? op >= 0 : op.re >= 0;
-          const result = isNonNegative ? ce.Zero : ce.Pi;
+          const result = isNonNegative ? ce.Zero : halfTurnAngle(ce);
           // D2: an inexact (float) argument numericizes even under plain
           // evaluate() — `Argument(-5.1)` → 3.14159… (not the symbolic `Pi`).
-          return shouldNumericize(numericApproximation, ops[0])
-            ? result.N()
-            : result;
+          if (shouldNumericize(numericApproximation, ops[0])) return result.N();
+          // With a user value of `Pi`, the exact `π` is not returned and the
+          // call stays symbolic: the MathJSON of `ce.Pi` names `Pi`, and
+          // boxed again it would have the user value. Only the radian half
+          // turn holds `Pi`.
+          if (result.has('Pi') && shadowsLibraryName(ce, 'Pi'))
+            return undefined;
+          return result;
         }
         // An exact operand passes its exact components (see `Real`): its
         // machine projections `op.im` and `op.re` made the angle of an exact
@@ -865,7 +937,21 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
         const n = nOp.re;
         // The root-count cap is part of the evaluate guard: past it the
         // roots stay symbolic, so the promise must decline too.
-        return Number.isInteger(n) && n > 0 && n <= MAX_COMPLEX_ROOTS;
+        if (!Number.isInteger(n) || n <= 0 || n > MAX_COMPLEX_ROOTS)
+          return false;
+        // When a user binding gives `Pi` another value, the evaluate handler
+        // declines exact roots that hold `Pi` and the call stays symbolic.
+        // Then the promise must decline too.
+        const ce = expr.engine;
+        if (
+          isNumber(z) &&
+          z.isExact === true &&
+          z.im === 0 &&
+          shadowsLibraryName(ce, 'Pi') &&
+          exactRootsHoldPi(ce, z, n)
+        )
+          return false;
+        return true;
       },
       evaluate: (ops, { engine: ce, numericApproximation }) => {
         const re = ops[0].re;
@@ -897,12 +983,7 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
           const halfTurn = halfTurnAngle(ce);
           const exactRoots: Expression[] = [];
           for (let k = 0; k < n; k++) {
-            const theta = ce
-              .function('Multiply', [
-                ce.number([(re < 0 ? 1 : 0) + 2 * k, n]),
-                halfTurn,
-              ])
-              .evaluate();
+            const theta = exactRootAngle(ce, re < 0, n, k, halfTurn);
             const cos = ce.function('Cos', [theta]).evaluate();
             const sin = ce.function('Sin', [theta]).evaluate();
             const real = ce.function('Multiply', [modulusRoot, cos]).evaluate();
@@ -914,7 +995,15 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
             );
           }
           const list = ce.function('List', exactRoots);
-          return numericApproximation ? list.N() : list;
+          if (numericApproximation) return list.N();
+          // A root that is not a closed form holds the angle as a multiple of
+          // `ce.Pi` (`cos(2π/7)`). `ce.Pi` is bound to the library constant
+          // π, but its MathJSON names `Pi`: when a user binding gives `Pi`
+          // another value, the list boxed again would have other roots. Then
+          // the call stays symbolic. Roots with no π (`[1, i, −1, −i]`) are
+          // returned.
+          if (list.has('Pi') && shadowsLibraryName(ce, 'Pi')) return undefined;
+          return list;
         }
 
         const roots: [number, number][] = [];

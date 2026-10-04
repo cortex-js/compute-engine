@@ -31,10 +31,7 @@ import { numericValueOf } from '../boxed-expression/numerics.js';
 
 import { checkDeadline, isThenable } from '../../common/interruptible.js';
 import { isSubtype } from '../../common/type/subtype.js';
-import {
-  EXTENDED_REAL_TYPE,
-  INDEXED_COLLECTION_SHAPE_TYPE,
-} from '../../common/type/primitive.js';
+import { EXTENDED_REAL_TYPE } from '../../common/type/primitive.js';
 import { MAX_ITERATION } from '../numerics/numeric.js';
 import { extrapolate } from '../numerics/richardson.js';
 import {
@@ -43,6 +40,7 @@ import {
 } from './collections.js';
 import { extractFiniteDomainWithReason } from './logic-analysis.js';
 import {
+  broadcastingComponentKind,
   isPossiblyCollectionTyped,
   isTupleShapedType,
   isValuelessCollectionTyped,
@@ -90,23 +88,31 @@ export function isTupleTypedOperand(d: OperandDescriptor): boolean {
  * produces.
  */
 export function pointNormBroadcasts(d: OperandDescriptor): boolean {
+  return pointNormBroadcastKind(d) !== undefined;
+}
+
+/**
+ * The broadcast reading of the point `d` (see `pointNormBroadcasts`):
+ * `'list'` when a component is a list, `'gated-list'` when a component is a
+ * list that may be absent (a restricted list, typed `list<…> | missing`, see
+ * `broadcastingComponentKind`), and `undefined` when the point does not
+ * broadcast.
+ */
+function pointNormBroadcastKind(
+  d: OperandDescriptor
+): 'list' | 'gated-list' | undefined {
   const children = operandChildren(d);
-  if (children !== undefined)
-    return children.some(
-      (c) =>
-        isSubtype(c.type, INDEXED_COLLECTION_SHAPE_TYPE) &&
-        !isTupleTypedOperand(c)
-    );
-  const t = d.type;
-  return (
-    typeof t !== 'string' &&
-    t.kind === 'tuple' &&
-    t.elements.some((el) => {
-      const et = el.type;
-      if (typeof et !== 'string' && et.kind === 'tuple') return false;
-      return isSubtype(et, INDEXED_COLLECTION_SHAPE_TYPE);
-    })
-  );
+  const kinds =
+    children !== undefined
+      ? children.map((c) =>
+          isTupleTypedOperand(c) ? undefined : broadcastingComponentKind(c.type)
+        )
+      : typeof d.type !== 'string' && d.type.kind === 'tuple'
+        ? d.type.elements.map((el) => broadcastingComponentKind(el.type))
+        : [];
+  if (kinds.includes('gated-list')) return 'gated-list';
+  if (kinds.includes('list')) return 'list';
+  return undefined;
 }
 
 /**
@@ -171,7 +177,12 @@ export function euclideanNormType(
  * claim; a point-TYPED symbol keeps the wide `number`.
  */
 export function pointNormType(d: OperandDescriptor): string {
-  if (pointNormBroadcasts(d)) return 'list<number>';
+  // A list component that may be absent gives one norm per element when it
+  // is present, and `NaN` (the norm of a point with an absent coordinate)
+  // when it is absent.
+  const broadcast = pointNormBroadcastKind(d);
+  if (broadcast === 'gated-list') return 'list<number> | nan';
+  if (broadcast === 'list') return 'list<number>';
   const children = operandChildren(d);
   if (children === undefined) return 'number';
   return euclideanNormType(children);

@@ -16,6 +16,7 @@ import {
 } from './polynomials.js';
 import { asSmallInteger } from './numerics.js';
 import { realPolynomialRoots } from '../numerics/polynomial-roots.js';
+import { halfTurnAngle } from './trigonometry.js';
 
 function numericApproximation(value: unknown): number | undefined {
   if (typeof value === 'number') return value;
@@ -134,6 +135,81 @@ export function rootsAsEquations(
   return eqs.length === 1 ? eqs[0] : ce.function('List', eqs);
 }
 
+/**
+ * The statistics of a call of `findUnivariateRoots()`. See the comment of
+ * that function for the meaning of each flag.
+ */
+type RootStats = {
+  candidates: boolean;
+  undecided: boolean;
+  partial?: boolean;
+  userRule?: boolean;
+};
+
+/** New statistics for a recursive call of `findUnivariateRoots()`. */
+function childStats(): Required<RootStats> {
+  return {
+    candidates: false,
+    undecided: false,
+    partial: false,
+    userRule: false,
+  };
+}
+
+/**
+ * Copy the `partial` and `userRule` flags of a recursive call of
+ * `findUnivariateRoots()` to the statistics `stats` of the caller. A
+ * strategy calls this function only when it returns roots that it made from
+ * the roots of that recursive call: when those roots are only a part of the
+ * roots, or come from a root template that the host added, the roots of the
+ * strategy are too. For example, `ln((x - 2)(x + e^x) + e) = 1` becomes
+ * `(x - 2)(x + e^x) = 0`, whose roots are only a part of the roots.
+ */
+function adoptChildStats(stats: RootStats | undefined, child: RootStats): void {
+  if (stats === undefined) return;
+  if (child.partial) stats.partial = true;
+  if (child.userRule) stats.userRule = true;
+}
+
+/**
+ * The name of the temporary unknown of a substitution (`u = g(x)`): the first
+ * name of `names` that is not `x` and is not in `expr`. A name that is in
+ * `expr` captures: with `u := 1/2`, `sin(2x) + u = 0` becomes
+ * `sin(u) + u = 0`, which is a different equation. `expr.unknowns` is not
+ * sufficient for this test, because it does not include a symbol that has a
+ * value.
+ *
+ * A name that is not in `expr` can still have a value or a type in the
+ * current scope (`t := 3`, or `u: integer`). Thus the caller declares the
+ * name in a new scope (`ce.pushScope()`) and makes the symbol in that scope,
+ * so that the outer value or type does not apply to the temporary unknown.
+ */
+function temporaryUnknownName(
+  expr: Expression,
+  x: string,
+  names: ReadonlyArray<string> = ['u', 't', 'w', 's', 'v', 'y', 'z']
+): string | undefined {
+  return names.find((n) => n !== x && !expr.has(n));
+}
+
+/**
+ * The second root of `sin(x) = c` in one turn: `x = H − arcsin(c)`, where `H`
+ * is a half turn in the angular unit of the engine (π rad, 180 deg, 200 grad
+ * or 1/2 turn). `Arcsin` gives its result in that unit, thus a root written
+ * with the constant π is not a root in degree mode. The root exists only when
+ * `|c| ≤ 1`, thus it is a `When(root, |c| ≤ 1)`, as the other trig roots are.
+ *
+ * A rule cannot write `H` in its MathJSON template: the template is the same
+ * for each angular unit. Thus the rules that use this function have a
+ * `replace` function.
+ */
+function sineSecondRoot(ce: ComputeEngine, c: Expression): Expression {
+  return ce.function('When', [
+    ce.function('Subtract', [halfTurnAngle(ce), ce.function('Arcsin', [c])]),
+    ce.function('LessEqual', [ce.function('Abs', [c]), ce.One]),
+  ]);
+}
+
 export const UNIVARIATE_ROOTS: Rule[] = [
   // ax = 0
   {
@@ -192,8 +268,14 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     ],
     id: 'solve.power-negative-root',
     useVariations: true,
+    // `x^n` takes the same value at `x` and `-x` when `n` is an even integer,
+    // or a fraction `p/q` with `p` even and `q` odd: the engine gives the
+    // real value `(-8)^(2/3) = 4`. Thus `x^(2/3) = 4` has the roots `8` and
+    // `-8`.
     condition: (sub: BoxedSubstitution) =>
-      filter(sub) && !sub._n.isSame(0) && (sub._n.isEven ?? false),
+      filter(sub) &&
+      !sub._n.isSame(0) &&
+      ((sub._n.isEven ?? false) || hasEvenNumeratorOddDenominator(sub._n)),
   },
 
   //
@@ -580,14 +662,17 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     condition: (sub) => filter(sub) && !sub.__a.isSame(0),
   },
 
-  // Second solution for sin: x = π - arcsin(-b/a)
+  // Second solution for sin: x = π - arcsin(-b/a), with π the half turn in
+  // the angular unit of the engine (see `sineSecondRoot()`)
   {
     match: ['Add', ['Multiply', '__a', ['Sin', '_x']], '__b'],
-    replace: [
-      'When',
-      ['Subtract', 'Pi', ['Arcsin', ['Divide', ['Negate', '__b'], '__a']]],
-      ['LessEqual', ['Abs', ['Divide', ['Negate', '__b'], '__a']], 1],
-    ],
+    replace: (expr: Expression, sub: BoxedSubstitution) => {
+      const ce = expr.engine;
+      return sineSecondRoot(
+        ce,
+        ce.function('Divide', [ce.function('Negate', [sub.__b]), sub.__a])
+      );
+    },
     id: 'solve.sine-second-branch',
     useVariations: true,
     condition: (sub) => filter(sub) && !sub.__a.isSame(0),
@@ -606,14 +691,14 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     condition: filter,
   },
 
-  // Second solution for sin(x) + b = 0: x = π - arcsin(-b)
+  // Second solution for sin(x) + b = 0: x = π - arcsin(-b), with π the half
+  // turn in the angular unit of the engine (see `sineSecondRoot()`)
   {
     match: ['Add', ['Sin', '_x'], '__b'],
-    replace: [
-      'When',
-      ['Subtract', 'Pi', ['Arcsin', ['Negate', '__b']]],
-      ['LessEqual', ['Abs', ['Negate', '__b']], 1],
-    ],
+    replace: (expr: Expression, sub: BoxedSubstitution) => {
+      const ce = expr.engine;
+      return sineSecondRoot(ce, ce.function('Negate', [sub.__b]));
+    },
     id: 'solve.sine-unit-second-branch',
     useVariations: true,
     condition: filter,
@@ -903,7 +988,41 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     useVariations: true,
     condition: (sub) => filter(sub) && !sub.__a.isSame(0),
   },
+
+  // Second root of a·sin(x) + b·cos(x) = 0: x = arctan(-b/a) + H, with H the
+  // half turn in the angular unit of the engine. The roots of `tan(x) = -b/a`
+  // are a half turn apart, but the period of the equation is a full turn:
+  // `sin(x) = cos(x)` has the roots `π/4` and `5π/4` in one turn.
+  {
+    match: [
+      'Add',
+      ['Multiply', '__a', ['Sin', '_x']],
+      ['Multiply', '__b', ['Cos', '_x']],
+    ],
+    replace: (expr: Expression, sub: BoxedSubstitution) => {
+      const ce = expr.engine;
+      return ce.function('Add', [
+        ce.function('Arctan', [
+          ce.function('Divide', [ce.function('Negate', [sub.__b]), sub.__a]),
+        ]),
+        halfTurnAngle(ce),
+      ]);
+    },
+    id: 'solve.sine-cosine-linear-combination-second-branch',
+    useVariations: true,
+    condition: (sub) => filter(sub) && !sub.__a.isSame(0),
+  },
 ];
+
+// The ids of the built-in root templates above. A matched template whose id
+// is not in this set is a rule that the host added to `ce.solveRules`: its
+// roots are the host's claim of a solution (see `stats.userRule` in
+// `findUnivariateRoots()`).
+const BUILT_IN_SOLVE_RULE_IDS = new Set(
+  UNIVARIATE_ROOTS.map((rule) =>
+    typeof rule === 'object' && 'id' in rule ? rule.id : undefined
+  ).filter((id): id is string => typeof id === 'string')
+);
 
 /**
  * Clear *symbolic* denominators from an Add expression by multiplying through
@@ -1103,7 +1222,8 @@ function transformSqrtLinearEquation(
 function solveSingleSqrtEquation(
   expr: Expression,
   variable: string,
-  trace?: RuleSteps
+  trace?: RuleSteps,
+  stats?: RootStats
 ): ReadonlyArray<Expression> | null {
   const ce = expr.engine;
 
@@ -1140,26 +1260,38 @@ function solveSingleSqrtEquation(
     return null;
 
   // Substitute a fresh symbol t for √R, then read off the polynomial in t.
-  const tName = ['t', 'u', 'w', 's', 'v', 'y', 'z'].find(
-    (n) => n !== variable && !expr.unknowns.includes(n)
-  );
+  // `t` is declared in a new scope (see `temporaryUnknownName()`).
+  const tName = temporaryUnknownName(expr, variable, [
+    't',
+    'u',
+    'w',
+    's',
+    'v',
+    'y',
+    'z',
+  ]);
   if (tName === undefined) return null;
-  const t = ce.symbol(tName);
-
   const sqrtTermNode: Expression = sqrtTerm;
-  const substitute = (node: Expression): Expression => {
-    if (node.isSame(sqrtTermNode)) return t;
-    if (isFunction(node)) {
-      const ops = node.ops.map(substitute);
-      // Nothing below this node was substituted: reuse it rather than
-      // re-canonicalizing an unchanged subtree.
-      if (ops.every((x, i) => x === node.ops![i])) return node;
-      return ce.function(node.operator, ops);
-    }
-    return node;
-  };
-  const exprT = substitute(expr);
-  const coeffs = getPolynomialCoefficients(exprT, tName);
+  let coeffs: Expression[] | null;
+  ce.pushScope();
+  try {
+    ce.declare(tName, 'unknown');
+    const t = ce.symbol(tName);
+    const substitute = (node: Expression): Expression => {
+      if (node.isSame(sqrtTermNode)) return t;
+      if (isFunction(node)) {
+        const ops = node.ops.map(substitute);
+        // Nothing below this node was substituted: reuse it rather than
+        // re-canonicalizing an unchanged subtree.
+        if (ops.every((x, i) => x === node.ops![i])) return node;
+        return ce.function(node.operator, ops);
+      }
+      return node;
+    };
+    coeffs = getPolynomialCoefficients(substitute(expr), tName);
+  } finally {
+    ce.popScope();
+  }
   if (coeffs === null) return null;
 
   // Split into the part multiplying √R (odd powers of t) and the rest (even
@@ -1181,7 +1313,10 @@ function solveSingleSqrtEquation(
   // by the caller's validation against the original equation.
   const sqrtFree = squared.simplify();
   traceStep(trace, 'solve.square-both-sides', asEquation(sqrtFree, variable));
-  return findUnivariateRoots(sqrtFree, variable);
+  const child = childStats();
+  const roots = findUnivariateRoots(sqrtFree, variable, 0, undefined, child);
+  if (roots.length > 0) adoptChildStats(stats, child);
+  return roots;
 }
 
 /**
@@ -1229,25 +1364,39 @@ function sqrtEquationRhsGuard(
     return null;
 
   // Substitute a fresh symbol t for √R and require the linear-in-√R shape
-  // `A·t + B` (the radical appears to the first power only).
-  const tName = ['t', 'u', 'w', 's', 'v', 'y', 'z'].find(
-    (n) => n !== variable && !expr.unknowns.includes(n)
-  );
+  // `A·t + B` (the radical appears to the first power only). `t` is declared
+  // in a new scope (see `temporaryUnknownName()`).
+  const tName = temporaryUnknownName(expr, variable, [
+    't',
+    'u',
+    'w',
+    's',
+    'v',
+    'y',
+    'z',
+  ]);
   if (tName === undefined) return null;
-  const t = ce.symbol(tName);
   const sqrtTermNode: Expression = sqrtTerm;
-  const substitute = (node: Expression): Expression => {
-    if (node.isSame(sqrtTermNode)) return t;
-    if (isFunction(node)) {
-      const ops = node.ops.map(substitute);
-      // Nothing below this node was substituted: reuse it rather than
-      // re-canonicalizing an unchanged subtree.
-      if (ops.every((x, i) => x === node.ops![i])) return node;
-      return ce.function(node.operator, ops);
-    }
-    return node;
-  };
-  const coeffs = getPolynomialCoefficients(substitute(expr), tName);
+  let coeffs: Expression[] | null;
+  ce.pushScope();
+  try {
+    ce.declare(tName, 'unknown');
+    const t = ce.symbol(tName);
+    const substitute = (node: Expression): Expression => {
+      if (node.isSame(sqrtTermNode)) return t;
+      if (isFunction(node)) {
+        const ops = node.ops.map(substitute);
+        // Nothing below this node was substituted: reuse it rather than
+        // re-canonicalizing an unchanged subtree.
+        if (ops.every((x, i) => x === node.ops![i])) return node;
+        return ce.function(node.operator, ops);
+      }
+      return node;
+    };
+    coeffs = getPolynomialCoefficients(substitute(expr), tName);
+  } finally {
+    ce.popScope();
+  }
   if (coeffs === null || coeffs.length !== 2) return null;
   const b = coeffs[0];
   const a = coeffs[1];
@@ -1275,7 +1424,8 @@ function sqrtEquationRhsGuard(
 function solveTwoSqrtEquation(
   expr: Expression,
   variable: string,
-  trace?: RuleSteps
+  trace?: RuleSteps,
+  stats?: RootStats
 ): Expression[] | null {
   if (!isFunction(expr, 'Add')) return null;
 
@@ -1397,7 +1547,8 @@ function solveTwoSqrtEquation(
         eExpr,
         fSign,
         variable,
-        trace
+        trace,
+        stats
       );
     }
     // Both negative: -√f - √g = e, i.e., √f + √g = -e
@@ -1412,7 +1563,8 @@ function solveTwoSqrtEquation(
     eExpr,
     gSign,
     variable,
-    trace
+    trace,
+    stats
   );
 }
 
@@ -1426,7 +1578,8 @@ function solveTwoSqrtEquationCore(
   eExpr: Expression,
   gSign: number,
   variable: string,
-  trace?: RuleSteps
+  trace?: RuleSteps,
+  stats?: RootStats
 ): Expression[] | null {
   // We have: √f = e - gSign·√g
   // Square both sides: f = e² - 2·e·gSign·√g + g
@@ -1454,7 +1607,14 @@ function solveTwoSqrtEquationCore(
   );
 
   // Solve the polynomial equation
-  const solutions = findUnivariateRoots(finalEquation, variable);
+  const child = childStats();
+  const solutions = findUnivariateRoots(
+    finalEquation,
+    variable,
+    0,
+    undefined,
+    child
+  );
 
   if (solutions.length === 0) return null;
   traceStep(
@@ -1506,7 +1666,9 @@ function solveTwoSqrtEquationCore(
     );
   }
 
-  return validSolutions.length > 0 ? validSolutions : null;
+  if (validSolutions.length === 0) return null;
+  adoptChildStats(stats, child);
+  return validSolutions;
 }
 
 /**
@@ -1522,7 +1684,8 @@ function solveTwoSqrtEquationCore(
 function solveNestedSqrtEquation(
   expr: Expression,
   variable: string,
-  trace?: RuleSteps
+  trace?: RuleSteps,
+  stats?: RootStats
 ): Expression[] | null {
   if (!isFunction(expr, 'Add')) return null;
 
@@ -1656,8 +1819,15 @@ function solveNestedSqrtEquation(
   ce.declare(uSymbolName, { type: 'real' });
 
   let uSolutions: ReadonlyArray<Expression>;
+  const child = childStats();
   try {
-    uSolutions = findUnivariateRoots(uEquation, uSymbolName);
+    uSolutions = findUnivariateRoots(
+      uEquation,
+      uSymbolName,
+      0,
+      undefined,
+      child
+    );
   } finally {
     ce.popScope();
   }
@@ -1694,7 +1864,9 @@ function solveNestedSqrtEquation(
       rootsAsEquations(ce, variable, xSolutions)
     );
 
-  return xSolutions.length > 0 ? xSolutions : null;
+  if (xSolutions.length === 0) return null;
+  adoptChildStats(stats, child);
+  return xSolutions;
 }
 
 /**
@@ -1741,6 +1913,14 @@ function rationalExponent(e: Expression): [number, number] | null {
   return null;
 }
 
+/** `true` when `e` is a rational constant `p/q` (in lowest terms) with an
+ * even `p` and an odd `q`. For a real `x`, `x^(p/q)` and `(-x)^(p/q)` then
+ * have the same real value. */
+function hasEvenNumeratorOddDenominator(e: Expression): boolean {
+  const r = rationalExponent(e);
+  return r !== null && r[0] % 2 === 0 && r[1] % 2 === 1;
+}
+
 /**
  * Solve an equation that is a polynomial in `x^{1/d}` (d > 1) by the
  * substitution `u = x^{1/d}` — i.e. equations mixing several rational powers
@@ -1758,7 +1938,8 @@ function rationalExponent(e: Expression): [number, number] | null {
 function solveByRationalPowerSubstitution(
   expr: Expression,
   x: string,
-  trace?: RuleSteps
+  trace?: RuleSteps,
+  stats?: RootStats
 ): ReadonlyArray<Expression> | null {
   const ce = expr.engine;
 
@@ -1801,52 +1982,61 @@ function solveByRationalPowerSubstitution(
   for (const q of dens) d = lcm2(d, q);
   if (d <= 1) return null; // already a plain polynomial in x
 
-  // Pick a fresh substitution variable not used in the expression.
-  const uName = ['u', 't', 'w', 's', 'v', 'y', 'z'].find(
-    (n) => n !== x && !expr.unknowns.includes(n)
-  );
+  // Pick a fresh substitution variable not used in the expression. It is
+  // declared in a new scope (see `temporaryUnknownName()`).
+  const uName = temporaryUnknownName(expr, x);
   if (uName === undefined) return null;
-  const u = ce.symbol(uName);
+  const child = childStats();
+  let uRoots: ReadonlyArray<Expression>;
+  ce.pushScope();
+  try {
+    ce.declare(uName, 'unknown');
+    const u = ce.symbol(uName);
 
-  // Second pass: rewrite each x^{p/q} as u^{p·d/q} (an integer power of u, since
-  // d is a multiple of every denominator).
-  const rewrite = (node: Expression): Expression => {
-    if (isSymbol(node, x)) return u.pow(d);
-    if (!node.has(x)) return node;
-    if (isFunction(node, 'Sqrt') && isSymbol(node.op1, x)) return u.pow(d / 2);
-    if (isFunction(node, 'Root') && isSymbol(node.op1, x))
-      return u.pow(d / asSmallInteger(node.op2)!);
-    if (isFunction(node, 'Power') && isSymbol(node.op1, x)) {
-      const [p, q] = rationalExponent(node.op2)!;
-      return u.pow((p * d) / q);
+    // Second pass: rewrite each x^{p/q} as u^{p·d/q} (an integer power of u,
+    // since d is a multiple of every denominator).
+    const rewrite = (node: Expression): Expression => {
+      if (isSymbol(node, x)) return u.pow(d);
+      if (!node.has(x)) return node;
+      if (isFunction(node, 'Sqrt') && isSymbol(node.op1, x))
+        return u.pow(d / 2);
+      if (isFunction(node, 'Root') && isSymbol(node.op1, x))
+        return u.pow(d / asSmallInteger(node.op2)!);
+      if (isFunction(node, 'Power') && isSymbol(node.op1, x)) {
+        const [p, q] = rationalExponent(node.op2)!;
+        return u.pow((p * d) / q);
+      }
+      if (isFunction(node, 'Negate')) return rewrite(node.op1).neg();
+      if (isFunction(node, 'Add'))
+        return ce.function('Add', node.ops!.map(rewrite));
+      if (isFunction(node, 'Multiply'))
+        return ce.function('Multiply', node.ops!.map(rewrite));
+      return node;
+    };
+
+    const uExpr = rewrite(expr);
+    if (trace) {
+      traceStep(
+        trace,
+        'solve.substitute',
+        ce.function('Equal', [
+          u,
+          ce.symbol(x).pow(ce.number(1).div(ce.number(d))),
+        ])
+      );
+      traceStep(trace, 'solve.substituted-equation', asEquation(uExpr, uName));
     }
-    if (isFunction(node, 'Negate')) return rewrite(node.op1).neg();
-    if (isFunction(node, 'Add'))
-      return ce.function('Add', node.ops!.map(rewrite));
-    if (isFunction(node, 'Multiply'))
-      return ce.function('Multiply', node.ops!.map(rewrite));
-    return node;
-  };
-
-  const uExpr = rewrite(expr);
-  if (trace) {
-    traceStep(
-      trace,
-      'solve.substitute',
-      ce.function('Equal', [
-        u,
-        ce.symbol(x).pow(ce.number(1).div(ce.number(d))),
-      ])
-    );
-    traceStep(trace, 'solve.substituted-equation', asEquation(uExpr, uName));
+    uRoots = findUnivariateRoots(uExpr, uName, 0, undefined, child);
+  } finally {
+    ce.popScope();
   }
-  const uRoots = findUnivariateRoots(uExpr, uName);
   if (uRoots.length === 0) return null;
 
   // Back-substitute x = uᵈ; extraneous roots are dropped by the caller's
   // validation against the original equation.
   const xRoots = uRoots.map((ur) => ur.pow(d));
   traceStep(trace, 'solve.back-substitute', rootsAsEquations(ce, x, xRoots));
+  adoptChildStats(stats, child);
   return xRoots;
 }
 
@@ -1864,7 +2054,8 @@ function solveByRationalPowerSubstitution(
  */
 function solveByPowerGcdSubstitution(
   expr: Expression,
-  x: string
+  x: string,
+  stats?: RootStats
 ): ReadonlyArray<Expression> | null {
   const ce = expr.engine;
   const coeffs = getPolynomialCoefficients(expr, x); // ascending [c₀, c₁, …]
@@ -1882,25 +2073,51 @@ function solveByPowerGcdSubstitution(
   const maxExp = nonzeroExps[nonzeroExps.length - 1];
   if (maxExp / g < 2) return null; // reduced degree < 2 → pure power; skip
 
-  // Reduced polynomial Q(u) with Q[k] = coeffs[k·g] (u = xᵍ).
-  const uName = ['u', 't', 'w', 's', 'v', 'y', 'z'].find(
-    (n) => n !== x && !expr.unknowns.includes(n)
-  );
+  // Reduced polynomial Q(u) with Q[k] = coeffs[k·g] (u = xᵍ). `u` is declared
+  // in a new scope (see `temporaryUnknownName()`).
+  const uName = temporaryUnknownName(expr, x);
   if (uName === undefined) return null;
   const reduced: Expression[] = [];
   for (let k = 0; k * g < coeffs.length; k++) reduced.push(coeffs[k * g]);
 
-  const uRoots = findUnivariateRoots(fromCoefficients(reduced, uName), uName);
+  const child = childStats();
+  let uRoots: ReadonlyArray<Expression>;
+  ce.pushScope();
+  try {
+    ce.declare(uName, 'unknown');
+    uRoots = findUnivariateRoots(
+      fromCoefficients(reduced, uName),
+      uName,
+      0,
+      undefined,
+      child
+    );
+  } finally {
+    ce.popScope();
+  }
   if (uRoots.length === 0) return null;
 
   const xRoots: Expression[] = [];
+  // The flags of the recursive calls, combined.
+  const combined = childStats();
+  adoptChildStats(combined, child);
   for (const uRoot of uRoots) {
     // Solve xᵍ = uRoot, keeping only the real branches (matching the engine's
     // real-only convention for higher-degree polynomial roots).
-    const branch = findUnivariateRoots(ce.symbol(x).pow(g).sub(uRoot), x);
+    const branchStats = childStats();
+    const branch = findUnivariateRoots(
+      ce.symbol(x).pow(g).sub(uRoot),
+      x,
+      0,
+      undefined,
+      branchStats
+    );
+    adoptChildStats(combined, branchStats);
     for (const r of branch) if (Math.abs(r.N().im ?? 0) < 1e-12) xRoots.push(r);
   }
-  return xRoots.length > 0 ? xRoots : null;
+  if (xRoots.length === 0) return null;
+  adoptChildStats(stats, combined);
+  return xRoots;
 }
 
 /** Parse a term as ±cᵉ: returns `[sign, base, exp]` when the term is a power,
@@ -1996,30 +2213,48 @@ function substituteGenerator(
  *
  * Valid on the principal (positive) domain. Because every candidate root is
  * validated by `validateRoots()` against the *untransformed* equation, this
- * rewrite can only ever drop roots where `f ≤ 0` (already outside `ln`'s real
- * domain), never introduce spurious ones.
+ * rewrite never adds a root, but it can drop the roots where `f < 0`. Such
+ * a root exists when `fᶜ` is real and positive for a negative `f`: `c` is a
+ * fraction `p/q` with an even `p` and an odd `q` (`ln(x²) = 2` has the root
+ * `-e`). When `exact` is `true`, the rewrite of such a power is
+ * `ln(fᶜ) → c·ln|f|`, which drops no root. When `exact` is `false`, it is
+ * `c·ln f`, which can drop roots: the caller then knows that its roots are
+ * only a part of the roots.
  */
-function expandLogPowers(node: Expression): Expression {
+function expandLogPowers(node: Expression, exact = true): Expression {
   if (!isFunction(node)) return node;
   const ce = node.engine;
-  const ops = node.ops.map(expandLogPowers);
+  const ops = node.ops.map((op) => expandLogPowers(op, exact));
   // Nothing below this node was rewritten: reuse it instead of
   // re-canonicalizing an unchanged subtree.
   const rebuilt = ops.every((x, i) => x === node.ops[i])
     ? node
     : ce.function(node.operator, ops);
+  // The argument of the logarithm in the rewrite of `ln(a)`, for a power
+  // `a`, or `undefined` when there is no exact rewrite: the exponent is not
+  // a number, and it can be a fraction with an even numerator.
+  const base = (a: Expression): Expression | undefined => {
+    if (!isFunction(a)) return undefined;
+    if (!exact) return a.op1;
+    if (hasEvenNumeratorOddDenominator(a.op2))
+      return ce.function('Abs', [a.op1]);
+    return isNumber(a.op2) ? a.op1 : undefined;
+  };
   if (isFunction(rebuilt, 'Ln')) {
     const a = rebuilt.op1;
-    if (isFunction(a, 'Power'))
-      return ce.function('Multiply', [a.op2, ce.function('Ln', [a.op1])]);
+    if (isFunction(a, 'Power') && base(a) !== undefined)
+      return ce.function('Multiply', [a.op2, ce.function('Ln', [base(a)!])]);
     if (isFunction(a, 'Sqrt'))
       return ce.function('Multiply', [ce.Half, ce.function('Ln', [a.op1])]);
   }
   if (isFunction(rebuilt, 'Log') && rebuilt.nops === 2) {
     const a = rebuilt.op1;
     const b = rebuilt.op2;
-    if (isFunction(a, 'Power'))
-      return ce.function('Multiply', [a.op2, ce.function('Log', [a.op1, b])]);
+    if (isFunction(a, 'Power') && base(a) !== undefined)
+      return ce.function('Multiply', [
+        a.op2,
+        ce.function('Log', [base(a)!, b]),
+      ]);
     if (isFunction(a, 'Sqrt'))
       return ce.function('Multiply', [ce.Half, ce.function('Log', [a.op1, b])]);
   }
@@ -2088,34 +2323,54 @@ function collectGenerators(expr: Expression, x: string): Expression[] {
  * Returns `null` when no single generator captures every occurrence of `x`
  * (e.g. `sin x − tan x`, which has two independent generators), or when the
  * reduced equation has no roots.
+ *
+ * The normalized form keeps all the roots (`expandLogPowers()` with `exact`).
+ * When no generator solves it, the rewrite that can drop roots
+ * (`ln(x²) → 2·ln x`) is tried: its roots are then only a part of the roots,
+ * and `stats.partial` is set. `stats.partial` is also set when the roots of
+ * the equation in `u`, or of an inversion `g(x) = u`, are only a part of the
+ * roots, and when an inversion gives no root and is not shown to have none
+ * (`factorHasNoRoot()`).
  */
 function solveByGeneratorSubstitution(
   expr: Expression,
   x: string,
   depth: number,
-  trace?: RuleSteps
+  trace?: RuleSteps,
+  stats?: RootStats
 ): ReadonlyArray<Expression> | null {
   if (depth >= 3) return null; // recursion backstop
   const ce = expr.engine;
 
-  const normalized = expandLogPowers(expr);
-  for (const g of collectGenerators(normalized, x)) {
-    const uName = ['u', 't', 'w', 's', 'v', 'y', 'z'].find(
-      (n) => n !== x && !normalized.unknowns.includes(n) && !g.has(n)
-    );
+  const exactForm = expandLogPowers(expr);
+  const lossyForm = expandLogPowers(expr, false);
+  const forms = lossyForm.isSame(exactForm)
+    ? [exactForm]
+    : [exactForm, lossyForm];
+  const generators = forms.flatMap((normalized) =>
+    collectGenerators(normalized, x).map((g) => ({ normalized, g }))
+  );
+  for (const { normalized, g } of generators) {
+    const uName = temporaryUnknownName(normalized, x);
     if (uName === undefined) continue;
-    const u = ce.symbol(uName);
 
-    // The generator must capture *every* occurrence of x for the substitution
-    // to yield an equation purely in u.
-    const exprU = substituteGenerator(normalized, g, u);
-    if (exprU.has(x) || !exprU.has(uName) || exprU.isSame(u)) continue;
-
+    // `u` is declared in a new scope (see `temporaryUnknownName()`).
     ce.pushScope();
+    let u: Expression;
+    let exprU: Expression;
     let uRoots: ReadonlyArray<Expression> = [];
+    // The flags of the recursive calls, combined.
+    const combined = childStats();
     try {
       ce.declare(uName, 'real');
-      uRoots = findUnivariateRoots(exprU, uName, depth + 1);
+      u = ce.symbol(uName);
+      // The generator must capture *every* occurrence of x for the
+      // substitution to yield an equation purely in u.
+      exprU = substituteGenerator(normalized, g, u);
+      if (exprU.has(x) || !exprU.has(uName) || exprU.isSame(u)) continue;
+      const child = childStats();
+      uRoots = findUnivariateRoots(exprU, uName, depth + 1, undefined, child);
+      adoptChildStats(combined, child);
     } finally {
       ce.popScope();
     }
@@ -2123,11 +2378,25 @@ function solveByGeneratorSubstitution(
 
     // Invert: for each u-root, solve g(x) = u for x.
     const xRoots: Expression[] = [];
-    for (const ur of uRoots)
-      for (const r of findUnivariateRoots(g.sub(ur), x, depth + 1))
-        xRoots.push(r);
+    for (const ur of uRoots) {
+      const inverse = g.sub(ur);
+      const child = childStats();
+      const roots = findUnivariateRoots(
+        inverse,
+        x,
+        depth + 1,
+        undefined,
+        child
+      );
+      adoptChildStats(combined, child);
+      if (roots.length === 0 && !factorHasNoRoot(inverse, x, child))
+        combined.partial = true;
+      xRoots.push(...roots);
+    }
 
     if (xRoots.length > 0) {
+      if (normalized !== exactForm) combined.partial = true;
+      adoptChildStats(stats, combined);
       if (trace) {
         traceStep(trace, 'solve.substitute', ce.function('Equal', [u, g]));
         traceStep(
@@ -2159,25 +2428,41 @@ function solveByGeneratorSubstitution(
  * factor transcendental products — so it complements the polynomial paths.
  * Returns `null` unless `expr` is a `Multiply` of at least two x-containing
  * factors.
+ *
+ * The roots are all the roots of the product only when each factor gives all
+ * its roots. A factor that gives no root can have roots that the root finder
+ * does not find: `(x - 2)(x + e^x) = 0` gives only `2`, but `x + e^x = 0` has
+ * the root `-W(1) ≈ -0.567`. When a factor gives no root and
+ * `factorHasNoRoot()` cannot show that it has no root, or a factor gives a
+ * part of its roots, `stats.partial` is set to `true`.
  */
 function solveByZeroProduct(
   expr: Expression,
   x: string,
   depth: number,
-  trace?: RuleSteps
+  trace?: RuleSteps,
+  stats?: { partial?: boolean; userRule?: boolean }
 ): ReadonlyArray<Expression> | null {
   if (depth >= 3) return null; // recursion backstop
   if (!isFunction(expr, 'Multiply')) return null;
   const factors = expr.ops!.filter((f) => f.has(x));
   if (factors.length < 2) return null;
 
+  let partial = false;
+  // A factor was solved by a template that the host added to `ce.solveRules`
+  let userRule = false;
   // The factor bases whose roots are collected (a factor `fⁿ`, n > 0,
   // contributes the roots of `f`; n ≤ 0 contributes none).
   const bases: Expression[] = [];
   for (const f of factors) {
     let base = f;
     if (isFunction(f, 'Power') && f.op1.has(x) && !f.op2.has(x)) {
-      if (f.op2.isPositive !== true) continue; // fⁿ with n ≤ 0: no extra roots
+      if (f.op2.isPositive !== true) {
+        // fⁿ with n ≤ 0: no extra roots. With an exponent of unknown sign,
+        // the roots of `f` can be roots of the product.
+        if (f.op2.isNonPositive !== true) partial = true;
+        continue;
+      }
       base = f.op1;
     }
     bases.push(base);
@@ -2196,9 +2481,84 @@ function solveByZeroProduct(
   }
 
   const roots: Expression[] = [];
-  for (const base of bases)
-    for (const r of findUnivariateRoots(base, x, depth + 1)) roots.push(r);
-  return roots.length > 0 ? roots : null;
+  for (const base of bases) {
+    const factorStats = {
+      candidates: false,
+      undecided: false,
+      partial: false,
+      userRule: false,
+    };
+    const factorRoots = findUnivariateRoots(
+      base,
+      x,
+      depth + 1,
+      undefined,
+      factorStats
+    );
+    if (factorStats.partial) partial = true;
+    if (factorStats.userRule) userRule = true;
+    if (factorRoots.length === 0 && !factorHasNoRoot(base, x, factorStats))
+      partial = true;
+    roots.push(...factorRoots);
+  }
+  if (roots.length === 0) return null;
+  if (partial && stats) stats.partial = true;
+  if (userRule && stats) stats.userRule = true;
+  return roots;
+}
+
+/**
+ * Return `true` when the root finder can show that the factor `f` of a
+ * product has no real root, after it gave no root for `f`:
+ * - it found candidate roots, and it rejected each one by a decided check
+ *   (`stats`, see `findUnivariateRoots()`). This is not a proof when a
+ *   candidate came from a root template that the host added to
+ *   `ce.solveRules` (`stats.userRule`): the template can be wrong, as
+ *   `emptyRootsAnswer()` also states. With the template `J₀(x) → 0`, the
+ *   candidate `0` of `J₀(x) = 0` is rejected, but `J₀` has real roots;
+ * - `f` is a polynomial in `x` with numeric coefficients, and its numeric
+ *   real roots (`realPolynomialRoots()`) are an empty list (`x^4 + 1`). A
+ *   polynomial with a symbolic coefficient can have a root that the root
+ *   finder does not give: `x^3 + a·x + 1` gives no root, but a real cubic
+ *   always has a real root;
+ * - `f` is `b^g(x)` with a constant base `b` that is not 0 (`e^x`);
+ * - `f` is positive, or negative, for each real `x` (`e^x + 1`).
+ */
+function factorHasNoRoot(
+  f: Expression,
+  x: string,
+  stats: { candidates: boolean; undecided: boolean; userRule?: boolean }
+): boolean {
+  if (stats.candidates && !stats.undecided && !stats.userRule) return true;
+  const coeffs = getPolynomialCoefficients(f, x);
+  if (coeffs !== null) {
+    const values: number[] = [];
+    for (const c of coeffs) {
+      const v = c.N();
+      if (!Number.isFinite(v.re) || v.im !== 0) return false;
+      values.push(v.re);
+    }
+    const roots = realPolynomialRoots(values, f.engine._deadline);
+    return roots !== null && roots.length === 0;
+  }
+  if (
+    isFunction(f, 'Power') &&
+    !f.op1.has(x) &&
+    f.op1.unknowns.length === 0 &&
+    f.op1.is(0) === false
+  )
+    return true;
+  // The sign of `f` for a real `x`: replace `x` with a symbol declared real.
+  const ce = f.engine;
+  ce.pushScope();
+  try {
+    const name = '_zero_product_x';
+    ce.declare(name, 'real');
+    const g = f.subs({ [x]: ce.symbol(name) });
+    return g.isPositive === true || g.isNegative === true;
+  } finally {
+    ce.popScope();
+  }
 }
 
 /**
@@ -2237,7 +2597,8 @@ function solveInverseTrigEquation(
   rhs: Expression,
   x: string,
   depth: number,
-  trace?: RuleSteps
+  trace?: RuleSteps,
+  stats?: RootStats
 ): Expression[] | null {
   if (depth >= 3) return null; // recursion backstop
   if (!isFunction(lhs) || !isFunction(rhs)) return null;
@@ -2253,27 +2614,37 @@ function solveInverseTrigEquation(
 
   const ce = lhs.engine;
   traceStep(trace, 'solve.apply-tangent', ce.function('Equal', [tanL, tanR]));
+  const child = childStats();
   const roots = findUnivariateRoots(
     ce.function('Equal', [tanL, tanR]),
     x,
-    depth + 1
+    depth + 1,
+    undefined,
+    child
   );
-  return roots.length > 0 ? [...roots] : null;
+  if (roots.length === 0) return null;
+  adoptChildStats(stats, child);
+  return [...roots];
 }
 
 /**
  * The candidate roots of `expr = 0` when exactly one term of `expr` contains
- * the unknown `x` and that term is a logarithm, possibly negated:
- * `ln(u) + c = 0` gives `u = e^(-c)`, `-ln(u) + c = 0` gives `u = e^c`, and
- * `log_b(u) + c = 0` gives `u = b^(-c)`. The equation for `u` is solved by
- * `findUnivariateRoots()`. `null` when `expr` does not have this form, or
- * when the recursion is too deep. The roots are candidates: the caller checks
- * them against the original equation.
+ * the unknown `x` and that term is a logarithm times a constant `k`:
+ * `ln(u) + c = 0` gives `u = e^(-c)`, `-ln(u) + c = 0` gives `u = e^c`,
+ * `k·ln(u) + c = 0` gives `u = e^(-c/k)`, and `log_b(u) + c = 0` gives
+ * `u = b^(-c)`. The equation for `u` is solved by `findUnivariateRoots()`,
+ * thus `2·ln|x| - 2 = 0` (the simplified form of `ln(x²) = 2`) gives both
+ * roots `e` and `-e`, and `ln(2x + 1) = 1` gives `(e - 1)/2`. `null` when
+ * `expr` does not have this form, or when the recursion is too deep. The
+ * roots are candidates: the caller checks them against the original
+ * equation. `stats.partial` and `stats.userRule` are set from the solution
+ * of the equation for `u`.
  */
 function solveSingleLogarithm(
   expr: Expression,
   x: string,
-  depth: number
+  depth: number,
+  stats?: RootStats
 ): ReadonlyArray<Expression> | null {
   if (depth > 2) return null;
   const ce = expr.engine;
@@ -2282,7 +2653,19 @@ function solveSingleLogarithm(
   if (withX.length !== 1) return null;
   const term = withX[0];
   const negated = isFunction(term, 'Negate');
-  const log = isFunction(term, 'Negate') ? term.op1 : term;
+  let log = isFunction(term, 'Negate') ? term.op1 : term;
+  // The constant `k` of a term `k·log(u)`, when it is not 1 or -1
+  let k: Expression | undefined;
+  if (isFunction(log, 'Multiply')) {
+    const factors = log.ops.filter((f) => f.has(x));
+    if (factors.length !== 1) return null;
+    k = ce.function(
+      'Multiply',
+      log.ops.filter((f) => !f.has(x))
+    );
+    if (negated) k = k.neg();
+    log = factors[0];
+  }
   if (!isFunction(log)) return null;
   let base: Expression | undefined;
   if (log.operator === 'Ln') base = ce.E;
@@ -2292,8 +2675,9 @@ function solveSingleLogarithm(
     if (base.has(x)) return null;
   } else return null;
   const argument = log.op1;
-  // The argument is a symbol or a linear form: the root templates solve it.
-  if (polynomialDegree(argument, x) === 1) return null;
+  // The argument is the unknown itself: the root templates solve it
+  // (`solve.logarithm-natural`), and a host can replace them.
+  if (isSymbol(argument, x)) return null;
   const rest = terms.filter((t) => !t.has(x));
   const c =
     rest.length === 0
@@ -2304,14 +2688,183 @@ function solveSingleLogarithm(
   // `ln(u) = 0` is the harmonization rule `ln(f(x)) → f(x) - 1`
   // (`HARMONIZATION_RULES`), which a host can replace: leave it to that rule.
   if (c.isSame(0)) return null;
-  // ln(u) = -c, or ln(u) = c when the logarithm term is negated.
-  const value = ce.function('Power', [base, negated ? c : c.neg()]);
+  // ln(u) = -c, or ln(u) = c when the logarithm term is negated, or
+  // ln(u) = -c/k.
+  const exponent =
+    k !== undefined
+      ? ce.function('Divide', [c.neg(), k])
+      : negated
+        ? c
+        : c.neg();
+  const value = ce.function('Power', [base, exponent]);
+  const child = childStats();
   const roots = findUnivariateRoots(
     ce.function('Equal', [argument, value]),
     x,
-    depth + 1
+    depth + 1,
+    undefined,
+    child
   );
-  return roots.length > 0 ? roots : null;
+  if (roots.length === 0) return null;
+  adoptChildStats(stats, child);
+  return roots;
+}
+
+/**
+ * Write `expr` as `k·f + c`, where `f` is the only factor with the unknown
+ * `x` of the only term with `x`, and `k` and `c` are free of `x`:
+ * `-2·|x - 1| + 4` gives `k = -2`, `f = |x - 1|` and `c = 4`. Returns `null`
+ * when `expr` does not have this form.
+ */
+function splitScaledTerm(
+  expr: Expression,
+  x: string
+): { k: Expression; f: Expression; c: Expression } | null {
+  const ce = expr.engine;
+  const terms = isFunction(expr, 'Add') ? expr.ops : [expr];
+  const withX = terms.filter((t) => t.has(x));
+  if (withX.length !== 1) return null;
+  let f = withX[0];
+  const negated = isFunction(f, 'Negate');
+  if (isFunction(f, 'Negate')) f = f.op1;
+  let k: Expression = ce.One;
+  if (isFunction(f, 'Multiply')) {
+    const factors = f.ops.filter((op) => op.has(x));
+    if (factors.length !== 1) return null;
+    k = ce.function(
+      'Multiply',
+      f.ops.filter((op) => !op.has(x))
+    );
+    f = factors[0];
+  }
+  if (negated) k = ce.function('Negate', [k]);
+  const rest = terms.filter((t) => !t.has(x));
+  const c =
+    rest.length === 0
+      ? ce.Zero
+      : rest.length === 1
+        ? rest[0]
+        : ce.function('Add', rest);
+  return { k, f, c };
+}
+
+/**
+ * The candidate roots of `expr = 0` when exactly one term of `expr` contains
+ * the unknown `x` and that term is an exponential with a constant positive
+ * base `b` times a constant `k`: `k·b^g(x) + c = 0`. As `b^g(x)` is positive
+ * for each real `x`, the equation has a real root only when `-c/k > 0`. Then
+ * it is the same as `g(x) = log_b(-c/k)`, which `findUnivariateRoots()`
+ * solves: `e^(x + 1) = 2` gives `ln(2) - 1`, and `10^(x + 1) = 5` gives
+ * `log_10(5) - 1`.
+ *
+ * Returns an empty list when `-c/k ≤ 0` (`e^(x + 1) = -2`): the equation has
+ * no real root, and the caller counts this as a decision. Returns `null`
+ * when `expr` does not have this form, when the sign of `-c/k` is not known,
+ * or when the equation for `g(x)` gives no root. `stats.partial` and
+ * `stats.userRule` are set from the solution of the equation for `g(x)`.
+ */
+function solveSingleExponential(
+  expr: Expression,
+  x: string,
+  depth: number,
+  stats?: RootStats
+): ReadonlyArray<Expression> | null {
+  if (depth > 2) return null;
+  const ce = expr.engine;
+  const split = splitScaledTerm(expr, x);
+  if (split === null) return null;
+  const { k, f, c } = split;
+  if (!isFunction(f, 'Power')) return null;
+  const base = f.op1;
+  if (
+    base.has(x) ||
+    !f.op2.has(x) ||
+    base.isPositive !== true ||
+    base.isSame(1)
+  )
+    return null;
+  const ratio = ce.function('Divide', [ce.function('Negate', [c]), k]);
+  if (ratio.isNonPositive === true) return [];
+  if (ratio.isPositive !== true) return null;
+  const value = isSymbol(base, 'ExponentialE')
+    ? ce.function('Ln', [ratio])
+    : ce.function('Log', [ratio, base]);
+  const child = childStats();
+  const roots = findUnivariateRoots(
+    ce.function('Equal', [f.op2, value]),
+    x,
+    depth + 1,
+    undefined,
+    child
+  );
+  if (roots.length === 0) return null;
+  adoptChildStats(stats, child);
+  return roots;
+}
+
+/**
+ * The candidate roots of `expr = 0` when exactly one term of `expr` contains
+ * the unknown `x` and that term is an absolute value times a constant `k`:
+ * `k·|u(x)| + c = 0`. As `|u(x)| ≥ 0`, the equation has a real root only
+ * when `-c/k ≥ 0`. Then it is the same as `u(x) = -c/k` or `u(x) = c/k`,
+ * which `findUnivariateRoots()` solves: `2|x| = 1` gives `1/2` and `-1/2`.
+ * The harmonization rules split only `|u(x)| + c` (`k = 1`).
+ *
+ * Returns an empty list when `-c/k < 0` (`2|x| + 1 = 0`), or when the root
+ * finder shows that the two equations for `u(x)` have no root
+ * (`factorHasNoRoot()`): the equation has no real root, and the caller
+ * counts this as a decision. Returns `null` when `expr` does not have this
+ * form, when the sign of `-c/k` is not known, or when an equation for `u(x)`
+ * gives no root and it is not shown to have none. `stats.partial` and
+ * `stats.userRule` are set from the solution of the equations for `u(x)`;
+ * `stats.partial` is also set when one of them gives no root and it is not
+ * shown to have none.
+ */
+function solveScaledAbsoluteValue(
+  expr: Expression,
+  x: string,
+  depth: number,
+  stats?: RootStats
+): ReadonlyArray<Expression> | null {
+  if (depth > 2) return null;
+  const ce = expr.engine;
+  const split = splitScaledTerm(expr, x);
+  if (split === null) return null;
+  const { k, f, c } = split;
+  if (!isFunction(f, 'Abs')) return null;
+  const ratio = ce.function('Divide', [ce.function('Negate', [c]), k]);
+  if (ratio.isNegative === true) return [];
+  if (ratio.isNonNegative !== true) return null;
+  const values = ratio.isSame(0)
+    ? [ratio]
+    : [ratio, ce.function('Negate', [ratio])];
+  // The flags of the recursive calls, combined.
+  const combined = childStats();
+  const roots: Expression[] = [];
+  let noRoot = true;
+  for (const value of values) {
+    const equation = ce.function('Subtract', [f.op1, value]);
+    const child = childStats();
+    const branchRoots = findUnivariateRoots(
+      equation,
+      x,
+      depth + 1,
+      undefined,
+      child
+    );
+    adoptChildStats(combined, child);
+    if (branchRoots.length === 0) {
+      if (!factorHasNoRoot(equation, x, child)) {
+        combined.partial = true;
+        noRoot = false;
+      }
+    } else noRoot = false;
+    for (const r of branchRoots)
+      if (!roots.some((other) => other.isSame(r))) roots.push(r);
+  }
+  if (roots.length === 0) return noRoot ? [] : null;
+  adoptChildStats(stats, combined);
+  return roots;
 }
 
 /**
@@ -2407,6 +2960,110 @@ function combineLogarithmsOfUnknown(expr: Expression, x: string): Expression {
   return ce.function('Add', [...terms, ...rest]);
 }
 
+/** The trig functions whose argument `solveLinearTrigArgument()` replaces. */
+const LINEAR_TRIG_OPERATORS = new Set([
+  'Sin',
+  'Cos',
+  'Tan',
+  'Cot',
+  'Sec',
+  'Csc',
+]);
+
+/**
+ * Solve `expr = 0` when the unknown `x` is only in trig functions, and all
+ * these functions have the same argument `a·x + b` that is linear in `x`
+ * and is not `x` itself: `sin(2x) = 0`, `cos(x + 1) = 1/2`,
+ * `sin(2x) = cos(2x)`.
+ *
+ * The root templates match only a trig function of `x` itself. The equation
+ * in `u = a·x + b` is solved by `findUnivariateRoots()`, which gives the
+ * principal roots of `u` for a full turn (both branches of the inverse, such
+ * as `arcsin(c)` and `π - arcsin(c)`). Each root `u₀` maps to
+ * `x = (u₀ - b)/a`, and the period of the equation in `x` is the period in
+ * `u` divided by `|a|`. Thus the result is the principal roots of the
+ * equation in `x`: `sin(2x) = 0` gives `0` and `π/2`, with the period `π`.
+ *
+ * Returns `null` when `expr` does not have this form, or when the equation
+ * in `u` gives no root and no candidate root (the other strategies of the
+ * root finder then apply). Returns an empty list when each candidate root in
+ * `u` was rejected (`sin(2x) = 2`). `stats` gets the statistics of the
+ * equation in `u`.
+ */
+function solveLinearTrigArgument(
+  expr: Expression,
+  x: string,
+  depth: number,
+  trace: RuleSteps | undefined,
+  stats: Required<RootStats>
+): Expression[] | null {
+  if (depth >= 3) return null; // recursion backstop
+  const ce = expr.engine;
+
+  // The common argument of the trig functions of `x`, or `null` when `x` is
+  // also outside such a function, or when two arguments are different.
+  let arg: Expression | undefined;
+  const scan = (node: Expression): boolean => {
+    if (!node.has(x)) return true;
+    if (isFunction(node) && LINEAR_TRIG_OPERATORS.has(node.operator)) {
+      if (node.nops !== 1) return false;
+      if (arg === undefined) arg = node.op1;
+      return node.op1.isSame(arg);
+    }
+    if (!isFunction(node)) return false; // the unknown itself
+    return node.ops.every(scan);
+  };
+  if (!scan(expr) || arg === undefined || isSymbol(arg, x)) return null;
+  const coeffs = getPolynomialCoefficients(arg, x);
+  if (coeffs === null || coeffs.length !== 2 || coeffs[1].isSame(0))
+    return null;
+  const [b, a] = coeffs;
+
+  // `u` is declared in a new scope (see `temporaryUnknownName()`).
+  const uName = temporaryUnknownName(expr, x);
+  if (uName === undefined) return null;
+  const commonArg = arg;
+  let u: Expression;
+  let exprU: Expression;
+  ce.pushScope();
+  let uRoots: ReadonlyArray<Expression>;
+  try {
+    ce.declare(uName, 'real');
+    u = ce.symbol(uName);
+    const replaceArg = (node: Expression): Expression => {
+      if (!node.has(x) || !isFunction(node)) return node;
+      if (
+        LINEAR_TRIG_OPERATORS.has(node.operator) &&
+        node.op1.isSame(commonArg)
+      )
+        return ce.function(node.operator, [u]);
+      return ce.function(node.operator, node.ops.map(replaceArg));
+    };
+    exprU = replaceArg(expr);
+    if (exprU.has(x)) return null;
+    uRoots = findUnivariateRoots(exprU, uName, depth + 1, undefined, stats);
+  } finally {
+    ce.popScope();
+  }
+  if (uRoots.length === 0 && !stats.candidates) return null;
+
+  // x = (u₀ - b)/a. A root `When(u₀, guard)` keeps its guard.
+  const back = (u0: Expression): Expression =>
+    ce.function('Divide', [ce.function('Subtract', [u0, b]), a]).evaluate();
+  const roots = uRoots.map((u0) =>
+    isFunction(u0, 'When')
+      ? ce.function('When', [back(u0.op1), u0.op2])
+      : back(u0)
+  );
+  if (trace) {
+    traceStep(trace, 'solve.substitute', ce.function('Equal', [u, commonArg]));
+    traceStep(trace, 'solve.substituted-equation', asEquation(exprU, uName));
+    if (roots.length > 0)
+      traceStep(trace, 'solve.back-substitute', rootsAsEquations(ce, x, roots));
+  }
+  return roots;
+}
+
 /**
  * MathJsonExpression is a function of a single variable (`x`) or an Equality
  *
@@ -2421,7 +3078,17 @@ function combineLogarithmsOfUnknown(expr: Expression, x: string): Expression {
  * and `stats.undecided` to `true` when a candidate was dropped although the
  * check against the original equation did not decide that it is wrong (a
  * residual with a free parameter that cannot be proved zero, such as the
- * root of `√(x + a) = -x`).
+ * root of `√(x + a) = -x`). `stats.partial` is set to `true` when the result
+ * is known to be only a part of the roots: a factor of a product gave no
+ * root, and it is not shown to have no root (`solveByZeroProduct()`), or a
+ * rewrite that can drop roots was used (`solveByGeneratorSubstitution()`).
+ * A strategy that solves another equation with a recursive call (a
+ * substitution, an inversion, squaring) copies this flag from that call
+ * (`adoptChildStats()`).
+ * `stats.userRule` is set to `true` when a root template that the host added
+ * to `ce.solveRules` matched (also for a factor of a product): the caller
+ * then accepts the roots of that template for a function that the root
+ * finder cannot invert.
  *
  */
 export function findUnivariateRoots(
@@ -2429,12 +3096,19 @@ export function findUnivariateRoots(
   x: string,
   depth = 0,
   trace?: RuleSteps,
-  stats?: { candidates: boolean; undecided: boolean }
+  stats?: {
+    candidates: boolean;
+    undecided: boolean;
+    partial?: boolean;
+    userRule?: boolean;
+  }
 ): ReadonlyArray<Expression> {
   const ce = expr.engine;
   if (stats) {
     stats.candidates = false;
     stats.undecided = false;
+    stats.partial = false;
+    stats.userRule = false;
   }
 
   // `BaseForm` is an inert display wrapper (`BaseForm(value, base)`); its value
@@ -2513,12 +3187,14 @@ export function findUnivariateRoots(
     // Record this strategy's steps provisionally: they only join the trace
     // if the strategy actually produces the answer.
     const invTrigTrace: RuleSteps | undefined = trace ? [] : undefined;
+    const invTrigStats = childStats();
     const invTrigRoots = solveInverseTrigEquation(
       lhs,
       rhs,
       x,
       depth,
-      invTrigTrace
+      invTrigTrace,
+      invTrigStats
     );
     if (invTrigRoots !== null) {
       traceStep(
@@ -2535,6 +3211,7 @@ export function findUnivariateRoots(
       if (validated.length > 0) {
         trace?.push(...invTrigTrace!);
         if (stats) stats.candidates = true;
+        adoptChildStats(stats, invTrigStats);
         return validated;
       }
     }
@@ -2580,7 +3257,7 @@ export function findUnivariateRoots(
   // (Strategy steps are recorded provisionally and only join the trace when
   // the strategy produces the answer.)
   const twoSqrtTrace: RuleSteps | undefined = trace ? [] : undefined;
-  const twoSqrtSolutions = solveTwoSqrtEquation(expr, x, twoSqrtTrace);
+  const twoSqrtSolutions = solveTwoSqrtEquation(expr, x, twoSqrtTrace, stats);
   if (twoSqrtSolutions !== null) {
     // Solutions are already validated inside the function. That validation
     // does not report whether a rejection was decided, so an empty list from
@@ -2593,7 +3270,12 @@ export function findUnivariateRoots(
   // Try to solve nested sqrt equations: √(f(x, √x)) = a
   // This uses substitution u = √x, solves for u, then converts back to x = u²
   const nestedTrace: RuleSteps | undefined = trace ? [] : undefined;
-  const nestedSqrtSolutions = solveNestedSqrtEquation(expr, x, nestedTrace);
+  const nestedSqrtSolutions = solveNestedSqrtEquation(
+    expr,
+    x,
+    nestedTrace,
+    stats
+  );
   if (nestedSqrtSolutions !== null) {
     // Validate and return the solutions
     trace?.push(...nestedTrace!);
@@ -2612,6 +3294,51 @@ export function findUnivariateRoots(
     expr = transformed;
   }
 
+  // The unknown is only in trig functions of one linear argument `a·x + b`
+  // (`sin(2x) = 0`, `cos(x + 1) = 1/2`): solve for `u = a·x + b`, then map
+  // each root back (see `solveLinearTrigArgument()`).
+  {
+    const subTrace: RuleSteps | undefined = trace ? [] : undefined;
+    const trigStats = childStats();
+    const trigRoots = solveLinearTrigArgument(
+      originalExpr,
+      x,
+      depth,
+      subTrace,
+      trigStats
+    );
+    if (trigRoots !== null) {
+      trace?.push(...subTrace!);
+      if (stats) {
+        if (trigStats.candidates) stats.candidates = true;
+        if (trigStats.undecided) stats.undecided = true;
+        adoptChildStats(stats, trigStats);
+      }
+      const validated = validateRoots(originalExpr, x, trigRoots, trace, stats);
+      return filterRootsByType(ce, x, validated, trace);
+    }
+  }
+
+  // A single logarithm of the unknown in the equation as it was given:
+  // `ln(u(x)) + c = 0` → `u(x) = e^(-c)` (see `solveSingleLogarithm()`).
+  // This must run before the strategies below, which use the simplified
+  // equation. `simplify()` rewrites `ln(x^n)` as `n·ln(x)` when `n` is not an
+  // even integer, which is not real for a negative `x`: `ln(x^(2/3)) = 2`
+  // becomes `(2/3)·ln(x) = 2`, which gives only `e^3`. Solved as it was
+  // given, it is `x^(2/3) = e^2`, which gives `e^3` and `-e^3`.
+  {
+    const logStats = childStats();
+    const logRoots = solveSingleLogarithm(originalExpr, x, depth, logStats);
+    if (logRoots !== null) {
+      if (stats) {
+        stats.candidates = true;
+        adoptChildStats(stats, logStats);
+      }
+      const validated = validateRoots(originalExpr, x, logRoots, trace, stats);
+      return filterRootsByType(ce, x, validated, trace);
+    }
+  }
+
   const rules = ce.getRuleSet('solve-univariate')!;
 
   // Make the unknown '_x' so that we can match against it
@@ -2621,6 +3348,9 @@ export function findUnivariateRoots(
   ce.pushScope();
 
   let result: Expression[] = [];
+  // A strategy showed that the equation has no real root (an empty list from
+  // `solveSingleExponential()` or `solveScaledAbsoluteValue()`).
+  let noRoot = false;
   try {
     // Use the declared type of the variable, if any, otherwise assume 'number'
     const varType = ce.symbol(x).type.type;
@@ -2648,6 +3378,9 @@ export function findUnivariateRoots(
       matches: RuleSteps,
       via?: { because: string; form: Expression }
     ): void => {
+      // A template that is not built in was added by the host.
+      if (stats && matches.some((m) => !BUILT_IN_SOLVE_RULE_IDS.has(m.because)))
+        stats.userRule = true;
       if (!trace || matches.length === 0) return;
       if (via) traceStep(trace, via.because, asEquation(via.form, x));
       for (const m of matches) {
@@ -2683,7 +3416,7 @@ export function findUnivariateRoots(
           ? expr
           : null;
     if (polyExpr !== null && polynomialDegree(polyExpr, x) >= 2)
-      result = solvePolynomialByCoefficients(polyExpr, x, trace);
+      result = solvePolynomialByCoefficients(polyExpr, x, trace, stats);
 
     if (result.length === 0) {
       for (const e of exprs) {
@@ -2762,7 +3495,7 @@ export function findUnivariateRoots(
     // sqrt-linear transform above intentionally skips.
     if (result.length === 0) {
       const subTrace: RuleSteps | undefined = trace ? [] : undefined;
-      const sqrtRoots = solveSingleSqrtEquation(expr, x, subTrace);
+      const sqrtRoots = solveSingleSqrtEquation(expr, x, subTrace, stats);
       if (sqrtRoots) {
         trace?.push(...subTrace!);
         result = [...sqrtRoots];
@@ -2776,7 +3509,8 @@ export function findUnivariateRoots(
       const substRoots = solveByRationalPowerSubstitution(
         originalExpr,
         x,
-        subTrace
+        subTrace,
+        stats
       );
       if (substRoots) {
         trace?.push(...subTrace!);
@@ -2788,37 +3522,60 @@ export function findUnivariateRoots(
     // (e.g. `ln(x)·(x − 1) = 0`, or an already-factored `(x+1)·cos³(3x) = 0`).
     if (result.length === 0) {
       const subTrace: RuleSteps | undefined = trace ? [] : undefined;
-      const productRoots = solveByZeroProduct(originalExpr, x, depth, subTrace);
+      const productRoots = solveByZeroProduct(
+        originalExpr,
+        x,
+        depth,
+        subTrace,
+        stats
+      );
       if (productRoots) {
         trace?.push(...subTrace!);
         result = [...productRoots];
       }
     }
 
+    // A single logarithm of the unknown: `ln(u(x)) + c = 0` → `u(x) = e^(-c)`
+    // (and `log_b(u(x)) + c = 0` → `u(x) = b^(-c)`), for an argument `u` that
+    // the root templates do not invert (`ln(x² + 2x) = 3`, or the combined
+    // form of `log_2(x) + log_2(x + 2) = 3`). This runs before the generator
+    // substitution: it solves `u(x) = e^(-c)` as it is, thus it keeps the
+    // root `-e` of `ln(x²) = 2`.
+    if (result.length === 0) {
+      const logRoots = solveSingleLogarithm(expr, x, depth, stats);
+      if (logRoots) result = [...logRoots];
+    }
+
+    // A single exponential or absolute value of the unknown, times a
+    // constant: `k·b^g(x) + c = 0` → `g(x) = log_b(-c/k)` (`e^(x + 1) = 2`),
+    // and `k·|u(x)| + c = 0` → `u(x) = ±(-c/k)` (`2|x| = 1`). An empty list
+    // states that there is no real root (`e^(x + 1) = -2`, `2|x| + 1 = 0`).
+    if (result.length === 0) {
+      const roots =
+        solveSingleExponential(expr, x, depth, stats) ??
+        solveScaledAbsoluteValue(expr, x, depth, stats);
+      if (roots !== null) {
+        if (roots.length === 0) noRoot = true;
+        result = [...roots];
+      }
+    }
+
     // Generator substitution: an equation that is a polynomial in a single
     // nonlinear generator g(x) — `(ln x)² − 4`, `√(ln x) = ln√x`,
     // `e^{2x} − 3e^x + 2` — via u = g(x), solve, invert.
-    if (result.length === 0) {
+    if (result.length === 0 && !noRoot) {
       const subTrace: RuleSteps | undefined = trace ? [] : undefined;
       const genRoots = solveByGeneratorSubstitution(
         originalExpr,
         x,
         depth,
-        subTrace
+        subTrace,
+        stats
       );
       if (genRoots) {
         trace?.push(...subTrace!);
         result = [...genRoots];
       }
-    }
-
-    // A single logarithm of the unknown: `ln(u(x)) + c = 0` → `u(x) = e^(-c)`
-    // (and `log_b(u(x)) + c = 0` → `u(x) = b^(-c)`), for an argument `u` that
-    // the root templates do not invert (`ln(x² + 2x) = 3`, or the combined
-    // form of `log_2(x) + log_2(x + 2) = 3`).
-    if (result.length === 0) {
-      const logRoots = solveSingleLogarithm(expr, x, depth);
-      if (logRoots) result = [...logRoots];
     }
 
     // A root may reference the `_x` wildcard symbol (e.g. when produced by a
@@ -2832,7 +3589,7 @@ export function findUnivariateRoots(
     ce.popScope();
   }
 
-  if (stats && result.length > 0) stats.candidates = true;
+  if (stats && (result.length > 0 || noRoot)) stats.candidates = true;
 
   // Evaluate/simplify each candidate root, resolving any validity guard a
   // trig rule attached (`When(root, guard)`) through the single chokepoint:
@@ -2882,7 +3639,8 @@ export function findUnivariateRoots(
 function solvePolynomialByCoefficients(
   polyExpr: Expression,
   x: string,
-  trace?: RuleSteps
+  trace?: RuleSteps,
+  stats?: RootStats
 ): Expression[] {
   const ce = polyExpr.engine;
   const deg = polynomialDegree(polyExpr, x);
@@ -2934,7 +3692,7 @@ function solvePolynomialByCoefficients(
     // discards any spurious ones.
     if (rationalRoots.length < deg) {
       const extra =
-        solveByPowerGcdSubstitution(polyExpr, x) ??
+        solveByPowerGcdSubstitution(polyExpr, x, stats) ??
         numericRealRoots(polyExpr, x, ce);
       const added: Expression[] = [];
       for (const nr of extra) {
@@ -3076,24 +3834,14 @@ export const HARMONIZATION_RULES: Rule[] = [
     // @todo: additional condition, f(x) > 0
     condition: ({ _a }) => _a.has('_x'),
   },
-  // sin(f(x)) -> f(x)
-  {
-    match: ['Sin', '_a'],
-    replace: (_x: Expression, sub: BoxedSubstitution) => sub._a,
-    condition: ({ _a }) => _a.has('_x'),
-  },
-  // cos(f(x)) -> f(x) - π/2
-  {
-    match: ['Cos', '_a'],
-    replace: ['Subtract', '_a', ['Divide', 'Pi', 2]],
-    condition: ({ _a }) => _a.has('_x'),
-  },
-  // tan(f(x)) -> f(x)
-  {
-    match: ['Tan', '_a'],
-    replace: (_x: Expression, sub: BoxedSubstitution) => sub._a,
-    condition: ({ _a }) => _a.has('_x'),
-  },
+  // There is no rule `sin(f(x)) = 0 → f(x) = 0` (or `cos(f(x)) = 0 →
+  // f(x) = π/2`): such a rule gives one branch of the inverse only, thus a
+  // part of the roots (`sin(2x) = 0` has the roots `0` and `π/2` in one
+  // period). A trig function of a linear argument is solved by
+  // `solveLinearTrigArgument()`, which gives all the branches. A trig
+  // function of an argument that is not linear (`sin(x²) = 0`) is not
+  // periodic in `x`, and `Solve` gives no answer for it
+  // (`partialRootListReason()` in `solve-domain.ts`).
   // sin(a) + cos(a) -> 1
   {
     match: ['Add', ['Sin', '_a'], ['Cos', '_a']],
@@ -3174,6 +3922,9 @@ function validateRoots(
     // to 0. The `When` (guard carried) is what stays in the solution list.
     const isWhen = isFunction(root, 'When');
     const probe = isWhen ? root.op1 : root;
+    // An infinite value is never a root: `sin(1/x) = 0` gives the candidate
+    // `+∞` (from `1/x = 0`), and `sin(1/∞)` evaluates to `0`.
+    if (probe.isInfinity === true) return false;
     // Evaluate the expression at the root
     const value = expr.subs({ [x]: probe }).canonical.evaluate();
     if (value === null) return false;

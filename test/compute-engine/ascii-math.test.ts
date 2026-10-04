@@ -182,8 +182,18 @@ describe('ARITHMETIC OPERATORS', () => {
     expect(check('\\pi + (-2-3i)')).toMatchInlineSnapshot(`(-2 - 3i) + pi`);
     expect(check('x + (-2-3i)')).toMatchInlineSnapshot(`x + (-2 - 3i)`);
     expect(check('1+(-x)')).toMatchInlineSnapshot(`1 - x`);
-    expect(check('(-x)-1')).toMatchInlineSnapshot(`-1 - x`);
+    expect(check('(-x)-1')).toMatchInlineSnapshot(`-x - 1`);
     expect(check('(-y)+(-x)-1')).toMatchInlineSnapshot(`-x - y - 1`);
+  });
+
+  it('keeps the order of `-x` and a negative constant', () => {
+    // Only a positive constant moves in front of a negated term
+    // (`-x + 1` prints as `1 - x`). A negative constant keeps its place.
+    expect(check('-x-1')).toBe('-x - 1');
+    expect(check('-x-\\frac12')).toBe('-x - 1/2');
+    expect(check('-x-1.5')).toBe('-x - 1.5');
+    expect(check('\\frac{-x-1}{y}')).toBe('(-x - 1) / y');
+    expect(check('-x^2+1')).toBe('1 - x^2');
   });
 
   it('should serialize Negate', () => {
@@ -423,5 +433,63 @@ describe('FACTORIAL', () => {
   it('wraps a factorial used as the base of a power', () => {
     // `n!^2` would lex `!^` as one operator.
     expect(check(['Power', ['Factorial', 'n'], 2])).toBe('(n!)^2');
+  });
+});
+
+describe('POWER BASE', () => {
+  // `^` is right-associative: `a^b^c` reads as `a^(b^c)`. A base that is not
+  // one unit is wrapped, so that the exponent applies to the whole base.
+  it('wraps a base that is a power', () => {
+    expect(check(['Power', ['Power', 't', 2], ['Rational', -3, 10]])).toBe(
+      '(t^2)^(-3/10)'
+    );
+    expect(check(['Power', ['Power', 'x', 'y'], 'z'])).toBe('(x^y)^z');
+    expect(
+      ce
+        .box(['Power', ['Power', 'ExponentialE', 'x'], 'y'], { form: 'raw' })
+        .toString()
+    ).toBe('(e^x)^y');
+    expect(
+      ce.box(['Square', ['Power', 'x', 3]], { form: 'raw' }).toString()
+    ).toBe('(x^3)^2');
+  });
+  it('keeps a power in the exponent wrapped', () => {
+    expect(check(['Power', 'x', ['Power', 'y', 'z']])).toBe('x^(y^z)');
+  });
+  it('wraps a number that is not an unsigned integer or decimal', () => {
+    expect(check(['Power', ['Rational', 3, 4], 'x'])).toBe('(3/4)^x');
+    expect(check(['Power', -2, 'x'])).toBe('(-2)^x');
+    expect(check(['Power', ['Complex', 0, 2], 'x'])).toBe('(2i)^x');
+    expect(check(['Power', 1e30, 'x'])).toBe('(1e+30)^x');
+    expect(check(['Power', 1.5, 'x'])).toBe('1.5^x');
+    expect(check(['Power', ['Sqrt', 2], 'x'])).toBe('sqrt(2)^x');
+  });
+  it('wraps the output of a function handler that is not one unit', () => {
+    expect(check(['Power', ['Quantity', 5, 'm'], 2])).toBe('(5 m)^2');
+    expect(check(['Power', ['Sum', 'n', ['Limits', 'n', 1, 10]], 2])).toBe(
+      '(sum_(n=1)^(10)(n))^2'
+    );
+    expect(check(['Power', ['When', 'x', ['Greater', 'x', 0]], 2])).toBe(
+      '(x {0 < x})^2'
+    );
+    expect(
+      ce.box(['Power', ['Not', 'p'], 2], { form: 'raw' }).toString()
+    ).toBe('(!p)^2');
+  });
+  it('keeps a name, a call and a bracketed group bare', () => {
+    expect(check(['Power', ['Negate', 'x'], 3])).toBe('(-x)^3');
+    expect(check(['Power', ['Sqrt', 'x'], 'y'])).toBe('sqrt(x)^y');
+    expect(check(['Power', ['Root', 'x', 3], 'y'])).toBe('root(3)(x)^y');
+    expect(check(['Power', ['Abs', 'x'], 2])).toBe('|x|^2');
+    expect(check(['Power', ['List', 1, 2], 2])).toBe('[1,2]^2');
+  });
+  it('keeps the parentheses of a base whose exponent is 1', () => {
+    expect(
+      ce
+        .box(['Multiply', ['Power', ['Add', 'a', 'b'], 1], 'c'], {
+          form: 'structural',
+        })
+        .toString()
+    ).toBe('(a + b) * c');
   });
 });

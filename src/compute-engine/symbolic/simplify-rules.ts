@@ -44,7 +44,7 @@ import {
 import { simplifyInfinity } from './simplify-infinity.js';
 import { simplifyLog } from './simplify-log.js';
 import { simplifyPower } from './simplify-power.js';
-import { simplifyTrig } from './simplify-trig.js';
+import { negatedArgument, oddEvenStep, simplifyTrig } from './simplify-trig.js';
 import { simplifyHyperbolic } from './simplify-hyperbolic.js';
 import { simplifyDivide } from './simplify-divide.js';
 import {
@@ -53,6 +53,16 @@ import {
   simplifyFactorialAdd,
 } from './simplify-factorial.js';
 import { isCollectionShaped } from '../collection-utils.js';
+
+// Odd special functions of one argument: f(-x) = -f(x)
+const ODD_SPECIAL_FUNCTIONS = new Set([
+  'SinIntegral',
+  'SinhIntegral',
+  'Erf',
+  'Erfi',
+  'FresnelS',
+  'FresnelC',
+]);
 
 /**
  * # Performance Optimization Notes for Simplification Rules
@@ -993,6 +1003,18 @@ export const SIMPLIFY_RULES: Rule[] = [
 
   // Hyperbolic trig simplifications
   simplifyHyperbolic,
+
+  // Odd special functions: f(-x) = -f(x), for `Negate(x)` and for a negative
+  // number. Each function is entire and odd, so the identity is true for
+  // every complex x.
+  (x): RuleStep | undefined => {
+    if (!ODD_SPECIAL_FUNCTIONS.has(x.operator) || !isFunction(x))
+      return undefined;
+    if (x.nops !== 1) return undefined;
+    const negated = negatedArgument(x.op1);
+    if (!negated) return undefined;
+    return oddEvenStep(x.operator, negated, true, x.engine);
+  },
 
   // Division simplifications (includes factorial quotient and binomial detection)
   simplifyDivide,

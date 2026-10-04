@@ -23,6 +23,7 @@ import {
   isDictionary,
   isObject,
 } from './type-guards.js';
+import { isShadowedSymbol } from '../library-shadowing.js';
 import { boundVariableBindings, sameBindingDef } from './binders.js';
 import { isTensorValue } from './tensor-view.js';
 import { stochasticEqual } from './stochastic-equal.js';
@@ -1867,8 +1868,12 @@ function isWithinTolerance(a: Expression, b: Expression): boolean {
 function correctlyRoundedMachineValue(x: Expression): number | undefined {
   let y: Expression | undefined = x;
   if (isSymbol(x)) {
-    if (x.symbol === 'Pi') return Math.PI;
-    if (x.symbol === 'ExponentialE') return Math.E;
+    // A user binding of the name `Pi` or `ExponentialE` is not the
+    // library constant (`isShadowedSymbol()`): its value is read below.
+    if (!isShadowedSymbol(x)) {
+      if (x.symbol === 'Pi') return Math.PI;
+      if (x.symbol === 'ExponentialE') return Math.E;
+    }
     y = x.value;
   }
   if (y === undefined || !isNumber(y) || y.isComplex) return undefined;

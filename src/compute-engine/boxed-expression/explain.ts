@@ -11,7 +11,11 @@ import type {
 } from '../global-types.js';
 import { simplify } from './simplify.js';
 import { findUnivariateRoots, rootsAsEquations } from './solve.js';
-import { filterRootsByAssumptions } from './solve-domain.js';
+import {
+  emptyRootsAnswer,
+  filterRootsByAssumptions,
+  partialRootListReason,
+} from './solve-domain.js';
 import { solveSystem } from './solve-system.js';
 import { normalizedUnknownsForSolve, liftIntegrand } from './utils.js';
 import { isFunction, isSymbol } from './type-guards.js';
@@ -148,8 +152,13 @@ function explainSolveUnivariate(
     : ce.function('Equal', [canonical, ce.Zero]);
 
   const trace: RuleSteps = [];
-  const roots = findUnivariateRoots(canonical, x, 0, trace);
-  const filtered = filterRootsByAssumptions(ce, roots, x);
+  const stats = { candidates: false, undecided: false };
+  const roots = findUnivariateRoots(canonical, x, 0, trace, stats);
+  // A list that is only a part of the roots: `solve()` returns `null`
+  const reason = partialRootListReason(canonical, x, roots, stats);
+  if (reason !== undefined)
+    return incompleteSolveExplanation(ce, initial, x, trace, reason, verbosity);
+  let filtered = filterRootsByAssumptions(ce, roots, x);
 
   if (filtered.length < roots.length) {
     const dropped = roots.filter((r) => !filtered.some((f) => f.isSame(r)));
@@ -157,6 +166,22 @@ function explainSolveUnivariate(
       value: rootsAsEquations(ce, x, dropped),
       because: 'solve.filter-domain',
     });
+  }
+
+  // An empty list is the answer only when `solve()` gives it too
+  // (`emptyRootsAnswer()`): else `solve()` returns `null`.
+  if (filtered.length === 0) {
+    const answer = emptyRootsAnswer(ce, canonical, x, stats, false);
+    if (answer === undefined)
+      return incompleteSolveExplanation(
+        ce,
+        initial,
+        x,
+        trace,
+        'no-roots',
+        verbosity
+      );
+    filtered = isFunction(answer) ? [...answer.ops] : [];
   }
 
   if (filtered.length > 0)
@@ -281,6 +306,39 @@ function systemSolutionToExpression(
 }
 
 /**
+ * The explanation of a solve that has no answer because the roots that the
+ * root finder gave are only a part of the roots (`partialRootListReason()`):
+ * `solve()` returns `null`, and the `Solve` operator stays unevaluated. The
+ * steps of the root finder are kept, and the last step tells why the list
+ * is not an answer: a factor of a product gave no root and is not shown to
+ * have none (`'solve.incomplete-factor'`), or the unknown is in a function
+ * that the root finder cannot invert (`'solve.incomplete-non-invertible'`),
+ * or the root finder gave no root and cannot show that there is none
+ * (`'solve.incomplete-no-roots'`, see `emptyRootsAnswer()`).
+ * `result` is the unevaluated `Solve(initial, x)`.
+ */
+function incompleteSolveExplanation(
+  ce: ComputeEngine,
+  initial: Expression,
+  x: string,
+  trace: RuleSteps,
+  reason: 'factor' | 'non-invertible' | 'no-roots',
+  verbosity: 'default' | 'all'
+): Explanation {
+  const result = ce.function('Solve', [initial, ce.symbol(x)]);
+  trace.push({
+    value: result,
+    because: `solve.incomplete-${reason}`,
+  });
+  return {
+    operation: 'solve',
+    initial,
+    result,
+    steps: curateChain(initial, trace, verbosity),
+  };
+}
+
+/**
  * Alternatives (`Or`) of univariate equations: solve each operand's
  * univariate pipeline (with its trace), then merge the roots with the same
  * JSON-key dedup as the plain `solveOr()`. A per-operand `'solve.case'` step
@@ -310,14 +368,42 @@ function explainSolveOr(
     });
 
     // The operand's univariate pipeline, with its trace (pure observation).
-    const roots = findUnivariateRoots(op, x, 0, trace);
-    const filtered = filterRootsByAssumptions(ce, roots, x);
+    const stats = { candidates: false, undecided: false };
+    const roots = findUnivariateRoots(op, x, 0, trace, stats);
+    // The roots of this case are only a part of its roots: `solve()`
+    // returns `null` for the alternatives
+    const reason = partialRootListReason(op, x, roots, stats);
+    if (reason !== undefined)
+      return incompleteSolveExplanation(
+        ce,
+        canonical,
+        x,
+        trace,
+        reason,
+        verbosity
+      );
+    let filtered = filterRootsByAssumptions(ce, roots, x);
     if (filtered.length < roots.length) {
       const dropped = roots.filter((r) => !filtered.some((f) => f.isSame(r)));
       trace.push({
         value: rootsAsEquations(ce, x, dropped),
         because: 'solve.filter-domain',
       });
+    }
+    // An empty list for this case is a decision only when `solve()` gives it
+    // too (`emptyRootsAnswer()`): else `solve()` returns `null`.
+    if (filtered.length === 0) {
+      const answer = emptyRootsAnswer(ce, op, x, stats, false);
+      if (answer === undefined)
+        return incompleteSolveExplanation(
+          ce,
+          canonical,
+          x,
+          trace,
+          'no-roots',
+          verbosity
+        );
+      filtered = isFunction(answer) ? [...answer.ops] : [];
     }
 
     for (const r of filtered) {

@@ -19,6 +19,8 @@
 
 import { ComputeEngine } from '../../src/compute-engine';
 import { engine as ce } from '../utils';
+import type { Expression } from '../../src/compute-engine/global-types';
+import { explicitBroadcastPointNorm } from '../../src/compute-engine/compilation/base-compiler';
 
 describe('Item 72 — Comprehension operand-position round trip', () => {
   test('definition row round-trips (Equal)', () => {
@@ -237,16 +239,16 @@ describe('Item 74 — Abs of a fixed-arity point is the Euclidean norm', () => {
     expect(r.run?.({})).toEqual(5);
   });
 
-  test('L-infinity norm with a broadcasting component stays symbolic (no wrong scalar)', () => {
-    // The scalar max loop cannot represent the per-element result; it used
-    // to silently DROP the broadcasting component and return the max of the
-    // rest.
+  test('L-infinity norm with a broadcasting component is one maximum per point (no wrong scalar)', () => {
+    // `([3, 6], 4)` is the points `(3, 4)` and `(6, 4)`, so the norm is one
+    // maximum per point. The scalar maximum once DROPPED the broadcasting
+    // component silently and returned the maximum of the rest.
     const e = ce.box([
       'Norm',
       ['Tuple', ['List', 3, 6], 4],
       { str: 'Infinity' },
     ]);
-    expect(e.evaluate().operator).toEqual('Norm');
+    expect(e.evaluate().json).toEqual(['List', 4, 6]);
   });
 
   test('Abs/Norm of a point honor the N() exactness contract', () => {
@@ -268,8 +270,9 @@ describe('Item 74 — Abs of a fixed-arity point is the Euclidean norm', () => {
     // Evaluation zips into one norm per element ([√10, √13]). A compiled
     // scalar norm would silently flatten to the single value √14; the
     // JavaScript target instead broadcasts over the list component (since
-    // 2026-09-04), and the targets with no per-element emission fail closed
-    // (falling back to interpretation).
+    // 2026-09-04). The interval and shader targets compile the explicit
+    // `√(Σ cᵢ²)` element by element when the list components have a length
+    // known at compile time: an array of intervals, and a `vec2`.
     const expr = ce.parse('\\left|([1,2],3)\\right|');
     expect(expr.evaluate().operator).toEqual('List');
     // `constantFold: false` throughout: every component of the point is a
@@ -286,11 +289,36 @@ describe('Item 74 — Abs of a fixed-arity point is the Euclidean norm', () => {
     const iv = ce
       ._getCompilationTarget('interval-js')
       .compile(expr, { constantFold: false });
-    expect(iv.success).toBe(false);
+    expect(iv.success).toBe(true);
+    const enclosures = iv.run!({}) as { lo: number; hi: number }[];
+    expect(enclosures).toHaveLength(2);
+    [Math.sqrt(10), Math.sqrt(13)].forEach((v, i) => {
+      expect(enclosures[i].lo).toBeLessThanOrEqual(v);
+      expect(enclosures[i].hi).toBeGreaterThanOrEqual(v);
+    });
     const glsl = ce
       ._getCompilationTarget('glsl')
-      .compile(expr, { fallback: true, constantFold: false });
-    expect(glsl.success).toBe(false);
+      .compile(expr, { fallback: false, constantFold: false });
+    expect(glsl.success).toBe(true);
+    // The `9.0` is the shader `Power` lowering, which writes the power of two
+    // literals as one literal. The explicit norm itself keeps `3^2`, see the
+    // next test.
+    expect(glsl.code).toBe('sqrt(9.0 + _gpu_pow2_v2(vec2(1.0, 2.0)))');
+  });
+
+  test('the explicit norm of a point with a list component keeps its literals', () => {
+    // The explicit form is built from structural nodes, so a literal
+    // coordinate is not folded (`3^2` does not become `9`): a compilation
+    // with `constantFold: false` asks not to fold constants.
+    const explicit = explicitBroadcastPointNorm(
+      ce.parse('([1,2],3)'),
+      ce._getCompilationTarget('glsl')!.createTarget()
+    );
+    expect(typeof explicit).not.toBe('string');
+    expect((explicit as Expression).json).toEqual([
+      'Sqrt',
+      ['Add', ['Power', 3, 2], ['Power', ['List', 1, 2], 2]],
+    ]);
   });
 
   test('shader norm arity limits: 3-vec uses length(), 5-tuple fails closed', () => {

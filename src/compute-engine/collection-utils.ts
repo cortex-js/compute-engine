@@ -2033,6 +2033,37 @@ export function isTupleShapedType(t: Type): boolean {
 }
 
 /**
+ * How a component of type `t` of a point takes part in the norm of the
+ * point:
+ *
+ * - `'list'`: the component is an indexed collection that is not a tuple
+ *   (a list), so the point is one point per element and its norm is one
+ *   number per element: `‖(x + [1, 2], y)‖` is two norms.
+ * - `'gated-list'`: the component is a list or the absent value. This is
+ *   the type `list<real> | missing` of a restricted list `L {c}`. When the
+ *   list is present, the norm is one number per element, as for `'list'`.
+ *   When it is absent, the component is an absent coordinate and the norm
+ *   is `NaN`.
+ * - `undefined`: the component is not a list. It is a number, a nested
+ *   point (a tuple is an indexed collection in the type lattice, but a
+ *   point is one coordinate of the norm), or a value with no list arm.
+ *
+ * The `missing` arm is removed before the shape test. Without this, the
+ * union `list<real> | missing` is not a subtype of the collection top, and
+ * a restricted list read as a scalar coordinate: the compiled norm put the
+ * whole list into one vector and answered one number where the interpreter
+ * answers one number per element.
+ */
+export function broadcastingComponentKind(
+  t: Type
+): 'list' | 'gated-list' | undefined {
+  const present = stripMissingFromType(t);
+  if (present === 'never' || isTupleShapedType(present)) return undefined;
+  if (!isSubtype(present, INDEXED_COLLECTION_SHAPE_TYPE)) return undefined;
+  return isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE) ? 'list' : 'gated-list';
+}
+
+/**
  * Is this type a RECORD, structurally — the bare `record` primitive or any
  * composite record, regardless of its field types? Same rationale as
  * {@link isTupleShapedType}: `record<any>` is not a spellable type, so a
@@ -2613,11 +2644,15 @@ export function lazyBroadcastMap(
     ? ce._fn('ApplyWhole', [callee, ...bodyArgs], { canonical: false })
     : ce._fn(operator, bodyArgs, { canonical: false });
   // When a numeric approximation was requested (`.N()`), wrap each element's
-  // body in `N(…)` so it floats on access — otherwise a lazy element would
-  // evaluate EXACTLY (e.g. `Sin(Range(1,1e8)).N()` element 1 → symbolic
-  // `sin(1)` instead of `0.841…`). The body is built fresh here, so there is
-  // no risk of double-wrapping on re-evaluation of the returned `Map`.
-  if (numericApproximation) body = ce._fn('N', [body], { canonical: false });
+  // body in the numeric marker `NumericApproximation(…)` so it floats on
+  // access — otherwise a lazy element would evaluate EXACTLY (e.g.
+  // `Sin(Range(1,1e8)).N()` element 1 → symbolic `sin(1)` instead of
+  // `0.841…`). The marker is not the `N` operator: it gives the result of the
+  // `.N()` method, which keeps an integer exact, while `N` makes it a float.
+  // The body is built fresh here, so there is no risk of double-wrapping on
+  // re-evaluation of the returned `Map`.
+  if (numericApproximation)
+    body = ce._fn('NumericApproximation', [body], { canonical: false });
   const fn = ce.function('Function', [body, ...params]);
   return ce.function('Map', [fn, ...cols]);
 }
@@ -2706,12 +2741,16 @@ export function lazyBroadcastMapIfNeeded(
  * without one the `numericApproximation` flag never reaches the elements, so
  * `each()`/`at()` keep producing EXACT values (`sin(1)`, `sin(2)`, …). This
  * breaks the `x.evaluate().N()` ≡ `x.N()` contract (`lazyBroadcastMap` wraps
- * the body in `N` only when the broadcast is CONSTRUCTED under `.N()`).
+ * the body in the numeric marker `NumericApproximation` only when the
+ * broadcast is CONSTRUCTED under `.N()`).
  *
  * Return a `Map` over the same sources whose mapping-function body is wrapped
- * in `N(…)`, so every element numericizes on access — laziness preserved.
+ * in the numeric marker `NumericApproximation(…)`, so every element
+ * numericizes on access — laziness preserved. The marker gives the result of
+ * the `.N()` method (an integer stays exact), not of the `N` operator.
  * Returns `undefined` when `expr` is not such a `Map`, or its body is already
- * `N`-wrapped (idempotence: `x.N().N()` must not grow the wrapping).
+ * wrapped in the marker or in `N` (idempotence: `x.N().N()` must not grow the
+ * wrapping; a body in `N` is already numeric).
  *
  * The rewrap is **memoized per original instance**: repeated `.N()` calls on
  * one logical `Map` return the *same* rewrapped instance, so any per-instance
@@ -2732,14 +2771,15 @@ export function lazyMapNumericApproximation(
   if (!isFunction(expr, 'Map')) return undefined;
   const fn = expr.op1;
   // A bare symbol callback (`Map(Sin, xs)`, `Map(f, xs, ys)`) has no body to
-  // wrap. Build the function literal `(_1, …, _k) ↦ N(f(_1, …, _k))` instead,
-  // with one parameter per source, so that the elements numericize on access
-  // as they do for a function literal callback.
+  // wrap. Build the function literal
+  // `(_1, …, _k) ↦ NumericApproximation(f(_1, …, _k))` instead, with one
+  // parameter per source, so that the elements numericize on access as they
+  // do for a function literal callback.
   if (isSymbol(fn)) {
     const params = expr.ops.slice(1).map((_, i) => `_${i + 1}`);
     const wrappedFn = ce.box([
       'Function',
-      ['N', [fn.symbol, ...params]],
+      ['NumericApproximation', [fn.symbol, ...params]],
       ...params,
     ] as MathJsonExpression);
     if (!wrappedFn.isValid) return undefined;
@@ -2755,7 +2795,8 @@ export function lazyMapNumericApproximation(
   let body: Expression = fn.op1;
   if (isFunction(body, 'Block') && body.nops === 1) body = body.op1;
   // Idempotence: the body already numericizes.
-  if (body.operator === 'N') return undefined;
+  if (body.operator === 'NumericApproximation' || body.operator === 'N')
+    return undefined;
 
   // Rebuild the function literal from MathJSON rather than re-hosting the
   // canonical body: a canonical body is bound into the ORIGINAL literal's
@@ -2765,7 +2806,7 @@ export function lazyMapNumericApproximation(
   if (!Array.isArray(fnJson)) return undefined;
   const wrappedFn = ce.box([
     'Function',
-    ['N', body.json],
+    ['NumericApproximation', body.json],
     ...fnJson.slice(2),
   ] as MathJsonExpression);
   if (!wrappedFn.isValid) return undefined;

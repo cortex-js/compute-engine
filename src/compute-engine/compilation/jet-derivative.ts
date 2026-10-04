@@ -135,6 +135,39 @@ export function jetDerivativeTarget(
   return { literal, order };
 }
 
+/**
+ * Whether the closed form of a multi-index derivative
+ * `Derivative(f, k₁, …, kₙ)` is expected to grow past a useful size. The
+ * measure is the one `jetDerivativeTarget` uses for a derivative of a
+ * function of one argument (`prefersJetDerivative`): the size of the body of
+ * `f` and the order, here the total order `k₁ + … + kₙ`. It is computed from
+ * the body BEFORE any differentiation, because the differentiation itself is
+ * the cost to avoid: the mixed derivative of order 3 of a four-deep nested
+ * radical in two variables takes more than 20 seconds to compute.
+ *
+ * Only a callee that resolves to a function literal is measured (`literalOf`
+ * resolves a function SYMBOL). A library operator has no body, and its
+ * derivative keeps the closed form, as for one argument.
+ */
+export function multiIndexDerivativeTooLarge(
+  callee: Expression | undefined,
+  literalOf: (id: string) => Expression | undefined
+): boolean {
+  if (!isFunction(callee, 'Derivative') || callee.ops.length <= 2) return false;
+  const head = callee.ops[0];
+  let literal: Expression | undefined;
+  if (isFunction(head, 'Function')) literal = head;
+  else if (isSymbol(head)) literal = literalOf(head.symbol);
+  if (literal === undefined) return false;
+  let order = 0;
+  for (const k of callee.ops.slice(1)) {
+    const v = Math.floor(k.N().re);
+    if (!Number.isFinite(v)) return false;
+    order += v;
+  }
+  return prefersJetDerivative(literal, order);
+}
+
 /** `Block(e)` wrappers a function-literal body carries are transparent here. */
 function unwrapBody(expr: Expression): Expression {
   let e = expr;

@@ -567,3 +567,133 @@ describe('A restricted collection on the interval target', () => {
     expect(r.success).toBe(false);
   });
 });
+
+describe('The norm of a point with a restricted list component', () => {
+  // `L {c}` is typed `list<…> | missing`. Its `missing` arm hid the list
+  // from the tests that decide whether a component broadcasts, so the
+  // JavaScript target took the absolute value of each coordinate of a
+  // restricted list of points, and folded a restricted list into one vector
+  // of a single norm. Every value is checked against the interpreter.
+  const ceR = new ComputeEngine();
+  ceR.declare('L', 'list<real>');
+  ceR.declare('y', 'real');
+  const pointList = [
+    'Abs',
+    ['PointList', ['When', ['List', 1, 2], ['Less', 0, 't']], 'y'],
+  ];
+  const tuple = ['Abs', ['Tuple', ['When', 'L', ['Less', 0, 't']], 'y']];
+  const L = [1, 2, 3];
+
+  /** The interpreted value at `t` (`y = 3`, `L = [1, 2, 3]`). */
+  function interpretedAt(json: unknown, t: number): unknown {
+    const e = new ComputeEngine();
+    e.declare('L', 'list<real>');
+    e.assign('L', e.box(['List', ...L]));
+    e.assign('t', t);
+    e.assign('y', 3);
+    const v = e.box(json as never).N();
+    if (v.symbol === 'Missing') return undefined;
+    return v.ops ? v.ops.map((c) => c.re) : v.re;
+  }
+
+  function compiledAt(json: unknown, t: number, to: string): unknown {
+    const r = compile(ceR.box(json as never), { to, fallback: false } as never);
+    expect(r.success).toBe(true);
+    return r.run!({ t, y: 3, L } as never);
+  }
+
+  test('a restricted list of points is one norm per point (JavaScript)', () => {
+    expect(interpretedAt(pointList, 1)).toEqual([
+      expect.closeTo(Math.sqrt(10), 12),
+      expect.closeTo(Math.sqrt(13), 12),
+    ]);
+    expect(compiledAt(pointList, 1, 'javascript')).toEqual([
+      expect.closeTo(Math.sqrt(10), 12),
+      expect.closeTo(Math.sqrt(13), 12),
+    ]);
+    // Absent when the condition fails: `Missing` in the interpreter,
+    // `undefined` in compiled JavaScript.
+    expect(interpretedAt(pointList, -1)).toBeUndefined();
+    expect(compiledAt(pointList, -1, 'javascript')).toBeUndefined();
+  });
+
+  test('a point with a restricted list coordinate is one norm per element (JavaScript)', () => {
+    const expected = [
+      expect.closeTo(Math.sqrt(10), 12),
+      expect.closeTo(Math.sqrt(13), 12),
+      expect.closeTo(Math.sqrt(18), 12),
+    ];
+    expect(interpretedAt(tuple, 1)).toEqual(expected);
+    expect(compiledAt(tuple, 1, 'javascript')).toEqual(expected);
+    // An absent coordinate makes the norm `NaN`.
+    expect(interpretedAt(tuple, -1)).toBeNaN();
+    expect(compiledAt(tuple, -1, 'javascript')).toBeNaN();
+  });
+
+  test('an absent restricted list beside another list is one NaN (JavaScript)', () => {
+    // The interpreter finds the absent coordinate before it broadcasts over
+    // the other list, so the norm is one `NaN`. It is not one `NaN` per
+    // element of the other list, and not `[]` when that list is empty.
+    const gatedL = ['When', 'L', ['Less', 0, 't']];
+    for (const other of [['List', 10, 20, 30], ['List']]) {
+      for (const json of [
+        ['Norm', ['Tuple', gatedL, other]],
+        ['Abs', ['Tuple', gatedL, other]],
+        ['Norm', ['Tuple', gatedL, other], 1],
+      ]) {
+        expect(interpretedAt(json, -1)).toBeNaN();
+        expect(compiledAt(json, -1, 'javascript')).toBeNaN();
+      }
+    }
+    // When the restricted list is present, the norm is one value per element.
+    const present = ['Norm', ['Tuple', gatedL, ['List', 10, 20, 30]]];
+    const expected = [
+      expect.closeTo(Math.sqrt(101), 12),
+      expect.closeTo(Math.sqrt(404), 12),
+      expect.closeTo(Math.sqrt(909), 12),
+    ];
+    expect(interpretedAt(present, 1)).toEqual(expected);
+    expect(compiledAt(present, 1, 'javascript')).toEqual(expected);
+  });
+
+  test('Hypot and a restricted list of points beside another list match the interpreter (JavaScript)', () => {
+    // `Hypot` broadcasts element by element, and the absent list is a NaN
+    // element: the interpreter gives one `NaN` per element of the other
+    // list, and `[]` when that list is empty.
+    const gatedL = ['When', 'L', ['Less', 0, 't']];
+    const hypot = ['Hypot', gatedL, ['List', 10, 20, 30]];
+    expect(interpretedAt(hypot, -1)).toEqual([NaN, NaN, NaN]);
+    expect(compiledAt(hypot, -1, 'javascript')).toEqual([NaN, NaN, NaN]);
+    // A restricted list of points is absent as a whole: `Missing` in the
+    // interpreter, `undefined` in compiled JavaScript.
+    const points = ['Abs', ['PointList', gatedL, ['List', 10, 20, 30]]];
+    expect(interpretedAt(points, -1)).toBeUndefined();
+    expect(compiledAt(points, -1, 'javascript')).toBeUndefined();
+  });
+
+  test('the norm types as a list, or NaN for an absent coordinate', () => {
+    expect(ceR.box(tuple as never).type.toString()).toBe(
+      'list<number> | number'
+    );
+  });
+
+  test('a restricted list of points on the interval target', () => {
+    const v = compiledAt(pointList, 1, 'interval-js') as {
+      kind: string;
+      value: { lo: number; hi: number };
+    }[];
+    [Math.sqrt(10), Math.sqrt(13)].forEach((n, i) => {
+      expect(v[i].value.lo).toBeLessThanOrEqual(n);
+      expect(v[i].value.hi).toBeGreaterThanOrEqual(n);
+    });
+    // The restricted value is empty where the condition fails.
+    expect(compiledAt(pointList, -1, 'interval-js')).toEqual({ kind: 'empty' });
+  });
+
+  test('the interval and shader targets decline a restricted list coordinate', () => {
+    for (const to of ['interval-js', 'glsl']) {
+      const r = compile(ceR.box(tuple as never), { to } as never);
+      expect(r.success).toBe(false);
+    }
+  });
+});

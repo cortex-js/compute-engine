@@ -2269,7 +2269,12 @@ export interface ValidateArgumentsInternals {
    * `isPointListArgumentType`. An argument typed as such a list is admitted
    * at that parameter; the evaluation binds each point to the parameter and
    * checks it there. Library operators leave this unset: a tuple parameter
-   * of theirs takes one tuple. */
+   * of theirs takes one tuple.
+   *
+   * A tuple at a scalar parameter is admitted as well
+   * (`isScalarParameterTuple`): the application maps over its components
+   * when the parameter is declared as a scalar, and binds it whole when the
+   * type of the parameter is only inferred. */
   mapsPointLists?: boolean;
   /** The callee is a USER function (a function literal, a multi-clause
    * definition, a function held as a value). A `NaN` argument is accepted
@@ -2355,6 +2360,32 @@ export function refusesAbsentArgument(
   if (ce._staticAssignmentEvidence === undefined) return false;
   if (typeof t === 'string' || t.kind !== 'union') return false;
   return t.types.some((arm) => resolveTypeAlias(arm) === 'missing');
+}
+
+/**
+ * Whether an argument of type `t` is a tuple at a SCALAR parameter `param`
+ * (a number type or `boolean`) of a user function. Such an argument is not
+ * refused when the call is boxed: when the parameter is declared as a
+ * scalar, the application maps over the components of the tuple and checks
+ * each one where it is applied (`declaredScalarTupleCells`,
+ * `boxed-function.ts`, user decision 2026-10-03), and when the type of the
+ * parameter is only inferred, the application binds the tuple whole. A
+ * tuple with a component that is a collection other than a tuple
+ * (`([1, 2], [3, 4])`) is data, not a point, and is checked as usual.
+ */
+function isScalarParameterTuple(t: Type, param: Type): boolean {
+  if (param === 'never' || param === 'nothing') return false;
+  if (!isSubtype(param, 'number') && !isSubtype(param, 'boolean'))
+    return false;
+  const r = resolveTypeAlias(t);
+  if (typeof r !== 'object' || r.kind !== 'tuple') return false;
+  return r.elements.every((e) => {
+    const c = resolveTypeAlias(e.type);
+    return (
+      (typeof c === 'object' && c.kind === 'tuple') ||
+      !isSubtype(c, COLLECTION_SHAPE_TYPE)
+    );
+  });
 }
 
 export function validateArguments(
@@ -2768,10 +2799,12 @@ export function validateArguments(
       continue;
     }
     // A list of points at a parameter declared as a point: the
-    // application maps over the points (`isPointListArgumentType`).
+    // application maps over the points (`isPointListArgumentType`). A tuple
+    // at a scalar parameter is admitted too (`isScalarParameterTuple`).
     if (
       internals?.mapsPointLists &&
-      isPointListArgumentType(op.type.type, param)
+      (isPointListArgumentType(op.type.type, param) ||
+        isScalarParameterTuple(op.type.type, param))
     ) {
       result.push(op);
       continue;
@@ -3075,11 +3108,12 @@ export function validateArguments(
       i += 1;
       continue;
     }
-    // A list of points at a parameter declared as a point, as at the
-    // required parameters above.
+    // A list of points at a parameter declared as a point, and a tuple at a
+    // scalar parameter, as at the required parameters above.
     if (
       internals?.mapsPointLists &&
-      isPointListArgumentType(op.type.type, param)
+      (isPointListArgumentType(op.type.type, param) ||
+        isScalarParameterTuple(op.type.type, param))
     ) {
       result.push(op);
       i += 1;

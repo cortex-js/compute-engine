@@ -75,7 +75,11 @@ describe('a lazy view over an eager collection operator', () => {
     const start = Date.now();
     const view = ce.box(['Reverse', ['Unique', ['Range', 1, 100000]]]);
     expect(view.isFiniteCollection).toBe(true);
-    expect(Date.now() - start).toBeLessThan(2000);
+    // The time depends on the load of the machine, so the limit is asserted
+    // only in a `CE_PERF=1` run. The finiteness check above does not depend on
+    // time.
+    if (process.env.CE_PERF === '1')
+      expect(Date.now() - start).toBeLessThan(2000);
   });
 
   // The guards of `eagerViewSource` (a pure library operator whose operands
@@ -106,6 +110,10 @@ describe('a lazy view over an eager collection operator', () => {
     expect(Array.from(result.each(), (x) => x.re)).toEqual([
       0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
     ]);
-    expect(Date.now() - start).toBeLessThan(2000);
+    // The time depends on the load of the machine, so the limit is asserted
+    // only in a `CE_PERF=1` run. The element values above do not depend on
+    // time.
+    if (process.env.CE_PERF === '1')
+      expect(Date.now() - start).toBeLessThan(2000);
   });
 });

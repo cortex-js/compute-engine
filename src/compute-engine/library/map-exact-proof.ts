@@ -423,7 +423,7 @@ function proveLevel(
    * needs for the runtime element check. */
   sourcesOut?: SourceBounds[]
 ): SourceBounds | undefined {
-  // The `Block(N(…))` marker belongs to the float tier; an identity level is
+  // The numeric marker belongs to the float tier; an identity level is
   // a pass-through the compiler cannot improve on.
   if (level.napprox || level.identity) return undefined;
   const op = level.op;

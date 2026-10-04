@@ -275,7 +275,8 @@ const OPERATORS: Record<
         ops.length === 2 &&
         ops[0].operator === 'Negate' &&
         ops[1].operator !== 'Negate' &&
-        isNumber(ops[1])
+        isNumber(ops[1]) &&
+        !ops[1].isNegative
       ) {
         ops = [ops[1], ops[0]];
       }
@@ -363,17 +364,15 @@ const OPERATORS: Record<
     (expr_, serialize) => {
       const expr = expr_ as FnExpr;
       const exponent = serialize(expr.op2, 14);
-      if (exponent === '1') return serialize(expr.op1);
+      // `x^1` prints as its base. The base is serialized at the precedence
+      // of `Power`, so that a base with a lower precedence keeps its
+      // parentheses in a product: `(a + b) * c`, not `a + b * c`.
+      if (exponent === '1') return serialize(expr.op1, 15);
       if (exponent === '(1/2)' || exponent === '1/2' || exponent === '0.5')
         return `sqrt(${serialize(expr.op1)})`;
       if (exponent === '-0.5' || exponent === '-1/2' || exponent === '(-1/2)')
         return `1 / sqrt(${serialize(expr.op1)})`;
-      let base = serialize(expr.op1, 14);
-      // Always wrap the base in parentheses if negative to avoid ambiguity,
-      // i.e. -3^2 -> (-3)^2
-      if (base.startsWith('-')) base = `(${base})`;
-      // Wrap a factorial base: `n!^2` would lex `!^` as one operator.
-      else if (base.endsWith('!')) base = `(${base})`;
+      const base = serializePowerBase(expr.op1, serialize);
       // Wrap the exponent in parentheses if longer than 1 character
       if (exponent.length === 1) return `${base}^${exponent}`;
       return `${base}^${wrap(exponent)}`;
@@ -507,7 +506,8 @@ const FUNCTIONS: Record<
     if (n.isSame(2)) return `sqrt${wrap(serialize(x))}`;
     return `root${wrap(serialize(n))}${wrap(serialize(x))}`;
   },
-  Square: (expr, serialize) => `${serialize((expr as FnExpr).op1, 12)}^2`,
+  Square: (expr, serialize) =>
+    `${serializePowerBase((expr as FnExpr).op1, serialize)}^2`,
 
   Det: 'det',
   Dim: 'dim',
@@ -902,6 +902,70 @@ function isSingleCall(s: string): boolean {
   return m !== null && isParenthesizedGroup(s.slice(m[0].length - 1));
 }
 
+/**
+ * Serialize the base of a power (`Power` or `Square`) so that the exponent
+ * applies to the whole base.
+ *
+ * The base is serialized at a precedence above the precedence of `Power`
+ * (15), so the result of any operator is wrapped. This matters for a base
+ * that is itself a power: `^` is right-associative, so `t^2^(-3/10)` reads as
+ * `t^(2^(-3/10))` and the base must print as `(t^2)^(-3/10)`.
+ *
+ * Other bases also need parentheses:
+ * - a base that starts with a sign: `(-3)^2`, not `-3^2`;
+ * - a factorial: `(n!)^2`, because `n!^2` lexes `!^` as one operator;
+ * - a number literal that is not an unsigned integer or decimal, or one call
+ *   such as `sqrt(2)`: its string has an operator in it (`3/4`, `2sqrt(3)`,
+ *   `2i`, `1e+30`), so `3/4^x` would read as `3/(4^x)`;
+ * - the output of a function handler that is not one unit, i.e. that has a
+ *   space, `^`, `_`, `/`, `*` or `+` outside of brackets and quotes:
+ *   `(5 m)^2`, `(x {0 < x})^2`, `(sum_(n=1)^(10)(n))^2`, `(x^3)^2` for a
+ *   `Square` base.
+ */
+function serializePowerBase(
+  base: Expression,
+  serialize: AsciiMathSerializer
+): string {
+  const result = serialize(base, 16);
+  if (isParenthesizedGroup(result)) return result;
+  // A name, including a wildcard name such as `_x`
+  if (/^[\p{L}_][\p{L}\p{N}_]*$/u.test(result)) return result;
+  if (isNumber(base)) {
+    if (/^(\d+(\.\d+)?|NaN)$/.test(result) || isSingleCall(result))
+      return result;
+    return `(${result})`;
+  }
+  if (
+    result.startsWith('-') ||
+    result.startsWith('+') ||
+    result.endsWith('!') ||
+    hasTopLevelInfix(result)
+  )
+    return `(${result})`;
+  return result;
+}
+
+/**
+ * Whether `s` has a space or one of the characters `^ _ / * +` outside of
+ * brackets (`()`, `[]`, `{}`) and double-quoted strings. A string with such a
+ * character is not one unit: `5 m`, `x {0 < x}`, `sum_(n=1)^(10)(n)`.
+ */
+function hasTopLevelInfix(s: string): boolean {
+  let depth = 0;
+  let inString = false;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (inString) {
+      if (c === '\\') i += 1;
+      else if (c === '"') inString = false;
+    } else if (c === '"') inString = true;
+    else if (c === '(' || c === '[' || c === '{') depth += 1;
+    else if (c === ')' || c === ']' || c === '}') depth -= 1;
+    else if (depth === 0 && ' ^_/*+'.includes(c)) return true;
+  }
+  return false;
+}
+
 function wrap(s: string, precedence = 0, target = -1): string {
   if (precedence > target && !isParenthesizedGroup(s)) return `(${s})`;
   return s;
@@ -1053,8 +1117,15 @@ export function toAsciiMath(
     if (typeof operator === 'function') {
       result = operator(fnExpr, serialize);
     } else {
+      // A prefix operator binds less tightly than a higher-precedence
+      // context, so wrap it like any other operator result: the base of a
+      // power `Not(p)` prints `(!p)^2`, not `!p^2`.
       if (fnExpr.nops === 1)
-        return `${operator}${serialize(fnExpr.op1, precedence_ + 1)}`;
+        return wrap(
+          `${operator}${serialize(fnExpr.op1, precedence_ + 1)}`,
+          precedence,
+          precedence_
+        );
 
       result =
         fnExpr.ops

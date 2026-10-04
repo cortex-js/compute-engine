@@ -1,5 +1,6 @@
 import { engine } from '../utils';
 import { ComputeEngine } from '../../src/compute-engine';
+import type { Expression as MathJson } from '../../src/math-json/types.ts';
 
 function evaluate(expr: string): string {
   return engine.parse(expr).evaluate().toString();
@@ -2937,5 +2938,193 @@ describe('INTEGRATE: a nested integral agrees with the multi-limit form', () => 
     expect(
       integral('PositiveInfinity', 0, 'a').evaluate().operator
     ).toBe('Integrate');
+  });
+});
+
+describe('INTEGRATE: constant factors of a quotient are split out', () => {
+  // A factor of the numerator or of the denominator that does not depend on
+  // the variable of integration is moved out of the integral, the same as a
+  // constant factor of a product: ∫ a·sin(t)/t dt = a·∫ sin(t)/t dt. Before
+  // this split, `a·sin(t)/t` stayed unevaluated while `a·(sin(t)/t)` gave
+  // `a·Si(t)`. Each answer is checked by differentiation at sample points,
+  // with values given to the constants.
+  const ce = new ComputeEngine();
+  const values = { a: 1.7, b: -0.6 };
+  const cases: Array<[latex: string, expected: string]> = [
+    ['\\frac{a\\sin t}{t}', 'a * SinIntegral(t)'],
+    ['\\frac{3a\\sin t}{t}', '3a * SinIntegral(t)'],
+    ['\\frac{-a\\sin t}{t}', '-(a * SinIntegral(t))'],
+    ['\\frac{a\\sin t}{b t}', '(a * SinIntegral(t)) / b'],
+    ['\\frac{a\\cos t}{t}', 'a * CosIntegral(t)'],
+    ['\\frac{a e^t}{t}', 'a * ExpIntegralEi(t)'],
+    ['\\frac{a}{\\ln t}', 'a * LogIntegral(t)'],
+  ];
+  for (const [latex, expected] of cases) {
+    test(`∫ ${latex} dt`, () => {
+      const F = ce.parse(`\\int ${latex}\\,dt`).evaluate();
+      expect(F.toString()).toBe(expected);
+      const dF = ce.box(['D', F, 't']).evaluate();
+      for (const t0 of [0.3, 1.3, 2.2]) {
+        const at = { ...values, t: t0 };
+        const lhs = dF.subs(at).N();
+        const rhs = ce.parse(latex).subs(at).N();
+        expect(lhs.im).toBeCloseTo(0, 12);
+        expect(lhs.re).toBeCloseTo(rhs.re, 10);
+      }
+    });
+  }
+
+  // d/dx xˣ = xˣ + ln(x)·xˣ has xˣ as a factor, so integration by parts with
+  // u = xˣ does not make the integral simpler. It recursed until the frame
+  // cap with a full rule search at each level (`∫ cos(x)·xˣ dx` did not
+  // finish in minutes), and `∫ eˣ·xˣ dx` overflowed the stack. These
+  // integrals have no closed form and must stay unevaluated.
+  for (const latex of ['e^x x^x', '\\cos(x) x^x', '\\sin(x) x^x']) {
+    test(`∫ ${latex} dx stays unevaluated`, () => {
+      const F = ce.parse(`\\int ${latex}\\,dx`).evaluate();
+      expect(F.operator).toBe('Integrate');
+    }, 120_000);
+  }
+
+  test('the definite integral of a·sin(t)/t over [−1, 1]', () => {
+    const I = ce.parse('\\int_{-1}^1 \\frac{a\\sin t}{t}\\,dt').evaluate();
+    expect(I.toString()).toBe('a * SinIntegral(1) - a * SinIntegral(-1)');
+    // Si is odd, so the value is 2a·Si(1), with Si(1) = 0.946083070367183.
+    expect(I.subs({ a: 1.7 }).N().re).toBeCloseTo(
+      2 * 1.7 * 0.946083070367183,
+      12
+    );
+  });
+});
+
+// The antiderivative, the integration rules and the residue method select a
+// function by its name. A user function with the name of a library function
+// (`Sin := t ↦ t + 1`) is integrated through its body, as `D` differentiates
+// it. When the body cannot replace the call, the integral stays unevaluated.
+describe('INTEGRATE: a user function with the name of a library function', () => {
+  const shadowing = (names: string[], body = 't \\mapsto t+1') => {
+    const ce = new ComputeEngine();
+    for (const name of names) {
+      ce.declare(name, 'function');
+      ce.assign(name, ce.parse(body));
+    }
+    return ce;
+  };
+
+  const definite: [string, number, number, string][] = [
+    ['Sin', 0, 1, '3/2'],
+    ['Exp', 0, 1, '3/2'],
+    ['Ln', 1, 2, '5/2'],
+  ];
+  for (const [name, lo, hi, value] of definite) {
+    test(`∫ ${name}(x) dx over [${lo}, ${hi}] with ${name} := t ↦ t + 1`, () => {
+      const ce = shadowing([name]);
+      const integral = ce.expr([
+        'Integrate',
+        [name, 'x'],
+        ['Limits', 'x', lo, hi],
+      ]);
+      expect(integral.evaluate().toString()).toBe(value);
+      expect(integral.N().re).toBeCloseTo(integral.evaluate().N().re, 12);
+    });
+  }
+
+  const indefinite: [string, MathJson, string][] = [
+    ['Sin', ['Multiply', 'x', ['Sin', 'x']], '1/3 * x^3 + 1/2 * x^2'],
+    ['Exp', ['Exp', 'x'], '1/2 * x^2 + x'],
+    ['Ln', ['Ln', 'x'], '1/2 * x^2 + x'],
+  ];
+  for (const [name, integrand, value] of indefinite) {
+    test(`∫ ${JSON.stringify(integrand)} dx with ${name} := t ↦ t + 1`, () => {
+      const ce = shadowing([name]);
+      expect(ce.expr(['Integrate', integrand, 'x']).evaluate().toString()).toBe(
+        value
+      );
+    });
+  }
+
+  test('the parse route integrates the user function', () => {
+    const ce = shadowing(['Sin']);
+    expect(ce.parse('\\int_0^1 \\sin(x)\\,dx').evaluate().toString()).toBe(
+      '3/2'
+    );
+  });
+
+  test('a user function with an evaluate handler stays unevaluated', () => {
+    const ce = new ComputeEngine();
+    ce.declare('Sin', {
+      signature: '(number) -> number',
+      evaluate: ([t], { engine }) => t.add(engine.One),
+    });
+    const integral = ce.expr([
+      'Integrate',
+      ['Sin', 'x'],
+      ['Limits', 'x', 0, 1],
+    ]);
+    expect(integral.evaluate().operator).toBe('Integrate');
+    expect(ce.expr(['Integrate', ['Sin', 'x'], 'x']).evaluate().operator).toBe(
+      'Integrate'
+    );
+    expect(integral.N().re).toBeCloseTo(1.5, 12);
+  });
+
+  // The body reads a free `x`. The integral binds `x`, so the body cannot
+  // replace the call of `Sin(x)` in an integral over `x`.
+  test('a body with a free symbol named like the variable stays unevaluated', () => {
+    const ce = shadowing(['Sin'], 't \\mapsto t+x');
+    expect(
+      ce
+        .expr(['Integrate', ['Sin', 'x'], ['Limits', 'x', 0, 1]])
+        .evaluate().operator
+    ).toBe('Integrate');
+    expect(
+      ce
+        .expr(['Integrate', ['Sin', 'y'], ['Limits', 'y', 0, 1]])
+        .evaluate()
+        .toString()
+    ).toBe('x + 1/2');
+  });
+
+  test('a block local with a library name stays unevaluated', () => {
+    const ce = new ComputeEngine();
+    const integral = ce.expr([
+      'Integrate',
+      [
+        'Block',
+        ['Declare', 'Ln', "'function'"],
+        ['Assign', 'Ln', ['Function', ['Add', 't', 1], 't']],
+        ['Ln', 'x'],
+      ],
+      ['Limits', 'x', 1, 2],
+    ]);
+    expect(integral.evaluate().operator).toBe('Integrate');
+  });
+
+  test('without a user function, the library rules apply', () => {
+    const ce = new ComputeEngine();
+    expect(
+      ce
+        .expr(['Integrate', ['Sin', 'x'], ['Limits', 'x', 0, 1]])
+        .evaluate()
+        .toString()
+    ).toBe('1 - cos(1)');
+    expect(
+      ce
+        .expr(['Integrate', ['Multiply', 'x', ['Sin', 'x']], 'x'])
+        .evaluate()
+        .toString()
+    ).toBe('-x * cos(x) + sin(x)');
+    expect(
+      ce
+        .expr(['Integrate', ['Ln', 'x'], 'x'])
+        .evaluate()
+        .toString()
+    ).toBe('-x + x * ln(x)');
+    expect(
+      ce
+        .expr(['Integrate', ['Exp', 'x'], ['Limits', 'x', 0, 1]])
+        .evaluate()
+        .toString()
+    ).toBe('-1 + e');
   });
 });

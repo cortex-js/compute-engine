@@ -1,5 +1,5 @@
 import { MathJsonExpression as Expression } from '../../src/math-json/types';
-import { ComputeEngine } from '../../src/compute-engine';
+import { ComputeEngine, compile } from '../../src/compute-engine';
 import { engine as ce } from '../utils';
 import { isTensor } from '../../src/compute-engine/boxed-expression/type-guards';
 import { packTensor } from '../../src/compute-engine/boxed-expression/tensor-view';
@@ -3751,7 +3751,82 @@ describe('Norm — a point with an EMPTY broadcasting component is zero points',
     expect(ce.box(['Abs', P]).evaluate().json).toEqual(['List']);
     expect(ce.box(['Norm', P, 1]).evaluate().json).toEqual(['List']);
     expect(ce.box(['Norm', P, 3]).evaluate().json).toEqual(['List']);
-    expect(ce.box(['Norm', ['Tuple', ['List'], ['List', 1, 2]]]).evaluate().json).toEqual(['List']);
+    expect(ce.box(['Norm', ['Tuple', ['List'], ['List']]]).evaluate().json).toEqual(['List']);
+  });
+
+  test('an empty component beside a NON-EMPTY list component is a length mismatch', () => {
+    // The list components zip element by element and need one length, as
+    // the operands of `Add` and `Hypot` do: 3 vs 0 is the same error as
+    // 3 vs 2, at every order. The answer was the empty list, as if the
+    // empty component made the other list not count.
+    const eng = new ComputeEngine();
+    eng.assign('L', eng.box(['List', 1, 2, 3]));
+    eng.assign('M', eng.box(['List']));
+    eng.assign('K', eng.box(['List', 1, 2]));
+    const error = (a: string) => ['Error', "'incompatible-dimensions'", `'${a}'`];
+    for (const order of [[], [1], [3], [{ str: 'Infinity' }]]) {
+      expect(eng.box(['Norm', ['Tuple', 'L', 'M'], ...order]).evaluate().json).toEqual(error('3 vs 0'));
+      expect(eng.box(['Norm', ['Tuple', 'M', 'L'], ...order]).evaluate().json).toEqual(error('0 vs 3'));
+      // The L∞ order did not zip its components and left this inert.
+      expect(eng.box(['Norm', ['Tuple', 'L', 'K'], ...order]).evaluate().json).toEqual(error('3 vs 2'));
+    }
+    expect(eng.box(['Abs', ['Tuple', 'L', 'M']]).evaluate().json).toEqual(error('3 vs 0'));
+    expect(eng.box(['Norm', ['Tuple', ['List'], ['List', 1, 2]]]).evaluate().json).toEqual(error('0 vs 2'));
+    // The same error as the element-wise operators give.
+    expect(eng.box(['Hypot', 'L', 'M']).evaluate().json).toEqual(error('3 vs 0'));
+    expect(eng.box(['Add', 'L', 'M']).evaluate().json).toEqual(error('3 vs 0'));
+    expect(eng.box(['Norm', ['Tuple', 'L', 'M']]).N().json).toEqual(error('3 vs 0'));
+    expect(eng.box(['Norm', ['Tuple', 'L', 'M']]).type.toString()).toBe('list<number>');
+  });
+
+  test('a PointList with an empty component is zero points, and its norm is []', () => {
+    // A `PointList` zips its components to the SHORTEST one, so
+    // `PointList(L, M)` with an empty `M` is a list of zero points and
+    // evaluates to `[]`. Its norm is one norm per point: the empty list,
+    // as the type `list<number>` says, not the scalar 0 of an empty
+    // vector.
+    const eng = new ComputeEngine();
+    eng.assign('L', eng.box(['List', 1, 2, 3]));
+    eng.assign('M', eng.box(['List']));
+    eng.assign('K', eng.box(['List', 1, 2]));
+    for (const order of [[], [1], [3], [{ str: 'Infinity' }]]) {
+      for (const pl of [['PointList', 'L', 'M'], ['PointList', 'M', 'L'], ['PointList', 'M', 3]]) {
+        const e = eng.box(['Norm', pl, ...order]);
+        expect(e.type.toString()).toBe('list<number>');
+        expect(e.evaluate().json).toEqual(['List']);
+        expect(e.N().json).toEqual(['List']);
+      }
+    }
+    expect(eng.box(['Abs', ['PointList', 'L', 'M']]).evaluate().json).toEqual(['List']);
+    // A symbol that holds the empty point list reads the same.
+    eng.assign('P', eng.box(['PointList', 'L', 'M']));
+    expect(eng.box(['Norm', 'P']).evaluate().json).toEqual(['List']);
+    expect(eng.box(['Norm', 'P']).type.toString()).toBe('list<number>');
+    // Unequal non-empty components zip to the shorter: two points, two norms.
+    expect(eng.box(['Norm', ['PointList', 'L', 'K']]).evaluate().toString()).toBe('[sqrt(2),2sqrt(2)]');
+    expect(eng.box(['Norm', ['PointList', 'L', 'K'], 1]).evaluate().toString()).toBe('[2,4]');
+    // The empty VECTOR keeps the norm 0.
+    expect(eng.box(['Norm', ['List']]).evaluate().json).toBe(0);
+    expect(eng.box(['Norm', ['List'], 1]).evaluate().json).toBe(0);
+  });
+
+  test('the compiled JavaScript route agrees', () => {
+    // Compiled code reports an interpreter error as `NaN`.
+    const eng = new ComputeEngine();
+    for (const s of ['L', 'M', 'K']) eng.declare(s, 'list<real>');
+    const run = (e: Expression) => {
+      const r = compile(eng.box(e), { to: 'javascript', fallback: false });
+      expect(r.success).toBe(true);
+      return r.run!({ L: [1, 2, 3], M: [], K: [1, 2] });
+    };
+    for (const order of [[], [1], ['PositiveInfinity'], [{ str: 'Infinity' }]]) {
+      expect(run(['Norm', ['Tuple', 'L', 'M'], ...order])).toBeNaN();
+      expect(run(['Norm', ['Tuple', 'L', 'K'], ...order])).toBeNaN();
+      expect(run(['Norm', ['PointList', 'L', 'M'], ...order])).toEqual([]);
+    }
+    expect(run(['Abs', ['Tuple', 'L', 'M']])).toBeNaN();
+    expect(run(['Abs', ['PointList', 'L', 'M']])).toEqual([]);
+    expect(run(['Norm', ['PointList', 'L', 'K'], 1])).toEqual([2, 4]);
   });
 
   test('zero points have no infinite or NaN norm either', () => {
@@ -3789,6 +3864,93 @@ describe('Norm — a point with an EMPTY broadcasting component is zero points',
     expect(ce.box(['Norm', ['Tuple', 3, 4]]).evaluate().re).toBe(5);
     expect(ce.box(['Hypot', ['Tuple', 3, 4], 12]).evaluate().re).toBe(13);
     expect(ce.box(['Hypot', ['Tuple', 1, 1], 1]).evaluate().json).toEqual(['Sqrt', 3]);
+  });
+});
+
+describe('Norm — the L∞ norm of a point with a broadcasting component', () => {
+  // `([1, -5, 3], [-4, 2, 1])` is the three points `(1, -4)`, `(-5, 2)` and
+  // `(3, 1)`, so its L∞ norm is one maximum per point, `[4, 5, 3]`, as the
+  // other orders give one norm per point. The interpreter left it
+  // unevaluated, while the compiled JavaScript code answered `[4, 5, 3]`.
+  const eng = new ComputeEngine();
+  eng.assign('L', eng.box(['List', 1, -5, 3]));
+  eng.assign('K', eng.box(['List', -4, 2, 1]));
+  const ORDERS: Expression[] = ['PositiveInfinity', { str: 'Infinity' }];
+
+  test('one maximum per point, for both spellings of the order', () => {
+    for (const order of ORDERS) {
+      const e = eng.box(['Norm', ['Tuple', 'L', 'K'], order]);
+      expect(e.type.toString()).toBe('list<number>');
+      expect(e.evaluate().json).toEqual(['List', 4, 5, 3]);
+      expect(e.N().json).toEqual(['List', 4, 5, 3]);
+      // A scalar component is a coordinate of every point.
+      expect(eng.box(['Norm', ['Tuple', 'L', 4], order]).evaluate().json).toEqual(['List', 4, 5, 4]);
+      // A nested point is one coordinate of every point: its norm is 5.
+      expect(eng.box(['Norm', ['Tuple', 'L', ['Tuple', 3, 4]], order]).evaluate().json).toEqual(['List', 5, 5, 5]);
+      // The maximum stays exact.
+      expect(
+        eng.box(['Norm', ['Tuple', ['List', 1, 'Pi'], ['List', 'ExponentialE', -1]], order]).evaluate().json
+      ).toEqual(['List', 'ExponentialE', 'Pi']);
+      // An absent coordinate makes the norm of that point `NaN`.
+      expect(eng.box(['Norm', ['Tuple', ['List', 1, 'Missing'], 2], order]).evaluate().toString()).toBe('[2,NaN]');
+      // A coordinate with no value leaves the norm undecided.
+      expect(eng.box(['Norm', ['Tuple', 'L', 'z'], order]).evaluate().operator).toBe('Norm');
+    }
+  });
+
+  test('the compiled JavaScript code gives the same values', () => {
+    const c = new ComputeEngine();
+    for (const s of ['L', 'K']) c.declare(s, 'list<real>');
+    for (const order of ORDERS) {
+      const r = compile(c.box(['Norm', ['Tuple', 'L', 'K'], order]), { to: 'javascript', fallback: false });
+      expect(r.success).toBe(true);
+      expect(r.run!({ L: [1, -5, 3], K: [-4, 2, 1] })).toEqual([4, 5, 3]);
+    }
+  });
+});
+
+describe('Norm — the string order "Infinity" compiles as the symbol order', () => {
+  // The interpreter reads `"Infinity"` and `+∞` as the same order. The
+  // JavaScript `Norm` handler refused the string ("the "Infinity" norm has no
+  // compiled form"). The GPU and interval targets compile only the default
+  // order, and refuse both spellings with the same message.
+  const eng = new ComputeEngine();
+  eng.declare('x', 'real');
+  eng.declare('y', 'real');
+  eng.declare('V', 'list<real>');
+  eng.declare('A', 'matrix<real>');
+  eng.declare('L', 'list<real>');
+  eng.declare('K', 'list<real>');
+  const ARGS = { x: 3, y: -4, V: [3, -4, 1], A: [[1, -2], [3, 4]], L: [1, -5, 3], K: [-4, 2, 1] };
+  const OPERANDS: Expression[] = [['Tuple', 'x', 'y'], 'V', 'A', ['Tuple', 'L', 'K'], ['PointList', 'L', 'K']];
+
+  test('on JavaScript, both spellings give the interpreter value', () => {
+    const expected = [4, 4, 7, [4, 5, 3], [4, 5, 3]];
+    OPERANDS.forEach((x, i) => {
+      for (const order of ['PositiveInfinity', { str: 'Infinity' }] as Expression[]) {
+        const r = compile(eng.box(['Norm', x, order]), { to: 'javascript', fallback: false });
+        expect(r.success).toBe(true);
+        expect(r.run!(ARGS)).toEqual(expected[i]);
+      }
+    });
+    // The matrix ∞-norm (the largest row sum) in the interpreter.
+    expect(eng.box(['Norm', ['List', ['List', 1, -2], ['List', 3, 4]], { str: 'Infinity' }]).evaluate().json).toBe(7);
+  });
+
+  test('on the GPU and interval targets, both spellings decline the same way', () => {
+    const message = (to: string, order: Expression): string => {
+      try {
+        const r = compile(eng.box(['Norm', ['Tuple', 'x', 'y'], order]), { to, fallback: false });
+        return r.success ? 'compiled' : String(r.error);
+      } catch (err) {
+        return (err as Error).message;
+      }
+    };
+    for (const to of ['glsl', 'wgsl', 'interval-js']) {
+      const symbol = message(to, 'PositiveInfinity');
+      expect(symbol).toMatch(/only the default L2 norm compiles/);
+      expect(message(to, { str: 'Infinity' })).toBe(symbol);
+    }
   });
 });
 

@@ -110,6 +110,270 @@ describe('COMPILE DERIVATIVE — other targets', () => {
   );
 });
 
+describe('COMPILE DERIVATIVE — partial derivatives of Arctan2', () => {
+  // The closed forms −y/(x² + y²) and x/(x² + y²) compile on every target.
+  // Before Arctan2 had a derivative, `D` stayed an inert
+  // `Apply(Derivative("Arctan2", …), y, x)`: the javascript target used a
+  // numeric derivative (`_SYS.nd`) and the other targets declined.
+  test.each([
+    ['javascript', 'x'],
+    ['javascript', 'y'],
+    ['interval-js', 'x'],
+    ['interval-js', 'y'],
+    ['glsl', 'x'],
+    ['glsl', 'y'],
+    ['wgsl', 'x'],
+    ['wgsl', 'y'],
+  ] as const)('D(Arctan2(y, x), %s) compiles on %s', (to, v) => {
+    const expr = ce.box(['D', ['Arctan2', 'y', 'x'], v]);
+    const result = compile(expr, { to, fallback: false });
+    expect(result.success).toBe(true);
+    expect(result.code).not.toContain('_SYS.nd');
+    expect(result.code).not.toContain('Derivative');
+  });
+
+  test.each(['javascript', 'interval-js', 'glsl', 'wgsl'] as const)(
+    'D(Mod(x, m), m) compiles on %s',
+    (to) => {
+      const result = compile(ce.box(['D', ['Mod', 'x', 'm'], 'm']), {
+        to,
+        fallback: false,
+      });
+      expect(result.success).toBe(true);
+      expect(result.code).not.toContain('_SYS.nd');
+    }
+  );
+
+  test('the multi-index form compiles on javascript', () => {
+    // The other targets are checked in the group "applied derivative of a
+    // function of two arguments" below.
+    for (const expr of [
+      ce.box(['Apply', ['Derivative', 'Arctan2', 1, 0], 'y', 'x']),
+      ce.box(['Apply', ['Derivative', 'Power', 0, 1], 'x', 'n']),
+    ]) {
+      const result = compile(expr, { fallback: false });
+      expect(result.success).toBe(true);
+      expect(result.code).not.toContain('_SYS.nd');
+    }
+    const run = compile(
+      ce.box(['Apply', ['Derivative', 'Arctan2', 1, 0], 'y', 'x'])
+    ).run!;
+    expect(run({ x: -1.4, y: -0.9 }) as number).toBeCloseTo(
+      -1.4 / (1.4 * 1.4 + 0.9 * 0.9),
+      12
+    );
+  });
+
+  test('the javascript closed form matches a finite difference', () => {
+    const dx = compile(ce.box(['D', ['Arctan2', 'y', 'x'], 'x'])).run!;
+    const dy = compile(ce.box(['D', ['Arctan2', 'y', 'x'], 'y'])).run!;
+    const h = 1e-6;
+    for (const [x, y] of [
+      [1.3, 0.7],
+      [-0.8, 1.7],
+      [-1.4, -0.9],
+      [0.6, -1.1],
+    ]) {
+      const fdx = (Math.atan2(y, x + h) - Math.atan2(y, x - h)) / (2 * h);
+      const fdy = (Math.atan2(y + h, x) - Math.atan2(y - h, x)) / (2 * h);
+      expect(dx({ x, y }) as number).toBeCloseTo(fdx, 6);
+      expect(dy({ x, y }) as number).toBeCloseTo(fdy, 6);
+    }
+  });
+});
+
+describe('COMPILE DERIVATIVE — applied derivative of a function of two arguments', () => {
+  // `Apply(Derivative(F, k₁, k₂), a, b)` evaluates to a closed form, and
+  // every target compiles that closed form. The interval and shader targets
+  // read it through `BaseCompiler.appliedDerivativeLiteral()`, which accepted
+  // one argument only, so they declined this application.
+  const CALLEES: [string, number, number][] = [
+    ['Power', 1, 0],
+    ['Power', 0, 1],
+    ['Log', 0, 1],
+    ['Arctan2', 1, 0],
+    ['Arctan2', 0, 1],
+    ['Mod', 0, 1],
+    ['h', 1, 0],
+    ['h', 0, 1],
+    ['h', 1, 1],
+  ];
+  const POINTS = [
+    [1.7, 2.3],
+    [0.4, 3.1],
+    [2.5, 0.6],
+  ];
+
+  for (const unit of ['rad', 'deg'] as const) {
+    const ce2 = new ComputeEngine();
+    ce2.angularUnit = unit;
+    ce2.declare('h', 'function');
+    ce2.assign('h', ce2.parse('(u, w) \\mapsto u^2 \\sin(w)'));
+
+    test.each(CALLEES)(
+      `${unit}: Derivative(%s, %i, %i) applied to (x, n) agrees with the closed form`,
+      (f, k1, k2) => {
+        const expr = ce2.box(['Apply', ['Derivative', f, k1, k2], 'x', 'n']);
+        const closedForm = expr.evaluate();
+        expect(closedForm.has('Derivative')).toBe(false);
+        const js = compile(expr, { to: 'javascript', fallback: false });
+        const iv = compile(expr, { to: 'interval-js', fallback: false });
+        expect(js.success).toBe(true);
+        expect(iv.success).toBe(true);
+        expect(js.code).not.toContain('_SYS.nd');
+        for (const [x, n] of POINTS) {
+          const expected = closedForm.subs({ x, n }).N().re;
+          const actual = js.run!({ x, n });
+          expect(typeof actual).toBe('number');
+          expect(actual as number).toBeCloseTo(expected, 10);
+          const r = iv.run!({ x, n }) as any;
+          const v = (r.kind === 'interval' ? r.value : r) as {
+            lo: number;
+            hi: number;
+          };
+          expect(v.lo).toBeLessThanOrEqual(expected + 1e-12);
+          expect(v.hi).toBeGreaterThanOrEqual(expected - 1e-12);
+        }
+        for (const to of ['glsl', 'wgsl'] as const) {
+          const gpu = compile(expr, { to, fallback: false });
+          expect(gpu.success).toBe(true);
+          expect(gpu.code).not.toContain('Derivative');
+        }
+      }
+    );
+  }
+
+  /** The error of a compilation that declines, thrown or returned. */
+  function declineMessage(expr: ReturnType<typeof ce.box>, to: string) {
+    try {
+      const r = compile(expr, { to, fallback: false } as never) as {
+        success: boolean;
+        error?: string;
+      };
+      expect(r.success).toBe(false);
+      return r.error ?? '';
+    } catch (e) {
+      return String(e);
+    }
+  }
+
+  test.each([
+    // The derivative of `BesselJ` in its order and of the upper incomplete
+    // `Gamma` in its first argument have no closed form.
+    ['BesselJ', 'javascript'],
+    ['BesselJ', 'interval-js'],
+    ['BesselJ', 'glsl'],
+    ['BesselJ', 'wgsl'],
+    ['Gamma', 'javascript'],
+    ['Gamma', 'interval-js'],
+    ['Gamma', 'glsl'],
+    ['Gamma', 'wgsl'],
+  ])('Derivative(%s, 1, 0) with no closed form declines on %s', (f, to) => {
+    const expr = ce.box(['Apply', ['Derivative', f, 1, 0], 's', 'x']);
+    expect(declineMessage(expr, to)).toMatch(
+      /Could not compile `Apply`: the derivative has no closed form/
+    );
+  });
+
+  test.each(['javascript', 'interval-js', 'glsl', 'wgsl'])(
+    'a high mixed order of a large function of two arguments declines quickly on %s',
+    (to) => {
+      // The closed form of this mixed derivative of order 3 takes more than
+      // 20 seconds to compute and has more than 20,000 nodes. The size of
+      // the body and the total order decide before any differentiation, with
+      // the measure used for a function of one argument. The javascript
+      // target has no numerical derivative of a function of two arguments.
+      const ceBig = new ComputeEngine();
+      ceBig.declare('H', 'function');
+      ceBig.assign(
+        'H',
+        ceBig.parse(
+          '(u, w) \\mapsto \\sqrt{u+\\sqrt{w+\\sqrt{u w+\\sqrt{u+w}}}}'
+        )
+      );
+      const expr = ceBig.box(['Apply', ['Derivative', 'H', 2, 1], 'x', 'y']);
+      const start = Date.now();
+      expect(declineMessage(expr, to)).toMatch(
+        /Could not compile `Apply`: the closed form of the derivative is too large to write out/
+      );
+      // The decline with the interpreter fallback does not compute the
+      // closed form either.
+      const fallback = compile(expr, { to, fallback: true } as never) as {
+        success: boolean;
+      };
+      expect(fallback.success).toBe(false);
+      // The time depends on the load of the machine, so the limit is asserted
+      // only in a `CE_PERF=1` run. The decline checks above do not depend on
+      // time.
+      if (process.env.CE_PERF === '1')
+        expect(Date.now() - start).toBeLessThan(2000);
+      // The first derivative of the same body has a closed form of a useful
+      // size, as for a function of one argument.
+      const first = ceBig.box(['Apply', ['Derivative', 'H', 1, 0], 'x', 'y']);
+      expect(
+        (
+          compile(first, { to, fallback: false } as never) as {
+            success: boolean;
+          }
+        ).success
+      ).toBe(true);
+    }
+  );
+
+  test('each decline gives its true reason', () => {
+    // A closed form with the wrong number of parameters is an arity decline,
+    // not a missing closed form.
+    for (const to of ['javascript', 'interval-js', 'glsl', 'wgsl']) {
+      expect(
+        declineMessage(
+          ce.box(['Apply', ['Derivative', 'Power', 0, 1], 'x']),
+          to
+        )
+      ).toContain('takes 2 parameter(s) but 1 argument(s)');
+      expect(
+        declineMessage(
+          ce.box(['Apply', ['Derivative', 'Sin', 1], 'x', 'y']),
+          to
+        )
+      ).toContain('takes 1 parameter(s) but 2 argument(s)');
+    }
+    // A third derivative of a large body has a closed form, but it is too
+    // large to write out. The javascript target compiles it with
+    // forward-mode differentiation; the other targets decline it.
+    const ceBig = new ComputeEngine();
+    ceBig.parse('f(x):=\\sqrt{x+\\sqrt{x+\\sqrt{x+\\sqrt{x+x}}}}').evaluate();
+    const big = ceBig.box(['Apply', ['Derivative', 'f', 3], 'x']);
+    for (const to of ['interval-js', 'glsl', 'wgsl'])
+      expect(declineMessage(big, to)).toMatch(
+        /the closed form of the derivative is too large to write out/
+      );
+  });
+
+  test('javascript declines an application with the wrong number of arguments', () => {
+    // The interpreter curries `((a, b) ↦ a + b)(x)` into a function of one
+    // argument, and rejects `(a ↦ a + 1)(x, y)`. A JavaScript call does
+    // neither: it answered `NaN` and `x + 1`.
+    for (const [expr, message] of [
+      [
+        ['Apply', ['Function', ['Add', 'a', 'b'], 'a', 'b'], 'x'],
+        'takes 2 parameter(s) but 1 argument(s)',
+      ],
+      [
+        ['Apply', ['Function', ['Add', 'a', 1], 'a'], 'x', 'y'],
+        'takes 1 parameter(s) but 2 argument(s)',
+      ],
+      [
+        ['Apply', ['Derivative', 'Power', 0, 1], 'x'],
+        'takes 2 parameter(s) but 1 argument(s)',
+      ],
+    ] as const) {
+      expect(declineMessage(ce.box(expr as never), 'javascript')).toContain(
+        message
+      );
+    }
+  });
+});
+
 describe('COMPILE DERIVATIVE — numeric agreement with the interpreter', () => {
   const cases: [string, string][] = [
     ['\\frac{d}{dx} x^2', 'x^2'],

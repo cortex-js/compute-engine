@@ -601,6 +601,8 @@ import {
   couldBeCollectionParticipant,
   isFlatAllStringComparisonParticipant,
   isGatedIndexedCollection,
+  isGatedListComponent,
+  isGatedNumericListOperand,
   isNumericTupleParticipant,
   isProvablyCharacterOperand,
   isProvablyStringComparisonParticipant,
@@ -626,6 +628,7 @@ import {
   unrollFixedWidthCollections,
 } from './fixed-width-unroll.js';
 import { compileDiagnosticOf } from './diagnostics.js';
+import { literalParamsMap } from '../library/core.js';
 import { colorSpaceOf, isColorValued } from './color-space-fact.js';
 import type {
   CompileMode,
@@ -2076,6 +2079,10 @@ function compilesToCheckedArray(
     const combiner = e.ops[1];
     const name = isSymbol(combiner) ? combiner.symbol : undefined;
     if (name !== undefined && visited.has(name)) return false;
+    // A block-local combiner whose value can change while its block runs
+    // (`CompileTarget.reboundFunctions`) has no one body to read.
+    if (name !== undefined && target?.reboundFunctions?.has(name) === true)
+      return false;
     const literal = BaseCompiler.callbackLiteral(combiner, target);
     if (literal === undefined || literal.nops !== 3) return false;
     // The value of a block body is its last statement. A body whose earlier
@@ -3528,6 +3535,25 @@ function compileColorEntryOperand(
  */
 const NESTED_COLOR_BROADCAST_TYPE =
   'broadcastable<broadcastable<broadcastable<broadcastable<color>>>>';
+
+/**
+ * Throw when the function literal `literal` does not take exactly `count`
+ * arguments. The interpreter curries an application with too few arguments
+ * and rejects one with too many (`makeLambda`, function-utils.ts). A
+ * JavaScript call does neither: it binds a missing parameter to `undefined`
+ * (the result is `NaN`) and ignores an extra argument. The application is
+ * declined, and the caller can fall back to the interpreter.
+ */
+function assertApplyArity(literal: Expression, count: number): void {
+  if (!isFunction(literal, 'Function')) return;
+  const paramCount = literal.nops - 1;
+  if (paramCount !== count)
+    throw new Error(
+      `Could not compile \`Apply\`: the function takes ${paramCount} parameter(s) but ` +
+        `${count} argument(s) are supplied — the interpreter curries or ` +
+        `throws there, which this target cannot express.`
+    );
+}
 
 /**
  * The forward-mode automatic-differentiation lowering of
@@ -5915,16 +5941,54 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // stays compact, and for any head with no coefficient recurrence.
     const jet = tryCompileJetDerivative(args, compile, target);
     if (jet !== undefined) return jet;
-    if (isFunction(args[0], 'Derivative') && args.length === 2) {
-      const literal = derivativeClosedForm('Derivative', args[0].ops);
-      if (isFunction(literal, 'Function') && literal.nops === 2) {
-        const callee = BaseCompiler.withDerivativeArgument(
-          literal,
-          args[1],
-          () => compile(literal)
-        );
-        return `(${callee})(${compile(args[1])})`;
+    if (isFunction(args[0], 'Derivative')) {
+      // A multi-index derivative, or a derivative applied to more than one
+      // argument, has no numerical lowering (`compileNumericDerivativeFallback`,
+      // library/calculus.ts, differentiates a function of one argument only).
+      // Its closed form is not computed when it would be too large.
+      const multivariate = args[0].ops.length > 2 || args.length > 2;
+      const literal =
+        multivariate && BaseCompiler.appliedDerivativeTooLarge(args)
+          ? undefined
+          : derivativeClosedForm('Derivative', args[0].ops);
+      if (isFunction(literal, 'Function')) {
+        assertApplyArity(literal, args.length - 1);
+        if (args.length === 2) {
+          const callee = BaseCompiler.withDerivativeArgument(
+            literal,
+            args[1],
+            () => compile(literal)
+          );
+          return `(${callee})(${compile(args[1])})`;
+        }
+        // A derivative of a function of more than one argument
+        // (`Derivative(f, k₁, …, kₙ)`) has no forward-mode lowering, and its
+        // closed form is compiled as an ordinary function literal.
+        return `(${compile(literal)})(${args
+          .slice(1)
+          .map((a) => compile(a))
+          .join(', ')})`;
       }
+      if (multivariate)
+        throw new Error(
+          `Could not compile \`Apply\`: ${BaseCompiler.appliedDerivativeDeclineReason(args)}, ` +
+            `and target 'javascript' has no numerical derivative of a function of more ` +
+            `than one argument.`
+        );
+    }
+    if (isFunction(args[0], 'Function')) {
+      assertApplyArity(args[0], args.length - 1);
+      // The emitted call maps over every array argument at run time, and a
+      // point is an array. Thus an argument whose type, or element type,
+      // cannot match the declared type of its parameter is declined, because
+      // the interpreter gives an `incompatible-type` error for it.
+      const mismatch = BaseCompiler.appliedArgumentTypeMismatch(
+        args[0],
+        args.slice(1),
+        literalParamsMap(args[0].type.type)
+      );
+      if (mismatch !== undefined)
+        throw new Error(`Could not compile \`Apply\`: ${mismatch}`);
     }
     // A function literal with an annotated parameter checks an argument that
     // may be absent, as a call of a named function does
@@ -6079,6 +6143,11 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Norm: (args, compile, target) => {
     if (args[0] == null)
       throw new Error('Could not compile `Norm`: missing argument');
+    // The interpreter reads the string order `"Infinity"` as the order `+∞`
+    // (the L∞ norm, or the ∞-operator norm of a matrix). Thus the string
+    // compiles as the symbol `PositiveInfinity` in every branch below.
+    if (args[1] != null && isString(args[1]) && args[1].string === 'Infinity')
+      args = [args[0], args[0].engine.PositiveInfinity, ...args.slice(2)];
     // A point with a broadcasting (non-tuple collection) component is one
     // point per element in the interpreter — `([1, 2], 3)` is `(1, 3)` and
     // `(2, 3)` — so its norm is one number per element, and the application
@@ -6142,6 +6211,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       };
       const params: string[] = [];
       const sources: string[] = [];
+      // The bound sources that are restricted lists: `undefined` when absent.
+      const absentable: string[] = [];
       const components = point.ops.map((c) => {
         // The same component test as `pointHasBroadcastComponent`, with the
         // tuple exclusion read off the type: a nested point is one leg of
@@ -6150,26 +6221,43 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         const ct = jsType(c);
         const isPoint =
           ct === 'tuple' || (typeof ct !== 'string' && ct.kind === 'tuple');
+        // A restricted list (`L {c}`, typed `list<…> | missing`) is a source
+        // too. When it is absent, its value is `undefined`. The interpreter
+        // finds the absent coordinate before it broadcasts, and answers one
+        // scalar `NaN` for the point. `_SYS.bcast` would pass `undefined` to
+        // the closure as a scalar, and another list component would still
+        // drive the broadcast: one `NaN` per element of that list, or `[]`
+        // when that list is empty. Thus the compiled code tests each
+        // restricted source for `undefined` before the broadcast.
+        const gated = isGatedNumericListOperand(c);
         const broadcasts =
           !isPoint &&
-          (c.isCollection || c.type.matches('indexed_collection<any>'));
+          (c.isCollection ||
+            c.type.matches('indexed_collection<any>') ||
+            isGatedListComponent(c));
         if (!broadcasts) return bind(compile(c));
-        if (!c.type.matches('indexed_collection<number>'))
+        if (!c.type.matches('indexed_collection<number>') && !gated)
           throw new Error(
             'Could not compile `Norm`: a point whose component is a collection ' +
               'of non-scalars.'
           );
         const p = BaseCompiler.tempVar(target);
         params.push(p);
-        sources.push(bind(compile(c)));
+        const source = bind(compile(c));
+        sources.push(source);
+        if (gated) absentable.push(source);
         return p;
       });
       const ord =
         args[1] != null && !isString(args[1])
           ? `, ${bind(compile(args[1]))}`
           : '';
+      const absent =
+        absentable.length === 0
+          ? ''
+          : `(${absentable.map((v) => `${v} === undefined`).join(' || ')}) ? NaN : `;
       return (
-        `((${bound.join(', ')}) => _SYS.bcast((${params.join(', ')}) => ` +
+        `((${bound.join(', ')}) => ${absent}_SYS.bcast((${params.join(', ')}) => ` +
         `_SYS.norm([${components.join(', ')}]${ord}), ${sources.join(', ')}))` +
         `(${values.join(', ')})`
       );

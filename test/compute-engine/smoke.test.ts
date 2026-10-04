@@ -612,7 +612,9 @@ describe('SIMPLIFICATION negate', () => {
     expect(simplify('-(-x)')).toMatchInlineSnapshot(`x`));
 
   test(`simplify('-(x+1)')`, () =>
-    expect(simplify('-(x+1)')).toMatchInlineSnapshot(`["Subtract", -1, "x"]`));
+    expect(simplify('-(x+1)')).toMatchInlineSnapshot(
+      `["Subtract", ["Negate", "x"], 1]`
+    ));
 });
 
 describe('SIMPLIFICATION trigonometry', () => {

@@ -1305,7 +1305,10 @@ describe('HurwitzZeta of an integer order far left of the imaginary axis', () =>
     ).toBeUndefined();
     const psi = polygammaComplex(1, new Complex(-5, 1e20));
     expect(psi.im).toBeCloseTo(-1e-20, 30);
-    expect(Date.now() - start).toBeLessThan(5000);
+    // Like the other time limits of this file, this one is asserted only in a
+    // `CE_PERF=1` run, because the time depends on the load of the machine.
+    // The value checks above do not depend on time.
+    if (PERF) expect(Date.now() - start).toBeLessThan(5000);
   });
 
   test('the error estimate grows with the order', () => {

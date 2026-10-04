@@ -1200,6 +1200,11 @@ describe('ASYNC LANE KEEPS A SCOPED HANDLER’S LOCAL SCOPE ALIVE', () => {
   const LARGE = 20_000;
   // Still in flight while a poller watches it (~250ms of work)
   const BIGGER_FOR_SUSPEND = 100_000;
+  // Each test here runs sums of 20 000 to 100 000 terms through the async
+  // lane. Alone they take well under a second, but when other test runs share
+  // the cores they can take more than the default 5 s test timeout, and the
+  // result does not depend on time. So the timeout is raised for this group.
+  const ASYNC_LANE_TIMEOUT = 60_000;
   const sum = (index: string, upper: number): Expression => [
     'Sum',
     [index, 1, upper],
@@ -1215,13 +1220,13 @@ describe('ASYNC LANE KEEPS A SCOPED HANDLER’S LOCAL SCOPE ALIVE', () => {
     expect(result.toString()).toBe(String(gauss(LARGE)));
     // `i` is left untouched as the imaginary unit
     expect(ce.box('i').type.toString()).toBe('imaginary');
-  });
+  }, ASYNC_LANE_TIMEOUT);
 
   test('the index does not leak into the global scope', async () => {
     const ce = new ComputeEngine();
     await ce.parse(`\\sum_{k=1}^{${LARGE}} k`).evaluateAsync();
     expect(ce.box('k').value).toBeUndefined();
-  });
+  }, ASYNC_LANE_TIMEOUT);
 
   test('an outer binding of the same name is not clobbered', async () => {
     // The silent case: the sum returned the RIGHT answer while overwriting
@@ -1231,7 +1236,7 @@ describe('ASYNC LANE KEEPS A SCOPED HANDLER’S LOCAL SCOPE ALIVE', () => {
     const result = await ce.parse(`\\sum_{n=1}^{${LARGE}} n`).evaluateAsync();
     expect(result.toString()).toBe(String(gauss(LARGE)));
     expect(ce.box('n').value?.toString()).toBe('7');
-  });
+  }, ASYNC_LANE_TIMEOUT);
 
   test('async matches sync, suspended or not', async () => {
     const ce = new ComputeEngine();
@@ -1241,7 +1246,7 @@ describe('ASYNC LANE KEEPS A SCOPED HANDLER’S LOCAL SCOPE ALIVE', () => {
         expr.evaluate().toString()
       );
     }
-  });
+  }, ASYNC_LANE_TIMEOUT);
 
   // Holding the local context across the `await` means a SECOND evaluation
   // started while the first is suspended interleaves its own push, so the
@@ -1288,7 +1293,7 @@ describe('ASYNC LANE KEEPS A SCOPED HANDLER’S LOCAL SCOPE ALIVE', () => {
     test('both evaluations still compute the correct result', async () => {
       const { settled } = await runBoth('q', 'w');
       expect(values(settled)).toEqual(expected);
-    });
+    }, ASYNC_LANE_TIMEOUT);
 
     // The adversarial spelling: the two evaluations use the SAME index name,
     // so any cross-talk between their scopes shows up as a wrong sum.
@@ -1296,7 +1301,7 @@ describe('ASYNC LANE KEEPS A SCOPED HANDLER’S LOCAL SCOPE ALIVE', () => {
       const { ce, settled } = await runBoth('m', 'm');
       expect(values(settled)).toEqual(expected);
       expect(ce.box('m').value).toBeUndefined();
-    });
+    }, ASYNC_LANE_TIMEOUT);
 
     test('the engine is left clean', async () => {
       const { ce, depth } = await runBoth('q', 'w');
@@ -1304,7 +1309,7 @@ describe('ASYNC LANE KEEPS A SCOPED HANDLER’S LOCAL SCOPE ALIVE', () => {
       expect(ce.box('q').value).toBeUndefined();
       expect(ce.box('w').value).toBeUndefined();
       expect(ce.parse('1+1').evaluate().toString()).toBe('2');
-    });
+    }, ASYNC_LANE_TIMEOUT);
   });
 
   // KNOWN LIMITATION, pinned so a change of behavior is deliberate: while an
@@ -1360,7 +1365,7 @@ describe('ASYNC LANE KEEPS A SCOPED HANDLER’S LOCAL SCOPE ALIVE', () => {
     // ...and the engine is left usable, with `i` intact
     expect(ce.parse('1+1').evaluate().toString()).toBe('2');
     expect(ce.box('i').type.toString()).toBe('imaginary');
-  });
+  }, ASYNC_LANE_TIMEOUT);
 });
 
 describe('CANONICAL-SUGAR HEADS KEEP ARITY ERRORS ON THE INERT HEAD', () => {

@@ -204,7 +204,9 @@ describe('SOLVE OVER A DOMAIN — budget and interruption', () => {
 
 describe('SOLVE OVER A DOMAIN — API surface', () => {
   test('no-domain single-unknown Solve is unchanged', () => {
-    const r = ce.box(['Solve', ['Equal', ['Power', 'x', 2], 4], 'x']).evaluate();
+    const r = ce
+      .box(['Solve', ['Equal', ['Power', 'x', 2], 4], 'x'])
+      .evaluate();
     expect(r.operator).toBe('List');
     expect(r.ops!.map((o) => o.re).sort((a, b) => a - b)).toEqual([-2, 2]);
   });
@@ -386,12 +388,7 @@ describe('SOLVE OVER A DOMAIN — periodic root-family expansion', () => {
       ['Equal', ['Cos', 'x'], 1],
       ['Element', 'x', ['Interval', 0, ['Multiply', 6.5, 'Pi']]],
     ]);
-    expect(solutions(expr)).toEqual([
-      0,
-      2 * Math.PI,
-      4 * Math.PI,
-      6 * Math.PI,
-    ]);
+    expect(solutions(expr)).toEqual([0, 2 * Math.PI, 4 * Math.PI, 6 * Math.PI]);
     expect(allExactPi(expr)).toBe(true);
   });
 
@@ -453,18 +450,83 @@ describe('SOLVE OVER A DOMAIN — periodic root-family expansion', () => {
   });
 
   test('huge domain does not hang: sin x = 0 over Interval(0, 10^9)', () => {
-    // span / period ≈ 1.6·10^8 exceeds MAX_PERIODIC_EXPANSION → degrade to the
-    // (filtered) principal roots [0, π]. Must be fast.
+    // span / period ≈ 1.6·10^8 exceeds MAX_PERIODIC_EXPANSION. The list of
+    // roots is too long to give, and the principal roots [0, π] are only a
+    // part of it: the `Solve` stays unevaluated. The jest per-test timeout is
+    // the backstop for the case that does not end (an expansion of ~1.6·10⁸
+    // periods).
     const expr = ce.box([
       'Solve',
       ['Equal', ['Sin', 'x'], 0],
       ['Element', 'x', ['Interval', 0, 1000000000]],
     ]);
-    // Principal roots 0 and π both lie in the domain. Getting exactly those
-    // two is the assertion: expanding ~1.6·10⁸ periods would neither finish
-    // nor produce a two-element answer. The jest per-test timeout is the
-    // backstop for the non-terminating case.
-    expect(solutions(expr)).toEqual([0, Math.PI]);
+    expect(isUnevaluated(expr)).toBe(true);
+  });
+
+  test('huge domain without a principal root: sin x = 0 over [10^8, 10^9] stays unevaluated', () => {
+    // No principal root (0, π) is in the domain, but the domain holds about
+    // 2.9·10^8 roots. The answer must not be the empty list.
+    const expr = ce.box([
+      'Solve',
+      ['Equal', ['Sin', 'x'], 0],
+      ['Element', 'x', ['Interval', 100000000, 1000000000]],
+    ]);
+    expect(isUnevaluated(expr)).toBe(true);
+  });
+
+  test('huge domain, scaled argument: cos(3x) = 1/2 over [0, 10^7] stays unevaluated', () => {
+    // The period is 2π/3: the domain holds about 4.8·10^6 periods, with two
+    // roots in each period.
+    const expr = ce.box([
+      'Solve',
+      ['Equal', ['Cos', ['Multiply', 3, 'x']], ['Rational', 1, 2]],
+      ['Element', 'x', ['Interval', 0, 10000000]],
+    ]);
+    expect(isUnevaluated(expr)).toBe(true);
+  });
+
+  test('huge integer Range is enumerated: sin x = 0 over -10^4..10^4 → [0]', () => {
+    // Over the cap of the expansion, but the integer domain is small enough to
+    // enumerate. Of the multiples of π, only 0 is an integer.
+    const expr = ce.box([
+      'Solve',
+      ['Equal', ['Sin', 'x'], 0],
+      ['Element', 'x', ['Range', -10000, 10000]],
+    ]);
+    expect(solutions(expr)).toEqual([0]);
+  });
+
+  test('x·sin x = 0 over [-10, 10] → each multiple of π in the domain', () => {
+    // The root finder gives [0, π]. The factor sin(x) is periodic: its
+    // family in the domain gives ±π, ±2π and ±3π, and a numeric scan of the
+    // product checks the list.
+    const expr = ce.box([
+      'Solve',
+      ['Equal', ['Multiply', 'x', ['Sin', 'x']], 0],
+      ['Element', 'x', ['Interval', -10, 10]],
+    ]);
+    const actual = solutions(expr);
+    expect(actual.length).toBe(7);
+    actual.forEach((v, i) => expect(v).toBeCloseTo((i - 3) * Math.PI, 12));
+  });
+
+  test('x·sin x = 0 over [0, 3] → [0] (a numeric scan shows the list is complete)', () => {
+    const expr = ce.box([
+      'Solve',
+      ['Equal', ['Multiply', 'x', ['Sin', 'x']], 0],
+      ['Element', 'x', ['Interval', 0, 3]],
+    ]);
+    expect(solutions(expr)).toEqual([0]);
+  });
+
+  test('sin(x²) = 0 over [0, 5] stays unevaluated (a trig function of a non-linear argument)', () => {
+    // The roots are √(kπ) for k = 0..7; the root finder gives only 0.
+    const expr = ce.box([
+      'Solve',
+      ['Equal', ['Sin', ['Power', 'x', 2]], 0],
+      ['Element', 'x', ['Interval', 0, 5]],
+    ]);
+    expect(isUnevaluated(expr)).toBe(true);
   });
 
   test('non-periodic quadratic over a range is unaffected (exact roots)', () => {
@@ -474,6 +536,775 @@ describe('SOLVE OVER A DOMAIN — periodic root-family expansion', () => {
       ['Element', 'x', ['Range', 1, 1000]],
     ]);
     expect(solutions(expr)).toEqual([2, 3]);
+  });
+});
+
+describe('SOLVE OVER A DOMAIN — periodic root families are complete', () => {
+  // The solver expands its principal roots by the spacing of the roots, which
+  // can be shorter than the period of the equation: `sin x + cos x` has the
+  // period 2π, but its roots are π apart. A numeric scan of the domain checks
+  // the final list; when the scan finds a root that is not in the list, the
+  // `Solve` stays unevaluated. Each case below compares the result with the
+  // roots listed by hand, and checks each root numerically.
+  const pi = Math.PI;
+  const cases: Array<
+    [
+      name: string,
+      lhs: Expression,
+      rhs: Expression,
+      lo: number,
+      hi: number,
+      f: (x: number) => number,
+      expected: number[],
+    ]
+  > = [
+    [
+      'sin x + cos x = 0',
+      ['Add', ['Sin', 'x'], ['Cos', 'x']],
+      0,
+      0,
+      7,
+      (x) => Math.sin(x) + Math.cos(x),
+      [(3 * pi) / 4, (7 * pi) / 4],
+    ],
+    [
+      'sin x - cos x = 0',
+      ['Subtract', ['Sin', 'x'], ['Cos', 'x']],
+      0,
+      0,
+      7,
+      (x) => Math.sin(x) - Math.cos(x),
+      [pi / 4, (5 * pi) / 4],
+    ],
+    [
+      'sin(2x) = 0',
+      ['Sin', ['Multiply', 2, 'x']],
+      0,
+      0,
+      7,
+      (x) => Math.sin(2 * x),
+      [0, pi / 2, pi, (3 * pi) / 2, 2 * pi],
+    ],
+    [
+      'sin x cos x = 0',
+      ['Multiply', ['Sin', 'x'], ['Cos', 'x']],
+      0,
+      0,
+      7,
+      (x) => Math.sin(x) * Math.cos(x),
+      [0, pi / 2, pi, (3 * pi) / 2, 2 * pi],
+    ],
+    [
+      'tan x = 1',
+      ['Tan', 'x'],
+      1,
+      0,
+      7,
+      (x) => Math.tan(x) - 1,
+      [pi / 4, (5 * pi) / 4],
+    ],
+    [
+      'cos(2x) = 1/2',
+      ['Cos', ['Multiply', 2, 'x']],
+      ['Rational', 1, 2],
+      0,
+      7,
+      (x) => Math.cos(2 * x) - 0.5,
+      [pi / 6, (5 * pi) / 6, (7 * pi) / 6, (11 * pi) / 6, (13 * pi) / 6],
+    ],
+    [
+      'sin x = 1/2',
+      ['Sin', 'x'],
+      ['Rational', 1, 2],
+      0,
+      7,
+      (x) => Math.sin(x) - 0.5,
+      [pi / 6, (5 * pi) / 6, (13 * pi) / 6],
+    ],
+    [
+      'sin(x)^2 = 1/4',
+      ['Power', ['Sin', 'x'], 2],
+      ['Rational', 1, 4],
+      0,
+      7,
+      (x) => Math.sin(x) ** 2 - 0.25,
+      [pi / 6, (5 * pi) / 6, (7 * pi) / 6, (11 * pi) / 6, (13 * pi) / 6],
+    ],
+    [
+      'sin(x/2) = 0',
+      ['Sin', ['Divide', 'x', 2]],
+      0,
+      -7,
+      14,
+      (x) => Math.sin(x / 2),
+      [-2 * pi, 0, 2 * pi, 4 * pi],
+    ],
+    [
+      'sin(3x) = 0',
+      ['Sin', ['Multiply', 3, 'x']],
+      0,
+      0,
+      7,
+      (x) => Math.sin(3 * x),
+      [0, 1, 2, 3, 4, 5, 6].map((k) => (k * pi) / 3),
+    ],
+    [
+      'sin(x + 1) = 0',
+      ['Sin', ['Add', 'x', 1]],
+      0,
+      0,
+      7,
+      (x) => Math.sin(x + 1),
+      [pi - 1, 2 * pi - 1],
+    ],
+    [
+      'sin x + cos x = 0 over a wide interval',
+      ['Add', ['Sin', 'x'], ['Cos', 'x']],
+      0,
+      -20,
+      30,
+      (x) => Math.sin(x) + Math.cos(x),
+      Array.from({ length: 16 }, (_, k) => ((4 * k - 25) * pi) / 4),
+    ],
+    [
+      // The periods 2π and 2π/√2 have no common multiple. The solver keeps
+      // its roots only because the scan finds no other root.
+      'sin(x) cos(√2 x) = 0 (no common period)',
+      ['Multiply', ['Sin', 'x'], ['Cos', ['Multiply', ['Sqrt', 2], 'x']]],
+      0,
+      -1,
+      3,
+      (x) => Math.sin(x) * Math.cos(Math.SQRT2 * x),
+      [0, pi / (2 * Math.SQRT2)],
+    ],
+  ];
+
+  test.each(cases)('%s', (_name, lhs, rhs, lo, hi, f, expected) => {
+    const expr = ce.box([
+      'Solve',
+      ['Equal', lhs, rhs],
+      ['Element', 'x', ['Interval', lo, hi]],
+    ]);
+    const actual = solutions(expr);
+    expect(actual.length).toBe(expected.length);
+    for (let i = 0; i < actual.length; i++) {
+      expect(actual[i]).toBeCloseTo(expected[i], 10);
+      expect(Math.abs(f(actual[i]))).toBeLessThan(1e-9);
+    }
+  });
+
+  // The solver finds only some of the roots of these equations. A partial
+  // list is not an answer: the `Solve` stays unevaluated.
+  const incomplete: Array<
+    [name: string, lhs: Expression, lo: number, hi: number]
+  > = [
+    // Roots: 2π/3, π, 4π/3, 2π. The solver finds none of them.
+    [
+      'sin x + sin(2x) = 0',
+      ['Add', ['Sin', 'x'], ['Sin', ['Multiply', 2, 'x']]],
+      0.1,
+      7,
+    ],
+    // Roots: π/2 and the eight multiples of π/13 in the interval. The
+    // solver finds only π/2.
+    [
+      'sin(13x) cos x = 0',
+      ['Multiply', ['Sin', ['Multiply', 13, 'x']], ['Cos', 'x']],
+      0.05,
+      2,
+    ],
+  ];
+
+  test.each(incomplete)('%s stays unevaluated', (_name, lhs, lo, hi) => {
+    const expr = ce.box([
+      'Solve',
+      ['Equal', lhs, 0],
+      ['Element', 'x', ['Interval', lo, hi]],
+    ]);
+    expect(isUnevaluated(expr)).toBe(true);
+  });
+
+  test('sin(x) sin(√2 x) = 0 over [1, 4] → π/√2, π', () => {
+    // The periods of the two factors have no common multiple. Each factor
+    // gives its own family in the domain, and a numeric scan of the product
+    // checks the union.
+    const actual = solutions(
+      ce.box([
+        'Solve',
+        [
+          'Equal',
+          ['Multiply', ['Sin', 'x'], ['Sin', ['Multiply', ['Sqrt', 2], 'x']]],
+          0,
+        ],
+        ['Element', 'x', ['Interval', 1, 4]],
+      ])
+    );
+    expect(actual.length).toBe(2);
+    expect(actual[0]).toBeCloseTo(Math.PI / Math.SQRT2, 12);
+    expect(actual[1]).toBeCloseTo(Math.PI, 12);
+  });
+});
+
+describe('SOLVE OVER A DOMAIN — the numeric scan that checks a root list', () => {
+  const solve = (
+    lhs: Expression,
+    rhs: Expression,
+    lo: Expression,
+    hi: Expression,
+    engine: ComputeEngine = ce
+  ) =>
+    engine.box([
+      'Solve',
+      ['Equal', lhs, rhs],
+      ['Element', 'x', ['Interval', lo, hi]],
+    ]);
+
+  // Near x = 10^8, a tolerance proportional to |x| (10^-6·|x| = 100) let a
+  // root that is not in the list match a root that is.
+  test('a partial list near 10^8 is not an answer', () => {
+    // Roots: the multiples of π/13 and the odd multiples of π/2. The solver
+    // finds only some of them.
+    expect(
+      isUnevaluated(
+        solve(
+          ['Multiply', ['Sin', ['Multiply', 13, 'x']], ['Cos', 'x']],
+          0,
+          100000000,
+          100000007
+        )
+      )
+    ).toBe(true);
+    // Roots: four multiples of π/13. The root finder gives the principal
+    // roots of sin(13x) = 0 (0 and π/13, period 2π/13), and the expansion
+    // gives all four.
+    const actual = solutions(
+      solve(['Sin', ['Multiply', 13, 'x']], 0, 100000000, 100000001)
+    );
+    expect(actual.length).toBe(4);
+    for (const [i, v] of actual.entries())
+      expect(v).toBeCloseTo(((413802853 + i) * Math.PI) / 13, 6);
+  });
+
+  // Near 10^17 the index k of a root kπ is above 2^53, where `k + 1` can be
+  // the same float as `k`: the expansion loop did not end.
+  test('a domain near 10^17 gives no answer, and no endless loop', () => {
+    expect(
+      isUnevaluated(solve(['Sin', 'x'], 0, 100000000000000000, 1e17 + 64))
+    ).toBe(true);
+  });
+
+  test('a complete list near 10^8 is still an answer', () => {
+    const actual = solutions(solve(['Sin', 'x'], 0, 100000000, 100000007));
+    expect(actual.length).toBe(2);
+    expect(actual[0]).toBeCloseTo(31830989 * Math.PI, 6);
+    expect(actual[1]).toBeCloseTo(31830990 * Math.PI, 6);
+  });
+
+  // A root where f touches zero between an end of the domain and the first
+  // sample of the scan.
+  test('a root that touches zero next to an end of the domain', () => {
+    // Roots: 6π/13 ≈ 1.449966 (sin(13x)^2 touches zero) and π/2. The solver
+    // finds only π/2.
+    expect(
+      isUnevaluated(
+        solve(
+          [
+            'Multiply',
+            ['Power', ['Sin', ['Multiply', 13, 'x']], 2],
+            ['Cos', 'x'],
+          ],
+          0,
+          1.4499,
+          1.6
+        )
+      )
+    ).toBe(true);
+    // The root π is in the first cell of the scan, and it is in the list.
+    const actual = solutions(solve(['Power', ['Sin', 'x'], 2], 0, 3.1415, 3.2));
+    expect(actual).toEqual([Math.PI]);
+  });
+
+  // x·√(cos x + 99/100) is not real between arccos(-0.99) and
+  // 2π - arccos(-0.99), and it is 0 at both ends of that interval.
+  test('a root at the edge of a region where f is not real', () => {
+    const lhs: Expression = [
+      'Multiply',
+      'x',
+      ['Sqrt', ['Add', ['Cos', 'x'], ['Rational', 99, 100]]],
+    ];
+    const edge = Math.acos(-0.99);
+    expect(Math.abs(Math.cos(2 * Math.PI - edge) + 0.99)).toBeLessThan(1e-15);
+    // The root `2π - arccos(-0.99) ≈ 3.28313` is in the list: the factor
+    // `√(cos x + 99/100)` gives its family in the domain. The scan checks
+    // the edges of the region where the function is not real.
+    const all = solutions(solve(lhs, 0, 0, 7));
+    expect(all.length).toBe(3);
+    expect(all[0]).toBe(0);
+    expect(all[1]).toBeCloseTo(edge, 12);
+    expect(all[2]).toBeCloseTo(2 * Math.PI - edge, 12);
+    const right = solutions(solve(lhs, 0, 3.1, 7));
+    expect(right.length).toBe(1);
+    expect(right[0]).toBeCloseTo(2 * Math.PI - edge, 12);
+    // The two roots in [0, 3.2] are in the list.
+    const actual = solutions(solve(lhs, 0, 0, 3.2));
+    expect(actual.length).toBe(2);
+    expect(actual[0]).toBe(0);
+    expect(actual[1]).toBeCloseTo(edge, 12);
+  });
+
+  // When the scan finds no root, the empty list is a decision.
+  test.each([
+    ['sin x = 0 over [0.1, 0.2]', ['Sin', 'x'], 0, 0.1, 0.2],
+    ['sin x = 2 over [0, 7]', ['Sin', 'x'], 2, 0, 7],
+    [
+      '√(cos x + 99/100) + 1 = 0 over [0, 7]',
+      ['Add', ['Sqrt', ['Add', ['Cos', 'x'], ['Rational', 99, 100]]], 1],
+      0,
+      0,
+      7,
+    ],
+  ] as Array<[string, Expression, Expression, number, number]>)(
+    '%s has no root',
+    (_name, lhs, rhs, lo, hi) => {
+      expect(solutions(solve(lhs, rhs, lo, hi))).toEqual([]);
+    }
+  );
+
+  // A trig function reads its argument in the angular unit of the engine,
+  // thus the period of `sin x` is 360 in degree mode. A half turn is π rad,
+  // 180 deg, 200 grad or 1/2 turn.
+  test.each([
+    ['rad', Math.PI],
+    ['deg', 180],
+    ['grad', 200],
+    ['turn', 0.5],
+  ] as const)('periodic roots in the angular unit %s', (unit, h) => {
+    const engine = new ComputeEngine();
+    engine.angularUnit = unit;
+    // `k` half turns. An end of the domain at a multiple of π is exact in
+    // radians.
+    const halfTurns = (k: number): Expression =>
+      unit === 'rad' ? ['Multiply', k, 'Pi'] : k * h;
+
+    // The upper end of the domain and the roots, in half turns
+    const cases: Array<
+      [lhs: Expression, rhs: Expression, hi: number, expected: number[]]
+    > = [
+      [['Sin', 'x'], ['Rational', 1, 2], 4, [1, 5, 13, 17].map((k) => k / 6)],
+      [['Sin', ['Multiply', 2, 'x']], 0, 2, [0, 0.5, 1, 1.5, 2]],
+      [['Add', ['Sin', 'x'], ['Cos', 'x']], 0, 4, [0.75, 1.75, 2.75, 3.75]],
+      [['Tan', 'x'], 1, 2, [0.25, 1.25]],
+      [['Sin', 'x'], 0, 0.5, [0]],
+    ];
+    for (const [lhs, rhs, hi, expected] of cases) {
+      const actual = solutions(solve(lhs, rhs, 0, halfTurns(hi), engine));
+      expect(actual.length).toBe(expected.length);
+      expected.forEach((k, i) => expect(actual[i]).toBeCloseTo(k * h, 10));
+      const f = engine.box(['Subtract', lhs, rhs]);
+      for (const x of actual) {
+        const y = f.subs({ x: engine.number(x) }).N().re;
+        expect(Math.abs(y)).toBeLessThan(1e-9);
+      }
+    }
+
+    // No root between 1/18 and 1/9 of a half turn (10 and 20 degrees)
+    expect(solutions(solve(['Sin', 'x'], 0, h / 18, h / 9, engine))).toEqual(
+      []
+    );
+  });
+});
+
+describe('SOLVE OVER A DOMAIN — a root list is given only when it is complete', () => {
+  const solveIn = (
+    f: Expression,
+    domain: Expression,
+    engine: ComputeEngine = ce
+  ) => engine.box(['Solve', f, ['Element', 'x', domain]]);
+
+  // Each value is a root of `f`, numerically.
+  const expectRoots = (f: Expression, roots: number[]) => {
+    const fn = ce.box(f);
+    for (const x of roots)
+      expect(Math.abs(fn.subs({ x: ce.number(x) }).N().re)).toBeLessThan(1e-9);
+  };
+
+  // Two principal roots 1.15·10^-10 apart give two families. Their numeric
+  // positions were compared to 10^-9 of the spacing, so one family was lost:
+  // the result was a list of 3 of the 6 roots.
+  test('two principal roots that are very near give two families', () => {
+    const f: Expression = [
+      'Multiply',
+      ['Subtract', ['Sin', 'x'], ['Rational', 1, 2]],
+      [
+        'Subtract',
+        ['Sin', 'x'],
+        ['Add', ['Rational', 1, 2], ['Power', 10, -10]],
+      ],
+    ];
+    const actual = solutions(solveIn(f, ['Interval', 0, 7]));
+    const a = Math.asin(0.5 + 1e-10);
+    const expected = [
+      Math.PI / 6,
+      a,
+      Math.PI - a,
+      (5 * Math.PI) / 6,
+      (13 * Math.PI) / 6,
+      2 * Math.PI + a,
+    ];
+    expect(actual.length).toBe(6);
+    expected.forEach((v, i) => expect(actual[i]).toBeCloseTo(v, 12));
+    expectRoots(f, actual);
+  });
+
+  // The root finder does not give all the roots of an equation with a
+  // function such as `BesselJ` or `Sinc`, and the scan cannot check it. The
+  // results were `[1]`.
+  test.each([
+    [
+      '(x - 1)·Haversine(x) over [0.5, 20]',
+      ['Multiply', ['Subtract', 'x', 1], ['Haversine', 'x']],
+      ['Interval', 0.5, 20],
+    ],
+    [
+      '(x - 1)·Sinc(x) over [0.5, 20]',
+      ['Multiply', ['Subtract', 'x', 1], ['Sinc', 'x']],
+      ['Interval', 0.5, 20],
+    ],
+    [
+      '(x - 1)·BesselJ(0, x) over [0.5, 10]',
+      ['Multiply', ['Subtract', 'x', 1], ['BesselJ', 0, 'x']],
+      ['Interval', 0.5, 10],
+    ],
+    // A factor that oscillates much faster than the trig terms can have
+    // roots between two samples of the scan.
+    [
+      'sin(x)·(BesselJ(0, 500x) + 1/100) over [3, 3.3]',
+      [
+        'Multiply',
+        ['Sin', 'x'],
+        ['Add', ['BesselJ', 0, ['Multiply', 500, 'x']], ['Rational', 1, 100]],
+      ],
+      ['Interval', 3, 3.3],
+    ],
+  ] as Array<[string, Expression, Expression]>)(
+    '%s stays unevaluated',
+    (_name, f, domain) => {
+      expect(isUnevaluated(solveIn(f, domain))).toBe(true);
+    }
+  );
+
+  test('a haversine is a periodic term of the equation', () => {
+    // hav(x) = (1 - cos x)/2 is 0 at 2kπ: no such root is in [0.5, 6].
+    expect(
+      solutions(
+        solveIn(
+          ['Multiply', ['Subtract', 'x', 1], ['Haversine', 'x']],
+          ['Interval', 0.5, 6]
+        )
+      )
+    ).toEqual([1]);
+    // A finite domain is enumerated: hav(πx) = 0 for each even x.
+    expect(
+      solutions(
+        solveIn(
+          [
+            'Multiply',
+            ['Subtract', 'x', 1],
+            ['Haversine', ['Multiply', 'Pi', 'x']],
+          ],
+          ['Range', -4, 4]
+        )
+      )
+    ).toEqual([-4, -2, 0, 1, 2, 4]);
+  });
+
+  // Over a domain that is not bounded, the principal roots are the answer
+  // only over the whole real line and the complex numbers. `sin(πx) = 0`
+  // over the integers was `[0]`, but each integer is a root.
+  test('a periodic equation over an unbounded domain', () => {
+    const sinPiX: Expression = ['Sin', ['Multiply', 'Pi', 'x']];
+    expect(isUnevaluated(solveIn(sinPiX, 'Integers'))).toBe(true);
+    expect(solutions(solveIn(sinPiX, ['Range', -3, 3]))).toEqual([
+      -3, -2, -1, 0, 1, 2, 3,
+    ]);
+    expect(
+      isUnevaluated(solveIn(['Sin', 'x'], ['Interval', 0, 'PositiveInfinity']))
+    ).toBe(true);
+    expect(
+      isUnevaluated(solveIn(['Multiply', 'x', ['Sin', 'x']], 'Integers'))
+    ).toBe(true);
+    // A finite set is enumerated: 1 is also a root.
+    expect(
+      solutions(solveIn(sinPiX, ['Set', 0, ['Rational', 1, 2], 1]))
+    ).toEqual([0, 1]);
+    // The principal roots over the real numbers
+    expect(solutions(solveIn(['Sin', 'x'], 'RealNumbers'))).toEqual([
+      0,
+      Math.PI,
+    ]);
+  });
+
+  // A root where f is flat: near the root π of sin(x)^10, |f| < 10^-16 on
+  // an interval of width 0.05. A sample in that interval was taken as the
+  // position of a root that is not in the list, and the list was rejected.
+  test('a root of high multiplicity', () => {
+    expect(
+      solutions(
+        solveIn(
+          ['Power', ['Sin', 'x'], 10],
+          ['Interval', 0, ['Multiply', 2, 'Pi']]
+        )
+      )
+    ).toEqual([0, Math.PI, 2 * Math.PI]);
+    expect(
+      solutions(solveIn(['Power', ['Cos', 'x'], 20], ['Interval', 0, 7]))
+    ).toEqual([Math.PI / 2, (3 * Math.PI) / 2]);
+    const f: Expression = [
+      'Multiply',
+      ['Power', ['Subtract', 'x', 1], 9],
+      ['Sin', 'x'],
+    ];
+    expect(solutions(solveIn(f, ['Interval', 0.5, 4]))).toEqual([1, Math.PI]);
+  });
+
+  // The principal roots represent the periodic families of a trig function.
+  // A function that the root finder cannot invert and that is not periodic
+  // has no such convention: the list `[1]` was only a part of the roots.
+  test('a function that is not periodic, over ℝ and without a domain', () => {
+    const f: Expression = [
+      'Multiply',
+      ['Subtract', 'x', 1],
+      ['BesselJ', 0, 'x'],
+    ];
+    expect(isUnevaluated(ce.box(['Solve', f, 'x']))).toBe(true);
+    expect(isUnevaluated(solveIn(f, 'RealNumbers'))).toBe(true);
+    // A trig function keeps its principal roots
+    expect(solutions(ce.box(['Solve', ['Sin', 'x'], 'x']))).toEqual([
+      0,
+      Math.PI,
+    ]);
+  });
+
+  // `x + e^x = 0` has the root -W(1) ≈ -0.567143, which the root finder does
+  // not find. The answer was `[2]`.
+  test('a factor with no closed-form root', () => {
+    const f: Expression = [
+      'Multiply',
+      ['Subtract', 'x', 2],
+      ['Add', 'x', ['Exp', 'x']],
+    ];
+    const w = -0.5671432904097838;
+    expect(Math.abs(w + Math.exp(w))).toBeLessThan(1e-15);
+    expect(isUnevaluated(ce.box(['Solve', f, 'x']))).toBe(true);
+    expect(isUnevaluated(solveIn(f, 'RealNumbers'))).toBe(true);
+    expect(isUnevaluated(solveIn(f, ['Interval', -1, 3]))).toBe(true);
+
+    // A factor with no root is shown to have none: these do not change
+    const cases: Array<[Expression, number[]]> = [
+      [
+        ['Multiply', ['Subtract', 'x', 2], ['Add', 'x', 3]],
+        [-3, 2],
+      ],
+      [['Multiply', ['Subtract', 'x', 2], ['Exp', 'x']], [2]],
+      [['Multiply', ['Subtract', 'x', 2], ['Add', ['Exp', 'x'], 1]], [2]],
+      [['Multiply', ['Subtract', 'x', 2], ['Add', ['Power', 'x', 2], 1]], [2]],
+      [['Multiply', 'x', ['Ln', 'x']], [1]],
+    ];
+    for (const [g, expected] of cases) {
+      expect(solutions(ce.box(['Solve', g, 'x']))).toEqual(expected);
+      expect(solutions(solveIn(g, 'RealNumbers'))).toEqual(expected);
+    }
+
+    // Over a bounded domain, the numeric scan can show that the list is
+    // complete: `Haversine(x)` gives no root, and has none in [0.5, 6].
+    expect(
+      solutions(
+        solveIn(
+          ['Multiply', ['Subtract', 'x', 1], ['Haversine', 'x']],
+          ['Interval', 0.5, 6]
+        )
+      )
+    ).toEqual([1]);
+  });
+
+  // `expr.solve()` returns `null` (no answer) for a list that is only a
+  // part of the roots. It returned `[1]` and `[2]`.
+  test('expr.solve() gives no partial list', () => {
+    const solve = (f: Expression) => ce.box(f).solve('x');
+    expect(
+      solve(['Multiply', ['Subtract', 'x', 1], ['BesselJ', 0, 'x']])
+    ).toBeNull();
+    expect(
+      solve(['Multiply', ['Subtract', 'x', 2], ['Add', 'x', ['Exp', 'x']]])
+    ).toBeNull();
+    const values = (f: Expression) =>
+      (solve(f) as ReadonlyArray<BoxedExpression>)
+        .map((r) => r.N().re)
+        .sort((a, b) => a - b);
+    expect(values(['Multiply', ['Subtract', 'x', 2], ['Exp', 'x']])).toEqual([
+      2,
+    ]);
+    expect(values(['Multiply', ['Subtract', 'x', 2], ['Add', 'x', 3]])).toEqual(
+      [-3, 2]
+    );
+    expect(values(['Multiply', 'x', ['Ln', 'x']])).toEqual([1]);
+    const sin = values(['Equal', ['Sin', 'x'], ['Rational', 1, 2]]);
+    expect(sin.length).toBe(2);
+    expect(sin[0]).toBeCloseTo(Math.PI / 6, 12);
+    expect(sin[1]).toBeCloseTo((5 * Math.PI) / 6, 12);
+  });
+
+  // The common roots of a list of equations in one unknown are the
+  // candidates of an equation that gives all its roots. A list where each
+  // equation gives only a part of its roots has no answer: it was `[2]`.
+  test('the common roots of equations that give a part of their roots', () => {
+    const f: Expression = [
+      'Equal',
+      ['Multiply', ['Subtract', 'x', 2], ['Add', 'x', ['Exp', 'x']]],
+      0,
+    ];
+    const g: Expression = [
+      'Equal',
+      [
+        'Multiply',
+        ['Subtract', 'x', 2],
+        ['Add', 'x', ['Exp', 'x']],
+        ['Add', 'x', 5],
+      ],
+      0,
+    ];
+    expect(isUnevaluated(ce.box(['Solve', ['List', f, g], 'x']))).toBe(true);
+    // `sin(πx) = 0` gives its principal roots: the only common root is 2
+    // (`sin(-0.567π)` is not 0).
+    expect(
+      solutions(
+        ce.box([
+          'Solve',
+          ['List', f, ['Equal', ['Sin', ['Multiply', 'Pi', 'x']], 0]],
+          'x',
+        ])
+      )
+    ).toEqual([2]);
+  });
+
+  // The alternatives of an `Or` have the union of their roots as solutions.
+  // When one alternative has no answer, the union is not an answer.
+  test('expr.solve() of alternatives with a partial list', () => {
+    const partial: Expression = [
+      'Equal',
+      ['Multiply', ['Subtract', 'x', 1], ['BesselJ', 0, 'x']],
+      0,
+    ];
+    expect(ce.box(['Or', ['Equal', 'x', 3], partial]).solve('x')).toBeNull();
+    const both = ce
+      .box(['Or', ['Equal', 'x', 3], ['Equal', 'x', 4]])
+      .solve('x') as ReadonlyArray<BoxedExpression>;
+    expect(both.map((r) => r.re)).toEqual([3, 4]);
+  });
+
+  // `explain('solve')` gives the same result as `solve()`: the explanation
+  // of a partial list says that there is no complete answer, and why.
+  test('explain("solve") of a partial list', () => {
+    const product = ce.box([
+      'Multiply',
+      ['Subtract', 'x', 2],
+      ['Add', 'x', ['Exp', 'x']],
+    ]);
+    const e = product.explain('solve', { variable: 'x' });
+    expect(e.result.operator).toBe('Solve');
+    expect(e.steps.at(-1)!.id).toBe('solve.incomplete-factor');
+    expect(e.steps.at(-1)!.description).toMatch(/^No complete answer/);
+
+    // The unknown in a function that the solver cannot invert, with no
+    // factor of a product
+    const bessel = ce.box(['Subtract', ['BesselJ', 0, 'x'], 'x']);
+    expect(bessel.solve('x')).toBeNull();
+    const b = bessel.explain('solve', { variable: 'x' });
+    expect(b.result.operator).toBe('Solve');
+    expect(b.steps.at(-1)!.id).toBe('solve.incomplete-non-invertible');
+
+    // A complete list is unchanged
+    const quadratic = ce.box(['Equal', ['Power', 'x', 2], 4]);
+    const q = quadratic.explain('solve', { variable: 'x' });
+    expect(q.result.operator).toBe('List');
+    expect(q.result.ops!.map((r) => r.re).sort()).toEqual([-2, 2]);
+  });
+
+  // A root template that the host adds to `ce.solveRules` is the host's
+  // claim of a solution: it is used also for a function that the solver
+  // cannot invert. J₁(0) = 0.
+  test('a user root template for a function the solver cannot invert', () => {
+    const engine = new ComputeEngine();
+    const j1: Expression = ['BesselJ', 1, 'x'];
+    expect(engine.box(j1).solve('x')).toBeNull();
+    engine.solveRules.push({ match: ['BesselJ', 1, '_x'], replace: 0 });
+    const roots = engine.box(j1).solve('x') as ReadonlyArray<BoxedExpression>;
+    expect(roots.map((r) => r.re)).toEqual([0]);
+    expect(solutions(engine.box(['Solve', j1, 'x']))).toEqual([0]);
+    const product: Expression = ['Multiply', ['Subtract', 'x', 1], j1];
+    expect(solutions(engine.box(['Solve', product, 'x']))).toEqual([0, 1]);
+    expect(
+      engine.box(product).explain('solve', { variable: 'x' }).result.operator
+    ).toBe('List');
+    // A candidate of a template that the check rejects does not show that
+    // there is no root: J₀(2.405) is not 0.
+    const other = new ComputeEngine();
+    other.solveRules.push({
+      match: ['BesselJ', 0, '_x'],
+      replace: ['Rational', 2405, 1000],
+    });
+    expect(isUnevaluated(other.box(['Solve', ['BesselJ', 0, 'x'], 'x']))).toBe(
+      true
+    );
+    // For the same reason, such a rejected candidate does not show that a
+    // factor of a product has no root: the template J₀(x) → 0 is wrong, and
+    // J₀ has real roots (2.405, …), thus `[1]` is not all the roots.
+    const zero = new ComputeEngine();
+    zero.solveRules.push({ match: ['BesselJ', 0, '_x'], replace: 0 });
+    const j0Product: Expression = [
+      'Multiply',
+      ['Subtract', 'x', 1],
+      ['BesselJ', 0, 'x'],
+    ];
+    expect(zero.box(j0Product).solve('x')).toBeNull();
+    expect(isUnevaluated(zero.box(['Solve', j0Product, 'x']))).toBe(true);
+  });
+
+  // A root written with the library π names `Pi` in its MathJSON, and it
+  // has the user value when it is boxed again.
+  test('a user value of Pi', () => {
+    const engine = new ComputeEngine();
+    engine.pushScope();
+    engine.declare('Pi', { value: 3 });
+    // `[0, Pi]` boxed again to `[0, 3]`
+    expect(
+      isUnevaluated(
+        solveIn(['Multiply', 'x', ['Sin', 'x']], ['Interval', 0, 4], engine)
+      )
+    ).toBe(true);
+    expect(isUnevaluated(solveIn(['Sin', 'x'], 'RealNumbers', engine))).toBe(
+      true
+    );
+    // The root π is not in the domain
+    expect(
+      solutions(
+        solveIn(
+          ['Multiply', ['Subtract', 'x', 1], ['Sin', 'x']],
+          ['Interval', 0.5, 2],
+          engine
+        )
+      )
+    ).toEqual([1]);
+    engine.popScope();
+
+    // In degrees, the half turn is 180 and the roots hold no π
+    const deg = new ComputeEngine();
+    deg.angularUnit = 'deg';
+    deg.pushScope();
+    deg.declare('Pi', { value: 3 });
+    const r = solveIn(['Sin', 'x'], ['Interval', 0, 360], deg).evaluate();
+    expect(r.json).toEqual(['List', 0, 180, 360]);
+    deg.popScope();
   });
 });
 
@@ -557,9 +1388,9 @@ describe('SOLVE — assumption bounds routed through root filtering', () => {
     const e = new ComputeEngine();
     e.assume(e.parse('n > 0'));
     // Via the `Solve` operator.
-    expect(roots(e.box(['Solve', ['Equal', ['Power', 'n', 2], 16], 'n']))).toEqual(
-      [4]
-    );
+    expect(
+      roots(e.box(['Solve', ['Equal', ['Power', 'n', 2], 16], 'n']))
+    ).toEqual([4]);
     // Via `expr.solve('n')` (same outer boundary).
     const m = e.parse('n^2 = 16').solve('n') as BoxedExpression[];
     expect(m.map((x) => x.N().re).sort((a, b) => a - b)).toEqual([4]);
@@ -568,16 +1399,18 @@ describe('SOLVE — assumption bounds routed through root filtering', () => {
   test('assume(n ∈ 1..10) keeps the in-range root of n^2 = 16', () => {
     const e = new ComputeEngine();
     e.assume(e.parse('n \\in 1..10'));
-    expect(roots(e.box(['Solve', ['Equal', ['Power', 'n', 2], 16], 'n']))).toEqual(
-      [4]
-    );
+    expect(
+      roots(e.box(['Solve', ['Equal', ['Power', 'n', 2], 16], 'n']))
+    ).toEqual([4]);
   });
 
   test('assume(n ∈ 1..10) drops a root past the upper bound → decided empty', () => {
     const e = new ComputeEngine();
     e.assume(e.parse('n \\in 1..10'));
     // n^2 = 400 → {-20, 20}; 20 > 10 → both dropped, empty List is the answer.
-    const r = e.box(['Solve', ['Equal', ['Power', 'n', 2], 400], 'n']).evaluate();
+    const r = e
+      .box(['Solve', ['Equal', ['Power', 'n', 2], 400], 'n'])
+      .evaluate();
     expect(r.operator).toBe('List');
     expect(r.ops!.length).toBe(0);
   });
@@ -585,17 +1418,17 @@ describe('SOLVE — assumption bounds routed through root filtering', () => {
   test('NotEqual assumption drops the excluded root', () => {
     const e = new ComputeEngine();
     e.assume(e.parse('x \\ne 3'));
-    expect(roots(e.box(['Solve', ['Equal', ['Power', 'x', 2], 9], 'x']))).toEqual([
-      -3,
-    ]);
+    expect(
+      roots(e.box(['Solve', ['Equal', ['Power', 'x', 2], 9], 'x']))
+    ).toEqual([-3]);
   });
 
   test('an assumption on a different symbol does not filter', () => {
     const e = new ComputeEngine();
     e.assume(e.parse('m > 0')); // constrains `m`, not the unknown `n`
-    expect(roots(e.box(['Solve', ['Equal', ['Power', 'n', 2], 16], 'n']))).toEqual(
-      [-4, 4]
-    );
+    expect(
+      roots(e.box(['Solve', ['Equal', ['Power', 'n', 2], 16], 'n']))
+    ).toEqual([-4, 4]);
   });
 
   test('symbolic/parametric root kept when the bound is undecidable', () => {
@@ -641,7 +1474,11 @@ describe('SOLVE — collection-shaped first argument (lifted constraints)', () =
   const digitEq: Expression = [
     'Equal',
     ['Add', ['Multiply', 100, 'a'], ['Multiply', 10, 'b'], 'c'],
-    ['Multiply', 11, ['Add', ['Power', 'a', 2], ['Power', 'b', 2], ['Power', 'c', 2]]],
+    [
+      'Multiply',
+      11,
+      ['Add', ['Power', 'a', 2], ['Power', 'b', 2], ['Power', 'c', 2]],
+    ],
   ];
 
   test('full LaTeX expression with brace-set constraints and brace variable list', () => {
@@ -665,7 +1502,11 @@ describe('SOLVE — collection-shaped first argument (lifted constraints)', () =
   });
 
   test('Set variable list: Solve(x^2=4, {x}) returns both roots', () => {
-    const expr = ce.box(['Solve', ['Equal', ['Power', 'x', 2], 4], ['Set', 'x']]);
+    const expr = ce.box([
+      'Solve',
+      ['Equal', ['Power', 'x', 2], 4],
+      ['Set', 'x'],
+    ]);
     expect(solutions(expr)).toEqual([-2, 2]);
   });
 
@@ -786,11 +1627,21 @@ describe('SOLVE — trailing bare domain-name spec (Mathematica)', () => {
 
   test('bare Integers domain: no integer solution decides []', () => {
     // 2x = 3 → x = 3/2, not an integer → [] (a decision, via the integer path).
-    const linear = ce.box(['Solve', ['Equal', ['Multiply', 2, 'x'], 3], 'x', 'Integers']);
+    const linear = ce.box([
+      'Solve',
+      ['Equal', ['Multiply', 2, 'x'], 3],
+      'x',
+      'Integers',
+    ]);
     expect(solutions(linear)).toEqual([]);
 
     // x^2 = 2 → ±√2, irrational → [] over the integers.
-    const quad = ce.box(['Solve', ['Equal', ['Power', 'x', 2], 2], 'x', 'Integers']);
+    const quad = ce.box([
+      'Solve',
+      ['Equal', ['Power', 'x', 2], 2],
+      'x',
+      'Integers',
+    ]);
     expect(solutions(quad)).toEqual([]);
   });
 
@@ -851,5 +1702,54 @@ describe('SOLVE — inequality/predicate side conditions', () => {
       [1, 4],
       [2, 3],
     ]);
+  });
+});
+
+describe('SOLVE OVER A DOMAIN — complete root lists', () => {
+  const solveIn = (latex: string, lo: number, hi: number) =>
+    ce.box([
+      'Solve',
+      ce.parse(latex).json,
+      ['Element', 'x', ['Interval', lo, hi]],
+    ]);
+
+  test('a partial list is not certified when a missing root is very near a listed one', () => {
+    // Roots: 0 and about 5·10^-9. The factor x + e^x - 1 - 10^-8 is not
+    // solved, and its root is within the tolerance of the scan from 0.
+    expect(
+      isUnevaluated(solveIn('\\sin(x)\\cdot(x+e^x-1-10^{-8})=0', -1, 1))
+    ).toBe(true);
+  });
+
+  test('a partial list is certified when each root found is resolved', () => {
+    // The factor x + e^x + 5 is not solved, but it has no root in [1, 4]
+    // (its root is near -5): the only root in the domain is π.
+    expect(solutions(solveIn('\\sin(x)\\cdot(x+e^x+5)=0', 1, 4))).toEqual([
+      Math.PI,
+    ]);
+  });
+
+  test('ln(x^2) = 2 over [-5, 5] → -e, e', () => {
+    const actual = solutions(solveIn('\\ln(x^2)=2', -5, 5));
+    expect(actual.length).toBe(2);
+    expect(actual[0]).toBeCloseTo(-Math.E, 12);
+    expect(actual[1]).toBeCloseTo(Math.E, 12);
+  });
+
+  test('a product: each periodic factor gives its family in the domain', () => {
+    const a = solutions(solveIn('(x-1)\\cos(x)=0', 0, 5));
+    expect(a.length).toBe(3);
+    expect(a[0]).toBeCloseTo(1, 12);
+    expect(a[1]).toBeCloseTo(Math.PI / 2, 12);
+    expect(a[2]).toBeCloseTo((3 * Math.PI) / 2, 12);
+    const b = solutions(solveIn('e^x\\sin(x)=0', -1, 7));
+    expect(b.length).toBe(3);
+    b.forEach((v, i) => expect(v).toBeCloseTo(i * Math.PI, 12));
+  });
+
+  test('sin(2x) = 0 over [0, 7] uses the period π', () => {
+    const actual = solutions(solveIn('\\sin(2x)=0', 0, 7));
+    expect(actual.length).toBe(5);
+    actual.forEach((v, i) => expect(v).toBeCloseTo((i * Math.PI) / 2, 12));
   });
 });

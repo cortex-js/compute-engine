@@ -40,6 +40,11 @@ export const INVERSE_TRIG_OPERATORS = new Set([
   // Evaluates as 2·arcsin(√z): its result is an angle. Result scaling is
   // linear, so the factor of 2 composes with the unit conversion.
   'InverseHaversine',
+  // The phase angle of a complex number is in the engine's unit, as the
+  // result of `Arctan2` is. Every target lowers it to a radian value
+  // (`Math.atan2`, `_IA.atan2`, `atan`, `np.angle`, or `0`/`π` for a real
+  // operand), so the compiled result is scaled the same way.
+  'Argument',
 ]);
 
 /**

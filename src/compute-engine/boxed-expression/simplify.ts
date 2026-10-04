@@ -17,8 +17,15 @@ import {
   rebindEscaping,
   hasAssignedVariable,
   assignedVariableNames,
+  isOperatorDef,
+  isValueDef,
 } from './utils.js';
 import { markShieldDeclaration } from './binders.js';
+import {
+  libraryNamesShadowedIn,
+  shadowedLibraryNames,
+  shadowsLibraryName,
+} from '../library-shadowing.js';
 import type {
   Expression,
   SimplifyOptions,
@@ -51,6 +58,11 @@ type InternalSimplifyOptions = SimplifyOptions & {
   /** Set on the inner call of the binder-body pass (see the end of
    * `simplify()`) so that pass cannot nest. */
   noBinderBodyPass?: boolean;
+  /** Set on the call that simplifies the expression in which each
+   * occurrence of a shadowed library name is replaced by an opaque name
+   * (`simplifyShadowedCallsMasked()`), so that the replacement is not done
+   * again. */
+  shadowedCallsMasked?: boolean;
 };
 
 const BASIC_ARITHMETIC = [
@@ -75,6 +87,56 @@ function containsConstructibleTrig(expr: Expression): boolean {
   if (CONSTRUCTIBLE_TRIG.includes(expr.operator)) return true;
   if (!isFunction(expr)) return false;
   return expr.ops.some((op) => containsConstructibleTrig(op));
+}
+
+// Odd and even functions of one argument whose simplify rules move the sign
+// out of a negated argument: f(-x) = -f(x) or f(-x) = f(x). The rules are in
+// `symbolic/simplify-trig.ts`, `symbolic/simplify-hyperbolic.ts` and
+// `symbolic/simplify-rules.ts`. Keep this list the same as the functions of
+// those rules. The circular functions are not in this list, because
+// `containsConstructibleTrig()` already selects them.
+const ODD_EVEN_FUNCTIONS = new Set([
+  'Sinh',
+  'Tanh',
+  'Coth',
+  'Csch',
+  'Cosh',
+  'Sech',
+  'Arcsin',
+  'Arctan',
+  'Arccsc',
+  'Arsinh',
+  'Artanh',
+  'Arcsch',
+  'SinIntegral',
+  'SinhIntegral',
+  'Erf',
+  'Erfi',
+  'FresnelS',
+  'FresnelC',
+]);
+
+/**
+ * Check if an expression contains a call f(-x) of an odd or even function
+ * f, where the argument is `Negate(x)` or a finite negative real number. In
+ * a sum or a product, such an operand must be simplified, so that the sign
+ * moves out of the argument: then `f(1) - f(-1)` becomes `2f(1)` and
+ * `f(x) + f(-x)` becomes `0` for an odd f. A user definition that shadows
+ * the library function has no sign rule, so its call is not selected.
+ */
+function containsNegatedOddEvenCall(expr: Expression): boolean {
+  if (!isFunction(expr)) return false;
+  if (
+    ODD_EVEN_FUNCTIONS.has(expr.operator) &&
+    expr.nops === 1 &&
+    !shadowsLibraryName(expr.engine, expr.operator)
+  ) {
+    const arg = expr.op1;
+    if (isFunction(arg, 'Negate')) return true;
+    if (isNumber(arg) && arg.isNegative === true && arg.isFinite === true)
+      return true;
+  }
+  return expr.ops.some((op) => containsNegatedOddEvenCall(op));
 }
 
 /**
@@ -334,6 +396,24 @@ export function simplify(
   const ce = expr.engine;
 
   //
+  // 1b/ The standard rules and the `fu` and `trig` strategies use identities
+  // of the library functions. When a user definition, a function parameter
+  // or a block local shadows a library name, these identities are false for
+  // its calls. So the name of each call is replaced by an opaque operator
+  // first (see `simplifyShadowedCallsMasked()`). A caller that gives its own
+  // rules decides what they apply to, so this is not done for its rules. The
+  // `fu` strategy does not use the rules of the caller, so it is always done
+  // for `fu`.
+  //
+  if (
+    (options?.rules === undefined || options.strategy === 'fu') &&
+    !options?.shadowedCallsMasked
+  ) {
+    const masked = simplifyShadowedCallsMasked(expr, options, steps);
+    if (masked !== undefined) return masked;
+  }
+
+  //
   // 2/ If the 'fu' strategy is requested, apply the Fu algorithm
   //
   if (options?.strategy === 'fu') {
@@ -384,10 +464,26 @@ export function simplify(
   //
   if (options?.strategy === 'trig') {
     const converted = expToTrig(expr);
-    if (!sameSyntactic(converted, expr)) {
+    // The conversion writes calls of the library `Cos` and `Sin`. Where a
+    // user definition, a function parameter or a block local shadows one of
+    // these names, the new call is a call of the user function, so the
+    // result is not equal to the input, and it is not used. With the
+    // standard rules, the calls of shadowed names that were in the input
+    // are opaque symbols at this point (step 1b), so each call that the
+    // search finds is a new one. With the rules of a caller, a call that was
+    // in the input also prevents the conversion.
+    if (
+      !sameSyntactic(converted, expr) &&
+      !hasShadowedOccurrence(converted, shadowedLibraryNames(ce))
+    ) {
       expr = converted;
       steps.push({ value: expr, because: 'exp-to-trig' });
     }
+    // The conversion above rewrites the whole expression, so the nested
+    // calls do not do it again. A nested call simplifies a function body or
+    // a block without the expression that contains it, so it cannot see a
+    // parameter or a block local that shadows `Cos` or `Sin`.
+    options = { ...options, strategy: 'default' };
     // fall through to the standard rule loop to simplify the trig form
   }
 
@@ -836,7 +932,8 @@ function simplifyOperands(
       if (
         x.operator === 'Sum' ||
         x.operator === 'Product' ||
-        containsConstructibleTrig(x)
+        containsConstructibleTrig(x) ||
+        containsNegatedOddEvenCall(x)
       )
         simplifiedOps.push(full(x, i));
       // Simplify Ln/Log operands within Add/Multiply to enable term cancellation
@@ -1242,6 +1339,337 @@ function handledNanOperand(expr: Expression): Expression | undefined {
   if (result === undefined || !isNumber(result) || result.isNaN !== true)
     return undefined;
   return result;
+}
+
+/**
+ * The definition of `name` in the system scope, where the standard library
+ * is installed, or `undefined` when the library does not define the name.
+ */
+function libraryDefinition(ce: Expression['engine'], name: string) {
+  return ce.contextStack[0]?.lexicalScope.bindings.get(name);
+}
+
+/**
+ * True when operand `i` of `expr` binds a name, and is not a use of the
+ * name: a parameter of a function literal, or the name that a `Declare` or
+ * an `Assign` defines. A library constant name, such as `Pi`, can be a
+ * parameter or a block local, and it must stay a name in these operands.
+ */
+function isBindingOperand(expr: Expression, i: number): boolean {
+  if (expr.operator === 'Function') return i > 0;
+  return i === 0 && (expr.operator === 'Declare' || expr.operator === 'Assign');
+}
+
+/**
+ * `expr` with the operands `ops`.
+ *
+ * A function literal and an expression with a local scope (a block, a sum)
+ * keep their local scope, and are not canonicalized again: the canonical
+ * handler of `Function` would wrap the body again, and the canonical form
+ * of a body is made in its own scope. An expression with an operand that is
+ * not canonical (the index of `Limits`, which stays raw) is not
+ * canonicalized again either: that operand would be canonicalized outside
+ * its scope. Other canonical expressions are canonicalized again, because a
+ * new operand can change their canonical form (the order of the operands).
+ */
+function withOperands(expr: Expression, ops: Expression[]): Expression {
+  const ce = expr.engine;
+  if (
+    expr.operator === 'Function' ||
+    expr.localScope !== undefined ||
+    ops.some((x) => !(x.isCanonical || x.isStructural))
+  )
+    return ce._fn(expr.operator, ops, {
+      scope: expr.localScope,
+      canonical: expr.isCanonical,
+    });
+  if (expr.isCanonical) return ce.function(expr.operator, ops);
+  return ce.function(expr.operator, ops, { form: 'structural' });
+}
+
+/**
+ * `expr`, with each occurrence of a shadowed library name replaced by the
+ * value that `f` returns for it. When `f` returns `undefined`, the
+ * occurrence is kept.
+ *
+ * An occurrence is a call of a name that the library defines as a function,
+ * or a symbol of a name that the library defines as a constant (such as
+ * `Pi`). Other names are not occurrences, because no library identity
+ * applies to them: a user variable named `N` is not a call of the library
+ * function `N`, and a user variable named `m` or `s` replaces a library unit
+ * symbol (the meter, the second), which is not a constant.
+ *
+ * The operands of a call occurrence are searched for other occurrences
+ * first, and `f` receives these operands, with their occurrences replaced,
+ * as its third argument. When `f` returns `undefined` for a call, the call is
+ * kept with its original operands: a caller that only searches returns
+ * `undefined` for each occurrence.
+ *
+ * The shadowed names are `names`, the library names that a user definition
+ * in the current scope chain shadows (`shadowedLibraryNames()`). Inside a
+ * function literal, its parameters with a library name are added, and
+ * inside an expression with a local scope (a function body, a block), the
+ * library names that the bindings of this scope shadow are added
+ * (`libraryNamesShadowedIn()`). These local scopes are not in the current
+ * scope chain while the expression is simplified, so
+ * `shadowedLibraryNames()` does not find them.
+ *
+ * `f` also receives the innermost local scope that contains the
+ * occurrence.
+ */
+function mapShadowedOccurrences(
+  expr: Expression,
+  names: ReadonlySet<string>,
+  scope: Expression['localScope'],
+  f: (
+    x: Expression,
+    scope: Expression['localScope'],
+    ops?: Expression[]
+  ) => Expression | undefined
+): Expression {
+  const ce = expr.engine;
+  if (isSymbol(expr)) {
+    if (!names.has(expr.symbol)) return expr;
+    const def = libraryDefinition(ce, expr.symbol);
+    if (isValueDef(def) && def.value.isConstant) return f(expr, scope) ?? expr;
+    return expr;
+  }
+  if (!isFunction(expr)) return expr;
+  const isCall =
+    names.has(expr.operator) &&
+    isOperatorDef(libraryDefinition(ce, expr.operator));
+
+  let inner = names;
+  const add = (name: string) => {
+    if (inner.has(name) || libraryDefinition(ce, name) === undefined) return;
+    if (inner === names) inner = new Set(names);
+    (inner as Set<string>).add(name);
+  };
+  if (expr.operator === 'Function')
+    for (const p of expr.ops.slice(1)) if (isSymbol(p)) add(p.symbol);
+  const local = expr.localScope;
+  if (local !== undefined)
+    for (const name of libraryNamesShadowedIn(ce, local)) add(name);
+
+  let changed = false;
+  const ops = expr.ops.map((op, i) => {
+    if (isBindingOperand(expr, i)) return op;
+    const r = mapShadowedOccurrences(op, inner, local ?? scope, f);
+    if (r !== op) changed = true;
+    return r;
+  });
+  if (isCall) return f(expr, scope, ops) ?? expr;
+  return changed ? withOperands(expr, ops) : expr;
+}
+
+/** True when `expr` has an occurrence of a shadowed library name (see
+ * `mapShadowedOccurrences()`). */
+function hasShadowedOccurrence(
+  expr: Expression,
+  names: ReadonlySet<string>
+): boolean {
+  let found = false;
+  mapShadowedOccurrences(expr, names, undefined, () => {
+    found = true;
+    return undefined;
+  });
+  return found;
+}
+
+/** True when `expr` has a function literal or an expression with a local
+ * scope (a function body, a block, a sum). Their bindings can shadow a
+ * library name (a parameter `Sin`), see `mapShadowedOccurrences()`. */
+function hasScopedNode(expr: Expression): boolean {
+  if (!isFunction(expr)) return false;
+  if (expr.operator === 'Function' || expr.localScope !== undefined)
+    return true;
+  return expr.ops.some(hasScopedNode);
+}
+
+/**
+ * Simplify `expr` with each occurrence of a shadowed library name replaced
+ * by an opaque name, then put the occurrences back in each step. Return
+ * `undefined` when `expr` has no such occurrence, which is the usual case.
+ * See `mapShadowedOccurrences()` for what an occurrence is.
+ *
+ * The standard rules, the Fu transformations and the `trig` strategy are
+ * identities of the library functions. They select a function by its name,
+ * also when the call is an operand of a sum or a product:
+ * `sin(x)² + cos(x)² → 1`, `sin(0) → 0`, `√x·√x → x`. With a user
+ * definition `Sin(t) := t + 1`, these identities are false for a call of
+ * `Sin`.
+ *
+ * In a call, only the name of the function is replaced: `Sin(k)` becomes
+ * `_shadowed1(k)`, where `_shadowed1` is an operator with no definition
+ * other than its signature. No rule selects this name, and the operator
+ * has no `evaluate` handler, no special values and no flags (it is not
+ * commutative, idempotent or an involution), so no identity of the library
+ * function applies to its calls. The rewrites that are true for every
+ * function still apply: `Sin(x)·Sin(x)` becomes `Sin(x)²`, and the calls in
+ * `Sin(x)² + Sin(x)` keep their number. The arguments stay visible, so the
+ * rules see on which variables a call depends: in `Sum(Sin(k), (k, 1, n))`
+ * the summand depends on the index `k`, and the sum is not done as the sum
+ * of a constant. A shadowed constant (a user `Pi`) has no arguments, so it
+ * is replaced by an opaque symbol.
+ *
+ * The calls of the same name in the same local scope get the same operator,
+ * and the equal constants in the same local scope get the same symbol, so
+ * the rules see that they are equal. An occurrence in another local scope
+ * gets another name, because its name can have another definition there (a
+ * parameter `Sin` and a global user function `Sin`). The result type of an
+ * operator is the type of its calls (`unknown` when the calls have different
+ * types), and each symbol has the type of its constant, so a rule that reads
+ * the sign or the domain of a value still applies. The opaque names are
+ * declared in a scope that is discarded after the simplification, and the
+ * returned steps do not contain them.
+ */
+function simplifyShadowedCallsMasked(
+  expr: Expression,
+  options: Partial<InternalSimplifyOptions> | undefined,
+  steps: RuleSteps
+): RuleSteps | undefined {
+  const ce = expr.engine;
+  const names = shadowedLibraryNames(ce);
+  // With no shadowed name in the current scope chain, only a local scope in
+  // `expr` can shadow a library name. Without one, skip the search.
+  if (names.size === 0 && !hasScopedNode(expr)) return undefined;
+
+  // An occurrence is identified by its name, by whether it is a call, and
+  // by its innermost local scope.
+  type Occurrence = {
+    name: string;
+    isCall: boolean;
+    scope: Expression['localScope'];
+    /** The first occurrence: the constant symbol, or a call */
+    value: Expression;
+    /** The types of the occurrences */
+    types: Set<string>;
+    /** The opaque name */
+    mask?: string;
+    /** For a constant, the opaque symbol */
+    symbol?: Expression;
+  };
+  const found: Occurrence[] = [];
+  const indexOf = (x: Expression, scope: Expression['localScope']) => {
+    const isCall = isFunction(x);
+    const name = isCall ? x.operator : isSymbol(x) ? x.symbol : '';
+    return found.findIndex(
+      (o) => o.scope === scope && o.isCall === isCall && o.name === name
+    );
+  };
+  mapShadowedOccurrences(expr, names, undefined, (x, scope) => {
+    const i = indexOf(x, scope);
+    if (i >= 0) found[i].types.add(x.type.toString());
+    else
+      found.push({
+        name: isFunction(x) ? x.operator : isSymbol(x) ? x.symbol : '',
+        isCall: isFunction(x),
+        scope,
+        value: x,
+        types: new Set([x.type.toString()]),
+      });
+    return undefined;
+  });
+  if (found.length === 0) return undefined;
+
+  // The name of each opaque operator or symbol is not used in `expr` and has
+  // no definition in the current scope chain.
+  const used = new Set(expr.symbols);
+  let count = 0;
+  const freshName = () => {
+    for (;;) {
+      const name = `_shadowed${++count}`;
+      if (!used.has(name) && ce.lookupDefinition(name) === undefined)
+        return name;
+    }
+  };
+
+  // A call with the operator `name`, canonical or structural like `like`
+  const call = (name: string, ops: Expression[], like: Expression) =>
+    like.isCanonical
+      ? ce._fn(name, ops)
+      : ce.function(name, ops, { form: 'structural' });
+
+  const occurrences = new Map<string, Occurrence>();
+  let inner: RuleSteps | undefined;
+  ce.pushScope();
+  const maskScope = ce.context.lexicalScope;
+  try {
+    for (const o of found) {
+      // A type that `declare` does not accept, or that makes a function
+      // definition for a constant, is replaced by `unknown`.
+      const type = o.types.size === 1 ? [...o.types][0] : 'unknown';
+      for (const t of [type, 'unknown']) {
+        const name = freshName();
+        try {
+          if (o.isCall) ce.declare(name, { signature: `(any*) -> ${t}` });
+          else ce.declare(name, { type: t });
+        } catch {
+          continue;
+        }
+        if (!o.isCall) {
+          o.symbol = ce._bindingSymbol(name, maskScope);
+          if (o.symbol === undefined) continue;
+        }
+        o.mask = name;
+        occurrences.set(name, o);
+        break;
+      }
+    }
+    if (found.every((o) => o.mask !== undefined)) {
+      const masked = mapShadowedOccurrences(
+        expr,
+        names,
+        undefined,
+        (x, scope, ops) => {
+          const o = found[indexOf(x, scope)];
+          return ops === undefined ? o.symbol : call(o.mask!, ops, x);
+        }
+      );
+      inner = simplify(masked, { ...options, shadowedCallsMasked: true });
+    }
+  } finally {
+    ce.popScope();
+  }
+  if (inner === undefined) return undefined;
+
+  // A call of an opaque operator is made again with the original name, in
+  // the local scope of the occurrence, so that the name has the same
+  // definition as in the occurrence (a parameter `Sin`).
+  const unmask = (x: Expression): Expression => {
+    if (isSymbol(x)) {
+      const o = occurrences.get(x.symbol);
+      if (o === undefined) return x;
+      if (!o.isCall) return o.value;
+      // The name of an opaque operator as an operand (`Derivative(_shadowed1)`)
+      return ce._inScope(o.scope, () => ce.symbol(o.name));
+    }
+    if (!isFunction(x)) return x;
+    let changed = false;
+    const ops = x.ops.map((op) => {
+      const r = unmask(op);
+      if (r !== op) changed = true;
+      return r;
+    });
+    const o = occurrences.get(x.operator);
+    if (o !== undefined && o.isCall)
+      return ce._inScope(o.scope, () => call(o.name, ops, x));
+    return changed ? withOperands(x, ops) : x;
+  };
+
+  // The first step of `inner` is the masked `expr`.
+  for (const step of inner.slice(1)) {
+    const value = unmask(step.value);
+    if (sameSyntactic(value, steps.at(-1)!.value)) continue;
+    const result: RuleStep = { ...step, value };
+    if (step.substeps)
+      result.substeps = step.substeps.map((s) => ({
+        ...s,
+        value: unmask(s.value),
+      }));
+    steps.push(result);
+  }
+  return steps;
 }
 
 function simplifyNonCommutativeFunction(

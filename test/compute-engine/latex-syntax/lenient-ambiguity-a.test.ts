@@ -82,6 +82,7 @@ describe('ambiguous-exponent-end', () => {
     'e^-x/2',
     'x^pi/2',
     'x^1/2',
+    'e^x sin x',
   ]);
   expectNotReported('ambiguous-exponent-end', [
     'x^2 y',
@@ -90,7 +91,6 @@ describe('ambiguous-exponent-end', () => {
     'e^(2)pi',
     'e^x',
     'e^x dx',
-    'e^x sin x',
     'x^2 + y',
   ]);
 

@@ -1,4 +1,10 @@
 import { ComputeEngine } from '../../src/compute-engine';
+import { compile } from '../../src/compile';
+import {
+  executeEpsil,
+  parseEpsil,
+  resolveLibraryNames,
+} from '../../src/epsil';
 
 /**
  * Regression tests for the nested-`Block` scope-capture defect
@@ -526,5 +532,169 @@ describe('captureClosures: scoped-expression re-rooting', () => {
         ['Limits', 'i', 1, 'n'],
       ])
     ).toBe('12');
+  });
+});
+
+/**
+ * A lazy collection (`Map`, `Filter`, …) computes its elements when they are
+ * read, and it finds its function and its sources by name at that time. When
+ * the collection is the value of a block or of a function call, the read
+ * happens after the block or the call has ended, where the names of its locals
+ * do not resolve: `Map(h, [1, 2])` with a block-local `h` was read as
+ * `[h(1), h(2)]`. The block and the call now replace those locals with their
+ * values when the collection leaves them (`bindEscapingLocals`,
+ * `function-utils.ts`). The collection stays lazy.
+ */
+describe('a lazy collection that leaves the block of its locals', () => {
+  const localH = (last: any): any => [
+    'Block',
+    ['Declare', 'h', { str: 'function' }],
+    ['Assign', 'h', ['Function', ['Add', 'k', 1], 'k']],
+    last,
+  ];
+
+  test.each([
+    ['Map over a list', ['Map', 'h', ['List', 1, 2]], '[2,3]'],
+    ['Map over a range', ['Map', 'h', ['Range', 1, 3]], '[2,3,4]'],
+    [
+      'Filter with a local predicate',
+      [
+        'Block',
+        ['Declare', 'p', { str: 'function' }],
+        ['Assign', 'p', ['Function', ['Greater', 'k', 1], 'k']],
+        ['Filter', ['List', 1, 2, 3], 'p'],
+      ],
+      '[2,3]',
+    ],
+  ])('%s', (_label, last, expected) => {
+    const ce = new ComputeEngine();
+    const result = ce.expr(localH(last)).evaluate();
+    expect(ce.expr(['ListFrom', result]).evaluate().toString()).toBe(expected);
+  });
+
+  test('the value of the block stays lazy', () => {
+    const ce = new ComputeEngine();
+    const result = ce.expr(localH(['Map', 'h', ['List', 1, 2]])).evaluate();
+    expect(result.operator).toBe('Map');
+    expect(result.toString()).toBe('[2,3]');
+  });
+
+  test('a local list used as the source', () => {
+    const ce = new ComputeEngine();
+    const result = ce
+      .expr([
+        'Block',
+        ['Declare', 'xs', { str: 'list' }],
+        ['Assign', 'xs', ['List', 1, 2]],
+        ['Map', ['Function', ['Add', 'k', 1], 'k'], 'xs'],
+      ])
+      .evaluate();
+    expect(result.toString()).toBe('[2,3]');
+  });
+
+  test('an element of an infinite source, read after the block', () => {
+    const ce = new ComputeEngine();
+    const result = ce
+      .expr(['At', localH(['Map', 'h', ['Range', 1, 'PositiveInfinity']]), 3])
+      .evaluate();
+    expect(result.toString()).toBe('4');
+  });
+
+  test('the value stored in a variable and read after the block', () => {
+    const ce = new ComputeEngine();
+    ce.expr(['Assign', 'r', localH(['Map', 'h', ['List', 1, 2]])]).evaluate();
+    expect(ce.expr('r').evaluate().toString()).toBe('[2,3]');
+  });
+
+  test('the value of a function call', () => {
+    const ce = new ComputeEngine();
+    const result = ce
+      .expr([
+        'Apply',
+        ['Function', localH(['Map', 'h', 'xs']), 'xs'],
+        ['List', 1, 2],
+      ])
+      .evaluate();
+    expect(ce.expr(['ListFrom', result]).evaluate().toString()).toBe('[2,3]');
+  });
+
+  // The function is not a local of the block: it still exists when the
+  // elements are read, so the collection continues to read it by name.
+  test('a function of an enclosing scope is not replaced', () => {
+    const ce = new ComputeEngine();
+    ce.assign('g', ce.expr(['Function', ['Add', 'k', 1], 'k']));
+    const result = ce.expr(['Block', ['Map', 'g', ['List', 1, 2]]]).evaluate();
+    expect(result.json).toEqual(['Map', 'g', ['List', 1, 2]]);
+    expect(result.toString()).toBe('[2,3]');
+  });
+});
+
+describe('a lazy collection that leaves an Epsil block or function', () => {
+  function run(src: string): string {
+    const result: any = executeEpsil(new ComputeEngine(), src);
+    expect((result.diagnostics ?? []).map((d: any) => d.message)).toEqual([]);
+    return String(result.value ?? result.result);
+  }
+
+  function compiled(src: string): unknown {
+    const [program] = parseEpsil(src);
+    const ce = new ComputeEngine();
+    const result = compile(ce.box(resolveLibraryNames(program, src, ce)), {
+      to: 'javascript',
+    });
+    if (!result.success) throw new Error(result.error);
+    return result.run!({});
+  }
+
+  test.each([
+    [
+      'a let function',
+      'let r = do { let h = (k) => k + 1; map(h, [1, 2]) }\nr',
+      [2, 3],
+    ],
+    [
+      'a const function',
+      'let r = do { const h = (k) => k + 1; map(h, [1, 2]) }\nr',
+      [2, 3],
+    ],
+    [
+      'a function definition',
+      'let r = do { h(k) = k + 1; map(h, [1, 2]) }\nr',
+      [2, 3],
+    ],
+    [
+      'a range source',
+      'let r = do { let h = (k) => k + 1; map(h, 1..3) }\nr',
+      [2, 3, 4],
+    ],
+    [
+      'a filter',
+      'let r = do { let p = (k) => k > 1; filter([1, 2, 3], p) }\nr',
+      [2, 3],
+    ],
+    [
+      'a fold',
+      'let r = do { let h = (a, b) => a + b; fold(h, 0, [1, 2, 3]) }\nr',
+      6,
+    ],
+    [
+      'a function body',
+      'function f(xs) { let h = (k) => k + 1; map(h, xs) }\nf([1, 2])',
+      [2, 3],
+    ],
+    [
+      'a function body without parameters',
+      'function f() { let h = (k) => k + 1; map(h, [1, 2]) }\nf()',
+      [2, 3],
+    ],
+  ])('%s', (_label, src, expected) => {
+    expect(run(src)).toBe(JSON.stringify(expected));
+    expect(compiled(src)).toEqual(expected);
+  });
+
+  test('a reduce', () => {
+    expect(
+      run('let r = do { let h = (a, b) => a + b; reduce([1, 2, 3], h) }\nr')
+    ).toBe('6');
   });
 });

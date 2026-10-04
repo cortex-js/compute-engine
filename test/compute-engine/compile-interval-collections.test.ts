@@ -502,6 +502,161 @@ describe('Interval target — collection-valued roots', () => {
     expect(r.success).toBe(true);
     expectEncloses(bands(r.run!({ V: [1, 2] })), [2, 4]);
   });
+
+  // The last statement of a `Block` root was compiled the ordinary way, and
+  // this target has no ordinary lowering for a `Tuple` or a `List`: the
+  // compilation declined with "Could not compile `Tuple`". It is now
+  // spelled as a collection value, in the scope of the block, so a call of
+  // a block-local function that maps over a tuple argument is an array of
+  // enclosures.
+  test('a Block whose value is a tuple is an array', () => {
+    const literal = ['Function', ['Multiply', 2, 'u'], ['Typed', 'u', 'real']];
+    const block = (last: unknown) => [
+      'Block',
+      ['Declare', 'h', "'function'"],
+      ['Assign', 'h', literal],
+      last,
+    ];
+    const valueOf = (json: unknown): unknown =>
+      Array.isArray(json) && (json[0] === 'Tuple' || json[0] === 'List')
+        ? json.slice(1).map(valueOf)
+        : json;
+    const CASES: unknown[] = [
+      ['h', ['Tuple', 'x', 1]],
+      ['h', ['List', ['Tuple', 'x', 1], ['Tuple', 3, 4]]],
+      ['Tuple', ['h', 'x'], 2],
+      ['List', 'x', ['h', 'x']],
+    ];
+    for (const last of CASES) {
+      // An engine-level `h` of another signature does not change the call
+      // of the block-local `h`.
+      for (const declared of [false, true]) {
+        const ce = new ComputeEngine();
+        ce.declare('x', 'real');
+        if (declared) ce.declare('h', '(string) -> number');
+        const r = compile(ce.box(block(last) as never), {
+          to: 'interval-js',
+          fallback: false,
+        });
+        expect(r.success).toBe(true);
+        ce.assign('x', 3);
+        const want = valueOf(ce.box(block(last) as never).evaluate().json);
+        expectEncloses(bands(r.run!({ x: pt(3) })), want);
+      }
+    }
+  });
+
+  // A function body with more than one statement was compiled the ordinary
+  // way, and declined with "Could not compile `Tuple`". The body of a
+  // block-local function was never offered to the collection spelling, not
+  // even with one statement. Both now return an array of enclosures.
+  test('a function body that returns a collection is an array', () => {
+    const body = (last: unknown) => [
+      'Block',
+      ['Declare', 'z', "'real'"],
+      ['Assign', 'z', ['Add', 'u', 1]],
+      last,
+    ];
+    const valueOf = (json: unknown): unknown =>
+      Array.isArray(json) && (json[0] === 'Tuple' || json[0] === 'List')
+        ? json.slice(1).map(valueOf)
+        : json;
+    const BODIES: unknown[] = [
+      body(['Tuple', 'z', 2]),
+      body(['List', 'z', 2]),
+      body(['Tuple', ['Multiply', 2, 'z'], 'u']),
+      ['Tuple', 'u', 2],
+    ];
+    for (const b of BODIES) {
+      const literal = ['Function', b, 'u'];
+      const local = [
+        'Block',
+        ['Declare', 'f', "'function'"],
+        ['Assign', 'f', literal],
+        ['f', 'x'],
+      ];
+      for (const engineLevel of [true, false]) {
+        const make = () => {
+          const ce = new ComputeEngine();
+          ce.declare('x', 'real');
+          if (engineLevel) ce.assign('f', ce.box(literal as never));
+          return ce;
+        };
+        const json = engineLevel ? ['f', 'x'] : local;
+        const r = compile(make().box(json as never), {
+          to: 'interval-js',
+          fallback: false,
+        });
+        expect(r.success).toBe(true);
+        const ce = make();
+        ce.assign('x', 3);
+        const want = valueOf(ce.box(json as never).evaluate().json);
+        expectEncloses(bands(r.run!({ x: pt(3) })), want);
+      }
+    }
+  });
+
+  // The type of a call of a block-local function declared `function` is
+  // `any`, so the scalar kernels did not see that it returns an array.
+  test('a call of a block-local function that returns a collection declines in a scalar position', () => {
+    const literal = ['Function', ['Tuple', 'u', 2], 'u'];
+    for (const use of [
+      ['Add', ['f', 'x'], 1],
+      ['Sin', ['f', 'x']],
+    ])
+      declines(
+        engine(),
+        ['Block', ['Declare', 'f', "'function'"], ['Assign', 'f', literal], use],
+        /is a call of a block-local function that returns a collection/
+      );
+  });
+
+  // The check above sees only a call that is a DIRECT operand of a scalar
+  // kernel. Through another function or a block local, the array reached a
+  // kernel, which read it as NaN bounds behind `success: true`. The
+  // interpreter gives an `incompatible-type` error for both shapes.
+  test('a call of a block-local function that returns a collection declines when its value is not consumed whole', () => {
+    const define = [
+      ['Declare', 'f', "'function'"],
+      ['Assign', 'f', ['Function', ['Tuple', 'u', 2], 'u']],
+    ];
+    const SHAPES = [
+      // Through the parameter of another block-local function.
+      [
+        'Block',
+        ...define,
+        ['Declare', 'g', "'function'"],
+        ['Assign', 'g', ['Function', ['Add', 'v', 1], 'v']],
+        ['g', ['f', 'x']],
+      ],
+      // Through a block local.
+      ['Block', ...define, ['Assign', 'w', ['f', 'x']], ['Add', 'w', 1]],
+    ];
+    for (const shape of SHAPES) {
+      const ce = new ComputeEngine();
+      ce.declare('x', 'real');
+      declines(
+        ce,
+        shape,
+        /Could not compile `f\(x\)`: it is a call of a block-local function that returns a collection, and its value is not consumed whole/
+      );
+      expect(ce.box(shape as never).evaluate().toString()).toMatch(
+        /incompatible-type/
+      );
+    }
+  });
+
+  test('a Block whose value is a list of booleans still declines, with the reason', () => {
+    declines(
+      engine(),
+      [
+        'Block',
+        ['Assign', 'z', 1],
+        ['List', ['Less', 'x', 'z'], ['Less', 'x', 2]],
+      ],
+      /Could not compile `List`/
+    );
+  });
 });
 
 describe('Interval target — the 2026-08-22 decisions that stay', () => {

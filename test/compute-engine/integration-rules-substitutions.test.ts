@@ -39,8 +39,9 @@ describe('loadIntegrationRules (Rubi driver) — reduction and substitution fami
   // whole call, so the Cot sub-integral stranded as an inert Integrate. The fix
   // (driver.ts intRec) engages the bridge for any subproblem that introduces
   // active trig into a non-trig context. Verified by finite-differencing F.N()
-  // (the PolyLog[2, ±E^(2i·arcsin)] results have inert symbolic D but evaluable
-  // F.N()); sampled inside |x|<1 (arcsin/√(1−x²) real domain).
+  // (the PolyLog[2, ±E^(2i·arcsin)] results have an evaluable F.N(), so the
+  // check does not rely on the derivative rules); sampled inside |x|<1
+  // (arcsin/√(1−x²) real domain).
   describe('the arcsin (d+e·x²)^p trig-subproblem bridge (Chapter-5, R22)', () => {
     const ce = rubiEngine();
     const verify = (latex: string, xs = [0.17, 0.31, 0.52, 0.73]) => {
@@ -438,8 +439,8 @@ describe('loadIntegrationRules (Rubi driver) — reduction and substitution fami
   // 6.4.1 #47 (positive-power reciprocal `(a+b·Coth)ᵏ`) shapes. Placed LAST among
   // the hyperbolic fallbacks, so every case here goes INERT under `RUBI_NO_R8=1`
   // (exercises the R8 rung, not a bundled rule). D-verified by finite-differencing
-  // F.N() (the antiderivative carries PolyLog/complex-Log terms whose symbolic
-  // derivative does not numericize). NOTE: the sinh additive-denominator rows keep
+  // F.N() (the antiderivative carries PolyLog/complex-Log terms; the numeric
+  // check does not rely on their derivative rules). NOTE: the sinh additive-denominator rows keep
   // their `√(a²+b²)` root cleanest with SYMBOLIC parameters, while the coth
   // reciprocal rows are fastest with concrete numeric coefficients — chosen per
   // case accordingly. Heavy PolyLog family: both budgets raised (see R30 above),

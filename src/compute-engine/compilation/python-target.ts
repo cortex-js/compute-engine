@@ -2201,6 +2201,10 @@ function pythonAssertReturnableBody(subject: string, expr: Expression): void {
   let value = expr;
   while (isFunction(value, 'Block') && value.ops.length > 0)
     value = value.ops[value.ops.length - 1];
+  // A `Return` in a branch is not a statement there: in this tail position
+  // it gives the value of the branch (`BaseCompiler.tailValue`), so
+  // `If(c, Return(1), Return(5))` compiles as the conditional `1 if c else 5`.
+  value = BaseCompiler.tailValue(value, true);
   if (
     isFunction(value, 'If') &&
     (pythonArmIsStatement(value.ops[1]) || pythonArmIsStatement(value.ops[2]))
@@ -5170,7 +5174,11 @@ export class PythonTarget implements LanguageTarget<Expression> {
               `\`None\`. Give the block a VALUE statement after the ` +
               `selection.`
           );
-        else stmts[last] = `return ${stmts[last]}`;
+        // A last statement that is a `Return` is already the `return`
+        // statement of the block: another `return` in front of it gave
+        // `return return x`, which does not parse.
+        else if (!/^return\b/.test(stmts[last]))
+          stmts[last] = `return ${stmts[last]}`;
         return stmts.join('\n');
       },
       // Per-compilation naming state for generated temporaries (see the
@@ -5491,6 +5499,10 @@ export class PythonTarget implements LanguageTarget<Expression> {
         .map((l) => `    ${l}`)
         .join('\n');
       code += `${indented}\n`;
+    } else if (/^return\b/.test(body)) {
+      // A body that is a `Return` (`Return(x)`, `Block(Return(x))`) is
+      // already a `return` statement.
+      code += `    ${body}\n`;
     } else {
       code += `    return ${body}\n`;
     }

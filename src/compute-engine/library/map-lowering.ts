@@ -11,6 +11,7 @@ import {
 } from './map-broadcast-shape.js';
 import { mapAutoCompileRunner } from './map-auto-compile.js';
 import { errorValue } from '../boxed-expression/error-value.js';
+import { isNumber } from '../boxed-expression/type-guards.js';
 
 // The broadcast-shape walk moved to `map-broadcast-shape.js` (a leaf shared
 // with `map-auto-compile.js`, which cannot import this module — it is imported
@@ -32,10 +33,10 @@ export type { Slot, LoweredLevel } from './map-broadcast-shape.js';
  * application whose operands are the parameters and closed scalars.
  *
  * This module walks that spine at drain start and reduces each level to
- * `(operator, slot layout, N marker)`. The drain then serves an element with
- * `ce._fn(op, args).evaluate()` per level, bypassing `makeLambda` entirely
- * (R1: locus is the `Map` collection handlers — canonical forms, `.json`,
- * serialization, types and facet delegation are untouched).
+ * `(operator, slot layout, numeric marker)`. The drain then serves an
+ * element with `ce._fn(op, args).evaluate()` per level, bypassing `makeLambda`
+ * entirely (R1: locus is the `Map` collection handlers — canonical forms,
+ * `.json`, serialization, types and facet delegation are untouched).
  *
  * The gate is purely STRUCTURAL (R2): no operator allowlist, no name sets. A
  * level that doesn't match ends the spine there; everything below it drains
@@ -309,6 +310,7 @@ export function makeSpineRunner(
                 ce.popScope();
               }
             } else v = ce._fn(level.op!, args).evaluate(opts);
+            if (level.inexact === true && v !== undefined) v = inexact(ce, v);
           }
         }
       }
@@ -329,4 +331,27 @@ export function makeSpineRunner(
     }
     return row[0];
   };
+}
+
+/**
+ * The result of a level whose body was a one-operand user-written `N(…)`
+ * (`LoweredLevel.inexact`). The level is evaluated with
+ * `{ numericApproximation: true }`, as the `.N()` method does, and that keeps
+ * an integer exact. The `N` operator always gives an inexact result, so
+ * convert an exact finite number to a float, in the same way as the `N`
+ * evaluate handler (`inexactResult()` in `library/core.ts`). The float follows
+ * the working precision of the engine. Any other result (a list, a lazy
+ * collection, a symbolic expression) goes through the `N` operator itself,
+ * so the value is the same as on the general route.
+ */
+function inexact(ce: ComputeEngine, v: Expression): Expression {
+  if (isNumber(v)) {
+    if (!v.isExact || v.isFinite !== true) return v;
+    const re = v.bignumRe ?? v.re;
+    const im = v.im;
+    return ce.number(
+      ce._inexactNumericValue(im === 0 ? re : { re: v.re, im })
+    );
+  }
+  return ce._fn('N', [v]).evaluate();
 }

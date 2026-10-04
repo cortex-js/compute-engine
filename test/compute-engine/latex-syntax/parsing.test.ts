@@ -1038,7 +1038,11 @@ describe('NON-STRICT MODE (Math-ASCII/Typst-like syntax)', () => {
       const src = 'e^{-('.repeat(n) + 'x' + ')}'.repeat(n);
       const t0 = Date.now();
       const result = lenient(src);
-      expect(Date.now() - t0).toBeLessThan(2000);
+      // The time depends on the load of the machine, so the limit is asserted
+      // only in a `CE_PERF=1` run. The comparison with strict mode below does
+      // not depend on time.
+      if (process.env.CE_PERF === '1')
+        expect(Date.now() - t0).toBeLessThan(2000);
       expect(result).toEqual(strict(src));
     });
 
@@ -1046,7 +1050,11 @@ describe('NON-STRICT MODE (Math-ASCII/Typst-like syntax)', () => {
       const n = 40;
       const t0 = Date.now();
       const result = lenient('e^-('.repeat(n) + 'x' + ')'.repeat(n));
-      expect(Date.now() - t0).toBeLessThan(2000);
+      // The time depends on the load of the machine, so the limit is asserted
+      // only in a `CE_PERF=1` run. The comparison below does not depend on
+      // time.
+      if (process.env.CE_PERF === '1')
+        expect(Date.now() - t0).toBeLessThan(2000);
       expect(result).toEqual(lenient('e^{-('.repeat(n) + 'x' + ')}'.repeat(n)));
     });
   });

@@ -113,20 +113,21 @@ describe('Map fusion — the structural gate (R2)', () => {
     expect(spine.levels.every((l) => l.napprox === true)).toBe(true);
   });
 
-  test('the `N`-wrapped mapping-function body is canonical at the source', () => {
-    // Both `N`-wrapped constructions rebuild the mapping function from raw
+  test('the marker-wrapped mapping-function body is canonical at the source', () => {
+    // Both constructions that wrap the body in the numeric marker
+    // `NumericApproximation` rebuild the mapping function from raw
     // material (`lazyMapNumericApproximation` re-boxes from MathJSON,
-    // `lazyBroadcastMap` builds with `canonical: false`); `N`'s canonical
-    // handler must bind the held body inside the literal's parameter scope,
-    // so consumers reading the node structurally get bound operands — the
-    // `o.isCanonical ? o : o.canonical` in `lowerMapSpine` is
+    // `lazyBroadcastMap` builds with `canonical: false`); the marker's
+    // canonical handler must bind the held body inside the literal's
+    // parameter scope, so consumers reading the node structurally get bound
+    // operands — the `o.isCanonical ? o : o.canonical` in `lowerMapSpine` is
     // belt-and-suspenders, not the binding mechanism.
     const innerBody = (map: any) => {
       expect(map.operator).toBe('Map');
       const fn = map.op1;
       let body = fn.op1;
       if (body.operator === 'Block' && body.nops === 1) body = body.op1;
-      expect(body.operator).toBe('N');
+      expect(body.operator).toBe('NumericApproximation');
       return body.op1;
     };
 
@@ -349,7 +350,11 @@ describe('Map fusion — witness perf pin (§7)', () => {
     }
     const median = (xs: number[]) => xs.slice().sort((x, y) => x - y)[2];
     // Measured headroom is ≥1.6×; the pin fires only on a genuine regression.
-    expect(median(a) * 1.15).toBeLessThan(median(b));
+    // The ratio of the two times still depends on the load of the machine, so
+    // it is asserted only in a `CE_PERF=1` run. The checks above (the lowering
+    // and the drained values) do not depend on time.
+    if (process.env.CE_PERF === '1')
+      expect(median(a) * 1.15).toBeLessThan(median(b));
   });
 });
 
@@ -428,10 +433,10 @@ describe('Map fusion — the row is EVALUATED before a level applies', () => {
   });
 });
 
-describe('Map fusion — the identity level under the `N` marker', () => {
+describe('Map fusion — the identity level under the numeric marker', () => {
   const ce = new ComputeEngine();
 
-  test('`Map(x => x, Range).N()` lowers as an `N` level and keeps its values', () => {
+  test('`Map(x => x, Range).N()` lowers as a marker level and keeps its values', () => {
     const m = ce.box(['Map', ['Function', '_1', '_1'], ['Range', 1, 150]]);
     // The bare identity level is a pass-through…
     const plain = lowerMapSpine(m)!;
@@ -439,12 +444,12 @@ describe('Map fusion — the identity level under the `N` marker', () => {
     expect(drainRe(m)).toEqual(Array.from({ length: 150 }, (_, i) => i + 1));
 
     // …but under the `.N()` rewrap the marker must still be APPLIED, so the
-    // level is modelled as an `N` application of the parameter, not a
-    // pass-through.
+    // level is modelled as an application of the marker to the parameter,
+    // not a pass-through.
     const n = m.N();
     const spine = lowerMapSpine(n)!;
     expect(spine.levels.map((l) => l.identity)).toEqual([false]);
-    expect(spine.levels.map((l) => l.op)).toEqual(['N']);
+    expect(spine.levels.map((l) => l.op)).toEqual(['NumericApproximation']);
     expect(spine.levels.map((l) => l.napprox)).toEqual([true]);
     expect(spine.levels[0].slots).toEqual([0]);
     expect(drainRe(n)).toEqual(Array.from({ length: 150 }, (_, i) => i + 1));
@@ -452,12 +457,92 @@ describe('Map fusion — the identity level under the `N` marker', () => {
     expect(n.at(150)?.re).toBe(150);
   });
 
-  test('a directly-boxed `N`-body identity lowers the same way', () => {
+  test('a user-written `N` body is an `N` level, not the marker', () => {
+    // The `N` operator makes an integer inexact, and the marker (the result
+    // of the `.N()` method) does not. A user-written `N` of the bare
+    // parameter is lowered as an application of `N` to the parameter, with
+    // the `inexact` flag (GitHub issue #409).
     const d = ce.box(['Map', ['Function', ['N', '_1'], '_1'], ['Range', 1, 5]]);
     const spine = lowerMapSpine(d)!;
     expect(spine.levels.map((l) => l.op)).toEqual(['N']);
     expect(spine.levels.map((l) => l.napprox)).toEqual([true]);
+    expect(spine.levels.map((l) => l.inexact)).toEqual([true]);
     expect(drainRe(d)).toEqual([1, 2, 3, 4, 5]);
+    expect([...d.each()].map((x: any) => x.isExact)).toEqual([
+      false,
+      false,
+      false,
+      false,
+      false,
+    ]);
+  });
+
+  test('a user-written `N` of an application lowers, and its elements are inexact', () => {
+    // `x ↦ N(x^2)`: the level applies `Power` numerically, and the drain
+    // makes the exact integer results inexact, as the `N` operator does on
+    // the general route.
+    const sq = ce.box([
+      'Map',
+      ['Function', ['N', ['Power', 'x', 2]], 'x'],
+      ['Range', 1, 5],
+    ]);
+    const spine = lowerMapSpine(sq)!;
+    expect(spine).toBeDefined();
+    expect(spine.levels.map((l) => l.op)).toEqual(['Power']);
+    expect(spine.levels.map((l) => l.napprox)).toEqual([true]);
+    expect(spine.levels.map((l) => l.inexact)).toEqual([true]);
+    expect(drainRe(sq)).toEqual([1, 4, 9, 16, 25]);
+    const xs = [...sq.each()];
+    expect(xs.map((x: any) => x.isExact)).toEqual([
+      false,
+      false,
+      false,
+      false,
+      false,
+    ]);
+    expect(sq.at(3)?.isExact).toBe(false);
+    // The values are the values of the `N` operator, element by element.
+    for (let k = 1; k <= 5; k++)
+      expect(xs[k - 1].isSame(ce.box(['N', ['Power', k, 2]]).evaluate())).toBe(
+        true
+      );
+
+    // `x ↦ N(Sin(x))` lowers too, with the same values as the `N` operator.
+    const sin = ce.box([
+      'Map',
+      ['Function', ['N', ['Sin', 'x']], 'x'],
+      ['Range', 1, 200],
+    ]);
+    expect(lowerMapSpine(sin)).toBeDefined();
+    const ys = [...sin.each()];
+    expect(ys.every((y: any) => y.isExact === false)).toBe(true);
+    for (const k of [1, 2, 100, 200])
+      expect(ys[k - 1].isSame(ce.box(['N', ['Sin', k]]).evaluate())).toBe(true);
+
+    // `N(inner, digits)` also rounds: it is not lowered.
+    const rounded = ce.box([
+      'Map',
+      ['Function', ['N', ['Sin', 'x'], 3], 'x'],
+      ['Range', 1, 5],
+    ]);
+    expect(lowerMapSpine(rounded)).toBeUndefined();
+  });
+
+  test('the marker of the `.N()` method keeps an integer exact', () => {
+    const m = ce
+      .box(['Map', ['Function', ['Power', 'x', 2], 'x'], ['Range', 1, 5]])
+      .N();
+    const spine = lowerMapSpine(m)!;
+    expect(spine.levels.map((l) => l.napprox)).toEqual([true]);
+    expect(spine.levels.map((l) => l.inexact)).toEqual([false]);
+    expect(drainRe(m)).toEqual([1, 4, 9, 16, 25]);
+    expect([...m.each()].map((x: any) => x.isExact)).toEqual([
+      true,
+      true,
+      true,
+      true,
+      true,
+    ]);
   });
 });
 

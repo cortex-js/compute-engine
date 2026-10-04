@@ -1342,3 +1342,25 @@ describe('explain: simplify operand-substep surfacing', () => {
     }
   });
 });
+
+describe('explain: a solve with no complete answer', () => {
+  test('no root found and no proof of none: the last step says so', () => {
+    const ex = ce.parse('e^x=x+2').explain('solve', { variable: 'x' });
+    expect(ex.result.operator).toBe('Solve');
+    expect(ex.steps[ex.steps.length - 1].id).toBe('solve.incomplete-no-roots');
+    expect(ce.parse('e^x=x+2').solve('x')).toBeNull();
+  });
+
+  test('an alternative with no root found gives no answer', () => {
+    const ex = ce
+      .parse('x=1 \\lor e^x=x+2')
+      .explain('solve', { variable: 'x' });
+    expect(ex.result.operator).toBe('Solve');
+    expect(ex.steps[ex.steps.length - 1].id).toBe('solve.incomplete-no-roots');
+  });
+
+  test('a decided empty list is still the answer', () => {
+    const ex = ce.parse('e^x=-1').explain('solve', { variable: 'x' });
+    expect(ex.result.toString()).toBe('[]');
+  });
+});

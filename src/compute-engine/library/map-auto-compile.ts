@@ -25,8 +25,11 @@ import type { Interval } from './map-exact-proof.js';
  * Auto-compilation of lazy-`Map` element lambdas on numeric drains.
  *
  * When a lazy `Map` whose element lambda carries the numeric marker — the
- * canonical `Block(N(body))` shape produced by the item-39 `.N()` rewrap and
- * the `addN`/`mulN` N-maps — is drained at machine precision, an
+ * canonical `Block(NumericApproximation(body))` shape produced by the `.N()`
+ * method of a lazy `Map` (`lazyMapNumericApproximation`) and the numeric
+ * element-wise sums and products (`lazyBroadcastMap` with
+ * `numericApproximation`) — or a user-written `Block(N(body))` is drained at
+ * machine precision, an
  * eligibility-gated compile attempt produces a per-logical-instance cached
  * compiled element function, validated per invocation against the same
  * two-axis keys that govern the comprehension cache
@@ -41,8 +44,8 @@ import type { Interval } from './map-exact-proof.js';
  *
  * ## Two tiers
  *
- * - the **marked** (float) tier above, gated on the `Block(N(…))` marker and
- *   restricted to machine precision;
+ * - the **marked** (float) tier above, gated on the numeric marker or a
+ *   user-written `N`, and restricted to machine precision;
  * - the **exact** tier (`docs/COMPILATION-MODEL.md`,
  *   ratified 2026-07-31): an UNMARKED broadcast-shaped lambda whose element
  *   function is provably integer-closed and overflow-free
@@ -162,19 +165,26 @@ export {
   _resetMapAutoCompileStats,
 } from '../map-auto-compile-stats.js';
 
-/** The numeric marker: a `Map` whose element lambda's body is the canonical
- * `Block(N(inner))` shape (single-statement `Block` whose statement is an `N`
- * application). Returns the lambda and the unwrapped inner body. */
+/** A marked lambda: a `Map` whose element lambda's body is the canonical
+ * `Block(NumericApproximation(inner))` shape (the numeric marker that the
+ * `.N()` method puts on a lazy `Map`) or the `Block(N(inner))` shape (a
+ * user-written `N`). Returns the lambda, the unwrapped inner body, and
+ * `inexact`: true for a user-written `N`, whose result is always inexact,
+ * also when its value is an integer. The marker gives the result of the
+ * `.N()` method, where an integer can stay exact. */
 function markedMapLambda(
   expr: Expression
-): { fn: Expression; inner: Expression } | undefined {
+): { fn: Expression; inner: Expression; inexact: boolean } | undefined {
   if (!isFunction(expr, 'Map') || expr.nops < 2) return undefined;
   const fn = expr.op1;
   if (!isFunction(fn, 'Function') || fn.nops < 1) return undefined;
   let body: Expression = fn.op1;
   if (isFunction(body, 'Block') && body.nops === 1) body = body.op1;
-  if (!isFunction(body, 'N') || body.nops !== 1) return undefined;
-  return { fn, inner: body.op1 };
+  if (isFunction(body, 'NumericApproximation') && body.nops === 1)
+    return { fn, inner: body.op1, inexact: false };
+  if (isFunction(body, 'N') && body.nops === 1)
+    return { fn, inner: body.op1, inexact: true };
+  return undefined;
 }
 
 // THE RANDOMNESS GATE IS GONE. Two successive gates lived here and both were
@@ -489,7 +499,7 @@ function validCompiled(ce: ComputeEngine, cache: MapCompileCache): boolean {
 }
 
 /**
- * One compile attempt (D2 eligibility → strip the `N` marker → compile with
+ * One compile attempt (D2 eligibility → strip the marker → compile with
  * the capture collector → post-compile gates). Returns the cache record to
  * store, or `undefined` for the latch case (CSP `EvalError`: no mark — the
  * engine-wide `ce.jit` latch already gates every future attempt).
@@ -521,10 +531,11 @@ function attemptCompile(
     // Purity/boundedness gate (transitive through called user functions).
     if (!fnLiteralEligible(ce, fn, new Set())) return noCompile('structural');
 
-    // Rebuild the stripped literal from MathJSON (the same idiom as the
-    // item-39 rewrap: never re-host a canonical body under a new `Function`,
-    // which would split its parameter-scope bindings). The compiled code is
-    // already numeric, so the `N` marker is dropped.
+    // Rebuild the stripped literal from MathJSON (the same idiom as
+    // `lazyMapNumericApproximation`: never re-host a canonical body under a
+    // new `Function`, which would split its parameter-scope bindings). The
+    // compiled code is already numeric, so the marker (`NumericApproximation`
+    // or `N`) is dropped.
     const fnJson = fn.json;
     if (inner === undefined || !Array.isArray(fnJson))
       return noCompile('structural');
@@ -641,9 +652,9 @@ export function mapAutoCompileRunner(
   if (ce._factsHidden()) return undefined;
 
   // ── Tier selection ───────────────────────────────────────────────────
-  // A marked (`Block(N(…))`) lambda takes the float tier, which stays gated
-  // on machine precision: at bignum precision the interpreter produces digits
-  // float64 cannot match. (The default engine precision is bignum-preferred;
+  // A marked lambda (`markedMapLambda()`) takes the float tier, which stays
+  // gated on machine precision: at bignum precision the interpreter produces
+  // digits float64 cannot match. (The default engine precision is bignum-preferred;
   // the plot/analyze consumers run machine.)
   const marked = markedMapLambda(expr);
   let tier: MapCompileTier;
@@ -802,6 +813,19 @@ export function mapAutoCompileRunner(
           _mapAutoCompileStats.elementFallbacks++;
           return undefined;
         }
+      } else if (
+        item.isExact &&
+        (Math.abs(item.re) > Number.MAX_SAFE_INTEGER ||
+          Math.abs(item.im) > Number.MAX_SAFE_INTEGER)
+      ) {
+        // The marked tier: an exact input that is larger than the safe
+        // integers loses digits when it is converted to a float, but the
+        // interpreter computes with its exact value first. For example, `3x`
+        // at the exact `9007199254740993` is `27021597764222979`, but the
+        // compiled code multiplies the float `9007199254740992`. The
+        // interpreter computes this element.
+        _mapAutoCompileStats.elementFallbacks++;
+        return undefined;
       }
       args.push(item.isComplex ? { re: item.re, im: item.im } : item.re);
     }
@@ -822,12 +846,32 @@ export function mapAutoCompileRunner(
     };
 
     // An integer value of the marked tier: see the comment where a real
-    // result is handled
+    // result is handled. Under a user-written `N` (`marked.inexact`), the
+    // value is a float, as the `N` operator gives in the interpreter. A
+    // compiled integer that is larger than the safe integers can have lost
+    // digits, so the interpreter computes it again.
+    //
+    // Under the numeric marker, the value is exact only when every input is
+    // an exact integer: an exact rational input is rounded when it is
+    // converted to a float. For example, `3x` at the exact `1/3 + 2^-60` is
+    // the compiled integer `1`, but the interpreter gives a float: the value
+    // of the exact rational `1 + 3·2^-60` is not an integer.
     const integerResult = (r: number): Expression | undefined => {
+      if (marked?.inexact === true) {
+        if (!Number.isSafeInteger(r)) return fallback();
+        _mapAutoCompileStats.compiledHits++;
+        return ce.number(ce._inexactNumericValue(r));
+      }
       if (
         cache.exactBody === true &&
         Number.isSafeInteger(r) &&
-        items.every((item) => isNumber(item) && item.isExact)
+        items.every(
+          (item) =>
+            isNumber(item) &&
+            item.isExact &&
+            Number.isInteger(item.re) &&
+            Number.isInteger(item.im)
+        )
       ) {
         _mapAutoCompileStats.compiledHits++;
         return ce.number(r);
@@ -864,9 +908,11 @@ export function mapAutoCompileRunner(
           return ce.number(r);
         }
       } else {
-        // The marked tier computes a numeric approximation, as `N()` does in
-        // the interpreter. A value that is not an integer is a float in the
-        // interpreter too. An integer value can be exact or a float there:
+        // The marked tier computes a numeric approximation, as `.N()` does
+        // in the interpreter. A value that is not an integer is a float in
+        // the interpreter too. Under a user-written `N`, an integer value is
+        // a float too (`integerResult()`). Under the numeric marker, an
+        // integer value can be exact or a float in the interpreter:
         // `N(x^2)` at `4` is the exact `16` and `N(Sign(2.5))` the exact `1`,
         // but `N(Sec(x))` at the float `1e-13` is the float `1.0`, and
         // `N(Sec(1e-13·x))` is the exact `1` at `0` and the float `1.0` at

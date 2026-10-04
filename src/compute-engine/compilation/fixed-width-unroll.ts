@@ -132,8 +132,23 @@ export interface UnrollOptions {
    * lowering for a comprehension keeps it. The shader targets set it: they
    * have no dynamic arrays, and a comprehension of a small, statically known
    * size is a fixed-size array literal there.
+   *
+   * It also writes out a `Map` over a list of ANY static width (rule 2,
+   * {@link mapSourceElements}), for the same reason: these targets have no
+   * `Map` lowering, so a `Map` they cannot see written out is a decline.
    */
   readonly unrollComprehensions?: boolean;
+
+  /**
+   * The explicit form of the norm of a point with a list component (rule
+   * 8), or `undefined` when the target does not use one for this point. A
+   * target that has no run-time lowering of such a norm supplies it (the
+   * interval and shader targets, through `explicitBroadcastPointNorm` in
+   * `base-compiler.ts`). The rewrite is done here, before the target reads
+   * the tree for common subexpressions, so the explicit form shares them
+   * with the rest of the expression. Absent means no rewrite.
+   */
+  readonly explicitPointNorm?: (point: Expression) => Expression | undefined;
 }
 
 /**
@@ -257,7 +272,8 @@ function rewrite(
       distributeOverList(node, options) ??
       foldLiteralIndex(node, options) ??
       unrollComprehension(node, options) ??
-      distributeSelection(node, options);
+      distributeSelection(node, options) ??
+      explicitPointNorm(node, options);
     if (next === undefined) break;
     node = rewrite(next, settled, options);
   }
@@ -787,7 +803,10 @@ function literalPointOperands(
  *
  * A list narrower than {@link MIN_UNROLLED_WIDTH} — or than the floor a target
  * sets through `UnrollOptions.minWidth` — is left to the target's own `Map`
- * lowering.
+ * lowering. A target that asks for `UnrollOptions.unrollComprehensions` (the
+ * shader targets) has no `Map` lowering at all, so for it the width floor does
+ * not apply, and the source can also be any list whose width the structure
+ * proves ({@link mapSourceElements}).
  */
 function tryUnrollMap(
   expr: Expression,
@@ -795,10 +814,10 @@ function tryUnrollMap(
 ): Expression | undefined {
   if (!isFunction(expr, 'Map') || expr.nops !== 2) return undefined;
   const callback = expr.op1;
-  const list = expr.op2;
-  if (!isUnrollableList(list, options)) return undefined;
+  const elements = mapSourceElements(expr.op2, options);
+  if (elements === undefined) return undefined;
   if (isSymbol(callback))
-    return unrollMapOfNamedFunction(callback.symbol, list);
+    return unrollMapOfNamedFunction(callback.symbol, elements, expr.engine);
   const lambda = callback;
   if (!isFunction(lambda, 'Function') || lambda.nops !== 2) return undefined;
 
@@ -820,12 +839,63 @@ function tryUnrollMap(
   if (isFunction(body, 'Block')) return undefined;
   if (body.isPure !== true) return undefined;
   if (collectBinderNames(body).size > 0) return undefined;
-  if (!list.ops.every((e) => e.isPure === true)) return undefined;
+  if (!elements.every((e) => e.isPure === true)) return undefined;
 
   return expr.engine.function(
     'List',
-    list.ops.map((e) => body.subs({ [parameter]: e }))
+    elements.map((e) => body.subs({ [parameter]: e }))
   );
+}
+
+/**
+ * The elements of the source of a `Map` that {@link tryUnrollMap} writes
+ * out, or `undefined` when the rule leaves the `Map` to the target.
+ *
+ * By default, the source must be a WIDE literal `List` ({@link
+ * isUnrollableList}). A narrower list is left to the target's own `Map`
+ * lowering, and a list built by element-wise arithmetic over a wide literal
+ * list was already written out as a literal list by rule 4 (the pass works
+ * from the leaves up).
+ *
+ * A target that asks for `UnrollOptions.unrollComprehensions` (the shader
+ * targets) has no `Map` lowering, and a list that it cannot write out is a
+ * decline there. For such a target, the source can be:
+ *  - a literal `List` of any width, also a list of number literals;
+ *  - a `Range` with number-literal bounds;
+ *  - a list built from these by the element-wise heads, for example
+ *    `x + [0, 4, 2]`, whose width the structure proves (`staticListWidth`).
+ *    Each element is read with `indexInto`, so `x + [0, 4, 2]` gives `x + 0`,
+ *    `x + 4` and `x + 2`.
+ * The count is capped at `MAX_UNROLLED_COMPREHENSION_SIZE`, and at the
+ * target's iteration budget when it has one, as for a comprehension.
+ */
+function mapSourceElements(
+  source: Expression,
+  options: UnrollOptions
+): ReadonlyArray<Expression> | undefined {
+  if (isUnrollableList(source, options)) return source.ops;
+  if (options.unrollComprehensions !== true) return undefined;
+  if (!isFunction(source)) return undefined;
+  if (options.skipHeads?.has(source.operator) === true) return undefined;
+  if (readsCallerSource(source, options)) return undefined;
+  const width =
+    source.operator === 'List' ? source.nops : staticListWidth(source, true);
+  if (width === undefined || width === 0) return undefined;
+  const cap = Math.min(
+    MAX_UNROLLED_COMPREHENSION_SIZE,
+    options.iterationBudget === undefined
+      ? Infinity
+      : Math.floor(options.iterationBudget)
+  );
+  if (width > cap) return undefined;
+  if (source.operator === 'List') return source.ops;
+  const elements: Expression[] = [];
+  for (let k = 1; k <= width; k++) {
+    const element = indexInto(source, k, options);
+    if (element === undefined) return undefined;
+    elements.push(element);
+  }
+  return elements;
 }
 
 /**
@@ -857,9 +927,10 @@ function tryUnrollMap(
  */
 function unrollMapOfNamedFunction(
   name: string,
-  list: Expression & FunctionInterface
+  elements: ReadonlyArray<Expression>,
+  ce: Expression['engine']
 ): Expression | undefined {
-  const literal = userFunctionLiteral(list.engine, name);
+  const literal = userFunctionLiteral(ce, name);
   // A `Function` literal is `["Function", body, …params]`, so one parameter
   // is two operands.
   if (literal === undefined || literal.nops !== 2) return undefined;
@@ -868,10 +939,9 @@ function unrollMapOfNamedFunction(
   // A destructuring pattern is a raw `Tuple` operand, for which
   // `functionLiteralParameterName` reports no name.
   if (!functionLiteralParameterName(parameter)) return undefined;
-  if (!list.ops.every((e) => e.isPure === true)) return undefined;
+  if (!elements.every((e) => e.isPure === true)) return undefined;
 
-  const ce = list.engine;
-  const calls = list.ops.map((e) => ce.function(name, [e]));
+  const calls = elements.map((e) => ce.function(name, [e]));
   if (!calls.every((call) => call.isPure === true)) return undefined;
   return ce.function('List', calls);
 }
@@ -1083,8 +1153,9 @@ const ELEMENTWISE_HEADS = new Set([
 /**
  * Every head any rule of this pass can rewrite: the point accessors (rule 1),
  * `Map` (rule 2), the reductions (rule 3), the element-wise heads (rule 4)
- * a literal index (rule 5), a comprehension over literal domains (rule 6)
- * and a selection over a list-shaped condition (rule 7).
+ * a literal index (rule 5), a comprehension over literal domains (rule 6),
+ * a selection over a list-shaped condition (rule 7) and the norm of a point
+ * with a list component (rule 8).
  *
  * Read by {@link overriddenCompilationHeads} for the one case where the
  * overridden heads cannot be enumerated: withholding all of these makes the
@@ -1100,6 +1171,8 @@ const REWRITTEN_HEADS: ReadonlySet<string> = new Set([
   'Comprehension',
   'Which',
   'If',
+  'Abs',
+  'Norm',
 ]);
 
 /**
@@ -1682,4 +1755,29 @@ function literalDomainElements(
  */
 function isProvablyScalar(op: Expression): boolean {
   return op.type.matches('number');
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Rule 8 — the norm of a point with a list component
+// ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * `Abs(P)` or `Norm(P)` of a written point `P` (a `Tuple` or a `PointList`),
+ * rewritten to the explicit form the target supplies
+ * (`UnrollOptions.explicitPointNorm`): `|(x + [1, 2], y)|` becomes
+ * `√((x + [1, 2])² + y²)`, one norm per element of the list. The target
+ * decides which points have this form; a target that does not supply it
+ * keeps the norm as written.
+ */
+function explicitPointNorm(
+  expr: Expression & FunctionInterface,
+  options: UnrollOptions
+): Expression | undefined {
+  if (options.explicitPointNorm === undefined) return undefined;
+  if (expr.operator !== 'Abs' && expr.operator !== 'Norm') return undefined;
+  if (expr.ops.length !== 1) return undefined;
+  const point = expr.ops[0];
+  if (!isFunction(point, 'Tuple') && !isFunction(point, 'PointList'))
+    return undefined;
+  return options.explicitPointNorm(point);
 }

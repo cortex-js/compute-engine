@@ -188,9 +188,10 @@ describe('expr.solve()', () => {
   });
 
   test('should **NOT** solve a quasi-quadratic equation', () => {
+    // The solver finds no root, and it cannot show that there is none: no
+    // answer (`null`), not an empty list.
     const e = expr('x^2 + 3x + 2 + \\sin(x) = 0');
-    const result = e.solve('x')?.map((x) => x.json);
-    expect(result).toMatchInlineSnapshot(`[]`);
+    expect(e.solve('x')).toBeNull();
   });
 
   // Exponential and logarithmic equations (regression tests for the
@@ -762,6 +763,49 @@ describe('SOLVING TRIGONOMETRIC EQUATIONS', () => {
       'arccos((x^2 + 1) / (2x)) {|(x^2 + 1) / (2x)| <= 1}',
       '-arccos((x^2 + 1) / (2x)) {|(x^2 + 1) / (2x)| <= 1}',
     ]);
+  });
+
+  // The second root of `sin(x) = c` is a half turn minus `arcsin(c)`, and a
+  // root of `cos(u) = 0` is a quarter turn. The size of a turn depends on the
+  // angular unit (a half turn is π rad, 180 deg, 200 grad or 1/2 turn), and
+  // `Arcsin` gives its result in that unit: `π - arcsin(1/2)` is not a root
+  // in degree mode.
+  test.each([
+    ['rad', Math.PI],
+    ['deg', 180],
+    ['grad', 200],
+    ['turn', 0.5],
+  ] as const)('trig roots in the angular unit %s', (unit, halfTurn) => {
+    const ce = new ComputeEngine();
+    ce.angularUnit = unit;
+    const toRadians = (v: number) => (v * Math.PI) / halfTurn;
+    const values = (latex: string) =>
+      ce
+        .parse(latex)
+        .solve('x')!
+        .map((r) => r.N().re)
+        .sort((a, b) => a - b);
+
+    // sin(x) = 1/2 at 1/12 and 5/12 of a turn
+    for (const latex of ['\\sin(x) = \\frac{1}{2}', '2\\sin(x) - 1 = 0']) {
+      const v = values(latex);
+      expect(v.length).toBe(2);
+      expect(v[0]).toBeCloseTo(halfTurn / 6, 10);
+      expect(v[1]).toBeCloseTo((5 * halfTurn) / 6, 10);
+      for (const x of v) expect(Math.sin(toRadians(x))).toBeCloseTo(0.5, 12);
+    }
+
+    // cos(2x) = 0 when 2x is plus or minus a quarter turn
+    const w = values('\\cos(2x) = 0');
+    expect(w.length).toBe(2);
+    expect(w[0]).toBeCloseTo(-halfTurn / 4, 10);
+    expect(w[1]).toBeCloseTo(halfTurn / 4, 10);
+    for (const x of w)
+      expect(Math.abs(Math.cos(toRadians(2 * x)))).toBeLessThan(1e-12);
+
+    // cos(x^2) = 0 is not periodic in x, and it has infinitely many roots
+    // (`x^2` is each odd multiple of a quarter turn): no answer.
+    expect(ce.parse('\\cos(x^2) = 0').solve('x')).toBeNull();
   });
 });
 
@@ -1542,13 +1586,11 @@ describe('DOMAIN-CONSTRAINED SOLVE', () => {
 describe('DOMAIN-CONSTRAINED SOLVE: infinities are not values of a declared unknown', () => {
   const { ComputeEngine } = require('../../src/compute-engine');
 
-  test('no declared type keeps the infinite roots', () => {
+  test('with no declared type, an infinite value is not a root', () => {
+    // An infinite value is never a root of an equation: `1/x = 0` has no
+    // root, and the candidates `+oo` and `~oo` are rejected.
     const ce = new ComputeEngine();
-    const result = ce.parse('1/x = 0').solve('x');
-    expect((result as any[]).map((r: any) => r.toString())).toEqual([
-      '+oo',
-      '~oo',
-    ]);
+    expect(ce.parse('1/x = 0').solve('x')).toEqual([]);
   });
 
   test('a real unknown rejects both infinite roots', () => {
@@ -1717,31 +1759,24 @@ describe('TRANSCENDENTAL AND SUBSTITUTION EQUATIONS (B9)', () => {
   });
 
   // a·sin(x) + b·cos(x) = 0 → x = arctan(-b/a).
-  test('sin(x) = cos(x) → π/4', () => {
+  // The period of the equation is a full turn, and the roots of
+  // `tan(x) = c` are a half turn apart: two roots in one period.
+  test('sin(x) = cos(x) → π/4, 5π/4', () => {
     const result = expr('\\sin x = \\cos x')
       .solve('x')
-      ?.map((x) => x.json);
-    expect(result).toMatchInlineSnapshot(`
-      [
-        [
-          Multiply,
-          [
-            Rational,
-            1,
-            4,
-          ],
-          Pi,
-        ],
-      ]
-    `);
+      ?.map((x) => x.toString());
+    expect(result).toEqual(['1/4 * pi', '5/4 * pi']);
   });
 
-  test('√3·sin(x) + cos(x) = 0 → -π/6', () => {
+  test('√3·sin(x) + cos(x) = 0 → -π/6, 5π/6', () => {
     const result = expr('\\sqrt{3}\\sin x + \\cos x = 0')
       .solve('x')
       ?.map((x) => x.N().re);
-    expect(result?.length).toBe(1);
+    expect(result?.length).toBe(2);
     expect(result![0]).toBeCloseTo(-Math.PI / 6, 8);
+    expect(result![1]).toBeCloseTo((5 * Math.PI) / 6, 8);
+    for (const x of result!)
+      expect(Math.sqrt(3) * Math.sin(x) + Math.cos(x)).toBeCloseTo(0, 12);
   });
 
   // Homogenization: polynomial in a rational power of x (u = x^{1/d}).
@@ -2505,5 +2540,288 @@ describe('Solve shields a value-bound unknown from a nested transformer', () => 
         .evaluate()
         .toString()
     ).toBe('[2,-2]');
+  });
+});
+
+// A `Solve` result list holds all the solutions; `[]` states that there is
+// none. When the solver cannot show that a list is complete, `Solve` stays
+// unevaluated and `expr.solve()` returns `null`. Over ℝ, ℂ or no domain, a
+// periodic trig equation gives its principal roots: a finite list whose
+// translates by the period give every root.
+describe('SOLVE: COMPLETE ROOT LISTS', () => {
+  // The shared engine: constructing an engine here, when the tests are
+  // collected, would change the global precision of the other tests.
+  const ce = engine;
+  const solveOp = (latex: string) =>
+    ce.box(['Solve', ce.parse(latex).json, 'x']).evaluate();
+  // The numeric value of each root, sorted. Each root is checked against the
+  // equation `lhs = rhs` given as a JavaScript function `f(x) = lhs - rhs`.
+  const checkedRoots = (latex: string, f: (x: number) => number) => {
+    const roots = ce.parse(latex).solve('x');
+    expect(roots).not.toBeNull();
+    const values = (roots as any[]).map((r) => r.N().re).sort((a, b) => a - b);
+    for (const v of values) expect(Math.abs(f(v))).toBeLessThan(1e-9);
+    // `Solve` and `explain('solve')` give the same list
+    expect(solveOp(latex).nops).toBe(values.length);
+    expect(
+      ce.parse(latex).explain('solve', { variable: 'x' }).result.nops
+    ).toBe(values.length);
+    return values;
+  };
+  // `Solve` stays unevaluated, `solve()` is `null`, and the explanation has
+  // no answer.
+  const noAnswer = (latex: string) => {
+    expect(solveOp(latex).operator).toBe('Solve');
+    expect(ce.parse(latex).solve('x')).toBeNull();
+    expect(
+      ce.parse(latex).explain('solve', { variable: 'x' }).result.operator
+    ).toBe('Solve');
+  };
+
+  test('a recursive strategy keeps the "partial" flag of its sub-equation', () => {
+    // ln(...) = 1 becomes (x - 2)(x + e^x) = 0, and x + e^x = 0 has the root
+    // -W(1) ≈ -0.567 that the solver does not find.
+    noAnswer('\\ln((x-2)(x+e^x)+e)=1');
+  });
+
+  test('a polynomial factor with a symbolic coefficient is not root-free', () => {
+    // A real cubic always has a real root.
+    noAnswer('(e^x-2)(x^3+ax+1)=0');
+    noAnswer('(e^x-2)(x^5+ax+1)=0');
+    noAnswer('(e^x-2)(x^7+x^3+a)=0');
+  });
+
+  test('no root found and no proof of none: no answer on every route', () => {
+    for (const latex of [
+      'e^x=x+2',
+      'x^2=2^x',
+      '\\cos x=x',
+      '\\operatorname{arsinh}(x)=1',
+      '(x+e^x)(x-e^{-x})=0',
+      'x^5+ax+1=0',
+    ])
+      noAnswer(latex);
+  });
+
+  test('an alternative with no answer gives no answer for the Or', () => {
+    noAnswer('x=1 \\lor e^x=x+2');
+    // Two alternatives with no root: the empty list is the answer.
+    expect(solveOp('e^x=-1 \\lor e^x=-2').toString()).toBe('[]');
+  });
+
+  test('a trig function of a non-linear argument gives no answer', () => {
+    for (const latex of [
+      '\\sin(e^x)=0',
+      '\\sin(x^2)=0',
+      '\\sin(\\sqrt{x})=0',
+      '\\sin(\\ln x)=0',
+      '\\cos(2^x)=0',
+      '\\sin(1/x)=0',
+    ])
+      noAnswer(latex);
+  });
+
+  test('a trig function of a linear argument gives its principal roots', () => {
+    const pi = Math.PI;
+    expect(checkedRoots('\\sin(2x)=0', (x) => Math.sin(2 * x))).toEqual([
+      0,
+      pi / 2,
+    ]);
+    const cos2 = checkedRoots('\\cos(2x)=0', (x) => Math.cos(2 * x));
+    expect(cos2[0]).toBeCloseTo(-pi / 4, 12);
+    expect(cos2[1]).toBeCloseTo(pi / 4, 12);
+    const sin1 = checkedRoots('\\sin(x+1)=0', (x) => Math.sin(x + 1));
+    expect(sin1[0]).toBeCloseTo(-1, 12);
+    expect(sin1[1]).toBeCloseTo(pi - 1, 12);
+    const tan2 = checkedRoots('\\tan(2x)=1', (x) => Math.tan(2 * x) - 1);
+    expect(tan2.length).toBe(1);
+    expect(tan2[0]).toBeCloseTo(pi / 8, 12);
+    const sinHalf = checkedRoots(
+      '\\sin(2x)=\\frac12',
+      (x) => Math.sin(2 * x) - 0.5
+    );
+    expect(sinHalf[0]).toBeCloseTo(pi / 12, 12);
+    expect(sinHalf[1]).toBeCloseTo((5 * pi) / 12, 12);
+    expect(
+      checkedRoots('\\cos(3x-1)=\\frac12', (x) => Math.cos(3 * x - 1) - 0.5)
+        .length
+    ).toBe(2);
+    // No real root: a decision
+    expect(ce.parse('\\sin(2x)=2').solve('x')).toEqual([]);
+  });
+
+  test('a linear trig argument in degrees', () => {
+    const deg = new ComputeEngine();
+    deg.angularUnit = 'deg';
+    const roots = deg
+      .parse('\\cos(2x+10)=0')
+      .solve('x')
+      ?.map((r) => r.N().re)
+      .sort((a, b) => a - b);
+    expect(roots).toEqual([-50, 40]);
+    for (const x of roots!)
+      expect(Math.abs(Math.cos(((2 * x + 10) * Math.PI) / 180))).toBeLessThan(
+        1e-12
+      );
+  });
+
+  test('an even function under a logarithm or a rational power keeps both signs', () => {
+    const e = Math.E;
+    const ln = checkedRoots('\\ln(x^2)=2', (x) => Math.log(x * x) - 2);
+    expect(ln[0]).toBeCloseTo(-e, 12);
+    expect(ln[1]).toBeCloseTo(e, 12);
+    // The engine gives the real value (-8)^(2/3) = 4
+    expect(ce.parse('(-8)^{2/3}').evaluate().toString()).toBe('4');
+    expect(checkedRoots('x^{2/3}=4', (x) => Math.cbrt(x) ** 2 - 4)).toEqual([
+      -8, 8,
+    ]);
+    expect(checkedRoots('x^{4/3}=16', (x) => Math.cbrt(x) ** 4 - 16)).toEqual([
+      -8, 8,
+    ]);
+    // An odd numerator: x^(3/2) is not real for a negative x
+    expect(checkedRoots('x^{3/2}=8', (x) => Math.sqrt(x) ** 3 - 8)).toEqual([
+      4,
+    ]);
+  });
+
+  test('a logarithm of a rational power with an even numerator keeps both signs', () => {
+    // `simplify()` writes ln(x^(2/3)) as (2/3)·ln(x), which is not real for
+    // a negative x. The solver solves the equation as it was given:
+    // x^(2/3) = e^2, and the engine gives the real value (-e^3)^(2/3) = e^2.
+    const e3 = Math.E ** 3;
+    const cases: [string, (x: number) => number, number][] = [
+      ['\\ln(x^{2/3})=2', (x) => (2 / 3) * Math.log(Math.abs(x)) - 2, e3],
+      ['\\ln(x^{4/3})=4', (x) => (4 / 3) * Math.log(Math.abs(x)) - 4, e3],
+      ['\\ln(x^{-2/3})=2', (x) => (-2 / 3) * Math.log(Math.abs(x)) - 2, 1 / e3],
+    ];
+    for (const [latex, f, root] of cases) {
+      const roots = checkedRoots(latex, f);
+      expect(roots.length).toBe(2);
+      expect(roots[0]).toBeCloseTo(-root, 9);
+      expect(roots[1]).toBeCloseTo(root, 9);
+      const over = ce
+        .box([
+          'Solve',
+          ce.parse(latex).json,
+          ['Element', 'x', ['Interval', -30, 30]],
+        ])
+        .evaluate();
+      expect(over.nops).toBe(2);
+    }
+    // An odd numerator: x^(3/2) is real only for x ≥ 0
+    expect(
+      checkedRoots('\\ln(x^{3/2})=3', (x) => 1.5 * Math.log(x) - 3)[0]
+    ).toBeCloseTo(Math.E ** 2, 12);
+    expect(checkedRoots('\\ln(x)=1', (x) => Math.log(x) - 1)).toEqual([Math.E]);
+    // The simplification is not changed
+    expect(ce.parse('\\ln(x^{2/3})').simplify().toString()).toBe('2/3 * ln(x)');
+  });
+
+  test('a logarithm of a linear argument', () => {
+    const e = Math.E;
+    const cases: [string, (x: number) => number, number][] = [
+      ['\\ln(x+1)=2', (x) => Math.log(x + 1) - 2, e ** 2 - 1],
+      ['\\ln(2x+1)=1', (x) => Math.log(2 * x + 1) - 1, (e - 1) / 2],
+      ['3\\ln(x+1)=6', (x) => 3 * Math.log(x + 1) - 6, e ** 2 - 1],
+      ['-3\\ln(x+1)=6', (x) => -3 * Math.log(x + 1) - 6, e ** -2 - 1],
+      ['\\log_{10}(x+1)=2', (x) => Math.log10(x + 1) - 2, 99],
+      ['\\ln(x+1)+1=0', (x) => Math.log(x + 1) + 1, 1 / e - 1],
+    ];
+    for (const [latex, f, root] of cases) {
+      const roots = checkedRoots(latex, f);
+      expect(roots.length).toBe(1);
+      expect(roots[0]).toBeCloseTo(root, 12);
+    }
+  });
+
+  test('an exponential of a linear argument', () => {
+    const cases: [string, (x: number) => number, number][] = [
+      ['e^{x+1}=2', (x) => Math.exp(x + 1) - 2, Math.log(2) - 1],
+      ['10^{x+1}=5', (x) => 10 ** (x + 1) - 5, Math.log10(5) - 1],
+      ['-2e^{x+1}+3=0', (x) => -2 * Math.exp(x + 1) + 3, Math.log(1.5) - 1],
+      ['2^{3x-1}=8', (x) => 2 ** (3 * x - 1) - 8, 4 / 3],
+      ['3\\cdot 2^x=12', (x) => 3 * 2 ** x - 12, 2],
+    ];
+    for (const [latex, f, root] of cases) {
+      const roots = checkedRoots(latex, f);
+      expect(roots.length).toBe(1);
+      expect(roots[0]).toBeCloseTo(root, 12);
+    }
+    // An exponential with a positive base is positive: no real root, a
+    // decision
+    for (const latex of ['e^{x+1}=-2', '2e^{x+1}+3=0', '10^{x+1}=0']) {
+      expect(ce.parse(latex).solve('x')).toEqual([]);
+      expect(solveOp(latex).toString()).toBe('[]');
+    }
+    // The sign of the value is not known: no answer
+    noAnswer('e^{x+1}=a');
+  });
+
+  test('a constant times an absolute value', () => {
+    const e = Math.E;
+    expect(checkedRoots('2|x|=1', (x) => 2 * Math.abs(x) - 1)).toEqual([
+      -0.5, 0.5,
+    ]);
+    expect(checkedRoots('3|x|-6=0', (x) => 3 * Math.abs(x) - 6)).toEqual([
+      -2, 2,
+    ]);
+    expect(checkedRoots('-2|x|+4=0', (x) => -2 * Math.abs(x) + 4)).toEqual([
+      -2, 2,
+    ]);
+    expect(
+      checkedRoots('3|2x-1|=6', (x) => 3 * Math.abs(2 * x - 1) - 6)
+    ).toEqual([-0.5, 1.5]);
+    // `|x| = e^{-1}` is `e·|x| - 1 = 0` once the denominator is cleared
+    const inv = checkedRoots('|x|=e^{-1}', (x) => Math.abs(x) - 1 / e);
+    expect(inv[0]).toBeCloseTo(-1 / e, 12);
+    expect(inv[1]).toBeCloseTo(1 / e, 12);
+    // ln(x^-2) = 2 is -2·ln|x| - 2 = 0, thus |x| = e^-1
+    const ln = checkedRoots('\\ln(x^{-2})=2', (x) => Math.log(x ** -2) - 2);
+    expect(ln[0]).toBeCloseTo(-1 / e, 12);
+    expect(ln[1]).toBeCloseTo(1 / e, 12);
+    // An absolute value is not negative: no real root, a decision
+    expect(ce.parse('2|x|+1=0').solve('x')).toEqual([]);
+    expect(solveOp('2|x|+1=0').toString()).toBe('[]');
+  });
+
+  test('the temporary unknown of a substitution does not capture a symbol', () => {
+    const pi = Math.PI;
+    // `u` and `t` are the first names that a substitution uses for its
+    // temporary unknown. A symbol with a value is not in `expr.unknowns`.
+    const valued = new ComputeEngine();
+    valued.assign('u', valued.parse('\\frac12'));
+    valued.assign('t', valued.parse('\\frac12'));
+    const roots = (engine: ComputeEngine, latex: string) =>
+      (engine.parse(latex).solve('x') as any[] | null)
+        ?.map((r) => r.N().re)
+        .sort((a, b) => a - b);
+    // A linear trig argument: sin(2x) = -1/2
+    const trig = roots(valued, '\\sin(2x)+u=0')!;
+    expect(trig.length).toBe(2);
+    expect(trig[0]).toBeCloseTo(-pi / 12, 12);
+    expect(trig[1]).toBeCloseTo((7 * pi) / 12, 12);
+    // A generator: e^(2x) - 3e^x + 2 = 0
+    const gen = roots(valued, 'e^{2x}-3e^x+4u=0')!;
+    expect(gen.length).toBe(2);
+    expect(gen[0]).toBeCloseTo(0, 12);
+    expect(gen[1]).toBeCloseTo(Math.log(2), 12);
+    // The positive root of x^4 + x^2 - 1 = 0 (a power substitution and a
+    // single square root)
+    const r = Math.sqrt((Math.sqrt(5) - 1) / 2);
+    const quartic = roots(valued, 'x^4+x^2-2u=0')!;
+    expect(quartic.length).toBe(2);
+    expect(quartic[0]).toBeCloseTo(-r, 12);
+    expect(quartic[1]).toBeCloseTo(r, 12);
+    for (const latex of ['x\\sqrt{x^2+1}=2u', 'x\\sqrt{x^2+1}=2t']) {
+      const sqrt = roots(valued, latex)!;
+      expect(sqrt.length).toBe(1);
+      expect(sqrt[0]).toBeCloseTo(r, 12);
+    }
+    // A type of the same name in an outer scope does not apply to the
+    // temporary unknown: 2u² + 3u - 2 = 0 with u = x^(1/4) has the root 1/2,
+    // which is not an integer.
+    const typed = new ComputeEngine();
+    typed.declare('u', 'integer');
+    expect(roots(typed, '2\\sqrt{x}+3\\sqrt[4]{x}=2')).toEqual([1 / 16]);
   });
 });

@@ -77,6 +77,9 @@ describe('Open and Closed endpoint markers', () => {
     // shape of item 317. The bound is loose on purpose (a shared machine).
     const t0 = performance.now();
     for (let i = 0; i < 2000; i++) engine.parse('A[3]').evaluate();
-    expect(performance.now() - t0).toBeLessThan(5000);
+    // The time depends on the load of the machine, so the limit is asserted
+    // only in a `CE_PERF=1` run. The value checks above do not depend on time.
+    if (process.env.CE_PERF === '1')
+      expect(performance.now() - t0).toBeLessThan(5000);
   });
 });

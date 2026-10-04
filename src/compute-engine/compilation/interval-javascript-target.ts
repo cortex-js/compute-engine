@@ -58,6 +58,7 @@ import {
   isGatedNumericListOperand,
   isProvablyNumericListOperand,
   isProvablyStringOperand,
+  explicitBroadcastPointNorm,
   pointHasBroadcastComponent,
 } from './base-compiler.js';
 import { isOperatorDef } from '../boxed-expression/utils.js';
@@ -157,7 +158,14 @@ function compileIntervalPointNorm(
   components: ReadonlyArray<Expression>,
   compile: (expr: Expression) => string
 ): string {
-  const comps = components.map((c) => compile(c));
+  return intervalNormOfCodes(components.map((c) => compile(c)));
+}
+
+/**
+ * The Euclidean norm of the point whose coordinates are the compiled interval
+ * codes `comps`.
+ */
+function intervalNormOfCodes(comps: ReadonlyArray<string>): string {
   if (comps.length === 0) return '_IA.point(0)';
   if (comps.length === 1) return `_IA.abs(${comps[0]})`;
   if (comps.length === 2) return `_IA.hypot(${comps[0]}, ${comps[1]})`;
@@ -387,6 +395,18 @@ function compileIntervalCollectionValue(
   // around the value; the body ROOT is that value.
   if (literal.operator === 'Block' && literal.ops.length === 1)
     return compileIntervalCollectionValue(literal.ops[0], target);
+  // A call of a user function (or an `Apply` of a function literal) with a
+  // tuple argument at a parameter declared as a scalar is the tuple of the
+  // calls at each component (`BaseCompiler.declaredScalarTupleCall`), and it
+  // is spelled as that tuple: an array of enclosures.
+  const tupleCall = BaseCompiler.declaredScalarTupleCall(
+    literal.engine,
+    literal.operator,
+    literal.ops,
+    target
+  );
+  if (tupleCall !== undefined)
+    return compileIntervalCollectionValue(tupleCall, target);
   // `Typed(value, type)` is a transparent ascription: the call of a helper
   // DECLARED with a return type (`U: (any, any) -> tuple<number, number>`,
   // how a document host registers every function) inlines to its body under
@@ -1150,6 +1170,119 @@ const COLLECTION_AWARE_HEADS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * The expressions that the shared compiler had spelled as a collection value
+ * through `CompileTarget.compileCollectionValue`: the body root of a
+ * function, or the last statement of a block whose value is consumed whole.
+ * `returnsSpelledCollection` reads it.
+ */
+const SPELLED_COLLECTION_VALUES = new WeakSet<Expression>();
+
+/**
+ * Whether the value of the body of the function literal `literal` was
+ * spelled as a collection (an array at run time): the body root, or the
+ * last statement of a body that is a `Block`.
+ */
+function bodyIsSpelledCollection(literal: Expression): boolean {
+  if (!isFunction(literal, 'Function')) return false;
+  let body = literal.ops[0].canonical;
+  if (SPELLED_COLLECTION_VALUES.has(body)) return true;
+  while (isFunction(body, 'Block') && body.nops > 0) {
+    body = body.ops[body.nops - 1];
+    if (SPELLED_COLLECTION_VALUES.has(body)) return true;
+  }
+  return false;
+}
+
+/**
+ * Whether `arg` is a call of a block-local function whose body value was
+ * spelled as a collection (an array at run time). The type of such a call
+ * can be `any`: the declaration `f: function` gives no result type. Thus
+ * the type does not show that the call returns an array, and a scalar
+ * kernel would read the array as NaN bounds behind `success: true`.
+ */
+function returnsSpelledCollection(
+  arg: Expression,
+  target: CompileTarget<Expression> | undefined
+): boolean {
+  if (!isFunction(arg)) return false;
+  const literal = target?.localFunctions?.get(arg.operator);
+  return literal !== undefined && bodyIsSpelledCollection(literal);
+}
+
+/**
+ * Fail closed when a block-local function whose body value was spelled as a
+ * collection (`bodyIsSpelledCollection`) is called where the array it
+ * returns is not consumed whole.
+ *
+ * The type of such a call can be `any` (the declaration `f: function` gives
+ * no result type), so the scalar gates do not see that the call returns an
+ * array. `assertScalarIntervalOperands` catches a call that is a DIRECT
+ * operand of a scalar kernel only. When the array goes through a block
+ * local (`w := f(x); w + 1`) or through the parameter of another function
+ * (`g(f(x))` with `g := v ↦ v + 1`), a kernel reads it as NaN bounds behind
+ * `success: true`, where the interpreter gives an `incompatible-type`
+ * error.
+ *
+ * The positions where such a call is accepted are the positions that
+ * consume its value whole: the value of the compilation root (the root, or
+ * the last statement of a root `Block`, at any depth of nested blocks), an
+ * element of a `Tuple` or `List` literal (the literal is typed as a
+ * collection, so the scalar gates see it), and a statement whose value is
+ * discarded. A call in any other position declines the compilation, as does
+ * a reference to such a function as a value (an operand that is not a call).
+ * The test is by name, so a different binding with the same name can also
+ * decline: this check fails closed.
+ */
+function assertSpelledLocalCallsConsumed(expr: Expression): void {
+  // The names that a statement binds to a function literal whose body value
+  // was spelled as a collection.
+  const names = new Set<string>();
+  const collect = (e: Expression): void => {
+    if (!isFunction(e)) return;
+    if (
+      (e.operator === 'Assign' || e.operator === 'Declare') &&
+      isSymbol(e.ops[0]) &&
+      e.ops.slice(1).some((v) => bodyIsSpelledCollection(v))
+    )
+      names.add(e.ops[0].symbol);
+    for (const op of e.ops) collect(op);
+  };
+  collect(expr);
+  if (names.size === 0) return;
+
+  const check = (e: Expression, consumed: boolean): void => {
+    if (isSymbol(e) && names.has(e.symbol))
+      throw new Error(
+        `Could not compile \`${e.symbol}\`: the block-local function ` +
+          `\`${e.symbol}\` returns a collection, and it is used as a value. ` +
+          `The interval target cannot follow where its result goes.`
+      );
+    if (!isFunction(e)) return;
+    if (names.has(e.operator) && !consumed)
+      throw new Error(
+        `Could not compile \`${e.toString()}\`: it is a call of a ` +
+          `block-local function that returns a collection, and its value ` +
+          `is not consumed whole (it is not the value of the compilation, ` +
+          `or an element of a tuple or a list). The interval target's ` +
+          `kernels take one interval per operand.`
+      );
+    const ops = e.ops;
+    if (e.operator === 'Block') {
+      ops.forEach((s, i) => check(s, i < ops.length - 1 || consumed));
+      return;
+    }
+    if (e.operator === 'Assign' || e.operator === 'Declare') {
+      // The name that the statement binds is not a use of it.
+      ops.slice(1).forEach((op) => check(op, false));
+      return;
+    }
+    const element = e.operator === 'Tuple' || e.operator === 'List';
+    for (const op of ops) check(op, element);
+  };
+  check(expr, true);
+}
+
+/**
  * Fail closed when a scalar interval kernel is handed a provably
  * collection-valued operand.
  *
@@ -1167,9 +1300,16 @@ const COLLECTION_AWARE_HEADS: ReadonlySet<string> = new Set([
  */
 function assertScalarIntervalOperands(
   head: string,
-  args: ReadonlyArray<Expression>
+  args: ReadonlyArray<Expression>,
+  target?: CompileTarget<Expression>
 ): void {
   for (const arg of args) {
+    if (returnsSpelledCollection(arg, target))
+      throw new Error(
+        `Could not compile \`${head}\`: the operand \`${arg.toString()}\` is ` +
+          `a call of a block-local function that returns a collection, and ` +
+          `the interval target's kernels take one interval per operand.`
+      );
     if (arg.isCollection || arg.type.matches('collection<any>'))
       throw new Error(
         `Could not compile \`${head}\`: the operand \`${arg.toString()}\` is a ` +
@@ -1277,7 +1417,7 @@ function guardedIntervalFunction(
       );
       if (broadcast !== undefined) return broadcast;
       const code = handler(args, compile, target);
-      assertScalarIntervalOperands(id, args);
+      assertScalarIntervalOperands(id, args, target);
       return code;
     };
     GUARDED_INTERVAL_FUNCTIONS.set(id, wrapped);
@@ -2107,24 +2247,52 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // the point compiles through the `Norm` codegen below (Tycho item 74).
   Abs: (args, compile) => `_IA.abs(${compile(args[0])})`,
   // Euclidean (L2) norm of a fixed-arity point. Only the default L2 norm of
-  // a structural `Tuple` is representable here; any other operand, an
-  // explicit norm-type argument, or a broadcasting component throws to fail
-  // closed to scalar JS.
-  Norm: (args, compile) => {
+  // a structural `Tuple` or `PointList` is representable here; any other
+  // operand or an explicit norm-type argument throws to fail closed to
+  // scalar JS.
+  //
+  // A point with a broadcasting component is one point per element of its
+  // list components, so its norm is the array of one norm per element, as
+  // on the JavaScript target. When the list components have one length that
+  // the static types give, the norm compiles as the explicit
+  // `Sqrt(Square(c1) + … + Square(cn))`, written out as the array of one
+  // norm per element, the same as the norm written by hand
+  // (`explicitBroadcastPointNorm`). Otherwise a
+  // `PointList` is zipped at run time to the length of its shortest list
+  // (`_IA.pointList`, the interpreter's zip), and `_IA.map` takes the norm
+  // of each point. A `Tuple` in that case fails closed.
+  Norm: (args, compile, target) => {
     if (args.length > 1)
       throw new Error(
         'Could not compile `Norm`: only the default L2 norm compiles on the interval target'
       );
     const arg = args[0];
-    if (!isFunction(arg, 'Tuple'))
+    if (
+      (isFunction(arg, 'Tuple') || isFunction(arg, 'PointList')) &&
+      pointHasBroadcastComponent(arg)
+    ) {
+      const explicit = explicitBroadcastPointNorm(arg, target);
+      // The unrolled explicit norm is a `List` of one norm per element,
+      // which only the collection-value spelling writes as an array.
+      if (typeof explicit !== 'string')
+        return (
+          compileIntervalCollectionValue(explicit, target) ?? compile(explicit)
+        );
+      const zip = isFunction(arg, 'PointList')
+        ? compileIntervalPointListZip(arg.ops, target)
+        : undefined;
+      if (zip === undefined)
+        throw new Error(
+          `Could not compile \`Norm\`: a point with a broadcasting component, and ${explicit}.`
+        );
+      const p = BaseCompiler.tempVar(target);
+      const coordinates = arg.ops.map((_, i) => `${p}[${i}]`);
+      return `_IA.map((${p}) => ${intervalNormOfCodes(coordinates)}, ${zip})`;
+    }
+    // An all-scalar `PointList` is one point, the same as a `Tuple`.
+    if (!isFunction(arg, 'Tuple') && !isFunction(arg, 'PointList'))
       throw new Error(
         'Could not compile `Norm`: the interval target requires a fixed-arity point operand'
-      );
-    // A broadcasting component means one norm per zipped element — not
-    // representable as a scalar interval. Fail closed.
-    if (pointHasBroadcastComponent(arg))
-      throw new Error(
-        'Could not compile `Norm`: a point with a broadcasting component.'
       );
     return compileIntervalPointNorm(arg.ops, compile);
   },
@@ -2679,12 +2847,15 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // valueless function symbol) has no parameter list to check against.
     // Fail closed on all of those.
     const fn = isFunction(args[0], 'Derivative')
-      ? BaseCompiler.intervalDerivativeLiteral(args)
+      ? BaseCompiler.appliedDerivativeLiteral(args)
       : args[0];
     if (!isFunction(fn, 'Function'))
       throw new Error(
-        `Could not compile \`Apply\`: only a function-literal callee compiles on the interval ` +
-          `target.`
+        isFunction(args[0], 'Derivative')
+          ? `Could not compile \`Apply\`: ${BaseCompiler.appliedDerivativeDeclineReason(args)}, ` +
+              `and the interval target has no numerical derivative.`
+          : `Could not compile \`Apply\`: only a function-literal callee compiles on the ` +
+              `interval target.`
       );
     const paramCount = fn.ops.length - 1;
     if (args.length - 1 !== paramCount)
@@ -4807,7 +4978,11 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
       // The array spelling of a collection-building expression, for the
       // consuming positions the shared compiler owns (a helper's body root,
       // a whole-bound call argument). See `compileIntervalCollectionValue`.
-      compileCollectionValue: (e, t) => compileIntervalCollectionValue(e, t),
+      compileCollectionValue: (e, t) => {
+        const code = compileIntervalCollectionValue(e, t);
+        if (code !== undefined) SPELLED_COLLECTION_VALUES.add(e);
+        return code;
+      },
       // A unary `broadcastable` head over a LITERAL collection
       // (`sin(3..5)`, `−[1, 2, 3]`) reaches this hook from the shared
       // compiler before the head's handler runs; it is the same element-wise
@@ -5162,9 +5337,18 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
     // substitution consults exists only now, so this second pass follows the
     // target's creation, and the unknowns are read again afterwards: a
     // callee body can read a global the root expression never named.
+    // This pass also writes the norm of a point with a list component as its
+    // explicit form (`explicitBroadcastPointNorm`), before the common
+    // subexpressions are read, so the two share them.
     expr = unrollFixedWidthCollections(
       BaseCompiler.inlineCollectionValuedCallsAtRoot(expr, target),
-      unrollOptions
+      {
+        ...unrollOptions,
+        explicitPointNorm: (point) => {
+          const explicit = explicitBroadcastPointNorm(point, target);
+          return typeof explicit === 'string' ? undefined : explicit;
+        },
+      }
     );
     unknowns = expr.unknowns;
 
@@ -5232,7 +5416,16 @@ function compileToIntervalTarget(
         rootLiteral.operator === 'Which' ||
         rootLiteral.operator === 'When' ||
         (isFunction(rootLiteral, 'WithRandomSeed') &&
-          isFunction(rootLiteral.ops[1], 'RandomChoice')));
+          isFunction(rootLiteral.ops[1], 'RandomChoice')) ||
+        // A call that maps over a tuple argument is a tuple
+        // (`BaseCompiler.declaredScalarTupleCall`).
+        (isFunction(rootLiteral) &&
+          BaseCompiler.declaredScalarTupleCall(
+            rootLiteral.engine,
+            rootLiteral.operator,
+            rootLiteral.ops,
+            target
+          ) !== undefined));
     js =
       point !== undefined
         ? BaseCompiler.compileCseRoot(
@@ -5253,7 +5446,18 @@ function compileToIntervalTarget(
                 compileIntervalCollectionValue(expr, target) ??
                 BaseCompiler.compile(expr, target)
             )
-          : BaseCompiler.compileCseRoot(expr, target);
+          : // A `Block` root is consumed whole too: its last statement is
+            // spelled as a collection value when it is one (a tuple, a call
+            // that maps over a tuple argument), in the scope of the block.
+            // See `BaseCompiler.compileCollectionValueBlock`.
+            isFunction(expr, 'Block')
+            ? BaseCompiler.compileCseRoot(expr, target, 0, () =>
+                BaseCompiler.compileCollectionValueBlock(expr, target)
+              )
+            : BaseCompiler.compileCseRoot(expr, target);
+    // The compilation tells which block-local function bodies were spelled
+    // as collections, so this check runs after it.
+    assertSpelledLocalCallsConsumed(expr);
   } catch (e) {
     // A cancellation that is not a timeout (an abort, an iteration or
     // recursion limit), or a timeout of an expired enclosing span, belongs

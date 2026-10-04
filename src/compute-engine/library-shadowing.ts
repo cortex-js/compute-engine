@@ -73,13 +73,121 @@ export function shadowsLibraryName(
     return true;
   if (ce._isShadowedParameter(name)) return true;
   const current = ce.lookupDefinition(name);
-  if (current === undefined || current === library) return false;
+  if (current === undefined) return false;
+  return isShadowOf(current, library);
+}
+
+/**
+ * True when the definition `current` of a name is not the library
+ * definition `library` of the same name, and is not an extension or a copy
+ * of it that keeps the library handlers (see {@link shadowsLibraryName}).
+ */
+function isShadowOf(current: unknown, library: unknown): boolean {
+  if (current === library) return false;
   const operator = (current as { operator?: object }).operator;
   const libraryOperator = (library as { operator?: object }).operator;
   if (operator === undefined || libraryOperator === undefined) return true;
   if (LIBRARY_EXTENSIONS.get(operator) === libraryOperator)
     return !keepsLibraryFlags(operator, libraryOperator);
   return !keepsLibraryOperator(operator, libraryOperator);
+}
+
+/**
+ * The standard-library names that a binding of `scope` shadows: a
+ * function parameter or a local of a block named `Sin`, `Ln`, …
+ *
+ * {@link shadowedLibraryNames} cannot find these names: the scope of a
+ * function body or of a block is not in the current scope chain while the
+ * expression is simplified, only while it is evaluated. So the caller reads
+ * the local scope of each scoped expression that it enters.
+ */
+export function libraryNamesShadowedIn(
+  ce: {
+    readonly contextStack: ReadonlyArray<{
+      readonly lexicalScope: {
+        readonly bindings: { get(name: string): unknown };
+      };
+    }>;
+  },
+  scope: { readonly bindings: { entries(): Iterable<[string, unknown]> } }
+): string[] {
+  const system = ce.contextStack[0]?.lexicalScope;
+  if (system === undefined) return [];
+  const result: string[] = [];
+  for (const [name, def] of scope.bindings.entries()) {
+    const library = system.bindings.get(name);
+    if (library !== undefined && isShadowOf(def, library)) result.push(name);
+  }
+  return result;
+}
+
+/**
+ * True when the symbol `sym` has a library name but does not denote the
+ * library value: a user declaration gave the name another value
+ * (`ce.declare('Pi', { value: 3 })`, `let Pi = 3`).
+ *
+ * Code that recognizes a constant by its name (`π` in `sin(π) = 0`, the
+ * angle of `e^{iπ}`) must ask this first. A bound symbol is compared by its
+ * definition: it denotes the library value only when it is bound to the
+ * definition in the system scope, where the standard library is installed.
+ * A symbol that is not bound (a structural expression) is compared by the
+ * definition that its name resolves to in the current scope
+ * (`shadowsLibraryName()`).
+ */
+export function isShadowedSymbol(sym: {
+  readonly symbol: string;
+  readonly valueDefinition: unknown;
+  readonly engine: Parameters<typeof shadowsLibraryName>[0];
+}): boolean {
+  const library = sym.engine.contextStack[0]?.lexicalScope.bindings.get(
+    sym.symbol
+  );
+  if (library === undefined) return false;
+  const def = sym.valueDefinition;
+  if (def !== undefined) return (library as { value?: unknown }).value !== def;
+  return shadowsLibraryName(sym.engine, sym.symbol);
+}
+
+/**
+ * The standard-library names that a user binding shadows
+ * (`shadowsLibraryName()`) in the current scope chain, and the names that a
+ * caller-supplied library replaced. The set is empty in the usual case,
+ * where the user defines no function with a library name.
+ *
+ * The search reads only the bindings of the scopes between the current
+ * scope and the system scope, and the system scope holds the whole standard
+ * library. So the cost is in proportion to the number of user names, not to
+ * the size of the library. A function parameter is not included: it is
+ * declared in the scope of its function body, which is not in the current
+ * scope chain.
+ */
+export function shadowedLibraryNames(ce: {
+  lookupDefinition(name: string): unknown;
+  readonly context: {
+    readonly lexicalScope: {
+      readonly parent: unknown;
+      readonly bindings: { keys(): Iterable<string> };
+    };
+  };
+  readonly contextStack: ReadonlyArray<{
+    readonly lexicalScope: {
+      readonly bindings: { get(name: string): unknown };
+    };
+  }>;
+  readonly _customLibraryOperators: ReadonlySet<string>;
+  _isShadowedParameter(name: string): boolean;
+}): ReadonlySet<string> {
+  const system = ce.contextStack[0]?.lexicalScope;
+  if (system === undefined) return new Set();
+  const result = new Set(ce._customLibraryOperators);
+  type ScopeLike = typeof ce.context.lexicalScope;
+  let scope = ce.context.lexicalScope as ScopeLike | null;
+  while (scope && scope !== (system as unknown)) {
+    for (const name of scope.bindings.keys())
+      if (!result.has(name) && shadowsLibraryName(ce, name)) result.add(name);
+    scope = scope.parent as ScopeLike | null;
+  }
+  return result;
 }
 
 /**

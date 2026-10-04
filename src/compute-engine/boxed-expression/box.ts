@@ -58,6 +58,7 @@ import {
 } from './named-arguments.js';
 import { qualifiedMemberRequirementShape } from '../engine-protocols.js';
 import { resolveFieldCallee } from './field-callee.js';
+import { recordCanonicalFailure } from './canonical-failure.js';
 import { multiClauseState } from '../multi-clause.js';
 
 import { _BoxedExpression } from './abstract-boxed-expression.js';
@@ -2106,6 +2107,125 @@ function staticallyPinnedCallee(
   return pinned.has(def) || def.value?.operator === 'Function';
 }
 
+/** `x` when it is a function literal that annotates at least one of its
+ * parameters (`(u: real) ↦ 7`), and `undefined` otherwise. */
+function annotatedLiteral(
+  x: Expression | undefined
+): Expression | undefined {
+  if (!isFunction(x, 'Function')) return undefined;
+  return x.ops.slice(1).some((p) => functionLiteralParameterType(p) !== undefined)
+    ? x
+    : undefined;
+}
+
+/**
+ * The operands of `Apply(literal, …ops)`, checked against the parameters
+ * that the function literal annotates, in a strict engine, as the call of a
+ * named function assigned the same literal is checked when it is boxed. An
+ * operand that certainly does not match its parameter (`"abc"` at `u: real`)
+ * is replaced by its `incompatible-type` error, so the application is
+ * invalid and is typed `error`, as `h("abc")` is for `h := (u: real) ↦ 7`.
+ * An operand that the application maps over (a list, or a tuple at a
+ * parameter declared as a scalar) is not refused here. The answer is
+ * `undefined` when there is nothing to check or nothing changed.
+ */
+export function validatedLiteralApplicationOperands(
+  ce: ComputeEngine,
+  literal: Expression,
+  ops: ReadonlyArray<Expression>
+): ReadonlyArray<Expression> | undefined {
+  if (!ce.strict) return undefined;
+  const annotated = annotatedLiteral(literal);
+  if (annotated === undefined || !annotated.isCanonical) return undefined;
+  if (!ops.every((x) => x.isCanonical)) return undefined;
+  const checkedType = pinnedValidationSignature(
+    annotated.type.type,
+    ops.length,
+    annotated
+  );
+  if (typeof checkedType === 'string' || checkedType.kind !== 'signature')
+    return undefined;
+  const invalid = validateArguments(
+    ce,
+    ops,
+    checkedType,
+    undefined,
+    threadableGate(checkedType, paramsAreScalar(checkedType)),
+    undefined,
+    undefined,
+    {
+      operatorName: 'Apply',
+      mapsPointLists: true,
+      userFunction: true,
+      enforcesParameterAnnotations: true,
+    }
+  );
+  if (!invalid) return undefined;
+  return keepProvisionalOperands(ce, ops, invalid, checkedType, true);
+}
+
+/**
+ * The operands of a call after `validateArguments` gave `invalid` for the
+ * operands `ops`. Only a CLOSED operand (a literal or a constant expression,
+ * whose type is definite: `0.5`, `"a"`) stays rejected. An operand with free
+ * variables (a bare symbol `x`, a pattern variable `_q`, or `x+1`) has a
+ * provisional type and may satisfy the parameter at run time, so its
+ * rejection is undone, unless its own type refutes the parameter.
+ *
+ * "Has free variables" is a proxy for "provisional type", and it is only a
+ * valid proxy while the type could still turn out compatible: a symbol
+ * declared `string` can never denote a `tuple<…>`, so the error is
+ * definite, not provisional. Refute only on PROVABLE disjointness
+ * (`isDisjointFrom`, conservative by construction), so union-declared,
+ * `unknown`-typed and same-category-composite operands (`list<integer>` vs
+ * `list<string>` — the empty list inhabits both) keep deferring. A symbol
+ * the Epsil static pre-pass recorded ASSIGNMENT EVIDENCE for is not
+ * provisional either: the pass established its type from an actual
+ * assignment (`x = g()` ⇒ `x: number`), so a rejection against that type is
+ * as definite as one against a held value. An argument refused because it
+ * is absent is refused by its `missing` member, which the type states
+ * whatever value the free variables take (`refusesAbsentArgument`,
+ * `validate.ts`), when `enforcesAnnotations` is true.
+ */
+function keepProvisionalOperands(
+  ce: ComputeEngine,
+  ops: ReadonlyArray<Expression>,
+  invalid: ReadonlyArray<Expression>,
+  checkedType: Type,
+  enforcesAnnotations: boolean
+): Expression[] {
+  return invalid.map((r, i) => {
+    const orig = ops[i];
+    if (
+      orig &&
+      orig.isValid &&
+      !r.isValid &&
+      orig.freeVariables.length > 0 &&
+      !(
+        isSymbol(orig) &&
+        orig.valueDefinition !== undefined &&
+        ce._staticAssignmentEvidence?.has(orig.valueDefinition)
+      )
+    ) {
+      const params = candidateParamsAt(checkedType, i);
+      if (params.length > 0 && params.every((p) => orig.type.isDisjointFrom(p)))
+        return r;
+      if (
+        enforcesAnnotations &&
+        params.length > 0 &&
+        params.every((p) =>
+          refusesAbsentArgument(ce, orig, p, {
+            enforcesParameterAnnotations: true,
+          })
+        )
+      )
+        return r;
+      return orig;
+    }
+    return r;
+  });
+}
+
 /**
  * The signature a call to a statically pinned literal (`staticallyPinnedCallee`)
  * is validated against, so the static verdict is the one the literal's own
@@ -2689,10 +2809,22 @@ function makeCanonicalFunctionCore(
     // when applied), so skip those — except for the Epsil static pre-pass,
     // which asks for a function LITERAL's signature to be enforced here
     // (`staticallyPinnedCallee`).
-    const valueType = def.value.type.type;
+    //
+    // A callee declared `function` and assigned a literal that annotates a
+    // parameter (`(u: real) ↦ 7`) is checked against those annotations, as
+    // the literal is pinned. The same literal assigned with no declaration
+    // is an operator definition, whose call is checked against them, so
+    // `f("abc")` is invalid on both routes, typed `error` on both.
+    const wildcardLiteral = wildcardCallee
+      ? annotatedLiteral(def.value.value)
+      : undefined;
+    const pinned = def.value.inferredType || wildcardLiteral !== undefined;
+    const valueType = wildcardLiteral?.type.type ?? def.value.type.type;
     if (
       ce.strict &&
-      (!def.value.inferredType || staticallyPinnedCallee(ce, def.value)) &&
+      (!def.value.inferredType ||
+        wildcardLiteral !== undefined ||
+        staticallyPinnedCallee(ce, def.value)) &&
       typeof valueType !== 'string' &&
       // A plain signature, OR an overload set (an intersection of signatures).
       // Gating on `kind === 'signature'` alone let an overload-typed value
@@ -2732,11 +2864,12 @@ function makeCanonicalFunctionCore(
       // During the Epsil static pre-pass the name has no value yet, and the
       // literal is the one the pass registered (`_staticPinnedCallees`).
       const heldLiteral = def.value.value;
-      const pinnedLiteral = !def.value.inferredType
+      const pinnedLiteral = !pinned
         ? undefined
-        : (ce._staticPinnedCallees?.get(def.value) ??
+        : (wildcardLiteral ??
+          ce._staticPinnedCallees?.get(def.value) ??
           (isFunction(heldLiteral, 'Function') ? heldLiteral : undefined));
-      const checkedType = def.value.inferredType
+      const checkedType = pinned
         ? pinnedValidationSignature(valueType, boxedOps.length, pinnedLiteral)
         : placeholderSlotsAs(valueType, def.value._signatureSkeleton, 'any');
       const enforcesAnnotations =
@@ -2766,8 +2899,8 @@ function makeCanonicalFunctionCore(
         // as `any` for validation is still a scalar slot for threading when
         // its refined type is one.
         threadableGate(
-          def.value.inferredType ? checkedType : valueType,
-          paramsAreScalar(def.value.inferredType ? checkedType : valueType)
+          pinned ? checkedType : valueType,
+          paramsAreScalar(pinned ? checkedType : valueType)
         ),
         undefined,
         undefined,
@@ -2788,66 +2921,15 @@ function makeCanonicalFunctionCore(
         }
       );
       if (invalid) {
-        // Only reject *closed* operands — literals and constant expressions
-        // whose type is definite (`0.5`, `"a"`). An operand with free
-        // variables (a bare symbol `x`, a pattern variable `_q`, or `x+1`)
-        // has a provisional/broad type and may satisfy the parameter at
-        // runtime, so it is not eagerly rejected; un-reject those and only
-        // keep an invalid result if a closed operand actually violated the
-        // signature.
-        //
-        // …unless the operand's own type *refutes* the parameter. "Has free
-        // variables" is a proxy for "provisional type", and it is only a
-        // valid proxy while the type could still turn out compatible: a
-        // symbol declared `string` can never denote a `tuple<…>`, so the
-        // error is definite, not provisional. Refute only on PROVABLE
-        // disjointness (`isDisjointFrom`, conservative by construction), so
-        // union-declared, `unknown`-typed and same-category-composite
-        // operands (`list<integer>` vs `list<string>` — the empty list
-        // inhabits both) keep deferring exactly as before.
-        const cleaned = invalid.map((r, i) => {
-          const orig = boxedOps[i];
-          if (
-            orig &&
-            orig.isValid &&
-            !r.isValid &&
-            orig.freeVariables.length > 0 &&
-            // "Has free variables" is a proxy for "provisional type" — and a
-            // symbol the Epsil static pre-pass recorded ASSIGNMENT EVIDENCE
-            // for is NOT provisional: the pass established its type from an
-            // actual assignment (`x = g()` ⇒ `x: number`), so a rejection
-            // against that type is as definite as one against a held value,
-            // and un-rejecting it here was what kept the whole-program
-            // static check from ever reporting the mismatch.
-            !(
-              isSymbol(orig) &&
-              orig.valueDefinition !== undefined &&
-              ce._staticAssignmentEvidence?.has(orig.valueDefinition)
-            )
-          ) {
-            const params = candidateParamsAt(checkedType, i);
-            if (
-              params.length > 0 &&
-              params.every((p) => orig.type.isDisjointFrom(p))
-            )
-              return r;
-            // An argument refused because it is absent is refused by its
-            // `missing` member, which the type states whatever value the
-            // free variables take (`refusesAbsentArgument`, `validate.ts`).
-            if (
-              enforcesAnnotations &&
-              params.length > 0 &&
-              params.every((p) =>
-                refusesAbsentArgument(ce, orig, p, {
-                  enforcesParameterAnnotations: true,
-                })
-              )
-            )
-              return r;
-            return orig;
-          }
-          return r;
-        });
+        // Only a closed operand stays rejected, or one whose type refutes
+        // the parameter (`keepProvisionalOperands`).
+        const cleaned = keepProvisionalOperands(
+          ce,
+          boxedOps,
+          invalid,
+          checkedType,
+          enforcesAnnotations
+        );
         // `validateArguments` returns a non-null list not only when an
         // operand was REJECTED but also when one was SUBSTITUTED and every
         // entry is valid — a one-cluster string literal narrowed to the
@@ -2860,6 +2942,11 @@ function makeCanonicalFunctionCore(
           canonical: true,
         });
         fn._resolvedOverload = valueResolutionOut.resolution;
+        // The operands were checked against the literal that the name holds
+        // now, and a later assignment can replace it. Keep the operands, so
+        // that the call is checked again against the new literal
+        // (`BoxedFunction._recheckedCall()`).
+        if (pinned && cleaned.some((x) => !x.isValid)) fn._refusedOps = boxedOps;
         return fn;
       }
       const fn = new BoxedFunction(ce, name, boxedOps, {
@@ -3182,6 +3269,7 @@ function applyOperatorDefinition(
     // If we have a lazy function, we don't canonicalize the arguments
     const xs = rawOps ?? boxOperands(ce, ops, RAW_OPERAND);
     if (opDef.canonical) {
+      let failure: { error: unknown } | undefined;
       try {
         result = opDef.canonical(xs, { engine: ce, scope });
         if (result) {
@@ -3225,12 +3313,16 @@ function applyOperatorDefinition(
           `ComputeEngine: error canonicalizing \`${name}\`:`,
           canonicalErrorDetail(e)
         );
+        failure = { error: e };
       }
       // The canonical handler gave up, return a non-canonical expression
       result = new BoxedFunction(ce, name, xs, {
         metadata,
         canonical: false,
       });
+      // Keep the exception with the expression, for a caller that cannot
+      // continue without the canonical form (`canonical-failure.ts`).
+      if (failure !== undefined) recordCanonicalFailure(result, failure.error);
       return result;
     }
 
@@ -3317,6 +3409,7 @@ function applyOperatorDefinition(
   // The arguments have been put in canonical form
   //
   if (opDef.canonical) {
+    let failure: { error: unknown } | undefined;
     try {
       const handlerResult = opDef.canonical(xs, { engine: ce, scope });
       if (handlerResult) {
@@ -3440,6 +3533,7 @@ function applyOperatorDefinition(
         `ComputeEngine: error canonicalizing \`${name}\`:`,
         canonicalErrorDetail(e)
       );
+      failure = { error: e };
     }
 
     // The canonical handler gave up, return a non-canonical expression
@@ -3447,6 +3541,8 @@ function applyOperatorDefinition(
       metadata,
       canonical: false,
     });
+    // See the lazy-path catch above.
+    if (failure !== undefined) recordCanonicalFailure(result, failure.error);
 
     return result;
   }
@@ -3547,6 +3643,10 @@ function applyOperatorDefinition(
         scope,
       });
       fn._resolvedOverload = resolutionOut.resolution;
+      // A later assignment can replace a user function. Keep the operands,
+      // so that the call is checked again against the new definition
+      // (`BoxedFunction._recheckedCall()`).
+      if (opDef.isUserFunctionDefinition) fn._refusedOps = args;
       return fn;
     }
     // All valid: an operand was substituted (devolved to an unknown symbol,

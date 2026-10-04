@@ -387,6 +387,9 @@ export function absorbSubscripts(
     // The name this iteration would produce, committed at the end of the
     // loop body via `commit()`.
     let suffix: string | null = null;
+    // The two letters of an unbraced subscript that the non-strict grammar
+    // splits (`a_kx^k` is `a_k·x^k`), or `null`.
+    let splitRun: string | null = null;
     const commit = (): boolean => {
       if (suffix === null) return false;
       const candidate = id + '_' + suffix;
@@ -483,6 +486,7 @@ export function absorbSubscripts(
             parser.peek === '^' ||
             /^[0-9]$/.test(parser.peek))
         ) {
+          splitRun = letters;
           letters = letters[0];
           parser.index = runStart + 1;
         }
@@ -503,6 +507,16 @@ export function absorbSubscripts(
     // Commit the absorbed subscript, or rewind (a base whose joined name is
     // not declared: the subscript is an index or a `Subscript` expression).
     if (!commit()) break;
+    // The split has a second common reading: `x_ab^2` is `x_a·b^2`, and a
+    // person can mean `x_{ab}^2`, which is the reading of `x^2_ab`. The span
+    // is the `_` and the two letters.
+    if (splitRun !== null)
+      parser._emitAmbiguity?.(
+        'ambiguous-implicit-subscript',
+        underscoreIndex,
+        underscoreIndex + 3,
+        { base: id.slice(0, id.length - 2), subscript: splitRun[0] }
+      );
   }
 
   return id;

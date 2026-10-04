@@ -9,11 +9,14 @@ import { ComputeEngine } from '../../src/compute-engine';
  * (`mod(L,N)/N`) tripped the `Not canonical` assert in `div`.
  *
  * Also covered here: the two hazards found while fixing it —
- * - the lazy `.N()` wrapper emits `["N", body]`, which a user symbol `N`
+ * - a lazy `Map` whose body is the `N` operator, which a user symbol `N`
  *   (ubiquitous in the Desmos corpus: `N = 85`) used to shadow into an
  *   `incompatible-type` application; operator-position binding now defers a
  *   provably-non-applicable value def to the outer builtin
- *   (`lookupApplicable`);
+ *   (`lookupApplicable`). The `.N()` method of a lazy `Map` now wraps the
+ *   body in the engine-internal `NumericApproximation`, not in `N`; the `N`
+ *   operator of a lazy collection (`N(Range(1, 200))`) still writes
+ *   `["N", "_1"]` into a `Map` body;
  * - `Map` over an `unknown`-typed source shed indexed-ness (type, `at`,
  *   display preview), making the lazy result non-consumable.
  */
@@ -159,6 +162,34 @@ describe('bare assign to a builtin operator shadows instead of mutating (2026-07
     expect(ce.box('N').evaluate().json).toBe(5);
     // … and the parse route agrees (route parity).
     expect(ce.parse('N+1').evaluate().json).toBe(6);
+  });
+
+  test('a user value of `N` or `_1` does not change the elements of N(Range(1, 200))', () => {
+    // The `N` operator of a lazy collection gives the lazy
+    // `Map(_1 ↦ N(_1), Range(1, 200))`, so `N` and `_1` are written into a
+    // `Map` body. A user value assigned to either symbol must not reach it.
+    const setups: Array<(ce: ComputeEngine) => void> = [
+      (ce) => ce.assign('N', 5),
+      (ce) => ce.assign('_1', 7),
+      (ce) => {
+        ce.declare('N', { type: 'number' });
+        ce.assign('N', 85);
+        ce.assign('_1', 7);
+      },
+    ];
+    for (const setup of setups) {
+      const ce = new ComputeEngine();
+      setup(ce);
+      const r = ce.box(['N', ['Range', 1, 200]]).evaluate();
+      expect(r.operator).toBe('Map');
+      const xs = [...r.each()];
+      expect(xs.length).toBe(200);
+      expect(xs.every((x, i) => x.re === i + 1 && x.isExact === false)).toBe(
+        true
+      );
+      expect(r.at(200)?.re).toBe(200);
+      expect(r.at(200)?.isExact).toBe(false);
+    }
   });
 
   test('bare assign(Sin) leaves the builtin intact on box and parse routes', () => {

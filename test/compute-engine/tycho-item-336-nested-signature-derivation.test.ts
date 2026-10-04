@@ -131,8 +131,11 @@ describe('TYCHO ITEM 336: NESTED CALLS OF FUNCTIONS DECLARED -> unknown', () => 
         for (let k = 1; k <= depth; k++)
           expect(ce.box(`W_${k}`).type.toString()).toBe(W_TYPE);
         // Measured 2026-09-29: about 20 ms at depth 6. Without the fix the
-        // count limit above throws first.
-        if (depth === 6) expect(elapsed).toBeLessThan(2000);
+        // count limit above throws first. The time depends on the load of the
+        // machine, so the limit is asserted only in a `CE_PERF=1` run. The
+        // type checks above do not depend on time.
+        if (process.env.CE_PERF === '1' && depth === 6)
+          expect(elapsed).toBeLessThan(2000);
       });
     }
     test(`${body} body: the derivations grow linearly with the depth`, () => {

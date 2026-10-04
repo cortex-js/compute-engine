@@ -1152,13 +1152,61 @@ describe('DSolve', () => {
   });
 
   test('stays inert when variation of parameters cannot integrate', () => {
+    // Variation of parameters needs ∫ cos(x)/ln(x) dx and
+    // ∫ sin(x)/ln(x) dx, which have no closed form.
     const result = dsolve([
       'Equal',
       ['Add', ['D', ['D', ['y', 'x'], 'x'], 'x'], ['y', 'x']],
-      ['Divide', 1, 'x'],
+      ['Divide', 1, ['Ln', 'x']],
     ]);
 
     expect(result.operator).toBe('DSolve');
+  });
+
+  // Variation of parameters needs ∫ cos(x)·xˣ dx and ∫ sin(x)·xˣ dx, and the
+  // first-order solver needs ∫ eˣ·xˣ dx. None has a closed form. Integration
+  // by parts with u = xˣ recursed without progress, because d/dx xˣ has xˣ
+  // as a factor: the second-order equation did not finish in 300 s, and the
+  // first-order one overflowed the stack.
+  test('stays inert when variation of parameters meets xˣ', () => {
+    const result = dsolve([
+      'Equal',
+      ['Add', ['D', ['D', ['y', 'x'], 'x'], 'x'], ['y', 'x']],
+      ['Power', 'x', 'x'],
+    ]);
+
+    expect(result.operator).toBe('DSolve');
+  }, 120_000);
+
+  test('a first-order equation with xˣ gives a quadrature', () => {
+    const result = dsolve([
+      'Equal',
+      ['Add', ['D', ['y', 'x'], 'x'], ['y', 'x']],
+      ['Power', 'x', 'x'],
+    ]);
+
+    expect(result.toString()).toMatchInlineSnapshot(
+      `[y(x) == ("c_1" + int(e^x * x^x dx)) / e^x]`
+    );
+  }, 120_000);
+
+  test('variation of parameters with sine and cosine integrals', () => {
+    // `y'' + y = 1/x`: variation of parameters needs ∫ cos(x)/x dx = Ci(x)
+    // and ∫ −sin(x)/x dx = −Si(x).
+    const equation = [
+      'Equal',
+      ['Add', ['D', ['D', ['y', 'x'], 'x'], 'x'], ['y', 'x']],
+      ['Divide', 1, 'x'],
+    ];
+    const result = dsolve(equation);
+
+    expect(result.toString()).toMatchInlineSnapshot(
+      `[y(x) == "c_1" * cos(x) + "c_2" * sin(x) + sin(x) * CosIntegral(x) - cos(x) * SinIntegral(x)]`
+    );
+    for (const x of [0.4, 1.3, 2.7])
+      expect(
+        verifyEquationSolution(equation, result, { c_1: 1.3, c_2: -0.7, x })
+      ).toBe(true);
   });
 
   // Regression: numeric-root fallback must cluster coincident Durand-Kerner

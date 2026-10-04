@@ -7,7 +7,10 @@ import {
   gpuIntegerFact,
   recordGPUCounter,
 } from './gpu-value-facts.js';
-import { COLLECTION_SHAPE_TYPE } from '../../common/type/primitive.js';
+import {
+  COLLECTION_SHAPE_TYPE,
+  INDEXED_COLLECTION_SHAPE_TYPE,
+} from '../../common/type/primitive.js';
 import { throwIfCallerCancellation } from '../../common/interruptible.js';
 import { normalizeDeprecatedCompileOptions } from './deprecation-warnings.js';
 import {
@@ -48,6 +51,7 @@ import { colorSpaceIsUnsettled, colorSpaceOf } from './color-space-fact.js';
 import { resolveStorageHints } from './storage-hints.js';
 import {
   BaseCompiler,
+  explicitBroadcastPointNorm,
   isProvablyCharacterOperand,
   isProvablyStringOperand,
   isProvablyTupleParticipant,
@@ -65,7 +69,17 @@ import {
 import { couldMatch, isSubtype } from '../../common/type/subtype.js';
 import { typeToString } from '../../common/type/serialize.js';
 import type { Type } from '../../common/type/types.js';
-import { isOperatorDef, isValueDef } from '../boxed-expression/utils.js';
+import {
+  collectBinderNames,
+  isOperatorDef,
+  isValueDef,
+} from '../boxed-expression/utils.js';
+import {
+  functionLiteralParameterName,
+  isRestParameter,
+} from '../boxed-expression/function-literal.js';
+import { isBroadcastableCollection } from '../collection-utils.js';
+import { literalParamsMap } from '../library/core.js';
 import { isRelationalOperator } from '../latex-syntax/utils.js';
 import { rewriteAngularUnit } from './angular-unit.js';
 import {
@@ -2216,6 +2230,17 @@ function compileGPUBroadcastUnary(
         `not a shader vector and the componentwise builtins do not apply to it.`
     );
   const vector = lowering.collection();
+  // The scalar lowering of `Square` reads the shape of its operand to choose
+  // between `_gpu_pow2` and the `vecN` overload `_gpu_pow2_vN`. Here its
+  // operand is a placeholder for the vector code, which has no shape, so the
+  // scalar helper is chosen and the check below declines it. A `vecN`
+  // operand is lowered here as `Power(c, 2)` lowers it: a bare name is
+  // multiplied by itself (`*` is componentwise), and any other code goes
+  // through the `vecN` overload, which evaluates it once.
+  if (head === 'Square')
+    return /^[A-Za-z_]\w*$/.test(vector)
+      ? `(${vector} * ${vector})`
+      : gpuFixedPower(vector, 2, gpuOperandShape(operand));
   const code = lowering.element(vector);
   const unsafe = gpuIsComponentwise(code, vector);
   if (unsafe !== undefined)
@@ -2847,6 +2872,21 @@ const GPU_AGGREGATE_CONSUMING = new WeakMap<
   object,
   (args: ReadonlyArray<Expression>) => boolean
 >();
+
+/**
+ * Is the operand of a `Norm` call a point literal with a broadcasting
+ * component? The `Norm` lowering compiles such a point as its explicit norm
+ * (`explicitBroadcastPointNorm`), so it consumes the point operand.
+ */
+function isBroadcastPointNormOperand(args: ReadonlyArray<Expression>): boolean {
+  const arg = args[0];
+  return (
+    args.length === 1 &&
+    arg !== undefined &&
+    (isFunction(arg, 'Tuple') || isFunction(arg, 'PointList')) &&
+    pointHasBroadcastComponent(arg)
+  );
+}
 
 /**
  * Declare `fn` an aggregate-consuming lowering for the calls `when` accepts
@@ -7714,16 +7754,41 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   // (`float[5](...)`), which `length()` rejects — so emit `abs` for arity 1
   // and fail closed for arity ≥ 5 or a norm-type argument rather than
   // reporting success on invalid shader source.
-  Norm: (args, compile, target) => {
+  //
+  // `markAggregateConsuming` for a point with a broadcasting component only:
+  // that form compiles the explicit norm, whose own nodes pass the shape
+  // gates, and the emission no longer contains the point operand, which has
+  // no shader shape of its own (it reads as an array).
+  Norm: markAggregateConsuming((args, compile, target) => {
     if (args.length > 1)
       throw new Error(
         `Could not compile \`Norm\`: only the default L2 norm compiles on the ` +
           `${target.language ?? 'GPU'} target.`
       );
     const arg = args[0];
+    // A point with a broadcasting component is one point per element of its
+    // list components, so its norm is one number per element, as on the
+    // JavaScript target. It compiles as the explicit
+    // `Sqrt(Square(c1) + … + Square(cn))`, which the shader target lowers
+    // element-wise to the same vector as the norm written by hand. This
+    // requires that the list components have one length that the static
+    // types give (`explicitBroadcastPointNorm`): a shader vector has a
+    // static width, and the run-time zip of a `PointList` to its shortest
+    // list has no shader form. Other cases fail closed.
+    if (
+      (isFunction(arg, 'Tuple') || isFunction(arg, 'PointList')) &&
+      pointHasBroadcastComponent(arg)
+    ) {
+      const explicit = explicitBroadcastPointNorm(arg, target);
+      if (typeof explicit === 'string')
+        throw new Error(
+          `Could not compile \`Norm\`: a point with a broadcasting component, and ${explicit}.`
+        );
+      return compile(explicit);
+    }
     if (isFunction(arg, 'Tuple') || isFunction(arg, 'List')) {
-      // A broadcasting component means one norm per zipped element — not a
-      // scalar. Fail closed.
+      // A broadcasting component of a `List` is not a matrix row: it means
+      // one norm per zipped element, not a scalar. Fail closed.
       if (pointHasBroadcastComponent(arg))
         throw new Error(
           'Could not compile `Norm`: a point with a broadcasting component.'
@@ -7758,7 +7823,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     }
     // Non-literal operand (e.g. a vec-typed symbol): `length()` applies.
     return `length(${compile(arg)})`;
-  },
+  }, isBroadcastPointNormOperand),
   Length: (_args, _compile, target) => {
     throw new Error(
       `Could not compile \`Length\`: the collection element count is not supported on the ` +
@@ -8119,6 +8184,18 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     throw new Error(gpuNoIndexingMessage('RandomShuffle(xs)', target));
   },
 
+  // `Apply(callee, args…)`: the parse of `f'(x)` is
+  // `Apply(Derivative(f, 1), x)`. A shader has no function values, so the
+  // callee cannot be emitted as a lambda. Instead, the arguments are
+  // substituted into the body of the callee's function literal, and the
+  // substituted body is compiled (`gpuAppliedBody`).
+  Apply: (args, compile, target) => {
+    const body = gpuAppliedBody(args, target);
+    if (typeof body === 'string')
+      throw new Error(`Could not compile \`Apply\`: ${body}`);
+    return compile(body);
+  },
+
   // Function (lambda) — not supported in GPU
   Function: () => {
     throw new Error(
@@ -8126,6 +8203,243 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     );
   },
 };
+
+/**
+ * The body of the callee of `Apply(callee, args…)` with the arguments
+ * substituted for its parameters, or the reason why there is none.
+ *
+ * Two callees have a function literal. A `Function` literal is its own
+ * literal. A `Derivative(f, n)` or a `Derivative(f, k₁, …, kₙ)` has the
+ * closed form of the derivative when the engine can differentiate `f`, and
+ * the interval target reads the same closed form
+ * (`BaseCompiler.appliedDerivativeLiteral`). That closed form is
+ * already rewritten for the engine's angular unit. It is not used when the
+ * body of `f` is large or the order is high (`prefersJetDerivative`,
+ * jet-derivative.ts), because the closed form then grows past a useful size.
+ * A derivative with no closed form of a useful size, or any other callee, has
+ * no literal, and the application is declined.
+ *
+ * The substitution is sound only under these conditions:
+ *  - the literal takes exactly one argument per parameter, and each
+ *    parameter is a plain name (not a rest parameter and not a
+ *    destructuring pattern). The interpreter curries an under-applied call
+ *    and rejects an over-applied one, and a shader can do neither;
+ *  - the body is a single statement;
+ *  - every argument is pure. The body can read a parameter more than once,
+ *    and the substitution then repeats the argument, while the interpreter
+ *    evaluates it once;
+ *  - no binder in the body rebinds a parameter or captures a symbol of an
+ *    argument, because `subs` is not capture-avoiding.
+ *
+ * When the parameters of the literal are scalar and an argument is a
+ * collection, the interpreter applies the function to each element, not to
+ * the whole collection. The substitution then follows the same rule
+ * (`gpuMappedAppliedBody`).
+ *
+ * An argument that is bound whole must match the declared type of its
+ * parameter (`BaseCompiler.appliedArgumentTypeMismatch`), or the
+ * application is declined.
+ */
+function gpuAppliedBody(
+  args: ReadonlyArray<Expression>,
+  target: CompileTarget<Expression>
+): Expression | string {
+  const [callee, ...actuals] = args;
+  if (callee === undefined) return 'missing function';
+  const literal = isFunction(callee, 'Derivative')
+    ? BaseCompiler.appliedDerivativeLiteral(args)
+    : callee;
+  if (!isFunction(literal, 'Function')) {
+    if (isFunction(callee, 'Derivative'))
+      return (
+        `${BaseCompiler.appliedDerivativeDeclineReason(args)}, and ` +
+        `target '${target.language}' has no numerical derivative.`
+      );
+    return (
+      `only a function literal or the derivative of a function compiles as ` +
+      `the callee on target '${target.language}'.`
+    );
+  }
+  const params = literal.ops.slice(1);
+  if (params.length !== actuals.length)
+    return (
+      `the function takes ${params.length} parameter(s) but ` +
+      `${actuals.length} argument(s) are supplied.`
+    );
+  const substitution: Record<string, Expression> = {};
+  for (const [i, p] of params.entries()) {
+    const name = isRestParameter(p) ? '' : functionLiteralParameterName(p);
+    if (!name) return 'a parameter of the function is not a plain name.';
+    substitution[name] = actuals[i];
+  }
+  const inner = literal.ops[0];
+  const body =
+    isFunction(inner, 'Block') && inner.nops === 1 ? inner.op1 : inner;
+  if (isFunction(body, 'Block'))
+    return 'the body of the function has more than one statement.';
+  if (!actuals.every((a) => a.isPure === true))
+    return 'an argument has an effect, which the substitution would repeat.';
+  const binders = collectBinderNames(body);
+  for (const [name, arg] of Object.entries(substitution)) {
+    if (binders.has(name))
+      return `the body of the function rebinds \`${name}\`.`;
+    for (const s of arg.symbols)
+      if (binders.has(s))
+        return `the body of the function binds \`${s}\`, which an argument reads.`;
+  }
+  if (literalParamsMap(literal.type.type) && actuals.some(gpuMapsOverArgument))
+    return gpuMappedAppliedBody(
+      literal,
+      body,
+      Object.keys(substitution),
+      actuals,
+      target
+    );
+  const mismatch = BaseCompiler.appliedArgumentTypeMismatch(
+    literal,
+    actuals,
+    false
+  );
+  if (mismatch !== undefined) return mismatch;
+  return body.subs(substitution);
+}
+
+/**
+ * The application of a function literal with scalar parameters to arguments
+ * of which at least one is a collection, written element by element:
+ * `Apply(u ↦ body, [a, b])` becomes `[body[u := a], body[u := b]]`, or the
+ * reason why it cannot be written.
+ *
+ * The interpreter applies such a function to each element of the collection
+ * arguments (`applyLiteralMapped` in `library/core.ts`). It zips the
+ * collection arguments, and it gives each cell the same value of an argument
+ * that is not a collection (a scalar, a point or a string). Substituting the
+ * whole collection for the parameter is wrong: a body that does not read
+ * the parameter (`u ↦ 7`) gives one number instead of one number per
+ * element, and a body with an operation that does not apply element by
+ * element gives a different value.
+ *
+ * Each collection argument must have a length known at compile time
+ * (`gpuMappedArgumentElements`), and all of them must have the same length.
+ * The interpreter gives an `incompatible-dimensions` error for different
+ * lengths, and a shader has no form of that error, so the application is
+ * declined. A cell whose element is itself a collection maps again, as in
+ * the interpreter, so a nested list gives a nested result. The shape of the
+ * result is decided when the `List` is compiled.
+ *
+ * `names` are the parameter names of the literal, in order. The checks of
+ * `gpuAppliedBody` (purity, binders) apply to the whole arguments, so they
+ * also apply to their elements.
+ */
+function gpuMappedAppliedBody(
+  literal: Expression,
+  body: Expression,
+  names: ReadonlyArray<string>,
+  actuals: ReadonlyArray<Expression>,
+  target: CompileTarget<Expression>
+): Expression | string {
+  let width: number | undefined;
+  const columns: Array<ReadonlyArray<Expression> | undefined> = [];
+  for (const actual of actuals) {
+    if (!gpuMapsOverArgument(actual)) {
+      columns.push(undefined);
+      continue;
+    }
+    const elements = gpuMappedArgumentElements(actual);
+    if (elements === undefined)
+      return (
+        `the function applies to each element of the argument ` +
+        `\`${actual.toString()}\`, but target '${target.language}' cannot ` +
+        `write out its elements: its length is not known at compile time, ` +
+        `or it has more than ${GPU_MAX_INLINE_ELEMENTS} elements.`
+      );
+    if (width !== undefined && elements.length !== width)
+      return (
+        `the function applies to each element of collection arguments of ` +
+        `different lengths (${width} and ${elements.length}).`
+      );
+    width = elements.length;
+    columns.push(elements);
+  }
+  const cells: Expression[] = [];
+  for (let k = 0; k < (width ?? 0); k++) {
+    const row = actuals.map((actual, i) => columns[i]?.[k] ?? actual);
+    if (
+      row.some((e, i) => columns[i] !== undefined && gpuMapsOverArgument(e))
+    ) {
+      const cell = gpuAppliedBody([literal, ...row], target);
+      if (typeof cell === 'string') return cell;
+      cells.push(cell);
+    } else {
+      const mismatch = BaseCompiler.appliedArgumentTypeMismatch(
+        literal,
+        row,
+        false
+      );
+      if (mismatch !== undefined) return mismatch;
+      const substitution: Record<string, Expression> = {};
+      for (const [i, name] of names.entries()) substitution[name] = row[i];
+      cells.push(body.subs(substitution));
+    }
+  }
+  return literal.engine.function('List', cells);
+}
+
+/**
+ * Does a function literal with scalar parameters apply to each element of
+ * the argument `arg`, not to `arg` as a whole?
+ *
+ * The interpreter evaluates the argument first and then asks whether the
+ * value is an indexed collection that is not a tuple (a point) and not a
+ * string (`applyLiteralMaps` in `library/core.ts`). Compiled code reads the
+ * argument before it is evaluated, so the static type gives the answer
+ * instead, as in the type handler of `Apply` (`applyLiteralMapType`):
+ * `[a, b] + c` has the type `vector<2>` and is a list when evaluated, and a
+ * symbol declared `list<real^2>` holds a list when the shader runs.
+ */
+function gpuMapsOverArgument(arg: Expression): boolean {
+  if (isBroadcastableCollection(arg)) return true;
+  const t = resolveTypeAlias(arg.type.type);
+  return (
+    isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE) &&
+    !isSubtype(t, 'string') &&
+    !(typeof t === 'object' && t.kind === 'tuple')
+  );
+}
+
+/**
+ * The elements of a collection argument that `gpuMappedAppliedBody` writes
+ * out, or `undefined` when the length is not known at compile time.
+ *
+ * A literal `List` gives its operands. A `Range` with number-literal bounds
+ * gives its values, as the `Range` entry of the function table does. Another
+ * expression that the shader holds as a `vec2`, `vec3` or `vec4`
+ * (`gpuOperandShape`) gives its components, read with `At`. Any other
+ * collection (a shader array, a matrix, a list of unknown length) gives
+ * `undefined`. A list with more elements than a shader array constructor
+ * takes (`GPU_MAX_INLINE_ELEMENTS`) also gives `undefined`.
+ */
+function gpuMappedArgumentElements(
+  arg: Expression
+): ReadonlyArray<Expression> | undefined {
+  const ce = arg.engine;
+  if (isFunction(arg, 'List'))
+    return arg.nops <= GPU_MAX_INLINE_ELEMENTS ? arg.ops : undefined;
+  if (isFunction(arg, 'Range') && (arg.nops === 2 || arg.nops === 3)) {
+    const lo = arg.ops[0].re;
+    const hi = arg.ops[1].re;
+    const step = arg.nops === 3 ? arg.ops[2].re : 1;
+    if (![lo, hi, step].every(Number.isFinite) || step === 0) return undefined;
+    const count = rangeCount(lo, hi, step);
+    if (count > GPU_MAX_INLINE_ELEMENTS) return undefined;
+    return Array.from({ length: count }, (_, k) => ce.number(lo + k * step));
+  }
+  const shape = gpuOperandShape(arg);
+  if (typeof shape !== 'number') return undefined;
+  return Array.from({ length: shape }, (_, k) =>
+    ce.function('At', [arg, ce.number(k + 1)])
+  );
+}
 
 //
 // ─── Counter-based random draws (PCG3D) ─────────────────────────────────────
@@ -14943,6 +15257,12 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       // definition body or an inlined body as at the entry
       // (`CompileTarget.unrollComprehensions`).
       unrollComprehensions: true,
+      // Only a function-LITERAL callee compiles here: the `Apply` entry of
+      // the function table substitutes the arguments into the literal's body
+      // (`gpuAppliedBody`). The reference analysis must stop at any other
+      // application rather than walk into a callee this target never
+      // compiles (`CompileTarget.appliesFunctionLiteralsOnly`).
+      appliesFunctionLiteralsOnly: true,
       assignmentValue: (value, code, current) =>
         isSubtype(gpuType(value), 'color')
           ? gpuColorOperand(
@@ -15908,6 +16228,9 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     // needs no second reading. A `vars` splice that the substituted body
     // repeats (a parameter read twice) is evaluated twice in the shader,
     // which is the same value each time: shader source has no side effects.
+    // This pass also writes the norm of a point with a list component as its
+    // explicit form (`explicitBroadcastPointNorm`), before the common
+    // subexpressions are read, so the two share them.
     expr = unrollFixedWidthCollections(
       BaseCompiler.inlineCollectionValuedCallsAtRoot(expr, target, 'list<any>'),
       {
@@ -15915,6 +16238,10 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
         iterationBudget: options.iterationBudget,
         readsLiveSource: (name) => typeof options.vars?.[name] === 'string',
         unrollComprehensions: true,
+        explicitPointNorm: (point) => {
+          const explicit = explicitBroadcastPointNorm(point, target);
+          return typeof explicit === 'string' ? undefined : explicit;
+        },
       }
     );
     if (vars) gpuRandomState(target).varNames = new Set(Object.keys(vars));

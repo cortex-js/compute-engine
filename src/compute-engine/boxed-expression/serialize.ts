@@ -122,7 +122,16 @@ function serializeSubtract(
     }
   }
 
-  if (a.operator === 'Negate' && b.operator !== 'Negate' && isFunction(a))
+  // `-x + b` is written `b - x`, but not when `b` is a negative number:
+  // `-x - 1` keeps the order of its terms, not `-1 - x`. The caller then
+  // tries the operands the other way round, and the branch above writes
+  // `-x + (-1)` as `-x - 1`.
+  if (
+    a.operator === 'Negate' &&
+    b.operator !== 'Negate' &&
+    !(isNumber(b) && b.isNegative) &&
+    isFunction(a)
+  )
     return serializeJsonFunction(ce, 'Subtract', [b, a.op1], options, metadata);
 
   return null;

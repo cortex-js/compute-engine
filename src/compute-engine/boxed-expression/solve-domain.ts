@@ -4,7 +4,10 @@ import {
   isBooleanOrBroadcastableBooleanType,
 } from '../../common/type/utils.js';
 import { checkDeadline } from '../../common/interruptible.js';
-import { implicitCompile } from '../implicit-compile.js';
+import {
+  implicitCompile,
+  implicitCompileNumeric,
+} from '../implicit-compile.js';
 
 import type {
   IComputeEngine as ComputeEngine,
@@ -29,6 +32,8 @@ import {
 } from './diophantine.js';
 import { contextAssumptions, isFactTrue } from './constraint-subject.js';
 import { containsResidueClass } from './residue-class.js';
+import { shadowsLibraryName } from '../library-shadowing.js';
+import { halfTurnAngle } from './trigonometry.js';
 
 /**
  * Inequality relational operators. A univariate `Solve` of one of these is
@@ -162,10 +167,19 @@ const MAX_SOLVE_ENUMERATION_INTERPRETED = 10_000;
 
 // Root-family expansion budget (Phase 2.2). When the domain span divided by the
 // equation's period exceeds this, the family is too large to materialize (e.g.
-// `sin(x) = 0` over `[0, 10^9]`): staying inert would LOSE the principal roots
-// we already have, so the honest degradation is to return the (unexpanded)
-// principal roots and let the normal membership filter apply.
+// `sin(x) = 0` over `[0, 10^9]`). The principal roots alone are only a part of
+// the roots in the domain, and a partial list is not an answer: the expansion
+// gives no roots, and the `Solve` stays unevaluated (or a finite integer
+// domain is enumerated).
 const MAX_PERIODIC_EXPANSION = 1000;
+
+// The numeric check that a periodic root list is complete samples the
+// equation this many times over the shortest period of its trig terms.
+const PERIODIC_SCAN_SAMPLES_PER_PERIOD = 256;
+
+// The largest `n` tried when the solver looks for a root spacing `T/n` that is
+// shorter than the period `T` of the equation (see `rootSetDivisor()`).
+const MAX_ROOT_SET_DIVISOR = 12;
 
 /** A validated `Solve` unknown specification. */
 export interface SolveSpec {
@@ -291,15 +305,22 @@ function canonicalSolveSpec(ce: ComputeEngine, spec: Expression): Expression {
 }
 
 /**
- * Evaluate a (canonical) `Solve` expression.
- *
- * Routing:
- * - no domain specs → existing symbolic path (`.solve()`), unchanged;
- * - some (but not all) specs carry a domain → inert (a free unknown has no
- *   univariate/enumeration path);
- * - exactly one domain spec → the univariate domain pipeline below;
- * - several domain specs → the multi-variable enumeration pipeline (Phase 2).
+ * Whether the values of the unknown `x` are restricted: by an assumption
+ * about `x` alone (`assume(x > 0)`), or by a declared type narrower than
+ * `number` (`x: integer`), the same types that `filterRootsByType()` in
+ * `solve.ts` checks.
  */
+function isRestrictedUnknown(ce: ComputeEngine, x: string): boolean {
+  const type = ce.symbol(x).type.type;
+  if (typeof type !== 'string' || (type !== 'number' && type !== 'unknown'))
+    return true;
+  for (const [fact, records] of contextAssumptions(ce).entries()) {
+    if (!isFactTrue(records)) continue;
+    if (fact.unknowns.includes(x)) return true;
+  }
+  return false;
+}
+
 /**
  * The answer of `Solve(equation, x)` when the root finder returned no root.
  *
@@ -312,7 +333,9 @@ function canonicalSolveSpec(ce: ComputeEngine, spec: Expression): Expression {
  *   other unknowns (`a = 0`), the answer depends on them, and `Solve` stays
  *   unevaluated.
  * - When the root finder produced candidate roots and rejected all of them
- *   by a decided check, the empty list is a decision: `[]` (`√x = -1`). When
+ *   by a decided check, the empty list is a decision: `[]` (`√x = -1`),
+ *   except when a candidate came from a root template that the host added
+ *   (`stats.userRule`). When
  *   a rejection was not decided (the residual of the root of
  *   `√(x + a) = -x` cannot be proved zero for a free `a`), `Solve` stays
  *   unevaluated.
@@ -333,29 +356,16 @@ function canonicalSolveSpec(ce: ComputeEngine, spec: Expression): Expression {
  * condition (`conditioned`), an assumption about the unknown
  * (`assume(x > 0)`), or a declared type narrower than `number`
  * (`x: integer`).
+ *
+ * `expr.solve()`, `expr.explain('solve')` and the alternatives of an `Or`
+ * (`solveOr()`) use the same answer: `undefined` there gives `null` (or an
+ * explanation with no answer), not an empty list.
  */
-/**
- * Whether the values of the unknown `x` are restricted: by an assumption
- * about `x` alone (`assume(x > 0)`), or by a declared type narrower than
- * `number` (`x: integer`), the same types that `filterRootsByType()` in
- * `solve.ts` checks.
- */
-function isRestrictedUnknown(ce: ComputeEngine, x: string): boolean {
-  const type = ce.symbol(x).type.type;
-  if (typeof type !== 'string' || (type !== 'number' && type !== 'unknown'))
-    return true;
-  for (const [fact, records] of contextAssumptions(ce).entries()) {
-    if (!isFactTrue(records)) continue;
-    if (fact.unknowns.includes(x)) return true;
-  }
-  return false;
-}
-
-function emptyRootsAnswer(
+export function emptyRootsAnswer(
   ce: ComputeEngine,
   equation: Expression,
   x: string,
-  stats: { candidates: boolean; undecided: boolean },
+  stats: { candidates: boolean; undecided: boolean; userRule?: boolean },
   conditioned: boolean
 ): Expression | undefined {
   const sides = isFunction(equation, 'Equal')
@@ -373,7 +383,11 @@ function emptyRootsAnswer(
       return undefined;
     }
   }
-  if (stats.candidates && !stats.undecided) return ce.function('List', []);
+  // A candidate of a root template that the host added to `ce.solveRules`
+  // (`stats.userRule`) that the check rejected does not show that there is
+  // no root: the template can be wrong.
+  if (stats.candidates && !stats.undecided && !stats.userRule)
+    return ce.function('List', []);
   return undefined;
 }
 
@@ -396,7 +410,10 @@ function emptyRootsAnswer(
  * source, and the answer is the union of their kept roots. The answer then
  * does not depend on the order of the equations. When this union is empty,
  * the answer is `'undecided'`, because a common root can be outside all the
- * principal root lists.
+ * principal root lists. The answer is also `'undecided'` when each source
+ * that gives candidates gives only a part of its roots: the unknown is in a
+ * function that the root finder cannot invert and that is not periodic, or
+ * a factor of a product gave no root (`solveByZeroProduct()`).
  *
  * An equation whose root list is empty, or has a symbol that is not in the
  * equations (the parameter of a root family), gives no candidates.
@@ -416,16 +433,19 @@ function commonRoots(
     isFunction(eq, 'Equal') &&
     polynomialDegree(eq.op1, x) >= 0 &&
     polynomialDegree(eq.op2, x) >= 0;
+  // The sources whose candidates are only a part of their roots (see
+  // `complete` below).
+  const partialSources = new Set<Expression>();
   // The kept roots of `source`, `undefined` when it gives no candidates, or
   // `'undecided'`.
   const keptRoots = (
     source: Expression
   ): Expression[] | 'undecided' | undefined => {
-    const candidates = filterRootsByAssumptions(
-      ce,
-      findUnivariateRoots(source, x),
-      x
-    );
+    const stats = { candidates: false, undecided: false };
+    const found = findUnivariateRoots(source, x, 0, undefined, stats);
+    const candidates = filterRootsByAssumptions(ce, found, x);
+    if (partialRootListReason(source, x, found, stats) !== undefined)
+      partialSources.add(source);
     if (
       candidates.length === 0 ||
       !candidates.every((root) =>
@@ -456,20 +476,38 @@ function commonRoots(
     if (kept !== undefined) return kept;
   }
 
+  // A common root is a root of each equation, thus the candidates of one
+  // source that gives all its roots (its principal roots, for a periodic
+  // equation) hold all the common roots. A source whose candidates are only
+  // a part of its roots (`partialSources`) cannot show that: when no other
+  // source gives all its roots, the answer is `'undecided'`.
   let hasCandidates = false;
+  let complete = false;
   const union: Expression[] = [];
   for (const source of equations.filter((eq) => !isPolynomial(eq))) {
     const kept = keptRoots(source);
     if (kept === undefined) continue;
     if (kept === 'undecided') return 'undecided';
     hasCandidates = true;
+    if (!partialSources.has(source)) complete = true;
     for (const root of kept)
       if (!union.some((r) => r.isSame(root))) union.push(root);
   }
   if (!hasCandidates) return undefined;
+  if (!complete) return 'undecided';
   return union.length > 0 ? union : 'undecided';
 }
 
+/**
+ * Evaluate a (canonical) `Solve` expression.
+ *
+ * Routing:
+ * - no domain specs → existing symbolic path (`.solve()`), unchanged;
+ * - some (but not all) specs carry a domain → inert (a free unknown has no
+ *   univariate/enumeration path);
+ * - exactly one domain spec → the univariate domain pipeline below;
+ * - several domain specs → the multi-variable enumeration pipeline (Phase 2).
+ */
 export function evaluateSolve(
   ce: ComputeEngine,
   ops: ReadonlyArray<Expression>
@@ -793,11 +831,16 @@ export function evaluateSolve(
         // empty root list is a decision only in some cases, see
         // `emptyRootsAnswer()`.
         const stats = { candidates: false, undecided: false };
-        roots = filterRootsByAssumptions(
-          ce,
-          findUnivariateRoots(ceq, names[0], 0, undefined, stats),
-          names[0]
-        );
+        const found = findUnivariateRoots(ceq, names[0], 0, undefined, stats);
+        roots = filterRootsByAssumptions(ce, found, names[0]);
+        // A list that is only a part of the roots is not an answer
+        // (`partialRootListReason()`): the unknown is in a function that
+        // the root finder cannot invert and that is not periodic
+        // (`(x - 1)·BesselJ(0, x) = 0` gives only `1`), or a factor of a
+        // product gave no root. The principal roots of a trig function are
+        // the answer, as they represent its periodic families of roots.
+        if (partialRootListReason(ceq, names[0], found, stats) !== undefined)
+          return undefined;
         if (roots.length === 0)
           return emptyRootsAnswer(ce, ceq, names[0], stats, conditioned);
       } else {
@@ -1032,27 +1075,49 @@ export function solveOverDomain(
 
   // 1. Symbolic solve (equations only), then membership filter.
   if (isEquation) {
-    const roots = symbolicRoots(ce, ceq, unknown, refinedType);
+    const stats = {
+      candidates: false,
+      undecided: false,
+      partial: false,
+      userRule: false,
+    };
+    const roots = symbolicRoots(ce, ceq, unknown, refinedType, stats);
 
     // Phase 2.2: the symbolic trig rules return principal values only. Over a
     // bounded domain, expand each principal root `x₀` into its full `x₀ + k·T`
     // family (and recover the scaled-argument roots the rules miss entirely).
-    // `expandPeriodicRoots` returns `undefined` when the equation is not a
-    // periodic one amenable to expansion — then the principal roots are used
-    // as-is (today's behavior).
-    const expanded = expandPeriodicRoots(
+    // `expandPeriodicRoots` returns `undefined` when the equation has no trig
+    // function of the unknown, or the domain is unbounded — then the principal
+    // roots are used as-is. It returns `null` when it cannot show that a list
+    // holds all the roots in the domain: then the symbolic roots are not
+    // used. A list it returns holds all the roots in the domain, thus an
+    // empty list is a decision (no solutions).
+    // When a factor of a product gave no root and is not shown to have no
+    // root (`stats.partial`), the roots can be only a part of the roots
+    // (`(x - 2)(x + e^x) = 0` gives only `2`). They are used only when the
+    // numeric scan shows that the list is complete: a list from
+    // `expandPeriodicRoots()` is checked by the scan, but with `undefined`
+    // there was no check.
+    // With `stats.partial`, the scan of `expandPeriodicRoots()` can reject
+    // the list, but it accepts it only under strict conditions (see `strict`
+    // in `rootListIsComplete()`).
+    const checked = expandPeriodicRoots(
       ce,
       ceq,
       predBody,
       unknown,
       domain,
-      roots
+      roots,
+      stats.userRule && roots.length > 0,
+      stats.partial
     );
-    const finalRoots = expanded ?? roots;
+    const expanded = stats.partial && checked === undefined ? null : checked;
+    const finalRoots = expanded === null ? [] : (expanded ?? roots);
 
-    if (finalRoots.length > 0) {
-      // At least one root: return the domain-filtered list and do NOT
-      // enumerate. Undecidable membership (`undefined`) keeps the root.
+    if (finalRoots.length > 0 || Array.isArray(expanded)) {
+      // At least one root, or a list that is known to hold all the roots:
+      // return the domain-filtered list and do NOT enumerate. Undecidable
+      // membership (`undefined`) keeps the root.
       const inDomain = finalRoots.filter((r) =>
         keepInDomain(ce, domain, unknown, r, condition)
       );
@@ -1342,14 +1407,214 @@ export function solveOverMultipleDomains(
 // so an imperfect period can never introduce a wrong answer.
 //
 
-// Trig heads and their base period (as a rational multiple of π): sin/cos and
-// their reciprocals repeat every 2π; tan/cot every π.
-const TRIG_2PI = new Set(['Sin', 'Cos', 'Sec', 'Csc']);
+// Trig heads and their base period (as a multiple of a half turn, which is π
+// in radians): sin/cos and their reciprocals repeat every full turn (2π);
+// tan/cot every half turn (π). The haversine `(1 - cos x)/2` repeats every
+// full turn, as cos does.
+const TRIG_2PI = new Set(['Sin', 'Cos', 'Sec', 'Csc', 'Haversine']);
 const TRIG_PI = new Set(['Tan', 'Cot']);
+
+// Heads that the root finder (`findUnivariateRoots()` in `solve.ts`) can
+// invert when the unknown is in their operands: arithmetic, powers and
+// radicals, exponentials and logarithms, the hyperbolic functions (which are
+// made of exponentials), the inverse trig functions (which are monotonic on
+// their domain) and `Abs`. A function of the unknown with another head
+// (`BesselJ`, `Sinc`, `Gamma`, `Floor`, …) can have roots that the root
+// finder does not give, and it can oscillate faster than the samples of the
+// scan of `rootListIsComplete()`. The trig heads above are not in this set:
+// the scan checks the roots of an equation with trig functions.
+const INVERTIBLE_HEADS = new Set([
+  'Add',
+  'Subtract',
+  'Negate',
+  'Multiply',
+  'Divide',
+  'Power',
+  'Square',
+  'Sqrt',
+  'Root',
+  'Exp',
+  'Ln',
+  'Log',
+  'Lb',
+  'Lg',
+  'Abs',
+  'Sinh',
+  'Cosh',
+  'Tanh',
+  'Coth',
+  'Sech',
+  'Csch',
+  'Arcsin',
+  'Arccos',
+  'Arctan',
+  'Arccot',
+  'Arcsec',
+  'Arccsc',
+  'Arsinh',
+  'Arcosh',
+  'Artanh',
+  'Arcoth',
+  'Arsech',
+  'Arcsch',
+  // An inert display wrapper (`161_b` is `BaseForm(b² + 6b + 1, b)`): the
+  // root finder removes it before it solves the equation.
+  'BaseForm',
+]);
+
+/**
+ * Return `true` when `unknown` is in an operand of a function that the root
+ * finder cannot invert: a head that is not a trig head (`TRIG_2PI`,
+ * `TRIG_PI`) and not in `INVERTIBLE_HEADS`, or a power whose base and
+ * exponent both hold the unknown (`x^x`). For such an equation, the list of
+ * the root finder can be a part of the roots, and no numeric scan can show
+ * that it is complete.
+ *
+ * A trig function whose argument is not linear in the unknown
+ * (`sin(x^2)`, `sin(e^x)`, `cos(2^x)`, `sin(1/x)`) is such a function too:
+ * the equation is not periodic in the unknown, its roots do not form a
+ * finite number of families, and the root finder gives only some of them
+ * (`sin(x^2) = 0` has the roots `±√(kπ)` for each integer `k ≥ 0`).
+ */
+function hasNonInvertibleHead(node: Expression, unknown: string): boolean {
+  if (!isFunction(node) || !node.has(unknown)) return false;
+  const op = node.operator;
+  if (!INVERTIBLE_HEADS.has(op) && !TRIG_2PI.has(op) && !TRIG_PI.has(op))
+    return true;
+  if (
+    (TRIG_2PI.has(op) || TRIG_PI.has(op)) &&
+    node.ops.some(
+      (arg) => arg.has(unknown) && polynomialDegree(arg, unknown) !== 1
+    )
+  )
+    return true;
+  if (op === 'Power' && node.op1.has(unknown) && node.op2.has(unknown))
+    return true;
+  return node.ops.some((child) => hasNonInvertibleHead(child, unknown));
+}
+
+/**
+ * `hasNonInvertibleHead()` for an equation `lhs = rhs` (each side is
+ * examined), or for an expression that is read as `expr = 0`.
+ */
+function equationHasNonInvertibleHead(
+  eq: Expression,
+  unknown: string
+): boolean {
+  if (isFunction(eq, 'Equal'))
+    return (
+      hasNonInvertibleHead(eq.op1, unknown) ||
+      hasNonInvertibleHead(eq.op2, unknown)
+    );
+  return hasNonInvertibleHead(eq, unknown);
+}
+
+/**
+ * Why the roots that `findUnivariateRoots()` gave for the equation `eq` (an
+ * `Equal`, or an expression read as `= 0`), with its `stats`, are only a part
+ * of the roots, or `undefined` when they are not known to be:
+ * - `'factor'`: a factor of a product gave no root, and it is not shown to
+ *   have none (`(x - 2)(x + e^x) = 0` gives only `2`);
+ * - `'non-invertible'`: the unknown is in a function that the root finder
+ *   cannot invert and that is not periodic (`(x - 1)·BesselJ(0, x) = 0`
+ *   gives only `1`). A root template that the host added to
+ *   `ce.solveRules` is the host's claim of a solution: when one matched
+ *   (`stats.userRule`) and `roots` (the result of the root finder) is not
+ *   empty, the roots are accepted. A candidate of such a template that the
+ *   check against the equation rejected does not show that there is no
+ *   root, thus an empty list is not accepted.
+ *
+ * Every route that returns the roots of the root finder as an answer uses
+ * this test (`Solve`, `expr.solve()`, `expr.explain('solve')`).
+ */
+export function partialRootListReason(
+  eq: Expression,
+  unknown: string,
+  roots: ReadonlyArray<Expression>,
+  stats: {
+    candidates: boolean;
+    undecided: boolean;
+    partial?: boolean;
+    userRule?: boolean;
+  }
+): 'factor' | 'non-invertible' | undefined {
+  if (stats.partial) return 'factor';
+  if (stats.userRule && roots.length > 0) return undefined;
+  if (!isFunction(eq, 'Equal') && !eq.type.matches('number')) return undefined;
+  return equationHasNonInvertibleHead(eq, unknown)
+    ? 'non-invertible'
+    : undefined;
+}
+
+/**
+ * Return `true` when `domain` is the whole real line (`RealNumbers`, or an
+ * interval from -∞ to +∞) or the complex numbers. For a periodic equation
+ * over these domains, the answer is the list of the principal roots: this
+ * is the documented convention of `Solve`. Over another domain that is not
+ * bounded (`Integers`, a half-line, a union), the principal roots are not
+ * all the roots in the domain, and there is no answer.
+ */
+function isPrincipalValueDomain(domain: Expression): boolean {
+  const name = sym(domain);
+  if (name === 'RealNumbers' || name === 'ComplexNumbers') return true;
+  const int = interval(domain);
+  return int !== undefined && int.start === -Infinity && int.end === Infinity;
+}
+
+/**
+ * Return `true` when a user binding gives the name `Pi` another value
+ * (`ce.declare('Pi', { value: 3 })`) and one of `roots` holds the symbol
+ * `Pi`. A root written with the library π names `Pi` in its MathJSON, and
+ * it has the user value when it is boxed again. Thus such a root is not an
+ * answer.
+ *
+ * With `bounds`, a root whose numeric value is clearly outside
+ * `[bounds.lo, bounds.hi]` is not examined: the caller removes it from the
+ * answer (`(x - 1)·sin(x) = 0` over `[0.5, 2]` has the solver roots `1`,
+ * `0` and `π`, and only `1` is in the domain).
+ */
+function rootsHoldShadowedPi(
+  ce: ComputeEngine,
+  roots: ReadonlyArray<Expression>,
+  bounds?: { lo: number; hi: number }
+): boolean {
+  const inBounds = (r: Expression): boolean => {
+    if (bounds === undefined) return true;
+    const v = r.N().re;
+    if (!Number.isFinite(v)) return true;
+    const margin = 1e-9 * Math.max(1, Math.abs(v));
+    return v >= bounds.lo - margin && v <= bounds.hi + margin;
+  };
+  return (
+    roots.some((r) => r.has('Pi') && inBounds(r)) &&
+    shadowsLibraryName(ce, 'Pi')
+  );
+}
+
+/**
+ * The numeric value of a half turn in the angular unit of the engine: π
+ * (rad), 180 (deg), 200 (grad) or 1/2 (turn). A trig function reads its
+ * argument in that unit, thus the periods of the trig terms of an equation
+ * are multiples of this value.
+ */
+function halfTurnValue(ce: ComputeEngine): number {
+  return halfTurnAngle(ce).N().re;
+}
+
+/** The shortest period of the trig terms `terms`. */
+function shortestTermPeriod(ce: ComputeEngine, terms: TrigTerm[]): number {
+  const halfTurn = halfTurnValue(ce);
+  return Math.min(
+    ...terms.map((t) => (t.baseMult * halfTurn) / Math.abs(t.aNum))
+  );
+}
 
 /** A trig occurrence of the unknown with a linear argument `a·x + b`. */
 interface TrigTerm {
-  /** Base period as a multiple of π: 2 for sin/cos/sec/csc, 1 for tan/cot. */
+  /**
+   * Base period as a multiple of a half turn: 2 for sin/cos/sec/csc, 1 for
+   * tan/cot.
+   */
   baseMult: number;
   /** The linear coefficient `a` (exact). */
   aExpr: Expression;
@@ -1425,16 +1690,25 @@ function analyzePeriodic(
  * for any real `a`); several distinct periods are combined by the least common
  * multiple of their π-rational multiples, which requires integer `a` — if any
  * coefficient is irrational the periods may be incommensurable and we decline.
+ *
+ * The period is a multiple of a half turn in the angular unit of the engine
+ * (`halfTurnAngle()`): the library constant `ce.Pi` in radians, 180 in
+ * degrees, 200 in gradians and 1/2 in turns. A trig function reads its
+ * argument in that unit, thus the period of `sin(x)` is 360 in degree mode.
+ * In radians, the name `Pi` (`ce.symbol('Pi')`) is not used: it gives the
+ * value of a user binding of `Pi`. The caller does not call this function
+ * when a user binding shadows `Pi`.
  */
 function combinedPeriod(
   ce: ComputeEngine,
   terms: TrigTerm[]
 ): { expr: Expression; value: number } | undefined {
-  const Pi = ce.symbol('Pi');
+  const halfTurn = halfTurnAngle(ce);
+  const halfTurnNum = halfTurn.N().re;
   const tol = 1e-9;
 
   const periods = terms.map((t) => ({
-    value: (t.baseMult * Math.PI) / Math.abs(t.aNum),
+    value: (t.baseMult * halfTurnNum) / Math.abs(t.aNum),
     baseMult: t.baseMult,
     aNum: t.aNum,
     aExpr: t.aExpr,
@@ -1456,7 +1730,7 @@ function combinedPeriod(
     // and Divide away while staying symbolic in π.
     const expr = ce
       .function('Divide', [
-        ce.function('Multiply', [ce.number(p.baseMult), Pi]),
+        ce.function('Multiply', [ce.number(p.baseMult), halfTurn]),
         ce.function('Abs', [p.aExpr]),
       ])
       .evaluate();
@@ -1479,10 +1753,10 @@ function combinedPeriod(
   }
   const lcmNum = fracs.reduce((acc, [n]) => lcmInt(acc, n), 1);
   const gcdDen = fracs.reduce((acc, [, d]) => gcdInt(acc, d), fracs[0][1]);
-  const value = (lcmNum / gcdDen) * Math.PI;
+  const value = (lcmNum / gcdDen) * halfTurnNum;
   const expr = ce
     .function('Divide', [
-      ce.function('Multiply', [ce.number(lcmNum), Pi]),
+      ce.function('Multiply', [ce.number(lcmNum), halfTurn]),
       ce.number(gcdDen),
     ])
     .evaluate();
@@ -1525,13 +1799,20 @@ function domainBoundingRange(
  * shares ONE linear argument `L = a·x + b`, the substitution `x = (u − b)/a`
  * turns each `trig(L)` into `trig(u)`, which the solver DOES handle; its
  * `u`-roots map back to `x = (u₀ − b)/a`. Returns `undefined` when the terms do
- * not share a single argument (no clean linearizing substitution).
+ * not share a single argument (no clean linearizing substitution). `stats`
+ * gets the statistics of the root finder for the equation in `u`.
  */
 function substitutionRoots(
   ce: ComputeEngine,
   ceq: Expression,
   unknown: string,
-  terms: TrigTerm[]
+  terms: TrigTerm[],
+  stats?: {
+    candidates: boolean;
+    undecided: boolean;
+    partial?: boolean;
+    userRule?: boolean;
+  }
 ): Expression[] | undefined {
   const arg0 = terms[0].arg;
   if (!terms.every((t) => t.arg.isSame(arg0))) return undefined;
@@ -1549,7 +1830,7 @@ function substitutionRoots(
     const subEq = ceq.subs({ [unknown]: xExpr });
     // The substitution must have eliminated the original unknown entirely.
     if (subEq.has(unknown)) return undefined;
-    const uRoots = findUnivariateRoots(subEq, uName);
+    const uRoots = findUnivariateRoots(subEq, uName, 0, undefined, stats);
     if (!uRoots || uRoots.length === 0) return undefined;
     // Map each `u`-root back: x = (u₀ − b)/a (exact).
     return uRoots.map((u0) =>
@@ -1564,14 +1845,56 @@ function substitutionRoots(
  * Expand the principal roots of a periodic equation into the full root family
  * that lands in a bounded domain.
  *
- * Returns `undefined` when the equation is not a candidate for expansion (the
- * unknown appears outside a linear-argument trig function, the domain is
- * unbounded, or the period is indeterminable) — the caller then uses the
- * principal roots as-is. Otherwise returns the exact family members, sorted
- * ascending and de-duplicated (membership + condition filtering is applied by
- * the caller). If the family would be larger than `MAX_PERIODIC_EXPANSION`, the
- * (unexpanded) principal roots are returned instead — the honest degradation,
- * since staying inert would lose the roots we already have.
+ * Returns `undefined` when the equation has no trig function of the unknown,
+ * or the domain is the whole real line or the complex numbers
+ * (`isPrincipalValueDomain()`) — the caller then uses the principal roots
+ * as-is. Otherwise returns the exact family members, sorted ascending and
+ * de-duplicated (membership + condition filtering is applied by the caller).
+ * The list holds all the roots in the domain: an empty list is a decision
+ * (the equation has no root in the domain).
+ *
+ * Returns `null` (no answer) when the list cannot be shown to hold all the
+ * roots in the domain. The caller then enumerates a finite domain, or leaves
+ * the `Solve` unevaluated. This is the case:
+ * - when the domain is not bounded, and it is not the whole real line or the
+ *   complex numbers (`Integers`, a half-line, a union): the principal roots
+ *   are only a part of the roots in the domain (`sin(πx) = 0` has a root at
+ *   each integer, and the solver gives only `0`);
+ * - when the unknown is in a function that the root finder cannot invert
+ *   (`hasNonInvertibleHead()`): `(x - 1)·BesselJ(0, x) = 0` gives only `1`,
+ *   and the scan cannot check such a function (see `rootListIsComplete()`).
+ *   This is also the result over the whole real line and the complex
+ *   numbers: such a function is not periodic, and principal roots do not
+ *   represent its roots;
+ * - when the family would be larger than `MAX_PERIODIC_EXPANSION` periods:
+ *   the principal roots alone are only a part of the roots in the domain, and
+ *   a partial list is not an answer;
+ * - when the numeric values of two principal roots cannot show whether they
+ *   give the same family or two families (`sameRootFamily()`);
+ * - when a numeric scan of the domain finds a root that is not in the list,
+ *   or cannot show that it found all the roots (`rootListIsComplete()`).
+ *
+ * When the solver finds no root, the result is `[]` if the scan finds no root
+ * in the domain, else `null`. When the periods of the trig terms have no
+ * common multiple, there is no family, and the result is the principal roots
+ * if the scan finds no other root, else `null`.
+ *
+ * When the unknown also appears outside a trig function of a linear argument
+ * (`x·sin(x) = 0`), there is no family to expand. The result is then the
+ * principal roots when a numeric scan shows that they are all the roots in
+ * the domain, else `null` (see `checkNonPeriodicRoots()`).
+ *
+ * Returns `null` when a user binding gives the name `Pi` another value
+ * (`ce.declare('Pi', { value: 3 })`), and the half turn of the angular unit
+ * or a root of the result holds `Pi` (`rootsHoldShadowedPi()`). In radians,
+ * the period is a multiple of the library π, and an exact root written with
+ * π would name `Pi` in its MathJSON and have the user value when it is boxed
+ * again. The principal roots alone are not used: they are not all the roots
+ * in the domain, and when none of them is in the domain the answer would be
+ * the empty list. With no roots, the caller enumerates a finite domain, or
+ * leaves the `Solve` unevaluated. In degrees, grads and turns, the half turn
+ * is a number (180, 200, 1/2), and a root list that does not hold `Pi` is an
+ * answer.
  */
 function expandPeriodicRoots(
   ce: ComputeEngine,
@@ -1579,35 +1902,121 @@ function expandPeriodicRoots(
   predBody: Expression,
   unknown: string,
   domain: Expression,
-  symbolicRootList: ReadonlyArray<Expression>
-): Expression[] | undefined {
+  symbolicRootList: ReadonlyArray<Expression>,
+  userRule = false,
+  strict = false
+): Expression[] | null | undefined {
+  // The principal roots are the answer over the whole real line or the
+  // complex numbers, but not over another domain that has no bounds.
+  const principalOrNone = (): undefined | null =>
+    isPrincipalValueDomain(domain) && !rootsHoldShadowedPi(ce, symbolicRootList)
+      ? undefined
+      : null;
+
+  // A function that the root finder cannot invert is not periodic, and its
+  // roots are not represented by principal roots: no answer, also over the
+  // whole real line. When a root template that the host added to
+  // `ce.solveRules` gave the roots (`userRule`), they are the host's claim of
+  // a solution, and they are used.
+  if (!userRule && hasNonInvertibleHead(predBody, unknown)) return null;
+
   // Detect the periodic structure on the residual `f(x) = lhs − rhs`.
   const terms = analyzePeriodic(predBody, unknown);
-  if (terms === undefined || terms.length === 0) return undefined;
+  if (terms === undefined)
+    return checkNonPeriodicRoots(
+      ce,
+      predBody,
+      unknown,
+      domain,
+      symbolicRootList,
+      strict
+    );
+  if (terms.length === 0) return undefined;
 
   const bounds = domainBoundingRange(domain);
-  if (bounds === undefined) return undefined; // unbounded → cannot expand
+  if (bounds === undefined) return principalOrNone(); // cannot expand
 
+  // In radians, the period is a multiple of the library π (see the comment
+  // of this function).
+  if (halfTurnAngle(ce).has('Pi') && shadowsLibraryName(ce, 'Pi')) return null;
+
+  // A period that is not a finite positive number gives no family. The
+  // principal roots alone are not known to be all the roots in the domain.
   const period = combinedPeriod(ce, terms);
-  if (period === undefined) return undefined;
-  const { expr: T, value: Tnum } = period;
-  if (!Number.isFinite(Tnum) || Tnum <= 0) return undefined;
+  if (
+    period !== undefined &&
+    (!Number.isFinite(period.value) || period.value <= 0)
+  )
+    return null;
 
   // Principal roots: the symbolic solver's (a = 1, direct-argument) roots when
   // it found any, else the scaled-argument substitution.
   let principal: Expression[] = [...symbolicRootList];
   if (principal.length === 0) {
-    principal = substitutionRoots(ce, ceq, unknown, terms) ?? [];
-    if (principal.length === 0) return undefined;
+    const subStats = {
+      candidates: false,
+      undecided: false,
+      partial: false,
+      userRule: false,
+    };
+    principal = substitutionRoots(ce, ceq, unknown, terms, subStats) ?? [];
+    // The roots of the substituted equation are only a part of its roots:
+    // the scan must use its strict conditions.
+    if (subStats.partial) strict = true;
   }
 
-  // Safety cap: never materialize an unbounded family (a `[0, 10^9]` domain
-  // must not generate ~10^8 roots). Degrade to the principal roots.
+  // The principal roots are not always all the roots in one period: for
+  // `sin x + cos x = 0` the solver gives only `-π/4`, and `3π/4` is a root
+  // too. A numeric scan of the domain checks the final list. When the scan
+  // finds a root that is not in the list, the result is `null`, and the
+  // caller leaves the `Solve` unevaluated (or enumerates a finite domain).
+  // The shortest period of a trig term sets the density of the scan.
+  const termPeriod = shortestTermPeriod(ce, terms);
+  const fn = realFunction(ce, predBody, unknown);
+  const complete = (
+    roots: Expression[],
+    periodNum?: number
+  ): Expression[] | null =>
+    !rootsHoldShadowedPi(ce, roots, bounds) &&
+    rootListIsComplete(ce, fn, bounds, termPeriod, roots, periodNum, strict)
+      ? roots
+      : null;
+
+  // The solver found no root (`sin x = 2`). When the scan finds no root
+  // either, the equation has no root in the domain, and the empty list is
+  // the answer.
+  if (principal.length === 0) return complete([]);
+
+  // The periods of the trig terms have no common multiple (an irrational
+  // ratio): there is no family to expand, and the principal roots are the
+  // answer only when the scan finds no other root.
+  if (period === undefined) return complete(principal);
+  const { expr: T, value: Tnum } = period;
+
+  // Safety cap: never materialize a very large family (a `[0, 10^9]` domain
+  // must not generate ~10^8 roots). The principal roots alone are a partial
+  // list, thus there is no answer: the `Solve` stays unevaluated (or the
+  // caller enumerates a finite integer domain).
   const span = bounds.hi - bounds.lo;
-  if (span / Tnum > MAX_PERIODIC_EXPANSION) return principal;
+  if (span / Tnum > MAX_PERIODIC_EXPANSION) return null;
+
+  // The roots repeat with the period `T` of the equation, but often also with
+  // a shorter spacing `T/n`: `sin x + cos x` has the period 2π, and its roots
+  // are π apart because `f(x + π) = -f(x)`. Expand each principal root with
+  // this shorter spacing.
+  const divisor = rootSetDivisor(fn.f, bounds.lo, Tnum);
+  const spacing =
+    divisor === 1
+      ? T
+      : ce.function('Divide', [T, ce.number(divisor)]).evaluate();
+  const spacingNum = Tnum / divisor;
 
   const tol = ce.tolerance;
   const out: Expression[] = [];
+  // The principal roots expanded so far, with their numeric values. Two
+  // principal roots give the same family when their difference is an exact
+  // multiple of the spacing.
+  const families: Array<{ root: Expression; value: number }> = [];
   for (const x0 of principal) {
     const x0num = x0.N().re;
     if (!Number.isFinite(x0num)) {
@@ -1616,14 +2025,29 @@ function expandPeriodicRoots(
       out.push(x0);
       continue;
     }
-    const kmin = Math.ceil((bounds.lo - x0num) / Tnum - tol);
-    const kmax = Math.floor((bounds.hi - x0num) / Tnum + tol);
+    const same = families.map((f) =>
+      sameRootFamily(ce, f.root, f.value, x0, x0num, spacing, spacingNum)
+    );
+    // The numeric values cannot show whether `x0` gives a new family: a
+    // family can be lost, thus there is no answer.
+    if (same.some((s) => s === undefined)) return null;
+    if (same.some((s) => s === true)) continue;
+    families.push({ root: x0, value: x0num });
+    const kmin = Math.ceil((bounds.lo - x0num) / spacingNum - tol);
+    const kmax = Math.floor((bounds.hi - x0num) / spacingNum + tol);
+    // Above 2^53, `k + 1` is not always a different float: the loop would
+    // not end (`sin x = 0` over `[10^17, 10^17 + 64]`), and the float `k` is
+    // not the exact index of the root. There is no answer.
+    if (!Number.isSafeInteger(kmin) || !Number.isSafeInteger(kmax)) return null;
     for (let k = kmin; k <= kmax; k++) {
       const member =
         k === 0
           ? x0
           : ce
-              .function('Add', [x0, ce.function('Multiply', [ce.number(k), T])])
+              .function('Add', [
+                x0,
+                ce.function('Multiply', [ce.number(k), spacing]),
+              ])
               .evaluate();
       // Confirm by exact substitution — guards an imperfect period and never
       // admits a wrong answer.
@@ -1638,35 +2062,680 @@ function expandPeriodicRoots(
     }
   }
 
-  // Sort ascending by numeric value, then drop duplicates (e.g. two principal
-  // roots that coincide modulo the period).
+  // Sort ascending by numeric value, then drop duplicates. The members of two
+  // different families are different values, thus only a value that is the
+  // same expression is a duplicate. Two values that are nearer than the
+  // tolerance can be two roots (`(sin x - 1/2)(sin x - 1/2 - 10^-10) = 0`).
   out.sort((p, q) => p.N().re - q.N().re);
   const deduped: Expression[] = [];
   for (const e of out) {
     const last = deduped[deduped.length - 1];
-    if (last && (last.isSame(e) || Math.abs(last.N().re - e.N().re) <= tol))
-      continue;
+    if (last && last.isSame(e)) continue;
     deduped.push(e);
   }
-  return deduped;
+  return complete(deduped, Tnum);
+}
+
+/**
+ * Compare the families `a + k·spacing` and `b + k·spacing` of two principal
+ * roots `a` and `b` (`aNum` and `bNum` are their numeric values).
+ *
+ * Returns `true` when `b - a` is an exact integer multiple of `spacing`:
+ * the two roots give the same family. Returns `false` when the numeric
+ * values show that it is not. Returns `undefined` when the difference does
+ * not simplify to 0 but is too small for its numeric value to show that it
+ * is not 0.
+ *
+ * Two roots can be very near each other: `sin(x) = 1/2` and
+ * `sin(x) = 1/2 + 10^-10` have roots `1.15·10^-10` apart. A comparison of
+ * the numeric values only would merge them, and a root would be lost.
+ */
+function sameRootFamily(
+  ce: ComputeEngine,
+  a: Expression,
+  aNum: number,
+  b: Expression,
+  bNum: number,
+  spacing: Expression,
+  spacingNum: number
+): boolean | undefined {
+  const q = (bNum - aNum) / spacingNum;
+  const k = Math.round(q);
+  // The rounding error of `q` is much smaller than this limit.
+  if (Math.abs(q - k) > 1e-6) return false;
+  const diff = ce
+    .function('Subtract', [
+      b,
+      ce.function('Add', [a, ce.function('Multiply', [ce.number(k), spacing])]),
+    ])
+    .evaluate();
+  if (diff.isSame(0)) return true;
+  // The numeric value of the exact difference has an error of a few units
+  // of `|x|·ε`. A value much larger than that is not 0.
+  const d = diff.N().re;
+  const scale = Math.max(1, Math.abs(aNum), Math.abs(bNum));
+  if (Number.isFinite(d) && Math.abs(d) > 1e-12 * scale) return false;
+  return undefined;
+}
+
+/**
+ * The trig functions of `unknown` in `node`, each with a linear argument
+ * `a·x + b`. The unknown can also appear outside a trig function: those
+ * occurrences are ignored. Returns `undefined` when a trig function of the
+ * unknown has an argument that is not linear in the unknown (`sin(x^2)`).
+ */
+function trigTerms(node: Expression, unknown: string): TrigTerm[] | undefined {
+  if (!isFunction(node) || !node.has(unknown)) return [];
+  const op = node.operator;
+  if ((TRIG_2PI.has(op) || TRIG_PI.has(op)) && node.nops === 1)
+    return analyzePeriodic(node, unknown);
+  const out: TrigTerm[] = [];
+  for (const child of node.ops) {
+    const r = trigTerms(child, unknown);
+    if (r === undefined) return undefined;
+    out.push(...r);
+  }
+  return out;
+}
+
+/**
+ * Check the root list of an equation that is not periodic because the
+ * unknown is not only in trig functions of a linear argument (`x·sin(x) = 0`,
+ * `(x - 1)·sin(x) = 0`, `sin(x^2) = 0`). Such an equation has no root family
+ * to expand, and the root finder often gives only some of its roots: for
+ * `x·sin(x) = 0` it gives `0` and `π`, but each `k·π` is a root.
+ *
+ * Returns `undefined` when the equation has no trig function of the unknown,
+ * or the domain is the whole real line or the complex numbers
+ * (`isPrincipalValueDomain()`), or the domain is bounded and `roots` is
+ * empty: the caller then uses `roots` as they are. Returns `null` (no
+ * answer) for another domain that is not bounded (`Integers`, a half-line):
+ * the roots of the solver are only a part of the roots there.
+ *
+ * Over a bounded domain, returns `roots` when a numeric scan of the domain
+ * finds no other root (`rootListIsComplete()`), else `null`. The scan
+ * samples each trig function at a density set by its period, thus a trig
+ * function of an argument that is not linear (`sin(x^2)`) has no such
+ * density and also gives `null`. With `null`, the caller enumerates a finite
+ * domain, or leaves the `Solve` unevaluated.
+ *
+ * Also returns `null` when a user binding gives the name `Pi` another value
+ * and a root holds `Pi` (`rootsHoldShadowedPi()`).
+ *
+ * When `predBody` is a product, each factor that is periodic (the unknown is
+ * only in trig functions of a linear argument) gives its family of roots in
+ * the domain (`expandPeriodicRoots()` on that factor), and the scan checks
+ * the union of the families and of `roots`: `(x - 1)·cos(x) = 0` over
+ * `[0, 5]` gives `1`, `π/2` and `3π/2`. `strict` is passed to the scan (see
+ * `rootListIsComplete()`).
+ */
+function checkNonPeriodicRoots(
+  ce: ComputeEngine,
+  predBody: Expression,
+  unknown: string,
+  domain: Expression,
+  roots: ReadonlyArray<Expression>,
+  strict = false
+): Expression[] | null | undefined {
+  const terms = trigTerms(predBody, unknown);
+  if (terms !== undefined && terms.length === 0) return undefined;
+  const bounds = domainBoundingRange(domain);
+  if (rootsHoldShadowedPi(ce, roots, bounds)) return null;
+  if (bounds === undefined)
+    return isPrincipalValueDomain(domain) ? undefined : null;
+  if (roots.length === 0) return undefined;
+  if (terms === undefined) return null;
+  const all = withFactorFamilies(ce, predBody, unknown, domain, roots);
+  const termPeriod = shortestTermPeriod(ce, terms);
+  const fn = realFunction(ce, predBody, unknown);
+  return rootListIsComplete(ce, fn, bounds, termPeriod, all, undefined, strict)
+    ? all
+    : null;
+}
+
+/**
+ * The roots `roots` of the product `predBody`, with the family of roots in
+ * the bounded `domain` of each factor that is periodic in `unknown` (the
+ * unknown is only in trig functions of a linear argument): for
+ * `(x - 1)·cos(x)` over `[0, 5]`, the roots `1`, `π/2` and `-π/2` of the
+ * root finder, and the family `π/2`, `3π/2` of `cos(x)`. A factor `fⁿ` with
+ * a positive constant `n` gives the family of `f`. The values are sorted
+ * when a family adds one, and a value that is equal to a value of the list
+ * is not added.
+ *
+ * Returns `roots` when `predBody` is not a product. A factor whose family
+ * cannot be shown to be complete (`expandPeriodicRoots()` gives `null`)
+ * adds no value: the caller scans the whole product, and the scan rejects a
+ * list that misses a root.
+ */
+function withFactorFamilies(
+  ce: ComputeEngine,
+  predBody: Expression,
+  unknown: string,
+  domain: Expression,
+  roots: ReadonlyArray<Expression>
+): Expression[] {
+  const out = [...roots];
+  if (!isFunction(predBody, 'Multiply')) return out;
+  let added = false;
+  for (const factor of predBody.ops) {
+    const base =
+      isFunction(factor, 'Power') &&
+      !factor.op2.has(unknown) &&
+      factor.op2.isPositive === true
+        ? factor.op1
+        : factor;
+    const terms = analyzePeriodic(base, unknown);
+    if (terms === undefined || terms.length === 0) continue;
+    const stats = {
+      candidates: false,
+      undecided: false,
+      partial: false,
+      userRule: false,
+    };
+    const factorRoots = findUnivariateRoots(base, unknown, 0, undefined, stats);
+    const family = expandPeriodicRoots(
+      ce,
+      base,
+      base,
+      unknown,
+      domain,
+      factorRoots,
+      false,
+      stats.partial
+    );
+    // No family: the scan of the whole product still checks the list.
+    if (family === null || family === undefined) continue;
+    for (const r of family) {
+      if (out.some((o) => o.isSame(r) || o.isEqual(r) === true)) continue;
+      out.push(r);
+      added = true;
+    }
+  }
+  if (added) out.sort((p, q) => p.N().re - q.N().re);
+  return out;
+}
+
+/**
+ * A numeric version of the real function `body` of `unknown`, for the checks
+ * of `expandPeriodicRoots()`. It is compiled when possible. Otherwise each
+ * call substitutes the value and evaluates `body` numerically, which is much
+ * slower: `compiled` tells the caller which version it has. A value that is
+ * not a finite real number (a pole, a complex value, a free symbol) is `NaN`.
+ */
+function realFunction(
+  ce: ComputeEngine,
+  body: Expression,
+  unknown: string
+): { f: (x: number) => number; compiled: boolean } {
+  const run = implicitCompileNumeric(ce, body);
+  if (run !== undefined) {
+    return {
+      f: (x) => {
+        try {
+          return run({ [unknown]: x });
+        } catch {
+          return NaN;
+        }
+      },
+      compiled: true,
+    };
+  }
+  return {
+    f: (x) => {
+      const v = body.subs({ [unknown]: ce.number(x) }).N();
+      return Math.abs(v.im) > 1e-12 ? NaN : v.re;
+    },
+    compiled: false,
+  };
+}
+
+/**
+ * The largest `n` (at most `MAX_ROOT_SET_DIVISOR`) such that the roots of
+ * `f` repeat every `period / n`, or 1 when no such `n` is found.
+ *
+ * `period` is a period of `f`. When `f(x + period/n)` is `f(x)` or `-f(x)`
+ * for all `x`, each root of `f` gives another root `period/n` away. The test
+ * compares the two values at a few sample points, so it is not a proof. The
+ * caller confirms each root it makes with this spacing by exact substitution,
+ * and checks the final list with `rootListIsComplete()`.
+ */
+function rootSetDivisor(
+  f: (x: number) => number,
+  start: number,
+  period: number
+): number {
+  // Sample points at irregular fractions of the period, so that they do not
+  // fall on a pattern of the function.
+  const fractions = [0.1234, 0.2718, 0.3142, 0.4142, 0.5772, 0.6931, 0.866];
+  for (let n = MAX_ROOT_SET_DIVISOR; n >= 2; n--) {
+    const shift = period / n;
+    let same = true;
+    let opposite = true;
+    let count = 0;
+    for (const t of fractions) {
+      const x = start + t * period;
+      const a = f(x);
+      const b = f(x + shift);
+      if (!Number.isFinite(a) || !Number.isFinite(b)) continue;
+      count += 1;
+      const tol = 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
+      if (Math.abs(b - a) > tol) same = false;
+      if (Math.abs(b + a) > tol) opposite = false;
+    }
+    if (count >= 4 && (same || opposite)) return n;
+  }
+  return 1;
+}
+
+/**
+ * Return `true` when a numeric scan of `[bounds.lo, bounds.hi]` finds no real
+ * root of `fn.f` that is not in `roots`.
+ *
+ * The scan samples `f` `PERIODIC_SCAN_SAMPLES_PER_PERIOD` times per
+ * `termPeriod` (the shortest period of a trig term of `f`). It finds a root
+ * where the sign of `f` changes (refined by bisection), and a root where `f`
+ * touches zero without a sign change (a local minimum of `|f|`, refined by a
+ * golden-section search). A sign change at a pole (`tan x` at `π/2`) is not a
+ * root: there `|f|` becomes very large.
+ *
+ * The search for a minimum of `|f|` also examines the first and the last
+ * cell of the scan (between an end of the window and the sample next to it):
+ * a root that touches zero there (`sin(13x)^2·cos(x)` at `6π/13`, just
+ * after `lo = 1.4499`) does not show as a local minimum of the samples.
+ *
+ * The scan also finds a root at the edge of a region where `f` is not real
+ * (`x·√(cos(x) + 0.99)` is not real between `arccos(-0.99)` and
+ * `2π - arccos(-0.99)`, and it is 0 at both ends of that region). Between
+ * each sample that is a finite number and a sample that is `NaN`, a bisection
+ * finds the edge. A value of `|f|` at the edge that is close to zero is a
+ * root: the list must hold it.
+ *
+ * A value found by the scan matches a value of the list when they are
+ * closer than a tolerance. The tolerance grows with `|x|`, because the
+ * rounding error of a root grows with `|x|`, but it stays much smaller than
+ * the distance between two samples. A larger tolerance at a large `|x|`
+ * (near `10^8`) would let a root that is not in the list match a near root
+ * that is in the list.
+ *
+ * A root where `f` touches zero can be flat: near the root `π` of
+ * `sin(x)^10`, `|f|` is less than `10^-16` on an interval of width 0.05, and
+ * a sample in that interval is not the position of the root. For a sample
+ * where `|f|` is close to zero, or a minimum of `|f|` that is close to zero,
+ * the scan does not record a point. Bisections find the interval around it
+ * where `|f|` stays below the threshold, and the list must hold a value in
+ * that interval (to the tolerance above). For a simple root, the interval
+ * is very small. For a root of high multiplicity, it is wider: the
+ * multiplicity makes the position of the root less certain. An interval
+ * longer than 1/8 of `termPeriod` is not clear: `f` is then close to zero
+ * on a large part of the domain.
+ *
+ * What the scan can and cannot show. The density of the samples comes only
+ * from the periods of the trig terms. Thus the scan can check an equation
+ * whose other parts (polynomials, radicals, exponentials, logarithms) do not
+ * oscillate faster than its trig terms. A function that can oscillate
+ * faster (`BesselJ(0, 50x)`, `Sinc`, a trig function of an argument that is
+ * not linear) can have roots between two samples. The callers do not call
+ * the scan for such an equation: `expandPeriodicRoots()` returns no answer
+ * when the unknown is in a function that the root finder cannot invert
+ * (`hasNonInvertibleHead()`), and `checkNonPeriodicRoots()` when a trig
+ * function has an argument that is not linear. Also, the scan cannot tell
+ * apart two roots that are in one interval where `|f|` is close to zero, or
+ * that are in one cell of the scan with no sign change of `f` at the
+ * samples: it finds only one of them. This occurs near a double root (a
+ * near tangency, `sin(x) = 1 - 10^-18`). The caller makes sure that two
+ * principal roots that are near each other are both expanded
+ * (`sameRootFamily()`).
+ *
+ * When `period` (a period of `f`) is given and the domain is longer than it,
+ * the scan covers only the first period `[lo, lo + period]`. Each root of `f`
+ * in the domain is then a root of that window plus a multiple of `period`, so
+ * the list must also hold `r + period` for each of its roots `r` when
+ * `r + period` is in the domain. This keeps the cost of the scan independent
+ * of the length of the domain.
+ *
+ * The result is `false` (the list cannot be shown to be complete) when:
+ * - the list does not hold `r + period` for one of its roots `r`;
+ * - the scan needs more samples than the budget (the enumeration budgets of
+ *   `Solve`, compiled or interpreted);
+ * - more than a tenth of the samples are not finite real numbers;
+ * - a refined point is neither clearly a root nor clearly not a root;
+ * - the rounding error of `x` at the largest `|x|` of the domain is not much
+ *   smaller than the tolerance: the scan cannot tell two near roots apart.
+ *
+ * With `strict`, the list is known to be only a part of the roots of the
+ * root finder (a factor of a product gave no root: `stats.partial`). A root
+ * that the root finder did not find can then be very near a root of the
+ * list: `sin(x)·(x + e^x - 1 - 10^-8) = 0` has the roots `0` and about
+ * `5·10^-9`, and the tolerance above matches both to `0`. The result is
+ * `true` only when each root that the scan finds is a crossing of zero (a
+ * change of sign of `f`) that is located to less than `10^-9·max(1, |x|)`,
+ * and it matches exactly one value of the list, which no other root that
+ * the scan finds matches. A root where `f` touches zero without a change of
+ * sign, or a zone where `|f|` is close to zero that is wider than that, can
+ * hide two roots: the result is then `false`. The scan still cannot tell an
+ * odd number of roots in one cell of the scan (three roots in a cell show as
+ * one change of sign) from one root.
+ */
+function rootListIsComplete(
+  ce: ComputeEngine,
+  fn: { f: (x: number) => number; compiled: boolean },
+  bounds: { lo: number; hi: number },
+  termPeriod: number,
+  roots: ReadonlyArray<Expression>,
+  period?: number,
+  strict = false
+): boolean {
+  const { f } = fn;
+  const values = roots
+    .map((r) => r.N().re)
+    .filter((v) => Number.isFinite(v))
+    .sort((a, b) => a - b);
+
+  const step = termPeriod / PERIODIC_SCAN_SAMPLES_PER_PERIOD;
+  if (!(step > 0)) return false;
+  // Two values closer than `matchTol(x)` are the same root (see above).
+  const matchTol = (x: number): number =>
+    Math.min(1e-6 * Math.max(1, Math.abs(x)), step / 16);
+  // The rounding error of a value near `x` is about 3 units of `|x|·ε`: the
+  // float of an exact root, a root refined by bisection to two adjacent
+  // floats, and the rounding of `x` and of the argument `a·x + b`. When it is
+  // larger than the tolerance at the largest `|x|` of the domain, a match
+  // cannot tell two near roots apart (near `10^17`, two adjacent floats are
+  // farther apart than the roots of `sin(x)`).
+  const xMax = Math.max(Math.abs(bounds.lo), Math.abs(bounds.hi));
+  if (4 * Number.EPSILON * Math.max(1, xMax) > matchTol(xMax)) return false;
+
+  // True if the list holds a value in `[l, r]` (to the precision of the
+  // scan).
+  const listHolds = (l: number, r: number): boolean => {
+    const start = l - matchTol(l);
+    // Binary search for the first value `>= start`.
+    let a = 0;
+    let b = values.length;
+    while (a < b) {
+      const m = (a + b) >> 1;
+      if (values[m] < start) a = m + 1;
+      else b = m;
+    }
+    return a < values.length && values[a] <= r + matchTol(r);
+  };
+  // True if the list holds a value at `x` (to the precision of the scan).
+  const inList = (x: number): boolean => listHolds(x, x);
+
+  const { lo } = bounds;
+  let { hi } = bounds;
+  if (period !== undefined && lo + period < hi) {
+    const edge = hi - matchTol(hi);
+    for (const v of values)
+      if (v + period <= edge && !inList(v + period)) return false;
+    hi = lo + period;
+  }
+
+  const budget = fn.compiled
+    ? MAX_SOLVE_ENUMERATION_COMPILED
+    : MAX_SOLVE_ENUMERATION_INTERPRETED;
+  const n = Math.max(1, Math.ceil((hi - lo) / step));
+  if (n > budget) return false;
+
+  const xs = new Float64Array(n + 1);
+  const ys = new Float64Array(n + 1);
+  let finiteCount = 0;
+  for (let i = 0; i <= n; i++) {
+    if ((i & 0x3ff) === 0x3ff) checkDeadline(ce._deadlineFrame);
+    xs[i] = i === n ? hi : lo + ((hi - lo) * i) / n;
+    ys[i] = f(xs[i]);
+    if (Number.isFinite(ys[i])) finiteCount += 1;
+  }
+  if (finiteCount < 0.9 * (n + 1)) return false;
+
+  // The median of `|f|` is the scale for the thresholds below. The median is
+  // used, not the maximum, because a sample near a pole is very large.
+  const mags = Array.from(ys)
+    .filter((y) => Number.isFinite(y))
+    .map((y) => Math.abs(y))
+    .sort((a, b) => a - b);
+  const scale = mags[mags.length >> 1] || 1;
+  const zeroTol = 1e-12 * scale;
+  const isZero = (y: number) => Math.abs(y) <= zeroTol;
+
+  // The interval around `[l, r]` where `|f| <= t` (see the comment of this
+  // function). `|f| <= t` at `l` and `r`, and `a <= l <= r <= b`. A
+  // bisection between `a` and `l` finds the left end, and a bisection
+  // between `r` and `b` the right end. Returns `undefined` when `|f| <= t`
+  // also at `a` or `b`, and that point is not an end of the window: the
+  // interval then goes past the cells of the scan next to it, and the scan
+  // cannot locate the root. Also returns `undefined` when the interval is
+  // longer than 1/8 of `termPeriod`.
+  const zeroInterval = (
+    a: number,
+    l: number,
+    r: number,
+    b: number,
+    t: number
+  ): [number, number] | undefined => {
+    // A value that is not a finite number is outside the interval.
+    const outside = (x: number): boolean => !(Math.abs(f(x)) <= t);
+    const end = (out: number, inside: number): number | undefined => {
+      if (out === inside) return out;
+      if (!outside(out))
+        return out === xs[0] || out === xs[n] ? out : undefined;
+      for (let k = 0; k < 100; k++) {
+        const m = inside + (out - inside) / 2;
+        if (m === inside || m === out) break;
+        if (outside(m)) out = m;
+        else inside = m;
+      }
+      return out;
+    };
+    const left = end(a, l);
+    const right = end(b, r);
+    if (left === undefined || right === undefined) return undefined;
+    if (right - left > termPeriod / 8) return undefined;
+    return [left, right];
+  };
+
+  // Each root found by the scan is an interval that holds it: a point for a
+  // root where `f` changes sign.
+  const found: Array<[number, number]> = [];
+  for (let i = 0; i <= n; i++) {
+    const y = ys[i];
+    if (!Number.isFinite(y)) continue;
+    if (isZero(y)) {
+      // A run of samples `i..j` where `|f|` is close to zero holds a root.
+      // Find the interval around the run where `|f|` stays close to zero.
+      let j = i;
+      while (j < n && Number.isFinite(ys[j + 1]) && isZero(ys[j + 1])) j++;
+      // With `strict`, the zone must be a crossing of zero: the samples next
+      // to it have opposite signs. Otherwise, it can hide two roots.
+      if (strict) {
+        const before = i > 0 ? ys[i - 1] : NaN;
+        const after = j < n ? ys[j + 1] : NaN;
+        if (
+          !Number.isFinite(before) ||
+          !Number.isFinite(after) ||
+          isZero(before) ||
+          isZero(after) ||
+          before > 0 === after > 0
+        )
+          return false;
+      }
+      const zone = zeroInterval(
+        xs[i > 0 ? i - 1 : 0],
+        xs[i],
+        xs[j],
+        xs[j < n ? j + 1 : n],
+        zeroTol
+      );
+      if (zone === undefined) return false;
+      found.push(zone);
+      i = j;
+      continue;
+    }
+
+    // A sign change between this sample and the next one: bisect.
+    const y1 = i < n ? ys[i + 1] : NaN;
+    if (Number.isFinite(y1) && !isZero(y1) && y > 0 !== y1 > 0) {
+      let a = xs[i];
+      let b = xs[i + 1];
+      let fa = y;
+      let fb = y1;
+      for (let k = 0; k < 100 && b - a > 0; k++) {
+        const m = a + (b - a) / 2;
+        if (m <= a || m >= b) break;
+        const fm = f(m);
+        if (Number.isNaN(fm)) return false;
+        // An infinite value is a pole, not a root.
+        if (!Number.isFinite(fm)) {
+          fa = fm;
+          fb = fm;
+          break;
+        }
+        if (fm > 0 === fa > 0) [a, fa] = [m, fm];
+        else [b, fb] = [m, fm];
+      }
+      const [x, fx] = Math.abs(fa) <= Math.abs(fb) ? [a, fa] : [b, fb];
+      // A crossing root refines to the rounding error of `f`, and a pole
+      // refines to a very large value. Any other value (a jump of `f` across
+      // zero) is not clear.
+      if (Math.abs(fx) <= 1e-6 * scale) found.push([x, x]);
+      else if (Math.abs(fx) <= 1e6 * scale) return false;
+      continue;
+    }
+
+    // A local minimum of `|f|` with no sign change: `f` can touch zero
+    // (`sin(x)^2 = 1` at `π/2`). Search the minimum of `|f|` in the two cells
+    // next to the sample. The first and the last sample have only one cell in
+    // the window: when `|f|` decreases toward the end of the window, the
+    // minimum is in that cell or at the end, and the search examines it.
+    let a: number;
+    let b: number;
+    if (i === 0 || i === n) {
+      const j = i === 0 ? 1 : n - 1;
+      const yj = ys[j];
+      if (!Number.isFinite(yj) || yj > 0 !== y > 0) continue;
+      if (Math.abs(y) > Math.abs(yj)) continue;
+      [a, b] = i === 0 ? [xs[0], xs[1]] : [xs[n - 1], xs[n]];
+    } else {
+      const y0 = ys[i - 1];
+      if (!Number.isFinite(y0) || !Number.isFinite(y1)) continue;
+      if (y0 > 0 !== y > 0 || y1 > 0 !== y > 0) continue;
+      if (Math.abs(y) > Math.abs(y0) || Math.abs(y) > Math.abs(y1)) continue;
+      [a, b] = [xs[i - 1], xs[i + 1]];
+    }
+    const [cellStart, cellEnd] = [a, b];
+    const g = (Math.sqrt(5) - 1) / 2;
+    let c = b - g * (b - a);
+    let d = a + g * (b - a);
+    let fc = Math.abs(f(c));
+    let fd = Math.abs(f(d));
+    for (let k = 0; k < 100 && b - a > 0; k++) {
+      if (fc <= fd) {
+        b = d;
+        d = c;
+        fd = fc;
+        c = b - g * (b - a);
+        fc = Math.abs(f(c));
+      } else {
+        a = c;
+        c = d;
+        fc = fd;
+        d = a + g * (b - a);
+        fd = Math.abs(f(d));
+      }
+    }
+    const [x, fx] = fc <= fd ? [c, fc] : [d, fd];
+    if (!Number.isFinite(fx)) return false;
+    // A minimum close to zero is a root. The list must hold a value in the
+    // interval around it where `|f|` stays close to zero: for a flat root,
+    // the position `x` of the minimum is not precise. A minimum too close to
+    // zero to tell a root from a near miss is not clear.
+    if (fx <= 1e-9 * scale) {
+      // With `strict`, a root where `f` touches zero can be two near roots.
+      if (strict) return false;
+      const zone = zeroInterval(
+        cellStart,
+        x,
+        x,
+        cellEnd,
+        Math.max(zeroTol, 2 * fx)
+      );
+      if (zone === undefined) return false;
+      found.push(zone);
+    } else if (fx < 1e-6 * scale) return false;
+  }
+
+  // A root at the edge of a region where `f` is not real: `f` can go to zero
+  // at the edge (`√u` where `u` goes to 0), with no sign change and no
+  // local minimum of the samples. Between a finite sample and a `NaN` sample,
+  // bisect to the last point where `f` is finite. A value of `|f|` there
+  // that is close to zero is a root, and the list must hold it. A value
+  // that is small, but not clearly a root (the edge of `u^(1/8)`), is not
+  // clear.
+  for (let i = 0; i < n; i++) {
+    let a: number;
+    let b: number;
+    if (Number.isFinite(ys[i]) && Number.isNaN(ys[i + 1]))
+      [a, b] = [xs[i], xs[i + 1]];
+    else if (Number.isNaN(ys[i]) && Number.isFinite(ys[i + 1]))
+      [a, b] = [xs[i + 1], xs[i]];
+    else continue;
+    checkDeadline(ce._deadlineFrame);
+    // `a` is on the side where `f` is finite, `b` on the other side.
+    let fa = f(a);
+    for (let k = 0; k < 100; k++) {
+      const m = a + (b - a) / 2;
+      if (m === a || m === b) break;
+      const fm = f(m);
+      if (Number.isFinite(fm)) [a, fa] = [m, fm];
+      else b = m;
+    }
+    if (Math.abs(fa) <= 1e-6 * scale) found.push([a, a]);
+    else if (Math.abs(fa) < 1e-2 * scale) return false;
+  }
+
+  if (!strict) return found.every(([l, r]) => listHolds(l, r));
+
+  // `strict`: each root found matches exactly one value of the list, at a
+  // tolerance much smaller than `matchTol`, and no two roots found match
+  // the same value (see the comment of this function).
+  const strictTol = (x: number): number => 1e-9 * Math.max(1, Math.abs(x));
+  const used = new Set<number>();
+  for (const [l, r] of found) {
+    if (r - l > strictTol(l)) return false;
+    const matches: number[] = [];
+    for (let k = 0; k < values.length; k++)
+      if (values[k] >= l - strictTol(l) && values[k] <= r + strictTol(r))
+        matches.push(k);
+    if (matches.length !== 1 || used.has(matches[0])) return false;
+    used.add(matches[0]);
+  }
+  return true;
 }
 
 /**
  * Run the symbolic univariate solver with the unknown's type refined to
  * `refinedType`, so `findUnivariateRoots` → `filterRootsByType` drops roots of
  * the wrong numeric kind (e.g. the irrational root of a quadratic when the
- * domain is integer).
+ * domain is integer). With `stats`, `stats.partial` tells when the roots are
+ * known to be only a part of the roots (see `findUnivariateRoots()`).
  */
 function symbolicRoots(
   ce: ComputeEngine,
   eq: Expression,
   unknown: string,
-  refinedType: Type
+  refinedType: Type,
+  stats?: {
+    candidates: boolean;
+    undecided: boolean;
+    partial?: boolean;
+    userRule?: boolean;
+  }
 ): ReadonlyArray<Expression> {
   ce.pushScope();
   try {
     ce.declare(unknown, refinedType);
-    return findUnivariateRoots(eq, unknown);
+    return findUnivariateRoots(eq, unknown, 0, undefined, stats);
   } finally {
     ce.popScope();
   }

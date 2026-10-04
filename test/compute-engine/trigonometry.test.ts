@@ -1,5 +1,15 @@
 import { engine } from '../utils';
 import { ComputeEngine } from '../../src/compute-engine';
+import { BigDecimal } from '../../src/big-decimal';
+
+// Constructing an engine sets the module-global `BigDecimal.precision`, and
+// several tests below construct one. The shared engine of this file works at
+// a higher precision, so restore the value after each test: otherwise the
+// result of a later test would depend on the tests that ran before it.
+const savedPrecision = BigDecimal.precision;
+afterEach(() => {
+  BigDecimal.precision = savedPrecision;
+});
 
 describe('TRIGONOMETRY constructible values', () => {
   for (const h of ['Sin', 'Cos', 'Tan', 'Csc', 'Sec', 'Cot']) {
@@ -94,6 +104,127 @@ describe('TRIGONOMETRY other values', () => {
     expect(engine.parse('\\cos^{-1}(0.1)').N()).toMatchInlineSnapshot(
       `1.470628905633336822885798512187058123529908727457923369096448441117505529492241947660079548311554079`
     ));
+});
+
+// The table of special angles has one spelling of each value. A radical
+// written another way (`√2/4·√(5 − √5)` for `sin(π/5)`) is matched when its
+// square is the square of the table value (issue #409).
+describe('Inverse trig of other spellings of the special values', () => {
+  const S5 = ['Sqrt', 5];
+  test.each([
+    [
+      [
+        'Arcsin',
+        ['Multiply', ['Divide', ['Sqrt', 2], 4], ['Sqrt', ['Subtract', 5, S5]]],
+      ],
+      '1/5 * pi',
+    ],
+    [
+      ['Arcsin', ['Divide', ['Sqrt', ['Add', 10, ['Multiply', 2, S5]]], 4]],
+      '2/5 * pi',
+    ],
+    [
+      ['Arctan', ['Sqrt', ['Add', 1, ['Multiply', ['Rational', -2, 5], S5]]]],
+      '1/10 * pi',
+    ],
+    [
+      [
+        'Arctan',
+        ['Negate', ['Sqrt', ['Add', 1, ['Multiply', ['Rational', -2, 5], S5]]]],
+      ],
+      '-1/10 * pi',
+    ],
+    [
+      [
+        'Arcsin',
+        [
+          'Negate',
+          [
+            'Multiply',
+            ['Divide', ['Sqrt', 2], 4],
+            ['Sqrt', ['Subtract', 5, S5]],
+          ],
+        ],
+      ],
+      '-1/5 * pi',
+    ],
+    [
+      [
+        'Arccos',
+        [
+          'Negate',
+          [
+            'Multiply',
+            ['Divide', ['Sqrt', 2], 4],
+            ['Sqrt', ['Subtract', 5, S5]],
+          ],
+        ],
+      ],
+      '7/10 * pi',
+    ],
+    [['Arcsin', ['Sqrt', ['Divide', ['Subtract', 5, S5], 8]]], '1/5 * pi'],
+    [['Arccos', ['Sqrt', ['Divide', ['Add', 3, S5], 8]]], '1/5 * pi'],
+    [
+      ['Arcsin', ['Divide', ['Sqrt', ['Subtract', 2, ['Sqrt', 3]]], 2]],
+      '1/12 * pi',
+    ],
+    [
+      ['Arctan', ['Sqrt', ['Subtract', 3, ['Multiply', 2, ['Sqrt', 2]]]]],
+      '1/8 * pi',
+    ],
+    [
+      [
+        'Arccot',
+        ['Negate', ['Sqrt', ['Add', 1, ['Multiply', ['Rational', -2, 5], S5]]]],
+      ],
+      '3/5 * pi',
+    ],
+    [
+      [
+        'Arcsec',
+        ['Negate', ['Sqrt', ['Subtract', 4, ['Multiply', 2, ['Sqrt', 2]]]]],
+      ],
+      '7/8 * pi',
+    ],
+  ])('%j = %s, and agrees with N', (expr, expected) => {
+    const e = engine.box(expr as any);
+    const v = e.evaluate();
+    expect(v.toString()).toBe(expected);
+    expect(v.N().re).toBeCloseTo(e.N().re, 14);
+  });
+
+  test('a value near a special value, or not a special value, stays symbolic', () => {
+    // (1 + √5)/4 + 10⁻³⁰ is within 10⁻⁹ of cos(π/5), but not equal to it
+    expect(
+      engine
+        .box([
+          'Arccos',
+          ['Add', ['Divide', ['Add', 1, S5], 4], ['Power', 10, -30]],
+        ])
+        .evaluate().operator
+    ).toBe('Arccos');
+    expect(
+      engine.box(['Arcsin', ['Divide', ['Sqrt', 2], 3]]).evaluate().operator
+    ).toBe('Arcsin');
+  });
+
+  test('the angle is in the angular unit of the engine', () => {
+    const ce = new ComputeEngine();
+    ce.angularUnit = 'deg';
+    expect(
+      ce
+        .box([
+          'Arcsin',
+          [
+            'Multiply',
+            ['Divide', ['Sqrt', 2], 4],
+            ['Sqrt', ['Subtract', 5, S5]],
+          ],
+        ])
+        .evaluate()
+        .toString()
+    ).toBe('36');
+  });
 });
 
 describe('Arctan2 quadrant correction (REVIEW.md B1)', () => {
@@ -379,20 +510,63 @@ describe('Hyperbolic functions at 0', () => {
     }
   });
 
-  // Arcosh(0) and Arcoth(0) are legitimately iπ/2, but stay symbolic under
-  // `evaluate()`, matching how Arccos leaves another exact-but-complex value
-  // (e.g. Arccos(2)) unevaluated there.
-  test('Arcosh(0) stays symbolic under evaluate, folds under N', () => {
-    expect(engine.expr(['Arcosh', 0]).evaluate().operator).toBe('Arcosh');
-    const v = engine.expr(['Arcosh', 0]).N();
-    expect(v.re).toBeCloseTo(0, 12);
-    expect(v.im).toBeCloseTo(Math.PI / 2, 12);
+  // Arcosh(0) and Arcoth(0) are the exact value iπ/2 under `evaluate()`
+  // (issue #409). The value agrees with the principal branch of `.N()`.
+  test('Arcosh(0) and Arcoth(0) are iπ/2 under evaluate, N and simplify', () => {
+    for (const op of ['Arcosh', 'Arcoth']) {
+      const e = engine.expr([op, 0]);
+      expect(e.evaluate().toString()).toBe('1/2i * pi');
+      expect(e.simplify().toString()).toBe('1/2i * pi');
+      const v = e.N();
+      expect(v.re).toBeCloseTo(0, 12);
+      expect(v.im).toBeCloseTo(Math.PI / 2, 12);
+    }
   });
-  test('Arcoth(0) stays symbolic under evaluate, folds under N', () => {
-    expect(engine.expr(['Arcoth', 0]).evaluate().operator).toBe('Arcoth');
-    const v = engine.expr(['Arcoth', 0]).N();
-    expect(v.re).toBeCloseTo(0, 12);
-    expect(v.im).toBeCloseTo(Math.PI / 2, 12);
+  test('a float zero numericizes: Arcosh(0.0), Arcoth(0.0)', () => {
+    for (const op of ['Arcosh', 'Arcoth']) {
+      const v = engine.expr([op, { num: '0.0' }]).evaluate();
+      expect(v.isExact).toBe(false);
+      expect(v.im).toBeCloseTo(Math.PI / 2, 12);
+    }
+  });
+  // On [−1, 1] the principal branch is arcosh(x) = i·arccos(x), so every
+  // special angle of arccos gives an exact value.
+  test.each([
+    [['Rational', 1, 2], '1/3i * pi'],
+    [['Rational', -1, 2], '2/3i * pi'],
+    [-1, 'i * pi'],
+    [['Divide', ['Sqrt', 3], 2], '1/6i * pi'],
+    [['Negate', ['Divide', ['Sqrt', 2], 2]], '3/4i * pi'],
+    [['Divide', ['Add', 1, ['Sqrt', 5]], 4], '1/5i * pi'],
+  ])('Arcosh(%j) = %s, and agrees with N', (x, expected) => {
+    const e = engine.expr(['Arcosh', x as any]);
+    const v = e.evaluate();
+    expect(v.toString()).toBe(expected);
+    expect(v.N().re).toBeCloseTo(e.N().re, 14);
+    expect(v.N().im).toBeCloseTo(e.N().im, 14);
+  });
+  test('Arcosh stays symbolic off the special angles and outside [−1, 1]', () => {
+    expect(
+      engine.expr(['Arcosh', ['Rational', 1, 3]]).evaluate().operator
+    ).toBe('Arcosh');
+    expect(engine.expr(['Arcosh', 2]).evaluate().operator).toBe('Arcosh');
+    expect(engine.expr(['Arcosh', -2]).evaluate().operator).toBe('Arcosh');
+  });
+  test('simplify does not evaluate an impure Arcosh argument', () => {
+    // The simplify rule for constructible values receives the unevaluated
+    // operand. Looking up the table must not run an impure function.
+    const ce = new ComputeEngine();
+    let calls = 0;
+    ce.declare('g', {
+      signature: '() -> real',
+      pure: false,
+      evaluate: () => {
+        calls += 1;
+        return ce.number(0.5);
+      },
+    });
+    expect(ce.expr(['Arcosh', ['g']]).simplify().operator).toBe('Arcosh');
+    expect(calls).toBe(0);
   });
 });
 

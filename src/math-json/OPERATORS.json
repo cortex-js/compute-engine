@@ -5872,6 +5872,18 @@
       ]
     },
     {
+      "name": "NumericApproximation",
+      "category": "Core",
+      "arity": "1",
+      "signature": "(any) -> unknown",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "Numerically evaluate an expression, as the `.N()` method does (engine-internal)."
+    },
+    {
       "name": "Object",
       "category": "Core",
       "arity": "optional",

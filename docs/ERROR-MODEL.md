@@ -1332,6 +1332,45 @@ answer and the fix landed. An entry with no FIXED date is still open.
   failure's cell is the error itself, still carrying its `ErrorBroadcast`
   context. Pinned by `test/compute-engine/evaluation-time-error-bubbling.test.ts`
   and the updated `broadcast-error-context.test.ts`.
+  Since 2026-10-03 the anonymous application collapses the same way:
+  `Apply((u: real) ↦ 7, "abc")` is the error `Error(incompatible-type, …)`,
+  with the hop `Apply` argument 2, and not the inert
+  `Apply((u) => 7, Error(…))`. The inert form is now only an internal step:
+  the literal's own application (`makeLambda` in `function-utils.ts`) still
+  returns it, and each route that calls a literal replaces it with the
+  error (`_refusedArgumentError` for a named call,
+  `refusedLiteralArgumentError` for `Apply` and for the cells of a mapped
+  list). An argument whose type certainly does not match (a string or a
+  boolean at a `real` parameter) is refused when the call is boxed, on all
+  three routes, so the call is invalid and typed `error` before it is
+  evaluated. Pinned by `test/compute-engine/apply-literal-maps.test.ts` and
+  `typed-function-literals.test.ts`.
+  On the two named routes, an assignment can later replace the function
+  (`h := (u: real) ↦ 7`, or `f` declared `function` and then assigned), so
+  that refusal states only what the name held when the call was boxed. The
+  call keeps the operands it was written with, and its evaluation and its
+  type box it again against the function that the name holds now
+  (`BoxedFunction._recheckedCall()`): with `f` declared `function` and
+  assigned `(u: real) ↦ 7`, `f("abc")` boxed then is typed `error`; after
+  `f` is assigned `(u: string) ↦ 1`, the same call is typed `integer` and
+  evaluates to `1`, as a call boxed after the assignment does. The same
+  applies when the call is an operand at any depth: an expression that
+  contains a refused call is boxed again from the checked calls when it is
+  evaluated or typed (`BoxedFunction._recheckedTree()`), so `f("abc") + 1`
+  evaluates to `2` and `[f("abc"), 1]` to `[1, 1]` after the assignment.
+  When the callee is still the same, the expression still runs its handler
+  instead of bubbling the error first, because one of its own statements can
+  replace the callee: `Block(Assign(h, u ↦ 7), h("abc") + 1)` evaluates to
+  `8` after `h := (u: real) ↦ 7`. If the call is still refused after the
+  handler, the error bubbles as before, with the same breadcrumb, and a
+  collection keeps the refused call in its cell. Because the handler runs,
+  its effects are those of an error that appears at evaluation:
+  `Assign(x, h("abc") + 1)` assigns the error to `x`, as
+  `Assign(x, Length(5) + 1)` does. The boxed expression
+  itself does not change, so its `isValid` stays `false` even when it
+  evaluates to a value: `isValid` reports the tree as it was boxed. A
+  declared signature (`ce.declare('k', '(real) -> real')`) is a contract
+  that an assignment cannot change, and its refusal is not checked again.
 - **RULED and IMPLEMENTED 2026-09-03: `RuntimeError(code)` constructs an
   error value at run time.** A written `Error(…)` stays what §1 says it is —
   a static diagnostic node that invalidates its tree, so a function whose

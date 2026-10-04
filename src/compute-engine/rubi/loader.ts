@@ -22,7 +22,11 @@ import type {
 } from '../global-types.js';
 import type { Expr as Expression, RubiRuleDoc } from './types.js';
 import { compileRuleDocs, type CompileResult } from './compile.js';
-import { RubiDriver, type IntStepRecord } from './driver.js';
+import {
+  DEFAULT_TIME_LIMIT_MS,
+  RubiDriver,
+  type IntStepRecord,
+} from './driver.js';
 
 export interface IntegrationRulesLoadOptions {
   /** Per-integral step budget of the rule driver (default `RUBI_STEP_BUDGET`,
@@ -34,9 +38,13 @@ export interface IntegrationRulesLoadOptions {
    * rule matcher, a checkpoint of the engine code a rule runs. */
   stepBudget?: number;
   /** Per-integral wall-clock limit of the rule driver, in milliseconds
-   * (default 30000). Only a guard against a hang in code that does not count
+   * (default 120000). Only a guard against a hang in code that does not count
    * steps: the step budget, not this limit, normally decides when the driver
-   * gives up. */
+   * gives up. The two bounded sub-searches of the driver get one sixth of
+   * this limit each (20 s for the default). On a very slow or loaded machine, raise
+   * this limit so that it cannot stop a search that the step budget
+   * allows: when it stops a search, the integral can stay unevaluated on that
+   * machine and close on a faster one. */
   timeLimitMs?: number;
 }
 
@@ -86,7 +94,7 @@ export function loadIntegrationRules(
       `loadIntegrationRules: stepBudget must be a non-negative integer or Infinity, not ${stepBudget}`
     );
   const driver = new RubiDriver(ce, compiled, {
-    timeLimitMs: options?.timeLimitMs ?? 30_000,
+    timeLimitMs: options?.timeLimitMs ?? DEFAULT_TIME_LIMIT_MS,
     stepBudget,
   });
 

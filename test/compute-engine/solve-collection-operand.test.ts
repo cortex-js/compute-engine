@@ -345,15 +345,17 @@ describe('SOLVE: SEVERAL EQUATIONS IN ONE UNKNOWN', () => {
   });
 
   test('periodic equations: a common root of a scaled argument', () => {
-    // `2π` solves `sin(x) = 0` and `cos(x/4) = 0`, but it is not a principal
-    // root of `sin(x) = 0`. Before, the answer was `[]`.
+    // `2π` and `-2π` solve `sin(x) = 0` and `cos(x/4) = 0`, but they are not
+    // principal roots of `sin(x) = 0`. They are the principal roots of
+    // `cos(x/4) = 0` (period 8π), and the common roots are `2π + 4kπ`.
+    // Before, the answer was `[]`, then `[2pi]`.
     const sinx = ['Equal', ['Sin', 'x'], 0];
     const cosx4 = ['Equal', ['Cos', ['Divide', 'x', 4]], 0];
     expect(solveBox(['Solve', ['List', sinx, cosx4], 'x']).toString()).toBe(
-      '[2pi]'
+      '[2pi,-2pi]'
     );
     expect(solveBox(['Solve', ['List', cosx4, sinx], 'x']).toString()).toBe(
-      '[2pi]'
+      '[2pi,-2pi]'
     );
   });
 

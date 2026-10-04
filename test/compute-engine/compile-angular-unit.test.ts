@@ -355,6 +355,34 @@ describe('ANGULAR UNIT — symbolic derivative (by-reference vs inline)', () => 
     );
   });
 
+  test('deg: the partial derivatives of Arctan2 are divided by k, as Arctan', () => {
+    // The result of Arctan2 is an angle in degrees, so its partial
+    // derivatives are the radian ones times 180/π.
+    const ce = degEngine();
+    const js = ce._getCompilationTarget('javascript')!;
+    const dx = ce.box(['D', ['Arctan2', 'y', 'x'], 'x']);
+    const dy = ce.box(['D', ['Arctan2', 'y', 'x'], 'y']);
+    expect(dx.evaluate().toString()).toBe('(-180y) / (pi * (x^2 + y^2))');
+    expect(dy.evaluate().toString()).toBe('(180x) / (pi * (x^2 + y^2))');
+    const dxRun = js.compile(dx).run!;
+    const dyRun = js.compile(dy).run!;
+    const deg = (y: number, x: number) => (Math.atan2(y, x) * 180) / Math.PI;
+    const h = 1e-6;
+    for (const [x, y] of [
+      [1.3, 0.7],
+      [-0.8, 1.7],
+      [-1.4, -0.9],
+      [0.6, -1.1],
+    ]) {
+      const fdx = (deg(y, x + h) - deg(y, x - h)) / (2 * h);
+      const fdy = (deg(y + h, x) - deg(y - h, x)) / (2 * h);
+      expect(dx.evaluate().subs({ x, y }).N().re).toBeCloseTo(fdx, 5);
+      expect(dy.evaluate().subs({ x, y }).N().re).toBeCloseTo(fdy, 5);
+      expect(dxRun({ x, y }) as number).toBeCloseTo(fdx, 5);
+      expect(dyRun({ x, y }) as number).toBeCloseTo(fdy, 5);
+    }
+  });
+
   test('deg: ND is not converted twice', () => {
     // `ND` numerically differentiates a body it compiles itself, so the
     // entry-point rewrite must not scale that body a second time.

@@ -1256,10 +1256,12 @@ export interface CompileTarget<Expr = unknown> {
   ) => TargetSource | undefined;
 
   /**
-   * Write a comprehension over literal domains out as a literal list
+   * Write a comprehension over literal domains, and a `Map` over a list whose
+   * width is known at compile time, out as a literal list
    * (`UnrollOptions.unrollComprehensions`). The shader targets set it: they
-   * have no loop lowering for a comprehension, and a small one is a
-   * fixed-size array literal there. Absent means the pass keeps it.
+   * have no loop lowering for a comprehension or a `Map`, and a small one is
+   * a `vecN` or a fixed-size array literal there. Absent means the pass
+   * keeps them.
    */
   unrollComprehensions?: boolean;
 
@@ -1303,7 +1305,11 @@ export interface CompileTarget<Expr = unknown> {
    * throw as ``Unknown operator `g` ``. Populated by `BaseCompiler.compileBlock`
    * on the target it compiles its statements under; an inner block's entry
    * shadows an outer one's, and a local whose value is NOT a function literal
-   * REMOVES the entry it shadows.
+   * REMOVES the entry it shadows. A top-level `Assign` of a function literal
+   * (`Declare(g, "function")` then `Assign(g, Function(…))`) adds the entry
+   * the same way. For a name whose value can change while the block runs, the
+   * entry is one of its literals, and {@link reboundFunctions} lists the
+   * name.
    *
    * Only set for targets that lower a `Declare` as a value binding — i.e.
    * those with no `declare` hook (the JavaScript family). Python and the GPU
@@ -1332,6 +1338,28 @@ export interface CompileTarget<Expr = unknown> {
    * exactly as the interpreter does.
    */
   lexicalFunctions?: ReadonlyMap<string, Expr>;
+
+  /**
+   * The function-valued block locals of {@link localFunctions} and
+   * {@link lexicalFunctions} whose value can CHANGE while the block runs: a
+   * name assigned more than once at the top level of its statement list, or
+   * assigned inside a nested statement (a loop body, a branch, a function
+   * body). In `k := f1; for … { k(1); k := f2 }` the call runs with `f1`
+   * first and with `f2` after, so no one literal is its value.
+   *
+   * A call of such a name is compiled as a call of the run-time binding,
+   * which reads the same value the interpreter reads at that point. It never
+   * folds or inlines the literal in the scope maps; that literal only gives
+   * the signature (arity, broadcast, complex arguments), which all the
+   * literals of the name share. When they do not share one, or the name is
+   * also assigned a value that is not a function literal, the entry holds
+   * the reason the call declines (`decline`).
+   *
+   * Set by `BaseCompiler.compileBlock` and the loop-body statement list
+   * (`BaseCompiler.reboundLocalNames`), on the same targets as
+   * {@link localFunctions}.
+   */
+  reboundFunctions?: ReadonlyMap<string, { readonly decline?: string }>;
 
   /**
    * The identifier this target binds its VARS OBJECT to, when it reads free
@@ -1374,7 +1402,9 @@ export interface CompileTarget<Expr = unknown> {
    * callee. The interval target is one: it validates a call's arity against
    * the literal's parameter list, and a callee it cannot see has none — the
    * interpreter curries an under-applied call and throws on an over-applied
-   * one, neither of which a plain call expresses, so it fails closed.
+   * one, neither of which a plain call expresses, so it fails closed. The
+   * shader targets are others: a shader has no function values, so they
+   * substitute the arguments into the literal's body.
    *
    * The reference analysis reads this so that it reports `Apply` as
    * unsupported instead of walking into a callee the target never compiles.

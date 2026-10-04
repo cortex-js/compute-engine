@@ -940,11 +940,23 @@ function makeParseHandler(
     //
     if (/[_^]/.test(latexTrigger?.[0] ?? '')) {
       const h = entry.name ?? entry.parse;
-      return (_parser: Parser, arg: MathJsonExpression) => [
-        h,
-        missingIfEmpty(operand(arg, 1)),
-        missingIfEmpty(operand(arg, 2)),
-      ];
+      // `parseSupsub()` calls this handler with a `Superscript` (for `^`)
+      // or a `Subscript` (for `_`) that holds the base and the script. The
+      // generic infix step of the parser can also call it, with the left
+      // operand alone, when a script follows an operand that
+      // `parseSupsub()` did not read: in `g=^Δ`, the `^` after the
+      // equation `g = (missing)`. The operands of that left operand are not
+      // a base and a script: reading them as such gave `g^{(missing)}·Δ`
+      // and dropped the `=`. Decline, so that the `^` is not read here.
+      const wrapper = latexTrigger![0] === '^' ? 'Superscript' : 'Subscript';
+      return (_parser: Parser, arg: MathJsonExpression) => {
+        if (operator(arg) !== wrapper) return null;
+        return [
+          h,
+          missingIfEmpty(operand(arg, 1)),
+          missingIfEmpty(operand(arg, 2)),
+        ];
+      };
     }
     const h = entry.parse ?? entry.name ?? idTrigger;
     if (h) {

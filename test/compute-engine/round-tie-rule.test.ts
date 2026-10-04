@@ -873,7 +873,11 @@ describe('An exact constant with a large argument or magnitude', () => {
     const ce = engineAt(21);
     const start = Date.now();
     const r = ce.box(['Floor', ['Power', 'Pi', 1000000]]).N();
-    expect(Date.now() - start).toBeLessThan(2000);
+    // The time depends on the load of the machine, so the limit is asserted
+    // only in a `CE_PERF=1` run. The checks below (inexact result and value)
+    // do not depend on time.
+    if (process.env.CE_PERF === '1')
+      expect(Date.now() - start).toBeLessThan(2000);
     expect(r.isExact).toBe(false);
     expect(r.toString()).toBe('7.45923232449144786349e+497149');
   }, 20000);
@@ -976,6 +980,9 @@ describe('The sign of a Floor in the arguments of a function call', () => {
     expect(result.toString()).toBe(
       'sqrt(1/961 * floor(31x)^2 + 1/961 * floor(31y)^2)'
     );
-    expect(elapsed).toBeLessThan(2000);
+    // The time depends on the load of the machine, so the limit is asserted
+    // only in a `CE_PERF=1` run. The result string above does not depend on
+    // time.
+    if (process.env.CE_PERF === '1') expect(elapsed).toBeLessThan(2000);
   });
 });

@@ -332,8 +332,8 @@ describe("Mill's formula https://en.wikipedia.org/wiki/Mills%27_constant", () =>
         "Floor",
         ["Power", ["Rational", 3540326840, 2710032743], ["Power", 3, "n"]]
       ]
-      eval-auto = floor(3540326840/2710032743^(3^n))
-      eval-mach = floor(3540326840/2710032743^(3^n))
+      eval-auto = floor((3540326840/2710032743)^(3^n))
+      eval-mach = floor((3540326840/2710032743)^(3^n))
       N-auto    = floor(1.30637788386308069046^(3^n))
       N-mach    = floor(1.3063778838630806^(3^n))
     `)));

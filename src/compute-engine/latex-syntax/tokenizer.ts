@@ -19,9 +19,23 @@ const UNICODE_SUPERSCRIPT_MAP: Record<string, string> = {
   '\u2078': '8', // ⁸
   '\u2079': '9', // ⁹
   '\u207B': '-', // ⁻
+  '\u207A': '+', // ⁺
+  '\u207D': '(', // ⁽
+  '\u207E': ')', // ⁾
   '\u2071': 'i', // ⁱ
   '\u207F': 'n', // ⁿ
+  // Modifier letters that plain text uses as superscript letters: `e⁻ˣ`
+  // is `e^{-x}`. Without them, `⁻` alone was read as `e^{-}` (the postfix
+  // `Superminus`) and `ˣ` as a string.
+  '\u02E3': 'x', // ˣ
+  '\u02B8': 'y', // ʸ
 };
+
+/** Matches a run of the characters of `UNICODE_SUPERSCRIPT_MAP` */
+const UNICODE_SUPERSCRIPT_RUN = new RegExp(
+  `[${Object.keys(UNICODE_SUPERSCRIPT_MAP).join('')}]+`,
+  'g'
+);
 
 const UNICODE_SUBSCRIPT_MAP: Record<string, string> = {
   '\u2080': '0', // ₀
@@ -120,8 +134,8 @@ class Tokenizer {
     s = s.replace(/\u2212/g, '-');
 
     // Replace Unicode superscript sequences with ^{...}
-    // Handles: ⁰¹²³⁴⁵⁶⁷⁸⁹⁻ⁱⁿ
-    s = s.replace(/[⁰¹²³⁴⁵⁶⁷⁸⁹⁻ⁱⁿ]+/g, (m) => {
+    // Handles: ⁰¹²³⁴⁵⁶⁷⁸⁹⁻⁺⁽⁾ⁱⁿˣʸ
+    s = s.replace(UNICODE_SUPERSCRIPT_RUN, (m) => {
       const digits = Array.from(m)
         .map((c) => UNICODE_SUPERSCRIPT_MAP[c])
         .join('');

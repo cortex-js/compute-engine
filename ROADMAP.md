@@ -109,6 +109,235 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
+### A spacing command inside a KroneckerDelta subscript becomes an index (OPEN, small — found 2026-10-04 by the δ-group change)
+
+`\delta_{n\,m}` parses to `KroneckerDelta(n, HorizontalSpacing(3), m)` in
+both grammars: the thin space is read as a third index. A spacing command
+(`\,`, `\;`, `\quad`, `~`) between indices must be skipped as white space,
+so this reads `KroneckerDelta(n, m)`. The KroneckerDelta parser is in
+`latex-syntax/dictionary/definitions-logic.ts`.
+
+### `Solve` of a periodic equation could return the exact family instead of the principal set (OPEN, design — found 2026-10-04 by the review of the `Solve` completeness rule)
+
+Since 2026-10-04, a `Solve` list holds all the solutions in the domain, with
+one exception: with no domain, or over ℝ or ℂ, a trigonometric equation gives
+its principal set (`Solve(sin x = 1/2, x)` is `[π/6, 5π/6]`), and the
+documentation says that every solution is one of these plus a multiple of the
+period. A cleaner result is the family itself, with an integer parameter, as
+the integer (diophantine) solver already returns (`n = 4t − 7` for all
+integers `t`): `sin x = 1/2` → `[π/6 + 2πt, 5π/6 + 2πt]`. This removes the
+only case where a `Solve` list is not every solution. It changes the result
+shape for every trigonometric equation without a domain, so it needs a
+decision on the parameter naming (the diophantine solver uses `t`, `t_1`, …)
+and a measurement of the snapshots it changes.
+
+### `Solve` over a bounded domain stays unevaluated in some cases that have a complete answer (OPEN, small — found 2026-10-04 by the completeness scan)
+
+Since 2026-10-04, a `Solve` over a bounded domain returns a list only when it
+is shown to be complete (`rootListIsComplete()` in
+`boxed-expression/solve-domain.ts`); otherwise it stays unevaluated (user
+decision). These cases stay unevaluated although a complete answer exists:
+- Far from 0, `rootSetDivisor()` compares `f(x)` with `f(x + T/n)` to a
+  relative 1e-9, which fails near `10^8`, so `sin(13x)·cos(x) = 0` over
+  `[10^8, 10^8 + 7]` stays unevaluated. Sampling near 0 instead of near the
+  lower bound would fix it. (`sin(13x) = 0` over `[10^8, 10^8 + 1]` now has
+  its answer: the root finder gives both principal roots `0` and `π/13`.)
+- Near `10^12`, one ulp moves `sin` by about 1e-4, more than the scan's
+  `1e-6·scale` threshold, so the scan declines (0.147.0 gave a correct list
+  there).
+- `checkNonPeriodicRoots()` returns no answer when the solver finds no root,
+  so an equation that is not periodic never gets a certified `[]`.
+- An equation with the unknown in a function that the root finder cannot
+  invert (`hasNonInvertibleHead()`) gets no answer over a bounded interval,
+  also when the function has no root: `sin(x)·(BesselJ(0, 50x) + 2) = 0`
+  over `[0.5, 3]` was `[]` and now stays unevaluated. A bound on how fast
+  such a function can oscillate would let the scan check it.
+- Over a domain that is not bounded and is not ℝ or ℂ, a periodic equation
+  gets no answer, also when its roots are finite in number:
+  `x·sin(x) = 0` over `ℤ` (only `0`) and `sin(x) = 0` over `ℤ` were `[0]`
+  and now stay unevaluated. A proof that the periods have no common
+  multiple with the integers would give the answer.
+- `sin(x) = 1 - 10^-18` over `[0, 3]` or over ℝ: with the unknown
+  declared `real` (`symbolicRoots()`), `findUnivariateRoots()` gives no
+  root, so the `Solve` stays unevaluated. Without a domain, it gives both
+  roots `π/2 ± 1.4·10^-9`. The same occurs for `1 - c·10^-17` with
+  `c ≤ 8`.
+- When a factor of a product is not solved (`stats.partial`), the scan
+  accepts the list only when each root it finds is a change of sign of `f`
+  located to `10^-9·max(1, |x|)` and matches exactly one listed value
+  (`strict` in `rootListIsComplete()`). Thus a root at an end of the domain
+  (`sin(x)·(x + e^x + 5) = 0` over `[0, 4]`, root `0` at the lower bound),
+  and a root where `f` touches zero, give no answer. The scan also cannot
+  tell three roots in one cell of the scan from one root.
+
+### `Solve` gives only some of the complex roots of a polynomial (OPEN, high — found 2026-10-04 while the solver documentation was written)
+
+With no domain, `x^2 + 1 = 0` gives `[i, -i]`, so the complex roots are part
+of the answer. But a polynomial of degree 3 or more gives only some of them:
+- `x^5 + x + 1 = 0` gives `[-0.7548776662466927]`, also with
+  `x ∈ ComplexNumbers`. It is `(x² + x + 1)(x³ − x² + 1)`: four more complex
+  roots, two of them exact (`(-1 ± i√3)/2`).
+- `x^3 = 8` gives `[2]` (the pure-power template); `-1 ± i√3` are missing.
+- `x^4 + 1 = 0` gives two of its four complex roots, `±(√2/2 + i√2/2)`;
+  `±(√2/2 − i√2/2)` are missing.
+Over ℂ and with no domain, every root must be in the list (exact for a
+factor that has a closed form, numeric with `durandKernerRoots()` in
+`numerics/polynomial-roots.ts` otherwise), or `Solve` must stay
+unevaluated. Over ℝ, and for an unknown declared `real`, the real roots
+only (`filterRootsByType()` already removes the complex roots). A pure power
+`x^n = c` needs the `n` roots `c^(1/n)·e^(2πik/n)` (with the half turn of the
+angular unit). Tests: degrees 3 to 7, with a numeric residual check of every
+root.
+
+### `Solve` gives floats for a polynomial whose roots are exact (OPEN, medium — found 2026-10-04 while the solver documentation was written)
+
+`x^3 − 2x + 1 = 0` gives `[1, −1.618…, 0.618…]`, but the roots are `1` and
+`(−1 ± √5)/2`. `solvePolynomialByCoefficients()` in
+`boxed-expression/solve.ts` finds the rational roots, then gives the other
+roots with the numeric Durand–Kerner method. It must divide the polynomial
+by `(x − r)` for each rational root `r` (with its multiplicity), and solve
+the quotient exactly when it has degree 1 or 2, or is a pure power or a
+polynomial in `x^g`. Only a factor with no closed form that the engine can
+find gives floats, and the CHANGELOG must say which case that is.
+
+### `Solve` gives a periodic product the principal roots of each factor (OPEN, question — found 2026-10-04)
+
+Over ℝ or with no domain, `sin(2x)·cos(3x) = 0` gives the union of the
+principal roots of each factor: `[0, π/2, π/6, −π/6]`. Each root stands for
+its family with the period of its own factor (π and 2π/3). With the period of
+the product (2π), the translates of this list do not give every root (`π` is
+a root). Decide whether the principal roots of a product are per factor (the
+current result, which the documentation must then say) or per period of the
+whole equation.
+
+### `sin(sin(x)) = 0` has no answer (OPEN, small — found 2026-10-04)
+
+Since 2026-10-04, a trig function whose argument is not linear in the unknown
+gives no answer (`hasNonInvertibleHead()` in
+`boxed-expression/solve-domain.ts`), because the equation is not periodic in
+the unknown. `sin(sin(x)) = 0` is periodic (its argument is periodic), and
+its roots are `0` and `π` plus multiples of `2π`: it was `[0, π]`. A test for
+an argument that is itself a periodic function of a linear argument would
+give this answer again.
+
+### White space before `_` stops a dictionary trigger when the subscript comes first (OPEN, small — found 2026-10-04 by the script-order review fixes)
+
+In both grammars, a dictionary entry whose trigger is a base with a
+subscript does not match when a white space token comes before the `_`:
+`\mathbb{R} _{>0}^2` is `Subscript(RealNumbers, Error)^2` and `\mathbb{N} _0`
+is `Subscript(NonNegativeIntegers, 0)`, while `\mathbb{R}_{>0}^2` is
+`PositiveNumbers^2` and `\mathbb{N}_0` is `NonNegativeIntegers`. LaTeX ignores
+the space, so the readings must be the same. The superscript-first order
+already matches across the space (`\mathbb{R}^2 _{>0}` is
+`PositiveNumbers^2`, in `parseSupsub()`), so the two orders now differ for
+this input. The tokenizer drops the space after a command, so `\R _-` and
+`\mu _0` are not affected; a base that ends with `}` is. A fix makes the
+trigger matcher of the dictionary skip a white space token before `_`.
+
+### A Greek name inside a run of letters after a one-letter argument is read one letter at a time (OPEN, small — found 2026-10-04 by the script-order review fixes)
+
+In the lenient grammar, `e^xalphax_1` is `e^x·a·l·p·h·a·x_1`, while
+`xalphax_1` is `x·alpha·x_1`. After an argument of one letter without braces
+(an exponent, a radicand), `parseToken()` in `latex-syntax/parse.ts` marks a
+word boundary only when the letters after the argument are exactly one Greek
+name (`e^xalpha_1` is `e^x·alpha_1`) or one function name (`e^xsin(t)` is
+`e^x·sin(t)`). The run `alphax` is neither, and `tryParseBareRun()` does not
+split a run that starts after a letter. A fix lets `tryParseBareRun()`
+segment the run at that boundary, with care for the words that start at the
+argument (`\sqrt beta` must stay `\sqrt{b}·e·t·a`, and `x^foo` must stay
+`x^f·o·o`).
+
+### A `_` with nothing after it drops the symbol before it (OPEN, small — found 2026-10-04 by the letter-run fix)
+
+In the lenient grammar, a symbol followed by white space and a `_` at the
+end of the input is lost: `x _`, `x_2 _` and `t2 _` parse to
+`Error('missing', ' _')` alone, and `xy2 _` to `x·Error(…)`. The `x` or
+`x_2` operand is not in the result: the error for the missing subscript
+replaces the base instead of being kept with it. `parseSupsub()` in
+`latex-syntax/parse.ts` is the place to look: a fix keeps the base and
+gives the error as its subscript.
+
+### Lenient grammar: `x^-2_01` reports a false `ambiguous-number-notation` (OPEN, small — found 2026-10-04 by the script-order fix)
+
+`x^-2_01` reads correctly as `x_01^{-2}`, but the line check
+(`reportNumberNotation()` in `latex-syntax/lenient-ambiguity.ts`) reports
+`2_01` as a digit group, while `x^2_01` reports nothing. The check does not
+see that the digits after `^-` are an exponent of a base that has a
+subscript. A fix skips a digit run that is the exponent of a scripted base.
+
+### Raw form of a subscript on a collection depends on the order of the scripts (OPEN, small — found 2026-10-04 by the script-order fix)
+
+With `B` a list, `B^2_{2}` parses in raw form to `Power(Subscript(B, 2), 2)`,
+but `B_{2}^2` to `Power(At(B, 2), 2)`. The canonical forms are the same. A host
+that reads the raw form (Tycho uses `form: "raw"`) sees two structures for one
+input. A fix makes `parseSupsub()` build the same raw node as the
+subscript-first route.
+
+### Results built with the library π change value on a JSON round trip when the user shadows `Pi` (OPEN, medium — found 2026-10-04 by the audit of the `Pi` sites)
+
+A user can declare `Pi` with another value (`ce.declare('Pi', { value: 3 })`;
+`ce.assign('Pi', 3)` is refused). A result built with `ce.Pi` holds a symbol
+bound to the library constant, so its `.N()` is right in the same expression,
+but its MathJSON is the name `"Pi"`, which boxes again with the user value.
+On 2026-10-04, `evaluate()` was made to stay symbolic at the sites in
+`boxed-expression/trigonometry.ts`, `library/trigonometry.ts`,
+`library/complex.ts` and `boxed-expression/arithmetic-power.ts` when `Pi` is
+shadowed. These sites still build results with the library π: `K(0) = π/2` in
+`library/special-functions.ts` (near lines 449 and 524), the angle chain factor
+in `measurement-arithmetic.ts` (near lines 427–431, also used by the `Arctan2`
+derivative in a non-radian unit), `angleToRadians` in
+`boxed-expression/utils.ts` (near lines 747–749), the closed forms of sums in
+`library/utils.ts` (near lines 1101–1276), `library/arithmetic.ts` (near lines
+3889, 3898, 5661), `library/distributions.ts` (near line 1014) and
+`library/number-theory.ts` (near lines 2252, 2512). A general fix is a
+serializer rule: a symbol bound to a library constant that the current scope
+shadows serializes to a spelling that cannot be shadowed (or the result stays
+symbolic at each site, as done for the trigonometric sites).
+
+### interval-js declines an index into the tuple that a block-local function returns (OPEN, small — found 2026-10-04 by the collection-valued function bodies)
+
+On the interval target, a block-local function whose body returns a tuple or
+a list now compiles to an array of enclosures, and so does a `Block` whose
+value is a tuple (`compileCollectionValueBlock`,
+`compilation/base-compiler.ts`). But `At(f(x), 1)` over such a local `f`
+declines with "first operand is not an indexed collection", while the
+interpreter gives the component (4 for `f := (u) ↦ (u+1, 2)` at `x = 3`). The
+`At` lowering of the interval target reads the static type of its first
+operand, and a call of a local declared `function` is typed `any`. A fix lets
+`At` accept an operand that the target recorded as spelled as a collection
+value (the same record that makes `f(x) + 1` decline with a reason), and reads
+the enclosure at the index.
+
+### Diagnostic spans after a Unicode superscript are shifted (OPEN, small — found 2026-10-04 by the review of the lenient ambiguity codes)
+
+In the lenient grammar, the span of an `ambiguous-*` diagnostic is wrong when
+the input has a Unicode superscript before it: `x²! + 1` reports the span
+`x²! + ` for `ambiguous-factorial`, not `x²!`. The tokenizer expands `²` to
+`^{2}` before parsing, so the token offsets no longer match the source text,
+and `sourceOffsets()` (`latex-syntax/`) is documented as exact only for input
+that serializes back to itself. The code and the reading are right; only the
+span that a host shows to the user is off. A fix keeps a map from expanded
+tokens to source offsets when the tokenizer expands a Unicode character.
+
+### The type of a call can be out of date after its function is reassigned (OPEN, design decision — found 2026-10-04 by the review of boxing-time refusal)
+
+A call of a user function is checked against the function's parameters when
+it is boxed. Since 2026-10-04, a call that was REFUSED at boxing is checked
+again at evaluation and when its type is read, so it follows a later
+reassignment of the function (`_refusedOps` and `_recheckedCall()` in
+`boxed-expression/boxed-function.ts`; the rule is in `docs/ERROR-MODEL.md`).
+The opposite direction is not covered: a call that was ACCEPTED at boxing,
+whose function is then replaced by one that refuses the operand, evaluates to
+the correct error, but its `.type` keeps the type of the old function.
+Example: `g := (u: string) ↦ 1`, box `g("abc")` (type `integer`), then
+`g := (u: real) ↦ 7`: the call evaluates to an `incompatible-type` error and is
+still typed `integer`. The same holds on the operator-definition route
+(`h := (u) ↦ 1`, then `h := (u: real) ↦ 7`). A fix checks every user-function
+call again when its type is read after the function's definition changed (a
+version stamp on the definition makes this cheap for calls whose function did
+not change), or re-canonicalizes the calls that depend on a function when it
+is reassigned.
+
 ### Contour integration does not certify the complex roots of most polynomials of degree 3 or more (OPEN, small — found 2026-10-04 by the review of PR #410)
 
 `ce.contourIntegrate()` needs every root of a denominator in exact form. For
@@ -141,6 +370,103 @@ give no answer, and `.N()` is `NaN`. A pole of odd order on the path makes the
 integral have no value whatever the behavior at infinity, so the pole
 classification (`realPathDivergence()` in `symbolic/contour-integrate.ts`)
 could also run when the decay test fails.
+
+### Symbolic integration and `DSolve` have no default budget (OPEN, design decision — found 2026-10-03 by the `x^x` hang in integration by parts)
+
+A plain `evaluate()` of `Integrate` or `DSolve` has no deadline unless the
+caller opens one with `ce.withTimeLimit(...)`, and the built-in antiderivative
+(`symbolic/antiderivative.ts`) and `DSolve` count no steps (only the Rubi
+driver and the compiler have a step budget). The only bound that is always on
+is the cap of 8 nested integration-by-parts frames, which does not bound the
+total work. One cause of runaway work was fixed on 2026-10-03: integration by
+parts chose `u = x^x`, whose derivative contains `x^x` again, and it accepted a
+result that still held an `Integrate`, so `∫ e^x x^x dx` overflowed the stack
+and `y'' + y = x^x` ran for more than 300 s. Other integrands that make no
+progress can still run for a long time. A fix gives the built-in antiderivative
+(and the variation-of-parameters step of `DSolve`) a step budget like
+`RUBI_STEP_BUDGET` in `rubi/driver.ts`, so that the result does not depend on
+the machine, and decides what an exhausted budget returns (the unevaluated
+`Integrate`, as Rubi does).
+
+### `simplify()` does not fully simplify the terms of a quotient's numerator (OPEN, small — found 2026-10-03 by the odd and even function rules)
+
+Inside a sum or a product, `simplify()` fully simplifies a term only when the
+term is a sum, a product, `Ln`, `Abs` or a fractional power, or contains a
+circular trigonometric function (`boxed-expression/simplify.ts`); the rule for
+odd and even functions of a negated argument was added to that list on
+2026-10-03. The numerator of a quotient gets only numeric folding, so
+`(Si(1) − Si(−1))/2` stays as it is, while `Si(1) − Si(−1)` simplifies to
+`2Si(1)`. The same holds for trigonometric terms. A fix simplifies the
+numerator and the denominator of a `Divide` like the operands of a sum, with
+the same guards against runaway rewriting.
+
+### A quotient has two canonical forms: `x·(1/y)` and `x/y` (OPEN, medium — measured 2026-10-03; user decision: not now)
+
+`ce.box(['Multiply', 'x', ['Divide', 1, 'y']])` stays `Multiply(x, Divide(1, y))`,
+and `.isSame(ce.box(['Divide', 'x', 'y']))` is `false`. Parsing
+`x\times(y^2+z^2)^{-1}` gives the same product form, because
+`canonicalPower` turns `Power(D, -1)` into `Divide(1, D)` and
+`canonicalMultiply()` (`boxed-expression/arithmetic-mul-div.ts`) never merges a
+`Divide` factor with the other factors. `evaluate()` and `simplify()` give
+`Divide(x, y)` for both, so only `isSame`, hashing and pattern matching see two
+forms. A fold in `canonicalMultiply()` that returns
+`canonicalDivide(numerators, denominators)` for a product of scalars with a
+`Divide` factor was measured on the full suite. It must not land until these
+are fixed first:
+
+1. `expandProduct()` (called by `mul()` through `expandProducts()`) has
+   branches for `Divide` operands that distribute into a sum numerator and
+   call `.mul()`/`.div()` recursively. With the fold, product-rule terms
+   become `Divide` nodes and the derivative of a nested radical takes
+   exponential time (depth 12: 670 ms → 2,760 ms; `derivatives.test.ts` and
+   both `compile-derivative-numeric-fallback` test files did not finish).
+2. A factor `Power(y, -n)` with `n ≠ 1` must go to the denominator too, or
+   `x·y^{-2}` and `x/y^2` stay two forms (and `Divide(2,x)·x^{-2}` prints as a
+   nested fraction).
+3. `.N()` must give floats for the literals of a quotient it builds:
+   `(1/3)·(1/x)` stayed the exact `1/(3x)` with the fold.
+4. Three integrals stayed unevaluated with the fold (`\int_{-1}^1 a\frac{\sin
+   t}{t}dt`, `\int\frac{\mathrm{arcsinh}(x)}{x}dx` and the Rubi case `#544`),
+   because a constant factor ended up inside a numerator. The integrator now
+   splits constant numerator factors (fixed 2026-10-03), so re-measure this.
+
+After these, about 7 snapshots and 3 assertions change, all to a single
+quotient form. The measured patch was `/tmp/recipfold.patch` (one file,
+`arithmetic-mul-div.ts`); it is not kept in the repository.
+
+### The Python target does not compile a block-local function (OPEN, small — found 2026-10-03 by the compilation of reassigned block-local functions)
+
+A `Block` that binds a function literal to a local name and calls it compiles
+on the JavaScript target (`let k = (u) => 2 * u; return k(_.x)`) and on the
+interval target, but the Python target declines every form of it: the
+`const`/`let` form, `Declare` + `Assign`, and a name assigned again. It gives
+no wrong value, but the messages do not say why: "Unknown operator `k`", "If:
+wrong number of arguments", or the list-arithmetic decline. Python has local
+function values (`k = lambda u: 2 * u`), so the JavaScript lowering of
+block-local functions (`noteLocalFunction`, `tryCompileLocalFunctionCall` and
+`reboundLocalNames` in `compilation/base-compiler.ts`) can be given a Python
+spelling. Until then, the decline must name the cause. Tests to mirror:
+`test/compute-engine/compile-block-local-function.test.ts`.
+
+### Nested `D` costs about 1.5 times more when its variables were declared before (OPEN, small — found 2026-10-03 by the fix of the index form of a partial derivative)
+
+`D(D(D(D(D(D(Arctan2(y, x), y), y), y), x), x), x)` in a new engine takes
+about 0.3 s of CPU time. If `Arctan2(y, x)` is boxed first, so that `y` and
+`x` are declared before the `D` expression is boxed, the same evaluation
+takes about 0.5 s. A chain of `differentiate()` calls
+(`symbolic/derivative.ts`) on symbols declared in an enclosing scope costs
+about 2 times as much as the nested `D`. The result is the same in all three
+cases, and the types of `x` and `y` are the same (`real | signed_infinity`).
+The slow cases compute FEWER types that are not in the cache (4,547 against
+6,203 for the nested `D`), but each costs more: a CPU profile shows about 10
+times more time in `isSubtype`, `reduceUnionType` and `deriveApplicationType`
+under `get type` (`boxed-expression/boxed-function.ts`), called from
+`sortProductOperands` (`isTensorProductOperand`) and from the product and
+sum code in `arithmetic-mul-div.ts` and `arithmetic-add.ts`. Find why the
+type of a new product or sum costs more when its symbols are declared in an
+outer scope than when a `D` declares them, and remove the difference. The
+index form `Derivative(f, k₁, …, kₙ)` avoids it: it evaluates the nested `D`
+over symbols that no outer scope declares (`library/calculus.ts`).
 
 ### Quadrature loops run 25 to 70 times slower under jest than under `tsx` (OPEN, small — found 2026-10-01 by the closing fixes of the integration round)
 
@@ -228,9 +554,53 @@ cases remain (measured 2026-10-01):
   quadrature of a semi-infinite interval (`integrateSemiInfiniteOscillatory`,
   `numerics/oscillatory-quadrature.ts`), which `integrateRealPart` and
   `_SYS.integrate` run first. It integrates up to 2000 lobes, each by
-  adaptive Simpson to a depth of 24, after a scan of up to 200 000 steps for
-  each zero, so its worst case is far above the price. A typical run takes
-  about 1e4 evaluations (∫₀^∞ sin x/√x dx: 14 000).
+  adaptive Gauss–Kronrod with up to 256 panels (`LOBE_PANELS`), after a scan
+  of up to 200 000 steps for each zero, and when no value is found it runs
+  the adaptive quadrature over the whole interval, so its worst case is far
+  above the price. A typical run takes about 3e3 evaluations
+  (∫₀^∞ sin x/√x dx: 3000).
+
+### An oscillatory integral with two frequencies whose ratio is not rational is `NaN` (OPEN, small — found 2026-10-03 by the fix for issue #405)
+
+`∫₀^∞ sin t·cos(√2·t)/t dt = 0` and `∫₀^∞ sin t·cos(√3·t)/√t dt` are `NaN`
+(`integrateSemiInfiniteOscillatory`, `numerics/oscillatory-quadrature.ts`).
+The lobes of such an integrand have no period, so their sums are not
+accelerated by the ε-algorithm (the values move irregularly) or by the Levin
+u-transform of the sums of one period of lobes (there is no period). After
+2000 lobes, the routine returns `NaN` rather than a value with an error that
+is too small; before the fix, Monte Carlo gave `0.072 ± 0.018` for the first
+integral. A method that does not depend on the lobes is necessary: for
+example, write the integral as `∫ₐ^X f + ∫_X^∞ f` and find the tail from an
+asymptotic expansion of `f`, or accelerate the partial integrals `∫ₐ^X f` as
+a function of `X` (Sidi's mW transformation with a period of each
+frequency). `(sin t + sin(√2·t))/t` has a value after 2000 lobes, with an
+error of `6.8e-6`.
+
+### An oscillatory integral from a lower bound far from 0 whose lobes repeat a pattern is `NaN` (OPEN, small — found 2026-10-04 by the review fixes for issue #405)
+
+From 0, `∫ sin t·cos 3t/t dt`, `∫ sin t·(2 + cos t)/t dt` and
+`∫ (sin t + sin 2t)/t dt` have a value. From `a = 100`, `1000` or `10⁴` they
+are `NaN` (`integrateSemiInfiniteOscillatory`,
+`numerics/oscillatory-quadrature.ts`). The sums of their lobes converge as
+`1/k`, so the ε-algorithm does not find the integral, and they need the Levin
+u-transform of the block sums (`blockLevin`). Far from 0, the block sums
+decrease slowly in the index `j` of the block (as `(a/W + j)^(−2)`, with `W`
+the width of a block), the estimate of the exponent of the decrease is less
+than `LEVIN_MIN_BLOCK_DECAY`, and no Levin value is returned. A Levin
+u-transform with the index shifted by `a/W` was tried: for
+`sin t·(2 + cos t)/t` from `10⁴` its value was `1.8e-4` from the integral,
+with a range of its values of only `7e-8`, so it was not kept. Possible
+methods: write the integral as the sum of the integrals of each frequency
+when the integrand is a known product of sines and cosines; or accelerate
+the partial integrals as a function of the upper bound (Sidi's mW
+transformation). `∫ₐ^∞ sin(t/2)·cos 2t/t dt` has a value from these bounds,
+because its ε values converge.
+
+User decision (2026-10-04): until a method gives a value, the result stays
+`NaN`. Do not let these integrals fall back to Monte Carlo. Before the fix for
+#405, Monte Carlo gave `-0.033 ± 0.027` for `∫_{100}^∞ sin t·cos 3t/t dt`
+(true value `-0.0019`) and `0.072 ± 0.018` for `∫₀^∞ sin t·cos(√2·t)/t dt`
+(true value 0, four times the error away).
 
 ### A pole at a number is missed when the integrand is not real on one side of it (OPEN, small — found 2026-10-01 by the review of the pole proofs; present before)
 

@@ -75,13 +75,16 @@ export function solveSystem(
         declined = true;
         break;
       }
-      if (res === 'none') return null; // a congruence with no solution
+      // A congruence with no solution: the system has no solution. The
+      // answer is an empty list, not `null`, which states that the solver
+      // cannot solve the system.
+      if (res === 'none') return [];
       residues.push(res.r);
       moduli.push(res.m);
     }
     if (!declined) {
       const combined = chineseRemainder(residues, moduli);
-      if (combined === null) return null; // inconsistent system
+      if (combined === null) return []; // inconsistent system: no solution
       let M = 1n;
       for (const mm of moduli) M = lcm(M, mm);
       const container = ce.function('List', [...equations]);
@@ -253,7 +256,11 @@ export function solveOr(
     const results: Expression[] = [];
     for (const op of operands) {
       const sol = op.solve(varNames) as ReadonlyArray<Expression> | null;
-      if (!sol || !Array.isArray(sol)) continue;
+      // An alternative with no answer (the solver cannot solve it, or finds
+      // only a part of its roots) can have roots that are not in the other
+      // lists: the union is not an answer.
+      if (sol === null) return null;
+      if (!Array.isArray(sol)) continue;
       for (const s of sol) {
         const key = JSON.stringify(s.json);
         if (!seen.has(key)) {
@@ -262,7 +269,10 @@ export function solveOr(
         }
       }
     }
-    return results.length > 0 ? results : null;
+    // Each alternative gave all its roots (`op.solve()` returns `null`
+    // otherwise, see `emptyRootsAnswer()`), thus the union is the answer,
+    // also when it is empty: `e^x = -1 ∨ e^x = -2` has no root.
+    return results;
   }
 
   // Multivariate: collect Record solutions, deduplicate

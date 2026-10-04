@@ -505,7 +505,7 @@ describe('Series — Laurent expansions at poles (§6)', () => {
     // the principal-part structure plus numeric equivalence.)
     const s = normal('\\tan x', '\\frac{\\pi}{2}', 1);
     expect(s.latex).toBe(
-      '\\frac{1}{3}(x-\\frac{\\pi}{2})-(x-\\frac{\\pi}{2})^{-1}'
+      '\\frac{1}{3}(x-\\frac{\\pi}{2})-\\frac{1}{x-\\frac{\\pi}{2}}'
     );
     const p = normal('\\tan x', '\\frac{\\pi}{2}', 3);
     expectNumericNearPole(

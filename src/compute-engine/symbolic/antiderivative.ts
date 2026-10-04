@@ -146,6 +146,12 @@ function tryIntegrationByParts(
     // Compute du = derivative of u
     const du = differentiate(u, index);
     if (!du) return null;
+    // If each term of du has u as a factor (u = xˣ gives du = xˣ + ln(x)·xˣ,
+    // u = 2ˣ gives du = ln(2)·2ˣ), then differentiation does not remove u:
+    // the integral ∫ v·du that is left has u in it again, and it is not
+    // simpler than ∫ u·dv. Integration by parts then only recurses until the
+    // frame cap, with a full rule search at each level.
+    if (eachTermHasFactor(du, u)) return null;
 
     // Compute v = antiderivative of dv
     // Use a simple check to avoid infinite recursion
@@ -156,9 +162,15 @@ function tryIntegrationByParts(
     const uv = u.mul(v);
     const vdu = v.mul(du);
 
-    // Try to integrate v·du
+    // Try to integrate v·du. Reject the result if any part of it is still an
+    // unevaluated `Integrate`, not only when the result is one. A sum such
+    // as `∫ eˣ·xˣ·ln(x) dx + ∫ eˣ·xˣ dx` is not a solution, and it can hold
+    // the integral that was asked. The `simplify()` below, and the
+    // evaluation of the result by `Integrate`, then evaluate that integral
+    // again, which starts the same integration by parts. This repeated with
+    // no end: `∫ eˣ·xˣ dx` overflowed the stack.
     const integralVdu = antiderivativeWithByParts(vdu, index, depth + 1);
-    if (!integralVdu || integralVdu.operator === 'Integrate') return null;
+    if (!integralVdu || integralVdu.has('Integrate')) return null;
 
     return uv.sub(integralVdu).simplify();
   } finally {
@@ -188,6 +200,22 @@ function isNonReducingPower(u: Expression, index: string): boolean {
     Number.isInteger(exponent.re) &&
     exponent.re > 0
   );
+}
+
+/**
+ * Is `factor` a factor of `expr`, or of each term of `expr` when `expr` is a
+ * sum? A factor of the numerator of a quotient counts, and a `Negate` is
+ * looked through.
+ */
+function eachTermHasFactor(expr: Expression, factor: Expression): boolean {
+  if (expr.isSame(factor)) return true;
+  if (isFunction(expr, 'Negate')) return eachTermHasFactor(expr.op1, factor);
+  if (isFunction(expr, 'Divide')) return eachTermHasFactor(expr.op1, factor);
+  if (isFunction(expr, 'Multiply'))
+    return expr.ops.some((op) => op.isSame(factor));
+  if (isFunction(expr, 'Add'))
+    return expr.ops.every((op) => eachTermHasFactor(op, factor));
+  return false;
 }
 
 /**
@@ -2983,6 +3011,17 @@ function tryRationalizeRadicalSum(
   return F.has('Integrate') ? null : F;
 }
 
+/**
+ * The factors of a numerator: the operands of a `Multiply`, `−1` and the
+ * factors of the operand of a `Negate`, or the expression itself.
+ */
+function constantSplitFactors(expr: Expression): Expression[] {
+  if (isFunction(expr, 'Multiply')) return [...expr.ops];
+  if (isFunction(expr, 'Negate'))
+    return [expr.engine.NegativeOne, ...constantSplitFactors(expr.op1)];
+  return [expr];
+}
+
 export function antiderivative(fn: Expression, index: string): Expression {
   // Bound the symbolic-integration recursion by the engine deadline: some
   // rational/parametric integrands (e.g. a linear numerator over a fully
@@ -3183,6 +3222,42 @@ export function antiderivative(fn: Expression, index: string): Expression {
         const inner = antiderivative(fn.op1.div(newDenom), index);
         if (inner.operator !== 'Integrate')
           return inner.div(constProduct).evaluate();
+      }
+    }
+
+    // Pull the constant (index-free) factors out of the numerator:
+    // ∫ c·N/D dx = c·∫ N/D dx. This is the same split that the Multiply
+    // branch does for a product. Without it, `a·sin(t)/t` stays inert,
+    // because the Si/Ci/Ei/li cases below and many other cases look for a
+    // bare numerator, while `a·(sin(t)/t)` (a Multiply) closes. A Negate
+    // numerator gives the factor −1. A numerator that is fully constant
+    // (other than 1) is split too: `a/ln(x)` integrates as a·∫1/ln(x).
+    // If the inner integral stays unevaluated, the cases below are tried on
+    // the full quotient, as before.
+    if (fn.op2.has(index) && !fn.op1.isSame(1)) {
+      const numFactors = constantSplitFactors(fn.op1);
+      const constFactors = numFactors.filter((f) => !f.has(index));
+      if (constFactors.length > 0) {
+        const varFactors = numFactors.filter((f) => f.has(index));
+        const newNum =
+          varFactors.length === 0
+            ? ce.One
+            : varFactors.length === 1
+              ? varFactors[0]
+              : mul(...varFactors);
+        const innerFn = newNum.div(fn.op2);
+        // Recursion guard: canonicalization of the new quotient can move a
+        // constant back into the numerator (for example a sign). If this
+        // occurs, do not recurse, because the same split could repeat.
+        const reintroduced =
+          isFunction(innerFn, 'Divide') &&
+          !innerFn.op1.isSame(1) &&
+          constantSplitFactors(innerFn.op1).some((f) => !f.has(index));
+        if (!reintroduced) {
+          const inner = antiderivative(innerFn, index);
+          if (inner.operator !== 'Integrate')
+            return mul(...constFactors).mul(inner).evaluate();
+        }
       }
     }
 

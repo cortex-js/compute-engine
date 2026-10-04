@@ -195,9 +195,9 @@ describe('ANONYMOUS APPLICATION — the polytype is enforced without a declarati
     const ok = ce.box(['Apply', f.json, 5] as any).evaluate();
     expect(ok.toString()).toBe('5');
     const bad = ce.box(['Apply', f.json, { str: 'a' }] as any).evaluate();
-    // The §13-decision-6 shape: the inert application carrying the error-marked
-    // argument, exactly as an annotated literal produces.
-    expect(bad.operator).toBe('Apply');
+    // The error is the value of the application, as for a call of a named
+    // function and for an annotated literal.
+    expect(bad.operator).toBe('Error');
     expect(bad.toString()).toContain('incompatible-type');
     expect(bad.isValid).toBe(false);
   });

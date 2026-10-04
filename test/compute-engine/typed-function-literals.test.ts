@@ -209,19 +209,17 @@ describe('Annotated function literal — application (values only, no enforcemen
 describe('Phase 2 — apply-time enforcement (§6.4, §6.5)', () => {
   const typedInc = ['Function', ['Add', 'x', 1], ['Typed', 'x', "'integer'"]];
 
-  test('mistyped argument yields an inert Apply carrying incompatible-type', () => {
+  test('mistyped argument yields an incompatible-type error', () => {
     const ce = new ComputeEngine();
     const r = ce.box(['Apply', typedInc, 2.5]).evaluate();
-    // Inert application, argument replaced by an incompatible-type error marker.
-    expect(r.operator).toBe('Apply');
+    // The error is the value of the application, as for a call of a named
+    // function. The breadcrumb names the `Apply` and the position of the
+    // argument in it.
     expect(r.json).toEqual([
-      'Apply',
-      ['Function', ['Block', ['Add', 'x', 1]], ['Typed', 'x', "'integer'"]],
-      [
-        'Error',
-        ['ErrorCode', "'incompatible-type'", "'integer'", "'2.5'"],
-        2.5,
-      ],
+      'Error',
+      ['ErrorCode', "'incompatible-type'", "'integer'", "'2.5'"],
+      2.5,
+      ['ErrorTrace', ['ErrorFrame', "'Apply'", 2]],
     ]);
   });
 
@@ -314,7 +312,7 @@ describe('Phase 2 — currying preserves annotations (§6.5)', () => {
   test('a mistyped applied prefix errors during currying', () => {
     const ce = new ComputeEngine();
     const r = ce.box(['Apply', typedAdd, 2.5]).evaluate();
-    expect(r.operator).toBe('Apply');
+    expect(r.operator).toBe('Error');
     expect(JSON.stringify(r.json)).toContain('incompatible-type');
   });
 
@@ -322,7 +320,7 @@ describe('Phase 2 — currying preserves annotations (§6.5)', () => {
     const ce = new ComputeEngine();
     const curried = ce.box(['Apply', typedAdd, 10]).evaluate();
     const r = ce.box(['Apply', curried, ['String', 'hi']]).evaluate();
-    expect(r.operator).toBe('Apply');
+    expect(r.operator).toBe('Error');
     expect(JSON.stringify(r.json)).toContain('incompatible-type');
   });
 

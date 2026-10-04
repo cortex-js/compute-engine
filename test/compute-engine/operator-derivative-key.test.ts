@@ -16,6 +16,7 @@ import type {
 } from '../../src/compute-engine/global-types';
 import { isNumber } from '../../src/compute-engine/boxed-expression/type-guards';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
+import { derivative } from '../../src/compute-engine/symbolic/derivative';
 
 /** `Sq(x) = x²`, with an `evaluate` handler that answers only for numbers. */
 function declareSq(ce: ComputeEngine, withKey = true): void {
@@ -228,6 +229,29 @@ describe('derivative key: array of function literals', () => {
         .evaluate()
         .toString()
     ).toBe('4');
+  });
+
+  test('a single order on a two-argument operator is the partial in the first argument', () => {
+    // A bare `Derivative(F)` and `Derivative(F, 1)` are padded with order 0
+    // to `Derivative(F, 1, 0)`, as for a user function of two parameters
+    // (`g'(x, y)` parses to `Apply(Derivative(g, 1), x, y)`).
+    // ∂F/∂x = 2xy at (2, 3) is 12.
+    const ce = new ComputeEngine();
+    declareF(ce);
+    for (const d of [
+      ['Derivative', 'F'],
+      ['Derivative', 'F', 1],
+    ])
+      expect(ce.box(['Apply', d, 2, 3]).evaluate().toString()).toBe('12');
+  });
+
+  test('derivative() of a two-argument operator with one hole stays symbolic', () => {
+    // There is no univariate derivative of `F(x, y)`. The application
+    // `F(_)` is invalid (`F(_, Error("missing"))`), and the chain rule over
+    // it used to throw "Not canonical".
+    const ce = new ComputeEngine();
+    declareF(ce);
+    expect(derivative(ce.symbol('F'), 1)).toBeUndefined();
   });
 
   test('an array with the wrong number of entries is not used', () => {

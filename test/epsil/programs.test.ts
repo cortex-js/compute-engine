@@ -16,7 +16,11 @@ import { executeEpsil } from '../../src/epsil/execute-epsil';
 //   mapsto lambda.
 // - Collection literals (lists, tuples, sets, dictionaries) evaluate their
 //   elements; lazy operators (`Range`/`Map`/`Filter`) are generators that
-//   enumerate on demand and read program state at materialization time.
+//   enumerate on demand. They do not read the program state at the time an
+//   element is read: an assignment stores a finite lazy collection as its
+//   list of elements, and a lazy collection that leaves a block or a function
+//   call keeps the binding its function had at that exit. A function from an
+//   enclosing scope is still read by name when an element is read.
 // - `a % b` is `Mod(a, b)`; a postfix `!` is `Factorial` and must abut its
 //   operand (`n!`, but `x != y` stays NotEqual).
 //

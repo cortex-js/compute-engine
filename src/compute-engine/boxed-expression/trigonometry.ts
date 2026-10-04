@@ -22,6 +22,7 @@ import type {
 import { asLatexString } from '../latex-syntax/utils.js';
 import { parse as parseLatex } from '../latex-syntax/latex-syntax.js';
 import { isNumber, isSymbol, isFunction } from './type-guards.js';
+import { isShadowedSymbol, shadowsLibraryName } from '../library-shadowing.js';
 import { isMachineTrigPole } from '../numerics/numeric.js';
 import { gcd as bigGcd } from '../numerics/numeric-bigint.js';
 import {
@@ -285,7 +286,9 @@ function exactAngleParts(
       [BigInt(r[0]), BigInt(r[1])],
     ];
   }
-  if (isSymbol(x, 'Pi'))
+  // A user binding of the name `Pi` (`ce.declare('Pi', { value: 3 })`) is
+  // not π: it is read through to its value below, as any other symbol.
+  if (isSymbol(x, 'Pi') && !isShadowedSymbol(x))
     return [
       [1n, 1n],
       [0n, 1n],
@@ -1511,6 +1514,50 @@ function constructibleValuesInverse(
   x: Expression | undefined,
   specialValues: ConstructibleTrigValues
 ): undefined | Expression {
+  const turns = inverseSpecialHalfTurns(ce, operator, x, specialValues);
+  if (turns === undefined) return undefined;
+  // The angle is (n/d)·halfTurn, expressed exactly in the engine's angular
+  // unit (π rad, 180 deg, …) so evaluate() agrees with the unit-converted
+  // numeric path (e.g. deg mode: arcsin(1) → exact 90).
+  const [n, d] = turns;
+  // An angle of 0 is 0 in every unit. It is not built as `0·π`: with a user
+  // value of `Pi`, that product does not fold to 0.
+  if (n === 0) return ce.Zero;
+  const half = halfTurnAngle(ce);
+  if (isSymbol(half, 'Pi') && isPiShadowed(ce)) return undefined;
+  return half.mul(n).div(d).evaluate();
+}
+
+/**
+ * True when a user binding of the name `Pi` in the current scope gives the
+ * name another value (`ce.declare('Pi', { value: 3 })`, a parameter named
+ * `Pi`). Then an exact special value that holds π is not returned, and the
+ * call stays symbolic. The reason: `ce.Pi` is bound to the library constant,
+ * so the value itself has the library value (`.N()` of `π/2` is 1.5707…),
+ * but its MathJSON (`["Multiply", ["Rational", 1, 2], "Pi"]`) names `Pi`,
+ * and when it is boxed again, `Pi` is the user value (`.N()` gives 1.5).
+ * This is the test that `isShadowedSymbol()` does for a symbol `Pi` that is
+ * not bound (`shadowsLibraryName()`).
+ */
+function isPiShadowed(ce: ComputeEngine): boolean {
+  return shadowsLibraryName(ce, 'Pi');
+}
+
+/**
+ * The principal value of the inverse circular function `operator` at `x`, as
+ * the fraction `n/d` of a half-turn (`n/d·π` rad), when `x` is exactly a
+ * value of the table of special angles. Otherwise `undefined`.
+ *
+ * The fraction does not depend on the engine's angular unit, so the caller
+ * can also use it where the result is not an angle (`arcosh(x) =
+ * i·arccos(x)` on `[−1, 1]`).
+ */
+function inverseSpecialHalfTurns(
+  ce: ComputeEngine,
+  operator: string,
+  x: Expression | undefined,
+  specialValues: ConstructibleTrigValues
+): [n: number, d: number] | undefined {
   if (!x) return undefined;
   // An inexact argument (`arcsin(0.5)`) numericizes: it has no exact value.
   if (isNumber(x) && x.isExact === false) return undefined;
@@ -1577,20 +1624,35 @@ function constructibleValuesInverse(
   for (const [[match_arg, match_arg_N], [n, d]] of specialInverseValues) {
     if (
       Math.abs(x_N - match_arg_N) <= 1e-9 * Math.max(1, Math.abs(x_N)) &&
-      isExactZero(x.sub(match_arg))
+      (isExactZero(x.sub(match_arg)) || isSameSquare(x, match_arg))
     ) {
-      // The angle is (n/d)·halfTurn, expressed exactly in the engine's
-      // angular unit (π rad, 180 deg, …) so evaluate() agrees with the
-      // unit-converted numeric path (e.g. deg mode: arcsin(1) → exact 90).
-      const halfTurn = halfTurnAngle(ce);
-      let theta = halfTurn.mul(n).div(d);
-      if (quadrant == -1) theta = theta.neg();
-      else if (quadrant == 1) theta = halfTurn.sub(theta);
-
-      return theta.evaluate();
+      if (quadrant == -1) return [-n, d];
+      if (quadrant == 1) return [d - n, d];
+      return [n, d];
     }
   }
   return undefined;
+}
+
+/**
+ * True when `x² − m²` is the exact number 0.
+ *
+ * The same nested radical has several spellings that the engine does not
+ * rewrite into one another: `tan(π/10)` is both `√(1 − 2√5/5)` and
+ * `√5/5·√(5 − 2√5)`, so their difference stays a sum of two terms. Their
+ * squares are both `1 − 2√5/5`, because the product of two square roots
+ * of the same radicand folds. So the squares are compared when the
+ * difference is not 0.
+ *
+ * The caller has already found that `x` and `m` have machine values that
+ * agree within 10⁻⁹, and that `m` is not negative. If `x² = m²`, then `x`
+ * is `m` or `−m`. When `m` is not 0, `−m` is far from `m`, so the numeric
+ * agreement excludes it and `x = m`. When `m` is 0, both are 0. So equal
+ * squares prove `x = m`. The test never gives a false match: it is true
+ * only when the exact arithmetic gives the exact number 0.
+ */
+function isSameSquare(x: Expression, m: Expression): boolean {
+  return isExactZero(x.mul(x).sub(m.mul(m)));
 }
 
 /** True when `x` is the exact number literal 0. */
@@ -1645,7 +1707,13 @@ export function isConstructible(x: string | Expression): boolean {
  *   are `±∞` (one-sided real poles), `arsech(0)` is `+∞` (approached from the
  *   domain `(0, 1]`), `arcsch(0)` is `ComplexInfinity` (odd, two-sided pole).
  *
- * `Arcosh(0)` and `Arcoth(0)` are `iπ/2` and, like `Arccos(2)`, stay symbolic.
+ * - `arcoth(0)` is `iπ/2`, the value of the principal branch that `.N()`
+ *   gives (`½·ln(−1)`);
+ * - `arcosh(x)` is `i·arccos(x)` for a real `x` in `[−1, 1]` when
+ *   `arccos(x)` is a special angle: `arcosh(0) = iπ/2`, `arcosh(1/2) =
+ *   iπ/3`, `arcosh(−1) = iπ`. The argument can also be a radical
+ *   (`arcosh(√3/2) = iπ/6`).
+ *
  * Returns `undefined` for any other operator or argument.
  *
  * Both the `evaluate` handler (`library/trigonometry.ts`) and the
@@ -1656,6 +1724,7 @@ export function hyperbolicExactValue(
   operator: string,
   x: Expression | undefined
 ): Expression | undefined {
+  if (operator === 'Arcosh' && x !== undefined) return arcoshExactValue(x);
   if (!isNumber(x) || x.isComplex) return undefined;
   const ce = x.engine;
   switch (operator) {
@@ -1675,11 +1744,15 @@ export function hyperbolicExactValue(
       if (x.isSame(-1)) return ce.NegativeInfinity;
       return undefined;
     case 'Arcoth':
+      // A float `0.0` numericizes, as `arcosh(0.0)` does. A user value of
+      // `Pi` leaves the call symbolic (`isPiShadowed()`).
+      if (x.isSame(0))
+        return x.isExact && !isPiShadowed(ce)
+          ? ce.I.mul(ce.Pi).div(2)
+          : undefined;
       if (x.isSame(1)) return ce.PositiveInfinity;
       if (x.isSame(-1)) return ce.NegativeInfinity;
       return undefined;
-    case 'Arcosh':
-      return x.isSame(1) ? ce.Zero : undefined;
     case 'Arsech':
       if (x.isSame(0)) return ce.PositiveInfinity;
       if (x.isSame(1)) return ce.Zero;
@@ -1691,31 +1764,48 @@ export function hyperbolicExactValue(
   }
 }
 
-export function constructibleValues(
-  operator: string,
-  x: Expression | undefined
-): undefined | Expression {
-  // Forward trig (Sin/Cos/…) reduces special angles; inverse trig
-  // (Arcsin/Arccos/Arctan/…) reduces special arguments via the dispatch to
-  // `constructibleValuesInverse` below. Without allowing inverse operators
-  // here, that dispatch was unreachable dead code and `arcsin(0)`, `arctan(1)`,
-  // etc. never reduced.
-  if (!x || (!isConstructible(operator) && !isInverseTrigFunc(operator)))
-    return undefined;
+/**
+ * The exact value of `arcosh(x)`, or `undefined`.
+ *
+ * On `[−1, 1]` the principal branch of `arcosh` is `i·arccos(x)`, with
+ * `arccos(x)` in `[0, π]` (`arcosh(1/2) = 1.047…i = iπ/3`, `arcosh(−1) =
+ * iπ`, as `.N()` gives). So when `arccos(x)` is a special angle `n/d·π`, the
+ * value is `i·n/d·π`. The value is an area, not an angle: it is in radians
+ * whatever the engine's angular unit is.
+ */
+function arcoshExactValue(x: Expression): Expression | undefined {
   const ce = x.engine;
+  if (isNumber(x)) {
+    if (x.isComplex) return undefined;
+    if (x.isSame(1)) return ce.Zero;
+  }
+  // A float argument numericizes, and an argument with unknowns is not a
+  // constant. The second test is done first: it is a linear walk, while the
+  // numeric value below evaluates the argument. An impure argument
+  // (`Random()`) is not evaluated: the simplify rule for constructible values
+  // calls this function with the unevaluated operand, and evaluating it there
+  // would consume random draws or run a callback only to look up the table.
+  if (x.unknowns.length > 0 || !x.isPure) return undefined;
+  if (isNumber(x) && x.isExact === false) return undefined;
+  const xN = x.N();
+  if (xN.im !== 0 || !(xN.re >= -1 && xN.re <= 1)) return undefined;
+  const turns = inverseSpecialHalfTurns(
+    ce,
+    'Arccos',
+    x,
+    constructibleTrigValues(ce)
+  );
+  if (turns === undefined) return undefined;
+  const [n, d] = turns;
+  // A user value of `Pi` leaves the call symbolic (`isPiShadowed()`)
+  if (n !== 0 && isPiShadowed(ce)) return undefined;
+  return ce.I.mul(ce.Pi).mul(n).div(d);
+}
 
-  // An argument with unknowns is not a constant angle. Gate on `.unknowns`
-  // (a symbol with an assigned value is NOT unknown, so `sin(y)` with
-  // `y := π/4` still reduces): the walk is a single linear pass, while a
-  // numeric evaluation of the argument over nested applications of a user
-  // function re-evaluates shared sub-chains and grows exponentially with the
-  // nesting depth (44 s for a 17-element list of such chains).
-  if (x.unknowns.length > 0) return undefined;
-
-  //
-  // Create the cache of special values
-  //
-  const specialValues = ce._cache<ConstructibleTrigValues>(
+/** The table `CONSTRUCTIBLE_VALUES` as canonical expressions, cached in the
+ * engine. */
+function constructibleTrigValues(ce: ComputeEngine): ConstructibleTrigValues {
+  return ce._cache<ConstructibleTrigValues>(
     'constructible-trigonometric-values',
     () => {
       return CONSTRUCTIBLE_VALUES.map(([val, results]) => [
@@ -1739,6 +1829,30 @@ export function constructibleValues(
       return cache;
     }
   );
+}
+
+export function constructibleValues(
+  operator: string,
+  x: Expression | undefined
+): undefined | Expression {
+  // Forward trig (Sin/Cos/…) reduces special angles; inverse trig
+  // (Arcsin/Arccos/Arctan/…) reduces special arguments via the dispatch to
+  // `constructibleValuesInverse` below. Without allowing inverse operators
+  // here, that dispatch was unreachable dead code and `arcsin(0)`, `arctan(1)`,
+  // etc. never reduced.
+  if (!x || (!isConstructible(operator) && !isInverseTrigFunc(operator)))
+    return undefined;
+  const ce = x.engine;
+
+  // An argument with unknowns is not a constant angle. Gate on `.unknowns`
+  // (a symbol with an assigned value is NOT unknown, so `sin(y)` with
+  // `y := π/4` still reduces): the walk is a single linear pass, while a
+  // numeric evaluation of the argument over nested applications of a user
+  // function re-evaluates shared sub-chains and grows exponentially with the
+  // nesting depth (44 s for a 17-element list of such chains).
+  if (x.unknowns.length > 0) return undefined;
+
+  const specialValues = constructibleTrigValues(ce);
 
   if (isInverseTrigFunc(operator))
     return constructibleValuesInverse(ce, operator, x, specialValues);
@@ -1823,7 +1937,9 @@ export function halfTurns(
       return undefined;
     }
     if (isSymbol(y)) {
-      if (y.symbol === 'Pi') return unit === 'rad' ? [1n, 1n] : undefined;
+      // A user binding of the name `Pi` is not π: read its value instead.
+      if (y.symbol === 'Pi' && !isShadowedSymbol(y))
+        return unit === 'rad' ? [1n, 1n] : undefined;
       if (y.isConstant) return undefined;
       const value = y.value;
       return value === undefined ? undefined : walk(value);
@@ -2176,7 +2292,8 @@ export function imaginaryHalfTurns(
   let p = 1n;
   let q = 1n;
   for (const op of raw.ops) {
-    if (isSymbol(op, 'Pi')) {
+    // A user binding of the name `Pi` is not π (`isShadowedSymbol()`).
+    if (isSymbol(op, 'Pi') && !isShadowedSymbol(op)) {
       piCount += 1;
       continue;
     }

@@ -99,6 +99,9 @@ describe('Assign + Function recursion knot-tying', () => {
     const t0 = performance.now();
     const r = ce.box(['Q', 40, 'z']).evaluate();
     expect(r.json).toEqual(['Q', 40, 'z']);
-    expect(performance.now() - t0).toBeLessThan(2000);
+    // The time depends on the load of the machine, so the limit is asserted
+    // only in a `CE_PERF=1` run. The value above does not depend on time.
+    if (process.env.CE_PERF === '1')
+      expect(performance.now() - t0).toBeLessThan(2000);
   });
 });

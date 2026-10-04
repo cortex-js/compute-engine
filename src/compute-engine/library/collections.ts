@@ -2092,7 +2092,8 @@ function applicationOfStructure(
   return undefined;
 }
 
-/** Look through a one-operand `wrapper` application (`Block`, `N`), which
+/** Look through a one-operand `wrapper` application (`Block`,
+ * `NumericApproximation`, `N`), which
  * the mapping body may be wrapped in. Answers the structure unchanged when
  * the wrapper is not there, and `undefined` when it is there but its
  * operand has no structural view. */
@@ -2157,8 +2158,9 @@ function structureMentionsParameter(
  * from each source: one descriptor per body operand — a parameter reference
  * stands for its source's element type, every other operand keeps its own
  * descriptor — handed to `derive`. Only ONE operator application is handled,
- * looking through a one-statement `Block` and the `N(…)` wrap the `.N()`
- * route adds. Nothing is declared, canonicalized or evaluated, so no memo is
+ * looking through a one-statement `Block`, the `NumericApproximation(…)` wrap
+ * the `.N()` route adds, and a user-written `N(…)` (the type of a numeric
+ * evaluation is the type of its operand). Nothing is declared, canonicalized or evaluated, so no memo is
  * needed: the whole derivation is type algebra over descriptors the call
  * site already built.
  */
@@ -2183,6 +2185,8 @@ function bareMappingElementTypeD(
 
   let bodyStructure: OperandStructure | undefined = literal.body;
   bodyStructure = lookThroughWrapper(bodyStructure, 'Block');
+  if (bodyStructure === undefined) return undefined;
+  bodyStructure = lookThroughWrapper(bodyStructure, 'NumericApproximation');
   if (bodyStructure === undefined) return undefined;
   bodyStructure = lookThroughWrapper(bodyStructure, 'N');
   const body = applicationOfStructure(bodyStructure);
@@ -4600,7 +4604,8 @@ function pointArityError(
 //
 // Under `numericApproximation` the projection is returned as its lazy `.N()`
 // form: the source itself is the EXACT collection (the transpose body's
-// `N(…)` wrap belongs to the whole tuple, and is discarded with it), so
+// `NumericApproximation(…)` wrap belongs to the whole tuple, and is discarded
+// with it), so
 // returning it bare would let `PointX(pts).N()` yield exact elements —
 // violating `x.N() ≡ x.evaluate().N()` parity.
 function projectLazyPointList(
@@ -4613,11 +4618,14 @@ function projectLazyPointList(
   if (!isFunction(fn) || fn.operator !== 'Function') return undefined;
   let body = fn.ops[0];
   // The canonical function literal wraps its body in a single-statement
-  // `Block`, and `.N()` on the lazy form wraps it in `N(…)` — unwrap both
-  // for the match.
+  // `Block`, and `.N()` on the lazy form wraps it in the numeric marker
+  // `NumericApproximation(…)` — unwrap both for the match. A user-written
+  // `N(…)` is not unwrapped: its elements are inexact, which the projection
+  // of the source does not give.
   if (isFunction(body) && body.operator === 'Block' && body.nops === 1)
     body = body.ops[0];
-  if (isFunction(body) && body.operator === 'N') body = body.ops[0];
+  if (isFunction(body) && body.operator === 'NumericApproximation')
+    body = body.ops[0];
   if (!isFunction(body) || body.operator !== 'Tuple') return undefined;
   const slot = body.ops[position - 1];
   if (slot === undefined || !isSymbol(slot)) return undefined;
@@ -7676,9 +7684,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           callbackResultTypeD(ops[0], engine);
         if (!resultType || resultType === 'unknown' || resultType === 'any') {
           // Unknown element type: still preserve value-aware indexed-ness
-          // (the `.N()` route wraps the body in `N`, whose lazy result types
-          // `unknown` — without this the whole Map would type `unknown` and
-          // the arithmetic broadcast would treat it as a scalar).
+          // (the `.N()` route wraps the body in `NumericApproximation`, whose
+          // lazy result types `unknown` — without this the whole Map would
+          // type `unknown` and the arithmetic broadcast would treat it as a
+          // scalar).
           const s = sourceType(0);
           // An index span must NOT be echoed: `range` promises a contiguous
           // ascending run of positive integers, and nothing constrains an
@@ -15823,7 +15832,7 @@ function mapIteratorImpl(expr: Expression): Iterator<Expression> {
   }
 
   // Auto-compile trigger (see `map-auto-compile.ts`): when the element
-  // lambda carries the numeric `Block(N(body))` marker and the engine
+  // lambda carries the numeric marker or a user-written `N` and the engine
   // is at machine precision, elements are served by a cached compiled
   // function, with silent per-element interpreter fallback. A new
   // iterator is a new drain (resets the once-per-drain attempt bound).

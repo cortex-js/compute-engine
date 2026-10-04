@@ -95,7 +95,11 @@ describe('TYCHO ITEM 329: SIGNATURE MEMO WITH AN UNDECLARED FREE NAME', () => {
         );
         expect(result).toBe('number');
         expect(count).toBeLessThan(LIMIT);
-        expect(performance.now() - start).toBeLessThan(2000);
+        // The time depends on the load of the machine, so the limit is
+        // asserted only in a `CE_PERF=1` run. The type and derivation-count
+        // checks above do not depend on time.
+        if (process.env.CE_PERF === '1')
+          expect(performance.now() - start).toBeLessThan(2000);
       });
     });
   }

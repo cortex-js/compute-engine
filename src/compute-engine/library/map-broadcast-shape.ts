@@ -42,17 +42,23 @@ export interface LoweredLevel {
    * compile caches are keyed on. */
   expr: Expression;
   /** The body is a bare parameter symbol: the element passes through
-   * unchanged. Never set when `napprox` is true (the `N` marker must still be
-   * applied). */
+   * unchanged. Never set when `napprox` is true (the numeric marker must
+   * still be applied). */
   identity: boolean;
   /** The applied operator (absent for an identity level). */
   op?: string;
   /** The operand layout (absent for an identity level; for an identity level
    * `slots[0]` is the pass-through row index). */
   slots?: Slot[];
-  /** The body carried the `Block(N(…))` numeric marker: this level evaluates
-   * with `{ numericApproximation: true }`. */
+  /** The body carried the `Block(NumericApproximation(…))` numeric marker or
+   * a one-operand user-written `Block(N(…))`: this level evaluates with
+   * `{ numericApproximation: true }`. */
   napprox: boolean;
+  /** The body was a one-operand user-written `N(…)`. The `N` operator always
+   * gives an inexact result, also when the value is an integer, so the drain
+   * converts an exact number result of this level to a float, as the `N`
+   * evaluate handler does. Set only when `napprox` is true. */
+  inexact?: boolean;
   /** The number of source collections of this level (= parameter count). */
   arity: number;
   /** The level's source operands (everything but the mapping function). */
@@ -206,7 +212,8 @@ export function hasAnnotatedParams(expr: Expression): boolean {
  * mapping function is *broadcast-shaped*: a canonical `Function` literal with
  * parameters that are bare symbols — or annotated symbols whose annotation the
  * source's element type provably satisfies — one per source, whose body — after
- * unwrapping a single-statement `Block` and then an optional `N` marker — is
+ * unwrapping a single-statement `Block` and then an optional numeric marker
+ * (`NumericApproximation`) — is
  * either a bare parameter symbol or a single function application each of
  * whose operands is a parameter symbol or a parameter-free subexpression, and
  * whose head is not declared impure. {@link isImpureHead} performs that
@@ -261,26 +268,40 @@ export function lowerLevel(expr: Expression): LoweredLevel | undefined {
   }
   let needsClosureScope = false;
 
-  // The numeric marker (`Block(N(inner))`, from the item-39 `.N()` rewrap and
-  // the `addN`/`mulN` N-maps).
+  // The numeric marker (`Block(NumericApproximation(inner))`), from the `.N()`
+  // method of a lazy `Map` (`lazyMapNumericApproximation`) and the numeric
+  // element-wise sums and products (`lazyBroadcastMap` with
+  // `numericApproximation`). A one-operand user-written `N(inner)` is lowered
+  // in the same way, but its result is always inexact, which a level
+  // evaluated with `{ numericApproximation: true }` does not give: the
+  // `inexact` flag tells the drain to convert an exact result to a float. A
+  // two-operand `N(inner, digits)` also rounds, and is not lowered.
   let napprox = false;
-  if (isFunction(body, 'N') && body.nops === 1) {
+  let inexact = false;
+  if (isFunction(body, 'NumericApproximation') && body.nops === 1) {
     napprox = true;
+    body = body.op1;
+  } else if (isFunction(body, 'N') && body.nops === 1) {
+    napprox = true;
+    inexact = true;
     body = body.op1;
   }
 
   if (isSymbol(body)) {
     const index = names.indexOf(sym(body) ?? '');
     if (index < 0) return undefined;
-    // An identity body under the `N` marker is NOT a pass-through: the marker
-    // must still be applied. Model it as an `N` application of the parameter.
+    // An identity body under the numeric marker is NOT a pass-through: the
+    // marker must still be applied. Model it as an application of the marker
+    // to the parameter. Under a user-written `N`, model it as an application
+    // of `N` to the parameter.
     if (napprox)
       return {
         expr,
         identity: false,
-        op: 'N',
+        op: inexact ? 'N' : 'NumericApproximation',
         slots: [index],
         napprox,
+        inexact,
         arity,
         sources,
         typeSensitive,
@@ -341,6 +362,7 @@ export function lowerLevel(expr: Expression): LoweredLevel | undefined {
     op: body.operator,
     slots,
     napprox,
+    inexact,
     arity,
     sources,
     closureScope: needsClosureScope ? bodyScope : undefined,

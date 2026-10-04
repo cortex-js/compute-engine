@@ -151,8 +151,8 @@ describe('the end of an exponent', () => {
   expectNotReported('ambiguous-exponent-end', [
     'x^2 y',
     'x^{x}y',
-    // An exponent that is not signed, then a function name
-    'e^x sin x',
+    // An exponent that is not signed, then a function name, is reported
+    // (see `lenient-ambiguity-h.test.ts`); a braced exponent is not
     'e^{-x} sin x',
   ]);
 });

@@ -177,10 +177,9 @@ describe('OPERATOR prefix', () => {
   test('-x // Negate', () =>
     expect(check('-x')).toMatchInlineSnapshot(`["Negate", "x"]`));
   test('-x-1 // Negate', () =>
-    expect(check('-x-1')).toMatchInlineSnapshot(`
-      box       = ["Subtract", ["Negate", "x"], 1]
-      canonical = ["Subtract", -1, "x"]
-    `));
+    expect(check('-x-1')).toMatchInlineSnapshot(
+      `["Subtract", ["Negate", "x"], 1]`
+    ));
   test('-x+1 // Negate', () =>
     expect(check('-x+1')).toMatchInlineSnapshot(`
       box       = ["Add", ["Negate", "x"], 1]

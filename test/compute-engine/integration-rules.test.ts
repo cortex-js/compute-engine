@@ -16,8 +16,23 @@ import { CancellationError } from '../../src/common/interruptible';
 // `loadIntegrationRules` on it: describe bodies run before the tests, so a
 // second load would replace the driver (and its time limit) for all the
 // blocks that share the engine.
+//
+// The step budget of the driver decides when it gives up on an integral, so
+// the result does not depend on the speed or the load of the machine. The
+// wall-clock limit (`timeLimitMs`) is only a guard against a hang, but when it
+// fires first, the integral stays inert. The slowest integral of this file
+// takes about 4.5 s on an idle machine, and 3 to 5 times as long on an
+// 8-core machine with a load average of 100. With a load average of 300, a
+// limit of 30 s stopped the trig-rational integrals. A clock made to run 30
+// times too fast gives the same result: the `rubi:integrate` guard fired
+// after 5,000 to 28,000 of the 40,000 to 64,000 steps these integrals need.
+// So the shared engine gets a limit of 10 minutes: more than 100 times what
+// any integral here needs on an idle machine, and still finite, so a real
+// hang fails the test instead of running forever. The sub-searches of the
+// driver get one sixth of it.
+const HANG_GUARD_MS = 600_000;
 const engines = new Map<number, ComputeEngine>();
-function rubiEngine(timeLimitMs = 10_000): ComputeEngine {
+function rubiEngine(timeLimitMs = HANG_GUARD_MS): ComputeEngine {
   let ce = engines.get(timeLimitMs);
   if (!ce) {
     ce = new ComputeEngine();
@@ -242,6 +257,51 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
     });
   });
 
+  // The step budget decides when the driver gives up; the wall-clock limits
+  // only guard against a hang. The driver reports in `stats.hangs` each span
+  // whose wall-clock limit stopped work, because such a result can differ on
+  // another machine. The limit of a sub-search is one sixth of `timeLimitMs`,
+  // so a caller that raises `timeLimitMs` for a loaded machine raises it too.
+  describe('wall-clock guards of the driver', () => {
+    test('a spent wall-clock limit is reported as a hang', () => {
+      const ce = new ComputeEngine();
+      const driver = new RubiDriver(ce, [], { timeLimitMs: 0 });
+      expect(driver.int(ce.symbol('x'), 'x')).toBeNull();
+      expect(driver.stats.hangs).toEqual(['rubi:integrate']);
+    });
+
+    test('a spent step budget is not reported as a hang', () => {
+      const ce = new ComputeEngine();
+      const driver = new RubiDriver(ce, [], {
+        timeLimitMs: 10_000,
+        stepBudget: 0,
+      });
+      expect(driver.int(ce.symbol('x'), 'x')).toBeNull();
+      expect(driver.stats.hangs).toEqual([]);
+    });
+
+    test('the limit of a sub-search is one sixth of timeLimitMs', () => {
+      const ce = new ComputeEngine();
+      const driver = new RubiDriver(ce, [], { timeLimitMs: 600_000 });
+      const limits: { ms?: number; label?: string }[] = [];
+      const original = ce._withBudget.bind(ce);
+      const spy = jest
+        .spyOn(ce, '_withBudget')
+        .mockImplementation((limit: any, fn: any) => {
+          limits.push(limit);
+          return original(limit, fn);
+        });
+      try {
+        const integrand = ce.parse('\\frac{1}{1+x^2}').canonical;
+        (driver as any).nativeRationalFallback(integrand, 'x');
+      } finally {
+        spy.mockRestore();
+      }
+      const fallback = limits.find((l) => l.label === 'rubi:native-fallback');
+      expect(fallback?.ms).toBe(100_000);
+    });
+  });
+
   // ── SYM P2-27: rule-driven outputs are folded clean (no stray ln(e)) even
   // before a user simplify(). ──
   test('Chapter-2 exponential output has no stray ln(e)/·1 clutter', () => {
@@ -282,10 +342,10 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
   // ExpandIntegrand and the 1.1.3.2 split (see rubi-utils ExpandIntegrand
   // guard). D-verify by differentiating and sampling at fixed parameter values.
   describe('symbolic quartic-denominator rationals (R25)', () => {
-    // The two-quartic product case runs 5–8.5 s idle — right against the 10 s
-    // default driver budget under worker contention, so raise both budgets
-    // (same convention as the other heavy describes).
-    const ce = rubiEngine(30_000);
+    // The two-quartic product case is one of the slowest integrals of this
+    // file. The shared engine's large wall-clock guard (see `HANG_GUARD_MS`)
+    // keeps the result independent of the machine load.
+    const ce = rubiEngine();
     const verify = (latex: string, params: Record<string, number>) => {
       const integrand = ce.parse(latex);
       let F = ce.parse(`\\int ${latex} \\, dx`).evaluate();
@@ -476,10 +536,10 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
   // Chapter-3 bundle walk (verified by reverting ch3Dir), so they exercise it.
   describe('integrates the logarithm family (Chapter-3)', () => {
     const ce = rubiEngine();
-    // Verify by finite-differencing F.N() (not symbolic D[F]): the PolyLog
-    // cases have an inert symbolic derivative (Derivative[PolyLog,…] does not
-    // numericize) but F.N() itself is numerically evaluable, so the numeric
-    // derivative of F is the robust check. `\ln(x)` is always parenthesized:
+    // Verify by finite-differencing F.N() (not symbolic D[F]): F.N() is
+    // numerically evaluable in every case, so the numeric derivative of F
+    // checks F without relying on the derivative rules for PolyLog and the
+    // other result functions. `\ln(x)` is always parenthesized:
     // `\ln x` before `dx` would absorb the differential `d` (parser quirk).
     const verify = (latex: string) => {
       const integrand = ce.parse(latex);
@@ -608,17 +668,14 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
   // antiderivative carries PolyLog/complex-Log terms whose symbolic derivative
   // does not numericize). Concrete integer params avoid the reserved `e`/`i`.
   describe('closes the single-angle trig-rational family (Chapter-4, R17)', () => {
-    // The poly³×trig-rational by-parts chains take 1–2.5 s each and are slow
-    // under ts-jest — same convention as the other heavy describes in this
-    // file. (Verified 2026-07-10: not a regression — A/B timing against the
-    // recent engine commits is identical; the default deadline was simply
-    // marginal for this family under load.) NOTE: the driver keeps its OWN
-    // wall-clock budget (loader default 10 s), independent of any
-    // `withTimeLimit` span; exhausting it declines cleanly to an inert
-    // Integrate — no
-    // CancellationError. Under full-suite worker contention the ~2 s chain
-    // can stretch past 10 s, so the heavy describes raise BOTH budgets.
-    const ce = rubiEngine(30_000);
+    // The poly³×trig-rational by-parts chains are the slowest integrals of
+    // this file: 1 to 4.5 s each on an idle machine, and 40,000 to 64,000
+    // steps of the 300,000-step budget of the driver. When the wall-clock
+    // guard of the driver fires before the step budget is spent, the driver
+    // declines with no error and the integral stays inert. Under heavy load
+    // a 30 s guard did that to all three. The shared engine's large guard
+    // (see `HANG_GUARD_MS`) prevents it.
+    const ce = rubiEngine();
     const verify = (latex: string) => {
       const integrand = ce.parse(latex);
       const F = ce.parse(`\\int ${latex} \\, dx`).evaluate();
@@ -662,7 +719,7 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
   // / complex-Si terms numericize but do not admit a symbolic derivative).
   // Concrete integer params avoid the reserved `e`/`i`.
   describe('closes complex-Si / reciprocal-arg families (Chapter-4, R18)', () => {
-    const ce = rubiEngine(30_000);
+    const ce = rubiEngine();
     const verify = (latex: string) => {
       const integrand = ce.parse(latex);
       const F = ce.parse(`\\int ${latex} \\, dx`).evaluate();
@@ -797,7 +854,7 @@ describe('loadIntegrationRules (Rubi integration rule driver)', () => {
   // that closes to the hyperbolic cosine/sine integral Chi/Shi (exercising the
   // new Shi/Chi kernels end-to-end). Verified by finite-differencing F.N().
   describe('integrates the inverse-hyperbolic family (Chapter-7, R21)', () => {
-    const ce = rubiEngine(30_000);
+    const ce = rubiEngine();
     const verify = (latex: string, xs = [0.31, 0.52, 0.73, 1.42, 2.3]) => {
       const integrand = ce.parse(latex);
       const F = ce.parse(`\\int ${latex} \\, dx`).evaluate();

@@ -43,12 +43,15 @@ import {
 import {
   broadcastableParamSlots,
   broadcastsOverTuples,
+  declaredScalarParams,
   declaresBroadcastableParam,
+  isDeclaredScalarType,
   paramsAreScalar,
   type BroadcastSlotPlan,
 } from '../boxed-expression/boxed-function.js';
 import { lookupApplicable } from '../function-utils.js';
 import {
+  broadcastingComponentKind,
   couldBeNumericTuple,
   hasTupleOrStringArm,
   isFiniteIndexedCollection,
@@ -73,11 +76,16 @@ import {
   resolveTypeForCompilation,
   stripMissingFromType,
   typeContainsMissing,
+  typeElementCount,
   unfoldAliasOnDescent,
   widen,
   type AliasDescent,
 } from '../../common/type/utils.js';
-import { isSubtype, provablyDisjoint } from '../../common/type/subtype.js';
+import {
+  couldMatch,
+  isSubtype,
+  provablyDisjoint,
+} from '../../common/type/subtype.js';
 import { typeToString } from '../../common/type/serialize.js';
 import {
   boundVariableNames,
@@ -116,6 +124,7 @@ import {
 } from '../boxed-expression/type-guards.js';
 import { isTensorValue } from '../boxed-expression/tensor-view.js';
 import { asRational } from '../boxed-expression/numerics.js';
+import { sortOperands } from '../boxed-expression/order.js';
 import { realPowerBranchTerms } from '../boxed-expression/arithmetic-power.js';
 import {
   isTimeoutCancellation,
@@ -146,7 +155,11 @@ import { planProtocolDispatch } from './protocol-dispatch.js';
 import type { ReceiverGuard } from './protocol-dispatch.js';
 import { isMoreSpecific } from '../boxed-expression/overload.js';
 import { containsDerivativeHead, rewriteAngularUnit } from './angular-unit.js';
-import { compileJetDerivative, jetDerivativeTarget } from './jet-derivative.js';
+import {
+  compileJetDerivative,
+  jetDerivativeTarget,
+  multiIndexDerivativeTooLarge,
+} from './jet-derivative.js';
 import { derivativeClosedForm } from './derivative-closed-form.js';
 import {
   MIN_UNROLLED_WIDTH,
@@ -1418,6 +1431,25 @@ function isGatedPoint(a: Expression): boolean {
 }
 
 /**
+ * Is `a` a GATED LIST OF POINTS: a gated indexed collection
+ * (`isGatedIndexedCollection`) whose every present arm is a list whose
+ * elements are points, such as `PointList(L {c}, y)`, typed
+ * `list<tuple<…>> | missing`? At run time it is a list of points or the
+ * absent value.
+ */
+function isGatedPointList(a: Expression): boolean {
+  const arms = gatedCollectionArms(a);
+  return (
+    arms !== undefined &&
+    arms.every((b) => {
+      if (isTupleShapedType(b)) return false;
+      const elt = collectionElementType(b);
+      return elt !== undefined && isPointElementType(stripMissingFromType(elt));
+    })
+  );
+}
+
+/**
  * The present arms of a gated indexed collection (see
  * `isGatedIndexedCollection`), alias-resolved, or `undefined` when `a` is
  * not one.
@@ -1730,6 +1762,16 @@ export function isGatedNumericListOperand(e: Expression): boolean {
 }
 
 /**
+ * Is the point component `op` a RESTRICTED list: a list or the absent value,
+ * typed `list<…> | missing` (`L {c}`)? When it is present, the point is one
+ * point per element of the list (`broadcastingComponentKind`). Exported for
+ * the compile targets, which must not import `collection-utils` directly.
+ */
+export function isGatedListComponent(op: Expression): boolean {
+  return broadcastingComponentKind(op.type.type) === 'gated-list';
+}
+
+/**
  * A `Tuple` or `List` literal with a broadcasting component — a shape whose
  * norm does NOT reduce to one scalar, so `Norm`/`Abs` compile handlers use
  * this to fail closed and let the interpreter broadcast. Exported for
@@ -1753,11 +1795,17 @@ export function pointHasBroadcastComponent(expr: Expression): boolean {
   // A `PointList` component is read the same way as a `Tuple` component: an
   // all-scalar `PointList` is one point, and a collection-valued component
   // makes it a SOURCE of several points.
+  //
+  // A RESTRICTED list component (`L {c}`, typed `list<…> | missing`) is a
+  // broadcasting component too: when it is present, the point is one point
+  // per element (`broadcastingComponentKind`).
   if (isFunction(expr, 'Tuple') || isFunction(expr, 'PointList'))
     return expr.ops.some(
       (op) =>
         !isTuple(op) &&
-        (op.isCollection || op.type.matches('indexed_collection<any>'))
+        (op.isCollection ||
+          op.type.matches('indexed_collection<any>') ||
+          isGatedListComponent(op))
     );
   if (isFunction(expr, 'List'))
     return expr.ops.some(
@@ -1767,6 +1815,116 @@ export function pointHasBroadcastComponent(expr: Expression): boolean {
         (op.isCollection || op.type.matches('indexed_collection<any>'))
     );
   return false;
+}
+
+/**
+ * The norm of a point with a broadcasting component, written as the explicit
+ * Euclidean norm `Sqrt(Square(c1) + … + Square(cn))`, or a string that says
+ * why this form is not used.
+ *
+ * `point` is a `Tuple` or a `PointList` literal for which
+ * `pointHasBroadcastComponent` is true. The interpreter reads it as one point
+ * per element of its list components, so its norm is one number per element.
+ * The explicit form computes the same list: every target already compiles
+ * `Square` and `Add` element-wise over a list of numbers, and the result has
+ * the shape of the same norm written by hand (`vec2` on a shader target, an
+ * array of intervals on the interval target). Each component occurs once in
+ * the explicit form, so it is evaluated once.
+ *
+ * The explicit form is used only when it gives the same value:
+ *
+ * - every component is a number or a provable list of numbers. A nested
+ *   point or a list of lists is not a coordinate, and its `Square` is not
+ *   the square of a coordinate.
+ * - no component is complex. The norm takes the square of the modulus, and
+ *   `Square` of a complex number is not that.
+ * - every list component has the same length, and its static type gives
+ *   that length. A `PointList` zips its lists to the length of the shortest
+ *   one, but the element-wise `Add` requires lists of one length. Two lists
+ *   of different lengths, or a list whose length is known only at run time,
+ *   would give a different answer, so the caller must handle them another
+ *   way or decline.
+ *
+ * Shared by the interval and shader targets. The JavaScript target has its
+ * own run-time lowering of the same norm (its `Norm` handler).
+ */
+export function explicitBroadcastPointNorm(
+  point: Expression,
+  target: CompileTarget<Expression>
+): Expression | string {
+  if (!isFunction(point, 'Tuple') && !isFunction(point, 'PointList'))
+    return 'the operand is not a point literal';
+  if (!pointHasBroadcastComponent(point))
+    return 'the point has no list component';
+  let length: number | undefined;
+  for (const op of point.ops) {
+    if (BaseCompiler.isComplexValued(op))
+      return `the component \`${op.toString()}\` is complex`;
+    if (isTuple(op))
+      return `the component \`${op.toString()}\` is a point, not a coordinate`;
+    // A restricted list has no static value: it can be absent, and the
+    // explicit form has no reading of an absent list.
+    if (isGatedListComponent(op))
+      return `the component \`${op.toString()}\` is a restricted list, which can be absent`;
+    if (!op.isCollection && !op.type.matches('indexed_collection<any>')) {
+      // A symbol with no type evidence (the free plot variable) is read as a
+      // number, as every scalar position of these targets reads it.
+      const t = compilationType(op);
+      if (!op.type.matches('number') && t !== 'unknown' && t !== 'any')
+        return `the component \`${op.toString()}\` is not a number`;
+      continue;
+    }
+    if (!isProvablyNumericListOperand(op))
+      return `the component \`${op.toString()}\` is not a list of numbers`;
+    const n = typeElementCount(compilationType(op));
+    if (n === undefined)
+      return `the length of the component \`${op.toString()}\` is not known at compile time`;
+    if (length !== undefined && n !== length)
+      return `its list components have different lengths (${length} and ${n})`;
+    length = n;
+  }
+  // A caller who overrode one of the heads of the explicit form (the
+  // `functions` and `operators` compilation options) did not ask for it to
+  // be called for a norm.
+  const heads = ['Sqrt', 'Add', 'Square', 'Power'];
+  if (heads.some((h) => target.unrollSkipHeads?.has(h) === true))
+    return 'the caller overrides a head of the explicit norm';
+  // The nodes are STRUCTURAL, not canonical: canonical construction folds a
+  // literal coordinate (`Square(3)` becomes `9`), which is a constant fold
+  // that a compilation with `constantFold: false` asks not to make. Each
+  // square is `Power(c, 2)`, the canonical form of `Square(c)`, because the
+  // shader targets lower `Power` of a `vecN` component by component and do
+  // not lower `Square` of a `vecN`. The terms of the sum are sorted in the
+  // canonical order of `Add`, so the code has the same term order as the
+  // norm written by hand.
+  const ce = point.engine;
+  const squares = point.ops.map((c) =>
+    ce.function('Power', [c, ce.number(2)], { form: 'structural' })
+  );
+  const norm = ce.function(
+    'Sqrt',
+    [
+      squares.length === 1
+        ? squares[0]
+        : ce.function('Add', sortOperands('Add', squares), {
+            form: 'structural',
+          }),
+    ],
+    { form: 'structural' }
+  );
+  // The compile entry has already applied the fixed-width unroll to the
+  // expression, but not to these new nodes. Apply it here with the options
+  // of the target, so that the explicit form compiles the same as the norm
+  // written by hand (on the interval target, an array of one norm per
+  // element instead of a run-time broadcast).
+  return unrollFixedWidthCollections(norm, {
+    skipHeads: target.unrollSkipHeads,
+    iterationBudget: target.iterationBudget,
+    readsLiveSource: target.cse?.harvestOptions?.isStringVar,
+    minWidth: target.unrollMinWidth,
+    unrollConstantLists: target.unrollConstantLists,
+    unrollComprehensions: target.unrollComprehensions,
+  });
 }
 
 /**
@@ -1964,6 +2122,22 @@ function hasBroadcastableCoordinate(t: Type): boolean {
     (e) => typeof e.type !== 'string' && e.type.kind === 'broadcastable'
   );
 }
+
+/**
+ * The function-valued locals of one statement list whose value can change
+ * while the list runs (`BaseCompiler.reboundLocalNames`).
+ *
+ * - `rebound`: each such name, with the function literal a call of it is
+ *   compiled against (`literal`, one of the literals the name is assigned —
+ *   they all have the same signature), or the reason a call of it cannot
+ *   compile (`decline`).
+ * - `writes`: for each top-level statement, the names of `rebound` that the
+ *   statement assigns, at its top level or inside it.
+ */
+type ReboundFunctionLocals = {
+  rebound: Map<string, { literal?: Expression; decline?: string }>;
+  writes: Map<Expression, Set<string>>;
+};
 
 export class BaseCompiler {
   /**
@@ -2323,7 +2497,38 @@ export class BaseCompiler {
           `only valid as a top-level function body.`
       );
     }
+    BaseCompiler.assertNoStatementOperand(expr, code, target);
     return code;
+  }
+
+  /**
+   * Fail closed when the code of an operand of an expression is a statement
+   * (`return …`, `break`, `continue`), on a target that writes a block as an
+   * IIFE (`writesBlocksAsIife`). A `Return` that is not in a statement or
+   * tail position (`tailValue`) is emitted that way, and the result is a
+   * syntax error (`c ? return 1 : 2`). The interpreter does not leave the
+   * enclosing function there either: it keeps the `Return` as a held value
+   * of the expression.
+   */
+  private static assertNoStatementOperand(
+    expr: Expression | undefined,
+    code: TargetSource,
+    target: CompileTarget<Expression>
+  ): void {
+    if (
+      !BaseCompiler.writesBlocksAsIife(target) ||
+      typeof code !== 'string' ||
+      !/^\s*(?:return|break|continue)\b/.test(code)
+    )
+      return;
+    const head = expr !== undefined && isFunction(expr) ? expr.operator : '?';
+    throw new Error(
+      `Could not compile \`${head}\`: a \`${head}\` that is an operand of ` +
+        `an expression has no lowering on target ` +
+        `'${target.language ?? 'unknown'}'. A \`Return\` compiles as a ` +
+        `statement of a block, or as the value of a block or of the ` +
+        `compilation.`
+    );
   }
 
   /**
@@ -7616,6 +7821,88 @@ export class BaseCompiler {
     return visit(expr);
   }
 
+  /**
+   * A call whose head has the name of a library operator that the compiler
+   * lowers (`Ln` → `Math.log`, `Sin` → `Math.sin`), where the name is bound
+   * in this compilation: a block local (`Declare(Ln, "function")`,
+   * `Assign(Ln, t ↦ t + 1)`), or a parameter of an enclosing function
+   * literal (`(Ln, y) ↦ Ln(y)`). The interpreter calls the binding, so the
+   * call must not be lowered as the library operator. `shadowedLibraryLoweringError()`
+   * does not see these bindings: it reads the scope chain of the engine, and
+   * a compilation does not enter its bindings there.
+   *
+   * The call compiles as a call of the block-local function
+   * (`tryCompileLocalFunctionCall`). It declines, with the reason, when the
+   * target has no such route: a parameter, a block local that is not bound
+   * to a function literal, or a target that does not bind a block-local
+   * function as a value (the shader and Python targets).
+   *
+   * `undefined` when the head is not such a name.
+   */
+  private static compileLocallyBoundLibraryCall(
+    expr: Expression & FunctionInterface,
+    target: CompileTarget<Expression>
+  ): TargetSource | undefined {
+    const h = expr.operator;
+    const lowered = (name: string): boolean =>
+      BaseCompiler.NAMED_LOWERING_HEADS.has(name) ||
+      target.functions?.(name) !== undefined ||
+      target.operators?.(name) !== undefined;
+    // A target that inlines `Apply(literal, …args)` by substitution (the
+    // shader targets) replaces each parameter where it is a value, not where
+    // it is the head of a call: `Apply((Sin, y) ↦ Sin(y), t ↦ t + 1, x)`
+    // became `sin(x)`. The body is never compiled with the parameters bound,
+    // so the test below cannot see them. Decline here, on every target.
+    if (h === 'Apply' && isFunction(expr.ops[0], 'Function')) {
+      const literal = expr.ops[0];
+      const heads = new Set<string>();
+      const walk = (e: Expression): void => {
+        if (!isFunction(e)) return;
+        heads.add(e.operator);
+        for (const op of e.ops) walk(op);
+      };
+      walk(literal.ops[0]);
+      for (const p of literal.ops.slice(1)) {
+        const name = functionLiteralParameterName(p);
+        if (name && heads.has(name) && lowered(name))
+          throw new Error(
+            `Could not compile \`${expr.toString()}\`: the parameter ` +
+              `\`${name}\` of the function is called in its body, and ` +
+              `\`${name}\` is also the name of a library operator. The ` +
+              `interpreter calls the argument, and the compiled code would ` +
+              `call the library operator.`
+          );
+      }
+    }
+    // Only a name that a `Declare` of an enclosing block or a parameter
+    // binds. A block that assigns a library name with no `Declare` writes
+    // the global binding, and the interpreter then still calls the library
+    // operator.
+    if (target.boundVars?.has(h) !== true || !lowered(h)) return undefined;
+    const decline = (why: string): never => {
+      throw new Error(
+        `Could not compile \`${expr.toString()}\`: \`${h}\` is bound in ` +
+          `this compilation (a block local or a parameter), and the ` +
+          `interpreter calls that binding, not the library operator ` +
+          `\`${h}\`. ${why}`
+      );
+    };
+    // A tuple argument at a parameter declared as a scalar maps the call
+    // over the components (`declaredScalarTupleCall`). That rewrite and the
+    // binding of its arguments are made for the ordinary call route only.
+    if (
+      BaseCompiler.declaredScalarTupleCall(expr.engine, h, expr.ops, target) !==
+      undefined
+    )
+      decline('The call maps over a tuple argument, which this route does not compile.');
+    const local = BaseCompiler.tryCompileLocalFunctionCall(h, expr.ops, target);
+    if (local !== undefined) return local;
+    return decline(
+      `Target '${target.language ?? 'javascript'}' has no lowering for a ` +
+        `call of this binding.`
+    );
+  }
+
   private static _compileInner(
     expr: Expression,
     target: CompileTarget<Expression>,
@@ -7645,6 +7932,8 @@ export class BaseCompiler {
         target
       );
       if (error !== undefined) throw new Error(error);
+      const local = BaseCompiler.compileLocallyBoundLibraryCall(expr, target);
+      if (local !== undefined) return local;
     }
 
     // Is it a symbol?
@@ -8158,6 +8447,39 @@ export class BaseCompiler {
   }
 
   /**
+   * The `Block` node that `compileCollectionValueBlock` compiles. The
+   * `Block` branch of `compileExpr` reads it (and clears it) to know that
+   * the value of this block is consumed whole. Compilation is synchronous,
+   * so a static is safe.
+   */
+  private static _collectionValueBlock: Expression | undefined;
+
+  /**
+   * Compile the `Block` `block`, whose value is consumed whole as a
+   * collection value (the compilation root on the interval target). The
+   * last statement of the block is offered to
+   * `target.compileCollectionValue` first, in the scope of the block, where
+   * its block-local functions are known. A target with no ordinary lowering
+   * for a collection literal (the interval target has none for `Tuple` or
+   * `List`) can then compile a block whose value is a tuple:
+   * `(h := (u: real) ↦ 2u; h((1, 2)))` is an array of enclosures. A last
+   * statement that the target does not spell (a scalar) compiles the
+   * ordinary way, so the code is then the same as `compile(block)`.
+   */
+  static compileCollectionValueBlock(
+    block: Expression,
+    target: CompileTarget<Expression>
+  ): TargetSource {
+    const previous = BaseCompiler._collectionValueBlock;
+    BaseCompiler._collectionValueBlock = block;
+    try {
+      return BaseCompiler.compile(block, target);
+    } finally {
+      BaseCompiler._collectionValueBlock = previous;
+    }
+  }
+
+  /**
    * Compile a function expression
    */
   static compileExpr(
@@ -8183,6 +8505,115 @@ export class BaseCompiler {
       const claim = BaseCompiler.booleanClaim(node);
       if (claim !== undefined)
         return BaseCompiler.compile(claim ? engine.True : engine.False, target);
+    }
+
+    // A TUPLE argument at a parameter declared as a scalar maps over its
+    // components (user decision 2026-10-03), so the call is compiled as the
+    // tuple of the calls at each component (`declaredScalarTupleCall`).
+    {
+      const mappedArgs = new Set<number>();
+      let tupleCall = BaseCompiler.declaredScalarTupleCall(
+        engine,
+        h,
+        args,
+        target,
+        mappedArgs
+      );
+      // The interpreter evaluates each argument once, then maps the call over
+      // the components. The rewrite writes an argument that is not mapped
+      // (`Random()` in `Apply((u: real, w: real) ↦ w, (1, 2), Random())`)
+      // into each component call, which would evaluate it once per
+      // component. Thus each argument with an effect is first bound to a
+      // temporary of the same type, and the component calls read the
+      // temporary. A `Tuple` or `List` literal that the rewrite maps over is
+      // not bound whole: its parts are the mapped components, and each one is
+      // read once. But each component call reads its part where the call is
+      // emitted, after the temporaries of the other arguments, and the
+      // interpreter evaluates all the arguments, in order, before any call.
+      // Thus each part with an effect is bound to its own temporary too, in
+      // the order of the arguments, and the literal is written again with
+      // the temporaries. A part that is itself a `Tuple` or `List` literal
+      // maps again, so its own parts are bound the same way.
+      // `Apply((u: real, w: real) ↦ w - u, (Random(), Random()), Random())`
+      // draws the two components before `w`, as the interpreter does. A
+      // literal at a position that is not mapped (a parameter with no
+      // declared type, or a `list<…>` parameter that receives the list whole)
+      // is written whole into each component call, so it is bound like any
+      // other argument. A target with no value binding (a shader) keeps the
+      // rewrite as it is.
+      const bindings: Array<[string, TargetSource]> = [];
+      let inner = target;
+      if (
+        tupleCall !== undefined &&
+        target.bindExpr !== undefined &&
+        args.some((a) => a.isPure === false)
+      ) {
+        const names: string[] = [];
+        const bind = (a: Expression): Expression => {
+          const name = BaseCompiler.tempVar(target);
+          names.push(name);
+          bindings.push([name, BaseCompiler.compileValueOperand(a, target)]);
+          return BaseCompiler.typedTemp(engine, name, a.type.type);
+        };
+        const bindParts = (a: Expression): Expression => {
+          if (a.isPure !== false) return a;
+          if (!isFunction(a, 'Tuple') && !isFunction(a, 'List')) return bind(a);
+          return engine.function(a.operator, a.ops.map(bindParts));
+        };
+        const boundArgs = args.map((a, i) => {
+          if ((h === 'Apply' && i === 0) || a.isPure !== false) return a;
+          if (
+            mappedArgs.has(i) &&
+            (isFunction(a, 'Tuple') || isFunction(a, 'List'))
+          )
+            return bindParts(a);
+          return bind(a);
+        });
+        if (names.length > 0) {
+          tupleCall = BaseCompiler.declaredScalarTupleCall(
+            engine,
+            h,
+            boundArgs,
+            target
+          );
+          // The temporaries are parameters of the binding emitted below, so
+          // they are read by their own names, not as keys of the variables
+          // object.
+          inner = {
+            ...target,
+            var: (id) => (names.includes(id) ? id : target.var(id)),
+            boundVars: BaseCompiler.withBoundNames(target, names),
+          };
+        }
+      }
+      if (tupleCall !== undefined) {
+        // A shader writes a tuple as a float vector (`vec2`), which cannot
+        // hold the booleans of a tuple of boolean results, as for
+        // `Not((A, B))`.
+        if (
+          (target.language === 'glsl' || target.language === 'wgsl') &&
+          isFunction(tupleCall) &&
+          tupleCall.ops.some((x) => x.type.matches('boolean'))
+        )
+          throw new Error(
+            `Could not compile a call over the tuple argument of \`${h}\`: ` +
+              `the result is a tuple of booleans, which target ` +
+              `'${target.language}' cannot represent as a vector.`
+          );
+        if (bindings.length > 0)
+          return target.bindExpr!(
+            bindings,
+            BaseCompiler.compile(tupleCall, inner, 0)
+          );
+        return BaseCompiler.compile(tupleCall, target, prec);
+      }
+      // On the JavaScript target, a tuple at a parameter with no declared
+      // type is bound whole (`wholeTupleCall`).
+      if (target.language === 'javascript') {
+        const whole = BaseCompiler.wholeTupleCall(engine, h, args, target);
+        if (whole !== undefined)
+          return BaseCompiler.compile(whole, target, prec);
+      }
     }
 
     if (h === 'Sequence') {
@@ -8346,7 +8777,18 @@ export class BaseCompiler {
     // emit behind `success: true` (Tycho item 138). Every target's `Norm`
     // either lowers the point list (javascript) or fails closed on it, so the
     // rewrite is uniform rather than javascript-only.
-    if (h === 'Abs' && args.length === 1 && isPointListValue(args[0])) {
+    //
+    // A RESTRICTED list of points (`PointList(L {c}, y)`, typed
+    // `list<tuple<…>> | missing`) is a list of points too when it is
+    // present. Without this test, its `missing` arm hid the point element
+    // type, and the broadcast lowering took the absolute value of each
+    // coordinate: `[[1, 3], [2, 3]]` where the interpreter answers
+    // `[√10, √13]`.
+    if (
+      h === 'Abs' &&
+      args.length === 1 &&
+      (isPointListValue(args[0]) || isGatedPointList(args[0]))
+    ) {
       return BaseCompiler.compileExpr(engine, 'Norm', args, prec, target);
     }
 
@@ -8500,9 +8942,14 @@ export class BaseCompiler {
     // `_SYS.bcast` and never reach here.
     if (target.language === 'javascript') {
       const def = engine.lookupDefinition(h);
+      // A block-local function shadows an engine-level function with the
+      // same name, so the engine definition does not tell how its call
+      // broadcasts. The call of the local (`tryCompileLocalFunctionCall`)
+      // decides that from the local literal.
       const isBroadcastableHead =
         BaseCompiler.SCALAR_ARITHMETIC_HEADS.has(h) ||
         (isOperatorDef(def) &&
+          BaseCompiler.blockLocalFunction(h, target) === undefined &&
           def.operator.broadcastable === true &&
           !isRelationalOperator(h) &&
           !BaseCompiler.LOGICAL_BROADCAST_HEADS.has(h));
@@ -9678,15 +10125,24 @@ export class BaseCompiler {
         literal === undefined ||
         descendantRegionAt(BaseCompiler.cseRegionOf(top), literal, 0) !==
           undefined;
+      // The value of the body is returned whole to the callers, as the body
+      // of an emitted definition is: a target that spells collection values
+      // only in consuming positions (`CompileTarget.compileCollectionValue`)
+      // gets the body offered to that spelling first
+      // (`compileDefinitionBody`). On a target without that spelling, this
+      // is `compileOp(literal, 0, …)`.
+      const emitBody = () =>
+        BaseCompiler.withCseOperand(literal, 0, lambdaTarget, () =>
+          BaseCompiler.compileDefinitionBody(bodyNode, lambdaTarget)
+        );
       const compileBody = () =>
         harvested
-          ? BaseCompiler.compileOp(literal, 0, lambdaTarget, 0, bodyNode)
+          ? emitBody()
           : BaseCompiler.withNestedCseHarvest(
               bodyNode,
               lambdaTarget,
               [...(lambdaTarget.boundVars ?? params)],
-              () =>
-                BaseCompiler.compileOp(literal, 0, lambdaTarget, 0, bodyNode)
+              emitBody
             );
       const arrow = `((${binding.emitted.join(', ')}) => ${
         framedComplex.size > 0
@@ -9969,6 +10425,7 @@ export class BaseCompiler {
       // temporary bound inside an arm is never hoisted out of it (§7.3).
       const arm = (v: Expression, i: number): TargetSource => {
         const code = BaseCompiler.compileOp(node, i, target, 0, v);
+        BaseCompiler.assertNoStatementOperand(v, code, target);
         return coerce ? coerce(v, code) : code;
       };
       // A condition whose TYPE is the value `true` or `false` (a proven
@@ -10274,7 +10731,17 @@ export class BaseCompiler {
     }
 
     if (h === 'Block') {
-      return BaseCompiler.compileBlock(args, target, node, true, prec);
+      const collectionValue =
+        node !== undefined && node === BaseCompiler._collectionValueBlock;
+      if (collectionValue) BaseCompiler._collectionValueBlock = undefined;
+      return BaseCompiler.compileBlock(
+        args,
+        target,
+        node,
+        true,
+        prec,
+        collectionValue
+      );
     }
 
     // Absence-discharge primitives (§3.F). `IsMissing`/`Coalesce` lower through
@@ -14884,7 +15351,11 @@ export class BaseCompiler {
     target: CompileTarget<Expression>,
     node?: Expression,
     valueUsed = true,
-    prec = 0
+    prec = 0,
+    /** The value of the block is consumed whole as a collection value: the
+     * last statement is first offered to `target.compileCollectionValue`
+     * (see `compileCollectionValueBlock`). */
+    collectionValue = false
   ): TargetSource {
     // A block-local `Declare` is HELD, so a target's constness / declared type
     // is visible ONLY in this statement list. Harvest it up front: the
@@ -14998,8 +15469,13 @@ export class BaseCompiler {
             ),
           ])
         );
+      // The value of a lone statement is the value of the block, so a
+      // `Return` there gives its value (`tailValueFor`).
+      const value = valueUsed
+        ? BaseCompiler.tailValueFor(args[0], target)
+        : args[0];
       return BaseCompiler.withCseScope(node, -1, target, () =>
-        BaseCompiler.compileOp(args[0], -1, target, prec, args[0])
+        BaseCompiler.compileOp(args[0], -1, target, prec, value)
       );
     }
 
@@ -15200,9 +15676,16 @@ export class BaseCompiler {
       // definitions are already hoisted to the front of `args`, which is what
       // makes their forward references resolve.
       const localFunctions = BaseCompiler.newLocalFunctionScope(target);
+      // The function-valued locals whose value can change while the list
+      // runs, which a call reads at run time (see `reboundLocalNames`).
+      const reboundLocals = BaseCompiler.reboundLocalNames(args);
       // …and the whole-list scope a function-literal BODY resolves against,
       // which is what makes mutually recursive definitions compile.
-      const lexicalFunctions = BaseCompiler.lexicalFunctionScope(args, target);
+      const lexicalFunctions = BaseCompiler.lexicalFunctionScope(
+        args,
+        target,
+        reboundLocals
+      );
 
       const localTarget: CompileTarget<Expression> = {
         ...target,
@@ -15214,6 +15697,11 @@ export class BaseCompiler {
         declaredVarTypes,
         localFunctions,
         lexicalFunctions,
+        reboundFunctions: BaseCompiler.reboundFunctionScope(
+          args,
+          target,
+          reboundLocals
+        ),
       };
 
       if (target.language === 'javascript')
@@ -15233,7 +15721,11 @@ export class BaseCompiler {
               (stmtTarget) => {
                 // Bring this statement's own function-valued binding into scope
                 // before compiling it (see `localFunctions` above).
-                BaseCompiler.noteLocalFunction(arg, localFunctions);
+                BaseCompiler.noteLocalFunction(
+                  arg,
+                  localFunctions,
+                  reboundLocals
+                );
                 // An ELSE-LESS `If` in STATEMENT position. `if c { … }` with no
                 // else has no value — the interpreter answers `Nothing`, which is
                 // the erasure marker and deliberately has no lowering — so
@@ -15275,14 +15767,34 @@ export class BaseCompiler {
                 //    else-less `If` inside an interval LOOP body — pre-existing,
                 //    separate, and not to be widened here.)
                 //  - The GPU targets: their own statement model, plus the above.
+                //
+                // An `If` with a `Return` in a branch, in statement position,
+                // takes the same statement form on plain JavaScript: the
+                // conditional expression would put `return` inside an
+                // expression (`c ? return 1 : return 5`), a syntax error. On
+                // the interval target the statement form is not correct (see
+                // above), so the shape declines there.
+                const isStatement = !(valueUsed && i === stmts.length - 1);
+                const returnsEarly =
+                  isFunction(arg, 'If') &&
+                  isStatement &&
+                  BaseCompiler.containsEarlyReturn(arg);
                 if (
                   isFunction(arg, 'If') &&
-                  arg.nops === 2 &&
-                  !(valueUsed && i === stmts.length - 1) &&
+                  (arg.nops === 2 || returnsEarly) &&
+                  isStatement &&
                   (target.language === undefined ||
                     target.language === 'javascript')
                 )
                   return [BaseCompiler.compileLoopBody(arg, stmtTarget)];
+                if (returnsEarly && BaseCompiler.writesBlocksAsIife(target))
+                  throw new Error(
+                    `Could not compile \`If\`: a branch returns early ` +
+                      `(\`Return\`) from a statement that is not the last ` +
+                      `one of the block, and target '${target.language}' ` +
+                      `has no statement form for a conditional with a ` +
+                      `\`Return\` in a branch.`
+                  );
                 // For Declare, pass inferred type hint to the target hook
                 if (
                   isFunction(arg, 'Declare') &&
@@ -15338,7 +15850,34 @@ export class BaseCompiler {
                 // A bare expression statement is its own bindable region, keyed
                 // `(statement, -1)`; every other statement head reaches its own
                 // value edges from `compileExpr` (Assign RHS, Return value, …).
-                return [BaseCompiler.compileOp(arg, -1, stmtTarget, 0, arg)];
+                // The last statement of a block whose value is consumed whole
+                // (`compileCollectionValueBlock`) is offered to the spelling of
+                // a collection value of the target first. It is compiled the
+                // ordinary way when the target does not spell it (a scalar).
+                // A `Return` in the last statement gives the value of the
+                // block (`tailValueFor`), which the IIFE or the `block` hook
+                // returns once.
+                const value = isStatement
+                  ? arg
+                  : BaseCompiler.tailValueFor(arg, target);
+                const spell = stmtTarget.compileCollectionValue;
+                if (
+                  collectionValue &&
+                  valueUsed &&
+                  i === stmts.length - 1 &&
+                  spell !== undefined
+                )
+                  return [
+                    BaseCompiler.withCseOperand(
+                      arg,
+                      -1,
+                      stmtTarget,
+                      () =>
+                        spell(value, stmtTarget) ??
+                        BaseCompiler.compile(value, stmtTarget, 0)
+                    ),
+                  ];
+                return [BaseCompiler.compileOp(arg, -1, stmtTarget, 0, value)];
               }
             )
           )
@@ -15417,7 +15956,8 @@ export class BaseCompiler {
 
       if (target.block) return target.block(result);
 
-      // Default: JavaScript IIFE
+      // Default: JavaScript IIFE. A `Return` in the last statement was
+      // compiled as its value (`tailValue`), so it is returned here once.
       result[result.length - 1] = `return ${result[result.length - 1]}`;
       return `(() => {${target.ws('\n')}${result.join(
         `;${target.ws('\n')}`
@@ -16586,10 +17126,20 @@ export class BaseCompiler {
       // `ReadonlyMap`: the target exposes it for READS during compilation, and
       // only this routine writes it.
       const bodyLocalFunctions = BaseCompiler.newLocalFunctionScope(target);
+      const bodyRebound = BaseCompiler.reboundLocalNames(withDecls);
       const bodyTarget: CompileTarget<Expression> = {
         ...BaseCompiler.loopBodyTempTarget(withDecls, target),
         localFunctions: bodyLocalFunctions,
-        lexicalFunctions: BaseCompiler.lexicalFunctionScope(withDecls, target),
+        lexicalFunctions: BaseCompiler.lexicalFunctionScope(
+          withDecls,
+          target,
+          bodyRebound
+        ),
+        reboundFunctions: BaseCompiler.reboundFunctionScope(
+          withDecls,
+          target,
+          bodyRebound
+        ),
       };
       const complexFrame = new Map<string, boolean>();
       for (const s of withDecls)
@@ -16604,7 +17154,11 @@ export class BaseCompiler {
             .map((s) => {
               // Statement-ordered, as in `compileBlock` — see the
               // `localFunctions` comment there.
-              BaseCompiler.noteLocalFunction(s, bodyLocalFunctions);
+              BaseCompiler.noteLocalFunction(
+                s,
+                bodyLocalFunctions,
+                bodyRebound
+              );
               return BaseCompiler.compileLoopBody(s, bodyTarget);
             })
             .join('; ')
@@ -16781,30 +17335,242 @@ export class BaseCompiler {
    */
   private static lexicalFunctionScope(
     stmts: ReadonlyArray<Expression>,
-    target: CompileTarget<Expression>
+    target: CompileTarget<Expression>,
+    rebound: ReboundFunctionLocals
   ): ReadonlyMap<string, Expression> | undefined {
     if (target.declare !== undefined) return undefined;
     const scope = new Map(
       target.lexicalFunctions ?? target.localFunctions ?? []
     );
-    for (const stmt of stmts) BaseCompiler.noteLocalFunction(stmt, scope);
+    for (const stmt of stmts)
+      BaseCompiler.noteLocalFunction(stmt, scope, rebound);
     return scope;
   }
 
   /**
-   * Record statement `stmt`'s function-valued local in `scope`, if it declares
-   * one. A local whose value is NOT a function literal REMOVES the entry it
-   * shadows (`let g = 5` over an outer function-valued `g` must not keep
-   * calling the outer one).
+   * The `reboundFunctions` scope for a statement list (see
+   * `CompileTarget.reboundFunctions`): the enclosing scope, without the names
+   * this list declares again (a `Declare` makes a new binding, which this
+   * list's own analysis describes), and with the names this list rebinds.
+   *
+   * A name this list writes but does NOT declare is a binding of an enclosing
+   * list. That list saw every write of this list as a nested write, so its
+   * entry already accounts for all of the literals the name can hold. Its
+   * decline is therefore kept: this list sees only some of those literals,
+   * and their agreement proves nothing about the others.
+   */
+  private static reboundFunctionScope(
+    stmts: ReadonlyArray<Expression>,
+    target: CompileTarget<Expression>,
+    rebound: ReboundFunctionLocals
+  ): ReadonlyMap<string, { readonly decline?: string }> | undefined {
+    if (target.declare !== undefined) return undefined;
+    const inherited = target.reboundFunctions;
+    if (rebound.rebound.size === 0 && (inherited?.size ?? 0) === 0)
+      return inherited;
+    const scope = new Map(inherited ?? []);
+    const declared = new Set<string>();
+    for (const stmt of stmts)
+      if (isFunction(stmt, 'Declare') && isSymbol(stmt.ops[0])) {
+        declared.add(stmt.ops[0].symbol);
+        scope.delete(stmt.ops[0].symbol);
+      }
+    for (const [name, info] of rebound.rebound) {
+      if (!declared.has(name) && inherited?.get(name)?.decline !== undefined)
+        continue;
+      scope.set(name, info.decline === undefined ? {} : { decline: info.decline });
+    }
+    return scope;
+  }
+
+  /**
+   * The function-valued locals of statement list `stmts` whose value can
+   * change while the list runs, so that no single function literal is their
+   * value at every call. A name is such a local when an `Assign` writes it
+   * INSIDE a statement (a loop body, a branch, an inner block, a
+   * function-literal body), or when the list binds it more than once at the
+   * top level (a `Declare` with a value, or an `Assign`).
+   *
+   * In `k := f1; for … { k(1); k := f2 }` the call runs with `f1` in the first
+   * iteration and with `f2` after it. Such a call is compiled as a call of the
+   * run-time binding (`k(1)`), which reads the value the interpreter reads at
+   * that point, and it never folds or inlines one literal. The call site needs
+   * the signature of the callee (arity, broadcast, complex arguments), so the
+   * name compiles only when every literal it is assigned has the same
+   * signature. Otherwise, and when the name is also assigned a value that is
+   * not a function literal, the entry holds the reason the call declines.
+   *
+   * A write is not counted when it writes a different binding of the same
+   * name: inside an inner block that declares the name again, or inside a
+   * function literal that has a parameter of that name.
+   *
+   * The result is empty when the list has no function literal. Then the list
+   * binds no function-valued local, and an entry it inherits is already
+   * correct: a write to that name inside this list is a nested write in the
+   * list that made the entry.
+   */
+  private static reboundLocalNames(
+    stmts: ReadonlyArray<Expression>
+  ): ReboundFunctionLocals {
+    const result: ReboundFunctionLocals = {
+      rebound: new Map(),
+      writes: new Map(),
+    };
+    if (!stmts.some((s) => s.has('Function'))) return result;
+    // Every value each name is bound to in the list (`undefined` for a leaf of
+    // a destructuring write, whose value is not read here), and the
+    // statements that bind it.
+    const values = new Map<string, Array<Expression | undefined>>();
+    const writers = new Map<string, Set<Expression>>();
+    const nested = new Set<string>();
+    const topLevelCount = new Map<string, number>();
+    const record = (
+      name: string,
+      value: Expression | undefined,
+      stmt: Expression
+    ): void => {
+      values.set(name, [...(values.get(name) ?? []), value]);
+      writers.set(name, (writers.get(name) ?? new Set()).add(stmt));
+    };
+    const walk = (
+      node: Expression | undefined,
+      shadowed: ReadonlySet<string>,
+      stmt: Expression
+    ): void => {
+      if (!isFunction(node)) return;
+      let inner = shadowed;
+      if (node.operator === 'Function') {
+        const params = node.ops
+          .slice(1)
+          .map((p) => functionLiteralParameterName(p))
+          .filter((p) => p !== '');
+        if (params.length > 0) inner = new Set([...shadowed, ...params]);
+      } else if (node.operator === 'Block') {
+        const names = [...(node.localScope?.bindings.keys() ?? [])];
+        for (const s of node.ops)
+          if (isFunction(s, 'Declare') && isSymbol(s.ops[0]))
+            names.push(s.ops[0].symbol);
+        if (names.length > 0) inner = new Set([...shadowed, ...names]);
+      }
+      if (node.operator === 'Assign') {
+        const writeLeaf = (t: Expression | undefined, value?: Expression) => {
+          if (isSymbol(t)) {
+            if (inner.has(t.symbol)) return;
+            nested.add(t.symbol);
+            record(t.symbol, value, stmt);
+          } else if (isFunction(t, 'Tuple'))
+            for (const leaf of t.ops) writeLeaf(leaf);
+        };
+        writeLeaf(node.ops[0], node.ops[1]);
+      }
+      for (const op of node.ops) walk(op, inner, stmt);
+    };
+    const none = new Set<string>();
+    for (const stmt of stmts) {
+      if (
+        (isFunction(stmt, 'Declare') || isFunction(stmt, 'Assign')) &&
+        isSymbol(stmt.ops[0])
+      ) {
+        const name = stmt.ops[0].symbol;
+        const value =
+          stmt.operator === 'Declare'
+            ? BaseCompiler.declareValueOperand(stmt.ops)
+            : stmt.ops[1];
+        if (value !== undefined) {
+          topLevelCount.set(name, (topLevelCount.get(name) ?? 0) + 1);
+          record(name, value, stmt);
+        }
+        for (const op of stmt.ops.slice(1)) walk(op, none, stmt);
+      } else walk(stmt, none, stmt);
+    }
+
+    const signature = (literal: Expression & FunctionInterface): string =>
+      [
+        String(literal.nops - 1),
+        typeToString(literal.type.type),
+        ...literal.ops.slice(1).map((p) => {
+          const t = functionLiteralParameterType(p);
+          return t === undefined ? '' : typeToString(t);
+        }),
+      ].join('|');
+    for (const [name, vals] of values) {
+      if (!nested.has(name) && (topLevelCount.get(name) ?? 0) <= 1) continue;
+      const literals = vals.filter(
+        (v): v is Expression & FunctionInterface =>
+          v !== undefined && isFunction(v, 'Function')
+      );
+      // A name never assigned a function literal is not function-valued.
+      if (literals.length === 0) continue;
+      const reason =
+        `Could not compile a call of \`${name}\`: the block-local function ` +
+        `\`${name}\` is assigned more than once or inside a nested statement, ` +
+        `so the compiled call reads its value at run time and must know the ` +
+        `signature of every value it can hold. `;
+      let decline: string | undefined;
+      if (literals.length < vals.length)
+        decline =
+          reason +
+          `It is also assigned a value that is not a function literal, ` +
+          `whose signature is not known.`;
+      else if (new Set(literals.map(signature)).size > 1)
+        decline =
+          reason +
+          `It is assigned functions with different signatures ` +
+          `(${[...new Set(literals.map((l) => typeToString(l.type.type)))].join(', ')}, ` +
+          `or a different number of parameters).`;
+      result.rebound.set(
+        name,
+        decline === undefined ? { literal: literals[0] } : { decline }
+      );
+      for (const stmt of writers.get(name) ?? [])
+        result.writes.set(
+          stmt,
+          (result.writes.get(stmt) ?? new Set()).add(name)
+        );
+    }
+    return result;
+  }
+
+  /**
+   * Record statement `stmt`'s function-valued local in `scope`, if it binds
+   * one: a `Declare` whose value is a function literal (`const g = (k) => …`),
+   * or an `Assign` of a function literal to a name (`Declare(g, "function")`
+   * followed by `Assign(g, Function(…))`, or an `Assign` whose `Declare` was
+   * synthesized by `withImplicitLocalDeclares`).
+   *
+   * A binding whose value is NOT a function literal REMOVES the entry it
+   * shadows or replaces (`let g = 5` over an outer function-valued `g` must
+   * not keep calling the outer one).
+   *
+   * A name that `rebound` lists (its value can change while the list runs —
+   * see `reboundLocalNames`) enters the scope at the first statement that
+   * assigns it, at the top level or inside the statement, with the literal
+   * `rebound` chose for it; it has no entry when its call declines. A
+   * `Declare` of it with no value removes the entry: the binding has no value
+   * until an assignment runs.
    */
   private static noteLocalFunction(
     stmt: Expression,
-    scope: Map<string, Expression> | undefined
+    scope: Map<string, Expression> | undefined,
+    rebound: ReboundFunctionLocals
   ): void {
     if (scope === undefined) return;
-    if (!isFunction(stmt, 'Declare') || !isSymbol(stmt.ops[0])) return;
+    for (const name of rebound.writes.get(stmt) ?? []) {
+      const literal = rebound.rebound.get(name)?.literal;
+      if (literal !== undefined) scope.set(name, literal);
+      else scope.delete(name);
+    }
+    if (!isFunction(stmt, 'Declare') && !isFunction(stmt, 'Assign')) return;
+    if (!isSymbol(stmt.ops[0])) return;
     const name = stmt.ops[0].symbol;
-    const value = BaseCompiler.declareValueOperand(stmt.ops);
+    const value =
+      stmt.operator === 'Declare'
+        ? BaseCompiler.declareValueOperand(stmt.ops)
+        : stmt.ops[1];
+    if (rebound.rebound.has(name)) {
+      if (value === undefined) scope.delete(name);
+      return;
+    }
     if (value !== undefined && isFunction(value, 'Function'))
       scope.set(name, value);
     else scope.delete(name);
@@ -18155,7 +18921,13 @@ export class BaseCompiler {
           // compilation was not going to pay anyway: it is memoised per
           // (function literal, order) (`derivative`, symbolic/derivative.ts),
           // and the emission that follows reads the same entry.
-          const closedForm = derivativeClosedForm('Derivative', callee.ops);
+          // A multi-index derivative of a large body is declined, and its
+          // closed form is not computed (`appliedDerivativeTooLarge`).
+          const closedForm = multiIndexDerivativeTooLarge(callee, (id) =>
+            BaseCompiler.userFunctionLiteral(expr.engine, id)
+          )
+            ? undefined
+            : derivativeClosedForm('Derivative', callee.ops);
           if (isFunction(closedForm, 'Function') && expr.ops.length === 2)
             return BaseCompiler.withDerivativeArgument(
               closedForm,
@@ -19652,6 +20424,65 @@ export class BaseCompiler {
     if (e.operator === 'Return') return true;
     if (e.operator === 'Function') return false;
     return e.ops.some(BaseCompiler.containsEarlyReturn);
+  }
+
+  /**
+   * Whether `target` writes a block with several statements as a JavaScript
+   * IIFE (`(() => { …; return v })()`): it has no `block` hook and no
+   * statement model of its own (the JavaScript and interval targets).
+   */
+  private static writesBlocksAsIife(target: CompileTarget<Expression>): boolean {
+    return target.block === undefined && !target.bareStatementBlocks;
+  }
+
+  /**
+   * The value of `e` in a TAIL position — the compilation root, or the last
+   * statement of a block whose value is used — on a target that writes a
+   * block as an IIFE (`writesBlocksAsIife`). There, `Return(v)` gives `v`,
+   * and a `Return` in a branch of an `If` gives the value of that branch:
+   * `If(c, Return(1), Return(5))` is the conditional `If(c, 1, 5)`. This is
+   * the reading the IIFE already gives an earlier `Return` (the IIFE
+   * returns it as the value of the block). The emitted `return` is a
+   * statement, so written in place it put `return` inside an expression
+   * (`return return x`, `c ? return 1 : return 5`), a syntax error.
+   *
+   * With `keepReturn`, a `Return` that is `e` itself is kept (a target
+   * whose block hook emits it as the `return` statement of the block, as
+   * Python does); a `Return` in a branch is still replaced.
+   *
+   * `e` itself when it has no such `Return`.
+   */
+  static tailValue(e: Expression, keepReturn = false): Expression {
+    if (isFunction(e, 'Return') && e.nops === 1)
+      return keepReturn ? e : BaseCompiler.tailValue(e.ops[0]);
+    // A block of one statement is that statement (`Block(Return(x))`).
+    if (isFunction(e, 'Block') && e.nops === 1) {
+      const inner = BaseCompiler.tailValue(e.ops[0], keepReturn);
+      return inner === e.ops[0] ? e : inner;
+    }
+    if (isFunction(e, 'If') && e.nops >= 2) {
+      const arms = e.ops.slice(1).map((a) => BaseCompiler.tailValue(a));
+      if (arms.every((a, i) => a === e.ops[i + 1])) return e;
+      return e.engine._fn('If', [e.ops[0], ...arms]);
+    }
+    return e;
+  }
+
+  /**
+   * `tailValue` for the targets that read a `Return` in a tail position as
+   * its value: the IIFE targets (`writesBlocksAsIife`), and Python, whose
+   * block hook writes the last statement as `return …` (a `Return` itself
+   * is kept there, and only a `Return` in a branch of an `If` is replaced).
+   * `e` itself on any other target.
+   */
+  private static tailValueFor(
+    e: Expression,
+    target: CompileTarget<Expression>
+  ): Expression {
+    if (BaseCompiler.writesBlocksAsIife(target))
+      return BaseCompiler.tailValue(e);
+    if (target.language === 'python') return BaseCompiler.tailValue(e, true);
+    return e;
   }
 
   /**
@@ -22402,6 +23233,448 @@ export class BaseCompiler {
   }
 
   /**
+   * The signature DECLARED for the user function `id`
+   * (`ce.declare('k', '(real) -> real')`), or `undefined` when its signature
+   * was only inferred from the function literal.
+   */
+  private static declaredUserSignature(
+    engine: ComputeEngine,
+    id: string
+  ): Type | undefined {
+    const def = engine.lookupDefinition(id);
+    if (!def) return undefined;
+    if (isOperatorDef(def))
+      return def.operator.inferredSignature
+        ? undefined
+        : def.operator.signature?.type;
+    if (!('value' in def) || def.value === undefined) return undefined;
+    if (def.value.inferredType) return undefined;
+    const t = def.value.type?.type;
+    return typeof t === 'object' && t.kind === 'signature' ? t : undefined;
+  }
+
+  /**
+   * A call of a user function, or `Apply(literal, …args)`, with a tuple or a
+   * list of tuples at a parameter with NO declared type, written in a form
+   * that the JavaScript target compiles with the meaning the interpreter
+   * gives it: an untyped parameter binds a tuple whole, and a list maps over
+   * its elements, each one a point bound whole. The emitted JavaScript maps
+   * a function over any array at run time (`_SYS.bcastFn`), and a point is
+   * an array, so `Apply(u ↦ 7, (a, b))` gave `[7, 7]` and `g(P)` for a list
+   * of points `P` gave `[[7, 7], [7, 7]]`, where the interpreter gives `7`
+   * and `[7, 7]`.
+   *
+   * - `Apply(literal, …args)` where every argument is a tuple at an untyped
+   *   parameter: the body of the literal with each parameter replaced by
+   *   its argument. Each argument must be a symbol or a `Tuple` literal of
+   *   symbols and numbers, so that the replacement computes nothing twice.
+   * - A call with one argument, a list of tuples that is not a list
+   *   literal, at an untyped parameter of a function that maps over a list:
+   *   `Map(literal, list)` for `Apply`, and `Map(x ↦ g(x), list)` for a
+   *   function `g` held as a value. `Map` binds each element whole. A
+   *   function assigned with no declaration (an operator definition)
+   *   already maps a list of points per element, and is not changed, except
+   *   when `operatorDefinitions` is true (`Map(g, list)`, below).
+   * - `Map(f, list)` over a list of tuples: the same map, with `f` a
+   *   function literal or the name of a user function.
+   *
+   * `undefined` for any other call.
+   */
+  static wholeTupleCall(
+    engine: ComputeEngine,
+    h: string,
+    args: ReadonlyArray<Expression>,
+    target: CompileTarget<Expression>,
+    operatorDefinitions = false
+  ): Expression | undefined {
+    // `Map(f, list)` over a list of tuples is the same map as the call
+    // `f(list)` below: rewritten so that each tuple is bound whole.
+    // A function assigned with no declaration (an operator definition) is
+    // included here: `Map` hands it the elements through its broadcasting
+    // wrapper, which maps into each point.
+    if (h === 'Map' && args.length === 2) {
+      const [f, list] = args;
+      const called = isSymbol(f)
+        ? BaseCompiler.wholeTupleCall(engine, f.symbol, [list], target, true)
+        : isFunction(f, 'Function') && !BaseCompiler.isElementCall(f)
+          ? BaseCompiler.wholeTupleCall(engine, 'Apply', [f, list], target)
+          : undefined;
+      return isFunction(called, 'Map') ? called : undefined;
+    }
+    let literal: Expression | undefined;
+    let callArgs: ReadonlyArray<Expression> = args;
+    let declared: Type | undefined;
+    if (h === 'Apply') {
+      if (!isFunction(args[0], 'Function')) return undefined;
+      literal = args[0];
+      callArgs = args.slice(1);
+    } else {
+      // A block-local function `h` shadows an engine-level function with the
+      // same name. Its call is compiled as a call of the local binding
+      // (`tryCompileLocalFunctionCall`), and is not rewritten here.
+      if (BaseCompiler.blockLocalFunction(h, target) !== undefined)
+        return undefined;
+      const def = engine.lookupDefinition(h);
+      if (!def || (isOperatorDef(def) && !operatorDefinitions))
+        return undefined;
+      literal = BaseCompiler.userFunctionLiteral(engine, h);
+      if (literal === undefined) return undefined;
+      declared = BaseCompiler.declaredUserSignature(engine, h);
+    }
+    if (!isFunction(literal, 'Function')) return undefined;
+    const params = literal.ops.slice(1);
+    if (
+      params.length !== callArgs.length ||
+      params.some((p) => isRestParameter(p) || isDestructuringParameter(p))
+    )
+      return undefined;
+    const declaredArgs =
+      typeof declared === 'object' && declared.kind === 'signature'
+        ? (declared.args ?? [])
+        : [];
+    const untyped = (i: number) => {
+      if (functionLiteralParameterType(params[i]) !== undefined) return false;
+      const t = declaredArgs[i]?.type;
+      return t === undefined || t === 'unknown' || t === 'any';
+    };
+    const isTupleTyped = (x: Expression) =>
+      isTupleShapedType(resolveTypeAlias(x.type.type));
+
+    // `Apply` with a tuple at each untyped parameter: the body with the
+    // tuples in place of the parameters.
+    const simple = (x: Expression) =>
+      isSymbol(x) ||
+      (isFunction(x, 'Tuple') &&
+        x.ops.every((c) => isSymbol(c) || isNumber(c)));
+    if (
+      h === 'Apply' &&
+      callArgs.length > 0 &&
+      callArgs.every((x, i) => untyped(i) && isTupleTyped(x) && simple(x))
+    ) {
+      const substitutions: Record<string, Expression> = {};
+      for (const [i, p] of params.entries()) {
+        const name = functionLiteralParameterName(p);
+        if (name === undefined) return undefined;
+        substitutions[name] = callArgs[i];
+      }
+      // `subs` does not avoid capture. A binder of the body (a `Sum` index, a
+      // nested `Function` parameter, a `Block` local) that has the name of a
+      // parameter would get the tuple in place of its own variable, and a
+      // binder with the name of a symbol of a tuple would capture that
+      // symbol: `Apply(u ↦ Sum(k·u[1], k=1..3), (k, 2))` would read the
+      // index `k` instead of the outer `k`. The body is a `Block` whose scope
+      // also holds the parameters, so its statements are walked one by one,
+      // and of its own bindings only the locals that are not parameters are
+      // kept. A statement that declares or assigns a parameter rebinds it.
+      const body = literal.op1;
+      const statements = isFunction(body, 'Block') ? body.ops : [body];
+      const binders = new Set<string>();
+      for (const s of statements) {
+        collectBinderNames(s, binders);
+        if (
+          (isFunction(s, 'Declare') || isFunction(s, 'Assign')) &&
+          isSymbol(s.op1)
+        )
+          binders.add(s.op1.symbol);
+      }
+      if (isFunction(body, 'Block'))
+        for (const n of boundVariableNames(body))
+          if (!(n in substitutions)) binders.add(n);
+      for (const [param, arg] of Object.entries(substitutions)) {
+        const captured = binders.has(param)
+          ? param
+          : arg.symbols.find((s) => binders.has(s));
+        if (captured !== undefined)
+          throw new Error(
+            `Could not compile \`Apply\`: a tuple argument is bound whole ` +
+              `to an untyped parameter, and the body of the function binds ` +
+              `\`${captured}\`, which is the name of the parameter or a ` +
+              `symbol of the argument.`
+          );
+      }
+      return literal.op1.subs(substitutions);
+    }
+
+    // One argument, a list of tuples at an untyped parameter of a function
+    // that maps over a list: a map that binds each tuple whole.
+    if (callArgs.length !== 1 || !untyped(0)) return undefined;
+    const arg = callArgs[0];
+    if (isFunction(arg, 'List')) return undefined;
+    const t = resolveTypeAlias(arg.type.type);
+    if (
+      typeof t !== 'object' ||
+      t.kind !== 'list' ||
+      !isTupleShapedType(resolveTypeAlias(t.elements))
+    )
+      return undefined;
+    const listsMap =
+      h === 'Apply'
+        ? paramsAreScalar(literal.type.type)
+        : BaseCompiler.userFunctionParamsAreScalar(engine, h);
+    if (!listsMap) return undefined;
+    // The element is applied through a call (`Apply` of the literal, or a
+    // call of `g`), which binds the point whole as the cases above do. A
+    // `Map` over the literal itself would compile the literal with its
+    // run-time broadcast, which maps into each point. The name of the element
+    // must not be a symbol of the literal either, because the map's own
+    // parameter would capture it.
+    let element = '_point';
+    while (
+      arg.symbols.includes(element) ||
+      (h === 'Apply' && literal.symbols.includes(element))
+    )
+      element = `_${element}`;
+    const call =
+      h === 'Apply' ? ['Apply', literal.json, element] : [h, element];
+    return engine.box([
+      'Map',
+      ['Function', call, element],
+      arg.json,
+    ] as never);
+  }
+
+  /**
+   * Whether the function literal `f` is `x ↦ g(x)` or `x ↦ Apply(…, x)`: a
+   * call whose only argument is the one parameter. `wholeTupleCall` writes a
+   * map in that form, and the form is not written again.
+   */
+  private static isElementCall(f: Expression): boolean {
+    if (!isFunction(f, 'Function') || f.nops !== 2) return false;
+    const name = functionLiteralParameterName(f.ops[1]);
+    let body = f.op1;
+    while (isFunction(body, 'Block') && body.nops === 1) body = body.op1;
+    if (!isFunction(body) || name === undefined) return false;
+    const last = body.ops[body.nops - 1];
+    return isSymbol(last, name) && (body.operator === 'Apply' || body.nops === 1);
+  }
+
+  /**
+   * A call `h(…args)` of a user function, or `Apply(literal, …args)`, with a
+   * TUPLE argument at a parameter declared as a scalar, written as the
+   * tuple of the calls at each component. The interpreter maps such a call
+   * over the components (`declaredScalarTupleCells`,
+   * `boxed-expression/boxed-function.ts`, user decision 2026-10-03):
+   * `Apply((u: real) ↦ 7, (a, b))` is `(7, 7)`. Each target then compiles
+   * the tuple with its own lowering: an array in JavaScript, an array of
+   * enclosures on the interval target, a `vecN` on a shader. A component
+   * that is itself a tuple maps again when its call is compiled.
+   *
+   * A list LITERAL of tuples at such a parameter is written as the list of
+   * the calls at each tuple, so that each tuple maps too.
+   *
+   * `undefined` when no such argument is a tuple (or a list literal of
+   * tuples). The compilation is declined, with the reason, when the
+   * tuple has no static length, when two tuples have different lengths
+   * (the interpreter gives an `incompatible-dimensions` error), when a
+   * component is a list (an `incompatible-type` error), when another
+   * argument is a collection and the function maps over a list (the
+   * interpreter maps the call over its cells first; a list at a collection
+   * parameter is bound whole in each cell instead), or when the tuple is
+   * neither a `Tuple` literal nor a symbol
+   * (its components cannot be read without computing it again for each
+   * one).
+   *
+   * When `mappedArgs` is given, it receives the index in `args` of each
+   * argument that the rewrite maps over: a tuple at a scalar parameter, or
+   * the list literal of tuples. The rewrite reads each part of such an
+   * argument once. It writes every other argument whole into each
+   * component call.
+   */
+  static declaredScalarTupleCall(
+    engine: ComputeEngine,
+    h: string,
+    args: ReadonlyArray<Expression>,
+    target: CompileTarget<Expression>,
+    mappedArgs?: Set<number>
+  ): Expression | undefined {
+    let literal: Expression | undefined;
+    let declared: Type | undefined;
+    let callArgs: ReadonlyArray<Expression> = args;
+    let call: (cell: Expression[]) => Expression;
+    let name: string;
+    // A block-local function `h` shadows an engine-level function with the
+    // same name, so its own literal gives the parameter types. It has no
+    // declared signature.
+    const local =
+      h === 'Apply' ? undefined : BaseCompiler.blockLocalFunction(h, target);
+    if (local === null) return undefined;
+    if (h === 'Apply') {
+      const fn = args[0];
+      if (!isFunction(fn, 'Function')) return undefined;
+      literal = fn;
+      callArgs = args.slice(1);
+      call = (cell) => engine.function('Apply', [fn, ...cell]);
+      name = '`Apply`';
+    } else {
+      literal = local ?? BaseCompiler.userFunctionLiteral(engine, h);
+      if (literal === undefined) return undefined;
+      declared =
+        local === undefined
+          ? BaseCompiler.declaredUserSignature(engine, h)
+          : undefined;
+      // In the current scope, `engine.function()` checks the arguments
+      // against the ENGINE-level definition of `h`, and declares `h` in the
+      // engine when it has no definition. A block local is not that
+      // function: with an engine-level `h: (string) -> number`, each
+      // component of the call of the local `(u: real) ↦ 2u` became an
+      // `incompatible-type` error. Thus the component call of a block local
+      // is boxed in a new scope whose parent is the scope that defines the
+      // local (the lexical parent of its body). There, `h` is the local, and
+      // a declaration made while boxing goes into the new scope, not into
+      // the engine. The compilation of the call reads the local
+      // (`tryCompileLocalFunctionCall`).
+      const parent = local?.op1.localScope?.parent;
+      call =
+        parent === undefined || parent === null
+          ? (cell) => engine.function(h, cell)
+          : (cell) => {
+              engine.pushScope({ parent, bindings: new Map() });
+              try {
+                return engine.function(h, cell);
+              } finally {
+                engine.popScope();
+              }
+            };
+      name = `a call of \`${h}\``;
+    }
+    const isScalarParam = declaredScalarParams(literal, declared);
+    if (isScalarParam === undefined) return undefined;
+    // Whether the function maps over a list argument (all its parameters are
+    // scalars). When it does not, a list argument is bound whole in each
+    // cell of the tuple map.
+    const listsMap =
+      h === 'Apply' || local !== undefined
+        ? paramsAreScalar(literal.type.type)
+        : BaseCompiler.userFunctionParamsAreScalar(engine, h);
+    const tupleTypeOf = (x: Expression) => {
+      const t = resolveTypeAlias(x.type.type);
+      return typeof t === 'object' && t.kind === 'tuple' ? t : undefined;
+    };
+    const decline = (why: string): never => {
+      throw new Error(`Could not compile ${name}: ${why}`);
+    };
+    const isListOfTuples = (x: Expression) =>
+      isFunction(x, 'List') &&
+      x.nops > 0 &&
+      x.ops.every((e) => tupleTypeOf(e) !== undefined || isFunction(e, 'Tuple'));
+    const isOtherCollection = (x: Expression) =>
+      tupleTypeOf(x) === undefined &&
+      !isTupleShapedType(resolveTypeAlias(x.type.type)) &&
+      (x.isCollection === true || x.type.matches('collection<any>'));
+
+    // A list literal of tuples: the list of the calls at each tuple.
+    const listAt = callArgs.findIndex(
+      (x, i) => listsMap && isScalarParam(i) && isListOfTuples(x)
+    );
+    if (listAt >= 0) {
+      if (callArgs.some((x, i) => i !== listAt && isOtherCollection(x)))
+        return undefined;
+      const list = callArgs[listAt];
+      if (!isFunction(list, 'List')) return undefined;
+      mappedArgs?.add(listAt + args.length - callArgs.length);
+      return engine.function(
+        'List',
+        list.ops.map((e) => call(callArgs.map((x, i) => (i === listAt ? e : x))))
+      );
+    }
+
+    // A list of tuples that is not a literal (a symbol), the one argument of
+    // a function assigned with no declaration (an operator definition): the
+    // map `Map(x ↦ h(x), list)`, whose element call maps over the tuple as
+    // above. The JavaScript target refused the call `h(list)` itself as a
+    // broadcast over a possibly list-valued operand. A function held as a
+    // value and `Apply` already compile such a call.
+    if (
+      h !== 'Apply' &&
+      local === undefined &&
+      listsMap &&
+      callArgs.length === 1 &&
+      isScalarParam(0) &&
+      !isFunction(callArgs[0], 'List') &&
+      isOperatorDef(engine.lookupDefinition(h)!)
+    ) {
+      const arg = callArgs[0];
+      const t = resolveTypeAlias(arg.type.type);
+      if (
+        typeof t === 'object' &&
+        t.kind === 'list' &&
+        isTupleShapedType(resolveTypeAlias(t.elements))
+      ) {
+        let element = '_point';
+        while (arg.symbols.includes(element)) element = `_${element}`;
+        return engine.box([
+          'Map',
+          ['Function', [h, element], element],
+          arg.json,
+        ] as never);
+      }
+    }
+
+    const mapped = callArgs.map(
+      (x, i) =>
+        isScalarParam(i) &&
+        (tupleTypeOf(x) !== undefined || isFunction(x, 'Tuple'))
+    );
+    if (!mapped.some((m) => m)) return undefined;
+    if (
+      listsMap &&
+      callArgs.some((x, i) => !mapped[i] && isOtherCollection(x))
+    )
+      decline(
+        'a tuple argument maps over its components at a parameter ' +
+          'declared as a scalar, and another argument is a collection.'
+      );
+    let length: number | undefined;
+    const components: (Expression[] | undefined)[] = callArgs.map((x, i) => {
+      if (!mapped[i]) return undefined;
+      const n = isFunction(x, 'Tuple')
+        ? x.nops
+        : (tupleTypeOf(x)?.elements.length ?? 0);
+      if (length === undefined) length = n;
+      else if (n !== length)
+        decline(
+          `the tuple arguments have different lengths (${length} and ` +
+            `${n}). The interpreter gives an \`incompatible-dimensions\` ` +
+            `error for this application.`
+        );
+      const parts = isFunction(x, 'Tuple')
+        ? [...x.ops]
+        : isSymbol(x)
+          ? Array.from({ length: n }, (_, k) =>
+              engine.function('At', [x, engine.number(k + 1)])
+            )
+          : decline(
+              `the tuple argument \`${x.toString()}\` maps over its ` +
+                `components, and its components cannot be read without ` +
+                `computing it again for each one.`
+            );
+      for (const c of parts) {
+        const t = resolveTypeAlias(c.type.type);
+        if (
+          !isTupleShapedType(t) &&
+          (c.isCollection === true || c.type.matches('collection<any>'))
+        )
+          decline(
+            `the tuple argument \`${x.toString()}\` has a component that ` +
+              `is a collection. The interpreter gives an ` +
+              `\`incompatible-type\` error for this application.`
+          );
+      }
+      return parts;
+    });
+    if (length === undefined || length === 0) return undefined;
+    mapped.forEach((m, i) => {
+      if (m) mappedArgs?.add(i + args.length - callArgs.length);
+    });
+    return engine.function(
+      'Tuple',
+      Array.from({ length }, (_, k) =>
+        call(callArgs.map((x, i) => components[i]?.[k] ?? x))
+      )
+    );
+  }
+
+  /**
    * If `id` names a symbol whose engine definition is a user-defined function
    * literal, return that `["Function", body, …params]` literal; otherwise
    * `undefined`. Covers both storage routes:
@@ -22427,6 +23700,30 @@ export class BaseCompiler {
     const value = engine._getSymbolValue(id);
     if (value !== undefined && isFunction(value, 'Function')) return value;
     return undefined;
+  }
+
+  /**
+   * The function literal of the block-local function `h`: a function that an
+   * enclosing statement list binds (`CompileTarget.localFunctions`). A call
+   * of `h` is compiled as a call of that binding
+   * (`tryCompileLocalFunctionCall`), not of an engine-level function with
+   * the same name, so a rewrite of the call must read this literal too.
+   *
+   * `null` when `h` is a block local whose literal cannot be read here: its
+   * value can change while the block runs (`CompileTarget.reboundFunctions`),
+   * or the block binds it only after this point
+   * (`CompileTarget.lexicalFunctions`). `undefined` when `h` is not a block
+   * local.
+   */
+  private static blockLocalFunction(
+    h: string,
+    target: CompileTarget<Expression>
+  ): (Expression & FunctionInterface) | null | undefined {
+    if (target.reboundFunctions?.has(h)) return null;
+    const literal = target.localFunctions?.get(h);
+    if (literal !== undefined)
+      return isFunction(literal, 'Function') ? literal : null;
+    return target.lexicalFunctions?.has(h) ? null : undefined;
   }
 
   /**
@@ -22866,6 +24163,23 @@ export class BaseCompiler {
             `call could not be inlined instead.`
         );
       }
+    }
+
+    // An argument whose type, or element type, cannot match the declared type
+    // of its parameter (`u: real` given the point `(a, b)`) is declined, as
+    // the `Apply` of a function literal is: in a strict engine the
+    // interpreter gives an `incompatible-type` error for this call, while the
+    // emitted code gives a value (a specialization that maps over the
+    // point, or a scalar body that computes `NaN` from the array of the
+    // point).
+    if (literal !== undefined) {
+      const mismatch = BaseCompiler.appliedArgumentTypeMismatch(
+        literal,
+        args,
+        BaseCompiler.userFunctionParamsAreScalar(engine, h)
+      );
+      if (mismatch !== undefined)
+        throw new Error(`Could not compile a call of \`${h}\`: ${mismatch}`);
     }
 
     const specialized =
@@ -23364,20 +24678,48 @@ export class BaseCompiler {
    * compiles at all.
    *
    * Returns `undefined` when `h` is not such a local, leaving the caller's
-   * fail-closed throw in place. An ARITY mismatch fails closed here instead:
-   * JavaScript would silently pass `undefined` for a missing argument (the
-   * body then computing `NaN`), where the interpreter reports an error.
+   * fail-closed throw in place. An ARITY mismatch fails closed here instead.
+   * With fewer arguments than parameters, the interpreter makes a partial
+   * application, whose value is a function, and the compiled call does not
+   * build that value (JavaScript would pass `undefined` for each missing
+   * argument and compute `NaN`). With more arguments than parameters, the
+   * interpreter reports an error.
+   *
+   * A local whose value can change while its block runs
+   * (`target.reboundFunctions`) is called through its run-time binding and is
+   * never folded: the literal in the scope only gives its signature.
    */
   private static tryCompileLocalFunctionCall(
     h: string,
     args: ReadonlyArray<Expression>,
     target: CompileTarget<Expression>
   ): TargetSource | undefined {
+    const rebound = target.reboundFunctions?.get(h);
+    if (rebound?.decline !== undefined) throw new Error(rebound.decline);
     const literal = target.localFunctions?.get(h);
     // Re-narrowed rather than typed on the map: `CompileTarget` is generic in
     // its expression type, so the map's value type carries no operand access.
     if (literal === undefined || !isFunction(literal, 'Function'))
       return undefined;
+
+    // A rebound local is compiled on the JavaScript target only. The interval
+    // target also binds a local function as a value, but it keeps the
+    // narrower contract (a function assigned once): a reassignment is often
+    // inside a statement-form `if`, and the interval lowering of an
+    // assignment inside a branch is not correct (see the else-less `If` note
+    // in `compileBlock`).
+    if (
+      rebound !== undefined &&
+      target.language !== undefined &&
+      target.language !== 'javascript'
+    )
+      throw new Error(
+        `Could not compile a call of \`${h}\`: the block-local function ` +
+          `\`${h}\` is assigned more than once or inside a nested statement, ` +
+          `so the call must read its value at run time, and target ` +
+          `'${target.language}' compiles a call of a block-local function ` +
+          `only when the function is assigned once.`
+      );
 
     // `["Function", body, ...params]` — one operand per declared parameter
     // after the body.
@@ -23386,9 +24728,13 @@ export class BaseCompiler {
       throw new Error(
         `Could not compile \`${h}\`: the block-local function is declared with ` +
           `${arity} parameter${arity === 1 ? '' : 's'} but called with ` +
-          `${args.length}. JavaScript would bind the missing parameters to ` +
-          `\`undefined\` and compute NaN, where the interpreter reports an ` +
-          `error.`
+          `${args.length}. ` +
+          (args.length < arity
+            ? `The interpreter reads a call with fewer arguments than ` +
+              `parameters as a partial application, whose value is a ` +
+              `function, and the compiled call does not build that value.`
+            : `The interpreter reports an error for a call with more ` +
+              `arguments than parameters.`)
       );
 
     // A call of a CLOSED local with constant arguments is itself constant, so
@@ -23408,11 +24754,17 @@ export class BaseCompiler {
     // own name in a recursive definition — declines on
     // `mentionsCompileBoundName`, since those names have no engine value the
     // fold could evaluate through.
-    const folded = BaseCompiler.tryConstantFold(
-      literal.engine.function('Apply', [literal, ...args]),
-      target,
-      BaseCompiler.FOLD_OPERAND_PREC
-    );
+    //
+    // A rebound local does not fold: the literal in the scope is one of its
+    // values, not necessarily the one it holds at this call.
+    const folded =
+      rebound === undefined
+        ? BaseCompiler.tryConstantFold(
+            literal.engine.function('Apply', [literal, ...args]),
+            target,
+            BaseCompiler.FOLD_OPERAND_PREC
+          )
+        : undefined;
     if (folded !== undefined) return folded;
 
     const declared = literal.type?.type;
@@ -23584,6 +24936,92 @@ export class BaseCompiler {
             `instead, bound the type variables (\`where T: number\`), or ` +
             `annotate the parameters with ground types.`
         );
+    }
+
+    // A TUPLE argument, or a list of tuples, at a parameter with no
+    // annotation. The interpreter binds a tuple whole at such a parameter,
+    // and applies the function to each tuple of a list of tuples. But the
+    // binding of a local whose parameters read as scalars is wrapped in the
+    // run-time broadcast (`_SYS.bcastFn`), which maps into any array, a point
+    // included: `const g = (v) => 7` then `g((5, 6))` gave `[7, 7]` where the
+    // interpreter gives `7`. Thus the call is written as the `Apply` of the
+    // literal is on the engine route (`wholeTupleCall`): the body with the
+    // tuple in place of the parameter, or the map of that over the list.
+    if (
+      target.language === 'javascript' &&
+      (signature === undefined || paramsAreScalar(signature))
+    ) {
+      const isListOfTuples = (a: Expression) => {
+        const t = resolveTypeAlias(a.type.type);
+        return (
+          typeof t === 'object' &&
+          t.kind === 'list' &&
+          isTupleShapedType(resolveTypeAlias(t.elements))
+        );
+      };
+      const whole = args.map(
+        (a, i) =>
+          annotations[i] === undefined &&
+          (isTupleShapedType(resolveTypeAlias(a.type.type)) ||
+            isListOfTuples(a))
+      );
+      if (whole.some((x) => x)) {
+        const reason =
+          `Could not compile \`${h}\`: a tuple argument at a parameter of ` +
+          `the block-local function with no declared type is bound whole, ` +
+          `and the compiled function maps over any array at run time`;
+        // The value of a rebound local is known only at run time, so its
+        // body cannot be written at the call.
+        if (rebound !== undefined)
+          throw new Error(
+            `${reason}. The function is assigned more than once or inside ` +
+              `a nested statement, so its value is known only at run time, ` +
+              `and the call cannot be written with the body of that value. ` +
+              `Declare the type of the parameter.`
+          );
+        // The body is written at the call, not where the local is defined.
+        // A binder that encloses the call can bind a name that the body
+        // reads, and it would capture that name. Each bound name that the
+        // body reads is refused, except the name of the function itself (a
+        // recursive call is compiled as a call of the local again).
+        const captured = [...freeSymbolNames(literal)].find(
+          (n) => n !== h && target.boundVars?.has(n) === true
+        );
+        if (captured !== undefined)
+          throw new Error(
+            `${reason}. The call is written with the body of the function, ` +
+              `which reads \`${captured}\`, and a binding at the call can ` +
+              `be a different \`${captured}\`.`
+          );
+        const engine = literal.engine;
+        const applied = (xs: ReadonlyArray<Expression>) =>
+          BaseCompiler.wholeTupleCall(
+            engine,
+            'Apply',
+            [literal, ...xs],
+            target
+          );
+        // A list literal of tuples is the list of the applications to each
+        // tuple. `wholeTupleCall` maps over a list that is not a literal.
+        const list = args[0];
+        const cells =
+          args.length === 1 && isFunction(list, 'List')
+            ? list.ops.map((t) => applied([t]))
+            : undefined;
+        const rewritten =
+          cells === undefined
+            ? applied(args)
+            : cells.every((c) => c !== undefined)
+              ? engine.function('List', cells as Expression[])
+              : undefined;
+        if (rewritten === undefined)
+          throw new Error(
+            `${reason}. The call is written with the body of the function ` +
+              `only when each argument is a tuple of symbols and numbers, ` +
+              `or the one argument is a list of such tuples.`
+          );
+        return `(${BaseCompiler.compile(rewritten, target)})`;
+      }
     }
 
     // Parameter-typed, not argument-typed — see the sibling computation in
@@ -26319,21 +27757,144 @@ export class BaseCompiler {
     return { op, accComplex, eltComplex, coerceSeed };
   }
 
-  /** Resolve only derivative calls whose closed form stays within the small-body path. */
-  static intervalDerivativeLiteral(
+  /**
+   * The closed form of the derivative callee of
+   * `Apply(Derivative(f, n), x)` or `Apply(Derivative(f, k₁, …, kₙ), x₁, …,
+   * xₙ)` as a function literal, or `undefined`. The `Derivative` evaluate
+   * handler computes the closed form (library/calculus.ts), so the literal
+   * has one parameter for each argument of `f`; the caller checks that this
+   * count is the count of the arguments. A derivative of a large body or of
+   * a high order (`appliedDerivativeTooLarge`) is not resolved, because its
+   * closed form grows past a useful size. The interval target and the shader
+   * targets read the literal: they have no other lowering for a derivative.
+   */
+  static appliedDerivativeLiteral(
     args: ReadonlyArray<Expression>
   ): Expression | undefined {
-    if (args.length !== 2 || !isFunction(args[0], 'Derivative'))
-      return undefined;
-    if (
-      jetDerivativeTarget(
-        args,
-        (id) => BaseCompiler.userFunctionLiteral(args[0].engine, id),
-        false
-      ) !== undefined
-    )
-      return undefined;
+    if (!isFunction(args[0], 'Derivative')) return undefined;
+    if (BaseCompiler.appliedDerivativeTooLarge(args)) return undefined;
     return derivativeClosedForm('Derivative', args[0].ops);
+  }
+
+  /**
+   * Why `appliedDerivativeLiteral(args)` has no literal for a `Derivative`
+   * callee, as a phrase for a decline message: the closed form is too large
+   * to write out (`appliedDerivativeTooLarge`), or there is no closed form.
+   */
+  static appliedDerivativeDeclineReason(
+    args: ReadonlyArray<Expression>
+  ): string {
+    return BaseCompiler.appliedDerivativeTooLarge(args)
+      ? 'the closed form of the derivative is too large to write out'
+      : 'the derivative has no closed form';
+  }
+
+  /**
+   * Whether the closed form of the derivative callee of `args` is too large
+   * to write out: a large body or a high order. For a function of one
+   * argument, this is when `jetDerivativeTarget` claims the application, and
+   * the JavaScript target then lowers it through forward-mode
+   * differentiation. For a multi-index derivative, the same measure is
+   * applied to the total order (`multiIndexDerivativeTooLarge`), and no
+   * target has another lowering.
+   */
+  static appliedDerivativeTooLarge(args: ReadonlyArray<Expression>): boolean {
+    if (!isFunction(args[0], 'Derivative')) return false;
+    const literalOf = (id: string) =>
+      BaseCompiler.userFunctionLiteral(args[0].engine, id);
+    return (
+      jetDerivativeTarget(args, literalOf, false) !== undefined ||
+      multiIndexDerivativeTooLarge(args[0], literalOf)
+    );
+  }
+
+  /**
+   * The reason why an argument of `Apply(literal, …actuals)` cannot be
+   * bound to its parameter, or `undefined` when all the arguments can be
+   * bound.
+   *
+   * In a strict engine, the interpreter checks each argument against the
+   * declared type of its parameter (`u: real`) and gives an
+   * `incompatible-type` error when they do not match: `Apply(u: real ↦ 2u,
+   * (a, b))` is that error under `evaluate()`. Compiled code with no check
+   * gives a value for the same application (`2.0 * vec2(a, b)` on a
+   * shader, `[2a, 2b]` in JavaScript, where a point is an array that the
+   * run-time broadcast maps over). Thus the compiled application is
+   * declined when the static type of an argument cannot be a value of the
+   * declared type (`couldMatch`). An argument of unknown type, or a
+   * parameter with no declared type, is not checked, because the
+   * interpreter accepts all values there.
+   *
+   * When `mapsElements` is true, the interpreter applies the function to
+   * each element of a list argument (the parameters are scalar), so the
+   * type that is checked is the element type at the deepest list rank. The
+   * descent stops at a tuple (a point is bound whole), at a string, and at
+   * a collection that is not indexed, as the run-time broadcast does. When
+   * it is false, each argument is bound whole and its own type is checked.
+   *
+   * The shader targets (`gpuAppliedBody`, `gpu-target.ts`) and the
+   * JavaScript target (`Apply`, `javascript-target.ts`) use this check.
+   */
+  static appliedArgumentTypeMismatch(
+    literal: Expression,
+    actuals: ReadonlyArray<Expression>,
+    mapsElements: boolean
+  ): string | undefined {
+    if (!isFunction(literal, 'Function') || !literal.engine.strict)
+      return undefined;
+    const boundType = (t: Type): Type => {
+      if (!mapsElements) return t;
+      // The bound keeps a recursive type alias from looping.
+      for (let rank = 0; rank < 8; rank++) {
+        if (isTupleShapedType(t) || isSubtype(t, 'string')) break;
+        if (!isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE)) break;
+        const element = collectionElementType(t);
+        if (element === undefined) break;
+        t = element;
+      }
+      return t;
+    };
+    // A tuple at a parameter declared as a scalar maps over its components
+    // (`declaredScalarTupleCells`, user decision 2026-10-03), so each
+    // component is checked, and a component that is a tuple is checked in
+    // the same way. A list component is a mismatch, as it is an error in the
+    // interpreter (`([1, 2], [3, 4])` is data, not a point).
+    const componentMismatch = (t: Type, declared: Type): Type | undefined => {
+      for (let depth = 0; depth < 8; depth++) {
+        const r = resolveTypeAlias(t);
+        if (typeof r !== 'object' || r.kind !== 'tuple')
+          return couldMatch(r, declared) ? undefined : r;
+        for (const e of r.elements) {
+          const bad = componentMismatch(e.type, declared);
+          if (bad !== undefined) return bad;
+        }
+        return undefined;
+      }
+      return undefined;
+    };
+    for (const [i, p] of literal.ops.slice(1).entries()) {
+      const declared = functionLiteralParameterType(p);
+      const actual = actuals[i];
+      if (declared === undefined || actual === undefined) continue;
+      let type = boundType(actual.type.type);
+      if (isDeclaredScalarType(declared) && isTupleShapedType(type)) {
+        const bad = componentMismatch(type, declared);
+        if (bad === undefined) continue;
+        type = bad;
+      }
+      if (couldMatch(type, declared)) continue;
+      return (
+        `the argument \`${actual.toString()}\` ` +
+        (type === actual.type.type
+          ? `has the type \`${typeToString(type)}\``
+          : `has elements of the type \`${typeToString(type)}\``) +
+        `, which does not match the type \`${typeToString(declared)}\` of ` +
+        `the parameter \`${functionLiteralParameterName(p)}\`. The ` +
+        `interpreter gives an \`incompatible-type\` error for this ` +
+        `application.`
+      );
+    }
+    return undefined;
   }
 
   static withDerivativeArgument<T>(
@@ -28131,6 +29692,11 @@ export class BaseCompiler {
     ) {
       const code = spell(bodyExpr, bodyTarget);
       if (code !== undefined) return code;
+      // A body with more than one statement: its value is the last
+      // statement, which is offered to the same spelling in the scope of
+      // the block (`compileCollectionValueBlock`).
+      if (isFunction(bodyExpr, 'Block'))
+        return BaseCompiler.compileCollectionValueBlock(bodyExpr, bodyTarget);
     }
     return BaseCompiler.compile(bodyExpr, bodyTarget);
   }
@@ -29099,17 +30665,15 @@ export class BaseCompiler {
       // descending into a getter where the compile path emits a setter).
       //
       // Resolve small derivative callees with the same limit as the interval
-      // emitter. Other nonliteral callees are not compiled, so do not probe
-      // their handlers: that could expand a derivative the target rejects.
+      // and shader emitters. Other nonliteral callees are not compiled, so do
+      // not probe their handlers: that could expand a derivative the target
+      // rejects.
       if (
         h === 'Apply' &&
         target.appliesFunctionLiteralsOnly === true &&
         !isFunction(ops[0], 'Function')
       ) {
-        const literal =
-          target.language === 'interval-javascript'
-            ? BaseCompiler.intervalDerivativeLiteral(ops)
-            : undefined;
+        const literal = BaseCompiler.appliedDerivativeLiteral(ops);
         if (isFunction(literal, 'Function') && literal.nops === ops.length) {
           visitLiteralBody(literal, bound);
           for (const op of ops.slice(1)) visit(op, bound);
@@ -29120,6 +30684,23 @@ export class BaseCompiler {
         // and it is what tells the caller which function it could not lower.
         // Anything else — a `Derivative` node above all — is left alone.
         if (isSymbol(ops[0])) visit(ops[0], bound);
+        for (const op of ops.slice(1)) visit(op, bound);
+        return;
+      }
+
+      // A multi-index derivative, or a derivative applied to more than one
+      // argument, whose closed form is too large to write out
+      // (`appliedDerivativeTooLarge`). Every target declines it without
+      // computing that closed form, so the `Derivative` head's compile
+      // handler must not be probed here: the probe computes the closed form,
+      // which can take tens of seconds.
+      if (
+        h === 'Apply' &&
+        isFunction(ops[0], 'Derivative') &&
+        (ops[0].ops.length > 2 || ops.length > 2) &&
+        BaseCompiler.appliedDerivativeTooLarge(ops)
+      ) {
+        unsupported.add('Apply');
         for (const op of ops.slice(1)) visit(op, bound);
         return;
       }
@@ -30663,7 +32244,11 @@ export class BaseCompiler {
      * BODY region (the root region holds only the `Function` node itself). */
     fn?: () => TargetSource
   ): TargetSource {
-    const emit = fn ?? (() => BaseCompiler.compile(expr, target, prec));
+    // The root is a tail position: a `Return` there gives its value
+    // (`tailValueFor`).
+    const root =
+      expr === undefined ? expr : BaseCompiler.tailValueFor(expr, target);
+    const emit = fn ?? (() => BaseCompiler.compile(root, target, prec));
     const session = target.cse;
     if (
       session === undefined ||

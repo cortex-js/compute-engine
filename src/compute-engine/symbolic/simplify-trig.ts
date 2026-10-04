@@ -32,6 +32,53 @@ const ODD_TRIG = new Set(['Sin', 'Tan', 'Cot', 'Csc']);
 // Even trig functions: f(-x) = f(x)
 const EVEN_TRIG = new Set(['Cos', 'Sec']);
 
+// Odd inverse trig functions: f(-x) = -f(x). This is true on the principal
+// branches for every complex x, also on the branch cuts of Arcsin and Arccsc.
+const ODD_INVERSE_TRIG = new Set(['Arcsin', 'Arctan', 'Arccsc']);
+
+/**
+ * If `arg` is the negation of a value `a`, return `a`, else `undefined`.
+ * The odd and even function rules use it to move the sign out of the
+ * argument: f(-a) = -f(a) or f(-a) = f(a).
+ *
+ * Two forms are a negation:
+ * - `Negate(a)`, the canonical form of `-a` for a non-numeric `a`.
+ * - A finite negative real number literal `-c`. Then `a` is `c`. This form
+ *   is necessary to cancel `f(1) - f(-1)` to `2f(1)`.
+ *
+ * `literal` is true for the number form. Its rewrite `f(-c) -> -f(c)` can
+ * make the cost larger by one (`sin(-1/2)` has a smaller cost than
+ * `-sin(1/2)`), so the caller marks that step `purpose: 'transform'`: a
+ * positive argument is the normal form, also when it does not make the cost
+ * smaller.
+ */
+export function negatedArgument(
+  arg: Expression
+): { inner: Expression; literal: boolean } | undefined {
+  if (isFunction(arg, 'Negate')) return { inner: arg.op1, literal: false };
+  if (isNumber(arg) && arg.isNegative === true && arg.isFinite === true)
+    return { inner: arg.neg(), literal: true };
+  return undefined;
+}
+
+/**
+ * The rule step for f(-a), where f is odd (`-f(a)`) or even (`f(a)`).
+ */
+export function oddEvenStep(
+  op: string,
+  negated: { inner: Expression; literal: boolean },
+  odd: boolean,
+  ce: ComputeEngine
+): RuleStep {
+  const value = odd
+    ? ce._fn(op, [negated.inner]).neg()
+    : ce._fn(op, [negated.inner]);
+  const because = odd ? `${op}(-x) -> -${op}(x)` : `${op}(-x) -> ${op}(x)`;
+  return negated.literal
+    ? { value, because, purpose: 'transform' }
+    : { value, because };
+}
+
 // Co-function pairs: f(pi/2 - x) = g(x)
 const COFUNCTION_MAP: Record<string, string> = {
   Sin: 'Cos',
@@ -262,25 +309,13 @@ export function simplifyTrig(x: Expression): RuleStep | undefined {
     // evaluate route. Simplify declines rather than duplicating the error
     // (the old `-> NaN` rewrite here contradicted that contract).
 
-    // Odd/even function properties with negation
-    if (isFunction(arg, 'Negate')) {
-      const innerArg = arg.op1;
-      if (innerArg) {
-        // Odd functions: f(-x) = -f(x)
-        if (ODD_TRIG.has(op)) {
-          return {
-            value: ce._fn(op, [innerArg]).neg(),
-            because: `${op}(-x) -> -${op}(x)`,
-          };
-        }
-        // Even functions: f(-x) = f(x)
-        if (EVEN_TRIG.has(op)) {
-          return {
-            value: ce._fn(op, [innerArg]),
-            because: `${op}(-x) -> ${op}(x)`,
-          };
-        }
-      }
+    // Odd/even function properties with negation: f(-x) = -f(x) for an odd
+    // function, f(-x) = f(x) for an even function. The argument is
+    // `Negate(x)` or a negative number.
+    const negated = negatedArgument(arg);
+    if (negated) {
+      if (ODD_TRIG.has(op)) return oddEvenStep(op, negated, true, ce);
+      if (EVEN_TRIG.has(op)) return oddEvenStep(op, negated, false, ce);
     }
 
     // π - x transformations
@@ -448,6 +483,12 @@ export function simplifyTrig(x: Expression): RuleStep | undefined {
     if (!isFunction(x)) return undefined;
     const arg = x.op1;
     if (!arg) return undefined;
+
+    // arcsin(-x) = -arcsin(x), arctan(-x) = -arctan(x), arccsc(-x) = -arccsc(x)
+    if (ODD_INVERSE_TRIG.has(op)) {
+      const negated = negatedArgument(arg);
+      if (negated) return oddEvenStep(op, negated, true, ce);
+    }
 
     // No Arcsin/Arccos infinity arm on purpose: both declare the FINITE
     // `complex` carrier (they diverge toward every infinity), so an

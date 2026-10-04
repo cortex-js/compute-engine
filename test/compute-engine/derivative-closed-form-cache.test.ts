@@ -344,3 +344,171 @@ describe('the closed form of Derivative(f, n) across evaluation points', () => {
     expect(relative(ce.box(['h', 5]).N().re, expected)).toBeLessThan(1e-6);
   });
 });
+
+/** Count the calls of `differentiate()` from outside its module made while
+ * `run` runs. Each partial derivative that is computed calls it at least
+ * once; a partial derivative served from the cache does not call it. */
+function differentiateCalls(run: () => void): number {
+  const spy = jest.spyOn(DerivativeModule, 'differentiate');
+  try {
+    run();
+    return spy.mock.calls.length;
+  } finally {
+    spy.mockRestore();
+  }
+}
+
+describe('the closed form of Derivative(f, k1, ..., kn) across evaluation points', () => {
+  const partialAt = (
+    ce: ComputeEngine,
+    fn: string,
+    orders: number[],
+    x: number,
+    y: number
+  ): number =>
+    ce.box(['Apply', ['Derivative', fn, ...orders], x, y]).N().re;
+
+  test('a partial derivative of a library operator is computed once across 100 points', () => {
+    const once = differentiateCalls(() =>
+      partialAt(new ComputeEngine(), 'Arctan2', [1, 0], 0.5, 2)
+    );
+    expect(once).toBeGreaterThan(0);
+    const ce = new ComputeEngine();
+    const calls = differentiateCalls(() => {
+      for (let i = 0; i < 100; i++) {
+        const y = 0.1 + i / 50;
+        // ∂/∂y atan2(y, x) = x / (x² + y²)
+        expect(partialAt(ce, 'Arctan2', [1, 0], y, 2)).toBeCloseTo(
+          2 / (4 + y * y),
+          12
+        );
+      }
+    });
+    expect(calls).toBe(once);
+  });
+
+  test('a partial derivative of a user function of two arguments is computed once across 100 points', () => {
+    const define = (ce: ComputeEngine) =>
+      ce.parse('u(a, b) \\coloneq a^2 \\sin(b)').evaluate();
+    const once = differentiateCalls(() => {
+      const ce = new ComputeEngine();
+      define(ce);
+      partialAt(ce, 'u', [1, 1], 0.5, 2);
+    });
+    expect(once).toBeGreaterThan(0);
+    const ce = new ComputeEngine();
+    define(ce);
+    const calls = differentiateCalls(() => {
+      for (let i = 0; i < 100; i++) {
+        const a = 0.1 + i / 50;
+        // ∂²/∂a∂b a²·sin(b) = 2a·cos(b)
+        expect(partialAt(ce, 'u', [1, 1], a, 0.7)).toBeCloseTo(
+          2 * a * Math.cos(0.7),
+          12
+        );
+      }
+    });
+    expect(calls).toBe(once);
+  });
+
+  test('redefining the function gives the new partial derivative', () => {
+    const ce = new ComputeEngine();
+    ce.parse('u(a, b) \\coloneq a^2 \\sin(b)').evaluate();
+    expect(partialAt(ce, 'u', [1, 1], 1, 0)).toBeCloseTo(2, 12);
+    expect(partialAt(ce, 'u', [1, 1], 2, 0)).toBeCloseTo(4, 12);
+    ce.parse('u(a, b) \\coloneq a^3 b^2').evaluate();
+    // ∂²/∂a∂b a³b² = 6a²b
+    expect(partialAt(ce, 'u', [1, 1], 1, 1)).toBeCloseTo(6, 12);
+    expect(partialAt(ce, 'u', [1, 1], 2, 3)).toBeCloseTo(72, 12);
+  });
+
+  test('reassigning a function that the function calls gives the new partial derivative', () => {
+    const ce = new ComputeEngine();
+    ce.assign('g', ce.box(['Function', ['Power', 'x', 2], 'x']));
+    ce.parse('u(a, b) \\coloneq g(a) b').evaluate();
+    // ∂/∂a a²·b = 2ab
+    expect(partialAt(ce, 'u', [1, 0], 3, 2)).toBeCloseTo(12, 12);
+    expect(partialAt(ce, 'u', [1, 0], 1, 2)).toBeCloseTo(4, 12);
+    ce.assign('g', ce.box(['Function', ['Power', 'x', 3], 'x']));
+    // ∂/∂a a³·b = 3a²b
+    expect(partialAt(ce, 'u', [1, 0], 3, 2)).toBeCloseTo(54, 12);
+    expect(partialAt(ce, 'u', [1, 0], 1, 2)).toBeCloseTo(6, 12);
+  });
+
+  test('assigning a free symbol of the function gives the new partial derivative', () => {
+    const ce = new ComputeEngine();
+    ce.assign('c', 2);
+    ce.parse('u(a, b) \\coloneq c a b').evaluate();
+    expect(partialAt(ce, 'u', [1, 1], 3, 4)).toBeCloseTo(2, 12);
+    expect(partialAt(ce, 'u', [1, 1], 5, 6)).toBeCloseTo(2, 12);
+    ce.assign('c', 5);
+    expect(partialAt(ce, 'u', [1, 1], 3, 4)).toBeCloseTo(5, 12);
+  });
+
+  test('a partial derivative of a closure answers per call of the enclosing function', () => {
+    // `g(t) = ((a, b) ↦ t·a²·b)` differentiated twice in `a` and once in `b`
+    // is `2t`. The literal is one node of the body of `g`, shared by every
+    // call, so its cached partial derivative must not carry the value of `t`
+    // of an earlier call.
+    const ce = new ComputeEngine({ precision: 'machine' });
+    ce.assign(
+      'g',
+      ce.box([
+        'Function',
+        [
+          'Apply',
+          [
+            'Derivative',
+            [
+              'Function',
+              ['Multiply', 't', ['Power', 'a', 2], 'b'],
+              'a',
+              'b',
+            ],
+            2,
+            1,
+          ],
+          1,
+          1,
+        ],
+        't',
+      ])
+    );
+    for (const t of [2, 3, 5, -1])
+      expect(ce.box(['g', t]).N().re).toBeCloseTo(2 * t, 12);
+  });
+
+  test('a partial derivative with no closed form is cached as inert', () => {
+    // The partial of `Round(x, y)` in `y` holds an unresolved `D`: the node
+    // stays inert. The memo records that answer, so a second request does
+    // not differentiate again, and it does not serve the function literal
+    // with the free `D` that the arm made before.
+    const ce = new ComputeEngine();
+    ce.parse('f(x, y) \\coloneq \\operatorname{Round}(x, y)').evaluate();
+    const first = differentiateCalls(() =>
+      expect(ce.box(['Derivative', 'f', 0, 1]).evaluate().json).toEqual([
+        'Derivative',
+        'f',
+        0,
+        1,
+      ])
+    );
+    expect(first).toBeGreaterThan(0);
+    const second = differentiateCalls(() =>
+      expect(ce.box(['Derivative', 'f', 0, 1]).evaluate().json).toEqual([
+        'Derivative',
+        'f',
+        0,
+        1,
+      ])
+    );
+    expect(second).toBe(0);
+  });
+
+  test('declares nothing in the caller scope', () => {
+    const ce = new ComputeEngine();
+    for (let i = 0; i < 3; i++) partialAt(ce, 'Arctan2', [1, 1], 0.5 + i, 2);
+    for (const name of ['_1', '_2', 'x_1', 'x_2'])
+      expect(ce.lookupDefinition(name)).toBeUndefined();
+  });
+});

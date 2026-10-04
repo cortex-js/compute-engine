@@ -2489,7 +2489,14 @@ export interface Expression {
    * If this is an equation, solve the equation for the variables in vars.
    * Otherwise, solve the equation `this = 0` for the variables in vars.
    *
-   * For univariate equations, returns an array of solutions (roots).
+   * For univariate equations, returns an array of solutions (roots). For a
+   * trigonometric equation, the array holds the principal roots, which
+   * represent the periodic families of roots. Returns `null` when the solver
+   * cannot solve the equation, and also when it can find only a part of the
+   * roots: when the unknown is in a function that the solver cannot invert
+   * and that is not periodic (`(x - 1)·BesselJ(0, x) = 0`), or in a factor of
+   * a product that gives no root and is not shown to have none
+   * (`(x - 2)(x + e^x) = 0`).
    * For systems of linear equations (List of Equal expressions), returns
    * an object mapping variable names to their values.
    * For non-linear polynomial systems (like xy=6, x+y=5), returns an array

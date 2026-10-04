@@ -32,6 +32,7 @@ import { _BoxedOperatorDefinition } from './boxed-operator-definition.js';
 import { _BoxedValueDefinition } from './boxed-value-definition.js';
 import { _BoxedExpression } from './abstract-boxed-expression.js';
 import { isNumber, isFunction, isSymbol, numericValue } from './type-guards.js';
+import { isShadowedSymbol } from '../library-shadowing.js';
 import { isImaginaryUnitValue, isRealPartZero } from './imaginary-part.js';
 import { functionLiteralParameterName } from './function-literal.js';
 import {
@@ -928,7 +929,10 @@ export function getPiTerm(
   expr: Expression
 ): [k: NumericValue, t: NumericValue] {
   const ce = expr.engine;
-  if (isSymbol(expr, 'Pi')) return [ce._numericValue(1), ce._numericValue(0)];
+  // A user binding of the name `Pi` (`ce.declare('Pi', { value: 3 })`) is
+  // not π (`isShadowedSymbol()`).
+  if (isSymbol(expr, 'Pi') && !isShadowedSymbol(expr))
+    return [ce._numericValue(1), ce._numericValue(0)];
 
   if (isFunction(expr, 'Negate')) {
     const [k, t] = getPiTerm(expr.ops[0]);
@@ -1105,13 +1109,41 @@ export function declaredOperator(ce: ComputeEngine, name: string) {
  *
  * Reads `def.value.isConstant` (the constness marker on the value definition),
  * so no boxed symbol is allocated per check.
+ *
+ * The name is first looked up in the current scope. When that finds an
+ * assigned variable, the symbols of `expr` with this name are also examined:
+ * if each one is bound to a constant definition, the name is not an assigned
+ * variable of `expr`. Example: after `ce.declare('Pi', { value: 3 })`, the
+ * name `Pi` finds the user variable, but `ce.Pi` is still bound to the
+ * library constant π. So `ce.Pi.mul(0)` is `0`, and is not held as the
+ * product `0·Pi`, whose MathJSON would box again with the user value.
  */
 export function hasAssignedVariable(expr: Expression): boolean {
   const ce = expr.engine;
   for (const name of expr.symbols) {
-    if (isAssignedVariableName(ce, name)) return true;
+    if (isAssignedVariableName(ce, name) && !isBoundToConstant(expr, name))
+      return true;
   }
   return false;
+}
+
+/**
+ * True when each symbol named `name` in `expr` is bound to a constant
+ * definition (the library constant `Pi` of `ce.Pi`). A symbol that is not
+ * bound, or is bound to a definition that is not constant, makes it false.
+ * The walk goes through the same operands as `expr.symbols`.
+ */
+function isBoundToConstant(
+  expr: Expression,
+  name: string,
+  visited: Set<Expression> = new Set()
+): boolean {
+  if (isSymbol(expr))
+    return expr.symbol !== name || expr.valueDefinition?.isConstant === true;
+  if (!isFunction(expr) || visited.has(expr)) return true;
+  visited.add(expr);
+  if (expr._numericStore !== undefined) return true;
+  return expr.ops.every((op) => isBoundToConstant(op, name, visited));
 }
 
 /**

@@ -113,6 +113,7 @@ import {
   polylogComplex,
   expIntegralEiComplex,
 } from '../numerics/numeric-complex.js';
+import { isShadowedSymbol, shadowsLibraryName } from '../library-shadowing.js';
 
 /**
  * Tier-2 numeric kernels for special functions (ROADMAP item 4).
@@ -141,16 +142,22 @@ const MAX_EXACT_SUPERFACTORIAL = 200;
  * (`Pi`, `Multiply(q, Pi)` with an exact rational q, or the `Negate` of
  * either: −π is canonically `Negate(Pi)`); otherwise `undefined`. The Clausen functions have period 2π, so q is only known
  * modulo 2.
+ *
+ * A symbol `Pi` that a user binding gives another value
+ * (`ce.declare('Pi', { value: 3 })`) is not π (`isShadowedSymbol()`), so θ
+ * is then not a multiple of π.
  */
 function exactPiMultiple(theta: Expression): [bigint, bigint] | undefined {
   let q: [bigint, bigint] | undefined;
-  if (isSymbol(theta) && theta.symbol === 'Pi') q = [1n, 1n];
+  if (isSymbol(theta) && theta.symbol === 'Pi' && !isShadowedSymbol(theta))
+    q = [1n, 1n];
   else if (
     isFunction(theta) &&
     theta.operator === 'Multiply' &&
     theta.nops === 2 &&
     isSymbol(theta.op2) &&
     theta.op2.symbol === 'Pi' &&
+    !isShadowedSymbol(theta.op2) &&
     isExactNumber(theta.op1)
   ) {
     const r = asRational(theta.op1);
@@ -291,9 +298,21 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
           isNumber(z) &&
           z.isSame(0.5) &&
           isExactNumber(z)
-        )
-          // Γ(1/2) = √π
-          return engine.expr(['Divide', ['Ln', 'Pi'], 2]).evaluate();
+        ) {
+          // lnΓ(1/2) = ln(√π) = ln(π)/2. The value is built with the library
+          // constant `engine.Pi`: boxing the name `Pi` gives the value of a
+          // user binding of `Pi` instead. When a user binding gives `Pi`
+          // another value, the exact value would name `Pi` in its MathJSON
+          // and have the user value when it is boxed again, so the call
+          // stays symbolic.
+          if (shadowsLibraryName(engine, 'Pi')) return undefined;
+          return engine
+            .function('Divide', [
+              engine.function('Ln', [engine.Pi]),
+              engine.number(2),
+            ])
+            .evaluate();
+        }
         return shouldNumericize(numericApproximation, z)
           ? applyN(
               [z],
@@ -443,6 +462,16 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         // K(1) = +∞ exactly (Fungrim 45b157)
         if (isNumber(m) && !m.isComplex && m.isSame(1))
           return engine.PositiveInfinity;
+        // K(0) = π/2 exactly (DLMF 19.6.1). A float `0.0` numericizes.
+        // The exact value names `Pi` in its MathJSON. When a user binding
+        // gives `Pi` another value, that value replaces π when the result is
+        // boxed again, so the call stays symbolic. The numeric value uses
+        // the library constant and is correct.
+        if (isNumber(m) && m.isExact && m.isSame(0)) {
+          if (numericApproximation) return engine.Pi.div(2).N();
+          if (shadowsLibraryName(engine, 'Pi')) return undefined;
+          return engine.Pi.div(2);
+        }
         const point = infinitePoint(m);
         if (point === 'anonymous') return engine.NaN;
         if (point !== undefined) return engine.Zero;
@@ -513,6 +542,16 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         const m = ops[0];
         // E(1) = 1 exactly
         if (isNumber(m) && !m.isComplex && m.isSame(1)) return engine.One;
+        // E(0) = π/2 exactly (DLMF 19.6.1). A float `0.0` numericizes.
+        // The exact value names `Pi` in its MathJSON. When a user binding
+        // gives `Pi` another value, that value replaces π when the result is
+        // boxed again, so the call stays symbolic. The numeric value uses
+        // the library constant and is correct.
+        if (isNumber(m) && m.isExact && m.isSame(0)) {
+          if (numericApproximation) return engine.Pi.div(2).N();
+          if (shadowsLibraryName(engine, 'Pi')) return undefined;
+          return engine.Pi.div(2);
+        }
         const point = infinitePoint(m);
         if (point === 'anonymous') return engine.NaN;
         if (point === '-oo') return engine.PositiveInfinity;

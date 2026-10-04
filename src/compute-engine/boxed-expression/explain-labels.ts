@@ -265,6 +265,12 @@ registerStepLabels({
     'Check each candidate in the original equation; reject the extraneous ones',
   'solve.filter-domain': 'Discard solutions outside the domain of the variable',
   'solve.roots': 'The solutions',
+  'solve.incomplete-factor':
+    'No complete answer: a factor gave no solution, and it is not shown to have none',
+  'solve.incomplete-non-invertible':
+    'No complete answer: the unknown is in a function that the solver cannot invert',
+  'solve.incomplete-no-roots':
+    'No complete answer: the solver found no solution, and it cannot show that there is none',
   'solve.template': 'Solve the matched equation pattern',
   // System-of-equations phases
   'solve.system.eliminate': 'Eliminate a variable from the remaining equations',
@@ -353,6 +359,8 @@ registerStepLabels({
   'solve.cotangent-unit': 'Apply the inverse cotangent',
   'solve.sine-cosine-linear-combination':
     'Rewrite a·sin x + b·cos x as a single sinusoid',
+  'solve.sine-cosine-linear-combination-second-branch':
+    'Rewrite a·sin x + b·cos x as a single sinusoid (second branch: add a half turn)',
 });
 
 //

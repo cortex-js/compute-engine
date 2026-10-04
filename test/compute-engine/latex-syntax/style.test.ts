@@ -1,4 +1,5 @@
 import { check, engine, latex } from '../../utils';
+import { ComputeEngine } from '../../../src/compute-engine';
 import { serialize } from '../../../src/compute-engine/latex-syntax/latex-syntax';
 
 describe('STYLE - MATH MODE', () => {
@@ -635,5 +636,153 @@ describe('STYLE - LONG NUMERATOR OVER A SINGLE POWER', () => {
     expect(
       engine.parse(`\\frac{${numer}}{\\sqrt{x}}`).toLatex({ prettify: false })
     ).toBe('\\frac{3x^4+2x^3+x+5}{\\sqrt{x}}');
+  });
+});
+
+describe('STYLE - SHORT NUMERATOR OVER A LONG DENOMINATOR', () => {
+  // The default fraction style writes a quotient, never an inverse power such
+  // as `(x)(y^2+z^2)^{-1}`. That inverse form parsed back to
+  // `Multiply(x, Divide(1, …))`, not to the original `Divide(x, …)`.
+  const cases: [string, string][] = [
+    ['\\frac{x}{y^2+z^2}', '\\frac{x}{y^2+z^2}'],
+    ['\\frac{-y}{x^2+y^2}', '\\frac{-y}{x^2+y^2}'],
+    ['\\frac{1}{x^2+y^2}', '\\frac{1}{x^2+y^2}'],
+    ['\\frac{x}{x^2+y^2+z^2}', '\\frac{x}{x^2+y^2+z^2}'],
+    ['\\frac{x}{a_1^2+a_2^2}', '\\frac{x}{a_1^2+a_2^2}'],
+    ['\\frac{x}{y^2-z^2}', '\\frac{x}{y^2-z^2}'],
+    ['\\frac{\\pi}{x^2+y^2}', '\\frac{\\pi}{x^2+y^2}'],
+    ['\\frac{1}{x^2+x+1}', '\\frac{1}{x^2+x+1}'],
+    ['\\frac{1}{(x+1)(x+2)}', '\\frac{1}{(x+1)(x+2)}'],
+    ['\\frac{2}{\\pi(x+1)(x+2)}', '\\frac{2}{\\pi(x+1)(x+2)}'],
+  ];
+
+  test.each(cases)('%s', (input, expected) => {
+    const expr = engine.parse(input);
+    expect(expr.latex).toBe(expected);
+    // The output parses back to the same MathJSON.
+    expect(engine.parse(expr.latex).json).toEqual(expr.json);
+  });
+
+  test('boxed MathJSON quotient', () => {
+    expect(
+      engine.box(['Divide', 'x', ['Add', ['Power', 'y', 2], ['Power', 'z', 2]]])
+        .latex
+    ).toBe('\\frac{x}{y^2+z^2}');
+  });
+
+  test('a power -1 of a long base is a quotient', () => {
+    // The raw form keeps the `Power`: the serializer writes `b^{-1}` as the
+    // quotient `1/b`, and that quotient takes the default fraction style.
+    expect(
+      engine.box(['Power', ['Add', ['Power', 'y', 2], ['Power', 'z', 2]], -1], {
+        form: 'raw',
+      }).latex
+    ).toBe('\\frac{1}{y^2+z^2}');
+  });
+
+  test('the reciprocal style is still available on request', () => {
+    expect(
+      engine
+        .parse('\\frac{1}{x^2+y^2}')
+        .toLatex({ fractionStyle: 'reciprocal' })
+    ).toBe('(x^2+y^2)^{-1}');
+  });
+});
+
+describe('STYLE - RECIPROCAL FRACTION STYLE ROUND TRIP', () => {
+  // The `reciprocal` style writes `a/b` as `a` times `b^{-1}`. The numerator
+  // gets parentheses only when it needs them (a sum, a negative value). A
+  // symbol or a decimal number before a parenthesized group gets an explicit
+  // multiplication sign: juxtaposed, `x(…)` parses as a function call and
+  // `1.5(2)` as a repeating decimal.
+  //
+  // The output parses to `Multiply(a, Divide(1, b))`, not to `Divide(a, b)`:
+  // the canonical form of a product keeps a `Divide(1, b)` factor. Both
+  // evaluate to the same expression.
+  const D = ['Add', ['Power', 'y', 2], ['Power', 'z', 2]];
+  const cases: [string, any, any, string][] = [
+    ['symbol', 'x', D, 'x\\times(y^2+z^2)^{-1}'],
+    ['negation', ['Negate', 'y'], D, '(-y)(y^2+z^2)^{-1}'],
+    ['sum', ['Add', 'x', 1], D, '(x+1)(y^2+z^2)^{-1}'],
+    ['product', ['Multiply', 2, 'x'], D, '2x\\times(y^2+z^2)^{-1}'],
+    ['integer', 2, D, '2(y^2+z^2)^{-1}'],
+    ['negative integer', -2, D, '(-2)(y^2+z^2)^{-1}'],
+    ['decimal number', 1.5, D, '1.5\\times(y^2+z^2)^{-1}'],
+    ['library constant', 'Pi', D, '\\pi(y^2+z^2)^{-1}'],
+    ['function', ['Sin', 'x'], D, '\\sin(x)\\times(y^2+z^2)^{-1}'],
+    ['symbol over symbol', 'x', 'y', 'x\\times(y)^{-1}'],
+    [
+      'symbol over absolute value',
+      'x',
+      ['Abs', 'y'],
+      'x\\times\\vert y\\vert^{-1}',
+    ],
+    ['numerator 1', 1, D, '(y^2+z^2)^{-1}'],
+  ];
+
+  test.each(cases)('%s', (_, numer, denom, expected) => {
+    const ce = new ComputeEngine();
+    const expr = ce.box(['Divide', numer, denom]);
+    expect(expr.operator).toBe('Divide');
+    const latex = expr.toLatex({ fractionStyle: 'reciprocal' });
+    expect(latex).toBe(expected);
+
+    // Parse in a new engine, so that no symbol has a type from the
+    // expression above.
+    const ce2 = new ComputeEngine();
+    const back = ce2.parse(latex);
+    const reciprocalProduct = ce2.box(
+      numer === 1
+        ? ['Divide', 1, denom]
+        : ['Multiply', numer, ['Divide', 1, denom]]
+    );
+    expect(back.json).toEqual(reciprocalProduct.json);
+    expect(back.evaluate().json).toEqual(expr.evaluate().json);
+  });
+});
+
+describe('STYLE - FACTOR FRACTION STYLE ROUND TRIP', () => {
+  // The `factor` style writes `a/b` as `\\frac{1}{b}` followed by `a` in
+  // parentheses. A parenthesized group after a `\\frac` is a factor, not the
+  // argument of a call, so every numerator parses back to the same value.
+  // As for the `reciprocal` style, the output parses to
+  // `Multiply(a, Divide(1, b))`, not to `Divide(a, b)`.
+  const D = ['Add', ['Power', 'y', 2], ['Power', 'z', 2]];
+  const cases: [string, any, any, string][] = [
+    ['symbol', 'x', D, '\\frac{1}{y^2+z^2}(x)'],
+    ['uppercase symbol', 'K', D, '\\frac{1}{y^2+z^2}(K)'],
+    ['negation', ['Negate', 'y'], D, '\\frac{1}{y^2+z^2}(-y)'],
+    ['sum', ['Add', 'x', 1], D, '\\frac{1}{y^2+z^2}(x+1)'],
+    ['product', ['Multiply', 2, 'x'], D, '\\frac{1}{y^2+z^2}(2x)'],
+    ['integer', 2, D, '\\frac{1}{y^2+z^2}(2)'],
+    ['negative integer', -2, D, '\\frac{1}{y^2+z^2}(-2)'],
+    ['decimal number', 1.5, D, '\\frac{1}{y^2+z^2}(1.5)'],
+    ['decimal over an integer', 1.5, 2, '\\frac{1}{2}(1.5)'],
+    ['library constant', 'Pi', D, '\\frac{1}{y^2+z^2}(\\pi)'],
+    ['function', ['Sin', 'x'], D, '\\frac{1}{y^2+z^2}(\\sin(x))'],
+    ['symbol over symbol', 'x', 'y', '\\frac{1}{y}(x)'],
+    [
+      'symbol over absolute value',
+      'x',
+      ['Abs', 'y'],
+      '\\frac{1}{\\vert y\\vert}(x)',
+    ],
+  ];
+
+  test.each(cases)('%s', (_, numer, denom, expected) => {
+    const ce = new ComputeEngine();
+    const expr = ce.box(['Divide', numer, denom]);
+    expect(expr.operator).toBe('Divide');
+    const latex = expr.toLatex({ fractionStyle: 'factor' });
+    expect(latex).toBe(expected);
+
+    // Parse in a new engine, so that no symbol has a type from the
+    // expression above.
+    const ce2 = new ComputeEngine();
+    const back = ce2.parse(latex);
+    expect(back.json).toEqual(
+      ce2.box(['Multiply', numer, ['Divide', 1, denom]]).json
+    );
+    expect(back.evaluate().json).toEqual(expr.evaluate().json);
   });
 });

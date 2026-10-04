@@ -337,6 +337,20 @@ function bigintToBaseDigits(value: bigint, base: number): string | null {
   return out.reverse().join('');
 }
 
+/**
+ * True when the tokens before token `end` are a superscript whose braced
+ * content is only digits, with an optional sign: `^{2}`, `^{-1}`. The
+ * tokenizer reads a Unicode superscript (`x²`) as such a group.
+ */
+function digitSuperscriptBefore(parser: Parser, end: number): boolean {
+  if (parser.latex(end - 1, end) !== '}') return false;
+  let k = end - 2;
+  while (k >= 0 && /^[0-9]$/.test(parser.latex(k, k + 1))) k -= 1;
+  if (k === end - 2) return false;
+  if (parser.latex(k, k + 1) === '-') k -= 1;
+  return parser.latex(k, k + 1) === '{' && parser.latex(k - 1, k) === '^';
+}
+
 // ---------------------------------------------------------------------------
 // Component-access postfix parse function (C3)
 // ---------------------------------------------------------------------------
@@ -367,17 +381,35 @@ function parseComponentAccess(
     let digits = '';
     while (typeof parser.peek === 'string' && /^\d$/.test(parser.peek))
       digits += parser.nextToken();
-    // In non-strict mode, report a symbol followed by `.digits` (`x.5`) when
-    // diagnostics are enabled: the source may be a mistyped decimal number or
-    // a member access, and it is read as the product `x \cdot 0.5`.
-    if (parser.options.strict === false && symbol(lhs) !== null)
+    // In non-strict mode, report an operand followed by `.digits` (`x.5`)
+    // when diagnostics are enabled: the source may be a mistyped decimal
+    // number, a member access, or a period used as a multiplication dot
+    // (`(x+1).5` as `(x+1)·5`), and it is read as the product
+    // `(x+1) \cdot 0.5`. The operand can be a symbol (`x.5`), a radical
+    // (`√b.5`), a power (`e^f.5`) or a group (`(x+1).5`). `detail.name` is
+    // given only for a symbol. An operand that is not a symbol and ends
+    // with a LaTeX brace or with `\right)` is not reported: `t^{i}.4` and
+    // `\left(1-t\right).9` are the spelling of Desmos for a product with a
+    // decimal number. A superscript of digits is reported, braced or not:
+    // the tokenizer reads `x².5` as `x^{2}.5`, so the two spellings cannot
+    // be told apart (as for the `!` of `M^{3}!`, see `ambiguous-factorial`).
+    // An operand that is an `Error` is not reported: `1.2.3` already holds
+    // the error of its first `.`.
+    const latexEnd =
+      symbol(lhs) === null &&
+      ((parser.latex(dotIndex - 1, dotIndex) === '}' &&
+        !digitSuperscriptBefore(parser, dotIndex)) ||
+        parser.latex(dotIndex - 2, dotIndex - 1) === '\\right');
+    if (
+      parser.options.strict === false &&
+      !latexEnd &&
+      operator(lhs) !== 'Error'
+    )
       parser._emitAmbiguity?.(
         'ambiguous-letter-decimal',
         dotIndex,
         parser.index,
-        {
-          name: symbol(lhs),
-        }
+        symbol(lhs) !== null ? { name: symbol(lhs) } : {}
       );
     return [
       'InvisibleOperator',
@@ -2532,11 +2564,73 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       // Parse either a group or a single symbol
       const scriptStart = parser.index;
       let rhs = parser.parseGroup();
+      const lenient = parser.options.strict === false;
+      const isDigit = (t: string) => /^[0-9]$/.test(t);
+      // In non-strict mode, a run of two or more digits that starts with
+      // `0` (`π_01`, `(x)_01`) is not taken as one subscript: the number
+      // value drops the zero, and a letter base keeps the text (`x_01` is
+      // the symbol `x_01`). The subscript is the one token `0`, as in the
+      // strict grammar, and the reading is reported below.
+      const leadingZero =
+        lenient &&
+        parser.peek === '0' &&
+        isDigit(parser.latex(parser.index + 1, parser.index + 2));
+      if (rhs === null && lenient && isDigit(parser.peek) && !leadingZero) {
+        // In non-strict mode, an unbraced subscript of digits is the whole
+        // run of digits, as on a letter base: `π_12` is `π_{12}`, as `x_12`
+        // is `x_{12}` (it was `π_1·2`). A letter directly after the digits
+        // is a factor: `π_1y` is `π_1·y`, and a person can mean `π_{1y}`.
+        // A run that a JavaScript number cannot hold exactly keeps its
+        // digits as a number string.
+        let digits = '';
+        while (isDigit(parser.peek)) digits += parser.nextToken();
+        const value = Number(digits);
+        rhs = Number.isSafeInteger(value) ? value : { num: digits };
+        if (/^\p{L}$/u.test(parser.peek))
+          parser._emitAmbiguity?.(
+            'ambiguous-implicit-subscript',
+            scriptStart - 1,
+            parser.index + 1,
+            symbol(lhs) !== null
+              ? { base: symbol(lhs), subscript: rhs }
+              : { subscript: rhs }
+          );
+      }
       if (rhs === null) {
         rhs = parser.parseToken();
         // An unbraced subscript is one token: in non-strict mode, report a
         // run of letters that it splits (`(x)_ab` is `(x)_a·b`).
         if (rhs !== null) parser._emitScriptLetterRunSplit?.(scriptStart, rhs);
+        // In non-strict mode, a one-letter subscript directly followed by a
+        // digit: `π_a2` is `π_a·2`, and a person can mean `π_{a2}`, as for
+        // `x_a2` (see `emitSubscriptEndAmbiguity()` in `parse.ts`). The
+        // subscript `0` before more digits is reported too: `π_01` is
+        // `π_0·1`, and a person can mean `π_{01}`. On a number base
+        // (`1_000`), the digit groups report `ambiguous-number-notation`.
+        if (
+          lenient &&
+          rhs !== null &&
+          parser.index === scriptStart + 1 &&
+          (/^\p{L}$/u.test(parser.latex(scriptStart, scriptStart + 1)) ||
+            (leadingZero && !isNumberExpression(lhs))) &&
+          isDigit(parser.peek)
+        ) {
+          let end = parser.index;
+          const at = (i: number) => parser.latex(i, i + 1);
+          while (isDigit(at(end))) end += 1;
+          if (at(end) === '.' && isDigit(at(end + 1))) {
+            end += 1;
+            while (isDigit(at(end))) end += 1;
+          }
+          parser._emitAmbiguity?.(
+            'ambiguous-implicit-subscript',
+            scriptStart - 1,
+            end,
+            symbol(lhs) !== null
+              ? { base: symbol(lhs), subscript: rhs }
+              : { subscript: rhs }
+          );
+        }
       }
       // In non-strict mode, also accept parenthesized expressions
       if (
@@ -4091,7 +4185,12 @@ function absorbPrimeSubscript(
         id,
         info?.type.matches('indexed_collection<any>') ?? false
       );
-      if (joined !== id) return joined;
+      if (joined !== id) {
+        // The symbol is the joined name: report `x_01` for `x'_{01}`, as
+        // the symbol parser does for `x_{01}'`.
+        parser._reportJoinedSymbol?.(id, joined, beforeSubscripts);
+        return joined;
+      }
       // `absorbSubscripts()` can consume input yet return the base name
       // unchanged: an empty braced subscript (`F'_{}`) is meaningless
       // decoration that it swallows and drops. The parser is then no longer

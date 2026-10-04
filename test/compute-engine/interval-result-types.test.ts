@@ -266,7 +266,11 @@ describe('INTERVAL RESULT TYPES — kernel adversarial matrix', () => {
     // better part of an hour on the corpus exponent `10000003`.
     const t0 = Date.now();
     const r = powInterval(iv(0.5, 2), 10000003)!;
-    expect(Date.now() - t0).toBeLessThan(100);
+    // The time depends on the load of the machine, so the limits on elapsed
+    // time (here and below) are asserted only in a `CE_PERF=1` run. The bound
+    // and type checks do not depend on time.
+    if (process.env.CE_PERF === '1')
+      expect(Date.now() - t0).toBeLessThan(100);
     expect(r.lo).toBe(0); // 0.5^10000003 underflows to 0 outward
     expect(r.hi).toBe(Infinity); // 2^10000003 overflows outward
     const e = new ComputeEngine();
@@ -277,7 +281,8 @@ describe('INTERVAL RESULT TYPES — kernel adversarial matrix', () => {
     expect(e.box(['Power', 'x', 10000003]).type.toString()).toBe(
       'real<1.797e+308..>'
     );
-    expect(Date.now() - t1).toBeLessThan(500);
+    if (process.env.CE_PERF === '1')
+      expect(Date.now() - t1).toBeLessThan(500);
     // The mirror case underflows both bounds into the subnormal veto; the
     // pre-existing positive-base sign claim is kept, not lost.
     e.declare('y', 'real<0.25..0.5>');

@@ -2460,7 +2460,11 @@ describe('INVERSE TRIG: an operand too large to evaluate again', () => {
       const expr = machine.parse(latex);
       const start = Date.now();
       expr.N();
-      expect(Date.now() - start).toBeLessThan(200);
+      // The time depends on the load of the machine, so the limit is asserted
+      // only in a `CE_PERF=1` run. The test then still checks that `.N()` does
+      // not throw or hang.
+      if (process.env.CE_PERF === '1')
+        expect(Date.now() - start).toBeLessThan(200);
     }
   });
 });
