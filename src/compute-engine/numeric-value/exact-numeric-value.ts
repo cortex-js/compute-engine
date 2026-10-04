@@ -1659,7 +1659,12 @@ export class ExactNumericValue extends NumericValue {
     const hasIm = !isZero(imRationalSum) || imRadicals.length > 0;
 
     if (!hasIm) {
-      // ── Real-only sum (the historical path, unchanged) ──
+      // ── Real-only sum ──
+      // A radical whose multiples cancel (`√2/4 − √2/4`) adds nothing. If
+      // it stayed in the result, the sum was the two values `0·√2` and `0`,
+      // and the caller built the term `0·x` instead of dropping it.
+      for (let i = radicals.length - 1; i >= 0; i--)
+        if (isZero(radicals[i].multiple)) radicals.splice(i, 1);
       // If we add no additional rational or radical,
       if (isZero(rationalSum) && radicals.length === 0)
         return [new ExactNumericValue(0, factory)];
