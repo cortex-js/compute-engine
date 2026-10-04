@@ -117,6 +117,7 @@ import {
   nanOperandAnswer,
   indeterminateFormAnswer,
 } from './type-guards.js';
+import { isTransitivelyPure } from './transitive-purity.js';
 import { realExponentValue } from './imaginary-part.js';
 import { scopeForRebuild } from './binding-sites.js';
 import {
@@ -7148,7 +7149,10 @@ function exactJumpBroadcastOperands(
   const result = tail.map((x, i) => {
     if (!isCellCollection(x) || !isFunction(x)) return x;
     const original = ops[i];
-    if (original === x || original.isPure !== true) return x;
+    // `isTransitivelyPure()`, not `isPure`: a symbol whose stored value is
+    // impure (`L` holds `Range(1, 300) + Random()`) is pure by `isPure`, but
+    // its exact evaluation below would evaluate the stored value again.
+    if (original === x || !isTransitivelyPure(original)) return x;
     const sameShape = (y: Expression) =>
       isFunction(y) && y.operator === x.operator && y.nops === x.nops;
     if (sameShape(original)) {
@@ -7232,7 +7236,10 @@ function exactJumpLazyBroadcastOperands(
   const result = tail.map((x, i) => {
     if (!isBroadcastableCollection(x)) return x;
     const original = ops[i];
-    if (original === x || original.isPure !== true) return x;
+    // `isTransitivelyPure()`, not `isPure`: a symbol whose stored value is
+    // impure (`L` holds `Range(1, 300) + Random()`) is pure by `isPure`, but
+    // its exact evaluation below would evaluate the stored value again.
+    if (original === x || !isTransitivelyPure(original)) return x;
     if (hasInexactNumberLiteral(original)) return x;
     const exact = original.evaluate();
     if (!isBroadcastableCollection(exact) || exact.count !== x.count) return x;

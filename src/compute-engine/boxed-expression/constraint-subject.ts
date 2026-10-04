@@ -20,6 +20,7 @@ import { reduceType } from '../../common/type/reduce.js';
 import { nextDown, nextUp } from '../numerics/numeric.js';
 import { isFunction, isSymbol, isNumber } from './type-guards.js';
 import { ExpressionMap } from './expression-map.js';
+import { isTransitivelyPure } from './transitive-purity.js';
 import { domainToType, SIGNED_NUMBER_SETS } from './number-set-types.js';
 
 /**
@@ -142,9 +143,11 @@ export function isExactRealLiteral(x: Expression): boolean {
  * digits is `25`, and its floor is `24`. A literal is returned as it is. An
  * expression is evaluated exactly only when it is pure, so that an operand
  * with a side effect (a random number, an assignment) is not evaluated a
- * second time. The caller does this only when the float of the operand is
- * near the point, because an exact evaluation can cost much more than a
- * numeric one.
+ * second time. The stored values of its symbols must be pure too
+ * (`isTransitivelyPure()`): `isPure` of a symbol `r` that holds `Random()`
+ * is true, but an evaluation of `r` draws a new number. The caller does this
+ * only when the float of the operand is near the point, because an exact
+ * evaluation can cost much more than a numeric one.
  */
 export function exactRealValueOf(
   original: Expression | undefined
@@ -152,7 +155,7 @@ export function exactRealValueOf(
   if (original === undefined) return undefined;
   if (isNumber(original))
     return isExactRealLiteral(original) ? original : undefined;
-  if (original.isPure !== true) return undefined;
+  if (!isTransitivelyPure(original)) return undefined;
   const value = original.evaluate();
   return isExactRealLiteral(value) ? value : undefined;
 }

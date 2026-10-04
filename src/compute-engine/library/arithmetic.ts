@@ -343,7 +343,6 @@ import {
 } from './quantity-arithmetic.js';
 import {
   containsResidueClass,
-  isPureThroughValues,
   isResidueClass,
   isResidueClassOperand,
   residueArithmetic,
@@ -352,6 +351,7 @@ import {
   residueNegate,
   residuePower,
 } from '../boxed-expression/residue-class.js';
+import { isTransitivelyPure } from '../boxed-expression/transitive-purity.js';
 import {
   foldMeasurementOperands,
   isMeasurement,
@@ -4250,9 +4250,16 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         //   type-level `isFinite` → value → `type` cycle. The guard that
         //   substitutes the value only once is on the `.N()` of the raw
         //   symbol.
+        // - A symbol whose stored value is impure (`r` holds `Random()`)
+        //   passes its evaluated form, as an impure operand does. `isPure`
+        //   of a symbol is always true, but the `.N()` of the raw symbol
+        //   reads the stored value again, and an impure value is not
+        //   remembered between reads, so `r + π` drew two numbers.
         if (numericApproximation) {
           const raw = ops.map(
-            (op) => op.isPure === true && (isNumber(op) || isSymbol(op))
+            (op) =>
+              op.isPure === true &&
+              (isNumber(op) || (isSymbol(op) && isTransitivelyPure(op)))
           );
           const terms = ops.map((op, i) => (raw[i] ? op : evaluated[i]));
           // A pure operand whose float is 0, ±∞ or NaN can have an exact
@@ -7441,13 +7448,18 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         }
         // Only a pure number literal or a pure symbol passes raw; every other
         // operand passes its numeric value, so it is evaluated once and its
-        // side effects run once — see the matching comment in `Add`.
+        // side effects run once — see the matching comment in `Add`. A
+        // symbol whose stored value is impure is not a pure symbol here
+        // (`isTransitivelyPure()`): its raw `.N()` would read that value a
+        // second time, and `2r` would draw two numbers for one `r`.
         // `mulNEvaluated` keeps a product of sums FACTORED exactly as
         // `mulFactored` does below — the two routes must agree on shape,
         // differing only in floats.
         if (numericApproximation) {
           const raw = ops.map(
-            (op) => op.isPure === true && (isNumber(op) || isSymbol(op))
+            (op) =>
+              op.isPure === true &&
+              (isNumber(op) || (isSymbol(op) && isTransitivelyPure(op)))
           );
           const factors = ops.map((op, i) => (raw[i] ? op : evaluated[i]));
           // A pure operand whose float is 0 or ±∞ can have an exact value
@@ -10515,7 +10527,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // extrapolation, which also serves as the convergence check.
         if (mode === 'numeric' && numeric) {
           if (rest.length === 1) {
-            const accel = acceleratedInfiniteSum(first, rest[0], engine);
+            const accel =
+              closedFormInfiniteSumN(first, rest[0], engine) ??
+              acceleratedInfiniteSum(first, rest[0], engine);
             if (accel !== undefined) return accel;
           }
           // Acceleration could not establish convergence (divergent,
@@ -10672,7 +10686,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           }
           if (mode === 'numeric' && numeric) {
             if (rest.length === 1) {
-              const accel = acceleratedInfiniteSum(first, rest[0], engine);
+              const accel =
+                closedFormInfiniteSumN(first, rest[0], engine) ??
+                acceleratedInfiniteSum(first, rest[0], engine);
               if (accel !== undefined) return accel;
             }
             // Unestablished convergence stays unevaluated — see the matching
@@ -10794,6 +10810,29 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 // (`numeric-canonical-registry.ts`).
 for (const table of ARITHMETIC_LIBRARY)
   recordNumericCanonicalDefinitions(table);
+
+/**
+ * The numeric value of the infinite sum `Σ body` over `limits` from its
+ * closed form (`infiniteSumClosedForm()`), when the precision of the engine
+ * is above machine precision. Else, or when there is no closed form, or when
+ * the value of the closed form is not a finite number, `undefined`.
+ *
+ * The extrapolation of `acceleratedInfiniteSum()` computes with machine
+ * floats: its value has at most about 15 correct digits, whatever the
+ * precision. A closed form (`ζ(2) = π²/6` for `Σ 1/k²`) gives a value with
+ * all the digits of the precision.
+ */
+function closedFormInfiniteSumN(
+  body: Expression,
+  limits: Expression,
+  ce: ComputeEngine
+): Expression | undefined {
+  if (ce.precision <= MACHINE_PRECISION) return undefined;
+  const closed = infiniteSumClosedForm(body, limits, ce);
+  if (closed === undefined) return undefined;
+  const value = closed.N();
+  return isNumber(value) && value.isFinite === true ? value : undefined;
+}
 
 /**
  * `json` with its LEFT-nested chain of the same `Add` or `Multiply` head
@@ -11167,9 +11206,10 @@ class NonFiniteTerm {
 /**
  * Records in `seen` the first term of a numeric fold that is not finite.
  * `exact` gives the exact value of that term. It is called only when
- * `expression` (the whole fold) is pure: the exact value of an impure term
- * (a random number) is a new value, and the exact evaluation of an impure
- * fold is not done.
+ * `expression` (the whole fold) is pure, and the stored values of its symbols
+ * are pure too (`isTransitivelyPure()`): the exact value of an impure term
+ * (a random number, or a symbol that holds one) is a new value, and the
+ * exact evaluation of an impure fold is not done.
  */
 function noteNonFiniteTerm(
   seen: NonFiniteTerm,
@@ -11179,7 +11219,7 @@ function noteNonFiniteTerm(
 ): void {
   if (seen.kind !== undefined || !term || !isNumber(term)) return;
   if (term.isFinite !== false) return;
-  if (expression?.isPure !== true) {
+  if (expression === undefined || !isTransitivelyPure(expression)) {
     seen.kind = 'overflow';
     return;
   }
@@ -12374,7 +12414,7 @@ function residueOperands(
  * class, when `evaluated` holds their values under `.N()`. A class is exact,
  * so the residue rules read the exact value of an operand (`1/3`, not
  * `0.333…`). An operand is evaluated again only when that cannot run a side
- * effect twice (`isPureThroughValues()`: a symbol whose value is an impure
+ * effect twice (`isTransitivelyPure()`: a symbol whose value is an impure
  * call is not evaluated again); otherwise its value from `evaluated` is
  * kept, and a float does not read as a class. Without a numeric
  * approximation, `evaluated` already holds the exact values.
@@ -12386,7 +12426,7 @@ function exactOperands(
 ): ReadonlyArray<Expression> {
   if (!numericApproximation) return evaluated;
   return ops.map((op, i) =>
-    evaluated[i].operator !== 'ResidueClass' && isPureThroughValues(op)
+    evaluated[i].operator !== 'ResidueClass' && isTransitivelyPure(op)
       ? op.evaluate()
       : evaluated[i]
   );
@@ -12401,7 +12441,9 @@ function exactOperands(
  * At machine precision, a numeric evaluation gives a double, and the double
  * of `10^{-401}` is 0 and the double of `10^{401}` is +∞. An operation with
  * this operand must then use its exact value: `\sqrt{10^{-401}}` is about
- * `3.16e-201`, not 0. Only a pure `original` is evaluated again. An engine
+ * `3.16e-201`, not 0. Only a pure `original` is evaluated again, and the
+ * stored values of its symbols must be pure too (`isTransitivelyPure()`):
+ * `r` that holds `Random()` and draws 0 must not draw again. An engine
  * whose numeric values are big decimals does not have this limit.
  *
  * The usual operand costs one comparison.
@@ -12412,7 +12454,7 @@ function exactValueOutOfDoubleRange(
   value: Expression
 ): Expression | undefined {
   if (!isOutOfDoubleRangeLiteral(value)) return undefined;
-  if (original === undefined || original.isPure !== true) return undefined;
+  if (original === undefined || !isTransitivelyPure(original)) return undefined;
   if (bignumPreferred(ce)) return undefined;
   const exact = isNumber(original) ? original : original.evaluate();
   if (
@@ -12440,8 +12482,9 @@ function exactValueOutOfDoubleRange(
  * so it goes to `mulNEvaluated()` with its exact coefficient, and
  * `mulNEvaluated()` folds this coefficient with the number factors and
  * floats the product: `(10^{400}/y) · 2` is `∞ · (1/y)`. Only a pure factor
- * is evaluated again. An engine whose numeric values are big decimals does
- * not have this limit.
+ * is evaluated again, and the stored values of its symbols must be pure too
+ * (`isTransitivelyPure()`). An engine whose numeric values are big decimals
+ * does not have this limit.
  *
  * The usual product costs one scan of the factors.
  */
@@ -12459,7 +12502,7 @@ function rescueExactCoefficients(
   if (bignumPreferred(ce)) return;
   for (let i = 0; i < factors.length; i++) {
     if (raw[i] || !hasOutOfRangeCoefficient(factors[i])) continue;
-    if (ops[i].isPure !== true) continue;
+    if (!isTransitivelyPure(ops[i])) continue;
     const exact = ops[i].evaluate();
     if (
       isFunction(exact) &&

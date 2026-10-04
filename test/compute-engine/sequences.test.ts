@@ -1,4 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
+import type { Expression } from '../../src/compute-engine';
 import { expectTypeBetween } from '../utils';
 
 // Note: Use single-letter symbols because LaTeX parses multi-letter
@@ -976,5 +977,947 @@ describe('SEQUENCE TYPE INFERENCE', () => {
   test('Sequence type is not "any" for multiple arguments', () => {
     const seq = ce.expr(['Sequence', 1, 2]);
     expect(seq.type.toString()).not.toBe('any');
+  });
+});
+
+describe('SEQUENCE MEMO: numeric terms are remembered for one precision', () => {
+  // A term computed by a numeric approximation is remembered with the
+  // precision: a term at 21 digits is not the value of `N(B_10, 50)`, and a
+  // float term is not the value of an exact evaluation. The digits are from
+  // mpmath: B_10 = π^10/10!.
+  const B_10_50 = '0.025806891390014060012598294252898849657186441048147';
+  function engine(): ComputeEngine {
+    const ce = new ComputeEngine();
+    ce.declareSequence('B', {
+      base: { 0: 1 },
+      recurrence: '\\frac{\\pi B_{n-1}}{n}',
+    });
+    return ce;
+  }
+  const term = (ce: ComputeEngine) => ce.parse('B_{10}').json;
+
+  test('N(B_10) then N(B_10, 50)', () => {
+    const ce = engine();
+    expect(ce.box(['N', term(ce)]).evaluate().toString()).toBe(
+      '0.0258068913900140600126'
+    );
+    expect(ce.box(['N', term(ce), 50]).evaluate().json).toEqual({
+      num: B_10_50,
+    });
+  });
+
+  test('N(B_10, 50) then N(B_10)', () => {
+    const ce = engine();
+    expect(ce.box(['N', term(ce), 50]).evaluate().json).toEqual({
+      num: B_10_50,
+    });
+    // The term at the precision of the engine (21 digits), not the
+    // 50-digit term.
+    expect(ce.parse('B_{10}').N().toString()).toBe(
+      '0.0258068913900140600126'
+    );
+  });
+
+  test('an exact evaluation after .N() is not a float', () => {
+    const ce = engine();
+    expect(ce.parse('B_{10}').N().isExact).toBe(false);
+    const exact = ce.parse('B_{10}').evaluate();
+    expect(exact.isNumberLiteral && !exact.isExact).toBe(false);
+  });
+
+  test('getSequenceCache() shows only the exact terms', () => {
+    const ce = new ComputeEngine();
+    ce.declareSequence('F', {
+      base: { 0: 0, 1: 1 },
+      recurrence: 'F_{n-1} + F_{n-2}',
+    });
+    // The numeric terms are in a separate map: no key after `.N()` reads.
+    expect(ce.parse('F_{6}').N().re).toBe(8);
+    expect(ce.box(['N', ce.parse('F_{6}').json, 50]).evaluate().re).toBe(8);
+    expect([...ce.getSequenceCache('F')!.keys()]).toEqual([]);
+    // The exact terms have the index as their key.
+    expect(ce.parse('F_{6}').evaluate().re).toBe(8);
+    expect([...ce.getSequenceCache('F')!.keys()].sort()).toEqual([
+      2, 3, 4, 5, 6,
+    ]);
+  });
+
+  test('clearSequenceCache() clears the numeric terms', () => {
+    const ce = engine();
+    const before = ce.parse('B_{10}').N();
+    // A memo hit returns the same object.
+    expect(ce.parse('B_{10}').N()).toBe(before);
+    ce.clearSequenceCache('B');
+    // After the clear, the term is computed again: a new object.
+    const after = ce.parse('B_{10}').N();
+    expect(after).not.toBe(before);
+    expect(after.isSame(before)).toBe(true);
+  });
+});
+
+describe('SEQUENCE EXACT TERMS: evaluate() returns an exact term', () => {
+  // `evaluate()` returns the exact form of a term also when the term is not
+  // a single number literal. `.N()` gives a float, as before.
+  function engine(): ComputeEngine {
+    const ce = new ComputeEngine();
+    // B_n = π^n/n!
+    ce.declareSequence('B', {
+      base: { 0: 1 },
+      recurrence: '\\frac{\\pi B_{n-1}}{n}',
+    });
+    // a_n = 1 + n√2
+    ce.declareSequence('a', {
+      base: { 0: 1 },
+      recurrence: 'a_{n-1} + \\sqrt{2}',
+    });
+    // c_n = x·c_{n-1} + 1, a recurrence over the free symbol x
+    ce.declareSequence('c', {
+      base: { 0: 1 },
+      recurrence: 'x c_{n-1} + 1',
+    });
+    return ce;
+  }
+
+  test('B_10 is π^10/10!', () => {
+    const ce = engine();
+    const term = ce.parse('B_{10}').evaluate();
+    expect(term.json).toEqual([
+      'Multiply',
+      ['Rational', 1, 3628800],
+      ['Power', 'Pi', 10],
+    ]);
+    expect(term.isSame(ce.parse('\\frac{\\pi^{10}}{10!}').evaluate())).toBe(
+      true
+    );
+    // The digits are from mpmath.
+    expect(ce.box(['N', term.json, 50]).evaluate().json).toEqual({
+      num: '0.025806891390014060012598294252898849657186441048147',
+    });
+    // The float term of `.N()` is computed by the recurrence, one float
+    // operation at each level, so only its first digits are compared.
+    expect(ce.parse('B_{10}').N().re).toBeCloseTo(term.N().re, 15);
+  });
+
+  test('a_10 is 1 + 10√2', () => {
+    const ce = engine();
+    const term = ce.parse('a_{10}').evaluate();
+    expect(term.toString()).toBe('1 + 10sqrt(2)');
+    expect(term.isSame(ce.parse('1 + 10\\sqrt{2}').evaluate())).toBe(true);
+    expect(ce.parse('a_{10}').N().re).toBeCloseTo(1 + 10 * Math.SQRT2, 14);
+    expect(term.N().re).toBeCloseTo(1 + 10 * Math.SQRT2, 14);
+  });
+
+  test('a term over a free symbol, below the size limit', () => {
+    const ce = engine();
+    // c_1 = x + 1, c_2 = x(x + 1) + 1, c_3 = x(x(x + 1) + 1) + 1
+    expect(ce.parse('c_{3}').evaluate().toString()).toBe(
+      'x * (x * (x + 1) + 1) + 1'
+    );
+    // `c_n` has 4n − 1 nodes: `c_62` (247 nodes) is below the limit.
+    expect(ce.parse('c_{62}').evaluate().operator).toBe('Add');
+    // `.N()` has no float for a term with a free symbol.
+    expect(ce.parse('c_{3}').N().operator).toBe('Subscript');
+  });
+
+  test('a term over a free symbol, above the size limit', () => {
+    const ce = engine();
+    // `c_63` has 251 nodes: it stays unevaluated, and so does every term
+    // above it, because it contains `c_63`.
+    expect(ce.parse('c_{63}').evaluate().toString()).toBe('Subscript(c, 63)');
+    expect(ce.parse('c_{100}').evaluate().toString()).toBe(
+      'Subscript(c, 100)'
+    );
+  });
+
+  test('a term over a free symbol is memoized until the symbol changes', () => {
+    const ce = engine();
+    expect(ce.parse('c_{3}').evaluate().operator).toBe('Add');
+    expect(ce.getSequenceCache('c')!.size).toBeGreaterThan(0);
+    // After an assignment, the term is computed again with the value.
+    ce.assign('x', 2);
+    expect(ce.parse('c_{3}').evaluate().json).toBe(15);
+  });
+
+  test('a large index: each term is computed one time', () => {
+    const ce = engine();
+    const b100 = ce.parse('B_{100}').evaluate();
+    expect(
+      b100.isSame(ce.parse('\\frac{\\pi^{100}}{100!}').evaluate())
+    ).toBe(true);
+    // One memo entry for each of B_1 … B_100 (a base case is not memoized).
+    expect(ce.getSequenceCache('B')!.size).toBe(100);
+    // A second read is a memo hit: the same term, and no new entry.
+    expect(ce.parse('B_{100}').evaluate()).toBe(b100);
+    expect(ce.getSequenceCache('B')!.size).toBe(100);
+
+    expect(ce.parse('a_{100}').evaluate().toString()).toBe('1 + 100sqrt(2)');
+    expect(ce.getSequenceCache('a')!.size).toBe(100);
+  });
+
+  test('evaluate() after .N() returns the exact term', () => {
+    const ce = engine();
+    const float = ce.parse('B_{10}').N();
+    expect(float.isNumberLiteral && !float.isExact).toBe(true);
+    expect(ce.parse('B_{10}').evaluate().json).toEqual([
+      'Multiply',
+      ['Rational', 1, 3628800],
+      ['Power', 'Pi', 10],
+    ]);
+  });
+
+  test('.N() after evaluate() returns a float', () => {
+    const ce = engine();
+    expect(ce.parse('a_{10}').evaluate().toString()).toBe('1 + 10sqrt(2)');
+    const float = ce.parse('a_{10}').N();
+    expect(float.isNumberLiteral && !float.isExact).toBe(true);
+    expect(float.re).toBeCloseTo(1 + 10 * Math.SQRT2, 14);
+    // The numeric terms are not in the cache of the exact terms.
+    const keys = [...ce.getSequenceCache('a')!.keys()];
+    expect(keys.length).toBe(10);
+    expect(keys.every((k) => typeof k === 'number')).toBe(true);
+  });
+
+  test('an inexact recurrence gives a float', () => {
+    const ce = new ComputeEngine();
+    ce.declareSequence('h', {
+      base: { 0: 1 },
+      recurrence: 'h_{n-1} + 0.1\\sqrt{2}',
+    });
+    const term = ce.parse('h_{3}').evaluate();
+    expect(term.isNumberLiteral && !term.isExact).toBe(true);
+    expect(term.re).toBeCloseTo(1 + 0.3 * Math.SQRT2, 14);
+  });
+});
+
+describe('SEQUENCE MEMO: cold reads, outdated terms and declined terms', () => {
+  test('a cold read of a large index does not overflow the stack', () => {
+    // The lower terms are computed from the lowest up, so the recursion
+    // does not go one level deeper for each index (before, a cold read of
+    // F_500 exceeded the call stack). The digits are from an exact
+    // computation in Python: F_1000 has 209 digits.
+    const ce = new ComputeEngine();
+    ce.declareSequence('F', {
+      base: { 0: 0, 1: 1 },
+      recurrence: 'F_{n-1} + F_{n-2}',
+    });
+    const exact = ce.parse('F_{1000}').evaluate().toString();
+    expect(exact.length).toBe(209);
+    expect(exact.startsWith('434665576869374564356885276750')).toBe(true);
+    expect(exact.endsWith('166849228875')).toBe(true);
+
+    const ce2 = new ComputeEngine();
+    ce2.declareSequence('F', {
+      base: { 0: 0, 1: 1 },
+      recurrence: 'F_{n-1} + F_{n-2}',
+    });
+    expect(
+      ce2.parse('F_{1000}').N().toString().startsWith('434665576869374')
+    ).toBe(true);
+  });
+
+  test('a recurrence with a step of 2 computes one parity only', () => {
+    const ce = new ComputeEngine();
+    ce.declareSequence('a', {
+      base: { 0: 0, 1: 1 },
+      recurrence: 'a_{n-2} + 2',
+    });
+    expect(ce.parse('a_{1001}').evaluate().json).toBe(1001);
+    // a_3, a_5, …, a_1001
+    expect(ce.getSequenceCache('a')!.size).toBe(500);
+  });
+
+  test('a recurrence that halves the index computes only the terms it reads', () => {
+    const ce = new ComputeEngine();
+    ce.declareSequence('h', {
+      base: { 0: 0 },
+      recurrence: 'h_{\\lfloor n/2 \\rfloor} + 1',
+    });
+    expect(ce.parse('h_{1000000}').evaluate().json).toBe(20);
+    expect(ce.getSequenceCache('h')!.size).toBe(20);
+  });
+
+  test('an assignment to a symbol of the recurrence makes the memo outdated', () => {
+    const ce = new ComputeEngine();
+    ce.declareSequence('c', { base: { 0: 1 }, recurrence: 'x c_{n-1} + 1' });
+    ce.assign('x', 2);
+    expect(ce.parse('c_{3}').evaluate().json).toBe(15);
+    expect(ce.parse('c_{3}').N().re).toBe(15);
+    ce.assign('x', 3);
+    expect(ce.parse('c_{3}').evaluate().json).toBe(40);
+    expect(ce.parse('c_{3}').N().re).toBe(40);
+    // .N() first, then evaluate()
+    ce.assign('x', 4);
+    expect(ce.parse('c_{3}').N().re).toBe(85);
+    expect(ce.parse('c_{3}').evaluate().json).toBe(85);
+  });
+
+  test('a term is computed one time while the symbols it reads are unchanged', () => {
+    const ce = new ComputeEngine();
+    let calls = 0;
+    ce.declare('f', {
+      signature: '(integer) -> integer',
+      evaluate: (ops) => {
+        if (!ops[0].isNumberLiteral) return undefined;
+        calls += 1;
+        return ops[0];
+      },
+    });
+    ce.declareSequence('K', { base: { 0: 0 }, recurrence: 'K_{n-1} + f(n)' });
+    expect(ce.parse('K_{10}').evaluate().json).toBe(55);
+    expect(calls).toBe(10);
+    expect(ce.parse('K_{10}').evaluate().json).toBe(55);
+    // An assignment to a symbol that the recurrence does not read
+    ce.assign('z', 5);
+    expect(ce.parse('K_{10}').evaluate().json).toBe(55);
+    expect(calls).toBe(10);
+    expect(ce.parse('K_{10}').N().re).toBe(55);
+    expect(ce.parse('K_{10}').N().re).toBe(55);
+    expect(calls).toBe(20);
+  });
+
+  test('a declined term is computed one time', () => {
+    const ce = new ComputeEngine();
+    let calls = 0;
+    ce.declare('f', {
+      signature: '(integer) -> integer',
+      evaluate: (ops) => {
+        if (!ops[0].isNumberLiteral) return undefined;
+        calls += 1;
+        return ce.number(1);
+      },
+    });
+    // The terms grow over the free symbol `y` and are declined above the
+    // size limit. The recurrence reads two lower terms: if a declined term
+    // is computed again at each read, the work doubles at each index.
+    ce.declareSequence('G', {
+      base: { 0: 1, 1: 1 },
+      recurrence: 'G_{n-1} + y f(n) G_{n-2}',
+    });
+    expect(ce.parse('G_{30}').evaluate().operator).toBe('Subscript');
+    // G_2 … G_30: 29 terms. One more when the first evaluation changes the
+    // state of the engine (the type of `y` is inferred).
+    expect(calls).toBeLessThanOrEqual(2 * 30);
+    calls = 0;
+    expect(ce.parse('G_{30}').N().operator).toBe('Subscript');
+    expect(calls).toBeLessThanOrEqual(2 * 30);
+
+    // A recurrence that reads the same lower term two times
+    calls = 0;
+    ce.declareSequence('d', {
+      base: { 0: ce.parse('w') },
+      recurrence: 'd_{n-1}(d_{n-1} + f(n))',
+    });
+    expect(ce.parse('d_{12}').evaluate().operator).toBe('Subscript');
+    expect(calls).toBeLessThanOrEqual(2 * 12);
+  });
+});
+
+describe('SEQUENCE TERMS: computed on demand', () => {
+  // A cold read computes the lower terms that the recurrence reads, with
+  // a stack of the terms whose computation is not complete: only the terms
+  // that the recurrence reads are computed, each one time, and the depth of
+  // the JavaScript calls does not grow with the index.
+
+  test('an index that is not a safe integer is declined', () => {
+    const ce = new ComputeEngine();
+    let calls = 0;
+    ce.declare('f', {
+      signature: '(integer) -> integer',
+      evaluate: (ops) => {
+        if (!ops[0].isNumberLiteral) return undefined;
+        calls += 1;
+        return ce.number(1);
+      },
+    });
+    ce.declareSequence('A', { base: { 0: 0 }, recurrence: 'A_{n-1} + f(n)' });
+    // `1e20 − 1` is `1e20`: before, the read did not stop.
+    expect(ce.box(['Subscript', 'A', 1e20]).evaluate().operator).toBe(
+      'Subscript'
+    );
+    expect(calls).toBe(0);
+  });
+
+  test('a term in a branch that is not taken is not computed', () => {
+    const ce = new ComputeEngine();
+    let draws = 0;
+    ce.declare('draw', {
+      signature: '(integer) -> integer',
+      evaluate: (ops) => {
+        if (!ops[0].isNumberLiteral) return undefined;
+        draws += 1;
+        return ce.number(1);
+      },
+    });
+    ce.declareSequence('A', {
+      base: { 0: 0 },
+      recurrence: '\\operatorname{If}(n = 1000, 7, A_{n-1} + \\operatorname{draw}(n))',
+    });
+    // Before, A_1 … A_999 were computed: 999 draws.
+    expect(ce.parse('A_{1000}').evaluate().json).toBe(7);
+    expect(draws).toBe(0);
+    // A taken branch computes the terms it reads, each one time.
+    expect(ce.parse('A_{5}').evaluate().json).toBe(5);
+    expect(draws).toBe(5);
+
+    // The same with `Random()` in a seeded frame: reading R_1000 consumes
+    // no draw, and reading S_5 consumes 5 draws.
+    ce.declareSequence('R', {
+      base: { 0: 0 },
+      recurrence:
+        '\\operatorname{If}(n = 1000, 7, R_{n-1} + \\operatorname{Random}())',
+    });
+    ce.declareSequence('S', {
+      base: { 0: 0 },
+      recurrence: 'S_{n-1} + \\operatorname{Random}()',
+    });
+    const stream = ce
+      .box(['WithRandomSeed', 1, ['Tuple', ...Array(6).fill(['Random'])]])
+      .evaluate();
+    const r = ce
+      .box(['WithRandomSeed', 1, ['Tuple', ['Subscript', 'R', 1000], ['Random']]])
+      .evaluate();
+    expect(r.op1.json).toBe(7);
+    expect(r.op2.re).toBe(stream.ops[0].re);
+    const s = ce
+      .box(['WithRandomSeed', 1, ['Tuple', ['Subscript', 'S', 5], ['Random']]])
+      .evaluate();
+    const firstFive = stream.ops.slice(0, 5).reduce((t, x) => t + x.re, 0);
+    expect(s.op1.re).toBeCloseTo(firstFive, 12);
+    expect(s.op2.re).toBe(stream.ops[5].re);
+  });
+
+  test('a term whose computation changes a symbol that the recurrence reads', () => {
+    // Each term changes `s`, which the recurrence reads: the memo is
+    // outdated after each term. The terms computed in the read are not
+    // computed again (before, `a_10` took 5157 calls of `w`).
+    const ce = new ComputeEngine();
+    let calls = 0;
+    ce.assign('s', 0);
+    ce.declare('w', {
+      signature: '(integer, number) -> integer',
+      evaluate: (ops) => {
+        if (!ops[0].isNumberLiteral) return undefined;
+        calls += 1;
+        ce.assign('s', calls);
+        return ce.number(0);
+      },
+    });
+    ce.declareSequence('a', {
+      base: { 0: 0, 1: 1 },
+      recurrence: 'a_{n-1} + a_{n-2} + w(n, s)',
+    });
+    expect(ce.parse('a_{10}').evaluate().json).toBe(55);
+    expect(calls).toBeLessThanOrEqual(2 * 10);
+    calls = 0;
+    expect(ce.parse('a_{30}').evaluate().json).toBe(832040);
+    expect(calls).toBeLessThanOrEqual(2 * 30);
+  });
+
+  test('a cold read of F_2000', () => {
+    // The digits are from an exact computation in Python.
+    const ce = new ComputeEngine();
+    ce.declareSequence('F', {
+      base: { 0: 0, 1: 1 },
+      recurrence: 'F_{n-1} + F_{n-2}',
+    });
+    const exact = ce.parse('F_{2000}').evaluate().toString();
+    expect(exact.length).toBe(418);
+    expect(exact.startsWith('422469633339230487870672560234')).toBe(true);
+    expect(exact.endsWith('082516817125')).toBe(true);
+  });
+
+  test('two sequences that read each other', () => {
+    // Before, each term was computed by a nested read of the other
+    // sequence, and a cold read of a large index exceeded the call stack.
+    const ce = new ComputeEngine();
+    ce.declareSequence('E', { base: { 0: 0 }, recurrence: 'O_{n-1} + 1' });
+    ce.declareSequence('O', { base: { 0: 0 }, recurrence: 'E_{n-1} + 1' });
+    expect(ce.parse('E_{3000}').evaluate().json).toBe(3000);
+  });
+
+  test('a term that reads itself is declined', () => {
+    const ce = new ComputeEngine();
+    ce.declareSequence('Y', { base: { 0: 0 }, recurrence: 'Y_{n} + 1' });
+    expect(ce.parse('Y_{5}').evaluate().operator).toBe('Subscript');
+  });
+
+  test('a read that needs more than 100,000 terms is declined', () => {
+    const ce = new ComputeEngine();
+    ce.declareSequence('A', { base: { 0: 0 }, recurrence: 'A_{n-1} + 1' });
+    expect(ce.parse('A_{100500}').evaluate().operator).toBe('Subscript');
+    // The read stops before it computes a term.
+    expect(ce.getSequenceCache('A')!.size).toBe(0);
+    expect(ce.parse('A_{10}').evaluate().json).toBe(10);
+  });
+
+  test('an exact term that contains a float is remembered for one precision', () => {
+    // mpmath: 1 + 0.3·√2
+    const ce = new ComputeEngine();
+    ce.declareSequence('h', {
+      base: { 0: 1 },
+      recurrence: 'h_{n-1} + 0.1\\sqrt{2}',
+    });
+    ce.declare('g', 'function');
+    ce.assign('g', ce.box(['Function', ['Subscript', 'h', 'k'], 'k']));
+    expect(ce.box(['N', ['g', 3], 50]).evaluate().toString()).toBe(
+      '1.4242640687119285146405066172629094235709015626131'
+    );
+    // Not the 55-digit term computed for `N(g(3), 50)`
+    expect(ce.parse('h_{3}').evaluate().toString()).toBe(
+      '1.42426406871192851464'
+    );
+    // The terms with a float are not in the cache of the exact terms.
+    expect(ce.getSequenceCache('h')!.size).toBe(0);
+  });
+
+  test('a base value is evaluated when it is read', () => {
+    const ce = new ComputeEngine();
+    ce.declareSequence('b', {
+      base: { 0: ce.box('s') },
+      recurrence: 'b_{n-1} + 1',
+    });
+    ce.assign('s', 10);
+    // Before, `b_3` was `s + 3`.
+    expect(ce.parse('b_{3}').evaluate().json).toBe(13);
+    expect(ce.parse('b_{0}').evaluate().json).toBe(10);
+    ce.assign('s', 20);
+    expect(ce.parse('b_{3}').evaluate().json).toBe(23);
+    expect(ce.parse('b_{3}').N().re).toBe(23);
+
+    // An exact base value stays exact under `evaluate()`
+    ce.declareSequence('p', {
+      base: { 0: ce.box('Pi') },
+      recurrence: 'p_{n-1} + 1',
+    });
+    expect(ce.parse('p_{2}').evaluate().toString()).toBe('2 + pi');
+    // Before, `.N()` of `p_2` stayed unevaluated.
+    expect(ce.parse('p_{2}').N().toString()).toBe('5.14159265358979323846');
+  });
+});
+
+describe('SEQUENCE TERMS: side effects of the recurrence', () => {
+  // A cold read of a pure sequence can stop the computation of a term and
+  // do it again (see "computed on demand" above). A sequence whose
+  // recurrence has side effects (an assignment, `Print`, `Random()`, a
+  // function declared `pure: false`) is computed recursively instead: each
+  // term one time, so each side effect occurs one time for each term.
+
+  /** A function with a side effect: it records each argument. */
+  function declareBump(ce: ComputeEngine, calls: number[]): void {
+    ce.declare('bump', {
+      signature: '(integer) -> integer',
+      pure: false,
+      evaluate: (ops) => {
+        if (!ops[0].isNumberLiteral) return undefined;
+        calls.push(ops[0].re);
+        return ce.number(1);
+      },
+    });
+  }
+
+  test('an assignment in the recurrence occurs one time for each term', () => {
+    const ce = new ComputeEngine();
+    ce.assign('c', 0);
+    ce.declareSequence('s', {
+      base: { 0: 0 },
+      recurrence:
+        '\\operatorname{Block}(\\operatorname{Assign}(c, c+1), s_{n-1}+1)',
+    });
+    expect(ce.parse('s_{10}').evaluate().json).toBe(10);
+    // Before, `c` was 19: the computations that were stopped were done
+    // again, with their assignments.
+    expect(ce.box('c').evaluate().json).toBe(10);
+  });
+
+  test('a function with a side effect is called one time for each term', () => {
+    const ce = new ComputeEngine();
+    const calls: number[] = [];
+    declareBump(ce, calls);
+    ce.declareSequence('A', {
+      base: { 0: 0 },
+      recurrence:
+        '\\operatorname{Block}(\\operatorname{bump}(n), A_{\\lfloor n/2 \\rfloor} + 1)',
+    });
+    // Before, `bump(2)` was called two times.
+    expect(ce.parse('A_{2}').evaluate().json).toBe(2);
+    expect(calls).toEqual([2, 1]);
+    calls.length = 0;
+    expect(ce.parse('A_{1000}').evaluate().json).toBe(10);
+    expect(calls).toEqual([1000, 500, 250, 125, 62, 31, 15, 7, 3]);
+    calls.length = 0;
+    expect(ce.parse('A_{1000}').evaluate().json).toBe(10);
+    expect(calls).toEqual([]);
+  });
+
+  test('a pure recurrence that reads a sequence with side effects', () => {
+    // The recurrence of `F` is pure, but it reads `I`, whose recurrence
+    // calls `bump`. The terms of `I` are not memoized, so a second
+    // computation of a term of `F` would compute its term of `I` again.
+    // A computation that computed a term of `I` is not stopped: the lower
+    // term of `F` is computed recursively.
+    const ce = new ComputeEngine();
+    const calls: number[] = [];
+    declareBump(ce, calls);
+    ce.declareSequence('I', {
+      base: { 0: 0 },
+      memoize: false,
+      recurrence: 'I_{n-1} + \\operatorname{bump}(n)',
+    });
+    ce.declareSequence('F', {
+      base: { 0: 0 },
+      recurrence: '\\operatorname{Block}(I_{n}, F_{\\lfloor n/2\\rfloor} + 1)',
+    });
+    expect(ce.parse('F_{8}').evaluate().json).toBe(4);
+    // I_8, I_4, I_2 and I_1: 8 + 4 + 2 + 1 calls. Before, 29.
+    expect(calls.length).toBe(15);
+  });
+
+  test('a random draw used by a nested read is not given again', () => {
+    const ce = new ComputeEngine();
+    ce.declareSequence('S', {
+      base: { 0: 0 },
+      recurrence: 'S_{n-1} + \\operatorname{Random}()',
+    });
+    ce.declareSequence('R', {
+      base: { 0: 0 },
+      recurrence:
+        '\\operatorname{If}(n > 0, \\operatorname{Block}(\\operatorname{Assign}(u, S_{n}), u + R_{n-1}), 0)',
+    });
+    const d = ce
+      .box(['WithRandomSeed', 1, ['Tuple', ['Random'], ['Random'], ['Random']]])
+      .evaluate()
+      .ops.map((x) => x.re);
+    const r = ce
+      .box(['WithRandomSeed', 1, ['Tuple', ['Subscript', 'R', 2], ['Random']]])
+      .evaluate();
+    // R_2 = S_2 + S_1 = (d1 + d2) + d1
+    expect(r.op1.re).toBeCloseTo(2 * d[0] + d[1], 12);
+    // Before, the trailing draw was d1, which S_1 used.
+    expect(r.op2.re).toBe(d[2]);
+  });
+
+  test('an index that is not affine is not computed in advance', () => {
+    // For n < 10, the index is 0: only A_0 is read. Before, the index
+    // looked like `n − 1` (its value at large n), and a read of A_5 also
+    // computed A_1 … A_4.
+    const ce = new ComputeEngine();
+    const draws: number[] = [];
+    ce.declare('draw', {
+      signature: '(integer) -> integer',
+      evaluate: (ops) => {
+        if (!ops[0].isNumberLiteral) return undefined;
+        draws.push(ops[0].re);
+        return ce.number(1);
+      },
+    });
+    ce.declareSequence('A', {
+      base: { 0: 0 },
+      recurrence:
+        'A_{\\operatorname{If}(n < 10, 0, n - 1)} + \\operatorname{draw}(n)',
+    });
+    expect(ce.parse('A_{5}').evaluate().json).toBe(1);
+    expect(draws).toEqual([5]);
+    expect([...ce.getSequenceCache('A')!.keys()]).toEqual([5]);
+  });
+
+  test('a constraint that reads the sequence', () => {
+    // The check of the constraint of A_9 reads A_7, which is not known
+    // yet. Before, the read threw an object, and each later read of a
+    // sequence threw it again.
+    const ce = new ComputeEngine();
+    ce.declareSequence('A', {
+      base: { 0: 0 },
+      domain: { min: 0 },
+      recurrence: 'A_{n-1} + 1',
+      constraints: 'n \\le 1 \\lor n = 10 \\lor A_{n-2} \\ge 0',
+    });
+    ce.declareSequence('F', {
+      base: { 0: 0, 1: 1 },
+      recurrence: 'F_{n-1} + F_{n-2}',
+    });
+    expect(ce.parse('A_{10}').evaluate().json).toBe(10);
+    expect(ce.parse('F_{10}').evaluate().json).toBe(55);
+  });
+
+  test('a constraint that reads the term that it checks', () => {
+    // The check of P_{2,1} reads P_{2,1}: the index is not valid. Before,
+    // the check started again with no end, and exceeded the call stack.
+    const ce = new ComputeEngine();
+    ce.declareSequence('P', {
+      variables: ['n', 'k'],
+      base: { 'n,0': 1, 'n,n': 1 },
+      recurrence: 'P_{n-1,k-1} + P_{n-1,k}',
+      constraints: 'P_{n-1, 0} + P_{2,1} > 0',
+    });
+    expect(ce.parse('P_{5,2}').evaluate().operator).toBe('Subscript');
+    ce.declareSequence('F', {
+      base: { 0: 0, 1: 1 },
+      recurrence: 'F_{n-1} + F_{n-2}',
+    });
+    expect(ce.parse('F_{10}').evaluate().json).toBe(55);
+  });
+
+  test('a recursion that is too deep is declined', () => {
+    // A recursive computation deeper than 100 terms stops before it
+    // exceeds the call stack (before, `H_{500}` threw a RangeError). The
+    // term is declined, and no term is memoized as declined: after reads
+    // of lower indices, the same read gives the term.
+    const ce = new ComputeEngine();
+    const calls: number[] = [];
+    declareBump(ce, calls);
+    ce.declareSequence('H', {
+      base: { 0: 0 },
+      recurrence: 'H_{n-1} + \\operatorname{bump}(n)',
+    });
+    expect(ce.parse('H_{500}').evaluate().operator).toBe('Subscript');
+    expect(calls.length).toBeLessThanOrEqual(100);
+    expect(ce.getSequenceCache('H')!.size).toBe(0);
+    // A later read of another sequence is not changed.
+    ce.declareSequence('F', {
+      base: { 0: 0, 1: 1 },
+      recurrence: 'F_{n-1} + F_{n-2}',
+    });
+    expect(ce.parse('F_{10}').evaluate().json).toBe(55);
+    for (let n = 90; n <= 500; n += 90)
+      expect(ce.parse(`H_{${n}}`).evaluate().json).toBe(n);
+    expect(ce.parse('H_{500}').evaluate().json).toBe(500);
+  });
+
+  test('a symbol whose value has a side effect makes the recurrence impure', () => {
+    // `r` holds `Assign(c, c + 1)`, not evaluated: each read of `r`
+    // evaluates it. The recurrence `r + Q_{⌊n/2⌋}` is pure (`isPure`), but
+    // what it reads is not. Before, the computation of a term was stopped
+    // and done again, and `c` was 7 after a read of Q_8 (4 terms).
+    const ce = new ComputeEngine();
+    ce.assign('c', 0);
+    ce.declare('r', {
+      value: ce.box(['Assign', 'c', ['Add', 'c', 1]], { form: 'raw' }),
+    });
+    ce.declareSequence('Q', {
+      base: { 0: 0 },
+      recurrence: 'r + Q_{\\lfloor n/2 \\rfloor}',
+    });
+    // Q_8, Q_4, Q_2 and Q_1 each read `r` one time: 1 + 2 + 3 + 4.
+    expect(ce.parse('Q_{8}').evaluate().json).toBe(10);
+    expect(ce.box('c').evaluate().json).toBe(4);
+  });
+
+  test('a function that reads a stopped term is not memoized', () => {
+    // A read of H_500 is stopped (the recursion is too deep): the term is
+    // declined for this read only. Before, the memo of the applications
+    // of `g` kept the declined term, and `g(500)` stayed `H_500` after
+    // the reads of the lower indices.
+    const ce = new ComputeEngine();
+    const calls: number[] = [];
+    declareBump(ce, calls);
+    ce.declareSequence('H', {
+      base: { 0: 0 },
+      recurrence: 'H_{n-1} + \\operatorname{bump}(n)',
+    });
+    ce.parse('g := k \\mapsto H_k').evaluate();
+    expect(ce.parse('g(500)').evaluate().operator).toBe('Subscript');
+    for (let n = 90; n <= 450; n += 90)
+      expect(ce.parse(`H_{${n}}`).evaluate().json).toBe(n);
+    expect(ce.parse('g(500)').evaluate().json).toBe(500);
+  });
+
+  test('two engines, and an error in a read', () => {
+    // The state of the reads in progress is for the process. A stopped
+    // read and an error thrown in a read leave no state that changes a
+    // later read, in the same engine or in another engine.
+    const ce1 = new ComputeEngine();
+    const ce2 = new ComputeEngine();
+    let fail = true;
+    ce1.declare('boom', {
+      signature: '(integer) -> integer',
+      pure: false,
+      evaluate: (ops) => {
+        if (fail && ops[0].re === 50) {
+          fail = false;
+          throw new Error('boom');
+        }
+        return ce1.number(1);
+      },
+    });
+    ce1.declareSequence('T', {
+      base: { 0: 0 },
+      recurrence: 'T_{n-1} + \\operatorname{boom}(n)',
+    });
+    ce2.declareSequence('F', {
+      base: { 0: 0, 1: 1 },
+      recurrence: 'F_{n-1} + F_{n-2}',
+    });
+    expect(() => ce1.parse('T_{60}').evaluate()).toThrow('boom');
+    expect(ce2.parse('F_{30}').evaluate().json).toBe(832040);
+    expect(ce1.parse('T_{60}').evaluate().json).toBe(60);
+    // A stop in one engine, then a read in the other engine.
+    expect(ce1.parse('T_{500}').evaluate().operator).toBe('Subscript');
+    expect(ce2.parse('F_{2000}').evaluate().isNumberLiteral).toBe(true);
+    expect(ce1.parse('T_{150}').evaluate().json).toBe(150);
+  });
+});
+
+describe('SEQUENCE MEMO: what the memo stamp records', () => {
+  test('an assignment to a symbol of the constraints makes the memo outdated', () => {
+    // G_{1,0} is valid only while w > 0. Before, the stamp recorded the
+    // recurrence and the base values only, and G_{2,0} stayed 2 when
+    // G_{1,0} was no longer valid.
+    const ce = new ComputeEngine();
+    ce.assign('w', 1);
+    ce.declareSequence('G', {
+      variables: ['n', 'k'],
+      base: { '0,0': 0 },
+      recurrence: 'G_{n-1,k} + 1',
+      constraints: 'n = 0 \\lor n = 2 \\lor w > 0',
+    });
+    expect(ce.parse('G_{2,0}').evaluate().json).toBe(2);
+    ce.assign('w', -1);
+    expect(ce.parse('G_{1,0}').evaluate().operator).toBe('Subscript');
+    expect(ce.parse('G_{2,0}').evaluate().operator).toBe('Subscript');
+    ce.assign('w', 1);
+    expect(ce.parse('G_{2,0}').evaluate().json).toBe(2);
+  });
+
+  test('a symbol that another sequence reads makes the memo outdated', () => {
+    // The recurrence of A reads B, and the handler of B reads x. Before,
+    // the stamp of A did not show x, and A_2 stayed 2 when B_2 was 4.
+    const ce = new ComputeEngine();
+    ce.assign('x', 1);
+    ce.declareSequence('B', { base: { 0: 0 }, recurrence: 'B_{n-1} + x' });
+    ce.declareSequence('A', { base: { 0: 0 }, recurrence: 'B_n' });
+    ce.declareSequence('C', { base: { 0: 0 }, recurrence: 'A_n + 1' });
+    expect(ce.parse('A_{2}').evaluate().json).toBe(2);
+    expect(ce.parse('C_{2}').evaluate().json).toBe(3);
+    ce.assign('x', 2);
+    expect(ce.parse('A_{2}').evaluate().json).toBe(4);
+    expect(ce.parse('C_{2}').evaluate().json).toBe(5);
+  });
+});
+
+describe('SEQUENCE TERMS: caches outside the sequence', () => {
+  function declareBump(ce: ComputeEngine): void {
+    ce.declare('bump', {
+      signature: '(integer) -> integer',
+      pure: false,
+      evaluate: (ops) => (ops[0].isNumberLiteral ? ce.number(1) : undefined),
+    });
+  }
+
+  /** A sequence whose read of `H_500` is stopped (the recursion is too
+   * deep), and that gives `H_500` after the reads of the lower indices. */
+  function declareDeepSequence(ce: ComputeEngine): void {
+    declareBump(ce);
+    ce.declareSequence('H', {
+      base: { 0: 0 },
+      recurrence: 'H_{n-1} + \\operatorname{bump}(n)',
+    });
+  }
+  function readLowerTerms(ce: ComputeEngine): void {
+    for (let n = 90; n <= 450; n += 90)
+      expect(ce.parse(`H_{${n}}`).evaluate().json).toBe(n);
+  }
+
+  test('the memo of a function follows what a sequence reads', () => {
+    // `g(2)` reads B_2, and the recurrence of B reads x. Before, the memo
+    // of the applications of `g` did not record x, and `g(2)` stayed 2
+    // when B_2 was 4. The same with a sequence A that reads B.
+    const ce = new ComputeEngine();
+    ce.declareSequence('B', { base: { 0: 0 }, recurrence: 'B_{n-1} + x' });
+    ce.declareSequence('A', { base: { 0: 0 }, recurrence: 'B_n' });
+    ce.assign('x', 1);
+    ce.parse('g := k \\mapsto B_k').evaluate();
+    ce.parse('h := k \\mapsto A_k').evaluate();
+    expect(ce.parse('g(2)').evaluate().json).toBe(2);
+    expect(ce.parse('h(2)').evaluate().json).toBe(2);
+    ce.assign('x', 2);
+    expect(ce.parse('B_{2}').evaluate().json).toBe(4);
+    expect(ce.parse('g(2)').evaluate().json).toBe(4);
+    expect(ce.parse('h(2)').evaluate().json).toBe(4);
+  });
+
+  test('a collection and a symbol value that read a sequence', () => {
+    const ce = new ComputeEngine();
+    ce.declareSequence('B', { base: { 0: 0 }, recurrence: 'B_{n-1} + x' });
+    ce.assign('x', 1);
+    const map = ce.function('Map', [
+      ce.parse('k \\mapsto B_k'),
+      ce.function('Range', [ce.number(1), ce.number(3)]),
+    ]);
+    ce.declare('s', { value: ce.box(['Subscript', 'B', 2], { form: 'raw' }) });
+    const each = (e: Expression) => [...e.each()].map((x) => x.json);
+    expect(each(map)).toEqual([1, 2, 3]);
+    expect(ce.parse('s').evaluate().json).toBe(2);
+    ce.assign('x', 2);
+    expect(each(map)).toEqual([2, 4, 6]);
+    expect(ce.parse('s').evaluate().json).toBe(4);
+  });
+
+  test('the memo of a function does not keep a stopped term', () => {
+    const ce = new ComputeEngine();
+    declareDeepSequence(ce);
+    ce.parse('g := k \\mapsto H_k').evaluate();
+    expect(ce.parse('g(500)').evaluate().operator).toBe('Subscript');
+    readLowerTerms(ce);
+    expect(ce.parse('g(500)').evaluate().json).toBe(500);
+  });
+
+  test('the element memo does not keep a stopped term', () => {
+    // The walk of the elements read H_500, and the read was stopped.
+    // Before, the element memo kept the walk, and the elements stayed
+    // `H_500` after the reads of the lower indices.
+    const ce = new ComputeEngine();
+    declareDeepSequence(ce);
+    ce.parse('g := k \\mapsto H_k').evaluate();
+    const map = ce.function('Map', [
+      ce.symbol('g'),
+      ce.function('List', [ce.number(3), ce.number(500)]),
+    ]);
+    const tabulate = ce.box([
+      'Tabulate',
+      ['Function', ['Subscript', 'H', ['Add', 'k', 497]], 'k'],
+      3,
+    ]);
+    const each = (e: Expression) => [...e.each()].map((x) => x.json);
+    expect(each(map)).toEqual([3, ['Subscript', 'H', 500]]);
+    expect(map.at(2)?.json).toEqual(['Subscript', 'H', 500]);
+    expect(each(tabulate)).toEqual([
+      ['Subscript', 'H', 498],
+      ['Subscript', 'H', 499],
+      ['Subscript', 'H', 500],
+    ]);
+    readLowerTerms(ce);
+    expect(each(map)).toEqual([3, 500]);
+    expect(map.at(2)?.json).toBe(500);
+    expect(each(tabulate)).toEqual([498, 499, 500]);
+  });
+
+  test('the memo of a stored value does not keep a stopped read', () => {
+    // The value of `v` is the term H_500, whose first read is stopped. The
+    // memo of the stored value must not keep the declined term: after the
+    // reads of the lower indices, `v` gives the term.
+    const ce = new ComputeEngine();
+    declareDeepSequence(ce);
+    ce.assign('v', ce.parse('H_{500}'));
+    expect(ce.symbol('v').evaluate().json).toEqual(['Subscript', 'H', 500]);
+    readLowerTerms(ce);
+    expect(ce.symbol('v').evaluate().json).toBe(500);
+  });
+});
+
+describe('a fused Map does not dispose the definitions of the scope of its function', () => {
+  test('the global definition read by the function stays live', () => {
+    // The fused route of `Map` evaluated each element in a frame. It pushed
+    // the parent scope of the function, the global scope here, and popping
+    // the frame disposed every definition of that scope.
+    const ce = new ComputeEngine();
+    ce.declare('q', 'real');
+    ce.assume(ce.parse('q > 0'));
+    const map = ce
+      .box(['Map', ['Function', ['Add', 'k', 'q'], 'k'], ['Range', 1, 300]])
+      .evaluate();
+    expect(ce.box(['At', map, 2]).evaluate().toString()).toBe('q + 2');
+    const def = ce.lookupDefinition('q') as any;
+    expect(def?.value?.disposed ?? def?.disposed).toBe(false);
+    expect(ce.symbol('q').isPositive).toBe(true);
   });
 });

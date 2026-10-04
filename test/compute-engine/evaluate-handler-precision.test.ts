@@ -5,8 +5,8 @@
  * - Under a numeric approximation, it is the number of digits requested by
  *   the enclosing `N(x, p)`, or else `ce.precision`.
  * - In an exact evaluation, it is `undefined`.
- * - `N(x, p)` with `p` above the engine precision still raises
- *   `ce.precision` and leaves it raised (issue #391); that is not changed.
+ * - `N(x, p)` with `p` above the engine precision computes at `p` digits
+ *   and restores `ce.precision` after the call (issue #391).
  */
 import { ComputeEngine } from '../../src/compute-engine';
 
@@ -53,11 +53,22 @@ describe('options.precision of an evaluate handler', () => {
     expect(ce.precision).toBe(before);
   });
 
-  test('N(x, p) above the engine precision: p, and the precision stays raised', () => {
+  test('N(x, p) above the engine precision: p, and the precision is restored', () => {
     const { ce, seen } = engineWithRecorder();
+    const before = ce.precision;
     ce.box(['N', ['Rec', 1], 40]).evaluate();
     expect(numericPrecisions(seen)).toEqual([40]);
-    expect(ce.precision).toBe(40);
+    expect(ce.precision).toBe(before);
+  });
+
+  test('N(x, [p, a]): the working precision of each evaluation', () => {
+    // The goal is met when two successive values agree. `Rec` has no
+    // value, so the result is not a number: the first value is the result.
+    const { ce, seen } = engineWithRecorder();
+    const before = ce.precision;
+    ce.box(['N', ['Rec', 1], ['List', 'PositiveInfinity', 30]]).evaluate();
+    expect(numericPrecisions(seen)).toEqual([40]);
+    expect(ce.precision).toBe(before);
   });
 
   test('reaches nested handlers, and is restored after N(x, p)', () => {

@@ -12,7 +12,10 @@ import {
   recordUnfoldOnDescent,
   type AliasDescent,
 } from '../common/type/utils.js';
-import { markInferredTypeOperand } from './boxed-expression/inferred-annotations.js';
+import {
+  isInferredTypedParameter,
+  markInferredTypeOperand,
+} from './boxed-expression/inferred-annotations.js';
 import { isSubtype, resolveTypeReference } from '../common/type/subtype.js';
 import { declarationOf } from '../common/type/reference.js';
 import { reduceType } from '../common/type/reduce.js';
@@ -26,6 +29,10 @@ import {
   machineNumberOf,
 } from './boxed-expression/machine-number.js';
 import { machineBroadcast } from './boxed-expression/machine-broadcast.js';
+import {
+  isOperatorDef,
+  isValueDef,
+} from './boxed-expression/definition-guards.js';
 import { typeToString } from '../common/type/serialize.js';
 import { Type } from '../common/type/types.js';
 import { CancellationError, checkDeadline } from '../common/interruptible.js';
@@ -2756,8 +2763,8 @@ export function lazyBroadcastMapIfNeeded(
  * one logical `Map` return the *same* rewrapped instance, so any per-instance
  * state keyed on the rewrapped `Map` (the auto-compile cache in
  * `library/map-auto-compile.ts`) survives across top-level drains. The rewrap
- * is purely structural (built from `fn.json`), so the memo needs no
- * invalidation. Per-instance semantics stay as item 40 ratified: a `subs()`
+ * is purely structural (built from `fn.json`, or around `fn` itself for a
+ * closure), so the memo needs no invalidation. Per-instance semantics stay as item 40 ratified: a `subs()`
  * or re-boxed copy is a new original and runs cold.
  */
 const lazyMapNRewraps = new WeakMap<Expression, Expression>();
@@ -2770,49 +2777,139 @@ export function lazyMapNumericApproximation(
   if (memo !== undefined) return memo;
   if (!isFunction(expr, 'Map')) return undefined;
   const fn = expr.op1;
-  // A bare symbol callback (`Map(Sin, xs)`, `Map(f, xs, ys)`) has no body to
-  // wrap. Build the function literal
-  // `(_1, …, _k) ↦ NumericApproximation(f(_1, …, _k))` instead, with one
-  // parameter per source, so that the elements numericize on access as they
-  // do for a function literal callback.
-  if (isSymbol(fn)) {
-    const params = expr.ops.slice(1).map((_, i) => `_${i + 1}`);
-    const wrappedFn = ce.box([
-      'Function',
-      ['NumericApproximation', [fn.symbol, ...params]],
-      ...params,
-    ] as MathJsonExpression);
-    if (!wrappedFn.isValid) return undefined;
-    const rewrapped = ce.function('Map', [wrappedFn, ...expr.ops.slice(1)]);
-    lazyMapNRewraps.set(expr, rewrapped);
-    return rewrapped;
-  }
-  if (!isFunction(fn, 'Function') || fn.nops < 1) return undefined;
+  if (!isSymbol(fn) && !(isFunction(fn, 'Function') && fn.nops >= 1))
+    return undefined;
 
   // Wrap the body INSIDE the canonical `Block` wrapper: `Block` evaluates its
   // result without propagating the approximation flag, so `N(Block(sin(_)))`
   // stays exact — the `N` must sit directly on the returned expression.
-  let body: Expression = fn.op1;
-  if (isFunction(body, 'Block') && body.nops === 1) body = body.op1;
-  // Idempotence: the body already numericizes.
-  if (body.operator === 'NumericApproximation' || body.operator === 'N')
-    return undefined;
+  let body: Expression | undefined = undefined;
+  if (isFunction(fn, 'Function')) {
+    body = fn.op1;
+    if (isFunction(body, 'Block') && body.nops === 1) body = body.op1;
+    // Idempotence: the body already numericizes.
+    if (body.operator === 'NumericApproximation' || body.operator === 'N')
+      return undefined;
+  }
 
-  // Rebuild the function literal from MathJSON rather than re-hosting the
-  // canonical body: a canonical body is bound into the ORIGINAL literal's
-  // parameter scope, and grafting it under a new `Function` would split the
-  // bindings between the old and new scopes.
-  const fnJson = fn.json;
-  if (!Array.isArray(fnJson)) return undefined;
-  const wrappedFn = ce.box([
-    'Function',
-    ['NumericApproximation', body.json],
-    ...fnJson.slice(2),
-  ] as MathJsonExpression);
+  let wrappedFn: Expression;
+  if (readsOtherBindings(ce, fn)) {
+    // A callback that reads a name that the current scope binds to another
+    // definition (a closure, such as `x ↦ x/c` for a `c` local to a `Block`)
+    // is not made again from MathJSON: a callback made again reads `c` in
+    // the current scope. The new callback applies the callback as it is:
+    // `(_1, …, _k) ↦ NumericApproximation(Apply(f, _1, …, _k))`. Its
+    // parameters are not symbols of `f`, so that they do not bind a symbol
+    // that `f` reads.
+    //
+    // A parameter type that inference wrote (`isInferredTypedParameter()`)
+    // is removed from `f`: it is the type of the exact elements of the
+    // source (`rational` for a source of halves), and the marker applies `f`
+    // to a float. The body of `f` is kept as it is, with its scope.
+    const callee =
+      isFunction(fn, 'Function') &&
+      fn.ops.slice(1).some(isInferredTypedParameter)
+        ? ce._fn('Function', [
+            fn.op1,
+            ...fn.ops
+              .slice(1)
+              .map((p) =>
+                isFunction(p) && isInferredTypedParameter(p) ? p.op1 : p
+              ),
+          ])
+        : fn;
+    const symbols = new Set(fn.symbols);
+    const params: Expression[] = [];
+    let k = 0;
+    for (let i = 1; i < expr.nops; i++) {
+      do k += 1;
+      while (symbols.has(`_${k}`));
+      params.push(ce.symbol(`_${k}`, { canonical: false }));
+    }
+    const applied = ce._fn(
+      'NumericApproximation',
+      [ce._fn('Apply', [callee, ...params], { canonical: false })],
+      { canonical: false }
+    );
+    wrappedFn = ce.function('Function', [applied, ...params]);
+  } else if (isSymbol(fn)) {
+    // A bare symbol callback (`Map(Sin, xs)`, `Map(f, xs, ys)`) has no body
+    // to wrap. Build the function literal
+    // `(_1, …, _k) ↦ NumericApproximation(f(_1, …, _k))` instead, with one
+    // parameter per source, so that the elements numericize on access as
+    // they do for a function literal callback.
+    const params = expr.ops.slice(1).map((_, i) => `_${i + 1}`);
+    wrappedFn = ce.box([
+      'Function',
+      ['NumericApproximation', [fn.symbol, ...params]],
+      ...params,
+    ] as MathJsonExpression);
+  } else {
+    // Rebuild the function literal from MathJSON rather than re-hosting the
+    // canonical body: a canonical body is bound into the ORIGINAL literal's
+    // parameter scope, and grafting it under a new `Function` would split
+    // the bindings between the old and new scopes. The callback reads no
+    // name that the current scope binds to another definition
+    // (`readsOtherBindings()`), so the literal made again reads the same
+    // definitions.
+    const fnJson = fn.json;
+    if (body === undefined || !Array.isArray(fnJson)) return undefined;
+    wrappedFn = ce.box([
+      'Function',
+      ['NumericApproximation', body.json],
+      ...fnJson.slice(2),
+    ] as MathJsonExpression);
+  }
   if (!wrappedFn.isValid) return undefined;
   const rewrapped = ce.function('Map', [wrappedFn, ...expr.ops.slice(1)]);
   lazyMapNRewraps.set(expr, rewrapped);
   return rewrapped;
+}
+
+/**
+ * True when the callback `fn` of a `Map` (a symbol, or a function literal)
+ * reads a name that the current scope of `ce` binds to a definition that is
+ * not the definition that `fn` is bound to. Such a callback is a closure: it
+ * reads a variable of another scope (`Block(c := 5, Map(x ↦ x/c, …))`, read
+ * after the `Block` returned), and a callback made again from MathJSON in the
+ * current scope does not read that variable.
+ *
+ * The parameters of a function literal are not checked: they are bound by
+ * the literal. A name of a scope inside the body (a local of a `Block`, the
+ * index of a `Sum`, the parameter of a nested function) is bound to that
+ * scope, and it makes the result `true`. The result is then `true` for a
+ * callback that is not a closure, which is safe: the callback is applied as
+ * it is (see `lazyMapNumericApproximation()`).
+ */
+function readsOtherBindings(ce: Expression['engine'], fn: Expression): boolean {
+  const current = (name: string): unknown => {
+    const def = ce.lookupDefinition(name);
+    return isValueDef(def)
+      ? def.value
+      : isOperatorDef(def)
+        ? def.operator
+        : undefined;
+  };
+  const params = new Set<string>();
+  if (isFunction(fn, 'Function'))
+    for (const p of fn.ops.slice(1)) {
+      const name = sym(p) ?? (isFunction(p, 'Typed') ? sym(p.op1) : undefined);
+      if (name !== undefined) params.add(name);
+    }
+  const visit = (e: Expression): boolean => {
+    if (isSymbol(e))
+      return !params.has(e.symbol) && e.baseDefinition !== current(e.symbol);
+    if (!isFunction(e)) return false;
+    // A call is bound to the operator definition of its operator, or to the
+    // value definition of a symbol whose value is a function: `h(x)` for a
+    // local `h := z ↦ 2z` of a `Block` has no operator definition. A call
+    // that is bound to no definition is also taken as a closure: the
+    // current scope can bind its operator to another definition.
+    const def = e.baseDefinition;
+    if (def === undefined || def !== current(e.operator)) return true;
+    return e.ops.some(visit);
+  };
+  return isFunction(fn, 'Function') ? visit(fn.op1) : visit(fn);
 }
 
 /**

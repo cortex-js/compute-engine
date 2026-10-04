@@ -32,6 +32,7 @@ import { _BoxedOperatorDefinition } from './boxed-operator-definition.js';
 import { _BoxedValueDefinition } from './boxed-value-definition.js';
 import { _BoxedExpression } from './abstract-boxed-expression.js';
 import { isNumber, isFunction, isSymbol, numericValue } from './type-guards.js';
+import { isTransitivelyPure } from './transitive-purity.js';
 import { isShadowedSymbol } from '../library-shadowing.js';
 import { isImaginaryUnitValue, isRealPartZero } from './imaginary-part.js';
 import { functionLiteralParameterName } from './function-literal.js';
@@ -1806,9 +1807,11 @@ export function placeholderDef(
  * sum of the doubles of `[10^{400}, -10^{400}, 1]` is then `∞ - ∞ + 1 = NaN`,
  * while the exact sum is 1. The exact value is computed with `evaluate()`,
  * and its float is the result: 1 here, and +∞ for an exact sum above the
- * largest double. Only a pure `expression` is evaluated again. An engine
- * whose numeric values are big decimals does not have this limit. A finite
- * `value` costs one test.
+ * largest double. Only a pure `expression` is evaluated again, and the
+ * stored values of its symbols must be pure too (`isTransitivelyPure()`):
+ * `isPure` of a symbol `r` that holds `Random()` is true, but an evaluation
+ * of `r` draws a new number. An engine whose numeric values are big decimals
+ * does not have this limit. A finite `value` costs one test.
  */
 export function numericFromExactValue(
   ce: ComputeEngine,
@@ -1816,7 +1819,8 @@ export function numericFromExactValue(
   value: Expression
 ): Expression | undefined {
   if (!isNumber(value) || value.isFinite === true) return undefined;
-  if (expression === undefined || expression.isPure !== true) return undefined;
+  if (expression === undefined || !isTransitivelyPure(expression))
+    return undefined;
   if (bignumPreferred(ce)) return undefined;
   const exact = expression.evaluate();
   if (!isNumber(exact) || exact.isNaN === true) return undefined;
@@ -1837,7 +1841,8 @@ export async function numericFromExactValueAsync(
   options: Parameters<Expression['evaluateAsync']>[0]
 ): Promise<Expression | undefined> {
   if (!isNumber(value) || value.isFinite === true) return undefined;
-  if (expression === undefined || expression.isPure !== true) return undefined;
+  if (expression === undefined || !isTransitivelyPure(expression))
+    return undefined;
   if (bignumPreferred(ce)) return undefined;
   const exact = await expression.evaluateAsync({
     signal: options?.signal,

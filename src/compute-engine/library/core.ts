@@ -30,8 +30,15 @@ import {
   describeType,
 } from '../boxed-expression/operand-descriptor.js';
 import { canonicalForm } from '../boxed-expression/canonical.js';
+import { isInferredTypedParameter } from '../boxed-expression/inferred-annotations.js';
+import { isTransitivelyPure } from '../boxed-expression/transitive-purity.js';
 import { asSmallInteger, toInteger } from '../boxed-expression/numerics.js';
-import { SMALL_INTEGER } from '../numerics/numeric.js';
+import { MACHINE_PRECISION, SMALL_INTEGER } from '../numerics/numeric.js';
+import type { BigNum } from '../numerics/types.js';
+import {
+  displayDigits,
+  setDisplayDigits,
+} from '../numeric-value/big-numeric-value.js';
 import {
   addSequenceBaseCase,
   addSequenceRecurrence,
@@ -7515,10 +7522,11 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       description: [
         'N(expr): numerically evaluate an expression',
         'N(expr, precision): evaluate to `precision` significant digits',
+        'N(expr, [precision, accuracy]): evaluate with a precision goal and an accuracy goal',
       ],
       lazy: true,
-      signature: '(any, integer?) -> unknown',
-      examples: ['N(Pi)', 'N(1/3, 4)'],
+      signature: '(any, (integer | list<number>)?) -> unknown',
+      examples: ['N(Pi)', 'N(1/3, 4)', 'N(Exp(100), [PositiveInfinity, 20])'],
       type: ([x], context) =>
         BoxedType.forResult(x.type, context.engine._typeResolver),
       canonical: (ops, { engine: ce }) => {
@@ -7549,6 +7557,33 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // outer rounds to `p` — a different result from `N(x, p)`.)
         if (xs.length === 1 && xs[0].operator === 'N') return xs[0];
 
+        // A written goal `[p, a]` (`N(x, [p, a])`) has two elements, and
+        // each element is a number: a list of another length, or an element
+        // of another type (a string), is a type error. A value that is not
+        // a valid goal (`[-1, 5]`) is found when the call is evaluated. A
+        // set is also a type error: the elements of a set have no order,
+        // and `\{30, 5\}` does not tell which one is the precision goal.
+        if (isFunction(xs[1], 'Set'))
+          xs[1] = ce.typeError(
+            parseType('tuple<number, number>')!,
+            xs[1].type,
+            xs[1]
+          );
+        else if (isFunction(xs[1], 'List') || isFunction(xs[1], 'Tuple')) {
+          const goal = xs[1];
+          if (goal.nops !== 2)
+            xs[1] = ce.typeError(
+              parseType('tuple<number, number>')!,
+              goal.type,
+              goal
+            );
+          else if (goal.ops.some((op) => !op.type.matches('number')))
+            xs[1] = ce._fn(
+              goal.operator,
+              goal.ops.map((op) => checkType(ce, op, 'number'))
+            );
+        }
+
         return ce._fn('N', xs);
       },
       evaluate: (ops, { engine: ce }) => {
@@ -7561,9 +7596,26 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // Single-argument form: evaluate at the engine's current precision.
         if (ops.length < 2) return inexactResult(ce, x.canonical.N());
 
-        // Optional precision argument: the requested number of significant
-        // digits. Resolve it numerically (it may be `2 + 3` or a bound symbol).
-        let p = ops[1].canonical.N().re;
+        // Optional second argument: the requested number of significant
+        // digits, or a list `[p, a]` of a precision goal and an accuracy
+        // goal. Resolve it numerically (it may be `2 + 3` or a bound symbol).
+        let request = ops[1].canonical.N();
+        // A lazy indexed collection (`Range(30, 31)`, or a symbol whose value
+        // is one) is a goal when it has two elements, as a list is: its
+        // elements are read into a list. With another number of elements,
+        // the goal is not valid and the call stays unevaluated.
+        if (request.isLazyCollection && request.isIndexedCollection) {
+          if (request.count !== 2) return undefined;
+          request = ce.function('List', [...request.each()]);
+        }
+        if (isFunction(request, 'List') || isFunction(request, 'Tuple')) {
+          const goal = numericGoal(request);
+          // A goal that is not valid leaves the call unevaluated.
+          if (goal === undefined) return undefined;
+          return evaluateToGoal(x.canonical, goal, request);
+        }
+
+        let p = request.re;
         if (!Number.isFinite(p) || p < 1)
           return inexactResult(ce, x.canonical.N());
         p = Math.min(Math.trunc(p), 1000); // cap to avoid runaway precision
@@ -7574,25 +7626,93 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         const enclosingRequest = ce._requestedPrecision;
         ce._requestedPrecision = p;
         try {
+          // The value is computed with guard digits, then rounded to `p`
+          // digits: a value computed at `p` digits can have an error of a
+          // few units in its last digit (`N(Exp(i), 30)` had a real part
+          // that ended with ...444, not ...443). With the guard digits, a
+          // digit is wrong only when the exact value is within that error
+          // of a point halfway between two `p`-digit numbers.
           const global = ce.precision;
-          if (p > global) {
-            // Display precision is global, so to *show* more than `global`
-            // digits the engine's working precision must be raised — and left
-            // raised. Recompute the (still raw) operand at the new precision
-            // so constants like `Pi` materialize to `p` digits.
-            ce.precision = p;
-            return inexactResult(ce, x.canonical.N(), p);
+          const working = p + guardDigits(p);
+          const source = x.canonical;
+          if (working <= global) {
+            // The working precision of the engine has the guard digits:
+            // round the value down to `p` significant digits. The precision
+            // is not lowered (it has a machine-digit floor, so lowering it
+            // can't reach a small `p`).
+            return inexactResult(
+              ce,
+              roundToSignificantDigits(source.N(), p),
+              p,
+              source
+            );
           }
 
-          // `p <= global`: leave the global precision untouched and round the
-          // result down to `p` significant digits (precision has a
-          // machine-digit floor, so lowering the global precision can't reach
-          // small `p`).
-          return inexactResult(
-            ce,
-            roundToSignificantDigits(x.canonical.N(), p),
-            p
-          );
+          // Compute at `working` digits, then restore the precision of the
+          // engine, also when the evaluation throws: `N(x, p)` does not
+          // change `ce.precision` (GitHub issue #391). The precision is
+          // raised without a reset of the engine
+          // (`_withTransientPrecision`): the value of a constant such as
+          // `Pi` is computed again at `working` digits, and is not read from
+          // the value that the engine keeps at its precision. The handlers
+          // receive `p` as `options.precision`: it is the number of digits
+          // that the call requests.
+          //
+          // The result is rounded to `p` digits. When `p` is more than the
+          // precision of the engine, each float that the window computed is
+          // displayed with its `p` digits (`showComputedDigits()`), also a
+          // float in a symbolic result (`x + 3.14159…`). An operation on the
+          // result later computes at the precision of the engine, and its
+          // result is displayed with that precision. The elements of a lazy
+          // collection are read after the precision is restored: each one
+          // is computed from the operand by its own `N(_, p)`
+          // (`inexactResult()`).
+          //
+          // The value at the precision of the engine is computed only when
+          // a float has more digits than that precision, and only for a pure
+          // operand: a second evaluation of `Random()` would give another
+          // value. It is also not computed for a float with more digits
+          // than a machine float when the operand reads no float that is
+          // already computed (`mayReadFixedFloat()`): such a float was
+          // computed by the window, at its precision. Thus `N(Pi, 50)` or
+          // `N(Integrate(…), 50)` evaluates the operand one time only.
+          const referenceValue = once(() => {
+            // `isPure` does not read the stored values: `r + Pi` is pure
+            // also when `r` holds `Random()` (`isTransitivelyPure()`).
+            if (!isTransitivelyPure(source)) return undefined;
+            ce._requestedPrecision = enclosingRequest;
+            try {
+              return ce._withTransientPrecision(global, () => source.N());
+            } finally {
+              ce._requestedPrecision = p;
+            }
+          });
+          const readsFixedFloat = once(() => mayReadFixedFloat(source));
+          const reference = (shown: number): Expression | undefined =>
+            shown <= MACHINE_FLOAT_DIGITS || readsFixedFloat()
+              ? referenceValue()
+              : undefined;
+          const result = ce._withTransientPrecision(working, () => {
+            const value = inexactResult(
+              ce,
+              roundToSignificantDigits(source.N(), p),
+              p,
+              source
+            );
+            if (p <= global) return value;
+            return showComputedDigits(
+              value,
+              p,
+              global,
+              reference,
+              once(() => source.evaluate())
+            );
+          });
+          // A float with no more digits than the precision of the engine is
+          // a float of the kind that the engine makes: a machine float at
+          // machine precision (`N(1/3, 11)` is computed at 16 digits, which
+          // makes a big decimal).
+          return followEnginePrecision(ce, result);
         } finally {
           ce._requestedPrecision = enclosingRequest;
         }
@@ -9550,12 +9670,21 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
  *
  * A lazy indexed collection (`Range(1, 4)`, a lazy `Map`) is not walked: its
  * elements are computed when they are read, and the collection can be
- * infinite. The result is the lazy collection `Map(_1 ↦ N(_1), xs)`, or
- * `Map(_1 ↦ N(_1, digits), xs)` when `digits` is given, so each element is
- * made inexact (and rounded) when it is read: `N(Range(1, 4))/3` is
- * `[0.333…, 0.666…, 1.0, 1.333…]`, not a list of exact thirds. The body is the
- * `N` operator, not the internal marker `NumericApproximation` of the `.N()`
- * method, because the marker keeps an integer exact.
+ * infinite. The result is a lazy collection whose elements are computed by
+ * `N` (`N(_1)`, or `N(_1, digits)` when `digits` is given) when they are
+ * read (`lazyInexactElements()`): `N(Range(1, 4))/3` is
+ * `[0.333…, 0.666…, 1.0, 1.333…]`, not a list of exact thirds. The body is
+ * the `N` operator, not the internal marker `NumericApproximation` of the
+ * `.N()` method, because the marker keeps an integer exact. `digits` is a
+ * number of significant digits, or a goal `[p, a]` (`evaluateToGoal()`). A
+ * lazy collection that is not indexed (a lazy set) is returned as it is.
+ *
+ * When `source` is given, it is the operand of `N` whose numeric value is
+ * `value`. When `source` is a lazy indexed collection, the elements are
+ * read from `source`, not from `value`: the elements of `source` are
+ * computed with the precision of each read, also the constants in the
+ * function of a lazy `Map` (`Map(x ↦ x·Sin(1.5), …)`), which `value` has as
+ * floats of the first working precision of `N(x, [p, a])`.
  *
  * The float follows the working precision of the engine when this function
  * is called: a big decimal above machine precision, else a machine float.
@@ -9563,7 +9692,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
 function inexactResult(
   ce: ComputeEngine,
   value: Expression,
-  digits?: number
+  digits?: number | Expression,
+  source?: Expression
 ): Expression {
   if (isNumber(value)) {
     if (!value.isExact || value.isFinite !== true) return value;
@@ -9574,22 +9704,440 @@ function inexactResult(
     );
   }
   if (isFunction(value, 'List') || isFunction(value, 'Tuple')) {
+    // The operand that matches each element, when the operand is a list or
+    // a tuple of the same length.
+    const sources =
+      source !== undefined &&
+      isFunction(source) &&
+      source.operator === value.operator &&
+      source.nops === value.nops
+        ? source.ops
+        : undefined;
     let changed = false;
-    const ops = value.ops.map((op) => {
-      const result = inexactResult(ce, op, digits);
+    const ops = value.ops.map((op, i) => {
+      const result = inexactResult(ce, op, digits, sources?.[i]);
       if (result !== op) changed = true;
       return result;
     });
     return changed ? ce.function(value.operator, ops) : value;
   }
-  if (value.isLazyCollection && value.isIndexedCollection) {
-    const body =
-      digits === undefined
-        ? (['N', '_1'] as const)
-        : (['N', '_1', digits] as const);
-    return ce.function('Map', [ce.box(['Function', body, '_1']), value]);
-  }
+  if (value.isLazyCollection && value.isIndexedCollection)
+    return lazyInexactElements(
+      ce,
+      source?.isLazyCollection && source.isIndexedCollection ? source : value,
+      value.count,
+      digits
+    );
   return value;
+}
+
+/**
+ * The lazy collection of the elements of the lazy indexed collection `xs`,
+ * each one computed by `N`: `Map(i ↦ N(e(i), digits), Range(1, n))`,
+ * where `n` is `count`, the number of elements of `xs` (`+∞` for an
+ * infinite collection), and `e(i)` is the element at `i` (`elementOf()`).
+ *
+ * `e(i)` is an operand of `N`, which is lazy: thus `N` computes the
+ * element, with its own precision. The function of a lazy `Map`, and the
+ * elements of any other lazy collection (`Reverse(Map(f, ys))`), are
+ * computed with the digits of `N`, also when `N(x, p)` raised the precision
+ * for `p` and restored it before the element is read. Each element is read
+ * by its index, and `At` reads one element of a `Map` or of a `Range`
+ * without the elements before it.
+ *
+ * When `xs` is a `Map` (also of `Map`s) whose sources are ranges with exact
+ * bounds or lists of number literals, the elements of the sources do not
+ * depend on the precision. The result is then `Map(_1 ↦ N(f(_1), digits),
+ * ys)` for `xs = Map(f, ys)`: the sources are read directly, which is
+ * faster than `At`.
+ *
+ * The parts of `xs` are put in the result as they are. They are not changed
+ * to MathJSON and boxed again: the function of a `Map` can read a variable
+ * of another scope (`Block(c := 5, Map(x ↦ x/c, …))`), and a function that
+ * is boxed again in the current scope does not read that variable.
+ *
+ * When `count` is not known, the result is `Map(_1 ↦ N(_1, digits), xs)`:
+ * the elements are computed with the precision in force when they are
+ * read, and `N` rounds them.
+ */
+function lazyInexactElements(
+  ce: ComputeEngine,
+  xs: Expression,
+  count: number | undefined,
+  digits: number | Expression | undefined
+): Expression {
+  const goal =
+    digits === undefined
+      ? []
+      : [typeof digits === 'number' ? ce.number(digits) : digits];
+  // The parameters of the function are not symbols of `xs`, so that the
+  // function does not bind a symbol that `xs` reads.
+  const symbols = new Set(xs.symbols);
+  let k = 0;
+  const newParam = (): Expression => {
+    do k += 1;
+    while (symbols.has(`_${k}`));
+    return ce.symbol(`_${k}`, { canonical: false });
+  };
+  // The body is not canonical: `ce.function('Function', …)` canonicalizes
+  // it in the scope of the function, where the parameters are bound. The
+  // parts of `xs` are canonical, and they are kept as they are.
+  const map = (
+    element: Expression,
+    params: Expression[],
+    sources: Expression[]
+  ): Expression =>
+    ce.function('Map', [
+      ce.function('Function', [
+        ce._fn('N', [element, ...goal], { canonical: false }),
+        ...params,
+      ]),
+      ...sources,
+    ]);
+
+  if (count === undefined) {
+    const param = newParam();
+    return map(param, [param], [xs]);
+  }
+
+  const sources: Expression[] = [];
+  if (sourcesOf(xs, sources).every(isFixedSource)) {
+    const params: Expression[] = [];
+    const element = elementOf(ce, xs, () => {
+      const param = newParam();
+      params.push(param);
+      return param;
+    });
+    return map(element, params, sources);
+  }
+
+  const index = newParam();
+  const element = elementOf(ce, xs, (ys) =>
+    ce._fn('At', [ys, index], { canonical: false })
+  );
+  return map(element, [index], [
+    ce.function('Range', [
+      ce.One,
+      count === Infinity ? ce.PositiveInfinity : ce.number(count),
+    ]),
+  ]);
+}
+
+/**
+ * The element of the lazy indexed collection `xs`, as an expression that is
+ * not canonical. When `xs` is `Map(f, ys₁, …, ysₖ)`, the element is
+ * `Apply(f, e₁, …, eₖ)`, where `eᵢ` is the element of `ysᵢ` (also a `Map`).
+ * The element of any other collection `ys` (a source) is `source(ys)`.
+ *
+ * The function `f` is applied in the body of `N`, and not read through
+ * `At(Map(f, ys), i)`: the `.N()` method of a lazy `Map` makes its function
+ * again from MathJSON, and a function made again does not read the
+ * variables of the scope of `f`.
+ *
+ * A parameter type that inference wrote (`isInferredTypedParameter()`) is
+ * removed from `f`: it is the type of the exact elements of the source
+ * (`rational` for `Map(x ↦ x/2, Range(1, 3))`), and `N` applies `f` to a
+ * float. The body of `f` is kept as it is, with its scope.
+ */
+function elementOf(
+  ce: ComputeEngine,
+  xs: Expression,
+  source: (ys: Expression) => Expression
+): Expression {
+  if (isFunction(xs, 'Map') && xs.nops >= 2) {
+    const fn = xs.op1;
+    if (isSymbol(fn) || isFunction(fn, 'Function')) {
+      const applied =
+        isFunction(fn) && fn.ops.slice(1).some(isInferredTypedParameter)
+          ? ce._fn('Function', [
+              fn.op1,
+              ...fn.ops
+                .slice(1)
+                .map((p) =>
+                  isFunction(p) && isInferredTypedParameter(p) ? p.op1 : p
+                ),
+            ])
+          : fn;
+      return ce._fn(
+        'Apply',
+        [applied, ...xs.ops.slice(1).map((ys) => elementOf(ce, ys, source))],
+        { canonical: false }
+      );
+    }
+  }
+  return source(xs);
+}
+
+/** Add to `sources` the sources of `xs` (see `elementOf()`), in the order of
+ * `elementOf()`, and return `sources`. */
+function sourcesOf(xs: Expression, sources: Expression[]): Expression[] {
+  if (isFunction(xs, 'Map') && xs.nops >= 2) {
+    const fn = xs.op1;
+    if (isSymbol(fn) || isFunction(fn, 'Function')) {
+      for (const ys of xs.ops.slice(1)) sourcesOf(ys, sources);
+      return sources;
+    }
+  }
+  sources.push(xs);
+  return sources;
+}
+
+/** True when the elements of the collection `xs` do not depend on the
+ * precision: a `Range` with exact bounds, or a `List` of number literals. */
+function isFixedSource(xs: Expression): boolean {
+  if (isFunction(xs, 'Range'))
+    return xs.ops.every((op) => isNumber(op) && op.isExact);
+  return isFunction(xs, 'List') && xs.ops.every((op) => isNumber(op));
+}
+
+/** A function that calls `fn` the first time only, and then gives the
+ * value of that call. */
+function once<T>(fn: () => T): () => T {
+  let done = false;
+  let value: T;
+  return () => {
+    if (!done) {
+      value = fn();
+      done = true;
+    }
+    return value;
+  };
+}
+
+/**
+ * The number of significant digits of the number literal `value`: the
+ * larger number of the two parts of a complex value, without the trailing
+ * zeros of the significand.
+ */
+function significantDigits(value: Expression): number {
+  const ce = value.engine;
+  const count = (v: BigNum): number => {
+    if (v.isZero()) return 0;
+    const significand = v.significand < 0n ? -v.significand : v.significand;
+    return significand.toString().replace(/0+$/, '').length;
+  };
+  return Math.max(
+    count(value.bignumRe ?? ce.bignum(value.re)),
+    count(value.bignumIm ?? ce.bignum(value.im))
+  );
+}
+
+/** True when the number literals `a` and `b` have the same value: the same
+ * big decimal real part and the same big decimal imaginary part. */
+function sameParts(a: Expression, b: Expression): boolean {
+  const ce = a.engine;
+  return (
+    (a.bignumRe ?? ce.bignum(a.re)).eq(b.bignumRe ?? ce.bignum(b.re)) &&
+    (a.bignumIm ?? ce.bignum(a.im)).eq(b.bignumIm ?? ce.bignum(b.im))
+  );
+}
+
+/**
+ * A new float with the value of the number literal `value`, displayed with
+ * at least `digits` significant digits (`setDisplayDigits()`). The float is
+ * always a new value: a value is immutable, and the digits of a shared
+ * value would change the display of every expression that holds it. Call it
+ * at a precision above machine precision, so that the float is a big
+ * decimal (a machine float has no display digits).
+ */
+function withDisplayDigits(value: Expression, digits: number): Expression {
+  const ce = value.engine;
+  const re = value.bignumRe ?? ce.bignum(value.re);
+  const im = value.bignumIm ?? ce.bignum(value.im);
+  const result = ce._inexactNumericValue(im.isZero() ? re : { re, im });
+  setDisplayDigits(result, digits);
+  return ce.number(result);
+}
+
+/**
+ * The value of `N(x, p)` (`value`, rounded to `p = digits` digits), with the
+ * floats that `N` computed displayed with their `p` digits
+ * (`withDisplayDigits()`). `p` is more than `precision`, the precision of
+ * the engine. The function walks into lists, tuples and symbolic results
+ * (`x + 3.14159…`), but not into a function literal, a `Hold`, or an
+ * operator that binds a variable (`Sum`). A float in a symbolic result is
+ * rounded to `p` digits.
+ *
+ * A float that does not depend on the precision is not given display
+ * digits: its digits past the precision of the engine are not correct
+ * digits of the value. This is a float of the operand (`N(x + 0.1, 50)`), a
+ * stored float that was computed at a lower precision, or the value of a
+ * kernel that computes with machine floats. Such a float is found when the
+ * float of `reference` (the value of `x` at the precision of the engine) at
+ * the same place has the same value after the same rounding. But the float
+ * is given display digits when the exact value of `x` (`exact`, at the same
+ * place) is an exact number: an exact value with a short decimal form
+ * (`2^−80`) also has the same value at two precisions. The float of a
+ * nested `N(y, q)` keeps its `q` display digits (at most `p`): it has the
+ * same value at two precisions, and `q` correct digits.
+ *
+ * `reference` and `exact` are computed only when a float has more than
+ * `precision` digits: a float with fewer digits is displayed with all its
+ * digits. `reference` receives the number of significant digits of the
+ * float, and it can return `undefined` when a float with that number of
+ * digits does not need the comparison: the float is then displayed with
+ * `digits` digits.
+ */
+function showComputedDigits(
+  value: Expression,
+  digits: number,
+  precision: number,
+  reference: (shown: number) => Expression | undefined,
+  exact: (shown: number) => Expression | undefined
+): Expression {
+  const ce = value.engine;
+  if (isNumber(value)) {
+    if (value.isExact || value.isFinite !== true) return value;
+    const rounded = roundToSignificantDigits(value, digits);
+    if (!isNumber(rounded)) return value;
+    const shown = significantDigits(rounded);
+    if (shown <= precision) return sameParts(rounded, value) ? value : rounded;
+    const ref = reference(shown);
+    if (
+      ref !== undefined &&
+      isNumber(ref) &&
+      ref.isFinite === true &&
+      sameParts(rounded, roundToSignificantDigits(ref, digits))
+    ) {
+      // The float of a nested `N(y, q)` has the same value at each
+      // precision, and it has `q` correct digits: its display digits.
+      const v = ref.numericValue;
+      const known = typeof v === 'number' ? undefined : displayDigits(v);
+      if (known !== undefined && known > precision)
+        return withDisplayDigits(rounded, Math.min(known, digits));
+      const e = exact(shown);
+      if (e === undefined || !isNumber(e) || !e.isExact) return rounded;
+    }
+    return withDisplayDigits(rounded, digits);
+  }
+  if (!isFunction(value) || isRoundingBoundary(value)) return value;
+  // The operand of `reference` or of `exact` at the same place, when it has
+  // the same operator and the same number of operands as `value`.
+  const at =
+    (whole: (shown: number) => Expression | undefined, i: number) =>
+    (shown: number): Expression | undefined => {
+      const r = whole(shown);
+      return r !== undefined &&
+        isFunction(r) &&
+        r.operator === value.operator &&
+        r.nops === value.nops
+        ? r.ops[i]
+        : undefined;
+    };
+  let changed = false;
+  const ops = value.ops.map((op, i) => {
+    const result = showComputedDigits(
+      op,
+      digits,
+      precision,
+      at(reference, i),
+      at(exact, i)
+    );
+    if (result !== op) changed = true;
+    return result;
+  });
+  if (!changed) return value;
+  const operator = value.operator;
+  return operator === 'List' || operator === 'Tuple'
+    ? ce.function(operator, ops)
+    : ce._fn(operator, ops);
+}
+
+/**
+ * `value` with each float that has no display digits above the precision
+ * of the engine made again as a float of the engine: a machine float at
+ * machine precision. A float computed at a precision raised by
+ * `_withTransientPrecision()` is a big decimal, also when it has no more
+ * digits than the precision of the engine. The function walks into lists,
+ * tuples and symbolic results (`x + 3.14159…`), as `showComputedDigits()`
+ * does. Call it after the precision is restored.
+ */
+function followEnginePrecision(
+  ce: ComputeEngine,
+  value: Expression
+): Expression {
+  if (ce.precision > MACHINE_PRECISION) return value;
+  if (isNumber(value)) {
+    if (value.isExact || value.isFinite !== true) return value;
+    if (value.bignumRe === undefined && value.bignumIm === undefined)
+      return value;
+    const v = value.numericValue;
+    if (typeof v !== 'number' && (displayDigits(v) ?? 0) > ce.precision)
+      return value;
+    // A big decimal outside the range of a machine float is kept: as a
+    // machine float, it is an infinity (`e^1000`, whose `re` is `Infinity`)
+    // or `0` (`e^−1000`, whose `re` is `0`).
+    const outOfRange = (part: number, big: BigNum | undefined): boolean =>
+      !Number.isFinite(part) || (part === 0 && big !== undefined && !big.isZero());
+    if (outOfRange(value.re, value.bignumRe) || outOfRange(value.im, value.bignumIm))
+      return value;
+    return ce.number(
+      ce._inexactNumericValue(
+        value.im === 0 ? value.re : { re: value.re, im: value.im }
+      )
+    );
+  }
+  if (!isFunction(value) || isRoundingBoundary(value)) return value;
+  let changed = false;
+  const ops = value.ops.map((op) => {
+    const result = followEnginePrecision(ce, op);
+    if (result !== op) changed = true;
+    return result;
+  });
+  if (!changed) return value;
+  const operator = value.operator;
+  return operator === 'List' || operator === 'Tuple'
+    ? ce.function(operator, ops)
+    : ce._fn(operator, ops);
+}
+
+/**
+ * True when the floats in `value` are not changed by `N`: `value` is a
+ * function literal, a `Hold`, an operator that binds a variable (`Sum`), or
+ * a lazy collection. The floats of a function body or of a held expression
+ * are computed when the function is applied or when the expression is
+ * released, and the elements of a lazy collection when they are read.
+ */
+function isRoundingBoundary(value: Expression): boolean {
+  return (
+    value.operator === 'Function' ||
+    value.operator === 'Hold' ||
+    value.operatorDefinition?.scoped === true ||
+    (value.isLazyCollection === true &&
+      value.operator !== 'List' &&
+      value.operator !== 'Tuple')
+  );
+}
+
+/** The largest number of significant digits of a machine float. */
+const MACHINE_FLOAT_DIGITS = 17;
+
+/**
+ * True when `expr` can read a float that was computed before the
+ * evaluation, and that thus does not depend on the precision of the
+ * evaluation: a float literal, a symbol that is not a symbol of the
+ * library and that has a value, or a function that is not a function of
+ * the library (its body can contain a float literal).
+ */
+function mayReadFixedFloat(expr: Expression): boolean {
+  const ce = expr.engine;
+  const library = ce.contextStack[0]?.lexicalScope;
+  const isUserName = (name: string): boolean => {
+    const def = ce.lookupDefinition(name);
+    return def !== undefined && library?.bindings.get(name) !== def;
+  };
+  const visit = (e: Expression): boolean => {
+    if (isNumber(e)) return !e.isExact;
+    if (isSymbol(e))
+      return (
+        isUserName(e.symbol) &&
+        (e.value !== undefined || e.operatorDefinition !== undefined)
+      );
+    if (!isFunction(e)) return false;
+    if (isUserName(e.operator)) return true;
+    return e.ops.some(visit);
+  };
+  return visit(expr);
 }
 
 /**
@@ -9599,9 +10147,12 @@ function inexactResult(
  * the requested precision is at or below the engine's working precision.
  *
  * Each element of a `List` or `Tuple` result is rounded in the same way, also
- * in nested lists and tuples: `N([1/3, Pi], 4)` is `[0.3333, 3.142]`.
- * Other results (symbolic expressions, lazy collections, strings) are
- * returned unchanged.
+ * in nested lists and tuples: `N([1/3, Pi], 4)` is `[0.3333, 3.142]`. Each
+ * float of a symbolic result is rounded too: `N(x + Pi, 5)` is
+ * `x + 3.1416`. An exact number in a symbolic result stays exact. The
+ * function does not walk into a function literal, a `Hold`, an operator
+ * that binds a variable, or a lazy collection (`isRoundingBoundary()`).
+ * Other results (strings, booleans) are returned unchanged.
  */
 function roundToSignificantDigits(value: Expression, p: number): Expression {
   const ce = value.engine;
@@ -9614,29 +10165,654 @@ function roundToSignificantDigits(value: Expression, p: number): Expression {
     });
     return changed ? ce.function(value.operator, ops) : value;
   }
+  // The floats of a function are rounded, and the function is kept. This is
+  // also true for a function that has a numeric value, such as
+  // `Measurement(v, δ)`, whose `re` is `v`: its value is rounded and it
+  // keeps its uncertainty.
+  if (isFunction(value)) {
+    if (isRoundingBoundary(value)) return value;
+    let changed = false;
+    const ops = value.ops.map((op) => {
+      if (isNumber(op) && op.isExact) return op;
+      const result = roundToSignificantDigits(op, p);
+      // A float with no more than `p` digits is kept as it is: a machine
+      // float stays a machine float.
+      if (isNumber(op) && isNumber(result) && sameParts(op, result)) return op;
+      if (result !== op) changed = true;
+      return result;
+    });
+    return changed ? ce._fn(value.operator, ops) : value;
+  }
   const re = value.re;
   const im = value.im;
   // Only round concrete finite numbers; leave symbolic results / non-numbers
-  // (where `re`/`im` are `NaN`) and infinities unchanged.
-  if (!Number.isFinite(re) || !Number.isFinite(im)) return value;
+  // (where `re`/`im` are `NaN`) and infinities unchanged. A number literal is
+  // finite when its big decimal parts are: a part can overflow a machine
+  // float (`1.2e400`, whose `re` is `Infinity`) or underflow it (`1.2e-400`,
+  // whose `re` is `0`).
+  if (
+    isNumber(value)
+      ? value.isFinite !== true
+      : !Number.isFinite(re) || !Number.isFinite(im)
+  )
+    return value;
 
-  // Complex: round each component (machine precision is enough here; JS
-  // `toPrecision` caps at 100 significant digits).
-  if (im !== 0) {
-    const clamp = Math.min(p, 100);
+  // `ce.bignum(re)` covers the machine-float case where there is no
+  // `bignumRe`.
+  const bigRe = value.bignumRe ?? ce.bignum(re);
+  const bigIm = value.bignumIm ?? ce.bignum(im);
+
+  // Complex: round each part as a big decimal. A part rounded as a machine
+  // float had at most 17 correct digits, also with `p` above that.
+  if (!bigIm.isZero()) {
     // The rounded value is a float, even when both its parts are integers
     return ce.number(
       ce._inexactNumericValue({
-        re: Number(re.toPrecision(clamp)),
-        im: Number(im.toPrecision(clamp)),
+        re: bigRe.toPrecision(p),
+        im: bigIm.toPrecision(p),
       })
     );
   }
 
   // Real: round the bignum to `p` significant digits (preserving large `p`).
-  // `ce.bignum(re)` covers the machine-float case where there is no `bignumRe`.
-  const bd = value.bignumRe ?? ce.bignum(re);
-  return boxBignumResult(ce, bd.toPrecision(p));
+  return boxBignumResult(ce, bigRe.toPrecision(p));
+}
+
+/**
+ * The number of digits that `N(x, p)` adds to `p` for its working
+ * precision: 5, or a tenth of `p` for a large `p`. The error of a numeric
+ * evaluation is a few units in the last digit of its precision, and it
+ * grows with the number of operations, which tends to grow with the
+ * precision (more terms in a series).
+ */
+function guardDigits(p: number): number {
+  return Math.max(5, Math.ceil(p / 10));
+}
+
+/**
+ * The goals of `N(x, [p, a])`: the precision goal `p` (a number of
+ * significant digits) and the accuracy goal `a` (a number of digits after
+ * the decimal point). Either one can be `Infinity`, which means that there
+ * is no goal of that kind, but not both.
+ */
+type NumericGoal = { precision: number; accuracy: number };
+
+/**
+ * The goals that the list `request` (the second operand of `N`, evaluated)
+ * gives, or `undefined` when it is not a valid goal: a list of two real
+ * numbers, a precision goal that is `+∞` or a number ≥ 1, an accuracy goal
+ * that is `+∞` or a finite number, not both `+∞`. A negative accuracy goal
+ * is valid: `a = −2` asks for an error below `100`. A precision goal is
+ * truncated to an integer, as the precision of `N(x, p)` is. An accuracy
+ * goal is rounded up to an integer, so that the error is below `10^−a`.
+ */
+function numericGoal(request: Expression): NumericGoal | undefined {
+  if (!isFunction(request) || request.nops !== 2) return undefined;
+  const [p, a] = request.ops;
+  if (!isNumber(p) || !isNumber(a) || p.im !== 0 || a.im !== 0)
+    return undefined;
+  const precision = p.re;
+  const accuracy = a.re;
+  if (precision !== Infinity && !(Number.isFinite(precision) && precision >= 1))
+    return undefined;
+  if (accuracy !== Infinity && !Number.isFinite(accuracy)) return undefined;
+  if (precision === Infinity && accuracy === Infinity) return undefined;
+  return {
+    precision: precision === Infinity ? Infinity : Math.trunc(precision),
+    accuracy: accuracy === Infinity ? Infinity : Math.ceil(accuracy),
+  };
+}
+
+/** The largest working precision of `evaluateToGoal()`, in digits. Past it,
+ * `N(x, [p, a])` stays unevaluated. It is the largest precision of
+ * `N(x, p)`, and the largest precision at which the trigonometric functions
+ * are accurate. */
+const GOAL_MAX_PRECISION = 1000;
+
+/** `evaluateToGoal()` takes a number as the rounding noise of `0` when its
+ * magnitude is below `10^−(d − ZERO_NOISE_MARGIN)` at the working precision
+ * `d`... */
+const ZERO_NOISE_MARGIN = 10;
+
+/** ...for this number of successive working precisions. */
+const ZERO_NOISE_COUNT = 3;
+
+/** The digits that `evaluateToGoal()` adds to the goal for its first
+ * working precision. */
+const GOAL_GUARD_DIGITS = 10;
+
+/**
+ * The value of `N(x, [p, a])`: a numeric value of `x` with `p` correct
+ * significant digits or with an absolute error below `10^−a`, whichever
+ * comes first, or `undefined` (the call stays unevaluated) when the
+ * working precision would have to be more than `GOAL_MAX_PRECISION` digits.
+ *
+ * This is the reading of Mathematica's `N[x, {p, a}]`, which "attempts to
+ * give a result with precision at most p and accuracy at most a": the
+ * evaluation stops when one of the two goals is met, and the result has the
+ * smaller number of digits that the two goals give. `N[x, {Infinity, a}]`
+ * thus asks for an absolute error below `10^−a`, however many significant
+ * digits that takes.
+ *
+ * The method: `x` is evaluated at a working precision, which is then
+ * doubled, until two successive values agree to within the goal with two
+ * more digits: `10^−(a+2)` absolute, or `10^−(p+2)` relative to the
+ * magnitude of the value. The agreement of two values is an estimate of the
+ * error, not a bound: two values with the same wrong digits pass the test.
+ * The last value is then rounded to `min(p, a + ⌊log10 |v|⌋ + 1)`
+ * significant digits, for each part of a complex value. The last value has
+ * guard digits for this rounding (see `guardDigits()`): it was computed at
+ * twice the precision of the value before it, which already agreed with it
+ * to two digits more than the goal. When the error of an evaluation goes
+ * down with the precision, the last value thus has about twice as many
+ * correct digits as the goal, less the digits lost to cancellation. A part whose
+ * magnitude is below `10^−a` has no digit to keep, and it is `0`: with an
+ * accuracy goal, `N(Sin(Pi), [PositiveInfinity, 20])` is `0`.
+ *
+ * This estimate is not valid for a value that does not change with the
+ * working precision: a stored float that was computed at a lower
+ * precision, or the value of a kernel that computes with machine floats
+ * (`Sum(1/(k^2+1), k=1..∞)`). Two such values have the same digits at two
+ * precisions, also the digits that are not correct. Thus, when a number
+ * with at least `MACHINE_PRECISION` significant digits has the same value
+ * at two successive working precisions, the goal keeps more digits than
+ * the number has (at most the precision of the engine: see
+ * `isPrecisionIndependent()`), and the exact value of `x` at the same place
+ * (`x.evaluate()`) is not an exact number, the goal is not met, and the
+ * call stays unevaluated (`isPrecisionIndependent()`). When the goal keeps
+ * no more digits than the number has, the number is rounded to the goal:
+ * `N(2y, [PositiveInfinity, 5])` for a machine float `y`. A number
+ * with fewer digits is exact to its digits: `0.1`, or `1.25` for
+ * `Cosh(Ln(2))`. An exact value with a short decimal form, such as `1/2`,
+ * also has the same value at two precisions: it is not caught, because
+ * its exact value is an exact number.
+ *
+ * A value that is `0` has approximations that are rounding errors: their
+ * magnitude goes down with the working precision `d`, at about `10^−d`, and
+ * two of them never agree relative to their magnitude. When a number is
+ * below `10^−(d − ZERO_NOISE_MARGIN)` at `ZERO_NOISE_COUNT` successive
+ * working precisions, and there is only a precision goal (a relative goal
+ * cannot be met by `0`), the call stays unevaluated. With an accuracy goal,
+ * the values agree to within `10^−(a+2)` when they are below it, and the
+ * result is `0`. A float that is exactly `0` does not meet any goal, also
+ * an accuracy goal, unless the exact value of `x` at the same place is the
+ * number `0` (`hasInexactZero()`): the terms of a value can cancel at a
+ * working precision (`e^(10^−100) − 1` is `0` below about 100 digits, and
+ * `10^100·(e^(10^−100) − 1)`, which is about `1`, is then also `0`), and
+ * the working precision is raised. The digits that a cancellation loses
+ * are not known: when the float is still `0` at `GOAL_MAX_PRECISION`
+ * digits, the call stays unevaluated.
+ *
+ * The first working precision is `min(p, a)` plus `GOAL_GUARD_DIGITS`.
+ * When it is `GOAL_MAX_PRECISION` or more, the first value is computed at
+ * half of `GOAL_MAX_PRECISION`, so that there are two values to compare.
+ *
+ * An impure operand (`Random()`) is evaluated one time only, at the first
+ * working precision: a second evaluation gives another value. That value is
+ * rounded to the goal, as `N(x, p)` does, with no estimate of its error.
+ * Its exact value is not computed. An operand is impure also when a value
+ * or a function body that it reads is impure (`isTransitivelyPure()`): a
+ * symbol `r` whose value is the call `Random()`.
+ *
+ * Each evaluation is at a precision set with `_withTransientPrecision()`,
+ * which restores the precision of the engine after it, also when the
+ * evaluation throws. The result is displayed with its digits
+ * (`roundToGoal()`). A number with no more digits than the precision of the
+ * engine is a float of the kind that the engine makes
+ * (`followEnginePrecision()`).
+ *
+ * Each number in a list or a tuple result has its own number of digits. In
+ * a symbolic result, each float is compared with the float at the same
+ * place in the previous value, and it is rounded to the goal:
+ * `N(x + Pi, [PositiveInfinity, 5])` is `x + 3.14159`. An exact number of a
+ * symbolic result stays exact. The two values must have the same structure
+ * (`valuesAgree()`): when they never have it, the call stays unevaluated,
+ * and no float is returned without a comparison. A result with no float
+ * (`x`) is returned after one evaluation. A lazy collection result is a
+ * lazy collection whose elements are computed by `N(_, [p, a])`
+ * (`inexactResult()`): each element is computed to the goal when it is
+ * read.
+ *
+ * `request` is the goal (the second operand of the call, evaluated), for the
+ * body of that `Map`.
+ */
+function evaluateToGoal(
+  x: Expression,
+  goal: NumericGoal,
+  request: Expression
+): Expression | undefined {
+  const ce = x.engine;
+  // `isPure` of `x` does not read the stored value of a symbol: `r` is pure
+  // also when its value is `Random()`, and each evaluation of `r` then
+  // draws again. Thus the values and the function bodies that `x` reads are
+  // checked too (`isTransitivelyPure()`).
+  const pure = isTransitivelyPure(x);
+  const enginePrecision = ce.precision;
+  // The working precision is above machine precision: at machine precision,
+  // a value is computed with machine floats, which overflow to an infinity
+  // (`e^1000`) or underflow to `0` (`e^−1000`), and an infinity is an exact
+  // value that needs no second evaluation.
+  let digits = Math.min(
+    GOAL_MAX_PRECISION,
+    Math.max(
+      ce.precision,
+      MACHINE_PRECISION + 1,
+      Math.min(goal.precision, goal.accuracy) + GOAL_GUARD_DIGITS
+    )
+  );
+  // Two values are compared: when the first working precision is the
+  // largest one, the first value is computed at half of it. An impure
+  // operand is evaluated one time only, at the first working precision.
+  if (pure && digits >= GOAL_MAX_PRECISION) digits = GOAL_MAX_PRECISION / 2;
+  let previous: Expression | undefined = undefined;
+  // The number of successive values that are the rounding noise of `0`
+  let zeroNoise = 0;
+  const exact = once(() => x.evaluate());
+  const enclosingRequest = ce._requestedPrecision;
+  try {
+    while (true) {
+      // The handlers that run inside the evaluation receive the working
+      // precision as `options.precision`.
+      ce._requestedPrecision = digits;
+      // `null`: the call stays unevaluated. `undefined`: the next working
+      // precision.
+      const result = ce._withTransientPrecision(
+        digits,
+        (): Expression | null | undefined => {
+          const value = x.N();
+          // A value with no float (`N(2, [PositiveInfinity, 20])`, or `y`
+          // for a symbol `y` with no value) needs no second evaluation. The
+          // value of an impure operand (`Random()`) is not computed again: a
+          // second evaluation gives another value.
+          if (isExactValue(value) || !pure)
+            return roundToGoal(value, goal, request, x) ?? null;
+          if (goal.accuracy === Infinity) {
+            zeroNoise = hasZeroNoise(value, digits) ? zeroNoise + 1 : 0;
+            if (zeroNoise >= ZERO_NOISE_COUNT) return null;
+          }
+          // A float that is exactly `0` does not meet a goal, also an
+          // accuracy goal, unless the exact value at the same place is the
+          // number `0`: the terms of the value can cancel at this working
+          // precision. `e^(10^−100) − 1` is `0` below about 100 digits, and
+          // `10^100·(e^(10^−100) − 1)`, whose value is about `1`, is thus
+          // also `0`. The digits lost to such a cancellation are not known,
+          // so the zero is not compared with the previous value: the
+          // working precision is raised until the float is not `0`, and at
+          // `GOAL_MAX_PRECISION` digits the call stays unevaluated.
+          if (hasInexactZero(value, exact, () => x)) {
+            previous = value;
+            return undefined;
+          }
+          if (previous !== undefined && valuesAgree(previous, value, goal)) {
+            if (
+              isPrecisionIndependent(
+                previous,
+                value,
+                exact,
+                goal,
+                enginePrecision
+              )
+            )
+              return null;
+            return roundToGoal(value, goal, request, x) ?? null;
+          }
+          previous = value;
+          return undefined;
+        }
+      );
+      if (result === null) return undefined;
+      if (result !== undefined) return followEnginePrecision(ce, result);
+      if (digits >= GOAL_MAX_PRECISION) return undefined;
+      digits = Math.min(GOAL_MAX_PRECISION, 2 * digits);
+    }
+  } finally {
+    ce._requestedPrecision = enclosingRequest;
+  }
+}
+
+/**
+ * True when every number in `value` (a value of `evaluateToGoal()`) is
+ * exact. A value that is not a number is exact when it has no float that
+ * `N` computed: a symbol, a string, a function literal, a `Hold`, an
+ * operator that binds a variable or a lazy collection
+ * (`isRoundingBoundary()`), or a function whose operands are exact.
+ */
+function isExactValue(value: Expression): boolean {
+  if (isNumber(value)) return value.isExact;
+  if (!isFunction(value) || isRoundingBoundary(value)) return true;
+  return value.ops.every(isExactValue);
+}
+
+/**
+ * True when a number in `value` (a value of `evaluateToGoal()`, computed at
+ * `digits` digits) is not `0` and its magnitude is below
+ * `10^−(digits − ZERO_NOISE_MARGIN)`: it can be the rounding noise of a value
+ * that is `0` (see `evaluateToGoal()`).
+ */
+function hasZeroNoise(value: Expression, digits: number): boolean {
+  if (isNumber(value)) {
+    if (value.isExact || value.isFinite !== true) return false;
+    const ce = value.engine;
+    const re = value.bignumRe ?? ce.bignum(value.re);
+    const im = value.bignumIm ?? ce.bignum(value.im);
+    if (re.isZero() && im.isZero()) return false;
+    const bound = ce.bignum(`1e${-(digits - ZERO_NOISE_MARGIN)}`);
+    return re.abs().lt(bound) && im.abs().lt(bound);
+  }
+  return (
+    isFunction(value) &&
+    !isRoundingBoundary(value) &&
+    value.ops.some((op) => hasZeroNoise(op, digits))
+  );
+}
+
+/**
+ * The operand `i` of `whole()` (the exact value of a list or a tuple), when
+ * it has the same operator and the same number of operands as `like`, else
+ * `undefined`.
+ */
+function exactAt(
+  whole: () => Expression | undefined,
+  like: Expression,
+  i: number
+): () => Expression | undefined {
+  return () => {
+    const e = whole();
+    return e !== undefined &&
+      isFunction(e) &&
+      isFunction(like) &&
+      e.operator === like.operator &&
+      e.nops === like.nops
+      ? e.ops[i]
+      : undefined;
+  };
+}
+
+/**
+ * True when a number of `value` (a value of `evaluateToGoal()`) is a float
+ * whose two parts are `0`, and the exact value of the operand at the same
+ * place is not a number that is `0`. Such a float can be the result of a
+ * cancellation at the working precision (`e^(10^−100) − 1` is `0` below
+ * about 100 digits), and it does not meet a goal (see `evaluateToGoal()`).
+ *
+ * The exact value at the same place is read from `exact`, the exact value
+ * of the operand of `N`. When `exact` has another structure at that place,
+ * it is the exact value of the part of `source`, the operand of `N`, at
+ * that place: the exact value of `x + Sin(Pi)` is `x`, and its numeric
+ * value is `x + 0`, whose `0` is at the place of `Sin(Pi)` in `source`. When
+ * no part is at that place, the float is taken as a cancellation.
+ */
+function hasInexactZero(
+  value: Expression,
+  exact: () => Expression | undefined,
+  source: () => Expression | undefined
+): boolean {
+  if (isNumber(value)) {
+    if (value.isExact || !isZeroNumber(value)) return false;
+    const e = exact() ?? source()?.evaluate();
+    return e === undefined || !isNumber(e) || !isZeroNumber(e);
+  }
+  return (
+    isFunction(value) &&
+    !isRoundingBoundary(value) &&
+    value.ops.some((op, i) =>
+      hasInexactZero(op, exactAt(exact, value, i), exactAt(source, value, i))
+    )
+  );
+}
+
+/** True when the two parts of the number literal `value` are `0`. A big
+ * decimal part is read as a big decimal: `1e−400` is not `0`. */
+function isZeroNumber(value: Expression): boolean {
+  if (!isNumber(value)) return false;
+  const re = value.bignumRe;
+  const im = value.bignumIm;
+  return (
+    (re !== undefined ? re.isZero() : value.re === 0) &&
+    (im !== undefined ? im.isZero() : value.im === 0)
+  );
+}
+
+/**
+ * True when a float of `b` has the same value as the float of `a` at the
+ * same place (`a` and `b` are two successive values of `evaluateToGoal()`),
+ * the float has at least `MACHINE_PRECISION` significant digits, `goal`
+ * keeps more digits than the float has (`goalDigits()`), and the exact
+ * value of the operand at that place (`exact`) is not an exact number: the
+ * float does not change with the working precision, and it does not have
+ * the digits of the goal (see `evaluateToGoal()`).
+ *
+ * A float with fewer significant digits that has the same value at two
+ * precisions is a value that is exact to its digits, such as `1.25` for
+ * `Cosh(Ln(2))` or `0.5` for `Abs(-0.5)`: it meets the goal. A float that
+ * is wrong past its digits has the digits of a precision, not this short
+ * form: a machine float has about 17 significant digits.
+ *
+ * A float that has the digits of the goal meets it: the float is rounded
+ * to the goal, as `N(x, p)` rounds it. A machine float `y` gives
+ * `N(2y, [PositiveInfinity, 5])`, as `N(2y, 30)` gives the 16 digits of
+ * `2y`. The digits of the float are its significant digits, but at most
+ * `precision`, the precision of the engine: the big decimal of a float
+ * computed at that precision can have more digits (the product of two
+ * 21-digit numbers has 42 digits), and only about `precision` of them are
+ * correct. `N(x, p)` also shows such a float with the precision of the
+ * engine (`showComputedDigits()`).
+ */
+function isPrecisionIndependent(
+  a: Expression,
+  b: Expression,
+  exact: () => Expression | undefined,
+  goal: NumericGoal,
+  precision: number
+): boolean {
+  if (isNumber(a) && isNumber(b)) {
+    if (b.isExact || b.isFinite !== true || a.isFinite !== true) return false;
+    if (!sameParts(a, b)) return false;
+    const digits = significantDigits(b);
+    if (digits < MACHINE_PRECISION) return false;
+    const ce = b.engine;
+    const needed = Math.max(
+      goalDigits(b.bignumRe ?? ce.bignum(b.re), goal),
+      goalDigits(b.bignumIm ?? ce.bignum(b.im), goal)
+    );
+    if (needed <= Math.min(digits, precision)) return false;
+    const e = exact();
+    return e === undefined || !isNumber(e) || !e.isExact;
+  }
+  if (
+    !isFunction(a) ||
+    !isFunction(b) ||
+    a.nops !== b.nops ||
+    isRoundingBoundary(b)
+  )
+    return false;
+  return b.ops.some((op, i) =>
+    isPrecisionIndependent(
+      a.ops[i],
+      op,
+      exactAt(exact, b, i),
+      goal,
+      precision
+    )
+  );
+}
+
+/**
+ * True when the values `a` and `b`, two successive values of
+ * `evaluateToGoal()`, agree to within `goal`: each part of each finite
+ * number of `b` differs from the part of `a` by at most `10^−(a+2)`, or by
+ * at most `10^−(p+2)` times the magnitude of the number. An infinity or a
+ * `NaN` must be the same in `a` and `b`.
+ *
+ * The numbers are compared at the same places: `a` and `b` must have the
+ * same functions with the same numbers of operands (`x + 3.14159…`), and
+ * the same parts that are not numbers (`x`). A function literal, a `Hold`,
+ * an operator that binds a variable and a lazy collection
+ * (`isRoundingBoundary()`) are not changed by the goal: they must be the
+ * same in `a` and `b` (`isSame()`). When `a` and `b` do not agree, the
+ * working precision is raised; when they never agree, the call stays
+ * unevaluated: a float is never returned without a comparison.
+ *
+ * The big decimals are compared at the precision in force, which is the
+ * precision of `b`. Their difference is exact (`BigDecimal.sub()`).
+ */
+function valuesAgree(a: Expression, b: Expression, goal: NumericGoal): boolean {
+  if (isNumber(a) && isNumber(b)) {
+    if (a.isFinite !== true || b.isFinite !== true) return a.isSame(b);
+    const ce = b.engine;
+    const parts = (v: Expression): [BigNum, BigNum] => [
+      v.bignumRe ?? ce.bignum(v.re),
+      v.bignumIm ?? ce.bignum(v.im),
+    ];
+    const [aRe, aIm] = parts(a);
+    const [bRe, bIm] = parts(b);
+    const magnitude = bRe.abs().gt(bIm.abs()) ? bRe.abs() : bIm.abs();
+    let tolerance = ce.bignum(0);
+    if (goal.accuracy !== Infinity)
+      tolerance = ce.bignum(`1e${-(goal.accuracy + 2)}`);
+    if (goal.precision !== Infinity) {
+      const relative = magnitude.mul(ce.bignum(`1e${-(goal.precision + 2)}`));
+      if (relative.gt(tolerance)) tolerance = relative;
+    }
+    return (
+      bRe.sub(aRe).abs().lte(tolerance) && bIm.sub(aIm).abs().lte(tolerance)
+    );
+  }
+  if (isNumber(a) || isNumber(b)) return false;
+  if (
+    isFunction(a) &&
+    isFunction(b) &&
+    a.operator === b.operator &&
+    a.nops === b.nops
+  ) {
+    if (isRoundingBoundary(a) || isRoundingBoundary(b)) return a.isSame(b);
+    return a.ops.every((op, i) => valuesAgree(op, b.ops[i], goal));
+  }
+  return a.isSame(b);
+}
+
+/**
+ * The number of significant digits of the big decimal `v` that `goal`
+ * keeps: `min(p, a + ⌊log10 |v|⌋ + 1)`. `0` for `v = 0`.
+ */
+function goalDigits(v: BigNum, goal: NumericGoal): number {
+  if (v.isZero()) return 0;
+  // `⌊log10 |v|⌋`: the number of digits of the significand, plus the
+  // exponent, minus 1.
+  const significand = v.significand < 0n ? -v.significand : v.significand;
+  const magnitude = significand.toString().length + v.exponent - 1;
+  return Math.min(goal.precision, goal.accuracy + magnitude + 1);
+}
+
+/**
+ * Round each number of `value` (a value of `evaluateToGoal()`) to the digits
+ * of `goal`: each part `v` of a finite number is rounded to
+ * `min(p, a + ⌊log10 |v|⌋ + 1)` significant digits, and is `0` when that
+ * number is less than 1. The numbers are new floats, and they are
+ * displayed with their digits (`setDisplayDigits()`). Call it at the working precision of
+ * `value`: a float made at machine precision is a machine float.
+ *
+ * The parts of an exact number are computed at the precision that the
+ * rounding needs. The big decimal of an exact number (`bignumRe`) is
+ * rounded to the precision in force, so at the working precision an
+ * integer with more digits lost its last digits:
+ * `N(123456789012345678901234567890, [PositiveInfinity, 5])` had an error
+ * of `234567890`. When the goal keeps more than `GOAL_MAX_PRECISION`
+ * digits of an exact number, the result is `undefined`, and the call stays
+ * unevaluated: `[10^9, PositiveInfinity]` would compute at a billion
+ * digits.
+ *
+ * Each element of a list or a tuple is rounded, and an exact element is a
+ * float. In a symbolic result (`x + 3.14159…`), each float is rounded, and
+ * an exact number stays exact (`symbolic`): the exponent of `x^2` is not a
+ * float. The function does not walk into a function literal, a `Hold`, an
+ * operator that binds a variable, or a lazy collection
+ * (`isRoundingBoundary()`). A function is made again with its rounded
+ * operands, and it is canonical: a float rounded to `0` is removed from a
+ * sum (`x + 0` is `x`).
+ *
+ * A lazy indexed collection that is the value, or an element of a list or
+ * a tuple value, is a lazy collection whose elements are computed by
+ * `N(_, request)` when they are read (`inexactResult()`). `source` is the
+ * operand of `N` at the same place.
+ */
+function roundToGoal(
+  value: Expression,
+  goal: NumericGoal,
+  request?: Expression,
+  source?: Expression,
+  symbolic = false
+): Expression | undefined {
+  const ce = value.engine;
+  if (!symbolic && (isFunction(value, 'List') || isFunction(value, 'Tuple'))) {
+    // The operand that matches each element, when the operand is a list or
+    // a tuple of the same length.
+    const sources =
+      source !== undefined &&
+      isFunction(source) &&
+      source.operator === value.operator &&
+      source.nops === value.nops
+        ? source.ops
+        : undefined;
+    const ops: Expression[] = [];
+    for (const [i, op] of value.ops.entries()) {
+      const result = roundToGoal(op, goal, request, sources?.[i]);
+      if (result === undefined) return undefined;
+      ops.push(result);
+    }
+    return ce.function(value.operator, ops);
+  }
+  if (!isNumber(value)) {
+    if (!isFunction(value) || isRoundingBoundary(value))
+      return symbolic ? value : inexactResult(ce, value, request, source);
+    let changed = false;
+    const ops: Expression[] = [];
+    for (const op of value.ops) {
+      let result =
+        isNumber(op) && op.isExact
+          ? op
+          : roundToGoal(op, goal, request, undefined, true);
+      if (result === undefined) return undefined;
+      // A term of a sum that the goal rounds to `0` is removed: the
+      // canonical form removes an exact `0` from a sum, but not a float `0`.
+      if (value.operator === 'Add' && isZeroNumber(result)) result = ce.Zero;
+      if (result !== op) changed = true;
+      ops.push(result);
+    }
+    return changed ? ce.function(value.operator, ops) : value;
+  }
+  if (value.isFinite !== true) return inexactResult(ce, value);
+
+  if (value.isExact) {
+    // The digits that the goal keeps, from the magnitude of the parts at
+    // the precision in force (it can be one less than the magnitude of
+    // the exact value: the guard digits cover it).
+    const needed = Math.max(
+      goalDigits(value.bignumRe ?? ce.bignum(value.re), goal),
+      goalDigits(value.bignumIm ?? ce.bignum(value.im), goal)
+    );
+    if (needed > GOAL_MAX_PRECISION) return undefined;
+    const working = needed + guardDigits(needed);
+    if (working > ce.precision)
+      return ce._withTransientPrecision(working, () =>
+        roundToGoal(value, goal)
+      );
+  }
+
+  let shown = 0;
+  const roundPart = (v: BigNum): BigNum => {
+    if (v.isZero()) return v;
+    const digits = goalDigits(v, goal);
+    if (digits < 1) return ce.bignum(0);
+    shown = Math.max(shown, digits);
+    return v.toPrecision(digits);
+  };
+  const re = roundPart(value.bignumRe ?? ce.bignum(value.re));
+  const im = roundPart(value.bignumIm ?? ce.bignum(value.im));
+  // A new value: its display digits change the display of this result only
+  const result = ce._inexactNumericValue(im.isZero() ? re : { re, im });
+  if (shown > 0) setDisplayDigits(result, shown);
+  return ce.number(result);
 }
 
 /**

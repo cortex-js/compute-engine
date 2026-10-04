@@ -296,32 +296,6 @@ export function residueFoldOrKeep(expr: Expression): Expression {
   return expr.isPure === true && expr.isConstant ? expr.evaluate() : expr;
 }
 
-/**
- * True when evaluating `expr` again cannot run a side effect twice: `expr`
- * and every subexpression are pure, and so are the values of its symbols,
- * followed transitively. `isPure` of a symbol is `true` even when its value
- * is an impure call, so the values are read here.
- */
-export function isPureThroughValues(
-  expr: Expression,
-  visited: Set<string> = new Set()
-): boolean {
-  if (isSymbol(expr)) {
-    if (visited.has(expr.symbol)) return true;
-    visited.add(expr.symbol);
-    const value = expr.value;
-    return (
-      value === undefined ||
-      value === expr ||
-      isPureThroughValues(value, visited)
-    );
-  }
-  if (expr.isPure !== true) return false;
-  return (
-    !isFunction(expr) || expr.ops.every((x) => isPureThroughValues(x, visited))
-  );
-}
-
 export function residueExpression(ce: ComputeEngine, x: Residue): Expression {
   return ce._fn('ResidueClass', [ce.number(x.k), ce.number(x.n)]);
 }

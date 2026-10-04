@@ -301,9 +301,18 @@ export function makeSpineRunner(
             // freshScope`, restored in its `finally`). A parent captured at
             // lowering time would be a stale link into a frame that has since
             // returned.
+            //
+            // The frame is a NEW empty scope whose parent is the closure's
+            // parent, not the closure's parent itself: popping a frame
+            // disposes every value definition of its scope (see
+            // `discardEvalContext()` in `engine-scope.ts`). Pushing the
+            // closure's parent directly disposed its definitions after each
+            // element — the global definitions when the function was written
+            // at the top level, which dropped their assumptions and made
+            // every memo that reads a global symbol outdated.
             const closureParent = level.closureScope?.parent;
             if (closureParent) {
-              ce.pushScope(closureParent);
+              ce.pushScope({ parent: closureParent, bindings: new Map() });
               try {
                 v = ce._fn(level.op!, args).evaluate(opts);
               } finally {

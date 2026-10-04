@@ -21,6 +21,8 @@ import {
   type ObjectDeps,
 } from './object-deps';
 import { containsObject } from './object-walk';
+import { subscriptEvaluateReads } from './transitive-purity';
+import { sequenceReadStopCount } from './sequence-read-stops';
 
 /**
  * Element memoization for lazy collection operators (Tycho item 126).
@@ -344,6 +346,10 @@ function snapshotDepsUnderChain(
    * name happened to be encountered second must still invalidate — the
    * `seenOperators` dedup above is about traversal cost only. */
   const seenOperatorNames = new Set<string>();
+  /** The `subscriptEvaluate` handlers whose registered reads were already
+   * walked — terminates a sequence whose recurrence reads the sequence, or
+   * two sequences that read each other. */
+  const seenHandlers = new Set<object>();
   const deps: ElementMemoDep[] = [];
   let eligible = true;
 
@@ -604,6 +610,22 @@ function snapshotDepsUnderChain(
       if (valueDef !== undefined) {
         if (excluded.has(valueDef) || seen.has(valueDef)) return;
         visitValueDef(e, valueDef);
+        // A symbol with a `subscriptEvaluate` handler, such as a sequence
+        // `B` with `B_n = B_{n−1} + x`: `B_k` evaluates the expressions that
+        // the handler registered (its recurrence, base values and
+        // constraints), and the symbols that they read (`x`) are not in the
+        // instance. Walk them as a stored value is walked: each is an
+        // independent definition, so no parameter name of the caller is
+        // skipped. A handler that registered nothing adds no dependency.
+        const handler = valueDef.subscriptEvaluate;
+        if (handler !== undefined && !seenHandlers.has(handler)) {
+          seenHandlers.add(handler);
+          for (const read of subscriptEvaluateReads(handler) ?? []) {
+            if (read === undefined || read === null) continue;
+            collectParameterDefs(read, excluded);
+            visit(read, undefined);
+          }
+        }
       } else if (
         e.operatorDefinition === undefined &&
         e.isCanonical === false
@@ -883,10 +905,16 @@ function commitRecordedWalk(
   suspendedWrite: boolean,
   suspendedEpochChange: boolean,
   complete: boolean,
-  objectDeps: ObjectDeps | undefined
+  objectDeps: ObjectDeps | undefined,
+  sequenceStopsBefore: number
 ): void {
   // A partial entry with nothing in it would only churn the cache.
   if (!complete && buffer.length === 0) return;
+  // A read of a sequence term was stopped while the walk ran (too many
+  // terms, or a recursion that is too deep): an element can hold that
+  // declined term, and a later read can give it. Such a buffer is not
+  // committed (`sequence-read-stops.ts`).
+  if (sequenceReadStopCount() !== sequenceStopsBefore) return;
   // An element that IS (or transitively holds) a mutable object is never
   // memoized: the entry would keep it alive for as long as the collection
   // instance lives (ruling B12), and its contents are not part of what the
@@ -959,6 +987,9 @@ export function* elementMemoRecordingStream(
   // Dependencies are static in the tree, so a pre-walk snapshot is valid; it
   // is the baseline the end-of-walk snapshot is diffed against.
   const startDeps = snapshotDeps(expr);
+  // A stop of a sequence read between here and the commit, also one made
+  // by the consumer between two pulls, prevents the commit.
+  const sequenceStopsBefore = sequenceReadStopCount();
   /** The mutable-object field reads made by the walk itself. A collector is
    * opened around each PULL rather than around the whole generator: the
    * generator suspends at every `yield`, and a collector left open across
@@ -1029,7 +1060,8 @@ export function* elementMemoRecordingStream(
       suspendedWrite,
       suspendedEpochChange || suspendedScopeChange,
       drained && !overflow,
-      objectDeps
+      objectDeps,
+      sequenceStopsBefore
     );
   }
 }
@@ -1082,6 +1114,7 @@ export function elementMemoFillTo(
   );
   const elements: Expression[] = [];
   let complete = false;
+  const sequenceStopsBefore = sequenceReadStopCount();
   const iter = makeStream();
   // The drain is synchronous and uninterrupted by consumer code, so ONE
   // collector brackets the whole of it: every mutable-object field read below
@@ -1110,7 +1143,14 @@ export function elementMemoFillTo(
   // …and the same payload rule: an element holding a mutable object is never
   // memoized, because the entry would keep that object alive (ruling B12) and
   // its contents are not part of what the version stamps validate.
-  if (deps !== undefined && !elements.some(containsObject)) {
+  // …and a fill during which a read of a sequence term was stopped is not
+  // committed: an element can hold the declined term, which a later read
+  // can give (`sequence-read-stops.ts`).
+  if (
+    deps !== undefined &&
+    !elements.some(containsObject) &&
+    sequenceReadStopCount() === sequenceStopsBefore
+  ) {
     const ce = expr.engine;
     elementMemoCaches.set(expr, {
       worldVersion: ce._worldVersion,

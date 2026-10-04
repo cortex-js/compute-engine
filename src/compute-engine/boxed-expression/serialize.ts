@@ -26,6 +26,7 @@ import { isFloatSpelling, numberToExpression } from '../numerics/expression.js';
 
 import { NumericValue } from '../numeric-value/types.js';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
+import { displayDigits } from '../numeric-value/big-numeric-value.js';
 
 import { order } from './order.js';
 import { asRational, asSmallInteger } from './numerics.js';
@@ -1122,6 +1123,16 @@ function serializeJsonNumberSpelling(
         ];
 
       return componentExpr(value.rational, value.radical);
+    }
+
+    // A value made by `N(x, n)` is displayed with its `n` digits when `n`
+    // is more than the precision of the engine (`displayDigits()`). This
+    // applies only to the display that follows the precision (`'auto'`):
+    // the other controls are the choice of the caller.
+    if (effectiveDigits(options) === 'auto') {
+      const digits = displayDigits(value);
+      if (digits !== undefined && digits > ce.precision)
+        options = { ...options, digits: { significant: digits } };
     }
 
     // We have a real number (big or machine)

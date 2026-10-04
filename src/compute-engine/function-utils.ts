@@ -80,6 +80,7 @@ import {
   snapshotMemoDeps,
   type MemoDeps,
 } from './boxed-expression/collection-element-memo.js';
+import { sequenceReadStopCount } from './boxed-expression/sequence-read-stops.js';
 import { isPureComputedEffects } from '../common/type/effects.js';
 import type { FunctionSignature, Type } from '../common/type/types.js';
 import { parseType } from '../common/type/parse.js';
@@ -3792,7 +3793,16 @@ function makeLambda(
     // assumptions are hidden right now: a body that reads a symbol whose
     // value an `assume(x = …)` put in force answers differently inside a
     // fact-blind bracket, and the two answers must not be confused
-    // (`docs/plans/2026-08-30-assumptions-memo-inventory.md`).
+    // (`docs/plans/2026-08-30-assumptions-memo-inventory.md`). Both keys,
+    // the numeric key and the exact key, also carry the precision of the
+    // engine and the digits that an enclosing `N(x, n)` requests: `N(x, n)`
+    // computes at `n` digits with no reset of the engine
+    // (`_withTransientPrecision`), thus the stamps of the memo do not
+    // change, and a value computed at one precision must not be served at
+    // another. The exact key needs them too: an exact evaluation can give a
+    // float (a body `N(Pi)`), and the body of a function that a numeric
+    // request applies runs through the exact route first.
+    const precisionKey = `${ce.precision}:${ce._requestedPrecision ?? ''}`;
     const memoArgs =
       iterationStatements === undefined &&
       evaluatedArgs.every((a) => isNumber(a)) &&
@@ -3803,11 +3813,18 @@ function makeLambda(
         : undefined;
     const numeric = options?.numericApproximation === true;
     const memoKey =
-      memoArgs === undefined ? undefined : `${numeric ? 'N' : 'E'}${memoArgs}`;
+      memoArgs === undefined
+        ? undefined
+        : `${numeric ? 'N' : 'E'}${precisionKey}${memoArgs}`;
     if (memoKey !== undefined) {
       const hit = validApplicationMemo(ce, fnExpr)?.results.get(memoKey);
       if (hit !== undefined) return hit;
     }
+    // A read of a sequence term that is stopped in this application (too
+    // many terms, or a recursion that is too deep) declines the term for
+    // this read only. The result is then not memoized: a later application
+    // can give the term (see `sequence-read-stops.ts`).
+    const sequenceStopsBefore = sequenceReadStopCount();
 
     // A recursive definition is not unrolled symbolically: a re-entrant
     // application with an argument that contains a free symbol abandons the
@@ -4016,7 +4033,10 @@ function makeLambda(
       exitNestedBodyScopes(ce, nested);
     }
 
-    if (memoKey !== undefined) {
+    if (
+      memoKey !== undefined &&
+      sequenceReadStopCount() === sequenceStopsBefore
+    ) {
       // The exact entry is stored whether or not the numeric pass produced
       // a valid result: the exact answer is what a recursive body, which
       // applies itself exactly, looks up.
@@ -4026,7 +4046,7 @@ function makeLambda(
         const memo = applicationMemoForStore(ce, fnExpr);
         if (memo !== undefined) {
           if (exactEntry !== undefined)
-            memo.results.set(`E${memoArgs}`, exactEntry);
+            memo.results.set(`E${precisionKey}${memoArgs}`, exactEntry);
           if (resultEntry !== undefined) memo.results.set(memoKey, resultEntry);
         }
       }

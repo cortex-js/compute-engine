@@ -112,6 +112,8 @@ import {
   valueDefinitionInContext,
 } from './binders.js';
 import { containsObject } from './object-walk.js';
+import { isTransitivelyPure } from './transitive-purity.js';
+import { sequenceReadStopCount } from './sequence-read-stops.js';
 import { assertLiveBinding } from './binding-tombstone.js';
 import {
   CYCLE_DETECTED,
@@ -192,52 +194,6 @@ const STORED_VALUE_MEMOS = new WeakMap<
     StoredValueMemo | undefined,
   ]
 >();
-
-/**
- * Is `value` pure THROUGH the stored values and helper bodies it reads?
- * `isPure` judges the expression's own heads: `r + 1` is pure even when `r`
- * holds `Random()`, and caching its evaluation would freeze the draw. So the
- * walk follows every symbol with a stored function value and every applied
- * user operator with a lambda body, once each, and answers `false` at the
- * first impure node it meets. Conservative on purpose: a name it cannot
- * resolve is assumed pure only because it then has no stored value to read.
- */
-function storedValueIsTransitivelyPure(
-  value: Expression,
-  visited: Set<string> = new Set()
-): boolean {
-  if (value.isPure !== true) return false;
-  if (!isFunction(value)) return true;
-  const engine = value.engine;
-  for (const name of value.symbols) {
-    if (visited.has(name)) continue;
-    visited.add(name);
-    const stored = engine._getSymbolValue(name);
-    if (stored !== undefined && isFunction(stored)) {
-      if (!storedValueIsTransitivelyPure(stored, visited)) return false;
-    }
-  }
-  const stack: Expression[] = [value];
-  const seenNodes = new Set<Expression>();
-  while (stack.length > 0) {
-    const node = stack.pop()!;
-    if (!isFunction(node) || seenNodes.has(node)) continue;
-    seenNodes.add(node);
-    const head = node.operator;
-    const key = `operator:${head}`;
-    if (!visited.has(key)) {
-      visited.add(key);
-      const lambda = node.operatorDefinition?.lambda;
-      if (
-        lambda !== undefined &&
-        !storedValueIsTransitivelyPure(lambda.body, visited)
-      )
-        return false;
-    }
-    for (const op of node.ops) stack.push(op);
-  }
-  return true;
-}
 
 export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   override readonly _kind = 'symbol';
@@ -1658,6 +1614,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
 
     const cyclesBefore = cycleDetectionCount();
     const rewritesBefore = ownBindingRewriteCount();
+    const sequenceStopsBefore = sequenceReadStopCount();
     beginObjectDeps();
     let objectDeps: ObjectDeps | undefined;
     let result: Expression;
@@ -1667,8 +1624,15 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       objectDeps = endObjectDeps();
     }
     // Settled only: a dereference a cycle cut short answered a provisional
-    // value, which must not be frozen.
-    if (cycleDetectionCount() !== cyclesBefore || result === this) {
+    // value, which must not be frozen. The same applies to a value computed
+    // while a sequence read was stopped (too many terms, or a recursion that
+    // is too deep): the declined term is a provisional value too, and a later
+    // read, after the lower terms are known, can give the term.
+    if (
+      cycleDetectionCount() !== cyclesBefore ||
+      sequenceReadStopCount() !== sequenceStopsBefore ||
+      result === this
+    ) {
       if (CACHE_STATS) recordCache('storedValue', 'declineCycle');
       return result;
     }
@@ -1686,7 +1650,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     // a value whose dependencies cannot be snapshotted.
     if (
       ownBindingRewriteCount() !== rewritesBefore ||
-      !storedValueIsTransitivelyPure(value) ||
+      !isTransitivelyPure(value) ||
       containsObject(result)
     ) {
       if (CACHE_STATS) recordCache('storedValue', 'declineStore');

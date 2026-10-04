@@ -20,6 +20,47 @@ import { complexNoiseRatio, isComplexDust } from './roundoff.js';
  * `imDecimal` polymorphic (a real product was 2.7 times slower). */
 const REAL_IM = new BigDecimal(0);
 
+/**
+ * The number of significant digits that a value made by `N(x, n)` shows
+ * when it is displayed, by value.
+ *
+ * `N(x, n)` computes its result at more than `n` digits (guard digits),
+ * rounds it to `n` digits, and then restores the precision of the engine. A
+ * value is usually displayed with the precision of the engine
+ * (`BigDecimal.precision`): the digits past the precision are noise of the
+ * computation. When `n` is more than the precision, the result of
+ * `N(x, n)` is displayed with `n` digits, but only when it changes with the
+ * precision. A value that does not change with the precision (a float of
+ * the operand, a stored float computed at a lower precision, the value of a
+ * kernel that computes with machine floats) has digits past the precision
+ * of the engine that are not correct, and it gets no display digits. The
+ * `n` digits are an estimate: the guard digits make the last digit correct
+ * for most values, not for all.
+ *
+ * The digits are kept in a map, not in a field of the value: a field that
+ * only some instances have gives the class two hidden classes, and the
+ * calls on the values of the hot arithmetic routes become polymorphic (see
+ * `REAL_IM`). The value of an operation on such a value is a new value,
+ * which is not in the map: it is displayed with the precision of the
+ * engine, as any other value.
+ */
+const DISPLAY_DIGITS = new WeakMap<NumericValue, number>();
+
+/** Display `value` with at least `digits` significant digits (see
+ * `DISPLAY_DIGITS`). Only a value that no other expression holds can be
+ * given digits: a value is immutable, and a shared value would change the
+ * display of every expression that holds it. */
+export function setDisplayDigits(value: NumericValue, digits: number): void {
+  if (value instanceof BigNumericValue) DISPLAY_DIGITS.set(value, digits);
+}
+
+/** The number of significant digits that `N(x, n)` gave to `value`, or
+ * `undefined` for any other value (see `DISPLAY_DIGITS`). A value is
+ * displayed with the larger of this number and the precision. */
+export function displayDigits(value: NumericValue): number | undefined {
+  return DISPLAY_DIGITS.get(value);
+}
+
 export class BigNumericValue extends NumericValue {
   declare __brand: 'BigNumericValue';
 
@@ -150,7 +191,8 @@ export class BigNumericValue extends NumericValue {
    * Each part, the real part and the imaginary part, is rounded to
    * `BigDecimal.precision` significant digits, so that noise digits from
    * precision-bounded operations (division, transcendentals) are not
-   * displayed.
+   * displayed. A value made by `N(x, n)` is rounded to `n` digits when `n`
+   * is more (`displayDigits()`).
    *
    * For the full unrounded value, use `toJSON()`.
    */
@@ -158,8 +200,8 @@ export class BigNumericValue extends NumericValue {
     if (this.isZero) return '0';
     if (this.isOne) return '1';
     if (this.isNegativeOne) return '-1';
-    const rounded = (x: BigDecimal) =>
-      decimalToString(x.toPrecision(BigDecimal.precision));
+    const digits = Math.max(BigDecimal.precision, displayDigits(this) ?? 0);
+    const rounded = (x: BigDecimal) => decimalToString(x.toPrecision(digits));
     if (!this.isComplex) return rounded(this.decimal);
     if (this.isNaN) return 'NaN';
     if (this.isComplexInfinity) return '~oo';

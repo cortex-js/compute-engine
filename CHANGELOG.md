@@ -213,6 +213,76 @@
   `["Map", ["Function", ["Block", ["NumericApproximation", ["Sin", "_1"]]],
   "_1"], ["Range", 1, 200]]`.
 
+- [#391](https://github.com/cortex-js/compute-engine/issues/391) **`N(x, p)`
+  does not change the precision of the engine.** With `p` above the
+  precision, `N(x, p)` set `ce.precision` to `p` and left it there: after
+  `ce.box(["N", "Pi", 30]).evaluate()`, `ce.precision` was `30`, and every
+  later evaluation computed at 30 digits. Now `N(x, p)` computes at `p`
+  digits plus guard digits (see below) and then restores the precision of the engine and of the big
+  decimals, also when the evaluation throws: `ce.precision` stays `21`. The
+  result is rounded to `p` digits, and `toString()`, `.json` and `.latex`
+  show its `p` digits: `N(Pi, 30)` is `3.14159265358979323846264338328`
+  (before, `.json` also showed the guard digits,
+  `3.141592653589793238462643383279503`). An operation on the result is
+  computed at the precision of the engine, as for any other big decimal,
+  and its result shows that precision: `N(Pi, 30) + 1` is
+  `4.14159265358979323846`. This applies to each element of a list or
+  tuple result, to each part of a complex result, and to each float of a
+  symbolic result: `N(x + π, 50)` is `x + 3.14159…` with 50 digits, and
+  `N(x + π, 5)` is `x + 3.1416` (it was `x + 3.14159265358979323846`). On
+  an engine at machine precision, the float of a symbolic result is a
+  machine float. A
+  float of the operand does not change: `N(x + 0.1, 50)` is `x + 0.1`. A
+  value that does not change with the precision is displayed with the
+  precision of the engine, because its digits past that precision are not
+  correct: with `w = (1/7).N()·sin(1).N()`, computed at 21 digits,
+  `N(w, 40)` showed 40 digits, 19 of them wrong, and now shows 21. The same
+  applies to the value of a kernel that computes with machine floats. The
+  elements of a lazy collection result are computed from the operand of
+  `N` when they are read, each one at `p` digits by its own `N`:
+  `N(Map(Range(1, 3), x ↦ xπ), 30)` gives 30 digits of `π`, `2π` and `3π`.
+  The function of a lazy `Map` is computed by the `N` of each element: with
+  `N(Map(Range(1, 3), x ↦ √(x + 0.5)), 30)`, the first element was
+  `1.2247448713915890491` (the 21 digits of the engine), and it is now
+  `1.22474487139158904909864203735`. This also applies to the elements of
+  another lazy collection, such as `Reverse(Map(…))`, and to an infinite
+  collection. The function of the `Map` keeps the variables of its scope:
+  `N(Block(c := 2, Map(x ↦ x/c, Range(1, 3))))` gives `[0.5, 1, 1.5]`, also
+  when the caller has a variable `c`. On an engine at machine precision,
+  `N(x, p)` with `p` at or below 15 gives a machine float: `N(1/3, 11)`
+  gave a big decimal, because it is computed at 16 digits. A function
+  literal remembers its values for each precision, also the values of an
+  exact evaluation (which can be a float): with `f(t) := N(π)` and
+  `g(t) := f(t)`, `N(g(1), 50)` after `N(g(1))` showed the 21-digit value
+  of `f(1)`. A sequence remembers its numeric terms
+  for each precision, apart from its exact terms: with
+  `B_n = π·B_{n−1}/n`, `N(B_10, 50)` after `N(B_10)` was the 21-digit
+  term `0.025806891390014060012598262` (wrong past the 22nd digit), and it
+  is now `0.025806891390014060012598294252898849657186441048147`; an exact
+  evaluation of `B_10` after `.N()` gave the float term.
+  `N(x, p)` computes with guard digits (5, or `p/10` for a large `p`) and
+  then rounds to `p` digits. Before, the last digit could be wrong:
+  `N(Exp(i), 30)` had the real part `0.540302305868139717400936607444`, now
+  `…607443`, and `N(Gamma(1/3), 30)` ended with `…098`, now `…097`. A
+  complex result of `N(z, p)` with `p` at or below the
+  precision is rounded as a big decimal: the parts were rounded to machine
+  floats, and `N(Exp(i), 20)` was `(0.5403023058681398 + 0.8414709848078965i)`.
+  It is now `(0.5403023058681397174 + 0.84147098480789650665i)`. A float
+  above `1.8e308` is rounded as a big decimal too (it was not rounded), and
+  an imaginary part below `5e-324` is kept (it was dropped). An infinite sum with a closed form is computed from the
+  closed form when the precision is above machine precision:
+  `N(Sum(1/k^2, k=1..∞), 30)` was `1.6449340668482313` (from an
+  extrapolation with machine floats, 14 correct digits), and it is now
+  `1.64493406684822643647241516665`. An infinite sum with no closed form is
+  still computed with machine floats, and shows the 17 digits of its value.
+  `N(Measurement(v, δ), p)` keeps the uncertainty and rounds `v`:
+  `N(Measurement(1.23456, 0.01), 3)` was `1.23`, it is now
+  `Measurement(1.23, 0.01)`. Thus the numeric value of an integral,
+  `N(Integrate(…), p)`, is a `Measurement`, not a plain number. The `.N()`
+  method of a lazy `Map` whose function reads a variable of another scope
+  now reads that variable: `Block(c := 5, Map(x ↦ x/c, Range(1, 300))).N()`
+  was `[1/c, 2/c, …]`, it is now `[0.2, 0.4, …]`.
+
 - **`N(list, p)` rounds each element.** With a precision `p` at or below the
   working precision, `N` rounded a number result to `p` significant digits,
   but not the elements of a list or tuple result: `N([1/3, Pi], 4)` was
@@ -733,7 +803,135 @@
   grammar reads one token, as TeX does. `\delta_0` was the symbol `delta_0`
   and is now `KroneckerDelta(0)`, as `\delta_1` is `KroneckerDelta(1)`.
 
+- **`evaluate()` returns an exact sequence term that is not a number.** A
+  term of a sequence declared with `ce.declareSequence()` or `a_n := …` was
+  returned only when it was a single number literal; any other term stayed
+  unevaluated. For `B_n = π·B_{n−1}/n`, `B_0 = 1`, `B_10.evaluate()` was
+  `B_10` and is now `π^10/10!` (`1/3628800·π^10`); for
+  `a_n = a_{n−1} + √2`, `a_0 = 1`, `a_10.evaluate()` was `a_10` and is now
+  `1 + 10√2`. `.N()` gives a float, as before. A term with a free symbol is
+  also returned: for `c_n = x·c_{n−1} + 1`, `c_0 = 1`, `c_3.evaluate()` is
+  `x(x(x + 1) + 1) + 1`. A term with more than 250 nodes stays unevaluated
+  (`c_62` is returned, `c_63` is not), and so does a term whose type is not
+  a number. `ce.getSequenceCache()` returns only the exact
+  terms, with the index as the key: after `F_6.N()` it held the terms
+  `F_2` … `F_6` that `.N()` computed, and it is now empty. The terms that `.N()` computes are
+  kept apart, for each precision, and `ce.clearSequenceCache()` clears them
+  too. Three more changes to the terms of a sequence:
+  - A memoized term is computed again when a symbol that the recurrence or
+    a base case reads changes. With `c_n = x·c_{n−1} + 1`, `c_0 = 1` and
+    `x := 2`, `c_3` is `15`; after `x := 3`, `c_3` was still `15` (from the
+    memo), and it is now `40`. An assumption or a change of the precision
+    also makes the memo outdated; an assignment to a symbol that the
+    recurrence does not read does not. A term with a free symbol, such as
+    `x(x(x + 1) + 1) + 1`, is now memoized too.
+  - A cold read of a large index no longer overflows the call stack: the
+    lower terms are computed on demand, with a stack of the terms whose
+    computation is not complete, so the depth of the calls does not grow
+    with the index. `F_500.evaluate()` and `F_500.N()` for the Fibonacci
+    recurrence threw `RangeError: Maximum call stack size exceeded` on a
+    new engine; `F_2000` now gives its 418 digits. This applies to every
+    pure recurrence, also one with two indices (`P_{400,200}` of the Pascal
+    recurrence) and two sequences that read each other. A recurrence with
+    side effects (an assignment, `Print`, `Random()`, a function declared
+    `pure: false`) is computed recursively, and each term is computed one
+    time, so each side effect occurs one time for each term; a cold read
+    that needs more than 100 nested levels of such a recurrence stays
+    unevaluated (read lower indices first). Only the terms that the
+    recurrence reads are computed: with
+    `A_n = If(n = 1000, 7, A_{n−1} + Random())`, `A_1000` no longer
+    computes `A_1` … `A_999` and consumes no draw, and with the index
+    `If(n < 10, 0, n − 1)`, `A_5` reads `A_0` only. A constraint that reads
+    the sequence no longer throws an internal value, and a constraint that
+    reads the term it checks no longer overflows the call stack. A
+    recurrence that reads a symbol whose value has a side effect (a value
+    `Assign(c, c + 1)` or `Random()`, evaluated at each read) is treated as
+    a recurrence with side effects. The memoized terms become outdated when
+    a symbol that the constraints read changes, or when a symbol that
+    another sequence the recurrence reads depends on changes: with
+    `A_n = B_n` and `B_n = B_{n−1} + x`, after `x := 2`, `A_2` was still `2`,
+    it is now `4`. A term whose computation
+    changes a symbol that the recurrence reads is computed one time in a
+    read (before, `a_10` of such a Fibonacci recurrence took 5157
+    computations). A read that needs more than 100,000 terms, an index that
+    is not a safe integer (`A_{10^20}`, which did not stop), and a term
+    that reads itself stay unevaluated. The read stops when the time limit
+    of `ce.withTimeLimit()` expires.
+  - A base value is evaluated when it is read: with `b_0 = s`,
+    `b_n = b_{n−1} + 1` and `s := 10`, `b_3` was `s + 3` and is now `13`;
+    `.N()` of `p_2` for `p_0 = π`, `p_n = p_{n−1} + 1` stayed unevaluated
+    and is now `5.14159…`.
+  - An exact term that contains a float (`h_n = h_{n−1} + 0.1√2`) is
+    remembered for one precision: `N(g(3), 50)` with `g(k) = h_k` gave the
+    21 digits of the term, and a later `h_3.evaluate()` gave the 55-digit
+    term that `N` computed.
+  - A term that stays unevaluated is remembered, so it is computed one time.
+    Before, a recurrence that reads two lower terms took a time exponential
+    in the index when its terms stay unevaluated: `G_n = G_{n−1} + y·G_{n−2}`
+    took 6.9 s for `G_20`, and `d_n = d_{n−1}(d_{n−1} + 1)` with `d_0 = w`
+    took 3.9 s for `d_12`. Both now take less than 0.2 s.
+
 ### New Features
+
+- [#391](https://github.com/cortex-js/compute-engine/issues/391) **An
+  accuracy goal and a precision goal for `N`.** `N(x, [p, a])` (MathJSON
+  `["N", x, ["List", p, a]]`) gives a value of `x` with `p` correct
+  significant digits or with an absolute error below `10^-a`, whichever
+  goal is met first, as `N[x, {p, a}]` does in Mathematica. Either goal can
+  be `PositiveInfinity`: `["N", x, ["List", "PositiveInfinity", 20]]` asks
+  for 20 correct digits after the decimal point, however many significant
+  digits that takes. For `x = 10^10·(e^100 − e^(999999999999/10^10))`, it
+  gives
+  `2.688117141681729591326298974395630530648558808379370953675983977e+43`
+  (64 digits), where `N(x)` gave `2.6881171417e+43`. The engine evaluates
+  `x` at a precision that it doubles until two successive values agree to
+  within the goal, with two more digits, then rounds the value to
+  `min(p, a + ⌊log10 |x|⌋ + 1)` significant digits. A value below `10^-a` is
+  `0.0`: `N(Exp(-100), [PositiveInfinity, 20])` is `0.0`. A result that is
+  not a number, or a list of numbers, ignores the goal and is the value at
+  the engine precision: `N(x + Pi, [PositiveInfinity, 5])` is
+  `x + 3.14159265358979323846`. When the precision would have to be more
+  than 1000 digits, the call stays unevaluated. A value that does not
+  change with the precision does not meet a goal, because two of its
+  values agree also in their digits that are not correct:
+  `N(Zeta(0.5 + 14.134725141734693i), [30, PositiveInfinity])` and
+  `N(w, [40, PositiveInfinity])` for a float `w` with 21 digits stay
+  unevaluated. A value with fewer significant digits than a machine float
+  is exact to its digits and meets the goal: `N(0.1, [30,
+  PositiveInfinity])` is `0.1`, and `N(Cosh(Ln(2)), [30,
+  PositiveInfinity])` is `1.25`. An exact value meets it:
+  `N(1/2, [30, PositiveInfinity])` is `0.5`, and an exact integer keeps all
+  its digits: `N(123456789012345678901234567890, [PositiveInfinity, 5])`
+  is `123456789012345678901234567890`. A precision goal for a value
+  that is 0, such as `Γ(1/3)·Γ(2/3) − 2π/√3`, stays unevaluated after
+  three working precisions, because the values are rounding errors (before,
+  the engine computed up to 2000 digits, which took about a minute); with
+  an accuracy goal, the value is `0.0`. The precision of the engine does not change. Each
+  number of a list result has its own digits:
+  `N([π, 1000π], [PositiveInfinity, 3])` is `[3.142, 3141.593]`. A goal
+  list that does not have two elements, or that has an element that is not
+  a number, is a type error, and so is a set (`N(\pi, \lbrace 30,
+  5\rbrace)`): the elements of a set have no order. A precision goal below
+  1, or two infinite goals, leave the call unevaluated. A lazy collection
+  of two elements is a valid goal: `N(Pi, Range(4, 5))` is `3.142`. An
+  exact value that would need more than 1000 digits leaves the call
+  unevaluated. A float `0` from cancelling terms does not meet a precision
+  goal: `N(Exp(10^-100) - 1, [30, PositiveInfinity])` is `1e-100`. A float
+  of the operand meets a goal that needs no more digits than it has: for a
+  machine float `y`, `N(2y, [PositiveInfinity, 5])` is `6.28319`. An impure
+  operand, such as `Random()`, is evaluated one time. On an engine at
+  machine precision, a value outside the range of a machine float is kept
+  as a big decimal: `N(Exp(1000), [5, PositiveInfinity])` is
+  `1.9701e+434`, not `+∞`. A float that is exactly `0` meets a goal only
+  when the exact value is `0`, because terms can cancel at the working
+  precision: `N(10^100·(e^(10^−100) − 1), [PositiveInfinity, 20])` was `0`,
+  it is now `1.0000…`. Each float of a symbolic or mixed result is compared
+  at two working precisions and rounded to the goal: for
+  `R = e^(π√163) − 262537412640768744`, `N([R, x], [10, PositiveInfinity])`
+  was `[-0.001, x]`, it is now `[-7.499274028e-13, x]`, and
+  `N([π, x], [5, PositiveInfinity])` is `[3.1416, x]`. An operand that reads
+  an impure stored value, such as a symbol whose value is an unevaluated
+  `Random()`, is evaluated one time.
 
 - **`ResidueClass(k, n)`: an element of ℤ/nℤ** (#399, #411, contributed by
   [enumeratio](https://github.com/enumeratio)). A residue class is now a
@@ -845,6 +1043,36 @@
   every precision up to that limit. Exact arithmetic is not changed.
 
 ### Issues Resolved
+
+- **A symbol whose stored value is impure is read one time for each place
+  it appears under `.N()`.** With `r` assigned an unevaluated random draw,
+  `.N()` of `2r`, `r + π`, `r/3`, `r − 1` and `2r + 1` evaluated the stored
+  value two times, and the result used the second draw. A stored value that
+  reads an impure symbol (`s := r + 1`) or calls a function with an impure
+  body is treated the same way. The exact evaluations that `.N()` does again
+  near a jump (`Round`, `Floor`, `Equal`, a lazy rounding broadcast) and
+  after an overflow (a `Sum` or `Product` term of `±∞`, a factor of `0`)
+  no longer evaluate such a symbol again.
+
+- **The memos of functions, lazy collections and stored values follow what
+  a sequence reads.** With `g := k ↦ B_k` and `B_n = B_{n−1} + x`, `g(2)`
+  kept its first value after `x` changed. Now it gives the new value. A
+  term whose read was stopped (more than 100,000 terms, or a recursion that
+  is too deep) is not kept by the memo of a function, of a lazy collection
+  (`Map`, `Tabulate`) or of a stored value: a later read gives the term.
+
+- **A fused `Map` no longer disposes the definitions of the scope of its
+  function.** The fast route of `Map` evaluated each element in a frame
+  that was the scope of the function itself, and the end of the frame
+  disposed every definition of that scope: for a function written at the
+  top level, every global definition, after each element. A disposed
+  definition loses its assumptions at a checkpoint restore, and every memo
+  that reads a global symbol was made outdated by each such `Map`.
+
+- **The check that an evaluation has no side effects has one
+  implementation**, which follows stored values, the bodies of user
+  functions and the definitions of sequences. It no longer reads every
+  element of a large numeric list made with `ce.list()`.
 
 - **Counting set operations.**
   - `Count(Intersection(Integers, Set(1, 2)))` was `PositiveInfinity`; it is

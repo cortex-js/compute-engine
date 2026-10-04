@@ -494,8 +494,11 @@ describe('the sequence registries', () => {
 
     const cp = ce.checkpoint();
     executeEpsil(ce, 'y = 1000');
-    // Populate the memo inside the window, with the window-only zm.
-    expect(ce.parse('T_{8}').evaluate().re).toBe(9 + 4 * 1000);
+    // Populate the memo inside the window, with the window-only value of
+    // `y`. The memo has a stamp of the values its terms depend on, so the
+    // terms memoized with `y = 2` are not used after `y = 1000`: every term
+    // is computed again, `T_8 = 1 + 8·1000`.
+    expect(ce.parse('T_{8}').evaluate().re).toBe(1 + 8 * 1000);
     expect(ce.getSequenceCache('T')?.size ?? 0).toBeGreaterThan(0);
 
     ce.restore(cp);

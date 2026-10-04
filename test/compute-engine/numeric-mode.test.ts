@@ -184,13 +184,16 @@ describe('N OPERATOR with a precision argument', () => {
     engine.precision = 'auto'; // reset process-global bignum precision
   });
 
-  test('precision above working precision raises and keeps it', () => {
+  test('precision above working precision computes at it, then restores it', () => {
+    // GitHub issue #391: the result shows its 50 digits, and the precision
+    // of the engine is not changed.
     const ce = new ComputeEngine();
+    const before = ce.precision;
     const result = ce.box(['N', 'Pi', 50]).evaluate();
     expect(result.toString()).toBe(
       '3.1415926535897932384626433832795028841971693993751'
     );
-    expect(ce.precision).toBe(50);
+    expect(ce.precision).toBe(before);
   });
 
   test('precision at or below working precision rounds the value down', () => {
