@@ -342,6 +342,17 @@ import {
   quantityPower,
 } from './quantity-arithmetic.js';
 import {
+  containsResidueClass,
+  isPureThroughValues,
+  isResidueClass,
+  isResidueClassOperand,
+  residueArithmetic,
+  residueDivide,
+  residueFold,
+  residueNegate,
+  residuePower,
+} from '../boxed-expression/residue-class.js';
+import {
   foldMeasurementOperands,
   isMeasurement,
   measurementAdd,
@@ -4082,7 +4093,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       missingBehavior: 'propagate',
       type: (ops, context) =>
         BoxedType.forResult(
-          signedInfinitySum(ops, addTypeOnTypes(ops.map(withoutFunctionArm))),
+          ops.some((x) => isResidueClassOperand(x, context.engine))
+            ? 'value'
+            : signedInfinitySum(
+                ops,
+                addTypeOnTypes(ops.map(withoutFunctionArm))
+              ),
           context.engine._typeResolver
         ),
 
@@ -4173,6 +4189,28 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             return engine!.Missing;
           if (hasAbsentScalarOperand(evaluated))
             return absentScalarMarker(engine!, expression);
+        }
+        // A sum with a residue class is folded by the residue rules only.
+        // The generic sum below does not know the ring of the class. A
+        // collection operand is first broadcast by the generic sum, and each
+        // element sum then comes back here: `ResidueClass(1, 5) + [1, 2]` is
+        // `[ResidueClass(2, 5), ResidueClass(3, 5)]`.
+        if (evaluated.some(containsResidueClass)) {
+          // The broadcast is the exact `add()`, also under `.N()`: the
+          // numeric route does not evaluate the elements it builds.
+          if (evaluated.some((x) => x.isCollection)) {
+            const r = add(
+              ...exactOperands(ops, evaluated, numericApproximation)
+            );
+            return numericApproximation ? r.N() : r;
+          }
+          return residueOperands(
+            engine!,
+            ops,
+            evaluated,
+            numericApproximation,
+            'Add'
+          );
         }
         if (evaluated.some((x) => x.operator === 'Quantity')) {
           const r = quantityAdd(engine!, evaluated);
@@ -4405,6 +4443,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       nanBehavior: 'propagate',
       type: (ops, context) => {
         const [num, den] = ops;
+        // A quotient that holds a residue class is not a number: it is a
+        // class, or it stays unevaluated (see the `evaluate` handler).
+        if (ops.some((x) => isResidueClassOperand(x, context.engine)))
+          return BoxedType.forResult('value', context.engine._typeResolver);
         if (operandLiteralValueOnTypes(den) === 1)
           return BoxedType.forResult(num.type, context.engine._typeResolver);
         // A numeric tuple (point/vector) divided by a scalar keeps the tuple
@@ -4664,6 +4706,21 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (listTuple !== undefined) return listTuple;
         const evalNum = num;
         const evalDen = den;
+        // A quotient with a residue class is a class, or it stays
+        // unevaluated: the generic division below reads `c/c` as 1 even
+        // when the class `c` has no inverse. A class is exact, so under
+        // `.N()` a pure operand is read from its exact value.
+        if (containsResidueClass(evalNum) || containsResidueClass(evalDen)) {
+          const originals =
+            numericApproximation && expression && isFunction(expression)
+              ? expression.ops
+              : undefined;
+          const exact =
+            originals?.length === 2
+              ? exactOperands(originals, [evalNum, evalDen], true)
+              : [evalNum, evalDen];
+          return residueDivide(engine!, exact[0], exact[1]);
+        }
         if (
           evalNum.operator === 'Quantity' ||
           evalDen.operator === 'Quantity'
@@ -6708,6 +6765,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       type: (ops, { engine, derive }) => {
         if (ops.length === 0)
           return BoxedType.forResult('integer', engine._typeResolver); // = 1
+        if (ops.some((x) => isResidueClassOperand(x, engine)))
+          return BoxedType.forResult('value', engine._typeResolver);
         if (ops.length === 1)
           return BoxedType.forResult(ops[0].type, engine._typeResolver);
         // A factor that is NaN or a number (`nan | real`, the type of an
@@ -7348,6 +7407,22 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           if (hasAbsentScalarOperand(evaluated))
             return absentScalarMarker(engine!, expression);
         }
+        // A product with a residue class: see the matching comment in `Add`.
+        if (evaluated.some(containsResidueClass)) {
+          if (evaluated.some((x) => x.isCollection)) {
+            const r = mulFactored(
+              ...exactOperands(ops, evaluated, numericApproximation)
+            );
+            return numericApproximation ? r.N() : r;
+          }
+          return residueOperands(
+            engine!,
+            ops,
+            evaluated,
+            numericApproximation,
+            'Multiply'
+          );
+        }
         if (evaluated.some((x) => x.operator === 'Quantity')) {
           const r = quantityMultiply(engine!, evaluated);
           if (
@@ -7497,6 +7572,22 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const listTuple = listCoordinateTupleOperandError(engine!, [x]);
         if (listTuple !== undefined) return listTuple;
         const evalX = x;
+        if (isResidueClass(evalX)) return residueNegate(engine, evalX);
+        // The negation of a sum or product that holds a class is distributed
+        // by `neg()`, then its classes are folded: `-(x + c)` is `-x - c`,
+        // and `-c` is the class `-c` (`residueFold()` reads it so).
+        if (containsResidueClass(evalX)) {
+          const r = evalX.neg();
+          if (isFunction(r, 'Add') || isFunction(r, 'Multiply'))
+            return (
+              residueArithmetic(
+                engine,
+                r.operator as 'Add' | 'Multiply',
+                r.ops
+              ) ?? r
+            );
+          return r;
+        }
         if (isQuantity(evalX)) {
           if (isMeasurement(evalX.op1)) {
             const negM = measurementNegate(engine, evalX.op1);
@@ -7657,6 +7748,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           context,
           ((): BoxedType | undefined => {
             const [base, exp] = ops;
+            // A power that holds a residue class, in its base or in its
+            // exponent, is not a number.
+            if (ops.some((x) => isResidueClassOperand(x, context.engine)))
+              return BoxedType.forResult('value', context.engine._typeResolver);
             // A proven-NaN operand: decline, so the framework's proven-NaN arm
             // answers the sharp `nan` from the propagate policy (the
             // `Sqrt`/`Erf` precedent).
@@ -8031,6 +8126,24 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         )
           return engine!.typeError(POWER_EXPONENT_CARRIER_TYPE, n.type, n);
         const evalBase = x;
+        // A power of a residue class is a class, or it stays unevaluated (a
+        // negative power of a class with no inverse, a call that is not a
+        // class yet, a base with a class inside it): the generic power reads
+        // `c^0` as 1 and `(1/c)^{-1}` as `c`.
+        if (containsResidueClass(evalBase)) {
+          // A class is exact: under `.N()`, a pure exponent is read from its
+          // exact value, not its approximation (`10^{20}` is not an exact
+          // integer as a float). See the same rule in `Divide`.
+          const original =
+            numericApproximation && expression && isFunction(expression)
+              ? expression.ops[1]
+              : undefined;
+          const exponent =
+            original !== undefined
+              ? exactOperands([original], [n], true)[0]
+              : n;
+          return residuePower(engine!, evalBase, exponent);
+        }
         if (evalBase.operator === 'Quantity') {
           const r = quantityPower(engine!, evalBase, n);
           if (
@@ -8229,6 +8342,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         return n.isSame(0) ? false : undefined;
       },
       type: ([base, exp], context) => {
+        // A root that holds a residue class, in its radicand or in its
+        // index, is not a number (it stays unevaluated).
+        if (
+          isResidueClassOperand(base, context.engine) ||
+          isResidueClassOperand(exp, context.engine)
+        )
+          return BoxedType.forResult('value', context.engine._typeResolver);
         // A proven-NaN operand: decline, so the framework's proven-NaN arm
         // answers the sharp `nan` (the `Sqrt` precedent).
         if (provablyNaNOperand(base) || provablyNaNOperand(exp))
@@ -8749,6 +8869,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // is not a subtype of `complex`, and `Sqrt(NaN)` must be `NaN`.
       nanBehavior: 'propagate',
       type: ([x], context) => {
+        // A root of a residue class is not a number (it stays unevaluated).
+        if (isResidueClassOperand(x, context.engine))
+          return BoxedType.forResult('value', context.engine._typeResolver);
         // A proven-NaN operand: decline, so the framework's proven-NaN arm
         // answers the sharp `nan` (the propagated value's own type).
         if (provablyNaNOperand(x)) return undefined;
@@ -12187,6 +12310,78 @@ function divideFromExactValues(
   }
   if (!rescued) return undefined;
   return ce.number(values[0].div(values[1])).N();
+}
+
+/**
+ * The value of a sum or a product when one of its evaluated operands
+ * `evaluated` contains a residue class. `ops` are the operands before the
+ * evaluation.
+ *
+ * Only the residue rules fold: the classes of one ring among the operands,
+ * and the exact integer or rational literals that read in that ring, become
+ * one class (`residueFold()`). Every other operand is kept as it is, beside
+ * the class, and the result is built with no other fold: no like terms are
+ * combined, no reciprocals cancel, and a zero, a float or an infinity does
+ * not absorb the class.
+ *
+ * - `ResidueClass(5, 7) + 3` is `ResidueClass(1, 7)`.
+ * - `ResidueClass(1, 5) + ResidueClass(2, 5) + x` is
+ *   `x + ResidueClass(3, 5)`.
+ * - `ResidueClass(2, 5) + ∞` and `ResidueClass(2, 4) + ResidueClass(1, 6)`
+ *   stay sums.
+ * - `d·x - d·x` stays a sum: the generic sum would make it the integer 0.
+ * - An operand that is `NaN` or `Indeterminate` decides the result, by the
+ *   rule of `nanOperandAnswer()`: `Indeterminate + c` is `Indeterminate`,
+ *   and under `.N()` the result is `NaN`.
+ *
+ * A class is exact, so under `.N()` the class is computed from the exact
+ * values of the operands: `ResidueClass(5, 7) + 1/3` is `ResidueClass(3, 7)`
+ * and not a sum with the float `0.333…`. A pure operand is evaluated again
+ * without the numeric approximation. An impure operand (a `Random()` draw,
+ * an assignment) keeps its value from `evaluated`, so that it runs once. The
+ * operands that are not folded keep their numeric value: `(c·π).N()` is
+ * `3.14159…·c`.
+ */
+function residueOperands(
+  ce: ComputeEngine,
+  ops: ReadonlyArray<Expression>,
+  evaluated: ReadonlyArray<Expression>,
+  numericApproximation: boolean | undefined,
+  operator: 'Add' | 'Multiply'
+): Expression {
+  if (evaluated.some((x) => isNumber(x) && x.isNaN))
+    return numericApproximation ? ce.NaN : nanOperandAnswer(ce, evaluated);
+  const exact = exactOperands(ops, evaluated, numericApproximation);
+  const fold = residueFold(ce, exact, operator === 'Add' ? 'add' : 'multiply');
+  if (fold === undefined) return ce.function(operator, evaluated);
+  if (fold.rest.length === 0) return fold.value;
+  return ce.function(operator, [
+    fold.value,
+    ...fold.rest.map((i) => evaluated[i]),
+  ]);
+}
+
+/**
+ * The exact values of the operands `ops` of an operation with a residue
+ * class, when `evaluated` holds their values under `.N()`. A class is exact,
+ * so the residue rules read the exact value of an operand (`1/3`, not
+ * `0.333…`). An operand is evaluated again only when that cannot run a side
+ * effect twice (`isPureThroughValues()`: a symbol whose value is an impure
+ * call is not evaluated again); otherwise its value from `evaluated` is
+ * kept, and a float does not read as a class. Without a numeric
+ * approximation, `evaluated` already holds the exact values.
+ */
+function exactOperands(
+  ops: ReadonlyArray<Expression>,
+  evaluated: ReadonlyArray<Expression>,
+  numericApproximation: boolean | undefined
+): ReadonlyArray<Expression> {
+  if (!numericApproximation) return evaluated;
+  return ops.map((op, i) =>
+    evaluated[i].operator !== 'ResidueClass' && isPureThroughValues(op)
+      ? op.evaluate()
+      : evaluated[i]
+  );
 }
 
 /**

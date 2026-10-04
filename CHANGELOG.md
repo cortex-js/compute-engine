@@ -97,6 +97,44 @@
 
 ### New Features
 
+- **`ResidueClass(k, n)`: an element of ℤ/nℤ** (#399, #411, contributed by
+  [enumeratio](https://github.com/enumeratio)). A residue class is now a
+  value.
+  - **Canonical form.** `k` is reduced to `0…n−1`: `ResidueClass(7, 5)` is
+    `ResidueClass(2, 5)` and `ResidueClass(-1, 7)` is `ResidueClass(6, 7)`.
+    `n` must be an exact integer ≥ 1. A rational `k` whose denominator is a
+    unit reads as `u·v⁻¹`: `ResidueClass(1/3, 7)` is `ResidueClass(5, 7)`. A
+    float or a symbolic `k` or `n` stays unevaluated.
+  - **Equality.** `ResidueClass(7, 5) == ResidueClass(2, 5)` is `True`.
+    Classes are not ordered.
+  - **Arithmetic.** Sums, differences, products and integer powers of classes
+    of one modulus are classes: `ResidueClass(5, 7) + ResidueClass(4, 7)` is
+    `ResidueClass(2, 7)`. An exact integer, or a rational whose denominator
+    is a unit, is read in the ring: `ResidueClass(5, 7) + 3` is
+    `ResidueClass(1, 7)`. An inverse, a quotient or a negative power needs
+    gcd(k, n) = 1: `1/ResidueClass(3, 7)` is `ResidueClass(5, 7)`, while
+    `1/ResidueClass(2, 4)` stays unevaluated. Classes of two different moduli,
+    a float and an infinity are never combined with a class: the expression
+    stays unevaluated.
+  - **No number rule applies to a class.** Canonical forms, `evaluate()`,
+    `.N()`, `simplify()`, `Expand`, `Factor` and the `.add()`, `.mul()`,
+    `.div()` and `.pow()` methods fold an expression that holds a class only
+    with the rules of the ring. So `c/c` and `c − c` are never cancelled to
+    the integers 1 and 0 when the class `c` has no inverse. This also holds
+    for a symbol whose value holds a class. `Solve`, `D` and `Integrate` stay
+    unevaluated for an expression that holds a class.
+  - **ℤ/nℤ.** `QuotientRing(Integers, n)` lists `ResidueClass(0, n)` …
+    `ResidueClass(n−1, n)`, without building them all for a large `n`. Its
+    element type is `value`. `Element(ResidueClass(7, 5), ℤ/5ℤ)` is `True`, a
+    class of another modulus is `False`, and an integer is not an element:
+    `Element(7, ℤ/5ℤ)` is `False`.
+  - **LaTeX.** `\overline{k}_{n}` is `ResidueClass(k, n)` when `k` and `n` are
+    integer literals, and a class is written back the same way. A bare
+    `\overline{7}` is still `Conjugate(7)`, and `\overline{z}_1` is still the
+    conjugate of z₁. `Subscript(Conjugate(3), 5)` is now written
+    `{\overline{3}}_{5}`, so that it reads back as written.
+  - `Mod` is still the remainder: `Mod(7, 3)` is `1`.
+
 - **Contour integration by the residue theorem.** `ce.contourIntegrate(f, z,
   contour)` and the `ContourIntegrate` operator integrate over a circle, a
   rectangle or a simple polygon (`CircleContour`, `RectangleContour`,
@@ -171,6 +209,10 @@
 
 ### Issues Resolved
 
+- **`simplify()` of a list quotient or difference keeps the list.**
+  `[x]/[x]` simplified to `1` and `[x] − [x]` to `0`. They now give `[1]` and
+  `[0]`, as `evaluate()` does.
+
 - **`Shape` and `Rank` of a lazy collection.** `Shape(Range(1, 3))` was `()`
   and `Rank(Range(1, 3))` was `0`, the answer for a scalar. A finite indexed
   collection now gives the answer of the list with the same elements:
@@ -214,9 +256,8 @@
   now has the count `n`, is finite and is not empty, and `Count` evaluates:
   `Count(\mathbb{Z}/5\mathbb{Z})` is `5`. A symbolic, zero or negative
   modulus, or a base other than `Integers`, stays inert. The type is
-  `set<unknown>`, as for an `Adjoin` adjunct that the engine cannot type. The
-  engine has no value for a residue class, so the classes are not listed and
-  membership is not decided.
+  `set<value>`: its elements are the classes `ResidueClass(k, n)` (see New
+  Features).
 
 - **A finite collection whose elements cannot be computed no longer reads as
   empty.** `Linspace(a, 1, 3)` with a symbolic `a` has the count 3 but no

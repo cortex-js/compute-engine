@@ -3157,8 +3157,16 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     kind: 'infix',
     serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
       if (nops(expr) === 2) {
+        const base = operand(expr, 1);
+        // `\overline{3}_{5}` reads as the residue class `ResidueClass(3, 5)`.
+        // The conjugate of a number literal is braced, `{\overline{3}}_{5}`,
+        // so that a subscript of it reads back as written.
+        const braced =
+          operator(base) === 'Conjugate' &&
+          isNumberExpression(operand(base, 1));
+        const lhs = serializer.serialize(base);
         return (
-          serializer.serialize(operand(expr, 1)) +
+          (braced ? `{${lhs}}` : lhs) +
           '_{' +
           serializer.serialize(operand(expr, 2)) +
           '}'

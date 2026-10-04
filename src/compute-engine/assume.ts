@@ -283,6 +283,10 @@ function stageAssumedValue(
     tx.touched.add(def);
   }
   overlay.set(def, value);
+  // An assumed value is a value of the symbol: report it as the value
+  // definition reports a stored value, so that the tests for a residue class
+  // read the values of symbols (`residue-class-value-hook.ts`).
+  noteSymbolValue(ce, value);
 }
 
 /**
@@ -1614,4 +1618,5 @@ function getSignFromAssumptionsLegacy(
 
 // Re-export from its new home for backward compatibility
 import { getInequalityBoundsFromAssumptions } from './boxed-expression/inequality-bounds.js';
+import { noteSymbolValue } from './boxed-expression/residue-class-value-hook.js';
 export { getInequalityBoundsFromAssumptions };

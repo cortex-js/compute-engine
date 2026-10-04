@@ -5166,6 +5166,22 @@ is exact. Two related notations are also wrong:
 - `\operatorname{card}(S)` is an unknown function `card`. It should be
   `Count(S)`.
 
+### A residue class that only a function returns is not protected from number rules (OPEN, found 2026-10-04)
+
+An expression that holds a `ResidueClass` is folded only by the rules of
+its ring: `c/c` is not cancelled to the integer 1 when `c` has no inverse.
+The engine finds the class by a walk through the expression and through the
+values of its symbols (`containsResidueClass()` in
+`boxed-expression/residue-class.ts`). The walk does not look inside a
+function definition, so it cannot see a class that only a function
+returns. With `g := k ↦ ResidueClass(k, 4)`, `g(2)/g(2)` simplifies to `1`,
+although `g(2)` is `ResidueClass(2, 4)`, which has no inverse, and
+`evaluate()` keeps the quotient. The same is true for an application of a
+function with no definition, `f(c)/f(c)` (the engine treats every
+application of an unknown function as one value). A fix needs the type of
+a class to be a type that no ordinary expression has, so that the check can
+use the type of the application instead of a walk.
+
 ### Load-sensitive test flakes under a full-suite run (observed 2026-08-31)
 
 Three suites failed under a 6-worker full-suite run and pass cleanly — at bare

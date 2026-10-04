@@ -39,6 +39,7 @@ import { realExponentValue } from './imaginary-part.js';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
 import { complexPow } from '../numerics/numeric-complex.js';
 import { asFloat, hasFloatOperand } from './float-result.js';
+import { containsResidueClass, residueArithmetic } from './residue-class.js';
 
 /** Is the expression statically a MATRIX — a shape decision, so the bottom
  * type must answer no: `never` is a subtype of `matrix` (of everything),
@@ -441,6 +442,13 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
   // TYPE stays `never` (the same guard `isMatrixTyped` carries for the
   // matrix rewrite).
   if (a.type.type === 'never' || b.type.type === 'never') return unchanged();
+
+  // A power with a residue class is kept as it is: only the residue rules of
+  // the evaluate handler know its ring. The rules below would merge
+  // `(c^{2/3})^3` into `c^2` (a non-integer power of a class has no value)
+  // and read `(c^{-1})^{-1}` as `c` when `c` has no inverse (see
+  // `containsResidueClass()`).
+  if (containsResidueClass(a) || containsResidueClass(b)) return unchanged();
 
   if (isFunction(a, 'Power')) {
     const [base, aPow] = a.ops;
@@ -849,6 +857,14 @@ export function canonicalRoot(
   b: Expression | number
 ): Expression {
   const ce = a.engine;
+  // A root of a residue class is kept as it is (see `canonicalPower()`).
+  if (
+    containsResidueClass(a) ||
+    (typeof b !== 'number' && containsResidueClass(b))
+  )
+    return b === 2
+      ? ce._fn('Sqrt', [a])
+      : ce._fn('Root', [a, typeof b === 'number' ? ce.number(b) : b]);
   let exp: number | undefined = undefined;
   if (typeof b === 'number') exp = b;
   else {
@@ -1373,6 +1389,12 @@ export function pow(
     return numericApproximation
       ? x.engine.NaN
       : nanOperandAnswer(x.engine, [x, x.engine.expr(exp)]);
+
+  // A residue class in the power: only the residue rules apply
+  // (`residueArithmetic()`). It comes after the `Indeterminate` rule above,
+  // which applies to a class as to any base.
+  const residue = residueArithmetic(x.engine, 'Power', [x, x.engine.expr(exp)]);
+  if (residue !== undefined) return residue;
 
   //
   // If a numeric approximation is requested, we try to evaluate the expression
@@ -1971,6 +1993,10 @@ export function root(
 ): Expression {
   if (!(a.isCanonical || a.isStructural) || !(b.isCanonical || b.isStructural))
     return a.engine._fn('Root', [a, b], { canonical: false });
+
+  // A root of a residue class is kept as written (`residueArithmetic()`).
+  const residue = residueArithmetic(a.engine, 'Root', [a, b]);
+  if (residue !== undefined) return residue;
 
   const special = rootAtExceptionalPoint(a, b);
   if (special !== undefined) return special;

@@ -202,6 +202,11 @@ import {
 } from './abstract-boxed-expression.js';
 import { DEFAULT_COMPLEXITY, sortOperands } from './order.js';
 import {
+  containsResidueClass,
+  noteResidueClass,
+  residueArithmetic,
+} from './residue-class.js';
+import {
   digest128,
   hashCode,
   hasVolatileDigest,
@@ -737,6 +742,8 @@ export class BoxedFunction
     super(ce, options?.metadata);
 
     this._operator = operator;
+    // Lets `containsResidueClass()` skip its walk in an engine with no class.
+    if (operator === 'ResidueClass') noteResidueClass(ce);
     const store = options?.numericStore;
     if (store !== undefined) {
       // The store is the list's literal content. Any other head would give
@@ -2164,6 +2171,14 @@ export class BoxedFunction
   inv(): Expression {
     if (!(this.isCanonical || this.isStructural))
       throw new Error('Not canonical');
+    // The reciprocal of an expression with a residue class: only the residue
+    // rules apply. The rules below read `(1/c)^{-1}` as `c` even when `1/c`
+    // has no value.
+    const residue = residueArithmetic(this.engine, 'Divide', [
+      this.engine.One,
+      this,
+    ]);
+    if (residue !== undefined) return residue;
     if (this._isOne) return this;
     if (this._isNegativeOne) return this;
 
@@ -2220,6 +2235,16 @@ export class BoxedFunction
   mul(rhs: NumericValue | number | Expression): Expression {
     if (!(this.isCanonical || this.isStructural))
       throw new Error('Not canonical');
+    // A product with a residue class goes to `mul()`, which broadcasts over
+    // a collection and then applies only the residue rules. The shortcuts
+    // below read `c · 0` as the integer 0.
+    if (containsResidueClass(this))
+      return mul(
+        this,
+        rhs instanceof NumericValue
+          ? this.engine.number(rhs)
+          : this.engine.expr(rhs)
+      );
     if (rhs === 0) return this.engine.Zero;
     if (rhs === 1) return this;
     if (rhs === -1) return this.neg();
@@ -2249,6 +2274,12 @@ export class BoxedFunction
       (typeof exp !== 'number' && !(exp.isCanonical || exp.isStructural))
     )
       throw new Error('Not canonical');
+    // A root of a residue class is kept as written (`residueArithmetic()`).
+    const residue = residueArithmetic(this.engine, 'Root', [
+      this,
+      this.engine.expr(exp),
+    ]);
+    if (residue !== undefined) return residue;
 
     const e =
       typeof exp === 'number'
@@ -3316,6 +3347,11 @@ export class BoxedFunction
     | ReadonlyArray<Expression>
     | Record<string, Expression>
     | Array<Record<string, Expression>> {
+    // An equation that holds a residue class is not solved (see
+    // `evaluateSolve()`): `null`, as for any equation the solver cannot
+    // solve, and not an empty list of roots.
+    if (containsResidueClass(this)) return null;
+
     const varNames = normalizedUnknownsForSolve(vars ?? this.unknowns);
 
     // Handle List or And of equations (system of equations)

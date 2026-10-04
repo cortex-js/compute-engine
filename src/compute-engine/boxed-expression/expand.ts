@@ -10,6 +10,7 @@ import { isFunction, isNumber } from './type-guards.js';
 import { asSmallInteger } from './numerics.js';
 import { mul, expandProducts } from './arithmetic-mul-div.js';
 import { add } from './arithmetic-add.js';
+import { containsResidueClass, residueFoldOrKeep } from './residue-class.js';
 
 const binomials = [
   [1],
@@ -131,6 +132,8 @@ export function expandFunction(
   h: string,
   ops: ReadonlyArray<Expression>
 ): Expression | null {
+  // See `expand()`: an expression with a residue class is not expanded.
+  if (ops.some(containsResidueClass)) return null;
   let result: Expression | null = null;
 
   //
@@ -209,6 +212,13 @@ export function expand(expr: Expression): Expression {
   expr = expr.canonical;
 
   if (typeof expr.operator !== 'string') return expr;
+
+  // An expression with a residue class is not expanded: the distribution
+  // and the cancellations of an expansion do not know the ring of the class
+  // (`(c·(x + 1))/c` is not `x + 1` when `c` has no inverse). A closed
+  // expression is folded by the residue rules instead
+  // (`residueFoldOrKeep()`).
+  if (containsResidueClass(expr)) return residueFoldOrKeep(expr);
 
   //
   // Expand relational operators

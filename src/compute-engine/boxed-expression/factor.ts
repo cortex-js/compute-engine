@@ -17,6 +17,7 @@ import { asSmallInteger } from './numerics.js';
 import { expand } from './expand.js';
 import { hasVolatileDigest } from './utils.js';
 import { cycleDetectionCount } from './cycle-guard.js';
+import { containsResidueClass, residueFoldOrKeep } from './residue-class.js';
 
 function hasNonTrivialRadical(value: unknown): boolean {
   return (
@@ -32,6 +33,8 @@ function hasNonTrivialRadical(value: unknown): boolean {
 export function together(op: Expression): Expression {
   const ce = op.engine;
   const h = op.operator;
+  // See `factor()`: an expression with a residue class is not combined.
+  if (containsResidueClass(op)) return residueFoldOrKeep(op);
 
   // Thread over inequality
   if (isFunction(op)) {
@@ -850,6 +853,12 @@ export function factorComputationCount(): number {
  */
 export function factor(expr: Expression): Expression {
   const ce = expr.engine;
+  // An expression with a residue class is not factored: the cancellations
+  // of a factorization do not know the ring of the class
+  // (`(c·x)/(c·y)` is not `x/y` when `c` has no inverse). A closed
+  // expression is folded by the residue rules instead
+  // (`residueFoldOrKeep()`).
+  if (containsResidueClass(expr)) return residueFoldOrKeep(expr);
   // The digest is read first: reading it is also what marks a node that sits
   // above a mutable object as volatile.
   const key = expr.digest;

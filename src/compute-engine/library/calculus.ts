@@ -109,6 +109,7 @@ import { residue } from '../symbolic/residue.js';
 import { computeSeries, normalStrip } from '../symbolic/series.js';
 import { canonicalLimits, canonicalLimitsSequence } from './utils.js';
 import { implicitCompile } from '../implicit-compile.js';
+import { containsResidueClass } from '../boxed-expression/residue-class.js';
 
 /**
  * The highest order the `D(f, {x, n})` spelling expands into `n` repeated
@@ -3150,6 +3151,11 @@ volumes
         // unevaluated rather than crashing on `ops[0].canonical`.
         if (!ops[0]) return undefined;
 
+        // A function that holds a residue class is not differentiated: a
+        // class is not a real number, and the rules of differentiation do
+        // not apply to it. The derivative stays unevaluated.
+        if (containsResidueClass(ops[0].canonical)) return undefined;
+
         // The differentiation variable(s) are bound by `D`: a same-named global
         // assignment (`x := 5`) must not substitute into the result. Shield
         // them across the whole evaluation — the final `.evaluate()` of the
@@ -3687,6 +3693,11 @@ volumes
         let body = (isFunction(ops[0], 'Function') ? ops[0].op1 : ops[0])
           .canonical;
         while (isFunction(body, 'Block') && body.nops === 1) body = body.op1;
+        // An integrand that holds a residue class is not integrated: a class
+        // is not a real number, and the bounds are real numbers, not
+        // elements of its ring (`1/2` is not the class `2⁻¹`). The integral
+        // stays unevaluated, under `evaluate()` and `N()` alike.
+        if (containsResidueClass(body)) return undefined;
         if (isNumber(body) && body.isNaN === true) {
           if (numericApproximation) return ce.NaN;
           const bounds = ops

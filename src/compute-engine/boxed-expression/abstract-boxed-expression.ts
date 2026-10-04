@@ -865,6 +865,14 @@ export abstract class _BoxedExpression implements Expression {
       if (other.freeVariables.length > 0) return false;
       const nThis = this.N();
       const nOther = other.N();
+      // A value that is not a number (a residue class) has no tolerance:
+      // the two values are the same or they are not.
+      // `ResidueClass(1, 5) + 1` is `ResidueClass(2, 5)`.
+      if (
+        nThis.operator === 'ResidueClass' &&
+        nOther.operator === 'ResidueClass'
+      )
+        return nThis.isSame(nOther);
       if (!isNumber(nThis) || !isNumber(nOther)) return false;
       const tol = tolerance ?? this.engine.tolerance;
       return (

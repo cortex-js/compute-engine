@@ -11,7 +11,7 @@ date: Last Modified
 ---
 # Epsil Standard Library
 
-The 703 functions and constants of the standard library, by category.
+The 704 functions and constants of the standard library, by category.
 Each row gives a name, its signature (for a function) or its kind and type
 (for a constant or variable), and the first sentence of its description —
 the same description `epsil doc <name>` prints in full and the editor
@@ -25,7 +25,7 @@ To search the library by concept rather than by name, use
 - [Core](#core) — 112 definitions · [full reference](/epsil/reference/core/)
 - [Control structures](#control-structures) — 13 definitions · [full reference](/epsil/reference/control-structures/)
 - [Logic](#logic) — 27 definitions · [full reference](/epsil/reference/logic/)
-- [Collections](#collections) — 125 definitions · [full reference](/epsil/reference/collections/)
+- [Collections](#collections) — 126 definitions · [full reference](/epsil/reference/collections/)
 - [Colors](#colors) — 20 definitions · [full reference](/epsil/reference/colors/)
 - [Regular expressions](#regular-expressions) — 4 definitions · [full reference](/epsil/reference/regexp/)
 - [Relations](#relations) — 30 definitions · [full reference](/epsil/reference/relop/)
@@ -315,6 +315,7 @@ The [Collections reference](/epsil/reference/collections/) has the full descript
 | `reduce` | `Reduce` | `(collection<T>, reducer: (unknown, T) any -> unknown, initial: value?) -> value where T` | Reduce (fold) a collection to a single value by repeatedly applying a binary function, with an optional initial value. |
 | `repeat` | `Repeat` | `(value: any, count: integer?) -> list` | Produce a sequence by repeating a single value. |
 | `replaceAt` | `ReplaceAt` | `(indexed_collection<T>, integer, T) -> list<T> where T` | Return a copy of the indexed collection with the element at the 1-based `index` replaced by `value`. |
+| `residueClass` | `ResidueClass` | `(any, any) -> value` | An element of ℤ/nℤ: the class of the integer `k` modulo `n`. |
 | `rest` | `Rest` | `((T) -> T where T: string) & ((indexed_collection<T>) -> list<T> where T)` | Return the collection without the first element. |
 | `reverse` | `Reverse` | `((T) -> T where T: string) & ((T) -> T where T: list) & ((indexed_collection<T>) -> list<T> where T)` | Reverse the order of the elements of an indexed collection. |
 | `rotateLeft` | `RotateLeft` | `((T, integer?) -> T where T: string) & ((T, integer?) -> T where T: list) & ((indexed_collection<T>, integer?) -> list<T> where T)` | Rotate the elements of the collection to the left by n positions. |
