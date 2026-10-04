@@ -313,6 +313,8 @@ function systemSolutionToExpression(
  * is not an answer: a factor of a product gave no root and is not shown to
  * have none (`'solve.incomplete-factor'`), or the unknown is in a function
  * that the root finder cannot invert (`'solve.incomplete-non-invertible'`),
+ * or a check did not decide whether a candidate is a root
+ * (`'solve.incomplete-undecided'`),
  * or the root finder gave no root and cannot show that there is none
  * (`'solve.incomplete-no-roots'`, see `emptyRootsAnswer()`).
  * `result` is the unevaluated `Solve(initial, x)`.
@@ -322,7 +324,7 @@ function incompleteSolveExplanation(
   initial: Expression,
   x: string,
   trace: RuleSteps,
-  reason: 'factor' | 'non-invertible' | 'no-roots',
+  reason: 'factor' | 'non-invertible' | 'undecided' | 'no-roots',
   verbosity: 'default' | 'all'
 ): Explanation {
   const result = ce.function('Solve', [initial, ce.symbol(x)]);

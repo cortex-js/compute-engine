@@ -269,6 +269,8 @@ registerStepLabels({
     'No complete answer: a factor gave no solution, and it is not shown to have none',
   'solve.incomplete-non-invertible':
     'No complete answer: the unknown is in a function that the solver cannot invert',
+  'solve.incomplete-undecided':
+    'No complete answer: the solver cannot decide whether a candidate is a solution',
   'solve.incomplete-no-roots':
     'No complete answer: the solver found no solution, and it cannot show that there is none',
   'solve.template': 'Solve the matched equation pattern',

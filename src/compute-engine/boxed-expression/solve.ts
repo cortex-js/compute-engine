@@ -1,4 +1,8 @@
-import { matchAnyRules, matchAnyRulesWithSteps } from './rules.js';
+import {
+  matchAnyRules,
+  matchAnyRulesWithSteps,
+  sourceOfBoxedRule,
+} from './rules.js';
 import { expand } from './expand.js';
 import type {
   Expression,
@@ -62,6 +66,16 @@ function filter(sub: BoxedSubstitution): boolean {
     if (k !== 'x' && k !== '_x' && v.has('_x')) return false;
   }
   return true;
+}
+
+/**
+ * For the condition of a root template: `true` when the unknown `_x` takes
+ * only real values, that is, its declared type does not admit a value that
+ * is not real (see `isComplexUnknown()`).
+ */
+function hasRealUnknown(sub: BoxedSubstitution): boolean {
+  const ce = Object.values(sub)[0]?.engine;
+  return ce !== undefined && !isComplexUnknown(ce, '_x');
 }
 
 /**
@@ -157,17 +171,19 @@ function childStats(): Required<RootStats> {
 }
 
 /**
- * Copy the `partial` and `userRule` flags of a recursive call of
+ * Copy the `partial`, `undecided` and `userRule` flags of a recursive call of
  * `findUnivariateRoots()` to the statistics `stats` of the caller. A
  * strategy calls this function only when it returns roots that it made from
  * the roots of that recursive call: when those roots are only a part of the
- * roots, or come from a root template that the host added, the roots of the
- * strategy are too. For example, `ln((x - 2)(x + e^x) + e) = 1` becomes
- * `(x - 2)(x + e^x) = 0`, whose roots are only a part of the roots.
+ * roots, can miss a root that a check did not decide, or come from a root
+ * template that the host added, the roots of the strategy are the same. For
+ * example, `ln((x - 2)(x + e^x) + e) = 1` becomes `(x - 2)(x + e^x) = 0`,
+ * whose roots are only a part of the roots.
  */
 function adoptChildStats(stats: RootStats | undefined, child: RootStats): void {
   if (stats === undefined) return;
   if (child.partial) stats.partial = true;
+  if (child.undecided) stats.undecided = true;
   if (child.userRule) stats.userRule = true;
 }
 
@@ -365,6 +381,10 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   // `eˣ = 0`), the guard drops the root, and the solver knows that the
   // equation has no real root. When the sign is unknown (`eˣ = c`), the rule
   // does not fire.
+  // The exponential is positive only for a real exponent: the unknown must be
+  // real (`hasRealUnknown()`), and a coefficient `b` of the unknown in the
+  // exponent must be real. `e^(i·x) = -1` has the root `π`, and over the
+  // complex numbers `eˣ = -1` has the roots `(2k + 1)·π·i`.
 
   // a^x + b = 0
   {
@@ -374,6 +394,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     useVariations: true,
     condition: (sub) =>
       filter(sub) &&
+      hasRealUnknown(sub) &&
       (sub._a.isPositive ?? false) &&
       sub.__b.isNegative !== undefined,
   },
@@ -394,6 +415,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     useVariations: true,
     condition: (sub) =>
       filter(sub) &&
+      isRealForRealUnknown(sub.__b, '_x') &&
       !sub.__a.isSame(0) &&
       // Captures of multiple operands are raw (unbound): canonicalize
       // before arithmetic, which asserts on non-canonical expressions
@@ -412,6 +434,7 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     useVariations: true,
     condition: (sub) =>
       filter(sub) &&
+      hasRealUnknown(sub) &&
       !sub.__a.isSame(0) &&
       sub.__c.canonical.div(sub.__a.canonical).isNegative !== undefined &&
       !sub.__a.has('_x') &&
@@ -424,7 +447,8 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     replace: ['When', ['Ln', ['Negate', '__c']], ['Less', '__c', 0]],
     id: 'solve.exponential-natural-simple',
     useVariations: true,
-    condition: (sub) => filter(sub) && sub.__c.isNegative !== undefined,
+    condition: (sub) =>
+      filter(sub) && hasRealUnknown(sub) && sub.__c.isNegative !== undefined,
   },
 
   // e^(bx) + c = 0
@@ -437,7 +461,10 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     ],
     id: 'solve.exponential-natural-unit-coefficient',
     useVariations: true,
-    condition: (sub) => filter(sub) && sub.__c.isNegative !== undefined,
+    condition: (sub) =>
+      filter(sub) &&
+      isRealForRealUnknown(sub.__b, '_x') &&
+      sub.__c.isNegative !== undefined,
   },
 
   // a * log_b(x) + c = 0
@@ -450,10 +477,12 @@ export const UNIVARIATE_ROOTS: Rule[] = [
       (filter(sub) && !sub.__a.isSame(0) && sub.__b.isPositive) ?? false,
   },
 
-  // a * log_b(x) = 0
+  // a * log_b(x) = 0  =>  log_b(x) = 0  =>  x = 1. (The pattern has no
+  // constant term: a replacement that names a wildcard `__c` of the rule
+  // above gives a root with an unbound wildcard.)
   {
     match: ['Multiply', '__a', ['Log', '_x', '__b']],
-    replace: ['Power', '__b', ['Negate', ['Divide', '__c', '__a']]],
+    replace: 1,
     id: 'solve.logarithm-base-no-constant',
     useVariations: true,
     condition: (sub) =>
@@ -463,17 +492,26 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   // |ax + b| + c = 0  ⟹  |ax+b| = -c  ⟹  ax+b = c  or  ax+b = -c
   // ⟹  x = (c-b)/a  or  x = -(b+c)/a   (validateRoots drops the spurious
   // branch when -c < 0 and |ax+b| = -c has no solution).
+  // The split is valid only when `ax + b` is real for a real `x`, thus `a`
+  // and `b` must be real: for `|x + i| = 1` it gives `1 - i` and `-1 - i`,
+  // and the real root `0` is lost (see `isRealForRealUnknown()`).
   {
     match: ['Add', ['Abs', ['Add', ['Multiply', '__a', '_x'], '__b']], '__c'],
     replace: ['Divide', ['Subtract', '__c', '__b'], '__a'],
     id: 'solve.absolute-value-positive',
-    condition: filter,
+    condition: (sub) =>
+      filter(sub) &&
+      isRealForRealUnknown(sub.__a, '_x') &&
+      isRealForRealUnknown(sub.__b, '_x'),
   },
   {
     match: ['Add', ['Abs', ['Add', ['Multiply', '__a', '_x'], '__b']], '__c'],
     replace: ['Divide', ['Negate', ['Add', '__b', '__c']], '__a'],
     id: 'solve.absolute-value-negative',
-    condition: filter,
+    condition: (sub) =>
+      filter(sub) &&
+      isRealForRealUnknown(sub.__a, '_x') &&
+      isRealForRealUnknown(sub.__b, '_x'),
   },
 
   //
@@ -1014,15 +1052,67 @@ export const UNIVARIATE_ROOTS: Rule[] = [
   },
 ];
 
-// The ids of the built-in root templates above. A matched template whose id
-// is not in this set is a rule that the host added to `ce.solveRules`: its
-// roots are the host's claim of a solution (see `stats.userRule` in
-// `findUnivariateRoots()`).
+// The built-in root templates above, by object identity. A matched template
+// that is not one of these objects is a rule that the host added to
+// `ce.solveRules`: its roots are the host's claim of a solution (see
+// `stats.userRule` in `findUnivariateRoots()`). The identity of the object is
+// used, not its id: a host can replace a built-in template with a copy that
+// keeps the id (`{ ...rule, replace: … }`), and that copy can be wrong.
+const BUILT_IN_SOLVE_RULES = new WeakSet<object>(
+  UNIVARIATE_ROOTS.filter(
+    (rule): rule is Exclude<Rule, string> => typeof rule !== 'string'
+  )
+);
+
+// The ids of the built-in root templates. They are used only for a boxed
+// rule whose source rule is not known (`hostSolveRules()`).
 const BUILT_IN_SOLVE_RULE_IDS = new Set(
   UNIVARIATE_ROOTS.map((rule) =>
     typeof rule === 'object' && 'id' in rule ? rule.id : undefined
   ).filter((id): id is string => typeof id === 'string')
 );
+
+type SolveRuleSet = NonNullable<ReturnType<ComputeEngine['getRuleSet']>>;
+
+// The built-in rules and the host rules of a boxed `solve-univariate` rule
+// set, for each boxed rule set (see `hostSolveRules()`).
+const SOLVE_RULE_PARTS = new WeakMap<
+  SolveRuleSet,
+  { builtIn: SolveRuleSet; host: SolveRuleSet }
+>();
+
+/**
+ * The rules of the boxed rule set `rules` (the boxed `ce.solveRules`), in
+ * two parts: the built-in root templates (`BUILT_IN_SOLVE_RULES`), and the
+ * rules that the host added.
+ *
+ * A boxed rule is built in when the rule it was made from
+ * (`sourceOfBoxedRule()`) is one of the built-in template objects. When that
+ * rule is not known (a boxed rule that `boxRules()` did not make), the id
+ * decides: a rule whose id is not the id of a built-in template is a host
+ * rule. The result is kept for each boxed rule set: the engine makes a new
+ * boxed rule set when `ce.solveRules` changes.
+ */
+function hostSolveRules(rules: SolveRuleSet): {
+  builtIn: SolveRuleSet;
+  host: SolveRuleSet;
+} {
+  let parts = SOLVE_RULE_PARTS.get(rules);
+  if (parts !== undefined) return parts;
+  const builtInRules: Array<SolveRuleSet['rules'][number]> = [];
+  const hostRules: Array<SolveRuleSet['rules'][number]> = [];
+  for (const rule of rules.rules) {
+    const source = sourceOfBoxedRule(rule);
+    const isBuiltIn =
+      source !== undefined
+        ? typeof source !== 'string' && BUILT_IN_SOLVE_RULES.has(source)
+        : rule.id !== undefined && BUILT_IN_SOLVE_RULE_IDS.has(rule.id);
+    (isBuiltIn ? builtInRules : hostRules).push(rule);
+  }
+  parts = { builtIn: { rules: builtInRules }, host: { rules: hostRules } };
+  SOLVE_RULE_PARTS.set(rules, parts);
+  return parts;
+}
 
 /**
  * Clear *symbolic* denominators from an Add expression by multiplying through
@@ -2441,7 +2531,7 @@ function solveByZeroProduct(
   x: string,
   depth: number,
   trace?: RuleSteps,
-  stats?: { partial?: boolean; userRule?: boolean }
+  stats?: { partial?: boolean; undecided?: boolean; userRule?: boolean }
 ): ReadonlyArray<Expression> | null {
   if (depth >= 3) return null; // recursion backstop
   if (!isFunction(expr, 'Multiply')) return null;
@@ -2449,6 +2539,8 @@ function solveByZeroProduct(
   if (factors.length < 2) return null;
 
   let partial = false;
+  // A root of a factor was removed by a check that was not decided
+  let undecided = false;
   // A factor was solved by a template that the host added to `ce.solveRules`
   let userRule = false;
   // The factor bases whose roots are collected (a factor `fⁿ`, n > 0,
@@ -2496,6 +2588,7 @@ function solveByZeroProduct(
       factorStats
     );
     if (factorStats.partial) partial = true;
+    if (factorStats.undecided) undecided = true;
     if (factorStats.userRule) userRule = true;
     if (factorRoots.length === 0 && !factorHasNoRoot(base, x, factorStats))
       partial = true;
@@ -2503,6 +2596,7 @@ function solveByZeroProduct(
   }
   if (roots.length === 0) return null;
   if (partial && stats) stats.partial = true;
+  if (undecided && stats) stats.undecided = true;
   if (userRule && stats) stats.userRule = true;
   return roots;
 }
@@ -2637,14 +2731,27 @@ function solveInverseTrigEquation(
  * roots `e` and `-e`, and `ln(2x + 1) = 1` gives `(e - 1)/2`. `null` when
  * `expr` does not have this form, or when the recursion is too deep. The
  * roots are candidates: the caller checks them against the original
- * equation. `stats.partial` and `stats.userRule` are set from the solution
- * of the equation for `u`.
+ * equation. `stats.partial`, `stats.undecided` and `stats.userRule` are set
+ * from the solution of the equation for `u`. When the base is not known to
+ * be positive and different from 1, each root is checked against
+ * `original` (the equation as it was given, `expr` by default) and then
+ * guarded by that condition.
+ *
+ * Two forms are left to the root templates and the harmonization rules,
+ * which a host can replace (`ce.solveRules`): a natural logarithm of the
+ * unknown itself (`ln(x) + c = 0`, `solve.logarithm-natural`), a logarithm
+ * of the unknown itself with an explicit positive base and `c ≠ 0`
+ * (`log_2(x) = 3`, `solve.logarithm-base`), and `ln(u) = 0` (the
+ * harmonization rule `ln(f(x)) → f(x) - 1`). No template or rule matches the
+ * other forms, thus this function solves them: `log(x) = 2` (base 10),
+ * `log_2(x) = 0`, `log(x² - 3) = 0`.
  */
 function solveSingleLogarithm(
   expr: Expression,
   x: string,
   depth: number,
-  stats?: RootStats
+  stats?: RootStats,
+  original: Expression = expr
 ): ReadonlyArray<Expression> | null {
   if (depth > 2) return null;
   const ce = expr.engine;
@@ -2668,16 +2775,16 @@ function solveSingleLogarithm(
   }
   if (!isFunction(log)) return null;
   let base: Expression | undefined;
+  // A logarithm with an explicit base (`log_2(x)`, not `log(x)`)
+  let explicitBase = false;
   if (log.operator === 'Ln') base = ce.E;
   else if (log.operator === 'Log') {
     const b = log.op2;
-    base = b === undefined || isSymbol(b, 'Nothing') ? ce.number(10) : b;
+    explicitBase = b !== undefined && !isSymbol(b, 'Nothing');
+    base = explicitBase ? b! : ce.number(10);
     if (base.has(x)) return null;
   } else return null;
   const argument = log.op1;
-  // The argument is the unknown itself: the root templates solve it
-  // (`solve.logarithm-natural`), and a host can replace them.
-  if (isSymbol(argument, x)) return null;
   const rest = terms.filter((t) => !t.has(x));
   const c =
     rest.length === 0
@@ -2685,9 +2792,17 @@ function solveSingleLogarithm(
       : rest.length === 1
         ? rest[0]
         : ce.function('Add', rest);
-  // `ln(u) = 0` is the harmonization rule `ln(f(x)) → f(x) - 1`
-  // (`HARMONIZATION_RULES`), which a host can replace: leave it to that rule.
-  if (c.isSame(0)) return null;
+  // Leave to the root templates and the harmonization rules the forms that
+  // they solve (see the comment of this function).
+  if (log.operator === 'Ln' && (isSymbol(argument, x) || c.isSame(0)))
+    return null;
+  if (
+    explicitBase &&
+    isSymbol(argument, x) &&
+    !c.isSame(0) &&
+    base.isPositive === true
+  )
+    return null;
   // ln(u) = -c, or ln(u) = c when the logarithm term is negated, or
   // ln(u) = -c/k.
   const exponent =
@@ -2696,7 +2811,7 @@ function solveSingleLogarithm(
       : negated
         ? c
         : c.neg();
-  const value = ce.function('Power', [base, exponent]);
+  const value = powerOfBase(base, exponent);
   const child = childStats();
   const roots = findUnivariateRoots(
     ce.function('Equal', [argument, value]),
@@ -2707,7 +2822,176 @@ function solveSingleLogarithm(
   );
   if (roots.length === 0) return null;
   adoptChildStats(stats, child);
-  return roots;
+  // `log_b` is defined only for a base `b > 0` with `b ≠ 1`: `log_a(x) = 3`
+  // has the root `a^3` only for such an `a`. When this is not known, each
+  // root is guarded (`When(root, 0 < b ∧ b ≠ 1)`), and a guard that is
+  // false removes the root (`conditionalRoot()`). The caller checks a
+  // guarded root less strictly than a bare root (a check that is not
+  // decided keeps it), thus the roots are checked here first against the
+  // original equation `original`, while they are bare: the root
+  // `-√(a + 1) - 1` of the combined form of `log_a(x) + log_a(x + 2) = 1`
+  // is not kept.
+  if (base.isPositive === true && base.isEqual(1) === false) return roots;
+  const guard = ce.function('And', [
+    ce.function('Less', [ce.Zero, base]),
+    ce.function('NotEqual', [base, ce.One]),
+  ]);
+  return validateRoots(original, x, roots, undefined, stats).flatMap((root) => {
+    const guarded = conditionalRoot(ce, root, guard);
+    return guarded === null ? [] : [guarded];
+  });
+}
+
+/**
+ * Return `true` when the declared type of the unknown `x` lets it take a
+ * value that is not real (`complex`, `imaginary`). Over the complex numbers,
+ * `|u(x)| = r` and `b^g(x) = r` have a curve or an infinite number of roots:
+ * the strategies that split `|u|` into `±u`, or that take the logarithm of
+ * both sides, find only some of them.
+ */
+function isComplexUnknown(ce: ComputeEngine, x: string): boolean {
+  const type = ce.symbol(x).type;
+  return type.matches('complex') && !type.matches('real');
+}
+
+/**
+ * Return `true` when `expr` is real for each real value of the unknown `x`
+ * (`isRealForSolve()`): `x + i` is not real, `x + a` is real for a
+ * parameter `a` whose type is not declared, and `x + c` is not known to be
+ * real for a `c` declared `complex`. The result is `false` when this is not
+ * known, and when the unknown can take a value that is not real
+ * (`isComplexUnknown()`).
+ */
+function isRealForRealUnknown(expr: Expression, x: string): boolean {
+  if (isComplexUnknown(expr.engine, x)) return false;
+  return isRealForSolve(expr, x) === true;
+}
+
+/**
+ * Return `true` when the symbol `name` is a parameter that the solver reads
+ * as a real number (see `isRealForSolve()`): it has no value, and its type
+ * was not declared, only inferred from its uses. An inferred type that
+ * excludes the reals (`imaginary`) is kept.
+ */
+function isGenericRealParameter(ce: ComputeEngine, name: string): boolean {
+  const symbol = ce.symbol(name);
+  if (!isSymbol(symbol) || symbol.value !== undefined) return false;
+  if (symbol.valueDefinition?.inferredType !== true) return false;
+  const type = symbol.type;
+  return type.isUnknown || ce.type('real').matches(type);
+}
+
+/**
+ * Whether `expr` is real, by its type, under the rules of the solver for its
+ * symbols. `true` or `false` when this is decided, `undefined` otherwise.
+ *
+ * - The unknown `unknown`, when it is given, is replaced by a symbol
+ *   declared real: the result is "real for each real value of the unknown".
+ * - A parameter (a symbol other than the unknown, with no value) whose type
+ *   was not declared is real, as `simplify()` reads an undeclared symbol
+ *   (`docs/SIMPLIFY.md`, generic real policy). Its type is only inferred
+ *   from its uses (`unknown` or `number`): `|x - a| = 2` gives `a - 2` and
+ *   `a + 2`. A parameter with a declared type keeps its type: a parameter
+ *   declared `complex` can be complex, and `|x - c| = 2` has no answer.
+ *
+ * Each such symbol is replaced by a symbol declared `real` in a new scope,
+ * and the result is the extended-real membership of the type of `expr`
+ * (`isExtendedReal`).
+ */
+function isRealForSolve(
+  expr: Expression,
+  unknown?: string
+): boolean | undefined {
+  const ce = expr.engine;
+  const names = expr.unknowns.filter(
+    (name) => name === unknown || isGenericRealParameter(ce, name)
+  );
+  if (names.length === 0) return expr.isExtendedReal;
+  ce.pushScope();
+  try {
+    const substitution: Record<string, Expression> = {};
+    let i = 0;
+    for (const name of names) {
+      let scratch: string;
+      do scratch = `_real_solve_${i++}`;
+      while (expr.has(scratch));
+      ce.declare(scratch, 'real');
+      substitution[name] = ce.symbol(scratch);
+    }
+    return expr.subs(substitution).isExtendedReal;
+  } finally {
+    ce.popScope();
+  }
+}
+
+/**
+ * Whether the root `root` is real: `true` or `false` when this is decided,
+ * `undefined` otherwise. The type of the root decides it when it can, with
+ * the rules of `isRealForSolve()` (a parameter whose type is not declared is
+ * real: `ln(2) - a` is real). A root
+ * with no free symbol whose numeric value has an imaginary part that is much
+ * larger than the rounding error is not real (`√(-ln 2)`).
+ */
+function isRealRoot(root: Expression): boolean | undefined {
+  const byType = isRealForSolve(root);
+  if (byType !== undefined) return byType;
+  if (root.unknowns.length > 0) return undefined;
+  const v = root.N();
+  if (!Number.isFinite(v.re) || !Number.isFinite(v.im)) return undefined;
+  if (Math.abs(v.im) > 1e-9 * Math.max(1, Math.abs(v.re))) return false;
+  return undefined;
+}
+
+/**
+ * The real roots of `roots`: a root that is not real is removed. Returns
+ * `null` when it is not known whether a root is real.
+ */
+function realRootsOnly(roots: ReadonlyArray<Expression>): Expression[] | null {
+  const result: Expression[] = [];
+  for (const root of roots) {
+    const real = isRealRoot(isFunction(root, 'When') ? root.op1 : root);
+    if (real === undefined) return null;
+    if (real) result.push(root);
+  }
+  return result;
+}
+
+/**
+ * `b^e`, with `b^(log_b(v))` written as `v`: the root of
+ * `log_2(x + 1) = log_2(3) + 1` is `-1 + 2·3`, not `-1 + 2^(1 + log_2(3))`.
+ * The identity holds for each `v ≠ 0`, also for a complex `v`:
+ * `b^(log_b(v)) = e^(ln(b)·ln(v)/ln(b)) = e^(ln(v)) = v`. A sum in the
+ * exponent is split (`b^(p + q) = b^p·b^q`) only when a term is such a
+ * logarithm.
+ */
+function powerOfBase(base: Expression, exponent: Expression): Expression {
+  const ce = base.engine;
+  // `v` when `e` is `log_b(v)` with the base `base`, otherwise `undefined`.
+  const logArgument = (e: Expression): Expression | undefined => {
+    if (isFunction(e, 'Ln') && isSymbol(base, 'ExponentialE')) return e.op1;
+    if (!isFunction(e, 'Log')) return undefined;
+    const b = e.op2;
+    const logBase = b === undefined || isSymbol(b, 'Nothing') ? 10 : b;
+    if (typeof logBase === 'number') return base.isSame(10) ? e.op1 : undefined;
+    return logBase.isSame(base) ? e.op1 : undefined;
+  };
+  const terms = isFunction(exponent, 'Add') ? exponent.ops : [exponent];
+  const factors: Expression[] = [];
+  const others: Expression[] = [];
+  for (const t of terms) {
+    const v = logArgument(t);
+    if (v !== undefined) factors.push(v);
+    else others.push(t);
+  }
+  if (factors.length === 0) return ce.function('Power', [base, exponent]);
+  if (others.length > 0)
+    factors.push(
+      ce.function('Power', [
+        base,
+        others.length === 1 ? others[0] : ce.function('Add', others),
+      ])
+    );
+  return factors.length === 1 ? factors[0] : ce.function('Multiply', factors);
 }
 
 /**
@@ -2751,16 +3035,24 @@ function splitScaledTerm(
 /**
  * The candidate roots of `expr = 0` when exactly one term of `expr` contains
  * the unknown `x` and that term is an exponential with a constant positive
- * base `b` times a constant `k`: `k·b^g(x) + c = 0`. As `b^g(x)` is positive
- * for each real `x`, the equation has a real root only when `-c/k > 0`. Then
- * it is the same as `g(x) = log_b(-c/k)`, which `findUnivariateRoots()`
- * solves: `e^(x + 1) = 2` gives `ln(2) - 1`, and `10^(x + 1) = 5` gives
- * `log_10(5) - 1`.
+ * base `b` times a constant `k`: `k·b^g(x) + c = 0`. When `g(x)` is real for
+ * each real `x`, `b^g(x)` is positive, and the equation has a real root only
+ * when `-c/k > 0`. Then it is the same as `g(x) = log_b(-c/k)`, which
+ * `findUnivariateRoots()` solves: `e^(x + 1) = 2` gives `ln(2) - 1`, and
+ * `10^(x + 1) = 5` gives `log_10(5) - 1`. The roots of that equation that
+ * are not real are removed: `e^(x²) = 1/2` gives `x² = -ln(2)`, whose roots
+ * `±i·√(ln 2)` are not real, thus the equation has no real root.
  *
- * Returns an empty list when `-c/k ≤ 0` (`e^(x + 1) = -2`): the equation has
- * no real root, and the caller counts this as a decision. Returns `null`
- * when `expr` does not have this form, when the sign of `-c/k` is not known,
- * or when the equation for `g(x)` gives no root. `stats.partial` and
+ * Returns an empty list when `-c/k ≤ 0` (`e^(x + 1) = -2`), or when no root
+ * of the equation for `g(x)` is real and that list holds all its roots: the
+ * equation has no real root, and the caller counts this as a decision.
+ * Returns `null` when `expr` does not have this form, when `g(x)` is not
+ * known to be real for each real `x` (`e^(i·x + 1) = -e` has the root `π`),
+ * when the sign of `-c/k` is not known, when the equation for `g(x)` gives
+ * no root, or when it is not known whether one of its roots is real. Also
+ * returns `null` when the unknown can take a value that is not real
+ * (`isComplexUnknown()`): over the complex numbers, `e^x = 2` has the roots
+ * `ln(2) + 2πik` for each integer `k`. `stats.partial`, `stats.undecided` and
  * `stats.userRule` are set from the solution of the equation for `g(x)`.
  */
 function solveSingleExponential(
@@ -2783,6 +3075,10 @@ function solveSingleExponential(
     base.isSame(1)
   )
     return null;
+  // `b^g(x)` is positive for each real `x` only when `g(x)` is real. This
+  // test is also `false` for an unknown that can be complex.
+  if (!isRealForRealUnknown(f.op2, x)) return null;
+  // The sign tests below are decided only for a real `-c/k`.
   const ratio = ce.function('Divide', [ce.function('Negate', [c]), k]);
   if (ratio.isNonPositive === true) return [];
   if (ratio.isPositive !== true) return null;
@@ -2798,8 +3094,14 @@ function solveSingleExponential(
     child
   );
   if (roots.length === 0) return null;
+  const real = realRootsOnly(roots);
+  if (real === null) return null;
+  // No real root: this is a decision only when the list of the equation for
+  // `g(x)` holds all its roots.
+  if (real.length === 0 && (child.partial || child.undecided || child.userRule))
+    return null;
   adoptChildStats(stats, child);
-  return roots;
+  return real;
 }
 
 /**
@@ -2810,15 +3112,25 @@ function solveSingleExponential(
  * which `findUnivariateRoots()` solves: `2|x| = 1` gives `1/2` and `-1/2`.
  * The harmonization rules split only `|u(x)| + c` (`k = 1`).
  *
+ * The split into `u(x) = ±(-c/k)` is valid only for a real `u(x)`: for
+ * `|x + i| = 1`, it gives `1 - i` and `-1 - i`, and the real root `0` is
+ * lost. Thus the strategy applies only when `u(x)` is real for each real
+ * `x` (`isRealForRealUnknown()`), and the roots of the equations for `u(x)`
+ * that are not real are removed: `2|x² + 1| = 1` gives `x² = -1/2` and
+ * `x² = -3/2`, whose roots are not real.
+ *
  * Returns an empty list when `-c/k < 0` (`2|x| + 1 = 0`), or when the root
- * finder shows that the two equations for `u(x)` have no root
- * (`factorHasNoRoot()`): the equation has no real root, and the caller
- * counts this as a decision. Returns `null` when `expr` does not have this
- * form, when the sign of `-c/k` is not known, or when an equation for `u(x)`
- * gives no root and it is not shown to have none. `stats.partial` and
- * `stats.userRule` are set from the solution of the equations for `u(x)`;
- * `stats.partial` is also set when one of them gives no root and it is not
- * shown to have none.
+ * finder shows that the two equations for `u(x)` have no real root
+ * (`factorHasNoRoot()`, or each root is not real and the lists hold all the
+ * roots): the equation has no real root, and the caller counts this as a
+ * decision. Returns `null` when `expr` does not have this form, when `u(x)`
+ * is not known to be real for each real `x`, when the unknown can take a
+ * value that is not real (`isComplexUnknown()`), when the sign of `-c/k` is
+ * not known, when it is not known whether a root is real, or when an
+ * equation for `u(x)` gives no root and it is not shown to have none.
+ * `stats.partial`, `stats.undecided` and `stats.userRule` are set from the
+ * solution of the equations for `u(x)`; `stats.partial` is also set when
+ * one of them gives no root and it is not shown to have none.
  */
 function solveScaledAbsoluteValue(
   expr: Expression,
@@ -2832,6 +3144,9 @@ function solveScaledAbsoluteValue(
   if (split === null) return null;
   const { k, f, c } = split;
   if (!isFunction(f, 'Abs')) return null;
+  // `|u| = r` is `u = ±r` only for a real `u`. This test is also `false`
+  // for an unknown that can be complex.
+  if (!isRealForRealUnknown(f.op1, x)) return null;
   const ratio = ce.function('Divide', [ce.function('Negate', [c]), k]);
   if (ratio.isNegative === true) return [];
   if (ratio.isNonNegative !== true) return null;
@@ -2845,7 +3160,7 @@ function solveScaledAbsoluteValue(
   for (const value of values) {
     const equation = ce.function('Subtract', [f.op1, value]);
     const child = childStats();
-    const branchRoots = findUnivariateRoots(
+    const allRoots = findUnivariateRoots(
       equation,
       x,
       depth + 1,
@@ -2853,12 +3168,20 @@ function solveScaledAbsoluteValue(
       child
     );
     adoptChildStats(combined, child);
-    if (branchRoots.length === 0) {
+    const branchRoots = realRootsOnly(allRoots);
+    if (branchRoots === null) return null;
+    if (allRoots.length === 0) {
       if (!factorHasNoRoot(equation, x, child)) {
         combined.partial = true;
         noRoot = false;
       }
-    } else noRoot = false;
+    } else if (
+      branchRoots.length > 0 ||
+      child.partial ||
+      child.undecided ||
+      child.userRule
+    )
+      noRoot = false;
     for (const r of branchRoots)
       if (!roots.some((other) => other.isSame(r))) roots.push(r);
   }
@@ -2999,6 +3322,10 @@ function solveLinearTrigArgument(
 ): Expression[] | null {
   if (depth >= 3) return null; // recursion backstop
   const ce = expr.engine;
+  // The unknown `u` of the substitution is declared real. For an unknown
+  // that can take a value that is not real, the roots of the equation in a
+  // real `u` are only a part of the roots.
+  if (isComplexUnknown(ce, x)) return null;
 
   // The common argument of the trig functions of `x`, or `null` when `x` is
   // also outside such a function, or when two arguments are different.
@@ -3315,7 +3642,7 @@ export function findUnivariateRoots(
         adoptChildStats(stats, trigStats);
       }
       const validated = validateRoots(originalExpr, x, trigRoots, trace, stats);
-      return filterRootsByType(ce, x, validated, trace);
+      return filterRootsByType(ce, x, validated, trace, stats);
     }
   }
 
@@ -3335,7 +3662,32 @@ export function findUnivariateRoots(
         adoptChildStats(stats, logStats);
       }
       const validated = validateRoots(originalExpr, x, logRoots, trace, stats);
-      return filterRootsByType(ce, x, validated, trace);
+      return filterRootsByType(
+        ce,
+        x,
+        realRootsOfAbsEquation(originalExpr, x, validated, trace, stats),
+        trace,
+        stats
+      );
+    }
+  }
+
+  // An absolute value and other terms with the unknown:
+  // `k·|u(x)| + c(x) = 0` → `k·u(x) + c(x) = 0` or `-k·u(x) + c(x) = 0`
+  // (see `solveAbsoluteValueSplit()`). This runs before the root templates:
+  // the harmonization rules make the same split, but a root template can
+  // match one of the two equations only, and the roots of the other one are
+  // then lost (`|x - 1| = x^5 + x`).
+  {
+    const absStats = childStats();
+    const absRoots = solveAbsoluteValueSplit(expr, x, depth, absStats);
+    if (absRoots !== null) {
+      if (stats) {
+        stats.candidates = true;
+        adoptChildStats(stats, absStats);
+      }
+      const validated = validateRoots(originalExpr, x, absRoots, trace, stats);
+      return filterRootsByType(ce, x, validated, trace, stats);
     }
   }
 
@@ -3362,13 +3714,36 @@ export function findUnivariateRoots(
     // `harmonize()` also contain the literal `_x` symbol, so binding `_x` to
     // the original unknown post-harmonization would make every pattern rule
     // fail to match.
-    const matchRootsSteps = (expr: Expression): RuleSteps =>
-      matchAnyRulesWithSteps(
+    // The built-in templates and the templates that the host added are
+    // matched in two parts, each rule once (a host rule can have a condition
+    // or a replacement with side effects). When a host template matched,
+    // `stats.userRule` is set (see `hostSolveRules()`). A root that a host
+    // template gives and that a built-in template also gives is listed once.
+    const ruleParts = hostSolveRules(rules);
+    const matchRootsSteps = (expr: Expression): RuleSteps => {
+      const matchOptions = {
+        useVariations: true,
+        form: 'canonical',
+      } as const;
+      const matches = matchAnyRulesWithSteps(
         expr,
-        rules,
+        ruleParts.builtIn,
         { _x: ce.symbol('_x') },
-        { useVariations: true, form: 'canonical' }
+        matchOptions
       );
+      if (ruleParts.host.rules.length === 0) return matches;
+      const hostMatches = matchAnyRulesWithSteps(
+        expr,
+        ruleParts.host,
+        { _x: ce.symbol('_x') },
+        matchOptions
+      );
+      if (stats && hostMatches.length > 0) stats.userRule = true;
+      for (const m of hostMatches)
+        if (!matches.some((other) => other.value.isSame(m.value)))
+          matches.push(m);
+      return matches;
+    };
 
     // Record the candidates produced by matched root templates, each under
     // its template's id (`solve.linear`, `solve.quadratic-formula-positive`,
@@ -3378,9 +3753,6 @@ export function findUnivariateRoots(
       matches: RuleSteps,
       via?: { because: string; form: Expression }
     ): void => {
-      // A template that is not built in was added by the host.
-      if (stats && matches.some((m) => !BUILT_IN_SOLVE_RULE_IDS.has(m.because)))
-        stats.userRule = true;
       if (!trace || matches.length === 0) return;
       if (via) traceStep(trace, via.because, asEquation(via.form, x));
       for (const m of matches) {
@@ -3415,7 +3787,36 @@ export function findUnivariateRoots(
         : polynomialDegree(expr, x) >= 0
           ? expr
           : null;
-    if (polyExpr !== null && polynomialDegree(polyExpr, x) >= 2)
+    // A polynomial that is a product of factors, with a coefficient that is
+    // not a number (`(x - 1)(x - a)`): each factor is solved alone. This
+    // gives the roots `1` and `a`. The quadratic formula gives
+    // `(a + 1 ± √((a + 1)² - 4a))/2`, whose type is not known to be real,
+    // thus these roots are removed for an unknown declared `real`.
+    if (
+      polyExpr === originalExpr &&
+      isFunction(originalExpr, 'Multiply') &&
+      getPolynomialCoefficients(originalExpr, x)?.some(
+        (c) => c.unknowns.length > 0
+      )
+    ) {
+      const subTrace: RuleSteps | undefined = trace ? [] : undefined;
+      const productRoots = solveByZeroProduct(
+        originalExpr,
+        x,
+        depth,
+        subTrace,
+        stats
+      );
+      if (productRoots) {
+        trace?.push(...subTrace!);
+        result = [...productRoots];
+      }
+    }
+    if (
+      result.length === 0 &&
+      polyExpr !== null &&
+      polynomialDegree(polyExpr, x) >= 2
+    )
       result = solvePolynomialByCoefficients(polyExpr, x, trace, stats);
 
     if (result.length === 0) {
@@ -3542,7 +3943,13 @@ export function findUnivariateRoots(
     // substitution: it solves `u(x) = e^(-c)` as it is, thus it keeps the
     // root `-e` of `ln(x²) = 2`.
     if (result.length === 0) {
-      const logRoots = solveSingleLogarithm(expr, x, depth, stats);
+      const logRoots = solveSingleLogarithm(
+        expr,
+        x,
+        depth,
+        stats,
+        originalExpr
+      );
       if (logRoots) result = [...logRoots];
     }
 
@@ -3604,14 +4011,29 @@ export function findUnivariateRoots(
   // today's behavior exactly; a symbolic RHS emits `When(root, 0 ≤ rhs)`.
   const sqrtGuard = sqrtEquationRhsGuard(originalExpr, x);
 
+  // The validity guards of the root templates state when a root is REAL
+  // (`|c| ≤ 1` for `arcsin(c)`). When the unknown can take a value that is
+  // not real (`isComplexUnknown()`), a root that such a guard removes can be
+  // a complex root (`sin(x) = 2` has the roots `π/2 ± i·ln(2 + √3)`): its
+  // removal is not a decision. The guard `0 ≤ r` of `√u = r` is different:
+  // the principal square root is never a negative real number, thus its
+  // removal is a decision when `r` is real. For a complex `r`, it is not
+  // (`√x = i` has the root `-1`).
+  const complexUnknown = isComplexUnknown(ce, x);
+  const sqrtGuardDecides =
+    sqrtGuard === null ||
+    !complexUnknown ||
+    (isFunction(sqrtGuard) && sqrtGuard.op2.isExtendedReal === true);
   const resolved: Expression[] = [];
   for (const r of result) {
     if (isFunction(r, 'When')) {
       const root = conditionalRoot(ce, r.op1.evaluate().simplify(), r.op2);
       if (root !== null) resolved.push(root);
+      else if (complexUnknown && stats) stats.undecided = true;
     } else if (sqrtGuard !== null) {
       const root = conditionalRoot(ce, r.evaluate().simplify(), sqrtGuard);
       if (root !== null) resolved.push(root);
+      else if (!sqrtGuardDecides && stats) stats.undecided = true;
     } else {
       resolved.push(r.evaluate().simplify());
     }
@@ -3623,7 +4045,178 @@ export function findUnivariateRoots(
   const validatedRoots = validateRoots(originalExpr, x, resolved, trace, stats);
 
   // Filter solutions by the declared type of the variable
-  return filterRootsByType(ce, x, validatedRoots, trace);
+  return filterRootsByType(
+    ce,
+    x,
+    realRootsOfAbsEquation(originalExpr, x, validatedRoots, trace, stats),
+    trace,
+    stats
+  );
+}
+
+/**
+ * The candidate roots of `expr = 0` when `expr` is a sum with exactly one
+ * term `k·|u(x)|` (`k` free of the unknown `x`), and the other terms `c(x)`
+ * hold `x` but no absolute value of `x`: `|x - 1| - x^5 - x`. For a real
+ * `u(x)`, `k·|u| + c = 0` holds when `k·u + c = 0` or `-k·u + c = 0`, and
+ * `findUnivariateRoots()` solves each of the two equations. The roots of
+ * each equation that are not real are removed (`isRealRoot()`). A
+ * candidate can be a root of one equation that does not have the sign that
+ * the equation supposes: the caller checks each candidate against the
+ * original equation.
+ *
+ * `stats.partial` is set when one of the two equations gives no root and is
+ * not shown to have none (`factorHasNoRoot()`): a root of that equation can
+ * be a root of `expr`. `stats.partial` and `stats.undecided` are set when it
+ * is not known whether a root is real. An equation without the unknown that
+ * is not shown to be different from 0 (`|x| = x` gives `x - x = 0`) has an
+ * interval of roots: the result is then an empty list with `stats.partial` and
+ * `stats.undecided` set, which is not an answer. Returns an empty list when
+ * the two equations have no real root. Returns `null` only when `expr` does
+ * not have this form (the other strategies of the root finder then apply),
+ * or when `u(x)` is not known to be real for each real `x`.
+ */
+function solveAbsoluteValueSplit(
+  expr: Expression,
+  x: string,
+  depth: number,
+  stats: RootStats
+): Expression[] | null {
+  if (!isFunction(expr, 'Add')) return null;
+  const ce = expr.engine;
+  let absTerm: { k: Expression; u: Expression } | undefined;
+  const rest: Expression[] = [];
+  for (const term of expr.ops) {
+    if (!hasAbsOfUnknown(term, x)) {
+      rest.push(term);
+      continue;
+    }
+    if (absTerm !== undefined) return null;
+    let t = term;
+    let k: Expression = ce.One;
+    if (isFunction(t, 'Negate')) {
+      k = ce.NegativeOne;
+      t = t.op1;
+    }
+    if (isFunction(t, 'Multiply')) {
+      const withX = t.ops.filter((op) => op.has(x));
+      if (withX.length !== 1) return null;
+      k = ce.function('Multiply', [k, ...t.ops.filter((op) => !op.has(x))]);
+      t = withX[0];
+    }
+    if (!isFunction(t, 'Abs')) return null;
+    absTerm = { k, u: t.op1 };
+  }
+  if (absTerm === undefined || !rest.some((t) => t.has(x))) return null;
+  const { k, u } = absTerm;
+  if (!isRealForRealUnknown(u, x) || !isRealForRealUnknown(k, x)) return null;
+  // From here, the equation has the form of this strategy. The other
+  // strategies split `|u|` too, with root templates that can solve only one
+  // of the two cases, and their list would be taken as complete. Thus when a
+  // case is not solved, the result is the list found so far with
+  // `stats.partial` set, which is not an answer, and never `null`.
+  if (depth > 2) {
+    stats.partial = true;
+    return [];
+  }
+  const c = rest.length === 1 ? rest[0] : ce.function('Add', rest);
+  const ku = ce.function('Multiply', [k, u]);
+  const combined = childStats();
+  const roots: Expression[] = [];
+  for (const branch of [
+    ce.function('Add', [ku, c]),
+    ce.function('Add', [ce.function('Negate', [ku]), c]),
+  ]) {
+    // An equation without the unknown: each `x` is a root when it is 0
+    // (`|x| = x` holds for each `x ≥ 0`), and none when it is not 0.
+    const constant = expand(branch);
+    if (!constant.has(x)) {
+      if (constant.isEqual(0) === false) continue;
+      // The roots are an interval, or this is not known: the list is not
+      // an answer, also when it is empty.
+      stats.partial = true;
+      stats.undecided = true;
+      return [];
+    }
+    const child = childStats();
+    const allRoots = findUnivariateRoots(
+      branch,
+      x,
+      depth + 1,
+      undefined,
+      child
+    );
+    adoptChildStats(combined, child);
+    if (allRoots.length === 0 && !factorHasNoRoot(branch, x, child))
+      combined.partial = true;
+    for (const r of allRoots) {
+      const real = isRealRoot(isFunction(r, 'When') ? r.op1 : r);
+      // A root that can be real is not removed as a decision
+      if (real === undefined) {
+        combined.partial = true;
+        combined.undecided = true;
+      }
+      if (real === true && !roots.some((other) => other.isSame(r)))
+        roots.push(r);
+    }
+  }
+  adoptChildStats(stats, combined);
+  return roots;
+}
+
+/** Return `true` when the unknown `x` is in an operand of `Abs` in `expr`. */
+function hasAbsOfUnknown(expr: Expression, x: string): boolean {
+  if (!isFunction(expr) || !expr.has(x)) return false;
+  if (expr.operator === 'Abs') return true;
+  return expr.ops.some((op) => hasAbsOfUnknown(op, x));
+}
+
+/**
+ * The roots of `roots` that are real, when the unknown `x` is in an operand
+ * of `Abs` in `expr`. Otherwise `roots`.
+ *
+ * The strategies for `|u(x)|` split it into `u(x)` and `-u(x)`, which is
+ * valid only for a real `x`. Over the complex numbers, the roots of such an
+ * equation are not a finite set: `|x² + 1| = 1/2` holds for each `x` on a
+ * curve of the complex plane, and the split gives only four points of it
+ * (`±i·√2/2`, `±i·√6/2`). Thus a root that is not real is removed. A root
+ * for which this is not known is removed too, and `stats.undecided` is set
+ * (see `findUnivariateRoots()`). When the unknown can take a value that is
+ * not real (`isComplexUnknown()`), the real roots are only a part of the
+ * roots: `stats.partial` and `stats.undecided` are set.
+ */
+function realRootsOfAbsEquation(
+  expr: Expression,
+  x: string,
+  roots: ReadonlyArray<Expression>,
+  trace?: RuleSteps,
+  stats?: RootStats
+): ReadonlyArray<Expression> {
+  if (!hasAbsOfUnknown(expr, x)) return roots;
+  const ce = expr.engine;
+  if (isComplexUnknown(ce, x)) {
+    if (stats) {
+      stats.partial = true;
+      stats.undecided = true;
+    }
+    return roots;
+  }
+  const kept = roots.filter((root) => {
+    const real = isRealRoot(isFunction(root, 'When') ? root.op1 : root);
+    if (real === undefined && stats) stats.undecided = true;
+    return real === true;
+  });
+  if (trace && kept.length < roots.length)
+    traceStep(
+      trace,
+      'solve.filter-domain',
+      rootsAsEquations(
+        ce,
+        x,
+        roots.filter((r) => !kept.includes(r))
+      )
+    );
+  return kept;
 }
 
 /**
@@ -3725,22 +4318,30 @@ export const HARMONIZATION_RULES: Rule[] = [
   // genuine solution (|f| = -c when -c < 0) is dropped by `validateRoots`. The
   // single `_f` capture handles any inner form uniformly — bare `x` (`|x| = 2`),
   // unit coefficients (`|x-1| = 2`), and `|ax+b|` alike.
+  // The split is valid only when `f(x)` is real for each real `x`
+  // (`isRealForRealUnknown()`): for `|x + i| = 1`, it gives `1 - i` and
+  // `-1 - i`, and the real root `0` is lost. The same condition applies to
+  // the three rules below.
   {
     match: ['Add', ['Abs', '_f'], '__c'],
     replace: ['Add', '_f', '__c'],
-    condition: ({ _f }) => _f.has('_x'),
+    condition: ({ _f }) => _f.has('_x') && isRealForRealUnknown(_f, '_x'),
   },
   {
     match: ['Add', ['Abs', '_f'], '__c'],
     replace: ['Add', ['Negate', '_f'], '__c'],
-    condition: ({ _f }) => _f.has('_x'),
+    condition: ({ _f }) => _f.has('_x') && isRealForRealUnknown(_f, '_x'),
   },
-  // |f(x)| = |g(x)|  (i.e. |f| - |g| = 0)  ->  f² - g² = 0.  Exact: |f| = |g|
-  // iff f² = g², so squaring introduces no extraneous roots here.
+  // |f(x)| = |g(x)|  (i.e. |f| - |g| = 0)  ->  f² - g² = 0.  Exact for a real
+  // `f` and `g`: |f| = |g| iff f² = g², so squaring introduces no extraneous
+  // roots here.
   {
     match: ['Add', ['Abs', '_f'], ['Negate', ['Abs', '_g']]],
     replace: ['Subtract', ['Square', '_f'], ['Square', '_g']],
-    condition: ({ _f, _g }) => (_f?.has('_x') && _g?.has('_x')) ?? false,
+    condition: ({ _f, _g }) =>
+      ((_f?.has('_x') && _g?.has('_x')) ?? false) &&
+      isRealForRealUnknown(_f, '_x') &&
+      isRealForRealUnknown(_g, '_x'),
   },
   // a·|f(x)| + b·|g(x)| = 0  ->  a²f² - b²g² = 0.  Squaring a|f| = -b|g| gives
   // a²f² = b²g² — a *necessary* condition (candidate-generating, not an
@@ -3764,7 +4365,11 @@ export const HARMONIZATION_RULES: Rule[] = [
       !__a.has('_x') &&
       !__b.has('_x') &&
       (_f?.has('_x') ?? false) &&
-      (_g?.has('_x') ?? false),
+      (_g?.has('_x') ?? false) &&
+      isRealForRealUnknown(__a, '_x') &&
+      isRealForRealUnknown(__b, '_x') &&
+      isRealForRealUnknown(_f, '_x') &&
+      isRealForRealUnknown(_g, '_x'),
   },
   // a(b^n) -> a
   {
@@ -3994,12 +4599,22 @@ function validateRoots(
 
 /** Filter solutions by the declared type of the variable.
  * For example, if the variable is declared as integer, discard non-integer roots.
+ *
+ * A root is removed when the test of its type is decided false, and also
+ * when the test is not decided: the root of `x = c` for a real `x` is `c`,
+ * and a `c` declared `complex` can be real or not. (A parameter whose type is
+ * not declared is real, see `isRealForSolve()`: `x = a` gives `a`.) Such a
+ * root is not kept, because it can be a
+ * value that the variable cannot hold. But the list without it is not known
+ * to hold all the roots, thus `stats.undecided` is set to `true` (see
+ * `findUnivariateRoots()`): the empty or reduced list is then not an answer.
  */
 function filterRootsByType(
   ce: ComputeEngine,
   x: string,
   roots: ReadonlyArray<Expression>,
-  trace?: RuleSteps
+  trace?: RuleSteps,
+  stats?: { undecided: boolean }
 ): ReadonlyArray<Expression> {
   const varTypeObj = ce.symbol(x).type;
   const vt = varTypeObj.type;
@@ -4007,17 +4622,44 @@ function filterRootsByType(
   if (typeof vt !== 'string' || vt === 'number' || vt === 'unknown')
     return roots;
 
+  // Keep a root whose test is true. Remove a root whose test is false or
+  // not decided, and record a test that is not decided.
+  const keep = (test: boolean | undefined): boolean => {
+    if (test === undefined && stats) stats.undecided = true;
+    return test === true;
+  };
   const filtered = roots.filter((root) => {
     const val = root.evaluate();
-    if (varTypeObj.matches('integer')) return val.isInteger === true;
-    if (varTypeObj.matches('rational')) return val.isRational === true;
+    if (varTypeObj.matches('integer')) return keep(val.isInteger);
+    if (varTypeObj.matches('rational')) return keep(val.isRational);
     // `isExtendedReal` is membership of the extended real line — a finite
     // real OR one of the signed infinities — but the type name `real` denotes
     // the FINITE reals, so that test alone kept `±oo` as a root of a variable
     // that cannot hold it. Reject a root that is provably infinite; a root
     // whose finiteness is undecided is treated as before.
-    if (varTypeObj.matches('real'))
-      return val.isExtendedReal === true && val.isInfinity !== true;
+    if (varTypeObj.matches('real')) {
+      if (isFunction(root, 'When')) {
+        // A root `When(v, guard)` of a root template: the guard states when
+        // `v` is a real root (`|c| ≤ 1` for `arcsin(c)`). When the type of
+        // `v` does not decide, and each symbol of `v` is real (by its
+        // declared type, or a parameter that the solver reads as real), the
+        // guard decides: the root is kept.
+        const v = root.op1.evaluate();
+        if (v.isInfinity === true) return false;
+        const real = isRealForSolve(v);
+        if (real !== undefined) return keep(real);
+        return keep(
+          v.unknowns.every(
+            (name) =>
+              isGenericRealParameter(ce, name) ||
+              ce.symbol(name).isExtendedReal === true
+          )
+            ? true
+            : undefined
+        );
+      }
+      return val.isInfinity === true ? false : keep(isRealForSolve(val));
+    }
     // A variable declared `complex` (or `imaginary`) had no arm at all, so
     // `±oo`, `~oo` and `NaN` all passed into it unchecked. Those names, too,
     // denote FINITE values. Every finite number is a complex one, so the only

@@ -35,8 +35,12 @@
   `null`, and `expr.explain('solve')` ends with the step
   `solve.incomplete-…` and the unevaluated `Solve` as its result. Over ℝ, ℂ
   or with no domain, a periodic trig equation gives its principal roots: a
-  finite list whose translates by the period give every root. These results
-  change:
+  finite list whose translates by the period give every root. When the
+  unknown has no declared type and no domain is given, a polynomial gives
+  all its roots, complex roots included (`x^2 + 1 = 0` is `[i, −i]`), and
+  every other equation gives its real solutions only (`e^x = −1` and
+  `|x^2 + 1| = 0` are `[]`, `|x − 1| = 3` is `[−2, 4]`). Declare the unknown
+  complex to solve such an equation over ℂ. These results change:
   - `expr.solve()` and `explain('solve')` returned `[]` where `Solve` stayed
     unevaluated: `e^x = x + 2`, `x^2 = 2^x`, `cos x = x`, `arsinh(x) = 1`,
     `(x + e^x)(x − e^{−x}) = 0`, `x^5 + ax + 1 = 0` now give `null` (new
@@ -107,6 +111,83 @@
   - A system of congruences with no solution (`x ≡ 1 (mod 4)`,
     `x ≡ 2 (mod 8)`) gives `[]` from the system solver; before, the `[]`
     came from the univariate solver, which now gives `null` there.
+  - Over a bounded domain, the samples of the numeric scan no longer show
+    that a list is complete: they can only find a root that is not in the
+    list. Interval arithmetic must prove that each other part of the domain
+    has no root. `sin(x) − 2·e^(−10^12·(sin(x) − 1/2)^2) = 0` over
+    `[0.3, 0.8]` was `[]`: its two roots near `π/6` are in a dip that is
+    narrower than the distance between two samples. It now stays
+    unevaluated. A pole in the domain does not stop the proof: the
+    numerator of the equation written as one fraction (`sin(x) − cos(x)`
+    for `tan(x) − 1`) is used near the pole. Only an enclosure of real
+    values is a proof: `√(sin x/(sin x − 2)) − 2·e^(−10^12·(sin x + 1/2)^2) = 0`
+    over `[3.3, 4]` was `[]`, but it has two roots near `7π/6`; it now stays
+    unevaluated.
+  - In `Solve`, a parameter (a symbol other than the unknown, with no value)
+    whose type is not declared is real, as in `simplify()`. A parameter
+    declared `complex`, or with a type that excludes the reals, can be
+    complex. The unknown keeps its own type or domain. A root whose
+    membership in the type of the unknown is not decided is not removed as
+    a decision: the list has no answer (step `solve.incomplete-undecided`
+    when a part of the list is kept). These results change:
+    - `tan(2x) = a` and `tan(3x) = a` were `[]` (`x = 0` is a root for
+      `a = 0`); they are `[arctan(a)/2]` and `[arctan(a)/3]`.
+      `cos(2x + 1) = a` and `sin(2x) + a = 0` were `[]`; they give their two
+      principal roots, with the guard `|a| ≤ 1`. `(x − 1)(tan(3x) − a) = 0`
+      was `[1]`; it is `[1, arctan(a)/3]`.
+    - The guarded roots are the same for a parameter declared `real`:
+      `cos(2x) = a` with `a: real` was `[]`.
+    - For an unknown declared `real`: `x = a`, `2x = a`,
+      `(x − 1)(x − a) = 0`, `sin(x) + a = 0` and `2|x − a| = 2` were `[]`;
+      they are `[a]`, `[a/2]`, `[1, a]`, the two guarded principal roots, and
+      `[a + 1, a − 1]`.
+    - With `a` declared `complex`, all these equations have no answer.
+    - A polynomial that is a product of factors with a coefficient that is
+      not a number is solved factor by factor: `(x − 1)(x − a) = 0` is
+      `[1, a]`, not the two roots of the quadratic formula.
+    - A decided check still removes a root: for an integer `x`, `2x = 3` is
+      `[]`; `2x = a` has no answer (`a/2` is an integer only for an even
+      `a`).
+  - An exponential is positive only for a real exponent.
+    `e^(ix + 1) = −e`, `e^(ix^2) = −1`, `e^(i(x + 1)) = −1` and
+    `e^(ix) = −1` were `[]` (`x = π` is a root of the first and the last);
+    they now have no answer. `e^(ax) = 2` is still `[ln(2)/a]` and
+    `e^(x + a) = 2` is still `[ln(2) − a]`; with `a` declared `complex`, they
+    have no answer. Roots that are not real are removed: `e^(x^2) = 1/2` was `[±√(−ln 2)]`
+    and `2^(x^2 + 1) = 1` was `[i, −i]`; both are `[]`.
+  - `|u| = r` is split into `u = ±r` only when `u` is real for each real
+    `x`. `2|x + i| = 2` was `[1 − i, −1 − i]` and `|x + i| = 1` the same
+    (`0` is the real root): they now have no answer. `|x − a| = 2` is still
+    `[a − 2, a + 2]`, and has no answer for an `a` declared `complex`. Roots
+    that are not real are removed: `2|x^2 + 1| = 1` and `|x^2 + 1| = 1/2` were four
+    imaginary roots and are `[]`; `|x^2 − 1| = 3` was
+    `[2, −2, i√2, −i√2]` and is `[2, −2]`.
+  - An absolute value beside other terms with the unknown is split into its
+    two cases, and each case is solved: `|x − 1| = x^5 + x` was `[]` (a
+    root template solved only one case), it is `[0.486…]`;
+    `|x| + x^5 − 3 = 0`, which had no answer, is `[1.133…]`. `|x| = x` was
+    `[0]`, but each `x ≥ 0` is a root: it now has no answer. When a case is
+    not solved, there is no answer: `|x − 1| = x + 2e^x` was `[]` (a root
+    near `−0.27`).
+  - For an unknown declared `complex`, the strategies that suppose a real
+    unknown give no answer: `e^x = −1`, `sin(x) = 2`, `cosh(x) = 0` were
+    `[]`, and `|x| = 1` was `[−1, 1]`.
+  - A logarithm with no root template is solved: `log(x) = 2` is `[100]`,
+    `log(x) = log(7)` is `[7]`, `log_2(x + 1) = 0` is `[0]`,
+    `log(x^2 − 3) = 0` is `[2, −2]`, `log_2(x) = 0` is `[1]`; they had no
+    answer. A root no longer keeps `b^(log_b(v))`: `log_2(x + 1) = log_2(3)`
+    was `[−1 + 2^(log_2 3)]`, it is `[2]`, and
+    `log_2(x + 1) = log_2(3) + 1` is `[5]`. A root of a logarithm with a
+    base that is not known to be positive and different from 1 is guarded:
+    `log_a(x + 1) = 3` was `[a^3 − 1]`, it is `[a^3 − 1]` with the guard
+    `0 < a ∧ a ≠ 1`; `log_a(x) = 3`, which had no answer, is `[a^3]` with
+    the same guard.
+  - A root template is built in only when it is one of the template
+    objects of the engine, not when it has the id of one. A wrong copy of
+    `solve.linear` that keeps its id (`{ ...rule, replace: 7 }`) no
+    longer makes the rejection of its candidate a decision: with such
+    copies of `solve.linear` and `solve.power`, `5x − 10 = 0` was `[]`, it
+    now has no answer.
 
 - [#409](https://github.com/cortex-js/compute-engine/issues/409) **The `N`
   operator gives an inexact result.** A number that `N` returns is a float,

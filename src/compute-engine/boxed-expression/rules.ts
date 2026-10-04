@@ -912,6 +912,22 @@ function pushSafeScope(ce: ComputeEngine) {
   }
 }
 
+// The rule from which `boxRules()` made each boxed rule. A caller can use it
+// to know where a boxed rule comes from: the root finder counts a root
+// template as built in only when its source is one of the template objects
+// of the engine (`hostSolveRules()` in `solve.ts`).
+const BOXED_RULE_SOURCES = new WeakMap<BoxedRule, Rule | BoxedRule>();
+
+/**
+ * The rule from which `boxRules()` made the boxed rule `rule`, or
+ * `undefined` when `rule` was not made by `boxRules()`.
+ */
+export function sourceOfBoxedRule(
+  rule: BoxedRule
+): Rule | BoxedRule | undefined {
+  return BOXED_RULE_SOURCES.get(rule);
+}
+
 /**
  * Create a boxed rule set from a collection of non-boxed rules
  */
@@ -929,7 +945,16 @@ export function boxRules(
   const rules: BoxedRule[] = [];
   for (const rule of rs) {
     try {
-      rules.push(boxRule(ce, rule, options));
+      const boxed = boxRule(ce, rule, options);
+      // A rule that is already boxed keeps the source it was made from.
+      if (boxed !== rule)
+        BOXED_RULE_SOURCES.set(
+          boxed,
+          (typeof rule === 'object'
+            ? BOXED_RULE_SOURCES.get(rule as BoxedRule)
+            : undefined) ?? rule
+        );
+      rules.push(boxed);
     } catch (e) {
       // There was a problem with a rule: log it, skip that one rule, and
       // continue boxing the rest. A single malformed rule must not take down

@@ -167,8 +167,29 @@ decision). These cases stay unevaluated although a complete answer exists:
   located to `10^-9·max(1, |x|)` and matches exactly one listed value
   (`strict` in `rootListIsComplete()`). Thus a root at an end of the domain
   (`sin(x)·(x + e^x + 5) = 0` over `[0, 4]`, root `0` at the lower bound),
-  and a root where `f` touches zero, give no answer. The scan also cannot
-  tell three roots in one cell of the scan from one root.
+  and a root where `f` touches zero, give no answer. (The scan cannot tell
+  three roots in one cell of the scan from one root, but it no longer
+  accepts a list alone: the interval proof of the next entry rejects a list
+  that misses a root, except a root inside the window around a listed
+  root.)
+
+### `Solve` over a bounded domain does not see a root that is very near a listed root (OPEN, medium — found 2026-10-04 by the interval proof of complete lists)
+
+Since 2026-10-04, interval arithmetic proves that a root list over a bounded
+domain is complete (`enclosureShowsNoOtherRoot()` in
+`boxed-expression/solve-domain.ts`): each cell of the domain must have an
+enclosure of the equation that excludes 0, except the cells in the window
+`[v − t, v + t]` around each listed root `v`. The window tolerance `t` is
+`10^−6·max(1, |v|)` (at most 1/16 of a sample step), or `10^−9·max(1, |v|)`
+when the list is known to be partial. A second root inside a window is not
+seen: the two roots of `(sin x − 1/2)(sin x − 1/2 − 10^−8) = 0` are
+`1.15·10^−8` apart, and a list that holds only one of them passes the proof
+(the root finder gives both, thus the result is correct today). A proof of
+uniqueness would close this gap for a simple root: when the enclosure of
+the derivative `f'` over the window excludes 0, `f` is monotonic there and
+has at most one root.
+A root of higher multiplicity (`sin(x)^10` at `π`) has no such proof, so it
+needs a decision: keep the tolerance for it, or give no answer.
 
 ### `Solve` gives only some of the complex roots of a polynomial (OPEN, high — found 2026-10-04 while the solver documentation was written)
 

@@ -2825,3 +2825,314 @@ describe('SOLVE: COMPLETE ROOT LISTS', () => {
     expect(roots(typed, '2\\sqrt{x}+3\\sqrt[4]{x}=2')).toEqual([1 / 16]);
   });
 });
+
+describe('SOLVE: A LIST IS AN ANSWER ONLY WHEN EACH REMOVAL IS DECIDED', () => {
+  const ce = engine;
+  const solveOp = (engine: ComputeEngine, latex: string) =>
+    engine.box(['Solve', engine.parse(latex).json, 'x']).evaluate();
+  const noAnswer = (engine: ComputeEngine, latex: string) => {
+    expect(solveOp(engine, latex).operator).toBe('Solve');
+    expect(engine.parse(latex).solve('x')).toBeNull();
+  };
+  // The numeric value of each root, sorted, after a check that each one is
+  // a root of `f(x) = lhs - rhs`.
+  const checkedRoots = (
+    engine: ComputeEngine,
+    latex: string,
+    f: (x: number) => number
+  ) => {
+    const roots = engine.parse(latex).solve('x');
+    expect(roots).not.toBeNull();
+    const values = (roots as any[]).map((r) => r.N().re).sort((a, b) => a - b);
+    for (const v of values) expect(Math.abs(f(v))).toBeLessThan(1e-9);
+    expect(solveOp(engine, latex).nops).toBe(values.length);
+    return values;
+  };
+
+  // Each root of `latex`, with the parameter `a` replaced by `value`, is a
+  // root of `f(x) = lhs - rhs` (with the same value of `a`).
+  const parametricRoots = (
+    engine: ComputeEngine,
+    latex: string,
+    value: number,
+    f: (x: number) => number
+  ) => {
+    const roots = engine.parse(latex).solve('x');
+    expect(roots).not.toBeNull();
+    for (const r of roots as any[]) {
+      const root = r.operator === 'When' ? r.op1 : r;
+      const v = root.subs({ a: value }).N().re;
+      expect(Math.abs(f(v))).toBeLessThan(1e-9);
+    }
+    return (roots as any[]).map((r) => r.toString());
+  };
+
+  test('a parameter whose type is not declared is real', () => {
+    const a = 0.3;
+    // arctan(a)/2 is the principal root of tan(2x) = a
+    expect(
+      parametricRoots(ce, '\\tan(2x)=a', a, (x) => Math.tan(2 * x) - a)
+    ).toEqual(['1/2 * arctan(a)']);
+    expect(
+      parametricRoots(ce, '\\tan(3x)=a', a, (x) => Math.tan(3 * x) - a)
+    ).toEqual(['1/3 * arctan(a)']);
+    expect(
+      parametricRoots(ce, '\\cos(2x+1)=a', a, (x) => Math.cos(2 * x + 1) - a)
+    ).toHaveLength(2);
+    expect(
+      parametricRoots(ce, '\\sin(2x)+a=0', a, (x) => Math.sin(2 * x) + a)
+    ).toHaveLength(2);
+    expect(
+      parametricRoots(
+        ce,
+        '(x-1)(\\tan(3x)-a)=0',
+        a,
+        (x) => (x - 1) * (Math.tan(3 * x) - a)
+      )
+    ).toEqual(['1', '1/3 * arctan(a)']);
+    expect(
+      parametricRoots(ce, '|x-a|=2', a, (x) => Math.abs(x - a) - 2)
+    ).toEqual(['a - 2', 'a + 2']);
+    expect(
+      parametricRoots(ce, 'e^{x+a}=2', a, (x) => Math.exp(x + a) - 2)
+    ).toEqual(['-a + ln(2)']);
+    expect(
+      parametricRoots(ce, 'e^{ax}=2', a, (x) => Math.exp(a * x) - 2)
+    ).toEqual(['ln(2) / a']);
+    // A product with a parameter is solved factor by factor
+    expect(
+      parametricRoots(ce, '(x-1)(x-a)=0', a, (x) => (x - 1) * (x - a))
+    ).toEqual(['1', 'a']);
+  });
+
+  test('a parameter declared complex: a root that can be complex is no answer', () => {
+    const complexA = new ComputeEngine();
+    complexA.declare('a', 'complex');
+    for (const latex of [
+      '|x-a|=2',
+      'e^{x+a}=2',
+      'e^{ax}=2',
+      '\\tan(2x)=a',
+      '\\tan(3x)=a',
+      '\\cos(2x+1)=a',
+      '\\sin(2x)+a=0',
+      '(x-1)(\\tan(3x)-a)=0',
+    ])
+      noAnswer(complexA, latex);
+    complexA.declare('x', 'real');
+    for (const latex of ['x=a', '2x=a', '(x-1)(x-a)=0'])
+      noAnswer(complexA, latex);
+  });
+
+  test('a guarded root with a parameter declared real or not declared', () => {
+    const a = 0.3;
+    for (const declared of [false, true]) {
+      const engine = new ComputeEngine();
+      if (declared) engine.declare('a', 'real');
+      for (const [latex, f] of [
+        ['\\cos(2x)=a', (x: number) => Math.cos(2 * x) - a],
+        ['\\cos(2x+1)=a', (x: number) => Math.cos(2 * x + 1) - a],
+        ['\\sin(2x)+a=0', (x: number) => Math.sin(2 * x) + a],
+      ] as Array<[string, (x: number) => number]>)
+        expect(parametricRoots(engine, latex, a, f)).toHaveLength(2);
+      engine.declare('x', 'real');
+      expect(
+        parametricRoots(engine, '\\sin x+a=0', a, (x) => Math.sin(x) + a)
+      ).toHaveLength(2);
+    }
+  });
+
+  test('a logarithm with a symbolic base: the roots are guarded', () => {
+    // log_a(x) = 3 has the root a^3 only for 0 < a ≠ 1
+    expect(
+      ce
+        .parse('\\log_a(x)=3')
+        .solve('x')!
+        .map((r) => r.toString())
+    ).toEqual(['a^3 {0 < a && a != 1}']);
+    expect(
+      ce
+        .parse('\\log_a(x+1)=3')
+        .solve('x')!
+        .map((r) => r.toString())
+    ).toEqual(['a^3 - 1 {0 < a && a != 1}']);
+    const a = 2.5;
+    expect(Math.log(a ** 3 - 1 + 1) / Math.log(a)).toBeCloseTo(3, 12);
+    const positive = new ComputeEngine();
+    positive.assume(positive.parse('a > 1'));
+    expect(
+      positive
+        .parse('\\log_a(x)=3')
+        .solve('x')!
+        .map((r) => r.toString())
+    ).toEqual(['a^3']);
+  });
+
+  test('a real unknown and a parameter whose type is not declared', () => {
+    const real = new ComputeEngine();
+    real.declare('x', 'real');
+    const a = -0.4;
+    expect(parametricRoots(real, 'x=a', a, (x) => x - a)).toEqual(['a']);
+    expect(parametricRoots(real, '2x=a', a, (x) => 2 * x - a)).toEqual([
+      '1/2 * a',
+    ]);
+    expect(
+      parametricRoots(real, '(x-1)(x-a)=0', a, (x) => (x - 1) * (x - a))
+    ).toEqual(['1', 'a']);
+    expect(
+      parametricRoots(real, '\\sin x+a=0', a, (x) => Math.sin(x) + a)
+    ).toHaveLength(2);
+    expect(
+      parametricRoots(real, '2|x-a|=2', a, (x) => 2 * Math.abs(x - a) - 2)
+    ).toEqual(['a + 1', 'a - 1']);
+    // A decided type check still removes a root: 3/2 is not an integer
+    const integer = new ComputeEngine();
+    integer.declare('x', 'integer');
+    expect(integer.parse('2x=3').solve('x')).toEqual([]);
+    // a/2 is an integer only for an even `a`: not decided
+    noAnswer(integer, '2x=a');
+  });
+
+  test('an exponential with an exponent that is not real', () => {
+    // e^(i·x + 1) = -e has the root π: e^(iπ) = -1
+    expect(Math.cos(Math.PI)).toBeCloseTo(-1, 15);
+    for (const latex of [
+      'e^{ix+1}=-e',
+      'e^{ix^2}=-1',
+      'e^{i(x+1)}=-1',
+      'e^{ix}=-1',
+      '3e^{ix}+3=0',
+    ])
+      noAnswer(ce, latex);
+  });
+
+  test('an exponential whose roots are not real has no real root', () => {
+    // e^(x²) ≥ 1 and 2^(x² + 1) ≥ 2 for each real x
+    expect(ce.parse('e^{x^2}=\\frac12').solve('x')).toEqual([]);
+    expect(ce.parse('2^{x^2+1}=1').solve('x')).toEqual([]);
+    expect(solveOp(ce, 'e^{x^2}=\\frac12').toString()).toBe('[]');
+    const r = Math.sqrt(Math.log(2));
+    expect(checkedRoots(ce, 'e^{x^2}=2', (x) => Math.exp(x * x) - 2)).toEqual(
+      [-r, r].map((v) => expect.closeTo(v, 12))
+    );
+    expect(checkedRoots(ce, 'e^{x+1}=2', (x) => Math.exp(x + 1) - 2)).toEqual([
+      expect.closeTo(Math.log(2) - 1, 12),
+    ]);
+    expect(ce.parse('e^{x+1}=-2').solve('x')).toEqual([]);
+  });
+
+  test('an unknown that can be complex: no answer from the real strategies', () => {
+    const complex = new ComputeEngine();
+    complex.declare('x', 'complex');
+    // e^x = -1 has the roots (2k + 1)·π·i; sin(x) = 2 has the roots
+    // π/2 ± i·ln(2 + √3) + 2kπ; |x| = 1 is the unit circle.
+    for (const latex of [
+      'e^x=-1',
+      'e^x=2',
+      'e^{2x}=-1',
+      '\\sin x=2',
+      '\\sin(2x)=2',
+      '\\cosh x=0',
+      '|x|=1',
+      '2|x|=1',
+    ])
+      noAnswer(complex, latex);
+    // A principal square root is never a negative real number
+    expect(complex.parse('\\sqrt{x}=-1').solve('x')).toEqual([]);
+  });
+
+  test('an absolute value of an expression that is not real', () => {
+    // |x + i| = 1 has the real root 0: |i| = 1
+    for (const latex of ['2|x+i|=2', '|x+i|=1', '|x+i|=|x-1|'])
+      noAnswer(ce, latex);
+    // |x² + 1| ≥ 1 for each real x: no real root, and the four imaginary
+    // roots of x² + 1 = ±1/2 are not listed
+    for (const latex of ['2|x^2+1|=1', '|x^2+1|=\\frac12']) {
+      expect(ce.parse(latex).solve('x')).toEqual([]);
+      expect(solveOp(ce, latex).toString()).toBe('[]');
+    }
+    // |x² - 1| = 3 has only the real roots ±2
+    expect(
+      checkedRoots(ce, '|x^2-1|=3', (x) => Math.abs(x * x - 1) - 3)
+    ).toEqual([-2, 2]);
+    expect(checkedRoots(ce, '2|x|=1', (x) => 2 * Math.abs(x) - 1)).toEqual([
+      -0.5, 0.5,
+    ]);
+  });
+
+  test('an absolute value beside other terms with the unknown', () => {
+    // |x - 1| = x^5 + x is -x^5 - 2x + 1 = 0 for x < 1: a root near 0.486.
+    // A root template solved only the other case, x^5 + 1 = 0, and the
+    // answer was [].
+    const f = (x: number) => Math.abs(x - 1) - x ** 5 - x;
+    const roots = checkedRoots(ce, '|x-1|=x^5+x', f);
+    expect(roots.length).toBe(1);
+    expect(roots[0]).toBeCloseTo(0.486389, 6);
+    expect(
+      checkedRoots(ce, '|x|+x^5-3=0', (x) => Math.abs(x) + x ** 5 - 3)
+    ).toHaveLength(1);
+    expect(checkedRoots(ce, '|x|=x^2', (x) => Math.abs(x) - x * x)).toEqual([
+      -1, 0, 1,
+    ]);
+    // |x| = x holds for each x ≥ 0: the roots are not a finite list
+    noAnswer(ce, '|x|=x');
+    noAnswer(ce, '|x-1|=1-x');
+    // The case -(x - 1) = x + 2e^x is not solved (a root near -0.27), thus
+    // the root template that solves the other case does not give a list
+    const g = (x: number) => Math.abs(x - 1) - x - 2 * Math.exp(x);
+    expect(g(-0.3)).toBeGreaterThan(0);
+    expect(g(-0.2)).toBeLessThan(0);
+    noAnswer(ce, '|x-1|=x+2e^x');
+  });
+
+  test('a logarithm with no template is solved', () => {
+    const cases: Array<[string, (x: number) => number, number[]]> = [
+      ['\\log(x)=2', (x) => Math.log10(x) - 2, [100]],
+      ['\\log(x)=0', (x) => Math.log10(x), [1]],
+      ['\\log(x)=\\log(7)', (x) => Math.log10(x) - Math.log10(7), [7]],
+      ['\\log_2(x+1)=0', (x) => Math.log2(x + 1), [0]],
+      ['\\log(x^2-3)=0', (x) => Math.log10(x * x - 3), [-2, 2]],
+      ['\\log_2(x)=\\log_2(3)', (x) => Math.log2(x) - Math.log2(3), [3]],
+      ['\\log_2(x)=0', (x) => Math.log2(x), [1]],
+      ['2\\log_2(x)=0', (x) => 2 * Math.log2(x), [1]],
+    ];
+    for (const [latex, f, expected] of cases)
+      expect(checkedRoots(ce, latex, f)).toEqual(expected);
+  });
+
+  test('a root does not keep b^(log_b(v))', () => {
+    const show = (latex: string) =>
+      ce
+        .parse(latex)
+        .solve('x')!
+        .map((r) => r.toString());
+    expect(show('\\log_2(x+1)=\\log_2(3)')).toEqual(['2']);
+    expect(show('\\log(x+1)=\\log(3)')).toEqual(['2']);
+    expect(show('\\log_2(x+1)=\\log_2(3)+1')).toEqual(['5']);
+    expect(show('\\log(x+1)=1+\\log(3)')).toEqual(['29']);
+    expect(Math.log2(6)).toBeCloseTo(Math.log2(3) + 1, 15);
+    expect(Math.log10(30)).toBeCloseTo(1 + Math.log10(3), 15);
+  });
+
+  test('the reason of a list that misses a candidate not decided', () => {
+    // `partialRootListReason()` is the test of every route (`Solve`,
+    // `solve()`, `explain('solve')`). A list from which a candidate was
+    // removed without a decision is not an answer.
+    const { partialRootListReason } = jest.requireActual(
+      '../../src/compute-engine/boxed-expression/solve-domain'
+    );
+    const eq = ce.parse('(x-1)(x-a)=0');
+    expect(
+      partialRootListReason(eq, 'x', [ce.One], {
+        candidates: true,
+        undecided: true,
+      })
+    ).toBe('undecided');
+    expect(
+      partialRootListReason(eq, 'x', [ce.One], {
+        candidates: true,
+        undecided: false,
+      })
+    ).toBeUndefined();
+  });
+});

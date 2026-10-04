@@ -170,6 +170,72 @@ describe('solveRules', () => {
     });
     expect(ce.parse('\\coth(x) - 3 = 0').solve('x')).toBeNull();
   });
+
+  //
+  // A copy of a built-in template is a template that the host added
+  //
+  it('a rule that cannot be boxed does not make the other rules host rules', () => {
+    const ce = new ComputeEngine();
+    const expected = ce.parse('(x-1)\\Gamma(x)=0').solve('x');
+    const error = console.error;
+    console.error = () => {};
+    try {
+      ce.solveRules.push({
+        match: ['Add', ['Coth', '_x'], '__b'],
+        replace: undefined as any,
+      });
+      // The unknown is in a function that the root finder cannot invert:
+      // a list is not an answer, as without the rule that cannot be boxed
+      expect(ce.parse('(x-1)\\Gamma(x)=0').solve('x')).toEqual(expected);
+      expect(ce.parse('x+\\Gamma(x)-\\Gamma(x)=1').solve('x')).toBeNull();
+      expect(ce.parse('\\sqrt{x}=-1').solve('x')).toEqual([]);
+    } finally {
+      console.error = error;
+    }
+  });
+
+  it('the condition of a host rule is checked once', () => {
+    const ce = new ComputeEngine();
+    let calls = 0;
+    // A wrong template whose condition is true only once. Its candidate 42
+    // is rejected, and as it is a host rule the rejection is not a proof.
+    ce.solveRules.push({
+      match: ['Add', ['Coth', '_x'], '__b'],
+      replace: 42,
+      condition: () => ++calls === 1,
+    });
+    expect(ce.parse('\\coth(x) - 3 = 0').solve('x')).toBeNull();
+    expect(calls).toBe(1);
+  });
+
+  it('a copy of a built-in template that keeps its id is not built in', () => {
+    const ce = new ComputeEngine();
+    // Wrong copies of the two templates that match 5x - 10: their root 7 is
+    // rejected. The rejection is not a proof that there is no root, because
+    // the templates are the host's: no answer, not `[]`.
+    ce.solveRules = ce.solveRules.map((rule) =>
+      typeof rule === 'object' &&
+      'id' in rule &&
+      (rule.id === 'solve.linear' || rule.id === 'solve.power')
+        ? { ...rule, replace: 7 }
+        : rule
+    );
+    expect(ce.parse('5x - 10 = 0').solve('x')).toBeNull();
+    expect(
+      ce.box(['Solve', ce.parse('5x - 10 = 0').json, 'x']).evaluate().operator
+    ).toBe('Solve');
+    // The built-in template objects in a new array are still built in: the
+    // rejected candidate of √x = -1 is a decision
+    const other = new ComputeEngine();
+    other.solveRules = [...other.solveRules];
+    expect(other.parse('\\sqrt{x} = -1').solve('x')).toEqual([]);
+    expect(
+      other
+        .parse('5x - 10 = 0')
+        .solve('x')
+        ?.map((x) => x.json)
+    ).toEqual([2]);
+  });
 });
 
 describe('harmonizationRules', () => {

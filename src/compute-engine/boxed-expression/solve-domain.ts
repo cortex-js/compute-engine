@@ -24,6 +24,7 @@ import {
 import { findUnivariateRoots } from './solve.js';
 import { getPolynomialCoefficients, polynomialDegree } from './polynomials.js';
 import { expand } from './expand.js';
+import { together } from './factor.js';
 import { interval } from '../numerics/interval.js';
 import {
   tryDiophantineSolve,
@@ -180,6 +181,12 @@ const PERIODIC_SCAN_SAMPLES_PER_PERIOD = 256;
 // The largest `n` tried when the solver looks for a root spacing `T/n` that is
 // shorter than the period `T` of the equation (see `rootSetDivisor()`).
 const MAX_ROOT_SET_DIVISOR = 12;
+
+// The largest number of cells for which the proof that a root list is
+// complete computes an interval enclosure of the equation (see
+// `enclosureShowsNoOtherRoot()`). When the proof needs more cells, it is not
+// completed, and the list is not an answer.
+const MAX_ENCLOSURE_CELLS = 200_000;
 
 /** A validated `Solve` unknown specification. */
 export interface SolveSpec {
@@ -1101,6 +1108,10 @@ export function solveOverDomain(
     // With `stats.partial`, the scan of `expandPeriodicRoots()` can reject
     // the list, but it accepts it only under strict conditions (see `strict`
     // in `rootListIsComplete()`).
+    // A candidate root that a check removed without a decision
+    // (`stats.undecided`) can be a root: the list is then used the same way
+    // as a list that is only a part of the roots.
+    const partial = stats.partial || stats.undecided;
     const checked = expandPeriodicRoots(
       ce,
       ceq,
@@ -1109,9 +1120,9 @@ export function solveOverDomain(
       domain,
       roots,
       stats.userRule && roots.length > 0,
-      stats.partial
+      partial
     );
-    const expanded = stats.partial && checked === undefined ? null : checked;
+    const expanded = partial && checked === undefined ? null : checked;
     const finalRoots = expanded === null ? [] : (expanded ?? roots);
 
     if (finalRoots.length > 0 || Array.isArray(expanded)) {
@@ -1522,7 +1533,13 @@ function equationHasNonInvertibleHead(
  *   (`stats.userRule`) and `roots` (the result of the root finder) is not
  *   empty, the roots are accepted. A candidate of such a template that the
  *   check against the equation rejected does not show that there is no
- *   root, thus an empty list is not accepted.
+ *   root, thus an empty list is not accepted;
+ * - `'undecided'`: `roots` is not empty, and a candidate root was removed
+ *   by a check that did not decide it (`stats.undecided`): its residual in
+ *   the equation cannot be proved zero, or its membership in the declared
+ *   type of the unknown is not known. For a real `x`,
+ *   `(x - 1)(x - a) = 0` gives `1` and removes `a`, which can be real. An
+ *   empty list with this flag is not an answer either (`emptyRootsAnswer()`).
  *
  * Every route that returns the roots of the root finder as an answer uses
  * this test (`Solve`, `expr.solve()`, `expr.explain('solve')`).
@@ -1537,8 +1554,9 @@ export function partialRootListReason(
     partial?: boolean;
     userRule?: boolean;
   }
-): 'factor' | 'non-invertible' | undefined {
+): 'factor' | 'non-invertible' | 'undecided' | undefined {
   if (stats.partial) return 'factor';
+  if (stats.undecided && roots.length > 0) return 'undecided';
   if (stats.userRule && roots.length > 0) return undefined;
   if (!isFunction(eq, 'Equal') && !eq.type.matches('number')) return undefined;
   return equationHasNonInvertibleHead(eq, unknown)
@@ -1960,9 +1978,10 @@ function expandPeriodicRoots(
       userRule: false,
     };
     principal = substitutionRoots(ce, ceq, unknown, terms, subStats) ?? [];
-    // The roots of the substituted equation are only a part of its roots:
-    // the scan must use its strict conditions.
-    if (subStats.partial) strict = true;
+    // The roots of the substituted equation are only a part of its roots,
+    // or a candidate was removed by a check that did not decide it: the scan
+    // must use its strict conditions.
+    if (subStats.partial || subStats.undecided) strict = true;
   }
 
   // The principal roots are not always all the roots in one period: for
@@ -2242,7 +2261,7 @@ function withFactorFamilies(
       domain,
       factorRoots,
       false,
-      stats.partial
+      stats.partial || stats.undecided
     );
     // No family: the scan of the whole product still checks the list.
     if (family === null || family === undefined) continue;
@@ -2257,17 +2276,39 @@ function withFactorFamilies(
 }
 
 /**
+ * The result of an interval evaluation of a real function over a cell
+ * `[lo, hi]`, as the `interval-js` compilation target gives it
+ * (`IntervalResult` in `interval/types.ts`): `value` encloses each real value
+ * of the function on the cell. `kind` is `'empty'` when the function has no
+ * real value on the cell, `'entire'` or `'singular'` with no `value` when it
+ * is not bounded on the cell (a pole).
+ */
+type CellEnclosure = {
+  kind: string;
+  value?: { lo: number; hi: number };
+};
+
+/**
  * A numeric version of the real function `body` of `unknown`, for the checks
  * of `expandPeriodicRoots()`. It is compiled when possible. Otherwise each
  * call substitutes the value and evaluates `body` numerically, which is much
  * slower: `compiled` tells the caller which version it has. A value that is
  * not a finite real number (a pole, a complex value, a free symbol) is `NaN`.
+ *
+ * `rootFree(lo, hi)` is `true` when interval arithmetic proves that the
+ * function has no real root in the cell `[lo, hi]` (see
+ * `cellHasNoRootProof()`).
  */
 function realFunction(
   ce: ComputeEngine,
   body: Expression,
   unknown: string
-): { f: (x: number) => number; compiled: boolean } {
+): {
+  f: (x: number) => number;
+  compiled: boolean;
+  rootFree: (lo: number, hi: number) => boolean;
+} {
+  const rootFree = cellHasNoRootProof(ce, body, unknown);
   const run = implicitCompileNumeric(ce, body);
   if (run !== undefined) {
     return {
@@ -2279,6 +2320,7 @@ function realFunction(
         }
       },
       compiled: true,
+      rootFree,
     };
   }
   return {
@@ -2287,7 +2329,352 @@ function realFunction(
       return Math.abs(v.im) > 1e-12 ? NaN : v.re;
     },
     compiled: false,
+    rootFree,
   };
+}
+
+/**
+ * A test that proves, by interval arithmetic, that the real function `body`
+ * of `unknown` has no real root in a cell `[lo, hi]`. The test is `true`
+ * only when it has a proof:
+ * - the interval enclosure of `body` over the cell is real and does not
+ *   hold 0 (`enclosureExcludesZero()`), or `body` is shown to be not real
+ *   where the enclosure has no value (`nonRealWhereRestrictedIs()`) and its
+ *   real values do not hold 0. The enclosure comes from the `interval-js` compilation target, whose
+ *   interval arithmetic rounds each bound outward;
+ * - or the enclosure of the numerator `N` of `body`, written as one fraction
+ *   `N/D` (`numeratorOfFraction()`), does not hold 0. Each real root of
+ *   `body` is a root of `N`. This proof also applies to a cell that holds a
+ *   pole: the enclosure of `tan(x) - 1` is not bounded on a cell that holds
+ *   `π/2`, but the enclosure of its numerator `sin(x) - cos(x)` is near 1
+ *   there.
+ *
+ * Each of the two enclosures is compiled when the test first needs it. A
+ * function that does not compile to the target gives no proof.
+ */
+function cellHasNoRootProof(
+  ce: ComputeEngine,
+  body: Expression,
+  unknown: string
+): (lo: number, hi: number) => boolean {
+  type Enclose = (lo: number, hi: number) => CellEnclosure | undefined;
+  let direct: Enclose | null | undefined;
+  let numerator: Enclose | null | undefined;
+  // The enclosure of the factor `B` of `body = A + B·D(u)` (see
+  // `nonRealWhereRestrictedIs()`), or `null` when `body` has not this form.
+  let factor: Enclose | null | undefined;
+  return (lo, hi) => {
+    if (direct === undefined)
+      direct = intervalFunction(ce, body, unknown) ?? null;
+    const r = direct === null ? undefined : direct(lo, hi);
+    if (enclosureExcludesZero(r)) return true;
+    // The function is not real on all of the cell (`'empty'`), or on a part
+    // of it (`'partial'`, whose value holds its real values). The cell has
+    // no root when the part where it is real has no root, and the function
+    // is shown to be not real where the interval target gives no value.
+    if (
+      r !== undefined &&
+      (r.kind === 'empty' ||
+        (r.kind === 'partial' &&
+          r.value !== undefined &&
+          (r.value.lo > 0 || r.value.hi < 0)))
+    ) {
+      if (factor === undefined) {
+        const b = nonRealWhereRestrictedIs(body, unknown);
+        factor =
+          b === undefined ? null : (intervalFunction(ce, b, unknown) ?? null);
+      }
+      if (factor !== null && enclosureExcludesZero(factor(lo, hi))) return true;
+    }
+    if (numerator === undefined) {
+      const n = numeratorOfFraction(body);
+      numerator = n.isSame(body)
+        ? null
+        : (intervalFunction(ce, n, unknown) ?? null);
+    }
+    return numerator !== null && enclosureExcludesZero(numerator(lo, hi));
+  };
+}
+
+// The heads that are real for each real value of their operands (a pole
+// aside). A function made only of these heads and of the unknown is real
+// where it is defined.
+const REAL_FOR_REAL_HEADS = new Set([
+  'Add',
+  'Subtract',
+  'Negate',
+  'Multiply',
+  'Divide',
+  'Sin',
+  'Cos',
+  'Tan',
+  'Cot',
+  'Sec',
+  'Csc',
+  'Exp',
+  'Abs',
+  'Sinh',
+  'Cosh',
+  'Tanh',
+  'Arctan',
+  'Haversine',
+]);
+
+// The heads that give a value that is not real (its imaginary part is not 0)
+// for a real operand outside their real domain: `√u` for `u < 0`, `ln(u)`
+// for `u < 0`, `arcsin(u)` and `arccos(u)` for `|u| > 1`.
+const NON_REAL_OUTSIDE_DOMAIN_HEADS = new Set([
+  'Sqrt',
+  'Ln',
+  'Arcsin',
+  'Arccos',
+]);
+
+/**
+ * When `body` is `A + B·D(u)`, where `D` is the only head of `body` that can
+ * give a value that is not real (`NON_REAL_OUTSIDE_DOMAIN_HEADS`), and `A`,
+ * `B` and `u` are real for each real value of the unknown (only
+ * `REAL_FOR_REAL_HEADS`), return `B`. Otherwise `undefined`.
+ *
+ * Where `D(u)` is not real, the imaginary part of `body` is `B` times the
+ * imaginary part of `D(u)`, thus `body` is not real, and is not a root,
+ * where `B ≠ 0`. The interval target gives no value for a cell, or a part
+ * of a cell, where `D(u)` is not real. Thus such a cell, or part of a cell,
+ * has no root when the enclosure of `B` excludes 0
+ * (`cellHasNoRootProof()`). For `x·√(cos(x) + 0.99)`, `B` is `x`; for
+ * `√(cos(x) + 0.99) + 1`, `B` is `1`.
+ */
+function nonRealWhereRestrictedIs(
+  body: Expression,
+  unknown: string
+): Expression | undefined {
+  const isReal = (e: Expression): boolean =>
+    !e.has(unknown)
+      ? e.isExtendedReal === true
+      : !isFunction(e)
+        ? true
+        : (REAL_FOR_REAL_HEADS.has(e.operator) ||
+            (e.operator === 'Power' &&
+              isFunction(e) &&
+              e.op2.isInteger === true &&
+              !e.op2.has(unknown))) &&
+          e.ops.every(isReal);
+  // `B` for a term `B·D(u)`, `undefined` when the term has not this form.
+  const factorOf = (term: Expression): Expression | undefined => {
+    if (isFunction(term, 'Negate')) {
+      const b = factorOf(term.op1);
+      return b === undefined ? undefined : b.neg();
+    }
+    const factors = isFunction(term, 'Multiply') ? term.ops : [term];
+    const restricted = factors.filter((f) => !isReal(f));
+    if (restricted.length !== 1) return undefined;
+    const d = restricted[0];
+    if (
+      !isFunction(d) ||
+      !NON_REAL_OUTSIDE_DOMAIN_HEADS.has(d.operator) ||
+      d.nops !== 1 ||
+      !isReal(d.op1)
+    )
+      return undefined;
+    const rest = factors.filter((f) => f !== d);
+    return rest.length === 0
+      ? body.engine.One
+      : rest.length === 1
+        ? rest[0]
+        : body.engine.function('Multiply', rest);
+  };
+  const terms = isFunction(body, 'Add') ? body.ops : [body];
+  const restricted = terms.filter((t) => !isReal(t));
+  if (restricted.length !== 1) return undefined;
+  return factorOf(restricted[0]);
+}
+
+/**
+ * The numerator `N` of `body` written as one fraction `N/D` (`together()`),
+ * after `tan(u)`, `cot(u)`, `sec(u)` and `csc(u)` are written with `sin(u)`
+ * and `cos(u)`, and `hav(u)` as `(1 - cos(u))/2`. `body` and `N/D` are
+ * equal where `body` is defined, and `D` is not 0 there (a factor of `D` is
+ * a denominator of `body`, or a factor that `N` also has). Thus each real
+ * root of `body` is a root of `N`. When the result is not a fraction, it is
+ * returned whole: it is `body` with the rewrites above.
+ *
+ * `together()` leaves a product of fractions as a product
+ * (`sin(x)/cos(x)·cos(x)` for `tan(x)·cos(x)`). Such a product is written
+ * as one fraction, and a factor that is in the numerator and in the
+ * denominator is removed from both: the numerator of `tan(x)·cos(x)` is
+ * `sin(x)`. This removes only zeros of `N` at points where a denominator of
+ * `body` is 0, where `body` is not defined, thus each real root of `body`
+ * is still a root of `N`. The numerator is only used to show that a cell
+ * has no root, never to give a root.
+ */
+function numeratorOfFraction(body: Expression): Expression {
+  const ce = body.engine;
+  const rewrite = (node: Expression): Expression => {
+    if (!isFunction(node)) return node;
+    const ops = node.ops.map(rewrite);
+    const sin = () => ce.function('Sin', [ops[0]]);
+    const cos = () => ce.function('Cos', [ops[0]]);
+    switch (node.operator) {
+      case 'Tan':
+        return ce.function('Divide', [sin(), cos()]);
+      case 'Cot':
+        return ce.function('Divide', [cos(), sin()]);
+      case 'Sec':
+        return ce.function('Divide', [ce.One, cos()]);
+      case 'Csc':
+        return ce.function('Divide', [ce.One, sin()]);
+      case 'Haversine':
+        return ce.function('Divide', [
+          ce.function('Subtract', [ce.One, cos()]),
+          ce.number(2),
+        ]);
+    }
+    return ops.every((op, i) => op === node.ops[i])
+      ? node
+      : ce.function(node.operator, ops);
+  };
+  const fraction = together(rewrite(body));
+  // The factors of the numerator and of the denominator of `fraction`
+  const numerator: Expression[] = [];
+  const denominator: Expression[] = [];
+  const collect = (node: Expression, inNumerator: boolean): void => {
+    if (isFunction(node, 'Multiply')) {
+      for (const op of node.ops) collect(op, inNumerator);
+    } else if (isFunction(node, 'Divide')) {
+      collect(node.op1, inNumerator);
+      collect(node.op2, !inNumerator);
+    } else (inNumerator ? numerator : denominator).push(node);
+  };
+  collect(fraction, true);
+  for (const d of denominator) {
+    const i = numerator.findIndex((n) => n.isSame(d));
+    if (i >= 0) numerator.splice(i, 1);
+  }
+  if (numerator.length === 0) return ce.One;
+  return numerator.length === 1
+    ? numerator[0]
+    : ce.function('Multiply', numerator);
+}
+
+/**
+ * The interval enclosure of the real function `body` of `unknown` (see
+ * `realFunction()`), or `undefined` when `body` does not compile to the
+ * `interval-js` target. The enclosure is `undefined` for a cell where the
+ * compiled function throws or gives a value of an unexpected shape.
+ */
+function intervalFunction(
+  ce: ComputeEngine,
+  body: Expression,
+  unknown: string
+): ((lo: number, hi: number) => CellEnclosure | undefined) | undefined {
+  const compiled = implicitCompile(ce, body, { to: 'interval-js' });
+  if (!compiled?.success || typeof compiled.run !== 'function')
+    return undefined;
+  const run = compiled.run as (vars: Record<string, unknown>) => unknown;
+  return (lo, hi) => {
+    let r: unknown;
+    try {
+      r = run({ [unknown]: { lo, hi } });
+    } catch {
+      return undefined;
+    }
+    if (typeof r !== 'object' || r === null) return undefined;
+    if ('kind' in r && typeof r.kind === 'string') return r as CellEnclosure;
+    // A bare interval `{ lo, hi }`
+    if (
+      'lo' in r &&
+      'hi' in r &&
+      typeof r.lo === 'number' &&
+      typeof r.hi === 'number'
+    )
+      return { kind: 'interval', value: { lo: r.lo, hi: r.hi } };
+    return undefined;
+  };
+}
+
+/**
+ * Return `true` when the enclosure `r` of a function over a cell shows that
+ * the function has no real root in the cell: the function is real on the
+ * whole cell, and the enclosure of its values does not hold 0.
+ *
+ * Only an enclosure of a function that is real on the whole cell is a
+ * proof: `'interval'`, or `'singular'` with a bounded `value` (a jump). The
+ * interval target reads a value that is not real at an intermediate step as
+ * no value (`'empty'`, or `'partial'` with the real part only). But the
+ * expression can be real there: `√x·√(x - 1)` is `-√2` at `x = -1`, where
+ * both square roots are not real. Thus `'empty'` and `'partial'` show
+ * nothing, and neither does an enclosure that is not bounded (a pole in the
+ * cell).
+ */
+function enclosureExcludesZero(r: CellEnclosure | undefined): boolean {
+  if (r === undefined || r.value === undefined) return false;
+  if (r.kind !== 'interval' && r.kind !== 'singular') return false;
+  const { lo, hi } = r.value;
+  // `NaN` bounds fail both tests.
+  return lo > 0 || hi < 0;
+}
+
+/**
+ * Return `true` when interval arithmetic proves that each real root of the
+ * function in `[lo, hi]` is within `windowTol(v)` of a value `v` of
+ * `values` (sorted in ascending order). This is the proof that the list of
+ * the values holds all the roots, to that tolerance.
+ *
+ * The window is cut into cells. A cell that is in the window
+ * `[v - windowTol(v), v + windowTol(v)]` of a value `v` needs no proof: the
+ * value accounts for it. For another cell, `rootFree` must prove that the
+ * function has no root in the cell (`cellHasNoRootProof()`). When it
+ * cannot, the cell is cut in two halves, and each half is examined. The
+ * result is `false` when a cell without a proof is narrower than a quarter
+ * of the window tolerance at its position (the function can have a root
+ * there that is not in the list), or when the proof needs more than
+ * `MAX_ENCLOSURE_CELLS` cells.
+ *
+ * Point samples cannot replace this proof: a narrow feature between two
+ * samples can hold roots (`sin(x) - 2·e^(-10¹²·(sin(x) - 1/2)²)` has two
+ * roots near `π/6` that are `2.7·10⁻⁶` apart).
+ */
+function enclosureShowsNoOtherRoot(
+  ce: ComputeEngine,
+  rootFree: (lo: number, hi: number) => boolean,
+  lo: number,
+  hi: number,
+  values: ReadonlyArray<number>,
+  windowTol: (x: number) => number
+): boolean {
+  // True if a window of a value holds the cell `[a, b]`.
+  const inWindow = (a: number, b: number): boolean => {
+    // Binary search for the first value `>= a`. A window that holds the cell
+    // belongs to that value or to the value before it.
+    let i = 0;
+    let j = values.length;
+    while (i < j) {
+      const m = (i + j) >> 1;
+      if (values[m] < a) i = m + 1;
+      else j = m;
+    }
+    for (const k of [i - 1, i]) {
+      if (k < 0 || k >= values.length) continue;
+      const v = values[k];
+      const t = windowTol(v);
+      if (v - t <= a && b <= v + t) return true;
+    }
+    return false;
+  };
+  const cells: Array<[number, number]> = [[lo, hi]];
+  let count = 0;
+  while (cells.length > 0) {
+    const [a, b] = cells.pop()!;
+    if (inWindow(a, b)) continue;
+    count += 1;
+    if (count > MAX_ENCLOSURE_CELLS) return false;
+    if ((count & 0x3ff) === 0) checkDeadline(ce._deadlineFrame);
+    if (rootFree(a, b)) continue;
+    const m = a + (b - a) / 2;
+    if (m <= a || m >= b || b - a < windowTol(m) / 4) return false;
+    cells.push([m, b], [a, m]);
+  }
+  return true;
 }
 
 /**
@@ -2330,7 +2717,19 @@ function rootSetDivisor(
 
 /**
  * Return `true` when a numeric scan of `[bounds.lo, bounds.hi]` finds no real
- * root of `fn.f` that is not in `roots`.
+ * root of `fn.f` that is not in `roots`, and interval arithmetic then proves
+ * that each real root is near a value of `roots`
+ * (`enclosureShowsNoOtherRoot()`).
+ *
+ * The scan can only REJECT the list: a root that it finds and that is not in
+ * the list makes the result `false`. Samples cannot show that there is no
+ * other root, because a narrow feature of the function between two samples
+ * can hold roots. Thus the scan does not accept the list: the proof by
+ * interval enclosures does. A cell that this proof examines is free of roots
+ * only when the enclosure of `fn` over the cell does not hold 0. The proof
+ * uses the same tolerance as the scan to match a root to a value of the
+ * list (`matchTol` below, or the smaller `strictTol` with `strict`): a root
+ * nearer than this tolerance to a value of the list is not seen.
  *
  * The scan samples `f` `PERIODIC_SCAN_SAMPLES_PER_PERIOD` times per
  * `termPeriod` (the shortest period of a trig term of `f`). It finds a root
@@ -2419,7 +2818,11 @@ function rootSetDivisor(
  */
 function rootListIsComplete(
   ce: ComputeEngine,
-  fn: { f: (x: number) => number; compiled: boolean },
+  fn: {
+    f: (x: number) => number;
+    compiled: boolean;
+    rootFree: (lo: number, hi: number) => boolean;
+  },
   bounds: { lo: number; hi: number },
   termPeriod: number,
   roots: ReadonlyArray<Expression>,
@@ -2694,7 +3097,13 @@ function rootListIsComplete(
     else if (Math.abs(fa) < 1e-2 * scale) return false;
   }
 
-  if (!strict) return found.every(([l, r]) => listHolds(l, r));
+  // The scan found no root that is not in the list. Prove that there is no
+  // other root (see the comment of this function).
+  if (!strict)
+    return (
+      found.every(([l, r]) => listHolds(l, r)) &&
+      enclosureShowsNoOtherRoot(ce, fn.rootFree, lo, hi, values, matchTol)
+    );
 
   // `strict`: each root found matches exactly one value of the list, at a
   // tolerance much smaller than `matchTol`, and no two roots found match
@@ -2710,7 +3119,7 @@ function rootListIsComplete(
     if (matches.length !== 1 || used.has(matches[0])) return false;
     used.add(matches[0]);
   }
-  return true;
+  return enclosureShowsNoOtherRoot(ce, fn.rootFree, lo, hi, values, strictTol);
 }
 
 /**

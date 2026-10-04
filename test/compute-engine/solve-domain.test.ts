@@ -1752,4 +1752,70 @@ describe('SOLVE OVER A DOMAIN — complete root lists', () => {
     expect(actual.length).toBe(5);
     actual.forEach((v, i) => expect(v).toBeCloseTo((i * Math.PI) / 2, 12));
   });
+
+  test('samples do not prove that a list is complete: a narrow dip has roots', () => {
+    // f(x) = sin(x) - 2·e^(-10¹²·(sin(x) - 1/2)²) is near sin(x) > 0 on
+    // [0.3, 0.8], except in a dip of width about 3·10⁻⁶ at π/6 where
+    // f(π/6) = -3/2. It has two roots there. The samples of the scan do not
+    // see the dip; the interval enclosures cannot exclude a root there.
+    const f = (x: number) =>
+      Math.sin(x) - 2 * Math.exp(-1e12 * (Math.sin(x) - 0.5) ** 2);
+    expect(f(Math.PI / 6)).toBeLessThan(0);
+    expect(f(0.3)).toBeGreaterThan(0);
+    expect(
+      isUnevaluated(
+        solveIn('\\sin(x)-2\\exp(-10^{12}(\\sin(x)-\\frac12)^2)=0', 0.3, 0.8)
+      )
+    ).toBe(true);
+  });
+
+  test('an enclosure with no real value is not a proof', () => {
+    // f(x) = √(sin x/(sin x − 2)) − 2·e^(−10¹²·(sin x + 1/2)²) is real on
+    // [3.3, 4], with two roots near 7π/6 where f(7π/6) = √(1/5) − 2. The
+    // numerator √(sin x) of one fraction is not real there: its enclosure
+    // shows nothing.
+    const f = (x: number) =>
+      Math.sqrt(Math.sin(x) / (Math.sin(x) - 2)) -
+      2 * Math.exp(-1e12 * (Math.sin(x) + 0.5) ** 2);
+    expect(f(3.3)).toBeGreaterThan(0);
+    expect(f((7 * Math.PI) / 6)).toBeLessThan(0);
+    expect(f(4)).toBeGreaterThan(0);
+    expect(
+      isUnevaluated(
+        solveIn(
+          '\\sqrt{\\frac{\\sin x}{\\sin x-2}}-2\\exp(-10^{12}(\\sin x+\\frac12)^2)=0',
+          3.3,
+          4
+        )
+      )
+    ).toBe(true);
+  });
+
+  test('a product of fractions has one numerator: tan(x)·cos(x)', () => {
+    // The numerator of tan(x)·cos(x) is sin(x): its enclosure is near 1 at
+    // the pole π/2
+    expect(solutions(solveIn('\\tan(x)\\cos(x)=0', 0.5, 4))).toEqual([Math.PI]);
+  });
+
+  test('interval enclosures prove the lists that the scan accepts', () => {
+    const pi = Math.PI;
+    const sin = solutions(solveIn('\\sin(x)=\\frac12', 0, 7));
+    expect(sin.length).toBe(3);
+    [pi / 6, (5 * pi) / 6, (13 * pi) / 6].forEach((v, i) =>
+      expect(sin[i]).toBeCloseTo(v, 12)
+    );
+    expect(solutions(solveIn('x\\sin(x)=0', 0.5, 4))).toEqual([pi]);
+    // A root of multiplicity 10: |f| < 10⁻¹⁶ on a width of 0.05 around π
+    const flat = solutions(solveIn('\\sin(x)^{10}=0', 0, 7));
+    expect(flat.length).toBe(3);
+    [0, pi, 2 * pi].forEach((v, i) => expect(flat[i]).toBeCloseTo(v, 12));
+    // No root: the enclosure of sin(x) - 2 is at most -1
+    expect(solutions(solveIn('\\sin(x)=2', 0, 7))).toEqual([]);
+    // A pole in the domain: the enclosure of tan(x) - 1 is not bounded near
+    // π/2, but the enclosure of its numerator sin(x) - cos(x) excludes 0
+    const tan = solutions(solveIn('\\tan(x)=1', 0, 7));
+    expect(tan.length).toBe(2);
+    expect(tan[0]).toBeCloseTo(pi / 4, 12);
+    expect(tan[1]).toBeCloseTo((5 * pi) / 4, 12);
+  });
 });
