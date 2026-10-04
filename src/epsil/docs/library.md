@@ -11,7 +11,7 @@ date: Last Modified
 ---
 # Epsil Standard Library
 
-The 704 functions and constants of the standard library, by category.
+The 705 functions and constants of the standard library, by category.
 Each row gives a name, its signature (for a function) or its kind and type
 (for a constant or variable), and the first sentence of its description —
 the same description `epsil doc <name>` prints in full and the editor
@@ -22,7 +22,7 @@ To search the library by concept rather than by name, use
 `epsil doc <keywords>` (see the [CLI](/epsil/cli/)); the
 [guide for agents](/epsil/for-agents/) lists the names most often needed.
 
-- [Core](#core) — 112 definitions · [full reference](/epsil/reference/core/)
+- [Core](#core) — 113 definitions · [full reference](/epsil/reference/core/)
 - [Control structures](#control-structures) — 13 definitions · [full reference](/epsil/reference/control-structures/)
 - [Logic](#logic) — 27 definitions · [full reference](/epsil/reference/logic/)
 - [Collections](#collections) — 126 definitions · [full reference](/epsil/reference/collections/)
@@ -97,10 +97,11 @@ The [Core reference](/epsil/reference/core/) has the full description and the ex
 | — | `LatexString` | `(string) -> string` | Value preserving type conversion/tag indicating the string is a LaTeX string |
 | — | `MatchesType` | `(subject: any, type: string \| type) -> boolean` | True iff the first operand, EVALUATED, is a value of the given type — the engine form of the Epsil `x is T` test and of `match` type patterns, which both lower here. |
 | `missing` | `Missing` | variable `missing` | A value that is absent but whose position is preserved (Julia `missing`, R `NA`); the sole member of the `missing` type. |
-| — | `N` | `(any, integer?) -> unknown` | N(expr): numerically evaluate an expression |
+| — | `N` | `(any, (integer \| list<number>)?) -> unknown` | N(expr): numerically evaluate an expression |
 | — | `NamedArgument` | `(string, any) -> nothing` | NamedArgument(name, value): one named argument of a call (Epsil |
 | `nothing` | `Nothing` | variable `nothing` | The absence of a value; the sole member of the unit type. |
 | `numberFrom` | `NumberFrom` | `(string, base: (integer \| string)?) -> number` | NumberFrom(s): the number the string `s` denotes — optional surrounding whitespace, an optional sign, then ASCII digits with an optional "." fraction and an optional e/E exponent, or one of "oo", "+oo", "-oo", "NaN", "Indeterminate". |
+| `numericApproximation` | `NumericApproximation` | `(any) -> unknown` | Numerically evaluate an expression, as the `.N()` method does (engine-internal). |
 | — | `Object` | `(any, string?) -> unknown` | Provenance head for the snapshot of a mutable object: `["Object", <record>, "'TypeName'"]`. |
 | — | `OverParen` | `(any+) -> expression` | Over-paren accent (`\overparen{BC}`) — opaque typed head; not evaluated. |
 | `padEnd` | `PadEnd` | `(string, n: integer, pad: string?) -> string` | PadEnd(s, n, pad=" "): `s` padded at the END to `n` characters by repeating `pad` (its final copy truncated on a character boundary). |
@@ -437,7 +438,7 @@ The [Arithmetic reference](/epsil/reference/arithmetic/) has the full descriptio
 | `airyBi` | `AiryBi` | `(complex \| infinity) -> number` | Airy function of the second kind |
 | `airyBiPrime` | `AiryBiPrime` | `(complex \| infinity) -> number` | Derivative of the Airy function of the second kind |
 | `arg` | `Arg` | `(complex \| infinity) -> number` | `Arg` is an alias for `Argument`, which is the preferred name. |
-| `argument` | `Argument` | `(complex \| infinity) -> number` | Complex argument (phase angle) of a number. |
+| `argument` | `Argument` | `(complex \| infinity) -> number` | Complex argument (phase angle) of a number, in the engine's angular unit. |
 | `besselI` | `BesselI` | `(order: complex, complex \| infinity) -> number` | Modified Bessel function of the first kind |
 | `besselJ` | `BesselJ` | `(order: complex, complex \| infinity) -> number` | Bessel function of the first kind |
 | `besselK` | `BesselK` | `(order: complex, complex \| infinity) -> number` | Modified Bessel function of the second kind (Macdonald function) |

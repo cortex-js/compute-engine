@@ -382,7 +382,7 @@ MathJSON `Arg` · `(complex | infinity) -> number`
 
 MathJSON `Argument` · `(complex | infinity) -> number`
 
-Complex argument (phase angle) of a number.
+Complex argument (phase angle) of a number, in the engine's angular unit.
 
 ```epsil
 [argument(1 + i), argument(-1)]
