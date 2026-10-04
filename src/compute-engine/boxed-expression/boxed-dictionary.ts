@@ -569,12 +569,33 @@ function boxedExpressionToDictionaryValue(value: Expression): DictionaryValue {
     return { sym: value.symbol };
   }
 
-  if (isNumber(value) && value.type.matches('real')) return value.re;
+  // A real number is stored as a JavaScript number only when it reads back
+  // as the same number: an exact value that IS an integer (its type is
+  // `integer`, not only its rounded machine value) and is a safe integer, or
+  // an inexact number that a machine number holds without loss. An exact
+  // rational is never stored as a JavaScript number: `1/2` would read back as
+  // the float 0.5, and `(10^20 + 1)/10^20` as the integer 1. It keeps its
+  // MathJSON form.
+  if (isNumber(value) && value.type.matches('real')) {
+    const re = value.re;
+    if (
+      value.isExact
+        ? value.type.matches('integer') && Number.isSafeInteger(re)
+        : value.engine.number(re).isSame(value)
+    )
+      return re;
+  }
 
   if (isFunction(value, 'List'))
     return value.ops.map(boxedExpressionToDictionaryValue);
 
-  return value.toMathJson({ shorthands: [] });
+  // A function expression is wrapped as a `{fn: …}` object: a bare array is
+  // a LIST in a dictionary value, so `["Sqrt", 2]` would read back as the
+  // list of the string "Sqrt" and the number 2.
+  const json = value.toMathJson({ shorthands: [] });
+  return Array.isArray(json)
+    ? { fn: json as [string, ...MathJsonExpression[]] }
+    : json;
 }
 
 /** Is `v` an already fully-evaluated dictionary value for the requested

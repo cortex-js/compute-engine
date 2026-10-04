@@ -1788,6 +1788,22 @@ export type SerializeLatexOptions = NumberSerializationFormat & {
   readsAsPointList?: (
     operands: ReadonlyArray<MathJsonExpression>
   ) => boolean | undefined;
+
+  /**
+   * Whether `Count` of this operand can be spelled `|…|`. The parser reads
+   * `|x|` as `Abs(x)`, and the compute engine writes `Abs` of an operand
+   * whose TYPE is a set or a string as `Count`. For any other operand, `|x|`
+   * is an absolute value, so `Count` of it must be spelled
+   * `\mathrm{Count}(…)`. The compute engine supplies this function when it
+   * serializes an expression. A result of `undefined` means "unknown": the
+   * serializer then uses its test on the MathJSON alone.
+   *
+   * When it is not supplied, the serializer has no types, and it uses the
+   * spelling `|…|` only for a `Set` literal, `EmptySet` and a string literal.
+   *
+   * @internal
+   */
+  readsAsCardinality?: (operand: MathJsonExpression) => boolean | undefined;
 };
 
 /** The serialization options as seen by the serializer: the style options
@@ -1807,10 +1823,13 @@ export type ResolvedSerializeLatexOptions = Omit<
   | 'numericSetStyle'
   | 'indexStyle'
   | 'readsAsPointList'
+  | 'readsAsCardinality'
 > & {
   readsAsPointList:
     | ((operands: ReadonlyArray<MathJsonExpression>) => boolean | undefined)
     | undefined;
+  readsAsCardinality:
+    ((operand: MathJsonExpression) => boolean | undefined) | undefined;
   applyFunctionStyle: (
     expr: MathJsonExpression,
     level: number

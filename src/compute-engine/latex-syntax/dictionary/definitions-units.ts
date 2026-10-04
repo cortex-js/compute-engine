@@ -263,7 +263,7 @@ function normalizeUnitText(text: string): string {
  *
  * Returns a MathJSON unit expression, or `null` if not recognised.
  */
-function resolveUnitText(text: string): MathJsonExpression | null {
+export function resolveUnitText(text: string): MathJsonExpression | null {
   if (!text) return null;
 
   // Trim surrounding whitespace so the blocklist and unit lookups see the

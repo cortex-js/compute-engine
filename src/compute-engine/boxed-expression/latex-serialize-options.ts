@@ -9,9 +9,13 @@ import type {
   JsonSerializationOptions,
 } from '../global-types.js';
 import { CancellationError } from '../../common/interruptible.js';
-import { isPointListCoordinateSource } from '../collection-utils.js';
+import { shadowsLibraryName } from '../library-shadowing.js';
+import {
+  isCardinalityOperand,
+  isPointListCoordinateSource,
+} from '../collection-utils.js';
 import { isNumberExpression, stringValue } from '../../math-json/utils.js';
-import { isFunction } from './type-guards.js';
+import { isFunction, isSymbol } from './type-guards.js';
 
 /**
  * The options the engine passes to the LaTeX serializer: the engine-wide
@@ -60,6 +64,9 @@ export function latexSerializeOptions(
 ): Partial<ParseLatexOptions & SerializeLatexOptions> {
   // Computed when the serializer first meets a tuple, and only once.
   let known: Map<string, boolean> | undefined;
+  // Computed when the serializer first meets a `Count`, and only once.
+  let countOperands: Map<string, boolean> | undefined;
+  let sourceBindsAbs: boolean | undefined;
   return {
     ...ce.latexOptions,
     ...options,
@@ -84,7 +91,79 @@ export function latexSerializeOptions(
         return undefined;
       }
     },
+    readsAsCardinality: (op: MathJsonExpression) => {
+      // `|S|` parses as `Abs(S)`, and boxing writes the library `Abs` of a
+      // set as `Count`. A definition of `Abs` that replaces the library one
+      // keeps `Abs(S)` (see `applyOperatorDefinition()` in `box.ts`), so
+      // `Count` must then keep the spelling `\mathrm{Count}(…)`.
+      if (shadowsLibraryName(ce, 'Abs')) return false;
+      // The same is true inside the serialized expression when it binds the
+      // name `Abs` (a function parameter `Abs`, or a local declaration or
+      // assignment of `Abs`): there `|S|` reads back as an application of
+      // that local `Abs`. Then every `Count` in the expression keeps the
+      // spelling `\mathrm{Count}(…)`.
+      if (source !== undefined) {
+        sourceBindsAbs ??= bindsName(source, 'Abs');
+        if (sourceBindsAbs) return false;
+      }
+      try {
+        return ce._resolveOnly(() => {
+          if (source !== undefined && countOperands === undefined)
+            countOperands = countOperandSources(source, sourceJson);
+          const fromSource = countOperands?.get(JSON.stringify(op));
+          if (fromSource !== undefined) return fromSource;
+          if (isNumberExpression(op)) return false;
+          if (stringValue(op) !== null) return true;
+          return isCardinalityOperand(ce.box(op));
+        });
+      } catch (e) {
+        // As for `readsAsPointList` above: a time limit set by the caller
+        // must expire, and any other failure to box the operand returns
+        // `undefined`.
+        if (e instanceof CancellationError) throw e;
+        return undefined;
+      }
+    },
   };
+}
+
+/**
+ * For the operand of each `Count` subexpression of `expr` that has one
+ * operand, keyed by the JSON text of its MathJSON form: whether the operand,
+ * bound as it is in `expr`, is a set or a string (`isCardinalityOperand`).
+ * Then `Count` of it is spelled `|…|` (see `readsAsCardinality` in
+ * `latexSerializeOptions()`).
+ *
+ * Two operands with the same MathJSON form can have different bindings (a
+ * function parameter can hide a global symbol of the same name). Then the
+ * entry is `true` only if each of them is a set or a string: the spelling
+ * `\mathrm{Count}(…)` is always correct, and `|…|` is correct only for a
+ * set or a string.
+ *
+ * The keys are made as in `tupleOperandSources()`: the default MathJSON form
+ * of the operand, and its form with the options `jsonOptions`.
+ */
+function countOperandSources(
+  expr: Expression,
+  jsonOptions?: Readonly<Partial<JsonSerializationOptions>>
+): Map<string, boolean> {
+  const result = new Map<string, boolean>();
+  if (!expr.isCanonical && !expr.isStructural) return result;
+  const visit = (e: Expression): void => {
+    if (!isFunction(e)) return;
+    if (e.operator === 'Count' && e.nops === 1) {
+      const op = e.op1;
+      const keys = [JSON.stringify(op.json)];
+      if (jsonOptions !== undefined)
+        keys.push(JSON.stringify(op.toMathJson(jsonOptions)));
+      const isCardinality = isCardinalityOperand(op);
+      for (const key of keys)
+        result.set(key, (result.get(key) ?? true) && isCardinality);
+    }
+    for (const op of e.ops) visit(op);
+  };
+  visit(expr);
+  return result;
 }
 
 /**
@@ -125,4 +204,23 @@ function tupleOperandSources(
   };
   visit(expr);
   return result;
+}
+
+/**
+ * True when `expr` binds the name `name` somewhere in it: a parameter of a
+ * `Function` (`(Abs) ↦ …`), or the first operand of a `Declare` or an
+ * `Assign` (`Abs := …`).
+ */
+function bindsName(expr: Expression, name: string): boolean {
+  if (!isFunction(expr)) return false;
+  const op = expr.operator;
+  if (op === 'Function') {
+    for (const param of expr.ops.slice(1)) {
+      const p = isFunction(param, 'Typed') ? param.op1 : param;
+      if (isSymbol(p, name)) return true;
+    }
+  }
+  if ((op === 'Declare' || op === 'Assign') && isSymbol(expr.op1, name))
+    return true;
+  return expr.ops.some((x) => bindsName(x, name));
 }

@@ -122,6 +122,84 @@ function serializeAbs(
 }
 
 /**
+ * True when `\#` at the current position of `parser` (just after the `\#`
+ * token) can be the number of elements of the operand that follows it.
+ *
+ * It cannot when the symbol `hash` (which `\#` spells) has a definition of
+ * its own: a declared type, a value, or a function type (declared, or
+ * inferred from an application `hash(x)`). A declaration that the engine
+ * inferred from an earlier use of `\#` as a symbol (`\#+1` makes `hash` a
+ * number) does not count: it has no value, and the user did not write it.
+ *
+ * It cannot either when the next token starts an operator that applies to
+ * `\#` as a symbol: `+`, `-`, a subscript, a superscript, a prime or `!`
+ * (`\#+1`, `\#_1`, `\#^2`). An operator that the operand cannot start with,
+ * such as `\le` or `\cdot`, gives an operand that holds an `Error`, which
+ * the caller rejects.
+ */
+function hashIsCount(parser: Parser): boolean {
+  const hash = parser.resolveSymbol('hash');
+  if (
+    hash !== undefined &&
+    (hash.inferred !== true ||
+      (!hash.type.isUnknown && hash.type.matches('function')))
+  )
+    return false;
+  const start = parser.index;
+  parser.skipSpace();
+  const next = parser.peek;
+  parser.index = start;
+  return !HASH_SYMBOL_FOLLOWERS.has(next);
+}
+
+/** The tokens after which `\#` is the symbol `hash` (see `hashIsCount()`). */
+const HASH_SYMBOL_FOLLOWERS: ReadonlySet<string> = new Set([
+  '+',
+  '-',
+  '_',
+  '^',
+  "'",
+  '!',
+  '\\prime',
+]);
+
+/** True when `expr` is an `Error` or has an `Error` in it. */
+function containsError(expr: MathJsonExpression): boolean {
+  if (operator(expr) === 'Error') return true;
+  return operands(expr).some(containsError);
+}
+
+/**
+ * `Count(S)` of a set or a string `S` is spelled `|S|`, as `Abs` is: the
+ * parser reads `|S|` as `Abs(S)`, and the compute engine writes `Abs` of a
+ * set or a string as `Count` (`isCardinalityOperand`), so the spelling
+ * parses back to the same expression.
+ *
+ * Every other `Count` is spelled `\mathrm{Count}(…)`: `|L|` of a list `L` is
+ * the absolute value of each element, not the number of elements.
+ *
+ * The compute engine supplies the `readsAsCardinality` option, which reads
+ * the type of the operand. Without it (the `LatexSyntax` class used alone,
+ * with no types), only a `Set` literal, `EmptySet` and a string literal get
+ * the `|S|` spelling.
+ */
+function serializeCount(
+  serializer: Serializer,
+  expr: MathJsonExpression
+): string {
+  if (nops(expr) === 1) {
+    const arg = operand(expr, 1)!;
+    const isCardinality =
+      serializer.options.readsAsCardinality?.(arg) ??
+      (operator(arg) === 'Set' ||
+        symbol(arg) === 'EmptySet' ||
+        stringValue(arg) !== null);
+    if (isCardinality) return serializeAbs(serializer, expr);
+  }
+  return serializer.serializeFunction(expr);
+}
+
+/**
  * The subscript that carries the order of a norm: `‖v‖_1`, `‖v‖_\infty`,
  * `‖v‖_F`, `‖v‖_{3/2}`.
  *
@@ -2423,6 +2501,49 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     latexTrigger: ['\\abs'],
     kind: 'function',
     parse: 'Abs',
+  },
+  // The number of elements of a set. `|S|` parses as `Abs(S)`, which the
+  // compute engine writes as `Count(S)` for a set or a string, and `Count` of
+  // a set or a string is spelled `|S|`.
+  {
+    name: 'Count',
+    serialize: serializeCount,
+  },
+  // `\#S` is another notation for the number of elements of `S`. The
+  // operand ends before a product, a sum or a set operator: `\#S+1` is
+  // `Count(S) + 1`, `2\#S` is `2 Count(S)`, and the number of elements of a
+  // union is written `\#(A\cup B)`.
+  //
+  // In all other cases `\#` is the symbol `hash` (see `hashIsCount()`):
+  // `\#` alone, `x_{\#}`, `\#+1`, `\#_1`, `\#\le 3`, and every use of `\#`
+  // when `hash` has a definition of its own. For a function `hash`, `\#(x)`
+  // is the application `hash(x)`, which is how that application is
+  // serialized.
+  {
+    latexTrigger: ['\\#'],
+    kind: 'expression',
+    parse: (parser: Parser, until?: Readonly<Terminator>) => {
+      if (!hashIsCount(parser)) return null;
+      const rhs = parser.parseExpression({
+        ...until,
+        minPrec: MULTIPLICATION_PRECEDENCE + 1,
+      });
+      if (rhs === null || isEmptySequence(rhs) || containsError(rhs))
+        return null;
+      return ['Count', rhs] as MathJsonExpression;
+    },
+  },
+  // `\operatorname{card}(S)` is a third notation for the number of
+  // elements.
+  {
+    symbolTrigger: 'card',
+    kind: 'function',
+    parse: 'Count',
+  },
+  {
+    symbolTrigger: 'Card',
+    kind: 'function',
+    parse: 'Count',
   },
   {
     name: 'Add',

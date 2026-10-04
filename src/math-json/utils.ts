@@ -255,10 +255,25 @@ export function dictionaryFromEntries(
   const entries: Record<string, unknown> = Object.fromEntries(
     Object.entries(dict).map(([k, v]) => [
       k,
-      jsValueToExpression(v) ?? 'Nothing',
+      asDictionaryValue(jsValueToExpression(v)),
     ])
   );
   return { dict: entries } as MathJsonDictionaryObject;
+}
+
+/**
+ * The value of a `{dict: …}` object for the MathJSON expression `expr`. In a
+ * dictionary object a bare array is a LIST of values and a bare string is a
+ * string, so a function expression is wrapped as `{fn: …}` and an absent
+ * value is the symbol `Nothing` as `{sym: "Nothing"}`.
+ */
+function asDictionaryValue(
+  expr: MathJsonExpression | null
+): MathJsonExpression {
+  if (expr === null) return { sym: 'Nothing' };
+  if (Array.isArray(expr))
+    return { fn: expr as [string, ...MathJsonExpression[]] };
+  return expr;
 }
 
 function machineValueOfString(s: string): number {
@@ -538,21 +553,27 @@ function jsValueToExpression(v: any): MathJsonExpression | null {
     return ['List', ...v.map((x) => jsValueToExpression(x) ?? 'Nothing')];
   } else if (v === null) {
     return null;
-  } else if (typeof v === 'object') {
-    const dict: Record<string, MathJsonExpression> = {};
-    for (const key in v) {
-      dict[key] = jsValueToExpression(v[key]) ?? 'Nothing';
-    }
-    return { dict };
   }
+  // A MathJSON expression object (`{num: "1.5"}`, `{sym: "x"}`,
+  // `{fn: ["Add", 1, 2]}`, `{str: "a"}`, `{dict: {…}}`) is kept as it is.
+  // It is tested before the general object below, which reads any other
+  // object as a dictionary: `{num: "1.5"}` would otherwise become a
+  // dictionary with the key "num".
   if (
     isFunctionObject(v) ||
-    isSymbolObject(v) ||
-    isNumberObject(v) ||
-    isStringObject(v) ||
+    (isSymbolObject(v) && typeof v.sym === 'string') ||
+    (isNumberObject(v) && typeof v.num === 'string') ||
+    (isStringObject(v) && typeof v.str === 'string') ||
     isDictionaryObject(v)
   ) {
     return v as MathJsonExpression;
+  }
+  if (typeof v === 'object') {
+    const dict: Record<string, MathJsonExpression> = {};
+    for (const key in v) {
+      dict[key] = asDictionaryValue(jsValueToExpression(v[key]));
+    }
+    return { dict };
   }
   return null;
 }

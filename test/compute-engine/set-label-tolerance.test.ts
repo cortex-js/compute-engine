@@ -60,17 +60,13 @@ describe('geometry intersection idiom', () => {
 describe('set-operation evaluation stays sound with inert operands', () => {
   test('literal set operations are unchanged', () => {
     expect(
-      ce
-        .box(['Intersection', ['Set', 1, 2, 3], ['Set', 2, 3]])
-        .evaluate()
-        .json
+      ce.box(['Intersection', ['Set', 1, 2, 3], ['Set', 2, 3]]).evaluate().json
     ).toEqual(['Set', 2, 3]);
-    expect(
-      ce
-        .box(['SetMinus', ['Set', 1, 2, 3], 2])
-        .evaluate()
-        .json
-    ).toEqual(['Set', 1, 3]);
+    expect(ce.box(['SetMinus', ['Set', 1, 2, 3], 2]).evaluate().json).toEqual([
+      'Set',
+      1,
+      3,
+    ]);
   });
 
   test('intersection of unknown symbols stays inert (was EmptySet)', () => {
@@ -83,12 +79,15 @@ describe('set-operation evaluation stays sound with inert operands', () => {
     expect(JSON.stringify(geo.json)).not.toContain('EmptySet');
   });
 
-  test('intersection with an infinite first operand stays inert (was EmptySet)', () => {
+  // The intersection walks the finite operand, not the infinite first one,
+  // so both operand orders give the same set (it was `EmptySet`, then it
+  // stayed unevaluated).
+  test('intersection with an infinite first operand walks the finite operand (was EmptySet)', () => {
     expect(
-      ce
-        .box(['Intersection', 'Integers', ['Set', 1, 2]])
-        .evaluate()
-        .json
-    ).toEqual(['Intersection', 'Integers', ['Set', 1, 2]]);
+      ce.box(['Intersection', 'Integers', ['Set', 1, 2]]).evaluate().json
+    ).toEqual(['Set', 1, 2]);
+    expect(
+      ce.box(['Intersection', 'Integers', ['Set', 1, 'x']]).evaluate().json
+    ).toEqual(['Intersection', 'Integers', ['Set', 1, 'x']]);
   });
 });

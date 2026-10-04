@@ -2,6 +2,33 @@
 
 ### Behavior Changes
 
+- **`|S|` of a set or a string is its number of elements.** `|\{1,2\}|` was
+  `Abs(Set(1, 2))`, an `incompatible-type` error. It is now `Count(Set(1, 2))`,
+  which is `2`, on the LaTeX, MathJSON and `ce.function` routes:
+  `Abs(Set(1, 2))` is `Count(Set(1, 2))`. `|\mathbb{Z}/5\mathbb{Z}|` is `5`,
+  `|\emptyset|` is `0`, `|\mathbb{Z}|` is `PositiveInfinity`, and
+  `|\text{abc}|` is `3`. For a set with no value, `|S|` is `Count(S)`. A list
+  is unchanged: `|[1, -2]|` is the element-wise absolute value `[1, 2]`. A
+  dictionary still gives the type error. `Count` of a set or a string is
+  written back as `|S|`. `\#S`, `\operatorname{card}(S)` and
+  `\operatorname{Card}(S)` read as `Count(S)`; `\#` alone, or followed by an
+  operator (`\#+1`), is still the symbol `hash`. When the user defines `Abs`,
+  `|S|` keeps that definition and `Count` is written `\mathrm{Count}(S)`.
+  Compiled `Abs` of an operand whose type could be a string or a set throws
+  a `TypeError` for such a value, where it gave `NaN`.
+
+- **A dictionary has a LaTeX form.** A dictionary serialized to an empty
+  string, so it disappeared from LaTeX output. It is now written
+  `\operatorname{Dictionary}(\operatorname{KeyValuePair}(\text{a}, 1), …)`,
+  which parses back to the same dictionary.
+
+- **Special characters in a LaTeX string are escaped.** A string is written
+  `\text{…}`, with `\`, `{`, `}`, `$`, `%`, `#`, `&`, `_`, `~` and `^`
+  escaped, so that it reads back as the same string: `\text{$}` was read as
+  the unit USD and `\text{%}` as an empty string. A string whose `\text{…}`
+  form reads as a unit or a keyword (`m`, `km`, `and`) is written `"m"`. The
+  string `"50%"` was written as the number `50%`.
+
 - **A `Solve` result list holds all the solutions, on every route.** An empty
   list states that there is no solution. When the solver cannot show that
   its list is complete, `Solve` stays unevaluated, `expr.solve()` returns
@@ -737,6 +764,29 @@
   every precision up to that limit. Exact arithmetic is not changed.
 
 ### Issues Resolved
+
+- **Counting set operations.**
+  - `Count(Intersection(Integers, Set(1, 2)))` was `PositiveInfinity`; it is
+    `2`, in both operand orders. `Intersection(Integers, Set(1, 2))` now
+    evaluates to `Set(1, 2)`.
+  - `Count(SymmetricDifference({1, 2, 3}, {2, 3, 4}))` was `1`; it is `2`.
+  - `Count(Union(A, S))`, `Count(Intersection(A, S))` and
+    `Count(SetMinus(A, S))` of sets with no value were `0`; they stay
+    unevaluated.
+  - `Intersection({1, 2, x}, Integers)` evaluated to `Set(1, 2)`, dropping
+    `x`, although `x` may be an integer. A set operation now stays unevaluated
+    when the membership of an element in an infinite set is undecided, in both
+    operand orders. A set operation with such a membership is not walked by
+    other operators, so it does not give a partial answer.
+  - A walk of `Intersection(Integers, Set(1, 2))`, and a count of a union
+    with an operand such as `Intersection(Integers, Interval(0, 3))`, never
+    ended. They now end.
+  - `Count` of an intersection of two large ranges no longer copies their
+    elements.
+
+- **A dictionary's MathJSON keeps its values.** An exact rational value was
+  written as a machine number (`1/2` read back as `0.5`), and a function value
+  as a bare array (`Sqrt(2)` read back as a list).
 
 - **`simplify()` of a list quotient or difference keeps the list.**
   `[x]/[x]` simplified to `1` and `[x] − [x]` to `0`. They now give `[1]` and

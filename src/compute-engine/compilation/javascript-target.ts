@@ -3727,6 +3727,14 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     }
     if (BaseCompiler.isNonNegative(args[0]))
       return identityPassthrough(args[0], compile, target);
+    // An operand whose type allows a string or a set (a symbol declared
+    // `any`) can hold one at run time. Then `|x|` is its number of elements
+    // (`isCardinalityOperand`), which `Math.abs` does not compute: it answers
+    // `NaN`. Such an operand goes through `_SYS.absAny`, which throws for a
+    // value that is not a number. An operand with a numeric type keeps
+    // `Math.abs`, with no test.
+    if (absOperandMayBeCardinality(args[0]))
+      return `_SYS.absAny(${compile(args[0])})`;
     return `Math.abs(${compile(args[0])})`;
   },
   Add: (args, compile, target) => {
@@ -11410,6 +11418,28 @@ function materializeRange(
  * Runtime helpers injected as `_SYS` into compiled JavaScript functions.
  * Shared by both ComputeEngineFunction and ComputeEngineFunctionLiteral.
  */
+/** The type of a set with elements of any type. */
+const SET_SHAPE_TYPE: Type = parseType('set<any>');
+
+/**
+ * True when the operand `x` of `Abs` can hold a string or a set at run time,
+ * as its type allows one (`any`, `value`, `real | string`). The interpreter
+ * computes `|x|` of such a value as its number of elements; the compiled
+ * `Math.abs` would answer `NaN`.
+ */
+function absOperandMayBeCardinality(x: Expression): boolean {
+  const type = x.type.type;
+  return couldMatch(type, 'string') || couldMatch(type, SET_SHAPE_TYPE);
+}
+
+/** A short description of the run-time value `x`, for an error message. */
+function describeRuntimeValue(x: unknown): string {
+  if (typeof x === 'string') return 'a string';
+  if (Array.isArray(x)) return 'a list';
+  if (x instanceof Set) return 'a set';
+  return `a value of type ${typeof x}`;
+}
+
 const SYS_HELPERS = {
   ...JET_HELPERS,
   // The element count of an arithmetic `Range`, shared with the interpreter
@@ -13033,6 +13063,22 @@ const SYS_HELPERS = {
     Math.abs(z.re) === Infinity || Math.abs(z.im) === Infinity
       ? Infinity
       : new Complex(z.re, z.im).abs(),
+  // `Abs` of an operand whose type allows a string or a set (see
+  // `absOperandMayBeCardinality`): the absolute value of a number or of a
+  // complex number, and `NaN` for an absent value (`undefined`), as
+  // `Math.abs` answers. Any other value throws. The interpreter computes
+  // `|x|` of a string or a set as its number of elements, and `Abs` of a list
+  // as the absolute value of each element; this compiled code computes
+  // neither, so it fails instead of answering `NaN`.
+  absAny: (x: unknown): number => {
+    if (typeof x === 'number') return Math.abs(x);
+    if (x === undefined || x === null) return NaN;
+    if (typeof x === 'object' && 're' in x && 'im' in x)
+      return SYS_HELPERS.cabs(x as ComplexResult);
+    throw new TypeError(
+      `Abs: the compiled code computes the absolute value of a number, and the operand is ${describeRuntimeValue(x)}. The interpreter computes |x| of a string or a set as its number of elements.`
+    );
+  },
   // The unsigned pole has no direction: its argument is `NaN`, as in the
   // interpreter, where `atan2(∞, ∞)` would answer `π/4`.
   carg: (z: ComplexResult) =>

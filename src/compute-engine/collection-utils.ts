@@ -3033,6 +3033,25 @@ export function isUnindexedCollectionOperand(x: Expression): boolean {
 }
 
 /**
+ * True when the type of `x` is a set or a string. Then `|x|` (the operator
+ * `Abs`) is the number of elements of `x`, that is `Count(x)`: the
+ * cardinality of a set, and the length of a string.
+ *
+ * Examples of such operands: a `Set` literal, `EmptySet`, an `Interval`, a
+ * number set such as `Integers`, `QuotientRing(Integers, 5)`, `Union(A, B)`,
+ * a symbol declared as a set, a string literal.
+ *
+ * The test reads the TYPE, so that a set-typed symbol with no value (`S`
+ * declared as `set<integer>`) is a cardinality too. A list, a tuple or a
+ * dictionary is not: `Abs` of a list or a tuple is the absolute value of each
+ * element or the norm of a point, and `Abs` of a dictionary is an error.
+ */
+export function isCardinalityOperand(x: Expression): boolean {
+  const type = x.type;
+  return type.matches('set<any>') || type.matches('string');
+}
+
+/**
  * The rows of a broadcast over `items`: the items for which `participates`
  * is true are zipped (shortest length wins, as in {@link zip}), and every
  * other item is repeated WHOLE in each row, a tuple included. {@link zip}

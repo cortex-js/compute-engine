@@ -113,6 +113,7 @@ import {
 import type { FunctionSignature, Type } from '../../common/type/types.js';
 import { flatten } from './flatten.js';
 import { isOperatorDef, isValueDef, withOwnHead } from './utils.js';
+import { isCardinalityOperand } from '../collection-utils.js';
 import {
   annotateFunctionLiteralParams,
   lookupApplicable,
@@ -3396,6 +3397,23 @@ function applyOperatorDefinition(
       canonical: true,
       scope,
     });
+
+  // In set theory `|S|` is the number of elements of the set `S`, and `|w|`
+  // is the length of the string `w`. The LaTeX parser reads every `|…|` as
+  // `Abs`, so the library `Abs` of an operand whose type is a set or a string
+  // is `Count` of it: `Abs(Set(1, 2))` is `Count(Set(1, 2))`, which evaluates
+  // to 2. The rewrite is done here, when the expression is boxed, so the
+  // LaTeX, MathJSON and `ce.function()` routes give the same expression. An
+  // operand that is a list or a tuple keeps `Abs` (the absolute value of
+  // each element, or the norm of a point). A definition of `Abs` that
+  // replaces the library one is not affected.
+  if (
+    name === 'Abs' &&
+    xs.length === 1 &&
+    isCardinalityOperand(xs[0]) &&
+    !shadowsLibraryName(ce, name)
+  )
+    return ce.function('Count', xs, { metadata, scope });
 
   //
   // 3/ Apply `canonical` handler

@@ -332,6 +332,10 @@ describe('a set in an element-wise broadcast', () => {
  * unevaluated (`Floor(Set(1.5, 2.5))`, `Mod(5, Set(2, 3))`). They now give the
  * same error. The list comes from a sweep of every library operator whose
  * parameters are all number types, with `Set(1, 2)` in each position.
+ *
+ * `Abs` is not in the list: `|S|` of a set is the number of its elements,
+ * so `Abs(Set(1, 2))` is `Count(Set(1, 2))`, which is 2 (see
+ * `set-cardinality.test.ts`).
  */
 describe('a set at a numeric parameter is an incompatible-type error', () => {
   const SET_ERROR =
@@ -342,7 +346,6 @@ describe('a set at a numeric parameter is an incompatible-type error', () => {
   // `Imaginary`.
   const OPERATORS: [string, number][] = [
     ['AGM', 1],
-    ['Abs', 1],
     ['AbsArg', 1],
     ['AiryAi', 1],
     ['AiryAiPrime', 1],

@@ -11,7 +11,10 @@ import {
   collectionElementType,
   isBooleanOrBroadcastableBooleanType,
 } from '../../common/type/utils.js';
-import { EXTENDED_REAL_TYPE } from '../../common/type/primitive.js';
+import {
+  COLLECTION_SHAPE_TYPE,
+  EXTENDED_REAL_TYPE,
+} from '../../common/type/primitive.js';
 import type { Type } from '../../common/type/types.js';
 import { flatten } from '../boxed-expression/flatten.js';
 import {
@@ -47,7 +50,6 @@ import {
 import {
   declareTypeSaturatedSet,
   enumerableFromAllSources,
-  enumerableFromSource,
   holdsConditionalValue,
   shapeIncludedIn,
   typeSaturatedShape,
@@ -1352,7 +1354,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     description:
       'Return the elements of the first set that are not in any of the subsequent sets.',
     collection: {
-      isEnumerable: enumerableFromSource,
+      isEnumerable: (expr) => differenceIsEnumerable(expr, memberOf),
       // Three-valued: `x ∈ col ∧ x ∉ s1 ∧ x ∉ s2 ∧ …` with Kleene
       // combination — indeterminate member tests yield `undefined`, not a
       // spurious definitive answer.
@@ -1364,11 +1366,13 @@ export const SETS_LIBRARY: SymbolDefinitions = {
           ...others.map((set) => kleeneNot(set.contains(x))),
         ]);
       },
-      count: (expr) => {
-        if (!isFunction(expr)) return 0;
-        return countMatchingElements(expr, (elem) =>
-          expr.ops.slice(1).every((set) => !set.contains(elem))
-        );
+      count: (expr) => differenceCount(expr, memberOf),
+      // Finite when the first set is finite, whatever the other sets are.
+      isFinite: (expr) => {
+        if (!isFunction(expr)) return undefined;
+        if (expr.ops[0]?.isFiniteCollection === true) return true;
+        const count = differenceCount(expr, memberOf);
+        return count === undefined ? undefined : Number.isFinite(count);
       },
 
       iterator: complementIterator,
@@ -1417,14 +1421,14 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     },
     evaluate: intersection,
     collection: {
-      isEnumerable: enumerableFromAllSources,
+      isEnumerable: intersectionIsEnumerable,
       contains: containsAll,
-      count: (expr) => {
-        if (!isFunction(expr)) return 0;
-        if (expr.ops.some(isUnwalkableSetOperand)) return undefined;
-        return countMatchingElements(expr, (elem) =>
-          expr.ops.slice(1).every((op) => op.contains(elem))
-        );
+      count: intersectionCount,
+      // Finite as soon as one operand is finite, whatever the others are.
+      isFinite: (expr) => {
+        if (!isFunction(expr)) return undefined;
+        if (expr.ops.some((op) => op.isFiniteCollection === true)) return true;
+        return intersectionCount(expr) === Infinity ? false : undefined;
       },
       iterator: intersectionIterator,
     },
@@ -1480,13 +1484,10 @@ export const SETS_LIBRARY: SymbolDefinitions = {
         isFunction(col)
           ? kleeneOr(col.ops.map((op) => op.contains(x)))
           : undefined,
-      count: (col) => {
-        if (isFunction(col) && col.ops.some(isUnwalkableSetOperand))
-          return undefined;
-        return countMatchingUnion(col, (elem, seen) =>
+      count: (col) =>
+        countMatchingUnion(col, (elem, seen) =>
           seen.every((e) => !e.contains(elem))
-        );
-      },
+        ),
       // A union is empty iff every operand is empty (Kleene AND).
       isEmpty: (col) =>
         isFunction(col)
@@ -1535,15 +1536,12 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     },
     evaluate: setMinus,
     collection: {
-      // The iterator and the `count` handler read an undecided membership in
-      // an exclusion operand as "not excluded". When an exclusion operand has
-      // elements that cannot be computed, that reading gives wrong elements,
-      // so the difference cannot be walked and has no count.
-      isEnumerable: (expr) => {
-        if (isFunction(expr) && expr.ops.slice(1).some(isUnwalkableSetOperand))
-          return false;
-        return enumerableFromSource(expr);
-      },
+      // The difference can be walked only when each exclusion that the walk
+      // meets is decided (`differenceIsEnumerable`). An exclusion operand
+      // whose memberships cannot be decided (`Integers` for a symbol, a
+      // collection whose elements cannot be computed) makes the walk give
+      // wrong elements, so the difference is then not walkable.
+      isEnumerable: (expr) => differenceIsEnumerable(expr, setMinusExcludes),
       // Three-valued: `x ∈ col ∧ ¬excluded(v1, x) ∧ …` with Kleene
       // combination (mirrors the `membershipKleene` SetMinus decomposition).
       contains: (expr, x) => {
@@ -1556,13 +1554,13 @@ export const SETS_LIBRARY: SymbolDefinitions = {
           ),
         ]);
       },
-      count: (expr) => {
-        if (!isFunction(expr)) return 0;
-        if (expr.ops.slice(1).some(isUnwalkableSetOperand)) return undefined;
-        return countMatchingElements(expr, (elem) => {
-          const [_col, ...values] = expr.ops;
-          return !values.some((val) => isExcludedBy(val, elem));
-        });
+      count: (expr) => differenceCount(expr, setMinusExcludes),
+      // Finite when the first set is finite, whatever the removed values are.
+      isFinite: (expr) => {
+        if (!isFunction(expr)) return undefined;
+        if (expr.ops[0]?.isFiniteCollection === true) return true;
+        const count = differenceCount(expr, setMinusExcludes);
+        return count === undefined ? undefined : Number.isFinite(count);
       },
       iterator: setMinusIterator,
     },
@@ -1578,7 +1576,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       'Return the symmetric difference of two sets (elements in either set but not both).',
     evaluate: symmetricDifference,
     collection: {
-      isEnumerable: enumerableFromAllSources,
+      isEnumerable: symmetricDifferenceIsEnumerable,
       // Three-valued XOR: decided only when both member tests are decided.
       contains: (expr, x) => {
         if (!isFunction(expr)) return undefined;
@@ -1588,15 +1586,17 @@ export const SETS_LIBRARY: SymbolDefinitions = {
         if (inA === undefined || inB === undefined) return undefined;
         return inA !== inB;
       },
-      count: (expr) => {
-        if (!isFunction(expr)) return 0;
-        if (expr.ops.some(isUnwalkableSetOperand)) return undefined;
-        return countMatchingElements(expr, (elem) => {
-          const [a, b] = expr.ops;
-          const inA = a.contains(elem) ?? false;
-          const inB = b.contains(elem) ?? false;
-          return (inA && !inB) || (!inA && inB);
-        });
+      count: symmetricDifferenceCount,
+      // Finite when both operands are finite, and infinite when exactly one
+      // of them is infinite.
+      isFinite: (expr) => {
+        if (!isFunction(expr)) return undefined;
+        const [a, b] = expr.ops;
+        const aFinite = a?.isFiniteCollection;
+        const bFinite = b?.isFiniteCollection;
+        if (aFinite === true && bFinite === true) return true;
+        if (aFinite === undefined || bFinite === undefined) return undefined;
+        return aFinite === bFinite ? undefined : false;
       },
       iterator: symmetricDifferenceIterator,
     },
@@ -1701,11 +1701,10 @@ function intersection(
   ops: ReadonlyArray<Expression>,
   { engine: ce }: { engine: ComputeEngine }
 ): Expression | undefined {
-  // Stay symbolic unless every operand is a collection and the first is
-  // finite and enumerable (mirrors `union`/`setMinus`). Folding unknown
-  // symbols or tolerated label operands (`H \cap K`, `AC \cap BD`) to
-  // literal elements produced a spurious `EmptySet`, as did an infinite
-  // first operand (`Intersection(Integers, Set(1,2))`).
+  // Stay symbolic unless every operand is a collection and one operand is
+  // finite and enumerable (see below). Folding unknown symbols or tolerated
+  // label operands (`H \cap K`, `AC \cap BD`) to literal elements produced
+  // a spurious `EmptySet`.
   // A single operand is that collection as a set. A set-shaped operand
   // needs no enumeration or dedup — return it directly (what lets
   // `Intersection(Integers)` evaluate to `Integers`). A finite non-set
@@ -1713,36 +1712,55 @@ function intersection(
   // collection stays symbolic.
   if (ops.length === 1 && ops[0].type.matches('set<any>')) return ops[0];
 
+  // An empty operand decides the answer before any membership is asked: the
+  // intersection is empty whatever the other operands are, also when an
+  // operand is a set with no value (`Intersection(A, EmptySet)`).
+  if (
+    ops.some((op) => op.isEmptyCollection === true) &&
+    ops.every((op) => op.isCollection || isValuelessCollectionTyped(op))
+  )
+    return ce.symbol('EmptySet');
+
   if (!ops.every((op) => op.isCollection)) return undefined;
-  const first = ops[0];
-  if (!isWalkableFiniteCollection(first)) return undefined;
-  if ((first.count ?? Infinity) > MAX_SIZE_EAGER_COLLECTION) return undefined;
 
-  // Remove elements that are not in all the other sets. Use `.contains()`
-  // (not `isFiniteIndexedCollection` + `.each()`) since a `Set` is a finite
-  // collection but not an *indexed* one: `isFiniteIndexedCollection(Set(2))`
-  // is `false`, which previously fell through to the "not a collection"
-  // branch and compared each candidate element to the whole `Set` operand
-  // (never matching), so e.g. `Intersection(Set(1,2), Set(2))` always
-  // produced `EmptySet`. `.contains()` also works for non-indexed and
-  // infinite collections (e.g. `Integers`) without enumerating them.
-  //
-  // An operand whose elements cannot be computed (`Linspace(a, 1, 3)` with a
-  // symbolic `a`, `QuotientRing(Integers, 5)`) cannot decide membership, and
-  // an undecided membership there is not an absence: the intersection stays
-  // unevaluated. For the other operands an undecided membership drops the
-  // element, so different symbols are different elements:
-  // `Intersection(Set(a, b), Set(b, c))` is `Set(b)`.
-  //
-  // An empty first operand decides the answer before any membership is
-  // asked: the intersection is empty whatever the other operands are.
-  if (first.isEmptyCollection === true) return ce.symbol('EmptySet');
-  if (ops.some((op) => op.isEnumerableCollection === false)) return undefined;
-  let elements = [...first.each()];
-  for (const op of ops.slice(1))
-    elements = elements.filter((element) => op.contains(element) === true);
+  // Walk a finite operand whose elements can be computed: the first operand
+  // if it is one, otherwise the smallest one. With no such operand, stay
+  // unevaluated (`Intersection(Integers, Interval(0, 3))`). Both operand
+  // orders give the same answer: `Intersection(Integers, Set(1, 2))` and
+  // `Intersection(Set(1, 2), Integers)` are both `Set(1, 2)`.
+  const walked = isWalkableFiniteCollection(ops[0])
+    ? ops[0]
+    : smallestWalkableOperand(ops);
+  if (walked === undefined) return undefined;
+  if ((walked.count ?? Infinity) > MAX_SIZE_EAGER_COLLECTION) return undefined;
 
-  // Preserve set semantics of the result: dedup (the first operand may be a
+  // Keep the elements that every other operand contains (`memberOf`). An
+  // undecided membership in another finite set whose elements can be walked
+  // drops the element, so different symbols are different elements:
+  // `Intersection(Set(a, b), Set(b, c))` is `Set(b)`. An undecided
+  // membership in an infinite operand, or in an operand whose elements cannot
+  // be computed, is not an absence: `x` may be an integer, so
+  // `Intersection(Set(1, x), Integers)` stays unevaluated. A decided
+  // membership in such an operand is used: an integer is not an element of
+  // `QuotientRing(Integers, 5)`, so `Intersection(Set(1),
+  // QuotientRing(Integers, 5))` is `EmptySet`.
+  const others = ops.filter((op) => op !== walked);
+  const elements: Expression[] = [];
+  for (const element of walked.each()) {
+    let inAll: boolean | undefined = true;
+    for (const op of others) {
+      const member = memberOf(op, element);
+      if (member === false) {
+        inAll = false;
+        break;
+      }
+      if (member === undefined) inAll = undefined;
+    }
+    if (inAll === undefined) return undefined;
+    if (inAll) elements.push(element);
+  }
+
+  // Preserve set semantics of the result: dedup (the walked operand may be a
   // list with repeated elements).
   const unique: Expression[] = [];
   for (const elem of elements)
@@ -1826,42 +1844,8 @@ function validateSetArguments(
   );
 }
 
-/** A trailing SetMinus operand excludes its *members* when it is itself a
- * set/collection, and excludes itself as a value otherwise.
- *
- * TEXT is ATOMIC here and excludes ITSELF. A string is an indexed collection
- * of its grapheme clusters, so reading it as a collection made
- * `SetMinus(Set("ab", "cd"), "ab")` remove the CHARACTERS `"a"` and `"b"` —
- * neither of which is a member — and leave `"ab"` in the set it was asked to
- * remove it from. Removing a string's characters is spelled explicitly as
- * `SetMinus(s, Characters(t))` (`docs/STRING_ROADMAP.md`, design constraint
- * 5). */
-function isExcludedBy(val: Expression, x: Expression): boolean {
-  if (val.isCollection && !isTextAtom(val)) return val.contains(x) === true;
-  return val.isSame(x);
-}
-
 /**
- * True when an operand of a set operator is a collection whose elements
- * cannot be computed (`QuotientRing(Integers, 5)`, `Linspace(a, 1, 3)` with a
- * symbolic `a`, `Range(1, n)`) and that is not provably empty. Its `each()`
- * yields nothing and its membership test is often undecided. The `count`
- * handlers of the set operators walk the operands and read an undecided
- * membership as an absence (`isExcludedBy` reads it as "not excluded"), so
- * with such an operand they would count wrong elements. They decline instead.
- */
-function isUnwalkableSetOperand(val: Expression): boolean {
-  return (
-    val.isCollection &&
-    !isTextAtom(val) &&
-    val.isEnumerableCollection === false &&
-    val.isEmptyCollection !== true
-  );
-}
-
-/**
- * Three-valued version of `isExcludedBy` for the `SetMinus.contains`
- * handler: `true` when `x` is definitely excluded by the operand, `false`
+ * The exclusion test of the `SetMinus.contains` handler: `true` when `x` is definitely excluded by the operand, `false`
  * when definitely not, `undefined` when indeterminate.
  */
 function isExcludedByKleene(
@@ -1869,8 +1853,9 @@ function isExcludedByKleene(
   val: Expression,
   x: Expression
 ): boolean | undefined {
-  // Text is atomic — see `isExcludedBy`, whose rule this mirrors: a string
-  // operand excludes itself as a value, never its characters as members.
+  // Text is atomic — see `setMinusExcludes`, whose rule this mirrors: a
+  // string operand excludes itself as a value, never its characters as
+  // members.
   if (val.isCollection && !isTextAtom(val)) return val.contains(x);
   // A valueless collection-typed operand excludes its MEMBERS, which are not
   // knowable yet — so the answer is UNDECIDED, not the scalar disequality
@@ -1994,7 +1979,7 @@ function membershipKleene(
 
   // 1. SetMinus query decomposition (signature is `(set, value*)`: trailing
   //    operands exclude their members when they are collections, themselves
-  //    otherwise — mirroring `isExcludedBy`)
+  //    otherwise — mirroring `setMinusExcludes`)
   if (isFunction(collection, 'SetMinus') && collection.nops >= 1) {
     const [base, ...excluded] = collection.ops;
     let result = membershipKleene(ce, x, base, depth + 1);
@@ -2149,39 +2134,45 @@ function setMinus(
   const [col, ...values] = ops;
   if (!col || !isWalkableFiniteCollection(col)) return undefined;
 
+  // An empty source is empty whatever is removed from it, also when a
+  // removed operand is a set with no value (`SetMinus(EmptySet, A)`).
+  if (col.isEmptyCollection === true) return ce.symbol('EmptySet');
+
   // An exclusion operand that is DEFINITELY collection-typed but carries no
   // value — a symbol declared `list<number>`, or a call whose head returns one
-  // — excludes its MEMBERS, and they are not knowable yet. `isExcludedBy` is
-  // two-valued and would fall to its scalar arm (`val.isSame(element)`, always
-  // false here), so every element survived and the fold committed a set that
-  // the same expression contradicts once the symbol is assigned:
+  // — excludes its MEMBERS, and they are not knowable yet. Such an operand is
+  // not a collection value, so `setMinusExcludes` would compare it as a value
+  // (`val.isSame(element)`, always false here): every element would survive,
+  // and the fold would commit a set that the same expression contradicts once
+  // the symbol is assigned:
   // `Element(1, SetMinus(Set(1,2), L))` answered `True`, and `False` once
   // `L := [1]`. INVERTING a membership answer is the worst shape this can
   // take, because a wrong `True` feeds assumption discharge. Stay symbolic;
   // the `contains`/iterator handlers answer once `L` has a value.
   if (values.some(isValuelessCollectionTyped)) return undefined;
 
-  // An exclusion operand whose elements cannot be computed
-  // (`QuotientRing(Integers, 5)`, `Linspace(a, 1, 3)` with a symbolic `a`,
-  // `Range(1, n)`) often cannot decide membership. `isExcludedBy` reads an
-  // undecided membership as "not excluded", so the element stayed and
-  // `SetMinus(Set(1), QuotientRing(Integers, 5))` gave `Set(1)`. An
-  // undecided membership there is not an absence: stay unevaluated. This is
-  // the rule of `intersection()`. For an operand whose elements can be
-  // computed, an undecided membership still keeps the element, so different
-  // symbols are different elements.
-  const unwalkable = values.filter(isUnwalkableSetOperand);
-  const all = [...col.each()];
-  if (
-    all.some((element) =>
-      unwalkable.some((val) => val.contains(element) === undefined)
-    )
-  )
-    return undefined;
-
-  const elements = all.filter(
-    (element) => !values.some((val) => isExcludedBy(val, element))
-  );
+  // An element is removed when a value excludes it (`setMinusExcludes`). An
+  // undecided membership in a finite set whose elements can be walked keeps
+  // the element, so different symbols are different elements:
+  // `SetMinus(Set(1, x), Set(1))` is `Set(x)`. An undecided membership in an
+  // infinite set (`Integers`), or in a collection whose elements cannot be
+  // computed (`QuotientRing(Integers, 5)`, `Range(1, n)`), is not an
+  // absence: `x` may be an integer, so `SetMinus(Set(1, x), Integers)` stays
+  // unevaluated.
+  const elements: Expression[] = [];
+  for (const element of col.each()) {
+    let excluded: boolean | undefined = false;
+    for (const val of values) {
+      const result = setMinusExcludes(val, element);
+      if (result === true) {
+        excluded = true;
+        break;
+      }
+      if (result === undefined) excluded = undefined;
+    }
+    if (excluded === undefined) return undefined;
+    if (!excluded) elements.push(element);
+  }
 
   if (elements.length === 0) return ce.symbol('EmptySet');
   return ce._fn('Set', elements);
@@ -2348,76 +2339,473 @@ function* unionIterator(
   }
 }
 
+// The held forms of `Intersection`, `SetMinus`, `Complement` and
+// `SymmetricDifference` are walked by their iterators, and by the `count`
+// handlers below. A walk decides, for each element of a walked operand,
+// whether the element is in the result. That decision is three-valued
+// (`memberOf`, `setMinusExcludes`): when it is undecided, the walk cannot give
+// the elements, and the operation reports that it cannot be walked (its
+// `isEnumerable` handler answers `false`). An iterator then yields nothing,
+// never a part of the elements. An operation whose walk would never end (an
+// infinite operand, with no finite operand to walk) cannot be walked either,
+// except when every element of the walked operand is in the result.
+
 function* setMinusIterator(
   expr: Expression
 ): Generator<Expression, undefined, any> {
-  if (!isFunction(expr)) return;
-  const [col, ...values] = expr.ops;
-  for (const elem of col.each()) {
-    if (!values.some((val) => isExcludedBy(val, elem))) {
-      yield elem;
-    }
-  }
+  yield* differenceIterator(expr, setMinusExcludes);
 }
+
 function* complementIterator(
   expr: Expression
 ): Generator<Expression, undefined, any> {
-  if (!isFunction(expr)) return;
-  const [col, ...others] = expr.ops;
+  yield* differenceIterator(expr, memberOf);
+}
+
+function* differenceIterator(
+  expr: Expression,
+  excludes: (val: Expression, elem: Expression) => boolean | undefined
+): Generator<Expression, undefined, any> {
+  if (!isFunction(expr) || !differenceIsEnumerable(expr, excludes)) return;
+  const [col, ...values] = expr.ops;
+  const isNew = firstOccurrence(col);
   for (const elem of col.each()) {
-    if (others.every((set) => !set.contains(elem))) {
-      yield elem;
-    }
+    const keep = notExcluded(values, elem, excludes);
+    if (keep === undefined) return;
+    if (keep && isNew(elem)) yield elem;
   }
 }
 
 function* intersectionIterator(
   expr: Expression
 ): Generator<Expression, undefined, any> {
-  if (!isFunction(expr)) return;
-  for (const elem of expr.ops[0].each()) {
-    if (expr.ops.slice(1).every((op) => op.contains(elem))) {
-      yield elem;
-    }
+  if (!isFunction(expr) || !intersectionIsEnumerable(expr)) return;
+  const walked = intersectionWalkedOperand(expr.ops);
+  if (walked === undefined) {
+    // Every element of an infinite operand that is a subset of every other
+    // operand is in the intersection.
+    const subset = infiniteSubsetOperand(expr.ops);
+    if (subset !== undefined) yield* subset.each();
+    return;
+  }
+  const others = expr.ops.filter((op) => op !== walked);
+  const isNew = firstOccurrence(walked);
+  for (const elem of walked.each()) {
+    const keep = inEveryOperand(others, elem);
+    if (keep === undefined) return;
+    if (keep && isNew(elem)) yield elem;
   }
 }
+
 function* symmetricDifferenceIterator(
   expr: Expression
 ): Generator<Expression, undefined, any> {
-  if (!isFunction(expr)) return;
+  if (!isFunction(expr) || !symmetricDifferenceIsEnumerable(expr)) return;
   const [a, b] = expr.ops;
-  for (const elem of a.each()) {
-    if (!(b.contains(elem) ?? false)) {
-      yield elem;
-    }
-  }
-  for (const elem of b.each()) {
-    if (!(a.contains(elem) ?? false)) {
-      yield elem;
+  // Walk a finite operand first: the walk of an infinite operand never ends,
+  // and the elements of the other operand would never come.
+  const [first, second] = isWalkableFiniteCollection(a) ? [a, b] : [b, a];
+  for (const [from, other] of [
+    [first, second],
+    [second, first],
+  ]) {
+    const isNew = firstOccurrence(from);
+    for (const elem of from.each()) {
+      const member = memberOf(other, elem);
+      if (member === undefined) return;
+      if (!member && isNew(elem)) yield elem;
     }
   }
 }
 
-// Helpers for efficient counting of set elements
-function countMatchingElements(
-  expr: Expression,
-  filter: (elem: Expression) => boolean
-): number {
-  if (!isFunction(expr)) return 0;
-  if (expr.ops.some((op) => op.count === Infinity)) return Infinity;
+/**
+ * Whether the operand `op` of a set operator contains `elem`, for the walks
+ * and the `count` handlers of the set operators.
+ *
+ * An undecided membership in a finite collection whose elements can be
+ * walked (a `Set` literal) is read as "not a member": different symbols are
+ * different elements, as in the evaluate handlers of the set operators
+ * (`intersection()`, `setMinus()`, `symmetricDifference()`). For any other
+ * operand (an infinite set such as `Integers`, a collection whose elements
+ * cannot be computed, a held set operation that cannot be walked), an
+ * undecided membership stays `undefined`.
+ */
+function memberOf(op: Expression, elem: Expression): boolean | undefined {
+  const result = op.contains(elem);
+  if (result !== undefined) return result;
+  return isWalkableFiniteCollection(op) ? false : undefined;
+}
+
+/**
+ * True when every membership test against `op` is decided (see `memberOf`):
+ * `op` is a finite collection whose elements can be walked.
+ */
+function decidesMembership(op: Expression): boolean {
+  return isWalkableFiniteCollection(op);
+}
+
+/** Three-valued: is `elem` in every operand of `ops`? */
+function inEveryOperand(
+  ops: ReadonlyArray<Expression>,
+  elem: Expression
+): boolean | undefined {
+  let result: boolean | undefined = true;
+  for (const op of ops) {
+    const member = memberOf(op, elem);
+    if (member === false) return false;
+    if (member === undefined) result = undefined;
+  }
+  return result;
+}
+
+/** Three-valued: does no value of `values` exclude `elem`? */
+function notExcluded(
+  values: ReadonlyArray<Expression>,
+  elem: Expression,
+  excludes: (val: Expression, elem: Expression) => boolean | undefined
+): boolean | undefined {
+  let result: boolean | undefined = true;
+  for (const val of values) {
+    const excluded = excludes(val, elem);
+    if (excluded === true) return false;
+    if (excluded === undefined) result = undefined;
+  }
+  return result;
+}
+
+/**
+ * A test that is true the first time it sees an element of the walk of
+ * `op`, and false when it sees the same element again. A set and a `Range`
+ * cannot hold the same element two times, so for them every element is new
+ * and nothing is kept. A list operand (`Intersection` accepts one) can. The
+ * elements are grouped by their hash, so that the test is linear. Call the
+ * test only for the elements that the walk keeps, so that only those are
+ * stored.
+ */
+function firstOccurrence(op: Expression): (elem: Expression) => boolean {
+  if (op.type.matches('set<any>') || op.operator === 'Range') return () => true;
+  const seen = new Map<number, Expression[]>();
+  return (elem) => {
+    const bucket = seen.get(elem.hash);
+    if (bucket?.some((x) => x.isSame(elem))) return false;
+    if (bucket) bucket.push(elem);
+    else seen.set(elem.hash, [elem]);
+    return true;
+  };
+}
+
+/**
+ * The number of distinct elements of the finite collection `op` for which
+ * `keep` is true. `keep` is three-valued: an undecided element makes the
+ * count not known (`undefined`). The elements are walked one at a time, and
+ * are not copied.
+ */
+function countDistinct(
+  op: Expression,
+  keep: (elem: Expression) => boolean | undefined
+): number | undefined {
+  const isNew = firstOccurrence(op);
   let count = 0;
-  for (const elem of expr.ops[0].each()) {
-    if (filter(elem)) count += 1;
+  for (const elem of op.each()) {
+    const kept = keep(elem);
+    if (kept === undefined) return undefined;
+    if (kept && isNew(elem)) count += 1;
   }
   return count;
 }
 
+/**
+ * True when the exclusion operand `val` of `SetMinus` or `Complement`
+ * removes a finite number of elements: it is a finite collection, or it is a
+ * value whose type cannot be a collection (`SetMinus(S, 2)` removes the
+ * element 2).
+ */
+function removesFinitelyMany(val: Expression): boolean {
+  if (val.isCollection && !isTextAtom(val))
+    return val.isFiniteCollection === true;
+  if (isTextAtom(val)) return true;
+  return !typesOverlap(val.type.type, COLLECTION_SHAPE_TYPE);
+}
+
+/**
+ * The operand that the walk of `Intersection(…ops)` walks: the first operand
+ * if it is a finite collection whose elements can be walked, otherwise the
+ * smallest such operand. `undefined` when there is none.
+ */
+function intersectionWalkedOperand(
+  ops: ReadonlyArray<Expression>
+): Expression | undefined {
+  return isWalkableFiniteCollection(ops[0])
+    ? ops[0]
+    : smallestWalkableOperand(ops);
+}
+
+/**
+ * An infinite operand of `Intersection(…ops)` whose elements can be walked
+ * and that is a subset of every other operand (`Integers` in
+ * `Intersection(Integers, RealNumbers)`), or `undefined`. Each element of
+ * such an operand is in the intersection, so the intersection is infinite.
+ */
+function infiniteSubsetOperand(
+  ops: ReadonlyArray<Expression>
+): Expression | undefined {
+  return ops.find(
+    (op) =>
+      op.isFiniteCollection === false &&
+      op.isEnumerableCollection === true &&
+      ops.every((other) => other === op || op.subsetOf(other, false) === true)
+  );
+}
+
+/**
+ * The number of elements of `Intersection(…ops)`.
+ *
+ * - An operand with no value: not known.
+ * - An empty operand: 0.
+ * - At least one finite operand whose elements can be walked: walk it (see
+ *   `intersectionWalkedOperand`), and count its elements that every other
+ *   operand contains. An undecided membership (see `memberOf`) makes the
+ *   count not known. `Intersection(Integers, Set(1, 2))` is 2: an infinite
+ *   operand does not make the intersection infinite.
+ * - No such operand: infinite only when an infinite operand is a subset of
+ *   every other operand (`Intersection(Integers, RealNumbers)`). Otherwise
+ *   not known: `Intersection(Integers, Interval(0, 3))` is finite, but no
+ *   operand can be walked.
+ */
+function intersectionCount(expr: Expression): number | undefined {
+  if (!isFunction(expr)) return 0;
+  const ops = expr.ops;
+  // An empty operand decides the count first, even when another operand has
+  // no value: `Intersection(A, EmptySet)` is empty.
+  if (ops.some((op) => op.isEmptyCollection === true)) return 0;
+  if (ops.some(isValuelessCollectionTyped)) return undefined;
+  const walked = intersectionWalkedOperand(ops);
+  if (walked !== undefined) {
+    const others = ops.filter((op) => op !== walked);
+    return countDistinct(walked, (elem) => inEveryOperand(others, elem));
+  }
+  const provenInfinite = ops.some(
+    (op) =>
+      op.isFiniteCollection === false &&
+      ops.every((other) => other === op || op.subsetOf(other, false) === true)
+  );
+  return provenInfinite ? Infinity : undefined;
+}
+
+/**
+ * True when the walk of `Intersection(…ops)` gives its elements: a finite
+ * walked operand whose memberships in the other operands are all decided,
+ * or an infinite operand that is a subset of every other operand.
+ */
+function intersectionIsEnumerable(expr: Expression): boolean {
+  if (!isFunction(expr)) return false;
+  const ops = expr.ops;
+  // An empty operand makes the intersection empty: its walk yields nothing,
+  // and that is the answer (the walk walks the empty operand).
+  if (ops.some((op) => op.isEmptyCollection === true)) return true;
+  if (ops.some(isValuelessCollectionTyped)) return false;
+  const walked = intersectionWalkedOperand(ops);
+  if (walked === undefined) return infiniteSubsetOperand(ops) !== undefined;
+  // When every other operand decides its memberships, no walk is needed to
+  // know that the walk is decided. Otherwise the count (computed once and
+  // kept) walks the operand.
+  if (ops.every((op) => op === walked || decidesMembership(op))) return true;
+  return expr.count !== undefined;
+}
+
+/**
+ * The operand of `ops` with the fewest elements among the finite operands
+ * whose elements can be walked, or `undefined` when there is none.
+ */
+function smallestWalkableOperand(
+  ops: ReadonlyArray<Expression>
+): Expression | undefined {
+  let result: Expression | undefined;
+  let size = Infinity;
+  for (const op of ops) {
+    if (!isWalkableFiniteCollection(op)) continue;
+    const n = op.count ?? Infinity;
+    if (result === undefined || n < size) {
+      result = op;
+      size = n;
+    }
+  }
+  return result;
+}
+
+/**
+ * The number of elements of `SetMinus(col, …values)` or
+ * `Complement(col, …values)`: the elements of `col` that no value excludes.
+ * `excludes` is three-valued.
+ *
+ * - An operand with no value: not known.
+ * - `col` is finite and its elements can be walked: walk it, and count the
+ *   elements that no operand excludes. An undecided exclusion makes the
+ *   count not known.
+ * - `col` is infinite and each value removes a finite number of elements:
+ *   infinite.
+ * - Otherwise not known: `SetMinus(Integers, Integers)` is empty.
+ */
+function differenceCount(
+  expr: Expression,
+  excludes: (val: Expression, elem: Expression) => boolean | undefined
+): number | undefined {
+  if (!isFunction(expr)) return 0;
+  const [col, ...values] = expr.ops;
+  // An empty source decides the count first, even when a value has no
+  // value: `SetMinus(EmptySet, A)` is empty.
+  if (col === undefined || col.isEmptyCollection === true) return 0;
+  if (expr.ops.some(isValuelessCollectionTyped)) return undefined;
+  if (isWalkableFiniteCollection(col))
+    return countDistinct(col, (elem) => notExcluded(values, elem, excludes));
+  if (col.isFiniteCollection === false && values.every(removesFinitelyMany))
+    return Infinity;
+  return undefined;
+}
+
+/**
+ * True when the walk of `SetMinus(col, …values)` or `Complement(col,
+ * …values)` gives its elements: the walk of `col` ends or every element of
+ * it can be decided, and each exclusion is decided.
+ *
+ * - `col` finite and walkable: every exclusion of its elements is decided.
+ *   With values that decide their memberships (finite walkable collections,
+ *   or a value that is not a collection for `SetMinus`), no walk is needed;
+ *   otherwise the count (computed once and kept) walks `col`.
+ * - `col` infinite and walkable: each value removes a finite number of
+ *   elements, and decides its memberships. The walk then never meets an
+ *   undecided exclusion.
+ */
+function differenceIsEnumerable(
+  expr: Expression,
+  excludes: (val: Expression, elem: Expression) => boolean | undefined
+): boolean {
+  if (!isFunction(expr)) return false;
+  const [col, ...values] = expr.ops;
+  // An empty source: the walk yields nothing, and that is the answer.
+  if (col === undefined || col.isEmptyCollection === true) return true;
+  if (expr.ops.some(isValuelessCollectionTyped)) return false;
+  const decided = values.every(
+    (val) =>
+      decidesMembership(val) ||
+      (excludes === setMinusExcludes && !isCollectionValue(val))
+  );
+  if (isWalkableFiniteCollection(col))
+    return decided || expr.count !== undefined;
+  return (
+    col.isFiniteCollection === false &&
+    col.isEnumerableCollection === true &&
+    values.every(removesFinitelyMany) &&
+    decided
+  );
+}
+
+/**
+ * True when `val` is a collection (not a string) or has a type that can be a
+ * collection. An exclusion value of `SetMinus` that is not such a value
+ * excludes only itself.
+ */
+function isCollectionValue(val: Expression): boolean {
+  if (isTextAtom(val)) return false;
+  return val.isCollection || typesOverlap(val.type.type, COLLECTION_SHAPE_TYPE);
+}
+
+/**
+ * Whether the value `val` of `SetMinus(col, …values)` excludes `elem`. A
+ * collection excludes its members (see `memberOf`), and any other value
+ * excludes itself.
+ *
+ * Text is atomic here and excludes itself. A string is an indexed collection
+ * of its grapheme clusters, so reading it as a collection would make
+ * `SetMinus(Set("ab", "cd"), "ab")` remove the characters `"a"` and `"b"`,
+ * which are not members, and keep `"ab"`. Removing the characters of a
+ * string is written `SetMinus(s, Characters(t))` (`docs/STRING_ROADMAP.md`,
+ * design constraint 5).
+ */
+function setMinusExcludes(
+  val: Expression,
+  elem: Expression
+): boolean | undefined {
+  if (val.isCollection && !isTextAtom(val)) return memberOf(val, elem);
+  return val.isSame(elem);
+}
+
+/**
+ * The number of elements of `SymmetricDifference(a, b)`.
+ *
+ * - An operand with no value: not known.
+ * - Both operands finite and walkable: the elements of `a` that are not in
+ *   `b`, plus the elements of `b` that are not in `a`.
+ * - One operand infinite and the other finite: infinite.
+ * - Otherwise not known: `SymmetricDifference(Integers, Integers)` is empty.
+ */
+function symmetricDifferenceCount(expr: Expression): number | undefined {
+  if (!isFunction(expr)) return 0;
+  if (expr.ops.some(isValuelessCollectionTyped)) return undefined;
+  const [a, b] = expr.ops;
+  if (a === undefined || b === undefined) return undefined;
+  if (isWalkableFiniteCollection(a) && isWalkableFiniteCollection(b)) {
+    const fromA = countDistinct(a, (elem) => negate(memberOf(b, elem)));
+    const fromB = countDistinct(b, (elem) => negate(memberOf(a, elem)));
+    if (fromA === undefined || fromB === undefined) return undefined;
+    return fromA + fromB;
+  }
+  const aFinite = a.isFiniteCollection;
+  const bFinite = b.isFiniteCollection;
+  if (
+    (aFinite === false && bFinite === true) ||
+    (aFinite === true && bFinite === false)
+  )
+    return Infinity;
+  return undefined;
+}
+
+/**
+ * True when the walk of `SymmetricDifference(a, b)` gives its elements: both
+ * operands are finite and walkable, or one is finite and walkable and the
+ * other is infinite and walkable, and each element of the finite operand has
+ * a decided membership in the infinite one.
+ */
+function symmetricDifferenceIsEnumerable(expr: Expression): boolean {
+  if (!isFunction(expr)) return false;
+  if (expr.ops.some(isValuelessCollectionTyped)) return false;
+  const [a, b] = expr.ops;
+  if (a === undefined || b === undefined) return false;
+  const aWalkable = isWalkableFiniteCollection(a);
+  const bWalkable = isWalkableFiniteCollection(b);
+  if (aWalkable && bWalkable) return true;
+  const [finite, infinite] = aWalkable ? [a, b] : [b, a];
+  if (!isWalkableFiniteCollection(finite)) return false;
+  if (
+    infinite.isFiniteCollection !== false ||
+    infinite.isEnumerableCollection !== true
+  )
+    return false;
+  for (const elem of finite.each())
+    if (memberOf(infinite, elem) === undefined) return false;
+  return true;
+}
+
+function negate(value: boolean | undefined): boolean | undefined {
+  return value === undefined ? undefined : !value;
+}
+
+/**
+ * The number of elements of `Union(…ops)`. `isUnique` tells whether an
+ * element of an operand is in none of the operands before it.
+ *
+ * - An infinite operand: infinite, even when another operand has no value.
+ * - An operand that is not a finite collection whose elements can be walked
+ *   (an operand with no value, a held set operation that cannot be walked,
+ *   an operand whose walk would never end): not known.
+ */
 function countMatchingUnion(
   expr: Expression,
   isUnique: (elem: Expression, seen: Expression[]) => boolean
-): number {
+): number | undefined {
   if (!isFunction(expr)) return 0;
   if (expr.ops.some((op) => op.count === Infinity)) return Infinity;
+  if (!expr.ops.every(isWalkableFiniteCollection)) return undefined;
   const seen: Expression[] = [];
   let count = 0;
   for (const op of expr.ops) {

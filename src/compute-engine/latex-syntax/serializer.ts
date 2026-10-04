@@ -1,5 +1,10 @@
-import type { MathJsonExpression } from '../../math-json/types.js';
+import type {
+  DictionaryValue,
+  MathJsonDictionaryObject,
+  MathJsonExpression,
+} from '../../math-json/types.js';
 import {
+  isDictionaryObject,
   nops,
   stringValue,
   operator,
@@ -39,8 +44,10 @@ import { complexPartShape, serializeNumber } from './serialize-number.js';
 import { SYMBOLS } from './dictionary/definitions-symbols.js';
 import {
   DELIMITERS_SHORTHAND,
+  isKeywordText,
   isSelfDelimitingBlockLatex,
 } from './dictionary/definitions-core.js';
+import { resolveUnitText } from './dictionary/definitions-units.js';
 import { EMOJIS } from '../../math-json/symbols.js';
 
 // ---------------------------------------------------------------------------
@@ -186,6 +193,7 @@ export class Serializer {
       dmsFormat: false,
       angleNormalization: 'none',
       readsAsPointList: undefined,
+      readsAsCardinality: undefined,
       exponentialE: '\\exponentialE',
       ...normalizeStyleOptions(options),
     } as Required<ResolvedSerializeLatexOptions>;
@@ -563,14 +571,19 @@ export class Serializer {
         //
         // 1. Is it a number
         //
-        const numericValue = serializeNumber(expr, this.options);
+        // A JSON string is a number only when it has the form of one: the
+        // string shorthand `"50%"` is the string "50%", not the number 50.
+        const numericValue =
+          typeof expr === 'string' && !isNumberExpression(expr)
+            ? ''
+            : serializeNumber(expr, this.options);
         if (numericValue) return numericValue;
 
         //
         // 2. Is it a string?
         //
         const s = stringValue(expr);
-        if (s !== null) return `\\text{${s}}`;
+        if (s !== null) return serializeString(s);
 
         //
         // 3. Is it a symbol?
@@ -593,7 +606,19 @@ export class Serializer {
         }
 
         //
-        // 5. Unknown expression
+        // 5. Is it a dictionary object (`{dict: …}`)? It is written as the
+        //    application `Dictionary(KeyValuePair(key, value), …)`.
+        //
+        if (isDictionaryObject(expr)) {
+          const fn = dictionaryAsApplication(expr);
+          return this.serializeFunction(
+            fn,
+            this.dictionary.ids.get('Dictionary')
+          );
+        }
+
+        //
+        // 6. Unknown expression
         //
         // This doesn't look like a symbol, or a function,
         // or anything we were expecting.
@@ -985,4 +1010,99 @@ export function serializeLatex(
 ): string {
   const serializer = new Serializer(dict, options);
   return serializer.serialize(expr);
+}
+
+/**
+ * The application `["Dictionary", ["KeyValuePair", key, value], …]` that has
+ * the same entries as the dictionary object `expr`, in the same order. Each
+ * key is a string.
+ */
+function dictionaryAsApplication(
+  expr: MathJsonDictionaryObject
+): MathJsonExpression {
+  return [
+    'Dictionary',
+    ...Object.entries(expr.dict).map(
+      ([key, value]) =>
+        [
+          'KeyValuePair',
+          { str: key },
+          dictionaryValueAsExpression(value),
+        ] as MathJsonExpression
+    ),
+  ];
+}
+
+/**
+ * The MathJSON expression for a value of a dictionary object. The values of a
+ * `{dict: …}` object are data: a JavaScript string is a string (not a
+ * symbol), an array is a list, and a boolean is `True` or `False`. This is
+ * how the compute engine reads them (`dictionaryValueToBoxedExpression()` in
+ * `boxed-dictionary.ts`). An object value (`{num}`, `{str}`, `{sym}`, `{fn}`,
+ * `{dict}`) is a MathJSON expression already.
+ */
+function dictionaryValueAsExpression(
+  value: DictionaryValue
+): MathJsonExpression {
+  if (typeof value === 'string') return { str: value };
+  if (typeof value === 'boolean') return value ? 'True' : 'False';
+  if (typeof value === 'number') return value;
+  if (Array.isArray(value))
+    return ['List', ...value.map(dictionaryValueAsExpression)];
+  return value as MathJsonExpression;
+}
+
+/**
+ * A string is written `\text{…}`. When the parser reads that content as
+ * something other than a string, the string is written with double quotes,
+ * which the parser always reads as a string:
+ * - a unit: `\text{m}` is the unit meter, `\text{m/s}` a unit quotient, and
+ *   `\text{miles per hour}` a unit too (`resolveUnitText()`);
+ * - a keyword: `\text{and}` is the conjunction (`isKeywordText()`).
+ *
+ * The test is a lookup in the unit and keyword tables, not a parse of the
+ * string.
+ *
+ * Inside `\text{…}`, a character that LaTeX reads as a command or a
+ * delimiter is escaped (`escapeText()`): `\$`, `\%`, `\{`, `\}`, `\#`, `\&`,
+ * `\_`, `\textasciitilde`, `\textasciicircum`, `\textbackslash`. The parser
+ * reads each escape back as the character (`parseTextRun()`). A string with
+ * such a character is not written with double quotes: inside double quotes
+ * these characters are not escaped (`"$"` is a syntax error).
+ */
+function serializeString(s: string): string {
+  if (
+    !TEXT_SPECIAL_CHARACTERS.test(s) &&
+    !s.includes('"') &&
+    (isKeywordText(s) || resolveUnitText(s) !== null)
+  )
+    return `"${s}"`;
+  return `\\text{${escapeText(s)}}`;
+}
+
+/** The characters that `escapeText()` escapes. */
+const TEXT_SPECIAL_CHARACTERS = /[\\{}$%#&_~^]/;
+
+/** The escape in `\text{…}` of each character of `TEXT_SPECIAL_CHARACTERS`. */
+const TEXT_ESCAPES: Readonly<Record<string, string>> = {
+  '\\': '\\textbackslash{}',
+  '{': '\\{',
+  '}': '\\}',
+  '$': '\\$',
+  '%': '\\%',
+  '#': '\\#',
+  '&': '\\&',
+  '_': '\\_',
+  '~': '\\textasciitilde{}',
+  '^': '\\textasciicircum{}',
+};
+
+/**
+ * The string `s` with each character that LaTeX reads as a command or a
+ * delimiter inside `\text{…}` escaped, so that the parser reads the content
+ * back as `s`.
+ */
+function escapeText(s: string): string {
+  if (!TEXT_SPECIAL_CHARACTERS.test(s)) return s;
+  return s.replace(/[\\{}$%#&_~^]/g, (c) => TEXT_ESCAPES[c]);
 }

@@ -423,6 +423,7 @@ import {
   broadcastSiblingType,
   isTextAtom,
   isTuple,
+  isCardinalityOperand,
   isShapedNumericType,
   resolveShapedTypeAlias,
   unionHasGenuineScalarBranch,
@@ -11478,6 +11479,13 @@ function evaluateAbs(
   numericApproximation?: boolean
 ): Expression | undefined {
   const ce = arg.engine;
+  // `|S|` of a set or a string is the number of its elements. Boxing already
+  // writes `Abs` of such an operand as `Count` (`isCardinalityOperand`). This
+  // arm is for an operand that becomes a set only when it is evaluated: the
+  // parameter `s` of `s ↦ |s|` applied to a set, or a symbol of type `any`
+  // that holds a set.
+  if (isCardinalityOperand(arg))
+    return ce.function('Count', [arg]).evaluate({ numericApproximation });
   // A fixed-arity point: |(x,y)| is the Euclidean norm — the single-bar
   // spelling of the vector magnitude (Desmos convention; matches the
   // `\lVert…\rVert` parse). `isTuple` is type-based, so a tuple-typed

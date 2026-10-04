@@ -5508,34 +5508,6 @@ recurring bug class (A3, G3, the sets/Union/Range contains family, NaN
 comparisons); validation-by-corpus (the Fungrim harness) found 15 engine bugs
 that targeted review missed — keep running it.
 
-### `|S|` of a set should be the number of its elements (OPEN, user request 2026-10-03)
-
-In set theory `|S|` is the size of `S` (its cardinality). The LaTeX parser
-reads every `|…|` as `Abs`, and `Abs` of a set is an `incompatible-type`
-error. Measured at HEAD `4a0b1edd`:
-
-- `|\{1,2\}|` and `\left|\{1,2,3\}\right|` are `Abs(Set(…))`, which evaluates to
-  `Error(ErrorCode("incompatible-type", "number", "set<integer>"), …)`. The
-  wanted answers are `2` and `3`.
-- `|\mathbb{Z}/5\mathbb{Z}|` and `|A \cup S|` give the same error. The wanted
-  answers are `5` and `Count(Union(A, S))`.
-- `|S|` for a declared `S: set<integer>` with no value stays `Abs(S)`, which
-  is the wrong operator for a set.
-- `|[1, 2, 3]|` is `[1, 2, 3]`, the element-wise absolute value of a list.
-  This must not change: only an operand that is not an indexed collection
-  (a set, an interval, `QuotientRing(Integers, n)`) is a cardinality.
-
-The change: `Abs` of an operand whose type is a set (not an indexed
-collection) is `Count` of it. Do this in the `Abs` canonical or evaluate
-handler, so that the MathJSON routes behave as the LaTeX route does, and not
-in the parser alone. An infinite set gives the answer that `Count` gives for
-it. `Count` of a set serializes as `|S|`, so that the LaTeX round trip
-is exact. Two related notations are also wrong:
-
-- `\#S` parses to `Tuple("hash", S)`. It should be `Count(S)`.
-- `\operatorname{card}(S)` is an unknown function `card`. It should be
-  `Count(S)`.
-
 ### A residue class that only a function returns is not protected from number rules (OPEN, found 2026-10-04)
 
 An expression that holds a `ResidueClass` is folded only by the rules of

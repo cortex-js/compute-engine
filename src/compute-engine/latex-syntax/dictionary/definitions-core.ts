@@ -1154,6 +1154,17 @@ const KEYWORDS: KeywordDef[] = [
 ];
 
 /**
+ * True when the braced content `text` of `\text{…}` is the surface of a
+ * keyword (`and`, `if`, `such that`), which the parser can read as that
+ * keyword instead of a string. Runs of white space count as one space, as in
+ * `matchBracedKeyword()`.
+ */
+export function isKeywordText(text: string): boolean {
+  const normalized = text.trim().replace(/\s+/g, ' ');
+  return KEYWORDS.some((kw) => kw.surface === normalized);
+}
+
+/**
  * Generate the LaTeX dictionary entries for every keyword in `KEYWORDS`.
  *
  * For each keyword we emit a `\text{…}`- and a `\keyword{…}`-triggered entry of
@@ -2305,6 +2316,28 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   },
 
   { name: 'Tuple', serialize: serializeTuple },
+  // A dictionary has no notation of its own in LaTeX. It is written as a
+  // function application, which the parse of a function reads back as the
+  // same dictionary:
+  // `\operatorname{Dictionary}(\operatorname{KeyValuePair}(\text{a}, 1))`. A
+  // `{dict: …}` object is written in the same form (`Serializer.serialize()`).
+  {
+    name: 'Dictionary',
+    serialize: (serializer, expr) =>
+      joinLatex(['\\operatorname{Dictionary}', serializer.wrapArguments(expr)]),
+  },
+  // A string key or value is written as any other string is (see
+  // `serializeString()` in `serializer.ts`): `\text{a}`, or `"m"` when the
+  // parser would read `\text{m}` as something other than a string (the unit
+  // meter).
+  {
+    name: 'KeyValuePair',
+    serialize: (serializer, expr) =>
+      joinLatex([
+        '\\operatorname{KeyValuePair}',
+        serializer.wrapArguments(expr),
+      ]),
+  },
   { name: 'Pair', serialize: serializeTuple },
   { name: 'Triple', serialize: serializeTuple },
   // `Single` is the MathJSON shorthand for a one-element `Tuple`.

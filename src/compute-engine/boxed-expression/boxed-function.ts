@@ -86,6 +86,7 @@ import {
   zipBroadcast,
   zipParticipates,
   isUnindexedCollectionOperand,
+  isCardinalityOperand,
   appliesToListCoordinateTuple,
   addsPointToNumberCollection,
   isAbsentScalarTerm,
@@ -10424,6 +10425,9 @@ function zipLiftingUnindexed(
  *   its handler;
  * - for a library operator, not a user function: a user function lifts a
  *   set whole into each cell of its own broadcast.
+ *
+ * `Abs` of a set is not an error: `|S|` is the number of elements of `S`,
+ * and the `Abs` evaluate handler gives `Count(S)` (`isCardinalityOperand`).
  */
 function unindexedCollectionOperandError(
   ce: ComputeEngine,
@@ -10435,6 +10439,8 @@ function unindexedCollectionOperandError(
   if (!ops.some(isUnindexedCollectionOperand)) return undefined;
   const isUserFn: boolean = isUserFunctionDef(def);
   if (isUserFn) return undefined;
+  if (def.name === 'Abs' && ops.length === 1 && isCardinalityOperand(ops[0]))
+    return undefined;
   for (let i = 0; i < ops.length; i++) {
     if (!isUnindexedCollectionOperand(ops[i])) continue;
     const param = declaredParameterType(def, i);
