@@ -57,12 +57,18 @@ export const DEFINITIONS_STATISTICS: LatexDictionary = [
     kind: 'function',
     symbolTrigger: 'stddev',
   },
+  // `\bar` over a symbol is the mean of that symbol: `\bar{x}` and `\bar x`
+  // parse as `Mean(x)`. A mean of a number or of a compound expression has
+  // no use, so `\bar` over anything else is the complex conjugate, as
+  // `\overline` is: `\bar{7}` parses as `Conjugate(7)`, and so do `\bar{-1}`
+  // and `\bar{x+1}`. `Conjugate` serializes as `\overline{…}` (definitions-complex.ts).
   {
     latexTrigger: ['\\bar'],
     kind: 'expression',
     parse: (parser: Parser, _until?: Readonly<Terminator>) => {
       const expr = parser.parseGroup() ?? parser.parseToken();
-      if (!expr || !symbol(expr)) return null;
+      if (!expr) return null;
+      if (!symbol(expr)) return ['Conjugate', expr] as MathJsonExpression;
       return ['Mean', expr] as MathJsonExpression;
     },
   },

@@ -64,7 +64,7 @@ interface Panel {
  * Apply the GK15 rule to a single finite panel `[a, b]`.
  * Returns the 15-point estimate and a QUADPACK-style error estimate.
  */
-function gk15(f: (x: number) => number, a: number, b: number): Panel {
+export function gk15(f: (x: number) => number, a: number, b: number): Panel {
   const center = 0.5 * (a + b);
   const halfLength = 0.5 * (b - a);
   const absHalfLength = Math.abs(halfLength);
@@ -182,6 +182,12 @@ const INITIAL_PANELS = 16;
  * bisection gave two non-finite children. See `mustStopAllBad` in
  * `adaptiveFinite`. */
 const ALL_BAD_STOP_PANELS = 16;
+
+/** The smallest error that `adaptiveQuadrature` reports, in units of
+ * `Number.EPSILON` times the larger of `|estimate|` and the sum of the
+ * magnitudes of the panel values: the rounding of a sum of double values.
+ * See the floor in `adaptiveQuadrature`. */
+const ROUNDOFF_ULPS = 4;
 
 /**
  * The per-level starting-panel count for a `dimensions`-deep iterated integral,
@@ -1073,19 +1079,59 @@ export function adaptiveQuadrature(
         initialPanels,
         deadline
       );
+      // The integrand is evaluated in doubles and the panel values are
+      // summed in doubles, so the estimate has a rounding error of some
+      // units in the last place of the sum of the magnitudes of the panel
+      // values. The GK15 error of a smooth panel can be much smaller than
+      // that, and the reported error is never less than this rounding.
+      // Without the floor, `∫₁² ln³t/(t − 1) dt` gave
+      // `0.1425141979357109345283 ± 0.0000000000000000000031`: the error
+      // was 3.1e-21, the true error 1.9e-17. The floor is applied to the
+      // reported error only: the convergence test of the adaptive loop does
+      // not change. But a result is not reported as `converged` when the
+      // raised error is larger than `rtol·max(|estimate|, magnitude)`, the
+      // tolerance at the scale of the floor. (The absolute tolerance of the
+      // adaptive loop, `min(atol, rtol·magnitude)`, is never larger than
+      // this.) With `rtol` smaller than `4·Number.EPSILON`, the floor can be
+      // larger than the tolerance that the loop met. The scale is
+      // the magnitude and not only `|estimate|`: the integral of an odd
+      // integrand on a symmetric interval (`∫₋₃₀³⁰ x³ dx = 0`) has an
+      // estimate near 0 and a floor at the scale of the magnitude, and with
+      // `rtol·|estimate|` it was not converged, and the caller used Monte
+      // Carlo (`-160 ± 190`).
+      const roundoff =
+        ROUNDOFF_ULPS *
+        Number.EPSILON *
+        Math.max(Math.abs(r.estimate), r.magnitude);
+      const floored = <
+        T extends { estimate: number; error: number; converged: boolean },
+      >(
+        q: T
+      ): T =>
+        q.error < roundoff
+          ? {
+              ...q,
+              error: roundoff,
+              converged:
+                q.converged &&
+                roundoff <= rtol * Math.max(Math.abs(q.estimate), r.magnitude),
+            }
+          : q;
       if (options?.singularEndpoints === true)
-        return resolveSingularEndpoints(g, lo, hi, r, {
-          rtol,
-          atol,
-          maxEvaluations: 2 * maxIntervals,
-          deadline,
-        });
-      return {
+        return floored(
+          resolveSingularEndpoints(g, lo, hi, r, {
+            rtol,
+            atol,
+            maxEvaluations: 2 * maxIntervals,
+            deadline,
+          })
+        );
+      return floored({
         estimate: r.estimate,
         error: r.error,
         converged: r.converged,
         divergent: r.divergent || r.unresolved,
-      };
+      });
     });
   } finally {
     activeQuadratures--;

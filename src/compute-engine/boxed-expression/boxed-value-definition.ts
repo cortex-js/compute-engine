@@ -57,6 +57,7 @@ import { parse as parseLatex } from '../latex-syntax/latex-syntax.js';
 import { ConfigurationChangeListener } from '../../common/configuration-change.js';
 import { CACHE_STATS, recordBump } from '../../common/cache-stats.js';
 import type { CheckpointHookKind } from '../checkpoint-journal.js';
+import { noteSymbolValue } from './residue-class-value-hook.js';
 
 /**
  * Record this definition record's mutable state in the active checkpoint
@@ -427,6 +428,7 @@ export class _BoxedValueDefinition
 
     this._value = dynamicValue(this._engine, def.value);
     this._isSelfReferential = isSelfReferentialValue(this.name, this._value);
+    noteSymbolValue(this._engine, this._value);
 
     if (this._value) {
       if (!this._type || this._type.isUnknown) {
@@ -625,6 +627,7 @@ export class _BoxedValueDefinition
     const prev = this._value;
     this._value = v;
     this._isSelfReferential = isSelfReferentialValue(this.name, v);
+    noteSymbolValue(this._engine, v);
 
     const ephemeral = this._engine._ephemeralWriteDepth > 0;
     // `callable` classification (design §4): the write is callable-relevant

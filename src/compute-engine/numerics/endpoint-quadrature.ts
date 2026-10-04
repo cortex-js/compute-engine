@@ -326,7 +326,7 @@ function shellTrend(
  * Wynn's ε-algorithm on the partial sums `s`: the last entry of the highest
  * even column of the table, or `undefined` when no entry is finite.
  */
-function wynnEpsilon(s: number[]): number | undefined {
+export function wynnEpsilon(s: number[]): number | undefined {
   const n = s.length;
   if (n < 3) return undefined;
   let previous: number[] = new Array(n + 1).fill(0);
@@ -352,7 +352,7 @@ function wynnEpsilon(s: number[]): number | undefined {
  * index `n` to the sum of index `n + k`. `s[i]` is the sum of the terms of
  * index 0 to `i`; the term index is offset by `beta`.
  */
-function levinU(
+export function levinU(
   s: number[],
   n: number,
   k: number,

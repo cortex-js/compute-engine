@@ -1344,6 +1344,67 @@ export function isGatedIndexedCollection(a: Expression): boolean {
 }
 
 /**
+ * The reason that the compiled `Shape` or `Rank` of the operand `a` cannot
+ * give the value of the interpreter, or `undefined` when it can.
+ *
+ * The interpreter gives no shape (the operator stays unevaluated) for a
+ * collection that is not indexed (a set, an interval, a dictionary) and for
+ * an infinite collection (`shapeOfOperand()` in
+ * `library/linear-algebra.ts`). The compiled code measures the nested arrays
+ * of the run-time value, and a set has the same run-time form as a list, so
+ * it would give a shape. Thus the compilation declines when the type of `a`
+ * has an arm that is a collection type but not an indexed collection type
+ * (`set<integer>`, `number | set<integer>`, `collection<integer>`), or when
+ * `a` is an infinite collection.
+ *
+ * A tuple (a point) is one value with the shape `()` in the interpreter, but
+ * at run time it is an array, which the compiled code measures as a vector:
+ * `Rank((1, 2))` is 0, and `Rank([(1, 2), (3, 4)])` is 1, not 2. Thus the
+ * compilation also declines when a tuple type is an arm of the type of `a`,
+ * or of its element type at any depth. The same applies to a string: the
+ * interpreter gives `"ab"` the shape `(2)`, but at run time it is a
+ * JavaScript or Python string, which is not an array.
+ */
+export function shapeOperandRefusal(a: Expression): string | undefined {
+  if (a.isFiniteCollection === false) return 'is an infinite collection';
+  const refusal = (t: Type, depth: number): string | undefined => {
+    const r = resolveTypeForCompilation(t);
+    const arms = typeof r !== 'string' && r.kind === 'union' ? r.types : [r];
+    for (const arm of arms) {
+      const b = resolveTypeForCompilation(arm);
+      if (b === 'never') continue;
+      if (isTupleShapedType(b))
+        return (
+          'can be a tuple or hold tuples, which the run-time value does not ' +
+          'tell apart from a list'
+        );
+      if (isSubtype(b, 'string'))
+        return (
+          'can be a string or hold strings, whose shape the run-time value ' +
+          'does not give'
+        );
+      if (
+        isSubtype(b, 'collection<any>') &&
+        !isSubtype(b, 'indexed_collection<any>')
+      )
+        return (
+          'can be a collection that is not indexed (a set, an interval or a ' +
+          'dictionary), which has no shape'
+        );
+      if (depth < 8 && isSubtype(b, 'indexed_collection<any>')) {
+        const elt = collectionElementType(b);
+        if (elt !== undefined) {
+          const inner = refusal(elt, depth + 1);
+          if (inner !== undefined) return inner;
+        }
+      }
+    }
+    return undefined;
+  };
+  return refusal(a.type.type, 0);
+}
+
+/**
  * Is `a` a GATED POINT: a gated indexed collection
  * (`isGatedIndexedCollection`) whose every present arm is a tuple, such as
  * `When((0, 1), c)`? At run time it is a point or the absent value. The

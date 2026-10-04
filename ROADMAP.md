@@ -109,6 +109,39 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
+### Contour integration does not certify the complex roots of most polynomials of degree 3 or more (OPEN, small — found 2026-10-04 by the review of PR #410)
+
+`ce.contourIntegrate()` needs every root of a denominator in exact form. For
+a polynomial of degree 3 or more that is not even, it uses `solve()`, which
+returns only the real roots. The pole set is then not certified and the
+status is `unsupported`: `1/(z³ − 2)` and `z/(z⁷ − 1)` on `|z| = 2` stay
+unevaluated. An attempt that wrote the roots of `zⁿ − c` as
+`|c|^(1/n)(cos θ + i sin θ)` gave correct values, but took 1.2 s to 1.5 s for
+`n = 3` and reached the 5 s time limit for `n = 5` and `n = 7`. Most of the
+time goes to the exact sign tests and the Laurent expansions at points that
+contain `cos(2π/n)`. A fix needs a cheaper residue at a simple pole of
+`h(z)/(zⁿ − c)`, which is `h(p)·p/(n·c)`, computed before the Laurent kernel
+runs, and a measurement of where the remaining time goes.
+
+### Residue sums and real integrals are not always in a simple form (OPEN, small — found 2026-10-04 by the review of PR #410)
+
+The values are correct, but `simplify()` does not reduce them.
+`cos z/(z² + 1)²` on `|z| = 2` gives
+`2iπ(¼ sin(−i) + ¼ sin(i) − ¼i cos(i) + ¼i cos(−i))`, which is 0:
+`sin(−i) + sin(i)` is not combined, because the odd-function rule does not
+read the complex literal `−i` as a negation. `∫ (x² − 1)/((x − 1)(x⁴ + 1)) dx`
+over `(−∞, ∞)` gives `π/(2(2 − √2)) − π/(2(2 + √2))` instead of `π/√2`.
+
+### `∫ dx/x` over `(−∞, ∞)` stays unevaluated (OPEN, small — found 2026-10-04 by the review of PR #410; present before)
+
+The integral has no value: the integrand changes sign at its simple pole at
+0. The residue route declines because the integrand decays only like `1/x`,
+so it cannot prove that the closing arc contributes nothing. The other routes
+give no answer, and `.N()` is `NaN`. A pole of odd order on the path makes the
+integral have no value whatever the behavior at infinity, so the pole
+classification (`realPathDivergence()` in `symbolic/contour-integrate.ts`)
+could also run when the decay test fails.
+
 ### Quadrature loops run 25 to 70 times slower under jest than under `tsx` (OPEN, small — found 2026-10-01 by the closing fixes of the integration round)
 
 The same numeric integral takes 7 ms under `tsx` and 185 ms under jest (one
@@ -5105,31 +5138,49 @@ recurring bug class (A3, G3, the sets/Union/Range contains family, NaN
 comparisons); validation-by-corpus (the Fungrim harness) found 15 engine bugs
 that targeted review missed — keep running it.
 
-### A list broadcast against a set is cut to the shorter length (OPEN, found 2026-10-03)
+### `|S|` of a set should be the number of its elements (OPEN, user request 2026-10-03)
 
-`Power([1, 2, 3], Set(1, 2))` evaluates to `[1, 4]`: the set is zipped with
-the list as if it were a list, and the result is cut to the shorter length.
-Two lists of different lengths give an error instead
-(`Add([1, 2, 3], [1, 2])` is `Error("incompatible-dimensions", "2 vs 3")`),
-so the set operand skips the length check. A set has no order, so it should
-not be zipped by position at all: the broadcast should decline or give an
-error.
+In set theory `|S|` is the size of `S` (its cardinality). The LaTeX parser
+reads every `|…|` as `Abs`, and `Abs` of a set is an `incompatible-type`
+error. Measured at HEAD `4a0b1edd`:
 
-### `Shape` and `Rank` of a lazy collection or a set are `()` and `0` (OPEN, found 2026-10-03)
+- `|\{1,2\}|` and `\left|\{1,2,3\}\right|` are `Abs(Set(…))`, which evaluates to
+  `Error(ErrorCode("incompatible-type", "number", "set<integer>"), …)`. The
+  wanted answers are `2` and `3`.
+- `|\mathbb{Z}/5\mathbb{Z}|` and `|A \cup S|` give the same error. The wanted
+  answers are `5` and `Count(Union(A, S))`.
+- `|S|` for a declared `S: set<integer>` with no value stays `Abs(S)`, which
+  is the wrong operator for a set.
+- `|[1, 2, 3]|` is `[1, 2, 3]`, the element-wise absolute value of a list.
+  This must not change: only an operand that is not an indexed collection
+  (a set, an interval, `QuotientRing(Integers, n)`) is a cardinality.
 
-`Shape(Range(1, 3))` is `()` and `Rank(Range(1, 3))` is `0`, while
-`Shape([1, 2, 3])` is `(3)`. `Shape(Set(1, 2))` is also `()`. A rank of 0
-means a scalar, which these are not. A finite lazy collection should give
-its count as the shape (`(3)`), and a set should give a shape that is not
-the scalar one (decline, or a documented answer).
+The change: `Abs` of an operand whose type is a set (not an indexed
+collection) is `Count` of it. Do this in the `Abs` canonical or evaluate
+handler, so that the MathJSON routes behave as the LaTeX route does, and not
+in the parser alone. An infinite set gives the answer that `Count` gives for
+it. `Count` of a set serializes as `|S|`, so that the LaTeX round trip
+is exact. Two related notations are also wrong:
 
-### `Solve` of a collection operand gives an empty list (OPEN, found 2026-10-03)
+- `\#S` parses to `Tuple("hash", S)`. It should be `Count(S)`.
+- `\operatorname{card}(S)` is an unknown function `card`. It should be
+  `Count(S)`.
 
-`Solve(Linspace(a, 0, 3))` and `Solve(Linspace(a, 1, 3))` evaluate to `[]`.
-`Solve` reads its operand as an equation in `a` and reports no solution,
-but the operand is a list, not an equation. A decision is needed: a
-collection operand is either a type error, or it is read element by element
-as a system of equations, each equal to 0.
+### A residue class that only a function returns is not protected from number rules (OPEN, found 2026-10-04)
+
+An expression that holds a `ResidueClass` is folded only by the rules of
+its ring: `c/c` is not cancelled to the integer 1 when `c` has no inverse.
+The engine finds the class by a walk through the expression and through the
+values of its symbols (`containsResidueClass()` in
+`boxed-expression/residue-class.ts`). The walk does not look inside a
+function definition, so it cannot see a class that only a function
+returns. With `g := k ↦ ResidueClass(k, 4)`, `g(2)/g(2)` simplifies to `1`,
+although `g(2)` is `ResidueClass(2, 4)`, which has no inverse, and
+`evaluate()` keeps the quotient. The same is true for an application of a
+function with no definition, `f(c)/f(c)` (the engine treats every
+application of an unknown function as one value). A fix needs the type of
+a class to be a type that no ordinary expression has, so that the check can
+use the type of the application instead of a walk.
 
 ### Load-sensitive test flakes under a full-suite run (observed 2026-08-31)
 

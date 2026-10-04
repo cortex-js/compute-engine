@@ -7765,7 +7765,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
               2
             )
           );
-        let [op1, op2] = ops;
+        let [op1] = ops;
+        const op2 = ops[1];
         // Save the raw symbol name BEFORE canonicalization, so that
         // `i` stays `i` (not `ImaginaryUnit`) and `e` stays `e`
         // (not `ExponentialE`) when creating compound symbols.

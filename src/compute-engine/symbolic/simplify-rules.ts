@@ -52,6 +52,7 @@ import {
   simplifyFactorial2,
   simplifyFactorialAdd,
 } from './simplify-factorial.js';
+import { isCollectionShaped } from '../collection-utils.js';
 
 /**
  * # Performance Optimization Notes for Simplification Rules
@@ -156,6 +157,21 @@ import {
  * used. Therefore in some cases using MathJsonExpression, while more verbose,
  * may be necessary as the expression could be simplified by the canonicalization.
  */
+
+/**
+ * A sum or a quotient with an operand that is or may be a collection. The
+ * scalar arithmetic (`add()`, `div()`) cancels its terms as scalars, so
+ * `[x] - [x]` became the number 0 and `[x]/[x]` the number 1, where the
+ * element-wise evaluation gives the lists `[0]` and `[1]`. The step is that
+ * evaluation, when it cannot read an assigned value (simplification does
+ * not substitute values) or run a side effect; otherwise there is no step.
+ */
+function elementWise(x: Expression, because: string): RuleStep | undefined {
+  if (x.isPure !== true || hasAssignedVariable(x)) return undefined;
+  const value = x.evaluate();
+  return value.isSame(x) ? undefined : { value, because };
+}
+
 export const SIMPLIFY_RULES: Rule[] = [
   // The Golden Ratio, a constant that can be simplified
   {
@@ -231,10 +247,13 @@ export const SIMPLIFY_RULES: Rule[] = [
     const num = x.op1;
     const denom = x.op2;
     if (!num || !denom) return undefined;
+    // Not for a collection: `[x]/[x]` is the list `[1]`, which the
+    // element-wise evaluation gives, not the number 1.
     if (
       num.isSame(denom) &&
       num.isSame(0) === false &&
-      num.isInfinity !== true
+      num.isInfinity !== true &&
+      !isCollectionShaped(num)
     ) {
       return { value: x.engine.One, because: 'a/a -> 1' };
     }
@@ -305,6 +324,11 @@ export const SIMPLIFY_RULES: Rule[] = [
     // product like -(x(y+1)) still expands here.
     if (isFunction(x, 'Negate') && isFunction(x.op1, 'Add')) return undefined;
 
+    // Skip an operand that is or may be a collection: the expansion combines
+    // like terms as scalars, so `[x] - [x]` became the number 0, where the
+    // element-wise evaluation gives the list `[0]`.
+    if (isFunction(x) && x.ops.some(isCollectionShaped)) return undefined;
+
     // Skip expand for Multiply expressions with same-base powers
     // Let simplifyPower handle e^x * e^2 -> e^{x+2} instead of evaluating e^2
     // Also handle bare symbols (a = a^1) as having an implicit power
@@ -340,6 +364,8 @@ export const SIMPLIFY_RULES: Rule[] = [
   //
   (x): RuleStep | undefined => {
     if (!isFunction(x, 'Add')) return undefined;
+    // A term that is or may be a collection: see `elementWise()`.
+    if (x.ops.some(isCollectionShaped)) return elementWise(x, 'addition');
     // The Add function has a 'lazy' property, so we need to ensure operands are canonical.
     // Also evaluate purely numeric operands (no unknowns) to simplify expressions like √(1+2) → √3.
     // IMPORTANT: Don't call .simplify() on operands to avoid infinite recursion.
@@ -523,6 +549,9 @@ export const SIMPLIFY_RULES: Rule[] = [
       // These cases can be handled by an explicit preliminary evaluation.
       const num = x.op1;
       const denom = x.op2;
+      // An operand that is or may be a collection: see `elementWise()`.
+      if (isCollectionShaped(num) || isCollectionShaped(denom))
+        return elementWise(x, 'division');
       if (!isNumber(denom) && denom.symbols.length === 0) {
         if (num.isSame(0) || num.isSame(denom)) return undefined;
       }

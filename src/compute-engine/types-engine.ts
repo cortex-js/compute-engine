@@ -40,6 +40,8 @@ import type { CheckpointWindow } from './checkpoint-journal.js';
 
 import type { Expression, ExpressionInput } from './types-expression.js';
 import type { FunctionProperties } from './function-properties/types.js';
+import type { ContourInput, ContourIntegralResult } from './types-contour.js';
+export type * from './types-contour.js';
 export type {
   FunctionProperties,
   FunctionPropertyRecord,
@@ -2371,6 +2373,17 @@ export interface IComputeEngine {
    * residues that depend on parameters) are available via `entries`.
    */
   functionProperties(name: string): FunctionProperties | undefined;
+
+  /** Integrate over a circle, simple polygon, or the entire real line by the
+   * residue theorem. Real-line contours also accept an explicit principal value.
+   * Returns pole classifications, residues, their sum, and the integral.
+   * Unsupported or undecidable inputs have no value; boundary poles have
+   * status `pole-on-contour`. See {@link ContourInput} for contour forms. */
+  contourIntegrate(
+    integrand: ExpressionInput,
+    variable: string,
+    contour: ContourInput
+  ): ContourIntegralResult;
 
   /** Debug representation, e.g. for `JSON.stringify()`. */
   toJSON(): string;

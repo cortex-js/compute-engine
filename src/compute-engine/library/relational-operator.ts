@@ -16,6 +16,7 @@ import {
   isPossiblyCollectionTyped,
   broadcastLengthMismatch,
   isTextAtom,
+  isUnindexedCollectionOperand,
 } from '../collection-utils.js';
 import { flatten } from '../boxed-expression/flatten.js';
 import {
@@ -1821,6 +1822,13 @@ function broadcastComparison(
   // the exclusion, a tuple-only comparison re-enters evaluate — whose step 2
   // now skips tuples — and ping-pongs back here forever (stack overflow).
   if (!ops.some((op) => isFiniteBroadcastParticipant(op))) return undefined;
+  // A collection that is not indexed (a set, an interval) is excluded too.
+  // It has no positions, and step 2 DECLINES a broadcast when such an
+  // operand is at a number parameter (`unindexedOperandBroadcast` in
+  // boxed-function). For such an operator, re-entering evaluate here would
+  // come straight back and recurse until the stack is exhausted. Declining
+  // leaves the comparison inert, as `1 < Set(1, 2)` is.
+  if (ops.some(isUnindexedCollectionOperand)) return undefined;
   // A collection-TYPED but valueless operand is excluded for the same reason,
   // and it is the same ping-pong: step 2 DECLINES such a comparison (it would
   // splice the valueless operand into every cell as a scalar — see

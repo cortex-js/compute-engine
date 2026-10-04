@@ -2969,6 +2969,29 @@ export function zipParticipates(x: Expression): boolean {
 }
 
 /**
+ * True when `x` is a collection that is not indexed: a set, an interval, a
+ * dictionary, or a symbol whose value is one of these. Such a collection has
+ * no positions, so the element-wise broadcast of a built-in operator must not
+ * pair its elements with the cells of a list. {@link zip} accepts it (see
+ * {@link zipParticipates}), so a broadcast arm must test for it before it
+ * calls {@link zip}.
+ *
+ * When such an operand is at a number parameter, the broadcast arm declines,
+ * and the evaluate handler of the operator gets the whole operand, as it does
+ * when the other operands are scalars. A numeric operator then answers the
+ * `incompatible-type` error for the set: `Power([1, 2, 3], Set(1, 2))` is the
+ * same error as `Power(Set(1, 2), 2)`. At another parameter, the operand is
+ * used whole in every cell (`String([1, 2], Set(3, 4))`).
+ *
+ * The test reads the value of `x`, not its type: an eager producer that is
+ * not evaluated yet (`Unique([1, 2])`) has `isCollection === false`, so it
+ * is not refused here, and it broadcasts when it is evaluated to a list.
+ */
+export function isUnindexedCollectionOperand(x: Expression): boolean {
+  return x.isCollection === true && x.isIndexedCollection === false;
+}
+
+/**
  * The rows of a broadcast over `items`: the items for which `participates`
  * is true are zipped (shortest length wins, as in {@link zip}), and every
  * other item is repeated WHOLE in each row, a tuple included. {@link zip}

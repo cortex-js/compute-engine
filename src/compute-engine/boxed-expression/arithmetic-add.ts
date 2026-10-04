@@ -3,6 +3,7 @@ import { getImaginaryFactor } from './utils.js';
 
 import { flatten } from './flatten.js';
 import { order, sortAddTerms } from './order.js';
+import { containsResidueClass, residueArithmetic } from './residue-class.js';
 import { Type } from '../../common/type/types.js';
 import {
   collectionElementType,
@@ -143,6 +144,12 @@ export function canonicalAdd(
   // skip the fold/sort below. (Operand order for the nested case is not
   // guaranteed to match the source.)
   if (ops.some((x) => isContinuationOperand(x))) return ce._fn('Add', ops);
+
+  // A sum with a residue class is only flattened and sorted: only the residue
+  // rules of the evaluate handler know its ring. The folds below would read
+  // `c + ∞` as `∞` (see `containsResidueClass()`).
+  if (ops.some(containsResidueClass))
+    return ops.length === 1 ? ops[0] : ce._fn('Add', sortAddTerms(ops));
 
   // A numeric tuple (point/vector in ℝⁿ) cannot be added to a scalar. Reject
   // `scalar + tuple` at canonicalization when provable: some operand is a
@@ -598,6 +605,11 @@ export function add(...xs: ReadonlyArray<Expression>): Expression {
     !xs.some((x) => !isAbsentSymbol(x) && isUnresolvedCollectionOperand(x))
   )
     return xs[0].engine.NaN;
+
+  // A residue class among the terms: only the residue rules apply, after the
+  // broadcast over a collection above (`residueArithmetic()`).
+  const residue = residueArithmetic(xs[0].engine, 'Add', xs);
+  if (residue !== undefined) return residue;
 
   return new Terms(xs[0].engine, xs).asExpression();
 }

@@ -2,6 +2,30 @@
 
 ### Behavior Changes
 
+- **A set is never paired by position in an element-wise operation.** A set
+  has no order, but beside a list it supplied elements by position and the
+  result was cut to the shorter length: `Power([1, 2, 3], Set(1, 2))` was
+  `[1, 4]`. A set at a number parameter now gives the `incompatible-type`
+  error that `Power(Set(1, 2), 2)` already gave. At a parameter that is not a
+  number, the set is used whole in each element: `String([1, 2], Set(3, 4))`
+  is a list of two strings, and `Less([1, 2, 3], Set(1, 2))` is a list of
+  three comparisons that stay unevaluated. `Power([1, 2], Interval(0, 1))`
+  gave `[1, 1.189…]` from the endpoints of the interval, and it is now the
+  same error.
+
+- **Numeric functions give a type error for a set operand.** `Power` and `Sin`
+  gave `incompatible-type` for a set, but 82 other numeric functions, such as
+  `Floor`, `Mod`, `Arctan2`, `Gamma` and `Zeta`, stayed unevaluated, and
+  `IsPrime(Set(1, 2))` was `False`. They all give the error now. A list still
+  broadcasts: `Floor([1.5, 2.5])` is `[1, 2]`.
+
+- **`Solve` of a computed collection is a type error.** `Solve(Range(1, 3), x)`
+  and `Solve(Linspace(a, 0, 3))` were `[]`, a false statement that there is no
+  solution. A first operand that is a collection but is not a written list,
+  set or tuple of equations (`Range`, `Linspace`, `Map`, a symbol that holds a
+  list) now gives an `incompatible-type` error. A written list is a system of
+  equations, as before.
+
 - **Error functions and trigonometric integrals on the imaginary axis.**
   `Erf`, `Erfc`, `Erfi`, `SinIntegral`, `SinhIntegral`, `CosIntegral` and
   `CoshIntegral` of an argument exactly on the imaginary axis (an exact
@@ -113,6 +137,72 @@
   where the code runs. The engine's own `_SYS` (`run.SYS`) is built from the
   same factory. (#372, contributed by [enumeratio](https://github.com/enumeratio))
 
+- **`ResidueClass(k, n)`: an element of ℤ/nℤ** (#399, #411, contributed by
+  [enumeratio](https://github.com/enumeratio)). A residue class is now a
+  value.
+  - **Canonical form.** `k` is reduced to `0…n−1`: `ResidueClass(7, 5)` is
+    `ResidueClass(2, 5)` and `ResidueClass(-1, 7)` is `ResidueClass(6, 7)`.
+    `n` must be an exact integer ≥ 1. A rational `k` whose denominator is a
+    unit reads as `u·v⁻¹`: `ResidueClass(1/3, 7)` is `ResidueClass(5, 7)`. A
+    float or a symbolic `k` or `n` stays unevaluated.
+  - **Equality.** `ResidueClass(7, 5) == ResidueClass(2, 5)` is `True`.
+    Classes are not ordered.
+  - **Arithmetic.** Sums, differences, products and integer powers of classes
+    of one modulus are classes: `ResidueClass(5, 7) + ResidueClass(4, 7)` is
+    `ResidueClass(2, 7)`. An exact integer, or a rational whose denominator
+    is a unit, is read in the ring: `ResidueClass(5, 7) + 3` is
+    `ResidueClass(1, 7)`. An inverse, a quotient or a negative power needs
+    gcd(k, n) = 1: `1/ResidueClass(3, 7)` is `ResidueClass(5, 7)`, while
+    `1/ResidueClass(2, 4)` stays unevaluated. Classes of two different moduli,
+    a float and an infinity are never combined with a class: the expression
+    stays unevaluated.
+  - **No number rule applies to a class.** Canonical forms, `evaluate()`,
+    `.N()`, `simplify()`, `Expand`, `Factor` and the `.add()`, `.mul()`,
+    `.div()` and `.pow()` methods fold an expression that holds a class only
+    with the rules of the ring. So `c/c` and `c − c` are never cancelled to
+    the integers 1 and 0 when the class `c` has no inverse. This also holds
+    for a symbol whose value holds a class. `Solve`, `D` and `Integrate` stay
+    unevaluated for an expression that holds a class.
+  - **ℤ/nℤ.** `QuotientRing(Integers, n)` lists `ResidueClass(0, n)` …
+    `ResidueClass(n−1, n)`, without building them all for a large `n`. Its
+    element type is `value`. `Element(ResidueClass(7, 5), ℤ/5ℤ)` is `True`, a
+    class of another modulus is `False`, and an integer is not an element:
+    `Element(7, ℤ/5ℤ)` is `False`.
+  - **LaTeX.** `\overline{k}_{n}` is `ResidueClass(k, n)` when `k` and `n` are
+    integer literals, and a class is written back the same way. A bare
+    `\overline{7}` is still `Conjugate(7)`, and `\overline{z}_1` is still the
+    conjugate of z₁. `Subscript(Conjugate(3), 5)` is now written
+    `{\overline{3}}_{5}`, so that it reads back as written.
+  - `Mod` is still the remainder: `Mod(7, 3)` is `1`.
+
+- **Contour integration by the residue theorem.** `ce.contourIntegrate(f, z,
+  contour)` and the `ContourIntegrate` operator integrate over a circle, a
+  rectangle or a simple polygon (`CircleContour`, `RectangleContour`,
+  `PolygonContour`), and `\oint_{|z-c|=r}` now evaluates. The report gives
+  each pole with its location, order, residue and leading Laurent coefficient,
+  the sum of the residues and the value. Supported integrands are rational
+  functions, entire numerators, products of `sin`/`cos` of a real affine
+  argument in the denominator, and `P(z)·exp(c/(z−a))` with an essential
+  singularity. An input that cannot be certified exactly stays unevaluated,
+  and a pole on the contour gives `Indeterminate`. A call has a step budget,
+  so the point where it gives up does not depend on the machine. See
+  `docs/CONTOUR-INTEGRATION.md`. Contributed in PR #410.
+
+- **Real integrals by residues.** `Integrate` gives an exact value over
+  `(−∞, ∞)` for a rational function, or a rational function times `cos`,
+  `sin` or `exp(i·a·x)`; over `[0, ∞)` for such an even integrand; and over
+  `[0, 2π]` or `[0, π]` for a rational function of `sin x` and `cos x`. For
+  example, `∫ sin(x)/x dx` over `(−∞, ∞)` is `π`, and `∫₀^{2π} dx/(2 + cos x)`
+  is `2π/√3`. `.N()` uses the exact value: before, `.N()` of the sinc
+  integral was `7.1 ± 7.3`. A Cauchy principal value is never assumed;
+  `RealLineContour(True)` asks for one.
+
+- **A pole on the path of a real integral gives `+∞`, `−∞` or no value.**
+  `∫ dx/x²` over `(−∞, ∞)` was `0` and is now `+∞`, and
+  `∫₀^{2π} dx/(1 + cos x)` is `+∞`. `∫ (1/x² − 1/(x−1)²) dx` over
+  `(−∞, ∞)` was `0` and is now `Indeterminate`: the integrand tends to `+∞`
+  at 0 and to `−∞` at 1.
+
 ### Improvements
 
 - **More accurate `erf`, `erfc` and `erfi` in doubles.** The machine kernels
@@ -159,6 +249,44 @@
 
 ### Issues Resolved
 
+- **`simplify()` of a list quotient or difference keeps the list.**
+  `[x]/[x]` simplified to `1` and `[x] − [x]` to `0`. They now give `[1]` and
+  `[0]`, as `evaluate()` does.
+
+- **`Shape` and `Rank` of a lazy collection.** `Shape(Range(1, 3))` was `()`
+  and `Rank(Range(1, 3))` was `0`, the answer for a scalar. A finite indexed
+  collection now gives the answer of the list with the same elements:
+  `Shape(Range(1, 3))` is `(3)` and `Rank(Range(1, 3))` is `1`. A set, a
+  dictionary, an infinite collection, and a symbol with a collection type
+  and no value stay unevaluated. Compiled `Shape` and `Rank` decline to
+  compile for an operand whose type is a set, a dictionary, a tuple or a
+  string, where the compiled answer was different from the evaluated one.
+
+- **`Solve` of a list of equations.**
+  - A list of several plain expressions is a system of equations, each equal
+    to 0, as the `=` spelling is: `Solve([x + y - 1, x - y], [x, y])` is
+    `[(1/2, 1/2)]`. It stayed unevaluated.
+  - A list of several equations in one unknown gives the roots that all the
+    equations share: `Solve([x = 1, x^2 = 1], x)` is `[1]` and
+    `Solve([\sin(2x) = 0, \cos(x) = -1], x)` is `[π, -π]`. Both were `[]`.
+    For periodic equations, when no principal root is common, `Solve` stays
+    unevaluated instead of saying that there is no solution.
+  - A list of inequalities with no equation stays unevaluated. Its solution
+    set is a region: `Solve([x < 1, y > 0], [x, y])` was `[(1, 0)]`, a point
+    that does not satisfy `x < 1`.
+  - A domain given as an argument applies to a list of equations:
+    `Solve([x + y = 3, x - y = 1], x ∈ 0..5, y ∈ 0..5)` is `[(2, 1)]`. It was
+    `[]`.
+  - `Solve([x = 1, 2x = 2], x)` threw a `TypeError` (`roots is not
+    iterable`). It is now `[1]`.
+  - `expr.solve()` of a system of linear inequalities gives `null` for an
+    unbounded region, as documented. It gave a corner point of the region.
+
+- **`\bar` over a number.** `\bar{7}` was an `unexpected-command` error. It now
+  parses to `Conjugate(7)`, as `\overline{7}` does, and `0.\bar{3}` is the
+  repeating decimal `1/3`, as `0.\overline{3}` is. `\bar{x}` is still
+  `Mean(x)`.
+
 - **`QuotientRing(Integers, n)` is a finite collection of `n` residue
   classes, not a set of integers** (#399, contributed by
   [enumeratio](https://github.com/enumeratio)). `\mathbb{Z}/5\mathbb{Z}` and
@@ -168,9 +296,8 @@
   now has the count `n`, is finite and is not empty, and `Count` evaluates:
   `Count(\mathbb{Z}/5\mathbb{Z})` is `5`. A symbolic, zero or negative
   modulus, or a base other than `Integers`, stays inert. The type is
-  `set<unknown>`, as for an `Adjoin` adjunct that the engine cannot type. The
-  engine has no value for a residue class, so the classes are not listed and
-  membership is not decided.
+  `set<value>`: its elements are the classes `ResidueClass(k, n)` (see New
+  Features).
 
 - **A finite collection whose elements cannot be computed no longer reads as
   empty.** `Linspace(a, 1, 3)` with a symbolic `a` has the count 3 but no

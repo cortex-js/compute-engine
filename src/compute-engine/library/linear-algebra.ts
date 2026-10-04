@@ -34,6 +34,8 @@ import {
   isPointListValue,
   isTuple,
   isTextAtom,
+  isTupleShapedType,
+  isValuelessCollectionTyped,
   isWalkableFiniteCollection,
 } from '../collection-utils.js';
 import {
@@ -98,6 +100,73 @@ const MAX_POINT_LIST_NORM = 10000;
  *  lazy `Map`, a `Range`). Beyond it the operator stays symbolic rather than
  *  box an unbounded number of elements. */
 const MAX_LAZY_NORM_ELEMENTS = 100_000;
+
+/** The most elements `Shape` and `Rank` copy into a `List` to read the shape
+ *  of a lazy collection whose elements are not scalar numbers. Beyond it the
+ *  operators stay symbolic rather than box an unbounded number of elements. */
+const MAX_LAZY_SHAPE_ELEMENTS = 100_000;
+
+/**
+ * The shape of the evaluated operand `xs` of `Shape` and `Rank`, or
+ * `undefined` when the operator must stay unevaluated.
+ *
+ * The `shape` property of an expression is read from its type. The type of
+ * an eager `List` has the dimensions, but the type of a lazy collection
+ * (`Range(1, 3)` is `range`, `Linspace(0, 1, 3)` is `list<real>`) does not,
+ * so `shape` gives `[]`, which is the shape of a scalar. This function gives
+ * a finite indexed lazy collection the shape of the eager `List` with the
+ * same elements:
+ *
+ * - When the elements are scalar numbers, the shape is `[count]` (`[]` for
+ *   an empty collection, as for `[]`). The elements are not computed, so
+ *   this also applies when the count is known but the elements cannot be
+ *   computed (`Linspace(a, 1, 3)` with a symbolic `a`).
+ * - Otherwise the elements are copied into a `List` and the shape of that
+ *   list is the result. When the elements cannot be computed, or there are
+ *   more than `MAX_LAZY_SHAPE_ELEMENTS` of them, the result is `undefined`.
+ *
+ * A collection that is infinite or has an unknown count gives `undefined`.
+ * A collection that is not indexed (a set, an interval, a dictionary) has no
+ * positions, so it has no shape and also gives `undefined`.
+ *
+ * An operand whose type is a collection but that has no value yet (a symbol
+ * `L: list<number>` with no value, or an application `f(1)` that stays
+ * unevaluated) also gives `undefined`, unless its type has the dimensions
+ * (`vector<3>`). Its shape is not known, and `()` is the shape of a scalar.
+ * A tuple-typed operand is an exception: a tuple always has the shape `()`.
+ *
+ * An eager `List`, a tuple, a string and a value that is not a collection
+ * keep the shape that their `shape` property gives.
+ */
+function shapeOfOperand(
+  ce: ComputeEngine,
+  xs: Expression
+): number[] | undefined {
+  const shape = xs.shape;
+  if (
+    shape.length === 0 &&
+    isValuelessCollectionTyped(xs) &&
+    !isTupleShapedType(xs.type.type)
+  )
+    return undefined;
+  if (
+    shape.length > 0 ||
+    isFunction(xs, 'List') ||
+    xs.isCollection !== true ||
+    isTupleShapedType(xs.type.type)
+  )
+    return shape;
+  if (xs.isIndexedCollection !== true) return undefined;
+  if (xs.isFiniteCollection !== true) return undefined;
+  const count = xs.count;
+  if (count === undefined || !Number.isFinite(count)) return undefined;
+  const elementType = collectionElementType(xs.type.type);
+  if (elementType !== undefined && isSubtype(elementType, 'number'))
+    return count === 0 ? [] : [count];
+  if (count > MAX_LAZY_SHAPE_ELEMENTS) return undefined;
+  if (!isFiniteIndexedCollection(xs)) return undefined;
+  return ce.function('List', [...xs.each()]).shape;
+}
 
 /** The sum of `terms`, in groups: one `add(...terms)` of more than about a
  *  hundred thousand terms overflows the call stack, because the terms are
@@ -1852,11 +1921,33 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       description: 'Return the shape tuple of an expression.',
       complexity: 8200,
       signature: '(value) -> tuple',
-      // Complete precondition: the evaluate handler has NO decline path — any
-      // valid operand has a `shape` (`()` for a scalar), so a shape tuple is
-      // always produced — see `canEnumerate` (types-definitions.ts).
-      canEnumerate: () => true,
-      evaluate: ([xs], { engine: ce }) => ce.tuple(...xs.shape),
+      // The evaluate handler declines (stays unevaluated) only for a
+      // collection that `shapeOfOperand()` cannot give a shape: a collection
+      // that is not indexed, an infinite collection, one with an unknown
+      // count, or a collection-typed operand with no value. A scalar number, a tuple, an eager `List` and an operand whose
+      // type has the dimensions always give a shape tuple. Other operands
+      // are decided when they are evaluated. See `canEnumerate`
+      // (types-definitions.ts).
+      canEnumerate: (expr) => {
+        if (!isFunction(expr)) return undefined;
+        const xs = expr.op1;
+        if (xs === undefined) return undefined;
+        if (
+          xs.shape.length > 0 ||
+          isFunction(xs, 'List') ||
+          isSubtype(xs.type.type, 'number') ||
+          isTupleShapedType(xs.type.type)
+        )
+          return true;
+        if (xs.isCollection === true && xs.isIndexedCollection === false)
+          return false;
+        if (xs.isFiniteCollection === false) return false;
+        return undefined;
+      },
+      evaluate: ([xs], { engine: ce }) => {
+        const shape = shapeOfOperand(ce, xs);
+        return shape === undefined ? undefined : ce.tuple(...shape);
+      },
     },
 
     Rank: {
@@ -1873,7 +1964,13 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       signature: '(value) -> integer',
       // The rank (number of dimensions) of a scalar is 0.
       sgn: (): Sign => 'non-negative',
-      evaluate: ([xs], { engine: ce }) => ce.number(xs.rank),
+      // The rank is the length of the shape. When `shapeOfOperand()` gives
+      // no shape (a set, an infinite collection, a collection-typed symbol
+      // with no value), `Rank` stays unevaluated.
+      evaluate: ([xs], { engine: ce }) => {
+        const shape = shapeOfOperand(ce, xs);
+        return shape === undefined ? undefined : ce.number(shape.length);
+      },
     },
 
     // Corresponds to ArrayReshape in Mathematica

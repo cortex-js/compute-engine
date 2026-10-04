@@ -82,6 +82,7 @@ import { asRational, asSmallInteger } from './numerics.js';
 import { heldNonNumericScalar } from './value-membership.js';
 import { negateProduct } from './negate.js';
 import { add } from './arithmetic-add.js';
+import { containsResidueClass, residueArithmetic } from './residue-class.js';
 
 // Maximum number of decimal digits allowed in a *materialized* exact power
 // folded into a product's coefficient. Beyond this the factor is kept symbolic
@@ -1256,6 +1257,14 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
     }
   }
 
+  // A quotient with a residue class is kept as it is: only the residue rules
+  // of the evaluate handler know its ring. The rules below would read
+  // `c/c` as 1 when `c` has no inverse, `c/0` as `~∞` and `c/∞` as 0 (see
+  // `containsResidueClass()`). A point divisor was rejected above, as for
+  // any numerator. Division by an exact 1 is the same in every ring.
+  if (containsResidueClass(op1) || containsResidueClass(op2))
+    return isLiteral(op2, 1) ? op1 : ce._fn('Divide', [op1, op2]);
+
   // An absent operand (`Missing` or `Undefined`) folds to `NaN` here, as a
   // `NaN` operand does above and for the same reasons: arithmetic with an
   // absent operand is `NaN` (user decision of 2026-09-25), and the folds
@@ -1633,6 +1642,14 @@ export function div(num: Expression, denom: number | Expression): Expression {
       return ce.tuple(...num.ops.map((c) => c.div(d).evaluate()));
   }
 
+  // A residue class in the quotient: only the residue rules apply, after
+  // the point numerator above (`residueArithmetic()`).
+  const residue = residueArithmetic(ce, 'Divide', [
+    num,
+    typeof denom === 'number' ? ce.number(denom) : denom,
+  ]);
+  if (residue !== undefined) return residue;
+
   // An absent operand (`Missing`, `Undefined`, or a product or negation of
   // one): arithmetic with an absent operand is `NaN` (user decision of
   // 2026-09-25), as the `Divide` operator answers at evaluation. Before,
@@ -1839,6 +1856,15 @@ export function canonicalMultiply(
   if (ops.some((x) => containsContinuationOperand(x)))
     ops = flattenHoldingBarriers(ops, 'Multiply', false);
   else ops = flatten(ops, 'Multiply', false);
+
+  // A product with a residue class is only flattened and sorted: only the
+  // residue rules of the evaluate handler know its ring. The folds below
+  // would read `0·c` as the integer 0, `c·(1/c)` as 1 and `0.0·c` as `0.0`
+  // (see `containsResidueClass()`).
+  if (ops.some(containsResidueClass))
+    return ops.length === 1
+      ? ops[0]
+      : ce._fn('Multiply', sortProductOperands(ops));
 
   // Two or more tuples (points/vectors) have no implicit product (dot/cross);
   // reject `tuple · tuple` at canonicalization. Counted by tuple-ness
@@ -2363,6 +2389,11 @@ function mulImpl(xs: ReadonlyArray<Expression>, expand: boolean): Expression {
     !xs.some((x) => !isAbsentSymbol(x) && isUnresolvedCollectionOperand(x))
   )
     return ce.NaN;
+
+  // A residue class among the factors: only the residue rules apply, after
+  // the broadcast over a collection above (`residueArithmetic()`).
+  const residue = residueArithmetic(ce, 'Multiply', xs);
+  if (residue !== undefined) return residue;
 
   // A zero factor beside a factor that reads a variable with an assigned
   // value is not folded to `0`: the product must keep the value the variable

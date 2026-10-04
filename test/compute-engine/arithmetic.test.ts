@@ -1066,8 +1066,22 @@ describe('EXP', () => {
   test(`Exp 0`, () => expect(checkJson(['Exp', 0])).toMatchSnapshot());
   test(`Exp -1`, () => expect(checkJson(['Exp', -1])).toMatchSnapshot());
   test(`Exp 'Pi'`, () => expect(checkJson(['Exp', 'Pi'])).toMatchSnapshot());
-  test(`Exp ['Complex', 1.1, 1.1]`, () =>
-    expect(checkJson(['Exp', ['Complex', 1.1, 1.1]])).toMatchSnapshot());
+  test(`Exp ['Complex', 1.1, 1.1]`, () => {
+    const engine = new ComputeEngine();
+    engine.precision = 'auto';
+    const expr = engine.box(['Exp', ['Complex', 1.1, 1.1]]);
+    expect(expr.evaluate().toString()).toBe(
+      '(1.36267805658060030032 + 2.67733487138755939617i)'
+    );
+    engine.precision = 'machine';
+    const machine = engine.box(expr.json);
+    // V8 versions differ in the last bit of complex exponentiation. Check
+    // both components numerically without pinning their printed last digit.
+    for (const value of [machine.evaluate(), machine.N()]) {
+      expect(value.re).toBeCloseTo(1.3626780565806003, 14);
+      expect(value.im).toBeCloseTo(2.6773348713875594, 14);
+    }
+  });
   test(`Exp ['List', 1.1, 2, 4]`, () =>
     expect(checkJson(['Exp', ['List', 1.1, 2, 4]])).toMatchSnapshot());
 

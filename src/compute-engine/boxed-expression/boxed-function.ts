@@ -84,6 +84,7 @@ import {
   zip,
   zipBroadcast,
   zipParticipates,
+  isUnindexedCollectionOperand,
   appliesToListCoordinateTuple,
   addsPointToNumberCollection,
   isAbsentScalarTerm,
@@ -201,6 +202,11 @@ import {
 } from './abstract-boxed-expression.js';
 import { DEFAULT_COMPLEXITY, sortOperands } from './order.js';
 import {
+  containsResidueClass,
+  noteResidueClass,
+  residueArithmetic,
+} from './residue-class.js';
+import {
   digest128,
   hashCode,
   hasVolatileDigest,
@@ -252,6 +258,7 @@ import {
   isAbsentScalarSymbol,
   listCoordinateTupleOperandError,
   markAbsentPointCells,
+  nonNumericOperandError,
   runtimeCheckExemptParam,
   runtimeConformanceError,
   isAbsentableCollectionOperand,
@@ -735,6 +742,8 @@ export class BoxedFunction
     super(ce, options?.metadata);
 
     this._operator = operator;
+    // Lets `containsResidueClass()` skip its walk in an engine with no class.
+    if (operator === 'ResidueClass') noteResidueClass(ce);
     const store = options?.numericStore;
     if (store !== undefined) {
       // The store is the list's literal content. Any other head would give
@@ -2162,6 +2171,14 @@ export class BoxedFunction
   inv(): Expression {
     if (!(this.isCanonical || this.isStructural))
       throw new Error('Not canonical');
+    // The reciprocal of an expression with a residue class: only the residue
+    // rules apply. The rules below read `(1/c)^{-1}` as `c` even when `1/c`
+    // has no value.
+    const residue = residueArithmetic(this.engine, 'Divide', [
+      this.engine.One,
+      this,
+    ]);
+    if (residue !== undefined) return residue;
     if (this._isOne) return this;
     if (this._isNegativeOne) return this;
 
@@ -2218,6 +2235,16 @@ export class BoxedFunction
   mul(rhs: NumericValue | number | Expression): Expression {
     if (!(this.isCanonical || this.isStructural))
       throw new Error('Not canonical');
+    // A product with a residue class goes to `mul()`, which broadcasts over
+    // a collection and then applies only the residue rules. The shortcuts
+    // below read `c · 0` as the integer 0.
+    if (containsResidueClass(this))
+      return mul(
+        this,
+        rhs instanceof NumericValue
+          ? this.engine.number(rhs)
+          : this.engine.expr(rhs)
+      );
     if (rhs === 0) return this.engine.Zero;
     if (rhs === 1) return this;
     if (rhs === -1) return this.neg();
@@ -2247,6 +2274,12 @@ export class BoxedFunction
       (typeof exp !== 'number' && !(exp.isCanonical || exp.isStructural))
     )
       throw new Error('Not canonical');
+    // A root of a residue class is kept as written (`residueArithmetic()`).
+    const residue = residueArithmetic(this.engine, 'Root', [
+      this,
+      this.engine.expr(exp),
+    ]);
+    if (residue !== undefined) return residue;
 
     const e =
       typeof exp === 'number'
@@ -3314,6 +3347,11 @@ export class BoxedFunction
     | ReadonlyArray<Expression>
     | Record<string, Expression>
     | Array<Record<string, Expression>> {
+    // An equation that holds a residue class is not solved (see
+    // `evaluateSolve()`): `null`, as for any equation the solver cannot
+    // solve, and not an empty list of roots.
+    if (containsResidueClass(this)) return null;
+
     const varNames = normalizedUnknownsForSolve(vars ?? this.unknowns);
 
     // Handle List or And of equations (system of equations)
@@ -4637,6 +4675,11 @@ export class BoxedFunction
         !isUserFunctionDef(def) &&
         !hasRawOperand &&
         this.ops!.some((x) => isFiniteBroadcastParticipant(x)) &&
+        // A set has no positions, so it cannot supply cells. At a number
+        // parameter the operator is not broadcast, and the handler gets the
+        // whole set, as it does beside a scalar. At another parameter the
+        // set is used whole in every cell (`unindexedOperandBroadcast`).
+        unindexedOperandBroadcast(def, this.ops!) !== 'veto' &&
         !skipBroadcastForVectorOps(def, hasTensors, this.ops!) &&
         !pointIsOneLegOf(this.operator, this.ops!);
       // An operand that is collection-TYPED but carries no collection value
@@ -4679,6 +4722,14 @@ export class BoxedFunction
         if (liftError !== undefined) return liftError;
         const mismatch = broadcastLengthMismatch(this.engine, bops);
         if (mismatch) return mismatch;
+        // A lift can be a set only when it is evaluated: `At([Set(1, 2), 3],
+        // 1)` has the type `integer | set<integer>`. Decide again on the
+        // evaluated operands. For a `'veto'`, apply the operator to them
+        // without a broadcast: the gate above then declines for the set, as
+        // it does for a set that is an operand as written.
+        const unindexed = unindexedOperandBroadcast(def, bops);
+        if (unindexed === 'veto')
+          return this.engine._fn(this.operator, bops).evaluate(options);
 
         const lazy = lazyBroadcastMapIfNeeded(
           this.engine,
@@ -4689,7 +4740,8 @@ export class BoxedFunction
         );
         if (lazy) return lazy;
 
-        const items = zip(bops);
+        const items =
+          unindexed === 'lift' ? zipLiftingUnindexed(bops) : zip(bops);
         if (!items) return this.engine._fn('List', []);
 
         const results: Expression[] = [];
@@ -5236,7 +5288,14 @@ export class BoxedFunction
           // evaluate handler maps operands that only became collections at
           // evaluation; this generic post-evaluation arm must not re-map them.
           (def.broadcastable &&
-            !def.broadcastExemptions.includes('evaluated-operands'))) &&
+            !def.broadcastExemptions.includes('evaluated-operands') &&
+            // A set has no positions, so it cannot supply cells. At a number
+            // parameter the operator is not broadcast, and the handler gets
+            // the whole set. At another parameter the set is used whole in
+            // every cell (`unindexedOperandBroadcast`). A user function
+            // (`lambdaBroadcast`) lifts a set whole into every cell, so it
+            // is not affected.
+            unindexedOperandBroadcast(def, tail) !== 'veto')) &&
         !skipBroadcastForVectorOps(def, false, tail) &&
         !pointIsOneLegOf(this.operator, tail) &&
         tail.some(isPostEvalBroadcastOperand);
@@ -5287,7 +5346,11 @@ export class BoxedFunction
         // (`exactJumpBroadcastOperands()`).
         const items = lambdaBroadcast
           ? zipBroadcast(tail, isBroadcastableCollection)
-          : zip(
+          : // A set at a parameter that is not a number type is used whole in
+            // every cell (`unindexedOperandBroadcast`).
+            (unindexedOperandBroadcast(def, tail) === 'lift'
+              ? zipLiftingUnindexed
+              : zip)(
               exactJumpBroadcastOperands(this, tail, numericApproximation) ??
                 tail
             );
@@ -5495,6 +5558,20 @@ export class BoxedFunction
       // parameters of the declaration checked here
       // (`declaredScalarConformance`).
       //
+      // A set at a numeric parameter of a built-in broadcastable operator is
+      // an error. The broadcast steps above decline for such a set, and this
+      // check applies with or without `strict`, as the handlers of `Power`
+      // and `Sin` do (`unindexedCollectionOperandError`). It also applies to
+      // an operator with no `evaluate` handler, such as the color
+      // constructor `Rgb`, which broadcasts over a list.
+      if (def.lazy !== true) {
+        const unindexed = unindexedCollectionOperandError(
+          this.engine,
+          def,
+          tail
+        );
+        if (unindexed !== undefined) return unindexed;
+      }
       if (
         this.engine.strict &&
         def.lazy !== true &&
@@ -5689,6 +5766,8 @@ export class BoxedFunction
         !isUserFunctionDef(def) &&
         !hasRawOperand &&
         this.ops!.some((x) => isFiniteBroadcastParticipant(x)) &&
+        // A set has no positions (mirrors the sync path).
+        unindexedOperandBroadcast(def, this.ops!) !== 'veto' &&
         !skipBroadcastForVectorOps(def, hasTensors, this.ops!) &&
         !pointIsOneLegOf(this.operator, this.ops!);
       // The veto and the definite-mismatch exception of the sync step 2,
@@ -5715,6 +5794,11 @@ export class BoxedFunction
         if (liftError !== undefined) return liftError;
         const mismatch = broadcastLengthMismatch(this.engine, bops);
         if (mismatch) return mismatch;
+        // A lift can be a set only when it is evaluated (mirrors the sync
+        // path).
+        const unindexed = unindexedOperandBroadcast(def, bops);
+        if (unindexed === 'veto')
+          return this.engine._fn(this.operator, bops).evaluateAsync(options);
 
         const lazy = lazyBroadcastMapIfNeeded(
           this.engine,
@@ -5725,7 +5809,8 @@ export class BoxedFunction
         );
         if (lazy) return lazy;
 
-        const items = zip(bops);
+        const items =
+          unindexed === 'lift' ? zipLiftingUnindexed(bops) : zip(bops);
         if (!items) return this.engine._fn('List', []);
 
         const results: Promise<Expression>[] = [];
@@ -6197,7 +6282,9 @@ export class BoxedFunction
           // As on the sync path: an `'evaluated-operands'` exemption means
           // the operator's own evaluate handler owns this case.
           (def.broadcastable &&
-            !def.broadcastExemptions.includes('evaluated-operands'))) &&
+            !def.broadcastExemptions.includes('evaluated-operands') &&
+            // A set has no positions (mirrors the sync path).
+            unindexedOperandBroadcast(def, tail) !== 'veto')) &&
         isSyncApplicable &&
         !skipBroadcastForVectorOps(def, false, tail) &&
         !pointIsOneLegOf(this.operator, tail) &&
@@ -6243,7 +6330,11 @@ export class BoxedFunction
         // step 4b (`exactJumpBroadcastOperands()`).
         const items = lambdaBroadcast
           ? zipBroadcast(tail, isBroadcastableCollection)
-          : zip(
+          : // A set at a parameter that is not a number type is used whole in
+            // every cell (`unindexedOperandBroadcast`).
+            (unindexedOperandBroadcast(def, tail) === 'lift'
+              ? zipLiftingUnindexed
+              : zip)(
               exactJumpBroadcastOperands(this, tail, numericApproximation) ??
                 tail
             );
@@ -6362,6 +6453,16 @@ export class BoxedFunction
       // 3c/ Generic runtime conformance — the async twin of the sync
       // step 4d (see that comment for the rationale and the exclusions).
       //
+      // A set at a numeric parameter of a built-in broadcastable operator is
+      // an error (mirrors the sync step 4d).
+      if (def.lazy !== true) {
+        const unindexed = unindexedCollectionOperandError(
+          this.engine,
+          def,
+          tail
+        );
+        if (unindexed !== undefined) return unindexed;
+      }
       if (
         this.engine.strict &&
         def.lazy !== true &&
@@ -9600,6 +9701,117 @@ function handlerThrowToErrorValue(
   // channels".
   const stack = (e.stack ?? '').split('\n').slice(0, 8).join('\n');
   return ce.error(['internal-error', e.message, stack], operator);
+}
+
+/**
+ * The declared type of the parameter at position `i` of a built-in operator,
+ * or `undefined` when it cannot be found: the definition has no single
+ * signature (an overloaded signature, for example), or no parameter is at
+ * that position.
+ */
+function declaredParameterType(
+  def: BoxedOperatorDefinition,
+  i: number
+): Type | undefined {
+  const sig = def.signature.type;
+  if (typeof sig === 'string' || sig.kind !== 'signature') return undefined;
+  const args = sig.args ?? [];
+  const optArgs = sig.optArgs ?? [];
+  if (i < args.length) return args[i].type;
+  if (i < args.length + optArgs.length) return optArgs[i - args.length].type;
+  return sig.variadicArg?.type;
+}
+
+/**
+ * How the element-wise broadcast of a built-in operator treats an operand
+ * that is a collection with no positions (a set, an interval, a dictionary —
+ * see `isUnindexedCollectionOperand`). Such an operand cannot be paired with
+ * the cells of a list by position.
+ *
+ * - `undefined`: no operand is such a collection.
+ * - `'veto'`: such an operand is at a parameter whose declared type is a
+ *   number type, or at a parameter whose type cannot be found. The operator
+ *   is not broadcast. It gets the whole operand, and a numeric operator gives
+ *   the `incompatible-type` error for it (`unindexedCollectionOperandError`).
+ * - `'lift'`: each such operand is at a parameter that is not a number type,
+ *   for example the `any` parameters of `String`. The operator is broadcast
+ *   over the other collections, and the operand is used whole in every cell,
+ *   as a scalar is: `String([1, 2], Set(3, 4))` is a list of two strings.
+ */
+function unindexedOperandBroadcast(
+  def: BoxedOperatorDefinition,
+  ops: ReadonlyArray<Expression>
+): 'veto' | 'lift' | undefined {
+  if (!ops.some(isUnindexedCollectionOperand)) return undefined;
+  for (let i = 0; i < ops.length; i++) {
+    if (!isUnindexedCollectionOperand(ops[i])) continue;
+    const param = declaredParameterType(def, i);
+    if (param === undefined || isSubtype(param, 'number')) return 'veto';
+  }
+  return 'lift';
+}
+
+/**
+ * The rows of the element-wise broadcast of a built-in operator over `ops`
+ * when `unindexedOperandBroadcast()` answers `'lift'`: each operand that is a
+ * collection with no positions is used whole in every row, and the other
+ * collections supply the cells, as in `zip`.
+ */
+function zipLiftingUnindexed(
+  ops: ReadonlyArray<Expression>
+): Iterator<Expression[]> {
+  return zipBroadcast(
+    ops,
+    (x) => zipParticipates(x) && !isUnindexedCollectionOperand(x)
+  );
+}
+
+/**
+ * The `incompatible-type` error for an operand that is a collection with no
+ * positions (a set, an interval, a dictionary — see
+ * `isUnindexedCollectionOperand`) at a NUMERIC parameter of a built-in
+ * broadcastable operator, or `undefined`.
+ *
+ * Such an operand is not a number, and the broadcast steps do not map the
+ * operator over it, because a set cannot be paired with the cells of a list
+ * by position (`unindexedOperandBroadcast`). This check gives every such
+ * operator the same error, before its handler runs: `Floor(Set(1.5, 2.5))`,
+ * `Mod(5, Set(2, 3))` and `Power(Set(1, 2), 2)` are each
+ * `Error(ErrorCode("incompatible-type", "number", …), …)`. Some handlers
+ * (`Power`, `Sin`, `Add`) also refuse such an operand themselves with
+ * `nonNumericOperandError`.
+ *
+ * The generic runtime conformance check (`runtimeConformanceError`) does not
+ * do this: at a broadcastable operator it leaves every operand that could
+ * be a collection to the broadcast steps.
+ *
+ * Only these operands are checked:
+ * - an operand at a parameter whose declared type is a number type. A
+ *   parameter that can take a set (`Element`, `Union`, the `any` parameters
+ *   of `String`) is not affected;
+ * - for an operator with ONE signature. An overloaded signature is left to
+ *   its handler;
+ * - for a library operator, not a user function: a user function lifts a
+ *   set whole into each cell of its own broadcast.
+ */
+function unindexedCollectionOperandError(
+  ce: ComputeEngine,
+  def: BoxedOperatorDefinition | undefined,
+  ops: ReadonlyArray<Expression>
+): Expression | undefined {
+  if (!(def instanceof _BoxedOperatorDefinition)) return undefined;
+  if (def.broadcastable !== true || def.lazy === true) return undefined;
+  if (!ops.some(isUnindexedCollectionOperand)) return undefined;
+  const isUserFn: boolean = isUserFunctionDef(def);
+  if (isUserFn) return undefined;
+  for (let i = 0; i < ops.length; i++) {
+    if (!isUnindexedCollectionOperand(ops[i])) continue;
+    const param = declaredParameterType(def, i);
+    if (param === undefined || !isSubtype(param, 'number')) continue;
+    const err = nonNumericOperandError(ce, [ops[i]]);
+    if (err !== undefined) return err;
+  }
+  return undefined;
 }
 
 /**

@@ -9,6 +9,11 @@ import { holdMap } from './hold.js';
 import { expToTrig } from './exp-to-trig.js';
 import { expand } from './expand.js';
 import {
+  containsResidueClass,
+  isResidueClass,
+  RESIDUE_ARITHMETIC,
+} from './residue-class.js';
+import {
   rebindEscaping,
   hasAssignedVariable,
   assignedVariableNames,
@@ -113,7 +118,7 @@ function evaluateNumericSubexpressions(expr: Expression): Expression {
     !hasAssignedVariable(expr)
   ) {
     const evaluated = expr.evaluate();
-    if (isNumber(evaluated)) return evaluated;
+    if (isNumber(evaluated) || isResidueClass(evaluated)) return evaluated;
   }
 
   // Constant logarithms are folded to their exact value even when they are
@@ -233,10 +238,16 @@ export function simplifyValueBlind(
   expr: Expression,
   options?: Partial<InternalSimplifyOptions>
 ): RuleSteps {
-  const shadow = assignedVariableNames(expr);
+  const ce = expr.engine;
+  // A variable whose value holds a residue class is not shadowed: the
+  // simplification barrier for classes must see the class, or `q/q` with
+  // `q := ResidueClass(2, 4)` simplifies to 1, and `1/q` has no value. The
+  // barrier then keeps every arithmetic expression with `q` as it is.
+  const shadow = assignedVariableNames(expr).filter(
+    (n) => !containsResidueClass(ce.box(n))
+  );
   if (shadow.length === 0) return simplify(expr, options);
 
-  const ce = expr.engine;
   // Capture each symbol's declared type as a STRING; passing the BoxedType
   // object to `declare` throws "type invalid".
   const types = shadow.map((n) => ce.box(n).type.toString());
@@ -476,6 +487,7 @@ export function simplify(
   if (
     !options.noExpansionTrial &&
     !rulesWereNull &&
+    !containsResidueClass(expr) &&
     mightExpand(expr) &&
     expandedTermBound(expr) <= MAX_TRIAL_EXPANSION_TERMS
   ) {
@@ -921,7 +933,7 @@ function simplifyOperands(
         continue;
       }
       const evaluated = x.evaluate();
-      if (isNumber(evaluated)) {
+      if (isNumber(evaluated) || isResidueClass(evaluated)) {
         simplifiedOps.push(evaluated);
         continue;
       }
@@ -1006,6 +1018,50 @@ function simplifyExpression(
         : { value: alt, because: 'simplified operands' };
     steps = [...steps, aggregate];
     expr = alt;
+  }
+
+  // Arithmetic on residue classes is the job of the evaluate handlers, which
+  // know the ring: `ResidueClass(5, 7) + ResidueClass(4, 7)` is
+  // `ResidueClass(2, 7)`, and `ResidueClass(1, 5) + ResidueClass(2, 5) + x`
+  // is `x + ResidueClass(3, 5)`. When they leave the expression as it is,
+  // simplification stops here. The generic rules do not know the ring: they
+  // read `c/c` as the integer 1 even when the class `c` has no inverse
+  // (`ResidueClass(2, 4)`), and `c - c` as the integer 0. The test looks
+  // through every operator (`containsResidueClass()`): `S/S` with
+  // `S := Sum(ResidueClass(k, 4), k, 1, 3)` has no value either.
+  //
+  // The terms of a sum (the factors of a product) with no class are
+  // simplified together first, as one sum (product), and then put back
+  // beside the terms with a class: `sin²x + cos²x + c` is `1 + c`, then
+  // the class `c + 1`. A number literal is kept beside the class, which the
+  // residue rules fold it with: simplified with the other factors, the `0` of
+  // `0·x·c` would absorb `x` and give the class 0, where evaluation gives
+  // `x·ResidueClass(0, n)`.
+  if (
+    isFunction(expr) &&
+    RESIDUE_ARITHMETIC.includes(expr.operator) &&
+    containsResidueClass(expr)
+  ) {
+    if (expr.isPure !== true || hasAssignedVariable(expr)) return steps;
+    let value: Expression = expr;
+    if (expr.operator === 'Add' || expr.operator === 'Multiply') {
+      const isFree = (x: Expression) =>
+        !isNumber(x) && !containsResidueClass(x);
+      const free = expr.ops.filter(isFree);
+      if (free.length >= 2) {
+        const together = simplify(expr.engine.function(expr.operator, free), {
+          ...options,
+          noExpansionTrial: true,
+        }).at(-1)!.value;
+        value = expr.engine.function(expr.operator, [
+          together,
+          ...expr.ops.filter((x) => !isFree(x)),
+        ]);
+      }
+    }
+    const folded = value.evaluate();
+    if (sameSyntactic(folded, expr)) return steps;
+    return [...steps, { value: folded, because: 'residue class arithmetic' }];
   }
 
   // A `NaN` or `Indeterminate` operand at a position whose NaN policy is

@@ -289,8 +289,8 @@ describe('Types', () => {
     expect(ce.parse('\\mathbb{Z}[x]').type.toString()).toBe('set<unknown>');
   });
 
-  test('QuotientRing claims no element type (its elements are classes)', () => {
-    expect(ce.parse('\\mathbb{Z}_n').type.toString()).toBe('set<unknown>');
+  test('QuotientRing elements are classes: value over ℤ, unknown over other bases', () => {
+    expect(ce.parse('\\mathbb{Z}_n').type.toString()).toBe('set<value>');
     expect(ce.parse('\\mathbb{Q}_p').type.toString()).toBe('set<unknown>');
   });
 });
@@ -331,7 +331,7 @@ describe('Route parity: raw MathJSON reaches the same dispatch', () => {
       structural: true,
     });
     expect(e.json).toEqual(['Subscript', 'Integers', 'n']);
-    expect(e.type.toString()).toBe('set<unknown>');
+    expect(e.type.toString()).toBe('set<value>');
     expect(e.type.toString()).toBe(
       ce.box(['QuotientRing', 'Integers', 'n']).type.toString()
     );
@@ -416,12 +416,10 @@ describe('Inert (v1)', () => {
     ]);
   });
 
-  test('membership is not decided (v1)', () => {
-    expect(ce.parse('3 \\in \\Z_5').evaluate().json).toEqual([
-      'Element',
-      3,
-      ['QuotientRing', 'Integers', 5],
-    ]);
+  // The elements of ℤ/5ℤ are residue classes. The integer 3 is a
+  // representative of a class, not the class, so it is not a member.
+  test('an integer is not a member of ℤ/5ℤ', () => {
+    expect(ce.parse('3 \\in \\Z_5').evaluate().json).toBe('False');
   });
 
   test('a non-set base is rejected by signature validation', () => {

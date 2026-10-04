@@ -3,6 +3,7 @@ import type { Expression } from '../../src/compute-engine/global-types';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { adaptiveQuadrature } from '../../src/compute-engine/numerics/gauss-kronrod';
 import { resolveSingularEndpoints } from '../../src/compute-engine/numerics/endpoint-quadrature';
+import { integrateSemiInfiniteOscillatory } from '../../src/compute-engine/numerics/oscillatory-quadrature';
 
 // A slowly integrable singularity at an endpoint. A large part of the
 // integral is closer to the bound than a double can be (∫₀^δ x^(−0.999) dx is
@@ -220,9 +221,10 @@ const cases: Case[] = [
     upper: 'PositiveInfinity',
     exact: Math.sqrt(Math.PI / 2),
     accuracy: 1e-9,
-    // The lobes decrease like `1/√x`: the lobes after the first take about
-    // 13300 evaluations before the accelerated sums converge.
-    maxCalls: 15000,
+    // The lobes decrease like `1/√x`. Each lobe is one GK15 panel, and the
+    // integral takes about 3,000 evaluations. With adaptive Simpson, the
+    // lobes took about 13,300 evaluations.
+    maxCalls: 5000,
   },
   {
     // Reversed bounds: the infinite LOWER bound was read as −∞, which gave
@@ -307,6 +309,47 @@ const cases: Case[] = [
     upper: 'PositiveInfinity',
     exact: -0.5772156649015329,
     accuracy: 1e-12,
+  },
+  {
+    // `sin(t/2)·cos 2t = (sin(5t/2) − sin(3t/2))/2`, so the integral is
+    // `(π/2 − π/2)/2 = 0`. The error of the accelerated lobe sums was the
+    // difference of the last two values: `-0.00000000681 ± 0.00000000089`.
+    name: '∫₀^∞ sin(x/2)·cos 2x/x dx = 0',
+    fn: (x) => (Math.sin(x / 2) * Math.cos(2 * x)) / x,
+    body: [
+      'Divide',
+      ['Multiply', ['Sin', ['Divide', x, 2]], ['Cos', ['Multiply', 2, x]]],
+      x,
+    ],
+    lower: 0,
+    upper: 'PositiveInfinity',
+    exact: 0,
+    accuracy: 1e-11,
+    maxCalls: 15000,
+  },
+  {
+    // `sin x·cos 3x = (sin 4x − sin 2x)/2`, so the integral is 0. The lobes
+    // repeat a pattern of four lobes whose sum has one sign, and the
+    // ε-algorithm gave `0.00001183017 ± 0.00000000075`.
+    name: '∫₀^∞ sin x·cos 3x/x dx = 0',
+    fn: (x) => (Math.sin(x) * Math.cos(3 * x)) / x,
+    body: ['Divide', ['Multiply', ['Sin', x], ['Cos', ['Multiply', 3, x]]], x],
+    lower: 0,
+    upper: 'PositiveInfinity',
+    exact: 0,
+    accuracy: 1e-7,
+  },
+  {
+    // `sin x·(2 + cos x) = 2·sin x + sin(2x)/2`, so the integral is
+    // `π + π/4`. Each lobe has a part of one sign in `1/k²`: the
+    // ε-algorithm did not converge, and Monte Carlo gave `4.037 ± 0.065`.
+    name: '∫₀^∞ sin x·(2 + cos x)/x dx = 5π/4',
+    fn: (x) => (Math.sin(x) * (2 + Math.cos(x))) / x,
+    body: ['Divide', ['Multiply', ['Sin', x], ['Add', 2, ['Cos', x]]], x],
+    lower: 0,
+    upper: 'PositiveInfinity',
+    exact: (5 * Math.PI) / 4,
+    accuracy: 1e-7,
   },
 ];
 
@@ -785,6 +828,425 @@ describe('a compiled semi-infinite oscillatory integral', () => {
     expect(r.success).toBe(true);
     const v = r.run!({ c: 1e-12 }) as number;
     expect(Math.abs(v - 1e6 * Math.atan(1e6))).toBeLessThan(1e-6);
+  });
+});
+
+describe('the error of a numeric integral is not less than its rounding', () => {
+  // The integrand is evaluated in doubles, and the panel values are summed in
+  // doubles. `∫₁² ln³t/(t − 1) dt` gave
+  // `0.1425141979357109345283 ± 0.0000000000000000000031`: the true error of
+  // the double estimate is 1.9e-17.
+  const exact = 0.14251419793571091570872;
+  test('adaptiveQuadrature', () => {
+    const r = adaptiveQuadrature((t) => Math.log(t) ** 3 / (t - 1), 1, 2, {
+      singularEndpoints: true,
+    });
+    expect(r.converged).toBe(true);
+    expect(r.error).toBeGreaterThanOrEqual(Number.EPSILON * r.estimate);
+    expect(Math.abs(r.estimate - exact)).toBeLessThanOrEqual(r.error);
+  });
+  test('a result is not converged when its error is larger than the tolerance', () => {
+    // GK15 integrates `x²` exactly, and the adaptive loop meets the
+    // tolerance `1e-16/3`. The error is raised to the rounding of the
+    // estimate, `2.96e-16`, which is larger than that tolerance.
+    const r = adaptiveQuadrature((x) => x * x, 0, 1, { atol: 0, rtol: 1e-16 });
+    expect(r.error).toBeGreaterThan(1e-16 * r.estimate);
+    expect(r.converged).toBe(false);
+    const s = adaptiveQuadrature((x) => x * x, 0, 1, { atol: 0, rtol: 1e-15 });
+    expect(s.converged).toBe(true);
+  });
+  // An odd integrand on a symmetric interval: the estimate is about 0, and
+  // the rounding is at the scale of the sum of the magnitudes of the panel
+  // values. When the rounding was compared with `rtol·|estimate|`, the
+  // result was not converged, and `.N()` used Monte Carlo:
+  // `∫₋₃₀³⁰ x³ dx` was `-160 ± 190`.
+  test.each([
+    ['x³', (x: number) => x ** 3, 30, '\\int_{-30}^{30} x^3\\,dx'],
+    ['1000·x', (x: number) => 1000 * x, 10, '\\int_{-10}^{10} 1000x\\,dx'],
+    [
+      'x³·e^(−x²/100)',
+      (x: number) => x ** 3 * Math.exp(-(x * x) / 100),
+      30,
+      '\\int_{-30}^{30} x^3 e^{-x^2/100}\\,dx',
+    ],
+  ])('∫ of the odd integrand %s is converged', (_name, f, c, latex) => {
+    const r = adaptiveQuadrature(f, -c, c);
+    expect(r.converged).toBe(true);
+    expect(Math.abs(r.estimate)).toBeLessThanOrEqual(r.error);
+    const v = ce.parse(latex).N();
+    const [value, error] =
+      v.operator === 'Measurement' ? [v.ops![0].re, v.ops![1].re] : [v.re, 0];
+    expect(Math.abs(value)).toBeLessThanOrEqual(error);
+    expect(error).toBeLessThan(1e-8);
+  });
+  test('Integrate(…).N()', () => {
+    const r = ce.parse('\\int_1^2 \\frac{\\ln^3 t}{t-1}\\,dt').N();
+    expect(r.operator).toBe('Measurement');
+    const [v, e] = r.ops!;
+    expect(e.re).toBeGreaterThanOrEqual(Number.EPSILON * v.re);
+    expect(Math.abs(v.re - exact)).toBeLessThanOrEqual(e.re);
+  });
+  test('the oscillatory quadrature', () => {
+    // `∫₀^∞ e^(−t/5)·cos 3t dt = (1/5)/(1/25 + 9)`. Its error was 3.5e-16,
+    // and its true error is 4.4e-16.
+    const r = integrateSemiInfiniteOscillatory(
+      (t) => Math.exp(-t / 5) * Math.cos(3 * t),
+      0
+    )!;
+    expect(Math.abs(r.estimate - 0.2 / (0.04 + 9))).toBeLessThanOrEqual(
+      r.error
+    );
+  });
+});
+
+describe('oscillatory integrals with a closed form', () => {
+  // Each value is within its error. `∫₀^∞ sin t/t^p dt = π/(2·Γ(p)·sin(πp/2))`
+  // and `∫₀^∞ cos t/t^p dt = Γ(1 − p)·sin(πp/2)`; the values are from mpmath.
+  const half = Math.PI / 2;
+  test.each([
+    ['sin(t/2)/t', 0, (t: number) => Math.sin(t / 2) / t, half],
+    ['sin t/t', 0, (t: number) => Math.sin(t) / t, half],
+    ['sin 2t/t', 0, (t: number) => Math.sin(2 * t) / t, half],
+    ['sin 3t/t', 0, (t: number) => Math.sin(3 * t) / t, half],
+    ['sin(t + 2)/(t + 2)', -2, (t: number) => Math.sin(t + 2) / (t + 2), half],
+    ['sin(t − 1)/(t − 1)', 1, (t: number) => Math.sin(t - 1) / (t - 1), half],
+    ['sin(t − 5)/(t − 5)', 5, (t: number) => Math.sin(t - 5) / (t - 5), half],
+    [
+      'sin t/t^0.9',
+      0,
+      (t: number) => Math.sin(t) / t ** 0.9,
+      1.488240487497361,
+    ],
+    [
+      'sin t/t^1.2',
+      0,
+      (t: number) => Math.sin(t) / t ** 1.2,
+      1.7988338344869936,
+    ],
+    [
+      'sin t/t^1.5',
+      0,
+      (t: number) => Math.sin(t) / t ** 1.5,
+      2.5066282746310007,
+    ],
+    [
+      'sin t/t^1.7',
+      0,
+      (t: number) => Math.sin(t) / t ** 1.7,
+      3.8078678365560488,
+    ],
+    [
+      'cos t/t^0.2',
+      0,
+      (t: number) => Math.cos(t) / t ** 0.2,
+      0.3597667668973987,
+    ],
+    [
+      'cos t/t^0.5',
+      0,
+      (t: number) => Math.cos(t) / t ** 0.5,
+      1.2533141373155003,
+    ],
+    [
+      'cos t/t^0.8',
+      0,
+      (t: number) => Math.cos(t) / t ** 0.8,
+      4.3661518275890945,
+    ],
+    // A lower bound far from 0: `∫ₐ^∞ sin t/t dt = π/2 − Si(a)`. The GK15
+    // nodes are rounded to the spacing of the doubles at `a`, and the
+    // rounding of the lobes has one sign. With `a = 10⁴`, the result was
+    // `-0.0000952185910152 ± 3.9e-15`, `5.0e-14` from the integral.
+    ['sin t/t', 300, (t: number) => Math.sin(t) / t, -8.476141885290002e-5],
+    ['sin t/t', 10000, (t: number) => Math.sin(t) / t, -9.521859106529649e-5],
+    // Far from 0, the lobes decrease by less than 5% over the window of
+    // `lobesDecaying`, and the lobes were not taken to decrease: the result
+    // was `null`, and `.N()` gave a Monte-Carlo value or `NaN`. The value is
+    // `√(2π)·(½ − S(√(2a/π)))`, with the Fresnel integral `S`, from mpmath.
+    [
+      'sin t/√t',
+      100000,
+      (t: number) => Math.sin(t) / Math.sqrt(t),
+      -0.0031602557903345477,
+    ],
+  ])('∫ from a of %s (a = %d)', (_name, a, f, exact) => {
+    const r = integrateSemiInfiniteOscillatory(f, a)!;
+    expect(Math.abs(r.estimate - exact)).toBeLessThanOrEqual(r.error);
+    expect(r.error).toBeLessThan(1e-9);
+  });
+});
+
+describe('an oscillatory integral with irregular lobes', () => {
+  // The value of each integral is within its error, or the integral has no
+  // value (`NaN`): it is never a value with an error that is too small.
+  const r2 = Math.SQRT2;
+  const r3 = Math.sqrt(3);
+  test.each([
+    // Two frequencies whose ratio is not rational: the widths of the lobes
+    // have no period. The scan for the next zero stopped after a narrow lobe,
+    // and Monte Carlo gave `0.072 ± 0.018`.
+    [
+      'sin t·cos(√2·t)/t',
+      (t: number) => (Math.sin(t) * Math.cos(r2 * t)) / t,
+      0,
+    ],
+    [
+      'sin t·cos(√3·t)/√t',
+      (t: number) => (Math.sin(t) * Math.cos(r3 * t)) / Math.sqrt(t),
+      0.5 *
+        (Math.sqrt(Math.PI / (2 * (1 + r3))) -
+          Math.sqrt(Math.PI / (2 * (r3 - 1)))),
+    ],
+    [
+      '(sin t + sin(√2·t))/t',
+      (t: number) => (Math.sin(t) + Math.sin(r2 * t)) / t,
+      Math.PI,
+    ],
+    // Two frequencies whose ratio is rational: the lobes repeat a pattern.
+    [
+      '(sin t + sin 2t)/t',
+      (t: number) => (Math.sin(t) + Math.sin(2 * t)) / t,
+      Math.PI,
+    ],
+    [
+      'sin 3t·cos t/t',
+      (t: number) => (Math.sin(3 * t) * Math.cos(t)) / t,
+      Math.PI / 2,
+    ],
+    [
+      'sin t·cos 2.5t/t',
+      (t: number) => (Math.sin(t) * Math.cos(2.5 * t)) / t,
+      0,
+    ],
+    [
+      'sin t·cos 3t/√t',
+      (t: number) => (Math.sin(t) * Math.cos(3 * t)) / Math.sqrt(t),
+      0.5 * (Math.sqrt(Math.PI / 8) - Math.sqrt(Math.PI / 4)),
+    ],
+    [
+      '10⁶·sin t·cos 3t/t',
+      (t: number) => (1e6 * Math.sin(t) * Math.cos(3 * t)) / t,
+      0,
+    ],
+    // The ε value was accepted with the spread of the ε values as its
+    // error: `-1.868e-12 ± 1.74e-12`.
+    ['sin t·cos 10t/t', (t: number) => (Math.sin(t) * Math.cos(10 * t)) / t, 0],
+  ])('∫₀^∞ %s dt', (_name, f, exact) => {
+    const r = integrateSemiInfiniteOscillatory(f, 0);
+    // The integrand oscillates: the result is not `null`, which would let
+    // the caller sample the integrand.
+    expect(r).not.toBeNull();
+    if (Number.isNaN(r!.estimate)) return;
+    expect(Math.abs(r!.estimate - exact)).toBeLessThanOrEqual(r!.error);
+  });
+});
+
+describe('an oscillatory integral with an integrable singularity', () => {
+  // The GK15 panels of the lobe that contains the singular point do not
+  // converge. That lobe is integrated again in two parts, with the singular
+  // point at an end of each part. The values are from mpmath, by a
+  // substitution that removes the singularity, and agree with `quad` with
+  // the singular point as a breakpoint plus `quadosc` for the tail.
+  test.each([
+    // Inside a lobe. The result was `-1.96685088 ± 6.6e-10`, `2.7e-4` from
+    // the integral. The integral is
+    // `∫₀^√5 2·sin(5 − u²) du + √(π/2)·(sin 5 + cos 5)`.
+    [
+      'sin t/√|t − 5|',
+      (t: number) => Math.sin(t) / Math.sqrt(Math.abs(t - 5)),
+      -1.9671167915329387,
+    ],
+    // A logarithmic singularity inside a lobe. The integral was not found
+    // (the result was `null`).
+    [
+      'sin t·ln|t − 5|/t',
+      (t: number) => (Math.sin(t) * Math.log(Math.abs(t - 5))) / t,
+      2.9294785250940905,
+    ],
+    // At the end of a lobe, where the integrand is 0 but is `+∞` at the
+    // double nearest to `π`. The integral is
+    // `∫₀^√π 2·sin(w²) dw − √(π/2)`. A lobe with a value that is not
+    // finite at one point makes the result `NaN` if the lobe is not
+    // integrated again.
+    [
+      'sin t/√|t − π|',
+      (t: number) => Math.sin(t) / Math.sqrt(Math.abs(t - Math.PI)),
+      0.5363488016527897,
+    ],
+    // A pole at the end of two lobes. The integral is
+    // `∫₀^π sin v/v^1.5 dv − √(2π)`. The result was `1.25699002 ± 8.0e-10`.
+    // When the lobe before the pole ended at `10⁻¹⁴` before it, the result
+    // was `0.14484092867668 ± 2.6e-10`, `5.0e-8` from the integral.
+    [
+      'sin t/|t − π|^1.5',
+      (t: number) => Math.sin(t) / Math.abs(t - Math.PI) ** 1.5,
+      0.14484097841008297,
+    ],
+  ])('∫₀^∞ %s dt', (_name, f, exact) => {
+    const r = integrateSemiInfiniteOscillatory(f, 0)!;
+    expect(Number.isFinite(r.estimate)).toBe(true);
+    expect(Math.abs(r.estimate - exact)).toBeLessThanOrEqual(r.error);
+    expect(r.error).toBeLessThan(1e-9);
+  });
+
+  test('.N() of the parsed integral', () => {
+    const v = ce
+      .parse('\\int_0^\\infty \\frac{\\sin t}{\\sqrt{|t-5|}}\\,dt')
+      .N();
+    expect(Math.abs(v.re - -1.9671167915329387)).toBeLessThan(1e-9);
+  });
+});
+
+describe('an oscillatory integral whose lobes have an error', () => {
+  // The value is within its error and is not `NaN`. The values are from
+  // mpmath: `∫ₐ^∞ sin t/√t dt = √(2π)·(½ − S(√(2a/π)))`, with the Fresnel
+  // integral `S`; the integral with two singular points is the sum of the
+  // integrals with one, each a sum of Fresnel integrals (see
+  // `sin t/√|t − 5|` above); the integral of `sin t/(t·√|t − 50|)` is a sum
+  // of lobes with `quad` and `nsum`.
+  test.each([
+    // The rounding of the lobes far from 0 is larger than the tolerance of
+    // the ε-algorithm, and the ratio of the differences of the ε values was
+    // 1: the result was `NaN`.
+    [
+      'sin t/√t',
+      10000,
+      (t: number) => Math.sin(t) / Math.sqrt(t),
+      -0.009521706418367215,
+    ],
+    // The error of the lobes that hold `t = 5` and `t = 20` is larger than
+    // the tolerance of the ε-algorithm: the loop integrated all the lobes,
+    // and the result was `NaN`.
+    [
+      'sin t/√|t − 5| + sin t/√|t − 20|',
+      0,
+      (t: number) =>
+        Math.sin(t) / Math.sqrt(Math.abs(t - 5)) +
+        Math.sin(t) / Math.sqrt(Math.abs(t - 20)),
+      0.5444937842680909,
+    ],
+    // With an absolute tolerance for the lobes, no lobe met it, the split
+    // of a lobe with no singular point failed, and the lobe that holds
+    // `t = 50` was not split: the result was `NaN` after 7.0M evaluations.
+    [
+      '10¹²·sin t/(t·√|t − 50|)',
+      1,
+      (t: number) => (1e12 * Math.sin(t)) / (t * Math.sqrt(Math.abs(t - 50))),
+      0.0754720923306389e12,
+    ],
+    // A bump of one sign after some periods. The Levin value of the blocks
+    // of lobes before the bump was used, and the lobes after it were left
+    // out: the result was `1.0e-8 ± 2.5e-8`. The integral is
+    // `0 + √π·(1 + erf 60)/2`.
+    [
+      'sin t·cos 3t/t + e^(−(t − 60)²)',
+      0,
+      (t: number) =>
+        (Math.sin(t) * Math.cos(3 * t)) / t + Math.exp(-((t - 60) ** 2)),
+      1.772453850905516,
+    ],
+  ])('∫ from a of %s (a = %d)', (_name, a, f, exact) => {
+    const r = integrateSemiInfiniteOscillatory(f, a)!;
+    expect(Number.isFinite(r.estimate)).toBe(true);
+    expect(Math.abs(r.estimate - exact)).toBeLessThanOrEqual(r.error);
+    expect(r.error).toBeLessThan(1e-6 * Math.max(1, Math.abs(exact)));
+  });
+
+  test('the tolerance of a lobe is relative', () => {
+    // With an absolute tolerance, `10¹²·sin t/t` took 34,622 evaluations
+    // and `sin t/t` 2,387.
+    const count = (c: number) => {
+      let n = 0;
+      const r = integrateSemiInfiniteOscillatory((t) => {
+        n += 1;
+        return (c * Math.sin(t)) / t;
+      }, 0)!;
+      expect(Math.abs(r.estimate - (c * Math.PI) / 2)).toBeLessThanOrEqual(
+        r.error
+      );
+      return n;
+    };
+    expect(count(1e12)).toBeLessThanOrEqual(1.1 * count(1));
+  });
+});
+
+describe('an oscillatory integral whose lobes repeat a pattern', () => {
+  // `sin at·cos bt = (sin((a + b)t) + sin((a − b)t))/2`, and
+  // `∫₀^∞ sin kt/t^p dt = k^(p − 1)·π/(2·Γ(p)·sin(πp/2))`. The values are from
+  // mpmath, and agree with the sums of single-frequency integrals.
+  //
+  // The lobes of `sin t·cos 6t` have the widths `π/12`, five times `π/6`,
+  // and `π/12` again: the period of the widths is 7 lobes. Only the last
+  // `3·m` widths were compared for a period `m`, so the run of five equal
+  // widths gave the period 1, and the Levin value was not tried again with
+  // the block of 14 lobes: the result was `NaN`.
+  test.each([
+    [
+      'sin t·cos 6t/√t',
+      (t: number) => (Math.sin(t) * Math.cos(6 * t)) / Math.sqrt(t),
+      -0.043395452107162784,
+    ],
+    [
+      'sin t·cos 10t/t^0.25',
+      (t: number) => (Math.sin(t) * Math.cos(10 * t)) / t ** 0.25,
+      -0.01522162351257732,
+    ],
+    [
+      'sin 3t·cos t/t',
+      (t: number) => (Math.sin(3 * t) * Math.cos(t)) / t,
+      Math.PI / 2,
+    ],
+    [
+      'sin t·cos 3t/√t',
+      (t: number) => (Math.sin(t) * Math.cos(3 * t)) / Math.sqrt(t),
+      -0.12978492839750394,
+    ],
+  ])('∫₀^∞ %s dt', (_name, f, exact) => {
+    const r = integrateSemiInfiniteOscillatory(f, 0)!;
+    expect(Number.isFinite(r.estimate)).toBe(true);
+    expect(Math.abs(r.estimate - exact)).toBeLessThanOrEqual(r.error);
+  });
+});
+
+describe('a divergent oscillatory integral has no value', () => {
+  // `sin t·(1 + sin t) = sin t + sin²t`, and `∫₁^∞ sin²t/t^p dt` diverges
+  // for `p ≤ 1`. The sums of pairs of lobes have one sign and decrease as
+  // `j^(−p)`: they have no sum, but their Levin value was finite
+  // (`-0.14277 ± 0.000069` for `p = ½`). A pole of order 2 inside a lobe
+  // (`sin t/(t − 5)²`) gave `-217023352.094 ± 0.0013`: the error of the
+  // panels of that lobe was not reported.
+  test.each([
+    [
+      'sin t·(1 + sin t)/√t',
+      1,
+      (t: number) => (Math.sin(t) * (1 + Math.sin(t))) / Math.sqrt(t),
+    ],
+    [
+      'sin t·(1 + sin t)/t^0.9',
+      1,
+      (t: number) => (Math.sin(t) * (1 + Math.sin(t))) / t ** 0.9,
+    ],
+    ['sin t/(t − 5)²', 0, (t: number) => Math.sin(t) / (t - 5) ** 2],
+    // A pole that is not integrable, inside a lobe and at the end of a
+    // lobe: the parts of the lobe next to the pole diverge.
+    [
+      'sin t/|t − 5|^1.1',
+      0,
+      (t: number) => Math.sin(t) / Math.abs(t - 5) ** 1.1,
+    ],
+    ['sin t/(t − π)²', 0, (t: number) => Math.sin(t) / (t - Math.PI) ** 2],
+    // Far from 0, the lobes must decrease less to be taken to decrease
+    // (`lobesDecaying`), but lobes that do not decrease, or a divergent
+    // part of one sign, still give no value.
+    ['sin t', 100000, (t: number) => Math.sin(t)],
+    [
+      'sin t·(1 + sin t)/√t',
+      100000,
+      (t: number) => (Math.sin(t) * (1 + Math.sin(t))) / Math.sqrt(t),
+    ],
+  ])('∫ from a of %s (a = %d)', (_name, a, f) => {
+    const r = integrateSemiInfiniteOscillatory(f, a);
+    expect(r === null || !Number.isFinite(r.estimate)).toBe(true);
   });
 });
 

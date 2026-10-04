@@ -302,3 +302,22 @@ describe('_numericValue with a large / non-integer radical (does not throw)', ()
     expect(e.N().re).toBeCloseTo(Math.sqrt(1234 * 1235), 6);
   });
 });
+
+// When the radical parts of the coefficients of a term cancel, the term is
+// dropped. Before, `√2/4·x − √2/4·x` was the product `0·x` and not `0`, so an
+// exact difference of two equal radical expressions did not read as zero
+// (issue #409: `arcsin(√2/4·√(5 − √5))` did not match `sin(π/5)`).
+describe('a term whose radical coefficients cancel', () => {
+  test('√2/4·x − √2/4·x is 0', () => {
+    const t = ce.box(['Multiply', ['Divide', ['Sqrt', 2], 4], 'x']);
+    expect(t.sub(t).json).toBe(0);
+  });
+  test('√2·√(5 + √5) − √2·√(5 + √5) is 0', () => {
+    const t = ce.box([
+      'Multiply',
+      ['Sqrt', 2],
+      ['Sqrt', ['Add', 5, ['Sqrt', 5]]],
+    ]);
+    expect(t.sub(t).json).toBe(0);
+  });
+});

@@ -78,6 +78,11 @@ import {
 import '../symbolic/explain-derivative.js';
 import { antiderivative } from '../symbolic/antiderivative.js';
 import {
+  definiteIntegralByResidues,
+  divergentIntegralValue,
+  singularPathValue,
+} from '../symbolic/contour-definite-integrate.js';
+import {
   getPolynomialCoefficients,
   polynomialDegree,
 } from '../boxed-expression/polynomials.js';
@@ -104,6 +109,7 @@ import { residue } from '../symbolic/residue.js';
 import { computeSeries, normalStrip } from '../symbolic/series.js';
 import { canonicalLimits, canonicalLimitsSequence } from './utils.js';
 import { implicitCompile } from '../implicit-compile.js';
+import { containsResidueClass } from '../boxed-expression/residue-class.js';
 
 /**
  * The highest order the `D(f, {x, n})` spelling expands into `n` repeated
@@ -675,6 +681,27 @@ function noValueIntegral(
     else if (isFunction(e)) for (const op of e.ops) collect(op);
   };
   collect(integrand);
+  return indeterminateFormAnswer(ce, operands);
+}
+
+/**
+ * The value of a contour integral (`ContourIntegrate`, `CircularIntegrate`)
+ * that has no value: `Indeterminate` when the contour and every number
+ * literal of the integrand are exact, and `NaN` when one of them is a float,
+ * as for `noValueIntegral()`.
+ */
+function noValueContourIntegral(
+  ce: ComputeEngine,
+  integrand: Expression,
+  contour: Expression
+): Expression {
+  const operands: Expression[] = [];
+  const collect = (e: Expression): void => {
+    if (isNumber(e)) operands.push(e);
+    else if (isFunction(e)) for (const op of e.ops) collect(op);
+  };
+  collect(integrand);
+  collect(contour);
   return indeterminateFormAnswer(ce, operands);
 }
 
@@ -3124,6 +3151,11 @@ volumes
         // unevaluated rather than crashing on `ops[0].canonical`.
         if (!ops[0]) return undefined;
 
+        // A function that holds a residue class is not differentiated: a
+        // class is not a real number, and the rules of differentiation do
+        // not apply to it. The derivative stays unevaluated.
+        if (containsResidueClass(ops[0].canonical)) return undefined;
+
         // The differentiation variable(s) are bound by `D`: a same-named global
         // assignment (`x := 5`) must not substitute into the result. Shield
         // them across the whole evaluation — the final `.evaluate()` of the
@@ -3405,25 +3437,100 @@ volumes
     },
 
     CircularIntegrate: {
-      description: 'Contour (closed-path) integral. Inert: never evaluated.',
+      description:
+        'Closed-path integral. Evaluates supported explicit contours by the residue theorem.',
       keywords: ['contour integral', 'closed integral', 'line integral'],
       broadcastable: false,
 
       lazy: true,
+      // The variable of the limits is bound by the integral, as in
+      // `Integrate`: it is declared in the integral's own scope, not in the
+      // scope of the caller.
+      scoped: indexingSetSites(1),
       signature: '(function, limits+) -> number',
 
-      // `CircularIntegrate` carries no contour-integration machinery: the
-      // integrand is left as the bare application it was parsed as (not wrapped
-      // in a `Function` literal the way `Integrate` does), so it round-trips to
-      // the same LaTeX. The canonical handler exists to (a) rewrite the limits
-      // that `parseIntegral` builds as `Tuple`s into `Limits` expressions, so a
-      // limits-consuming caller sees the same shape as `Integrate` (the `Tuple`
-      // uses the symbol `Nothing` as a *positional* placeholder for an absent
-      // index/bound), and (b) give the operator a `number` type.
+      // The integrand is left as the bare application it was parsed as (not
+      // wrapped in a `Function` literal the way `Integrate` does), so it
+      // round-trips to the same LaTeX. The canonical handler rewrites the
+      // limits that `parseIntegral` builds as `Tuple`s into `Limits`
+      // expressions, so a limits-consuming caller sees the same shape as
+      // `Integrate` (the `Tuple` uses the symbol `Nothing` as a positional
+      // placeholder for an absent index or bound). A single lower limit can
+      // name a contour (`\oint_{|z|=2}`): the evaluate handler then applies
+      // the residue theorem. Any other limits leave the integral inert.
       canonical: (ops, { engine: ce }) => {
         if (!ops[0]) return null;
         const limits = canonicalLimitsSequence(ops.slice(1), { engine: ce });
         return ce._fn('CircularIntegrate', [ops[0].canonical, ...limits]);
+      },
+      evaluate: (ops, { engine: ce, numericApproximation }) => {
+        if (ops.length !== 2 || !isFunction(ops[1], 'Limits')) return undefined;
+        const [variable, contour, upper] = ops[1].ops;
+        if (
+          !isSymbol(variable) ||
+          !contour ||
+          (upper && sym(upper) !== 'Nothing')
+        )
+          return undefined;
+        // The box route can deliver the integrand as a `Function` literal,
+        // the shape that `Integrate` uses: read its body.
+        const integrand = liftIntegrand(ops[0]);
+        const r = ce.contourIntegrate(integrand, variable.symbol, contour);
+        let value =
+          r.status === 'pole-on-contour' ? singularPathValue(ce, r) : r.value;
+        if (value?.isIndeterminate === true)
+          value = noValueContourIntegral(ce, integrand, contour);
+        return numericApproximation ? value?.N() : value;
+      },
+    },
+
+    CircleContour: {
+      description:
+        'Closed circle: center, positive radius, optional orientation (+1 or -1).',
+      signature:
+        '(center:complex, radius:real, orientation:integer?) -> expression',
+    },
+    RealLineContour: {
+      description:
+        'The real axis from minus infinity to infinity. Pass True to explicitly request a Cauchy principal value.',
+      signature: '(principalValue:boolean?) -> expression',
+    },
+    PolygonContour: {
+      description:
+        'Simple closed polygon: a list of complex vertices in traversal order, with optional orientation override (+1 or -1).',
+      signature: '(vertices:list<complex>, orientation:integer?) -> expression',
+    },
+    RectangleContour: {
+      description:
+        'Closed rectangle: lower-left and upper-right complex corners, optional orientation (+1 or -1).',
+      signature:
+        '(lowerLeft:complex, upperRight:complex, orientation:integer?) -> expression',
+    },
+    ContourIntegrate: {
+      description:
+        'Symbolic integral over an explicit closed contour, using the residue theorem.',
+      keywords: ['residue theorem', 'contour integral'],
+      broadcastable: false,
+      lazy: true,
+      scoped: operandSites(1),
+      signature: '(expression, variable:symbol, contour:expression) -> number',
+      canonical: (ops, { engine: ce }) => {
+        if (ops.length !== 3 || !isSymbol(ops[1])) return null;
+        return ce._fn(
+          'ContourIntegrate',
+          ops.map((op) => op.canonical)
+        );
+      },
+      evaluate: ([f, x, contour], { engine: ce, numericApproximation }) => {
+        const variable = sym(x);
+        if (!variable) return undefined;
+        const integrand = liftIntegrand(f);
+        const r = ce.contourIntegrate(integrand, variable, contour);
+        let value =
+          r.status === 'pole-on-contour' ? singularPathValue(ce, r) : r.value;
+        if (value?.isIndeterminate === true)
+          value = noValueContourIntegral(ce, integrand, contour);
+        return numericApproximation ? value?.N() : value;
       },
     },
 
@@ -3586,6 +3693,11 @@ volumes
         let body = (isFunction(ops[0], 'Function') ? ops[0].op1 : ops[0])
           .canonical;
         while (isFunction(body, 'Block') && body.nops === 1) body = body.op1;
+        // An integrand that holds a residue class is not integrated: a class
+        // is not a real number, and the bounds are real numbers, not
+        // elements of its ring (`1/2` is not the class `2⁻¹`). The integral
+        // stays unevaluated, under `evaluate()` and `N()` alike.
+        if (containsResidueClass(body)) return undefined;
         if (isNumber(body) && body.isNaN === true) {
           if (numericApproximation) return ce.NaN;
           const bounds = ops
@@ -3640,6 +3752,55 @@ volumes
           const [lo, hi] = [l.op2, l.op3];
           if (sym(lo) === 'Nothing' || sym(hi) === 'Nothing') continue;
           if (lo.isSame(hi)) return ce.Zero;
+        }
+
+        // Use the exact residue result for both `evaluate()` and `.N()`, after
+        // the real-line driver has verified the closing arc and all poles.
+        if (ops.length === 2 && isFunction(ops[1], 'Limits')) {
+          const [x, lo, hi] = ops[1].ops;
+          const variable = sym(x);
+          if (
+            variable &&
+            lo?.isInfinity === true &&
+            hi?.isInfinity === true &&
+            ((lo.sgn === 'negative' && hi.sgn === 'positive') ||
+              (lo.sgn === 'positive' && hi.sgn === 'negative'))
+          ) {
+            const r = ce.contourIntegrate(liftIntegrand(ops[0]), variable, {
+              kind: 'real-line',
+            });
+            // A pole on the real axis: the integral is +∞ or −∞ when the
+            // integrand keeps one sign next to every such pole, and has no
+            // value when it changes sign. When neither could be decided, the
+            // other methods below are tried.
+            let divergent =
+              r.status === 'pole-on-contour'
+                ? divergentIntegralValue(
+                    ce,
+                    r.divergence,
+                    lo.sgn === 'negative'
+                  )
+                : undefined;
+            if (divergent?.isIndeterminate === true)
+              divergent = noValueIntegral(ce, liftIntegrand(ops[0]), lo, hi);
+            if (divergent)
+              return numericApproximation ? divergent.N() : divergent;
+            if (r.value) {
+              const value = lo.sgn === 'negative' ? r.value : r.value.neg();
+              return numericApproximation ? value.N() : value;
+            }
+          }
+          if (variable && lo && hi) {
+            let value = definiteIntegralByResidues(
+              liftIntegrand(ops[0]),
+              variable,
+              lo,
+              hi
+            );
+            if (value?.isIndeterminate === true)
+              value = noValueIntegral(ce, liftIntegrand(ops[0]), lo, hi);
+            if (value) return numericApproximation ? value.N() : value;
+          }
         }
 
         if (numericApproximation) {

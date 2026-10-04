@@ -111,7 +111,9 @@
     "description": "Calculus operators such as differentiation and integration.",
     "operators": [
       "BigO",
+      "CircleContour",
       "CircularIntegrate",
+      "ContourIntegrate",
       "D",
       "Derivative",
       "DSolve",
@@ -126,6 +128,9 @@
       "NIntegrate",
       "NLimit",
       "Normal",
+      "PolygonContour",
+      "RealLineContour",
+      "RectangleContour",
       "Residue",
       "RSolve",
       "Series"
@@ -209,6 +214,7 @@
       "Reduce",
       "Repeat",
       "ReplaceAt",
+      "ResidueClass",
       "Rest",
       "Reverse",
       "RotateLeft",

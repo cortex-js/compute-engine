@@ -3113,10 +3113,15 @@ export class _Parser implements Parser {
         numberEnd++;
         while (/^[0-9]$/.test(t[numberEnd] ?? '')) numberEnd++;
       }
-      this._emitAmbiguity('ambiguous-implicit-subscript', underscore, numberEnd, {
-        base,
-        subscript: run,
-      });
+      this._emitAmbiguity(
+        'ambiguous-implicit-subscript',
+        underscore,
+        numberEnd,
+        {
+          base,
+          subscript: run,
+        }
+      );
       return;
     }
     for (let k = 1; k < run.length - 1; k++) {
@@ -5666,12 +5671,9 @@ export class _Parser implements Parser {
           PARENTHESIZED_BARE_FUNCTION_MAP[run] !== undefined)
       )
         return;
-      this._emitAmbiguity(
-        'ambiguous-name-then-number',
-        runStart,
-        this.index,
-        { name: runStart < factorStart ? run : name }
-      );
+      this._emitAmbiguity('ambiguous-name-then-number', runStart, this.index, {
+        name: runStart < factorStart ? run : name,
+      });
       return;
     }
 
