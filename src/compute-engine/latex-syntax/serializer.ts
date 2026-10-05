@@ -1,3 +1,4 @@
+import { TEXT_SPECIAL_CHARACTERS, escapeText } from './utils.js';
 import type {
   DictionaryValue,
   MathJsonDictionaryObject,
@@ -1069,6 +1070,12 @@ function dictionaryValueAsExpression(
  * reads each escape back as the character (`parseTextRun()`). A string with
  * such a character is not written with double quotes: inside double quotes
  * these characters are not escaped (`"$"` is a syntax error).
+ *
+ * A control character or a private-use character is written as its code
+ * point, `\char"0009{}`: TeX rejects most control characters in its input,
+ * reads a tab or a line break as a space, and has no glyph for a
+ * private-use character. The parser reads the code point back as the
+ * character (`parseChar()`).
  */
 function serializeString(s: string): string {
   if (
@@ -1078,31 +1085,4 @@ function serializeString(s: string): string {
   )
     return `"${s}"`;
   return `\\text{${escapeText(s)}}`;
-}
-
-/** The characters that `escapeText()` escapes. */
-const TEXT_SPECIAL_CHARACTERS = /[\\{}$%#&_~^]/;
-
-/** The escape in `\text{…}` of each character of `TEXT_SPECIAL_CHARACTERS`. */
-const TEXT_ESCAPES: Readonly<Record<string, string>> = {
-  '\\': '\\textbackslash{}',
-  '{': '\\{',
-  '}': '\\}',
-  '$': '\\$',
-  '%': '\\%',
-  '#': '\\#',
-  '&': '\\&',
-  '_': '\\_',
-  '~': '\\textasciitilde{}',
-  '^': '\\textasciicircum{}',
-};
-
-/**
- * The string `s` with each character that LaTeX reads as a command or a
- * delimiter inside `\text{…}` escaped, so that the parser reads the content
- * back as `s`.
- */
-function escapeText(s: string): string {
-  if (!TEXT_SPECIAL_CHARACTERS.test(s)) return s;
-  return s.replace(/[\\{}$%#&_~^]/g, (c) => TEXT_ESCAPES[c]);
 }

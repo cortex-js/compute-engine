@@ -34,7 +34,11 @@ import {
 } from '../types.js';
 import { joinLatex, supsub } from '../tokenizer.js';
 import { latexTemplate } from '../serializer-style.js';
-import { isEquationOperator, isInequalityOperator } from '../utils.js';
+import {
+  escapeText,
+  isEquationOperator,
+  isInequalityOperator,
+} from '../utils.js';
 import { BoxedType } from '../../../common/type/boxed-type.js';
 import { parseType } from '../../../common/type/parse.js';
 import {
@@ -3191,10 +3195,10 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     },
   },
 
-  // A character value serializes exactly like the one-character string it
-  // denotes — `\text{x}` — because LaTeX has no notation that distinguishes
-  // the two. Serialize-only, with no `latexTrigger`: `\text{x}` parses back as
-  // a STRING, and narrowing it to a character is the job of argument
+  // A character value serializes like the one-character string it denotes —
+  // `\text{x}`, with the same escapes (`escapeText()`) — because LaTeX has no
+  // notation that distinguishes the two. Serialize-only, with no
+  // `latexTrigger`: `\text{x}` parses back as a STRING, and narrowing it to a character is the job of argument
   // validation at a `character`-typed position, not of the parser.
   {
     name: 'CharacterFrom',
@@ -3207,7 +3211,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
         return `\\operatorname{CharacterFrom}(${serializer.serialize(
           operand(expr, 1)
         )})`;
-      return `\\text{${sanitizeLatex(s)}}`;
+      return `\\text{${escapeText(s)}}`;
     },
   },
 

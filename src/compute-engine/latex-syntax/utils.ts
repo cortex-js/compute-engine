@@ -74,3 +74,45 @@ export function isEquationOperator(operator: string | undefined): boolean {
   if (typeof operator !== 'string') return false;
   return ['Equal', 'NotEqual'].includes(operator);
 }
+
+/**
+ * The characters that `escapeText()` escapes: the characters that LaTeX
+ * reads as a command or a delimiter, the control characters (U+0000 to
+ * U+001F and U+007F to U+009F) and the private-use characters (U+E000 to
+ * U+F8FF, and planes 15 and 16).
+ */
+export const TEXT_SPECIAL_CHARACTERS =
+  /[\\{}$%#&_~^\u0000-\u001F\u007F-\u009F\uE000-\uF8FF\u{F0000}-\u{10FFFF}]/u;
+
+/** The escape in `\text{…}` of each character of `TEXT_SPECIAL_CHARACTERS`. */
+const TEXT_ESCAPES: Readonly<Record<string, string>> = {
+  '\\': '\\textbackslash{}',
+  '{': '\\{',
+  '}': '\\}',
+  '$': '\\$',
+  '%': '\\%',
+  '#': '\\#',
+  '&': '\\&',
+  '_': '\\_',
+  '~': '\\textasciitilde{}',
+  '^': '\\textasciicircum{}',
+};
+
+/**
+ * The content of a `\text{…}` for the string `s`: each character that LaTeX
+ * reads as a command or a delimiter is escaped (`\#`, `\textbackslash{}`),
+ * and each control character or private-use character is written as its
+ * code point (`\char"0009{}`), so that the parser reads the content back as
+ * `s`.
+ */
+export function escapeText(s: string): string {
+  if (!TEXT_SPECIAL_CHARACTERS.test(s)) return s;
+  // The empty group after the code point ends the number: without it, a
+  // following `A` to `F` or digit would be read as one more hexadecimal digit.
+  return s.replace(
+    new RegExp(TEXT_SPECIAL_CHARACTERS.source, 'gu'),
+    (c) =>
+      TEXT_ESCAPES[c] ??
+      `\\char"${c.codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0')}{}`
+  );
+}

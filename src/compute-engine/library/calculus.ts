@@ -106,7 +106,7 @@ import {
 } from '../differential-equation-utils.js';
 import { evalDenseRows } from '../numerics/differential-equations.js';
 import { rewriteAngularUnit } from '../symbolic/angular-unit.js';
-import { symbolicLimit } from '../symbolic/limit.js';
+import { hasNonRealConstant, symbolicLimit } from '../symbolic/limit.js';
 import { residue } from '../symbolic/residue.js';
 import { computeSeries, normalStrip } from '../symbolic/series.js';
 import { canonicalLimits, canonicalLimitsSequence } from './utils.js';
@@ -2879,6 +2879,75 @@ function functionLiteralOf(
   return isFunction(value, 'Function') ? value : undefined;
 }
 
+/**
+ * The numeric limit of the function literal `f` at the point `x`, by
+ * Richardson extrapolation, as a float. `undefined` when the point has no
+ * numeric value; `NaN` when the samples do not converge.
+ *
+ * A function with no non-real constant is sampled as a real function, with
+ * compiled machine arithmetic when the body compiles. A function with a
+ * non-real constant (`t ↦ Gamma(i·t)`) can take complex values: the
+ * extrapolation works on real samples, so the real part and the imaginary
+ * part are extrapolated separately, and the limit exists when both
+ * converge. Its samples come from the interpreter, because a compiled
+ * function answers `NaN` for some functions of a complex argument (`Gamma`).
+ */
+function numericLimitValue(
+  engine: ComputeEngine,
+  f: Expression,
+  x: Expression,
+  dir: Expression | undefined
+): Expression | undefined {
+  let target = x.N().re;
+  if (Number.isNaN(target)) return undefined;
+  const direction = dir ? dir.re : 1;
+
+  // The extrapolation reaches an infinite point through positive arguments
+  // only. A limit at `−∞` is the limit of `t ↦ f(−t)` at `+∞`.
+  const mirrored = target === -Infinity;
+  if (mirrored) target = Infinity;
+  const at = (t: number): number => (mirrored ? -t : t);
+
+  if (!hasNonRealConstant(f)) {
+    // The iteration budget keeps a single sample on the extrapolation
+    // ladder interruptible: an unbudgeted compiled Sum/Product with a
+    // variable-dependent bound runs an arbitrarily long loop that no
+    // deadline check can reach (see LIMIT_PROBE_ITERATION_BUDGET).
+    const compiled = implicitCompile(engine, f, {
+      iterationBudget: LIMIT_PROBE_ITERATION_BUDGET,
+    });
+    const fn = (compiled?.run as (x: number) => number) ?? applicableN1(f);
+    // A numeric limit is a float, even when its value is an integer
+    return engine.number(
+      engine._inexactNumericValue(
+        limit((t) => fn(at(t)), target, direction, engine._deadline) + 0
+      )
+    );
+  }
+
+  // Each sample is evaluated once and read twice (real part, imaginary part).
+  const apply = applicable(f);
+  const samples = new Map<number, [re: number, im: number]>();
+  const sample = (t: number): [re: number, im: number] => {
+    let v = samples.get(t);
+    if (v === undefined) {
+      const y = apply([engine.number(at(t))])?.N();
+      v = y === undefined || !isNumber(y) ? [NaN, NaN] : [y.re, y.im];
+      samples.set(t, v);
+    }
+    return v;
+  };
+  const re = limit((t) => sample(t)[0], target, direction, engine._deadline);
+  const im = Number.isNaN(re)
+    ? NaN
+    : limit((t) => sample(t)[1], target, direction, engine._deadline);
+  if (Number.isNaN(re) || Number.isNaN(im)) return engine.NaN;
+  // A numeric limit is a float, even when both parts are integers.
+  return engine.number(
+    engine._inexactNumericValue(im === 0 ? re + 0 : { re, im })
+  );
+}
+
 export const CALCULUS_LIBRARY: SymbolDefinitions[] = [
   {
     /* @todo
@@ -5228,19 +5297,7 @@ volumes
         // variable-dependent bound runs an arbitrarily long loop that no
         // deadline check can reach (see LIMIT_PROBE_ITERATION_BUDGET).
         if (numericApproximation) {
-          const target = x.N().re;
-          if (Number.isNaN(target)) return undefined;
-          const compiled = implicitCompile(engine, f, {
-            iterationBudget: LIMIT_PROBE_ITERATION_BUDGET,
-          });
-          const fn =
-            (compiled?.run as (x: number) => number) ?? applicableN1(f);
-          // A numeric limit is a float, even when its value is an integer
-          return engine.number(
-            engine._inexactNumericValue(
-              limit(fn, target, dir ? dir.re : 1, engine._deadline) + 0
-            )
-          );
+          return numericLimitValue(engine, f, x, dir);
         }
         return undefined;
       },
@@ -5281,18 +5338,7 @@ volumes
       evaluate: ([f, x, dir], { engine }) => {
         // Uses compiled JS functions (machine arithmetic). Budgeted for the
         // same reason as Limit's numeric fallback above.
-        const target = x.N().re;
-        if (Number.isNaN(target)) return undefined;
-        const compiled = implicitCompile(engine, f, {
-          iterationBudget: LIMIT_PROBE_ITERATION_BUDGET,
-        });
-        const fn = (compiled?.run as (x: number) => number) ?? applicableN1(f);
-        // A numeric limit is a float, even when its value is an integer
-        return engine.number(
-          engine._inexactNumericValue(
-            limit(fn, target, dir ? dir.re : 1, engine._deadline) + 0
-          )
-        );
+        return numericLimitValue(engine, f, x, dir);
       },
     },
   },

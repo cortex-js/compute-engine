@@ -2032,10 +2032,14 @@ function serializePower(
         ]);
       }
       if (denom === 2) {
-        // It's x^(n/2) -> it's √x^n
-        return `${serializer.serialize(['Sqrt', base])}^{${serializer.serialize(
-          operand(exp, 1)
-        )}}`;
+        // It's x^(n/2) -> it's √x^n. This form is used only when the root is
+        // written as a radical. Deep inside an expression the root style is
+        // an exponent (`2^{1/2}`), and a second exponent written after it
+        // (`2^{1/2}^{n}`) is a double superscript, which TeX rejects. The
+        // generic form below writes one exponent, `2^{n/2}`, in that case.
+        const root = serializer.serialize(['Sqrt', base]);
+        if (root.startsWith('\\sqrt'))
+          return `${root}^{${serializer.serialize(operand(exp, 1))}}`;
       }
     } else if (operator(exp) === 'Power') {
       if (machineValue(operand(exp, 2)) === -1) {
