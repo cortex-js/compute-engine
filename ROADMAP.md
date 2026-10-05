@@ -109,6 +109,52 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
+### `Limit` at infinity: two sign reads that still default to `+` (OPEN, small — found 2026-10-04 by the complex-valued limit fix for issue #396)
+
+The polynomial rule, the product rule and the quotient rule of the limit at
+infinity (`symbolic/limit.ts`) answer `±∞` only when the sign is decided.
+Two reads in the growth oracles still use `leadingSignAtInf`, which returns
+`+1` when its numeric probe at `x = 120` has no value (a symbolic
+parameter): the `Exp` case and the constant-base `Power` case near
+`tendsToInfinity`. No wrong limit is known to come from them — the probes
+tried (`a·eᵗ`, `a·ln t`, `(a·t)³`, `a·eᵗ + t`) all stay unevaluated — but
+each read must decline when the probe has no value.
+
+### A complex-valued limit that is not finite has no answer (OPEN, design — found 2026-10-04, issue #396)
+
+`Limit(t ↦ i·t, ∞)` and `Limit(t ↦ Erf(i·t), ∞)` stay unevaluated: the
+engine has no directed complex infinity, and by the 2026-07-10 convention a
+limit never answers `ComplexInfinity`. Deciding that a limit whose modulus
+goes to `+∞` answers `ComplexInfinity` would give these an answer. The code
+is `complexLimitAtPosInf` in `symbolic/limit.ts`. Also not covered: a
+complex-valued function whose parts cannot be separated (only sums,
+products, quotients, integer powers and the exponential are), for example
+`t·Gamma(2 + i·t)`, whose symbolic limit is `0`; `.N()` gives a value near
+`0` for it.
+
+### `NLimit` gives `NaN` for a function that rises before it decays to 0 (OPEN, small — found 2026-10-04, issue #396; present before)
+
+`NLimit(t ↦ 7t/(t² + 9), ∞)` is `NaN`; the limit is `0`. The sample test
+`reliableLimitSamples` (`numerics/numeric.ts`) reads "the magnitude grew to
+a peak, then fell below `1e-8` of the peak" as catastrophic cancellation,
+and this function has that shape (0.7 at `t = 1`, 0.77 at `t = 8`, then a
+`7/t` decay). `Limit` answers it symbolically, so only the numeric route
+shows it — including the imaginary part of `(2t + i)/(t − 3i)`. A decay
+that is regular (each sample smaller than the one before by a near-constant
+ratio) is not a cancellation and could be told apart from one. A related
+point: a function that decays to 0 gives a residue such as `−9e-46`, not
+`0` (`NLimit(t ↦ |Gamma(i·t)|, ∞)`).
+
+### Compiled JavaScript `Gamma` of a non-real argument is `NaN` (OPEN, small — found 2026-10-04, issue #396)
+
+`compile(Gamma(i·t))` succeeds and the function returns `NaN` for every
+`t`: the generated code is `cisreal(z) ? gamma(re(z)) : NaN`. The
+interpreter has a complex `gamma()` (`numerics/numeric-complex.ts`) and
+answers `Gamma(5i) ≈ −0.00027 + 0.00034i`. The compiled function must call
+a complex kernel, or the compilation must decline, so the two routes agree.
+For this reason the numeric `Limit` of a complex-valued function samples
+through the interpreter (`numericLimitValue`, `library/calculus.ts`).
+
 ### A spacing command inside a KroneckerDelta subscript becomes an index (OPEN, small — found 2026-10-04 by the δ-group change)
 
 `\delta_{n\,m}` parses to `KroneckerDelta(n, HorizontalSpacing(3), m)` in
