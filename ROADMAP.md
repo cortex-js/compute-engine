@@ -49,8 +49,8 @@ clean-parse 3/345 → 278/345, throws 9 → 0). Fresh unseen-sample validation
 measured 97.4% clean parse with 0 throws/0 hangs; the remaining MathNet work is
 a small notation tail tracked below.
 
-**0.141.0 released 2026-09-29** (latest; adopted by Tycho the same day). The
-0.111–0.141 line is described release by release in `CHANGELOG.md`. The
+**0.148.0 released 2026-10-05** (latest; Tycho runs 0.147.0, adopted
+2026-10-02). The 0.111–0.148 line is described release by release in `CHANGELOG.md`. The
 0.97–0.110 line carried the Tycho-compatibility rounds through items 177–190
 (the canonicalization-time facet-probe storm and its document-context survivor,
 the `Add` collection-view nesting fix, `broadcastable` divide admission, opt-in
@@ -471,6 +471,53 @@ progress can still run for a long time. A fix gives the built-in antiderivative
 `RUBI_STEP_BUDGET` in `rubi/driver.ts`, so that the result does not depend on
 the machine, and decides what an exhausted budget returns (the unevaluated
 `Integrate`, as Rubi does).
+
+### `x^a · x^b` with a symbolic exponent does not combine, but `x^a / x^b` does (OPEN, decision — issue #415, found 2026-10-05)
+
+The two directions of the same-base power rule use different guards for a
+base that can be zero:
+
+- The quotient combines with no guard. `x^a / x^a` is `1` when the
+  expression is made canonical, and `simplify()` makes `x^a / x^b` into
+  `x^(a − b)` (`simplify-divide.ts`, `simplify-power.ts`).
+- The product combines only when the base is known to be nonzero or the sum
+  of the exponents is known to be positive (`simplify-power.ts`, and the rule
+  "combined powers with same base" in `simplify-rules.ts`). So `x^a · x^b`,
+  `x^a · x^(−a)` and `x · x^a` stay unchanged under `simplify()` for a symbol
+  `x` with no assumptions, while `x · x^(−1)` and `x^2 · x^(−2)` evaluate to
+  `1`.
+
+The engine already reads `x/x` as `1`, so the guard on the product does not
+give a more correct answer, only a different one. A decision is necessary:
+remove the guard on the product (the quotient's convention, and
+Mathematica's), or add it to the quotient. Separate questions in the same
+issue: whether `evaluate()` combines symbolic exponents (today it combines
+only numeric exponents, at canonicalization), and whether the rule must
+check that the exponents are scalar numbers (it is correct today for matrix
+exponents, because `Exp` of a matrix is element-wise).
+
+### `Count` of a finite collection with more than 2^53 elements stays unevaluated (OPEN, decided 2026-10-05 — issue #416)
+
+The `count` handler of a collection returns a JavaScript number, and
+`integerQuotientModulus()` (`library/sets.ts`) returns `undefined` when the
+count is not a safe integer. So `Count(QuotientRing(Integers, 2^61 − 1))`
+stays unevaluated, although the exact count is the modulus. Decision: the
+`count` handler and `expr.count` can return a `bigint` for a count that is
+not a safe integer. Every reader of `count` must then accept a `bigint`.
+
+### Symbolic interval arithmetic in `evaluate()` (OPEN, investigation — issue #416, 2026-10-05)
+
+`Interval(a, b)` is a set of reals, so a numeric function of an interval is a
+type error (`Sin(Interval(0, 1))`), and `Abs(Interval(−1, 2))` is the
+cardinality of the set, `+∞`. Interval arithmetic exists only in compiled
+code: `compile(expr, {to: 'interval-js'})` and the `IntervalArithmetic`
+functions of `@cortex-js/compute-engine/interval` give `|[−1, 2]| = [0, 2]`.
+To investigate: a way for `evaluate()` to compute the image of an interval
+under a numeric function (`Sin(Interval(0, 1))` → `Interval(0, sin 1)`),
+exact where the endpoints are exact, without a second meaning for the
+operators that already accept a set (`Abs` as the cardinality). One possible
+form is a separate head for an interval value, distinct from the set
+`Interval`.
 
 ### `simplify()` does not fully simplify the terms of a quotient's numerator (OPEN, small — found 2026-10-03 by the odd and even function rules)
 
