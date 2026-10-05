@@ -79,6 +79,7 @@ import {
 // Self-registers the `expr.explain('D')` driver (see explain.ts)
 import '../symbolic/explain-derivative.js';
 import { antiderivative } from '../symbolic/antiderivative.js';
+import { integratePiecewise } from '../symbolic/piecewise-integrate.js';
 import {
   definiteIntegralByResidues,
   divergentIntegralValue,
@@ -3318,7 +3319,9 @@ volumes
             if (
               isSymbol(op) &&
               opDef !== undefined &&
-              (!opDef.lazy || op.symbol === 'Add' || op.symbol === 'Multiply') &&
+              (!opDef.lazy ||
+                op.symbol === 'Add' ||
+                op.symbol === 'Multiply') &&
               orders.reduce((sum, n) => sum + n, 0) <= MAX_NESTED_PARTIAL_ORDER
             ) {
               const names = orders.map((_, i) => `_${i + 1}`);
@@ -4537,14 +4540,16 @@ volumes
               continue;
             }
             if (isDefinite) {
-              const split = integrateAcrossKinks(
-                ce,
-                integrand,
-                variable,
-                lower,
-                upper,
-                numericApproximation ?? false
-              );
+              const split =
+                integratePiecewise(ce, integrand, variable, lower, upper) ??
+                integrateAcrossKinks(
+                  ce,
+                  integrand,
+                  variable,
+                  lower,
+                  upper,
+                  numericApproximation ?? false
+                );
               if (split !== undefined) {
                 isIndefinite = false;
                 expr =
