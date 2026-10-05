@@ -526,21 +526,31 @@ Dynamic scoping has to survive compilation, or it silently becomes lexical at th
 boundary: a compiled body would ignore the frame it is running inside and draw
 live instead.
 
-**The binding is an engine reference, not a frame handle.** There is exactly one
-frame slot per engine, and both the interpreter and compiled code reach it
-through the engine — one representation, not two kept in agreement.
+**The binding is a source, not a frame handle.** There is exactly one frame
+slot per source (per engine, for the engine's), and both the interpreter and
+compiled code reach it through it — one representation, not two kept in
+agreement.
 
-- `makeSysHelpers(ce)` (`compilation/javascript-target.ts`) builds each compiled
-  artifact's `_SYS` bundle **over the compiling engine**.
-- `_SYS.drawNextRandomNumber()` delegates to `ce._random()` — the *same*
-  primitive the interpreter uses. It resolves the engine's active frame **at call
-  time**, advances that frame's counter, and returns `hash(seed, n)`; with no
-  frame it draws from the `entropy` handler of the host capability registry
-  (`ce.effects.entropy`, `Math.random` by default — `docs/EFFECTS-MODEL.md`,
-  "Host capabilities").
+- `makeSysHelpers(source)` (`compilation/javascript-runtime.ts`) builds each
+  compiled artifact's `_SYS` bundle over a `RuntimeSource`: the live draw, the
+  frame slot, the iteration limit and the deadline. The engine passes its own
+  (`ce._liveRandom`, `ce._randomFrame`, `ce.iterationLimit`,
+  `ce._deadlineFrame`); `createJavaScriptRuntime` (`@cortex-js/compute-engine/runtime`)
+  passes plain options, so the same helpers run with no engine.
+- `_SYS.drawNextRandomNumber()` is `nextFrameDraw` on the active frame, the
+  *same* primitive `ce._random()` uses. It resolves the frame **at call time**,
+  advances that frame's counter, and returns `hash(seed, n)`; with no frame it
+  draws from the source's live draw, which for the engine is the `entropy`
+  handler of the host capability registry (`ce.effects.entropy`, `Math.random`
+  by default — `docs/EFFECTS-MODEL.md`, "Host capabilities"), and for a
+  runtime its `random` option (`null` denies the draw, which then throws).
 - Compiled `WithRandomSeed` emits `_SYS.withRandomSeed(seed, () => body)`, which
-  is literally `withRandomSeedFrame(ce, seed, …)` — the same push/`finally`-pop
-  as the interpreter, on the same slot.
+  is `withSeedFrame` over the source's frame slot — the same push/`finally`-pop
+  as the interpreter (`withRandomSeedFrame`).
+- A runtime takes an outer frame as input (`frame`, `{ seedLo, seedHi, next }`
+  or `{ seed, next }`) and keeps the advanced counter in `runtime.frame.next`,
+  so a host that runs the code elsewhere sends the frame there and reads the
+  counter back.
 
 One mechanism therefore covers all three cases:
 

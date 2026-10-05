@@ -47,7 +47,7 @@ fi
 export BUILD="${1-production}"
 
 # export TARGETS="math-json epsil compute-engine"
-export TARGETS="math-json latex-syntax interval numerics core compile identities integration-rules epsil compute-engine"
+export TARGETS="math-json latex-syntax interval numerics core compile runtime identities integration-rules epsil compute-engine"
 
 # export GIT_VERSION=`git describe --long --dirty`
 
@@ -124,6 +124,10 @@ if [[ "$TARGETS" == *compile* ]]; then
   "$TS7" $DTS_FLAGS \
     --emitDeclarationOnly --outDir ./dist/types ./src/compile.ts
 fi
+if [[ "$TARGETS" == *runtime* ]]; then
+  "$TS7" $DTS_FLAGS \
+    --emitDeclarationOnly --outDir ./dist/types ./src/runtime.ts
+fi
 if [[ "$TARGETS" == *identities* ]]; then
   # --resolveJsonModule/--esModuleInterop: the identities entry imports the
   # compiled rule artifact (fungrim-core-data.json); these flags are not in
@@ -181,6 +185,10 @@ if [ "$BUILD" = "production" ]; then
     printf "$BASENAME$DOT Verifying Epsil runtime smoke"
     node ./test/consumer/epsil-runtime-smoke.mjs
     echo -e $LINECLEAR$BASENAME$CHECK$DIM" Verifying Epsil runtime smoke$RESET"
+
+    printf "$BASENAME$DOT Verifying JavaScript runtime smoke"
+    node ./test/consumer/js-runtime-smoke.mjs
+    echo -e $LINECLEAR$BASENAME$CHECK$DIM" Verifying JavaScript runtime smoke$RESET"
 
     printf "$BASENAME$DOT Verifying Epsil CLI smoke"
     node ./test/consumer/epsil-cli-smoke.mjs

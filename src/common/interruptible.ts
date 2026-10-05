@@ -476,3 +476,7 @@ await new Promise((resolve) => setTimeout(resolve, 2000));
 
 
 */
+
+/** The default cap on iterations of a loop or lazy walk (`ce.iterationLimit`,
+ * and the `iterationLimit` of a compiled-code runtime). */
+export const DEFAULT_ITERATION_LIMIT = 1024;

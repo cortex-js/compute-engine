@@ -2460,6 +2460,20 @@ export interface CompiledRunner<R = CompiledValue, V = number> {
   (...args: V[]): R;
 }
 
+/** The entry plan of a compiled JavaScript result, as plain data. */
+export type StoredEntryPlan = {
+  /** `vars`: keyed by symbol name; `args`: keyed by parameter index. */
+  kind: 'vars' | 'args';
+  real: (string | number)[];
+  complex: (string | number)[];
+  lists: (string | number)[];
+  /** The per-binding entry checks of the collection-valued bindings. */
+  entries: [
+    string | number,
+    { numbers: boolean; depth: number; label: string },
+  ][];
+};
+
 /**
  * Result of compiling an expression.
  *
@@ -2520,6 +2534,36 @@ export type CompilationResult<
 
   /** Generated source code */
   code: string;
+
+  /**
+   * The version of the helper set the JavaScript `code` calls (`_SYS`). Run
+   * stored code with `createJavaScriptRuntime()` from
+   * `@cortex-js/compute-engine/runtime`, and compare this with the runtime's
+   * `runtimeVersion`: a mismatch means the code was compiled by another
+   * release. Set by the JavaScript target only.
+   */
+  runtimeVersion?: string;
+
+  /**
+   * JavaScript only. How `run()` checks and converts its inputs before the
+   * code reads them: a complex-declared symbol given a real is lifted to
+   * `{re, im: 0}`, a numeric typed array bound to a list symbol is copied to a
+   * plain array, a complex value bound to a real symbol is refused. A runtime
+   * that loads the stored code applies the same plan. Absent when there is
+   * nothing to check.
+   */
+  entryPlan?: StoredEntryPlan;
+
+  /**
+   * JavaScript only. The significant digits `run()` reads the float exponent
+   * of a negative base to, to tell `(-8)^(1/3)` from an irrational power
+   * (`realPowerReconstructionDigits()`), fixed when the code is compiled.
+   * `run()` and a runtime that loads the stored code both use this number: a
+   * change of the engine's precision after the compilation does not change
+   * the value of the compiled code, and a runtime has its own number library,
+   * so it cannot compute the number again.
+   */
+  reconstructionDigits?: number;
 
   /**
    * Identifiers the generated `code` references that the caller must supply at
@@ -2644,6 +2688,26 @@ export type CompilationResult<
    * library (helper functions, etc.) that the compiled expression references.
    */
   preamble?: string;
+
+  /**
+   * JavaScript only. The definitions of `preamble` that read nothing per call
+   * (a constant list, a memo), which `run()` evaluates once. A runtime that
+   * loads the stored code does the same: evaluating them on every call
+   * rebuilds each constant on every sample.
+   */
+  preambleOnce?: string;
+
+  /**
+   * JavaScript only. The rest of `preamble`, evaluated on every call; set with
+   * `preambleOnce`.
+   */
+  preamblePerCall?: string;
+
+  /**
+   * JavaScript lambdas only, with `preambleOnce`. `code` without the
+   * once-only definitions: the function the runtime calls.
+   */
+  callCode?: string;
 
   /**
    * How `run` should be called (present only for executable targets).

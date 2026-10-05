@@ -27,7 +27,12 @@
   escaped, so that it reads back as the same string: `\text{$}` was read as
   the unit USD and `\text{%}` as an empty string. A string whose `\text{…}`
   form reads as a unit or a keyword (`m`, `km`, `and`) is written `"m"`. The
-  string `"50%"` was written as the number `50%`.
+  string `"50%"` was written as the number `50%`. A control character or a
+  private-use character is written as its code point (a tab is
+  `\char"0009{}`), where it was written as it is: TeX rejects most control
+  characters and reads a tab or a line break as a space (#345). A
+  `character` value is written with the same escapes as the one-character
+  string: `#` was written `\text{#}` and a backslash `\text{\backslash }`.
 
 - **A `Solve` result list holds all the solutions, on every route.** An empty
   list states that there is no solution. When the solver cannot show that
@@ -945,6 +950,49 @@
   an impure stored value, such as a symbol whose value is an unevaluated
   `Random()`, is evaluated one time.
 
+- **Compiled JavaScript runs without the engine.** The new entry point
+  `@cortex-js/compute-engine/runtime` exports `createJavaScriptRuntime(options)`,
+  the `_SYS` helper bundle that `compile()` builds for `run()`, with no engine
+  behind it: store the `code` of a `JavaScriptTarget` result, and run it on a
+  page, in a worker or on a server with `runtime.load(result)`. The runtime
+  type exposes only `load`, `frame`, `setFrame`, `iterationLimit`, `deadline`
+  and `runtimeVersion`; the helpers are internal and may change in any release. The
+  helpers that read engine state take it as options: `random` is the source of
+  draws outside any `WithRandomSeed` frame and of the integrals' Monte-Carlo
+  samples (`null` denies draws, and a draw then throws a `CapabilityDeniedError`,
+  a different class in each bundle, so test `e.name`, not `instanceof`);
+  `frame` (or `runtime.setFrame()`) is the frame of an interpreted
+  `WithRandomSeed` the code is called from (`{ seedLo, seedHi, next }` or
+  `{ seed, next }`), and `runtime.frame.next` is the advanced counter after the
+  call; `iterationLimit` caps the lazy-stream
+  walks (default 1024, and `Infinity` when set to 0 or less, as
+  `ce.iterationLimit`) and `deadline` is an optional time after which the
+  shuffle and choice loops throw. A seeded program gives the same values
+  interpreted, with `run()` and as stored code:
+  `WithRandomSeed(7, RandomShuffle(Range(1, 6)))` is the same list in all
+  three. `load()` evaluates the definitions that read nothing per call (a
+  constant list, a memo) once, as `run()` does, from the new
+  `CompilationResult.preambleOnce`, `preamblePerCall` and `callCode`, so a
+  `At(L, Floor(x))` with a 1,000-element `L` no longer rebuilds `L` on every
+  call. `load()` also applies the input conversions `run()` does, from the new
+  `CompilationResult.entryPlan`: a real given to a complex-declared symbol is
+  lifted (`z^2 + z` at `z = 2` is 6 from both, where `load()` gave a complex
+  NaN), and a `Float64Array` for a list symbol is copied. The digits a negative
+  base's exponent is read to, `(-2)^x` at `x = 33.3333333333333`, are fixed in
+  `CompilationResult.reconstructionDigits`, since the runtime's own number
+  library cannot tell a machine-precision engine from the default (10822639409.68
+  from `run()`, NaN from the runtime before). `run()` uses the same recorded
+  digits: before, it read the working precision on each call, so code compiled
+  at machine precision gave NaN for this power after `ce.precision` was
+  changed or after another engine was constructed.
+  `CompilationResult.runtimeVersion` and `runtime.runtimeVersion` are the
+  version of the helper set; `load()` throws when they differ or when the
+  stored code has none. Functions passed in the `functions` or `imports`
+  compile options are copied into the code as source (`toString()`), so a
+  closure loses its enclosing scope and a function given by name must exist
+  where the code runs. The engine's own `_SYS` (`run.SYS`) is built from the
+  same factory. (#372, contributed by [enumeratio](https://github.com/enumeratio))
+
 - **`ResidueClass(k, n)`: an element of ℤ/nℤ** (#399, #411, contributed by
   [enumeratio](https://github.com/enumeratio)). A residue class is now a
   value.
@@ -1055,6 +1103,36 @@
   every precision up to that limit. Exact arithmetic is not changed.
 
 ### Issues Resolved
+
+- **`Limit` at infinity of a complex-valued function** (#396). The limit at
+  `±∞` chose between `+∞` and `−∞` from the sign of a term, and a complex
+  value has no sign: `\lim_{t\to\infty} e^{it}` was `+∞`,
+  `\lim_{t\to\infty} \operatorname{erf}(it)` was `1` and
+  `\lim_{t\to\infty} e^{it}/t` was `+∞`. A function with a non-real
+  constant is now resolved through its real part and its imaginary part:
+  `e^{it}/t` is `0`, `(1+it)/t` is `i`, `(2t+i)/(t-3i)` is `2`, and a limit
+  that does not exist (`e^{it}`) or is not finite (`i·t`, `Erf(it)`) stays
+  unevaluated. `Gamma` goes to `0` along a vertical line:
+  `Limit(t ↦ Gamma(i·t), ∞)` is `0`, and `Abs`, `Real`, `Imaginary` and
+  `Conjugate` carry such a limit. `Limit(t ↦ Gamma(t), ∞)` is `+∞`; it was
+  unevaluated. `.N()` and `NLimit` extrapolate the real part and the
+  imaginary part of a complex-valued function separately; they gave `NaN`.
+
+- **`Limit` at infinity with a coefficient of unknown sign stays
+  unevaluated.** `Limit(t ↦ a·t, ∞)` and `Limit(t ↦ a·eᵗ/t, ∞)` were `+∞`
+  for a symbol `a` with no assumption. The answer depends on the sign of
+  `a`, so the limit is now unevaluated; `-2t` and `π·t` are unchanged. A
+  non-integer power of a base that goes to `−∞` is also unevaluated:
+  `Limit(t ↦ (−t)^{3/2}, ∞)` was `+∞`, and the value is not real. An integer
+  power takes its sign from the parity (`(−t)³` is `−∞`).
+
+- **`NLimit` at `−∞` samples negative arguments.** `NLimit(t ↦ arctan t, −∞)`
+  was `π/2`; it is `−π/2`.
+
+- **No double superscript for a half-integer power deep in an expression**
+  (#345). Inside two lists, `2^{(1+x)/2}` was written `2^{1/2}^{1+x}`, which
+  TeX rejects. It is now `2^{(1+x)/2}`. At the top level it is still
+  `\sqrt{2}^{1+x}`.
 
 - **A symbol whose stored value is impure is read one time for each place
   it appears under `.N()`.** With `r` assigned an unevaluated random draw,

@@ -141,6 +141,41 @@ export function frameDraw(seedLo: number, seedHi: number, n: number): number {
   return (w0 * 2 ** 21 + (w1 >>> 11)) * 2 ** -53;
 }
 
+/**
+ * The next draw of `frame`: `frameDraw` at the frame's counter, which then
+ * advances (u32, wrapping). The one place a frame's counter is consumed, shared
+ * by the interpreter (`ce._random()`) and the compiled-code runtime.
+ */
+export function nextFrameDraw(frame: RandomSeedFrame): number {
+  const n = frame.next >>> 0;
+  frame.next = (frame.next + 1) >>> 0;
+  return frameDraw(frame.seedLo, frame.seedHi, n);
+}
+
+/**
+ * Run `fn` inside a new frame seeded with `seed`, installed through `get` and
+ * `set`, and restore the previous frame in a `finally` (a body that throws
+ * must not leak its frame). The one implementation of `WithRandomSeed`'s
+ * dynamic scope, shared by the interpreter (`withRandomSeedFrame`) and the
+ * compiled-code runtime. Throws if `seed` is not a finite real or a string
+ * (see `foldSeed`).
+ */
+export function withSeedFrame<T>(
+  seed: number | string,
+  get: () => RandomSeedFrame | undefined,
+  set: (frame: RandomSeedFrame | undefined) => void,
+  fn: () => T
+): T {
+  const [seedLo, seedHi] = foldSeed(seed);
+  const prev = get();
+  set({ seedLo, seedHi, next: 0 });
+  try {
+    return fn();
+  } finally {
+    set(prev);
+  }
+}
+
 //
 // ─── Derived sub-streams ────────────────────────────────────────────────────
 //
