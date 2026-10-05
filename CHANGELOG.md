@@ -1,4 +1,4 @@
-## [Unreleased]
+## 0.148.0 _2026-10-05_
 
 ### Behavior Changes
 
