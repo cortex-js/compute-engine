@@ -51,7 +51,8 @@ Modular arithmetic & GCD:
   PrimitiveRoot, PrimitiveRootList
 - RationalReconstruction: the small fraction `p/q` with `p ≡ a·q (mod m)`
 - JacobiSymbol, LegendreSymbol
-- DirichletCharacter, DirichletL: Dirichlet characters mod k and their L-functions
+- DirichletCharacter, DirichletL: Dirichlet characters mod k and their
+  L-functions
 
 Other primitives:
 
@@ -63,4 +64,5 @@ Other primitives:
 
 - Binomial
 - Fibonacci
-- Stirling (second kind) and its alias StirlingS2, StirlingS1 (signed first kind)
+- Stirling (second kind) and its alias StirlingS2, StirlingS1 (signed first
+  kind)
