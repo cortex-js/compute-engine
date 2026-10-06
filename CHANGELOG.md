@@ -182,6 +182,23 @@
 
 ### Issues Resolved
 
+- **The polynomial operators see the value of a variable.** `PolynomialDegree`,
+  `CoefficientList`, `PolynomialQuotient`, `PolynomialRemainder`,
+  `PolynomialGCD`, `Resultant`, `Cancel`, `PartialFraction`, `Apart`,
+  `PolynomialRoots` and `Discriminant` receive their operands unevaluated, and
+  they read a symbol bound to a polynomial as the bare symbol: with
+  `p := x^3 - 2x^2 - 4` and `q := x - 3`, `PolynomialDegree(p, x)` was `0`,
+  `PolynomialRemainder(p, q, x)` was `0` and `PolynomialQuotient(p, q, x)`
+  stayed `p / q`. They now resolve such a symbol to its value, as `Expand` and
+  `Factor` do, and read the default variable from that value:
+  `PolynomialQuotient(p, q, x)` is `x^2 + x + 3` and the remainder is `5`. The
+  variable named in the call is never substituted, even when it has a value:
+  with `x := 5`, `PolynomialDegree(x^2 + 1, x)` is `2` and `Factor(x^2 - 1, x)`
+  is `(x - 1)(x + 1)` (`Factor` gave `24`). These operators are also
+  recognized inside the operand of an expression transformer, so
+  `Expand(PolynomialQuotient(p, q, x) * q + PolynomialRemainder(p, q, x))` is
+  `x^3 - 2x^2 - 4`; the quotient stayed unevaluated inside the product.
+
 - **Epsil: a pipe stage written with `->` instead of `=>`.**
   `1..5 |> x -> x^2` failed at run time with "Function body must be a scoped
   Block expression". The parser now reports `mapsto-arrow-expected` on the

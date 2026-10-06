@@ -1,0 +1,6 @@
+// corpus: known-failure a lazy walk over more than a few thousand elements stays unevaluated (ROADMAP: "Default iteration limit of 1024 for Epsil programs")
+// Project Euler 4: the largest palindrome that is a product of two 3-digit
+// numbers. The comprehension has 5050 elements; `max` over it is held.
+isPalindrome(n) = integerDigits(n) == reverse(integerDigits(n))
+max(filter([a * b for a in 900..999, b in a..999], isPalindrome))
+// ➔ 906609

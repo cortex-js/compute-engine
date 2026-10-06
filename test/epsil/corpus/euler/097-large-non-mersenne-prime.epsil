@@ -1,0 +1,3 @@
+// Project Euler 97: the last ten digits of 28433 × 2^7830457 + 1, by modular power.
+Mod(28433 * powerMod(2, 7830457, 10^10) + 1, 10^10)
+// ➔ 8739992577

@@ -1,0 +1,6 @@
+// corpus: known-failure a filter over ten thousand elements with a user predicate exceeds the 1024-turn iteration limit (ROADMAP: "Default iteration limit of 1024 for Epsil programs")
+// Project Euler 30 (fourth powers): the numbers that equal the sum of the
+// fourth powers of their digits.
+isDigitPowerSum(n) = sum(map(d => d^4, integerDigits(n))) == n
+filter(2..9999, isDigitPowerSum)
+// ➔ [1634, 8208, 9474]

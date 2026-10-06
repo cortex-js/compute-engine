@@ -1,0 +1,5 @@
+// Towers of Hanoi: the list of moves for three disks, and the move count for n.
+hanoi(n, from, to, via) =
+  [] if n == 0 else [...hanoi(n - 1, from, via, to), (from, to), ...hanoi(n - 1, via, to, from)]
+(hanoi(3, "A", "C", "B"), length(hanoi(6, "A", "C", "B")), 2^6 - 1)
+// ➔ ([("A", "C"), ("A", "B"), ("C", "B"), ("A", "C"), ("B", "A"), ("B", "C"), ("A", "C")], 63, 63)

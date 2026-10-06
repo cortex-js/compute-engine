@@ -1,0 +1,3 @@
+// Modular arithmetic and multiplicative functions.
+(modularInverse(3, 11), powerMod(2, 100, 7), eulerPhi(36), chineseRemainder([2, 3, 2], [3, 5, 7]), divisors(28), factorInteger(360), isPrime(2^31 - 1))
+// ➔ (4, 2, 12, 23, [1, 2, 4, 7, 14, 28], [(2, 3), (3, 2), (5, 1)], True)

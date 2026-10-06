@@ -1,0 +1,4 @@
+// Hamming distance: positions at which two DNA strands differ.
+hamming(a, b) = count(zip(characters(a), characters(b)), p => p[1] != p[2])
+(hamming("GAGCCTACTAACGGGAT", "CATCGTAATGACGGCCT"), hamming("AAA", "AAA"))
+// ➔ (7, 0)

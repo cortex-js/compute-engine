@@ -1,0 +1,4 @@
+// Leap year: divisible by 4, except centuries, except every 400 years.
+isLeap(y) = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0)
+map(isLeap, [1996, 1997, 1900, 2000, 2100, 2400])
+// ➔ [True, False, False, True, False, True]

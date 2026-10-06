@@ -1,0 +1,14 @@
+// Prime factorization by trial division up to the square root, checked
+// against the library. The inputs keep the loop under the 1024-turn
+// iteration limit.
+factorsOf(n) = do {
+  let m = n
+  let d = 2
+  let fs = []
+  while d * d <= m {
+    if m % d == 0 { fs = [...fs, d]; m = m / d } else { d = d + 1 }
+  }
+  [...fs, m] if m > 1 else fs
+}
+(factorsOf(1), factorsOf(2), factorsOf(9), factorsOf(1001), factorsOf(901255), primeFactors(901255))
+// ➔ ([], [2], [3, 3], [7, 11, 13], [5, 17, 23, 461], [5, 17, 23, 461])

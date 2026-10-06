@@ -1,0 +1,7 @@
+// Project Euler 9: the product abc of the Pythagorean triplet with a + b + c = 1000.
+// For a given a, b = (500000 - 1000a) / (1000 - a) must be an integer.
+let a = find(1..332, a => Mod(500000 - 1000a, 1000 - a) == 0)
+let b = (500000 - 1000a) / (1000 - a)
+let c = 1000 - a - b
+(a, b, c, a * b * c, a^2 + b^2 == c^2)
+// ➔ (200, 375, 425, 31875000, True)

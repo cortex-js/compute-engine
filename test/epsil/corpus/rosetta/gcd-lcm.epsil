@@ -1,0 +1,4 @@
+// Greatest common divisor by Euclid's algorithm, against the library, and lcm.
+euclid(a, b) = a if b == 0 else euclid(b, a % b)
+(euclid(1071, 462), gcd(1071, 462), lcm(1071, 462), euclid(2^64, 2^40), extendedGCD(240, 46))
+// ➔ (21, 21, 23562, 1099511627776, (2, -9, 47))

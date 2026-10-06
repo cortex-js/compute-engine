@@ -1,0 +1,5 @@
+// A lazy collection is materialized when it is the program's value, but a
+// lazy collection stored in a tuple stays a recipe. `listFrom` forces it.
+let squares = map(k => k^2, 1..3)
+(listFrom(squares), sum(squares), length(squares))
+// ➔ ([1, 4, 9], 14, 3)

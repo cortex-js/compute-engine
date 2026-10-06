@@ -1,0 +1,5 @@
+// Grains of wheat on a chessboard: 2^(k-1) on square k, exact integers.
+square(k) = 2^(k - 1)
+total = sum(map(square, 1..64))
+(square(1), square(32), square(64), total)
+// ➔ (1, 2147483648, 9223372036854775808, 18446744073709551615)

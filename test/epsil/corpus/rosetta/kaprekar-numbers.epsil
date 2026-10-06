@@ -1,0 +1,14 @@
+// Kaprekar numbers below 1000: the digits of the square split into two parts
+// that add up to the number itself. A one-digit square has no split.
+isKaprekar(n) = do {
+  let ds = integerDigits(n^2)
+  if length(ds) == 1 { n == 1 }
+  else {
+    any(1..(length(ds) - 1), i => do {
+      let lo = fromDigits(drop(ds, i))
+      lo > 0 && fromDigits(take(ds, i)) + lo == n
+    })
+  }
+}
+filter(1..999, isKaprekar)
+// ➔ [1, 9, 45, 55, 99, 297, 703, 999]

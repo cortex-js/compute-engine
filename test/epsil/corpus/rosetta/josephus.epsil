@@ -1,0 +1,5 @@
+// Josephus problem: the survivor's 1-based position for n people and every k-th
+// eliminated, by the recurrence j(n) = (j(n-1) + k) mod n.
+josephus(n, k) = 1 if n == 1 else (josephus(n - 1, k) + k - 1) % n + 1
+(josephus(41, 3), josephus(5, 2), josephus(7, 3))
+// ➔ (31, 3, 4)

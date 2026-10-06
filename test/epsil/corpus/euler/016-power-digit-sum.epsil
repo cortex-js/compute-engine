@@ -1,0 +1,4 @@
+// Project Euler 16: the sum of the digits of 2^1000, exact. `digitCount`
+// counts each digit 0..9; the number of digits is the length of the digit list.
+(digitSum(2^1000), sum(integerDigits(2^1000)), length(integerDigits(2^1000)))
+// ➔ (1366, 1366, 302)

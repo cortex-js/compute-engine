@@ -285,6 +285,12 @@ export function defaultUnknown(
  * - relational/boolean heads: evaluating an `Equal` collapses it to a
  *   boolean before the solver sees it;
  * - `CanonicalForm`: taking `.canonical` already handles it.
+ *
+ * The polynomial algebra operators (`PolynomialQuotient`, `Cancel`, …) are
+ * included: each one is lazy and resolves its operands the way `Expand` does,
+ * so `Expand(PolynomialQuotient(p, q, x) * q)` means "divide, then expand".
+ * `Resultant` and `Discriminant` eliminate the named variable; the others
+ * answer in the same free variables as their operands.
  */
 const TRANSFORMER_HEADS = new Set([
   'Simplify',
@@ -294,6 +300,14 @@ const TRANSFORMER_HEADS = new Set([
   'Together',
   'Distribute',
   'TrigExpand',
+  'PolynomialQuotient',
+  'PolynomialRemainder',
+  'PolynomialGCD',
+  'Resultant',
+  'Cancel',
+  'PartialFraction',
+  'Apart',
+  'Discriminant',
 ]);
 
 /**
@@ -312,8 +326,11 @@ export function reduceTransformerHead(expr: Expression): Expression {
  * root-only check left it opaque and the solve returned `[]`.
  *
  * Recursing is safe for exactly this set — every member rewrites its operand
- * without resolving assigned symbol values, so the unknown survives. That is
- * why `Evaluate`/`N`/`ReplaceAll` are not members.
+ * as an expression (it resolves a symbol bound to a value through
+ * `reduceTransformerOperand`, but it never folds the whole operand to a
+ * number the way `Evaluate`/`N` do, and it protects the variable it is given).
+ * A caller that must keep a symbol unresolved shields it, as the next
+ * paragraph says; that is why `Evaluate`/`N`/`ReplaceAll` are not members.
  *
  * A value-bound `Solve` unknown is shielded upstream (`evaluateSolve` shadow-
  * declares it valueless for the duration of the reduction), so the transformer
@@ -657,10 +674,16 @@ const TRANSFORMER_OPERAND_HEADS = new Set([...TRANSFORMER_HEADS, 'ReplaceAll']);
  * on an expression is still value-blind (`(a + 2).simplify()` is `a + 2` even
  * when `a := 5`). Only the operand handed to the operator is resolved.
  */
-export function reduceTransformerOperand(expr: Expression): Expression {
+export function reduceTransformerOperand(
+  expr: Expression,
+  /** Symbol names that are NOT resolved even when they have a value: the
+   * variable a polynomial operator is asked about (`PolynomialDegree(poly, x)`
+   * with `x := 5` is a question about `x`, not about `5`). */
+  protect: ReadonlySet<string> = EMPTY_NAME_SET
+): Expression {
   return reduceProducerHeads(
     reduceStructuralIndex(
-      resolveBoundSymbols(inlineLambdaApplications(expr), EMPTY_NAME_SET)
+      resolveBoundSymbols(inlineLambdaApplications(expr), protect)
     )
   );
 }

@@ -1,0 +1,4 @@
+// Project Euler 28: the sum of the diagonals of a 1001×1001 number spiral.
+// Ring k (side 2k+1) has corners (2k+1)^2 - 0, -2k, -4k, -6k.
+1 + sum(4(2k + 1)^2 - 12k, (k, 1, 500))
+// ➔ 669171001

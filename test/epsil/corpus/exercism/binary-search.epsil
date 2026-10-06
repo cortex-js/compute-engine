@@ -1,0 +1,16 @@
+// Binary search in a sorted list; the 1-based index or -1.
+binarySearch(xs, target) = do {
+  let lo = 1
+  let hi = length(xs)
+  let found = -1
+  while lo <= hi && found == -1 {
+    let mid = floor((lo + hi) / 2)
+    if xs[mid] == target { found = mid }
+    else if xs[mid] < target { lo = mid + 1 }
+    else { hi = mid - 1 }
+  }
+  found
+}
+let xs = [1, 3, 4, 6, 8, 9, 11]
+(binarySearch(xs, 6), binarySearch(xs, 1), binarySearch(xs, 11), binarySearch(xs, 7), binarySearch([], 1))
+// ➔ (4, 1, 7, -1, -1)

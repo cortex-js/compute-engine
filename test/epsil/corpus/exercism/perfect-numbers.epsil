@@ -1,0 +1,7 @@
+// Nicomachus classification: the aliquot sum against the number.
+classify(n) = do {
+  let aliquot = sum(filter(divisors(n), d => d != n))
+  "perfect" if aliquot == n else ("abundant" if aliquot > n else "deficient")
+}
+map(classify, [6, 28, 12, 24, 8, 33550336, 1])
+// ➔ ["perfect", "perfect", "abundant", "abundant", "deficient", "perfect", "deficient"]

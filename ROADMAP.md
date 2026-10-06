@@ -109,6 +109,133 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
+### String operators reject a `character` (OPEN, design decision — found 2026-10-06 by the Epsil program corpus)
+
+Indexing a string gives a `character`, and `character` is a disjoint sibling of
+`string` in the type lattice by design (`docs/STRING_ROADMAP.md`). Every string
+operator declares a `string` parameter, so `toUpperCase("ab"[1])`,
+`stringRepeat(c, 3)`, `numberFrom("7"[1])`, `unicodeScalars(c)` and
+`map(numberFrom, characters(s))` are all static type errors, and so is a
+dictionary lookup with a character key (`{a -> 1}[c]`, where `At` admits
+`boolean | indexed_collection | number`). The character and the one-cluster
+string are the SAME value (`isSame`, user-ruled 2026-08-16), so the refusal
+protects nothing. The workaround is `String(c)` at every use, which the corpus
+programs `exercism/acronym`, `exercism/luhn`, `exercism/rna-transcription`,
+`exercism/run-length-encoding` and `language/character-at-string-operators`
+show. Decision needed: widen the `string` parameters of the string library and
+the dictionary key of `At` to `string | character` (recommended), or keep the
+refusal and document `String(c)`.
+
+### Effects inference rejects a function whose local is read by a lambda (OPEN, design decision — found 2026-10-06 by the Epsil program corpus)
+
+The confinement rule of `docs/EFFECTS-MODEL.md` treats a symbol that any nested
+`Function` literal references as escaping, so a write to it needs the `scope`
+effect. That refuses this common shape, where the local is declared in the body,
+written only by the body's own loop and merely READ by the lambda:
+
+```
+f(n) = do {
+  let acc = {}
+  for p in 2..n { acc = union(acc, {p}) }
+  filter(1..n, k => k !in acc)
+}
+```
+
+The write cannot reach anything outside the call. The error text ("writes
+outside a function require a declared `scope` effect") does not say what to
+change. Corpus: `language/effects-local-read-by-lambda`, `exercism/sieve`.
+Decision needed: confine a body-declared local that no nested literal WRITES (a
+nested literal that writes it still reports `scope` on its own arrow and
+projects it where it is applied), or keep the rule and improve the message.
+
+### Overloaded result type on an unknown operand (OPEN, design decision — found 2026-10-06 by the Epsil program corpus)
+
+For an overload set applied to an operand of unknown type, result typing reads
+the result off ONE arm (declaration order wins among incomparable arms, pinned
+by `overload-resolution.test.ts`). An untyped Epsil parameter is such an
+operand, so `characters(slice(s, 1, 2))` in `firstTwo(s) = …` is refused
+statically: `slice(s, 1, 2)` is typed `list<unknown>` from the collection arm
+although the string arm applies at runtime. A union-typed operand IS accepted by
+the consumer (`Characters(v)` with `v: string | list<integer>` types
+`list<character>`), so the join of the viable arms' results would make these
+programs well-typed. Corpus:
+`language/overload-result-type-on-untyped-parameter`. Decision needed: join the
+results of every viable arm when an operand is `unknown`/`any` and more than one
+arm survives (`resolvedArm`, `boxed-function.ts`), which changes the pinned
+tie-break, or keep declaration order.
+
+### A `length(xs)` call on an untyped parameter changes later static types (OPEN, medium — found 2026-10-06 by the Epsil program corpus)
+
+```
+smaller(xs) = do {
+  let n = length(xs)
+  let p = first(xs)
+  listFrom(filter(xs, x => x < p))
+}
+```
+
+is refused: "expected `(vector) any -> boolean`, got
+`(x: vector) -> list<boolean | missing>`". Without the `length` line the same
+function is accepted and gives `[1, 2]` for `[3, 1, 2]`. `Length` is declared
+`(any) -> integer | infinity` and its `type` handler reads the operand's type
+without narrowing it, so where the `vector` comes from is not yet known. Corpus:
+`language/length-changes-later-static-types`, `rosetta/quicksort`.
+
+### Static type of a zipped tuple component inside a loop (OPEN, small — found 2026-10-06 by the Epsil program corpus)
+
+`listFrom(map(p => !p[1], zip(open, 1..3)))` with `open = repeat(false, 3)` is
+accepted at the top level. The same `map`, assigned back to `open` inside a
+`for` loop, is refused: "expected `boolean`, got `nan | real` at `p[1]`". The
+program's value is right. Corpus:
+`language/static-type-of-zipped-tuple-in-loop`, `rosetta/100-doors`.
+
+### A list literal does not snapshot a spread lazy collection (OPEN, small — found 2026-10-06 by the Epsil program corpus)
+
+A list literal snapshots its elements, and `[...xs, k]` is the documented way to
+grow a list (`src/epsil/docs/for-agents.md`). When a spread operand is lazy
+(`[...take(ys, 1), 9, ...drop(ys, 2)]`), the literal becomes a
+`ListJoin(Take(…), [9], Drop(…))` recipe: it prints as the recipe, it does not
+compare equal to `[1, 9, 3, 4]`, and in a loop it nests one level per turn (the
+bubble sort of `rosetta/bubble-sort` needed `listFrom` around each part).
+Corpus: `language/spread-of-lazy-collection`.
+
+### Lazy argument to a recursive call loses its block binding (OPEN, medium — found 2026-10-06 by the Epsil program corpus)
+
+```
+smallest(xs: list<number>) =
+  xs if length(xs) <= 1 else do {
+    let p = first(xs)
+    smallest(filter(rest(xs), x => x < p))
+  }
+```
+
+`smallest([3, 1, 2])` is a large unevaluated
+`If(Length(Filter(…, (x) => x < p)) …)` in which `p` is a free symbol: the lazy
+`filter` is evaluated after the block exited and the lambda no longer sees the
+local. The documentation says a lazy collection that leaves a block keeps the
+binding its function had at that exit (`src/epsil/docs/examples.md`); the
+recursive call is the case where it does not. `listFrom` around the argument
+gives `[]`. Corpus: `language/lazy-argument-to-recursive-call`,
+`rosetta/quicksort-typed` (the working form).
+
+### Default iteration limit of 1024 for Epsil programs (OPEN, design decision — found 2026-10-06 by the Epsil program corpus)
+
+`ce.iterationLimit` defaults to 1024 (`DEFAULT_ITERATION_LIMIT`,
+`common/interruptible.ts`) and the CLI and `executeEpsil` keep it. A `for` or
+`while` loop of 2000 turns is canceled with `iteration-limit-exceeded` (the
+value after cancellation is the partial count, 1025). A lazy walk hits the same
+limit in several forms: `listFrom(filter(1000..4999, f))` with a user predicate
+is an `Error` value, `length(filter(1..9000, g))` and
+`max(filter(comprehension of 5050 elements))` stay UNEVALUATED with no
+diagnostic, while `sum(filter(1..99999, isPrime))` and `count(1..5000, isPrime)`
+stream to the end. Programs that are ordinary in any language (Project Euler 21,
+29, 30, 34; a sieve to 10000) cannot run with the default. Corpus:
+`language/loop-iteration-limit`, `euler/004`, `euler/021`, `euler/029`,
+`euler/030`, `euler/034`. Decision needed: a higher default for Epsil programs
+(the CLI and `executeEpsil`), for example 1,000,000 with the time-based deadline
+as the safety net, and one consistent outcome (an error value with a diagnostic,
+never a silently unevaluated result) when a lazy walk exceeds it.
+
 ### A determinant with float entries keeps unfolded constants (OPEN, small — found 2026-10-06 by the review of the exact determinant fix; present before)
 
 The determinant is returned as the tensor field builds it, and neither the

@@ -1,0 +1,3 @@
+// Project Euler 2: the sum of the even Fibonacci numbers not above four million.
+sum(filter(takeWhile(map(fibonacci, 1..100), f => f <= 4000000), isEven))
+// ➔ 4613732

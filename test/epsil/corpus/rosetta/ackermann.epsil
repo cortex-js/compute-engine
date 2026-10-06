@@ -1,0 +1,5 @@
+// The Ackermann function, by its recursive definition.
+ack(m, n) =
+  n + 1 if m == 0 else (ack(m - 1, 1) if n == 0 else ack(m - 1, ack(m, n - 1)))
+(ack(0, 0), ack(1, 2), ack(2, 3), ack(3, 3))
+// ➔ (1, 4, 9, 61)

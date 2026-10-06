@@ -1,0 +1,5 @@
+// Reverse a string, character by character (grapheme clusters, so an
+// accented letter stays one unit).
+reverseString(s) = stringJoin(reverse(characters(s)), "")
+(reverseString("stressed"), reverseString("robot"), reverseString("naïve"))
+// ➔ ("desserts", "tobor", "evïan")

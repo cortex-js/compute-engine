@@ -1,0 +1,3 @@
+// Definite and indefinite integrals with exact results.
+(integrate(x^2, (x, 0, 1)), integrate(sin(x), (x, 0, pi)), integrate(e^x, (x, 0, 1)), integrate(1 / x, (x, 1, e)), integrate(x * e^x, x))
+// ➔ (1/3, 2, -1 + e, 1, x * e^x - e^x)

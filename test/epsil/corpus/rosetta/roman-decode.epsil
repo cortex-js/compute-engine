@@ -1,0 +1,9 @@
+// Decode a Roman numeral: a letter below its right neighbor is subtracted.
+let value = {I -> 1, V -> 5, X -> 10, L -> 50, C -> 100, D -> 500, M -> 1000}
+decode(s) = do {
+  let vs = map(c => value[String(c)], characters(s))
+  let n = length(vs)
+  sum(map(i => -vs[i] if i < n && vs[i] < vs[i + 1] else vs[i], 1..n))
+}
+map(decode, ["MCMXC", "MMVIII", "MDCLXVI", "MMMCMXCIX", "IV"])
+// ➔ [1990, 2008, 1666, 3999, 4]

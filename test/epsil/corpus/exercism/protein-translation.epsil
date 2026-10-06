@@ -1,0 +1,16 @@
+// Translate an RNA strand into proteins, stopping at a STOP codon.
+// `partition(s, 3)` cuts a string into pieces of three characters.
+let codons = {AUG -> "Methionine", UUU -> "Phenylalanine", UUC -> "Phenylalanine", UUA -> "Leucine",
+  UUG -> "Leucine", UCU -> "Serine", UCC -> "Serine", UAU -> "Tyrosine", UGU -> "Cysteine",
+  UGG -> "Tryptophan", UAA -> "STOP", UAG -> "STOP", UGA -> "STOP"}
+proteins(rna) = do {
+  let out = []
+  for codon in partition(rna, 3) {
+    let p = codons[codon]
+    if p == "STOP" { break }
+    out = [...out, p]
+  }
+  out
+}
+(proteins("AUGUUUUGG"), proteins("UGGUGUUAUUAAUGGUUU"), proteins(""))
+// ➔ (["Methionine", "Phenylalanine", "Tryptophan"], ["Tryptophan", "Cysteine", "Tyrosine"], [])

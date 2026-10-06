@@ -1,0 +1,7 @@
+// Age on each planet from seconds lived, in Earth years, rounded to the
+// nearest hundredth. `round(x, step)` rounds to a multiple of the step and is
+// exact (a rational); `N` prints the decimal.
+let orbit = {mercury -> 0.2408467, venus -> 0.61519726, earth -> 1, mars -> 1.8808158, jupiter -> 11.862615}
+ageOn(planet, seconds) = N(round(seconds / 31557600 / orbit[planet], 1/100))
+(ageOn("earth", 1000000000), ageOn("mercury", 2134835688), ageOn("jupiter", 901876382))
+// ➔ (31.69, 280.88, 2.41)

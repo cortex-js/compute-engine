@@ -1,0 +1,7 @@
+// Saddle points of a matrix: largest in its row, smallest in its column.
+saddlePoints(m) = do {
+  let t = transpose(m)
+  [(i, j) for i in 1..length(m), j in 1..length(m[1]) if m[i, j] == max(m[i]) && m[i, j] == min(t[j])]
+}
+saddlePoints([[9, 8, 7], [5, 3, 2], [6, 6, 7]])
+// ➔ [(2, 1)]

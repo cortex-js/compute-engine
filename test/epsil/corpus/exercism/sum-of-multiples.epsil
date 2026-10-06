@@ -1,0 +1,4 @@
+// Sum of the unique multiples of any factor below the limit.
+sumOfMultiples(factors, limit) = sum(filter(1..(limit - 1), k => any(factors, f => k % f == 0)))
+(sumOfMultiples([3, 5], 20), sumOfMultiples([7, 13, 17], 20), sumOfMultiples([3, 5], 1000))
+// ➔ (78, 51, 233168)

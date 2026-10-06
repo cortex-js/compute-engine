@@ -1,0 +1,4 @@
+// Fibonacci numbers by matrix power, exact, compared with the library.
+let q = [[1, 1], [1, 0]]
+(matrixPower(q, 10), matrixPower(q, 90)[1, 2], fibonacci(90))
+// ➔ ([[89, 55], [55, 34]], 2880067194370816120, 2880067194370816120)

@@ -1,0 +1,9 @@
+// Count the words of a phrase, case-insensitively, as a dictionary.
+wordCount(phrase) = do {
+  let words = stringSplit(toLowerCase(phrase))
+  let (uniqueWords, counts) = tally(words)
+  dictionaryFrom(zip(uniqueWords, counts))
+}
+let counts = wordCount("olly olly in come free")
+(counts.olly, counts.in, counts.come, counts.free, length(keys(counts)))
+// ➔ (2, 1, 1, 1, 4)

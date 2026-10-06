@@ -1,0 +1,12 @@
+// Kadane's algorithm: the largest sum over a contiguous subsequence.
+maxSubarray(xs) = do {
+  let best = 0
+  let current = 0
+  for x in xs {
+    current = max(0, current + x)
+    best = max(best, current)
+  }
+  best
+}
+(maxSubarray([-1, -2, 3, 5, 6, -2, -1, 4, -4, 2, -1]), maxSubarray([-1, -5]), maxSubarray([]))
+// ➔ (15, 0, 0)

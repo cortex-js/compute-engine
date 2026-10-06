@@ -1,0 +1,11 @@
+// Classify a triangle by its side lengths; degenerate triangles are no
+// triangle at all.
+kind(a, b, c) = do {
+  let sides = sort([a, b, c])
+  if sides[1] <= 0 || sides[1] + sides[2] <= sides[3] { "none" }
+  else if a == b && b == c { "equilateral" }
+  else if a == b || b == c || a == c { "isosceles" }
+  else { "scalene" }
+}
+(kind(2, 2, 2), kind(3, 4, 4), kind(3, 4, 5), kind(1, 1, 3), kind(0, 0, 0), kind(1/2, 1/2, 1/2))
+// ➔ ("equilateral", "isosceles", "scalene", "none", "none", "equilateral")

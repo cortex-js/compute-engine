@@ -1,0 +1,6 @@
+// Dot product, cross product, scalar and vector triple products.
+let a = [3, 4, 5]
+let b = [4, 3, 5]
+let c = [-5, -12, -13]
+(dot(a, b), cross(a, b), dot(a, cross(b, c)), cross(a, cross(b, c)))
+// ➔ (49, [5, 5, -7], 6, [-267, 204, -3])

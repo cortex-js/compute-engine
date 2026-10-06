@@ -1,0 +1,4 @@
+// 100 doors, counting toggles: door k is toggled once per divisor, so it ends
+// open when it has an odd number of divisors, which is when k is a square.
+[k for k in 1..100 if isOdd(sigma0(k))]
+// ➔ [1, 4, 9, 16, 25, 36, 49, 64, 81, 100]

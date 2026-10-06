@@ -1,0 +1,4 @@
+// Horner's rule for a polynomial given by its coefficients, lowest degree first.
+horner(coefficients, x) = reduce(reverse(coefficients), (acc, c) => acc * x + c, 0)
+(horner([-19, 7, -4, 6], 3), horner([1, 2, 3], 1/2))
+// ➔ (128, 11/4)

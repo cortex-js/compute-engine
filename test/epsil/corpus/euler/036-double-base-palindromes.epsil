@@ -1,0 +1,4 @@
+// Project Euler 36 (reduced): numbers below 1000 palindromic in base 10 and base 2.
+isPal(ds) = ds == reverse(ds)
+sum(filter(1..999, n => isPal(integerDigits(n)) && isPal(integerDigits(n, 2))))
+// ➔ 1772

@@ -1,0 +1,4 @@
+// Project Euler 12 (reduced): the first triangle number with over 100 divisors.
+triangle(n) = n * (n + 1) / 2
+find(map(triangle, 1..oo), t => sigma0(t) > 100)
+// ➔ 73920

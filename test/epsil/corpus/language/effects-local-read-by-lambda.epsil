@@ -1,0 +1,12 @@
+// corpus: known-failure a local written in a loop and read by a lambda trips the scope-effect ceiling (ROADMAP: "Effects inference rejects a function whose local is read by a lambda")
+// The local `acc` is declared in the body, written only by the body's own
+// loop, and merely READ by the lambda given to `filter`. The write cannot
+// reach anything outside the call, yet the definition is refused with
+// "writes outside a function require a declared `scope` effect".
+f(n) = do {
+  let acc = {}
+  for p in 2..n { acc = union(acc, {p}) }
+  filter(1..n, k => k !in acc)
+}
+f(5)
+// ➔ [1]

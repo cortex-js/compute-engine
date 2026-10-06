@@ -1,0 +1,3 @@
+// Project Euler 20: the sum of the digits of 100!.
+digitSum(100!)
+// ➔ 648

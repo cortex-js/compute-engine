@@ -1,0 +1,6 @@
+// Square of the sum minus the sum of the squares of the first n naturals.
+squareOfSum(n) = sum(1..n)^2
+sumOfSquares(n) = sum(map(k => k^2, 1..n))
+difference(n) = squareOfSum(n) - sumOfSquares(n)
+(squareOfSum(10), sumOfSquares(10), difference(10), difference(100))
+// ➔ (3025, 385, 2640, 25164150)

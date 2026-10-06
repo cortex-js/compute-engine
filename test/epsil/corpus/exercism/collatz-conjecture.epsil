@@ -1,0 +1,12 @@
+// Number of Collatz steps to reach 1.
+steps(n) = do {
+  let k = 0
+  let m = n
+  while m != 1 {
+    m = m / 2 if m % 2 == 0 else 3m + 1
+    k = k + 1
+  }
+  k
+}
+map(steps, [1, 16, 12, 1000000])
+// ➔ [0, 4, 9, 152]

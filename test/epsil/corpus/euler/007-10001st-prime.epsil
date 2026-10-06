@@ -1,0 +1,3 @@
+// Project Euler 7: the 10001st prime.
+nthPrime(10001)
+// ➔ 104743

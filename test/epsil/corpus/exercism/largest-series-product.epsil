@@ -1,0 +1,7 @@
+// Largest product of n adjacent digits in a string of digits.
+largestProduct(s, n) = do {
+  let digits = map(c => numberFrom(String(c)), characters(s))
+  max(map(i => product(digits[i..(i + n - 1)]), 1..(length(digits) - n + 1)))
+}
+(largestProduct("63915", 3), largestProduct("1027839564", 3), largestProduct("0000", 2), largestProduct("73167176531330624919225119674426574742355349194934", 6))
+// ➔ (162, 270, 0, 23520)

@@ -1,0 +1,3 @@
+// Project Euler 15: routes through a 20×20 grid moving only right and down.
+binomial(40, 20)
+// ➔ 137846528820

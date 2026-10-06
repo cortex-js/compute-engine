@@ -1,0 +1,6 @@
+// The first n rows of Pascal's triangle, each row from the previous one.
+// `iterate` starts at the first APPLICATION, so the initial row is prepended.
+nextRow(row) = map(p => p[1] + p[2], zip([0, ...row], [...row, 0]))
+rows(n) = [[1], ...take(iterate(nextRow, [1]), n - 1)]
+rows(5)
+// ➔ [[1], [1, 1], [1, 2, 1], [1, 3, 3, 1], [1, 4, 6, 4, 1]]

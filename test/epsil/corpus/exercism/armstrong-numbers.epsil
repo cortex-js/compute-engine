@@ -1,0 +1,9 @@
+// An Armstrong number equals the sum of its digits each raised to the
+// number of digits.
+isArmstrong(n) = do {
+  let ds = integerDigits(n)
+  let k = length(ds)
+  sum(map(d => d^k, ds)) == n
+}
+filter(1..500, isArmstrong)
+// ➔ [1, 2, 3, 4, 5, 6, 7, 8, 9, 153, 370, 371, 407]

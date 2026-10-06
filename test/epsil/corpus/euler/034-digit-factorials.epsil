@@ -1,0 +1,5 @@
+// corpus: known-failure a filter over fifty thousand elements with a user predicate exceeds the 1024-turn iteration limit (ROADMAP: "Default iteration limit of 1024 for Epsil programs")
+// Project Euler 34: the numbers equal to the sum of the factorials of their digits.
+isCurious(n) = sum(map(d => d!, integerDigits(n))) == n
+filter(10..50000, isCurious)
+// ➔ [145, 40585]

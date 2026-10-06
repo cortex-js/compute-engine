@@ -1,0 +1,8 @@
+// corpus: known-failure the static pass types `p[1]` of a zipped tuple as a number once the zipped variable is reassigned in a loop (ROADMAP: "Static type of a zipped tuple component inside a loop")
+// 100 doors: after 100 toggling passes, the open doors are the perfect squares.
+let open = repeat(false, 100)
+for pass in 1..100 {
+  open = map(p => !p[1] if p[2] % pass == 0 else p[1], zip(open, 1..100))
+}
+[i for i in 1..100 if open[i]]
+// ➔ [1, 4, 9, 16, 25, 36, 49, 64, 81, 100]

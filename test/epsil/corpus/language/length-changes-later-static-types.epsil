@@ -1,0 +1,11 @@
+// corpus: known-failure a `length(xs)` call on an untyped parameter changes how a later lambda over `xs` is typed (ROADMAP: "A length call on an untyped parameter changes later static types")
+// Without the `length` line this function is accepted; with it, the
+// comparison lambda is refused as `(x: vector) -> list<boolean | missing>`
+// where `(vector) any -> boolean` is expected.
+smaller(xs) = do {
+  let n = length(xs)
+  let p = first(xs)
+  listFrom(filter(xs, x => x < p))
+}
+smaller([3, 1, 2])
+// ➔ [1, 2]

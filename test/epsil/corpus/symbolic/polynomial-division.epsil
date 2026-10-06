@@ -1,0 +1,6 @@
+// Polynomial quotient, remainder and greatest common divisor, on polynomials
+// held in variables.
+let p = x^3 - 2x^2 - 4
+let q = x - 3
+(polynomialQuotient(p, q, x), polynomialRemainder(p, q, x), polynomialGCD(x^2 - 1, x^2 + 2x + 1), expand(polynomialQuotient(p, q, x) * q + polynomialRemainder(p, q, x)) == expand(p))
+// ➔ (x^2 + x + 3, 5, x + 1, True)

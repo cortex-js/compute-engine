@@ -1,0 +1,4 @@
+// Factoring, expanding and simplifying polynomials, exactly.
+let p = x^4 - 1
+(factor(p), expand((x + 1)^3), expand(factor(p)) == p, simplify((x^2 - 1) / (x - 1)), polynomialDegree(p, x), coefficientList(p, x))
+// ➔ ((x - 1) * (x + 1) * (x^2 + 1), x^3 + 3x^2 + 3x + 1, True, x + 1, 4, [1, 0, 0, 0, -1])

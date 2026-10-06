@@ -1,0 +1,15 @@
+// corpus: known-failure string operators reject a `character` argument (ROADMAP: "String operators reject a `character`")
+// Luhn checksum of a string of digits with optional spaces. `numberFrom`
+// declares a `string` parameter, so mapping it over the characters of a
+// string is a static type error today; `c => numberFrom(String(c))` works.
+isValidLuhn(s) = do {
+  let digits = map(numberFrom, reverse(filter(characters(s), c => c != " ")))
+  if length(digits) <= 1 { false }
+  else {
+    let doubled = map(p => (p[1] * 2 - 9 if p[1] * 2 > 9 else p[1] * 2) if p[2] % 2 == 0 else p[1],
+      zip(digits, 1..length(digits)))
+    sum(doubled) % 10 == 0
+  }
+}
+map(isValidLuhn, ["4539 3195 0343 6467", "8273 1232 7352 0569", "0", "059", "055 444 285"])
+// ➔ [True, False, False, True, True]

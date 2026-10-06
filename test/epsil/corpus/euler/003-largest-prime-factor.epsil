@@ -1,0 +1,3 @@
+// Project Euler 3: the largest prime factor of 600851475143.
+max(primeFactors(600851475143))
+// ➔ 6857

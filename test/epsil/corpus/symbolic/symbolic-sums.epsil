@@ -1,0 +1,4 @@
+// Closed forms of sums with a symbolic bound come from `simplify`; a sum with
+// numeric bounds evaluates directly.
+(simplify(sum(k, (k, 1, n))), sum(k, (k, 1, 100)), sum(2^k, (k, 0, 10)), product(k, (k, 1, 5)))
+// ➔ (1/2 * (n^2 + n), 5050, 2047, 120)

@@ -1,0 +1,13 @@
+// Look-and-say sequence: describe the runs of the previous term.
+say(s) = do {
+  let out = ""
+  let run = 1
+  let cs = characters(s)
+  for i in 1..length(cs) {
+    if i < length(cs) && cs[i] == cs[i + 1] { run = run + 1 }
+    else { out = "\(out)\(run)\(cs[i])"; run = 1 }
+  }
+  out
+}
+["1", ...take(iterate(say, "1"), 5)]
+// ➔ ["1", "11", "21", "1211", "111221", "312211"]

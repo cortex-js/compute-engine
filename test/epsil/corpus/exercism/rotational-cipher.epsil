@@ -1,0 +1,10 @@
+// Caesar rotation of letters by k, keeping case and other characters.
+rotateChar(c, k) = do {
+  let code = unicodeScalars(String(c))[1]
+  if 97 <= code <= 122 { stringFrom([97 + (code - 97 + k) % 26]) }
+  else if 65 <= code <= 90 { stringFrom([65 + (code - 65 + k) % 26]) }
+  else { c }
+}
+rotate(s, k) = stringJoin(map(c => rotateChar(c, k), characters(s)), "")
+(rotate("a", 1), rotate("OMG", 5), rotate("Testing 1 2 3 testing", 4), rotate("The quick brown fox", 13))
+// ➔ ("b", "TRL", "Xiwxmrk 1 2 3 xiwxmrk", "Gur dhvpx oebja sbk")

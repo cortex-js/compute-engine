@@ -1,0 +1,17 @@
+// Levenshtein distance by dynamic programming over a matrix built row by row.
+levenshtein(a, b) = do {
+  let m = length(a)
+  let n = length(b)
+  let prev = listFrom(0..n)
+  for i in Range(1, m) {
+    let row = [i]
+    for j in Range(1, n) {
+      let cost = 0 if a[i] == b[j] else 1
+      row = [...row, min(prev[j + 1] + 1, row[j] + 1, prev[j] + cost)]
+    }
+    prev = row
+  }
+  last(prev)
+}
+(levenshtein("kitten", "sitting"), levenshtein("rosettacode", "raisethysword"), levenshtein("same", "same"))
+// ➔ (3, 8, 0)

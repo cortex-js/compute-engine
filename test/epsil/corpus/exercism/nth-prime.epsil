@@ -1,0 +1,14 @@
+// The n-th prime, by trial division, compared with the library. `2..1` is a
+// descending range, so the trial divisors are cut with `takeWhile` instead.
+isPrimeByTrial(n) = n >= 2 && all(takeWhile(2..n, d => d * d <= n), d => n % d != 0)
+nthPrimeByTrial(n) = do {
+  let found = 0
+  let k = 1
+  while found < n {
+    k = k + 1
+    if isPrimeByTrial(k) { found = found + 1 }
+  }
+  k
+}
+(nthPrimeByTrial(1), nthPrimeByTrial(6), nthPrimeByTrial(100), nthPrime(100))
+// ➔ (2, 13, 541, 541)

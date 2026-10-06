@@ -1,0 +1,8 @@
+// An isogram has no repeated letter; spaces and hyphens are ignored and
+// case does not matter.
+isIsogram(s) = do {
+  let letters = filter(characters(toLowerCase(s)), c => c != " " && c != "-")
+  length(unique(letters)) == length(letters)
+}
+map(isIsogram, ["lumberjacks", "background", "downstream", "six-year-old", "isograms", "Alphabet"])
+// ➔ [True, True, True, True, False, False]

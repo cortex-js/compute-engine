@@ -1,0 +1,4 @@
+// "One for you, one for me." with a default name.
+twoFer(name) = "One for \(name), one for me."
+(twoFer("Alice"), twoFer("you"))
+// ➔ ("One for Alice, one for me.", "One for you, one for me.")

@@ -1,0 +1,4 @@
+// Convert a list of digits from one base to another through an integer.
+rebase(digits, fromBase, toBase) = integerDigits(fromDigits(digits, fromBase), toBase)
+(rebase([1], 2, 10), rebase([1, 0, 1], 2, 10), rebase([4, 2], 10, 2), rebase([1, 1, 2, 0], 3, 16), rebase([3, 46, 60], 97, 73))
+// ➔ ([1], [5], [1, 0, 1, 0, 1, 0], [2, 10], [6, 10, 45])

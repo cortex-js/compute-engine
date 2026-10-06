@@ -1,0 +1,11 @@
+// Raindrops: "Pling" for a factor 3, "Plang" for 5, "Plong" for 7, otherwise
+// the number as a string.
+raindrops(n) = do {
+  let s = stringJoin([
+    "Pling" if n % 3 == 0 else "",
+    "Plang" if n % 5 == 0 else "",
+    "Plong" if n % 7 == 0 else ""], "")
+  s if s != "" else "\(n)"
+}
+map(raindrops, [28, 30, 34, 105])
+// ➔ ["Plong", "PlingPlang", "34", "PlingPlangPlong"]

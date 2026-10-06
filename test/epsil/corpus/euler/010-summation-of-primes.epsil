@@ -1,0 +1,3 @@
+// Project Euler 10 (reduced): the sum of the primes below 100000.
+sum(filter(1..99999, isPrime))
+// ➔ 454396537

@@ -1,0 +1,3 @@
+// Binary representation of integers, and back.
+(listFrom(map(n => integerString(n, 2), [5, 50, 9000])), numberFrom("10001100101000", 2))
+// ➔ (["101", "110010", "10001100101000"], 9000)

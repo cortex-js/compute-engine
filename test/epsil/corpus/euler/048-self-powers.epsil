@@ -1,0 +1,3 @@
+// Project Euler 48: the last ten digits of 1^1 + 2^2 + … + 1000^1000.
+Mod(sum(map(n => n^n, 1..1000)), 10^10)
+// ➔ 9110846700

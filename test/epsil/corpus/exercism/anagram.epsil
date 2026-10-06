@@ -1,0 +1,7 @@
+// Anagrams of a target word among candidates: same letters, different word,
+// case-insensitive.
+key(w) = sort(characters(toLowerCase(w)))
+anagramsOf(target, candidates) = filter(candidates,
+  c => toLowerCase(c) != toLowerCase(target) && key(c) == key(target))
+anagramsOf("listen", ["enlists", "google", "inlets", "banana", "Silent", "LISTEN"])
+// ➔ ["inlets", "Silent"]

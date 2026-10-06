@@ -1,0 +1,32 @@
+// corpus: known-failure string operators reject a `character` argument (ROADMAP: "String operators reject a `character`")
+// Run-length encode a string: "AABCCC" → "2AB3C", and decode it back.
+// `stringRepeat(c, n)` with a character `c` is a static type error today.
+encode(s) = do {
+  let out = ""
+  let run = 0
+  let prev = ""
+  for c in characters(s) {
+    if c == prev { run = run + 1 }
+    else {
+      if run > 1 { out = "\(out)\(run)\(prev)" } else if run == 1 { out = "\(out)\(prev)" }
+      prev = c
+      run = 1
+    }
+  }
+  if run > 1 { out = "\(out)\(run)\(prev)" } else if run == 1 { out = "\(out)\(prev)" }
+  out
+}
+decode(s) = do {
+  let out = ""
+  let n = ""
+  for c in characters(s) {
+    if "0" <= c <= "9" { n = "\(n)\(c)" }
+    else {
+      out = "\(out)\(stringRepeat(c, numberFrom(n) if n != "" else 1))"
+      n = ""
+    }
+  }
+  out
+}
+(encode("AABCCCDEEEE"), encode(""), decode("2AB3CD4E"), decode(encode("  hsqq qww  ")))
+// ➔ ("2AB3CD4E", "", "AABCCCDEEEE", "  hsqq qww  ")

@@ -1,0 +1,5 @@
+// A pangram uses every letter of the alphabet at least once.
+let alphabet = characters("abcdefghijklmnopqrstuvwxyz")
+isPangram(s) = all(alphabet, c => c in toLowerCase(s))
+(isPangram("The quick brown fox jumps over the lazy dog"), isPangram("a quick movement of the enemy"))
+// ➔ (True, False)

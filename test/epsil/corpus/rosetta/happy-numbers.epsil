@@ -1,0 +1,13 @@
+// The first eight happy numbers, by iterating the digit-square sum until 1 or a
+// cycle, compared with the library predicate.
+isHappyByHand(n) = do {
+  let seen = {}
+  let m = n
+  while m != 1 && m !in seen {
+    seen = union(seen, {m})
+    m = sum(map(d => d^2, integerDigits(m)))
+  }
+  m == 1
+}
+(listFrom(take(filter(1..oo, isHappyByHand), 8)), listFrom(take(filter(1..oo, isHappy), 8)))
+// ➔ ([1, 7, 10, 13, 19, 23, 28, 31], [1, 7, 10, 13, 19, 23, 28, 31])

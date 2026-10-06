@@ -1,0 +1,8 @@
+// corpus: known-failure a dictionary rejects a `character` key (ROADMAP: "String operators reject a `character`")
+// DNA to RNA complement: G→C, C→G, T→A, A→U. Indexing a dictionary with a
+// character read from a string is a static type error today, though a
+// character and the one-character string are the same value.
+let complement = {G -> "C", C -> "G", T -> "A", A -> "U"}
+toRna(dna) = stringJoin(map(c => complement[c], characters(dna)), "")
+toRna("ACGTGGTCTTAA")
+// ➔ "UGCACCAGAAUU"

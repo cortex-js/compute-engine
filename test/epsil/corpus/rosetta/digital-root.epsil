@@ -1,0 +1,9 @@
+// Digital root and additive persistence of an integer.
+digitalRoot(n) = do {
+  let m = n
+  let steps = 0
+  while m >= 10 { m = digitSum(m); steps = steps + 1 }
+  (m, steps)
+}
+map(digitalRoot, [627615, 39390, 588225, 393900588225])
+// ➔ [(9, 2), (6, 2), (3, 2), (9, 2)]

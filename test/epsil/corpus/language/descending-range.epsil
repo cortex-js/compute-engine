@@ -1,0 +1,6 @@
+// A range whose end is below its start counts down; it is not empty. So
+// `1..(n - 1)` with n = 1 is `[1, 0]`, and `xs[1..(j - 1)]` with j = 1 reads
+// positions 1 and 0 instead of nothing. Use `Range` with a guard, or
+// `take`/`drop`, where an empty range is wanted.
+(listFrom(3..1), length(Range(5, 1)), listFrom(Range(10, 1, -3)), listFrom(1..0))
+// ➔ ([3, 2, 1], 5, [10, 7, 4, 1], [1, 0])

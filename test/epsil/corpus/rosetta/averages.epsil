@@ -1,0 +1,4 @@
+// Mean, median, mode, population variance and sample standard deviation.
+let data = [1, 2, 2, 3, 4, 7, 9]
+(mean(data), median(data), mode(data), populationVariance(data), N(standardDeviation(data), 6))
+// ➔ (4, 3, 2, 52/7, 2.94392)

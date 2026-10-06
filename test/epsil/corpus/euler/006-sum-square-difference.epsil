@@ -1,0 +1,4 @@
+// Project Euler 6: the difference between the square of the sum and the sum of
+// the squares of the first hundred natural numbers, as a closed-form sum.
+sum(k, (k, 1, 100))^2 - sum(k^2, (k, 1, 100))
+// ➔ 25164150

@@ -1,0 +1,10 @@
+// corpus: known-failure the static pass types `p[1]` of a zipped tuple as a number once the zipped variable is reassigned in a loop (ROADMAP: "Static type of a zipped tuple component inside a loop")
+// Toggle a list of booleans by position. Outside a loop the same `map` is
+// accepted; inside the loop that reassigns `open`, `!p[1]` is refused with
+// "expected `boolean`, got `nan | real`". The program's value is correct.
+let open = repeat(false, 3)
+for pass in 1..3 {
+  open = map(p => !p[1] if p[2] % pass == 0 else p[1], zip(open, 1..3))
+}
+open
+// ➔ [True, True, True]

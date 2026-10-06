@@ -1,0 +1,12 @@
+// ISBN-10 check: weighted sum of digits, X allowed as the last check digit.
+digitOf(c, i) = 10 if c == "X" && i == 10 else (numberFrom(String(c)) if "0" <= c <= "9" else -1)
+isValidIsbn(s) = do {
+  let cs = filter(characters(s), c => c != "-")
+  if length(cs) != 10 { false }
+  else {
+    let ds = map(p => digitOf(p[1], p[2]), zip(cs, 1..10))
+    all(ds, d => d >= 0) && sum(map(p => p[1] * (11 - p[2]), zip(ds, 1..10))) % 11 == 0
+  }
+}
+map(isValidIsbn, ["3-598-21508-8", "3-598-21508-9", "3-598-21507-X", "3598215088", "3-598-2X507-9"])
+// ➔ [True, False, True, True, False]

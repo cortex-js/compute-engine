@@ -1,0 +1,6 @@
+// corpus: known-failure a filter over ten thousand elements with a user predicate exceeds the 1024-turn iteration limit (ROADMAP: "Default iteration limit of 1024 for Epsil programs")
+// Project Euler 21: the sum of the amicable numbers below 10000.
+d(n) = sum(divisors(n)) - n
+isAmicable(n) = do { let m = d(n); m != n && d(m) == n }
+sum(filter(2..9999, isAmicable))
+// ➔ 31626

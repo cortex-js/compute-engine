@@ -1,0 +1,16 @@
+// Are the brackets balanced? Non-bracket characters are ignored.
+let closing = {")" -> "(", "]" -> "[", "}" -> "{"}
+isBalanced(s) = do {
+  let stack = []
+  let ok = true
+  for c in characters(s) {
+    if c in "([{" { stack = [...stack, c] }
+    else if c in ")]}" {
+      if length(stack) == 0 || last(stack) != closing[String(c)] { ok = false; break }
+      stack = most(stack)
+    }
+  }
+  ok && length(stack) == 0
+}
+map(isBalanced, ["[]", "[[", "{]", "{[]}", "([{}({}[])])", "\\left(\\begin{array}{cc} \\frac{1}{2} \\end{array}\\right)"])
+// ➔ [True, False, False, True, True, True]

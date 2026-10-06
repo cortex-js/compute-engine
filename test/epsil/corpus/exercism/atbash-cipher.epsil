@@ -1,0 +1,12 @@
+// Atbash: a → z, b → y, …; output in groups of five, digits kept.
+// `stringFrom(list of code points)` is the inverse of `unicodeScalars`.
+atbashChar(c) = do {
+  let code = unicodeScalars(String(c))[1]
+  stringFrom([219 - code]) if 97 <= code <= 122 else c
+}
+encode(s) = do {
+  let kept = filter(characters(toLowerCase(s)), c => ("a" <= c <= "z") || ("0" <= c <= "9"))
+  stringJoin(map(g => stringJoin(g, ""), chunk(map(atbashChar, kept), ceil(length(kept) / 5))), " ")
+}
+(encode("yes"), encode("The quick brown fox jumps over the lazy dog."), encode("Testing,1 2 3, testing."))
+// ➔ ("bvh", "gsvjf rxpyi ldmul cqfnk hlevi gsvoz abwlt", "gvhgr mt123 gvhgr mt")

@@ -1,0 +1,4 @@
+// Split a string on a separator and join the parts with another.
+let parts = stringSplit("Hello,How,Are,You,Today", ",")
+(parts, stringJoin(parts, "."), length(parts))
+// ➔ (["Hello", "How", "Are", "You", "Today"], "Hello.How.Are.You.Today", 5)

@@ -1,0 +1,3 @@
+// Project Euler 25 (reduced): the index of the first Fibonacci number with 100 digits.
+indexWhere(map(fibonacci, 1..1000), f => length(integerDigits(f)) >= 100)
+// ➔ 476

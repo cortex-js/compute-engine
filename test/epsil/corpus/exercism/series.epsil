@@ -1,0 +1,5 @@
+// All contiguous substrings of a given length, as lists of digits. The
+// parameter is typed `string` so that `slice` is known to return a string.
+slices(s: string, n) = map(i => map(c => numberFrom(String(c)), characters(slice(s, i, i + n - 1))), 1..(length(s) - n + 1))
+slices("49142", 3)
+// ➔ [[4, 9, 1], [9, 1, 4], [1, 4, 2]]

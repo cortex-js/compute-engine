@@ -14,12 +14,78 @@ import {
   cancelCommonFactors,
   fromCoefficients,
 } from '../boxed-expression/polynomials.js';
-import type { SymbolDefinitions } from '../global-types.js';
-import { isFunction, sym } from '../boxed-expression/type-guards.js';
+import type { Expression, SymbolDefinitions } from '../global-types.js';
+import { isFunction, isSymbol, sym } from '../boxed-expression/type-guards.js';
 import {
   defaultUnknown,
   reduceTransformerOperand,
 } from '../boxed-expression/utils.js';
+
+/**
+ * The operands of a polynomial operator, resolved for its algorithm, and the
+ * variable the operator works in.
+ *
+ * The polynomial operators are lazy, so each operand arrives unevaluated. An
+ * operand is resolved the way `Expand` resolves its operand
+ * (`reduceTransformerOperand`): a symbol bound to a polynomial
+ * (`let p = x^2 - 1`) stands for its value. The variable is never
+ * substituted, even when it has a value: with `x := 5`,
+ * `PolynomialDegree(x^2 + 1, x)` is a question about `x`, so the resolution
+ * protects that name. When no variable is given, it is read from the
+ * resolved operands; when resolving folds every symbol away (the only
+ * unknown had a value), it is read from the stored value of a bound operand
+ * instead (`p := x^2 - 1` names `x`), and the operands are resolved with that
+ * name protected.
+ *
+ * `undefined` when a variable is given but is not a symbol, or when no
+ * variable can be found.
+ */
+function polynomialOperands(
+  varExpr: Expression | undefined,
+  ...ops: Expression[]
+): { targets: Expression[]; variable: string } | undefined {
+  const canonical = ops.map((op) => op.canonical);
+  let variable: string | undefined;
+  if (varExpr) {
+    variable = sym(varExpr.canonical);
+    if (!variable) return undefined;
+  } else {
+    variable =
+      defaultUnknown(...canonical.map((op) => reduceTransformerOperand(op))) ??
+      storedValueVariable(canonical);
+    if (!variable) return undefined;
+  }
+  const protect = new Set([variable]);
+  return {
+    targets: canonical.map((op) => reduceTransformerOperand(op, protect)),
+    variable,
+  };
+}
+
+/**
+ * The variable named by the stored values of bound operands, for a polynomial
+ * operator called without a variable when every unknown of the resolved
+ * operands has a value: with `p := x^2 - 1` and `x := 3`, `PolynomialDegree(p)`
+ * is about `x`. The names are the non-constant symbols of each operand's
+ * stored value (`p.value` is `x^2 - 1`, read without evaluation); one name is
+ * the variable, and `x` wins among several, as in `defaultUnknown`.
+ */
+function storedValueVariable(ops: Expression[]): string | undefined {
+  const names = new Set<string>();
+  for (const op of ops) {
+    const value = isSymbol(op) ? op.value : undefined;
+    const source = value !== undefined && !isSymbol(value) ? value : op;
+    for (const name of source.symbols) {
+      if (name === '_') continue;
+      if (source.engine.box(name).valueDefinition?.isConstant === true)
+        continue;
+      names.add(name);
+    }
+  }
+  if (names.size === 1) return names.values().next().value;
+  if (names.has('x')) return 'x';
+  return undefined;
+}
 
 export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
   {
@@ -57,17 +123,21 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
       signature: '(value, symbol?) -> value',
       evaluate: ([x, varExpr]) => {
         if (!x) return x;
-        const target = reduceTransformerOperand(x.canonical);
 
-        // If variable is provided, use polynomial factoring with that variable
+        // With a variable, factor in that variable. The variable is protected
+        // from resolution: with `x := 5`, `Factor(x^2 - 1, x)` is a question
+        // about `x`, not about `24`.
         if (varExpr) {
           const variable = sym(varExpr.canonical);
-          if (!variable) return target;
-          return factorPolynomial(target, variable);
+          if (!variable) return reduceTransformerOperand(x.canonical);
+          return factorPolynomial(
+            reduceTransformerOperand(x.canonical, new Set([variable])),
+            variable
+          );
         }
 
         // Otherwise, try polynomial factoring without specific variable
-        return factorPolynomial(target);
+        return factorPolynomial(reduceTransformerOperand(x.canonical));
       },
     },
 
@@ -104,11 +174,11 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
       signature: '(value, symbol?) -> integer',
       evaluate: ([poly, varExpr]) => {
         if (!poly) return undefined;
-        const variable = varExpr
-          ? sym(varExpr.canonical)
-          : defaultUnknown(poly);
-        if (!variable) return undefined;
-        const deg = polynomialDegree(poly.canonical, variable);
+        const resolved = polynomialOperands(varExpr, poly);
+        if (!resolved) return undefined;
+        const [target] = resolved.targets;
+        const { variable } = resolved;
+        const deg = polynomialDegree(target, variable);
         return deg >= 0 ? poly.engine.number(deg) : undefined;
       },
     },
@@ -121,11 +191,11 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
       signature: '(value, symbol?) -> list<value>',
       evaluate: ([poly, varExpr]) => {
         if (!poly) return undefined;
-        const variable = varExpr
-          ? sym(varExpr.canonical)
-          : defaultUnknown(poly);
-        if (!variable) return undefined;
-        const coeffs = getPolynomialCoefficients(poly.canonical, variable);
+        const resolved = polynomialOperands(varExpr, poly);
+        if (!resolved) return undefined;
+        const [target] = resolved.targets;
+        const { variable } = resolved;
+        const coeffs = getPolynomialCoefficients(target, variable);
         if (!coeffs) return undefined;
         return poly.engine.expr(['List', ...coeffs.reverse()]);
       },
@@ -140,15 +210,11 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
         '(dividend: value, divisor: value, variable: symbol?) -> value',
       evaluate: ([dividend, divisor, varExpr]) => {
         if (!dividend || !divisor) return undefined;
-        const variable = varExpr
-          ? sym(varExpr.canonical)
-          : defaultUnknown(dividend, divisor);
-        if (!variable) return undefined;
-        const result = polynomialDivide(
-          dividend.canonical,
-          divisor.canonical,
-          variable
-        );
+        const resolved = polynomialOperands(varExpr, dividend, divisor);
+        if (!resolved) return undefined;
+        const [left, right] = resolved.targets;
+        const { variable } = resolved;
+        const result = polynomialDivide(left, right, variable);
         return result?.[0];
       },
     },
@@ -162,15 +228,11 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
         '(dividend: value, divisor: value, variable: symbol?) -> value',
       evaluate: ([dividend, divisor, varExpr]) => {
         if (!dividend || !divisor) return undefined;
-        const variable = varExpr
-          ? sym(varExpr.canonical)
-          : defaultUnknown(dividend, divisor);
-        if (!variable) return undefined;
-        const result = polynomialDivide(
-          dividend.canonical,
-          divisor.canonical,
-          variable
-        );
+        const resolved = polynomialOperands(varExpr, dividend, divisor);
+        if (!resolved) return undefined;
+        const [left, right] = resolved.targets;
+        const { variable } = resolved;
+        const result = polynomialDivide(left, right, variable);
         return result?.[1];
       },
     },
@@ -183,11 +245,11 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
       signature: '(a: value, b: value, variable: symbol?) -> value',
       evaluate: ([a, b, varExpr]) => {
         if (!a || !b) return undefined;
-        const variable = varExpr
-          ? sym(varExpr.canonical)
-          : defaultUnknown(a, b);
-        if (!variable) return undefined;
-        return polynomialGCD(a.canonical, b.canonical, variable);
+        const resolved = polynomialOperands(varExpr, a, b);
+        if (!resolved) return undefined;
+        const [left, right] = resolved.targets;
+        const { variable } = resolved;
+        return polynomialGCD(left, right, variable);
       },
     },
 
@@ -200,11 +262,11 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
       signature: '(a: value, b: value, variable: symbol?) -> value',
       evaluate: ([a, b, varExpr]) => {
         if (!a || !b) return undefined;
-        const variable = varExpr
-          ? sym(varExpr.canonical)
-          : defaultUnknown(a, b);
-        if (!variable) return undefined;
-        return polynomialResultant(a.canonical, b.canonical, variable);
+        const resolved = polynomialOperands(varExpr, a, b);
+        if (!resolved) return undefined;
+        const [left, right] = resolved.targets;
+        const { variable } = resolved;
+        return polynomialResultant(left, right, variable);
       },
     },
 
@@ -216,11 +278,11 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
       signature: '(value, symbol?) -> value',
       evaluate: ([expr, varExpr]) => {
         if (!expr) return undefined;
-        const variable = varExpr
-          ? sym(varExpr.canonical)
-          : defaultUnknown(expr);
-        if (!variable) return undefined;
-        return cancelCommonFactors(expr.canonical, variable);
+        const resolved = polynomialOperands(varExpr, expr);
+        if (!resolved) return undefined;
+        const [target] = resolved.targets;
+        const { variable } = resolved;
+        return cancelCommonFactors(target, variable);
       },
     },
 
@@ -232,11 +294,11 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
       signature: '(value, symbol?) -> value',
       evaluate: ([expr, varExpr]) => {
         if (!expr) return undefined;
-        const variable = varExpr
-          ? sym(varExpr.canonical)
-          : defaultUnknown(expr);
-        if (!variable) return undefined;
-        return partialFraction(expr.canonical, variable);
+        const resolved = polynomialOperands(varExpr, expr);
+        if (!resolved) return undefined;
+        const [target] = resolved.targets;
+        const { variable } = resolved;
+        return partialFraction(target, variable);
       },
     },
 
@@ -247,11 +309,11 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
       signature: '(value, symbol?) -> value',
       evaluate: ([expr, varExpr]) => {
         if (!expr) return undefined;
-        const variable = varExpr
-          ? sym(varExpr.canonical)
-          : defaultUnknown(expr);
-        if (!variable) return undefined;
-        return partialFraction(expr.canonical, variable);
+        const resolved = polynomialOperands(varExpr, expr);
+        if (!resolved) return undefined;
+        const [target] = resolved.targets;
+        const { variable } = resolved;
+        return partialFraction(target, variable);
       },
     },
 
@@ -263,11 +325,11 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
       signature: '(value, symbol?) -> set<value>',
       evaluate: ([poly, varExpr]) => {
         if (!poly) return undefined;
-        const variable = varExpr
-          ? sym(varExpr.canonical)
-          : defaultUnknown(poly);
-        if (!variable) return undefined;
-        const roots = poly.canonical.polynomialRoots(variable);
+        const resolved = polynomialOperands(varExpr, poly);
+        if (!resolved) return undefined;
+        const [target] = resolved.targets;
+        const { variable } = resolved;
+        const roots = target.polynomialRoots(variable);
         if (!roots || roots.length === 0) return undefined;
         return poly.engine.expr(['Set', ...roots.map((r) => r.json)]);
       },
@@ -281,12 +343,12 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
       signature: '(value, symbol?) -> value',
       evaluate: ([poly, varExpr]) => {
         if (!poly) return undefined;
-        const variable = varExpr
-          ? sym(varExpr.canonical)
-          : defaultUnknown(poly);
-        if (!variable) return undefined;
+        const resolved = polynomialOperands(varExpr, poly);
+        if (!resolved) return undefined;
+        const [target] = resolved.targets;
+        const { variable } = resolved;
 
-        const coeffsAsc = getPolynomialCoefficients(poly.canonical, variable);
+        const coeffsAsc = getPolynomialCoefficients(target, variable);
         if (!coeffsAsc) return undefined;
 
         const coeffs = [...coeffsAsc].reverse();
