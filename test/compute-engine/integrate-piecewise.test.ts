@@ -195,6 +195,25 @@ describe('FINITE REAL PIECEWISE INTEGRALS', () => {
     );
   });
 
+  test('a sum of cells with different radical bounds stays exact', () => {
+    // The cells of ⌊x²⌋ on [0, 3] end at √2, √3, √5, √6, √7 and 2√2. Their
+    // integrals must add as exact numbers, not as machine floats.
+    const ce = new ComputeEngine();
+    const result = integrate(['Floor', ['Square', 'x']], 0, 3, ce);
+    expect(result.toString()).toBe(
+      '21 - 3sqrt(2) - sqrt(7) - sqrt(6) - sqrt(5) - sqrt(3)'
+    );
+    expect(result.N().re).toBeCloseTo(
+      21 -
+        3 * Math.sqrt(2) -
+        Math.sqrt(3) -
+        Math.sqrt(5) -
+        Math.sqrt(6) -
+        Math.sqrt(7),
+      10
+    );
+  });
+
   test('periodic sine switches include every period and retain Pi', () => {
     const result = integrate(['If', ['Greater', ['Sin', 'x'], 0], 1, 0], 0, [
       'Multiply',

@@ -90,6 +90,20 @@
 
 ### New Features
 
+- [#413](https://github.com/cortex-js/compute-engine/pull/413) **Definite
+  integrals of piecewise functions.** An integral over a finite real interval
+  of an integrand that contains `If`, `Which`, `Min`, `Max`, `Floor`, `Ceil`
+  or `Fract` is cut at the points where the integrand changes branch, and
+  each piece is integrated. `∫_{-1}^{1} max(x, 0) dx` is `1/2`,
+  `∫_0^3 ⌊x⌋ dx` is `3`, `∫_0^{2π} max(sin x, cos x) dx` is `2√2`, and
+  `∫_0^2 ⌊x²⌋ dx` is `5 − √2 − √3`. The cut points are exact: they come from
+  linear conditions, from `Solve` over the interval (polynomial and periodic
+  conditions), and from the poles and domain limits of `1/u`, `√u`, `ln u`
+  and `tan u`. When a cut point is not known exactly, when a condition is not
+  supported, or when there are more than 128 cuts, the integral stays
+  unevaluated as before. Contributed by
+  [KingArth0r](https://github.com/KingArth0r).
+
 - **The tie rule of `Round` is an engine setting**
   ([#417](https://github.com/cortex-js/compute-engine/issues/417), requested
   by [enumeratio](https://github.com/enumeratio)). `ce.roundingTies` selects
