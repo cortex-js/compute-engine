@@ -1462,6 +1462,37 @@ export interface LibraryDefinition {
  */
 export type AngularUnit = 'rad' | 'deg' | 'grad' | 'turn';
 
+/**
+ * The rule that `Round` uses for a value that is exactly halfway between two
+ * integers (a tie). A value that is not a tie always rounds to the nearest
+ * integer.
+ *
+ * | Rule | `Round(2.5)` | `Round(3.5)` | `Round(-2.5)` | Description |
+ * |:-----|:------------:|:------------:|:-------------:|:------------|
+ * | `away-from-zero` | `3` | `4` | `-3` | the default |
+ * | `to-even` | `2` | `4` | `-2` | IEEE 754, Python, NumPy and Mathematica |
+ * | `toward-zero` | `2` | `3` | `-2` | |
+ * | `toward-positive-infinity` | `3` | `4` | `-2` | JavaScript `Math.round` |
+ * | `toward-negative-infinity` | `2` | `3` | `-3` | |
+ *
+ * The rule also applies to the form `Round(x, n)`, which rounds to `n`
+ * decimal places: the tie is at the half of the last kept digit.
+ *
+ * To change the rule used by the Compute Engine, use:
+ *
+ * ```js
+ * ce.roundingTies = 'to-even';
+ * ```
+ *
+ * @category Compute Engine
+ */
+export type RoundingTies =
+  | 'away-from-zero'
+  | 'to-even'
+  | 'toward-zero'
+  | 'toward-positive-infinity'
+  | 'toward-negative-infinity';
+
 /** @category Numerics */
 export type Sign =
   /** The expression is equal to 0 */

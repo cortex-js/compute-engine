@@ -13,6 +13,7 @@ import {
   secWithPole,
   cscWithPole,
   floorModDouble,
+  roundToInteger,
 } from '../numerics/numeric.js';
 import {
   parseColor,
@@ -3482,6 +3483,10 @@ export const SYS_HELPERS = {
   // kernel answered the final arm's `1` — a fail-closed violation.
   heaviside: (x: number) =>
     Number.isNaN(x) ? NaN : x < 0 ? 0 : x === 0 ? 0.5 : 1,
+  // `Round` with a tie rounded to the even neighbour (`ce.roundingTies` is
+  // `'to-even'` when the code is compiled). The other tie rules have an
+  // inline form made of `Math.round`; this one does not.
+  roundToEven: (x: number) => roundToInteger(x, 'to-even'),
   // `Characters`/`GraphemeClusters`: the interpreter's own decomposition —
   // UAX #29 grapheme clusters via `Intl.Segmenter` (`splitGraphemeClusters` in
   // `library/core.ts`), with the NFC normalization `engine.string()` applies to

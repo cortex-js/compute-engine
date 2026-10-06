@@ -88,7 +88,40 @@
   The `LambertW` reference documentation now gives the argument order, the
   real domain of each real branch, and the named form.
 
+### New Features
+
+- **The tie rule of `Round` is an engine setting**
+  ([#417](https://github.com/cortex-js/compute-engine/issues/417), requested
+  by [enumeratio](https://github.com/enumeratio)). `ce.roundingTies` selects
+  how `Round` rounds a value exactly halfway between two integers:
+  `"away-from-zero"` (the default, unchanged: `Round(2.5)` is `3` and
+  `Round(-2.5)` is `-3`), `"to-even"` (IEEE 754, Python, NumPy and
+  Mathematica: `Round(2.5)` is `2` and `Round(3.5)` is `4`), `"toward-zero"`,
+  `"toward-positive-infinity"` (JavaScript `Math.round`: `Round(-2.5)` is
+  `-2`) and `"toward-negative-infinity"`. The rule applies at every
+  precision, to an exact rational (`Round(5/2)`), to an exact constant that
+  is at a tie under `.N()`, to the sign of `Round`, and to the form
+  `Round(x, n)`, which rounds to `n` decimal places (with `"to-even"`,
+  `Round(0.125, 2)` is `3/25`). An unknown rule is an error. Compiled
+  JavaScript, interval JavaScript, GLSL, WGSL and Python use the rule in
+  effect at compile time; a function compiled before a change keeps its rule,
+  and an automatically compiled `Map` is compiled again. `Remainder` does not
+  use the rule: its quotient is still rounded with a tie toward `+∞`.
+
 ### Issues Resolved
+
+- **`Round` of a large odd integer in compiled Python and shader code.**
+  Python computed `sign(x)·floor(|x| + 0.5)`, and `|x| + 0.5` is rounded when
+  `|x| ≥ 2⁵²`: `Round(2⁵² + 1)` was `2⁵² + 2`. GLSL and WGSL had the same
+  error in `f32` from `2²³` (`Round(8388609)` was `8388610`). The code now
+  compares the exact distance to the floor of `|x|` with `0.5`.
+
+- **`Remainder` at a tie in compiled Python, GLSL, WGSL and interval
+  JavaScript.** The interpreter rounds the quotient with a tie toward `+∞`, as
+  JavaScript `Math.round` does: `Remainder(5, 2)` is `5 − 2·3 = −1`. Python
+  and the shaders rounded the quotient with `np.round` or `round()`, which
+  round a tie to even, and gave `1`. The interval target rounded a tie away
+  from zero, and gave `1` for `Remainder(−5, 2)`. All of them now give `−1`.
 
 - **`Take` and `Drop` with a symbolic count no longer give a wrong answer to
   `Any` or `All`.** `Any(Take([1, 2, 3], n), x > 0)` was `False` and

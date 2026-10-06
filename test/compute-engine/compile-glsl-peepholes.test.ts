@@ -332,7 +332,8 @@ describe('argument of a complex value, and rounding', () => {
     const r = glsl(['Round', 'x']);
     expect(r.code).toBe('_gpu_round(x)');
     expect(r.preamble).toContain(
-      'float _gpu_round(float x) {\n  return sign(x) * floor(abs(x) + 0.5);\n}'
+      'float _gpu_round(float x) {\n  float a = abs(x);\n  float m = floor(a);\n' +
+        '  return sign(x) * (m + step(0.5, a - m));\n}'
     );
     expect(wgsl(['Round', 'x']).code).toBe('_gpu_round(x)');
   });
@@ -341,9 +342,27 @@ describe('argument of a complex value, and rounding', () => {
     // The interpreter rounds half AWAY from zero; both languages' own
     // `round()` rounds a half to the even neighbour, which is why the helper
     // exists. Check the helper's expression against the interpreter.
+    // The helper does not add 0.5 to the operand, which is rounded for a
+    // large operand: `floor(2^52 + 1 + 0.5)` is `2^52 + 2`.
     const ce = fresh();
-    const helper = (v: number) => Math.sign(v) * Math.floor(Math.abs(v) + 0.5);
-    for (const v of [-2.5, -1.5, -0.5, 0.5, 1.5, 2.5, -0.4, 0.4]) {
+    const step = (edge: number, d: number) => (d < edge ? 0 : 1);
+    const helper = (v: number) => {
+      const a = Math.abs(v);
+      const m = Math.floor(a);
+      return Math.sign(v) * (m + step(0.5, a - m));
+    };
+    for (const v of [
+      -2.5,
+      -1.5,
+      -0.5,
+      0.5,
+      1.5,
+      2.5,
+      -0.4,
+      0.4,
+      2 ** 52 + 1,
+      -(2 ** 52 + 1),
+    ]) {
       // `+ 0` normalizes the negative zero `sign(-0.4) * floor(0.9)` gives.
       expect(helper(v) + 0).toBe(ce.box(['Round', v]).evaluate().re! + 0);
     }
@@ -352,11 +371,13 @@ describe('argument of a complex value, and rounding', () => {
   it('a vector operand keeps the componentwise expression', () => {
     // `_gpu_round` is declared over `float`, and the shape gate declines a
     // vector handed to a scalar-only helper; every piece of the inline form
-    // is componentwise, so it stays valid there.
+    // is componentwise, so it stays valid there. `ceil(0.5 + 0.5 * sign(d -
+    // 0.5))` is 1 when the distance `d` to the floor is at least 0.5.
     const ce = fresh();
     ce.declare('v', 'vector<2>');
     expect(glsl(['Round', 'v'], ce).code).toBe(
-      '(sign(v) * floor(abs(v) + 0.5))'
+      '(sign(v) * (floor(abs(v)) + ' +
+        'ceil(0.5 + 0.5 * sign(abs(v) - floor(abs(v)) - 0.5))))'
     );
   });
 });

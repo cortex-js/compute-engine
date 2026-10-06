@@ -1,4 +1,5 @@
 import type { Expression } from '../types-expression.js';
+import type { RoundingTies } from '../types-definitions.js';
 import { isFunction, isNumber, isSymbol } from './type-guards.js';
 import {
   integerExactnessClass,
@@ -8,7 +9,7 @@ import {
 import {
   isMachineTrigPole,
   MACHINE_PRECISION,
-  roundHalfAway,
+  roundToInteger,
 } from '../numerics/numeric.js';
 import { checkDeadline } from '../../common/interruptible.js';
 
@@ -289,7 +290,9 @@ function listFloats(list: Expression): boolean {
  *   radians the argument is converted first, which the kernel does not do.
  */
 interface MachineFunctionKernel {
-  apply: (x: number) => number;
+  /** The second argument is the tie rule of the engine (`ce.roundingTies`),
+   * which only the kernel of `Round` reads. */
+  apply: (x: number, ties: RoundingTies) => number;
   routes: 'both' | 'N';
   integers: boolean;
   domain?: (x: number) => boolean;
@@ -399,12 +402,12 @@ const FUNCTION_KERNELS: Record<string, MachineFunctionKernel> = {
     exactResult: true,
   },
   Ceil: { apply: Math.ceil, routes: 'both', integers: true, exactResult: true },
-  // A half rounds AWAY FROM ZERO at every precision (`Round(-0.5)` is `-1`,
-  // `Round(2.5)` is `3`; user decision, 2026-09-21), which is what the scalar
-  // route answers. JavaScript `Math.round` rounds a half toward `+∞`, so the
-  // kernel is `roundHalfAway`, not the bare primitive.
+  // A value halfway between two integers is rounded with the rule of
+  // `ce.roundingTies` (the second argument of `apply`), which is what the
+  // scalar route answers. JavaScript `Math.round` always rounds a half toward
+  // `+∞`, so the kernel is `roundToInteger`, not the bare primitive.
   Round: {
-    apply: roundHalfAway,
+    apply: roundToInteger,
     routes: 'both',
     integers: true,
     exactResult: true,
@@ -538,6 +541,7 @@ function machineFunctionBroadcast(
   const floatElements = listFloats(list);
   const admitsIntegers = numericApproximation || kernel.integers;
   const floats = new IntegerResultExactness();
+  const ties = ce.roundingTies;
   const out = new Array<number>(values.length);
   for (let i = 0; i < values.length; i++) {
     if ((i & DEADLINE_STRIDE) === DEADLINE_STRIDE)
@@ -551,7 +555,7 @@ function machineFunctionBroadcast(
     if (kernel.domain !== undefined && !kernel.domain(x)) return undefined;
     if (!numericApproximation && kernel.avoid !== undefined && kernel.avoid(x))
       return undefined;
-    const r = kernel.apply(x);
+    const r = kernel.apply(x, ties);
     if (!Number.isFinite(r)) return undefined;
     if (kernel.pole === true && isMachineTrigPole(r, x)) return undefined;
     if (Number.isInteger(r) && !Number.isSafeInteger(r)) return undefined;

@@ -33,6 +33,7 @@ import type {
   ValueDefinition,
   OperatorDefinition,
   AngularUnit,
+  RoundingTies,
   AssignValue,
   AssumeResult,
   Expression,
@@ -1736,6 +1737,32 @@ export class ComputeEngine implements IComputeEngine {
 
   set angularUnit(u: AngularUnit) {
     if (!this._numericConfiguration.setAngularUnit(u)) return;
+    this._reset();
+  }
+
+  /**
+   * The rule that `Round` uses for a value that is exactly halfway between
+   * two integers (a tie). See {@link RoundingTies}.
+   *
+   * - `away-from-zero`: `Round(2.5)` is `3`, `Round(-2.5)` is `-3`
+   * - `to-even`: `Round(2.5)` is `2`, `Round(3.5)` is `4` (IEEE 754, Python)
+   * - `toward-zero`: `Round(2.5)` is `2`, `Round(-2.5)` is `-2`
+   * - `toward-positive-infinity`: `Round(-2.5)` is `-2` (JavaScript
+   *   `Math.round`)
+   * - `toward-negative-infinity`: `Round(2.5)` is `2`
+   *
+   * The rule applies to the evaluation of `Round` at every precision and to
+   * the code that `compile()` makes. A function compiled before a change
+   * keeps the rule that was in effect when it was compiled.
+   *
+   * Default is `"away-from-zero"`.
+   */
+  get roundingTies(): RoundingTies {
+    return this._numericConfiguration.roundingTies;
+  }
+
+  set roundingTies(r: RoundingTies) {
+    if (!this._numericConfiguration.setRoundingTies(r)) return;
     this._reset();
   }
 

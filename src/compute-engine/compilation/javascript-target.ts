@@ -17,6 +17,7 @@ import type {
   Expression,
   FunctionInterface,
   IComputeEngine as ComputeEngine,
+  RoundingTies,
 } from '../global-types.js';
 import { typeToString } from '../../common/type/serialize.js';
 import type { MathJsonSymbol } from '../../math-json/types.js';
@@ -3051,6 +3052,31 @@ function spreadIfSequence(
       return `...${code}`;
   }
   return code;
+}
+
+/**
+ * The JavaScript code that rounds `x` to an integer, with a value halfway
+ * between two integers rounded with the rule `ties` (see `RoundingTies`).
+ *
+ * `Math.round` rounds a tie toward `+∞` (`Math.round(-2.5)` is `-2`), and
+ * it is exact at every magnitude. The other rules are built from it: the
+ * rule applied to `|x|` (or to `−x`) and the sign put back. `to-even` has no
+ * such form and calls the runtime (`_SYS.roundToEven`). `x` is spliced more
+ * than once: the caller binds an operand that is not a simple name.
+ */
+function jsRoundToInteger(x: string, ties: RoundingTies): string {
+  switch (ties) {
+    case 'away-from-zero':
+      return `(Math.sign(${x}) * Math.round(Math.abs(${x})))`;
+    case 'toward-zero':
+      return `(Math.sign(${x}) * -Math.round(-Math.abs(${x})))`;
+    case 'toward-positive-infinity':
+      return `Math.round(${x})`;
+    case 'toward-negative-infinity':
+      return `(-Math.round(-${x}))`;
+    case 'to-even':
+      return `_SYS.roundToEven(${x})`;
+  }
 }
 
 /**
@@ -6984,15 +7010,16 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     return `_SYS.randomSample(${domain}, ${compileRealOperand(args[1], compile)})`;
   },
   Round: (args, compile, target) => {
-    // The interpreter rounds half away from zero (Round(-2.5) = -3); JS
-    // `Math.round` rounds half toward +∞ (Round(-2.5) = -2). Reconstruct
-    // half-away as `sign(x)·round(|x|)`.
+    // A value halfway between two integers is rounded with the rule of
+    // `ce.roundingTies` at compile time, as the interpreter does
+    // (`jsRoundToInteger()`).
+    const ties = args[0].engine.roundingTies;
     if (args.length < 2) {
       if (BaseCompiler.isIntegerValued(args[0]))
         return identityPassthrough(args[0], compile, target);
       return BaseCompiler.inlineExpression(
         target,
-        '(Math.sign(${x}) * Math.round(Math.abs(${x})))',
+        jsRoundToInteger('${x}', ties),
         compile(args[0])
       );
     }
@@ -7003,7 +7030,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     return (
       `(() => { const ${fv} = Math.pow(10, ${compile(args[1])}); ` +
       `const ${xv} = ${compile(args[0])} * ${fv}; ` +
-      `return (Math.sign(${xv}) * Math.round(Math.abs(${xv}))) / ${fv}; })()`
+      `return ${jsRoundToInteger(xv, ties)} / ${fv}; })()`
     );
   },
   Square: (args, compile, target) => {

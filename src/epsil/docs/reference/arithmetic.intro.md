@@ -184,7 +184,8 @@ evaluation as well as for `N`.
 ## Rounding and remainders
 
 `floor` rounds down, `ceil` rounds up, `truncate` rounds toward zero, and
-`round` rounds to the nearest integer, with a tie rounded away from zero:
+`round` rounds to the nearest integer, with a tie rounded away from zero (a
+host can choose another rule with the engine setting `roundingTies`):
 
 ```epsil
 [floor(-2.5), ceil(-2.5), truncate(-2.5), round(-2.5)]

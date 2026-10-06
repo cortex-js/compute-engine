@@ -1,4 +1,4 @@
-import type { Expression } from '../global-types.js';
+import type { Expression, RoundingTies } from '../global-types.js';
 import { entrySource } from './function-purity.js';
 import { isCallerMapped } from './cse.js';
 import { withVarsValuesHidden } from './vars-inputs.js';
@@ -6670,26 +6670,22 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   Radians: 'radians',
   Round: (args, compile, target) => {
-    // GLSL/WGSL `round()` rounds half to even (implementation-defined ties);
-    // the interpreter rounds half away from zero (Round(-2.5) = -3).
-    // Reconstruct half-away as `sign(x)·floor(|x| + 0.5)`.
-    //
-    // A SCALAR operand goes through the `_gpu_round` preamble helper, which
-    // holds that expression and so writes the operand once. A `vecN` operand
-    // keeps the expression inline: the helper is declared over `float`/`f32`
-    // and the operand-shape gate declines a vector handed to a scalar-only
-    // helper, while every piece of the inline form (`sign`, `floor`, `abs`,
-    // `*`, `+`) is componentwise and valid on a vector. The inline form
-    // splices its operand TWICE, so it goes through `gpuOperandOnce`: an
-    // impure (Random-family) operand is bound to a hoisted temporary instead
-    // of re-drawn, a pure one compiles directly (byte-identical).
+    // A value halfway between two integers is rounded with the rule of
+    // `ce.roundingTies` at compile time, as the interpreter does
+    // (`gpuRoundToInteger()`). A SCALAR operand goes through a preamble
+    // helper, which writes the operand once. A `vecN` operand uses an inline
+    // form that is componentwise; it splices its operand more than once, so
+    // it goes through `gpuOperandOnce`: an impure (Random-family) operand is
+    // bound to a hoisted temporary instead of re-drawn, a pure one compiles
+    // directly.
     const isScalar = gpuOperandShape(args[0]) === 'scalar';
-    const halfAway = (c: string): string =>
-      isScalar ? `_gpu_round(${c})` : `(sign(${c}) * floor(abs(${c}) + 0.5))`;
+    const ties = args[0].engine.roundingTies;
+    const roundTie = (c: string): string =>
+      gpuRoundToInteger(c, ties, isScalar, target.language === 'wgsl');
     if (args.length < 2) {
       if (BaseCompiler.isIntegerValued(args[0]))
         return gpuIdentityPassthrough(args[0], compile, target);
-      return halfAway(
+      return roundTie(
         isScalar
           ? compile(args[0])
           : gpuOperandOnce('Round', args[0], compile, target)
@@ -6730,13 +6726,14 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     if (n >= 0 && BaseCompiler.isIntegerValued(args[0]))
       return gpuIdentityPassthrough(args[0], compile, target);
     const factor = formatFloat(Math.pow(10, n), target.language);
-    // The SCALED operand is what the inline `halfAway` splices twice — bind
-    // the operand itself once, then build the scaled string from it. The
-    // helper form writes it once, so a scalar operand needs no binding.
+    // The SCALED operand is what the inline vector form splices more than
+    // once — bind the operand itself once, then build the scaled string from
+    // it. The helper form writes it once, so a scalar operand needs no
+    // binding.
     const c0 = isScalar
       ? compile(args[0])
       : gpuOperandOnce('Round', args[0], compile, target);
-    return `(${halfAway(`(${c0} * ${factor})`)} / ${factor})`;
+    return `(${roundTie(`(${c0} * ${factor})`)} / ${factor})`;
   },
   Sign: 'sign',
   Sin: (args, compile) => {
@@ -6849,6 +6846,17 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   Remainder: ([a, b], compile, target) => {
     if (a === null || b === null)
       throw new Error('Could not compile `Remainder`: missing argument');
+    // The interpreter rounds the quotient with a tie toward `+∞`
+    // (JavaScript `Math.round`: `Remainder(5, 2)` is `-1`), whatever the
+    // tie rule of `Round`. The shader `round()` rounds a tie to even (WGSL)
+    // or as the implementation chooses (GLSL), so it is not used.
+    const remainderQuotient = (q: string): string =>
+      gpuRoundToInteger(
+        q,
+        'toward-positive-infinity',
+        gpuOperandShape(a) === 'scalar' && gpuOperandShape(b) === 'scalar',
+        target.language === 'wgsl'
+      );
     // An IMPURE operand (the Random family) must be evaluated exactly once:
     // both operands are spliced twice, and `_gpu_rnd_draw` advances a runtime
     // counter, so a repeated draw returns a different value AND shifts every
@@ -6875,13 +6883,13 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
         `${decl(ta)} = ${compile(a)};`,
         `${decl(tb)} = ${compile(b)};`
       );
-      return `(${ta} - ${tb} * round(${ta} / ${tb}))`;
+      return `(${ta} - ${tb} * ${remainderQuotient(`${ta} / ${tb}`)})`;
     }
     // `compile()` emits sub-expressions without outer parentheses, and
     // `*`/`/` bind tighter than `+` — wrap before splicing.
     const ca = `(${compile(a)})`;
     const cb = `(${compile(b)})`;
-    return `(${ca} - ${cb} * round(${ca} / ${cb}))`;
+    return `(${ca} - ${cb} * ${remainderQuotient(`${ca} / ${cb}`)})`;
   },
 
   // Reciprocal trigonometric functions (no GPU built-ins)
@@ -14454,23 +14462,112 @@ fn _gpu_tanpi(u: f32) -> f32 {
 `;
 
 /**
- * Round half AWAY FROM ZERO (GLSL syntax) — the rule the interpreter's `Round`
- * follows (`Round(-2.5)` is -3, `Round(-0.5)` is -1, `Round(2.5)` is 3).
+ * The shader code that rounds `c` to an integer, with a value halfway between
+ * two integers rounded with the rule `ties` (see `RoundingTies`).
  *
- * Neither language's own `round()` can be used: both round a half to the EVEN
- * neighbour. The helper exists so that the operand is written once; the
- * expression it holds was previously inlined with the operand spliced twice.
+ * Neither language's own `round()` can be used for a rule other than
+ * `to-even`: both round a tie to the EVEN neighbour (GLSL leaves the choice
+ * to the implementation; its `roundEven()` is defined to round to even).
+ *
+ * A SCALAR operand (`isScalar`) goes through a preamble helper
+ * (`GPU_ROUND_PREAMBLE_GLSL`), which writes the operand once. A `vecN`
+ * operand uses an inline form made of componentwise functions only. In that
+ * form, `ceil(0.5 + 0.5 * sign(d - 0.5))` is `1` when `d ≥ 0.5` and `0`
+ * otherwise, and `floor(…)` of the same value is `1` only when `d > 0.5`.
+ *
+ * The forms do not add `0.5` to the operand: in `f32`, `x + 0.5` is rounded
+ * when `|x| ≥ 2²³`, and `floor(8388609.0 + 0.5)` is `8388610.0`. The
+ * distance `d` to the floor of the magnitude is exact.
+ */
+function gpuRoundToInteger(
+  c: string,
+  ties: RoundingTies,
+  isScalar: boolean,
+  isWGSL: boolean
+): string {
+  if (ties === 'to-even') return isWGSL ? `round(${c})` : `roundEven(${c})`;
+  if (isScalar) {
+    const helper = {
+      'away-from-zero': '_gpu_round',
+      'toward-zero': '_gpu_round_tz',
+      'toward-positive-infinity': '_gpu_round_up',
+      'toward-negative-infinity': '_gpu_round_down',
+    }[ties];
+    return `${helper}(${c})`;
+  }
+  const atLeastHalf = (d: string) => `ceil(0.5 + 0.5 * sign(${d} - 0.5))`;
+  const overHalf = (d: string) => `floor(0.5 + 0.5 * sign(${d} - 0.5))`;
+  // The operand can be an infix expression (`v + w`): it is put in
+  // parentheses where it is an operand of `-`.
+  const x = /^[\w.]+$/.test(c) ? c : `(${c})`;
+  const m = `floor(abs(${c}))`;
+  switch (ties) {
+    case 'away-from-zero':
+      return `(sign(${c}) * (${m} + ${atLeastHalf(`abs(${c}) - ${m}`)}))`;
+    case 'toward-zero':
+      return `(sign(${c}) * (${m} + ${overHalf(`abs(${c}) - ${m}`)}))`;
+    case 'toward-positive-infinity':
+      return `(floor(${c}) + ${atLeastHalf(`${x} - floor(${c})`)})`;
+    case 'toward-negative-infinity':
+      return `(ceil(${c}) - ${atLeastHalf(`ceil(${c}) - ${x}`)})`;
+  }
+}
+
+/**
+ * The rounding helpers of `Round` for a scalar operand (GLSL syntax), one
+ * for each tie rule other than `to-even` (see `gpuRoundToInteger()`):
+ * `_gpu_round` rounds a tie away from zero (`Round(-2.5)` is -3,
+ * `Round(2.5)` is 3), `_gpu_round_tz` toward zero, `_gpu_round_up` toward
+ * `+∞` and `_gpu_round_down` toward `−∞`. `gpuLibrarySubset()` keeps only
+ * the helpers that a compilation calls.
+ *
+ * `step(0.5, d)` is `1` when `d ≥ 0.5`, and `1 - step(d, 0.5)` is `1` when
+ * `d > 0.5`; it is added to `m` as one term, because `m + 1.0` is rounded
+ * when `m ≥ 2²⁴`. The distance `d` to the floor (or the ceiling) is exact for a
+ * magnitude, and for the other two helpers it can only be rounded UP to
+ * `0.5`, from a value that must round the same way.
  */
 const GPU_ROUND_PREAMBLE_GLSL = `
 float _gpu_round(float x) {
-  return sign(x) * floor(abs(x) + 0.5);
+  float a = abs(x);
+  float m = floor(a);
+  return sign(x) * (m + step(0.5, a - m));
+}
+float _gpu_round_tz(float x) {
+  float a = abs(x);
+  float m = floor(a);
+  return sign(x) * (m + (1.0 - step(a - m, 0.5)));
+}
+float _gpu_round_up(float x) {
+  float m = floor(x);
+  return m + step(0.5, x - m);
+}
+float _gpu_round_down(float x) {
+  float m = ceil(x);
+  return m - step(0.5, m - x);
 }
 `;
 
-/** Round half away from zero (WGSL syntax). See `GPU_ROUND_PREAMBLE_GLSL`. */
+/** The rounding helpers of `Round` (WGSL syntax). See
+ * `GPU_ROUND_PREAMBLE_GLSL`. */
 const GPU_ROUND_PREAMBLE_WGSL = `
 fn _gpu_round(x: f32) -> f32 {
-  return sign(x) * floor(abs(x) + 0.5);
+  let a = abs(x);
+  let m = floor(a);
+  return sign(x) * (m + step(0.5, a - m));
+}
+fn _gpu_round_tz(x: f32) -> f32 {
+  let a = abs(x);
+  let m = floor(a);
+  return sign(x) * (m + (1.0 - step(a - m, 0.5)));
+}
+fn _gpu_round_up(x: f32) -> f32 {
+  let m = floor(x);
+  return m + step(0.5, x - m);
+}
+fn _gpu_round_down(x: f32) -> f32 {
+  let m = ceil(x);
+  return m - step(0.5, m - x);
 }
 `;
 

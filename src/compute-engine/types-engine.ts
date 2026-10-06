@@ -54,6 +54,7 @@ import type {
 } from './types-serialization.js';
 import type {
   AngularUnit,
+  RoundingTies,
   SymbolDefinitionInput,
   OperatorDefinition,
   ValueDefinition,
@@ -1470,6 +1471,10 @@ export interface IComputeEngine {
   _substream(tag: number): RandomSubstream;
 
   angularUnit: AngularUnit;
+
+  /** The rule that `Round` uses for a value halfway between two integers.
+   *  See {@link RoundingTies}. Default: `'away-from-zero'`. */
+  roundingTies: RoundingTies;
 
   costFunction: (expr: Expression) => number;
 
