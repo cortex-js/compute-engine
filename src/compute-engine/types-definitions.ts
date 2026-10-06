@@ -1475,8 +1475,9 @@ export type AngularUnit = 'rad' | 'deg' | 'grad' | 'turn';
  * | `toward-positive-infinity` | `3` | `4` | `-2` | JavaScript `Math.round` |
  * | `toward-negative-infinity` | `2` | `3` | `-3` | |
  *
- * The rule also applies to the form `Round(x, n)`, which rounds to `n`
- * decimal places: the tie is at the half of the last kept digit.
+ * The rule also applies to the step form `Round(x, step)`, which rounds to
+ * the nearest multiple of the step: the tie is at the half of the step
+ * (with the step `1/100`, `Round(0.125, 1/100)` is a tie).
  *
  * To change the rule used by the Compute Engine, use:
  *

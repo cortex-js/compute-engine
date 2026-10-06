@@ -735,6 +735,8 @@ describe('multi-splice × impure operand — the 2026-08-02 audit round', () => 
 
   // `Round` writes its operand ONCE, inside the `_gpu_round` helper call, so
   // an impure operand needs no hoisted temporary to be drawn a single time.
+  // The step form writes the operand twice (in the quotient and in the
+  // overflow fix), so an impure operand is bound to a hoisted temporary.
   test('GLSL: Round draws an impure operand once (both forms)', () => {
     expect(gpuDraws(['Round', ['Random']])).toBe(1);
     expect(gpuDraws(['Round', ['Random'], 2])).toBe(1);
@@ -800,7 +802,7 @@ describe('multi-splice × impure operand — the 2026-08-02 audit round', () => 
   test('GPU: pure operands keep the direct emission (byte-identical pins)', () => {
     expect(gpuCode(['Round', 'x'])).toBe('_gpu_round(x)');
     expect(gpuCode(['Round', 'x', 2])).toBe(
-      '(_gpu_round((x * 100.0)) / 100.0)'
+      '_gpu_step_fix(_gpu_round(_gpu_half_step_quotient(x, 2.0)) * 2.0, x, 2.0)'
     );
     expect(gpuCode(['Root', 'x', 3])).toBe(
       '(sign(x) * pow(abs(x), 0.33333334))'

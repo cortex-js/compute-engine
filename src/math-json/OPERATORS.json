@@ -1105,7 +1105,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Rounds a number up to the next largest integer",
+      "description": "Rounds a number up to the next largest integer, or with a step to the least multiple of the step that is at least the number.",
       "examples": [
         "[Ceil(2.3), Ceil(-2.7), Ceil(226, 10)]"
       ]
@@ -3173,7 +3173,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Rounds a number down to the nearest integer.",
+      "description": "Rounds a number down to the nearest integer, or with a step to the greatest multiple of the step that is at most the number.",
       "wikidata": "Q56860783",
       "examples": [
         "[Floor(2.7), Floor(-2.3), Floor(226, 10)]"
@@ -7415,15 +7415,15 @@
       "name": "Round",
       "category": "Arithmetic",
       "arity": "optional",
-      "signature": "(real | signed_infinity, integer?) -> real | signed_infinity",
+      "signature": "(x: real | signed_infinity, step: real?) -> real | signed_infinity",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Rounds a number to the nearest integer, or (with a precision argument) to `n` decimal places.",
+      "description": "Rounds a number to the nearest integer, or with a step to the nearest multiple of the step.",
       "examples": [
-        "[Round(2.5), Round(-2.5), Round(3.14159, 2)]"
+        "[Round(2.5), Round(-2.5), Round(226, 10), Round(3.14159, 1/100)]"
       ]
     },
     {
@@ -8894,7 +8894,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Rounds a number towards zero (removes the fractional part)",
+      "description": "Rounds a number towards zero (removes the fractional part), or with a step to the multiple of the step nearest to the number in the direction of zero.",
       "examples": [
         "[Truncate(2.7), Truncate(-2.7), Truncate(-226, 10)]"
       ]

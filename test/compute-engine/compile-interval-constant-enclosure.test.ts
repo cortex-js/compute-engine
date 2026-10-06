@@ -401,13 +401,11 @@ describe('interval-js: repeated constants are bound once in the preamble', () =>
   });
 });
 
-describe('INTERVAL-JS — Round(x, n) scales through an exact integer power', () => {
+describe('INTERVAL-JS — Round(x, step) scales through an exact integer', () => {
   const ce = new ComputeEngine();
-  test('a negative precision divides by 10^-n and multiplies back', () => {
-    // `10^-2 = 0.01` has no double; rounding to hundreds goes through the
-    // exact `100` instead, so the scale is a true point and an exact
-    // multiple of a hundred stays an exact point.
-    const r = compile(ce.box(['Round', 'x', -2]), { to: 'interval-js' });
+  test('an integer step divides by the step and multiplies back', () => {
+    // A multiple of a hundred stays an exact point.
+    const r = compile(ce.box(['Round', 'x', 100]), { to: 'interval-js' });
     expect(r.code).toBe('_IA.mul(_IA.round(_IA.div(_.x, _k1)), _k1)');
     expect(r.run!({ x: { lo: 1234.5, hi: 1234.5 } })).toEqual({
       kind: 'interval',
@@ -418,8 +416,13 @@ describe('INTERVAL-JS — Round(x, n) scales through an exact integer power', ()
       value: { lo: 1300, hi: 1300 },
     });
   });
-  test('a positive precision multiplies by the exact 10^n first', () => {
-    const r = compile(ce.box(['Round', 'x', 2]), { to: 'interval-js' });
+  test('a step 1/m multiplies by the exact integer m first', () => {
+    // `1/100` has no double: dividing by an enclosure of it would widen the
+    // tie `0.125/(1/100) = 12.5` across its jump. `0.125·100` is the exact
+    // point `12.5`.
+    const r = compile(ce.box(['Round', 'x', ['Rational', 1, 100]]), {
+      to: 'interval-js',
+    });
     expect(r.code).toBe('_IA.div(_IA.round(_IA.mul(_.x, _k1)), _k1)');
     const v = r.run!({ x: { lo: 0.125, hi: 0.125 } }) as {
       value: { lo: number; hi: number };
@@ -428,5 +431,17 @@ describe('INTERVAL-JS — Round(x, n) scales through an exact integer power', ()
     expect(v.value.lo).toBeLessThanOrEqual(0.13);
     expect(v.value.hi).toBeGreaterThanOrEqual(0.13);
     expect(v.value.hi - v.value.lo).toBeLessThan(1e-15);
+  });
+  test('another step divides by an enclosure of its magnitude', () => {
+    const r = compile(ce.box(['Round', 'x', ['Rational', 2, 3]]), {
+      to: 'interval-js',
+    });
+    expect(r.code).toContain('_IA.abs(');
+    const v = r.run!({ x: { lo: 1.1, hi: 1.1 } }) as {
+      value: { lo: number; hi: number };
+    };
+    // 1.1/(2/3) = 1.65, so the nearest multiple of 2/3 is 4/3.
+    expect(v.value.lo).toBeLessThanOrEqual(4 / 3);
+    expect(v.value.hi).toBeGreaterThanOrEqual(4 / 3);
   });
 });

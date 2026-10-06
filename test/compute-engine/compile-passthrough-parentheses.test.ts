@@ -69,7 +69,6 @@ describe('IDENTITY PASSTHROUGH PARENTHESES — GPU (GLSL and WGSL)', () => {
     ['Ceil of an integer', 'Ceil', 'n'],
     ['Truncate of an integer', 'Truncate', 'n'],
     ['Round of an integer', 'Round', 'n'],
-    ['Round of an integer to n places', 'Round', 'n', [2]],
     ['Abs of a non-negative real', 'Abs', 'u'],
     ['Real of a real', 'Real', 'x'],
     ['Conjugate of a real', 'Conjugate', 'x'],

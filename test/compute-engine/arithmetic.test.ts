@@ -3075,20 +3075,26 @@ describe('nPr / nCr (Desmos combinatorics notation)', () => {
   });
 });
 
-describe('Round with an optional precision argument (Desmos/spreadsheet)', () => {
+describe('Round with an optional step argument', () => {
+  // The second argument is a step: `Round(x, step)` is the multiple of the
+  // step nearest to `x`. To round to `n` decimal places, the step is
+  // `10^-n` (it was a number of decimal places before
+  // cortex-js/compute-engine#417).
   const n = (s: string) => ce.parse(s).N().valueOf();
-  it('rounds to the nearest integer without the precision arg', () => {
+  it('rounds to the nearest integer without the step', () => {
     expect(n('\\operatorname{round}(2.567)')).toBe(3);
     expect(n('\\operatorname{round}(-2.5)')).toBe(-3); // half away from zero
   });
-  it('rounds to n decimal places with the precision arg', () => {
-    expect(n('\\operatorname{round}(2.567, 2)')).toBe(2.57);
-    expect(n('\\operatorname{round}(-2.567, 2)')).toBe(-2.57);
-    expect(n('\\operatorname{round}(3.14159, 4)')).toBe(3.1416);
-    expect(n('\\operatorname{round}(1234.5, -2)')).toBe(1200);
+  it('rounds to the nearest multiple of the step', () => {
+    expect(n('\\operatorname{round}(2.567, 0.01)')).toBe(2.57);
+    expect(n('\\operatorname{round}(-2.567, 10^{-2})')).toBe(-2.57);
+    expect(n('\\operatorname{round}(3.14159, 10^{-4})')).toBe(3.1416);
+    expect(n('\\operatorname{round}(1234.5, 100)')).toBe(1200);
+    expect(n('\\operatorname{round}(226, 10)')).toBe(230);
+    expect(n('\\operatorname{round}(3.14159, 2)')).toBe(4);
   });
   it('does not manufacture an Error operand for the 2-arg form', () => {
-    expect(ce.parse('\\operatorname{round}(2.567, 2)').isValid).toBe(true);
+    expect(ce.parse('\\operatorname{round}(2.567, 0.01)').isValid).toBe(true);
   });
 });
 

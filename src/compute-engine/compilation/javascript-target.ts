@@ -3055,21 +3055,24 @@ function spreadIfSequence(
 }
 
 /**
- * The JavaScript code of the step form `Floor(x, step)`, `Ceil(x, step)` or
- * `Truncate(x, step)`: a call of the runtime helper (`_SYS.floorStep`,
- * `_SYS.ceilStep`, `_SYS.truncStep`), which takes the quotient `x/|step|`
- * to the nearest integer when it is within its rounding error of it, as the
- * interpreter's decimal division does (`Floor(0.3, 0.1)` is `0.3`, not
- * `0.2`). The operand and the step are evaluated once each, in the order
- * written, also for a zero step, whose result is `NaN`.
+ * The JavaScript code of the step form `Floor(x, step)`, `Ceil(x, step)`,
+ * `Truncate(x, step)` or `Round(x, step)`: a call of the runtime helper
+ * (`_SYS.floorStep`, `_SYS.ceilStep`, `_SYS.truncStep`, `_SYS.roundStep`),
+ * which takes the quotient `x/|step|` to a jump when the interpreter's
+ * decimal division finds it there (`Floor(0.3, 0.1)` is `0.3`, not `0.2`).
+ * `Round` also passes its tie rule (`ce.roundingTies` at compile time). The
+ * operand and the step are evaluated once each, in the order written, also
+ * for a zero step, whose result is `NaN`.
  */
 function jsRoundToStep(
-  helper: 'floorStep' | 'ceilStep' | 'truncStep',
+  helper: 'floorStep' | 'ceilStep' | 'truncStep' | 'roundStep',
   x: Expression,
   step: Expression,
-  compile: (expr: Expression) => string
+  compile: (expr: Expression) => string,
+  ties?: RoundingTies
 ): string {
-  return `_SYS.${helper}(${compile(x)}, ${compile(step)})`;
+  const tieArg = ties === undefined ? '' : `, ${JSON.stringify(ties)}`;
+  return `_SYS.${helper}(${compile(x)}, ${compile(step)}${tieArg})`;
 }
 
 /**
@@ -7045,15 +7048,10 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         compile(args[0])
       );
     }
-    // Round(x, n) = Round(x·10ⁿ)/10ⁿ — round to `n` decimal places
-    // (Desmos/spreadsheet form). Bind both operands once.
-    const xv = BaseCompiler.tempVar(target);
-    const fv = BaseCompiler.tempVar(target);
-    return (
-      `(() => { const ${fv} = Math.pow(10, ${compile(args[1])}); ` +
-      `const ${xv} = ${compile(args[0])} * ${fv}; ` +
-      `return ${jsRoundToInteger(xv, ties)} / ${fv}; })()`
-    );
+    // `Round(x, step)`: the multiple of the step nearest to `x`, computed
+    // by the runtime (`_SYS.roundStep`), which finds a tie of the quotient
+    // `x/|step|` as the interpreter's decimal division does.
+    return jsRoundToStep('roundStep', args[0], args[1]!, compile, ties);
   },
   Square: (args, compile, target) => {
     const arg = args[0];

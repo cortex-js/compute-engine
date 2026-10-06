@@ -128,18 +128,17 @@ describe('COMPILE deterministic naming', () => {
   });
 
   it('does not capture a lambda parameter named `_tv1`', () => {
-    // `Round(x, n)` binds two temporaries; the parameter is emitted BARE, so a
-    // generated name that collided with it would shadow the argument.
-    const expr = ce.box(['Function', ['Round', '_tv1', 2], '_tv1']);
+    // `Round` of a compound operand binds the operand to a temporary; the
+    // parameter is emitted BARE, so a generated name that collided with it
+    // would shadow the argument.
+    const expr = ce.box(['Function', ['Round', ['Add', '_tv1', 0.25]], '_tv1']);
     const result = compile(expr);
 
     expect(result.code).not.toMatch(/const _tv1\b/);
     expect((result.run as (x: number) => number)(3.14159)).toBe(
-      ce.box(['Round', 3.14159, 2]).N().re
+      ce.box(['Round', 3.39159]).N().re
     );
-    expect(result.code).toMatchInlineSnapshot(
-      `(_tv1) => (() => { const _tv3 = Math.pow(10, 2); const _tv2 = _tv1 * _tv3; return (Math.sign(_tv2) * Math.round(Math.abs(_tv2))) / _tv3; })()`
-    );
+    expect(result.code).toMatch(/const _tv2 = _tv1 \+ 0\.25/);
   });
 
   it('does not capture a loop index named `_tv1`', () => {

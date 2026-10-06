@@ -2077,7 +2077,8 @@ def _ce_pow(_x, _y, _f=None):
  * `np.ceil` or `np.trunc`), with or without a step.
  *
  * The step form `Floor(x, step)` is `round(q) * k` with `k = |step|` and
- * `q = x / k`, where `q` is taken to the nearest integer when it is within
+ * `q = x / k`, where `q` is taken to the nearest integer (the nearest
+ * half-integer for `Round`, whose `round` is a function) when it is within
  * 4 ulps of it: the double of a decimal step is not the decimal, and
  * `0.3 / 0.1` is `2.9999999999999996`, while the interpreter, which divides
  * the decimals, finds `3` (`_SYS.floorStep` in the JavaScript runtime does
@@ -2092,20 +2093,48 @@ def _ce_pow(_x, _y, _f=None):
  * list is divided elementwise.
  */
 function pythonRoundToStep(
-  round: string,
+  name: string,
+  round: string | ((q: string) => string),
   args: ReadonlyArray<Expression | null>,
-  compile: (expr: Expression) => string
+  compile: (expr: Expression) => string,
+  unit: 1 | 0.5 = 1
 ): string {
   const [x, step] = args;
+  const apply = (q: string) =>
+    typeof round === 'string' ? `${round}(${q})` : round(q);
   if (x === null || x === undefined)
-    throw new Error(`Could not compile \`${round}\`: no argument`);
-  if (step === null || step === undefined) return `${round}(${compile(x)})`;
+    throw new Error(`Could not compile \`${name}\`: no argument`);
+  if (step === null || step === undefined) return apply(compile(x));
+  // `unit` is the distance between two jumps of the quotient: 1 for
+  // `Floor`, `Ceil` and `Truncate`, 0.5 for `Round`. A quotient within 4
+  // ulps of a jump is taken to be at the jump when the quotient of the
+  // shortest decimals of `x` and the step is exactly at it, as the
+  // interpreter reads a float (`fractions.Fraction(repr(x))` is that
+  // decimal, exactly); the test runs only when some element is near a jump.
+  // The tolerance is relative to the quotient only, so a non-zero quotient
+  // is never taken to be `0`. A non-zero quotient that underflows to `0`
+  // (with a finite step) keeps the sign of `x` as the smallest double
+  // (`Ceil(1e-300, 1e300)` is `1e300`), and when the quotient overflows, `x`
+  // is the nearest double to the multiple (`_SYS.floorStep` in the
+  // JavaScript runtime does the same).
+  const near = unit === 1 ? '_ce_q' : '(_ce_q * 2)';
+  const jump = unit === 1 ? 'np.round(_ce_q)' : '(np.round(_ce_q * 2) / 2)';
+  const fraction = "__import__('fractions').Fraction";
+  const exact =
+    `np.vectorize(lambda _ce_a, _ce_b, _ce_r: ` +
+    `${fraction}(repr(float(_ce_a))) == ` +
+    `${fraction}(float(_ce_r)) * ${fraction}(repr(float(_ce_b))), ` +
+    `otypes=[bool])(_ce_x, _ce_k, ${jump})`;
   const snapped =
-    `(lambda _ce_q: np.where(np.abs(_ce_q - np.round(_ce_q)) <= ` +
-    `8.881784197001252e-16 * np.maximum(1, np.abs(_ce_q)), ` +
-    `np.round(_ce_q), _ce_q))(_ce_x / _ce_k)`;
+    `(lambda _ce_q: (lambda _ce_n: np.where(_ce_n & (${exact} ` +
+    `if np.any(_ce_n) else False), ${jump}, _ce_q))` +
+    `(np.isfinite(_ce_q) & (np.abs(${near} - np.round(${near})) <= ` +
+    `8.881784197001252e-16 * np.abs(${near}))))` +
+    `(np.where((_ce_x / _ce_k == 0) & (_ce_x != 0) & np.isfinite(_ce_k), ` +
+    `np.sign(_ce_x) * 5e-324, _ce_x / _ce_k))`;
   return (
-    `(lambda _ce_x, _ce_k: ${round}(${snapped}) * _ce_k)` +
+    `(lambda _ce_x, _ce_k: np.where(np.isinf(_ce_x / _ce_k) & ` +
+    `np.isfinite(_ce_x) & (_ce_k != 0), _ce_x, ${apply(snapped)} * _ce_k))` +
     `(np.asarray(${compile(x)}, dtype=float), np.abs(${compile(step)}))`
   );
 }
@@ -3774,8 +3803,9 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
       compile,
       target
     ),
-  Floor: (args, compile) => pythonRoundToStep('np.floor', args, compile),
-  Ceil: (args, compile) => pythonRoundToStep('np.ceil', args, compile),
+  Floor: (args, compile) =>
+    pythonRoundToStep('Floor', 'np.floor', args, compile),
+  Ceil: (args, compile) => pythonRoundToStep('Ceil', 'np.ceil', args, compile),
   // A value halfway between two integers is rounded with the rule of
   // `ce.roundingTies` at compile time, as the interpreter does
   // (`pythonRoundToInteger()`).
@@ -3783,34 +3813,20 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     const x = args[0];
     if (x == null) throw new Error('Could not compile `Round`: no argument');
     const ties = x.engine.roundingTies;
-    const roundTie = (c: string): string => pythonRoundToInteger(c, ties);
-    if (args.length < 2) return roundTie(compile(x));
-    // The SECOND operand is a PRECISION: `Round(x, n)` rounds to `n` decimal
-    // places (the signature is `(number, integer?)`), i.e. `Round(x·10ⁿ)/10ⁿ`
-    // — what the interpreter, the JavaScript target and the interval target
-    // all compute — and a negative `n` rounds to tens/hundreds/…
-    // (`Round(1234.5678, -2)` is 1200).
-    //
-    // Unlike the GPU targets, Python needs neither a compile-time-constant
-    // guard nor a |n| range guard: `10 ** n` is an exact arbitrary-precision
-    // integer for n ≥ 0 and a correctly-rounded float for n < 0 — never the
-    // shader's `exp2(n·log2(10))` approximation, which moves the very tie
-    // boundary the rounding depends on. A RUNTIME `n` therefore lowers
-    // soundly.
-    const n = tryGetConstant(args[1]);
-    if (n !== undefined && Number.isInteger(n)) {
-      const factor = `10 ** ${n}`;
-      const scaled = `((${compile(x)}) * ${factor})`;
-      return `(${roundTie(scaled)} / ${factor})`;
-    }
-    // A runtime precision: bind the factor and the scaled value once each, so
-    // neither operand's code is evaluated twice.
-    return (
-      `(lambda _p: (lambda _t: ${roundTie('_t')} / _p)` +
-      `((${compile(x)}) * _p))(10 ** (${compile(args[1])}))`
+    if (args.length < 2) return pythonRoundToInteger(compile(x), ties);
+    // `Round(x, step)`: the multiple of the step nearest to `x`. The
+    // quotient is snapped to the nearest HALF-integer, where `Round` jumps,
+    // so that a tie is found, and the tie is rounded with the rule `ties`.
+    return pythonRoundToStep(
+      'Round',
+      (q) => pythonRoundToInteger(q, ties),
+      args,
+      compile,
+      0.5
     );
   },
-  Truncate: (args, compile) => pythonRoundToStep('np.trunc', args, compile),
+  Truncate: (args, compile) =>
+    pythonRoundToStep('Truncate', 'np.trunc', args, compile),
 
   // Min/Max — REDUCTIONS: fold every operand (a collection to its own extremum)
   // to a single value. `np.maximum`/`np.minimum` are element-wise and strictly

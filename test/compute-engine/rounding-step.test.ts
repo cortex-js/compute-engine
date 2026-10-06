@@ -241,16 +241,29 @@ describe('compiled code', () => {
 
   test('GLSL and WGSL', () => {
     const scalar = new GLSLTarget().compile(ce.box(['Floor', 'x', 0.1]), {});
-    expect(scalar.code).toBe('(floor(_gpu_step_quotient(x, 0.1)) * 0.1)');
+    expect(scalar.code).toBe(
+      '_gpu_step_fix(floor(_gpu_step_quotient(x, 0.1)) * 0.1, x, 0.1)'
+    );
     expect(scalar.preamble).toContain('float _gpu_step_quotient(float x');
+    expect(scalar.preamble).toContain('float _gpu_step_fix(float m');
     const engine = new ComputeEngine();
     engine.declare('v', 'vector<3>');
-    expect(
-      new WGSLTarget().compile(engine.box(['Ceil', 'v', 0.5]), {}).code
-    ).toBe(
-      '(ceil(mix(((v) / 0.5), round(((v) / 0.5)), ' +
-        'step(abs(((v) / 0.5) - round(((v) / 0.5))), ' +
-        '4.8e-7 * (abs(((v) / 0.5)) + 1.0)))) * 0.5)'
+    const vector = new WGSLTarget().compile(
+      engine.box(['Ceil', 'v', 0.5]),
+      {}
+    ).code;
+    // The vector form is componentwise, with its quotients bound to
+    // temporaries. Every choice is a `select` with vector operands on both
+    // sides of each comparison (WGSL compares no vector with a scalar), so
+    // an infinite value in the branch not taken cannot make the result
+    // `NaN`. The last choice keeps `v` when the quotient overflows.
+    expect(vector).toBe(
+      'var _tv1: vec3f = (v / 0.5);\n' +
+        'var _tv2: vec3f = select(_tv1, (sign(v) * 1.17549435e-38), ' +
+        '_tv1 == vec3f(0.0));\n' +
+        'var _tv3: vec3f = select(_tv2, round(_tv2), ' +
+        'abs(_tv2 - round(_tv2)) <= 4.8e-7 * abs(_tv2));\n' +
+        'return (select((ceil(_tv3) * 0.5), v, abs(_tv1) > vec3f(3.4e38)));'
     );
     // A shader has no NaN literal.
     expect(() =>
@@ -260,12 +273,30 @@ describe('compiled code', () => {
 
   test('Python binds the operand and the step as arguments', () => {
     const python = new PythonTarget();
-    expect(python.compileLambda(ce.box(['Floor', 'x', 'a']), ['x', 'a'])).toBe(
-      'lambda x, a: (lambda _ce_x, _ce_k: np.floor((lambda _ce_q: ' +
-        'np.where(np.abs(_ce_q - np.round(_ce_q)) <= 8.881784197001252e-16 ' +
-        '* np.maximum(1, np.abs(_ce_q)), np.round(_ce_q), _ce_q))' +
-        '(_ce_x / _ce_k)) * _ce_k)(np.asarray(x, dtype=float), np.abs(a))'
-    );
+    const code = python.compileLambda(ce.box(['Floor', 'x', 'a']), ['x', 'a']);
+    expect(code.startsWith('lambda x, a: (lambda _ce_x, _ce_k: ')).toBe(true);
+    expect(code.endsWith('(np.asarray(x, dtype=float), np.abs(a))')).toBe(true);
+  });
+
+  test('a tiny quotient is not taken to be 0, and an extreme quotient keeps its value', () => {
+    // The tolerance of the compiled quotient is relative to the quotient
+    // only. A quotient that underflows keeps the sign of the operand, and
+    // one that overflows gives the operand itself, the nearest double to
+    // the multiple.
+    for (const [h, x, a, want] of [
+      ['Ceil', 1e-20, 1, 1],
+      ['Floor', -1e-20, 1, -1],
+      ['Ceil', 1e-300, 1e300, 1e300],
+      ['Floor', -1e-300, 1e300, -1e300],
+      ['Floor', 1e200, 1e-200, 1e200],
+      ['Round', 1e-20, 1, 0],
+    ] as const) {
+      const f = compile(ce.box([h, 'x', 'a']), { fallback: false });
+      expect([h, x, a, f.run!({ x, a }) + 0]).toEqual([h, x, a, want]);
+      expect(ce.box([h, ce.number(x), ce.number(a)]).evaluate().re + 0).toBe(
+        want
+      );
+    }
   });
 });
 

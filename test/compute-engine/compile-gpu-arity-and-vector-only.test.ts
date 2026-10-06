@@ -54,58 +54,73 @@ const V3 = ['List', 1, 2, 3];
 const W3 = ['List', 4, 5, 6];
 const U3 = ['List', 7, 8, 9];
 
-/** An engine with a declared INTEGER symbol — a runtime rounding precision. */
+/** An engine with declared symbols: `n` is a runtime rounding step. */
 const cen = new ComputeEngine();
 cen.declare('n', 'integer');
 cen.declare('x', 'real');
 cen.declare('k', 'integer');
 
-/** Evaluate emitted shader source as f64 arithmetic. The four builtins the
- *  `Round` lowering uses have exact `Math` counterparts. */
+/** Evaluate emitted shader source as f64 arithmetic. The builtins the
+ *  `Round` lowering uses have exact `Math` counterparts, and the preamble
+ *  helpers are given definitions that mirror their GLSL bodies in
+ *  `gpu-target.ts` (`GPU_ROUND_PREAMBLE_GLSL`). */
 function evalShader(code: string): number {
   const js = code.replace(/\b(sign|floor|abs)\(/g, 'Math.$1(');
-  // `_gpu_round` is a preamble helper, so the evaluated source has to be
-  // given a definition for it. It mirrors the emitted GLSL body, which is
-  // `GPU_ROUND_PREAMBLE_GLSL` in `gpu-target.ts`: round half AWAY from zero,
-  // with `step(0.5, d)` written as a comparison.
+  // `_gpu_round`: round half AWAY from zero, with `step(0.5, d)` written as
+  // a comparison.
   const round = (x: number) => {
     const a = Math.abs(x);
     const m = Math.floor(a);
     return Math.sign(x) * (m + (a - m >= 0.5 ? 1 : 0));
   };
+  // `_gpu_half_step_quotient`: the quotient, taken to the nearest
+  // half-integer when it is within its rounding error of it.
+  const halfQuotient = (x: number, k: number) => {
+    const q = x / k;
+    if (q === 0 && x !== 0) return Math.sign(x) * 1.17549435e-38;
+    const r = Math.round(q * 2) * 0.5;
+    return Math.abs(q - r) <= 4.8e-7 * Math.abs(q) ? r : q;
+  };
+  // `_gpu_step_fix`: the operand itself when the quotient overflows.
+  const fix = (m: number, x: number, k: number) =>
+    Math.abs(x / k) > 3.4e38 ? x : m;
   // eslint-disable-next-line no-new-func
   return Function(
     '_gpu_round',
+    '_gpu_half_step_quotient',
+    '_gpu_step_fix',
     `"use strict"; return (${js});`
-  )(round) as number;
+  )(round, halfQuotient, fix) as number;
 }
 
-describe('GPU ARITY — `Round(x, n)` rounds to `n` decimal places', () => {
+describe('GPU ARITY — `Round(x, step)` rounds to a multiple of the step', () => {
   it('lowers the two-operand form to a value matching the interpreter', () => {
-    const code = g(['Round', 3.14159, 2]);
-    expect(code).toBe('(_gpu_round((3.14159 * 100.0)) / 100.0)');
-    // The emitted source, EVALUATED — not merely inspected. Before the fix it
-    // computed 3, where the interpreter answers 157/50.
+    const code = g(['Round', 3.14159, 0.01]);
+    expect(code).toBe(
+      '_gpu_step_fix(_gpu_round(_gpu_half_step_quotient(3.14159, 0.01)) * 0.01, 3.14159, 0.01)'
+    );
+    // The emitted source, EVALUATED — not merely inspected.
     expect(evalShader(code)).toBeCloseTo(
-      ce.box(['Round', 3.14159, 2]).N().re,
+      ce.box(['Round', 3.14159, 0.01]).N().re,
       12
     );
-    expect(evalShader(code)).not.toBe(3);
-    expect(w(['Round', 3.14159, 2])).toBe(code);
+    expect(w(['Round', 3.14159, 0.01])).toBe(code);
   });
 
-  it('matches the interpreter on the half-away-from-zero ties and on `n < 0`', () => {
-    for (const [x, n] of [
-      [-2.5, 0],
-      [2.5, 0],
-      [0.125, 2],
-      [-0.125, 2],
-      [-3.14159, 2],
-      [1234.5678, -2],
-      [12345, -3],
+  it('matches the interpreter on the half-away-from-zero ties and on large steps', () => {
+    for (const [x, step] of [
+      [-2.5, 1],
+      [2.5, 1],
+      [0.125, 0.01],
+      [-0.125, 0.01],
+      [-3.14159, 0.01],
+      [1234.5678, 100],
+      [12345, 1000],
+      [225, 10],
+      [-225, 10],
     ] as const)
-      expect(evalShader(g(['Round', x, n]))).toBeCloseTo(
-        ce.box(['Round', x, n]).N().re,
+      expect(evalShader(g(['Round', x, step]))).toBeCloseTo(
+        ce.box(['Round', x, step]).N().re,
         9
       );
   });
@@ -123,37 +138,29 @@ describe('GPU ARITY — `Round(x, n)` rounds to `n` decimal places', () => {
     expect(g(['Round', ['Multiply', 2, 'k']], cen)).toBe('(2.0 * k)');
   });
 
-  it('an integer-valued operand short-circuits only for `n >= 0`', () => {
-    // Parenthesized for the reason given above.
-    expect(g(['Round', ['Multiply', 2, 'k'], 2], cen)).toBe('(2.0 * k)');
-    expect(g(['Round', ['Multiply', 2, 'k'], -2], cen)).toContain('* 0.01');
+  it('an integer-valued operand does not short-circuit with a step', () => {
+    // The nearest multiple of 10 to an integer is not the integer.
+    expect(g(['Round', ['Multiply', 2, 'k'], 10], cen)).toContain(
+      '_gpu_half_step_quotient'
+    );
   });
 
-  it('a RUNTIME precision fails closed', () => {
-    // A shader `pow(10.0, n)` is `exp2(n·log2(10.0))`, not exactly a power of
-    // ten, so it moves the tie boundary of the rounding it is scaling for.
+  it('a RUNTIME step compiles', () => {
     for (const emit of [g, w])
-      expect(() => emit(['Round', 'x', 'n'], cen)).toThrow(
-        /^Could not compile `Round`: rounding to `n` decimal places compiles on the \w+ target only for a compile-time INTEGER precision .*$/s
+      expect(emit(['Round', 'x', 'n'], cen)).toBe(
+        '_gpu_step_fix(_gpu_round(_gpu_half_step_quotient(x, abs(n))) * abs(n), x, abs(n))'
       );
   });
 
-  it('a factor outside the shader float range fails closed', () => {
-    for (const emit of [g, w]) {
-      expect(() => emit(['Round', 3.14, 40])).toThrow(
-        /^Could not compile `Round`: the rounding factor 10\^40 is outside the shader float range\.$/
-      );
-      expect(() => emit(['Round', 3.14, -40])).toThrow(
-        /rounding factor 10\^-40 is outside/
-      );
-    }
-    // The largest representable factors still compile.
-    expect(g(['Round', 3.14, 37])).toContain('1e+37');
+  it('a constant zero step fails closed', () => {
+    // The result is NaN, and neither language has a NaN literal.
+    for (const emit of [g, w])
+      expect(() => emit(['Round', 3.14, 0])).toThrow(/no NaN literal/);
   });
 
   it('reports `success: false` (no source) through the fallback route', () => {
     for (const target of [glsl, wgsl]) {
-      const r = target.compile(cen.box(['Round', 'x', 'n'] as any), {
+      const r = target.compile(cen.box(['Round', 'x', 0] as any), {
         fallback: true,
       });
       expect(r.success).toBe(false);

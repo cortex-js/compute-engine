@@ -44,18 +44,18 @@ describe.each(['machine', 21] as const)('Round at a half (precision %s)', (p) =>
     expect(ce.box(['Round', ['Rational', 5, 2]]).evaluate().re).toBe(3);
   });
 
-  test('the precision form rounds a half away from zero too', () => {
+  test('the step form rounds a half away from zero too', () => {
     const ce = engineAt(p);
-    // `Round(x, n)` is `Round(x·10ⁿ)/10ⁿ`, so the tie of the scaled value
+    // `Round(x, step)` is `Round(x/step)·step`, so the tie of the quotient
     // follows the same rule: −0.125·100 is −12.5, which rounds to −13.
-    expect(ce.box(['Round', -0.125, 2]).evaluate().re).toBeCloseTo(-0.13, 12);
-    expect(ce.box(['Round', 0.125, 2]).evaluate().re).toBeCloseTo(0.13, 12);
-    expect(ce.box(['Round', -1.25, 1]).evaluate().re).toBeCloseTo(-1.3, 12);
-    expect(ce.box(['Round', 1.25, 1]).evaluate().re).toBeCloseTo(1.3, 12);
-    // A negative `n` rounds to tens, hundreds, … and follows the same rule:
-    // −1250·10⁻² is −12.5, which rounds to −13, hence −1300.
-    expect(ce.box(['Round', -1250, -2]).evaluate().re).toBe(-1300);
-    expect(ce.box(['Round', 1250, -2]).evaluate().re).toBe(1300);
+    expect(ce.box(['Round', -0.125, ['Rational', 1, 100]]).evaluate().re).toBeCloseTo(-0.13, 12);
+    expect(ce.box(['Round', 0.125, ['Rational', 1, 100]]).evaluate().re).toBeCloseTo(0.13, 12);
+    expect(ce.box(['Round', -1.25, ['Rational', 1, 10]]).evaluate().re).toBeCloseTo(-1.3, 12);
+    expect(ce.box(['Round', 1.25, ['Rational', 1, 10]]).evaluate().re).toBeCloseTo(1.3, 12);
+    // A step of 100 rounds to hundreds with the same rule: −1250/100 is
+    // −12.5, which rounds to −13, hence −1300.
+    expect(ce.box(['Round', -1250, 100]).evaluate().re).toBe(-1300);
+    expect(ce.box(['Round', 1250, 100]).evaluate().re).toBe(1300);
   });
 
   test('the sign agrees with the value', () => {
@@ -107,14 +107,14 @@ describe('Round at a half in compiled JavaScript', () => {
       expect([x, fn!.run({ x })]).toEqual([x, want]);
   });
 
-  test('the compiled precision form matches the interpreter', () => {
+  test('the compiled step form matches the interpreter', () => {
     const ce = engineAt('machine');
     ce.declare('x', 'real');
-    const fn = compile(ce.box(['Round', 'x', 2]));
+    const fn = compile(ce.box(['Round', 'x', ['Rational', 1, 100]]));
     expect(fn).not.toBeNull();
     expect(fn!.run({ x: -0.125 })).toBeCloseTo(-0.13, 12);
     expect(fn!.run({ x: 0.125 })).toBeCloseTo(0.13, 12);
-    const tens = compile(ce.box(['Round', 'x', -2]));
+    const tens = compile(ce.box(['Round', 'x', 100]));
     expect(tens!.run({ x: -1250 })).toBe(-1300);
   });
 });
@@ -122,18 +122,18 @@ describe('Round at a half in compiled JavaScript', () => {
 /**
  * The rounding family answers an EXACT number for a float argument, as in
  * Mathematica (cortex-js/compute-engine#351): `Round(2.5)` is the integer `3`,
- * not the float `3.0`, and `Round(3.14159, 2)` is the rational `157/50`. This
+ * not the float `3.0`, and `Round(3.14159, 1/100)` is the rational `157/50`. This
  * is an exception to the rule that a float operand makes a numeric result a
  * float. Under `.N()` the result is a float.
  */
 describe('Rounding a float gives an exact result', () => {
-  test('the precision form gives an exact rational', () => {
+  test('the step form gives an exact rational', () => {
     const ce = engineAt('machine');
-    const r = ce.box(['Round', 3.14159, 2]).evaluate();
+    const r = ce.box(['Round', 3.14159, ['Rational', 1, 100]]).evaluate();
     expect(r.json).toEqual(['Rational', 157, 50]);
     expect(r.isExact).toBe(true);
-    // A negative `n` rounds to hundreds and gives an exact integer.
-    const tens = ce.box(['Round', 1234.5, -2]).evaluate();
+    // A step of 100 rounds to hundreds and gives an exact integer.
+    const tens = ce.box(['Round', 1234.5, 100]).evaluate();
     expect(tens.json).toBe(1200);
     expect(tens.isExact).toBe(true);
   });
@@ -181,7 +181,7 @@ describe('Rounding a float gives an exact result', () => {
 
   test('under N the result is a float', () => {
     const ce = engineAt('machine');
-    const r = ce.box(['Round', 3.14159, 2]).N();
+    const r = ce.box(['Round', 3.14159, ['Rational', 1, 100]]).N();
     expect(r.isExact).toBe(false);
     expect(r.re).toBeCloseTo(3.14, 12);
     expect(ce.box(['Round', 2.5]).N().json).toEqual({ num: '3.0' });
@@ -284,18 +284,18 @@ describe.each(['machine', 21, 60] as const)(
       expect(ce.box(['Truncate', y]).evaluate().json).toBe(0);
     });
 
-    test('Fract and the precision form of Round use the exact floor', () => {
+    test('Fract and the step form of Round use the exact floor', () => {
       const ce = engineAt(p);
       // BIG = 25! − 1 ≡ 2 (mod 3)
       expect(
         ce.box(['Fract', ['Rational', big(BIG), 3]]).evaluate().json
       ).toEqual(['Rational', 2, 3]);
       expect(ce.box(['Fract', big(BIG)]).evaluate().json).toBe(0);
-      // Round(BIG/3, 2) = round(100·BIG/3)/100
+      // Round(BIG/3, 1/100) = round(100·BIG/3)/100
       const scaled = reference(100n * BIG, 3n).Round;
       expect(
         ce
-          .box(['Round', ['Rational', big(BIG), 3], 2])
+          .box(['Round', ['Rational', big(BIG), 3], ['Rational', 1, 100]])
           .evaluate()
           .toString()
       ).toBe(
@@ -384,14 +384,14 @@ describe.each(['machine', 21] as const)(
           .N()
           .toString()
       ).toBe('24');
-      // Round((25! − 1)/24! − 1/200, 2): 100 times the value is just below
+      // Round((25! − 1)/24! − 1/200, 1/100): 100 times the value is just below
       // 2499.5, so the result is 24.99, approximated.
       const s = 100n * (200n * BIG - F24);
       const t = 200n * F24;
       expect(s / t).toBe(2499n);
       expect(2n * (s % t) < t).toBe(true);
       const r = ce
-        .box(['Round', ['Subtract', quotient, ['Rational', 1, 200]], 2])
+        .box(['Round', ['Subtract', quotient, ['Rational', 1, 200]], ['Rational', 1, 100]])
         .N();
       expect(r.isExact).toBe(false);
       expect(r.re).toBe(24.99);
@@ -419,7 +419,7 @@ describe.each(['machine', 21] as const)(
     test('a float operand and an operand with no exact value do not change', () => {
       const ce = engineAt(p);
       expect(ce.box(['Floor', 2.7]).N().re).toBe(2);
-      expect(ce.box(['Round', 3.14159, 2]).N().re).toBe(3.14);
+      expect(ce.box(['Round', 3.14159, ['Rational', 1, 100]]).N().re).toBe(3.14);
       // π·10³⁰ has no exact number value: the float is rounded.
       const r = ce.box(['Floor', ['Multiply', 'Pi', ['Power', 10, 30]]]).N();
       expect(r.isExact).toBe(false);
@@ -701,13 +701,13 @@ describe.each(['machine', 21] as const)(
       expect(ce.box(['Floor', ['Multiply', ['Sin', 1], 10]]).N().re).toBe(8);
     });
 
-    test('Round(x, n), Fract and Mod', () => {
+    test('Round(x, step), Fract and Mod', () => {
       const ce = engineAt(p);
       // Mathematica: `Round[Pi, 1/10^25]`, `FractionalPart[Pi]`,
       // `Mod[Pi 10^30, 1]`.
       expect(
         ce
-          .box(['Round', 'Pi', 25])
+          .box(['Round', 'Pi', ['Power', 10, -25]])
           .evaluate()
           .isSame(
             ce.number([15707963267948966192313217n, 5000000000000000000000000n])
@@ -854,7 +854,7 @@ describe('An exact constant with a large argument or magnitude', () => {
     expect(ce.box(['Heaviside', SIN]).N().re).toBe(1);
     expect(ce.box(['Fract', SIN]).N().re).toBeCloseTo(0.969171481070263, 14);
     expect(ce.box(['Mod', SIN, 1]).N().re).toBeCloseTo(0.969171481070263, 14);
-    expect(ce.box(['Round', SIN, 3]).N().re).toBe(0.969);
+    expect(ce.box(['Round', SIN, ['Rational', 1, 1000]]).N().re).toBe(0.969);
   });
 
   test('π·10^200', () => {

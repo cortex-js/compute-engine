@@ -2,6 +2,26 @@
 
 ### Breaking Changes
 
+- **The second argument of `Round` is a step, not a number of decimal
+  places** ([#417](https://github.com/cortex-js/compute-engine/issues/417)).
+  `Round(x, step)` is the multiple of the step nearest to `x`, as
+  `Round[x, a]` in Mathematica and as the step forms of `Floor`, `Ceil` and
+  `Truncate`: `Round(226, 10)` is `230` and `Round(7, 0.5)` is `7`. A tie is
+  rounded with the rule of `ce.roundingTies`. Before, the second argument
+  was a number of decimal places, and `Round(3.14159, 2)` was `157/50`; it is
+  now the multiple of `2` nearest to `3.14159`, which is `4`. To round to
+  `n` decimal places, use the step `10^-n`: `Round(3.14159, 1/100)` is
+  `157/50`, `Round(3.14159, 0.01)` is the float `3.14`, and
+  `Round(1234, 100)` is `1200` (it was `Round(1234, -2)`). This applies to
+  MathJSON, to Epsil `round(x, step)` and to the LaTeX
+  `\operatorname{round}(x, step)`. In particular, LaTeX copied from Desmos,
+  where `round(x, 2)` means two decimal places, must be translated to
+  `\operatorname{round}(x, 10^{-2})`. A zero step gives `Indeterminate`
+  (`NaN` with a float operand), and the step can be any real number, also a
+  symbol or an exact constant (`Round(10, π)` is `3π`). Compiled JavaScript,
+  interval JavaScript, GLSL, WGSL and Python follow, and on GLSL and WGSL the
+  step no longer has to be a constant.
+
 - **A negative `Take`/`Drop` count counts from the end**
   ([#414](https://github.com/cortex-js/compute-engine/issues/414), reported by
   [enumeratio](https://github.com/enumeratio)). `Take(xs, -n)` is the last `n`
@@ -131,9 +151,9 @@
   `"toward-positive-infinity"` (JavaScript `Math.round`: `Round(-2.5)` is
   `-2`) and `"toward-negative-infinity"`. The rule applies at every
   precision, to an exact rational (`Round(5/2)`), to an exact constant that
-  is at a tie under `.N()`, to the sign of `Round`, and to the form
-  `Round(x, n)`, which rounds to `n` decimal places (with `"to-even"`,
-  `Round(0.125, 2)` is `3/25`). An unknown rule is an error. Compiled
+  is at a tie under `.N()`, to the sign of `Round`, and to the step form
+  `Round(x, step)` (with `"to-even"`, `Round(0.125, 1/100)` is `3/25`). An
+  unknown rule is an error. Compiled
   JavaScript, interval JavaScript, GLSL, WGSL and Python use the rule in
   effect at compile time; a function compiled before a change keeps its rule,
   and an automatically compiled `Map` is compiled again. `Remainder` does not

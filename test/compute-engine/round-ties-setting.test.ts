@@ -154,11 +154,12 @@ describe.each(RULES)('Round with the tie rule %s', (rule) => {
     );
   });
 
-  test('the precision form rounds the tie of the scaled value', () => {
+  test('the step form rounds the tie of the quotient', () => {
     const ce = engine(rule);
-    // −0.125·100 is −12.5 and 0.375·100 is 37.5.
-    const neg = ce.box(['Round', ['Rational', -1, 8], 2]).evaluate();
-    const pos = ce.box(['Round', ['Rational', 3, 8], 2]).evaluate();
+    // −0.125/(1/100) is −12.5 and 0.375/(1/100) is 37.5.
+    const step = ['Rational', 1, 100];
+    const neg = ce.box(['Round', ['Rational', -1, 8], step]).evaluate();
+    const pos = ce.box(['Round', ['Rational', 3, 8], step]).evaluate();
     const want = {
       'away-from-zero': ['-13/100', '19/50'],
       'to-even': ['-3/25', '19/50'],
@@ -213,12 +214,13 @@ describe.each(RULES)('Round with the tie rule %s', (rule) => {
         x,
         re(ce.box(['Round', x]).evaluate()),
       ]);
-    const g = compile(ce.box(['Round', 'x', 1]), { fallback: false });
+    // A step of 0.1: the quotients `−2.5`, `2.5`, … are ties in the
+    // interpreter's decimal division, and the compiled code finds them too.
+    // The multiple `k·0.1` is a float product (`3·0.1` is
+    // `0.30000000000000004`), so the values are compared to 12 digits.
+    const g = compile(ce.box(['Round', 'x', 0.1]), { fallback: false });
     for (const x of [-0.25, 0.25, 0.75, -0.75, 1.05])
-      expect([x, g.run!({ x }) + 0]).toEqual([
-        x,
-        re(ce.box(['Round', x, 1]).N()),
-      ]);
+      expect(g.run!({ x })).toBeCloseTo(re(ce.box(['Round', x, 0.1]).N()), 12);
   });
 
   test('compiled interval JavaScript matches the interpreter at a point', () => {

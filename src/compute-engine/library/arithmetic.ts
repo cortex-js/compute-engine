@@ -1006,15 +1006,15 @@ function isOrdered(
  * Mathematica, `Floor(2.7)` is the integer `2`, not the float `2.0`. The
  * integer that a rounding function returns is exact even when its argument
  * is not, because there is no rounding error left to carry. The precision
- * form `Round(x, n)` builds on this: it divides the exact integer by the
- * exact `10ⁿ`, so `Round(3.14159, 2)` is the exact rational `157/50`.
+ * forms build on this: they multiply the exact integer by the exact step,
+ * so `Round(3.14159, 1/100)` is the exact rational `157/50`.
  *
  * `apply()` boxes the result of a float argument as a float; this function
  * re-boxes it. A machine integer beyond the safe-integer range is still an
  * integer (a double of that size has no fractional part), so it is boxed
  * from a `bigint` and keeps all its digits. The non-finite results (`±∞`,
  * `NaN`) are returned unchanged. Under a numeric approximation (`.N()`)
- * the result stays a float: `Round(3.14159, 2).N()` is the float `3.14`.
+ * the result stays a float: `Round(3.14159, 1/100).N()` is the float `3.14`.
  *
  * An EXACT real argument (a rational, or a rational times a square root)
  * does not go through `apply()`: `roundExactReal()` rounds it with `bigint`
@@ -1083,9 +1083,10 @@ function applyRounding(
 }
 
 /**
- * The signature of `Floor`, `Ceil` and `Truncate`: the integer-valued form
- * `f(x)`, and the step form `f(x, step)`, which rounds `x` to a multiple of
- * `step` (`Floor(226, 10)` is `220`, as `Floor[226, 10]` in Mathematica).
+ * The signature of `Floor`, `Ceil`, `Truncate` and `Round`: the
+ * integer-valued form `f(x)`, and the step form `f(x, step)`, which rounds
+ * `x` to a multiple of `step` (`Floor(226, 10)` is `220`, as
+ * `Floor[226, 10]` in Mathematica).
  *
  * The carrier of `x` is the extended real line (`Floor(±∞) = ±∞`). The step
  * is a finite real; a zero step has no multiple to round to, and it is the
@@ -1106,7 +1107,7 @@ const INTEGER_NAN_OR_SIGNED_INFINITY = parseType(
 );
 
 /**
- * The type of `Floor`, `Ceil` or `Truncate`, with or without a step.
+ * The type of `Floor`, `Ceil`, `Truncate` or `Round`, with or without a step.
  *
  * The one-argument form is integer-valued (`roundingFunctionTypeOnTypes()`).
  * When that handler declines (an operand that may be `NaN`, or that is not
@@ -1174,8 +1175,8 @@ function roundingType(
 }
 
 /**
- * The domain condition of the step form of `Floor`, `Ceil`, `Truncate`
- * (`definedWhen`): the step is not zero. `Floor(x, 0)` is `Indeterminate`
+ * The domain condition of the step form of `Floor`, `Ceil`, `Truncate` and
+ * `Round` (`definedWhen`): the step is not zero. `Floor(x, 0)` is `Indeterminate`
  * (`NaN` with a float operand), as `Mod(x, 0)` is. The one-argument form is
  * defined at every point of its carrier. As for `Mod`, the step is read from
  * its static type (its element type under a broadcast), and a step that is
@@ -1194,8 +1195,8 @@ function roundingStepDefined(
 }
 
 /**
- * For the `sgn` handlers of `Floor`, `Ceil` and `Truncate`: the distance
- * between two consecutive results, `1` for the one-argument form and `|step|`
+ * For the `sgn` handlers of `Floor`, `Ceil`, `Truncate` and `Round`: the
+ * distance between two consecutive results, `1` for the one-argument form and `|step|`
  * for the step form, or `undefined` when the step is not a non-zero real
  * number literal (the sign is then not decided). The handlers compare `x`
  * with this unit: `Floor(x, step)` is positive exactly when `x ≥ |step|`.
@@ -1222,10 +1223,9 @@ function roundingStepUnit(
  * an exact constant (`Floor(x, a)` stays unevaluated), and the indeterminate
  * form for a zero step.
  *
- * The result is exact when `k` and the step are exact, as for
- * `Round(x, n)` (`applyRounding()` boxes `k` as an exact integer, also for
- * a float `x`): `Floor(2.7, 1/2)` is `5/2`, and `Floor(2.7, 0.5)` is the
- * float `2.5`. An exact constant step (`π`) is rounded from enclosures of
+ * The result is exact when `k` and the step are exact (`applyRounding()`
+ * boxes `k` as an exact integer, also for a float `x`): `Floor(2.7, 1/2)` is
+ * `5/2`, and `Floor(2.7, 0.5)` is the float `2.5`. An exact constant step (`π`) is rounded from enclosures of
  * the quotient (`roundExactConstant()`): `Floor(10, π)` is `3π`.
  *
  * Under `.N()`, an operand whose exact value is known is rounded exactly
@@ -8842,73 +8842,38 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
     Round: {
       description:
-        'Rounds a number to the nearest integer, or (with a precision argument) to `n` decimal places.',
+        'Rounds a number to the nearest integer, or with a step to the nearest multiple of the step.',
       complexity: 1250,
       broadcastable: true,
-      // Optional precision arg (Desmos/spreadsheet `round(x, n)`): round to `n`
-      // decimal places. Without it, rounds to the nearest integer.
+      // The optional second argument is a step: `Round(x, step)` is the
+      // multiple of the step nearest to `x` (`Round(226, 10)` is `230`, as
+      // `Round[226, 10]` in Mathematica), and a tie is rounded with the rule
+      // of `ce.roundingTies`. To round to `n` decimal places, the step is
+      // `10^-n`: `Round(3.14159, 1/100)` is the exact rational `157/50`.
       //
       // The carrier is the extended real line — rounding depends on the
       // order of the real line, and `Round(±∞) = ±∞` — so a proven
-      // off-carrier operand (a complex value, `~oo`) is a boxing error,
-      // and a `NaN` argument in the VALUE slot propagates through the
-      // generic gate (an extended-real carrier derives `reject`, hence
-      // the explicit declaration). The declared result is
-      // `real | signed_infinity`, not the family's
-      // `integer | signed_infinity`, because the precision form is
-      // generally non-integer (`Round(3.14159, 2)` is the exact rational
-      // `157/50`, see `applyRounding()`); the handler below restores the
-      // sharp `integer` claim for the single-argument form. The precision
-      // slot keeps the DERIVED `NaN` policy for an integer carrier
-      // (`reject`): a `NaN` digit count is an error, not a value to
-      // propagate — which is why `nanBehavior` is the one-element array
-      // (slot 0 only) rather than operator-wide.
-      // NO `partiality: 'total'` claim, deliberately: the precision form
-      // computes `10^n` first, and an exact power beyond the
-      // materialization limit stays symbolic, so an in-carrier call such
-      // as `Round(1, 500001)` remains unevaluated — the omitted
-      // (may-marker) default is the honest declaration.
-      // (`docs/ERROR-MODEL.md` §4; the Phase F record in
-      // `docs/plans/2026-08-30-error-model-implementation.md`.)
-      signature: '(real | signed_infinity, integer?) -> real | signed_infinity',
-      examples: ['[Round(2.5), Round(-2.5), Round(3.14159, 2)]'],
-      nanBehavior: ['propagate'],
-      type: ([x, n], context) => {
-        const t = roundingFunctionTypeOnTypes(x);
-        if (n === undefined)
-          return BoxedType.forResult(t, context.engine._typeResolver);
-        // With a precision arg the result is generally non-integer
-        // (`Round(3.14159, 2)` is `157/50`): keep the non-finite
-        // classification, but replace the integer claim by `real`.
-        // The replacement must apply to EVERY operand that rounds to
-        // `integer`, including a bare `real` symbol of unknown
-        // finiteness — an earlier guard on `isFinite === true` let
-        // `Round(x, 2)` with `x: real` fall through to `integer`.
-        if (t === 'integer')
-          return BoxedType.forResult('real', context.engine._typeResolver);
-        if (t === undefined) return undefined;
-        // A pure signed-infinity claim survives the precision arg
-        // (`Round(±∞, n) = ±∞`); any mixed claim relaxes to
-        // `real | signed_infinity`, which IS the declared result, so
-        // decline and let it apply. Structural test, not object identity:
-        // the helper's claim must not be tied to which constant it built
-        // the type from.
-        return BoxedType.forResult(
-          isSubtype(t, SIGNED_INFINITY_TYPE) ? t : undefined,
-          context.engine._typeResolver
-        );
-      },
-      sgn: ([x, n]) => {
-        // Only reason about the sign in the single-argument (round-to-integer)
-        // case; a precision arg rescales the value and the interval reasoning
-        // below no longer holds.
-        if (n !== undefined) return undefined;
+      // off-carrier operand (a complex value, `~oo`) is a boxing error, and
+      // a `NaN` argument propagates through the generic gate (an
+      // extended-real carrier derives `reject`, hence the explicit
+      // declaration). The signature, the domain condition (a zero step is
+      // `Indeterminate`) and the `type` handler are those of `Floor`, `Ceil`
+      // and `Truncate` (`ROUNDING_STEP_SIGNATURE`, `roundingStepDefined()`,
+      // `roundingType()`). (`docs/ERROR-MODEL.md` §4.)
+      signature: ROUNDING_STEP_SIGNATURE,
+      examples: [
+        '[Round(2.5), Round(-2.5), Round(226, 10), Round(3.14159, 1/100)]',
+      ],
+      nanBehavior: 'propagate',
+      definedWhen: roundingStepDefined,
+      type: ([x, step], context) => roundingType(x, step, context),
+      sgn: ([x, step]) => {
         if (x.isNaN) return 'unsigned';
-        // The evaluate handler rounds a value halfway between two integers
+        // The evaluate handler rounds a value halfway between two multiples
         // with the rule of `ce.roundingTies` at every precision, so this sign
         // uses the same rule.
         const ties = x.engine.roundingTies;
-        if (isNumber(x)) {
+        if (step === undefined && isNumber(x)) {
           // An exact literal is rounded exactly: the double `x.re` of
           // `1/2 − 10⁻³⁰` is `0.5`, which can round to `1`, not `0`.
           const exact = roundExactReal(x, 'round');
@@ -8929,13 +8894,17 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           }
           return numberSgn(roundToInteger(x.re, ties));
         }
+        // The result is `0` for `|x|` below half the step (half of `1`
+        // without a step), and at half the step it depends on the tie rule:
         // `Round(1/2)` is `1` when a positive tie goes away from zero, and
         // `0` otherwise; the same for `Round(-1/2)` and `-1`. The truncated
         // value of `±1/2` is `0`, which is even.
+        const unit = roundingStepUnit(x, step);
+        if (unit === undefined) return undefined;
         const halfUp = tieRoundsAway(ties, false, true);
         const halfDown = tieRoundsAway(ties, true, true);
-        const half = x.engine.number([1, 2]);
-        const minusHalf = x.engine.number([-1, 2]);
+        const half = unit.div(2);
+        const minusHalf = half.neg();
         if (isOrdered(x, halfUp ? '>=' : '>', half)) return 'positive';
         if (isOrdered(x, halfDown ? '<=' : '<', minusHalf)) return 'negative';
         if (
@@ -8947,18 +8916,19 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (x.isNonPositive) return 'non-positive';
         return undefined;
       },
-      evaluate: ([x, n], { engine: ce, numericApproximation, expression }) => {
+      evaluate: (
+        [x, step],
+        { engine: ce, numericApproximation, expression }
+      ) => {
         // A value halfway between two integers is rounded with the rule of
         // `ce.roundingTies` at every precision (by default away from zero:
         // `Round(-0.5)` is `-1`, `Round(2.5)` is `3`). The machine lane
         // (`roundToInteger()`), the big-number lane (`bigRoundToInteger()`)
-        // and the exact lane (`roundExactReal()`) all use that rule. The
-        // precision form below inherits it: it rounds the SCALED value with
-        // the same helpers. `applyRounding()`
-        // boxes the rounded value as an exact integer also for a float `x`,
-        // so the precision form divides two exact numbers and its result is
-        // an exact rational (`Round(3.14159, 2)` is `157/50`, as in
-        // Mathematica).
+        // and the exact lane (`roundExactReal()`) all use that rule. The step
+        // form (`roundToStep()`) rounds the quotient `x/|step|` with the same
+        // helpers. `applyRounding()` boxes the rounded quotient as an exact
+        // integer also for a float `x`, so the multiple of an exact step is
+        // exact (`Round(3.14159, 1/100)` is `157/50`, as in Mathematica).
         const original = originalOperand(expression, 0);
         const ties = ce.roundingTies;
         const roundValue = (v: Expression, original?: Expression) =>
@@ -8970,42 +8940,16 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             numericApproximation,
             original
           );
-        if (n === undefined) return roundValue(x, original);
-        // Round(x, n) = Round(x·10ⁿ)/10ⁿ — round to `n` decimal places.
-        if (!isNumber(n) || n.isFinite !== true) return undefined;
-        const factor = ce.number(10).pow(n);
-        if (numericApproximation) {
-          // Under `.N()`, an operand whose exact value is known is rounded
-          // exactly, as without `.N()`, and the RESULT is approximated
-          // (`exactRoundingOperand()` says when the exact value is used).
-          // The jump test reads the scaled float `x·10ⁿ`.
-          const scaledFloat = x.mul(factor);
-          const exactX = isExactRealLiteral(x)
-            ? x
-            : original !== undefined &&
-                (isNumber(original) || isNearRoundingJump(scaledFloat, 'round'))
-              ? exactRealValueOf(original)
-              : undefined;
-          let k =
-            exactX === undefined
-              ? undefined
-              : roundExactReal(exactX.mul(factor), 'round');
-          // An exact constant expression that is not a number (`π`) is
-          // rounded from enclosures of its scaled value
-          // (`roundExactConstant()`), at any distance from a jump, as in
-          // `applyRounding()`.
-          if (k === undefined && exactX === undefined && original !== undefined)
-            k = roundExactConstant(
-              ce.function('Multiply', [original, factor]),
-              'round',
-              true
-            );
-          if (k !== undefined) return ce.number(k).div(factor).N();
-          const scaled = roundValue(scaledFloat);
-          return scaled === undefined ? undefined : scaled.div(factor);
-        }
-        const scaled = roundValue(x.mul(factor));
-        return scaled === undefined ? undefined : scaled.div(factor);
+        if (step === undefined) return roundValue(x, original);
+        return roundToStep(
+          x,
+          step,
+          'round',
+          roundValue,
+          numericApproximation,
+          original,
+          originalOperand(expression, 1)
+        );
       },
     },
 

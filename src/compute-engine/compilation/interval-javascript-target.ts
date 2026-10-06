@@ -38,6 +38,7 @@ import type {
 import { normalizeDeprecatedCompileOptions } from './deprecation-warnings.js';
 import { entrySource } from './function-purity.js';
 import { withVarsValuesHidden } from './vars-inputs.js';
+import { asRational } from '../boxed-expression/numerics.js';
 import {
   isSymbol,
   isNumber,
@@ -151,8 +152,9 @@ const INTERVAL_JAVASCRIPT_OPERATORS: CompiledOperators = {
 };
 
 /**
- * The interval code of `Floor`, `Ceil` or `Truncate` (`round` is the `_IA`
- * function), with or without a step. The step form `Floor(x, step)` is
+ * The interval code of `Floor`, `Ceil`, `Truncate` or `Round` (`round` is
+ * the `_IA` function, and `extra` its further arguments: the tie rule of
+ * `Round`), with or without a step. The step form `Floor(x, step)` is
  * `round(x / k) · k` with `k = |step|`: the division and the product are
  * the outward-rounded interval operations, so an enclosure that the
  * division widens across a jump answers `singular`, as the one-argument
@@ -160,20 +162,34 @@ const INTERVAL_JAVASCRIPT_OPERATORS: CompiledOperators = {
  * `Random` family) fails closed.
  */
 function intervalRoundToStep(
-  round: 'floor' | 'ceil' | 'trunc',
+  round: 'floor' | 'ceil' | 'trunc' | 'round',
   args: ReadonlyArray<Expression | null>,
-  compile: (expr: Expression) => string
+  compile: (expr: Expression) => string,
+  extra = ''
 ): string {
   const [x, step] = args;
   if (x === null || x === undefined)
     throw new Error(`Could not compile \`${round}\`: no argument`);
-  if (step === null || step === undefined) return `_IA.${round}(${compile(x)})`;
+  if (step === null || step === undefined)
+    return `_IA.${round}(${compile(x)}${extra})`;
   if (step.isPure === false)
     throw new Error(
       `Could not compile \`${round}\`: the interval target requires a pure step`
     );
+  // An exact step `1/m` or `m`, with `m` a safe integer (`10^-2` is
+  // `1/100`), scales through the exact point `m`: `1/100` has no double, and
+  // dividing by an enclosure of it would widen a tie (`Round(0.125, 1/100)`)
+  // across its jump, while `0.125·100` is the exact point `12.5`.
+  const r = asRational(step);
+  if (r !== undefined) {
+    const [p, q] = [Math.abs(Number(r[0])), Number(r[1])];
+    if (p === 1 && Number.isSafeInteger(q) && q > 0)
+      return `_IA.div(_IA.${round}(_IA.mul(${compile(x)}, _IA.point(${q}))${extra}), _IA.point(${q}))`;
+    if (q === 1 && Number.isSafeInteger(p) && p > 0)
+      return `_IA.mul(_IA.${round}(_IA.div(${compile(x)}, _IA.point(${p}))${extra}), _IA.point(${p}))`;
+  }
   const k = `_IA.abs(${compile(step)})`;
-  return `_IA.mul(_IA.${round}(_IA.div(${compile(x)}, ${k})), ${k})`;
+  return `_IA.mul(_IA.${round}(_IA.div(${compile(x)}, ${k})${extra}), ${k})`;
 }
 
 /**
@@ -2630,25 +2646,9 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // zero, is left out.
     const ties = args[0].engine.roundingTies;
     const tieArg = ties === 'away-from-zero' ? '' : `, ${JSON.stringify(ties)}`;
-    if (args.length < 2) return `_IA.round(${compile(args[0])}${tieArg})`;
-    // Round(x, n) = Round(x·10ⁿ)/10ⁿ — round to `n` decimal places. Only the
-    // constant-`n` form is representable here (the factor must be a point);
-    // a non-constant precision throws to fail closed to scalar JS.
-    const n = args[1];
-    if (!isNumber(n) || n.isComplex || !Number.isInteger(n.re))
-      throw new Error(
-        'Could not compile `Round`: interval target requires a constant precision'
-      );
-    // The scale is always spelled as the EXACT integer power `10^|n|`, so the
-    // constant is a true point: for `n < 0` the operand is divided by `10^-n`
-    // before rounding and multiplied back afterwards (`Round(x, -2)` rounds to
-    // hundreds through `100`, not through the double nearest `0.01`, which
-    // would need an enclosure of its own inside a step function).
-    const scale = `_IA.point(${Math.pow(10, Math.abs(n.re))})`;
-    const x = compile(args[0]);
-    if (n.re >= 0)
-      return `_IA.div(_IA.round(_IA.mul(${x}, ${scale})${tieArg}), ${scale})`;
-    return `_IA.mul(_IA.round(_IA.div(${x}, ${scale})${tieArg}), ${scale})`;
+    // `Round(x, step)` is the multiple of the step nearest to `x`
+    // (`intervalRoundToStep()`).
+    return intervalRoundToStep('round', args, compile, tieArg);
   },
   Heaviside: (args, compile) => `_IA.heaviside(${compile(args[0])})`,
   Sign: (args, compile) => `_IA.sign(${compile(args[0])})`,

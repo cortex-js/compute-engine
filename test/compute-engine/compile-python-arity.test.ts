@@ -57,9 +57,9 @@ import { TEST_PYTHON } from './test-python';
  * CE signature accepts. Each emitted valid-looking Python and reported
  * `success: true` while computing something else:
  *
- * - `Round(x, n)` ignored the decimal-precision operand (`Round(3.14159, 2)`
- *   compiled to the round-to-integer form, 3, where the interpreter answers
- *   157/50).
+ * - `Round(x, n)` ignored its second operand (then a number of decimal
+ *   places; since cortex-js/compute-engine#417 a step: `Round(x, step)` is
+ *   the multiple of the step nearest to `x`).
  * - `Gamma(s, z)` — the UPPER INCOMPLETE gamma, a different function from
  *   Γ(z) — passed both operands to the one-argument `scipy.special.gamma`.
  * - `Transpose(m, i, j)` emitted `np.transpose(m, i, j)`, whose second
@@ -93,25 +93,23 @@ const src = (expr: any): string =>
  * definitions (`def _ce_round(…)`) that the source starts with. */
 const lastLine = (code: string): string => code.split('\n').at(-1)!;
 
-describe('PYTHON ARITY — Round(x, n) rounds to n decimal places', () => {
-  it('a constant precision folds the 10ⁿ factor', () => {
-    expect(lastLine(src(['Round', 'x', 2]))).toBe(
-      "(_ce_round(((x) * 10 ** 2), 'away-from-zero') / 10 ** 2)"
+describe('PYTHON ARITY — Round(x, step) rounds to a multiple of the step', () => {
+  it('binds the operand and the step once each, as lambda arguments', () => {
+    const code = lastLine(src(['Round', 'x', 'k']));
+    expect(code.startsWith('(lambda _ce_x, _ce_k: ')).toBe(true);
+    expect(code.endsWith('(np.asarray(x, dtype=float), np.abs(k))')).toBe(
+      true
     );
+    expect(code.match(/\bx\b/g)?.length).toBe(1);
+    expect(code.match(/\bk\b/g)?.length).toBe(1);
+    // The quotient is snapped to the nearest half-integer, then rounded
+    // with the tie rule of the engine.
+    expect(code).toContain('_ce_round(');
+    expect(code).toContain("'away-from-zero')");
   });
 
-  it('a negative precision rounds to tens/hundreds', () => {
-    expect(lastLine(src(['Round', 'x', -2]))).toBe(
-      "(_ce_round(((x) * 10 ** -2), 'away-from-zero') / 10 ** -2)"
-    );
-  });
-
-  it('a RUNTIME precision lowers (Python `10 ** n` is exact/correctly rounded, unlike a shader `pow`)', () => {
-    const code = src(['Round', 'x', 'k']);
-    expect(code).toContain('10 ** (k)');
-    // Both operands are bound once — neither is emitted twice.
-    expect(code.match(/\(x\)/g)?.length).toBe(1);
-    expect(code.match(/10 \*\* \(k\)/g)?.length).toBe(1);
+  it('a constant step', () => {
+    expect(lastLine(src(['Round', 'x', 10]))).toContain('np.abs(10)');
   });
 
   it('the unary form is unchanged', () => {
@@ -295,10 +293,16 @@ function venvHas(mod: string): boolean {
 
 /** Expression, and the `repr()`-independent JSON the emitted code must print. */
 const EXEC_CASES: Array<{ name: string; expr: any; expected: any }> = [
-  { name: 'round_2dp', expr: ['Round', 3.14159, 2], expected: 3.14 },
-  { name: 'round_neg2dp', expr: ['Round', 1234.5678, -2], expected: 1200 },
-  { name: 'round_tie_up', expr: ['Round', 0.125, 2], expected: 0.13 },
-  { name: 'round_tie_neg', expr: ['Round', -0.125, 2], expected: -0.13 },
+  { name: 'round_2dp', expr: ['Round', 3.14159, 0.01], expected: 3.14 },
+  { name: 'round_hundreds', expr: ['Round', 1234.5678, 100], expected: 1200 },
+  { name: 'round_tie_up', expr: ['Round', 0.125, 0.01], expected: 0.13 },
+  { name: 'round_tie_neg', expr: ['Round', -0.125, 0.01], expected: -0.13 },
+  // `1.05/0.1` is `10.500000000000002` in doubles, and the decimals give the
+  // tie `10.5`: the compiled code finds the tie, as the interpreter does.
+  { name: 'round_snapped_tie', expr: ['Round', 1.05, 0.1], expected: 1.1 },
+  // Not a tie: `0.49999999999999994` is below one half.
+  { name: 'round_below_tie', expr: ['Round', 0.49999999999999994, 1], expected: 0 },
+  { name: 'round_step_10', expr: ['Round', 226, 10], expected: 230 },
   { name: 'round_unary_tie', expr: ['Round', 2.5], expected: 3 },
   { name: 'round_unary_tie_neg', expr: ['Round', -2.5], expected: -3 },
   { name: 'mean_multi', expr: ['Mean', ['List', 2, 3], ['List', 5, 7]], expected: 4.25 },

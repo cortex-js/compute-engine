@@ -117,6 +117,7 @@ import { monteCarloEstimate } from '../numerics/monte-carlo.js';
 import { rangeCount } from '../numerics/range-count.js';
 import { negativeBaseRealPowFromRational } from '../numerics/real-power.js';
 import type { Rational } from '../numerics/types.js';
+import type { RoundingTies } from '../types-definitions.js';
 import {
   complexAcos,
   complexAcosh,
@@ -3202,20 +3203,89 @@ function describeRuntimeValue(x: unknown): string {
  * Shared by both ComputeEngineFunction and ComputeEngineFunctionLiteral.
  */
 /**
- * The quotient `x / k` of a step form (`Floor(x, step)`), taken to the
- * nearest integer when it is within 4 ulps of it. The double of a decimal
- * step is not the decimal: `0.3 / 0.1` is `2.9999999999999996`, whose floor
- * is `2`, while the interpreter, which divides the decimals, finds `3`. The
- * quotient of two doubles is wrong by about 1.5 ulps at most (the rounding
- * of `x`, of `k` and of the division), so a quotient that close to an
- * integer is taken to be that integer.
+ * The digits and the exponent of the shortest decimal of a finite double:
+ * `x = m·10^e`, with `m` a `bigint`. This is the decimal that the
+ * interpreter reads for a float: `0.1` is `1·10^-1`, not the binary value
+ * of the double.
  */
-function stepQuotient(x: number, k: number): number {
+function shortestDecimal(x: number): [bigint, number] {
+  const [mantissa, exponent] = Math.abs(x).toString().split('e');
+  const dot = mantissa.indexOf('.');
+  const digits =
+    dot < 0 ? mantissa : mantissa.slice(0, dot) + mantissa.slice(dot + 1);
+  const fraction = dot < 0 ? 0 : mantissa.length - dot - 1;
+  const m = BigInt(digits);
+  return [x < 0 ? -m : m, Number(exponent ?? 0) - fraction];
+}
+
+/**
+ * True when the quotient of the shortest decimals of `x` and `k` is exactly
+ * `r`, a multiple of `1/2`: `x/k = r` is tested as `2·x = (2r)·k` in integer
+ * arithmetic.
+ */
+function decimalQuotientIs(x: number, k: number, r: number): boolean {
+  const [a, ea] = shortestDecimal(x);
+  const [b, eb] = shortestDecimal(k);
+  const e = Math.min(ea, eb);
+  const lhs = 2n * a * 10n ** BigInt(ea - e);
+  const rhs = BigInt(Math.round(2 * r)) * b * 10n ** BigInt(eb - e);
+  return lhs === rhs;
+}
+
+/**
+ * The quotient `x / k` of a step form (`Floor(x, step)`), taken to be AT a
+ * jump when the interpreter finds it there: the jumps are the multiples of
+ * `unit`, which is `1` for `Floor`, `Ceil` and `Truncate` and `0.5` for
+ * `Round`.
+ *
+ * The interpreter reads a float as its shortest decimal and divides the
+ * decimals: `0.3 / 0.1` is `3`, and `Floor(0.3, 0.1)` is `0.3`. The double
+ * quotient is `2.9999999999999996`, whose floor is `2`. So a double quotient
+ * within 4 ulps of a jump (the quotient of two doubles is wrong by about 1.5
+ * ulps at most) is taken to be at the jump when the quotient of the
+ * decimals is exactly at it (`decimalQuotientIs()`), and is kept otherwise:
+ * `0.49999999999999994 / 1` is not a tie, and `Round` of it is `0`. The
+ * tolerance is relative to the quotient only, so a non-zero quotient is
+ * never taken to be `0` (`Ceil(1e-20, 1)` is `1`).
+ *
+ * A non-zero quotient that underflows to `0` (`1e-300 / 1e300`) is replaced
+ * by the smallest double of its sign, so that `Ceil` gives `1` and `Floor`
+ * of a negative value gives `-1`.
+ */
+function stepQuotient(x: number, k: number, unit = 1): number {
   const q = x / k;
-  const r = Math.round(q);
-  return Math.abs(q - r) <= 4 * Number.EPSILON * Math.max(1, Math.abs(q))
+  if (q === 0 && x !== 0 && k !== 0 && Number.isFinite(k))
+    return Math.sign(x) * Number.MIN_VALUE;
+  const r = Math.round(q / unit) * unit;
+  if (q === r || Math.abs(q - r) > 4 * Number.EPSILON * Math.abs(q)) return q;
+  return Number.isFinite(x) && Number.isFinite(k) && decimalQuotientIs(x, k, r)
     ? r
     : q;
+}
+
+/**
+ * The multiple `round(q) · k` of a step form, with `k = |step|` and `q` the
+ * quotient of `stepQuotient()`. When the quotient overflows (`1e200 /
+ * 1e-200`), the multiple is an integer far beyond 2⁵³ times the step, and
+ * `x` itself is the nearest double to it. A zero step gives `NaN`, as
+ * `Floor(x, 0)` is in the interpreter.
+ */
+function stepMultiple(
+  round: (q: number) => number,
+  x: number,
+  step: number,
+  unit = 1
+): number {
+  const k = Math.abs(step);
+  const q = stepQuotient(x, k, unit);
+  if (
+    !Number.isFinite(q) &&
+    Number.isFinite(x) &&
+    Number.isFinite(k) &&
+    k !== 0
+  )
+    return x;
+  return round(q) * k;
 }
 
 export const SYS_HELPERS = {
@@ -3539,20 +3609,15 @@ export const SYS_HELPERS = {
     Number.isNaN(x) ? NaN : x < 0 ? 0 : x === 0 ? 0.5 : 1,
   // The step forms `Floor(x, step)`, `Ceil(x, step)` and `Truncate(x, step)`:
   // `round(x / k) · k` with `k = |step|`, the quotient taken to the nearest
-  // integer when it is within its rounding error of it (`stepQuotient`). A
-  // zero step gives `NaN`, as `Floor(x, 0)` is in the interpreter.
-  floorStep: (x: number, step: number) => {
-    const k = Math.abs(step);
-    return Math.floor(stepQuotient(x, k)) * k;
-  },
-  ceilStep: (x: number, step: number) => {
-    const k = Math.abs(step);
-    return Math.ceil(stepQuotient(x, k)) * k;
-  },
-  truncStep: (x: number, step: number) => {
-    const k = Math.abs(step);
-    return Math.trunc(stepQuotient(x, k)) * k;
-  },
+  // integer when it is within its rounding error of it (`stepMultiple`).
+  floorStep: (x: number, step: number) => stepMultiple(Math.floor, x, step),
+  ceilStep: (x: number, step: number) => stepMultiple(Math.ceil, x, step),
+  truncStep: (x: number, step: number) => stepMultiple(Math.trunc, x, step),
+  // `Round(x, step)`: the quotient is taken to the nearest half-integer
+  // when it is that close, so that a tie is found, and the tie is rounded
+  // with the rule `ties` (`ce.roundingTies` when the code is compiled).
+  roundStep: (x: number, step: number, ties: RoundingTies) =>
+    stepMultiple((q) => roundToInteger(q, ties), x, step, 0.5),
   // `Round` with a tie rounded to the even neighbour (`ce.roundingTies` is
   // `'to-even'` when the code is compiled). The other tie rules have an
   // inline form made of `Math.round`; this one does not.

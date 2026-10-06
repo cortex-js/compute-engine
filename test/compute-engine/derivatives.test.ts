@@ -1230,7 +1230,7 @@ describe('Multi-argument function derivatives', () => {
         );
     });
 
-    it('d/dx round(x, 2) = 0, and stays symbolic in the digit count', () => {
+    it('d/dx round(x, 2) = 0, and stays symbolic in the step', () => {
       expect(
         engine
           .expr(['D', ['Round', 'x', 2], 'x'])
@@ -1240,6 +1240,19 @@ describe('Multi-argument function derivatives', () => {
       expect(
         engine.expr(['D', ['Round', 2.5, 'n'], 'n']).evaluate().operator
       ).toBe('D');
+    });
+
+    it('the step forms of Floor, Ceil and Truncate: 0 in the operand, symbolic in the step', () => {
+      // `Floor(x, a)` is `k·|a|`: constant between the jumps as a function
+      // of x, but not as a function of the step a.
+      for (const head of ['Floor', 'Ceil', 'Truncate']) {
+        expect(
+          engine.expr(['D', [head, 'x', 3], 'x']).evaluate().toString()
+        ).toBe('0');
+        expect(
+          engine.expr(['D', [head, 2.5, 'a'], 'a']).evaluate().operator
+        ).toBe('D');
+      }
     });
 
     it('d/dx gcd(x, 6) = 0', () => {

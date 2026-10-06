@@ -192,13 +192,15 @@ host can choose another rule with the engine setting `roundingTies`):
 // ➔ [-3, -2, -2, -3]
 ```
 
-With a second argument, `floor`, `ceil` and `truncate` round to a multiple of
-that step instead of an integer. `floor(x, step)` is the greatest multiple of
-the step that is at most `x`, whatever the sign of the step:
+With a second argument, `floor`, `ceil`, `truncate` and `round` round to a
+multiple of that step instead of an integer. `floor(x, step)` is the greatest
+multiple of the step that is at most `x`, whatever the sign of the step, and
+`round(x, step)` the nearest multiple. To round to `n` decimal places, the
+step is `10^-n`:
 
 ```epsil
-[floor(226, 10), ceil(226, 10), truncate(-226, 10), floor(2.7, 1/2)]
-// ➔ [220, 230, -220, 5/2]
+[floor(226, 10), ceil(226, 10), truncate(-226, 10), round(226, 10), round(3.14159, 1/100)]
+// ➔ [220, 230, -220, 230, 157/50]
 ```
 
 There are two remainders. `a % b` (`Mod`) takes the sign of the divisor `b`.

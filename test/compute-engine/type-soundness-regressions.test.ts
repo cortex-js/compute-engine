@@ -121,9 +121,7 @@ describe('SYM P0-13 — imaginary ± imaginary is not typed imaginary', () => {
     ce.declare('b', 'imaginary');
     // a=i, b=i ⇒ a−b = 0 ∈ ℝ, so this must not be `False`.
     expect(
-      ce
-        .expr(['Element', ['Subtract', 'a', 'b'], 'RealNumbers'])
-        .evaluate()
+      ce.expr(['Element', ['Subtract', 'a', 'b'], 'RealNumbers']).evaluate()
         .symbol
     ).not.toBe('False');
   });
@@ -216,24 +214,29 @@ describe('Tycho item 89 — rounding a symbolic number stays integer-valued', ()
     expect(ce.parse('\\mathrm{Round}(i)').isValid).toBe(false);
   });
 
-  it('a precision argument never claims integer, whatever the finiteness', () => {
-    // `Round(x, 2)` with `x: real` (finiteness unknown) used to fall through
-    // to the integer claim while evaluating to `3.14`-like rationals.
+  it('a step that is not an integer never claims integer, whatever the finiteness', () => {
+    // `Round(x, step)` is a multiple of the step: with a non-integer step,
+    // the result is a rational (an exact step) or a real (a float step),
+    // never an integer, also for `x: real` of unknown finiteness. With an
+    // integer step, the result is an integer.
     // (`xr`/`xf` parse as juxtaposition PRODUCTS of undeclared symbols —
     // they always have — so those rows exercise a maybe-NaN compound
     // operand, which now honestly carries the propagated `nan` arm.)
     ce.declare('xr', 'real');
     ce.declare('xf', 'real');
+    expect(typeOf('\\mathrm{Round}(xr, 0.01)')).toBe(
+      'nan | real | signed_infinity'
+    );
+    expect(typeOf('\\mathrm{Round}(xf, \\frac{1}{100})')).toBe(
+      'nan | rational | signed_infinity'
+    );
     expect(typeOf('\\mathrm{Round}(xr, 2)')).toBe(
-      'nan | real | signed_infinity'
+      'integer | nan | signed_infinity'
     );
-    expect(typeOf('\\mathrm{Round}(xf, 2)')).toBe(
-      'nan | real | signed_infinity'
-    );
-    expect(typeOf('\\mathrm{Round}(Q, 2)')).toBe('real | signed_infinity');
-    expect(typeOf('\\mathrm{Round}(3.14159, 2)')).toBe('real');
-    expect(ce.parse('\\mathrm{Round}(1.2+3.4i, 2)').isValid).toBe(false);
-    expect(typeOf('\\mathrm{Round}(\\infty, 2)')).toBe('signed_infinity');
+    expect(typeOf('\\mathrm{Round}(Q, 0.01)')).toBe('real | signed_infinity');
+    expect(typeOf('\\mathrm{Round}(3.14159, 0.01)')).toBe('real');
+    expect(ce.parse('\\mathrm{Round}(1.2+3.4i, 0.01)').isValid).toBe(false);
+    expect(typeOf('\\mathrm{Round}(\\infty, 0.01)')).toBe('signed_infinity');
   });
 
   it('the non-finite and NaN claims', () => {
@@ -242,8 +245,9 @@ describe('Tycho item 89 — rounding a symbolic number stays integer-valued', ()
     expect(typeOf('\\mathrm{Round}(\\mathrm{NaN})')).toBe('nan');
   });
 
-  it('a precision argument still gives a real, not an integer', () => {
-    expect(typeOf('\\mathrm{Round}(4.7, 2)')).toBe('real');
+  it('a step that is not an integer gives a real or a rational, not an integer', () => {
+    expect(typeOf('\\mathrm{Round}(4.7, 0.01)')).toBe('real');
+    expect(typeOf('\\mathrm{Round}(4.7, \\frac{1}{100})')).toBe('rational');
   });
 });
 

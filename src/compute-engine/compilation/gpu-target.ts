@@ -6695,49 +6695,18 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
           : gpuOperandOnce('Round', args[0], compile, target)
       );
     }
-    // The SECOND operand is a precision: `Round(x, n)` rounds to `n` DECIMAL
-    // places (the Desmos/spreadsheet form the signature `(number, integer?)`
-    // declares) — `Round(x·10ⁿ)/10ⁿ`, which is what the interpreter and the
-    // JavaScript and interval targets all compute. Both operands are required;
-    // dropping the precision would silently round to an integer.
-    //
-    // The factor must be a compile-time constant. A shader `pow(10.0, n)` for
-    // a RUNTIME `n` is spec-defined as `exp2(n·log2(10.0))`, which is not
-    // exactly a power of ten — it moves the very tie boundary the rounding it
-    // scales for depends on — and neither language has an integer `pow` to
-    // fall back on. A non-constant precision therefore fails closed, as
-    // it already does on the interval target.
-    const n = tryGetConstant(args[1]);
-    if (n === undefined || !Number.isInteger(n))
-      throw new Error(
-        `Could not compile \`Round\`: rounding to \`n\` decimal places compiles on the ` +
-          `${target.language ?? 'GPU'} target only for a compile-time ` +
-          `INTEGER precision — the factor 10ⁿ has to be folded, because a ` +
-          `shader \`pow(10.0, n)\` is \`exp2(n·log2(10.0))\` and is not ` +
-          `exactly a power of ten.`
-      );
-    // 10ⁿ and its reciprocal must both be representable as a shader float
-    // (f32 normals stop at ~3.4e38 / ~1.2e-38); past that the emitted literal
-    // is an infinity and the whole expression collapses to 0 or NaN.
-    if (Math.abs(n) > 37)
-      throw new Error(
-        `Could not compile \`Round\`: the rounding factor 10^${n} is outside the shader float ` +
-          `range.`
-      );
-    // An integer-valued operand is unchanged by rounding to a NON-NEGATIVE
-    // number of decimal places (it is not, for a negative `n`, which rounds
-    // to tens, hundreds, …).
-    if (n >= 0 && BaseCompiler.isIntegerValued(args[0]))
-      return gpuIdentityPassthrough(args[0], compile, target);
-    const factor = formatFloat(Math.pow(10, n), target.language);
-    // The SCALED operand is what the inline vector form splices more than
-    // once — bind the operand itself once, then build the scaled string from
-    // it. The helper form writes it once, so a scalar operand needs no
-    // binding.
-    const c0 = isScalar
-      ? compile(args[0])
-      : gpuOperandOnce('Round', args[0], compile, target);
-    return `(${roundTie(`(${c0} * ${factor})`)} / ${factor})`;
+    // `Round(x, step)`: the multiple of the step nearest to `x`
+    // (`gpuRoundToStep()`), with the tie of the quotient rounded with the
+    // same rule.
+    return gpuRoundToStep(
+      (q, scalar) =>
+        gpuRoundToInteger(q, ties, scalar, target.language === 'wgsl'),
+      args[0],
+      args[1]!,
+      compile,
+      target,
+      0.5
+    );
   },
   Sign: 'sign',
   Sin: (args, compile) => {
@@ -14488,27 +14457,110 @@ fn _gpu_tanpi(u: f32) -> f32 {
  * is `NaN`, and neither language has a `NaN` literal.
  */
 function gpuRoundToStep(
-  round: string,
+  round: string | ((q: string, isScalar: boolean) => string),
   x: Expression,
   step: Expression,
   compile: (expr: Expression) => string,
-  target: CompileTarget<Expression>
+  target: CompileTarget<Expression>,
+  unit: 1 | 0.5 = 1
 ): string {
+  const name = typeof round === 'string' ? round : 'Round';
+  const apply = (q: string, isScalar: boolean) =>
+    typeof round === 'string' ? `${round}(${q})` : round(q, isScalar);
   const c = tryGetConstant(step);
   if (c !== undefined && (c === 0 || !Number.isFinite(c)))
     throw new Error(
-      `Could not compile \`${round}\` with a step of ${c}: the result is NaN, ` +
+      `Could not compile \`${name}\` with a step of ${c}: the result is NaN, ` +
         `and the ${target.language ?? 'GPU'} target has no NaN literal.`
     );
   const k =
     c !== undefined
       ? formatFloat(Math.abs(c), target.language)
-      : `abs(${gpuOperandOnce(round, step, compile, target)})`;
-  if (gpuOperandShape(x) === 'scalar')
-    return `(${round}(_gpu_step_quotient(${compile(x)}, ${k})) * ${k})`;
-  const q = `((${gpuOperandOnce(round, x, compile, target)}) / ${k})`;
-  const near = `step(abs(${q} - round(${q})), 4.8e-7 * (abs(${q}) + 1.0))`;
-  return `(${round}(mix(${q}, round(${q}), ${near})) * ${k})`;
+      : `abs(${gpuOperandOnce(name, step, compile, target)})`;
+  // `unit` is the distance between two jumps of the quotient: 1 for
+  // `Floor`, `Ceil` and `Truncate`, 0.5 for `Round`, whose quotient is
+  // taken to the nearest half-integer (`_gpu_half_step_quotient`). The
+  // tolerance is relative to the quotient only, so a non-zero quotient is
+  // never taken to be `0`. A non-zero quotient that underflows to `0` (with
+  // a finite step) keeps the sign of `x` as the smallest normal float
+  // (`Ceil(1e-30, 1e30)` is `1e30`), and when the quotient overflows (with
+  // a non-zero step), `x` is the nearest float to the multiple
+  // (`_gpu_step_fix`). A zero step gives `NaN`. The operand is spliced more
+  // than once, so an impure one is bound to a hoisted temporary
+  // (`gpuOperandOnce`).
+  if (gpuOperandShape(x) === 'scalar') {
+    const xc = gpuOperandOnce(name, x, compile, target);
+    const helper =
+      unit === 1 ? '_gpu_step_quotient' : '_gpu_half_step_quotient';
+    const m = `${apply(`${helper}(${xc}, ${k})`, true)} * ${k}`;
+    return `_gpu_step_fix(${m}, ${xc}, ${k})`;
+  }
+  const width = gpuOperandShape(x);
+  if (typeof width !== 'number')
+    throw new Error(
+      `Could not compile \`${name}\` with a step: the operand is not a ` +
+        `scalar or a vector.`
+    );
+  // A `vecN` operand: the same computation, componentwise. A choice between
+  // two vectors is a SELECTION (`select` in WGSL, `mix` with a boolean
+  // vector in GLSL), never the arithmetic `mix(a, b, t)`, which gives `NaN`
+  // when the other branch is infinite. Both sides of a comparison are
+  // vectors: WGSL has no comparison of a vector with a scalar.
+  const isWGSL = target.language === 'wgsl';
+  const vt = gpuVecType(width, isWGSL);
+  const choose = (
+    a: string,
+    b: string,
+    l: string,
+    op: '<=' | '>' | '==',
+    r: string
+  ): string => {
+    if (isWGSL) return `select(${a}, ${b}, ${l} ${op} ${r})`;
+    const fn = { '<=': 'lessThanEqual', '>': 'greaterThan', '==': 'equal' }[op];
+    return `mix(${a}, ${b}, ${fn}(${l}, ${r}))`;
+  };
+  // The operand, the step and the quotients are bound to temporaries when
+  // the position has a statement before it (`BaseCompiler.canHoist`), so
+  // that each is written once; otherwise they are spliced.
+  const hoist = BaseCompiler.canHoist(target);
+  const bind = (value: string, type: string): string => {
+    if (!hoist || /^[A-Za-z_]\w*$/.test(value)) return value;
+    const t = BaseCompiler.tempVar(target);
+    BaseCompiler.hoistStatement(
+      target,
+      isWGSL ? `var ${t}: ${type} = ${value};` : `${type} ${t} = ${value};`
+    );
+    return t;
+  };
+  const xv = bind(gpuOperandOnce(name, x, compile, target), vt);
+  const kv = c !== undefined ? k : bind(k, gpuScalarType(isWGSL));
+  const q0 = bind(`(${xv} / ${kv})`, vt);
+  // The smallest normal float of the sign of `x`, for a quotient that
+  // underflows: `0` for an infinite step, whose quotient is truly `0`.
+  const tiny =
+    c !== undefined
+      ? '1.17549435e-38'
+      : isWGSL
+        ? `select(0.0, 1.17549435e-38, ${kv} < 3.4e38)`
+        : `(${kv} < 3.4e38 ? 1.17549435e-38 : 0.0)`;
+  const q = bind(
+    choose(q0, `(sign(${xv}) * ${tiny})`, q0, '==', `${vt}(0.0)`),
+    vt
+  );
+  const r = unit === 1 ? `round(${q})` : `(round(${q} * 2.0) * 0.5)`;
+  const snapped = bind(
+    choose(q, r, `abs(${q} - ${r})`, '<=', `4.8e-7 * abs(${q})`),
+    vt
+  );
+  const m = `(${apply(snapped, false)} * ${kv})`;
+  // A zero step makes `abs(q0)·0` `NaN`, which is not `> 3.4e38`: the
+  // result stays `NaN`.
+  const big = c !== undefined ? `abs(${q0})` : `(abs(${q0}) * sign(${kv}))`;
+  // Parenthesized: the outer call does not take the operands of the
+  // rounding head one for one, and the operand-shape check
+  // (`gpuCheckOperandShapes()`) reads an emission that starts with a call
+  // as such a call.
+  return `(${choose(m, xv, big, '>', `${vt}(3.4e38)`)})`;
 }
 
 /**
@@ -14568,8 +14620,10 @@ function gpuRoundToInteger(
  * for each tie rule other than `to-even` (see `gpuRoundToInteger()`):
  * `_gpu_round` rounds a tie away from zero (`Round(-2.5)` is -3,
  * `Round(2.5)` is 3), `_gpu_round_tz` toward zero, `_gpu_round_up` toward
- * `+∞` and `_gpu_round_down` toward `−∞`. `_gpu_step_quotient` is the
- * quotient of the step forms (`gpuRoundToStep()`). `gpuLibrarySubset()` keeps
+ * `+∞` and `_gpu_round_down` toward `−∞`. `_gpu_step_quotient` and
+ * `_gpu_half_step_quotient` are the quotients of the step forms, and
+ * `_gpu_step_fix` their result when the quotient overflows
+ * (`gpuRoundToStep()`). `gpuLibrarySubset()` keeps
  * only the helpers that a compilation calls.
  *
  * `step(0.5, d)` is `1` when `d ≥ 0.5`, and `1 - step(d, 0.5)` is `1` when
@@ -14599,8 +14653,18 @@ float _gpu_round_down(float x) {
 }
 float _gpu_step_quotient(float x, float k) {
   float q = x / k;
+  if (q == 0.0 && x != 0.0 && k < 3.4e38) return sign(x) * 1.17549435e-38;
   float r = round(q);
-  return abs(q - r) <= 4.8e-7 * max(1.0, abs(q)) ? r : q;
+  return abs(q - r) <= 4.8e-7 * abs(q) ? r : q;
+}
+float _gpu_half_step_quotient(float x, float k) {
+  float q = x / k;
+  if (q == 0.0 && x != 0.0 && k < 3.4e38) return sign(x) * 1.17549435e-38;
+  float r = round(q * 2.0) * 0.5;
+  return abs(q - r) <= 4.8e-7 * abs(q) ? r : q;
+}
+float _gpu_step_fix(float m, float x, float k) {
+  return k != 0.0 && abs(x / k) > 3.4e38 ? x : m;
 }
 `;
 
@@ -14627,8 +14691,18 @@ fn _gpu_round_down(x: f32) -> f32 {
 }
 fn _gpu_step_quotient(x: f32, k: f32) -> f32 {
   let q = x / k;
+  if (q == 0.0 && x != 0.0 && k < 3.4e38) { return sign(x) * 1.17549435e-38; }
   let r = round(q);
-  return select(q, r, abs(q - r) <= 4.8e-7 * max(1.0, abs(q)));
+  return select(q, r, abs(q - r) <= 4.8e-7 * abs(q));
+}
+fn _gpu_half_step_quotient(x: f32, k: f32) -> f32 {
+  let q = x / k;
+  if (q == 0.0 && x != 0.0 && k < 3.4e38) { return sign(x) * 1.17549435e-38; }
+  let r = round(q * 2.0) * 0.5;
+  return select(q, r, abs(q - r) <= 4.8e-7 * abs(q));
+}
+fn _gpu_step_fix(m: f32, x: f32, k: f32) -> f32 {
+  return select(m, x, k != 0.0 && abs(x / k) > 3.4e38);
 }
 `;
 

@@ -1711,11 +1711,19 @@ function differentiateNode(
     return ce.Zero;
   }
 
-  // Round(u, n) rounds u to n digits: it is a step function of u, so its
-  // derivative is 0 almost everywhere, as for the one-argument `Round` of
-  // the table. The digit count n is an integer, a discrete parameter: if n
-  // depends on v there is no derivative, so stay symbolic.
-  if (expr.operator === 'Round' && expr.nops === 2) {
+  // The step forms `Round(u, a)`, `Floor(u, a)`, `Ceil(u, a)` and
+  // `Truncate(u, a)` round u to a multiple of the step a: a step function of
+  // u, so the derivative in u is 0 almost everywhere, as for the
+  // one-argument forms of the table. As a function of the step, the result
+  // `k·|a|` is not constant (its derivative is `±k` between the jumps): if
+  // the step depends on v, stay symbolic.
+  if (
+    (expr.operator === 'Round' ||
+      expr.operator === 'Floor' ||
+      expr.operator === 'Ceil' ||
+      expr.operator === 'Truncate') &&
+    expr.nops === 2
+  ) {
     const [u, n] = expr.ops;
     if (n.has(v)) return ce._fn('D', [expr, ce.symbol(v)]);
     if (u.has(v)) recordD(trace, expr, v, 'derivative.zero', () => ce.Zero);

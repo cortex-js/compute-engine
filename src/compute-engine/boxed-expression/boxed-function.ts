@@ -7106,21 +7106,13 @@ function exactJumpBroadcastOperands(
   if (ops.length !== tail.length) return undefined;
   const ce = expr.engine;
 
-  // The float of an element is multiplied by `10ⁿ` for `Round(x, n)`, whose
-  // jump is where `x·10ⁿ` is a half-integer. When `n` is not a real number
-  // literal, the scale is not known, and every element is taken as near a
-  // jump.
   let scale = 1;
-  if (expr.operator === 'Round' && tail.length > 1) {
-    const n = tail[1];
-    if (!isNumber(n) || n.isComplex || n.isFinite !== true) scale = NaN;
-    else scale = Math.pow(10, n.re);
-  }
   // `Floor(x, step)`, `Ceil(x, step)` and `Truncate(x, step)` jump where
-  // `x/|step|` is an integer, so the float of an element is divided by the
-  // step. When the step is not a non-zero real number literal, every element
-  // is taken as near a jump.
-  if (jump === 'integer' && tail.length > 1) {
+  // `x/|step|` is an integer, and `Round(x, step)` where it is a
+  // half-integer, so the float of an element is divided by the step. When
+  // the step is not a non-zero real number literal, every element is taken
+  // as near a jump.
+  if ((jump === 'integer' || jump === 'half') && tail.length > 1) {
     const step = tail[1];
     if (
       !isNumber(step) ||
