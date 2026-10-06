@@ -43,7 +43,7 @@ import {
 } from './simplify-abs.js';
 import { simplifyInfinity } from './simplify-infinity.js';
 import { simplifyLog } from './simplify-log.js';
-import { simplifyPower } from './simplify-power.js';
+import { simplifyPower, canCombineSameBase } from './simplify-power.js';
 import { negatedArgument, oddEvenStep, simplifyTrig } from './simplify-trig.js';
 import { simplifyHyperbolic } from './simplify-hyperbolic.js';
 import { simplifyDivide } from './simplify-divide.js';
@@ -1032,15 +1032,21 @@ export const SIMPLIFY_RULES: Rule[] = [
     if (!isFunction(x, 'Multiply') || x.ops.length < 2) return undefined;
 
     const ce = x.engine;
-    // Group ALL terms by base (including unknown symbols)
-    const baseGroups = new Map<
-      string,
-      {
-        base: Expression;
-        terms: Array<{ term: Expression; exp: Expression }>;
-      }
-    >();
+    type Group = {
+      base: Expression;
+      terms: Array<{ term: Expression; exp: Expression }>;
+    };
+    // Group ALL scalar terms by base (including unknown symbols)
+    const baseGroups = new Map<string, Group>();
     const otherTerms: Expression[] = [];
+    // The non-scalar terms (matrices and other collections), in the order of
+    // the product. The matrix product is not commutative, so these terms keep
+    // their order: `A·B·A` is not `A^2·B`. Only a run of adjacent terms with
+    // the same base is combined (`A·A·B` is `A^2·B`). Scalar terms commute
+    // with all terms, so they do not break a run. A term that is kept as it
+    // is makes a group of one term.
+    const nonScalarTerms: Group[] = [];
+    let run: { key: string; group: Group } | undefined;
 
     for (const term of x.ops) {
       let base: Expression;
@@ -1054,12 +1060,46 @@ export const SIMPLIFY_RULES: Rule[] = [
         base = term;
         exp = ce.One;
       } else {
-        // Non-symbol, non-power terms (e.g., numbers) go to otherTerms
-        otherTerms.push(term);
+        // Non-symbol, non-power terms (e.g., numbers) go to otherTerms. A
+        // non-scalar term (`Transpose(A)`) keeps its position and ends the
+        // current run.
+        if (isCollectionShaped(term)) {
+          nonScalarTerms.push({ base: term, terms: [{ term, exp: ce.One }] });
+          run = undefined;
+        } else otherTerms.push(term);
+        continue;
+      }
+
+      const nonScalar =
+        isCollectionShaped(term) ||
+        isCollectionShaped(base) ||
+        isCollectionShaped(exp);
+
+      // A term that cannot be combined with another power of its base is
+      // kept as it is. `canCombineSameBase()` states the conditions: the base
+      // is not required to be non-zero, but no factor can be a matrix or
+      // another collection (the matrix product is not element-wise, so
+      // `Exp(A)·Exp(B) ≠ Exp(A+B)` for matrices), except a positive integer
+      // power (`A·A` is `A^2`). The conditions apply to each term separately,
+      // so the test is done here, before a numeric coefficient is split into
+      // powers of the bases found (second pass below).
+      if (!canCombineSameBase(base, [exp], [term], 'product')) {
+        if (nonScalar) {
+          nonScalarTerms.push({ base, terms: [{ term, exp }] });
+          run = undefined;
+        } else otherTerms.push(term);
         continue;
       }
 
       const baseKey = JSON.stringify(base.json);
+      if (nonScalar) {
+        if (run?.key === baseKey) run.group.terms.push({ term, exp });
+        else {
+          run = { key: baseKey, group: { base, terms: [{ term, exp }] } };
+          nonScalarTerms.push(run.group);
+        }
+        continue;
+      }
       let group = baseGroups.get(baseKey);
       if (!group) {
         group = { base, terms: [] };
@@ -1227,45 +1267,25 @@ export const SIMPLIFY_RULES: Rule[] = [
       }
     }
 
-    // Check if any base has multiple terms that can be combined
+    // Any group with two or more terms is combined: a term that cannot be
+    // combined was put in `otherTerms`, or in a group of one term, by the
+    // first pass. Adding the exponents
+    // assumes that they commute (ab = ba), which is true for every scalar
+    // exponent (see `canCombineSameBase()`).
     for (const group of baseGroups.values()) {
-      if (group.terms.length > 1) {
-        // Check if we can safely combine:
-        // - base is known non-zero (positive, negative, or numeric), OR
-        // - sum of exponents is positive (so 0^n = 0, not 0^(-k) = undefined)
-        const base = group.base;
-        const baseNonZero =
-          base.isPositive === true ||
-          base.isNegative === true ||
-          isNumber(base);
-
-        if (baseNonZero) {
-          hasCombinations = true;
-        } else {
-          // Check if sum of exponents is positive (safe even if base might be 0)
-          // Use symbolic Add to preserve exact forms (e.g., 1 + sqrt(2))
-          // instead of .add() which evaluates numerically
-          const exponents = group.terms.map((t) => t.exp);
-          const summedExp = ce.function('Add', exponents);
-          if (summedExp.isPositive === true) {
-            hasCombinations = true;
-          } else {
-            // Can't safely combine - push all terms to otherTerms
-            for (const t of group.terms) {
-              otherTerms.push(t.term);
-            }
-            group.terms.length = 0;
-          }
-        }
-      }
+      if (group.terms.length > 1) hasCombinations = true;
+    }
+    for (const group of nonScalarTerms) {
+      if (group.terms.length > 1) hasCombinations = true;
     }
 
     if (!hasCombinations) return undefined;
 
-    // Build result
+    // Build result: the scalar terms first, then the non-scalar terms in
+    // their order in the product
     const resultTerms: Expression[] = [...otherTerms];
 
-    for (const group of baseGroups.values()) {
+    for (const group of [...baseGroups.values(), ...nonScalarTerms]) {
       if (group.terms.length === 1) {
         // Single term, keep as-is
         resultTerms.push(group.terms[0].term);
@@ -1280,6 +1300,10 @@ export const SIMPLIFY_RULES: Rule[] = [
           resultTerms.push(ce.One);
         } else if (summedExp.isSame(1)) {
           resultTerms.push(group.base);
+        } else if (isCollectionShaped(group.base)) {
+          // A positive integer power of a matrix: the canonical form is the
+          // matrix power `MatrixPower(A, n)`
+          resultTerms.push(ce.function('Power', [group.base, summedExp]));
         } else {
           resultTerms.push(ce._fn('Power', [group.base, summedExp]));
         }

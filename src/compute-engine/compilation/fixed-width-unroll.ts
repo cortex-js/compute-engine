@@ -16,6 +16,7 @@ import {
   functionLiteralParameterName,
   isRestParameter,
 } from '../boxed-expression/function-literal.js';
+import { smallCount } from '../boxed-expression/collection-count.js';
 
 /**
  * Rewrite a collection whose WIDTH is known at compile time into straight-line
@@ -1711,7 +1712,7 @@ function isLiteralRange(
  */
 function literalRangeCount(range: Expression): number | undefined {
   if (!isLiteralRange(range)) return undefined;
-  const count = range.count;
+  const count = smallCount(range);
   return count !== undefined && Number.isFinite(count) ? count : undefined;
 }
 

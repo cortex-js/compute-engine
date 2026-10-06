@@ -53,8 +53,9 @@ import {
   chop as scalarChop,
   nextDown,
   nextUp,
-  roundHalfAway,
+  roundToInteger,
 } from '../numerics/numeric.js';
+import type { RoundingTies } from '../types-definitions.js';
 
 /**
  * Square root of an interval (or IntervalResult).
@@ -758,7 +759,8 @@ function ceilRaw(x: Interval | IntervalResult): IntervalResult {
  *
  * The first jump is at `rlo + 0.5`. Continuity is derived from the rule itself
  * (`right` when the value at the jump matches the value just above it), so this
- * is correct for both half-away (Round) and half-toward-+∞ (Remainder) rules.
+ * is correct for every tie rule (`RoundingTies`): with `to-even`, the jump at
+ * `0.5` is continuous from the left and the jump at `1.5` from the right.
  */
 function roundStep(
   x: Interval,
@@ -776,19 +778,24 @@ function roundStep(
 }
 
 /**
- * Round to nearest integer, half away from zero.
+ * Round to the nearest integer. A value halfway between two integers is
+ * rounded with the rule `ties` (`roundToInteger()` in `numeric.ts`). The
+ * compiled code of `Round` passes the rule of `ce.roundingTies` at compile
+ * time; the default, away from zero, matches the default of the interpreter
+ * (Round(-2.5) = -3, Round(2.5) = 3).
  *
- * Matches the interpreter (Round(-2.5) = -3, Round(2.5) = 3), NOT JS
- * `Math.round` (half toward +∞). Round is a step function with jump
- * discontinuities at every half-integer (±0.5, ±1.5, …) and is continuous
- * through 0; an interval that stays within one step returns that constant
- * value, one that spans a half-integer returns `singular`.
+ * Round is a step function with jump discontinuities at every half-integer
+ * (±0.5, ±1.5, …); an interval that stays within one step returns that
+ * constant value, one that spans a half-integer returns `singular`.
  */
-function roundRaw(x: Interval | IntervalResult): IntervalResult {
+function roundRaw(
+  x: Interval | IntervalResult,
+  ties: RoundingTies = 'away-from-zero'
+): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
-  return roundStep(xVal, roundHalfAway);
+  return roundStep(xVal, (v) => roundToInteger(v, ties));
 }
 
 /**
@@ -987,11 +994,16 @@ function modRaw(
 }
 
 /**
- * IEEE remainder: remainder(a, b) = a - b * round(a / b).
+ * Remainder: remainder(a, b) = a - b * round(a / b), with the quotient
+ * rounded to the nearest integer.
  *
  * Composes division, rounding, multiplication, and subtraction.
  * Discontinuities arise from the `round` step when `a/b` spans
  * a half-integer boundary.
+ *
+ * The quotient is rounded with a tie toward `+∞`, as the interpreter's
+ * `Remainder` does (JavaScript `Math.round`): `Remainder(-5, 2)` is `-1`,
+ * not `1`. The tie rule of `Round` (`ce.roundingTies`) does not apply here.
  */
 function remainderRaw(
   a: Interval | IntervalResult,
@@ -1002,7 +1014,10 @@ function remainderRaw(
   // steps its answer. `round` performs no rounding of its own, so the exported
   // form of it is used as it is — and it is the source of this routine's
   // discontinuities, which the unrounded kernels still propagate.
-  return subUnrounded(a, mulUnrounded(b, round(divUnrounded(a, b))));
+  return subUnrounded(
+    a,
+    mulUnrounded(b, round(divUnrounded(a, b), 'toward-positive-infinity'))
+  );
 }
 
 /**

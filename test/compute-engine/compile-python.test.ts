@@ -757,12 +757,19 @@ describe('PYTHON TARGET', () => {
     it('Remainder is round-to-nearest, not np.remainder (P0-7)', () => {
       const code = python.compile(ce.box(['Remainder', 'a', 'b'])).code;
       expect(code).not.toContain('np.remainder');
-      expect(code).toBe('((a) - (b) * np.round((a) / (b)))');
+      // The quotient is rounded with a tie toward +∞, as the interpreter does
+      // with `Math.round`: `np.round` rounds a tie to even, and
+      // `Remainder(5, 2)` was `1` instead of `-1`.
+      expect(code).toContain('def _ce_round(');
+      expect(code.split('\n').at(-1)).toBe(
+        "((a) - (b) * _ce_round((a) / (b), 'toward-positive-infinity'))"
+      );
     });
 
     it('Round is half-away-from-zero, not np.round banker (P0-41)', () => {
       const code = python.compile(ce.box(['Round', 'x'])).code;
-      expect(code).toBe('(np.sign(x) * np.floor(np.abs(x) + 0.5))');
+      expect(code).toContain('def _ce_round(');
+      expect(code.split('\n').at(-1)).toBe("_ce_round(x, 'away-from-zero')");
     });
 
     it('Arccot uses the (0, π) branch (P0-42)', () => {

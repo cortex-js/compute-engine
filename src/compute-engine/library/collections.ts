@@ -15,7 +15,11 @@ import {
   isAbsentScalarSymbol,
   absentScalarMarker,
 } from '../boxed-expression/validate.js';
-import { toInteger, toIntegerOperand } from '../boxed-expression/numerics.js';
+import {
+  asBigint,
+  toInteger,
+  toIntegerOperand,
+} from '../boxed-expression/numerics.js';
 import { computeBroadcastCell } from '../boxed-expression/broadcast-cell-widening.js';
 
 import {
@@ -46,6 +50,11 @@ import {
   type WindowedParams,
   isWalkableFiniteCollection,
 } from '../collection-utils.js';
+import {
+  isFiniteCount,
+  normalizeCount,
+  smallCount,
+} from '../boxed-expression/collection-count.js';
 import {
   isAbstractCollectionTypeOf,
   isKindOpenOperandType,
@@ -123,6 +132,10 @@ import { interval, intervalContains } from '../numerics/interval.js';
 import { MAX_RANDOM_ELEMENT_COUNT } from '../numerics/random.js';
 import { MAX_CHUNK_COUNT } from '../numerics/value-scaled-caps.js';
 import { rangeCount } from '../numerics/range-count.js';
+import {
+  exactArithmeticRange,
+  rationalRangeCount,
+} from './range-closed-form.js';
 import { splitGraphemeClusters } from '../../common/grapheme-splitter.js';
 import { mapAutoCompileRunner } from './map-auto-compile.js';
 import { lowerMapSpine, makeSpineRunner } from './map-lowering.js';
@@ -278,6 +291,67 @@ function linspaceSample(
 function integerParam(op: Expression | undefined): number | undefined | null {
   if (op === undefined || isSymbol(op, 'Nothing')) return undefined;
   return toIntegerOperand(op);
+}
+
+/**
+ * The value of an exact integer operand that is NOT a safe integer, as a
+ * `bigint`, else `undefined`. `toIntegerOperand()` answers `null` for such an
+ * operand, because a `number` cannot hold it exactly. An operand that is not
+ * a number literal is evaluated first, as `toIntegerOperand()` does.
+ */
+function unsafeIntegerOperand(op: Expression): bigint | undefined {
+  const value = isNumber(op) ? op : op.evaluate();
+  if (!isNumber(value) || !value.isExact || !value.isInteger) return undefined;
+  const n = asBigint(value);
+  if (n === null) return undefined;
+  const limit = BigInt(Number.MAX_SAFE_INTEGER);
+  return n > limit || n < -limit ? n : undefined;
+}
+
+/**
+ * The count operand of `Take`/`Drop`, read as `integerParam()` reads it, with
+ * one addition for a count that `integerParam()` cannot read: an exact
+ * integer that is not a safe integer (`10^20`), a float whose magnitude is
+ * larger than every safe integer (`1e20`), or an infinite count (`+∞`,
+ * `-∞`).
+ *
+ * The magnitude of such a count is larger than any length that is a safe
+ * integer. When the length `c` of the source is a finite safe integer, the
+ * count is clamped to `c` and keeps its sign: `Take(xs, 10^20)` is
+ * `Take(xs, c)` (the whole source), and `Drop(xs, -∞)` is `Drop(xs, -c)` (the
+ * empty collection). Every facet then reads an ordinary number and answers as
+ * it does for a count past the length that is a safe integer.
+ *
+ * When the length of the source is not known, is infinite or is a `bigint`,
+ * the clamp is not known, and the result is `null`, the same as for a
+ * symbolic count: every facet answers its indeterminate value and the
+ * expression stays unevaluated.
+ */
+function takeDropCount(
+  xs: Expression,
+  op: Expression | undefined
+): number | undefined | null {
+  const n = integerParam(op);
+  if (n !== null || op === undefined) return n;
+  let sign: number;
+  const big = unsafeIntegerOperand(op);
+  if (big !== undefined) sign = big > 0n ? 1 : -1;
+  else {
+    // A real count whose magnitude is larger than every safe integer: an
+    // infinity, or a float such as `1e20` (every float that large has an
+    // integer value). The compiled Python code clamps a constant count of
+    // this size in the same way (`pyTakeDropSlice()` in
+    // `compilation/python-target.ts`).
+    const value = isNumber(op) ? op : op.evaluate();
+    if (!isNumber(value) || value.im !== 0) return null;
+    const re = value.re;
+    if (Math.abs(re) > Number.MAX_SAFE_INTEGER) sign = Math.sign(re);
+    else return null;
+  }
+  let length = smallCount(xs);
+  if (length === undefined && xs.isEmptyCollection === true) length = 0;
+  if (length === undefined || !Number.isFinite(length)) return null;
+  return sign * length;
 }
 
 /**
@@ -1777,10 +1851,29 @@ function eagerViewSource(xs: Expression): Expression {
 function finitenessOfSource(xs: Expression): boolean | undefined {
   const finite = xs.isFiniteCollection;
   if (finite !== undefined || xs.isCollection || !isFunction(xs)) return finite;
-  const count = xs.count;
-  if (count !== undefined && Number.isFinite(count)) return true;
+  if (isFiniteCount(xs.count)) return true;
   if (eagerOperandsAreFinite(xs)) return true;
   return eagerViewSource(xs).isFiniteCollection;
+}
+
+/**
+ * The `isEnumerable` handler of a view over ONE source collection at `op1`
+ * whose walk reads the source from the end (`Reverse`, which reads `at(-1)`,
+ * `at(-2)`, …) or at a position computed from the source count (`RotateLeft`,
+ * `RotateRight`).
+ *
+ * A negative index and a position past the safe integers need the source
+ * count as a `number`. When that count is a `bigint` (a finite count that is
+ * not a safe integer), the walk yields nothing, so the view is not
+ * enumerable: answering the source's enumerability let a consumer read the
+ * empty walk as an empty collection (`Any(Reverse(Permutations(Range(1,
+ * 20))), p)` answered `False`). Otherwise the view can produce its elements
+ * exactly when its source can (see `enumerableFromSource()`).
+ */
+function enumerableFromSmallSource(expr: Expression): boolean | undefined {
+  if (!isFunction(expr)) return undefined;
+  if (typeof expr.op1.count === 'bigint') return false;
+  return expr.op1.isEnumerableCollection;
 }
 
 /**
@@ -1814,7 +1907,11 @@ function eagerOperandsAreFinite(xs: Expression): boolean {
  * {@link eagerViewSource}.
  */
 function countOfSource(xs: Expression): number | undefined {
-  return xs.count ?? eagerViewSource(xs).count;
+  // A count that is not a safe integer (a `bigint`) is read as unknown, and
+  // the source is not evaluated for it: it would report the same count.
+  const count = xs.count;
+  if (count !== undefined) return typeof count === 'bigint' ? undefined : count;
+  return smallCount(eagerViewSource(xs));
 }
 
 // Rebuild the operand list with `first` in place of `op1`, dropping nothing
@@ -2463,8 +2560,8 @@ function componentTypeD(xs: OperandDescriptor, position: number): Type {
  * - a list literal whose type has no length;
  * - a string literal: its characters (grapheme clusters, as `BoxedString`
  *   counts them);
- * - a `Range` whose bounds and step are number literals, counted with
- *   `rangeCount()`, the function its own `count` handler uses.
+ * - a `Range` whose bounds and step are number literals, counted as its
+ *   own `count` handler counts it (`rangeElementCount()`).
  *
  * A symbol declared `list<T>` with no length, a `Filter`, a `Rest`, a range
  * with a symbolic bound answer `undefined`: their length is a fact of the
@@ -2496,6 +2593,21 @@ function provenLengthD(d: OperandDescriptor): number | undefined {
           ? [bounds[0]!, bounds[1]!, bounds[1]! >= bounds[0]! ? 1 : -1]
           : [bounds[0]!, bounds[1]!, bounds[2]!];
     const n = rangeCount(lower, upper, step);
+    // The `count` handler uses the exact count when every operand is an
+    // exact rational. A descriptor gives the rational value of a literal,
+    // but not whether the literal is exact: `3.0` and `3` have the same
+    // descriptor, and an integer-valued float makes the handler use the
+    // machine count. When the exact count of the rational values is not the
+    // machine count (`Range(0, 9999999999999/10^12, 1)`: 10 and 11), the
+    // count of the handler is not known here, and no length is proved.
+    const rationals = s.children.map((c) => {
+      const st = c.structureOf?.();
+      return st?.kind === 'number' ? st.rational : undefined;
+    });
+    if (rationals.every((r) => r !== undefined)) {
+      const exact = rationalRangeCount(rationals);
+      if (exact !== undefined && exact !== BigInt(n)) return undefined;
+    }
     return Number.isInteger(n) && n >= 0 ? n : undefined;
   }
   return undefined;
@@ -4190,6 +4302,10 @@ function isProvablyOutOfRange(xs: Expression, index: number): boolean {
     return false;
   if (xs.isEmptyCollection === true) return true;
   const count = xs.count;
+  // A count that is not a safe integer (a `bigint`) is larger than every
+  // `number` index, and `at()` cannot use it to resolve a negative index. A
+  // miss is then not a proof.
+  if (typeof count === 'bigint') return false;
   // A finite collection whose elements cannot be computed
   // (`Linspace(a, 1, 3)` with a symbolic `a`) knows its length, but its
   // handler misses at every position, inside the range too. Only a position
@@ -4544,7 +4660,7 @@ function concretePointArity(e: Expression): number | undefined {
   if (isFunction(e) && e.operator === 'Tuple') return e.nops;
   // A coordinate ROW (the list-of-lists spelling), peeked the same way
   // `pointComponentAt` decides broadcast-vs-index.
-  if (isPointLike(e)) return e.count;
+  if (isPointLike(e)) return smallCount(e);
   return undefined;
 }
 
@@ -5302,7 +5418,7 @@ const JOIN_COLLECTION_HANDLERS: CollectionHandlers = {
     if (typeof index !== 'number' || !isFunction(expr)) return undefined;
 
     const countOf = (op: Expression): number | undefined =>
-      isAtomicJoinOperand(op) ? 1 : op.count;
+      isAtomicJoinOperand(op) ? 1 : smallCount(op);
 
     // A set-kind result has to be indexed through the DEDUPLICATED
     // enumeration, and a keyed one through the MERGED entries, so that
@@ -5787,6 +5903,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // collection whose count is not known (a `Filter` over an infinite
       // source) keeps the inert form below.
       if (n === Infinity) return engine.PositiveInfinity;
+      // A count that is not a safe integer is a `bigint`: an exact integer.
+      if (typeof n === 'bigint') return engine.number(n);
       if (n === undefined || !isFinite(n))
         return xs.isEmptyCollection ? engine.Zero : undefined;
       return engine.number(n);
@@ -6546,12 +6664,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // Symbolic bounds (e.g. Range(1, n)): the count is indeterminate —
         // `range()` would coerce the bound to 1 and report a count of 1.
         if (hasSymbolicRangeBounds(expr)) return undefined;
-        // `rangeCount` returns 0 for a zero step or a sign-mismatched step
-        // (e.g. Range(5, 1, 1)), Infinity for a non-finite bound, and
-        // counts an end point that is on the step grid in exact arithmetic
-        // but one rounding error short of it in floating point.
+        // See `rangeElementCount()`.
         const [lower, upper, step] = range(expr);
-        return rangeCount(lower, upper, step);
+        return rangeElementCount(expr, lower, upper, step);
       },
 
       contains: (expr, target) => {
@@ -6571,6 +6686,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (hasSymbolicRangeBounds(expr)) return undefined;
         const [lower, upper, step] = range(expr);
         if (step === 0) return false;
+        // The element count of the `count` handler (`rangeElementCount()`):
+        // the exact count for exact rational operands, which never counts
+        // an element past `upper`, and otherwise the machine count. A count
+        // that is not a safe integer is a `bigint`. The comparisons below
+        // are valid between a `number` and a `bigint`.
+        const count = rangeElementCount(expr, lower, upper, step);
         // An infinite step with a finite lower bound: the only finite
         // element is `lower`, and `rangeCount` counts it (`Range(0, 1, +oo)`
         // is [0], and `Range(1, 5, -oo)` is [1], as in `rangeLast()`). The
@@ -6578,7 +6699,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // `(t − lower) / step` is 0 for every finite target, and the last
         // element `lower + step·0` is NaN.
         if (!Number.isFinite(step) && Number.isFinite(lower))
-          return t === lower && rangeCount(lower, upper, step) > 0;
+          return t === lower && count > 0;
         const tol = expr.engine.tolerance;
         // Directional bounds check: t must lie between lower and upper in
         // the direction implied by step's sign. Both sides allow a slack of
@@ -6599,12 +6720,17 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // `tol` steps: `Range(0, 999.9999999999, 0.1)` counts 10001
         // elements, and its last element, 1000, is past `upper` by 10⁻¹⁰.
         // When both bounds are finite, the far limit is therefore the
-        // last counted element if it is past `upper`.
+        // last counted element if it is past `upper`. (An exact count never
+        // counts an element past `upper`, and a `bigint` count has no exact
+        // machine position: the far limit is then `upper` with its slack.)
         const slack = Number.isFinite(step) ? tol * Math.abs(step) : 0;
         const near = step > 0 ? lower - slack : lower + slack;
         let far = step > 0 ? upper + slack : upper - slack;
-        if (Number.isFinite(lower) && Number.isFinite(upper)) {
-          const count = rangeCount(lower, upper, step);
+        if (
+          Number.isFinite(lower) &&
+          Number.isFinite(upper) &&
+          typeof count === 'number'
+        ) {
           if (count > 0) {
             const last = lower + step * (count - 1);
             far = step > 0 ? Math.max(far, last) : Math.min(far, last);
@@ -6628,9 +6754,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         const k = (t - lower) / step;
         const kRounded = Math.round(k);
         return (
-          kRounded >= 0 &&
-          kRounded < rangeCount(lower, upper, step) &&
-          Math.abs(k - kRounded) < tol
+          kRounded >= 0 && kRounded < count && Math.abs(k - kRounded) < tol
         );
       },
 
@@ -6647,16 +6771,18 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (hasInfiniteRangeOrigin(expr)) return undefined;
         const [lower, upper, step] = range(expr);
 
-        // Number of elements in the range. `rangeCount` returns 0 for a
-        // sign-mismatched step (e.g. Range(0, 1, -1)), so the count is never
-        // negative and the loop always ends.
-        const maxCount = rangeCount(lower, upper, step);
+        // Number of elements in the range (see `rangeElementCount()`). It is
+        // 0 for a sign-mismatched step (e.g. Range(0, 1, -1)), so the count
+        // is never negative and the loop always ends. A count that is not a
+        // safe integer is a `bigint`, and the comparison below is valid
+        // between a `number` and a `bigint`.
+        const maxCount = rangeElementCount(expr, lower, upper, step);
 
         let index = 1;
 
         return {
           next: () => {
-            if (index === maxCount + 1) return { value: undefined, done: true };
+            if (index > maxCount) return { value: undefined, done: true };
             index += 1;
             return {
               value: rangeElement(expr, lower, step, index - 2),
@@ -6686,7 +6812,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (hasInfiniteRangeOrigin(expr)) return undefined;
         const [lower, upper, step] = range(expr);
         if (step === 0) return undefined;
-        const maxCount = rangeCount(lower, upper, step);
+        // The count can be a `bigint`: the comparison is still valid.
+        const maxCount = rangeElementCount(expr, lower, upper, step);
         if (index < 1 || index > maxCount) return undefined;
         return rangeElement(expr, lower, step, index - 1);
       },
@@ -6710,8 +6837,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           // and `Range.contains` compares decimal steps with a tolerance this
           // would contradict), and a descending range does not enumerate as
           // `al, al + as, …`. Everything else takes the elementwise walk.
-          const aLast = rangeLast(a);
-          const bLast = rangeLast(b);
+          // The last elements come from the counts of the `count` handler
+          // (`rangeElementCount()`): `Range(0, 9999999999999/10^12, 1)` ends
+          // at 9, where the machine count would end it at 10.
+          const aLast = rangeLast(a, rangeElementCount(expr, ...a));
+          const bLast = rangeLast(b, rangeElementCount(target, ...b));
           if (
             as <= 0 ||
             bs <= 0 ||
@@ -6768,7 +6898,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // ends at 5), and a descending range runs from `lower` DOWN. Reading
         // the direction alone reported `Range(-5, 10)` as `positive`, which a
         // subset test against `PositiveIntegers` then believed.
-        const last = rangeLast(r);
+        const last = rangeLast(r, rangeElementCount(expr, ...r));
         // `rangeLast` returns ±Infinity for an infinite UPPER bound, but NaN
         // for an infinite LOWER one (`Range(-oo, -1)`), which has no grid
         // origin to count from. Decline explicitly: NaN makes
@@ -7863,6 +7993,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       elementMemo: true,
       count: (expr) => {
         if (!isFunction(expr)) return undefined;
+        // The count of each source passes through unchanged, a `bigint` too.
         const sourceCount =
           expr.nops > 2
             ? minCount(expr.ops.slice(1).map((c) => mapSource(c).count))
@@ -7871,7 +8002,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // only an upper bound once the callback can map two elements onto one
         // value (see the `iterator` handler).
         if (sourceCount === undefined || !producesSet(expr)) return sourceCount;
-        return Number.isFinite(sourceCount)
+        return typeof sourceCount === 'number' && Number.isFinite(sourceCount)
           ? distinctCount(expr, sourceCount)
           : undefined;
       },
@@ -8581,7 +8712,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       isLazy: (_expr) => true,
       count: (expr) => {
         if (!isFunction(expr)) return undefined;
-        const c = expr.op1.count;
+        const c = smallCount(expr.op1);
         if (c === undefined) return undefined;
         if (!Number.isFinite(c)) return Infinity;
         return Math.max(0, c - 1);
@@ -9338,7 +9469,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         index: number | string
       ): undefined | Expression => {
         if (typeof index !== 'number' || !isFunction(expr)) return undefined;
-        const count = expr.op1.count;
+        const count = smallCount(expr.op1);
         if (count === undefined || !Number.isFinite(count)) return undefined;
         const total = count + expr.nops - 1;
         // A set-kind result is indexed through the DEDUPLICATED enumeration
@@ -10385,8 +10516,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
   // Miranda: `take` (also Haskell)
   Take: {
-    examples: ['Take([1, 2, 3, 4, 5], 2)'],
-    description: ['Return `n` elements from a collection.'],
+    examples: ['Take([1, 2, 3, 4, 5], 2)', 'Take([1, 2, 3, 4, 5], -2)'],
+    description: [
+      'Return the first `n` elements of an indexed collection.',
+      'A negative `n` counts from the end: `Take(xs, -n)` is the last `n` elements.',
+      'A count past the length is clamped: the result is the whole collection.',
+    ],
     complexity: 8200,
     // The leading arm is the string-preservation rule: taking a prefix of a
     // string's characters yields a string (`docs/STRING_ROADMAP.md`, "String
@@ -10419,14 +10554,27 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // the taken characters can merge or split grapheme clusters, so the result
     // may hold a different number of characters than were taken.
     collection: {
-      // A non-positive bound yields the empty collection whatever the source
-      // is, so the walk is faithful even over an unwalkable one — without this
+      // A zero bound yields the empty collection whatever the source is, so
+      // the walk is faithful even over an unwalkable one — without this
       // short-circuit `Any(Take(xs, 0), p)` would go inert for a valueless
       // `xs`, where `False` is both available and correct.
+      // A symbolic bound walks nothing, and that empty walk does not mean an
+      // empty result, so the answer is `false`: answering the source's
+      // enumerability let `Any(Take([1, 2, 3], n), p)` answer `False`.
+      // A negative bound takes the last elements, which needs the length of
+      // the source. When that length is not known or not finite, the walk
+      // also yields nothing and the answer is `false` for the same reason
+      // (see `negativeCountWindow`).
       isEnumerable: (expr) => {
         if (!isFunction(expr)) return undefined;
-        const bound = integerParam(expr.op2);
-        if (bound !== null && (bound ?? 0) <= 0) return true;
+        const bound = takeDropCount(expr.op1, expr.op2);
+        if (bound === null) return false;
+        if ((bound ?? 0) === 0) return true;
+        if (bound !== undefined && bound < 0) {
+          const window = negativeCountWindow(expr.op1, bound, 'Take');
+          if (window === undefined) return false;
+          if (window.length === 0) return true;
+        }
         return expr.op1.isEnumerableCollection;
       },
       isLazy: (_expr) => true,
@@ -10439,31 +10587,46 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // symbolic `n` from an infinite source is not known non-empty either
         // (`n = 0` makes it empty), so answering `false` there would be a
         // definitive wrong answer for exactly the input this guard is about.
-        const bound = integerParam(op2);
+        const bound = takeDropCount(xs, op2);
         if (bound === null) return undefined; // symbolic bound
-        if (xs.isFiniteCollection === false) return (bound ?? 0) <= 0;
-        const n = Math.max(0, bound ?? 0);
+        const n = bound ?? 0;
+        // A negative bound takes the last elements: empty only when the
+        // source length is known and the selection holds no element.
+        if (n < 0) {
+          const window = negativeCountWindow(xs, n, 'Take');
+          return window === undefined ? undefined : window.length === 0;
+        }
+        if (xs.isFiniteCollection === false) return n === 0;
         // A known non-empty source with n ≥ 1 gives a non-empty Take even
         // when the source's count is unknown (e.g. Dedup of an infinite
         // Iterate) — required for the generic materializer, which keeps the
         // lazy form when emptiness is indeterminate.
         if (xs.isEmptyCollection === false && n >= 1) return false;
+        // The count can be a `bigint` (a finite count that is not a safe
+        // integer): it is only compared here, never used in arithmetic.
         const count = xs.count;
         if (count === undefined) return undefined;
         if (!Number.isFinite(n)) return false;
-        return Math.min(count, n) === 0;
+        return n === 0 || count === 0;
       },
       isFinite: (expr) => {
         if (!isFunction(expr)) return undefined;
-        // A non-positive bound yields an empty (finite) collection regardless
-        // of the source.
-        const n = integerParam(expr.op2);
+        const n = takeDropCount(expr.op1, expr.op2);
         if (n === null) return undefined; // symbolic bound
-        // A finite bound caps the result at `n` elements, so the `Take` is
-        // finite whatever the source is — including a source whose own length
-        // is unknown (`Take(Filter(Range(1, ∞), IsPrime), 10)`). Finiteness
-        // and exact count are separate questions: `count` stays `undefined`
-        // there because the source may exhaust before `n` elements.
+        // A negative bound takes the last elements, which exist only when the
+        // source length is known and finite. Otherwise the result is not
+        // known, and its finiteness is not known either: answering `true`
+        // would let a consumer read the empty walk as an empty collection.
+        if (n !== undefined && n < 0)
+          return negativeCountWindow(expr.op1, n, 'Take') !== undefined
+            ? true
+            : undefined;
+        // A zero or positive finite bound caps the result at `n` elements, so
+        // the `Take` is finite whatever the source is — including a source
+        // whose own length is unknown
+        // (`Take(Filter(Range(1, ∞), IsPrime), 10)`). Finiteness and exact
+        // count are separate questions: `count` stays `undefined` there
+        // because the source may exhaust before `n` elements.
         if (n !== undefined && Number.isFinite(n)) return true;
         // Otherwise (an infinite bound, or a missing one) the result is finite
         // when its own element count is known-finite. When the source's length
@@ -10480,9 +10643,17 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       ): undefined | Expression => {
         if (typeof index !== 'number' || index === 0) return undefined;
         if (!isFunction(expr)) return undefined;
-        const bound = integerParam(expr.op2);
+        const bound = takeDropCount(expr.op1, expr.op2);
         if (bound === null) return undefined; // symbolic bound
-        const n = Math.max(0, bound ?? 0);
+        const n = bound ?? 0;
+        // A negative bound takes the last elements (see
+        // `negativeCountWindow`).
+        if (n < 0)
+          return windowAt(
+            expr.op1,
+            negativeCountWindow(expr.op1, n, 'Take'),
+            index
+          );
         if (n === 0) return undefined;
 
         if (index > 0) {
@@ -10501,8 +10672,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
   // Miranda: `drop` (also Haskell)
   Drop: {
-    examples: ['Drop([1, 2, 3, 4, 5], 2)'],
-    description: ['Return the collection without the first n elements.'],
+    examples: ['Drop([1, 2, 3, 4, 5], 2)', 'Drop([1, 2, 3, 4, 5], -2)'],
+    description: [
+      'Return the indexed collection without its first `n` elements.',
+      'A negative `n` counts from the end: `Drop(xs, -n)` is the collection without its last `n` elements.',
+      'A count past the length is clamped: the result is empty.',
+    ],
     complexity: 8200,
     // The leading arm is the string-preservation rule: dropping a prefix of a
     // string's characters yields a string (`docs/STRING_ROADMAP.md`, "String
@@ -10526,26 +10701,53 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     signature:
       '((xs: T, count: number) -> T where T: string) & ((xs: indexed_collection<T>, count: number) -> list<T> where T)',
     collection: {
-      isEnumerable: enumerableFromSource,
+      // A symbolic count walks nothing, and that empty walk does not mean an
+      // empty result, so the answer is `false`: answering the source's
+      // enumerability let `All(Drop([1, 2, 3], n), p)` answer `True`.
+      // A negative count drops the last elements, which needs the length of
+      // the source. When that length is not known or not finite, the walk
+      // also yields nothing and the answer is `false` for the same reason
+      // (see `negativeCountWindow`).
+      isEnumerable: (expr) => {
+        if (!isFunction(expr)) return undefined;
+        const dropped = takeDropCount(expr.op1, expr.op2);
+        if (dropped === null) return false;
+        if (dropped !== undefined && dropped < 0) {
+          const window = negativeCountWindow(expr.op1, dropped, 'Drop');
+          if (window === undefined) return false;
+          if (window.length === 0) return true;
+        }
+        return enumerableFromSource(expr);
+      },
       isLazy: (_expr) => true,
       count: (expr) => {
         if (!isFunction(expr)) return undefined;
         const [xs, n] = expr.ops;
+        const dropped = takeDropCount(xs, n);
+        // A negative count drops the last elements. It is read before the
+        // infinite-source branch below: `Drop(Range(1, ∞), -2)` has no last
+        // elements to drop, so its count is not known, not infinite.
+        if (dropped !== null && dropped !== undefined && dropped < 0)
+          return negativeCountWindow(xs, dropped, 'Drop')?.length;
         const count = xs.count;
         if (count === undefined) return undefined;
-        if (!Number.isFinite(count)) return Infinity;
         if (xs.isEmptyCollection) return 0;
-        const dropped = integerParam(n);
+        // A symbolic count is read BEFORE the infinite-source branch below:
+        // `Drop(Range(1, ∞), n)` is empty or not, finite or not, depending on
+        // `n`, so its count is not known. Answering `Infinity` there disagreed
+        // with `isFinite` and `isEnumerable`, which answer for an unknown
+        // count.
         if (dropped === null) return undefined; // symbolic bound
-        // A NEGATIVE count drops nothing — which is what the walk does — so it
-        // is clamped here as well. `Math.max(0, …)` on the RESULT does not do
-        // that: `count - (-5)` is larger than `count`, so `Drop(1..10, -5)`
-        // reported 15 elements for a walk that yields 10. A count that
-        // disagrees with its own walk is not merely a wrong `Length`: the
-        // facet is what indexing bounds, emptiness and the materialization
-        // gates all read.
-        const nValue = Math.max(0, dropped ?? 0);
+        if (!isFiniteCount(count)) return Infinity;
+        // The count must agree with the walk. A count that disagrees with its
+        // own walk is not merely a wrong `Length`: the facet is what indexing
+        // bounds, emptiness and the materialization gates all read.
+        const nValue = dropped ?? 0;
         if (nValue >= count) return 0;
+        // A source count that is not a safe integer is a `bigint`: subtract
+        // with `bigint` arithmetic (mixing a `bigint` and a `number` throws).
+        if (typeof count === 'bigint')
+          return normalizeCount(count - BigInt(nValue));
         return count - nValue;
       },
       isFinite: (expr) => {
@@ -10553,7 +10755,15 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // Every facet bails together on a symbolic bound: a coherent
         // unknown is what keeps a consumer (`ListFrom`, a broadcast) from
         // reading the empty iterator as an empty collection.
-        if (integerParam(expr.op2) === null) return undefined;
+        const dropped = takeDropCount(expr.op1, expr.op2);
+        if (dropped === null) return undefined;
+        // A negative count needs the source length, and the result exists
+        // only when that length is known and finite. The same coherent
+        // unknown applies when it is not.
+        if (dropped !== undefined && dropped < 0)
+          return negativeCountWindow(expr.op1, dropped, 'Drop') !== undefined
+            ? true
+            : undefined;
         return finitenessOfSource(expr.op1);
       },
       iterator: (expr) => {
@@ -10561,11 +10771,15 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           return { next: () => ({ value: undefined, done: true }) };
         const [xs, nExpr] = expr.ops;
 
-        const dropped = integerParam(nExpr);
+        const dropped = takeDropCount(xs, nExpr);
         if (dropped === null)
           return { next: () => ({ value: undefined, done: true }) };
         const n = dropped ?? 0;
-        if (n <= 0) return xs.each();
+        // A negative count drops the last elements (see
+        // `negativeCountWindow`).
+        if (n < 0)
+          return windowIterator(xs, negativeCountWindow(xs, n, 'Drop'));
+        if (n === 0) return xs.each();
 
         const count = xs.count;
         let index = n + 1;
@@ -10591,18 +10805,22 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (!isFunction(expr)) return undefined;
         const [xs, nExpr] = expr.ops;
 
-        const dropped = integerParam(nExpr);
+        const dropped = takeDropCount(xs, nExpr);
         if (dropped === null) return undefined; // symbolic bound
         const n = dropped ?? 0;
-        // Dropping <= 0 elements is the identity (matches the iterator, which
-        // returns `xs.each()` for n <= 0).
-        if (n <= 0) return xs.at(index);
+        // A negative count drops the last elements (see
+        // `negativeCountWindow`).
+        if (n < 0)
+          return windowAt(xs, negativeCountWindow(xs, n, 'Drop'), index);
+        // Dropping 0 elements is the identity (matches the iterator, which
+        // returns `xs.each()` for n = 0).
+        if (n === 0) return xs.at(index);
 
         // A negative index counts from the end. Dropping from the front does
         // not move the tail, so `xs.at(index)` is already correct — but reject
         // indices that would reach back into the dropped prefix.
         if (index < 0) {
-          const count = xs.count;
+          const count = smallCount(xs);
           if (count !== undefined && -index > count - n) return undefined;
           return xs.at(index);
         }
@@ -10849,6 +11067,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (!isFunction(expr)) return undefined;
         const count = expr.op1.count;
         if (count === undefined) return undefined;
+        // A source count that is not a safe integer is a `bigint`: subtract
+        // with `bigint` arithmetic (mixing a `bigint` and a `number` throws).
+        if (typeof count === 'bigint') return normalizeCount(count - 1n);
         return Math.max(0, count - 1);
       },
       isEmpty: (expr) => {
@@ -10930,6 +11151,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (!isFunction(expr)) return undefined;
         const count = expr.op1.count;
         if (count === undefined) return undefined;
+        // A source count that is not a safe integer is a `bigint`: subtract
+        // with `bigint` arithmetic (mixing a `bigint` and a `number` throws).
+        if (typeof count === 'bigint') return normalizeCount(count - 1n);
         return Math.max(0, count - 1);
       },
       isFinite: (expr) => {
@@ -10945,7 +11169,24 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       iterator: (expr) => {
         if (!isFunction(expr))
           return { next: () => ({ value: undefined, done: true }) };
-        const l = expr.op1.count;
+        const count = expr.op1.count;
+        // A source count that is not a safe integer (a `bigint`) is larger
+        // than every index this walk can reach, so the walk reads the source
+        // from its first element and never reaches the element it omits. It
+        // must still walk: `isEnumerable` answers from the source, and an
+        // empty walk would read as an empty collection
+        // (`Any(Most(Permutations(Range(1, 20))), p)`).
+        if (typeof count === 'bigint') {
+          let i = 1;
+          return {
+            next: () => {
+              const value = expr.op1.at(i++);
+              if (value === undefined) return { value: undefined, done: true };
+              return { value, done: false };
+            },
+          };
+        }
+        const l = count;
         if (l === undefined || l <= 1)
           return { next: () => ({ value: undefined, done: true }) };
 
@@ -10965,7 +11206,18 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       ): undefined | Expression => {
         if (typeof index !== 'number') return undefined;
         if (!isFunction(expr)) return undefined;
-        const l = expr.op1.count;
+        const count = expr.op1.count;
+        // A source count that is not a safe integer is a `bigint`. A positive
+        // index that is a safe integer is then always before the omitted last
+        // element: it is less than 2^53, and the count of `Most` is at least
+        // 2^53. An index that is not a safe integer (`1e20`) can be the
+        // omitted element or past it, and a `number` cannot compare with the
+        // count exactly, so the result is not known.
+        if (typeof count === 'bigint')
+          return index >= 1 && Number.isSafeInteger(index)
+            ? expr.op1.at(index)
+            : undefined;
+        const l = count;
         if (l === undefined) return undefined;
         if (index < 1) index = l + 1 + index;
         if (index < 1 || index > l - 1) return undefined;
@@ -11088,7 +11340,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       isCollection: (expr) =>
         !(isFunction(expr) && expr.ops.length === 2) ||
         !isSymbol(expr.op2, 'Nothing'),
-      isEnumerable: enumerableFromSource,
+      // Without bounds (a symbolic bound, a source whose length is not known,
+      // or a bound that cannot be placed in a source whose length is not a
+      // safe integer) the walk yields nothing, so the view is not
+      // enumerable: answering the source's enumerability let a consumer read
+      // the empty walk as an empty collection.
+      isEnumerable: (expr) =>
+        sliceBounds(expr) === undefined ? false : enumerableFromSource(expr),
       isLazy: (_expr) => true,
       count: (expr) => {
         const bounds = sliceBounds(expr);
@@ -11186,7 +11444,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     signature:
       '((T) -> T where T: string) & ((T) -> T where T: list) & ((indexed_collection<T>) -> list<T> where T)',
     collection: {
-      isEnumerable: enumerableFromSource,
+      isEnumerable: enumerableFromSmallSource,
       isLazy: (_expr) => true,
       count: (expr) => {
         if (!isFunction(expr)) return undefined;
@@ -11309,7 +11567,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       ]);
     },
     collection: {
-      isEnumerable: enumerableFromSource,
+      // The walk inserts or skips at the position the index names. When
+      // there is no position (an index outside the source, a negative index
+      // over a source whose length is not known, infinite or not a safe
+      // integer), the walk yields nothing, so the view is not enumerable:
+      // answering the source's enumerability let a consumer read the empty
+      // walk as an empty collection.
+      isEnumerable: (expr) =>
+        insertPosition(expr) === undefined ? false : enumerableFromSource(expr),
       isLazy: (_expr) => true,
       // One `op1.count` per level, threaded into the position guard — see
       // `insertPositionOf`.
@@ -11318,6 +11583,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         const n = expr.op1.count;
         if (n === undefined || insertPositionOf(expr, n) === undefined)
           return undefined;
+        // A source count that is not a safe integer is a `bigint`.
+        if (typeof n === 'bigint') return n + 1n;
         return Number.isFinite(n) ? n + 1 : Infinity;
       },
       // A valid Insert always contains at least the inserted value.
@@ -11328,7 +11595,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         const n = expr.op1.count;
         if (n === undefined || insertPositionOf(expr, n) === undefined)
           return undefined;
-        return Number.isFinite(n);
+        return isFiniteCount(n);
       },
       at: (
         expr: Expression,
@@ -11431,7 +11698,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       return ce.function('List', [...all.slice(0, i0), ...all.slice(i0 + 1)]);
     },
     collection: {
-      isEnumerable: enumerableFromSource,
+      // The walk inserts or skips at the position the index names. When
+      // there is no position (an index outside the source, a negative index
+      // over a source whose length is not known, infinite or not a safe
+      // integer), the walk yields nothing, so the view is not enumerable:
+      // answering the source's enumerability let a consumer read the empty
+      // walk as an empty collection.
+      isEnumerable: (expr) =>
+        targetPosition(expr) === undefined ? false : enumerableFromSource(expr),
       isLazy: (_expr) => true,
       // One `op1.count` per level, threaded into the position guard — see
       // `targetPositionOf`.
@@ -11440,6 +11714,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         const n = expr.op1.count;
         if (n === undefined || targetPositionOf(expr, n) === undefined)
           return undefined;
+        // A source count that is not a safe integer is a `bigint`.
+        if (typeof n === 'bigint') return normalizeCount(n - 1n);
         return Number.isFinite(n) ? n - 1 : Infinity;
       },
       isEmpty: (expr) => {
@@ -11447,6 +11723,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         const n = expr.op1.count;
         if (n === undefined || targetPositionOf(expr, n) === undefined)
           return undefined;
+        if (typeof n === 'bigint') return false;
         return Number.isFinite(n) ? n - 1 <= 0 : false;
       },
       isFinite: (expr) => {
@@ -11454,7 +11731,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         const n = expr.op1.count;
         if (n === undefined || targetPositionOf(expr, n) === undefined)
           return undefined;
-        return Number.isFinite(n);
+        return isFiniteCount(n);
       },
       at: (
         expr: Expression,
@@ -11546,7 +11823,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       return ce.function('List', out);
     },
     collection: {
-      isEnumerable: enumerableFromSource,
+      // The walk inserts or skips at the position the index names. When
+      // there is no position (an index outside the source, a negative index
+      // over a source whose length is not known, infinite or not a safe
+      // integer), the walk yields nothing, so the view is not enumerable:
+      // answering the source's enumerability let a consumer read the empty
+      // walk as an empty collection.
+      isEnumerable: (expr) =>
+        targetPosition(expr) === undefined ? false : enumerableFromSource(expr),
       isLazy: (_expr) => true,
       // One `op1.count` per level, threaded into the position guard — see
       // `targetPositionOf`.
@@ -11562,13 +11846,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         const n = expr.op1.count;
         if (n === undefined || targetPositionOf(expr, n) === undefined)
           return undefined;
+        if (typeof n === 'bigint') return false;
         return Number.isFinite(n) ? n <= 0 : false;
       },
       isFinite: (expr) => {
         if (!isFunction(expr)) return undefined;
         const n = expr.op1.count;
         if (targetPositionOf(expr, n) === undefined) return undefined;
-        return Number.isFinite(n!);
+        return isFiniteCount(n);
       },
       at: (
         expr: Expression,
@@ -11632,7 +11917,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     signature:
       '((T, integer?) -> T where T: string) & ((T, integer?) -> T where T: list) & ((indexed_collection<T>, integer?) -> list<T> where T)',
     collection: {
-      isEnumerable: enumerableFromSource,
+      isEnumerable: enumerableFromSmallSource,
       isLazy: (_expr) => true,
       // A rotation is a permutation, so length/emptiness/finiteness are
       // offset-INVARIANT and knowable here. They are nonetheless suppressed
@@ -11647,7 +11932,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       count: (expr) => {
         if (!isFunction(expr) || integerParam(expr.op2) === null)
           return undefined;
-        return expr.op1.count;
+        return smallCount(expr.op1);
       },
       isEmpty: (expr) => {
         if (!isFunction(expr) || integerParam(expr.op2) === null)
@@ -11674,7 +11959,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       iterator: (expr) => {
         if (!isFunction(expr))
           return { next: () => ({ value: undefined, done: true }) };
-        const l = expr.op1.count;
+        const l = smallCount(expr.op1);
         if (l === undefined || l <= 0)
           return { next: () => ({ value: undefined, done: true }) };
         const offset = integerParam(expr.op2);
@@ -11702,7 +11987,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       ): undefined | Expression => {
         if (typeof index !== 'number') return undefined;
         if (!isFunction(expr)) return undefined;
-        const l = expr.op1.count;
+        const l = smallCount(expr.op1);
         if (l === undefined || l <= 0) return undefined;
         if (index < 1) index = l + 1 + index;
         if (index < 1 || index > l) return undefined;
@@ -11733,14 +12018,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     signature:
       '((T, integer?) -> T where T: string) & ((T, integer?) -> T where T: list) & ((indexed_collection<T>, integer?) -> list<T> where T)',
     collection: {
-      isEnumerable: enumerableFromSource,
+      isEnumerable: enumerableFromSmallSource,
       isLazy: (_expr) => true,
       // See `RotateLeft`: knowable, but suppressed while `at`/`iterator`
       // cannot back it up.
       count: (expr) => {
         if (!isFunction(expr) || integerParam(expr.op2) === null)
           return undefined;
-        return expr.op1.count;
+        return smallCount(expr.op1);
       },
       // NOT gated on the offset: a rotation is a permutation, so membership is
       // offset-INVARIANT. `false` here is the DEFINITIVE "not a member" answer
@@ -11757,7 +12042,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       iterator: (expr) => {
         if (!isFunction(expr))
           return { next: () => ({ value: undefined, done: true }) };
-        const l = expr.op1.count;
+        const l = smallCount(expr.op1);
         if (l === undefined || l <= 0)
           return { next: () => ({ value: undefined, done: true }) };
         const offset = integerParam(expr.op2);
@@ -11785,7 +12070,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       ): undefined | Expression => {
         if (typeof index !== 'number') return undefined;
         if (!isFunction(expr)) return undefined;
-        const l = expr.op1.count;
+        const l = smallCount(expr.op1);
         if (l === undefined || l <= 0) return undefined;
         if (index < 1) index = l + 1 + index;
         if (index < 1 || index > l) return undefined;
@@ -13695,23 +13980,46 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     evaluate: (ops, { engine }) => {
       if (ops.length !== 2) return undefined;
       const raw = toInteger(ops[1]);
-      if (raw === null) return undefined;
+      if (raw === null) {
+        // A repeat count that is not a safe integer: a negative one is the
+        // empty list, a positive one stays lazy (it is larger than
+        // `maxCollectionSize`).
+        const big = unsafeIntegerOperand(ops[1]);
+        return big !== undefined && big < 0n
+          ? engine._fn('List', [])
+          : undefined;
+      }
       const n = Math.max(0, raw);
       // Larger requests stay lazy; elements remain accessible via .at()
       // and the iterator.
       if (n > engine.maxCollectionSize) return undefined;
       return engine._fn('List', Array(n).fill(ops[0]));
     },
+    // A repeat count that is not a safe integer is read exactly, with
+    // `unsafeIntegerOperand()`, by every handler, so that the handlers agree:
+    // a negative count is the empty list, and a positive count is a list of
+    // more elements than can be walked, which is not enumerable but still
+    // answers `count`, `contains` and `at`.
     collection: {
-      isEnumerable: (expr) =>
-        isFunction(expr) &&
-        (expr.ops.length < 2 || toIntegerOperand(expr.op2) !== null),
+      isEnumerable: (expr) => {
+        if (!isFunction(expr)) return false;
+        if (expr.ops.length < 2 || toIntegerOperand(expr.op2) !== null)
+          return true;
+        const big = unsafeIntegerOperand(expr.op2);
+        return big !== undefined && big < 0n;
+      },
       isLazy: (expr) => isFunction(expr) && expr.ops?.length === 1,
       count: (expr) => {
         if (!isFunction(expr)) return undefined;
         if (expr.ops?.length === 2) {
           const n = toIntegerOperand(expr.op2);
-          return n !== null ? Math.max(0, n) : undefined;
+          if (n !== null) return Math.max(0, n);
+          // A repeat count that is not a safe integer is reported exactly,
+          // as a `bigint`. The elements are not enumerated (`isEnumerable`
+          // is `false`), so a walk does not start.
+          const big = unsafeIntegerOperand(expr.op2);
+          if (big === undefined) return undefined;
+          return big < 0n ? 0 : big;
         }
         return Infinity;
       },
@@ -13719,7 +14027,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (!isFunction(expr)) return undefined;
         if (expr.ops?.length === 2) {
           const n = toIntegerOperand(expr.op2);
-          return n !== null ? n <= 0 : undefined;
+          if (n !== null) return n <= 0;
+          const big = unsafeIntegerOperand(expr.op2);
+          return big === undefined ? undefined : big < 0n;
         }
         return false; // infinite — never empty
       },
@@ -13729,6 +14039,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (expr.ops?.length === 2) {
           const n = toIntegerOperand(expr.op2);
           if (n !== null && n <= 0) return false; // empty list
+          if (n === null) {
+            const big = unsafeIntegerOperand(expr.op2);
+            if (big === undefined) return undefined; // symbolic count
+            if (big < 0n) return false; // empty list
+          }
         }
         return expr.op1.isSame(target);
       },
@@ -13758,7 +14073,15 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (typeof index !== 'number') return undefined;
         if (expr.ops?.length === 2) {
           const n = toIntegerOperand(expr.op2);
-          const count = n !== null ? Math.max(0, n) : 0;
+          // A repeat count that is not a safe integer: a positive one is
+          // larger than every index, a negative one gives no element.
+          const big = n === null ? unsafeIntegerOperand(expr.op2) : undefined;
+          const count: number | bigint =
+            n !== null
+              ? Math.max(0, n)
+              : big !== undefined && big > 0n
+                ? big
+                : 0;
           if (index < 1 || index > count) return undefined;
         } else {
           // Infinite sequence: any positive 1-based index is valid
@@ -13814,12 +14137,16 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (!isFunction(expr))
           return { next: () => ({ value: undefined, done: true }) };
         let index = 1;
-        const l = expr.op1.count;
+        const count = expr.op1.count;
+        // A source count that is not a safe integer (a `bigint`) is larger
+        // than every index this walk can reach, so the walk never wraps
+        // around: it reads the source in order.
+        const l = typeof count === 'bigint' ? Infinity : count;
         if (l === undefined || l === 0)
           return { next: () => ({ value: undefined, done: true }) };
         return {
           next: () => {
-            const i = ((index - 1) % l) + 1;
+            const i = l === Infinity ? index : ((index - 1) % l) + 1;
             const value = expr.op1.at(i);
             if (value === undefined) return { value: undefined, done: true };
             index += 1;
@@ -13830,7 +14157,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       at: (expr, index) => {
         if (typeof index !== 'number' || index < 1) return undefined;
         if (!isFunction(expr)) return undefined;
-        const l = expr.op1.count;
+        const count = expr.op1.count;
+        // A safe-integer index never wraps around a source whose count is not
+        // a safe integer (a `bigint`): see the iterator. An index that is not
+        // a safe integer (`2e20`) can wrap, and a `number` cannot hold the
+        // wrapped position exactly, so the result is not known.
+        if (typeof count === 'bigint')
+          return Number.isSafeInteger(index) ? expr.op1.at(index) : undefined;
+        const l = count;
         if (l === undefined || l === 0) return undefined;
         const i = ((index - 1) % l) + 1; // 1-based index
         return expr.op1.at(i);
@@ -14194,20 +14528,27 @@ function insertPosition(expr: Expression): number | undefined {
   return insertPositionOf(expr, expr.op1.count);
 }
 
-/** {@link insertPosition} against an already-computed source length. */
+/**
+ * {@link insertPosition} against an already-computed source length.
+ *
+ * A length that is not a safe integer (a `bigint`) is larger than every
+ * positive index, so a positive index is always valid. A negative index
+ * would give a position that is not a safe integer, so it gives no position.
+ */
 function insertPositionOf(
   expr: Expression,
-  n: number | undefined
+  n: number | bigint | undefined
 ): number | undefined {
   if (n === undefined || !isFunction(expr)) return undefined;
   const index = toIntegerOperand(expr.op2);
   if (index === null || index === 0) return undefined;
   if (index > 0) {
-    if (Number.isFinite(n) && index > n + 1) return undefined;
+    if (typeof n === 'number' && Number.isFinite(n) && index > n + 1)
+      return undefined;
     return index; // g = gap + 1 = index
   }
   // A negative index counts from the end; that requires a finite length.
-  if (!Number.isFinite(n)) return undefined;
+  if (typeof n === 'bigint' || !Number.isFinite(n)) return undefined;
   if (index < -(n + 1)) return undefined;
   return n + 2 + index; // g = (n + 1 + index) + 1
 }
@@ -14223,20 +14564,24 @@ function targetPosition(expr: Expression): number | undefined {
   return targetPositionOf(expr, expr.op1.count);
 }
 
-/** {@link targetPosition} against an already-computed source length. */
+/**
+ * {@link targetPosition} against an already-computed source length. A length
+ * that is a `bigint` is read as in {@link insertPositionOf}.
+ */
 function targetPositionOf(
   expr: Expression,
-  n: number | undefined
+  n: number | bigint | undefined
 ): number | undefined {
   if (n === undefined || !isFunction(expr)) return undefined;
   const index = toIntegerOperand(expr.op2);
   if (index === null || index === 0) return undefined;
   if (index > 0) {
-    if (Number.isFinite(n) && index > n) return undefined;
+    if (typeof n === 'number' && Number.isFinite(n) && index > n)
+      return undefined;
     return index; // g = i0 + 1 = index
   }
   // A negative index counts from the end; that requires a finite length.
-  if (!Number.isFinite(n)) return undefined;
+  if (typeof n === 'bigint' || !Number.isFinite(n)) return undefined;
   if (index < -n) return undefined;
   return n + index + 1; // g = (n + index) + 1
 }
@@ -14498,10 +14843,14 @@ export function literalCollectionEmptiness(
   }
   if (op === 'Range') {
     // Mirror the `Range` collection `count` handler exactly (same file,
-    // `Range` definition): a zero step counts 0, a non-finite bound counts
-    // Infinity (non-empty — a directional bounds test alone gets
+    // `Range` definition, and `rangeElementCount()`): exact rational
+    // operands use the exact count, a zero step counts 0, a non-finite bound
+    // counts Infinity (non-empty — a directional bounds test alone gets
     // `Range(1, 5, -∞)` wrong: it has one element), and otherwise the
-    // grid-point count decides.
+    // grid-point count decides. The exact count reads only number literals
+    // here (`evaluateOperands` false), so the engine state does not change.
+    const exact = exactArithmeticRange(xs, false);
+    if (exact !== undefined) return exact.n === 0n;
     const [lower, upper, step] = literalRange(xs);
     if (Number.isNaN(lower) || Number.isNaN(upper) || Number.isNaN(step))
       return undefined;
@@ -14576,6 +14925,37 @@ function rangeElement(
   return ce.number(k === 0 ? lower : lower + step * k);
 }
 
+/**
+ * The element count of a `Range`, with `lower`, `upper` and `step` from
+ * `range()`.
+ *
+ * When every operand is an exact rational (integers included), the count is
+ * the exact count of `exactArithmeticRange()` (`library/range-closed-form.ts`),
+ * which the closed forms of `Sum`, `Mean`, `Max` and the other reducers also
+ * use. A count that is not a safe integer is a `bigint` (see
+ * `normalizeCount()`): `Range(1, 10^20, 1/2)` has 199999999999999999999
+ * elements, and `Range(1, 10^400)` is finite although its machine upper
+ * bound is `Infinity`. The exact count never counts an element past
+ * `upper`: `Range(0, 99999999999999/10^14, 1/10)` has 10 elements.
+ *
+ * Otherwise (a float operand, an exact constant such as `π`, a zero step,
+ * an infinite bound) the count is the machine count `rangeCount()`. It is 0
+ * for a zero step or a sign-mismatched step (e.g. Range(5, 1, 1)),
+ * `Infinity` for a non-finite bound, and it counts an end point that is on
+ * the step grid in exact arithmetic but one rounding error short of it in
+ * floating point (`Range(0, 0.3, 0.1)` has 4 elements).
+ */
+function rangeElementCount(
+  expr: Expression,
+  lower: number,
+  upper: number,
+  step: number
+): number | bigint {
+  const exact = exactArithmeticRange(expr);
+  if (exact !== undefined) return normalizeCount(exact.n)!;
+  return rangeCount(lower, upper, step);
+}
+
 /** An exact number literal: an integer or a rational (`1/3`). */
 function isExactRangeOperand(op: Expression): boolean {
   return isNumber(op) && op.isExact && !op.isComplex;
@@ -14586,10 +14966,17 @@ function isExactRangeOperand(op: Expression): boolean {
  * - could be less than upper if step is positive, for
  * example `rangeLast([1, 6, 2])` = 5
  *
- * The last value is `lower + step · (count − 1)`, with the element count
- * from `rangeCount()`. The count absorbs a floating-point rounding error in
- * `(upper − lower) / step`, so an `upper` that is on the step grid in exact
- * arithmetic is the last value (`rangeLast([0, 0.3, 0.1])` is 0.3, not 0.2).
+ * The last value is `lower + step · (count − 1)`. A caller that has the
+ * `Range` expression gives the element count of its `count` handler
+ * (`rangeElementCount()`): for exact rational operands it is the exact
+ * count, and the machine count can be one more
+ * (`Range(0, 9999999999999/10^12, 1)` ends at 9, not 10). When `count` is
+ * not given, or is a `bigint` that is not a safe integer (a count that large
+ * has no exact machine position), the count is the machine count
+ * `rangeCount()`. The machine count absorbs a floating-point rounding error
+ * in `(upper − lower) / step`, so an `upper` that is on the step grid in
+ * exact arithmetic is the last value (`rangeLast([0, 0.3, 0.1])` is 0.3, not
+ * 0.2).
  *
  * - An infinite `upper` gives `Infinity` (or `-Infinity` for a negative
  *   step).
@@ -14600,13 +14987,20 @@ function isExactRangeOperand(op: Expression): boolean {
  *   Callers check for an empty range first.
  */
 export function rangeLast(
-  r: [lower: number, upper: number, step: number]
+  r: [lower: number, upper: number, step: number],
+  elementCount?: number | bigint
 ): number {
   const [lower, upper, step] = r;
   if (!Number.isFinite(upper)) return step > 0 ? Infinity : -Infinity;
   if (!Number.isFinite(lower) || step === 0) return NaN;
 
-  const count = rangeCount(lower, upper, step);
+  const count =
+    typeof elementCount === 'number'
+      ? elementCount
+      : typeof elementCount === 'bigint' &&
+          elementCount <= BigInt(Number.MAX_SAFE_INTEGER)
+        ? Number(elementCount)
+        : rangeCount(lower, upper, step);
   // A single element is `lower`, also for an infinite step, where
   // `step · 0` would be NaN (`Range(1, 5, -oo)` is [1]).
   if (count === 1) return lower;
@@ -15617,9 +16011,9 @@ function mapAtCell(expr: Expression, index: number): Expression | undefined {
     return distinctAt(expr, index, () => {
       const n =
         expr.nops > 2
-          ? minCount(expr.ops.slice(1).map((c) => mapSource(c).count))
-          : mapSource(expr.op2).count;
-      return n !== undefined && Number.isFinite(n) ? n : undefined;
+          ? minCount(expr.ops.slice(1).map((c) => smallCount(mapSource(c))))
+          : smallCount(mapSource(expr.op2));
+      return typeof n === 'number' && Number.isFinite(n) ? n : undefined;
     });
 
   // Random access re-derives the element through the memoized lowered
@@ -16352,7 +16746,7 @@ export function sortedIndices(
   expr: Expression,
   fn: Expression | undefined = undefined
 ): number[] | undefined {
-  const l = expr.count;
+  const l = smallCount(expr);
   if (l === undefined || !Number.isFinite(l) || l < 1) return undefined;
 
   const indices = Array.from({ length: l }, (_, i) => i + 1);
@@ -16627,7 +17021,7 @@ function spanBounds(
   // a span, bounds unresolvable" — leaves every facet declining.
   if (isSymbol(op, 'Nothing')) return null;
   if (!op.isCollection) return undefined;
-  const n = op.count;
+  const n = smallCount(op);
   if (n === undefined || !Number.isFinite(n) || n < 1) return null;
   // Exact integers only: `toInteger` ROUNDS, and a rounded fractional bound
   // (`1.5..3.5` → `[2, 4]`) would pass the contiguity check below while
@@ -16740,6 +17134,14 @@ function computeSliceBounds(
   // `sliceBounds` reports `undefined` when it returns `undefined`.
   if (startParam === null || endParam === null) return undefined;
   let start = startParam ?? 1;
+  // A source count that is not a safe integer (a `bigint`) is larger than
+  // every safe integer bound. Explicit positive bounds then need no clamp and
+  // give the slice directly. A bound that counts from the end, or an omitted
+  // end, would give a position that is not a safe integer: no bounds.
+  if (typeof count === 'bigint') {
+    if (start < 1 || endParam === undefined || endParam < 1) return undefined;
+    return { start, end: endParam };
+  }
   if (start < 1) {
     if (!Number.isFinite(count)) return undefined;
     start = count + 1 + start;
@@ -16837,6 +17239,83 @@ function isEvaluatedElement(
   return false;
 }
 
+/**
+ * The source positions that `Take(xs, n)` or `Drop(xs, n)` selects when the
+ * count `n` is NEGATIVE. A negative count counts from the end:
+ * `Take(xs, -k)` is the last `k` elements of `xs`, and `Drop(xs, -k)` is `xs`
+ * without its last `k` elements. A count past the length is clamped, as a
+ * positive count is: over 5 elements, `Take(xs, -10)` is all 5 elements and
+ * `Drop(xs, -10)` is empty.
+ *
+ * The result is the 1-based source position of the first selected element
+ * (`start`) and the number of selected elements (`length`). The selected
+ * elements are consecutive.
+ *
+ * The positions depend on the length of the source, so the result is
+ * `undefined` when that length is not known or is not finite
+ * (`Take(Range(1, ∞), -2)`, a symbol with no value, a lazy source whose count
+ * is unknown). Every facet of `Take` and `Drop` must then answer its
+ * indeterminate value together — `count`, `isEmpty` and `isFinite` answer
+ * `undefined`, `at` answers `undefined`, the iterator yields nothing and
+ * `isEnumerable` answers `false` — so the expression stays unevaluated. A
+ * facet that answered from the empty walk instead would turn an unknown
+ * result into the empty collection.
+ */
+function negativeCountWindow(
+  xs: Expression,
+  n: number,
+  op: 'Take' | 'Drop'
+): { start: number; length: number } | undefined {
+  let sourceLength = smallCount(xs);
+  if (sourceLength === undefined && xs.isEmptyCollection === true)
+    sourceLength = 0;
+  if (sourceLength === undefined || !Number.isFinite(sourceLength))
+    return undefined;
+  const k = Math.min(-n, sourceLength);
+  if (op === 'Take') return { start: sourceLength - k + 1, length: k };
+  return { start: 1, length: sourceLength - k };
+}
+
+/** Walk the source elements selected by {@link negativeCountWindow}. */
+function windowIterator(
+  xs: Expression,
+  window: { start: number; length: number } | undefined
+): Iterator<Expression> {
+  if (window === undefined)
+    return { next: () => ({ value: undefined, done: true }) };
+  let i = 0;
+  return {
+    next: () => {
+      if (i >= window.length) return { value: undefined, done: true };
+      const value = xs.at(window.start + i);
+      if (value === undefined) return { value: undefined, done: true };
+      i += 1;
+      return { value, done: false };
+    },
+  };
+}
+
+/**
+ * The element at `index` (1-based; a negative index counts from the end of
+ * the selection) of the source elements selected by
+ * {@link negativeCountWindow}, or `undefined` when the index is outside the
+ * selection or the selection is not known.
+ */
+function windowAt(
+  xs: Expression,
+  window: { start: number; length: number } | undefined,
+  index: number
+): Expression | undefined {
+  if (window === undefined) return undefined;
+  if (index > 0)
+    return index <= window.length ? xs.at(window.start + index - 1) : undefined;
+  if (index < 0)
+    return -index <= window.length
+      ? xs.at(window.start + window.length + index)
+      : undefined;
+  return undefined;
+}
+
 function takeIterator(expr: Expression): Iterator<Expression> {
   if (!isFunction(expr))
     return { next: () => ({ value: undefined, done: true }) };
@@ -16844,9 +17323,15 @@ function takeIterator(expr: Expression): Iterator<Expression> {
   // channel here (an iterator either yields or does not), so it yields
   // nothing — the count/at facets report `undefined`, which is what keeps
   // the expression from materializing at all.
-  const bound = integerParam(expr.op2);
+  const bound = takeDropCount(expr.op1, expr.op2);
   if (bound === null) return { next: () => ({ value: undefined, done: true }) };
-  const count = Math.max(0, bound ?? 0);
+  const count = bound ?? 0;
+  // A negative count takes the last elements (see `negativeCountWindow`).
+  if (count < 0)
+    return windowIterator(
+      expr.op1,
+      negativeCountWindow(expr.op1, count, 'Take')
+    );
 
   if (count === 0) return { next: () => ({ value: undefined, done: true }) };
 
@@ -16855,7 +17340,7 @@ function takeIterator(expr: Expression): Iterator<Expression> {
 
   return {
     next: () => {
-      if (n >= Math.abs(count)) return { value: undefined, done: true };
+      if (n >= count) return { value: undefined, done: true };
       const value = expr.op1.at(index);
       if (!value) return { value: undefined, done: true };
       index += 1;
@@ -16870,10 +17355,15 @@ function takeCount(expr: Expression): number | undefined {
   const [xs, op2] = expr.ops;
   const count = xs.count;
   if (count === undefined) return undefined;
-  const bound = integerParam(op2);
+  const bound = takeDropCount(xs, op2);
   if (bound === null) return undefined; // symbolic bound
-  const n = Math.max(0, bound ?? 0);
+  const n = bound ?? 0;
+  // A negative count takes the last elements (see `negativeCountWindow`).
+  if (n < 0) return negativeCountWindow(xs, n, 'Take')?.length;
   if (!Number.isFinite(n)) return Infinity;
+  // A source count that is not a safe integer (a `bigint`) is larger than
+  // every safe integer `n`, so the first `n` elements are all present.
+  if (typeof count === 'bigint') return n;
   return Math.min(count, n);
 }
 
@@ -17001,17 +17491,20 @@ function* tabulateIterator(
 // The length of an element-wise combination of collections (Zip, and the
 // multi-collection `Map`): the shortest input bounds the result, so `undefined`
 // as soon as any count is unknown, `Infinity` only if all are infinite, and
-// otherwise the minimum — a finite source bounds an infinite one
-// (`Math.min` handles `Infinity` operands directly).
+// otherwise the minimum — a finite source bounds an infinite one.
+// A count can be a `bigint` (a finite count that is not a safe integer). The
+// minimum uses `<`, which compares a `bigint` and a `number` correctly
+// (`Math.min()` throws for a `bigint`): a `bigint` count is larger than every
+// safe integer and smaller than `Infinity`.
 function minCount(
-  counts: ReadonlyArray<number | undefined>
-): number | undefined {
+  counts: ReadonlyArray<number | bigint | undefined>
+): number | bigint | undefined {
   if (counts.some((c) => c === undefined)) return undefined;
   if (counts.length === 0) return 0;
-  return Math.min(...(counts as number[]));
+  return (counts as (number | bigint)[]).reduce((a, b) => (b < a ? b : a));
 }
 
-function zipCount(expr: Expression): number | undefined {
+function zipCount(expr: Expression): number | bigint | undefined {
   if (!isFunction(expr)) return undefined;
   return minCount(expr.ops.map((x) => x.count));
 }
@@ -17038,6 +17531,9 @@ function isEmptySource(x: Expression): boolean | undefined {
   if (empty !== undefined) return empty;
   const n = x.count;
   // `Infinity` correctly answers `false` here — an unbounded source is not
-  // empty. Only a genuinely unknown count leaves the verdict open.
+  // empty — and so does a `bigint` (a finite count that is not a safe
+  // integer, never 0). Only a genuinely unknown count leaves the verdict
+  // open.
+  if (typeof n === 'bigint') return false;
   return typeof n === 'number' ? n === 0 : undefined;
 }

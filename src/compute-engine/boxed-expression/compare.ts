@@ -2387,7 +2387,7 @@ function approximateNode(
   unit: number
 ): { approximation: Approximation | undefined; pure: boolean } {
   const ce = x.engine;
-  const key = `${ce.precision}:${BigDecimal.precision}:${ce.angularUnit}`;
+  const key = `${ce.precision}:${BigDecimal.precision}:${ce.angularUnit}:${ce.roundingTies}`;
   const known = approximations.get(x);
   const entry = known?.find((k) => k.key === key);
   if (entry !== undefined)

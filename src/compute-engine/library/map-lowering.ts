@@ -358,9 +358,7 @@ function inexact(ce: ComputeEngine, v: Expression): Expression {
     if (!v.isExact || v.isFinite !== true) return v;
     const re = v.bignumRe ?? v.re;
     const im = v.im;
-    return ce.number(
-      ce._inexactNumericValue(im === 0 ? re : { re: v.re, im })
-    );
+    return ce.number(ce._inexactNumericValue(im === 0 ? re : { re: v.re, im }));
   }
   return ce._fn('N', [v]).evaluate();
 }

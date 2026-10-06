@@ -52,7 +52,8 @@ echo "Checking type-level pins in the test suite..."
   ./test/compute-engine/compile-free-function-typing.test.ts \
   ./test/compute-engine/compile-mode-plumbing.test.ts \
   ./test/compute-engine/user-collection-handlers.test.ts \
-  ./test/compute-engine/declare-definition-input.test.ts
+  ./test/compute-engine/declare-definition-input.test.ts \
+  ./test/compute-engine/bigint-count.test.ts
 
 # Circular dependency check
 MAX_CYCLES=0

@@ -75,7 +75,9 @@ describe('COMPILE lazy infinite collections', () => {
     expect(r?.success).toBe(true);
     expect(r?.run?.({ n: 10 })).toBe(385);
     expect(r?.run?.({ n: 0 })).toBe(0);
-    expect(r?.run?.({ n: -3 })).toBe(0); // negative count → Take is []
+    // A negative count takes the last elements, which an infinite collection
+    // does not have: it throws (the interpreter leaves it unevaluated).
+    expect(() => r?.run?.({ n: -3 })).toThrow(/negative count/);
   });
 
   it('Filter over an infinite range stays lazy', () => {

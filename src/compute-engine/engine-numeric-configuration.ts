@@ -6,11 +6,20 @@ import {
   MACHINE_PRECISION,
 } from './numerics/numeric.js';
 
-import type { AngularUnit } from './types-definitions.js';
+import type { AngularUnit, RoundingTies } from './types-definitions.js';
+
+const ROUNDING_TIES: readonly RoundingTies[] = [
+  'away-from-zero',
+  'to-even',
+  'toward-zero',
+  'toward-positive-infinity',
+  'toward-negative-infinity',
+];
 
 export class EngineNumericConfiguration {
   private _precision: number;
   private _angularUnit: AngularUnit;
+  private _roundingTies: RoundingTies = 'away-from-zero';
   private _tolerance: number;
   private _bignumTolerance: BigDecimal;
   private _negBignumTolerance: BigDecimal;
@@ -105,6 +114,22 @@ export class EngineNumericConfiguration {
     if (typeof value !== 'string') throw Error('Expected a string');
 
     this._angularUnit = value;
+    return true;
+  }
+
+  get roundingTies(): RoundingTies {
+    return this._roundingTies;
+  }
+
+  /** Returns `true` when the rule changed. An unknown rule is an error: a
+   *  misspelled rule would otherwise be ignored without a message. */
+  setRoundingTies(value: RoundingTies): boolean {
+    if (!ROUNDING_TIES.includes(value))
+      throw Error(
+        `Expected one of ${ROUNDING_TIES.map((r) => `"${r}"`).join(', ')}`
+      );
+    if (value === this._roundingTies) return false;
+    this._roundingTies = value;
     return true;
   }
 

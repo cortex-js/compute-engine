@@ -90,6 +90,7 @@ import {
   containsContinuationOperand,
 } from './type-guards.js';
 import { narrowStringLiteralToCharacter } from './boxed-character.js';
+import { smallCount } from './collection-count.js';
 
 // Parsed once: the type of an indexed collection whose every element is a
 // number. Used in `checkNumericArgs` to accept collections for broadcasting on
@@ -2123,7 +2124,7 @@ function strippedMatchesParam(
   const dims = staticCollectionDims(stripped);
   if (dims === null || dims.length !== 1 || dims[0] >= 0) return false;
   if (op.isFiniteCollection !== true) return false;
-  const count = op.count;
+  const count = smallCount(op);
   if (count === undefined || !Number.isFinite(count)) return false;
   const r = resolveTypeAlias(stripped);
   if (typeof r === 'string' || r.kind !== 'list') return false;
@@ -2375,8 +2376,7 @@ export function refusesAbsentArgument(
  */
 function isScalarParameterTuple(t: Type, param: Type): boolean {
   if (param === 'never' || param === 'nothing') return false;
-  if (!isSubtype(param, 'number') && !isSubtype(param, 'boolean'))
-    return false;
+  if (!isSubtype(param, 'number') && !isSubtype(param, 'boolean')) return false;
   const r = resolveTypeAlias(t);
   if (typeof r !== 'object' || r.kind !== 'tuple') return false;
   return r.elements.every((e) => {

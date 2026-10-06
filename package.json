@@ -1,5 +1,5 @@
 {
-  "version": "0.147.0",
+  "version": "0.148.0",
   "scripts": {
     "doc": "bash ./scripts/doc.sh",
     "build": "bash ./scripts/build.sh",
@@ -14,6 +14,7 @@
     "postpublish": "bash ./scripts/package-vsix.sh",
     "test": "bash ./scripts/test.sh",
     "test:nodenext": "node ./test/consumer/nodenext-smoke.mjs",
+    "test:js-runtime": "node ./test/consumer/js-runtime-smoke.mjs",
     "test:epsil-runtime": "node ./test/consumer/epsil-runtime-smoke.mjs",
     "test:epsil-cli": "node ./test/consumer/epsil-cli-smoke.mjs",
     "test:nightly": "CE_NIGHTLY=1 jest --config ./config/jest.config.cjs --reporters default -- test/compute-engine/nightly/",
@@ -102,6 +103,12 @@
       "import": "./dist/esm-min/compile.js",
       "require": "./dist/umd-min/compile.cjs",
       "default": "./dist/esm-min/compile.js"
+    },
+    "./runtime": {
+      "types": "./dist/types/runtime.d.ts",
+      "import": "./dist/esm-min/runtime.js",
+      "require": "./dist/umd-min/runtime.cjs",
+      "default": "./dist/esm-min/runtime.js"
     },
     "./identities": {
       "types": "./dist/types/identities.d.ts",

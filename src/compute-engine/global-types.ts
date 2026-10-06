@@ -41,6 +41,7 @@ export type {
   SymbolDefinitions,
   LibraryDefinition,
   AngularUnit,
+  RoundingTies,
   Sign,
   BaseCollectionHandlers,
   IndexedCollectionHandlers,

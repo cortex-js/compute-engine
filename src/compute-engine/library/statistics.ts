@@ -113,6 +113,11 @@ import {
   distributionVariance,
   isDistributionExpression,
 } from './distributions.js';
+import { smallCount } from '../boxed-expression/collection-count.js';
+import {
+  rangeMeanClosedForm,
+  rangeVarianceClosedForm,
+} from './range-closed-form.js';
 
 // Geometric mean:
 // Harmonic mean:
@@ -676,6 +681,12 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           const r = distributionMean(engine, ops[0]);
           return numericApproximation ? r?.N() : r;
         }
+        // A `Range` with exact rational bounds and step has a closed-form
+        // mean, the mean of its first and last elements: it is not walked.
+        if (ops.length === 1) {
+          const m = rangeMeanClosedForm(engine, ops[0], numericApproximation);
+          if (m !== undefined) return m;
+        }
         // ONE walk of the data decides all three verdicts — an absent datum
         // or empty input (`NaN`), a provably non-numeric datum (an error), or
         // symbolic data (stay inert rather than fold a valueless symbol to
@@ -744,6 +755,13 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       description: 'Median of a collection of numbers.',
       examples: ['Median([3, 1, 4, 2])  // 5/2'],
       evaluate: (ops, { engine, numericApproximation }) => {
+        // The elements of an exact `Range` are an arithmetic sequence, so its
+        // median is its mean, the mean of its first and last elements: it is
+        // not sorted.
+        if (ops.length === 1) {
+          const m = rangeMeanClosedForm(engine, ops[0], numericApproximation);
+          if (m !== undefined) return m;
+        }
         // ONE walk of the data decides all three verdicts — an absent datum
         // or empty input (`NaN`), a provably non-numeric datum (an error), or
         // symbolic data (stay inert rather than fold a valueless symbol to
@@ -817,6 +835,17 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           const r = distributionVariance(engine, ops[0]);
           return numericApproximation ? r?.N() : r;
         }
+        // A `Range` with exact rational bounds and step has a closed-form
+        // variance: see `rangeVarianceClosedForm`.
+        if (ops.length === 1) {
+          const v = rangeVarianceClosedForm(
+            engine,
+            ops[0],
+            false,
+            numericApproximation
+          );
+          if (v !== undefined) return v;
+        }
         // ONE walk of the data decides all three verdicts — an absent datum
         // or empty input (`NaN`), a provably non-numeric datum (an error), or
         // symbolic data (stay inert rather than fold a valueless symbol to
@@ -881,6 +910,17 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       nanBehavior: 'handle',
       missingBehavior: 'handle',
       evaluate: (ops, { engine, numericApproximation }) => {
+        // A `Range` with exact rational bounds and step has a closed-form
+        // variance: see `rangeVarianceClosedForm`.
+        if (ops.length === 1) {
+          const v = rangeVarianceClosedForm(
+            engine,
+            ops[0],
+            true,
+            numericApproximation
+          );
+          if (v !== undefined) return v;
+        }
         // ONE walk of the data decides all three verdicts — an absent datum
         // or empty input (`NaN`), a provably non-numeric datum (an error), or
         // symbolic data (stay inert rather than fold a valueless symbol to
@@ -1711,7 +1751,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       },
       evaluate: ([xs, kOp], { engine: ce }) => {
         if (!xs.isIndexedCollection) return undefined;
-        const n = xs.count;
+        const n = smallCount(xs);
         if (n === undefined) return undefined;
         if (!Number.isFinite(n))
           return ce.error([

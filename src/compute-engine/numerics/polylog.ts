@@ -5,6 +5,7 @@ import {
   gammaErrorWeight,
   hurwitzZetaComplex,
   polylogComplex,
+  polylogSeriesOutsideDisk,
 } from './numeric-complex.js';
 import { polylog as polylogIntegerReal } from './special-functions.js';
 
@@ -142,11 +143,16 @@ function polylogInversionComplex(s: Complex, z: Complex): Complex {
   if (Math.abs(s.im) > 1.5) return C_NAN;
   const inner = polylogInsideDisk(s, z.inverse());
   if (inner.isNaN()) return C_NAN;
+  // Γ(s) overflows a double past Re(s) ≈ 171.6. The factor below then
+  // comes out as 0, the error check sees only the second term, and the
+  // result would be that term, not the value.
+  const g = gammaComplex(s);
+  if (!g.isFinite()) return C_NAN;
   const iPiS = new Complex(0, Math.PI).mul(s);
   const factor = new Complex(2 * Math.PI, 0)
     .pow(s)
     .mul(iPiS.mul(0.5).exp())
-    .div(gammaComplex(s));
+    .div(g);
   // 1 − s is rounded; its exact distance to the pole of ζ at 1 is −s.
   const zeta = hurwitzZetaComplex(C_ONE.sub(s), a, s.neg());
   const first = factor.mul(zeta);
@@ -182,8 +188,10 @@ function polylogInsideDisk(s: Complex, z: Complex): Complex {
 /**
  * Liₛ(z) for complex s, z, at machine precision. An integer order goes to
  * the closed forms and the dedicated kernel (`polylogIntegerOrderComplex`).
- * Any other order uses z·Φ(z,s,1): past |z| = 1 through the Lerch
- * continuation, and where that declines through Jonquière's inversion
+ * Any other order uses z·Φ(z,s,1): past |z| = 1, for a real order, first
+ * the leading terms of the power series where they give the value
+ * (`polylogSeriesOutsideDisk`, which answers fast at a large order), then
+ * the Lerch continuation, and where that declines Jonquière's inversion
  * (`polylogInversionComplex`). `NaN` where every route declines: the caller
  * (`applyN`) reads a NaN kernel result as "stay symbolic" rather than ship
  * an unverified number.
@@ -196,8 +204,14 @@ export function polylogOrderComplex(s: Complex, z: Complex): Complex {
     if (r !== undefined) return r;
   }
   if (z.abs() <= 1) return polylogInsideDisk(s, z);
-  // Past the disk: the Lerch continuation first; where it declines (see
-  // `lerchContinuedComplex`), the inversion takes over.
+  // Past the disk: the first terms of the power series where they give the
+  // value (a real order large enough for |z|), then the Lerch continuation;
+  // where that declines (see `lerchContinuedComplex`), the inversion takes
+  // over.
+  if (s.im === 0) {
+    const series = polylogSeriesOutsideDisk(s.re, z);
+    if (series !== undefined) return series;
+  }
   const phi = lerchPhiComplex(z, s, C_ONE);
   if (phi !== undefined && !phi.isNaN()) return z.mul(phi);
   return polylogInversionComplex(s, z);

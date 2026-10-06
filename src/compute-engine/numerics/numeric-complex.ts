@@ -3988,14 +3988,17 @@ export function erfiComplex(z: Complex): Complex {
 // ---------------- Polylogarithm Liₙ(z), integer order n ≥ 2 (complex) ----
 //
 // Liₙ(z) = Σ_{k≥1} zᵏ/kⁿ, analytically continued over the whole plane with
-// Liₙ(z) = Σ_{k≥1} zᵏ/kⁿ, analytically continued over the whole plane with
 // the standard branch cut along z ∈ (1, ∞) (mpmath's convention: the value
 // on the cut matches the limit from below, Im < 0). Three bands, mirroring
 // mpmath's `polylog`:
-//   - |z| ≤ 1/2                 → direct power series
+//   - |z| ≤ 1/2                 → direct power series (also on |z| ≤ 1
+//                                 from the order `POLYLOG_SERIES_MIN_ORDER`)
 //   - 1/2 < |z| ≤ 1             → ln-expansion about z = 1 (Crandall), valid
 //                                 while |ln z| < 2π (always true on |z| ≤ 1)
-//   - |z| > 1                   → inversion to Liₙ(1/z) with a Bernoulli-
+//   - |z| > 1                   → the first terms of the power series where
+//                                 they give the value
+//                                 (`polylogSeriesOutsideDisk`), else
+//                                 inversion to Liₙ(1/z) with a Bernoulli-
 //                                 polynomial term (below)
 // Non-integer order and order < 2 are out of scope (return NaN → the caller
 // keeps the expression symbolic).
@@ -4024,7 +4027,21 @@ function bernoulliPolyComplex(n: number, x: Complex): Complex {
   return result;
 }
 
-/** Direct series Liₙ(z) = Σ_{k≥1} zᵏ/kⁿ (|z| ≲ 1/2). */
+/**
+ * From this order on, `polylogInteriorComplex` and the real `polylog` use
+ * the direct series on the whole disk |z| ≤ 1, not only on |z| ≤ 1/2. The
+ * terms are at most 1/kⁿ, so fewer than 10^(17/n) of them reach double
+ * precision: 134 at n = 8, 7 at n = 20, 2 from n = 57 on. The
+ * ln-expansion about z = 1 costs O(n) work (the harmonic number H_{n−1}),
+ * which takes seconds at n = 10⁹, and it is less accurate at these orders:
+ * measured against mpmath on 20 points of the disk (on the real axis, and
+ * on and near the unit circle), its worst relative error at n = 8 and
+ * n = 10 is 1.1e−14, and the series' is 1.3e−15. At n = 6 the series
+ * needs more than its 500-term limit near |z| = 1.
+ */
+export const POLYLOG_SERIES_MIN_ORDER = 8;
+
+/** Direct series Liₙ(z) = Σ_{k≥1} zᵏ/kⁿ (|z| ≲ 1/2, or a large order n). */
 function polylogSeriesComplex(n: number, z: Complex): Complex {
   let sum = C_ZERO;
   let zk: Complex = C_ONE;
@@ -4075,7 +4092,8 @@ function polylogLnExpComplex(n: number, z: Complex): Complex {
 
 /** Interior evaluation for |z| ≤ 1 (dispatches series vs ln-expansion). */
 function polylogInteriorComplex(n: number, z: Complex): Complex {
-  if (z.abs() <= 0.5) return polylogSeriesComplex(n, z);
+  if (z.abs() <= 0.5 || n >= POLYLOG_SERIES_MIN_ORDER)
+    return polylogSeriesComplex(n, z);
   return polylogLnExpComplex(n, z);
 }
 
@@ -4101,12 +4119,111 @@ function polylogInversionComplex(n: number, z: Complex): Complex {
   return inner.mul(sign).sub(twoPiI.pow(n).div(nFact).mul(bern));
 }
 
+/** The most terms `polylogSeriesOutsideDisk` sums before it declines. */
+const SERIES_OUTSIDE_DISK_MAX_TERMS = 200;
+
+/** ln(1e−20): on the branch cut, `polylogSeriesOutsideDisk` answers only
+ * when the imaginary part of the value is below 1e−20. */
+const SERIES_OUTSIDE_DISK_LN_CUT_TAIL = Math.log(1e-20);
+
+/**
+ * Liₛ(z) for a real order s > 0 and |z| > 1 from the first terms of the
+ * power series Σ zⁿ/nˢ, or `undefined` when these terms do not give the
+ * value to double precision.
+ *
+ * The series diverges for |z| > 1, but at a large order its first terms
+ * fall fast: term n + 1 is |z|·(n/(n+1))ˢ times term n. The Lerch integral
+ * (DLMF 25.14.1) bounds what remains after N terms:
+ *
+ *   |Liₛ(z) − Σ_{n≤N} zⁿ/nˢ| ≤ |z|^{N+1} / ((N+1)ˢ · δ),
+ *
+ * where δ is the distance from 1 to the segment [0, z]. The bound holds for
+ * z outside [1, ∞): Liₛ(z) = z·Φ(z, s, 1), the remainder is
+ * z^{N+1}·Φ(z, s, N+1), and in the integral for Φ the denominator
+ * 1 − z·e^{−t} stays at least δ from 0. The sum stops when the bound is
+ * below 2⁻⁶⁰ of the sum, and the function declines when that does not
+ * happen within `SERIES_OUTSIDE_DISK_MAX_TERMS` terms.
+ *
+ * On the branch cut, z = x real and x > 1, the value below the cut has the
+ * imaginary part −π·(ln x)^{s−1}/Γ(s) (the convention of the other
+ * polylogarithm kernels and of mpmath). The function declines unless that
+ * part is below 1e−20, and then takes the partial sum as the real part.
+ * This real part has no proven bound (δ is 0 on the cut), but it was
+ * measured against mpmath (40 and 60 digits) for orders from 8 to 2.5e6:
+ * on 358 answered points of the cut (x from 1.0001 to 1e15) the worst
+ * relative error is 7.3e−16, and on 1105 answered points off the cut it
+ * is 5.2e−16. On the same points the inversion formula of the integer
+ * orders is off by up to 5e−14.
+ */
+export function polylogSeriesOutsideDisk(
+  s: number,
+  z: Complex
+): Complex | undefined {
+  const abs = z.abs();
+  if (!(s > 0) || !Number.isFinite(s) || !Number.isFinite(abs) || !(abs > 1))
+    return undefined;
+  const onCut = z.im === 0 && z.re > 1;
+  let delta = 1;
+  let cutIm = 0;
+  if (onCut) {
+    const lnTail =
+      (s - 1) * Math.log(Math.log(abs)) - gammaln(new Complex(s, 0)).re;
+    if (!(lnTail <= SERIES_OUTSIDE_DISK_LN_CUT_TAIL)) return undefined;
+    cutIm = -Math.PI * Math.exp(lnTail);
+  } else {
+    // The point of the segment [0, z] nearest to 1 is u·z, with u the
+    // projection of 1 on the line through 0 and z, clamped to [0, 1]:
+    // u = Re z/|z|². Because |z| > 1, u < 1, so the projection is inside
+    // the segment exactly when Re z > 0, and then the distance from 1 to
+    // the line is |Im z|/|z|. Otherwise the nearest point is 0, at
+    // distance 1. This form does not compute |z|², which overflows above
+    // |z| ≈ 1.3e154 (u was then 0 and δ was 1 at z = 1e200 + 1e184·i,
+    // where δ is 1e−16, so the bound was 16 orders too small).
+    delta = z.re > 0 ? Math.abs(z.im) / abs : 1;
+    // A δ below the smallest normal double has lost digits: decline.
+    if (!(delta >= 2 ** -1022)) return undefined;
+  }
+  const lnAbs = Math.log(abs);
+  const arg = Math.atan2(z.im, z.re);
+  // |zⁿ/nˢ|, from logarithms because zⁿ and nˢ can overflow separately.
+  const term = (n: number): number =>
+    n === 1 ? abs : Math.exp(n * lnAbs - s * Math.log(n));
+  let re = 0;
+  let im = 0;
+  for (let n = 1; n <= SERIES_OUTSIDE_DISK_MAX_TERMS; n++) {
+    const t = term(n);
+    if (z.im === 0) {
+      re += z.re < 0 && n % 2 === 1 ? -t : t;
+    } else {
+      re += t * (n === 1 ? z.re / abs : Math.cos(n * arg));
+      im += t * (n === 1 ? z.im / abs : Math.sin(n * arg));
+    }
+    if (!Number.isFinite(re + im)) return undefined;
+    if (term(n + 1) / delta <= 2 ** -60 * Math.hypot(re, im))
+      return new Complex(re, im + cutIm);
+  }
+  return undefined;
+}
+
+/**
+ * The largest order for which `polylogComplex` uses the inversion formula
+ * (`polylogInversionComplex`). From n = 171 on, n! overflows a double, so
+ * the factor (2πi)ⁿ/n! is 0 or NaN, and the Bernoulli polynomial Bₙ costs
+ * O(n²) work with exact rationals. At these orders `polylogComplex`
+ * answers |z| > 1 only through `polylogSeriesOutsideDisk`. On the measured
+ * points (orders 171 to 2.5e6) that series answered every |z| up to 1e15,
+ * and declined some points at |z| = 1e100 and above.
+ */
+const POLYLOG_INVERSION_MAX_ORDER = 170;
+
 /**
  * Polylogarithm Liₙ(z) for integer order n ≥ 2 and complex z (whole plane).
  * Returns NaN for non-integer order, order < 2, or NaN input — the caller
- * then keeps the expression symbolic. Accurate to ≈1e-12 or better across
- * the plane (see the validation notes at the call site); the branch cut is
- * z ∈ (1, ∞) with the below-the-cut (Im < 0) convention.
+ * then keeps the expression symbolic. Returns NaN also for |z| > 1 at an
+ * order above `POLYLOG_INVERSION_MAX_ORDER` when `polylogSeriesOutsideDisk`
+ * declines. Accurate to ≈1e-12 or better across the plane (see the
+ * validation notes at the call site); the branch cut is z ∈ (1, ∞) with
+ * the below-the-cut (Im < 0) convention.
  */
 export function polylogComplex(s: Complex, z: Complex): Complex {
   if (s.isNaN() || z.isNaN()) return C_NAN;
@@ -4115,7 +4232,12 @@ export function polylogComplex(s: Complex, z: Complex): Complex {
   if (!Number.isInteger(s.re) || Math.abs(s.re - n) > 1e-12 || n < 2)
     return C_NAN;
   if (z.isZero()) return C_ZERO;
-  if (z.abs() > 1) return polylogInversionComplex(n, z);
+  if (z.abs() > 1) {
+    const series = polylogSeriesOutsideDisk(n, z);
+    if (series !== undefined) return series;
+    if (n > POLYLOG_INVERSION_MAX_ORDER) return C_NAN;
+    return polylogInversionComplex(n, z);
+  }
   return polylogInteriorComplex(n, z);
 }
 

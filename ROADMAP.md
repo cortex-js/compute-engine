@@ -49,8 +49,8 @@ clean-parse 3/345 → 278/345, throws 9 → 0). Fresh unseen-sample validation
 measured 97.4% clean parse with 0 throws/0 hangs; the remaining MathNet work is
 a small notation tail tracked below.
 
-**0.141.0 released 2026-09-29** (latest; adopted by Tycho the same day). The
-0.111–0.141 line is described release by release in `CHANGELOG.md`. The
+**0.148.0 released 2026-10-05** (latest; Tycho runs 0.147.0, adopted
+2026-10-02). The 0.111–0.148 line is described release by release in `CHANGELOG.md`. The
 0.97–0.110 line carried the Tycho-compatibility rounds through items 177–190
 (the canonicalization-time facet-probe storm and its document-context survivor,
 the `Add` collection-view nesting fix, `broadcastable` divide admission, opt-in
@@ -108,6 +108,143 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 ---
 
 ## Remaining work
+
+### A determinant with float entries keeps unfolded constants (OPEN, small — found 2026-10-06 by the review of the exact determinant fix; present before)
+
+The determinant is returned as the tensor field builds it, and neither the
+field `add` nor the `.add()` method folds an exact integer with a float. So
+`CharacteristicPolynomial([[1.5, 2], [3, 4]], x)` is
+`x^2 - 5.5 * x - 6 + 6`, and `Determinant([[x + 1.5, 1], [1, 2]])` is
+`2x - 1 + 3`. A second `.evaluate()` of the first result gives
+`x^2 - 5.5x + 0`, which still keeps a `+ 0`. To do: fold the numeric terms of
+the determinant when an entry is inexact, and find why `evaluate()` keeps the
+`+ 0` term.
+
+### A determinant above the size limit of the cofactor expansion is a nested quotient (OPEN, small — found 2026-10-06 by the exact determinant fix)
+
+`AbstractTensor.determinant()` (`tensor/tensors.ts`) expands the cofactors of
+a matrix with a symbolic entry up to 6×6, and of a matrix with exact
+irrational numbers up to 8×8. A larger matrix goes through Bareiss
+elimination, which divides by the previous pivot. A quotient by a sum of
+radicals or symbols is not reduced, so each step nests the previous one: the
+7×7 symbolic case and a 9×9 radical case give results of many thousand
+characters. The values are correct. To do: rationalize each exact Bareiss
+quotient, or use a division-free elimination. A radical whose square-free
+radicand is above 10⁶ also still becomes a float in a product
+(`ExactNumericValue.mul`), because such a radicand is not stored.
+
+### `PolyLog` past |z| = 1 at an order above 170 stays unevaluated for a very large |z| (OPEN, small — found 2026-10-06 by the fix for issue #412)
+
+Past the unit circle, a real order uses the first terms of the power series
+when they give the value (`polylogSeriesOutsideDisk`,
+`numerics/numeric-complex.ts`). The series stops answering when its terms
+grow before they fall, which happens when |z| is large compared with 2ˢ,
+and on the branch cut z > 1 when the imaginary part −π·(ln z)^{s−1}/Γ(s)
+is above 1e−20. The other routes do not answer above the order 170: the
+inversion formula of the integer orders needs n!, which overflows a double
+at n = 171, and Jonquière's inversion of the non-integer orders needs
+Γ(s), which overflows at s ≈ 171.6. So `.N()` stays unevaluated for these
+points, although the values exist (mpmath gives
+`polylog(250, 1e100) = 8.997e99 − 3.778e98i`):
+
+- integer orders: `PolyLog(171, z)`, `PolyLog(200, z)` and
+  `PolyLog(250, z)` for z = 1e100, −1e100, 1e100·i and 1e300 + 1e300·i;
+  `PolyLog(500, 1e100)`, `PolyLog(500, 1e300 + 1e300i)`,
+  `PolyLog(1000, 1e300 + 1e300i)`;
+- non-integer orders: `PolyLog(250.5, z)` for the same four z,
+  `PolyLog(171.5, 1e300 + 1e300i)`, `PolyLog(1000.5, 1e300 + 1e300i)`,
+  `PolyLog(200.5, 1e40)`, and also `PolyLog(20.25, 1e300 + 1e300i)`;
+- the compiled lane (`_SYS.polyLog`, real values only) gives `NaN` for
+  `PolyLog(171, −1e100)`, `PolyLog(200, −1e100)` and
+  `PolyLog(250, −1e100)`.
+
+A possible route: the asymptotic expansion of Liₛ(z) for a large |ln z|
+(DLMF 25.12.12 with the Hurwitz zeta form of Jonquière's formula), with
+(2π)ˢ/Γ(s) computed from logarithms so that it does not overflow.
+
+### The modulus of a very small complex number is wrong or `0` (OPEN, decision — found 2026-10-06 by the Lerch kernel fix)
+
+`Complex.abs()` of the `complex-esm` dependency computes `√(a² + b²)` without
+scaling when both parts are below 3000. So a modulus below about 1.5e−154
+underflows: `new Complex(3e−200, 4e−200).abs()` is `0` (the value is
+5e−200), and a subnormal square loses digits: `new Complex(1e−160, 0).abs()`
+is `9.99994e−161`. `Math.hypot` gives the correct values. `numerics/lerch-phi.ts`
+now uses its own `modulus()` (`Math.hypot`), and its error estimates had
+dropped small terms because of this. `src/` has 258 `.abs()` calls (99 in
+`numerics/numeric-complex.ts`), and the error estimates of other kernels can
+drop small terms in the same way. The same unscaled `hypot` can also affect
+other `complex-esm` methods that call it. A decision is necessary on the form of
+the fix: one shared `modulus()` helper used everywhere in `src/`, a
+replacement of `Complex.prototype.abs` when the engine loads (the build
+bundles `complex-esm`, so only the engine's copy changes — to confirm), or a
+fix in `complex-esm` itself (a fork, or a pull request to its repository).
+
+The other end has a related defect: `Complex.log()` gives a real part of
+`Infinity` above |z| ≈ 1.3e154. `lerchSeriesOutsideDisk` in
+`numerics/lerch-phi.ts` now builds log z from `Math.log(|z|)` and
+`Math.atan2`, but `logAccurate` in the same file still falls back to
+`Complex.log()`. So the Lerch continuation declines (no wrong value was seen)
+for a complex z with both parts nonzero and |z| above 1.3e154. Related
+declines on purpose: at |z| = 1e200 near the cut, `PolyLog(s, z)` and
+`LerchPhi(z, s, 1)` stay unevaluated for s from about 725 to 777, where the
+proven remainder bound of the series is about 1.7e−10 of the value.
+
+### The GPU Lerch tail integral may be inaccurate at a large order (OPEN, investigation — found 2026-10-06 by the Lerch kernel fix)
+
+`_gpu_lerch_hermite` in `compilation/gpu-target.ts` limits the width of an
+integration panel to 4/|ln |z|| but does not account for the phase rate
+|s|/b of the integrand. At s = −30 and b = 1, the first panel (width 1.5) has
+about 30 radians of phase for an 8-point rule. The interpreter's tail
+integral had the same problem (`hermiteTail` in `numerics/lerch-phi.ts`, now
+cut into parts with at most 12 radians each). The GPU helper is used only for
+s ≤ 0 after the other methods decline. To do: measure it against the f32 model
+of the GPU code, and cut its panels the same way if it is wrong.
+
+### `Limit` at infinity: two sign reads that still default to `+` (OPEN, small — found 2026-10-04 by the complex-valued limit fix for issue #396)
+
+The polynomial rule, the product rule and the quotient rule of the limit at
+infinity (`symbolic/limit.ts`) answer `±∞` only when the sign is decided.
+Two reads in the growth oracles still use `leadingSignAtInf`, which returns
+`+1` when its numeric probe at `x = 120` has no value (a symbolic
+parameter): the `Exp` case and the constant-base `Power` case near
+`tendsToInfinity`. No wrong limit is known to come from them — the probes
+tried (`a·eᵗ`, `a·ln t`, `(a·t)³`, `a·eᵗ + t`) all stay unevaluated — but
+each read must decline when the probe has no value.
+
+### A complex-valued limit that is not finite has no answer (OPEN, design — found 2026-10-04, issue #396)
+
+`Limit(t ↦ i·t, ∞)` and `Limit(t ↦ Erf(i·t), ∞)` stay unevaluated: the
+engine has no directed complex infinity, and by the 2026-07-10 convention a
+limit never answers `ComplexInfinity`. Deciding that a limit whose modulus
+goes to `+∞` answers `ComplexInfinity` would give these an answer. The code
+is `complexLimitAtPosInf` in `symbolic/limit.ts`. Also not covered: a
+complex-valued function whose parts cannot be separated (only sums,
+products, quotients, integer powers and the exponential are), for example
+`t·Gamma(2 + i·t)`, whose symbolic limit is `0`; `.N()` gives a value near
+`0` for it.
+
+### `NLimit` gives `NaN` for a function that rises before it decays to 0 (OPEN, small — found 2026-10-04, issue #396; present before)
+
+`NLimit(t ↦ 7t/(t² + 9), ∞)` is `NaN`; the limit is `0`. The sample test
+`reliableLimitSamples` (`numerics/numeric.ts`) reads "the magnitude grew to
+a peak, then fell below `1e-8` of the peak" as catastrophic cancellation,
+and this function has that shape (0.7 at `t = 1`, 0.77 at `t = 8`, then a
+`7/t` decay). `Limit` answers it symbolically, so only the numeric route
+shows it — including the imaginary part of `(2t + i)/(t − 3i)`. A decay
+that is regular (each sample smaller than the one before by a near-constant
+ratio) is not a cancellation and could be told apart from one. A related
+point: a function that decays to 0 gives a residue such as `−9e-46`, not
+`0` (`NLimit(t ↦ |Gamma(i·t)|, ∞)`).
+
+### Compiled JavaScript `Gamma` of a non-real argument is `NaN` (OPEN, small — found 2026-10-04, issue #396)
+
+`compile(Gamma(i·t))` succeeds and the function returns `NaN` for every
+`t`: the generated code is `cisreal(z) ? gamma(re(z)) : NaN`. The
+interpreter has a complex `gamma()` (`numerics/numeric-complex.ts`) and
+answers `Gamma(5i) ≈ −0.00027 + 0.00034i`. The compiled function must call
+a complex kernel, or the compilation must decline, so the two routes agree.
+For this reason the numeric `Limit` of a complex-valued function samples
+through the interpreter (`numericLimitValue`, `library/calculus.ts`).
 
 ### A spacing command inside a KroneckerDelta subscript becomes an index (OPEN, small — found 2026-10-04 by the δ-group change)
 
@@ -172,6 +309,23 @@ decision). These cases stay unevaluated although a complete answer exists:
   accepts a list alone: the interval proof of the next entry rejects a list
   that misses a root, except a root inside the window around a listed
   root.)
+
+### An unevaluated `Solve` from a parse keeps parse forms in its MathJSON (OPEN, small — found 2026-10-04)
+
+`Solve` holds its arguments, and `canonicalSolve()`
+(`boxed-expression/solve-domain.ts`) keeps the equation operand as written,
+on purpose. When `Solve` cannot give a complete list, it stays unevaluated,
+and the result holds that operand as it came from the parser:
+`ce.parse('\operatorname{Solve}((x-2)(x+e^x)=0, x)').evaluate().json` is
+`["Solve", ["Equal", ["InvisibleOperator", ["Delimiter", …], ["Delimiter",
+…]], 0], "x"]`. The same input from `ce.box(...)` gives
+`["Multiply", …]`. The LaTeX is the same on both routes, but a host that
+reads the MathJSON sees `InvisibleOperator` and `Delimiter`. A canonical form
+of an equation stays an equation (`x - x = 0` keeps its `Equal`), so a
+possible fix is to return `Solve` with the canonical equation when the solver
+gives no answer. Before that change, find why the comment in
+`canonicalSolve()` says not to canonicalize the equation (for example, a
+symbol declared too early, before the domain spec is read).
 
 ### `Solve` over a bounded domain does not see a root that is very near a listed root (OPEN, medium — found 2026-10-04 by the interval proof of complete lists)
 
@@ -408,6 +562,62 @@ progress can still run for a long time. A fix gives the built-in antiderivative
 `RUBI_STEP_BUDGET` in `rubi/driver.ts`, so that the result does not depend on
 the machine, and decides what an exhausted budget returns (the unevaluated
 `Integrate`, as Rubi does).
+
+### Whole-number powers of one matrix do not combine (OPEN, small — found 2026-10-05 by the matrix fix for issue #415)
+
+`A^2 · A^3` stays a product for a symbol `A` declared `matrix<2x2>`, and
+`A · A^2` too. The value `A^5` (or `A^3`) is correct, because a positive
+whole-number power of a matrix is the matrix power and the powers of one matrix
+commute. The products stay because canonicalization writes these powers as
+`MatrixPower(…)`, and no rule merges two `MatrixPower` factors with the same
+base. The same-base rules in `simplify-power.ts` (`canCombineSameBase()`)
+refuse every other combination of matrix factors on purpose (the product of
+matrices is the matrix product, while `Exp` and a non-integer `Power` of a
+matrix are element-wise).
+
+### Indexing and slicing a collection whose count is a `bigint` (OPEN, decided 2026-10-06 — issue #416)
+
+A collection count that is not a safe integer is a `bigint` (`expr.count`,
+the `count` collection handler; see `smallCount()` in
+`boxed-expression/collection-count.ts`). The readers that index or slice with
+the count still take a `number`, so they treat such a count as unknown:
+`at()` takes a `number` index, and `Last(Range(1, 10^20))` stays unevaluated
+because the last index, 10^20, is not a safe integer. Decision: make `at()`
+and the readers that compute an index from the count (`Last`, a negative
+index, `Take`/`Drop` with a negative count, `Most`, the rotations) accept a
+`bigint` index, so that these give their value.
+
+### Reducers over a `Range`: three cases still walk or round (OPEN, small — found 2026-10-06 by the closed forms of `Sum` and `Mean` over a `Range`)
+
+`Sum`, `Mean`, `Median`, `Variance`, `PopulationVariance`, `Max` and `Min`
+of a literal `Range` with exact bounds and step use a closed form
+(`library/range-closed-form.ts`). Three cases do not:
+
+- A `Range` held by a symbol (`r := Range(1, 10^6)`, then `Sum(r)`) still
+  walks every element, because the check reads only a literal `Range`
+  operand.
+- Under `.N()`, `Mean`, `Median` and the variances receive their operand
+  already made numeric, so `Range(-17, 0, 1/3)` arrives with the float step
+  0.333…, the closed form does not apply, and the walk gives
+  `-8.50000000000000060577` instead of `-8.5`. A fix: read the operand before
+  it is made numeric (hold it), as `Sum` does.
+- Compiled JavaScript builds the whole array before it reduces it
+  (`_SYS.range(1, n, …).reduce(…)`, `_SYS.mean(_SYS.range(…))`), so the
+  memory use grows with `n`. The closed form, or a counted loop, would not.
+
+### Symbolic interval arithmetic in `evaluate()` (OPEN, investigation — issue #416, 2026-10-05)
+
+`Interval(a, b)` is a set of reals, so a numeric function of an interval is a
+type error (`Sin(Interval(0, 1))`), and `Abs(Interval(−1, 2))` is the
+cardinality of the set, `+∞`. Interval arithmetic exists only in compiled
+code: `compile(expr, {to: 'interval-js'})` and the `IntervalArithmetic`
+functions of `@cortex-js/compute-engine/interval` give `|[−1, 2]| = [0, 2]`.
+To investigate: a way for `evaluate()` to compute the image of an interval
+under a numeric function (`Sin(Interval(0, 1))` → `Interval(0, sin 1)`),
+exact where the endpoints are exact, without a second meaning for the
+operators that already accept a set (`Abs` as the cardinality). One possible
+form is a separate head for an interval value, distinct from the set
+`Interval`.
 
 ### `simplify()` does not fully simplify the terms of a quotient's numerator (OPEN, small — found 2026-10-03 by the odd and even function rules)
 
@@ -5573,10 +5783,14 @@ running out under contention. Neither suite was run on an idle box.
 ### `LerchPhi` past |z| = 1 still declines for a complex `a` whose shift terms dwarf the value (OPEN — residue of the two 2026-09-30 rounds, #340, #353)
 
 `lerchPhiComplex` (`numerics/lerch-phi.ts`) declines (`N()` stays symbolic)
-where no route can vouch for 1e−11 relative accuracy; it never returns a wrong
-number (every returned value on about 30 000 sweep points is within 1.1e−12 of a
-reference). The routes past the circle: the continuation
-(`lerchContinuedWithError`), the sum over the Fourier modes of the base point
+where no route can vouch for 1e−11 relative accuracy; it does not return a
+wrong number (every returned value on about 30 000 sweep points is within
+1.1e−12 of a reference; on a 2026-10-06 sweep of 12 000 points with orders up to
+200 and |z| up to 1e300, after the continuation was fixed for those, within
+8.8e−13). The routes past the circle: for `Re(s) > 0` off the cut, the leading
+terms of the series with a proven bound of the rest (`lerchSeriesOutsideDisk`);
+the continuation (`lerchContinuedWithError`), the sum over the Fourier modes of
+the base point
 for a real `a` and every `s` that is not a positive integer
 (`lerchModesComplex`), an integral route for `Re(s) > 0`
 (`lerchIntegralComplex`), and Lerch's transformation formula for a complex `a`

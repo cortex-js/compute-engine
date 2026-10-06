@@ -113,6 +113,7 @@ import {
 } from './binders.js';
 import { containsObject } from './object-walk.js';
 import { isTransitivelyPure } from './transitive-purity.js';
+import { normalizeCount, smallCount } from './collection-count.js';
 import { sequenceReadStopCount } from './sequence-read-stops.js';
 import { assertLiveBinding } from './binding-tombstone.js';
 import {
@@ -1937,7 +1938,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
 
   // For a non-collection symbol these return `undefined` (the abstract-class
   // contract), not 0 / true — a plain symbol is not an empty collection.
-  get count(): number | undefined {
+  get count(): number | bigint | undefined {
     // A declared collection type pins the size even with no value to walk
     // (`vector<2>` has 2 elements by declaration), so it is the fallback when
     // neither the collection handlers nor a value can answer. It is only a
@@ -1950,7 +1951,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     if (guard === CYCLE_DETECTED) return undefined;
     try {
       return (
-        this._asCollection?.count(this._value ?? this) ??
+        normalizeCount(this._asCollection?.count(this._value ?? this)) ??
         this._value?.count ??
         fromType
       );
@@ -2088,7 +2089,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       const target = this._value ?? this;
       if (index < 0) {
         if (this.isFiniteCollection !== true) return this._value?.at?.(index);
-        const count = this.count;
+        const count = smallCount(this);
         if (count !== undefined && Number.isFinite(count)) {
           const normalized = count + 1 + index;
           if (normalized >= 1) {

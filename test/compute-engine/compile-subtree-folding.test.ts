@@ -666,18 +666,19 @@ describe('COMPILE Take/Drop - literal count peephole', () => {
     expect(r.code).toBe('([1, 2, 3, 4]).slice(0, 3)');
   });
 
-  it('clamps a negative literal count to 0', () => {
+  it('a negative literal count takes the last elements', () => {
     const r = compile(ce.box(['Take', ['List', 1, 2, 3], -2]), NO_FOLD);
-    expect(r.code).toBe('([1, 2, 3]).slice(0, 0)');
-    expect(r.run?.()).toEqual([]);
+    expect(r.code).toBe('([1, 2, 3]).slice(-2)');
+    expect(r.run?.()).toEqual([2, 3]);
   });
 
-  it('keeps the runtime guard for a non-constant count', () => {
+  it('chooses the slice at run time for a non-constant count', () => {
     const r = compile(ce.box(['Take', ['List', 1, 2, 3, 4], 'n']));
     expect(r.code).toBe(
-      '([1, 2, 3, 4]).slice(0, Math.max(0, Math.round(_.n)))'
+      '((_a, _n) => _n < 0 ? _a.slice(_n) : _a.slice(0, _n))([1, 2, 3, 4], Math.round(_.n))'
     );
     expect(r.run?.({ n: 2.5 })).toEqual([1, 2, 3]);
+    expect(r.run?.({ n: -2.5 })).toEqual([3, 4]);
   });
 
   it('Drop emits a bare literal count', () => {
@@ -711,7 +712,9 @@ describe('COMPILE Python counts - rounding parity', () => {
     const r = compile(ce.box(['Take', ['List', 1, 2, 3, 4], 'n']), {
       to: 'python',
     });
-    expect(r.code).toBe('[1, 2, 3, 4][:max(0, int(np.floor((n) + 0.5)))]');
+    expect(r.code).toBe(
+      '(lambda _l, _n: _l[_n:] if _n < 0 else _l[:_n])([1, 2, 3, 4], int(np.clip(np.floor((n) + 0.5), -9007199254740991, 9007199254740991)))'
+    );
   });
 
   it('Tabulate emits a bare literal dimension', () => {

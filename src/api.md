@@ -1119,12 +1119,26 @@ precision, both parts are rounded to doubles: there
 When the imaginary part is zero (a `number` or a `BigDecimal`), the
 result is a real number.
 
+When both parts are integers, the result is the EXACT Gaussian integer,
+as `ce.number(2)` is the exact `2`: a part is an integer when it is a
+`number` that is a safe integer, or an integer-valued `BigDecimal` whose
+exponent is at most `10^6` (also at machine precision, and also outside
+the double range). When a part has a fraction, is a `number` past the
+safe integers, or is a `BigDecimal` with a larger exponent (`1e2000000`),
+the result is a float. The same rule applies to a `Complex` given to
+`ce.number()` or `ce.box()`: `ce.number(new Complex(2, 3))` is the exact
+`2+3i`, `ce.number(new Complex(2.5, 3))` is a float.
+
 ```js
 ce.precision = 30;
 ce.number({ re: ce.bignum('1e-800'), im: ce.bignum(2) });
 // ➔ a complex number with the real part 1e-800 and the imaginary part 2
 ce.number({ re: 1, im: 0 });
 // ➔ 1
+ce.number({ re: 2, im: 3 }).isExact;
+// ➔ true
+ce.number({ re: 2.5, im: 3 }).isExact;
+// ➔ false
 ```
 
 ####### value
@@ -2440,6 +2454,34 @@ residues that depend on parameters) are available via `entries`.
 ####### name
 
 `string`
+
+</MemberCard>
+
+<MemberCard>
+
+##### ExpressionComputeEngine.~~contourIntegrate()~~ {#contourintegrate-1}
+
+```ts
+contourIntegrate(integrand, variable, contour): ContourIntegralResult
+```
+
+Integrate over a circle, simple polygon, or the entire real line by the
+residue theorem. Real-line contours also accept an explicit principal value.
+Returns pole classifications, residues, their sum, and the integral.
+Unsupported or undecidable inputs have no value; boundary poles have
+status `pole-on-contour`. See [ContourInput](#contourinput) for contour forms.
+
+####### integrand
+
+[`ExpressionInput`](#expressioninput)
+
+####### variable
+
+`string`
+
+####### contour
+
+[`ContourInput`](#contourinput)
 
 </MemberCard>
 
@@ -3792,7 +3834,7 @@ Status of a sequence definition.
 
 <MemberCard>
 
-##### SequenceStatus.status {#status}
+##### SequenceStatus.status {#status-1}
 
 ```ts
 status: "complete" | "pending" | "not-a-sequence";
@@ -5137,7 +5179,7 @@ Some examples:
 
 <MemberCard>
 
-##### BoxedValueDefinition.value {#value-3}
+##### BoxedValueDefinition.value {#value-4}
 
 ```ts
 value: Expression | undefined;
@@ -8108,8 +8150,10 @@ type ResolvedSerializeLatexOptions = Omit<SerializeLatexOptions,
   | "powerStyle"
   | "numericSetStyle"
   | "indexStyle"
-  | "readsAsPointList"> & {
+  | "readsAsPointList"
+  | "readsAsCardinality"> & {
   readsAsPointList: ((operands) => boolean | undefined) | undefined;
+  readsAsCardinality: ((operand) => boolean | undefined) | undefined;
   applyFunctionStyle: (expr, level) => DelimiterScale;
   groupStyle: (expr, level) => DelimiterScale;
   rootStyle: (expr, level) => RootStyle;
@@ -8473,12 +8517,12 @@ them never changes the parse output.
   recovery that do not otherwise surface as an `Error` node. `detail` may
   include the skipped fragment as `{ skipped }`.
 - `"ambiguous-denominator"` — non-strict mode only: the
-  denominator of a `/` is an implicit product, which binds tighter than
-  `/`. `1/2x` is read as `1/(2x)`, not `(1/2)x`. The span covers the
+  denominator of a `/` or `÷` is an implicit product, which binds tighter
+  than `/`. `1/2x` is read as `1/(2x)`, not `(1/2)x`. The span covers the
   denominator. A differential denominator (`dy/dx`) is not reported.
 - `"ambiguous-digit-groups"` — non-strict mode only: white space between
-  digits was read as part of one number (`2 3` → 23, `1 000` → 1000).
-  `detail: { digits }`. Visual space commands (`1\,000`) and the `{,}`
+  digits was read as part of one number (`2 3` → 23, `1 000` → 1000,
+  `3 .5` → 3.5). `detail: { digits }`. Visual space commands (`1\,000`) and the `{,}`
   separator are not reported.
 - `"ambiguous-letter-decimal"` — non-strict mode only: a symbol is directly
   followed by `.digits` (`x.5`), read as the product `x \cdot 0.5`.
@@ -8510,7 +8554,12 @@ them never changes the parse output.
   - `"ambiguous-function-argument"` — a bare function name with an
     argument of more than one factor and no parentheses (`sin x y` →
     `sin(xy)`), or `log` and a number after white space (`log 2 x` →
-    `log_2(x)`). `detail: { function }`.
+    `log_2(x)`), or an argument with no parentheses that starts with `+`
+    (`ln+1` → `ln(1)`). `detail: { function }`.
+  - `"ambiguous-function-subscript"` — a bare function name other than
+    `log` with a subscript, read as the strict grammar reads it:
+    `ln_3(x)` → `Log(x, 3)`, `tan_1x` → `Apply(Subscript(Tan, 1), x)`.
+    A person can mean a name such as `tan_1`. `detail: { name, subscript }`.
   - `"ambiguous-function-without-parentheses"` — a symbol declared as a
     function followed by an operand: `f x` → `f·x`. `detail: { name }`.
   - `"ambiguous-name-then-number"` — a name, white space, a number:
@@ -8558,7 +8607,10 @@ them never changes the parse output.
     `M in [0,1]^2` → `Element(M, Power(List(0, 1), 2))`. The span is the
     bracket pair and the operator after it, with the operand of a `^` or
     a `/` (`[0,1]^2`). `M in [0,1]` is not reported.
-  - `"ambiguous-range"` — a range with two `..` (`1..10..2`).
+  - `"ambiguous-range"` — a range with two `..` (`1..10..2`), a range
+    with one `..` next to an operation (`1..5/2`), or `...` directly
+    followed by a digit after a decimal number (`.5...5`, which can be
+    `.5..` and `.5`).
   - `"ambiguous-percent"` — a `%` after a number (`y = 50%`), which
     starts a comment. The span is the number and the `%`, in
     original-input coordinates.
@@ -9696,6 +9748,189 @@ The arguments and ancestry describe the parsed structure, not LaTeX tokens.
 Source offsets are half-open UTF-16 offsets in normalized LaTeX, as for parse
 diagnostics. Ancestry runs from the outermost expression to the nearest
 parent, with one-based operand indices; it includes written Delimiters.
+
+</MemberCard>
+
+<MemberCard>
+
+### ContourOrientation {#contourorientation}
+
+```ts
+type ContourOrientation = "counterclockwise" | "clockwise";
+```
+
+Positive orientation is counterclockwise.
+
+</MemberCard>
+
+<MemberCard>
+
+### Contour {#contour}
+
+```ts
+type Contour = 
+  | {
+  kind: "real-line";
+  principalValue: boolean;
+ }
+  | {
+  kind: "circle";
+  center: ExpressionInput;
+  radius: ExpressionInput;
+  orientation: ContourOrientation;
+ }
+  | {
+  kind: "polygon";
+  vertices: readonly ExpressionInput[];
+  orientation: ContourOrientation;
+ }
+  | {
+  kind: "rectangle";
+  lowerLeft: ExpressionInput;
+  upperRight: ExpressionInput;
+  orientation: ContourOrientation;
+};
+```
+
+A closed contour, or a real line completed by a controlled semicircle.
+Polygon vertices are complex numbers in traversal order. An explicit
+polygon orientation overrides that order.
+
+#### Type Declaration
+
+\{
+  `kind`: `"real-line"`;
+  `principalValue`: `boolean`;
+ \}
+
+#### Contour.kind
+
+```ts
+kind: "real-line";
+```
+
+The real axis from -infinity to +infinity, closed in a half-plane
+after the large-arc contribution has been established.
+
+\{
+  `kind`: `"circle"`;
+  `center`: [`ExpressionInput`](#expressioninput);
+  `radius`: [`ExpressionInput`](#expressioninput);
+  `orientation`: [`ContourOrientation`](#contourorientation);
+ \}
+
+\{
+  `kind`: `"polygon"`;
+  `vertices`: readonly [`ExpressionInput`](#expressioninput)[];
+  `orientation`: [`ContourOrientation`](#contourorientation);
+ \}
+
+\{
+  `kind`: `"rectangle"`;
+  `lowerLeft`: [`ExpressionInput`](#expressioninput);
+  `upperRight`: [`ExpressionInput`](#expressioninput);
+  `orientation`: [`ContourOrientation`](#contourorientation);
+ \}
+
+</MemberCard>
+
+<MemberCard>
+
+### ContourInput {#contourinput}
+
+```ts
+type ContourInput = Contour | ExpressionInput;
+```
+
+Accepted MathJSON forms are CircleContour(center, radius, orientation?),
+PolygonContour(List(vertices...), orientation?), and
+RectangleContour(lowerLeft, upperRight, orientation?), and
+RealLineContour(principalValue?). The orientation is +1 (counterclockwise)
+or -1 (clockwise); principalValue is True or False. Circle equations
+Equal(Abs(z - center), radius) are also accepted.
+
+</MemberCard>
+
+<MemberCard>
+
+### NormalizedContour {#normalizedcontour}
+
+```ts
+type NormalizedContour = 
+  | {
+  kind: "real-line";
+  principalValue: boolean;
+  orientation: ContourOrientation;
+ }
+  | {
+  kind: "circle";
+  center: Expression;
+  radius: Expression;
+  orientation: ContourOrientation;
+ }
+  | {
+  kind: "polygon";
+  vertices: readonly Expression[];
+  orientation: ContourOrientation;
+};
+```
+
+</MemberCard>
+
+<MemberCard>
+
+### ContourPole {#contourpole}
+
+```ts
+type ContourPole = {
+  point: Expression;
+  kind: "pole" | "essential" | "removable" | "undetermined";
+  location: "inside" | "outside" | "boundary" | "undetermined";
+  enclosed: boolean | undefined;
+  order: number;
+  residue: Expression;
+  leadingCoefficient: Expression;
+};
+```
+
+</MemberCard>
+
+<MemberCard>
+
+### ContourIntegralResult {#contourintegralresult}
+
+```ts
+type ContourIntegralResult = {
+  method: "residue-theorem";
+  status:   | "success"
+     | "pole-on-contour"
+     | "invalid-contour"
+     | "unsupported"
+     | "undetermined";
+  reason: string;
+  contour: NormalizedContour;
+  polesComplete: boolean;
+  poleScope: "global" | "contour";
+  poles: readonly ContourPole[];
+  divergence: "positive-infinity" | "negative-infinity" | "no-value" | "undetermined";
+  residueSum: Expression;
+  value: Expression;
+  realIntegral: {
+     closure: "upper" | "lower";
+     projection: "none" | "real" | "imaginary";
+     principalValue: boolean;
+     largeArcContribution: Expression;
+    };
+};
+```
+
+Intermediate results of symbolic contour integration. No partial sum is
+exposed as an integral: value and residueSum exist only on success.
+poles includes essential singularities and removable denominator zeros,
+explicitly marked as such. The pole-on-contour status also covers an
+essential singularity on the integration path.
+polesComplete means candidate discovery is complete in poleScope, not that every
+candidate's order or residue has been determined.
 
 </MemberCard>
 
@@ -11685,12 +11920,26 @@ precision, both parts are rounded to doubles: there
 When the imaginary part is zero (a `number` or a `BigDecimal`), the
 result is a real number.
 
+When both parts are integers, the result is the EXACT Gaussian integer,
+as `ce.number(2)` is the exact `2`: a part is an integer when it is a
+`number` that is a safe integer, or an integer-valued `BigDecimal` whose
+exponent is at most `10^6` (also at machine precision, and also outside
+the double range). When a part has a fraction, is a `number` past the
+safe integers, or is a `BigDecimal` with a larger exponent (`1e2000000`),
+the result is a float. The same rule applies to a `Complex` given to
+`ce.number()` or `ce.box()`: `ce.number(new Complex(2, 3))` is the exact
+`2+3i`, `ce.number(new Complex(2.5, 3))` is a float.
+
 ```js
 ce.precision = 30;
 ce.number({ re: ce.bignum('1e-800'), im: ce.bignum(2) });
 // ➔ a complex number with the real part 1e-800 and the imaginary part 2
 ce.number({ re: 1, im: 0 });
 // ➔ 1
+ce.number({ re: 2, im: 3 }).isExact;
+// ➔ true
+ce.number({ re: 2.5, im: 3 }).isExact;
+// ➔ false
 ```
 
 ####### value
@@ -13006,6 +13255,34 @@ residues that depend on parameters) are available via `entries`.
 ####### name
 
 `string`
+
+</MemberCard>
+
+<MemberCard>
+
+##### IComputeEngine.contourIntegrate() {#contourintegrate}
+
+```ts
+contourIntegrate(integrand, variable, contour): ContourIntegralResult
+```
+
+Integrate over a circle, simple polygon, or the entire real line by the
+residue theorem. Real-line contours also accept an explicit principal value.
+Returns pole classifications, residues, their sum, and the integral.
+Unsupported or undecidable inputs have no value; boundary poles have
+status `pole-on-contour`. See [ContourInput](#contourinput) for contour forms.
+
+####### integrand
+
+[`ExpressionInput`](#expressioninput)
+
+####### variable
+
+`string`
+
+####### contour
+
+[`ContourInput`](#contourinput)
 
 </MemberCard>
 
@@ -15008,7 +15285,14 @@ solve(vars?):
 If this is an equation, solve the equation for the variables in vars.
 Otherwise, solve the equation `this = 0` for the variables in vars.
 
-For univariate equations, returns an array of solutions (roots).
+For univariate equations, returns an array of solutions (roots). For a
+trigonometric equation, the array holds the principal roots, which
+represent the periodic families of roots. Returns `null` when the solver
+cannot solve the equation, and also when it can find only a part of the
+roots: when the unknown is in a function that the solver cannot invert
+and that is not periodic (`(x - 1)·BesselJ(0, x) = 0`), or in a factor of
+a product that gives no root and is not shown to have none
+(`(x - 2)(x + e^x) = 0`).
 For systems of linear equations (List of Equal expressions), returns
 an object mapping variable names to their values.
 For non-linear polynomial systems (like xy=6, x+y=5), returns an array
@@ -15039,7 +15323,7 @@ console.log(nonlinear.solve(["x", "y"])); // Returns [{ x: 2, y: 3 }, { x: 3, y:
 
 <MemberCard>
 
-##### Expression.value {#value-4}
+##### Expression.value {#value-5}
 
 ```ts
 get value(): Expression | undefined

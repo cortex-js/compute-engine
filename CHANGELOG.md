@@ -1,5 +1,253 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- **A negative `Take`/`Drop` count counts from the end**
+  ([#414](https://github.com/cortex-js/compute-engine/issues/414), reported by
+  [enumeratio](https://github.com/enumeratio)). `Take(xs, -n)` is the last `n`
+  elements of `xs`, and `Drop(xs, -n)` is `xs` without its last `n` elements:
+  `Take([1, 2, 3, 4, 5], -2)` is `[4, 5]` (it was `[]`) and
+  `Drop([1, 2, 3, 4, 5], -2)` is `[1, 2, 3]` (it was the whole list). A string
+  gives a string: `Take("hello", -2)` is `"lo"` and `Drop("hello", -2)` is
+  `"hel"`. A count past the length is still clamped, now in both directions:
+  over 5 elements, `Take(xs, 10)` and `Take(xs, -10)` are all 5 elements, and
+  `Drop(xs, 10)` and `Drop(xs, -10)` are `[]`. A count of 0 is unchanged. A
+  negative count needs the length of the collection: when that length is not
+  known or is infinite (`Take(Range(1, ∞), -2)`, a symbol with no value), the
+  expression stays unevaluated. Compiled JavaScript and Python give the same
+  results. In compiled JavaScript, a negative count over an infinite collection
+  is a compile error when the count is a constant, and throws when the count is
+  known only at run time.
+
+- **A collection count can be a `bigint`**
+  ([#416](https://github.com/cortex-js/compute-engine/issues/416), reported by
+  [enumeratio](https://github.com/enumeratio)). The type of `expr.count` and
+  of the `count` collection handler is now `number | bigint | undefined`. A
+  `bigint` is used only for a finite count that is not a safe integer (larger
+  than `Number.MAX_SAFE_INTEGER`); a smaller count is always a `number`, and
+  an infinite count is `Infinity`. A handler can return a `bigint` for any
+  count: `expr.count` converts a safe one to a `number`. Code that does
+  arithmetic with `expr.count` must check its type first, because JavaScript
+  throws a `TypeError` when a `bigint` and a `number` are mixed.
+  `Count(QuotientRing(Integers, 2^61 - 1))`, `Length` and
+  `|\mathbb{Z}_{2^{61}-1}|` now give the exact integer 2305843009213693951;
+  they stayed unevaluated. Other counts are exact where they were rounded
+  floats, `Infinity` or `undefined`:
+  - `Range` with exact integer bounds: `Count(Range(1, 10^20 + 1))` is
+    100000000000000000001 (it was `1e20`).
+  - `CartesianProduct`, `Permutations`, `Combinations` and `PowerSet`:
+    `Count(Permutations(Range(1, 200)))` is 200! (it was `+∞`), and
+    `PowerSet` of a set with 1100 elements has the count 2^1100 and is finite
+    (it was `+∞` and infinite). A count that needs more than 10,000
+    multiplications to compute stays unknown; a finite collection is never
+    reported as infinite.
+  - `Repeat(x, n)` with an `n` that is not a safe integer.
+  - The views of such a collection: `Take`, `Drop`, `Rest`, `Most`, `Zip`,
+    `Insert`, `DeleteAt`, `ReplaceAt` and `When`.
+
+  The count of a `CartesianProduct` or a `PowerSet` with an operand of unknown
+  size is `undefined`; it was `NaN`. A ring ℤ/nℤ with more than 2^53 elements
+  is not enumerable: `Sum`, `Max` and the other operators that walk a
+  collection to its end stay unevaluated. Indexing from the end of a
+  collection whose count is a `bigint` is not supported yet:
+  `Last(Range(1, 10^20))` stays unevaluated (it was `1e20`), and
+  `Take(Range(1, 10^20), -2)` stays unevaluated (it was the wrong
+  `[1e20, 1e20]`).
+
+### Behavior Changes
+
+- **`simplify()` combines same-base powers in a product as it does in a
+  quotient** ([#415](https://github.com/cortex-js/compute-engine/issues/415),
+  reported by [enumeratio](https://github.com/enumeratio)). For a symbol `x`
+  with no assumptions, `x^a / x^b` simplified to `x^(a−b)`, but `x^a · x^b` was
+  left unchanged, because the product rule required a base known to be
+  non-zero. The engine already reads `x/x` as `1` for a symbol `x`, so products
+  now follow the same convention: `x^a · x^b` is `x^(a+b)`, `x^a · x^(−a)` is
+  `1`, `x · x^a` is `x^(a+1)` and `x^a · x · x^b` is `x^(a+b+1)`. `evaluate()`
+  does not change: it still leaves `x^a · x^b` as it is. A literal zero base is
+  not affected: `0^1 · 0^(−1)` is still `Indeterminate`.
+
+- **The branch of `LambertW` must be an integer, and it can be named**
+  ([#418](https://github.com/cortex-js/compute-engine/issues/418), reported by
+  [enumeratio](https://github.com/enumeratio)). The branch is the second
+  argument, `LambertW(z, k)`, as in mpmath, SciPy, SymPy and Julia. Mathematica
+  (`ProductLog[k, z]`; `LambertW[k, z]` in Wolfram|Alpha), Maple, Sage and
+  MATLAB put the branch first, so input
+  copied from them has the two arguments swapped. The signature is now
+  `(z: complex | infinity, branch: integer?) -> number` (it was
+  `(complex | infinity, number?) -> number`):
+  - A branch that is not an integer is a type error. `LambertW(-1, -0.1)`
+    (the Wolfram order) was left unevaluated; it now has an
+    `incompatible-type` error on `-0.1`. A swap of two integers cannot be
+    found: `LambertW(1, 2)` is W₂(1) and `LambertW(2, 1)` is W₁(2).
+  - The branch can be given by name, in any position:
+    `lambertW(-0.1, branch: -1)` and `lambertW(branch: -1, z: -0.1)` in Epsil,
+    or `["LambertW", -0.1, ["NamedArgument", "'branch'", -1]]` in MathJSON.
+    All give W₋₁(−0.1) ≈ −3.5772.
+
+  The `LambertW` reference documentation now gives the argument order, the
+  real domain of each real branch, and the named form.
+
+### New Features
+
+- **The tie rule of `Round` is an engine setting**
+  ([#417](https://github.com/cortex-js/compute-engine/issues/417), requested
+  by [enumeratio](https://github.com/enumeratio)). `ce.roundingTies` selects
+  how `Round` rounds a value exactly halfway between two integers:
+  `"away-from-zero"` (the default, unchanged: `Round(2.5)` is `3` and
+  `Round(-2.5)` is `-3`), `"to-even"` (IEEE 754, Python, NumPy and
+  Mathematica: `Round(2.5)` is `2` and `Round(3.5)` is `4`), `"toward-zero"`,
+  `"toward-positive-infinity"` (JavaScript `Math.round`: `Round(-2.5)` is
+  `-2`) and `"toward-negative-infinity"`. The rule applies at every
+  precision, to an exact rational (`Round(5/2)`), to an exact constant that
+  is at a tie under `.N()`, to the sign of `Round`, and to the form
+  `Round(x, n)`, which rounds to `n` decimal places (with `"to-even"`,
+  `Round(0.125, 2)` is `3/25`). An unknown rule is an error. Compiled
+  JavaScript, interval JavaScript, GLSL, WGSL and Python use the rule in
+  effect at compile time; a function compiled before a change keeps its rule,
+  and an automatically compiled `Map` is compiled again. `Remainder` does not
+  use the rule: its quotient is still rounded with a tie toward `+∞`.
+
+### Issues Resolved
+
+- **`Round` of a large odd integer in compiled Python and shader code.**
+  Python computed `sign(x)·floor(|x| + 0.5)`, and `|x| + 0.5` is rounded when
+  `|x| ≥ 2⁵²`: `Round(2⁵² + 1)` was `2⁵² + 2`. GLSL and WGSL had the same
+  error in `f32` from `2²³` (`Round(8388609)` was `8388610`). The code now
+  compares the exact distance to the floor of `|x|` with `0.5`.
+
+- **`Remainder` at a tie in compiled Python, GLSL, WGSL and interval
+  JavaScript.** The interpreter rounds the quotient with a tie toward `+∞`, as
+  JavaScript `Math.round` does: `Remainder(5, 2)` is `5 − 2·3 = −1`. Python
+  and the shaders rounded the quotient with `np.round` or `round()`, which
+  round a tie to even, and gave `1`. The interval target rounded a tie away
+  from zero, and gave `1` for `Remainder(−5, 2)`. All of them now give `−1`.
+
+- **`Take` and `Drop` with a symbolic count no longer give a wrong answer to
+  `Any` or `All`.** `Any(Take([1, 2, 3], n), x > 0)` was `False` and
+  `All(Drop([1, 2, 3], n), x < 0)` was `True`. Both now stay unevaluated.
+
+- **`Take` and `Drop` with a count past the safe integers or an infinite count
+  clamp to the length.** `Take([1, 2, 3], 10^20)`, `Take([1, 2, 3], 1e20)` and
+  `Take([1, 2, 3], ∞)` stayed unevaluated, while compiled JavaScript gave `[1, 2, 3]` and compiled
+  Python raised an `OverflowError`. All three now give `[1, 2, 3]`.
+
+- **Collection views no longer give a wrong answer to `Any` or `All` when
+  their walk cannot produce the elements.** `Reverse`, `RotateLeft` and
+  `RotateRight` of a collection with more than 2^53 elements, and `Insert`,
+  `DeleteAt`, `ReplaceAt` and `Slice` without a usable position, reported
+  that they could be walked, so `Any` gave `False` and `All` gave `True`.
+  These now stay unevaluated. `Repeat(x, n)` with a negative `n` past the safe
+  integers is empty in every respect: `Element(x, …)` was `True`.
+
+- **A `Range` with exact bounds and step has the exact number of elements.**
+  The count of a `Range` was computed in floats with a small tolerance, so a
+  `Range` whose exact upper bound is just below a step gave one element too
+  many, above its upper bound: `Range(0, 9999999999999/10^12)` gave the
+  elements 0 to 10, and `Range(1, 10^20, 1/2)` counted 200000000000000000000
+  elements (the count is 199999999999999999999). A `Range` with a bound past
+  the largest double, such as `Range(1, 10^400)`, was infinite: `Length` was
+  `+∞`. With exact bounds and step, the count, the elements, `Length`,
+  `Element`, `Last` and the reducers now all use the exact count. With a float
+  bound or step, the count is computed in floats as before.
+
+- **`Max` and `Min` of a `Range` are exact.** `Min(Range(10^20 + 1, 1, -1))`
+  was `0`, `Max(Range(1, 10^20 + 1))` was the rounded float `1e20`, and
+  `Min(Range(1/3, 1, 1/3))` was `0.333…`. They are now `1`,
+  `100000000000000000001` and `1/3`: the first or last element, read
+  exactly.
+
+- **`Sum`, `Mean`, `Median`, `Variance` and `PopulationVariance` of a `Range`
+  no longer go through every element.** With exact integer or rational bounds
+  and step, they use the closed form of an arithmetic sequence:
+  `Sum(Range(1, 10^6))` took 3 s and now takes less than 1 ms, and
+  `Sum(Range(1, 10^20))` did not finish and is now the exact
+  `5000000000000000000050000000000000000000`. `evaluate()` gives the exact
+  value, and `.N()` gives a float for a result that is not an integer.
+
+- **Powers of a matrix are no longer combined as if they were numbers**
+  ([#415](https://github.com/cortex-js/compute-engine/issues/415)). The
+  product of two matrices is the matrix product, but `Exp` of a matrix and a
+  non-integer power of a matrix are element-wise, so the same-base rules gave
+  wrong answers for matrices: `simplify()` turned `Exp(A)·Exp(B)` into
+  `Exp(A+B)` (also for literal matrices), `A^a / A^b` into `A^(a−b)`, and
+  `√A·√A` and `A^(1/3)·A^(2/3)` into `A`, and `(e^A)^2` was `e^(2A)`. These
+  now stay as they are, except where a matrix power applies: `√A·√A` is
+  `MatrixPower(√A, 2)`, `(e^A)^2` is `MatrixPower(e^A, 2)`, and `A·A` is
+  `MatrixPower(A, 2)`.
+
+- **A definite integral with an irrational bound keeps its exact value.**
+  `∫_2^{√5} 4 dx` was `0.944…`; it is now `4√5 − 8`. The same applied to
+  `EvaluateAt(f, a, b)` whenever `f(b)` and `f(a)` are two different exact
+  numbers, as `√3` and `√2`. `EvaluateAt(…).N()` still gives a float.
+
+- **The sum of two lists or matrices keeps exact elements exact.**
+  `[√2, 2] + [1, 1]` was `[2.414…, 3]`; it is now `[1 + √2, 3]`, and
+  `[√2, 2] − [1, 1]` is `[−1 + √2, 1]`. A list plus a number was already
+  exact. `.N()` still gives floats.
+
+- **Determinants of matrices with irrational or symbolic entries.**
+  - The determinant of `[[√2, 1], [1, 1]]` was `0.414…`; it is now `√2 − 1`.
+    The same applied to every determinant whose computation subtracts two
+    different exact numbers.
+  - From 4×4, a matrix with a symbol or an exact irrational entry has an
+    expanded determinant. The determinant of a 4×4 matrix of 16 symbols was
+    a quotient of 1,900 characters with terms in `a⁴`; it is now the sum of
+    its 24 terms. This applies up to 6×6 for a matrix with symbols, and up
+    to 10×10 for a matrix of numbers. A singular 4×4 matrix with radical
+    entries has determinant `0`, where it was a nonzero float.
+  - `Determinant(m).N()` of a 4×4 or larger matrix chooses the largest pivot
+    of each column. A pivot that is zero in exact arithmetic but about
+    `1e-16` after rounding gave `2048` for a matrix whose determinant is
+    `−155.19`.
+  - `CharacteristicPolynomial([[a, b], [c, d]], x)` stayed
+    `Determinant([[x − a, −b], [−c, x − d]])`; it is now
+    `x² − (a + d)x + ad − bc`.
+
+- **`PolyLog` at a large order past |z| = 1**
+  ([#412](https://github.com/cortex-js/compute-engine/issues/412), reported by
+  [enumeratio](https://github.com/enumeratio)). For an integer order above 170
+  and |z| > 1 the value was wrong: `PolyLog(250, 4).N()` was `−0.25` and
+  `PolyLog(250, −4).N()` was `0.25`, where the values are `4` and `−4` to
+  double precision. At a larger order the evaluation was slow or did not end:
+  `PolyLog(1000, 4)` stayed unevaluated after 0.2 s, `PolyLog(5000, 4)` ran for
+  minutes and `PolyLog(2500000, 4)` did not return. Now, when the first terms
+  of the power series give the value (the error of the partial sum has a
+  proven bound off the branch cut), they are used: these points answer at
+  once, also for a non-integer order (`PolyLog(2500000.5, 4)` stayed
+  unevaluated after 2 s). The compiled `PolyLog` gives the same values:
+  `PolyLog(200, −4)` was `0.25` and is now `−4`. A non-integer order between
+  about 70 and 200 past |z| = 1 was also inaccurate: `PolyLog(170.5, −4)` was
+  off by 0.7%, and `PolyLog(200.5, 1e40)` was about `−1e−40·i`. The first is
+  now correct, and the second stays unevaluated, as do the other points where
+  no method gives the value, such as `PolyLog(250, 1e100)`. For an integer
+  order from 8 to 170 past |z| = 1 the series is more accurate than the
+  inversion formula used before: on the measured points where the series
+  answers, the largest relative error went from 5e−14 to 7e−16.
+
+  Inside the unit disk, an integer order of 8 or more now uses the power
+  series. `PolyLog(1e9, 0.99)` took seconds and now answers at once, and the
+  values are correct to the last digit (`PolyLog(2500000, −0.9)` was
+  `−0.9000000000000012` with `precision: 'machine'`). Above machine precision,
+  `PolyLog(2500000, 0.3)` took 1.6 s and `PolyLog(1e7, 0.3)` 2.3 s; they now
+  answer at once.
+
+- **`LerchPhi` and `PolyLog` at a very large |z| or a large order.** The
+  continuation of the Lerch transcendent past |z| = 1 returned wrong values
+  that passed its own error check: `LerchPhi(1e100, 20.25, 1).N()` was
+  `−0.170`, where the value is `−1.29e−71`, so `PolyLog(20.25, 1e100).N()`
+  was `−1.7e99` instead of `−1.29e29`. At orders from 80 to 150 and |z| from
+  1e8 to 1e40, values were off by up to 2.5e−10. The tail integral did not
+  follow the oscillation of the integrand, and several factors underflowed.
+  Now the values are correct within 1e−11, or the expression stays
+  unevaluated: on 12,000 points checked against an independent 25- to
+  100-digit computation, no value is off by more than 8.8e−13 (before, 1,209
+  were off by more than 1e−11). For an order with a positive real part, the
+  first terms of the series with a proven bound of the rest now give the
+  value at once where they suffice.
+
+## 0.148.0 _2026-10-05_
+
 ### Behavior Changes
 
 - **`|S|` of a set or a string is its number of elements.** `|\{1,2\}|` was
@@ -27,7 +275,12 @@
   escaped, so that it reads back as the same string: `\text{$}` was read as
   the unit USD and `\text{%}` as an empty string. A string whose `\text{…}`
   form reads as a unit or a keyword (`m`, `km`, `and`) is written `"m"`. The
-  string `"50%"` was written as the number `50%`.
+  string `"50%"` was written as the number `50%`. A control character or a
+  private-use character is written as its code point (a tab is
+  `\char"0009{}`), where it was written as it is: TeX rejects most control
+  characters and reads a tab or a line break as a space (#345). A
+  `character` value is written with the same escapes as the one-character
+  string: `#` was written `\text{#}` and a backslash `\text{\backslash }`.
 
 - **A `Solve` result list holds all the solutions, on every route.** An empty
   list states that there is no solution. When the solver cannot show that
@@ -813,7 +1066,19 @@
   also returned: for `c_n = x·c_{n−1} + 1`, `c_0 = 1`, `c_3.evaluate()` is
   `x(x(x + 1) + 1) + 1`. A term with more than 250 nodes stays unevaluated
   (`c_62` is returned, `c_63` is not), and so does a term whose type is not
-  a number. `ce.getSequenceCache()` returns only the exact
+  a number. `ce.getSequenceTerms()` returns these terms too:
+  `getSequenceTerms('a', 0, 3)` was `undefined`, and it is now
+  `[1, 1 + √2, 1 + 2√2, 1 + 3√2]`; it is still `undefined` when a term in
+  the range has no value, or when a term is not a number (`Undefined`).
+  The terms of a sequence whose name is not one letter (`alpha`, `fib`)
+  are read correctly: `getSequenceTerms()` read `alpha_{0}` as a product
+  of letters. `ce.checkSequenceOEIS()` looks up the numeric values of the
+  terms, from the first index of the domain of the sequence. It reports an
+  error when a term has no numeric value (a term with a free symbol), when
+  a term is complex or not an integer (`i·Z_{n−1}`, `a_{n−1} + √2`: OEIS
+  holds integer sequences, and the real part was sent), and when a term of
+  a defined sequence has no value (it reported that the sequence was not
+  defined). `ce.getSequenceCache()` returns only the exact
   terms, with the index as the key: after `F_6.N()` it held the terms
   `F_2` … `F_6` that `.N()` computed, and it is now empty. The terms that `.N()` computes are
   kept apart, for each precision, and `ce.clearSequenceCache()` clears them
@@ -933,6 +1198,49 @@
   an impure stored value, such as a symbol whose value is an unevaluated
   `Random()`, is evaluated one time.
 
+- **Compiled JavaScript runs without the engine.** The new entry point
+  `@cortex-js/compute-engine/runtime` exports `createJavaScriptRuntime(options)`,
+  the `_SYS` helper bundle that `compile()` builds for `run()`, with no engine
+  behind it: store the `code` of a `JavaScriptTarget` result, and run it on a
+  page, in a worker or on a server with `runtime.load(result)`. The runtime
+  type exposes only `load`, `frame`, `setFrame`, `iterationLimit`, `deadline`
+  and `runtimeVersion`; the helpers are internal and may change in any release. The
+  helpers that read engine state take it as options: `random` is the source of
+  draws outside any `WithRandomSeed` frame and of the integrals' Monte-Carlo
+  samples (`null` denies draws, and a draw then throws a `CapabilityDeniedError`,
+  a different class in each bundle, so test `e.name`, not `instanceof`);
+  `frame` (or `runtime.setFrame()`) is the frame of an interpreted
+  `WithRandomSeed` the code is called from (`{ seedLo, seedHi, next }` or
+  `{ seed, next }`), and `runtime.frame.next` is the advanced counter after the
+  call; `iterationLimit` caps the lazy-stream
+  walks (default 1024, and `Infinity` when set to 0 or less, as
+  `ce.iterationLimit`) and `deadline` is an optional time after which the
+  shuffle and choice loops throw. A seeded program gives the same values
+  interpreted, with `run()` and as stored code:
+  `WithRandomSeed(7, RandomShuffle(Range(1, 6)))` is the same list in all
+  three. `load()` evaluates the definitions that read nothing per call (a
+  constant list, a memo) once, as `run()` does, from the new
+  `CompilationResult.preambleOnce`, `preamblePerCall` and `callCode`, so a
+  `At(L, Floor(x))` with a 1,000-element `L` no longer rebuilds `L` on every
+  call. `load()` also applies the input conversions `run()` does, from the new
+  `CompilationResult.entryPlan`: a real given to a complex-declared symbol is
+  lifted (`z^2 + z` at `z = 2` is 6 from both, where `load()` gave a complex
+  NaN), and a `Float64Array` for a list symbol is copied. The digits a negative
+  base's exponent is read to, `(-2)^x` at `x = 33.3333333333333`, are fixed in
+  `CompilationResult.reconstructionDigits`, since the runtime's own number
+  library cannot tell a machine-precision engine from the default (10822639409.68
+  from `run()`, NaN from the runtime before). `run()` uses the same recorded
+  digits: before, it read the working precision on each call, so code compiled
+  at machine precision gave NaN for this power after `ce.precision` was
+  changed or after another engine was constructed.
+  `CompilationResult.runtimeVersion` and `runtime.runtimeVersion` are the
+  version of the helper set; `load()` throws when they differ or when the
+  stored code has none. Functions passed in the `functions` or `imports`
+  compile options are copied into the code as source (`toString()`), so a
+  closure loses its enclosing scope and a function given by name must exist
+  where the code runs. The engine's own `_SYS` (`run.SYS`) is built from the
+  same factory. (#372, contributed by [enumeratio](https://github.com/enumeratio))
+
 - **`ResidueClass(k, n)`: an element of ℤ/nℤ** (#399, #411, contributed by
   [enumeratio](https://github.com/enumeratio)). A residue class is now a
   value.
@@ -1043,6 +1351,36 @@
   every precision up to that limit. Exact arithmetic is not changed.
 
 ### Issues Resolved
+
+- **`Limit` at infinity of a complex-valued function** (#396). The limit at
+  `±∞` chose between `+∞` and `−∞` from the sign of a term, and a complex
+  value has no sign: `\lim_{t\to\infty} e^{it}` was `+∞`,
+  `\lim_{t\to\infty} \operatorname{erf}(it)` was `1` and
+  `\lim_{t\to\infty} e^{it}/t` was `+∞`. A function with a non-real
+  constant is now resolved through its real part and its imaginary part:
+  `e^{it}/t` is `0`, `(1+it)/t` is `i`, `(2t+i)/(t-3i)` is `2`, and a limit
+  that does not exist (`e^{it}`) or is not finite (`i·t`, `Erf(it)`) stays
+  unevaluated. `Gamma` goes to `0` along a vertical line:
+  `Limit(t ↦ Gamma(i·t), ∞)` is `0`, and `Abs`, `Real`, `Imaginary` and
+  `Conjugate` carry such a limit. `Limit(t ↦ Gamma(t), ∞)` is `+∞`; it was
+  unevaluated. `.N()` and `NLimit` extrapolate the real part and the
+  imaginary part of a complex-valued function separately; they gave `NaN`.
+
+- **`Limit` at infinity with a coefficient of unknown sign stays
+  unevaluated.** `Limit(t ↦ a·t, ∞)` and `Limit(t ↦ a·eᵗ/t, ∞)` were `+∞`
+  for a symbol `a` with no assumption. The answer depends on the sign of
+  `a`, so the limit is now unevaluated; `-2t` and `π·t` are unchanged. A
+  non-integer power of a base that goes to `−∞` is also unevaluated:
+  `Limit(t ↦ (−t)^{3/2}, ∞)` was `+∞`, and the value is not real. An integer
+  power takes its sign from the parity (`(−t)³` is `−∞`).
+
+- **`NLimit` at `−∞` samples negative arguments.** `NLimit(t ↦ arctan t, −∞)`
+  was `π/2`; it is `−π/2`.
+
+- **No double superscript for a half-integer power deep in an expression**
+  (#345). Inside two lists, `2^{(1+x)/2}` was written `2^{1/2}^{1+x}`, which
+  TeX rejects. It is now `2^{(1+x)/2}`. At the top level it is still
+  `\sqrt{2}^{1+x}`.
 
 - **A symbol whose stored value is impure is read one time for each place
   it appears under `.N()`.** With `r` assigned an unevaluated random draw,
@@ -2450,8 +2788,8 @@
   [enumeratio](https://github.com/enumeratio)).
 
 - **`ClausenCl(n, θ)` is the Clausen function Clₙ(θ).** For an integer order
-  n ≥ 1 and real θ it is Im Liₙ(e^{iθ}) = Σ sin(kθ)/kⁿ when n is even and
-  Re Liₙ(e^{iθ}) = Σ cos(kθ)/kⁿ when n is odd (mpmath's `clsin` and `clcos`;
+  n ≥ 1 and real θ it is `Im Liₙ(e^{iθ}) = Σ sin(kθ)/kⁿ` when n is even and
+  `Re Liₙ(e^{iθ}) = Σ cos(kθ)/kⁿ` when n is odd (mpmath's `clsin` and `clcos`;
   Mathematica writes them as `Im`/`Re` of `PolyLog`). `N(ClausenCl(2, 1))` is
   `1.0139591323607684`, `N(ClausenCl(3, 2.5))` is `-0.7606561109685137` and
   `N(ClausenCl(2, 3.14159))` is `1.8393282835451e-6` (the expansion of Liₙ at

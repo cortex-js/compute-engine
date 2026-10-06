@@ -35,6 +35,7 @@ import { contextAssumptions, isFactTrue } from './constraint-subject.js';
 import { containsResidueClass } from './residue-class.js';
 import { shadowsLibraryName } from '../library-shadowing.js';
 import { halfTurnAngle } from './trigonometry.js';
+import { smallCount } from './collection-count.js';
 
 /**
  * Inequality relational operators. A univariate `Solve` of one of these is
@@ -1145,7 +1146,9 @@ export function solveOverDomain(
     // This resolves e.g. `Solve(2x=3, x, ℤ)` and `Solve(x²=2, x, ℤ)` → `[]`.
     // Restricted to polynomials so a solver that returns a *partial* root set
     // (transcendental equations) never over-claims "no solutions".
-    const domainCount = domain.count;
+    // A count that is not a safe integer (a `bigint`) is too large to
+    // enumerate: `smallCount()` reads it as unknown, so it is unbounded here.
+    const domainCount = smallCount(domain);
     const unbounded =
       domainCount === undefined || !Number.isFinite(domainCount);
     if (unbounded && getPolynomialCoefficients(predBody, unknown)) {
@@ -1160,7 +1163,7 @@ export function solveOverDomain(
   }
 
   // 2. Enumeration fallback.
-  const count = domain.count;
+  const count = smallCount(domain);
   if (count === undefined || !Number.isFinite(count)) return undefined;
 
   // Compile the predicate as a lambda `unknown ↦ predBody`. Only a genuine
@@ -1305,7 +1308,7 @@ export function solveOverMultipleDomains(
   let product = 1;
   for (const s of specs) {
     if (s.domain === undefined) return undefined;
-    const c = s.domain.count;
+    const c = smallCount(s.domain);
     if (c === undefined || !Number.isFinite(c)) return undefined;
     product *= c;
     if (product > MAX_SOLVE_ENUMERATION_COMPILED) return undefined;

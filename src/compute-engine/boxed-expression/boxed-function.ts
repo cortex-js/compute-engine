@@ -92,6 +92,7 @@ import {
   isAbsentScalarTerm,
   collectionSourceOperands,
 } from '../collection-utils.js';
+import { normalizeCount, smallCount } from './collection-count.js';
 import { isRelationalOperator } from '../latex-syntax/utils.js';
 import { _BoxedOperatorDefinition } from './boxed-operator-definition.js';
 import {
@@ -814,7 +815,7 @@ export class BoxedFunction
          * moves no axis. */
         factsHidden: boolean;
         deps: MemoDeps;
-        count?: FacetEntry<number | undefined>;
+        count?: FacetEntry<number | bigint | undefined>;
         isEmpty?: FacetEntry<boolean | undefined>;
         isFinite?: FacetEntry<boolean | undefined>;
       }
@@ -3687,7 +3688,7 @@ export class BoxedFunction
    * deadline/timeout cancellation THROWS through this helper, so nothing
    * partial is ever stored.
    */
-  private _memoizedFacet<T extends number | boolean | undefined>(
+  private _memoizedFacet<T extends number | bigint | boolean | undefined>(
     facet: 'count' | 'isEmpty' | 'isFinite',
     compute: () => T
   ): T {
@@ -3788,12 +3789,15 @@ export class BoxedFunction
     return value;
   }
 
-  get count(): number | undefined {
+  get count(): number | bigint | undefined {
     if (this._optedOutOfCollection) return undefined;
     return this._memoizedFacet('count', () => {
       // A DECLARED count handler owns the answer, including its `undefined`.
+      // `normalizeCount()` converts a `bigint` count that is a safe integer
+      // to a `number`, so a `bigint` reaches readers only for a count that a
+      // `number` cannot hold exactly.
       const handler = this.operatorDefinition?.collection?.count;
-      if (handler !== undefined) return handler(this);
+      if (handler !== undefined) return normalizeCount(handler(this));
       // An EAGER producer with no collection handlers may still know its own
       // length without evaluating (`Sort` preserves its source's, `Chunk`
       // answers `k`) — the `count` twin of `canEnumerate`. It owns the answer,
@@ -3850,7 +3854,7 @@ export class BoxedFunction
    * says so with an `elementCount` handler; the rest honestly report
    * `undefined`.
    */
-  private _broadcastCount(): number | undefined {
+  private _broadcastCount(): number | bigint | undefined {
     // Only a collection-SHAPED result can have an element count. `Add(1, 2)`
     // types `integer` and must keep answering `undefined`. UNKEYED:
     // broadcast lifts over element collections only, so a keyed-typed result
@@ -3875,7 +3879,7 @@ export class BoxedFunction
       return this._lambdaBroadcastCount();
     const ops = this.ops;
     if (ops === undefined) return undefined;
-    let count: number | undefined;
+    let count: number | bigint | undefined;
     for (const op of ops) {
       // A scalar operand is a LIFT, not a participant. Broadcast participants
       // are UNKEYED collections only — keyed operands are never admitted.
@@ -3929,7 +3933,7 @@ export class BoxedFunction
    * definition never reaches this arm: it derives `broadcastable`, so the
    * lifted-operator rule above answers for it.
    */
-  private _lambdaBroadcastCount(): number | undefined {
+  private _lambdaBroadcastCount(): number | bigint | undefined {
     const ops = this.ops;
     if (ops === undefined) return undefined;
     let source: Type | undefined;
@@ -3965,7 +3969,7 @@ export class BoxedFunction
     if (sig.variadicArg === undefined && ops.length > required + optional)
       return undefined;
     if (ops.some((x) => isNumericTuple(x))) return undefined;
-    let count: number | undefined;
+    let count: number | bigint | undefined;
     for (const op of ops) {
       if (!isLambdaBroadcastParticipant(op)) continue;
       const c = op.count;
@@ -4203,7 +4207,9 @@ export class BoxedFunction
       // count. Infinite or unknown-count sources stay undefined (no
       // materialization, no hang).
       if (this.isFiniteCollection !== true) return undefined;
-      const count = this.count;
+      // A count that is not a safe integer (a `bigint`) cannot be used as a
+      // `number` index: `smallCount()` reads it as unknown.
+      const count = smallCount(this);
       if (count === undefined || !Number.isFinite(count)) return undefined;
       idx = count + 1 + index;
       if (idx < 1) return undefined;
@@ -7009,7 +7015,7 @@ function tupleBroadcastCells(
   let length: number | undefined;
   for (const op of tail) {
     if (isTupleBroadcastParticipant(op)) {
-      const n = op.count;
+      const n = smallCount(op);
       if (n === undefined) return undefined;
       if (length === undefined) length = n;
       else if (n !== length)
@@ -7309,7 +7315,9 @@ function withBroadcastThrowContext(
   if (!(e instanceof Error) || e.name === 'CancellationError') return e;
   if (BROADCAST_CONTEXTED.has(e)) return e;
   BROADCAST_CONTEXTED.add(e);
-  const length = ops.find(isBroadcastParticipant)?.count;
+  const participant = ops.find(isBroadcastParticipant);
+  const length =
+    participant === undefined ? undefined : smallCount(participant);
   e.message = `${e.message} (${broadcastContextMessage(operator, length, index)})`;
   return e;
 }
@@ -9362,7 +9370,9 @@ function isValuelessTupleSymbol(x: Expression): boolean {
     isTupleShapedType(resolveTypeReference(t) ?? t);
   const t = resolveTypeReference(x.type.type) ?? x.type.type;
   if (tupleShaped(t)) return true;
-  return typeof t === 'object' && t.kind === 'union' && t.types.some(tupleShaped);
+  return (
+    typeof t === 'object' && t.kind === 'union' && t.types.some(tupleShaped)
+  );
 }
 
 /**
@@ -9402,7 +9412,7 @@ export function declaredScalarTupleCells(
   if (listTuple !== undefined) return listTuple;
   let length: number | undefined;
   for (const x of tuples) {
-    const n = x.count;
+    const n = smallCount(x);
     if (n === undefined) return undefined;
     if (length === undefined) length = n;
     else if (n !== length)
@@ -9514,9 +9524,7 @@ export function declaredScalarTupleType(
       ? cellResult
       : undefined;
   };
-  const shapes = argTypes.filter(
-    (t, i) => isScalarParam(i) && hasTuple(t)
-  );
+  const shapes = argTypes.filter((t, i) => isScalarParam(i) && hasTuple(t));
   if (shapes.length === 0) return undefined;
   // Another argument that is a collection supplies cells of its own, when
   // the function maps over a list, and the shape of the result then depends
@@ -11120,7 +11128,7 @@ function materialize(
       // the lazy form rather than fabricate a placeholder literal.
       if (xs.length === 0) return expr;
 
-      const count = expr.count;
+      const count = smallCount(expr);
       if (count === undefined || count <= headSize) {
         // If the collection is smaller than the head, we don't need to evaluate the tail
         if (count === undefined || xs.length < count)

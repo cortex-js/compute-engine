@@ -1,5 +1,6 @@
 import { extrapolate } from './richardson.js';
 import { primeFactors } from './primes.js';
+import type { RoundingTies } from '../types-definitions.js';
 import {
   checkDeadline,
   getAmbientDeadline,
@@ -102,19 +103,64 @@ export function nextDown(x: number): number {
 }
 
 /**
- * Round a machine double to the nearest integer, with a half rounded AWAY
- * FROM ZERO: `roundHalfAway(-0.5)` is `-1` and `roundHalfAway(2.5)` is `3`.
+ * Whether `Round` of a value exactly halfway between two integers (a tie)
+ * takes the integer that is farther from zero.
  *
- * This is the tie rule of the `Round` operator, at every precision and on
- * every route (user decision, 2026-09-21); the big-number lane
- * (`BigDecimal.round()`) already rounds a half away from zero. JavaScript
- * `Math.round` rounds a half toward `+∞` instead (`Math.round(-0.5)` is
- * `-0`), so it must not be used for `Round`. `Math.round` of the MAGNITUDE
- * is the same rule, because the magnitude is never negative; the sign is put
- * back afterwards.
+ * The two candidates are the truncated value `t` (the integer nearer to
+ * zero) and the integer one step farther from zero. `negative` is the sign
+ * of the value, and `truncatedIsEven` tells whether `t` is even. For
+ * `-2.5`, `t` is `-2` (even), and the integer farther from zero is `-3`.
+ *
+ * The same decision serves the machine lane (`roundToInteger()`), the
+ * big-decimal lane (`bigRoundToInteger()` in `numeric-bignum.ts`) and the
+ * exact `bigint` lane of the evaluation of `Round`, so that all of them
+ * answer the same integer for a tie.
  */
-export function roundHalfAway(x: number): number {
-  return Math.sign(x) * Math.round(Math.abs(x));
+export function tieRoundsAway(
+  ties: RoundingTies,
+  negative: boolean,
+  truncatedIsEven: boolean
+): boolean {
+  switch (ties) {
+    case 'away-from-zero':
+      return true;
+    case 'toward-zero':
+      return false;
+    case 'to-even':
+      return !truncatedIsEven;
+    case 'toward-positive-infinity':
+      return !negative;
+    case 'toward-negative-infinity':
+      return negative;
+  }
+}
+
+/**
+ * Round a machine double to the nearest integer. A value exactly halfway
+ * between two integers is rounded with the rule `ties` (see
+ * `tieRoundsAway()`): with `'away-from-zero'`, `roundToInteger(-0.5)` is
+ * `-1` and `roundToInteger(2.5)` is `3`; with `'to-even'`,
+ * `roundToInteger(2.5)` is `2`.
+ *
+ * JavaScript `Math.round` rounds a half toward `+∞`, so it is not used.
+ * The distance to the truncated value, `|x − trunc(x)|`, is computed with
+ * no rounding error (`x` and `trunc(x)` have the same sign and differ by
+ * less than 1), so the comparison with `0.5` is exact. The form
+ * `floor(x + 0.5)` is not: `x + 0.5` is rounded when `|x| ≥ 2⁵²`, and
+ * `floor(2⁵² + 1 + 0.5)` is `2⁵² + 2`. The form `x − floor(x)` is not
+ * either: for `x = −(0.5 − 2⁻⁵⁴)` it is `0.5 + 2⁻⁵⁴`, which rounds to the
+ * tie `0.5`.
+ *
+ * A non-finite value is returned unchanged.
+ */
+export function roundToInteger(x: number, ties: RoundingTies): number {
+  if (!Number.isFinite(x)) return x;
+  const t = Math.trunc(x);
+  const d = Math.abs(x - t);
+  if (d < 0.5) return t;
+  const away = x < 0 ? t - 1 : t + 1;
+  if (d > 0.5) return away;
+  return tieRoundsAway(ties, x < 0, t % 2 === 0) ? away : t;
 }
 
 /**

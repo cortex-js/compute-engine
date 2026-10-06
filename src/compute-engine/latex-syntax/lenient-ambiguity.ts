@@ -927,8 +927,7 @@ function reportNumberNotation(
         expr,
         (x) =>
           operator(x) === 'BaseForm' ||
-          (operator(x) === 'Subscript' &&
-            isNumberExpression(operand(x, 1)))
+          (operator(x) === 'Subscript' && isNumberExpression(operand(x, 1)))
       );
       if (!numberSubscript) continue;
     }

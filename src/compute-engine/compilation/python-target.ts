@@ -1,4 +1,4 @@
-import type { Expression } from '../global-types.js';
+import type { Expression, RoundingTies } from '../global-types.js';
 import {
   COLLECTION_SHAPE_TYPE,
   INDEXED_COLLECTION_SHAPE_TYPE,
@@ -219,15 +219,11 @@ function pyRangeCount(a: string, b: string, s: string): string {
 }
 
 /**
- * A `Take`/`Drop` slice bound or a `Tabulate`/`Fill` dimension: non-negative
- * and ROUNDED, the interpreter's `toInteger` count contract
- * (`Take([…], 2.5)` keeps 3 elements — `Math.round` semantics, i.e.
- * `floor(x + 0.5)`). The previous emissions diverged from the interpreter on
- * fractional runtime counts: `Take`/`Drop` truncated (`int(x)`, dropping an
- * element the interpreter keeps) and `Tabulate`/`Fill` used Python's
- * `round()`, which rounds half to EVEN. A compile-time-constant count is
- * normalized now and emitted as a bare literal (`xs[:10]`, `range(3)`); only
- * a runtime count pays the emitted guard.
+ * A `Tabulate`/`Fill` dimension: non-negative and ROUNDED, the interpreter's
+ * `toInteger` count contract (`Math.round` semantics, i.e. `floor(x + 0.5)`).
+ * The previous emissions used Python's `round()`, which rounds half to EVEN.
+ * A compile-time-constant count is normalized now and emitted as a bare
+ * literal (`range(3)`); only a runtime count pays the emitted guard.
  */
 function pyClampedCount(
   count: Expression,
@@ -235,7 +231,64 @@ function pyClampedCount(
 ): string {
   const n = tryGetConstant(count);
   if (n !== undefined) return `${Math.max(0, Math.round(n))}`;
-  return `max(0, int(np.floor((${compile(count)}) + 0.5)))`;
+  return `max(0, ${pyRoundedCount(count, compile)})`;
+}
+
+/** A count ROUNDED with `Math.round` semantics, `floor(x + 0.5)`. */
+function pyRoundedCount(
+  count: Expression,
+  compile: (expr: Expression) => string
+): string {
+  return `int(np.floor((${compile(count)}) + 0.5))`;
+}
+
+/**
+ * The slice for `Take(coll, count)` or `Drop(coll, count)` over the compiled
+ * sequence `coll`. The count is ROUNDED, the interpreter's `toInteger` count
+ * contract (`Take([…], 2.5)` keeps 3 elements). A negative count counts from
+ * the end, and a count past the length is clamped, as in the interpreter:
+ *
+ * - `Take`: a count `n ≥ 0` is `coll[:n]`, a count `n < 0` is `coll[n:]` (the
+ *   last `|n|` elements; Python clamps `|n|` past the length to the whole
+ *   sequence). A bare `coll[n:]` is not enough: `coll[0:]` is the whole
+ *   sequence, where `Take(xs, 0)` is empty.
+ * - `Drop`: a count `n ≥ 0` is `coll[n:]`, a count `n < 0` is `coll[:n]` (all
+ *   but the last `|n|` elements; empty when `|n|` is past the length).
+ *
+ * A compile-time-constant count is normalized now and the slice is chosen at
+ * compile time (`xs[:10]`, `xs[-2:]`); a runtime count is evaluated once and
+ * the slice is chosen at run time.
+ *
+ * A count whose magnitude is past every length (`10^20`, `±∞`) is clamped as
+ * in the interpreter: `Take` gives the whole sequence and `Drop` gives the
+ * empty sequence, for both signs. A constant count of that size is not
+ * written as a slice bound (`xs[:Infinity]` and `xs[:1e+21]` are not valid
+ * Python). A runtime count is clipped to ±(2^53 − 1) before `int()`, because
+ * `int()` of an infinite float raises `OverflowError`; no sequence is that
+ * long, so the clip does not change the slice. A `NaN` count is not clipped
+ * (`np.clip` keeps it), so `int()` raises `ValueError` for it, as before.
+ */
+function pyTakeDropSlice(
+  op: 'Take' | 'Drop',
+  coll: string,
+  count: Expression,
+  compile: (expr: Expression) => string
+): string {
+  const n = tryGetConstant(count);
+  if (n !== undefined) {
+    const k = Math.round(n);
+    if (Math.abs(k) > Number.MAX_SAFE_INTEGER)
+      return op === 'Take' ? `${coll}[:]` : `${coll}[:0]`;
+    if (op === 'Take') return k < 0 ? `${coll}[${k}:]` : `${coll}[:${k}]`;
+    return k < 0 ? `${coll}[:${k}]` : `${coll}[${k}:]`;
+  }
+  const body =
+    op === 'Take'
+      ? '_l[_n:] if _n < 0 else _l[:_n]'
+      : '_l[:_n] if _n < 0 else _l[_n:]';
+  const limit = Number.MAX_SAFE_INTEGER;
+  const rounded = `int(np.clip(np.floor((${compile(count)}) + 0.5), -${limit}, ${limit}))`;
+  return `(lambda _l, _n: ${body})(${coll}, ${rounded})`;
 }
 
 /**
@@ -1968,6 +2021,58 @@ def _ce_pow(_x, _y, _f=None):
 `;
 }
 
+/**
+ * Round to an integer, elementwise, with a value halfway between two
+ * integers rounded with the rule `_ties` (a `RoundingTies` name). See
+ * `pythonRoundToInteger()`.
+ *
+ * The distance `_d` of the magnitude to its floor is exact, so a tie is
+ * found exactly. The form `floor(|x| + 0.5)` is not exact: `|x| + 0.5` is
+ * rounded when `|x| ≥ 2⁵²`, and `floor(2⁵² + 1 + 0.5)` is `2⁵² + 2`.
+ */
+const PYTHON_ROUND_HELPER = `def _ce_round(_x, _ties):
+    _a = np.abs(_x)
+    _m = np.floor(_a)
+    _d = _a - _m
+    if _ties == 'away-from-zero':
+        _away = True
+    elif _ties == 'toward-zero':
+        _away = False
+    elif _ties == 'toward-positive-infinity':
+        _away = np.greater(_x, 0)
+    else:
+        _away = np.less(_x, 0)
+    return np.sign(_x) * (_m + np.logical_or(_d > 0.5, np.logical_and(_d == 0.5, _away)))
+`;
+
+/**
+ * The Python code that rounds `c` to an integer, with a value halfway
+ * between two integers rounded with the rule `ties`. `np.round` rounds a tie
+ * to even and is exact at every magnitude, so it is used for `to-even`; the
+ * other rules call the `_ce_round` helper (`PYTHON_ROUND_HELPER`), which
+ * writes the operand once.
+ *
+ * A body of `compileLambda` has no place for a module-level helper
+ * (`pythonLambdaBody`), so there the helper's computation is written inline,
+ * in nested lambdas that bind the operand, its magnitude and the floor of
+ * the magnitude once each.
+ */
+function pythonRoundToInteger(c: string, ties: RoundingTies): string {
+  if (ties === 'to-even') return `np.round(${c})`;
+  if (!pythonLambdaBody) return `_ce_round(${c}, '${ties}')`;
+  const away = {
+    'away-from-zero': 'True',
+    'toward-zero': 'False',
+    'toward-positive-infinity': 'np.greater(_x, 0)',
+    'toward-negative-infinity': 'np.less(_x, 0)',
+  }[ties];
+  return (
+    `(lambda _x: (lambda _a: (lambda _m: np.sign(_x) * (_m + ` +
+    `np.logical_or(_a - _m > 0.5, np.logical_and(_a - _m == 0.5, ${away}))))` +
+    `(np.floor(_a)))(np.abs(_x)))(${c})`
+  );
+}
+
 const PYTHON_ORD_HELPER = `def _ce_ord(_f, _a, _b):
     def _ce_ord_len(_x):
         if isinstance(_x, np.ndarray):
@@ -2064,6 +2169,7 @@ function withPythonHelpers(code: string): string {
   if (out.includes('_ce_eqcoll(')) out = `${PYTHON_EQCOLL_HELPER}\n${out}`;
   if (out.includes('_ce_indexof(')) out = `${PYTHON_INDEXOF_HELPER}\n${out}`;
   if (out.includes('_ce_ord(')) out = `${PYTHON_ORD_HELPER}\n${out}`;
+  if (out.includes('_ce_round(')) out = `${PYTHON_ROUND_HELPER}\n${out}`;
   if (out.includes('_ce_pow(')) out = `${pythonPowHelper()}\n${out}`;
   if (
     /_ce_(replaceat|replaceat_inplace|owned_copy|deleteat|insert)\(/.test(out)
@@ -3581,15 +3687,15 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     ),
   Floor: 'np.floor',
   Ceil: 'np.ceil',
-  // The interpreter rounds half away from zero (Round(-2.5) = -3, Round(2.5) =
-  // 3); `np.round` uses banker's rounding (Round(2.5) = 2). Reconstruct
-  // half-away as `sign(x)·floor(|x| + 0.5)`.
+  // A value halfway between two integers is rounded with the rule of
+  // `ce.roundingTies` at compile time, as the interpreter does
+  // (`pythonRoundToInteger()`).
   Round: (args, compile) => {
     const x = args[0];
     if (x == null) throw new Error('Could not compile `Round`: no argument');
-    const halfAway = (c: string): string =>
-      `(np.sign(${c}) * np.floor(np.abs(${c}) + 0.5))`;
-    if (args.length < 2) return halfAway(compile(x));
+    const ties = x.engine.roundingTies;
+    const roundTie = (c: string): string => pythonRoundToInteger(c, ties);
+    if (args.length < 2) return roundTie(compile(x));
     // The SECOND operand is a PRECISION: `Round(x, n)` rounds to `n` decimal
     // places (the signature is `(number, integer?)`), i.e. `Round(x·10ⁿ)/10ⁿ`
     // — what the interpreter, the JavaScript target and the interval target
@@ -3606,12 +3712,12 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     if (n !== undefined && Number.isInteger(n)) {
       const factor = `10 ** ${n}`;
       const scaled = `((${compile(x)}) * ${factor})`;
-      return `(${halfAway(scaled)} / ${factor})`;
+      return `(${roundTie(scaled)} / ${factor})`;
     }
     // A runtime precision: bind the factor and the scaled value once each, so
     // neither operand's code is evaluated twice.
     return (
-      `(lambda _p: (lambda _t: ${halfAway('_t')} / _p)` +
+      `(lambda _p: (lambda _t: ${roundTie('_t')} / _p)` +
       `((${compile(x)}) * _p))(10 ** (${compile(args[1])}))`
     );
   },
@@ -3668,7 +3774,9 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   // Modulo. `np.mod` is floored (matches the interpreter and D1). `Remainder`
   // uses the interpreter's truncated/round-to-nearest-quotient semantics, NOT
   // `np.remainder` (which is a floored modulo): mirror the JS target's
-  // `a - b·round(a/b)`.
+  // `a - b·round(a/b)`. The quotient is rounded with a tie toward `+∞`, as
+  // JavaScript `Math.round` does in the interpreter (`Remainder(5, 2)` is
+  // `-1`), not with `np.round`, which rounds a tie to even.
   Mod: 'np.mod',
   Remainder: ([a, b], compile) => {
     if (a === null || b === null)
@@ -3677,7 +3785,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     // `*`/`/` bind tighter than `+` — wrap before splicing.
     const ca = `(${compile(a)})`;
     const cb = `(${compile(b)})`;
-    return `(${ca} - ${cb} * np.round(${ca} / ${cb}))`;
+    return `(${ca} - ${cb} * ${pythonRoundToInteger(`${ca} / ${cb}`, 'toward-positive-infinity')})`;
   },
 
   // Complex numbers
@@ -4398,13 +4506,13 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     const coll = pyCollArg('Take', args[0], compile);
     if (args[1] == null)
       throw new Error('Could not compile `Take`: missing count');
-    return `${coll}[:${pyClampedCount(args[1], compile)}]`;
+    return pyTakeDropSlice('Take', coll, args[1], compile);
   },
   Drop: (args, compile) => {
     const coll = pyCollArg('Drop', args[0], compile);
     if (args[1] == null)
       throw new Error('Could not compile `Drop`: missing count');
-    return `${coll}[${pyClampedCount(args[1], compile)}:]`;
+    return pyTakeDropSlice('Drop', coll, args[1], compile);
   },
   Reverse: (args, compile) => `${pyCollArg('Reverse', args[0], compile)}[::-1]`,
   Sort: (args, compile) => {
@@ -5477,6 +5585,7 @@ export class PythonTarget implements LanguageTarget<Expression> {
     if (body.includes('_ce_eqcoll(')) code += `${PYTHON_EQCOLL_HELPER}\n`;
     if (body.includes('_ce_indexof(')) code += `${PYTHON_INDEXOF_HELPER}\n`;
     if (body.includes('_ce_ord(')) code += `${PYTHON_ORD_HELPER}\n`;
+    if (body.includes('_ce_round(')) code += `${PYTHON_ROUND_HELPER}\n`;
     if (body.includes('_ce_pow(')) code += `${pythonPowHelper()}\n`;
     if (
       /_ce_(replaceat|replaceat_inplace|owned_copy|deleteat|insert)\(/.test(
@@ -5597,7 +5706,9 @@ export class PythonTarget implements LanguageTarget<Expression> {
     // elimination; `_ce_cplx`, `_ce_cisreal`, `_ce_creal` and
     // `_ce_creal_elems` are the complex-value helpers of the complex modes;
     // `_ce_pow` is the power with the real root of a negative base, which the
-    // `Power` lowering does not use in a lambda body: listed as a guard.)
+    // `Power` lowering does not use in a lambda body: listed as a guard;
+    // `_ce_round` is the rounding of `Round` and `Remainder`, which
+    // `pythonRoundToInteger()` writes inline in a lambda body: also a guard.)
     for (const [helper, what] of [
       ['_ce_bcast(', 'ElementMax/ElementMin/Clamp over a collection operand'],
       ['_ce_rref(', 'RowReduce'],
@@ -5605,6 +5716,7 @@ export class PythonTarget implements LanguageTarget<Expression> {
       ['_ce_eqcoll(', 'equality over a collection or tuple operand'],
       ['_ce_ord(', 'an ordering over a collection operand'],
       ['_ce_pow(', 'a power whose base may be negative'],
+      ['_ce_round(', 'Round or Remainder'],
       ['_ce_cplx(', 'the complex lift of the complex modes'],
       ['_ce_cisreal(', 'the realness test of the complex modes'],
       ['_ce_creal(', 'the real projection of the complex modes'],

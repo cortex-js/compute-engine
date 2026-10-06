@@ -567,7 +567,7 @@ describe('an impure operand spliced by a multi-use template draws exactly once',
       '(cos(x) / sin(x))'
     );
     expect(g.compile(ce.box(['Remainder', 'x', 2]) as any).code).toBe(
-      '((x) - (2.0) * round((x) / (2.0)))'
+      '((x) - (2.0) * _gpu_round_up((x) / (2.0)))'
     );
     expect(g.compile(ce.box(['Coth', 'x']) as any).code).toBe(
       '(cosh(x) / sinh(x))'

@@ -62,16 +62,20 @@ const python = new PythonTarget();
 const src = (expr: any): string =>
   python.compileToSource(ce.box(expr), { constantFold: false });
 
+/** The last line of the source: the expression after the helper
+ * definitions (`def _ce_round(…)`) that the source starts with. */
+const lastLine = (code: string): string => code.split('\n').at(-1)!;
+
 describe('PYTHON ARITY — Round(x, n) rounds to n decimal places', () => {
   it('a constant precision folds the 10ⁿ factor', () => {
-    expect(src(['Round', 'x', 2])).toBe(
-      '((np.sign(((x) * 10 ** 2)) * np.floor(np.abs(((x) * 10 ** 2)) + 0.5)) / 10 ** 2)'
+    expect(lastLine(src(['Round', 'x', 2]))).toBe(
+      "(_ce_round(((x) * 10 ** 2), 'away-from-zero') / 10 ** 2)"
     );
   });
 
   it('a negative precision rounds to tens/hundreds', () => {
-    expect(src(['Round', 'x', -2])).toBe(
-      '((np.sign(((x) * 10 ** -2)) * np.floor(np.abs(((x) * 10 ** -2)) + 0.5)) / 10 ** -2)'
+    expect(lastLine(src(['Round', 'x', -2]))).toBe(
+      "(_ce_round(((x) * 10 ** -2), 'away-from-zero') / 10 ** -2)"
     );
   });
 
@@ -84,8 +88,8 @@ describe('PYTHON ARITY — Round(x, n) rounds to n decimal places', () => {
   });
 
   it('the unary form is unchanged', () => {
-    expect(src(['Round', 'x'])).toBe(
-      '(np.sign(x) * np.floor(np.abs(x) + 0.5))'
+    expect(lastLine(src(['Round', 'x']))).toBe(
+      "_ce_round(x, 'away-from-zero')"
     );
   });
 });

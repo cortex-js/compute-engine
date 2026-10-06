@@ -889,11 +889,13 @@ missing + 1
 
 ### N
 
-`(any, integer?) -> unknown`
+`(any, (integer | list<number>)?) -> unknown`
 
 N(expr): numerically evaluate an expression
 
 N(expr, precision): evaluate to `precision` significant digits
+
+N(expr, [precision, accuracy]): evaluate with a precision goal and an accuracy goal
 
 ```epsil
 N(pi)
@@ -903,6 +905,11 @@ N(pi)
 ```epsil
 N(1/3, 4)
 // ➔ 0.3333
+```
+
+```epsil
+N(exp(100), [positiveInfinity, 20])
+// ➔ 2.688117141816135448412625551580013587361111877374192241519160862e+43
 ```
 
 ### NamedArgument
@@ -958,6 +965,12 @@ numberFrom("3.25")
 numberFrom("ff", 16)
 // ➔ 255
 ```
+
+### numericApproximation
+
+MathJSON `NumericApproximation` · `(any) -> unknown`
+
+Numerically evaluate an expression, as the `.N()` method does (engine-internal).
 
 ### Object
 

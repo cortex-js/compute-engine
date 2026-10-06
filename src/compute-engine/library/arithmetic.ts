@@ -97,6 +97,7 @@ import {
   factorial2 as bigFactorial2,
   gcd as bigGcd,
   lcm as bigLcm,
+  bigRoundToInteger,
 } from '../numerics/numeric-bignum.js';
 import { factorial as bigFactorial } from '../numerics/numeric-bigint.js';
 import {
@@ -161,7 +162,8 @@ import {
   lcm,
   realGcd,
   realLcm,
-  roundHalfAway,
+  roundToInteger,
+  tieRoundsAway,
   floorModDouble,
   MACHINE_PRECISION,
 } from '../numerics/numeric.js';
@@ -373,6 +375,10 @@ import {
   enumerationDeclinedAfterWalk,
 } from './collections.js';
 import {
+  rangeExtremumClosedForm,
+  rangeSumClosedForm,
+} from './range-closed-form.js';
+import {
   run,
   runAsync,
   CancellationError,
@@ -506,7 +512,8 @@ function oppositeSgn(x: Sign | undefined): Sign | undefined {
 }
 
 /** The rounding rule of `Floor`, `Ceil`, `Truncate` and `Round`. `round`
- * rounds a half away from zero (user decision, 2026-09-21). */
+ * rounds a value halfway between two integers with the rule of the engine
+ * setting `ce.roundingTies` (away from zero by default). */
 type RoundingMode = 'floor' | 'ceil' | 'trunc' | 'round';
 
 /** The integer square root of a non-negative `bigint`: the largest `s` with
@@ -538,8 +545,9 @@ function bigintSqrtFloor(n: bigint): bigint {
  * Here `|x| = √N / q` with `N = p²·r`, and for an integer `q > 0`,
  * `⌊√N / q⌋ = ⌊⌊√N⌋ / q⌋`. So `m = ⌊|x|⌋` needs only the integer square
  * root of `N`. `|x|` is an integer exactly when `N` is a perfect square and
- * `q` divides its root. `|x| ≥ m + ½` exactly when `4N ≥ (2m + 1)²·q²`,
- * which is the tie-away-from-zero test for `round`.
+ * `q` divides its root. `|x| > m + ½` exactly when `4N > (2m + 1)²·q²`,
+ * and `|x| = m + ½` (a tie) exactly when the two sides are equal. A tie is
+ * rounded with the rule of `ce.roundingTies` (`tieRoundsAway()`).
  *
  * Reported in cortex-js/compute-engine#382.
  */
@@ -570,14 +578,20 @@ function roundExactReal(x: Expression, mode: RoundingMode): bigint | undefined {
   let k: bigint;
   if (mode === 'trunc') k = m;
   else if (mode === 'round') {
-    // Round up when `|x| ≥ m + 1/2`. For a rational this is
-    // `2·(a mod q) ≥ q`; otherwise it is `4n ≥ (2m + 1)²·q²`, squared so that
-    // no square root is needed.
-    if (r === 1n) k = 2n * (a % q) >= q ? m + 1n : m;
+    // Compare `|x|` with `m + 1/2`. For a rational this compares
+    // `2·(a mod q)` with `q`; otherwise it compares `4n` with
+    // `(2m + 1)²·q²`, squared so that no square root is needed.
+    let order: bigint;
+    if (r === 1n) order = 2n * (a % q) - q;
     else {
       const twice = 2n * m + 1n;
-      k = 4n * n >= twice * twice * q * q ? m + 1n : m;
+      order = 4n * n - twice * twice * q * q;
     }
+    const away =
+      order > 0n ||
+      (order === 0n &&
+        tieRoundsAway(x.engine.roundingTies, negative, m % 2n === 0n));
+    k = away ? m + 1n : m;
   } else {
     // `floor` of a negative value and `ceil` of a positive value move away
     // from zero unless the value is an integer.
@@ -607,8 +621,8 @@ function roundExactReal(x: Expression, mode: RoundingMode): bigint | undefined {
  * `narrowAtLimit` test of `refineExactConstants()`: the jumps are 1 apart),
  * is taken to be AT the jump nearest to the middle of the enclosure, and it
  * is rounded as that point: an integer for `floor`,
- * `ceil` and `trunc`, and a half-integer for `round`, which rounds away
- * from zero. Mathematica does the same under `N`
+ * `ceil` and `trunc`, and a half-integer for `round`, which is rounded with
+ * the rule of `ce.roundingTies`. Mathematica does the same under `N`
  * (`N[Floor[(Sqrt[2] + Sqrt[3])^2 - 2 Sqrt[6]]]` is `5`). A wider
  * enclosure (`sin(10⁶⁰⁰)`, whose error grows with its argument) is not
  * decided: the caller uses the float.
@@ -626,6 +640,7 @@ function roundExactConstant(
   atJumpAtLimit = false
 ): bigint | undefined {
   if (!isExactConstantExpression(x)) return undefined;
+  const ties = x.engine.roundingTies;
   const round = (v: BigDecimal): BigDecimal =>
     mode === 'floor'
       ? v.floor()
@@ -633,7 +648,7 @@ function roundExactConstant(
         ? v.ceil()
         : mode === 'trunc'
           ? v.trunc()
-          : v.round();
+          : bigRoundToInteger(v, ties);
   const exact = exactFormOfConstant(x);
   if (exact === undefined) return undefined;
   if (isExactRealLiteral(exact)) return roundExactReal(exact, mode);
@@ -5937,10 +5952,18 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       wikidata: 'Q429331',
       complexity: 8300,
       broadcastable: true,
-      // Optional second argument: the (integer) branch index. The branch is
-      // kept as a plain `number?` (not `integer`) in the signature — an
-      // `integer`-typed parameter has broken rule boxing in this repo — and
-      // validated in `evaluate` instead.
+      // Optional second argument: the integer branch index k, default 0.
+      // The branch comes AFTER the argument, as in mpmath, SciPy, SymPy,
+      // Julia and Fungrim. Mathematica (`ProductLog[k, z]`; `LambertW[k, z]`
+      // in Wolfram|Alpha), Maple, Sage and MATLAB put the branch FIRST, so
+      // input copied from those systems has the two swapped. The `integer`
+      // type of the branch slot finds a swap whose new branch is not an
+      // integer: `LambertW(-1, -0.1)` is a boxing error
+      // (`incompatible-type`), not an inert expression. A swap
+      // of two integers cannot be found: `LambertW(1, 2)` is W₂(1), a valid
+      // value. The parameters have names, so a call can name the branch to
+      // make the order clear: `lambertW(-0.1, branch: -1)` in Epsil, or
+      // `["LambertW", -0.1, ["NamedArgument", "'branch'", -1]]` in MathJSON.
       //
       // The argument slot is the carrier `complex | infinity`: W has a
       // value at every finite complex point, and the infinite points are
@@ -5975,15 +5998,20 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // gap as an indeterminate value.
       // No `canonical` handler, so a proven off-carrier operand is rejected
       // at boxing.
-      signature: '(complex | infinity, number?) -> number',
-      examples: ['[LambertW(1), N(LambertW(1))]'],
+      signature: '(z: complex | infinity, branch: integer?) -> number',
+      examples: [
+        '[LambertW(1), N(LambertW(1))]',
+        'N(LambertW(-0.1, branch: -1))',
+      ],
       nanBehavior: 'propagate',
       type: (ops, context) =>
         BoxedType.forResult(lambertWType(ops), context.engine._typeResolver),
       evaluate: (ops, { numericApproximation, engine, expression }) => {
         const x = ops[0];
-        // Branch index: default 0 (principal W₀). A symbolic or non-integer
-        // branch keeps the expression inert.
+        // Branch index: default 0 (principal W₀). A symbolic branch, or an
+        // integer branch too large for a machine integer, keeps the
+        // expression inert. The signature rejects a non-integer branch
+        // literal at boxing, so it does not get here.
         let branch = 0;
         if (ops[1] !== undefined) {
           const k = asSmallInteger(ops[1]);
@@ -8620,49 +8648,73 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // below no longer holds.
         if (n !== undefined) return undefined;
         if (x.isNaN) return 'unsigned';
-        // The evaluate handler rounds a half AWAY FROM ZERO at every
-        // precision (`Round(-1/2)` and `Round(-0.5)` are both `-1`; user
-        // decision, 2026-09-21), so this sign uses the same rule.
+        // The evaluate handler rounds a value halfway between two integers
+        // with the rule of `ce.roundingTies` at every precision, so this sign
+        // uses the same rule.
+        const ties = x.engine.roundingTies;
         if (isNumber(x)) {
           // An exact literal is rounded exactly: the double `x.re` of
-          // `1/2 − 10⁻³⁰` is `0.5`, which rounds to `1`, not `0`.
+          // `1/2 − 10⁻³⁰` is `0.5`, which can round to `1`, not `0`.
           const exact = roundExactReal(x, 'round');
           if (exact !== undefined)
             return exact > 0n ? 'positive' : exact < 0n ? 'negative' : 'zero';
-          return numberSgn(roundHalfAway(x.re));
+          // A big-decimal literal is rounded with all its digits, as the
+          // evaluation does: its double can be a tie when it is not one
+          // (`0.50000000000000000001` at 50 digits).
+          const big = x.bignumRe;
+          if (big !== undefined) {
+            const r = bigRoundToInteger(big, ties);
+            if (r.isNaN()) return 'unsigned';
+            return r.isZero()
+              ? 'zero'
+              : r.isNegative()
+                ? 'negative'
+                : 'positive';
+          }
+          return numberSgn(roundToInteger(x.re, ties));
         }
+        // `Round(1/2)` is `1` when a positive tie goes away from zero, and
+        // `0` otherwise; the same for `Round(-1/2)` and `-1`. The truncated
+        // value of `±1/2` is `0`, which is even.
+        const halfUp = tieRoundsAway(ties, false, true);
+        const halfDown = tieRoundsAway(ties, true, true);
         const half = x.engine.number([1, 2]);
         const minusHalf = x.engine.number([-1, 2]);
-        if (isOrdered(x, '>=', half)) return 'positive';
-        if (isOrdered(x, '<=', minusHalf)) return 'negative';
-        if (isOrdered(x, '<', half) && isOrdered(x, '>', minusHalf))
+        if (isOrdered(x, halfUp ? '>=' : '>', half)) return 'positive';
+        if (isOrdered(x, halfDown ? '<=' : '<', minusHalf)) return 'negative';
+        if (
+          isOrdered(x, halfUp ? '<' : '<=', half) &&
+          isOrdered(x, halfDown ? '>' : '>=', minusHalf)
+        )
           return 'zero';
         if (x.isNonNegative) return 'non-negative';
         if (x.isNonPositive) return 'non-positive';
         return undefined;
       },
       evaluate: ([x, n], { engine: ce, numericApproximation, expression }) => {
-        // A half rounds AWAY FROM ZERO at every precision (`Round(-0.5)` is
-        // `-1`, `Round(2.5)` is `3`; user decision, 2026-09-21). The
-        // big-number lane `BigDecimal.round()` already does that; the machine
-        // lane needs `roundHalfAway`, because JavaScript `Math.round` rounds
-        // a half toward `+∞`. The precision form below inherits the rule: it
-        // rounds the SCALED value with the same helper. `applyRounding()`
+        // A value halfway between two integers is rounded with the rule of
+        // `ce.roundingTies` at every precision (by default away from zero:
+        // `Round(-0.5)` is `-1`, `Round(2.5)` is `3`). The machine lane
+        // (`roundToInteger()`), the big-number lane (`bigRoundToInteger()`)
+        // and the exact lane (`roundExactReal()`) all use that rule. The
+        // precision form below inherits it: it rounds the SCALED value with
+        // the same helpers. `applyRounding()`
         // boxes the rounded value as an exact integer also for a float `x`,
         // so the precision form divides two exact numbers and its result is
         // an exact rational (`Round(3.14159, 2)` is `157/50`, as in
         // Mathematica).
         const original = originalOperand(expression, 0);
-        const roundToInteger = (v: Expression, original?: Expression) =>
+        const ties = ce.roundingTies;
+        const roundValue = (v: Expression, original?: Expression) =>
           applyRounding(
             v,
             'round',
-            roundHalfAway,
-            (v) => v.round(),
+            (v) => roundToInteger(v, ties),
+            (v) => bigRoundToInteger(v, ties),
             numericApproximation,
             original
           );
-        if (n === undefined) return roundToInteger(x, original);
+        if (n === undefined) return roundValue(x, original);
         // Round(x, n) = Round(x·10ⁿ)/10ⁿ — round to `n` decimal places.
         if (!isNumber(n) || n.isFinite !== true) return undefined;
         const factor = ce.number(10).pow(n);
@@ -8693,10 +8745,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               true
             );
           if (k !== undefined) return ce.number(k).div(factor).N();
-          const scaled = roundToInteger(scaledFloat);
+          const scaled = roundValue(scaledFloat);
           return scaled === undefined ? undefined : scaled.div(factor);
         }
-        const scaled = roundToInteger(x.mul(factor));
+        const scaled = roundValue(x.mul(factor));
         return scaled === undefined ? undefined : scaled.div(factor);
       },
     },
@@ -10461,6 +10513,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // collection whose iterator declines (symbolic elements) would
           // silently fold to 0 — stay symbolic too.
           if (first.isFiniteCollection !== true) return undefined;
+          // A `Range` with exact rational bounds and step is summed with the
+          // closed form of an arithmetic sequence, not walked: see
+          // `rangeSumClosedForm`.
+          const closedForm = rangeSumClosedForm(
+            engine,
+            first,
+            numericApproximation
+          );
+          if (closedForm !== undefined) return closedForm;
           // A `List` of machine numbers is summed on its doubles: see
           // `machineSum`.
           const summed = machineSum(first);
@@ -10613,6 +10674,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               _effects: effects,
             });
           if (first.isFiniteCollection !== true) return undefined;
+          // An exact `Range` has a closed form — see the sync handler.
+          const closedForm = rangeSumClosedForm(
+            engine,
+            first,
+            numericApproximation
+          );
+          if (closedForm !== undefined) return closedForm;
           // Decline read off the fold's own walk — see the sync handler.
           let walked = 0;
           const nonFinite = new NonFiniteTerm();
@@ -11701,6 +11769,11 @@ function processMinMaxItem(
   if (item.operator === 'Range') {
     // Symbolic bounds (e.g. Range(1, n)): the extremum is indeterminate
     if (hasSymbolicRangeBounds(item)) return [undefined, [item]];
+    // Exact rational bounds and step give the exact first or last element.
+    // The machine reading below rounds a bound larger than 2^53, and a
+    // rational element (`1/3`) becomes a float.
+    const exact = rangeExtremumClosedForm(ce, item, upper);
+    if (exact !== undefined) return [exact, []];
     // The run may descend (`Range(1, -oo)` is 1, 0, -1, …), so the
     // extremum is the larger or smaller of the first and last elements, as
     // for `Max`. Reading the first element for `Min` answered 1 for that

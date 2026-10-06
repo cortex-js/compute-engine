@@ -63,7 +63,9 @@ describe('compiled Mod/Remainder operand parenthesization', () => {
     const code = glsl.compile(ce.box(['Remainder', ['Add', 'x', 29], 3]), {
       vars: { x: 'x' },
     }).code;
-    expect(code).toBe('((x + 29.0) - (3.0) * round((x + 29.0) / (3.0)))');
+    expect(code).toBe(
+      '((x + 29.0) - (3.0) * _gpu_round_up((x + 29.0) / (3.0)))'
+    );
   });
 
   it('Python Remainder parenthesizes the compiled dividend', () => {
@@ -71,7 +73,9 @@ describe('compiled Mod/Remainder operand parenthesization', () => {
     const code = py.compile(ce.box(['Remainder', ['Add', 'x', 29], 9]), {
       vars: { x: 'x' },
     }).code;
-    expect(code).toBe('((x + 29) - (9) * np.round((x + 29) / (9)))');
+    expect(code.split('\n').at(-1)).toBe(
+      "((x + 29) - (9) * _ce_round((x + 29) / (9), 'toward-positive-infinity'))"
+    );
   });
 });
 

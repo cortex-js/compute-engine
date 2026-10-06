@@ -1,5 +1,7 @@
 import type { BigNum } from './types.js';
 import { BigDecimal } from '../../big-decimal/index.js';
+import type { RoundingTies } from '../types-definitions.js';
+import { tieRoundsAway } from './numeric.js';
 
 export function gcd(a: BigNum, b: BigNum): BigNum {
   //@todo: https://github.com/Yaffle/bigint-gcd/blob/main/gcd.js
@@ -97,4 +99,28 @@ export function isExactJsonNumber(
   // `new BigDecimal(n)` converts an integer double exactly, and any other
   // double through its text; `String(n)` is the text in both cases.
   return exact.eq(new BigDecimal(n)) && exact.eq(new BigDecimal(String(n)));
+}
+
+/**
+ * Round a big decimal to the nearest integer. A value exactly halfway
+ * between two integers is rounded with the rule `ties`, as for a machine
+ * double (`roundToInteger()` and `tieRoundsAway()` in `numeric.ts`).
+ *
+ * The difference with the truncated value is exact (`BigDecimal.sub()` does
+ * not round), so a tie is found exactly. `BigDecimal.round()` always rounds
+ * a tie away from zero, so it is not used for `Round`. A NaN or an infinity
+ * is returned unchanged.
+ */
+export function bigRoundToInteger(
+  x: BigDecimal,
+  ties: RoundingTies
+): BigDecimal {
+  if (!x.isFinite() || x.isInteger()) return x;
+  const t = x.trunc();
+  const c = x.sub(t).abs().cmp(BigDecimal.HALF);
+  const negative = x.isNegative();
+  const away = negative ? t.sub(BigDecimal.ONE) : t.add(BigDecimal.ONE);
+  if (c < 0) return t;
+  if (c > 0) return away;
+  return tieRoundsAway(ties, negative, t.toBigInt() % 2n === 0n) ? away : t;
 }

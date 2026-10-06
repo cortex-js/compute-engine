@@ -130,6 +130,7 @@ type ConfigSnapshot = {
   readonly precision: number;
   readonly tolerance: number;
   readonly angularUnit: IComputeEngine['angularUnit'];
+  readonly roundingTies: IComputeEngine['roundingTies'];
   readonly strict: boolean;
   readonly jit: IComputeEngine['jit'];
   readonly costFunction: ((expr: Expression) => number) | undefined;
@@ -369,6 +370,7 @@ function snapshotConfig(ce: IComputeEngine): ConfigSnapshot {
     precision: ce.precision,
     tolerance: ce.tolerance,
     angularUnit: ce.angularUnit,
+    roundingTies: ce.roundingTies,
     strict: ce.strict,
     jit: ce.jit,
     costFunction: engine._cost,
@@ -405,6 +407,7 @@ function restoreConfig(ce: IComputeEngine, snapshot: ConfigSnapshot): void {
   ce.precision = snapshot.precision;
   ce.tolerance = snapshot.tolerance;
   ce.angularUnit = snapshot.angularUnit;
+  ce.roundingTies = snapshot.roundingTies;
   ce.strict = snapshot.strict;
   ce.jit = snapshot.jit;
   engine._cost = snapshot.costFunction;

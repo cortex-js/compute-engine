@@ -2,7 +2,7 @@
  "$comment": "Known failures of the serialize->parse round-trip property `ce.parse(t.latex).isSame(t)` (structural tier) over docs/mathnet/parser-test-cases.json. Maintained by docs/mathnet/scripts/check-roundtrip.ts (npm run check:roundtrip); regenerate with `npm run check:roundtrip -- --update`. `reason` is `bug` (a serializer/round-trip defect to fix) or `documented-lossy` (a form the serializer is contractually allowed to lose). `class` groups identical-cause entries; see `classes` below. CI fails only on failures NOT listed here.",
  "date": "2026-08-04",
  "engineVersion": "0.101.0+unreleased",
- "lastChecked": "2026-09-27",
+ "lastChecked": "2026-10-05",
  "classes": {
   "fraction-fallback-inverse-power": {
    "reason": "documented-lossy",
@@ -19,28 +19,6 @@
  },
  "exceptions": [
   {
-   "latex": "\\left( \\frac{n}{2(a_1 + a_2 + \\cdots + a_n)} - 1 \\right)^n \\le \\left[ \\frac{a_1 + a_2 + \\cdots + a_n}{n} \\right]^n \\left( \\frac{1}{a_1} - 1 \\right) \\left( \\frac{1}{a_2} - 1 \\right) \\cdots \\left( \\frac{1}{a_n} - 1 \\right).",
-   "reserialized": "((n)(2(a_1+a_2+\\dots+a_{n}))^{-1}-1)^{n}\\le\\bigl\\lbrack\\frac{a_1+a_2+\\dots+a_{n}}{n}\\bigr\\rbrack^{n}\\times(\\frac{1}{a_1}-1)\\times(\\frac{1}{a_2}-1)\\times\\dots\\times(\\frac{1}{a_{n}}-1)",
-   "mismatch": "[\"LessEqual\",[\"Power\",[\"Add\",[\"Divide\",\"n\",[\"Multiply\",2,[\"Add\",\"a_1\",\"a_2\",\"ContinuationPlaceholder\",\"a_n\"]]],-1],\"n\"],[\"Multiply\",[\"Power\",[\"List\",[\"Divide\",[\"Add\",\"a_1\",\"a_2\",\"ContinuationPlaceholder\",\"a_n\"],\"n\"]],\"n…  ≠  [\"LessEqual\",[\"Power\",[\"Add\",[\"Multiply\",\"n\",[\"Divide\",1,[\"Multiply\",2,[\"Add\",\"a_1\",\"a_2\",\"ContinuationPlaceholder\",\"a_n\"]]]],-1],\"n\"],[\"Multiply\",[\"Power\",[\"List\",[\"Divide\",[\"Add\",\"a_1\",\"a_2\",\"ContinuationPlaceholder\",…",
-   "class": "fraction-fallback-inverse-power",
-   "reason": "documented-lossy",
-   "note": "Also exhibits continuation-placeholder-multiply-regroups on the RHS."
-  },
-  {
-   "latex": "B D^{2} = \\frac{100}{\\sin 100^{\\circ}}",
-   "reserialized": "BD^2=(100)(\\sin(\\frac{5\\pi}{9}))^{-1}",
-   "mismatch": "[\"Equal\",[\"Multiply\",\"B\",[\"Power\",\"D\",2]],[\"Divide\",100,[\"Sin\",[\"Multiply\",[\"Rational\",5,9],\"Pi\"]]]]  ≠  [\"Equal\",[\"Multiply\",\"B\",[\"Power\",\"D\",2]],[\"Multiply\",100,[\"Divide\",1,[\"Sin\",[\"Multiply\",[\"Rational\",5,9],\"Pi\"]]]]]",
-   "class": "fraction-fallback-inverse-power",
-   "reason": "documented-lossy"
-  },
-  {
-   "latex": "M = \\max \\left\\{ \\frac{x_1}{1+x_1}, \\frac{x_2}{1+x_1+x_2}, \\dots, \\frac{x_n}{1+x_1+x_2+\\dots+x_n} \\right\\}.",
-   "reserialized": "M=\\max(\\lbrace\\frac{x_1}{x_1+1}, \\frac{x_2}{x_1+x_2+1}, \\dots, (x_{n})(1+x_1+x_2+\\dots+x_{n})^{-1}\\rbrace)",
-   "mismatch": "[\"Equal\",\"M\",[\"Max\",[\"Set\",[\"Divide\",\"x_1\",[\"Add\",\"x_1\",1]],[\"Divide\",\"x_2\",[\"Add\",\"x_1\",\"x_2\",1]],\"ContinuationPlaceholder\",[\"Divide\",\"x_n\",[\"Add\",1,\"x_1\",\"x_2\",\"ContinuationPlaceholder\",\"x_n\"]]]]]  ≠  [\"Equal\",\"M\",[\"Max\",[\"Set\",[\"Divide\",\"x_1\",[\"Add\",\"x_1\",1]],[\"Divide\",\"x_2\",[\"Add\",\"x_1\",\"x_2\",1]],\"ContinuationPlaceholder\",[\"Multiply\",\"x_n\",[\"Divide\",1,[\"Add\",1,\"x_1\",\"x_2\",\"ContinuationPlaceholder\",\"x_n\"]]]]]]",
-   "class": "fraction-fallback-inverse-power",
-   "reason": "documented-lossy"
-  },
-  {
    "latex": "\\frac{1}{n} = \\frac{1}{a_1} - \\frac{1}{a_2} + \\frac{1}{a_3} - \\dots + (-1)^{m-1} \\frac{1}{a_m}.",
    "reserialized": "\\frac{1}{n}=\\frac{1}{a_1}-\\frac{1}{a_2}+\\frac{1}{a_3}-\\dots+\\frac{(-1)^{m-1}}{a_{m}}",
    "mismatch": "[\"Equal\",[\"Divide\",1,\"n\"],[\"Add\",[\"Divide\",1,\"a_1\"],[\"Negate\",[\"Divide\",1,\"a_2\"]],[\"Divide\",1,\"a_3\"],[\"Negate\",\"ContinuationPlaceholder\"],[\"Multiply\",[\"Divide\",1,\"a_m\"],[\"Power\",-1,[\"Add\",\"m\",-1]]]]]  ≠  [\"Equal\",[\"Divide\",1,\"n\"],[\"Add\",[\"Divide\",1,\"a_1\"],[\"Negate\",[\"Divide\",1,\"a_2\"]],[\"Divide\",1,\"a_3\"],[\"Negate\",\"ContinuationPlaceholder\"],[\"Divide\",[\"Power\",-1,[\"Add\",\"m\",-1]],\"a_m\"]]]",
@@ -49,7 +27,7 @@
   },
   {
    "latex": "\\left[ \\sum_{i=1}^{n} \\frac{1}{a_i^2 + x^2} \\right]^2 \\leq \\frac{1}{2} \\cdot \\frac{1}{a_1 (a_1 - 1) + x^2}.",
-   "reserialized": "\\bigl\\lbrack\\sum_{i=1}^{n}1/(a_{i}^2+x^2)\\bigr\\rbrack^2\\le(2(x^2+a_1\\times(a_1-1)))^{-1}",
+   "reserialized": "\\bigl\\lbrack\\sum_{i=1}^{n}1/(a_{i}^2+x^2)\\bigr\\rbrack^2\\le\\frac{1}{2(x^2+a_1\\times(a_1-1))}",
    "mismatch": "[\"LessEqual\",[\"Power\",[\"List\",[\"Sum\",[\"Divide\",1,[\"Add\",[\"Power\",\"a_i\",2],[\"Power\",\"x\",2]]],[\"Limits\",\"i\",1,\"n\"]]],2],[\"Multiply\",[\"Rational\",1,2],[\"Divide\",1,[\"Add\",[\"Power\",\"x\",2],[\"Multiply\",\"a_1\",[\"Add\",\"a_1\",-1]]]]…  ≠  [\"LessEqual\",[\"Power\",[\"List\",[\"Sum\",[\"Divide\",1,[\"Add\",[\"Power\",\"a_i\",2],[\"Power\",\"x\",2]]],[\"Limits\",\"i\",1,\"n\"]]],2],[\"Divide\",1,[\"Multiply\",2,[\"Add\",[\"Power\",\"x\",2],[\"Multiply\",\"a_1\",[\"Add\",\"a_1\",-1]]]]]]",
    "class": "quotient-factor-merged-into-fraction",
    "reason": "documented-lossy"

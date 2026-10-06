@@ -24,7 +24,7 @@ import {
   effectsContractStateOf,
   recordEffectsTransition,
 } from './effects-provenance.js';
-import { foldSeed } from '../numerics/random.js';
+import { withSeedFrame } from '../numerics/random.js';
 import { containsSignatureArm } from '../../common/type/utils.js';
 import { NumericValue } from '../numeric-value/types.js';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
@@ -1236,14 +1236,14 @@ export function withRandomSeedFrame<T>(
   seed: number | string,
   fn: () => T
 ): T {
-  const [seedLo, seedHi] = foldSeed(seed);
-  const prevFrame = ce._randomFrame;
-  ce._randomFrame = { seedLo, seedHi, next: 0 };
-  try {
-    return fn();
-  } finally {
-    ce._randomFrame = prevFrame;
-  }
+  return withSeedFrame(
+    seed,
+    () => ce._randomFrame,
+    (frame) => {
+      ce._randomFrame = frame;
+    },
+    fn
+  );
 }
 
 /**

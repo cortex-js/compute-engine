@@ -565,7 +565,7 @@ export function add(...xs: ReadonlyArray<Expression>): Expression {
   // Check if any operands are tensors
   const hasTensors = xs.some((x) => isTensorValue(x));
   if (!unresolvedTerm && hasTensors) {
-    const r = addTensors(xs[0].engine, xs);
+    const r = addTensors(xs[0].engine, xs, false);
     if (r) return r;
   }
 
@@ -680,7 +680,7 @@ export function addNEvaluated(
     xs = xs.map((x, i) =>
       numeric?.[i] ? x : isTensorValue(x) ? x.evaluate() : x.N()
     );
-    const r = addTensors(xs[0].engine, xs);
+    const r = addTensors(xs[0].engine, xs, true);
     if (r) return r;
   }
 
@@ -750,7 +750,7 @@ export function addNEvaluated(
         true
       );
     if (!unresolvedTerm && xs.some((x) => isTensorValue(x))) {
-      const rt = addTensors(xs[0].engine, xs);
+      const rt = addTensors(xs[0].engine, xs, true);
       if (rt) return rt;
     }
     if (!unresolvedTerm && xs.some((x) => isFiniteBroadcastParticipant(x))) {
@@ -842,10 +842,14 @@ function addTuples(
  * Add tensors element-wise, with scalar broadcasting support.
  * - Tensor + Tensor: element-wise addition (shapes must match)
  * - Scalar + Tensor: broadcast scalar to all elements
+ *
+ * When `numericApproximation` is true (the `addN` route), each cell sum is
+ * made numeric. Otherwise each cell sum stays exact.
  */
 function addTensors(
   ce: ComputeEngine,
-  ops: ReadonlyArray<Expression>
+  ops: ReadonlyArray<Expression>,
+  numericApproximation: boolean
 ): Expression | undefined {
   // Separate tensors and scalars. Pack each tensor operand once, here at
   // entry (not per element access below).
@@ -917,24 +921,44 @@ function addTensors(
     }
   }
 
-  // Compute scalar sum (to add to each element)
-  let scalarSum: Expression = ce.Zero;
-  for (const s of scalars) {
-    scalarSum = scalarSum.add(s);
-  }
+  // The sum of one cell: the scalars plus the cell of each tensor at the
+  // same position. The `.add()` method is fast, but it folds two exact
+  // number literals to a float: `[√2, 2] + [1, 1]` became `[2.414…, 3]`
+  // instead of `[1 + √2, 3]`. So the method is used only where it cannot
+  // lose exactness: under a numeric approximation (the terms are already
+  // numeric), and for number literals when the result is exact or a term is
+  // a float. The other cells go to the exact `add()` function, which costs
+  // about four times more per cell.
+  const cellSum = (cells: Expression[]): Expression => {
+    const terms = [...scalars, ...cells];
+    if (numericApproximation || terms.every((x) => isNumber(x))) {
+      let sum: Expression = ce.Zero;
+      for (const x of terms) sum = sum.add(x);
+      sum = sum.evaluate();
+      if (
+        numericApproximation ||
+        !isNumber(sum) ||
+        sum.isExact ||
+        terms.some((x) => isNumber(x) && !x.isExact)
+      )
+        return sum;
+    }
+    return add(...terms).evaluate();
+  };
 
   // For vectors (rank 1)
   if (referenceShape.length === 1) {
     const n = referenceShape[0];
     const result: Expression[] = [];
     for (let i = 0; i < n; i++) {
-      let sum = scalarSum;
-      for (const tensor of tensors) {
-        // tensor.at() uses 1-based indexing for vectors
-        const val = tensor.at(i + 1) ?? ce.Zero;
-        sum = sum.add(tensorCellExpression(ce, val));
-      }
-      result.push(sum.evaluate());
+      // tensor.at() uses 1-based indexing for vectors
+      result.push(
+        cellSum(
+          tensors.map((tensor) =>
+            tensorCellExpression(ce, tensor.at(i + 1) ?? ce.Zero)
+          )
+        )
+      );
     }
     return ce.expr(['List', ...result]);
   }
@@ -946,13 +970,14 @@ function addTensors(
     for (let i = 0; i < m; i++) {
       const row: Expression[] = [];
       for (let j = 0; j < n; j++) {
-        let sum = scalarSum;
-        for (const tensor of tensors) {
-          // tensor.at(row, col) uses 1-based indexing
-          const val = tensor.at(i + 1, j + 1) ?? ce.Zero;
-          sum = sum.add(tensorCellExpression(ce, val));
-        }
-        row.push(sum.evaluate());
+        // tensor.at(row, col) uses 1-based indexing
+        row.push(
+          cellSum(
+            tensors.map((tensor) =>
+              tensorCellExpression(ce, tensor.at(i + 1, j + 1) ?? ce.Zero)
+            )
+          )
+        );
       }
       rows.push(ce.expr(['List', ...row]));
     }

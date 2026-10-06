@@ -111,6 +111,10 @@ interface MapCompileCache {
    * (the second compiler-baked engine input, alongside tolerance); a change
    * forces a recompile (never a re-stamp). */
   angularUnit: ComputeEngine['angularUnit'];
+  /** `ce.roundingTies` stamp — baked into the code by the `Round` lowering,
+   * which writes the tie rule in effect at compile time; a change forces a
+   * recompile (never a re-stamp). */
+  roundingTies: ComputeEngine['roundingTies'];
   /**
    * Why the instance is `no-compile`:
    * - `'structural'` — unsupported head, excluded (impure) head, non-ambient
@@ -465,7 +469,8 @@ function depChanged(ce: ComputeEngine, dep: MapCompileDep): boolean {
 /**
  * Per-invocation validation (D3). Cheap check first (`_semanticVersion` +
  * `ce.tolerance` stamps); on mismatch, the full dependency walk. If every
- * dep is unchanged (and the tolerance, angularUnit and `_worldVersion` still
+ * dep is unchanged (and the tolerance, angularUnit, roundingTies and
+ * `_worldVersion` still
  * match — those are never re-stamped away), **re-stamp and keep** the
  * compiled function: an unrelated per-frame `ce.assign` bumping the global
  * axis must not thrash the cache (review 13). A genuine dep change returns
@@ -475,15 +480,18 @@ function validCompiled(ce: ComputeEngine, cache: MapCompileCache): boolean {
   if (
     cache.generation === ce._semanticVersion &&
     cache.tolerance === ce.tolerance &&
-    cache.angularUnit === ce.angularUnit
+    cache.angularUnit === ce.angularUnit &&
+    cache.roundingTies === ce.roundingTies
   )
     return true;
   _mapAutoCompileStats.revalidations++;
   // Compiler-baked engine inputs (tolerance via the equality codegen,
-  // angularUnit via `rewriteAngularUnit`): a change is compiled into the
-  // code, so it can never be re-stamped away — always recompile.
+  // angularUnit via `rewriteAngularUnit`, roundingTies via the `Round`
+  // lowering): a change is compiled into the code, so it can never be
+  // re-stamped away — always recompile.
   if (cache.tolerance !== ce.tolerance) return false;
   if (cache.angularUnit !== ce.angularUnit) return false;
+  if (cache.roundingTies !== ce.roundingTies) return false;
   // Global-semantics axis (2026-08-02 dependency-precise invalidation design,
   // §4): an `assume`/`forget`, an operator/type redefinition or a signature
   // inference bumps `_semanticVersion` too, but the dep walk below sees no
@@ -524,6 +532,7 @@ function attemptCompile(
     epoch: ce._worldVersion,
     tolerance: ce.tolerance,
     angularUnit: ce.angularUnit,
+    roundingTies: ce.roundingTies,
   });
 
   let literal: Expression;
@@ -615,6 +624,7 @@ function attemptCompile(
     epoch: ce._worldVersion,
     tolerance: ce.tolerance,
     angularUnit: ce.angularUnit,
+    roundingTies: ce.roundingTies,
   };
 }
 

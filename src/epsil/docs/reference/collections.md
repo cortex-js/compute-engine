@@ -566,11 +566,20 @@ differences([1, 4, 9, 16])
 
 MathJSON `Drop` · `((xs: T, count: number) -> T where T: string) & ((xs: indexed_collection<T>, count: number) -> list<T> where T)`
 
-Return the collection without the first n elements.
+Return the indexed collection without its first `n` elements.
+
+A negative `n` counts from the end: `Drop(xs, -n)` is the collection without its last `n` elements.
+
+A count past the length is clamped: the result is empty.
 
 ```epsil
 drop([1, 2, 3, 4, 5], 2)
 // ➔ [3,4,5]
+```
+
+```epsil
+drop([1, 2, 3, 4, 5], -2)
+// ➔ [1,2,3]
 ```
 
 ### dropWhile
@@ -1716,11 +1725,20 @@ tabulate((i, j) => i * j, 2, 3)
 
 MathJSON `Take` · `((xs: T, count: number) -> T where T: string) & ((xs: indexed_collection<T>, count: number) -> list<T> where T)`
 
-Return `n` elements from a collection.
+Return the first `n` elements of an indexed collection.
+
+A negative `n` counts from the end: `Take(xs, -n)` is the last `n` elements.
+
+A count past the length is clamped: the result is the whole collection.
 
 ```epsil
 take([1, 2, 3, 4, 5], 2)
 // ➔ [1,2]
+```
+
+```epsil
+take([1, 2, 3, 4, 5], -2)
+// ➔ [4,5]
 ```
 
 ### takeWhile

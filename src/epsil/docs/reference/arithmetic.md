@@ -198,7 +198,8 @@ evaluation as well as for `N`.
 ## Rounding and remainders
 
 `floor` rounds down, `ceil` rounds up, `truncate` rounds toward zero, and
-`round` rounds to the nearest integer, with a tie rounded away from zero:
+`round` rounds to the nearest integer, with a tie rounded away from zero (a
+host can choose another rule with the engine setting `roundingTies`):
 
 ```epsil
 [floor(-2.5), ceil(-2.5), truncate(-2.5), round(-2.5)]
@@ -382,7 +383,7 @@ MathJSON `Arg` · `(complex | infinity) -> number`
 
 MathJSON `Argument` · `(complex | infinity) -> number`
 
-Complex argument (phase angle) of a number.
+Complex argument (phase angle) of a number, in the engine's angular unit.
 
 ```epsil
 [argument(1 + i), argument(-1)]
@@ -929,13 +930,18 @@ Least Common Multiple
 
 ### lambertW
 
-MathJSON `LambertW` · `(complex | infinity, number?) -> number`
+MathJSON `LambertW` · `(z: complex | infinity, branch: integer?) -> number`
 
 Lambert W function (product logarithm)
 
 ```epsil
 [lambertW(1), N(lambertW(1))]
 // ➔ [LambertW(1),0.567143290409783872999]
+```
+
+```epsil
+N(lambertW(-0.1, branch: -1))
+// ➔ -3.57715206395729721841
 ```
 
 ### lb

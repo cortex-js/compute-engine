@@ -54,6 +54,7 @@ import type {
 } from './types-serialization.js';
 import type {
   AngularUnit,
+  RoundingTies,
   SymbolDefinitionInput,
   OperatorDefinition,
   ValueDefinition,
@@ -1471,6 +1472,10 @@ export interface IComputeEngine {
 
   angularUnit: AngularUnit;
 
+  /** The rule that `Round` uses for a value halfway between two integers.
+   *  See {@link RoundingTies}. Default: `'away-from-zero'`. */
+  roundingTies: RoundingTies;
+
   costFunction: (expr: Expression) => number;
 
   /** The rules used by `.simplify()` when no explicit `rules` option is passed.
@@ -2180,6 +2185,8 @@ export interface IComputeEngine {
    * @param end - Ending index (inclusive)
    * @param step - Step size (default: 1)
    * @returns Array of BoxedExpressions, or undefined if not a sequence
+   * or if a term in the range has no value. Each term is its value under
+   * `evaluate()`: a number, or an exact expression such as `1 + 3√2`.
    *
    * @example
    * ```typescript

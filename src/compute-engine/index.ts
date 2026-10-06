@@ -33,6 +33,7 @@ import type {
   ValueDefinition,
   OperatorDefinition,
   AngularUnit,
+  RoundingTies,
   AssignValue,
   AssumeResult,
   Expression,
@@ -170,7 +171,7 @@ import { SIMPLIFY_RULES } from './symbolic/simplify-rules.js';
 
 import {
   deriveSubstream,
-  frameDraw,
+  nextFrameDraw,
   type RandomSeedFrame,
   type RandomSubstream,
 } from './numerics/random.js';
@@ -1740,6 +1741,32 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   /**
+   * The rule that `Round` uses for a value that is exactly halfway between
+   * two integers (a tie). See {@link RoundingTies}.
+   *
+   * - `away-from-zero`: `Round(2.5)` is `3`, `Round(-2.5)` is `-3`
+   * - `to-even`: `Round(2.5)` is `2`, `Round(3.5)` is `4` (IEEE 754, Python)
+   * - `toward-zero`: `Round(2.5)` is `2`, `Round(-2.5)` is `-2`
+   * - `toward-positive-infinity`: `Round(-2.5)` is `-2` (JavaScript
+   *   `Math.round`)
+   * - `toward-negative-infinity`: `Round(2.5)` is `2`
+   *
+   * The rule applies to the evaluation of `Round` at every precision and to
+   * the code that `compile()` makes. A function compiled before a change
+   * keeps the rule that was in effect when it was compiled.
+   *
+   * Default is `"away-from-zero"`.
+   */
+  get roundingTies(): RoundingTies {
+    return this._numericConfiguration.roundingTies;
+  }
+
+  set roundingTies(r: RoundingTies) {
+    if (!this._numericConfiguration.setRoundingTies(r)) return;
+    this._reset();
+  }
+
+  /**
    * Run `fn` with **at most** `ms` milliseconds (the `limit`, or `limit.ms`
    * for the object form).
    *
@@ -2153,11 +2180,7 @@ export class ComputeEngine implements IComputeEngine {
    */
   _random(): number {
     const frame = this._runtimeState.randomFrame;
-    if (frame !== undefined) {
-      const n = frame.next >>> 0;
-      frame.next = (frame.next + 1) >>> 0;
-      return frameDraw(frame.seedLo, frame.seedHi, n);
-    }
+    if (frame !== undefined) return nextFrameDraw(frame);
     return this._liveRandom();
   }
 

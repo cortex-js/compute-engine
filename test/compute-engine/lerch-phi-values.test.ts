@@ -893,3 +893,126 @@ describe('LerchPhi past the unit circle where the continuation cancels: the mode
     expectClose(phi(c(zRe, zIm), c(sRe, sIm), c(aRe, aIm)).N(), re, im);
   });
 });
+
+describe('LerchPhi and PolyLog at a very large |z| or a large order: the tail integral oscillates', () => {
+  // The tail integral of the continuation oscillates with a frequency of up
+  // to |log z| + |s|/Re(a). Its 20-point panels of width 1/2 did not follow
+  // it, and the continuation returned wrong values that passed its error
+  // estimate: Φ(1e100, 20.25, 1) was −0.170. The panels are now cut to
+  // follow the oscillation. References: the integral
+  // (1/Γ(s+m))∫₀^∞ t^(s+m−1)e^(−at)·Φ(z·e^(−t), −m, a) dt (m = 0 here),
+  // along a path that passes above the pole on the cut, evaluated by mpmath
+  // at 50 digits; for a = 1 also mpmath polylog(s, z)/z at 300 digits.
+  function expectClose(v: any, re: number, im: number) {
+    expect(v.isNumberLiteral).toBe(true);
+    expect(Math.hypot(v.re - re, (v.im ?? 0) - im)).toBeLessThan(
+      1e-11 * Math.hypot(re, im)
+    );
+  }
+  const c = (re: number, im: number) => (im === 0 ? re : ['Complex', re, im]);
+
+  test.each([
+    // was −0.17021901789736177
+    [1e100, 0, 20.25, 1, -1.286644182128569e-71, -3.6432907862700034e-72],
+    // was −0.17630882182034718 − 0.02747439867920793i
+    [-1e100, 0, 20.25, 1, 1.3347230554993529e-71, 0],
+    // was −0.17176300075798012 − 0.013881951081408252i
+    [0, 1e100, 20.25, 1, 1.8366180794113553e-72, 1.3226592740059833e-71],
+    // Large orders: the phase s·arctan(t/a) turns fast near t = 0.
+    // was 2.5e−6 off
+    [1e20, 1e20, 150, 1, 1.0, 7.0064967758355412e-26],
+    // was 4.4e−11 off
+    [1e8, 0, 80.5, 1, 1.0000000000000001, -1.5361971033384224e-25],
+    // was 1.5e−10 off
+    [-1e15, 0, 100.5, 1, 0.99999999999999944, 0],
+    // was 2.5e−10 off
+    [-1e40, 0, 150.5, 1, 0.99999996972198453, 0],
+  ])('Φ(%p+%pi, %p, %p)', (zRe, zIm, s, a, re, im) => {
+    expectClose(phi(c(zRe, zIm), s, a).N(), re, im);
+  });
+
+  test.each([
+    // was −1.70e99 − 7.37e84i
+    [20.25, 1e100, 0, -1.2866441821285691e29, -3.6432907862700034e28],
+    [20.25, -1e100, 0, -1.3347230554993529e29, 0],
+    [20.25, 0, 1e100, -1.3226592740059833e29, 1.8366180794113554e28],
+  ])('PolyLog(%p, %p+%pi)', (s, zRe, zIm, re, im) => {
+    expectClose(ce.expr(['PolyLog', s, c(zRe, zIm) as any]).N(), re, im);
+  });
+});
+
+describe('LerchPhi at a large order next to the branch cut, with |z| above 1e154', () => {
+  // The remainder bound of the series past the unit disk divides by δ, the
+  // distance from 1 to the segment [0, z]. At z = 1e200 ± 1e184·i, δ is
+  // 1e−16. δ was computed from |z|², which overflows above |z| ≈ 1.3e154,
+  // and was then 1: the bound was 16 orders too small. The series also
+  // took log z from `Complex.log()`, whose real part is Infinity there, so
+  // it did not answer at all. References: the series with its bound
+  // |z|^N/((N+1)ˢ·δ) (a = 1), summed by mpmath at 60 digits.
+  const z = (im: number) => ['Complex', 1e200, im];
+
+  test.each([
+    // series to N = 1: 1.0, relative bound 1.5e−25
+    // (to N = 2: 1.0 ± 1.4997e−57j)
+    [800, 1e184],
+    [800, -1e184],
+    // series to N = 1: 1.0, relative bound 1.1e−25
+    [800.5, 1e184],
+    [800.5, -1e184],
+    // series to N = 1: 1.0, relative bound 6.6e−86
+    // (to N = 2: 1.0 ± 6.5992e−118j)
+    [1000.5, 1e184],
+    [1000.5, -1e184],
+  ])('Φ(z, s, 1) at s = %p, z = 1e200 + %pi matches the series', (s, im) => {
+    const v = phi(z(im as number), s, 1).N();
+    expect(v.isNumberLiteral).toBe(true);
+    expect(Math.hypot(v.re - 1, v.im ?? 0)).toBeLessThanOrEqual(1e-15);
+  });
+
+  test.each([
+    // The series diverges after its first terms, so no bound is small.
+    [300, 1, 1e184],
+    [300, 1, -1e184],
+    [300.5, 2.5, 1e184],
+    [300.5, 2.5, -1e184],
+    // The smallest bound, after N = 1 term, is 1.7e−10 (s = 750) and
+    // 1.2e−10 (s = 750.5) of the value: the series does not give double
+    // precision. With δ = 1 the bound was 1e−16 of these.
+    [750, 1, 1e184],
+    [750, 1, -1e184],
+    [750.5, 1, 1e184],
+    [750.5, 1, -1e184],
+    // The second term is smaller than the first only for s above 1369,
+    // and 2.5^(−1369) is below the range of a double.
+    [1000.5, 2.5, 1e184],
+    [1000.5, 2.5, -1e184],
+  ])('Φ(z, s, a) at s = %p, a = %p, z = 1e200 + %pi stays unevaluated', (s, a, im) => {
+    expect(phi(z(im), s, a).N().operator).toBe('LerchPhi');
+  });
+});
+
+describe('LerchPhi past the unit circle where 1/Γ(s) underflows', () => {
+  // With a complex a, the closed term of the continuation can be on another
+  // sheet (m = −1 at these points). It then contains −2πi·m·e^{iπmσ}/Γ(s)
+  // with σ = 1 − s, and 1/Γ(s) is 0 as a double for Re(s) above about 172.
+  // The error allowance for that 0 is 2^−1022 times the factor
+  // 2π|m|·e^{π·m·Im s}. It was 2^−1022·2π, which overcounted the error by
+  // e^{π·|Im s|} when m·Im s < 0, so the first two points declined, and
+  // undercounted it when m·Im s > 0 (the third point, which answers with
+  // both). References: (1/Γ(s))∫₀^∞ t^(s−1)e^(−at)/(1 − z·e^(−t)) dt,
+  // along a path below the pole at t = log z, evaluated by mpmath at 40
+  // digits.
+  const z = ['Complex', 1632497323.917026, 0.007528495710047928];
+  const a = ['Complex', 3.629238796234131, -0.38984060287475586];
+  test.each([
+    [6.94003701210022, -1.167881854689397656244e-98, -1.92697635871759495702e-99],
+    [3, -9.47034134416640372738e-99, 1.535904514165654334556e-98],
+    [-6.94003701210022, -3.948127087819597250381e-98, 3.425786630046654381784e-98],
+  ])('Φ(z, 173.578309237957 + %pi, a)', (sIm, re, im) => {
+    const v = phi(z, ['Complex', 173.578309237957, sIm], a).N();
+    expect(v.isNumberLiteral).toBe(true);
+    expect(Math.hypot(v.re - re, (v.im ?? 0) - im)).toBeLessThan(
+      1e-11 * Math.hypot(re, im)
+    );
+  });
+});

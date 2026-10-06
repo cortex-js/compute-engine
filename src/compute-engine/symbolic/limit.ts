@@ -22,7 +22,7 @@ import {
   checkDeadline,
   CancellationError,
 } from '../../common/interruptible.js';
-import { isNumber } from '../boxed-expression/type-guards.js';
+import { isNumber, isSymbol } from '../boxed-expression/type-guards.js';
 import { journalCheckpointMemoEntry } from '../checkpoint-journal.js';
 
 // The base `Expression` type exposes operands only after a type-guard narrows it
@@ -181,6 +181,14 @@ function limitDispatch(
     // (`ln((x+1)/x)`, conjugate quotients) are handled exactly by the
     // existing strategies.
     g = combineCancellingPairs(g, x, ce);
+    // The strategies at infinity read the SIGN of a term to choose between
+    // `+∞` and `−∞`, which has no meaning for a complex value: `i·x` was
+    // read as `+∞`, so `e^{ix}` gave `+∞` and `Erf(ix)` gave `1`. An
+    // expression with a non-real constant is resolved through its real and
+    // imaginary parts instead, or declined. This test comes before the
+    // numeric stability test below, whose probes read a complex value as
+    // `NaN`.
+    if (hasNonRealConstant(g)) return complexLimitAtPosInf(g, x, ce, depth);
     // Bail *before* simplify (which can distribute and mangle the structure) if
     // any subexpression cancels catastrophically or overflows at the probes —
     // the symbolic pass can't rank such a form, so defer to the numeric limit.
@@ -600,10 +608,12 @@ function limitAtPosInf(
   if (deg > 0) {
     const coeffs = getPolynomialCoefficients(e, x);
     const lead = coeffs?.[deg];
-    if (lead)
-      return lead.isNegative === true
-        ? ce.NegativeInfinity
-        : ce.PositiveInfinity;
+    // A leading coefficient with no decided sign (a symbol `a` with no
+    // assumption) has no decided limit: `a·x` goes to `+∞`, to `−∞` or stays
+    // at `0`, depending on `a`.
+    if (lead?.isNegative === true) return ce.NegativeInfinity;
+    if (lead?.isPositive === true) return ce.PositiveInfinity;
+    if (lead) return undefined;
   }
 
   const op = e.operator;
@@ -694,6 +704,16 @@ function limitAtPosInf(
     return undefined;
   }
 
+  // Gamma grows without bound at `+∞`. At `−∞` it has no limit (a pole at
+  // each negative integer).
+  if (op === 'Gamma' && oo(e).length === 1) {
+    if (!isRealValuedAtProbe(o1(e), x, ce)) return undefined;
+    const inner = limitAtPosInf(o1(e), x, ce, depth + 1);
+    if (inner?.isInfinity === true && inner.isPositive === true)
+      return ce.PositiveInfinity;
+    return undefined;
+  }
+
   // Erf saturates: Erf(+∞) = 1, Erf(−∞) = −1. Erfc = 1 − Erf: Erfc(+∞) = 0,
   // Erfc(−∞) = 2. (The argument's own limit decides which end applies.)
   if (op === 'Erf' || op === 'Erfc') {
@@ -740,8 +760,14 @@ function limitRatioAtPosInf(
   if (cmp !== undefined) {
     if (cmp < 0) return ce.Zero; // numerator grows slower → 0
     if (cmp > 0) {
-      const s = leadingSign(n, x, ce) * leadingSign(d, x, ce);
-      return s < 0 ? ce.NegativeInfinity : ce.PositiveInfinity;
+      // The sign of each term is read from a numeric probe. A probe with no
+      // value (a symbolic coefficient, as in `a·eˣ/x`) leaves the sign of
+      // the infinity undecided: decline.
+      const sn = numericAt(n, x, 120, ce);
+      const sd = numericAt(d, x, 120, ce);
+      if (Number.isNaN(sn) || Number.isNaN(sd) || sn === 0 || sd === 0)
+        return undefined;
+      return sn < 0 !== sd < 0 ? ce.NegativeInfinity : ce.PositiveInfinity;
     }
     // Same growth order → ratio of leading coefficients.
     const r = n.div(d).simplify();
@@ -777,8 +803,17 @@ function limitPowerAtPosInf(
     const b = limitAtPosInf(base, x, ce, depth + 1);
     if (!b) return undefined;
     if (b.isInfinity === true) {
-      if (expo.isPositive === true) return ce.PositiveInfinity;
       if (expo.isNegative === true) return ce.Zero;
+      if (expo.isPositive !== true) return undefined;
+      if (b.isPositive === true) return ce.PositiveInfinity;
+      // A base that goes to `−∞`: an integer exponent gives a signed
+      // infinity by its parity. Any other exponent gives a complex value
+      // (`(−x)^{3/2} = −i·x^{3/2}`), which has no signed limit.
+      if (b.isNegative === true && isNumber(expo) && expo.im === 0) {
+        const n = expo.re;
+        if (Number.isSafeInteger(n))
+          return n % 2 === 0 ? ce.PositiveInfinity : ce.NegativeInfinity;
+      }
       return undefined;
     }
     if (isDefiniteValue(b)) return ce.function('Power', [b, expo]).evaluate();
@@ -851,10 +886,221 @@ function limitProductAtPosInf(
     } else return undefined;
   }
   if (infinities > 0) {
+    // The finite part must have a decided, non-zero sign: an unknown factor
+    // can turn the infinity, and `0·∞` has no value.
+    if (result.isNegative !== true && result.isPositive !== true)
+      return undefined;
     const s = (result.isNegative === true ? -1 : 1) * infinitySign;
     return s < 0 ? ce.NegativeInfinity : ce.PositiveInfinity;
   }
   return result.evaluate();
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Complex-valued expressions at an infinite point
+// ──────────────────────────────────────────────────────────────────────────
+
+/**
+ * True when `e` contains a number literal with a non-zero imaginary part, or
+ * the symbol `ImaginaryUnit`. Such an expression can take complex values for
+ * a real argument, so the sign-based strategies do not apply to it.
+ */
+export function hasNonRealConstant(e: Expression): boolean {
+  if (isNumber(e)) return e.im !== 0;
+  if (isSymbol(e, 'ImaginaryUnit')) return true;
+  return oo(e).some((op) => hasNonRealConstant(op));
+}
+
+/**
+ * True when `e` has a real numeric value at two large values of `x`. The
+ * rules for `Gamma` need a real operand, and an expression with no non-real
+ * constant can still take complex values: `(−x)^{3/2}` is `−i·x^{3/2}`. A
+ * complex or missing value at a probe reads as `NaN` (see `numericAt`).
+ */
+function isRealValuedAtProbe(
+  e: Expression,
+  x: string,
+  ce: ComputeEngine
+): boolean {
+  return [60, 120].every((xv) => !Number.isNaN(numericAt(e, x, xv, ce)));
+}
+
+/**
+ * Limit as `x → +∞` of an expression that contains a non-real constant.
+ *
+ * The limit variable is real. The limit exists when the real part and the
+ * imaginary part both have a finite limit, and it is then `re + i·im`. A
+ * limit that is not finite is declined (`undefined`): the engine has no
+ * directed complex infinity, and a limit never answers `ComplexInfinity`.
+ */
+function complexLimitAtPosInf(
+  e: Expression,
+  x: string,
+  ce: ComputeEngine,
+  depth: number
+): Expression | undefined {
+  if (depth > MAX_DEPTH) return undefined;
+  checkDeadline(ce._deadlineFrame);
+  if (!e.has(x)) return e.evaluate();
+
+  const finite = (l: Expression | undefined): l is Expression =>
+    l !== undefined && isDefiniteValue(l, x) && l.isFinite !== false;
+
+  // The limit of a part that has no non-real constant, by the real
+  // strategies. The numeric stability test of `limitDispatch` applies to
+  // each part: a part whose terms cancel catastrophically at the probes is
+  // declined, because the leading-order rewrite gives a wrong finite value
+  // for it.
+  const realLimit = (part: Expression): Expression | undefined =>
+    numericallyUnstable(part, x, ce, 0)
+      ? undefined
+      : limitAtPosInf(part.simplify(), x, ce, depth + 1);
+
+  if (!hasNonRealConstant(e)) {
+    const l = realLimit(e);
+    return finite(l) ? l : undefined;
+  }
+
+  // `Gamma(σ + i·y)` goes to 0 when `y → ±∞` with `σ` fixed: its modulus is
+  // asymptotic to `√(2π)·|y|^(σ − 1/2)·e^(−π|y|/2)` (DLMF 5.11.9).
+  if (e.operator === 'Gamma' && oo(e).length === 1) {
+    const parts = realAndImaginaryParts(o1(e), x, ce, 0);
+    if (parts && !parts[0].has(x) && isRealValuedAtProbe(parts[1], x, ce)) {
+      const im = realLimit(parts[1]);
+      if (im?.isInfinity === true) return ce.Zero;
+    }
+    return undefined;
+  }
+
+  // These heads are continuous: they carry a finite limit of their operand.
+  if (
+    (e.operator === 'Abs' ||
+      e.operator === 'Real' ||
+      e.operator === 'Imaginary' ||
+      e.operator === 'Conjugate') &&
+    oo(e).length === 1
+  ) {
+    const inner = complexLimitAtPosInf(o1(e), x, ce, depth + 1);
+    return finite(inner)
+      ? ce.function(e.operator, [inner]).evaluate()
+      : undefined;
+  }
+
+  // A sum or a product of terms that each have a finite limit.
+  if (e.operator === 'Add' || e.operator === 'Multiply') {
+    const limits = oo(e).map((t) => complexLimitAtPosInf(t, x, ce, depth + 1));
+    if (limits.every(finite)) return ce.function(e.operator, limits).evaluate();
+  }
+
+  const parts = realAndImaginaryParts(e, x, ce, 0);
+  if (!parts) return undefined;
+  const re = realLimit(parts[0]);
+  if (!finite(re)) return undefined;
+  const im = realLimit(parts[1]);
+  if (!finite(im)) return undefined;
+  return ce
+    .function('Add', [re, ce.function('Multiply', [ce.I, im])])
+    .evaluate();
+}
+
+/**
+ * The real part and the imaginary part of `e`, as two expressions with no
+ * non-real constant, for a real limit variable `x`. A subexpression with no
+ * non-real constant is taken as real-valued, which is the assumption of all
+ * the strategies at infinity. `undefined` when `e` has an operator that this
+ * function cannot separate (only sums, products, quotients, integer powers
+ * and the exponential are separated).
+ */
+function realAndImaginaryParts(
+  e: Expression,
+  x: string,
+  ce: ComputeEngine,
+  depth: number
+): [re: Expression, im: Expression] | undefined {
+  if (depth > MAX_DEPTH) return undefined;
+  if (!hasNonRealConstant(e)) return [e, ce.Zero];
+  if (!e.has(x)) {
+    const re = ce.function('Real', [e]).evaluate();
+    const im = ce.function('Imaginary', [e]).evaluate();
+    if (hasNonRealConstant(re) || hasNonRealConstant(im)) return undefined;
+    return [re, im];
+  }
+
+  type Parts = [Expression, Expression];
+  const fn = (name: string, ops: Expression[]): Expression =>
+    ce.function(name, ops);
+  // A product with the literal `0` is written `0`: the canonical form keeps
+  // `0·x` (the value of `x` could be infinite), and the part would then
+  // depend on the limit variable when it does not.
+  const times = (a: Expression, b: Expression): Expression =>
+    a.isSame(0) || b.isSame(0) ? ce.Zero : fn('Multiply', [a, b]);
+  const mul = ([a, b]: Parts, [c, d]: Parts): Parts => [
+    fn('Subtract', [times(a, c), times(b, d)]),
+    fn('Add', [times(a, d), times(b, c)]),
+  ];
+  const div = ([a, b]: Parts, [c, d]: Parts): Parts => {
+    // (a + ib)/(c + id) = ((ac + bd) + i(bc − ad)) / (c² + d²)
+    const den = fn('Add', [times(c, c), times(d, d)]);
+    return [
+      fn('Divide', [fn('Add', [times(a, c), times(b, d)]), den]),
+      fn('Divide', [fn('Subtract', [times(b, c), times(a, d)]), den]),
+    ];
+  };
+  const partsOf = (op: Expression): Parts | undefined =>
+    realAndImaginaryParts(op, x, ce, depth + 1);
+
+  const op = e.operator;
+  if (op === 'Negate') {
+    const p = partsOf(o1(e));
+    return p && [fn('Negate', [p[0]]), fn('Negate', [p[1]])];
+  }
+  if (op === 'Add' || op === 'Multiply') {
+    const all: Parts[] = [];
+    for (const t of oo(e)) {
+      const p = partsOf(t);
+      if (!p) return undefined;
+      all.push(p);
+    }
+    if (op === 'Add')
+      return [
+        fn(
+          'Add',
+          all.map((p) => p[0])
+        ),
+        fn(
+          'Add',
+          all.map((p) => p[1])
+        ),
+      ];
+    return all.reduce(mul);
+  }
+  if (op === 'Divide') {
+    const n = partsOf(o1(e));
+    const d = partsOf(o2(e));
+    return n && d && div(n, d);
+  }
+  if (op === 'Exp' || (op === 'Power' && isSymbol(o1(e), 'ExponentialE'))) {
+    // e^(a + ib) = e^a·cos b + i·e^a·sin b
+    const p = partsOf(op === 'Exp' ? o1(e) : o2(e));
+    if (!p) return undefined;
+    const modulus = fn('Exp', [p[0]]);
+    return [
+      times(modulus, fn('Cos', [p[1]])),
+      times(modulus, fn('Sin', [p[1]])),
+    ];
+  }
+  if (op === 'Power') {
+    const n = o2(e);
+    if (!isNumber(n) || !Number.isInteger(n.re) || n.im !== 0) return undefined;
+    const k = Math.abs(n.re);
+    if (k === 0 || k > 8) return undefined;
+    const base = partsOf(o1(e));
+    if (!base) return undefined;
+    let result = base;
+    for (let i = 1; i < k; i++) result = mul(result, base);
+    return n.re < 0 ? div([ce.One, ce.Zero], result) : result;
+  }
+  return undefined;
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -1322,11 +1568,6 @@ function lnOfLimit(
   if (inner.isPositive === true && isDefiniteValue(inner))
     return ce.function('Ln', [inner]).evaluate();
   return undefined;
-}
-
-/** Sign of the leading coefficient of an (assumed unbounded) expression. */
-function leadingSign(e: Expression, x: string, ce: ComputeEngine): number {
-  return leadingSignAtInf(e, x, ce);
 }
 
 function leadingSignAtInf(e: Expression, x: string, ce: ComputeEngine): number {

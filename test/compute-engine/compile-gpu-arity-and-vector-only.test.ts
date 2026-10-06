@@ -66,8 +66,13 @@ function evalShader(code: string): number {
   const js = code.replace(/\b(sign|floor|abs)\(/g, 'Math.$1(');
   // `_gpu_round` is a preamble helper, so the evaluated source has to be
   // given a definition for it. It mirrors the emitted GLSL body, which is
-  // `GPU_ROUND_PREAMBLE_GLSL` in `gpu-target.ts`: round half AWAY from zero.
-  const round = (x: number) => Math.sign(x) * Math.floor(Math.abs(x) + 0.5);
+  // `GPU_ROUND_PREAMBLE_GLSL` in `gpu-target.ts`: round half AWAY from zero,
+  // with `step(0.5, d)` written as a comparison.
+  const round = (x: number) => {
+    const a = Math.abs(x);
+    const m = Math.floor(a);
+    return Math.sign(x) * (m + (a - m >= 0.5 ? 1 : 0));
+  };
   // eslint-disable-next-line no-new-func
   return Function(
     '_gpu_round',

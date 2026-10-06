@@ -62,6 +62,7 @@ import { flatten, flattenSequence } from '../boxed-expression/flatten.js';
 import { fromDigits } from '../numerics/strings.js';
 import { MAX_RANDOM_ELEMENT_COUNT } from '../numerics/random.js';
 import { rangeCount } from '../numerics/range-count.js';
+import { exactArithmeticRange } from './range-closed-form.js';
 import { randomCount } from './random-utils.js';
 import {
   coarsenEvidenceType,
@@ -283,6 +284,7 @@ import {
   widenAssignedType,
 } from '../boxed-expression/boxed-value-definition.js';
 import { reduceType } from '../../common/type/reduce.js';
+import { smallCount } from '../boxed-expression/collection-count.js';
 
 /**
  * Literal narrowing at a typed declaration or assignment: the character a
@@ -1797,7 +1799,7 @@ function analyzeRandomDomain(
   //    `range()` already infers a descending step for `Range(7, 2)` and
   //    reports an empty range for a zero or sign-mismatched step.
   if (isFunction(domain, 'Range')) {
-    const n = domain.count;
+    const n = smallCount(domain);
     // Symbolic bounds (e.g. `Range(1, n)`): the count is indeterminate.
     if (n === undefined) return { kind: 'symbolic' };
     if (!Number.isFinite(n))
@@ -1820,7 +1822,7 @@ function analyzeRandomDomain(
   if (domain.isEnumerableCollection === false) return { kind: 'symbolic' };
 
   if (domain.isIndexedCollection) {
-    const n = domain.count;
+    const n = smallCount(domain);
     if (n === undefined) return { kind: 'symbolic' };
     if (!Number.isFinite(n))
       return randomDomainError(ce, 'a finite collection', domain);
@@ -1829,7 +1831,17 @@ function analyzeRandomDomain(
   }
 
   // Non-indexed: the count when it is known, otherwise ONE counting pass.
-  let n = domain.count;
+  // A count that is not a safe integer (a `bigint`) is far above the limit
+  // that the counting pass applies, so the domain is refused without the
+  // pass.
+  const count = domain.count;
+  if (typeof count === 'bigint')
+    return randomDomainError(
+      ce,
+      `a collection of at most ${MAX_RANDOM_ELEMENT_COUNT} elements`,
+      domain
+    );
+  let n = count;
   if (n === undefined || !Number.isFinite(n)) n = countByTraversal(ce, domain);
   if (n === undefined)
     return randomDomainError(
@@ -7037,7 +7049,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       },
       // EvaluateAt(F, a, b) = F(b) - F(a); it is how a definite integral applies
       // its limits. See ../latex-syntax/dictionary/README.md (integral subsystem).
-      evaluate: ([f, lower, upper], { engine: ce }) => {
+      evaluate: ([f, lower, upper], options) => {
+        const ce = options.engine;
         // The operator is `lazy`, so its arguments are not validated against
         // the signature: `EvaluateAt(f)` with no point arrives here, and
         // applying `f` to a missing argument threw a TypeError. It stays
@@ -7089,7 +7102,16 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           !fLower.has('Integrate') &&
           !fUpper.has('Integrate')
         ) {
-          return fUpper.sub(fLower);
+          // Build the difference with `ce.function('Subtract', …)`, not the
+          // `.sub()` method: `.sub()` folds two exact numbers into a machine
+          // float, so `√5 − 2` became `0.236…` and a definite integral with an
+          // irrational bound, such as `∫₂^√5 4 dx`, lost its exact value.
+          // The difference is evaluated so that the special values that the
+          // definite-integral evaluator tests for are folded: `∞ − ∞` is
+          // `Indeterminate` (a NaN), and `~∞ − 1` is `~∞`. The options of the
+          // caller are passed on: under `.N()` the difference is a float, and
+          // a cancellation signal also stops this evaluation.
+          return ce.function('Subtract', [fUpper, fLower]).evaluate(options);
         }
         // Fallback: return unevaluated symbolic form
         return ce._fn('EvaluateAt', [f, lower, upper]);
@@ -7821,8 +7843,16 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           if (step === 0) return undefined;
           if (!Number.isFinite(first) || !Number.isFinite(upper))
             return undefined;
-          if (rangeCount(first, upper, step) === 0) return undefined;
-          const last = rangeLast([first, upper, step]);
+          // Exact rational operands use the exact count, as the `count`
+          // handler does: `Range(0, 9999999999999/10^12, 1)` ends at 9, and
+          // the machine count `rangeCount()` would count 10 as an element.
+          // Only number literals are read (`evaluateOperands` false), so the
+          // engine state does not change.
+          const count =
+            exactArithmeticRange(domain, false)?.n ??
+            rangeCount(first, upper, step);
+          if (count === 0 || count === 0n) return undefined;
+          const last = rangeLast([first, upper, step], count);
           if (first >= 0 && last >= 0) return 'non-negative';
           if (first <= 0 && last <= 0) return 'non-positive';
         }
@@ -9725,7 +9755,7 @@ function inexactResult(
     return lazyInexactElements(
       ce,
       source?.isLazyCollection && source.isIndexedCollection ? source : value,
-      value.count,
+      smallCount(value),
       digits
     );
   return value;
@@ -9815,12 +9845,16 @@ function lazyInexactElements(
   const element = elementOf(ce, xs, (ys) =>
     ce._fn('At', [ys, index], { canonical: false })
   );
-  return map(element, [index], [
-    ce.function('Range', [
-      ce.One,
-      count === Infinity ? ce.PositiveInfinity : ce.number(count),
-    ]),
-  ]);
+  return map(
+    element,
+    [index],
+    [
+      ce.function('Range', [
+        ce.One,
+        count === Infinity ? ce.PositiveInfinity : ce.number(count),
+      ]),
+    ]
+  );
 }
 
 /**
@@ -10068,8 +10102,12 @@ function followEnginePrecision(
     // machine float, it is an infinity (`e^1000`, whose `re` is `Infinity`)
     // or `0` (`e^−1000`, whose `re` is `0`).
     const outOfRange = (part: number, big: BigNum | undefined): boolean =>
-      !Number.isFinite(part) || (part === 0 && big !== undefined && !big.isZero());
-    if (outOfRange(value.re, value.bignumRe) || outOfRange(value.im, value.bignumIm))
+      !Number.isFinite(part) ||
+      (part === 0 && big !== undefined && !big.isZero());
+    if (
+      outOfRange(value.re, value.bignumRe) ||
+      outOfRange(value.im, value.bignumIm)
+    )
       return value;
     return ce.number(
       ce._inexactNumericValue(
@@ -10627,13 +10665,7 @@ function isPrecisionIndependent(
   )
     return false;
   return b.ops.some((op, i) =>
-    isPrecisionIndependent(
-      a.ops[i],
-      op,
-      exactAt(exact, b, i),
-      goal,
-      precision
-    )
+    isPrecisionIndependent(a.ops[i], op, exactAt(exact, b, i), goal, precision)
   );
 }
 

@@ -115,6 +115,7 @@ import {
   callerSpliceSources,
   preservesMappedSplices,
 } from './constant-folding.js';
+import { smallCount } from '../boxed-expression/collection-count.js';
 
 /**
  * Interval arithmetic operators mapped to _IA library calls.
@@ -701,7 +702,7 @@ function seededChoiceDomain(domain: Expression): string | undefined {
     const ops = domain.ops.map(real);
     if (ops.length < 1 || ops.length > 3) return undefined;
     if (ops.some((x) => x === undefined)) return undefined;
-    const n = domain.count;
+    const n = smallCount(domain);
     if (n === undefined || !Number.isFinite(n) || n <= 0) return undefined;
     const [first, step] =
       ops.length === 1
@@ -2597,7 +2598,13 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     )}))`;
   },
   Round: (args, compile) => {
-    if (args.length < 2) return `_IA.round(${compile(args[0])})`;
+    // A value halfway between two integers is rounded with the rule of
+    // `ce.roundingTies` at compile time, as the interpreter does. The rule
+    // is the second argument of `_IA.round`; the default rule, away from
+    // zero, is left out.
+    const ties = args[0].engine.roundingTies;
+    const tieArg = ties === 'away-from-zero' ? '' : `, ${JSON.stringify(ties)}`;
+    if (args.length < 2) return `_IA.round(${compile(args[0])}${tieArg})`;
     // Round(x, n) = Round(x·10ⁿ)/10ⁿ — round to `n` decimal places. Only the
     // constant-`n` form is representable here (the factor must be a point);
     // a non-constant precision throws to fail closed to scalar JS.
@@ -2614,8 +2621,8 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     const scale = `_IA.point(${Math.pow(10, Math.abs(n.re))})`;
     const x = compile(args[0]);
     if (n.re >= 0)
-      return `_IA.div(_IA.round(_IA.mul(${x}, ${scale})), ${scale})`;
-    return `_IA.mul(_IA.round(_IA.div(${x}, ${scale})), ${scale})`;
+      return `_IA.div(_IA.round(_IA.mul(${x}, ${scale})${tieArg}), ${scale})`;
+    return `_IA.mul(_IA.round(_IA.div(${x}, ${scale})${tieArg}), ${scale})`;
   },
   Heaviside: (args, compile) => `_IA.heaviside(${compile(args[0])})`,
   Sign: (args, compile) => `_IA.sign(${compile(args[0])})`,

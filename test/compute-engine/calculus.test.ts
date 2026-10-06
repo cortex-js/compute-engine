@@ -3128,3 +3128,77 @@ describe('INTEGRATE: a user function with the name of a library function', () =>
     ).toBe('-1 + e');
   });
 });
+
+describe('INTEGRATE: exact bounds give an exact value', () => {
+  // `F(b) − F(a)` must be built as an exact sum. Built with the `.sub()`
+  // method, two different exact numbers such as `4√5` and `8` were folded
+  // into a machine float.
+  test('an irrational upper bound and an integer lower bound', () => {
+    const ce = new ComputeEngine();
+    const result = ce
+      .box(['Integrate', 4, ['Limits', 'x', 2, ['Sqrt', 5]]])
+      .evaluate();
+    expect(result.toString()).toBe('-8 + 4sqrt(5)');
+  });
+
+  test('two different irrational bounds', () => {
+    const ce = new ComputeEngine();
+    const result = ce
+      .box(['Integrate', 1, ['Limits', 'x', ['Sqrt', 2], ['Sqrt', 3]]])
+      .evaluate();
+    expect(result.toString()).toBe('-sqrt(2) + sqrt(3)');
+  });
+
+  test('EvaluateAt is exact under evaluate() and a float under N()', () => {
+    const ce = new ComputeEngine();
+    const at = ce.expr([
+      'EvaluateAt',
+      ['Function', ['Multiply', 4, 'x'], 'x'],
+      2,
+      ['Sqrt', 5],
+    ]);
+    expect(at.evaluate().toString()).toBe('-8 + 4sqrt(5)');
+    const n = at.N();
+    expect(n.isNumberLiteral).toBe(true);
+    expect(n.re).toBeCloseTo(4 * Math.sqrt(5) - 8, 12);
+  });
+
+  test('EvaluateAt of a list-valued function is exact in each element', () => {
+    const ce = new ComputeEngine();
+    const at = ce.expr([
+      'EvaluateAt',
+      ['Function', ['List', 'x', ['Square', 'x']], 'x'],
+      1,
+      ['Sqrt', 2],
+    ]);
+    expect(at.evaluate().toString()).toBe('[-1 + sqrt(2),1]');
+  });
+
+  test('the LaTeX route gives the same exact value', () => {
+    const ce = new ComputeEngine();
+    expect(ce.parse('\\int_2^{\\sqrt5} 4\\,dx').evaluate().toString()).toBe(
+      '-8 + 4sqrt(5)'
+    );
+  });
+
+  // The definite-integral evaluator reads these special values of
+  // `F(b) − F(a)`: a NaN starts the limit at an infinite bound, and an
+  // infinity starts the check for a pole at a bound.
+  test('EvaluateAt folds ∞ − ∞ to a NaN and keeps ~∞', () => {
+    const ce = new ComputeEngine();
+    const square = ce.expr([
+      'EvaluateAt',
+      ['Function', ['Square', 'x'], 'x'],
+      'NegativeInfinity',
+      'PositiveInfinity',
+    ]);
+    expect(square.evaluate().isNaN).toBe(true);
+    const reciprocal = ce.expr([
+      'EvaluateAt',
+      ['Function', ['Negate', ['Divide', 1, 'x']], 'x'],
+      0,
+      1,
+    ]);
+    expect(reciprocal.evaluate().isSame(ce.ComplexInfinity)).toBe(true);
+  });
+});

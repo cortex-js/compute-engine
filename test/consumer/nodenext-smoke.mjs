@@ -86,6 +86,7 @@ import * as interval from '${PKG_NAME}/interval';
 import * as numerics from '${PKG_NAME}/numerics';
 import * as core from '${PKG_NAME}/core';
 import * as compile from '${PKG_NAME}/compile';
+import * as runtime from '${PKG_NAME}/runtime';
 import * as identities from '${PKG_NAME}/identities';
 import * as integrationRules from '${PKG_NAME}/integration-rules';
 import * as epsil from '${PKG_NAME}/epsil';
@@ -103,6 +104,8 @@ const touched: unknown[] = [
   numerics.NumericValue,
   core.simplify,
   compile.compile,
+  runtime.createJavaScriptRuntime,
+  runtime.runtimeVersion,
   identities.loadIdentities,
   integrationRules.loadIntegrationRules,
   epsil.parseEpsil,
