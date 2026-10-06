@@ -1,3 +1,8 @@
+// 1..5 |> x -> x^2 -> print
+
+
+print($\mathrm{Solve}(s=A\cdot\cos(2\pi f t),f)$)
+
 // let x ;
 // print(Type(x))
 // Heaviside(x)
