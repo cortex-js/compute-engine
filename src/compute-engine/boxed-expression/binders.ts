@@ -522,9 +522,25 @@ export function rewriteWithBinders(
     if (next.every((op, i) => op === ops[i])) result = expr;
     else {
       const ce = expr.engine;
-      if (!next.every((x) => x.isValid))
-        result = ce.function(expr.operator, next, { form: 'raw' });
-      else {
+      if (!next.every((x) => x.isValid)) {
+        // An operand that holds an `Error` node must not be canonicalized
+        // again (canonicalization short-circuits on an invalid expression),
+        // so the node is rebuilt without canonical transforms. A node that
+        // OWNS a scope (the body `Block` of a function literal) keeps that
+        // scope: it is rebuilt bound-but-not-canonical, with its scope
+        // attached, because a raw rebuild carries no scope at all. Without
+        // this, a literal whose body holds an error — `x ↦ (x -> x^2)`,
+        // lifted from a key-value pair whose key is not a string — lost its
+        // body scope here, and `makeLambda` then threw "Function body must
+        // be a scoped Block expression" instead of answering the error.
+        result =
+          expr.localScope !== undefined
+            ? ce.function(expr.operator, next, {
+                form: 'structural',
+                scope: expr.localScope,
+              })
+            : ce.function(expr.operator, next, { form: 'raw' });
+      } else {
         const form = expr.isCanonical
           ? 'canonical'
           : expr.isStructural

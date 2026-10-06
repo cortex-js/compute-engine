@@ -65,6 +65,39 @@ describe('EPSIL MAPSTO-ARROW DIAGNOSTIC — wrong-arrow lambdas', () => {
     ]);
     expect(value.re).toBe(4);
   });
+
+  test('a bare symbol after a pipe operator before `->` is diagnosed and recovered', () => {
+    // A pipe stage is always a function, never a dictionary entry, so
+    // `xs |> x -> x^2` is the stage lambda `xs |> x => x^2` written with the
+    // wrong arrow. Before this branch the pair reached the engine as
+    // `KeyValuePair(x, x^2)` and failed at run time with "Function body must
+    // be a scoped Block expression" — no diagnostic, no fixit.
+    const src = '1..5 |> x -> x^2';
+    const { value, diagnostics } = run(src);
+    expect(diagnostics.map((d) => d.message[0])).toEqual([
+      'mapsto-arrow-expected',
+    ]);
+    expect(value.toString()).toBe('[1,4,9,16,25]');
+    const [start, end, replacement] = diagnostics[0].fixits![0];
+    expect(src.slice(0, start) + replacement + src.slice(end)).toBe(
+      '1..5 |> x => x^2'
+    );
+    // The pipe is read from the token before the parameter, so the `~>`
+    // spelling, the single-glyph spellings `▷` and `⇝`, and a comment
+    // between the pipe and the parameter are all covered.
+    for (const src of [
+      '1..3 ~> n -> n + 1',
+      '1..3 ▷ n -> n + 1',
+      '1..3 ⇝ n -> n + 1',
+      '1..3 |> /* stage */ n -> n + 1',
+    ]) {
+      const result = run(src);
+      expect(result.diagnostics.map((d) => d.message[0])).toEqual([
+        'mapsto-arrow-expected',
+      ]);
+      expect(result.value.toString()).toBe('[2,3,4]');
+    }
+  });
 });
 
 describe('EPSIL MAPSTO-ARROW DIAGNOSTIC — legitimate `->` stays silent', () => {

@@ -162,6 +162,19 @@
 
 ### Issues Resolved
 
+- **Epsil: a pipe stage written with `->` instead of `=>`.**
+  `1..5 |> x -> x^2` failed at run time with "Function body must be a scoped
+  Block expression". The parser now reports `mapsto-arrow-expected` on the
+  arrow, with a fixit to `=>`, and runs the program as `1..5 |> x => x^2`
+  (`[1,4,9,16,25]`), as it already did for `f = x -> x^2` and
+  `(x) -> x^2`. The `~>`, `▷` and `⇝` spellings of the pipe are covered
+  too, and a comment between the pipe and the parameter does not hide the
+  mistake. A `->` in a dictionary literal (`{one -> 1}`) is unchanged. In the engine, applying a
+  function literal whose body holds an error node (the pair with a symbol
+  key that this typo produced) no longer throws: the body keeps its scope
+  when it is rebuilt around the error, and the application evaluates to that
+  error value.
+
 - **`Norm`, `Hypot` and `Distance` of very small or very large numbers.** At
   machine precision, `Norm([3e-200, 4e-200])` and `Hypot(3e-200, 4e-200)` were
   `0`, and `Norm([3e200, 4e200])` was `+∞`, because the squares underflowed or

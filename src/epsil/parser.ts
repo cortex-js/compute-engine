@@ -7659,11 +7659,12 @@ export class Parser {
 
   /** Is a `KeyValuePair`'s left operand shaped like a parameter list — a
    * `Typed` parameter (`(x: number) -> …`), a tuple of parameters
-   * (`(x, y) -> …`), or a bare symbol right after a `(` or `=`
-   * (`(x) -> …`, `f = x -> …`)? None of these is a valid dictionary key, so
-   * the `->` was almost certainly meant to be `=>`. A bare symbol in any
-   * other position (`{one -> 1}`, a list element) is left alone: inside a
-   * brace literal an unquoted name is a legitimate string key. */
+   * (`(x, y) -> …`), or a bare symbol right after a `(`, a `=`, or a pipe
+   * operator (`(x) -> …`, `f = x -> …`, `xs |> x -> …`)? None of these is a
+   * valid dictionary key, so the `->` was almost certainly meant to be `=>`.
+   * A bare symbol in any other position (`{one -> 1}`, a list element) is
+   * left alone: inside a brace literal an unquoted name is a legitimate
+   * string key. */
   private lambdaMistypedAsPair(left: MathJsonExpression): boolean {
     const isTypedParam = (p: MathJsonExpression): boolean => {
       const pops = fnOps(p);
@@ -7704,9 +7705,45 @@ export class Parser {
       if (start === undefined) return false;
       let i = start - 1;
       while (i >= 0 && /\s/.test(this.source[i])) i -= 1;
-      return i >= 0 && (this.source[i] === '(' || this.source[i] === '=');
+      if (i < 0) return false;
+      if (this.source[i] === '(' || this.source[i] === '=') return true;
+      // A pipe stage: `xs |> x -> x^2` is a stage lambda written with the
+      // wrong arrow. Only a function can follow `|>`, never a dictionary
+      // entry, so a bare symbol followed by `->` in that position is the
+      // same mistake as `f = x -> x^2`. (The stage-lambda sugar in
+      // `pipeStage` only claims a `=>`, so without this branch the pair
+      // reached the engine as `KeyValuePair(x, x^2)` and failed at run time
+      // with a message about the function body instead of this diagnostic.)
+      // The pipe is read from the TOKEN before the symbol, not from the
+      // source text: a comment can sit between the two (`xs |> /* c */ x`),
+      // and the single-glyph spellings `▷` and `⇝` lex as symbol tokens
+      // that `operatorText` maps to `|>` and `~>`.
+      const prev = this.tokenBefore(start);
+      const pipe = prev === undefined ? null : this.operatorText(prev);
+      return pipe === '|>' || pipe === '~>';
     }
     return false;
+  }
+
+  /** The last token that ends at or before local offset `offset`, or
+   * `undefined` when no token does. Trivia — whitespace and comments — is
+   * not in the token stream, so this is the token that precedes the one
+   * starting at `offset`, whatever sits between them. */
+  private tokenBefore(offset: number): Token | undefined {
+    // Binary search: the tokens are in source order, so their end offsets
+    // are non-decreasing.
+    let lo = 0;
+    let hi = this.tokens.length - 1;
+    let found: Token | undefined;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      const t = this.tokens[mid];
+      if (t.end <= offset) {
+        found = t;
+        lo = mid + 1;
+      } else hi = mid - 1;
+    }
+    return found;
   }
 
   /** Report the retired `|->` spelling of the mapsto arrow, with a fixit

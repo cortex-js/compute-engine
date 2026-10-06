@@ -673,6 +673,29 @@ describe('Pipe', () => {
 // lambda — is a PARSER rewrite; on the box route `["Power", "_", 2]` keeps
 // its topic-placeholder meaning, and the last test pins that divergence.
 describe('Pipe — stage sugar (box route)', () => {
+  test('a stage lifted from a pair with a non-string key is an error value, not a throw', () => {
+    // `KeyValuePair(x, x^2)` canonicalizes with an `incompatible-type` error
+    // in its key slot. The pipe lifts the stage into `x ↦ KeyValuePair(…)`,
+    // and re-binding `x` to the lifted parameter rebuilds the body `Block`
+    // around that error. The rebuild must keep the Block's scope: without it,
+    // applying the lambda threw "Function body must be a scoped Block
+    // expression" (the Epsil `1..5 |> x -> x^2` typo reached this route).
+    const ce = new ComputeEngine();
+    const result = ce
+      .box(['Pipe', ['Range', 1, 5], ['KeyValuePair', 'x', ['Power', 'x', 2]]])
+      .evaluate();
+    expect(result.isValid).toBe(false);
+    expect(result.json).toEqual([
+      'KeyValuePair',
+      [
+        'Error',
+        ['ErrorCode', "'incompatible-type'", "'string'", "'number'"],
+        ['Range', 1, 5],
+      ],
+      ['Power', ['Range', 1, 5], 2],
+    ]);
+  });
+
   test('implicit topic argument fills an incomplete call', () => {
     const ce = new ComputeEngine();
     // Take(10) is missing its collection: the topic becomes the first arg.
