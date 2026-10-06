@@ -152,7 +152,7 @@ describe('COMPILE Integrate — adaptive Gauss–Kronrod', () => {
     expect(Math.abs(got - 3.7408935992e-6)).toBeLessThan(1e-6);
   });
 
-  test('piecewise integrand ∫_0^2 f, f = 1 for t<1 else 2 → 3', () => {
+  test('affine piecewise integral resolves exactly before compilation', () => {
     // Built via Which (jump discontinuity at t = 1).
     const expr = ce.box([
       'Integrate',
@@ -161,18 +161,24 @@ describe('COMPILE Integrate — adaptive Gauss–Kronrod', () => {
     ]);
     const r = compile(expr);
     expect(r.success).toBe(true);
-    expect(r.code).toContain('_SYS.integrate(');
+    expect(r.code).not.toContain('_SYS.integrate');
+    expect(r.code).not.toContain('integrateMC');
     expect(r.run() as number).toBeCloseTo(3, 6);
   });
 
   describe('quadrature option', () => {
-    // A piecewise (Which) integrand has no elementary antiderivative, so the
-    // antiderivative-first path declines and the quadrature emitter is exercised
-    // (∫_0^2 of {1 for t<1, else 2} = 3).
+    // The non-periodic trig argument is outside the symbolic splitter, so this
+    // exercises quadrature. On [0, 2], sin(x²-1) < 0 selects [0, 1).
     const piecewise = () =>
       ce.box([
         'Integrate',
-        ['Which', ['Less', 'x', 1], 1, 'True', 2],
+        [
+          'Which',
+          ['Less', ['Sin', ['Subtract', ['Square', 'x'], 1]], 0],
+          1,
+          'True',
+          2,
+        ],
         ['Limits', 'x', 0, 2],
       ]);
 
