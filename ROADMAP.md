@@ -194,6 +194,69 @@ recursive call is the case where it does not. `listFrom` around the argument
 gives `[]`. Corpus: `language/lazy-argument-to-recursive-call`,
 `rosetta/quicksort-typed` (the working form).
 
+### Corpus playground follow-ups: compiled values that differ silently, bound names read as free, and timing outliers (OPEN, medium — found 2026-10-06 by the Epsil corpus playground)
+
+`npm run epsil:corpus-report` runs every program of `test/epsil/corpus/`
+through the interpreter and through the JavaScript compile target and writes
+`temp-docs/epsil-corpus/index.html` (see `test/epsil/corpus/README.md`). The
+run of 2026-10-06 over 107 programs: interpreted 101 as expected (the 6
+others are the recorded known failures); compiled 43 ran, 59 were declined,
+5 read a symbol with no value. The items below come from that run; rerun the
+report after a fix and read the page for the next ones.
+
+**Compiled values that differ from the interpreter with no error (defects).**
+Compiled arithmetic is machine arithmetic by contract (`src/cli/compile.ts`),
+so a float where the interpreter gives an exact number is expected
+(`11/4` compiles to `2.75`). These two are not that:
+- `euler/016`: `digitSum(2^1000)` compiles to `84`; the interpreter gives
+  `1366`. The double `2^1000` is `1.07e301` and the lowering sums the digits
+  of that float's decimal text. A result the target cannot represent must be
+  an error (or a decline), not a different number.
+- `euler/048`: `Mod(sum(map(n => n^n, 1..1000)), 10^10)` compiles to `null`;
+  the interpreter gives `9110846700`. The sum overflows the double range and
+  `Mod` of `Infinity` falls out as `null` instead of an error value.
+
+**Bound names read as free by the compile route (5 programs, status
+"unbound symbol").** Each is a construct the interpreter binds and the
+compiler does not: a top-level assignment without `let` (`exercism/grains`:
+`total = sum(…)`, reported as `total has no value`); a library function
+passed by name to a higher-order operator (`euler/005`:
+`reduce(1..20, lcm, 1)`, reported as `LCM`); the variable of a comprehension
+(`rosetta/100-doors-by-squares`: `[k for k in 1..100 if …]`, reported as
+`k`); and `symbolic/integrals`, reported as `Nothing has no value`, which
+names no symbol of the program at all. Three more declines are of the same
+family: "Could not compile invalid expression" on a body with `Declare`
+(`rosetta/100-doors`, `exercism/rna-transcription`), and "Unknown operator
+`m`" for the forward declaration `let m` of `rosetta/mutual-recursion`.
+
+**Declines by missing lowering (46 of the 59 declines).** Operators the
+corpus uses that the JavaScript target does not lower, by number of programs
+blocked: `IntegerDigits` 7, `StringSplit` 3, `Set` 3, `Simplify` 3,
+`Divisors` 2, `UnicodeScalars` 2, `NumberFrom` 2, `N` 2, `DigitSum` 2, and
+one each of `Iterate`, `IntegerString`, `Permutations`, `LinearSolve`,
+`FactorInteger`, `PolynomialQuotient`, `Factor`, `Solve`. The symbolic ones
+are expected; the integer and string ones are candidates for a lowering.
+The other declines are typing refusals (`At` on a value not provably an
+indexed collection, 4; `String`/`Characters` on a value not provably text,
+5; a `Loop` or `Sum` bound that is not a finite number, 4; multi-index `At`,
+2; a `Find` over an infinite range; a `Sort` of characters; a mixed-string
+ordering; a `Filter` over a value that may be text).
+
+**Timing outliers.** The interpreted median is 98 ms. Programs above 5 s:
+`euler/004` 14.7 s (a comprehension of 5050 products with a palindrome
+test), `euler/030` 12.7 s (9000 elements, a digit-power sum each),
+`rosetta/100-doors` 12.4 s (100 passes of a `map` over a `zip` of 100: about
+1.2 ms per lambda application), `exercism/nth-prime` 9.2 s,
+`exercism/armstrong-numbers` 8.0 s (500 elements: 16 ms per element for
+`integerDigits`, a `map` and a `sum`), `rosetta/kaprekar-numbers` 6.1 s (100
+elements), `euler/036` 5.7 s, `euler/010` 5.2 s. The per-element cost of a
+user function applied inside `Filter`/`Map`/`Any` is the common factor (see
+the next entry). Compile time: median 7 ms, but `euler/010`
+(`sum(filter(1..99999, isPrime))`) took 6.9 s to compile and 0.02 ms to run,
+so the compile step evaluated the whole sum (constant folding of a closed
+program). The report should show that fold as what it is, or the target
+should bound it. Compiled run times are all under 12 ms.
+
 ### A user predicate over a lazy range is slow, and each consumer walks the range again (OPEN, performance — found 2026-10-06 by the Epsil program corpus)
 
 With the iteration limit removed for Epsil programs, the full-size Project
@@ -208,9 +271,12 @@ walks it again, so the last program cost 47 s in the corpus runner. The
 corpus keeps reduced sizes for `euler/021`, `euler/029` and `euler/034` for
 this reason, and `rosetta/kaprekar-numbers` stops at 100: a predicate whose
 body holds an `any` over a lambda with a `do` block cost about 30 ms per
-number. To do: profile the per-element cost of applying a user function
-inside `Filter`/`Map`/`Any`, and decide whether a finite lazy collection
-should keep its elements after the first complete walk.
+number. The corpus playground (previous entry) measured 16 ms per element
+for `isArmstrong` (`integerDigits`, `map`, `sum`) and 1.2 ms per application
+of a small lambda inside `map` over a `zip`. To do: profile the per-element
+cost of applying a user function inside `Filter`/`Map`/`Any`, and decide
+whether a finite lazy collection should keep its elements after the first
+complete walk.
 
 ### A determinant with float entries keeps unfolded constants (OPEN, small — found 2026-10-06 by the review of the exact determinant fix; present before)
 

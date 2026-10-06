@@ -17,6 +17,7 @@
     "test:js-runtime": "node ./test/consumer/js-runtime-smoke.mjs",
     "test:epsil-runtime": "node ./test/consumer/epsil-runtime-smoke.mjs",
     "test:epsil-cli": "node ./test/consumer/epsil-cli-smoke.mjs",
+    "epsil:corpus-report": "npx --yes tsx scripts/epsil-corpus-report.ts",
     "test:nightly": "CE_NIGHTLY=1 jest --config ./config/jest.config.cjs --reporters default -- test/compute-engine/nightly/",
     "test:perf": "CE_PERF=1 jest --config ./config/jest.config.cjs --runInBand --reporters default -- $(grep -rl CE_PERF test --include=*.test.ts)",
     "check:deps": "madge --circular --extensions ts src/compute-engine && echo 'No circular dependencies found'",

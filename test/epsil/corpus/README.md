@@ -33,6 +33,17 @@ The whole corpus:
 One program through the CLI, without a build:
 `npx tsx src/cli/epsil.ts test/epsil/corpus/<category>/<name>.epsil`.
 
+## The playground report
+
+`npm run epsil:corpus-report` runs every program through the interpreter and
+through the JavaScript compile target, records the value and the time of each
+route, and writes `temp-docs/epsil-corpus/index.html` (a self-contained page
+with filters, sorting and the generated code of each program) and `report.json`
+beside it. `--only <substring>` restricts the run, `--time-limit <ms>` caps each
+route (default 60000), `--out <dir>` changes the output directory. The script is
+`scripts/epsil-corpus-report.ts`; the page template is
+`scripts/epsil-corpus-report.html`.
+
 ## Categories
 
 - `exercism/`: small algorithmic exercises on strings, collections and integers,

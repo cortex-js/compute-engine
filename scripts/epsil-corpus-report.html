@@ -1,0 +1,231 @@
+<title>Epsil Corpus Playground</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap">
+<style>
+  /* Layout: a summary strip, a filter bar, then one wide table whose rows open
+     into a two-column detail (source on the left, the two routes on the right). */
+  :root {
+    --bg: #f6f7f4;
+    --surface: #ffffff;
+    --surface-2: #eceee8;
+    --fg: #1b1f1a;
+    --fg-muted: #5e665c;
+    --line: #d5d9cf;
+    --accent: #2f6b4f;
+    --accent-soft: #dcebe2;
+    --ok: #2f7a4a;
+    --ok-soft: #dff1e3;
+    --warn: #9a6b14;
+    --warn-soft: #f6ead0;
+    --bad: #a63a2e;
+    --bad-soft: #f6dcd8;
+    --info: #3b5f8a;
+    --info-soft: #dde6f2;
+    --font-ui: 'Public Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+    --font-mono: 'Fira Code', ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #161916; --surface: #1f231f; --surface-2: #272c27; --fg: #e6e9e2;
+      --fg-muted: #9aa396; --line: #353b35; --accent: #7fbf9a; --accent-soft: #24372d;
+      --ok: #7fbf9a; --ok-soft: #223a2b; --warn: #d9a84a; --warn-soft: #3a2f16;
+      --bad: #e07b6e; --bad-soft: #3d2521; --info: #86a9d6; --info-soft: #22303f;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #161916; --surface: #1f231f; --surface-2: #272c27; --fg: #e6e9e2;
+    --fg-muted: #9aa396; --line: #353b35; --accent: #7fbf9a; --accent-soft: #24372d;
+    --ok: #7fbf9a; --ok-soft: #223a2b; --warn: #d9a84a; --warn-soft: #3a2f16;
+    --bad: #e07b6e; --bad-soft: #3d2521; --info: #86a9d6; --info-soft: #22303f;
+    color-scheme: dark;
+  }
+  body { background: var(--bg); color: var(--fg); font-family: var(--font-ui); font-size: 14px; line-height: 1.45; }
+  .wrap { max-width: 1280px; margin: 0 auto; padding-block: 24px 48px; padding-inline: 16px; display: grid; gap: 20px; }
+  header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 16px; }
+  h1 { font-size: 22px; font-weight: 700; margin: 0; letter-spacing: -0.01em; text-wrap: balance; }
+  .meta { color: var(--fg-muted); font-size: 13px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+  .tile { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; min-width: 0; }
+  .tile .label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--fg-muted); }
+  .tile .num { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; margin-top: 2px; }
+  .tile .sub { font-size: 12px; color: var(--fg-muted); }
+  .controls { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
+  .controls input[type="search"] { font: inherit; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--fg); min-width: 220px; }
+  .controls select { font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--fg); }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { font: inherit; font-size: 12px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--fg); cursor: pointer; }
+  .chip[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--fg); }
+  .chip:focus-visible, .row:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+  table { width: 100%; border-collapse: collapse; min-width: 900px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--fg-muted); font-weight: 600; background: var(--surface-2); position: sticky; top: env(safe-area-inset-top, 0px); cursor: pointer; user-select: none; white-space: nowrap; }
+  th[aria-sort="ascending"]::after { content: " ▲"; } th[aria-sort="descending"]::after { content: " ▼"; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .row { cursor: pointer; }
+  .row:hover { background: var(--surface-2); }
+  .row[aria-expanded="true"] { background: var(--accent-soft); }
+  .name { font-weight: 500; }
+  .cat { color: var(--fg-muted); font-size: 12px; }
+  .val { font-family: var(--font-mono); font-size: 12px; color: var(--fg); max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
+  .pill { display: inline-block; font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 999px; letter-spacing: 0.02em; white-space: nowrap; }
+  .pill.ok { background: var(--ok-soft); color: var(--ok); }
+  .pill.mismatch, .pill.error, .pill.diagnostic { background: var(--bad-soft); color: var(--bad); }
+  .pill.declined, .pill.unbound { background: var(--warn-soft); color: var(--warn); }
+  .pill.timeout { background: var(--bad-soft); color: var(--bad); }
+  .pill.known { background: var(--info-soft); color: var(--info); }
+  .detail td { background: var(--surface-2); padding: 14px 12px 18px; }
+  .detail-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+  @media (max-width: 760px) { .detail-grid { grid-template-columns: 1fr; } }
+  .detail h3 { margin: 0 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--fg-muted); }
+  pre { margin: 0; font-family: var(--font-mono); font-size: 12px; line-height: 1.5; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; overflow-x: auto; white-space: pre; }
+  pre.wrap-text { white-space: pre-wrap; word-break: break-word; }
+  details summary { cursor: pointer; color: var(--fg-muted); font-size: 12px; margin: 8px 0 4px; }
+  .kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; font-size: 13px; margin-bottom: 10px; }
+  .kv dt { color: var(--fg-muted); } .kv dd { margin: 0; font-variant-numeric: tabular-nums; }
+  .diag { color: var(--bad); font-family: var(--font-mono); font-size: 12px; white-space: pre-wrap; word-break: break-word; }
+  .empty { padding: 24px; color: var(--fg-muted); text-align: center; }
+  .note { font-size: 12px; color: var(--fg-muted); }
+  @media (prefers-reduced-motion: no-preference) { .row { transition: background 120ms; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Epsil Corpus Playground</h1>
+    <div class="meta" id="meta"></div>
+  </header>
+
+  <section class="tiles" id="tiles" aria-label="Summary"></section>
+
+  <section class="controls" aria-label="Filters">
+    <input type="search" id="q" placeholder="Search name, source, value…" aria-label="Search">
+    <div class="chips" id="cats" aria-label="Categories"></div>
+    <select id="istatus" aria-label="Interpreted status">
+      <option value="">interpreted: any</option>
+      <option value="ok">ok</option><option value="mismatch">mismatch</option><option value="diagnostic">diagnostic</option><option value="error">error</option><option value="timeout">timeout</option><option value="known">known failure</option>
+    </select>
+    <select id="cstatus" aria-label="Compiled status">
+      <option value="">compiled: any</option>
+      <option value="ok">ok</option><option value="declined">declined</option><option value="unbound">unbound symbol</option><option value="error">error</option><option value="diagnostic">diagnostic</option><option value="timeout">timeout</option>
+    </select>
+    <span class="note" id="count"></span>
+  </section>
+
+  <div class="table-wrap">
+    <table id="table">
+      <thead>
+        <tr>
+          <th data-key="name">Program</th>
+          <th data-key="expected">Expected</th>
+          <th data-key="istatus">Interpreted</th>
+          <th class="num" data-key="ims">ms</th>
+          <th data-key="cstatus">Compiled (JavaScript)</th>
+          <th class="num" data-key="cms">compile ms</th>
+          <th class="num" data-key="rms">run ms</th>
+        </tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+  <p class="note">The interpreted time is the whole run of <code>executeEpsil</code> on a fresh engine. The compiled columns are the <code>compile()</code> call and the run of the generated code; parsing and canonicalization are shared and not counted. Compiled arithmetic is machine arithmetic, so a compiled value is a float where the interpreter gives an exact number, and a program that stays symbolic cannot compile. Sort by clicking a column; click a row for the source, the full values and the generated code.</p>
+</div>
+
+<script>
+  const DATA = /*__DATA__*/null;
+  const state = { q: '', cats: new Set(), istatus: '', cstatus: '', sort: 'name', dir: 1, open: new Set() };
+  try { const s = JSON.parse(localStorage.getItem('epsil-corpus-state') || 'null'); if (s) { state.sort = s.sort ?? state.sort; state.dir = s.dir ?? 1; } } catch {}
+
+  const fmt = (ms) => ms === undefined ? '' : ms >= 100 ? Math.round(ms).toLocaleString() : ms.toFixed(1);
+  const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const istat = (p) => p.knownFailure ? 'known' : p.interpreted.status;
+
+  function render() {
+    const programs = DATA.programs;
+    document.getElementById('meta').textContent = `${programs.length} programs · generated ${new Date(DATA.generatedAt).toLocaleString()} · time limit ${DATA.timeLimit / 1000} s per route`;
+    renderTiles(programs); renderChips(programs); renderRows();
+  }
+
+  function renderTiles(ps) {
+    const n = (f) => ps.filter(f).length;
+    const sum = (f) => ps.reduce((a, p) => a + (f(p) || 0), 0);
+    const tiles = [
+      ['Programs', ps.length, `${new Set(ps.map((p) => p.category)).size} categories`],
+      ['Interpreted ok', n((p) => p.interpreted.status === 'ok'), `${n((p) => !!p.knownFailure)} known failures`],
+      ['Compiled ok', n((p) => p.compiled.status === 'ok'), `${n((p) => p.compiled.status === 'declined')} declined · ${n((p) => p.compiled.status === 'unbound')} unbound`],
+      ['Interpreted total', `${(sum((p) => p.interpreted.ms) / 1000).toFixed(1)} s`, `median ${fmt(median(ps.map((p) => p.interpreted.ms)))} ms`],
+      ['Compile total', `${(sum((p) => p.compiled.compileMs) / 1000).toFixed(2)} s`, `median ${fmt(median(ps.map((p) => p.compiled.compileMs).filter((x) => x !== undefined)))} ms`],
+      ['Compiled run total', `${(sum((p) => p.compiled.runMs) / 1000).toFixed(3)} s`, `over ${n((p) => p.compiled.runMs !== undefined)} programs that ran`],
+    ];
+    document.getElementById('tiles').innerHTML = tiles.map(([l, v, s]) => `<div class="tile"><div class="label">${esc(l)}</div><div class="num">${esc(v)}</div><div class="sub">${esc(s)}</div></div>`).join('');
+  }
+  function median(xs) { const a = xs.slice().sort((x, y) => x - y); return a.length ? a[Math.floor(a.length / 2)] : undefined; }
+
+  function renderChips(ps) {
+    const cats = [...new Set(ps.map((p) => p.category))].sort();
+    const el = document.getElementById('cats');
+    el.innerHTML = cats.map((c) => `<button class="chip" type="button" data-cat="${esc(c)}" aria-pressed="${state.cats.has(c)}">${esc(c)} <span class="cat">${ps.filter((p) => p.category === c).length}</span></button>`).join('');
+    el.querySelectorAll('.chip').forEach((b) => b.addEventListener('click', () => { const c = b.dataset.cat; state.cats.has(c) ? state.cats.delete(c) : state.cats.add(c); renderChips(ps); renderRows(); }));
+  }
+
+  function visible() {
+    const q = state.q.toLowerCase();
+    return DATA.programs.filter((p) =>
+      (state.cats.size === 0 || state.cats.has(p.category)) &&
+      (!state.istatus || istat(p) === state.istatus) &&
+      (!state.cstatus || p.compiled.status === state.cstatus) &&
+      (!q || [p.name, p.source, p.interpreted.value, p.compiled.value, p.expected].join('\n').toLowerCase().includes(q)));
+  }
+  const keyOf = { name: (p) => p.name, expected: (p) => p.expected ?? '', istatus: (p) => istat(p), ims: (p) => p.interpreted.ms, cstatus: (p) => p.compiled.status, cms: (p) => p.compiled.compileMs ?? -1, rms: (p) => p.compiled.runMs ?? -1 };
+
+  function renderRows() {
+    const ps = visible().sort((a, b) => { const x = keyOf[state.sort](a), y = keyOf[state.sort](b); return (x < y ? -1 : x > y ? 1 : 0) * state.dir; });
+    document.getElementById('count').textContent = `${ps.length} of ${DATA.programs.length} shown`;
+    document.querySelectorAll('th[data-key]').forEach((th) => th.setAttribute('aria-sort', th.dataset.key === state.sort ? (state.dir > 0 ? 'ascending' : 'descending') : 'none'));
+    const tb = document.getElementById('rows');
+    if (ps.length === 0) { tb.innerHTML = `<tr><td colspan="7" class="empty">No program matches these filters.</td></tr>`; return; }
+    tb.innerHTML = ps.map((p) => {
+      const open = state.open.has(p.name);
+      const i = p.interpreted, c = p.compiled;
+      return `<tr class="row" data-name="${esc(p.name)}" tabindex="0" aria-expanded="${open}">
+        <td><div class="name">${esc(p.name.split('/').slice(1).join('/').replace(/\.epsil$/, ''))}</div><div class="cat">${esc(p.category)}</div></td>
+        <td><span class="val" title="${esc(p.expected)}">${esc(p.expected ?? '(diagnostic expected)')}</span></td>
+        <td><span class="pill ${istat(p)}">${esc(istat(p) === 'known' ? 'known failure' : i.status)}</span><span class="val" title="${esc(i.value)}">${esc(i.value)}</span></td>
+        <td class="num">${fmt(i.ms)}</td>
+        <td><span class="pill ${c.status}">${esc(c.status === 'unbound' ? 'unbound symbol' : c.status)}</span><span class="val" title="${esc(c.value)}">${esc(c.value)}</span></td>
+        <td class="num">${fmt(c.compileMs)}</td>
+        <td class="num">${fmt(c.runMs)}</td>
+      </tr>${open ? detail(p) : ''}`;
+    }).join('');
+    tb.querySelectorAll('.row').forEach((tr) => {
+      const toggle = () => { const n = tr.dataset.name; state.open.has(n) ? state.open.delete(n) : state.open.add(n); renderRows(); };
+      tr.addEventListener('click', toggle);
+      tr.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } });
+    });
+  }
+
+  function detail(p) {
+    const i = p.interpreted, c = p.compiled;
+    const diags = (d) => d.length ? `<div class="diag">${d.map(esc).join('\n')}</div>` : '';
+    return `<tr class="detail"><td colspan="7"><div class="detail-grid">
+      <div><h3>Source</h3><pre>${esc(p.source)}</pre>${p.knownFailure ? `<p class="note">Known failure: ${esc(p.knownFailure)}</p>` : ''}</div>
+      <div>
+        <h3>Interpreted</h3>
+        <dl class="kv"><dt>Status</dt><dd><span class="pill ${istat(p)}">${esc(i.status)}</span></dd><dt>Time</dt><dd>${fmt(i.ms)} ms</dd><dt>Expected</dt><dd class="val" style="max-width:none;white-space:pre-wrap">${esc(p.expected ?? '')}</dd></dl>
+        <pre class="wrap-text">${esc(i.value)}</pre>${diags(i.diagnostics)}
+        <h3 style="margin-top:14px">Compiled (JavaScript)</h3>
+        <dl class="kv"><dt>Status</dt><dd><span class="pill ${c.status}">${esc(c.status)}</span></dd><dt>Compile</dt><dd>${fmt(c.compileMs)} ms</dd><dt>Run</dt><dd>${fmt(c.runMs)} ms</dd></dl>
+        <pre class="wrap-text">${esc(c.value)}</pre>${diags(c.diagnostics)}
+        ${c.code ? `<details><summary>Generated code</summary><pre>${esc(c.code)}</pre></details>` : ''}
+      </div></div></td></tr>`;
+  }
+
+  document.getElementById('q').addEventListener('input', (e) => { state.q = e.target.value; renderRows(); });
+  document.getElementById('istatus').addEventListener('change', (e) => { state.istatus = e.target.value; renderRows(); });
+  document.getElementById('cstatus').addEventListener('change', (e) => { state.cstatus = e.target.value; renderRows(); });
+  document.querySelectorAll('th[data-key]').forEach((th) => th.addEventListener('click', () => {
+    const k = th.dataset.key; state.dir = state.sort === k ? -state.dir : 1; state.sort = k;
+    try { localStorage.setItem('epsil-corpus-state', JSON.stringify({ sort: state.sort, dir: state.dir })); } catch {}
+    renderRows();
+  }));
+  if (DATA) render(); else document.getElementById('rows').innerHTML = '<tr><td colspan="7" class="empty">No data: run scripts/epsil-corpus-report.ts to generate this page.</td></tr>';
+</script>
