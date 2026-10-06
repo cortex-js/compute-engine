@@ -784,7 +784,8 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
           if (
             sizes.some(
               (s) =>
-                s === undefined || (typeof s === 'number' && !Number.isInteger(s))
+                s === undefined ||
+                (typeof s === 'number' && !Number.isInteger(s))
             )
           )
             return undefined;
