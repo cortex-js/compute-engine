@@ -5941,10 +5941,18 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       wikidata: 'Q429331',
       complexity: 8300,
       broadcastable: true,
-      // Optional second argument: the (integer) branch index. The branch is
-      // kept as a plain `number?` (not `integer`) in the signature — an
-      // `integer`-typed parameter has broken rule boxing in this repo — and
-      // validated in `evaluate` instead.
+      // Optional second argument: the integer branch index k, default 0.
+      // The branch comes AFTER the argument, as in mpmath, SciPy, SymPy,
+      // Julia and Fungrim. Mathematica (`ProductLog[k, z]`; `LambertW[k, z]`
+      // in Wolfram|Alpha), Maple, Sage and MATLAB put the branch FIRST, so
+      // input copied from those systems has the two swapped. The `integer`
+      // type of the branch slot finds a swap whose new branch is not an
+      // integer: `LambertW(-1, -0.1)` is a boxing error
+      // (`incompatible-type`), not an inert expression. A swap
+      // of two integers cannot be found: `LambertW(1, 2)` is W₂(1), a valid
+      // value. The parameters have names, so a call can name the branch to
+      // make the order clear: `lambertW(-0.1, branch: -1)` in Epsil, or
+      // `["LambertW", -0.1, ["NamedArgument", "'branch'", -1]]` in MathJSON.
       //
       // The argument slot is the carrier `complex | infinity`: W has a
       // value at every finite complex point, and the infinite points are
@@ -5979,15 +5987,20 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // gap as an indeterminate value.
       // No `canonical` handler, so a proven off-carrier operand is rejected
       // at boxing.
-      signature: '(complex | infinity, number?) -> number',
-      examples: ['[LambertW(1), N(LambertW(1))]'],
+      signature: '(z: complex | infinity, branch: integer?) -> number',
+      examples: [
+        '[LambertW(1), N(LambertW(1))]',
+        'N(LambertW(-0.1, branch: -1))',
+      ],
       nanBehavior: 'propagate',
       type: (ops, context) =>
         BoxedType.forResult(lambertWType(ops), context.engine._typeResolver),
       evaluate: (ops, { numericApproximation, engine, expression }) => {
         const x = ops[0];
-        // Branch index: default 0 (principal W₀). A symbolic or non-integer
-        // branch keeps the expression inert.
+        // Branch index: default 0 (principal W₀). A symbolic branch, or an
+        // integer branch too large for a machine integer, keeps the
+        // expression inert. The signature rejects a non-integer branch
+        // literal at boxing, so it does not get here.
         let branch = 0;
         if (ops[1] !== undefined) {
           const k = asSmallInteger(ops[1]);

@@ -929,13 +929,18 @@ Least Common Multiple
 
 ### lambertW
 
-MathJSON `LambertW` · `(complex | infinity, number?) -> number`
+MathJSON `LambertW` · `(z: complex | infinity, branch: integer?) -> number`
 
 Lambert W function (product logarithm)
 
 ```epsil
 [lambertW(1), N(lambertW(1))]
 // ➔ [LambertW(1),0.567143290409783872999]
+```
+
+```epsil
+N(lambertW(-0.1, branch: -1))
+// ➔ -3.57715206395729721841
 ```
 
 ### lb

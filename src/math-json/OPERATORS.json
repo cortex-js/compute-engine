@@ -586,7 +586,7 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": true,
-      "description": "Complex argument (phase angle) of a number.",
+      "description": "Complex argument (phase angle) of a number, in the engine's angular unit.",
       "examples": [
         "[Argument(1 + i), Argument(-1)]"
       ]
@@ -2467,9 +2467,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Return the collection without the first n elements.",
+      "description": "Return the indexed collection without its first `n` elements.\n\nA negative `n` counts from the end: `Drop(xs, -n)` is the collection without its last `n` elements.\n\nA count past the length is clamped: the result is empty.",
       "examples": [
-        "Drop([1, 2, 3, 4, 5], 2)"
+        "Drop([1, 2, 3, 4, 5], 2)",
+        "Drop([1, 2, 3, 4, 5], -2)"
       ]
     },
     {
@@ -4512,7 +4513,7 @@
       "name": "LambertW",
       "category": "Arithmetic",
       "arity": "optional",
-      "signature": "(complex | infinity, number?) -> number",
+      "signature": "(z: complex | infinity, branch: integer?) -> number",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -4521,7 +4522,8 @@
       "description": "Lambert W function (product logarithm)",
       "wikidata": "Q429331",
       "examples": [
-        "[LambertW(1), N(LambertW(1))]"
+        "[LambertW(1), N(LambertW(1))]",
+        "N(LambertW(-0.1, branch: -1))"
       ]
     },
     {
@@ -5347,16 +5349,17 @@
       "name": "N",
       "category": "Core",
       "arity": "optional",
-      "signature": "(any, integer?) -> unknown",
+      "signature": "(any, (integer | list<number>)?) -> unknown",
       "associative": false,
       "commutative": false,
       "idempotent": false,
       "lazy": true,
       "broadcastable": false,
-      "description": "N(expr): numerically evaluate an expression\n\nN(expr, precision): evaluate to `precision` significant digits",
+      "description": "N(expr): numerically evaluate an expression\n\nN(expr, precision): evaluate to `precision` significant digits\n\nN(expr, [precision, accuracy]): evaluate with a precision goal and an accuracy goal",
       "examples": [
         "N(Pi)",
-        "N(1/3, 4)"
+        "N(1/3, 4)",
+        "N(Exp(100), [PositiveInfinity, 20])"
       ]
     },
     {
@@ -8469,9 +8472,10 @@
       "idempotent": false,
       "lazy": false,
       "broadcastable": false,
-      "description": "Return `n` elements from a collection.",
+      "description": "Return the first `n` elements of an indexed collection.\n\nA negative `n` counts from the end: `Take(xs, -n)` is the last `n` elements.\n\nA count past the length is clamped: the result is the whole collection.",
       "examples": [
-        "Take([1, 2, 3, 4, 5], 2)"
+        "Take([1, 2, 3, 4, 5], 2)",
+        "Take([1, 2, 3, 4, 5], -2)"
       ]
     },
     {

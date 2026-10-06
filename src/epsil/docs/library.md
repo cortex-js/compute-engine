@@ -487,7 +487,7 @@ The [Arithmetic reference](/epsil/reference/arithmetic/) has the full descriptio
 | `isOdd` | `IsOdd` | `(number) -> boolean` | `IsOdd(n)` returns `True` if `n` is an odd number |
 | `isPrime` | `IsPrime` | `(number) -> boolean` | `IsPrime(n)` returns `True` if `n` is a prime number |
 | `lcm` | `LCM` | `(any*) -> number` | Least Common Multiple |
-| `lambertW` | `LambertW` | `(complex \| infinity, number?) -> number` | Lambert W function (product logarithm) |
+| `lambertW` | `LambertW` | `(z: complex \| infinity, branch: integer?) -> number` | Lambert W function (product logarithm) |
 | `lb` | `Lb` | `(number) -> number` | Base-2 Logarithm |
 | `lerchPhi` | `LerchPhi` | `(complex, complex, complex) -> number` | Lerch transcendent Φ(z,s,a) = Σ_&#123;k=0&#125;^∞ zᵏ(k+a)^&#123;-s&#125; |
 | `lg` | `Lg` | `(number) -> number` | Base-10 Logarithm |

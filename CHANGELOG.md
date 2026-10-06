@@ -67,6 +67,27 @@
   does not change: it still leaves `x^a · x^b` as it is. A literal zero base is
   not affected: `0^1 · 0^(−1)` is still `Indeterminate`.
 
+- **The branch of `LambertW` must be an integer, and it can be named**
+  ([#418](https://github.com/cortex-js/compute-engine/issues/418), reported by
+  [enumeratio](https://github.com/enumeratio)). The branch is the second
+  argument, `LambertW(z, k)`, as in mpmath, SciPy, SymPy and Julia. Mathematica
+  (`ProductLog[k, z]`; `LambertW[k, z]` in Wolfram|Alpha), Maple, Sage and
+  MATLAB put the branch first, so input
+  copied from them has the two arguments swapped. The signature is now
+  `(z: complex | infinity, branch: integer?) -> number` (it was
+  `(complex | infinity, number?) -> number`):
+  - A branch that is not an integer is a type error. `LambertW(-1, -0.1)`
+    (the Wolfram order) was left unevaluated; it now has an
+    `incompatible-type` error on `-0.1`. A swap of two integers cannot be
+    found: `LambertW(1, 2)` is W₂(1) and `LambertW(2, 1)` is W₁(2).
+  - The branch can be given by name, in any position:
+    `lambertW(-0.1, branch: -1)` and `lambertW(branch: -1, z: -0.1)` in Epsil,
+    or `["LambertW", -0.1, ["NamedArgument", "'branch'", -1]]` in MathJSON.
+    All give W₋₁(−0.1) ≈ −3.5772.
+
+  The `LambertW` reference documentation now gives the argument order, the
+  real domain of each real branch, and the named form.
+
 ### Issues Resolved
 
 - **`Take` and `Drop` with a symbolic count no longer give a wrong answer to

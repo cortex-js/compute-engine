@@ -1,5 +1,7 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { isNumber } from '../../src/compute-engine/boxed-expression/type-guards';
+import { executeEpsil } from '../../src/epsil/execute-epsil';
+import type { MathJsonExpression } from '../../src/math-json/types';
 
 // Complex values of `LambertW` (every integer branch), `Sinc`, `FresnelS` and
 // `FresnelC`. Every reference value comes from mpmath (`lambertw(z, k)`,
@@ -364,8 +366,20 @@ describe('LAMBERTW OF A COMPLEX ARGUMENT, EVERY BRANCH', () => {
     ).toBeLessThan(1e-15);
   });
 
-  test('a non-integer branch stays unevaluated', () => {
-    expect(ce.box(['LambertW', 1, 0.5]).N().operator).toBe('LambertW');
+  test('a non-integer branch is a type error, a symbolic branch stays unevaluated', () => {
+    expect(ce.box(['LambertW', 1, 0.5]).toString()).toBe(
+      'LambertW(1, Error(ErrorCode("incompatible-type", "integer", "0.5"), 0.5))'
+    );
+    const symbolic = ce.box(['LambertW', 1.5, 'k']);
+    expect(symbolic.isValid).toBe(true);
+    expect(symbolic.N().toString()).toBe('LambertW(1.5, k)');
+    // A symbol declared `real` may hold an integer, so the `integer` slot
+    // accepts it, and the expression stays unevaluated.
+    const engine = new ComputeEngine();
+    engine.declare('r', 'real');
+    const real = engine.box(['LambertW', 1.5, 'r']);
+    expect(real.isValid).toBe(true);
+    expect(real.N().toString()).toBe('LambertW(1.5, r)');
   });
 
   test('W_k(0) = −∞ on a branch k ≠ 0, as Ln(0)', () => {
@@ -386,6 +400,62 @@ describe('LAMBERTW OF A COMPLEX ARGUMENT, EVERY BRANCH', () => {
     const b = ce.box(['LambertW', 'NegativeInfinity', -1]).N();
     expect(isNumber(b) && b.re).toBe(Infinity);
     expect(isNumber(b) && b.im).toBeCloseTo(-Math.PI, 15);
+  });
+});
+
+// The branch is the SECOND argument (mpmath, SciPy, SymPy, Julia, Fungrim).
+// Wolfram, Maple, Sage and MATLAB put it first, so input copied from them has
+// the two arguments swapped. The integer type of the branch slot reports a
+// swap whose new branch is not an integer, and the named parameter `branch`
+// lets a call state the order. GitHub issue #418.
+describe('LAMBERTW ARGUMENT ORDER AND THE NAMED BRANCH', () => {
+  // mpmath: lambertw(-0.1, -1)
+  const wm1 = -3.577152063957297;
+
+  test('the branch is the second argument', () => {
+    expect(ce.box(['LambertW', -0.1, -1]).N().re).toBeCloseTo(wm1, 14);
+  });
+
+  test('the branch first, with a non-integer argument, is a type error', () => {
+    const swapped = ce.box(['LambertW', -1, -0.1]);
+    expect(swapped.isValid).toBe(false);
+    expect(swapped.toString()).toBe(
+      'LambertW(-1, Error(ErrorCode("incompatible-type", "integer", "-0.1"), -0.1))'
+    );
+  });
+
+  test('a named branch, in either position', () => {
+    const named: MathJsonExpression = ['NamedArgument', "'branch'", -1];
+    const z: MathJsonExpression = ['NamedArgument', "'z'", -0.1];
+    const cases: MathJsonExpression[] = [
+      ['LambertW', -0.1, named],
+      ['LambertW', named, z],
+      ['LambertW', z, named],
+    ];
+    for (const expr of cases) {
+      const v = ce.box(expr);
+      expect(v.toString()).toBe('LambertW(-0.1, -1)');
+      expect(v.N().re).toBeCloseTo(wm1, 14);
+    }
+  });
+
+  test('an unknown argument name is reported', () => {
+    expect(
+      ce.box(['LambertW', -0.1, ['NamedArgument', "'k'", -1]]).toString()
+    ).toBe(
+      'LambertW(-0.1, Error(ErrorCode("argument-name-unknown", "k", "declared parameter names: `z`, `branch`")))'
+    );
+  });
+
+  test('a named branch in Epsil', () => {
+    for (const source of [
+      'N(lambertW(-0.1, branch: -1))',
+      'N(lambertW(branch: -1, z: -0.1))',
+    ]) {
+      const result = executeEpsil(new ComputeEngine(), source);
+      expect(result.diagnostics).toEqual([]);
+      expect(isNumber(result.value) && result.value.re).toBeCloseTo(wm1, 14);
+    }
   });
 });
 
