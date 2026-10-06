@@ -3,6 +3,24 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 
 /**
+ * The Python source of `np.linalg.norm(_a, ord)` that the target emits. For
+ * the default order, the order 2, `'fro'` and a run-time order `_p`, the
+ * array is multiplied by `2⁶⁰⁰` or `2⁻⁶⁰⁰` when its largest absolute entry
+ * `_m` is below `2⁻⁵⁰⁰` or above `2⁵⁰⁰`, and the norm by the inverse factor,
+ * so that the squares of the entries do not underflow or overflow.
+ */
+function normCall(ord?: string): string {
+  const o = ord === undefined ? '' : `, ${ord}`;
+  if (!(ord === undefined || ord === '2' || ord === "'fro'" || ord === '_p'))
+    return `np.linalg.norm(_a${o})`;
+  return (
+    `(lambda _m: np.linalg.norm(_a * 2.0**600${o}) * 2.0**-600 if 0 < _m < 2.0**-500 ` +
+    `else np.linalg.norm(_a * 2.0**-600${o}) * 2.0**600 if _m > 2.0**500 ` +
+    `else np.linalg.norm(_a${o}))(np.max(np.abs(_a), initial=0))`
+  );
+}
+
+/**
  * The Python source that the target emits for `np.linalg.norm(x, ord)` over
  * an operand whose entries can be NaN or infinite. An infinite entry makes
  * the norm `+∞`, a NaN entry included; otherwise a NaN entry makes it NaN.
@@ -10,7 +28,7 @@ import { PythonTarget } from '../../src/compute-engine/compilation/python-target
  * of a matrix with a NaN entry raises `LinAlgError`).
  */
 function gn(x: string, ord?: string): string {
-  const call = `np.linalg.norm(_a${ord === undefined ? '' : `, ${ord}`})`;
+  const call = normCall(ord);
   return (
     `(lambda _a: float('inf') if _a.dtype.kind in 'fc' and np.isinf(_a).any() else ` +
     `(float('nan') if _a.dtype.kind in 'fc' and np.isnan(_a).any() else ${call}))` +

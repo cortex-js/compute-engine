@@ -1,4 +1,4 @@
-import { Complex } from 'complex-esm';
+import { Complex } from 'complex.js';
 import { bernoulliRational } from './bernoulli.js';
 import { cosSinPi, gammaln, logSinPi } from './numeric-complex.js';
 

@@ -338,7 +338,7 @@ describe('the entry point has no engine in it', () => {
       /^src\/compute-engine\/numerics\/[\w-]+\.ts$/,
       /^src\/big-decimal\/[\w-]+\.ts$/,
       /^src\/compute-engine\/compilation\/(javascript-runtime|jet-helpers)\.ts$/,
-      /node_modules\/(complex-esm|@arnog\/colors)\//,
+      /node_modules\/(complex\.js|@arnog\/colors)\//,
     ];
     const inputs = Object.keys(metafile.inputs);
     expect(inputs).toContain(

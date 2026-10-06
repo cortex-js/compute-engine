@@ -1,4 +1,4 @@
-import { Complex } from 'complex-esm';
+import { Complex } from 'complex.js';
 import { BigDecimal } from '../../big-decimal/index.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import {

@@ -1,4 +1,4 @@
-import { Complex } from 'complex-esm';
+import { Complex } from 'complex.js';
 import {
   chop,
   factorial,
@@ -152,7 +152,11 @@ import {
   MAX_COLORMAP_SAMPLES,
   MAX_MATRIX_POWER_EXPONENT,
 } from '../numerics/value-scaled-caps.js';
-import { spectralNorm } from '../numerics/linear-algebra.js';
+import {
+  pNormIsSafe,
+  scaledPNorm,
+  spectralNorm,
+} from '../numerics/linear-algebra.js';
 import {
   checkDeadline,
   DEFAULT_ITERATION_LIMIT,
@@ -1202,6 +1206,8 @@ const colorHelpers = {
     // interpreter (`Distance((1, Missing), (0, 0))` is `NaN`).
     if (a.some((x) => x == null) || b.some((x) => x == null)) return NaN;
     let sumSq = 0;
+    // The largest magnitude of a difference.
+    let m = 0;
     for (let i = 0; i < a.length; i++) {
       if (typeof a[i] !== 'number' || typeof b[i] !== 'number')
         throw new Error(
@@ -1220,6 +1226,20 @@ const colorHelpers = {
       // test for the same reason.
       if (d === Infinity || d === -Infinity) return Infinity;
       sumSq += d * d;
+      if (Math.abs(d) > m) m = Math.abs(d);
+    }
+    // When the largest difference `m` is so small or so large that its
+    // square is below the normal doubles or overflows, the sum is computed
+    // again with the differences scaled by a power of 2 (`scaledPNorm()`),
+    // as `_SYS.norm` does: the distance from `(3e200, 4e200)` to the origin
+    // was `+∞`. For the other points, the plain sum is the result,
+    // unchanged.
+    if (!pNormIsSafe(m, 2)) {
+      const scaled = scaledPNorm(
+        a.map((x, i) => (x as number) - (b[i] as number)),
+        2
+      );
+      if (scaled !== undefined) return scaled;
     }
     return Math.sqrt(sumSq);
   },
@@ -1264,6 +1284,8 @@ const colorHelpers = {
     // interpreter (`Distance((1, Missing), (0, 0))` is `NaN`).
     if (a.some((x) => x == null) || b.some((x) => x == null)) return NaN;
     let sumSq = 0;
+    // The largest magnitude of a part of a difference.
+    let m = 0;
     for (let i = 0; i < a.length; i++) {
       if (
         (typeof a[i] !== 'number' && !isComplexObject(a[i])) ||
@@ -1284,6 +1306,21 @@ const colorHelpers = {
       )
         return Infinity;
       sumSq += dr * dr + di * di;
+      m = Math.max(m, Math.abs(dr), Math.abs(di));
+    }
+    // Scaled when a square would overflow or be below the normal doubles,
+    // as in `pointDistance`. The real and imaginary parts of each
+    // difference enter as separate values: the sum of their squares is the
+    // same.
+    if (!pNormIsSafe(m, 2)) {
+      const parts: number[] = [];
+      for (let i = 0; i < a.length; i++) {
+        const p = complexEntry(a[i]);
+        const q = complexEntry(b[i]);
+        parts.push(p.re - q.re, p.im - q.im);
+      }
+      const scaled = scaledPNorm(parts, 2);
+      if (scaled !== undefined) return scaled;
     }
     return Math.sqrt(sumSq);
   },
@@ -3944,13 +3981,36 @@ export const SYS_HELPERS = {
       for (const v of flat) m = Math.max(m, Math.abs(v));
       return m;
     }
+    // The largest magnitude `m` is found in the same loop as the sum. When a
+    // term `m²` (or `m^p`) would overflow or be below the normal doubles,
+    // the sum is computed again with the magnitudes scaled by a power of 2
+    // (`scaledPNorm()`): `norm([3e-200, 4e-200])` was 0 and
+    // `norm([3e200, 4e200])` was `+∞`. For the other vectors, the plain sum
+    // below is the result, unchanged. `Math.hypot` would also be correct,
+    // but it rounds differently and costs more.
     if (p === undefined || p === 2) {
       let s = 0;
-      for (const v of flat) s += v * v;
+      let m = 0;
+      for (const v of flat) {
+        s += v * v;
+        if (v > m) m = v;
+      }
+      if (!pNormIsSafe(m, 2)) {
+        const scaled = scaledPNorm(flat, 2);
+        if (scaled !== undefined) return scaled;
+      }
       return Math.sqrt(s);
     }
     let s = 0;
-    for (const v of flat) s += Math.pow(Math.abs(v), p);
+    let m = 0;
+    for (const v of flat) {
+      s += Math.pow(Math.abs(v), p);
+      if (v > m) m = v;
+    }
+    if (!pNormIsSafe(m, p)) {
+      const scaled = scaledPNorm(flat, p);
+      if (scaled !== undefined) return scaled;
+    }
     return Math.pow(s, 1 / p);
   },
   // Transpose of a 2D matrix; a vector (or scalar) is returned unchanged,

@@ -1,4 +1,4 @@
-import { Complex } from 'complex-esm';
+import { Complex } from 'complex.js';
 import type { BigNum } from '../numerics/types.js';
 import type { MathJsonExpression } from '../../math-json/types.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
@@ -3690,7 +3690,7 @@ function evaluateHurwitzZeta(
     return boxComplexResult(engine, z, real);
   }
 
-  // The kernel reads the doubles `re`/`im`: the complex-esm kernels are
+  // The kernel reads the doubles `re`/`im`: the complex.js kernels are
   // doubles by nature (docs/plans/2026-09-27-big-decimal-imaginary-part.md §5).
   // When the kernel declines (it cannot reach 1e−12 relative, or it would
   // take too long), the expression stays symbolic rather than showing a
@@ -3803,7 +3803,7 @@ function evaluateGeneralizedZeta(
     return boxComplexResult(engine, z, real);
   }
 
-  // The kernel reads the doubles `re`/`im`: the complex-esm kernels are
+  // The kernel reads the doubles `re`/`im`: the complex.js kernels are
   // doubles by nature (docs/plans/2026-09-27-big-decimal-imaginary-part.md §5).
   // A kernel decline leaves the expression symbolic, as in
   // `evaluateHurwitzZeta`.
@@ -5190,7 +5190,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (infinite !== undefined) return infinite;
 
         // Is the argument a complex number? `isComplex` decides, but the
-        // kernel reads the double `im`: the complex-esm kernels are doubles by
+        // kernel reads the double `im`: the complex.js kernels are doubles by
         // nature (docs/plans/2026-09-27-big-decimal-imaginary-part.md §5).
         // An exact complex argument stays symbolic under `evaluate()`, as
         // for `Gamma`: the value is a float.
@@ -5263,7 +5263,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (infinite !== undefined) return infinite;
 
         // Is the argument a complex number? `isComplex` decides, but the
-        // kernel reads the double `im`: the complex-esm kernels are doubles by
+        // kernel reads the double `im`: the complex.js kernels are doubles by
         // nature (docs/plans/2026-09-27-big-decimal-imaginary-part.md §5).
         // An exact complex argument stays symbolic under `evaluate()`, as
         // for `Gamma`: the value is a float.

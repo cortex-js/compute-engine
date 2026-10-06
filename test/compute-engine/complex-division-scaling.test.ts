@@ -5,7 +5,7 @@
  * The textbook formula `a·conj(b) / |b|²` squares the parts of the divisor:
  * `1 / (1e308 + 1e308i)` gave `0` (the square overflows) and
  * `1 / (1e-200 + 1e-200i)` gave `~oo` (the square underflows). The unscaled
- * Smith formula of `complex-esm` overflows for
+ * Smith formula of `complex.js` overflows for
  * `(1e308 + 1e308i) / (1 + i)`. The interpreter now uses
  * `scaledComplexDivide()` (`src/compute-engine/numerics/numeric-complex.ts`),
  * the same algorithm as the compiled JavaScript target.
@@ -16,7 +16,7 @@
  * - `(s + s·i) / (1 + i) = s`;
  * - the inverse of `[[a, b], [0, 1]]` is `[[1/a, −b/a], [0, 1]]`.
  */
-import { Complex } from 'complex-esm';
+import { Complex } from 'complex.js';
 import { ComputeEngine } from '../../src/compute-engine';
 import type { Expression } from '../../src/compute-engine/global-types';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';

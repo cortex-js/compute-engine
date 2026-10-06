@@ -1,4 +1,4 @@
-import { Complex } from 'complex-esm';
+import { Complex } from 'complex.js';
 import type { IComputeEngine as ComputeEngine } from '../global-types.js';
 import type { BigNum } from './types.js';
 import { BigDecimal } from '../../big-decimal/index.js';

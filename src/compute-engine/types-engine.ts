@@ -1,4 +1,4 @@
-import type { Complex } from 'complex-esm';
+import type { Complex } from 'complex.js';
 import type { OneOf } from '../common/one-of.js';
 import type { MathJsonSymbol, MathJsonNumberObject } from '../math-json.js';
 import type {

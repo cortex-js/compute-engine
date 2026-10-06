@@ -1,4 +1,4 @@
-import { Complex } from 'complex-esm';
+import { Complex } from 'complex.js';
 import { BigDecimal } from '../../big-decimal/index.js';
 
 import type { Rational } from '../numerics/types.js';

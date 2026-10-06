@@ -1,5 +1,4 @@
-import { Complex } from 'complex-esm';
-import './complex-esm-augment.js'; // adds the 1-arg `Complex.equals` overload
+import { Complex } from 'complex.js';
 import {
   bernoulliRational,
   hurwitzZetaNegativeIntegerAt,
@@ -14,6 +13,15 @@ import {
   twoProd,
   twoSum,
 } from './double-double.js';
+import { installComplexScaling } from './complex-scaling.js';
+
+// Make the `complex.js` methods that square the parts of a value (`abs()`,
+// `log()`, `inverse()`, ...) correct for a very small or very large value.
+// Every bundle that contains `complex.js` (the engine, the `core`,
+// `numerics`, `interval` and `compile` entry points, and the runtime of
+// compiled JavaScript) also contains this module, so the call runs when it
+// loads.
+installComplexScaling();
 
 // Lanczos approximation coefficients (g = 7, n = 9), accurate to ~15 digits
 // for the principal branch. See Numerical Recipes / mathjs gamma().
@@ -87,7 +95,7 @@ function pairExponent(x: number, y: number): number {
  * A multiplication by a power of two is exact in the normal range, so when
  * Smith's formula on the unscaled operands keeps all its values in the
  * normal range, the result is the same, bit for bit, as the unscaled Smith
- * formula (the one `Complex.div()` of `complex-esm` uses). A part of the
+ * formula (the one `Complex.div()` of `complex.js` uses). A part of the
  * quotient that is exactly zero stays zero, also when the other part
  * overflows.
  *
@@ -227,7 +235,7 @@ function productIsAccurate(x: number, y: number): boolean {
 }
 
 /**
- * `a / b` for `complex-esm` values, a drop-in replacement for `a.div(b)`
+ * `a / b` for `complex.js` values, a drop-in replacement for `a.div(b)`
  * that does not overflow or underflow when the quotient is in the range of a
  * double. An ordinary quotient is `a.div(z)` itself, and only an out-of-range
  * one pays for the scaling (see `scaledComplexDivide()`).
@@ -264,13 +272,15 @@ export function complexDivide(a: Complex, b: Complex | number): Complex {
 }
 
 /**
- * `1 / z` for a `complex-esm` value, a drop-in replacement for
- * `z.inverse()`. `z.inverse()` computes `conj(z) / |z|²`, whose `|z|²`
- * overflows for `z = 1e308 + 1e308·i` (the result is `0` instead of
- * `5e-309 − 5e-309·i`) and underflows for `z = 1e-200 + 1e-200·i` (the
- * result is infinite instead of `5e199 − 5e199·i`). This function uses
- * `complexQuotient()`. A zero, infinite or NaN value is left to
- * `z.inverse()`, so its result does not change.
+ * `1 / z` for a `complex.js` value, a drop-in replacement for
+ * `z.inverse()`, computed with `complexQuotient()`. It does not overflow or
+ * underflow when the result is in the range of a double. (The unpatched
+ * `z.inverse()` of `complex.js` computes `conj(z) / |z|²`, whose `|z|²`
+ * overflows for `z = 1e308 + 1e308·i` and underflows for
+ * `z = 1e-200 + 1e-200·i`. `installComplexScaling()` in
+ * `numerics/complex-scaling.ts` corrects `z.inverse()` for these values
+ * too.) A zero, infinite or NaN value is left to `z.inverse()`, so its
+ * result does not change.
  */
 export function complexInverse(z: Complex): Complex {
   if (z.isZero() || !Number.isFinite(z.re) || !Number.isFinite(z.im))
@@ -282,7 +292,7 @@ export function complexInverse(z: Complex): Complex {
 //
 // Inverse trigonometric and inverse hyperbolic functions of a complex value
 //
-// The `complex-esm` methods (`asin`, `acos`, `atan`, `asinh`, `acosh`,
+// The `complex.js` methods (`asin`, `acos`, `atan`, `asinh`, `acosh`,
 // `atanh`) use the textbook logarithm formulas, such as
 // `asin z = −i·ln(iz + √(1 − z²))`. For a large `|z|` the two terms in the
 // logarithm nearly cancel on one side of the plane (`arcsin(−10⁶)` lost six
@@ -314,7 +324,7 @@ export function complexInverse(z: Complex): Complex {
 //   `arctan(−2i)` is `−π/2 − 0.549i`), so `arctan(−z) = −arctan(z)` on the
 //   cut. This is the side that `arctan z = −i·artanh(iz)` gives with the
 //   side of `artanh` above.
-// A value with an infinite or NaN part uses the `complex-esm` method.
+// A value with an infinite or NaN part uses the `complex.js` method.
 //
 
 /** True if `x` is `−0` or negative. */
@@ -452,10 +462,12 @@ function imaginaryAxisZero(y: number): number {
  * The principal square root of `z`. A zero imaginary part is read as `+0`,
  * so a negative real `z` has a root on the positive imaginary axis
  * (`√−4 = 2i`), as in the interpreter, which does not keep the sign of a
- * zero. The `complex-esm` method loses a small `|z|`: `√(10⁻³⁰⁰·i)` was `0`
- * and `√(10⁻³⁰⁰ + 10⁻³⁰⁰·i)` was `7.07·10⁻¹⁵¹·(1 + i)` instead of
- * `1.099·10⁻¹⁵⁰ + 4.55·10⁻¹⁵¹·i`. A value with an infinite or NaN part
- * uses the `complex-esm` method.
+ * zero. The root is computed with `sqrtParts()`, which scales a very small
+ * or very large value. (The unpatched `complex.js` method lost a small
+ * `|z|`: `√(10⁻³⁰⁰·i)` was `0` and `√(10⁻³⁰⁰ + 10⁻³⁰⁰·i)` was
+ * `7.07·10⁻¹⁵¹·(1 + i)` instead of `1.099·10⁻¹⁵⁰ + 4.55·10⁻¹⁵¹·i`.
+ * `installComplexScaling()` corrects `z.sqrt()` for these values too.) A
+ * value with an infinite or NaN part uses the `complex.js` method.
  */
 export function complexSqrt(z: Complex): Complex {
   if (!isFiniteComplex(z.re, z.im)) return z.sqrt();
@@ -467,7 +479,7 @@ export function complexSqrt(z: Complex): Complex {
  * The principal value of `z^w` for a nonzero `z`, with an exact `0` for a
  * part whose value is `0`, and no part removed.
  *
- * The `complex-esm` power computes every case in polar form,
+ * The `complex.js` power computes every case in polar form,
  * `|z|^w·(cos θ + i·sin θ)`, which leaves roundoff in a part whose value is
  * `0` (`(−2)²` gave `4 − 9.8·10⁻¹⁶i`, `(1 + i)²` gave `1.2·10⁻¹⁶ + 2i`,
  * `(−1)^0.5` gave `6.1·10⁻¹⁷ + i`) and loses digits for an integer exponent
@@ -486,7 +498,7 @@ export function complexSqrt(z: Complex): Complex {
  *   `|z|`, so a small part that is the value is kept
  *   (`2^(10⁻¹⁰⁰·i)` is `1 + 6.93·10⁻¹⁰¹i`).
  * A zero base, or a value with an infinite or NaN part, uses the
- * `complex-esm` method.
+ * `complex.js` method.
  */
 export function complexPow(z: Complex, w: Complex): Complex {
   const x = z.re;
@@ -4490,10 +4502,11 @@ export function carlsonRJComplex(
     .sub(E4.mul(3276))
     .add(E5.mul(2772))
     .div(24024);
-  // Divide by A and then by √A rather than by `A.pow(1.5)`: complex-esm's
-  // `pow` goes through `log`/`exp` and returns NaN once |A| is above about
-  // 1e154, and the product A·√A overflows to an infinite part above about
-  // 1e205, which the complex division turns into NaN. The two divisions
+  // Divide by A and then by √A rather than by `A^1.5` (`A.pow(1.5)` or the
+  // product A·√A): `A^1.5` overflows to an infinite part above about
+  // |A| = 1e205, which the complex division turns into NaN. (The unpatched
+  // `pow` of `complex.js` also returned NaN above about |A| = 1e154;
+  // `installComplexScaling()` corrects that.) The two divisions
   // stay finite over the whole double range (E(m) at |m| = 1e300 needs
   // this; the term only underflows to 0 there, where it is negligible).
   return series.mul(pow4).div(A).div(A.sqrt()).add(S.mul(6));

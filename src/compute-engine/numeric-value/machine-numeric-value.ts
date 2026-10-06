@@ -14,7 +14,7 @@ import {
   isOutsideNormalDoubleRange,
   machineNthRoot,
 } from '../numerics/numeric.js';
-import { Complex } from 'complex-esm';
+import { Complex } from 'complex.js';
 import { complexPow, complexQuotient } from '../numerics/numeric-complex.js';
 
 export class MachineNumericValue extends NumericValue {
@@ -670,8 +670,21 @@ export class MachineNumericValue extends NumericValue {
     if (!this.isComplex)
       return this.decimal > 0 ? this : this.clone(-this.decimal);
 
-    // abs(z) = √(z.real² + z.imaginary²)
-    return this.clone(Math.sqrt(this.decimal ** 2 + this.im ** 2));
+    // abs(z) = √(z.real² + z.imaginary²). A square is not a normal double
+    // when the largest part `m` is below about 2⁻⁵¹¹ (it underflows, and
+    // `|3e-200 + 4e-200i|` would be 0) or above about 2⁵¹¹ (it overflows,
+    // and `|1e200 + 1e200i|` would be ∞). For a finite `m` outside
+    // [2⁻⁵⁰⁰, 2⁵⁰⁰], the parts are first multiplied by a power of 2 `s`,
+    // which is exact, and the result is divided by `s`. In that range, the
+    // formula is used as it is, so the result does not change there.
+    const re = this.decimal;
+    const im = this.im;
+    const m = Math.max(Math.abs(re), Math.abs(im));
+    if (Number.isFinite(m) && (m < 2 ** -500 || m > 2 ** 500)) {
+      const s = m < 2 ** -500 ? 2 ** 600 : 2 ** -600;
+      return this.clone(Math.sqrt((re * s) ** 2 + (im * s) ** 2) / s);
+    }
+    return this.clone(Math.sqrt(re ** 2 + im ** 2));
   }
 
   ln(base?: number): NumericValue {

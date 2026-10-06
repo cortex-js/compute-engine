@@ -1,5 +1,4 @@
-import { Complex } from 'complex-esm';
-import '../numerics/complex-esm-augment.js'; // adds the 1-arg `Complex.equals` overload
+import { Complex } from 'complex.js';
 import { complexDivide } from '../numerics/numeric-complex.js';
 import {
   Expression,

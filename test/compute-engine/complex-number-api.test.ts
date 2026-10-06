@@ -98,7 +98,7 @@ describe('Boundaries that build a complex value keep its big decimals', () => {
 
 describe('Elementary functions of a complex argument above machine precision', () => {
   // The big-decimal methods compute both parts at the working precision; a
-  // `complex-esm` kernel would give 16 digits. The reference values are
+  // `complex.js` kernel would give 16 digits. The reference values are
   // computed with the real big-decimal kernels of the same engine.
   const ce50 = new ComputeEngine();
   ce50.precision = 50;

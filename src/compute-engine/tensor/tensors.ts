@@ -1,4 +1,4 @@
-import { Complex } from 'complex-esm';
+import { Complex } from 'complex.js';
 import { getSupertype, makeTensorField } from './tensor-fields.js';
 import { isNumber } from '../boxed-expression/type-guards.js';
 import type {

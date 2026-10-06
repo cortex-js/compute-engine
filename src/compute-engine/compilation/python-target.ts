@@ -1440,6 +1440,23 @@ function pyFiniteEntries(expr: Expression): boolean {
 }
 
 /**
+ * What the entries of a `Norm` operand are typed as: `'integer'` when every
+ * entry, through every level of nesting, is typed as an integer,
+ * `'finite'` when every entry is typed as a finite number (see
+ * `pyFiniteEntries`), and `'any'` otherwise.
+ */
+type PyNormEntries = 'integer' | 'finite' | 'any';
+
+function pyNormEntries(expr: Expression): PyNormEntries {
+  let t: Type | undefined = expr.type.type;
+  for (let depth = 0; t !== undefined && depth < 16; depth++) {
+    if (isSubtype(t, 'integer')) return 'integer';
+    t = collectionElementType(t);
+  }
+  return pyFiniteEntries(expr) ? 'finite' : 'any';
+}
+
+/**
  * The Python source of `np.linalg.norm(x, ord)` (no `ord` argument when `ord`
  * is `undefined`) with the interpreter's rule for non-finite entries. An
  * infinite entry (a complex entry with an infinite part included) makes every
@@ -1457,14 +1474,48 @@ function pyFiniteEntries(expr: Expression): boolean {
  * Call it only after the order is accepted: the guard answers `+∞` for any
  * order.
  *
- * When `finite` is true (the operand's entries are typed as finite numbers,
- * see `pyFiniteEntries`), no entry can be NaN or infinite and the source is
- * the plain `np.linalg.norm` call.
+ * When `entries` is not `'any'` (the operand's entries are typed as finite
+ * numbers, see `pyNormEntries`), no entry can be NaN or infinite and the
+ * guard is left out.
+ *
+ * The default order, the order 2, `'fro'` and a run-time order `_p` compute
+ * the squares (or other powers) of the entries: numpy computes
+ * `√(Σ|xᵢ|²)` with no scaling, so `np.linalg.norm([3e200, 4e200])` is `inf`
+ * and `np.linalg.norm([3e-200, 4e-200])` is `0`, where the interpreter and
+ * the JavaScript target answer `5e200` and `5e-200`. For these orders, when
+ * the largest absolute entry `_m` is below `2⁻⁵⁰⁰` or above `2⁵⁰⁰`, the
+ * emitted code computes the norm of the array multiplied by `2⁶⁰⁰` or
+ * `2⁻⁶⁰⁰`, and multiplies the result by the inverse factor. Each norm is
+ * absolutely homogeneous (`‖s·x‖ = |s|·‖x‖`), and a multiplication by a
+ * power of 2 is exact for a normal result, so this is the norm of `x` (an
+ * entry that the factor `2⁻⁶⁰⁰` makes subnormal or 0 is less than
+ * `_m·2⁻⁹²²`, which does not change the norm). The squares of the largest
+ * scaled entries are normal doubles. When `_m` is in
+ * `[2⁻⁵⁰⁰, 2⁵⁰⁰]`, the source is the unscaled call, as before. An operand
+ * whose entries are typed as integers is not scaled: its entries cannot be
+ * small, and numpy computes the norm of an integer array in floating point,
+ * where the square of an `int64` value cannot overflow. The orders 1 and
+ * `np.inf` form no power. A literal order other than 1, 2 and `np.inf` (a
+ * p-norm) is not scaled: its powers `|xᵢ|ᵖ` can also overflow or underflow
+ * for entries in `[2⁻⁵⁰⁰, 2⁵⁰⁰]` (for example `|xᵢ|³` for `|xᵢ|` above
+ * about `5.6·10¹⁰²`), so this scaling does not correct it.
  */
-function pyNorm(x: string, ord: string | undefined, finite: boolean): string {
-  if (finite)
-    return `np.linalg.norm(${x}${ord === undefined ? '' : `, ${ord}`})`;
-  const call = `np.linalg.norm(_a${ord === undefined ? '' : `, ${ord}`})`;
+function pyNorm(
+  x: string,
+  ord: string | undefined,
+  entries: PyNormEntries
+): string {
+  const o = ord === undefined ? '' : `, ${ord}`;
+  const scaled =
+    entries !== 'integer' &&
+    (ord === undefined || ord === '2' || ord === "'fro'" || ord === '_p');
+  const call = scaled
+    ? `(lambda _m: np.linalg.norm(_a * 2.0**600${o}) * 2.0**-600 if 0 < _m < 2.0**-500 ` +
+      `else np.linalg.norm(_a * 2.0**-600${o}) * 2.0**600 if _m > 2.0**500 ` +
+      `else np.linalg.norm(_a${o}))(np.max(np.abs(_a), initial=0))`
+    : `np.linalg.norm(${entries === 'any' ? '_a' : x}${o})`;
+  if (entries !== 'any')
+    return scaled ? `(lambda _a: ${call})(np.asarray(${x}))` : call;
   const float = `_a.dtype.kind in 'fc'`;
   return (
     `(lambda _a: float('inf') if ${float} and np.isinf(_a).any() else ` +
@@ -1504,13 +1555,13 @@ function pythonNormRankTest(
   x: string,
   p: string,
   orders: 'vector' | 'matrix' | 'two',
-  finite: boolean
+  entries: PyNormEntries
 ): string {
   const nan = "float('nan')";
   const body =
     orders === 'vector'
-      ? `${pyNorm('_x', p, finite)} if np.ndim(_x) == 1 else ${nan}`
-      : `${pyNorm('_x', p, finite)} if np.ndim(_x) <= 2 else ${orders === 'two' ? pyNorm('_x', undefined, finite) : nan}`;
+      ? `${pyNorm('_x', p, entries)} if np.ndim(_x) == 1 else ${nan}`
+      : `${pyNorm('_x', p, entries)} if np.ndim(_x) <= 2 else ${orders === 'two' ? pyNorm('_x', undefined, entries) : nan}`;
   return `(lambda _x: np.abs(_x) if np.ndim(_x) == 0 else ${body})(${x})`;
 }
 
@@ -1538,7 +1589,7 @@ function pythonNormRuntimeRankTest(
   x: string,
   p: string,
   pType: Type,
-  finite: boolean
+  entries: PyNormEntries
 ): string {
   const nan = "float('nan')";
   return pythonNormRuntimeOrder(
@@ -1547,9 +1598,9 @@ function pythonNormRuntimeRankTest(
     pType,
     (fro) =>
       `(np.abs(_x) if _p > 0 else ${nan}) if np.ndim(_x) == 0 else ` +
-      `(${pyNorm('_x', '_p', finite)} if _p > 0 else ${nan}) if np.ndim(_x) == 1 else ` +
-      `(${pythonMatrixRuntimeNorm(fro, finite)}) if np.ndim(_x) == 2 else ` +
-      `(${pyNorm('_x', undefined, finite)} if _p == 2 else ${nan})`
+      `(${pyNorm('_x', '_p', entries)} if _p > 0 else ${nan}) if np.ndim(_x) == 1 else ` +
+      `(${pythonMatrixRuntimeNorm(fro, entries)}) if np.ndim(_x) == 2 else ` +
+      `(${pyNorm('_x', undefined, entries)} if _p == 2 else ${nan})`
   );
 }
 
@@ -1563,13 +1614,13 @@ function pythonNormRuntimeRankTest(
  */
 function pythonMatrixRuntimeNorm(
   fro: string | undefined,
-  finite: boolean
+  entries: PyNormEntries
 ): string {
   const nan = "float('nan')";
-  const numeric = `${pyNorm('_x', '_p', finite)} if _p == 1 or _p == 2 or _p == np.inf else ${nan}`;
+  const numeric = `${pyNorm('_x', '_p', entries)} if _p == 1 or _p == 2 or _p == np.inf else ${nan}`;
   return fro === undefined
     ? numeric
-    : `${pyNorm('_x', "'fro'", finite)} if ${fro} else ${numeric}`;
+    : `${pyNorm('_x', "'fro'", entries)} if ${fro} else ${numeric}`;
 }
 
 /**
@@ -3963,8 +4014,8 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
             'into one scalar, but the interpreter answers one norm per point.'
         );
     }
-    const finite = pyFiniteEntries(args[0]);
-    if (args.length < 2) return pyNorm(compile(args[0]), undefined, finite);
+    const entries = pyNormEntries(args[0]);
+    if (args.length < 2) return pyNorm(compile(args[0]), undefined, entries);
     const p = args[1];
     const rank = pyStaticRank(args[0]);
     if (isString(p)) {
@@ -3994,7 +4045,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
       // scalar (whose norm is then its absolute value, as in the
       // interpreter).
       if (p.string === 'Frobenius' && rank !== 2)
-        return pyNorm(compile(args[0]), undefined, finite);
+        return pyNorm(compile(args[0]), undefined, entries);
       // The `"Infinity"` norm type is the order +Infinity. Over an operand
       // whose rank is not statically known, the emitted code tests the rank
       // when it runs (`pythonNormRankTest`). A scalar answers its absolute
@@ -4002,9 +4053,9 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
       if (rank === undefined)
         return args[0].type.matches('number')
           ? `np.abs(${compile(args[0])})`
-          : pythonNormRankTest(compile(args[0]), ord, 'matrix', finite);
+          : pythonNormRankTest(compile(args[0]), ord, 'matrix', entries);
       assertPythonNormRankAtMost2(rank);
-      return pyNorm(compile(args[0]), ord, finite);
+      return pyNorm(compile(args[0]), ord, entries);
     }
     // The order 2 is the Euclidean norm on a vector and the SPECTRAL norm
     // (the largest singular value) on a matrix, in the interpreter
@@ -4021,10 +4072,10 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     const scalar = rank === undefined && args[0].type.matches('number');
     if (p.isSame(2)) {
       if (rank !== undefined && rank >= 3)
-        return pyNorm(compile(args[0]), undefined, finite);
+        return pyNorm(compile(args[0]), undefined, entries);
       if (scalar) return `np.abs(${compile(args[0])})`;
       if (rank === undefined)
-        return pythonNormRankTest(compile(args[0]), compile(p), 'two', finite);
+        return pythonNormRankTest(compile(args[0]), compile(p), 'two', entries);
     } else if (!isNumber(p) && !p.isInfinity) {
       // The order is only known at RUN time. A scalar answers its absolute
       // value for a positive order and has no value for any other one, as
@@ -4047,7 +4098,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
           compile(args[0]),
           compile(p),
           pType,
-          finite
+          entries
         );
       // Above rank 2 the interpreter computes only the order 2, as the
       // entry-wise Frobenius norm, which is `np.linalg.norm(t)` with no `ord`
@@ -4058,7 +4109,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
           compile(p),
           pType,
           () =>
-            `${pyNorm('_x', undefined, finite)} if _p == 2 else float('nan')`
+            `${pyNorm('_x', undefined, entries)} if _p == 2 else float('nan')`
         );
       // The interpreter (`library/linear-algebra.ts`) computes a vector norm
       // only for an order `p > 0` (the p-norms, and L∞ for `+∞`), and a
@@ -4074,8 +4125,8 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
         pType,
         (fro) =>
           rank === 1
-            ? `${pyNorm('_x', '_p', finite)} if _p > 0 else float('nan')`
-            : pythonMatrixRuntimeNorm(fro, finite)
+            ? `${pyNorm('_x', '_p', entries)} if _p > 0 else float('nan')`
+            : pythonMatrixRuntimeNorm(fro, entries)
       );
     }
     // A literal numeric order that is not positive (`0`, `-1`, `-∞`) has no
@@ -4121,11 +4172,11 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
         compile(args[0]),
         compile(p),
         matrixOrder ? 'matrix' : 'vector',
-        finite
+        entries
       );
     }
     assertPythonNormRankAtMost2(rank);
-    return pyNorm(compile(args[0]), compile(p), finite);
+    return pyNorm(compile(args[0]), compile(p), entries);
   },
   Determinant: 'np.linalg.det',
   Inverse: 'np.linalg.inv',

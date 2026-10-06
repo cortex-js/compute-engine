@@ -3,6 +3,7 @@ import { BigDecimal } from '../../big-decimal/index.js';
 
 import {
   euclideanNormType,
+  machineScaledNorm,
   pointNormBroadcasts,
   pointNormType,
 } from './utils.js';
@@ -599,6 +600,12 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         // anyway (through the point's own norm), and the sign handler
         // reads the same helper, so all three agree.
         if (hypotLegIsNaN(x) || hypotLegIsNaN(y)) return engine.NaN;
+        // At machine precision, the square of a very small or very large
+        // leg is below the normal doubles or overflows: `Hypot(3e-200,
+        // 4e-200)` was 0. Such legs are scaled by a power of 2 first
+        // (`machineScaledNorm`). Other legs keep the computation below.
+        const scaled = machineScaledNorm(engine, legs, 2, numericApproximation);
+        if (scaled !== undefined) return scaled;
         const sq = (v: Expression): Expression => engine.expr(['Square', v]);
         return engine
           .expr(['Sqrt', ['Add', sq(legs[0]), sq(legs[1])]])

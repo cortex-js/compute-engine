@@ -162,32 +162,20 @@ A possible route: the asymptotic expansion of Liₛ(z) for a large |ln z|
 (DLMF 25.12.12 with the Hurwitz zeta form of Jonquière's formula), with
 (2π)ˢ/Γ(s) computed from logarithms so that it does not overflow.
 
-### The modulus of a very small complex number is wrong or `0` (OPEN, decision — found 2026-10-06 by the Lerch kernel fix)
+### `Norm` and `Hypot` in the other compile targets at extreme magnitudes (OPEN, investigation — found 2026-10-06 by the machine-precision `Norm` fix)
 
-`Complex.abs()` of the `complex-esm` dependency computes `√(a² + b²)` without
-scaling when both parts are below 3000. So a modulus below about 1.5e−154
-underflows: `new Complex(3e−200, 4e−200).abs()` is `0` (the value is
-5e−200), and a subnormal square loses digits: `new Complex(1e−160, 0).abs()`
-is `9.99994e−161`. `Math.hypot` gives the correct values. `numerics/lerch-phi.ts`
-now uses its own `modulus()` (`Math.hypot`), and its error estimates had
-dropped small terms because of this. `src/` has 258 `.abs()` calls (99 in
-`numerics/numeric-complex.ts`), and the error estimates of other kernels can
-drop small terms in the same way. The same unscaled `hypot` can also affect
-other `complex-esm` methods that call it. A decision is necessary on the form of
-the fix: one shared `modulus()` helper used everywhere in `src/`, a
-replacement of `Complex.prototype.abs` when the engine loads (the build
-bundles `complex-esm`, so only the engine's copy changes — to confirm), or a
-fix in `complex-esm` itself (a fork, or a pull request to its repository).
-
-The other end has a related defect: `Complex.log()` gives a real part of
-`Infinity` above |z| ≈ 1.3e154. `lerchSeriesOutsideDisk` in
-`numerics/lerch-phi.ts` now builds log z from `Math.log(|z|)` and
-`Math.atan2`, but `logAccurate` in the same file still falls back to
-`Complex.log()`. So the Lerch continuation declines (no wrong value was seen)
-for a complex z with both parts nonzero and |z| above 1.3e154. Related
-declines on purpose: at |z| = 1e200 near the cut, `PolyLog(s, z)` and
-`LerchPhi(z, s, 1)` stay unevaluated for s from about 725 to 777, where the
-proven remainder bound of the series is about 1.7e−10 of the value.
+At machine precision, the interpreter's `Norm` and `Hypot` and the compiled
+JavaScript `Norm`, `Hypot` and `Distance` scale the components by a power of 2
+when the largest one is outside the range where its square is a normal double
+(`scaledPNorm()` in `numerics/linear-algebra.ts`); the Python lowering scales
+the default, order-2 and Frobenius norms the same way (`pyNorm` in
+`compilation/python-target.ts`). Not done: a literal p-norm with p other than
+1, 2 and ∞ in Python (`|x|³` overflows above about 5.6e102, inside the range
+that the power-of-2 rule leaves alone), the interval `Hypot`
+(`interval/elementary.ts`), the GLSL and WGSL lowerings (f32, whose range is
+much smaller), and the spectral norm `Norm(M, 2)`. To do: measure each at
+1e-200 and 1e200 (1e-30 and 1e30 for f32), and scale where the result
+underflows or overflows.
 
 ### The GPU Lerch tail integral may be inaccurate at a large order (OPEN, investigation — found 2026-10-06 by the Lerch kernel fix)
 
@@ -1652,14 +1640,7 @@ the fixes and four user decisions of the same day landed. These items remain.
 
 Defects:
 
-1. **Inverse trigonometric functions of a huge complex argument are `NaN`.**
-   `Arccot(10^{-200}+10^{-200}i).N()` and `Arccsc(10^{-200}+10^{-200}i).N()` are
-   `NaN`: the reciprocal is now right (`5e199 - 5e199i`, since 2026-09-27), but
-   `complex-esm`'s `atan` and `asin` return `NaN` for an argument near `5e199`
-   (`new Complex(5e199, -5e199).atan()` is `NaN`). Found 2026-09-27 while
-   scaling the interpreter's complex division; the fix is a scaled `atan`/`asin`
-   kernel, or a reduction for large arguments.
-2. **A lazy `Map` or `Filter` over a `Join` or `Append` whose operand is absent
+1. **A lazy `Map` or `Filter` over a `Join` or `Append` whose operand is absent
    stays unevaluated.** `Map(f, Join(Missing, [3]))` should be `Missing`, as
    `Map(f, Missing)` is. The source correctly declines to enumerate, but a lazy
    operator does not evaluate its collection operand, and conditional threading
@@ -1963,7 +1944,7 @@ Iverson bracket, so no product reading). `4]1,2[` canonicalizes to
   exact: several places keep a Gaussian integer exact (`isExactNumber` in
   `apply.ts`, `ExactNumericValue.sum`, `_liftComplex`, the fold in
   `arithmetic-add.ts`), from when the literal `3i` was a float. A decision:
-  whether `ce.number(new Complex(2, 3))` (a `complex-esm` value, doubles by
+  whether `ce.number(new Complex(2, 3))` (a `complex.js` value, doubles by
   definition) is exact; if not, these exceptions go.
 - **Integer functions of a float argument answer exactly.** `Fibonacci(5.0)`,
   `Lucas`, `BellNumber`, `CatalanNumber`, `NthPrime`, `PrimePi`, `Totient`,
@@ -2266,7 +2247,7 @@ Since 2026-09-27 an inexact complex value holds its imaginary part as a big
 decimal, and `Ln`, `Exp`, `Power`, `Root`, `Sqrt` and the arithmetic compute
 both parts at the working precision. `Sin`, `Cos`, `Tan` and the other
 trigonometric and hyperbolic functions, `Gamma`, `Zeta`, the Bessel family and
-every other complex kernel still compute in doubles (`complex-esm`,
+every other complex kernel still compute in doubles (`complex.js`,
 `numerics/numeric-complex.ts`) at every engine precision: `Sin(1+i).N()` at 50
 digits has 16 correct digits, and an imaginary part below the double range
 reaches those kernels as `0`. The fix is a big-decimal complex kernel per

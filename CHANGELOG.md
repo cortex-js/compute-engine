@@ -54,6 +54,14 @@
   `Take(Range(1, 10^20), -2)` stays unevaluated (it was the wrong
   `[1e20, 1e20]`).
 
+- **The complex-number library is now `complex.js` 2.4.** It replaces
+  `complex-esm`, a fork of `complex.js` 2.1.1 that has not changed since 2024.
+  The public types now refer to the `Complex` class of `complex.js`: code that
+  passes a `Complex` value to the engine (for example `ce.number(z)`) and was
+  typed with `complex-esm` must import the type from `complex.js` instead.
+  Numeric results do not change: the full test suite and its 4,297 snapshots
+  give the same values.
+
 ### Behavior Changes
 
 - **`simplify()` combines same-base powers in a product as it does in a
@@ -153,6 +161,24 @@
 
 
 ### Issues Resolved
+
+- **`Norm`, `Hypot` and `Distance` of very small or very large numbers.** At
+  machine precision, `Norm([3e-200, 4e-200])` and `Hypot(3e-200, 4e-200)` were
+  `0`, and `Norm([3e200, 4e200])` was `+∞`, because the squares underflowed or
+  overflowed. The vector, matrix (Frobenius) and p-norms, `Hypot`, and the
+  compiled `Norm` and `Distance` now scale the components by a power of 2 when
+  the largest one is outside the range where its square (or p-th power) is a
+  normal double. Other inputs give the same results as before, bit for bit.
+
+- **Complex numbers with very small or very large parts.** In
+  machine-precision calculations, the modulus, square root, logarithm, power,
+  reciprocal, `Sign` and the inverse trigonometric and hyperbolic functions of
+  a complex number with a part below about 1e-150 or above about 1e150 were
+  wrong, because the squares of the parts underflowed to 0 or overflowed:
+  `Abs(3e-200 + 4e-200i)` was `0`, `Sign` of it was `~∞`,
+  `|1e200 + 1e200i|` was `+∞`, `Ln(1e-200 + 1e-200i)` was `-∞`, and
+  `Arccot(1e-200 + 1e-200i)` was `NaN`. These are now correct. The results for
+  other values do not change, not even in the last digit.
 
 - **The quotient of two floats is one division.** `0.3/0.3` was
   `0.999999999999999999999`: a quotient with a float operand was computed as

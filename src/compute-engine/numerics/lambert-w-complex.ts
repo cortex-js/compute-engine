@@ -1,4 +1,4 @@
-import { Complex } from 'complex-esm';
+import { Complex } from 'complex.js';
 
 //
 // ---------------- Lambert W function, every branch (complex) ----------------
@@ -132,8 +132,9 @@ export function lambertWComplex(z: Complex, k: number): Complex {
   }
 
   // W₀ for a small |z|: the Maclaurin series Σ (−n)ⁿ⁻¹/n!·zⁿ, whose terms
-  // decrease about e·|z| < 0.003 times at each step. Halley's iteration
-  // would divide by w there, and `complex-esm` squares the size of a divisor.
+  // decrease about e·|z| < 0.003 times at each step, so 12 terms are more
+  // than enough for double precision. This replaces Halley's iteration
+  // there.
   if (k === 0 && z.abs() < 2 ** -10) {
     let sum = new Complex(0, 0);
     let power = new Complex(1, 0);
@@ -167,9 +168,11 @@ export function lambertWComplex(z: Complex, k: number): Complex {
  * One step of Halley's iteration for w·e^w = z, in the form of mpmath,
  * w − f/(w·e^w + e^w − (w + 2)·f/(2w + 2)) with f = w·e^w − z, with the
  * numerator and the denominator divided by w·e^w: with r = 1 − z·e^−w/w,
- * the step is r/(1 + 1/w − (w + 2)·r/(2w + 2)). The divided form does not
- * overflow: w·e^w has the size of z, and the complex division of
- * `complex-esm` squares the size of the divisor.
+ * the step is r/(1 + 1/w − (w + 2)·r/(2w + 2)). In the divided form, the
+ * values have the size of 1, of w or of 1/w (z·e^−w is w at the root). The
+ * undivided form computes w·e^w, which has the size of z, and e^w, which
+ * has the size of z/w: these overflow or underflow when |z| is near the
+ * ends of the double range.
  */
 function halleyStep(w: Complex, z: Complex): Complex {
   // z·e^−w is formed directly, as it is more accurate. For a tiny |z| on a
@@ -263,8 +266,11 @@ function lambertWInitialValue(z: Complex, k: number): Complex {
   return asymptoticW(z, k);
 }
 
-/** The principal logarithm. The `log` of `complex-esm` squares the modulus
- *  and overflows for |z| > 10¹⁵⁴ (or underflows for |z| < 10⁻¹⁵⁴). */
+/** The principal logarithm, with `Math.hypot()` for the modulus. (The
+ *  unpatched `log` of `complex.js` squared the modulus, and overflowed for
+ *  |z| > 10¹⁵⁴ or underflowed for |z| < 10⁻¹⁵⁴. `installComplexScaling()`
+ *  in `numerics/complex-scaling.ts` corrects `z.log()` for these values
+ *  too.) */
 function log(z: Complex): Complex {
   return new Complex(Math.log(Math.hypot(z.re, z.im)), Math.atan2(z.im, z.re));
 }

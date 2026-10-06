@@ -753,8 +753,10 @@ fall back to floating or arbitrary precision when needed.
   benchmarks.
 - **`numerics/`** holds the algorithms: rationals, primes/factorization,
   special functions (gamma, zeta, Bessel, …), statistics, interval helpers,
-  and numeric integration/extrapolation. Complex numbers use the `complex-esm`
-  package.
+  and numeric integration/extrapolation. Complex numbers use the `complex.js`
+  package. `numerics/complex-scaling.ts` replaces the methods of its `Complex`
+  class that square the parts of a value (`abs`, `log`, `inverse`, ...), so
+  that they are correct for a very small or very large value.
 
 ### What `.N()` promises (user decision 2026-09-30)
 

@@ -34,7 +34,6 @@ module.exports = {
   // unambiguous `Test Suites:/Tests:/Snapshots:` block at the end of every
   // run, pass or fail.
   reporters: ['jest-silent-reporter', 'summary'],
-  transformIgnorePatterns: ['node_modules/(?!(complex-esm)/)'],
   // Source imports carry explicit `.js` extensions (nodenext-style) that
   // resolve to `.ts` files under bundler resolution. Strip the extension so
   // jest's resolver finds the TypeScript sources.

@@ -1,4 +1,4 @@
-import { Complex } from 'complex-esm';
+import { Complex } from 'complex.js';
 import { BigDecimal } from '../../big-decimal/index.js';
 import type { IComputeEngine as ComputeEngine } from '../global-types.js';
 import { bernoulliRational } from './bernoulli.js';

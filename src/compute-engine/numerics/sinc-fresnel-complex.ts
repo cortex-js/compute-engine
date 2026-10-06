@@ -1,4 +1,4 @@
-import { Complex } from 'complex-esm';
+import { Complex } from 'complex.js';
 import { erfComplex } from './numeric-complex.js';
 
 const C_NAN = new Complex(NaN, NaN);
@@ -74,7 +74,7 @@ export function sincComplex(z: Complex): Complex {
     const half = Math.exp(ay / 2);
     return new Complex(q.re * half * (half / 2), q.im * half * (half / 2));
   }
-  // `Math.hypot`, not `q.abs()`: complex-esm squares the parts, which
+  // `Math.hypot`, not `q.abs()`: complex.js squares the parts, which
   // underflows for |q| below 10⁻¹⁵⁴ (at z = 10²⁰⁰ + 2000i).
   const m = Math.hypot(q.re, q.im);
   const scale = Math.exp(ay - Math.LN2 + Math.log(m));

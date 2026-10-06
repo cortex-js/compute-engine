@@ -1,4 +1,4 @@
-import { Complex } from 'complex-esm';
+import { Complex } from 'complex.js';
 import { BigDecimal } from '../../src/big-decimal';
 import { ComputeEngine } from '../../src/compute-engine';
 import { isNumber } from '../../src/compute-engine/boxed-expression/type-guards';

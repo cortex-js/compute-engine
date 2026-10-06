@@ -1,7 +1,7 @@
 /**
  * Inverse trigonometric and inverse hyperbolic functions at arguments with a
  * very large or a very small modulus, where the textbook logarithm formulas
- * of the `complex-esm` library lose digits or overflow.
+ * of the `complex.js` library lose digits or overflow.
  *
  * Before the fix, `arcsin(−10⁶)` was `−π/2 + 14.50865012405984i` (six
  * correct digits in the imaginary part), and `arcsin(10³⁰⁰)` was `~oo`
@@ -467,7 +467,7 @@ describe('COMPILE: a small part is kept, as the interpreter keeps it', () => {
   });
 
   test('the square root of a small complex value', () => {
-    // The `complex-esm` square root gave 0 for √(10⁻³⁰⁰·i), and
+    // The `complex.js` square root gave 0 for √(10⁻³⁰⁰·i), and
     // 7.07·10⁻¹⁵¹·(1 + i) for √(10⁻³⁰⁰ + 10⁻³⁰⁰·i).
     expectClose(
       compiled('Sqrt', 0, 1e-300) as { re: number; im: number },

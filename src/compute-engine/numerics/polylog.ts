@@ -1,4 +1,4 @@
-import { Complex } from 'complex-esm';
+import { Complex } from 'complex.js';
 import { lerchPhiComplex } from './lerch-phi.js';
 import {
   gamma as gammaComplex,

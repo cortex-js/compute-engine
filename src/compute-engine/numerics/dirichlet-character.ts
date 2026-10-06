@@ -1,4 +1,4 @@
-import { Complex } from 'complex-esm';
+import { Complex } from 'complex.js';
 import { stieltjesGammaComplex } from './stieltjes.js';
 
 // Dirichlet characters mod k and the Laurent expansion of their L-functions at

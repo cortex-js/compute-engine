@@ -2,7 +2,7 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { erfInv, gamma } from '../../src/compute-engine/numerics/special-functions';
 import { hypergeometric2F1Complex } from '../../src/compute-engine/numerics/numeric-complex';
-import { Complex } from 'complex-esm';
+import { Complex } from 'complex.js';
 import { engine } from '../utils';
 
 const ce = engine;

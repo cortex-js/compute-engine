@@ -1,4 +1,4 @@
-import { Complex } from 'complex-esm';
+import { Complex } from 'complex.js';
 import { BigDecimal } from '../../big-decimal/index.js';
 
 import type { Expression, IComputeEngine } from '../global-types.js';
@@ -164,12 +164,12 @@ export function boxComplexKernelResult(
 /**
  * The value of an operator at operands of which one at least is complex,
  * computed with the big-decimal methods of `NumericValue` (`sqrt()`, `pow()`,
- * `root()`, `ln()`, `exp()`, the arithmetic) instead of a `complex-esm`
+ * `root()`, `ln()`, `exp()`, the arithmetic) instead of a `complex.js`
  * kernel.
  *
  * In an engine working above machine precision, a `BigNumericValue` holds
  * both parts of a complex value as big decimals, and its methods compute
- * both parts at the working precision. The `complex-esm` kernels compute in
+ * both parts at the working precision. The `complex.js` kernels compute in
  * doubles: they give 16 digits, and they read an imaginary part too small
  * or too large for a double (`10^{-800}`, `10^{800}`) as `0` or `Infinity`.
  *
@@ -234,7 +234,7 @@ export function apply(
   // The test is `isComplex`, not `im !== 0`: an exact value with an
   // imaginary part too small for a double (`10^{-800}·i`) is complex and must
   // reach the complex kernel, not the real branch, which reads only `re`. The
-  // complex kernels (`complex-esm`) compute in doubles by nature, so they
+  // complex kernels (`complex.js`) compute in doubles by nature, so they
   // receive the double projections `re` and `im`, and for that value they see
   // an imaginary part of `0`. The same rule applies in `applyN` and `apply2`.
   // Design note: `docs/plans/2026-09-27-big-decimal-imaginary-part.md` §5.

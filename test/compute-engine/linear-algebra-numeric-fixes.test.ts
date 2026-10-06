@@ -1,7 +1,12 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import type { Expression } from '../../src/compute-engine';
 import { BigDecimal } from '../../src/big-decimal';
-import { singularValues } from '../../src/compute-engine/numerics/linear-algebra';
+import {
+  pNormIsSafe,
+  scaledPNorm,
+  singularValues,
+} from '../../src/compute-engine/numerics/linear-algebra';
+import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { isNumber } from '../../src/compute-engine/boxed-expression/type-guards';
 
 const ce = new ComputeEngine();
@@ -994,5 +999,254 @@ describe('EIGENVECTORS OF A REPEATED EIGENVALUE', () => {
         [0, 'y'],
       ])
     ).toBe('[[1,0],[0,1]]');
+  });
+});
+
+describe('EUCLIDEAN NORMS OF VERY SMALL AND VERY LARGE MACHINE NUMBERS', () => {
+  // At machine precision, `Norm` and `Hypot` add the squares (or the p-th
+  // powers) of the components in machine floats. When the largest magnitude
+  // is very small or very large, a square is below the normal doubles or
+  // overflows, so the components are scaled by a power of 2 first. In the
+  // normal range the plain formula is kept, bit for bit.
+  //
+  // Constructing an engine, and setting its precision, set the global
+  // big-decimal precision, which the shared engine `ce` also reads, so it is
+  // restored after these tests.
+  let me: ComputeEngine;
+  let savedPrecision: number;
+  beforeAll(() => {
+    savedPrecision = BigDecimal.precision;
+    me = new ComputeEngine();
+    me.precision = 'machine';
+    me.declare('v', 'list<real>');
+    me.declare('a', 'real');
+    me.declare('b', 'real');
+  });
+  afterAll(() => {
+    BigDecimal.precision = savedPrecision;
+  });
+
+  const value = (expr: unknown) => me.box(expr as any).evaluate().re;
+  const valueN = (expr: unknown) => me.box(expr as any).N().re;
+  const compiled = (expr: unknown) => {
+    const result = compile(me.box(expr as any));
+    expect(result?.success).toBe(true);
+    return result!.run!({}) as number;
+  };
+  // The relative difference of `x` from `expected`.
+  const relErr = (x: number, expected: number) =>
+    Math.abs(x - expected) / expected;
+
+  const cases: [string, unknown, number][] = [
+    ['Norm of a tiny vector', ['Norm', ['List', 3e-200, 4e-200]], 5e-200],
+    ['Hypot of tiny legs', ['Hypot', 3e-200, 4e-200], 5e-200],
+    [
+      'Norm of a tiny complex entry',
+      ['Norm', ['List', ['Complex', 3e-200, 4e-200]]],
+      5e-200,
+    ],
+    ['Norm of a huge vector', ['Norm', ['List', 3e200, 4e200]], 5e200],
+    ['Hypot of huge legs', ['Hypot', 3e200, 4e200], 5e200],
+    ['Norm of a huge point', ['Norm', ['Tuple', 3e200, 4e200]], 5e200],
+    [
+      'Norm of a huge complex entry',
+      ['Norm', ['List', ['Complex', 3e200, 4e200]]],
+      5e200,
+    ],
+    [
+      'Frobenius norm of a huge matrix',
+      ['Norm', ['List', ['List', 3e200, 4e200], ['List', 0, 0]]],
+      5e200,
+    ],
+    [
+      'Frobenius norm of a tiny matrix',
+      ['Norm', ['List', ['List', 3e-200, 0], ['List', 0, 4e-200]]],
+      5e-200,
+    ],
+    [
+      'Frobenius norm of a huge rank-3 tensor',
+      [
+        'Norm',
+        [
+          'List',
+          ['List', ['List', 3e200, 0], ['List', 0, 0]],
+          ['List', ['List', 0, 0], ['List', 0, 4e200]],
+        ],
+      ],
+      5e200,
+    ],
+    [
+      'Norm of order 3 of a huge vector',
+      ['Norm', ['List', 1e150, 1e150], 3],
+      Math.cbrt(2) * 1e150,
+    ],
+    [
+      'Norm of order 3 of a tiny vector',
+      ['Norm', ['List', 1e-150, 1e-150], 3],
+      Math.cbrt(2) * 1e-150,
+    ],
+    [
+      'Norm of order 2.5 of a huge vector',
+      ['Norm', ['List', 1e200, 1e200], 2.5],
+      Math.pow(2, 1 / 2.5) * 1e200,
+    ],
+    [
+      'Norm of a vector with a subnormal component',
+      ['Norm', ['List', 1e-320, 0]],
+      1e-320,
+    ],
+    [
+      'Norm of a vector near the largest double',
+      ['Norm', ['List', 1e308, 1e308]],
+      Math.SQRT2 * 1e308,
+    ],
+  ];
+
+  test.each(cases)(
+    '%s: evaluate(), N() and the compiled code',
+    (_, expr, expected) => {
+      for (const x of [value(expr), valueN(expr), compiled(expr)])
+        expect(relErr(x, expected)).toBeLessThan(4e-16);
+    }
+  );
+
+  test('the compiled Distance of points with very small or very large coordinates', () => {
+    me.declare('p', 'tuple<real, real>');
+    me.declare('q', 'tuple<real, real>');
+    const f = compile(me.box(['Distance', 'p', 'q']));
+    expect(f?.success).toBe(true);
+    const run = (p: number[], q: number[]) => f!.run!({ p, q }) as number;
+    expect(relErr(run([3e200, 4e200], [0, 0]), 5e200)).toBeLessThan(4e-16);
+    expect(relErr(run([3e-200, 4e-200], [0, 0]), 5e-200)).toBeLessThan(4e-16);
+    // The normal range keeps the plain formula.
+    expect(run([0.1, 0.2], [0.3, 0.7])).toBe(
+      Math.sqrt((0.1 - 0.3) ** 2 + (0.2 - 0.7) ** 2)
+    );
+  });
+
+  test('a subnormal result keeps its value', () => {
+    // 1e-320 is a subnormal double: the result is exact, as the scaling by a
+    // power of 2 is.
+    expect(value(['Norm', ['List', 1e-320, 0]])).toBe(1e-320);
+    expect(value(['Hypot', 5e-324, 0])).toBe(5e-324);
+  });
+
+  test('N() of exact components outside the range does not overflow', () => {
+    const big = ['Power', 10, 300];
+    expect(
+      relErr(valueN(['Norm', ['List', big, big]]), Math.SQRT2 * 1e300)
+    ).toBeLessThan(4e-16);
+    expect(
+      relErr(valueN(['Hypot', big, big]), Math.SQRT2 * 1e300)
+    ).toBeLessThan(4e-16);
+    // An exact rational beside a float.
+    expect(
+      relErr(
+        value(['Norm', ['List', ['Rational', 3, ['Power', 10, 200]], 4e-200]]),
+        5e-200
+      )
+    ).toBeLessThan(4e-16);
+  });
+
+  test('exact components stay exact under evaluate()', () => {
+    const big = ['Power', 10, 300];
+    const norm = me.box(['Norm', ['List', big, big]]).evaluate();
+    expect(norm.operator).toBe('Sqrt');
+    expect(me.box(['Hypot', big, big]).evaluate().operator).toBe('Sqrt');
+  });
+
+  test('zero, NaN and infinite components behave as before', () => {
+    expect(value(['Norm', ['List', 0, 0]])).toBe(0);
+    expect(value(['Norm', ['List', 0.0, -0.0]])).toBe(0);
+    expect(value(['Norm', ['List', 1e-300, 'NaN']])).toBeNaN();
+    expect(value(['Hypot', 1e-300, 'NaN'])).toBeNaN();
+    expect(value(['Norm', ['List', 1e-300, 'PositiveInfinity']])).toBe(
+      Infinity
+    );
+    expect(value(['Hypot', 1e300, 'NegativeInfinity'])).toBe(Infinity);
+    expect(compiled(['Norm', ['List', 1e-300, 'NaN']])).toBeNaN();
+    expect(compiled(['Norm', ['List', 1e300, 'PositiveInfinity']])).toBe(
+      Infinity
+    );
+  });
+
+  test('the scaled kernel matches the plain formula on the scaled values', () => {
+    // Out of the safe range, the result is the plain formula on the values
+    // multiplied by 2^-e, then multiplied by 2^e: both multiplications are
+    // exact.
+    const v = [3e-200, 4e-200, 1e-201];
+    const e = Math.floor(Math.log2(4e-200)) + 1;
+    const plain = Math.sqrt(
+      v.map((x) => x * 2 ** -e).reduce((s, x) => s + x * x, 0)
+    );
+    expect(scaledPNorm(v, 2)).toBe(plain * 2 ** e);
+    // In the safe range, there is no scaled result.
+    expect(scaledPNorm([3, 4], 2)).toBeUndefined();
+    expect(scaledPNorm([2 ** -500, 0], 2)).toBeUndefined();
+    expect(scaledPNorm([2 ** 500, 0], 2)).toBeUndefined();
+    expect(scaledPNorm([0, 0], 2)).toBeUndefined();
+    expect(scaledPNorm([1e-300, NaN], 2)).toBeUndefined();
+    // For p ≤ 1 the plain formula is always safe.
+    expect(scaledPNorm([1e300, 1e300], 1)).toBeUndefined();
+    // A large order: the largest term is made exactly 1.
+    expect(
+      relErr(scaledPNorm([1.5, 1.5], 2000)!, 1.5 * 2 ** (1 / 2000))
+    ).toBeLessThan(4e-16);
+    expect(pNormIsSafe(2 ** 333, 3)).toBe(true);
+    expect(pNormIsSafe(2 ** 334, 3)).toBe(false);
+  });
+
+  test('results in the normal range are bit-identical to the plain formula', () => {
+    // A seeded generator, so that the vectors are the same at each run.
+    let seed = 20261006;
+    const random = () => {
+      seed = (seed * 1103515245 + 12345) % 2147483648;
+      return seed / 2147483648;
+    };
+    const fNorm = compile(me.box(['Norm', 'v']));
+    const fNorm3 = compile(me.box(['Norm', 'v', 3]));
+    const fHypot = compile(me.box(['Hypot', 'a', 'b']));
+    expect(fNorm?.success).toBe(true);
+    expect(fNorm3?.success).toBe(true);
+    expect(fHypot?.success).toBe(true);
+    let checked = 0;
+    for (let t = 0; t < 300; t++) {
+      const n = 2 + Math.floor(random() * 6);
+      // The largest magnitude is in [2^-480, 2^480], in the range where
+      // the plain formula is kept for the order 2. Some components are
+      // much smaller than the largest one.
+      const v = Array.from(
+        { length: n },
+        () => (random() - 0.5) * 2 ** Math.floor(random() * 960 - 480)
+      );
+      // The plain formulas: the sum of the squares in order, then the
+      // square root (or the cube root for the order 3).
+      let sum2 = 0;
+      for (const x of v) sum2 += x * x;
+      const plain2 = Math.sqrt(sum2);
+      expect(value(['Norm', ['List', ...v]])).toBe(plain2);
+      expect(fNorm!.run!({ v })).toBe(plain2);
+      expect(
+        value(['Norm', ['List', ['List', ...v], ['List', ...v.map(() => 0)]]])
+      ).toBe(plain2);
+
+      const hypot = Math.sqrt(v[0] * v[0] + v[1] * v[1]);
+      expect(value(['Hypot', v[0], v[1]])).toBe(hypot);
+
+      // The order 3 is safe while the largest magnitude is in
+      // [2^-333, 2^333].
+      const w = v.map((x) => x * 2 ** -150);
+      if (
+        Math.max(...w.map(Math.abs)) <= 2 ** 333 &&
+        Math.max(...w.map(Math.abs)) >= 2 ** -333
+      ) {
+        let sum3 = 0;
+        for (const x of w) sum3 += Math.pow(Math.abs(x), 3);
+        expect(value(['Norm', ['List', ...w], 3])).toBe(Math.cbrt(sum3));
+        expect(fNorm3!.run!({ v: w })).toBe(Math.pow(sum3, 1 / 3));
+        checked += 1;
+      }
+    }
+    expect(checked).toBeGreaterThan(100);
   });
 });

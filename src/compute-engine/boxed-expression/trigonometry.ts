@@ -1,4 +1,4 @@
-import { Complex } from 'complex-esm';
+import { Complex } from 'complex.js';
 import { BigDecimal } from '../../big-decimal/index.js';
 
 import type { MathJsonExpression } from '../../math-json/types.js';
@@ -1292,7 +1292,7 @@ export function evalTrig(
                 .div(x)
                 .ln(),
         // `complexAsech()`: the previous inline expression dropped the `sqrt`
-        // (computed `ln((2 − x²)/x)`), and `complex-esm`'s `asech` lost
+        // (computed `ln((2 − x²)/x)`), and `complex.js`'s `asech` lost
         // digits near ±1 and overflowed for a small |x|.
         complexAsech
       );

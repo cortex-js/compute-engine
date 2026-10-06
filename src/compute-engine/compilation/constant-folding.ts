@@ -24,7 +24,7 @@ import {
   floorModDouble,
 } from '../numerics/numeric.js';
 import { gamma } from '../numerics/special-functions.js';
-import { Complex } from 'complex-esm';
+import { Complex } from 'complex.js';
 import {
   complexAcos,
   complexAcosh,
@@ -976,7 +976,7 @@ function variadicFold(
  * The `_SYS` complex routines whose body is one kernel followed by the
  * conversion to a `{re, im}` object (`kernelResult` in
  * `javascript-target.ts`, which removes nothing and makes a `-0` part `+0`),
- * listed as `<runtime name>: <kernel>`. The kernel is a `complex-esm` method,
+ * listed as `<runtime name>: <kernel>`. The kernel is a `complex.js` method,
  * or for the square root and the inverse functions the function of
  * `numerics/numeric-complex.ts` that the routine calls (`complexSqrt()`,
  * `complexAsin()` and the others).

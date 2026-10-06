@@ -38,7 +38,7 @@ import { bernoulliPolynomialRational } from '../numerics/bernoulli.js';
 import { shouldNumericize } from '../boxed-expression/apply.js';
 import { floatIfFloatOperand } from '../boxed-expression/float-result.js';
 import { bignumPreferred } from '../boxed-expression/utils.js';
-import { Complex } from 'complex-esm';
+import { Complex } from 'complex.js';
 import { BigDecimal } from '../../big-decimal/index.js';
 import type { BigNum } from '../numerics/types.js';
 import {

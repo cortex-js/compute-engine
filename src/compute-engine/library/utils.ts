@@ -20,7 +20,11 @@ import {
 } from '../../common/type/utils.js';
 import { activeRollbackFrame } from '../inference-rollback.js';
 import { conditionalValue } from '../boxed-expression/conditional-value.js';
-import { collectBinderNames } from '../boxed-expression/utils.js';
+import {
+  bignumPreferred,
+  collectBinderNames,
+} from '../boxed-expression/utils.js';
+import { scaledPNorm } from '../numerics/linear-algebra.js';
 import { flatLimitsSpan } from '../boxed-expression/binding-sites.js';
 import {
   binderBindingOf,
@@ -186,6 +190,54 @@ export function pointNormType(d: OperandDescriptor): string {
   const children = operandChildren(d);
   if (children === undefined) return 'number';
   return euclideanNormType(children);
+}
+
+/**
+ * The p-norm `(Σ |xᵢ|^p)^(1/p)` (`p > 1`) of the number literals `elements`,
+ * scaled by a power of 2 so that it does not overflow or underflow at
+ * machine precision. This is the norm that `Norm` (a vector, the Frobenius
+ * norm of a matrix or of a tensor) and `Hypot` (its legs) compute.
+ *
+ * At machine precision, those handlers add the squares (or the p-th powers)
+ * of the components in machine floats. When the largest magnitude `m` is
+ * very small or very large, a square is below the normal doubles or
+ * overflows, and `‖(3e-200, 4e-200)‖` was 0 and `‖(3e200, 4e200)‖` was
+ * `+∞`. Above machine precision, the big decimals hold these squares, and
+ * the result is correct.
+ *
+ * The result is `undefined` (the caller keeps its own computation, which
+ * gives the same values as before, bit for bit) when any of these is true:
+ * - the engine computes with big decimals;
+ * - an element is not a number literal, or has a NaN or infinite part (the
+ *   caller decides these elements);
+ * - every element is exact and `numericApproximation` is not set: the
+ *   caller keeps the exact result, such as `√(2·10⁶⁰⁰)`;
+ * - `m` is in the range where the plain formula is safe (`pNormIsSafe()`,
+ *   `[2⁻⁵⁰⁰, 2⁵⁰⁰]` for `p = 2`), or `m` is 0.
+ *
+ * A complex element enters through its modulus, `Math.hypot(re, im)`, which
+ * does not overflow or underflow.
+ */
+export function machineScaledNorm(
+  ce: ComputeEngine,
+  elements: ReadonlyArray<Expression>,
+  p: number,
+  numericApproximation: boolean | undefined
+): Expression | undefined {
+  if (bignumPreferred(ce)) return undefined;
+  const magnitudes: number[] = [];
+  let inexact = false;
+  for (const el of elements) {
+    if (!isNumber(el)) return undefined;
+    const re = el.re;
+    const im = el.im;
+    if (!Number.isFinite(re) || !Number.isFinite(im)) return undefined;
+    if (!el.isExact) inexact = true;
+    magnitudes.push(im === 0 ? Math.abs(re) : Math.hypot(re, im));
+  }
+  if (!inexact && numericApproximation !== true) return undefined;
+  const norm = scaledPNorm(magnitudes, p);
+  return norm === undefined ? undefined : ce.number(norm);
 }
 
 /**

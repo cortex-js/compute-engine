@@ -26,7 +26,7 @@ import type {
   DataTypeMap,
 } from '../global-types.js';
 
-import { Complex } from 'complex-esm';
+import { Complex } from 'complex.js';
 
 import { isSubtype } from '../../common/type/subtype.js';
 import {

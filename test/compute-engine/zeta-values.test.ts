@@ -12,7 +12,7 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
 import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
 import { zeta as zetaReal } from '../../src/compute-engine/numerics/special-functions';
-import { Complex } from 'complex-esm';
+import { Complex } from 'complex.js';
 import {
   hurwitzZetaComplex,
   hurwitzZetaComplexWithError,

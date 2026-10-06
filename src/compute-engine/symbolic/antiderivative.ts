@@ -1,4 +1,4 @@
-import { Complex } from 'complex-esm';
+import { Complex } from 'complex.js';
 
 import type { Expression, BoxedSubstitution, Rule } from '../global-types.js';
 

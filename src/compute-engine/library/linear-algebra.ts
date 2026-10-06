@@ -66,6 +66,7 @@ import {
 } from '../boxed-expression/type-guards.js';
 import { asRational, toInteger } from '../boxed-expression/numerics.js';
 import { boxBignumResult } from '../boxed-expression/utils.js';
+import { machineScaledNorm } from './utils.js';
 import { add } from '../boxed-expression/arithmetic-add.js';
 import { infinitePoint } from '../boxed-expression/infinite-point.js';
 import { admissionOf } from '../boxed-expression/value-membership.js';
@@ -4236,6 +4237,18 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
             // `1 − 2π + π²`), and the square root of a sum of terms cannot
             // take the square out, so `‖[1 − π]‖` was `√(1 − 2π + π²)`
             // rather than `π − 1`.
+            //
+            // At machine precision, a square of a very small or very large
+            // component is below the normal doubles or overflows, so such a
+            // vector is scaled by a power of 2 first (`machineScaledNorm`).
+            // Every other vector keeps the computation below.
+            const scaled = machineScaledNorm(
+              ce,
+              elements,
+              2,
+              numericApproximation
+            );
+            if (scaled !== undefined) return scaled;
             const sumSq = addAll(
               elements.map((el) => {
                 const absEl = ce.expr(['Abs', el]).evaluate();
@@ -4327,6 +4340,13 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           // General Lp norm: (Σ|xi|^p)^(1/p)
           if (typeof normType === 'number' && normType > 0) {
             const p = normType;
+            // The p-th powers overflow or are below the normal doubles for
+            // the same reason as the squares above, at other magnitudes
+            // (`pNormIsSafe()`, `numerics/linear-algebra.ts`). This branch
+            // always returns a float (`.N()` below), also for exact
+            // components, so the scaled float applies to them too.
+            const scaled = machineScaledNorm(ce, elements, p, true);
+            if (scaled !== undefined) return scaled;
             const sumPow = addAll(
               elements.map((el) => {
                 const absEl = ce.expr(['Abs', el]).evaluate();
@@ -4574,6 +4594,15 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
 
           // Frobenius norm (default for matrices): √(ΣΣ|aij|²)
           if (normType === 2) {
+            // Scaled at machine precision when a square would overflow or
+            // be below the normal doubles, as for a vector above.
+            const scaled = machineScaledNorm(
+              ce,
+              entries,
+              2,
+              numericApproximation
+            );
+            if (scaled !== undefined) return scaled;
             let sumSq: Expression = ce.Zero;
             for (const el of entries) {
               const absEl = ce.expr(['Abs', el]).evaluate();
@@ -4614,6 +4643,15 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           // does at rank 1 and rank 2, so the scan runs before any folding.
           if (hasInfiniteMagnitudeComponent(entries))
             return ce.PositiveInfinity;
+          // Scaled at machine precision when a square would overflow or be
+          // below the normal doubles, as for a vector and a matrix above.
+          const scaled = machineScaledNorm(
+            ce,
+            entries,
+            2,
+            numericApproximation
+          );
+          if (scaled !== undefined) return scaled;
           let sumSq: Expression = ce.Zero;
           for (const el of entries) {
             const absEl = ce.expr(['Abs', el]).evaluate();

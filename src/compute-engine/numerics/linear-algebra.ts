@@ -59,6 +59,104 @@ export function spectralNorm(re: number[][], im: number[][]): number {
   return gram.scale * Math.sqrt(lambdaMax);
 }
 
+/** The range of the largest magnitude `m` in which the plain formula of the
+ * order-2 norm, `√(Σ xᵢ²)`, is safe: for `m` in `[2⁻⁵⁰⁰, 2⁵⁰⁰]`, the
+ * largest square is in `[2⁻¹⁰⁰⁰, 2¹⁰⁰⁰]`, a normal double. */
+const NORM2_SMALL = 2 ** -500;
+const NORM2_LARGE = 2 ** 500;
+
+/**
+ * Whether the plain formula of the p-norm, `(Σ xᵢ^p)^(1/p)` in machine
+ * floats, is safe for magnitudes whose largest value is `m`. When it is
+ * safe, the caller uses the plain formula, so that its result does not
+ * change, bit for bit.
+ *
+ * The plain formula fails when the largest term `m^p` overflows (the norm is
+ * `+∞` although its value is finite) or is below the normal doubles (the
+ * norm loses digits, or is 0). The formula is safe when `m^p` is in
+ * `[2⁻¹⁰⁰⁰, 2¹⁰⁰⁰]`, that is when `m` is in `[2^(−1000/p), 2^(1000/p)]`:
+ * `[2⁻⁵⁰⁰, 2⁵⁰⁰]` for `p = 2` and `[2⁻³³³, 2³³³]` for `p = 3`. The margin
+ * of `2²⁴` below the overflow threshold `2¹⁰²⁴` lets a sum of up to `2²⁴`
+ * terms not overflow.
+ *
+ * The formula is always safe for `m = 0`, for a NaN or infinite `m` (the
+ * caller decides these values) and for `p ≤ 1`. For `p ≤ 1`, `m^p` is
+ * between `m` and 1, so it cannot overflow or underflow when `m` does not,
+ * and the sum of the terms overflows only when the norm does.
+ */
+export function pNormIsSafe(m: number, p: number): boolean {
+  if (m === 0 || !Number.isFinite(m) || !(p > 1)) return true;
+  if (p === 2) return m >= NORM2_SMALL && m <= NORM2_LARGE;
+  const bound = 1000 / p;
+  return m >= 2 ** -bound && m <= 2 ** bound;
+}
+
+/**
+ * `v · 2ᵏ` for an integer `k`. The multiplication by a power of 2 is exact
+ * unless the result is outside the normal doubles. `2ᵏ` is a double only for
+ * `k` in `[−1074, 1023]`, so a large `k` is applied in steps of at most
+ * `2¹⁰⁰⁰`.
+ */
+function scaleByPowerOfTwo(v: number, k: number): number {
+  while (k > 1000) {
+    v *= 2 ** 1000;
+    k -= 1000;
+  }
+  while (k < -1000) {
+    v *= 2 ** -1000;
+    k += 1000;
+  }
+  return v * 2 ** k;
+}
+
+/**
+ * The p-norm `(Σ |xᵢ|^p)^(1/p)` of the values `x`, for `p > 1`, computed
+ * without overflow or underflow, or `undefined` when the plain formula is
+ * safe for these values (`pNormIsSafe()`) or when a value is NaN or
+ * infinite. With `undefined`, the caller uses its plain formula, so that the
+ * result in the safe range does not change.
+ *
+ * Each value is multiplied by `2⁻ᵉ`, where `2ᵉ` is near the largest
+ * magnitude `m`, so that the largest scaled magnitude is near 1. The
+ * multiplication by a power of 2 is exact, except for a value so much
+ * smaller than `m` that its term is negligible in the sum. The norm of the
+ * scaled values is then multiplied by `2ᵉ`.
+ *
+ * For `p > 1000`, the largest term `(m · 2⁻ᵉ)^p` can be as small as `2⁻ᵖ`,
+ * which is below the doubles. Thus each value is divided by `m` instead, so
+ * that the largest term is exactly 1.
+ */
+export function scaledPNorm(
+  x: readonly number[],
+  p: number
+): number | undefined {
+  let m = 0;
+  for (const v of x) {
+    const a = Math.abs(v);
+    if (!Number.isFinite(a)) return undefined;
+    if (a > m) m = a;
+  }
+  if (pNormIsSafe(m, p)) return undefined;
+  if (p > 1000) {
+    let sum = 0;
+    for (const v of x) sum += Math.pow(Math.abs(v) / m, p);
+    return m * Math.pow(sum, 1 / p);
+  }
+  // `m · 2⁻ᵉ` is near `[0.5, 1)`. `Math.log2()` can be wrong by a small
+  // amount near a power of 2, which only moves the scaled magnitude a
+  // little: the largest term stays in `[2⁻¹⁰⁰⁰, 1]` and the sum does not
+  // overflow.
+  const e = Math.floor(Math.log2(m)) + 1;
+  let sum = 0;
+  for (const v of x) {
+    const a = scaleByPowerOfTwo(Math.abs(v), -e);
+    sum += p === 2 ? a * a : Math.pow(a, p);
+  }
+  const r =
+    p === 2 ? Math.sqrt(sum) : p === 3 ? Math.cbrt(sum) : Math.pow(sum, 1 / p);
+  return scaleByPowerOfTwo(r, e);
+}
+
 /**
  * The singular values of a finite `m × n` matrix, in machine precision,
  * sorted in descending order: `min(m, n)` values, zeros included.

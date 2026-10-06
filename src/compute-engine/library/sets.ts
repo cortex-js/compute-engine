@@ -2,7 +2,7 @@ import { BoxedType } from '../../common/type/boxed-type.js';
 // Set operations:
 // https://query.wikidata.org/#PREFIX%20wd%3A%20%3Chttp%3A%2F%2Fwww.wikidata.org%2Fentity%2F%3E%0APREFIX%20wdt%3A%20%3Chttp%3A%2F%2Fwww.wikidata.org%2Fprop%2Fdirect%2F%3E%0A%0ASELECT%20DISTINCT%20%3Fitem%0AWHERE%20%7B%0A%20%20%20%20%3Fitem%20wdt%3AP31%2a%20wd%3AQ1964995%0A%7D%0A
 
-import { Complex } from 'complex-esm';
+import { Complex } from 'complex.js';
 import { kleeneAnd, kleeneNot, kleeneOr } from '../../common/kleene.js';
 import { parseType } from '../../common/type/parse.js';
 import { reduceType, typesOverlap } from '../../common/type/reduce.js';

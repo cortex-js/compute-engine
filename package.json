@@ -181,6 +181,6 @@
   "prettier": "@cortex-js/prettier-config",
   "dependencies": {
     "@arnog/colors": "^0.7.0",
-    "complex-esm": "^2.1.1-esm1"
+    "complex.js": "^2.4.3"
   }
 }

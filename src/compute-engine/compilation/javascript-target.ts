@@ -60,7 +60,7 @@ import {
   provableTopLevelKind,
   userFunctionLiteral,
 } from './provable-kind.js';
-import { Complex } from 'complex-esm';
+import { Complex } from 'complex.js';
 import { realPowerReconstructionDigits } from '../numerics/real-power.js';
 import {
   tryGetConstant,
