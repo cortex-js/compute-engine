@@ -109,6 +109,30 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
+### A determinant with float entries keeps unfolded constants (OPEN, small — found 2026-10-06 by the review of the exact determinant fix; present before)
+
+The determinant is returned as the tensor field builds it, and neither the
+field `add` nor the `.add()` method folds an exact integer with a float. So
+`CharacteristicPolynomial([[1.5, 2], [3, 4]], x)` is
+`x^2 - 5.5 * x - 6 + 6`, and `Determinant([[x + 1.5, 1], [1, 2]])` is
+`2x - 1 + 3`. A second `.evaluate()` of the first result gives
+`x^2 - 5.5x + 0`, which still keeps a `+ 0`. To do: fold the numeric terms of
+the determinant when an entry is inexact, and find why `evaluate()` keeps the
+`+ 0` term.
+
+### A determinant above the size limit of the cofactor expansion is a nested quotient (OPEN, small — found 2026-10-06 by the exact determinant fix)
+
+`AbstractTensor.determinant()` (`tensor/tensors.ts`) expands the cofactors of
+a matrix with a symbolic entry up to 6×6, and of a matrix with exact
+irrational numbers up to 8×8. A larger matrix goes through Bareiss
+elimination, which divides by the previous pivot. A quotient by a sum of
+radicals or symbols is not reduced, so each step nests the previous one: the
+7×7 symbolic case and a 9×9 radical case give results of many thousand
+characters. The values are correct. To do: rationalize each exact Bareiss
+quotient, or use a division-free elimination. A radical whose square-free
+radicand is above 10⁶ also still becomes a float in a product
+(`ExactNumericValue.mul`), because such a radicand is not stored.
+
 ### `Limit` at infinity: two sign reads that still default to `+` (OPEN, small — found 2026-10-04 by the complex-valued limit fix for issue #396)
 
 The polynomial rule, the product rule and the quotient rule of the limit at

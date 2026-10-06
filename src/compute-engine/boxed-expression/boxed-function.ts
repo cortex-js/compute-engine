@@ -9362,7 +9362,9 @@ function isValuelessTupleSymbol(x: Expression): boolean {
     isTupleShapedType(resolveTypeReference(t) ?? t);
   const t = resolveTypeReference(x.type.type) ?? x.type.type;
   if (tupleShaped(t)) return true;
-  return typeof t === 'object' && t.kind === 'union' && t.types.some(tupleShaped);
+  return (
+    typeof t === 'object' && t.kind === 'union' && t.types.some(tupleShaped)
+  );
 }
 
 /**
@@ -9514,9 +9516,7 @@ export function declaredScalarTupleType(
       ? cellResult
       : undefined;
   };
-  const shapes = argTypes.filter(
-    (t, i) => isScalarParam(i) && hasTuple(t)
-  );
+  const shapes = argTypes.filter((t, i) => isScalarParam(i) && hasTuple(t));
   if (shapes.length === 0) return undefined;
   // Another argument that is a collection supplies cells of its own, when
   // the function maps over a list, and the shape of the result then depends

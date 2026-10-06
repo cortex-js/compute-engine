@@ -3387,7 +3387,9 @@ volumes
             if (
               isSymbol(op) &&
               opDef !== undefined &&
-              (!opDef.lazy || op.symbol === 'Add' || op.symbol === 'Multiply') &&
+              (!opDef.lazy ||
+                op.symbol === 'Add' ||
+                op.symbol === 'Multiply') &&
               orders.reduce((sum, n) => sum + n, 0) <= MAX_NESTED_PARTIAL_ORDER
             ) {
               const names = orders.map((_, i) => `_${i + 1}`);

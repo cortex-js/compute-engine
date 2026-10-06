@@ -831,8 +831,17 @@ export class ExactNumericValue extends NumericValue {
 
     if (!this.isComplex && !other.isComplex) {
       const radical = BigInt(this.radical) * BigInt(other.radical);
-      if (radical > BigInt(SMALL_INTEGER))
-        return this.factory(this.bignumRe).mul(other);
+      if (radical > BigInt(SMALL_INTEGER)) {
+        // A radicand above 10⁶ is not stored. Take its square factors out
+        // first: `√17·√323323 = √5496491 = 17√19019` stays exact. The value
+        // becomes a float only when the square-free part is still above 10⁶.
+        const parts = exactSqrtParts(radical, 1n);
+        if (parts === null) return this.factory(this.bignumRe).mul(other);
+        return this.clone({
+          rational: mul(mul(this.rational, other.rational), parts.rational),
+          radical: parts.radical,
+        });
+      }
 
       return this.clone({
         rational: mul(this.rational, other.rational),
@@ -942,8 +951,16 @@ export class ExactNumericValue extends NumericValue {
     ]);
 
     const radical = BigInt(this.radical) * BigInt(exactOther.radical);
-    if (radical > BigInt(SMALL_INTEGER))
-      return this.factory(this.bignumRe).div(exactOther);
+    if (radical > BigInt(SMALL_INTEGER)) {
+      // As in `mul`: take the square factors out of the radicand before the
+      // value becomes a float.
+      const parts = exactSqrtParts(radical, 1n);
+      if (parts === null) return this.factory(this.bignumRe).div(exactOther);
+      return this.clone({
+        rational: mul(rational, parts.rational),
+        radical: parts.radical,
+      });
+    }
 
     return this.clone({ rational, radical: Number(radical) });
   }

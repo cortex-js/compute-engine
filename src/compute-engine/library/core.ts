@@ -7037,7 +7037,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       },
       // EvaluateAt(F, a, b) = F(b) - F(a); it is how a definite integral applies
       // its limits. See ../latex-syntax/dictionary/README.md (integral subsystem).
-      evaluate: ([f, lower, upper], { engine: ce }) => {
+      evaluate: ([f, lower, upper], options) => {
+        const ce = options.engine;
         // The operator is `lazy`, so its arguments are not validated against
         // the signature: `EvaluateAt(f)` with no point arrives here, and
         // applying `f` to a missing argument threw a TypeError. It stays
@@ -7089,7 +7090,16 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           !fLower.has('Integrate') &&
           !fUpper.has('Integrate')
         ) {
-          return fUpper.sub(fLower);
+          // Build the difference with `ce.function('Subtract', …)`, not the
+          // `.sub()` method: `.sub()` folds two exact numbers into a machine
+          // float, so `√5 − 2` became `0.236…` and a definite integral with an
+          // irrational bound, such as `∫₂^√5 4 dx`, lost its exact value.
+          // The difference is evaluated so that the special values that the
+          // definite-integral evaluator tests for are folded: `∞ − ∞` is
+          // `Indeterminate` (a NaN), and `~∞ − 1` is `~∞`. The options of the
+          // caller are passed on: under `.N()` the difference is a float, and
+          // a cancellation signal also stops this evaluation.
+          return ce.function('Subtract', [fUpper, fLower]).evaluate(options);
         }
         // Fallback: return unevaluated symbolic form
         return ce._fn('EvaluateAt', [f, lower, upper]);
@@ -9815,12 +9825,16 @@ function lazyInexactElements(
   const element = elementOf(ce, xs, (ys) =>
     ce._fn('At', [ys, index], { canonical: false })
   );
-  return map(element, [index], [
-    ce.function('Range', [
-      ce.One,
-      count === Infinity ? ce.PositiveInfinity : ce.number(count),
-    ]),
-  ]);
+  return map(
+    element,
+    [index],
+    [
+      ce.function('Range', [
+        ce.One,
+        count === Infinity ? ce.PositiveInfinity : ce.number(count),
+      ]),
+    ]
+  );
 }
 
 /**
@@ -10068,8 +10082,12 @@ function followEnginePrecision(
     // machine float, it is an infinity (`e^1000`, whose `re` is `Infinity`)
     // or `0` (`e^−1000`, whose `re` is `0`).
     const outOfRange = (part: number, big: BigNum | undefined): boolean =>
-      !Number.isFinite(part) || (part === 0 && big !== undefined && !big.isZero());
-    if (outOfRange(value.re, value.bignumRe) || outOfRange(value.im, value.bignumIm))
+      !Number.isFinite(part) ||
+      (part === 0 && big !== undefined && !big.isZero());
+    if (
+      outOfRange(value.re, value.bignumRe) ||
+      outOfRange(value.im, value.bignumIm)
+    )
       return value;
     return ce.number(
       ce._inexactNumericValue(
@@ -10627,13 +10645,7 @@ function isPrecisionIndependent(
   )
     return false;
   return b.ops.some((op, i) =>
-    isPrecisionIndependent(
-      a.ops[i],
-      op,
-      exactAt(exact, b, i),
-      goal,
-      precision
-    )
+    isPrecisionIndependent(a.ops[i], op, exactAt(exact, b, i), goal, precision)
   );
 }
 

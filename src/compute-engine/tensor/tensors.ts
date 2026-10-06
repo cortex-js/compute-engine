@@ -1,5 +1,6 @@
 import { Complex } from 'complex-esm';
 import { getSupertype, makeTensorField } from './tensor-fields.js';
+import { isNumber } from '../boxed-expression/type-guards.js';
 import type {
   Expression,
   IComputeEngine as ComputeEngine,
@@ -633,13 +634,92 @@ export abstract class AbstractTensor<
       );
     }
 
+    const isZero = this.field.isZero.bind(this.field);
+
+    // An expression matrix with a symbolic entry (a symbol such as `a` or
+    // `π`, or a sum such as `1 + √2`) or an exact irrational number literal
+    // (`√2`): cofactor expansion, with no division. Bareiss divides by the
+    // previous pivot, and a quotient by a sum of radicals or of symbols is
+    // not reduced, so each step nests the previous one: the 4×4 determinant
+    // of a matrix of 16 symbols was a quotient of 1,900 characters. With
+    // `muln`, which distributes, the products expand and like terms collect,
+    // as in the 3×3 case above. The expansion of a matrix of symbols has n!
+    // terms, so it is used up to 6×6 (720 terms). For a matrix of numbers
+    // the terms are radicals, and products of different radicands make new
+    // radicals, so the sums grow too: the limit is 8×8 (about 0.8 s; a 10×10
+    // matrix took 14 s).
+    const hasSymbolicEntry =
+      this.dtype === 'expression' &&
+      this.data.some((x) => !isNumber(x as Expression));
+    const hasIrrationalEntry =
+      this.dtype === 'expression' &&
+      this.data.some((x) => {
+        const e = x as Expression;
+        return isNumber(e) && e.isExact && e.isRational !== true;
+      });
+    if (
+      (hasSymbolicEntry && m <= 6) ||
+      (!hasSymbolicEntry && hasIrrationalEntry && m <= 8)
+    ) {
+      // `minors[S]` is the determinant of the last |S| rows and of the
+      // columns in the set S (a bit mask). It is the expansion along the
+      // first of those rows, from the minors with one column less.
+      const minors: DataTypeMap[DT][] = new Array(1 << m);
+      minors[0] = this.field.one;
+      for (let mask = 1; mask < 1 << m; mask++) {
+        let size = 0;
+        for (let j = 0; j < m; j++) if (mask & (1 << j)) size += 1;
+        const row = m - size;
+        const terms: DataTypeMap[DT][] = [];
+        let position = 0;
+        for (let j = 0; j < m; j++) {
+          if (!(mask & (1 << j))) continue;
+          const entry = this.data[row * m + j];
+          if (!isZero(entry)) {
+            const term = muln(entry, minors[mask ^ (1 << j)]);
+            terms.push(position % 2 === 0 ? term : neg(term));
+          }
+          position += 1;
+        }
+        minors[mask] = terms.length === 0 ? this.field.zero : addn(...terms);
+      }
+      return minors[(1 << m) - 1];
+    }
+
     // General case (n >= 4): fraction-free Bareiss elimination. Each division
     // is exact (the Bareiss identity), so integer matrices stay exact instead
     // of accumulating floating-point error. Operates on a mutable 2D copy of
     // the flat, row-major data (all indices 0-based).
     const div = this.field.div.bind(this.field);
     const sub = this.field.sub.bind(this.field);
-    const isZero = this.field.isZero.bind(this.field);
+
+    // The magnitude of an inexact entry, or `undefined` for an exact or
+    // symbolic entry. When every candidate pivot of a column has a
+    // magnitude, the pivot is the largest one (partial pivoting). A float
+    // that is zero in exact arithmetic is often about 1e-16 after rounding:
+    // used as a pivot, it gave `Determinant(…).N()` = 2048 for a matrix whose
+    // determinant is −155.19. A big decimal outside the range of a machine
+    // number (`1e-400`) has no machine magnitude, so its column keeps the
+    // exact zero test.
+    const magnitude = (x: DataTypeMap[DT]): number | undefined => {
+      let size: number | undefined = undefined;
+      if (typeof x === 'number') size = Math.abs(x);
+      else if (x instanceof Complex) size = x.abs();
+      else {
+        const e = x as Expression;
+        if (isNumber(e) && e.isExact === false) size = Math.hypot(e.re, e.im);
+      }
+      if (size === undefined) return undefined;
+      if (size === 0 && !isZero(x)) return undefined;
+      if (
+        size === Infinity &&
+        typeof x === 'object' &&
+        !(x instanceof Complex) &&
+        (x as Expression).isFinite === true
+      )
+        return undefined;
+      return size;
+    };
 
     const M: DataTypeMap[DT][][] = [];
     for (let i = 0; i < m; i++) M.push(this.data.slice(i * m, (i + 1) * m));
@@ -647,8 +727,24 @@ export abstract class AbstractTensor<
     let sign = 1;
     let prev: DataTypeMap[DT] = this.field.one;
     for (let k = 0; k < m - 1; k++) {
-      if (isZero(M[k][k])) {
-        let pivotRow = -1;
+      const sizes: (number | undefined)[] = [];
+      for (let r = k; r < m; r++) sizes.push(magnitude(M[r][k]));
+      let pivotRow = k;
+      if (sizes.every((x) => x !== undefined)) {
+        // A NaN candidate is chosen, so that the NaN reaches the result.
+        // Every comparison with NaN is false, so without this test the rows
+        // of zeros around it gave a determinant of 0.
+        for (let r = k; r < m; r++) {
+          const size = sizes[r - k]!;
+          if (Number.isNaN(size)) {
+            pivotRow = r;
+            break;
+          }
+          if (size > sizes[pivotRow - k]!) pivotRow = r;
+        }
+        if (sizes[pivotRow - k] === 0) return this.field.zero;
+      } else if (isZero(M[k][k])) {
+        pivotRow = -1;
         for (let r = k + 1; r < m; r++)
           if (!isZero(M[r][k])) {
             pivotRow = r;
@@ -656,6 +752,8 @@ export abstract class AbstractTensor<
           }
         // A zero column on/below the diagonal means the matrix is singular.
         if (pivotRow === -1) return this.field.zero;
+      }
+      if (pivotRow !== k) {
         const tmp = M[k];
         M[k] = M[pivotRow];
         M[pivotRow] = tmp;

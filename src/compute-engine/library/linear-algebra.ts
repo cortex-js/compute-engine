@@ -2343,10 +2343,11 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
 
           // Symbolic Vandermonde matrices: return the closed-form difference
           // product ∏_{i<j}(nodeⱼ − nodeᵢ) directly. The general symbolic
-          // determinant (fraction-free elimination) otherwise yields a
-          // value-correct but unfactored rational form carrying a division
-          // artifact, which Factor/simplify cannot recover. Gated to symbolic
-          // matrices so numeric determinants keep their existing fast path.
+          // determinant is an expanded sum (cofactor expansion, up to 6×6) or,
+          // for a larger matrix, an unfactored quotient from fraction-free
+          // elimination. Factor and simplify cannot recover the product from
+          // either form. Gated to symbolic matrices so numeric determinants
+          // keep their existing fast path.
           if (op1Tensor.dtype === 'expression') {
             const vdm = vandermondeDifferenceProduct(op1, shape[0], ce);
             if (vdm !== undefined) return vdm;
@@ -3725,9 +3726,23 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           }
           rows.push(ce.function('List', row));
         }
-        return ce
-          .function('Determinant', [ce.function('List', rows)])
-          .evaluate();
+        // The determinant is taken from a tensor packed by shape, not
+        // through `Determinant(...)`. The variable is accepted as `any`, so
+        // an entry such as `x − a` has the type `unknown`, the list is not
+        // typed `matrix`, and `Determinant` declined: the characteristic
+        // polynomial of `[[a, b], [c, d]]` stayed `Determinant([[x − a, −b],
+        // [−c, x − d]])`. Packing by shape is safe here: each cell is the
+        // variable minus a cell of `A`, which `packTensor` accepted above.
+        // A variable with a known type that is not a number (a list, a
+        // string) keeps the route through `Determinant`, which gives a type
+        // error: `L − 1` for a list `L` is a list, not a cell.
+        if (!x.type.isUnknown && !x.type.matches('number'))
+          return ce
+            .function('Determinant', [ce.function('List', rows)])
+            .evaluate();
+        const xIminusA = packStructural(ce, ce.function('List', rows));
+        const det = xIminusA?.determinant();
+        return det === undefined ? undefined : xIminusA!.field.expression(det);
       },
     },
 

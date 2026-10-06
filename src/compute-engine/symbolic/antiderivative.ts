@@ -3256,7 +3256,9 @@ export function antiderivative(fn: Expression, index: string): Expression {
         if (!reintroduced) {
           const inner = antiderivative(innerFn, index);
           if (inner.operator !== 'Integrate')
-            return mul(...constFactors).mul(inner).evaluate();
+            return mul(...constFactors)
+              .mul(inner)
+              .evaluate();
         }
       }
     }

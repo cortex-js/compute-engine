@@ -299,8 +299,11 @@ export class TensorFieldExpression implements TensorField<Expression> {
     return lhs.isSame(rhs) === true;
   }
 
+  // `add` and `sub` use the n-ary `add()` function, not the `.add()` and
+  // `.sub()` methods: the methods fold two exact number literals to a float,
+  // so the determinant of `[[√2, 1], [1, 1]]` was `0.414…`, not `√2 − 1`.
   add(lhs: Expression, rhs: Expression): Expression {
-    return lhs.add(rhs);
+    return _addN ? _addN(lhs, rhs) : lhs.add(rhs);
   }
 
   addn(...xs: Expression[]): Expression {
@@ -320,7 +323,7 @@ export class TensorFieldExpression implements TensorField<Expression> {
   }
 
   sub(lhs: Expression, rhs: Expression): Expression {
-    return lhs.sub(rhs);
+    return _addN ? _addN(lhs, rhs.neg()) : lhs.sub(rhs);
   }
 
   mul(lhs: Expression, rhs: Expression): Expression {

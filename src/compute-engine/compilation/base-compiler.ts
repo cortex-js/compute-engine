@@ -7894,7 +7894,9 @@ export class BaseCompiler {
       BaseCompiler.declaredScalarTupleCall(expr.engine, h, expr.ops, target) !==
       undefined
     )
-      decline('The call maps over a tuple argument, which this route does not compile.');
+      decline(
+        'The call maps over a tuple argument, which this route does not compile.'
+      );
     const local = BaseCompiler.tryCompileLocalFunctionCall(h, expr.ops, target);
     if (local !== undefined) return local;
     return decline(
@@ -17378,7 +17380,10 @@ export class BaseCompiler {
     for (const [name, info] of rebound.rebound) {
       if (!declared.has(name) && inherited?.get(name)?.decline !== undefined)
         continue;
-      scope.set(name, info.decline === undefined ? {} : { decline: info.decline });
+      scope.set(
+        name,
+        info.decline === undefined ? {} : { decline: info.decline }
+      );
     }
     return scope;
   }
@@ -20431,7 +20436,9 @@ export class BaseCompiler {
    * IIFE (`(() => { …; return v })()`): it has no `block` hook and no
    * statement model of its own (the JavaScript and interval targets).
    */
-  private static writesBlocksAsIife(target: CompileTarget<Expression>): boolean {
+  private static writesBlocksAsIife(
+    target: CompileTarget<Expression>
+  ): boolean {
     return target.block === undefined && !target.bareStatementBlocks;
   }
 
@@ -23426,11 +23433,7 @@ export class BaseCompiler {
       element = `_${element}`;
     const call =
       h === 'Apply' ? ['Apply', literal.json, element] : [h, element];
-    return engine.box([
-      'Map',
-      ['Function', call, element],
-      arg.json,
-    ] as never);
+    return engine.box(['Map', ['Function', call, element], arg.json] as never);
   }
 
   /**
@@ -23445,7 +23448,9 @@ export class BaseCompiler {
     while (isFunction(body, 'Block') && body.nops === 1) body = body.op1;
     if (!isFunction(body) || name === undefined) return false;
     const last = body.ops[body.nops - 1];
-    return isSymbol(last, name) && (body.operator === 'Apply' || body.nops === 1);
+    return (
+      isSymbol(last, name) && (body.operator === 'Apply' || body.nops === 1)
+    );
   }
 
   /**
@@ -23556,7 +23561,9 @@ export class BaseCompiler {
     const isListOfTuples = (x: Expression) =>
       isFunction(x, 'List') &&
       x.nops > 0 &&
-      x.ops.every((e) => tupleTypeOf(e) !== undefined || isFunction(e, 'Tuple'));
+      x.ops.every(
+        (e) => tupleTypeOf(e) !== undefined || isFunction(e, 'Tuple')
+      );
     const isOtherCollection = (x: Expression) =>
       tupleTypeOf(x) === undefined &&
       !isTupleShapedType(resolveTypeAlias(x.type.type)) &&
@@ -23574,7 +23581,9 @@ export class BaseCompiler {
       mappedArgs?.add(listAt + args.length - callArgs.length);
       return engine.function(
         'List',
-        list.ops.map((e) => call(callArgs.map((x, i) => (i === listAt ? e : x))))
+        list.ops.map((e) =>
+          call(callArgs.map((x, i) => (i === listAt ? e : x)))
+        )
       );
     }
 
@@ -23616,10 +23625,7 @@ export class BaseCompiler {
         (tupleTypeOf(x) !== undefined || isFunction(x, 'Tuple'))
     );
     if (!mapped.some((m) => m)) return undefined;
-    if (
-      listsMap &&
-      callArgs.some((x, i) => !mapped[i] && isOtherCollection(x))
-    )
+    if (listsMap && callArgs.some((x, i) => !mapped[i] && isOtherCollection(x)))
       decline(
         'a tuple argument maps over its components at a parameter ' +
           'declared as a scalar, and another argument is a collection.'

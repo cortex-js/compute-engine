@@ -2110,11 +2110,11 @@ function staticallyPinnedCallee(
 
 /** `x` when it is a function literal that annotates at least one of its
  * parameters (`(u: real) ↦ 7`), and `undefined` otherwise. */
-function annotatedLiteral(
-  x: Expression | undefined
-): Expression | undefined {
+function annotatedLiteral(x: Expression | undefined): Expression | undefined {
   if (!isFunction(x, 'Function')) return undefined;
-  return x.ops.slice(1).some((p) => functionLiteralParameterType(p) !== undefined)
+  return x.ops
+    .slice(1)
+    .some((p) => functionLiteralParameterType(p) !== undefined)
     ? x
     : undefined;
 }
@@ -2947,7 +2947,8 @@ function makeCanonicalFunctionCore(
         // now, and a later assignment can replace it. Keep the operands, so
         // that the call is checked again against the new literal
         // (`BoxedFunction._recheckedCall()`).
-        if (pinned && cleaned.some((x) => !x.isValid)) fn._refusedOps = boxedOps;
+        if (pinned && cleaned.some((x) => !x.isValid))
+          fn._refusedOps = boxedOps;
         return fn;
       }
       const fn = new BoxedFunction(ce, name, boxedOps, {

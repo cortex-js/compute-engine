@@ -2375,8 +2375,7 @@ export function refusesAbsentArgument(
  */
 function isScalarParameterTuple(t: Type, param: Type): boolean {
   if (param === 'never' || param === 'nothing') return false;
-  if (!isSubtype(param, 'number') && !isSubtype(param, 'boolean'))
-    return false;
+  if (!isSubtype(param, 'number') && !isSubtype(param, 'boolean')) return false;
   const r = resolveTypeAlias(t);
   if (typeof r !== 'object' || r.kind !== 'tuple') return false;
   return r.elements.every((e) => {

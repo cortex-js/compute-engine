@@ -1,3 +1,35 @@
+## [Unreleased]
+
+### Issues Resolved
+
+- **A definite integral with an irrational bound keeps its exact value.**
+  `∫_2^{√5} 4 dx` was `0.944…`; it is now `4√5 − 8`. The same applied to
+  `EvaluateAt(f, a, b)` whenever `f(b)` and `f(a)` are two different exact
+  numbers, as `√3` and `√2`. `EvaluateAt(…).N()` still gives a float.
+
+- **The sum of two lists or matrices keeps exact elements exact.**
+  `[√2, 2] + [1, 1]` was `[2.414…, 3]`; it is now `[1 + √2, 3]`, and
+  `[√2, 2] − [1, 1]` is `[−1 + √2, 1]`. A list plus a number was already
+  exact. `.N()` still gives floats.
+
+- **Determinants of matrices with irrational or symbolic entries.**
+  - The determinant of `[[√2, 1], [1, 1]]` was `0.414…`; it is now `√2 − 1`.
+    The same applied to every determinant whose computation subtracts two
+    different exact numbers.
+  - From 4×4, a matrix with a symbol or an exact irrational entry has an
+    expanded determinant. The determinant of a 4×4 matrix of 16 symbols was
+    a quotient of 1,900 characters with terms in `a⁴`; it is now the sum of
+    its 24 terms. This applies up to 6×6 for a matrix with symbols, and up
+    to 10×10 for a matrix of numbers. A singular 4×4 matrix with radical
+    entries has determinant `0`, where it was a nonzero float.
+  - `Determinant(m).N()` of a 4×4 or larger matrix chooses the largest pivot
+    of each column. A pivot that is zero in exact arithmetic but about
+    `1e-16` after rounding gave `2048` for a matrix whose determinant is
+    `−155.19`.
+  - `CharacteristicPolynomial([[a, b], [c, d]], x)` stayed
+    `Determinant([[x − a, −b], [−c, x − d]])`; it is now
+    `x² − (a + d)x + ad − bc`.
+
 ## 0.148.0 _2026-10-05_
 
 ### Behavior Changes
