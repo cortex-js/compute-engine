@@ -32,7 +32,7 @@ import {
   Serializer,
   Terminator,
 } from '../types.js';
-import { joinLatex, supsub } from '../tokenizer.js';
+import { endsWithSuperscript, joinLatex, supsub } from '../tokenizer.js';
 import { latexTemplate } from '../serializer-style.js';
 import {
   escapeText,
@@ -51,6 +51,15 @@ import { reducedRationalFromDecimal } from '../../numerics/rationals.js';
 import { parseQuantifier } from './definitions-logic.js';
 import { absorbSubscripts } from '../parse-symbol.js';
 import { continuationRanges } from '../range-provenance.js';
+
+/** Negative-signed-set modifier for a base number set: `\mathbb{Z}^-` is the
+ * negative integers, `\mathbb{R}^-` the negative reals. Sets with no
+ * negative counterpart (`\mathbb{N}`, `\mathbb{C}`) are left to the general
+ * `Superminus` postfix. */
+const NEGATIVE_SET_MODIFIER: Record<string, string> = {
+  Integers: 'NegativeIntegers',
+  RealNumbers: 'NegativeNumbers',
+};
 
 // ---------------------------------------------------------------------------
 // Component-access member-name table (C2)
@@ -3342,18 +3351,30 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       if (parser.options.strict === false && /^[0-9]$/.test(parser.peek))
         return null;
       // In non-strict mode, `e^-x` is `e^{-x}`, not `Superminus(e)·x`
-      return (
-        parser._parseLenientSignedExponent?.(lhs, '-') ??
-        (['Superminus', lhs] as MathJsonExpression)
-      );
+      const power = parser._parseLenientSignedExponent?.(lhs, '-') ?? null;
+      if (power !== null) return power;
+      // A `-` superscript on a number-set symbol is the negative-signed-set
+      // modifier: `\mathbb{Z}^-` (and the Unicode `ℤ^-`) is the same set as
+      // the terse `\Z^-`, whose own trigger lives in `definitions-sets.ts`.
+      // The `^+` counterpart is in the `PseudoInverse` postfix of
+      // `definitions-linear-algebra.ts`.
+      if (typeof lhs === 'string' && Object.hasOwn(NEGATIVE_SET_MODIFIER, lhs))
+        return NEGATIVE_SET_MODIFIER[lhs] as MathJsonExpression;
+      return ['Superminus', lhs] as MathJsonExpression;
     },
   },
   { name: 'Subminus', latexTrigger: ['_', '-'], kind: 'postfix' },
   {
     latexTrigger: ['^', '*'],
     kind: 'postfix',
-    parse: (_parser: Parser, lhs: MathJsonExpression) =>
-      ['Superstar', lhs] as MathJsonExpression,
+    parse: (_parser: Parser, lhs: MathJsonExpression) => {
+      // A `*` superscript on the non-negative integers is the set of
+      // positive integers. `\mathbb{N}^*` and `\N^*` have triggers of their
+      // own in `definitions-sets.ts`; this covers the spellings that do not,
+      // such as the Unicode `ℕ^*`.
+      if (lhs === 'NonNegativeIntegers') return 'PositiveIntegers';
+      return ['Superstar', lhs] as MathJsonExpression;
+    },
   },
   // { name: 'Superstar', latexTrigger: ['^', '\\star'], kind: 'postfix' },
   {
@@ -3380,7 +3401,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       parsePrime(parser, lhs, 1),
     serialize: (serializer, expr) => {
       const n2 = machineValue(operand(expr, 2)) ?? 1;
-      const base = serializer.serialize(operand(expr, 1));
+      const base = serializePrimeBase(serializer, operand(expr, 1));
       // Note: the prime command must be braced: an undelimited
       // `A^\prime` swallows a following letter into the command name
       // (`A^\primeC`) and no longer round-trips.
@@ -3529,7 +3550,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
   {
     name: 'Derivative',
     serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
-      const base = serializer.serialize(operand(expr, 1));
+      const base = serializePrimeBase(serializer, operand(expr, 1));
 
       // The multi-index of orders, one per argument of the function.
       const orders = operands(expr).slice(1);
@@ -4248,6 +4269,36 @@ function absorbPrimeSubscript(
     return lhs;
   }
   return ['Subscript', lhs, sub];
+}
+
+/**
+ * Write the operand that a prime mark (`^{\\prime}`, `^{(n)}`) is attached
+ * to, for the `Prime` and `Derivative` serializers.
+ *
+ * The prime is written as a superscript, so the operand is a base directly
+ * under a `^` and follows the same fencing rules as the base of a `Power`
+ * (`wrapPowerBase`): a symbol or a function name stays bare (`f^{\\prime}`,
+ * `\\sin^{\\prime}`), while a sum, a product, a lambda or a power is fenced
+ * (`(x+2)^{\\prime}`, `(x\\mapsto x^2)^{\\prime}`, `(x^2)^{\\prime}`). Without
+ * the fence, `x^2^{\\prime}` is a double superscript, which TeX rejects, and
+ * `x+2^{\\prime}` reads back as `x + (2)'`.
+ *
+ * In addition to what `wrapPowerBase` fences, any other base whose written
+ * form ends with a superscript is fenced for the same double-superscript
+ * reason: a nested `Prime` or `Derivative` from raw input, `A^T`,
+ * `A^\\dagger`, and also a symbol whose spelling ends with a superscript
+ * (`PositiveIntegers` is written `\\mathbb{N}^*`, and `x__2` is `x^{2}`).
+ */
+function serializePrimeBase(
+  serializer: Serializer,
+  base: MathJsonExpression | null
+): string {
+  const latex = serializer.wrapPowerBase(base);
+  if (base === null || !endsWithSuperscript(latex)) return latex;
+  return serializer.wrapString(
+    latex,
+    serializer.options.groupStyle(base, serializer.level + 1)
+  );
 }
 
 function parsePrime(

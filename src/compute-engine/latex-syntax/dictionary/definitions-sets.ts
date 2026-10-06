@@ -552,6 +552,10 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     latexTrigger: '\\mathbb{C}',
   },
   { latexTrigger: '\\C', parse: 'ComplexNumbers' },
+  // The Unicode double-struck letters (ℕ ℤ ℚ ℝ ℂ) read as the matching
+  // `\mathbb{…}` set, as the Unicode Greek letters, `≤` and `∞` already do.
+  // Parse only: the sets serialize as `\mathbb{…}`.
+  { latexTrigger: 'ℂ', parse: 'ComplexNumbers' }, // U+2102 DOUBLE-STRUCK CAPITAL C
   // `\mathbb{C}^+` is input shorthand for the open upper half-plane. In a
   // membership (`z \in \mathbb{C}^+`) it canonicalizes to `Im(z) > 0` (see the
   // Element handler in library/sets.ts); the longer trigger wins over the
@@ -570,6 +574,7 @@ export const DEFINITIONS_SETS: LatexDictionary = [
   { latexTrigger: ['\\varnothing'], parse: 'EmptySet' }, // Parsing only
   { name: 'Integers', standaloneSymbol: true, latexTrigger: '\\mathbb{Z}' },
   { latexTrigger: '\\Z', parse: 'Integers' },
+  { latexTrigger: 'ℤ', parse: 'Integers' }, // U+2124 DOUBLE-STRUCK CAPITAL Z
   { name: 'Primes', standaloneSymbol: true, latexTrigger: ['\\mathbb{P}'] },
   {
     name: 'RationalNumbers',
@@ -577,8 +582,10 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     latexTrigger: '\\mathbb{Q}',
   },
   { latexTrigger: '\\Q', parse: 'RationalNumbers' },
+  { latexTrigger: 'ℚ', parse: 'RationalNumbers' }, // U+211A DOUBLE-STRUCK CAPITAL Q
   { name: 'RealNumbers', standaloneSymbol: true, latexTrigger: '\\mathbb{R}' },
   { latexTrigger: '\\R', parse: 'RealNumbers' },
+  { latexTrigger: 'ℝ', parse: 'RealNumbers' }, // U+211D DOUBLE-STRUCK CAPITAL R
   {
     name: 'TranscendentalNumbers',
     standaloneSymbol: true,
@@ -725,6 +732,7 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     standaloneSymbol: true,
     latexTrigger: '\\mathbb{N}',
   },
+  { latexTrigger: 'ℕ', parse: 'NonNegativeIntegers' }, // U+2115 DOUBLE-STRUCK CAPITAL N
   { latexTrigger: '\\Z^{+0}', parse: 'NonNegativeIntegers' },
   { latexTrigger: '\\Z^{\\geq}', parse: 'NonNegativeIntegers' },
   { latexTrigger: '\\Z^{\\ge}', parse: 'NonNegativeIntegers' },

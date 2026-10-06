@@ -450,14 +450,12 @@ describe('Pins: notations that are NOT ring constructions', () => {
     expect(parse('\\Z_+')).toBe('PositiveIntegers');
     expect(parse('\\mathbb{R}_+')).toBe('PositiveNumbers');
     expect(parse('\\R^-')).toBe('NegativeNumbers');
+    expect(parse('\\mathbb{R}^-')).toBe('NegativeNumbers');
+    expect(parse('\\mathbb{Z}^-')).toBe('NegativeIntegers');
     expect(parse('\\mathbb{Z}_-')).toBe('NegativeIntegers');
     expect(parse('\\mathbb{Z}_{\\ge0}')).toBe('NonNegativeIntegers');
     expect(parse('\\mathbb{R}_{<0}')).toBe('NegativeNumbers');
     expect(parse('\\mathbb{N}_0')).toBe('NonNegativeIntegers');
-  });
-
-  test('`\\mathbb{R}^-` (no terse trigger) is unchanged', () => {
-    expect(parse('\\mathbb{R}^-')).toEqual(['Superminus', 'RealNumbers']);
   });
 
   test('the terse `\\R`/`\\Z`/`\\N` sign restrictions are NOT QuotientRing', () => {

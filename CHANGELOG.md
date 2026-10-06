@@ -251,6 +251,27 @@
 
 ### Issues Resolved
 
+- **A prime on a compound operand is fenced, and the Unicode letters ℕ ℤ ℚ ℝ ℂ
+  are number sets**
+  ([#420](https://github.com/cortex-js/compute-engine/issues/420), reported by
+  [enumeratio](https://github.com/enumeratio)). The LaTeX of `Prime` and
+  `Derivative` put the prime mark straight after the operand, so
+  `["Prime", ["Power", "x", 2]]` was `x^2^{\prime}`, a double superscript that
+  TeX rejects, and `["Derivative", ["Function", ["Power", "x", 2], "x"]]` was
+  `x\mapsto x^2^{\prime}`, which reads as a prime on the body. The operand is
+  now fenced as the base of a power is: `(x^2)^{\prime}`,
+  `(x\mapsto x^2)^{\prime}`, `(x+2)^{\prime}`, while a symbol or a function name
+  stays bare (`f^{\prime}`, `\sin^{\prime}`). The Unicode double-struck letters
+  `ℕ`, `ℤ`, `ℚ`, `ℝ` and `ℂ` parsed as strings, so `x \in ℝ` was
+  `Element(x, 'ℝ')` and `ℤ[\omega]` was a parse error. They now read as
+  `\mathbb{N}`, `\mathbb{Z}`, `\mathbb{Q}`, `\mathbb{R}` and `\mathbb{C}`, as
+  the Unicode Greek letters, `≤` and `∞` already did: `x \in ℝ` is
+  `Element(x, RealNumbers)` and `ℤ[\omega]` is `Adjoin(Integers, omega)`. On the
+  way, `\mathbb{Z}^-` and `\mathbb{R}^-` (and so `ℤ^-` and `ℝ^-`) now name
+  `NegativeIntegers` and `NegativeNumbers`, as the terse `\Z^-` and `\R^-`
+  already did; they were the inert `Superminus(Integers)` and
+  `Superminus(RealNumbers)`. `ℕ^*` is `PositiveIntegers`, as `\mathbb{N}^*` is.
+
 - **A later use narrows an inferred union type.** A symbol whose type was
   inferred as a union by one use (`ToUpperCase(s)` gives `s` the type
   `character | string`) was refused by a later use whose parameter admits

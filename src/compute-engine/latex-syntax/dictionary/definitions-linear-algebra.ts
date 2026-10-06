@@ -310,7 +310,7 @@ export const DEFINITIONS_LINEAR_ALGEBRA: LatexDictionary = [
       const power = parser._parseLenientSignedExponent?.(lhs, '+') ?? null;
       if (power !== null) return power;
       if (typeof lhs === 'string') {
-        if (lhs in POSITIVE_SET_MODIFIER)
+        if (Object.hasOwn(POSITIVE_SET_MODIFIER, lhs))
           return POSITIVE_SET_MODIFIER[lhs] as MathJsonExpression;
         if (KNOWN_SET_SYMBOLS.has(lhs)) return null;
       }

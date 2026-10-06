@@ -5178,7 +5178,14 @@ export class _Parser implements Parser {
     const baseStart = this._scriptBaseStart;
     let b = start - 3;
     while (this._tokens[b] === '<space>') b--;
-    const letterBase = sign === '-' && /^\p{L}$/u.test(this._tokens[b] ?? '');
+    // A Unicode double-struck letter (`ℝ`) is a one-character spelling of a
+    // `\mathbb{…}` command and is read as a command base, not as a letter:
+    // `ℝ^- x` keeps the negative-set reading of `\mathbb{R}^- x`.
+    const baseToken = this._tokens[b] ?? '';
+    const letterBase =
+      sign === '-' &&
+      /^\p{L}$/u.test(baseToken) &&
+      !/^[ℕℤℚℝℂ]$/.test(baseToken);
     this.index = start - 1;
     const superscript = this.parseLenientExponent(letterBase);
     if (superscript === null) {
