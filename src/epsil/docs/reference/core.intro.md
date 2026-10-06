@@ -269,6 +269,16 @@ characters("naïve")
 // ➔ ["n", "a", "ï", "v", "e"]
 ```
 
+Indexing a string gives a character. A character and the one-character string
+with the same content are the same value, so every string operation accepts a
+character where it accepts a string, and a dictionary accepts a character as a
+key. The result is the result for the one-character string:
+
+```epsil
+toUpperCase("abc"[1])
+// ➔ "A"
+```
+
 A string literal can include the value of an expression with `\(…)`:
 
 ```epsil

@@ -483,6 +483,7 @@ import {
   isProvablyNonTupleCollectionParticipant,
   isProvablyTupleParticipant,
   installUnrolledBigOpLane,
+  stringEvidenceSource,
   pointHasBroadcastComponent,
   shapeOperandRefusal,
   unfaithfulComparisonAggregate,
@@ -822,20 +823,57 @@ function assertNoStringOperand(
 }
 
 /**
- * True when the operand is a SCALAR piece of text: provably a `string` or
- * provably a `character`.
+ * True when the operand is a SCALAR piece of text: provably a `string`,
+ * provably a `character`, or provably one of the two (`string | character`).
  *
  * `character` and `string` are disjoint siblings in the type lattice, so
  * `isProvablyStringOperand` alone answers "no" for a character and every
  * text-accepting lowering has to ask both questions. A character lowers to the
  * one-cluster JS string it denotes, so wherever a string operand is
- * concatenated or compared by value, a character operand is handled by exactly
- * the same emitted code — which is why the two are admitted together by
- * `StringJoin`/`String`, the operators whose interpreter counterparts take
- * either kind.
+ * concatenated, compared by value or passed to a string kernel, a character
+ * operand is handled by exactly the same emitted code. Every string operator
+ * of the interpreter accepts a character wherever it accepts a string, and a
+ * symbol whose type is inferred from such a parameter is typed
+ * `string | character`, which is why the union is admitted too.
  */
 function isProvablyTextOperand(x: Expression): boolean {
-  return isProvablyStringOperand(x) || isProvablyCharacterOperand(x);
+  if (isProvablyStringOperand(x) || isProvablyCharacterOperand(x)) return true;
+  const t = resolveTypeForCompilation(x.type.type);
+  return t !== 'never' && isSubtype(t, TEXT_TYPE);
+}
+
+/** The type of a scalar piece of text: `isProvablyTextOperand` tests it. */
+const TEXT_TYPE = parseType('string | character');
+
+/**
+ * True when the operand is a `string` at run time, so that a COLLECTION
+ * operator (`Length`, `At`) can segment it into its characters with
+ * `_SYS.chars`. Two kinds of operand qualify:
+ *
+ * - an operand that is provably a `string`;
+ * - a free variable typed `string | character`. A free variable used at a
+ *   text parameter of a string operator gets that type by inference
+ *   (`ToUpperCase(s)` types `s` as `string | character`). The caller of the
+ *   compiled function supplies its value as a host JavaScript string, and a
+ *   host string is a `string` for the interpreter, never a `character`.
+ *
+ * Any other operand of the union type can be a character at run time: a
+ * computed value (`If(b, "ab", CharacterFrom("c"))`), a local variable or a
+ * function parameter (both are in `boundVars`), or a symbol with an assigned
+ * value (the compiled code reads the value itself). The interpreter's
+ * collection operators reject a character (`Length` of a character is an
+ * `incompatible-type` error), and a JavaScript string cannot tell the two
+ * kinds apart, so these operands are not admitted. A provable `character` is
+ * not admitted for the same reason.
+ */
+function isRunTimeStringOperand(
+  x: Expression,
+  boundVars: ReadonlySet<string> | undefined
+): boolean {
+  if (isProvablyStringOperand(x)) return true;
+  if (!isSymbol(x) || boundVars?.has(x.symbol)) return false;
+  if (isProvablyCharacterOperand(x) || !isProvablyTextOperand(x)) return false;
+  return x.engine._getSymbolValue(x.symbol) === undefined;
 }
 
 /**
@@ -874,9 +912,15 @@ function hasPossiblyTextElements(e: Expression | undefined): boolean {
  * combining mark). `elementsArg` cannot rescue it either: segmenting is gated
  * on PROOF of a string, so the union is passed through unsegmented. The
  * collection funnels therefore fail closed on it.
+ *
+ * The type is read at `stringEvidenceSource(e)`: a string-preserving operator
+ * applied to a subject whose type does not decide between a string and a list
+ * (`RotateLeft(S, 1)` for a bare `S: indexed_collection`) is typed
+ * `list<unknown> | string`, but its `string` member says no more than the
+ * subject's type, which does not fail closed here.
  */
 export function couldBeStringOperand(e: Expression): boolean {
-  const t = jsType(e);
+  const t = jsType(stringEvidenceSource(e));
   if (typeof t !== 'object' || t.kind !== 'union') return false;
   return t.types.some(
     (m) =>
@@ -1789,6 +1833,11 @@ function admitsRuntimeCheckedArray(e: Expression): boolean {
   // then declines, so that the interpreter evaluates it.
   if (e.valueDefinition?.inferredType !== true) return false;
   if (couldBeStringOperand(e)) return false;
+  // A symbol whose type is inferred `string` matches `collection<any>`, but
+  // its value is a JavaScript string, never an array, so `_SYS.arr` would
+  // always throw. The caller reads such a symbol as a string instead
+  // (`isRunTimeStringOperand`).
+  if (isSubtype(t, 'string')) return false;
   if (
     e.type.matches('set<any>') ||
     e.type.matches('dictionary<any>') ||
@@ -3007,9 +3056,9 @@ function compileJSCharacters(
   const arg = args[0];
   if (arg === null || arg === undefined)
     throw new Error(`Could not compile \`${kind}\`: missing argument`);
-  if (args.length !== 1 || !isProvablyStringOperand(arg))
+  if (args.length !== 1 || !isProvablyTextOperand(arg))
     throw new Error(
-      `Could not compile \`${kind}\`: the operand must be provably a string. The ` +
+      `Could not compile \`${kind}\`: the operand must be provably a string or a character. The ` +
         `interpreter leaves a non-string operand unevaluated (or reports an ` +
         `\`incompatible-type\` error). The interpreter evaluates it instead.`
     );
@@ -4033,7 +4082,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // string: that counts UTF-16 code units, so a ZWJ family emoji would
     // measure 8 and a decomposed `"é"` 2, where the interpreter answers 1.
     // (`docs/STRING_ROADMAP.md`, decision D13.)
-    if (isProvablyStringOperand(arg))
+    if (isRunTimeStringOperand(arg, target.boundVars))
       return `_SYS.chars(${compile(arg)}).length`;
     if (!isIndexedCollectionOperand(arg, target)) {
       // Counting needs no positions or order, so an abstract collection
@@ -4120,7 +4169,19 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // the JS string directly would select UTF-16 code units and hand back half
     // a surrogate pair.
     // (`docs/STRING_ROADMAP.md`, decision D13.)
-    const stringBase = isProvablyStringOperand(coll);
+    const stringBase = isRunTimeStringOperand(coll, target.boundVars);
+    // Any OTHER base that may be text at run time (a `string | list<number>`
+    // symbol, a computed `string | character` value) fails closed. The "could
+    // be an indexed collection" test below admits it through its string arm,
+    // and `_SYS.at` then reads a JavaScript string as a non-array base and
+    // answers no value, where the interpreter answers the character at that
+    // index.
+    if (!stringBase && couldBeStringOperand(coll))
+      throw new Error(
+        `Could not compile \`At\`: the first operand may be text at run time ` +
+          `(type \`${coll.type.toString()}\`) but is not provably a string. ` +
+          `The interpreter evaluates it instead.`
+      );
     // A SYMBOL whose inferred type says "a collection" without proving an
     // indexed one and without an indexed arm to admit it below
     // (`let q = Fold((acc, i) => Join(acc, [p[i]]), [], 1..n)` infers
@@ -4163,9 +4224,10 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // silently dropped), and `_SYS.at` reproduces that at RUN time. A static
     // gate was tried and reverted — the index's declared type is routinely far
     // wider than its runtime value (a comprehension variable types as
-    // `boolean | indexed_collection | number | string`), so refusing on
-    // "not provably real" declined ordinary compilable code such as `P[n]`
-    // inside a comprehension. Matching the interpreter beats refusing.
+    // `boolean | character | indexed_collection | number | string`), so
+    // refusing on "not provably real" declined ordinary compilable code such
+    // as `P[n]` inside a comprehension. Matching the interpreter beats
+    // refusing.
     // A positive integer needs only the 1-based offset. The nullish fallback
     // preserves absent positions without a helper call or explicit bounds test.
     if (canIndexArrayDirectly(coll, index, target)) {
@@ -4218,7 +4280,12 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // which the object-domain mapping below turns into `undefined`. So a row
     // read of a restricted matrix whose condition is false is `undefined`
     // (the interpreter's `Missing`), and a number read is `NaN`.
-    const eltT = collectionElementType(stripMissingFromType(jsType(coll)));
+    // A string base read as a string (`stringBase`) yields characters even
+    // when its static type is the union `string | character`, which has no
+    // element type of its own.
+    const eltT = stringBase
+      ? 'character'
+      : collectionElementType(stripMissingFromType(jsType(coll)));
     const scalarIndex =
       !isIndexedCollectionOperand(index) &&
       !index.type.matches('collection<any>');
@@ -4533,8 +4600,10 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // `[...s]` nor `s.split('')` is faithful: probed, `Characters` answers 1
   // element for a ZWJ family emoji and for a regional-indicator flag (5 and 2
   // code points), and 1 for a decomposed `"e" + U+0301`. `_SYS.chars` runs the
-  // same segmenter. A non-string operand leaves the interpreter's `Characters`
-  // inert (or an `incompatible-type` error), so it fails closed.
+  // same segmenter. A character operand is accepted as a string is (it is the
+  // one-cluster string with the same content). Any other operand leaves the
+  // interpreter's `Characters` inert (or an `incompatible-type` error), so it
+  // fails closed.
   Characters: (args, compile) =>
     compileJSCharacters('Characters', args, compile),
   // Shipped synonym of `Characters` (v0.30), same interpreter handler.
@@ -4559,7 +4628,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // Everything else fails closed, because the interpreter leaves it
   // unevaluated or reports a type error rather than coercing: a non-text
   // element (`StringJoin([1, 2])` is inert — coercion is `String`, a different
-  // operator), a non-string separator, and a SCALAR `character` subject, which
+  // operator), a separator that is neither a string nor a character, and a
+  // SCALAR `character` subject, which
   // is an `incompatible-type` error against the `collection<string |
   // character>` parameter (a character is one element, not a collection of
   // them).
@@ -4581,10 +4651,10 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       );
     let separator = '""';
     if (args.length === 2) {
-      if (!isProvablyStringOperand(args[1]))
+      if (!isProvablyTextOperand(args[1]))
         throw new Error(
           `Could not compile \`StringJoin\`: the separator must be provably a ` +
-            `string; the interpreter leaves the expression unevaluated on any ` +
+            `string or a character; the interpreter leaves the expression unevaluated on any ` +
             `other operand. The interpreter evaluates it instead.`
         );
       separator = `_SYS.ct(${compile(args[1])})`;
@@ -10578,16 +10648,6 @@ function joinIfString(source: Expression | undefined, code: string): string {
   return `(${code}).join("").normalize()`;
 }
 
-/**
- * Compile a STRING operand of a string-specific operator, failing closed
- * when it is not provably a `string`.
- *
- * `character` is deliberately NOT admitted even though it lowers to a
- * one-cluster JS string: every operator using this funnel declares a `string`
- * parameter, so a character operand is an `incompatible-type` error in the
- * interpreter, and compiling it would answer a value where interpretation
- * answers an error. `position` labels the operand in the diagnostic.
- */
 /** Is this operand a compiled pattern — a `RegExp(...)` node or a
  * `regexp`-typed value? */
 function isRegExpOperand(arg: Expression | undefined): boolean {
@@ -10644,15 +10704,24 @@ function literalPatternArg(
   };
 }
 
+/**
+ * Compile a TEXT operand of a string-specific operator, failing closed when
+ * it is not provably text.
+ *
+ * A `string`, a `character` and a `string | character` operand are all
+ * admitted: each lowers to a JS string, and the interpreter accepts each of
+ * them at these parameters, which every operator using this funnel declares
+ * as `string | character`. `position` labels the operand in the diagnostic.
+ */
 function stringArg(
   kind: string,
   arg: Expression | undefined,
   compile: (expr: Expression) => string,
   position: string
 ): string {
-  if (arg === undefined || !isProvablyStringOperand(arg))
+  if (arg === undefined || !isProvablyTextOperand(arg))
     throw new Error(
-      `Could not compile \`${kind}\`: ${position} is not provably a string ` +
+      `Could not compile \`${kind}\`: ${position} is not provably a string or a character ` +
         `(type \`${arg === undefined ? 'missing' : arg.type.toString()}\`). The interpreter evaluates it instead.`
     );
   return compile(arg);

@@ -307,6 +307,79 @@ describe('Fresh-matrix-inference repair (P-matrix pins)', () => {
     expect(sym(ce, 'A')).toBe('matrix');
     expect(sym(ce, 'B')).toBe('matrix');
   });
+
+  // `Length(xs)` narrows an untyped `xs` to `collection` earlier in the same
+  // boxing. That is collection evidence, not a numeric guess made by `Add` or
+  // `Multiply`, so a later collection accessor does not repair `xs` to
+  // `matrix`. Before, `First(xs)` retyped `xs` as `matrix`, typed its own
+  // result as a row (`missing | vector`), and a later `Filter` over `xs`
+  // refused a scalar predicate.
+  test('a symbol narrowed to a collection by Length is not repaired to matrix', () => {
+    const ce = new ComputeEngine();
+    const first = ce.box([
+      'Function',
+      ['Block', ['Length', 'xs'], ['First', 'xs']],
+      'xs',
+    ]);
+    expect(first.isValid).toBe(true);
+    expect(first.type.toString()).toBe('(xs: collection) -> unknown');
+
+    const rest = ce.box([
+      'Function',
+      ['Block', ['Length', 'ys'], ['Rest', 'ys']],
+      'ys',
+    ]);
+    expect(rest.isValid).toBe(true);
+    // `ys` is a collection, which can be a string: `Rest` of a string is a
+    // string, so the result type joins the string and list arms.
+    expect(rest.type.toString()).toBe(
+      '(ys: indexed_collection<unknown>) -> list<unknown> | string'
+    );
+
+    const filter = ce.box([
+      'Function',
+      [
+        'Block',
+        ['Length', 'zs'],
+        ['Filter', 'zs', ['Function', ['Less', 'x', ['First', 'zs']], 'x']],
+      ],
+      'zs',
+    ]);
+    expect(filter.isValid).toBe(true);
+    expect(filter.type.toString()).toBe('(zs: collection) -> collection');
+    expect(
+      ce
+        .box(['Apply', filter, ['List', 3, 1, 2]])
+        .evaluate()
+        .toString()
+    ).toBe('[1,2]');
+  });
+
+  test('a fresh numeric guess beside a collection-typed symbol is still repaired', () => {
+    // `B` is narrowed to `collection` by `Length`; `A` is guessed numeric by
+    // `Multiply` and repaired to `matrix` by `Determinant`.
+    const ce = new ComputeEngine();
+    const f = ce.box([
+      'Function',
+      ['Block', ['Length', 'B'], ['Determinant', ['Multiply', 2, 'A']]],
+      'A',
+      'B',
+    ]);
+    expect(f.isValid).toBe(true);
+    expect(f.type.toString()).toBe('(A: matrix, B: collection) -> number');
+  });
+
+  test('a collection-typed symbol at a matrix parameter is narrowed, not repaired', () => {
+    // Ordinary inference narrows `collection` to `matrix`.
+    const ce = new ComputeEngine();
+    const f = ce.box([
+      'Function',
+      ['Block', ['Length', 'xs'], ['Determinant', 'xs']],
+      'xs',
+    ]);
+    expect(f.isValid).toBe(true);
+    expect(f.type.toString()).toBe('(xs: matrix) -> number');
+  });
 });
 
 describe('Fresh-matrix repair — phase 2a slot restore (docs/TYPE-SYSTEM.md)', () => {

@@ -137,6 +137,12 @@ export function executeEpsil(
   const enclosingBatch = ce._epsilBatchId;
   ce._epsilBatchId = ++epsilBatchCounter;
   try {
+    // A program runs with no iteration limit: a loop written by its author
+    // runs until it ends, and the host's time budget is the bound. A limit
+    // that the host assigned to the engine still applies. The engine keeps
+    // the lifted limit after the run, so that a lazy collection the program
+    // returns can be enumerated by the host in full.
+    ce._liftDefaultIterationLimit();
     return executeEpsilBatch(ce, source, options);
   } finally {
     ce._epsilBatchId = enclosingBatch;

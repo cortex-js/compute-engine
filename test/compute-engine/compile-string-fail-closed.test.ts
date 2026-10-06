@@ -1593,7 +1593,8 @@ describe('tier 2: Characters / GraphemeClusters', () => {
     const numeric = compile(ce.box(['Characters', 123]));
     expect(numeric.success).toBe(false);
     // A bare SYMBOL operand does not exercise the gate either: the same
-    // signature INFERS it `string`, which is provable evidence, so it compiles
+    // signature INFERS it `string | character`, which is provable text
+    // evidence (a character lowers to a one-cluster JS string), so it compiles
     // — and `_SYS.chars` throws loudly if the host then supplies a non-string.
     const inferred = compile(ce.box(['Characters', 'uq']), { fallback: false });
     expect(inferred.success).toBe(true);
@@ -2059,5 +2060,58 @@ describe('string COLLECTION operations lower grapheme-aware', () => {
     expect(r.success).toBe(true);
     expect(r.run!()).toEqual(['a', 'b', 'c']);
     expect(expr.evaluate().toString()).toBe('["a","b","c"]');
+  });
+});
+
+describe('string-preserving operators: the evidence is the subject', () => {
+  // A string-preserving operator (`RotateLeft`, `Reverse`, `Take`, …) returns
+  // a string exactly when its subject is one. On a subject whose type does not
+  // decide that (a bare `indexed_collection` or `list`), overload resolution
+  // types the application with the join of the string and list results
+  // (`list<unknown> | string`). That `string` member is not string evidence:
+  // the gate reads the subject instead, recursively.
+  const shapes: Array<[string, unknown]> = [
+    ['Equal(RotateLeft(S, 1), 3)', ['Equal', ['RotateLeft', 'S', 1], 3]],
+    [
+      'Less(Take(Reverse(S), 2), 2)',
+      ['Less', ['Take', ['Reverse', 'S'], 2], 2],
+    ],
+    [
+      'Equal(RotateLeft(S, 1) + RotateLeft(S, -1), 4)',
+      ['Equal', ['Add', ['RotateLeft', 'S', 1], ['RotateLeft', 'S', -1]], 4],
+    ],
+  ];
+
+  describe.each(['indexed_collection', 'list'])(
+    'a subject declared bare %s compiles, with run parity',
+    (type) => {
+      test.each(shapes)('%s', (_label, json) => {
+        ce.declare('S', type);
+        const expr = ce.box(json as never);
+        const r = compile(expr, { constantFold: false, fallback: false });
+        expect(r.success).toBe(true);
+        const compiled = r.run!({ S: [3, 1, 2] }) as boolean[];
+        ce.assign('S', ce.box(['List', 3, 1, 2]));
+        expect(expr.evaluate().toString()).toBe(
+          JSON.stringify(compiled.map((b) => (b ? 'True' : 'False')))
+        );
+      });
+    }
+  );
+
+  test.each(['string', 'string | list<number>'])(
+    'a subject declared %s still fails closed',
+    (type) => {
+      ce.declare('S', type);
+      for (const [, json] of shapes.slice(0, 2)) {
+        const expr = ce.box(json as never);
+        expect(compile(expr, { constantFold: false }).success).toBe(false);
+      }
+    }
+  );
+
+  test('a string literal subject still fails closed', () => {
+    const expr = ce.box(['Equal', ['Reverse', { str: 'abc' }], 3]);
+    expect(compile(expr, { constantFold: false }).success).toBe(false);
   });
 });

@@ -1,6 +1,5 @@
 // Prime factorization by trial division up to the square root, checked
-// against the library. The inputs keep the loop under the 1024-turn
-// iteration limit.
+// against the library.
 factorsOf(n) = do {
   let m = n
   let d = 2

@@ -251,9 +251,44 @@ carry no information. Only *escaping* writes emit `scope`.
 finding 6 — a bare containment check is not enough)*: an `Assign` is
 confined iff **every static path from the literal's entry to the
 `Assign` passes through a `Declare` of that symbol within the literal**,
-**and** the symbol is not referenced by any nested `Function` literal
-(closure capture ⇒ escaping — the closure may outlive the declaring
-application). `Assume` is **never** confined. Destructuring and compound
+**and** no nested `Function` literal **writes** the symbol *(amendment
+2026-10-06, user-ruled: before it, any nested literal that merely
+referenced the symbol made the write escaping)*. A nested literal writes
+the symbol when it contains, at any depth, an `Assign`, `Declare` or
+`DefineFunction` whose target is the symbol, or whose destructuring or
+`Field` target has the symbol as a component or base. (A `Declare` inside
+the nested literal makes a new local of that literal and does not write
+the outer binding; it is counted anyway, which is the conservative
+direction.) A write to a parameter of the nested literal itself is not
+a write to the enclosing symbol of the same name. A closure that writes
+the symbol shares the binding with the application that declared it and
+may outlive that application, so every write to the symbol is escaping. A nested literal that only **reads** the symbol does
+not un-confine it: the closure sees the value, but the only writes are
+the body's own, and they die with the application. A nested literal that
+writes the symbol is judged by its own inference, which reports `scope`
+on its own arrow; the enclosing body receives that `scope` where it
+applies the nested literal ("Literals are inference boundaries"). The
+motivating case is an ordinary Epsil function whose local is built by a
+loop and then read by a callback:
+
+```epsil
+f(n) = do {
+  let acc = {}
+  for p in 2..n { acc = union(acc, {p}) }
+  filter(1..n, k => k !in acc)
+}
+f(5)
+// ➔ [1]
+```
+
+The local `acc` is declared in the body and written only by the body's
+own loop; the lambda given to `filter` only reads it. Nothing outside a
+call of `f` can observe the writes, so `f` infers pure and a bare
+definition is accepted. Before the amendment the lambda's reference to
+`acc` made the loop's write escaping, and the definition was refused
+with "writes outside a function require a declared `scope` effect".
+
+`Assume` is **never** confined. Destructuring and compound
 targets are judged per target symbol; a `Field` target
 (`Assign(Field(p, "name"), v)` — the property rebinding sugar
 `p.name = v`) is judged on its **base symbol** *(amendment 2026-08-15:
@@ -282,9 +317,10 @@ The explicit fallback, stated normatively: **not provably confined ⇒
   with the application; the caller's variable never changes (verified
   empirically: with `f(x) := (x := x + 1; x)` and `a := 5`, `f(a)` is `6`
   and `a` stays `5`). So `f(x) := (x := x + 1; x)` infers **pure**. The
-  closure-capture exclusion still applies: a parameter referenced by a
-  nested literal is not confined, the same conservative rule as any
-  captured binding.
+  rule about nested literals applies to parameters as it does to
+  declared locals *(amendment 2026-10-06)*: a parameter that a nested
+  literal only reads stays confined, and a parameter that a nested
+  literal writes is not confined.
 - **No implicit-local exemption for `Assign`** *(tried and reverted,
   2026-08-15)*: treating an `Assign` to a name with no visible outer
   binding as confined (evaluation does create a call-local binding —
@@ -296,21 +332,24 @@ The explicit fallback, stated normatively: **not provably confined ⇒
   pure while every call returned a different value. "Not provably
   confined ⇒ `scope`" stands; a fresh-temp body opts out with a `Declare`
   (`let`) or a `scope` annotation.
-- **A nested `DefineFunction` is confined only through a local
-  declaration** *(amendment, 2026-08-15)*: Epsil's one-step inner
-  definition (`helper(x) = x + a` inside a body) lowers to
-  `DefineFunction`. With a `let`-declared local name
-  (`let sq; sq(m) = m * m`) it assigns that local, which dies with the
-  call — confined, and the defining write is the initialization, so
-  capture by the helper's own recursive body does not un-confine it.
-  WITHOUT a local declaration it installs into the **global registry**
-  (probed: the helper is callable at top level after the enclosing call
-  returns, and overwrites an outer function of the same name) — an
-  escaping write, so an enclosing bare definition using the bare
-  one-step form is refused by the ceiling. (Judging it by a visibility
-  lookup instead would also make the verdict flip when the
-  provisional-dependents cascade re-walks the body after the runtime
-  install has made the name globally visible.)
+- **A nested `DefineFunction` is always confined** *(amendment
+  2026-10-06; it replaces the amendment of 2026-08-15, which said that
+  without a local declaration the helper installs into the global
+  registry)*: Epsil's one-step inner definition (`helper(x) = x + a`
+  inside a body) lowers to `DefineFunction`. The definition binds in the
+  block or call frame where it is written and is removed with it, with or
+  without a `let` declaration of the name. Probed: after
+  `f(x) = do { g(y) = y + 1; g(x) * 2 }`, `f(3)` is `8` and `g(1)` at
+  top level stays unevaluated; when a top-level `g(y) = y * 100` exists,
+  the inner definition shadows it during the call and `g(1)` at top level
+  is still `100`. So the defining write contributes no `scope`, and a
+  bare outer definition that uses the one-step form is accepted. Applying
+  the helper inside the body contributes the effects of its literal
+  ("Literals are inference boundaries"), so a helper that writes an outer
+  binding still makes the body `scope`. The verdict does not use a lookup
+  of which definitions are visible: such a verdict would change when the
+  provisional-dependents cascade re-walks the body after a runtime
+  install has made the name visible.
 
 **Confinement does not apply to `state` — v1.** The confinement
 analysis above is written entirely in terms of *bindings* (a `Declare`
@@ -1360,6 +1399,18 @@ surface):
   `() random -> …`. This **amends Stage 0's shipped behavior** — the
   current `inferLambdaFlags` recurses into nested literal bodies
   (conservative) — and `user-function-purity.test.ts` updates accordingly.
+  A local bound to a literal earlier in the body is applied the same way
+  *(amendment 2026-10-06)*: for `h(n) = do { let sq = x => x * x; sq(n) }`
+  the body adds the effects of `sq`'s literal, so `h` is pure. Epsil
+  lowers `let sq = …` to `Declare(sq, Dictionary(value: …))`, and the
+  literal is read from that `value` entry as from a positional value.
+  When the `Declare` has a type that states an effect set
+  (`let f: () random -> number = …`), that set is the contract of the
+  local and the body adds it instead of the literal's effects; `Declare`
+  refuses a literal whose effects are not in the stated set. A type that
+  states no effects (`() -> number`) leaves the literal in charge.
+  Before the amendment the literal in the dictionary was not found, the
+  application was an unresolved head, and the body inferred `any`.
 - **Applied parameters** *(ruling (c))*: an **annotated** function
   parameter contributes its declared arrow effects to body inference and
   the boundary enforces the bound. An **unannotated** parameter (declared
@@ -2631,9 +2682,13 @@ Two layers, in order of preference:
   }
   ```
 
-  The first two cases are what confinement inference already classifies
-  for `scope` writes (closure capture ⇒ escaping); the third falls out
-  of `with` being an expression. This layer is a
+  The first case is what confinement inference already classifies for
+  `scope` writes. The second needs a capture check of its own:
+  confinement inference treats a closure that only reads a binding as
+  confined (amendment 2026-10-06, "The confinement rule is a dominance
+  condition"), while a closure that reads a `with` binding still lets
+  the handle escape the frame. The third falls out of `with` being an
+  expression. This layer is a
   quality-of-diagnosis feature, not the soundness mechanism: full
   static prevention would be retention tracking, declined in "Resource
   frames", and would over-reject lazy values forced inside the frame.

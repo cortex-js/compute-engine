@@ -84,6 +84,75 @@
 
 ### Behavior Changes
 
+- **A function whose local variable is read by a lambda needs no `scope`
+  effect.** Effect inference treated any local that a nested function
+  mentions as escaping, so a function that fills a local in a loop and then
+  reads it from a lambda (`filter(1..n, k => k !in acc)`) was refused: "writes
+  outside a function require a declared `scope` effect". A local, or a
+  parameter, now stays confined when nested functions only read it; a nested
+  function that writes it still makes the write a `scope` effect. Effect
+  inference also reads the value of a `let` declaration: a function that
+  applies a `let`-bound lambda (`let sq = x => x * x; sq(n)`) was given the
+  effects `any` and is now pure, a `let`-bound function that writes an outer
+  variable and is applied is `scope` (it was `any`), and `let x = Random()`
+  makes the function `random` (the draw was missed). A type annotation on such
+  a `let` (`let f: () random -> number = …`) is the effect contract of the
+  local.
+  The effects of a dictionary are now the effects of its values:
+  `{"a" -> Random()}` was reported pure (`isPure` was `true` for every
+  dictionary) and is now `random`.
+
+- **A string operator accepts a character.** Indexing a string gives a
+  `character`, and the string operators declared a `string` parameter, so
+  `ToUpperCase(s[1])`, `StringRepeat(c, 3)`, `NumberFrom(c)`,
+  `UnicodeScalars(c)` and `Map(NumberFrom, Characters(s))` were type errors,
+  and so was a dictionary lookup with a character key. A character is now
+  accepted wherever these operators accept a string, with the result of the
+  one-character string: `ToUpperCase`, `ToLowerCase`, `CaseFold`,
+  `StringRepeat`, `PadStart`, `PadEnd`, `Trim`, `TrimStart`, `TrimEnd`,
+  `StringReplace`, `StringSplit`, `StringCompare`, `Characters`,
+  `GraphemeClusters`, `UnicodeScalars`, `Utf8`, `Utf16`, `CharacterFrom`,
+  `NumberFrom`, `DigitsFrom`, the separator of `StringJoin`, the subject of
+  `IsMatch`, `StringMatch` and `StringMatchAll`, the textual base of
+  `NumberFrom` and `DigitsFrom`, and the key of a dictionary lookup (`At`).
+  In Epsil, `toUpperCase("abc"[1])` is `"A"`. The types
+  `character` and `string` are still distinct. A symbol with no declared type
+  that is used at one of these parameters is now inferred `character | string`
+  (it was `string`).
+
+- **The type of an overloaded call on an operand of unknown type is the join
+  of the possible results.** For an operator with several signatures, the
+  result type was read off one signature even when the operand's type did not
+  decide which one applies (declaration order decided). It is now the join of
+  the results of every signature that can apply: with `s` of unknown type,
+  `Slice(s, 1, 2)` has the type `list | string` (it was `list`), and so have
+  `Take`, `Drop`, `Rest`, `Most` and `Reverse`. This matters for an Epsil
+  function with an untyped parameter: `firstTwo(s) = characters(slice(s, 1, 2))`
+  was refused before it ran ("expected `string`, got `list<unknown>`") and now
+  gives `["a", "b"]` for `"abc"`. The same join applies when the operand's
+  type is known but does not decide the signature: an operand typed
+  `collection` can be a string or a list, so `Take` of it is `list | string`,
+  and a `real` operand at `((integer) -> integer) & ((real) -> string)` gives
+  `integer | string`. An operand whose type selects exactly one signature is
+  typed as before.
+
+- **Epsil: a program has no iteration limit.** A `for` or `while` loop, and a
+  walk of a lazy collection, stopped after 1024 turns with
+  `iteration-limit-exceeded`; some lazy walks stayed unevaluated with no
+  diagnostic (`length(filter(1..9000, f))`). A loop now runs until it ends: a
+  program that counts to 5000 gives 5000, and a program that does not end is a
+  valid program. `executeEpsil` and the `epsil` command remove the engine's
+  default iteration limit the first time an engine runs a program, and the
+  engine keeps it removed, so that a lazy collection a program returns can be
+  read in full afterwards. A host that wants a bound assigns
+  `ce.iterationLimit` before it runs a program: an assigned limit is kept and
+  applies to Epsil programs. The time limit and the recursion limit are not
+  changed. The default of `ce.iterationLimit` is still 1024 for an engine
+  that has not run an Epsil program; an engine that has run one keeps no
+  limit for every later evaluation on it, Epsil or not, so a host that shares
+  one engine between Epsil and other evaluation and wants the cap for the
+  latter assigns `ce.iterationLimit` itself.
+
 - **`simplify()` combines same-base powers in a product as it does in a
   quotient** ([#415](https://github.com/cortex-js/compute-engine/issues/415),
   reported by [enumeratio](https://github.com/enumeratio)). For a symbol `x`
@@ -181,6 +250,40 @@
 
 
 ### Issues Resolved
+
+- **A later use narrows an inferred union type.** A symbol whose type was
+  inferred as a union by one use (`ToUpperCase(s)` gives `s` the type
+  `character | string`) was refused by a later use whose parameter admits
+  only some members of the union (`Sort(s)`, "expected
+  `indexed_collection`, got `character | string`"), although the same program
+  with the two uses in the other order was accepted. A later use now narrows
+  such an inferred type to the members the parameter admits (`string`), as
+  the inference design requires (`docs/INFERENCE_ROADMAP.md`); a declared
+  union is checked as before. The repair that corrects a bottom-up numeric
+  guess no longer retypes a symbol with text evidence as a `matrix`.
+
+- **Compiled `At` over a value that may be a string gave `null`.** With
+  `m: string | list<number>`, `compile(At(m, 1))` emitted an array read that
+  returns `null` for a string; the interpreter gives `"x"`. The compiler now
+  refuses such a base unless it is a plain host-input variable typed
+  `string | character`, which it reads as a string; an out-of-range read of a
+  string base compiles to the absence marker, as in the interpreter.
+
+- **A sum or a negation with an operand that may be a string is typed as a
+  number.** With `w: number | string`, `w + 1`, `w - 1` and `-w` were typed
+  `number | string`, although a sum is never a string (`Add("a", 1)` is an
+  `incompatible-type` error). The `string` and `character` arms of an operand
+  are now dropped by the type handlers of `Add` and `Negate`, so these are
+  typed `number`. A sum over an operand typed `list | string` is typed
+  `unknown`.
+
+- **A parameter used with `Length` and then with `First` was typed as a
+  matrix.** In a function body, `Length(xs)` narrows an untyped `xs` to a
+  collection. A repair meant for a numeric guess made by `Add` or `Multiply`
+  then retyped `xs` as `matrix` when `First(xs)` or `Filter(xs, …)` followed,
+  and a comparison lambda over the elements was refused ("expected
+  `(vector) any -> boolean`"). The repair now leaves a symbol that is already
+  typed as a collection.
 
 - **The polynomial operators see the value of a variable.** `PolynomialDegree`,
   `CoefficientList`, `PolynomialQuotient`, `PolynomialRemainder`,

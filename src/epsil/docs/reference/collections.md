@@ -355,7 +355,7 @@ argMin([3, 9, 2])
 
 ### At
 
-`(value: any, index: (boolean | indexed_collection<any> | number | string)+) -> unknown`
+`(value: any, index: (boolean | character | indexed_collection<any> | number | string)+) -> unknown`
 
 Access an element of an indexed collection.
 

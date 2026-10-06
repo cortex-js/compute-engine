@@ -23,6 +23,19 @@ export class EngineRuntimeState {
     this._iterationLimit = value <= 0 ? Number.POSITIVE_INFINITY : value;
   }
 
+  /**
+   * True once a host has assigned `iterationLimit`, even to the default
+   * value. An engine that runs an Epsil program drops its iteration limit
+   * unless this is true, and keeps it dropped for every later evaluation on
+   * the same engine (a lazy result of the program may be enumerated after the
+   * run): the default limit protects symbolic evaluation from a runaway
+   * internal loop, and a loop written by the author of a program is not such
+   * a loop. A host that wants a bound, for Epsil programs or for the other
+   * evaluations it runs on the same engine, assigns the limit, and that
+   * assignment is then honored.
+   */
+  iterationLimitIsExplicit = false;
+
   get recursionLimit(): number {
     return this._recursionLimit;
   }

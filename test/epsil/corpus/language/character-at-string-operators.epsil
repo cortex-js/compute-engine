@@ -1,7 +1,6 @@
-// corpus: known-failure string operators reject a `character` argument (ROADMAP: "String operators reject a `character`")
-// Indexing a string yields a `character`. Every string operator declares a
-// `string` parameter, and `character` is a disjoint type, so the character
-// has to be converted back with `String(c)` before any string operation.
+// Indexing a string yields a `character`. A character is accepted wherever a
+// string is (the two are the same value): by the string operators, and as a
+// dictionary key.
 let c = "abc"[1]
 (toUpperCase(c), stringRepeat(c, 2), numberFrom("7"[1]), {a -> 1}[c])
 // ➔ ("A", "aa", 7, 1)

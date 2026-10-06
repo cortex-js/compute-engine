@@ -1,5 +1,9 @@
 import type { SymbolDefinitions, Expression } from '../global-types.js';
-import { isFunction, isString } from '../boxed-expression/type-guards.js';
+import {
+  isCharacter,
+  isFunction,
+  isString,
+} from '../boxed-expression/type-guards.js';
 import { splitGraphemeClusters } from '../../common/grapheme-splitter.js';
 import { asSmallInteger } from '../boxed-expression/numerics.js';
 
@@ -409,7 +413,12 @@ export function replaceByPattern(
     limit = n;
   }
 
-  const literal = isString(replacement) ? replacement.string : undefined;
+  // A character replacement is read as its text, as a string one is: the two
+  // are the same value.
+  const literal =
+    isString(replacement) || isCharacter(replacement)
+      ? replacement.string
+      : undefined;
   const fn = literal === undefined ? replacement.canonical : undefined;
   if (literal === undefined && !fn?.type.matches('function')) return undefined;
 
@@ -528,9 +537,11 @@ export const REGEXP_LIBRARY: SymbolDefinitions = {
   IsMatch: {
     description: 'Whether a string contains a match for a regular expression.',
     complexity: 8200,
-    signature: '(subject: string, pattern: regexp) -> boolean',
+    // A character subject is accepted wherever a string one is: a character
+    // and the one-character string with the same content are the same value.
+    signature: '(subject: string | character, pattern: regexp) -> boolean',
     evaluate: ([subject, pattern], { engine: ce }) => {
-      if (!isString(subject)) return undefined;
+      if (!isString(subject) && !isCharacter(subject)) return undefined;
       const p = patternOf(pattern);
       if (p === undefined) return undefined;
       const re = hostRegExp(p.pattern, p.flags);
@@ -549,9 +560,10 @@ export const REGEXP_LIBRARY: SymbolDefinitions = {
       'The record holds `match`, `range`, `groups` and `names`; the result is `Nothing` when there is no match.',
     ],
     complexity: 8200,
-    signature: '(subject: string, pattern: regexp) -> record | nothing',
+    signature:
+      '(subject: string | character, pattern: regexp) -> record | nothing',
     evaluate: ([subject, pattern], { engine: ce }) => {
-      if (!isString(subject)) return undefined;
+      if (!isString(subject) && !isCharacter(subject)) return undefined;
       const p = patternOf(pattern);
       if (p === undefined) return undefined;
       const re = hostRegExp(p.pattern, p.flags);
@@ -569,9 +581,9 @@ export const REGEXP_LIBRARY: SymbolDefinitions = {
       'Each record has the same shape as `StringMatch`.',
     ],
     complexity: 8200,
-    signature: '(subject: string, pattern: regexp) -> list<record>',
+    signature: '(subject: string | character, pattern: regexp) -> list<record>',
     evaluate: ([subject, pattern], { engine: ce }) => {
-      if (!isString(subject)) return undefined;
+      if (!isString(subject) && !isCharacter(subject)) return undefined;
       const p = patternOf(pattern);
       if (p === undefined) return undefined;
       // `g` is added to a PRIVATE compiled copy: the user's `regexp` value

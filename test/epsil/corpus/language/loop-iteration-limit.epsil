@@ -1,7 +1,6 @@
-// corpus: known-failure a loop stops after 1024 turns by default (ROADMAP: "Default iteration limit of 1024 for Epsil programs")
-// `ce.iterationLimit` defaults to 1024 and a `for` or `while` loop that
-// runs longer is canceled with `iteration-limit-exceeded`. A program that
-// counts to two thousand cannot run with the default.
+// An Epsil program has no iteration limit: a loop runs until it ends. The
+// engine's default limit of 1024 turns is removed when a program runs, unless
+// the host assigned a limit.
 let k = 0
 for i in 1..2000 { k = k + 1 }
 k

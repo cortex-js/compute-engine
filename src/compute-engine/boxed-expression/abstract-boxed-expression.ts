@@ -626,11 +626,12 @@ export abstract class _BoxedExpression implements Expression {
   }
 
   /** The default answer for everything that is not an application: evaluating
-   * a number, a string, a symbol or a dictionary merely PRODUCES a value, and
-   * producing a value fires nothing — even when the value is an effectful
-   * function (`docs/EFFECTS-MODEL.md`, worked example 4: the latent set lives
-   * on the arrow, reachable as `.type.effects`). `BoxedFunction` overrides
-   * this with the projection rule. */
+   * a number, a string or a symbol merely PRODUCES a value, and producing a
+   * value fires nothing — even when the value is an effectful function
+   * (`docs/EFFECTS-MODEL.md`, worked example 4: the latent set lives on the
+   * arrow, reachable as `.type.effects`). `BoxedFunction` overrides this with
+   * the projection rule, and `BoxedDictionary` with the union of the effects
+   * of its values, which its evaluation evaluates. */
   get effects(): ReadonlyArray<EffectLabel> | 'any' | undefined {
     return undefined;
   }

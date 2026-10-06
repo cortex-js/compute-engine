@@ -46,10 +46,166 @@ describe('overload resolution: arm selection', () => {
   });
 
   it('tie-breaks incomparable arms by declaration order', () => {
+    // Neither `real` nor `integer | string` is a subtype of the other, and
+    // the integer operand fits both, so the first arm wins.
+    const ce = engine('((real) -> integer) & ((integer | string) -> rational)');
+    expect(ce.box(['Rnd', 5]).type.toString()).toBe('integer');
+  });
+
+  it('joins the results of incomparable arms on an unknown operand', () => {
     // Neither `string` nor `boolean` is a subtype of the other, and an
-    // unknown-typed operand refutes neither arm, so the first wins.
+    // unknown-typed operand refutes neither arm. The call can take either arm
+    // at run time, so its result type is the join of `integer` and
+    // `rational` (which is `rational`), not the result of the first arm.
     const ce = engine('((string) -> integer) & ((boolean) -> rational)');
-    expect(ce.box(['Rnd', 'undeclaredSym']).type.toString()).toBe('integer');
+    expect(ce.box(['Rnd', 'undeclaredSym']).type.toString()).toBe('rational');
+  });
+});
+
+describe('overload resolution: result join on an undecided operand', () => {
+  it('joins the results of every viable arm', () => {
+    const ce = engine('((string) -> string) & ((boolean) -> integer)');
+    // An undeclared symbol, a symbol declared `unknown`, and one declared
+    // `any` all leave both arms viable.
+    expect(ce.box(['Rnd', 'w']).type.toString()).toBe('integer | string');
+    ce.declare('u', 'unknown');
+    expect(ce.box(['Rnd', 'u']).type.toString()).toBe('integer | string');
+    ce.declare('a', 'any');
+    expect(ce.box(['Rnd', 'a']).type.toString()).toBe('integer | string');
+  });
+
+  it('a concrete operand still selects one arm', () => {
+    const ce = engine('((string) -> string) & ((boolean) -> integer)');
+    expect(ce.box(['Rnd', 'True']).type.toString()).toBe('integer');
+    expect(ce.box(['Rnd', { str: 'x' }]).type.toString()).toBe('string');
+  });
+
+  it('keeps the selected result when every viable arm has the same result', () => {
+    const ce = engine('((string) -> integer) & ((boolean) -> integer)');
+    expect(ce.box(['Rnd', 'w']).type.toString()).toBe('integer');
+  });
+
+  it('an arm whose result is unknown makes the join unknown', () => {
+    // `widen` would drop the `unknown` and claim `integer`.
+    const ce = engine('((string) -> integer) & ((boolean) -> unknown)');
+    expect(ce.box(['Rnd', 'w']).type.toString()).toBe('unknown');
+  });
+
+  it('a lazy operator keeps the selected result', () => {
+    // A lazy operator's operands arrive unbound, so their types do not
+    // decide anything, and the result is read off the selected arm.
+    const ce = new ComputeEngine();
+    ce.declare('Rnd', {
+      signature: '((string) -> integer) & ((boolean) -> rational)',
+      lazy: true,
+      evaluate: () => ce.number(0.5),
+    });
+    expect(ce.box(['Rnd', 'w']).type.toString()).toBe('integer');
+  });
+
+  it('a bounded type variable reads as its bound in the join (Slice)', () => {
+    // `Slice` has string arms `(value: T, …) -> T where T: string` and list
+    // arms `(value: indexed_collection<T>, …) -> list<T> where T`. An
+    // unknown operand binds no `T`, so the string arm contributes `string`.
+    const ce = new ComputeEngine();
+    ce.declare('u', 'unknown');
+    expect(ce.box(['Slice', 'u', 1, 2]).type.toString()).toBe(
+      'list<unknown> | string'
+    );
+    // An undeclared symbol is narrowed by the call (a string is an indexed
+    // collection, so to `indexed_collection<unknown>`), but the call keeps
+    // the resolution it was validated against.
+    expect(ce.box(['Slice', 'v', 1, 2]).type.toString()).toBe(
+      'list<unknown> | string'
+    );
+    // A concrete operand selects one arm.
+    expect(ce.box(['Slice', { str: 'abc' }, 1, 2]).type.toString()).toBe(
+      'string'
+    );
+    expect(ce.box(['Slice', ['List', 1, 2, 3], 1, 2]).type.toString()).toBe(
+      'list<integer>'
+    );
+  });
+
+  it('a string consumer accepts a slice of an unknown operand', () => {
+    const ce = new ComputeEngine();
+    ce.declare('u', 'unknown');
+    const expr = ce.box(['Characters', ['Slice', 'u', 1, 2]]);
+    expect(expr.isValid).toBe(true);
+    expect(expr.type.toString()).toBe('list<character>');
+    ce.assign('u', { str: 'abc' });
+    expect(expr.evaluate().toString()).toBe('["a","b"]');
+  });
+});
+
+describe('overload resolution: result join on an overlapping operand', () => {
+  it('a non-viable generic arm that can take the operand at run time joins', () => {
+    // Arm 2 is the only viable arm and it matches strictly (`collection` is
+    // `collection`). Arm 1 is refused by its bound (`collection` is not a
+    // subtype of `string`), but a collection value can be a string at run
+    // time, so the call is undecided and the result joins both arms. A
+    // shortcut that reads "one strictly matching viable arm" as decided
+    // would type this `integer`.
+    const ce = engine('((T) -> T where T: string) & ((collection) -> integer)');
+    ce.declare('c', 'collection');
+    expect(ce.box(['Rnd', 'c']).type.toString()).toBe('integer | string');
+  });
+
+  // An operand whose type only OVERLAPS a parameter (shares a value with it
+  // without being a subtype of it) does not decide the arm either: at run
+  // time the value may or may not be one that arm takes.
+
+  it('a collection-typed operand at the string-preserving operators joins', () => {
+    const ce = new ComputeEngine();
+    ce.declare('c', 'collection');
+    ce.declare('ic', 'indexed_collection');
+    for (const s of ['c', 'ic']) {
+      expect(ce.box(['Slice', s, 1, 2]).type.toString()).toBe(
+        'list<unknown> | string'
+      );
+      expect(ce.box(['Take', s, 2]).type.toString()).toBe(
+        'list<unknown> | string'
+      );
+      expect(ce.box(['Reverse', s]).type.toString()).toBe('list | string');
+    }
+  });
+
+  it('an operand that decides the arm still selects one arm', () => {
+    const ce = new ComputeEngine();
+    ce.declare('li', 'list<integer>');
+    ce.declare('st', 'string');
+    expect(ce.box(['Slice', 'li', 1, 2]).type.toString()).toBe('list<integer>');
+    expect(ce.box(['Take', 'li', 2]).type.toString()).toBe('list<integer>');
+    expect(ce.box(['Reverse', 'li']).type.toString()).toBe('list<integer>');
+    expect(ce.box(['Slice', 'st', 1, 2]).type.toString()).toBe('string');
+    expect(ce.box(['Take', 'st', 2]).type.toString()).toBe('string');
+    expect(ce.box(['Reverse', 'st']).type.toString()).toBe('string');
+  });
+
+  it('a collection bound keeps the element type of the operand', () => {
+    // `Reverse` has a `T where T: list` arm. An
+    // `indexed_collection<boolean>` operand overlaps `list`, and the arm's
+    // result is read as `list<boolean>`, not as the bare `list`.
+    const ce = new ComputeEngine();
+    ce.declare('ib', 'indexed_collection<boolean>');
+    expect(ce.box(['Reverse', 'ib']).type.toString()).toBe('list<boolean>');
+  });
+
+  it('ground arms: an operand that overlaps two incomparable parameters joins', () => {
+    const ce = engine('((list<integer>) -> integer) & ((string) -> string)');
+    ce.declare('ic', 'indexed_collection');
+    expect(ce.box(['Rnd', 'ic']).type.toString()).toBe('integer | string');
+    const ce2 = engine('((integer) -> integer) & ((real) -> string)');
+    ce2.declare('n', 'number');
+    expect(ce2.box(['Rnd', 'n']).type.toString()).toBe('integer | string');
+  });
+
+  it('ground arms: an operand that is a subtype of one parameter selects it', () => {
+    const ce = engine('((list<integer>) -> integer) & ((string) -> string)');
+    ce.declare('li', 'list<integer>');
+    expect(ce.box(['Rnd', 'li']).type.toString()).toBe('integer');
+    ce.declare('st', 'string');
+    expect(ce.box(['Rnd', 'st']).type.toString()).toBe('string');
   });
 });
 

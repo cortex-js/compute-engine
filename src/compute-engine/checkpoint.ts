@@ -136,6 +136,7 @@ type ConfigSnapshot = {
   readonly costFunction: ((expr: Expression) => number) | undefined;
   readonly integrationProvider: unknown;
   readonly iterationLimit: number;
+  readonly iterationLimitIsExplicit: boolean;
   readonly recursionLimit: number;
   readonly maxCollectionSize: number;
   readonly latexOptions: object;
@@ -376,6 +377,7 @@ function snapshotConfig(ce: IComputeEngine): ConfigSnapshot {
     costFunction: engine._cost,
     integrationProvider: engine._integrationProvider,
     iterationLimit: ce.iterationLimit,
+    iterationLimitIsExplicit: ce._iterationLimitIsExplicit,
     recursionLimit: ce.recursionLimit,
     maxCollectionSize: ce.maxCollectionSize,
     // COPIED: the setter replaces the object, but a caller can also spread
@@ -413,6 +415,9 @@ function restoreConfig(ce: IComputeEngine, snapshot: ConfigSnapshot): void {
   engine._cost = snapshot.costFunction;
   engine._integrationProvider = snapshot.integrationProvider;
   ce.iterationLimit = snapshot.iterationLimit;
+  // The setter records a host assignment; put back what the snapshot held, so
+  // that restoring a default limit does not make it bind Epsil programs.
+  ce._iterationLimitIsExplicit = snapshot.iterationLimitIsExplicit;
   ce.recursionLimit = snapshot.recursionLimit;
   ce.maxCollectionSize = snapshot.maxCollectionSize;
   engine._latexOptions = { ...snapshot.latexOptions };

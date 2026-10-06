@@ -272,7 +272,9 @@ search by concept with `epsil doc <keywords>`.
   membership. Also `StringReplace(s, target, replacement, count?)`,
   `trim`/`trimStart`/`trimEnd`, `stringRepeat`, `padStart`/`padEnd`,
   `toUpperCase`/`toLowerCase`/`caseFold`, `stringCompare(a, b)` (`-1/0/1`,
-  code-point order) and `NumberFrom(s, base?)`.
+  code-point order) and `NumberFrom(s, base?)`. `s[i]` is a character; every
+  string operation, and a dictionary lookup `d[c]`, accepts a character as the
+  one-character string (`toUpperCase(s[1])`, no `String(c)` needed).
 - **Dictionaries**: `keys`, `values`.
 - **Absence**: `missing` preserves a missing position; `nothing` is omitted
   from arguments and collections; `isMissing`, `Coalesce`.

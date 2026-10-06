@@ -1559,6 +1559,24 @@ const UNICODE_WHITESPACE_CHARACTER = new RegExp(
 );
 
 /**
+ * The text of `op` when it is a string or a character, otherwise `undefined`.
+ *
+ * A character is accepted wherever a string is: a character and the
+ * one-character string with the same content are the same value (`isSame`
+ * treats them as equal), so a string operator reads a character operand's
+ * text exactly as it reads a string's, and its result is the result for the
+ * one-character string.
+ */
+function textOf(op: Expression | undefined): string | undefined {
+  return isString(op) || isCharacter(op) ? op.string : undefined;
+}
+
+/** True when `op` is a string or a character, the operands `textOf` reads. */
+function isText(op: Expression): boolean {
+  return isString(op) || isCharacter(op);
+}
+
+/**
  * The set of characters that `Trim`/`TrimStart`/`TrimEnd` strip, decoded from
  * the optional second operand.
  *
@@ -8547,14 +8565,15 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // of a string, and of `Characters(s)`, are characters, so both
       // `StringJoin(Characters(s))` and `StringJoin(s)` must type-check.
       signature:
-        '(collection<string | character>, separator: string?) -> string',
+        '(collection<string | character>, separator: (string | character)?) -> string',
       examples: ['StringJoin(["a", "b", "c"], "-")'],
       evaluate: ([xs, separator], { engine }) => {
         if (xs === undefined) return undefined;
         let sep = '';
         if (separator !== undefined) {
-          if (!isString(separator)) return undefined;
-          sep = separator.string;
+          const text = textOf(separator);
+          if (text === undefined) return undefined;
+          sep = text;
         }
         // A lazy collection (e.g. a `Map` result) is materialized via
         // `.each()`; a non-finite one stays symbolic. A string subject is a
@@ -8584,7 +8603,9 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           'one user-perceived character (one grapheme cluster) after NFC ' +
           'normalization; an empty or multi-character string is an error.',
       ],
-      signature: '(string) -> character',
+      // A character operand is accepted too, as for every string operator, and
+      // is its own result.
+      signature: '(string | character) -> character',
       examples: ['CharacterFrom("é")'],
       canonical: (ops, { engine: ce }) => {
         const xs = flatten(ops);
@@ -8601,6 +8622,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // already reports a multi-cluster literal passed to a `character`
         // parameter. Any NON-literal operand (a symbol, a call) keeps the call
         // form, and `evaluate` decides once the text is known.
+        if (xs.length === 1 && isCharacter(xs[0])) return xs[0];
         if (xs.length === 1 && isString(xs[0])) {
           if (isSingleGraphemeCluster(xs[0].string))
             return ce.character(xs[0].string);
@@ -8612,6 +8634,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         return ce._fn('CharacterFrom', checkArity(ce, xs, 1));
       },
       evaluate: ([s], { engine }) => {
+        if (isCharacter(s)) return s;
         if (!isString(s)) return undefined;
         if (!isSingleGraphemeCluster(s.string))
           // The operand's TYPE is fine — `string` is what the signature asks
@@ -8640,17 +8663,18 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           'stable integer decompositions see UnicodeScalars, Utf8 and Utf16. ' +
           'A non-string argument leaves the expression unevaluated.',
       ],
-      signature: '(string) -> list<character>',
+      signature: '(string | character) -> list<character>',
       examples: ['Characters("héllo")'],
-      // The evaluate guard (`isString`) is a complete precondition, exposed
+      // The evaluate guard (`textOf`) is a complete precondition, exposed
       // for the enumerability facet — see `canEnumerate` (types-definitions).
       canEnumerate: (expr) =>
-        isFunction(expr) ? canEnumerateOperand(expr.op1, isString) : undefined,
+        isFunction(expr) ? canEnumerateOperand(expr.op1, isText) : undefined,
       evaluate: ([s], { engine }) => {
-        if (!isString(s)) return undefined;
+        const text = textOf(s);
+        if (text === undefined) return undefined;
         return engine.function(
           'List',
-          splitGraphemeClusters(s.string).map((c) => engine.character(c))
+          splitGraphemeClusters(text).map((c) => engine.character(c))
         );
       },
     },
@@ -8685,7 +8709,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // and both return `list<string>`, so an `unknown` separator gets the
       // same result type whichever arm most-specific-wins picks.
       signature:
-        '((string, string?) -> list<string>) & ((string, regexp) -> list<string>)',
+        '((string | character, (string | character)?) -> list<string>) & ' +
+        '((string | character, regexp) -> list<string>)',
       examples: [
         'StringSplit("a,b,c", ",")',
         'StringSplit("  one two  three ")',
@@ -8695,36 +8720,36 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // whitespace split).
       canEnumerate: (expr) => {
         if (!isFunction(expr)) return undefined;
-        const s = canEnumerateOperand(expr.ops[0], isString);
+        const s = canEnumerateOperand(expr.ops[0], isText);
         if (s !== true) return s;
         if (expr.ops[1] === undefined) return true;
         if (expr.ops[1].type.matches('regexp')) return true;
-        return canEnumerateOperand(expr.ops[1], isString);
+        return canEnumerateOperand(expr.ops[1], isText);
       },
       evaluate: ([s, sep], { engine }) => {
-        if (!isString(s)) return undefined;
+        const subject = textOf(s);
+        if (subject === undefined) return undefined;
         let parts: string[];
         // A PATTERN separator splits on each match, host semantics. An empty
         // match would not advance, so `splitByPattern` steps past it; see
         // there.
         const bySplitPattern =
-          sep !== undefined ? splitByPattern(s.string, sep) : undefined;
+          sep !== undefined ? splitByPattern(subject, sep) : undefined;
         if (bySplitPattern !== undefined)
           return engine.function(
             'List',
             bySplitPattern.map((x) => engine.string(x))
           );
         if (sep === undefined) {
-          parts = s.string
-            .split(UNICODE_WHITESPACE)
-            .filter((p) => p.length > 0);
+          parts = subject.split(UNICODE_WHITESPACE).filter((p) => p.length > 0);
         } else {
-          if (!isString(sep)) return undefined;
+          const separator = textOf(sep);
+          if (separator === undefined) return undefined;
           // An empty separator means "split into characters": segment into
           // grapheme clusters. JS `split('')` would cut between UTF-16 code
           // units, shattering surrogate pairs — never do that.
-          if (sep.string === '') parts = splitGraphemeClusters(s.string);
-          else parts = s.string.split(sep.string);
+          if (separator === '') parts = splitGraphemeClusters(subject);
+          else parts = subject.split(separator);
         }
         return engine.function(
           'List',
@@ -8782,23 +8807,27 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // replacement, called with the match record `StringMatch` returns, so a
       // caller can compute each replacement from its captures.
       signature:
-        '((string, string, string, count: integer?) -> string) & ' +
-        '((string, regexp, string, count: integer?) -> string) & ' +
-        '((string, regexp, function, count: integer?) -> string)',
+        '((string | character, string | character, string | character, count: integer?) -> string) & ' +
+        '((string | character, regexp, string | character, count: integer?) -> string) & ' +
+        '((string | character, regexp, function, count: integer?) -> string)',
       examples: [
         'StringReplace("banana", "a", "o")',
         'StringReplace("banana", "a", "o", 1)',
       ],
       evaluate: ([s, target, replacement, count], { engine: ce }) => {
-        if (!isString(s)) return undefined;
+        const text = textOf(s);
+        if (text === undefined) return undefined;
         // A PATTERN target: `replaceByPattern` owns the whole call, including
         // the `count` guard, because its notion of an occurrence is the
         // host's rather than a cluster run.
         if (target !== undefined && target.type.matches('regexp')) {
-          return replaceByPattern(ce, s.string, target, replacement, count);
+          return replaceByPattern(ce, text, target, replacement, count);
         }
-        if (!isString(target) || !isString(replacement)) return undefined;
-        if (target.string === '')
+        const needleText = textOf(target);
+        const replacementText = textOf(replacement);
+        if (needleText === undefined || replacementText === undefined)
+          return undefined;
+        if (needleText === '')
           return ce.error(
             'unexpected-argument',
             'StringReplace: the target must not be empty'
@@ -8813,8 +8842,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             );
           limit = n;
         }
-        const subject = splitGraphemeClusters(s.string);
-        const needle = splitGraphemeClusters(target.string);
+        const subject = splitGraphemeClusters(text);
+        const needle = splitGraphemeClusters(needleText);
         const out: string[] = [];
         let i = 0;
         let done = 0;
@@ -8824,7 +8853,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             i + needle.length <= subject.length &&
             needle.every((c, k) => subject[i + k] === c)
           ) {
-            out.push(replacement.string);
+            out.push(replacementText);
             i += needle.length;
             done += 1;
           } else {
@@ -8853,13 +8882,14 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           'whose elements each contribute their own characters.',
       ],
       signature:
-        '(string, chars: (string | character | collection<string | character>)?) -> string',
+        '(string | character, chars: (string | character | collection<string | character>)?) -> string',
       examples: ['Trim("  hi  ")', 'Trim("--hi--", "-")'],
       evaluate: ([s, chars], { engine }) => {
-        if (!isString(s)) return undefined;
+        const text = textOf(s);
+        if (text === undefined) return undefined;
         const set = trimCharacterSet(chars);
         if (set === undefined) return undefined;
-        return engine.string(trimClusters(s.string, set, true, true));
+        return engine.string(trimClusters(text, set, true, true));
       },
     },
 
@@ -8871,13 +8901,14 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           '`chars` — a SET of characters, as for Trim.',
       ],
       signature:
-        '(string, chars: (string | character | collection<string | character>)?) -> string',
+        '(string | character, chars: (string | character | collection<string | character>)?) -> string',
       examples: ['TrimStart("007", "0")'],
       evaluate: ([s, chars], { engine }) => {
-        if (!isString(s)) return undefined;
+        const text = textOf(s);
+        if (text === undefined) return undefined;
         const set = trimCharacterSet(chars);
         if (set === undefined) return undefined;
-        return engine.string(trimClusters(s.string, set, true, false));
+        return engine.string(trimClusters(text, set, true, false));
       },
     },
 
@@ -8889,13 +8920,14 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           '`chars` — a SET of characters, as for Trim.',
       ],
       signature:
-        '(string, chars: (string | character | collection<string | character>)?) -> string',
+        '(string | character, chars: (string | character | collection<string | character>)?) -> string',
       examples: ['TrimEnd("hi!!", "!")'],
       evaluate: ([s, chars], { engine }) => {
-        if (!isString(s)) return undefined;
+        const text = textOf(s);
+        if (text === undefined) return undefined;
         const set = trimCharacterSet(chars);
         if (set === undefined) return undefined;
-        return engine.string(trimClusters(s.string, set, false, true));
+        return engine.string(trimClusters(text, set, false, true));
       },
     },
 
@@ -8910,17 +8942,18 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           'StringRepeat(s, 0) is "". A negative or non-integer `n` is an ' +
           'error.',
       ],
-      signature: '(string, n: integer) -> string',
+      signature: '(string | character, n: integer) -> string',
       examples: ['StringRepeat("ab", 3)'],
       evaluate: ([s, n], { engine: ce }) => {
-        if (!isString(s)) return undefined;
+        const text = textOf(s);
+        if (text === undefined) return undefined;
         const count = asSmallInteger(n);
         if (count === null || count < 0)
           return ce.error(
             'unexpected-argument',
             'StringRepeat: n must be a non-negative integer'
           );
-        return ce.string(s.string.repeat(count));
+        return ce.string(text.repeat(count));
       },
     },
 
@@ -8939,24 +8972,26 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           '`pad` is an error; a non-string `pad` leaves the expression ' +
           'unevaluated.',
       ],
-      signature: '(string, n: integer, pad: string?) -> string',
+      signature:
+        '(string | character, n: integer, pad: (string | character)?) -> string',
       examples: ['PadStart("42", 5, "0")'],
       evaluate: ([s, n, pad], { engine: ce }) => {
-        if (!isString(s)) return undefined;
+        const text = textOf(s);
+        if (text === undefined) return undefined;
         const width = asSmallInteger(n);
         if (width === null || width < 0)
           return ce.error(
             'unexpected-argument',
             'PadStart: n must be a non-negative integer'
           );
-        if (pad !== undefined && !isString(pad)) return undefined;
-        const fill = pad === undefined ? ' ' : pad.string;
+        const fill = pad === undefined ? ' ' : textOf(pad);
+        if (fill === undefined) return undefined;
         if (fill === '')
           return ce.error(
             'unexpected-argument',
             'PadStart: the padding must not be empty'
           );
-        return ce.string(padClusters(s.string, width, fill, true));
+        return ce.string(padClusters(text, width, fill, true));
       },
     },
 
@@ -8969,24 +9004,26 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           'is an error; a non-string `pad` leaves the expression ' +
           'unevaluated.',
       ],
-      signature: '(string, n: integer, pad: string?) -> string',
+      signature:
+        '(string | character, n: integer, pad: (string | character)?) -> string',
       examples: ['PadEnd("abc", 6, ".")'],
       evaluate: ([s, n, pad], { engine: ce }) => {
-        if (!isString(s)) return undefined;
+        const text = textOf(s);
+        if (text === undefined) return undefined;
         const width = asSmallInteger(n);
         if (width === null || width < 0)
           return ce.error(
             'unexpected-argument',
             'PadEnd: n must be a non-negative integer'
           );
-        if (pad !== undefined && !isString(pad)) return undefined;
-        const fill = pad === undefined ? ' ' : pad.string;
+        const fill = pad === undefined ? ' ' : textOf(pad);
+        if (fill === undefined) return undefined;
         if (fill === '')
           return ce.error(
             'unexpected-argument',
             'PadEnd: the padding must not be empty'
           );
-        return ce.string(padClusters(s.string, width, fill, false));
+        return ce.string(padClusters(text, width, fill, false));
       },
     },
 
@@ -9004,11 +9041,12 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           'Unicode default (locale-independent) mappings. The character ' +
           'count can change ("ß" uppercases to "SS").',
       ],
-      signature: '(string) -> string',
+      signature: '(string | character) -> string',
       examples: ['ToUpperCase("straße")'],
       evaluate: ([s], { engine }) => {
-        if (!isString(s)) return undefined;
-        return engine.string(s.string.toUpperCase());
+        const text = textOf(s);
+        if (text === undefined) return undefined;
+        return engine.string(text.toUpperCase());
       },
     },
 
@@ -9017,11 +9055,12 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         'ToLowerCase(s): the string `s` mapped to lower case using the ' +
           'Unicode default (locale-independent) mappings.',
       ],
-      signature: '(string) -> string',
+      signature: '(string | character) -> string',
       examples: ['ToLowerCase("Hello World")'],
       evaluate: ([s], { engine }) => {
-        if (!isString(s)) return undefined;
-        return engine.string(s.string.toLowerCase());
+        const text = textOf(s);
+        if (text === undefined) return undefined;
+        return engine.string(text.toLowerCase());
       },
     },
 
@@ -9048,15 +9087,16 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           'comparison — `CaseFold(a) == CaseFold(b)` tests equality ' +
           'ignoring case. An approximation of Unicode full case folding.',
       ],
-      signature: '(string) -> string',
+      signature: '(string | character) -> string',
       examples: [
         'CaseFold("Straße")',
         'CaseFold("Hello") == CaseFold("HELLO")',
       ],
       evaluate: ([s], { engine }) => {
-        if (!isString(s)) return undefined;
+        const text = textOf(s);
+        if (text === undefined) return undefined;
         return engine.string(
-          s.string
+          text
             .toUpperCase()
             .toLowerCase()
             // GREEK SMALL LETTER FINAL SIGMA → GREEK SMALL LETTER SIGMA.
@@ -9079,10 +9119,14 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           'scalar sequences code point by code point (NOT UTF-16 code ' +
           'units, which would sort astral characters below U+E000..U+FFFF).',
       ],
-      signature: '(string, string) -> integer',
+      signature: '(string | character, string | character) -> integer',
       examples: ['StringCompare("apple", "banana")'],
       evaluate: ([a, b], { engine }) => {
-        if (!isString(a) || !isString(b)) return undefined;
+        if (
+          !(isString(a) || isCharacter(a)) ||
+          !(isString(b) || isCharacter(b))
+        )
+          return undefined;
         return engine.number(
           compareScalarSequences(a.unicodeScalars, b.unicodeScalars)
         );
@@ -9207,15 +9251,21 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
 
     Utf8: {
       description: 'A collection of UTF-8 code units from a string.',
-      signature: '(string) -> list<integer>',
+      signature: '(string | character) -> list<integer>',
       examples: ['Utf8("A€")'],
-      // The evaluate guard (`isString`) is a complete precondition, exposed
+      // The evaluate guard (`isText`) is a complete precondition, exposed
       // for the enumerability facet — see `canEnumerate` (types-definitions).
       canEnumerate: (expr) =>
-        isFunction(expr) ? canEnumerateOperand(expr.op1, isString) : undefined,
+        isFunction(expr) ? canEnumerateOperand(expr.op1, isText) : undefined,
       evaluate: ([str], { engine }) => {
-        if (!isString(str)) return undefined;
-        const utf8Buffer = str.buffer;
+        // A string caches its UTF-8 encoding (`buffer`); a character does not
+        // carry one, so its text is encoded here.
+        const utf8Buffer = isString(str)
+          ? str.buffer
+          : isCharacter(str)
+            ? new TextEncoder().encode(str.string)
+            : undefined;
+        if (utf8Buffer === undefined) return undefined;
         // Convert the Uint8Array to a list of integers
         return engine.function(
           'List',
@@ -9226,18 +9276,19 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
 
     Utf16: {
       description: 'A collection of UTF-16 code units from a string.',
-      signature: '(string) -> list<integer>',
+      signature: '(string | character) -> list<integer>',
       examples: ['Utf16("A😀")'],
-      // The evaluate guard (`isString`) is a complete precondition, exposed
+      // The evaluate guard (`textOf`) is a complete precondition, exposed
       // for the enumerability facet — see `canEnumerate` (types-definitions).
       canEnumerate: (expr) =>
-        isFunction(expr) ? canEnumerateOperand(expr.op1, isString) : undefined,
+        isFunction(expr) ? canEnumerateOperand(expr.op1, isText) : undefined,
       evaluate: ([str], { engine }) => {
-        if (!isString(str)) return undefined;
+        const text = textOf(str);
+        if (text === undefined) return undefined;
         const utf16Values: number[] = [];
         // Convert the string to a list of Unicode scalars
-        for (let i = 0; i < str.string.length; i++) {
-          const codePoint = str.string.charCodeAt(i)!;
+        for (let i = 0; i < text.length; i++) {
+          const codePoint = text.charCodeAt(i)!;
           utf16Values.push(codePoint);
         }
         return engine.function(
@@ -9250,14 +9301,14 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     UnicodeScalars: {
       description:
         'A collection of Unicode scalars from a string, same as UTF-32',
-      signature: '(string) -> list<integer>',
+      signature: '(string | character) -> list<integer>',
       examples: ['UnicodeScalars("A😀")'],
-      // The evaluate guard (`isString`) is a complete precondition, exposed
+      // The evaluate guard (`isText`) is a complete precondition, exposed
       // for the enumerability facet — see `canEnumerate` (types-definitions).
       canEnumerate: (expr) =>
-        isFunction(expr) ? canEnumerateOperand(expr.op1, isString) : undefined,
+        isFunction(expr) ? canEnumerateOperand(expr.op1, isText) : undefined,
       evaluate: ([str], { engine }) => {
-        if (!isString(str)) return undefined;
+        if (!isString(str) && !isCharacter(str)) return undefined;
         const codePoints = str.unicodeScalars;
         return engine.function(
           'List',
@@ -9271,17 +9322,18 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     GraphemeClusters: {
       description:
         'A collection of grapheme clusters from a string. Synonym of Characters.',
-      signature: '(string) -> list<character>',
+      signature: '(string | character) -> list<character>',
       examples: ['GraphemeClusters("héllo")'],
-      // The evaluate guard (`isString`) is a complete precondition, exposed
+      // The evaluate guard (`textOf`) is a complete precondition, exposed
       // for the enumerability facet — see `canEnumerate` (types-definitions).
       canEnumerate: (expr) =>
-        isFunction(expr) ? canEnumerateOperand(expr.op1, isString) : undefined,
+        isFunction(expr) ? canEnumerateOperand(expr.op1, isText) : undefined,
       evaluate: ([str], { engine }) => {
-        if (!isString(str)) return undefined;
+        const text = textOf(str);
+        if (text === undefined) return undefined;
         return engine.function(
           'List',
-          splitGraphemeClusters(str.string).map((c) => engine.character(c))
+          splitGraphemeClusters(text).map((c) => engine.character(c))
         );
       },
     },
@@ -9299,11 +9351,11 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // @todo could accept "roman"... as base
       // @todo could accept optional third parameter as the (padded) length of the output
 
-      signature: '(string, (string|integer)?) -> integer',
+      signature: '(string | character, (string|character|integer)?) -> integer',
       examples: ['DigitsFrom("ff", 16)', 'DigitsFrom("1010", 2)'],
 
       evaluate: (ops, { engine }) => {
-        let op1str = isString(ops[0]) ? ops[0].string : undefined;
+        let op1str = textOf(ops[0]);
         const ce = engine;
         if (!op1str) return ce.typeError('string', ops[0]?.type, ops[0]);
 
@@ -9328,9 +9380,11 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // was handed `op2.string ?? sym(op2) ?? 10`, which is `10` for an
         // integer operand — so `DigitsFrom("101", 2)` parsed "101" in base TEN
         // and answered 101 instead of 5.
-        const base = isString(op2)
-          ? baseFromString(op2.string)
-          : (asSmallInteger(op2) ?? NaN);
+        const baseText = textOf(op2);
+        const base =
+          baseText !== undefined
+            ? baseFromString(baseText)
+            : (asSmallInteger(op2) ?? NaN);
         if (!Number.isInteger(base) || base < 2 || base > 36) {
           // An operand that resolves to no number at all (a free symbol) is
           // reported as written, since `NaN` names nothing the reader gave.
@@ -9383,23 +9437,27 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         'NumberFrom(s, base): the integer `s` denotes in `base` (2 to 36); ' +
           'only integer numerals are accepted.',
       ],
-      signature: '(string, base: (string|integer)?) -> number',
+      signature:
+        '(string | character, base: (string|character|integer)?) -> number',
       examples: ['NumberFrom("3.25")', 'NumberFrom("ff", 16)'],
       evaluate: ([s, baseArg], { engine: ce }) => {
-        if (!isString(s)) return undefined;
+        const source = textOf(s);
+        if (source === undefined) return undefined;
         const invalid = (): Expression =>
-          ce.error(['invalid-number', s.string], s.toString());
+          ce.error(['invalid-number', source], s.toString());
 
         // Unicode White_Space is allowed around the numeral, but nowhere
         // inside it — hence anchored trimming with the shared set rather than
         // `String.trim()`, whose notion of whitespace is the host's.
-        const text = trimClusters(s.string, null, true, true);
+        const text = trimClusters(source, null, true, true);
 
         // Base other than 10: integer numerals only, `DigitsFrom` semantics.
         if (baseArg !== undefined && sym(baseArg) !== 'Nothing') {
-          const base = isString(baseArg)
-            ? baseFromString(baseArg.string)
-            : (asSmallInteger(baseArg) ?? NaN);
+          const baseText = textOf(baseArg);
+          const base =
+            baseText !== undefined
+              ? baseFromString(baseText)
+              : (asSmallInteger(baseArg) ?? NaN);
           if (!Number.isInteger(base) || base < 2 || base > 36) {
             // An operand that resolves to no number at all (a free symbol) is
             // reported as written, since `NaN` names nothing the reader gave.

@@ -75,17 +75,20 @@ function normalizeOutput(output: string): string {
   return output.replace(/\s+/g, '').replace(/"(True|False)"/g, '$1');
 }
 
-/** Materialize a preview-elided collection (`[1,2,3,...]`) so that the
+/** The text of a value, with a lazy collection enumerated so that the
  * expectation can list every element. Only a value whose expectation is a
- * list is materialized: a string is a collection too, and a string that
+ * list is enumerated: a string is a collection too, and a string that
  * contains a literal `...` is not an elision. */
 function fullText(
   value: ReturnType<typeof executeEpsil>['value'],
   expected: string
 ): string {
   const text = value.toString();
-  if (!text.includes('...')) return text;
   if (!value.isCollection || !expected.trim().startsWith('[')) return text;
+  // A literal list prints in full. A lazy collection prints as a preview
+  // with `...`, or as its recipe (`Filter(Range(…), f)`) when the engine
+  // does not turn it into a list by itself; both are enumerated here.
+  if (text.startsWith('[') && !text.includes('...')) return text;
   // Enumerating a lazy collection past the engine's iteration limit throws a
   // cancellation; report it as the text so the failure names the cause.
   try {

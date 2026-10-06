@@ -979,10 +979,14 @@ describe('D8: ToUpperCase / ToLowerCase / CaseFold', () => {
       });
   });
 
-  test('a scalar `character` operand fails closed', () => {
-    // The signature is `(string) -> string`, and `character` is a disjoint
-    // sibling of `string`, so the interpreter reports `incompatible-type`.
-    failsClosed(ce.box(['CaseFold', ['CharacterFrom', { str: 'a' }]]));
+  test('a scalar `character` operand compiles as the one-character string', () => {
+    // A character is accepted wherever a string is: the two are the same
+    // value, so `CaseFold` of the character `A` is the string `"a"`. A
+    // character lowers to the one-cluster JS string it denotes, so the
+    // compiled code is the same as for a string operand.
+    const expr = ce.box(['CaseFold', ['CharacterFrom', { str: 'A' }]]);
+    expect(expr.evaluate().string).toBe('a');
+    agreesWithInterpreter(expr);
   });
 });
 
@@ -1105,6 +1109,93 @@ describe('D8: RandomShuffle / RandomSample over a string source', () => {
       });
       expect(r.run!()).toBe(ce.box(json as never).evaluate().string);
     }
+  });
+});
+
+// ── A `string | character` operand at the collection operators ─────────────
+
+describe('a `string | character` free variable reads as a string', () => {
+  // A free variable used at a text parameter of a string operator is typed
+  // `string | character` by inference. The caller of the compiled function
+  // supplies its value as a host string, which the interpreter reads as a
+  // `string`, so `Length` and `At` segment it into characters as they do a
+  // provable string.
+  test.each([
+    ['Length', ['Length', 's']],
+    ['At, first', ['At', 's', 1]],
+    ['At, second', ['At', 's', 2]],
+    ['At, from the end', ['At', 's', -1]],
+    ['Characters', ['Characters', 's']],
+  ] as const)('%s agrees with the interpreter', (_label, json) => {
+    ce.declare('s', 'string | character');
+    const expr = ce.box(json as never);
+    // A multi-grapheme string (the emoji is two UTF-16 code units) and a
+    // one-character string.
+    agreesWithInterpreterAtRuntime(expr, { s: `h${E_ACUTE_PRECOMPOSED}llo😀` });
+    agreesWithInterpreterAtRuntime(expr, { s: E_ACUTE_PRECOMPOSED });
+  });
+
+  test('a type inferred from `ToUpperCase` admits the same lowering', () => {
+    ce.box(['ToUpperCase', 's']);
+    expect(ce.symbol('s').type.toString()).toBe('character | string');
+    agreesWithInterpreterAtRuntime(ce.box(['Length', 's']), {
+      s: `a${ZWJ_FAMILY}b`,
+    });
+    agreesWithInterpreterAtRuntime(ce.box(['At', 's', 2]), {
+      s: `a${ZWJ_FAMILY}b`,
+    });
+  });
+
+  test('a type inferred as `string` reads the operand as a string', () => {
+    // A `string` matches `collection<any>`, but the operand must not be read
+    // through the run-time array check, which throws for a string.
+    ce.declare('f', '(string) -> integer');
+    ce.box(['f', 's']);
+    expect(ce.symbol('s').type.toString()).toBe('string');
+    agreesWithInterpreterAtRuntime(ce.box(['At', 's', 2]), {
+      s: `a${ZWJ_FAMILY}b`,
+    });
+  });
+
+  test('a `character` value at `Length` fails closed', () => {
+    // A character is not a collection: the interpreter answers an
+    // `incompatible-type` error, so the compiled `1` would be a wrong value.
+    const expr = ce.box(['Length', ['CharacterFrom', { str: 'é' }]]);
+    expect(expr.evaluate().operator).toBe('Error');
+    failsClosed(expr);
+  });
+
+  test('a COMPUTED `string | character` value fails closed', () => {
+    // The `If` gives a character when `b` is false. The interpreter then
+    // answers an error, and a JS string cannot tell the two kinds apart.
+    ce.declare('b', 'boolean');
+    const u = ['If', 'b', { str: 'ab' }, ['CharacterFrom', { str: 'c' }]];
+    failsClosed(ce.box(['Length', u] as never));
+    failsClosed(ce.box(['At', u, 1] as never));
+  });
+
+  test('a LOCAL variable typed `string | character` fails closed', () => {
+    ce.declare('b', 'boolean');
+    failsClosed(
+      ce.box([
+        'Block',
+        [
+          'Assign',
+          'c',
+          ['If', 'b', { str: 'ab' }, ['CharacterFrom', { str: 'c' }]],
+        ],
+        ['Length', 'c'],
+      ])
+    );
+  });
+
+  test('a `string | list<number>` base at `At` fails closed', () => {
+    // It used to compile to `_SYS.at` over the JS string, which answers no
+    // value where the interpreter answers the character at the index.
+    ce.declare('m', 'string | list<number>');
+    const expr = ce.box(['At', 'm', 1]);
+    expect(substitute(expr, { m: 'xy' }).evaluate().string).toBe('x');
+    failsClosed(expr);
   });
 });
 

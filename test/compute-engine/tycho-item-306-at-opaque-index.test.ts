@@ -18,7 +18,7 @@
 import { ComputeEngine } from '../../src/compute-engine';
 
 const INDEX_ERROR =
-  '["Error",["ErrorCode","\'incompatible-type\'","\'boolean | indexed_collection | number\'","\'expression\'"],';
+  '["Error",["ErrorCode","\'incompatible-type\'","\'boolean | character | indexed_collection | number\'","\'expression\'"],';
 
 describe('At refuses an opaque-head index (Tycho item 306)', () => {
   const ce = new ComputeEngine();
@@ -126,12 +126,18 @@ describe('At with a valid index is not affected (Tycho item 306)', () => {
   });
 
   test('strings, tuples, dictionaries and records', () => {
-    expect(ce.box(['At', { str: 'abc' }, 2]).evaluate().toString()).toBe(
-      '"b"'
-    );
-    expect(ce.box(['At', ['Tuple', 1, 'x'], 2]).evaluate().toString()).toBe(
-      'x'
-    );
+    expect(
+      ce
+        .box(['At', { str: 'abc' }, 2])
+        .evaluate()
+        .toString()
+    ).toBe('"b"');
+    expect(
+      ce
+        .box(['At', ['Tuple', 1, 'x'], 2])
+        .evaluate()
+        .toString()
+    ).toBe('x');
     expect(
       ce
         .box(['At', ['Dictionary', ['Tuple', "'a'", 1]], "'a'"])

@@ -109,77 +109,53 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
-### String operators reject a `character` (OPEN, design decision — found 2026-10-06 by the Epsil program corpus)
+### A lazy drawing collection stored in a dictionary is not seen as escaping its seed frame (OPEN, small — found 2026-10-06 by the effects work for the Epsil program corpus)
 
-Indexing a string gives a `character`, and `character` is a disjoint sibling of
-`string` in the type lattice by design (`docs/STRING_ROADMAP.md`). Every string
-operator declares a `string` parameter, so `toUpperCase("ab"[1])`,
-`stringRepeat(c, 3)`, `numberFrom("7"[1])`, `unicodeScalars(c)` and
-`map(numberFrom, characters(s))` are all static type errors, and so is a
-dictionary lookup with a character key (`{a -> 1}[c]`, where `At` admits
-`boolean | indexed_collection | number`). The character and the one-cluster
-string are the SAME value (`isSame`, user-ruled 2026-08-16), so the refusal
-protects nothing. The workaround is `String(c)` at every use, which the corpus
-programs `exercism/acronym`, `exercism/luhn`, `exercism/rna-transcription`,
-`exercism/run-length-encoding` and `language/character-at-string-operators`
-show. Decision needed: widen the `string` parameters of the string library and
-the dictionary key of `At` to `string | character` (recommended), or keep the
-refusal and document `String(c)`.
+`escapesAsDrawingLazyView` (`boxed-expression/effects-of.ts`) decides whether
+a lazy collection that draws random numbers leaves a `WithRandomSeed` frame
+before it is enumerated. Its helper `isValueContainer` lists `List`, `Tuple`
+and `Pair` as containers whose cells are in value position, but not a
+dictionary. So `WithRandomSeed(42, {"a" -> Map(x ↦ Random(), xs)})` is
+treated as not escaping, and the seed frame is said to discharge the draws.
+The rule is optimistic by design (`docs/RANDOMNESS-MODEL.md` §2 names only
+`List` and `Tuple` cells). `isValueContainer` is shared with the pending-draw
+walk in `library/core.ts`, which reads `.ops`, and a canonical dictionary has
+none, so both channels and the §2 text must change together.
 
-### Effects inference rejects a function whose local is read by a lambda (OPEN, design decision — found 2026-10-06 by the Epsil program corpus)
+### Compiled code for a parameter declared `indexed_collection` treats a string argument as an array (OPEN, design decision — found 2026-10-06 by the review of the overload result join; present before)
 
-The confinement rule of `docs/EFFECTS-MODEL.md` treats a symbol that any nested
-`Function` literal references as escaping, so a write to it needs the `scope`
-effect. That refuses this common shape, where the local is declared in the body,
-written only by the body's own loop and merely READ by the lambda:
+With `S` declared bare `indexed_collection`, `compile(Length(Drop(S, 1)))`
+succeeds and the JavaScript lowering uses `.slice(1)` and `.length`. The
+compiled entry accepts a string argument for `S`, so `S = "😀a"` gives 2 where
+the interpreter gives 1 (a string is a collection of grapheme clusters, and
+the lowering counts UTF-16 code units). `Drop(S, 1)` on the same input gives
+a broken half of the emoji. The result join types `Drop(S, 1)` as
+`list<unknown> | string`, which the compiler's string guard would have read
+as evidence and failed closed on; the guard now reads the evidence at the
+subject (`stringEvidenceSource`, `compilation/base-compiler.ts`), which keeps
+the behavior that existed before the join and that
+`compile-numeric-selection-fusion.test.ts` pins ("a carrier declared
+indexed_collection fuses"). Decision needed: the compiled entry refuses a
+string argument for a parameter declared with a bare collection type (a
+run-time type error, since the lowering is an array lowering), or the compile
+declines such a parameter when a string-preserving operator is applied to it,
+or the current optimistic behavior is kept and documented in
+`docs/COMPILATION-MODEL.md`.
 
-```
-f(n) = do {
-  let acc = {}
-  for p in 2..n { acc = union(acc, {p}) }
-  filter(1..n, k => k !in acc)
-}
-```
+### A collection of possibly absent elements is refused by a typed collection parameter (OPEN, design decision — found 2026-10-06 by the Epsil program corpus)
 
-The write cannot reach anything outside the call. The error text ("writes
-outside a function require a declared `scope` effect") does not say what to
-change. Corpus: `language/effects-local-read-by-lambda`, `exercism/sieve`.
-Decision needed: confine a body-declared local that no nested literal WRITES (a
-nested literal that writes it still reports `scope` on its own arrow and
-projects it where it is applied), or keep the rule and improve the message.
-
-### Overloaded result type on an unknown operand (OPEN, design decision — found 2026-10-06 by the Epsil program corpus)
-
-For an overload set applied to an operand of unknown type, result typing reads
-the result off ONE arm (declaration order wins among incomparable arms, pinned
-by `overload-resolution.test.ts`). An untyped Epsil parameter is such an
-operand, so `characters(slice(s, 1, 2))` in `firstTwo(s) = …` is refused
-statically: `slice(s, 1, 2)` is typed `list<unknown>` from the collection arm
-although the string arm applies at runtime. A union-typed operand IS accepted by
-the consumer (`Characters(v)` with `v: string | list<integer>` types
-`list<character>`), so the join of the viable arms' results would make these
-programs well-typed. Corpus:
-`language/overload-result-type-on-untyped-parameter`. Decision needed: join the
-results of every viable arm when an operand is `unknown`/`any` and more than one
-arm survives (`resolvedArm`, `boxed-function.ts`), which changes the pinned
-tie-break, or keep declaration order.
-
-### A `length(xs)` call on an untyped parameter changes later static types (OPEN, medium — found 2026-10-06 by the Epsil program corpus)
-
-```
-smaller(xs) = do {
-  let n = length(xs)
-  let p = first(xs)
-  listFrom(filter(xs, x => x < p))
-}
-```
-
-is refused: "expected `(vector) any -> boolean`, got
-`(x: vector) -> list<boolean | missing>`". Without the `length` line the same
-function is accepted and gives `[1, 2]` for `[3, 1, 2]`. `Length` is declared
-`(any) -> integer | infinity` and its `type` handler reads the operand's type
-without narrowing it, so where the `vector` comes from is not yet known. Corpus:
-`language/length-changes-later-static-types`, `rosetta/quicksort`.
+A dictionary lookup or an index with a computed key has the type
+`T | missing`. A scalar of that type is admitted by a parameter that expects
+`T` (the absence is handled at run time), but a COLLECTION of such elements is
+refused: with `xs = ["a", "b"]`, `stringJoin(map(i => xs[i], [1, 2]), "")` is
+a static error, "expected `collection<character | string>`, got
+`list<missing | string^2>`", although every element is present. The program
+`toRna(dna) = stringJoin(map(c => complement[c], characters(dna)), "")` of
+`exercism/rna-transcription` is refused for this reason; `complement[c] ?? "?"`
+is accepted. Decision needed: admit a collection whose element type is
+`T | missing` where `collection<T>` is expected, with the same run-time
+handling of an absent element as the scalar case (recommended), or keep the
+refusal and require the `??` at the element.
 
 ### Static type of a zipped tuple component inside a loop (OPEN, small — found 2026-10-06 by the Epsil program corpus)
 
@@ -218,23 +194,23 @@ recursive call is the case where it does not. `listFrom` around the argument
 gives `[]`. Corpus: `language/lazy-argument-to-recursive-call`,
 `rosetta/quicksort-typed` (the working form).
 
-### Default iteration limit of 1024 for Epsil programs (OPEN, design decision — found 2026-10-06 by the Epsil program corpus)
+### A user predicate over a lazy range is slow, and each consumer walks the range again (OPEN, performance — found 2026-10-06 by the Epsil program corpus)
 
-`ce.iterationLimit` defaults to 1024 (`DEFAULT_ITERATION_LIMIT`,
-`common/interruptible.ts`) and the CLI and `executeEpsil` keep it. A `for` or
-`while` loop of 2000 turns is canceled with `iteration-limit-exceeded` (the
-value after cancellation is the partial count, 1025). A lazy walk hits the same
-limit in several forms: `listFrom(filter(1000..4999, f))` with a user predicate
-is an `Error` value, `length(filter(1..9000, g))` and
-`max(filter(comprehension of 5050 elements))` stay UNEVALUATED with no
-diagnostic, while `sum(filter(1..99999, isPrime))` and `count(1..5000, isPrime)`
-stream to the end. Programs that are ordinary in any language (Project Euler 21,
-29, 30, 34; a sieve to 10000) cannot run with the default. Corpus:
-`language/loop-iteration-limit`, `euler/004`, `euler/021`, `euler/029`,
-`euler/030`, `euler/034`. Decision needed: a higher default for Epsil programs
-(the CLI and `executeEpsil`), for example 1,000,000 with the time-based deadline
-as the safety net, and one consistent outcome (an error value with a diagnostic,
-never a silently unevaluated result) when a lazy walk exceeds it.
+With the iteration limit removed for Epsil programs, the full-size Project
+Euler programs give the right answers but are slow. Measured on a loaded
+machine, so the figures are upper bounds: `sum(filter(2..9999, isAmicable))`
+(two `divisors` sums per element) took about 20 s, that is 2 ms per element;
+`length(unique([a^b for a in 2..100, b in 2..100]))` took 15 s; and
+`filter(10..50000, isCurious)` (a digit sum per element) took about 20 s per
+walk, 0.4 ms per element. A lazy result is not kept after a walk: printing
+the value walks it once for the preview, and a host that then enumerates it
+walks it again, so the last program cost 47 s in the corpus runner. The
+corpus keeps reduced sizes for `euler/021`, `euler/029` and `euler/034` for
+this reason, and `rosetta/kaprekar-numbers` stops at 100: a predicate whose
+body holds an `any` over a lambda with a `do` block cost about 30 ms per
+number. To do: profile the per-element cost of applying a user function
+inside `Filter`/`Map`/`Any`, and decide whether a finite lazy collection
+should keep its elements after the first complete walk.
 
 ### A determinant with float entries keeps unfolded constants (OPEN, small — found 2026-10-06 by the review of the exact determinant fix; present before)
 

@@ -1,4 +1,5 @@
-// corpus: known-failure materializing a comprehension of 9801 elements exceeds the 1024-turn iteration limit (ROADMAP: "Default iteration limit of 1024 for Epsil programs")
-// Project Euler 29: distinct values of a^b for 2 <= a, b <= 100.
-length(unique([a^b for a in 2..100, b in 2..100]))
-// ➔ 9183
+// Project Euler 29 (reduced): distinct values of a^b for 2 <= a, b <= 30. The
+// full problem (up to 100, answer 9183) runs correctly but takes about
+// fifteen seconds.
+length(unique([a^b for a in 2..30, b in 2..30]))
+// ➔ 755

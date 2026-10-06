@@ -2033,7 +2033,12 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   /** Throw `CancellationError` `iteration-limit-exceeded` when the iteration limit
-   * in a loop is exceeded. Default: no limits.
+   * in a loop or a lazy walk is exceeded. Default: 1024. A value of 0 or less
+   * means no limit.
+   *
+   * An engine that runs an Epsil program (`executeEpsil`, the `epsil`
+   * command) has no iteration limit from then on, unless this property was
+   * assigned: an assigned limit is kept and applies to Epsil programs too.
    *
    * @experimental
    */
@@ -2041,14 +2046,40 @@ export class ComputeEngine implements IComputeEngine {
     return this._runtimeState.iterationLimit;
   }
   set iterationLimit(t: number) {
-    if (t === this._runtimeState.iterationLimit) return;
-    this._runtimeState.iterationLimit = t;
+    // Recorded before the equality test: assigning the default value is still
+    // a host decision that Epsil programs must honor.
+    this._runtimeState.iterationLimitIsExplicit = true;
+    this._setIterationLimit(t);
+  }
+
+  /** Change the iteration limit without recording a host assignment. */
+  private _setIterationLimit(t: number): void {
+    // Compared after normalization: a limit of 0 or less means no limit and
+    // is stored as `Infinity`, so removing a limit that is already removed
+    // must be a no-op and must not signal a configuration change.
+    const limit = t <= 0 ? Number.POSITIVE_INFINITY : t;
+    if (limit === this._runtimeState.iterationLimit) return;
+    this._runtimeState.iterationLimit = limit;
     // The iteration limit is a global evaluation input: a collection count
     // or element walk that gave up under the old limit
     // (`iteration-limit-exceeded` → "unknown") can answer differently under
     // the new one, and the facet/element memos key such answers on the
     // world epoch. Same event, same reason as the `tolerance` setter.
     this._noteStateEvent({ kind: 'config' });
+  }
+
+  /** See `IComputeEngine._liftDefaultIterationLimit`. @internal */
+  _liftDefaultIterationLimit(): void {
+    if (this._runtimeState.iterationLimitIsExplicit) return;
+    this._setIterationLimit(0);
+  }
+
+  /** See `IComputeEngine._iterationLimitIsExplicit`. @internal */
+  get _iterationLimitIsExplicit(): boolean {
+    return this._runtimeState.iterationLimitIsExplicit;
+  }
+  set _iterationLimitIsExplicit(explicit: boolean) {
+    this._runtimeState.iterationLimitIsExplicit = explicit;
   }
 
   /** Signal `recursion-depth-exceeded` when the recursion depth for this

@@ -426,6 +426,108 @@ describe('EPSIL EFFECTS — end to end through the engine', () => {
     expect(value.toString()).toContain('random effects');
   });
 
+  test('a local written by the body and only READ by a lambda infers no `scope`', () => {
+    // `acc` is declared in the body and written only by the body's own loop;
+    // the lambda given to `filter` reads it. Nothing outside a call of `f`
+    // can observe the writes, so the bare definition is accepted.
+    const ce = new ComputeEngine();
+    const { value, diagnostics } = executeEpsil(
+      ce,
+      [
+        'f(n) = do {',
+        '  let acc = {}',
+        '  for p in 2..n { acc = union(acc, {p}) }',
+        '  filter(1..n, k => k !in acc)',
+        '}',
+        'f(5)',
+      ].join('\n')
+    );
+    expect(diagnostics).toEqual([]);
+    expect(value.toString()).toBe('[1]');
+    expect(ce.box('f').type.toString()).not.toContain('scope');
+  });
+
+  test('a local WRITTEN by an applied inner function still requires `scope`', () => {
+    // The inner function `add` writes `acc`, so its own arrow carries
+    // `scope`, and `g` receives that `scope` where it applies `add`.
+    const ce = new ComputeEngine();
+    const { diagnostics } = executeEpsil(
+      ce,
+      [
+        'function g(n) {',
+        '  let acc = 0',
+        '  add(k) = do { acc = acc + k }',
+        '  add(n)',
+        '  acc',
+        '}',
+        'g(3)',
+      ].join('\n')
+    );
+    expect(diagnostics.map((d) => d.message[0])).toEqual(['runtime-error']);
+    expect(String(diagnostics[0].message[1])).toContain(
+      'writes outside a function require a declared `scope` effect'
+    );
+  });
+
+  test('applying a pure `let`-bound lambda adds no effects', () => {
+    const ce = new ComputeEngine();
+    const { value, diagnostics } = executeEpsil(
+      ce,
+      ['h(n) = do {', '  let sq = x => x * x', '  sq(n)', '}', 'h(3)'].join(
+        '\n'
+      )
+    );
+    expect(diagnostics).toEqual([]);
+    expect(value.toString()).toBe('9');
+    expect(ce.box('h').type.toString()).toBe('(unknown) -> unknown');
+  });
+
+  test('applying a `let`-bound lambda that writes a local requires `scope`', () => {
+    const ce = new ComputeEngine();
+    const { diagnostics } = executeEpsil(
+      ce,
+      [
+        'g(n) = do {',
+        '  let acc = 0',
+        '  let add = k => do { acc = acc + k }',
+        '  add(n)',
+        '  acc',
+        '}',
+        'g(3)',
+      ].join('\n')
+    );
+    expect(diagnostics.map((d) => d.message[0])).toEqual(['runtime-error']);
+    expect(String(diagnostics[0].message[1])).toContain(
+      'writes outside a function require a declared `scope` effect'
+    );
+  });
+
+  test('a `let` initializer that draws makes the function `random`', () => {
+    const ce = new ComputeEngine();
+    const { diagnostics } = executeEpsil(
+      ce,
+      ['h() = do {', '  let x = Random()', '  x', '}', 'h()'].join('\n')
+    );
+    expect(diagnostics).toEqual([]);
+    expect(ce.box('h').type.toString()).toContain('random');
+  });
+
+  test('a nested one-step definition is local to the call', () => {
+    // The inner `g` binds in the call frame: it is not callable at top level
+    // after `f` returns, and it does not replace a top-level `g`. So the
+    // bare definition of `f` needs no `scope`.
+    const ce = new ComputeEngine();
+    const { value, diagnostics } = executeEpsil(
+      ce,
+      ['g(y) = y * 100', 'f(x) = do { g(y) = y + 1; g(x) * 2 }', 'f(3)'].join(
+        '\n'
+      )
+    );
+    expect(diagnostics).toEqual([]);
+    expect(value.toString()).toBe('8');
+    expect(ce.box(['g', 1]).evaluate().toString()).toBe('100');
+  });
+
   test('a violated contract in a non-final statement is a `runtime-error` diagnostic', () => {
     const ce = new ComputeEngine();
     const { diagnostics } = executeEpsil(

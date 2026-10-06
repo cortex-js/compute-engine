@@ -1,6 +1,4 @@
-// corpus: known-failure string operators reject a `character` argument (ROADMAP: "String operators reject a `character`")
 // Run-length encode a string: "AABCCC" → "2AB3C", and decode it back.
-// `stringRepeat(c, n)` with a character `c` is a static type error today.
 encode(s) = do {
   let out = ""
   let run = 0

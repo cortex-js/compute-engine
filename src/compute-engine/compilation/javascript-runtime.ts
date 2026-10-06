@@ -4242,8 +4242,8 @@ export const SYS_HELPERS = {
   // same. Doing this at RUN time rather than gating at compile time is
   // deliberate: the index's declared type is routinely far wider than its
   // runtime value (a comprehension variable types as
-  // `boolean | indexed_collection | number | string`), so a static
-  // "provably real" gate rejected ordinary compilable code.
+  // `boolean | character | indexed_collection | number | string`), so a
+  // static "provably real" gate rejected ordinary compilable code.
   //
   // The index may itself be a collection at run time (a literal list, or the
   // array a `_SYS.bcast` index expression such as `p[X-1]` produces), so

@@ -557,6 +557,33 @@ describe('EPSIL EXECUTE — structured cancellation cause', () => {
     expect(value.op1?.string).toBe('Operation canceled');
   });
 
+  test('a program has no iteration limit on an engine with the default limit', () => {
+    const ce = new ComputeEngine();
+    expect(ce.iterationLimit).toBe(1024);
+    const { value, diagnostics } = executeEpsil(
+      ce,
+      'let total = 0\nfor i in 1..5000 { total = total + i * 2 }\ntotal'
+    );
+    expect(diagnostics).toEqual([]);
+    expect(value.re).toBe(25005000);
+    // The limit stays removed, so that a lazy collection the program returns
+    // can be enumerated by the host after the run.
+    expect(ce.iterationLimit).toBe(Infinity);
+    const lazy = executeEpsil(ce, 'filter(1..3000, k => k % 1000 == 0)').value;
+    expect([...lazy.each()].map((x) => x.re)).toEqual([1000, 2000, 3000]);
+  });
+
+  test('a limit the host assigned is kept, even when it equals the default', () => {
+    const ce = new ComputeEngine();
+    ce.iterationLimit = 1024;
+    const { value } = executeEpsil(
+      ce,
+      'let c = 0\nfor i in 1..5000 { c = c + 1 }'
+    );
+    expect(value.op2?.string).toBe('iteration-limit-exceeded');
+    expect(ce.iterationLimit).toBe(1024);
+  });
+
   test('timeout on the final-statement Error value', () => {
     const ce = new ComputeEngine();
     ce.iterationLimit = 100_000_000;
@@ -968,21 +995,19 @@ describe('EPSIL EXECUTE — error propagation', () => {
  */
 describe('EPSIL EXECUTE — pipe-stage sugar', () => {
   test('the motivating pipelines are equivalent', () => {
-    expect(
-      run('1..oo |> Take(_, 10) |> Map(_^2, _) |> Sum').value.re
-    ).toBe(385);
+    expect(run('1..oo |> Take(_, 10) |> Map(_^2, _) |> Sum').value.re).toBe(
+      385
+    );
     expect(run('1..oo |> Take(10) |> x => x^2 |> Sum').value.re).toBe(385);
     expect(run('1..oo |> Take(10) |> _^2 |> Sum').value.re).toBe(385);
   });
 
   test('implicit topic argument fills an incomplete call', () => {
     expect(run('1..10 |> Take(3)').value.toString()).toBe('[1,2,3]');
-    expect(
-      run('let f = x => x * 2\n[1,2,3] |> Map(f)').value.toString()
-    ).toBe('[2,4,6]');
-    expect(run('[1,2,3] |> Filter(x => x > 1)').value.toString()).toBe(
-      '[2,3]'
+    expect(run('let f = x => x * 2\n[1,2,3] |> Map(f)').value.toString()).toBe(
+      '[2,4,6]'
     );
+    expect(run('[1,2,3] |> Filter(x => x > 1)').value.toString()).toBe('[2,3]');
   });
 
   test('the topic takes the TRAILING fitting slot, and displaced arguments must still fit', () => {
@@ -1026,9 +1051,7 @@ describe('EPSIL EXECUTE — pipe-stage sugar', () => {
   });
 
   test('a stage lambda ends at the next pipe', () => {
-    expect(
-      run('[1,2,3] |> x => x + 1 |> Sum').value.re
-    ).toBe(9);
+    expect(run('[1,2,3] |> x => x + 1 |> Sum').value.re).toBe(9);
   });
 
   test('a unary lambda stage maps over a collection topic', () => {
@@ -1043,9 +1066,7 @@ describe('EPSIL EXECUTE — pipe-stage sugar', () => {
     ).toBe('3');
     // …and so do the named function and an authored collection annotation.
     expect(run('[1,2,3] |> Length').value.re).toBe(3);
-    expect(
-      run('[1,2,3] |> ((l: list<number>) => Length(l))').value.re
-    ).toBe(3);
+    expect(run('[1,2,3] |> ((l: list<number>) => Length(l))').value.re).toBe(3);
   });
 
   test('a lambda stage over a non-collection topic applies', () => {
@@ -1081,9 +1102,7 @@ describe('EPSIL EXECUTE — pipe-stage sugar', () => {
     // `_` as a call argument marks where the piped value goes — no implicit
     // Map, even over a collection topic.
     expect(run('1..10 |> Take(_, 3)').value.toString()).toBe('[1,2,3]');
-    expect(run('1..5 |> Map(_^2, _)').value.toString()).toBe(
-      '[1,4,9,16,25]'
-    );
+    expect(run('1..5 |> Map(_^2, _)').value.toString()).toBe('[1,4,9,16,25]');
   });
 });
 
@@ -1102,9 +1121,7 @@ describe('EPSIL EXECUTE — pipe-stage sugar', () => {
  */
 describe('EPSIL EXECUTE — collection-literal spread', () => {
   test('splices lists and ranges', () => {
-    expect(run('let xs = [1, 2]\n[...xs, 3]').value.toString()).toBe(
-      '[1,2,3]'
-    );
+    expect(run('let xs = [1, 2]\n[...xs, 3]').value.toString()).toBe('[1,2,3]');
     expect(run('[0, ...(1..3), 9]').value.toString()).toBe('[0,1,2,3,9]');
     expect(
       run('let xs = [1,2]\nlet ys = [4,5]\n[...xs, 3, ...ys]').value.toString()
@@ -1116,9 +1133,9 @@ describe('EPSIL EXECUTE — collection-literal spread', () => {
     const { value } = run('let t = (1, 2)\n[...t, 3]');
     expect(value.toString()).toContain('spread-tuple');
     // The explicit conversion is the escape: ListFrom(t) splices.
-    expect(
-      run('let t = (1, 2)\n[...ListFrom(t), 3]').value.toString()
-    ).toBe('[1,2,3]');
+    expect(run('let t = (1, 2)\n[...ListFrom(t), 3]').value.toString()).toBe(
+      '[1,2,3]'
+    );
   });
 
   test('a lone spread is the list materialization (Join)', () => {
@@ -1156,16 +1173,12 @@ describe('EPSIL EXECUTE — collection-literal spread', () => {
       'Set(1, 2, 3)'
     );
     expect(run('{1, ...[2, 2, 3]}').value.toString()).toBe('Set(1, 2, 3)');
-    expect(run('{...{1, 2}, ...{2, 3}}').value.toString()).toBe(
-      'Set(1, 2, 3)'
-    );
+    expect(run('{...{1, 2}, ...{2, 3}}').value.toString()).toBe('Set(1, 2, 3)');
   });
 
   test('dictionary merge is last-wins; the bare `->` marker forces dictionary', () => {
     expect(
-      run(
-        'let d = {"a" -> 1, "b" -> 2}\n{...d, "b" -> 9}'
-      ).value.toString()
+      run('let d = {"a" -> 1, "b" -> 2}\n{...d, "b" -> 9}').value.toString()
     ).toBe('{"a" -> 1, "b" -> 9}');
     expect(
       run('let d = {"b" -> 9}\n{"a" -> 1, "b" -> 2, ...d}').value.toString()
@@ -1427,9 +1440,7 @@ describe('EPSIL EXECUTE — diagnostic anchoring inside a NAMED call', () => {
     // the same corrected anchor.
     const src = `${DEF}\nf(y: "ok", x: "bad")`;
     const { diagnostics, valueRange } = run(src);
-    expect(diagnostics.map((d) => d.message[0])).toEqual([
-      'static-type-error',
-    ]);
+    expect(diagnostics.map((d) => d.message[0])).toEqual(['static-type-error']);
     expect(src.slice(diagnostics[0].range[0], diagnostics[0].range[1])).toBe(
       'x: "bad"'
     );
@@ -1630,9 +1641,11 @@ describe('EPSIL EXECUTE — a parameter shadows a same-named outer binding', () 
 
   test('a parameter shadows an outer non-function `const`', () => {
     const { value, diagnostics } = run(
-      ['const offset = 5', 'const wrap = (offset) => offset + 1', 'wrap(10)'].join(
-        '\n'
-      )
+      [
+        'const offset = 5',
+        'const wrap = (offset) => offset + 1',
+        'wrap(10)',
+      ].join('\n')
     );
     expect(diagnostics).toEqual([]);
     expect(value.re).toBe(11);

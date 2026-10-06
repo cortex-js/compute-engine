@@ -60,9 +60,9 @@ The [Core reference](/epsil/reference/core/) has the full description and the ex
 | — | `Block` | `(unknown*) -> unknown` | Evaluate a sequence of expressions in a local scope, **sequentially**. |
 | — | `BuiltinFunction` | `(string \| symbol) -> symbol` | Return a built-in function symbol by name. |
 | `canonicalForm` | `CanonicalForm` | `(any, symbol*) -> any` | Return the canonical form of an expression |
-| `caseFold` | `CaseFold` | `(string) -> string` | CaseFold(s): a case-folded form of `s`, for case-insensitive comparison — `CaseFold(a) == CaseFold(b)` tests equality ignoring case. |
-| `characterFrom` | `CharacterFrom` | `(string) -> character` | CharacterFrom(s): the character `s` denotes. |
-| `characters` | `Characters` | `(string) -> list<character>` | Characters(s): split a string into a list of user-perceived characters (grapheme clusters). |
+| `caseFold` | `CaseFold` | `(character \| string) -> string` | CaseFold(s): a case-folded form of `s`, for case-insensitive comparison — `CaseFold(a) == CaseFold(b)` tests equality ignoring case. |
+| `characterFrom` | `CharacterFrom` | `(character \| string) -> character` | CharacterFrom(s): the character `s` denotes. |
+| `characters` | `Characters` | `(character \| string) -> list<character>` | Characters(s): split a string into a list of user-perceived characters (grapheme clusters). |
 | — | `Coalesce` | `(any+) -> unknown` | Return the first operand that is not ABSENT (`Missing`, `Undefined` or `NaN`), evaluated left-to-right. |
 | — | `Colon` | `(any, any) -> expression` | Type annotation (`a : b`) — opaque typed head. |
 | `conforms` | `Conforms` | `(subject: any, protocols: string+) -> boolean` | True iff the subject conforms to EVERY named protocol. |
@@ -73,7 +73,7 @@ The [Core reference](/epsil/reference/core/) has the full description and the ex
 | — | `DeclareType` | `(string \| symbol, type: string \| symbol \| type, attributes: dictionary<any>?) scope -> nothing` | Declare a type. |
 | — | `DefineFunction` | `(symbol, function, dictionary<any>?) scope -> nothing` | Define one clause of a (possibly multi-clause) function: `DefineFunction(f, Function(body, params…))`. |
 | — | `Delimiter` | `(any, string?) -> any` | Group expressions with explicit delimiters. |
-| `digitsFrom` | `DigitsFrom` | `(string, (integer \| string)?) -> integer` | Return an integer representation of the string `s` in base `base`. |
+| `digitsFrom` | `DigitsFrom` | `(character \| string, (character \| integer \| string)?) -> integer` | Return an integer representation of the string `s` in base `base`. |
 | `error` | `Error` | `(expression<ErrorCode> \| string, expression?) -> nothing` | Represent an error expression. |
 | — | `ErrorCode` | `(string, any*) -> error` | Structured error code with optional arguments. |
 | `evaluate` | `Evaluate` | `(any) -> unknown` | Evaluate an expression. |
@@ -81,7 +81,7 @@ The [Core reference](/epsil/reference/core/) has the full description and the ex
 | `findRoot` | `FindRoot` | `(any, any) -> dictionary` | FindRoot(equations, params): numerically find parameter values that |
 | — | `Function` | `(expression, (function \| symbol)*) -> function` | A function literal |
 | `geometricVector` | `GeometricVector` | `(any, any) -> expression` | Geometric vector (directed segment between two points) — opaque typed head. |
-| `graphemeClusters` | `GraphemeClusters` | `(string) -> list<character>` | A collection of grapheme clusters from a string. |
+| `graphemeClusters` | `GraphemeClusters` | `(character \| string) -> list<character>` | A collection of grapheme clusters from a string. |
 | `head` | `Head` | `(any) -> symbol` | Return the head of an expression, the name of the operator |
 | — | `Hold` | `(any) -> unknown` | Hold an expression, preventing it from being canonicalized or evaluated until `ReleaseHold` is applied to it |
 | — | `HoldValues` | `(any, any?) -> expression` | HoldValues(body): evaluate `body` with its assigned free symbols |
@@ -100,12 +100,12 @@ The [Core reference](/epsil/reference/core/) has the full description and the ex
 | — | `N` | `(any, (integer \| list<number>)?) -> unknown` | N(expr): numerically evaluate an expression |
 | — | `NamedArgument` | `(string, any) -> nothing` | NamedArgument(name, value): one named argument of a call (Epsil |
 | `nothing` | `Nothing` | variable `nothing` | The absence of a value; the sole member of the unit type. |
-| `numberFrom` | `NumberFrom` | `(string, base: (integer \| string)?) -> number` | NumberFrom(s): the number the string `s` denotes — optional surrounding whitespace, an optional sign, then ASCII digits with an optional "." fraction and an optional e/E exponent, or one of "oo", "+oo", "-oo", "NaN", "Indeterminate". |
+| `numberFrom` | `NumberFrom` | `(character \| string, base: (character \| integer \| string)?) -> number` | NumberFrom(s): the number the string `s` denotes — optional surrounding whitespace, an optional sign, then ASCII digits with an optional "." fraction and an optional e/E exponent, or one of "oo", "+oo", "-oo", "NaN", "Indeterminate". |
 | `numericApproximation` | `NumericApproximation` | `(any) -> unknown` | Numerically evaluate an expression, as the `.N()` method does (engine-internal). |
 | — | `Object` | `(any, string?) -> unknown` | Provenance head for the snapshot of a mutable object: `["Object", <record>, "'TypeName'"]`. |
 | — | `OverParen` | `(any+) -> expression` | Over-paren accent (`\overparen{BC}`) — opaque typed head; not evaluated. |
-| `padEnd` | `PadEnd` | `(string, n: integer, pad: string?) -> string` | PadEnd(s, n, pad=" "): `s` padded at the END to `n` characters by repeating `pad` (its final copy truncated on a character boundary). |
-| `padStart` | `PadStart` | `(string, n: integer, pad: string?) -> string` | PadStart(s, n, pad=" "): `s` padded at the START to `n` characters by repeating `pad` (its final copy truncated on a character boundary). |
+| `padEnd` | `PadEnd` | `(character \| string, n: integer, pad: (character \| string)?) -> string` | PadEnd(s, n, pad=" "): `s` padded at the END to `n` characters by repeating `pad` (its final copy truncated on a character boundary). |
+| `padStart` | `PadStart` | `(character \| string, n: integer, pad: (character \| string)?) -> string` | PadStart(s, n, pad=" "): `s` padded at the START to `n` characters by repeating `pad` (its final copy truncated on a character boundary). |
 | `parallel` | `Parallel` | `(any, any) -> expression` | Parallelism relation (`AB \parallel CD`) — opaque typed head; not evaluated. |
 | `parse` | `Parse` | `(string) -> any` | Parse a LaTeX string and evaluate to a corresponding expression |
 | `perpendicular` | `Perpendicular` | `(any, any) -> expression` | Perpendicularity relation (`AB \perp CD`) — opaque typed head; not evaluated. |
@@ -131,12 +131,12 @@ The [Core reference](/epsil/reference/core/) has the full description and the ex
 | `sphere` | `Sphere` | `(any+) -> expression` | Sphere primitive — opaque typed head. |
 | — | `Spread` | `(any) -> unknown` | Spread(t): splice the elements of the tuple `t` into the enclosing |
 | — | `String` | `(any*) -> string` | A string created by joining its arguments. |
-| `stringCompare` | `StringCompare` | `(string, string) -> integer` | StringCompare(a, b): -1 when `a` sorts before `b`, 0 when they are equal, 1 when `a` sorts after `b`. |
+| `stringCompare` | `StringCompare` | `(character \| string, character \| string) -> integer` | StringCompare(a, b): -1 when `a` sorts before `b`, 0 when they are equal, 1 when `a` sorts after `b`. |
 | `stringFrom` | `StringFrom` | `(any, format: string?) -> string` | StringFrom(value, format?): create a string from `value`. |
-| `stringJoin` | `StringJoin` | `(collection<character \| string>, separator: string?) -> string` | StringJoin(xs): join the elements of the finite collection `xs` (strings or characters) into a string. |
-| `stringRepeat` | `StringRepeat` | `(string, n: integer) -> string` | StringRepeat(s, n): `n` copies of the string `s`, concatenated. |
-| `stringReplace` | `StringReplace` | `((string, string, string, count: integer?) -> string) & ((string, regexp, string, count: integer?) -> string) & ((string, regexp, function, count: integer?) -> string)` | StringReplace(s, target, replacement): replace every non-overlapping occurrence of `target` in `s`, scanning left to right over whole characters. |
-| `stringSplit` | `StringSplit` | `((string, string?) -> list<string>) & ((string, regexp) -> list<string>)` | StringSplit(s): split a string on runs of whitespace (the Unicode White_Space code points), dropping empty parts. |
+| `stringJoin` | `StringJoin` | `(collection<character \| string>, separator: (character \| string)?) -> string` | StringJoin(xs): join the elements of the finite collection `xs` (strings or characters) into a string. |
+| `stringRepeat` | `StringRepeat` | `(character \| string, n: integer) -> string` | StringRepeat(s, n): `n` copies of the string `s`, concatenated. |
+| `stringReplace` | `StringReplace` | `((character \| string, character \| string, character \| string, count: integer?) -> string) & ((character \| string, regexp, character \| string, count: integer?) -> string) & ((character \| string, regexp, function, count: integer?) -> string)` | StringReplace(s, target, replacement): replace every non-overlapping occurrence of `target` in `s`, scanning left to right over whole characters. |
+| `stringSplit` | `StringSplit` | `((character \| string, (character \| string)?) -> list<string>) & ((character \| string, regexp) -> list<string>)` | StringSplit(s): split a string on runs of whitespace (the Unicode White_Space code points), dropping empty parts. |
 | — | `Subscript` | `(collection<any>, any) -> any` | Subscript notation for indexing or compound symbols. |
 | — | `Subtype` | `(subtype: string \| type, supertype: string \| type) -> boolean` | True iff the FIRST operand is a subtype of the second — `Subtype("integer", "number")` is `True`, `Subtype("number", "integer")` is `False`. |
 | `symbol` | `Symbol` | `function` | Construct a new symbol with a name formed by concatenating the arguments |
@@ -144,19 +144,19 @@ The [Core reference](/epsil/reference/core/) has the full description and the ex
 | — | `Text` | `(any*) -> string` | A sequence of strings, annotated expressions and other Text expressions |
 | `timing` | `Timing` | `(value, repeat: integer?) -> tuple<number, value>` | `Timing(expr)` evaluates `expr` and returns a pair: the time the evaluation took, in microseconds, then the value; read them as `Timing(expr)[1]` and `Timing(expr)[2]`. |
 | `to` | `To` | `(any, any) -> nothing` | Action arrow / mapping (`a \to b`) — opaque typed head. |
-| `toLowerCase` | `ToLowerCase` | `(string) -> string` | ToLowerCase(s): the string `s` mapped to lower case using the Unicode default (locale-independent) mappings. |
-| `toUpperCase` | `ToUpperCase` | `(string) -> string` | ToUpperCase(s): the string `s` mapped to upper case using the Unicode default (locale-independent) mappings. |
+| `toLowerCase` | `ToLowerCase` | `(character \| string) -> string` | ToLowerCase(s): the string `s` mapped to lower case using the Unicode default (locale-independent) mappings. |
+| `toUpperCase` | `ToUpperCase` | `(character \| string) -> string` | ToUpperCase(s): the string `s` mapped to upper case using the Unicode default (locale-independent) mappings. |
 | `triangle` | `Triangle` | `(any+) -> expression` | Triangle primitive — opaque typed head. |
-| `trim` | `Trim` | `(string, chars: (character \| collection<character \| string> \| string)?) -> string` | Trim(s): remove leading and trailing whitespace (the Unicode White_Space characters). |
-| `trimEnd` | `TrimEnd` | `(string, chars: (character \| collection<character \| string> \| string)?) -> string` | TrimEnd(s): remove trailing whitespace (the Unicode White_Space characters). |
-| `trimStart` | `TrimStart` | `(string, chars: (character \| collection<character \| string> \| string)?) -> string` | TrimStart(s): remove leading whitespace (the Unicode White_Space characters). |
+| `trim` | `Trim` | `(character \| string, chars: (character \| collection<character \| string> \| string)?) -> string` | Trim(s): remove leading and trailing whitespace (the Unicode White_Space characters). |
+| `trimEnd` | `TrimEnd` | `(character \| string, chars: (character \| collection<character \| string> \| string)?) -> string` | TrimEnd(s): remove trailing whitespace (the Unicode White_Space characters). |
+| `trimStart` | `TrimStart` | `(character \| string, chars: (character \| collection<character \| string> \| string)?) -> string` | TrimStart(s): remove leading whitespace (the Unicode White_Space characters). |
 | `type` | `Type` | `(any) -> type` | The STATIC type of an expression, as a type value: `Type(3)` is `TypeFrom("integer")`. |
 | `typeFrom` | `TypeFrom` | `(text: string) -> type` | A type expression as a first-class value, constructed from its text: `TypeFrom("list<integer>")`. |
 | — | `Typed` | `(any, string \| symbol) -> unknown` | Ascribe a type to an expression. |
 | — | `Unevaluated` | `(any) -> unknown` | Prevent an expression from being evaluated |
-| `unicodeScalars` | `UnicodeScalars` | `(string) -> list<integer>` | A collection of Unicode scalars from a string, same as UTF-32 |
-| `utf16` | `Utf16` | `(string) -> list<integer>` | A collection of UTF-16 code units from a string. |
-| `utf8` | `Utf8` | `(string) -> list<integer>` | A collection of UTF-8 code units from a string. |
+| `unicodeScalars` | `UnicodeScalars` | `(character \| string) -> list<integer>` | A collection of Unicode scalars from a string, same as UTF-32 |
+| `utf16` | `Utf16` | `(character \| string) -> list<integer>` | A collection of UTF-16 code units from a string. |
+| `utf8` | `Utf8` | `(character \| string) -> list<integer>` | A collection of UTF-8 code units from a string. |
 | — | `Wildcard` | `(symbol) -> symbol` | Single-expression pattern wildcard. |
 | — | `WildcardOptionalSequence` | `(symbol) -> symbol` | Pattern wildcard matching zero or more expressions. |
 | — | `WildcardSequence` | `(symbol) -> symbol` | Pattern wildcard matching one or more expressions. |
@@ -228,7 +228,7 @@ The [Collections reference](/epsil/reference/collections/) has the full descript
 | `append` | `Append` | `(collection<any>, (missing \| value)+) -> collection` | Add one or more elements to the end of a collection. |
 | `argMax` | `ArgMax` | `(indexed_collection<T>, key: ((T) any -> unknown)?) -> integer where T` | Return the 1-based index of the element that maximizes the given key function (or the element itself when no key is given). |
 | `argMin` | `ArgMin` | `(indexed_collection<T>, key: ((T) any -> unknown)?) -> integer where T` | Return the 1-based index of the element that minimizes the given key function (or the element itself when no key is given). |
-| — | `At` | `(value: any, index: (boolean \| indexed_collection<any> \| number \| string)+) -> unknown` | Access an element of an indexed collection. |
+| — | `At` | `(value: any, index: (boolean \| character \| indexed_collection<any> \| number \| string)+) -> unknown` | Access an element of an indexed collection. |
 | `chunk` | `Chunk` | `((S, integer) -> list<string> where S: string) & ((collection, integer) -> list<list>)` | Split the collection into `k` nearly equal-sized groups. |
 | `chunkBy` | `ChunkBy` | `((S, key: (character) any -> unknown) -> list<string> where S: string) & ((collection<T>, key: (T) any -> unknown) -> list<list<T>> where T)` | Split the collection into maximal runs of consecutive elements over which the key function yields the same value. |
 | `closed` | `Closed` | `(number) -> number` | Closed(x): the endpoint x of an Interval, marked as included. |
@@ -382,10 +382,10 @@ The [Regular expressions reference](/epsil/reference/regexp/) has the full descr
 
 | Epsil | MathJSON | Signature | Summary |
 |:------|:---------|:----------|:--------|
-| `isMatch` | `IsMatch` | `(subject: string, pattern: regexp) -> boolean` | Whether a string contains a match for a regular expression. |
+| `isMatch` | `IsMatch` | `(subject: character \| string, pattern: regexp) -> boolean` | Whether a string contains a match for a regular expression. |
 | `regExp` | `RegExp` | `(pattern: string, flags: string?) -> regexp` | A compiled regular expression, using the host JavaScript dialect. |
-| `stringMatch` | `StringMatch` | `(subject: string, pattern: regexp) -> nothing \| record` | The first match of a regular expression in a string, as a record. |
-| `stringMatchAll` | `StringMatchAll` | `(subject: string, pattern: regexp) -> list<record>` | Every non-overlapping match of a regular expression in a string, as a list of records. |
+| `stringMatch` | `StringMatch` | `(subject: character \| string, pattern: regexp) -> nothing \| record` | The first match of a regular expression in a string, as a record. |
+| `stringMatchAll` | `StringMatchAll` | `(subject: character \| string, pattern: regexp) -> list<record>` | Every non-overlapping match of a regular expression in a string, as a list of records. |
 
 ## Relations
 

@@ -4,7 +4,7 @@ import {
   widen,
 } from '../../common/type/subtype.js';
 import { isEffectSubset } from '../../common/type/effects.js';
-import { reduceType } from '../../common/type/reduce.js';
+import { reduceType, typesOverlap } from '../../common/type/reduce.js';
 import {
   freeTypeVariables,
   paramAt,
@@ -20,7 +20,10 @@ import {
   type Threadable,
 } from './generic-instantiation.js';
 import {
+  collectionElementType,
   narrowingPreservesEffects,
+  overlapsForDeferredValidation,
+  resolveTypeAlias,
   signatureArms,
   typeContainsMissing,
 } from '../../common/type/utils.js';
@@ -66,6 +69,14 @@ import {
  *   in opposite directions; conflating them reintroduces the §4.5
  *   unsoundness.
  *
+ *   One exception on the result side: when the operand types do not decide
+ *   the arm (an operand typed `unknown` or `any`, or one whose type only
+ *   overlaps an arm's parameter), `selected` is only one of the arms the
+ *   call can take at run time. When more than one arm is possible and their
+ *   results differ, result typing JOINS their results
+ *   (`OverloadResolution.undecidedResults`, read by `resolvedArm` in
+ *   `boxed-function.ts`). Argument validation still uses `selected`.
+ *
  * Selection is purely a **typing** concern (ratified 2026-07-25): it governs
  * argument validation and result typing. An operator's `evaluate` handler keeps
  * its own runtime discrimination and is never told which arm was picked.
@@ -83,6 +94,39 @@ export interface OverloadResolution {
    * open type (§4.2 ground invariant).
    */
   viable: ReadonlyArray<FunctionSignature>;
+  /** Set only when the operand types do not decide which arm the call takes
+   * at run time, and the operator is not lazy: the results of the arms the
+   * call can take, for result typing to JOIN instead of reading `selected`'s
+   * (`resolvedArm` in `boxed-function.ts`). All are GROUND.
+   *
+   * The operand types do not decide the arm when one of these holds:
+   *
+   * - a valid operand is typed `unknown` or `any`: it refutes no arm
+   *   (`prefilterAdmits`);
+   * - an arm the call can take receives an operand whose type only
+   *   OVERLAPS the parameter (not a subtype of it, but sharing a value with
+   *   it on validation's reading, {@link canTakeAtRunTime}), as a
+   *   `collection` operand at a `string` or an `indexed_collection<T>`
+   *   parameter: the value may or may not be one that arm takes;
+   * - a generic arm was refused only because an operand's type overlaps a
+   *   variable's declared bound without satisfying it, as a `collection`
+   *   operand at `T where T: string` (see {@link boundReadInstance}).
+   *
+   * The entries are the results of every arm the call can take at run time
+   * ({@link undecidedJoin}), and not only of the `viable` arms. The first
+   * pass of trial admission in validation is strict: when one arm takes the
+   * operand, an arm that only overlaps it is not viable, so that validation
+   * and operand inference keep the strict reading. At run time the value can
+   * still be one that other arm takes, so result typing reads it. An arm
+   * refused only by an overlapping bound is read at that bound. See
+   * {@link undecidedResultOf} for how a type variable that only an `unknown`
+   * or `any` operand bound is read.
+   *
+   * Recorded here, and not recomputed from the operands, because validation
+   * can narrow an untyped symbol operand after the resolution ran: the
+   * resolution attached to a call keeps the arms the operand was undecided
+   * between. */
+  undecidedResults?: ReadonlyArray<Type>;
   /** `selected`'s ground instantiation at this call (§6). `undefined` exactly
    * when `selected` is; for a ground arm it IS `selected`.
    *
@@ -651,6 +695,65 @@ function instantiateArm(
 }
 
 /**
+ * The result of one arm, for the undecided-operand result join
+ * ({@link OverloadResolution.undecidedResults}): the result of the arm's
+ * ground instance, except that each type variable that only an `unknown`- or
+ * `any`-typed operand bound is read at its DECLARED bound.
+ *
+ * Such an operand says nothing about the variable. The solver records the
+ * variable as ABSORBED: it binds it to the top type and satisfies the bound
+ * provisionally, so validation admits the operand and leaves the check to
+ * run time. That binding is right for admission, but its result erases what
+ * the arm promises: `(value: T, start: number, end: number) -> T where T:
+ * string` on an `unknown` operand has the result `unknown`, which `widen`
+ * drops from a join. Read at its bound, the result is `string`, which is what
+ * an untyped symbol operand already gets (an inferable symbol contributes no
+ * lower bound, so the solver reads the variable at its bound).
+ *
+ * Only a variable that occurs as the WHOLE parameter at a position whose
+ * operand is `unknown` or `any` is read at its bound. A variable absorbed
+ * from a nested `unknown` (`list<unknown>` at `list<T>`), and a variable
+ * with no declared bound, keep the solved binding. The instance itself is
+ * not changed, so admission, ranking and operand inference (which reads the
+ * instances in `viable`) are not changed either.
+ */
+function undecidedResultOf(
+  candidate: ArmInstance,
+  /** The operands in the arm's declaration order (permuted for a named
+   * call). */
+  armOps: ReadonlyArray<Expression>
+): Type {
+  const { declared, solution } = candidate;
+  if (!candidate.generic || solution === undefined)
+    return candidate.instance.result;
+  if (solution.absorbed.size === 0) return candidate.instance.result;
+  let bindings: Record<string, Type> | undefined;
+  for (const tp of declared.typeParams ?? []) {
+    if (tp.bound === undefined || tp.kind === 'value') continue;
+    if (!solution.absorbed.has(tp.name)) continue;
+    const fromUndecidedOperand = armOps.some((op, i) => {
+      if (!op?.isValid) return false;
+      if (!op.type.isUnknown && op.type.type !== 'any') return false;
+      const param = paramAt(declared, i);
+      return (
+        typeof param === 'object' &&
+        param.kind === 'variable' &&
+        param.name === tp.name
+      );
+    });
+    if (!fromUndecidedOperand) continue;
+    bindings ??= { ...solution.bindings };
+    bindings[tp.name] = tp.bound;
+  }
+  if (bindings === undefined) return candidate.instance.result;
+  const result = substituteTypeVariables(declared.result, bindings);
+  // The §4.2 ground invariant: an open type must never reach `widen`.
+  return freeTypeVariables(result).size === 0
+    ? result
+    : candidate.instance.result;
+}
+
+/**
  * Every arm of `arms` in its GROUND form at this call — index-aligned with
  * `arms`, and `arms` itself (no allocation, no solve) when no arm is generic.
  *
@@ -850,10 +953,24 @@ export function resolveOverload(
       selectedInstance: selected,
       selectedSolution: undefined,
       viable,
+      undecidedResults: undecidedJoin(
+        ops,
+        arms.map((arm) =>
+          viable.includes(arm)
+            ? { instance: arm, viable: true, result: arm.result }
+            : arityAdmits(arm, arity)
+              ? { instance: arm, viable: false, result: arm.result }
+              : undefined
+        ),
+        policies
+      ),
     };
   }
 
   const candidates: ArmInstance[] = [];
+  // Every arity-admitted arm, for the undecided-operand result join (see
+  // `OverloadResolution.undecidedResults`).
+  const joinArms: JoinArm[] = [];
   for (let k = 0; k < arms.length; k++) {
     const arm = arms[k];
     const permutation = named?.[k];
@@ -869,8 +986,19 @@ export function resolveOverload(
       permutation === undefined ? ops : permuteOps(ops, permutation);
     const candidate = instantiateArm(arm, armOps, policies, ce._typeResolver);
     // An unsatisfiable instantiation (violated bound) is not an arm this call
-    // can take.
-    if (!candidate.ok) continue;
+    // can take. Its result can still be one the call has at run time, when
+    // the operand only overlaps the bound: result typing keeps it.
+    if (!candidate.ok) {
+      const instance = boundReadInstance(candidate);
+      if (instance !== undefined)
+        joinArms.push({
+          instance,
+          viable: false,
+          result: instance.result,
+          ops: armOps,
+        });
+      continue;
+    }
     const admits =
       armOps.every((op, i) => {
         const param = paramAt(candidate.instance, i);
@@ -891,6 +1019,12 @@ export function resolveOverload(
           armOps
         ) === null);
     if (admits) candidates.push({ ...candidate, permutation });
+    joinArms.push({
+      instance: candidate.instance,
+      viable: admits,
+      result: undecidedResultOf(candidate, armOps),
+      ops: armOps,
+    });
   }
 
   if (candidates.length === 0)
@@ -928,7 +1062,242 @@ export function resolveOverload(
     viable: candidates.map((c) => c.instance),
     selectedPermutation: best.permutation,
     permutationAmbiguous,
+    undecidedResults: undecidedJoin(ops, joinArms, policies),
   };
+}
+
+/** One arity-admitted arm, as the undecided-operand result join reads it. */
+interface JoinArm {
+  /** The GROUND instance: for an arm refused by a declared bound, the
+   * instance read at that bound ({@link boundReadInstance}). */
+  instance: FunctionSignature;
+  /** The arm is in `viable`: the call takes it on the strict reading. */
+  viable: boolean;
+  /** The arm's result for the join (see {@link undecidedResultOf}). */
+  result: Type;
+  /** The operands in the arm's declaration order (permuted for a named
+   * call). Omitted when they are the call's operands. */
+  ops?: ReadonlyArray<Expression>;
+}
+
+/**
+ * The results to JOIN for result typing when the operand types do not
+ * decide which arm the call takes at run time, else `undefined` (see
+ * `OverloadResolution.undecidedResults`). `arms` has one entry per declared
+ * arm, `undefined` for an arm the call's arity refuses.
+ *
+ * An arm is one the call can take when it is viable, or when every operand
+ * is `unknown`/`any` or {@link canTakeAtRunTime} at its parameter. The
+ * operand types do not decide the arm when an operand is `unknown` or
+ * `any`, or when one of these arms takes an operand only by overlap
+ * ({@link takesByOverlap}).
+ */
+function undecidedJoin(
+  ops: ReadonlyArray<Expression>,
+  arms: ReadonlyArray<JoinArm | undefined>,
+  policies?: AdmissionPolicies
+): ReadonlyArray<Type> | undefined {
+  if (policies?.lazy) return undefined;
+  // A collection operand lifted at a threadable scalar position: the call
+  // broadcasts, and its result type is built elsewhere. The arms the strict
+  // reading refused are then not added.
+  const lifted = ops.some(
+    (op, i) =>
+      isThreadableAt(policies?.threadable, i) &&
+      policies?.couldBeUnkeyedCollection?.(op) === true
+  );
+  const takeable = arms.filter(
+    (arm): arm is JoinArm =>
+      arm !== undefined &&
+      (arm.viable ||
+        (!lifted &&
+          (arm.ops ?? ops).every((op, i) => {
+            if (!op.isValid) return false;
+            if (op.type.isUnknown || op.type.type === 'any') return true;
+            const param = paramAt(arm.instance, i);
+            return param !== undefined && canTakeAtRunTime(op, param);
+          })))
+  );
+  const undecided =
+    hasUndecidedOperand(ops, policies) ||
+    takeable.some((arm) =>
+      takesByOverlap(arm.instance, arm.ops ?? ops, policies)
+    );
+  return undecided ? takeable.map((arm) => arm.result) : undefined;
+}
+
+/**
+ * True when a value of the operand's type CAN be one the parameter takes,
+ * on the reading argument validation uses for an operand whose type is not
+ * a subtype of the parameter.
+ *
+ * - A parameter with a value component (`0`, `integer<0..10>`) is decided by
+ *   the value-arm join in `resolvedArm`, and an arrow-typed parameter by the
+ *   callback rules: neither counts here.
+ * - A collection-kind parameter (`list`, `set`, `collection`,
+ *   `indexed_collection`, `dictionary`, `tuple`, `record`) uses the deferred
+ *   collection test `overlapsForDeferredValidation`, which is validation's
+ *   authority for those kinds. `typesOverlap` would count the empty
+ *   collection as a shared value (`list<number>` and `matrix` both hold
+ *   `[]`).
+ * - Any other parameter uses `typesOverlap`, the test of validation's
+ *   overlap admission: the two types share a value (`collection` and
+ *   `string`, `real` and `integer`).
+ */
+function canTakeAtRunTime(op: Expression, param: Type): boolean {
+  if (op.type.matches(param)) return true;
+  if (hasValueComponent(param) || isArrowParam(param)) return false;
+  const t = op.type.type;
+  if (overlapsForDeferredValidation(t, param)) return true;
+  const r = resolveTypeAlias(param);
+  const paramArms = typeof r !== 'string' && r.kind === 'union' ? r.types : [r];
+  if (paramArms.every(isCollectionKind)) return false;
+  return typesOverlap(t, param);
+}
+
+const COLLECTION_KINDS = new Set([
+  'list',
+  'set',
+  'collection',
+  'indexed_collection',
+  'dictionary',
+  'tuple',
+  'record',
+]);
+
+function isCollectionKind(t: Type): boolean {
+  return COLLECTION_KINDS.has(typeof t === 'string' ? t : t.kind);
+}
+
+/** True for a function-typed parameter: `function`, a signature, or a union
+ * or intersection of them. */
+function isArrowParam(param: Type): boolean {
+  return param === 'function' || signatureArms(param) !== undefined;
+}
+
+/**
+ * True when `arm` takes one of `ops` only by OVERLAP: the operand's type is
+ * not a subtype of the parameter, so the value may or may not be one this
+ * arm takes.
+ *
+ * Not counted as overlap, because other rules decide them: an invalid
+ * operand, an `unknown` or `any` operand (handled by
+ * {@link hasUndecidedOperand}), a collection operand lifted at a threadable
+ * scalar position (the call broadcasts, and its result type is built
+ * elsewhere), a parameter with a value component (`0`, `integer<0..10>`),
+ * whose dispatch the value-arm join in `resolvedArm` decides, and an
+ * arrow-typed parameter, where the callback rules decide.
+ */
+function takesByOverlap(
+  arm: FunctionSignature,
+  ops: ReadonlyArray<Expression>,
+  policies?: AdmissionPolicies
+): boolean {
+  return ops.some((op, i) => {
+    if (!op.isValid || op.type.isUnknown || op.type.type === 'any')
+      return false;
+    const param = paramAt(arm, i);
+    if (param === undefined || hasValueComponent(param) || isArrowParam(param))
+      return false;
+    if (
+      isThreadableAt(policies?.threadable, i) &&
+      policies?.couldBeUnkeyedCollection?.(op)
+    )
+      return false;
+    return !op.type.matches(param);
+  });
+}
+
+/**
+ * For a generic arm whose instantiation failed (`candidate.ok === false`):
+ * its ground instance with each failing variable read at its DECLARED bound,
+ * when every failure is a declared bound, else `undefined`.
+ *
+ * Example: `(value: T, start: number, end: number) -> T where T: string` on
+ * an operand typed `collection`. The solver binds `T := collection`, which
+ * violates the bound, so the arm is not viable. But a `collection` can be a
+ * string at run time, and the ground twin `(string, number, number) ->
+ * string` would take it by overlap. Each failing variable is read at the
+ * values its solution and its bound share ({@link boundReading}), the other
+ * variables keep their solved binding, and
+ * {@link undecidedJoin} then tests the operands against the resulting
+ * parameters as it tests a ground arm: an operand that cannot be a string
+ * (`list<integer>`) keeps the arm out.
+ *
+ * A failure of another kind (a callback's contravariant requirement, a
+ * protocol slot) is not an overlap, and the arm stays out. The arm is never
+ * made viable: validation, ranking and operand inference do not see it, and
+ * only the undecided-operand result join reads its result.
+ */
+function boundReadInstance(
+  candidate: ArmInstance
+): FunctionSignature | undefined {
+  const { declared, solution } = candidate;
+  if (solution === undefined || solution.failures.length === 0)
+    return undefined;
+  const bindings: Record<string, Type> = { ...solution.bindings };
+  for (const failure of solution.failures) {
+    if (failure.kind !== 'bound') return undefined;
+    const tp = declared.typeParams?.find((p) => p.name === failure.variable);
+    if (tp?.bound === undefined || tp.kind === 'value') return undefined;
+    bindings[tp.name] = boundReading(solution.bindings[tp.name], tp.bound);
+  }
+  const substituted = substituteTypeVariables(declared, bindings);
+  // The §4.2 ground invariant: an open type must never reach `matches`,
+  // `typesOverlap` or `widen`.
+  if (freeTypeVariables(substituted).size > 0) return undefined;
+  return substituted as FunctionSignature;
+}
+
+/**
+ * The reading of a type variable whose solution violates its declared
+ * bound, for {@link boundReadInstance}: the values the two share, as
+ * closely as the type algebra can state them, and never wider than the
+ * bound.
+ *
+ * - The meet of the two when the intersection reduces to a non-empty type:
+ *   `collection` and `string` give `string`.
+ * - A bare collection bound (`list`) whose meet does not reduce keeps the
+ *   ELEMENT type of the solution: `indexed_collection<boolean>` and `list`
+ *   give `list<boolean>`. Reading the bare bound would drop the element
+ *   type from the result.
+ * - Otherwise the bound itself.
+ */
+function boundReading(solution: Type | undefined, bound: Type): Type {
+  if (solution === undefined) return bound;
+  const meet = reduceType({ kind: 'intersection', types: [solution, bound] });
+  if (meet !== 'never') return meet;
+  // Only the constructors whose application has the `{ kind, elements }`
+  // shape.
+  if (
+    bound === 'list' ||
+    bound === 'set' ||
+    bound === 'collection' ||
+    bound === 'indexed_collection'
+  ) {
+    const element = collectionElementType(solution);
+    if (element !== undefined && element !== 'unknown') {
+      const typed = { kind: bound, elements: element } as Type;
+      if (isSubtype(typed, bound)) return typed;
+    }
+  }
+  return bound;
+}
+
+/**
+ * True when a valid operand is typed `unknown` or `any` — the operand
+ * `prefilterAdmits` lets through at every arm — and the operator is not lazy
+ * (a lazy operator's operands arrive unbound, so their types say nothing).
+ * See {@link OverloadResolution.undecidedResults}.
+ */
+function hasUndecidedOperand(
+  ops: ReadonlyArray<Expression>,
+  policies?: AdmissionPolicies
+): boolean {
+  if (policies?.lazy) return false;
+  return ops.some(
+    (op) => op.isValid && (op.type.isUnknown || op.type.type === 'any')
+  );
 }
 
 /**

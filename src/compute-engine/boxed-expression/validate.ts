@@ -13,7 +13,11 @@ import { readTypeVariablesAsBounds } from '../../common/type/instantiate.js';
 import { COLLECTION_SHAPE_TYPE } from '../../common/type/primitive.js';
 import { flatten, flattenHoldingBarriers } from './flatten.js';
 import { functionLiteralParameterType } from './function-literal.js';
-import { isSubtype, provablyDisjoint } from '../../common/type/subtype.js';
+import {
+  isSubtype,
+  provablyDisjoint,
+  widenAll,
+} from '../../common/type/subtype.js';
 import { callbackArityError } from './callback-arity.js';
 import { callbackIncompatibility } from '../../common/type/compatibility.js';
 import { broadcastAdmitsCollectionElement } from './callback-broadcast-admission.js';
@@ -1573,6 +1577,41 @@ function evidenceGuardedNarrow(
 }
 
 /**
+ * The type an INFERRED symbol type is narrowed to at a parameter, or
+ * `undefined` when no narrowing applies.
+ *
+ * - When the parameter is a subtype of the current type, the target is the
+ *   parameter itself (`B` inferred `value`, later required `set`).
+ * - When the current type is a UNION that the parameter does not admit as a
+ *   whole, but the parameter admits some of its members, the target is the
+ *   union of those members. Example: a valueless `s` used at a text
+ *   parameter (`ToUpperCase(s)`) is inferred `character | string`; a later
+ *   `Sort(s)` requires `indexed_collection`, which admits `string` but not
+ *   `character`, so `s` narrows to `string`. A use of a valueless symbol is
+ *   a requirement on it, and two requirements together allow only the
+ *   members that satisfy both: this is the meet of the requirements, as the
+ *   use-bound model in `docs/INFERENCE_ROADMAP.md` (section 2b) describes.
+ *   Without this, the result of a program depended on the order of the
+ *   uses: `(Sort(s), ToUpperCase(s))` was accepted and
+ *   `(ToUpperCase(s), Sort(s))` was refused.
+ *
+ * Only whole members are kept, so the target is always a subtype of both
+ * the current type and the parameter. A member that the parameter admits
+ * only in part (`list<number>` at `list<integer>`) is dropped, not
+ * sharpened. The caller applies this only to an inferred type: a DECLARED
+ * union is a contract, and a parameter that does not admit all of it is
+ * still an error.
+ */
+function inferredNarrowTarget(current: Type, param: Type): Type | undefined {
+  if (isSubtype(param, current)) return param;
+  if (typeof current === 'string' || current.kind !== 'union') return undefined;
+  const admitted = current.types.filter((member) => isSubtype(member, param));
+  if (admitted.length === 0 || admitted.length === current.types.length)
+    return undefined;
+  return widenAll(admitted);
+}
+
+/**
  * R1 overlap admission (§4.4 of
  * `docs/plans/2026-08-22-type-handlers-on-types.md`) — the verdict for
  * "every other parameter" once the specialized admissions (arrow slots,
@@ -2859,10 +2898,11 @@ export function validateArguments(
     // `evidenceGuardedNarrow` reads the operand's type and the held value in
     // the same bracket, for the same reason.
     const narrowVerdict = ce._withoutFacts(() => {
+      const target = inferredNarrowTarget(op.type.type, param);
       if (!(
         !paramStillOpen &&
         op.valueDefinition?.inferredType &&
-        isSubtype(param, op.type.type) &&
+        target !== undefined &&
         !hasValueComponent(param) &&
         // Design E §3: never narrow a symbol's type TO an arrow slot's
         // arrow — the slot is a per-call supply, not evidence of the
@@ -2871,7 +2911,7 @@ export function validateArguments(
         // reject a symbol that both calls admit. The compatibility gate
         // below admits with no write instead.
         paramArrowArms(param) === undefined &&
-        narrowingPreservesEffects(op.type.type, param)
+        narrowingPreservesEffects(op.type.type, target)
       ))
         return 'fall-through';
 
@@ -2892,7 +2932,7 @@ export function validateArguments(
       // whose own type fits is admitted with no write; one that does not
       // falls through to the ordinary `incompatible-type` error, minted at
       // canonicalization.
-      return evidenceGuardedNarrow(ce, op, param, internals?.noInference);
+      return evidenceGuardedNarrow(ce, op, target, internals?.noInference);
     });
     if (narrowVerdict !== 'fall-through') {
       result.push(op);
@@ -3156,16 +3196,17 @@ export function validateArguments(
     // write are fact-blind for the reason given at the required-parameter
     // gate above.
     const optNarrowVerdict = ce._withoutFacts(() => {
+      const target = inferredNarrowTarget(op.type.type, param);
       if (!(
         !paramStillOpen &&
         op.valueDefinition?.inferredType &&
-        isSubtype(param, op.type.type) &&
+        target !== undefined &&
         !hasValueComponent(param) &&
         paramArrowArms(param) === undefined &&
-        narrowingPreservesEffects(op.type.type, param)
+        narrowingPreservesEffects(op.type.type, target)
       ))
         return 'fall-through';
-      return evidenceGuardedNarrow(ce, op, param, internals?.noInference);
+      return evidenceGuardedNarrow(ce, op, target, internals?.noInference);
     });
     if (optNarrowVerdict !== 'fall-through') {
       result.push(op);
@@ -3401,16 +3442,17 @@ export function validateArguments(
       // and write are fact-blind for the reason given at the
       // required-parameter gate above.
       const varNarrowVerdict = ce._withoutFacts(() => {
+        const target = inferredNarrowTarget(op.type.type, varParam);
         if (!(
           !paramStillOpen &&
           op.valueDefinition?.inferredType &&
-          isSubtype(varParam, op.type.type) &&
+          target !== undefined &&
           !hasValueComponent(varParam) &&
           paramArrowArms(varParam) === undefined &&
-          narrowingPreservesEffects(op.type.type, varParam)
+          narrowingPreservesEffects(op.type.type, target)
         ))
           return 'fall-through';
-        return evidenceGuardedNarrow(ce, op, varParam, internals?.noInference);
+        return evidenceGuardedNarrow(ce, op, target, internals?.noInference);
       });
       if (varNarrowVerdict !== 'fall-through') {
         result.push(op);
@@ -3737,6 +3779,10 @@ function couldRepairFreshMatrixInference(
   for (const name of op.freeVariables) {
     const def = ce.lookupDefinition(name);
     if (!def || !isValueDef(def) || !def.value.inferredType) continue;
+    // Keep this test in step with `repairFreshMatrixInference`, which
+    // explains it: a symbol already typed as a collection or as text is not
+    // a numeric guess, so it is not eligible.
+    if (hasNonNumericShapeEvidence(def.value.type.type)) continue;
     if (freshlyInferred.has(def.value) || def.value.type.isUnknown)
       eligible.add(name);
   }
@@ -3744,6 +3790,23 @@ function couldRepairFreshMatrixInference(
 
   const names = matrixInferencePlan(op, eligible);
   return names !== null && names.size > 0;
+}
+
+/** The type of a text value: a `string` or a `character`. */
+const TEXT_TYPE: Type = Object.freeze({
+  kind: 'union',
+  types: ['string', 'character'],
+}) as Type;
+
+/**
+ * True when an inferred type is a collection type or a text type
+ * (`string`, `character`, or a union of the two). Such a type is evidence of
+ * the symbol's shape, not a numeric guess, so the fresh-matrix repair must not
+ * retype the symbol. Shared by {@link couldRepairFreshMatrixInference} and
+ * {@link repairFreshMatrixInference} so that the two tests stay the same.
+ */
+function hasNonNumericShapeEvidence(type: Type): boolean {
+  return isSubtype(type, COLLECTION_SHAPE_TYPE) || isSubtype(type, TEXT_TYPE);
 }
 
 /**
@@ -3777,6 +3840,28 @@ function repairFreshMatrixInference(
     // definition's identity rather than its name also means a symbol whose
     // fresh inner-scope definition has been popped, and which now resolves to
     // an outer definition inferred before this box, is correctly ineligible.
+    //
+    // A symbol whose current type is already a collection type is NOT
+    // eligible, even when that type is fresh. The repair exists to correct a
+    // NUMERIC guess that `Add` or `Multiply` made bottom-up, before the
+    // enclosing matrix operator gave them the context. A collection type is
+    // collection evidence, not such a guess: `Length(xs)` narrows an untyped
+    // `xs` to `collection`, and a later `First(xs)` in the same boxing
+    // (parameter `indexed_collection<any>`) must not then retype `xs` as
+    // `matrix`, which made `First(xs)` a row (`vector`) and refused a later
+    // `Filter(xs, x => x < p)`. Such an operand is left to the ordinary
+    // admission and inference instead. The test uses the `<any>` shape top,
+    // so that a collection of any element type, absence markers included,
+    // is excluded.
+    //
+    // A symbol typed as text (`string`, `character`, or their union) is not
+    // eligible either, for the same reason: a use at a text parameter
+    // (`ToUpperCase(s)` types an untyped `s` as `character | string`) is
+    // evidence that the symbol is text, and text is never a matrix. Without
+    // this test, a later `Determinant(s)` in the same boxing retyped `s` as
+    // `matrix`. The `character | string` union needs this explicit test
+    // because `character` is not a collection.
+    if (hasNonNumericShapeEvidence(def.value.type.type)) continue;
     if (freshlyInferred.has(def.value) || def.value.type.isUnknown)
       eligible.add(name);
   }

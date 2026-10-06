@@ -3703,7 +3703,8 @@ function applyOperatorDefinition(
   // 5/ Sort the operands
   //
   // The attached resolution is index-INSENSITIVE for its consumer: result
-  // typing reads `selected`/`selectedInstance` only, so a commutative sort of
+  // typing reads `selected`, `selectedInstance` and `undecidedResults` only,
+  // none of which is indexed by operand position, so a commutative sort of
   // the operands does not invalidate it.
   const fn = new BoxedFunction(ce, name, sortOperands(name, args), {
     metadata,

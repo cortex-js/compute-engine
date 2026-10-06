@@ -2273,20 +2273,39 @@ function tupleComponentwiseAddType(
 }
 
 /**
- * The operand descriptor with any FUNCTION arm dropped from a union type.
+ * The operand descriptor with any FUNCTION, STRING or CHARACTER arm dropped
+ * from a union type.
  *
  * An arithmetic parameter is `number`, and the boxing seam admits an operand
  * typed `function | number` provisionally (its number arm overlaps the
  * parameter; a function value would be refused at evaluation). The result
  * type of the arithmetic must then come from the number arm alone: with the
  * union passed through, `Add(f(u), 1)` for `f: (T) -> T where T: number |
- * function` typed `function | number`, a type no sum can have. A union with
- * no number arm is left as it is — the seam's own rejection covers it.
+ * function` typed `function | number`, a type no sum can have. A string arm
+ * is dropped for the same reason: a string operand is refused at evaluation
+ * (`Add("a", 1)` is an `incompatible-type` error), yet with the union passed
+ * through, an operand typed `number | string` made the sum `number | string`,
+ * and one typed `list<unknown> | string` (a string-preserving operator such
+ * as `RotateLeft` applied to a bare `indexed_collection`) made it
+ * `list<string> | string`. A character arm is dropped for the same reason:
+ * the type `character` is not a subtype of `string`, so the string test does
+ * not remove it, but a character operand is refused at evaluation exactly as
+ * a string operand is. Character arms are common: a symbol used at a string
+ * parameter is inferred `character | string`, and the index of `At` is typed
+ * `boolean | character | indexed_collection | number | string`, so without
+ * this an operand typed `number | character` made the sum
+ * `number | character`. A union with no other arm is left as it is — the
+ * seam's own rejection covers it.
  */
-function withoutFunctionArm(x: OperandDescriptor): OperandDescriptor {
+function withoutNonArithmeticArms(x: OperandDescriptor): OperandDescriptor {
   const t = x.type;
   if (typeof t === 'string' || t.kind !== 'union') return x;
-  const kept = t.types.filter((arm) => !isSubtype(arm, 'function'));
+  const kept = t.types.filter(
+    (arm) =>
+      !isSubtype(arm, 'function') &&
+      !isSubtype(arm, 'string') &&
+      !isSubtype(arm, 'character')
+  );
   if (kept.length === 0 || kept.length === t.types.length) return x;
   const type: Type =
     kept.length === 1 ? kept[0] : { kind: 'union', types: kept };
@@ -4341,7 +4360,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             ? 'value'
             : signedInfinitySum(
                 ops,
-                addTypeOnTypes(ops.map(withoutFunctionArm))
+                addTypeOnTypes(ops.map(withoutNonArithmeticArms))
               ),
           context.engine._typeResolver
         ),
@@ -7850,10 +7869,14 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // A transparent alias of a SHAPE is unfolded before the echo, so `-L`
       // for `L: nums` (an alias of `list<number>`) is `list<number>` — the
       // alias policy of the broadcast lift — while a scalar alias keeps its
-      // name (`-m` for `m: meters` is `meters`, like `m + 1`).
+      // name (`-m` for `m: meters` is `meters`, like `m + 1`). A function or
+      // string arm of a union operand is dropped first, as for `Add`
+      // (`withoutNonArithmeticArms`): a negation never yields one.
       type: ([x], context) =>
         BoxedType.forResult(
-          negateNumericType(resolveShapedTypeAlias(x.type)),
+          negateNumericType(
+            resolveShapedTypeAlias(withoutNonArithmeticArms(x).type)
+          ),
           context.engine._typeResolver
         ),
       sgn: ([x]) => oppositeSgn(x.sgn),

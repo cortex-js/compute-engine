@@ -202,6 +202,14 @@ program continues. A fallback for a timeout (§2) does not catch such a breach:
 the `compile()` fallback and the "no closed form" result of Rubi let it
 propagate.
 
+Epsil programs are the exception to the default iteration cap. A loop
+written by the author of a program is not a runaway internal loop, so
+`executeEpsil` removes the iteration limit of the engine before it runs a
+program (`_liftDefaultIterationLimit`), unless the host assigned
+`ce.iterationLimit`; an assigned limit is kept. The limit is not put back
+after the run: the value of a program can be a lazy collection that the host
+enumerates later. The recursion limit is not changed.
+
 Do not infer deadline semantics from a count-based cap:
 
 - a timeout is attributed to a dynamic span and normally propagates;

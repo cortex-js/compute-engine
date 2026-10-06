@@ -161,10 +161,10 @@ seen
 // ➔ ["a", "b"]
 ```
 
-The default `iterationLimit` stops a loop after 1024 turns, so a loop that
-builds anything larger needs the engine's limit raised (see
-[Interruptibility](/epsil/evaluation/#interruptibility)). The measurement
-behind these figures is in the
+A loop has no iteration limit unless the host sets one (see
+[Interruptibility](/epsil/evaluation/#interruptibility)), so the cost of
+copying is what bounds a loop that builds a list. The measurement behind
+these figures is in the
 [performance note](#loop-accumulation-measured) at the end of this page.
 
 ## Indexing

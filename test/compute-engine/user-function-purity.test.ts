@@ -1,4 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
+import type { Expression } from '../../src/compute-engine/global-types';
 
 /**
  * A user-defined function derives its `pure` and `drawsRandom` flags from the
@@ -878,8 +879,9 @@ describe('Dependency order: an unresolved named head infers `any`', () => {
  *
  * > an `Assign` is confined iff **every static path from the literal's entry to
  * > the `Assign` passes through a `Declare` of that symbol within the literal**,
- * > **and** the symbol is not referenced by any nested `Function` literal
- * > (closure capture ⇒ escaping). […] `Assume` is **never** confined.
+ * > **and** no nested `Function` literal **writes** the symbol. […] A nested
+ * > literal that only **reads** the symbol does not un-confine it. […]
+ * > `Assume` is **never** confined.
  * > Destructuring and compound targets are judged per target symbol; any target
  * > the analysis cannot resolve ⇒ `scope`. […] **not provably confined ⇒
  * > `scope`.**
@@ -974,14 +976,332 @@ describe('Confinement: `scope` is inferred only for ESCAPING writes', () => {
     expect(specifier(literal)).toBe('scope');
   });
 
-  it('CLOSURE CAPTURE by a nested literal makes the write escaping', () => {
-    // The closure may outlive the declaring application.
+  it('a nested literal that only READS a body local leaves the write confined', () => {
+    // The closure sees `n`, but the only write to `n` is the body's own, and
+    // it dies with the application.
     const ce = new ComputeEngine();
     const literal = ce.box([
       'Function',
       ['Block', ['Declare', 'n', 0], ['Assign', 'n', 1], ['Function', 'n']],
     ]);
+    expect(specifier(literal)).toBe('');
+  });
+
+  it('a nested literal that only READS a parameter leaves the write confined', () => {
+    // `f(x) { x := x + 1; (y) ↦ x + y }`
+    const ce = new ComputeEngine();
+    const literal = ce.box([
+      'Function',
+      [
+        'Block',
+        ['Assign', 'x', ['Add', 'x', 1]],
+        ['Function', ['Add', 'x', 'y'], 'y'],
+      ],
+      'x',
+    ]);
+    expect(specifier(literal)).toBe('');
+  });
+
+  it('a nested literal that WRITES a body local makes the write escaping', () => {
+    // The closure shares `n` with the application and may outlive it, so the
+    // body's own write to `n` is not confined…
+    const ce = new ComputeEngine();
+    const literal = ce.box([
+      'Function',
+      [
+        'Block',
+        ['Declare', 'n', 0],
+        ['Assign', 'n', 1],
+        ['Function', ['Assign', 'n', ['Add', 'n', 1]]],
+      ],
+    ]);
     expect(specifier(literal)).toBe('scope');
+    // …and the writing closure carries `scope` on its own arrow.
+    expect(
+      specifier(ce.box(['Function', ['Assign', 'n', ['Add', 'n', 1]]]))
+    ).toBe('scope');
+  });
+
+  it('a DEEPER nested literal that writes a body local makes the write escaping', () => {
+    const ce = new ComputeEngine();
+    const literal = ce.box([
+      'Function',
+      [
+        'Block',
+        ['Declare', 'n', 0],
+        ['Assign', 'n', 1],
+        ['Function', ['Function', ['Assign', 'n', 2]]],
+      ],
+    ]);
+    expect(specifier(literal)).toBe('scope');
+  });
+
+  it('a nested DESTRUCTURING write of a body local makes the write escaping', () => {
+    const ce = new ComputeEngine();
+    const literal = ce.box([
+      'Function',
+      [
+        'Block',
+        ['Declare', 'n', 0],
+        ['Assign', 'n', 1],
+        ['Function', ['Assign', ['Tuple', 'n', 'm'], ['Tuple', 1, 2]]],
+      ],
+    ]);
+    expect(specifier(literal)).toBe('scope');
+  });
+
+  it('a nested literal that WRITES a parameter makes the write escaping', () => {
+    // `f(x) { x := x + 1; () ↦ (x := 0) }`
+    const ce = new ComputeEngine();
+    const literal = ce.box([
+      'Function',
+      [
+        'Block',
+        ['Assign', 'x', ['Add', 'x', 1]],
+        ['Function', ['Assign', 'x', 0]],
+      ],
+      'x',
+    ]);
+    expect(specifier(literal)).toBe('scope');
+  });
+
+  it('a nested literal writing its OWN parameter does not un-confine the outer local', () => {
+    // `(n) ↦ (n := 2)` writes its own call-local `n`, not the body's `n`.
+    const ce = new ComputeEngine();
+    const literal = ce.box([
+      'Function',
+      [
+        'Block',
+        ['Declare', 'n', 0],
+        ['Assign', 'n', 1],
+        ['Function', ['Assign', 'n', 2], 'n'],
+      ],
+    ]);
+    expect(specifier(literal)).toBe('');
+  });
+
+  it('APPLYING a nested literal that writes a body local projects its `scope`', () => {
+    // The body declares `n` but never assigns it directly; the write is in
+    // `inc`, and the body receives `inc`'s `scope` where it applies `inc`.
+    const ce = new ComputeEngine();
+    const literal = ce.box([
+      'Function',
+      [
+        'Block',
+        ['Declare', 'n', 0],
+        ['Declare', 'inc', ['Function', ['Assign', 'n', ['Add', 'n', 1]]]],
+        ['inc'],
+        'n',
+      ],
+    ]);
+    expect(specifier(literal)).toBe('scope');
+  });
+
+  // Epsil lowers `let f = v` to `Declare(f, Dictionary(value: v))` and
+  // `let f: T = v` to `Declare(f, "T", Dictionary(value: v))`. The value in
+  // the dictionary must be seen like a positional value.
+  describe('a `Declare` whose value is in its attributes dictionary', () => {
+    const valueDict = (v: unknown) => [
+      'Dictionary',
+      ['KeyValuePair', 'value', v],
+    ];
+
+    it('applying a pure `let`-bound lambda contributes nothing', () => {
+      // `h(n) = do { let sq = x => x * x; sq(n) }`
+      const ce = new ComputeEngine();
+      const literal = ce.box([
+        'Function',
+        [
+          'Block',
+          [
+            'Declare',
+            'sq',
+            valueDict(['Function', ['Multiply', 'x', 'x'], 'x']),
+          ],
+          ['sq', 'n'],
+        ],
+        'n',
+      ] as any);
+      expect(specifier(literal)).toBe('');
+    });
+
+    it('applying a `let`-bound lambda that writes a body local gives `scope`', () => {
+      const ce = new ComputeEngine();
+      const literal = ce.box([
+        'Function',
+        [
+          'Block',
+          ['Declare', 'acc', valueDict(0)],
+          [
+            'Declare',
+            'add',
+            valueDict([
+              'Function',
+              ['Assign', 'acc', ['Add', 'acc', 'k']],
+              'k',
+            ]),
+          ],
+          ['add', 'n'],
+          'acc',
+        ],
+        'n',
+      ] as any);
+      expect(specifier(literal)).toBe('scope');
+    });
+
+    it('a `let`-bound lambda that writes a body local un-confines the body’s write', () => {
+      // The closure is returned, not applied: the body's own write to `acc`
+      // is escaping because the closure shares `acc` and outlives the call.
+      const ce = new ComputeEngine();
+      const literal = ce.box([
+        'Function',
+        [
+          'Block',
+          ['Declare', 'acc', valueDict(0)],
+          [
+            'Declare',
+            'add',
+            valueDict([
+              'Function',
+              ['Assign', 'acc', ['Add', 'acc', 'k']],
+              'k',
+            ]),
+          ],
+          ['Assign', 'acc', 5],
+          'add',
+        ],
+      ] as any);
+      expect(specifier(literal)).toBe('scope');
+    });
+
+    it('a `let` initializer that draws gives `random`', () => {
+      // `h() = do { let x = Random(); x }`
+      const ce = new ComputeEngine();
+      const literal = ce.box([
+        'Function',
+        ['Block', ['Declare', 'x', valueDict(['Random'])], 'x'],
+      ] as any);
+      expect(specifier(literal)).toBe('random');
+    });
+
+    it('a positional type that STATES effects is the contract of the local', () => {
+      // `let f: () random -> number = () => 1; f()`: the literal is pure,
+      // but applying `f` contributes the stated `random`.
+      const ce = new ComputeEngine();
+      const literal = ce.box([
+        'Function',
+        [
+          'Block',
+          [
+            'Declare',
+            'f',
+            { str: '() random -> number' },
+            valueDict(['Function', 1]),
+          ],
+          ['f'],
+        ],
+      ] as any);
+      expect(specifier(literal)).toBe('random');
+    });
+
+    it('a `type` entry that STATES effects is the contract of the local', () => {
+      const ce = new ComputeEngine();
+      const literal = ce.box([
+        'Function',
+        [
+          'Block',
+          [
+            'Declare',
+            'f',
+            [
+              'Dictionary',
+              ['KeyValuePair', 'type', { str: '() random -> number' }],
+              ['KeyValuePair', 'value', ['Function', 1]],
+            ],
+          ],
+          ['f'],
+        ],
+      ] as any);
+      expect(specifier(literal)).toBe('random');
+    });
+
+    it('a type that states NO effects leaves the literal in charge', () => {
+      const ce = new ComputeEngine();
+      const literal = ce.box([
+        'Function',
+        [
+          'Block',
+          [
+            'Declare',
+            'f',
+            { str: '() -> number' },
+            valueDict(['Function', ['Random']]),
+          ],
+          ['f'],
+        ],
+      ] as any);
+      expect(specifier(literal)).toBe('random');
+    });
+
+    it('a tower of SHARED dictionaries is walked once per distinct node', () => {
+      // Level k+1 holds level k under two keys, so the tower has one node
+      // per level but 2^depth paths to the draw at the bottom. The body
+      // declares a local whose value is the tower, and returns a nested
+      // literal that declares another one: the walk of the body and the
+      // scan of the nested literal for writes must both stay linear in the
+      // number of levels. The dictionaries are built from boxed operands so
+      // that the two keys hold the SAME object.
+      const build = (depth: number) => {
+        const ce = new ComputeEngine();
+        const kv = (key: string, value: Expression) =>
+          ce.function('KeyValuePair', [ce.string(key), value]);
+        const bottom = ce.function('Dictionary', [
+          kv('v', ce.function('Random', [])),
+        ]);
+        // Count the reads of the bottom dictionary's values.
+        let reads = 0;
+        const valuesOf = Object.getOwnPropertyDescriptor(
+          Object.getPrototypeOf(bottom),
+          'values'
+        )!.get!;
+        Object.defineProperty(bottom, 'values', {
+          get() {
+            reads += 1;
+            return valuesOf.call(this);
+          },
+        });
+        let top = bottom;
+        for (let k = 0; k < depth; k++)
+          top = ce.function('Dictionary', [kv('a', top), kv('b', top)]);
+        const declare = (name: string) =>
+          ce.function('Declare', [
+            ce.symbol(name),
+            ce.function('Dictionary', [kv('value', top)]),
+          ]);
+        const literal = ce.function('Function', [
+          ce.function('Block', [
+            declare('t'),
+            ce.function('Function', [
+              ce.function('Block', [declare('u'), ce.symbol('u')]),
+            ]),
+          ]),
+        ]);
+        return { literal, reads: () => reads };
+      };
+
+      // Without the shared-node cutoffs, 12 levels read the bottom
+      // thousands of times.
+      const small = build(12);
+      expect(specifier(small.literal)).toBe('random');
+      expect(small.reads()).toBeLessThanOrEqual(10);
+
+      const start = Date.now();
+      expect(specifier(build(25).literal)).toBe('random');
+      // The time depends on the load of the machine, so the limit is asserted
+      // only in a `CE_PERF=1` run.
+      if (process.env.CE_PERF === '1')
+        expect(Date.now() - start).toBeLessThan(1000);
+    });
   });
 
   it('`Assume` is NEVER confined', () => {

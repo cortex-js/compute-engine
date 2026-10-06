@@ -158,6 +158,19 @@ inapplicable arms, orders applicable arms by specificity, and preserves
 declaration order for ties. Trial validation occurs in an inference rollback
 frame so rejected arms cannot mutate engine inference state.
 
+The result type of a call is the result of the selected arm, with one
+exception. When the argument types do not decide the arm, the call can take
+more than one arm at run time. This is the case for an argument typed `unknown`
+or `any`, which rejects no arm, and for an argument whose type only overlaps a
+parameter: a `collection` argument at a `string` parameter can be a string or
+not. When the possible arms have different results, the result type is the
+join of their results: `Slice(s, 1, 2)` with an untyped or `collection`-typed
+`s` is `string | list<unknown>`, not the result of one arm. A type variable
+whose argument does not satisfy its bound reads as the part of the bound the
+argument can be (`T where T: string` with a `collection` argument gives
+`string`). Argument validation still uses the selected arm, and inference into
+arguments uses the join of the viable arms' parameters.
+
 Multi-clause functions use the same ordering. Concrete calls refuting every
 clause are rejected statically; a call whose applicability was undecidable and
 later has no matching runtime clause produces `no-matching-clause`. Arguments

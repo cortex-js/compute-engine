@@ -23,7 +23,7 @@ category.
 
 ### isMatch
 
-MathJSON `IsMatch` · `(subject: string, pattern: regexp) -> boolean`
+MathJSON `IsMatch` · `(subject: character | string, pattern: regexp) -> boolean`
 
 Whether a string contains a match for a regular expression.
 
@@ -37,7 +37,7 @@ The pattern is written most readably as a raw string literal: `RegExp(#"[0-9]+"#
 
 ### stringMatch
 
-MathJSON `StringMatch` · `(subject: string, pattern: regexp) -> nothing | record`
+MathJSON `StringMatch` · `(subject: character | string, pattern: regexp) -> nothing | record`
 
 The first match of a regular expression in a string, as a record.
 
@@ -45,7 +45,7 @@ The record holds `match`, `range`, `groups` and `names`; the result is `Nothing`
 
 ### stringMatchAll
 
-MathJSON `StringMatchAll` · `(subject: string, pattern: regexp) -> list<record>`
+MathJSON `StringMatchAll` · `(subject: character | string, pattern: regexp) -> list<record>`
 
 Every non-overlapping match of a regular expression in a string, as a list of records.
 

@@ -30,6 +30,43 @@ ce.angularUnit = 'deg';
 
 <MemberCard>
 
+### RoundingTies {#roundingties}
+
+```ts
+type RoundingTies = 
+  | "away-from-zero"
+  | "to-even"
+  | "toward-zero"
+  | "toward-positive-infinity"
+  | "toward-negative-infinity";
+```
+
+The rule that `Round` uses for a value that is exactly halfway between two
+integers (a tie). A value that is not a tie always rounds to the nearest
+integer.
+
+| Rule | `Round(2.5)` | `Round(3.5)` | `Round(-2.5)` | Description |
+|:-----|:------------:|:------------:|:-------------:|:------------|
+| `away-from-zero` | `3` | `4` | `-3` | the default |
+| `to-even` | `2` | `4` | `-2` | IEEE 754, Python, NumPy and Mathematica |
+| `toward-zero` | `2` | `3` | `-2` | |
+| `toward-positive-infinity` | `3` | `4` | `-2` | JavaScript `Math.round` |
+| `toward-negative-infinity` | `2` | `3` | `-3` | |
+
+The rule also applies to the step form `Round(x, step)`, which rounds to
+the nearest multiple of the step: the tie is at the half of the step
+(with the step `1/100`, `Round(0.125, 1/100)` is a tie).
+
+To change the rule used by the Compute Engine, use:
+
+```js
+ce.roundingTies = 'to-even';
+```
+
+</MemberCard>
+
+<MemberCard>
+
 ### AssignValue {#assignvalue}
 
 ```ts
@@ -358,6 +395,19 @@ tolerance: number;
 ```ts
 angularUnit: AngularUnit;
 ```
+
+</MemberCard>
+
+<MemberCard>
+
+##### ExpressionComputeEngine.~~roundingTies~~ {#roundingties-2}
+
+```ts
+roundingTies: RoundingTies;
+```
+
+The rule that `Round` uses for a value halfway between two integers.
+ See [RoundingTies](#roundingties). Default: `'away-from-zero'`.
 
 </MemberCard>
 
@@ -2904,7 +2954,7 @@ readonly isCollection: true;
 ##### CollectionInterface.count {#count-2}
 
 ```ts
-readonly count: number | undefined;
+readonly count: number | bigint | undefined;
 ```
 
 </MemberCard>
@@ -4780,12 +4830,19 @@ different order.
 ##### BaseCollectionHandlers.count {#count}
 
 ```ts
-count: (collection) => number | undefined;
+count: (collection) => number | bigint | undefined;
 ```
 
 Return the number of elements in the collection.
 
-An empty collection has a count of 0.
+An empty collection has a count of 0. An infinite collection has a count
+of `Infinity`. Return `undefined` when the count cannot be determined.
+
+A finite count that is not a safe integer (larger than
+`Number.MAX_SAFE_INTEGER`) cannot be held exactly by a `number`: return
+it as a `bigint`. A handler can also return a `bigint` for a smaller
+count: `expr.count` always converts a count that is a safe integer to a
+`number`.
 
 </MemberCard>
 
@@ -11164,6 +11221,19 @@ angularUnit: AngularUnit;
 
 <MemberCard>
 
+##### IComputeEngine.roundingTies {#roundingties-1}
+
+```ts
+roundingTies: RoundingTies;
+```
+
+The rule that `Round` uses for a value halfway between two integers.
+ See [RoundingTies](#roundingties). Default: `'away-from-zero'`.
+
+</MemberCard>
+
+<MemberCard>
+
 ##### IComputeEngine.costFunction {#costfunction-1}
 
 ```ts
@@ -15650,6 +15720,14 @@ If the collection is infinite, return `Infinity`.
 If the number of elements cannot be determined, return `undefined`, for
 example, if the collection is lazy and not finite and the size cannot
 be determined without iterating over the collection.
+
+The count is a `bigint` only when it is finite and is not a safe integer
+(larger than `Number.MAX_SAFE_INTEGER`), for example the count of
+`QuotientRing(Integers, 2^61 - 1)`. A count that is a safe integer is
+always a `number`, and an infinite count is `Infinity`. Do not mix the
+count with a `number` in arithmetic before you check its type:
+JavaScript throws a `TypeError` for `count + 1` when `count` is a
+`bigint`. A comparison (`count > 10`) is valid for both types.
 
 </MemberCard>
 

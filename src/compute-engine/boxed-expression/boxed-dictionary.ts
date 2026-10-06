@@ -24,8 +24,10 @@ import { internType } from '../../common/type/intern.js';
 import { numberLiteralTierType } from './literal-tier.js';
 import { widenValueTypes } from '../../common/type/widen-value.js';
 import { boundTypeSize } from '../../common/type/size-cap.js';
-import type { Type } from '../../common/type/types.js';
+import type { EffectLabel, Type } from '../../common/type/types.js';
 import { isFunction, isString, isSymbol, isNumber } from './type-guards.js';
+import { effectsOf, publicEffects } from './effects-of.js';
+import { isPureComputedEffects } from '../../common/type/effects.js';
 
 /** Keys a `record{…}` type can carry unescaped: what the type lexer reads back
  * as an `IDENTIFIER` (`lexer.ts`), minus the words it lexes as keywords.
@@ -418,8 +420,16 @@ export class BoxedDictionary
     );
   }
 
+  /** Evaluating a dictionary evaluates each of its values, so the dictionary
+   * is pure only when all of its values are: `{"value" -> Random()}` draws.
+   * Both getters read the runtime effect channel (`effectsOf()`), which
+   * unions the effects of the values. */
   get isPure(): boolean {
-    return true;
+    return isPureComputedEffects(effectsOf(this));
+  }
+
+  get effects(): ReadonlyArray<EffectLabel> | 'any' | undefined {
+    return publicEffects(effectsOf(this));
   }
 
   get isCanonical(): boolean {

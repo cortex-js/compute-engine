@@ -25,7 +25,7 @@ import type {
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
 
-import { isFunction, isString, sym } from './type-guards.js';
+import { isDictionary, isFunction, isString, sym } from './type-guards.js';
 
 /**
  * # The runtime effect channel (`docs/EFFECTS-MODEL.md`, "Runtime counterpart")
@@ -83,7 +83,15 @@ import { isFunction, isString, sym } from './type-guards.js';
  * from `'any'`.
  */
 export function effectsOf(expr: Expression): ComputedEffects {
-  // Only an application has effects: a number, a string, a dictionary — and a
+  // A canonical dictionary is not an application, but evaluating it evaluates
+  // every one of its values (`BoxedDictionary.evaluate`), so its effects are
+  // the union of its values' effects: `{"value" -> Random()}` draws. A value
+  // is only STORED in the dictionary, never invoked, so a function-valued
+  // value adds no latent set (the same rule as a `List` cell). The RAW form,
+  // `Dictionary(KeyValuePair(key, value), …)`, is an application and goes
+  // through the projection rule below.
+  if (isDictionary(expr)) return dictionaryEffects(expr);
+  // Otherwise only an application has effects: a number, a string — and a
   // SYMBOL — merely produce a value. Reading a symbol is not an effect ("Reads
   // of non-local scope are not an effect"), and a symbol bound to an effectful
   // function contributes at the application that invokes it, through the latent
@@ -100,6 +108,68 @@ export function effectsOf(expr: Expression): ComputedEffects {
     ? expr._effectsOf()
     : applicationEffects(expr);
 }
+
+/**
+ * The effects of evaluating a canonical dictionary: the union of the effects
+ * of its values, each read through {@link effectsOf}.
+ *
+ * Memoized per dictionary in {@link dictionaryEffectsMemo}. Without a memo, a
+ * dictionary that holds the same dictionary under two keys, repeated level
+ * after level, has a number of distinct nodes linear in its depth but a
+ * number of paths exponential in it, and the memo of each application value
+ * does not cut a dictionary-to-dictionary edge. The entry is stamped with the
+ * same two keys as the `_effects` memo of `BoxedFunction`: the engine's
+ * `_callableVersion` and the ambient lexical scope. A dictionary is
+ * immutable, so only what its values resolve to can change, and those stamps
+ * track exactly that.
+ *
+ * A result is stored only when its computation took no release step (see
+ * {@link releaseSteps}). Following a binding at a `ReleaseHold` is the only
+ * step of this walk that can reach an application whose computation is in
+ * flight; that application then answers with a provisional `'any'`, and a
+ * value derived from it must not be frozen into the memo — the same rule
+ * `BoxedFunction._effectsOf` applies to its own memo. A purely structural
+ * computation cannot reach an ancestor, because an expression has no cycles.
+ */
+function dictionaryEffects(
+  dict: Expression & { readonly values: readonly Expression[] }
+): ComputedEffects {
+  const ce = dict.engine;
+  const callable = ce._callableVersion;
+  const scope = ce.context?.lexicalScope;
+  const cached = dictionaryEffectsMemo.get(dict);
+  if (
+    cached !== undefined &&
+    cached.callable === callable &&
+    cached.scope === scope
+  )
+    return cached.value;
+
+  const stepsBefore = releaseSteps;
+  let effects: ComputedEffects = undefined;
+  for (const value of dict.values) {
+    // `'any'` absorbs under union.
+    if (effects === 'any') break;
+    effects = unionComputedEffects(effects, effectsOf(value));
+  }
+  if (releaseSteps === stepsBefore)
+    dictionaryEffectsMemo.set(dict, { callable, scope, value: effects });
+  return effects;
+}
+
+/** The {@link dictionaryEffects} memo, keyed by the dictionary object and
+ * stamped on the callable version and the lexical scope it was computed
+ * under. A `WeakMap`, so an entry lives only as long as its dictionary. */
+const dictionaryEffectsMemo = new WeakMap<
+  object,
+  { callable: number; scope: unknown; value: ComputedEffects }
+>();
+
+/** Count of the release steps {@link applicationEffects} has taken: each time
+ * it follows a `ReleaseHold` operand into the content it releases. Monotonic;
+ * {@link dictionaryEffects} only compares it before and after a computation
+ * to know whether that computation followed a binding. */
+let releaseSteps = 0;
 
 /**
  * The **public boundary** of the runtime effect channel: the value behind
@@ -221,6 +291,7 @@ export function applicationEffects(expr: Expression): ComputedEffects {
     // Following a BINDING is the one step of this walk that can cycle
     // (`h := Hold(ReleaseHold(h))`). Structural recursion into operands cannot.
     // Fail conservative — unknown effects — rather than overflow the stack.
+    releaseSteps += 1;
     if (releaseDepth >= MAX_RELEASE_DEPTH) return 'any';
     releaseDepth += 1;
     try {

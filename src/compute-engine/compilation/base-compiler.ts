@@ -74,6 +74,7 @@ import {
   nonNegativeRangeType,
   resolveTypeAlias,
   resolveTypeForCompilation,
+  signatureArms,
   stripMissingFromType,
   typeContainsMissing,
   typeElementCount,
@@ -97,6 +98,7 @@ import {
 } from '../boxed-expression/binding-sites.js';
 import { parseType } from '../../common/type/parse.js';
 import {
+  freeTypeVariables,
   hasFreeTypeVariables,
   isPolymorphicType,
 } from '../../common/type/instantiate.js';
@@ -838,8 +840,9 @@ export function isProvablyCharacterOperand(x: Expression): boolean {
  * `unknown` has never been string evidence (see `isProvablyStringOperand`), and
  * this extends the same reading to a top type spelled as a union. `At`'s index
  * slot is
- * `boolean | indexed_collection | number | string` (a gather index may itself
- * be a collection or a dictionary key), so indexing with a local —
+ * `boolean | character | indexed_collection | number | string` (a gather
+ * index may itself be a collection, and a string or a character is a
+ * dictionary key), so indexing with a local —
  * `cs[j]` — types `j` with that union, and the numeric operators never narrow
  * it back, because an operand that could be a collection is skipped by the
  * threadable-operator inference (`validate.ts`, Tycho item 121). A plain
@@ -1136,7 +1139,77 @@ export function isNumericTupleParticipant(x: Expression): boolean {
  */
 export function isProvablyStringComparisonParticipant(x: Expression): boolean {
   if (isProvablyStringOperand(x)) return true;
-  return typeHasStringEvidence(compilationType(x));
+  return typeHasStringEvidence(compilationType(stringEvidenceSource(x)));
+}
+
+/**
+ * The expression whose static type carries the string evidence of `x`: `x`
+ * itself, or, when `x` applies a STRING-PRESERVING collection operator, the
+ * evidence source of its subject (its first operand), recursively —
+ * `Take(Reverse(S), 2)` reads `S`.
+ *
+ * A string-preserving operator (`Slice`, `Take`, `Drop`, `Rest`, `Reverse`,
+ * `RotateLeft`, `Sort`, …) returns a string exactly when its subject is a
+ * string, and a list of the subject's elements otherwise. When the subject's
+ * type does not decide which, overload resolution types the application with
+ * the JOIN of the two results (`resolvedArm`, `boxed-function.ts`): a bare
+ * `indexed_collection` subject gives `list<unknown> | string`. That `string`
+ * member says only that the subject may be a string, which the subject's own
+ * type already said without counting as string evidence. So the evidence of
+ * the application is the evidence of its subject: a subject declared
+ * `string`, or `string | list<number>`, still has evidence, and a bare
+ * `indexed_collection`, `collection` or `list` subject has none.
+ *
+ * The set of operators is derived from the definitions, not listed: see
+ * {@link isStringPreservingSignature}.
+ */
+export function stringEvidenceSource(x: Expression): Expression {
+  let current = x;
+  for (;;) {
+    if (!isFunction(current) || current.nops === 0) return current;
+    const sig = current.operatorDefinition?.signature.type;
+    if (sig === undefined || !isStringPreservingSignature(sig)) return current;
+    current = current.ops[0];
+  }
+}
+
+const stringPreservingSignatures = new WeakMap<object, boolean>();
+
+/**
+ * True when `sig` is an overload set with a string-preserving arm and at
+ * least one other arm. A string-preserving arm has the shape `(T, …) -> T
+ * where T: string`: its first parameter and its result are the same type
+ * variable, whose declared bound is `string`, and no other parameter
+ * mentions that variable. The last condition keeps out an arm such as
+ * `(T+) -> T`, whose result also depends on its other operands.
+ */
+function isStringPreservingSignature(sig: Type): boolean {
+  if (typeof sig === 'string' || sig.kind !== 'intersection') return false;
+  const cached = stringPreservingSignatures.get(sig);
+  if (cached !== undefined) return cached;
+  const arms = signatureArms(sig) ?? [];
+  const preserving = arms.filter((arm) => {
+    const first = arm.args?.[0]?.type;
+    if (typeof first !== 'object' || first.kind !== 'variable') return false;
+    const result = arm.result;
+    if (
+      typeof result !== 'object' ||
+      result.kind !== 'variable' ||
+      result.name !== first.name
+    )
+      return false;
+    if (arm.typeParams?.find((p) => p.name === first.name)?.bound !== 'string')
+      return false;
+    const others = [
+      ...(arm.args ?? []).slice(1),
+      ...(arm.optArgs ?? []),
+      ...(arm.variadicArg ? [arm.variadicArg] : []),
+    ];
+    return others.every((p) => !freeTypeVariables(p.type).has(first.name));
+  });
+  const answer = preserving.length > 0 && preserving.length < arms.length;
+  stringPreservingSignatures.set(sig, answer);
+  return answer;
 }
 
 /**

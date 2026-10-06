@@ -1,5 +1,7 @@
-// Kaprekar numbers below 1000: the digits of the square split into two parts
-// that add up to the number itself. A one-digit square has no split.
+// Kaprekar numbers up to 100: the digits of the square split into two parts
+// that add up to the number itself. A one-digit square has no split. The
+// range is short because a block inside a lambda inside `any` costs several
+// milliseconds per number.
 isKaprekar(n) = do {
   let ds = integerDigits(n^2)
   if length(ds) == 1 { n == 1 }
@@ -10,5 +12,5 @@ isKaprekar(n) = do {
     })
   }
 }
-filter(1..999, isKaprekar)
-// ➔ [1, 9, 45, 55, 99, 297, 703, 999]
+filter(1..100, isKaprekar)
+// ➔ [1, 9, 45, 55, 99]

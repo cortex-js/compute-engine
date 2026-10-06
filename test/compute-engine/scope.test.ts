@@ -663,11 +663,12 @@ describe('BigOp + Function interaction', () => {
     // f(3) should return a function g where g(y) = 6 + y
     ce.pushScope();
     try {
-      // `scope` declared: `clbigop_total` is captured by the returned
-      // closure, so its initializing write is not provably confined and the
-      // default-`!scope` ceiling refuses a bare declaration
-      // (docs/EFFECTS-MODEL.md, "Scope is opt-in").
-      ce.declare('clbigop_f', '(number) scope -> function');
+      // No `scope` declared: the returned closure only READS
+      // `clbigop_total`, so the body's initializing write stays confined and
+      // the default-`!scope` ceiling accepts a bare declaration
+      // (docs/EFFECTS-MODEL.md, "The confinement rule is a dominance
+      // condition").
+      ce.declare('clbigop_f', '(number) -> function');
       ce.assign(
         'clbigop_f',
         ce.expr([

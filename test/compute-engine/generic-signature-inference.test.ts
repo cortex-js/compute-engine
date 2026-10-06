@@ -64,6 +64,36 @@ describe('a generic head whose bound has a function arm', () => {
     expect(ce.symbol('w').type.toString()).toBe('function | number');
   });
 
+  it('types a sum and a negation without the string arm of an operand', () => {
+    // A string operand is refused at evaluation, so a sum or a negation is
+    // never a string. Before, the string arm passed through: `w + 1` typed
+    // `number | string`, and a sum over a string-preserving operator on a
+    // bare `indexed_collection` typed `list<string> | string`.
+    const ce = new ComputeEngine();
+    ce.declare('w', 'number | string');
+    expect(ce.box(['Add', 'w', 1]).type.toString()).toBe('number');
+    expect(ce.box(['Subtract', 'w', 1]).type.toString()).toBe('number');
+    expect(ce.box(['Negate', 'w']).type.toString()).toBe('number');
+    ce.declare('S', 'indexed_collection');
+    const sum = ce.box([
+      'Add',
+      ['RotateLeft', 'S', 1],
+      ['RotateLeft', 'S', -1],
+    ]);
+    expect(sum.type.toString()).not.toContain('string');
+  });
+
+  it('types a sum and a negation without the character arm of an operand', () => {
+    // A character operand is refused at evaluation like a string operand,
+    // and the type `character` is not a subtype of `string`. Before, the
+    // character arm passed through: `w + 1` typed `character | number`.
+    const ce = new ComputeEngine();
+    ce.declare('w', 'number | character');
+    expect(ce.box(['Add', 'w', 1]).type.toString()).toBe('number');
+    expect(ce.box(['Subtract', 'w', 1]).type.toString()).toBe('number');
+    expect(ce.box(['Negate', 'w']).type.toString()).toBe('number');
+  });
+
   it('does not forward a function requirement', () => {
     const ce = new ComputeEngine();
     ce.declare('f', '(T) -> T where T: number | function');

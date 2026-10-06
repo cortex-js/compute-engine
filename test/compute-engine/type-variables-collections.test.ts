@@ -427,14 +427,17 @@ describe('TYPE VARIABLES / Reverse — `((T) -> T where T: list) & ((indexed_col
   });
 
   test('ACCEPTED deltas on the unknown/any edge (§4.3 bound-join table)', () => {
-    // An `unknown` operand cannot bind the `list` arm's `T` (nothing proves
-    // it a list), so the generic `list<T>` arm answers with `T` unbound:
-    // `list<unknown>`. (Under the former single `(T) -> T` bound the
-    // absorbing-`unknown` rule made this `unknown`.)
+    // An `unknown` operand refutes no arm, so the call can take the string
+    // arm, the `list` arm or the generic `list<T>` arm at run time. Its
+    // result type is the join of their results, each type variable read at
+    // its declared bound: `string`, `list` and `list<unknown>`, which is
+    // `list | string`. (Before the result join, the generic `list<T>` arm
+    // alone answered `list<unknown>`; under the former single `(T) -> T`
+    // bound the absorbing-`unknown` rule made this `unknown`.)
     const ce = engine();
     ce.declare('rvU', 'unknown');
     expect(ce.function('Reverse', [ce.box('rvU')]).type.toString()).toBe(
-      'list<unknown>'
+      'list | string'
     );
     // An `any`-typed operand is ADMITTED: §4.5 parity requires it, because
     // the ground `(indexed_collection<T>) -> list<T>` admits `any`
@@ -444,7 +447,7 @@ describe('TYPE VARIABLES / Reverse — `((T) -> T where T: list) & ((indexed_col
     ce2.declare('rvA', 'any');
     expect(ce2.function('Reverse', [ce2.box('rvA')]).isValid).toBe(true);
     expect(ce2.function('Reverse', [ce2.box('rvA')]).type.toString()).toBe(
-      'list<unknown>'
+      'list | string'
     );
     const ce3 = engine();
     ce3.declare('ivA', 'any');

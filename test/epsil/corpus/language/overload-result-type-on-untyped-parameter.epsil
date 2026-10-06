@@ -1,8 +1,8 @@
-// corpus: known-failure the result type of an overloaded call on an untyped operand is read off one arm (ROADMAP: "Overloaded result type on an unknown operand")
 // `slice` is overloaded: a string slice is a string, a list slice is a list.
-// With an untyped parameter the static pass types the result as a list, so
-// a string consumer refuses it before anything runs. Typing the parameter
-// (`s: string`) avoids the error; the untyped program is correct.
+// With an untyped parameter, the static pass types the result as the join of
+// both (`string | list`), so a string consumer accepts it and the choice is
+// made at run time.
 firstTwo(s) = characters(slice(s, 1, 2))
-firstTwo("abc")
-// ➔ ["a", "b"]
+middle(s) = slice(s, 2, 3)
+(firstTwo("abc"), middle("abcd"), listFrom(middle([7, 8, 9, 10])))
+// ➔ (["a", "b"], "bc", [8, 9])

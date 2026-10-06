@@ -1,7 +1,7 @@
-// corpus: known-failure a `length(xs)` call on an untyped parameter changes how a later lambda over `xs` is typed (ROADMAP: "A length call on an untyped parameter changes later static types")
-// Without the `length` line this function is accepted; with it, the
-// comparison lambda is refused as `(x: vector) -> list<boolean | missing>`
-// where `(vector) any -> boolean` is expected.
+// A `length(xs)` call on an untyped parameter narrows it to a collection, and
+// the later uses of `xs` keep that type. (A repair meant for numeric guesses
+// used to retype such a parameter as a matrix, and the comparison lambda was
+// then refused.)
 smaller(xs) = do {
   let n = length(xs)
   let p = first(xs)

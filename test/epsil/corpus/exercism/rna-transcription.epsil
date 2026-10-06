@@ -1,7 +1,8 @@
-// corpus: known-failure a dictionary rejects a `character` key (ROADMAP: "String operators reject a `character`")
-// DNA to RNA complement: G→C, C→G, T→A, A→U. Indexing a dictionary with a
-// character read from a string is a static type error today, though a
-// character and the one-character string are the same value.
+// corpus: known-failure a collection whose elements may be absent is refused where a collection of strings is expected (ROADMAP: "A collection of possibly absent elements is refused by a typed collection parameter")
+// DNA to RNA complement: G→C, C→G, T→A, A→U. A dictionary lookup with a
+// computed key has the type `string | missing`, so the mapped list is a
+// `list<missing | string>`, and `stringJoin` refuses it before anything
+// runs. `complement[c] ?? "?"` is accepted.
 let complement = {G -> "C", C -> "G", T -> "A", A -> "U"}
 toRna(dna) = stringJoin(map(c => complement[c], characters(dna)), "")
 toRna("ACGTGGTCTTAA")

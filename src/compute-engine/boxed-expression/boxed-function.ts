@@ -8125,7 +8125,10 @@ function type(expr: BoxedFunction): Type | BoxedType {
     // with operand inference, which uses the
     // JOIN over every viable arm (§4.3): a result type wants the most precise
     // arm, an operand constraint must be the weakest — conflating them
-    // reintroduces the §4.5 unsoundness.
+    // reintroduces the §4.5 unsoundness. The exception is an operand whose
+    // type does not decide the arm (`unknown`, `any`, or a type that only
+    // overlaps a parameter), which leaves several arms possible at run time:
+    // `resolvedArm` then joins their results.
     // Resolved ON FIRST READ: the resolution and the arm solve below walk
     // every operand through overload resolution, and when a `type` handler
     // answers (every collection head, most numeric heads) their result is
@@ -9166,6 +9169,14 @@ function applyFunctionLiteral(
  * every arm's result — NOT `unknown`; the operands have already been marked
  * invalid by `validateArguments`, so the imprecision is not load-bearing.
  *
+ * Two cases return the selected arm with a JOINED result instead: when the
+ * arms dispatch on values and the operands leave the dispatch open (the
+ * value-arm join below), and when the operand types leave more than one arm
+ * possible at run time and those arms have different results (the
+ * undecided-operand join below): an operand typed `unknown` or `any`, or one
+ * whose type only overlaps an arm's parameter. In both cases the call can take more than
+ * one arm at run time, so its result type is the join of their results.
+ *
  * **The resolution computed at validation time wins** (phase 2c): the
  * construction site attached it to the call (`_resolvedOverload`), and it
  * records the arm the operands were actually validated against — under trial
@@ -9194,7 +9205,7 @@ function resolvedArm(
     threadable: def?.broadcastable,
     couldBeUnkeyedCollection: couldBeUnkeyedCollectionOperand,
   };
-  const { selected, selectedInstance } =
+  const { selected, selectedInstance, undecidedResults } =
     expr._resolvedOverload ??
     resolveOverload(expr.engine, expr.ops, arms, policies);
   if (selected === undefined) return undefined;
@@ -9229,6 +9240,36 @@ function resolvedArm(
       return {
         ...(selectedInstance ?? selected),
         result: widen(...verdict.nonRefuted.map((i) => ground[i].result)),
+      };
+  }
+
+  // Undecided-operand JOIN. An operand typed `unknown` or `any` refutes no
+  // arm, and an operand whose type only overlaps a parameter (a
+  // `collection` at a `string` parameter) may or may not be a value that
+  // arm takes. Then `selected` is only one of the arms the call can take at
+  // run time: the most specific, or the first one declared when they are
+  // incomparable. Its result alone would claim more than is known:
+  // `Slice(s, 1, 2)` on an untyped `s` is a string when `s` is a string and
+  // a list otherwise, and reading the list arm alone made a string consumer
+  // (`Characters`) refuse a correct call. The result is then the join of
+  // the results of every arm the call can take (`undecidedResults`, built
+  // by `resolveOverload`). It is set only in this case, and holds GROUND
+  // types, so no open type reaches `widen`. An arm whose result is `unknown` makes the join `unknown`:
+  // `widen` would drop it and claim the other arms' results. When every
+  // such arm has the same result, the selected arm is kept unchanged. A
+  // lazy operator never joins: its operands are unbound, and
+  // `undecidedResults` is never set for it.
+  if (!def?.lazy && undecidedResults && undecidedResults.length > 1) {
+    const first = undecidedResults[0];
+    const allSame = undecidedResults.every(
+      (r) => r === first || (isSubtype(r, first) && isSubtype(first, r))
+    );
+    if (!allSame)
+      return {
+        ...(selectedInstance ?? selected),
+        result: undecidedResults.some((r) => r === 'unknown')
+          ? 'unknown'
+          : widen(...undecidedResults),
       };
   }
   return selected;

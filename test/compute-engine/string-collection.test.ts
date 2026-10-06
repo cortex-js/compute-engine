@@ -565,17 +565,17 @@ describe('string-preserving operators', () => {
     );
   });
 
-  test('an UNKNOWN-typed source does not get the string arm', () => {
-    // An `unknown` operand refutes no arm, so a GROUND `string` parameter
-    // would win most-specific-wins and claim `string` for a call that usually
-    // returns a list. The arms are spelled `T where T: string` for exactly
-    // that reason: a bounded variable with no call-site binding does not win.
+  test('an UNKNOWN-typed source gets the join of the string and list arms', () => {
+    // An `unknown` operand refutes no arm, so the call can take the string
+    // arm or a list arm at run time. Its result type is the join of their
+    // results, not `string` alone and not `list<unknown>` alone. The string
+    // arm's `T where T: string` reads as its bound, `string`.
     ce.declare('untypedSrc', 'unknown');
     expect(ce.box(['Reverse', 'untypedSrc']).type.toString()).toBe(
-      'list<unknown>'
+      'list | string'
     );
     expect(ce.box(['Take', 'untypedSrc', 2]).type.toString()).toBe(
-      'list<unknown>'
+      'list<unknown> | string'
     );
   });
 

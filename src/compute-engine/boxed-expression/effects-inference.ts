@@ -23,6 +23,7 @@ import {
   widenAll,
 } from '../../common/type/subtype.js';
 import { reduceType } from '../../common/type/reduce.js';
+import { parseType } from '../../common/type/parse.js';
 import {
   effectSetToString,
   isCoFiniteEffects,
@@ -39,6 +40,7 @@ import type {
 } from '../global-types.js';
 
 import {
+  isDictionary,
   isFunction,
   isNumber,
   isString,
@@ -847,8 +849,9 @@ function acceptsGenericFunctionLiteral(
  * (the overwhelmingly common case, `x ↦ 2x`) keeps an `unknown` slot so the
  * `broadcastable<T>` lift still fires; so does a function-typed one (a
  * higher-order callback slot), and — the trap — so does an INDEX parameter:
- * `At`'s index slot is `boolean | indexed_collection | number | string`
- * (a gather index may itself be a collection), so `(t) ↦ L[t] + 1` must keep
+ * `At`'s index slot is
+ * `boolean | character | indexed_collection | number | string` (a gather
+ * index may itself be a collection), so `(t) ↦ L[t] + 1` must keep
  * `t` unlifted even though one arm of that union is a collection.
  */
 export function inferredCollectionParameterType(
@@ -1242,7 +1245,12 @@ interface WalkContext {
  *   APPLIES (or projects) the literal. Merely producing or storing a callback
  *   contributes ∅. Applications recognized statically: an immediately-applied
  *   literal (`Apply(Function(…), …)`) and a head that is a local symbol bound
- *   to a literal by a `Declare`/`Assign` earlier in the body.
+ *   to a literal by a `Declare`/`Assign` earlier in the body. The literal of
+ *   a `Declare` can be a positional operand or the `value` entry of its
+ *   attributes dictionary (Epsil's `let f = …`). When the `Declare` has a
+ *   type that states an effect set (`let f: () random -> number = …`),
+ *   applying the local contributes the stated set, which is the contract,
+ *   and the literal is not walked.
  * - **Applied parameters (ruling (c)).** An ANNOTATED function parameter
  *   contributes its declared arrow effects where the body applies it. An
  *   UNANNOTATED parameter (declared `unknown`) is treated pure — deliberate
@@ -1253,18 +1261,27 @@ interface WalkContext {
  *   itself, not an unknown.
  * - **Confinement (dominance).** An `Assign` contributes no `scope` iff every
  *   static path from the literal's entry to it passes through a `Declare` of
- *   that symbol WITHIN the literal, and the symbol is not referenced by any
- *   nested `Function` literal (closure capture ⇒ escaping). `Assume` is never
- *   confined. Not provably confined ⇒ `scope`. Inference-only: the runtime
- *   `effectsOf` accounting stays conservative.
+ *   that symbol WITHIN the literal, and no nested `Function` literal WRITES
+ *   the symbol. A nested literal that only READS the symbol does not change
+ *   this: the body's own writes still die with the application, and the
+ *   nested literal sees the value but cannot change it. A nested literal
+ *   that writes the symbol (an `Assign`, `Declare` or `DefineFunction` of
+ *   it, or a destructuring or `Field` target that has it as a component or
+ *   base, at any depth of nesting) makes every write to the symbol in this
+ *   body escaping, because the nested literal can outlive the application
+ *   and keep the binding alive. The nested literal's own walk reports
+ *   `scope` on its own arrow, and this body receives that `scope` where it
+ *   applies the nested literal.
+ *   `Assume` is never confined. Not provably confined ⇒ `scope`.
+ *   Inference-only: the runtime `effectsOf` accounting stays conservative.
  * - **Parameters are confined at entry.** A write to the literal's own
  *   parameter is call-local — the binding lives in the call frame and dies
  *   with the application; the caller's variable never changes (verified
  *   empirically: `f(x) := (x := x + 1; x)` returns 6 for `f(5)` and leaves
  *   the caller's `a := 5` untouched). Parameters therefore seed the
- *   dominance frontier. The closure-capture exclusion still applies: a
- *   parameter referenced by a nested literal is NOT confined, the same
- *   conservative rule as any captured binding.
+ *   dominance frontier. The rule about nested literals applies to
+ *   parameters too: a parameter that a nested literal only reads stays
+ *   confined, and a parameter that a nested literal writes is not confined.
  *
  * `Hold` is NOT skipped: `Hold(Random())` marks the literal as drawing even
  * though nothing draws until `Release`. That is the conservative direction and
@@ -1383,14 +1400,18 @@ function walkLiteral(
   const body = functionLiteralBody(literal);
   if (body === undefined) return;
 
-  // Closure capture: a symbol referenced by ANY nested literal escapes, so a
-  // write to it can outlive this application and is never confined.
+  // Closure capture: a symbol that a nested literal WRITES is shared between
+  // this application and a closure that can outlive it, so a write to it is
+  // never confined. A symbol that nested literals only READ is not in this
+  // set: the closure observes the binding but cannot change it, so the
+  // body's own writes to it still die with the application.
   const captured = new Set<string>();
-  collectNestedLiteralSymbols(body, captured);
+  collectNestedLiteralWrites(body, captured);
 
   // Local symbols bound to a `Function` literal by a `Declare`/`Assign` in the
-  // body: applying one of them projects the literal's latent effects.
-  const localLiterals = new Map<string, Expression>();
+  // body: applying one of them projects the literal's latent effects, or the
+  // effects its declaration states (see {@link LocalLiteral}).
+  const localLiterals = new Map<string, LocalLiteral>();
 
   const walker = new Walker(
     ce,
@@ -1405,32 +1426,105 @@ function walkLiteral(
   );
   // Parameters seed the confinement frontier: a parameter is bound on every
   // static path at entry, and a write to it is call-local (see "Parameters
-  // are confined at entry" above). Captured parameters are still excluded by
-  // the `captured` check in `scopeWrite`.
+  // are confined at entry" above). A parameter that a nested literal writes
+  // is still excluded by the `captured` check in `scopeWrite`.
   walker.sequence([body], { declared: new Set(params.keys()) });
 }
 
-/** All symbol names occurring inside any nested `Function` literal of `expr`.
+/** The names of the symbols that some nested `Function` literal of `expr`
+ * WRITES, at any depth of nesting inside that literal.
+ *
+ * A write is an `Assign`, `Declare` or `DefineFunction` node. Its target
+ * symbols come from {@link assignTargets}, the same extraction
+ * {@link Walker.scopeWrite} uses, so the two cannot disagree about what a
+ * target names: a plain symbol, each component of a destructuring target,
+ * and the base symbol of a `Field` target. A `Declare` inside a nested
+ * literal binds a new local of that literal, and so does not write the outer
+ * binding. It is counted anyway: this is the conservative direction, and it
+ * keeps the scan a plain structural walk with no dominance reasoning of its
+ * own.
  *
  * An expression that SHARES operands is a DAG: the same node object can be
  * reachable along exponentially many paths (`test/compute-engine/
  * dag-shared-walks.test.ts`). The scan only ADDS names to `out`, so visiting
  * a node a second time contributes nothing — the `seen` set makes the walk
  * linear in distinct nodes instead of in paths. */
-function collectNestedLiteralSymbols(
+function collectNestedLiteralWrites(
   expr: Expression,
   out: Set<string>,
   seen: Set<Expression> = new Set()
 ): void {
   if (isSymbol(expr)) return;
-  if (!isFunction(expr)) return;
+  const ops = walkedOperands(expr);
+  if (ops === undefined) return;
   if (seen.has(expr)) return;
   seen.add(expr);
-  if (expr.operator === 'Function') {
-    collectSymbolsMasked(expr, new Set(), out);
+  if (isFunction(expr, 'Function')) {
+    collectWritesMasked(expr, new Set(), out);
     return;
   }
-  for (const op of expr.ops) collectNestedLiteralSymbols(op, out, seen);
+  for (const op of ops) collectNestedLiteralWrites(op, out, seen);
+}
+
+/**
+ * Collect the target symbols of every write inside `expr`, masking each
+ * `Function` literal's OWN parameter names within its subtree, in the same
+ * way as {@link collectSymbolsMasked}: a write to a parameter of a nested
+ * literal changes that literal's call-local binding, not a binding of the
+ * enclosing body with the same spelling.
+ *
+ * A target that {@link assignTargets} cannot resolve to a symbol (an `At` or
+ * `Subscript` target, for example) records every symbol spelling of the
+ * target expression instead. This over-approximates, which only makes more
+ * of the enclosing body's writes escaping.
+ */
+function collectWritesMasked(
+  expr: Expression,
+  mask: ReadonlySet<string>,
+  out: Set<string>,
+  /** Nodes already scanned UNDER THE SAME MASK OBJECT — see the parameter of
+   * the same name on {@link collectSymbolsMasked}. */
+  seen: Map<ReadonlySet<string>, Set<Expression>> = new Map()
+): void {
+  if (!isFunction(expr) && !isDictionary(expr)) return;
+  // The memo covers dictionaries too: a dictionary can hold the same
+  // dictionary under several keys, and the scan must stay linear in distinct
+  // nodes.
+  let seenForMask = seen.get(mask);
+  if (seenForMask === undefined) {
+    seenForMask = new Set();
+    seen.set(mask, seenForMask);
+  }
+  if (seenForMask.has(expr)) return;
+  seenForMask.add(expr);
+  if (isDictionary(expr)) {
+    for (const value of expr.values)
+      collectWritesMasked(value, mask, out, seen);
+    return;
+  }
+  if (!isFunction(expr)) return;
+  if (expr.operator === 'Function') {
+    // Every name the parameter list binds, destructuring leaves included.
+    const extended = new Set(mask);
+    for (const name of functionLiteralBoundNames(expr.ops.slice(1)))
+      extended.add(name);
+    for (const op of expr.ops) collectWritesMasked(op, extended, out, seen);
+    return;
+  }
+  if (
+    expr.operator === 'Assign' ||
+    expr.operator === 'Declare' ||
+    expr.operator === 'DefineFunction'
+  ) {
+    const targets = assignTargets(expr);
+    if (targets.some((name) => name === undefined)) {
+      const target = expr.ops[0];
+      if (target !== undefined) collectSymbolsMasked(target, mask, out);
+    }
+    for (const name of targets)
+      if (name !== undefined && !mask.has(name)) out.add(name);
+  }
+  for (const op of expr.ops) collectWritesMasked(op, mask, out, seen);
 }
 
 /**
@@ -1441,7 +1535,8 @@ function collectNestedLiteralSymbols(
  * the enclosing body's writes to its own `x`. Deeper literals extend the
  * mask with their own parameters, subtree by subtree. Operator names are
  * still collected — harmless over-approximation for the membership checks
- * the `captured` set feeds.
+ * the `captured` set feeds. {@link collectWritesMasked} uses this for a
+ * write target it cannot resolve to a symbol.
  */
 function collectSymbolsMasked(
   expr: Expression,
@@ -1488,7 +1583,7 @@ class Walker {
      * classification in {@link Walker.isFieldStore}. */
     private paramTypes: Map<string, Type>,
     private captured: Set<string>,
-    private localLiterals: Map<string, Expression>,
+    private localLiterals: Map<string, LocalLiteral>,
     private selfName: string | undefined,
     private depth: number,
     /** See the parameter of the same name on {@link walkLiteral}. */
@@ -1585,16 +1680,37 @@ class Walker {
     const name = sym(expr.ops[0]);
     if (name === undefined) return;
     // `Declare(n, type, value)` puts the value third; `Assign(n, value)`
-    // second. Scan the remaining operands for a literal.
-    for (const op of expr.ops.slice(valueIndex))
-      if (isFunction(op, 'Function')) {
-        // A REBINDING invalidates the shared-node memos: a node visited under
-        // the old binding may resolve this name differently now. Re-recording
-        // the same literal changes nothing and keeps the memos.
-        if (this.localLiterals.get(name) !== op) this.localLiteralsGen++;
-        this.localLiterals.set(name, op);
-        return;
-      }
+    // second. Scan the remaining operands for a literal. A `Declare` can
+    // also carry its value in a trailing attributes dictionary,
+    // `Declare(n, Dictionary(value: …))` or `Declare(n, type, Dictionary(
+    // value: …))`, which is how Epsil lowers `let n = …` and
+    // `let n: T = …`; the literal is then the dictionary's `value` entry.
+    // Only the LAST operand of a `Declare` is an attributes dictionary: the
+    // dictionary operand of an `Assign` is the value itself, a dictionary
+    // and not a function.
+    const isDeclare = isFunction(expr, 'Declare');
+    const ops = expr.ops.slice(valueIndex);
+    for (const [i, op] of ops.entries()) {
+      const literal = isFunction(op, 'Function')
+        ? op
+        : isDeclare && i === ops.length - 1
+          ? dictionaryEntry(op, 'value')
+          : undefined;
+      if (literal === undefined || !isFunction(literal, 'Function')) continue;
+      const stated = isDeclare ? declaredEffects(this.ce, expr) : undefined;
+      // A REBINDING invalidates the shared-node memos: a node visited under
+      // the old binding may resolve this name differently now. Re-recording
+      // the same literal changes nothing and keeps the memos.
+      const prior = this.localLiterals.get(name);
+      if (
+        prior === undefined ||
+        prior.literal !== literal ||
+        !sameEffectSet(prior.stated, stated)
+      )
+        this.localLiteralsGen++;
+      this.localLiterals.set(name, { literal, stated });
+      return;
+    }
   }
 
   visit(expr: Expression, ctx: WalkContext): void {
@@ -1606,10 +1722,13 @@ class Walker {
       this.state.unresolvedHead
     )
       return;
-    if (!isFunction(expr)) return;
+    if (!isFunction(expr) && !isDictionary(expr)) return;
 
     // Shared-node cutoff — see the {@link seen} field for why the skip is
-    // exact. Recorded before descending: an expression is a DAG (no cycles),
+    // exact. It applies to a dictionary as well as to a function expression:
+    // a dictionary can hold the same dictionary under several keys, and
+    // without the cutoff a tower of such dictionaries unfolds once per path.
+    // Recorded before descending: an expression is a DAG (no cycles),
     // so the entry cannot be consulted mid-visit of the same node. The
     // snapshot carries the ENTRY generation; a descent that rebinds a local
     // literal advances the generation, so the stale snapshot simply never
@@ -1635,6 +1754,16 @@ class Walker {
       size: ctx.declared.size,
       gen: this.localLiteralsGen,
     });
+
+    // A canonical `Dictionary` is not a function expression, but its entry
+    // values are evaluated like operands: the `value` entry of
+    // `Declare(x, Dictionary(value: Random()))` (Epsil's `let x = Random()`)
+    // draws. Building the dictionary itself has no effect.
+    if (isDictionary(expr)) {
+      for (const value of expr.values) this.visit(value, ctx);
+      return;
+    }
+    if (!isFunction(expr)) return;
 
     const head = expr.operator;
 
@@ -2063,9 +2192,17 @@ class Walker {
     // literal's latent effects.
     const local = this.localLiterals.get(name);
     if (local !== undefined) {
+      // A declaration whose type STATES an effect set is the contract for the
+      // local, as it is for an annotated parameter: `Declare` refuses a
+      // literal whose effects are not in the stated set, so the stated set
+      // covers every literal the local can hold.
+      if (local.stated !== undefined) {
+        this.noteContributorEffects(local.stated);
+        return;
+      }
       walkLiteral(
         this.ce,
-        local,
+        local.literal,
         this.state,
         this.selfName,
         this.depth + 1,
@@ -2412,6 +2549,105 @@ function acceptsCallable(def: BoxedOperatorDefinition | undefined): boolean {
     if (params.some((p) => isCallableType(p.type))) return true;
   }
   return false;
+}
+
+/**
+ * A local symbol bound to a `Function` literal by a statement of the body
+ * being walked (`Declare`, `Assign` or `DefineFunction`).
+ *
+ * `stated` is the effect set that the TYPE of a `Declare` states, when it
+ * states one (`let f: () random -> number = …`). Applying the local then
+ * contributes that set instead of walking the literal. When the declaration
+ * has no type, or a type that states no effects (`() -> number`,
+ * `function`), `stated` is `undefined` and the literal is walked.
+ */
+interface LocalLiteral {
+  literal: Expression;
+  stated: EffectSet | undefined;
+}
+
+/**
+ * The sub-expressions an effect walk descends into: the operands of a
+ * function expression, and the entry values of a canonical `Dictionary`.
+ * `undefined` for a leaf.
+ *
+ * A canonical `Dictionary` is a separate kind of expression, not a function
+ * expression, so a walk that only follows `ops` stops at it. That hides the
+ * value of every `Declare(x, Dictionary(value: …))`, which is how Epsil
+ * lowers `let x = …`.
+ */
+function walkedOperands(expr: Expression): readonly Expression[] | undefined {
+  if (isFunction(expr)) return expr.ops;
+  if (isDictionary(expr)) return expr.values;
+  return undefined;
+}
+
+/**
+ * The value of the entry `key` of a `Dictionary` operand, in either of its
+ * two forms: a canonical dictionary, or a RAW
+ * `["Dictionary", ["KeyValuePair", key, value], …]` function expression,
+ * whose key is a symbol or a string. `undefined` when `op` is not a
+ * dictionary or has no such entry.
+ */
+function dictionaryEntry(
+  op: Expression | undefined,
+  key: string
+): Expression | undefined {
+  if (op === undefined) return undefined;
+  if (isDictionary(op)) return op.get(key);
+  if (!isFunction(op, 'Dictionary')) return undefined;
+  for (const kv of op.ops) {
+    if (!isFunction(kv, 'KeyValuePair') || kv.nops !== 2) continue;
+    const k = kv.ops[0];
+    if ((isString(k) ? k.string : sym(k)) === key) return kv.ops[1];
+  }
+  return undefined;
+}
+
+/**
+ * The effect set that the type of a `Declare` states, or `undefined` when the
+ * declaration has no type, the type cannot be parsed, or the type states no
+ * effects.
+ *
+ * The operand layout follows the `Declare` evaluate handler
+ * (`library/core.ts`): after the symbol come an optional positional type and
+ * value, and an optional trailing attributes dictionary. A positional type
+ * wins over the dictionary's `type` entry.
+ */
+function declaredEffects(
+  ce: ComputeEngine,
+  declare: Expression
+): EffectSet | undefined {
+  if (!isFunction(declare)) return undefined;
+  const rest = declare.ops.slice(1);
+  const last = rest[rest.length - 1];
+  const attrs =
+    last !== undefined && (isDictionary(last) || isFunction(last, 'Dictionary'))
+      ? last
+      : undefined;
+  const typeOp =
+    rest.length > (attrs === undefined ? 0 : 1)
+      ? rest[0]
+      : dictionaryEntry(attrs, 'type');
+  if (typeOp === undefined) return undefined;
+  const source = isString(typeOp) ? typeOp.string : sym(typeOp);
+  if (source === undefined) return undefined;
+  try {
+    return signatureEffects(parseType(source, ce._typeResolver));
+  } catch {
+    return undefined;
+  }
+}
+
+/** Whether two effect sets are the same set. */
+function sameEffectSet(
+  a: EffectSet | undefined,
+  b: EffectSet | undefined
+): boolean {
+  if (a === b) return true;
+  if (a === undefined || b === undefined) return false;
+  if (a === 'any' || b === 'any') return false;
+  return a.length === b.length && a.every((label) => b.includes(label));
 }
 
 /**

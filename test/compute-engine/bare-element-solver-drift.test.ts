@@ -27,10 +27,19 @@ describe('type-variable binding over bare collection operands', () => {
     ]) {
       ce.declare(`v_${t}`, t);
       const result = ce.box(['Unique', `v_${t}`]).type;
-      // The discriminating pin: a values-only `list` admits the result;
+      // A `collection` or an `indexed_collection` can be a string, and
+      // `Unique` of a string is a string, so the result type is the join of
+      // the list and the string results. The other constructors exclude a
+      // string and select the list result.
+      const admitsString = t === 'collection' || t === 'indexed_collection';
+      // The discriminating pin: a values-only `list` admits the list result;
       // the drifted `list<any>` did NOT match bare `list`.
-      expect(result.matches('list')).toBe(true);
-      expect(result.toString()).toBe('list<unknown>');
+      expect(result.matches(admitsString ? 'list | string' : 'list')).toBe(
+        true
+      );
+      expect(result.toString()).toBe(
+        admitsString ? 'list<unknown> | string' : 'list<unknown>'
+      );
     }
   });
 

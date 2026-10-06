@@ -283,6 +283,16 @@ characters("naïve")
 // ➔ ["n", "a", "ï", "v", "e"]
 ```
 
+Indexing a string gives a character. A character and the one-character string
+with the same content are the same value, so every string operation accepts a
+character where it accepts a string, and a dictionary accepts a character as a
+key. The result is the result for the one-character string:
+
+```epsil
+toUpperCase("abc"[1])
+// ➔ "A"
+```
+
 A string literal can include the value of an expression with `\(…)`:
 
 ```epsil
@@ -439,7 +449,7 @@ canonicalForm(Hold(1 + x), "Order")
 
 ### caseFold
 
-MathJSON `CaseFold` · `(string) -> string`
+MathJSON `CaseFold` · `(character | string) -> string`
 
 CaseFold(s): a case-folded form of `s`, for case-insensitive comparison — `CaseFold(a) == CaseFold(b)` tests equality ignoring case. An approximation of Unicode full case folding.
 
@@ -455,7 +465,7 @@ caseFold("Hello") == caseFold("HELLO")
 
 ### characterFrom
 
-MathJSON `CharacterFrom` · `(string) -> character`
+MathJSON `CharacterFrom` · `(character | string) -> character`
 
 CharacterFrom(s): the character `s` denotes. `s` must be exactly one user-perceived character (one grapheme cluster) after NFC normalization; an empty or multi-character string is an error.
 
@@ -466,7 +476,7 @@ characterFrom("é")
 
 ### characters
 
-MathJSON `Characters` · `(string) -> list<character>`
+MathJSON `Characters` · `(character | string) -> list<character>`
 
 Characters(s): split a string into a list of user-perceived characters (grapheme clusters). Synonym: GraphemeClusters. For stable integer decompositions see UnicodeScalars, Utf8 and Utf16. A non-string argument leaves the expression unevaluated.
 
@@ -593,7 +603,7 @@ Delimiter(1 + 2)
 
 ### digitsFrom
 
-MathJSON `DigitsFrom` · `(string, (integer | string)?) -> integer`
+MathJSON `DigitsFrom` · `(character | string, (character | integer | string)?) -> integer`
 
 Return an integer representation of the string `s` in base `base`.
 
@@ -696,7 +706,7 @@ geometricVector(A, B)
 
 ### graphemeClusters
 
-MathJSON `GraphemeClusters` · `(string) -> list<character>`
+MathJSON `GraphemeClusters` · `(character | string) -> list<character>`
 
 A collection of grapheme clusters from a string. Synonym of Characters.
 
@@ -950,7 +960,7 @@ The absence of a value; the sole member of the unit type.
 
 ### numberFrom
 
-MathJSON `NumberFrom` · `(string, base: (integer | string)?) -> number`
+MathJSON `NumberFrom` · `(character | string, base: (character | integer | string)?) -> number`
 
 NumberFrom(s): the number the string `s` denotes — optional surrounding whitespace, an optional sign, then ASCII digits with an optional "." fraction and an optional e/E exponent, or one of "oo", "+oo", "-oo", "NaN", "Indeterminate". The integer part may be omitted before a fraction (".5" is 0.5); a trailing "." with no fraction digits ("5.") is not accepted. Any other text, including "", is an error value (never NaN).
 
@@ -991,7 +1001,7 @@ OverParen(B, C)
 
 ### padEnd
 
-MathJSON `PadEnd` · `(string, n: integer, pad: string?) -> string`
+MathJSON `PadEnd` · `(character | string, n: integer, pad: (character | string)?) -> string`
 
 PadEnd(s, n, pad=" "): `s` padded at the END to `n` characters by repeating `pad` (its final copy truncated on a character boundary). Returned unchanged when `s` already has `n` or more characters. `n` must be a non-negative integer; an empty `pad` is an error; a non-string `pad` leaves the expression unevaluated.
 
@@ -1002,7 +1012,7 @@ padEnd("abc", 6, ".")
 
 ### padStart
 
-MathJSON `PadStart` · `(string, n: integer, pad: string?) -> string`
+MathJSON `PadStart` · `(character | string, n: integer, pad: (character | string)?) -> string`
 
 PadStart(s, n, pad=" "): `s` padded at the START to `n` characters by repeating `pad` (its final copy truncated on a character boundary). Returned unchanged when `s` already has `n` or more characters. `n` must be a non-negative integer; an empty `pad` is an error; a non-string `pad` leaves the expression unevaluated.
 
@@ -1255,7 +1265,7 @@ Return the signature string of an operator.
 
 ```epsil
 Signature(stringRepeat)
-// ➔ "(string, n: integer) -> string"
+// ➔ "(character | string, n: integer) -> string"
 ```
 
 ### simplify
@@ -1353,7 +1363,7 @@ String("x", 2)
 
 ### stringCompare
 
-MathJSON `StringCompare` · `(string, string) -> integer`
+MathJSON `StringCompare` · `(character | string, character | string) -> integer`
 
 StringCompare(a, b): -1 when `a` sorts before `b`, 0 when they are equal, 1 when `a` sorts after `b`. The order compares Unicode scalar sequences code point by code point (NOT UTF-16 code units, which would sort astral characters below U+E000..U+FFFF).
 
@@ -1380,7 +1390,7 @@ stringFrom([72, 105])
 
 ### stringJoin
 
-MathJSON `StringJoin` · `(collection<character | string>, separator: string?) -> string`
+MathJSON `StringJoin` · `(collection<character | string>, separator: (character | string)?) -> string`
 
 StringJoin(xs): join the elements of the finite collection `xs` (strings or characters) into a string.
 
@@ -1393,7 +1403,7 @@ stringJoin(["a", "b", "c"], "-")
 
 ### stringRepeat
 
-MathJSON `StringRepeat` · `(string, n: integer) -> string`
+MathJSON `StringRepeat` · `(character | string, n: integer) -> string`
 
 StringRepeat(s, n): `n` copies of the string `s`, concatenated. StringRepeat(s, 0) is "". A negative or non-integer `n` is an error.
 
@@ -1404,7 +1414,7 @@ stringRepeat("ab", 3)
 
 ### stringReplace
 
-MathJSON `StringReplace` · `((string, string, string, count: integer?) -> string) & ((string, regexp, string, count: integer?) -> string) & ((string, regexp, function, count: integer?) -> string)`
+MathJSON `StringReplace` · `((character | string, character | string, character | string, count: integer?) -> string) & ((character | string, regexp, character | string, count: integer?) -> string) & ((character | string, regexp, function, count: integer?) -> string)`
 
 StringReplace(s, target, replacement): replace every non-overlapping occurrence of `target` in `s`, scanning left to right over whole characters.
 
@@ -1426,7 +1436,7 @@ stringReplace("banana", "a", "o", 1)
 
 ### stringSplit
 
-MathJSON `StringSplit` · `((string, string?) -> list<string>) & ((string, regexp) -> list<string>)`
+MathJSON `StringSplit` · `((character | string, (character | string)?) -> list<string>) & ((character | string, regexp) -> list<string>)`
 
 StringSplit(s): split a string on runs of whitespace (the Unicode White_Space code points), dropping empty parts.
 
@@ -1523,7 +1533,7 @@ replaceAll(x^2 + x, to(x, 3))
 
 ### toLowerCase
 
-MathJSON `ToLowerCase` · `(string) -> string`
+MathJSON `ToLowerCase` · `(character | string) -> string`
 
 ToLowerCase(s): the string `s` mapped to lower case using the Unicode default (locale-independent) mappings.
 
@@ -1534,7 +1544,7 @@ toLowerCase("Hello World")
 
 ### toUpperCase
 
-MathJSON `ToUpperCase` · `(string) -> string`
+MathJSON `ToUpperCase` · `(character | string) -> string`
 
 ToUpperCase(s): the string `s` mapped to upper case using the Unicode default (locale-independent) mappings. The character count can change ("ß" uppercases to "SS").
 
@@ -1556,7 +1566,7 @@ triangle(A, B, C)
 
 ### trim
 
-MathJSON `Trim` · `(string, chars: (character | collection<character | string> | string)?) -> string`
+MathJSON `Trim` · `(character | string, chars: (character | collection<character | string> | string)?) -> string`
 
 Trim(s): remove leading and trailing whitespace (the Unicode White_Space characters).
 
@@ -1574,7 +1584,7 @@ trim("--hi--", "-")
 
 ### trimEnd
 
-MathJSON `TrimEnd` · `(string, chars: (character | collection<character | string> | string)?) -> string`
+MathJSON `TrimEnd` · `(character | string, chars: (character | collection<character | string> | string)?) -> string`
 
 TrimEnd(s): remove trailing whitespace (the Unicode White_Space characters).
 
@@ -1587,7 +1597,7 @@ trimEnd("hi!!", "!")
 
 ### trimStart
 
-MathJSON `TrimStart` · `(string, chars: (character | collection<character | string> | string)?) -> string`
+MathJSON `TrimStart` · `(character | string, chars: (character | collection<character | string> | string)?) -> string`
 
 TrimStart(s): remove leading whitespace (the Unicode White_Space characters).
 
@@ -1644,7 +1654,7 @@ Prevent an expression from being evaluated
 
 ### unicodeScalars
 
-MathJSON `UnicodeScalars` · `(string) -> list<integer>`
+MathJSON `UnicodeScalars` · `(character | string) -> list<integer>`
 
 A collection of Unicode scalars from a string, same as UTF-32
 
@@ -1655,7 +1665,7 @@ unicodeScalars("A😀")
 
 ### utf16
 
-MathJSON `Utf16` · `(string) -> list<integer>`
+MathJSON `Utf16` · `(character | string) -> list<integer>`
 
 A collection of UTF-16 code units from a string.
 
@@ -1666,7 +1676,7 @@ utf16("A😀")
 
 ### utf8
 
-MathJSON `Utf8` · `(string) -> list<integer>`
+MathJSON `Utf8` · `(character | string) -> list<integer>`
 
 A collection of UTF-8 code units from a string.
 

@@ -910,6 +910,22 @@ export interface IComputeEngine {
    * @internal */
   _epsilBatchId: number | undefined;
 
+  /** Remove the iteration limit of this engine, unless a host has assigned
+   * `iterationLimit` (an assigned limit is kept). Called by `executeEpsil`
+   * before a program runs: a loop written by the author of a program runs
+   * until it ends, and the host's time budget is the bound. The limit is not
+   * put back after the run, because the value of a program can be a lazy
+   * collection that the host enumerates later, and that walk must not stop
+   * at a limit the program itself did not have.
+   * @internal */
+  _liftDefaultIterationLimit(): void;
+
+  /** True once a host has assigned `iterationLimit`, even to its default
+   * value. Read and written by the checkpoint code so that a restore does not
+   * turn the default limit into an assigned one.
+   * @internal */
+  _iterationLimitIsExplicit: boolean;
+
   /** Assignment EVIDENCE the Epsil static pre-pass established, keyed by the
    * symbol's value-definition record. Set (and restored) only by
    * `staticDiagnostics`: when the pass applies the type effect of a

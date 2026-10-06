@@ -1,7 +1,5 @@
-// corpus: known-failure string operators reject a `character` argument (ROADMAP: "String operators reject a `character`")
 // Acronym: first letter of each word, upper-cased. Hyphens separate words.
-// `w[1]` is a character; `toUpperCase` declares `(string) -> string` and
-// refuses it, so this natural spelling is a static type error today.
+// `w[1]` is a character, which every string operator accepts.
 acronym(s) = stringJoin(map(w => toUpperCase(w[1]), stringSplit(stringReplace(s, "-", " "))), "")
 (acronym("Portable Network Graphics"), acronym("Complementary metal-oxide semiconductor"), acronym("Ruby on Rails"))
 // ➔ ("PNG", "CMOS", "ROR")

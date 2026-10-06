@@ -1,4 +1,3 @@
-// corpus: known-failure a local written in a loop and read by a lambda trips the scope-effect ceiling (ROADMAP: "Effects inference rejects a function whose local is read by a lambda")
 // Sieve of Eratosthenes: strike the multiples of each prime into a set, then
 // keep the numbers that were not struck.
 sieve(limit) = do {

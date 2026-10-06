@@ -115,7 +115,7 @@ describe('the index kind selects the arm', () => {
     expect(ce.box(['At', 'i1', 'j']).type.toString()).toBe('number');
     // The index symbol keeps the index slot's own type.
     expect(typeOf(ce, 'j')).toBe(
-      'boolean | indexed_collection<any> | number | string'
+      'boolean | character | indexed_collection<any> | number | string'
     );
   });
 

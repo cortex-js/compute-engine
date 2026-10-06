@@ -1,7 +1,8 @@
-// corpus: known-failure a `length(xs)` call on an untyped parameter changes how a later lambda over `xs` is typed (ROADMAP: "A length call on an untyped parameter changes later static types")
-// Quicksort as a pure recursive function over filtered partitions. With an
-// untyped parameter, `length(xs)` changes how the comparison lambda is typed
-// and the definition is refused before anything runs.
+// corpus: known-failure a lazy collection passed to a recursive call loses the binding of the block local its lambda reads (ROADMAP: "Lazy argument to a recursive call loses its block binding")
+// Quicksort as a pure recursive function over filtered partitions. Each
+// partition is a lazy `filter` whose lambda reads the block local `pivot`;
+// passed to the recursive call, it is evaluated after the block exited.
+// `rosetta/quicksort-typed` materializes each partition and works.
 quicksort(xs) =
   xs if length(xs) <= 1 else do {
     let pivot = first(xs)

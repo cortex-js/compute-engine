@@ -897,3 +897,133 @@ describe('Overloads: per-application effects use the RESOLVED arm', () => {
     expect(eff(ce.box(['Legacy', { str: 'a' }]))).toBe('any');
   });
 });
+
+// Evaluating a canonical dictionary evaluates each of its values
+// (`BoxedDictionary.evaluate`), so the dictionary carries the union of the
+// effects of its values. Epsil lowers `let x = v` to
+// `Declare(x, Dictionary(value: v))`, so a draw in a `let` initializer is
+// reported only if this union is taken.
+describe('A dictionary carries the effects of its values', () => {
+  const ce = new ComputeEngine();
+  const entry = (key: string, value: unknown) => [
+    'KeyValuePair',
+    { str: key },
+    value,
+  ];
+
+  it('a dictionary holding a draw is `{random}`', () => {
+    const d = ce.box(['Dictionary', entry('value', ['Random'])] as any);
+    expect(eff(d)).toEqual(['random']);
+    expect(d.isPure).toBe(false);
+    expect(d.effects).toEqual(['random']);
+    // The raw `Dictionary(KeyValuePair(…))` form agrees.
+    const raw = ce.box(['Dictionary', entry('value', ['Random'])] as any, {
+      form: 'raw',
+    });
+    expect(eff(raw)).toEqual(['random']);
+  });
+
+  it('a dictionary of pure values is pure', () => {
+    const d = ce.box([
+      'Dictionary',
+      entry('a', ['Add', 'x', 1]),
+      entry('b', 2),
+    ] as any);
+    expect(eff(d)).toBe(undefined);
+    expect(d.isPure).toBe(true);
+    expect(d.effects).toBe(undefined);
+  });
+
+  it('a stored function value adds no latent set', () => {
+    // The value is stored, not invoked, as in a `List` cell.
+    const d = ce.box([
+      'Dictionary',
+      entry('f', ['Function', ['Random']]),
+    ] as any);
+    expect(eff(d)).toBe(undefined);
+  });
+
+  it('nested dictionaries carry the effects of the inner values', () => {
+    const d = ce.box([
+      'Dictionary',
+      entry('outer', ['Dictionary', entry('inner', ['Random'])]),
+    ] as any);
+    expect(eff(d)).toEqual(['random']);
+    expect(d.isPure).toBe(false);
+    // …and so does an application that holds one.
+    expect(eff(ce.box(['List', d]))).toEqual(['random']);
+  });
+
+  it('a `Declare` whose attributes dictionary draws is `{scope, random}`', () => {
+    const e = ce.box([
+      'Declare',
+      'x',
+      ['Dictionary', entry('value', ['Random'])],
+    ] as any);
+    expect(eff(e)).toEqual(expect.arrayContaining(['scope', 'random']));
+    expect((eff(e) as string[]).length).toBe(2);
+  });
+
+  it('the runtime channel reports every label inference reports for a `let` draw', () => {
+    // `h() = do { let x = Random(); x }`, as Epsil lowers it. The runtime
+    // channel may report MORE than the inferred arrow, never less.
+    const literal = ce.box([
+      'Function',
+      [
+        'Block',
+        ['Declare', 'x', ['Dictionary', ['KeyValuePair', 'value', ['Random']]]],
+        'x',
+      ],
+    ] as any);
+    const t = literal.type.type as { effects?: string[] | 'any' };
+    expect(t.effects).toEqual(['random']);
+    const body = (literal as any).ops[0] as Expression;
+    const runtime = eff(body) as string[];
+    expect(runtime).toEqual(expect.arrayContaining(t.effects as string[]));
+  });
+
+  it('a tower of SHARED dictionaries is read once per distinct node', () => {
+    // Level k+1 holds level k under two keys, so the tower has one node per
+    // level but 2^depth paths from the top to the draw at the bottom. Each
+    // dictionary memoizes its own effects, so the read is linear in the
+    // number of levels. The dictionaries are built from boxed operands so
+    // that the two keys hold the SAME object.
+    const tower = (depth: number) => {
+      const kv = (key: string, value: Expression) =>
+        ce.function('KeyValuePair', [ce.string(key), value]);
+      const bottom = ce.function('Dictionary', [
+        kv('v', ce.function('Random', [])),
+      ]);
+      // Count the reads of the bottom dictionary's values.
+      let reads = 0;
+      const valuesOf = Object.getOwnPropertyDescriptor(
+        Object.getPrototypeOf(bottom),
+        'values'
+      )!.get!;
+      Object.defineProperty(bottom, 'values', {
+        get() {
+          reads += 1;
+          return valuesOf.call(this);
+        },
+      });
+      let top = bottom;
+      for (let k = 0; k < depth; k++)
+        top = ce.function('Dictionary', [kv('a', top), kv('b', top)]);
+      return { top, reads: () => reads };
+    };
+
+    // Without the memo, 12 levels read the bottom 2^12 = 4096 times.
+    const small = tower(12);
+    expect(small.top.effects).toEqual(['random']);
+    expect(small.reads()).toBeLessThanOrEqual(2);
+
+    const { top } = tower(25);
+    const start = Date.now();
+    expect(top.effects).toEqual(['random']);
+    expect(top.isPure).toBe(false);
+    // The time depends on the load of the machine, so the limit is asserted
+    // only in a `CE_PERF=1` run.
+    if (process.env.CE_PERF === '1')
+      expect(Date.now() - start).toBeLessThan(1000);
+  });
+});

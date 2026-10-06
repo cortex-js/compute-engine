@@ -15,6 +15,7 @@ import {
   isAbsentScalarSymbol,
   absentScalarMarker,
 } from '../boxed-expression/validate.js';
+import type { OverloadResolution } from '../boxed-expression/overload.js';
 import {
   asBigint,
   toInteger,
@@ -607,7 +608,7 @@ function canEnumerateCollectionOperands(expr: Expression): boolean | undefined {
 // still be a collection (a bare `value`, an unknown symbol) and refuses a
 // provably scalar one with its own error, so the two are not meant to match.
 const AT_SIGNATURE = parseType(
-  '(value: indexed_collection<any> | dictionary<any>, index: (number|string|boolean|indexed_collection<any>)+) -> unknown'
+  '(value: indexed_collection<any> | dictionary<any>, index: (number|string|character|boolean|indexed_collection<any>)+) -> unknown'
 );
 
 // True when `expr`'s type is a *union* with at least one member compatible with
@@ -631,7 +632,7 @@ function hasIndexableMember(expr: Expression): boolean {
 // The index type of `AT_SIGNATURE`, reported as the expected type when an
 // `At` index is refused by `isInertOpaqueHead`.
 const AT_INDEX_TYPE = parseType(
-  'number | string | boolean | indexed_collection<any>'
+  'number | string | character | boolean | indexed_collection<any>'
 );
 
 // True when `expr` is an application of a library OPAQUE HEAD: an operator
@@ -798,7 +799,10 @@ function validateAgainstDeclaration(
   ce: ComputeEngine,
   name: string,
   args: ReadonlyArray<Expression>,
-  stripMissing = false
+  stripMissing = false,
+  /** Receives the overload resolution the arguments were validated
+   * against, when the declared signature is an overload set. */
+  resolutionOut?: { resolution?: OverloadResolution }
 ): ReadonlyArray<Expression> | null {
   const op = declaredOperator(ce, name);
   if (op === undefined) return null;
@@ -809,7 +813,8 @@ function validateAgainstDeclaration(
     false,
     false,
     undefined,
-    stripMissing ? (i) => op.stripsMissingAt(i) : undefined
+    stripMissing ? (i) => op.stripsMissingAt(i) : undefined,
+    resolutionOut === undefined ? undefined : { resolutionOut }
   );
 }
 
@@ -2752,8 +2757,10 @@ function elementRequirementOfAt(
   // The index kind selects the arm when it is provable: a numeric index or a
   // gather/mask reads an indexed collection, a string key reads a keyed one.
   // Otherwise (a symbolic index whose kind is still open) both arms are
-  // kept, which is the shape the validation wrote.
-  if (isSubtype(indexType, 'string'))
+  // kept, which is the shape the validation wrote. A character key reads a
+  // keyed collection too: it looks up the entry of the one-character string
+  // with the same content.
+  if (isSubtype(indexType, 'string') || isSubtype(indexType, 'character'))
     return [{ kind: 'dictionary', values: r }, undefined];
   if (isSubtype(indexType, 'number'))
     return [{ kind: 'indexed_collection', elements: r }, undefined];
@@ -9825,7 +9832,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // base` pins. A collection-typed declaration here would refuse the
     // deferred bases at the boxing validation seam.
     signature:
-      '(value: any, index: (number|string|boolean|indexed_collection<any>)+) -> unknown',
+      '(value: any, index: (number|string|character|boolean|indexed_collection<any>)+) -> unknown',
     // `At` accepts absence into any position (base or index) and absorbs it at
     // runtime (§3.A/§3.C): declared `handle`, stripping ALL positions. This
     // subsumes the P1 operator-local carve-out — the general `missingStrip`
@@ -10349,14 +10356,23 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         )
           return chainAbsorbMarker(ce, expr.type.type, ops, index);
 
+        // A string key, or a CHARACTER key read as its text: a character and
+        // the one-character string with the same content are the same value,
+        // so `d[c]` finds the entry `d["a"]` finds when `c` is the character
+        // `a`.
+        const key =
+          isString(opAtIndex) || isCharacter(opAtIndex)
+            ? opAtIndex.string
+            : undefined;
+
         // Dictionary key access: a `dictionary` is a keyed (not indexed)
         // collection with no `collection.at` handler, so look the value up by
-        // its string key directly. Only string keys are supported; a missing
-        // key yields the absence marker, a non-string index leaves `At`
-        // unevaluated.
+        // its string key directly. Only string (or character) keys are
+        // supported; a missing key yields the absence marker, any other index
+        // leaves `At` unevaluated.
         if (isDictionary(expr)) {
-          if (!isString(opAtIndex)) return undefined;
-          const v = expr.get(opAtIndex.string);
+          if (key === undefined) return undefined;
+          const v = expr.get(key);
           if (v === undefined)
             return index + 1 < ops.length
               ? chainAbsorbMarker(ce, expr.type.type, ops, index)
@@ -10402,9 +10418,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           return undefined;
         }
 
-        // Case A: string key (dictionary-style access).
-        const s = isString(opAtIndex) ? opAtIndex.string : undefined;
-        if (s !== undefined) {
+        // Case A: string (or character) key, dictionary-style access.
+        if (key !== undefined) {
           // A STRING is an INDEXED collection of its characters: it has no
           // keys at all, so `At("abc", "b")` is not a lookup that missed, it
           // is a lookup a string does not offer. The string fallback accessor
@@ -10413,7 +10428,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           // absent key and answer with the absence marker. Decline the
           // dispatch instead, leaving the expression unevaluated.
           if (isString(expr)) return undefined;
-          const v = at(expr, s);
+          const v = at(expr, key);
           if (v === undefined)
             return index + 1 < ops.length
               ? chainAbsorbMarker(ce, expr.type.type, ops, index)
@@ -11310,11 +11325,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `broadcastable`, and none of its parameters is numeric-only, so the
     // remaining steps the default path would run (operand sorting, the
     // involution/idempotent rewrites, the missing-arm strip) are all no-ops
-    // for it. The one thing NOT reproduced is the attachment of the validated
-    // overload resolution to the constructed call (`_resolvedOverload`); the
-    // result type then comes from the cold re-derivation in `resolvedArm`
-    // (`boxed-expression/boxed-function.ts`), which recomputes the same
-    // policies from the definition. The `Slice` type pins in
+    // for it. The handler also attaches the validated overload resolution to
+    // the constructed call (`_resolvedOverload`), as the default path does;
+    // result typing in `resolvedArm` (`boxed-expression/boxed-function.ts`)
+    // reads it. The `Slice` type pins in
     // `test/compute-engine/type-variables-collections.test.ts` and
     // `test/compute-engine/collections.test.ts` cover that path.
     canonical: (ops, { engine: ce }) => {
@@ -11322,10 +11336,25 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // `flatten` is what drops the `Nothing`.
       if (ops.length === 2 && isSymbol(ops[1], 'Nothing')) return ce.Nothing;
       const args = flatten(ops);
-      return ce._fn(
+      const resolutionOut: { resolution?: OverloadResolution } = {};
+      const fn = ce._fn(
         'Slice',
-        validateAgainstDeclaration(ce, 'Slice', args) ?? args
+        validateAgainstDeclaration(ce, 'Slice', args, false, resolutionOut) ??
+          args
       );
+      // Attach the resolution the operands were validated against, as the
+      // default canonicalization does (`boxed-expression/box.ts`). Result
+      // typing (`resolvedArm`) reads it. It matters when the value operand is
+      // an untyped symbol: validation narrows that symbol to
+      // `indexed_collection`, after which a fresh resolution keeps only the
+      // list arms (an `indexed_collection` operand fails the string arms'
+      // bound), while the attached one records that the operand was
+      // undecided between a string and a list, so the call types `string |
+      // list<…>`.
+      if (isFunction(fn))
+        (fn as { _resolvedOverload?: OverloadResolution })._resolvedOverload =
+          resolutionOut.resolution;
+      return fn;
     },
     collection: {
       // Collection-ness is decided PER INSTANCE, because the `range | nothing`

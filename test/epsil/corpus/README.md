@@ -39,8 +39,7 @@ One program through the CLI, without a build:
   written from the public Exercism problem statements (MIT) in our own words and
   code.
 - `euler/`: Project Euler problems with a known integer answer; a few are
-  reduced in size so that they stay under the engine's iteration limit, and the
-  file says so.
+  reduced in size to keep the suite fast, and the file says so.
 - `rosetta/`: classic Rosetta Code tasks, written as our own programs from the
   task idea (the site's content is GFDL and is not copied).
 - `symbolic/`: exact and symbolic computation, which is what Epsil is for.

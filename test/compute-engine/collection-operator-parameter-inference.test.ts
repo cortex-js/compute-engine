@@ -140,7 +140,10 @@ const EPSIL_CASES: [string, string, string, string[]][] = [
   [
     'Sort',
     'sort(xs, (a, b) => b - a)',
-    '(indexed_collection<unknown>) -> list<unknown>',
+    // An untyped `xs` is only known to be an indexed collection, which can be
+    // a string, and sorting a string gives a string: the result type is the
+    // join of the list and the string results.
+    '(indexed_collection<unknown>) -> list<unknown> | string',
     [LIST],
   ],
   [
@@ -171,7 +174,8 @@ const EPSIL_CASES: [string, string, string, string[]][] = [
   [
     'Unique',
     'unique(xs)',
-    '(collection<unknown>) -> collection<unknown>',
+    // The join of the list and the string results, as for `Sort` above.
+    '(collection<unknown>) -> list<unknown> | string',
     [LIST],
   ],
   ['Sum', 'sum(xs)', '(collection) -> number', [LIST, SET]],
