@@ -79,7 +79,7 @@ interface BaseCollectionHandlers {
   iterator: (
     collection: Expression
   ) => Iterator<Expression, undefined> | undefined;
-  count: (collection: Expression) => number | undefined;
+  count: (collection: Expression) => number | bigint | undefined;
   isEmpty?: (collection: Expression) => boolean | undefined;
   isFinite?: (collection: Expression) => boolean | undefined;
   /** Whether `iterator()` will actually produce this collection's elements —
@@ -2952,8 +2952,16 @@ export interface Expression {
    * example, if the collection is lazy and not finite and the size cannot
    * be determined without iterating over the collection.
    *
+   * The count is a `bigint` only when it is finite and is not a safe integer
+   * (larger than `Number.MAX_SAFE_INTEGER`), for example the count of
+   * `QuotientRing(Integers, 2^61 - 1)`. A count that is a safe integer is
+   * always a `number`, and an infinite count is `Infinity`. Do not mix the
+   * count with a `number` in arithmetic before you check its type:
+   * JavaScript throws a `TypeError` for `count + 1` when `count` is a
+   * `bigint`. A comparison (`count > 10`) is valid for both types.
+   *
    */
-  get count(): number | undefined;
+  get count(): number | bigint | undefined;
 
   /** If this is a finite collection, return true. */
   isFiniteCollection: boolean | undefined;
@@ -3179,7 +3187,7 @@ export interface CollectionInterface {
   each(): Generator<Expression>;
   contains(rhs: Expression): boolean | undefined;
   subsetOf(other: Expression, strict: boolean): boolean | undefined;
-  readonly count: number | undefined;
+  readonly count: number | bigint | undefined;
   readonly isFiniteCollection: boolean | undefined;
   readonly isEmptyCollection: boolean | undefined;
   readonly isEnumerableCollection: boolean | undefined;

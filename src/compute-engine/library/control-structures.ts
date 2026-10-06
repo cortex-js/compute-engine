@@ -85,6 +85,7 @@ import {
   substituteBinderValues,
 } from './utils.js';
 import { journalCheckpointMapEntry } from '../checkpoint-journal.js';
+import { smallCount } from '../boxed-expression/collection-count.js';
 import {
   coarsenEvidenceType,
   markDeclaredLocal,
@@ -1191,7 +1192,7 @@ function whenCollectionHandlers(): CollectionHandlers {
   ):
     | {
         value: Expression;
-        count: number | undefined;
+        count: number | bigint | undefined;
         restrict: (elem: Expression, i: number) => Expression | undefined;
       }
     | undefined => {
@@ -1222,6 +1223,8 @@ function whenCollectionHandlers(): CollectionHandlers {
       if (atomic) return undefined;
       return {
         value: v,
+        // A `bigint` count (a finite count that is not a safe integer)
+        // passes through: the walk reads the value's own walk.
         count: v.count,
         restrict: (elem) => ce._fn('When', [elem, cond]),
       };
@@ -1232,10 +1235,14 @@ function whenCollectionHandlers(): CollectionHandlers {
     // cell once, from one iterator of the mask, and keeps it. A request
     // that skips ahead of the cells read so far (a single `at(i)`) looks up
     // that one cell with `at()` instead of reading and keeping `i` cells.
+    // A count can be a `bigint` (a finite count that is not a safe integer).
+    // The shorter length uses `<`, which compares a `bigint` and a `number`
+    // correctly (`Math.min()` throws for a `bigint`), and `restrict` only
+    // compares a cell index with it.
     const vn = v.count;
     const cn = cond.count;
     if (vn === undefined || cn === undefined) return undefined;
-    const n = Math.min(vn, cn);
+    const n = cn < vn ? cn : vn;
     const mask: Expression[] = [];
     let cells: Iterator<Expression> | undefined;
     return {
@@ -3401,7 +3408,9 @@ function scanIndependentClauses(
       if (!isFunction(clause, 'Element')) return undefined;
       const coll = clause.ops[1]?.evaluate();
       if (!coll?.isCollection) return undefined;
-      const c = coll.count;
+      // A count that is not a safe integer (a `bigint`) is read as unknown:
+      // `Number.isFinite()` below would read it as infinite.
+      const c = smallCount(coll);
       if (coll.isEmptyCollection === true || c === 0) empty = true;
       else if (c === undefined) unknown = true;
       else if (!Number.isFinite(c)) infinite = true;

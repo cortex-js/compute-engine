@@ -291,7 +291,14 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
     const outerIsInteger = b.isInteger === true;
     const baseNonNeg = base.isNonNegative === true;
 
-    if (baseNonNeg || outerIsInteger) {
+    // Not for a matrix `a` with a non-integer inner exponent (`e^A`, `A^x`,
+    // `√A`): that power is element-wise, but an integer power of a matrix
+    // is the matrix power (see the `MatrixPower` rewrite below), so
+    // `(e^A)^2` is `e^A·e^A` (matrix product), not `e^{2A}`. The node falls
+    // through to the `MatrixPower` rewrite.
+    const elementWiseMatrix = aPow.isInteger !== true && isMatrixTyped(a);
+
+    if ((baseNonNeg || outerIsInteger) && !elementWiseMatrix) {
       return ce._fn('Power', [
         base,
         ce.expr(['Multiply', aPow, b], {

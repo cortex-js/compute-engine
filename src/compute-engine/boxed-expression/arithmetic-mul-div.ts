@@ -52,6 +52,7 @@ import {
   typeMayCarryQuotientShape,
   isTupleWithListCoordinate,
   isAbsentScalarTerm,
+  isCollectionShaped,
 } from '../collection-utils.js';
 import { NumericValue } from '../numeric-value/types.js';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
@@ -491,6 +492,19 @@ export class Product {
 
     const exponent: Rational = exp ?? [1, 1];
 
+    // A matrix (or another collection) raised to a non-integer power is
+    // element-wise, but `Multiply` of two matrices is the matrix product. So
+    // the base and the exponent of `√A`, `∛A` or `A^{1/3}` are not extracted
+    // for a collection `A`: `√A·√A` is not `A`. The term is tallied as it is,
+    // and `√A·√A` becomes `(√A)^2`, the matrix power. An integer power of a
+    // matrix is the matrix power, and is extracted as for a scalar.
+    const collectionShaped =
+      isFunction(term) &&
+      (term.operator === 'Power' ||
+        term.operator === 'Sqrt' ||
+        term.operator === 'Root') &&
+      isCollectionShaped(term);
+
     // If this is a power expression, extract the exponent
     if (isFunction(term, 'Power')) {
       // Term is `Power(op1, op2)`
@@ -516,7 +530,11 @@ export class Product {
           (expIsInteger && numeratorIsOdd) ||
           term.op1.isNonNegative === true;
 
-        if (foldIsSound && (!baseIsNumeric || expIsInteger)) {
+        if (
+          foldIsSound &&
+          (!baseIsNumeric || expIsInteger) &&
+          (!collectionShaped || expIsInteger)
+        ) {
           this.mul(term.op1, rationalMul(exponent, r));
           return;
         }
@@ -529,7 +547,7 @@ export class Product {
       // Don't extract non-integer exponents for numeric bases
       // This keeps √2 symbolic instead of evaluating to 1.414...
       const baseIsNumeric = isNumber(term.op1);
-      if (!baseIsNumeric) {
+      if (!baseIsNumeric && !collectionShaped) {
         this.mul(term.op1, rationalMul(exponent, [1, 2]));
         return;
       }
@@ -543,7 +561,7 @@ export class Product {
         // Don't extract non-integer exponents for numeric bases
         // This keeps ∛2 symbolic instead of evaluating to 1.259...
         const baseIsNumeric = isNumber(term.op1);
-        if (!baseIsNumeric) {
+        if (!baseIsNumeric && !collectionShaped) {
           this.mul(term.op1, rationalMul(exponent, inverse(r)));
           return;
         }
@@ -583,9 +601,23 @@ export class Product {
       tallyExp = rationalMul(exponent, norm.exp);
     }
 
-    // Look for the base, and add the exponent if already in the list of terms
+    // Look for the base, and add the exponent if already in the list of terms.
+    // The matrix product is not commutative, so a matrix (or another
+    // collection) is not merged with an earlier term of the same base when a
+    // different collection-shaped term is between them: `A·B·A` is not
+    // `A^2·B`, and `√A·B·√A` is not `(√A)^2·B`. Scalar terms commute with all
+    // terms, so they do not prevent the merge.
+    const tallyShaped = isCollectionShaped(tallyTerm);
     let found = false;
-    for (const x of this.terms) {
+    for (const [i, x] of this.terms.entries()) {
+      if (
+        tallyShaped &&
+        x.term.isSame(tallyTerm) &&
+        this.terms
+          .slice(i + 1)
+          .some((y) => !y.term.isSame(tallyTerm) && isCollectionShaped(y.term))
+      )
+        continue;
       if (x.term.isSame(tallyTerm)) {
         x.exponent = rationalAdd(x.exponent, tallyExp);
         found = true;

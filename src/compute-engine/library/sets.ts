@@ -26,6 +26,7 @@ import {
   sym,
 } from '../boxed-expression/type-guards.js';
 import { checkArity, validateArguments } from '../boxed-expression/validate.js';
+import { asBigint } from '../boxed-expression/numerics.js';
 import {
   residueClassOf,
   residueExpression,
@@ -77,6 +78,7 @@ import {
   cantorEnumeratePositiveRationals,
   cantorEnumerateRationals,
 } from '../numerics/numeric.js';
+import { smallCount } from '../boxed-expression/collection-count.js';
 
 function typeIntersection(a: Type, b: Type): Type {
   return reduceType({ kind: 'intersection', types: [a, b] });
@@ -368,16 +370,30 @@ function approxLiteralValue(
 }
 
 /**
- * `n` of `QuotientRing(Integers, n)` for a positive integer literal `n`
- * (a count must be a safe integer), else `undefined`.
+ * `n` of `QuotientRing(Integers, n)` for a positive integer literal `n`,
+ * else `undefined`. An exact `n` can have any size. An inexact `n` (`5.0`)
+ * must be a safe integer: a larger float does not hold one integer exactly.
+ *
+ * The modulus is a `bigint` because it is also the count of the ring, and a
+ * count larger than `Number.MAX_SAFE_INTEGER` is reported exactly as a
+ * `bigint` (`expr.count` converts a smaller one to a `number`).
  */
-function integerQuotientModulus(expr: Expression): number | undefined {
+function integerQuotientModulus(expr: Expression): bigint | undefined {
   if (!isFunction(expr, 'QuotientRing')) return undefined;
   if (sym(expr.op1) !== 'Integers') return undefined;
   const n = expr.op2;
   if (!isNumber(n) || !n.isInteger) return undefined;
-  const value = n.re;
-  return Number.isSafeInteger(value) && value >= 1 ? value : undefined;
+  if (!n.isExact && !Number.isSafeInteger(n.re)) return undefined;
+  const value = asBigint(n);
+  return value !== null && value >= 1n ? value : undefined;
+}
+
+/**
+ * True when ℤ/nℤ has more elements than a walk can visit: its count `n` is
+ * not a safe integer.
+ */
+function isUnwalkableModulus(n: bigint): boolean {
+  return n > BigInt(Number.MAX_SAFE_INTEGER);
 }
 
 /**
@@ -1248,24 +1264,32 @@ export const SETS_LIBRARY: SymbolDefinitions = {
         integerQuotientModulus(expr) === undefined ? undefined : false,
       isFinite: (expr) =>
         integerQuotientModulus(expr) === undefined ? undefined : true,
-      isEnumerable: (expr) =>
-        integerQuotientModulus(expr) === undefined ? undefined : true,
+      // A ring whose count is not a safe integer (more than 2^53 elements)
+      // is not enumerable, and its iterator yields nothing: a walk of it
+      // cannot end. A consumer that walks a finite collection to its end
+      // (`Sum`, `Max`, `Mean`) then reads the empty walk of a collection that
+      // is not enumerable as a decline, and stays unevaluated, as it does for
+      // `Linspace(a, 1, 3)` with a symbolic `a`. Without this, the consumer
+      // would not return. The count, the emptiness, the finiteness and the
+      // membership do not walk the ring, so they still answer.
+      isEnumerable: (expr) => {
+        const n = integerQuotientModulus(expr);
+        if (n === undefined) return undefined;
+        return !isUnwalkableModulus(n);
+      },
       // `ResidueClass(0, n)` … `ResidueClass(n - 1, n)`, produced lazily: a
       // modulus of 10^9 is counted without building its classes.
       iterator: (expr) => {
         const n = integerQuotientModulus(expr);
-        if (n === undefined) return undefined;
+        if (n === undefined || isUnwalkableModulus(n)) return undefined;
         const ce = expr.engine;
-        let k = 0;
+        let k = 0n;
         return {
           next: () =>
             k >= n
               ? { value: undefined, done: true as const }
               : {
-                  value: residueExpression(ce, {
-                    k: BigInt(k++),
-                    n: BigInt(n),
-                  }),
+                  value: residueExpression(ce, { k: k++, n }),
                   done: false as const,
                 },
         };
@@ -1281,7 +1305,7 @@ export const SETS_LIBRARY: SymbolDefinitions = {
         if (n === undefined) return undefined;
         if (x.operator === 'ResidueClass') {
           const r = residueOf(x);
-          return r === undefined ? undefined : r.n === BigInt(n);
+          return r === undefined ? undefined : r.n === n;
         }
         return cannotBeResidueClass(x) ? false : undefined;
       },
@@ -1682,7 +1706,9 @@ function union(
   if (!xs.every((op) => isWalkableFiniteCollection(op)))
     return ce._fn('Union', xs);
 
-  const totalSize = xs.reduce((acc, op) => acc + (op.count ?? 0), 0);
+  // A count that is not a safe integer (a `bigint`) is far above the limit.
+  if (xs.some((op) => typeof op.count === 'bigint')) return ce._fn('Union', xs);
+  const totalSize = xs.reduce((acc, op) => acc + (smallCount(op) ?? 0), 0);
   if (totalSize > MAX_SIZE_EAGER_COLLECTION) return ce._fn('Union', xs);
 
   // Keep only unique elements
@@ -2621,7 +2647,8 @@ function smallestWalkableOperand(
   ops: ReadonlyArray<Expression>
 ): Expression | undefined {
   let result: Expression | undefined;
-  let size = Infinity;
+  // A `bigint` count compares correctly with a `number`.
+  let size: number | bigint = Infinity;
   for (const op of ops) {
     if (!isWalkableFiniteCollection(op)) continue;
     const n = op.count ?? Infinity;

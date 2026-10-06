@@ -4397,9 +4397,9 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       return compile(coll.engine._fn('At', [coll, coll.engine.number(-1)]));
     return `_SYS.at(${elementsArg('Last', coll, compile)}, -1)`;
   },
-  // All-but-first / all-but-first-n / first-n. `Take`/`Drop` clamp the count to
-  // ≥ 0 so a negative count matches the interpreter (`Take(xs, -2) = []`,
-  // `Drop(xs, -2) = xs`), and JS `slice` already clamps a count past the end.
+  // All-but-first / all-but-first-n / first-n. A negative `Take`/`Drop` count
+  // counts from the end, as in the interpreter (`Take(xs, -2)` is the last two
+  // elements, `Drop(xs, -2)` is `xs` without them); see `takeDropSlice`.
   Rest: (args, compile) =>
     joinIfString(
       args[0],
@@ -4422,22 +4422,25 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
           `Could not compile \`Take\`: a non-finite count (\`${args[1].toString()}\`) cannot bound ` +
             `an infinite collection.`
         );
+      // A negative count takes the LAST elements, and an infinite collection
+      // has no last elements: the interpreter leaves `Take(1..∞, -2)`
+      // unevaluated. A constant negative count fails closed here; a negative
+      // count known only at run time throws in `takeIter`.
+      if (isNegativeConstantCount(args[1]))
+        throw new Error(
+          `Could not compile \`Take\`: a negative count (\`${args[1].toString()}\`) counts from ` +
+            `the end, and an infinite collection has no end.`
+        );
       return `_SYS.takeIter(${emitLazyStream(args[0]!, compile)}, ${compileRealOperand(args[1], compile)})`;
     }
     const coll = elementsArg('Take', args[0], compile);
-    return joinIfString(
-      args[0],
-      `(${coll}).slice(0, ${clampedSliceCount(args[1], compile)})`
-    );
+    return joinIfString(args[0], takeDropSlice('Take', coll, args[1], compile));
   },
   Drop: (args, compile) => {
     const coll = elementsArg('Drop', args[0], compile);
     if (args[1] == null)
       throw new Error('Could not compile `Drop`: missing count');
-    return joinIfString(
-      args[0],
-      `(${coll}).slice(${clampedSliceCount(args[1], compile)})`
-    );
+    return joinIfString(args[0], takeDropSlice('Drop', coll, args[1], compile));
   },
   // Reverse and (ascending, numeric) Sort — copy first so the source array is
   // not mutated. A custom `Sort` comparator is not lowered (fails closed).
@@ -10013,21 +10016,54 @@ function sliceCount(
 }
 
 /**
- * The `Take`/`Drop` count as a `slice` argument: non-negative and rounded (the
- * interpreter's `toInteger` count contract — `Take([…], 2.5)` keeps 3
- * elements). A compile-time-constant count is normalized NOW and emitted as a
- * bare literal (`Take(xs, 10)` → `.slice(0, 10)`, a negative count → `0`);
- * only a runtime count pays the emitted `Math.max(0, Math.round(…))` guard. A
- * non-finite literal (`NaN`, `±∞`) is not a constant to `tryGetConstant` and
- * stays on the runtime-guard path, preserving its existing semantics.
+ * Whether a `Take`/`Drop` count is a compile-time constant that rounds to a
+ * negative integer (the interpreter rounds counts with `Math.round`, so
+ * `-0.4` is a zero count, not a negative one).
  */
-function clampedSliceCount(
+function isNegativeConstantCount(count: Expression): boolean {
+  const n = tryGetConstant(count);
+  return n !== undefined && Math.round(n) < 0;
+}
+
+/**
+ * The `slice` call for `Take(coll, count)` or `Drop(coll, count)` over the
+ * compiled array `coll`. The count is rounded (the interpreter's `toInteger`
+ * count contract — `Take([…], 2.5)` keeps 3 elements). A negative count
+ * counts from the end, and a count past the length is clamped, as in the
+ * interpreter:
+ *
+ * - `Take`: a count `n ≥ 0` is `slice(0, n)`, a count `n < 0` is `slice(n)`
+ *   (the last `|n|` elements; `slice` clamps `|n|` past the length to the
+ *   whole array). A bare `slice(n)` is not enough: `slice(0)` is the whole
+ *   array, where `Take(xs, 0)` is empty.
+ * - `Drop`: a count `n ≥ 0` is `slice(n)`, a count `n < 0` is `slice(0, n)`
+ *   (all but the last `|n|` elements; empty when `|n|` is past the length).
+ *
+ * A compile-time-constant count is normalized NOW and the branch is chosen at
+ * compile time (`Take(xs, 10)` → `.slice(0, 10)`, `Take(xs, -2)` →
+ * `.slice(-2)`). A runtime count is evaluated once and the branch is chosen
+ * at run time. A non-finite literal (`NaN`, `±∞`) is not a constant to
+ * `tryGetConstant` and takes the run-time branch: a `NaN` count compares
+ * false with 0, so `Take` answers `[]` and `Drop` the whole array.
+ */
+function takeDropSlice(
+  op: 'Take' | 'Drop',
+  coll: string,
   count: Expression,
   compile: (expr: Expression) => string
 ): string {
   const n = tryGetConstant(count);
-  if (n !== undefined) return `${Math.max(0, Math.round(n))}`;
-  return `Math.max(0, ${sliceCount(count, compile)})`;
+  if (n !== undefined) {
+    const k = Math.round(n);
+    if (op === 'Take')
+      return k < 0 ? `(${coll}).slice(${k})` : `(${coll}).slice(0, ${k})`;
+    return k < 0 ? `(${coll}).slice(0, ${k})` : `(${coll}).slice(${k})`;
+  }
+  const body =
+    op === 'Take'
+      ? '_n < 0 ? _a.slice(_n) : _a.slice(0, _n)'
+      : '_n < 0 ? _a.slice(0, _n) : _a.slice(_n)';
+  return `((_a, _n) => ${body})(${coll}, ${sliceCount(count, compile)})`;
 }
 
 /**
@@ -10085,10 +10121,15 @@ function isLazyStream(expr: Expression | undefined): boolean {
   // `library/collections.ts`); excluding it here makes the whole pipeline
   // fail closed to the interpreter instead of compiling to a stream that
   // silently yields nothing.
+  // A constant NEGATIVE drop count drops the last elements, which an infinite
+  // source does not have: the interpreter leaves `Drop(1..∞, -2)`
+  // unevaluated, so the pipeline fails closed here too. A negative count
+  // known only at run time throws in `dropIter`.
   if (op === 'Drop')
     return (
       expr.nops === 2 &&
       !isNonFiniteBound(expr.ops[1]) &&
+      !isNegativeConstantCount(expr.ops[1]) &&
       isLazyStream(expr.ops[0])
     );
   if (op === 'Rest') return expr.nops === 1 && isLazyStream(expr.ops[0]);

@@ -33,6 +33,7 @@ import {
   hypergeometric2F1Complex,
   polygammaComplex,
   POLYGAMMA_MAX_ORDER,
+  POLYLOG_SERIES_MIN_ORDER,
 } from './numeric-complex.js';
 import {
   bernoulliPolynomialInteger,
@@ -2791,11 +2792,19 @@ function lerchPhiSeries(
     if (power.isNaN()) return undefined; // w < 0, non-integer s: complex
     if (!power.isFinite()) return undefined; // w = 0, s > 0: a pole
     const term = rnd(zPow.mul(power));
-    sum = rnd(sum.add(term));
+    const termLog = term.isZero() ? -Infinity : bigLog10Abs(term);
+    // `BigDecimal.add` aligns the two numbers exactly, and its cost grows
+    // with the difference of their exponents: at a large order the second
+    // term is tiny (about 10^−752575 times the first for Li_{2500000}(0.3)),
+    // and adding it takes seconds. A term below 10^(−2·working) of the sum
+    // is not added. At most `LERCH_BIG_MAX_TERMS` terms are skipped, so
+    // together they change the sum by less than 10^(−1.5·working) of it,
+    // far below its last digit.
+    if (sum.isZero() || termLog >= bigLog10Abs(sum) - 2 * working)
+      sum = rnd(sum.add(term));
     // Past k = 0, a zero term means zᵏ = 0 (z = 0): every later term is
     // zero too, so the sum is complete.
     if (term.isZero() && k > 0) return { sum, largest };
-    const termLog = term.isZero() ? -Infinity : bigLog10Abs(term);
     largest = Math.max(largest, termLog);
 
     // The tail bound is compared on base-10 exponents, never on doubles: a
@@ -3443,11 +3452,13 @@ function polylogLnExpReal(n: number, z: number): number {
  * Polylogarithm Liₙ(z) = Σ_{k≥1} zᵏ/kⁿ for integer order n ≥ 2 and real z.
  *
  * Returns a real value on the real-valued domain z ≤ 1 (fast paths for
- * z ∈ [−1/2, 1]); returns NaN for z > 1 (genuinely complex — on the branch
- * cut), for real z outside the fast-path range (z < −1/2, where ln z is
- * complex), and for non-integer/order < 2. In every NaN case the caller
- * (`applyN`) cascades to `polylogComplex`, which yields the correct value
- * (real, with a negligible imaginary part, for real z < 1).
+ * z ∈ [−1/2, 1], and for z ∈ [−1, 1] from the order
+ * `POLYLOG_SERIES_MIN_ORDER` on); returns NaN for z > 1 (genuinely
+ * complex — on the branch cut), for real z outside the fast-path range
+ * (z < −1/2, where ln z is complex), and for non-integer/order < 2. In
+ * every NaN case the caller (`applyN`) cascades to `polylogComplex`, which
+ * yields the correct value (real, with a negligible imaginary part, for
+ * real z < 1).
  */
 export function polylog(n: number, z: number): number {
   if (!Number.isInteger(n) || n < 2) return NaN;
@@ -3455,6 +3466,8 @@ export function polylog(n: number, z: number): number {
   if (z === 0) return 0;
   if (z === 1) return zeta(n);
   if (z >= -0.5 && z <= 0.5) return polylogSeriesReal(n, z);
+  if (n >= POLYLOG_SERIES_MIN_ORDER && z >= -1 && z < 1)
+    return polylogSeriesReal(n, z);
   if (z > 0.5 && z < 1) return polylogLnExpReal(n, z);
   return NaN; // |z| > 1 or z < −1/2 → complex kernel
 }

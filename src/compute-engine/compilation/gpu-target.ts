@@ -88,6 +88,7 @@ import {
 } from './fixed-width-unroll.js';
 import { foldSeed } from '../numerics/random.js';
 import { rangeCount } from '../numerics/range-count.js';
+import { smallCount } from '../boxed-expression/collection-count.js';
 
 /**
  * GPU shader operators shared by GLSL and WGSL.
@@ -8831,7 +8832,7 @@ function gpuRandomDomainDraw(
   }
 
   if (isFunction(domain, 'Range')) {
-    const n = domain.count;
+    const n = smallCount(domain);
     if (n === undefined || !Number.isFinite(n))
       throw new Error(
         'Could not compile `Random(Range(…))`: the GPU target requires a Range with constant, ' +

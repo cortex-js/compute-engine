@@ -64,6 +64,7 @@ import {
 import { extractIntervalBounds } from './inequality-bounds.js';
 import { labelFor } from './explain-labels.js';
 import { latexSerializeOptions } from './latex-serialize-options.js';
+import { isFiniteCount } from './collection-count.js';
 
 // Lazy reference to break circular dependency:
 // serialize → numerics → utils → abstract-boxed-expression
@@ -1355,7 +1356,7 @@ export abstract class _BoxedExpression implements Expression {
   // type, because an application's collection type can be an artifact of the
   // vacuous lift rather than a promise, and a base class that answered would
   // make that an easily-missed opt-OUT instead of an explicit opt-in.
-  get count(): number | undefined {
+  get count(): number | bigint | undefined {
     return undefined;
   }
 
@@ -1381,7 +1382,7 @@ export abstract class _BoxedExpression implements Expression {
     if (!this.isCollection) return undefined;
     const count = this.count;
     if (count === undefined) return undefined;
-    return Number.isFinite(count);
+    return isFiniteCount(count);
   }
 
   // Base contract: a self-contained collection (a dictionary, a string, a

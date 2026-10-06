@@ -42,6 +42,10 @@ import {
   isWalkableFiniteCollection,
 } from '../collection-utils.js';
 import { innerRun, resolveTextSource } from './collections.js';
+import {
+  isFiniteCount,
+  normalizeCount,
+} from '../boxed-expression/collection-count.js';
 
 /**
  * Above this many decimal digits, an exact combinatorial result (Fibonacci,
@@ -773,7 +777,24 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
           if (!isFunction(expr)) return 0;
           const sizes = expr.ops.map((op) => op.count);
           if (sizes.includes(Infinity)) return Infinity;
-          return sizes.reduce((a, b) => a! * b!, 1);
+          // A factor whose count is not known leaves the product unknown.
+          // Without this check, the product of `undefined` was `NaN`. A
+          // count that is not an integer (`NaN` for `Range(1, NaN)`) is not
+          // known either, and `BigInt()` below would throw for it.
+          if (
+            sizes.some(
+              (s) =>
+                s === undefined || (typeof s === 'number' && !Number.isInteger(s))
+            )
+          )
+            return undefined;
+          // The product is computed with `bigint`, so it is exact when it is
+          // not a safe integer. `expr.count` converts a safe result to a
+          // `number`.
+          return (sizes as (number | bigint)[]).reduce<bigint>(
+            (a, b) => a * BigInt(b),
+            1n
+          );
         },
         iterator: cartesianProductIterator,
       },
@@ -798,7 +819,30 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
           const xs = expr.ops[0];
           if (xs.isEmptyCollection) return 1; // Power set of empty set is {{}}
           if (xs.isFiniteCollection === false) return Infinity;
-          return 2 ** xs.count!;
+          const n = xs.count;
+          // An unknown base count leaves the count unknown. Without this
+          // check, `2 ** undefined` was `NaN`.
+          if (n === undefined) return undefined;
+          // `2^n` is not a safe integer for n ≥ 53: it is returned as an
+          // exact `bigint`, however large, so the count of this finite
+          // collection is never `Infinity`. Past `MAX_COUNT_BITS`
+          // (and for a base count that is itself a `bigint`) the exact value
+          // is too large to build, and the count is not known.
+          if (typeof n === 'bigint' || n + 1 > MAX_COUNT_BITS) return undefined;
+          if (n >= 53) return 1n << BigInt(n);
+          return 2 ** n;
+        },
+        // Finiteness comes from the BASE collection, not from `count`: the
+        // count of a finite power set can be unknown (too large to compute,
+        // see `MAX_COUNT_BITS`), and the default reading of an
+        // unknown count would not say the power set is finite. The power set
+        // of a finite set is finite, and the power set of an infinite set is
+        // infinite (the `count` handler answers `Infinity` for it).
+        isFinite: (expr) => {
+          if (!isFunction(expr)) return undefined;
+          const xs = expr.ops[0];
+          if (xs.isEmptyCollection) return true;
+          return xs.isFiniteCollection;
         },
         iterator: powerSetIterator,
       },
@@ -1046,30 +1090,75 @@ function* powerSetIterator(
   }
 }
 
-// NOTE on precision: `count` returns a JS `number`, so values past 2^53 are not
-// exact and values past ~1.8e308 round to `Infinity` — the same ceiling every
-// collection `count` handler has (cf. `PowerSet`'s `2 ** n`). The products below
-// are accumulated in `bigint` so everything that DOES fit is exact and there is
-// no float rounding; only the final `Number(...)` conversion is lossy. The
-// `isFinite` handlers report finiteness from the BASE collection, not from
-// `count`, so a finite-but-huge result that rounds to `Infinity` is never
-// mistaken for an infinite collection.
+// NOTE on precision: the products below are accumulated in `bigint`, so they
+// are exact. A count that is not a safe integer is returned as a `bigint`
+// (`normalizeCount()` converts a safe one to a `number`), however large it
+// is: the count of a finite collection is never `Infinity`.
+//
+// Two limits apply, and past either one the count is `undefined` (not
+// known): the expression stays unevaluated. A product of more than
+// `MAX_COUNT_PRODUCT_STEPS` factors is not computed, and a count larger than
+// `MAX_COUNT_BITS` bits is not computed.
+// The cost of each step grows with the size of the running product, so the
+// total cost grows faster than the number of steps: 10,000 steps (10000!,
+// about 36,000 digits) take about 20 ms, and 100,000 steps (about 456,000
+// digits) take about 3.5 s. A `count` read must stay cheap, because many
+// facets read it (emptiness, indexing bounds, broadcast length checks).
+// The `isFinite` handlers report finiteness from the BASE collection, not
+// from `count`, so a finite collection with an unknown count is still finite.
+const MAX_COUNT_PRODUCT_STEPS = 10_000;
 
-// Once a running count exceeds the largest finite JS number, `Number(...)` can
-// only ever yield `Infinity`, so the products below stop early at this bigint
-// threshold rather than grinding through (potentially billions of) remaining
-// terms for an astronomically large — but finite — collection.
-const MAX_FINITE_COUNT = BigInt(Number.MAX_VALUE);
+// The largest size, in bits, of a count that `Permutations`, `Combinations`
+// and `PowerSet` compute. The step limit above does not limit the size: the
+// factors can be very large numbers themselves, and
+// `Count(Permutations(Permutations(Range(1, 10000)), 10000))` multiplies
+// 10,000 factors of about 118,000 bits each, a result of about 356 million
+// digits. Each count function therefore estimates the size of the result
+// from its factors (the sum of their base-2 logarithms) before it multiplies.
+// At the limit, a product of 10,000 factors takes about 20 ms and the
+// conversion of the result to a decimal string (about 60,000 digits) takes
+// about 3 ms; at 1,000,000 bits these were about 140 ms and 28 ms. The limit
+// admits `10000!` (about 118,000 bits) and `2^n` for `n` below 200,000.
+const MAX_COUNT_BITS = 200_000;
+
+/**
+ * The base-2 logarithm of a positive `bigint`, accurate to about 15
+ * significant digits.
+ */
+function log2Bigint(n: bigint): number {
+  const bits = n.toString(16).length * 4;
+  // Keep the 53 most significant bits (or fewer) so that `Number()` is
+  // exact enough, and add back the bits that the shift removed.
+  const shift = Math.max(0, bits - 53);
+  return Math.log2(Number(n >> BigInt(shift))) + shift;
+}
+
+/**
+ * The base-2 logarithm of the falling factorial `n·(n − 1)···(n − k + 1)`,
+ * that is, the size in bits of that product. `k` is at most `n` and at most
+ * `MAX_COUNT_PRODUCT_STEPS`, so the loop is short.
+ */
+function log2FallingFactorial(n: number | bigint, k: number): number {
+  if (typeof n === 'bigint') {
+    // `n` is larger than 2^53 and `k` is at most 10,000, so every factor has
+    // the same logarithm as `n` to about 12 significant digits.
+    return k * log2Bigint(n);
+  }
+  let bits = 0;
+  for (let j = 0; j < k; j++) bits += Math.log2(n - j);
+  return bits;
+}
 
 /**
  * The number of length-`k` permutations of an `n`-element collection,
  * `P(n, k) = n·(n-1)···(n-k+1)`, WITHOUT enumerating them. `k` defaults to the
  * collection size. Returns `1` for `k = 0` (the empty arrangement); `undefined`
- * when the size is unknown, `k` is out of range, or the base is infinite with
- * `k > 0` (which the iterator cannot enumerate); `Infinity` only when a finite
- * base's count exceeds the largest finite JS number.
+ * when the size is unknown, `k` is out of range, the base is infinite with
+ * `k > 0` (which the iterator cannot enumerate), the product has more than
+ * `MAX_COUNT_PRODUCT_STEPS` factors, or the result has more than
+ * `MAX_COUNT_BITS` bits.
  */
-function permutationsCount(expr: Expression): number | undefined {
+function permutationsCount(expr: Expression): number | bigint | undefined {
   if (!isFunction(expr)) return undefined;
   const n = expr.op1.count;
   if (n === undefined) return undefined;
@@ -1077,47 +1166,60 @@ function permutationsCount(expr: Expression): number | undefined {
   const k = kExpr ? toIntegerOperand(kExpr) : n;
   // Validate `k` BEFORE the infinite short-circuit: an out-of-range `k` is an
   // invalid expression, not an infinite collection.
-  if (k === null || k < 0 || (Number.isFinite(n) && k > n)) return undefined;
+  if (k === null || k < 0 || (isFiniteCount(n) && k > n)) return undefined;
   if (k === 0) return 1; // P(n, 0) = 1
   // A valid `k > 0` over an infinite base has infinitely many arrangements, but
   // the iterator can't enumerate them (it can't materialize the source): report
   // `undefined` (unsupported) rather than a count no consumer can back up.
-  if (!Number.isFinite(n)) return undefined;
+  if (!isFiniteCount(n)) return undefined;
+  // Too many factors to multiply in a `count` read (see
+  // `MAX_COUNT_PRODUCT_STEPS`): the count is not known.
+  if (k > MAX_COUNT_PRODUCT_STEPS) return undefined;
+  // A result too large to build in a `count` read (see `MAX_COUNT_BITS`).
+  if (log2FallingFactorial(n, Number(k)) > MAX_COUNT_BITS) return undefined;
   let p = 1n;
   const bn = BigInt(n);
-  for (let j = 0n; j < BigInt(k); j++) {
-    p *= bn - j;
-    if (p > MAX_FINITE_COUNT) return Infinity;
-  }
-  return Number(p);
+  for (let j = 0n; j < BigInt(k); j++) p *= bn - j;
+  return normalizeCount(p);
 }
 
 /**
  * The number of `k`-element combinations of an `n`-element collection,
  * `C(n, k) = P(n, k) / k!`, WITHOUT enumerating them. Returns `1` for `k = 0`;
- * `undefined` when the size is unknown, `k` is out of range, or the base is
- * infinite with `k > 0`; `Infinity` only when a finite base's count exceeds the
- * largest finite JS number.
+ * `undefined` when the size is unknown, `k` is out of range, the base is
+ * infinite with `k > 0`, the product has more than
+ * `MAX_COUNT_PRODUCT_STEPS` factors, or the result has more than
+ * `MAX_COUNT_BITS` bits.
  */
-function combinationsCount(expr: Expression): number | undefined {
+function combinationsCount(expr: Expression): number | bigint | undefined {
   if (!isFunction(expr)) return undefined;
   const n = expr.op1.count;
   if (n === undefined) return undefined;
   const k = toIntegerOperand(expr.ops[1]);
-  if (k === null || k < 0 || (Number.isFinite(n) && k > n)) return undefined;
+  if (k === null || k < 0 || (isFiniteCount(n) && k > n)) return undefined;
   if (k === 0) return 1; // C(n, 0) = 1
-  if (!Number.isFinite(n)) return undefined; // see `permutationsCount`
+  if (!isFiniteCount(n)) return undefined; // see `permutationsCount`
   // Symmetry C(n,k) = C(n,n-k) keeps the running product smallest. Each step
   // `c·(n-j)/(j+1)` is an exact integer division because the product of `j+1`
   // consecutive integers is divisible by `(j+1)!`.
   const bn = BigInt(n);
-  const kk = BigInt(Math.min(k, n - k));
+  const bk = BigInt(k);
+  const kk = bk < bn - bk ? bk : bn - bk;
+  // Too many factors to multiply in a `count` read (see
+  // `MAX_COUNT_PRODUCT_STEPS`): the count is not known.
+  if (kk > BigInt(MAX_COUNT_PRODUCT_STEPS)) return undefined;
+  // A result too large to build in a `count` read (see `MAX_COUNT_BITS`).
+  // The size of C(n, k) is the size of P(n, kk) less the size of kk!.
+  // The running product stays below the result times `n`.
+  const steps = Number(kk);
+  if (
+    log2FallingFactorial(n, steps) - log2FallingFactorial(steps, steps) >
+    MAX_COUNT_BITS
+  )
+    return undefined;
   let c = 1n;
-  for (let j = 0n; j < kk; j++) {
-    c = (c * (bn - j)) / (j + 1n);
-    if (c > MAX_FINITE_COUNT) return Infinity;
-  }
-  return Number(c);
+  for (let j = 0n; j < kk; j++) c = (c * (bn - j)) / (j + 1n);
+  return normalizeCount(c);
 }
 
 /** Stream the length-`k` permutations of a (finite) collection, in the same
@@ -1230,14 +1332,16 @@ function nthFromIterator(
   expr: Expression,
   index: number | string,
   gen: (e: Expression) => Generator<Expression, undefined, any>,
-  countFn: (e: Expression) => number | undefined
+  countFn: (e: Expression) => number | bigint | undefined
 ): Expression | undefined {
   if (typeof index !== 'number' || !Number.isInteger(index) || index === 0)
     return undefined;
   let target = index;
   if (index < 0) {
+    // A `bigint` count is not a safe integer: no `number` index reaches
+    // back from its end.
     const c = countFn(expr);
-    if (c === undefined || !Number.isFinite(c)) return undefined;
+    if (typeof c !== 'number' || !Number.isFinite(c)) return undefined;
     target = c + index + 1;
     if (target < 1) return undefined;
   }

@@ -7,6 +7,7 @@ import {
 import { isFunction, isNumber } from '../boxed-expression/type-guards.js';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
 import { isEligibleRealRewrite } from '../function-properties/index.js';
+import { isCollectionShaped } from '../collection-utils.js';
 
 /**
  * Denest a nested square root √(a + b√c) → √x + sign(b)·√y.
@@ -330,6 +331,66 @@ function rationalizeRadicalDenominator(x: Expression): Expression | undefined {
   }
 
   return result;
+}
+
+/**
+ * Return `true` if the same-base powers `factors` (each one `base^e` for an
+ * exponent `e` in `exponents`, or the bare `base` for `e = 1`) can be
+ * combined into one power: `x^a · x^b -> x^{a+b}` for a product,
+ * `x^a / x^b -> x^{a-b}` for a quotient.
+ *
+ * The base is not required to be non-zero. For a symbol `x`, the engine reads
+ * `x/x` as `1` (a generic symbol is treated as non-zero), so `x^a · x^{-a}`
+ * is `1` and `x^a / x^b` is `x^{a-b}` for an unconstrained `x`.
+ *
+ * The base must not be provably non-finite (`isFinite === false`, for example
+ * a symbol declared `signed_infinity`). At `u = +∞` and `a = 1`, the product
+ * `u^a · u^{-a}` is `∞ · 0`, which is indeterminate, not `1`. A base whose
+ * finiteness is not known (`isFinite === undefined`) is accepted, so that an
+ * ordinary symbol still combines.
+ *
+ * The combination is refused when a factor, its base or one of its exponents
+ * is collection-shaped (a matrix, a list, a tensor). `Multiply` of two
+ * matrices is the matrix product, but `Exp` of a matrix and `Power` of a
+ * matrix with a non-integer exponent are element-wise. So
+ * `Exp(A)·Exp(B) ≠ Exp(A+B)`, `√A·√A ≠ A` and `A^a·A^b ≠ A^{a+b}` for
+ * matrices. The one exception is a product where every exponent is a
+ * positive integer literal: `A·A` is `A^2`, because a positive integer power
+ * of a matrix is the matrix power, and the powers of one matrix commute.
+ * A quotient of collections is never combined.
+ *
+ * Lists are refused too, only to be cautious. For a 1-D list, `Multiply` is
+ * element-wise and the combination would be correct, but a value typed
+ * `list` can hold a matrix, and the product of two matrices is the matrix
+ * product.
+ *
+ * This function tests one group of same-base factors. It does not know the
+ * position of the factors in a product. The caller must combine
+ * collection-shaped factors only when no other non-scalar factor is between
+ * them: `A·B·A` is not `A^2·B` for matrices.
+ *
+ * An operand whose type is `unknown` (an undeclared function call `f(x)`) is
+ * not collection-shaped, and is treated as a scalar.
+ *
+ * The combination also assumes that the exponents commute (ab = ba). That is
+ * true for every scalar exponent. If an operator that gives a non-commuting
+ * scalar-typed exponent is added (quaternions), this check must also require
+ * real or complex exponents.
+ */
+export function canCombineSameBase(
+  base: Expression,
+  exponents: Expression[],
+  factors: Expression[],
+  kind: 'product' | 'quotient'
+): boolean {
+  if (base.isFinite === false) return false;
+  if (exponents.some(isCollectionShaped)) return false;
+  if (!isCollectionShaped(base) && !factors.some(isCollectionShaped))
+    return true;
+  if (kind === 'quotient') return false;
+  return exponents.every(
+    (e) => isNumber(e) && e.isInteger === true && e.isPositive === true
+  );
 }
 
 /**
@@ -1092,7 +1153,17 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
       const baseDenom = denom.op1;
       const expDenom = denom.op2;
 
-      if (baseNum?.isSame(baseDenom) && expNum && expDenom) {
+      if (
+        baseNum?.isSame(baseDenom) &&
+        expNum &&
+        expDenom &&
+        canCombineSameBase(
+          baseNum,
+          [expNum, expDenom],
+          [num, denom],
+          'quotient'
+        )
+      ) {
         // Use symbolic Add to preserve exact forms (e.g., sqrt(2) - 3)
         // instead of .sub() which evaluates numerically
         const diffExp = ce.function('Add', [expNum, expDenom.neg()]);
@@ -1104,7 +1175,11 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
     }
 
     // a^m / a -> a^{m-1}
-    if (isFunction(num, 'Power') && num.op1.isSame(denom)) {
+    if (
+      isFunction(num, 'Power') &&
+      num.op1.isSame(denom) &&
+      canCombineSameBase(denom, [num.op2], [num, denom], 'quotient')
+    ) {
       const diffExp = ce.function('Add', [num.op2, ce.NegativeOne]);
       return {
         value: denom.pow(diffExp),
@@ -1113,7 +1188,11 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
     }
 
     // a / a^n -> a^{1-n}
-    if (isFunction(denom, 'Power') && denom.op1.isSame(num)) {
+    if (
+      isFunction(denom, 'Power') &&
+      denom.op1.isSame(num) &&
+      canCombineSameBase(num, [denom.op2], [num, denom], 'quotient')
+    ) {
       const diffExp = ce.function('Add', [ce.One, denom.op2.neg()]);
       return {
         value: num.pow(diffExp),
@@ -1190,6 +1269,12 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
   // whitelist was replaced. These three had been left untagged and were
   // instead riding the gate's growth tolerance, so the same rewrite obeyed two
   // different policies depending on which implementation caught it.
+  //
+  // `canCombineSameBase()` states when same-base powers can be combined: the
+  // base is not required to be non-zero, and no factor can be a matrix or
+  // another collection (the matrix product is not element-wise). Adding the
+  // exponents also assumes that they commute (ab = ba), which is true for
+  // every scalar exponent.
   if (op === 'Multiply' && isFunction(x) && x.ops.length >= 2) {
     // x^n * x^m -> x^{n+m}
     // This is a more complex rule that needs to find matching bases
@@ -1206,52 +1291,47 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
         const baseB = b.op1;
         const expB = b.op2;
 
-        if (baseA?.isSame(baseB) && expA && expB) {
+        if (
+          baseA?.isSame(baseB) &&
+          expA &&
+          expB &&
+          canCombineSameBase(baseA, [expA, expB], [a, b], 'product')
+        ) {
           // Use symbolic Add to preserve exact forms (e.g., 1 + sqrt(2))
           // instead of .add() which evaluates numerically
           const sumExp = ce.function('Add', [expA, expB]);
-          // Only combine if base is non-zero or sum of exponents is non-negative
-          const canCombine =
-            baseA.isPositive === true ||
-            baseA.isNegative === true ||
-            sumExp.isNonNegative === true;
-
-          if (canCombine) {
-            return {
-              value: baseA.pow(sumExp),
-              because: 'x^n * x^m -> x^{n+m}',
-              purpose: 'transform',
-            };
-          }
+          return {
+            value: baseA.pow(sumExp),
+            because: 'x^n * x^m -> x^{n+m}',
+            purpose: 'transform',
+          };
         }
       }
 
       // x * x^n -> x^{n+1}
-      if (isFunction(b, 'Power') && a.isSame(b.op1)) {
-        const canCombine =
-          a.isPositive === true || a.isNegative === true || isNumber(a);
-
-        if (canCombine) {
-          return {
-            value: a.pow(ce.function('Add', [b.op2, ce.One])),
-            because: 'x * x^n -> x^{n+1}',
-            purpose: 'transform',
-          };
-        }
+      if (
+        isFunction(b, 'Power') &&
+        a.isSame(b.op1) &&
+        canCombineSameBase(a, [ce.One, b.op2], [a, b], 'product')
+      ) {
+        return {
+          value: a.pow(ce.function('Add', [b.op2, ce.One])),
+          because: 'x * x^n -> x^{n+1}',
+          purpose: 'transform',
+        };
       }
 
       // x^n * x -> x^{n+1}
-      if (isFunction(a, 'Power') && b.isSame(a.op1)) {
-        const canCombine =
-          b.isPositive === true || b.isNegative === true || isNumber(b);
-
-        if (canCombine) {
-          return {
-            value: b.pow(ce.function('Add', [a.op2, ce.One])),
-            because: 'x^n * x -> x^{n+1}',
-            purpose: 'transform',
-          };
-        }
+      if (
+        isFunction(a, 'Power') &&
+        b.isSame(a.op1) &&
+        canCombineSameBase(b, [a.op2, ce.One], [a, b], 'product')
+      ) {
+        return {
+          value: b.pow(ce.function('Add', [a.op2, ce.One])),
+          because: 'x^n * x -> x^{n+1}',
+          purpose: 'transform',
+        };
       }
     }
   }

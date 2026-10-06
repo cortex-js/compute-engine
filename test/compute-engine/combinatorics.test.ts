@@ -114,12 +114,17 @@ describe('Permutations / Combinations are lazy collections', () => {
     expect(ce.box(['Combinations', list(50), 25]).count).toBe(126410606437752);
   });
 
-  test('count on an astronomically large domain returns Infinity without hanging', () => {
-    // Early-exit once the running product exceeds MAX_VALUE — must not grind
-    // through ~1e9 bigint multiplications.
+  test('count on an astronomically large domain is unknown, not Infinity, and does not hang', () => {
+    // The count of a finite collection is never `Infinity`. A product of
+    // more factors than a count read may multiply (~1e9 here) is not
+    // computed: the count is unknown, and the collection is still finite.
     const big = ce.box(['Range', 1, 1000000000]);
-    expect(ce.box(['Permutations', big]).count).toBe(Infinity);
-    expect(ce.box(['Combinations', big, 500000000]).count).toBe(Infinity);
+    const p = ce.box(['Permutations', big]);
+    expect(p.count).toBeUndefined();
+    expect(p.isFiniteCollection).toBe(true);
+    const c = ce.box(['Combinations', big, 500000000]);
+    expect(c.count).toBeUndefined();
+    expect(c.isFiniteCollection).toBe(true);
   });
 });
 

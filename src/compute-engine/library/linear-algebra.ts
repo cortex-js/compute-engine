@@ -79,6 +79,7 @@ import {
 import { BigDecimal } from '../../big-decimal/index.js';
 import { float64HoldsNumber } from '../boxed-expression/constraint-subject.js';
 import { exactOrder } from '../boxed-expression/compare.js';
+import { smallCount } from '../boxed-expression/collection-count.js';
 
 // Total number of elements (m·n) at or below which a constant matrix
 // constructor (`IdentityMatrix`, `ZeroMatrix`, `OnesMatrix`, and the vector
@@ -162,7 +163,7 @@ function shapeOfOperand(
     return shape;
   if (xs.isIndexedCollection !== true) return undefined;
   if (xs.isFiniteCollection !== true) return undefined;
-  const count = xs.count;
+  const count = smallCount(xs);
   if (count === undefined || !Number.isFinite(count)) return undefined;
   const elementType = collectionElementType(xs.type.type);
   if (elementType !== undefined && isSubtype(elementType, 'number'))

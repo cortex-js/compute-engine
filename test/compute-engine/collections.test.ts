@@ -5733,26 +5733,30 @@ describe('COLLECTION-LITERAL SPREAD (box route)', () => {
 });
 
 describe("Drop's count facet agrees with its own walk", () => {
-  // A NEGATIVE count drops nothing, which is what the walk does — but the
-  // count clamped its RESULT rather than the drop count, so `count - (-5)`
+  // The count facet must agree with the walk. Once, a negative count was
+  // clamped on the RESULT rather than on the drop count, so `count - (-5)`
   // came out LARGER than the source: `Drop(1..10, -5)` reported 15 elements
-  // for a walk that yields 10. The facet is what indexing bounds, emptiness
+  // for a walk that yielded 10. The facet is what indexing bounds, emptiness
   // and the materialization gates read, so a disagreement is not confined to
-  // a wrong `Length`.
-  test.each([-5, -1, 0, 2, 20])('Drop(1..10, %p)', (n) => {
+  // a wrong `Length`. A negative count now counts from the end, and the
+  // agreement is checked on the lazy form and on the materialized result.
+  test.each([-20, -5, -1, 0, 2, 20])('Drop(1..10, %p)', (n) => {
     const ce2 = new ComputeEngine();
-    const dropped = ce2.box(['Drop', ['Range', 1, 10], n]).evaluate();
+    const lazy = ce2.box(['Drop', ['Range', 1, 10], n]);
+    expect(lazy.count).toBe([...lazy.each()].length);
+    const dropped = lazy.evaluate();
     expect(dropped.count).toBe([...dropped.each()].length);
+    expect(lazy.count).toBe(dropped.count);
   });
 
-  test('a negative count drops nothing', () => {
+  test('a negative count drops the last elements', () => {
     const ce2 = new ComputeEngine();
     expect(
       ce2
         .box(['Length', ['Drop', ['Range', 1, 10], -5]])
         .evaluate()
         .toString()
-    ).toBe('10');
+    ).toBe('5');
   });
 });
 

@@ -772,6 +772,12 @@ const COLLECTION_CASES: Array<{ name: string; expr: any; expected: any }> = (() 
     { name: 'most', expr: ['Most', L], expected: [1, 5, 2, 4] },
     { name: 'take', expr: ['Take', L, 2], expected: [1, 5] },
     { name: 'drop', expr: ['Drop', L, 2], expected: [2, 4, 3] },
+    // A negative count counts from the end; a count past the length is clamped.
+    { name: 'take_neg', expr: ['Take', L, -2], expected: [4, 3] },
+    { name: 'drop_neg', expr: ['Drop', L, -2], expected: [1, 5, 2] },
+    { name: 'take_neg_past', expr: ['Take', L, -9], expected: [1, 5, 2, 4, 3] },
+    { name: 'drop_neg_past', expr: ['Drop', L, -9], expected: [] },
+    { name: 'take_zero', expr: ['Take', L, 0], expected: [] },
     { name: 'reverse', expr: ['Reverse', L], expected: [3, 4, 2, 5, 1] },
     { name: 'sort', expr: ['Sort', L], expected: [1, 2, 3, 4, 5] },
     { name: 'ordering', expr: ['Ordering', ['List', 30, 10, 20]], expected: [2, 3, 1] },

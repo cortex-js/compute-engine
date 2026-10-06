@@ -2,6 +2,7 @@ import { Complex } from 'complex-esm';
 import {
   gamma,
   gammaErrorWeight,
+  gammaln,
   gaussLegendreRule,
   hurwitzZetaComplexWithError,
   incompleteGammaUpperComplexWithError,
@@ -30,7 +31,10 @@ import { hurwitzZeta, zeta } from './special-functions.js';
 // still converges there, but only conditionally, and stalls on the |z| = 1
 // rim — Φ(−1,1,1) = ln 2 needs on the order of 10^17 terms for direct
 // summation to reach even single-digit accuracy, where the transform
-// reaches double precision in a few dozen. |z| ≥ 1 (off z = 1) needs
+// reaches double precision in a few dozen. Past the disk, for Re(s) > 0
+// and z off the cut, the first terms of the series can give the value with
+// a proven bound of the rest (`lerchSeriesOutsideDisk`, at a large order).
+// Otherwise |z| ≥ 1 (off z = 1) needs
 // analytic continuation past the disk of convergence, by the Hermite-type
 // integral representation valid for Re(a) > 0 (`lerchContinuedComplex`).
 // Where its terms cancel too far (mostly a large |z|), a real a uses the
@@ -45,6 +49,17 @@ const C_ZERO = new Complex(0, 0);
 
 const C_ONE = new Complex(1, 0);
 const C_NAN = new Complex(NaN, NaN);
+
+/**
+ * |z|, also for a modulus below 1e−154 or above 1e154. `Complex.abs()`
+ * squares the parts when both are below 3000, so it returns 0 for
+ * |z| < 1.5e−154: at a large order the terms of Φ and their factors are
+ * that small (Γ(−149, x) = 3.2e−260 − 7.5e−260i at z = 7e7 − 7e7i, s = 150,
+ * a = 10), and the error estimates then dropped them.
+ */
+function modulus(z: Complex): number {
+  return Math.hypot(z.re, z.im);
+}
 
 /**
  * The principal logarithm of z, accurate relative to its own size when z is
@@ -100,7 +115,7 @@ function shiftBase(
     if (!(b.re === 0 && b.im === 0)) {
       const term = zn.mul(b.pow(negS));
       head = head.add(term);
-      largest = Math.max(largest, term.abs());
+      largest = Math.max(largest, modulus(term));
     }
     zn = zn.mul(z);
   }
@@ -123,7 +138,8 @@ const MAX_LOSS = 1e-12;
  * comment at the top of this file). */
 const ACCURACY = 1e-11;
 
-/** Added to the error estimates of the continuation and of the modes route.
+/** Added to the error estimates of the continuation, of the modes route
+ * and of the series past the disk (`lerchSeriesOutsideDisk`).
  * Their models count the large roundings; below about 1e−14 the many small
  * ones they leave out dominate: on the extended sweeps the actual error was
  * up to 1.7e−14 where the model gave 1.2e−15. */
@@ -178,7 +194,7 @@ function lerchSeriesWithError(
   const shifted = shiftBase(z, s, a, Number.MIN_VALUE);
   if (shifted === undefined) return undefined;
   const { head, zn, b } = shifted;
-  const absZ = z.abs();
+  const absZ = modulus(z);
   const logAbsZ = Math.log(absZ);
   // The terms decay like |z|ᵏ, after the growth of (k+b)^(−Re s) peaks near
   // k = −Re(s)/(−log|z|) for Re(s) < 0.
@@ -194,20 +210,20 @@ function lerchSeriesWithError(
   let previous = Infinity;
   let settled = 0;
   let weighted = 0; // Σ |term|·(number of roundings in the term)
-  const absS = s.abs();
+  const absS = modulus(s);
   for (let k = 0; k <= maxN; k++) {
     const base = new Complex(b.re + k, b.im);
     const term = zn.mul(zk).mul(base.pow(negS));
     sum = sum.add(term);
-    const size = term.abs();
+    const size = modulus(term);
     largest = Math.max(largest, size);
     const logBase = Math.hypot(
-      Math.log(base.abs()),
+      Math.log(modulus(base)),
       Math.atan2(b.im, b.re + k)
     );
     weighted += size * (k + absS * logBase + 4);
     const rho = Math.max(size / previous, absZ);
-    const total = sum.add(head).abs();
+    const total = modulus(sum.add(head));
     // A zero term (zᵏ underflowed) leaves nothing more to add.
     if (
       size === 0 ||
@@ -309,7 +325,7 @@ function lerchEulerComplex(
     if (k > 4 && Math.hypot(incR, incI) <= 1e-16 * Math.hypot(sumR, sumI)) {
       if (++settled === 3) {
         const out = head.add(zn.mul(new Complex(sumR, sumI)));
-        if (!((1e-16 * shifted.largest) / out.abs() <= MAX_LOSS))
+        if (!((1e-16 * shifted.largest) / modulus(out) <= MAX_LOSS))
           return undefined;
         return out;
       }
@@ -327,10 +343,27 @@ const GAUSS = gaussLegendreRule(20);
  * quadrature error. */
 const GAUSS_CHECK = gaussLegendreRule(10);
 
-/** Where the Hermite integrand is below double precision: its decay is at
- * worst e^{−πt}. */
+/** The end of the Hermite integral's range: the integrand decays at least
+ * like e^{−πt}. The integral usually stops much earlier, where a bound of
+ * the remaining part is negligible (see `hermiteTail`). */
 const T_MAX = 40;
 const PANELS = 80;
+
+/** The largest change, in radians, that the logarithm of the Hermite
+ * integrand is allowed to have across one panel of the 20-point rule
+ * (`hermiteTail` subdivides a panel until this holds). For e^{iωt} on a
+ * panel with ω·width = 12, the 20-point rule is in error by about 1e−29 of
+ * the integrand size; at 26 the error is 1e−16 and at 32 it is 1e−13. The
+ * margin covers the change of the frequency inside the panel. */
+const PANEL_PHASE = 12;
+
+/** The most panels of the 20-point rule that `hermiteTail` uses (20
+ * evaluations of the integrand each). The largest |z| of a double needs
+ * 840 at z = −1.7e308, where the integrand decays slowest, and 420 at
+ * z = 1.7e308; more come only from a large |s|/Re(a) in addition. An
+ * integral that needs more is not computed, and the continuation
+ * declines. */
+const MAX_TAIL_PANELS = 1000;
 
 /**
  * −2∫₀^∞ sin(t·log z − s·arctan(t/a)) / ((a²+t²)^(s/2)(e^{2πt} − 1)) dt —
@@ -344,15 +377,39 @@ const PANELS = 80;
  * power have rounded arguments). The estimate is the sum of these over the
  * nodes.
  *
- * `quadrature` is an estimate of the absolute error of the 20-point rule:
- * the sum over the panels of |S₂₀ − S₁₀|, where S₁₀ is the 10-point sum on
- * the same panel. The integrand has branch points at t = ±i·a, which come
+ * The integrand oscillates: it is the difference of z^{it}·(a + it)^(−s)
+ * and z^{−it}·(a − it)^(−s), divided by 2i(e^{2πt} − 1), so the derivative
+ * of its logarithm has a modulus of at most ω = |log z| + |s|/|a ± it| + 2π.
+ * At a large |z| or a large |s|/Re(a), ω is large: at z = 1e100 (|log z| =
+ * 230) a panel of width 1/2 holds 18 periods, and the 20-point rule, which
+ * follows a polynomial of degree 39, gave −0.665 for the integral
+ * −0.4952 (s = 20.25, a = 1). Each panel of width 1/2 is therefore cut into
+ * equal parts so that ω times the width of a part is at most `PANEL_PHASE`,
+ * with ω bounded on the panel by the smallest |a ± it| there. More than
+ * `MAX_TAIL_PANELS` parts in total make the function return NaN with an
+ * infinite error estimate.
+ *
+ * The integral stops at the start t of a panel when the part from t to ∞ is
+ * bounded below 1e−20 of the sum of the node sizes so far (that sum also
+ * sets the rounding estimate, which is at least 2.6e−15 of it, so the
+ * dropped part is not significant). The bound: |sin w| ≤ e^{|Im w|}, so the
+ * integrand is at most E(t) = e^{|Im phase|}·|(a²+t²)^(−s/2)|/(e^{2πt} − 1).
+ * The derivative of ln E is at most r(t) = |Im log z| − 2π + (the growth
+ * rate of the phase's imaginary part and of the power), see `tailRate`. When
+ * r(t) < 0 and r does not increase after t, the integral from t to ∞ is at
+ * most E(t)/(−r(t)). This bound is added to `quadrature`. At t = 40 the
+ * bound is added too; where it does not exist there (r ≥ 0), `quadrature`
+ * is infinite.
+ *
+ * `quadrature` is also an estimate of the absolute error of the 20-point
+ * rule where the integrand has singularities close to the real axis: the
+ * sum over the panels of |S₂₀ − S₁₀|, where S₁₀ is the 10-point sum on the
+ * same panel. The integrand has branch points at t = ±i·a, which come
  * near the real axis when Re(a) is small, and then the rule converges
  * slowly on the panels next to them. The difference is the error of the
  * 10-point sum, which is larger than that of the 20-point one, so the
- * estimate is pessimistic. It costs 800 evaluations of the integrand in
- * addition to the 1600 of the 20-point sum, and it runs only for Re(a) < 1
- * (`checkQuadrature`); for a larger Re(a) the estimate is 0.
+ * estimate is pessimistic. It costs 10 more evaluations per panel, and it
+ * runs only for Re(a) < 1 (`checkQuadrature`).
  */
 function hermiteTail(
   logZ: Complex,
@@ -364,48 +421,126 @@ function hermiteTail(
   const integrand = (t: number) => {
     const phase = logZ.mul(t).sub(s.mul(new Complex(t, 0).div(a).atan()));
     const base = a2.add(new Complex(t * t, 0));
-    const denom = base.pow(halfS).mul(Math.expm1(2 * Math.PI * t));
-    return { value: phase.sin().div(denom), phase, base };
+    const power = base.pow(halfS);
+    const denom = power.mul(Math.expm1(2 * Math.PI * t));
+    return { value: phase.sin().div(denom), phase, base, power };
+  };
+  // E(t) / (−r(t)), the bound of the integral from t to ∞ (see above), or
+  // Infinity where it does not apply.
+  const remainder = (t: number): number => {
+    const rate = tailRate(logZ, s, a, t);
+    if (!(rate < 0)) return Infinity;
+    const { phase, power } = integrand(t);
+    const envelope =
+      Math.exp(Math.abs(phase.im)) /
+      (modulus(power) * Math.expm1(2 * Math.PI * t));
+    return envelope / -rate;
   };
   let sum = C_ZERO;
   let rounding = 0;
   let quadrature = 0;
+  let magnitude = 0; // the sum of the node sizes |term|
+  let parts = 0;
   // The 10-point check runs only when the branch points are close to the
   // real axis: with Re(a) ≥ 1/2 no panel showed a quadrature error above
   // 1e−13 of the integrand size on 2400 points, and the callers move a to
   // Re(a) ≥ 1 first, so the check costs the common case nothing.
   const checkQuadrature = a.re < 1;
-  const halfSAbs = halfS.abs();
+  const halfSAbs = modulus(halfS);
+  const logZAbs = modulus(logZ);
+  const sAbs = modulus(s);
+  const aImAbs = Math.abs(a.im);
   const h = T_MAX / PANELS;
+  let truncated = false;
   for (let p = 0; p < PANELS; p++) {
-    let panel = C_ZERO;
-    for (let i = 0; i < GAUSS.x.length; i++) {
-      const t = h * (p + 0.5 + 0.5 * GAUSS.x[i]);
-      const { value, phase, base } = integrand(t);
-      const term = value.mul(0.5 * h * GAUSS.w[i]);
-      panel = panel.add(term);
-      // |log(a²+t²)| ≤ |ln|a²+t²|| + π.
-      rounding +=
-        term.abs() *
-        (phase.abs() +
-          halfSAbs * (Math.abs(Math.log(base.abs())) + Math.PI) +
-          6);
-    }
-    sum = sum.add(panel);
-    if (checkQuadrature) {
-      let check = C_ZERO;
-      for (let i = 0; i < GAUSS_CHECK.x.length; i++) {
-        const t = h * (p + 0.5 + 0.5 * GAUSS_CHECK.x[i]);
-        check = check.add(integrand(t).value.mul(0.5 * h * GAUSS_CHECK.w[i]));
+    const t0 = h * p;
+    if (p > 0) {
+      const rest = remainder(t0);
+      if (rest <= 1e-20 * magnitude) {
+        quadrature += rest;
+        truncated = true;
+        break;
       }
-      quadrature += panel.sub(check).abs();
+    }
+    // |a ± it|² = Re(a)² + (Im(a) ± t)², smallest on the panel where
+    // |t − |Im a|| is smallest.
+    const gap = Math.max(0, t0 - aImAbs, aImAbs - t0 - h);
+    const omega = logZAbs + sAbs / Math.hypot(a.re, gap) + 2 * Math.PI;
+    const k = Math.max(1, Math.ceil((omega * h) / PANEL_PHASE));
+    parts += k;
+    if (!(parts <= MAX_TAIL_PANELS))
+      return { value: C_NAN, rounding: Infinity, quadrature: Infinity };
+    const w = h / k;
+    for (let j = 0; j < k; j++) {
+      const start = t0 + j * w;
+      let panel = C_ZERO;
+      for (let i = 0; i < GAUSS.x.length; i++) {
+        const t = start + w * (0.5 + 0.5 * GAUSS.x[i]);
+        const { value, phase, base } = integrand(t);
+        const term = value.mul(0.5 * w * GAUSS.w[i]);
+        panel = panel.add(term);
+        const size = modulus(term);
+        magnitude += size;
+        // |log(a²+t²)| ≤ |ln|a²+t²|| + π.
+        rounding +=
+          size *
+          (modulus(phase) +
+            halfSAbs * (Math.abs(Math.log(modulus(base))) + Math.PI) +
+            6);
+      }
+      sum = sum.add(panel);
+      if (checkQuadrature) {
+        let check = C_ZERO;
+        for (let i = 0; i < GAUSS_CHECK.x.length; i++) {
+          const t = start + w * (0.5 + 0.5 * GAUSS_CHECK.x[i]);
+          check = check.add(integrand(t).value.mul(0.5 * w * GAUSS_CHECK.w[i]));
+        }
+        quadrature += modulus(panel.sub(check));
+      }
     }
   }
+  if (!truncated) quadrature += remainder(T_MAX);
   return {
     value: sum.mul(-2),
     rounding: 2 * Number.EPSILON * rounding,
     quadrature: 2 * quadrature,
   };
+}
+
+/**
+ * An upper bound, valid for every u ≥ t, of the derivative of ln E(u),
+ * where E(u) = e^{|Im φ(u)|}·|(a²+u²)^(−s/2)|/(e^{2πu} − 1) bounds the
+ * Hermite integrand and φ(u) = u·log z − s·arctan(u/a) (see
+ * `hermiteTail`). The three parts:
+ * - d/du of −ln(e^{2πu} − 1) is at most −2π;
+ * - d/du of |Im φ| is at most |Im log z| + |Im(s·a/(a²+u²))|;
+ * - d/du of ln|(a²+u²)^(−s/2)| is −Re(s·u/(a²+u²)).
+ * For a real a, the last two are at most |Im s|·a/(a²+u²) and
+ * max(0, −Re s)·u/(a²+u²); both decrease for u ≥ t once t ≥ a, and
+ * u/(a²+u²) is at most 1/(2a) everywhere. For a complex a, both together
+ * are at most |s|·(|a| + u)/|a²+u²|, where |a²+u²| = |a + iu|·|a − iu|.
+ * One of the two factors is at least |Im a| + u and the other at least
+ * Re(a), so the quotient is at most |s|·(|a| + u)/((|Im a| + u)·Re(a)),
+ * which decreases in u. For v = u − |Im a| ≥ 0 the factors are also at
+ * least √(Re(a)² + v²) each, so the quotient is at most
+ * |s|·(2|a| + v)/(Re(a)² + v²), which decreases for v ≥ Re(a). The
+ * smaller of the two bounds is used.
+ */
+function tailRate(logZ: Complex, s: Complex, a: Complex, t: number): number {
+  const base = Math.abs(logZ.im) - 2 * Math.PI;
+  if (a.im === 0) {
+    const sq = a.re * a.re + t * t;
+    const growth = t >= a.re ? t / sq : 1 / (2 * a.re);
+    return base + (Math.abs(s.im) * a.re) / sq + Math.max(0, -s.re) * growth;
+  }
+  const sAbs = modulus(s);
+  const aAbs = modulus(a);
+  const aImAbs = Math.abs(a.im);
+  let growth = (sAbs * (aAbs + t)) / ((aImAbs + t) * a.re);
+  const v = t - aImAbs;
+  if (v >= a.re)
+    growth = Math.min(growth, (sAbs * (2 * aAbs + v)) / (a.re * a.re + v * v));
+  return base + growth;
 }
 
 /** The relative error to count for a value of the incomplete gamma kernel:
@@ -487,7 +622,7 @@ function reciprocalGammaWithError(s: Complex): {
   const sine = s.mul(Math.PI).sin();
   const value = sine.mul(gamma(oneMinusS)).div(Math.PI);
   const sineError =
-    (Math.PI * s.abs() * Math.cosh(Math.PI * s.im)) / sine.abs();
+    (Math.PI * modulus(s) * Math.cosh(Math.PI * s.im)) / modulus(sine);
   return {
     value,
     weight:
@@ -546,7 +681,18 @@ function lerchContinuedComplex(
  * estimate passes is off by more than 9.1e−13. Before the rounding of the
  * tail integral was counted (see `hermiteTail`), values off by up to 4.2e−5
  * passed (Re(s) below −14, |z| above 90). The estimate also counts the
- * quadrature error of the tail integral (`hermiteTail`'s `quadrature`). */
+ * quadrature error of the tail integral (`hermiteTail`'s `quadrature`).
+ * Those points did not include a large order or a very large |z|: there
+ * the tail integral oscillates faster than its panels followed, and parts
+ * of the closed term are outside the range of a double, and values with no
+ * correct digit passed (Φ(1e100, 20.25, 1) was −0.170 for −1.29e−71). Measured
+ * again after the fixes (see `hermiteTail` and the closed term below), on
+ * 10920 points past the unit circle with orders from −20 to 200 (complex
+ * ones with |Im s| ≤ 1.5 included), a ∈ {1/2, 1, 5/2, 10} and |z| up to
+ * 1e300 (references: the integral that `lerchSeriesOutsideDisk` bounds,
+ * continued to Re(s) ≤ 0 by integration by parts, evaluated by mpmath at
+ * 25 to 100 digits), the 6213 points whose estimate passes are within
+ * 8.8e−13, and the actual error is at most 0.42 times the estimate. */
 function lerchContinuedWithError(
   z: Complex,
   s: Complex,
@@ -588,17 +734,39 @@ function lerchContinuedWithError(
     const turn = sigma.mul(new Complex(0, Math.PI * m)).exp();
     correction = new Complex(0, -2 * Math.PI * m).mul(turn).mul(r.value);
     // The exponential has an argument rounded to about ε·π|σ|.
-    correctionError = (r.weight + Math.PI * sigma.abs() + 6) * correction.abs();
+    correctionError =
+      (r.weight + Math.PI * modulus(sigma) + 6) * modulus(correction);
   }
-  const prefactor = negLogZ
-    .mul(b)
-    .exp()
-    .mul(negLogZ.pow(s.sub(new Complex(1, 0))));
-  const closed = prefactor.mul(rotated.add(correction));
+  // The prefactor e^x·(−log z)^(s−1), as one exponential divided by 2^k.
+  // Each factor, and the prefactor itself, can be outside the range of a
+  // double where the closed term is not: at z = 1.0001, s = 85.5, a = 10,
+  // (−log z)^(s−1) is 1e−338, which is 0 as a double, and Γ(σ, x) is
+  // 1e253, so the closed term was 0 instead of 3.7e−87 and the value was
+  // 12% off. `unscale` multiplies by 2^k in two steps, so that a
+  // product that fits in a double is not lost to an overflow of 2^k.
+  // Subtracting k·ln 2 adds a rounding of about ε·|Re(log of the
+  // prefactor)|, which `closedLoss` below counts already.
+  const sm1 = s.sub(new Complex(1, 0));
+  const logPrefactor = x.add(negLogZ.log().mul(sm1));
+  const k = Math.round(logPrefactor.re / Math.LN2);
+  const prefactorScaled = logPrefactor.sub(new Complex(k * Math.LN2, 0)).exp();
+  const kHalf = Math.trunc(k / 2);
+  const unscale = (v: number) => v * 2 ** kHalf * 2 ** (k - kHalf);
+  const prefactorAbs = (factor: number) =>
+    unscale(modulus(prefactorScaled) * factor);
+  const closedScaled = prefactorScaled.mul(rotated.add(correction));
+  const closed = new Complex(
+    unscale(closedScaled.re),
+    unscale(closedScaled.im)
+  );
   // The size the closed term is computed from: its two parts can cancel.
-  const closedSize =
-    prefactor.abs() * Math.max(rotated.abs(), correction.abs());
+  const closedSize = prefactorAbs(
+    Math.max(modulus(rotated), modulus(correction))
+  );
   const tail = hermiteTail(logZ, s, b);
+  // No bound of the tail integral's error (too many panels, or no bound of
+  // the part past t = 40): decline.
+  if (!Number.isFinite(tail.quadrature)) return undefined;
   const terms = [new Complex(0.5, 0).div(b.pow(s)), closed, tail.value];
   const phi = terms.reduce((acc, t) => acc.add(t), C_ZERO);
   const out = head.add(zk.mul(phi));
@@ -615,39 +783,64 @@ function lerchContinuedWithError(
   // cancel.
   const size = Math.max(
     shifted.largest,
-    zk.abs() * Math.max(...terms.map((t) => t.abs()), closedSize)
+    modulus(zk) * Math.max(...terms.map((t) => modulus(t)), closedSize)
   );
-  const rounding = (1e-15 * size) / out.abs();
+  const rounding = (1e-15 * size) / modulus(out);
+  // Γ(σ, x) and 1/Γ(s) can be below the smallest normal double, 2^−1022
+  // (Γ(−199, −46.1 − 7.85i) = −3.3e−315 + 2.1e−315i at z = −1e8,
+  // s = 200, a = 2.5): they then have fewer significant digits than the
+  // kernels' estimates assume, and the value was 2e−11 off. The incomplete
+  // gamma kernel forms its result from one exponential and a few products,
+  // so a result below 2^−1022 is in error by a few units of the smallest
+  // double, 2^−1074; this counts 2^−1068 (64 units). 1/Γ(s) is 0 when Γ(s)
+  // overflows, an absolute error of up to 2^−1022. Both are multiplied by
+  // the factors that multiply them in the closed term: Γ(σ, x) by
+  // |e^{2πimσ}| = e^{−2πm·Im σ}, and 1/Γ(s) by |−2πi·m·e^{iπmσ}| =
+  // 2π|m|·e^{−πm·Im σ}. These factors can overflow (to Infinity, or NaN
+  // after the prefactor scale), and the function then declines below.
+  const underflow =
+    2 ** -1068 * Math.exp(-2 * Math.PI * m * sigma.im) +
+    (m !== 0
+      ? 2 ** -1022 *
+        2 *
+        Math.PI *
+        Math.abs(m) *
+        Math.exp(-Math.PI * m * sigma.im)
+      : 0);
   const gammaLoss =
-    (zk.abs() *
-      prefactor.abs() *
-      (incompleteGammaError(upperError) * rotated.abs() +
-        Number.EPSILON * correctionError)) /
-    out.abs();
+    (modulus(zk) *
+      prefactorAbs(
+        incompleteGammaError(upperError) * modulus(rotated) +
+          Number.EPSILON * correctionError +
+          underflow
+      )) /
+    modulus(out);
   // The closed term has errors of its own beyond a few roundings: e^x and
   // (−log z)^(s−1) are exponentials of rounded arguments, with errors of
   // about ε·|x| and ε·|(s − 1)·log(−log z)| relative to the term, and x
   // itself is rounded, which moves Γ(1 − s, x) by about
   // ε·|x|·|x^(−s)·e^{−x}| (its derivative is −x^(−s)·e^{−x}), so the term
   // by ε·|x|·|(−log z)^(s−1)·x^(−s)| (times |e^{2πimσ}| on another sheet).
-  const sm1 = s.sub(new Complex(1, 0));
   const closedLoss =
     (Number.EPSILON *
-      zk.abs() *
-      ((x.abs() + sm1.abs() * negLogZ.log().abs() + 4) * closedSize +
-        x.abs() *
+      modulus(zk) *
+      ((modulus(x) + modulus(sm1) * modulus(negLogZ.log()) + 4) * closedSize +
+        modulus(x) *
           Math.exp(
             sm1.mul(negLogZ.log()).re -
               s.mul(x.log()).re -
               2 * Math.PI * m * sigma.im
           ))) /
-    out.abs();
+    modulus(out);
   // The tail integral's own rounding (see `hermiteTail`): its integrand can
   // be far larger than the integral for Re(s) < 0.
-  const tailLoss = (zk.abs() * tail.rounding) / out.abs();
+  const tailLoss = (modulus(zk) * tail.rounding) / modulus(out);
   // The quadrature error of the tail integral (see `hermiteTail`).
-  const quadratureLoss = (zk.abs() * tail.quadrature) / out.abs();
+  const quadratureLoss = (modulus(zk) * tail.quadrature) / modulus(out);
   if (!out.isFinite() || !(rounding + tailLoss <= MAX_LOSS)) return undefined;
+  // An error that is not a finite number cannot be compared with another
+  // estimate (callers keep the smaller one): decline.
+  if (!Number.isFinite(gammaLoss)) return undefined;
   return {
     value: out,
     error:
@@ -817,7 +1010,8 @@ function modesTailOnCircle(
     const value = cos.mul(zeta.value);
     return {
       value,
-      error: cos.abs() * (64 * Number.EPSILON * zeta.value.abs() + zeta.error),
+      error:
+        modulus(cos) * (64 * Number.EPSILON * modulus(zeta.value) + zeta.error),
     };
   }
   const phase = 2 * Math.PI * b;
@@ -833,8 +1027,8 @@ function modesTailOnCircle(
   const value = first.add(second).mul(0.5);
   const error =
     0.5 *
-    (first.abs() * (down.error + 8 * Number.EPSILON) +
-      second.abs() * (up.error + 8 * Number.EPSILON));
+    (modulus(first) * (down.error + 8 * Number.EPSILON) +
+      modulus(second) * (up.error + 8 * Number.EPSILON));
   return { value, error };
 }
 
@@ -855,16 +1049,16 @@ function lerchModesWith(
   // Each term added to move a is a power with a rounded exponent, about
   // ε·|s|·|log b| of its size, times a power of z (one rounding per step).
   let headError = 0;
-  const absS = s.abs();
+  const absS = modulus(s);
   let scale = one;
   let steps = 0;
   while (b <= 0) {
     if (b !== 0) {
       const t = scale.mul(new Complex(b, 0).pow(negS));
       head = head.add(t);
-      headLargest = Math.max(headLargest, t.abs());
+      headLargest = Math.max(headLargest, modulus(t));
       headError +=
-        t.abs() * (absS * (Math.abs(Math.log(-b)) + Math.PI) + steps + 4);
+        modulus(t) * (absS * (Math.abs(Math.log(-b)) + Math.PI) + steps + 4);
     }
     scale = scale.mul(z);
     b += 1;
@@ -875,24 +1069,29 @@ function lerchModesWith(
     scale = scale.div(z);
     const t = scale.mul(new Complex(b, 0).pow(negS)).neg();
     head = head.add(t);
-    headLargest = Math.max(headLargest, t.abs());
-    headError += t.abs() * (absS * Math.abs(Math.log(b)) + steps + 4);
+    headLargest = Math.max(headLargest, modulus(t));
+    headError += modulus(t) * (absS * Math.abs(Math.log(b)) + steps + 4);
     if (++steps > MAX_BASE_SHIFT) return undefined;
   }
 
   const logZ = logAccurate(z);
   const negLogZ =
     z.im === 0 && z.re > 1 ? new Complex(-logZ.re, 0) : logZ.mul(-1);
-  const absLog = logZ.abs();
+  const absLog = modulus(logZ);
   const N = Math.max(1, Math.ceil(absLog / (2 * Math.PI * MODES_RATIO)) - 1);
   if (N > MODES_MAX) return undefined;
   const sm1 = s.sub(one);
   const g = gamma(one.sub(s));
+  // At a large order Γ(1 − s) is below the smallest normal double, 2^−1022
+  // (|Γ(−174.25)| is about 1e−317), and has fewer significant digits than
+  // `gammaWeight` counts: Φ(−1.485 − 0.212i, 175.25, 1) was 8e−9 off with
+  // an estimate of 9e−12. Decline there (2^−1000 leaves a margin).
+  if (!(modulus(g) >= 2 ** -1000)) return undefined;
   const gw = gammaWeight(one.sub(s));
 
   // The explicit modes |n| ≤ N (without the factor Γ(1 − s)).
   let modes = negLogZ.pow(sm1);
-  let modesAbs = modes.abs();
+  let modesAbs = modulus(modes);
   for (let n = 1; n <= N; n++) {
     const phase = 2 * Math.PI * ((n * b) % 1);
     const e = new Complex(Math.cos(phase), Math.sin(phase));
@@ -901,15 +1100,16 @@ function lerchModesWith(
       .pow(sm1)
       .mul(e.conjugate());
     modes = modes.add(up).add(down);
-    modesAbs += up.abs() + down.abs();
+    modesAbs += modulus(up) + modulus(down);
   }
   const explicit = g.mul(modes);
   // Each mode is a power with an exponent rounded to about ε·|s − 1|·|log u|.
   let error =
     eps *
-    (gw * explicit.abs() +
-      (8 + sm1.abs() * (Math.log(2 * Math.PI * (N + 1) + absLog) + Math.PI)) *
-        g.abs() *
+    (gw * modulus(explicit) +
+      (8 +
+        modulus(sm1) * (Math.log(2 * Math.PI * (N + 1) + absLog) + Math.PI)) *
+        modulus(g) *
         modesAbs);
 
   // The other modes: Σ_k (log z)^k/k!·ζ_N(s − k, b). R = Γ(σ)(2π)^(−σ),
@@ -925,7 +1125,8 @@ function lerchModesWith(
     }
     const sigma = new Complex(1 + k, 0).sub(s);
     const quarter = sigma.mul(Math.PI / 2);
-    const rounding = gw + 4 * k + 10 + 2 * sigma.abs() * (1 + Math.log(N + 1));
+    const rounding =
+      gw + 4 * k + 10 + 2 * modulus(sigma) * (1 + Math.log(N + 1));
     let zetaN: Complex;
     let tailOnCircle: { value: Complex; error: number } | undefined;
     if (sigma.re >= MODES_DIRECT_ORDER) {
@@ -939,15 +1140,16 @@ function lerchModesWith(
           .cos()
           .mul(new Complex(n, 0).pow(sigma.neg()));
         sum = sum.add(t);
-        sumAbs += t.abs();
+        sumAbs += modulus(t);
       }
       zetaN = R.mul(sum).mul(2);
-      error += eps * rounding * 2 * R.abs() * sumAbs * power.abs();
+      error += eps * rounding * 2 * modulus(R) * sumAbs * modulus(power);
     } else if (onCircle && (tailOnCircle = modesTailOnCircle(sigma, b, N))) {
       zetaN = R.mul(tailOnCircle.value).mul(2);
       error +=
-        (2 * R.abs() * tailOnCircle.error + eps * rounding * zetaN.abs()) *
-        power.abs();
+        (2 * modulus(R) * tailOnCircle.error +
+          eps * rounding * modulus(zetaN)) *
+        modulus(power);
     } else {
       // The Hurwitz zeta kernel is used only where its error is measured.
       const kernelWeight = hurwitzKernelWeight(s.sub(new Complex(k, 0)));
@@ -971,22 +1173,22 @@ function lerchModesWith(
       first = R.mul(first).mul(2);
       zetaN = full.sub(first);
       const envelope =
-        2 * R.abs() * Math.cosh((Math.PI * Math.abs(sigma.im)) / 2);
+        2 * modulus(R) * Math.cosh((Math.PI * Math.abs(sigma.im)) / 2);
       // The measured weight (relative to the envelope) and the kernel's own
       // estimate, which is relative to the value and is not a bound for a
       // real order (up to 28 times too small there), are both counted.
       error +=
         (eps *
-          (kernelWeight * Math.max(full.abs(), envelope) +
-            rounding * first.abs()) +
+          (kernelWeight * Math.max(modulus(full), envelope) +
+            rounding * modulus(first)) +
           kernel.error) *
-        power.abs();
+        modulus(power);
     }
     const t = zetaN.mul(power);
     tail = tail.add(t);
-    error += 4 * eps * t.abs();
+    error += 4 * eps * modulus(t);
     // The terms fall like k^(−Re s)·4^(−k) once k is past −Re(s).
-    if (k > 2 - s.re && t.abs() < 1e-17 * explicit.add(tail).abs()) {
+    if (k > 2 - s.re && modulus(t) < 1e-17 * modulus(explicit.add(tail))) {
       if (++small === 2) break;
     } else small = 0;
   }
@@ -995,16 +1197,17 @@ function lerchModesWith(
   const out = head.add(main);
   // z^(−b): an exponential with an argument rounded to about ε·b·|log z|.
   const relative =
-    (error / inner.abs() + eps * (b * absLog + 4)) * (main.abs() / out.abs());
+    (error / modulus(inner) + eps * (b * absLog + 4)) *
+    (modulus(main) / modulus(out));
   const headLoss =
-    Math.max(1e-15 * headLargest, Number.EPSILON * headError) / out.abs();
+    Math.max(1e-15 * headLargest, Number.EPSILON * headError) / modulus(out);
   // Only the largest term is checked against `MAX_LOSS`; the rounding
   // model of the terms (`headError`) is counted in the estimate, which is
   // checked against `ACCURACY`. A very negative s makes the exponents of the
   // powers large, and the model then exceeded `MAX_LOSS` where the values
   // were within 6e−13: 5 points with Re(s) < −9 and |z| ≥ 1000 of the
   // extended real sweep declined only for that.
-  if (!out.isFinite() || !((1e-15 * headLargest) / out.abs() <= MAX_LOSS))
+  if (!out.isFinite() || !((1e-15 * headLargest) / modulus(out) <= MAX_LOSS))
     return undefined;
   return { value: out, error: relative + headLoss + ESTIMATE_FLOOR };
 }
@@ -1077,8 +1280,8 @@ function lerchIntegralWithError(
   const eps = Number.EPSILON;
   const one = C_ONE;
   const sm1 = s.sub(one);
-  const absSm1 = sm1.abs();
-  const absB = b.abs();
+  const absSm1 = modulus(sm1);
+  const absB = modulus(b);
 
   // [0, t₁]: Σ_k g_k·t₁^(s+k)/(s+k), with g = e^(−bt)/(1 − z·e^(−t)) =
   // Σ g_k t^k from g·h = e, h = 1 − z·e^(−t), e = e^(−bt).
@@ -1086,7 +1289,7 @@ function lerchIntegralWithError(
   // before it cancels.
   const t1 = Math.min(1, x0 / 4, 2 / absB);
   const h0 = one.sub(z);
-  const absH0 = h0.abs();
+  const absH0 = modulus(h0);
   const g: Complex[] = [];
   const gError: number[] = []; // absolute error of each g_k
   let eK = one; // (−b)^k/k!
@@ -1102,13 +1305,13 @@ function lerchIntegralWithError(
       hK[k] = zK; // h_k for k ≥ 1
     }
     let num = eK;
-    let size = eK.abs();
+    let size = modulus(eK);
     let propagated = 0;
     for (let j = 1; j <= k; j++) {
       const p = hK[j].mul(g[k - j]);
       num = num.sub(p);
-      size += p.abs();
-      propagated += hK[j].abs() * gError[k - j];
+      size += modulus(p);
+      propagated += modulus(hK[j]) * gError[k - j];
     }
     const gk = num.div(h0);
     g.push(gk);
@@ -1119,8 +1322,9 @@ function lerchIntegralWithError(
     const term = gk.mul(w);
     series = series.add(term);
     seriesError +=
-      w.abs() * gError[k] + eps * term.abs() * (sk.abs() * Math.abs(logT1) + 4);
-    if (k > 4 && term.abs() < 1e-18 * series.abs()) break;
+      modulus(w) * gError[k] +
+      eps * modulus(term) * (modulus(sk) * Math.abs(logT1) + 4);
+    if (k > 4 && modulus(term) < 1e-18 * modulus(series)) break;
     if (k === 79) return undefined;
   }
 
@@ -1140,11 +1344,11 @@ function lerchIntegralWithError(
     const denominator = one.sub(ze);
     const value = numerator.div(denominator).mul(dt);
     const weight =
-      absSm1 * Math.abs(t.log().abs()) +
-      absB * t.abs() +
-      t.abs() +
+      absSm1 * Math.abs(modulus(t.log())) +
+      absB * modulus(t) +
+      modulus(t) +
       8 +
-      ((t.abs() + 2) * ze.abs()) / denominator.abs();
+      ((modulus(t) + 2) * modulus(ze)) / modulus(denominator);
     return { value, weight };
   };
   // Panel widths: 1/4 around the pole, else up to 2, and short enough for
@@ -1176,8 +1380,8 @@ function lerchIntegralWithError(
       const { value, weight } = integrand(xi);
       const term = value.mul(0.5 * width * GAUSS.w[i]);
       panel = panel.add(term);
-      panelAbs += term.abs();
-      rounding += term.abs() * weight;
+      panelAbs += modulus(term);
+      rounding += modulus(term) * weight;
     }
     let check = C_ZERO;
     for (let i = 0; i < GAUSS_CHECK.x.length; i++) {
@@ -1186,7 +1390,7 @@ function lerchIntegralWithError(
         integrand(xi).value.mul(0.5 * width * GAUSS_CHECK.w[i])
       );
     }
-    quadratureError += panel.sub(check).abs();
+    quadratureError += modulus(panel.sub(check));
     quadrature = quadrature.add(panel);
     absSum += panelAbs;
     x += width;
@@ -1197,19 +1401,19 @@ function lerchIntegralWithError(
     } else small = 0;
   }
   const integral = series.add(quadrature);
-  const absIntegral = integral.abs();
+  const absIntegral = modulus(integral);
   const gammaS = gamma(s);
   const phiB = integral.div(gammaS);
   const out = head.add(zn.mul(phiB));
   const relativeIntegral =
     (seriesError + eps * rounding + quadratureError) / absIntegral +
     eps * gammaWeight(s);
-  const headLoss = (1e-15 * shifted.largest) / out.abs();
+  const headLoss = (1e-15 * shifted.largest) / modulus(out);
   if (!out.isFinite() || !(headLoss <= MAX_LOSS)) return undefined;
   return {
     value: out,
     error:
-      (relativeIntegral * zn.mul(phiB).abs()) / out.abs() +
+      (relativeIntegral * modulus(zn.mul(phiB))) / modulus(out) +
       headLoss +
       ESTIMATE_FLOOR,
   };
@@ -1295,12 +1499,12 @@ function lerchFunctionalWithError(
   s: Complex,
   a: Complex
 ): { value: Complex; error: number } | undefined {
-  if (!(z.abs() > 1)) return undefined;
+  if (!(modulus(z) > 1)) return undefined;
   if (s.im === 0 && s.re > 0 && Number.isInteger(s.re)) return undefined;
   const eps = Number.EPSILON;
   const one = C_ONE;
   const negS = s.neg();
-  const absS = s.abs();
+  const absS = modulus(s);
   // Move a into the strip: Φ(z,s,a) = head + scale·Φ(z,s,b).
   const upper = a.im > 0; // 0 ≤ Re(b) < 1; otherwise 0 < Re(b) ≤ 1
   const below = (re: number) => (upper ? re < 0 : re <= 0);
@@ -1317,9 +1521,10 @@ function lerchFunctionalWithError(
     if (!(b.re === 0 && b.im === 0)) {
       const t = scale.mul(b.pow(negS));
       head = head.add(t);
-      headLargest = Math.max(headLargest, t.abs());
+      headLargest = Math.max(headLargest, modulus(t));
       headError +=
-        t.abs() * (absS * (Math.abs(Math.log(b.abs())) + Math.PI) + steps + 4);
+        modulus(t) *
+        (absS * (Math.abs(Math.log(modulus(b))) + Math.PI) + steps + 4);
     }
     scale = scale.mul(z);
     b = new Complex(b.re + 1, b.im);
@@ -1330,9 +1535,10 @@ function lerchFunctionalWithError(
     scale = scale.div(z);
     const t = scale.mul(b.pow(negS)).neg();
     head = head.add(t);
-    headLargest = Math.max(headLargest, t.abs());
+    headLargest = Math.max(headLargest, modulus(t));
     headError +=
-      t.abs() * (absS * (Math.abs(Math.log(b.abs())) + Math.PI) + steps + 4);
+      modulus(t) *
+      (absS * (Math.abs(Math.log(modulus(b))) + Math.PI) + steps + 4);
     if (++steps > MAX_BASE_SHIFT) return undefined;
   }
   // The shift made no progress: a is so large that adding 1 does not
@@ -1348,7 +1554,7 @@ function lerchFunctionalWithError(
   const grow = Math.exp(2 * Math.PI * b.im);
   const v = new Complex(cos / grow, sin / grow);
   const vInv = new Complex(cos * grow, -sin * grow);
-  if (!(v.sub(one).abs() >= 1e-3) || !(vInv.sub(one).abs() >= 1e-3))
+  if (!(modulus(v.sub(one)) >= 1e-3) || !(modulus(vInv.sub(one)) >= 1e-3))
     return undefined;
 
   const logZ = logAccurate(z);
@@ -1366,7 +1572,7 @@ function lerchFunctionalWithError(
   // axis. The best estimate wins.
   const inner = (w: Complex, c: Complex) => {
     const series =
-      w.abs() < 0.9 ? lerchSeriesWithError(w, order, c) : undefined;
+      modulus(w) < 0.9 ? lerchSeriesWithError(w, order, c) : undefined;
     if (series !== undefined) return series;
     let best = lerchContinuedWithError(w, order, c);
     const better = (r: { value: Complex; error: number } | undefined) => {
@@ -1398,43 +1604,160 @@ function lerchFunctionalWithError(
   // absolute error of log v, ε·(2π|b| + 2). Next to w = 1, Φ(w,σ,c) grows
   // like Γ(1−σ)·(−log w)^(σ−1), whose logarithmic derivative is
   // (σ − 1)/log w.
-  const vError = eps * (2 * Math.PI * b.abs() + 2);
-  const logV = v.log().abs();
+  const vError = eps * (2 * Math.PI * modulus(b) + 2);
+  const logV = modulus(v.log());
   const sensitivity = (c: Complex) =>
-    c.abs() + order.abs() + 2 + (order.sub(one).abs() + 1) / logV;
+    modulus(c) + modulus(order) + 2 + (modulus(order.sub(one)) + 1) / logV;
   // e^{iπ(s−1)/2} and (2π)^(s−1) are exponentials of rounded arguments.
-  const factorError = eps * (sm1.abs() * (Math.PI / 2 + 1.84) + 8);
+  const factorError = eps * (modulus(sm1) * (Math.PI / 2 + 1.84) + 8);
   const error =
     eps *
-      (sm1.abs() * (Math.abs(Math.log(negLogZ.abs())) + Math.PI) + 8) *
-      n0.abs() +
-    tPlus.abs() * (plus.error + factorError + vError * sensitivity(cPlus)) +
-    tMinus.abs() * (minus.error + factorError + vError * sensitivity(cMinus)) +
-    4 * eps * (n0.abs() + tPlus.abs() + tMinus.abs());
+      (modulus(sm1) * (Math.abs(Math.log(modulus(negLogZ))) + Math.PI) + 8) *
+      modulus(n0) +
+    modulus(tPlus) * (plus.error + factorError + vError * sensitivity(cPlus)) +
+    modulus(tMinus) *
+      (minus.error + factorError + vError * sensitivity(cMinus)) +
+    4 * eps * (modulus(n0) + modulus(tPlus) + modulus(tMinus));
 
   const g = gamma(order);
+  // Γ(1 − s) below the smallest normal double has fewer significant digits
+  // than `gammaWeight` counts: decline, as `lerchModesWith` does.
+  if (!(modulus(g) >= 2 ** -1000)) return undefined;
   const main = scale.mul(g).mul(logZ.mul(b.neg()).exp()).mul(modes);
   const out = head.add(main);
   // Γ(1 − s), and z^(−b): an exponential with an argument rounded to about
   // ε·|b|·|log z|.
   const relative =
-    (error / modes.abs() +
-      eps * (gammaWeight(order) + b.abs() * logZ.abs() + 4)) *
-    (main.abs() / out.abs());
-  const headLoss = Math.max(1e-15 * headLargest, eps * headError) / out.abs();
+    (error / modulus(modes) +
+      eps * (gammaWeight(order) + modulus(b) * modulus(logZ) + 4)) *
+    (modulus(main) / modulus(out));
+  const headLoss =
+    Math.max(1e-15 * headLargest, eps * headError) / modulus(out);
   // As in `lerchModesWith`, only the largest term moving a is checked
   // against `MAX_LOSS`; the rounding model is in the estimate.
-  if (!out.isFinite() || !((1e-15 * headLargest) / out.abs() <= MAX_LOSS))
+  if (!out.isFinite() || !((1e-15 * headLargest) / modulus(out) <= MAX_LOSS))
     return undefined;
   return { value: out, error: relative + headLoss + ESTIMATE_FLOOR };
+}
+
+/** The most terms `lerchSeriesOutsideDisk` sums before it declines. */
+const SERIES_OUTSIDE_DISK_MAX_TERMS = 200;
+
+/**
+ * Φ(z,s,a) for |z| > 1, Re(s) > 0 and z off the cut [1, ∞), from the first
+ * terms of the series Σ zⁿ(n+a)^(−s), or `undefined` when these terms do
+ * not give the value. The series diverges for |z| > 1, but at a large
+ * order its first terms can fall fast: Φ(−1e8, 200, 2.5) = 2.58e−80 is its
+ * first term 2.5^(−200) to 21 digits.
+ *
+ * The bound of the remainder: Φ(z,s,a) = Σ_{n<N} zⁿ(n+a)^(−s) +
+ * z^N·Φ(z,s,a+N), and for Re(c) > 0 (DLMF 25.14.5)
+ *
+ *   Φ(z,s,c) = (1/Γ(s))·∫₀^∞ t^(s−1)·e^(−ct) / (1 − z·e^(−t)) dt,
+ *
+ * where |1 − z·e^(−t)| is at least δ, the distance from 1 to the segment
+ * [0, z], because e^(−t) is in (0, 1]. So
+ *
+ *   |Φ(z,s,c)| ≤ Γ(Re s) / (|Γ(s)|·Re(c)^(Re s)·δ),
+ *
+ * and the remainder after N terms is at most |z|^N times this at
+ * c = a + N. (Checked against mpmath on points with |z| from 2 to 1e8,
+ * orders 2.5 to 200, complex orders included: the remainder was below the
+ * bound at each N.) The sum stops when the bound is below 2⁻⁶⁰ of the sum.
+ * The bound is convex in N, so once it grows it grows for every later N:
+ * the function then declines, as it does after
+ * `SERIES_OUTSIDE_DISK_MAX_TERMS` terms.
+ *
+ * Each term is one exponential of n·log z − s·log(n + a), with an error of
+ * about ε·(n·|log z| + |s|·|log(n + a)|) relative to the term, from the
+ * rounded argument, plus a few roundings. The estimate counts twice that
+ * argument error plus 4ε per term, and adds the bound: on the 10920 points
+ * past the unit circle of the sweep described at `lerchContinuedWithError`
+ * the actual error reached 0.76 times the single count at s = 80,
+ * a = 10, where Φ is its first term 10^(−80). With the double count the 2307
+ * points that answer are within 6e−14, and the actual error is at most
+ * 0.29 times the estimate.
+ */
+function lerchSeriesOutsideDisk(
+  z: Complex,
+  s: Complex,
+  a: Complex
+): { value: Complex; error: number } | undefined {
+  if (!(s.re > 0) || !Number.isFinite(s.re) || !Number.isFinite(s.im))
+    return undefined;
+  if (z.im === 0 && z.re >= 1) return undefined;
+  const absZ = modulus(z);
+  if (!(absZ > 1) || !Number.isFinite(absZ)) return undefined;
+  // The point of the segment [0, z] nearest to 1 is u·z, with u the
+  // projection of 1 on the line through 0 and z, clamped to [0, 1]:
+  // u = Re z/|z|². Because |z| > 1, u < 1, so the projection is inside the
+  // segment exactly when Re z > 0, and then the distance from 1 to the line
+  // is |Im z|/|z|. Otherwise the nearest point is 0, at distance 1. This
+  // form does not compute |z|², which overflows above |z| ≈ 1.3e154 (u was
+  // then 0 and δ was 1 at z = 1e200 + 1e184·i, where δ is 1e−16, so the
+  // bound was 16 orders too small).
+  const delta = z.re > 0 ? Math.abs(z.im) / absZ : 1;
+  // δ is 0 only on the cut, which returned above. A δ below the smallest
+  // normal double has lost digits: decline.
+  if (!(delta >= 2 ** -1022)) return undefined;
+  // The principal logarithm from |z| as `Math.hypot` gives it:
+  // `Complex.log()` forms |z|² when both parts of z are not zero, and its
+  // real part is Infinity above |z| ≈ 1.3e154 (z = 1e200 + 1e184·i).
+  const lnAbsZ = Math.log(absZ);
+  const logZ = new Complex(lnAbsZ, Math.atan2(z.im, z.re));
+  const logZAbs = modulus(logZ);
+  // ln(Γ(Re s)/|Γ(s)|): 0 for a real s. For a complex s, ln 2 more covers
+  // the rounding of the two log-gamma values.
+  const lnRatio =
+    s.im === 0
+      ? 0
+      : gammaln(new Complex(s.re, 0)).re - gammaln(s).re + Math.LN2;
+  const lnDelta = Math.log(delta);
+  const negS = s.neg();
+  const absS = modulus(s);
+  let sum = C_ZERO;
+  let largest = 0;
+  let weighted = 0; // Σ |term|·(the rounding of the term, in units of ε)
+  let previous = Infinity;
+  for (let n = 0; n < SERIES_OUTSIDE_DISK_MAX_TERMS; n++) {
+    const c = new Complex(a.re + n, a.im);
+    // The (n + a) = 0 term is dropped, as in `shiftBase`.
+    if (!(c.re === 0 && c.im === 0)) {
+      const logC = c.log();
+      const term = logZ.mul(n).add(logC.mul(negS)).exp();
+      if (!term.isFinite()) return undefined;
+      sum = sum.add(term);
+      const size = modulus(term);
+      largest = Math.max(largest, size);
+      weighted += size * (2 * (n * logZAbs + absS * modulus(logC)) + 4);
+    }
+    // The bound after N = n + 1 terms needs Re(a + N) > 0.
+    const next = a.re + n + 1;
+    if (!(next > 0)) continue;
+    const lnBound =
+      (n + 1) * lnAbsZ + lnRatio - s.re * Math.log(next) - lnDelta;
+    const total = modulus(sum);
+    if (lnBound <= Math.log(2 ** -60 * total)) {
+      if (!((1e-16 * largest) / total <= MAX_LOSS)) return undefined;
+      return {
+        value: sum,
+        error:
+          (Number.EPSILON * weighted + Math.exp(lnBound)) / total +
+          ESTIMATE_FLOOR,
+      };
+    }
+    if (lnBound > previous) return undefined;
+    previous = lnBound;
+  }
+  return undefined;
 }
 
 /**
  * The Lerch transcendent Φ(z,s,a) = Σ_{k≥0} zᵏ(k+a)^(−s), within about
  * 1e−11 relative. Returns `undefined` where no method can vouch for that
  * accuracy (see `lerchSeriesComplex`, `lerchEulerComplex`,
- * `lerchContinuedComplex`, `lerchModesComplex`, `lerchIntegralComplex` and
- * `lerchFunctionalComplex`) —
+ * `lerchSeriesOutsideDisk`, `lerchContinuedComplex`, `lerchModesComplex`,
+ * `lerchIntegralComplex` and `lerchFunctionalComplex`) —
  * the caller keeps the expression symbolic
  * rather than ship an unverified number.
  */
@@ -1450,7 +1773,7 @@ export function lerchPhiComplex(
   if (z.isZero()) return a.pow(s.neg()); // Φ(0,s,a) = a^(−s): only k = 0 survives
   if (s.im === 0 && s.re === 0)
     return new Complex(1, 0).div(new Complex(1, 0).sub(z)); // Φ(z,0,a) = 1/(1−z)
-  const absZ = z.abs();
+  const absZ = modulus(z);
   const onRim = z.im !== 0 && Math.abs(absZ - 1) < 1e-9;
   // Past the unit disk and on its rim: the continuation. It declines by
   // itself where `incompleteGammaUpperComplex` declines or where its terms
@@ -1471,7 +1794,11 @@ export function lerchPhiComplex(
   // small Re(a): on 2400 points past the unit circle with a moved only to
   // Re(a) ≥ 1/4, it declined 54 more, all with Re(a) < 0.56 and none off
   // by more than 1.7e−14. So 1/2 stays the lowest target used.
-  if (absZ > 1 || onRim)
+  if (absZ > 1 || onRim) {
+    // First the leading terms of the series with their proven remainder
+    // bound, which answer at a large order (see `lerchSeriesOutsideDisk`).
+    const series = onRim ? undefined : lerchSeriesOutsideDisk(z, s, a);
+    if (series !== undefined && series.error <= ACCURACY) return series.value;
     return (
       lerchContinuedComplex(z, s, a) ??
       (a.im !== 0 ? lerchContinuedComplex(z, s, a, 0.5) : undefined) ??
@@ -1479,6 +1806,7 @@ export function lerchPhiComplex(
       lerchIntegralComplex(z, s, a) ??
       lerchFunctionalComplex(z, s, a)
     );
+  }
   // Real z in [−1, 0) with Re(s) > 0: the Euler transform. For Re(s) ≤ 0
   // its terms grow and the transform is not valid (see `lerchEulerComplex`):
   // those points, and any the transform declines, go to the direct series
@@ -1515,9 +1843,12 @@ export function lerchPhiComplex(
       const scale = new Complex(2, 0).pow(s.neg());
       const out = even.value.sub(odd.value).mul(scale);
       const lost =
-        (1e-16 * Math.max(even.value.abs(), odd.value.abs()) * scale.abs()) /
-        out.abs();
-      const kernelLoss = ((even.error + odd.error) * scale.abs()) / out.abs();
+        (1e-16 *
+          Math.max(modulus(even.value), modulus(odd.value)) *
+          modulus(scale)) /
+        modulus(out);
+      const kernelLoss =
+        ((even.error + odd.error) * modulus(scale)) / modulus(out);
       if (out.isFinite() && lost <= MAX_LOSS && lost + kernelLoss <= ACCURACY)
         return out;
     }

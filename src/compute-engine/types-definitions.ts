@@ -1507,9 +1507,16 @@ export interface BaseCollectionHandlers {
 
   /** Return the number of elements in the collection.
    *
-   * An empty collection has a count of 0.
+   * An empty collection has a count of 0. An infinite collection has a count
+   * of `Infinity`. Return `undefined` when the count cannot be determined.
+   *
+   * A finite count that is not a safe integer (larger than
+   * `Number.MAX_SAFE_INTEGER`) cannot be held exactly by a `number`: return
+   * it as a `bigint`. A handler can also return a `bigint` for a smaller
+   * count: `expr.count` always converts a count that is a safe integer to a
+   * `number`.
    */
-  count: (collection: Expression) => number | undefined;
+  count: (collection: Expression) => number | bigint | undefined;
 
   /** Optional flag to quickly check if the collection is empty, without having to count exactly how may elements it has (useful for lazy evaluation). */
   isEmpty?: (collection: Expression) => boolean | undefined;

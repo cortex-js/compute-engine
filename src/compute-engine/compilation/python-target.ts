@@ -219,15 +219,11 @@ function pyRangeCount(a: string, b: string, s: string): string {
 }
 
 /**
- * A `Take`/`Drop` slice bound or a `Tabulate`/`Fill` dimension: non-negative
- * and ROUNDED, the interpreter's `toInteger` count contract
- * (`Take([…], 2.5)` keeps 3 elements — `Math.round` semantics, i.e.
- * `floor(x + 0.5)`). The previous emissions diverged from the interpreter on
- * fractional runtime counts: `Take`/`Drop` truncated (`int(x)`, dropping an
- * element the interpreter keeps) and `Tabulate`/`Fill` used Python's
- * `round()`, which rounds half to EVEN. A compile-time-constant count is
- * normalized now and emitted as a bare literal (`xs[:10]`, `range(3)`); only
- * a runtime count pays the emitted guard.
+ * A `Tabulate`/`Fill` dimension: non-negative and ROUNDED, the interpreter's
+ * `toInteger` count contract (`Math.round` semantics, i.e. `floor(x + 0.5)`).
+ * The previous emissions used Python's `round()`, which rounds half to EVEN.
+ * A compile-time-constant count is normalized now and emitted as a bare
+ * literal (`range(3)`); only a runtime count pays the emitted guard.
  */
 function pyClampedCount(
   count: Expression,
@@ -235,7 +231,64 @@ function pyClampedCount(
 ): string {
   const n = tryGetConstant(count);
   if (n !== undefined) return `${Math.max(0, Math.round(n))}`;
-  return `max(0, int(np.floor((${compile(count)}) + 0.5)))`;
+  return `max(0, ${pyRoundedCount(count, compile)})`;
+}
+
+/** A count ROUNDED with `Math.round` semantics, `floor(x + 0.5)`. */
+function pyRoundedCount(
+  count: Expression,
+  compile: (expr: Expression) => string
+): string {
+  return `int(np.floor((${compile(count)}) + 0.5))`;
+}
+
+/**
+ * The slice for `Take(coll, count)` or `Drop(coll, count)` over the compiled
+ * sequence `coll`. The count is ROUNDED, the interpreter's `toInteger` count
+ * contract (`Take([…], 2.5)` keeps 3 elements). A negative count counts from
+ * the end, and a count past the length is clamped, as in the interpreter:
+ *
+ * - `Take`: a count `n ≥ 0` is `coll[:n]`, a count `n < 0` is `coll[n:]` (the
+ *   last `|n|` elements; Python clamps `|n|` past the length to the whole
+ *   sequence). A bare `coll[n:]` is not enough: `coll[0:]` is the whole
+ *   sequence, where `Take(xs, 0)` is empty.
+ * - `Drop`: a count `n ≥ 0` is `coll[n:]`, a count `n < 0` is `coll[:n]` (all
+ *   but the last `|n|` elements; empty when `|n|` is past the length).
+ *
+ * A compile-time-constant count is normalized now and the slice is chosen at
+ * compile time (`xs[:10]`, `xs[-2:]`); a runtime count is evaluated once and
+ * the slice is chosen at run time.
+ *
+ * A count whose magnitude is past every length (`10^20`, `±∞`) is clamped as
+ * in the interpreter: `Take` gives the whole sequence and `Drop` gives the
+ * empty sequence, for both signs. A constant count of that size is not
+ * written as a slice bound (`xs[:Infinity]` and `xs[:1e+21]` are not valid
+ * Python). A runtime count is clipped to ±(2^53 − 1) before `int()`, because
+ * `int()` of an infinite float raises `OverflowError`; no sequence is that
+ * long, so the clip does not change the slice. A `NaN` count is not clipped
+ * (`np.clip` keeps it), so `int()` raises `ValueError` for it, as before.
+ */
+function pyTakeDropSlice(
+  op: 'Take' | 'Drop',
+  coll: string,
+  count: Expression,
+  compile: (expr: Expression) => string
+): string {
+  const n = tryGetConstant(count);
+  if (n !== undefined) {
+    const k = Math.round(n);
+    if (Math.abs(k) > Number.MAX_SAFE_INTEGER)
+      return op === 'Take' ? `${coll}[:]` : `${coll}[:0]`;
+    if (op === 'Take') return k < 0 ? `${coll}[${k}:]` : `${coll}[:${k}]`;
+    return k < 0 ? `${coll}[:${k}]` : `${coll}[${k}:]`;
+  }
+  const body =
+    op === 'Take'
+      ? '_l[_n:] if _n < 0 else _l[:_n]'
+      : '_l[:_n] if _n < 0 else _l[_n:]';
+  const limit = Number.MAX_SAFE_INTEGER;
+  const rounded = `int(np.clip(np.floor((${compile(count)}) + 0.5), -${limit}, ${limit}))`;
+  return `(lambda _l, _n: ${body})(${coll}, ${rounded})`;
 }
 
 /**
@@ -4398,13 +4451,13 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     const coll = pyCollArg('Take', args[0], compile);
     if (args[1] == null)
       throw new Error('Could not compile `Take`: missing count');
-    return `${coll}[:${pyClampedCount(args[1], compile)}]`;
+    return pyTakeDropSlice('Take', coll, args[1], compile);
   },
   Drop: (args, compile) => {
     const coll = pyCollArg('Drop', args[0], compile);
     if (args[1] == null)
       throw new Error('Could not compile `Drop`: missing count');
-    return `${coll}[${pyClampedCount(args[1], compile)}:]`;
+    return pyTakeDropSlice('Drop', coll, args[1], compile);
   },
   Reverse: (args, compile) => `${pyCollArg('Reverse', args[0], compile)}[::-1]`,
   Sort: (args, compile) => {

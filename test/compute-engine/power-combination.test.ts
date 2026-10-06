@@ -1,3 +1,4 @@
+import { ComputeEngine } from '../../src/compute-engine';
 import { engine } from '../utils';
 import type { MathJsonExpression as Expression } from '../../src/math-json/types';
 
@@ -178,6 +179,197 @@ describe('Power Combination (#176)', () => {
       ['Multiply', ['Power', 2, ['Add', 'x', 2]], ['Power', 3, ['Add', 'x', 1]]],
       { simplify: true }
     );
+  });
+});
+
+describe('Same-base products need no non-zero base (#415)', () => {
+  // The engine reads `x/x` as 1 for a symbol `x`, and `simplify()` combines
+  // the quotient `x^a / x^b` with no check on the base. Products follow the
+  // same convention.
+  test('symbolic exponents over an unconstrained symbol', () => {
+    check('x^a \\cdot x^b', ['Power', 'x', ['Add', 'a', 'b']], {
+      simplify: true,
+    });
+    check('x^a \\cdot x^{-a}', 1, { simplify: true });
+    check('x \\cdot x^a', ['Power', 'x', ['Add', 'a', 1]], { simplify: true });
+    check('x^a \\cdot x \\cdot x^b', ['Power', 'x', ['Add', 'a', 'b', 1]], {
+      simplify: true,
+    });
+    check('x^a \\cdot x^b \\cdot x^c', ['Power', 'x', ['Add', 'a', 'b', 'c']], {
+      simplify: true,
+    });
+  });
+
+  test('products and quotients agree', () => {
+    const aMinusB = ['Power', 'x', ['Add', 'a', ['Negate', 'b']]] as Expression;
+    check('\\frac{x^a}{x^b}', aMinusB, { simplify: true });
+    check('x^a \\cdot x^{-b}', aMinusB, { simplify: true });
+  });
+
+  test('other factors are kept', () => {
+    check(
+      'y \\cdot x^a \\cdot x^b',
+      ['Multiply', 'y', ['Power', 'x', ['Add', 'a', 'b']]],
+      {
+        simplify: true,
+      }
+    );
+  });
+
+  test('constant and numeric bases still combine', () => {
+    check('e^x \\cdot e^y', ['Power', 'ExponentialE', ['Add', 'x', 'y']], {
+      simplify: true,
+    });
+    check('2^x \\cdot 2^y', ['Power', 2, ['Add', 'x', 'y']], {
+      simplify: true,
+    });
+  });
+
+  test('a base with an assumption', () => {
+    check('t^a \\cdot t^b', ['Power', 't', ['Add', 'a', 'b']], {
+      simplify: true,
+      assume: ['t > 0'],
+    });
+  });
+
+  test('a literal zero base is not combined into 0^0', () => {
+    // Canonicalization reduces 0^{-1} to ComplexInfinity, so the product is
+    // 0·∞, which is indeterminate. It must not become 0^0 or 1.
+    const expr = engine.box(['Multiply', ['Power', 0, 1], ['Power', 0, -1]]);
+    expect(expr.simplify().json).toEqual('Indeterminate');
+    expect(expr.evaluate().json).toEqual('Indeterminate');
+  });
+
+  test('a provably infinite base is not combined', () => {
+    // At u = +∞ and a = 1, u^a·u^(−a) is ∞·0, which is indeterminate. It
+    // must not become 3·u^0 or 3.
+    engine.pushScope();
+    try {
+      engine.declare('u', 'signed_infinity');
+      const product = engine.box([
+        'Multiply',
+        3,
+        ['Power', 'u', 'a'],
+        ['Power', 'u', ['Negate', 'a']],
+      ]);
+      expect(product.simplify().json).toEqual(product.json);
+      const quotient = engine.box([
+        'Divide',
+        ['Power', 'u', 'a'],
+        ['Power', 'u', 'b'],
+      ]);
+      expect(quotient.simplify().json).toEqual(quotient.json);
+    } finally {
+      engine.popScope();
+    }
+  });
+
+  test('evaluate() does not combine symbolic exponents', () => {
+    expect(engine.parse('x^a \\cdot x^b').evaluate().json).toEqual([
+      'Multiply',
+      ['Power', 'x', 'a'],
+      ['Power', 'x', 'b'],
+    ]);
+  });
+});
+
+describe('Same-base powers of a matrix are not combined as scalars', () => {
+  // `Multiply` of two matrices is the matrix product, but `Exp` of a matrix
+  // and `Power` of a matrix with a non-integer exponent are element-wise. So
+  // `Exp(A)·Exp(B)` is not `Exp(A+B)` and `√A·√A` is not `A`. A positive
+  // integer power of a matrix is the matrix power.
+  // Constructing an engine sets the module-global BigDecimal precision. Use
+  // the precision of the shared engine, so that its tests later in this file
+  // are not run at a lower precision.
+  const ce = new ComputeEngine({ precision: engine.precision });
+  ce.declare('A', 'matrix<2x2>');
+  ce.declare('B', 'matrix<2x2>');
+  const L1: Expression = ['List', ['List', 1, 2], ['List', 3, 4]];
+  const L2: Expression = ['List', ['List', 0, 1], ['List', 1, 0]];
+  const simplified = (x: Expression) => ce.box(x).simplify().json;
+
+  test.each<[string, Expression]>([
+    ['Exp(A)·Exp(B)', ['Multiply', ['Exp', 'A'], ['Exp', 'B']]],
+    ['Exp(A)·Exp(A)', ['Multiply', ['Exp', 'A'], ['Exp', 'A']]],
+    ['2^A·2^B', ['Multiply', ['Power', 2, 'A'], ['Power', 2, 'B']]],
+    ['A^a·A^b', ['Multiply', ['Power', 'A', 'a'], ['Power', 'A', 'b']]],
+    ['A·A^a', ['Multiply', 'A', ['Power', 'A', 'a']]],
+    [
+      'A^(1/3)·A^(2/3)',
+      ['Multiply', ['Root', 'A', 3], ['Power', 'A', ['Rational', 2, 3]]],
+    ],
+    ['A^a/A^b', ['Divide', ['Power', 'A', 'a'], ['Power', 'A', 'b']]],
+    ['A^a/A', ['Divide', ['Power', 'A', 'a'], 'A']],
+    ['A/A^a', ['Divide', 'A', ['Power', 'A', 'a']]],
+    ['Exp(L1)·Exp(L2)', ['Multiply', ['Exp', L1], ['Exp', L2]]],
+    ['L1^a·L1^b', ['Multiply', ['Power', L1, 'a'], ['Power', L1, 'b']]],
+  ])('%s is unchanged by simplify()', (_, x) => {
+    expect(simplified(x)).toEqual(ce.box(x).json);
+  });
+
+  test('√A·√A is the matrix square of √A, not A', () => {
+    const x: Expression = ['Multiply', ['Sqrt', 'A'], ['Sqrt', 'A']];
+    const square = ['MatrixPower', ['Sqrt', 'A'], 2];
+    expect(simplified(x)).toEqual(square);
+    expect(ce.box(x).evaluate().json).toEqual(square);
+  });
+
+  test('√L·√L of a literal matrix keeps its value', () => {
+    const x = ce.box(['Multiply', ['Sqrt', L1], ['Sqrt', L1]]);
+    // The matrix product of [[1, √2], [√3, 2]] with itself
+    expect(x.simplify().N().json).toEqual(x.N().json);
+    expect(x.simplify().json).not.toEqual(L1);
+  });
+
+  test('a positive integer power of a matrix is the matrix power', () => {
+    expect(simplified(['Multiply', 'A', 'A'])).toEqual(['MatrixPower', 'A', 2]);
+  });
+
+  test('(e^A)^2 is the matrix power, not e^(2A)', () => {
+    const square = ['MatrixPower', ['Power', 'ExponentialE', 'A'], 2];
+    expect(ce.box(['Power', ['Exp', 'A'], 2]).json).toEqual(square);
+    expect(
+      ce.box(['Multiply', ['Exp', 'A'], ['Exp', 'A']]).evaluate().json
+    ).toEqual(square);
+  });
+
+  test('Exp(L)·Exp(L) of a literal matrix is the matrix product', () => {
+    const e = ce.box(['Exp', L1]).N();
+    const expected = ce.box(['Multiply', e, e]).N().json;
+    expect(ce.box(['Multiply', ['Exp', L1], ['Exp', L1]]).N().json).toEqual(
+      expected
+    );
+  });
+
+  // The matrix product is not commutative: only adjacent factors with the
+  // same base are combined. A non-scalar factor between two factors with the
+  // same base keeps them apart.
+  test.each<[string, Expression]>([
+    ['A·B·A', ['Multiply', 'A', 'B', 'A']],
+    ['B·A·B·A', ['Multiply', 'B', 'A', 'B', 'A']],
+    ['A·A^a·A', ['Multiply', 'A', ['Power', 'A', 'a'], 'A']],
+    ['√A·B·√A', ['Multiply', ['Sqrt', 'A'], 'B', ['Sqrt', 'A']]],
+  ])('%s keeps the order of its factors in simplify()', (_, x) => {
+    expect(simplified(x)).toEqual(ce.box(x).json);
+  });
+
+  test.each<[string, Expression]>([
+    ['√A·B·√A', ['Multiply', ['Sqrt', 'A'], 'B', ['Sqrt', 'A']]],
+    ['A^x·B·A^x', ['Multiply', ['Power', 'A', 'x'], 'B', ['Power', 'A', 'x']]],
+  ])('%s keeps the order of its factors in evaluate()', (_, x) => {
+    expect(ce.box(x).evaluate().json).toEqual(ce.box(x).json);
+  });
+
+  test('adjacent factors with the same base are combined', () => {
+    const square = ['Multiply', ['MatrixPower', 'A', 2], 'B'];
+    expect(simplified(['Multiply', 'A', 'A', 'B'])).toEqual(square);
+    expect(ce.box(['Multiply', 'A', 'A', 'B']).evaluate().json).toEqual(square);
+  });
+
+  test('scalar symbols of the same engine still combine', () => {
+    expect(
+      simplified(['Multiply', ['Power', 'x', 'a'], ['Power', 'x', 'b']])
+    ).toEqual(['Power', 'x', ['Add', 'a', 'b']]);
   });
 });
 

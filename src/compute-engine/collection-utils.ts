@@ -30,6 +30,11 @@ import {
 } from './boxed-expression/machine-number.js';
 import { machineBroadcast } from './boxed-expression/machine-broadcast.js';
 import {
+  isFiniteCount,
+  normalizeCount,
+  smallCount,
+} from './boxed-expression/collection-count.js';
+import {
   isOperatorDef,
   isValueDef,
 } from './boxed-expression/definition-guards.js';
@@ -331,7 +336,7 @@ export function elementCountOfFiniteSource(
   const xs = expr.op1;
   if (xs === undefined) return undefined;
   if (xs.isFiniteCollection !== true) return undefined;
-  return xs.count;
+  return smallCount(xs);
 }
 
 /**
@@ -500,7 +505,10 @@ export function broadcastLengthMismatch(
   ce: Expression['engine'],
   ops: ReadonlyArray<Expression>
 ): Expression | undefined {
-  let first: number | undefined;
+  // A count can be a `bigint` (a finite count that is not a safe integer).
+  // `!==` and the message template give the correct result for a `bigint`,
+  // so such an operand takes part in the check like any other.
+  let first: number | bigint | undefined;
   for (const op of ops) {
     if (!isBroadcastableCollection(op)) continue;
     const n = op.count;
@@ -2492,7 +2500,7 @@ export function broadcastOverIndexedCollections(
   // (stay inert) if any length is not statically known.
   let n = Infinity;
   for (const c of cols) {
-    const len = c.count;
+    const len = smallCount(c);
     if (len === undefined || len < 0) return undefined;
     if (len < n) n = len;
   }
@@ -2959,7 +2967,7 @@ export function windowedCollectionOps(
     count: (expr) => {
       const p = getParams(expr);
       if (p === undefined) return undefined;
-      const n = p.src.count;
+      const n = smallCount(p.src);
       if (n === undefined) return undefined;
       return windowCount(p, n);
     },
@@ -2979,7 +2987,7 @@ export function windowedCollectionOps(
     isEmpty: (expr) => {
       const p = getParams(expr);
       if (p === undefined) return undefined;
-      const n = p.src.count;
+      const n = smallCount(p.src);
       if (n === undefined) return undefined;
       return windowCount(p, n) === 0;
     },
@@ -2988,7 +2996,7 @@ export function windowedCollectionOps(
       const p = getParams(expr);
       if (p === undefined) return undefined;
       const { src, size, step, keepPartial } = p;
-      const n = src.count;
+      const n = smallCount(src);
       if (n === undefined) return undefined;
       const start = (index - 1) * step + 1;
       const end = start + size - 1;
@@ -3221,10 +3229,15 @@ export function zip(items: ReadonlyArray<Expression>): Iterator<Expression[]> {
     };
   }
 
-  // Get the length of the shortest collection
-  const shortest = Math.min(
-    ...items.map((x) => (zipParticipates(x) ? (x.count ?? 1) : Infinity))
-  );
+  // Get the length of the shortest collection. A count can be a `bigint` (a
+  // finite count that is not a safe integer), so the minimum uses `<`, which
+  // compares a `bigint` and a `number` correctly; `Math.min()` throws for a
+  // `bigint`. Reading such a count as unknown gave it the fallback length 1,
+  // and the zip stopped after one row.
+  const shortest = items.reduce<number | bigint>((min, x) => {
+    const n = zipParticipates(x) ? (x.count ?? 1) : Infinity;
+    return n < min ? n : min;
+  }, Infinity);
 
   // When no item supplies cells, every item is repeated and the zip would
   // never end. Yield one row that holds each item whole, as for a single
@@ -3690,11 +3703,13 @@ function storeContains(store: readonly number[], x: number): boolean {
  * source and throw during canonicalization.
  */
 function countOrUndefinedOnIterationLimit(
-  count: (expr: Expression) => number | undefined,
+  count: (expr: Expression) => number | bigint | undefined,
   expr: Expression
-): number | undefined {
+): number | bigint | undefined {
   try {
-    return count(expr);
+    // The handler result is not normalized yet: a handler can return a small
+    // `bigint` such as `0n`, which would fail the `=== 0` test below.
+    return normalizeCount(count(expr));
   } catch (e) {
     if (
       e instanceof CancellationError &&
@@ -3737,7 +3752,7 @@ export function defaultCollectionHandlers(
       ((expr) => {
         const count = countOrUndefinedOnIterationLimit(def.count, expr);
         if (count === undefined) return undefined;
-        return Number.isFinite(count);
+        return isFiniteCount(count);
       }),
     subsetOf: def.subsetOf ?? collectionSubset,
   };

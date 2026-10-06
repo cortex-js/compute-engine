@@ -115,6 +115,7 @@ import {
   callerSpliceSources,
   preservesMappedSplices,
 } from './constant-folding.js';
+import { smallCount } from '../boxed-expression/collection-count.js';
 
 /**
  * Interval arithmetic operators mapped to _IA library calls.
@@ -701,7 +702,7 @@ function seededChoiceDomain(domain: Expression): string | undefined {
     const ops = domain.ops.map(real);
     if (ops.length < 1 || ops.length > 3) return undefined;
     if (ops.some((x) => x === undefined)) return undefined;
-    const n = domain.count;
+    const n = smallCount(domain);
     if (n === undefined || !Number.isFinite(n) || n <= 0) return undefined;
     const [first, step] =
       ops.length === 1

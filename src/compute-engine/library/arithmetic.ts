@@ -373,6 +373,10 @@ import {
   enumerationDeclinedAfterWalk,
 } from './collections.js';
 import {
+  rangeExtremumClosedForm,
+  rangeSumClosedForm,
+} from './range-closed-form.js';
+import {
   run,
   runAsync,
   CancellationError,
@@ -10461,6 +10465,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // collection whose iterator declines (symbolic elements) would
           // silently fold to 0 — stay symbolic too.
           if (first.isFiniteCollection !== true) return undefined;
+          // A `Range` with exact rational bounds and step is summed with the
+          // closed form of an arithmetic sequence, not walked: see
+          // `rangeSumClosedForm`.
+          const closedForm = rangeSumClosedForm(
+            engine,
+            first,
+            numericApproximation
+          );
+          if (closedForm !== undefined) return closedForm;
           // A `List` of machine numbers is summed on its doubles: see
           // `machineSum`.
           const summed = machineSum(first);
@@ -10613,6 +10626,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               _effects: effects,
             });
           if (first.isFiniteCollection !== true) return undefined;
+          // An exact `Range` has a closed form — see the sync handler.
+          const closedForm = rangeSumClosedForm(
+            engine,
+            first,
+            numericApproximation
+          );
+          if (closedForm !== undefined) return closedForm;
           // Decline read off the fold's own walk — see the sync handler.
           let walked = 0;
           const nonFinite = new NonFiniteTerm();
@@ -11701,6 +11721,11 @@ function processMinMaxItem(
   if (item.operator === 'Range') {
     // Symbolic bounds (e.g. Range(1, n)): the extremum is indeterminate
     if (hasSymbolicRangeBounds(item)) return [undefined, [item]];
+    // Exact rational bounds and step give the exact first or last element.
+    // The machine reading below rounds a bound larger than 2^53, and a
+    // rational element (`1/3`) becomes a float.
+    const exact = rangeExtremumClosedForm(ce, item, upper);
+    if (exact !== undefined) return [exact, []];
     // The run may descend (`Range(1, -oo)` is 1, 0, -1, …), so the
     // extremum is the larger or smaller of the first and last elements, as
     // for `Max`. Reading the first element for `Min` answered 1 for that

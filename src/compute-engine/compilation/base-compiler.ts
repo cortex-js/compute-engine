@@ -113,6 +113,7 @@ import {
   isRelationalOperator,
 } from '../latex-syntax/utils.js';
 import { normalizeIndexingSet } from '../library/utils.js';
+import { machineRangeCountDiffers } from '../library/range-closed-form.js';
 import {
   isSymbol,
   isNumber,
@@ -235,6 +236,7 @@ import {
   exactValueDoubleRoundings,
 } from '../numeric-value/exact-integer-value.js';
 import { rangeCount, RANGE_COUNT_JS_SOURCE } from '../numerics/range-count.js';
+import { smallCount } from '../boxed-expression/collection-count.js';
 
 /** `real<0..>`: every real number that is not negative. */
 const NON_NEGATIVE_REAL_TYPE = nonNegativeRangeType('real');
@@ -7447,18 +7449,21 @@ export class BaseCompiler {
       const n = rangeCount(lo, hi, s);
       return Number.isFinite(n) ? n : undefined;
     }
-    // A bounding consumer caps its source: `Take(xs, n)` walks at most `n`.
+    // A bounding consumer caps its source: `Take(xs, n)` keeps at most `|n|`
+    // elements. A negative count counts from the end (`Take(xs, -2)` is the
+    // last two elements, `Drop(xs, -2)` is `xs` without them), so both sizes
+    // depend on the magnitude of the count only.
     if (expr.operator === 'Take' && ops.length >= 2) {
       const n = BaseCompiler.bigOpBoundConstant(ops[1]);
       if (n === undefined) return undefined;
       const src = BaseCompiler.staticCollectionSize(ops[0], depth + 1);
-      return src === undefined ? Math.max(0, n) : Math.min(src, Math.max(0, n));
+      return src === undefined ? Math.abs(n) : Math.min(src, Math.abs(n));
     }
     if (expr.operator === 'Drop' && ops.length >= 2) {
       const src = BaseCompiler.staticCollectionSize(ops[0], depth + 1);
       const n = BaseCompiler.bigOpBoundConstant(ops[1]);
       if (src === undefined || n === undefined) return undefined;
-      return Math.max(0, src - Math.max(0, n));
+      return Math.max(0, src - Math.abs(n));
     }
     // A unary `Map` preserves its source's length; the zipWith form
     // `Map(f, xs, ys, …)` is as long as its SHORTEST source. A source whose
@@ -7538,7 +7543,7 @@ export class BaseCompiler {
   ): Expression[] | undefined {
     if (value.isFiniteCollection !== true) return undefined;
     if (value.isIndexedCollection !== true) return undefined;
-    const count = value.count;
+    const count = smallCount(value);
     if (count === undefined || count > maxElements) return undefined;
     const elements: Expression[] = [];
     for (const element of value.each()) {
@@ -7769,6 +7774,13 @@ export class BaseCompiler {
    * multi-clause function. Each name is read once. Other symbol values are
    * not read: the compiler compiles such a value as an expression, through
    * `_compileInner`, which checks each node.
+   *
+   * The walk also declines a `Range` whose operands are exact rationals
+   * (number literals, or constant expressions such as `10^400`) when the
+   * machine count of its elements, which compiled code uses, is not the
+   * count of the interpreter (`machineRangeCountDiffers()`,
+   * `library/range-closed-form.ts`): `Range(0, 9999999999999/10^12, 1)` has
+   * 10 elements, and compiled code would count 11.
    */
   private static findShadowedLibraryLowering(
     expr: Expression,
@@ -7812,6 +7824,21 @@ export class BaseCompiler {
         );
       const error = heads.get(h);
       if (error !== undefined) return error;
+      if (
+        h === 'Range' &&
+        machineRangeCountDiffers(
+          e,
+          (s) =>
+            target.varsKeys?.has(s) === true ||
+            target.boundVars?.has(s) === true
+        )
+      )
+        return (
+          `Could not compile \`Range\`: its operands are exact rationals, ` +
+          `and the interpreter counts its elements exactly, but compiled ` +
+          `code counts them in machine arithmetic, which gives a different ` +
+          `count. The interpreter evaluates it instead.`
+        );
       for (const op of e.ops) {
         const found = visit(op);
         if (found !== undefined) return found;

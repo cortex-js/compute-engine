@@ -2191,14 +2191,18 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     expect(runJs(mkEngine(), ['Last', 'd'])).toBe(30);
   });
 
-  it('Rest / Take / Drop compile to slices (count clamped ≥ 0)', () => {
+  it('Rest / Take / Drop compile to slices (a negative count counts from the end)', () => {
     const e = mkEngine();
     expect(runJs(e, ['Rest', 'd'])).toEqual([20, 30]);
     expect(runJs(e, ['Take', 'd', 2])).toEqual([10, 20]);
-    expect(runJs(e, ['Take', 'd', -1])).toEqual([]); // negative → []
+    expect(runJs(e, ['Take', 'd', 0])).toEqual([]);
+    expect(runJs(e, ['Take', 'd', -1])).toEqual([30]); // the last element
+    expect(runJs(e, ['Take', 'd', -9])).toEqual([10, 20, 30]); // clamped → all
     expect(runJs(e, ['Take', 'd', 9])).toEqual([10, 20, 30]); // past end → all
     expect(runJs(e, ['Drop', 'd', 1])).toEqual([20, 30]);
-    expect(runJs(e, ['Drop', 'd', -1])).toEqual([10, 20, 30]); // negative → all
+    expect(runJs(e, ['Drop', 'd', 0])).toEqual([10, 20, 30]);
+    expect(runJs(e, ['Drop', 'd', -1])).toEqual([10, 20]); // all but the last
+    expect(runJs(e, ['Drop', 'd', -9])).toEqual([]); // clamped → []
     expect(runJs(e, ['Drop', 'd', 9])).toEqual([]); // past end → []
   });
 

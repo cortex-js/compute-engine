@@ -219,6 +219,169 @@ describe('PolyLog at a large |z| for an order above 2', () => {
   });
 });
 
+describe('PolyLog at a large order past |z| = 1 (cortex-js/compute-engine#412)', () => {
+  // At a large order the first terms of the power series give the value
+  // (`polylogSeriesOutsideDisk`). The inversion formula of the integer
+  // orders gave wrong values from n = 171 on (n! overflows a double), and
+  // it took minutes or did not return for an order in the thousands.
+  ce.declare('lo_s', 'real');
+  ce.declare('lo_z', 'real');
+  const run = compile(ce.box(['PolyLog', 'lo_s', 'lo_z']))?.run;
+
+  function expectClose(
+    v: { re: number; im: number },
+    re: number,
+    im: number,
+    tolerance = 1e-15
+  ) {
+    expect(Math.hypot(v.re - re, v.im - im)).toBeLessThanOrEqual(
+      tolerance * Math.hypot(re, im)
+    );
+  }
+
+  test.each([
+    // mpmath: polylog(250,4) = 4.0 - 1.0198638594975983743e-454j
+    [250, 4, 4],
+    // mpmath: polylog(250,-4) = -4.0
+    [250, -4, -4],
+    // mpmath: polylog(2500000,4) = 4.0 - 1.91e-14554472j
+    [2500000, 4, 4],
+    // mpmath: polylog(2500000.5,4) = 4.0 - 7.11e-14554476j
+    [2500000.5, 4, 4],
+    // mpmath: polylog(100.5,-4) = -3.99999999999999999999999999999
+    [100.5, -4, -4],
+  ])('Li_%p(%p) = %p', (s, z, expected) => {
+    const v = li(s, z).N();
+    expect(isNumber(v)).toBe(true);
+    expectClose(v, expected, 0);
+  });
+
+  test('on the branch cut, a negligible imaginary part is kept', () => {
+    // mpmath: polylog(20,1.5) = 1.50000214673983975986230772579 - 9.18695336297433125957916525149e-25j
+    const v = li(20, 1.5).N();
+    expectClose(v, 1.50000214673983975986, 0);
+    expect(Math.abs(v.im / -9.18695336297433125958e-25 - 1)).toBeLessThan(
+      1e-12
+    );
+  });
+
+  test('on the branch cut, an order 30 still uses the inversion formula', () => {
+    // mpmath: polylog(30,1e4) = 10000.096682241643102259107197 - 0.0032704368927528762317118713611j
+    expectClose(
+      li(30, 1e4).N(),
+      10000.096682241643102259107197,
+      -0.0032704368927528762317118713611,
+      1e-13
+    );
+  });
+
+  test('a complex z matches mpmath', () => {
+    // mpmath: polylog(25,2-3j) = 1.99999985093399202615487307585 - 3.00000035763838216121816443678j
+    expectClose(
+      li(25, ['Complex', 2, -3]).N(),
+      1.99999985093399202615487307585,
+      -3.00000035763838216121816443678
+    );
+    // mpmath: polylog(171,-3+1j) = -3.0 + 1.0j
+    expectClose(li(171, ['Complex', -3, 1]).N(), -3, 1);
+  });
+
+  test('a z next to the branch cut matches mpmath', () => {
+    // mpmath: polylog(1000,4+1e-9j) = 4.0 + 1.00000000000000006228159145778e-9j
+    expectClose(li(1000, ['Complex', 4, 1e-9]).N(), 4, 1e-9);
+  });
+
+  test('the compiled lane gives the real value below z = −1', () => {
+    // mpmath: polylog(200,-4) = -4.0
+    expect(run?.({ lo_s: 200, lo_z: -4 })).toBe(-4);
+    // mpmath: polylog(40.5,-10) = -9.99999999993568906037676159257
+    expect(
+      Math.abs(
+        (run?.({ lo_s: 40.5, lo_z: -10 }) as number) + 9.99999999993568906
+      )
+    ).toBeLessThan(1e-14);
+  });
+
+  test('where no route gives the value, PolyLog stays unevaluated', () => {
+    // On the branch cut at a large z the imaginary part is not negligible
+    // (mpmath: polylog(250,1e100) = 8.9969521347604057526e+99 - 3.7775478312087685438e+98j),
+    // so the series does not answer, and the inversion formula is not used
+    // above the order 170.
+    const v = li(250, 1e100).N();
+    expect(v.operator).toBe('PolyLog');
+  });
+});
+
+describe('PolyLog at a large order next to the branch cut, with |z| above 1e154', () => {
+  // The remainder bound of the series divides by δ, the distance from 1 to
+  // the segment [0, z]. At z = 1e200 ± 1e184·i, δ is 1e−16. δ was computed
+  // from |z|², which overflows above |z| ≈ 1.3e154, and was then 1: the
+  // bound was 16 orders too small. References: the series with its bound
+  // |z|^{N+1}/((N+1)ˢ·δ), summed by mpmath at 60 digits.
+  function expectClose(v: { re: number; im: number }, re: number, im: number) {
+    expect(Math.hypot(v.re - re, v.im - im)).toBeLessThanOrEqual(
+      1e-15 * Math.hypot(re, im)
+    );
+  }
+
+  test.each([
+    // series to N = 1: 1.0e+200 + 1.0e+184j, relative bound 1.5e−25
+    [800, 1e184],
+    [800, -1e184],
+    // series to N = 1: 1.0e+200 + 1.0e+184j, relative bound 1.1e−25
+    [800.5, 1e184],
+    [800.5, -1e184],
+  ])('Li_%p(z) at z = 1e200 + %pi matches the series', (s, im) => {
+    const v = li(s, ['Complex', 1e200, im]).N();
+    expect(isNumber(v)).toBe(true);
+    expectClose(v, 1e200, im);
+  });
+
+  test.each([
+    // The series diverges after its first term, so no bound is small.
+    [300, 1e184],
+    [300, -1e184],
+    [300.5, 1e184],
+    [300.5, -1e184],
+    // The smallest bound, after N = 1 term, is 1.7e−10 (s = 750) and
+    // 1.2e−10 (s = 750.5) of the value: the series does not give double
+    // precision. With δ = 1 the bound was 1e−16 of these, and the series
+    // answered.
+    [750, 1e184],
+    [750, -1e184],
+    [750.5, 1e184],
+    [750.5, -1e184],
+  ])('Li_%p(z) at z = 1e200 + %pi stays unevaluated', (s, im) => {
+    expect(li(s, ['Complex', 1e200, im]).N().operator).toBe('PolyLog');
+  });
+});
+
+describe('PolyLog at a large order inside the disk', () => {
+  // From the order 8 on, the direct series is used on the whole disk; the
+  // ln-expansion about z = 1 costs O(n) work. Above machine precision, the
+  // arbitrary-precision series skips the terms that cannot change the sum.
+  test.each([
+    // mpmath: polylog(2500000,0.9) = 0.9 (to 30 digits)
+    [2500000, 0.9],
+    [2500000, -0.9],
+    [1e9, 0.99],
+    [2500000.5, 0.5],
+  ])('Li_%p(%p) = z', (s, z) => {
+    expect(li(s, z).N().re).toBe(z);
+  });
+
+  test('at machine precision', () => {
+    const saved = ce.precision;
+    ce.precision = 'machine';
+    try {
+      for (const z of [0.9, -0.9, -0.6, 0.99])
+        expect(li(2500000, z).N().re).toBe(z);
+    } finally {
+      ce.precision = saved;
+    }
+  });
+});
+
 describe('PolyLog of a negative integer order: the Eulerian closed form', () => {
   test('Li₋₂(1/2) is the exact 6', () => {
     // mpmath: polylog(-2,0.5) = 6.0

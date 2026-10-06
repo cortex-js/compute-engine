@@ -5094,6 +5094,10 @@ export function makeLazyStreamHelpers(
     new Error(
       `Iteration limit of ${source.iterationLimit()} exceeded while evaluating ${op}()`
     );
+  const negativeCountOverStream = (op: string): Error =>
+    new Error(
+      `${op}(): a negative count counts from the end, and an infinite collection has no end`
+    );
   // Which helpers get the iteration cap, and what it counts.
   //
   // The cap exists to turn a walk that can NEVER FINISH into the interpreter's
@@ -5143,11 +5147,15 @@ export function makeLazyStreamHelpers(
           throw exceeded('Filter');
       }
     },
-    // A negative count drops nothing (`Drop(xs, -2)` is `xs`, matching the
-    // eager lowering's clamp and the interpreter).
+    // A negative count drops the LAST elements, and an infinite stream has
+    // no last elements: the interpreter leaves `Drop(1..∞, -2)` unevaluated,
+    // and here such a count throws instead of yielding a wrong walk. (A
+    // constant negative count never reaches this helper: the compiler does
+    // not lower that pipeline as a stream.)
     dropIter: function* (it, n) {
       const k = intCount(n);
       if (k === null) return;
+      if (k < 0) throw negativeCountOverStream('Drop');
       let dropped = 0;
       for (const x of it) {
         if (dropped < k) {
@@ -5158,11 +5166,14 @@ export function makeLazyStreamHelpers(
       }
     },
     // Materialize the first k elements of a (possibly infinite) stream — one
-    // of the two points where a lazy pipeline becomes an array. A negative or
-    // invalid count yields [].
+    // of the two points where a lazy pipeline becomes an array. An invalid
+    // count yields []. A negative count takes the LAST elements, which an
+    // infinite stream does not have, so it throws (the interpreter leaves
+    // `Take(1..∞, -2)` unevaluated).
     takeIter: (it, n) => {
       const k = intCount(n);
-      if (k === null || k <= 0) return [];
+      if (k === null || k === 0) return [];
+      if (k < 0) throw negativeCountOverStream('Take');
       const out: unknown[] = [];
       for (const x of it) {
         out.push(x);

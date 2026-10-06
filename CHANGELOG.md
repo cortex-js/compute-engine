@@ -1,6 +1,126 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- **A negative `Take`/`Drop` count counts from the end**
+  ([#414](https://github.com/cortex-js/compute-engine/issues/414), reported by
+  [enumeratio](https://github.com/enumeratio)). `Take(xs, -n)` is the last `n`
+  elements of `xs`, and `Drop(xs, -n)` is `xs` without its last `n` elements:
+  `Take([1, 2, 3, 4, 5], -2)` is `[4, 5]` (it was `[]`) and
+  `Drop([1, 2, 3, 4, 5], -2)` is `[1, 2, 3]` (it was the whole list). A string
+  gives a string: `Take("hello", -2)` is `"lo"` and `Drop("hello", -2)` is
+  `"hel"`. A count past the length is still clamped, now in both directions:
+  over 5 elements, `Take(xs, 10)` and `Take(xs, -10)` are all 5 elements, and
+  `Drop(xs, 10)` and `Drop(xs, -10)` are `[]`. A count of 0 is unchanged. A
+  negative count needs the length of the collection: when that length is not
+  known or is infinite (`Take(Range(1, ∞), -2)`, a symbol with no value), the
+  expression stays unevaluated. Compiled JavaScript and Python give the same
+  results. In compiled JavaScript, a negative count over an infinite collection
+  is a compile error when the count is a constant, and throws when the count is
+  known only at run time.
+
+- **A collection count can be a `bigint`**
+  ([#416](https://github.com/cortex-js/compute-engine/issues/416), reported by
+  [enumeratio](https://github.com/enumeratio)). The type of `expr.count` and
+  of the `count` collection handler is now `number | bigint | undefined`. A
+  `bigint` is used only for a finite count that is not a safe integer (larger
+  than `Number.MAX_SAFE_INTEGER`); a smaller count is always a `number`, and
+  an infinite count is `Infinity`. A handler can return a `bigint` for any
+  count: `expr.count` converts a safe one to a `number`. Code that does
+  arithmetic with `expr.count` must check its type first, because JavaScript
+  throws a `TypeError` when a `bigint` and a `number` are mixed.
+  `Count(QuotientRing(Integers, 2^61 - 1))`, `Length` and
+  `|\mathbb{Z}_{2^{61}-1}|` now give the exact integer 2305843009213693951;
+  they stayed unevaluated. Other counts are exact where they were rounded
+  floats, `Infinity` or `undefined`:
+  - `Range` with exact integer bounds: `Count(Range(1, 10^20 + 1))` is
+    100000000000000000001 (it was `1e20`).
+  - `CartesianProduct`, `Permutations`, `Combinations` and `PowerSet`:
+    `Count(Permutations(Range(1, 200)))` is 200! (it was `+∞`), and
+    `PowerSet` of a set with 1100 elements has the count 2^1100 and is finite
+    (it was `+∞` and infinite). A count that needs more than 10,000
+    multiplications to compute stays unknown; a finite collection is never
+    reported as infinite.
+  - `Repeat(x, n)` with an `n` that is not a safe integer.
+  - The views of such a collection: `Take`, `Drop`, `Rest`, `Most`, `Zip`,
+    `Insert`, `DeleteAt`, `ReplaceAt` and `When`.
+
+  The count of a `CartesianProduct` or a `PowerSet` with an operand of unknown
+  size is `undefined`; it was `NaN`. A ring ℤ/nℤ with more than 2^53 elements
+  is not enumerable: `Sum`, `Max` and the other operators that walk a
+  collection to its end stay unevaluated. Indexing from the end of a
+  collection whose count is a `bigint` is not supported yet:
+  `Last(Range(1, 10^20))` stays unevaluated (it was `1e20`), and
+  `Take(Range(1, 10^20), -2)` stays unevaluated (it was the wrong
+  `[1e20, 1e20]`).
+
+### Behavior Changes
+
+- **`simplify()` combines same-base powers in a product as it does in a
+  quotient** ([#415](https://github.com/cortex-js/compute-engine/issues/415),
+  reported by [enumeratio](https://github.com/enumeratio)). For a symbol `x`
+  with no assumptions, `x^a / x^b` simplified to `x^(a−b)`, but `x^a · x^b` was
+  left unchanged, because the product rule required a base known to be
+  non-zero. The engine already reads `x/x` as `1` for a symbol `x`, so products
+  now follow the same convention: `x^a · x^b` is `x^(a+b)`, `x^a · x^(−a)` is
+  `1`, `x · x^a` is `x^(a+1)` and `x^a · x · x^b` is `x^(a+b+1)`. `evaluate()`
+  does not change: it still leaves `x^a · x^b` as it is. A literal zero base is
+  not affected: `0^1 · 0^(−1)` is still `Indeterminate`.
+
 ### Issues Resolved
+
+- **`Take` and `Drop` with a symbolic count no longer give a wrong answer to
+  `Any` or `All`.** `Any(Take([1, 2, 3], n), x > 0)` was `False` and
+  `All(Drop([1, 2, 3], n), x < 0)` was `True`. Both now stay unevaluated.
+
+- **`Take` and `Drop` with a count past the safe integers or an infinite count
+  clamp to the length.** `Take([1, 2, 3], 10^20)`, `Take([1, 2, 3], 1e20)` and
+  `Take([1, 2, 3], ∞)` stayed unevaluated, while compiled JavaScript gave `[1, 2, 3]` and compiled
+  Python raised an `OverflowError`. All three now give `[1, 2, 3]`.
+
+- **Collection views no longer give a wrong answer to `Any` or `All` when
+  their walk cannot produce the elements.** `Reverse`, `RotateLeft` and
+  `RotateRight` of a collection with more than 2^53 elements, and `Insert`,
+  `DeleteAt`, `ReplaceAt` and `Slice` without a usable position, reported
+  that they could be walked, so `Any` gave `False` and `All` gave `True`.
+  These now stay unevaluated. `Repeat(x, n)` with a negative `n` past the safe
+  integers is empty in every respect: `Element(x, …)` was `True`.
+
+- **A `Range` with exact bounds and step has the exact number of elements.**
+  The count of a `Range` was computed in floats with a small tolerance, so a
+  `Range` whose exact upper bound is just below a step gave one element too
+  many, above its upper bound: `Range(0, 9999999999999/10^12)` gave the
+  elements 0 to 10, and `Range(1, 10^20, 1/2)` counted 200000000000000000000
+  elements (the count is 199999999999999999999). A `Range` with a bound past
+  the largest double, such as `Range(1, 10^400)`, was infinite: `Length` was
+  `+∞`. With exact bounds and step, the count, the elements, `Length`,
+  `Element`, `Last` and the reducers now all use the exact count. With a float
+  bound or step, the count is computed in floats as before.
+
+- **`Max` and `Min` of a `Range` are exact.** `Min(Range(10^20 + 1, 1, -1))`
+  was `0`, `Max(Range(1, 10^20 + 1))` was the rounded float `1e20`, and
+  `Min(Range(1/3, 1, 1/3))` was `0.333…`. They are now `1`,
+  `100000000000000000001` and `1/3`: the first or last element, read
+  exactly.
+
+- **`Sum`, `Mean`, `Median`, `Variance` and `PopulationVariance` of a `Range`
+  no longer go through every element.** With exact integer or rational bounds
+  and step, they use the closed form of an arithmetic sequence:
+  `Sum(Range(1, 10^6))` took 3 s and now takes less than 1 ms, and
+  `Sum(Range(1, 10^20))` did not finish and is now the exact
+  `5000000000000000000050000000000000000000`. `evaluate()` gives the exact
+  value, and `.N()` gives a float for a result that is not an integer.
+
+- **Powers of a matrix are no longer combined as if they were numbers**
+  ([#415](https://github.com/cortex-js/compute-engine/issues/415)). The
+  product of two matrices is the matrix product, but `Exp` of a matrix and a
+  non-integer power of a matrix are element-wise, so the same-base rules gave
+  wrong answers for matrices: `simplify()` turned `Exp(A)·Exp(B)` into
+  `Exp(A+B)` (also for literal matrices), `A^a / A^b` into `A^(a−b)`, and
+  `√A·√A` and `A^(1/3)·A^(2/3)` into `A`, and `(e^A)^2` was `e^(2A)`. These
+  now stay as they are, except where a matrix power applies: `√A·√A` is
+  `MatrixPower(√A, 2)`, `(e^A)^2` is `MatrixPower(e^A, 2)`, and `A·A` is
+  `MatrixPower(A, 2)`.
 
 - **A definite integral with an irrational bound keeps its exact value.**
   `∫_2^{√5} 4 dx` was `0.944…`; it is now `4√5 − 8`. The same applied to
@@ -29,6 +149,48 @@
   - `CharacteristicPolynomial([[a, b], [c, d]], x)` stayed
     `Determinant([[x − a, −b], [−c, x − d]])`; it is now
     `x² − (a + d)x + ad − bc`.
+
+- **`PolyLog` at a large order past |z| = 1**
+  ([#412](https://github.com/cortex-js/compute-engine/issues/412), reported by
+  [enumeratio](https://github.com/enumeratio)). For an integer order above 170
+  and |z| > 1 the value was wrong: `PolyLog(250, 4).N()` was `−0.25` and
+  `PolyLog(250, −4).N()` was `0.25`, where the values are `4` and `−4` to
+  double precision. At a larger order the evaluation was slow or did not end:
+  `PolyLog(1000, 4)` stayed unevaluated after 0.2 s, `PolyLog(5000, 4)` ran for
+  minutes and `PolyLog(2500000, 4)` did not return. Now, when the first terms
+  of the power series give the value (the error of the partial sum has a
+  proven bound off the branch cut), they are used: these points answer at
+  once, also for a non-integer order (`PolyLog(2500000.5, 4)` stayed
+  unevaluated after 2 s). The compiled `PolyLog` gives the same values:
+  `PolyLog(200, −4)` was `0.25` and is now `−4`. A non-integer order between
+  about 70 and 200 past |z| = 1 was also inaccurate: `PolyLog(170.5, −4)` was
+  off by 0.7%, and `PolyLog(200.5, 1e40)` was about `−1e−40·i`. The first is
+  now correct, and the second stays unevaluated, as do the other points where
+  no method gives the value, such as `PolyLog(250, 1e100)`. For an integer
+  order from 8 to 170 past |z| = 1 the series is more accurate than the
+  inversion formula used before: on the measured points where the series
+  answers, the largest relative error went from 5e−14 to 7e−16.
+
+  Inside the unit disk, an integer order of 8 or more now uses the power
+  series. `PolyLog(1e9, 0.99)` took seconds and now answers at once, and the
+  values are correct to the last digit (`PolyLog(2500000, −0.9)` was
+  `−0.9000000000000012` with `precision: 'machine'`). Above machine precision,
+  `PolyLog(2500000, 0.3)` took 1.6 s and `PolyLog(1e7, 0.3)` 2.3 s; they now
+  answer at once.
+
+- **`LerchPhi` and `PolyLog` at a very large |z| or a large order.** The
+  continuation of the Lerch transcendent past |z| = 1 returned wrong values
+  that passed its own error check: `LerchPhi(1e100, 20.25, 1).N()` was
+  `−0.170`, where the value is `−1.29e−71`, so `PolyLog(20.25, 1e100).N()`
+  was `−1.7e99` instead of `−1.29e29`. At orders from 80 to 150 and |z| from
+  1e8 to 1e40, values were off by up to 2.5e−10. The tail integral did not
+  follow the oscillation of the integrand, and several factors underflowed.
+  Now the values are correct within 1e−11, or the expression stays
+  unevaluated: on 12,000 points checked against an independent 25- to
+  100-digit computation, no value is off by more than 8.8e−13 (before, 1,209
+  were off by more than 1e−11). For an order with a positive real part, the
+  first terms of the series with a proven bound of the rest now give the
+  value at once where they suffice.
 
 ## 0.148.0 _2026-10-05_
 

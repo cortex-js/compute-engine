@@ -3,6 +3,7 @@ import { isFunction, isNumber } from '../boxed-expression/type-guards.js';
 import { asRational } from '../boxed-expression/numerics.js';
 import { baseOffset } from './simplify-factorial.js';
 import { isCollectionShaped } from '../collection-utils.js';
+import { canCombineSameBase } from './simplify-power.js';
 
 /**
  * Division simplification rules consolidated from simplify-rules.ts.
@@ -116,7 +117,18 @@ export function simplifyDivide(x: Expression): RuleStep | undefined {
       denomExp = ce.One;
     }
 
-    if (numBase && denomBase && numBase.isSame(denomBase)) {
+    // Not for a matrix or another collection: see `canCombineSameBase()`.
+    if (
+      numBase &&
+      denomBase &&
+      numBase.isSame(denomBase) &&
+      canCombineSameBase(
+        numBase,
+        [numExp!, denomExp!],
+        [num, denom],
+        'quotient'
+      )
+    ) {
       // Only apply when at least one exponent is non-rational (symbolic)
       // Rational cases are already handled by canonicalization
       if (!asRational(numExp!) || !asRational(denomExp!)) {

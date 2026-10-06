@@ -133,6 +133,73 @@ quotient, or use a division-free elimination. A radical whose square-free
 radicand is above 10⁶ also still becomes a float in a product
 (`ExactNumericValue.mul`), because such a radicand is not stored.
 
+### `PolyLog` past |z| = 1 at an order above 170 stays unevaluated for a very large |z| (OPEN, small — found 2026-10-06 by the fix for issue #412)
+
+Past the unit circle, a real order uses the first terms of the power series
+when they give the value (`polylogSeriesOutsideDisk`,
+`numerics/numeric-complex.ts`). The series stops answering when its terms
+grow before they fall, which happens when |z| is large compared with 2ˢ,
+and on the branch cut z > 1 when the imaginary part −π·(ln z)^{s−1}/Γ(s)
+is above 1e−20. The other routes do not answer above the order 170: the
+inversion formula of the integer orders needs n!, which overflows a double
+at n = 171, and Jonquière's inversion of the non-integer orders needs
+Γ(s), which overflows at s ≈ 171.6. So `.N()` stays unevaluated for these
+points, although the values exist (mpmath gives
+`polylog(250, 1e100) = 8.997e99 − 3.778e98i`):
+
+- integer orders: `PolyLog(171, z)`, `PolyLog(200, z)` and
+  `PolyLog(250, z)` for z = 1e100, −1e100, 1e100·i and 1e300 + 1e300·i;
+  `PolyLog(500, 1e100)`, `PolyLog(500, 1e300 + 1e300i)`,
+  `PolyLog(1000, 1e300 + 1e300i)`;
+- non-integer orders: `PolyLog(250.5, z)` for the same four z,
+  `PolyLog(171.5, 1e300 + 1e300i)`, `PolyLog(1000.5, 1e300 + 1e300i)`,
+  `PolyLog(200.5, 1e40)`, and also `PolyLog(20.25, 1e300 + 1e300i)`;
+- the compiled lane (`_SYS.polyLog`, real values only) gives `NaN` for
+  `PolyLog(171, −1e100)`, `PolyLog(200, −1e100)` and
+  `PolyLog(250, −1e100)`.
+
+A possible route: the asymptotic expansion of Liₛ(z) for a large |ln z|
+(DLMF 25.12.12 with the Hurwitz zeta form of Jonquière's formula), with
+(2π)ˢ/Γ(s) computed from logarithms so that it does not overflow.
+
+### The modulus of a very small complex number is wrong or `0` (OPEN, decision — found 2026-10-06 by the Lerch kernel fix)
+
+`Complex.abs()` of the `complex-esm` dependency computes `√(a² + b²)` without
+scaling when both parts are below 3000. So a modulus below about 1.5e−154
+underflows: `new Complex(3e−200, 4e−200).abs()` is `0` (the value is
+5e−200), and a subnormal square loses digits: `new Complex(1e−160, 0).abs()`
+is `9.99994e−161`. `Math.hypot` gives the correct values. `numerics/lerch-phi.ts`
+now uses its own `modulus()` (`Math.hypot`), and its error estimates had
+dropped small terms because of this. `src/` has 258 `.abs()` calls (99 in
+`numerics/numeric-complex.ts`), and the error estimates of other kernels can
+drop small terms in the same way. The same unscaled `hypot` can also affect
+other `complex-esm` methods that call it. A decision is necessary on the form of
+the fix: one shared `modulus()` helper used everywhere in `src/`, a
+replacement of `Complex.prototype.abs` when the engine loads (the build
+bundles `complex-esm`, so only the engine's copy changes — to confirm), or a
+fix in `complex-esm` itself (a fork, or a pull request to its repository).
+
+The other end has a related defect: `Complex.log()` gives a real part of
+`Infinity` above |z| ≈ 1.3e154. `lerchSeriesOutsideDisk` in
+`numerics/lerch-phi.ts` now builds log z from `Math.log(|z|)` and
+`Math.atan2`, but `logAccurate` in the same file still falls back to
+`Complex.log()`. So the Lerch continuation declines (no wrong value was seen)
+for a complex z with both parts nonzero and |z| above 1.3e154. Related
+declines on purpose: at |z| = 1e200 near the cut, `PolyLog(s, z)` and
+`LerchPhi(z, s, 1)` stay unevaluated for s from about 725 to 777, where the
+proven remainder bound of the series is about 1.7e−10 of the value.
+
+### The GPU Lerch tail integral may be inaccurate at a large order (OPEN, investigation — found 2026-10-06 by the Lerch kernel fix)
+
+`_gpu_lerch_hermite` in `compilation/gpu-target.ts` limits the width of an
+integration panel to 4/|ln |z|| but does not account for the phase rate
+|s|/b of the integrand. At s = −30 and b = 1, the first panel (width 1.5) has
+about 30 radians of phase for an 8-point rule. The interpreter's tail
+integral had the same problem (`hermiteTail` in `numerics/lerch-phi.ts`, now
+cut into parts with at most 12 radians each). The GPU helper is used only for
+s ≤ 0 after the other methods decline. To do: measure it against the f32 model
+of the GPU code, and cut its panels the same way if it is wrong.
+
 ### `Limit` at infinity: two sign reads that still default to `+` (OPEN, small — found 2026-10-04 by the complex-valued limit fix for issue #396)
 
 The polynomial rule, the product rule and the quotient rule of the limit at
@@ -496,38 +563,47 @@ progress can still run for a long time. A fix gives the built-in antiderivative
 the machine, and decides what an exhausted budget returns (the unevaluated
 `Integrate`, as Rubi does).
 
-### `x^a · x^b` with a symbolic exponent does not combine, but `x^a / x^b` does (OPEN, decision — issue #415, found 2026-10-05)
+### Whole-number powers of one matrix do not combine (OPEN, small — found 2026-10-05 by the matrix fix for issue #415)
 
-The two directions of the same-base power rule use different guards for a
-base that can be zero:
+`A^2 · A^3` stays a product for a symbol `A` declared `matrix<2x2>`, and
+`A · A^2` too. The value `A^5` (or `A^3`) is correct, because a positive
+whole-number power of a matrix is the matrix power and the powers of one matrix
+commute. The products stay because canonicalization writes these powers as
+`MatrixPower(…)`, and no rule merges two `MatrixPower` factors with the same
+base. The same-base rules in `simplify-power.ts` (`canCombineSameBase()`)
+refuse every other combination of matrix factors on purpose (the product of
+matrices is the matrix product, while `Exp` and a non-integer `Power` of a
+matrix are element-wise).
 
-- The quotient combines with no guard. `x^a / x^a` is `1` when the
-  expression is made canonical, and `simplify()` makes `x^a / x^b` into
-  `x^(a − b)` (`simplify-divide.ts`, `simplify-power.ts`).
-- The product combines only when the base is known to be nonzero or the sum
-  of the exponents is known to be positive (`simplify-power.ts`, and the rule
-  "combined powers with same base" in `simplify-rules.ts`). So `x^a · x^b`,
-  `x^a · x^(−a)` and `x · x^a` stay unchanged under `simplify()` for a symbol
-  `x` with no assumptions, while `x · x^(−1)` and `x^2 · x^(−2)` evaluate to
-  `1`.
+### Indexing and slicing a collection whose count is a `bigint` (OPEN, decided 2026-10-06 — issue #416)
 
-The engine already reads `x/x` as `1`, so the guard on the product does not
-give a more correct answer, only a different one. A decision is necessary:
-remove the guard on the product (the quotient's convention, and
-Mathematica's), or add it to the quotient. Separate questions in the same
-issue: whether `evaluate()` combines symbolic exponents (today it combines
-only numeric exponents, at canonicalization), and whether the rule must
-check that the exponents are scalar numbers (it is correct today for matrix
-exponents, because `Exp` of a matrix is element-wise).
+A collection count that is not a safe integer is a `bigint` (`expr.count`,
+the `count` collection handler; see `smallCount()` in
+`boxed-expression/collection-count.ts`). The readers that index or slice with
+the count still take a `number`, so they treat such a count as unknown:
+`at()` takes a `number` index, and `Last(Range(1, 10^20))` stays unevaluated
+because the last index, 10^20, is not a safe integer. Decision: make `at()`
+and the readers that compute an index from the count (`Last`, a negative
+index, `Take`/`Drop` with a negative count, `Most`, the rotations) accept a
+`bigint` index, so that these give their value.
 
-### `Count` of a finite collection with more than 2^53 elements stays unevaluated (OPEN, decided 2026-10-05 — issue #416)
+### Reducers over a `Range`: three cases still walk or round (OPEN, small — found 2026-10-06 by the closed forms of `Sum` and `Mean` over a `Range`)
 
-The `count` handler of a collection returns a JavaScript number, and
-`integerQuotientModulus()` (`library/sets.ts`) returns `undefined` when the
-count is not a safe integer. So `Count(QuotientRing(Integers, 2^61 − 1))`
-stays unevaluated, although the exact count is the modulus. Decision: the
-`count` handler and `expr.count` can return a `bigint` for a count that is
-not a safe integer. Every reader of `count` must then accept a `bigint`.
+`Sum`, `Mean`, `Median`, `Variance`, `PopulationVariance`, `Max` and `Min`
+of a literal `Range` with exact bounds and step use a closed form
+(`library/range-closed-form.ts`). Three cases do not:
+
+- A `Range` held by a symbol (`r := Range(1, 10^6)`, then `Sum(r)`) still
+  walks every element, because the check reads only a literal `Range`
+  operand.
+- Under `.N()`, `Mean`, `Median` and the variances receive their operand
+  already made numeric, so `Range(-17, 0, 1/3)` arrives with the float step
+  0.333…, the closed form does not apply, and the walk gives
+  `-8.50000000000000060577` instead of `-8.5`. A fix: read the operand before
+  it is made numeric (hold it), as `Sum` does.
+- Compiled JavaScript builds the whole array before it reduces it
+  (`_SYS.range(1, n, …).reduce(…)`, `_SYS.mean(_SYS.range(…))`), so the
+  memory use grows with `n`. The closed form, or a counted loop, would not.
 
 ### Symbolic interval arithmetic in `evaluate()` (OPEN, investigation — issue #416, 2026-10-05)
 
@@ -5707,10 +5783,14 @@ running out under contention. Neither suite was run on an idle box.
 ### `LerchPhi` past |z| = 1 still declines for a complex `a` whose shift terms dwarf the value (OPEN — residue of the two 2026-09-30 rounds, #340, #353)
 
 `lerchPhiComplex` (`numerics/lerch-phi.ts`) declines (`N()` stays symbolic)
-where no route can vouch for 1e−11 relative accuracy; it never returns a wrong
-number (every returned value on about 30 000 sweep points is within 1.1e−12 of a
-reference). The routes past the circle: the continuation
-(`lerchContinuedWithError`), the sum over the Fourier modes of the base point
+where no route can vouch for 1e−11 relative accuracy; it does not return a
+wrong number (every returned value on about 30 000 sweep points is within
+1.1e−12 of a reference; on a 2026-10-06 sweep of 12 000 points with orders up to
+200 and |z| up to 1e300, after the continuation was fixed for those, within
+8.8e−13). The routes past the circle: for `Re(s) > 0` off the cut, the leading
+terms of the series with a proven bound of the rest (`lerchSeriesOutsideDisk`);
+the continuation (`lerchContinuedWithError`), the sum over the Fourier modes of
+the base point
 for a real `a` and every `s` that is not a positive integer
 (`lerchModesComplex`), an integral route for `Re(s) > 0`
 (`lerchIntegralComplex`), and Lerch's transformation formula for a complex `a`
