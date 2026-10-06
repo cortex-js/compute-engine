@@ -2637,6 +2637,16 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     closeTrigger: '\\rceil',
     parse: (_parser: Parser, body: MathJsonExpression) =>
       isEmptySequence(body) ? null : (['Ceil', body] as MathJsonExpression),
+    // The step form `Ceil(x, step)` has no bracket notation: it is written
+    // as a function, `\mathrm{ceil}(x, step)`, which parses back to it.
+    serialize: (serializer: Serializer, expr: MathJsonExpression): string =>
+      nops(expr) === 2
+        ? `\\mathrm{ceil}${serializer.wrapArguments(expr)}`
+        : joinLatex([
+            '\\lceil',
+            serializer.serialize(operand(expr, 1)),
+            '\\rceil',
+          ]),
   },
   {
     kind: 'matchfix',
@@ -2861,6 +2871,16 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     closeTrigger: '\\rfloor',
     parse: (_parser: Parser, body: MathJsonExpression) =>
       isEmptySequence(body) ? null : (['Floor', body] as MathJsonExpression),
+    // The step form `Floor(x, step)` has no bracket notation: it is written
+    // as a function, `\mathrm{floor}(x, step)`, which parses back to it.
+    serialize: (serializer: Serializer, expr: MathJsonExpression): string =>
+      nops(expr) === 2
+        ? `\\mathrm{floor}${serializer.wrapArguments(expr)}`
+        : joinLatex([
+            '\\lfloor',
+            serializer.serialize(operand(expr, 1)),
+            '\\rfloor',
+          ]),
   },
   {
     kind: 'matchfix',

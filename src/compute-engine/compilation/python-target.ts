@@ -2022,6 +2022,44 @@ def _ce_pow(_x, _y, _f=None):
 }
 
 /**
+ * The Python code of `Floor`, `Ceil` or `Truncate` (`round` is `np.floor`,
+ * `np.ceil` or `np.trunc`), with or without a step.
+ *
+ * The step form `Floor(x, step)` is `round(q) * k` with `k = |step|` and
+ * `q = x / k`, where `q` is taken to the nearest integer when it is within
+ * 4 ulps of it: the double of a decimal step is not the decimal, and
+ * `0.3 / 0.1` is `2.9999999999999996`, while the interpreter, which divides
+ * the decimals, finds `3` (`_SYS.floorStep` in the JavaScript runtime does
+ * the same).
+ *
+ * The code is an immediately applied lambda, so it is valid in the body of
+ * `compileLambda` too, which has no place for a module-level helper. The
+ * operand and the step are its ARGUMENTS: they are evaluated once each, in
+ * the caller's scope (a caller variable named like a parameter of the lambda
+ * is not captured), and in the order written, also for a zero step, whose
+ * result is `NaN`. The operand goes through `np.asarray`, so a plain Python
+ * list is divided elementwise.
+ */
+function pythonRoundToStep(
+  round: string,
+  args: ReadonlyArray<Expression | null>,
+  compile: (expr: Expression) => string
+): string {
+  const [x, step] = args;
+  if (x === null || x === undefined)
+    throw new Error(`Could not compile \`${round}\`: no argument`);
+  if (step === null || step === undefined) return `${round}(${compile(x)})`;
+  const snapped =
+    `(lambda _ce_q: np.where(np.abs(_ce_q - np.round(_ce_q)) <= ` +
+    `8.881784197001252e-16 * np.maximum(1, np.abs(_ce_q)), ` +
+    `np.round(_ce_q), _ce_q))(_ce_x / _ce_k)`;
+  return (
+    `(lambda _ce_x, _ce_k: ${round}(${snapped}) * _ce_k)` +
+    `(np.asarray(${compile(x)}, dtype=float), np.abs(${compile(step)}))`
+  );
+}
+
+/**
  * Round to an integer, elementwise, with a value halfway between two
  * integers rounded with the rule `_ties` (a `RoundingTies` name). See
  * `pythonRoundToInteger()`.
@@ -3685,8 +3723,8 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
       compile,
       target
     ),
-  Floor: 'np.floor',
-  Ceil: 'np.ceil',
+  Floor: (args, compile) => pythonRoundToStep('np.floor', args, compile),
+  Ceil: (args, compile) => pythonRoundToStep('np.ceil', args, compile),
   // A value halfway between two integers is rounded with the rule of
   // `ce.roundingTies` at compile time, as the interpreter does
   // (`pythonRoundToInteger()`).
@@ -3721,7 +3759,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
       `((${compile(x)}) * _p))(10 ** (${compile(args[1])}))`
     );
   },
-  Truncate: 'np.trunc',
+  Truncate: (args, compile) => pythonRoundToStep('np.trunc', args, compile),
 
   // Min/Max — REDUCTIONS: fold every operand (a collection to its own extremum)
   // to a single value. `np.maximum`/`np.minimum` are element-wise and strictly

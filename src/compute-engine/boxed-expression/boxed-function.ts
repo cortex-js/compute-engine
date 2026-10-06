@@ -7049,7 +7049,8 @@ function tupleBroadcastCells(
 /**
  * The operators whose result jumps at a point, and which a broadcast maps
  * cell by cell with the handler of a scalar operand: `Floor`, `Ceil`,
- * `Truncate` and `Fract` jump at an integer, `Round` at a half-integer,
+ * `Truncate` and `Fract` jump at an integer (the step forms
+ * `Floor(x, step)`, … where `x/|step|` is an integer), `Round` at a half-integer,
  * `Sign` and `Heaviside` at 0, and `Mod(a, m)` where `a/m` is an integer
  * (either operand can be the collection). Under `.N()`, the handler of such an operator uses the exact
  * value of an exact operand when the float of the operand is near the jump
@@ -7115,6 +7116,21 @@ function exactJumpBroadcastOperands(
     if (!isNumber(n) || n.isComplex || n.isFinite !== true) scale = NaN;
     else scale = Math.pow(10, n.re);
   }
+  // `Floor(x, step)`, `Ceil(x, step)` and `Truncate(x, step)` jump where
+  // `x/|step|` is an integer, so the float of an element is divided by the
+  // step. When the step is not a non-zero real number literal, every element
+  // is taken as near a jump.
+  if (jump === 'integer' && tail.length > 1) {
+    const step = tail[1];
+    if (
+      !isNumber(step) ||
+      step.isComplex ||
+      step.isFinite !== true ||
+      step.re === 0
+    )
+      scale = NaN;
+    else scale = 1 / Math.abs(step.re);
+  }
   // `Mod(a, m)` jumps where `a/m` is an integer. When one operand is a real
   // number literal and the other a collection, an element is near a jump
   // when its quotient with that literal is near an integer. In all other
@@ -7171,7 +7187,31 @@ function exactJumpBroadcastOperands(
     changed = true;
     return exact;
   });
-  return changed ? result : undefined;
+  return changed ? withExactScalarOperands(result, ops) : undefined;
+}
+
+/**
+ * `operands` with each scalar operand whose value before the numeric
+ * approximation (in `originals`) is exact put back as that exact value. When
+ * the cells of a broadcast of a jump operator are built from exact elements,
+ * an exact scalar operand must be exact too: the step of `Floor(L, 1/3)` is
+ * approximated with the list, and `Floor(1, 0.333…)` is `0.999…`, not `1`.
+ * The exact value is an exact number literal, or the exact value of a pure
+ * expression with no float in it (a symbol that holds `1/3`).
+ */
+function withExactScalarOperands(
+  operands: ReadonlyArray<Expression>,
+  originals: ReadonlyArray<Expression>
+): ReadonlyArray<Expression> {
+  return operands.map((x, i) => {
+    const original = originals[i];
+    if (!isNumber(x) || original === undefined) return x;
+    if (isNumber(original)) return original.isExact ? original : x;
+    if (!isTransitivelyPure(original) || hasInexactNumberLiteral(original))
+      return x;
+    const exact = original.evaluate();
+    return isNumber(exact) && exact.isExact ? exact : x;
+  });
 }
 
 /**
@@ -7252,7 +7292,7 @@ function exactJumpLazyBroadcastOperands(
     changed = true;
     return exact;
   });
-  return changed ? result : undefined;
+  return changed ? withExactScalarOperands(result, ops) : undefined;
 }
 
 /**

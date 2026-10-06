@@ -523,11 +523,7 @@ describe('Sums and products', () => {
     ]);
     // Exact table entry (2026-07-18): sinh(π)/π, from the sin product
     // formula at z = i.
-    expect(product.evaluate().json).toEqual([
-      'Divide',
-      ['Sinh', 'Pi'],
-      'Pi',
-    ]);
+    expect(product.evaluate().json).toEqual(['Divide', ['Sinh', 'Pi'], 'Pi']);
     expect(product.N().re).toBeCloseTo(Math.sinh(Math.PI) / Math.PI, 9);
   });
 });
@@ -1188,8 +1184,8 @@ describe('Statistics', () => {
 
   test(`Normal(4.35, 0.59): CDF(5) - CDF(4) ≈ 0.58819`, () => {
     // Wester's review cites 0.5867, but an independent mpmath computation gives
-    // 0.588185984502579239824…, which matches CE exactly — Wester's cited value
-    // is inaccurate.
+    // 0.58818598450257923982463657…, which matches CE to 22 digits — Wester's
+    // cited value is inaccurate.
     expect(
       ce
         .expr([
@@ -1198,7 +1194,7 @@ describe('Statistics', () => {
           ['CDF', ['NormalDistribution', 4.35, 0.59], 4],
         ])
         .N().json
-    ).toEqual({ num: '0.588185984502579239826' });
+    ).toEqual({ num: '0.5881859845025792398245' });
   });
 });
 

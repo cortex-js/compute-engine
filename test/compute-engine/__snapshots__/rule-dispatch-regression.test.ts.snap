@@ -26,7 +26,7 @@ exports[`simplify: absolute value |x|^2 1`] = `["Square", "x"]`;
 
 exports[`simplify: arithmetic \\frac{1}{2} + 0.5 1`] = `{num: "1.0"}`;
 
-exports[`simplify: arithmetic \\frac{3.1}{2.8} 1`] = `1.10714285714285714285714285714285714285714285714285714285714285714285714285714285714285714285714285701`;
+exports[`simplify: arithmetic \\frac{3.1}{2.8} 1`] = `1.10(714285)`;
 
 exports[`simplify: arithmetic \\frac{3}{4} 1`] = `["Rational", 3, 4]`;
 

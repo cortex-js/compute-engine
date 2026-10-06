@@ -310,6 +310,7 @@ import {
 import type {
   OperandDescriptor,
   PureEngineView,
+  TypeHandlerContext,
 } from '../types-definitions.js';
 import { isPrime as isPrimeNumber } from '../numerics/primes.js';
 import { parseType } from '../../common/type/parse.js';
@@ -1079,6 +1080,233 @@ function applyRounding(
   // `Math.ceil(-0.3)` is `-0`; the exact integer zero has no sign.
   if (Number.isSafeInteger(re)) return ce.number(re === 0 ? 0 : re);
   return ce.number(BigInt(re));
+}
+
+/**
+ * The signature of `Floor`, `Ceil` and `Truncate`: the integer-valued form
+ * `f(x)`, and the step form `f(x, step)`, which rounds `x` to a multiple of
+ * `step` (`Floor(226, 10)` is `220`, as `Floor[226, 10]` in Mathematica).
+ *
+ * The carrier of `x` is the extended real line (`Floor(±∞) = ±∞`). The step
+ * is a finite real; a zero step has no multiple to round to, and it is the
+ * domain condition of the step form (`roundingStepDefined()`). The declared
+ * result is `real`, because the step form is not integer-valued; the `type`
+ * handler (`roundingType()`) claims `integer` for the one-argument form.
+ *
+ * The two forms are not declared as an overload set
+ * (`(x) -> integer & (x, step) -> real`): a `NaN` operand of an overload set
+ * is a boxing error, not a `NaN` result, because the `nanBehavior` gate does
+ * not apply to its arms.
+ */
+const ROUNDING_STEP_SIGNATURE =
+  '(x: real | signed_infinity, step: real?) -> real | signed_infinity';
+
+const INTEGER_NAN_OR_SIGNED_INFINITY = parseType(
+  'integer | nan | signed_infinity'
+);
+
+/**
+ * The type of `Floor`, `Ceil` or `Truncate`, with or without a step.
+ *
+ * The one-argument form is integer-valued (`roundingFunctionTypeOnTypes()`).
+ * When that handler declines (an operand that may be `NaN`, or that is not
+ * proven extended-real), the answer is `integer | nan | signed_infinity`
+ * (`nan` for a `NaN` operand): the claim that the framework derived from the
+ * former declared result `integer | signed_infinity` before the step form
+ * made the declared result `real`.
+ *
+ * The step form is a multiple `k·|step|` of the step, with `k` an integer:
+ * an integer for an integer step and a rational for a rational step. An
+ * infinite `x` gives `±∞`. A step that may be zero, an operand that may be
+ * `NaN` and a step that is not proven real add the `nan` arm. A collection
+ * step always adds it: its elements are not proven non-zero from its type
+ * (`Floor(5, [1/3, 2])` is typed `list<nan | rational>`), which is sound
+ * but not sharp. The handler
+ * gives the whole claim, because the framework does not widen the answer of
+ * a handler.
+ */
+function roundingType(
+  x: OperandDescriptor | undefined,
+  step: OperandDescriptor | undefined,
+  context: TypeHandlerContext
+): BoxedType | undefined {
+  if (x === undefined) return undefined;
+  const resolver = context.engine._typeResolver;
+  const xType = broadcastCellType(x.type);
+  // A step that is `NaN` or zero gives `NaN` (`Indeterminate`) for every `x`.
+  if (
+    step !== undefined &&
+    (isSubtype(broadcastCellType(step.type), 'nan') ||
+      nonZeroLiteral(step) === false)
+  )
+    return BoxedType.forResult('nan', resolver);
+  const t = roundingFunctionTypeOnTypes(x);
+  const kindOf = (): Type => {
+    if (step === undefined) return 'integer';
+    const f = factsOf(broadcastCellType(step.type));
+    return f.integer ? 'integer' : f.rational ? 'rational' : 'real';
+  };
+  let mayBeNaN = false;
+  let result: Type;
+  if (t === 'integer') result = kindOf();
+  else if (t !== undefined && isSubtype(t, SIGNED_INFINITY_TYPE)) result = t;
+  else if (t !== undefined)
+    result = { kind: 'union', types: [kindOf(), SIGNED_INFINITY_TYPE] };
+  else if (isSubtype(xType, 'nan')) return BoxedType.forResult('nan', resolver);
+  else {
+    if (step === undefined)
+      return BoxedType.forResult(INTEGER_NAN_OR_SIGNED_INFINITY, resolver);
+    result = { kind: 'union', types: [kindOf(), SIGNED_INFINITY_TYPE] };
+    mayBeNaN = true;
+  }
+  if (step !== undefined) {
+    const stepSgn = operandSgnOnTypes(step);
+    const nonZero =
+      nonZeroLiteral(step) ??
+      (positiveSign(stepSgn) === true ||
+        negativeSign(stepSgn) === true ||
+        stepSgn === 'not-zero');
+    if (!nonZero || !factsOf(broadcastCellType(step.type)).real)
+      mayBeNaN = true;
+  }
+  if (mayBeNaN) result = { kind: 'union', types: [result, 'nan'] };
+  return BoxedType.forResult(reduceType(result), resolver);
+}
+
+/**
+ * The domain condition of the step form of `Floor`, `Ceil`, `Truncate`
+ * (`definedWhen`): the step is not zero. `Floor(x, 0)` is `Indeterminate`
+ * (`NaN` with a float operand), as `Mod(x, 0)` is. The one-argument form is
+ * defined at every point of its carrier. As for `Mod`, the step is read from
+ * its static type (its element type under a broadcast), and a step that is
+ * not proven real is not decided here: the carrier refuses it.
+ */
+function roundingStepDefined(
+  ops: ReadonlyArray<Expression>
+): boolean | undefined {
+  const step = ops[1];
+  if (step === undefined) return true;
+  if (!factsOf(broadcastCellType(step.type.type)).real) return undefined;
+  if (isNumber(step)) return !step.isSame(0);
+  const s = step.sgn;
+  if (positiveSign(s) === true || negativeSign(s) === true) return true;
+  return s === 'not-zero' ? true : undefined;
+}
+
+/**
+ * For the `sgn` handlers of `Floor`, `Ceil` and `Truncate`: the distance
+ * between two consecutive results, `1` for the one-argument form and `|step|`
+ * for the step form, or `undefined` when the step is not a non-zero real
+ * number literal (the sign is then not decided). The handlers compare `x`
+ * with this unit: `Floor(x, step)` is positive exactly when `x ≥ |step|`.
+ */
+function roundingStepUnit(
+  x: Expression,
+  step: Expression | undefined
+): Expression | undefined {
+  if (step === undefined) return x.engine.One;
+  if (!isNumber(step) || step.isComplex || step.isFinite !== true)
+    return undefined;
+  if (step.isSame(0)) return undefined;
+  return step.isNegative ? step.neg() : step;
+}
+
+/**
+ * Rounds `x` to a multiple of `step` with the rounding `mode`: the multiple
+ * is `k·|step|`, where `k` is the rounded value of `x/|step|` (`round`
+ * computes it, as for the one-argument form). So `Floor(x, step)` is the
+ * greatest multiple of the step that is at most `x`, whatever the sign of
+ * the step (`Floor(7, -2)` is `6`).
+ *
+ * Returns `undefined` when the step is not a finite real number literal or
+ * an exact constant (`Floor(x, a)` stays unevaluated), and the indeterminate
+ * form for a zero step.
+ *
+ * The result is exact when `k` and the step are exact, as for
+ * `Round(x, n)` (`applyRounding()` boxes `k` as an exact integer, also for
+ * a float `x`): `Floor(2.7, 1/2)` is `5/2`, and `Floor(2.7, 0.5)` is the
+ * float `2.5`. An exact constant step (`π`) is rounded from enclosures of
+ * the quotient (`roundExactConstant()`): `Floor(10, π)` is `3π`.
+ *
+ * Under `.N()`, an operand whose exact value is known is rounded exactly
+ * when the step is exact (`exactRoundingOperand()` says when), as for the
+ * one-argument form, and the result is approximated. `.N()` approximates the
+ * step before the handler runs, so its exact value is read from
+ * `originalStep`, the step before the approximation (a literal, an exact
+ * constant, or a pure expression with an exact value, such as a symbol that
+ * holds `2/3`): the float of `1/3` gives `Floor(1, 1/3)` as `0.999…`, not
+ * `1`.
+ */
+function roundToStep(
+  x: Expression,
+  step: Expression,
+  mode: RoundingMode,
+  round: (v: Expression, original?: Expression) => Expression | undefined,
+  numericApproximation: boolean | undefined,
+  originalX: Expression | undefined,
+  originalStep: Expression | undefined
+): Expression | undefined {
+  const ce = x.engine;
+  if (numericApproximation && originalStep !== undefined) {
+    if (
+      isExactRealLiteral(originalStep) ||
+      isExactConstantExpression(originalStep)
+    )
+      step = originalStep;
+    else step = exactRealValueOf(originalStep) ?? step;
+  }
+  if (!isNumber(step)) {
+    if (!isExactConstantExpression(step)) return undefined;
+    // An exact constant step: its sign is decided from enclosures.
+    const sign = step.sgn;
+    const negative = negativeSign(sign) === true;
+    if (!negative && positiveSign(sign) !== true) return undefined;
+    const k = negative ? step.neg() : step;
+    // The quotient can fold to an exact number (`π/π` is `1`), which is
+    // rounded exactly (`roundExactReal()`).
+    const quotient = ce.function('Divide', [
+      numericApproximation ? (originalX ?? x) : x,
+      k,
+    ]);
+    const n = isExactRealLiteral(quotient)
+      ? roundExactReal(quotient, mode)
+      : roundExactConstant(quotient, mode, numericApproximation);
+    if (n !== undefined)
+      return numericApproximation
+        ? ce.number(n).mul(k).N()
+        : ce.number(n).mul(k);
+    // A float operand is divided by the float of the step. Without `.N()`,
+    // the rounded quotient is an exact integer (`applyRounding()`), and the
+    // result is that multiple of the exact step: `Floor(7.5, π)` is `2π`.
+    const inexact = isNumber(x) && !x.isExact;
+    if (!numericApproximation && !inexact) return undefined;
+    const r = round(x.div(k.N()));
+    if (r === undefined) return undefined;
+    return numericApproximation ? r.mul(k.N()) : r.mul(k);
+  }
+  if (step.isComplex || step.isFinite !== true) return undefined;
+  if (step.isSame(0)) return indeterminateFormAnswer(ce, [x, step]);
+  const k = step.isNegative ? step.neg() : step;
+  if (numericApproximation && isExactRealLiteral(k)) {
+    const quotient = x.div(k);
+    const exactX = isExactRealLiteral(x)
+      ? x
+      : originalX !== undefined &&
+          (isNumber(originalX) || isNearRoundingJump(quotient, mode))
+        ? exactRealValueOf(originalX)
+        : undefined;
+    let n =
+      exactX === undefined ? undefined : roundExactReal(exactX.div(k), mode);
+    // An exact constant expression that is not a number (`π`) is rounded
+    // from enclosures of its quotient (`roundExactConstant()`).
+    if (n === undefined && exactX === undefined && originalX !== undefined)
+      n = roundExactConstant(ce.function('Divide', [originalX, k]), mode, true);
+    if (n !== undefined) return ce.number(n).mul(k).N();
+    const r = round(quotient);
+    return r === undefined ? undefined : r.mul(k);
+  }
+  const r = round(x.div(k));
+  return r === undefined ? undefined : r.mul(k);
 }
 
 /**
@@ -4336,7 +4564,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
 
     Ceil: {
-      description: 'Rounds a number up to the next largest integer',
+      description:
+        'Rounds a number up to the next largest integer, or with a step to the least multiple of the step that is at least the number.',
       keywords: ['round up', 'ceiling'],
       complexity: 1250,
       broadcastable: true,
@@ -4346,44 +4575,59 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // proven off-carrier operand — a complex value, `~oo` — is a boxing
       // error; there is no component-wise ceiling of a complex number
       // (the compiled lanes agree — they are real-only for this
-      // operator). The slim `'types'` handler only NARROWS: a proven
-      // finite real sharpens the claim to `integer`, a proven ±∞ to the
-      // signed pair, and everything else falls to the declared result
-      // plus the derived `nan` arm exactly where the argument can carry
-      // one. (Domain-signature doctrine: `docs/ERROR-MODEL.md` §4
-      // "Choosing carriers".)
-      signature: '(real | signed_infinity) -> integer | signed_infinity',
-      examples: ['[Ceil(2.3), Ceil(-2.7)]'],
+      // operator). The `type` handler (`roundingType()`) gives the whole
+      // claim: a proven finite real gives `integer` (a multiple of the step
+      // in the step form), a proven ±∞ the signed pair, and an operand that
+      // may be `NaN` adds the `nan` arm. Nothing falls back to the declared
+      // result, which is `real` only because of the step form.
+      // (Domain-signature doctrine: `docs/ERROR-MODEL.md` §4 "Choosing
+      // carriers".)
+      // The optional second argument is a step: `Ceil(x, step)` is the
+      // least multiple of the step that is at least `x` (see
+      // `ROUNDING_STEP_SIGNATURE` and `roundToStep()`).
+      signature: ROUNDING_STEP_SIGNATURE,
+      examples: ['[Ceil(2.3), Ceil(-2.7), Ceil(226, 10)]'],
       // Explicit: the DERIVED default answers `reject` for an
       // extended-real carrier, and `Ceil(NaN)` must be `NaN`.
       nanBehavior: 'propagate',
-      // Defined at every point of the carrier, and the numeric route
-      // cannot fail (an exact real always has a ceiling): the strong claim
-      // discharges the marker arm.
-      partiality: 'total',
-      type: ([x], context) =>
-        BoxedType.forResult(
-          roundingFunctionTypeOnTypes(x),
-          context.engine._typeResolver
-        ),
-      sgn: ([x]) => {
-        const minusOne = x.engine.NegativeOne;
-        if (isOrdered(x, '<=', minusOne)) return 'negative';
+      // The one-argument form is defined at every point of the carrier, and
+      // the numeric route cannot fail (an exact real always has a ceiling).
+      // The step form is defined for a non-zero step.
+      definedWhen: roundingStepDefined,
+      type: ([x, step], context) => roundingType(x, step, context),
+      sgn: ([x, step]) => {
+        const unit = roundingStepUnit(x, step);
+        if (unit === undefined) return undefined;
+        const minusUnit = unit.neg();
+        if (isOrdered(x, '<=', minusUnit)) return 'negative';
         if (x.isPositive) return 'positive';
         if (x.isNonNegative) return 'non-negative';
-        if (x.isNonPositive && isOrdered(x, '>', minusOne)) return 'zero';
+        if (x.isNonPositive && isOrdered(x, '>', minusUnit)) return 'zero';
         if (x.isNonPositive) return 'non-positive';
         return undefined;
       },
-      evaluate: ([x], { numericApproximation, expression }) =>
-        applyRounding(
+      evaluate: ([x, step], { numericApproximation, expression }) => {
+        const original = originalOperand(expression, 0);
+        const round = (v: Expression, original?: Expression) =>
+          applyRounding(
+            v,
+            'ceil',
+            Math.ceil,
+            (v) => v.ceil(),
+            numericApproximation,
+            original
+          );
+        if (step === undefined) return round(x, original);
+        return roundToStep(
           x,
+          step,
           'ceil',
-          Math.ceil,
-          (x) => x.ceil(),
+          round,
           numericApproximation,
-          originalOperand(expression, 0)
-        ),
+          original,
+          originalOperand(expression, 1)
+        );
+      },
     },
 
     Chop: {
@@ -5186,7 +5430,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
 
     Floor: {
-      description: 'Rounds a number down to the nearest integer.',
+      description:
+        'Rounds a number down to the nearest integer, or with a step to the greatest multiple of the step that is at most the number.',
       keywords: ['round down', 'integer part'],
       wikidata: 'Q56860783',
       complexity: 1250,
@@ -5195,34 +5440,45 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // Same domain-signature shape and rationale as `Ceil` above: the
       // extended-real carrier (`Floor(±∞) = ±∞`), `NaN` propagated by the
       // generic gate, a proven off-carrier operand a boxing error, and
-      // the slim handler narrowing to `integer` / the signed pair where
-      // the operand proves it.
-      signature: '(real | signed_infinity) -> integer | signed_infinity',
-      examples: ['[Floor(2.7), Floor(-2.3)]'],
+      // the `type` handler (`roundingType()`) giving the whole claim.
+      // The optional second argument is a step: `Floor(x, step)` is the
+      // greatest multiple of the step that is at most `x`.
+      signature: ROUNDING_STEP_SIGNATURE,
+      examples: ['[Floor(2.7), Floor(-2.3), Floor(226, 10)]'],
       nanBehavior: 'propagate',
-      partiality: 'total',
-      type: ([x], context) =>
-        BoxedType.forResult(
-          roundingFunctionTypeOnTypes(x),
-          context.engine._typeResolver
-        ),
-      sgn: ([x]) => {
-        const one = x.engine.One;
+      definedWhen: roundingStepDefined,
+      type: ([x, step], context) => roundingType(x, step, context),
+      sgn: ([x, step]) => {
+        const unit = roundingStepUnit(x, step);
+        if (unit === undefined) return undefined;
         if (x.isNegative) return 'negative';
-        if (isOrdered(x, '>=', one)) return 'positive';
-        if (x.isNonNegative && isOrdered(x, '<', one)) return 'zero';
+        if (isOrdered(x, '>=', unit)) return 'positive';
+        if (x.isNonNegative && isOrdered(x, '<', unit)) return 'zero';
         if (x.isNonNegative) return 'non-negative';
         return undefined;
       },
-      evaluate: ([x], { numericApproximation, expression }) =>
-        applyRounding(
+      evaluate: ([x, step], { numericApproximation, expression }) => {
+        const original = originalOperand(expression, 0);
+        const round = (v: Expression, original?: Expression) =>
+          applyRounding(
+            v,
+            'floor',
+            Math.floor,
+            (v) => v.floor(),
+            numericApproximation,
+            original
+          );
+        if (step === undefined) return round(x, original);
+        return roundToStep(
           x,
+          step,
           'floor',
-          Math.floor,
-          (x) => x.floor(),
+          round,
           numericApproximation,
-          originalOperand(expression, 0)
-        ),
+          original,
+          originalOperand(expression, 1)
+        );
+      },
     },
 
     Fract: {
@@ -9181,42 +9437,56 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
 
     Truncate: {
-      description: 'Rounds a number towards zero (removes the fractional part)',
+      description:
+        'Rounds a number towards zero (removes the fractional part), or with a step to the multiple of the step nearest to the number in the direction of zero.',
       complexity: 1250,
       broadcastable: true,
       // Same domain-signature shape and rationale as `Ceil`/`Floor`
       // above.
-      signature: '(real | signed_infinity) -> integer | signed_infinity',
-      examples: ['[Truncate(2.7), Truncate(-2.7)]'],
+      // The optional second argument is a step: `Truncate(x, step)` is the
+      // multiple of the step nearest to `x` in the direction of zero.
+      signature: ROUNDING_STEP_SIGNATURE,
+      examples: ['[Truncate(2.7), Truncate(-2.7), Truncate(-226, 10)]'],
       nanBehavior: 'propagate',
-      partiality: 'total',
-      type: ([x], context) =>
-        BoxedType.forResult(
-          roundingFunctionTypeOnTypes(x),
-          context.engine._typeResolver
-        ),
-      // trunc(x) = 0 for |x| < 1, so the sign of x alone is not enough
-      // (trunc(1/2) = 0, not positive). Mirror the Floor/Ceil interval logic.
-      sgn: ([x]) => {
-        const one = x.engine.One;
-        const minusOne = x.engine.NegativeOne;
-        if (isOrdered(x, '>=', one)) return 'positive';
-        if (isOrdered(x, '<=', minusOne)) return 'negative';
-        if (isOrdered(x, '>', minusOne) && isOrdered(x, '<', one))
+      definedWhen: roundingStepDefined,
+      type: ([x, step], context) => roundingType(x, step, context),
+      // trunc(x) = 0 for |x| < 1 (for |x| < |step| in the step form), so the
+      // sign of x alone is not enough (trunc(1/2) = 0, not positive). Mirror
+      // the Floor/Ceil interval logic.
+      sgn: ([x, step]) => {
+        const unit = roundingStepUnit(x, step);
+        if (unit === undefined) return undefined;
+        const minusUnit = unit.neg();
+        if (isOrdered(x, '>=', unit)) return 'positive';
+        if (isOrdered(x, '<=', minusUnit)) return 'negative';
+        if (isOrdered(x, '>', minusUnit) && isOrdered(x, '<', unit))
           return 'zero';
         if (x.isNonNegative) return 'non-negative';
         if (x.isNonPositive) return 'non-positive';
         return undefined;
       },
-      evaluate: ([x], { numericApproximation, expression }) =>
-        applyRounding(
+      evaluate: ([x, step], { numericApproximation, expression }) => {
+        const original = originalOperand(expression, 0);
+        const round = (v: Expression, original?: Expression) =>
+          applyRounding(
+            v,
+            'trunc',
+            Math.trunc,
+            (v) => v.trunc(),
+            numericApproximation,
+            original
+          );
+        if (step === undefined) return round(x, original);
+        return roundToStep(
           x,
+          step,
           'trunc',
-          Math.trunc,
-          (x) => x.trunc(),
+          round,
           numericApproximation,
-          originalOperand(expression, 0)
-        ),
+          original,
+          originalOperand(expression, 1)
+        );
+      },
     },
   },
   {

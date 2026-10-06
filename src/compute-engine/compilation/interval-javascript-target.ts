@@ -151,6 +151,32 @@ const INTERVAL_JAVASCRIPT_OPERATORS: CompiledOperators = {
 };
 
 /**
+ * The interval code of `Floor`, `Ceil` or `Truncate` (`round` is the `_IA`
+ * function), with or without a step. The step form `Floor(x, step)` is
+ * `round(x / k) · k` with `k = |step|`: the division and the product are
+ * the outward-rounded interval operations, so an enclosure that the
+ * division widens across a jump answers `singular`, as the one-argument
+ * form does. The step is spliced twice, so an impure step (a draw from the
+ * `Random` family) fails closed.
+ */
+function intervalRoundToStep(
+  round: 'floor' | 'ceil' | 'trunc',
+  args: ReadonlyArray<Expression | null>,
+  compile: (expr: Expression) => string
+): string {
+  const [x, step] = args;
+  if (x === null || x === undefined)
+    throw new Error(`Could not compile \`${round}\`: no argument`);
+  if (step === null || step === undefined) return `_IA.${round}(${compile(x)})`;
+  if (step.isPure === false)
+    throw new Error(
+      `Could not compile \`${round}\`: the interval target requires a pure step`
+    );
+  const k = `_IA.abs(${compile(step)})`;
+  return `_IA.mul(_IA.${round}(_IA.div(${compile(x)}, ${k})), ${k})`;
+}
+
+/**
  * Emit the Euclidean (L2) norm of a fixed-arity point from its compiled
  * components: `hypot` for the 2-D case (tighter enclosure than the
  * sqrt-of-squares composition), √(Σ xᵢ²) otherwise.
@@ -2501,9 +2527,9 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   PointZ: (args, compile, target) =>
     compileIntervalPointComponent('PointZ', args[0], 2, compile, target),
 
-  Ceil: (args, compile) => `_IA.ceil(${compile(args[0])})`,
+  Ceil: (args, compile) => intervalRoundToStep('ceil', args, compile),
   Exp: (args, compile) => `_IA.exp(${compile(args[0])})`,
-  Floor: (args, compile) => `_IA.floor(${compile(args[0])})`,
+  Floor: (args, compile) => intervalRoundToStep('floor', args, compile),
   Ln: (args, compile) => `_IA.ln(${compile(args[0])})`,
   Log: (args, compile) => {
     // Base 10 (the one-argument form) and base 2 take the dedicated
@@ -2719,7 +2745,7 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
 
   // Elementary
   Fract: (args, compile) => `_IA.fract(${compile(args[0])})`,
-  Truncate: (args, compile) => `_IA.trunc(${compile(args[0])})`,
+  Truncate: (args, compile) => intervalRoundToStep('trunc', args, compile),
 
   // Mod / Remainder
   Mod: (args, compile) => `_IA.mod(${compile(args[0])}, ${compile(args[1])})`,

@@ -192,6 +192,15 @@ host can choose another rule with the engine setting `roundingTies`):
 // ➔ [-3, -2, -2, -3]
 ```
 
+With a second argument, `floor`, `ceil` and `truncate` round to a multiple of
+that step instead of an integer. `floor(x, step)` is the greatest multiple of
+the step that is at most `x`, whatever the sign of the step:
+
+```epsil
+[floor(226, 10), ceil(226, 10), truncate(-226, 10), floor(2.7, 1/2)]
+// ➔ [220, 230, -220, 5/2]
+```
+
 There are two remainders. `a % b` (`Mod`) takes the sign of the divisor `b`.
 `remainder(a, b)` rounds the quotient to the nearest integer, so its result
 can be negative when `b` is positive:

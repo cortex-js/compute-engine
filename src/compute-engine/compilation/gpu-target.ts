@@ -6167,6 +6167,8 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     compileGPUAt(args, compile, target)
   ),
   Ceil: (args, compile, target) => {
+    if (args.length > 1 && args[1] !== null)
+      return gpuRoundToStep('ceil', args[0], args[1], compile, target);
     if (BaseCompiler.isIntegerValued(args[0]))
       return gpuIdentityPassthrough(args[0], compile, target);
     return `ceil(${compile(args[0])})`;
@@ -6218,6 +6220,8 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   PointZ: (args, compile, target) =>
     compilePointSwizzle(args[0], 'z', compile, target),
   Floor: (args, compile, target) => {
+    if (args.length > 1 && args[1] !== null)
+      return gpuRoundToStep('floor', args[0], args[1], compile, target);
     if (BaseCompiler.isIntegerValued(args[0]))
       return gpuIdentityPassthrough(args[0], compile, target);
     return `floor(${compile(args[0])})`;
@@ -6782,6 +6786,8 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     return `tan(${compile(args[0])})`;
   },
   Truncate: (args, compile, target) => {
+    if (args.length > 1 && args[1] !== null)
+      return gpuRoundToStep('trunc', args[0], args[1], compile, target);
     if (BaseCompiler.isIntegerValued(args[0]))
       return gpuIdentityPassthrough(args[0], compile, target);
     return `trunc(${compile(args[0])})`;
@@ -14462,6 +14468,50 @@ fn _gpu_tanpi(u: f32) -> f32 {
 `;
 
 /**
+ * The shader code of the step form `Floor(x, step)`, `Ceil(x, step)` or
+ * `Truncate(x, step)`: `round(q) * k` with `k = |step|` and `q = x / k`,
+ * where `round` is `floor`, `ceil` or `trunc`, and `q` is taken to the
+ * nearest integer when it is within 4 ulps (of `f32`) of it: the float of a
+ * decimal step is not the decimal, and `0.3 / 0.1` is not `3` (the
+ * JavaScript runtime's `_SYS.floorStep` does the same).
+ *
+ * A scalar operand goes through the `_gpu_step_quotient` preamble helper
+ * (`GPU_ROUND_PREAMBLE_GLSL`), which writes it once. A `vecN` operand uses
+ * the same computation inline, made of componentwise functions only: there
+ * `step(d, t)` is `1` when the distance `d` to the nearest integer is at
+ * most the tolerance `t`, and `mix` then takes that integer. The inline form
+ * splices the operand more than once, so an impure operand (a draw from the
+ * `Random` family) is bound to a hoisted temporary (`gpuOperandOnce`), and
+ * so is an impure step, which both forms splice twice.
+ *
+ * A constant step is folded. A constant zero step fails closed: the result
+ * is `NaN`, and neither language has a `NaN` literal.
+ */
+function gpuRoundToStep(
+  round: string,
+  x: Expression,
+  step: Expression,
+  compile: (expr: Expression) => string,
+  target: CompileTarget<Expression>
+): string {
+  const c = tryGetConstant(step);
+  if (c !== undefined && (c === 0 || !Number.isFinite(c)))
+    throw new Error(
+      `Could not compile \`${round}\` with a step of ${c}: the result is NaN, ` +
+        `and the ${target.language ?? 'GPU'} target has no NaN literal.`
+    );
+  const k =
+    c !== undefined
+      ? formatFloat(Math.abs(c), target.language)
+      : `abs(${gpuOperandOnce(round, step, compile, target)})`;
+  if (gpuOperandShape(x) === 'scalar')
+    return `(${round}(_gpu_step_quotient(${compile(x)}, ${k})) * ${k})`;
+  const q = `((${gpuOperandOnce(round, x, compile, target)}) / ${k})`;
+  const near = `step(abs(${q} - round(${q})), 4.8e-7 * (abs(${q}) + 1.0))`;
+  return `(${round}(mix(${q}, round(${q}), ${near})) * ${k})`;
+}
+
+/**
  * The shader code that rounds `c` to an integer, with a value halfway between
  * two integers rounded with the rule `ties` (see `RoundingTies`).
  *
@@ -14518,8 +14568,9 @@ function gpuRoundToInteger(
  * for each tie rule other than `to-even` (see `gpuRoundToInteger()`):
  * `_gpu_round` rounds a tie away from zero (`Round(-2.5)` is -3,
  * `Round(2.5)` is 3), `_gpu_round_tz` toward zero, `_gpu_round_up` toward
- * `+∞` and `_gpu_round_down` toward `−∞`. `gpuLibrarySubset()` keeps only
- * the helpers that a compilation calls.
+ * `+∞` and `_gpu_round_down` toward `−∞`. `_gpu_step_quotient` is the
+ * quotient of the step forms (`gpuRoundToStep()`). `gpuLibrarySubset()` keeps
+ * only the helpers that a compilation calls.
  *
  * `step(0.5, d)` is `1` when `d ≥ 0.5`, and `1 - step(d, 0.5)` is `1` when
  * `d > 0.5`; it is added to `m` as one term, because `m + 1.0` is rounded
@@ -14546,6 +14597,11 @@ float _gpu_round_down(float x) {
   float m = ceil(x);
   return m - step(0.5, m - x);
 }
+float _gpu_step_quotient(float x, float k) {
+  float q = x / k;
+  float r = round(q);
+  return abs(q - r) <= 4.8e-7 * max(1.0, abs(q)) ? r : q;
+}
 `;
 
 /** The rounding helpers of `Round` (WGSL syntax). See
@@ -14568,6 +14624,11 @@ fn _gpu_round_up(x: f32) -> f32 {
 fn _gpu_round_down(x: f32) -> f32 {
   let m = ceil(x);
   return m - step(0.5, m - x);
+}
+fn _gpu_step_quotient(x: f32, k: f32) -> f32 {
+  let q = x / k;
+  let r = round(q);
+  return select(q, r, abs(q - r) <= 4.8e-7 * max(1.0, abs(q)));
 }
 `;
 

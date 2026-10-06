@@ -136,7 +136,7 @@ exports[`DIVIDE Divide 2.5/1.1 1`] = `2.(27)`;
 
 exports[`DIVIDE Divide 6/3 1`] = `2`;
 
-exports[`DIVIDE Divide with many arguments 1`] = `-0.123517786561264822134387351778656126482213438735177865612648221343873517786561264822134387351778656125`;
+exports[`DIVIDE Divide with many arguments 1`] = `-0.1235177865612648221343873517786561264822134387351778656126482213438735177865612648221343873517786561`;
 
 exports[`DIVIDE Divide with single argument 1`] = `["Error", "'missing'", ["ErrorTrace", ["ErrorFrame", "'Divide'", 2]]]`;
 

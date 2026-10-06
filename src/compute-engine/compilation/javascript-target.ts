@@ -3055,6 +3055,24 @@ function spreadIfSequence(
 }
 
 /**
+ * The JavaScript code of the step form `Floor(x, step)`, `Ceil(x, step)` or
+ * `Truncate(x, step)`: a call of the runtime helper (`_SYS.floorStep`,
+ * `_SYS.ceilStep`, `_SYS.truncStep`), which takes the quotient `x/|step|`
+ * to the nearest integer when it is within its rounding error of it, as the
+ * interpreter's decimal division does (`Floor(0.3, 0.1)` is `0.3`, not
+ * `0.2`). The operand and the step are evaluated once each, in the order
+ * written, also for a zero step, whose result is `NaN`.
+ */
+function jsRoundToStep(
+  helper: 'floorStep' | 'ceilStep' | 'truncStep',
+  x: Expression,
+  step: Expression,
+  compile: (expr: Expression) => string
+): string {
+  return `_SYS.${helper}(${compile(x)}, ${compile(step)})`;
+}
+
+/**
  * The JavaScript code that rounds `x` to an integer, with a value halfway
  * between two integers rounded with the rule `ties` (see `RoundingTies`).
  *
@@ -3811,6 +3829,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     return `Math.atanh(${compile(args[0])})`;
   },
   Ceil: (args, compile, target) => {
+    if (args.length > 1 && args[1] !== null)
+      return jsRoundToStep('ceilStep', args[0], args[1], compile);
     if (BaseCompiler.isIntegerValued(args[0]))
       return identityPassthrough(args[0], compile, target);
     return `Math.ceil(${compile(args[0])})`;
@@ -3873,6 +3893,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // decision D13).
   First: (args, compile) => compileNthElement(args[0], 0, compile),
   Floor: (args, compile, target) => {
+    if (args.length > 1 && args[1] !== null)
+      return jsRoundToStep('floorStep', args[0], args[1], compile);
     if (BaseCompiler.isIntegerValued(args[0]))
       return identityPassthrough(args[0], compile, target);
     return `Math.floor(${compile(args[0])})`;
@@ -7213,6 +7235,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     );
   },
   Truncate: (args, compile, target) => {
+    if (args.length > 1 && args[1] !== null)
+      return jsRoundToStep('truncStep', args[0], args[1], compile);
     if (BaseCompiler.isIntegerValued(args[0]))
       return identityPassthrough(args[0], compile, target);
     return `Math.trunc(${compile(args[0])})`;

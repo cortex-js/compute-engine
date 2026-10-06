@@ -88,6 +88,15 @@
   The `LambertW` reference documentation now gives the argument order, the
   real domain of each real branch, and the named form.
 
+- **Under `.N()`, a broadcast of an operator with a jump uses its exact
+  scalar operands.** When an element of a list is near a jump of `Floor`,
+  `Ceil`, `Truncate`, `Round`, `Mod`, …, the cells were already built from the
+  exact elements of the list, but a scalar operand stayed approximated: the
+  modulus of `Mod(L, 1/3)` or the step of `Floor(L, 1/3)`.
+  `Mod(Range(1, 6)/3, 1/3).N()` was `[0, 1e-21, 1e-21, 0.333…, 5e-21, 2e-21]`;
+  it is now six zeros. A scalar operand whose exact value is known (an exact
+  literal, or a symbol that holds `1/3`) is now exact in the cells too.
+
 ### New Features
 
 - [#413](https://github.com/cortex-js/compute-engine/pull/413) **Definite
@@ -122,7 +131,33 @@
   and an automatically compiled `Map` is compiled again. `Remainder` does not
   use the rule: its quotient is still rounded with a tie toward `+∞`.
 
+- **`Floor`, `Ceil` and `Truncate` round to a multiple of a step**
+  ([#417](https://github.com/cortex-js/compute-engine/issues/417), requested
+  by [enumeratio](https://github.com/enumeratio)). With a second argument,
+  the value is rounded to a multiple of that step instead of an integer, as
+  `Floor[x, a]` in Mathematica: `Floor(226, 10)` is `220`, `Ceil(226, 10)` is
+  `230` and `Truncate(-226, 10)` is `-220`. `Floor(x, step)` is the greatest
+  multiple of the step that is at most `x`, whatever the sign of the step
+  (`Floor(7, -2)` is `6`). An exact step gives an exact result, also for a
+  float operand (`Floor(2.7, 1/2)` is `5/2`), and a float step a float
+  result. A zero step gives `Indeterminate` (`NaN` with a float operand), as
+  `Mod(x, 0)` does. The type is an integer for an integer step and a rational
+  for a rational step; the one-argument forms keep their integer type. The
+  LaTeX of the step form is `\mathrm{floor}(x, 10)`, which parses back to it.
+  Compiled JavaScript, interval JavaScript, GLSL, WGSL and Python support the
+  step form; there the quotient `x/|step|` is taken to the nearest integer
+  when it is within its rounding error of it, as the interpreter's decimal
+  division finds it (`Floor(0.3, 0.1)` is `0.3`, not `0.2`). An exact constant
+  step is rounded from enclosures: `Floor(10, π)` is `3π`. Before this change,
+  `Floor(226, 10)` was an `unexpected-argument` error.
+
+
 ### Issues Resolved
+
+- **The quotient of two floats is one division.** `0.3/0.3` was
+  `0.999999999999999999999`: a quotient with a float operand was computed as
+  a product with the inverse of the divisor, which rounds twice. It is now
+  `1`, and `Floor(0.3, 0.3)` is `0.3` (it was `0`).
 
 - **`Round` of a large odd integer in compiled Python and shader code.**
   Python computed `sign(x)·floor(|x| + 0.5)`, and `|x| + 0.5` is rounded when

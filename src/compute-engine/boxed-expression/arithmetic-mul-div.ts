@@ -1821,6 +1821,21 @@ export function div(num: Expression, denom: number | Expression): Expression {
           return ce.number(numV.asExact!.div(denomV.asExact!));
         }
       }
+      // A finite float divisor: one division of the two values. The
+      // `Product` below multiplies by the inverse of the divisor, and the
+      // inverse of a float is rounded, so the quotient was rounded twice:
+      // `0.3/0.3` was `0.999999999999999999999`, and `Floor(0.3, 0.3)` was
+      // `0`. An EXACT divisor keeps the `Product`: its inverse is exact (the
+      // inverse of `1/7` is `7`), while `NumericValue.div` would round it
+      // first (`1.0/(1/7)` would be `6.99…`). An infinite or NaN operand
+      // keeps the rules of the `Product` too. (A zero divisor returned
+      // above.)
+      if (!denom.isExact && num.isFinite === true && denom.isFinite === true) {
+        const a = typeof numV === 'number' ? ce._numericValue(numV) : numV;
+        const b =
+          typeof denomV === 'number' ? ce._numericValue(denomV) : denomV;
+        return ce.number(a.div(b));
+      }
     }
   }
   const result = new Product(ce, [num]);

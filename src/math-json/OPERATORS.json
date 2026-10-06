@@ -1098,8 +1098,8 @@
     {
       "name": "Ceil",
       "category": "Arithmetic",
-      "arity": "1",
-      "signature": "(real | signed_infinity) -> integer | signed_infinity",
+      "arity": "optional",
+      "signature": "(x: real | signed_infinity, step: real?) -> real | signed_infinity",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -1107,7 +1107,7 @@
       "broadcastable": true,
       "description": "Rounds a number up to the next largest integer",
       "examples": [
-        "[Ceil(2.3), Ceil(-2.7)]"
+        "[Ceil(2.3), Ceil(-2.7), Ceil(226, 10)]"
       ]
     },
     {
@@ -3166,8 +3166,8 @@
     {
       "name": "Floor",
       "category": "Arithmetic",
-      "arity": "1",
-      "signature": "(real | signed_infinity) -> integer | signed_infinity",
+      "arity": "optional",
+      "signature": "(x: real | signed_infinity, step: real?) -> real | signed_infinity",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -3176,7 +3176,7 @@
       "description": "Rounds a number down to the nearest integer.",
       "wikidata": "Q56860783",
       "examples": [
-        "[Floor(2.7), Floor(-2.3)]"
+        "[Floor(2.7), Floor(-2.3), Floor(226, 10)]"
       ]
     },
     {
@@ -8887,8 +8887,8 @@
     {
       "name": "Truncate",
       "category": "Arithmetic",
-      "arity": "1",
-      "signature": "(real | signed_infinity) -> integer | signed_infinity",
+      "arity": "optional",
+      "signature": "(x: real | signed_infinity, step: real?) -> real | signed_infinity",
       "associative": false,
       "commutative": false,
       "idempotent": false,
@@ -8896,7 +8896,7 @@
       "broadcastable": true,
       "description": "Rounds a number towards zero (removes the fractional part)",
       "examples": [
-        "[Truncate(2.7), Truncate(-2.7)]"
+        "[Truncate(2.7), Truncate(-2.7), Truncate(-226, 10)]"
       ]
     },
     {

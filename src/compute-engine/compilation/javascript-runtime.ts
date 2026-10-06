@@ -3164,6 +3164,23 @@ function describeRuntimeValue(x: unknown): string {
  * Runtime helpers injected as `_SYS` into compiled JavaScript functions.
  * Shared by both ComputeEngineFunction and ComputeEngineFunctionLiteral.
  */
+/**
+ * The quotient `x / k` of a step form (`Floor(x, step)`), taken to the
+ * nearest integer when it is within 4 ulps of it. The double of a decimal
+ * step is not the decimal: `0.3 / 0.1` is `2.9999999999999996`, whose floor
+ * is `2`, while the interpreter, which divides the decimals, finds `3`. The
+ * quotient of two doubles is wrong by about 1.5 ulps at most (the rounding
+ * of `x`, of `k` and of the division), so a quotient that close to an
+ * integer is taken to be that integer.
+ */
+function stepQuotient(x: number, k: number): number {
+  const q = x / k;
+  const r = Math.round(q);
+  return Math.abs(q - r) <= 4 * Number.EPSILON * Math.max(1, Math.abs(q))
+    ? r
+    : q;
+}
+
 export const SYS_HELPERS = {
   ...JET_HELPERS,
   // The element count of an arithmetic `Range`, shared with the interpreter
@@ -3483,6 +3500,22 @@ export const SYS_HELPERS = {
   // kernel answered the final arm's `1` — a fail-closed violation.
   heaviside: (x: number) =>
     Number.isNaN(x) ? NaN : x < 0 ? 0 : x === 0 ? 0.5 : 1,
+  // The step forms `Floor(x, step)`, `Ceil(x, step)` and `Truncate(x, step)`:
+  // `round(x / k) · k` with `k = |step|`, the quotient taken to the nearest
+  // integer when it is within its rounding error of it (`stepQuotient`). A
+  // zero step gives `NaN`, as `Floor(x, 0)` is in the interpreter.
+  floorStep: (x: number, step: number) => {
+    const k = Math.abs(step);
+    return Math.floor(stepQuotient(x, k)) * k;
+  },
+  ceilStep: (x: number, step: number) => {
+    const k = Math.abs(step);
+    return Math.ceil(stepQuotient(x, k)) * k;
+  },
+  truncStep: (x: number, step: number) => {
+    const k = Math.abs(step);
+    return Math.trunc(stepQuotient(x, k)) * k;
+  },
   // `Round` with a tie rounded to the even neighbour (`ce.roundingTies` is
   // `'to-even'` when the code is compiled). The other tie rules have an
   // inline form made of `Math.round`; this one does not.
