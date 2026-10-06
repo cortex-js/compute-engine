@@ -829,6 +829,10 @@ export class _Parser implements Parser {
   // k))`, so the array has `this._tokens.length + 1` entries. The token stream
   // is immutable, so this is built once on demand.
   private _tokenPrefixOffsets: number[] | null = null;
+  // The character offset at which the text of each token starts, after the
+  // space that separates a command from a letter. Built with
+  // `_tokenPrefixOffsets` (see `tokenPrefixOffsets()`).
+  private _tokenStartOffsets: number[] | null = null;
 
   // Cache for the speculative `parseSymbol()` performed by the
   // `symbolTrigger` path of `peekDefinitions()`. The parsed candidate
@@ -1106,6 +1110,14 @@ export class _Parser implements Parser {
   // step of `parsePrimary()`. The span of the `ambiguous-exponent-end`
   // diagnostic starts there.
   private _scriptBaseStart = -1;
+
+  // The token index at which the primary being read by `parsePrimary()`
+  // started. A function name parselet calls `parseArguments('implicit')`
+  // from inside that primary, before any nested primary is read, so the
+  // value is the start of the function name (`\sin`, `\operatorname{arctg}`,
+  // the bare word `tan`): the span of the `ambiguous-factorial` diagnostic
+  // of `\sin x !` starts there.
+  private _primaryStart = -1;
 
   // The last symbol read by `parseSymbol()` from a spelling that takes a
   // subscript into the symbol name (`x_1`, `\alpha_{01}`, `\pi_0`): its
@@ -1505,7 +1517,12 @@ export class _Parser implements Parser {
     // normalization), these offsets match the original input string.
     const offsets = this.tokenPrefixOffsets();
     const n = this._tokens.length;
-    const start = offsets[Math.max(0, Math.min(startToken, n))];
+    // A span starts at the text of its first token, after the space that
+    // separates a command from a letter (`\alpha y`: a span that starts at
+    // `y` starts after the space), and ends at the end of the text of its
+    // last token, before such a space.
+    const first = Math.max(0, Math.min(startToken, n));
+    const start = first < n ? this._tokenStartOffsets![first] : offsets[first];
     const end = offsets[Math.max(0, Math.min(endToken, n))];
     return start <= end ? [start, end] : [end, start];
   }
@@ -1523,6 +1540,7 @@ export class _Parser implements Parser {
 
     const tokens = this._tokens;
     const offsets = new Array<number>(tokens.length + 1);
+    const starts = new Array<number>(tokens.length);
     offsets[0] = 0;
     let len = 0;
     let sep = '';
@@ -1531,6 +1549,8 @@ export class _Parser implements Parser {
       // If the segment begins with a char that *could* be in a command name,
       // insert the pending separator (see `joinLatex()`)
       if (/[a-zA-Z]/.test(segment[0])) len += sep.length;
+      // The text of token `i` starts after that separator
+      starts[i] = len;
       // If the segment ends in a command, a space precedes the next segment
       sep = /\\[a-zA-Z]+\*?$/.test(segment) ? ' ' : '';
       len += segment.length;
@@ -1538,6 +1558,7 @@ export class _Parser implements Parser {
     }
 
     this._tokenPrefixOffsets = offsets;
+    this._tokenStartOffsets = starts;
     return offsets;
   }
 
@@ -2618,12 +2639,45 @@ export class _Parser implements Parser {
       if (group !== null) return [group];
 
       // No group, but arguments without parentheses are allowed
-      // Read a primary
+      // Read a primary.
+      //
+      // A `!` after white space ends the argument and applies to the call:
+      // `\sin x !`, `tan x !` and `\ln x !` are `(\sin x)!`, `(tan x)!` and
+      // `(\ln x)!`, while `\sin x!` is `\sin(x!)`. Without white space the
+      // `!` attaches to its operand before this terminator is consulted
+      // (see `parsePostfixOperator()`). This holds on every route that
+      // reads an argument without parentheses, so it is done here and not
+      // in each function name parselet.
+      const head = this._primaryStart;
       const primary = this.parseExpression({
         ...until,
         minPrec: MULTIPLICATION_PRECEDENCE,
+        condition: (p: Parser) =>
+          p.peek === '!' || (until?.condition?.(p) ?? false),
       });
-      return primary === null ? null : [primary];
+      if (primary === null) return null;
+      // In non-strict mode, that `!` is reported as `ambiguous-factorial`: a
+      // person can mean `\sin(x!)`, which is how `\sin x!` is read. The same
+      // holds for `!!`. `\sin x != 0` is not a factorial. The span runs from
+      // the function name to the `!`. An argument in parentheses
+      // (`\sin(x) !`) has a clear end and returns above, so it is not
+      // reported. The argument parser has consumed the white space after
+      // the argument, so the end of the argument is found by going back
+      // over it.
+      if (this.diagnostics !== null && head >= 0) {
+        let argEnd = this.index;
+        while (argEnd > head && this._tokens[argEnd - 1] === '<space>')
+          argEnd -= 1;
+        let bang = this.index;
+        while (this._tokens[bang] === '<space>') bang += 1;
+        if (
+          bang > argEnd &&
+          this._tokens[bang] === '!' &&
+          this._tokens[bang + 1] !== '='
+        )
+          this._emitAmbiguity('ambiguous-factorial', head, bang + 1);
+      }
+      return [primary];
     }
 
     // The element following the function does not match
@@ -3713,18 +3767,8 @@ export class _Parser implements Parser {
         this._emitAmbiguity('ambiguous-function-argument', start, argEnd, {
           function: name,
         });
-      // A `!` after the argument and white space applies to the call:
-      // `tan x !` and `αtanπ !` are `(tan x)!` and `α·(tan π)!`, while
-      // `tan x!` is `tan(x!)`. A person can mean `tan(x!)`. The same holds
-      // for `!!`. `tan x != 0` is not a factorial and is not reported.
-      let bang = argEnd;
-      while (this._tokens[bang] === '<space>') bang++;
-      if (
-        bang > argEnd &&
-        this._tokens[bang] === '!' &&
-        this._tokens[bang + 1] !== '='
-      )
-        this._emitAmbiguity('ambiguous-factorial', start, bang + 1);
+      // A `!` after the argument and white space applies to the call
+      // (`tan x !` is `(tan x)!`) and is reported by `parseArguments()`.
       let depth = 0;
       for (let k = plusSign ? argEnd : argStart; k < argEnd; k++) {
         const tok = this._tokens[k];
@@ -5226,7 +5270,21 @@ export class _Parser implements Parser {
     //    multiplication by a list literal (Desmos semantics), not an index:
     //    no postfix is tried here, and `parseNumberTimesList()` reads the
     //    list as a factor.
-    //  - Any other postfix trigger attaches only when no space is before it.
+    //  - Every other postfix trigger also attaches after PLAIN whitespace,
+    //    for the same reason: `n !` is `n!`, `(x+1) !` is `(x+1)!`,
+    //    `30 \degree` is `30°` and `f '(x)` is `f'(x)`. Before, the `!` of
+    //    `n !` found no operand and the line was read as `n` followed by a
+    //    `Factorial` of a `missing` error, while `3 !` and `x^2 !` read as
+    //    factorials on other routes. One trigger keeps the no-space rule:
+    //    the member access `.`, because `v .x` is not the member access
+    //    `v.x` (it is an error, as before).
+    //    A trigger after white space also defers to the terminator of the
+    //    caller: the implicit argument of a function name ends before a
+    //    `!` after white space, so `tan x !` is `(tan x)!` (see
+    //    `parseArguments()`). The white space can be skipped here or
+    //    already consumed by the operand (a number reads its digit groups
+    //    across white space, so `tan 2 !` reaches this point at the `!`),
+    //    so the token before the trigger is tested.
     // The `this.index = start` no-match restore rolls back the skipped space.
     this.skipVisualSpace();
     if (this.index !== start) {
@@ -5237,8 +5295,15 @@ export class _Parser implements Parser {
       if (!isBraceTrigger) {
         this.index = start;
         this.skipSpace();
-        if (!this.atIndexBracket()) this.index = start;
+        if (this._tokens[this.index] === '.') this.index = start;
       }
+    }
+    if (
+      (this.index !== start || this._tokens[start - 1] === '<space>') &&
+      (until?.condition?.(this) ?? false)
+    ) {
+      this.index = start;
+      return null;
     }
     const afterSpace = this.index;
     for (const [def, n] of this.peekDefinitions('postfix')) {
@@ -5467,6 +5532,7 @@ export class _Parser implements Parser {
 
     let result: MathJsonExpression | null = null;
     const start = this.index;
+    this._primaryStart = start;
 
     //
     // 1. Is it a group? (i.e. `{...}`)

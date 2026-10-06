@@ -307,7 +307,7 @@ export function reportLineAmbiguities(
   const outside = (i: number) => !layout.inBraces[i];
 
   reportFactorial(tokens, expr, emit, outside);
-  reportFactorialOperand(tokens, expr, emit, outside);
+  reportFactorialOperand(tokens, expr, emit, outside, isFunctionName);
   reportMissingBase(tokens, expr, emit, outside);
   reportRadicalAfterLetterRun(tokens, expr, emit, outside);
   reportArrow(tokens, expr, emit, outside);
@@ -356,7 +356,10 @@ function reportFactorial(
  *   `M^(3!)`, `2^(-k!)` or `√(i!)`. The exponent is a run of letters or of
  *   digits, with a sign or not. A braced exponent that holds only digits is
  *   also reported, because the tokenizer reads `M³` as `M^{3}`. A
- *   parenthesized operand (`(M^3)!`, `√(i)!`) has a clear end.
+ *   parenthesized operand (`(M^3)!`, `√(i)!`, `x^(2)!`) has a clear end.
+ *   White space between the exponent or the radicand and the `!` does not
+ *   change the reading or the report: `x^2 !` and `√x !` are reported as
+ *   `x^2!` and `√x!` are.
  * - A superscript directly after a `!`: `n!²` is `(n!)²`, and a person can
  *   mean `(n²)!`.
  *
@@ -367,7 +370,8 @@ function reportFactorialOperand(
   tokens: readonly string[],
   expr: MathJsonExpression | null,
   emit: EmitAmbiguity,
-  outside: (i: number) => boolean
+  outside: (i: number) => boolean,
+  isFunctionName?: (word: string) => boolean
 ): void {
   const ofScript = someNode(
     expr,
@@ -381,10 +385,36 @@ function reportFactorialOperand(
   );
   if (!ofScript && !scripted) return;
   const at = (k: number) => tokens[k];
+  // True when a function name ends directly before token `k`, after optional
+  // white space: a command that is not a letter (`\sin`, `\ln`) or a run of
+  // letters that the lenient grammar reads as a function name (`tan`). A
+  // `!` after white space after the argument of such a name applies to the
+  // call (`tan y^2 !` is `(tan y^2)!`, reported by the parser with the span
+  // `tan y^2 !`), so the script before that `!` is not the operand of the
+  // `!` and is not reported here.
+  const afterFunctionName = (k: number): boolean => {
+    let j = k - 1;
+    while (tokens[j] === SPACE) j -= 1;
+    if (j < 0) return false;
+    if (isCommand(tokens[j])) return !getSymbolToUnicode().has(tokens[j]);
+    if (!isLetter(tokens[j])) return false;
+    let w = j;
+    while (w > 0 && isLetter(tokens[w - 1])) w -= 1;
+    return isFunctionName?.(tokens.slice(w, j + 1).join('')) ?? false;
+  };
   for (let i = 1; i < tokens.length; i++) {
     if (tokens[i] !== '!' || !outside(i)) continue;
+    // The last token of the operand of the `!`: white space between them
+    // is nothing (`x^2 !` is `(x^2)!`, as `x^2!` is)
+    let before = i - 1;
+    while (tokens[before] === SPACE) before -= 1;
+    const spaced = before !== i - 1;
     // `!=` is reported by `reportFactorial()`, `!!` is a double factorial
-    if (tokens[i + 1] === '=' || tokens[i + 1] === '!' || tokens[i - 1] === '!')
+    if (
+      tokens[i + 1] === '=' ||
+      tokens[i + 1] === '!' ||
+      tokens[before] === '!'
+    )
       continue;
 
     // A superscript directly after the `!`: `n!²`
@@ -392,7 +422,7 @@ function reportFactorialOperand(
       // The span starts at the operand of the `!`: the opening bracket that
       // matches a closing bracket (`(n+1)!²`), or the start of a run of
       // letters (`n!²`) or of digits (`10!²`).
-      let start = i - 1;
+      let start = before;
       if (MATCH_CLOSE.has(tokens[start])) {
         const open = matchingBracket(at, start);
         if (open >= 0) start = open;
@@ -425,6 +455,7 @@ function reportFactorialOperand(
           if (open >= 0) start = open;
         }
       }
+      if (spaced && afterFunctionName(start)) continue;
       emit('ambiguous-factorial', start, operandEnd(at, i + 1));
       // The `!` of an exponent is also reported as the `!` of `x^2!` is
       // (see below): `x^2!^3` can also mean `x^{2!}`.
@@ -433,7 +464,7 @@ function reportFactorialOperand(
     if (!ofScript) continue;
 
     // The `^` or `√` before the operand of the `!`
-    let k = i - 1;
+    let k = before;
     let script = -1;
     if (tokens[k] === '<}>') {
       const open = matchingBracket(at, k);
@@ -461,6 +492,7 @@ function reportFactorialOperand(
       (isLetter(tokens[script - 1]) || isDigit(tokens[script - 1]))
         ? script - 1
         : script;
+    if (spaced && afterFunctionName(start)) continue;
     emit('ambiguous-factorial', start, i + 1);
   }
 }

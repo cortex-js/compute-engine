@@ -272,6 +272,44 @@
   already did; they were the inert `Superminus(Integers)` and
   `Superminus(RealNumbers)`. `ℕ^*` is `PositiveIntegers`, as `\mathbb{N}^*` is.
 
+- **A postfix operator after white space.** In math mode white space is nothing,
+  so `n !` is `n!`. Before, a `!` after white space found no operand on most
+  routes: `n !`, `(x+1) !`, `|x| !` and `\sqrt{x} !` were read as the operand
+  followed by a `Factorial` of a `missing` error, and `f '(x)` lost its prime,
+  while `3 !` and `x^2 !` were read as factorials. Every postfix operator now
+  attaches after plain white space (`n !`, `n !!`, `f '(x)`, `30 \degree`), in
+  both grammars, also in the body of a big operator or of an integral
+  (`\sum_{n=0}^{10} n !` is a sum of factorials, `\int x ! dx` parses). The
+  member access `.` keeps the no-space rule (`v .x` is not the member access
+  `v.x`), and a visual-space command before a bracket (`a\,[1,2]`) is still a
+  product with a list. A `!` after the argument of a function name written
+  without parentheses, and white space, applies to the call on every route:
+  `\sin x !`, `\ln x !`, `\det A !` and `tan 2 !` are `(sin x)!`, `(ln x)!`,
+  `(det A)!` and `(tan 2)!`, as `tan x !` already was, while `\sin x!` stays
+  `sin(x!)`. In the lenient grammar these report `ambiguous-factorial` (an
+  argument in parentheses, `\sin(x) !`, has a clear end and is not reported),
+  and so do `x^2 !` and `√x !`, as `x^2!` and `√x!` do: the white space changes
+  neither the reading nor the report. A parenthesized exponent has a clear end
+  as a braced one does, so `x^(2)!` is `(x^2)!` and is not reported, as `√(i)!`
+  and `M^{n}!` are not (rows 366 and 363 of the Tycho ledger). A diagnostic
+  span that starts right after a command (`\alpha y^2 !`) now starts at the
+  text of its first token (`y^2 !`), not at the space that separates the
+  command from the letter.
+
+- **A number radicand, white space and an operand reports
+  `ambiguous-radical`.** In the lenient grammar, `√2 x` and `√2 π` are read
+  as `√2·x` and `√2·π`, and a person can mean `√(2x)` or `√(2π)`, as for
+  `√2π` and `√a b`, which were already reported. They now report
+  `ambiguous-radical` with the span `√2 x`; a number of more than one token
+  is reported once, with that wider span (`√12 x`). A word of two or more
+  letters after the white space (`√2 sin x`) is not an operand of the
+  radicand and is not reported. Decided not ambiguous, so still not
+  reported: a factorial after a parenthesized exponent (`x^(2)!` is
+  `(x^2)!`, as `M^{n}!` and `√(i)!` are), and an operand before `√` that is
+  not a Latin letter or a digit written directly before the glyph (`θ√y`,
+  `(x)√y`, `|x|√y`, `2 √x` are products; only `t√y` and `2√x` can be a root
+  with an index). Row 366 of the Tycho ledger.
+
 - **A later use narrows an inferred union type.** A symbol whose type was
   inferred as a union by one use (`ToUpperCase(s)` gives `s` the type
   `character | string`) was refused by a later use whose parameter admits

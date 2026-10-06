@@ -190,18 +190,25 @@ describe('a factorial next to an exponent or a radical', () => {
 describe('the end of a radical', () => {
   expectReported('ambiguous-radical', [
     ['√a b', '["InvisibleOperator",["Sqrt","a"],"b"]'],
+    ['√2 x', '["InvisibleOperator",["Sqrt",2],"x"]'],
     ['t√y', '["InvisibleOperator","t",["Sqrt","y"]]'],
     ['2√x', '["InvisibleOperator",2,["Sqrt","x"]]'],
   ]);
+  // An operand before the glyph that is not a Latin letter or a digit
+  // written directly before it is a factor, not a root index: a Greek
+  // letter, a group, an absolute value, or a digit then white space
   expectNotReported('ambiguous-radical', [
     '\\sqrt{a}b',
     '\\sqrt{a} b',
     '√{a} b',
     '√(a) b',
-    '√2 x',
     '√x sin x',
     '√x dx',
     't √y',
+    '2 √x',
+    'θ√y',
+    '(x)√y',
+    '|x|√y',
     'π√2',
     '√a',
     'sin√x',

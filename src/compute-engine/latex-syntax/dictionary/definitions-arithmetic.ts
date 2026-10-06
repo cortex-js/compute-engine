@@ -316,7 +316,7 @@ function parseRootGlyph(parser: Parser): MathJsonExpression | null {
     const radicand = parseRadicandNumber(parser, glyph);
     if (radicand !== null) {
       const result: MathJsonExpression = ['Sqrt', radicand];
-      emitRadicalAmbiguity(parser, glyph);
+      emitRadicalAmbiguity(parser, glyph, true);
       return result;
     }
     parser.index = start;
@@ -375,11 +375,24 @@ function parseRadicandNumber(
   // reported once, with this span.
   let j = end;
   while (token(j) === ' ') j += 1;
+  // White space then an operand of one letter or a constant (`√12 x`,
+  // `√2 π`) is reported by `emitRadicalAmbiguity()` too, with a span that
+  // holds the operand; a number of more than one token is then reported
+  // once, with that wider span. A word of two or more letters (`√12 sin x`)
+  // is not an operand there, so the number is reported here.
+  const isLatin = (i: number) => /^[a-zA-Z]$/.test(token(i));
+  const spacedOperand =
+    j > end && isOperandStartToken(token(j)) && !(isLatin(j) && isLatin(j + 1));
   if (j > end && isDigit(j)) {
     let k = j;
     while (isDigit(k)) k += 1;
     parser._emitAmbiguity?.('ambiguous-radical', glyph, k);
-  } else if (end - first > 1 && next !== '^' && !isOperandStartToken(next))
+  } else if (
+    end - first > 1 &&
+    next !== '^' &&
+    !isOperandStartToken(next) &&
+    !spacedOperand
+  )
     parser._emitAmbiguity?.('ambiguous-radical', glyph, end);
   return { num: text.startsWith('.') ? '0' + text : text };
 }
@@ -396,13 +409,22 @@ function parseRadicandNumber(
  * - a digit directly before the glyph: `3√8` is `3·√8`, and a person can
  *   mean the cube root of 8. Also a Latin letter: `t√y` is `t·√y`, and a
  *   person can mean the root of index `t`;
- * - a radicand that is one letter, then white space and an operand: `√a b`
- *   is `√a·b`, and a person can mean `√(ab)`.
+ * - a radicand that is one letter or a number, then white space and an
+ *   operand: `√a b` is `√a·b` and `√2 x` is `√2·x`, and a person can mean
+ *   `√(ab)` or `√(2x)`.
  *
  * The span starts at the glyph and ends after the operand that has the
- * second reading (`√2π`, `√x²`, `√xy`, `√a b`). The reading does not change.
+ * second reading (`√2π`, `√x²`, `√xy`, `√a b`, `√2 x`). The reading does not
+ * change.
  */
-function emitRadicalAmbiguity(parser: Parser, glyph: number): void {
+function emitRadicalAmbiguity(
+  parser: Parser,
+  glyph: number,
+  // True when the radicand is the number read by `parseRadicandNumber()`,
+  // which skips white space and an empty group `{}` before the number: the
+  // radicand of `√{}12` is not braced.
+  numberRadicand = false
+): void {
   if (!parser._emitAmbiguity) return;
   const token = (i: number) => (i < 0 ? '' : parser.latex(i, i + 1));
   // The token at index `i`, or `undefined` after the end of the input
@@ -427,7 +449,11 @@ function emitRadicalAmbiguity(parser: Parser, glyph: number): void {
     parser._emitAmbiguity('ambiguous-radical', glyph, parser.index);
   // A braced radicand (`√{2π}`) has a clear end
   const radicand = token(glyph + 1);
-  if (radicand === '{' || radicand === '(' || radicand === '\\left') return;
+  if (
+    !numberRadicand &&
+    (radicand === '{' || radicand === '(' || radicand === '\\left')
+  )
+    return;
   const next = token(parser.index);
   if (next === '^' || isOperandStartToken(next)) {
     parser._emitAmbiguity(
@@ -437,13 +463,14 @@ function emitRadicalAmbiguity(parser: Parser, glyph: number): void {
     );
     return;
   }
-  // A radicand that is one letter, then white space and an operand: `√a b`
-  // is `√a·b`, and a person can mean `√(ab)`. A number radicand is not
-  // reported (`√2 x` is `√2·x`), as a number exponent is not (`x^2 y`). A
-  // word of two or more letters after the white space is not reported
-  // either: a function name (`√x sin x`), a differential (`√x dx`) or the
-  // word `in`. A letter with an unbraced subscript of digits or letters is
-  // one name, as one letter is: `√a_1 b` is `√a_1·b`.
+  // A radicand that is one letter or a number, then white space and an
+  // operand: `√a b` is `√a·b` and `√2 x` is `√2·x`, and a person can mean
+  // `√(ab)` or `√(2x)`, as for `√2π`. A word of two or more letters after
+  // the white space is not reported: a function name (`√x sin x`,
+  // `√2 sin x`), a differential (`√x dx`) or the word `in`. A letter with
+  // an unbraced subscript of digits or letters is one name, as one letter
+  // is: `√a_1 b` is `√a_1·b`. A digit after a number radicand and white
+  // space (`√1 000`) is a digit group, reported by `parseRadicandNumber()`.
   if (next !== ' ') return;
   const subscripted =
     token(glyph + 2) === '_' &&
@@ -451,12 +478,15 @@ function emitRadicalAmbiguity(parser: Parser, glyph: number): void {
     Array.from({ length: parser.index - glyph - 3 }, (_, k) =>
       token(glyph + 3 + k)
     ).every((t) => /^[a-zA-Z0-9]$/.test(t));
-  if (parser.index !== glyph + 2 && !subscripted) return;
-  if (!isLetterToken(radicand) && !isLetterToken(letterOf(radicand))) return;
+  if (!numberRadicand) {
+    if (parser.index !== glyph + 2 && !subscripted) return;
+    if (!isLetterToken(radicand) && !isLetterToken(letterOf(radicand))) return;
+  }
   let j = parser.index;
   while (token(j) === ' ') j += 1;
   const operand = token(j);
   if (!isOperandStartToken(operand)) return;
+  if (numberRadicand && /^[0-9]$/.test(operand)) return;
   if (/^[a-zA-Z]$/.test(operand) && /^[a-zA-Z]$/.test(token(j + 1))) return;
   parser._emitAmbiguity('ambiguous-radical', glyph, operandEnd(at, j));
 }

@@ -312,11 +312,20 @@ or a library constant.
   each letter of its run must be read as a symbol directly before the
   `Sqrt`. So `n√2 + sin√x` and `i√3 + pi√2` do not report `√x` and `pi√2`
   (`n√2` and `i√3` are reported, as `t√y` is). Also a radicand that is one
-  letter, with or without an unbraced subscript, then white space and an
-  operand: `√a b`, `√a_1 b` (`√a·b` / `√(ab)`). A number radicand
-  (`√2 x`), a braced or parenthesized radicand (`\sqrt{a} b`, `√(a) b`)
-  and a word of two or more letters after the white space (`√x sin x`,
-  `√x dx`) are not reported.
+  letter, with or without an unbraced subscript, or a number, then white
+  space and an operand: `√a b`, `√a_1 b`, `√2 x`, `√2 π` (`√a·b` /
+  `√(ab)`, `√2·x` / `√(2x)`); a number of more than one token is then
+  reported once, with that wider span (`√12 x`). User decision 2026-10-07
+  (row 366 of the Tycho ledger): a number radicand before white space was
+  not reported before, by analogy with the exponent `x^2 y`, but `√(2π)`
+  is a common reading and `e^2 x` is reported. A braced or parenthesized
+  radicand (`\sqrt{a} b`, `√(a) b`) and a word of two or more letters after
+  the white space (`√x sin x`, `√2 sin x`, `√x dx`) are not reported.
+  Decided not ambiguous (user decision 2026-10-07, row 366): an operand
+  before the glyph that is not a Latin letter or a digit written directly
+  before it — a Greek letter (`θ√y`), a group (`(x)√y`), an absolute value
+  (`|x|√y`), or a digit then white space (`2 √x`) — is a factor, not a root
+  index, and is not reported.
 - **`ambiguous-absolute-value`** — bars that pair two ways: `|x|y|z|`.
 
 ### 5.4 Signs and operators
@@ -336,11 +345,25 @@ or a library constant.
     the radicand can be a letter with an unbraced subscript: `√i_1!`,
     `x^a_1!`. Because the tokenizer reads `M³` as `M^{3}`, a braced
     exponent that holds only digits is reported too (`M^{3}!`); `M^{n}!`,
-    `(M^3)!`, `√(i)!`, `\sqrt{i}!` and `x_1!` are not;
+    `(M^3)!`, `√(i)!`, `\sqrt{i}!` and `x_1!` are not. A parenthesized
+    exponent has a clear end as a braced one does: `x^(2)!` and `e^(-x)!`
+    are `(x^2)!` and `(e^-x)!` and are not reported. White space between
+    the exponent or the radicand and the `!` changes neither the reading
+    nor the report: `x^2 !` and `√x !` are reported as `x^2!` and `√i!`
+    are. (In math mode white space is nothing, so `n !` is `n!`; before, a
+    `!` after white space found no operand on most routes, and `√x !` was
+    read as `√x` followed by a `Factorial` of a `missing` error.)
   - a `!` after white space after the argument of a function name with no
     parentheses: `tan x !` and `αtanπ !` are `(tan x)!` and `α·(tan π)!`,
-    and a person can mean `tan(x!)`, as `tan x!` is read. `tan x != 0` is
-    not reported;
+    and a person can mean `tan(x!)`, as `tan x!` is read. The same holds
+    for a number argument (`tan 2 !`) and on every LaTeX route that reads
+    an argument without parentheses (`\sin x !`, `\ln x !`, `\det A !`,
+    `\operatorname{arctg} x !`); the span starts at the function name. An
+    argument in parentheses has a clear end: `tan(x) !` and `\sin(x) !`
+    are not reported. `tan x != 0` is not reported. The `!` applies to
+    the call, so a script at the end of the argument is not reported as
+    the operand of the `!`: `tan y^2 !` reports `tan y^2 !` only, not
+    `y^2 !`;
   - a superscript directly after a `!`: `n!²` (`(n!)²` / `(n²)!`).
     `(n!)²`, `n!` and `n!!` are not reported. When the operand of the `!`
     is an exponent, the span starts at the base of the exponent, and the

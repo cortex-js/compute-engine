@@ -744,3 +744,69 @@ describe('Double negation (was C-style --/++)', () => {
     expect(ce.parse(s.latex).json).toBe('x');
   });
 });
+
+describe('OPERATOR postfix after white space', () => {
+  // In math mode, white space is nothing: `n !` is `n!`. Before, a `!`
+  // after white space found no operand on most routes, and `n !` was read
+  // as `n` followed by a `Factorial` of a `missing` error, while `3 !` and
+  // `x^2 !` were read as factorials. The member access `.` and the
+  // ring-quotient `/` keep the no-space rule.
+  const raw = (s: string) => JSON.stringify(ce.parse(s, { form: 'raw' }).json);
+  test.each([
+    ['n !', '["Factorial","n"]'],
+    ['n  !', '["Factorial","n"]'],
+    ['(x+1) !', '["Factorial",["Delimiter",["Add","x",1]]]'],
+    ['|x| !', '["Factorial",["Abs","x"]]'],
+    ['x_1 !', '["Factorial","x_1"]'],
+    ['\\sqrt{x} !', '["Factorial",["Sqrt","x"]]'],
+    ['n !!', '["Factorial2","n"]'],
+    ['n ! = 1', '["Equal",["Factorial","n"],1]'],
+    ['n ! != 1', '["NotEqual",["Factorial","n"],1]'],
+    ['n != 1', '["NotEqual","n",1]'],
+    ['n !^2', '["Power",["Factorial","n"],2]'],
+    ['2 ! 3', '["InvisibleOperator",["Factorial",2],3]'],
+    ["f '(x)", '["Apply",["Derivative","f",1],"x"]'],
+    ['f \\prime(x)', '["Apply",["Derivative","f",1],"x"]'],
+    ['30 \\degree', '["Degrees",30]'],
+  ])('%s', (input, json) => {
+    expect(raw(input)).toBe(json);
+  });
+  // A `!` after the implicit argument of a function name and white space
+  // applies to the call, on the LaTeX route as on the bare-word route, and
+  // also when the argument is a number (a number reads its digit groups
+  // across white space, so the `!` is reached with the white space already
+  // consumed).
+  test.each([
+    ['\\sin x !', '["Factorial",["Sin","x"]]'],
+    ['\\sin x!', '["Sin",["Factorial","x"]]'],
+    ['\\sin 2 !', '["Factorial",["Sin",2]]'],
+    ['\\sin 2!', '["Sin",["Factorial",2]]'],
+    ['\\sin(x) !', '["Factorial",["Sin","x"]]'],
+    ['\\ln x !', '["Factorial",["Ln","x"]]'],
+    ['\\ln x!', '["Ln",["Factorial","x"]]'],
+    ['\\exp x !', '["Factorial",["Exp","x"]]'],
+    ['\\det A !', '["Factorial",["Determinant","A"]]'],
+    ['\\operatorname{arctg} x !', '["Factorial",["Arctan","x"]]'],
+  ])('%s', (input, json) => {
+    expect(raw(input)).toBe(json);
+  });
+  // The body of a big operator or of an integral
+  test.each([
+    ['\\sum_{n=0}^{10} n !', '["Sum",["Factorial","n"],["Tuple","n",0,10]]'],
+    ['\\int x ! dx', '["Integrate",["Factorial","x"],"x"]'],
+  ])('%s', (input, json) => {
+    expect(raw(input)).toBe(json);
+  });
+  test('the member access `.` keeps the no-space rule', () => {
+    expect(raw('v.x')).toBe('["PointX","v"]');
+    expect(raw('v .x')).toContain('"Error"');
+  });
+  test('the ring quotient reads the same with and without a space', () => {
+    expect(raw('\\Z/2\\Z')).toBe('["QuotientRing","Integers",2]');
+    expect(raw('\\Z / 2\\Z')).toBe('["QuotientRing","Integers",2]');
+  });
+  test('a visual space before a bracket is still a product with a list', () => {
+    expect(raw('a [1,2]')).toBe('["At","a",1,2]');
+    expect(raw('a\\,[1,2]')).toBe('["InvisibleOperator","a",["List",1,2]]');
+  });
+});

@@ -246,7 +246,23 @@ describe('a number after the radical glyph', () => {
     ['2√12', '["InvisibleOperator",2,["Sqrt",12]]'],
     ['√1 000', '["InvisibleOperator",["Sqrt",1],0]'],
   ]);
-  expectNotReported('ambiguous-radical', ['√2', '√2 x', '√2/3', 'sqrt12']);
+  expectNotReported('ambiguous-radical', ['√2', '√2/3', 'sqrt12']);
+  // A number radicand, white space and an operand: `√2 x` is `√2·x`, and a
+  // person can mean `√(2x)`, as for `√2x` and `√a b`. A word of two or more
+  // letters after the white space is not an operand here. An empty group
+  // `{}` before the number is skipped as white space is.
+  expectReported('ambiguous-radical', [
+    ['√2 x', '["InvisibleOperator",["Sqrt",2],"x"]'],
+    ['√2 π', '["InvisibleOperator",["Sqrt",2],"Pi"]'],
+    ['√2 \\pi', '["InvisibleOperator",["Sqrt",2],"Pi"]'],
+    ['√12 x', '["InvisibleOperator",["Sqrt",12],"x"]'],
+    ['√2.5 x', '["InvisibleOperator",["Sqrt",2.5],"x"]'],
+    ['√.5 x', '["InvisibleOperator",["Sqrt",0.5],"x"]'],
+    ['√ 2 x', '["InvisibleOperator",["Sqrt",2],"x"]'],
+    ['√{}2 x', '["InvisibleOperator",["Sqrt",2],"x"]'],
+    ['√{}12 x', '["InvisibleOperator",["Sqrt",12],"x"]'],
+  ]);
+  expectNotReported('ambiguous-radical', ['√2 sin x', '√2 (x)', '√2 + 1']);
   test('the number ends the radicand', () => {
     expect(lenient('√1.5.5').json).toBe(
       '["InvisibleOperator",["Sqrt",1.5],0.5]'
@@ -257,14 +273,18 @@ describe('a number after the radical glyph', () => {
   test('the spans', () => {
     expect(span('√12', 'ambiguous-radical')).toBe('√12');
     expect(span('√12x', 'ambiguous-radical')).toBe('√12x');
+    // One report with the wider span, not `√12` and `√12 x`
+    expect(spans('√12 x', 'ambiguous-radical')).toEqual(['√12 x']);
+    expect(spans('√2 π', 'ambiguous-radical')).toEqual(['√2 π']);
+    expect(spans('√12 sin x', 'ambiguous-radical')).toEqual(['√12']);
+    // A digit group is reported once, by the number reader
+    expect(spans('√1 000', 'ambiguous-radical')).toEqual(['√1 000']);
+    expect(spans('√12 000', 'ambiguous-radical')).toEqual(['√12 000']);
+    expect(spans('√{}12 x', 'ambiguous-radical')).toEqual(['√{}12 x']);
   });
   test('the strict grammar keeps the TeX reading', () => {
-    expect(strict('\\sqrt12').json).toBe(
-      '["InvisibleOperator",["Sqrt",1],2]'
-    );
-    expect(strict('\\sqrt 12').json).toBe(
-      '["InvisibleOperator",["Sqrt",1],2]'
-    );
+    expect(strict('\\sqrt12').json).toBe('["InvisibleOperator",["Sqrt",1],2]');
+    expect(strict('\\sqrt 12').json).toBe('["InvisibleOperator",["Sqrt",1],2]');
     expect(strict('\\sqrt{12}').json).toBe('["Sqrt",12]');
     expect(strict('√12').json).toBe('["InvisibleOperator",["Sqrt",1],2]');
   });
@@ -299,13 +319,79 @@ describe('a factorial after a function argument and white space', () => {
   expectReported('ambiguous-factorial', [
     ['αtanπ !', '["InvisibleOperator","alpha",["Factorial",["Tan","Pi"]]]'],
     ['tan x !', '["Factorial",["Tan","x"]]'],
+    // A number argument: the number reads its digit groups across white
+    // space, so the `!` is reached with the white space already consumed
+    ['tan 2 !', '["Factorial",["Tan",2]]'],
+    ['\\sin x !', '["Factorial",["Sin","x"]]'],
+    // Every route that reads an argument without parentheses
+    ['\\ln x !', '["Factorial",["Ln","x"]]'],
+    ['\\exp x !', '["Factorial",["Exp","x"]]'],
+    ['\\operatorname{arctg} x !', '["Factorial",["Arctan","x"]]'],
   ]);
+  // An argument in parentheses has a clear end
   expectNotReported('ambiguous-factorial', [
     'tan x!',
     'tan π!',
+    'tan 2!',
     'tan x != 0',
     'tan(x)!',
+    'tan(x) !',
+    '\\sin x!',
+    '\\sin(x) !',
+    '\\ln(x) !',
   ]);
+  test('the span starts at the function name', () => {
+    expect(span('\\sin x !', 'ambiguous-factorial')).toBe('\\sin x !');
+    expect(span('\\operatorname{arctg} x !', 'ambiguous-factorial')).toBe(
+      '\\operatorname{arctg} x !'
+    );
+  });
+  // The `!` applies to the call, so the script before it is not the
+  // operand of the `!`: `y^2 !` is not reported as `(y^2)!`
+  test('the `!` of a call is not reported as the `!` of a script', () => {
+    expect(spans('x^2! + tan y^2 !', 'ambiguous-factorial').sort()).toEqual([
+      'tan y^2 !',
+      'x^2!',
+    ]);
+    expect(spans('\\sin y^2 !', 'ambiguous-factorial')).toEqual([
+      '\\sin y^2 !',
+    ]);
+  });
+});
+
+describe('a factorial after an exponent or a radicand and white space', () => {
+  // White space between the exponent or the radicand and the `!` does not
+  // change the reading (`x^2 !` is `(x^2)!`, as `x^2!` is), so the report
+  // is the same. Before, `√x !` was read as `√x` followed by a `Factorial`
+  // of a `missing` error.
+  expectReported('ambiguous-factorial', [
+    ['x^2 !', '["Factorial",["Power","x",2]]'],
+    ['√x !', '["Factorial",["Sqrt","x"]]'],
+    ['2^-k !', '["Factorial",["Power",2,["Negate","k"]]]'],
+    ['x^2 ! + 1', '["Add",["Factorial",["Power","x",2]],1]'],
+    ['n !^2', '["Power",["Factorial","n"],2]'],
+    // More than one white space token (`~` is one)
+    ['x^2~~!', '["Factorial",["Power","x",2]]'],
+  ]);
+  // A parenthesized exponent or radicand has a clear end, as a braced one
+  // does; a `!` after an operand that is not a script has one reading
+  expectNotReported('ambiguous-factorial', [
+    'x^(2)!',
+    'e^(-x)!',
+    '√(x) !',
+    'x^{n} !',
+    'n !',
+    '(x+1) !',
+    'x^2 != 3',
+  ]);
+  test('the spans', () => {
+    expect(span('x^2 !', 'ambiguous-factorial')).toBe('x^2 !');
+    expect(span('√x !', 'ambiguous-factorial')).toBe('√x !');
+    expect(span('n !^2', 'ambiguous-factorial')).toBe('n !^2');
+    // A span that starts after a command starts after the space that
+    // separates the command from the letter, not at the space
+    expect(span('\\alpha y^2 !', 'ambiguous-factorial')).toBe('y^2 !');
+  });
 });
 
 describe('a script after a postfix operand', () => {

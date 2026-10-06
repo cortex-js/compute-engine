@@ -98,7 +98,10 @@ function parseTrig(op: string): ExpressionParseHandler {
 
     // Look for an implicit argument (a product of terms) but stop if another
     // trig function is encountered, i.e. ensure that
-    // "\cos a \sin b" is parsed as "(\cos a)(\sin b)" and not "\cos (a \sin b)"
+    // "\cos a \sin b" is parsed as "(\cos a)(\sin b)" and not "\cos (a \sin b)".
+    // A `!` after white space ends the argument and applies to the call
+    // (`\sin x !` is `(\sin x)!`): `parseArguments()` does this for every
+    // route and reports it.
     let args = parser.parseArguments('implicit', {
       minPrec: MULTIPLICATION_PRECEDENCE,
       condition: (parser) =>
