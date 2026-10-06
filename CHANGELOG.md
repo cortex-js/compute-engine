@@ -2788,8 +2788,8 @@
   [enumeratio](https://github.com/enumeratio)).
 
 - **`ClausenCl(n, θ)` is the Clausen function Clₙ(θ).** For an integer order
-  n ≥ 1 and real θ it is Im Liₙ(e^{iθ}) = Σ sin(kθ)/kⁿ when n is even and
-  Re Liₙ(e^{iθ}) = Σ cos(kθ)/kⁿ when n is odd (mpmath's `clsin` and `clcos`;
+  n ≥ 1 and real θ it is `Im Liₙ(e^{iθ}) = Σ sin(kθ)/kⁿ` when n is even and
+  `Re Liₙ(e^{iθ}) = Σ cos(kθ)/kⁿ` when n is odd (mpmath's `clsin` and `clcos`;
   Mathematica writes them as `Im`/`Re` of `PolyLog`). `N(ClausenCl(2, 1))` is
   `1.0139591323607684`, `N(ClausenCl(3, 2.5))` is `-0.7606561109685137` and
   `N(ClausenCl(2, 3.14159))` is `1.8393282835451e-6` (the expansion of Liₙ at
