@@ -919,9 +919,16 @@ function hasPossiblyTextElements(e: Expression | undefined): boolean {
  * (`RotateLeft(S, 1)` for a bare `S: indexed_collection`) is typed
  * `list<unknown> | string`, but its `string` member says no more than the
  * subject's type, which does not fail closed here.
+ *
+ * A collection type with text elements that a string inhabits
+ * (`indexed_collection<character>`, `collection<character>`) also admits text
+ * without proving it, and fails closed for the same reason. See
+ * `isTextAdmittingCollectionType`.
  */
 export function couldBeStringOperand(e: Expression): boolean {
-  const t = jsType(stringEvidenceSource(e));
+  const source = stringEvidenceSource(e);
+  if (isTextAdmittingCollectionType(source.type.type)) return true;
+  const t = jsType(source);
   if (typeof t !== 'object' || t.kind !== 'union') return false;
   return t.types.some(
     (m) =>
@@ -1750,6 +1757,35 @@ function compileScalarBooleanBody(
 }
 
 /**
+ * True when `t` is a collection type, other than `string` itself, that a
+ * string inhabits: an `indexed_collection<E>` or a `collection<E>` whose
+ * element type `E` admits a one-character string, such as
+ * `indexed_collection<character>` or `collection<character>`, or a union
+ * with such a member. A transparent alias is unfolded.
+ *
+ * The compiled entry does not refuse a string for a binding of such a type
+ * (`stringRefusedEntryType`), because the interpreter accepts one there and
+ * reads it as a collection of grapheme clusters. The compiled collection
+ * lowerings read their operand as a JavaScript array, and on a string they
+ * read UTF-16 code units instead. So an operand of such a type is not
+ * array-shaped for the compiled code, and the operations on it fail closed
+ * at compile time.
+ *
+ * Not included: `string`, which has its own lowerings that segment the
+ * string first; the bare `indexed_collection` and `collection`, and a
+ * collection whose element type admits every value, for which the entry
+ * refuses a string; a `list<...>` type, which a string does not inhabit; and
+ * a nominal type reference, which a string does not inhabit either.
+ */
+function isTextAdmittingCollectionType(t: Type): boolean {
+  t = resolveTypeAlias(t);
+  if (typeof t === 'string') return false;
+  if (t.kind === 'union') return t.types.some(isTextAdmittingCollectionType);
+  if (t.kind !== 'indexed_collection' && t.kind !== 'collection') return false;
+  return admitsStringAsText(t);
+}
+
+/**
  * True when `e` compiles to a JavaScript array that supports index access and
  * `.length` — an indexed collection (list / vector / range) or a `list`-typed
  * expression (e.g. `Power(L, 2)`, which types as `list<number>` but is
@@ -1772,6 +1808,14 @@ export function isIndexedCollectionOperand(
   // characters. Exclude it explicitly so string
   // operations fail closed here until the grapheme-aware lowerings exist.
   if (t.matches('string')) return false;
+  // A collection type that a string inhabits, such as
+  // `indexed_collection<character>`, is excluded for the same reason. The
+  // compiled entry does not refuse a string for a binding of this type,
+  // because the interpreter accepts one there. The generic lowerings would
+  // then read the string as an array of UTF-16 code units: `Length` of
+  // `"😀a"` would give 3 where the interpreter gives 2. So the operations
+  // on such an operand fail closed, and the interpreter evaluates them.
+  if (isTextAdmittingCollectionType(t.type)) return false;
   // This is a SHAPE question — "does this lower to a JS array?" — so it is
   // asked against the absence-admitting family tops `list<any>` /
   // `indexed_collection<any>`: a `list<any>` is array-shaped even though it
@@ -1903,6 +1947,10 @@ function iterableCollectionCode(
     !couldBeIndexedCollectionOperand(e);
   if (!numberArm && !e.type.matches('collection<any>')) return undefined;
   if (couldBeStringOperand(e)) return undefined;
+  // A `string` matches `collection<any>`, but its value is a JavaScript
+  // string, which `_SYS.elts` refuses at run time. The operator then fails
+  // closed at compile time instead, and the interpreter evaluates it.
+  if (isSubtype(t, 'string')) return undefined;
   if (e.type.matches('dictionary<any>') || isPointOperandType(e))
     return undefined;
   // A single value is read as one element when the type has a number arm,
@@ -2068,6 +2116,10 @@ export function couldBeIndexedCollectionOperand(e: Expression): boolean {
   if (t === 'unknown' || t === 'any' || t === 'value') return false;
   // A string is not an array-shaped operand — see `isIndexedCollectionOperand`.
   if (t === 'string') return false;
+  // Nor is an operand of a collection type that a string inhabits, such as
+  // `indexed_collection<character>`: a string can arrive for it at run time.
+  // See `isTextAdmittingCollectionType`.
+  if (isTextAdmittingCollectionType(e.type.type)) return false;
   // Shape question, so asked against the family top `indexed_collection<any>`
   // — see `isIndexedCollectionOperand` above.
   if (typeof t === 'object' && t.kind === 'union')
@@ -2314,6 +2366,16 @@ function compileNthElement(
 ): string {
   if (isProvablyStringOperand(arg))
     return `_SYS.chars(${compile(arg)})[${idx}]`;
+  // An operand that may be text at run time without being provably a string
+  // (`string | list<number>`, `indexed_collection<character>`) would be
+  // indexed by UTF-16 code unit below, and could give half of a surrogate
+  // pair. The interpreter evaluates it instead.
+  if (couldBeStringOperand(arg))
+    throw new Error(
+      `Could not compile the element read: the operand may be text at run ` +
+        `time (type \`${arg.type.toString()}\`) but is not provably a ` +
+        `string. The interpreter evaluates it instead.`
+    );
   const read = absentRead(arg);
   const collT = stripMissingFromType(jsType(arg));
   const eltT = collectionElementType(collT);
@@ -9528,8 +9590,19 @@ function isListEntryType(t: Type): boolean {
  * collection is not affected: `string` itself, and a union with a text
  * member (`string | list<number>`, whose lowerings fail closed at compile
  * time). `indexed_collection<character>` and `collection<character>` are
- * not affected either, and stay an open case: a string inhabits them, and
- * the compiled code still reads it as an array of UTF-16 code units.
+ * not affected either: a string inhabits them, so the entry accepts one, and
+ * the collection lowerings fail closed at compile time on an operand of
+ * these types (`isTextAdmittingCollectionType`).
+ *
+ * A union with a member of this kind and a scalar member is refused too
+ * when no member admits a string (`number | list<number>`,
+ * `integer | vector<integer^2>`). The interpreter refuses a string for such
+ * a type. The compiled code reads a value that is not an array as a number,
+ * so without the refusal a string reached that branch: compiled `Sum(S)` of
+ * `"😀a"` returned the string. A union that a string inhabits
+ * (`number | indexed_collection`, `string | list<number>`) is not refused
+ * by this rule, and a type with no collection member (`number`) keeps the
+ * checks of its own type.
  *
  * A transparent alias is read as the type it names, and a nominal type as
  * the layout of its definition: `type seq = indexed_collection` refuses a
@@ -9537,7 +9610,22 @@ function isListEntryType(t: Type): boolean {
  */
 function stringRefusedEntryType(t: Type): boolean {
   if (admitsStringAsText(t)) return false;
-  return isArrayLoweredCollectionType(t);
+  if (isArrayLoweredCollectionType(t)) return true;
+  // A union of a scalar and a collection that no member lets a string into
+  // (`number | list<number>`) is refused too. Each member is asked through
+  // its compiled layout: in a sum type such as
+  // `type json = jnull | jstr(string) | jarr(list<json>)`, the variant
+  // `jstr` is not the type `string`, but its erased layout is a string, so a
+  // string is a valid value of `json` and is not refused.
+  const union = resolveTypeAlias(t);
+  return (
+    typeof union !== 'string' &&
+    union.kind === 'union' &&
+    !union.types.some((m) =>
+      isSubtype('string', resolveTypeForCompilation(m))
+    ) &&
+    union.types.some(isArrayLoweredCollectionType)
+  );
 }
 
 /** True when each member of `t` is a list, an indexed collection or a
@@ -10157,7 +10245,12 @@ function compileSumProduct(
     // run time, so it reduces under an `Array.isArray` guard (a runtime scalar
     // returns itself, matching the interpreter's `Sum(scalar) = scalar`).
     // A dictionary/string/statically-scalar operand fails closed, matching
-    // `Length`/`At`/`Reduce`.
+    // `Length`/`At`/`Reduce`. An operand that may be text at run time
+    // (`string | list<number>`) fails closed too: it is an indexed collection
+    // in the type lattice, but `.reduce` on the string it may hold throws a
+    // `TypeError`.
+    if (couldBeStringOperand(args[0]))
+      refuseNonNumericScalarProjection(kind, args[0]);
     if (isIndexedCollectionOperand(args[0])) {
       // Elements that are themselves collections (a list of points, the rows
       // of a matrix or of a list of lists) are combined element-wise, as the
@@ -10220,8 +10313,10 @@ function compileSumProduct(
         return emitCollectionReduce(kind, args[0], target, true);
       return emitCollectionReduce(kind, args[0], target, false);
     }
-    if (isPossiblyCollectionTypedJS(args[0]))
+    if (isPossiblyCollectionTypedJS(args[0])) {
+      refuseNonNumericScalarProjection(kind, args[0]);
       return emitCollectionReduce(kind, args[0], target, true);
+    }
     // A symbol typed as an abstract collection (declared or inferred): adding
     // or multiplying the elements needs no positions or order, so it is read
     // through `_SYS.elts`, which accepts an array or a JavaScript `Set` at run
@@ -11716,6 +11811,55 @@ function refuseNestedData(
 }
 
 /**
+ * Fail closed when the run-time projection of a scalar-or-collection operand
+ * could read a value that is not a number.
+ *
+ * `Max`, `Min`, `Sum` and `Product` of an operand whose type admits both a
+ * scalar and an indexed collection (`number | list<number>`) dispatch on the
+ * run-time shape: an array is reduced, and any other value is read as one
+ * number (`Math.max(_v)`, or the value itself for `Sum`). This is correct
+ * only when every value that is not an array is a number. Two kinds of type
+ * break that rule:
+ *
+ * - a type that admits text, through a `string` or `character` member or
+ *   through a collection member that a string inhabits (`number | string`,
+ *   `number | indexed_collection`). A string is not a JavaScript array, so it
+ *   takes the scalar branch: compiled `Max(S)` of `"😀a"` gave `NaN` and
+ *   compiled `Sum(S)` returned the string, where the interpreter reports a
+ *   type error.
+ * - a type with a scalar member that is not a number (`boolean |
+ *   list<number>`), which the scalar branch reads as a number too.
+ *
+ * A `missing` member is not tested here (an absent value keeps the current
+ * lowering), and neither is a `broadcastable<T>` member (a number or a list
+ * of numbers) or a top type (nothing is known).
+ */
+function refuseNonNumericScalarProjection(kind: string, e: Expression): void {
+  const t = stripMissingFromType(jsType(e));
+  const members = typeof t !== 'string' && t.kind === 'union' ? t.types : [t];
+  const nonNumeric = (m: Type): boolean => {
+    if (m === 'never' || m === 'unknown' || m === 'any' || m === 'value')
+      return false;
+    if (typeof m !== 'string' && m.kind === 'broadcastable') return false;
+    if (
+      isSubtype('string', m) ||
+      isSubtype(m, 'string') ||
+      isSubtype(m, 'character')
+    )
+      return true;
+    if (isSubtype(m, COLLECTION_SHAPE_TYPE)) return false;
+    return !isSubtype(m, 'number');
+  };
+  if (couldBeStringOperand(e) || members.some(nonNumeric))
+    throw new Error(
+      `Could not compile \`${kind}\`: the operand (type \`${e.type.toString()}\`) ` +
+        `may be a value at run time that is neither a number nor an array, ` +
+        `such as a string, and the compiled code would read it as a number. ` +
+        `The interpreter evaluates it instead.`
+    );
+}
+
+/**
  * Compile `Max`/`Min`. Two shapes:
  *   - a single indexed-collection operand (`[3,4,5].max`, `Max(range)`) reduces
  *     over the elements. A reduce (not `Math.max(...spread)`) is used so a large
@@ -11741,6 +11885,15 @@ function compileExtremum(
   // returned on the empty branch.
   const guardedReduce = (arrayCode: string): string =>
     `((_l) => _l.length === 0 ? NaN : _l.reduce((_a, _b) => ${fn}(_a, _b), ${identity}))(${arrayCode})`;
+  // An operand that may be text at run time is not an array for the
+  // compiled code, so none of the options below reads it correctly. For
+  // example, `string | list<number>` is an indexed collection in the type
+  // lattice, and `.reduce` on the string it may hold throws a `TypeError`;
+  // `number | indexed_collection<character>` is not possibly indexed for the
+  // compiled code, and would reach the scalar `Math.max(S)`, which is `NaN`
+  // for an array and for a string.
+  for (const a of args)
+    if (couldBeStringOperand(a)) refuseNonNumericScalarProjection(kind, a);
   if (args.length === 1 && args[0] && isIndexedCollectionOperand(args[0])) {
     // A positional gather walks its positions with a counted loop rather
     // than building the slice. A gather the loop takes always holds at least
@@ -11795,6 +11948,7 @@ function compileExtremum(
     args[0] &&
     couldBeIndexedCollectionOperand(args[0])
   ) {
+    refuseNonNumericScalarProjection(kind, args[0]);
     return `((_v) => Array.isArray(_v) ? ${guardedReduce('_v')} : ${fn}(_v))(${compile(args[0])})`;
   }
   // Mixed scalars + collection operand(s): `Max`/`Min` REDUCE — fold the
@@ -11821,8 +11975,10 @@ function compileExtremum(
     const parts = args.map((a, i) => {
       if (isIndexedCollectionOperand(a)) return `...(${compile(a)})`;
       if (checkedArray[i] !== undefined) return `...(${checkedArray[i]})`;
-      if (couldBeIndexedCollectionOperand(a))
+      if (couldBeIndexedCollectionOperand(a)) {
+        refuseNonNumericScalarProjection(kind, a);
         return `...((_v) => Array.isArray(_v) ? _v : [_v])(${compile(a)})`;
+      }
       return compile(a);
     });
     return guardedReduce(`[${parts.join(', ')}]`);

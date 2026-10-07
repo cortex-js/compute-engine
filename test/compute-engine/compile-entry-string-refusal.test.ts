@@ -213,16 +213,84 @@ describe('COMPILE entry: a collection of text that a string does not inhabit', (
       expect(r.success).toBe(true);
       expect(() => r.run!({ S: EMOJI_A } as any)).toThrow(refusal('"S"', type));
     });
+});
 
-  it('S: indexed_collection<character> still accepts a string (open case)', () => {
-    // A string inhabits `indexed_collection<character>`, so the entry does
-    // not refuse it. The compiled code still reads it as an array of UTF-16
-    // code units: the count below is WRONG (the interpreter gives 2). This
-    // is the open case recorded in ROADMAP.md; the assertion only records
-    // the current output, it does not say that it is correct.
-    const r = compiled('indexed_collection<character>', ['Length', 'S']);
+describe('COMPILE: a collection of text that a string inhabits fails closed', () => {
+  // A string inhabits `indexed_collection<character>` and
+  // `collection<character>`, so the entry does not refuse it. The compiled
+  // collection lowerings read their operand as a JavaScript array, and would
+  // read a string as an array of UTF-16 code units: `Length(S)` of "😀a" gave
+  // 3 where the interpreter gives 2, and `Drop(S, 1)` gave half of the emoji.
+  // So the compile fails, and the result runs the interpreter, which reads
+  // the string as text and agrees with it for an array too.
+  for (const type of [
+    'indexed_collection<character>',
+    'collection<character>',
+  ]) {
+    for (const c of CASES) {
+      it(`S: ${type}, ${c.name} does not compile`, () => {
+        const r = compiled(type, c.expr);
+        expect(r.success).toBe(false);
+        expect(r.run!({ S: EMOJI_A } as any)).toEqual(c.forString);
+      });
+    }
+
+    it(`S: ${type}, the element reads do not compile`, () => {
+      for (const expr of [
+        ['At', 'S', 1],
+        ['First', 'S'],
+        ['Take', 'S', 1],
+        ['Count', 'S'],
+        ['List', ['Spread', 'S']],
+      ])
+        expect(compiled(type, expr).success).toBe(false);
+    });
+
+    it(`S: ${type}, \`Length(S)\` throws without the fallback`, () => {
+      expect(() =>
+        compile(engine(type).box(['Length', 'S']), {
+          constantFold: false,
+          fallback: false,
+        })
+      ).toThrow(/Could not compile `Length`/);
+    });
+  }
+});
+
+describe('COMPILE: an extremum or a sum over a scalar-or-collection union that admits text', () => {
+  // `Max`, `Min`, `Sum` and `Product` of an operand typed as a scalar or a
+  // collection read an array as a collection and any other value as one
+  // number. A string is not an array, so it was read as a number: compiled
+  // `Max(S)` of "😀a" gave NaN, and compiled `Sum(S)` returned the string,
+  // where the interpreter reports a type error. The compile now fails.
+  it('S: number | string, `Max(S)` does not compile', () => {
+    expect(compiled('number | string', ['Max', 'S']).success).toBe(false);
+  });
+
+  it('S: number | indexed_collection, `Sum(S)` does not compile', () => {
+    expect(compiled('number | indexed_collection', ['Sum', 'S']).success).toBe(
+      false
+    );
+  });
+
+  it('S: number | list<number>, `Sum(S)` compiles and refuses a string at entry', () => {
+    // No member of this type admits a string, and the interpreter refuses
+    // one. Before, the entry accepted it, because not every member is a
+    // collection, and compiled `Sum(S)` returned the string.
+    const r = compiled('number | list<number>', ['Sum', 'S']);
     expect(r.success).toBe(true);
-    expect(r.run!({ S: EMOJI_A } as any)).toBe(3);
+    expect(r.run!({ S: 5 } as any)).toBe(5);
+    expect(r.run!({ S: [1, 2, 3] } as any)).toBe(6);
+    expect(() => r.run!({ S: EMOJI_A } as any)).toThrow(TypeError);
+    expect(() => r.run!({ S: EMOJI_A } as any)).toThrow(
+      refusal('"S"', 'list<number> | number')
+    );
+  });
+
+  it('S: string | list<number>, `Sum(S)` does not compile', () => {
+    // A string inhabits this type, so the entry accepts one, and `.reduce`
+    // on the string would throw a `TypeError`.
+    expect(compiled('string | list<number>', ['Sum', 'S']).success).toBe(false);
   });
 });
 

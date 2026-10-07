@@ -212,6 +212,49 @@ g(map(x => x * 2, t))`);
   });
 });
 
+describe('LAZY ARGUMENT CAPTURE — operators that bind names', () => {
+  // A comprehension or a `sum` in the argument binds its own index, and reads
+  // the other names (here the parameter `n` of the caller) from the enclosing
+  // scope. A comprehension stays a lazy view, and in a recursive call that
+  // scope is the body of the callee, where `n` is one less. The free names
+  // must keep the value that they have in the caller, and the bound names
+  // must continue to read the index.
+
+  test('a comprehension that reads a parameter of the caller', () => {
+    const { value, diagnostics } = run(`
+f(n, s) = first(s) if n == 0 else f(n - 1, [n for x in 1..1])
+f(1, [0])`);
+    expect(diagnostics).toEqual([]);
+    expect(value.re).toBe(1);
+  });
+
+  test('a sum over an index that reads a parameter of the caller', () => {
+    const { value, diagnostics } = run(`
+f(n, s) = first(s) if n == 0 else f(n - 1, [sum(n, k in 1..2)])
+f(1, [0])`);
+    expect(diagnostics).toEqual([]);
+    expect(value.re).toBe(2);
+  });
+
+  test('a sum inside a comprehension, which reads a parameter of the caller', () => {
+    const { value, diagnostics } = run(`
+f(n, s) = first(s) if n == 0 else f(n - 1, [sum(n, k in 1..2) for x in 1..1])
+f(1, [0])`);
+    expect(diagnostics).toEqual([]);
+    expect(value.re).toBe(2);
+  });
+
+  test('a comprehension whose index has the name of a parameter', () => {
+    // The `n` of the comprehension is its index, not the parameter `n`, and
+    // is not replaced with the value of the parameter.
+    const { value, diagnostics } = run(`
+h(n, s) = first(s) if n == 0 else h(n - 1, [n for n in 5..5])
+h(1, [0])`);
+    expect(diagnostics).toEqual([]);
+    expect(value.re).toBe(5);
+  });
+});
+
 describe('LAZY ARGUMENT CAPTURE — arguments with no lazy collection', () => {
   // A long list with no lazy collection and no function literal is passed
   // unchanged to each call, and is not walked again at each call. The time

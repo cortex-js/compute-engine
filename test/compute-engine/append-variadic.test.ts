@@ -332,11 +332,13 @@ describe('Append: a non-finite source is not forced', () => {
   test('isFiniteCollection is false', () =>
     expect(ce.box(inf).isFiniteCollection).toBe(false));
 
-  test('at() declines rather than forcing the source', () =>
-    expect([1, -1].map((i) => ce.box(inf).at(i))).toEqual([
-      undefined,
-      undefined,
-    ]));
+  // The source never ends, so a positive index reads the source element
+  // without walking the rest of the source, and the appended values have no
+  // position. A negative index counts from an end that does not exist.
+  test('at() reads the source and declines a negative index', () =>
+    expect(
+      [1, 2, 3, -1, 0].map((i) => ce.box(inf).at(i)?.toString())
+    ).toEqual(['1', '2', '1', undefined, undefined]));
 
   test('flattening a non-finite chain reports the same as the nested form', () => {
     const flat = ce.box([
@@ -352,6 +354,63 @@ describe('Append: a non-finite source is not forced', () => {
     expect(flat.nops).toBe(3);
     expect(flat.count).toBe(nested.count);
     expect(flat.isFiniteCollection).toBe(nested.isFiniteCollection);
+  });
+});
+
+describe('Append: an infinite source delivers its elements', () => {
+  const inf: Expression = { num: '+Infinity' };
+  const appended: Expression = ['Append', ['Range', 1, inf], 0];
+
+  test('Take over the infinite Append materializes the prefix', () =>
+    expect(ce.box(['Take', appended, 3]).evaluate().toString()).toBe(
+      '[1,2,3]'
+    ));
+
+  test('Take with several appended values reads only the source', () =>
+    expect(
+      ce
+        .box(['Take', ['Append', ['Range', 1, inf], 0, 7], 4])
+        .evaluate()
+        .toString()
+    ).toBe('[1,2,3,4]'));
+
+  test('At reads the source element', () => {
+    expect(ce.box(['At', appended, 2]).evaluate().toString()).toBe('2');
+    expect(ce.box(['At', appended, 1000]).evaluate().toString()).toBe('1000');
+  });
+
+  test('each() over the Take yields three elements', () =>
+    expect(elements(ce.box(['Take', appended, 3]))).toEqual(['1', '2', '3']));
+
+  test('a negative or zero index has no element', () =>
+    expect([-1, 0].map((i) => ce.box(appended).at(i))).toEqual([
+      undefined,
+      undefined,
+    ]));
+
+  test('the Append itself is unchanged: lazy, infinite, previewed', () => {
+    const e = ce.box(appended);
+    expect(e.count).toBe(Infinity);
+    expect(e.isLazyCollection).toBe(true);
+    expect(e.isFiniteCollection).toBe(false);
+    expect(e.evaluate().toString()).toBe('[1,2,3,4,5,...]');
+  });
+
+  test('Join over the same source agrees', () =>
+    expect(
+      ce
+        .box(['Take', ['Join', ['Range', 1, inf], ['List', 0]], 3])
+        .evaluate()
+        .toString()
+    ).toBe('[1,2,3]'));
+
+  test('a finite source still counts negative indices from the end', () => {
+    const finite: Expression = ['Append', ['Range', 1, 5], 0, 9];
+    expect(
+      [-1, -2, -3, -7, -8].map((i) =>
+        ce.box(['At', finite, i]).evaluate().toString()
+      )
+    ).toEqual(['9', '0', '5', '1', 'NaN']);
   });
 });
 

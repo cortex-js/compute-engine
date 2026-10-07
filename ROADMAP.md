@@ -109,19 +109,68 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
-### Compiled code over a text-typed collection parameter counts code units (OPEN, small — found 2026-10-07 by the compiled-entry string refusal)
+### Compiled Python code counts code points on a string parameter (OPEN, small — found 2026-10-07 by the compiled-entry string refusal)
 
-The compiled entry refuses a string for a parameter whose declared type does
-not admit a string (a bare collection, a collection of numbers, `list<string>`,
-`list<character>`). Two cases remain. `S: indexed_collection<character>`
-or `collection<character>` with the argument `"😀a"`: a string is exactly
-that type, so refusing it would be wrong, yet compiled `Length(S)` is 3 (the
-interpreter gives 2) and `Drop(S, 1)` is a broken half of the emoji; the
-lowerings should fail closed at compile time for these types, as they do for
-a `string | …` union. The Python target
-has no entry check at all (`compileFunction` emits a plain `def`), and
-Python's `len` counts code points, so it disagrees with the interpreter on
-any string.
+The Python target has no entry check (`compileFunction` emits a plain `def`),
+and Python's `len` counts code points, so compiled Python disagrees with the
+interpreter on any string that has a combining sequence or a multi-code-point
+emoji. The JavaScript target is not affected: its entry refuses a string for
+a parameter whose type a string does not inhabit, and for
+`indexed_collection<character>` and `collection<character>`, which a string
+does inhabit, the collection lowerings fail closed at compile time and the
+interpreter evaluates them.
+
+### A list literal whose lazy spread has no cheap count can run impure callbacks twice (OPEN, small — found 2026-10-07 by the review of the list-literal snapshot)
+
+`snapshotListJoin` (`library/collections.ts`) lists the elements of a list
+literal with a spread. It adds the cheap counts of the operands before the
+walk and keeps the lazy view when their sum exceeds `ce.maxCollectionSize`,
+so no callback runs for a literal that is too large. An operand whose count
+is not cheap (a `filter`, a `map` over a set) is bounded only during the
+walk: when such an operand takes the snapshot over the bound, the callbacks
+that already ran (random draws, for example) are discarded, and they run
+again when the kept view is read. A fix must either know the size of such an
+operand before the walk, or keep the elements that the walk produced.
+
+### A `WithRandomSeed` body that returns an eager operator holding a drawing view is reported pure (OPEN, small — found 2026-10-07 by the review of the seed-frame escape check)
+
+`WithRandomSeed(7, Repeat(Map(u ↦ Random(), Range(1, 3)), 2))` reports
+`isPure === true`. The escape check (`escapesAsDrawingLazyView`,
+`boxed-expression/effects-of.ts`) follows the operands of a LAZY view and the
+cells of a literal container, so a lazy `Take`, `Join` or `ListJoin` that
+holds a drawing view is impure, as it should be. The two-argument `Repeat`
+is an eager application before it is evaluated, so the check treats it as
+opaque, yet it evaluates to a `List` of two drawing views, which escape the
+frame and draw live at each read. A fix needs a rule for which eager
+operators store an operand in their result; it is a separate change from the
+lazy-view rule.
+
+### A recursive function whose parameter is only returned maps itself over a list argument (OPEN, question — found 2026-10-07 by the review of the lazy-argument capture)
+
+`f(n, s) = s if n == 0 else f(n - 1, [1, 2])` then `f(1, [0])` gives
+`[[1, 2]]`, and `length(f(1, [0]))` is 1. The body never indexes, measures,
+spreads or iterates `s`, so the inferred signature keeps `s` as a scalar
+slot, and under the broadcast rule (`docs/BROADCAST-MODEL.md`, rule 1) the
+call runs once per element of `[0]`: `f(1, [0])` is `[f(1, 0)]`, and
+`f(1, 0)` is `[1, 2]`. Recursion is not needed (`g(n, s) = s if n == 0 else
+[1, 2]` behaves the same way), and an annotation removes the effect
+(`f(n, s: list) = …` gives `[1, 2]`). The rule is locked in by
+`test/compute-engine/lambda-param-collection-inference.test.ts`. Decision
+needed: keep the rule and document the annotation, or count a self-call
+that passes a collection (a list literal, a range, a comprehension) at a
+parameter's position as evidence that the parameter takes the whole
+collection (`inferredCollectionParameterType`,
+`boxed-expression/effects-inference.ts`). The second option fixes the
+recursive shapes and changes nothing for `f(x) = x * 2; f([1, 2, 3])`.
+
+### A host value that is not a collection reaches a compiled `Sum` over a `missing | list<number>` parameter as a JavaScript error (OPEN, small — found 2026-10-07 by the compiled-entry string refusal)
+
+With `S: missing | list<number>`, compiled `Sum(S)` of the number 5 throws
+`_tv1.reduce is not a function`. The value is not of the declared type, so a
+refusal is right, but the entry check does not cover a union of `missing`
+and a collection, and the error names a generated variable instead of the
+parameter. The entry check should refuse the value with the diagnostic it
+gives for a string (`stringRefusedEntryType`, `javascript-target.ts`).
 
 ### `subs()` does not reach into a canonical dictionary (OPEN, small — found 2026-10-07 by the dictionary seed-frame work)
 
@@ -148,10 +197,15 @@ rounded to the working precision (21 digits) before `DigitSum`/`Mod` read it
 as an exact integer (`toBigint` on a rounded big decimal). An integer
 operation under `.N()` should either compute from the exact operand when it
 is exact, or refuse to read a rounded value as an integer. The compile
-target's constant folding used `.N()` and inherited the wrong values; it now
-folds these operators from `evaluate()`, but a subtree whose operand uses a
-bound variable (`Sum(Mod(n^n, 10^10), n, 1, 1000)`) still folds through
-`.N()` and gives the wrong value.
+target's constant folding used `.N()` and inherited the wrong values. It now
+folds these operators from `evaluate()`. An operand that uses a bound
+variable has no value before the evaluation, so it is priced at the largest
+accepted size and must have a rational type: `Sum(DigitSum(2^n), n, 1000,
+1000)` folds to 1366, and `Sum(Mod(n^n, 10^10), n, 1, 1000)` declines the
+fold and its compiled loop throws a `RangeError`. An operand whose type is an
+integer range inside ±(2^53 − 1), such as the index `n` of
+`Sum(Mod(n, 7), n, 1, 1000)`, is known to be safe and keeps the ordinary
+fold. The interpreter's `.N()` itself is not fixed.
 
 ### `Mod` of an exact irrational operand evaluates to a wrong exact integer (OPEN, small — found 2026-10-07 by the compiled integer-range guard)
 
@@ -236,9 +290,12 @@ not listed: `[map(x => x + 1, xs)]` holds a lazy `Map`, prints as
 `[Map((x) => x + 1, "xs")]`, and reads `xs` again at every later read; only
 an assignment lists it (`assignedValue`, `library/core.ts`). So
 `[map(f, xs)]` and `[...[map(f, xs)]]` print differently. The documented rule
-is that a literal is a value. Decision needed: list every finite lazy element
-of a literal at evaluation (the `List` evaluate handler, the same bound of
-`ce.maxCollectionSize` as the spread case), or keep elements lazy and say so.
+is that a literal is a value. The snapshot of a literal with a spread now
+keeps an element that is not spread as it is, so `[...xs, 1..3]` and `[1..3]`
+agree; the decision is only about whether a literal lists its lazy elements.
+Decision needed: list every finite lazy element of a literal at evaluation
+(the `List` evaluate handler, the same bound of `ce.maxCollectionSize` as the
+spread case), or keep elements lazy and say so.
 
 ### The CLI `--json` output flattens a nested lazy list (OPEN, small — found 2026-10-07 by the spread snapshot)
 
@@ -584,35 +641,20 @@ has at most one root.
 A root of higher multiplicity (`sin(x)^10` at `π`) has no such proof, so it
 needs a decision: keep the tolerance for it, or give no answer.
 
-### `Solve` gives only some of the complex roots of a polynomial (OPEN, high — found 2026-10-04 while the solver documentation was written)
+### The real odd root of a real symbol is not typed real, so `x³ = a` has no answer for a real `x` (OPEN, small — found 2026-10-07 by the complete polynomial roots)
 
-With no domain, `x^2 + 1 = 0` gives `[i, -i]`, so the complex roots are part
-of the answer. But a polynomial of degree 3 or more gives only some of them:
-- `x^5 + x + 1 = 0` gives `[-0.7548776662466927]`, also with
-  `x ∈ ComplexNumbers`. It is `(x² + x + 1)(x³ − x² + 1)`: four more complex
-  roots, two of them exact (`(-1 ± i√3)/2`).
-- `x^3 = 8` gives `[2]` (the pure-power template); `-1 ± i√3` are missing.
-- `x^4 + 1 = 0` gives two of its four complex roots, `±(√2/2 + i√2/2)`;
-  `±(√2/2 − i√2/2)` are missing.
-Over ℂ and with no domain, every root must be in the list (exact for a
-factor that has a closed form, numeric with `durandKernerRoots()` in
-`numerics/polynomial-roots.ts` otherwise), or `Solve` must stay
-unevaluated. Over ℝ, and for an unknown declared `real`, the real roots
-only (`filterRootsByType()` already removes the complex roots). A pure power
-`x^n = c` needs the `n` roots `c^(1/n)·e^(2πik/n)` (with the half turn of the
-angular unit). Tests: degrees 3 to 7, with a numeric residual check of every
-root.
-
-### `Solve` gives floats for a polynomial whose roots are exact (OPEN, medium — found 2026-10-04 while the solver documentation was written)
-
-`x^3 − 2x + 1 = 0` gives `[1, −1.618…, 0.618…]`, but the roots are `1` and
-`(−1 ± √5)/2`. `solvePolynomialByCoefficients()` in
-`boxed-expression/solve.ts` finds the rational roots, then gives the other
-roots with the numeric Durand–Kerner method. It must divide the polynomial
-by `(x − r)` for each rational root `r` (with its multiplicity), and solve
-the quotient exactly when it has degree 1 or 2, or is a pure power or a
-polynomial in `x^g`. Only a factor with no closed form that the engine can
-find gives floats, and the CHANGELOG must say which case that is.
+With `x` and `a` declared `real`, `Solve(x^3 = a, x)` stays unevaluated:
+the solver gives the root `Root(a, 3)`, and the type of `Root(a, 3)` is
+`number`, which does not decide whether the value is real, so the root is
+removed by a check that does not decide and the list is not an answer. With
+`ce.assume(a > 0)` the type is decided and the answer is `[∛a]`. The engine
+evaluates `Root(a, n)` for a real `a` and an odd `n` to the real root
+(`Root(-8, 3)` is `-2`), so the type of `Root(a, n)` with `a: real` and an
+odd integer `n` should be `real` (the type handler of `Root`/`Power` with
+an exponent `1/n`). The same gap removes `√(a² + 1)`-like roots whose
+radicand is positive for every real `a`. Test: `x^3 = a` with `x`, `a`
+real gives `[root(3)(a)]`; `x^4 = a` keeps today's behavior (not real for a
+negative `a`).
 
 ### `Solve` gives a periodic product the principal roots of each factor (OPEN, question — found 2026-10-04)
 

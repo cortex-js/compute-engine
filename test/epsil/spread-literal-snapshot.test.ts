@@ -157,6 +157,17 @@ describe('a list literal snapshots a spread lazy collection', () => {
     expect(value.json).toEqual(['Tuple', ['List', 3, 4], 4]);
   });
 
+  test('an element that is not spread is kept as it is', () => {
+    // `[...xs, 1..3]` is `ListJoin(xs, [Range(1, 3)])`. The range is an
+    // element of the literal, not a spread, so it stays a range, as it does
+    // in `[1..3]`, also when another operand is spread.
+    const { value } = run('let xs = [1, 2]\n[...xs, 1..3]');
+    expect(value.operator).toBe('List');
+    expect(value.nops).toBe(3);
+    expect(value.ops![2].operator).toBe('Range');
+    expect(value.ops![2].json).toEqual(run('[1..3]').value.ops![0].json);
+  });
+
   test('nested lazy elements share one bound on the number of elements', () => {
     // 10,000 rows of 10,000 elements would be 10^8 elements. The rows use
     // the rest of the bound of the whole literal, so they stay lazy ranges.
@@ -209,6 +220,32 @@ describe('a ListJoin snapshots a finite lazy operand (MathJSON)', () => {
   test('a view larger than the collection size bound stays lazy', () => {
     const e = ce.box(['ListJoin', ['Range', 1, 20000], ['List', 0]]);
     expect(e.evaluate().operator).toBe('ListJoin');
+  });
+
+  test('operands that are together over the size bound run no callback', () => {
+    // Each `Map` has two elements, in the bound of three, but together they
+    // have four. The view is kept before any walk, so the callback does not
+    // run for a snapshot that would be abandoned.
+    const small = new ComputeEngine();
+    small.maxCollectionSize = 3;
+    let calls = 0;
+    small.declare('Tick', {
+      signature: '(number) -> number',
+      pure: false,
+      evaluate: ([x]) => {
+        calls += 1;
+        return x;
+      },
+    });
+    const value = small
+      .box([
+        'ListJoin',
+        ['Map', 'Tick', ['List', 1, 2]],
+        ['Map', 'Tick', ['List', 3, 4]],
+      ])
+      .evaluate();
+    expect(value.operator).toBe('ListJoin');
+    expect(calls).toBe(0);
   });
 
   test('an operand that is not a collection now stays a view', () => {

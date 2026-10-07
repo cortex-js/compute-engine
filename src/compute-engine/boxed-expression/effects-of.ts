@@ -428,6 +428,22 @@ function escapesAsDrawingLazyViewUncached(
     if (hasDeclaredEffectLabel(shallowApplicationEffects(expr), 'random'))
       return true;
 
+    // An operand of a view is in value position: the view holds it and reads
+    // its elements only when the view itself is read. So an operand that is a
+    // drawing lazy view escapes with the view that holds it, even when the
+    // callback of the outer view does not draw. `[...a, 0]` is
+    // `ListJoin(a, [0])`: evaluation lists a finite spread operand, but an
+    // infinite one stays a lazy view, and it draws when the result is read,
+    // outside the frame. `Join`, `Append`, `Take` and a `Map` over another
+    // view hold their operands in the same way. The test applies only to an
+    // operand that is itself a lazy view (or a container or a `Block` that
+    // returns one). An operand that draws when it is evaluated, such as the
+    // source in `Map(k ↦ k, RandomShuffle(…))`, draws when the view is built,
+    // inside the frame, and keeps the discharge. The pending-draw walk of
+    // `library/core.ts` (`hasPendingImpureApplication()`) also puts each
+    // operand of a lazy view in value position.
+    if (expr.ops.some((op) => escapesAsDrawingLazyView(op, seen))) return true;
+
     // A binder view: everything that is not a clause is per-element body.
     const clauses = binderClauseOperands(expr);
     if (clauses === undefined) return false;

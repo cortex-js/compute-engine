@@ -88,6 +88,7 @@ import {
   provablyDisjoint,
 } from '../../common/type/subtype.js';
 import { typeToString } from '../../common/type/serialize.js';
+import { makeNumericRangeType } from '../../common/type/numeric-range.js';
 import {
   boundVariableNames,
   boundVariableNamesInOperand,
@@ -397,11 +398,28 @@ const DIGIT_DEPENDENT_OPERATORS: ReadonlySet<string> = new Set([
  * digits of the integer part of its magnitude (`Infinity` when the
  * approximate value overflowed). The digit count prices the exact fold
  * (`exactFoldValue`).
+ *
+ * The digit count is `undefined` when the operand cannot be checked: it has
+ * no fold value of its own, usually because it mentions a variable bound in
+ * the subtree, such as the index of a `Sum`. Such an operand is not known to
+ * be in the safe integer range, so the fold does not use `.N()` for it.
  */
 type UnsafeIntegerOperand = {
   readonly operand: Expression;
-  readonly digits: number;
+  readonly digits: number | undefined;
 };
+
+/**
+ * The integers inside the safe integer range, `integer<-(2^53 − 1)..2^53 − 1>`.
+ * An operand that has no fold value of its own, but whose static type is a
+ * subtype of this type, is known to be in the safe integer range
+ * (`unsafeIntegerOperands`).
+ */
+const SAFE_INTEGER_TYPE = makeNumericRangeType(
+  'integer',
+  -Number.MAX_SAFE_INTEGER,
+  Number.MAX_SAFE_INTEGER
+);
 
 /**
  * The largest operand, in decimal digits, that the exact constant fold of a
@@ -7021,9 +7039,20 @@ export class BaseCompiler {
    *
    * Each checked operand is evaluated through `constantFoldValue`, whose
    * memo the top-down fold reads again when it reaches that operand, so the
-   * evaluation is not repeated. An operand that does not fold itself (it
-   * mentions a variable bound in the subtree, such as the index of a `Sum`)
-   * cannot be checked here and keeps the `.N()` value.
+   * evaluation is not repeated. An operand that does not fold itself, and is
+   * not a number literal, cannot be checked here. Usually it mentions a
+   * variable bound in the subtree, such as the index of a `Sum`:
+   * `DigitSum(2^n)` in `Sum(DigitSum(2^n), n, 1000, 1000)`. The value of such
+   * an operand can be beyond the safe integer range, and `.N()` then gives a
+   * wrong value (`84` for that sum, where `evaluate()` answers `1366`). So it
+   * is included with an unknown digit count (`digits: undefined`), and the
+   * fold value comes from `evaluate()` or the fold declines
+   * (`exactFoldValue`). There is one exception: when the static type of the
+   * operand is an integer range whose two bounds are finite and inside
+   * `±(2^53 − 1)` (`SAFE_INTEGER_TYPE`), such as `integer<1..1000>` for `n`
+   * in `Sum(Mod(n, 7), n, 1, 1000)`, the operand is known to be safe and is
+   * not included. A bare `integer`, a range with an infinite bound such as
+   * `integer<0..>`, and a non-integer type stay unknown.
    *
    * The answer for a node is the checked operands among its own operands,
    * followed by the answer for each operand. It is memoized per node
@@ -7050,12 +7079,19 @@ export class BaseCompiler {
       return Number.isFinite(x) ? Math.floor(Math.log10(x)) + 1 : Infinity;
     };
     // The digit count of the largest value of `op` beyond the safe integer
-    // range, or `undefined` when there is no such value.
-    const unsafeDigits = (op: Expression): number | undefined => {
+    // range, or `undefined` when there is no such value. `'unknown'` when
+    // `op` cannot be checked, because it has no fold value, is not a number
+    // literal, and its static type is not inside `SAFE_INTEGER_TYPE`.
+    const unsafeDigits = (op: Expression): number | 'unknown' | undefined => {
       const folded = BaseCompiler.constantFoldValue(op, target);
-      if (folded === undefined) return undefined;
+      if (folded === undefined && !isNumber(op)) {
+        const t = compilationType(op);
+        return t !== 'never' && isSubtype(t, SAFE_INTEGER_TYPE)
+          ? undefined
+          : 'unknown';
+      }
       let digits: number | undefined = undefined;
-      for (const v of folded.elements ?? [folded.value])
+      for (const v of folded?.elements ?? [folded?.value ?? op])
         if (isNumber(v) && !v.isComplex && isBeyondSafeInteger(v.re))
           digits = Math.max(digits ?? 0, digitsOf(v));
       return digits;
@@ -7077,7 +7113,9 @@ export class BaseCompiler {
       }
       if (checked) {
         const digits = unsafeDigits(op);
-        if (digits !== undefined) result.push({ operand: op, digits });
+        if (digits === 'unknown')
+          result.push({ operand: op, digits: undefined });
+        else if (digits !== undefined) result.push({ operand: op, digits });
       }
       result.push(...BaseCompiler.unsafeIntegerOperands(op, target));
     }
@@ -7104,6 +7142,17 @@ export class BaseCompiler {
    * `evaluate()` of `Mod` reads a rounding of it and answers the exact `5`,
    * where the value is `0.698…`.
    *
+   * An operand with an unknown digit count (`digits: undefined`) has no
+   * value before the evaluation, because it mentions a variable bound in
+   * the subtree. It is not replaced: the `evaluate()` of the whole subtree
+   * computes it for each value of the bound variable. Its value cannot be
+   * checked for rationality, so its static type is checked instead: the
+   * fold declines unless the type is a subtype of `rational`. The type of
+   * `√2 · 10^30 · n` is `real`, so `Sum(Mod(√2 · 10^30 · n, 7), n, 1, 1)`
+   * declines, where `evaluate()` answers the wrong exact `5`. When there is
+   * such an operand, the result must also be an exact rational, and a
+   * boolean result declines.
+   *
    * The fold also declines when the exact evaluation is too expensive.
    * `foldCostEstimate`, which admitted the subtree, prices the `.N()`
    * evaluation, where an operation costs the same at every magnitude; an
@@ -7113,7 +7162,12 @@ export class BaseCompiler {
    * subtree, times the size of the largest operand in machine words, exceed
    * `CONSTANT_FOLD_MAX_COST`. The size of the largest operand is an upper
    * bound for the values that each iteration computes when the operand is
-   * the result of the iteration, as in `Mod(Sum(n^n, …), 10^10)`.
+   * the result of the iteration, as in `Mod(Sum(n^n, …), 10^10)`. An
+   * operand with an unknown digit count has the largest size that the fold
+   * accepts, `EXACT_FOLD_MAX_DIGITS`, so the estimate does not depend on the
+   * values. Thus `Sum(Mod(n^n, 10^10), n, 1, 1000)` declines (1000
+   * iterations of 264 words), and its compiled loop refuses the large
+   * operand at run time.
    *
    * Each operand in `unsafe` is evaluated once, and the subtree is then
    * evaluated with the operand replaced by its exact value, so the operand
@@ -7123,26 +7177,49 @@ export class BaseCompiler {
     expr: Expression,
     unsafe: ReadonlyArray<UnsafeIntegerOperand>
   ): Expression | undefined {
-    const digits = Math.max(...unsafe.map((u) => u.digits));
+    const digits = Math.max(
+      ...unsafe.map((u) => u.digits ?? EXACT_FOLD_MAX_DIGITS)
+    );
     if (!(digits <= EXACT_FOLD_MAX_DIGITS)) return undefined;
+    const unknown = unsafe.filter((u) => u.digits === undefined);
+    if (
+      !unknown.every((u) => isSubtype(compilationType(u.operand), 'rational'))
+    )
+      return undefined;
     const words = Math.ceil(digits / EXACT_FOLD_DIGITS_PER_WORD);
     if (!(BaseCompiler.bigOpIterations(expr) * words <= CONSTANT_FOLD_MAX_COST))
       return undefined;
 
+    // The items of a result: the operands of a `List` or `Tuple`, the
+    // elements of a finite indexed collection that `evaluate()` left lazy (a
+    // `Filter` or `Map` over a range: `.N()` materializes it, `evaluate()`
+    // does not), or the value itself.
     const allItems = (
       v: Expression,
       test: (x: Expression) => boolean
-    ): boolean =>
-      (isFunction(v, 'List') || isFunction(v, 'Tuple') ? v.ops : [v]).every(
-        test
-      );
-    const operands = new Set(unsafe.map((u) => u.operand));
-    // A copy of `node` where each operand in `unsafe` is replaced by its
-    // exact value, or `undefined` when an operand is not an exact rational.
-    // The walk does not go into a replaced operand. An operand in `unsafe`
-    // inside another one was already checked: the outer operand is in
-    // `unsafe` only if it has a fold value, and its own fold was exact
-    // (this function) because the inner operand is beyond the range.
+    ): boolean => {
+      if (isFunction(v, 'List') || isFunction(v, 'Tuple'))
+        return v.ops.every(test);
+      if (v.isCollection) {
+        const elements = BaseCompiler.foldableCollectionElements(
+          v,
+          CONSTANT_FOLD_MAX_INLINE_ELEMENTS
+        );
+        return elements !== undefined && elements.every(test);
+      }
+      return test(v);
+    };
+    const operands = new Set(
+      unsafe.filter((u) => u.digits !== undefined).map((u) => u.operand)
+    );
+    // A copy of `node` where each operand in `unsafe` with a known digit
+    // count is replaced by its exact value, or `undefined` when such an
+    // operand is not an exact rational. The walk does not go into a replaced
+    // operand. An operand in `unsafe` inside a replaced one was already
+    // checked: the outer operand has a known digit count only if it has a
+    // fold value, and its own fold was exact (this function) because the
+    // inner operand is beyond the range. The walk goes into an operand with
+    // an unknown digit count, which stays in the copy.
     let rational = true;
     const replace = (node: Expression): Expression => {
       if (!rational) return node;
@@ -7165,6 +7242,13 @@ export class BaseCompiler {
     const replaced = replace(expr);
     if (!rational) return undefined;
     const v = replaced.evaluate();
+    if (unknown.length > 0)
+      return allItems(
+        v,
+        (x) => isNumber(x) && x.isExact && x.isRational === true
+      )
+        ? v.N()
+        : undefined;
     if (isSymbol(v, 'True') || isSymbol(v, 'False')) return v;
     return allItems(v, (x) => isNumber(x) && x.isExact) ? v.N() : undefined;
   }

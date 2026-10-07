@@ -2414,10 +2414,22 @@ function bindEscapingLocals(ce: ComputeEngine, expr: Expression): Expression {
  *   callee resolves to the same binding (a variable of the top level, or of
  *   a function that encloses both) is left as a symbol, so the collection
  *   continues to read its current value when its elements are read.
- * - A symbol that is not inside a `Function` literal or inside an operator
- *   that binds names (a comprehension, a `Sum`). A function literal finds
- *   its free variables through its own lexical chain, not through the scope
- *   of the read. That chain is fixed here instead:
+ * - A symbol that is not bound by an operator of the argument that encloses
+ *   it. The operands of an operator that binds names (a comprehension, a
+ *   `Sum`, a `Block`) are walked, and a symbol with a name that the operator
+ *   binds in that operand is left as it is: it reads the index or the local
+ *   of the operator, not a binding of the caller. This includes the symbol
+ *   at the position that declares the name (the `x` of `x in 1..3`). The
+ *   other symbols of the operands are free in the operator and are replaced
+ *   as above. The operator makes its own scope when its elements are read,
+ *   and the parent of that scope is the body scope of the function that
+ *   contains it. A recursive call makes that body scope a child of the call
+ *   frame of the callee, so a free symbol that is not replaced reads the
+ *   binding of the callee: in `f(n - 1, [n for x in 1..1])` called from the
+ *   body of `f`, the comprehension read the `n` of the callee.
+ * - A symbol that is not inside a `Function` literal. A function literal
+ *   finds its free variables through its own lexical chain, not through the
+ *   scope of the read. That chain is fixed here instead:
  *   - A function literal inside a lazy collection captures the locals of the
  *     nested blocks that are in use (`captureNestedLocals`). A lazy operator
  *     holds its function operand without evaluating it, so the capture that
@@ -2445,14 +2457,12 @@ function bindLazyArgumentLocals(
   // that reads its own binding (directly or through another binding) is left
   // as a symbol at the second visit, so the walk ends.
   const visiting = new Set<BoxedDefinition>();
-  // The rewrite of each node, for each of the two contexts (inside a lazy
-  // collection or not). A value that shares its operands (a function applied
-  // to its own previous result embeds that result once per mention of the
-  // parameter) is then walked once per node, not once per path.
-  const memo = [
-    new Map<Expression, Expression>(),
-    new Map<Expression, Expression>(),
-  ];
+  // The rewrite of each node, for each context: inside a lazy collection or
+  // not, and the names that the enclosing operators bind (`shadowedKey`). A
+  // value that shares its operands (a function applied to its own previous
+  // result embeds that result once per mention of the parameter) is then
+  // walked once per node and context, not once per path.
+  const memo = new Map<Expression, Map<string, Expression>>();
 
   const callerValue = (
     s: Expression & { symbol: string }
@@ -2476,17 +2486,29 @@ function bindLazyArgumentLocals(
     if (value === undefined) return undefined;
     visiting.add(live);
     try {
-      return walk(value, true);
+      // The value is not inside the operators that enclose `s` in the
+      // argument, so the names that they bind do not apply to it. The
+      // operators inside the value shadow their own names as the walk
+      // enters them.
+      return walk(value, true, undefined);
     } finally {
       visiting.delete(live);
     }
   };
 
-  const walk = (e: Expression, inLazy: boolean): Expression => {
-    if (isSymbol(e)) return inLazy ? (callerValue(e) ?? e) : e;
+  const walk = (
+    e: Expression,
+    inLazy: boolean,
+    // The names bound, at `e`, by the operators of the argument that
+    // enclose `e`.
+    shadowed: ReadonlySet<string> | undefined
+  ): Expression => {
+    if (isSymbol(e))
+      return inLazy && !shadowed?.has(e.symbol) ? (callerValue(e) ?? e) : e;
     if (!isFunction(e) && !isDictionary(e)) return e;
-    const cache = memo[inLazy ? 1 : 0];
-    const hit = cache.get(e);
+    const key = (inLazy ? '1' : '0') + shadowedKey(shadowed);
+    let cache = memo.get(e);
+    const hit = cache?.get(key);
     if (hit !== undefined) return hit;
     let result: Expression = e;
     if (isFunction(e) && e.operator === 'Function') {
@@ -2498,7 +2520,7 @@ function bindLazyArgumentLocals(
       let changed = false;
       const entries = e.keys.map((key) => {
         const value = e.get(key)!;
-        const next = walk(value, inLazy);
+        const next = walk(value, inLazy, shadowed);
         if (next !== value) changed = true;
         return ce.function('KeyValuePair', [ce.string(key), next]);
       });
@@ -2507,12 +2529,27 @@ function bindLazyArgumentLocals(
       isFunction(e) &&
       // A store-backed list holds numbers only, and reading its `ops` would
       // box every element.
-      e._numericStore === undefined &&
-      boundVariableNames(e).length === 0
+      e._numericStore === undefined
     ) {
       const lazy = inLazy || e.isLazyCollection;
       const ops = e.ops;
-      const next = ops.map((op) => walk(op, lazy));
+      // A name that this node binds shadows the operands where it is in
+      // scope (`boundVariableNamesInOperand`): an iterator clause's index
+      // does not shadow an earlier clause.
+      const binds = boundVariableNames(e);
+      // The clause ordering is read once per node, not once per operand.
+      const binders = binds.length > 0 ? declaredBinders(e, 'post') : undefined;
+      const next = ops.map((op, i) => {
+        const here =
+          binders === undefined
+            ? binds
+            : boundVariableNamesInOperand(e, i, binders);
+        const inner =
+          here.length > 0
+            ? new Set(shadowed ? [...shadowed, ...here] : here)
+            : shadowed;
+        return walk(op, lazy, inner);
+      });
       if (!next.every((op, i) => op === ops[i]))
         result = ce.function(e.operator, next, {
           form: e.isCanonical
@@ -2523,11 +2560,15 @@ function bindLazyArgumentLocals(
           scope: e.localScope,
         });
     }
-    cache.set(e, result);
+    if (cache === undefined) {
+      cache = new Map();
+      memo.set(e, cache);
+    }
+    cache.set(key, result);
     return result;
   };
 
-  return walk(arg, false);
+  return walk(arg, false, undefined);
 }
 
 /** The result of `mayReadCallerBindings`, for each expression. */
@@ -2538,8 +2579,10 @@ const MAY_READ_CALLER_BINDINGS = new WeakMap<Expression, boolean>();
  * lazy collection and no `Function` literal at a position that its walk
  * reaches. That walk replaces a symbol only inside a lazy collection, and
  * rebuilds a node only when an operand changed or the node is a `Function`
- * literal. It does not enter a store-backed list or an operator that binds
- * names, so this function does not either.
+ * literal. It does not enter a store-backed list, so this function does not
+ * either. It enters an operator that binds names, and leaves a symbol with a
+ * bound name as it is. This function does not track those names: it can
+ * return true for an argument that the walk then returns unchanged.
  *
  * The result is kept for each expression: an argument that a recursive call
  * passes to itself unchanged (a long list of strings, for example) is then
@@ -2560,9 +2603,7 @@ function mayReadCallerBindings(expr: Expression): boolean {
   if (expr._numericStore !== undefined) return false;
   const cached = MAY_READ_CALLER_BINDINGS.get(expr);
   if (cached !== undefined) return cached;
-  const result =
-    boundVariableNames(expr).length === 0 &&
-    (expr.isLazyCollection || expr.ops.some(mayReadCallerBindings));
+  const result = expr.isLazyCollection || expr.ops.some(mayReadCallerBindings);
   MAY_READ_CALLER_BINDINGS.set(expr, result);
   return result;
 }

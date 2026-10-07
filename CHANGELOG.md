@@ -1,6 +1,126 @@
 ## [Unreleased]
 
+### Behavior Changes
+
+- **`Solve` gives every complex root of a polynomial of degree 3 or more.** With
+  no domain, or over the complex numbers, `x^2 + 1 = 0` gave `[i, -i]`, but a
+  polynomial of degree 3 or more gave only some of its roots: `x^3 = 8` gave
+  `[2]`, `x^4 + 1 = 0` two of its four roots, and `x^5 + x + 1 = 0` its one real
+  root. Every root is now in the list, as the documentation of `Solve` states:
+  `x^3 = 8` is `[2, -1 + √3i, -1 - √3i]`, `x^4 + 1 = 0` is `[±√2/2 ± (√2/2)i]`,
+  and `x^3 = a` is `[∛a, (-1/2 ± (√3/2)i)·∛a]`. A pure power `x^n = c` gives its
+  `n` roots `ⁿ√c·(cos(2kπ/n) + i·sin(2kπ/n))`, written in the angular unit of
+  the engine; a polynomial in `x^g` gives the `g` roots of `x^g = u` for each
+  root `u` of the reduced polynomial; a polynomial with no closed form gives
+  numeric complex roots. Over the real numbers (`Solve(eq, x, RealNumbers)`),
+  and for an unknown declared `real`, the result holds the real roots only:
+  `Solve(x^3 = 8, x, RealNumbers)` is `[2]`, and `x^4 + 1 = 0` is `[]`. A
+  square-root equation keeps its real solutions only, as before:
+  `x·√(x^2 + 1) = 1` is squared into `x^4 + x^2 - 1 = 0`, and the root
+  `-√((-1 - √5)/2)` of the quartic, which is a root of the original equation
+  over the complex numbers, is not in the result. A list that cannot hold every
+  root is not an answer: `x^3 + a·x + 1 = 0` stays unevaluated, as before, and
+  so does a polynomial of degree 13 or more with no closed form.
+
+- **Compiled integer operations beyond the safe integer range are errors,
+  not different numbers.** Compiled `Mod`, `Remainder`, `GCD` and `LCM` read a
+  double beyond ±2^53 or an infinity as an integer: `(2^60 + 1) % 10` gave 6
+  (the true value is 7), `Remainder(2^60, …)` gave 0, and `Mod` of a sum
+  that overflowed to `Infinity` gave `NaN`. They now throw a `RangeError` that
+  names the operation and the value, in JavaScript and in Python; the
+  `Mod(x, 1)` fractional-part forms are unchanged. A plot kernel that samples
+  `Mod(1/x, 2)` at `x = 0` now throws at that sample where it gave `NaN`.
+  Constant folding of an integer operation on a large exact operand
+  (`digitSum(2^1000)` compiled to 84 because the fold used the rounded `.N()`
+  value) now folds from the exact value, so the compiled `digitSum(2^1000)` is
+  1366. The same holds when the operand uses the index of a `Sum` or
+  `Product`: `Sum(DigitSum(2^n), n, 1000, 1000)` compiles to 1366 (it was 84),
+  and `Sum(Mod(n^n, 10^10), n, 1, 1000)`, whose exact fold is too expensive,
+  now throws the `RangeError` at run time instead of giving 646802592660.
+
+- **Compiled code refuses a string for a parameter declared as a collection.**
+  A parameter declared with a bare collection type (`indexed_collection`,
+  `collection`, `list`) or a collection of non-text elements (`list<number>`)
+  is compiled as a JavaScript array. The declared type also admits a string,
+  and the compiled function accepted one and read it as UTF-16 code units:
+  with `S: indexed_collection`, compiled `Length(Drop(S, 1))` gave 2 for
+  `"😀a"` where the interpreter gives 1. The compiled entry now throws a
+  `TypeError` that names the parameter and says that compiled code does not
+  accept a string for it; `entryChecks: false` turns the check off with the
+  others. The same applies to `list<string>` and `list<character>`, which a
+  string does not inhabit, and to a user-declared alias of such a type. A
+  symbol or parameter whose collection type the engine inferred from its uses
+  is refused in the same way. A parameter whose declared type admits a string
+  (`string`, `indexed_collection<character>`) is not affected. The interpreter fallback of a program that did not compile now
+  passes a string or a boolean argument through as that value (a string was
+  read as a symbol name, a boolean was refused as "not a number") and returns
+  a string result as a string (it returned an array of `NaN`). For
+  `indexed_collection<character>` and `collection<character>`, which a string
+  does inhabit, the entry accepts the string and the collection operations on
+  it (`Length`, `Drop`, `Take`, `At`, `First`, a spread, …) fail closed at
+  compile time, so the interpreter evaluates them: `Length(S)` of `"😀a"` is
+  2, where the compiled code read 3 UTF-16 code units. `First`, `Second` and
+  `Third` of an operand that may be text (`string | list<number>`) fail closed
+  too, where they could return half of a surrogate pair. Compiled `Max`,
+  `Min`, `Sum` and `Product` of an operand typed as a scalar or a collection
+  (`number | string`, `number | indexed_collection`) fail closed when the
+  operand may be text or a scalar that is not a number: `Max(S)` of `"😀a"`
+  gave `NaN`, and `Sum(S)` returned the string. The entry also refuses a
+  string for a union of a scalar and a collection that a string does not
+  inhabit (`number | list<number>`), where compiled `Sum(S)` returned the
+  string, and `Sum`, `Product`, `Max` and `Min` of a `string` or
+  `string | list<number>` operand fail closed instead of throwing at run time.
+
+- **A collection whose elements may be absent is accepted where a collection
+  of values is expected.** A lookup with a computed key is typed `T | missing`,
+  and a list of such lookups was refused before anything ran:
+  `StringJoin(Map(i ↦ xs[i], [1, 2]), "")` was "expected
+  `collection<character | string>`, got `list<missing | string>`", although
+  every element existed. Such a collection is now accepted, as the single
+  value already was, and an absent element is decided when the program runs:
+  `StringJoin` and the character set of `Trim` report an `incompatible-type`
+  error naming the absent element; the other collection operators keep their
+  documented absence behavior (`Sum` of an absent element is `NaN`, `Filter`
+  skips it, `Length` counts it). In Epsil,
+  `stringJoin(map(c => complement[c], characters(dna)), "")` runs. A
+  collection whose cells can only be absent (`list<missing>`) is still
+  refused.
+
+- **A list literal with a spread of a lazy collection is a plain list.**
+  `[...take(ys, 1), 9, ...drop(ys, 2)]` evaluated to the lazy recipe
+  `ListJoin(Take(…), [9], Drop(…))`: it printed as the recipe, re-read its
+  variables at every later read, and a loop that rebuilt a list this way
+  nested one recipe per turn until it timed out. `ListJoin` now evaluates to
+  a list when every segment is a finite collection whose elements can be
+  computed and the total is within `ce.maxCollectionSize`; lazy rows inside
+  the segments are listed too. An infinite spread (`[...1..oo]`) stays lazy,
+  and an explicit `join(a, b)` keeps its lazy semantics. An element that is
+  not spread stays as it is: `[...xs, 1..3]` keeps the `Range`, as `[1..3]`
+  does. When the spread operands together hold more than `maxCollectionSize`
+  elements, the literal stays a lazy view and runs no operand callback.
+
 ### Issues Resolved
+
+- **`Solve` gives exact roots for a polynomial whose roots have a closed form.**
+  `x^3 - 2x + 1 = 0` gave `[1, -1.618…, 0.618…]`; it is now
+  `[1, (-1 + √5)/2, (-1 - √5)/2]`. Each rational root is divided out, with its
+  multiplicity, and the quotient is solved exactly when it is linear, quadratic,
+  a pure power or a polynomial in `x^g`. When the quotient has no such closed
+  form, its roots are found numerically, and two of them that are the root set
+  of a quadratic factor with rational coefficients are replaced by the exact
+  roots of that factor: `x^5 + x + 1 = 0` is `(x^2 + x + 1)(x^3 - x^2 + 1) = 0`,
+  and its roots are the exact `(-1 ± i√3)/2` and three floats, the roots of the
+  cubic, which has no rational root and no quadratic factor. Only such a factor
+  gives floats.
+
+- **`DSolve` writes the modes of an exact complex characteristic root in real
+  form.** The characteristic polynomial of `y''' - y = 0` is `r^3 - 1`, whose
+  roots are now the exact `1` and `(-1 ± i√3)/2`; the solution was written
+  with the complex exponentials `e^((-1/2 ± (√3/2)i)x)`. A complex root and
+  its conjugate now give `c₂·e^(-x/2)·cos(√3x/2) + c₃·e^(-x/2)·sin(√3x/2)`,
+  with exact coefficients where the numeric root finder gave
+  `cos(0.866…x)·e^(-0.5x)`. A repeated complex pair (`(r^2 + 1)^2`) gives
+  the modes `x·cos(x)` and `x·sin(x)` too.
 
 - **A spread of a `map` over a set runs the callback once per element.** A list
   literal with a spread of a lazy collection (`[...map(f, {1, 2, 3})]`) read the
@@ -37,17 +157,6 @@
   `2^60 + 1`, `2^60 + 2`, `2^60 + 3`. The same reading makes a rational step
   held by a symbol give exact rationals (`Range(0, 1, s)` with `s := 1/3` is
   `[0, 1/3, 2/3, 1]`, as it already was for a literal step).
-
-- **Compiled integer operations beyond the safe integer range are errors,
-  not different numbers.** Compiled `Mod`, `Remainder`, `GCD` and `LCM` read a
-  double beyond ±2^53 or an infinity as an integer: `(2^60 + 1) % 10` gave 6
-  (the true value is 7), `Remainder(2^60, …)` gave 0, and `Mod` of a sum
-  that overflowed to `Infinity` gave `NaN`. They now throw a `RangeError` that
-  names the operation and the value, in JavaScript and in Python; the
-  `Mod(x, 1)` fractional-part forms are unchanged. Constant folding of an
-  integer operation on a large exact operand (`digitSum(2^1000)` compiled to
-  84 because the fold used the rounded `.N()` value) now folds from the exact
-  value, so the compiled `digitSum(2^1000)` is 1366.
 
 - **A lazy collection passed as an argument keeps the bindings of its
   caller.** A lazy `filter` whose lambda reads a block local, passed to a
@@ -105,6 +214,39 @@
   its body reads, or the variable holding the function literal), so a
   repeated walk is served from the memo, and a write to one of those
   dependencies, or a redefinition of the function, refills it.
+
+- **`Zip` and `Repeat` keep their element types.** `Zip` was typed as a bare
+  `list` as soon as one source had no element type, and `Repeat` was always a
+  bare `list`. In a lambda over `zip(open, 1..3)`, the parameter then had no
+  type, and a numeric index read (`p[2] % pass`) typed every component as a
+  number, so `!p[1]` was refused ("expected `boolean`, got `nan | real`"). `Zip`
+  is now typed `list<tuple<c₁, …, cₙ>>` with each component the element type
+  of its source (`unknown` for a bare source), and `Repeat(v, n)` is
+  `list<T>` for a value of type `T` (`repeat(false, 3)` is `list<boolean>`). The
+  100-doors program of the Epsil corpus runs.
+
+- **A lazy random collection held in a dictionary now keeps its seed.** A
+  `WithRandomSeed` frame recognizes a lazy collection that draws random
+  numbers when it is returned directly or as a cell of a list or a tuple. A
+  dictionary value was not recognized: `WithRandomSeed(42, {"a" ->
+  ListFrom(Map(u ↦ Random(), Range(1, n)))})` with `n` still unbound dropped
+  the frame, so the draws owed to the seed became live, unseeded draws, and
+  `WithRandomSeed(42, {"a" -> Map(u ↦ Random(), xs)})` was reported pure. A
+  dictionary is now a value container for both checks, as a list is, and a
+  structure that holds the same node many times is classified in linear
+  time. The same escape is now seen through every lazy view that holds a
+  drawing view: `WithRandomSeed(7, [...map(u ↦ random(), 1..∞), 0])`,
+  `Take(map(u ↦ random(), 1..3), 2)` and `Reverse` of such a `map` reported
+  `isPure` true while they drew new values at each read; they are impure, so
+  no memo or constant fold keeps one sample of them.
+
+- **`Append` over an infinite source gives its elements by index.**
+  `Take(Append(Range(1, +oo), 0), 3)` stayed unevaluated and
+  `At(Append(Range(1, +oo), 0), 2)` was `NaN`: the `at` handler of `Append`
+  declined every index once the count of the source was not finite, and `Take`
+  reads its elements through `at`. They are now `[1, 2, 3]` and `2`. The
+  appended values have no position after an infinite source, so a negative
+  index still has no element.
 
 ## 0.149.0 _2026-10-07_
 
@@ -191,39 +333,6 @@
   give the same values.
 
 ### Behavior Changes
-
-- **Compiled code refuses a string for a parameter declared as a collection.**
-  A parameter declared with a bare collection type (`indexed_collection`,
-  `collection`, `list`) or a collection of non-text elements (`list<number>`)
-  is compiled as a JavaScript array. The declared type also admits a string,
-  and the compiled function accepted one and read it as UTF-16 code units:
-  with `S: indexed_collection`, compiled `Length(Drop(S, 1))` gave 2 for
-  `"😀a"` where the interpreter gives 1. The compiled entry now throws a
-  `TypeError` that names the parameter and says that compiled code does not
-  accept a string for it; `entryChecks: false` turns the check off with the
-  others. The same applies to `list<string>` and `list<character>`, which a
-  string does not inhabit, and to a user-declared alias of such a type. A
-  symbol or parameter whose collection type the engine inferred from its uses
-  is refused in the same way. A parameter whose declared type admits a string
-  (`string`, `indexed_collection<character>`) is not affected. The interpreter fallback of a program that did not compile now
-  passes a string or a boolean argument through as that value (a string was
-  read as a symbol name, a boolean was refused as "not a number") and returns
-  a string result as a string (it returned an array of `NaN`).
-
-- **A collection whose elements may be absent is accepted where a collection
-  of values is expected.** A lookup with a computed key is typed `T | missing`,
-  and a list of such lookups was refused before anything ran:
-  `StringJoin(Map(i ↦ xs[i], [1, 2]), "")` was "expected
-  `collection<character | string>`, got `list<missing | string>`", although
-  every element existed. Such a collection is now accepted, as the single
-  value already was, and an absent element is decided when the program runs:
-  `StringJoin` and the character set of `Trim` report an `incompatible-type`
-  error naming the absent element; the other collection operators keep their
-  documented absence behavior (`Sum` of an absent element is `NaN`, `Filter`
-  skips it, `Length` counts it). In Epsil,
-  `stringJoin(map(c => complement[c], characters(dna)), "")` runs. A
-  collection whose cells can only be absent (`list<missing>`) is still
-  refused.
 
 - **A function whose local variable is read by a lambda needs no `scope`
   effect.** Effect inference treated any local that a nested function
@@ -389,39 +498,7 @@
   step is rounded from enclosures: `Floor(10, π)` is `3π`. Before this change,
   `Floor(226, 10)` was an `unexpected-argument` error.
 
-
 ### Issues Resolved
-
-- **A list literal with a spread of a lazy collection is a plain list.**
-  `[...take(ys, 1), 9, ...drop(ys, 2)]` evaluated to the lazy recipe
-  `ListJoin(Take(…), [9], Drop(…))`: it printed as the recipe, re-read its
-  variables at every later read, and a loop that rebuilt a list this way
-  nested one recipe per turn until it timed out. `ListJoin` now evaluates to
-  a list when every segment is a finite collection whose elements can be
-  computed and the total is within `ce.maxCollectionSize`; lazy rows inside
-  the segments are listed too. An infinite spread (`[...1..oo]`) stays lazy,
-  and an explicit `join(a, b)` keeps its lazy semantics.
-
-- **`Zip` and `Repeat` keep their element types.** `Zip` was typed as a bare
-  `list` as soon as one source had no element type, and `Repeat` was always a
-  bare `list`. In a lambda over `zip(open, 1..3)`, the parameter then had no
-  type, and a numeric index read (`p[2] % pass`) typed every component as a
-  number, so `!p[1]` was refused ("expected `boolean`, got `nan | real`"). `Zip`
-  is now typed `list<tuple<c₁, …, cₙ>>` with each component the element type
-  of its source (`unknown` for a bare source), and `Repeat(v, n)` is
-  `list<T>` for a value of type `T` (`repeat(false, 3)` is `list<boolean>`). The
-  100-doors program of the Epsil corpus runs.
-
-- **A lazy random collection held in a dictionary now keeps its seed.** A
-  `WithRandomSeed` frame recognizes a lazy collection that draws random
-  numbers when it is returned directly or as a cell of a list or a tuple. A
-  dictionary value was not recognized: `WithRandomSeed(42, {"a" ->
-  ListFrom(Map(u ↦ Random(), Range(1, n)))})` with `n` still unbound dropped
-  the frame, so the draws owed to the seed became live, unseeded draws, and
-  `WithRandomSeed(42, {"a" -> Map(u ↦ Random(), xs)})` was reported pure. A
-  dictionary is now a value container for both checks, as a list is, and a
-  structure that holds the same node many times is classified in linear
-  time.
 
 - **A prime on a compound operand is fenced, and the Unicode letters ℕ ℤ ℚ ℝ ℂ
   are number sets**

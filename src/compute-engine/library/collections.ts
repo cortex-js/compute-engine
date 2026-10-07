@@ -9487,15 +9487,27 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       ): undefined | Expression => {
         if (typeof index !== 'number' || !isFunction(expr)) return undefined;
         const count = smallCount(expr.op1);
-        if (count === undefined || !Number.isFinite(count)) return undefined;
-        const total = count + expr.nops - 1;
+        if (count === undefined) return undefined;
         // A set-kind result is indexed through the DEDUPLICATED enumeration
         // and a keyed one through the MERGED entries, so that `at`, `each` and
         // `count` agree; the positional arithmetic below counts repeats and
-        // would skip past elements. (`total` is already known finite here —
-        // the guard above returned.)
+        // would skip past elements. The total length is known only for a
+        // finite source, and only a negative index needs it (see `distinctAt`).
         if (producesMergedView(expr))
-          return distinctAt(expr, index, () => total);
+          return distinctAt(expr, index, () =>
+            Number.isFinite(count) ? count + expr.nops - 1 : undefined
+          );
+        // An infinite source never ends, so a positive index is always an
+        // index into the source, and the appended values have no position.
+        // A negative index counts from an end that does not exist, so it has
+        // no element. Before, every index answered `undefined` here, so
+        // `At(Append(Range(1, +oo), 0), 2)` was `NaN` and
+        // `Take(Append(Range(1, +oo), 0), 3)` did not evaluate.
+        if (!Number.isFinite(count)) {
+          if (!Number.isInteger(index) || index < 1) return undefined;
+          return expr.op1.at(index);
+        }
+        const total = count + expr.nops - 1;
         // A negative index counts from the end of the appended collection.
         if (index < 0) index = total + index + 1;
         if (index < 1) return undefined;
@@ -16095,9 +16107,13 @@ function foldLiteralListAppend(
  * The operands are enumerated as the collection handlers of `ListJoin`
  * (`JOIN_COLLECTION_HANDLERS`) enumerate them: a tuple operand and a scalar
  * operand are one element each, and any other operand contributes its
- * elements in its iteration order. An element that is itself a finite lazy
- * collection is listed too (`listedElement`). The view is kept when an
- * operand:
+ * elements in its iteration order. An element that a spread operand
+ * enumerates and that is itself a finite lazy collection is listed too
+ * (`listedElement`). The elements of a `List` literal operand are kept as
+ * they are: `canonicalJoin` wraps each element of the literal that is not
+ * spread in a `List` operand, so `[...xs, 1..3]` is
+ * `ListJoin(xs, [Range(1, 3)])`, and its third element must stay the range,
+ * as in `[1..3]`. The view is kept when an operand:
  *
  * - may be absent (`Missing`, a restricted collection): the evaluation
  *   answers `Missing` or threads the condition, as before;
@@ -16117,11 +16133,18 @@ function foldLiteralListAppend(
  * of 10,000 ranges of 10,000 elements would otherwise hold 10^8 elements.
  *
  * The count of an operand is read before the walk only when it is cheap
- * (`hasConstantTimeCount`). The count of a `Filter` walks the filter and
- * calls the predicate, so the walk would call the predicate a second time,
- * and an error of the predicate would escape from the count instead of
- * keeping the view. Such an operand is bounded by the budget during the
- * single walk.
+ * (`hasConstantTimeCount`). The sum of these counts (an atomic or a scalar
+ * operand counts as one element) is compared with the budget before any
+ * walk. Thus, when the operands together hold too many elements, the view
+ * is kept and no callback of an operand (such as a random draw in a `Map`)
+ * runs for a snapshot that would be abandoned. The count of a `Filter`
+ * walks the filter and calls the predicate, so the walk would call the
+ * predicate a second time, and an error of the predicate would escape from
+ * the count instead of keeping the view. Such an operand is bounded by the
+ * budget during the single walk. This is a known limit: when such an
+ * operand makes the snapshot exceed the budget during the walk, the
+ * callbacks that the walk ran before it stopped run again when the kept
+ * view is read.
  *
  * A `Join` (`join(xs, ys)` in Epsil) is not changed: it is a lazy operator,
  * not a literal.
@@ -16141,14 +16164,25 @@ function snapshotListJoin(
   // view.
   try {
     // Check every operand before any walk, so that a view that is kept
-    // costs no enumeration when its count is cheap.
+    // costs no enumeration when its count is cheap. The cheap counts are
+    // added, because the budget is for the whole snapshot: two operands
+    // that are each in the budget can be over it together.
+    let knownCount = 0;
     for (const op of ops) {
       if (!op.isValid || mayBeAbsentCollectionOperand(op)) return undefined;
-      if (isAtomicJoinOperand(op) || isProvablyScalarJoinOperand(op)) continue;
+      if (isAtomicJoinOperand(op) || isProvablyScalarJoinOperand(op)) {
+        knownCount += 1;
+        if (knownCount > budget.max) return undefined;
+        continue;
+      }
       if (!op.isCollection || !isWalkableFiniteCollection(op)) return undefined;
       if (!hasConstantTimeCount(op)) continue;
       const count = op.count;
-      if (count !== undefined && count > budget.max) return undefined;
+      if (count === undefined) continue;
+      // A `bigint` count is past 2^53, so its conversion is far over the
+      // budget and the comparison below keeps the view.
+      knownCount += Number(count);
+      if (knownCount > budget.max) return undefined;
     }
     for (const op of ops) {
       if (isAtomicJoinOperand(op) || isProvablyScalarJoinOperand(op)) {
@@ -16157,10 +16191,14 @@ function snapshotListJoin(
         elements.push(op);
         continue;
       }
+      // An element of a `List` literal operand was written as an element,
+      // not spread, so it is kept as it is. Only the elements that a spread
+      // operand enumerates are listed.
+      const isListLiteral = isFunction(op, 'List') && op.isCanonical;
       for (const x of op.each()) {
         if (budget.used >= budget.max) return undefined;
         budget.used += 1;
-        const element = listedElement(ce, x, budget);
+        const element = isListLiteral ? x : listedElement(ce, x, budget);
         elements.push(
           numericApproximation
             ? element.evaluate({ numericApproximation })

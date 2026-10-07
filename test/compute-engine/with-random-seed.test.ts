@@ -1037,3 +1037,73 @@ describe('WithRandomSeed — a dictionary is a value container like a list', () 
     );
   });
 });
+
+describe('WithRandomSeed — a lazy view that holds a drawing view escapes', () => {
+  // An operand of a lazy view is in value position: the view reads the
+  // elements of the operand only when the view itself is read, outside the
+  // frame. `[...a, 0]` is `ListJoin(a, [0])`. Evaluation lists a finite spread
+  // operand, but an infinite one stays a lazy view. Before the fix, the
+  // frame-escape check of `boxed-expression/effects-of.ts`
+  // (`escapesAsDrawingLazyView()`) examined only the callback of the outer
+  // view, which does not draw, so the expression reported itself pure while
+  // each read drew new values.
+  const VIEW = [
+    'Map',
+    ['Function', ['Random'], 'u'],
+    ['Range', 1, { num: '+Infinity' }],
+  ];
+
+  it('a spread of an infinite drawing view reports `random`, like the bare view', () => {
+    for (const body of [VIEW, ['ListJoin', VIEW, ['List', 0]]]) {
+      const e = boxed(['WithRandomSeed', 7, body]);
+      expect([body[0], e.effects, e.isPure]).toEqual([
+        body[0],
+        ['random'],
+        false,
+      ]);
+      // The frame is stripped: the result is the lazy view, which draws
+      // live each time it is read.
+      expect(e.evaluate().operator).toBe(body[0]);
+    }
+  });
+
+  it('a spread of an infinite drawing view gives new values on each read', () => {
+    const ce = new ComputeEngine();
+    const take = ce.box([
+      'Take',
+      ['WithRandomSeed', 7, ['ListJoin', VIEW, ['List', 0]]],
+      3,
+    ]);
+    expect(take.isPure).toBe(false);
+    // `Take` of a lazy view is a lazy view too, so `each()` reads it.
+    const read = () => Array.from(take.evaluate().each()).map((x: any) => x.re);
+    const first = read();
+    expect(first).toHaveLength(3);
+    expect(read()).not.toEqual(first);
+  });
+
+  it('other views that hold a drawing view report `random` too', () => {
+    const finite = ['Map', ['Function', ['Random'], 'u'], ['Range', 1, 3]];
+    for (const body of [
+      ['Join', VIEW, ['List', 0]],
+      ['Append', VIEW, 0],
+      ['Take', finite, 2],
+      ['Map', ['Function', 'k', 'k'], finite],
+    ]) {
+      const e = boxed(['WithRandomSeed', 7, body]);
+      expect([body[0], e.isPure]).toEqual([body[0], false]);
+    }
+  });
+
+  it('a source that draws when the view is built keeps the discharge', () => {
+    // `RandomShuffle` draws when it is evaluated, inside the frame, so the
+    // view holds a completed list and the frame replays it.
+    const e = boxed([
+      'WithRandomSeed',
+      7,
+      ['ListJoin', ['RandomShuffle', ['Range', 1, 3]], ['List', 0]],
+    ]);
+    expect(e.isPure).toBe(true);
+    expect(e.evaluate().toString()).toBe(e.evaluate().toString());
+  });
+});

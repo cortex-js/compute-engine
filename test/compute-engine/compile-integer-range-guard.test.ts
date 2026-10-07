@@ -265,6 +265,78 @@ describe('constant fold of an operand beyond the safe integer range', () => {
     expect(folded(json)).toEqual({ code: '21', value: 21 });
   });
 
+  it('an operand that uses the index of a Sum folds to the exact value', () => {
+    // `2^n` has no value of its own, so its digits cannot be checked before
+    // the evaluation. The fold takes the value of `evaluate()`: `.N()`
+    // answered `84`, the digit sum of a 21-digit decimal.
+    const json = [
+      'Sum',
+      ['DigitSum', ['Power', 2, 'n']],
+      ['Limits', 'n', 1000, 1000],
+    ];
+    expect(ce.box(json as never).evaluate().re).toBe(1366);
+    expect(folded(json)).toEqual({ code: '1366', value: 1366 });
+  });
+
+  it('an unchecked operand in too many iterations does not fold to a wrong value', () => {
+    // `n^n` has no value of its own, so the exact fold prices it at the
+    // largest operand it accepts. 1000 iterations of that size exceed the
+    // fold ceiling, so the fold declines and the compiled loop refuses the
+    // first operand beyond the range. `.N()` answered 646802592660, where
+    // `evaluate()` answers 4629110846700.
+    const json = [
+      'Sum',
+      ['Mod', ['Power', 'n', 'n'], ['Power', 10, 10]],
+      ['Limits', 'n', 1, 1000],
+    ];
+    expect(ce.box(json as never).evaluate().re).toBe(4629110846700);
+    const r = compiled(json);
+    expect(r.code).not.toContain('646802592660');
+    let value: unknown;
+    let error: unknown;
+    try {
+      value = r.run!({} as never);
+    } catch (e) {
+      error = e;
+    }
+    expect(value).not.toBe(646802592660);
+    expect(error).toBeInstanceOf(RangeError);
+    expect((error as Error).message).toMatch(rangeError('Mod'));
+  });
+
+  it('an unchecked operand that is not rational declines', () => {
+    // `evaluate()` reads a rounding of `√2 · 10^30` and answers the exact
+    // `5`, where the value is `0.698…`. The operand has no value before the
+    // evaluation, and its type is not rational, so the fold declines and the
+    // run-time guard refuses the operand.
+    const r = compiled([
+      'Sum',
+      ['Mod', ['Multiply', ['Sqrt', 2], ['Power', 10, 30], 'n'], 7],
+      ['Limits', 'n', 1, 1],
+    ]);
+    expect(() => r.run!({} as never)).toThrow(rangeError('Mod'));
+  });
+
+  it('a small Sum with an unchecked operand still folds', () => {
+    // The type of `n^n` is a bare `integer`, so the operand stays unchecked,
+    // and the fold takes the exact value of `evaluate()`.
+    const json = [
+      'Sum',
+      ['Mod', ['Power', 'n', 'n'], 7],
+      ['Limits', 'n', 1, 10],
+    ];
+    expect(ce.box(json as never).evaluate().re).toBe(25);
+    expect(folded(json)).toEqual({ code: '25', value: 25 });
+  });
+
+  it('an unchecked operand with a safe integer range type keeps the ordinary fold', () => {
+    // The type of `n` is `integer<1..1000>`, inside the safe integer range,
+    // so the operand is known to be safe without a value.
+    const json = ['Sum', ['Mod', 'n', 7], ['Limits', 'n', 1, 1000]];
+    expect(ce.box(json as never).evaluate().re).toBe(3003);
+    expect(folded(json)).toEqual({ code: '3003', value: 3003 });
+  });
+
   it('safe constant operands keep the ordinary fold', () => {
     expect(folded(['DigitSum', 1234]).value).toBe(10);
     expect(folded(['IntegerDigits', 255, 16]).value).toEqual([15, 15]);
