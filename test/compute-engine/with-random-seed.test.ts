@@ -299,9 +299,12 @@ describe('WithRandomSeed — partial evaluation keeps the frame (Tycho item 104)
       ['List', ['Random'], ['RandomShuffle', ['Range', 1, 'n']]],
     ]);
     expect(e.evaluate().operator).toBe('WithRandomSeed');
-    expect(e.subs({ n: 3 }).N().isSame(e.evaluate().subs({ n: 3 }).N())).toBe(
-      true
-    );
+    expect(
+      e
+        .subs({ n: 3 })
+        .N()
+        .isSame(e.evaluate().subs({ n: 3 }).N())
+    ).toBe(true);
   });
 
   it('a body that COMPLETES its draws still strips the frame', () => {
@@ -342,9 +345,7 @@ describe('WithRandomSeed — partial evaluation keeps the frame (Tycho item 104)
 
   it('Hold content is inert data, not a pending draw', () => {
     expect(
-      boxed(['WithRandomSeed', 1, ['Hold', ['Random']]])
-        .evaluate()
-        .operator
+      boxed(['WithRandomSeed', 1, ['Hold', ['Random']]]).evaluate().operator
     ).toBe('Hold');
   });
 });
@@ -533,9 +534,7 @@ describe('WithRandomSeed — typing', () => {
   // `HoldValues` had the same latent gap: its held body arrived unbound, so
   // its `type` handler read `unknown` on the box/parse routes.
   it('HoldValues carries its body type through (box route)', () => {
-    expect(boxed(['HoldValues', ['Random']]).type.toString()).toBe(
-      'real'
-    );
+    expect(boxed(['HoldValues', ['Random']]).type.toString()).toBe('real');
   });
 
   it('HoldValues carries its body type through (parse route)', () => {
@@ -849,5 +848,192 @@ describe('WithRandomSeed — a binder LAZY view is a completed value (Tycho item
       ],
     ]);
     expect(e.evaluate().operator).toBe('WithRandomSeed');
+  });
+});
+
+describe('WithRandomSeed — a dictionary is a value container like a list', () => {
+  // `docs/RANDOMNESS-MODEL.md` §2: a lazy drawing view returned in a cell of a
+  // list, a tuple or a dictionary is a completed value. It strips the frame
+  // and draws at materialization, so the expression reports `random`. A draw
+  // that a surviving eager consumer still owes keeps the frame, in a
+  // dictionary value as in a list cell. The two checks that decide this are
+  // `escapesAsDrawingLazyView` (`boxed-expression/effects-of.ts`) and the
+  // pending-draw walk of `library/core.ts`; both read the container set from
+  // `valueContainerCells`. Before a dictionary was in that set, the dictionary
+  // form reported itself pure while its view drew live, and it stripped the
+  // frame from an owed draw, so the draws it owed became live too.
+
+  /** A lazy view whose element work draws: it escapes the frame. */
+  const VIEW = ['Map', ['Function', ['Random'], 'u'], ['Range', 1, 3]];
+  /** A lazy view with nothing to draw. */
+  const PURE_VIEW = [
+    'Map',
+    ['Function', ['Add', 'u', 1], 'u'],
+    ['Range', 1, 3],
+  ];
+  /** Draws owed to the frame: `ListFrom` asks for them in the frame, and only
+   * the unbound length `m` stops it from finishing. */
+  const OWED = [
+    'ListFrom',
+    ['Map', ['Function', ['Random'], 'u'], ['Range', 1, 'm']],
+  ];
+  const dict = (value: any) => [
+    'Dictionary',
+    ['KeyValuePair', { str: 'a' }, value],
+  ];
+  const forms = (value: any) => ({ list: ['List', value], dict: dict(value) });
+
+  it('an escaping view: the dictionary reports `random` and strips the frame, like the list', () => {
+    for (const [form, body] of Object.entries(forms(VIEW))) {
+      const e = boxed(['WithRandomSeed', 42, body]);
+      if (form === 'dict') expect(e.ops[1].operator).toBe('Dictionary');
+      expect([form, e.effects, e.isPure]).toEqual([form, ['random'], false]);
+      const v = e.evaluate();
+      expect([form, v.operator]).toEqual([
+        form,
+        form === 'dict' ? 'Dictionary' : 'List',
+      ]);
+    }
+  });
+
+  it('an escaping view in a dictionary, on the parse route', () => {
+    const view =
+      '\\operatorname{Map}(u \\mapsto \\operatorname{Random}(), \\operatorname{Range}(1,3))';
+    for (const [form, latex] of Object.entries({
+      list: `${WRS}(42, [${view}])`,
+      dict: `${WRS}(42, \\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{a}, ${view})))`,
+    })) {
+      const e = parsed(latex);
+      expect([form, e.effects]).toEqual([form, ['random']]);
+    }
+  });
+
+  it('the structural application `Dictionary(KeyValuePair(…))` is a container too', () => {
+    // A structural expression keeps the `Dictionary` and `KeyValuePair`
+    // applications instead of building a dictionary value. It also keeps a
+    // `Triple`, which the canonical form spells `Tuple`.
+    const ce = new ComputeEngine();
+    const structural = { form: 'structural' } as const;
+    const view = ce.box(VIEW as any);
+    const bodies = {
+      list: ce.function('List', [view], structural),
+      dict: ce.function(
+        'Dictionary',
+        [ce.function('KeyValuePair', [ce.string('a'), view], structural)],
+        structural
+      ),
+      Triple: ce.function(
+        'Triple',
+        [view, ce.number(1), ce.number(2)],
+        structural
+      ),
+    };
+    for (const [form, body] of Object.entries(bodies)) {
+      const e = ce.function(
+        'WithRandomSeed',
+        [ce.number(42), body],
+        structural
+      );
+      expect([form, e.ops![1].operator]).toEqual([
+        form,
+        { list: 'List', dict: 'Dictionary', Triple: 'Triple' }[form],
+      ]);
+      expect([form, e.effects]).toEqual([form, ['random']]);
+    }
+  });
+
+  it('the static effect channel agrees: a lambda returning the frame is `random`', () => {
+    const ce = new ComputeEngine();
+    for (const [form, body] of Object.entries(forms(VIEW))) {
+      const f = ce.box(['Function', ['WithRandomSeed', 42, body], 'i']);
+      expect([form, f.type.effects]).toEqual([form, ['random']]);
+    }
+  });
+
+  it('an owed draw keeps the frame in a dictionary value, and replays like the list', () => {
+    const replays: Record<string, string> = {};
+    for (const [form, body] of Object.entries(forms(OWED))) {
+      const ce = new ComputeEngine();
+      const kept = ce.box(['WithRandomSeed', 42, body]).evaluate();
+      expect([form, kept.operator]).toEqual([form, 'WithRandomSeed']);
+      // Bind the length; each evaluation of the kept expression replays the
+      // frame from draw 0.
+      ce.assign('m', 3);
+      const cell = (x: any) =>
+        (form === 'dict' ? x.get('a') : x.ops[0]).toString();
+      const a = cell(kept.evaluate());
+      const b = cell(kept.evaluate());
+      expect([form, a]).toEqual([form, b]);
+      replays[form] = a;
+    }
+    // Same seed, same draw indices: the dictionary value holds the very
+    // values of the list cell.
+    expect(replays.dict).toBe(replays.list);
+    expect(replays.dict).toBe(`[${draw(42, 0)},${draw(42, 1)},${draw(42, 2)}]`);
+  });
+
+  it('a nested dictionary, and a dictionary mixed with a list', () => {
+    for (const [label, body] of Object.entries({
+      'dictionary in dictionary': dict(dict(VIEW)),
+      'list in dictionary': dict(['List', 1, VIEW]),
+      'dictionary in list': ['List', dict(VIEW)],
+    })) {
+      const e = boxed(['WithRandomSeed', 42, body]);
+      expect([label, e.effects]).toEqual([label, ['random']]);
+      expect([label, e.evaluate().operator]).not.toEqual([
+        label,
+        'WithRandomSeed',
+      ]);
+    }
+    for (const [label, body] of Object.entries({
+      'dictionary in dictionary': dict(dict(OWED)),
+      'list in dictionary': dict(['List', 1, OWED]),
+      'dictionary in list': ['List', dict(OWED)],
+    })) {
+      const e = boxed(['WithRandomSeed', 42, body]);
+      expect([label, e.evaluate().operator]).toEqual([label, 'WithRandomSeed']);
+    }
+  });
+
+  it('a dictionary with nothing that escapes keeps the discharge and strips the frame', () => {
+    for (const [label, body] of Object.entries({
+      // A lazy view whose element work is pure.
+      'pure view': dict(PURE_VIEW),
+      // Materialized in the frame before it is stored.
+      'materialized': dict(['ListFrom', VIEW]),
+      // A draw made in the frame's own extent.
+      'framed draw': dict(['Random']),
+      // A function value is stored, never invoked by the dictionary.
+      'function value': dict(['Function', ['Random'], 'u']),
+    })) {
+      const e = boxed(['WithRandomSeed', 42, body]);
+      expect([label, e.effects, e.isPure]).toEqual([label, undefined, true]);
+      expect([label, e.evaluate().operator]).toEqual([label, 'Dictionary']);
+    }
+    // Draws made in the frame replay.
+    const e = boxed(['WithRandomSeed', 42, dict(['ListFrom', VIEW])]);
+    expect(e.evaluate().toString()).toBe(e.evaluate().toString());
+  });
+
+  it('a container that holds the same node in many cells is classified in linear time', () => {
+    // Each level holds the level below twice, so a body 40 levels deep has
+    // 2^40 paths but only 41 distinct nodes. The escape check classifies
+    // each node once; a walk over every path would not finish.
+    const ce = new ComputeEngine();
+    let d = ce.box(PURE_VIEW as any);
+    let l = d;
+    for (let i = 0; i < 40; i++) {
+      d = ce.function('Dictionary', [
+        ce.function('KeyValuePair', [ce.string('a'), d]),
+        ce.function('KeyValuePair', [ce.string('b'), d]),
+      ]);
+      l = ce.function('List', [l, l]);
+    }
+    expect(ce.function('WithRandomSeed', [ce.number(42), d]).effects).toBe(
+      undefined
+    );
+    expect(ce.function('WithRandomSeed', [ce.number(42), l]).effects).toBe(
+      undefined
+    );
   });
 });

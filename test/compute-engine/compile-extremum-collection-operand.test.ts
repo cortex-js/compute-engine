@@ -73,7 +73,14 @@ describe('ITERATION-ONLY OPERATORS OVER AN ABSTRACT COLLECTION (issue #385)', ()
 
       test(`${label} with w: ${type} stops on a value that is not a collection`, () => {
         const fn = compiled(new ComputeEngine(), body, type);
-        expect(() => fn('abc')).toThrow(/not a list or a set at run time/);
+        // A string at a `collection` parameter is refused at entry, before
+        // the body reads it (`compile-entry-string-refusal.test.ts`). A
+        // `set` parameter has no entry refusal, and the body stops on it.
+        expect(() => fn('abc')).toThrow(
+          type.startsWith('set')
+            ? /not a list or a set at run time/
+            : /does not accept a string/
+        );
         expect(() => fn({ a: 1 })).toThrow(/not a list or a set at run time/);
       });
     }

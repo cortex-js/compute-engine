@@ -1166,8 +1166,8 @@ describe('6 — discharge', () => {
 
     it('a view escapes from a CONTAINER cell and from a `Block` result too', () => {
       // `RANDOMNESS-MODEL.md` §2: the escape "stays a live-draw escape,
-      // whether the view is the result itself or a cell of a returned
-      // `List`/`Tuple`" — value position propagates through the literal
+      // whether the view is the result itself or a cell of a returned list,
+      // tuple or dictionary" — value position propagates through the literal
       // containers exactly as it does in the pending-draw walk, and through
       // the statement a `Block` returns.
       const ce = new ComputeEngine();

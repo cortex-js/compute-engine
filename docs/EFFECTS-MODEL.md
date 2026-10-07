@@ -1070,9 +1070,10 @@ The **contribution** of operand `aᵢ` separates *producing* the operand from
   callback it invokes per element, or, for a view that binds its own
   variables, its non-clause operands), reached through **value position**:
   §2 states the escape holds "whether the view is the result itself or a
-  cell of a returned `List`/`Tuple`", so the literal containers are
-  traversed — the same container set, defined once, that the pending-draw
-  walk reads — as is the statement a `Block` returns (the walk needs no
+  cell of a returned list, tuple or dictionary", so the literal containers
+  (a dictionary's cells are its values) are traversed — the same container
+  set, defined once, that the pending-draw walk reads — as is the statement
+  a `Block` returns (the walk needs no
   `Block` case: it runs on an evaluated body, where the block has already
   collapsed to that statement). A materializer around the view
   (`ListFrom`, an index, a reducer) asked for the draws *inside* the frame

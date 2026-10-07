@@ -1021,10 +1021,15 @@ describe('PointList zip — constructed source widths', () => {
       [3, 30],
     ]);
     expect(r.run!({ k: 1, fixed: [] })).toEqual([]);
-    for (const fixed of [null, undefined, 'abc', 3, { length: 3 }])
+    for (const fixed of [null, undefined, 3, { length: 3 }])
       expect(() => r.run!({ k: 1, fixed })).toThrow(
         /source component 2 is not an array/
       );
+    // A string is refused at entry, before the body reads it
+    // (`compile-entry-string-refusal.test.ts`).
+    expect(() => r.run!({ k: 1, fixed: 'abc' })).toThrow(
+      /does not accept a string/
+    );
   });
 
   it('keeps runtime scalar-or-list role selection alongside a constructed source', () => {

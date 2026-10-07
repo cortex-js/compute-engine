@@ -1,8 +1,6 @@
-// corpus: known-failure a collection whose elements may be absent is refused where a collection of strings is expected (ROADMAP: "A collection of possibly absent elements is refused by a typed collection parameter")
 // DNA to RNA complement: G→C, C→G, T→A, A→U. A dictionary lookup with a
-// computed key has the type `string | missing`, so the mapped list is a
-// `list<missing | string>`, and `stringJoin` refuses it before anything
-// runs. `complement[c] ?? "?"` is accepted.
+// computed key may be absent, so the mapped list is a `list<string | missing>`;
+// `stringJoin` accepts it, and an absent element would be a run-time error.
 let complement = {G -> "C", C -> "G", T -> "A", A -> "U"}
 toRna(dna) = stringJoin(map(c => complement[c], characters(dna)), "")
 toRna("ACGTGGTCTTAA")

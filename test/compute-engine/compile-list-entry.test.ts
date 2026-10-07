@@ -95,15 +95,24 @@ describe('COMPILE list entry check (vars route)', () => {
     }
   });
 
-  it('passes a scalar, a string, an object and `undefined` through untouched', () => {
-    // The entry check copies a typed array and does nothing else. A value the
-    // declared type does not admit is left to the lowerings, which dispatch on
-    // the runtime shape.
+  it('passes a scalar, an object and `undefined` through untouched', () => {
+    // The entry check copies a typed array and refuses a string, and does
+    // nothing else. Any other value the declared type does not admit is left
+    // to the lowerings, which dispatch on the runtime shape.
     const unit = probeUnit();
-    for (const value of [5, 'abc', { length: 3 }, undefined, null]) {
+    for (const value of [5, { length: 3 }, undefined, null]) {
       unit.run(value);
       expect(unit.seen()).toBe(value);
     }
+  });
+
+  it('refuses a string', () => {
+    // The compiled code would read the string as an array of UTF-16 code
+    // units (`compile-entry-string-refusal.test.ts`).
+    const unit = probeUnit();
+    expect(() => unit.run('abc')).toThrow(
+      /"S" \(type `list<number>`\) is compiled as a JavaScript array/
+    );
   });
 
   it('passes a DataView and a BigInt typed array through untouched', () => {
@@ -155,13 +164,16 @@ describe('COMPILE list entry check (vars route)', () => {
     expect(r.run!({ s: 'abc' } as any)).toBe(3);
   });
 
-  it('leaves an `indexed_collection`-typed symbol accepting a string', () => {
-    // A string inhabits the bare `indexed_collection` type, so the entry check
-    // does not cover it: a typed-array copy there would be wrong.
+  it('refuses a string for an `indexed_collection`-typed symbol', () => {
+    // A string inhabits the bare `indexed_collection` type, but the compiled
+    // code reads the binding as a JavaScript array, so the entry refuses a
+    // string (`compile-entry-string-refusal.test.ts`). An array passes.
     const e = listEngine('indexed_collection');
     const r = compile(e.box(['Length', 'S']), { to: 'javascript' })!;
     expect(r.success).toBe(true);
-    expect(r.run!({ S: 'abc' } as any)).toBe(3);
+    expect(() => r.run!({ S: 'abc' } as any)).toThrow(
+      /compiled code does not accept a string/
+    );
     expect(r.run!({ S: [1, 2, 3] } as any)).toBe(3);
   });
 
@@ -205,18 +217,21 @@ describe('COMPILE list entry check (args route)', () => {
   });
 
   it('passes a non-array argument through untouched', () => {
-    // As on the free-symbol route, only a typed array is rewritten. `At` on a
-    // non-array base answers `NaN`, which is what the interpreter's `Nothing`
-    // projects to — the behavior before the typed-array copy existed.
+    // As on the free-symbol route, only a typed array is rewritten and a
+    // string is refused. `At` on a non-array base answers `NaN`, which is
+    // what the interpreter's `Nothing` projects to — the behavior before the
+    // typed-array copy existed.
     const run = lambdaUnit();
     for (const value of [
       5,
-      'abc',
       {},
       new DataView(new ArrayBuffer(8)),
       new BigInt64Array(2),
     ])
       expect(run(value)).toBeNaN();
+    expect(() => run('abc')).toThrow(
+      /argument 1 \(type `list<number>`\) is compiled as a JavaScript array/
+    );
   });
 
   it('leaves an unannotated parameter unchecked', () => {
@@ -226,6 +241,27 @@ describe('COMPILE list entry check (args route)', () => {
     })!;
     expect(r.success).toBe(true);
     expect((r.run as unknown as (x: unknown) => unknown)(4)).toBe(5);
+  });
+});
+
+describe('COMPILE list entry: interpreter fallback with text', () => {
+  // `S: string | list<number>` is not provably a string, so `At` and
+  // `Characters` do not compile and the interpreter runs them instead. A
+  // character the interpreter answers is a JS string, as compiled code
+  // answers `At(s, 1)` for `s: string` — never `NaN`.
+  it('answers a character result as a string', () => {
+    const e = listEngine('string | list<number>');
+    const r = compile(e.box(['At', 'S', 1]), { to: 'javascript' })!;
+    expect(r.success).toBe(false);
+    expect(r.run!({ S: 'abc' } as any)).toBe('a');
+    expect(r.run!({ S: [4, 5, 6] } as any)).toBe(4);
+  });
+
+  it('answers a list of characters as an array of strings', () => {
+    const e = listEngine('string | list<number>');
+    const r = compile(e.box(['Characters', 'S']), { to: 'javascript' })!;
+    expect(r.success).toBe(false);
+    expect(r.run!({ S: 'abc' } as any)).toEqual(['a', 'b', 'c']);
   });
 });
 

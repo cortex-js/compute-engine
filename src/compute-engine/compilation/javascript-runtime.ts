@@ -5521,8 +5521,15 @@ export function copyToPlainArray(x: ArrayLike<number>): number[] {
  *   string, `null`) throws too, except `undefined`, an absent cell. The linear-algebra heads read a
  *   `matrix<number>` operand as real in these modes, and would otherwise
  *   give `NaN` or a wrong number for a complex entry;
- * - anything else (a string, a boolean, an array, `undefined`) is left to
- *   today's behavior.
+ * - declared with a collection type that the compiled code reads as a
+ *   JavaScript array, and whose elements are not text (`strings`, built by
+ *   `stringRefusedEntryType` in `javascript-target.ts`): a string THROWS a
+ *   `TypeError` that names the binding. The engine reads a string as an
+ *   indexed collection of grapheme clusters, so a bare `indexed_collection`
+ *   or `collection` type admits one, but the compiled code would read it as
+ *   an array of UTF-16 code units: `Length` of `"😀a"` would be 3, not 2;
+ * - anything else (a string for any other binding, a boolean, an array,
+ *   `undefined`) is left to today's behavior.
  *
  * One `typeof` per checked binding per call, plus one per entry of each
  * collection whose entries are checked. The vars object is never mutated (a
@@ -5535,6 +5542,7 @@ export type EntryPlan =
       complex: string[];
       lists: string[];
       entries: Map<string, RealEntryCheck>;
+      strings: Map<string, string>;
     }
   | {
       kind: 'args';
@@ -5542,7 +5550,23 @@ export type EntryPlan =
       complex: number[];
       lists: number[];
       entries: Map<number, RealEntryCheck>;
+      strings: Map<number, string>;
     };
+
+/**
+ * Throw when the binding `key` is in `strings`, the bindings of an entry plan
+ * that refuse a string. The caller has already found that the value of the
+ * binding is a string, so a binding that is not a string costs no map read.
+ * The value of `strings` is the label of the binding and its declared type,
+ * as the diagnostic shows them.
+ */
+function refuseStringEntry<K>(strings: Map<K, string>, key: K): void {
+  const label = strings.get(key);
+  if (label === undefined) return;
+  throw new TypeError(
+    `${label} is compiled as a JavaScript array, and compiled code does not accept a string for it: it would read the string as UTF-16 code units, not as characters. Pass an array, or declare the binding \`string\` to compile text.`
+  );
+}
 
 /**
  * The entry check of one collection-valued binding read on the real lane,
@@ -5733,6 +5757,7 @@ export function checkEntry(
     // float encoding of it.
     for (const id of plan.real) {
       const x = v[id];
+      if (typeof x === 'string') refuseStringEntry(plan.strings, id);
       const read = checkBindingEntries(plan.entries.get(id), x);
       if (read !== x) {
         lifted ??= { ...v };
@@ -5746,6 +5771,7 @@ export function checkEntry(
     }
     for (const id of plan.complex) {
       const x = v[id];
+      if (typeof x === 'string') refuseStringEntry(plan.strings, id);
       const read = checkBindingEntries(plan.entries.get(id), x);
       if (read !== x) {
         lifted ??= { ...v };
@@ -5761,6 +5787,7 @@ export function checkEntry(
     // shape, so a narrower declaration is not enforced here.
     for (const id of plan.lists) {
       const x = v[id];
+      if (typeof x === 'string') refuseStringEntry(plan.strings, id);
       const read = checkBindingEntries(plan.entries.get(id), x);
       if (read !== x) {
         lifted ??= { ...v };
@@ -5778,6 +5805,7 @@ export function checkEntry(
   // free-symbol route above.
   for (const i of plan.real) {
     const x = argumentsList[i];
+    if (typeof x === 'string') refuseStringEntry(plan.strings, i);
     const read = checkBindingEntries(plan.entries.get(i), x);
     if (read !== x) {
       lifted ??= [...argumentsList];
@@ -5791,6 +5819,7 @@ export function checkEntry(
   }
   for (const i of plan.complex) {
     const x = argumentsList[i];
+    if (typeof x === 'string') refuseStringEntry(plan.strings, i);
     const read = checkBindingEntries(plan.entries.get(i), x);
     if (read !== x) {
       lifted ??= [...argumentsList];
@@ -5804,6 +5833,7 @@ export function checkEntry(
   // free-symbol route above.
   for (const i of plan.lists) {
     const x = argumentsList[i];
+    if (typeof x === 'string') refuseStringEntry(plan.strings, i);
     const read = checkBindingEntries(plan.entries.get(i), x);
     if (read !== x) {
       lifted ??= [...argumentsList];
@@ -5827,6 +5857,7 @@ export function storeEntryPlan(plan: EntryPlan): StoredEntryPlan {
     complex: [...plan.complex],
     lists: [...plan.lists],
     entries: [...plan.entries],
+    strings: [...plan.strings],
   };
 }
 
@@ -5834,6 +5865,8 @@ function restoreEntryPlan(stored: StoredEntryPlan): EntryPlan {
   return {
     ...stored,
     entries: new Map(stored.entries),
+    // A plan stored without the field refuses no string.
+    strings: new Map(stored.strings ?? []),
   } as EntryPlan;
 }
 

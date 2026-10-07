@@ -232,9 +232,9 @@ import {
   typeCompatibilityErrorValue,
 } from '../boxed-expression/type-compatibility-error.js';
 import {
-  isValueContainer,
   operatorDefinitionOf,
   shallowApplicationEffects,
+  valueContainerCells,
 } from '../boxed-expression/effects-of.js';
 import { hasDeclaredEffectLabel } from '../../common/type/effects.js';
 import {
@@ -267,6 +267,7 @@ import {
   isString,
   isCharacter,
   isAbsentValue,
+  isAbsentSymbol,
   sym,
 } from '../boxed-expression/type-guards.js';
 import {
@@ -1450,13 +1451,32 @@ function holdValuesShieldNames(spec: Expression): string[] {
  * Quoted content is inert. A lazy collection returned as a completed value
  * draws when it is materialized, so its body is skipped; beneath any other
  * surviving eager application, function bodies are scanned because that work
- * was expected to finish during the current evaluation.
+ * was expected to finish during the current evaluation. The cells of a
+ * literal container (a list, a tuple, a dictionary — `valueContainerCells`)
+ * keep the position of the container itself.
  */
 function hasPendingImpureApplication(
   expr: Expression,
   underEagerSurvivor = false
 ): boolean {
-  if (!isFunction(expr)) return false;
+  if (!isFunction(expr)) {
+    // A canonical dictionary is not an application, but it is a literal
+    // container: each of its values keeps the position of the dictionary.
+    // `{"a" -> ListFrom(Map(u ↦ Random(), Range(1, n)))}` with `n` unbound
+    // still owes its draws to the frame, while `{"a" -> Map(u ↦ Random(),
+    // xs)}` returns a lazy view that draws at materialization. A dictionary
+    // never invokes a value, so a `Function` literal stored in it is a
+    // completed value — the same rule as a non-invoking position below.
+    const cells = valueContainerCells(expr);
+    return (
+      cells !== undefined &&
+      cells.some(
+        (cell) =>
+          !isFunction(cell, 'Function') &&
+          hasPendingImpureApplication(cell, underEagerSurvivor)
+      )
+    );
+  }
   const h = expr.operator;
   const def = operatorDefinitionOf(expr);
   // A quote position is never evaluated by its operator, so nothing beneath it
@@ -1474,10 +1494,11 @@ function hasPendingImpureApplication(
   // Value position propagates through a lazy view and through the literal
   // containers; every other surviving application puts its whole subtree —
   // lambdas included — in eager-survivor position. The container set is the
-  // one `isValueContainer` defines, shared with the effect channel's
+  // one `valueContainerCells` defines, shared with the effect channel's
   // frame-escape classifier so the two readings of §2 cannot drift.
   const isValueNode =
-    !underEagerSurvivor && (expr.isLazyCollection || isValueContainer(expr));
+    !underEagerSurvivor &&
+    (expr.isLazyCollection || valueContainerCells(expr) !== undefined);
   const under = underEagerSurvivor || !isValueNode;
   // Mode 1, the LATENT half: a surviving application that INVOKES a
   // function-valued operand which draws (`Map(randomF, xs)` beneath an
@@ -1577,6 +1598,26 @@ function isText(op: Expression): boolean {
 }
 
 /**
+ * The error for an absent element (`Missing`, or `Undefined`, which a list
+ * types as a `missing` cell) that a text operator reads from a collection of
+ * text values: `StringJoin`'s operand, the `chars` set of `Trim`.
+ *
+ * Argument validation admits a collection typed `collection<string |
+ * missing>` at a `collection<string | character>` parameter (a `Map` over
+ * dictionary lookups is typed so, although every lookup may succeed), so the
+ * check that each element exists is made here, when the element is read. The
+ * error is the one a scalar absent operand of a text operator gets:
+ * `ToUpperCase(Missing)` is "expected `character | string`, got `missing`".
+ */
+function absentTextElementError(element: Expression): Expression {
+  return element.engine.typeError(
+    { kind: 'union', types: ['character', 'string'] },
+    'missing',
+    element
+  );
+}
+
+/**
  * The set of characters that `Trim`/`TrimStart`/`TrimEnd` strip, decoded from
  * the optional second operand.
  *
@@ -1589,10 +1630,12 @@ function isText(op: Expression): boolean {
  * - `undefined`: the operand is neither text nor a finite collection of text,
  *   so the caller leaves the expression unevaluated (the house rule for a
  *   non-string operand of a string operator).
+ * - an error: an element of the collection is absent, and the caller answers
+ *   this error (`absentTextElementError`).
  */
 function trimCharacterSet(
   chars: Expression | undefined
-): Set<string> | null | undefined {
+): Set<string> | null | undefined | Expression {
   if (chars === undefined) return null;
   if (isString(chars) || isCharacter(chars))
     return new Set(splitGraphemeClusters(chars.string));
@@ -1600,6 +1643,9 @@ function trimCharacterSet(
     return undefined;
   const set = new Set<string>();
   for (const c of chars.each()) {
+    // An absent element is an error that names it, which the caller returns
+    // — see `absentTextElementError`.
+    if (isAbsentSymbol(c)) return absentTextElementError(c);
     if (!isString(c) && !isCharacter(c)) return undefined;
     for (const g of splitGraphemeClusters(c.string)) set.add(g);
   }
@@ -8582,6 +8628,9 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           return undefined;
         const parts: string[] = [];
         for (const op of xs.each()) {
+          // An absent element is an error that names it — see
+          // `absentTextElementError`.
+          if (isAbsentSymbol(op)) return absentTextElementError(op);
           // A CHARACTER contributes its content just as a string does — the
           // elements of a string, and of `Characters(s)`, are characters, so
           // `StringJoin(Characters(s))` must round-trip.
@@ -8889,6 +8938,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         if (text === undefined) return undefined;
         const set = trimCharacterSet(chars);
         if (set === undefined) return undefined;
+        if (set !== null && !(set instanceof Set)) return set;
         return engine.string(trimClusters(text, set, true, true));
       },
     },
@@ -8908,6 +8958,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         if (text === undefined) return undefined;
         const set = trimCharacterSet(chars);
         if (set === undefined) return undefined;
+        if (set !== null && !(set instanceof Set)) return set;
         return engine.string(trimClusters(text, set, true, false));
       },
     },
@@ -8927,6 +8978,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         if (text === undefined) return undefined;
         const set = trimCharacterSet(chars);
         if (set === undefined) return undefined;
+        if (set !== null && !(set instanceof Set)) return set;
         return engine.string(trimClusters(text, set, false, true));
       },
     },

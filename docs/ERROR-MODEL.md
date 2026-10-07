@@ -592,6 +592,49 @@ arm are not compiled on either target, because `some`/`every` cannot answer
 `Missing`; the selecting operators need no refusal, since "not decidedly true"
 is "not selected" on both routes.
 
+**A collection whose elements may be absent is admitted where a collection of
+present values is expected** (user decision of 2026-10-07). A dictionary lookup
+or an index with a computed key is typed `T | missing`, so a `Map` over such
+reads is typed `list<T | missing>`, even when every element exists. One value
+typed `T | missing` is admitted at a parameter that expects `T`, and the
+operator checks the value at run time: with `xs = ["a", "b"]`,
+`ToUpperCase(xs[3])` is accepted when the call is boxed, and evaluates to the
+error "expected `character | string`, got `missing`". A collection of such
+values is now admitted in the same way. At a parameter whose type is a
+collection kind (list, set, collection, indexed collection, tuple, dictionary,
+record), an operand whose element types, tuple components, dictionary values or
+record fields have a `missing` member is admitted when the operand, with every
+`missing` member removed, fits the parameter. "Fits" is the test for any other
+collection operand: a subtype of the parameter, or not refuted by the deferred
+collection test. So `list<missing | string>` is admitted at
+`collection<character | string>` and at `list<string>`, `list<integer |
+missing>` at `collection<number>`, and a symbol declared
+`collection<string | missing>` at `collection<string | character>`, while
+`list<string>` is still refused at `collection<integer>`. The rule reads the
+type of the operand, not where the type came from. Two things do not change.
+The type lattice keeps its rule that a bare or element-typed collection holds
+values only: `list<missing | string>` is still not a subtype of
+`collection<string>`, and the admission is made by the argument validation
+alone (`absentElementsMatchParam`, `boxed-expression/validate.ts`). A
+collection that can hold nothing but absent elements, `list<missing>` (the type
+of `[Missing, Missing]`), is still refused, as a scalar operand typed `missing`
+alone is refused by a text operator. The transform is the strip of a scalar
+operand at a position that strips `missing` (`stripMissingFromType`, through
+`stripMissingFromElements` in `src/common/type/utils.ts`), so the scalar case
+and the collection case cannot give different types.
+
+At run time, the operator that reads an absent element decides, by the rules
+above and by its `missingBehavior`. A text operator answers the error a scalar
+absent operand gets, and the error names the element: `StringJoin(["a",
+Missing, "b"])` and `Trim("xax", ["x", Missing])` are "expected `character |
+string`, got `missing`" at `Missing` (an `Undefined` element is absent too,
+because a list types it as a `missing` cell). An aggregate answers `NaN` (rule
+B), a positional operator keeps the cell (rule A), and a selection skips it
+(rule D). In Epsil, `stringJoin(map(i => xs[i], [1, 2]), "")` is `"ab"` with no
+diagnostic, and with the indices `[1, 3]` the static check accepts the program
+and the run answers that error. The `??` operator at the element
+(`xs[i] ?? ""`) is still the way to supply a fallback instead.
+
 Because errors absorb *before* ordinary handlers run, an ordinary
 operator handler never receives an error operand and needs no error
 tests — laziness does not change that, since a lazy handler that demands

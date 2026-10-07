@@ -33,6 +33,7 @@ import {
   overlapsForDeferredValidation,
   resolveTypeAlias,
   stripMissingFromType,
+  stripMissingFromElements,
   signatureSlotType,
   staticCollectionDims,
   functionResult,
@@ -2140,6 +2141,10 @@ export function checkPure(
  * carrying a `missing` arm is admitted iff its stripped type still matches the
  * parameter. A Missing-free operand (`typeContainsMissing` false) is never
  * touched, so the lift is invisible to Missing-free programs.
+ *
+ * At any other position, only the ELEMENTS of a collection operand are
+ * stripped, and only at a collection-kind parameter — see
+ * {@link absentElementsMatchParam}.
  */
 function strippedMatchesParam(
   op: Expression,
@@ -2147,8 +2152,8 @@ function strippedMatchesParam(
   idx: number,
   stripMissing?: (index: number) => boolean
 ): boolean {
-  if (!stripMissing?.(idx)) return false;
   if (!op.type.facts.containsMissing) return false;
+  if (!stripMissing?.(idx)) return absentElementsMatchParam(op, param);
   const stripped = stripMissingFromType(op.type.type);
   if (stripped === 'never' || isSubtype(stripped, param)) return true;
   // A rank-free list of scalars whose length the VALUE knows is the vector
@@ -2168,6 +2173,40 @@ function strippedMatchesParam(
   const r = resolveTypeAlias(stripped);
   if (typeof r === 'string' || r.kind !== 'list') return false;
   return isSubtype({ ...r, dimensions: [count] }, param);
+}
+
+/**
+ * A collection whose elements may be absent is admitted at a collection-kind
+ * parameter when the collection, with the `missing` arm of its element type
+ * removed, fits the parameter.
+ *
+ * A dictionary lookup or an index with a computed key is typed `T | missing`,
+ * so a `Map` over such reads is typed `list<T | missing>` even when every
+ * element exists. One such value is admitted at a `T` parameter and checked
+ * when its value is known; this function gives the same treatment to a
+ * collection of them. With `xs = ["a", "b"]`,
+ * `StringJoin(Map(i => xs[i], [1, 2]))` is admitted although its operand is
+ * typed `list<missing | string>`, and with the indices `[1, 3]` the operator
+ * that reads the absent element answers at run time: `StringJoin` answers an
+ * `incompatible-type` error that names it, an aggregate such as `Sum` answers
+ * `NaN`. A collection DECLARED with a `missing` element type is admitted in
+ * the same way: the rule reads the type, not where the type came from.
+ *
+ * The strip is `stripMissingFromElements`, the same transform as the strip of
+ * a scalar operand at a stripped position. The stripped type is then tested
+ * like any other collection operand: it is admitted when it is a subtype of
+ * the parameter or when the deferred collection test
+ * (`overlapsForDeferredValidation`) admits it. A collection that can hold
+ * nothing but absent elements (`list<missing>`) is not admitted, as a scalar
+ * operand typed `missing` alone is not.
+ */
+function absentElementsMatchParam(op: Expression, param: Type): boolean {
+  if (!paramArms(param).some(isCollectionKindArm)) return false;
+  const stripped = stripMissingFromElements(op.type.type);
+  if (stripped === undefined) return false;
+  return (
+    isSubtype(stripped, param) || overlapsForDeferredValidation(stripped, param)
+  );
 }
 
 /**

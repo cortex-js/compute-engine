@@ -164,7 +164,29 @@ scalar there is not an error, because a declared type is routinely wider than
 the value a caller binds and several lowerings project on the runtime shape —
 a `list`-typed summand of an element-wise big operator bound to a number gives
 the scalar sum. A list-valued result always comes back as a fresh plain
-`Array`, never as a typed array and never aliasing caller data. Typed arrays
+`Array`, never as a typed array and never aliasing caller data.
+
+A string is the one value the entry refuses for a binding whose declared type
+is a list, an indexed collection or a `collection`, bare (`indexed_collection`)
+or with an element type (`list<number>`, `list<string>`). The engine reads a
+string as an indexed collection of its grapheme clusters, so the bare
+`indexed_collection` and `collection` types admit one, but the compiled code
+reads such a binding as an array and would read the string as UTF-16 code
+units: `Length(S)` of `"😀a"` would be 3, where the interpreter gives 2. The
+entry throws a `TypeError` that names the binding and its declared type
+instead (decided by the user, 2026-10-07). A string does not inhabit
+`list<string>`, `list<character>` or `list<list<string>>`, and the
+interpreter refuses it there too. A type alias is read as the type it names.
+Only a declared type is checked: on the function-literal route a parameter
+with a type annotation, on the expression route a symbol with a declaration.
+The type the engine infers for an undeclared symbol from its uses does not
+refuse a string. A type that a string inhabits through a text member is not
+affected: `string` itself is compiled as text, and a union with a string
+member (`string | list<number>`) does not compile and runs on the
+interpreter. `indexed_collection<character>` and `collection<character>` are
+an open case: a string inhabits them, the entry does not refuse it, and the
+compiled code still reads it as UTF-16 code units. The Python target binds its parameters as plain Python names and
+has no entry check, so it has no equivalent of this refusal. Typed arrays
 are not used inside the artifact: a typed pipeline measured no faster than the
 plain one on the witness that asked for it, so the container would add
 per-helper result-kind rules for no gain. The measurements and the decision

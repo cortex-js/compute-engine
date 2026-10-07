@@ -391,18 +391,39 @@ export function effectiveDischarge(
  *
  * VALUE POSITION propagates, exactly as it does in that walk: §2 states the
  * escape "stays a live-draw escape, whether the view is the result itself or a
- * cell of a returned `List`/`Tuple`" — so the literal containers
- * ({@link isValueContainer}, the one definition the walk reads too) are
- * traversed. A `Block`'s LAST statement is traversed for the same reason: it is
- * what the block returns. (The walk needs no `Block` case of its own — it runs
- * on an EVALUATED body, where a block has already collapsed to that statement;
- * this channel classifies the unevaluated shape.) Everything else is opaque and
- * keeps the discharge — positive proof, optimistic otherwise.
+ * cell of a returned list, tuple or dictionary" — so the cells of the literal
+ * containers ({@link valueContainerCells}, the one definition the walk reads
+ * too) are traversed. A `Block`'s LAST statement is traversed for the same
+ * reason: it is what the block returns. (The walk needs no `Block` case of its
+ * own — it runs on an EVALUATED body, where a block has already collapsed to
+ * that statement; this channel classifies the unevaluated shape.) Everything
+ * else is opaque and keeps the discharge — positive proof, optimistic
+ * otherwise.
+ *
+ * `seen` holds the answer for each node this call has already classified. A
+ * container can hold the same node in several cells, level after level, so
+ * the number of paths through the body can be exponential in its depth while
+ * the number of distinct nodes stays linear. Without the map, the walk visits
+ * every path. The map lives for one call only, so it needs none of the
+ * version stamps of the memos in this file: no binding can change during
+ * the call.
  */
-function escapesAsDrawingLazyView(expr: Expression): boolean {
-  if (!isFunction(expr)) return false;
+function escapesAsDrawingLazyView(
+  expr: Expression,
+  seen: Map<Expression, boolean> = new Map()
+): boolean {
+  const known = seen.get(expr);
+  if (known !== undefined) return known;
+  const result = escapesAsDrawingLazyViewUncached(expr, seen);
+  seen.set(expr, result);
+  return result;
+}
 
-  if (expr.isLazyCollection) {
+function escapesAsDrawingLazyViewUncached(
+  expr: Expression,
+  seen: Map<Expression, boolean>
+): boolean {
+  if (isFunction(expr) && expr.isLazyCollection) {
     // The per-element callback of an ordinary view.
     if (hasDeclaredEffectLabel(shallowApplicationEffects(expr), 'random'))
       return true;
@@ -416,29 +437,57 @@ function escapesAsDrawingLazyView(expr: Expression): boolean {
     );
   }
 
-  // Value position: the cells a literal container returns…
-  if (isValueContainer(expr)) return expr.ops.some(escapesAsDrawingLazyView);
+  // Value position: the cells a literal container returns (a canonical
+  // dictionary included, which is not an application)…
+  const cells = valueContainerCells(expr);
+  if (cells !== undefined)
+    return cells.some((cell) => escapesAsDrawingLazyView(cell, seen));
   // …and the statement a `Block` returns. The earlier statements are evaluated
   // UNDER the frame, so whatever they draw is owed to it.
   if (isFunction(expr, 'Block'))
-    return escapesAsDrawingLazyView(expr.ops[expr.ops.length - 1]);
+    return escapesAsDrawingLazyView(expr.ops[expr.ops.length - 1], seen);
 
   return false;
 }
 
 /**
- * True when `expr` is a literal CONTAINER — an application that merely holds
- * its operands, so a value in one of its cells is in value position and a lazy
- * view there escapes with it (`docs/RANDOMNESS-MODEL.md` §2: "whether the view
- * is the result itself or a cell of a returned `List`/`Tuple`").
+ * The cells of `expr` when it is a literal CONTAINER, `undefined` otherwise.
+ * A container merely holds its cells, so a value in a cell is in value
+ * position and a lazy view there escapes with it (`docs/RANDOMNESS-MODEL.md`
+ * §2: "whether the view is the result itself or a cell of a returned list,
+ * tuple or dictionary"). A container never invokes a function-valued cell.
+ *
+ * The containers are:
+ *
+ * - the applications `List`, `Tuple`, and the `Pair` and `Triple` spellings
+ *   of a tuple that a raw or structural expression keeps: the cells are the
+ *   operands;
+ * - a canonical dictionary (a `BoxedDictionary`, not an application): the
+ *   cells are its values, read through the same accessor as
+ *   {@link dictionaryEffects}. Its keys are strings and hold nothing;
+ * - the raw or structural dictionary application `Dictionary(KeyValuePair(key,
+ *   value), …)` and each `KeyValuePair` in it: the cells are the operands, so
+ *   the walk reaches each value through its pair.
  *
  * The single definition of that set: the pending-draw walk of `library/core.ts`
  * reads it too, so the two cannot drift.
  */
-export function isValueContainer(expr: Expression): boolean {
-  if (!isFunction(expr)) return false;
+export function valueContainerCells(
+  expr: Expression
+): readonly Expression[] | undefined {
+  if (isDictionary(expr)) return expr.values;
+  if (!isFunction(expr)) return undefined;
   const h = expr.operator;
-  return h === 'List' || h === 'Tuple' || h === 'Pair';
+  if (
+    h === 'List' ||
+    h === 'Tuple' ||
+    h === 'Pair' ||
+    h === 'Triple' ||
+    h === 'Dictionary' ||
+    h === 'KeyValuePair'
+  )
+    return expr.ops;
+  return undefined;
 }
 
 /**

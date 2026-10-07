@@ -31586,9 +31586,18 @@ export class BaseCompiler {
       | boolean
       | ComplexResult
       | CompiledColor
+      | string
       | unknown[]
       | undefined => {
       if (isAbsentValue(e)) return absentRunValue(t, undefined);
+      // A string is a JS string, as compiled code answers it. It is tested
+      // before the collection rule below: a string is an indexed collection
+      // of its grapheme clusters, which that rule read as an array of `NaN`.
+      // A character (`isString` is false for it) is also a JS string, as
+      // compiled code answers it: without this test the scalar rule below
+      // read it as `NaN`. The same test serves a character cell of a list,
+      // since the collection rule calls this function for each cell.
+      if (isString(e) || isCharacter(e)) return e.string;
       // A COLOR node keeps its space. The interpreter answers a color as a
       // typed head — `Rgb(r, g, b)`, `Hsv(h, s, v)`, … — and the compiled
       // runtime's color value carries the same three channels plus the space
@@ -31663,6 +31672,10 @@ export class BaseCompiler {
     // compiled runtime give a bare array.
     const boxArg = (v: unknown, type?: Type): Expression => {
       if (isComplexArg(v)) return ce.number(ce.complex(v.re, v.im));
+      // A JS string is a string VALUE. `ce.expr` reads a string as MathJSON,
+      // where `"abc"` is the SYMBOL `abc`, so the interpreter read a text
+      // argument as an unknown symbol.
+      if (typeof v === 'string') return ce.string(v);
       // A color VALUE boxes to the typed head that names its space, with its
       // channels as operands and its alpha as a fourth. Without this the
       // object reached `ce.expr` as MathJSON and boxed to an error, so a
@@ -31791,7 +31804,8 @@ export class BaseCompiler {
             // The shadow's type is the value's RUNTIME shape: a `{re, im}`
             // object is a complex number (declaring it `number` would reject
             // the assignment and run the expression against an unbound
-            // symbol), a number is a number.
+            // symbol), a string is a string, a boolean a boolean, and a
+            // number is a number.
             if (isComplexArg(v)) {
               ce.declare(k, 'complex');
               ce.assign(k, ce.number(ce.complex(v.re, v.im)));
@@ -31810,6 +31824,16 @@ export class BaseCompiler {
               const boxed = boxArg(v, declaredTypeOf(k));
               ce.declare(k, boxed.type.type);
               ce.assign(k, boxed);
+            } else if (typeof v === 'string') {
+              // A string argument is a string. Declaring it `number` below
+              // rejected the assignment, and a string that is a valid
+              // identifier was read as a symbol.
+              ce.declare(k, 'string');
+              ce.assign(k, ce.string(v));
+            } else if (typeof v === 'boolean') {
+              // A boolean argument is a boolean, which `number` rejects too.
+              ce.declare(k, 'boolean');
+              ce.assign(k, v ? ce.True : ce.False);
             } else {
               ce.declare(k, 'number');
               ce.assign(k, v as number);

@@ -1325,6 +1325,68 @@ export function stripMissingFromType(
 }
 
 /**
+ * The ELEMENT strip: `t` with every `missing` arm removed, for an operand that
+ * holds a collection whose elements may be absent (`list<string | missing>`,
+ * `set<integer | missing>`, a tuple with a `missing` component, a dictionary
+ * whose values may be `missing`). Argument validation uses it at a
+ * collection-kind parameter: such an operand is admitted where the stripped
+ * type fits, and the operator that reads an absent element decides at run
+ * time, in the same way that a scalar `T | missing` operand is admitted at a
+ * `T` parameter and checked when its value is known. The transform is
+ * {@link stripMissingFromType}, so the element strip and the strip of a scalar
+ * operand cannot give different types.
+ *
+ * Returns `undefined`, and the ordinary rules decide, in two cases:
+ *
+ * - No `missing` member sits inside a collection: the type has no `missing`
+ *   at all, or only a top-level `missing` arm (`missing | list<string>`),
+ *   which is the scalar case.
+ * - A cell can hold nothing but an absent value: an element type, a tuple
+ *   component, a dictionary value or a record field that is `missing` alone
+ *   (`list<missing>`, the type of `[Missing, Missing]`). A call with such an
+ *   operand fails whenever it reads a cell, as a scalar operand typed
+ *   `missing` alone fails at a `string` parameter.
+ */
+export function stripMissingFromElements(t: Readonly<Type>): Type | undefined {
+  const arms = typeof t !== 'string' && t.kind === 'union' ? t.types : [t];
+  if (!arms.some((arm) => arm !== 'missing' && typeContainsMissing(arm)))
+    return undefined;
+  if (hasAbsentOnlyCell(t)) return undefined;
+  const stripped = stripMissingFromType(t);
+  return stripped === 'never' ? undefined : stripped;
+}
+
+/** True when a cell of `t` (an element type, a tuple component, a dictionary
+ * value or a record field, at any depth) is `missing` and nothing else. */
+function hasAbsentOnlyCell(t: Readonly<Type>): boolean {
+  const absentOnly = (x: Readonly<Type>): boolean =>
+    typeContainsMissing(x) && stripMissingFromType(x) === 'never';
+  const cell = (x: Readonly<Type>): boolean =>
+    absentOnly(x) || hasAbsentOnlyCell(x);
+  if (typeof t === 'string') return false;
+  switch (t.kind) {
+    case 'union':
+    case 'intersection':
+      return t.types.some(hasAbsentOnlyCell);
+    case 'list':
+    case 'set':
+    case 'collection':
+    case 'indexed_collection':
+    case 'broadcastable':
+      return cell(t.elements);
+    case 'tuple':
+      return t.elements.some((e) => cell(e.type));
+    case 'dictionary':
+      return cell(t.values);
+    case 'record':
+    case 'object':
+      return Object.values(t.elements).some((x) => cell(x));
+    default:
+      return false;
+  }
+}
+
+/**
  * Is `t` a type whose `missing` arm sits on a NUMERIC base (`number | missing`,
  * `integer | missing`, …)? Such a slot's absence representation is `NaN`, not
  * the `Missing` symbol (I6 domain normalization) — comparisons read it as `NaN`

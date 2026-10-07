@@ -109,53 +109,50 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
-### A lazy drawing collection stored in a dictionary is not seen as escaping its seed frame (OPEN, small — found 2026-10-06 by the effects work for the Epsil program corpus)
+### Compiled code over a text-typed collection parameter counts code units (OPEN, small — found 2026-10-07 by the compiled-entry string refusal)
 
-`escapesAsDrawingLazyView` (`boxed-expression/effects-of.ts`) decides whether
-a lazy collection that draws random numbers leaves a `WithRandomSeed` frame
-before it is enumerated. Its helper `isValueContainer` lists `List`, `Tuple`
-and `Pair` as containers whose cells are in value position, but not a
-dictionary. So `WithRandomSeed(42, {"a" -> Map(x ↦ Random(), xs)})` is
-treated as not escaping, and the seed frame is said to discharge the draws.
-The rule is optimistic by design (`docs/RANDOMNESS-MODEL.md` §2 names only
-`List` and `Tuple` cells). `isValueContainer` is shared with the pending-draw
-walk in `library/core.ts`, which reads `.ops`, and a canonical dictionary has
-none, so both channels and the §2 text must change together.
+The compiled entry refuses a string for a parameter whose declared type does
+not admit a string (a bare collection, a collection of numbers, `list<string>`,
+`list<character>`). Two cases remain. (1) `S: indexed_collection<character>`
+or `collection<character>` with the argument `"😀a"`: a string is exactly
+that type, so refusing it would be wrong, yet compiled `Length(S)` is 3 (the
+interpreter gives 2) and `Drop(S, 1)` is a broken half of the emoji; the
+lowerings should fail closed at compile time for these types, as they do for
+a `string | …` union. (2) An UNDECLARED symbol whose collection type is
+inferred from its uses (`Drop(S, 1)` infers `indexed_collection<unknown>`)
+is not refused, by the ruling that only a declared type is a contract of the
+caller, so compiled `Drop(S, 1)` of `"😀a"` still gives the broken half.
+Decision needed for (2): make the compiled code fail closed for a string when
+the type is only inferred, or keep the declared-only rule. The Python target
+has no entry check at all (`compileFunction` emits a plain `def`), and
+Python's `len` counts code points, so it disagrees with the interpreter on
+any string.
 
-### Compiled code for a parameter declared `indexed_collection` treats a string argument as an array (OPEN, design decision — found 2026-10-06 by the review of the overload result join; present before)
+### `subs()` does not reach into a canonical dictionary (OPEN, small — found 2026-10-07 by the dictionary seed-frame work)
 
-With `S` declared bare `indexed_collection`, `compile(Length(Drop(S, 1)))`
-succeeds and the JavaScript lowering uses `.slice(1)` and `.length`. The
-compiled entry accepts a string argument for `S`, so `S = "😀a"` gives 2 where
-the interpreter gives 1 (a string is a collection of grapheme clusters, and
-the lowering counts UTF-16 code units). `Drop(S, 1)` on the same input gives
-a broken half of the emoji. The result join types `Drop(S, 1)` as
-`list<unknown> | string`, which the compiler's string guard would have read
-as evidence and failed closed on; the guard now reads the evidence at the
-subject (`stringEvidenceSource`, `compilation/base-compiler.ts`), which keeps
-the behavior that existed before the join and that
-`compile-numeric-selection-fusion.test.ts` pins ("a carrier declared
-indexed_collection fuses"). Decision needed: the compiled entry refuses a
-string argument for a parameter declared with a bare collection type (a
-run-time type error, since the lowering is an array lowering), or the compile
-declines such a parameter when a string-preserving operator is applied to it,
-or the current optimistic behavior is kept and documented in
-`docs/COMPILATION-MODEL.md`.
+`BoxedDictionary` inherits the base `subs()`, which returns the receiver:
+`{"a" -> n + 1}.subs({n: 3})` is `{"a" -> n + 1}`, while the list form
+`[n + 1].subs({n: 3})` gives `[4]`. A dictionary that kept its seed frame for
+an owed draw cannot be completed by `subs`; `ce.assign` works. Fix in
+`boxed-expression/boxed-dictionary.ts`: substitute in every value.
 
-### A collection of possibly absent elements is refused by a typed collection parameter (OPEN, design decision — found 2026-10-06 by the Epsil program corpus)
+### A lambda value in a dictionary serializes with a trailing `;` and does not parse back (OPEN, small — found 2026-10-07 by the dictionary seed-frame work)
 
-A dictionary lookup or an index with a computed key has the type
-`T | missing`. A scalar of that type is admitted by a parameter that expects
-`T` (the absence is handled at run time), but a COLLECTION of such elements is
-refused: with `xs = ["a", "b"]`, `stringJoin(map(i => xs[i], [1, 2]), "")` is
-a static error, "expected `collection<character | string>`, got
-`list<missing | string^2>`", although every element is present. The program
-`toRna(dna) = stringJoin(map(c => complement[c], characters(dna)), "")` of
-`exercism/rna-transcription` is refused for this reason; `complement[c] ?? "?"`
-is accepted. Decision needed: admit a collection whose element type is
-`T | missing` where `collection<T>` is expected, with the same run-time
-handling of an absent element as the scalar case (recommended), or keep the
-refusal and require the `??` at the element.
+`{"a" -> u ↦ u + 1}` serializes to LaTeX as
+`\operatorname{Dictionary}(\operatorname{KeyValuePair}(\text{a}, u\mapsto u+1;))`,
+and parsing that gives an `incompatible-type` error. The same lambda inside a
+`Tuple` or a raw `KeyValuePair` prints without the `;`; the difference is in
+how the dictionary serializes a `Function` whose body is a `Block`.
+
+### `Map` with a lambda keeps an absent element where the direct form reports an error (OPEN, small — found 2026-10-07 by the admission of collections of possibly absent elements)
+
+`Map(x ↦ ToUpperCase(x), ["a", Missing, "b"])` gives `["A", Missing, "B"]`
+and is typed `list<string>`, while `Map(ToUpperCase, ["a", Missing, "b"])`
+and `Apply(x ↦ ToUpperCase(x), Missing)` give the `incompatible-type` error
+for the absent element. The result type claims no absence while the value
+holds one, and the two spellings of the same call disagree. The difference
+is in how `Map` applies a lambda to each element (`library/collections.ts`)
+versus how it applies a named operator. Present before the admission change.
 
 ### Static type of a zipped tuple component inside a loop (OPEN, small — found 2026-10-06 by the Epsil program corpus)
 

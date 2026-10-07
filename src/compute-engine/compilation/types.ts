@@ -2033,8 +2033,11 @@ export interface CompilationOptions<Expr = unknown> {
   /**
    * Whether the JavaScript runner performs the D3 ENTRY CHECK on each call
    * (default `true`): a `{re, im}` value bound to a free symbol or lambda
-   * parameter the compilation shaped REAL throws a `TypeError` naming it, and
-   * a plain number bound to a `complex`-typed one is lifted to `{re, im: 0}`.
+   * parameter the compilation shaped REAL throws a `TypeError` naming it, a
+   * plain number bound to a `complex`-typed one is lifted to `{re, im: 0}`,
+   * and a string bound to one declared with a list or collection type whose
+   * elements are not text (`indexed_collection`, `list<number>`) throws a
+   * `TypeError` naming it, because the compiled code reads it as an array.
    * One `typeof` per checked binding per call — which is one READ of each
    * checked free symbol on the vars object, whether or not the compiled code
    * would read it on that call (a getter-backed vars object sees the read).
@@ -2472,6 +2475,11 @@ export type StoredEntryPlan = {
     string | number,
     { numbers: boolean; depth: number; label: string },
   ][];
+  /** The bindings that refuse a string argument, each with the label of the
+   * binding and its declared type that the error message shows. A binding
+   * is here when its declared type is a collection type that compiled code
+   * reads as an array and whose elements are not text. */
+  strings?: [string | number, string][];
 };
 
 /**

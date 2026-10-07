@@ -84,6 +84,39 @@
 
 ### Behavior Changes
 
+- **Compiled code refuses a string for a parameter declared as a collection.**
+  A parameter declared with a bare collection type (`indexed_collection`,
+  `collection`, `list`) or a collection of non-text elements (`list<number>`)
+  is compiled as a JavaScript array. The declared type also admits a string,
+  and the compiled function accepted one and read it as UTF-16 code units:
+  with `S: indexed_collection`, compiled `Length(Drop(S, 1))` gave 2 for
+  `"😀a"` where the interpreter gives 1. The compiled entry now throws a
+  `TypeError` that names the parameter and says that compiled code does not
+  accept a string for it; `entryChecks: false` turns the check off with the
+  others. The same applies to `list<string>` and `list<character>`, which a
+  string does not inhabit, and to a user-declared alias of such a type. Only a
+  declared type is checked: a symbol whose collection type was inferred from
+  its uses is not refused. A parameter whose declared type admits a string
+  (`string`, `indexed_collection<character>`) is not affected. The interpreter fallback of a program that did not compile now
+  passes a string or a boolean argument through as that value (a string was
+  read as a symbol name, a boolean was refused as "not a number") and returns
+  a string result as a string (it returned an array of `NaN`).
+
+- **A collection whose elements may be absent is accepted where a collection
+  of values is expected.** A lookup with a computed key is typed `T | missing`,
+  and a list of such lookups was refused before anything ran:
+  `StringJoin(Map(i ↦ xs[i], [1, 2]), "")` was "expected
+  `collection<character | string>`, got `list<missing | string>`", although
+  every element existed. Such a collection is now accepted, as the single
+  value already was, and an absent element is decided when the program runs:
+  `StringJoin` and the character set of `Trim` report an `incompatible-type`
+  error naming the absent element; the other collection operators keep their
+  documented absence behavior (`Sum` of an absent element is `NaN`, `Filter`
+  skips it, `Length` counts it). In Epsil,
+  `stringJoin(map(c => complement[c], characters(dna)), "")` runs. A
+  collection whose cells can only be absent (`list<missing>`) is still
+  refused.
+
 - **A function whose local variable is read by a lambda needs no `scope`
   effect.** Effect inference treated any local that a nested function
   mentions as escaping, so a function that fills a local in a loop and then
@@ -250,6 +283,17 @@
 
 
 ### Issues Resolved
+
+- **A lazy random collection held in a dictionary now keeps its seed.** A
+  `WithRandomSeed` frame recognizes a lazy collection that draws random
+  numbers when it is returned directly or as a cell of a list or a tuple. A
+  dictionary value was not recognized: `WithRandomSeed(42, {"a" ->
+  ListFrom(Map(u ↦ Random(), Range(1, n)))})` with `n` still unbound dropped
+  the frame, so the draws owed to the seed became live, unseeded draws, and
+  `WithRandomSeed(42, {"a" -> Map(u ↦ Random(), xs)})` was reported pure. A
+  dictionary is now a value container for both checks, as a list is, and a
+  structure that holds the same node many times is classified in linear
+  time.
 
 - **A prime on a compound operand is fenced, and the Unicode letters ℕ ℤ ℚ ℝ ℂ
   are number sets**

@@ -116,13 +116,24 @@ that did complete and yields exactly the single-evaluation stream —
 Two shapes are **completed values**, not pending draws, and do strip the
 frame: a lazy view whose lambda draws at materialization (the §6 ruling — the
 escape stays a live-draw escape, whether the view is the result itself or a
-cell of a returned `List`/`Tuple`; a view that BINDS its own variables, such
-as a `Comprehension`, counts here too — its body is the lambda, spelled
-without a `Function` node), and `Hold` content (inert until
+cell of a returned list, tuple or dictionary; a view that BINDS its own
+variables, such as a `Comprehension`, counts here too — its body is the
+lambda, spelled without a `Function` node), and `Hold` content (inert until
 `Release`, under whatever frame is active then). A lazy view beneath a
 **surviving eager consumer** (`ListFrom(Map(x ↦ Random(), range))` whose
 length has not resolved) is the opposite case: the materialization was asked
-for *inside* the frame, so its draws are owed and the frame is kept. A body
+for *inside* the frame, so its draws are owed and the frame is kept.
+
+The cells of a dictionary are its values, so the two cases apply to a value
+exactly as to a list cell. `WithRandomSeed(42, {"a" -> Map(x ↦ Random(),
+xs)})` strips the frame and reports the `random` effect, the same as
+`WithRandomSeed(42, [Map(x ↦ Random(), xs)])`. A dictionary value that holds
+`ListFrom(Map(x ↦ Random(), Range(1, n)))` with `n` unbound keeps the frame,
+and the kept expression replays the same draws as the list form once `n` is
+bound. This applies to the dictionary value and to the raw
+`Dictionary(KeyValuePair(key, value), …)` form. A function value stored in a
+dictionary is not invoked by the dictionary, so it is a completed value, as
+in a list. A body
 that evaluates to a structured error passes the error through (§5: an error
 consumed zero draws), rather than hiding it behind an inert wrapper.
 

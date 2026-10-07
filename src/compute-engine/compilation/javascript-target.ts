@@ -54,6 +54,7 @@ import {
 import {
   functionLiteralBoundNames,
   functionLiteralParameterName,
+  functionLiteralParameterType,
 } from '../boxed-expression/function-literal.js';
 import {
   provableApplicationKind,
@@ -9448,18 +9449,96 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
  * declared type: a union such as `number | list<number>` admits a scalar, so
  * it is not a list binding.
  *
- * A type that a STRING inhabits is excluded, because a string is a legitimate
- * caller value there and the string lowerings read it as a string, not as an
- * array of numbers. Two types are excluded for this reason: `string` itself,
- * and the bare `indexed_collection` (a string is an indexed collection of its
+ * A type that a STRING inhabits is excluded. Two types are excluded for this
+ * reason: `string` itself, whose lowerings read the value as text, and the
+ * bare `indexed_collection` (a string is an indexed collection of its
  * grapheme clusters in the type lattice). `indexed_collection<number>` and
  * every `list<...>` keep the check — no string inhabits them.
+ *
+ * The bare `indexed_collection` refuses a string at entry all the same
+ * (`stringRefusedEntryType`), because the compiled code reads it as an
+ * array. It stays out of this class because the class also decides the
+ * real/complex rule of the binding, and the refusal of a string does not
+ * need that rule to change.
  */
 function isListEntryType(t: Type): boolean {
   if (isSubtype('string', t)) return false;
   return (
     isSubtype(t, 'list<any>') || isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE)
   );
+}
+
+/**
+ * True when a binding declared with the type `t` refuses a string argument at
+ * entry (the `strings` set of the entry plan).
+ *
+ * The compiled code reads a value of a collection type as a JavaScript array
+ * (a `collection` value may also be a `Set`). The engine reads a string as an
+ * indexed collection of its grapheme clusters, so the bare
+ * `indexed_collection` and the bare `collection` admit a string, but the
+ * compiled code would read it as an array of UTF-16 code units: `Length` of
+ * `"😀a"` gives 3 where the interpreter gives 2, and `Drop(S, 1)` keeps half
+ * of the emoji. A string is therefore refused for every type of which each
+ * member is a list, an indexed collection (a tuple, a vector, a matrix are
+ * included) or a `collection`, bare or with an element type. The bare
+ * `collection` follows the same rule as the bare `indexed_collection`: its
+ * lowerings read an array or a `Set`, never text.
+ *
+ * A collection whose elements are text is refused too when a string does not
+ * inhabit it: the interpreter refuses a string for `list<string>`,
+ * `list<character>` or `list<list<string>>`, so the refusal agrees with it.
+ *
+ * A type that a string inhabits through a member other than a bare
+ * collection is not affected: `string` itself, and a union with a text
+ * member (`string | list<number>`, whose lowerings fail closed at compile
+ * time). `indexed_collection<character>` and `collection<character>` are
+ * not affected either, and stay an open case: a string inhabits them, and
+ * the compiled code still reads it as an array of UTF-16 code units.
+ *
+ * A transparent alias is read as the type it names, and a nominal type as
+ * the layout of its definition: `type seq = indexed_collection` refuses a
+ * string as `indexed_collection` does.
+ */
+function stringRefusedEntryType(t: Type): boolean {
+  if (admitsStringAsText(t)) return false;
+  return isArrayLoweredCollectionType(t);
+}
+
+/** True when each member of `t` is a list, an indexed collection or a
+ * `collection` (see `stringRefusedEntryType`). A type reference is read as
+ * the layout of its definition. */
+function isArrayLoweredCollectionType(t: Type): boolean {
+  t = resolveTypeForCompilation(t);
+  if (typeof t !== 'string' && t.kind === 'union')
+    return t.types.every(isArrayLoweredCollectionType);
+  if (t === 'collection' || (typeof t !== 'string' && t.kind === 'collection'))
+    return true;
+  return (
+    isSubtype(t, 'list<any>') || isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE)
+  );
+}
+
+/** True when a string inhabits `t` through a member that is not a bare
+ * collection (see `stringRefusedEntryType`). A bare collection is
+ * `indexed_collection` or `collection` with no element type, or with an
+ * element type that admits every value (`any`, `unknown`, `value`): a string
+ * inhabits it, but the compiled code reads it as an array, so it is refused.
+ * A transparent alias is unfolded; a nominal reference is not, and a string
+ * does not inhabit it. */
+function admitsStringAsText(t: Type): boolean {
+  t = resolveTypeAlias(t);
+  if (typeof t !== 'string' && t.kind === 'union')
+    return t.types.some(admitsStringAsText);
+  if (!isSubtype('string', t)) return false;
+  if (t === 'indexed_collection' || t === 'collection') return false;
+  if (
+    typeof t !== 'string' &&
+    (t.kind === 'indexed_collection' || t.kind === 'collection')
+  ) {
+    const elt = collectionElementType(t);
+    return elt !== undefined && !isSubtype('value', elt);
+  }
+  return true;
 }
 
 /**
@@ -9567,29 +9646,24 @@ function lambdaEntryPlan(
   const complex: number[] = [];
   const lists: number[] = [];
   const entries = new Map<number, RealEntryCheck>();
+  const strings = new Map<number, string>();
   literalParams.forEach((p, i) => {
-    let t: Type | undefined;
-    if (isFunction(p, 'Typed')) {
-      const src = p.ops[1];
-      const text = isString(src)
-        ? src.string
-        : isSymbol(src)
-          ? src.symbol
-          : undefined;
-      if (text !== undefined) {
-        try {
-          t = parseType(text);
-        } catch {
-          t = undefined;
-        }
-      }
-    }
+    // The shared accessor reads a user-declared type name too (with the
+    // engine's type resolver), not only a built-in type.
+    const t = functionLiteralParameterType(p);
     const checkType = t ?? (isSymbol(p) ? p.type.type : undefined);
     const check =
       checkType === undefined
         ? undefined
         : realEntryCheckOf(checkType, mode === 'complex', `argument ${i + 1}`);
     if (check !== undefined) entries.set(i, check);
+    // Only an annotation refuses a string: the type the engine infers for an
+    // unannotated parameter from its uses is not a declaration by the caller.
+    if (t !== undefined && stringRefusedEntryType(t))
+      strings.set(
+        i,
+        `argument ${i + 1} (type \`${BaseCompiler.declaredTypeText(t)}\`)`
+      );
     if (t !== undefined && isListEntryType(t)) {
       lists.push(i);
       return;
@@ -9603,7 +9677,7 @@ function lambdaEntryPlan(
         : mode === 'complex';
     (isComplex ? complex : real).push(i);
   });
-  return { kind: 'args', real, complex, lists, entries };
+  return { kind: 'args', real, complex, lists, entries, strings };
 }
 
 /**
@@ -9624,6 +9698,7 @@ function varsEntryPlan(
   const complex: string[] = [];
   const lists: string[] = [];
   const entries = new Map<string, RealEntryCheck>();
+  const strings = new Map<string, string>();
   for (const id of refs) {
     const sym = engine.symbol(id);
     // A symbol whose declared type proves an array is classed as a list
@@ -9635,6 +9710,18 @@ function varsEntryPlan(
         ? undefined
         : realEntryCheckOf(declared, mode === 'complex', `"${id}"`);
     if (check !== undefined) entries.set(id, check);
+    // Only a declared type refuses a string: the type the engine inferred
+    // for an undeclared symbol from its uses is not a declaration by the
+    // caller (the same rule as the lambda route above).
+    if (
+      declared !== undefined &&
+      sym.valueDefinition?.inferredType !== true &&
+      stringRefusedEntryType(declared)
+    )
+      strings.set(
+        id,
+        `"${id}" (type \`${BaseCompiler.declaredTypeText(declared)}\`)`
+      );
     if (declared !== undefined && isListEntryType(declared)) {
       lists.push(id);
       continue;
@@ -9646,7 +9733,7 @@ function varsEntryPlan(
       (mode === 'complex' && BaseCompiler.wideNumericType(sym.type?.type));
     (isComplex ? complex : real).push(id);
   }
-  return { kind: 'vars', real, complex, lists, entries };
+  return { kind: 'vars', real, complex, lists, entries, strings };
 }
 
 function compileToTarget(
