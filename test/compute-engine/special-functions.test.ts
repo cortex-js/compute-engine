@@ -2041,6 +2041,166 @@ describe('INCOMPLETE ELLIPTIC INTEGRALS', () => {
   });
 });
 
+describe('COMPLEX-PARAMETER EllipticPi (#422)', () => {
+  // Reference values from mpmath 1.4 (`ellippi`, 20 digits). Outside the
+  // argument configurations where the Carlson duplication theorem is known
+  // to be valid (Re m > 1, or a characteristic n > 1), `carlsonRJComplex`
+  // integrates the first part of the defining integral numerically along a
+  // segment that leaves the real axis, as mpmath does, and these inputs all
+  // take that route. They answered `ComplexInfinity` before.
+  const expectComplex = (expr: any, re: number, im: number, tol = 1e-13) => {
+    const v = expr.N();
+    const scale = Math.hypot(re, im) * tol;
+    expect(Math.abs(v.re - re)).toBeLessThan(scale);
+    expect(Math.abs(v.im - im)).toBeLessThan(scale);
+  };
+  const z = (re: number, im: number): any => ['Complex', re, im];
+
+  test('Π(2 | π/2 + 10⁻⁶i): a pole of the integrand next to the path', () =>
+    // The characteristic n = 2 puts a pole on the real axis at a distance
+    // of 2.5·10⁻⁷ from the integration segment; `carlsonRJComplex`
+    // subtracts it analytically.
+    expectComplex(
+      ce.expr(['EllipticPi', 2, z(1.5707963267948966, 1e-6)]),
+      -0.75756177117795986781,
+      -6.1635025009534055746,
+      1e-12
+    ));
+
+  test('Π(2 | 10¹⁰ + i): a pole next to a long path', () =>
+    expectComplex(
+      ce.expr(['EllipticPi', 2, z(1e10, 1)]),
+      0.0000379223779682521189804345118539,
+      0.000116527693470328035527012744283,
+      1e-12
+    ));
+
+  test('Π(2 ± 10⁻¹⁴i | 0.3): a nearly real characteristic above 1', () => {
+    // The pole of the integrand is 5·10⁻¹⁵ from the integration segment;
+    // `carlsonRJComplex` subtracts it with the branch of the segment. The
+    // two sides of the real axis give conjugate values.
+    expectComplex(
+      ce.expr(['EllipticPi', z(2, 1e-14), 0.3]),
+      -0.15182298474780313919,
+      1.703767831557402738,
+      1e-12
+    );
+    expectComplex(
+      ce.expr(['EllipticPi', z(2, -1e-14), 0.3]),
+      -0.15182298474780313911,
+      -1.703767831557402738,
+      1e-12
+    );
+  });
+
+  test('Π(3 + 10⁻¹³i | 0.5 + 0.5i): a nearly real characteristic, complex m', () =>
+    expectComplex(
+      ce.expr(['EllipticPi', z(3, 1e-13), z(0.5, 0.5)]),
+      -0.20145133647151367048,
+      0.97331309791034633492,
+      1e-12
+    ));
+
+  test('Π(2 + 10⁻⁹i | π/2 + 10⁻⁶i): the pole off the axis, a small margin', () =>
+    expectComplex(
+      ce.expr(['EllipticPi', z(2, 1e-9), z(1.5707963267948966, 1e-6)]),
+      -0.75756967132176009968,
+      0.61811288592922070776,
+      1e-12
+    ));
+
+  test('Π(2 | −5 ± 10⁻⁸i): the two sides of the real axis', () => {
+    expectComplex(
+      ce.expr(['EllipticPi', 2, z(-5, 1e-8)]),
+      0.370886146862066717991485725257,
+      -0.839625954253366675842101201031
+    );
+    expectComplex(
+      ce.expr(['EllipticPi', 2, z(-5, -1e-8)]),
+      0.370886145662601069160975716368,
+      -0.839625954109347302324988353084
+    );
+  });
+
+  test('Π(0.5 | 1.2 + 0.5i): Re m > 1', () =>
+    expectComplex(
+      ce.expr(['EllipticPi', 0.5, z(1.2, 0.5)]),
+      2.4222884856310676535,
+      1.4397130015184150915
+    ));
+
+  test('Π(0.3 | −2 + i)', () =>
+    expectComplex(
+      ce.expr(['EllipticPi', 0.3, z(-2, 1)]),
+      1.3405995116625893975,
+      0.13255942378466497872
+    ));
+
+  test('Π(1 + i | 0.3): a complex characteristic', () =>
+    expectComplex(
+      ce.expr(['EllipticPi', z(1, 1), 0.3]),
+      1.1660193503749007285,
+      1.2553187211387750345
+    ));
+
+  test('Π(−3 + 2i | 0.5 − 0.5i)', () =>
+    expectComplex(
+      ce.expr(['EllipticPi', z(-3, 2), z(0.5, -0.5)]),
+      0.79908733973142223574,
+      0.09939382029527715183
+    ));
+
+  test('Π(3 | 0.5 + 0.5i): a real characteristic above 1', () =>
+    expectComplex(
+      ce.expr(['EllipticPi', 3, z(0.5, 0.5)]),
+      0.03599704988153406972,
+      -1.4246827893404509107
+    ));
+
+  test('Π(0.5 | 2 ± 10⁻⁹i) are conjugates (Schwarz reflection)', () => {
+    expectComplex(
+      ce.expr(['EllipticPi', 0.5, z(2, 1e-9)]),
+      1.5327383495309688618,
+      2.1041333950576347747,
+      1e-11
+    );
+    expectComplex(
+      ce.expr(['EllipticPi', 0.5, z(2, -1e-9)]),
+      1.5327383495309688618,
+      -2.1041333950576347747,
+      1e-11
+    );
+  });
+
+  test('Π(0.5; 1 + 0.5i | 1.2 + 0.5i): incomplete, complex amplitude', () =>
+    expectComplex(
+      ce.expr(['EllipticPi', 0.5, z(1, 0.5), z(1.2, 0.5)]),
+      0.7653528221862625506,
+      0.95496435429134770559
+    ));
+
+  test('Π(2; 0.8 | 1.5 + 0.1i): incomplete, n > 1', () =>
+    expectComplex(
+      ce.expr(['EllipticPi', 2, 0.8, z(1.5, 0.1)]),
+      3.3544162071794271,
+      -2.9707579250271044004
+    ));
+
+  test('Π(0.5; 5 + 6i − 2π | −7 − 8i): the mpmath documentation example', () =>
+    expectComplex(
+      ce.expr(['EllipticPi', 0.5, z(5 - 2 * Math.PI, 6), z(-7, -8)]),
+      -0.36128566200767476604,
+      0.52177353399848078298
+    ));
+
+  test('a real n > 1 with a real m stays the Cauchy principal value', () => {
+    // The real kernel gives the principal value of the integral through
+    // the pole (DLMF 19.2(ii)); mpmath gives −0.1518 − 1.7038i there, the
+    // value for n + i0⁺, whose real part is the principal value.
+    expectApprox(ce.expr(['EllipticPi', 2, 0.3]), -0.15182298474781241, 1e-13);
+  });
+});
+
 describe('GAUSS HYPERGEOMETRIC ₂F₁', () => {
   test('₂F₁(a,b;c;0) = 1 exactly', () => {
     expect(ce.expr(['Hypergeometric2F1', 0.3, 1.7, 2.1, 0]).evaluate().re).toBe(

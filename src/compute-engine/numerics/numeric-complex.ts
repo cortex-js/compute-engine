@@ -4398,13 +4398,134 @@ export function carlsonRFComplex(x: Complex, y: Complex, z: Complex): Complex {
 }
 
 /**
- * Carlson R_J(x, y, z, p), complex, via the duplication theorem. Only the
- * argument configurations for which the duplication theorem is known to be
- * valid are evaluated (mpmath's criterion): Re x, Re y, Re z ≥ 0 with
+ * `∫ₐᵇ f(s) ds` for a complex-valued `f` of a real variable, by the
+ * double-exponential (tanh-sinh) rule, with bisection of a sub-interval on
+ * which the rule does not converge.
+ *
+ * The rule is the one of `tanhSinh()` in `numerics/endpoint-quadrature.ts`,
+ * for a complex integrand: the substitution `s = c + h·tanh(π/2·sinh t)`
+ * makes the integrand decay double-exponentially in `t`, so the trapezoidal
+ * rule in `t` converges fast even for an integrable singularity at an
+ * endpoint (`1/√s` at 0). The step is halved at each level, and the rule
+ * stops when the last two levels agree to `rtol` relative to the estimate,
+ * or to `atol`. A node where the integrand is not finite is left out, as at
+ * an endpoint singularity.
+ *
+ * When the rule has not converged after `TANH_SINH_LEVELS` levels — the
+ * integrand has a pole or a branch point close to the interior of the
+ * interval — the interval is bisected and each half is integrated on its
+ * own. Only the halves that contain the difficulty are bisected again; the
+ * others converge at once. The bisection stops at the depth
+ * `TANH_SINH_DEPTH`, and when `budget.panels` intervals have been
+ * integrated in all (a singularity at a distance from the segment that the
+ * doubles cannot resolve would otherwise be bisected without end); the
+ * last estimate of an interval is then accepted.
+ *
+ * `atol` is the absolute tolerance of ONE interval: the caller sets it from
+ * the magnitude of the whole integral, so a sub-interval whose contribution
+ * is negligible is not bisected for a relative accuracy it cannot reach.
+ */
+const TANH_SINH_LEVELS = 6;
+const TANH_SINH_DEPTH = 48;
+const TANH_SINH_PANELS = 4096;
+function tanhSinhComplex(
+  f: (s: number) => Complex,
+  a: number,
+  b: number,
+  rtol: number,
+  atol: number,
+  budget: { panels: number },
+  depth = 0
+): Complex {
+  budget.panels -= 1;
+  const c = 0.5 * (a + b);
+  const h = 0.5 * (b - a);
+  // The `t` where `e^(−2|s|)` underflows: `|s| = 372`.
+  const tMax = Math.asinh((2 * 372) / Math.PI);
+  const term = (t: number): Complex => {
+    const sh = (Math.PI / 2) * Math.sinh(t);
+    const e = Math.exp(-2 * Math.abs(sh));
+    const distance = (2 * h * e) / (1 + e);
+    if (!(distance > 0)) return C_ZERO;
+    const s = t > 0 ? b - distance : t < 0 ? a + distance : c;
+    // The node rounds to the endpoint: no closer node exists.
+    if (!(s > a && s < b)) return C_ZERO;
+    const weight =
+      (h * (Math.PI / 2) * Math.cosh(t) * 4 * e) / ((1 + e) * (1 + e));
+    const v = f(s);
+    if (!Number.isFinite(v.re) || !Number.isFinite(v.im)) return C_ZERO;
+    return v.mul(weight);
+  };
+
+  let step = 1;
+  let sum = term(0);
+  for (let k = 1; k * step <= tMax; k++)
+    sum = sum.add(term(k * step)).add(term(-k * step));
+  let previous = sum.mul(step);
+  for (let level = 1; level <= TANH_SINH_LEVELS; level++) {
+    step /= 2;
+    for (let k = 1; k * step <= tMax; k += 2)
+      sum = sum.add(term(k * step)).add(term(-k * step));
+    const estimate = sum.mul(step);
+    const error = estimate.sub(previous).abs();
+    previous = estimate;
+    if (level >= 3 && error <= Math.max(atol, rtol * estimate.abs()))
+      return estimate;
+  }
+  if (depth >= TANH_SINH_DEPTH || budget.panels <= 0) return previous;
+  return tanhSinhComplex(f, a, c, rtol, atol, budget, depth + 1).add(
+    tanhSinhComplex(f, c, b, rtol, atol, budget, depth + 1)
+  );
+}
+
+/**
+ * `∫₀¹ f(s) ds` for a complex-valued `f`, to about 14 significant digits
+ * (`tanhSinhComplex`). A first pass over the whole interval sets the
+ * absolute tolerance of the sub-intervals from the magnitude of the
+ * integral.
+ */
+function integrateComplexUnitInterval(f: (s: number) => Complex): Complex {
+  const rtol = 1e-14;
+  const budget = { panels: TANH_SINH_PANELS };
+  const first = tanhSinhComplex(f, 0, 1, rtol, 0, { panels: 1 });
+  const atol = rtol * first.abs();
+  if (!Number.isFinite(atol) || atol === 0) return first;
+  return tanhSinhComplex(f, 0, 1, rtol, atol, budget);
+}
+
+/**
+ * Carlson R_J(x, y, z, p), complex, via the duplication theorem, as mpmath
+ * computes it (`elliprj`, `mpmath/functions/elliptic.py`).
+ *
+ * With principal-branch square roots the duplication theorem is known to be
+ * valid for these argument configurations: Re x, Re y, Re z ≥ 0 with
  * Re p > 0; or p equal to one of x, y, z; or one argument nonnegative real
- * with the other two complex conjugates and p not on (−∞, 0]. Other
- * configurations return NaN (mpmath falls back to contour integration
- * there; we do not).
+ * with the other two complex conjugates and p not on (−∞, 0]. For any other
+ * configuration (`Π(n|m)` with Re m > 1, or with n > 1) it can pick a wrong
+ * branch, so the integral is split at a point N in the right half-plane,
+ * `N = ⌈−min(Re x, Re y, Re z, Re p)⌉ + 1 + i·margin`:
+ *
+ *   R_J(x, y, z, p) = (3/2)·∫₀ᴺ dt / ((t + p)·√(t + x)·√(t + y)·√(t + z))
+ *                   + R_J(x + N, y + N, z + N, p + N)
+ *
+ * The first part is integrated numerically along the straight segment from
+ * 0 to N; the shifted arguments of the second part all have a real part of
+ * at least 1, where the duplication theorem is valid (at least 0 when the
+ * shift rounds, for a real part past 2^53, and the recursion then shifts
+ * once more). The segment leaves
+ * the real axis so it passes the singularities of the integrand (a pole at
+ * t = −p, branch points at t = −x, −y, −z) on a definite side: through the
+ * upper half-plane, unless every singularity lies in the upper half-plane
+ * and the segment goes below them. An argument in the lower half-plane
+ * keeps the segment below its branch cut (`margin` is at most half its
+ * distance from the axis). A real negative p is therefore passed ABOVE the
+ * pole, which gives the value for `p + i0⁺`, as in mpmath; the real kernel
+ * `carlsonRJ()` in `numerics/special-functions.ts` gives the Cauchy
+ * principal value there, which is the real part of this value.
+ *
+ * The complete and incomplete Π built on this kernel agree with mpmath to
+ * about 14 digits (`test/compute-engine/special-functions.test.ts`,
+ * "COMPLEX-PARAMETER EllipticPi").
  */
 export function carlsonRJComplex(
   x: Complex,
@@ -4417,8 +4538,28 @@ export function carlsonRJComplex(
   if ((x.isZero() ? 1 : 0) + (y.isZero() ? 1 : 0) + (z.isZero() ? 1 : 0) > 1)
     return new Complex(Infinity, 0);
 
+  // R_J is homogeneous of degree −3/2: R_J(λx, λy, λz, λp) = λ^{-3/2}·R_J(x,
+  // y, z, p). Above about 1e100 the duplication loop overflows (the dₘ
+  // product is of the order of |A|^{3/2}), so scale the arguments to unit
+  // size first, with a real positive λ so no branch moves (the scaling also
+  // bounds the length of the integration segment of the fallback below at
+  // about 1e100). E(m) at
+  // |m| = 1e300 goes through R_D(0, 1 − m, 1) and needs this. The two
+  // divisions at the end (by λ, then by √λ) keep the result in range.
+  const big = Math.max(x.abs(), y.abs(), z.abs(), p.abs());
+  if (big > 1e100) {
+    const r = carlsonRJComplex(x.div(big), y.div(big), z.div(big), p.div(big));
+    return r.div(big).div(Math.sqrt(big));
+  }
+
+  // The comparisons are exact, as in mpmath: `Complex.equals()` has an
+  // absolute tolerance of 1e-15, which after the scaling above reads a
+  // small p as equal to x = 0 (`Π(0.5 | 10^200·(1 + i))` scales p to
+  // 3.5e-201) and takes the R_D route to a wrong value.
+  const same = (a: Complex, b: Complex): boolean =>
+    a.re === b.re && a.im === b.im;
   let ok = x.re >= 0 && y.re >= 0 && z.re >= 0 && p.re > 0;
-  if (!ok && (x.equals(p) || y.equals(p) || z.equals(p))) ok = true;
+  if (!ok && (same(x, p) || same(y, p) || same(z, p))) ok = true;
   if (!ok && (p.im !== 0 || p.re >= 0)) {
     const conj = (a: Complex, b: Complex): boolean =>
       a.re === b.re && a.im === -b.im;
@@ -4426,18 +4567,75 @@ export function carlsonRJComplex(
     else if (y.im === 0 && y.re >= 0 && conj(x, z)) ok = true;
     else if (z.im === 0 && z.re >= 0 && conj(x, y)) ok = true;
   }
-  if (!ok) return C_NAN;
-
-  // R_J is homogeneous of degree −3/2: R_J(λx, λy, λz, λp) = λ^{-3/2}·R_J(x,
-  // y, z, p). Above about 1e100 the duplication loop overflows (the dₘ
-  // product is of the order of |A|^{3/2}), so scale the arguments to unit
-  // size first, with a real positive λ so no branch moves. E(m) at
-  // |m| = 1e300 goes through R_D(0, 1 − m, 1) and needs this. The two
-  // divisions at the end (by λ, then by √λ) keep the result in range.
-  const big = Math.max(x.abs(), y.abs(), z.abs(), p.abs());
-  if (big > 1e100) {
-    const r = carlsonRJComplex(x.div(big), y.div(big), z.div(big), p.div(big));
-    return r.div(big).div(Math.sqrt(big));
+  if (!ok) {
+    const args = [x, y, z, p];
+    const upper = (t: Complex): boolean => t.im >= 0 || t.re > 0;
+    const lower = (t: Complex): boolean => t.im < 0 || t.re > 0;
+    let margin: number;
+    if (args.every(upper)) margin = 1;
+    else if (args.every(lower)) margin = -1;
+    else {
+      margin = 1;
+      for (const t of args)
+        if (!upper(t)) margin = Math.min(margin, 0.5 * Math.abs(t.im));
+    }
+    const N = new Complex(
+      Math.ceil(-Math.min(x.re, y.re, z.re, p.re)) + 1,
+      margin
+    );
+    // G(t) = 1/(√(t + x)·√(t + y)·√(t + z)): the integrand without the pole.
+    const G = (t: Complex): Complex =>
+      t.add(x).sqrt().mul(t.add(y).sqrt()).mul(t.add(z).sqrt()).inverse();
+    // Along the segment t = N·s, s ∈ [0, 1], dt = N·ds.
+    let initial: Complex;
+    if (p.re < 0) {
+      // A p with a negative real part puts the pole t₀ = −p next to the
+      // segment: its real part is between 0 and Re N − 1, and its distance
+      // to the segment can be as small as the margin (a real p: the segment
+      // passes above the pole; Im p < 0: the margin is at most half of
+      // |Im p|). In Π(2 | π/2 + 10⁻⁶i) the pole is 2.5·10⁻⁷ from the
+      // segment, and for Π(2 + 10⁻¹⁴i | 0.3) it is 5·10⁻¹⁵ away. The
+      // bisection cannot resolve such a pole, so it is subtracted:
+      //
+      //   ∫₀ᴺ G(t)/(t − t₀) dt = ∫₀ᴺ (G(t) − c)/(t − t₀) dt
+      //                        + c·log((N − t₀)/(−t₀)),  c = G(t₀)
+      //
+      // The first integrand is analytic at t₀, and the logarithm is the
+      // integral of 1/(t − t₀) along the segment: a straight segment never
+      // winds around t₀, so the principal logarithm has the branch the path
+      // follows. The identity holds for any constant c; the integrand is
+      // smooth at t₀ only when c is G(t₀) on the branch that the segment
+      // follows. Each square root at t₀ is therefore given the sign that
+      // brings it nearest to the same square root at the point of the
+      // segment closest to t₀ (a branch cut of a square root can pass
+      // between the pole and the segment, where the principal value at t₀
+      // is on the other sheet).
+      const t0 = p.neg();
+      const n2 = N.re * N.re + N.im * N.im;
+      const closest = N.mul(
+        Math.min(1, Math.max(0, (t0.re * N.re + t0.im * N.im) / n2))
+      );
+      const root = (w: Complex): Complex => {
+        const r = t0.add(w).sqrt();
+        const rs = closest.add(w).sqrt();
+        return r.sub(rs).abs() > r.add(rs).abs() ? r.neg() : r;
+      };
+      const c = root(x).mul(root(y)).mul(root(z)).inverse();
+      initial = integrateComplexUnitInterval((s) => {
+        const t = N.mul(s);
+        return G(t).sub(c).div(t.sub(t0));
+      })
+        .mul(N)
+        .add(c.mul(N.sub(t0).div(t0.neg()).log()));
+    } else {
+      initial = integrateComplexUnitInterval((s) => {
+        const t = N.mul(s);
+        return G(t).div(t.add(p));
+      }).mul(N);
+    }
+    return initial
+      .mul(1.5)
+      .add(carlsonRJComplex(x.add(N), y.add(N), z.add(N), p.add(N)));
   }
 
   const A0 = x.add(y).add(z).add(p.mul(2)).div(5);

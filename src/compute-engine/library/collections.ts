@@ -136,6 +136,7 @@ import { rangeCount } from '../numerics/range-count.js';
 import {
   exactArithmeticRange,
   rationalRangeCount,
+  type ArithmeticRange,
 } from './range-closed-form.js';
 import { splitGraphemeClusters } from '../../common/grapheme-splitter.js';
 import { mapAutoCompileRunner } from './map-auto-compile.js';
@@ -6783,7 +6784,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // is never negative and the loop always ends. A count that is not a
         // safe integer is a `bigint`, and the comparison below is valid
         // between a `number` and a `bigint`.
-        const maxCount = rangeElementCount(expr, lower, upper, step);
+        // The exact range, computed once: `rangeElement()` reads the
+        // elements past 2^53 and the rational elements from it.
+        const exact = exactArithmeticRange(expr);
+        const maxCount = rangeElementCount(expr, lower, upper, step, exact);
 
         let index = 1;
 
@@ -6792,7 +6796,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
             if (index > maxCount) return { value: undefined, done: true };
             index += 1;
             return {
-              value: rangeElement(expr, lower, step, index - 2),
+              value: rangeElement(expr, lower, step, index - 2, exact),
               done: false,
             };
           },
@@ -6820,9 +6824,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         const [lower, upper, step] = range(expr);
         if (step === 0) return undefined;
         // The count can be a `bigint`: the comparison is still valid.
-        const maxCount = rangeElementCount(expr, lower, upper, step);
+        const exact = exactArithmeticRange(expr);
+        const maxCount = rangeElementCount(expr, lower, upper, step, exact);
         if (index < 1 || index > maxCount) return undefined;
-        return rangeElement(expr, lower, step, index - 1);
+        return rangeElement(expr, lower, step, index - 1, exact);
       },
 
       indexWhere: undefined,
@@ -14953,14 +14958,27 @@ export function range(
  * Element `k` (counted from 0) of a `Range` with a finite lower bound:
  * `lower + k·step`.
  *
- * When the lower bound and the step are both exact number literals (`1/3`,
- * `1/2`) and one of them is not an integer, the element is the exact
- * rational: `Range(0, 1, 1/3)` is `[0, 1/3, 2/3, 1]`, as in Mathematica, not
- * `[0, 0.333…, 0.666…, 1]`. Otherwise the element is computed in machine
- * arithmetic from the numeric values `lower` and `step` of `range()`. Integer
- * bounds and steps are exact in machine arithmetic, and a float bound or step
- * makes every element inexact. A step that is an exact constant expression
- * (`π/4`) also gives floats: the consumers of a range read each element as a
+ * `exact` is the range as exact rationals (`exactArithmeticRange()`,
+ * `library/range-closed-form.ts`), `undefined` when an operand is a float,
+ * an infinity, a symbol with no value, or an exact constant such as `π`.
+ * The callers that enumerate (the `iterator` and `at` handlers) compute it
+ * once for the whole range, since it evaluates the operands.
+ *
+ * For an exact range the element is exact:
+ *
+ * - Integer bounds and step give the integer `lower + k·step`, in machine
+ *   arithmetic while the bound, the step and the sum are safe integers, and
+ *   otherwise as a `bigint`:
+ *   `Range(2^60, 2^60 + 3)` is `[2^60, 2^60 + 1, 2^60 + 2, 2^60 + 3]`, where
+ *   the machine sum rounds every element to `2^60` (the count has been exact
+ *   since 0.149.0; the elements went through doubles).
+ * - A rational bound or step gives the exact rational: `Range(0, 1, 1/3)`
+ *   is `[0, 1/3, 2/3, 1]`, as in Mathematica, not `[0, 0.333…, 0.666…, 1]`.
+ *
+ * Otherwise the element is computed in machine arithmetic from the numeric
+ * values `lower` and `step` of `range()`: a float bound or step makes every
+ * element inexact, and a step that is an exact constant expression (`π/4`)
+ * also gives floats, since the consumers of a range read each element as a
  * number literal (`.re`), and `π/2` is not one.
  *
  * The first element is `lower` itself: for an infinite step, `step · 0` is
@@ -14970,25 +14988,30 @@ function rangeElement(
   expr: Expression,
   lower: number,
   step: number,
-  k: number
+  k: number,
+  exact: ArithmeticRange | undefined
 ): Expression {
   const ce = expr.engine;
-  // `Range(lower, upper)` has the implicit step ±1 (from `range()`), and
-  // `Range(upper)` has the integer bounds and step 1.
-  if (isFunction(expr) && expr.nops >= 2 && Number.isFinite(step)) {
-    const lowerOp = expr.op1;
-    const stepOp = expr.nops === 3 ? expr.op3 : ce.number(step);
-    if (
-      !(Number.isInteger(lower) && Number.isInteger(step)) &&
-      isExactRangeOperand(lowerOp) &&
-      isExactRangeOperand(stepOp)
-    )
-      return ce
-        .function('Add', [
-          lowerOp,
-          ce.function('Multiply', [ce.number(k), stepOp]),
-        ])
-        .evaluate();
+  if (exact !== undefined) {
+    const [aNum, aDen] = exact.a;
+    const [dNum, dDen] = exact.d;
+    if (aDen === 1n && dDen === 1n) {
+      // The machine sum is the element only when the lower bound, the step
+      // and the sum are all safe integers: a bound past 2^53 is already
+      // rounded in `lower`, and `Range(2^60 + 1, 1, -2^60)` would then give
+      // the safe integer 0 for its second element, which is 1.
+      if (Number.isSafeInteger(lower) && Number.isSafeInteger(step)) {
+        const machine = k === 0 ? lower : lower + step * k;
+        if (Number.isSafeInteger(machine)) return ce.number(machine);
+      }
+      return ce.number(aNum + dNum * BigInt(k));
+    }
+    return ce
+      .function('Add', [
+        ce.number(exact.a),
+        ce.function('Multiply', [ce.number(k), ce.number(exact.d)]),
+      ])
+      .evaluate();
   }
   return ce.number(k === 0 ? lower : lower + step * k);
 }
@@ -15017,16 +15040,11 @@ function rangeElementCount(
   expr: Expression,
   lower: number,
   upper: number,
-  step: number
+  step: number,
+  exact: ArithmeticRange | undefined = exactArithmeticRange(expr)
 ): number | bigint {
-  const exact = exactArithmeticRange(expr);
   if (exact !== undefined) return normalizeCount(exact.n)!;
   return rangeCount(lower, upper, step);
-}
-
-/** An exact number literal: an integer or a rational (`1/3`). */
-function isExactRangeOperand(op: Expression): boolean {
-  return isNumber(op) && op.isExact && !op.isComplex;
 }
 
 /** Return the last value in the range
