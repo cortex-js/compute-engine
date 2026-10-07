@@ -3749,8 +3749,15 @@ export function antiderivative(fn: Expression, index: string): Expression {
         }
       }
 
-      // Try to find roots of the denominator
-      const roots = findUnivariateRoots(denominator, index);
+      // The real roots of the denominator. The root finder gives the complex
+      // roots of a polynomial too; the partial fractions below are over the
+      // real numbers (a real pole gives `ln|x − r|`, an irreducible quadratic
+      // factor gives `ln` and `arctan`), thus a root that is not real is
+      // not a pole here.
+      const roots = findUnivariateRoots(denominator, index).filter((r) => {
+        const v = r.N();
+        return Math.abs(v.im) <= 1e-12 * (1 + Math.abs(v.re));
+      });
 
       // Simple poles: only valid when the real roots account for the FULL
       // degree of the denominator. With fewer roots (e.g. 1−x⁶: two real

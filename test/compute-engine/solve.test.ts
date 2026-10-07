@@ -868,7 +868,7 @@ describe('SOLVING CUBIC AND QUARTIC EQUATIONS', () => {
   const maxResidual = (mj: any) => {
     const e = ce.expr(mj);
     const rs = e.solve('x') ?? [];
-    return Math.max(0, ...rs.map((r) => Math.abs(e.subs({ x: r }).N().re)));
+    return Math.max(0, ...rs.map((r) => e.subs({ x: r }).N().abs().re));
   };
 
   test('general cubic with irrational roots: 3x³−18x²+33x−19', () => {
@@ -885,14 +885,24 @@ describe('SOLVING CUBIC AND QUARTIC EQUATIONS', () => {
   });
 
   test('cubic with one real root: x³−2x−5 (Newton’s example)', () => {
+    // With no domain, the two complex roots are given too (as for
+    // `x² + 1 = 0`); a real `x` keeps the real root only.
     const mj = [
       'Subtract',
       ['Subtract', ['Power', 'x', 3], ['Multiply', 2, 'x']],
       5,
     ];
-    const r = roots(mj)!;
+    const rs = ce.expr(mj).solve('x')!;
+    expect(rs.length).toBe(3);
+    const real = rs.filter((r) => r.N().im === 0);
+    expect(real.length).toBe(1);
+    expect(real[0].N().re).toBeCloseTo(2.0945514815, 6);
+    expect(maxResidual(mj)).toBeLessThan(1e-6);
+    const realEngine = new ComputeEngine();
+    realEngine.declare('x', 'real');
+    const r = realEngine.expr(mj).solve('x')!;
     expect(r.length).toBe(1);
-    expect(r[0]).toBeCloseTo(2.0945514815, 6);
+    expect(r[0].N().re).toBeCloseTo(2.0945514815, 6);
   });
 
   test('casus irreducibilis (three real roots): x³−3x+1', () => {
@@ -930,32 +940,203 @@ describe('SOLVING CUBIC AND QUARTIC EQUATIONS', () => {
   });
 
   test('biquadratic with irrational roots is exact: x⁴+x²−1', () => {
-    // u = x² → u²+u−1 = 0 → u = (√5−1)/2 (the negative u is complex, dropped).
-    // x = ±√((√5−1)/2), exact radicals rather than the numeric fallback.
+    // u = x² → u²+u−1 = 0 → u = (√5−1)/2 gives x = ±√((√5−1)/2), exact
+    // radicals rather than the numeric fallback.
+    // The negative u gives the two imaginary roots ±√((−√5−1)/2), exact too.
     const mj = ['Subtract', ['Add', ['Power', 'x', 4], ['Power', 'x', 2]], 1];
     const rs = ce.expr(mj).solve('x')!;
-    expect(rs.length).toBe(2);
+    expect(rs.length).toBe(4);
     // Exact radical form (contains a √), not a floating-point approximation.
-    expect(rs.some((r) => r.toString().includes('sqrt'))).toBe(true);
-    expect(rs.map((r) => r.N().re).sort((a, b) => a - b)).toEqual([
+    expect(rs.every((r) => r.toString().includes('sqrt'))).toBe(true);
+    const real = rs.filter((r) => r.N().im === 0);
+    expect(real.map((r) => r.N().re).sort((a, b) => a - b)).toEqual([
       -0.7861513777574233, 0.7861513777574233,
+    ]);
+    const imaginary = rs.filter((r) => r.N().im !== 0);
+    expect(imaginary.map((r) => r.N().re)).toEqual([0, 0]);
+    expect(imaginary.map((r) => r.N().im).sort((a, b) => a - b)).toEqual([
+      -1.272019649514069, 1.272019649514069,
     ]);
     // Residual ≈ 0.
     const e = ce.expr(mj);
     expect(
-      Math.max(...rs.map((r) => Math.abs(e.subs({ x: r }).N().re)))
+      Math.max(...rs.map((r) => e.subs({ x: r }).N().abs().re))
     ).toBeLessThan(1e-12);
   });
 
   test('higher gcd reduction is exact: x⁶+x³−1 via u=x³', () => {
     const mj = ['Subtract', ['Add', ['Power', 'x', 6], ['Power', 'x', 3]], 1];
     const rs = ce.expr(mj).solve('x')!;
-    expect(rs.length).toBe(2); // two real roots, both exact cube roots
-    expect(rs.some((r) => r.toString().includes('root'))).toBe(true);
+    // Each of the two roots u of u² + u − 1 gives three cube roots, all
+    // exact: the real one, and the real one times (−1 ± i√3)/2.
+    expect(rs.length).toBe(6);
+    expect(rs.every((r) => r.toString().includes('root'))).toBe(true);
+    expect(rs.filter((r) => r.N().im === 0).length).toBe(2);
     const e = ce.expr(mj);
     expect(
-      Math.max(...rs.map((r) => Math.abs(e.subs({ x: r }).N().re)))
+      Math.max(...rs.map((r) => e.subs({ x: r }).N().abs().re))
     ).toBeLessThan(1e-12);
+  });
+
+  test('every complex root of a polynomial of degree 3 to 7, with a residual check', () => {
+    const check = (latex: string, count: number, exact?: number) => {
+      const e = ce.parse(latex) as any;
+      const rs = e.solve('x')!;
+      expect(rs).not.toBeNull();
+      expect(rs.length).toBe(count);
+      // The residual lhs − rhs at each root.
+      const f =
+        e.operator === 'Equal' ? ce.function('Subtract', [e.op1, e.op2]) : e;
+      for (const r of rs)
+        expect(f.subs({ x: r }).N().abs().re).toBeLessThan(1e-9);
+      if (exact !== undefined)
+        expect(rs.filter((r) => isExact(r)).length).toBe(exact);
+    };
+    // A root is exact when its MathJSON holds no float.
+    const isExact = (r: any): boolean =>
+      !JSON.stringify(r.json).match(/\d\.\d/);
+    // Degree 3: a pure power, the n-th roots of unity times ∛8 = 2.
+    check('x^3=8', 3, 3);
+    check('x^3=-8', 3, 3);
+    // Degree 3: a rational root, then an exact quadratic.
+    check('x^3-2x+1=0', 3, 3);
+    // Degree 3: no closed form, three floats.
+    check('x^3-2x-5=0', 3, 0);
+    // Degree 4: a pure power with no real root.
+    check('x^4+1=0', 4, 4);
+    // Degree 3: a rational root and a pure power (x + 1)(x² + 1).
+    check('x^3+x^2+x+1=0', 3, 3);
+    // The root 0 is exact, also with a float coefficient.
+    check('x^3-3x^2+1.5x=0', 3, 1);
+    expect(
+      ce
+        .parse('x^3-3x^2+1.5x=0')
+        .solve('x')!
+        .map((r) => r.json)
+    ).toContain(0);
+    // Degree 5: (x² + x + 1)(x³ − x² + 1), the quadratic factor is exact.
+    check('x^5+x+1=0', 5, 2);
+    // Degree 5: (x² − 2)(x³ − x − 1), the quadratic factor is exact.
+    check('x^5-3x^3-x^2+2x+2=0', 5, 2);
+    // Degree 6: a polynomial in x³.
+    check('x^6+x^3-1=0', 6, 6);
+    // Degree 7: a pure power, the 7th roots of unity as cos + i·sin.
+    check('x^7=1', 7, 7);
+    // A repeated factor is listed once: (x² + x + 1)².
+    check('x^4+2x^3+3x^2+2x+1=0', 2, 2);
+  });
+
+  test('the roots of x³ = 8 and x⁴ + 1 = 0 are exact', () => {
+    expect(
+      ce
+        .parse('x^3=8')
+        .solve('x')!
+        .map((r) => r.toString())
+    ).toEqual(['2', '-1 + sqrt(3)i', '-1 - sqrt(3)i']);
+    expect(
+      ce
+        .parse('x^3-2x+1=0')
+        .solve('x')!
+        .map((r) => r.toString())
+    ).toEqual(['-1/2 - sqrt(5)/2', '-1/2 + sqrt(5)/2', '1']);
+    expect(
+      ce
+        .parse('x^4+1=0')
+        .solve('x')!
+        .map((r) => r.toString())
+        .sort()
+    ).toEqual([
+      '(-sqrt(2)/2 + sqrt(2)/2i)',
+      '(-sqrt(2)/2 - sqrt(2)/2i)',
+      '(sqrt(2)/2 + sqrt(2)/2i)',
+      '(sqrt(2)/2 - sqrt(2)/2i)',
+    ]);
+    // The roots of the quadratic factor are exact; the three roots of the
+    // cubic factor are floats.
+    expect(
+      ce
+        .parse('x^5+x+1=0')
+        .solve('x')!
+        .map((r) => r.toString())
+        .filter((s) => !/\d\.\d/.test(s))
+    ).toEqual(['-1/2 + sqrt(3)/2i', '-1/2 - sqrt(3)/2i']);
+  });
+
+  test('a real unknown, or a real domain, keeps the real roots only', () => {
+    const real = new ComputeEngine();
+    real.declare('x', 'real');
+    const strings = (latex: string) =>
+      (real.parse(latex).solve('x') as any[] | null)?.map((r) => r.toString());
+    expect(strings('x^3=8')).toEqual(['2']);
+    expect(strings('x^4+1=0')).toEqual([]);
+    expect(strings('x^3-2x+1=0')).toEqual([
+      '-1/2 - sqrt(5)/2',
+      '-1/2 + sqrt(5)/2',
+      '1',
+    ]);
+    expect(strings('x^5+x+1=0')).toEqual(['-0.7548776662466927']);
+    // A symbolic real right-hand side: the real root only, and an answer.
+    // (The assumption makes the type of root(3)(a) decided real; without
+    // it, the root is removed by a check that does not decide, and there is
+    // no answer, as before.)
+    real.declare('a', 'real');
+    real.assume(real.parse('a > 0'));
+    expect(strings('x^3=a')).toEqual(['root(3)(a)']);
+    expect(strings('x^4=a')).toEqual(['root(4)(a)', '-root(4)(a)']);
+    const op = (latex: string) => ce.parse(latex).evaluate().toString();
+    expect(op('\\operatorname{Solve}(x^3=8, x, \\mathbb{R})')).toBe('[2]');
+    expect(op('\\operatorname{Solve}(x^3=8, x, \\mathbb{C})')).toBe(
+      '[2,-1 + sqrt(3)i,-1 - sqrt(3)i]'
+    );
+    expect(op('\\operatorname{Solve}(x^3=8, x)')).toBe(
+      '[2,-1 + sqrt(3)i,-1 - sqrt(3)i]'
+    );
+  });
+
+  test('a symbolic pure power gives its n roots; a symbolic cubic has no answer', () => {
+    expect(
+      ce
+        .parse('x^3=a')
+        .solve('x')!
+        .map((r) => r.toString())
+    ).toEqual([
+      'root(3)(a)',
+      '(-1/2 + sqrt(3)/2i) * root(3)(a)',
+      '(-1/2 - sqrt(3)/2i) * root(3)(a)',
+    ]);
+    // A biquadratic with a symbolic coefficient: four exact roots.
+    expect(ce.parse('x^4+ax^2+1=0').solve('x')!.length).toBe(4);
+    // No closed form and a symbolic coefficient: the list would be partial.
+    expect(ce.parse('x^3+ax+1=0').solve('x')).toBeNull();
+  });
+
+  test('the n-th roots are written in the angular unit of the engine', () => {
+    const deg = new ComputeEngine();
+    deg.angularUnit = 'deg';
+    expect(
+      deg
+        .parse('x^3=8')
+        .solve('x')!
+        .map((r) => r.toString())
+    ).toEqual(['2', '-1 + sqrt(3)i', '-1 - sqrt(3)i']);
+  });
+
+  test('a substitution u = √x whose polynomial has complex roots only gives no answer', () => {
+    // u = √x turns √x = x² + 1 into u = u⁴ + 1, whose four roots are complex:
+    // the equation has no real solution, and x = u² is not given.
+    expect(ce.parse('\\sqrt{x}=x^2+1').solve('x')).toBeNull();
+  });
+
+  test('a square-root equation that squares to a quartic gives real solutions only', () => {
+    // x·√(x² + 1) = 1 squares to x⁴ + x² − 1 = 0, whose imaginary root
+    // −√((−1 − √5)/2) satisfies the original equation over the complex
+    // numbers, but is not a real solution.
+    expect(
+      ce
+        .parse('x\\sqrt{x^2+1}=1')
+        .solve('x')!
+        .map((r) => r.toString())
+    ).toEqual(['sqrt(-1/2 + sqrt(5)/2)']);
   });
 
   test('exact paths are preserved (no numeric leakage)', () => {
@@ -2808,10 +2989,11 @@ describe('SOLVE: COMPLETE ROOT LISTS', () => {
     // The positive root of x^4 + x^2 - 1 = 0 (a power substitution and a
     // single square root)
     const r = Math.sqrt((Math.sqrt(5) - 1) / 2);
+    // (Its two imaginary roots are given too, with no domain.)
     const quartic = roots(valued, 'x^4+x^2-2u=0')!;
-    expect(quartic.length).toBe(2);
+    expect(quartic.length).toBe(4);
     expect(quartic[0]).toBeCloseTo(-r, 12);
-    expect(quartic[1]).toBeCloseTo(r, 12);
+    expect(quartic[3]).toBeCloseTo(r, 12);
     for (const latex of ['x\\sqrt{x^2+1}=2u', 'x\\sqrt{x^2+1}=2t']) {
       const sqrt = roots(valued, latex)!;
       expect(sqrt.length).toBe(1);

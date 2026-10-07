@@ -19,7 +19,11 @@ import {
   fromCoefficients,
 } from './polynomials.js';
 import { asSmallInteger } from './numerics.js';
-import { realPolynomialRoots } from '../numerics/polynomial-roots.js';
+import type { Complex } from 'complex.js';
+import {
+  durandKernerRoots,
+  realPolynomialRoots,
+} from '../numerics/polynomial-roots.js';
 import { halfTurnAngle } from './trigonometry.js';
 
 function numericApproximation(value: unknown): number | undefined {
@@ -1404,9 +1408,36 @@ function solveSingleSqrtEquation(
   const sqrtFree = squared.simplify();
   traceStep(trace, 'solve.square-both-sides', asEquation(sqrtFree, variable));
   const child = childStats();
-  const roots = findUnivariateRoots(sqrtFree, variable, 0, undefined, child);
+  const roots = realRootsOfSquaredEquation(
+    ce,
+    variable,
+    findUnivariateRoots(sqrtFree, variable, 0, undefined, child)
+  );
   if (roots.length > 0) adoptChildStats(stats, child);
   return roots;
+}
+
+/**
+ * The roots of a polynomial that squaring gave, without the roots that are
+ * decided not real. A polynomial equation gives all its roots, the complex
+ * ones included; every other equation gives its real solutions only (see
+ * `doc/85-reference-core.md`, `Solve`). `x·√(x² + 1) = 1` is squared into
+ * `x⁴ + x² − 1 = 0`, whose root `−√((−1 − √5)/2)` is a root of the original
+ * equation over the complex numbers (`−1.27i·0.79i = 1`), but not a real
+ * solution: the check against the original equation keeps it, thus it is
+ * removed here. A root whose realness is not decided (`isRealRoot()`) is
+ * kept. When the unknown can take a value that is not real
+ * (`isComplexUnknown()`), every root is kept.
+ */
+function realRootsOfSquaredEquation(
+  ce: ComputeEngine,
+  x: string,
+  roots: ReadonlyArray<Expression>
+): ReadonlyArray<Expression> {
+  if (isComplexUnknown(ce, x)) return roots;
+  return roots.filter(
+    (root) => isRealRoot(isFunction(root, 'When') ? root.op1 : root) !== false
+  );
 }
 
 /**
@@ -2122,9 +2153,21 @@ function solveByRationalPowerSubstitution(
   }
   if (uRoots.length === 0) return null;
 
+  // The unknown is `x = uᵈ`, and a root `u` that is not real gives a value
+  // of `x` that is not real: `√x = x² + 1` becomes `u = u⁴ + 1`, whose four
+  // roots are all complex, and the equation has no real solution. The check
+  // against the original equation keeps such a value of `x`, because the
+  // principal root of `uᵈ` is `u` again. Thus, when the unknown cannot take
+  // a value that is not real, a root `u` that is decided not real is removed
+  // (`isRealRoot()`); a root whose realness is not decided is kept.
+  const realURoots = isComplexUnknown(ce, x)
+    ? uRoots
+    : uRoots.filter((ur) => isRealRoot(ur) !== false);
+  if (realURoots.length === 0) return null;
+
   // Back-substitute x = uᵈ; extraneous roots are dropped by the caller's
   // validation against the original equation.
-  const xRoots = uRoots.map((ur) => ur.pow(d));
+  const xRoots = realURoots.map((ur) => ur.pow(d));
   traceStep(trace, 'solve.back-substitute', rootsAsEquations(ce, x, xRoots));
   adoptChildStats(stats, child);
   return xRoots;
@@ -2134,13 +2177,15 @@ function solveByRationalPowerSubstitution(
  * Exact reduction of a "sparse" polynomial whose x-exponents share a common
  * factor g > 1 — e.g. a biquadratic `x⁴ + bx² + c` (g = 2) — via the
  * substitution `u = xᵍ`. Solves the reduced polynomial (degree maxExp/g)
- * exactly, then takes the **real** g-th roots, yielding exact radical roots
- * where the numeric fallback only approximates: `x⁴ + x² − 1 → ±√((√5−1)/2)`.
+ * exactly, then gives the `g` roots of `xᵍ = u` for each root `u`
+ * (`nthRoots()`), the complex ones included, yielding exact radical roots
+ * where the numeric fallback only approximates:
+ * `x⁴ + x² − 1 → ±√((√5−1)/2), ±√((−√5−1)/2)`.
  *
  * Only fires when the reduced degree is ≥ 2, so it never recurses on a pure
- * power `xᵍ − c` (already solved exactly by the `a·xⁿ + b` rule). Returns `null`
- * when `expr` is not a polynomial in x, or the exponent gcd is 1, or no real
- * root results.
+ * power `xᵍ − c` (solved by `nthRoots()`). Returns `null` when `expr` is not
+ * a polynomial in x, or the exponent gcd is 1, or the reduced polynomial
+ * gives no root.
  */
 function solveByPowerGcdSubstitution(
   expr: Expression,
@@ -2151,16 +2196,10 @@ function solveByPowerGcdSubstitution(
   const coeffs = getPolynomialCoefficients(expr, x); // ascending [c₀, c₁, …]
   if (coeffs === null) return null;
 
-  const nonzeroExps: number[] = [];
-  for (let i = 1; i < coeffs.length; i++)
-    if (!coeffs[i].isSame(0)) nonzeroExps.push(i);
-  if (nonzeroExps.length === 0) return null;
-
-  let g = nonzeroExps[0];
-  for (const e of nonzeroExps) g = gcd2(g, e);
+  const g = exponentGcd(coeffs);
   if (g <= 1) return null;
 
-  const maxExp = nonzeroExps[nonzeroExps.length - 1];
+  const maxExp = coeffs.length - 1;
   if (maxExp / g < 2) return null; // reduced degree < 2 → pure power; skip
 
   // Reduced polynomial Q(u) with Q[k] = coeffs[k·g] (u = xᵍ). `u` is declared
@@ -2188,26 +2227,27 @@ function solveByPowerGcdSubstitution(
   if (uRoots.length === 0) return null;
 
   const xRoots: Expression[] = [];
-  // The flags of the recursive calls, combined.
-  const combined = childStats();
-  adoptChildStats(combined, child);
-  for (const uRoot of uRoots) {
-    // Solve xᵍ = uRoot, keeping only the real branches (matching the engine's
-    // real-only convention for higher-degree polynomial roots).
-    const branchStats = childStats();
-    const branch = findUnivariateRoots(
-      ce.symbol(x).pow(g).sub(uRoot),
-      x,
-      0,
-      undefined,
-      branchStats
-    );
-    adoptChildStats(combined, branchStats);
-    for (const r of branch) if (Math.abs(r.N().im ?? 0) < 1e-12) xRoots.push(r);
-  }
-  if (xRoots.length === 0) return null;
-  adoptChildStats(stats, combined);
+  // Each root `u` of the reduced polynomial gives the `g` roots of `xᵍ = u`,
+  // the complex ones included: a list of roots is an answer only when it
+  // holds every root (see `solvePolynomialByCoefficients()`). For an unknown
+  // declared real, only the real roots of `xᵍ = u` are given when `u` is
+  // real (`nthRoots()`).
+  const realOnly = isRealUnknown(ce, x);
+  for (const uRoot of uRoots) xRoots.push(...nthRoots(ce, uRoot, g, realOnly));
+  adoptChildStats(stats, child);
   return xRoots;
+}
+
+/**
+ * The greatest common divisor of the exponents of the terms with a nonzero
+ * coefficient, the constant term excluded (`coeffs` ascending): 2 for a
+ * biquadratic `x⁴ + bx² + c`, 1 for a dense polynomial, 0 for a constant.
+ */
+function exponentGcd(coeffs: ReadonlyArray<Expression>): number {
+  let g = 0;
+  for (let i = 1; i < coeffs.length; i++)
+    if (!coeffs[i].isSame(0)) g = gcd2(g, i);
+  return g;
 }
 
 /** Parse a term as ±cᵉ: returns `[sign, base, exp]` when the term is a power,
@@ -3408,7 +3448,9 @@ function solveLinearTrigArgument(
  * root of `√(x + a) = -x`). `stats.partial` is set to `true` when the result
  * is known to be only a part of the roots: a factor of a product gave no
  * root, and it is not shown to have no root (`solveByZeroProduct()`), or a
- * rewrite that can drop roots was used (`solveByGeneratorSubstitution()`).
+ * rewrite that can drop roots was used (`solveByGeneratorSubstitution()`),
+ * or a polynomial of degree 3 or more has a root that the root finder
+ * cannot give (`rootsOfPolynomialFactor()`).
  * A strategy that solves another equation with a recursive call (a
  * substitution, an inversion, squaring) copies this flag from that call
  * (`adoptChildStats()`).
@@ -3614,10 +3656,13 @@ export function findUnivariateRoots(
   // This handles Pattern 2: √(ax+b) = cx+d by squaring both sides.
   // Must be done before pattern matching so quadratic formula can match.
   // Note: This can introduce extraneous roots, which are filtered by validateRoots().
+  let squared = false;
   {
     const transformed = transformSqrtLinearEquation(expr, x);
-    if (trace && !transformed.isSame(expr))
+    if (!transformed.isSame(expr)) {
+      squared = true;
       traceStep(trace, 'solve.square-both-sides', asEquation(transformed, x));
+    }
     expr = transformed;
   }
 
@@ -3818,6 +3863,10 @@ export function findUnivariateRoots(
       polynomialDegree(polyExpr, x) >= 2
     )
       result = solvePolynomialByCoefficients(polyExpr, x, trace, stats);
+    // The polynomial came from squaring a square-root equation: its
+    // complex roots are not solutions of the original equation.
+    if (squared && polyExpr !== originalExpr)
+      result = [...realRootsOfSquaredEquation(ce, x, result)];
 
     if (result.length === 0) {
       for (const e of exprs) {
@@ -4220,14 +4269,19 @@ function realRootsOfAbsEquation(
 }
 
 /**
- * Closed-form roots of a univariate polynomial (degree ≥ 2) from its
- * coefficients, bypassing the commutative pattern-matcher. Degree 2 uses the
- * quadratic formula (exact — radicals preserved via canonical `Add`/`Multiply`);
- * degree ≥ 3 uses the rational-root theorem, then an exact sparse-power
- * reduction (biquadratic via u = x²) or the numeric Durand–Kerner fallback for
- * the remaining real roots. Returns `[]` when no closed form is produced (the
- * caller then falls back to the rule templates). Extracted from the former
- * post-matcher fallback so it can run as a fast path *before* the matcher (P1-2).
+ * The roots of a univariate polynomial (degree ≥ 2) from its coefficients,
+ * bypassing the commutative pattern-matcher. Degree 2 uses the quadratic
+ * formula (exact: radicals preserved via canonical `Add`/`Multiply`). Degree
+ * ≥ 3 gives every root, the complex ones included, in this order: the root
+ * `0` is divided out; a pure power `a·xⁿ + b` or a polynomial in `xᵍ` is
+ * solved whole (`rootsOfPolynomialFactor()`); otherwise each rational root
+ * (rational-root theorem) is divided out, and the quotient is solved by
+ * `rootsOfPolynomialFactor()`: exactly when it has a closed form, else all
+ * its complex roots numerically, with the exact quadratic factors recovered.
+ * The result holds every root, or `stats.partial` is set (a root that cannot
+ * be given: a symbolic coefficient with no closed form, a degree above 12).
+ * The roots are sorted (`sortRoots()`). Extracted from the former
+ * post-matcher fallback so it can run as a fast path *before* the matcher.
  */
 function solvePolynomialByCoefficients(
   polyExpr: Expression,
@@ -4253,62 +4307,405 @@ function solvePolynomialByCoefficients(
     return roots;
   }
   if (deg >= 3) {
-    // Pure powers `x^n + c` (only the constant and leading coefficients are
-    // nonzero) are expressed EXACTLY as `Root(k, n)` by the rule templates —
-    // power-gcd declines them (reduced degree 1), so defer to the rules rather
-    // than numericize. General (dense) cubics/quartics with no closed form fall
-    // through to the numeric Durand–Kerner path below, matching prior behavior.
-    const coeffs = getPolynomialCoefficients(polyExpr, x);
-    if (coeffs !== null) {
-      let isPurePower = true;
-      for (let i = 1; i < coeffs.length - 1; i++)
-        if (!coeffs[i].isSame(0)) {
-          isPurePower = false;
-          break;
-        }
-      if (isPurePower) return [];
+    let coeffs = getPolynomialCoefficients(polyExpr, x);
+    if (coeffs === null) return [];
+    const realOnly = isRealUnknown(ce, x);
+    const result: Expression[] = [];
+
+    // The root `0` is divided out first: a zero constant term (and the zero
+    // coefficients above it) is the factor `xᵏ`. The rational-root theorem
+    // does not see this root, and the numeric root finder gives it as
+    // rounding noise (`2.9e-42`) when a float coefficient keeps it from being
+    // divided out exactly: `x³ − 3x² + 1.5x = 0` has the exact root `0`.
+    if (coeffs[0].isSame(0)) {
+      result.push(ce.Zero);
+      while (coeffs.length > 1 && coeffs[0].isSame(0)) coeffs = coeffs.slice(1);
+    }
+    const degree = coeffs.length - 1;
+
+    // A pure power `a·xⁿ + b` and a polynomial in `xᵍ` have exact closed
+    // forms for every root (`rootsOfPolynomialFactor()`): they are solved
+    // whole, before a rational root is divided out, so that `x⁷ = 1` gives
+    // `cos(2kπ/7) + i·sin(2kπ/7)` and not six floats. A quotient of degree 2
+    // or less after the root `0` is solved the same way.
+    if (
+      degree <= 2 ||
+      coeffs.slice(1, degree).every((c) => c.isSame(0)) ||
+      exponentGcd(coeffs) > 1
+    ) {
+      const roots = sortRoots([
+        ...result,
+        ...rootsOfPolynomialFactor(coeffs, x, stats, realOnly),
+      ]);
+      if (trace && roots.length > 0)
+        traceStep(
+          trace,
+          'solve.polynomial-roots',
+          rootsAsEquations(ce, x, roots)
+        );
+      return roots;
     }
 
-    // Exact rational roots first (rational-root theorem)…
-    const rationalRoots = findRationalRoots(polyExpr, x, ce);
+    // The rational roots (rational-root theorem) come first. Each is divided
+    // out, with its multiplicity, so that the other roots are the roots of a
+    // polynomial of lower degree: `x³ − 2x + 1` has the rational root `1`,
+    // and the quotient `x² + x − 1` gives the exact roots `(−1 ± √5)/2`.
+    const rationalRoots = findRationalRoots(fromCoefficients(coeffs, x), x, ce);
     if (trace && rationalRoots.length > 0)
       traceStep(
         trace,
         'solve.rational-roots',
         rootsAsEquations(ce, x, rationalRoots)
       );
-    const result: Expression[] = [...rationalRoots];
-    // For the remaining (irrational) roots, prefer an exact reduction of a
-    // sparse polynomial (gcd of exponents > 1, e.g. a biquadratic via u = x²)
-    // over the numeric Durand–Kerner fallback (a general cubic or quartic, e.g.
-    // `3x³−18x²+33x−19`). Real roots not already found are added; `validateRoots`
-    // discards any spurious ones.
-    if (rationalRoots.length < deg) {
-      const extra =
-        solveByPowerGcdSubstitution(polyExpr, x, stats) ??
-        numericRealRoots(polyExpr, x, ce);
-      const added: Expression[] = [];
-      for (const nr of extra) {
-        const v = nr.N().re;
-        if (
-          !result.some(
-            (r) => Math.abs(r.N().re - v) <= 1e-7 * (1 + Math.abs(v))
-          )
-        ) {
-          result.push(nr);
-          added.push(nr);
-        }
+    let rest: ReadonlyArray<Expression> = coeffs;
+    for (const r of rationalRoots) {
+      result.push(r);
+      while (rest.length > 1) {
+        const [quotient, remainder] = divideCoefficients(ce, rest, [
+          r.neg(),
+          ce.One,
+        ]);
+        if (!isZeroCoefficient(remainder[0])) break;
+        rest = quotient;
       }
-      if (trace && added.length > 0)
-        traceStep(
-          trace,
-          'solve.polynomial-roots',
-          rootsAsEquations(ce, x, added)
-        );
     }
-    return result;
+
+    const added = rootsOfPolynomialFactor(rest, x, stats, realOnly);
+    for (const root of added) {
+      // A root found twice is listed once: a rational root that a float
+      // coefficient did not let divide out exactly comes back from the
+      // numeric root finder as a float, near the rational root. Only such an
+      // inexact root is matched numerically. An exact root is a duplicate
+      // only when it is the same expression: two exact roots can be nearer
+      // than any tolerance and still be different (`1` and `1 ± 10⁻⁷i`).
+      const v = root.N();
+      const duplicate =
+        isNumber(root) && !root.isExact
+          ? result.some((r) => {
+              const w = r.N();
+              return (
+                Math.abs(w.re - v.re) + Math.abs(w.im - v.im) <=
+                1e-7 * (1 + Math.abs(v.re) + Math.abs(v.im))
+              );
+            })
+          : result.some((r) => r.isSame(root));
+      if (!duplicate) result.push(root);
+    }
+    if (trace && added.length > 0)
+      traceStep(
+        trace,
+        'solve.polynomial-roots',
+        rootsAsEquations(ce, x, added)
+      );
+    return sortRoots(result);
   }
   return [];
+}
+
+/**
+ * The roots in a stable order: the real roots in ascending order, then the
+ * other roots by ascending real part and descending imaginary part (a
+ * conjugate pair has the root with the positive imaginary part first):
+ * `x³ − 2x + 1 = 0` gives `(−1 − √5)/2, (−1 + √5)/2, 1`, and `x³ = 8` gives
+ * `2, −1 + i√3, −1 − i√3`. The order is unchanged when a root has no finite
+ * numeric value (a root with a symbolic coefficient).
+ */
+function sortRoots(roots: Expression[]): Expression[] {
+  const keyed = roots.map((root) => {
+    const value = root.N();
+    return { root, re: value.re, im: value.im };
+  });
+  if (keyed.some((k) => !Number.isFinite(k.re) || !Number.isFinite(k.im)))
+    return roots;
+  const isReal = (k: { re: number; im: number }): boolean =>
+    Math.abs(k.im) <= 1e-12 * (1 + Math.abs(k.re));
+  // Two real parts that differ by rounding error only (the two roots of a
+  // conjugate pair, computed by different routes) count as equal, so that
+  // the pair is ordered by its imaginary parts.
+  const sameRe = (a: { re: number }, b: { re: number }): boolean =>
+    Math.abs(a.re - b.re) <= 1e-12 * (1 + Math.abs(a.re));
+  keyed.sort((a, b) => {
+    const realA = isReal(a);
+    const realB = isReal(b);
+    if (realA !== realB) return realA ? -1 : 1;
+    if (!sameRe(a, b)) return a.re - b.re;
+    return b.im - a.im;
+  });
+  return keyed.map((k) => k.root);
+}
+
+/**
+ * Whether the unknown `x` is declared with a type that admits real values
+ * only (`real`, `integer`, `rational`, …): the roots that are not real are
+ * then removed by `filterRootsByType()`. An unknown with no declared type is
+ * not such an unknown: it gets the complex roots too.
+ */
+function isRealUnknown(ce: ComputeEngine, x: string): boolean {
+  const type = ce.symbol(x).type;
+  const vt = type.type;
+  if (typeof vt !== 'string' || vt === 'number' || vt === 'unknown')
+    return false;
+  return type.matches('real');
+}
+
+/**
+ * The roots of the polynomial with the coefficients `coeffs` (ascending:
+ * `coeffs[k]` is the coefficient of `xᵏ`), after its rational roots were
+ * divided out. The roots are exact when the polynomial has a closed form
+ * that the root finder knows:
+ * - degree 1 or 2: the linear root, the quadratic formula;
+ * - a pure power `a·xⁿ + b`: the `n` roots `ⁿ√(−b/a)·e^(2πik/n)`
+ *   (`nthRoots()`);
+ * - a polynomial in `xᵍ` with `g > 1`: the reduced polynomial is solved,
+ *   then the `g` roots of each `xᵍ = u` (`solveByPowerGcdSubstitution()`);
+ * - otherwise, with numeric coefficients, all the complex roots are found
+ *   numerically, and a pair of them that is the root set of a quadratic
+ *   factor with rational coefficients is replaced by the exact roots of that
+ *   factor (`numericPolynomialRoots()`): `x⁵ + x + 1` is
+ *   `(x² + x + 1)(x³ − x² + 1)`, and the roots `(−1 ± i√3)/2` are exact
+ *   while the three roots of the cubic are floats.
+ *
+ * A list of roots is an answer only when it holds every root, thus
+ * `stats.partial` is set when a root cannot be given: a polynomial of degree
+ * 3 or more with a symbolic coefficient and no closed form above
+ * (`x³ + a·x + 1`), a degree above 12, or a numeric root finder that does
+ * not converge.
+ */
+function rootsOfPolynomialFactor(
+  coeffs: ReadonlyArray<Expression>,
+  x: string,
+  stats?: RootStats,
+  realOnly = false
+): Expression[] {
+  const m = coeffs.length - 1;
+  if (m <= 0) return [];
+  const ce = coeffs[0].engine;
+  if (m === 1) return [ce.function('Divide', [coeffs[0].neg(), coeffs[1]])];
+  if (m === 2)
+    return solveQuadraticByCoefficients(fromCoefficients([...coeffs], x), x);
+  if (coeffs.slice(1, m).every((c) => c.isSame(0)))
+    return nthRoots(
+      ce,
+      ce.function('Divide', [coeffs[0].neg(), coeffs[m]]),
+      m,
+      realOnly
+    );
+  const byGcd = solveByPowerGcdSubstitution(
+    fromCoefficients([...coeffs], x),
+    x,
+    stats
+  );
+  if (byGcd !== null) return [...byGcd];
+  return numericPolynomialRoots(coeffs, x, stats);
+}
+
+/**
+ * The `n` roots of `xⁿ = c` for an integer `n ≥ 1`: `r·(cos θₖ + i·sin θₖ)`
+ * with `r` an n-th root of `c` and `θₖ` one of `n` angles one n-th of a turn
+ * apart. The angles are written with a half turn in the angular unit of the
+ * engine (`halfTurnAngle()`: π in radians, 180 in degrees), so that the
+ * cosine and the sine have their exact values in every unit. The real roots
+ * come first.
+ *
+ * For a real number `c`, `r` is the positive real root `ⁿ√|c|`, and the
+ * angles are `2kπ/n` for `c > 0`, `(2k + 1)π/n` for `c < 0`: `x³ = −8` gives
+ * `−2, 1 ± i√3`. For a symbolic or a complex `c`, `r` is `Root(c, n)`, which
+ * the engine evaluates to one n-th root of `c` (the real one for a real
+ * `c`), and the angles are `2kπ/n`: `x³ = a` gives `∛a` and
+ * `∛a·(−1/2 ± (√3/2)i)`, which are the three roots for each sign of a real
+ * `a`.
+ *
+ * With `realOnly`, for an unknown declared real, a symbolic `c` that the
+ * solver reads as real (`isRealForSolve()`) gives the real roots only:
+ * `ⁿ√c` for an odd `n`, `±ⁿ√c` for an even `n`. The other branches are not
+ * real for `c ≠ 0`, and are `0`, the same as `ⁿ√c`, for `c = 0`; their type
+ * does not decide this (a free parameter), and a root removed by a check
+ * that does not decide makes the list no answer (`filterRootsByType()`):
+ * `x³ = a` with a real `x` has the answer `∛a`. (For an even `n` and a
+ * negative `c`, `Root(c, n)` is not real, and the type filter decides it.)
+ */
+function nthRoots(
+  ce: ComputeEngine,
+  c: Expression,
+  n: number,
+  realOnly = false
+): Expression[] {
+  if (n === 1) return [c];
+  if (c.isSame(0)) return [ce.Zero];
+  const nExpr = ce.number(n);
+  if (realOnly && !isNumber(c) && isRealForSolve(c) === true) {
+    const r = ce.function('Root', [c, nExpr]);
+    return n % 2 === 0 ? [r, r.neg()] : [r];
+  }
+  const halfTurn = halfTurnAngle(ce);
+  // The root at the angle `turns` half turns divided by `n`.
+  const rootAt = (r: Expression, turns: number): Expression => {
+    if (turns === 0) return r;
+    if (turns === n) return r.neg();
+    const theta = ce.function('Divide', [
+      ce.function('Multiply', [ce.number(turns), halfTurn]),
+      nExpr,
+    ]);
+    return ce.function('Multiply', [
+      r,
+      ce.function('Add', [
+        ce.function('Cos', [theta]),
+        ce.function('Multiply', [ce.I, ce.function('Sin', [theta])]),
+      ]),
+    ]);
+  };
+  const realRoots: Expression[] = [];
+  const otherRoots: Expression[] = [];
+  if (isNumber(c) && c.im === 0) {
+    const negative = c.isNegative === true;
+    const r = ce.function('Root', [negative ? c.neg() : c, nExpr]);
+    for (let k = 0; k < n; k++) {
+      const turns = 2 * k + (negative ? 1 : 0);
+      (turns === 0 || turns === n ? realRoots : otherRoots).push(
+        rootAt(r, turns)
+      );
+    }
+    return [...realRoots, ...otherRoots];
+  }
+  const r = ce.function('Root', [c, nExpr]);
+  const roots: Expression[] = [];
+  for (let k = 0; k < n; k++) roots.push(rootAt(r, 2 * k));
+  return roots;
+}
+
+/**
+ * Long division of the polynomial `dividend` by the polynomial `divisor`,
+ * both given by their coefficients in ascending order. Returns the quotient
+ * and the remainder, whose degree is less than the degree of the divisor.
+ * The coefficients are combined with the canonical `Subtract`, `Multiply`
+ * and `Divide`, which fold exact numbers exactly: the quotient of an
+ * integer polynomial by `x − r` with a rational root `r` has exact
+ * rational coefficients.
+ */
+function divideCoefficients(
+  ce: ComputeEngine,
+  dividend: ReadonlyArray<Expression>,
+  divisor: ReadonlyArray<Expression>
+): [Expression[], Expression[]] {
+  const d = divisor.length - 1;
+  const lead = divisor[d];
+  const r = [...dividend];
+  const q: Expression[] = [];
+  for (let k = r.length - 1; k >= d; k--) {
+    const t = ce.function('Divide', [r[k], lead]);
+    q[k - d] = t;
+    for (let j = 0; j <= d; j++)
+      r[k - d + j] = ce.function('Subtract', [
+        r[k - d + j],
+        ce.function('Multiply', [t, divisor[j]]),
+      ]);
+  }
+  if (q.length === 0) q.push(ce.Zero);
+  return [q, r.slice(0, d)];
+}
+
+/** Whether the coefficient `c` is 0: as it is, or after simplification
+ * (a symbolic coefficient `a − a` that canonicalization did not fold). */
+function isZeroCoefficient(c: Expression): boolean {
+  return c.isSame(0) || c.simplify().isSame(0);
+}
+
+/**
+ * All the roots of a polynomial of degree 3 to 12 with numeric coefficients
+ * (`coeffs`, ascending), found with the Durand–Kerner iteration
+ * (`durandKernerRoots()`). The roots are floats (`ce.number()`, real when
+ * the imaginary part is only rounding error), except when two of them are
+ * the root set of a quadratic factor with rational coefficients: that
+ * factor is then divided out exactly and its roots come from the quadratic
+ * formula. By Gauss's lemma, a monic quadratic factor over the rationals of
+ * a polynomial with integer coefficients has coefficients whose
+ * denominators divide the leading coefficient `aₙ`: the candidate factor
+ * `x² − (z₁ + z₂)x + z₁z₂` is read as `x² + (P/aₙ)x + Q/aₙ` with `P`, `Q`
+ * the nearest integers, and it is accepted only when the exact division
+ * leaves no remainder. This is what makes the roots of `x² + x + 1` exact in
+ * `x⁵ + x + 1 = (x² + x + 1)(x³ − x² + 1)`.
+ *
+ * `stats.partial` is set, and the list is empty, when a coefficient is not a
+ * finite real number, when the degree is above 12, or when the iteration
+ * does not converge: the roots cannot all be given.
+ */
+function numericPolynomialRoots(
+  coeffs: ReadonlyArray<Expression>,
+  x: string,
+  stats?: RootStats
+): Expression[] {
+  const ce = coeffs[0].engine;
+  const partial = (): Expression[] => {
+    if (stats) stats.partial = true;
+    return [];
+  };
+  if (coeffs.length - 1 > 12) return partial();
+  const nums: number[] = [];
+  for (const c of coeffs) {
+    const v = c.N();
+    if (!Number.isFinite(v.re) || v.im !== 0) return partial();
+    nums.push(v.re);
+  }
+  const numeric = durandKernerRoots(nums, ce._deadline);
+  if (numeric === null) return partial();
+
+  const result: Expression[] = [];
+  let remaining: Complex[] = numeric;
+  let rest = coeffs;
+  // The leading coefficient of `rest` scaled to an integer polynomial, or
+  // `null` when a coefficient is not a rational with small numerator and
+  // denominator.
+  const integerLead = (cs: ReadonlyArray<Expression>): number | null => {
+    let lcm = 1;
+    for (const c of cs) {
+      if (!isNumber(c) || c.isRational !== true) return null;
+      const den = asSmallInteger(c.numeratorDenominator[1]);
+      if (den === null || den === 0) return null;
+      lcm = lcm2(lcm, den);
+      if (!Number.isSafeInteger(lcm)) return null;
+    }
+    const lead = Math.round(cs[cs.length - 1].re * lcm);
+    return Number.isSafeInteger(lead) && lead !== 0 ? lead : null;
+  };
+  const near = (value: number, integer: number): boolean =>
+    Math.abs(value - integer) <= 1e-6 * (1 + Math.abs(integer));
+  pairs: while (remaining.length >= 2 && rest.length > 3) {
+    const lead = integerLead(rest);
+    if (lead === null) break;
+    for (let i = 0; i < remaining.length; i++) {
+      for (let j = i + 1; j < remaining.length; j++) {
+        const sum = remaining[i].add(remaining[j]);
+        const product = remaining[i].mul(remaining[j]);
+        if (!near(sum.im, 0) || !near(product.im, 0)) continue;
+        const P = Math.round(-sum.re * lead);
+        const Q = Math.round(product.re * lead);
+        if (!near(-sum.re * lead, P) || !near(product.re * lead, Q)) continue;
+        if (!Number.isSafeInteger(P) || !Number.isSafeInteger(Q)) continue;
+        const factor = [ce.number([Q, lead]), ce.number([P, lead]), ce.One];
+        const [quotient, remainder] = divideCoefficients(ce, rest, factor);
+        if (!remainder.every((c) => isZeroCoefficient(c))) continue;
+        result.push(
+          ...solveQuadraticByCoefficients(fromCoefficients(factor, x), x)
+        );
+        rest = quotient;
+        remaining = remaining.filter((_, k) => k !== i && k !== j);
+        continue pairs;
+      }
+    }
+    break;
+  }
+  // The quotient left after the exact factors were divided out can have a
+  // closed form of its own (a quadratic, a pure power): `(x² + x + 1)(x² − 2)`
+  // leaves `x² − 2`, whose roots `±√2` are exact.
+  if (rest !== coeffs)
+    return [...result, ...rootsOfPolynomialFactor(rest, x, stats)];
+  for (const z of remaining)
+    result.push(
+      Math.abs(z.im) <= 1e-8 * (1 + Math.abs(z.re))
+        ? ce.number(z.re)
+        : ce.number(z)
+    );
+  return result;
 }
 
 /** Harmonization rules transform an expr into one or more equivalent
@@ -4658,7 +5055,10 @@ function filterRootsByType(
             : undefined
         );
       }
-      return val.isInfinity === true ? false : keep(isRealForSolve(val));
+      // The type of a complex root written as a product, such as
+      // `(-1/2 + (√3/2)i)·∛2`, is `complex`, which does not decide whether
+      // the value is real: the numeric value then decides it (`isRealRoot()`).
+      return val.isInfinity === true ? false : keep(isRealRoot(val));
     }
     // A variable declared `complex` (or `imaginary`) had no arm at all, so
     // `±oo`, `~oo` and `NaN` all passed into it unchecked. Those names, too,
@@ -4798,33 +5198,4 @@ function findRationalRoots(
     if (value.isSame(0)) roots.push(root);
   }
   return roots;
-}
-
-/**
- * Numeric **real** roots of a univariate polynomial with numeric coefficients,
- * via Durand–Kerner. Used as a last-resort fallback for general cubics/quartics
- * (and higher) that have no rational root, so `solve` returns approximate real
- * roots instead of nothing. Returns `[]` when the coefficients aren't all
- * numeric, the degree is impractically large, or the iteration fails to
- * converge — leaving the (exact) symbolic paths untouched.
- */
-function numericRealRoots(
-  expr: Expression,
-  variable: string,
-  ce: ComputeEngine
-): Expression[] {
-  const coeffs = getPolynomialCoefficients(expr, variable);
-  if (!coeffs) return [];
-  if (coeffs.length - 1 > 12) return []; // degree cap
-
-  const nums: number[] = [];
-  for (const c of coeffs) {
-    const v = c.N().re;
-    if (!Number.isFinite(v)) return []; // a symbolic/parametric coefficient
-    nums.push(v);
-  }
-
-  const roots = realPolynomialRoots(nums, ce._deadline);
-  if (roots === null) return [];
-  return roots.map((r) => ce.number(r));
 }

@@ -1296,13 +1296,75 @@ function solveHigherOrderHomogeneousConstantCoefficient(
   let constantIndex = 0;
   const terms: Expression[] = [];
 
-  for (const { root, multiplicity } of rootMultiplicities) {
+  // A complex root `a + bi` and its conjugate give the real modes
+  // `xᵏ·e^(ax)·cos(bx)` and `xᵏ·e^(ax)·sin(bx)` (`k` below the multiplicity),
+  // with `a` and `b` exact (`Re`, `Im`): the characteristic polynomial
+  // `r³ − 1` has the roots `1` and `(−1 ± i√3)/2`, and the solution is
+  // `c₁eˣ + c₂e^(−x/2)cos(√3x/2) + c₃e^(−x/2)sin(√3x/2)`. The roots of a
+  // polynomial come in conjugate pairs only when its coefficients are real:
+  // the pairing is done only when each coefficient is decided real (a
+  // number, or an expression whose type is real), and it reads two roots as
+  // conjugates when their numeric values are. With a coefficient that is not
+  // decided real (`i`, or a free parameter), and for a complex root with no
+  // conjugate in the list, the complex exponential is kept.
+  const realCoefficients = [...collected.coefficients.values()].every((c) => {
+    const v = c.N();
+    return (Number.isFinite(v.re) && v.im === 0) || c.isExtendedReal === true;
+  });
+  const used = new Set<number>();
+  for (let i = 0; i < rootMultiplicities.length; i++) {
+    if (used.has(i)) continue;
+    const { root, multiplicity } = rootMultiplicities[i];
+    const value = root.N();
+    const conjugateIndex =
+      realCoefficients && Math.abs(value.im) > 1e-12 * (1 + Math.abs(value.re))
+        ? rootMultiplicities.findIndex((candidate, j) => {
+            if (j === i || used.has(j)) return false;
+            if (candidate.multiplicity !== multiplicity) return false;
+            const other = candidate.root.N();
+            return (
+              Math.hypot(other.re - value.re, other.im + value.im) <=
+              1e-9 * (1 + Math.hypot(value.re, value.im))
+            );
+          })
+        : -1;
+    if (conjugateIndex < 0) {
+      for (let power = 0; power < multiplicity; power++) {
+        const coefficient =
+          power === 0
+            ? constants[constantIndex]
+            : constants[constantIndex].mul(x.pow(power)).simplify();
+        terms.push(expTerm(coefficient, root, independentName));
+        constantIndex += 1;
+      }
+      continue;
+    }
+    used.add(i);
+    used.add(conjugateIndex);
+    const representative =
+      value.im > 0 ? root : rootMultiplicities[conjugateIndex].root;
+    const alpha = ce.function('Re', [representative]).evaluate();
+    const beta = ce.function('Im', [representative]).evaluate();
+    const betaX = beta.mul(x).simplify();
+    const cos = ce.function('Cos', [betaX]);
+    const sin = ce.function('Sin', [betaX]);
     for (let power = 0; power < multiplicity; power++) {
-      const coefficient =
-        power === 0
-          ? constants[constantIndex]
-          : constants[constantIndex].mul(x.pow(power)).simplify();
-      terms.push(expTerm(coefficient, root, independentName));
+      const xPower = power === 0 ? ce.One : x.pow(power);
+      terms.push(
+        expTerm(
+          constants[constantIndex].mul(xPower).mul(cos).simplify(),
+          alpha,
+          independentName
+        )
+      );
+      constantIndex += 1;
+      terms.push(
+        expTerm(
+          constants[constantIndex].mul(xPower).mul(sin).simplify(),
+          alpha,
+          independentName
+        )
+      );
       constantIndex += 1;
     }
   }

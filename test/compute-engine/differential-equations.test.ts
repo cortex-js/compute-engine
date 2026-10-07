@@ -818,7 +818,10 @@ describe('DSolve', () => {
     ).toBe(true);
   });
 
-  test('solves third-order homogeneous equation with numeric complex roots', () => {
+  test('solves third-order homogeneous equation with exact complex roots', () => {
+    // The characteristic polynomial r³ − 1 has the roots 1 and (−1 ± i√3)/2:
+    // the complex pair gives the real modes e^(−x/2)·cos(√3x/2) and
+    // e^(−x/2)·sin(√3x/2), with exact coefficients.
     const equation = [
       'Equal',
       [
@@ -831,7 +834,7 @@ describe('DSolve', () => {
     const solution = dsolve(equation);
 
     expect(solution.toString()).toMatchInlineSnapshot(
-      `[y(x) == "c_1" * e^x + "c_2" * cos(0.8660254037844387 * x) * e^(-0.5 * x) + "c_3" * sin(0.8660254037844387 * x) * e^(-0.5 * x)]`
+      `[y(x) == "c_1" * e^x + "c_2" * cos(sqrt(3)/2 * x) * e^(-1/2 * x) + "c_3" * sin(sqrt(3)/2 * x) * e^(-1/2 * x)]`
     );
     expect(
       verifyEquationSolution(equation, solution, {
@@ -1483,8 +1486,8 @@ describe('DSolve', () => {
           rest.length === 0
             ? engine.One
             : rest.length === 1
-            ? rest[0]
-            : engine.function('Multiply', rest);
+              ? rest[0]
+              : engine.function('Multiply', rest);
         return { ...found, coef };
       }
       return undefined;
@@ -2088,9 +2091,8 @@ describe('NDSolveFunction (interpolating-function result surface)', () => {
   });
 
   test('composes with compile(): the literal compiles as a lambda', async () => {
-    const { compile } = await import(
-      '../../src/compute-engine/compilation/compile-expression'
-    );
+    const { compile } =
+      await import('../../src/compute-engine/compilation/compile-expression');
     // A top-level Function literal compiles with `calling: 'lambda'` — its
     // `run` takes POSITIONAL arguments, not a `{vars}` record.
     const compiled = compile(solveExp(), { to: 'javascript' });
@@ -2101,9 +2103,8 @@ describe('NDSolveFunction (interpolating-function result surface)', () => {
   });
 
   test('composes with compile(): the applied form lowers to plain JS', async () => {
-    const { compile } = await import(
-      '../../src/compute-engine/compilation/compile-expression'
-    );
+    const { compile } =
+      await import('../../src/compute-engine/compilation/compile-expression');
     engine.pushScope();
     try {
       engine.assign('ndsfC', solveExp());
