@@ -113,17 +113,12 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 The compiled entry refuses a string for a parameter whose declared type does
 not admit a string (a bare collection, a collection of numbers, `list<string>`,
-`list<character>`). Two cases remain. (1) `S: indexed_collection<character>`
+`list<character>`). Two cases remain. `S: indexed_collection<character>`
 or `collection<character>` with the argument `"😀a"`: a string is exactly
 that type, so refusing it would be wrong, yet compiled `Length(S)` is 3 (the
 interpreter gives 2) and `Drop(S, 1)` is a broken half of the emoji; the
 lowerings should fail closed at compile time for these types, as they do for
-a `string | …` union. (2) An UNDECLARED symbol whose collection type is
-inferred from its uses (`Drop(S, 1)` infers `indexed_collection<unknown>`)
-is not refused, by the ruling that only a declared type is a contract of the
-caller, so compiled `Drop(S, 1)` of `"😀a"` still gives the broken half.
-Decision needed for (2): make the compiled code fail closed for a string when
-the type is only inferred, or keep the declared-only rule. The Python target
+a `string | …` union. The Python target
 has no entry check at all (`compileFunction` emits a plain `def`), and
 Python's `len` counts code points, so it disagrees with the interpreter on
 any string.

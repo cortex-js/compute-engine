@@ -9657,12 +9657,16 @@ function lambdaEntryPlan(
         ? undefined
         : realEntryCheckOf(checkType, mode === 'complex', `argument ${i + 1}`);
     if (check !== undefined) entries.set(i, check);
-    // Only an annotation refuses a string: the type the engine infers for an
-    // unannotated parameter from its uses is not a declaration by the caller.
-    if (t !== undefined && stringRefusedEntryType(t))
+    // A string is refused for an annotated parameter and for an unannotated
+    // one whose type the engine inferred from its uses alike: either way the
+    // compiled code reads the parameter as an array, and the refusal is
+    // about what the code does with the value, not about who stated the
+    // type.
+    const refused = t ?? (isSymbol(p) ? p.type.type : undefined);
+    if (refused !== undefined && stringRefusedEntryType(refused))
       strings.set(
         i,
-        `argument ${i + 1} (type \`${BaseCompiler.declaredTypeText(t)}\`)`
+        `argument ${i + 1} (type \`${BaseCompiler.declaredTypeText(refused)}\`)`
       );
     if (t !== undefined && isListEntryType(t)) {
       lists.push(i);
@@ -9710,14 +9714,11 @@ function varsEntryPlan(
         ? undefined
         : realEntryCheckOf(declared, mode === 'complex', `"${id}"`);
     if (check !== undefined) entries.set(id, check);
-    // Only a declared type refuses a string: the type the engine inferred
-    // for an undeclared symbol from its uses is not a declaration by the
-    // caller (the same rule as the lambda route above).
-    if (
-      declared !== undefined &&
-      sym.valueDefinition?.inferredType !== true &&
-      stringRefusedEntryType(declared)
-    )
+    // A declared type and a type the engine inferred for an undeclared
+    // symbol from its uses refuse a string alike (the same rule as the
+    // lambda route above): the compiled code reads the symbol as an array
+    // either way.
+    if (declared !== undefined && stringRefusedEntryType(declared))
       strings.set(
         id,
         `"${id}" (type \`${BaseCompiler.declaredTypeText(declared)}\`)`

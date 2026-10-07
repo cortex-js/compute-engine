@@ -177,10 +177,11 @@ entry throws a `TypeError` that names the binding and its declared type
 instead (decided by the user, 2026-10-07). A string does not inhabit
 `list<string>`, `list<character>` or `list<list<string>>`, and the
 interpreter refuses it there too. A type alias is read as the type it names.
-Only a declared type is checked: on the function-literal route a parameter
-with a type annotation, on the expression route a symbol with a declaration.
-The type the engine infers for an undeclared symbol from its uses does not
-refuse a string. A type that a string inhabits through a text member is not
+A declared type and an inferred one are checked alike: an annotated
+parameter and a declared symbol, and also an unannotated parameter or an
+undeclared symbol whose collection type the engine inferred from its uses,
+because the compiled code reads the binding as an array in every one of
+these cases. A type that a string inhabits through a text member is not
 affected: `string` itself is compiled as text, and a union with a string
 member (`string | list<number>`) does not compile and runs on the
 interpreter. `indexed_collection<character>` and `collection<character>` are

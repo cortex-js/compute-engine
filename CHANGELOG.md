@@ -94,9 +94,9 @@
   `TypeError` that names the parameter and says that compiled code does not
   accept a string for it; `entryChecks: false` turns the check off with the
   others. The same applies to `list<string>` and `list<character>`, which a
-  string does not inhabit, and to a user-declared alias of such a type. Only a
-  declared type is checked: a symbol whose collection type was inferred from
-  its uses is not refused. A parameter whose declared type admits a string
+  string does not inhabit, and to a user-declared alias of such a type. A
+  symbol or parameter whose collection type the engine inferred from its uses
+  is refused in the same way. A parameter whose declared type admits a string
   (`string`, `indexed_collection<character>`) is not affected. The interpreter fallback of a program that did not compile now
   passes a string or a boolean argument through as that value (a string was
   read as a symbol name, a boolean was refused as "not a number") and returns

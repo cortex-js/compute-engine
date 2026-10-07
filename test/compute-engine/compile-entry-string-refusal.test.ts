@@ -226,38 +226,44 @@ describe('COMPILE entry: a collection of text that a string does not inhabit', (
   });
 });
 
-describe('COMPILE entry: an undeclared symbol is not refused', () => {
+describe('COMPILE entry: an inferred collection type refuses a string too', () => {
   // The engine infers a type for an undeclared symbol from its uses
-  // (`Drop(S, 1)` infers `indexed_collection`). That type is not a
-  // declaration by the caller, so the vars route does not refuse a string
-  // for it, as the lambda route does not refuse one for an unannotated
-  // parameter.
-  it('accepts a string for a symbol inferred `indexed_collection`', () => {
+  // (`Drop(S, 1)` infers `indexed_collection<unknown>`). The compiled code
+  // reads such a symbol as an array exactly as it reads a declared one, so
+  // the refusal applies alike; otherwise `Drop(S, 1)` of `"😀a"` gave a
+  // broken half of the emoji.
+  it('refuses a string for a symbol inferred `indexed_collection`', () => {
     const ce = new ComputeEngine();
     const r = compile(ce.box(['Length', ['Drop', 'S', 1]]), {
       constantFold: false,
     })!;
     expect(r.success).toBe(true);
     expect(ce.symbol('S').valueDefinition?.inferredType).toBe(true);
-    expect(r.run!({ S: 'abc' } as any)).toBe(2);
-    // The compiled code reads the string as an array of UTF-16 code units,
-    // which is the behavior from before the entry refusal: the count is 2,
-    // where the interpreter gives 1 (`Drop` removes one code unit, half of
-    // the emoji).
-    expect(r.run!({ S: EMOJI_A } as any)).toBe(2);
+    expect(r.run!({ S: [1, 2, 3] } as any)).toBe(2);
+    expect(() => r.run!({ S: EMOJI_A } as any)).toThrow(
+      /does not accept a string/
+    );
   });
 
-  it('does not use the entry refusal for a symbol inferred `collection`', () => {
-    // `Length(S)` infers `collection`. The string fails the run-time array
-    // check of the operand (a different check), not the entry refusal.
+  it('refuses a string for a symbol inferred `collection`', () => {
     const ce = new ComputeEngine();
     const r = compile(ce.box(['Length', 'S']), { constantFold: false })!;
     expect(r.success).toBe(true);
     expect(ce.symbol('S').valueDefinition?.inferredType).toBe(true);
     expect(r.run!({ S: [1, 2, 3] } as any)).toBe(3);
     expect(() => r.run!({ S: 'abc' } as any)).toThrow(
-      'Length: the operand is not a list or a set at run time'
+      /does not accept a string/
     );
+  });
+
+  it('refuses a string for an unannotated lambda parameter used as a list', () => {
+    const ce = new ComputeEngine();
+    const r = compile(ce.box(['Function', ['Length', ['Drop', 'S', 1]], 'S']), {
+      constantFold: false,
+    })!;
+    expect(r.success).toBe(true);
+    expect(r.run!([1, 2, 3] as any)).toBe(2);
+    expect(() => r.run!(EMOJI_A as any)).toThrow(/does not accept a string/);
   });
 });
 
