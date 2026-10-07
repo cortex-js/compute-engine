@@ -574,11 +574,68 @@ describe('Series — Laurent expansions at poles (§6)', () => {
     );
   });
 
-  test('ζ(x) at 1 = 1/(x−1) + γ + O(x−1)', () => {
-    expect(series('\\zeta(x)', '1').latex).toBe(
-      '\\frac{1}{x-1}+\\operatorname{EulerGamma}+O\\left(x-1\\right)'
+  test('ζ(x) at 1 = 1/(x−1) + γ − γ₁(x−1) + γ₂/2 (x−1)² − … (GitHub #421)', () => {
+    // DLMF 25.2.4: the coefficient of (x−1)^k is (−1)^k StieltjesGamma(k)/k!.
+    // Before, the expansion stopped at the constant term with `O(x−1)` at
+    // every order.
+    expect(series('\\zeta(x)', '1', 3).latex).toBe(
+      '\\frac{1}{x-1}+\\operatorname{EulerGamma}-(x-1)\\mathrm{StieltjesGamma}(1)+\\frac{1}{2}(\\mathrm{StieltjesGamma}(2)(x-1)^2)-\\frac{1}{6}(\\mathrm{StieltjesGamma}(3)(x-1)^3)+O\\left((x-1)^4\\right)'
     );
     expect(seriesResidue('\\zeta(x)', '1').isSame(1)).toBe(true);
+
+    // The box route of the issue report.
+    const s = ce.box(['Series', ['Zeta', 's'], 's', 1, 3]).evaluate();
+    expect(s.json).toEqual([
+      'Add',
+      [
+        'Multiply',
+        ['Rational', -1, 6],
+        ['StieltjesGamma', 3],
+        ['Power', ['Add', 's', -1], 3],
+      ],
+      [
+        'Multiply',
+        ['Rational', 1, 2],
+        ['StieltjesGamma', 2],
+        ['Power', ['Add', 's', -1], 2],
+      ],
+      ['Negate', ['Multiply', ['Add', 's', -1], ['StieltjesGamma', 1]]],
+      ['Divide', 1, ['Add', 's', -1]],
+      ['BigO', ['Power', ['Add', 's', -1], 4]],
+      'EulerGamma',
+    ]);
+
+    // The Stieltjes constants evaluate numerically, so the truncated series
+    // agrees with ζ near the pole to the order of the first dropped term.
+    const p = normal('\\zeta(x)', '1', 4);
+    expectNumericNearPole(
+      p,
+      (x) => ce.function('Zeta', [ce.number(x)]).N().re,
+      1,
+      [0.05, 0.1, 0.2],
+      1e-8
+    );
+  });
+
+  test('ζ(x) at 1 stays exact above the numeric order limit of StieltjesGamma', () => {
+    // The numeric evaluator of `StieltjesGamma(k)` covers `k ≤ 30`
+    // (`STIELTJES_MAX_ORDER`, numerics/stieltjes.ts): above it, the constant
+    // stays symbolic under `N()`. The exact series does not stop there: the
+    // coefficient of (x−1)^31 is −StieltjesGamma(31)/31! and the remainder is
+    // O((x−1)^32).
+    const s = series('\\zeta(x)', '1', 31);
+    const c31 = ce
+      .function('Divide', [
+        ce.function('StieltjesGamma', [ce.number(31)]).neg(),
+        ce.function('Factorial', [ce.number(31)]),
+      ])
+      .evaluate();
+    const expected = c31.mul(ce.parse('(x-1)^{31}'));
+    expect(s.ops!.some((term) => term.isSame(expected))).toBe(true);
+    expect(s.latex).toContain('O\\left((x-1)^{32}\\right)');
+    expect(ce.function('StieltjesGamma', [ce.number(31)]).N().operator).toBe(
+      'StieltjesGamma'
+    );
   });
 
   test('pole at +∞: x²/(x−1) = x + 1 + 1/x + 1/x² + …', () => {
@@ -917,7 +974,7 @@ describe('Series — exact expansions drop the BigO remainder', () => {
     expect(series('\\frac{1}{\\sin x}').latex).toContain('O\\left(');
   });
 
-  test('ζ(x) at 1 keeps its BigO (hi = 0 fails the gate cheaply)', () => {
+  test('ζ(x) at 1 keeps its BigO (the next Stieltjes coefficient is nonzero)', () => {
     expect(series('\\zeta(x)', '1').latex).toContain('O\\left(');
   });
 

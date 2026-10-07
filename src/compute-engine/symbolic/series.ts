@@ -567,10 +567,10 @@ function assemble(
 // first stored coefficient. `hi` is the highest power for which the coefficient
 // is *complete* — every power `p ≤ hi` is fully known; powers above `hi` are
 // unknown (they become the `BigO` remainder). A regular expansion has `hi = W`;
-// a special function whose closed-form Laurent data is truncated (e.g. `Zeta`
-// at 1, of which only the residue and constant term are elementary) has a
-// smaller `hi`, and that boundary propagates through the arithmetic so the
-// remainder is never overstated.
+// an expansion whose data is reliable only up to some order (e.g. a Stirling
+// asymptotic expansion at infinity, or a polygamma pole expansion, where each
+// differentiation consumes one order) has a smaller `hi`, and that boundary
+// propagates through the arithmetic so the remainder is never overstated.
 
 // A `Laurent` carries a ramification index `d ≥ 1` so it can represent
 // **Puiseux** series (fractional powers): `Σ c[i]·t^{(v+i)/d}`. `v` and `hi`
@@ -878,11 +878,28 @@ function specialLaurent(
   if (!isRecordedPole(ce, op, point)) return null;
 
   if (op === 'Zeta') {
-    // ζ(s) = 1/(s−1) + γ + Σ_{k≥1} (−1)^k/k!·γ_k·(s−1)^k. Only the residue and
-    // the constant (Stieltjes γ_0 = γ) are elementary; higher γ_k are not in
-    // the engine, so `hi = 0` (residue + constant only).
+    // ζ(s) = 1/(s−1) + Σ_{k≥0} (−1)^k·γ_k/k!·(s−1)^k (DLMF 25.2.4), where γ_k
+    // is the k-th Stieltjes constant and γ_0 is Euler's constant. The engine
+    // has `StieltjesGamma(k)` as an exact symbolic constant, so every order of
+    // the Laurent series is available. Its numeric evaluation covers orders up
+    // to `STIELTJES_MAX_ORDER` (30, `numerics/stieltjes.ts`): past that order,
+    // the series is still exact, but `N()` leaves the constant symbolic.
     if (point.re !== 1) return null;
-    return { v: -1, d: 1, c: [ce.One, ce.symbol('EulerGamma')], hi: 0 };
+    const c: Coeffs = [ce.One, ce.symbol('EulerGamma')];
+    let factorial = 1n;
+    for (let k = 1; k <= W; k++) {
+      factorial *= BigInt(k);
+      const gk = ce.function('StieltjesGamma', [ce.number(k)]);
+      c.push(
+        ce
+          .function('Divide', [
+            k % 2 === 0 ? gk : gk.neg(),
+            ce.number(factorial),
+          ])
+          .evaluate()
+      );
+    }
+    return { v: -1, d: 1, c, hi: W };
   }
 
   const re = point.re;

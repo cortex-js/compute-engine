@@ -1,3 +1,15 @@
+## [Unreleased]
+
+### Issues Resolved
+
+- **`Series(Zeta(s), s, 1, n)` gives every order of the Laurent series**
+  ([#421](https://github.com/cortex-js/compute-engine/issues/421)). The
+  expansion of `Zeta` at its pole stopped at the constant term, with an `O(s−1)`
+  remainder at every order. It is now the full Laurent series
+  `1/(s−1) + EulerGamma − StieltjesGamma(1)(s−1) + StieltjesGamma(2)/2 (s−1)² − …`,
+  where the coefficient of `(s−1)^k` is `(−1)^k StieltjesGamma(k)/k!` (DLMF
+  25.2.4). The coefficients stay exact and `N()` evaluates them.
+
 ## 0.149.0 _2026-10-07_
 
 ### Breaking Changes
