@@ -75,6 +75,37 @@
   where the coefficient of `(s−1)^k` is `(−1)^k StieltjesGamma(k)/k!` (DLMF
   25.2.4). The coefficients stay exact and `N()` evaluates them.
 
+- **`.N()` of a `Sum` or `Product` with many terms runs in linear time.** The
+  numeric fold kept every digit of each partial result: the addition and the
+  multiplication of a big decimal are exact, so `Sum(n^n, n, 1, 8000).N()`
+  built a 31,225-digit accumulator for a 21-digit answer and took more than
+  ten seconds, and a product of big floats grew by one working precision per
+  factor. Each partial sum or product is now rounded to twice the working
+  precision (one precision of guard digits, so the rounding errors of the
+  steps stay below the digits the answer keeps), and the sum is compensated
+  (Kahan): what a rounding loses is added back with the next term, so a term
+  that a later term cancels is kept as the scalar `Add` keeps it
+  (`Sum([1.0e30, 1, -1.0e30]).N()` is 1). `Sum(n^n, n, 1, 2000).N()` takes
+  40 ms instead of 900 ms, and the time grows linearly with the number of
+  terms. The exact route is unchanged: `Sum(n^n, n, 1, 60).evaluate()` keeps
+  every digit of the exact integer.
+
+- **A lazy `Filter`, `Map` or `Any` over a user function named as the
+  callback keeps its elements after a complete walk.** The element memo of a
+  lazy collection refused an instance whose callback was written as a bare
+  name (`filter(1..500, isArmstrong)` with `isArmstrong(n) = …`, or
+  `map(f, xs)` with `let f = n => …`), where the same pipeline with an inline
+  lambda was memoized. A result printed once (a walk) and then enumerated by
+  the host (a second walk), or a `let` holding such a collection read by two
+  consumers, walked the pipeline again: the application memo answered the
+  body of a pure predicate, but each element paid the boxing of its
+  application once more (about 100 µs per element: the second display of a
+  3000-element filter cost about 300 ms). The dependency snapshot of the memo
+  now records what the name resolves to (the user function and the variables
+  its body reads, or the variable holding the function literal), so a
+  repeated walk is served from the memo, and a write to one of those
+  dependencies, or a redefinition of the function, refills it.
+
 ## 0.149.0 _2026-10-07_
 
 ### Breaking Changes

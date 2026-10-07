@@ -327,6 +327,17 @@ export class BigNumericValue extends NumericValue {
     return this;
   }
 
+  roundToPrecision(digits: number): NumericValue {
+    // `toPrecision` answers the same object when the part is within
+    // `digits`, so an unchanged value is detected by identity: the real
+    // part of a real value is the one part that can change, and
+    // `imDecimal` is the shared zero constant then.
+    const re = this.decimal.toPrecision(digits);
+    const im = this.imDecimal.toPrecision(digits);
+    if (re === this.decimal && im === this.imDecimal) return this;
+    return this.clone({ re, im });
+  }
+
   neg(): BigNumericValue {
     if (this.isZero) return this;
     if (!this.isComplex) return this.clone(this.decimal.neg());

@@ -324,12 +324,34 @@ function resolveDepBinding(
  * symbol occurrence with no binding at all resolves dynamically through the
  * ambient context at walk time, which a per-instance cache cannot track.
  */
-function snapshotDeps(expr: Expression): ElementMemoDep[] | undefined {
-  return underWalkChain(expr, () => snapshotDepsUnderChain(expr));
+function snapshotDeps(
+  expr: Expression,
+  rawOperands = false
+): ElementMemoDep[] | undefined {
+  return underWalkChain(expr, () => snapshotDepsUnderChain(expr, rawOperands));
 }
 
+/**
+ * `rawOperands`: whether a DIRECT operand of `expr` that is a raw symbol —
+ * a callback written as a bare name, `Filter(xs, isEven)` — is recorded as a
+ * dependency on what the name resolves to, instead of making the instance
+ * ineligible. Only the element memo asks for it: the instance it snapshots
+ * is the lazy collection itself, whose walk resolves such an operand by name
+ * through the scope chain at each application. The other memos that share
+ * this snapshot keep the ineligibility. For a sequence's terms, a
+ * function's applications and a symbol's stored value, the snapshotted
+ * expression is not a lazy instance, and a raw symbol in it is not resolved
+ * by a walk: when every snapshot resolved raw operands, the term memo of a
+ * sequence served an outdated term. The collection-facet memo
+ * (`BoxedFunction._memoizedFacet`) does snapshot the lazy instance itself,
+ * and could opt in on the same terms; it stays conservative on purpose: its
+ * reads of such an instance go through `each()`, which the element memo
+ * already serves, so the facet of a named-callback instance costs one
+ * served walk, and the opt-in is kept to the one memo that was measured.
+ */
 function snapshotDepsUnderChain(
-  expr: Expression
+  expr: Expression,
+  rawOperands: boolean
 ): ElementMemoDep[] | undefined {
   const ce = expr.engine;
   const depScope = depResolutionScope(expr);
@@ -630,6 +652,55 @@ function snapshotDepsUnderChain(
         e.operatorDefinition === undefined &&
         e.isCanonical === false
       ) {
+        // A callback operand written as a bare NAME — `Filter(xs, isEven)`
+        // with `isEven(n) = …`, or `Map(f, xs)` with `let f = n => …` — is
+        // kept as a raw symbol by the canonical form, and each application
+        // resolves the name through the scope chain in force at walk time
+        // (`makeLambda`, `function-utils.ts`). That resolution is the
+        // dependency. A name resolving to a user function is an operator
+        // dependency (validated by the identity of the operator definition
+        // the chain resolves the name to), and the function's body is
+        // visited for its own dependencies, as the body of a user function
+        // applied by name inside a lambda is. A name resolving to a variable
+        // holding a function literal is a chain-resolved value dependency
+        // (the `shadow` form), validated by re-resolving the name and by the
+        // definition's write version. A name the chain cannot resolve keeps
+        // the instance ineligible: it resolves dynamically at each walk.
+        //
+        // Only a DIRECT operand of the instance, and only for the element
+        // memo (`rawOperands`): a raw symbol deeper in the tree, or in an
+        // expression another memo snapshots, is not resolved by the walk this
+        // way, and stays ineligible as before.
+        //
+        // Before this, every lazy `Filter`/`Map`/`Any` over a named user
+        // function was ineligible, so a result printed once (a walk) and
+        // then enumerated by the host (a second walk) walked its pipeline
+        // again, as did two consumers of one `let`: the application memo
+        // answered the body of a pure predicate, but each element paid the
+        // boxing of its application once more.
+        const resolved =
+          rawOperands && isFunction(expr) && expr.ops.includes(e)
+            ? resolveDepBinding(ce, depScope, e.symbol)
+            : undefined;
+        if (isOperatorDef(resolved)) {
+          const name = e.symbol;
+          if (!seenOperatorNames.has(name)) {
+            seenOperatorNames.add(name);
+            deps.push({
+              occurrence: e,
+              name,
+              resolved,
+              resolvedOperator: resolved.operator,
+            });
+          }
+          visitLambdaBody(e, name, resolved.operator, false);
+          return;
+        }
+        if (isValueDef(resolved)) {
+          if (!excluded.has(resolved.value) && !seen.has(resolved.value))
+            visitValueDef(e, resolved.value, true);
+          return;
+        }
         if (DEBUG_DEPS)
           console.log(`[deps] ineligible: unbound symbol '${e.symbol}'`);
         eligible = false;
@@ -705,7 +776,10 @@ function snapshotDepsUnderChain(
  * `undefined` when the instance is ineligible (see `snapshotDeps`). The
  * public seam of this module's dependency machinery, shared by the element
  * memo and the collection-facet memo (`BoxedFunction._memoizedFacet`) so the
- * two can never diverge on what counts as a dependency. The returned value
+ * two agree on what counts as a dependency, with one difference: a direct
+ * raw-symbol operand of the instance (a callback named bare) is a dependency
+ * for the element memo only (`rawOperands` of `snapshotDepsUnderChain`), so
+ * the facet memo of such an instance stays ineligible. The returned value
  * is opaque: hold it and hand it back to `memoDepsStillValid`.
  */
 export function snapshotMemoDeps(expr: Expression): MemoDeps | undefined {
@@ -928,7 +1002,7 @@ function commitRecordedWalk(
   // impure walk is fine: it IS the instance's draw set.
   if (!complete && !expr.isPure) return;
   if (suspendedEpochChange) return;
-  const endDeps = snapshotDeps(expr);
+  const endDeps = snapshotDeps(expr, true);
   if (endDeps === undefined) return;
   if (suspendedWrite && !depsUnmoved(startDeps, endDeps)) return;
   // Never shrink coverage: a still-valid entry that already covers at least
@@ -986,7 +1060,7 @@ export function* elementMemoRecordingStream(
   let drained = false;
   // Dependencies are static in the tree, so a pre-walk snapshot is valid; it
   // is the baseline the end-of-walk snapshot is diffed against.
-  const startDeps = snapshotDeps(expr);
+  const startDeps = snapshotDeps(expr, true);
   // A stop of a sequence read between here and the commit, also one made
   // by the consumer between two pulls, prevents the commit.
   const sequenceStopsBefore = sequenceReadStopCount();
@@ -1139,7 +1213,7 @@ export function elementMemoFillTo(
   // Same purity gate as `commitRecordedWalk`: a PARTIAL prefix of an impure
   // instance would be replaced by a later re-drawing complete walk, so
   // `at()` reads before and after would disagree — partials are pure-only.
-  const deps = complete || expr.isPure ? snapshotDeps(expr) : undefined;
+  const deps = complete || expr.isPure ? snapshotDeps(expr, true) : undefined;
   // …and the same payload rule: an element holding a mutable object is never
   // memoized, because the entry would keep that object alive (ruling B12) and
   // its contents are not part of what the version stamps validate.

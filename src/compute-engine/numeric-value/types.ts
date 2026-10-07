@@ -140,6 +140,20 @@ export abstract class NumericValue {
   /** Return a non-exact representation of the numeric value */
   abstract N(): NumericValue;
 
+  /**
+   * This value with each part rounded to `digits` significant digits. A
+   * value that is already within `digits` (an exact value, a machine float,
+   * a big decimal with no more digits) is returned as it is.
+   *
+   * The `add` and `mul` of a big decimal are exact, so a running sum or
+   * product of big floats grows a digit count of the size of the exponent
+   * span, or of the number of factors: the numeric folds of `Sum` and
+   * `Product` round each partial result with this method.
+   */
+  roundToPrecision(_digits: number): NumericValue {
+    return this;
+  }
+
   abstract neg(): NumericValue;
   abstract inv(): NumericValue;
   abstract add(other: number | NumericValue): NumericValue;

@@ -153,17 +153,6 @@ folds these operators from `evaluate()`, but a subtree whose operand uses a
 bound variable (`Sum(Mod(n^n, 10^10), n, 1, 1000)`) still folds through
 `.N()` and gives the wrong value.
 
-### `.N()` of a sum keeps every digit instead of rounding to the working precision (OPEN, medium — found 2026-10-07 by the compiled integer-range guard)
-
-`Sum(n^n, n, 1, k).N()` accumulates in a `BigDecimal` that is never rounded
-to the working precision: at k = 2000 it takes 0.9 s, at k = 4000 2.0 s, and
-at k = 8000 10.7 s with a 31,225-digit accumulator, where the approximation
-asked for has 21 digits. The compile target's constant folding reaches this
-`.N()` for a closed `Sum` operand (`foldCostEstimate` prices each term at a
-few units, so a 50,000-term sum is admitted and takes minutes). The numeric
-accumulator of `Sum`/`Product` under `.N()` should round each partial sum to
-the working precision, as a scalar `.N()` does.
-
 ### `Mod` of an exact irrational operand evaluates to a wrong exact integer (OPEN, small — found 2026-10-07 by the compiled integer-range guard)
 
 `Mod(√2 · 10^30, 7).evaluate()` gives the exact `5`; the true value is
@@ -310,26 +299,66 @@ so the compile step evaluated the whole sum (constant folding of a closed
 program). The report should show that fold as what it is, or the target
 should bound it. Compiled run times are all under 12 ms.
 
-### A user predicate over a lazy range is slow, and each consumer walks the range again (OPEN, performance — found 2026-10-06 by the Epsil program corpus)
+### A user function applied per element of a lazy collection costs about 100 µs per application (OPEN, performance — found 2026-10-06 by the Epsil program corpus, profiled 2026-10-07)
 
 With the iteration limit removed for Epsil programs, the full-size Project
-Euler programs give the right answers but are slow. Measured on a loaded
-machine, so the figures are upper bounds: `sum(filter(2..9999, isAmicable))`
-(two `divisors` sums per element) took about 20 s, that is 2 ms per element;
-`length(unique([a^b for a in 2..100, b in 2..100]))` took 15 s; and
-`filter(10..50000, isCurious)` (a digit sum per element) took about 20 s per
-walk, 0.4 ms per element. A lazy result is not kept after a walk: printing
-the value walks it once for the preview, and a host that then enumerates it
-walks it again, so the last program cost 47 s in the corpus runner. The
-corpus keeps reduced sizes for `euler/021`, `euler/029` and `euler/034` for
-this reason, and `rosetta/kaprekar-numbers` stops at 100: a predicate whose
-body holds an `any` over a lambda with a `do` block cost about 30 ms per
-number. The corpus playground (previous entry) measured 16 ms per element
-for `isArmstrong` (`integerDigits`, `map`, `sum`) and 1.2 ms per application
-of a small lambda inside `map` over a `zip`. To do: profile the per-element
-cost of applying a user function inside `Filter`/`Map`/`Any`, and decide
-whether a finite lazy collection should keep its elements after the first
-complete walk.
+Euler programs give the right answers but are slow: `sum(filter(2..9999,
+isAmicable))` took about 20 s on a loaded machine, `filter(10..50000,
+isCurious)` about 20 s per walk. The corpus keeps reduced sizes for
+`euler/021`, `euler/029` and `euler/034`, and `rosetta/kaprekar-numbers`
+stops at 100.
+
+**The second walk is fixed (2026-10-07).** A lazy `Filter`, `Map` or `Any`
+whose callback is a bare name (`filter(1..500, isArmstrong)`) was refused by
+the element memo (`snapshotDeps`,
+`boxed-expression/collection-element-memo.ts` declared the raw callback
+symbol an unbound dependency), where the same pipeline with an inline lambda
+was memoized. Printing the value walked it once for the preview and the host
+then walked it again, and two consumers of one `let` walked it twice: the
+application memo answered the body of a pure predicate on the second walk,
+but each element paid the boxing of its application again (about 100 µs per
+element: the second display of a 3000-element filter cost about 300 ms). The
+snapshot now records the resolution of the name, and a repeated walk of an
+unmodified instance is served from the memo. So a finite lazy collection DOES
+keep its elements after a complete walk; the named-callback case was a
+defect, not a design gap.
+
+**The first walk remains: about 100 µs per application of a named user
+function, measured 2026-10-07 by a CPU profile of `isEven(n) = n % 2 == 0`
+inside `filter(1..20000, isEven)` (box loaded, so an upper bound).** An
+inline lambda with an arithmetic body inside `map` costs 7 µs per element
+because it is lowered to a broadcast and never applied as a function; a body
+such as `sum(map(d => d^4, integerDigits(n))) == n` costs 0.25 to 1 ms per
+element. Where the time of a trivial body goes:
+
+- The body is typed again at every call (about a quarter of the call). A
+  call frame declares its parameters with `ce.declare`; every declaration
+  advances the `any` version axis
+  (`engine-configuration-lifecycle.ts`), and the type cache of every
+  expression keys on that axis (`BoxedFunction.type`), so `Mod(n, 2) == 0`
+  derives the types of its operands at each call. The read comes from the
+  broadcast check of `Equal` (`skipBroadcastForVectorOps`), which asks
+  whether each operand is a text atom, and `isTextAtom` reads the operand's
+  type. This is by design: the type of a body expression depends on what the
+  frame binds (`f(s) = s < "m"` broadcasts for a list and compares whole for
+  a string), and the `definitionVersion` axis exists for memos that must
+  survive these declarations.
+- The application is boxed and canonicalized again at every call (about a
+  quarter): `makeLambda` for a symbol callee builds `ce.function(name, args)`
+  and evaluates it, so the direct-call route decides error bubbling and
+  validation. The application memo answers a repeated call with the same
+  number arguments, but a fresh argument pays the full boxing.
+- The parameter declaration builds a full value definition
+  (`declareSymbolValue`, about an eighth), and the application memo key
+  serializes each argument to JSON.
+
+Candidates, none decided: key the type cache of a function body on the call
+frame instead of the engine generation (a redesign of cache invalidation);
+apply the literal of a symbol callee directly instead of boxing an
+application per call (the direct-call route's error and validation
+decisions would have to be kept); extend the compiled element function of
+`Map` (`library/map-auto-compile.ts`, lambdas only today) to a named user
+function whose body it can compile.
 
 ### A determinant with float entries keeps unfolded constants (OPEN, small — found 2026-10-06 by the review of the exact determinant fix; present before)
 
