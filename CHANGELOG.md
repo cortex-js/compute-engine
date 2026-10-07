@@ -2,6 +2,14 @@
 
 ### Issues Resolved
 
+- **A spread of a `map` over a set runs the callback once per element.** A list
+  literal with a spread of a lazy collection (`[...map(f, {1, 2, 3})]`) read the
+  count of the spread operand before listing its elements, and the count of a
+  set-producing `map` is the number of distinct results, which walks the
+  elements and calls the callback: the callback ran twice per element, and a
+  callback with a side effect (a random draw) ran it twice. The count of such an
+  operand is no longer read before the walk, as for a `filter`.
+
 - **`EllipticPi` with a complex parameter, or a characteristic above 1, has a
   finite value**
   ([#422](https://github.com/cortex-js/compute-engine/issues/422)).

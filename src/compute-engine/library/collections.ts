@@ -16192,16 +16192,23 @@ type SnapshotBudget = { used: number; max: number };
 /**
  * True when the `count` of the collection `x` is known without a walk of its
  * elements: a collection that is not lazy (a `List`, a `Set`, a string), a
- * `Range`, a `Linspace`, or a `Map` whose sources have such a count. Any
- * other lazy collection can have a count that walks its elements and calls
- * its callbacks: the count of a `Filter` calls the predicate on each
- * element.
+ * `Range`, a `Linspace`, or a list-producing `Map` whose sources have such a
+ * count. Any other lazy collection can have a count that walks its elements
+ * and calls its callbacks: the count of a `Filter` calls the predicate on
+ * each element, and the count of a set-producing `Map` (a `Map` over a
+ * `Set`) counts the DISTINCT results by walking `each()`, which calls the
+ * callback on every element (`distinctCount`). Reading such a count before
+ * the walk would call the callback twice per element, and a callback with a
+ * side effect, such as a random draw, would take effect twice.
  */
 function hasConstantTimeCount(x: Expression): boolean {
   if (!x.isLazyCollection) return true;
   if (isFunction(x, 'Range') || isFunction(x, 'Linspace')) return true;
   if (isFunction(x, 'Map') && x.nops >= 2)
-    return x.ops.slice(1).every((source) => hasConstantTimeCount(source));
+    return (
+      !producesSet(x) &&
+      x.ops.slice(1).every((source) => hasConstantTimeCount(source))
+    );
   return false;
 }
 
