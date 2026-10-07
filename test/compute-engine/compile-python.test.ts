@@ -778,10 +778,11 @@ describe('PYTHON TARGET', () => {
       // The quotient is rounded with a tie toward +∞, as the interpreter does
       // with `Math.round`: `np.round` rounds a tie to even, and
       // `Remainder(5, 2)` was `1` instead of `-1`.
-      expect(code).toContain('def _ce_round(');
-      expect(code.split('\n').at(-1)).toBe(
-        "((a) - (b) * _ce_round((a) / (b), 'toward-positive-infinity'))"
-      );
+      expect(code).toContain('def _ce_remainder(');
+      expect(code).toContain('np.logical_and(_d == 0.5, np.greater(_q, 0))');
+      // The `_ce_remainder` helper checks each operand once, and raises
+      // beyond the safe integer range.
+      expect(code.split('\n').at(-1)).toBe('_ce_remainder(a, b)');
     });
 
     it('Round is half-away-from-zero, not np.round banker (P0-41)', () => {

@@ -153,7 +153,9 @@ describe('COMPREHENSION GUARD — compiled', () => {
     );
     // The guard is the decided-true test of the three-valued condition
     // lowering, not a bare truthiness test.
-    expect(code).toMatch(/\[x \*\* 2 for x in .* if .*np\.mod\(x, 2\).*\]/);
+    // The `Mod` operands go through the safe-integer-range check of the
+    // Python target (`_ce_int_operands`), so the pattern reads through it.
+    expect(code).toMatch(/\[x \*\* 2 for x in .* if .*np\.mod\(.*x.*, 2\).*\]/);
   });
 
   test('Python: a guarded Loop statement declines', () => {

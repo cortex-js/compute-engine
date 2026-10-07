@@ -164,7 +164,12 @@ const EPSIL_CASES: [string, string, string, string[]][] = [
     '(collection<unknown>) -> list<integer>',
     [LIST],
   ],
-  ['Zip', 'zip(xs, xs)', '(indexed_collection<any>) -> list', [LIST]],
+  [
+    'Zip',
+    'zip(xs, xs)',
+    '(indexed_collection<any>) -> list<tuple<any, any>>',
+    [LIST],
+  ],
   [
     'Tally',
     'tally(xs)',

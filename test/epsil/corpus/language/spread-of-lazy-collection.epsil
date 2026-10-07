@@ -1,8 +1,6 @@
-// corpus: known-failure spreading a lazy collection into a list literal keeps a lazy recipe instead of a list (ROADMAP: "A list literal does not snapshot a spread lazy collection")
-// A list literal snapshots its elements, and `[...xs, k]` is the documented
-// way to grow a list. When the spread operand is lazy (`take`, `drop`), the
-// literal becomes a `ListJoin(Take(…), …)` recipe: it prints as a recipe,
-// nests one level per loop turn, and does not compare equal to the list.
+// A list literal snapshots its elements, including a spread operand that is
+// a finite lazy collection: the literal is a plain list, prints as one, and
+// a loop that rebuilds a list from `take`/`drop` parts does not nest.
 let ys = [1, 2, 3, 4]
 let zs = [...take(ys, 1), 9, ...drop(ys, 2)]
 (zs, zs == [1, 9, 3, 4])

@@ -22,6 +22,7 @@ import {
   secWithPole,
   cscWithPole,
   floorModDouble,
+  isBeyondSafeInteger,
 } from '../numerics/numeric.js';
 import { gamma } from '../numerics/special-functions.js';
 import { Complex } from 'complex.js';
@@ -1119,9 +1120,19 @@ const JAVASCRIPT_EMITTED_FOLD: EmittedFoldDialect = {
     '_SYS.sec': unaryFold(secWithPole),
     '_SYS.csc': unaryFold(cscWithPole),
     '_SYS.pow3': unaryFold((x) => x * x * x),
-    // `_SYS.floorMod` is the lowering of `Mod`; it folds with the function
-    // the runtime calls.
-    '_SYS.floorMod': binaryFold(floorModDouble),
+    // `_SYS.floorMod` is the lowering of `Mod` and `_SYS.remainder` the one
+    // of `Remainder`; each folds with the function the runtime calls. The
+    // runtime throws a `RangeError` for an operand beyond the safe integer
+    // range or infinite (`integerOperand` in `javascript-runtime.ts`), so
+    // such a call is not folded: it is left to run time, where it throws.
+    '_SYS.floorMod': (args) =>
+      args.length === 2 && !args.some(isBeyondSafeInteger)
+        ? floorModDouble(args[0], args[1])
+        : undefined,
+    '_SYS.remainder': (args) =>
+      args.length === 2 && !args.some(isBeyondSafeInteger)
+        ? args[0] - args[1] * Math.round(args[0] / args[1])
+        : undefined,
     '_SYS.pow4': unaryFold((x) => {
       const s = x * x;
       return s * s;

@@ -238,6 +238,7 @@ import {
   exactValueDoubleRoundings,
 } from '../numeric-value/exact-integer-value.js';
 import { rangeCount, RANGE_COUNT_JS_SOURCE } from '../numerics/range-count.js';
+import { isBeyondSafeInteger } from '../numerics/numeric.js';
 import { smallCount } from '../boxed-expression/collection-count.js';
 
 /** `real<0..>`: every real number that is not negative. */
@@ -373,6 +374,59 @@ const MONTE_CARLO_FOLD_EXCLUSIONS: ReadonlySet<string> = new Set([
   'Integrate',
   'NIntegrate',
 ]);
+
+/**
+ * The operators whose value depends on every digit of an operand, so that a
+ * rounded operand gives a different number and not a less precise one: the
+ * remainders and the common divisor and multiple. Their compiled lowerings
+ * refuse an operand beyond the safe integer range at run time
+ * (`integerOperand` in `javascript-runtime.ts`), and the constant fold
+ * declines for the same operand (`unsafeIntegerOperands`). An operand at
+ * a parameter that an operator's signature declares `integer` is treated
+ * the same way, with no need to be listed here.
+ */
+const DIGIT_DEPENDENT_OPERATORS: ReadonlySet<string> = new Set([
+  'Mod',
+  'Remainder',
+  'GCD',
+  'LCM',
+]);
+
+/**
+ * An operand found by `unsafeIntegerOperands`, with the number of decimal
+ * digits of the integer part of its magnitude (`Infinity` when the
+ * approximate value overflowed). The digit count prices the exact fold
+ * (`exactFoldValue`).
+ */
+type UnsafeIntegerOperand = {
+  readonly operand: Expression;
+  readonly digits: number;
+};
+
+/**
+ * The largest operand, in decimal digits, that the exact constant fold of a
+ * digit-reading operation accepts (`exactFoldValue`). A larger operand
+ * declines the fold.
+ *
+ * `foldCostEstimate` prices the `.N()` evaluation, where one arithmetic
+ * operation costs about the same at every magnitude. The exact evaluation
+ * computes with every digit, so its cost grows with the size of the values,
+ * and the estimate does not see that. Measured: the exact sum of `n^n` for
+ * `n = 1..1000` (3,001 digits) takes about 80 ms, and for `n = 1..5000`
+ * (18,495 digits) about 2.7 s. The cap admits the first and declines the
+ * second. It also admits the usual large constants of exact integer
+ * problems: `2^1000` has 302 digits.
+ */
+const EXACT_FOLD_MAX_DIGITS = 5_000;
+
+/**
+ * The decimal digits in one 64-bit word of a big integer (64 · log10 2 ≈
+ * 19.3), rounded down. The exact fold prices one exact operation on a value
+ * of `d` digits as `d / EXACT_FOLD_DIGITS_PER_WORD` units of the cost
+ * estimate, where one unit is one machine-number operation: an exact
+ * addition does one word operation per word of its operands.
+ */
+const EXACT_FOLD_DIGITS_PER_WORD = 19;
 
 /**
  * Cap on the element count of a constant collection folded to a literal list
@@ -2988,6 +3042,7 @@ export class BaseCompiler {
       BaseCompiler._foldValueBlockedMemo = new Map();
       BaseCompiler._foldValueImpureMemo = new Map();
       BaseCompiler._foldValueMentionsMemo = new Map();
+      BaseCompiler._unsafeOperandsMemo = new WeakMap();
       // (The fold-aware oracle latch `_oracleFoldTarget` is synced below,
       // OUTSIDE this depth-0 block — a re-entrant nested compile must be
       // able to switch it off.)
@@ -6715,6 +6770,18 @@ export class BaseCompiler {
   >();
 
   /**
+   * Per-compilation memo of `unsafeIntegerOperands`, keyed per target then
+   * per expression, like `_foldValueMemo`; reset with `_foldValueMemo` at
+   * each outermost compilation entry. Without it, every subtree was scanned
+   * again from each of its ancestors, and a nesting of digit operators
+   * (`DigitSum(DigitSum(…))`) was scanned an exponential number of times.
+   */
+  private static _unsafeOperandsMemo = new WeakMap<
+    object,
+    Map<Expression, ReadonlyArray<UnsafeIntegerOperand>>
+  >();
+
+  /**
    * Is `expr` impure once every assigned symbol value it reaches is looked
    * through? `expr.isPure` stops at a symbol that has a value, so
    * `a := r + r` with `r := Random()` reports pure; the body of a called
@@ -6932,6 +6999,200 @@ export class BaseCompiler {
   }
 
   /**
+   * The operands, in the constant subtree `expr`, of an operation that reads
+   * every digit of its operand, whose numeric value is beyond the safe
+   * integer range `±(2^53 − 1)` or infinite. The operations are the
+   * operators of `DIGIT_DEPENDENT_OPERATORS`, and any operand at a parameter
+   * that the operator's signature declares `integer` (`DigitSum`,
+   * `IntegerDigits`, …). Empty for most subtrees.
+   *
+   * When there is such an operand, the fold value cannot come from `.N()`. `.N()`
+   * approximates each operand first, `2^1000` to a 21-digit decimal, and the
+   * integer operation then reads the rounded value as an exact integer:
+   * `DigitSum(2^1000)` folded to `84`, the sum of those 21 digits, where
+   * `evaluate()` answers `1366`, and `Mod(Σ n^n, 10^10)` over `n = 1..1000`
+   * folded to `2683211021` where `evaluate()` answers `9110846700`. The
+   * fold takes the value of `evaluate()` instead, when it is exact
+   * (`exactFoldValue`), and declines otherwise. A declined fold leaves the
+   * subtree to its structural lowering, whose run-time helper refuses the
+   * same operand (`integerOperand` in `javascript-runtime.ts`), or which
+   * declines when the target has no lowering for the operator. An operand
+   * that is NaN is not beyond the range: NaN propagates.
+   *
+   * Each checked operand is evaluated through `constantFoldValue`, whose
+   * memo the top-down fold reads again when it reaches that operand, so the
+   * evaluation is not repeated. An operand that does not fold itself (it
+   * mentions a variable bound in the subtree, such as the index of a `Sum`)
+   * cannot be checked here and keeps the `.N()` value.
+   *
+   * The answer for a node is the checked operands among its own operands,
+   * followed by the answer for each operand. It is memoized per node
+   * (`_unsafeOperandsMemo`), so one compilation scans each node once, however
+   * many ancestors ask.
+   */
+  private static unsafeIntegerOperands(
+    expr: Expression,
+    target: CompileTarget<Expression>
+  ): ReadonlyArray<UnsafeIntegerOperand> {
+    if (!isFunction(expr)) return [];
+    let byExpr = BaseCompiler._unsafeOperandsMemo.get(target);
+    const cached = byExpr?.get(expr);
+    if (cached !== undefined) return cached;
+    // The number of decimal digits of the integer part of `|v|`, read from
+    // the working-precision value when there is one, since a machine number
+    // overflows to `Infinity` beyond about 308 digits.
+    const digitsOf = (v: Expression): number => {
+      if (!isNumber(v)) return Infinity;
+      const big = v.bignumRe;
+      if (big !== undefined)
+        return big.isFinite() ? big.exponent + big._digitCount() : Infinity;
+      const x = Math.abs(v.re);
+      return Number.isFinite(x) ? Math.floor(Math.log10(x)) + 1 : Infinity;
+    };
+    // The digit count of the largest value of `op` beyond the safe integer
+    // range, or `undefined` when there is no such value.
+    const unsafeDigits = (op: Expression): number | undefined => {
+      const folded = BaseCompiler.constantFoldValue(op, target);
+      if (folded === undefined) return undefined;
+      let digits: number | undefined = undefined;
+      for (const v of folded.elements ?? [folded.value])
+        if (isNumber(v) && !v.isComplex && isBeyondSafeInteger(v.re))
+          digits = Math.max(digits ?? 0, digitsOf(v));
+      return digits;
+    };
+    const engine = expr.engine;
+    const result: UnsafeIntegerOperand[] = [];
+    const h = expr.operator;
+    const all = DIGIT_DEPENDENT_OPERATORS.has(h);
+    const def = all ? undefined : engine.lookupDefinition(h);
+    const signature =
+      def !== undefined && 'operator' in def
+        ? def.operator.signature?.type
+        : undefined;
+    for (const [i, op] of expr.ops.entries()) {
+      let checked = all;
+      if (!checked && signature !== undefined) {
+        const t = BaseCompiler.signatureParamType(signature, i);
+        checked = t !== undefined && isSubtype(t, 'integer');
+      }
+      if (checked) {
+        const digits = unsafeDigits(op);
+        if (digits !== undefined) result.push({ operand: op, digits });
+      }
+      result.push(...BaseCompiler.unsafeIntegerOperands(op, target));
+    }
+    if (byExpr === undefined) {
+      byExpr = new Map();
+      BaseCompiler._unsafeOperandsMemo.set(target, byExpr);
+    }
+    byExpr.set(expr, result);
+    return result;
+  }
+
+  /**
+   * The fold value of `expr` taken from `evaluate()`, for a subtree where an
+   * operation that reads every digit of its operand has the operands
+   * `unsafe`, beyond the safe integer range (`unsafeIntegerOperands`). The
+   * exact result is approximated once, at the end, so it is the float of the
+   * value the interpreter answers.
+   *
+   * `undefined`, and the fold declines, when an operand in `unsafe` is not
+   * an exact RATIONAL, or the result is not exact: a symbolic value, an
+   * inexact number, or a list with such an element. The operands are checked
+   * first because an integer operation is exact only on an exact rational
+   * operand: `√2 · 10^30` is an exact value but not a rational, and
+   * `evaluate()` of `Mod` reads a rounding of it and answers the exact `5`,
+   * where the value is `0.698…`.
+   *
+   * The fold also declines when the exact evaluation is too expensive.
+   * `foldCostEstimate`, which admitted the subtree, prices the `.N()`
+   * evaluation, where an operation costs the same at every magnitude; an
+   * exact operation costs more as its values get larger. So the fold
+   * declines when an operand has more than `EXACT_FOLD_MAX_DIGITS` digits,
+   * or when the iterations of the `Sum` and `Product` operators in the
+   * subtree, times the size of the largest operand in machine words, exceed
+   * `CONSTANT_FOLD_MAX_COST`. The size of the largest operand is an upper
+   * bound for the values that each iteration computes when the operand is
+   * the result of the iteration, as in `Mod(Sum(n^n, …), 10^10)`.
+   *
+   * Each operand in `unsafe` is evaluated once, and the subtree is then
+   * evaluated with the operand replaced by its exact value, so the operand
+   * is not evaluated a second time.
+   */
+  private static exactFoldValue(
+    expr: Expression,
+    unsafe: ReadonlyArray<UnsafeIntegerOperand>
+  ): Expression | undefined {
+    const digits = Math.max(...unsafe.map((u) => u.digits));
+    if (!(digits <= EXACT_FOLD_MAX_DIGITS)) return undefined;
+    const words = Math.ceil(digits / EXACT_FOLD_DIGITS_PER_WORD);
+    if (!(BaseCompiler.bigOpIterations(expr) * words <= CONSTANT_FOLD_MAX_COST))
+      return undefined;
+
+    const allItems = (
+      v: Expression,
+      test: (x: Expression) => boolean
+    ): boolean =>
+      (isFunction(v, 'List') || isFunction(v, 'Tuple') ? v.ops : [v]).every(
+        test
+      );
+    const operands = new Set(unsafe.map((u) => u.operand));
+    // A copy of `node` where each operand in `unsafe` is replaced by its
+    // exact value, or `undefined` when an operand is not an exact rational.
+    // The walk does not go into a replaced operand. An operand in `unsafe`
+    // inside another one was already checked: the outer operand is in
+    // `unsafe` only if it has a fold value, and its own fold was exact
+    // (this function) because the inner operand is beyond the range.
+    let rational = true;
+    const replace = (node: Expression): Expression => {
+      if (!rational) return node;
+      if (operands.has(node)) {
+        const v = node.evaluate();
+        rational = allItems(
+          v,
+          (x) => isNumber(x) && x.isExact && x.isRational === true
+        );
+        return v;
+      }
+      if (!isFunction(node)) return node;
+      const ops = node.ops.map(replace);
+      if (ops.every((op, i) => op === node.ops[i])) return node;
+      return node.engine._fn(node.operator, ops, {
+        canonical: node.isCanonical,
+        scope: node.localScope,
+      });
+    };
+    const replaced = replace(expr);
+    if (!rational) return undefined;
+    const v = replaced.evaluate();
+    if (isSymbol(v, 'True') || isSymbol(v, 'False')) return v;
+    return allItems(v, (x) => isNumber(x) && x.isExact) ? v.N() : undefined;
+  }
+
+  /**
+   * The number of times the `Sum` and `Product` operators of `expr` repeat
+   * their body: the product of the iteration counts along the most expensive
+   * chain of nested operators, `0` when there is none, and `Infinity` when a
+   * count is not static. The count of the one-operand form (`Sum(xs)`) is
+   * the size of its collection, `1` when that size is not static, as in
+   * `foldCostEstimate`. For the cost of an exact fold (`exactFoldValue`).
+   */
+  private static bigOpIterations(expr: Expression, depth = 0): number {
+    if (!isFunction(expr)) return 0;
+    if (depth > CONSTANT_FOLD_MAX_DEPTH) return Infinity;
+    let inner = 0;
+    for (const op of expr.ops)
+      inner = Math.max(inner, BaseCompiler.bigOpIterations(op, depth + 1));
+    if (expr.operator !== 'Sum' && expr.operator !== 'Product') return inner;
+    const trips =
+      expr.ops.length >= 2
+        ? BaseCompiler.bigOpTripCount(expr)
+        : (BaseCompiler.staticCollectionSize(expr.ops[0], depth + 1) ?? 1);
+    if (trips === undefined) return Infinity;
+    return trips * Math.max(1, inner);
+  }
+
+  /**
    * Does `expr` mention a free symbol, or an impure operation, once every
    * assigned symbol value it reaches is looked through?
    *
@@ -7141,6 +7402,11 @@ export class BaseCompiler {
     let byExpr = BaseCompiler._foldValueMemo.get(target);
     const hit = byExpr?.get(expr);
     if (hit !== undefined) return hit === 'declined' ? undefined : hit;
+    // An operand beyond the safe integer range at a position that reads
+    // every digit: the value comes from `evaluate()`, not `.N()` (see
+    // `unsafeIntegerOperands`). Read after the memo, since the scan
+    // folds the operands it checks, which is the work the memo saves.
+    const unsafe = BaseCompiler.unsafeIntegerOperands(expr, target);
     BaseCompiler._boundVarsCtx = undefined;
     BaseCompiler._binderShield = [];
     try {
@@ -7165,7 +7431,11 @@ export class BaseCompiler {
       // budget. An AMBIENT deadline armed by the caller still cancels the
       // whole compilation through the ordinary check sites.
       value = (() => {
-        const v = expr.N();
+        const v =
+          unsafe.length > 0
+            ? BaseCompiler.exactFoldValue(expr, unsafe)
+            : expr.N();
+        if (v === undefined) return undefined;
         elements = BaseCompiler.foldableCollectionElements(
           v,
           target.maxInlineElements ?? CONSTANT_FOLD_MAX_INLINE_ELEMENTS

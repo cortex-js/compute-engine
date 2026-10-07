@@ -1,8 +1,6 @@
-// corpus: known-failure a lazy collection passed to a recursive call loses the binding of the block local its lambda reads (ROADMAP: "Lazy argument to a recursive call loses its block binding")
 // Quicksort as a pure recursive function over filtered partitions. Each
 // partition is a lazy `filter` whose lambda reads the block local `pivot`;
-// passed to the recursive call, it is evaluated after the block exited.
-// `rosetta/quicksort-typed` materializes each partition and works.
+// passed to the recursive call, it keeps that binding.
 quicksort(xs) =
   xs if length(xs) <= 1 else do {
     let pivot = first(xs)

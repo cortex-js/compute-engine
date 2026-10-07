@@ -200,10 +200,17 @@ xs
 // ➔ [1, 2]
 ```
 
-(A spread inside a literal, `[...xs, k]`, is the exception: it is the lazy
-`join` described next, not a snapshot — see the
-[Style Guide](/epsil/style/#building-a-list-one-element-at-a-time) before
-growing a list in a loop.)
+A spread inside a list literal, `[...xs, k]`, is a snapshot too: the literal
+holds the elements of each finite spread operand, also of a lazy one such as
+`take(xs, 2)`. Only an infinite spread (`[...1..oo]`) stays a lazy list. See
+the [Style Guide](/epsil/style/#building-a-list-one-element-at-a-time) before
+growing a list in a loop.
+
+```epsil
+let ys = [1, 2, 3, 4]
+[...take(ys, 1), 9, ...drop(ys, 2)]
+// ➔ [1, 9, 3, 4]
+```
 
 Lazy collection **operators** — `Range`, `map`, `filter`, `take`, `join` —
 are *generators*: their operands (bounds, sources, functions) are evaluated

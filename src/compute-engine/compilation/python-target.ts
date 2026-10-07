@@ -51,6 +51,7 @@ import {
   realPowerReconstructionDigits,
 } from '../boxed-expression/arithmetic-power.js';
 import {
+  isBeyondSafeInteger,
   TRIG_POLE_ARGUMENT_CAP,
   TRIG_POLE_EPSILON,
 } from '../numerics/numeric.js';
@@ -2191,6 +2192,123 @@ function pythonRoundToInteger(c: string, ties: RoundingTies): string {
   );
 }
 
+/**
+ * The run-time check of the operands of `Mod` and `Remainder`, the Python
+ * spelling of the JavaScript runtime's `integerOperand`
+ * (`javascript-runtime.ts`): an operand beyond the safe integer range
+ * `±(2^53 − 1)`, or infinite, raises a `ValueError` that names the operation
+ * and the value.
+ *
+ * A FLOAT beyond that range is the rounding of the value that produced it,
+ * so its remainder is a different number from the interpreter's, not a less
+ * precise one (`np.mod(2.0**60 + 1, 10)` is `6.0`, the exact answer is `7`),
+ * and `np.mod` of an infinity is `nan`. A Python or NumPy INTEGER is exact
+ * at any magnitude, and `np.mod` computes on two integers exactly (or raises
+ * an `OverflowError` past 64 bits). But `np.mod` converts an integer to a
+ * float when the other operand is a float, so for `Mod` the operands are
+ * checked when one of them is a float (`_all` is `False`). The `Remainder`
+ * formula divides, which converts an integer to a float, so for `Remainder`
+ * the operands are always checked (`_all` is `True`).
+ *
+ * The test compares the operand with both limits. It does not take the
+ * absolute value: `np.abs` of the minimum int64, `-2^63`, overflows and stays
+ * negative. `nan` passes and propagates. An array operand is tested element
+ * by element.
+ */
+const PYTHON_SAFE_INTEGER_LIMIT = '9007199254740991.0';
+
+/** The Python test that `x` (a name) has an element beyond the safe integer
+ * range, or infinite. */
+function pythonBeyondSafeInteger(x: string): string {
+  return (
+    `(np.any(np.asarray(${x}) > ${PYTHON_SAFE_INTEGER_LIMIT}) or ` +
+    `np.any(np.asarray(${x}) < -${PYTHON_SAFE_INTEGER_LIMIT}))`
+  );
+}
+
+/** The Python test that the operand `_a` or `_b` is a float, which makes
+ * `np.mod` compute on floats. */
+const PYTHON_FLOAT_OPERANDS =
+  "np.asarray(_a).dtype.kind == 'f' or np.asarray(_b).dtype.kind == 'f'";
+
+/** The message of the `ValueError` for the operand `x` (a name) of `op` (a
+ * Python expression). */
+function pythonIntOperandMessage(op: string, x: string): string {
+  return (
+    `${op} + ': ' + str(${x}) + ' is beyond the safe integer range of ` +
+    'compiled code (+/-9007199254740991); evaluate with the interpreter ' +
+    "for the exact result'"
+  );
+}
+
+/**
+ * `_ce_int_operands` checks the two operands of `op` and returns them as a
+ * tuple. `Mod` spreads the tuple into `np.mod`. `_ce_remainder` is
+ * `a - b·round(a/b)`, with each operand checked and computed once. The
+ * quotient is rounded with a tie toward `+∞`, as JavaScript `Math.round`
+ * does in the interpreter: this is the computation of
+ * `_ce_round(_q, 'toward-positive-infinity')` (`PYTHON_ROUND_HELPER`), not
+ * the `Round` tie rule of the engine.
+ */
+const PYTHON_INT_OPERAND_HELPER = `def _ce_int_operands(_op, _all, _a, _b):
+    _all = _all or ${PYTHON_FLOAT_OPERANDS}
+    for _x in (_a, _b):
+        if _all and ${pythonBeyondSafeInteger('_x')}:
+            raise ValueError(${pythonIntOperandMessage('_op', '_x')})
+    return (_a, _b)
+def _ce_remainder(_a, _b):
+    _ce_int_operands('Remainder', True, _a, _b)
+    _q = _a / _b
+    _m = np.floor(np.abs(_q))
+    _d = np.abs(_q) - _m
+    return _a - _b * (np.sign(_q) * (_m + np.logical_or(_d > 0.5, np.logical_and(_d == 0.5, np.greater(_q, 0)))))`;
+
+/**
+ * The code of `Mod` or `Remainder` of `a` and `b`, with the operands checked
+ * (`PYTHON_INT_OPERAND_HELPER`). When both operands are number literals
+ * inside the safe integer range, `Mod` needs no check.
+ *
+ * A bare lambda has no place for a module helper (`pythonLambdaBody`), so
+ * there the check is written inline: a lambda binds the two operands once,
+ * and the generator `throw` idiom raises the error.
+ */
+function pythonIntegerOperands(
+  op: 'Mod' | 'Remainder',
+  a: Expression,
+  b: Expression,
+  compile: (expr: Expression) => string
+): string {
+  const ca = compile(a);
+  const cb = compile(b);
+  const isSafeLiteral = (x: Expression) =>
+    isNumber(x) && !x.isComplex && !isBeyondSafeInteger(x.re);
+  if (op === 'Mod' && isSafeLiteral(a) && isSafeLiteral(b))
+    return `np.mod(${ca}, ${cb})`;
+  if (!pythonLambdaBody) {
+    if (op === 'Mod')
+      return `np.mod(*_ce_int_operands('Mod', False, ${ca}, ${cb}))`;
+    return `_ce_remainder(${ca}, ${cb})`;
+  }
+  const raise = (x: string) =>
+    `(_ for _ in ()).throw(ValueError(${pythonIntOperandMessage(`'${op}'`, x)}))`;
+  const beyond = (x: string) =>
+    op === 'Mod'
+      ? `_f and ${pythonBeyondSafeInteger(x)}`
+      : pythonBeyondSafeInteger(x);
+  const result =
+    op === 'Mod'
+      ? 'np.mod(_a, _b)'
+      : `(_a - _b * ${pythonRoundToInteger('_a / _b', 'toward-positive-infinity')})`;
+  const checked =
+    `${raise('_a')} if ${beyond('_a')} else ` +
+    `${raise('_b')} if ${beyond('_b')} else ${result}`;
+  const body =
+    op === 'Mod'
+      ? `(lambda _f: ${checked})(${PYTHON_FLOAT_OPERANDS})`
+      : checked;
+  return `(lambda _a, _b: ${body})(${ca}, ${cb})`;
+}
+
 const PYTHON_ORD_HELPER = `def _ce_ord(_f, _a, _b):
     def _ce_ord_len(_x):
         if isinstance(_x, np.ndarray):
@@ -2288,6 +2406,8 @@ function withPythonHelpers(code: string): string {
   if (out.includes('_ce_indexof(')) out = `${PYTHON_INDEXOF_HELPER}\n${out}`;
   if (out.includes('_ce_ord(')) out = `${PYTHON_ORD_HELPER}\n${out}`;
   if (out.includes('_ce_round(')) out = `${PYTHON_ROUND_HELPER}\n${out}`;
+  if (out.includes('_ce_int_operands(') || out.includes('_ce_remainder('))
+    out = `${PYTHON_INT_OPERAND_HELPER}\n${out}`;
   if (out.includes('_ce_pow(')) out = `${pythonPowHelper()}\n${out}`;
   if (
     /_ce_(replaceat|replaceat_inplace|owned_copy|deleteat|insert)\(/.test(out)
@@ -3882,15 +4002,23 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   // `a - b·round(a/b)`. The quotient is rounded with a tie toward `+∞`, as
   // JavaScript `Math.round` does in the interpreter (`Remainder(5, 2)` is
   // `-1`), not with `np.round`, which rounds a tie to even.
-  Mod: 'np.mod',
+  //
+  // Both check their operands (`pythonIntegerOperands`): a float operand beyond
+  // the safe integer range, or infinite, raises, because the remainder of the
+  // rounded float is a different number. `Mod` by the literal `1` is not
+  // checked: the remainder of a float beyond that range by `1` is `0`, which
+  // is also the exact answer, as on the JavaScript target.
+  Mod: ([a, b], compile) => {
+    if (a === null || b === null)
+      throw new Error('Could not compile `Mod`: missing argument');
+    if (isNumber(b) && b.re === 1 && !b.isComplex)
+      return `np.mod(${compile(a)}, ${compile(b)})`;
+    return pythonIntegerOperands('Mod', a, b, compile);
+  },
   Remainder: ([a, b], compile) => {
     if (a === null || b === null)
       throw new Error('Could not compile `Remainder`: missing argument');
-    // `compile()` emits sub-expressions without outer parentheses, and
-    // `*`/`/` bind tighter than `+` — wrap before splicing.
-    const ca = `(${compile(a)})`;
-    const cb = `(${compile(b)})`;
-    return `(${ca} - ${cb} * ${pythonRoundToInteger(`${ca} / ${cb}`, 'toward-positive-infinity')})`;
+    return pythonIntegerOperands('Remainder', a, b, compile);
   },
 
   // Complex numbers
@@ -5691,6 +5819,8 @@ export class PythonTarget implements LanguageTarget<Expression> {
     if (body.includes('_ce_indexof(')) code += `${PYTHON_INDEXOF_HELPER}\n`;
     if (body.includes('_ce_ord(')) code += `${PYTHON_ORD_HELPER}\n`;
     if (body.includes('_ce_round(')) code += `${PYTHON_ROUND_HELPER}\n`;
+    if (body.includes('_ce_int_operands(') || body.includes('_ce_remainder('))
+      code += `${PYTHON_INT_OPERAND_HELPER}\n`;
     if (body.includes('_ce_pow(')) code += `${pythonPowHelper()}\n`;
     if (
       /_ce_(replaceat|replaceat_inplace|owned_copy|deleteat|insert)\(/.test(
@@ -5812,7 +5942,7 @@ export class PythonTarget implements LanguageTarget<Expression> {
     // `_ce_creal_elems` are the complex-value helpers of the complex modes;
     // `_ce_pow` is the power with the real root of a negative base, which the
     // `Power` lowering does not use in a lambda body: listed as a guard;
-    // `_ce_round` is the rounding of `Round` and `Remainder`, which
+    // `_ce_round` is the rounding of `Round`, which
     // `pythonRoundToInteger()` writes inline in a lambda body: also a guard.)
     for (const [helper, what] of [
       ['_ce_bcast(', 'ElementMax/ElementMin/Clamp over a collection operand'],
@@ -5821,7 +5951,7 @@ export class PythonTarget implements LanguageTarget<Expression> {
       ['_ce_eqcoll(', 'equality over a collection or tuple operand'],
       ['_ce_ord(', 'an ordering over a collection operand'],
       ['_ce_pow(', 'a power whose base may be negative'],
-      ['_ce_round(', 'Round or Remainder'],
+      ['_ce_round(', 'Round'],
       ['_ce_cplx(', 'the complex lift of the complex modes'],
       ['_ce_cisreal(', 'the realness test of the complex modes'],
       ['_ce_creal(', 'the real projection of the complex modes'],

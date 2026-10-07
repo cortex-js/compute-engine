@@ -26,7 +26,11 @@ import type { EvaluationResult, InputFormat } from './types.js';
  *
  * - Arithmetic is machine arithmetic. Every number is a float: `1/3` is
  *   `0.333…`, `sqrt(2)` is `1.414…`, and a pole is `Infinity` or `NaN` where
- *   the interpreter answers `~oo` or an exact value.
+ *   the interpreter answers `~oo` or an exact value. An operation that reads
+ *   every digit of its operand (`Mod`, `Remainder`, `GCD`, `LCM`) on a float
+ *   beyond the safe integer range, or on an infinity, is an error value, not
+ *   a different number (docs/COMPILATION-MODEL.md, "Integer operations
+ *   beyond the safe integer range").
  * - The program must be closed. The generated code reads a symbol with no
  *   value from an inputs object, and this mode supplies none, so a program
  *   whose value would stay symbolic in the interpreter (`x + 1`) is an

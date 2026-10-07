@@ -1,7 +1,6 @@
 // Bubble sort, rebuilding the list around each swap, checked against `sort`.
-// The surrounding parts come from `take`/`drop`, materialized with `listFrom`
-// so the literal holds a list and not a lazy recipe; a range `1..(j - 1)`
-// cannot express an empty prefix because it is descending when j is 1.
+// The surrounding parts come from `take`/`drop`: a range `1..(j - 1)` cannot
+// express an empty prefix because it is descending when j is 1.
 bubbleSort(xs) = do {
   let ys = xs
   let n = length(ys)
@@ -9,7 +8,7 @@ bubbleSort(xs) = do {
     for i in 1..(n - 1) {
       for j in 1..(n - i) {
         if ys[j] > ys[j + 1] {
-          ys = [...listFrom(take(ys, j - 1)), ys[j + 1], ys[j], ...listFrom(drop(ys, j + 1))]
+          ys = [...take(ys, j - 1), ys[j + 1], ys[j], ...drop(ys, j + 1)]
         }
       }
     }

@@ -1,4 +1,3 @@
-// corpus: known-failure the static pass types `p[1]` of a zipped tuple as a number once the zipped variable is reassigned in a loop (ROADMAP: "Static type of a zipped tuple component inside a loop")
 // 100 doors: after 100 toggling passes, the open doors are the perfect squares.
 let open = repeat(false, 100)
 for pass in 1..100 {

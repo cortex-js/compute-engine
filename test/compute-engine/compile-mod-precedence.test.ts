@@ -73,9 +73,10 @@ describe('compiled Mod/Remainder operand parenthesization', () => {
     const code = py.compile(ce.box(['Remainder', ['Add', 'x', 29], 9]), {
       vars: { x: 'x' },
     }).code;
-    expect(code.split('\n').at(-1)).toBe(
-      "((x + 29) - (9) * _ce_round((x + 29) / (9), 'toward-positive-infinity'))"
-    );
+    // The dividend is an argument of the `_ce_remainder` helper, which
+    // checks each operand once against the safe integer range: a call
+    // argument needs no parentheses.
+    expect(code.split('\n').at(-1)).toBe('_ce_remainder(x + 29, 9)');
   });
 });
 

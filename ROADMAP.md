@@ -139,6 +139,81 @@ and parsing that gives an `incompatible-type` error. The same lambda inside a
 `Tuple` or a raw `KeyValuePair` prints without the `;`; the difference is in
 how the dictionary serializes a `Function` whose body is a `Block`.
 
+### `.N()` of an integer operation on a large exact integer reads a rounded value (OPEN, medium — found 2026-10-07 by the compiled integer-range guard)
+
+`DigitSum(2^1000).N()` is 84 where `evaluate()` gives 1366, and
+`Sum(Mod(n^n, 10^10), n, 1, 1000).N()` is 646802592660 where `evaluate()`
+gives 4629110846700. Under numeric approximation the 302-digit operand is
+rounded to the working precision (21 digits) before `DigitSum`/`Mod` read it
+as an exact integer (`toBigint` on a rounded big decimal). An integer
+operation under `.N()` should either compute from the exact operand when it
+is exact, or refuse to read a rounded value as an integer. The compile
+target's constant folding used `.N()` and inherited the wrong values; it now
+folds these operators from `evaluate()`, but a subtree whose operand uses a
+bound variable (`Sum(Mod(n^n, 10^10), n, 1, 1000)`) still folds through
+`.N()` and gives the wrong value.
+
+### `.N()` of a sum keeps every digit instead of rounding to the working precision (OPEN, medium — found 2026-10-07 by the compiled integer-range guard)
+
+`Sum(n^n, n, 1, k).N()` accumulates in a `BigDecimal` that is never rounded
+to the working precision: at k = 2000 it takes 0.9 s, at k = 4000 2.0 s, and
+at k = 8000 10.7 s with a 31,225-digit accumulator, where the approximation
+asked for has 21 digits. The compile target's constant folding reaches this
+`.N()` for a closed `Sum` operand (`foldCostEstimate` prices each term at a
+few units, so a 50,000-term sum is admitted and takes minutes). The numeric
+accumulator of `Sum`/`Product` under `.N()` should round each partial sum to
+the working precision, as a scalar `.N()` does.
+
+### `Mod` of an exact irrational operand evaluates to a wrong exact integer (OPEN, small — found 2026-10-07 by the compiled integer-range guard)
+
+`Mod(√2 · 10^30, 7).evaluate()` gives the exact `5`; the true value is
+0.698… (`.N()` gives it). The exact route reads the irrational operand as an
+integer somewhere in `Mod`'s evaluate handler.
+
+### Compiled `Mod` of an infinite dividend throws where a plot kernel may prefer `NaN` (OPEN, question — found 2026-10-07 by the compiled integer-range guard)
+
+Compiled `Mod`, `Remainder`, `GCD` and `LCM` now throw a `RangeError` for an
+operand beyond the safe integer range or infinite, instead of answering a
+different number (`(2^60 + 1) % 10` gave 6, true value 7; `Mod(Infinity,
+1e10)` gave `NaN`). This matches the interpreter, which gives a type error
+for `Mod(+oo, 10)`. Consequence: compiled `Mod(1/x, 2)` at `x = 0` throws
+where it gave `NaN`, so a plot kernel fails at that sample. The `Mod(x, 1)`
+fractional-part forms are not checked (exact for every finite `x`). Decision
+needed: keep the throw for every operand type (consistent with the
+interpreter), or limit the check to integer-typed operands and let a
+`number`-typed dividend give `NaN` (then the Euler 48 program compiles to
+`NaN` again, because its sum is typed `number`).
+
+### The index of a loop over a literal range has no ranged type (OPEN, small — found 2026-10-07 by the compiled `Mod` fast path)
+
+`Loop(body, Element(j, Range(1, 100)))` types `j` as a bare `integer`, while
+`Sum(…, Limits(j, 1, 100))` types it `integer<1..100>`. Compiled `Mod(j, 3)`
+keeps the plain `%` only when both operands are integers whose type bounds
+them inside the safe range, so a sieve or the 100-doors loop over a literal
+`Range` still calls the checked `_SYS.floorMod` on every turn. Giving the
+loop index the type `integer<a..b>` when the range bounds are literals (the
+same inference `Limits` already has) would restore the fast path for those
+loops.
+
+### Binding a large list to a parameter recomputes its type at every call (OPEN, performance — found 2026-10-07 by the lazy-argument capture review)
+
+A recursion of depth 200 that passes a 3000-element list of strings takes 7
+to 10 s; a CPU profile puts most of it in `declareParameterActivation` →
+`_BoxedValueDefinition` → `inferTypeFromValue` → the `type` of the list, about
+20 ms per call, growing with the list length, repeated at every call
+(`boxed-expression/boxed-value-definition.ts` and the parameter binding in
+`function-utils.ts`). A list value's type could be memoized on the value, or
+the parameter activation could reuse the type the argument already carries.
+
+### A parameter used inside a tuple makes the call broadcast over its argument (OPEN, small — found 2026-10-07 by the lazy-argument capture review)
+
+`g(s) = do { let q = (s, 0); 1 }` applied to a list is applied to EACH
+element of the list (with `incompatible-type` errors), and with the infinite
+`map(x => x * 2, 1..oo)` it does not end. The use of `s` as a tuple component
+seems to infer `s` as a scalar parameter, which turns the call into a
+broadcast. `let (a, b) = (s, 0)` behaves the same. A use as a tuple component
+says nothing about the parameter being scalar.
+
 ### `Map` with a lambda keeps an absent element where the direct form reports an error (OPEN, small — found 2026-10-07 by the admission of collections of possibly absent elements)
 
 `Map(x ↦ ToUpperCase(x), ["a", Missing, "b"])` gives `["A", Missing, "B"]`
@@ -149,42 +224,40 @@ holds one, and the two spellings of the same call disagree. The difference
 is in how `Map` applies a lambda to each element (`library/collections.ts`)
 versus how it applies a named operator. Present before the admission change.
 
-### Static type of a zipped tuple component inside a loop (OPEN, small — found 2026-10-06 by the Epsil program corpus)
+### A numeric index read types every element of an untyped lambda parameter as a number (OPEN, design decision — found 2026-10-07 by the zipped-tuple fix)
 
-`listFrom(map(p => !p[1], zip(open, 1..3)))` with `open = repeat(false, 3)` is
-accepted at the top level. The same `map`, assigned back to `open` inside a
-`for` loop, is refused: "expected `boolean`, got `nan | real` at `p[1]`". The
-program's value is right. Corpus:
-`language/static-type-of-zipped-tuple-in-loop`, `rosetta/100-doors`.
+`let f = p => !p[1] if p[2] % 2 == 0 else p[1]` is refused: "expected
+`boolean`, got `nan | real`". The parameter `p` has no type, and the first
+use typed, `p[2] % 2`, narrows `p` to `indexed_collection<real>` by the
+rule that one numeric index read decides the element type of every element
+(`docs/INFERENCE_ROADMAP.md` §5, ruling R1-A). A tuple `(boolean, integer)`
+fits both uses, and §5 itself names the mirror case as the risk to design
+against ("`And(xs[1], …)` must not poison `xs` for later numeric use"). With
+a typed source (`zip(open, 1..3)` now types its tuples) the program works;
+the bare lambda does not. Decision needed: narrow an untyped parameter from
+an index read to an indexed collection whose element type is the JOIN of the
+requirements of each index read (`p[1]` boolean, `p[2]` real), or to a tuple
+when the indices are literals, instead of one element type for all.
 
-### A list literal does not snapshot a spread lazy collection (OPEN, small — found 2026-10-06 by the Epsil program corpus)
+### A lazy element without a spread stays lazy inside a list literal (OPEN, design decision — found 2026-10-07 by the spread snapshot)
 
-A list literal snapshots its elements, and `[...xs, k]` is the documented way to
-grow a list (`src/epsil/docs/for-agents.md`). When a spread operand is lazy
-(`[...take(ys, 1), 9, ...drop(ys, 2)]`), the literal becomes a
-`ListJoin(Take(…), [9], Drop(…))` recipe: it prints as the recipe, it does not
-compare equal to `[1, 9, 3, 4]`, and in a loop it nests one level per turn (the
-bubble sort of `rosetta/bubble-sort` needed `listFrom` around each part).
-Corpus: `language/spread-of-lazy-collection`.
+A list literal with a spread operand now lists a finite lazy collection
+(`[...take(ys, 1), 9]` is a plain list). A lazy ELEMENT without a spread is
+not listed: `[map(x => x + 1, xs)]` holds a lazy `Map`, prints as
+`[Map((x) => x + 1, "xs")]`, and reads `xs` again at every later read; only
+an assignment lists it (`assignedValue`, `library/core.ts`). So
+`[map(f, xs)]` and `[...[map(f, xs)]]` print differently. The documented rule
+is that a literal is a value. Decision needed: list every finite lazy element
+of a literal at evaluation (the `List` evaluate handler, the same bound of
+`ce.maxCollectionSize` as the spread case), or keep elements lazy and say so.
 
-### Lazy argument to a recursive call loses its block binding (OPEN, medium — found 2026-10-06 by the Epsil program corpus)
+### The CLI `--json` output flattens a nested lazy list (OPEN, small — found 2026-10-07 by the spread snapshot)
 
-```
-smallest(xs: list<number>) =
-  xs if length(xs) <= 1 else do {
-    let p = first(xs)
-    smallest(filter(rest(xs), x => x < p))
-  }
-```
-
-`smallest([3, 1, 2])` is a large unevaluated
-`If(Length(Filter(…, (x) => x < p)) …)` in which `p` is a free symbol: the lazy
-`filter` is evaluated after the block exited and the lambda no longer sees the
-local. The documentation says a lazy collection that leaves a block keeps the
-binding its function had at that exit (`src/epsil/docs/examples.md`); the
-recursive call is the case where it does not. `listFrom` around the argument
-gives `[]`. Corpus: `language/lazy-argument-to-recursive-call`,
-`rosetta/quicksort-typed` (the working form).
+`epsil --json` on `[map(x => x + 1, xs)]` with `xs = [1, 2]` prints
+`["List", 2, 3]` instead of `[[2, 3]]`, and `[[0], ...[map(…)]]` prints
+`["List", ["List", 0], 2, 3]`. The likely cause is the `materialization`
+branch of `List`, which calls `enlist(ops)` and flattens one level. Present
+before the spread change.
 
 ### Corpus playground follow-ups: compiled values that differ silently, bound names read as free, and timing outliers (OPEN, medium — found 2026-10-06 by the Epsil corpus playground)
 
@@ -195,18 +268,6 @@ run of 2026-10-06 over 107 programs: interpreted 101 as expected (the 6
 others are the recorded known failures); compiled 43 ran, 59 were declined,
 5 read a symbol with no value. The items below come from that run; rerun the
 report after a fix and read the page for the next ones.
-
-**Compiled values that differ from the interpreter with no error (defects).**
-Compiled arithmetic is machine arithmetic by contract (`src/cli/compile.ts`),
-so a float where the interpreter gives an exact number is expected
-(`11/4` compiles to `2.75`). These two are not that:
-- `euler/016`: `digitSum(2^1000)` compiles to `84`; the interpreter gives
-  `1366`. The double `2^1000` is `1.07e301` and the lowering sums the digits
-  of that float's decimal text. A result the target cannot represent must be
-  an error (or a decline), not a different number.
-- `euler/048`: `Mod(sum(map(n => n^n, 1..1000)), 10^10)` compiles to `null`;
-  the interpreter gives `9110846700`. The sum overflows the double range and
-  `Mod` of `Infinity` falls out as `null` instead of an error value.
 
 **Bound names read as free by the compile route (5 programs, status
 "unbound symbol").** Each is a construct the interpreter binds and the

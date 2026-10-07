@@ -106,6 +106,44 @@ divergences are recorded in `ROADMAP.md`.
 A consumer that needs tolerant equality evaluates through the interpreter, or
 asks for a compile option; none exists today.
 
+### Integer operations beyond the safe integer range
+
+Compiled arithmetic is machine arithmetic. Every number is a double, so a
+compiled `1/3` is `0.333…` and a compiled `2^1000` is `1.07e301`, where the
+interpreter keeps exact values. A float result where the interpreter answers
+an exact number is expected, and a sum that overflows the double range is
+`Infinity`.
+
+An operation that reads every digit of its operand is different. A double
+beyond `±(2^53 − 1)` (`Number.MAX_SAFE_INTEGER`) is the rounding of the value
+that produced it: `2^60 + 1` is held as `2^60`. The remainder or the common
+divisor of that double is a different number, not a less precise one:
+`Mod(2^60 + 1, 10)` on the double is `6`, and the interpreter answers `7`.
+For these operations, an operand beyond the safe integer range, or an
+infinite operand, is an error. The compiled JavaScript throws a `RangeError`
+that names the operation and the value (`Mod: Infinity is beyond the safe
+integer range of compiled code …`). The CLI's compile mode reports it as an
+error value. The operations are `Mod`, `Remainder`, `GCD` and `LCM` (the
+runtime helper `integerOperand` in `compilation/javascript-runtime.ts`). The
+Python target raises a `ValueError` for `Mod` and `Remainder` (`GCD` and `LCM`
+have no Python lowering); there a Python integer is exact at any magnitude and
+passes `Mod`. A `NaN` operand is not an error: it propagates as through the
+other arithmetic. `Mod` by the literal `1` is not checked, because the
+remainder by `1` of every double beyond the range is `0`, which is also the
+exact answer.
+
+Constant folding follows the same rule. A constant subtree is folded with the
+interpreter's `.N()`, which rounds each operand to the working precision
+first, so an integer operation then reads a rounded operand as exact:
+`DigitSum(2^1000)` folded to `84` where `evaluate()` answers `1366`. When an
+operand of `Mod`, `Remainder`, `GCD`, `LCM`, or an operand at a parameter
+that the operator's signature declares `integer`, is beyond the safe integer
+range, the fold uses the value of `evaluate()` when that value is exact and
+every such operand evaluates to an exact rational. Otherwise the fold
+declines, and the structural lowering throws at run time, or declines when
+the target has no lowering for the operator (`DigitSum`, `IntegerDigits`).
+The shader and interval targets have no error channel and are not changed.
+
 ## Running stored JavaScript
 
 The code of a JavaScript compilation result reads only `_SYS` and `_`.

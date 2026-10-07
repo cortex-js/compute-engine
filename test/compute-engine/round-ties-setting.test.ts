@@ -380,12 +380,17 @@ describe('a Python lambda writes the rounding inline', () => {
   test('Remainder', () => {
     const ce = engine('away-from-zero');
     const code = python.compileLambda(ce.box(['Remainder', 'x', 2]), ['x']);
-    expect(code).toBe(
-      'lambda x: ((x) - (2) * (lambda _x: (lambda _a: (lambda _m: ' +
+    // The lambda has no helper definitions, so the rounding and the
+    // safe-integer-range check of each `Remainder` operand are both inline.
+    expect(code.startsWith('lambda x: ')).toBe(true);
+    expect(code).not.toContain('_ce_round(');
+    expect(code).toContain(
+      '(lambda _x: (lambda _a: (lambda _m: ' +
         'np.sign(_x) * (_m + np.logical_or(_a - _m > 0.5, ' +
         'np.logical_and(_a - _m == 0.5, np.greater(_x, 0)))))' +
-        '(np.floor(_a)))(np.abs(_x)))((x) / (2)))'
+        '(np.floor(_a)))(np.abs(_x)))('
     );
+    expect(code).toContain('is beyond the safe integer range of compiled code');
   });
 });
 
@@ -420,8 +425,11 @@ describe('Remainder does not use the tie rule of Round', () => {
     expect(new GLSLTarget().compile(remainder, {}).code).toBe(
       '((x) - (2.0) * _gpu_round_up((x) / (2.0)))'
     );
-    expect(new PythonTarget().compile(remainder).code.split('\n').at(-1)).toBe(
-      "((x) - (2) * _ce_round((x) / (2), 'toward-positive-infinity'))"
-    );
+    // The Python `_ce_remainder` helper checks the safe integer range of
+    // each operand and rounds the quotient with a tie toward +∞, whatever
+    // the tie rule of the engine.
+    const python = new PythonTarget().compile(remainder).code;
+    expect(python.split('\n').at(-1)).toBe('_ce_remainder(x, 2)');
+    expect(python).toContain('np.logical_and(_d == 0.5, np.greater(_q, 0))');
   });
 });

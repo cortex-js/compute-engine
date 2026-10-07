@@ -106,9 +106,7 @@ describe('lazy collection regimes', () => {
     // `Permutations` and `Combinations` (`library/combinatorics.ts`, both
     // genuine lazy views that the memo now covers) and `Tuple`, whose
     // `isLazy` handler exists but answers `false` for every instance — its
-    // membership here is inert (see the instance check below). `ListJoin`,
-    // the list literal with a spread, shares the collection handlers of
-    // `Join`.
+    // membership here is inert (see the instance check below).
     expect(namesIn('change-1')).toEqual([
       'Append',
       'Combinations',
@@ -118,7 +116,6 @@ describe('lazy collection regimes', () => {
       'Iterate',
       'Join',
       'Linspace',
-      'ListJoin',
       'Most',
       'Permutations',
       'Range',
@@ -138,11 +135,15 @@ describe('lazy collection regimes', () => {
     // `Partition`, `Repeat` and `SlidingWindow` have the same shape. They all
     // now participate in the memo (see 'conditional-handler views are
     // memoized …' below); the regime stays distinct because the handler is
-    // what decides between materializing and falling through.
+    // what decides between materializing and falling through. `ListJoin`,
+    // the list literal with a spread, is here too: its handler lists a
+    // finite view up to `ce.maxCollectionSize` elements, because a literal
+    // is a value, and keeps an infinite or larger view.
     expect(namesIn('conditional-handler')).toEqual([
       'ChunkBy',
       'DeleteAt',
       'Insert',
+      'ListJoin',
       'Partition',
       'Repeat',
       'ReplaceAt',
@@ -188,7 +189,6 @@ describe('lazy collection regimes', () => {
     Iterate: ['Iterate', ['Function', ['Multiply', '_', 2]], 1],
     Join: ['Join', ['Range', 1, 2], ['List', 3, 4]],
     Linspace: ['Linspace', 1, 10, 5],
-    ListJoin: ['ListJoin', ['Range', 1, 2], ['List', 3, 4]],
     Most: ['Most', ['List', 1, 2, 3]],
     Permutations: ['Permutations', ['List', 1, 2, 3]],
     Range: ['Range', 1, 10],
@@ -693,6 +693,8 @@ describe('conditional-handler views participate in the memo', () => {
     ],
     DeleteAt: ['DeleteAt', ['Range', 1, 200], 1],
     Insert: ['Insert', ['Range', 1, 200], 1, 0],
+    // The bound of `ListJoin` is `ce.maxCollectionSize` (10,000), not 100.
+    ListJoin: ['ListJoin', ['Range', 1, 20000], ['List', 0]],
     Partition: ['Partition', ['Range', 1, 200], 3],
     Repeat: ['Repeat', 5],
     ReplaceAt: ['ReplaceAt', ['Range', 1, 200], 1, 0],

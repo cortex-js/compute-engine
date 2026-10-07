@@ -2295,6 +2295,15 @@ export function resolveEscapingLambda(
  *   so they continue to read the local. This also keeps a write to a local
  *   in a function body (`c = c + 1`) a write to the binding.
  *
+ * A `Function` literal inside a lazy collection captures the locals of the
+ * nested blocks that are in use (`captureNestedLocals`), as the evaluation
+ * of a function literal does. A lazy operator holds its function operand
+ * without evaluating it, so this capture did not happen when the collection
+ * was evaluated. Without it, the literal reads the local through the shared
+ * scope of the block after the block exits, where the local no longer has
+ * its value: `if c { xs } else { let p = 2; filter(xs, x => x < p) }` as the
+ * body of a function gave a filter whose predicate read a free `p`.
+ *
  * A parameter of the function being applied is not replaced here: the call
  * replaces it with its argument after this (`bindingKeyedSubs`).
  *
@@ -2350,7 +2359,9 @@ function bindEscapingLocals(ce: ComputeEngine, expr: Expression): Expression {
 
   const walk = (e: Expression, inLazy: boolean): Expression => {
     if (isSymbol(e)) return inLazy ? (localValue(e) ?? e) : e;
-    if (!isFunction(e) || e.operator === 'Function') return e;
+    if (!isFunction(e)) return e;
+    if (e.operator === 'Function')
+      return inLazy ? (captureNestedLocals(ce, e) ?? e) : e;
     // A store-backed list holds numbers only, and reading its `ops` would
     // box every element.
     if (e._numericStore !== undefined) return e;
@@ -2366,6 +2377,230 @@ function bindEscapingLocals(ce: ComputeEngine, expr: Expression): Expression {
   };
 
   return walk(expr, false);
+}
+
+/**
+ * Replace, in the lazy collections of an evaluated ARGUMENT of a call to a
+ * function literal, each symbol that the called function would resolve to a
+ * different binding than the caller does, with the value of the caller's
+ * binding. Call it in the caller's context, after the argument is evaluated
+ * and before the call frame of the callee is pushed.
+ *
+ * A lazy collection (`Map`, `Filter`, `Rest`, …) keeps the symbols of its
+ * operands and reads them by name, in the scope chain that is current when
+ * its elements are read. An argument is read in the callee, and a call frame
+ * chains to the scope where the callee was DEFINED, not to the caller. So a
+ * name that is local to the caller (a parameter of the calling function, a
+ * `let` local of its body or of a block) is either free in the callee or,
+ * when the callee has a binding with the same name, it reads that binding.
+ * The second case is the usual one for a recursive call:
+ * `smallest(filter(rest(xs), x => x < p))` called from the body of `smallest`
+ * gave the callee an argument that reads the callee's own `xs`, that is the
+ * argument itself, and the call stayed unevaluated.
+ *
+ * This is what `bindEscapingLocals` does for a lazy collection that leaves a
+ * block or a call as its value, applied to a lazy collection that leaves the
+ * caller as an argument. The value of the binding at the call is the value
+ * that the collection would read in the caller: the callee cannot write to a
+ * binding that it cannot resolve.
+ *
+ * Only these occurrences are replaced:
+ * - A symbol inside a lazy collection. A symbol outside one has already been
+ *   evaluated, and a symbol without a value stays a symbol.
+ * - A symbol whose binding in the caller is not the binding the callee would
+ *   find: its name is a parameter or a local of the callee (`calleeNames`),
+ *   or the chain of the callee's defining scope (`calleeScope`) does not
+ *   reach the caller's binding. A name that the
+ *   callee resolves to the same binding (a variable of the top level, or of
+ *   a function that encloses both) is left as a symbol, so the collection
+ *   continues to read its current value when its elements are read.
+ * - A symbol that is not inside a `Function` literal or inside an operator
+ *   that binds names (a comprehension, a `Sum`). A function literal finds
+ *   its free variables through its own lexical chain, not through the scope
+ *   of the read. That chain is fixed here instead:
+ *   - A function literal inside a lazy collection captures the locals of the
+ *     nested blocks that are in use (`captureNestedLocals`). A lazy operator
+ *     holds its function operand without evaluating it, so the capture that
+ *     the evaluation of a literal does has not happened. In a recursive
+ *     call, the callee runs the same blocks and declares the same locals
+ *     again, and the uncaptured literal would read the callee's locals.
+ *   - A function literal anywhere in the argument is re-rooted on the call
+ *     frame that created it, when the body scope of the function that
+ *     created it is part of its chain (`rerootOnCreatingFrame`).
+ *
+ * The values of a dictionary are walked too: a lazy collection stored in a
+ * dictionary that is passed to a call is read in the callee as well.
+ */
+function bindLazyArgumentLocals(
+  ce: ComputeEngine,
+  arg: Expression,
+  calleeScope: Scope | null,
+  calleeNames: () => ReadonlySet<string>
+): Expression {
+  // Most arguments have no lazy collection and no function literal: the walk
+  // below would return them unchanged. Exit before it allocates anything.
+  if (!mayReadCallerBindings(arg)) return arg;
+
+  // The bindings already replaced on the current branch of the walk: a value
+  // that reads its own binding (directly or through another binding) is left
+  // as a symbol at the second visit, so the walk ends.
+  const visiting = new Set<BoxedDefinition>();
+  // The rewrite of each node, for each of the two contexts (inside a lazy
+  // collection or not). A value that shares its operands (a function applied
+  // to its own previous result embeds that result once per mention of the
+  // parameter) is then walked once per node, not once per path.
+  const memo = [
+    new Map<Expression, Expression>(),
+    new Map<Expression, Expression>(),
+  ];
+
+  const callerValue = (
+    s: Expression & { symbol: string }
+  ): Expression | undefined => {
+    const own = s.valueDefinition ?? s.operatorDefinition;
+    const live = bindingInContext(ce, s.symbol, own);
+    if (live === undefined) return undefined;
+    if (
+      !calleeNames().has(s.symbol) &&
+      bindingInContext(ce, s.symbol, own, calleeScope) === live
+    )
+      return undefined;
+    if ('operator' in live) {
+      const literal = (live.operator as { _lambdaLiteral?: Expression })
+        ._lambdaLiteral;
+      if (literal === undefined) return undefined;
+      return captureNestedLocals(ce, literal) ?? literal;
+    }
+    if (!('value' in live) || visiting.has(live)) return undefined;
+    const value = live.value.value;
+    if (value === undefined) return undefined;
+    visiting.add(live);
+    try {
+      return walk(value, true);
+    } finally {
+      visiting.delete(live);
+    }
+  };
+
+  const walk = (e: Expression, inLazy: boolean): Expression => {
+    if (isSymbol(e)) return inLazy ? (callerValue(e) ?? e) : e;
+    if (!isFunction(e) && !isDictionary(e)) return e;
+    const cache = memo[inLazy ? 1 : 0];
+    const hit = cache.get(e);
+    if (hit !== undefined) return hit;
+    let result: Expression = e;
+    if (isFunction(e) && e.operator === 'Function') {
+      result = rerootOnCreatingFrame(
+        ce,
+        inLazy ? (captureNestedLocals(ce, e) ?? e) : e
+      );
+    } else if (isDictionary(e)) {
+      let changed = false;
+      const entries = e.keys.map((key) => {
+        const value = e.get(key)!;
+        const next = walk(value, inLazy);
+        if (next !== value) changed = true;
+        return ce.function('KeyValuePair', [ce.string(key), next]);
+      });
+      if (changed) result = ce.function('Dictionary', entries);
+    } else if (
+      isFunction(e) &&
+      // A store-backed list holds numbers only, and reading its `ops` would
+      // box every element.
+      e._numericStore === undefined &&
+      boundVariableNames(e).length === 0
+    ) {
+      const lazy = inLazy || e.isLazyCollection;
+      const ops = e.ops;
+      const next = ops.map((op) => walk(op, lazy));
+      if (!next.every((op, i) => op === ops[i]))
+        result = ce.function(e.operator, next, {
+          form: e.isCanonical
+            ? 'canonical'
+            : e.isStructural
+              ? 'structural'
+              : 'raw',
+          scope: e.localScope,
+        });
+    }
+    cache.set(e, result);
+    return result;
+  };
+
+  return walk(arg, false);
+}
+
+/** The result of `mayReadCallerBindings`, for each expression. */
+const MAY_READ_CALLER_BINDINGS = new WeakMap<Expression, boolean>();
+
+/**
+ * False if `bindLazyArgumentLocals` returns `expr` unchanged: `expr` has no
+ * lazy collection and no `Function` literal at a position that its walk
+ * reaches. That walk replaces a symbol only inside a lazy collection, and
+ * rebuilds a node only when an operand changed or the node is a `Function`
+ * literal. It does not enter a store-backed list or an operator that binds
+ * names, so this function does not either.
+ *
+ * The result is kept for each expression: an argument that a recursive call
+ * passes to itself unchanged (a long list of strings, for example) is then
+ * walked once, not once per call.
+ */
+function mayReadCallerBindings(expr: Expression): boolean {
+  if (isDictionary(expr)) {
+    const cached = MAY_READ_CALLER_BINDINGS.get(expr);
+    if (cached !== undefined) return cached;
+    const result = expr.keys.some((key) =>
+      mayReadCallerBindings(expr.get(key)!)
+    );
+    MAY_READ_CALLER_BINDINGS.set(expr, result);
+    return result;
+  }
+  if (!isFunction(expr)) return false;
+  if (expr.operator === 'Function') return true;
+  if (expr._numericStore !== undefined) return false;
+  const cached = MAY_READ_CALLER_BINDINGS.get(expr);
+  if (cached !== undefined) return cached;
+  const result =
+    boundVariableNames(expr).length === 0 &&
+    (expr.isLazyCollection || expr.ops.some(mayReadCallerBindings));
+  MAY_READ_CALLER_BINDINGS.set(expr, result);
+  return result;
+}
+
+/** The names of `declaredLocalNames`, for each function body. */
+const DECLARED_LOCAL_NAMES = new WeakMap<Expression, ReadonlySet<string>>();
+
+/**
+ * The names that a function body binds, other than its parameters: the
+ * names that its `Declare` statements declare (its `let` and `const` locals,
+ * each leaf of a destructuring pattern such as `let (t, u) = …`), the
+ * functions that its `DefineFunction` statements define (`t(k) = …`), and
+ * the indexes of the operators that bind names (a `for` loop, a
+ * comprehension, a `Sum`). The nested blocks of the body are included, but
+ * not the function literals that it contains, which have their own frames.
+ */
+function declaredLocalNames(body: Expression): ReadonlySet<string> {
+  const cached = DECLARED_LOCAL_NAMES.get(body);
+  if (cached !== undefined) return cached;
+  const names = new Set<string>();
+  const visit = (e: Expression): void => {
+    if (!isFunction(e) || e.operator === 'Function') return;
+    if (e._numericStore !== undefined) return;
+    if (e.operator === 'Declare') {
+      for (const name of functionLiteralParameterNames(e.op1)) names.add(name);
+    } else if (e.operator === 'DefineFunction') {
+      const name = sym(e.op1);
+      if (name !== undefined) names.add(name);
+    } else {
+      const binders = declaredBinders(e, 'post');
+      if (binders !== undefined)
+        for (const name of binders.visibleFrom.keys()) names.add(name);
+    }
+    for (const op of e.ops) visit(op);
+  };
+  visit(body);
+  DECLARED_LOCAL_NAMES.set(body, names);
+  return names;
 }
 
 /**
@@ -2819,6 +3054,81 @@ function nestedBodyScopes(body: Expression): Scope[] {
  */
 const liveNestedScopes = new WeakMap<Scope, number>();
 
+/**
+ * For the body scope of each function literal that is being applied, the
+ * number of applications of that literal currently on the stack, and the
+ * parent that the body scope had before the first of them: the scope where
+ * the literal was defined. While an application runs, the parent of the body
+ * scope is the call frame of the application (see `makeLambda`), and a new
+ * application of the same literal changes that parent to its own frame.
+ */
+const appliedBodyScopes = new WeakMap<
+  Scope,
+  { count: number; definingScope: Scope | null }
+>();
+
+/** Record an application of the literal whose body scope is `bodyScope`.
+ * `definingScope` is the parent of `bodyScope` before the application
+ * changed it. */
+function enterAppliedBodyScope(
+  bodyScope: Scope,
+  definingScope: Scope | null
+): void {
+  const entry = appliedBodyScopes.get(bodyScope);
+  if (entry === undefined)
+    appliedBodyScopes.set(bodyScope, { count: 1, definingScope });
+  else entry.count += 1;
+}
+
+function exitAppliedBodyScope(bodyScope: Scope): void {
+  const entry = appliedBodyScopes.get(bodyScope);
+  if (entry === undefined) return;
+  if (entry.count <= 1) appliedBodyScopes.delete(bodyScope);
+  else entry.count -= 1;
+}
+
+/**
+ * The scope where the function literal whose body scope is `bodyScope` was
+ * defined: the parent of every call frame of the literal.
+ *
+ * While the literal is applied, the parent of its body scope is the frame of
+ * that application, so a recursive application that took this parent as its
+ * defining scope chained its frame to the frame of its caller. The callee
+ * then saw the locals of the caller that it did not declare itself: a
+ * `let` local of the caller read before the callee declared its own, and a
+ * lazy argument that reads a local of the caller by name resolved it in the
+ * frame of the callee.
+ */
+function definingScopeOf(bodyScope: Scope): Scope | null {
+  const entry = appliedBodyScopes.get(bodyScope);
+  return entry !== undefined ? entry.definingScope : bodyScope.parent;
+}
+
+/**
+ * Re-root a function literal on the call frame it was created in, when its
+ * lexical chain reaches that frame through the body scope of a function
+ * literal that is being applied. Returns `fn` unchanged otherwise.
+ *
+ * A function literal created in the body of a function finds the parameters
+ * and the `let` locals of that call through the body scope, whose parent is
+ * the frame of the application that is running. When the literal is passed
+ * to a new application of the same function (a recursive call, directly or
+ * through another function), that application sets the parent of the body
+ * scope to its own frame, and the literal then reads the parameters of the
+ * callee: with `f(n, g) = g(0) if n == 0 else f(n - 1, x => n)`, `f(3, …)`
+ * gave `0`, not `1`. Re-rooted, the literal keeps the frame of the call that
+ * created it, as a literal returned from a call does (`captureClosures`).
+ */
+function rerootOnCreatingFrame(ce: ComputeEngine, fn: Expression): Expression {
+  if (!isFunction(fn, 'Function')) return fn;
+  const body = fn.op1;
+  if (!isFunction(body) || !body.localScope) return fn;
+  let top = body.localScope.parent;
+  while (top && CLOSURE_LOCALS_SCOPES.has(top)) top = top.parent;
+  if (!top || !top.parent || !appliedBodyScopes.has(top)) return fn;
+  return captureClosures(ce, fn, top.parent);
+}
+
 /** The bindings of one nested scope, and the stored value of each of its
  * (non-constant) value definitions, at the entry of an application. */
 type NestedScopeSnapshot = {
@@ -3181,10 +3491,12 @@ function makeLambda(
     const nullaryBody = onlyBody as Expression & FunctionInterface;
     return wrapRecursion(ce, (_args, options) => {
       const bodyScope = nullaryBody.localScope!;
-      const capturedScope = bodyScope.parent ?? ce.context.lexicalScope;
+      const capturedScope =
+        definingScopeOf(bodyScope) ?? ce.context.lexicalScope;
       const freshScope: Scope = { parent: capturedScope, bindings: new Map() };
       const savedParent = bodyScope.parent;
       bodyScope.parent = freshScope;
+      enterAppliedBodyScope(bodyScope, savedParent);
       // Hide the stale canonicalization bookkeeping in bodyScope (hoisted
       // `Declare`/`Assign` targets, auto-declared references — all inferred
       // and valueless), exactly as the parameterized `invoke` path does.
@@ -3211,6 +3523,7 @@ function makeLambda(
       } finally {
         ce.popScope();
         bodyScope.parent = savedParent;
+        exitAppliedBodyScope(bodyScope);
         restoreBodyScopeParams(bodyScope, hiddenBindings);
         exitNestedBodyScopes(ce, nested);
       }
@@ -3426,7 +3739,8 @@ function makeLambda(
     // The scope the literal was defined in — the parent of every call frame
     // (step 5), and the chain a held argument's symbols must be resolvable
     // through (`inlineFrameLocals`).
-    const capturedScope = bodyFn.localScope!.parent ?? ce.context.lexicalScope;
+    const capturedScope =
+      definingScopeOf(bodyFn.localScope!) ?? ce.context.lexicalScope;
 
     // A `hold` application binds each argument as WRITTEN. `.canonical` is
     // value-safe — it binds structure (a held operand reaching here from the
@@ -3447,10 +3761,28 @@ function makeLambda(
     // through its own chain (a top-level `let a`, or a frame binding of an
     // enclosing function the callee was defined inside) stay symbolic, so
     // `hold f(e) = e; f(a + 1)` still binds `e` to `a + 1`, not to `4`.
+    //
+    // An evaluated argument can hold a lazy collection that reads a local of
+    // the caller by name. The callee reads it in its own frame, where that
+    // name is free or names another binding, so the caller's value is put in
+    // its place (`bindLazyArgumentLocals`). The names that the callee binds
+    // (its parameters and its locals) are collected only when an argument
+    // has a symbol to check.
+    let calleeNames: Set<string> | undefined;
+    const calleeNameSet = (): ReadonlySet<string> =>
+      (calleeNames ??= new Set([
+        ...functionLiteralBoundNames(params),
+        ...declaredLocalNames(bodyFn),
+      ]));
     const argValue = (a: Expression): Expression =>
       options?.holdArguments
         ? inlineFrameLocals(ce, a.canonical, capturedScope)
-        : a.evaluate();
+        : bindLazyArgumentLocals(
+            ce,
+            a.evaluate(),
+            capturedScope,
+            calleeNameSet
+          );
     //
     // 1/ If there are more arguments than expected, exit
     //
@@ -3667,7 +3999,7 @@ function makeLambda(
       }
 
       const capturedScope =
-        bodyFn.localScope!.parent ?? ce.context.lexicalScope;
+        definingScopeOf(bodyFn.localScope!) ?? ce.context.lexicalScope;
       const freshScope: Scope = {
         parent: capturedScope,
         bindings: new Map(),
@@ -3697,6 +4029,7 @@ function makeLambda(
       const bodyScope = bodyFn.localScope!;
       const savedParent = bodyScope.parent;
       bodyScope.parent = freshScope;
+      enterAppliedBodyScope(bodyScope, savedParent);
       const curryParamNames = boundPrefix.leaves.map((l) => l.name);
       const hiddenBindings = hideBodyScopeParams(bodyScope, curryParamNames);
       // The scopes nested in the body (loops, big-ops, inner blocks) are
@@ -3713,6 +4046,7 @@ function makeLambda(
       } finally {
         ce.popScope();
         bodyScope.parent = savedParent;
+        exitAppliedBodyScope(bodyScope);
         restoreBodyScopeParams(bodyScope, hiddenBindings);
         exitNestedBodyScopes(ce, nested);
       }
@@ -3909,6 +4243,7 @@ function makeLambda(
     const bodyScope = bodyFn.localScope!;
     const savedParent = bodyScope.parent;
     bodyScope.parent = freshScope;
+    enterAppliedBodyScope(bodyScope, savedParent);
     const hiddenBindings = hideBodyScopeParams(bodyScope, paramNames);
     // The scopes nested in the body (loops, big-ops, inner blocks) are
     // private to this application: a recursive call restores the caller's
@@ -4029,6 +4364,7 @@ function makeLambda(
     } finally {
       ce.popScope();
       bodyScope.parent = savedParent;
+      exitAppliedBodyScope(bodyScope);
       restoreBodyScopeParams(bodyScope, hiddenBindings);
       exitNestedBodyScopes(ce, nested);
     }

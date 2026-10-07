@@ -461,15 +461,17 @@ The splice happens at canonicalization: literal collections splice
 immediately, and a symbolic or lazy segment lowers to the equivalent
 `join` expression — a lone spread `[...xs]` is `join(xs)`, the list
 materialization of `xs`, and an infinite segment stays lazy
-(`[...(1..oo), 5] |> Take(3)` is `[1, 2, 3]`). Set literals deduplicate as
-usual.
+(`[...(1..oo), 5] |> Take(3)` is `[1, 2, 3]`). A literal is a value, so
+when it is evaluated, every finite segment is listed, also a lazy one:
+`[...take(xs, 1), 9]` is a plain list, not a `join` recipe. Set literals
+deduplicate as usual.
 
 **Tuples do not spread here** — a tuple is a unit (a point, a pair), and
 splicing it would quietly discard that; spreading one is a `spread-tuple`
 error. To use a tuple's elements, convert explicitly:
-`[...ListFrom(t), 3]`. A scalar or string operand is an
-`incompatible-type` error (a string is a scalar, not a character
-collection). Note the mirror-image rule in calls: argument lists are
+`[...ListFrom(t), 3]`. A scalar operand is one element (`[...5]` is
+`[5]`), and a string operand contributes its characters (`[..."ab", 1]` is
+`["a", "b", 1]`). Note the mirror-image rule in calls: argument lists are
 tuple-shaped, so there exactly tuples spread.
 
 In a **dictionary literal**, `...` merges the entries of a dictionary.

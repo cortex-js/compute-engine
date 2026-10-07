@@ -13,6 +13,7 @@ import {
   secWithPole,
   cscWithPole,
   floorModDouble,
+  isBeyondSafeInteger,
   roundToInteger,
 } from '../numerics/numeric.js';
 import {
@@ -1355,6 +1356,33 @@ function listCopy(x: unknown): unknown[] {
   return typeof x === 'string'
     ? SYS_HELPERS.chars(x)
     : (x as unknown[]).slice();
+}
+
+/**
+ * `x`, checked as an operand of a compiled operation that reads every digit
+ * of its operand: the floored remainder (`Mod`), the remainder (`Remainder`)
+ * and the common divisor and multiple (`GCD`, `LCM`).
+ *
+ * Compiled arithmetic is machine arithmetic, and a double beyond
+ * `±(2^53 − 1)` is the rounding of the value that produced it: `2^60 + 1`
+ * is held as `2^60`, and a sum that overflows the double range is
+ * `Infinity`. The interpreter computes these operations on the exact
+ * integer, so a remainder or a divisor of the rounded double is a different
+ * number, not a less precise one: compiled `Mod(2^60 + 1, 10)` would answer
+ * `6` where the interpreter answers `7`, and `Mod` of an overflowed sum
+ * would answer `NaN`. Such an operand throws a `RangeError` that names the
+ * operation and the value, as the compiled list operations do for an
+ * invalid index (`listPosition`). `NaN` is returned unchanged, so it
+ * propagates as it does through the other compiled arithmetic.
+ */
+function integerOperand(operator: string, x: number): number {
+  if (isBeyondSafeInteger(x))
+    throw new RangeError(
+      `${operator}: ${String(x)} is beyond the safe integer range of ` +
+        `compiled code (±${Number.MAX_SAFE_INTEGER}); evaluate with the ` +
+        `interpreter for the exact result`
+    );
+  return x;
 }
 
 /**
@@ -3467,7 +3495,10 @@ export const SYS_HELPERS = {
   // goes to the helper unchanged.
   gamma: (z: number): number =>
     Number.isInteger(z) && z <= 0 ? Infinity : gamma(z),
-  gcd,
+  // The common divisor of two reals (`realGcd`). An operand beyond the safe
+  // integer range, or infinite, throws (`integerOperand`).
+  gcd: (a: number, b: number): number =>
+    gcd(integerOperand('GCD', a), integerOperand('GCD', b)),
   // Numeric-differentiation fallback (item 177): `_SYS.nd(f, k)` returns the
   // function x ↦ (numeric k-th derivative of f at x). Emitted by
   // `compileDerivative` (library/calculus.ts) when the symbolic closed form
@@ -3536,7 +3567,22 @@ export const SYS_HELPERS = {
   // The floored remainder, the value of `Mod(a, b)`, as the interpreter
   // computes it on doubles: the divisor is added only when the signs of the
   // truncated remainder and of the divisor differ (see `floorModDouble`).
-  floorMod: floorModDouble,
+  // An operand beyond the safe integer range, or infinite, throws
+  // (`integerOperand`).
+  floorMod: (a: number, b: number): number =>
+    floorModDouble(integerOperand('Mod', a), integerOperand('Mod', b)),
+  // The remainder of `a / b` with the quotient rounded to the nearest
+  // integer, a tie toward `+∞` (`Math.round`), the value of
+  // `Remainder(a, b)`. An operand beyond the safe integer range, or
+  // infinite, throws (`integerOperand`): there the rounded quotient is not
+  // exact, and the formula answers a value that is not the remainder of
+  // either the double or the exact operand (`2^60 - 7·round(2^60/7)` is
+  // `0`, where the remainder is `1`).
+  remainder: (a: number, b: number): number => {
+    const x = integerOperand('Remainder', a);
+    const y = integerOperand('Remainder', b);
+    return x - y * Math.round(x / y);
+  },
   pow4: (x: number) => {
     const s = x * x;
     return s * s;
@@ -4658,7 +4704,10 @@ export const SYS_HELPERS = {
       activeIntegrals--;
     }
   },
-  lcm,
+  // The common multiple of two reals (`realLcm`). An operand beyond the safe
+  // integer range, or infinite, throws (`integerOperand`).
+  lcm: (a: number, b: number): number =>
+    lcm(integerOperand('LCM', a), integerOperand('LCM', b)),
   lngamma: gammaln,
   limit: (f: (x: number) => number, x: number, dir?: number): number =>
     limit(realFn(f), x, dir),

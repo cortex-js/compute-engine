@@ -499,6 +499,22 @@ export function floorModDouble(a: number, b: number): number {
   return r < 0 !== b < 0 ? (r + b) % b : r;
 }
 
+/**
+ * True when the double `x` is outside the range where every integer has an
+ * exact double, `±(2^53 − 1)` (`Number.MAX_SAFE_INTEGER`): a finite value
+ * beyond that range, or an infinity. `NaN` answers `false`.
+ *
+ * Every double beyond the range is an integer, but it is the rounding of
+ * the value that produced it: `2^60 + 1` is held as `2^60`. An operation
+ * that reads the exact digits of its operand (a remainder, a common
+ * divisor) answers a different number for such an operand than for the
+ * value the interpreter holds, so the compiled code refuses the operand
+ * instead (`integerOperand` in `compilation/javascript-runtime.ts`).
+ */
+export function isBeyondSafeInteger(x: number): boolean {
+  return x > Number.MAX_SAFE_INTEGER || x < -Number.MAX_SAFE_INTEGER;
+}
+
 export const tanWithPole = (x: number): number => trigPole(Math.tan(x), x);
 export const cotWithPole = (x: number): number => trigPole(1 / Math.tan(x), x);
 export const secWithPole = (x: number): number => trigPole(1 / Math.cos(x), x);

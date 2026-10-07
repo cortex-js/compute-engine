@@ -9247,6 +9247,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     threadsConditionals: true,
     signature: '(collection<any>*) -> list',
     canonical: (ops, { engine: ce }) => canonicalJoin(ce, 'ListJoin', ops),
+    // A list literal is a value: evaluating it lists the elements of each
+    // finite spread operand, also when that operand is a lazy collection
+    // (`snapshotListJoin`). An infinite operand keeps the lazy view.
+    evaluate: (ops, { engine: ce, numericApproximation }) =>
+      snapshotListJoin(ce, ops, numericApproximation === true),
     type: (ops, context) => {
       const elements = joinedElementTypeD(ops);
       return BoxedType.forResult(
@@ -13839,20 +13844,32 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     threadsConditionals: true,
     signature: '(indexed_collection<any>+) -> list',
     // Each element is a tuple of one element from every source, so the
-    // result is `list<tuple<e₁, …, eₙ>>` when every source's element type is
-    // known; a source with an unknown element type leaves the bare `list`
-    // of the signature. The precise type is what lets a destructuring
-    // `for (a, b) in Zip(xs, ys)` prove its elements are pairs.
+    // result is `list<tuple<e₁, …, eₙ>>`. The precise type is what lets a
+    // destructuring `for (a, b) in Zip(xs, ys)` prove its elements are pairs.
+    //
+    // A source whose element type is not known (a bare `list`, such as the
+    // result of `Repeat(False, 3)`) contributes an `unknown` COMPONENT. The
+    // other components and the arity stay known. The result must not fall
+    // back to the bare `list` of the signature: a callback parameter bound
+    // to an element of the zip is then valueless, and its uses narrow it.
+    // For example, `p[2] % 2` narrows `p` to `indexed_collection<real>`, so a
+    // later `!p[1]` is refused because `p[1]` is typed `nan | real`, although
+    // `p` is a pair whose first component may be a boolean.
     type: (ops, context) => {
-      const elements = ops.map((x) => mappingSourceElementTypeD(x));
-      if (elements.length === 0 || elements.some((t) => t === undefined))
+      if (ops.length === 0)
         return BoxedType.forResult('list', context.engine._typeResolver);
+      // The component is the source's element type as it is spelled: an
+      // explicit `any` (`list<any>`, absence markers admitted) stays `any`,
+      // and a bare `list` gives `unknown` (values only).
+      const elements = ops.map(
+        (x) => x.facts.elementType ?? collectionElementType(x.type) ?? 'unknown'
+      );
       return BoxedType.forResult(
         {
           kind: 'list',
           elements: {
             kind: 'tuple',
-            elements: elements.map((t) => ({ type: t as Type })),
+            elements: elements.map((t) => ({ type: t })),
           },
         },
         context.engine._typeResolver
@@ -14006,6 +14023,28 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'Produce a sequence by repeating a single value. With 1 argument, returns an infinite sequence; with 2 arguments (value, count), returns a finite list of `count` copies.',
     complexity: 8200,
     signature: '(value: any, count: integer?) -> list',
+    // Every element is the repeated value, so the result is `list<T>` where
+    // `T` is the type of the value, widened as a list literal widens its
+    // elements (`Repeat(1, 3)` is `list<integer>`, like `[1, 1, 1]`). A
+    // value of unknown type leaves the bare `list` of the signature.
+    //
+    // The infinite form `Repeat(v)` gets the same type. The `list` kind does
+    // not claim that the collection is finite: an unbounded `Range` is also
+    // a `list<integer>`, and the `count` handler reports `Infinity`.
+    //
+    // Without this handler, `Repeat(False, 3)` was a bare `list`, so a
+    // variable that held it (`let open = repeat(false, 3)` in Epsil) had no
+    // element type for the static pass to check its uses against.
+    type: (ops, context) => {
+      const elements =
+        ops.length === 0
+          ? 'unknown'
+          : literalElementType([storedComponentTypeD(ops[0])]);
+      return BoxedType.forResult(
+        elements === 'unknown' ? 'list' : { kind: 'list', elements },
+        context.engine._typeResolver
+      );
+    },
     evaluate: (ops, { engine }) => {
       if (ops.length !== 2) return undefined;
       const raw = toInteger(ops[1]);
@@ -16016,6 +16055,187 @@ function foldLiteralListAppend(
     return undefined;
   if (source.nops + ops.length - 1 > ce.maxCollectionSize) return undefined;
   return ce._fn('List', [...source.ops, ...ops.slice(1)]);
+}
+
+/**
+ * The `List` that a `ListJoin` (a list literal with a spread) stands for
+ * once its operands are evaluated, or `undefined` to keep the lazy
+ * `ListJoin` view (the evaluation then rebuilds the node from the evaluated
+ * operands, as it does for an operator with no `evaluate` handler).
+ *
+ * A collection literal is a value: it holds the values of its elements at
+ * the time it is evaluated. The canonical form of `[...a, 9, ...b]` is
+ * `ListJoin(a, [9], b)`, and `canonicalJoin` folds it to a `List` only when
+ * every operand is a `List` or `Set` literal. A spread operand that is a
+ * lazy collection (`Take(ys, 1)`, `Map(f, xs)`, `Range(1, 5)`) is still a
+ * lazy collection after it is evaluated, so the literal stayed a
+ * `ListJoin` view: it printed as that view, it read the variables of its
+ * operands again at each later read, and a loop that rebuilt a list from parts of itself
+ * (`xs = [...take(xs, 2), ...drop(xs, 2)]`) added one level of `ListJoin`
+ * per turn.
+ *
+ * The operands are enumerated as the collection handlers of `ListJoin`
+ * (`JOIN_COLLECTION_HANDLERS`) enumerate them: a tuple operand and a scalar
+ * operand are one element each, and any other operand contributes its
+ * elements in its iteration order. An element that is itself a finite lazy
+ * collection is listed too (`listedElement`). The view is kept when an
+ * operand:
+ *
+ * - may be absent (`Missing`, a restricted collection): the evaluation
+ *   answers `Missing` or threads the condition, as before;
+ * - is not a collection now: a symbol with no value, or a call of a function
+ *   with no known result type, may still hold a list;
+ * - is not known to be finite, or its elements cannot be computed: an
+ *   infinite spread (`[...1..oo]`) stays a lazy list, which can be indexed
+ *   and taken from;
+ * - cannot be enumerated now (the walk throws, for example a predicate that
+ *   does not answer a boolean): the failure is reported when the view is
+ *   read, as before;
+ *
+ * and when the list would hold more than `ce.maxCollectionSize` elements,
+ * the same bound as the fold of literal operands in `canonicalJoin`. This
+ * bound is one budget for the whole snapshot: it counts the elements of the
+ * list and the elements of each listed lazy element, at every depth. A list
+ * of 10,000 ranges of 10,000 elements would otherwise hold 10^8 elements.
+ *
+ * The count of an operand is read before the walk only when it is cheap
+ * (`hasConstantTimeCount`). The count of a `Filter` walks the filter and
+ * calls the predicate, so the walk would call the predicate a second time,
+ * and an error of the predicate would escape from the count instead of
+ * keeping the view. Such an operand is bounded by the budget during the
+ * single walk.
+ *
+ * A `Join` (`join(xs, ys)` in Epsil) is not changed: it is a lazy operator,
+ * not a literal.
+ *
+ * Under a numeric approximation each element that an operand enumerates is
+ * approximated too, as `List` approximates each of its elements.
+ */
+function snapshotListJoin(
+  ce: ComputeEngine,
+  ops: ReadonlyArray<Expression>,
+  numericApproximation: boolean
+): Expression | undefined {
+  const budget: SnapshotBudget = { used: 0, max: ce.maxCollectionSize };
+  const elements: Expression[] = [];
+  // The checks of the operands are in the `try` too: the finiteness of an
+  // operand can call its callbacks, and a failure of a callback keeps the
+  // view.
+  try {
+    // Check every operand before any walk, so that a view that is kept
+    // costs no enumeration when its count is cheap.
+    for (const op of ops) {
+      if (!op.isValid || mayBeAbsentCollectionOperand(op)) return undefined;
+      if (isAtomicJoinOperand(op) || isProvablyScalarJoinOperand(op)) continue;
+      if (!op.isCollection || !isWalkableFiniteCollection(op)) return undefined;
+      if (!hasConstantTimeCount(op)) continue;
+      const count = op.count;
+      if (count !== undefined && count > budget.max) return undefined;
+    }
+    for (const op of ops) {
+      if (isAtomicJoinOperand(op) || isProvablyScalarJoinOperand(op)) {
+        if (budget.used >= budget.max) return undefined;
+        budget.used += 1;
+        elements.push(op);
+        continue;
+      }
+      for (const x of op.each()) {
+        if (budget.used >= budget.max) return undefined;
+        budget.used += 1;
+        const element = listedElement(ce, x, budget);
+        elements.push(
+          numericApproximation
+            ? element.evaluate({ numericApproximation })
+            : element
+        );
+      }
+    }
+  } catch (e) {
+    // A deadline or a cancellation by the host stops the evaluation. Any
+    // other failure keeps the view.
+    if (
+      e instanceof CancellationError &&
+      e.cause !== 'iteration-limit-exceeded'
+    )
+      throw e;
+    return undefined;
+  }
+  return ce._fn('List', elements);
+}
+
+/**
+ * The number of elements that a snapshot of a `ListJoin` has created, at
+ * every depth, and the most that it can create (`ce.maxCollectionSize`).
+ * The elements that a walk created before it stopped stay counted, so the
+ * work of the whole snapshot is bounded by `max`.
+ */
+type SnapshotBudget = { used: number; max: number };
+
+/**
+ * True when the `count` of the collection `x` is known without a walk of its
+ * elements: a collection that is not lazy (a `List`, a `Set`, a string), a
+ * `Range`, a `Linspace`, or a `Map` whose sources have such a count. Any
+ * other lazy collection can have a count that walks its elements and calls
+ * its callbacks: the count of a `Filter` calls the predicate on each
+ * element.
+ */
+function hasConstantTimeCount(x: Expression): boolean {
+  if (!x.isLazyCollection) return true;
+  if (isFunction(x, 'Range') || isFunction(x, 'Linspace')) return true;
+  if (isFunction(x, 'Map') && x.nops >= 2)
+    return x.ops.slice(1).every((source) => hasConstantTimeCount(source));
+  return false;
+}
+
+/**
+ * An element of a `ListJoin` operand, as the snapshot of the literal holds
+ * it: a finite lazy collection is replaced by the list (or the set) of its
+ * elements, at every depth, and any other element is returned unchanged.
+ * Each element that the listing creates uses one unit of `budget`.
+ *
+ * The rows of `take(iterate(nextRow, [1]), 4)` are lazy `Map` views. Kept
+ * as views inside the `List`, they print as their recipes
+ * (`[[1], Map((p) => …, Zip(…)), …]`), and each one reads the variables of
+ * its callback again at each later read.
+ *
+ * An element is kept as it is when it is not known to be finite, when its
+ * elements cannot be computed, when it is neither indexed nor a set (a
+ * keyed view), when it is a held conditional (`When`, `Which`, `If`: a
+ * restricted collection, not a view), when its elements would use more
+ * than the rest of the budget, or when the walk throws.
+ */
+function listedElement(
+  ce: ComputeEngine,
+  x: Expression,
+  budget: SnapshotBudget
+): Expression {
+  if (!x.isValid || !x.isLazyCollection) return x;
+  if (isFunction(x, 'When') || isFunction(x, 'Which') || isFunction(x, 'If'))
+    return x;
+  const elements: Expression[] = [];
+  let isSet = false;
+  try {
+    if (!isWalkableFiniteCollection(x)) return x;
+    isSet = !x.isIndexedCollection && x.type.matches('set<any>');
+    if (!isSet && !x.isIndexedCollection) return x;
+    if (hasConstantTimeCount(x)) {
+      const count = x.count;
+      if (count === undefined || count > budget.max - budget.used) return x;
+    }
+    for (const y of x.each()) {
+      if (budget.used >= budget.max) return x;
+      budget.used += 1;
+      elements.push(listedElement(ce, y, budget));
+    }
+  } catch (e) {
+    if (
+      e instanceof CancellationError &&
+      e.cause !== 'iteration-limit-exceeded'
+    )
+      throw e;
+    return x;
+  }
+  return isSet ? ce.function('Set', elements) : ce._fn('List', elements);
 }
 
 /** The undeduplicated element enumeration of a `Map` node.

@@ -1,8 +1,6 @@
-// corpus: known-failure a lazy collection passed to a recursive call loses the binding of the block local its lambda reads (ROADMAP: "Lazy argument to a recursive call loses its block binding")
 // The `filter` is lazy and its lambda reads the block local `p`. Passed to
-// the recursive call, the recipe is evaluated after the block has exited and
-// `p` is then a free symbol: the result is an unevaluated expression.
-// Wrapping the argument in `listFrom` gives the expected answer.
+// the recursive call, it keeps the bindings of the block that made it, so it
+// is evaluated with that `p` even after the block exited.
 smallest(xs: list<number>) =
   xs if length(xs) <= 1 else do {
     let p = first(xs)

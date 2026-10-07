@@ -2,6 +2,63 @@
 
 ### Issues Resolved
 
+- **`EllipticPi` with a complex parameter, or a characteristic above 1, has a
+  finite value**
+  ([#422](https://github.com/cortex-js/compute-engine/issues/422)).
+  `EllipticPi(0.5, 1.2 + 0.5i)` answered `ComplexInfinity`; it is now
+  `2.4222884856310676 + 1.4397130015184151i`, as in mpmath, and
+  `EllipticPi(2, π/2 + 10⁻⁶i)` is `−0.7575617711779599 − 6.163502500953406i`.
+  The complex Carlson `R_J` kernel declined every argument configuration outside
+  the domain of its duplication theorem (a parameter `m` with `Re m > 1`, a real
+  characteristic `n > 1`, most complex characteristics), and the decline
+  surfaced as an infinity. It now integrates the first part of the defining
+  integral numerically along a segment that leaves the real axis, as mpmath
+  does, with an on-axis pole subtracted analytically, and the complete and
+  incomplete `Π` agree with mpmath to about 14 digits on both sides of the real
+  axis. `EllipticPi(2, 0.3)` with real operands is unchanged: the real kernel
+  gives the Cauchy principal value `−0.15182298474781241`, which is the real
+  part of the complex value.
+
+- **The elements of a `Range` past 2^53 are exact**
+  ([#422](https://github.com/cortex-js/compute-engine/issues/422)).
+  `Range(2^60, 2^60 + 3)` materialized to four copies of `1152921504606846976`
+  (the element count has been exact since 0.149.0, but each element was
+  `lower + k·step` in machine arithmetic), and `At(Range(2^60, 2^60 + 3), 2)`
+  was the same double. The iterator and `At` now step in `bigint` arithmetic
+  when the machine sum is not a safe integer: the elements are `2^60`,
+  `2^60 + 1`, `2^60 + 2`, `2^60 + 3`. The same reading makes a rational step
+  held by a symbol give exact rationals (`Range(0, 1, s)` with `s := 1/3` is
+  `[0, 1/3, 2/3, 1]`, as it already was for a literal step).
+
+- **Compiled integer operations beyond the safe integer range are errors,
+  not different numbers.** Compiled `Mod`, `Remainder`, `GCD` and `LCM` read a
+  double beyond ±2^53 or an infinity as an integer: `(2^60 + 1) % 10` gave 6
+  (the true value is 7), `Remainder(2^60, …)` gave 0, and `Mod` of a sum
+  that overflowed to `Infinity` gave `NaN`. They now throw a `RangeError` that
+  names the operation and the value, in JavaScript and in Python; the
+  `Mod(x, 1)` fractional-part forms are unchanged. Constant folding of an
+  integer operation on a large exact operand (`digitSum(2^1000)` compiled to
+  84 because the fold used the rounded `.N()` value) now folds from the exact
+  value, so the compiled `digitSum(2^1000)` is 1366.
+
+- **A lazy collection passed as an argument keeps the bindings of its
+  caller.** A lazy `filter` whose lambda reads a block local, passed to a
+  call made inside that block (`smallest(filter(rest(xs), x => x < p))` in a
+  recursive function), was evaluated in the callee's frame after the block
+  had exited, so the local was gone and the result stayed an unevaluated
+  expression; a non-recursive helper receiving such an argument read the
+  caller's parameter by name in the wrong frame too. Four causes in the same
+  mechanism are fixed (`function-utils.ts`): a symbol inside a lazy argument
+  is replaced by the caller's value when the callee would resolve it to a
+  different binding; a function literal held by a lazy operator captures the
+  block's locals; a recursive application's frame chains to the function's
+  defining scope, not to the caller's frame, which also fixes `hold`-function
+  recursion (`hold f(e, n) = e if n == 0 else f(e + n, n - 1); f(10, 2)` gave
+  an unevaluated `If`, now 13) and a lambda passed into a recursive call
+  reading the callee's parameters; and a lazy collection returned from a
+  block in an `if` branch captures its locals. Quicksort over lazy partitions
+  now sorts.
+
 - **`Series(Zeta(s), s, 1, n)` gives every order of the Laurent series**
   ([#421](https://github.com/cortex-js/compute-engine/issues/421)). The
   expansion of `Zeta` at its pole stopped at the constant term, with an `O(s−1)`
@@ -295,6 +352,26 @@
 
 
 ### Issues Resolved
+
+- **A list literal with a spread of a lazy collection is a plain list.**
+  `[...take(ys, 1), 9, ...drop(ys, 2)]` evaluated to the lazy recipe
+  `ListJoin(Take(…), [9], Drop(…))`: it printed as the recipe, re-read its
+  variables at every later read, and a loop that rebuilt a list this way
+  nested one recipe per turn until it timed out. `ListJoin` now evaluates to
+  a list when every segment is a finite collection whose elements can be
+  computed and the total is within `ce.maxCollectionSize`; lazy rows inside
+  the segments are listed too. An infinite spread (`[...1..oo]`) stays lazy,
+  and an explicit `join(a, b)` keeps its lazy semantics.
+
+- **`Zip` and `Repeat` keep their element types.** `Zip` was typed as a bare
+  `list` as soon as one source had no element type, and `Repeat` was always a
+  bare `list`. In a lambda over `zip(open, 1..3)`, the parameter then had no
+  type, and a numeric index read (`p[2] % pass`) typed every component as a
+  number, so `!p[1]` was refused ("expected `boolean`, got `nan | real`"). `Zip`
+  is now typed `list<tuple<c₁, …, cₙ>>` with each component the element type
+  of its source (`unknown` for a bare source), and `Repeat(v, n)` is
+  `list<T>` for a value of type `T` (`repeat(false, 3)` is `list<boolean>`). The
+  100-doors program of the Epsil corpus runs.
 
 - **A lazy random collection held in a dictionary now keeps its seed.** A
   `WithRandomSeed` frame recognizes a lazy collection that draws random

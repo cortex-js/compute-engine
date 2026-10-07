@@ -527,9 +527,11 @@ describe('an impure operand spliced by a multi-use template draws exactly once',
     expect(
       compile(ce.box(['Mod', ['Add', 'x', 29], 900]), { fallback: false }).code
     ).toBe('_SYS.floorMod(_.x + 29, 900)');
+    // `Remainder` is a call of the runtime helper, which refuses an operand
+    // beyond the safe integer range (`integerOperand`).
     expect(
       compile(ce.box(['Remainder', 'x', 2]), { fallback: false }).code
-    ).toBe('((_.x) - (2) * Math.round((_.x) / (2)))');
+    ).toBe('_SYS.remainder(_.x, 2)');
   });
 
   test('GLSL: Remainder(Random(), 2) hoists the draw to a single temporary', () => {

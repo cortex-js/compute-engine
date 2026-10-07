@@ -3650,6 +3650,30 @@ function compileColorComponents(
   return compile(components);
 }
 
+/** The integers from `0` to `2^53 - 1`, both included. */
+const SAFE_NON_NEGATIVE_INTEGER_TYPE = parseType(
+  `integer<0..${Number.MAX_SAFE_INTEGER}>`
+);
+
+/**
+ * True if `expr` is an integer from `0` to `2^53 - 1` at every evaluation:
+ * a number literal in that range, or an operand whose static type is a
+ * subtype of `integer<0..2^53 - 1>` (a declared `integer<0..100>`, say).
+ * A bare `integer` type has no bound and answers `false`. Every double in
+ * that range is an exact integer, so `%` on two such operands is exact.
+ */
+function isSafeNonNegativeInteger(expr: Expression): boolean {
+  if (isNumber(expr))
+    return (
+      !expr.isComplex &&
+      Number.isInteger(expr.re) &&
+      expr.re >= 0 &&
+      expr.re <= Number.MAX_SAFE_INTEGER
+    );
+  const t = expr.type?.type;
+  return t !== undefined && isSubtype(t, SAFE_NON_NEGATIVE_INTEGER_TYPE);
+}
+
 const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   __proto__: null as never,
   // Tolerance-aware equality (see compileJSEquality). Not operators — a raw
@@ -7243,11 +7267,28 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // divisor the floored modulo takes the sign of the divisor, and `%` the
     // sign of the dividend (`Mod(7, -3)` is `-2`, `7 % -3` is `1`). A zero
     // divisor gives `NaN` on both.
+    //
+    // For a divisor other than `1` the remainder reads every digit of the
+    // dividend, and `_SYS.floorMod` refuses an operand beyond the safe
+    // integer range or infinite with a `RangeError`, where `%` answers the
+    // remainder of the rounded double (`(2^60 + 1) % 10` is `6`, the exact
+    // answer is `7`) or `NaN`. So the plain `%` is kept only in two cases.
+    // The first is the divisor `1`: the remainder of an integer by `1` is `0`
+    // whatever its magnitude, so `%` cannot answer a different number. The
+    // second is a pair of operands that are each a literal or of a static
+    // type bounded inside `0..2^53 - 1` (the index of a loop over a literal
+    // range, `Mod(i, 2)` with `i: integer<0..100>`): no such operand can be
+    // beyond the range, so the run-time check is not needed. An operand
+    // typed bare `integer` has no bound and keeps the checked helper.
     const fastPath =
-      BaseCompiler.isIntegerValued(a) &&
-      BaseCompiler.isIntegerValued(b) &&
-      BaseCompiler.isNonNegative(a) &&
-      BaseCompiler.isNonNegative(b);
+      (BaseCompiler.isIntegerValued(a) &&
+        BaseCompiler.isIntegerValued(b) &&
+        BaseCompiler.isNonNegative(a) &&
+        BaseCompiler.isNonNegative(b) &&
+        isNumber(b) &&
+        b.re === 1 &&
+        !b.isComplex) ||
+      (isSafeNonNegativeInteger(a) && isSafeNonNegativeInteger(b));
     // An IMPURE operand (the Random family) must be evaluated exactly once:
     // a spliced draw re-draws at run time (`Mod(x, Random())` consumed three
     // draws).
@@ -7288,7 +7329,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // `((a % b) + b) % b` always added it, and that sum is rounded when it is
     // larger than 2^53: `Mod(2, 2^53 - 1)` ran to `1`. A call evaluates each
     // operand once, in order, so an impure operand (the Random family) or a
-    // computed divisor needs no temporary.
+    // computed divisor needs no temporary. The helper throws for an operand
+    // beyond the safe integer range (see `fastPath` above).
     if (!fastPath) return `_SYS.floorMod(${compile(a)}, ${compile(b)})`;
     // `compile()` emits sub-expressions without outer parentheses (`x + 29`),
     // and `%` binds tighter than `+` — wrap before splicing next to `%`.
@@ -7310,23 +7352,17 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       return identityPassthrough(args[0], compile, target);
     return `Math.trunc(${compile(args[0])})`;
   },
-  Remainder: ([a, b], compile, target) => {
+  Remainder: ([a, b], compile) => {
     if (a === null || b === null)
       throw new Error('Could not compile `Remainder`: missing argument');
-    // An IMPURE operand must be evaluated exactly once: both operands are
-    // spliced twice by the template, so a spliced draw re-draws at run time
-    // (`Remainder(Random(), 2)` consumed two draws). Bind to temps; pure
-    // operands keep the direct emission byte-identical (see `Mod`).
-    if (a.isPure === false || b.isPure === false) {
-      const ta = BaseCompiler.tempVar(target);
-      const tb = BaseCompiler.tempVar(target);
-      return `(() => { const ${ta} = ${compile(a)}, ${tb} = ${compile(b)}; return (${ta} - ${tb} * Math.round(${ta} / ${tb})); })()`;
-    }
-    // `compile()` emits sub-expressions without outer parentheses, and
-    // `*`/`/` bind tighter than `+` — wrap before splicing.
-    const ca = `(${compile(a)})`;
-    const cb = `(${compile(b)})`;
-    return `(${ca} - ${cb} * Math.round(${ca} / ${cb}))`;
+    // `_SYS.remainder` computes `a - b·round(a/b)`. It refuses an operand
+    // beyond the safe integer range or infinite with a `RangeError`: there
+    // the rounded quotient is not exact, and the formula answers a value
+    // that is the remainder of neither the double nor the exact operand
+    // (`2^60 - 7·round(2^60/7)` is `0`, the remainder is `1`). A call
+    // evaluates each operand once, in order, so an impure operand (the
+    // Random family) needs no temporary.
+    return `_SYS.remainder(${compile(a)}, ${compile(b)})`;
   },
 
   // No Subtract function handler — Subtract canonicalizes to Add+Negate.

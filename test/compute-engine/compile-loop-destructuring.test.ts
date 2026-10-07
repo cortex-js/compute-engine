@@ -80,10 +80,13 @@ describe('COMPILE Loop — destructuring binder (JavaScript)', () => {
     expect(
       ce.box(['Zip', ['Range', 1, 3], ['Range', 4, 6]]).type.toString()
     ).toBe('list<tuple<integer, integer>>');
-    // A source whose element type is unknown keeps the bare `list`.
+    // A source whose element type is not known still gives pairs: its
+    // component is the source's own element type (`any` here, from the
+    // `indexed_collection<any>` parameter of `Zip` that the valueless symbol
+    // is inferred from), and the other component stays typed.
     expect(
       ce.box(['Zip', 'unknownSource', ['Range', 1, 3]]).type.toString()
-    ).toBe('list');
+    ).toBe('list<tuple<any, integer>>');
     const program = epsil(
       'let s = 0\nfor (i, j) in Zip(1..3, 4..6) { s = s + i * j }\ns'
     );
