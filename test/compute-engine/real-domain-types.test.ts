@@ -128,21 +128,23 @@ describe('TYPE: Power/Root of a negative base', () => {
 
   //
   // Must NOT widen: an odd-denominator rational exponent takes the REAL root,
-  // so these are real values and must not be claimed complex.
+  // so these are real values and must not be claimed complex. A literal
+  // rational exponent with an odd denominator, and an odd integer degree,
+  // are typed `real` (non-negative for an even numerator); a float degree
+  // keeps the `number` hedge.
   //
   it.each([
-    [['Power', -8, ['Divide', 2, 3]], 4],
-    [['Power', -2, ['Divide', 2, 3]], 1.5874010519681994],
-    [['Root', -8, 3], -2],
-    [['Root', -8, 2.5], -2.29739670999407],
-  ] as [any, number][])(
+    [['Power', -8, ['Divide', 2, 3]], 4, 'real<0..>'],
+    [['Power', -2, ['Divide', 2, 3]], 1.5874010519681994, 'real<0..>'],
+    [['Root', -8, 3], -2, 'real'],
+    [['Root', -8, 2.5], -2.29739670999407, 'number'],
+  ] as [any, number, string][])(
     'the real branch of %j is not claimed complex',
-    (mathjson, expected) => {
+    (mathjson, expected, type) => {
       const expr = ce.box(mathjson);
       expect(expr.N().re).toBeCloseTo(expected, 10);
       expect(isComplexValued(expr)).toBe(false);
-      expect(expr.type.matches('complex')).toBe(false);
-      expect(expr.type.toString()).toBe('number');
+      expect(expr.type.toString()).toBe(type);
     }
   );
 
@@ -169,5 +171,52 @@ describe('TYPE: Power/Root of a negative base', () => {
     [['Root', -8, 'k'], 'number'], // unknown parity: no narrowing
   ] as [any, string][])('%j keeps its type %s', (mathjson, type) => {
     expect(ce.box(mathjson).type.toString()).toBe(type);
+  });
+});
+
+describe('ODD ROOT OF A REAL SYMBOL IS REAL', () => {
+  // The engine takes the real root for an odd degree, for a base of either
+  // sign (`Root(−8, 3) = −2`, `(−8)^(2/3) = 4`): the type of the root of a
+  // real symbol of unknown sign is `real`, and non-negative for an even
+  // numerator. An even denominator keeps the complex hedge.
+  const ce = new ComputeEngine();
+  ce.declare('a', 'real');
+  ce.declare('n', 'integer');
+  const typeOf = (latex: string) => ce.parse(latex).type.toString();
+
+  test('an odd literal degree is real', () => {
+    expect(typeOf('\\sqrt[3]{a}')).toBe('real');
+    expect(typeOf('\\sqrt[5]{a}')).toBe('real');
+    expect(typeOf('a^{1/3}')).toBe('real');
+    expect(typeOf('a^{3/5}')).toBe('real');
+    expect(typeOf('a^{2/3}')).toBe('real<0..>');
+    expect(ce.parse('\\sqrt[3]{a}').isExtendedReal).toBe(true);
+    // Cross-checked against the values.
+    expect(ce.parse('\\sqrt[3]{-8}').N().re).toBe(-2);
+    expect(ce.parse('(-8)^{2/3}').N().re).toBe(4);
+    expect(ce.parse('(-32)^{3/5}').N().re).toBe(-8);
+  });
+
+  test('a negative exponent over a base that can be 0 admits the pole', () => {
+    // `0^(-2/3)` is `~oo`: the type is not the finite `real`, as for a
+    // negative integer exponent. A base proven non-zero keeps the real root.
+    ce.declare('b', 'real<1..>');
+    expect(ce.parse('a^{-2/3}').type.matches('real')).toBe(false);
+    expect(ce.parse('a^{-2/3}').type.matches('infinity | nan | real')).toBe(
+      true
+    );
+    expect(ce.parse('a^{-3/5}').type.matches('real')).toBe(false);
+    expect(ce.parse('a^{-2/3}').subs({ a: 0 }).evaluate().toString()).toBe(
+      '~oo'
+    );
+    expect(ce.parse('b^{-2/3}').type.matches('real')).toBe(true);
+    expect(ce.parse('b^{-3/5}').type.matches('real')).toBe(true);
+  });
+
+  test('an even degree, a symbolic degree and a float exponent keep the hedge', () => {
+    expect(typeOf('\\sqrt[4]{a}')).toBe('number');
+    expect(typeOf('\\sqrt[n]{a}')).toBe('number');
+    expect(typeOf('a^{1/2}')).toBe('complex');
+    expect(typeOf('a^{0.5}')).toBe('number');
   });
 });

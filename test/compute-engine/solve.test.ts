@@ -1075,13 +1075,15 @@ describe('SOLVING CUBIC AND QUARTIC EQUATIONS', () => {
       '1',
     ]);
     expect(strings('x^5+x+1=0')).toEqual(['-0.7548776662466927']);
-    // A symbolic real right-hand side: the real root only, and an answer.
-    // (The assumption makes the type of root(3)(a) decided real; without
-    // it, the root is removed by a check that does not decide, and there is
-    // no answer, as before.)
+    // A symbolic real right-hand side: the real root only, and an answer
+    // (root(3)(a) is typed real for a real a of either sign). An even
+    // degree has real roots only for a ≥ 0: with no sign known there is no
+    // answer, and with a > 0 the two real roots.
     real.declare('a', 'real');
-    real.assume(real.parse('a > 0'));
     expect(strings('x^3=a')).toEqual(['root(3)(a)']);
+    expect(strings('x^5=2a')).toEqual(['root(5)(2a)']);
+    expect(strings('x^4=a')).toBeUndefined();
+    real.assume(real.parse('a > 0'));
     expect(strings('x^4=a')).toEqual(['root(4)(a)', '-root(4)(a)']);
     const op = (latex: string) => ce.parse(latex).evaluate().toString();
     expect(op('\\operatorname{Solve}(x^3=8, x, \\mathbb{R})')).toBe('[2]');

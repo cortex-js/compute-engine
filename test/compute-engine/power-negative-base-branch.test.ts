@@ -241,8 +241,8 @@ describe('NEGATIVE BASE: exact-rational branch decision', () => {
     const expr = ce.box(['Power', -2, ['Rational', 100, 3]]);
     const expected = Math.pow(2, 100 / 3); // ≈ 1.0822639e10, REAL
 
-    it('is typed number', () => {
-      expect(expr.type.toString()).toBe('number');
+    it('is typed non-negative real (an even numerator over an odd denominator)', () => {
+      expect(expr.type.toString()).toBe('real<0..>');
     });
 
     it('.N() is the REAL +2^(100/3)', () => {

@@ -113,6 +113,15 @@
   cubic, which has no rational root and no quadratic factor. Only such a factor
   gives floats.
 
+- **The odd root of a real symbol is typed real.** `Root(a, 3)` and `a^(2/3)`
+  with `a` declared `real` were typed `number`: the engine takes the real
+  root for an odd degree (`Root(-8, 3)` is `-2`, `(-8)^(2/3)` is `4`), so the
+  value is real for either sign of `a`. They are now typed `real`, and
+  `a^(2/3)` non-negative; a literal rational exponent with an even denominator
+  (`a^(1/2)`) is unchanged. `Solve(x^3 = a, x)` with `x` and `a` real, which
+  stayed unevaluated because the root `∛a` was removed by a check that did
+  not decide, is now `[∛a]`.
+
 - **`DSolve` writes the modes of an exact complex characteristic root in real
   form.** The characteristic polynomial of `y''' - y = 0` is `r^3 - 1`, whose
   roots are now the exact `1` and `(-1 ± i√3)/2`; the solution was written

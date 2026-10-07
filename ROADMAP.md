@@ -641,21 +641,6 @@ has at most one root.
 A root of higher multiplicity (`sin(x)^10` at `π`) has no such proof, so it
 needs a decision: keep the tolerance for it, or give no answer.
 
-### The real odd root of a real symbol is not typed real, so `x³ = a` has no answer for a real `x` (OPEN, small — found 2026-10-07 by the complete polynomial roots)
-
-With `x` and `a` declared `real`, `Solve(x^3 = a, x)` stays unevaluated:
-the solver gives the root `Root(a, 3)`, and the type of `Root(a, 3)` is
-`number`, which does not decide whether the value is real, so the root is
-removed by a check that does not decide and the list is not an answer. With
-`ce.assume(a > 0)` the type is decided and the answer is `[∛a]`. The engine
-evaluates `Root(a, n)` for a real `a` and an odd `n` to the real root
-(`Root(-8, 3)` is `-2`), so the type of `Root(a, n)` with `a: real` and an
-odd integer `n` should be `real` (the type handler of `Root`/`Power` with
-an exponent `1/n`). The same gap removes `√(a² + 1)`-like roots whose
-radicand is positive for every real `a`. Test: `x^3 = a` with `x`, `a`
-real gives `[root(3)(a)]`; `x^4 = a` keeps today's behavior (not real for a
-negative `a`).
-
 ### `Solve` gives a periodic product the principal roots of each factor (OPEN, question — found 2026-10-04)
 
 Over ℝ or with no domain, `sin(2x)·cos(3x) = 0` gives the union of the

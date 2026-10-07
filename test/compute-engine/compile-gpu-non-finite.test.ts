@@ -184,13 +184,13 @@ describe('GPU no-real-value constants FOLD (the JS target ruling, applied)', () 
       `vec2(1.0, 0.0) + vec2(${pRe}, ${pIm})`
     );
 
-    // The ODD-denominator branch keeps a REAL principal root, stays
-    // `number`, and must fold to that real value — NOT to NaN, which is
+    // The ODD-denominator branch keeps a REAL principal root (typed real,
+    // non-negative for an even numerator) and must fold to that real value — NOT to NaN, which is
     // all the shader `pow` yields for a negative base. `Power` had no such
     // correction (only `Root` did), so this folded to NaN while the
     // interpreter returned 4.
     expect(ce.box(['Power', -8, ['Divide', 2, 3]]).type.toString()).toBe(
-      'number'
+      'real<0..>'
     );
     expect(g(['Power', -8, ['Divide', 2, 3]])).toBe('4.0');
     expect(w(['Power', -8, ['Divide', 2, 3]])).toBe('4.0');
@@ -203,7 +203,7 @@ describe('GPU no-real-value constants FOLD (the JS target ruling, applied)', () 
     // folds to the real `+2^(100/3)` on both shader targets instead of the
     // shader NaN it used to yield.
     expect(ce.box(['Power', -2, ['Divide', 100, 3]]).type.toString()).toBe(
-      'number'
+      'real<0..>'
     );
     const real100over3 = formatFloat(Math.pow(2, 100 / 3));
     expect(g(['Power', -2, ['Divide', 100, 3]])).toBe(real100over3);

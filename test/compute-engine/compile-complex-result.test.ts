@@ -228,7 +228,8 @@ describe('COMPILE: complex RESULT of a real argument (assigned symbol)', () => {
       // what had to change.
       const ce = engineWithNegativeAssignment();
       const expr = ce.parse('(-8)^{\\frac{2}{3}}');
-      expect(expr.type.toString()).toBe('number');
+      // An even numerator over an odd denominator: the real root, squared.
+      expect(expr.type.toString()).toBe('real<0..>');
       const result = compile(expr, { fallback: false });
       expect(result.code).toBe('4');
       expect(result.run!()).toBe(4);
@@ -248,7 +249,7 @@ describe('COMPILE: complex RESULT of a real argument (assigned symbol)', () => {
       // constant now tell one story: the real `+2^(100/3)`.
       const ce = engineWithNegativeAssignment();
       const expr = ce.parse('(-2)^{\\frac{100}{3}}');
-      expect(expr.type.toString()).toBe('number');
+      expect(expr.type.toString()).toBe('real<0..>');
       // `constantFold: false`: the subject is the EMITTER's own fold of a
       // negative base with an odd-denominator exponent (the branch that used
       // to produce NaN), which is what runs when the whole-expression

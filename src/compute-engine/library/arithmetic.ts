@@ -1346,6 +1346,24 @@ function lnSign(x: Expression): Sign | undefined {
 }
 
 /**
+ * The parity of the numerator of a LITERAL rational exponent `p/q` in
+ * lowest terms with an odd denominator `q > 1`, as `{ numeratorEven }`;
+ * `undefined` for an integer, a float, a symbol or a compound exponent, and
+ * for an even denominator. Such an exponent takes the real root for a real
+ * base of either sign (see `negativeBaseIsComplexBranch()`).
+ */
+function oddDenominatorExponent(
+  exp: OperandDescriptor
+): { numeratorEven: boolean } | undefined {
+  const structure = exp.structureOf?.();
+  const exact = structure?.kind === 'number' ? structure.rational : undefined;
+  if (exact === undefined) return undefined;
+  const [p, q] = exact;
+  if (q === 1n || q % 2n === 0n) return undefined;
+  return { numeratorEven: p % 2n === 0n };
+}
+
+/**
  * Whether `(negative base)^exp` provably takes the principal *complex* branch
  * rather than a real root.
  *
@@ -8279,6 +8297,26 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
                   negativePoleTier() ?? refinePow('real') ?? 'real',
                   context.engine._typeResolver
                 );
+              // A literal rational exponent `p/q` with an odd denominator
+              // takes the real root for a base of either sign (the branch
+              // convention of `arithmetic-power.ts`: `(−8)^(2/3) = 4`,
+              // `(−32)^(3/5) = −8`), so the value is real; with an even
+              // numerator it is the square of a real, thus non-negative. A
+              // negative exponent over a base that can be 0 is the pole
+              // `0^(−2/3) = ~oo`: the type then admits the infinity
+              // (`POSSIBLY_ZERO_QUOTIENT_TYPE`, as for a negative integer
+              // exponent; `negativePoleTier()` reads integer exponents only,
+              // so the pole is read from the sign of the exponent here).
+              const oddDenominator = oddDenominatorExponent(exp);
+              if (oddDenominator !== undefined)
+                return BoxedType.forResult(
+                  powerMayBePole(base, expSgn)
+                    ? POSSIBLY_ZERO_QUOTIENT_TYPE
+                    : oddDenominator.numeratorEven
+                      ? nonNegativeRangeType('real')
+                      : 'real',
+                  context.engine._typeResolver
+                );
               // A *provably negative* base with an exponent that provably lands on
               // the complex branch (`(−2)^0.3`) is a finite complex value — the
               // `number` default below is true but too coarse for the
@@ -8710,6 +8748,16 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             positiveSign(rootExpSgn) === true
           )
             return BoxedType.forResult('complex', context.engine._typeResolver);
+          // A real base of either sign with a provably *odd* positive degree
+          // has a real value: the engine's real-root convention gives the
+          // real root (`Root(−8, 3) = −2`), so `Root(a, 3)` with `a: real` is
+          // real, whichever the sign of `a`. (`=== true`: a symbolic degree
+          // has no provable parity and keeps the `number` hedge below.)
+          if (
+            operandParityIsOdd(exp) === true &&
+            positiveSign(rootExpSgn) === true
+          )
+            return BoxedType.forResult('real', context.engine._typeResolver);
           // A negative real base: a positive index yields a finite (real or
           // complex) value; a non-positive index can numericize to NaN in the
           // current evaluate path (e.g. Root(−2,−2)), so widen to `number`.
