@@ -286,9 +286,10 @@ describe('Interval target — collection values across a user-function boundary'
 describe('Interval target — literal and symbolic ranges', () => {
   test('a literal range is an accessor operand (audit n7uhaaoq1q)', () => {
     const { code, out } = run(engine(), '(1..4)_{y}', { y: pt(3) });
-    // The four-element array is a constant of the artifact (`_k5`), bound
-    // once after its elements rather than built at the read on every call.
-    expect(code).toBe('_IA.at(_k5, _.y)');
+    // The four-element range is ONE constant of the artifact (`_k1`, the
+    // compact `_IA.points([1, 2, 3, 4])` spelling), bound once rather than
+    // built at the read on every call.
+    expect(code).toBe('_IA.at(_k1, _.y)');
     expectEncloses(out, 3);
   });
 
@@ -1719,8 +1720,10 @@ describe('Interval target — a selection among list values', () => {
       which(ce, ['List', 'x', 1], ['List', 1, 2]),
       { x: pt(3) }
     );
+    // `[1, 2]` is one compact constant (`_k3`); `[x, 1]` holds a variable
+    // and stays an array at the read, its `1` a shared scalar constant.
     expect(root.code).toBe(
-      "((_tv1 = _IA.less(_k1, _.x)) === 'true' ? _IA.res([_.x, _k2]) : _tv1 === 'false' ? _IA.res(_k4) : _IA.hull([_.x, _k2], _k4))"
+      "((_tv1 = _IA.less(_k1, _.x)) === 'true' ? _IA.res([_.x, _k2]) : _tv1 === 'false' ? _IA.res(_k3) : _IA.hull([_.x, _k2], _k3))"
     );
     expect(root.out).toEqual([
       [3, 3],

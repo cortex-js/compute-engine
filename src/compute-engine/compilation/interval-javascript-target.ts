@@ -358,6 +358,51 @@ function compileIntervalCollectionOperand(
 }
 
 /**
+ * The emitted spelling of a run-time array whose elements are `codes`.
+ *
+ * An array whose every element is a point over a plain number literal — a
+ * `List` of numbers written in the source or held as a symbol's value, the
+ * written-out elements of a literal `Range` — is spelled as one call over the
+ * array of numbers, `_IA.points([4, 4.5, …])`; the run-time `points`
+ * (`interval/collections.ts`) builds the same array of degenerate intervals
+ * the elementwise spelling `[_IA.point(4), _IA.point(4.5), …]` built. In the
+ * elementwise spelling every element is a constant of its own, which
+ * `hoistIntervalConstants` binds to a name before it binds the array, so a
+ * list of N numbers cost N + 1 declarations, each with its own `_IA.point`
+ * call. The compact spelling is one constant, bound once by the same pass,
+ * at the byte cost of the numbers themselves.
+ *
+ * Any other element — a variable, a loop index, the enclosure of a literal
+ * no double holds (`1/49`), a nested list, a non-finite endpoint — keeps the
+ * elementwise array, whose constant elements the hoist still shares. A
+ * nested list of numbers is compact at its own level and the outer array
+ * then reads the names the pass bound.
+ */
+function intervalArrayCode(codes: readonly string[]): string {
+  if (
+    codes.length > 0 &&
+    codes.every((code) => NUMERIC_POINT_CODE.test(code))
+  ) {
+    const numbers = codes.map((code) => NUMERIC_POINT_CODE.exec(code)![1]);
+    return `_IA.points([${numbers.join(', ')}])`;
+  }
+  return `[${codes.join(', ')}]`;
+}
+
+/**
+ * Does `x` have an interval reading — is it a number by its type, a provable
+ * list of numbers (its own array), or a symbol with no type evidence at all
+ * (the free plot variable in `[x + 1, x − 1]`, which every scalar position on
+ * this target already reads as an interval)? An expression PROVABLY of
+ * another sort — a boolean, a string, a point — has none.
+ */
+function hasIntervalReading(x: Expression): boolean {
+  if (x.type.matches('number') || isProvablyNumericListOperand(x)) return true;
+  const t = compilationType(x);
+  return t === 'unknown' || t === 'any';
+}
+
+/**
  * The heads whose node is spelled as a run-time collection value by
  * `compileIntervalCollectionValue`. `Tuple` and `PointList` are among them
  * for the positions that consume a point whole — the accessor operand
@@ -415,19 +460,6 @@ const COLLECTION_VALUE_HEADS: ReadonlySet<string> = new Set([
  * have no interval reading. A head the caller overrode
  * (`CompileTarget.unrollSkipHeads`) keeps its ordinary dispatch.
  */
-/**
- * Does `x` have an interval reading — is it a number by its type, a provable
- * list of numbers (its own array), or a symbol with no type evidence at all
- * (the free plot variable in `[x + 1, x − 1]`, which every scalar position on
- * this target already reads as an interval)? An expression PROVABLY of
- * another sort — a boolean, a string, a point — has none.
- */
-function hasIntervalReading(x: Expression): boolean {
-  if (x.type.matches('number') || isProvablyNumericListOperand(x)) return true;
-  const t = compilationType(x);
-  return t === 'unknown' || t === 'any';
-}
-
 function compileIntervalCollectionValue(
   e: Expression,
   target: CompileTarget<Expression>
@@ -564,14 +596,18 @@ function compileIntervalCollectionValue(
       if (code === undefined) return undefined;
       elements.push(code);
     }
-    return `[${elements.join(', ')}]`;
+    // A tuple is one point, and its spelling is read as a nested array by
+    // the coordinate accessors; only a `List` takes the compact spelling.
+    return head === 'List'
+      ? intervalArrayCode(elements)
+      : `[${elements.join(', ')}]`;
   }
   if (head === 'Range') {
     const ops = literalRangeElements(literal, INTERVAL_UNROLL_LIMIT);
     if (ops !== undefined)
-      return `[${ops
-        .map((x) => BaseCompiler.compileValueOperand(x, target))
-        .join(', ')}]`;
+      return intervalArrayCode(
+        ops.map((x) => BaseCompiler.compileValueOperand(x, target))
+      );
     if (literal.ops.length < 1 || literal.ops.length > 3) return undefined;
     if (!literal.ops.every((op) => op.type.matches('number'))) return undefined;
     return `_IA.range(${literal.ops
@@ -4051,10 +4087,20 @@ const FOLDABLE_INTERVAL_RESIDUE = /^[\s\d.,(){}:+\-*/eE]*$/;
 const FOLDABLE_MATH_MEMBERS =
   /Math\.(?:PI|E|LN2|LN10|LOG2E|LOG10E|SQRT2|SQRT1_2|sqrt)\b/g;
 
-/** A whole `_IA.point(…)` call over a plain numeric literal — the spelling
- * that a fold would only make longer. */
-const NUMERIC_POINT_CODE =
-  /^_IA\.point\(-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?\)$/;
+/** A plain numeric literal on its own, as the emitters spell a number: what
+ * `intervalArrayCode` writes between the brackets of `_IA.points([…])`, one
+ * per element, and what `hoistIntervalConstants` checks each element of
+ * that spelling against before it binds the call. */
+const PLAIN_NUMERIC_LITERAL = /^-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/;
+
+/** A whole `_IA.point(…)` call over a plain numeric literal, the literal
+ * captured — the spelling that a fold would only make longer, and the test
+ * an element of a list must pass to be written as a bare number inside the
+ * compact `_IA.points([…])` spelling (`intervalArrayCode`). Built from
+ * `PLAIN_NUMERIC_LITERAL` so the two spellings cannot disagree. */
+const NUMERIC_POINT_CODE = new RegExp(
+  `^_IA\\.point\\((${PLAIN_NUMERIC_LITERAL.source.slice(1, -1)})\\)$`
+);
 
 /** Memo of `foldConstantIntervalCode` by code string: the same constant
  * subtree recurs across the unrolled terms of a sum (`0.1·π`), and a fold
@@ -4535,12 +4581,27 @@ function foldRationalConstantFactors(
  * spelled the same way and must not be hoisted.
  */
 const HOISTABLE_INTERVAL_CONSTANT =
-  /\{ kind: 'interval', value: \{ lo: ([^,{}]+), hi: ([^,{}]+) \} \}|\{ lo: ([^,{}]+), hi: ([^,{}]+) \}|_IA\.point\(([^(),]*)\)/g;
+  /\{ kind: 'interval', value: \{ lo: ([^,{}]+), hi: ([^,{}]+) \} \}|\{ lo: ([^,{}]+), hi: ([^,{}]+) \}|(?<![\w$.])_IA\.point\(([^(),]*)\)/g;
 
 /** An array literal whose every element is a name the constant table bound
  * (`hoistIntervalConstants`): the spelling of a constant list after the
  * scalar pass, with the emitter's own `, ` separator. */
 const HOISTABLE_INTERVAL_ARRAY = /\[_k\d+(?:, _k\d+)*\]/g;
+
+/** The compact spelling of a constant list of numbers (`intervalArrayCode`):
+ * `_IA.points([…])` over plain numeric literals, one constant however long
+ * the list. The element list is captured and every element is checked
+ * against `PLAIN_NUMERIC_LITERAL` before the call is bound, as the scalar
+ * captures are checked against `INTERVAL_CONSTANT_ENDPOINT`: a caller's
+ * spliced source may spell the same call over a name.
+ *
+ * Both this search and the `_IA.point(` alternative above refuse a match
+ * whose `_IA` continues an identifier or a property access (`my_IA.point(1)`,
+ * `lib._IA.points([1])`): such text is a caller's own object spelled in a
+ * `vars` entry, and rewriting it to a table name would leave the runner
+ * reading a name that was never declared. The brace spellings need no such
+ * guard: `{` cannot continue an identifier. */
+const HOISTABLE_INTERVAL_POINTS = /(?<![\w$.])_IA\.points\(\[([^[\]]*)\]\)/g;
 
 /** A numeric endpoint as the emitters spell one, plus the named constants
  * they inline. Anything else in the same syntactic position is a variable,
@@ -4653,7 +4714,25 @@ function hoistIntervalConstants(
         text: m[0],
       });
     }
+    // The compact list spelling is a constant of its own. It cannot overlap
+    // a scalar match: `_IA.point(` does not occur inside `_IA.points([…])`,
+    // and no enclosure does either.
+    HOISTABLE_INTERVAL_POINTS.lastIndex = 0;
+    while ((m = HOISTABLE_INTERVAL_POINTS.exec(source)) !== null) {
+      if (masked[m.index] !== source[m.index]) continue;
+      const elements = m[1].split(', ');
+      if (!elements.every((p) => PLAIN_NUMERIC_LITERAL.test(p))) continue;
+      matches.push({
+        source: s,
+        start: m.index,
+        end: m.index + m[0].length,
+        text: m[0],
+      });
+    }
   }
+  // `rewrite` walks the matches of a source in text order; the two searches
+  // above each ran in order, so the merged list has to be put back in it.
+  matches.sort((a, b) => a.source - b.source || a.start - b.start);
 
   const used = target.naming?.usedNames;
   const names = new Map<string, string>();
@@ -4690,10 +4769,13 @@ function hoistIntervalConstants(
   // Arrays whose every element is a constant bound above are constants too,
   // and they are the expensive ones: a list value the emitter spells at each
   // read site — `_IA.at([_k3, …, _k402], _IA.point(i))` for `h[i]` over a
-  // 400-element assigned list — built one array of 400 slots per read, per
-  // call, and inside a loop-form sum once per iteration (Tycho corpus
-  // document `vwbagbcerj`, 2026-09-16: 160,000 element placements per
-  // evaluation). Each distinct array is bound once, after its elements. A
+  // 400-element assigned list whose elements are enclosures (`1/49`) or
+  // nested lists — built one array of 400 slots per read, per call, and
+  // inside a loop-form sum once per iteration (Tycho corpus document
+  // `vwbagbcerj`, 2026-09-16: 160,000 element placements per evaluation). A
+  // list of plain number literals does not reach this pass: it is spelled
+  // as one `_IA.points([…])` call and bound by the first search above.
+  // Each distinct array is bound once, after its elements. A
   // nested list becomes constant from the inside out, so the search repeats
   // until it finds nothing new: an inner `[_k1, _k2]` is bound to a name on
   // one round and the outer array reads that name on the next. An array

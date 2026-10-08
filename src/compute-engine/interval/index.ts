@@ -137,6 +137,7 @@ import {
   bcastPoint as _bcastPoint,
   pointList as _pointList,
   map as _map,
+  points as _points,
   range as _range,
   seededChoice as _seededChoice,
 } from './collections.js';
@@ -287,6 +288,7 @@ export {
   bcastPoint,
   pointList,
   map,
+  points,
   range,
   seededChoice,
 } from './collections.js';
@@ -373,6 +375,7 @@ export const IntervalArithmetic = {
   bcastPoint: _bcastPoint,
   pointList: _pointList,
   map: _map,
+  points: _points,
   range: _range,
   seededChoice: _seededChoice,
 

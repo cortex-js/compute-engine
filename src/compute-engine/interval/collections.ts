@@ -173,6 +173,23 @@ function atRaw(
 }
 
 /**
+ * The point intervals of a constant list of numbers: the run-time value of a
+ * `List` literal whose every element is a plain number literal.
+ *
+ * The interval target spells such a list as `_IA.points([4, 4.5, …])` over
+ * the array of numbers, not as `[_IA.point(4), _IA.point(4.5), …]`
+ * (`intervalArrayCode` in `compilation/interval-javascript-target.ts`). The
+ * elementwise spelling made every element a constant of its own, which the
+ * constant-table pass bound to a name before it bound the array: a list of N
+ * numbers cost N + 1 declarations. The compact spelling is one constant,
+ * evaluated once when the runner is built, and the value is the same array
+ * of degenerate intervals the elementwise spelling built.
+ */
+export function points(values: readonly number[]): Interval[] {
+  return values.map((v) => point(v));
+}
+
+/**
  * The element count of a collection, as a point interval.
  *
  * A non-array operand is not a collection at run time and answers the numeric

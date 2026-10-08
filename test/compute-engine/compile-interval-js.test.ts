@@ -1474,10 +1474,10 @@ describe('INTERVAL JS - collection access', () => {
     });
     expect(fn.success).toBe(true);
     // The array is a constant of the artifact, built once when the runner
-    // is built, not on every call at the read site.
-    expect(fn.code).toBe('_IA.at(_k4, _.k)');
-    expect(fn.preamble).toContain('const _k1 = _IA.point(10);');
-    expect(fn.preamble).toContain('const _k4 = [_k1, _k2, _k3];');
+    // is built, not on every call at the read site. A list of plain number
+    // literals is ONE constant (`_IA.points`), not one per element.
+    expect(fn.code).toBe('_IA.at(_k1, _.k)');
+    expect(fn.preamble).toBe('const _k1 = _IA.points([10, 20, 30]);');
     expect(fn.run!({ k: 3 })).toEqual({
       kind: 'interval',
       value: { lo: 30, hi: 30 },
@@ -1772,8 +1772,8 @@ describe('INTERVAL JS - ACCESSORS OVER AN ASSIGNED LITERAL', () => {
   test('At over an assigned list with a run-time index reads the array from the constant table', () => {
     const fn = compile(ceA.box(['At', 'La', 'n']), { to: 'interval-js' });
     expect(fn.success).toBe(true);
-    expect(fn.code).toBe('_IA.at(_k4, _.n)');
-    expect(fn.preamble).toContain('const _k4 = [_k1, _k2, _k3];');
+    expect(fn.code).toBe('_IA.at(_k1, _.n)');
+    expect(fn.preamble).toBe('const _k1 = _IA.points([10, 20, 30]);');
     const r = fn.run!({ n: { lo: 2, hi: 3 } }) as {
       kind: string;
       value: { lo: number; hi: number };
@@ -1980,7 +1980,12 @@ describe('INTERVAL JS - CONSTANT ARRAYS ARE BOUND ONCE PER ARTIFACT', () => {
     expect(fn.success).toBe(true);
     expect(fn.code).toMatch(/_IA\.at\(_k\d+, _IA\.point\(i\)\)/);
     expect(fn.code).not.toContain('[_k');
-    expect(fn.preamble).toMatch(/const _k\d+ = \[_k\d+(?:, _k\d+){119}\];/);
+    // The 120 numbers are one `_IA.points` constant, not 120 point
+    // constants and an array of their names.
+    expect(fn.preamble).toMatch(
+      /const _k\d+ = _IA\.points\(\[[^,\]]*(?:, [^,\]]*){119}\]\);/
+    );
+    expect(fn.preamble).not.toContain('[_k');
     const v = fn.run!({ x: { lo: 2, hi: 2 } }) as {
       value: { lo: number; hi: number };
     };
@@ -1995,11 +2000,12 @@ describe('INTERVAL JS - CONSTANT ARRAYS ARE BOUND ONCE PER ARTIFACT', () => {
       to: 'interval-js',
     });
     expect(fn.success).toBe(true);
-    // The inner arrays are bound on the first round, the outer one on the
-    // next, so the root reads a single name.
-    expect(fn.code).toBe('_k7');
-    expect(fn.preamble).toContain(
-      'const _k5 = [_k1, _k2];\nconst _k6 = [_k3, _k4];\nconst _k7 = [_k5, _k6];'
+    // The inner lists are compact constants bound on the first round, the
+    // outer array of their names on the next, so the root reads a single
+    // name.
+    expect(fn.code).toBe('_k3');
+    expect(fn.preamble).toBe(
+      'const _k1 = _IA.points([1, 2]);\nconst _k2 = _IA.points([3, 4]);\nconst _k3 = [_k1, _k2];'
     );
     // Answered at the root, the constant is copied at every level, so a
     // caller who writes to the result cannot change what the next call
