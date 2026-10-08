@@ -109,70 +109,49 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
-### The default `auto` mode puts a real-valued plot kernel on the complex lane at 23 times the per-sample cost (OPEN, decision — found 2026-10-08 by the review of the Tycho codegen audit of CE 0.149.0)
+### A declared real result, a ranged index or a ranged argument keeps a compiled user function on the real lane: what remains (OPEN, small — found 2026-10-08 by the review of the Tycho codegen audit of CE 0.149.0)
 
-Under the default `auto` mode the JavaScript target promotes an unknown-sign
-`Sqrt`, `Ln` or `Log` through the complex kernels, and every value that
-depends on it then runs on the complex lane. Measured on the Voronoi showcase
-row `{F(x,y) < 0.0008: 0, B(x,y) > 1.3: 0, 0.12 + 0.8 H(x,y)}` (sites
-`p(k) = 1.45 √((k − 0.5)/16) cos(2.4k) + …`, `k` an integer from 1 to 16):
-the default mode emits 52 KB with 205 complex literals and runs at about
-1 540 µs per sample; `mode: 'strict'` emits 14 KB and runs at about 66 µs
-per sample, with the same values at the sampled points (probe
-`build/probe-voronoi-full.mts`, gitignored). The Joukowsky airfoil
-(`s(x,y) = √((m + u)/2)`, non-negative by construction but not provably so),
-the exoplanet transit, and about ten other documents of the Tycho corpus
-carry the same shape; the digest cannot count them because it does not
-record `mode`, `promoted` or `escalation`. Three ways to close it, which are
-not exclusive: (1) Tycho passes `mode: 'strict'` for plot sampling, which is
-the Desmos reading (a square root of a negative number is undefined), and
-keeps `auto` for the colour lane that needs complex intermediates; under
-`strict` a genuinely complex row (`Mandelbrot(x + iy)`, `|x + iy|`,
-`(x + iy)^a`) still compiles, and only an ordering comparison over a
-complex-typed operand declines; (2) a declared real result (`-> real`) for
-a body with a promotable head selects the real lane for that body instead
-of declining with "the value is complex, but its ascribed type `real` says
-it is real" (the decline is `Typed`, javascript-target.ts), so a host whose
-functions are real by definition can say so per function; (3) the sign
-proofs below remove the promotion where it is provable. The choice between
-(1) and (2) is the user's: (1) is a one-line policy change on the Tycho
-side, (2) is a semantics change of the ascription decline.
+Landed 2026-10-08 (CHANGELOG, Unreleased): under the JavaScript target's
+default `auto` mode, a function declared `-> real` compiles its body on the
+real lane instead of declining; the index of a sum, product, loop or
+comprehension over literal bounds is typed `integer<a..b>` on every route; a
+user function is compiled for the range of its argument when the range
+proves the sign of a radical in its body. Measured on the Voronoi showcase
+row of the Tycho corpus: about 40 µs per sample instead of 1,540 µs, 14 KB
+instead of 52 KB, same values. Tycho was asked whether it passes
+`mode: 'strict'` for plot sampling (its ledger, 2026-10-08) and is acting on
+it. What remains:
 
-### A ranged parameter type does not reach the sign proof of a compiled user-function body (OPEN, small — found 2026-10-08 by the review of the Tycho codegen audit)
-
-With `p` declared `(integer<1..16>) -> unknown` and assigned
-`k ↦ √((k − 0.5)/16)`, the call `p(x)` types `real`, but the compiled body
-is `_SYS.csqrt({ re: 0.0625 * (k - 0.5), im: 0 })` under `auto`
-(`promoted: true`), while the same radicand over a symbol declared
-`integer<1..16>` compiles to `Math.sqrt(0.0625 * (x - 0.5))`. The body is
-compiled with its parameters typed as the lambda wrote them, not as the
-declared signature narrows them (`lowering.define` in base-compiler.ts takes
-`parameterTypes` only from a call-site specialization). Two sources of
-range evidence should reach the promotion verdict
-(`promotesRadicalToComplex`): the declared parameter type, and the join of
-the argument types at every call site of the compilation unit (a `Sum`
-index `integer<1..16>`, a literal after a `Sum` unroll). The comprehension
-index `[D(x, y, k) for k = [1...16]]` has no ranged type either (the
-comprehension types `list<complex>` for the Voronoi body), which is the same
-gap as the loop-index entry below for `Loop`. This is the whole cause of the
-Voronoi promotion above, and does not cover the Joukowsky case.
-
-### interval-js recomputes the all-constant subterms of an unrolled sum inside a compiled user-function body (OPEN, small — found 2026-10-08 by the review of the Tycho codegen audit)
-
-`B(c, k) = Σ_{n=1}^{3} ((n − 0.5)/40)(1 − k(1 − √(1 − ((n − 0.5)/40)²))) S((n − 0.5)/40, c)`
-compiles on `javascript` to one literal per constant
-(`-(k * 0.00007812805199625128) + 1`), but on `interval-js` the body of
-`_fn_B` holds, per term and per call, a closure
-`(() => { const _cse1 = _k4; const _cse2 = _IA.scaleDiv(_cse1, _k5); return … _IA.sub(_k3, _IA.sqrt(_IA.sub(_k3, _IA.square(_cse2)))) … })()`
-whose every operand is a preamble constant (probe `build/probe-fnfold.mts`).
-The same sum at the top level folds (`_k3 = { lo: 0.0000781…, hi: … }`), so
-the fold (`foldConstantIntervalCode`, interval-javascript-target.ts) runs
-for the root but not for a term inside a user-function body once the CSE
-harvest has bound the constant to a `_cse` name. Tycho's exoplanet transit
-kernel `_fn_B` carries 40 such terms (13.8 KB of preamble), so each call
-recomputes 40 interval square roots of constants. A CSE binding whose
-operands are all preamble constants should be folded to a preamble constant
-itself.
+- Under `mode: 'complex'`, a function declared `(real) -> real` that is
+  emitted as a shared definition (a recursive function, or one whose call is
+  not inlined) still declines: the literal's parameter carries no type from
+  the declared signature, so a `number`-typed node over the parameter is read
+  as complex in that mode whether or not promotion is on. The inlined call
+  compiles. Carrying the declared parameter types into the body in complex
+  mode closes it (the `auto` route already rebuilds the generic definition
+  with the declared types when that removes a promoted head).
+- A real-ascribed body that reads an assigned symbol whose value promotes
+  (`a := √(c − 1)`) still declines under `auto`: the symbol's value compiles
+  with the promotion of the mode, because its preamble local is shared by
+  every reader.
+- The range copies of a user function are shared by containment of the
+  argument range, in emission order: `1..16` compiled after `2..10` gives two
+  copies (`integer<2..>` and `integer<1..>`), where one would do. A copy
+  already emitted is not widened.
+- A clause that becomes a literal `Range` only after canonicalization gets
+  the inferred narrowing, which the first assignment of an index value widens
+  to `integer`; only a clause whose raw form has integer literal bounds is
+  declared ranged.
+- The `promoted` report can still read `true` for a promotion recorded by
+  the analysis of a subtree that is never emitted (documented at the
+  `finally` block of `compile`).
+- A helper passed BY NAME inside a real-ascribed body declines: with
+  `g: (integer<1..16>) -> unknown` and `p: (real) -> real`,
+  `p := y ↦ √y · Total(Map(Range(1, 16), g))` refuses to compile, because the
+  analysis reads the declared `unknown` result of `g` as complex and the
+  real ascription fails closed. The same helper CALLED (`g(k)` under a
+  `Sum`) compiles real. Found 2026-10-08 by the review of the real-lane
+  ascription.
 
 ### A user function, a relation and most other lazy heads still run their operands synchronously under `evaluateAsync` (OPEN, design decision — issue #392, found 2026-10-07)
 

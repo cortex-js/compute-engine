@@ -61,6 +61,14 @@ export type CompiledFunctionEntry =
  * lane mismatch declines, and that decline redoes the compilation once under
  * `'complex'`. Which discipline the returned code was compiled under is
  * reported on the result (`CompilationResult.mode`, never `'auto'`).
+ *
+ * A declared real result is real in every mode. The body of a function
+ * declared with a real result type (`(real) -> real`, `-> finite_real`,
+ * `-> nan | real`) is a real ascription. When the body is complex only
+ * because of promotion, it compiles with promotion off, as `'strict'`
+ * compiles it, also under `'auto'` and `'complex'`: an unknown-sign radical
+ * in it gives `NaN` outside its real domain. A body that is complex also
+ * without promotion (a `complex`-typed operand) still declines.
  */
 export type CompileMode = 'strict' | 'complex' | 'auto';
 
@@ -1034,6 +1042,28 @@ export interface CompileTarget<Expr = unknown> {
    */
   cseMinSize?: number;
   cseMinScore?: number;
+
+  /**
+   * Whether the folded right-hand side `code` of a common-subexpression
+   * candidate is a CONSTANT value of this target, which every occurrence
+   * writes in place instead of reading a temporary.
+   *
+   * A candidate's structure can still mention a symbol that the emission
+   * replaces with a literal: the index of an unrolled `Sum` term is such a
+   * symbol, so `(n − 0.5)/40` is a candidate in the term's region and its
+   * right-hand side folds to a constant in each term. A temporary bound to
+   * that constant is a name the emitted-code fold (`foldEmittedConstant`)
+   * cannot see through, so every expression that reads it (`√(1 − t²)`) stays
+   * a run-time computation over constants. When this answers `true` the
+   * candidate is not bound: each occurrence compiles to the same constant
+   * code, and the expressions around it fold. A constant has no effects, so
+   * writing it at each occurrence changes no evaluation count.
+   *
+   * The predicate must answer `true` only for code that reads no variable, no
+   * caller-mapped `vars` source and no impure routine. Absent means every
+   * candidate is bound as before.
+   */
+  cseInlineConstant?: (code: string) => boolean;
 
   /**
    * The storage hints of this compilation, validated and normalized from the
@@ -2016,7 +2046,10 @@ export interface CompilationOptions<Expr = unknown> {
    *
    * The disciplines are live, not merely reported: a default (`'auto'`)
    * compilation promotes an unknown-sign `Sqrt`/`Ln`/`Log`/`Power` with no
-   * opt-in, a complex-shaped value reaching a binding the strict attempt
+   * opt-in (except in the body of a function declared with a real result,
+   * which compiles on the real lane in every mode when only promotion would
+   * make it complex — see `CompileMode`), a complex-shaped value reaching a
+   * binding the strict attempt
    * shaped real declines with a lane mismatch, and that decline redoes the
    * compilation ONCE under `'complex'`. That redo is each registered
    * target's own responsibility — the built-in targets apply the shared
@@ -2678,6 +2711,12 @@ export type CompilationResult<
    * lowered through a complex kernel — the signal that this compiled unit
    * would NOT compute the same value on a shader target's real kernel, even
    * when no escalation happened. Set by the built-in targets on every result.
+   *
+   * The body of a function declared with a real result (`(real) -> real`)
+   * that is complex only because of promotion compiles with promotion off,
+   * in every mode (see `CompileMode`). Its promotable heads stay on the real
+   * kernel and give `NaN` outside their real domain, so they do not set this
+   * field.
    */
   promoted?: boolean;
 

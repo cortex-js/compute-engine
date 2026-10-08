@@ -31,7 +31,11 @@ describe('real arithmetic from loop bounds', () => {
 
   test('large constant bounds and Product use the same decision', () => {
     const ce = engine();
-    const sum = compile(ce.parse('\\sum_{i=1}^{101}\\ln(i)'), {
+    // A sum whose bounds are both literals types its index `integer<1..101>`,
+    // and that type alone proves the sign of `i` under the logarithm. The
+    // upper bound is a symbol here, so the index type is the bare `integer`
+    // and only the contextual analysis of the loop bounds can prove the sign.
+    const sum = compile(ce.parse('\\sum_{i=1}^{N}\\ln(i)'), {
       constantFold: false,
     });
     expect(sum.success).toBe(true);

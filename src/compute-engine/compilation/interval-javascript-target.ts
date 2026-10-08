@@ -5399,6 +5399,24 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
                 false,
                 intervalSpliceSources(target)
               ),
+      // A common subexpression whose folded value is a constant interval is
+      // written at each occurrence instead of being bound to a temporary, so
+      // the fold above also reaches the expressions that read it (see
+      // `CompileTarget.cseInlineConstant`). In the body of a user function,
+      // `(n − 0.5)/40` in each unrolled term of a `Sum` was bound to a
+      // temporary, and `√(1 − t²)` over it was computed on every call. The
+      // constant table (`hoistIntervalConstants`) then gives each distinct
+      // value one name. A constant that spells a caller's `vars` source is
+      // still bound: the `vars` contract says such a source is never folded.
+      // Off under `constantFold: false`, together with the fold.
+      cseInlineConstant:
+        options.constantFold === false
+          ? undefined
+          : (code) =>
+              constantIntervalEndpoints(code) !== undefined &&
+              !intervalSpliceSources(target).some((splice) =>
+                code.includes(splice)
+              ),
       constant: (id) => INTERVAL_JAVASCRIPT_CONSTANTS[id],
       functions: (id) =>
         namedFunctions?.[id] ? namedFunctions[id] : guardedIntervalFunction(id),

@@ -63,13 +63,17 @@ describe('Sum/Product index typed from an Element clause', () => {
     expect(sum.evaluate().toString()).toBe('14');
   });
 
-  it('keeps an integer index for a range-shaped clause', () => {
+  it('types the index of a range-shaped clause by its literal bounds on both routes', () => {
+    // A clause with integer literal bounds gives the index the ranged type
+    // `integer<1..3>`, as the `Limits` form does: the parse route and the
+    // box route agree. The range is what lets the compiler prove the sign
+    // of `k - 0.5` under the radical of a body such as `sqrt(k - 0.5)`.
     const ce = new ComputeEngine();
     const sum = ce.parse('\\sum_{k=1}^{3} k^2');
-    expect(sum.ops![1].op1.type.toString()).toBe('integer');
+    expect(sum.ops![1].op1.type.toString()).toBe('integer<1..3>');
     expect(sum.evaluate().toString()).toBe('14');
     const boxed = ce.box(['Sum', ['Square', 'k'], ['Tuple', 'k', 1, 3]]);
-    expect(boxed.ops![1].op1.type.toString()).toBe('integer');
+    expect(boxed.ops![1].op1.type.toString()).toBe('integer<1..3>');
     expect(boxed.evaluate().toString()).toBe('14');
   });
 

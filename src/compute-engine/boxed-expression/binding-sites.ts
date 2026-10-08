@@ -119,7 +119,21 @@ function rangeIndexType(
   ops: ReadonlyArray<Expression>,
   flatIndexes: ReadonlySet<number>
 ): TypeString | undefined {
-  if (type !== 'integer' || !isFunction(op, 'Limits')) return type;
+  if (type !== 'integer' || !isFunction(op)) return type;
+  // The parser spells `\sum_{k=1}^{16}` as `Tuple(k, 1, 16)`, which
+  // `canonicalIndexingSet` reads as `Limits(k, 1, 16)`; `Triple(k, 1, 16)`
+  // and the held iterator set `{k, 1, 16}` are read the same way. With a
+  // fourth operand (a step), the clause is a `Range` and is not typed here.
+  if (
+    op.operator !== 'Limits' &&
+    !(
+      (op.operator === 'Tuple' ||
+        op.operator === 'Triple' ||
+        op.operator === 'Set') &&
+      op.nops === 3
+    )
+  )
+    return type;
   return rangeIndexTypeOf(
     op.ops[0],
     op.ops[1],
@@ -232,11 +246,20 @@ export function rangeElementIndexType(
 
 /** Does `expr` contain an `Assign` whose target is the symbol `name`, or a
  * tuple pattern with `name` as a leaf (`Assign(Tuple(k, _), …)`)? */
-function assignsSymbol(expr: Expression, name: string): boolean {
+function assignsSymbol(
+  expr: Expression,
+  name: string,
+  visited: Set<Expression> = new Set()
+): boolean {
   if (!isFunction(expr)) return false;
+  // Boxed expressions share nodes: `List(t, t)` repeated 24 times is a tree
+  // of 2^24 paths over 25 distinct nodes. Each node is walked once, so the
+  // cost is linear in the number of distinct nodes.
+  if (visited.has(expr)) return false;
+  visited.add(expr);
   if (expr.operator === 'Assign' && patternNames(expr.ops[0], name))
     return true;
-  return expr.ops.some((x) => assignsSymbol(x, name));
+  return expr.ops.some((x) => assignsSymbol(x, name, visited));
 }
 
 /** Is `name` the symbol `target`, or a leaf of the tuple pattern `target`? */
@@ -297,8 +320,22 @@ function indexingSetSite(
   // `library/utils.ts`). Pinning `integer` on that shape made the body
   // `chi(n)` an `expected-function` error and the float element an
   // `incompatible-type` throw at the per-iteration assignment.
+  //
+  // One `Element` clause is typed here: a range with integer literal bounds
+  // (`Element(k, Range(1, 16))`). Its index takes the ranged type
+  // `integer<1..16>` ({@link rangeElementIndexType}), as the index of the
+  // `Limits(k, 1, 16)` clause does. The type is DECLARED at the site, so the
+  // assignment of each index value when the loop runs is checked against it
+  // and does not change it. A type narrowed from the collection when the
+  // clause is canonicalized is an INFERRED type instead: the assignment of
+  // the first index value widens it to `integer`, and a compile after an
+  // evaluation does not see the range.
   if (isFunction(op, 'Element')) {
-    const site = siteFor(op.ops[0], [i, 0], undefined);
+    const site = siteFor(
+      op.ops[0],
+      [i, 0],
+      rangeElementIndexType(op.ops[0], op.ops[1], ops)
+    );
     return site === undefined ? [] : [{ ...site, clauseLocal: true }];
   }
   // A bare symbol that is followed by its bounds (`Sum(body, n, 1, 10)`)

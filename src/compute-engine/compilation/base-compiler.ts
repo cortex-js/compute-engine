@@ -107,6 +107,7 @@ import { substituteDeclaredBounds } from '../boxed-expression/generic-instantiat
 import { ascribeDeclaredParameterTypes } from '../engine-declarations.js';
 import type {
   FunctionSignature,
+  NumericPrimitiveType,
   Type,
   TypeReference,
 } from '../../common/type/types.js';
@@ -1246,6 +1247,64 @@ export function stringEvidenceSource(x: Expression): Expression {
 }
 
 const stringPreservingSignatures = new WeakMap<object, boolean>();
+
+/** The registry of the user functions emitted by one compilation. */
+type UserFunctionRegistry = NonNullable<
+  CompileTarget<Expression>['userFunctions']
+>;
+
+/**
+ * Per-compilation memos of the analysis that decides whether a user function
+ * gets a definition with typed parameters (`BaseCompiler.
+ * rangeSpecializedParameterTypes`, `BaseCompiler.declaredParameterLiteral`,
+ * `BaseCompiler.unprovenRadicalCount`). They are keyed by the registry of
+ * the compilation, so they end with it.
+ */
+const radicalCountMemos = new WeakMap<
+  UserFunctionRegistry,
+  Map<string, number>
+>();
+const rangeVerdictMemos = new WeakMap<
+  UserFunctionRegistry,
+  Map<string, (Type | undefined)[] | undefined>
+>();
+const rangeVariantMemos = new WeakMap<
+  UserFunctionRegistry,
+  Map<string, (Type | undefined)[][]>
+>();
+const declaredLiteralMemos = new WeakMap<
+  UserFunctionRegistry,
+  Map<
+    string,
+    {
+      source: Expression & FunctionInterface;
+      emitted: Expression & FunctionInterface;
+    }
+  >
+>();
+
+/**
+ * The user-function definitions of a compilation whose body recorded a
+ * promotion (a radical or logarithm lowered through a complex kernel) while
+ * it compiled, by emitted name. See `BaseCompiler.hasPromotedDefinition`.
+ */
+const promotedDefinitions = new WeakMap<
+  UserFunctionRegistry,
+  Map<string, boolean>
+>();
+
+/** The memo of `registry` in `memos`, created when it does not exist. */
+function memoFor<V>(
+  memos: WeakMap<UserFunctionRegistry, Map<string, V>>,
+  registry: UserFunctionRegistry
+): Map<string, V> {
+  let memo = memos.get(registry);
+  if (memo === undefined) {
+    memo = new Map();
+    memos.set(registry, memo);
+  }
+  return memo;
+}
 
 /**
  * True when `sig` is an overload set with a string-preserving arm and at
@@ -3295,14 +3354,27 @@ export class BaseCompiler {
       // for a subtree that was never emitted at all. On the throw path the
       // neutral `{mode: 'strict', promoted: false}` installed at depth-0 entry
       // stands. (User ruling 2026-08-17, on Tycho consumer item 201.)
-      if (BaseCompiler._compileDepth === 0 && emitted)
+      if (BaseCompiler._compileDepth === 0 && emitted) {
+        // A promotion in the body of an emitted user-function definition is
+        // recorded on that definition (`promotedDefinitions`), not in
+        // `_promoted`. It counts while the definition is in `defs`; a
+        // definition removed later as unreferenced is taken out of the
+        // report again (`pruneUnreferencedVariantBases`).
+        const registry = target.userFunctions;
+        const promoted =
+          BaseCompiler._promoted ||
+          BaseCompiler.hasPromotedDefinition(registry);
         BaseCompiler._lastReport = {
           mode:
-            BaseCompiler._mode === 'complex' || BaseCompiler._promoted
-              ? 'complex'
-              : 'strict',
-          promoted: BaseCompiler._promoted,
+            BaseCompiler._mode === 'complex' || promoted ? 'complex' : 'strict',
+          promoted,
         };
+        BaseCompiler._lastReportBasis = {
+          registry,
+          complexDiscipline: BaseCompiler._mode === 'complex',
+          promotedOutsideDefinitions: BaseCompiler._promoted,
+        };
+      }
       BaseCompiler._complexPromotion = prevPromotion;
       BaseCompiler._mode = prevMode;
       BaseCompiler._realOnlyLowering = prevRealOnlyLowering;
@@ -3471,13 +3543,113 @@ export class BaseCompiler {
    * unknown magnitude) lowers through the complex kernels — the `auto` and
    * `complex` disciplines, and the deprecated `complexPromotion` opt-in.
    * `strict` never promotes (the shader targets' model).
+   *
+   * Promotion is off, in every mode, inside the value of a `Typed` node whose
+   * ascribed type is real when that value is complex only because of
+   * promotion (`withPromotionSuppressed`): there the author declared that
+   * the value is real, and the value compiles on the real lane as `strict`
+   * compiles it.
    */
   static get promotionActive(): boolean {
+    if (BaseCompiler._promotionSuppressed > 0) return false;
+    return BaseCompiler.modePromotes;
+  }
+
+  /**
+   * Whether the compile mode promotes (`auto`, `complex`, or the deprecated
+   * `complexPromotion` opt-in), also inside the value of a real ascription
+   * (`withPromotionSuppressed`). A module-level definition (a user function)
+   * is always compiled with the promotion of the mode
+   * (`withPromotionUnsuppressed`), so the choice of the definition to emit
+   * for a call must read this value, not `promotionActive`. Otherwise a call
+   * inside a real-ascribed value selects a definition that is not
+   * specialized for the promoting mode, and that definition is then
+   * compiled with promotion on and reused by every later call.
+   */
+  private static get modePromotes(): boolean {
     return (
       BaseCompiler._complexPromotion ||
       BaseCompiler._mode === 'auto' ||
       BaseCompiler._mode === 'complex'
     );
+  }
+
+  /**
+   * The number of `withPromotionSuppressed` calls in progress. While it is
+   * more than zero, `promotionActive` is `false`. Both the analysis
+   * (`isComplexValued`, through `promotesRadicalToComplex`) and the emitters
+   * read `promotionActive`, so they agree on the shape of every node that is
+   * compiled while the count is more than zero.
+   *
+   * A module-level definition (a user function, a folded symbol value) is
+   * shared by every call site, so it is never compiled with the count of the
+   * call site that emits it: `withPromotionUnsuppressed` sets the count to
+   * zero for that compilation.
+   */
+  private static _promotionSuppressed = 0;
+
+  /**
+   * Run `fn` with promotion off: an unknown-sign `Sqrt`/`Ln`/`Log`, an even
+   * `Root` and a non-integer `Power` stay on the real lane, and give NaN
+   * outside their real domain, as in `mode: 'strict'`.
+   *
+   * The `Typed` lowering uses this for the value of a real ascription. The
+   * answers of `isComplexValued` computed inside `fn` go into a new memo
+   * layer, which is removed when `fn` returns, so they are never read with
+   * promotion on, and the answers computed with promotion on are not read
+   * inside `fn`.
+   */
+  private static withPromotionSuppressed<T>(fn: () => T): T {
+    BaseCompiler._promotionSuppressed += 1;
+    BaseCompiler._pushComplexMemoLayer();
+    try {
+      return fn();
+    } finally {
+      BaseCompiler._promotionSuppressed -= 1;
+      BaseCompiler._popComplexMemoLayer();
+    }
+  }
+
+  /**
+   * Run `fn` with the promotion of the compile mode, also when it is called
+   * inside `withPromotionSuppressed`. For the compilation (or the analysis)
+   * of a module-level definition: the definition is emitted once and called
+   * from every call site, so its lane must not depend on the call site that
+   * caused the emission. A call of such a definition inside a suppressed
+   * value then reads the lane that the definition records
+   * (`recordUserFunctionLane`): when that lane is complex, the value is
+   * complex and the real ascription declines.
+   */
+  private static withPromotionUnsuppressed<T>(fn: () => T): T {
+    const saved = BaseCompiler.liftPromotionSuppression();
+    try {
+      return fn();
+    } finally {
+      BaseCompiler.restorePromotionSuppression(saved);
+    }
+  }
+
+  /**
+   * The first half of `withPromotionUnsuppressed`, for a caller whose
+   * `try`/`finally` already encloses the compilation: set the count of
+   * `withPromotionSuppressed` calls to zero and return the count it had.
+   * The caller must give that count to `restorePromotionSuppression` in its
+   * `finally` block.
+   */
+  private static liftPromotionSuppression(): number {
+    const saved = BaseCompiler._promotionSuppressed;
+    if (saved === 0) return 0;
+    BaseCompiler._promotionSuppressed = 0;
+    BaseCompiler._pushComplexMemoLayer();
+    return saved;
+  }
+
+  /** The second half of `withPromotionUnsuppressed`: see
+   * `liftPromotionSuppression`. */
+  private static restorePromotionSuppression(saved: number): void {
+    if (saved === 0) return;
+    BaseCompiler._promotionSuppressed = saved;
+    BaseCompiler._popComplexMemoLayer();
   }
 
   /**
@@ -3625,6 +3797,34 @@ export class BaseCompiler {
     mode: 'strict' | 'complex';
     promoted: boolean;
   } = { mode: 'strict', promoted: false };
+
+  /**
+   * What `_lastReport` was computed from, so that the report can be
+   * computed again when unreferenced user-function definitions are removed
+   * from the emitted code (`pruneUnreferencedVariantBases`): the registry of
+   * the definitions, whether the discipline was `complex`, and whether a
+   * promotion was recorded outside the body of every definition.
+   */
+  private static _lastReportBasis:
+    | {
+        registry: UserFunctionRegistry | undefined;
+        complexDiscipline: boolean;
+        promotedOutsideDefinitions: boolean;
+      }
+    | undefined;
+
+  /** True when a definition in `registry.defs` recorded a promotion while
+   * its body compiled. */
+  private static hasPromotedDefinition(
+    registry: UserFunctionRegistry | undefined
+  ): boolean {
+    if (registry === undefined) return false;
+    const promotedDefs = promotedDefinitions.get(registry);
+    if (promotedDefs === undefined) return false;
+    for (const name of promotedDefs.keys())
+      if (registry.defs.has(name)) return true;
+    return false;
+  }
 
   /**
    * Whether the compilation in progress uses complex-value promotion. A numeric
@@ -5274,6 +5474,11 @@ export class BaseCompiler {
    * - the index values of the unrolled `Sum`/`Product` terms in progress
    *   (`_unrolledIndexValues`).
    *
+   * The promotion of the compile mode is also restored when the caller is
+   * the value of a real ascription, which compiles with promotion off
+   * (`withPromotionUnsuppressed`): the definition is compiled for every call
+   * site, not for this one.
+   *
    * The analysis runs in a fresh complexness memo layer (pushed by
    * `withLocalShapeFrame`), so no answer computed here reaches the caller's
    * context, and no answer of the caller's context is reused here.
@@ -5290,7 +5495,7 @@ export class BaseCompiler {
         BaseCompiler._binderShield = [];
         BaseCompiler._unrolledIndexValues = [];
         try {
-          return fn();
+          return BaseCompiler.withPromotionUnsuppressed(fn);
         } finally {
           BaseCompiler._boundVarsCtx = savedBoundCtx;
           BaseCompiler._binderShield = savedShield;
@@ -5926,6 +6131,50 @@ export class BaseCompiler {
     const elt = collectionElementType(r);
     if (elt !== undefined) return BaseCompiler.wideEntriesType(elt, seen);
     return BaseCompiler.wideNumericType(r);
+  }
+
+  /** The ascribed type of the `Typed` node `typed`, as its second operand
+   * `type` spells it. */
+  private static ascriptionText(type: Expression, typed: Expression): string {
+    return isString(type)
+      ? type.string
+      : isSymbol(type)
+        ? type.symbol
+        : typed.type.toString();
+  }
+
+  /**
+   * The decline of a real ascription (`Typed(value, type)`, the `Typed`
+   * node `typed`) over a value that the analysis reads as complex.
+   */
+  private static realAscriptionError(
+    value: Expression,
+    type: Expression,
+    typed: Expression
+  ): Error {
+    const ascribed = BaseCompiler.ascriptionText(type, typed);
+    return new Error(
+      `Could not compile \`Typed\`: the value \`${value.toString()}\` is complex, but its ` +
+        `ascribed type \`${ascribed}\` says it is real. The compiled ` +
+        `code would read the complex value as a real number. When the ` +
+        `ascription comes from a declared signature, declare a result ` +
+        `type that admits a complex value, for example ` +
+        `\`(unknown) -> complex\` instead of \`(unknown) -> real\`.`
+    );
+  }
+
+  /**
+   * Whether the `Typed` node `typed` ascribes a real scalar type: its type,
+   * without the `NaN` and infinity members of a union, is `real` or a subtype
+   * of it (`real`, `finite_real`, `nan | real`, `integer`), and the analysis
+   * reads the node on the real lane. Such an ascription selects the real lane
+   * for its value (see the `Typed` lowering in `compileExpr`). A type that
+   * admits a complex value (`number`, `complex`) is not a real ascription.
+   */
+  private static isRealScalarAscription(typed: Expression): boolean {
+    const t = typed.type.type;
+    if (t === 'never' || !isSubtype(finitePartOfType(t), 'real')) return false;
+    return !BaseCompiler.isComplexValued(typed);
   }
 
   /**
@@ -6669,12 +6918,32 @@ export class BaseCompiler {
     // (`.re` working or not, depending only on whether the inputs happened to
     // be constant), so decline and let the structural path define the shape,
     // exactly as it did before folding existed. A value with a NONZERO
-    // imaginary part is unambiguous and still folds, through the complex
-    // literal path below.
+    // imaginary part still folds, through the complex literal path below,
+    // when the node is complex-valued (next gate).
     if (
       isNumber(value) &&
       !value.isComplex &&
       BaseCompiler.isComplexValued(expr)
+    )
+      return undefined;
+
+    // The converse: a finite value with a NONZERO imaginary part does not
+    // fold on a node that the analysis reads as REAL. The interpreter that
+    // computes the fold ignores a real ascription, while the structural
+    // lowering honors it. For example, `p(0)` with `p: (real) -> real` and
+    // `p := k ↦ √(k − 1)` evaluates to `i`, but the structural route calls
+    // the real-lane definition `Math.sqrt(k + -1)` and gives `NaN`, as
+    // `p(x)` does at `x = 0`. Folding the complex value would also hand a
+    // parent that lowered real arithmetic an object to add, which
+    // stringifies (`x + {…}` → `"0[object Object]"`). Decline, so the
+    // structural route defines the value, whether the operands are constant
+    // or not. `~oo` is excluded: the gate below emits it as a real
+    // `Infinity` on such a node.
+    if (
+      isNumber(value) &&
+      value.isComplex &&
+      !value.isInfinity &&
+      !BaseCompiler.isComplexValued(expr)
     )
       return undefined;
 
@@ -11387,24 +11656,74 @@ export class BaseCompiler {
     //    base case included (Tycho item 60).
     //  - A complex ascription over a value that is not a scalar (a point,
     //    a color, a boolean) contradicts the value. Fail closed.
-    //  - A real ascription over a complex value contradicts the value too:
-    //    with `q: (unknown) -> real` and `q := z ↦ z²`, the call `q(1+i)`
-    //    is `2i`. JavaScript read the `{re, im}` object that `_fn_q` returns
-    //    as a real number, and `q(w) + 1` returned the string
+    //  - A real ascription over a value that is complex only because of
+    //    promotion selects the real lane for the value. Under a mode that
+    //    promotes (`auto`, `complex`), an unknown-sign `Sqrt`, `Ln`, `Log`,
+    //    even `Root` or non-integer `Power` lowers through a complex kernel,
+    //    and makes the value complex. The ascription says that the value is
+    //    real, so the value compiles with promotion off
+    //    (`withPromotionSuppressed`), as `mode: 'strict'` compiles it: such a
+    //    head gives NaN outside its real domain. NaN is the value that a
+    //    real-typed result has when it has no real value. With
+    //    `p: (real) -> real` and `p := k ↦ sin(2.4k)·√((k − 0.5)/16)`, the
+    //    definition is `Math.sin(2.4 * k) * Math.sqrt(0.0625 * (k + -0.5))`
+    //    in every mode, and `promoted` stays `false`. "Complex only because
+    //    of promotion" means: complex with promotion on, real with promotion
+    //    off. A value that is real with promotion on (`|√k|`) keeps its
+    //    promoted heads.
+    //  - A real ascription over a value that is complex also with promotion
+    //    off contradicts the value: the value has a complex-typed operand
+    //    (or, under `mode: 'complex'`, a node whose type admits a complex
+    //    value, which that mode reads as complex). With `q: (unknown) -> real` and `q := z ↦ z²`, the call `q(1+i)` is
+    //    `2i`. JavaScript read the `{re, im}` object that `_fn_q` returns as
+    //    a real number, and `q(w) + 1` returned the string
     //    `"[object Object]1"`; a shader has no conversion from a `vec2` to a
     //    `float` that keeps the value. Fail closed, and ask for a corrected
-    //    signature.
+    //    signature. A call in the value of a user function whose definition
+    //    is complex is such an operand: the definition is shared by every
+    //    call site, so it is compiled with the promotion of the mode
+    //    (`withPromotionUnsuppressed`), and its recorded lane is complex.
     //
     // With these rules, the lane of the `Typed` node is the lane of the value
     // it emits, so the lane recorded for a user function whose body is the
     // ascription (`recordUserFunctionLane`) is the lane of what its
     // definition returns.
     if (h === 'Typed') {
-      const code = BaseCompiler.compile(args[0], target);
-      if (!BaseCompiler.LANE_RECORD_LANGUAGES.has(target.language ?? ''))
-        return code;
-      const typed = node ?? engine._fn('Typed', [...args]);
       const value = args[0];
+      if (!BaseCompiler.LANE_RECORD_LANGUAGES.has(target.language ?? ''))
+        return BaseCompiler.compile(value, target);
+      const typed = node ?? engine._fn('Typed', [...args]);
+      // The real lane is selected only where it changes the lane of the
+      // value: under a mode that promotes, for a value that is complex with
+      // promotion on. Every other value compiles below as before, and so
+      // does every value under `strict` and on the shader targets, which
+      // never promote.
+      if (
+        BaseCompiler.promotionActive &&
+        BaseCompiler.isRealScalarAscription(typed)
+      ) {
+        // The analysis records a promotion for each promotable head that it
+        // reads as promoted (`notePromoted`), but it emits nothing. The
+        // compilation that follows records the promotions of the code that
+        // it emits, so the record of the analysis is removed. A decline
+        // emits nothing either.
+        const promoted = BaseCompiler._promoted;
+        const complexWithPromotion = BaseCompiler.isComplexValued(value);
+        BaseCompiler._promoted = promoted;
+        if (complexWithPromotion) {
+          // One suppressed region for the analysis and the compilation, so
+          // the compilation reads the complexness answers that the analysis
+          // put in the memo layer of the region.
+          return BaseCompiler.withPromotionSuppressed(() => {
+            if (BaseCompiler.isComplexValued(value))
+              throw BaseCompiler.realAscriptionError(value, args[1], typed);
+            return BaseCompiler.withCseIsolatedInstance(target, () =>
+              BaseCompiler.compile(value, target)
+            );
+          });
+        }
+      }
+      const code = BaseCompiler.compile(value, target);
       // A collection ascription whose entry type is real (`matrix<real>`,
       // `list<real>`) over a collection that may hold a complex entry
       // contradicts the value, as a real ascription over a complex scalar
@@ -11427,20 +11746,9 @@ export class BaseCompiler {
       const ascribedComplex = BaseCompiler.isComplexValued(typed);
       const valueComplex = BaseCompiler.isComplexValued(value);
       if (ascribedComplex === valueComplex) return code;
-      const ascribed = isString(args[1])
-        ? args[1].string
-        : isSymbol(args[1])
-          ? args[1].symbol
-          : typed.type.toString();
+      const ascribed = BaseCompiler.ascriptionText(args[1], typed);
       if (!ascribedComplex)
-        throw new Error(
-          `Could not compile \`Typed\`: the value \`${value.toString()}\` is complex, but its ` +
-            `ascribed type \`${ascribed}\` says it is real. The compiled ` +
-            `code would read the complex value as a real number. When the ` +
-            `ascription comes from a declared signature, declare a result ` +
-            `type that admits a complex value, for example ` +
-            `\`(unknown) -> complex\` instead of \`(unknown) -> real\`.`
-        );
+        throw BaseCompiler.realAscriptionError(value, args[1], typed);
       if (
         BaseCompiler.isNonScalarShape(value) ||
         BaseCompiler.aggregateComponentCount(value) !== undefined ||
@@ -19116,7 +19424,12 @@ export class BaseCompiler {
           return BaseCompiler.wideIsComplex(t.type);
         inProgress.add(expr.symbol);
         try {
-          return BaseCompiler.isComplexValued(v);
+          // The value compiles with the promotion of the compile mode, also
+          // inside the value of a real ascription (`tryFoldKnownSymbol`), so
+          // it is analyzed the same way.
+          return BaseCompiler.withPromotionUnsuppressed(() =>
+            BaseCompiler.isComplexValued(v)
+          );
         } finally {
           inProgress.delete(expr.symbol);
         }
@@ -23321,10 +23634,17 @@ export class BaseCompiler {
       throw new Error(BaseCompiler.selfReferenceRefusal(id));
     inProgress.add(id);
     try {
-      return BaseCompiler.compile(
-        value,
-        BaseCompiler.inlineFoldTarget(target, value),
-        BaseCompiler.FOLD_OPERAND_PREC
+      // The value of a symbol is not part of the expression that mentions
+      // the symbol: it compiles with the promotion of the compile mode, also
+      // inside the value of a real ascription, on this route as on the
+      // preamble route above. `isComplexValued` reads the value of a symbol
+      // the same way (see `withPromotionUnsuppressed`).
+      return BaseCompiler.withPromotionUnsuppressed(() =>
+        BaseCompiler.compile(
+          value,
+          BaseCompiler.inlineFoldTarget(target, value),
+          BaseCompiler.FOLD_OPERAND_PREC
+        )
       );
     } finally {
       inProgress.delete(id);
@@ -23457,14 +23777,31 @@ export class BaseCompiler {
     // never emitted.
     const definedBefore = new Set(registry.defs.keys());
     registry.compiling.add(name);
+    // A promotion recorded while the value compiles belongs to the preamble
+    // local, not to the definition or the code that emits it first: the
+    // local is shared by every reference, and it stays in the emitted code
+    // when that first definition is removed as unreferenced
+    // (`pruneUnreferencedVariantBases`). So it is recorded under the name of
+    // the local (`promotedDefinitions`), and the report counts it while the
+    // local is in `defs`. The code that emits the local also reads its
+    // promoted value, so the promotion is added to the record of that code
+    // too.
+    const outerPromoted = BaseCompiler._promoted;
+    BaseCompiler._promoted = false;
+    let valuePromoted = false;
     try {
       const root = registry.valueRoot ?? registry.root ?? target;
+      // The preamble local is read by every reference: it compiles with the
+      // promotion of the compile mode, also when the reference is in the
+      // value of a real ascription (see `withPromotionUnsuppressed`).
       const code = BaseCompiler.withLocalShapeFrame(
         new Map(),
         new Map(),
         () =>
-          BaseCompiler.withNestedCseHarvest(value, root, [], () =>
-            BaseCompiler.compile(value, root)
+          BaseCompiler.withPromotionUnsuppressed(() =>
+            BaseCompiler.withNestedCseHarvest(value, root, [], () =>
+              BaseCompiler.compile(value, root)
+            )
           ),
         true
       );
@@ -23473,6 +23810,8 @@ export class BaseCompiler {
         javascriptStatements(root)?.initialize(name, code) ??
           `const ${name} = ${code};`
       );
+      valuePromoted = BaseCompiler._promoted;
+      if (valuePromoted) memoFor(promotedDefinitions, registry).set(name, true);
       // A value emitted from the compiler's own lowerings only — no
       // caller-supplied source, no string-valued `vars` mapping, both of
       // which splice live source — is the same on every call unless it reads
@@ -23489,6 +23828,7 @@ export class BaseCompiler {
       throw e;
     } finally {
       registry.compiling.delete(name);
+      BaseCompiler._promoted = outerPromoted || valuePromoted;
     }
     return name;
   }
@@ -24650,7 +24990,16 @@ export class BaseCompiler {
     const specialized =
       literal === undefined
         ? undefined
-        : BaseCompiler.trySpecializedUserCall(engine, h, literal, args, target);
+        : BaseCompiler.trySpecializedUserCall(
+            engine,
+            h,
+            literal,
+            args,
+            target,
+            node === undefined
+              ? undefined
+              : BaseCompiler._prefixCallOverrides.get(node)
+          );
     if (specialized !== undefined) return specialized;
 
     // A POINT bound to an UNTYPED parameter never goes by reference: the
@@ -27508,7 +27857,11 @@ export class BaseCompiler {
     h: string,
     literal: Expression & FunctionInterface,
     args: readonly Expression[],
-    target: CompileTarget<Expression>
+    target: CompileTarget<Expression>,
+    prefixed?: {
+      prefixes: ReadonlyArray<number>;
+      values: ReadonlyArray<Expression>;
+    }
   ): TargetSource | undefined {
     const emitted = BaseCompiler.ensureSpecializedUserCallEmitted(
       engine,
@@ -27522,6 +27875,44 @@ export class BaseCompiler {
     // Scalar definitions already have a broadcast-aware call boundary and a
     // memoization policy. Reuse it after preparing the typed body.
     if (scalarDefinition) return undefined;
+    // A call that a repetition site rewrote to the INVARIANT-PREFIX VARIANT
+    // of `h` (see the ordinary route in the caller) and that takes a range
+    // specialization calls a variant of that specialization: the same typed
+    // body, with the prefix values passed as extra parameters. Without it,
+    // the range specialization would evaluate the prefixes again on each
+    // repetition. The variant is emitted only on the JavaScript target (a
+    // range specialization exists only there). When it cannot be emitted,
+    // the call takes the range specialization itself.
+    if (
+      emitted.rangeKey !== undefined &&
+      prefixed !== undefined &&
+      prefixed.values.every((v) => BaseCompiler._codeOverrides.has(v))
+    ) {
+      let variant: string | undefined;
+      try {
+        variant = BaseCompiler.ensureUserFunctionVariantEmitted(
+          engine,
+          h,
+          prefixed.prefixes,
+          target,
+          { key: emitted.rangeKey, name }
+        );
+      } catch (e) {
+        if (e instanceof Error && e.name === 'CancellationError') throw e;
+        variant = undefined;
+      }
+      if (variant !== undefined)
+        return BaseCompiler.emitUserFunctionCall(
+          variant,
+          args,
+          target,
+          args.map(() => false),
+          BaseCompiler.userFunctionParamsAreScalar(engine, h),
+          false,
+          prefixed.values.map((v) => BaseCompiler.compile(v, target)),
+          BaseCompiler.absentArgumentChecks(h, literal, args, target)
+        );
+    }
     // A list argument the interpreter broadcasts is mapped over at the call
     // boundary, the point arguments held whole: the "atomic argument beside
     // a collection" form of `emitUserFunctionCall`, whose closure calls the
@@ -27577,6 +27968,8 @@ export class BaseCompiler {
         scalarDefinition: boolean;
         listArgument: boolean;
         bindsListsWhole: boolean;
+        /** The specialization key, for a range specialization only. */
+        rangeKey?: string;
       }
     | undefined {
     const registry = target.userFunctions;
@@ -27593,21 +27986,15 @@ export class BaseCompiler {
     )
       return undefined;
     const params = literal.ops.slice(1);
-    if (
-      params.length !== args.length ||
-      params.some((p) => isRestParameter(p) || isDestructuringParameter(p))
-    )
-      return undefined;
     // A private Typed parameter also enforces assignments to that binding.
     // Preserve the original mutation semantics instead of adding a promise
-    // based only on the value passed at entry.
+    // based only on the value passed at entry (`parametersCanBeTyped`).
+    if (
+      params.length !== args.length ||
+      !BaseCompiler.parametersCanBeTyped(literal)
+    )
+      return undefined;
     const parameterNames = new Set(params.map(functionLiteralParameterName));
-    const writesParameter = (expr: Expression): boolean =>
-      isFunction(expr) &&
-      ((expr.operator === 'Assign' &&
-        expr.op1.symbols.some((name) => parameterNames.has(name))) ||
-        expr.ops.some(writesParameter));
-    if (writesParameter(literal.op1)) return undefined;
     const types: Type[] = [];
     const pointWidths: (number | undefined)[] = [];
     let preservesPoints: boolean | undefined;
@@ -27798,6 +28185,37 @@ export class BaseCompiler {
       }
       pointWidths.push(pointWidth);
     }
+    // A RANGE SPECIALIZATION: an argument typed by a real range (the index
+    // of a `Sum`, of a comprehension over a literal range, a number
+    // literal) at a wider parameter, when the body typed by that range keeps
+    // a radical on the real lane that the definition the call uses otherwise
+    // promotes to the complex lane (`rangeSpecializedParameterTypes`). The
+    // copy has its own name, and the call passes its scalar arguments to it
+    // directly: each one is a constructed scalar (the branch above), so no
+    // broadcast dispatch is needed.
+    let rangeTypes: (Type | undefined)[] | undefined;
+    if (
+      target.language === 'javascript' &&
+      !registry.lowering &&
+      BaseCompiler.modePromotes &&
+      !pointArgument &&
+      !listArgument &&
+      !complexArgument &&
+      types.every((t) => isSubtype(t, 'number'))
+    )
+      rangeTypes = BaseCompiler.rangeSpecializedParameterTypes(
+        engine,
+        h,
+        literal,
+        args.map((a) => a.type.type),
+        registry
+      );
+    if (rangeTypes !== undefined) {
+      rangeTypes.forEach((t, i) => {
+        if (t !== undefined) types[i] = t;
+      });
+      narrower = true;
+    }
     if (listArgument && !pointArgument) return undefined;
     const hasPointProof = pointWidths.some((w) => w !== undefined);
     if (!narrower && !hasPointProof) return undefined;
@@ -27805,10 +28223,12 @@ export class BaseCompiler {
       return undefined;
     // A complex copy is never the scalar definition: it has its own name and
     // its own call boundary (a `vec2` argument), so it cannot share either
-    // with the real definition.
+    // with the real definition. Nor is a range specialization: other calls
+    // of the function use the definition without the range.
     const scalarDefinition =
       !bindsListsWhole &&
       !complexArgument &&
+      rangeTypes === undefined &&
       types.every((t) => isSubtype(t, 'number'));
     // A declared tuple and a constructed point can have the same type.
     // Only the constructed variant may omit runtime shape checks.
@@ -27819,48 +28239,12 @@ export class BaseCompiler {
     const cache = (registry.specializations ??= new Map());
     let specialized = cache.get(key);
     if (specialized === undefined) {
-      // Rebuild under the definition's lexical parent, never under a caller's
-      // local scope. Parameter bindings are fresh and cannot narrow the source.
-      engine.pushScope({
-        parent: literal.op1.localScope?.parent ?? null,
-        bindings: new Map(),
-      });
-      try {
-        const body = literal.op1;
-        const marker = functionLiteralReturnMarker(literal);
-        const resultType = functionLiteralReturnType(literal);
-        // A broad result ascription hides the representation derived from
-        // the narrower parameters. Scalar promises remain authoritative.
-        const scalarResult =
-          resultType !== undefined &&
-          (isSubtype(resultType, 'number') ||
-            isSubtype(resultType, 'boolean') ||
-            isSubtype(resultType, 'string'));
-        const bodyJson =
-          marker && !scalarResult && isFunction(body, 'Block')
-            ? ([
-                'Block',
-                ...body.ops.slice(0, -1).map((x) => x.json),
-                marker.op1.json,
-              ] as MathJsonExpression)
-            : body.json;
-        specialized = engine.box([
-          'Function',
-          bodyJson,
-          ...params.map(
-            (p, i) =>
-              [
-                'Typed',
-                functionLiteralParameterName(p)!,
-                `'${typeToString(types[i])}'`,
-              ] as MathJsonExpression
-          ),
-        ]);
-      } finally {
-        engine.popScope();
-      }
-      if (!isFunction(specialized, 'Function') || !specialized.isValid)
-        return undefined;
+      specialized = BaseCompiler.literalWithParameterTypes(
+        engine,
+        literal,
+        types
+      );
+      if (specialized === undefined) return undefined;
       cache.set(key, specialized);
     }
     if (!isFunction(specialized, 'Function')) return undefined;
@@ -27880,7 +28264,556 @@ export class BaseCompiler {
     }
     if (name === undefined) return undefined;
     target.symbolDeps?.add(h);
-    return { name, scalarDefinition, listArgument, bindsListsWhole };
+    return {
+      name,
+      scalarDefinition,
+      listArgument,
+      bindsListsWhole,
+      rangeKey: rangeTypes === undefined ? undefined : key,
+    };
+  }
+
+  /**
+   * `literal` rebuilt with parameter `i` typed `types[i]` (a `Typed`
+   * parameter), or `undefined` when the rebuilt literal is not valid. A
+   * parameter whose entry is `undefined` is kept as it is written.
+   *
+   * The body is boxed again from its MathJSON, so each reference to a
+   * parameter in the body is bound to the new, typed parameter, and the
+   * types of the body nodes follow from it. The rebuilt literal is used for
+   * an emission only. It is never stored on the definition of the function.
+   */
+  private static literalWithParameterTypes(
+    engine: ComputeEngine,
+    literal: Expression & FunctionInterface,
+    types: ReadonlyArray<Type | undefined>
+  ): (Expression & FunctionInterface) | undefined {
+    const params = literal.ops.slice(1);
+    let specialized: Expression;
+    // Rebuild under the definition's lexical parent, never under a caller's
+    // local scope. Parameter bindings are fresh and cannot narrow the source.
+    engine.pushScope({
+      parent: literal.op1.localScope?.parent ?? null,
+      bindings: new Map(),
+    });
+    try {
+      const body = literal.op1;
+      const marker = functionLiteralReturnMarker(literal);
+      const resultType = functionLiteralReturnType(literal);
+      // A broad result ascription hides the representation derived from
+      // the narrower parameters. Scalar promises remain authoritative.
+      const scalarResult =
+        resultType !== undefined &&
+        (isSubtype(resultType, 'number') ||
+          isSubtype(resultType, 'boolean') ||
+          isSubtype(resultType, 'string'));
+      const bodyJson =
+        marker && !scalarResult && isFunction(body, 'Block')
+          ? ([
+              'Block',
+              ...body.ops.slice(0, -1).map((x) => x.json),
+              marker.op1.json,
+            ] as MathJsonExpression)
+          : body.json;
+      specialized = engine.box([
+        'Function',
+        bodyJson,
+        ...params.map((p, i) => {
+          const t = types[i];
+          if (t === undefined) return p.json;
+          return [
+            'Typed',
+            functionLiteralParameterName(p)!,
+            `'${typeToString(t)}'`,
+          ] as MathJsonExpression;
+        }),
+      ]);
+    } finally {
+      engine.popScope();
+    }
+    if (!isFunction(specialized, 'Function') || !specialized.isValid)
+      return undefined;
+    return specialized;
+  }
+
+  /**
+   * True when the JavaScript compile of `head(args)` must prove the sign of
+   * an operand to keep the real lane, and cannot: a `Sqrt`, `Ln` or `Log`
+   * whose operand is not provably non-negative, a `Root` with an even
+   * degree, or a `Power` with a non-integer exponent, whose radicand or base
+   * is not provably non-negative. Under the `auto` and `complex` modes, such
+   * a node takes the complex lane, and so does every value computed from it.
+   *
+   * This is the test of `promotesRadicalToComplex`, without its side
+   * effects (it does not record a promotion) and without the verdicts that
+   * a broadcast closure records. It is used only to compare two versions of
+   * one body (see `unprovenRadicalCount`).
+   */
+  private static radicalNeedsSignProof(
+    head: string,
+    args: ReadonlyArray<Expression>
+  ): boolean {
+    if (head === 'Power') {
+      if (BaseCompiler.realPowerExponent(args) !== undefined) return false;
+      const [base, exp] = args;
+      if (base === undefined || exp === undefined) return false;
+      if (!isNumber(exp) || Number.isInteger(exp.re) || exp.isComplex)
+        return false;
+      return !BaseCompiler.assumedRealNonNegative(base);
+    }
+    if (head === 'Root') {
+      const [radicand, degree] = args;
+      if (radicand === undefined || degree === undefined) return false;
+      if (!isNumber(degree) || degree.isComplex) return false;
+      if (!Number.isInteger(degree.re) || degree.re === 0) return false;
+      if (degree.re % 2 !== 0) return false;
+      return !BaseCompiler.assumedRealNonNegative(radicand);
+    }
+    if (!BaseCompiler.PROMOTABLE_RADICAL_HEADS.has(head)) return false;
+    return args.some(
+      (a) => a === undefined || !BaseCompiler.assumedRealNonNegative(a)
+    );
+  }
+
+  /**
+   * The number of nodes in `body` that need a sign proof they do not have
+   * (`radicalNeedsSignProof`), with the nodes in the bodies of the user
+   * functions that `body` calls. A called function is counted with the
+   * definition that the call would use: the range specialization when the
+   * arguments of the call give one (`rangeSpecializedParameterTypes`), the
+   * definition with its declared parameter types otherwise
+   * (`declaredParameterLiteral`).
+   *
+   * The count is used to COMPARE two versions of one body: a version with
+   * typed parameters is worth emitting only when it has fewer such nodes
+   * than the version that would be emitted otherwise. A function that is
+   * already being counted (a recursive call) adds nothing.
+   *
+   * The counts of called functions are kept for the compilation, by the
+   * function name and the parameter types of the definition that is
+   * counted.
+   */
+  private static unprovenRadicalCount(
+    engine: ComputeEngine,
+    body: Expression,
+    registry: UserFunctionRegistry,
+    visiting: Set<string>
+  ): number {
+    let count = 0;
+    const visit = (node: Expression): void => {
+      if (!isFunction(node)) return;
+      const h = node.operator;
+      if (BaseCompiler.radicalNeedsSignProof(h, node.ops)) count += 1;
+      if (!visiting.has(h)) count += calleeCount(h, node.ops);
+      for (const op of node.ops) visit(op);
+    };
+    const calleeCount = (
+      h: string,
+      args: ReadonlyArray<Expression>
+    ): number => {
+      const callee = BaseCompiler.userFunctionLiteral(engine, h);
+      if (
+        callee === undefined ||
+        BaseCompiler.userFunctionIsGeneric(engine, h, callee)
+      )
+        return 0;
+      const types = BaseCompiler.rangeSpecializedParameterTypes(
+        engine,
+        h,
+        callee,
+        args.map((a) => a.type.type),
+        registry,
+        visiting
+      );
+      const definition =
+        types === undefined
+          ? BaseCompiler.declaredParameterLiteral(
+              engine,
+              h,
+              callee,
+              registry,
+              visiting
+            )
+          : BaseCompiler.cachedLiteralWithParameterTypes(
+              engine,
+              h,
+              callee,
+              types,
+              registry
+            );
+      if (definition === undefined) return 0;
+      const memo = memoFor(radicalCountMemos, registry);
+      const key = BaseCompiler.parameterTypesKey(
+        h,
+        definition.ops
+          .slice(1)
+          .map((p) => (isFunction(p, 'Typed') ? p.type.type : undefined))
+      );
+      let n = memo.get(key);
+      if (n === undefined) {
+        // Recorded first, so a recursive call reached while the body is
+        // counted adds nothing.
+        memo.set(key, 0);
+        visiting.add(h);
+        try {
+          n = BaseCompiler.unprovenRadicalCount(
+            engine,
+            definition.op1,
+            registry,
+            visiting
+          );
+        } finally {
+          visiting.delete(h);
+        }
+        memo.set(key, n);
+      }
+      return n;
+    };
+    // The body is read as an emitted definition is compiled: the sign facts
+    // of the caller (the values of an unrolled `Sum` index, the shapes of
+    // its locals) do not apply to it.
+    BaseCompiler.withCallerBindingsHidden(() => visit(body));
+    return count;
+  }
+
+  /** A key for the definition of `h` with the parameter types `types`. */
+  private static parameterTypesKey(
+    h: string,
+    types: ReadonlyArray<Type | undefined>
+  ): string {
+    return `${h}#${types.map((t) => (t === undefined ? '' : typeToString(t))).join(';')}`;
+  }
+
+  /** `literalWithParameterTypes`, kept in the specialization cache of the
+   * compilation (`registry.specializations`). */
+  private static cachedLiteralWithParameterTypes(
+    engine: ComputeEngine,
+    h: string,
+    literal: Expression & FunctionInterface,
+    types: ReadonlyArray<Type | undefined>,
+    registry: UserFunctionRegistry
+  ): (Expression & FunctionInterface) | undefined {
+    const cache = (registry.specializations ??= new Map());
+    const key = BaseCompiler.parameterTypesKey(h, types);
+    const hit = cache.get(key);
+    if (hit !== undefined) return isFunction(hit, 'Function') ? hit : undefined;
+    const rebuilt = BaseCompiler.literalWithParameterTypes(
+      engine,
+      literal,
+      types
+    );
+    if (rebuilt !== undefined) cache.set(key, rebuilt);
+    return rebuilt;
+  }
+
+  /**
+   * True when the parameters of `literal` can be typed again for an
+   * emission: each one is a plain name (not a rest parameter, not a
+   * destructuring pattern), and the body never assigns one. A typed
+   * parameter also checks each assignment to it, so typing it would change
+   * what an assignment in the body does.
+   */
+  private static parametersCanBeTyped(
+    literal: Expression & FunctionInterface
+  ): boolean {
+    const params = literal.ops.slice(1);
+    if (params.some((p) => isRestParameter(p) || isDestructuringParameter(p)))
+      return false;
+    const names = new Set(params.map(functionLiteralParameterName));
+    const writes = (expr: Expression): boolean =>
+      isFunction(expr) &&
+      ((expr.operator === 'Assign' &&
+        expr.op1.symbols.some((name) => names.has(name))) ||
+        expr.ops.some(writes));
+    return !writes(literal.op1);
+  }
+
+  /**
+   * The bounds of a real numeric type that carries a range: a ranged type
+   * (`integer<1..16>`, `real<0..>`) or the type of a number literal (`3`).
+   * `undefined` for any other type, and for a type with no finite bound.
+   */
+  private static numericRangeOf(t: Type):
+    | {
+        tier: NumericPrimitiveType;
+        lower: number;
+        upper: number;
+        lowerOpen: boolean;
+        upperOpen: boolean;
+      }
+    | undefined {
+    if (typeof t === 'string') return undefined;
+    if (t.kind === 'value') {
+      const v = t.value;
+      if (typeof v !== 'number' || !Number.isFinite(v)) return undefined;
+      return {
+        tier: Number.isInteger(v) ? 'integer' : 'real',
+        lower: v,
+        upper: v,
+        lowerOpen: false,
+        upperOpen: false,
+      };
+    }
+    if (t.kind !== 'numeric' || !isSubtype(t, 'real')) return undefined;
+    const lower = t.lower ?? -Infinity;
+    const upper = t.upper ?? Infinity;
+    if (!Number.isFinite(lower) && !Number.isFinite(upper)) return undefined;
+    return {
+      tier: t.type,
+      lower,
+      upper,
+      lowerOpen: t.lowerOpen === true,
+      upperOpen: t.upperOpen === true,
+    };
+  }
+
+  /**
+   * The parameter types of a RANGE SPECIALIZATION of user function `h` for a
+   * call whose arguments have the types `argTypes`, or `undefined` when the
+   * call does not get one.
+   *
+   * An argument gives range evidence when its type is a real range
+   * (`integer<1..16>`: the index of a `Sum` or of a comprehension over a
+   * literal range) or the type of a number literal, and the parameter that
+   * receives it is wider (its type, declared or written on the literal,
+   * admits values out of that range). The body of `h`, compiled with that
+   * parameter typed by the range, can prove the sign of an operand that it
+   * cannot prove otherwise: `√((k − 0.5)/16)` is real for every `k` in
+   * `1..16`, while for a `k` typed `unknown` it takes the complex lane under
+   * the `auto` mode, and the whole kernel with it.
+   *
+   * A specialization is emitted only when it changes that verdict: it must
+   * have fewer unproven radicals (`unprovenRadicalCount`) than the
+   * definition that the call uses otherwise. So a function whose body proves
+   * nothing more with the range gets no copy, whatever its call sites.
+   *
+   * Each range is first widened to its lower bound only (`integer<1..>`).
+   * When that type proves as much as the range itself, it is used, so call
+   * sites with different ranges (or with the literals of an unrolled sum)
+   * share one specialization. Otherwise the exact range is used.
+   *
+   * An entry is `undefined` for a parameter that gets no evidence: that
+   * parameter keeps its own type.
+   *
+   * The caller applies this to the JavaScript target only: the other
+   * targets have no complex promotion.
+   */
+  private static rangeSpecializedParameterTypes(
+    engine: ComputeEngine,
+    h: string,
+    literal: Expression & FunctionInterface,
+    argTypes: ReadonlyArray<Type>,
+    registry: UserFunctionRegistry,
+    visiting: Set<string> = new Set()
+  ): (Type | undefined)[] | undefined {
+    const params = literal.ops.slice(1);
+    if (params.length !== argTypes.length || params.length === 0)
+      return undefined;
+    if (!BaseCompiler.parametersCanBeTyped(literal)) return undefined;
+    // A parameter declared complex is passed a `{re, im}` object by the
+    // ordinary call (`coerceToComplex` in `tryCompileUserFunction`), which
+    // the direct call of a specialization does not do.
+    if (
+      params.some((_p, i) => {
+        const declared = BaseCompiler.userFunctionParamType(engine, h, i);
+        return declared !== undefined && isNonRealNumber(declared);
+      })
+    )
+      return undefined;
+    const exact: (Type | undefined)[] = [];
+    const widened: (Type | undefined)[] = [];
+    for (let i = 0; i < params.length; i++) {
+      const range = BaseCompiler.numericRangeOf(argTypes[i]);
+      const own =
+        BaseCompiler.userFunctionParamType(engine, h, i) ?? params[i].type.type;
+      const t =
+        range === undefined
+          ? undefined
+          : makeNumericRangeType(
+              range.tier,
+              range.lower,
+              range.upper,
+              range.lowerOpen,
+              range.upperOpen
+            );
+      // The argument must be a value of the parameter (otherwise the call
+      // is not valid, and its own route reports it), and the parameter must
+      // admit more than the range.
+      if (
+        range === undefined ||
+        t === undefined ||
+        !isSubtype(t, own) ||
+        isSubtype(own, t)
+      ) {
+        exact.push(undefined);
+        widened.push(undefined);
+        continue;
+      }
+      exact.push(t);
+      const lowerOnly =
+        Number.isFinite(range.lower) && Number.isFinite(range.upper)
+          ? makeNumericRangeType(
+              range.tier,
+              range.lower,
+              Infinity,
+              range.lowerOpen
+            )
+          : t;
+      widened.push(isSubtype(lowerOnly, own) ? lowerOnly : t);
+    }
+    if (exact.every((t) => t === undefined)) return undefined;
+    const memo = memoFor(rangeVerdictMemos, registry);
+    const memoKey = BaseCompiler.parameterTypesKey(h, exact);
+    if (memo.has(memoKey)) return memo.get(memoKey);
+    // A specialization already chosen for another call of `h` is used when
+    // each of its parameter types contains the range of this call: its body
+    // is valid for these arguments, and it already keeps a radical on the
+    // real lane. So call sites over `1..16` and over `2..10` share the
+    // specialization typed `integer<1..>`.
+    const chosen = memoFor(rangeVariantMemos, registry).get(h) ?? [];
+    const shared = chosen.find((types) =>
+      types.every((t, i) => {
+        const e = exact[i];
+        if (e === undefined || t === undefined) return e === t;
+        return isSubtype(e, t);
+      })
+    );
+    if (shared !== undefined) {
+      memo.set(memoKey, shared);
+      return shared;
+    }
+    // Recorded first as "no specialization", so a recursive function that
+    // reaches this call again while it is counted stops here.
+    memo.set(memoKey, undefined);
+    const countOf = (
+      definition: (Expression & FunctionInterface) | undefined
+    ): number | undefined => {
+      if (definition === undefined) return undefined;
+      visiting.add(h);
+      try {
+        return BaseCompiler.unprovenRadicalCount(
+          engine,
+          definition.op1,
+          registry,
+          visiting
+        );
+      } finally {
+        visiting.delete(h);
+      }
+    };
+    const baseline = countOf(
+      BaseCompiler.declaredParameterLiteral(
+        engine,
+        h,
+        literal,
+        registry,
+        visiting
+      )
+    );
+    const exactCount = countOf(
+      BaseCompiler.cachedLiteralWithParameterTypes(
+        engine,
+        h,
+        literal,
+        exact,
+        registry
+      )
+    );
+    let result: (Type | undefined)[] | undefined;
+    if (
+      baseline !== undefined &&
+      exactCount !== undefined &&
+      exactCount < baseline
+    ) {
+      result = exact;
+      if (widened.some((t, i) => t !== exact[i])) {
+        const widenedCount = countOf(
+          BaseCompiler.cachedLiteralWithParameterTypes(
+            engine,
+            h,
+            literal,
+            widened,
+            registry
+          )
+        );
+        if (widenedCount === exactCount) result = widened;
+      }
+    }
+    memo.set(memoKey, result);
+    if (result !== undefined)
+      memoFor(rangeVariantMemos, registry).set(h, [...chosen, result]);
+    return result;
+  }
+
+  /**
+   * The literal of user function `h` to emit as its definition on the
+   * JavaScript target: `literal` with each parameter typed by the DECLARED
+   * signature of `h`, when that type is a real type narrower than the type
+   * the literal gives the parameter, and when the typed body proves the
+   * sign of more radicands (`unprovenRadicalCount`). `literal` otherwise.
+   *
+   * The declared signature is the contract of every call: with `p` declared
+   * `(integer<1..16>) -> unknown` and assigned `k ↦ √((k − 0.5)/16)`, the
+   * literal's own parameter `k` has no type, and its body would take the
+   * complex lane under the `auto` mode, while every call of `p` passes an
+   * integer from 1 to 16. The GPU targets read the declared parameter types
+   * the same way when they synthesize a definition.
+   *
+   * The typed literal is used for the emission only; the definition of `h`
+   * keeps its own literal.
+   */
+  private static declaredParameterLiteral(
+    engine: ComputeEngine,
+    h: string,
+    literal: Expression & FunctionInterface,
+    registry: UserFunctionRegistry,
+    visiting: Set<string> = new Set()
+  ): Expression & FunctionInterface {
+    const memo = memoFor(declaredLiteralMemos, registry);
+    const hit = memo.get(h);
+    if (hit !== undefined && hit.source === literal) return hit.emitted;
+    // Recorded first, so a recursive function that reaches this function
+    // again while it is counted reads its own literal.
+    memo.set(h, { source: literal, emitted: literal });
+    let emitted = literal;
+    if (
+      !BaseCompiler.userFunctionIsGeneric(engine, h, literal) &&
+      BaseCompiler.parametersCanBeTyped(literal)
+    ) {
+      const types = literal.ops.slice(1).map((p, i) => {
+        const declared = BaseCompiler.userFunctionParamType(engine, h, i);
+        if (declared === undefined || !isSubtype(declared, 'real'))
+          return undefined;
+        return isSubtype(p.type.type, declared) ? undefined : declared;
+      });
+      const typed = types.some((t) => t !== undefined)
+        ? BaseCompiler.cachedLiteralWithParameterTypes(
+            engine,
+            h,
+            literal,
+            types,
+            registry
+          )
+        : undefined;
+      if (typed !== undefined) {
+        const count = (definition: Expression & FunctionInterface): number => {
+          visiting.add(h);
+          try {
+            return BaseCompiler.unprovenRadicalCount(
+              engine,
+              definition.op1,
+              registry,
+              visiting
+            );
+          } finally {
+            visiting.delete(h);
+          }
+        };
+        if (count(typed) < count(literal)) emitted = typed;
+      }
+    }
+    memo.set(h, { source: literal, emitted });
+    return emitted;
   }
 
   static ensureUserFunctionEmitted(
@@ -27945,7 +28878,21 @@ export class BaseCompiler {
         return undefined;
       }
       emitted = BaseCompiler.literalAtGroundSignature(engine, literal, ground);
-    }
+    } else if (
+      target.language === 'javascript' &&
+      !registry.lowering &&
+      BaseCompiler.modePromotes
+    )
+      // A parameter declared with a narrower real type than the literal
+      // gives it (`(integer<1..16>) -> unknown` for `k ↦ √((k − 0.5)/16)`)
+      // is compiled at the declared type when that keeps a radical of the
+      // body on the real lane (`declaredParameterLiteral`).
+      emitted = BaseCompiler.declaredParameterLiteral(
+        engine,
+        h,
+        literal,
+        registry
+      );
 
     // The generated code bakes this user function's current definition: record
     // it in the capture set (see `CompileTarget.symbolDeps`). Symbols its body
@@ -28895,6 +29842,10 @@ export class BaseCompiler {
       // never emitted.
       const definedBefore = new Set(registry.defs.keys());
       registry.compiling.add(name);
+      // The definition is shared by every call site, so it compiles with the
+      // promotion of the compile mode, also when the call site is the value
+      // of a real ascription (see `withPromotionUnsuppressed`).
+      const suppressed = BaseCompiler.liftPromotionSuppression();
       try {
         const { params, bodyExpr, bodyTarget } =
           BaseCompiler.prepareUserFunctionBody(literal, target, registry, h);
@@ -29137,6 +30088,15 @@ export class BaseCompiler {
         // idempotent lift-at-use wrap (`liftWideResult`).
         let complexShaped = false;
         let body: TargetSource;
+        // A promotion recorded while this body compiles belongs to this
+        // definition, not to the code that asked for it: it is recorded on
+        // the definition (`promotedDefinitions`), and the report counts it
+        // only while the definition is in the emitted code (see
+        // `pruneUnreferencedVariantBases`).
+        const outerPromoted = BaseCompiler._promoted;
+        BaseCompiler._promoted = false;
+        const promotedDefs = memoFor(promotedDefinitions, registry);
+        promotedDefs.delete(name);
         try {
           body = BaseCompiler.emitWithRecursiveLaneRetry(registry, name, () => {
             const frames = {
@@ -29176,6 +30136,8 @@ export class BaseCompiler {
         } finally {
           for (const node of overridden)
             BaseCompiler._codeOverrides.delete(node);
+          if (BaseCompiler._promoted) promotedDefs.set(name, true);
+          BaseCompiler._promoted = outerPromoted;
         }
         if (complexShaped) (registry.complexShaped ??= new Set()).add(h);
         (registry.literals ??= new Map()).set(name, literal);
@@ -29206,6 +30168,7 @@ export class BaseCompiler {
         throw e;
       } finally {
         registry.compiling.delete(name);
+        BaseCompiler.restorePromotionSuppression(suppressed);
       }
     }
 
@@ -29851,6 +30814,9 @@ export class BaseCompiler {
     // never emitted.
     const definedBefore = new Set(registry.defs.keys());
     registry.compiling.add(name);
+    // The clause helpers are shared by every call site: they compile with the
+    // promotion of the compile mode (see `withPromotionUnsuppressed`).
+    const suppressed = BaseCompiler.liftPromotionSuppression();
     try {
       // One helper per clause, in declaration order. `$` cannot appear in a
       // MathJSON symbol, so `_fn_f$c1` can never collide with the emitted
@@ -29947,6 +30913,7 @@ export class BaseCompiler {
       throw e;
     } finally {
       registry.compiling.delete(name);
+      BaseCompiler.restorePromotionSuppression(suppressed);
     }
     return name;
   }
@@ -30233,6 +31200,21 @@ export class BaseCompiler {
         changed = true;
       }
     }
+    // A removed definition is not in the emitted code, so a promotion in
+    // its body does not describe that code: compute the report again. The
+    // report is only lowered here, never raised.
+    const basis = BaseCompiler._lastReportBasis;
+    if (
+      basis !== undefined &&
+      basis.registry === registry &&
+      BaseCompiler._lastReport.promoted &&
+      !basis.promotedOutsideDefinitions &&
+      !BaseCompiler.hasPromotedDefinition(registry)
+    )
+      BaseCompiler._lastReport = {
+        mode: basis.complexDiscipline ? 'complex' : 'strict',
+        promoted: false,
+      };
   }
 
   /**
@@ -33799,16 +34781,19 @@ export class BaseCompiler {
     engine: ComputeEngine,
     h: string,
     prefixIndices: ReadonlyArray<number>,
-    target: CompileTarget<Expression>
+    target: CompileTarget<Expression>,
+    /** The base definition, when it is not the definition named for `h`:
+     * a range specialization, with its key and its emitted name. */
+    specialization?: { key: string; name: string }
   ): string | undefined {
     const registry = target.userFunctions;
     if (!registry) return undefined;
     // The literal the BASE definition was emitted from, when it has been —
     // the call-shape specialization may have rebuilt it with the parameter
     // types the call proved (`registry.literals`) — else the engine's own.
-    const base = registry.literals?.get(
-      BaseCompiler.userFunctionName(registry, h)
-    );
+    const baseName =
+      specialization?.name ?? BaseCompiler.userFunctionName(registry, h);
+    const base = registry.literals?.get(baseName);
     const literal =
       base !== undefined && isFunction(base, 'Function')
         ? (base as Expression & FunctionInterface)
@@ -33824,13 +34809,13 @@ export class BaseCompiler {
       target,
       registry,
       undefined,
-      { key: `${h}$inv${prefixIndices.join('_')}`, prefixes }
+      {
+        key: `${specialization?.key ?? h}$inv${prefixIndices.join('_')}`,
+        prefixes,
+      }
     );
     if (variant !== undefined)
-      (registry.variantBases ??= new Map()).set(
-        variant,
-        BaseCompiler.userFunctionName(registry, h)
-      );
+      (registry.variantBases ??= new Map()).set(variant, baseName);
     return variant;
   }
 
@@ -33882,6 +34867,38 @@ export class BaseCompiler {
       return BaseCompiler.withCseRegion(target, nested.root, fn);
     } finally {
       session.harvest = outer;
+      session.availabilityFloor = outerFloor;
+    }
+  }
+
+  /**
+   * Compile `fn` under a fresh instance of the innermost region that cannot
+   * read a temporary that an enclosing instance bound
+   * (`CseSession.availabilityFloor`). Temporaries that `fn` binds are emitted
+   * by `cseBind` around `fn`'s own result, and are not read after it.
+   *
+   * For a value compiled with a different promotion than the code around it
+   * (`withPromotionSuppressed`): the same structure inside and outside the
+   * value can have different lanes there, so a temporary bound on one side
+   * must not be read on the other side. With CSE inactive `fn` compiles as
+   * is.
+   */
+  private static withCseIsolatedInstance(
+    target: CompileTarget<Expression>,
+    fn: () => TargetSource
+  ): TargetSource {
+    const top = BaseCompiler.cseTop(target);
+    if (top === undefined) return fn();
+    const session = target.cse!;
+    const outerFloor = session.availabilityFloor;
+    session.availabilityFloor = session.instances.length;
+    try {
+      return BaseCompiler.withCseRegion(
+        target,
+        BaseCompiler.cseRegionOf(top),
+        fn
+      );
+    } finally {
       session.availabilityFloor = outerFloor;
     }
   }
@@ -34128,6 +35145,13 @@ export class BaseCompiler {
     // precedence is what this position needs, so mirror the `'defining'`
     // branch and recompile when they differ.
     if (target.bareStatementBlocks === true && rhs.includes('\n'))
+      return prec === 0 ? rhs : BaseCompiler._compileInner(expr, target, prec);
+    // A right-hand side that folded to a constant (`cseInlineConstant`) is
+    // not bound either: a temporary would hide the constant from the fold of
+    // every expression that reads it. The candidate stays `'defining'` for
+    // the same reason as above, so each later occurrence compiles to the
+    // same constant code.
+    if (target.cseInlineConstant?.(rhs) === true)
       return prec === 0 ? rhs : BaseCompiler._compileInner(expr, target, prec);
 
     const name = BaseCompiler.cseTempVar(target);

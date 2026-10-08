@@ -27,6 +27,7 @@ import {
   resolveTypeForCompilation,
   widen,
   stripMissingFromType,
+  stripNumericRanges,
 } from '../../common/type/utils.js';
 import {
   broadcastLengthMismatch,
@@ -60,6 +61,7 @@ import type {
   Expression,
   OperandDescriptor,
   OperandStructure,
+  TypeHandlerContext,
   SymbolDefinitions,
   OperatorDefinition,
   EvaluateOptions,
@@ -69,6 +71,7 @@ import type {
   BoxedValueDefinition,
 } from '../global-types.js';
 import { errorValue } from '../boxed-expression/error-value.js';
+import { describeBoundSymbol } from '../boxed-expression/operand-descriptor.js';
 import {
   isFunction,
   isNumber,
@@ -496,8 +499,9 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
       // node.
       scoped: indexingSetSites(1),
       signature: '(body:expression, iterators:expression+) -> list',
-      // The handler reads the body operand's type and nothing else.
-      type: ([body], context) => {
+      // The handler reads the body operand's type, and the type of the index
+      // of each `Element` clause.
+      type: ([body, ...clauses], context) => {
         if (!body)
           return BoxedType.forResult('nothing', context.engine._typeResolver);
         // Result is a list of body.type values (`list<T>` since 2026-09-29;
@@ -506,8 +510,19 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         // wrap it in list<...>. The type says nothing about the length: a
         // comprehension over an unbounded source is a lazy list, as a `Map`
         // over it is.
+        //
+        // The index of a clause over a range with integer literal bounds has
+        // a ranged type (`integer<1..16>`, see `indexingSetSite` in
+        // `binding-sites.ts` and `canonicalLoopLike`). That type is there for
+        // the body: it proves the sign of `√((k − 0.5)/16)`, so the body
+        // types `real` and compiles without the complex lane. It is not a
+        // statement about the list: the element type is the type of the
+        // body with each such index typed `integer`
+        // (`bodyTypeWithoutIndexRanges`), so `[k for k in 1..16]` is
+        // `list<integer>`, not `list<integer<1..16>>`.
+        const elements = bodyTypeWithoutIndexRanges(body, clauses, context);
         return BoxedType.forResult(
-          { kind: 'list', elements: body.type },
+          { kind: 'list', elements },
           context.engine._typeResolver
         );
       },
@@ -2746,6 +2761,315 @@ function loopBodyYieldsValue(structure: OperandStructure | undefined): boolean {
 }
 
 /**
+ * The type of the body of a `Comprehension` as the element type of the list
+ * it returns, without the bounds that a ranged index (`integer<1..16>`)
+ * gives it: `[k² for k in 1..5]` is `list<integer<0..>>`, the type of the
+ * square of an integer, not `list<integer<1..25>>`, and
+ * `[√((k − 0.5)/16) for k in 1..16]` is `list<real>`.
+ *
+ * Two types are computed: the body type with its numeric ranges removed
+ * (`stripNumericRanges`), and the body type derived again with each ranged
+ * index typed without its range (`integer`). The second is used when it is
+ * a subtype of the first, the first otherwise.
+ *
+ * Each node of the body that reads such an index is derived again from its
+ * operands, through the type handler of its operator (`context.derive`).
+ * When a node cannot be derived again (an operator with no type handler and
+ * no signature), the numeric ranges are removed from the body type
+ * instead (`stripNumericRanges`).
+ *
+ * A symbol is typed again only where it names the index of this
+ * comprehension. A nested binder can bind the same name: in
+ * `[[k for k in [0.5, 1.5]] for k in 1..16]` the inner `k` is a real, and
+ * typing it `integer` would give `list<list<integer>>`. So the names that a
+ * nested binder binds are removed from the substitution in the operands
+ * where its binding is visible (see {@link LOOP_LIKE_BINDERS}).
+ *
+ * The derived descriptor of each node is kept for each set of names that
+ * are still substituted. The body is a graph: `List(t, t)` holds the same
+ * operand twice, and a body built from 24 such levels has 25 nodes but
+ * 2^24 paths from the root. Without the memo, the derivation would visit
+ * each path.
+ */
+function bodyTypeWithoutIndexRanges(
+  body: OperandDescriptor,
+  clauses: ReadonlyArray<OperandDescriptor>,
+  context: TypeHandlerContext
+): Type {
+  const unranged = new Map<string, Type>();
+  for (const clause of clauses) {
+    const structure = clause.structureOf?.();
+    if (structure?.kind !== 'application' || structure.head !== 'Element')
+      continue;
+    const index = structure.children[0];
+    const indexStructure = index?.structureOf?.();
+    if (indexStructure?.kind !== 'symbol') continue;
+    const stripped = stripNumericRanges(index.type);
+    if (stripped !== index.type) unranged.set(indexStructure.name, stripped);
+  }
+  if (unranged.size === 0) return body.type;
+  let failed = false;
+
+  // The names that are still substituted, with the key of that set of
+  // names. A name is only ever removed from the substitution, and its type
+  // is the same in every substitution, so the names alone identify it.
+  type Substitution = {
+    readonly types: ReadonlyMap<string, Type>;
+    readonly key: string;
+  };
+  const substitutions = new Map<string, Substitution>();
+  const substitutionOf = (types: ReadonlyMap<string, Type>): Substitution => {
+    const key = [...types.keys()].sort().join('\u0000');
+    let s = substitutions.get(key);
+    if (s === undefined) {
+      s = { types, key };
+      substitutions.set(key, s);
+    }
+    return s;
+  };
+  const without = (
+    s: Substitution,
+    names: ReadonlySet<string>
+  ): Substitution => {
+    let types: Map<string, Type> | undefined;
+    for (const name of names) {
+      if (!s.types.has(name)) continue;
+      types ??= new Map(s.types);
+      types.delete(name);
+    }
+    return types === undefined ? s : substitutionOf(types);
+  };
+
+  // One memo for each substitution, keyed by the input descriptor.
+  const memo = new Map<string, Map<OperandDescriptor, OperandDescriptor>>();
+  const derive = (d: OperandDescriptor, s: Substitution): OperandDescriptor => {
+    if (failed || s.types.size === 0) return d;
+    let derivedIn = memo.get(s.key);
+    if (derivedIn === undefined) {
+      derivedIn = new Map();
+      memo.set(s.key, derivedIn);
+    }
+    const cached = derivedIn.get(d);
+    if (cached !== undefined) return cached;
+    const result = deriveNode(d, s);
+    derivedIn.set(d, result);
+    return result;
+  };
+
+  const deriveNode = (
+    d: OperandDescriptor,
+    s: Substitution
+  ): OperandDescriptor => {
+    const structure = d.structureOf?.();
+    if (structure === undefined) return d;
+    if (structure.kind === 'symbol') {
+      const t = s.types.get(structure.name);
+      return t === undefined ? d : describeBoundSymbol(t, structure.name);
+    }
+    const operands = operandsOf(structure);
+    if (operands === undefined) return d;
+    const head = headOf(structure);
+    if (LOOP_LIKE_BINDERS.has(head))
+      return rebuild(d, structure, operands, deriveBinderOperands(operands, s));
+    // Any other operator that binds names (a `Block`, a quantifier,
+    // `NDSolveFunction`) is not typed again: the names it binds are not
+    // read from its operand descriptors here, and a substitution into its
+    // operands could replace a symbol that it binds.
+    if (context.engine.lookupDefinition(head)?.operator?.scoped === true)
+      return d;
+    return rebuild(
+      d,
+      structure,
+      operands,
+      operands.map((x) => derive(x, s))
+    );
+  };
+
+  // The operands of a binder in `LOOP_LIKE_BINDERS`. Operand 0 is the body,
+  // which is inside every clause: each name that a clause binds is removed
+  // from the substitution there. A clause sees the names of the clauses
+  // BEFORE it ("later clauses see earlier bindings"), not its own: in
+  // `Element(k, Range(1, k))`, the `k` of the range is the enclosing `k`.
+  // Its index position is not substituted.
+  const deriveBinderOperands = (
+    operands: ReadonlyArray<OperandDescriptor>,
+    s: Substitution
+  ): OperandDescriptor[] => {
+    const bound = operands.map((x, i) =>
+      i === 0 ? new Set<string>() : clauseBoundNames(x)
+    );
+    const all = new Set<string>();
+    for (const names of bound) for (const name of names) all.add(name);
+    const result: OperandDescriptor[] = [derive(operands[0], without(s, all))];
+    const before = new Set<string>();
+    for (let i = 1; i < operands.length; i++) {
+      const visible = without(s, before);
+      result.push(
+        deriveClause(operands[i], visible, without(visible, bound[i]))
+      );
+      for (const name of bound[i]) before.add(name);
+    }
+    return result;
+  };
+
+  // A clause: its first operand (the index, or the index pattern) is
+  // derived with `own`, which does not substitute the names the clause
+  // binds, and its other operands (the collection, the bounds) with
+  // `visible`.
+  const deriveClause = (
+    d: OperandDescriptor,
+    visible: Substitution,
+    own: Substitution
+  ): OperandDescriptor => {
+    const structure = d.structureOf?.();
+    const operands =
+      structure === undefined ? undefined : operandsOf(structure);
+    if (
+      structure === undefined ||
+      operands === undefined ||
+      operands.length === 0
+    )
+      return derive(d, own);
+    return rebuild(
+      d,
+      structure,
+      operands,
+      operands.map((x, i) => derive(x, i === 0 ? own : visible))
+    );
+  };
+
+  const rebuild = (
+    d: OperandDescriptor,
+    structure: OperandStructure,
+    operands: ReadonlyArray<OperandDescriptor>,
+    derived: ReadonlyArray<OperandDescriptor>
+  ): OperandDescriptor => {
+    if (derived.every((x, i) => x === operands[i])) return d;
+    const head = headOf(structure);
+    const t = context.derive(head, derived);
+    if (t === undefined) {
+      failed = true;
+      return d;
+    }
+    let rebuilt: OperandStructure | undefined;
+    return {
+      type: t,
+      facts: describeBoundSymbol(t).facts,
+      structureOf: () =>
+        (rebuilt ??=
+          structure.kind === 'application'
+            ? { kind: 'application', head, children: derived }
+            : structure.kind === 'tuple'
+              ? { kind: 'tuple', arity: derived.length, elements: derived }
+              : structure.kind === 'list-literal'
+                ? { ...structure, elements: derived }
+                : structure),
+    };
+  };
+
+  const stripped = stripNumericRanges(body.type);
+  const result = derive(body, substitutionOf(unranged));
+  // Both types contain every value of the body. The derived one is kept
+  // when it is the narrower: it has the sign of `k²`, which the stripped
+  // type does not. The stripped one is kept otherwise: `√((k − 0.5)/16)`
+  // derived over a plain `integer` index is `complex`, while the body,
+  // over its ranged index, is `real`.
+  if (failed || !isSubtype(result.type, stripped)) return stripped;
+  return result.type;
+}
+
+/**
+ * The operators whose operand 0 is a body and whose other operands are
+ * clauses that can bind names: an `Element`, `Limits`, `Tuple`, `Triple`,
+ * `Pair`, `Single` or `Set` clause binds the symbol (or the symbols of the
+ * tuple pattern) in its first operand, and a bare symbol operand
+ * (`Sum(body, n, 1, 10)`, `D(f, x)`) binds that symbol. These are the
+ * operators declared with `indexingSetSites(1)`, `operandSites(1)` or
+ * `operandsFrom(1)` (`boxed-expression/binding-sites.ts`).
+ *
+ * The names read here can include more than the operator binds: a symbol
+ * bound of the flat spelling (`b` in `Integrate(f, x, 0, b)`), or the second
+ * operand of `Series`. Such a name is then not typed again in the body, and
+ * keeps its ranged type there. That type is narrower, but it is correct.
+ */
+const LOOP_LIKE_BINDERS: ReadonlySet<string> = new Set([
+  'Comprehension',
+  'Loop',
+  'Sum',
+  'Product',
+  'Integrate',
+  'CircularIntegrate',
+  'ContourIntegrate',
+  'D',
+  'Series',
+]);
+
+/** The clauses that carry their index in their first operand. */
+const INDEX_CLAUSE_HEADS: ReadonlySet<string> = new Set([
+  'Element',
+  'Limits',
+  'Tuple',
+  'Triple',
+  'Pair',
+  'Single',
+  'Set',
+]);
+
+/** The head a structure is derived with by `context.derive`. */
+function headOf(structure: OperandStructure): string {
+  if (structure.kind === 'application') return structure.head;
+  if (structure.kind === 'tuple') return 'Tuple';
+  return 'List';
+}
+
+/** The operands of a structure that `context.derive` can derive again, or
+ * `undefined` for a leaf or a function literal. */
+function operandsOf(
+  structure: OperandStructure
+): ReadonlyArray<OperandDescriptor> | undefined {
+  if (structure.kind === 'application') return structure.children;
+  if (structure.kind === 'tuple' || structure.kind === 'list-literal')
+    return structure.elements;
+  return undefined;
+}
+
+/** The names that a clause of a binder in `LOOP_LIKE_BINDERS` binds. */
+function clauseBoundNames(clause: OperandDescriptor): Set<string> {
+  const names = new Set<string>();
+  const structure = clause.structureOf?.();
+  if (structure === undefined) return names;
+  if (structure.kind === 'symbol' || isHoldStructure(structure)) {
+    patternBoundNames(clause, names);
+    return names;
+  }
+  if (INDEX_CLAUSE_HEADS.has(headOf(structure))) {
+    const index = operandsOf(structure)?.[0];
+    if (index !== undefined) patternBoundNames(index, names);
+  }
+  return names;
+}
+
+function isHoldStructure(structure: OperandStructure): boolean {
+  return (
+    structure.kind === 'application' &&
+    structure.head === 'Hold' &&
+    structure.children.length === 1
+  );
+}
+
+/** The symbols of an index: a symbol, a held symbol, or the leaves of a
+ * tuple pattern (`Element(Tuple(p, q), pairs)`). */
+function patternBoundNames(d: OperandDescriptor, names: Set<string>): void {
+  const structure = d.structureOf?.();
+  if (structure === undefined) return;
+  if (structure.kind === 'symbol') names.add(structure.name);
+  else if (structure.kind === 'tuple')
+    for (const x of structure.elements) patternBoundNames(x, names);
+  else if (isHoldStructure(structure) && structure.kind === 'application')
+    patternBoundNames(structure.children[0], names);
+}
+
+/**
  * Canonicalize a `Loop` or `Comprehension` expression. Both share the same
  * variadic `Element`-clause scope hygiene:
  *
@@ -2881,13 +3205,12 @@ function canonicalLoopLike(
     // `integer` element type of the range, as the index of a `Sum` over
     // `Limits(j, 1, 100)` is. The bounded type lets a compiled `Mod(j, 3)` in
     // the body use the plain `%` operator instead of the checked helper.
-    // A `Comprehension` index is not changed: its body type becomes the
-    // element type of the list it returns, so a ranged index would also
-    // change the type of that list (`list<integer<1..100>>`).
-    const rangeIndex =
-      head === 'Loop'
-        ? rangeElementIndexType(idxCanonical, collCanonical, ops)
-        : undefined;
+    // The index of a `Comprehension` is typed the same way: the ranged type
+    // proves the sign of a body such as `√((k − 0.5)/16)`, so the compiled
+    // body stays on the real lane. The `Comprehension` type handler removes
+    // the numeric ranges from the element type of the list it returns, so
+    // `[k for k in 1..100]` is `list<integer>`, not `list<integer<1..100>>`.
+    const rangeIndex = rangeElementIndexType(idxCanonical, collCanonical, ops);
     const currentElementType = (): Type | undefined =>
       rangeIndex !== undefined
         ? parseType(rangeIndex)

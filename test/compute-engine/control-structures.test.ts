@@ -181,14 +181,84 @@ describe('CONTROL STRUCTURES', () => {
           ['Block', ['Assign', 'j', ['Add', 'j', 200]], ['Mod', 'j', 3]]
         )
       ).toBe('integer');
-      // A `Comprehension` index keeps the element type of the range.
+      // A `Comprehension` index has the same ranged type. The list type does
+      // not keep the range of its elements.
       const eng = new ComputeEngine();
       const comp = eng.box([
         'Comprehension',
         ['Mod', 'j', 3],
         ['Element', 'j', ['Range', 1, 100]],
       ] as any);
-      expect(comp.op1.op1.type.toString()).toBe('integer');
+      expect(comp.op1.op1.type.toString()).toBe('integer<1..100>');
+      expect(comp.type.toString()).toBe('list<integer>');
+    });
+
+    it('a nested binder that binds the same name hides the ranged comprehension index', () => {
+      // The element type of a comprehension is its body type with each
+      // ranged index typed `integer`. The inner `k` below is a real bound by
+      // the inner comprehension, not the outer index, and keeps its type.
+      const eng = new ComputeEngine();
+      const typeOf = (json: unknown) => eng.box(json as any).type.toString();
+      expect(
+        typeOf([
+          'Comprehension',
+          ['Comprehension', 'k', ['Element', 'k', ['List', 0.5, 1.5]]],
+          ['Element', 'k', ['Range', 1, 16]],
+        ])
+      ).toBe('list<list<real>>');
+      // A nested comprehension that binds another name sees the outer `k`.
+      expect(
+        typeOf([
+          'Comprehension',
+          [
+            'Comprehension',
+            ['Add', 'k', 'j'],
+            ['Element', 'j', ['List', 0.5, 1.5]],
+          ],
+          ['Element', 'k', ['Range', 1, 16]],
+        ])
+      ).toBe('list<list<real>>');
+      expect(
+        typeOf([
+          'Comprehension',
+          ['Comprehension', 'k', ['Element', 'j', ['List', 0.5]]],
+          ['Element', 'k', ['Range', 1, 3]],
+        ])
+      ).toBe('list<list<integer>>');
+      // A `Sum` binds its index too.
+      expect(
+        typeOf([
+          'Comprehension',
+          ['Sum', 'k', ['Element', 'k', ['List', 0.5, 1.5]]],
+          ['Element', 'k', ['Range', 1, 16]],
+        ])
+      ).toBe('list<real>');
+    });
+
+    it('types a comprehension over a ranged index whose body shares operands', () => {
+      // `List(t, t)` holds the same operand twice: 24 such levels are 25
+      // nodes, but 2^24 paths from the root. The body type is derived once
+      // for each node, not once for each path. A tower over the index `k`
+      // itself is derived again at each node: before the memo, 20 levels
+      // took about 19 seconds.
+      const eng = new ComputeEngine();
+      const typeOf = (leaf: string, levels: number) => {
+        let tower = eng.symbol(leaf);
+        for (let i = 0; i < levels; i++)
+          tower = eng.function('List', [tower, tower]);
+        return eng
+          .function('Comprehension', [
+            tower,
+            eng.function('Element', [
+              eng.symbol('k'),
+              eng.function('Range', [eng.number(1), eng.number(3)]),
+            ]),
+          ])
+          .type.toString();
+      };
+      const dims = (levels: number) => Array(levels).fill(2).join('x');
+      expect(typeOf('t', 24)).toBe(`list<list<number^(${dims(24)})>>`);
+      expect(typeOf('k', 20)).toBe(`list<list<integer^(${dims(20)})>>`);
     });
   });
 

@@ -74,7 +74,66 @@
   was `x·alpha·x_1`; it is now `e^x·alpha·x_1`. `\sqrt beta` stays
   `√b·e·t·a` and `x^foo` stays `x^f·o·o`.
 
+- **The index of a sum, product, loop or comprehension over literal bounds
+  has a ranged type on every route, and the range reaches a compiled user
+  function.** `Sum(…, Limits(k, 1, 16))` typed its index `integer<1..16>`,
+  but the parsed `\sum_{k=1}^{16}` (a `Tuple` clause), `Loop` and
+  `Comprehension` over `Element(k, Range(1, 16))` typed it `integer`, and the
+  `Loop` narrowing of 0.150.0 was lost after the first evaluation. The index
+  of a clause with integer literal bounds is now declared `integer<a..b>` at
+  its binding site, on the parse route and the box route alike, and it keeps
+  that type. A comprehension's list keeps its element type without the
+  range: `[k for k in 1..16]` is `list<integer>`, and
+  `[√((k − 0.5)/16) for k in 1..16]` is `list<real>`, where it was
+  `list<complex>`. On the JavaScript target under the default `auto` mode,
+  a user function whose body holds a square root, logarithm or non-integer
+  power of a parameter is compiled for the range of its argument when that
+  range proves the sign: `p(k) = 1.45 √((k − 0.5)/16) cos(2.4k) + …` called
+  from `\sum_{k=1}^{16}` or from `[D(x, y, k) for k = [1...16]]` gets a copy
+  of its definition with `k: integer<1..>`, on the real lane; a function
+  declared `(integer<1..16>) -> unknown` compiles its generic definition with
+  the declared parameter type, as the shader targets already did. A copy is
+  made only when it removes a promoted head, so a function with no such head
+  keeps one definition. Measured on the Voronoi showcase document of the
+  Tycho corpus, whose kernel had run on the complex lane: 14 KB of code
+  instead of 52 KB, and about 40 µs per sample instead of 1,540 µs, with the
+  same values. The `promoted` report is lowered when every definition that
+  promoted was removed as unreferenced.
+
+- **A function declared with a real result compiles on the real lane.** Under
+  the JavaScript target's default `auto` mode (and under `complex`), a square
+  root, logarithm, even root or non-integer power of an operand whose sign is
+  not provable is lowered through the complex kernels, and every value that
+  reads it runs on the complex lane. A function declared `(real) -> real`
+  whose body holds such a head declined to compile ("the value is complex,
+  but its ascribed type `real` says it is real"). The declaration is now
+  read as the author's statement: the body compiles on the real lane, as
+  `mode: 'strict'` compiles it, and gives `NaN` outside the real domain.
+  `p: (real) -> real`, `p := k ↦ sin(2.4k)·√((k − 0.5)/16)` compiles to
+  `Math.sin(2.4 * k) * Math.sqrt(0.0625 * (k + -0.5))` in every mode, with
+  `promoted: false`. A body that is complex because of a complex-typed
+  operand (`q: (unknown) -> real`, `q := z ↦ z²`, called with `1 + i`) still
+  declines with the same message, and a value that is real with promotion on
+  (`|√k|`) keeps its promoted heads, so `|√(−4)|` is still 2.
+  A constant fold agrees with the real lane: `x + p(0)` folded through the
+  interpreter, where the ascription is transparent, to `x + i` and ran to the
+  string `"0[object Object]"`; a fold whose value is complex for a node the
+  analysis reads as real is now refused, and `p(0)` compiles as a call of the
+  real-lane definition, which gives `NaN`.
+
 ### Issues Resolved
+
+- **`interval-js` recomputed the constant subterms of an unrolled sum inside a
+  user-function body on every call.** The interval target binds a repeated
+  subexpression of a function body to a temporary; when the subexpression
+  folds to a constant interval (the `(n − 0.5)/40` of an unrolled `Sum` term,
+  after the index is substituted), the temporary hid the constant from the
+  fold of every expression that read it, so `√(1 − t²)` over it ran on every
+  call. Tycho's exoplanet transit kernel computed 40 interval square roots of
+  constants per sample. A candidate whose folded value is a constant interval
+  is now written in place (`CompileTarget.cseInlineConstant`), the
+  expressions around it fold, and the constant table gives each distinct
+  value one name. The JavaScript target already folded these.
 
 - **A dictionary trigger with a subscript matches across a space.**
   `\mathbb{R} _{>0}^2` parsed to `Subscript(RealNumbers, Error)^2` and

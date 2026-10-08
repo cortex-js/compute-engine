@@ -262,6 +262,43 @@ and diagnostic.
 Unknown-sign radical operations are the promotion trigger. Real-only kernels
 guard and project only where the model explicitly permits it.
 
+A declared real result is real on every mode. A function declared with a real
+result type (`p: (real) -> real`, also `-> finite_real` and `-> nan | real`)
+has its body wrapped in a real ascription, `Typed(body, 'real')`. When the
+body is complex only because of promotion — complex with promotion on, real
+with promotion off — the ascription selects the real lane for the body: the
+body compiles with promotion off, as `strict` compiles it, in the `auto` mode
+and in the `complex` mode. An unknown-sign `Sqrt`, `Ln`, `Log`, even `Root` or
+non-integer `Power` in the body then gives `NaN` outside its real domain, the
+same value that `strict` gives. This is the reading that a real-typed symbol
+already has: the type `real` excludes `NaN`, and `NaN` is the answer when a
+real result has no value. The result reports `promoted: false` for such a body.
+For example, with `p := k ↦ sin(2.4k)·√((k − 0.5)/16)`, `p(x)` compiles to
+`Math.sin(2.4 * k) * Math.sqrt(0.0625 * (k + -0.5))` and is `NaN` at `x = 0`.
+
+The rule applies only where it changes the lane of the body:
+
+- A body that is real also with promotion on (`|√k|`) keeps its promoted
+  heads, and `|√(−4)|` is `2`, as the interpreter computes it.
+- A body that is complex also with promotion off still declines with "Could
+  not compile `Typed`: the value … is complex, but its ascribed type `real`
+  says it is real". Such a body has an operand that is complex by its type
+  (`q := z ↦ z²` called with a `complex` argument), a call of a user function
+  whose definition is complex (a definition is shared by every call site, so
+  it is never recompiled on the real lane for one caller), or, in the `complex`
+  mode, a node whose type admits a complex value. The `complex` mode reads
+  such a node as complex without promotion: a parameter declared `unknown`
+  (`(unknown) -> real`), and also a radical over a parameter that the
+  function literal leaves untyped, which types `number`. A call that the
+  compiler inlines substitutes the typed argument and avoids this; a call of an
+  emitted definition (a recursive function, for example) declines in the
+  `complex` mode.
+- A result type that admits a complex value (`-> number`, `-> complex`) is not
+  a real result, and the body promotes as before.
+- The value of an assigned symbol that the body reads is compiled with the
+  promotion of the mode, like a user-function definition.
+- The shader targets never promote, so nothing changes there.
+
 A `Sum` or `Product` over a small constant range is unrolled by mapping the
 index NAME to a literal in the emitted code, so the analysis reads a body in
 which the index is still a free symbol. Each unrolled term therefore also
