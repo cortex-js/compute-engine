@@ -347,6 +347,9 @@ describe('phase 0b: `Filter` converts, on the LAZY path', () => {
 
   it('the union flagship is unchanged by `Map`’s own conversion', () => {
     const ce = new ComputeEngine();
+    // "banana" is the `incompatible-type` error of `Sqrt`, not `NaN`:
+    // the lowered lambda route now keeps an Error result as the cell's
+    // value, as the general route has since 2026-09-03.
     expect(
       ce
         .box([
@@ -356,7 +359,9 @@ describe('phase 0b: `Filter` converts, on the LAZY path', () => {
         ])
         .evaluate()
         .toString()
-    ).toBe('[4,2i,NaN,9]');
+    ).toBe(
+      '[4,2i,Error(ErrorCode("incompatible-type", "complex | infinity", "string"), "banana"),9]'
+    );
   });
 
   it('a UNION source declines the stamp (the permanent union ruling)', () => {

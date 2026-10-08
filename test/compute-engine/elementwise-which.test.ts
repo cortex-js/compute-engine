@@ -862,6 +862,52 @@ describe('type handler', () => {
       'integer'
     );
   });
+
+  test('a branch of type unknown makes the result unknown', () => {
+    // `widen` drops `unknown` from a join, so the conditional claimed the
+    // type of the other branch: `If(n = 0, s, [1, 2])` was typed
+    // `vector<integer^2>` while `f(0, 5)` with
+    // `f(n, s) = s if n == 0 else f(n - 1, [1, 2])` is `5`.
+    const ce = engine();
+    expect(
+      ce.box(['If', ['Equal', 'n', 0], 's', ['List', 1, 2]]).type.toString()
+    ).toBe('unknown');
+    expect(
+      ce.box(['If', ['Equal', 'n', 0], ['List', 1, 2], 's']).type.toString()
+    ).toBe('unknown');
+    expect(ce.box(['If', ['Equal', 'n', 0], 's']).type.toString()).toBe(
+      'missing | unknown'
+    );
+    ce.assign(
+      'f',
+      ce.parse('(n, s) \\mapsto \\operatorname{If}(n = 0, s, f(n - 1, [1, 2]))')
+    );
+    expect(ce.parse('f(0, 5)').evaluate().json).toBe(5);
+    expect(ce.parse('f(0, [0.5])').evaluate().json).toEqual(['List', 0.5]);
+    expect(ce.parse('f(2, 5)').evaluate().json).toEqual(['List', 1, 2]);
+    // `Which` follows the same rule.
+    expect(
+      ce
+        .box(['Which', ['Equal', 'n', 0], 's', 'True', ['List', 1, 2]])
+        .type.toString()
+    ).toBe('unknown');
+  });
+
+  test('a recursive call or a Return branch keeps the join of the other branches', () => {
+    // A recursive call reads the signature of its function while that
+    // signature is derived, where the result is the placeholder `unknown`;
+    // the other branch is the seed of the fixpoint. A `Return` yields no
+    // value in place.
+    const ce = engine();
+    ce.assign(
+      'f',
+      ce.parse('(n) \\mapsto \\operatorname{If}(n = 0, 1, f(n - 1))')
+    );
+    expect(ce.box('f').type.toString()).toBe('(unknown) -> integer');
+    expect(
+      ce.box(['If', ['Greater', 'y', 0], ['Return', 1], 2]).type.toString()
+    ).toBe('integer');
+  });
 });
 
 //

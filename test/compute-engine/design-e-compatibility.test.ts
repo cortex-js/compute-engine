@@ -213,6 +213,9 @@ describe('E2 — the lazy-route gate (`canonicalCallbackOperand`)', () => {
   it('the KEEP table holds on the lazy route', () => {
     const ce = new ComputeEngine();
     // Messy-data broadcast: admitted, per-element at evaluation.
+    // "banana" is the `incompatible-type` error of `Sqrt`, not `NaN`:
+    // the lowered lambda route now keeps an Error result as the cell's
+    // value, as the general route has since 2026-09-03.
     expect(
       ce
         .box([
@@ -222,7 +225,9 @@ describe('E2 — the lazy-route gate (`canonicalCallbackOperand`)', () => {
         ])
         .evaluate()
         .toString()
-    ).toBe('[4,2i,NaN,9]');
+    ).toBe(
+      '[4,2i,Error(ErrorCode("incompatible-type", "complex | infinity", "string"), "banana"),9]'
+    );
     // Union source with a narrower predicate: admitted (partial overlap).
     expect(
       ce.box(['Filter', ['List', 2, 3, { str: 'a' }, 4], 'IsPrime']).isValid

@@ -16538,9 +16538,14 @@ export class BaseCompiler {
     }
 
     // ── General for-each (for effect) ─────────────────────────────────────
+    // A shader loop needs bounds that are known when the shader is written:
+    // the counted loop above takes a single `Range` with integer literal
+    // bounds, and every other loop (several `Element` clauses, a collection
+    // that is not a `Range`, a `Range` with a bound that is a symbol or an
+    // expression) is read at run time, which a shader cannot do.
     if (lang === 'glsl' || lang === 'wgsl')
       throw new Error(
-        `Could not compile \`${lang.toUpperCase()}\`: a multi-Element or non-Range Loop is not supported.`
+        `Could not compile \`${lang.toUpperCase()}\`: a Loop compiles to a shader only over a single Range with integer literal bounds.`
       );
 
     BaseCompiler.assertBreakLeavesWholeLoop(elements, body);
@@ -17167,11 +17172,11 @@ export class BaseCompiler {
    * runtime semantics match the legacy imperative for-loop shape
    * `for (let i = lo; i <= hi; i++)`.
    *
-   * Concretely: integer-ascending bounds and step omitted-or-1. When bounds
-   * are not statically numeric we accept the Range (the historical
-   * behaviour) — runtime mismatch in the descending-unknown-bounds case is
-   * left as a known limitation; callers can force the iterable path by
-   * supplying an explicit step.
+   * Concretely: integer number literal bounds, ascending, and a step that is
+   * omitted or 1. The counted loop reads both bounds at compile time, so a
+   * bound that is not a number literal (`Range(1, n)`) is refused here: the
+   * general for-each loop reads it at run time, and also handles a range
+   * that counts down.
    */
   private static isLegacyCompatibleRange(coll: Expression): boolean {
     if (!isFunction(coll, 'Range')) return false;
@@ -17181,9 +17186,9 @@ export class BaseCompiler {
     }
     const lo = coll.ops[0];
     const hi = coll.ops[1];
-    if (isNumber(lo) && !Number.isInteger(lo.re)) return false;
-    if (isNumber(hi) && !Number.isInteger(hi.re)) return false;
-    if (isNumber(lo) && isNumber(hi) && lo.re > hi.re) return false;
+    if (!isNumber(lo) || !Number.isInteger(lo.re)) return false;
+    if (!isNumber(hi) || !Number.isInteger(hi.re)) return false;
+    if (lo.re > hi.re) return false;
     return true;
   }
 

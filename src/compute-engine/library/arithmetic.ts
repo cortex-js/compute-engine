@@ -49,7 +49,6 @@ import { polynomialGCDMulti } from '../boxed-expression/polynomials.js';
 import {
   asSmallInteger,
   asRational,
-  asBignum,
   asBigint,
   toBigint,
   toInteger,
@@ -98,11 +97,13 @@ import { logGammaComplex } from '../numerics/log-gamma.js';
 import { EULERIAN_MAX_ORDER } from '../numerics/polylog.js';
 import {
   factorial2 as bigFactorial2,
-  gcd as bigGcd,
-  lcm as bigLcm,
   bigRoundToInteger,
 } from '../numerics/numeric-bignum.js';
-import { factorial as bigFactorial } from '../numerics/numeric-bigint.js';
+import {
+  factorial as bigFactorial,
+  gcd as bigintGcd,
+  lcm as bigintLcm,
+} from '../numerics/numeric-bigint.js';
 import {
   zetaEvenCoefficient,
   eulerEvenNumber,
@@ -161,8 +162,6 @@ import {
 } from '../numerics/bessel-complex.js';
 import {
   factorial2,
-  gcd,
-  lcm,
   realGcd,
   realLcm,
   roundToInteger,
@@ -818,6 +817,12 @@ function exactModUnderN(
   expression: Expression | undefined
 ): Expression | undefined {
   const ce = a.engine;
+  // A big decimal beyond the range of a double (`999^999`) reads as
+  // `Infinity` through `re`, and so does its quotient: such a float has no
+  // fractional digit left, so it is near a jump, as a float with no
+  // fractional digit inside the range is (`isNearRoundingJumpValue()`).
+  // Without this, `Mod(n^n, 10^10).N()` with `n = 999` gave 0 where the
+  // exact remainder is 499998999.
   const near =
     isNumber(a) &&
     isNumber(m) &&
@@ -826,7 +831,8 @@ function exactModUnderN(
     a.isFinite === true &&
     m.isFinite === true &&
     m.re !== 0 &&
-    isNearRoundingJumpValue(ce, a.re / m.re, false);
+    (!Number.isFinite(a.re / m.re) ||
+      isNearRoundingJumpValue(ce, a.re / m.re, false));
   const exactOf = (x: Expression, index: number): Expression | undefined => {
     if (isExactRealLiteral(x)) return x;
     const original = originalOperand(expression, index);
@@ -854,6 +860,34 @@ function exactModUnderN(
     const value = exactConstantValue(modulo);
     if (value !== undefined) return ce.number(ce._numericValue(value));
   }
+  const fromFloat = (isNumber(a) && !a.isExact) || (isNumber(m) && !m.isExact);
+  // An integer dividend as written, by an exact integer modulus: reduce it
+  // in ℤ/mℤ without forming its value (`reduceModulo()`), as the exact
+  // `Mod` handler does. The exact value of `2^(3^20)` has billions of
+  // digits: `exactRealValueOf()` tried to build it, and `Mod(2^(3^20),
+  // 7).N()` failed after 45 s with an internal error. A float literal as
+  // written is not taken, because its digits are rounded.
+  if (
+    oa !== undefined &&
+    om !== undefined &&
+    oa.isInteger === true &&
+    !(isNumber(oa) && !oa.isExact) &&
+    isNumber(om) &&
+    om.isExact &&
+    om.isInteger === true
+  ) {
+    const bm = toBigint(om);
+    if (bm !== null && bm !== 0n) {
+      const r = reduceModulo(oa, bm < 0n ? -bm : bm);
+      if (r !== null) {
+        // Floored convention: the sign of the result follows the divisor.
+        const n = bm > 0n || r === 0n ? r : r + bm;
+        if (fromFloat)
+          return ce.number(ce._numericValue(new BigDecimal(n.toString())));
+        return ce.number(n).N();
+      }
+    }
+  }
   const ea = exactOf(a, 0);
   if (ea === undefined) return undefined;
   const em = exactOf(m, 1);
@@ -863,8 +897,15 @@ function exactModUnderN(
   const exact = ce
     .function('Add', [ea, ce.function('Multiply', [ce.number(-k), em])])
     .evaluate();
-  if (!isExactRealLiteral(exact)) return undefined;
-  const fromFloat = (isNumber(a) && !a.isExact) || (isNumber(m) && !m.isExact);
+  // An exact literal with a radical (`√2·10³⁰`) less an integer is an exact
+  // sum, not a literal: its value is computed at a raised precision, as for
+  // a constant expression above, because at the working precision the two
+  // terms cancel.
+  if (!isExactRealLiteral(exact)) {
+    if (!isExactConstantExpression(exact)) return undefined;
+    const value = exactConstantValue(exact);
+    return value === undefined ? undefined : ce.number(ce._numericValue(value));
+  }
   const n = exact.isInteger ? roundExactReal(exact, 'floor') : undefined;
   if (fromFloat && n !== undefined)
     return ce.number(ce._numericValue(new BigDecimal(n.toString())));
@@ -906,6 +947,35 @@ function exactConstantModulo(
     a,
     ce.function('Multiply', [ce.number(k), m]),
   ]);
+}
+
+/**
+ * `Mod(a, m)` as an exact expression, when `a` and `m` are exact real
+ * literals, `m` is not zero, and at least one of them has a radical
+ * (`√2·10³⁰`, `√2`); `undefined` otherwise. The quotient of two such
+ * literals is an exact literal (`√2/√3` folds to `√6/3`), so `k = ⌊a/m⌋`
+ * is decided exactly (`roundExactReal()`), and the result is `a − m·k`
+ * evaluated: a literal (`Mod(√8, √2)` is `0`) or an exact sum (`Mod(√2, 1)`
+ * is `√2 − 1`). Two rational literals are not taken: the caller reduces
+ * them with integer arithmetic.
+ */
+function exactRadicalLiteralModulo(
+  a: Expression,
+  m: Expression
+): Expression | undefined {
+  if (!isExactRealLiteral(a) || !isExactRealLiteral(m)) return undefined;
+  if (a.isRational === true && m.isRational === true) return undefined;
+  if (m.isSame(0)) return undefined;
+  const ce = a.engine;
+  const q = ce.function('Divide', [a, m]).evaluate();
+  if (!isExactRealLiteral(q)) return undefined;
+  const k = roundExactReal(q, 'floor');
+  if (k === undefined) return undefined;
+  const r = ce
+    .function('Add', [a, ce.function('Multiply', [ce.number(-k), m])])
+    .evaluate();
+  if (isExactRealLiteral(r) || isExactConstantExpression(r)) return r;
+  return undefined;
 }
 
 /**
@@ -6928,6 +6998,20 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           }
         }
 
+        // Two exact real literals of which at least one has a radical
+        // (`√2·10³⁰`, which the evaluation of the operand folds into one
+        // literal before this handler sees it, or `Mod(√2, 1)`): the rational
+        // fast path above does not take them, and the float lane below
+        // rounds `a` to the working precision before it reduces, so
+        // `Mod(√2·10³⁰, 7)` gave the exact integer `5` where the true value
+        // is 0.698…. The quotient of two such literals is an exact literal
+        // (`√2/√3` folds to `√6/3`), so `k = ⌊a/m⌋` is decided exactly
+        // (`roundExactReal()`), and the result is the exact `a − m·k`, a
+        // literal (`Mod(√8, √2)` is `0`) or an exact sum (`Mod(√2, 1)` is
+        // `√2 − 1`, as in Mathematica).
+        const exactRadical = exactRadicalLiteralModulo(a, b);
+        if (exactRadical !== undefined) return exactRadical;
+
         // An exact constant expression that is not a number (`π·10³⁰`):
         // `a − m·k`, where `k` is the floor of `a/m` decided from enclosures
         // (`exactConstantModulo()`). `Mod(π·10³⁰, 1)` is
@@ -9595,7 +9679,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       signature: '(number) -> boolean',
       examples: ['[IsPrime(17), IsPrime(21)]'],
       nanBehavior: 'handle',
-      evaluate: ([n], { engine }) => {
+      // Under `.N()`, the operand is read as written when its float stands
+      // for an exact integer (`exactIntegerOriginals()`): the float of
+      // `2^89 − 1` is rounded to the working precision, and the handler
+      // answered `False` for that Mersenne prime.
+      evaluate: ([n], { engine, numericApproximation, expression }) => {
+        [n] = exactIntegerOriginals([n], expression, numericApproximation);
         const outOfDomain = infiniteOperandOfIntegerPredicate(engine, n);
         if (outOfDomain !== undefined) return outOfDomain;
         const result = isPrime(n);
@@ -9626,7 +9715,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // negation of primality, and `Not(IsPrime(n))` is the wrong definition
       // for it. `isComposite` is the shared one, used by the `:composite`
       // pattern guard in `rules.ts` as well.
-      evaluate: ([n], { engine }) => {
+      evaluate: ([n], { engine, numericApproximation, expression }) => {
+        // The written operand is read under `.N()`, as for `IsPrime`.
+        [n] = exactIntegerOriginals([n], expression, numericApproximation);
         const outOfDomain = infiniteOperandOfIntegerPredicate(engine, n);
         if (outOfDomain !== undefined) return outOfDomain;
         const result = isComposite(n);
@@ -9655,7 +9746,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       signature: '(number) -> boolean',
       examples: ['[IsOdd(7), IsOdd(8)]'],
       nanBehavior: 'handle',
-      evaluate: ([n], { engine }) => parityPredicate(engine, n, 'odd'),
+      // The written operand is read under `.N()`, as for `IsPrime`.
+      evaluate: ([n], { engine, numericApproximation, expression }) =>
+        parityPredicate(
+          engine,
+          exactIntegerOriginals([n], expression, numericApproximation)[0],
+          'odd'
+        ),
     },
     IsEven: {
       type: (ops, context) =>
@@ -9673,7 +9770,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       signature: '(number) -> boolean',
       examples: ['[IsEven(7), IsEven(8)]'],
       nanBehavior: 'handle',
-      evaluate: ([n], { engine }) => parityPredicate(engine, n, 'even'),
+      // The written operand is read under `.N()`, as for `IsPrime`.
+      evaluate: ([n], { engine, numericApproximation, expression }) =>
+        parityPredicate(
+          engine,
+          exactIntegerOriginals([n], expression, numericApproximation)[0],
+          'even'
+        ),
     },
     // @todo: Divisor:
   },
@@ -9704,7 +9807,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           return 'positive';
         return 'non-negative';
       },
-      evaluate: (xs, { engine }) => {
+      evaluate: (xs, { engine, numericApproximation, expression }) => {
+        // Under `.N()`, an exact integer operand is read exactly
+        // (`exactIntegerOriginals()`): the float of `2^100` has no unit digit.
+        xs = exactIntegerOriginals(xs, expression, numericApproximation);
         // Integer operands take the fast numeric path. Otherwise, attempt a
         // univariate polynomial GCD (e.g. GCD(x²+3x+2, x²+4x+3) → x+1),
         // falling back to the numeric path — which folds any integer operands
@@ -9744,7 +9850,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (ops.some((x) => x.isSame(0))) return 'zero';
         return 'non-negative';
       },
-      evaluate: (xs, { engine }) => evaluateGcdLcm(engine, xs, 'LCM'),
+      evaluate: (xs, { engine, numericApproximation, expression }) =>
+        evaluateGcdLcm(
+          engine,
+          exactIntegerOriginals(xs, expression, numericApproximation),
+          'LCM'
+        ),
     },
 
     Numerator: {
@@ -12428,13 +12539,71 @@ function evaluateMinMax(
   return result;
 }
 
+/**
+ * Under `.N()`, the operands `xs` of an integer operation (`GCD`, `LCM`)
+ * with each float that stands for an EXACT integer replaced by that integer:
+ * the operand as written (`expression`, before the numeric evaluation) is
+ * evaluated exactly when it is pure (`exactRealValueOf()`), and the value
+ * is kept when it is an integer. The float of `2^100` is rounded to the
+ * working precision and has no unit digit, so `GCD(2^100, 6^50).N()` gave
+ * `3.02·10²³` where the answer is `2^50`. A float literal as written
+ * (`GCD(4.0, 6)`) is not exact and is kept, so the float lane still answers
+ * the float `2`. A `List` operand as written (`GCD([2^100, 6^50])`, whose
+ * elements `evaluateGcdLcm()` takes as operands) has its elements replaced
+ * in the same way, one level deep. Outside `.N()`, or without the written
+ * operands, `xs` is returned as it is.
+ */
+function exactIntegerOriginals(
+  xs: ReadonlyArray<Expression>,
+  expression: Expression | undefined,
+  numericApproximation: boolean | undefined
+): ReadonlyArray<Expression> {
+  if (!numericApproximation || expression === undefined) return xs;
+  if (!isFunction(expression) || expression.nops !== xs.length) return xs;
+  // The exact integer that the float `x` stands for, from the operand as
+  // written, or `undefined` when `x` is kept.
+  const exactInteger = (
+    x: Expression,
+    written: Expression
+  ): Expression | undefined => {
+    if (!isNumber(x) || x.isExact) return undefined;
+    const exact = exactRealValueOf(written);
+    return exact !== undefined && exact.isInteger === true ? exact : undefined;
+  };
+  let replaced: Expression[] | undefined;
+  xs.forEach((x, i) => {
+    const written = expression.ops[i];
+    if (
+      isFunction(x, 'List') &&
+      isFunction(written, 'List') &&
+      x.nops === written.nops
+    ) {
+      let elements: Expression[] | undefined;
+      x.ops.forEach((el, j) => {
+        const exact = exactInteger(el, written.ops[j]);
+        if (exact === undefined) return;
+        elements ??= [...x.ops];
+        elements[j] = exact;
+      });
+      if (elements === undefined) return;
+      replaced ??= [...xs];
+      replaced[i] = x.engine._fn('List', elements);
+      return;
+    }
+    const exact = exactInteger(x, written);
+    if (exact === undefined) return;
+    replaced ??= [...xs];
+    replaced[i] = exact;
+  });
+  return replaced ?? xs;
+}
+
 function evaluateGcdLcm(
   ce: ComputeEngine,
   ops: ReadonlyArray<Expression>,
   mode: 'LCM' | 'GCD'
 ): Expression {
-  const fn = mode === 'LCM' ? lcm : gcd;
-  const bigFn = mode === 'LCM' ? bigLcm : bigGcd;
+  const bigintFn = mode === 'LCM' ? bigintLcm : bigintGcd;
 
   // Zero-argument identities, consistent with the empty-collection case below:
   // `GCD() → 0`, `LCM() → 1`.
@@ -12515,42 +12684,33 @@ function evaluateGcdLcm(
     return ce.number(ce._inexactNumericValue(acc));
   }
 
+  // The GCD or LCM of exact integer operands is computed with bigint
+  // arithmetic, exactly at any magnitude (`asBigint()` reads an exact
+  // integer literal without a precision-limited round trip). A float
+  // operand does not take part. Float operands in the range of a double
+  // took the `realGcd`/`realLcm` branch above, but a float beyond that
+  // range (`N(10^400)`), or a float together with an exact operand beyond
+  // that range, gets here: its digits are rounded, so an exact result
+  // computed from it would be wrong, and it goes to the symbolic tail. The
+  // accumulator was a machine number, or a big decimal at the working
+  // precision, and both rounded an operand above their precision:
+  // `GCD(2^100, 2^50)` gave 2048 where the answer is `2^50`, and
+  // `LCM(2^60, 3^40)` a rounded value. An operand that is not an integer
+  // literal (a symbol, a rational) is deferred to the symbolic tail.
   const rest: Expression[] = [];
-  if (bignumPreferred(ce)) {
-    let result: BigDecimal | null = null;
-    for (const op of ops) {
-      if (result === null) {
-        // Seed the accumulator with the first integer operand; defer the rest.
-        // GCD/LCM are non-negative, so seed with the magnitude.
-        const d = asBignum(op);
-        if (d !== null && d.isInteger()) result = d.abs();
-        else rest.push(op);
-      } else {
-        const d = asBignum(op);
-        if (d && d.isInteger()) result = bigFn(result, d);
-        else rest.push(op);
-      }
-    }
-
-    // The GCD or LCM of exact integers is an exact integer at any magnitude
-    // (`ce.number()` of an integer-valued big decimal). Float operands took
-    // the `realGcd`/`realLcm` branch above.
-    if (rest.length === 0) return result === null ? ce.One : ce.number(result);
-    if (result === null) return ce._fn(mode, rest);
-    return ce._fn(mode, [ce.number(result), ...rest]);
-  }
-
-  let result: number | null = null;
+  let result: bigint | null = null;
   for (const op of ops) {
-    if (result === null) {
-      // Seed the accumulator with the first integer operand; defer the rest.
-      // GCD/LCM are non-negative, so seed with the magnitude.
-      if (op.isInteger) result = Math.abs(op.re);
-      else rest.push(op);
-    } else {
-      if (op.isInteger) result = fn(result, op.re);
-      else rest.push(op);
+    const k =
+      op.isInteger === true && !(isNumber(op) && !op.isExact)
+        ? asBigint(op)
+        : null;
+    if (k === null) {
+      rest.push(op);
+      continue;
     }
+    // GCD/LCM are non-negative, so the magnitude is accumulated.
+    const m = k < 0n ? -k : k;
+    result = result === null ? m : bigintFn(result, m);
   }
   if (rest.length === 0) return result === null ? ce.One : ce.number(result);
   if (result === null) return ce._fn(mode, rest);

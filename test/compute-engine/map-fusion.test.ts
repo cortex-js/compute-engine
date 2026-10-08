@@ -248,6 +248,40 @@ describe('Map fusion — shape-gate negatives fall back correctly', () => {
     expect(drainRe(m)).toEqual([2, 3, 4, 5, 6]);
   });
 
+  test('a body whose head is the parameter applies the element', () => {
+    // `w => w(1)` over a list of functions: the head of the body is the
+    // parameter, so each element is a function to apply. The level is not
+    // lowerable, and the general path binds `w` to each function in turn.
+    const fns = [
+      'List',
+      ['Function', 0, 'a'],
+      ['Function', ['Add', 'a', 5], 'a'],
+    ];
+    expect(
+      lowerMapSpine(ce.box(['Map', ['Function', ['w', 1], 'w'], fns]))
+    ).toBe(undefined);
+    for (const body of [
+      ['w', 1],
+      ['Apply', 'w', 1],
+    ]) {
+      const m = ce.box(['Map', ['Function', body, 'w'], fns]);
+      expect(m.evaluate().toString()).toBe('[0,6]');
+      expect(m.N().toString()).toBe('[0,6]');
+      expect(m.at(2)?.toString()).toBe('6');
+    }
+    // A comprehension over the same list gives the same values.
+    const c = ce.box(['Comprehension', ['q', 1], ['Element', 'q', fns]]);
+    expect(c.evaluate().toString()).toBe('[0,6]');
+    // The zipWith form: each function is applied to the matching argument.
+    const z = ce.box([
+      'Map',
+      ['Function', ['w', 'x'], 'w', 'x'],
+      fns,
+      ['List', 1, 2],
+    ]);
+    expect(z.evaluate().toString()).toBe('[0,7]');
+  });
+
   test('an eager small-list broadcast stays eager and unchanged', () => {
     const e = ce.box(['Add', ['List', 1, 2, 3], 1]).evaluate();
     expect(e.operator).toBe('List');
@@ -569,9 +603,12 @@ describe('Map fusion — a scope-writing body is NOT lowered', () => {
 
 describe('Map fusion — level-failure semantics per route (R3)', () => {
   // A level fails when the strict-mode input gate fires or the level's own
-  // application produces an invalid value. No lowerable stack reachable from
-  // the public surface fails this way (every broadcast operator absorbs a bad
-  // operand symbolically), so the mechanism is pinned directly on the runner.
+  // application produces an invalid value that is not an error. A level whose
+  // application produces an `Error` value does not fail: the error is the
+  // element's value, as on the general route
+  // (`collection-of-missing-elements.test.ts`, the `ToUpperCase` rows). No
+  // lowerable stack reachable from the public surface fails this way, so the
+  // mechanism is pinned directly on the runner.
   const ce = new ComputeEngine();
 
   const spineOf = () => lowerMapSpine(ce.box(WITNESS as any).evaluate())!;

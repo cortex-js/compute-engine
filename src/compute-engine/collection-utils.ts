@@ -1805,12 +1805,23 @@ export function scalarOrListUnionCellType(t: Readonly<Type>): Type | undefined {
  * scalars" pins in `list-broadcast-typing.test.ts`). Statically-visible
  * collection/tuple/tensor operands are handled by the dedicated branches that
  * fire before this predicate is consulted.
+ *
+ * A top-typed SELECTION (`If`, `Which`) is as collection-shaped as its arms:
+ * its value is the value of one arm, and its type is `unknown` as soon as
+ * one arm is an undeclared symbol (the `If` type handler does not drop an
+ * `unknown` branch from the join). So `If(d < 0, a, 5)` with an undeclared
+ * `a` is read through its arms, `a` and `5`, as the bare `a` would be, and
+ * `If(d < 0, a, 5) + z` still compiles.
  */
 export function isPossiblyCollectionTyped(expr: Expression): boolean {
   // Resolve a transparent alias BEFORE the top-type test, so an alias whose
   // body is a top type takes the application check like the bare spelling.
   const t = resolveTypeAlias(expr.type.type);
-  if (t === 'unknown' || t === 'any' || t === 'value') return isFunction(expr);
+  if (t === 'unknown' || t === 'any' || t === 'value') {
+    if (!isFunction(expr)) return false;
+    const arms = selectionArms(expr);
+    return arms === undefined || arms.some(selectionArmMayBeCollection);
+  }
   if (typeof t === 'string') return false;
   if (t.kind === 'broadcastable') return true;
   // A `broadcastable<…>` branch inside a union hides its collection-ness the
@@ -1826,6 +1837,29 @@ export function isPossiblyCollectionTyped(expr: Expression): boolean {
     const b = resolveTypeAlias(branch);
     return typeof b !== 'string' && b.kind === 'broadcastable';
   });
+}
+
+/** True when an arm of a top-typed selection may be a collection: an arm
+ * that IS one (a list literal, a symbol declared `list<number>`), an arm
+ * whose type is a union with a collection member (`number | list<number>`),
+ * or an arm that is possibly a collection by the rule of
+ * `isPossiblyCollectionTyped` (a top-typed application, a `broadcastable`
+ * type). A bare top-typed symbol is excluded, as that rule excludes it. */
+function selectionArmMayBeCollection(arm: Expression): boolean {
+  if (arm.isCollection || arm.type.matches(COLLECTION_SHAPE_TYPE)) return true;
+  if (unionMayHoldACollection(arm.type.type)) return true;
+  return isPossiblyCollectionTyped(arm);
+}
+
+/** The arms of a selection, or `undefined` when `expr` is not one: the two
+ * branches of an `If` (`If(c, a, b)`), and the values of a `Which`
+ * (`Which(c1, v1, c2, v2, …)`), which are its operands at the odd positions. */
+function selectionArms(
+  expr: Expression & FunctionInterface
+): ReadonlyArray<Expression> | undefined {
+  if (expr.operator === 'If') return expr.ops.slice(1, 3);
+  if (expr.operator === 'Which') return expr.ops.filter((_, i) => i % 2 === 1);
+  return undefined;
 }
 
 /**

@@ -1,3 +1,102 @@
+## [Unreleased]
+
+### Behavior Changes
+
+- **An integer operation under `.N()` reads an exact integer operand
+  exactly.** An operand at an `integer`-typed parameter was approximated to
+  the working precision before the handler read it as an integer, so
+  `DigitSum(2^1000).N()` was 84 (the digit sum of a 21-digit rounding) where
+  `evaluate()` gives 1366. Such an operand is now evaluated exactly under
+  `.N()`, and `.N()` agrees with `evaluate()`: `DigitSum(2^1000).N()` is 1366,
+  and `Binomial`, `Fibonacci`, `Factorial` and the other integer functions of
+  an exact argument give the exact integer under `.N()`. `Mod`, `GCD` and
+  `LCM`, whose parameters are real or open, read the operand as written when
+  its float stands for an exact integer: `Sum(Mod(n^n, 10^10), n, 1, 1000).N()`
+  is 4629110846700 (it was 646802592660), and `GCD(2^100, 6^50).N()` is `2^50`
+  (it was `3.02·10²³`). The integer predicates `IsPrime`, `IsComposite`,
+  `IsOdd` and `IsEven` read the operand as written too: `IsPrime(2^89 - 1).N()`
+  was `False` for that Mersenne prime. `Mod(2^(3^20), 7).N()` reduces the
+  written dividend modulo 7 without forming the integer, as `evaluate()` does;
+  it ended with an internal error after 45 seconds.
+
+- **`Mod` of exact radical literals is exact.** `Mod(√2, 1)` evaluates to
+  `√2 − 1`, as in Mathematica, and `Mod(√2·10^30, 7)` to
+  `√2·10^30 − 1414213562373095048801688724209`. Both operands were handed to
+  the float lane, which rounded the dividend to the working precision before
+  it reduced: `Mod(√2·10^30, 7)` evaluated to the exact integer `5` where the
+  value is 0.698…, and `Mod(√2, 1)` to a float. `.N()` still gives the float.
+
+- **Materializing a list keeps a lazy element as one element.** A `List`
+  asked to materialize (the `materialization` evaluation option, which the
+  `epsil --json` output uses) spliced the elements of a finite lazy element
+  into the outer list: `[map(x => x + 1, xs)]` with `xs = [1, 2]` printed
+  `["List", 2, 3]`, and `[[0], ...[map(…)]]` printed
+  `["List", ["List", 0], 2, 3]`. Each element is now materialized in place,
+  as the option's documentation says and as `Tuple` and `Set` already did:
+  `["List", ["List", 2, 3]]` and `["List", ["List", 0], ["List", 2, 3]]`.
+
+- **A lowered `Map` lambda keeps an error cell.** `Map(x ↦ Sqrt(x), [16, -4,
+  "banana", 81])` gave `[4, 2i, NaN, 9]`, while `Map(Sqrt, …)`, the
+  comprehension `[Sqrt(x) for x in …]` and `Apply` gave the `incompatible-type`
+  error for `"banana"`. The fast route that `Map` takes for a lambda that
+  applies one operator to its parameter treated an error result as a failed
+  step and wrote the absence marker in the cell. It now keeps the error value,
+  as the general lambda route has since 2026-09-03, so every spelling agrees.
+  An absent element (`Missing`) under a numeric lambda still gives `NaN`, and
+  under a text lambda the `incompatible-type` error that `ToUpperCase(Missing)`
+  gives.
+
+### Issues Resolved
+
+- **`GCD` and `LCM` of large integers were wrong.** The exact fold accumulated
+  in a machine number or a big decimal at the working precision, so
+  `GCD(2^100, 2^50)` was 2048 (the answer is `2^50`), `GCD(2^100, 6^50)` was
+  500000000000, and `LCM(2^60, 3^40)` was rounded. The fold now uses bigint
+  arithmetic at any magnitude. A float operand still takes the float lane.
+
+- **The type of `If` dropped a branch of type `unknown`.** `If(n = 0, s,
+  [1, 2])` with an untyped `s` was typed `vector<integer^2>`, so the inferred
+  signature of `f(n, s) = s if n == 0 else f(n - 1, [1, 2])` claimed that
+  result while `f(0, 5)` is `5`. The result is now `unknown`. A `Return`
+  branch, which yields no value in place, does not widen the result.
+
+- **`subs()` reaches into a dictionary.** `{"a" -> n + 1}.subs({n: 3})`
+  returned the dictionary unchanged; it is now `{"a" -> 4}`, as
+  `[n + 1].subs({n: 3})` is `[4]`.
+
+- **A function literal in a dictionary round-trips through LaTeX.**
+  `{"a" -> u ↦ u + 1}` was written as
+  `\operatorname{KeyValuePair}(\text{a}, u\mapsto u+1;)`, with the block
+  marker of a single-statement body, and parsing it back gave an
+  `incompatible-type` error. The dictionary's values are now serialized with
+  the caller's options, as a tuple's operands are, and the marker is gone.
+
+- **`map` over a list of functions applies each function.** `map(w => w(1),
+  [(a) => 0, (a) => a + 5])` stayed an unevaluated `Map`; it is now `[0, 6]`,
+  as the `for` loop over the same list already was. The fast route for a
+  one-call body evaluated `w(1)` outside the callback's scope, where `w` did
+  not hold the element.
+
+- **The index of a loop over a literal `Range` has a ranged type.**
+  `Loop(body, Element(j, Range(1, 100)))` typed `j` as a bare `integer`, while
+  `Sum(…, Limits(j, 1, 100))` typed it `integer<1..100>`. The loop index is
+  now `integer<1..100>` when both bounds are integer literals (a step and a
+  descending range included), so compiled `Mod(j, 3)` inside such a loop keeps
+  the plain `%` instead of the checked `_SYS.floorMod`.
+
+- **A `Loop` over a `Range` with a symbolic bound compiles.** `Loop(body,
+  Element(j, Range(1, k)))` failed to compile with "bounds must be finite
+  numbers": the counted-loop lowering read the bound at compile time. Such a
+  loop now takes the general for-each lowering, which reads the bounds at run
+  time. A shader target still declines it, with a message that names the
+  requirement (a single `Range` with integer literal bounds).
+
+- **`Map` with a lambda and a named operator agree on an absent element.**
+  `Map(x ↦ ToUpperCase(x), ["a", Missing, "b"])` gave `["A", Missing, "B"]`
+  typed `list<string>`, while `Map(ToUpperCase, …)` and `Apply(x ↦
+  ToUpperCase(x), Missing)` gave the `incompatible-type` error for the absent
+  element. Both spellings now give the error cell.
+
 ## 0.150.0 _2026-10-08_
 
 ### Behavior Changes

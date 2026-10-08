@@ -253,3 +253,78 @@ describe('Mod — non-integer modulus stays out of the ℤ/mℤ fast path', () =
     expect(ce.box(['Mod', 7, 2.5]).evaluate().re).toBeCloseTo(2, 10);
   });
 });
+
+describe('Mod — exact radical literal operands', () => {
+  // The evaluation of an operand folds `√2·10³⁰` into one exact literal
+  // (a rational times a radical) before the handler sees it. Such a pair of
+  // literals is neither rational (the integer and rational fast paths
+  // decline) nor a constant expression (`exactConstantModulo()` declines
+  // two literals), so it fell to the float lane, which rounds the dividend
+  // to the working precision before it reduces: `Mod(√2·10³⁰, 7)` was the
+  // exact integer `5`. The floor of the exact quotient now decides `k`, and
+  // the result is the exact `a − m·k`.
+  // Reference values (30-digit computation):
+  //   √2·10³⁰ mod 7 = 0.698078569671875376948…
+  //   (3√5/2) mod (1/3) = 0.0207686329163512112804…
+  test('a large radical dividend is reduced exactly', () => {
+    const e = ce.parse('\\operatorname{Mod}(\\sqrt{2}\\cdot 10^{30}, 7)');
+    expect(e.evaluate().json).toEqual([
+      'Add',
+      { num: '-1414213562373095048801688724209' },
+      ['Multiply', { num: '1e+30' }, ['Sqrt', 2]],
+    ]);
+    expect(e.N().re).toBeCloseTo(0.698078569671875376948, 14);
+  });
+
+  test('a literal dividend that is already folded, under .N()', () => {
+    const lit = ce.parse('\\sqrt{2}\\cdot 10^{30}').evaluate();
+    expect(ce.box(['Mod', lit, 7]).N().re).toBeCloseTo(
+      0.698078569671875376948,
+      14
+    );
+  });
+
+  test('the fractional part of √2 is the exact √2 − 1', () => {
+    expect(ce.box(['Mod', ['Sqrt', 2], 1]).evaluate().json).toEqual([
+      'Add',
+      -1,
+      ['Sqrt', 2],
+    ]);
+    expect(ce.box(['Mod', ['Negate', ['Sqrt', 2]], 1]).evaluate().json).toEqual(
+      ['Add', 2, ['Negate', ['Sqrt', 2]]]
+    );
+  });
+
+  test('the sign of the result follows the divisor', () => {
+    expect(ce.box(['Mod', ['Sqrt', 2], -1]).evaluate().json).toEqual([
+      'Add',
+      -2,
+      ['Sqrt', 2],
+    ]);
+  });
+
+  test('a radical divisor', () => {
+    expect(ce.box(['Mod', 7, ['Sqrt', 2]]).evaluate().json).toEqual([
+      'Add',
+      7,
+      ['Multiply', -4, ['Sqrt', 2]],
+    ]);
+    expect(ce.box(['Mod', ['Sqrt', 8], ['Sqrt', 2]]).evaluate().json).toBe(0);
+    expect(ce.box(['Mod', ['Sqrt', 2], ['Sqrt', 3]]).evaluate().json).toEqual([
+      'Sqrt',
+      2,
+    ]);
+  });
+
+  test('a rational times a radical, with a rational modulus', () => {
+    const e = ce.parse('\\operatorname{Mod}(\\frac{3\\sqrt{5}}{2}, \\frac{1}{3})');
+    expect(e.evaluate().N().re).toBeCloseTo(0.0207686329163512112804, 14);
+    expect(e.N().re).toBeCloseTo(0.0207686329163512112804, 14);
+  });
+
+  test('rational and float operands are unchanged', () => {
+    expect(ce.box(['Mod', ['Rational', 1, 2], ['Rational', 1, 3]]).evaluate().json).toEqual(['Rational', 1, 6]);
+    expect(ce.box(['Mod', 7.5, 2]).evaluate().json).toBe(1.5);
+    expect(ce.box(['Mod', -7, 3]).evaluate().json).toBe(2);
+  });
+});

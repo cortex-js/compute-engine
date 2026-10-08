@@ -319,6 +319,13 @@ export function lowerLevel(expr: Expression): LoweredLevel | undefined {
 
   if (!isFunction(body)) return undefined;
 
+  // A body whose head is a parameter (`w => w(1)` mapped over a list of
+  // functions) applies the ELEMENT, so it is not an operator application. The
+  // lowered path would evaluate `ce._fn('w', …)` in the ambient scope, where
+  // `w` does not hold the element, and the call would stay unevaluated. The
+  // general path binds the parameter to the element and applies it.
+  if (names.includes(body.operator)) return undefined;
+
   // Scope safety. The general path runs the body inside a FRESH function
   // frame; the lowered path evaluates the application in the AMBIENT scope. A
   // body whose head WRITES scope (`Assign`, `Declare`, `Assume`) would

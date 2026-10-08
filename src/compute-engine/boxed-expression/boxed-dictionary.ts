@@ -6,6 +6,8 @@ import type {
   Metadata,
   DictionaryInterface,
   EvaluateOptions,
+  Substitution,
+  CanonicalOptions,
 } from '../global-types.js';
 
 import { _BoxedExpression } from './abstract-boxed-expression.js';
@@ -509,6 +511,26 @@ export class BoxedDictionary
 
   get values(): Expression[] {
     return Object.values(this._keyValues);
+  }
+
+  /** Substitute in every value. A dictionary whose values do not change is
+   * returned as it is; otherwise a new dictionary is built with the same
+   * keys, in the same order. Without this, the base `subs()` returned the
+   * receiver, and `{"a" -> n + 1}.subs({n: 3})` was `{"a" -> n + 1}` while
+   * `[n + 1].subs({n: 3})` is `[4]`. A dictionary is always canonical, so
+   * the values are substituted in their own form (canonical). */
+  override subs(
+    sub: Substitution,
+    options?: { canonical?: CanonicalOptions }
+  ): Expression {
+    const entries = Object.entries(this._keyValues);
+    const values = entries.map(([, v]) => v.subs(sub, options));
+    if (values.every((v, i) => v === entries[i][1])) return this;
+    const ce = this.engine;
+    const pairs = entries.map(([k], i) =>
+      ce._fn('KeyValuePair', [ce.string(k), values[i]])
+    );
+    return new BoxedDictionary(ce, ce._fn('Dictionary', pairs));
   }
 
   override evaluate(options?: Partial<EvaluateOptions>): Expression {

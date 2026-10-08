@@ -11,7 +11,10 @@ import {
   withEvaluationEffects,
 } from '../effects-registry.js';
 import { checkConditions } from '../boxed-expression/rules.js';
-import { indexingSetSites } from '../boxed-expression/binding-sites.js';
+import {
+  indexingSetSites,
+  rangeElementIndexType,
+} from '../boxed-expression/binding-sites.js';
 import {
   collectTuplePattern,
   tuplePatternNames,
@@ -55,6 +58,7 @@ import {
 } from '../../common/interruptible.js';
 import type {
   Expression,
+  OperandDescriptor,
   OperandStructure,
   SymbolDefinitions,
   OperatorDefinition,
@@ -257,6 +261,27 @@ export const BLOCK_DEFINITION: OperatorDefinition = {
   evaluateAsync: evaluateBlockAsync,
 };
 
+/**
+ * True when the branch of a conditional is a bare symbol whose type is not
+ * known (an untyped parameter `s`). Such a branch makes the result of the
+ * conditional `unknown`: `widen` drops `unknown` from a join, so
+ * `If(n = 0, s, [1, 2])` claimed `vector<integer^2>` while `f(0, 5)` with
+ * `f(n, s) = s if n == 0 else f(n - 1, [1, 2])` is `5`.
+ *
+ * Only a SYMBOL counts. An application typed `unknown` keeps the join of the
+ * other branches, for two reasons. A `Return` branch yields no value in
+ * place (it leaves the enclosing function), so `If(c, Return(1), 2)` is an
+ * `integer` where it is read. And a recursive call `f(n - 1)` reads the
+ * signature of `f` while that signature is derived, where its result is the
+ * placeholder `unknown`: the join of the other branches is the seed of the
+ * fixpoint, and `f(n) = If(n = 0, 1, f(n - 1))` is typed `integer` through
+ * it. A symbol's `unknown` is not a placeholder: nothing refines it later
+ * at this site.
+ */
+function untypedSymbolArm(branch: OperandDescriptor): boolean {
+  return branch.type === 'unknown' && branch.structureOf?.()?.kind === 'symbol';
+}
+
 export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
   {
     // A condition expression tests for one or more conditions of an expression.
@@ -355,6 +380,8 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
             }),
             context.engine._typeResolver
           );
+        if (untypedSymbolArm(ifTrue) || untypedSymbolArm(ifFalse))
+          return BoxedType.forResult('unknown', context.engine._typeResolver);
         return BoxedType.forResult(
           widen(ifTrue.type, ifFalse.type),
           context.engine._typeResolver
@@ -976,7 +1003,11 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         }
         if (arms.length === 0)
           return BoxedType.forResult('missing', context.engine._typeResolver);
-        const armType = widen(...arms.map((x) => x.type));
+        // An untyped symbol among the values makes the result unknown, as
+        // for `If` (`untypedSymbolArm`).
+        const armType = arms.some(untypedSymbolArm)
+          ? 'unknown'
+          : widen(...arms.map((x) => x.type));
         if (dflt >= 0)
           return BoxedType.forResult(armType, context.engine._typeResolver);
         return BoxedType.forResult(
@@ -2845,8 +2876,24 @@ function canonicalLoopLike(
     // be narrowed by an assumption, and the index binding this write creates is
     // a contract that must not carry a fact the next statement can retract.
     let patternError: Expression | undefined;
+    // The index of a `Loop` over a range with integer literal bounds
+    // (`Element(j, Range(1, 100))`) is typed `integer<1..100>`, not the bare
+    // `integer` element type of the range, as the index of a `Sum` over
+    // `Limits(j, 1, 100)` is. The bounded type lets a compiled `Mod(j, 3)` in
+    // the body use the plain `%` operator instead of the checked helper.
+    // A `Comprehension` index is not changed: its body type becomes the
+    // element type of the list it returns, so a ranged index would also
+    // change the type of that list (`list<integer<1..100>>`).
+    const rangeIndex =
+      head === 'Loop'
+        ? rangeElementIndexType(idxCanonical, collCanonical, ops)
+        : undefined;
     const currentElementType = (): Type | undefined =>
-      collectionElementType(resolveTypeForCompilation(collCanonical.type.type));
+      rangeIndex !== undefined
+        ? parseType(rangeIndex)
+        : collectionElementType(
+            resolveTypeForCompilation(collCanonical.type.type)
+          );
     // Bind the index (or each leaf of a destructuring pattern) from the
     // element type `elt` through `bindOne`. The leaves are looked up in the
     // scope current NOW, since the second read (below) runs outside it.

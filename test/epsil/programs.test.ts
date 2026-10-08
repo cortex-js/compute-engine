@@ -510,14 +510,19 @@ let sol = Solve([x + y == 3, x - y == 1], [x, y])
     expect(text).toBe('([(2, 1)], 2)');
   });
 
-  test('errors are values: a bad element becomes NaN, the aggregate survives', () => {
-    // "banana" is out of Sqrt's domain, so its slot materializes as NaN while
-    // the valid inputs still compute — the Map never throws.
+  test('errors are values: a bad element becomes an Error, the aggregate survives', () => {
+    // "banana" is out of Sqrt's domain, so its slot holds the
+    // `incompatible-type` error while the valid inputs still compute —
+    // the Map never throws. It is not `NaN`: the lowered lambda route
+    // now keeps an Error result as the cell's value, as the general
+    // route has since 2026-09-03.
     const { text, diagnostics } = run(`
 let inputs = [16, -4, "banana", 81]
 Map(x => Sqrt(x), inputs)`);
     expect(diagnostics).toEqual([]);
-    expect(text).toBe('[4,2i,NaN,9]');
+    expect(text).toBe(
+      '[4,2i,Error(ErrorCode("incompatible-type", "complex | infinity", "string"), "banana"),9]'
+    );
   });
 });
 
@@ -607,6 +612,33 @@ let b = makeCounter()
 [a(), a(), b(), a()]`);
     expect(diagnostics).toEqual([]);
     expect(text).toBe('[1,2,1,3]');
+  });
+});
+
+describe('EPSIL PROGRAMS — a list of functions applied by name', () => {
+  // Each element of the list is a function. The comprehension, `map` and the
+  // `for` loop bind the name to one element at a time and apply it.
+  const FNS = '[(a) => 0, (a) => a + 5]';
+
+  test.each([
+    ['a comprehension', `[q(1) for q in ${FNS}]`],
+    ['map', `map(w => w(1), ${FNS})`],
+    ['map with the list in a variable', `let fs = ${FNS}\nmap(w => w(1), fs)`],
+    ['map in a function body', `g(xs) = map(w => w(1), xs)\ng(${FNS})`],
+    [
+      'a for loop',
+      `let out = []\nfor fn in ${FNS} { out = [...out, fn(1)] }\nout`,
+    ],
+  ])('%s gives [0, 6]', (_, source) => {
+    const { text, diagnostics } = run(source);
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('[0,6]');
+  });
+
+  test('map applies a library function held by the parameter', () => {
+    const { text, diagnostics } = run('map(w => w(0), [sin, cos])');
+    expect(diagnostics).toEqual([]);
+    expect(text).toBe('[0,1]');
   });
 });
 

@@ -323,6 +323,16 @@ export function makeSpineRunner(
           }
         }
       }
+      // A level whose operator evaluated to an `Error` value answers with
+      // that error, as the general route does: `makeLambda` gives the error
+      // its body produced as the value of the application
+      // (`bodyResultValue()` in `function-utils.ts`). Read as a level
+      // failure instead, the error was replaced by the absence marker, so
+      // `Map(x ↦ ToUpperCase(x), ["a", Missing])` held `Missing` where
+      // `Map(ToUpperCase, ["a", Missing])` holds the `incompatible-type`
+      // error.
+      if (err === undefined && v !== undefined && v.isValid === false)
+        err = errorValue(v);
       if (err !== undefined) {
         // Bubbled, not a level FAILURE: the error is the element's value on
         // both routes (the iterator emits it, `at()` returns it), so it must

@@ -920,7 +920,12 @@ describe('admissible element types (ruling 4, widened 2026-08-09)', () => {
       'let inputs = [16, -4, "banana", 81]\nMap(x => Sqrt(x), inputs)'
     );
     expect(diagnostics).toEqual([]);
-    expect(value?.toString()).toBe('[4,2i,NaN,9]');
+    // "banana" is the `incompatible-type` error of `Sqrt`, not `NaN`:
+    // the lowered lambda route now keeps an Error result as the cell's
+    // value, as the general route has since 2026-09-03.
+    expect(value?.toString()).toBe(
+      '[4,2i,Error(ErrorCode("incompatible-type", "complex | infinity", "string"), "banana"),9]'
+    );
   });
 
   test('an ABSTRACT supertype (`scalar`) is not evidence', () => {

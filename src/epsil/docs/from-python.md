@@ -309,7 +309,7 @@ not abort the rest of the work:
 
 ```epsil
 map(x => sqrt(x), [16, -4, "banana", 81])
-// ➔ [4, 2i, NaN, 9]
+// ➔ [4, 2i, Error(ErrorCode("incompatible-type", "complex | infinity", "string"), "banana"), 9]
 ```
 
 Note also `sqrt(-4)` → `2i` rather than a `ValueError`: the engine works over

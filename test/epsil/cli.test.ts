@@ -175,6 +175,26 @@ describe('Epsil CLI LaTeX', () => {
     expect(JSON.parse(json.stdout())).toEqual(['Multiply', 2, ['Sqrt', 2]]);
   });
 
+  test('--json keeps a lazy element of a list literal nested', async () => {
+    // The `--json` output materializes the value. A lazy element (here a
+    // `Map`) is ONE element of the list, so it must become a nested list,
+    // not be spliced into the outer list.
+    const cases: [string, unknown][] = [
+      ['let xs = [1, 2]\n[map(x => x + 1, xs)]', ['List', ['List', 2, 3]]],
+      [
+        'let xs = [1, 2]\n[[0], ...[map(x => x + 1, xs)]]',
+        ['List', ['List', 0], ['List', 2, 3]],
+      ],
+      ['[Range(1, 3), 4]', ['List', ['List', 1, 2, 3], 4]],
+    ];
+    for (const [source, expected] of cases) {
+      const { io, stdout, stderr } = makeIo();
+      expect(await main(['--json', '-e', source], io)).toBe(0);
+      expect(stderr()).toBe('');
+      expect(JSON.parse(stdout())).toEqual(expected);
+    }
+  });
+
   test('reports a LaTeX parse error, quoting the LaTeX', async () => {
     const { io, stdout, stderr } = makeIo();
     expect(await main(['--from', 'latex', '-e', '1+'], io)).toBe(1);

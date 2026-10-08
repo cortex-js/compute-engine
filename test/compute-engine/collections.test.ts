@@ -1726,11 +1726,14 @@ describe('MATERIALIZATION PRESERVES STRUCTURAL ELEMENTS (enlist regression)', ()
     expect(e.json).toEqual(['List', ['List', 1, 2], 3]);
   });
 
-  test('materialization splices a finite lazy sub-collection (Range)', () => {
+  test('materialization keeps a finite lazy sub-collection (Range) as one element', () => {
+    // `List(Range(1, 3))` has the count 1: its one element is the range.
+    // Materializing it must not change the count, so the range becomes a
+    // nested list, as it does in a `Tuple` or a `Set`.
     const e = engine
       .box(['List', ['Range', 1, 3]])
       .evaluate({ materialization: true });
-    expect(e.json).toEqual(['List', 1, 2, 3]);
+    expect(e.json).toEqual(['List', ['List', 1, 2, 3]]);
   });
 
   test('materialization keeps an infinite lazy child as an element (no deadline burn)', () => {

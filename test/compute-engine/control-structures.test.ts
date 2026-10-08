@@ -139,6 +139,57 @@ describe('CONTROL STRUCTURES', () => {
       ] as any);
       expect(loop3.ops![1].ops![0].type.matches('integer')).toBe(true);
     });
+
+    it('a loop index over a Range with integer literal bounds has a ranged type', () => {
+      // The index of `Element(j, Range(a, b))` is typed `integer<a..b>`, as
+      // the index of `Sum(…, Limits(j, a, b))` is. The type is read on the
+      // index inside the body.
+      const indexType = (range: unknown, body: unknown = ['Mod', 'j', 3]) => {
+        const eng = new ComputeEngine();
+        eng.declare('n', 'integer');
+        const loop = eng.box(['Loop', body, ['Element', 'j', range]] as any);
+        return loop.op1.op1.type.toString();
+      };
+      expect(indexType(['Range', 1, 100])).toBe('integer<1..100>');
+      // Every element of a range is between its two bounds, also with a
+      // step and when the range counts down.
+      expect(indexType(['Range', 1, 100, 2])).toBe('integer<1..100>');
+      expect(indexType(['Range', 100, 1, -1])).toBe('integer<1..100>');
+      expect(indexType(['Range', 5, 1])).toBe('integer<1..5>');
+      expect(indexType(['Range', 1, 'PositiveInfinity'])).toBe('integer<1..>');
+      // A symbolic bound can be reassigned later: the index stays `integer`.
+      expect(indexType(['Range', 1, 'n'])).toBe('integer');
+      // A step that goes away from the upper bound gives an empty range.
+      expect(indexType(['Range', 1, 100, -1])).toBe('integer');
+      // A bound that is not an integer gives non-integer elements, and the
+      // index keeps the element type of the range (`real`), even when the
+      // machine value of the bound is an integer: `(10^20 - 1)/10^20` reads
+      // as the double 1, and the first element of that range is below 1.
+      expect(indexType(['Range', ['Rational', 1, 2], 2])).toBe('real');
+      expect(
+        indexType([
+          'Range',
+          ['Rational', { num: '99999999999999999999' }, { num: '1e20' }],
+          2,
+        ])
+      ).toBe('real');
+      expect(indexType(['Range', 1, 10, ['Rational', 1, 2]])).toBe('real');
+      // A body that assigns the index can move it outside the range.
+      expect(
+        indexType(
+          ['Range', 1, 100],
+          ['Block', ['Assign', 'j', ['Add', 'j', 200]], ['Mod', 'j', 3]]
+        )
+      ).toBe('integer');
+      // A `Comprehension` index keeps the element type of the range.
+      const eng = new ComputeEngine();
+      const comp = eng.box([
+        'Comprehension',
+        ['Mod', 'j', 3],
+        ['Element', 'j', ['Range', 1, 100]],
+      ] as any);
+      expect(comp.op1.op1.type.toString()).toBe('integer');
+    });
   });
 
   describe('If', () => {

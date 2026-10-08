@@ -181,6 +181,7 @@ import {
   widenNumericCellsWithNan,
   widenWithNan,
   signatureSlotType,
+  signatureArms,
 } from '../../common/type/utils.js';
 import { NumericValue } from '../numeric-value/types.js';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
@@ -5216,7 +5217,19 @@ export class BoxedFunction
       // Without `materialization`: that option describes the result, and a
       // lazy operand must reach the handler in its lazy form
       // (`operandOptions`).
-      const tail = holdMap(this, (x) => x.evaluate(operandOptions(options)));
+      // Under `.N()`, an operand at an `integer`-typed parameter is evaluated
+      // EXACTLY (`exactIntegerOperand()`): the handler reads such an operand
+      // as an integer, and the float of a large one is rounded to the
+      // working precision before it is read, so `DigitSum(2^1000).N()` gave
+      // 84 where the digit sum is 1366.
+      const exactIntegerAt = numericApproximation
+        ? integerParameterPositions(def)
+        : undefined;
+      const tail = holdMap(this, (x, index) =>
+        exactIntegerAt !== undefined && exactIntegerAt(index)
+          ? exactIntegerOperand(x, options)
+          : x.evaluate(operandOptions(options))
+      );
 
       //
       // 4-err/ An operand has now evaluated to an error — either one held
@@ -6307,9 +6320,15 @@ export class BoxedFunction
 
       // Resolve all the operand promises. Without `materialization`, as on
       // the sync route's step 4 (`operandOptions`).
-      const tail = await holdMapAsync(
-        this,
-        async (x) => await x.evaluateAsync(operandOptions(options))
+      // An operand at an `integer`-typed parameter is evaluated exactly
+      // under `.N()`, as on the sync route's step 4 (`exactIntegerOperand()`).
+      const exactIntegerAt = numericApproximation
+        ? integerParameterPositions(def)
+        : undefined;
+      const tail = await holdMapAsync(this, async (x, index) =>
+        exactIntegerAt !== undefined && exactIntegerAt(index)
+          ? await exactIntegerOperandAsync(x, options)
+          : await x.evaluateAsync(operandOptions(options))
       );
 
       //
@@ -11003,6 +11022,148 @@ function operandOptions(
   if (options === undefined || (options.materialization ?? false) === false)
     return options;
   return { ...options, materialization: false };
+}
+
+/** Memoized per SIGNATURE TYPE object, as `BROADCAST_SLOT_PLANS` is: the
+ * positions are a pure function of the declared signature. `null` records
+ * "no `integer` parameter", the common answer. */
+const INTEGER_PARAMETER_POSITIONS = new WeakMap<
+  object,
+  ((index: number) => boolean) | null
+>();
+
+/**
+ * The test "is the parameter at this position declared `integer` (or a
+ * subtype) in EVERY arm of the signature of `def`", or `undefined` when no
+ * position is. A position past the required and optional parameters reads
+ * the variadic parameter. A signature with no parameter types (the bare
+ * `function` type, an inferred lambda with unknown parameters) has no such
+ * position. The position `-1`, which `holdMap()` gives to an operand lifted
+ * out of a nested application of an associative operator, is never an
+ * integer position.
+ *
+ * Under `.N()`, the operands at these positions are evaluated exactly
+ * (`exactIntegerOperand()`): the handler reads them as integers, and a
+ * float that was rounded to the working precision does not hold the
+ * integer it stands for.
+ */
+function integerParameterPositions(
+  def: BoxedOperatorDefinition
+): ((index: number) => boolean) | undefined {
+  const sig = def.signature?.type;
+  if (sig === undefined || typeof sig === 'string') return undefined;
+  const memo = INTEGER_PARAMETER_POSITIONS.get(sig);
+  if (memo !== undefined) return memo ?? undefined;
+  const arms = signatureArms(sig);
+  const typeAt = (arm: FunctionSignature, i: number): Type | undefined => {
+    const required = arm.args?.length ?? 0;
+    if (i < required) return arm.args![i].type;
+    const optional = arm.optArgs?.length ?? 0;
+    if (i < required + optional) return arm.optArgs![i - required].type;
+    return arm.variadicArg?.type;
+  };
+  const isIntegerAt = (i: number): boolean =>
+    arms !== undefined &&
+    arms.length > 0 &&
+    arms.every((arm) => {
+      const t = typeAt(arm, i);
+      return t !== undefined && isSubtype(t, 'integer');
+    });
+  // The longest positional list of the arms bounds the positions to test;
+  // a variadic parameter extends the last position to every later one.
+  const width = Math.max(
+    0,
+    ...(arms ?? []).map(
+      (arm) =>
+        (arm.args?.length ?? 0) +
+        (arm.optArgs?.length ?? 0) +
+        (arm.variadicArg !== undefined ? 1 : 0)
+    )
+  );
+  const positions: boolean[] = [];
+  for (let i = 0; i < width; i++) positions.push(isIntegerAt(i));
+  const variadic =
+    arms !== undefined &&
+    arms.length > 0 &&
+    arms.every((arm) => arm.variadicArg !== undefined) &&
+    positions[width - 1] === true;
+  const result = positions.some((x) => x)
+    ? (index: number) =>
+        index < 0
+          ? false
+          : index < positions.length
+            ? positions[index]
+            : variadic
+    : null;
+  INTEGER_PARAMETER_POSITIONS.set(sig, result);
+  return result ?? undefined;
+}
+
+/**
+ * Under `.N()`, the value of the operand `x` at an `integer`-typed
+ * parameter. The operand is evaluated ONCE, exactly. When the result is a
+ * number literal, or a `List` or `Tuple` literal whose elements are all
+ * number literals, it is returned as it is. Otherwise the numeric
+ * approximation of that result is returned, as for any other operand.
+ *
+ * The handler reads such an operand as an integer (`toBigint`), and the
+ * float of a large integer is rounded to the working precision before it
+ * is read: `DigitSum(2^1000).N()` read the 302-digit operand at 21 digits
+ * and gave 84 where the digit sum is 1366. An exact evaluation gives the
+ * integer the handler needs; a float operand (`DigitSum(1234.0)`) is a
+ * number literal too and is returned as it is. A list of number literals is
+ * kept exact for the same reason: an operator that broadcasts over a list at
+ * an integer parameter reads each element as an integer. A result that
+ * stays symbolic (an unknown, an exact constant the handler cannot read) is
+ * approximated numerically, so that an operator with a numeric fallback
+ * keeps its answer.
+ *
+ * The numeric approximation is computed from the exact RESULT, not from the
+ * written operand: evaluating the operand a second time would repeat its
+ * effects (an assignment in a `Block`, a `Print`, a user operator with side
+ * effects) and would cost a second evaluation.
+ */
+function exactIntegerOperand(
+  x: Expression,
+  options: Partial<EvaluateOptions> | undefined
+): Expression {
+  const exact = x.evaluate({
+    ...(operandOptions(options) ?? {}),
+    numericApproximation: false,
+  });
+  if (isExactIntegerOperandValue(exact)) return exact;
+  return exact.evaluate({
+    ...(operandOptions(options) ?? {}),
+    numericApproximation: true,
+  });
+}
+
+/** The asynchronous twin of `exactIntegerOperand()`: one exact evaluation,
+ * then the numeric approximation of its result when it is not kept. */
+async function exactIntegerOperandAsync(
+  x: Expression,
+  options: Partial<EvaluateOptions> | undefined
+): Promise<Expression> {
+  const exact = await x.evaluateAsync({
+    ...(operandOptions(options) ?? {}),
+    numericApproximation: false,
+  });
+  if (isExactIntegerOperandValue(exact)) return exact;
+  return await exact.evaluateAsync({
+    ...(operandOptions(options) ?? {}),
+    numericApproximation: true,
+  });
+}
+
+/** True when `x`, the exact value of an operand at an `integer`-typed
+ * parameter, is passed to the handler as it is: a number literal, or a
+ * `List` or `Tuple` literal whose elements are all number literals. */
+function isExactIntegerOperandValue(x: Expression): boolean {
+  if (isNumber(x)) return true;
+  return (
+    (isFunction(x, 'List') || isFunction(x, 'Tuple')) &&
+    x.ops.every((op) => isNumber(op))
+  );
 }
 
 /**

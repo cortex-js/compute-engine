@@ -5513,10 +5513,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     canonical: canonicalList,
     lazy: true,
     evaluate: (ops, { engine, numericApproximation, materialization }) => {
-      // Eager materialization: flatten and materialize lazy sub-collections.
+      // Eager materialization: materialize each element. A lazy element (a
+      // `Range`, a `Map`) stays one element and becomes a nested list.
       if (materialization) {
         const items = enlist(ops);
-        if (items === undefined) return undefined;
         return engine._fn(
           'List',
           // `Nothing` is an ERASURE marker: an element that *evaluates* to
@@ -5578,11 +5578,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         }
         return result;
       };
-      if (materialization) {
-        const items = enlist(ops);
-        if (items === undefined) return undefined;
-        return engine._fn('List', await evaluated(items));
-      }
+      if (materialization)
+        return engine._fn('List', await evaluated(enlist(ops)));
       if (
         ops.every((op) => isEvaluatedElement(op, numericApproximation ?? false))
       )
@@ -17483,18 +17480,18 @@ function computeSliceBounds(
 }
 
 /**
+ * Splice the `Sequence` operands of a list literal into the list, and drop
+ * its `Nothing` operands.
  *
- * Flatten an array of BoxedExpressions (possibly lazy collections),
- * handling Sequence and Nothing
- *
- * Return `undefined` when a finite lazy sub-collection has elements that
- * cannot be computed (`Linspace(a, 1, 3)` with a symbolic `a`). Such a
- * collection cannot be spread, and it is not one element either, so the
- * caller must leave the list unevaluated.
+ * A collection operand (lazy or eager) is ONE element of the list, and stays
+ * one element: `List(Range(1, 3))` has the count 1, so materializing it gives
+ * `[[1, 2, 3]]`, not `[1, 2, 3]`. The caller materializes each element with
+ * the same options. This is also what `Tuple` and `Set` do with a collection
+ * element.
  *
  */
 
-function enlist(xs: ReadonlyArray<Expression>): Expression[] | undefined {
+function enlist(xs: ReadonlyArray<Expression>): Expression[] {
   if (xs.length === 0) return [];
 
   const result: Expression[] = [];
@@ -17514,28 +17511,12 @@ function enlist(xs: ReadonlyArray<Expression>): Expression[] | undefined {
     // }
 
     if (isFunction(x, 'Sequence')) {
-      const items = enlist([...x.ops]);
-      if (items === undefined) return undefined;
-      result.push(...items);
+      result.push(...enlist([...x.ops]));
     } else if (isString(x)) {
       // A string is a collection (of strings), but we don't want to iterate it recursively
       // if (s === undefined) s = '';
       // s += x.string;
       result.push(x);
-    } else if (x.isLazyCollection && isWalkableFiniteCollection(x)) {
-      // Only flatten and materialize finite lazy sub-collections (e.g. a
-      // `Range`). Eager literals (a `Tuple`, a nested `List`) are structural
-      // elements and must be preserved as-is; an infinite lazy child (e.g. a
-      // `Cycle`) is kept as an element rather than spread (which would burn
-      // the evaluation deadline).
-      const items = enlist([...x.each()]);
-      if (items === undefined) return undefined;
-      result.push(...items);
-    } else if (x.isLazyCollection && x.isFiniteCollection === true) {
-      // A finite lazy sub-collection whose elements cannot be computed: it
-      // has `count` elements, so keeping it as one element gives a list with
-      // the wrong length.
-      return undefined;
     } else {
       result.push(x);
     }

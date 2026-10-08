@@ -203,12 +203,14 @@ describe('operators that decide membership or splice elements', () => {
     expect(evaluate(['When', ['Set', 1, 2], ['List', 'True', 'False']])).toBe(
       '[1,NaN]'
     );
+    // The range is one element of the list, so it materializes as a nested
+    // list (it is not spliced into the outer list).
     expect(
       ce
         .box(['List', 1, ['Range', 1, 3]])
         .evaluate({ materialization: true })
         .toString()
-    ).toBe('[1,1,2,3]');
+    ).toBe('[1,[1,2,3]]');
   });
 });
 

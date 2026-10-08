@@ -109,6 +109,71 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
+### The default `auto` mode puts a real-valued plot kernel on the complex lane at 23 times the per-sample cost (OPEN, decision — found 2026-10-08 by the review of the Tycho codegen audit of CE 0.149.0)
+
+Under the default `auto` mode the JavaScript target promotes an unknown-sign
+`Sqrt`, `Ln` or `Log` through the complex kernels, and every value that
+depends on it then runs on the complex lane. Measured on the Voronoi showcase
+row `{F(x,y) < 0.0008: 0, B(x,y) > 1.3: 0, 0.12 + 0.8 H(x,y)}` (sites
+`p(k) = 1.45 √((k − 0.5)/16) cos(2.4k) + …`, `k` an integer from 1 to 16):
+the default mode emits 52 KB with 205 complex literals and runs at about
+1 540 µs per sample; `mode: 'strict'` emits 14 KB and runs at about 66 µs
+per sample, with the same values at the sampled points (probe
+`build/probe-voronoi-full.mts`, gitignored). The Joukowsky airfoil
+(`s(x,y) = √((m + u)/2)`, non-negative by construction but not provably so),
+the exoplanet transit, and about ten other documents of the Tycho corpus
+carry the same shape; the digest cannot count them because it does not
+record `mode`, `promoted` or `escalation`. Three ways to close it, which are
+not exclusive: (1) Tycho passes `mode: 'strict'` for plot sampling, which is
+the Desmos reading (a square root of a negative number is undefined), and
+keeps `auto` for the colour lane that needs complex intermediates; under
+`strict` a genuinely complex row (`Mandelbrot(x + iy)`, `|x + iy|`,
+`(x + iy)^a`) still compiles, and only an ordering comparison over a
+complex-typed operand declines; (2) a declared real result (`-> real`) for
+a body with a promotable head selects the real lane for that body instead
+of declining with "the value is complex, but its ascribed type `real` says
+it is real" (the decline is `Typed`, javascript-target.ts), so a host whose
+functions are real by definition can say so per function; (3) the sign
+proofs below remove the promotion where it is provable. The choice between
+(1) and (2) is the user's: (1) is a one-line policy change on the Tycho
+side, (2) is a semantics change of the ascription decline.
+
+### A ranged parameter type does not reach the sign proof of a compiled user-function body (OPEN, small — found 2026-10-08 by the review of the Tycho codegen audit)
+
+With `p` declared `(integer<1..16>) -> unknown` and assigned
+`k ↦ √((k − 0.5)/16)`, the call `p(x)` types `real`, but the compiled body
+is `_SYS.csqrt({ re: 0.0625 * (k - 0.5), im: 0 })` under `auto`
+(`promoted: true`), while the same radicand over a symbol declared
+`integer<1..16>` compiles to `Math.sqrt(0.0625 * (x - 0.5))`. The body is
+compiled with its parameters typed as the lambda wrote them, not as the
+declared signature narrows them (`lowering.define` in base-compiler.ts takes
+`parameterTypes` only from a call-site specialization). Two sources of
+range evidence should reach the promotion verdict
+(`promotesRadicalToComplex`): the declared parameter type, and the join of
+the argument types at every call site of the compilation unit (a `Sum`
+index `integer<1..16>`, a literal after a `Sum` unroll). The comprehension
+index `[D(x, y, k) for k = [1...16]]` has no ranged type either (the
+comprehension types `list<complex>` for the Voronoi body), which is the same
+gap as the loop-index entry below for `Loop`. This is the whole cause of the
+Voronoi promotion above, and does not cover the Joukowsky case.
+
+### interval-js recomputes the all-constant subterms of an unrolled sum inside a compiled user-function body (OPEN, small — found 2026-10-08 by the review of the Tycho codegen audit)
+
+`B(c, k) = Σ_{n=1}^{3} ((n − 0.5)/40)(1 − k(1 − √(1 − ((n − 0.5)/40)²))) S((n − 0.5)/40, c)`
+compiles on `javascript` to one literal per constant
+(`-(k * 0.00007812805199625128) + 1`), but on `interval-js` the body of
+`_fn_B` holds, per term and per call, a closure
+`(() => { const _cse1 = _k4; const _cse2 = _IA.scaleDiv(_cse1, _k5); return … _IA.sub(_k3, _IA.sqrt(_IA.sub(_k3, _IA.square(_cse2)))) … })()`
+whose every operand is a preamble constant (probe `build/probe-fnfold.mts`).
+The same sum at the top level folds (`_k3 = { lo: 0.0000781…, hi: … }`), so
+the fold (`foldConstantIntervalCode`, interval-javascript-target.ts) runs
+for the root but not for a term inside a user-function body once the CSE
+harvest has bound the constant to a `_cse` name. Tycho's exoplanet transit
+kernel `_fn_B` carries 40 such terms (13.8 KB of preamble), so each call
+recomputes 40 interval square roots of constants. A CSE binding whose
+operands are all preamble constants should be folded to a preamble constant
+itself.
+
 ### A user function, a relation and most other lazy heads still run their operands synchronously under `evaluateAsync` (OPEN, design decision — issue #392, found 2026-10-07)
 
 `N`, `Add`, `Multiply`, `Evaluate` and `ReleaseHold` now have an
@@ -191,7 +256,7 @@ frame and draw live at each read. A fix needs a rule for which eager
 operators store an operand in their result; it is a separate change from the
 lazy-view rule.
 
-### A host value that is not a collection reaches a compiled `Sum` over a `missing | list<number>` parameter as a JavaScript error (OPEN, small — found 2026-10-07 by the compiled-entry string refusal)
+### A host value that is not a collection reaches a compiled `Sum` over a `missing | list<number>` parameter as a JavaScript error (OPEN, decision — found 2026-10-07 by the compiled-entry string refusal; conflict found 2026-10-08)
 
 With `S: missing | list<number>`, compiled `Sum(S)` of the number 5 throws
 `_tv1.reduce is not a function`. The value is not of the declared type, so a
@@ -199,6 +264,19 @@ refusal is right, but the entry check does not cover a union of `missing`
 and a collection, and the error names a generated variable instead of the
 parameter. The entry check should refuse the value with the diagnostic it
 gives for a string (`stringRefusedEntryType`, `javascript-target.ts`).
+
+A refusal of every present value that is not an array conflicts with a rule
+that tests lock in (`compile-list-entry.test.ts`, "keeps the runtime-shape
+projection of a scalar on a list binding"): a binding declared `list<number>`
+and bound to the number 5 is NOT refused at entry, and `Add(S, 1)` gives 6,
+because the lowerings dispatch on the run-time shape and a narrower
+declaration is not enforced. The same number 5 for `S: missing |
+list<number>` fails inside the body instead. Decision needed: (a) keep the
+run-time-shape rule and only replace the body's JavaScript error with a
+diagnostic that names the binding, or (b) refuse a present value that is not
+an array for every binding that the compiled code reads as an array (the
+`strings` set of the entry plan), which changes the locked-in rule. Until
+decided, nothing changes.
 
 ### The rounding margin of a float contour or integrand is not a strict bound on the pole position (OPEN, design — found 2026-10-07 by the contour integration review)
 
@@ -224,16 +302,6 @@ antiderivative. Extending the residue route needs a rule for a pole whose
 imaginary part is within the rounding of 0, because the float can move the
 pole onto or off the real axis.
 
-### The type of `If` drops a branch of type `unknown` (OPEN, small — found 2026-10-08 by the self-call collection evidence review)
-
-`If(n = 0, s, [1, 2])` with an untyped `s` is typed `vector<integer^2>`: the
-branch whose type is `unknown` is dropped instead of widening the result. So
-the inferred signature of `f(n, s) = s if n == 0 else f(n - 1, [1, 2])` claims
-the result `vector<integer^2>`, while `f(0, [0.5])` is a `vector<real^1>` and
-`f(0, 5)` is `5`. The value is right; only the static type is wrong. The
-result of a conditional with an `unknown` branch should be `unknown` (or the
-union with `unknown`), as for any other operator.
-
 ### A forwarding caller of a value-held recursive function does not learn its collection parameter (OPEN, small — found 2026-10-08 by the self-call collection evidence review)
 
 With `let r = (n, s) => s if n == 0 else r(n - 1, [1, 2])` and
@@ -256,59 +324,6 @@ A again, `m(1, [0])` is typed `list<vector<integer^2>>` and evaluates to
 canonicalizes; the value route (`boxed-function.ts`, `type()`) should do the
 same.
 
-### A comprehension or `map` whose element is a function and is applied in the body stays unevaluated (OPEN, small — found 2026-10-08 by the self-call collection evidence review)
-
-`[q(1) for q in [(a) => 0, (a) => a + 5]]` evaluates to the unevaluated
-`Comprehension(q(1), Element(q, [...]))`, and
-`map(w => w(1), [(a) => 0, (a) => a + 5])` stays a `Map`; the `for` loop
-`for fn in [(a) => 0, (a) => a + 5] { out = [...out, fn(1)] }` gives
-`[0, 6]`. Inside a lazy collection callback, a bound variable that holds a
-function literal is not applied when it is called by name; the loop route
-binds the variable as a value and applies it. The comprehension and the
-`map` should give `[0, 6]`. This does not depend on shadowing: the same
-decline happens when no outer function has the index's name.
-
-### `subs()` does not reach into a canonical dictionary (OPEN, small — found 2026-10-07 by the dictionary seed-frame work)
-
-`BoxedDictionary` inherits the base `subs()`, which returns the receiver:
-`{"a" -> n + 1}.subs({n: 3})` is `{"a" -> n + 1}`, while the list form
-`[n + 1].subs({n: 3})` gives `[4]`. A dictionary that kept its seed frame for
-an owed draw cannot be completed by `subs`; `ce.assign` works. Fix in
-`boxed-expression/boxed-dictionary.ts`: substitute in every value.
-
-### A lambda value in a dictionary serializes with a trailing `;` and does not parse back (OPEN, small — found 2026-10-07 by the dictionary seed-frame work)
-
-`{"a" -> u ↦ u + 1}` serializes to LaTeX as
-`\operatorname{Dictionary}(\operatorname{KeyValuePair}(\text{a}, u\mapsto u+1;))`,
-and parsing that gives an `incompatible-type` error. The same lambda inside a
-`Tuple` or a raw `KeyValuePair` prints without the `;`; the difference is in
-how the dictionary serializes a `Function` whose body is a `Block`.
-
-### `.N()` of an integer operation on a large exact integer reads a rounded value (OPEN, medium — found 2026-10-07 by the compiled integer-range guard)
-
-`DigitSum(2^1000).N()` is 84 where `evaluate()` gives 1366, and
-`Sum(Mod(n^n, 10^10), n, 1, 1000).N()` is 646802592660 where `evaluate()`
-gives 4629110846700. Under numeric approximation the 302-digit operand is
-rounded to the working precision (21 digits) before `DigitSum`/`Mod` read it
-as an exact integer (`toBigint` on a rounded big decimal). An integer
-operation under `.N()` should either compute from the exact operand when it
-is exact, or refuse to read a rounded value as an integer. The compile
-target's constant folding used `.N()` and inherited the wrong values. It now
-folds these operators from `evaluate()`. An operand that uses a bound
-variable has no value before the evaluation, so it is priced at the largest
-accepted size and must have a rational type: `Sum(DigitSum(2^n), n, 1000,
-1000)` folds to 1366, and `Sum(Mod(n^n, 10^10), n, 1, 1000)` declines the
-fold and its compiled loop throws a `RangeError`. An operand whose type is an
-integer range inside ±(2^53 − 1), such as the index `n` of
-`Sum(Mod(n, 7), n, 1, 1000)`, is known to be safe and keeps the ordinary
-fold. The interpreter's `.N()` itself is not fixed.
-
-### `Mod` of an exact irrational operand evaluates to a wrong exact integer (OPEN, small — found 2026-10-07 by the compiled integer-range guard)
-
-`Mod(√2 · 10^30, 7).evaluate()` gives the exact `5`; the true value is
-0.698… (`.N()` gives it). The exact route reads the irrational operand as an
-integer somewhere in `Mod`'s evaluate handler.
-
 ### Compiled `Mod` of an infinite dividend throws where a plot kernel may prefer `NaN` (OPEN, question — found 2026-10-07 by the compiled integer-range guard)
 
 Compiled `Mod`, `Remainder`, `GCD` and `LCM` now throw a `RangeError` for an
@@ -322,17 +337,6 @@ needed: keep the throw for every operand type (consistent with the
 interpreter), or limit the check to integer-typed operands and let a
 `number`-typed dividend give `NaN` (then the Euler 48 program compiles to
 `NaN` again, because its sum is typed `number`).
-
-### The index of a loop over a literal range has no ranged type (OPEN, small — found 2026-10-07 by the compiled `Mod` fast path)
-
-`Loop(body, Element(j, Range(1, 100)))` types `j` as a bare `integer`, while
-`Sum(…, Limits(j, 1, 100))` types it `integer<1..100>`. Compiled `Mod(j, 3)`
-keeps the plain `%` only when both operands are integers whose type bounds
-them inside the safe range, so a sieve or the 100-doors loop over a literal
-`Range` still calls the checked `_SYS.floorMod` on every turn. Giving the
-loop index the type `integer<a..b>` when the range bounds are literals (the
-same inference `Limits` already has) would restore the fast path for those
-loops.
 
 ### Binding a large list to a parameter recomputes its type at every call (OPEN, performance — found 2026-10-07 by the lazy-argument capture review)
 
@@ -352,16 +356,6 @@ element of the list (with `incompatible-type` errors), and with the infinite
 seems to infer `s` as a scalar parameter, which turns the call into a
 broadcast. `let (a, b) = (s, 0)` behaves the same. A use as a tuple component
 says nothing about the parameter being scalar.
-
-### `Map` with a lambda keeps an absent element where the direct form reports an error (OPEN, small — found 2026-10-07 by the admission of collections of possibly absent elements)
-
-`Map(x ↦ ToUpperCase(x), ["a", Missing, "b"])` gives `["A", Missing, "B"]`
-and is typed `list<string>`, while `Map(ToUpperCase, ["a", Missing, "b"])`
-and `Apply(x ↦ ToUpperCase(x), Missing)` give the `incompatible-type` error
-for the absent element. The result type claims no absence while the value
-holds one, and the two spellings of the same call disagree. The difference
-is in how `Map` applies a lambda to each element (`library/collections.ts`)
-versus how it applies a named operator. Present before the admission change.
 
 ### A numeric index read types every element of an untyped lambda parameter as a number (OPEN, design decision — found 2026-10-07 by the zipped-tuple fix)
 
@@ -393,13 +387,12 @@ Decision needed: list every finite lazy element of a literal at evaluation
 (the `List` evaluate handler, the same bound of `ce.maxCollectionSize` as the
 spread case), or keep elements lazy and say so.
 
-### The CLI `--json` output flattens a nested lazy list (OPEN, small — found 2026-10-07 by the spread snapshot)
-
-`epsil --json` on `[map(x => x + 1, xs)]` with `xs = [1, 2]` prints
-`["List", 2, 3]` instead of `[[2, 3]]`, and `[[0], ...[map(…)]]` prints
-`["List", ["List", 0], 2, 3]`. The likely cause is the `materialization`
-branch of `List`, which calls `enlist(ops)` and flattens one level. Present
-before the spread change.
+The same lazy elements show when a user function whose body returns a
+comprehension, a `map` or a range is broadcast over a list: `f(s) = [q + 1
+for q in [1, 2]]` applied to `[0, 1]` prints `[Comprehension(…),
+Comprehension(…)]`, and `[[x for x in 1..2], 4]` prints as `[1..3, 4]` does.
+The values are right (`f([0, 1])[1]` is `[2, 3]`); only the printing of the
+lazy element is at stake (found 2026-10-08).
 
 ### Corpus playground follow-ups: compiled values that differ silently, bound names read as free, and timing outliers (OPEN, medium — found 2026-10-06 by the Epsil corpus playground)
 

@@ -58,6 +58,16 @@ describe('DICTIONARY LATEX ROUND TRIP', () => {
       D(['k', 'x']),
       '\\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{k}, x))',
     ],
+    // The dictionary's values are serialized with the caller's options, as
+    // a tuple's operands are, so a function literal whose body is a
+    // single-statement `Block` is written without the block marker. With
+    // the raw `.json` of the dictionary the value was written
+    // `u\mapsto u+1;`, which does not parse back.
+    [
+      'a function literal value',
+      D(['k', ['Function', ['Add', 'u', 1], 'u']]),
+      '\\operatorname{Dictionary}(\\operatorname{KeyValuePair}(\\text{k}, u\\mapsto u+1))',
+    ],
     [
       'an exact rational value',
       D(['k', ['Rational', 1, 3]]),

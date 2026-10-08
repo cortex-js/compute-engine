@@ -762,3 +762,40 @@ describe('Dictionary `.json` serialization and scope round-trip', () => {
     expect(applied.json).toEqual({ dict: { v: 3 } });
   });
 });
+
+describe('Dictionary subs()', () => {
+  // `BoxedDictionary` inherited the base `subs()`, which returns the
+  // receiver: `{"a" -> n + 1}.subs({n: 3})` was `{"a" -> n + 1}` while the
+  // list form `[n + 1].subs({n: 3})` is `[4]`.
+  test('substitutes in every value', () => {
+    const ce = new ComputeEngine();
+    const d = ce.box([
+      'Dictionary',
+      ['KeyValuePair', { str: 'a' }, ['Add', 'n', 1]],
+      ['KeyValuePair', { str: 'b' }, ['Multiply', 2, 'n']],
+      ['KeyValuePair', { str: 'c' }, 'x'],
+    ]);
+    const r = d.subs({ n: 3 });
+    expect(r.json).toEqual([
+      'Dictionary',
+      ['KeyValuePair', { str: 'a' }, 4],
+      ['KeyValuePair', { str: 'b' }, 6],
+      ['KeyValuePair', { str: 'c' }, 'x'],
+    ]);
+    expect(isDictionary(r)).toBe(true);
+  });
+
+  test('returns the receiver when no value changes', () => {
+    const ce = new ComputeEngine();
+    const d = ce.box(['Dictionary', ['KeyValuePair', { str: 'a' }, ['Add', 'n', 1]]]);
+    expect(d.subs({ z: 3 })).toBe(d);
+  });
+
+  test('reaches a dictionary nested in a list', () => {
+    const ce = new ComputeEngine();
+    const r = ce
+      .box(['List', ['Dictionary', ['KeyValuePair', { str: 'a' }, ['Add', 'n', 1]]]])
+      .subs({ n: 3 });
+    expect(r.json).toEqual(['List', { dict: { a: 4 } }]);
+  });
+});

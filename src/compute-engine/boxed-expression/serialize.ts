@@ -1425,14 +1425,18 @@ function serializeJsonExpression(
   if (isDictionary(expr) && Array.isArray(expr.entries)) {
     if (options.shorthands.includes('dictionary')) {
       const json = expr.json;
-      // `.json` serializes every entry with the default options, so a caller
-      // that asked for the inferred annotations (`inferredAnnotations`) needs
-      // the entries serialized with these options instead — in the same shape
+      // `.json` serializes every entry with the default options, so the
+      // entries are serialized again with THESE options, in the same shape
       // `.json` chose: the `{dict: …}` shorthand holds plain data only (no
-      // function literal, so nothing to annotate) and is returned as is; the
-      // `["Dictionary", ["KeyValuePair", …]]` form is rebuilt entry by entry.
-      if (options.inferredAnnotations !== true || !Array.isArray(json))
-        return json;
+      // function literal, so nothing depends on the options) and is returned
+      // as is; the `["Dictionary", ["KeyValuePair", …]]` form is rebuilt
+      // entry by entry. This is what gives a caller the inferred annotations
+      // it asked for (`inferredAnnotations`), and what unwraps the
+      // single-statement `Block` body of a function literal value, as for a
+      // value held by a `Tuple`: with the raw `.json`, `{"a" -> u ↦ u + 1}`
+      // was written in LaTeX with the block marker, `u\mapsto u+1;`, which
+      // does not parse back.
+      if (!Array.isArray(json)) return json;
       return [
         'Dictionary',
         ...expr.entries.map(

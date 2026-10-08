@@ -214,3 +214,80 @@ describe('Run time: the operator that reads an absent element answers', () => {
     expect(parsed(latex).evaluate().toString()).toBe(expected);
   });
 });
+
+// A `Map` whose callback is a lambda literal applies it to an absent element
+// in the same way as a `Map` whose callback is the named operator: the
+// operator in the body decides. A text operator answers the
+// `incompatible-type` error for the cell, and a numeric operator answers
+// `NaN`. The lambda `x ↦ ToUpperCase(x)` is a broadcast shape, so its
+// elements come from the lowered route (`makeSpineRunner()`,
+// `library/map-lowering.ts`). That route read the error of the level as a
+// level failure and put `Missing` in the cell, so the result held `Missing`
+// with a type that has no `missing` arm.
+describe('Map: a lambda callback and the named operator agree on an absent element', () => {
+  const upper = ['Function', ['ToUpperCase', 'x'], 'x'];
+  const strings = L("'a'", 'Missing', "'b'");
+  const cells = (e: ReturnType<typeof boxed>) =>
+    [...e.evaluate().each()].map((x) => JSON.stringify(x.json));
+
+  test('a text body: the lambda gives the error of the named operator', () => {
+    const lambda = boxed(['Map', upper, strings]);
+    const named = boxed(['Map', 'ToUpperCase', strings]);
+    const expected = cells(named);
+    expect(expected[1]).toContain('incompatible-type');
+    expect(expected[1]).toContain("'missing'");
+    expect(cells(lambda)).toEqual(expected);
+    // The error is the element itself, not `Missing`.
+    expect(cells(lambda)[1]).not.toBe('"Missing"');
+    expect(cells(lambda)[0]).toBe(`"'A'"`);
+    expect(cells(lambda)[2]).toBe(`"'B'"`);
+  });
+
+  test('a text body: the indexed read gives the same error', () => {
+    const lambda = boxed(['Map', upper, strings]).evaluate();
+    const named = boxed(['Map', 'ToUpperCase', strings]).evaluate();
+    expect(JSON.stringify(lambda.at(2)!.json)).toBe(
+      JSON.stringify(named.at(2)!.json)
+    );
+    expect(JSON.stringify(lambda.at(2)!.json)).toContain('incompatible-type');
+  });
+
+  test('a text body: the lambda gives the error of a direct application', () => {
+    const direct = boxed(['Apply', upper, 'Missing']).evaluate();
+    expect(cells(boxed(['Map', upper, strings]))[1]).toBe(
+      JSON.stringify(direct.json)
+    );
+  });
+
+  test('a text body: the parse route agrees with the box route', () => {
+    const lambda = parsed(
+      '\\operatorname{Map}(x \\mapsto \\operatorname{ToUpperCase}(x), [\\text{a}, \\operatorname{Missing}, \\text{b}])'
+    );
+    expect(cells(lambda)).toEqual(
+      cells(boxed(['Map', 'ToUpperCase', strings]))
+    );
+  });
+
+  test('a text body: the two spellings have the same result type', () => {
+    const lambda = boxed(['Map', upper, strings]);
+    const named = boxed(['Map', 'ToUpperCase', strings]);
+    expect(lambda.type.toString()).toBe(named.type.toString());
+    expect(lambda.evaluate().type.toString()).toBe(
+      named.evaluate().type.toString()
+    );
+  });
+
+  test('a numeric body: both spellings still give NaN for the absent cell', () => {
+    const numbers = L(1, 'Missing', 2);
+    const lambda = boxed(['Map', ['Function', ['Abs', 'x'], 'x'], numbers]);
+    const named = boxed(['Map', 'Abs', numbers]);
+    expect(lambda.evaluate().toString()).toBe('[1,NaN,2]');
+    expect(named.evaluate().toString()).toBe('[1,NaN,2]');
+    expect(lambda.type.toString()).toBe(named.type.toString());
+    expect(
+      boxed(['Map', ['Function', ['Add', 'x', 1], 'x'], numbers])
+        .evaluate()
+        .toString()
+    ).toBe('[2,NaN,3]');
+  });
+});

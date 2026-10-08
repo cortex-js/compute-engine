@@ -170,6 +170,66 @@ function rangeIndexTypeOf(
   return `integer<${lo}..${hi}>` as TypeString;
 }
 
+/**
+ * The ranged type `integer<lo..hi>` of the index of a loop clause
+ * `Element(index, Range(a, b))` whose bounds `a` and `b` are integer
+ * literals, or `undefined` when the clause has another shape.
+ *
+ * Every element of such a range is between its two bounds, whichever bound
+ * is the larger (`Range(5, 1)` counts down), and also with a step
+ * (`Range(1, 100, 2)` stops at 99, inside `1..100`). So the ranged type
+ * holds every value the index takes. A step must be a non-zero integer
+ * literal that goes from `a` toward `b`: any other step can give an empty
+ * range, or non-integer elements.
+ *
+ * The same limits as for a `Limits` clause apply (see
+ * {@link rangeIndexTypeOf}): the bounds must be safe integer literals (a
+ * symbol bound can be reassigned later), an infinite upper bound gives
+ * `integer<lo..>`, and when an operand of the loop assigns the index, or
+ * when two clauses bind the same name, the result is `undefined`.
+ *
+ * `ops` are all the operands of the loop.
+ */
+export function rangeElementIndexType(
+  index: Expression | undefined,
+  collection: Expression | undefined,
+  ops: ReadonlyArray<Expression>
+): TypeString | undefined {
+  if (!isSymbol(index) || !isFunction(collection, 'Range')) return undefined;
+  if (collection.nops !== 2 && collection.nops !== 3) return undefined;
+  const [a, b, step] = collection.ops;
+  // The bounds and the step must BE integers (`isInteger`), not only have an
+  // integer machine value: the exact rational `(10^20 − 1)/10^20` reads as
+  // the double `1`, and `Range((10^20 − 1)/10^20, 2)` has non-integer
+  // elements, the first of them below 1. An infinite upper bound is not an
+  // integer and is handled by `rangeIndexTypeOf` (`integer<lo..>`).
+  if (!isNumber(a) || !isNumber(b)) return undefined;
+  if (a.isInteger !== true) return undefined;
+  if (b.isInteger !== true && b.re !== Infinity) return undefined;
+  const descending = a.re > b.re;
+  if (step !== undefined) {
+    if (
+      !isNumber(step) ||
+      step.isInteger !== true ||
+      !Number.isSafeInteger(step.re) ||
+      step.re === 0
+    )
+      return undefined;
+    if (step.re < 0 !== descending) return undefined;
+  }
+  // `rangeIndexTypeOf` reads its bounds in ascending order.
+  const [lo, hi] = descending ? [b, a] : [a, b];
+  const clauses = ops.filter(
+    (x) =>
+      isFunction(x, 'Element') &&
+      isSymbol(x.ops[0]) &&
+      x.ops[0].symbol === index.symbol
+  );
+  if (clauses.length > 1) return undefined;
+  const type = rangeIndexTypeOf(index, lo, hi, 'integer', ops, NO_FLAT_INDEXES);
+  return type === 'integer' ? undefined : type;
+}
+
 /** Does `expr` contain an `Assign` whose target is the symbol `name`, or a
  * tuple pattern with `name` as a leaf (`Assign(Tuple(k, _), …)`)? */
 function assignsSymbol(expr: Expression, name: string): boolean {
