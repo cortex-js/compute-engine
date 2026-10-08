@@ -1,11 +1,13 @@
 import type {
   BoxedValueDefinition,
+  EvaluateOptions,
   Expression,
   IComputeEngine as ComputeEngine,
   OperandDescriptor,
   Scope,
 } from '../global-types.js';
 import type { EffectHandlers } from '../types-effects.js';
+import { runWithEvaluationEffects } from '../effects-registry.js';
 
 import {
   isNumber,
@@ -2850,19 +2852,40 @@ export async function evaluateBigOpTermAsync(
   bindings: BigOpIndexBindings | undefined,
   numericApproximation: boolean | undefined,
   signal?: AbortSignal,
-  effects?: EffectHandlers
+  effects?: EffectHandlers,
+  contextStack?: EvaluateOptions['_contextStack']
 ): Promise<Expression | undefined> {
   // `effects` is the host capability registry the enclosing asynchronous
-  // evaluation captured; the term and its repair must run with the same one.
+  // evaluation captured, and `contextStack` its evaluation-context stack,
+  // which holds the scope of the loop index. The term and its repair must
+  // run with the same ones: the term reads the index through that scope.
   const term = await body.evaluateAsync({
     numericApproximation,
     signal,
     _effects: effects,
+    _contextStack: contextStack,
   });
   if (bindings === undefined || bindings.length === 0) return term;
-  const leaked = bindings.filter(([name]) => term.has(name));
-  if (leaked.length === 0) return term;
-  const repaired = substituteIndexBindings(term, leaked);
+  // The repair runs after the `await` above. It finds the binding of the
+  // index through the current lexical scope, which is the scope of the
+  // index only when the context stack of this evaluation is in place. Else
+  // an occurrence of the index in the term is taken for a global and left
+  // symbolic.
+  const ce = body.engine;
+  const repair = () => {
+    const leaked = bindings.filter(([name]) => term.has(name));
+    if (leaked.length === 0) return term;
+    return substituteIndexBindings(term, leaked);
+  };
+  const repaired =
+    effects === undefined && contextStack === undefined
+      ? repair()
+      : runWithEvaluationEffects(
+          ce,
+          effects ?? ce._evaluationEffects ?? ce.effects,
+          repair,
+          contextStack
+        );
   if (repaired === undefined) return undefined;
   return repaired === term
     ? term
@@ -2870,6 +2893,7 @@ export async function evaluateBigOpTermAsync(
         numericApproximation,
         signal,
         _effects: effects,
+        _contextStack: contextStack,
       });
 }
 

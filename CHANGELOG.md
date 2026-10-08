@@ -2,6 +2,22 @@
 
 ### Behavior Changes
 
+- **An `evaluateAsync` handler sees the global scope after its first
+  `await`.** A scoped operator (a `Sum`, a `Block`) left its scope on the
+  engine's stack while its handler was suspended, so a user `evaluateAsync`
+  handler that did synchronous work after an `await` (canonicalizing a held
+  operand, `ce.box()`, `ce.parse()`, `evaluate()`, `ce.assign()`) saw the
+  index of the enclosing `Sum`. Each asynchronous evaluation now keeps its
+  scopes to itself (see "Concurrent `evaluateAsync()` calls" below), so that
+  work sees the global scope: `Sum(Late(k), k, 1, 20)` with a lazy `Late`
+  that returns `x.canonical.evaluateAsync(options)` after an `await` gives
+  `20k` and declares a global `k`. Run such work inside the new
+  `ce.withEvaluationContext(options, fn)`:
+  `ce.withEvaluationContext(options, () => x.canonical).evaluateAsync(options)`
+  gives 210. A nested `evaluateAsync(options)` needs no change, and a new
+  evaluation that a handler starts without options keeps the handler's
+  scopes.
+
 - **A shader target declines a constant collection of more than 256 elements.**
   The `glsl` and `wgsl` targets wrote a literal `List`, `Tuple` or `PointList`
   of any length into the shader as a constant array constructor
@@ -414,6 +430,27 @@
   undetermined, and a pole exactly on the contour gives `NaN`.
   `\oint_{|z|=2} \frac{0.5}{z}dz`, which gave the half-symbolic
   `Complex(0, 1)·Pi`, is the float `3.141592653589793i`.
+
+- **Concurrent `evaluateAsync()` calls on one engine keep their own scopes.**
+  A suspended asynchronous evaluation left the scope of the scoped operator
+  it was inside (the index of a `Sum` or `Product`, a `Block`, a `Loop`) on
+  top of the engine's context stack, so a second evaluation that ran in the
+  same window resolved its names in that scope: two sums over `k` evaluated
+  at the same time threw `Symbol "k": The value "100001" is not compatible
+  with the type "integer<1..100000>"`, or one of them read the other's
+  index. Each asynchronous evaluation now keeps its frames on its own copy of
+  the context stack, which is in place only while that evaluation's own code
+  runs, in the same way that it keeps its host capability registry. While an
+  evaluation is suspended, other code on the engine no longer sees its loop
+  index. One engine per concurrent evaluation is no longer necessary.
+
+- **`ReleaseHold(Hold(f(k)))` with an asynchronous-only `f` is awaited inside
+  a `Sum` term and inside the operand of a lazy operator.**
+  `Sum(ReleaseHold(Hold(Delay(j))), j, 1, 3).evaluateAsync()` gave
+  `Delay(1) + Delay(2) + Delay(3)`, and `Less(15, ReleaseHold(Hold(Delay(2))))`
+  stayed `15 < Delay(2)`: the search for asynchronous-only applications did
+  not look inside a `Hold` that a `ReleaseHold` releases. They are now 6 and
+  `False`.
 
 ## 0.149.0 _2026-10-07_
 

@@ -3295,12 +3295,28 @@ export class BoxedFunction
     // may run on the same engine with a different registry. A synchronous
     // evaluation that is already running (this call comes from one of its
     // handlers) passes its own registry on.
+    //
+    // The evaluation-context stack (`EvaluateOptions._contextStack`), which
+    // holds the scopes of the scoped operators the evaluation is inside,
+    // travels the same way. A call without one captures the engine's stack
+    // as it is now: for a call from the host, the engine's own array; for a
+    // call from the synchronous part of a handler (`ce.box(…).evaluateAsync()`
+    // with no options), the stack of the enclosing evaluation, which then
+    // holds the scope of its index. Without this capture, the nested
+    // evaluation saw that scope only until its first `await`. The array is
+    // shared, not copied: an evaluation that pushes a frame it holds across
+    // an `await` (a scoped operator, step 4 of the asynchronous driver)
+    // pushes it on a copy of its own.
     const effects =
       options?._effects ??
       this.engine._evaluationEffects ??
       this.engine.effects;
-    if (options?._effects === undefined)
-      options = { ...options, _effects: effects };
+    if (options?._effects === undefined || options._contextStack === undefined)
+      options = {
+        ...options,
+        _effects: effects,
+        _contextStack: options?._contextStack ?? this.engine._evalContextStack,
+      };
     this.engine._inFlightAsyncEvaluations += 1;
     let promise: Promise<Expression>;
     try {
@@ -3311,8 +3327,11 @@ export class BoxedFunction
       // evaluations inherit it; the slot is restored when the driver first
       // suspends (`runWithEvaluationEffects` returns when the promise is
       // created, not when it settles).
-      promise = runWithEvaluationEffects(this.engine, effects, () =>
-        this._evaluateAsyncUncounted(options)
+      promise = runWithEvaluationEffects(
+        this.engine,
+        effects,
+        () => this._evaluateAsyncUncounted(options),
+        options._contextStack
       );
     } catch (error) {
       this.engine._inFlightAsyncEvaluations -= 1;
@@ -6112,11 +6131,19 @@ export class BoxedFunction
       ) {
         const mismatch = broadcastLengthMismatch(this.engine, this.ops!);
         if (mismatch) return mismatch;
-        return this.engine.function(
-          this.operator,
-          await Promise.all(
-            this.ops!.map((x) => x.evaluateAsync(operandOptions(options)))
-          )
+        const held = await Promise.all(
+          this.ops!.map((x) => x.evaluateAsync(operandOptions(options)))
+        );
+        // The held application is built after the `await` above, when the
+        // engine does not keep the registry and the context stack of this
+        // evaluation installed: put them in place for the build.
+        return runWithEvaluationEffects(
+          this.engine,
+          options?._effects ??
+            this.engine._evaluationEffects ??
+            this.engine.effects,
+          () => this.engine.function(this.operator, held),
+          options?._contextStack
         );
       }
       if (lambdaElementwise) {
@@ -6740,36 +6767,51 @@ export class BoxedFunction
       //
       const isScoped = this._localScope !== undefined;
 
-      // Later operand evaluation can suspend this path at an `await`, so by the
-      // time it unwinds its frame is NOT necessarily on top: another
-      // evaluation on the same engine may have pushed above it. Both popping
-      // the top and unwinding by depth would then destroy a frame belonging to
-      // something still running, disposing its bindings out from under it — so
-      // capture the frame and remove it by IDENTITY instead.
+      // The local scope must stay in force until the handler completes, and
+      // an `evaluateAsync` handler suspends at each `await`. While it is
+      // suspended, another evaluation can run on the same engine: a second
+      // `evaluateAsync()`, or an operand of this evaluation that is evaluated
+      // at the same time. If the frame of the local scope were on the
+      // engine's own stack, those evaluations would see it on top and resolve
+      // their symbols against it, and this evaluation would resume with their
+      // frames above its own. A `Sum` would then assign its index in the
+      // scope of another `Sum`.
       //
-      // This keeps one evaluation from corrupting another's scope, but it does
-      // not make concurrent async evaluation on a single engine *correct*: the
-      // context stack is engine-global mutable state, so while this evaluation
-      // is suspended its scope is the engine's current one, and anything else
-      // entering the engine in that window — a second `evaluateAsync`, or plain
-      // synchronous work from a timer or event handler — resolves against it.
-      // Making that sound needs per-evaluation (task-local) context
-      // propagation across every await in the async path, not just this one.
-      // Until then: one engine per concurrent evaluation.
+      // So this evaluation pushes its frame on its OWN copy of the stack: the
+      // stack it inherited (from the options of the enclosing asynchronous
+      // evaluation, or the engine's stack at the start of a new evaluation)
+      // plus the new frame. The engine's stack does not change. The copy
+      // travels to the handler and to every nested evaluation in
+      // `opts._contextStack`, and each synchronous segment of the handler
+      // puts it in place of the engine's stack while it runs
+      // (`runWithEvaluationEffects`, `withEvaluationEffects`), exactly as the
+      // capability registry travels in `opts._effects`. A nested scoped
+      // evaluation makes its own copy in turn, so two operands evaluated at
+      // the same time do not see the frames of each other.
+      const engine = this.engine;
+      const effects =
+        options?._effects ?? engine._evaluationEffects ?? engine.effects;
+      const contextStack = isScoped
+        ? [...(options?._contextStack ?? engine._evalContextStack)]
+        : options?._contextStack;
       if (isScoped) {
-        this.engine._pushEvalContext(this._localScope!, undefined, {
-          ambient: true,
-        });
+        runWithEvaluationEffects(
+          engine,
+          effects,
+          () =>
+            engine._pushEvalContext(this._localScope!, undefined, {
+              ambient: true,
+            }),
+          contextStack
+        );
       }
-      const localContext = isScoped ? this.engine.context : undefined;
+      const localContext = isScoped
+        ? contextStack![contextStack!.length - 1]
+        : undefined;
 
       //
       // 5/ Call the `evaluate` handler
       //
-      const engine = this.engine;
-      const effects =
-        options?._effects ?? engine._evaluationEffects ?? engine.effects;
-
       let value: Expression | undefined;
       try {
         const opts: Partial<EvaluateOptions> & {
@@ -6782,8 +6824,9 @@ export class BoxedFunction
           engine,
           signal: options?.signal,
           // An `evaluateAsync` handler passes these options to the operands
-          // it awaits; the registry must go with them.
+          // it awaits; the registry and the context stack must go with them.
           _effects: effects,
+          _contextStack: contextStack,
           materialization: options?.materialization,
           // See the matching comment (and `EvaluateHandlerOptions.expression`)
           // on the sync path.
@@ -6830,58 +6873,75 @@ export class BoxedFunction
         // that a handler which evaluates operands with the synchronous
         // `evaluate()` — every `lazy` operator with a synchronous handler
         // does — gives them this registry and not the one another,
-        // concurrent evaluation installed. Restored before the `await`.
+        // concurrent evaluation installed. The context stack of this
+        // evaluation is put in place for the same part, for the same reason.
+        // Both are restored before the `await`.
         value = await runWithEvaluationEffects(
           engine,
           effects,
           () =>
-            def.evaluateAsync?.(tail, opts) ?? def.evaluate?.(handlerOps, opts)
+            def.evaluateAsync?.(tail, opts) ?? def.evaluate?.(handlerOps, opts),
+          contextStack
         );
       } catch (e) {
         value = handlerThrowToErrorValue(this.engine, e, def, this._operator);
       } finally {
-        if (localContext) this.engine._removeEvalContext(localContext);
+        // The frame is on this evaluation's own stack, not on the engine's
+        // stack: remove it from there.
+        if (localContext)
+          runWithEvaluationEffects(
+            engine,
+            effects,
+            () => engine._removeEvalContext(localContext),
+            contextStack
+          );
       }
 
       // The rest runs after the `await` above, so the engine slot is empty
       // again; the string-preservation check and the pole override evaluate
-      // synchronously and must see this evaluation's registry.
-      return runWithEvaluationEffects(engine, effects, () => {
-        // Handler-less scoped-operator no-operand-change identity: see the
-        // matching comment in the sync path (avoids re-canonicalizing a lazy
-        // scoped collection into a fresh, split-off local scope; every other
-        // operator keeps the load-bearing re-box).
-        const result =
-          value ??
-          (isScoped &&
-          def.evaluate === undefined &&
-          def.evaluateAsync === undefined &&
-          this.isCanonical &&
-          tail.every((x, i) => x === this._ops[i])
-            ? this
-            : this._withParseScope(() =>
-                engine.function(this._operator, tail)
-              ));
+      // synchronously and must see this evaluation's registry and context
+      // stack.
+      return runWithEvaluationEffects(
+        engine,
+        effects,
+        () => {
+          // Handler-less scoped-operator no-operand-change identity: see the
+          // matching comment in the sync path (avoids re-canonicalizing a lazy
+          // scoped collection into a fresh, split-off local scope; every other
+          // operator keeps the load-bearing re-box).
+          const result =
+            value ??
+            (isScoped &&
+            def.evaluate === undefined &&
+            def.evaluateAsync === undefined &&
+            this.isCanonical &&
+            tail.every((x, i) => x === this._ops[i])
+              ? this
+              : this._withParseScope(() =>
+                  engine.function(this._operator, tail)
+                ));
 
-        // 5a/ String preservation, re-checked on the RESULT. The step that
-        // ran before evaluation could only see the node as authored, whose
-        // type may be a union that resolves to `string` only once the
-        // operands are evaluated (see `evaluateStringPreservingResult`).
-        // Declines leave `result` untouched. Twin of step 6a in the sync
-        // path.
-        const preservedResult = evaluateStringPreservingResult(result);
-        if (preservedResult !== result) return preservedResult;
+          // 5a/ String preservation, re-checked on the RESULT. The step that
+          // ran before evaluation could only see the node as authored, whose
+          // type may be a union that resolves to `string` only once the
+          // operands are evaluated (see `evaluateStringPreservingResult`).
+          // Declines leave `result` untouched. Twin of step 6a in the sync
+          // path.
+          const preservedResult = evaluateStringPreservingResult(result);
+          if (preservedResult !== result) return preservedResult;
 
-        // 5b/ A lazy collection answered by the handler is materialized as
-        // asked (`materializeLazyResult`); twin of step 6b in the sync path.
-        const materializedResult = materializeLazyResult(result, options);
-        if (materializedResult !== result) return materializedResult;
+          // 5b/ A lazy collection answered by the handler is materialized as
+          // asked (`materializeLazyResult`); twin of step 6b in the sync path.
+          const materializedResult = materializeLazyResult(result, options);
+          if (materializedResult !== result) return materializedResult;
 
-        // 5c/ Pole-aware numeric evaluation (see the sync path).
-        if (numericApproximation)
-          return applyPoleOverride(engine, this._operator, tail, result);
-        return result;
-      });
+          // 5c/ Pole-aware numeric evaluation (see the sync path).
+          if (numericApproximation)
+            return applyPoleOverride(engine, this._operator, tail, result);
+          return result;
+        },
+        contextStack
+      );
     };
   }
 }

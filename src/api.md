@@ -850,6 +850,62 @@ calling `withEffects`, or use a separate engine.
 
 <MemberCard>
 
+##### ExpressionComputeEngine.~~withEvaluationContext()~~ {#withevaluationcontext-1}
+
+```ts
+withEvaluationContext<T>(options, fn): T
+```
+
+Run the synchronous `fn` in the evaluation context that `options`
+carries, then put the previous context back, and return the result of
+`fn`.
+
+For an `evaluateAsync` handler. The handler receives `options`, which
+carry the evaluation context of the evaluation that called it: the host
+capability registry, and the lexical scopes of the scoped operators that
+the evaluation is inside (the scope of the index of a `Sum`, for
+example). While the handler is suspended at an `await`, other code can
+run on the same engine, so the engine does not keep that context
+installed for the handler. Before the first `await`, the context is in
+place. After it, synchronous work that reads the scope — canonicalizing
+a held operand (`x.canonical`), `ce.box()`, `ce.parse()`, `evaluate()`,
+`ce.assign()` — sees the global scope unless it runs inside `fn`. An
+index of an enclosing `Sum` then stays symbolic, and a new global
+symbol with its name is declared.
+
+```ts
+ce.declare('Late', {
+  signature: '(integer) -> integer',
+  lazy: true,
+  evaluateAsync: async ([x], options) => {
+    await delay(1);
+    return ce
+      .withEvaluationContext(options, () => x.canonical)
+      .evaluateAsync(options);
+  },
+});
+```
+
+A nested `evaluateAsync(options)` call does not need it: the options
+carry the context to that evaluation.
+
+If `fn` returns a promise, only the synchronous part of `fn`, up to its
+first `await`, runs in the context.
+
+• T
+
+####### options
+
+`Partial`\<`EvaluateOptions`\> \| `undefined`
+
+####### fn
+
+() => `T`
+
+</MemberCard>
+
+<MemberCard>
+
 ##### ExpressionComputeEngine.~~chop()~~ {#chop-1}
 
 ###### chop(n)
@@ -8947,6 +9003,29 @@ Return a non-exact representation of the numeric value
 
 <MemberCard>
 
+##### NumericValue.roundToPrecision() {#roundtoprecision}
+
+```ts
+roundToPrecision(_digits): NumericValue
+```
+
+This value with each part rounded to `digits` significant digits. A
+value that is already within `digits` (an exact value, a machine float,
+a big decimal with no more digits) is returned as it is.
+
+The `add` and `mul` of a big decimal are exact, so a running sum or
+product of big floats grows a digit count of the size of the exponent
+span, or of the number of factors: the numeric folds of `Sum` and
+`Product` round each partial result with this method.
+
+####### \_digits
+
+`number`
+
+</MemberCard>
+
+<MemberCard>
+
 ##### NumericValue.neg() {#neg}
 
 ```ts
@@ -11662,6 +11741,62 @@ calling `withEffects`, or use a separate engine.
 ####### overrides
 
 [`EffectHandlerOverrides`](#effecthandleroverrides)
+
+####### fn
+
+() => `T`
+
+</MemberCard>
+
+<MemberCard>
+
+##### IComputeEngine.withEvaluationContext() {#withevaluationcontext}
+
+```ts
+withEvaluationContext<T>(options, fn): T
+```
+
+Run the synchronous `fn` in the evaluation context that `options`
+carries, then put the previous context back, and return the result of
+`fn`.
+
+For an `evaluateAsync` handler. The handler receives `options`, which
+carry the evaluation context of the evaluation that called it: the host
+capability registry, and the lexical scopes of the scoped operators that
+the evaluation is inside (the scope of the index of a `Sum`, for
+example). While the handler is suspended at an `await`, other code can
+run on the same engine, so the engine does not keep that context
+installed for the handler. Before the first `await`, the context is in
+place. After it, synchronous work that reads the scope — canonicalizing
+a held operand (`x.canonical`), `ce.box()`, `ce.parse()`, `evaluate()`,
+`ce.assign()` — sees the global scope unless it runs inside `fn`. An
+index of an enclosing `Sum` then stays symbolic, and a new global
+symbol with its name is declared.
+
+```ts
+ce.declare('Late', {
+  signature: '(integer) -> integer',
+  lazy: true,
+  evaluateAsync: async ([x], options) => {
+    await delay(1);
+    return ce
+      .withEvaluationContext(options, () => x.canonical)
+      .evaluateAsync(options);
+  },
+});
+```
+
+A nested `evaluateAsync(options)` call does not need it: the options
+carry the context to that evaluation.
+
+If `fn` returns a promise, only the synchronous part of `fn`, up to its
+first `await`, runs in the context.
+
+• T
+
+####### options
+
+`Partial`\<`EvaluateOptions`\> \| `undefined`
 
 ####### fn
 

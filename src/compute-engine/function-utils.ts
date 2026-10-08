@@ -2013,15 +2013,22 @@ export async function evaluateStatementsAsync(
   ce: ComputeEngine,
   ops: Iterable<Expression>,
   signal?: AbortSignal,
-  effects?: EffectHandlers
+  effects?: EffectHandlers,
+  contextStack?: EvaluateOptions['_contextStack']
 ): Promise<Expression> {
   let result: Expression = ce.Nothing;
   for (const op of ops) {
     if (debugStatementHook !== undefined && op.sourceOffsets !== undefined)
       debugStatementHook(op);
     // `effects` is the host capability registry the enclosing asynchronous
-    // evaluation captured; each statement must run with the same one.
-    result = await op.evaluateAsync({ signal, _effects: effects });
+    // evaluation captured, and `contextStack` its evaluation-context stack
+    // (which holds the block scope); each statement must run with the same
+    // ones.
+    result = await op.evaluateAsync({
+      signal,
+      _effects: effects,
+      _contextStack: contextStack,
+    });
     if (
       debugStatementResultHook !== undefined &&
       op.sourceOffsets !== undefined

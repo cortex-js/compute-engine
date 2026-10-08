@@ -41,6 +41,27 @@ export function popScope(ce: IComputeEngine): void {
   popEvalContext(ce);
 }
 
+/**
+ * For each scope that a live frame chains onto an ambient scope (`ambient`
+ * option of `pushEvalContext`), the set of those live frames.
+ *
+ * The same scope object can be live in more than one frame at once: two
+ * evaluations of one node interleaved on the asynchronous path. Each
+ * asynchronous evaluation keeps its frames on its own copy of the
+ * evaluation-context stack (`EvaluateOptions._contextStack`), so the frames
+ * of two interleaved evaluations are not on one array, and a search of the
+ * current stack does not find all of them. This registry finds them.
+ *
+ * A frame leaves the registry when it is dropped from its stack:
+ * `popEvalContext` and `removeEvalContext` (through `discardEvalContext`),
+ * and the public `ce.contextStack` setter for each frame that the new stack
+ * does not keep (`releaseChainingFrame`). A frame of an asynchronous
+ * evaluation that never settles stays in the registry, and its scope stays
+ * chained onto the ambient scope, until that evaluation settles: the
+ * evaluation can still resume and use the frame.
+ */
+const chainingFrames = new WeakMap<Scope, Set<EvalContext>>();
+
 export function pushEvalContext(
   ce: IComputeEngine,
   scope: Scope,
@@ -72,9 +93,7 @@ export function pushEvalContext(
       // parent link to restore is then the ORIGINAL one that frame saved,
       // not the link this frame found (already re-pointed); and only the
       // last such frame to be discarded restores it (`discardEvalContext`).
-      const other = ce._evalContextStack.find(
-        (f) => f.lexicalScope === scope && f._restoreParentOnPop !== undefined
-      );
+      const other = chainingFrames.get(scope)?.values().next().value;
       restoreParentOnPop =
         other !== undefined ? other._restoreParentOnPop : scope.parent;
       scope.parent = parent;
@@ -104,6 +123,12 @@ export function pushEvalContext(
       ? { _restoreParentOnPop: restoreParentOnPop }
       : {}),
   });
+  if (restoreParentOnPop !== undefined) {
+    const frame = ce._evalContextStack[ce._evalContextStack.length - 1];
+    const frames = chainingFrames.get(scope);
+    if (frames === undefined) chainingFrames.set(scope, new Set([frame]));
+    else frames.add(frame);
+  }
 }
 
 export function popEvalContext(ce: IComputeEngine): void {
@@ -111,14 +136,19 @@ export function popEvalContext(ce: IComputeEngine): void {
 }
 
 /**
- * Remove one SPECIFIC evaluation context, wherever it currently sits.
+ * Remove one SPECIFIC evaluation context from the current stack
+ * (`ce._evalContextStack`), wherever it sits on that stack.
  *
- * The asynchronous evaluation path holds its context across an `await`
- * (`BoxedFunction._computeValueAsync`), so by the time it unwinds, its frame is
- * not necessarily on top: another evaluation on the same engine may have pushed
- * above it. Popping the top there would destroy a frame belonging to something
- * still running — disposing its bindings out from under it. Removing by
- * identity leaves every other frame intact.
+ * The asynchronous evaluation path holds the frame of a scoped operator
+ * across an `await` (`BoxedFunction._computeValueAsync`). It pushes the frame
+ * on its own copy of the stack (`EvaluateOptions._contextStack`), not on the
+ * engine's stack, and puts that copy in place of the engine's stack while it
+ * removes the frame. A nested evaluation that holds a frame across an
+ * `await` pushes it on a copy of its own, and a synchronous evaluation pops
+ * its frames before it returns, so the frame is expected to be on top of
+ * its copy. Removal by identity does not depend on that: if another frame
+ * were above it, a pop of the top would dispose the bindings of a frame
+ * that is still in use.
  *
  * A no-op if the context is not on the stack (already removed).
  */
@@ -132,6 +162,28 @@ export function removeEvalContext(
   discardEvalContext(ce, context);
 }
 
+/**
+ * Take a frame that chains its scope onto an ambient scope out of the
+ * registry of live chaining frames (`chainingFrames`). When it was the last
+ * live frame for its scope, give the scope its original parent link back.
+ * A no-op for a frame that does not chain its scope.
+ *
+ * For a frame that leaves its stack. `discardEvalContext` calls it, and so
+ * does the `ce.contextStack` setter for each frame that the new stack does
+ * not keep. Without that call, the registry keeps a frame that is no longer
+ * live: the next push of the same scope then takes the link that frame
+ * saved, and the pop that follows does not restore the link.
+ */
+export function releaseChainingFrame(context: EvalContext): void {
+  if (context._restoreParentOnPop === undefined) return;
+  const frames = chainingFrames.get(context.lexicalScope);
+  frames?.delete(context);
+  if (frames === undefined || frames.size === 0) {
+    chainingFrames.delete(context.lexicalScope);
+    context.lexicalScope.parent = context._restoreParentOnPop;
+  }
+}
+
 function discardEvalContext(
   ce: IComputeEngine,
   context: EvalContext | undefined
@@ -140,18 +192,9 @@ function discardEvalContext(
   // parent link back: the chaining lasts exactly as long as the frame —
   // unless another live frame still chains the same scope object (an
   // interleaved evaluation of the same node on the async path), which then
-  // restores the original link when it is discarded itself.
-  if (
-    context !== undefined &&
-    context._restoreParentOnPop !== undefined &&
-    !ce._evalContextStack.some(
-      (f) =>
-        f !== context &&
-        f.lexicalScope === context.lexicalScope &&
-        f._restoreParentOnPop !== undefined
-    )
-  )
-    context.lexicalScope.parent = context._restoreParentOnPop;
+  // restores the original link when it is discarded itself
+  // (`releaseChainingFrame`).
+  if (context !== undefined) releaseChainingFrame(context);
   // A checkpoint standing on this frame has no world left to restore once
   // the frame's bindings are disposed below — retire it, folding its journal
   // window downward so older checkpoints still unwind this scope's writes

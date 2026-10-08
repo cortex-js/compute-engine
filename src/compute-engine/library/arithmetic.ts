@@ -4433,7 +4433,14 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // of the values is the same (`addEvaluatedOperands()`).
       evaluateAsync: async (
         ops,
-        { numericApproximation, engine, expression, signal, effects }
+        {
+          numericApproximation,
+          engine,
+          expression,
+          signal,
+          effects,
+          _contextStack,
+        }
       ) => {
         if (ops.some((x) => isContinuationOperand(x))) return undefined;
         const evaluated: Expression[] = [];
@@ -4441,20 +4448,29 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           evaluated.push(
             await x.evaluateAsync(
               numericApproximation
-                ? { numericApproximation: true, signal, _effects: effects }
-                : { signal, _effects: effects }
+                ? {
+                    numericApproximation: true,
+                    signal,
+                    _effects: effects,
+                    _contextStack,
+                  }
+                : { signal, _effects: effects, _contextStack }
             )
           );
         // The fold runs after the `await`s: it evaluates again (a conditional
         // operand, the exact operands), and a synchronous evaluation after an
-        // `await` must run with this evaluation's registry
+        // `await` must run with this evaluation's registry and context stack
         // (`docs/EFFECTS-MODEL.md`, rule 3 for an asynchronous handler).
-        return runWithEvaluationEffects(engine, effects, () =>
-          addEvaluatedOperands(ops, evaluated, {
-            numericApproximation,
-            engine,
-            expression,
-          })
+        return runWithEvaluationEffects(
+          engine,
+          effects,
+          () =>
+            addEvaluatedOperands(ops, evaluated, {
+              numericApproximation,
+              engine,
+              expression,
+            }),
+          _contextStack
         );
       },
     },
@@ -7568,7 +7584,14 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // of the values is the same (`mulEvaluatedOperands()`).
       evaluateAsync: async (
         ops,
-        { numericApproximation, engine, expression, signal, effects }
+        {
+          numericApproximation,
+          engine,
+          expression,
+          signal,
+          effects,
+          _contextStack,
+        }
       ) => {
         if (ops.some((x) => isContinuationOperand(x))) return undefined;
         const evaluated: Expression[] = [];
@@ -7576,20 +7599,29 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           evaluated.push(
             await x.evaluateAsync(
               numericApproximation
-                ? { numericApproximation: true, signal, _effects: effects }
-                : { signal, _effects: effects }
+                ? {
+                    numericApproximation: true,
+                    signal,
+                    _effects: effects,
+                    _contextStack,
+                  }
+                : { signal, _effects: effects, _contextStack }
             )
           );
         // The fold runs after the `await`s: it evaluates again (a conditional
         // operand, the exact operands), and a synchronous evaluation after an
-        // `await` must run with this evaluation's registry
+        // `await` must run with this evaluation's registry and context stack
         // (`docs/EFFECTS-MODEL.md`, rule 3 for an asynchronous handler).
-        return runWithEvaluationEffects(engine, effects, () =>
-          mulEvaluatedOperands(ops, evaluated, {
-            numericApproximation,
-            engine,
-            expression,
-          })
+        return runWithEvaluationEffects(
+          engine,
+          effects,
+          () =>
+            mulEvaluatedOperands(ops, evaluated, {
+              numericApproximation,
+              engine,
+              expression,
+            }),
+          _contextStack
         );
       },
     },
@@ -10393,6 +10425,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
                       numericApproximation: numeric,
                       signal: options.signal,
                       _effects: options.effects,
+                      _contextStack: options._contextStack,
                     })
                   : term;
               if (asyncTerms) return undefined;
@@ -10448,7 +10481,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const result = await runAsync(
           // The terms are evaluated synchronously, and `runAsync`
           // suspends this handler between time slices: every step must run
-          // with the host capability registry this evaluation captured.
+          // with the host capability registry and the context stack (the
+          // scope of the index) this evaluation captured.
           withEvaluationEffects(
             ce,
             options.effects,
@@ -10462,11 +10496,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
                       bindings,
                       numeric,
                       options.signal,
-                      options.effects
+                      options.effects,
+                      options._contextStack
                     ).then((xe) => accumulate(acc, xe))
                   : accumulate(acc, numericTerm(x, bindings)),
               ce.One
-            )
+            ),
+            options._contextStack
           ),
           ce._timeRemaining,
           options.signal,
@@ -10487,6 +10523,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         return numericOfFoldAsync(ce, options.expression, product, nonFinite, {
           signal: options.signal,
           _effects: options.effects,
+          _contextStack: options._contextStack,
         });
       },
     },
@@ -10696,7 +10733,14 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
 
       evaluateAsync: async (
         [first, ...rest],
-        { engine, signal, numericApproximation, effects, expression }
+        {
+          engine,
+          signal,
+          numericApproximation,
+          effects,
+          expression,
+          _contextStack,
+        }
       ) => {
         // Arity-1 form over an operand that can be absent as a whole: as in
         // the synchronous handler.
@@ -10714,6 +10758,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               numericApproximation,
               signal,
               _effects: effects,
+              _contextStack,
             });
           if (first.isFiniteCollection !== true) return undefined;
           // An exact `Range` has a closed form — see the sync handler.
@@ -10729,7 +10774,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           const result = await runAsync(
             // The elements are evaluated synchronously, and `runAsync`
             // suspends this handler between time slices: every step must run
-            // with the host capability registry this evaluation captured.
+            // with the host capability registry and the context stack this
+            // evaluation captured.
             withEvaluationEffects(
               engine,
               effects,
@@ -10741,7 +10787,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
                     x.evaluate()
                   );
                 return addSumTerm(acc, term, numericApproximation);
-              })
+              }),
+              _contextStack
             ),
             engine._timeRemaining,
             signal,
@@ -10756,6 +10803,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           return numericOfFoldAsync(engine, expression, sum, nonFinite, {
             signal,
             _effects: effects,
+            _contextStack,
           });
         }
 
@@ -10781,6 +10829,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
                       numericApproximation: numeric,
                       signal,
                       _effects: effects,
+                      _contextStack,
                     })
                   : term;
               if (asyncTerms) return undefined;
@@ -10834,7 +10883,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const result = await runAsync(
           // The terms are evaluated synchronously, and `runAsync`
           // suspends this handler between time slices: every step must run
-          // with the host capability registry this evaluation captured.
+          // with the host capability registry and the context stack (the
+          // scope of the index) this evaluation captured.
           withEvaluationEffects(
             engine,
             effects,
@@ -10848,7 +10898,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
                       bindings,
                       numeric,
                       signal,
-                      effects
+                      effects,
+                      _contextStack
                     ).then((term) => accumulate(acc, term))
                   : accumulate(acc, numericTerm(x, bindings)),
               new SumTerms(),
@@ -10864,7 +10915,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
                 },
                 numericApproximation: numeric,
               }
-            )
+            ),
+            _contextStack
           ),
           engine._timeRemaining,
           signal,
@@ -10882,6 +10934,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         return numericOfFoldAsync(engine, expression, sum, nonFinite, {
           signal,
           _effects: effects,
+          _contextStack,
         });
       },
     },

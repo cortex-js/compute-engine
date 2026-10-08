@@ -28,6 +28,7 @@ import { limitsIndexSites } from '../boxed-expression/binding-sites.js';
 import { validateArguments } from '../boxed-expression/validate.js';
 import { flatten } from '../boxed-expression/flatten.js';
 import { isOperatorDef } from '../boxed-expression/utils.js';
+import { runWithEvaluationEffects } from '../effects-registry.js';
 import {
   isCollectionShaped,
   isFiniteBroadcastParticipant,
@@ -308,8 +309,20 @@ const decideImplies: Decider = (ce, v, i) =>
 function evaluateOptionsOf(
   options: EvaluateHandlerOptions
 ): Partial<EvaluateOptions> {
-  const { numericApproximation, materialization, signal, _effects } = options;
-  return { numericApproximation, materialization, signal, _effects };
+  const {
+    numericApproximation,
+    materialization,
+    signal,
+    _effects,
+    _contextStack,
+  } = options;
+  return {
+    numericApproximation,
+    materialization,
+    signal,
+    _effects,
+    _contextStack,
+  };
 }
 
 /**
@@ -339,8 +352,20 @@ function finishShortCircuit(
   if (error && !values.some((v, i) => decide(ce, v, i) !== undefined))
     return error;
   const isCollectionValue = (x: Expression) => isFiniteBroadcastParticipant(x);
-  if (!ops.some(isCollectionValue) && values.some(isCollectionValue))
-    return ce.function(name, values).evaluate(evalOptions);
+  if (!ops.some(isCollectionValue) && values.some(isCollectionValue)) {
+    // On the asynchronous path this runs after an `await`, so the
+    // evaluation must be given the registry and the context stack of its
+    // evaluation explicitly: the engine does not keep them installed.
+    const rebuild = () => ce.function(name, values).evaluate(evalOptions);
+    return evalOptions._effects === undefined
+      ? rebuild()
+      : runWithEvaluationEffects(
+          ce,
+          evalOptions._effects,
+          rebuild,
+          evalOptions._contextStack
+        );
+  }
   return reduce(values, { engine: ce });
 }
 

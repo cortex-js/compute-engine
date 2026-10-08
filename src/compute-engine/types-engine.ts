@@ -81,6 +81,7 @@ import type {
   InspectableScope as KernelInspectableScope,
   NarrowingSink as KernelNarrowingSink,
   EvalContext as KernelEvalContext,
+  EvaluateOptions as KernelEvaluateOptions,
 } from './types-kernel-evaluation.js';
 import type {
   LanguageTarget,
@@ -1433,6 +1434,48 @@ export interface IComputeEngine {
    * calling `withEffects`, or use a separate engine.
    */
   withEffects<T>(overrides: EffectHandlerOverrides, fn: () => T): T;
+
+  /**
+   * Run the synchronous `fn` in the evaluation context that `options`
+   * carries, then put the previous context back, and return the result of
+   * `fn`.
+   *
+   * For an `evaluateAsync` handler. The handler receives `options`, which
+   * carry the evaluation context of the evaluation that called it: the host
+   * capability registry, and the lexical scopes of the scoped operators that
+   * the evaluation is inside (the scope of the index of a `Sum`, for
+   * example). While the handler is suspended at an `await`, other code can
+   * run on the same engine, so the engine does not keep that context
+   * installed for the handler. Before the first `await`, the context is in
+   * place. After it, synchronous work that reads the scope — canonicalizing
+   * a held operand (`x.canonical`), `ce.box()`, `ce.parse()`, `evaluate()`,
+   * `ce.assign()` — sees the global scope unless it runs inside `fn`. An
+   * index of an enclosing `Sum` then stays symbolic, and a new global
+   * symbol with its name is declared.
+   *
+   * ```ts
+   * ce.declare('Late', {
+   *   signature: '(integer) -> integer',
+   *   lazy: true,
+   *   evaluateAsync: async ([x], options) => {
+   *     await delay(1);
+   *     return ce
+   *       .withEvaluationContext(options, () => x.canonical)
+   *       .evaluateAsync(options);
+   *   },
+   * });
+   * ```
+   *
+   * A nested `evaluateAsync(options)` call does not need it: the options
+   * carry the context to that evaluation.
+   *
+   * If `fn` returns a promise, only the synchronous part of `fn`, up to its
+   * first `await`, runs in the context.
+   */
+  withEvaluationContext<T>(
+    options: Partial<KernelEvaluateOptions> | undefined,
+    fn: () => T
+  ): T;
 
   iterationLimit: number;
 

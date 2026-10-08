@@ -1870,6 +1870,7 @@ export async function numericFromExactValueAsync(
   const exact = await expression.evaluateAsync({
     signal: options?.signal,
     _effects: options?._effects,
+    _contextStack: options?._contextStack,
   });
   if (!isNumber(exact) || exact.isNaN === true) return undefined;
   return exact.N();

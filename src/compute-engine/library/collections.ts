@@ -5550,15 +5550,23 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // element's effects happen in the same order as on the sync route.
     evaluateAsync: async (
       ops,
-      { engine, numericApproximation, materialization, signal, effects }
+      {
+        engine,
+        numericApproximation,
+        materialization,
+        signal,
+        effects,
+        _contextStack,
+      }
     ) => {
-      // `_effects` hands the host capability registry this evaluation
-      // captured to each element's evaluation.
+      // `_effects` and `_contextStack` hand the host capability registry and
+      // the context stack this evaluation captured to each element's evaluation.
       const options = {
         numericApproximation,
         materialization,
         signal,
         _effects: effects,
+        _contextStack,
       };
       const evaluated = async (
         xs: ReadonlyArray<Expression>
@@ -5658,15 +5666,23 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // are awaited one at a time, in order.
     evaluateAsync: async (
       ops,
-      { engine: ce, numericApproximation, materialization, signal, effects }
+      {
+        engine: ce,
+        numericApproximation,
+        materialization,
+        signal,
+        effects,
+        _contextStack,
+      }
     ) => {
-      // `_effects` hands the host capability registry this evaluation
-      // captured to each nested evaluation.
+      // `_effects` and `_contextStack` hand the host capability registry and
+      // the context stack this evaluation captured to each nested evaluation.
       const options = {
         numericApproximation,
         materialization,
         signal,
         _effects: effects,
+        _contextStack,
       };
       const comp = parseSetComprehension(ops);
       if (comp !== null) {

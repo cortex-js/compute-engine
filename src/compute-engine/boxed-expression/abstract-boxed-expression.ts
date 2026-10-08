@@ -1306,8 +1306,24 @@ export abstract class _BoxedExpression implements Expression {
   // options decide WHAT it evaluates to, and dropping them made
   // `[1/3].evaluateAsync({ numericApproximation: true })` keep the rational
   // where the synchronous route floats it.
+  //
+  // A symbol reads its value through the current scope, which is the top of
+  // the engine's evaluation-context stack. Inside a scoped operator (the
+  // index of a `Sum`), an asynchronous evaluation keeps its scopes on its
+  // own stack (`EvaluateOptions._contextStack`), so that stack is put in
+  // place of the engine's stack while the leaf is evaluated.
   evaluateAsync(options?: Partial<EvaluateOptions>): Promise<Expression> {
-    return Promise.resolve(this.evaluate(options));
+    const contextStack = options?._contextStack;
+    if (contextStack === undefined)
+      return Promise.resolve(this.evaluate(options));
+    const engine = this.engine;
+    const enclosingStack = engine._evalContextStack;
+    engine._evalContextStack = contextStack;
+    try {
+      return Promise.resolve(this.evaluate(options));
+    } finally {
+      engine._evalContextStack = enclosingStack;
+    }
   }
 
   N(): Expression {

@@ -428,7 +428,7 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
       },
       evaluateAsync: async (
         ops,
-        { engine: ce, signal, effects, expression }
+        { engine: ce, signal, effects, expression, _contextStack }
       ) => {
         const nested = enterNestedBodyScopes(expression, {
           includeRoot: true,
@@ -438,11 +438,13 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
           return await runAsync(
             // The loop body is evaluated synchronously, and `runAsync`
             // suspends this handler between time slices: every step must run
-            // with the host capability registry this evaluation captured.
+            // with the host capability registry and the context stack (the
+            // scope of the loop index) this evaluation captured.
             withEvaluationEffects(
               ce,
               effects,
-              runLoop(ops[0], ops.slice(1), ce)
+              runLoop(ops[0], ops.slice(1), ce),
+              _contextStack
             ),
             ce._timeRemaining,
             signal,
@@ -2061,17 +2063,21 @@ async function evaluateIfAsync(
     materialization: options.materialization,
     signal: options.signal,
     _effects: options._effects,
+    _contextStack: options._contextStack,
   };
   const evaluated =
     cond === undefined ? undefined : await cond.evaluateAsync(evalOptions);
   // The synchronous fallbacks below run after the `await` above, so the
   // arms they evaluate must be given this evaluation's host capability
-  // registry explicitly (`runWithEvaluationEffects`).
+  // registry and context stack explicitly (`runWithEvaluationEffects`).
   const fallback = (ops: ReadonlyArray<Expression>) =>
     options._effects === undefined
       ? evaluateIf(ops, options)
-      : runWithEvaluationEffects(engine, options._effects, () =>
-          evaluateIf(ops, options)
+      : runWithEvaluationEffects(
+          engine,
+          options._effects,
+          () => evaluateIf(ops, options),
+          options._contextStack
         );
   if (evaluated === undefined) return fallback(ops);
   const { value, undecided } = evaluateCondition(evaluated);
@@ -2106,15 +2112,19 @@ async function evaluateWhichAsync(
     materialization: options.materialization,
     signal: options.signal,
     _effects: options._effects,
+    _contextStack: options._contextStack,
   };
   // The synchronous fallbacks below run after an `await`, so the arms they
-  // evaluate must be given this evaluation's host capability registry
-  // explicitly (`runWithEvaluationEffects`).
+  // evaluate must be given this evaluation's host capability registry and
+  // context stack explicitly (`runWithEvaluationEffects`).
   const fallback = (args: ReadonlyArray<Expression>) =>
     options._effects === undefined
       ? evaluateWhich(args, options)
-      : runWithEvaluationEffects(engine, options._effects, () =>
-          evaluateWhich(args, options)
+      : runWithEvaluationEffects(
+          engine,
+          options._effects,
+          () => evaluateWhich(args, options),
+          options._contextStack
         );
   let i = 0;
   while (i < args.length - 1) {
@@ -2297,10 +2307,24 @@ async function evaluateBlockAsync(
   const ce = options.engine;
   if (ops.length === 0) return ce.Nothing;
   sweepCanonicalizationBindings(ce);
-  return resolveEscapingLambda(
+  const result = await evaluateStatementsAsync(
     ce,
-    await evaluateStatementsAsync(ce, ops, options.signal, options._effects)
+    ops,
+    options.signal,
+    options._effects,
+    options._contextStack
   );
+  // `resolveEscapingLambda` reads the block scope as the current lexical
+  // scope. It runs after an `await`, so the context stack of this evaluation
+  // (which holds the block scope) must be put in place explicitly.
+  return options._effects === undefined
+    ? resolveEscapingLambda(ce, result)
+    : runWithEvaluationEffects(
+        ce,
+        options._effects,
+        () => resolveEscapingLambda(ce, result),
+        options._contextStack
+      );
 }
 
 /**

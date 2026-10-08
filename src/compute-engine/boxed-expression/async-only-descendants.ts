@@ -1,5 +1,6 @@
 import type { Expression, EvaluateOptions } from '../global-types.js';
 import { isFunction } from './type-guards.js';
+import { isOperatorDef } from './definition-guards.js';
 
 /**
  * Await the ASYNCHRONOUS-ONLY descendants of a lazy operator's held operands
@@ -30,7 +31,9 @@ import { isFunction } from './type-guards.js';
  * which owns the evaluation of its body, where a bound index may still be
  * free; and an operator that QUOTES its operand, which holds it as data. An
  * asynchronous-only application under either stays for that operator to
- * handle.
+ * handle. One exception: a `ReleaseHold` whose operand is a `Hold` evaluates
+ * the held expression, so when that expression holds an asynchronous-only
+ * application, the `ReleaseHold` is awaited whole.
  */
 export async function awaitAsyncOnlyDescendants(
   ops: ReadonlyArray<Expression>,
@@ -68,6 +71,15 @@ async function awaitAsyncOnlyIn(
       return def.evaluateAsync !== undefined ? x.evaluateAsync(options) : x;
     if (def.scoped || def.holdClass === 'quote') return x;
   }
+  // `ReleaseHold(Hold(y))` evaluates `y`, which the walk does not enter
+  // (`Hold` quotes it). When `y` holds an asynchronous-only application,
+  // the `ReleaseHold` is awaited whole through its asynchronous handler.
+  if (
+    x.operator === 'ReleaseHold' &&
+    isFunction(x.op1, 'Hold') &&
+    containsAsyncOnly(x.op1.op1, true)
+  )
+    return x.evaluateAsync(options);
   const ops = await awaitAsyncOnlyInEach(x.ops, options);
   if (ops === undefined) return x;
   // A value-safe rebuild: the values stand where the applications stood, as
@@ -79,6 +91,8 @@ async function awaitAsyncOnlyIn(
  * Whether `x` contains an application of an ASYNCHRONOUS-ONLY operator (one
  * with an `evaluateAsync` handler and no `evaluate` handler), at any depth
  * except under an operator that QUOTES its operand, which holds it as data.
+ * One quoted operand is looked into: the operand of a `Hold` that is the
+ * operand of a `ReleaseHold`, because the `ReleaseHold` evaluates it.
  * An engine that has never declared such an operator answers `false` at
  * once. The scoped operators that own the evaluation of their body (`Sum`,
  * `Product`, `Block`) ask this before taking their asynchronous per-term
@@ -89,13 +103,28 @@ export function hasAsyncOnlyApplication(x: Expression): boolean {
   return containsAsyncOnly(x);
 }
 
-function containsAsyncOnly(x: Expression): boolean {
+/**
+ * `held` is `true` inside the operand of a released `Hold`. That operand is
+ * not bound, so its applications carry no operator definition: the
+ * definition is then looked up by name in the current scope.
+ */
+function containsAsyncOnly(x: Expression, held = false): boolean {
   if (!isFunction(x)) return false;
-  const def = x.operatorDefinition;
+  let def = x.operatorDefinition;
+  if (def === undefined && held) {
+    const binding = x.engine.lookupDefinition(x.operator);
+    if (isOperatorDef(binding)) def = binding.operator;
+  }
   if (def !== undefined) {
     if (def.evaluateAsync !== undefined && def.evaluate === undefined)
       return true;
     if (def.holdClass === 'quote') return false;
   }
-  return x.ops.some(containsAsyncOnly);
+  // `ReleaseHold(Hold(y))` evaluates `y`, so an asynchronous-only
+  // application in `y` must be found. Else a `Sum` with the term
+  // `ReleaseHold(Hold(f(k)))` takes its synchronous fold, which cannot run
+  // `f`, and keeps `f(1) + f(2) + …` unevaluated.
+  if (x.operator === 'ReleaseHold' && isFunction(x.op1, 'Hold'))
+    return containsAsyncOnly(x.op1.op1, true);
+  return x.ops.some((op) => containsAsyncOnly(op, held));
 }

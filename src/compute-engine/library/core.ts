@@ -3893,8 +3893,16 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // The asynchronous twin: the released expression is evaluated with
       // `evaluateAsync`, so that a long one yields to the event loop and
       // honours the abort signal (GitHub issue #392).
-      evaluateAsync: async ([x], { numericApproximation, signal, effects }) => {
-        const opts = { numericApproximation, signal, _effects: effects };
+      evaluateAsync: async (
+        [x],
+        { numericApproximation, signal, effects, _contextStack }
+      ) => {
+        const opts = {
+          numericApproximation,
+          signal,
+          _effects: effects,
+          _contextStack,
+        };
         if (isFunction(x, 'Hold')) return x.op1.canonical.evaluateAsync(opts);
         const v = await x.canonical.evaluateAsync(opts);
         if (isFunction(v, 'Hold')) return v.op1.canonical.evaluateAsync(opts);
@@ -7104,8 +7112,16 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // The asynchronous twin: the operand is evaluated with `evaluateAsync`,
       // so that a long operand yields to the event loop and honours the abort
       // signal (GitHub issue #392).
-      evaluateAsync: ([x], { numericApproximation, signal, effects }) =>
-        x.evaluateAsync({ numericApproximation, signal, _effects: effects }),
+      evaluateAsync: (
+        [x],
+        { numericApproximation, signal, effects, _contextStack }
+      ) =>
+        x.evaluateAsync({
+          numericApproximation,
+          signal,
+          _effects: effects,
+          _contextStack,
+        }),
     },
 
     // Evaluate an expression at a specific point, potentially symbolically
@@ -11138,13 +11154,23 @@ async function evaluateNAsync(
   ops: ReadonlyArray<Expression>,
   options: EvaluateHandlerOptions
 ): Promise<Expression | undefined> {
-  const { engine: ce, signal, effects } = options;
-  const opts = { numericApproximation: true, signal, _effects: effects };
+  const { engine: ce, signal, effects, _contextStack } = options;
+  const opts = {
+    numericApproximation: true,
+    signal,
+    _effects: effects,
+    _contextStack,
+  };
   const source = ops[0].canonical;
+  // `numeric()` can run after an `await`: a symbol's `N()` reads its value
+  // through the current scope, so it runs with this evaluation's context
+  // stack (and registry) in place.
   const numeric = (): Promise<Expression> =>
     isFunction(source)
       ? source.evaluateAsync(opts)
-      : Promise.resolve(source.N());
+      : Promise.resolve(
+          runWithEvaluationEffects(ce, effects, () => source.N(), _contextStack)
+        );
   const request: NRequest =
     ops.length < 2
       ? { kind: 'plain' }
@@ -11158,11 +11184,15 @@ async function evaluateNAsync(
     const [resolved] = await awaitAsyncOnlyDescendants([source], {
       signal,
       _effects: effects,
+      _contextStack,
     });
     // A synchronous evaluation after an `await` runs with this evaluation's
-    // registry (`docs/EFFECTS-MODEL.md`, rule 3).
-    return runWithEvaluationEffects(ce, effects, () =>
-      evaluateNResolved(ce, resolved, request)
+    // registry and context stack (`docs/EFFECTS-MODEL.md`, rule 3).
+    return runWithEvaluationEffects(
+      ce,
+      effects,
+      () => evaluateNResolved(ce, resolved, request),
+      _contextStack
     );
   }
 
@@ -11182,8 +11212,11 @@ async function evaluateNAsync(
   ce._requestedPrecision = p;
   try {
     const value = await numeric();
-    return runWithEvaluationEffects(ce, effects, () =>
-      inexactResult(ce, roundToSignificantDigits(value, p), p, source)
+    return runWithEvaluationEffects(
+      ce,
+      effects,
+      () => inexactResult(ce, roundToSignificantDigits(value, p), p, source),
+      _contextStack
     );
   } finally {
     const i = active.entries.indexOf(entry);

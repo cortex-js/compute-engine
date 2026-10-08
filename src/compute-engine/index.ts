@@ -74,6 +74,7 @@ import type {
   InferenceWriteEvent,
   InferenceCauseContext,
   EngineCheckpoint,
+  EvaluateOptions,
 } from './global-types.js';
 
 import type {
@@ -179,6 +180,7 @@ import {
   CapabilityDeniedError,
   DEFAULT_EFFECT_HANDLERS,
   deriveEffectHandlers,
+  runWithEvaluationEffects,
 } from './effects-registry.js';
 import type {
   EffectHandlerOverrides,
@@ -214,6 +216,7 @@ import {
   pushEvalContext as pushEvalContextImpl,
   popEvalContext as popEvalContextImpl,
   removeEvalContext as removeEvalContextImpl,
+  releaseChainingFrame,
   inScope as inScopeImpl,
   printStack as printStackImpl,
 } from './engine-scope.js';
@@ -595,6 +598,12 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   set contextStack(stack: ReadonlyArray<EvalContext>) {
+    // A frame that the new stack does not keep is dropped without a pop. If
+    // it chains its scope onto an ambient scope, release it, so that the
+    // scope gets its parent link back when no other live frame chains it.
+    const kept = new Set(stack);
+    for (const frame of this._evalContextStack)
+      if (!kept.has(frame)) releaseChainingFrame(frame);
     this._evalContextStack = [...stack];
   }
 
@@ -1977,6 +1986,20 @@ export class ComputeEngine implements IComputeEngine {
     if (settled !== undefined) return settled as T;
     close();
     return result;
+  }
+
+  withEvaluationContext<T>(
+    options: Partial<EvaluateOptions> | undefined,
+    fn: () => T
+  ): T {
+    // When `options` carry no registry, the registry slot keeps the one of
+    // the evaluation that is running now, or gets the installed one.
+    return runWithEvaluationEffects(
+      this,
+      options?._effects ?? this._evaluationEffects ?? this._effects,
+      fn,
+      options?._contextStack
+    );
   }
 
   /** Absolute time (`Date.now()` epoch ms) beyond which evaluation should

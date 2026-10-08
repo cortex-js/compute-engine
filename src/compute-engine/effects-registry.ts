@@ -119,56 +119,85 @@ export function deriveEffectHandlers(
 }
 
 /**
- * Run the synchronous `fn` as part of the evaluation that captured `effects`,
- * and return its result.
+ * Run the synchronous `fn` as part of the evaluation that captured `effects`
+ * and `contextStack`, and return its result.
  *
- * For a synchronous segment of asynchronous evaluation code that runs AFTER
- * an `await`: the evaluation driver publishes the captured registry in the
- * engine slot only for the synchronous start of an `evaluateAsync()` call and
- * of a handler call. A synchronous `evaluate()` started after an `await`
- * would find the slot empty and capture whichever registry is installed at
- * that moment — possibly one installed for a different, concurrent
- * evaluation. This puts the right one in the slot for the duration of `fn`,
- * and takes it out again before control returns.
+ * An asynchronous evaluation carries two parts of engine state that an
+ * engine field cannot hold for it, because while it is suspended at an
+ * `await`, another evaluation can run on the same engine:
+ *
+ * - The host capability registry (`effects`). The evaluation driver
+ *   publishes the captured registry in the engine slot only for the
+ *   synchronous start of an `evaluateAsync()` call and of a handler call. A
+ *   synchronous `evaluate()` started after an `await` would find the slot
+ *   empty and capture whichever registry is installed at that moment —
+ *   possibly one installed for a different, concurrent evaluation.
+ * - The evaluation-context stack (`contextStack`), when the evaluation has
+ *   its own: the lexical scopes of the scoped operators it is inside (the
+ *   index of a `Sum`, the locals of a `Block`). The engine reads the current
+ *   scope from the top of `engine._evalContextStack`. An asynchronous
+ *   evaluation keeps its scopes on its own array, not on the engine's array,
+ *   so that a concurrent evaluation does not see them, and they do not hide
+ *   the concurrent evaluation's own scopes.
+ *
+ * This puts the right registry in the slot, and the evaluation's own array
+ * in place of the engine's array (by reference, so that a scope `fn` pushes
+ * and holds across a later `await` stays on that array), for the duration
+ * of `fn`. It restores both before control returns. When `contextStack` is
+ * `undefined`, the engine's array is left as it is.
  */
-export function runWithEvaluationEffects<T>(
-  engine: { _evaluationEffects: EffectHandlers | undefined },
+export function runWithEvaluationEffects<T, C>(
+  engine: {
+    _evaluationEffects: EffectHandlers | undefined;
+    _evalContextStack: C[];
+  },
   effects: EffectHandlers,
-  fn: () => T
+  fn: () => T,
+  contextStack?: C[]
 ): T {
   const enclosing = engine._evaluationEffects;
+  const enclosingStack = engine._evalContextStack;
   engine._evaluationEffects = effects;
+  if (contextStack !== undefined) engine._evalContextStack = contextStack;
   try {
     return fn();
   } finally {
     engine._evaluationEffects = enclosing;
+    if (contextStack !== undefined) engine._evalContextStack = enclosingStack;
   }
 }
 
 /**
  * Wrap a generator so that every step of it runs as part of the evaluation
- * that captured `effects`.
+ * that captured `effects` and `contextStack` (see `runWithEvaluationEffects`
+ * for what these two hold and why).
  *
  * For an `evaluateAsync` operator handler that drives a generator with
  * `runAsync` when the generator's steps call the synchronous `evaluate()` — a
  * loop body, the terms of a sum. `runAsync` suspends the handler between time
- * slices. The evaluation driver publishes the captured registry in the engine
- * slot only for the synchronous START of a handler, so a step that runs after
- * a suspension would find the slot empty, and the synchronous evaluation it
- * starts would capture whichever registry is installed at that moment —
- * possibly one installed for a different, concurrent evaluation. This puts
- * the right registry in the slot around each step, and takes it out again
- * before control returns to `runAsync`.
+ * slices, and a step that runs after a suspension would otherwise see the
+ * engine state that another, concurrent evaluation left: an empty registry
+ * slot, and an evaluation-context stack without this evaluation's scopes. A
+ * `Sum` would then assign its index in the wrong scope. This puts the right
+ * registry and stack in place around each step, and restores the previous
+ * ones before control returns to `runAsync`.
  */
-export function* withEvaluationEffects<T, R, N>(
-  engine: { _evaluationEffects: EffectHandlers | undefined },
+export function* withEvaluationEffects<T, R, N, C>(
+  engine: {
+    _evaluationEffects: EffectHandlers | undefined;
+    _evalContextStack: C[];
+  },
   effects: EffectHandlers,
-  gen: Generator<T, R, N>
+  gen: Generator<T, R, N>,
+  contextStack?: C[]
 ): Generator<T, R, N> {
   let sent: N | undefined = undefined;
   for (;;) {
-    const step = runWithEvaluationEffects(engine, effects, () =>
-      gen.next(sent as N)
+    const step = runWithEvaluationEffects(
+      engine,
+      effects,
+      () => gen.next(sent as N),
+      contextStack
     );
     if (step.done) return step.value;
     sent = yield step.value;

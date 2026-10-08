@@ -167,6 +167,22 @@ export type EvaluateOptions = {
    * @internal
    */
   _effects: EffectHandlers;
+
+  /**
+   * The evaluation-context stack of the asynchronous evaluation these options
+   * belong to: the engine's stack as it was when the evaluation started, plus
+   * the lexical scope of each scoped operator (a `Sum`, a `Block`) the
+   * evaluation is inside. `evaluateAsync()` sets it when it evaluates a
+   * scoped operator, and the options object then carries it to every nested
+   * `evaluateAsync()` call, as it carries `_effects`. The engine reads the
+   * current scope from the top of its own stack. While this evaluation is
+   * suspended at an `await`, another evaluation can run on the same engine,
+   * so this evaluation keeps its scopes on this array, and puts the array in
+   * place of the engine's stack only while its own synchronous code runs
+   * (`runWithEvaluationEffects`). Not an input.
+   * @internal
+   */
+  _contextStack: EvalContext<any, any, any>[];
 };
 
 /**

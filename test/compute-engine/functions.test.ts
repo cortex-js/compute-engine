@@ -1271,20 +1271,23 @@ describe('ASYNC LANE KEEPS A SCOPED HANDLER’S LOCAL SCOPE ALIVE', () => {
     }
   }, ASYNC_LANE_TIMEOUT);
 
-  // Holding the local context across the `await` means a SECOND evaluation
-  // started while the first is suspended interleaves its own push, so the
-  // first one's frame is no longer on top when it unwinds. (Measured: the two
-  // frames do coexist — the stack reaches depth 4, and the first unwind finds
-  // its own frame at index 2 of 4.) The frame is therefore removed by
-  // IDENTITY, so an unwinding evaluation cannot dispose a still-running one's
-  // bindings.
+  // Each evaluation holds its local context across the `await` on its OWN
+  // copy of the evaluation-context stack (`EvaluateOptions._contextStack`),
+  // so a SECOND evaluation started while the first is suspended neither sees
+  // the frame of the first nor pushes its own frame above it. Each frame is
+  // removed by IDENTITY from the copy that holds it, so an unwinding
+  // evaluation cannot dispose a still-running one's bindings.
   //
   // HONESTY NOTE: these are CHARACTERIZATION tests, not discriminating
-  // regression tests. They also pass against the pop-the-top and unwind-by-
-  // depth versions: on this workload the wrong frame being disposed has no
-  // observable effect (the stack still rebalances, and the sums still come out
-  // right). They pin the outcome so a future change that DOES make it
-  // observable fails here. Do not read a pass as proof the removal is correct.
+  // regression tests. They also passed when the frames of both evaluations
+  // were on the engine's own stack: on this workload, a frame that another
+  // evaluation can see, or that it removes, has no observable effect (the
+  // stack still rebalances, and the sums still come out right). They pin the
+  // outcome so a future change that DOES make it observable fails here. The
+  // tests that fail when the two evaluations share one stack are the
+  // mid-flight caller test below and the "concurrent asynchronous
+  // evaluations keep their own scopes" block of
+  // `evaluate-async-lazy-heads.test.ts`.
   describe('concurrent async evaluation', () => {
     // Asymmetric ON PURPOSE: the smaller sum is started FIRST, so it settles
     // while the larger one is still mid-flight — the ordering that makes one
@@ -1335,40 +1338,50 @@ describe('ASYNC LANE KEEPS A SCOPED HANDLER’S LOCAL SCOPE ALIVE', () => {
     }, ASYNC_LANE_TIMEOUT);
   });
 
-  // KNOWN LIMITATION, pinned so a change of behavior is deliberate: while an
-  // async evaluation is suspended, its scope is the engine's current one, so
-  // code that enters the engine in that window can SEE the loop index. Outer
-  // bindings still resolve correctly through the scope's parent chain, and the
-  // index is gone once the evaluation settles. Making this invisible needs
-  // per-evaluation (task-local) context propagation.
+  // While an async evaluation is suspended, its scope is NOT the engine's
+  // current scope: the evaluation keeps its scopes on its own copy of the
+  // evaluation-context stack (`EvaluateOptions._contextStack`), and puts that
+  // copy in place of the engine's stack only while its own code runs. So code
+  // that enters the engine in that window does not see the loop index, and
+  // enclosing bindings resolve as usual. (Before, the scope of the suspended
+  // evaluation stayed on top of the engine's stack, and this test pinned that
+  // the index was visible.)
   // Generous timeout: the workload is sized so the sum is still in flight
   // while the poller watches (do NOT shrink it — see BIGGER_FOR_SUSPEND), and
   // on a loaded CI runner each poll iteration also absorbs a ~16ms runAsync
   // chunk of the suspended sum, so the default 5s can be exceeded without
   // anything being wrong.
-  test('a suspended evaluation’s index is visible to a mid-flight caller', async () => {
+  test('a suspended evaluation’s index is not visible to a mid-flight caller', async () => {
     const ce = new ComputeEngine();
     ce.assign('a', 42);
+    let settled = false;
     const pending = ce
       .parse(`\\sum_{z=1}^{${BIGGER_FOR_SUSPEND}} z`)
-      .evaluateAsync();
+      .evaluateAsync()
+      .finally(() => {
+        settled = true;
+      });
 
-    // POLL rather than sleep a fixed interval: a single sleep races the
-    // evaluation finishing, which would make this test flaky under load.
+    // Poll while the evaluation is in flight, and count the polls that saw
+    // it in flight: a run in which the sum settles before the first poll
+    // proves nothing.
+    let pollsInFlight = 0;
     let sawIndex = false;
     let outerStayedCorrect = true;
-    for (let i = 0; i < 100 && !sawIndex; i++) {
+    for (let i = 0; i < 100 && !settled; i++) {
       await new Promise((resolve) => setTimeout(resolve, 5));
+      if (settled) break;
+      pollsInFlight += 1;
+      if (ce._evalContextStack.length !== 2) sawIndex = true;
       if (ce.box('z').value !== undefined) sawIndex = true;
-      // Enclosing bindings resolve through the scope's parent chain throughout
       if (ce.parse('a+1').evaluate().toString() !== '43')
         outerStayedCorrect = false;
     }
+    expect(pollsInFlight).toBeGreaterThan(0);
     expect(outerStayedCorrect).toBe(true);
-    expect(sawIndex).toBe(true);
+    expect(sawIndex).toBe(false);
 
-    await pending;
-    // ...and it is gone again once the evaluation settles
+    expect((await pending).toString()).toBe(String(gauss(BIGGER_FOR_SUSPEND)));
     expect(ce.box('z').value).toBeUndefined();
     expect(ce._evalContextStack.length).toBe(2);
   }, 30_000);
