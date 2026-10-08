@@ -16,12 +16,6 @@ const SMALL_SUM = [
   ['Divide', 1, ['Power', 'k', 2]],
   ['Limits', 'k', 1, 200],
 ];
-// About a quarter of a second: long enough to finish after a small sum.
-const MEDIUM_SUM = [
-  'Sum',
-  ['Divide', 1, ['Power', 'k', 2]],
-  ['Limits', 'k', 1, 20000],
-];
 
 describe('evaluateAsync under a lazy head yields and honours the abort signal', () => {
   const ce = new ComputeEngine();
@@ -136,23 +130,53 @@ describe('the asynchronous twins give the value of the synchronous handlers', ()
     );
   });
 
+  // Two requests in flight on one engine, finished in each order. The
+  // operand of one request is held by `Gated`, an asynchronous-only
+  // operator that suspends until the test releases it, so the test chooses
+  // the order of completion. (A first version let a sum over 20000 terms
+  // finish after a sum over 200 terms; under the load of the continuous
+  // integration machine it crossed the time limit of the test.) The field
+  // follows the requests in flight: while one request is still running, it
+  // holds that request's digits; once none is left, it is cleared.
   test('concurrent N(x, p) calls leave no requested precision behind', async () => {
     const engine = new ComputeEngine();
+    let release: () => void = () => {};
+    let gate = Promise.resolve();
+    const closeGate = () => {
+      gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+    };
+    engine.declare('Gated', {
+      signature: '(number) -> number',
+      evaluateAsync: async ([x]) => {
+        await gate;
+        return x;
+      },
+    } as never);
+    const expected = (p: number) =>
+      engine.box(['N', SMALL_SUM, p]).evaluate().toString();
+    const requested = () => (engine as any)._requestedPrecision;
+
+    // The first request to start finishes first.
+    closeGate();
     const a = engine.box(['N', SMALL_SUM, 10]).evaluateAsync();
-    const b = engine.box(['N', SMALL_SUM, 12]).evaluateAsync();
-    const [va, vb] = await Promise.all([a, b]);
-    expect(va.toString()).toBe(
-      engine.box(['N', SMALL_SUM, 10]).evaluate().toString()
-    );
-    expect(vb.toString()).toBe(
-      engine.box(['N', SMALL_SUM, 12]).evaluate().toString()
-    );
-    expect((engine as any)._requestedPrecision).toBeUndefined();
-    // The other order of completion.
-    const c = engine.box(['N', MEDIUM_SUM, 10]).evaluateAsync();
+    const b = engine.box(['N', ['Gated', SMALL_SUM], 12]).evaluateAsync();
+    expect((await a).toString()).toBe(expected(10));
+    expect(requested()).toBe(12);
+    release();
+    expect((await b).toString()).toBe(expected(12));
+    expect(requested()).toBeUndefined();
+
+    // The first request to start finishes last.
+    closeGate();
+    const c = engine.box(['N', ['Gated', SMALL_SUM], 10]).evaluateAsync();
     const d = engine.box(['N', SMALL_SUM, 12]).evaluateAsync();
-    await Promise.all([d, c]);
-    expect((engine as any)._requestedPrecision).toBeUndefined();
+    expect((await d).toString()).toBe(expected(12));
+    expect(requested()).toBe(10);
+    release();
+    expect((await c).toString()).toBe(expected(10));
+    expect(requested()).toBeUndefined();
   });
 
   test('an asynchronous-only precision operand, and an asynchronous-only source in the synchronous forms', async () => {
