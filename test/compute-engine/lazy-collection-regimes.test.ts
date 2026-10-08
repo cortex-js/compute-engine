@@ -102,11 +102,11 @@ describe('lazy collection regimes', () => {
   });
 
   test('Change 1 set — memoized lazy views', () => {
-    // The plan names sixteen; re-derivation adds three the regex missed:
+    // The plan names sixteen; re-derivation adds two the regex missed:
     // `Permutations` and `Combinations` (`library/combinatorics.ts`, both
-    // genuine lazy views that the memo now covers) and `Tuple`, whose
-    // `isLazy` handler exists but answers `false` for every instance — its
-    // membership here is inert (see the instance check below).
+    // genuine lazy views that the memo now covers). `Tuple` was here until
+    // it got an `evaluate` handler; it is now in the conditional-handler
+    // set.
     expect(namesIn('change-1')).toEqual([
       'Append',
       'Combinations',
@@ -125,7 +125,6 @@ describe('lazy collection regimes', () => {
       'RotateRight',
       'Slice',
       'Take',
-      'Tuple',
       'Zip',
     ]);
   });
@@ -138,7 +137,11 @@ describe('lazy collection regimes', () => {
     // what decides between materializing and falling through. `ListJoin`,
     // the list literal with a spread, is here too: its handler lists a
     // finite view up to `ce.maxCollectionSize` elements, because a literal
-    // is a value, and keeps an infinite or larger view.
+    // is a value, and keeps an infinite or larger view. `Tuple` is here
+    // because its `evaluate` handler lists each finite lazy element of the
+    // tuple, for the same reason. Its `isLazy` handler answers `false` for
+    // every instance, so its membership here is inert (see the instance
+    // check below).
     expect(namesIn('conditional-handler')).toEqual([
       'ChunkBy',
       'DeleteAt',
@@ -148,6 +151,7 @@ describe('lazy collection regimes', () => {
       'Repeat',
       'ReplaceAt',
       'SlidingWindow',
+      'Tuple',
     ]);
   });
 
@@ -198,7 +202,6 @@ describe('lazy collection regimes', () => {
     RotateRight: ['RotateRight', ['List', 1, 2, 3], 1],
     Slice: ['Slice', ['List', 1, 2, 3], 1, 2],
     Take: ['Take', ['List', 1, 2, 3], 2],
-    Tuple: ['Tuple', 1, 2, 3],
     Zip: ['Zip', ['List', 1, 2], ['List', 3, 4]],
   };
 
@@ -212,19 +215,6 @@ describe('lazy collection regimes', () => {
       const ce = new ComputeEngine();
       const e = ce.box(expr);
       expect(e.isCanonical).toBe(true);
-      if (name === 'Tuple') {
-        // `Tuple`'s `isLazy` handler answers `false`: an inert member of the
-        // def-level set, and correctly NOT memoized. A tuple of number
-        // literals is written-out data and evaluates to ITSELF
-        // (`evaluate-literal-data.test.ts`), which is not the memo, so the
-        // memo question is asked of a tuple with an element to evaluate.
-        expect(e.isLazyCollection).toBe(false);
-        expect(e.evaluate()).toBe(e);
-        const computed = ce.box(['Tuple', 1, ['Add', 'x', 2]]);
-        expect(computed.isLazyCollection).toBe(false);
-        expect(computed.evaluate()).not.toBe(computed.evaluate());
-        return;
-      }
       if (name === 'Iterate') {
         // Excluded for RETENTION: an `elementMemo` operator whose instance is
         // infinite. See the dedicated test below.
@@ -699,6 +689,7 @@ describe('conditional-handler views participate in the memo', () => {
     Repeat: ['Repeat', 5],
     ReplaceAt: ['ReplaceAt', ['Range', 1, 200], 1, 0],
     SlidingWindow: ['SlidingWindow', ['Range', 1, 200], 3],
+    Tuple: ['Tuple', 1, 2, 3],
   };
 
   test('every conditional-handler operator has a representative instance', () => {
@@ -709,10 +700,23 @@ describe('conditional-handler views participate in the memo', () => {
 
   test.each(Object.entries(CONDITIONAL_INSTANCES))(
     '%s: an over-threshold instance is memoized',
-    (_name, expr) => {
+    (name, expr) => {
       const ce = new ComputeEngine();
       const e = ce.box(expr);
       expect(e.isCanonical).toBe(true);
+      if (name === 'Tuple') {
+        // `Tuple`'s `isLazy` handler answers `false`: an inert member of the
+        // def-level set, and correctly NOT memoized. A tuple of number
+        // literals is written-out data and evaluates to ITSELF
+        // (`evaluate-literal-data.test.ts`), which is not the memo, so the
+        // memo question is asked of a tuple with an element to evaluate.
+        expect(e.isLazyCollection).toBe(false);
+        expect(e.evaluate()).toBe(e);
+        const computed = ce.box(['Tuple', 1, ['Add', 'x', 2]]);
+        expect(computed.isLazyCollection).toBe(false);
+        expect(computed.evaluate()).not.toBe(computed.evaluate());
+        return;
+      }
       expect(e.isLazyCollection).toBe(true);
       expect(e.evaluate()).toBe(e.evaluate());
     }

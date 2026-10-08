@@ -2,6 +2,25 @@
 
 ### Behavior Changes
 
+- **A list or tuple literal lists its finite lazy elements.** A list or
+  tuple literal, and the list or tuple that a user function collects when it
+  maps over a list or over the components of a tuple, now lists each finite
+  lazy element when it is evaluated, because a literal is a value. Before, an
+  element that evaluated to a lazy collection stayed a live view: with
+  `xs = [1, 2]`, `[map(x => x + 1, xs)]` printed as `[Map((x) => x + 1, "xs")]`
+  and read `xs` again at each later read; `[1..3, 4]` printed as `[1..3, 4]`;
+  and with `f(s) = [q + 1 for q in [1, 2]]`, `f([0, 1])` printed as
+  `[Comprehension(…), Comprehension(…)]`. They now evaluate to `[[2, 3]]`,
+  `[[1, 2, 3], 4]` and `[[2, 3], [2, 3]]`; `(1..3, 4)` evaluates to
+  `([1, 2, 3], 4)`, and with `g(u: integer) = 1..u`, `g((2, 3))` to
+  `([1, 2], [1, 2, 3])`. An indexed element becomes a list, and an element
+  typed as a set becomes a set. These stay lazy: an element that is not known
+  to be finite (`filter(1..oo, p)`, `1..oo`), a lazy dictionary view, and an
+  element whose elements would be more than `ce.maxCollectionSize` (one
+  budget for each literal or result). A callback in such an element now runs
+  for every element when the value is evaluated, not only for the elements a
+  consumer reads.
+
 - **An integer operation under `.N()` reads an exact integer operand
   exactly.** An operand at an `integer`-typed parameter was approximated to
   the working precision before the handler read it as an integer, so
@@ -134,6 +153,20 @@
   is now written in place (`CompileTarget.cseInlineConstant`), the
   expressions around it fold, and the constant table gives each distinct
   value one name. The JavaScript target already folded these.
+
+- **A compiled body error caused by a scalar in a list binding names the
+  binding.** A binding declared `list<number>` or `missing | list<number>`
+  and bound to a number is not refused at entry (the lowerings dispatch on
+  the run-time shape, so `Add(S, 1)` with `S = 5` is 6), but a lowering that
+  needs an array failed inside the body with `_tv1.reduce is not a function`,
+  which names a generated variable. Such an error now names the bindings
+  that may explain it, with the body's message kept as its `cause`: `"S"
+  (type \`list<number> | missing\`) received a number: compiled code reads
+  such a binding as a JavaScript array, and the compiled body failed (…).
+  Pass an array.` A scalar that the lowering accepts still runs. Compiled `Mod`, `Remainder`, `GCD` and `LCM` keep throwing a
+  `RangeError` for an infinite or out-of-range operand of any type (the
+  interpreter gives a type error for `Mod(+oo, 10)`); a plot host catches
+  the error at that sample.
 
 - **A dictionary trigger with a subscript matches across a space.**
   `\mathbb{R} _{>0}^2` parsed to `Subscript(RealNumbers, Error)^2` and

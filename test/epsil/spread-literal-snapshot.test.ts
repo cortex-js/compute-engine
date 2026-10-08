@@ -157,14 +157,16 @@ describe('a list literal snapshots a spread lazy collection', () => {
     expect(value.json).toEqual(['Tuple', ['List', 3, 4], 4]);
   });
 
-  test('an element that is not spread is kept as it is', () => {
+  test('an element that is not spread is one element, listed', () => {
     // `[...xs, 1..3]` is `ListJoin(xs, [Range(1, 3)])`. The range is an
-    // element of the literal, not a spread, so it stays a range, as it does
-    // in `[1..3]`, also when another operand is spread.
+    // element of the literal, not a spread, so it stays one element. A
+    // literal lists each finite lazy element, so that element is the list
+    // `[1, 2, 3]`, as it is in `[1..3]`, also when another operand is
+    // spread.
     const { value } = run('let xs = [1, 2]\n[...xs, 1..3]');
     expect(value.operator).toBe('List');
     expect(value.nops).toBe(3);
-    expect(value.ops![2].operator).toBe('Range');
+    expect(value.ops![2].json).toEqual(['List', 1, 2, 3]);
     expect(value.ops![2].json).toEqual(run('[1..3]').value.ops![0].json);
   });
 

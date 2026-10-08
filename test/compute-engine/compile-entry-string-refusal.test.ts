@@ -399,3 +399,92 @@ describe('COMPILE fallback: a string or a boolean argument', () => {
     expect(r.run!({ B: false, S: [1, 2] } as any)).toBe(-1);
   });
 });
+
+describe('COMPILE entry: a body error caused by a scalar in an array-read binding names the binding', () => {
+  // A scalar in a `list`-declared binding is NOT refused at entry: the
+  // lowerings dispatch on the run-time shape, and `Add(S, 1)` with `S = 5` is
+  // 6 (`compile-list-entry.test.ts`). A lowering that needs an array then
+  // fails inside the body, and the error named a generated variable:
+  // `_tv1.reduce is not a function`. The error now names the binding and
+  // its declared type (user decision 2026-10-08, `namedEntryError`).
+  const named = (label: string, type: string, kind: string) =>
+    new RegExp(
+      `${label} \\(type \`${type.replace(/[<>|]/g, (c) => `\\${c}`)}\`\\) received ${kind}: compiled code reads such a binding as a JavaScript array, and the compiled body failed \\(.*\\)\\. Pass an array\\.`
+    );
+
+  it('Sum over `missing | list<number>` given a number', () => {
+    const r = compiled('missing | list<number>', ['Sum', 'S']);
+    expect(r.success).toBe(true);
+    expect(r.run!({ S: [1, 2, 3] } as any)).toBe(6);
+    expect(r.run!({ S: undefined } as any)).toBeNaN();
+    expect(() => r.run!({ S: 5 } as any)).toThrow(
+      named('"S"', 'list<number> | missing', 'a number')
+    );
+    expect(() => r.run!({ S: null } as any)).toThrow(
+      named('"S"', 'list<number> | missing', 'null')
+    );
+  });
+
+  it('Sum over `list<number>` given a number', () => {
+    const r = compiled('list<number>', ['Sum', 'S']);
+    expect(() => r.run!({ S: 5 } as any)).toThrow(
+      named('"S"', 'list<number>', 'a number')
+    );
+  });
+
+  it('a scalar that the lowering accepts still runs', () => {
+    const ce = new ComputeEngine();
+    ce.declare('S', 'list<number>');
+    const r = compile(ce.box(['Add', 'S', 1]), { constantFold: false })!;
+    expect(r.run!({ S: 5 } as any)).toBe(6);
+    expect(r.run!({ S: [1, 2] } as any)).toEqual([2, 3]);
+  });
+
+  it('the lambda route names the argument', () => {
+    const ce = new ComputeEngine();
+    const r = compile(
+      ce.box(['Function', ['Sum', 'xs'], ['Typed', 'xs', 'list<number>']]),
+      { constantFold: false }
+    )!;
+    expect(r.run!([1, 2, 3] as any)).toBe(6);
+    expect(() => r.run!(5 as any)).toThrow(
+      named('argument 1', 'list<number>', 'a number')
+    );
+  });
+
+  it('an error that no array-read binding explains is unchanged', () => {
+    const ce = new ComputeEngine();
+    ce.declare('S', 'list<number>');
+    const r = compile(ce.box(['Sum', 'S']), { constantFold: false })!;
+    // The binding holds an array: a body error (none here) would pass
+    // through; a wrong-typed entry is reported by the entry check itself.
+    expect(r.run!({ S: new Float64Array([1, 2]) } as any)).toBe(3);
+    // A body error of another shape is not renamed: the complex entry check
+    // reports an object entry itself, before the body runs.
+    expect(() => r.run!({ S: [{ re: 1, im: 2 }] } as any)).toThrow(/entry/);
+  });
+
+  it('names every candidate binding when several hold a scalar', () => {
+    // `Add(S, 1)` accepts the scalar `S`; `Sum(T)` fails on the scalar `T`.
+    // The runtime cannot tell which binding the body read, so it names
+    // both as possible causes and keeps the body's message.
+    const ce = new ComputeEngine();
+    ce.declare('S', 'list<number>');
+    ce.declare('T', 'list<number>');
+    const r = compile(ce.box(['Tuple', ['Add', 'S', 1], ['Sum', 'T']]), {
+      constantFold: false,
+    })!;
+    expect(r.success).toBe(true);
+    let caught: unknown;
+    try {
+      r.run!({ S: 5, T: 7 } as any);
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(TypeError);
+    const message = (caught as TypeError).message;
+    expect(message).toMatch(/"S" \(type `list<number>`\) received a number/);
+    expect(message).toMatch(/"T" \(type `list<number>`\) received a number/);
+    expect((caught as TypeError).cause).toBeInstanceOf(TypeError);
+  });
+});

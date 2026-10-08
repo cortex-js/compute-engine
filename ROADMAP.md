@@ -109,6 +109,23 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
+### Asynchronous materialization walks a lazy view synchronously (OPEN, small — found 2026-10-08 by the listing of lazy elements)
+
+`Map(AsyncOnly, [1, 2]).evaluateAsync({ materialization: true })`, with
+`AsyncOnly` an operator that has only an `evaluateAsync` handler, gives
+`[AsyncOnly(1), AsyncOnly(2)]`: the materialization enumerates the view with
+the synchronous iterator, which cannot run an asynchronous-only application,
+and the unevaluated applications are stored. The inline-lambda spelling
+(`Map(x ↦ AsyncOnly(x), …)`) does the same, inside a list literal or not. The
+listing of a lazy element of a literal or of a spread keeps such a view lazy
+(`holdsAsyncOnlyOperator`, `boxed-expression/listed-element.ts`); the
+materialization option needs an asynchronous walk of the view
+(`materialize` in `boxed-function.ts`, and the `materialization` branch of
+the `List` handlers in `library/collections.ts`). The name check of
+`holdsAsyncOnlyOperator` looks one level into the function literal a symbol
+holds and does not look into the clauses of a multi-clause user function.
+
+
 ### A declared real result, a ranged index or a ranged argument keeps a compiled user function on the real lane: what remains (OPEN, small — found 2026-10-08 by the review of the Tycho codegen audit of CE 0.149.0)
 
 Landed 2026-10-08 (CHANGELOG, Unreleased): under the JavaScript target's
@@ -235,28 +252,6 @@ frame and draw live at each read. A fix needs a rule for which eager
 operators store an operand in their result; it is a separate change from the
 lazy-view rule.
 
-### A host value that is not a collection reaches a compiled `Sum` over a `missing | list<number>` parameter as a JavaScript error (OPEN, decision — found 2026-10-07 by the compiled-entry string refusal; conflict found 2026-10-08)
-
-With `S: missing | list<number>`, compiled `Sum(S)` of the number 5 throws
-`_tv1.reduce is not a function`. The value is not of the declared type, so a
-refusal is right, but the entry check does not cover a union of `missing`
-and a collection, and the error names a generated variable instead of the
-parameter. The entry check should refuse the value with the diagnostic it
-gives for a string (`stringRefusedEntryType`, `javascript-target.ts`).
-
-A refusal of every present value that is not an array conflicts with a rule
-that tests lock in (`compile-list-entry.test.ts`, "keeps the runtime-shape
-projection of a scalar on a list binding"): a binding declared `list<number>`
-and bound to the number 5 is NOT refused at entry, and `Add(S, 1)` gives 6,
-because the lowerings dispatch on the run-time shape and a narrower
-declaration is not enforced. The same number 5 for `S: missing |
-list<number>` fails inside the body instead. Decision needed: (a) keep the
-run-time-shape rule and only replace the body's JavaScript error with a
-diagnostic that names the binding, or (b) refuse a present value that is not
-an array for every binding that the compiled code reads as an array (the
-`strings` set of the entry plan), which changes the locked-in rule. Until
-decided, nothing changes.
-
 ### The rounding margin of a float contour or integrand is not a strict bound on the pole position (OPEN, design — found 2026-10-07 by the contour integration review)
 
 A float radius, center, vertex or integrand coefficient is read as the exact
@@ -303,20 +298,6 @@ A again, `m(1, [0])` is typed `list<vector<integer^2>>` and evaluates to
 canonicalizes; the value route (`boxed-function.ts`, `type()`) should do the
 same.
 
-### Compiled `Mod` of an infinite dividend throws where a plot kernel may prefer `NaN` (OPEN, question — found 2026-10-07 by the compiled integer-range guard)
-
-Compiled `Mod`, `Remainder`, `GCD` and `LCM` now throw a `RangeError` for an
-operand beyond the safe integer range or infinite, instead of answering a
-different number (`(2^60 + 1) % 10` gave 6, true value 7; `Mod(Infinity,
-1e10)` gave `NaN`). This matches the interpreter, which gives a type error
-for `Mod(+oo, 10)`. Consequence: compiled `Mod(1/x, 2)` at `x = 0` throws
-where it gave `NaN`, so a plot kernel fails at that sample. The `Mod(x, 1)`
-fractional-part forms are not checked (exact for every finite `x`). Decision
-needed: keep the throw for every operand type (consistent with the
-interpreter), or limit the check to integer-typed operands and let a
-`number`-typed dividend give `NaN` (then the Euler 48 program compiles to
-`NaN` again, because its sum is typed `number`).
-
 ### Binding a large list to a parameter recomputes its type at every call (OPEN, performance — found 2026-10-07 by the lazy-argument capture review)
 
 A recursion of depth 200 that passes a 3000-element list of strings takes 7
@@ -350,28 +331,6 @@ the bare lambda does not. Decision needed: narrow an untyped parameter from
 an index read to an indexed collection whose element type is the JOIN of the
 requirements of each index read (`p[1]` boolean, `p[2]` real), or to a tuple
 when the indices are literals, instead of one element type for all.
-
-### A lazy element without a spread stays lazy inside a list literal (OPEN, design decision — found 2026-10-07 by the spread snapshot)
-
-A list literal with a spread operand now lists a finite lazy collection
-(`[...take(ys, 1), 9]` is a plain list). A lazy ELEMENT without a spread is
-not listed: `[map(x => x + 1, xs)]` holds a lazy `Map`, prints as
-`[Map((x) => x + 1, "xs")]`, and reads `xs` again at every later read; only
-an assignment lists it (`assignedValue`, `library/core.ts`). So
-`[map(f, xs)]` and `[...[map(f, xs)]]` print differently. The documented rule
-is that a literal is a value. The snapshot of a literal with a spread now
-keeps an element that is not spread as it is, so `[...xs, 1..3]` and `[1..3]`
-agree; the decision is only about whether a literal lists its lazy elements.
-Decision needed: list every finite lazy element of a literal at evaluation
-(the `List` evaluate handler, the same bound of `ce.maxCollectionSize` as the
-spread case), or keep elements lazy and say so.
-
-The same lazy elements show when a user function whose body returns a
-comprehension, a `map` or a range is broadcast over a list: `f(s) = [q + 1
-for q in [1, 2]]` applied to `[0, 1]` prints `[Comprehension(…),
-Comprehension(…)]`, and `[[x for x in 1..2], 4]` prints as `[1..3, 4]` does.
-The values are right (`f([0, 1])[1]` is `[2, 3]`); only the printing of the
-lazy element is at stake (found 2026-10-08).
 
 ### Corpus playground follow-ups: compiled values that differ silently, bound names read as free, and timing outliers (OPEN, medium — found 2026-10-06 by the Epsil corpus playground)
 

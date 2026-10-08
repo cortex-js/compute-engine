@@ -54,6 +54,7 @@ import {
   skipBroadcastForVectorOpsOnViews,
   type BroadcastOperandView,
 } from './broadcast-lift-type.js';
+import { listedBroadcastCells } from './listed-element.js';
 import {
   MAX_SIZE_EAGER_COLLECTION,
   broadcastLengthMismatch,
@@ -5106,7 +5107,10 @@ export class BoxedFunction
           }
           return this.engine._fn(
             'List',
-            annotateBroadcastErrors(this.operator, results)
+            annotateBroadcastErrors(
+              this.operator,
+              listedBroadcastCells(this.engine, results, numericApproximation)
+            )
           );
         }
       }
@@ -5631,7 +5635,10 @@ export class BoxedFunction
           if (lambdaBroadcast)
             return this.engine._fn(
               'List',
-              annotateBroadcastErrors(this.operator, results)
+              annotateBroadcastErrors(
+                this.operator,
+                listedBroadcastCells(this.engine, results, numericApproximation)
+              )
             );
           // An absent point cell answers `Missing`, not `NaN` (see step 2).
           return markAbsentPointCells(
@@ -5689,8 +5696,12 @@ export class BoxedFunction
             'Tuple',
             annotateBroadcastErrors(
               this.operator,
-              userCells.map((cell) =>
-                this.engine._fn(this.operator, cell).evaluate(options)
+              listedBroadcastCells(
+                this.engine,
+                userCells.map((cell) =>
+                  this.engine._fn(this.operator, cell).evaluate(options)
+                ),
+                numericApproximation
               )
             )
           );
@@ -6208,11 +6219,23 @@ export class BoxedFunction
             );
           }
           // Element-wise context — mirrors the sync step 2b.
+          // The listing of the cells evaluates synchronously after the
+          // `await`, so it runs with the capability registry and the context
+          // stack of this evaluation put in place again.
           return Promise.all(results).then(
             (resolved) =>
-              this.engine._fn(
-                'List',
-                annotateBroadcastErrors(this.operator, resolved)
+              this.engine.withEvaluationContext(options, () =>
+                this.engine._fn(
+                  'List',
+                  annotateBroadcastErrors(
+                    this.operator,
+                    listedBroadcastCells(
+                      this.engine,
+                      resolved,
+                      numericApproximation
+                    )
+                  )
+                )
               ),
             (e) => {
               throw withBroadcastThrowContext(e, this.operator, bops);
@@ -6653,13 +6676,25 @@ export class BoxedFunction
             );
           }
           // A lambda broadcast always yields a `List` (mirroring step 2b),
-          // and carries the element-wise context on its failures.
+          // and carries the element-wise context on its failures. The listing
+          // of the cells evaluates synchronously after the `await`, so it
+          // runs with the capability registry and the context stack of this
+          // evaluation put in place again.
           if (lambdaBroadcast)
             return Promise.all(results).then(
               (resolved) =>
-                this.engine._fn(
-                  'List',
-                  annotateBroadcastErrors(this.operator, resolved)
+                this.engine.withEvaluationContext(options, () =>
+                  this.engine._fn(
+                    'List',
+                    annotateBroadcastErrors(
+                      this.operator,
+                      listedBroadcastCells(
+                        this.engine,
+                        resolved,
+                        numericApproximation
+                      )
+                    )
+                  )
                 ),
               (e) => {
                 throw withBroadcastThrowContext(e, this.operator, tail);
@@ -6717,9 +6752,21 @@ export class BoxedFunction
               this.engine._fn(this.operator, cell).evaluateAsync(options)
             )
           );
-          return this.engine._fn(
-            'Tuple',
-            annotateBroadcastErrors(this.operator, resolved)
+          // The listing of the cells evaluates synchronously after the
+          // `await`: put the capability registry and the context stack of
+          // this evaluation in place again.
+          return this.engine.withEvaluationContext(options, () =>
+            this.engine._fn(
+              'Tuple',
+              annotateBroadcastErrors(
+                this.operator,
+                listedBroadcastCells(
+                  this.engine,
+                  resolved,
+                  numericApproximation
+                )
+              )
+            )
           );
         }
       }
@@ -9158,7 +9205,14 @@ function applyFunctionLiteral(
       }
       return expr.engine._fn(
         'List',
-        annotateBroadcastErrors(expr.operator, results)
+        annotateBroadcastErrors(
+          expr.operator,
+          listedBroadcastCells(
+            expr.engine,
+            results,
+            options?.numericApproximation
+          )
+        )
       );
     }
   }
@@ -9181,8 +9235,12 @@ function applyFunctionLiteral(
         'Tuple',
         annotateBroadcastErrors(
           expr.operator,
-          cells.map((cell) =>
-            expr.engine._fn(expr.operator, cell).evaluate(options)
+          listedBroadcastCells(
+            expr.engine,
+            cells.map((cell) =>
+              expr.engine._fn(expr.operator, cell).evaluate(options)
+            ),
+            options?.numericApproximation
           )
         )
       );
@@ -10315,7 +10373,13 @@ function declaredBroadcast(
       results.length + 1
     );
   }
-  return ce._fn('List', annotateBroadcastErrors(operator, results));
+  return ce._fn(
+    'List',
+    annotateBroadcastErrors(
+      operator,
+      listedBroadcastCells(ce, results, options?.numericApproximation)
+    )
+  );
 }
 
 /** The asynchronous twin of {@link declaredBroadcast}. */
@@ -10355,8 +10419,20 @@ async function declaredBroadcastAsync(
         })
     );
   }
+  // The listing of the cells evaluates synchronously after the `await`, so
+  // it runs with the capability registry and the context stack of this
+  // evaluation put in place again.
   return Promise.all(results).then(
-    (resolved) => ce._fn('List', annotateBroadcastErrors(operator, resolved)),
+    (resolved) =>
+      ce.withEvaluationContext(options, () =>
+        ce._fn(
+          'List',
+          annotateBroadcastErrors(
+            operator,
+            listedBroadcastCells(ce, resolved, options?.numericApproximation)
+          )
+        )
+      ),
     (e) => {
       throw withBroadcastThrowContext(e, operator, setup.mapped);
     }

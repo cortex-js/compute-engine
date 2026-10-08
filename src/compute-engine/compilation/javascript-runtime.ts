@@ -1374,6 +1374,12 @@ function listCopy(x: unknown): unknown[] {
  * operation and the value, as the compiled list operations do for an
  * invalid index (`listPosition`). `NaN` is returned unchanged, so it
  * propagates as it does through the other compiled arithmetic.
+ *
+ * The throw applies to every operand type, an infinite dividend included
+ * (`Mod(1/x, 2)` at `x = 0`): the interpreter gives a type error for
+ * `Mod(+oo, 10)`, and a `NaN` would stand for a value the operation does
+ * not have. A plot host that samples a compiled kernel catches the error at
+ * that sample and draws a gap, as it does for any other thrown sample.
  */
 function integerOperand(operator: string, x: number): number {
   if (isBeyondSafeInteger(x))
@@ -5783,6 +5789,62 @@ function realEntryError(
 function entryCheckError(binding: string): TypeError {
   return new TypeError(
     `${binding} was compiled as a real number but received a complex {re, im} value. Declare it complex, or compile with \`mode: 'complex'\`.`
+  );
+}
+
+/**
+ * The error that the compiled body threw, with the bindings that may
+ * explain it named, or the error unchanged.
+ *
+ * A binding that the compiled code reads as a JavaScript array (the
+ * `strings` set of the plan) is not refused at entry when it holds a scalar:
+ * the lowerings dispatch on the run-time shape, and `Add(S, 1)` with
+ * `S = 5` gives 6. A lowering that needs an array then fails inside the
+ * body with a `TypeError` that names a generated variable
+ * (`_tv1.reduce is not a function`). When such an error has the shape of a
+ * failed array read (`is not a function`, `is not iterable`, `Cannot read
+ * properties of`) while a binding of that set holds a present value that is
+ * not an array, a typed array or a `Set`, the error is replaced by one that
+ * names every such binding with its declared type and the kind of value it
+ * received, and keeps the original as its `cause`, so a host can read which
+ * argument was wrong. The set also holds unions with a scalar member
+ * (`number | list<number>`), whose scalar is a valid value: the message
+ * therefore names the bindings as the possible causes, and the body's own
+ * message stays in it. Any other error, and an error while every such
+ * binding holds an array, is returned as it is.
+ */
+export function namedEntryError(
+  plan: EntryPlan | undefined,
+  argumentsList: unknown[],
+  error: unknown
+): unknown {
+  if (plan === undefined || !(error instanceof TypeError)) return error;
+  if (
+    !/is not a function|is not iterable|Cannot read propert/.test(error.message)
+  )
+    return error;
+  const isArrayLike = (x: unknown): boolean =>
+    Array.isArray(x) || isNumericTypedArray(x) || x instanceof Set;
+  const describe = (x: unknown): string =>
+    x === null ? 'null' : typeof x === 'object' ? 'an object' : `a ${typeof x}`;
+  const valueOf = (key: string | number): unknown => {
+    if (plan.kind === 'vars') {
+      const vars = argumentsList[0];
+      if (typeof vars !== 'object' || vars === null) return undefined;
+      return (vars as Record<string, unknown>)[key as string];
+    }
+    return argumentsList[key as number];
+  };
+  const culprits: string[] = [];
+  for (const [key, label] of plan.strings as Map<string | number, string>) {
+    const x = valueOf(key);
+    if (x === undefined || isArrayLike(x)) continue;
+    culprits.push(`${label} received ${describe(x)}`);
+  }
+  if (culprits.length === 0) return error;
+  return new TypeError(
+    `${culprits.join('; ')}: compiled code reads such a binding as a JavaScript array, and the compiled body failed (${error.message}). Pass an array.`,
+    { cause: error }
   );
 }
 

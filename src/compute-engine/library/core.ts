@@ -58,6 +58,7 @@ import {
 import { freeAnonymousSlots } from '../boxed-expression/function-literal.js';
 
 import { flatten, flattenSequence } from '../boxed-expression/flatten.js';
+import { listedBroadcastCells } from '../boxed-expression/listed-element.js';
 
 import { fromDigits } from '../numerics/strings.js';
 import { MAX_RANDOM_ELEMENT_COUNT } from '../numerics/random.js';
@@ -825,7 +826,13 @@ function applyLiteralMapped(
   }
   // An element that fails says that the application was element-wise, as
   // on the named routes (`annotateBroadcastErrors`).
-  return ce._fn('List', annotateBroadcastErrors('Apply', results));
+  return ce._fn(
+    'List',
+    annotateBroadcastErrors(
+      'Apply',
+      listedBroadcastCells(ce, results, numericApproximation)
+    )
+  );
 }
 
 /**
@@ -853,8 +860,12 @@ function applyLiteralOverTuples(
     'Tuple',
     annotateBroadcastErrors(
       'Apply',
-      cells.map((cell) =>
-        ce._fn('Apply', [fn, ...cell]).evaluate({ numericApproximation })
+      listedBroadcastCells(
+        ce,
+        cells.map((cell) =>
+          ce._fn('Apply', [fn, ...cell]).evaluate({ numericApproximation })
+        ),
+        numericApproximation
       )
     )
   );
@@ -2170,6 +2181,12 @@ function randomListType(
  * nested list and tuple literals. Without this, `h = g` after the statement
  * changed `r[1]`, while the compiled code and the same list written with
  * calls (`[[h(1), h(2)]]`) keep the values computed with the first `h`.
+ * The evaluation of the literal itself already lists each finite lazy
+ * element, within a budget of `ce.maxCollectionSize` elements
+ * (`listedLiteralElements()` in `boxed-expression/listed-element.ts`), so most literals
+ * arrive here with no lazy element. This function still lists an element
+ * that the literal kept lazy because it is above that budget, when the
+ * element reads a variable.
  *
  * The host function `ce.assign()` is not changed: a host that defines one
  * name from another with an expression wants the live view.

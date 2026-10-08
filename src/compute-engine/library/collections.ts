@@ -47,7 +47,6 @@ import {
   MAX_SIZE_EAGER_COLLECTION,
   typeCouldBeCollection,
   windowedCollectionOps,
-  collectionSourceOperands,
   type WindowedParams,
   isWalkableFiniteCollection,
 } from '../collection-utils.js';
@@ -167,6 +166,15 @@ import {
   numericFromExactValue,
 } from '../boxed-expression/utils.js';
 import { flatten } from '../boxed-expression/flatten.js';
+import {
+  hasConstantTimeCount,
+  holdsAsyncOnlyOperator,
+  listedElement,
+  listedLiteralElements,
+  producesKeyed,
+  producesSet,
+  type SnapshotBudget,
+} from '../boxed-expression/listed-element.js';
 import { machineListFrom } from '../boxed-expression/machine-broadcast.js';
 import {
   isAbsentSymbol,
@@ -5530,15 +5538,23 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // which keep late binding). Fast path: a list whose elements are all
       // already fully-evaluated literals is returned unchanged, avoiding an
       // O(n) rebuild for large numeric lists.
+      // A lazy element (a `Range`, a `Map`) is a function expression, so it
+      // never takes this fast path.
       if (
         ops.every((op) => isEvaluatedElement(op, numericApproximation ?? false))
       )
         return undefined;
+      const elements = ops
+        .map((op) => op.evaluate({ numericApproximation, materialization }))
+        .filter((op) => !isSymbol(op, 'Nothing'));
+      // A literal is a value: each finite lazy element is listed.
       return engine.function(
         'List',
-        ops
-          .map((op) => op.evaluate({ numericApproximation, materialization }))
-          .filter((op) => !isSymbol(op, 'Nothing'))
+        listedLiteralElements(
+          engine,
+          elements,
+          numericApproximation ?? false
+        ) ?? elements
       );
     },
     // The async twin of the handler above. `List` is `lazy`, so its elements
@@ -5584,7 +5600,23 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         ops.every((op) => isEvaluatedElement(op, numericApproximation ?? false))
       )
         return undefined;
-      return engine.function('List', await evaluated(ops));
+      // As on the sync route, each finite lazy element is listed.
+      const elements = await evaluated(ops);
+      // The listing runs after the `await` above, and it evaluates with the
+      // synchronous `evaluate()`: the callbacks of a lazy element, and the
+      // listed element under a numeric approximation. The engine keeps the
+      // capability registry and the context stack of this evaluation in
+      // place only until the first `await`, so put them in place again.
+      return engine.withEvaluationContext(options, () =>
+        engine.function(
+          'List',
+          listedLiteralElements(
+            engine,
+            elements,
+            numericApproximation ?? false
+          ) ?? elements
+        )
+      );
     },
     eq: defaultCollectionEq,
     collection: basicIndexedCollectionHandlers(),
@@ -5965,6 +5997,21 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // canonical handler (`library/core.ts`), so it never reaches this one; a
     // MathJSON `Tuple` stays data, because operators (`Tally`, `Eigen`, `LU`)
     // and Epsil tuple literals use it to hold several results side by side.
+    //
+    // A tuple literal is a value, as a list literal is: each operand that
+    // evaluates to a finite lazy collection is replaced by the list (or the
+    // set) of its elements (`listedLiteralElements`). The operands arrive
+    // evaluated, because `Tuple` is not `lazy`. When no operand is listed,
+    // the handler declines and the tuple is built from its evaluated
+    // operands.
+    evaluate: (ops, { engine, numericApproximation }) => {
+      const listed = listedLiteralElements(
+        engine,
+        ops,
+        numericApproximation ?? false
+      );
+      return listed === undefined ? undefined : engine.tuple(...listed);
+    },
     eq: defaultCollectionEq,
     collection: basicIndexedCollectionHandlers(),
   },
@@ -16189,6 +16236,10 @@ function snapshotListJoin(
         continue;
       }
       if (!op.isCollection || !isWalkableFiniteCollection(op)) return undefined;
+      // A spread operand whose callback applies an operator that has only
+      // an `evaluateAsync` handler keeps the view: the walk below is
+      // synchronous and would store the applications unevaluated.
+      if (holdsAsyncOnlyOperator(op)) return undefined;
       if (!hasConstantTimeCount(op)) continue;
       const count = op.count;
       if (count === undefined) continue;
@@ -16205,8 +16256,10 @@ function snapshotListJoin(
         continue;
       }
       // An element of a `List` literal operand was written as an element,
-      // not spread, so it is kept as it is. Only the elements that a spread
-      // operand enumerates are listed.
+      // not spread, so it is kept as one element. The evaluation of that
+      // literal has already listed it when it is a finite lazy collection
+      // within its budget (`listedLiteralElements`). Here it is kept as it
+      // is. Only the elements that a spread operand enumerates are listed.
       const isListLiteral = isFunction(op, 'List') && op.isCanonical;
       for (const x of op.each()) {
         if (budget.used >= budget.max) return undefined;
@@ -16230,88 +16283,6 @@ function snapshotListJoin(
     return undefined;
   }
   return ce._fn('List', elements);
-}
-
-/**
- * The number of elements that a snapshot of a `ListJoin` has created, at
- * every depth, and the most that it can create (`ce.maxCollectionSize`).
- * The elements that a walk created before it stopped stay counted, so the
- * work of the whole snapshot is bounded by `max`.
- */
-type SnapshotBudget = { used: number; max: number };
-
-/**
- * True when the `count` of the collection `x` is known without a walk of its
- * elements: a collection that is not lazy (a `List`, a `Set`, a string), a
- * `Range`, a `Linspace`, or a list-producing `Map` whose sources have such a
- * count. Any other lazy collection can have a count that walks its elements
- * and calls its callbacks: the count of a `Filter` calls the predicate on
- * each element, and the count of a set-producing `Map` (a `Map` over a
- * `Set`) counts the DISTINCT results by walking `each()`, which calls the
- * callback on every element (`distinctCount`). Reading such a count before
- * the walk would call the callback twice per element, and a callback with a
- * side effect, such as a random draw, would take effect twice.
- */
-function hasConstantTimeCount(x: Expression): boolean {
-  if (!x.isLazyCollection) return true;
-  if (isFunction(x, 'Range') || isFunction(x, 'Linspace')) return true;
-  if (isFunction(x, 'Map') && x.nops >= 2)
-    return (
-      !producesSet(x) &&
-      x.ops.slice(1).every((source) => hasConstantTimeCount(source))
-    );
-  return false;
-}
-
-/**
- * An element of a `ListJoin` operand, as the snapshot of the literal holds
- * it: a finite lazy collection is replaced by the list (or the set) of its
- * elements, at every depth, and any other element is returned unchanged.
- * Each element that the listing creates uses one unit of `budget`.
- *
- * The rows of `take(iterate(nextRow, [1]), 4)` are lazy `Map` views. Kept
- * as views inside the `List`, they print as their recipes
- * (`[[1], Map((p) => …, Zip(…)), …]`), and each one reads the variables of
- * its callback again at each later read.
- *
- * An element is kept as it is when it is not known to be finite, when its
- * elements cannot be computed, when it is neither indexed nor a set (a
- * keyed view), when it is a held conditional (`When`, `Which`, `If`: a
- * restricted collection, not a view), when its elements would use more
- * than the rest of the budget, or when the walk throws.
- */
-function listedElement(
-  ce: ComputeEngine,
-  x: Expression,
-  budget: SnapshotBudget
-): Expression {
-  if (!x.isValid || !x.isLazyCollection) return x;
-  if (isFunction(x, 'When') || isFunction(x, 'Which') || isFunction(x, 'If'))
-    return x;
-  const elements: Expression[] = [];
-  let isSet = false;
-  try {
-    if (!isWalkableFiniteCollection(x)) return x;
-    isSet = !x.isIndexedCollection && x.type.matches('set<any>');
-    if (!isSet && !x.isIndexedCollection) return x;
-    if (hasConstantTimeCount(x)) {
-      const count = x.count;
-      if (count === undefined || count > budget.max - budget.used) return x;
-    }
-    for (const y of x.each()) {
-      if (budget.used >= budget.max) return x;
-      budget.used += 1;
-      elements.push(listedElement(ce, y, budget));
-    }
-  } catch (e) {
-    if (
-      e instanceof CancellationError &&
-      e.cause !== 'iteration-limit-exceeded'
-    )
-      throw e;
-    return x;
-  }
-  return isSet ? ce.function('Set', elements) : ce._fn('List', elements);
 }
 
 /** The undeduplicated element enumeration of a `Map` node.
@@ -16609,110 +16580,6 @@ function mapIteratorImpl(expr: Expression): Iterator<Expression> {
 
 function isIterator(x: unknown): x is Iterator<Expression> {
   return typeof (x as Iterator<Expression>)?.next === 'function';
-}
-
-/** Does this node promise a SET?
- *
- * Three operators reach here, by two different mechanisms: `Join` and
- * `Append` ADOPT the set kind from a set operand (`joinResultType`,
- * `appendResultType`), while `Map` PRESERVES its source's kind
- * (`mapResultType`). Either way the answer is read off the node's OWN type
- * rather than re-derived from the operands, so the two mechanisms need no
- * distinction here.
- *
- * The distinction does matter to the callers, and in one place: `Join`/
- * `Append` pass their operands' elements through UNCHANGED, so an infinite
- * SET operand keeps infinitely many distinct elements, whereas `Map` applies
- * a callback that may collapse them all onto one value. See the infinite-
- * operand branches of their `count`/`isFinite` handlers.
- *
- * A node typed with an ABSTRACT collection type (`collection<T>`: not
- * indexed, not a set, not keyed) is built over a source whose type admits
- * several kinds, such as a symbol declared `collection<number>`. Its kind is
- * then the kind of the values its SOURCES hold now (the operands in the
- * source positions of the operator, `collectionSourceOperands`: the appended
- * elements of an `Append` and the seed of a `Scan` are not sources), the
- * rule `BoxedFunction.isIndexedCollection` applies. The node is indexed when
- * every such source holds an indexed value. It is keyed when one of them
- * holds a dictionary or a record (see `producesKeyed`). Otherwise it is a
- * set when one of them holds a value that is not indexed (a set, or a lazy
- * view over one). This is the precedence the static type of `Join` and
- * `Append` gives to the kinds of their operands (`joinResultTypeD`): a keyed
- * operand before a set operand, a set operand before a list. Without this,
- * `Join(P, [5, 3])` with `P` holding `Set(3, 1)` enumerated the repeated `3`
- * although its value is the set `Set(3, 1, 5)`.
- *
- * A source that holds no value yet (a valueless symbol, which cannot be
- * enumerated) does not make the node a set: its kind is not known, and the
- * facts the handlers derive then are the ones that hold for a list. The
- * count of `Join(Range(1, ∞), xs)` stays `∞`, which is true whatever `xs`
- * holds. */
-function producesSet(expr: Expression): boolean {
-  if (expr.type.matches('set<any>')) return true;
-  if (!isAbstractCollectionTypeOf(expr.type.type) || expr.isIndexedCollection)
-    return false;
-  if (producesKeyed(expr)) return false;
-  return collectionSourceOperands(expr).some(
-    (op) =>
-      isKindOpenOperandType(op.type.type) &&
-      op.isCollection &&
-      op.isEnumerableCollection !== false &&
-      op.isIndexedCollection === false
-  );
-}
-
-/** Does this node promise a KEYED collection — a `record` or a `dictionary`?
- *
- * `Join` and `Append` adopt those kinds from an operand exactly as they adopt
- * `set` (`joinResultType`, `appendResultType`), and a keyed collection owes
- * its keys the same distinctness a set owes its elements.
- *
- * A `Join` or an `Append` typed with an ABSTRACT collection type (see
- * `producesSet`) is keyed when one of its abstract-typed sources holds a
- * dictionary or a record now. The node then enumerates merged entries, and
- * its `elttype` handler answers the entry tuple, so that `materialize()`
- * rebuilds a `Dictionary`. Without this, `Join(a, b)` with `a` and `b`
- * declared `collection` and holding dictionaries was a dictionary when
- * evaluated (the evaluation rebuilds the join over the values, whose type is
- * a dictionary), but a `Set` of entry tuples when evaluated with
- * `materialization: true`. The rule reads the held values of `Join` and
- * `Append` only: they are the operators that adopt the kind of their
- * operands. */
-function producesKeyed(expr: Expression): boolean {
-  return producesKeyedAt(expr, 0);
-}
-
-/** `producesKeyed` at a depth of the descent through the values of symbols
- * and nested joins (see `holdsKeyedValue`). */
-function producesKeyedAt(expr: Expression, depth: number): boolean {
-  if (
-    isRecordShapedType(expr.type.type) ||
-    expr.type.matches('dictionary<any>')
-  )
-    return true;
-  if (!isFunction(expr, 'Join') && !isFunction(expr, 'Append')) return false;
-  if (!isAbstractCollectionTypeOf(expr.type.type)) return false;
-  return collectionSourceOperands(expr).some(
-    (op) =>
-      isKindOpenOperandType(op.type.type) && holdsKeyedValue(op, depth + 1)
-  );
-}
-
-/** Whether `op` holds a keyed collection (a dictionary or a record) now: its
- * type is keyed, or it is a symbol whose value holds one, or it is a `Join`
- * or an `Append` that is keyed by the values its own sources hold. The
- * descent through symbol values and nested joins is bounded: a chain deeper
- * than the bound, or a cycle of symbols that hold each other
- * (`a := Append(b, 1)` with `b := a`), answers `false`. */
-function holdsKeyedValue(op: Expression, depth: number): boolean {
-  if (depth > 16) return false;
-  if (isRecordShapedType(op.type.type) || op.type.matches('dictionary<any>'))
-    return true;
-  if (isSymbol(op)) {
-    const value = op.value;
-    return value !== undefined && holdsKeyedValue(value, depth + 1);
-  }
-  return producesKeyedAt(op, depth + 1);
 }
 
 /** Does this node's enumeration need rewriting before anyone reads it —

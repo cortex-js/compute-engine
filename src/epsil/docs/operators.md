@@ -463,8 +463,9 @@ immediately, and a symbolic or lazy segment lowers to the equivalent
 materialization of `xs`, and an infinite segment stays lazy
 (`[...(1..oo), 5] |> Take(3)` is `[1, 2, 3]`). A literal is a value, so
 when it is evaluated, every finite segment is listed, also a lazy one:
-`[...take(xs, 1), 9]` is a plain list, not a `join` recipe. Set literals
-deduplicate as usual.
+`[...take(xs, 1), 9]` is a plain list, not a `join` recipe. An element
+that is a finite lazy collection is listed too (`[1..3, 4]` is
+`[[1, 2, 3], 4]`). Set literals deduplicate as usual.
 
 **Tuples do not spread here** — a tuple is a unit (a point, a pair), and
 splicing it would quietly discard that; spreading one is a `spread-tuple`

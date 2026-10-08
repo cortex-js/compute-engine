@@ -4,6 +4,7 @@ import {
   normalizeRunResult,
   twoStageRunner,
   checkEntry,
+  namedEntryError,
   storeEntryPlan,
   type EntryPlan,
   type RealEntryCheck,
@@ -7392,7 +7393,11 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // larger than 2^53: `Mod(2, 2^53 - 1)` ran to `1`. A call evaluates each
     // operand once, in order, so an impure operand (the Random family) or a
     // computed divisor needs no temporary. The helper throws for an operand
-    // beyond the safe integer range (see `fastPath` above).
+    // beyond the safe integer range or infinite (see `fastPath` above and
+    // `integerOperand` in `javascript-runtime.ts`): this is kept for every
+    // operand type, a `number`-typed dividend such as `1/x` at `x = 0`
+    // included, so that a compiled `Mod` never answers a number the
+    // interpreter does not. A plot host catches the error at the sample.
     if (!fastPath) return `_SYS.floorMod(${compile(a)}, ${compile(b)})`;
     // `compile()` emits sub-expressions without outer parentheses (`x + 29`),
     // and `%` binds tighter than `+` — wrap before splicing next to `%`.
@@ -8974,11 +8979,17 @@ export class ComputeEngineFunction extends Function {
         const previous = setReconstructionDigits(reconstructionDigits);
         try {
           const args = entry ? checkEntry(entry, argumentsList) : argumentsList;
-          return normalizeRunResult(
-            inner !== undefined
-              ? inner.apply(thisArg, args)
-              : super.apply(thisArg, [this.SYS, ...args])
-          );
+          try {
+            return normalizeRunResult(
+              inner !== undefined
+                ? inner.apply(thisArg, args)
+                : super.apply(thisArg, [this.SYS, ...args])
+            );
+          } catch (error) {
+            // A body error caused by a scalar in an array-read binding is
+            // named after that binding (`namedEntryError`).
+            throw namedEntryError(entry, args, error);
+          }
         } finally {
           setReconstructionDigits(previous);
         }
@@ -9033,11 +9044,16 @@ export class ComputeEngineFunctionLiteral extends Function {
           const callArgs = entry
             ? checkEntry(entry, argumentsList)
             : argumentsList;
-          return normalizeRunResult(
-            inner !== undefined
-              ? inner.apply(thisArg, callArgs)
-              : super.apply(thisArg, [this.SYS, ...callArgs])
-          );
+          try {
+            return normalizeRunResult(
+              inner !== undefined
+                ? inner.apply(thisArg, callArgs)
+                : super.apply(thisArg, [this.SYS, ...callArgs])
+            );
+          } catch (error) {
+            // As in the expression runner above (`namedEntryError`).
+            throw namedEntryError(entry, callArgs, error);
+          }
         } finally {
           setReconstructionDigits(previous);
         }

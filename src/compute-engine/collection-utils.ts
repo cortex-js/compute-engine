@@ -4158,7 +4158,7 @@ function isAbsentElement(x: Expression): boolean {
  * Two predicates read that: `BoxedFunction.isIndexedCollection` (through
  * `abstractSourcesHoldIndexedValues`, `boxed-function.ts`) and the kind
  * predicates of `Join` and `Append` (`producesSet` and `producesKeyed`,
- * `library/collections.ts`). They must read the same operands, so the
+ * `boxed-expression/listed-element.ts`). They must read the same operands, so the
  * source positions are in this one table. For example `Append(acc, s)` with
  * `acc` holding `[[1], [1]]` and `s` holding `Set(2, 3)` is a list with the
  * set as its last element: `s` is an element, not a source, so it must not

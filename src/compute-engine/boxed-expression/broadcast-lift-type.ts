@@ -236,7 +236,7 @@ export function isAbstractCollectionTypeOf(t: Type): boolean {
  * operand (`joinResultTypeD`, `library/collections.ts`), and the predicates
  * that follow the held values read such an operand as a source whose value
  * decides the kind (`abstractSourcesHoldIndexedValues`, `boxed-function.ts`,
- * and `producesSet`, `library/collections.ts`).
+ * and `producesSet`, `boxed-expression/listed-element.ts`).
  */
 export function isKindOpenOperandType(t: Type): boolean {
   return (
