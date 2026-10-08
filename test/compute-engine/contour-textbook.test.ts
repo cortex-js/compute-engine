@@ -92,12 +92,31 @@ describe('Textbook reductions: convergence and domain safeguards', () => {
     ['\\frac{z}{z^2+1}', '0', '\\infty'],
     ['\\frac{\\sin z}{2+\\cos z}', '0', '\\pi'],
     ['\\frac{1}{2+\\cos z}', '0', '\\pi/2'],
-    ['\\frac{1}{2+\\cos(2z)}', '0', '2\\pi'],
     ['\\sqrt{2+\\cos z}', '0', '2\\pi'],
     ['\\frac{1}{a+\\cos z}', '0', '2\\pi'],
   ])('does not apply an unproved reduction to %s on [%s, %s]', (f, lo, hi) => {
     expect(reduce(f, lo, hi)).toBeUndefined();
   });
+
+  // With z = exp(i t), 2 + cos(2t) gives the denominator z⁴ + 4z² + 1. Its
+  // roots are z² = −2 ± √3, both negative reals, so the four poles are
+  // ±i√(2 ∓ √3): two inside the unit circle and two outside. For an integer
+  // k ≥ 1 and a > |b|, the integral of 1/(a + b cos(k t)) on [0, 2π] is
+  // 2π/√(a² − b²), here 2π/√3.
+  test('a quartic period denominator with negative real z² roots: 1/(2+cos 2t)', () => {
+    const expected = (2 * Math.PI) / Math.sqrt(3);
+    expect(expected).toBeCloseTo(3.6275987284684357, 14);
+    const reduced = reduce('\\frac{1}{2+\\cos(2z)}', '0', '2\\pi');
+    expect(reduced?.N().re).toBeCloseTo(expected, 12);
+    expect(reduced?.N().im).toBeCloseTo(0, 12);
+    const value = ce
+      .parse('\\int_0^{2\\pi} \\frac{1}{2+\\cos(2z)} dz')
+      .evaluate();
+    expect(value.has('Integrate')).toBe(false);
+    // The value must stay exact: a number literal here is a float.
+    expect(value.isNumberLiteral).toBe(false);
+    expect(value.N().re).toBeCloseTo(expected, 12);
+  }, 30_000);
 
   // 1 ± cos z ≥ 0 has double zeros: the integral is +∞. The simple zeros
   // of cos z change the sign of the integrand: the integral has no value.
@@ -122,6 +141,33 @@ describe('Textbook reductions: convergence and domain safeguards', () => {
       (direction * Math.PI) / (2 * Math.E),
       10
     );
+  });
+
+  // With z = exp(i t), cos(k t) = (z^k + z^(-k))/2 and
+  // sin(k t) = (z^k - z^(-k))/(2i) for an exact integer k. For |a| < 1,
+  // the integral of cos(n t)/(1 - 2a cos t + a^2) on [0, 2π] is
+  // 2π a^n/(1 - a^2). With a = 1/2, 5 - 4cos t = 4(1 - 2a cos t + a^2).
+  test.each([
+    ['\\cos(2t)', '\\frac{\\pi}{6}', Math.PI / 6],
+    ['\\cos(3t)', '\\frac{\\pi}{12}', Math.PI / 12],
+    ['\\sin(2t)', '0', 0],
+    ['\\cos(-2t)', '\\frac{\\pi}{6}', Math.PI / 6],
+    ['\\sin(-2t)\\sin t', '-\\frac{\\pi}{8}', -Math.PI / 8],
+  ] as const)(
+    'a multiple angle k t maps to z^k on the unit circle: %s/(5-4cos t)',
+    (numerator, exact, numeric) => {
+      const value = ce
+        .parse(`\\int_0^{2\\pi} \\frac{${numerator}}{5-4\\cos t} dt`)
+        .evaluate();
+      expect(value.isSame(ce.parse(exact))).toBe(true);
+      expect(value.N().re).toBeCloseTo(numeric, 12);
+    }
+  );
+
+  test('a multiple angle above the degree budget is declined', () => {
+    expect(
+      reduce('\\frac{\\cos(40z)}{5-4\\cos z}', '0', '2\\pi')
+    ).toBeUndefined();
   });
 
   test('reversing full and half periods negates the value', () => {

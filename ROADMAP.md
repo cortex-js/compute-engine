@@ -109,6 +109,52 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
+### A user function, a relation and most other lazy heads still run their operands synchronously under `evaluateAsync` (OPEN, design decision — issue #392, found 2026-10-07)
+
+`N`, `Add`, `Multiply`, `Evaluate` and `ReleaseHold` now have an
+asynchronous twin that evaluates the held operands with `evaluateAsync`, so
+a `Sum` under them yields and honours an abort signal. The other lazy
+operators with a synchronous handler only (about 140, among them the nine
+relations `Equal`, `Less`, …, and the application of a user function, whose
+body statements are evaluated by `applyFunctionLiteral()` in
+`boxed-function.ts` with the synchronous `evaluateStatements()`) still run
+their operands to the end: `Less(Sum(1/k^2, k, 1, 400000), 2)` and `f(400000)`
+with `f(n) = Σ 1/k²` do not yield and cannot be aborted. Two forms of `N`
+block too: `N(x, p)` with `p` above the precision of the engine minus the
+guard digits (`p ≥ 17` on a default engine), and a goal `N(x, [p, a])`,
+because `_withTransientPrecision` raises the precision of the engine, a
+global of the bignum library, for the time of the computation, and the
+raised precision cannot span an `await` while other evaluations run; a
+per-evaluation working precision would remove that limit. The asynchronous
+route already has a classification of the lazy operators that DEMAND every
+held operand (not `selectsOperands`, not `scoped`, not `holdClass:
+'quote'`), used to await asynchronous-only descendants
+(`awaitAsyncOnlyDescendants()`). Decision needed: give that class a default
+asynchronous behavior (await each held operand with `evaluateAsync`, then
+run the synchronous handler on the values), or add twins one by one. The
+default is not safe as it stands: a lazy operator that reads the structure
+of its operand (`Numerator`, `Denominator`, `Interpret`, `N` before its
+twin) must not receive an evaluated operand, so the class would need a flag
+that says "the handler only evaluates its operands". The function body
+needs its own asynchronous application (`evaluateStatementsAsync()` exists
+and is used by `Block`).
+
+### `.N()` of a user function evaluates the body exactly, then numericizes the result (OPEN, performance — found 2026-10-07 by issue #392)
+
+With `f(n) = Σ_{k=1}^{n} 1/k²`, `f(2000).N()` takes 1432 ms where
+`Sum(1/k^2, k, 1, 2000).N()` takes 68 ms: the body is evaluated with a bare
+`evaluate()` (`evaluateStatements()`, `function-utils.ts`), which sums 2000
+exact rationals, and only the result is numericized
+(`result.evaluate({ numericApproximation: true })` after the statements).
+This is by design for the statements of a block (a numeric request must not
+reach the statements on one route and not the other), but for a body that
+is a single numeric expression it costs the exact evaluation for nothing,
+and `f(400000).N()` does not finish. Decision needed: forward the numeric
+request to the body when the body is a single expression (the value of the
+last statement is the value of the function), or keep the exact
+evaluation. The same applies to the memo of the application, which keys on
+the request (`memoKey`).
+
 ### Compiled Python code counts code points on a string parameter (OPEN, small — found 2026-10-07 by the compiled-entry string refusal)
 
 The Python target has no entry check (`compileFunction` emits a plain `def`),
@@ -172,6 +218,30 @@ and a collection, and the error names a generated variable instead of the
 parameter. The entry check should refuse the value with the diagnostic it
 gives for a string (`stringRefusedEntryType`, `javascript-target.ts`).
 
+### The rounding margin of a float contour or integrand is not a strict bound on the pole position (OPEN, design — found 2026-10-07 by the contour integration review)
+
+A float radius, center, vertex or integrand coefficient is read as the exact
+value it holds, and the sum of the half-ulp rounding bounds of the replaced
+floats is a margin: a pole closer to the contour than the margin is
+`undetermined` (`symbolic/contour.ts`, `parseContour()`;
+`symbolic/contour-integrate.ts`, `exactFloatLiterals()`). The margin is a
+bound on the coordinates, not on the poles: the root of `a·z − b` moves by
+about `|b/a²|` times the error in `a`, and a multiple root moves by a
+fractional power of the error. The margin stops the last bit of a float
+from deciding a pole that sits on the contour; it does not prove that a pole
+farther away than the margin is on the right side. A strict bound needs a
+root-perturbation bound for each polynomial factor.
+
+### The real-line residue route rejects a float integrand (OPEN, small — found 2026-10-07 by the contour integration review)
+
+`ContourIntegrate(1/(x² + 2.25), x, RealLineContour(True))`, called directly,
+returns "unsupported: Rational coefficients must be exact", while the closed
+contours read a float as the exact rational it holds and answer a float. The
+`\int_{-\infty}^{\infty}` route is not affected: it integrates through the
+antiderivative. Extending the residue route needs a rule for a pole whose
+imaginary part is within the rounding of 0, because the float can move the
+pole onto or off the real axis.
+
 ### `subs()` does not reach into a canonical dictionary (OPEN, small — found 2026-10-07 by the dictionary seed-frame work)
 
 `BoxedDictionary` inherits the base `subs()`, which returns the receiver:
@@ -212,6 +282,23 @@ fold. The interpreter's `.N()` itself is not fixed.
 `Mod(√2 · 10^30, 7).evaluate()` gives the exact `5`; the true value is
 0.698… (`.N()` gives it). The exact route reads the irrational operand as an
 integer somewhere in `Mod`'s evaluate handler.
+
+### A constant list of any length compiles into a shader as a constant array, with no limit and no diagnostic (OPEN, question — asked 2026-10-07 by Tycho ledger row 368)
+
+The `glsl` and `wgsl` targets write a literal list of numbers as a constant
+array constructor (`float[9540](…)`), however long the list. A 9,540-element
+list that a graphing document inlines compiles to a 100 KB array in the
+shader body with no size limit and no diagnostic; whether such a shader
+compiles, and how long it takes, is up to the GPU driver. The consumer asked
+for a limit, or a decline that names the size, so that a host knows to ship
+such a list as a texture (`storage: sampler2D`) instead. Decision needed:
+keep compiling any size (today), or decline a constant list above a size
+limit with a `capability` diagnostic that names the element count and the
+limit. A decline changes the behavior of documents that compile today (the
+consumer's fallback is another target); the limit itself cannot be derived
+from the specification, which sets no bound on a constant array. The
+`interval-js` and `javascript` targets are not concerned: their lists are
+one array constant.
 
 ### Compiled `Mod` of an infinite dividend throws where a plot kernel may prefer `NaN` (OPEN, question — found 2026-10-07 by the compiled integer-range guard)
 

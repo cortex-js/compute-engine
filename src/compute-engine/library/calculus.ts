@@ -708,10 +708,15 @@ function noValueIntegral(
  * that has no value: `Indeterminate` when the contour and every number
  * literal of the integrand are exact, and `NaN` when one of them is a float,
  * as for `noValueIntegral()`.
+ *
+ * The values of the assigned symbols other than the integration variable
+ * `variable` are substituted first, so that a float held by a symbol
+ * (`a := 1.5` in `a/(z − 1)`) counts as a float operand.
  */
 function noValueContourIntegral(
   ce: ComputeEngine,
   integrand: Expression,
+  variable: string,
   contour: Expression
 ): Expression {
   const operands: Expression[] = [];
@@ -719,8 +724,8 @@ function noValueContourIntegral(
     if (isNumber(e)) operands.push(e);
     else if (isFunction(e)) for (const op of e.ops) collect(op);
   };
-  collect(integrand);
-  collect(contour);
+  collect(withAssignedValues(ce, integrand, [variable]));
+  collect(withAssignedValues(ce, contour, [variable]));
   return indeterminateFormAnswer(ce, operands);
 }
 
@@ -1504,8 +1509,10 @@ function scanPoint(lo: number, hi: number, s: number): number {
 
 /**
  * A finite range inside the range between `lo` and `hi`, with the same
- * orientation, for the interior-pole check of `dependentPoleScan`, which
- * requires finite bounds. A finite bound is kept. An infinite bound is
+ * orientation, for the interior-pole check of `dependentPoleScan`. The check
+ * accepts an infinite bound, but then also tests the integrand at points far
+ * past the grid, and the scan needs only the poles near the grid. A finite
+ * bound is kept. An infinite bound is
  * replaced by a point `1024·max(1, |b|)` past the other bound `b`, or by
  * `±1024` when both bounds are infinite: the points of the grid of a
  * dimension with an infinite range (`scanPoint`) are within `±63` of its
@@ -2133,6 +2140,33 @@ function inlineShadowedCalls(
     return body ?? x;
   });
   return failed ? undefined : result;
+}
+
+/**
+ * The integrand of a contour integral (`ContourIntegrate`,
+ * `CircularIntegrate`) over the variable `variable`, to give to the residue
+ * method. The residue method selects a function by its NAME: it takes `Sin`,
+ * `Exp`, … to be entire. With a user definition `Sin := z ↦ 1/z`, a call of
+ * `Sin` has a pole at 0 that the residue method does not see. So each call
+ * of a user function that has the name of a library function is replaced by
+ * the body of the user function (`inlineShadowedCalls()`).
+ *
+ * Return `undefined` when a call cannot be replaced (a name that a local
+ * scope of the integrand shadows, or one of the cases of
+ * `inlineShadowedCalls()`): the integral then stays unevaluated. This also
+ * applies under `N()`, because the residue method is the only method of a
+ * contour integral.
+ */
+function contourIntegrand(
+  ce: ComputeEngine,
+  f: Expression,
+  variable: string
+): Expression | undefined {
+  const names = shadowedLibraryNames(ce);
+  const calls = shadowedCallsIn(ce, f.canonical, names);
+  if (calls === 'none') return liftIntegrand(f);
+  if (calls === 'local') return undefined;
+  return inlineShadowedCalls(ce, liftIntegrand(f.canonical), names, [variable]);
 }
 
 /**
@@ -3914,13 +3948,20 @@ volumes
         )
           return undefined;
         // The box route can deliver the integrand as a `Function` literal,
-        // the shape that `Integrate` uses: read its body.
-        const integrand = liftIntegrand(ops[0]);
+        // the shape that `Integrate` uses: `contourIntegrand()` reads its
+        // body.
+        const integrand = contourIntegrand(ce, ops[0], variable.symbol);
+        if (integrand === undefined) return undefined;
         const r = ce.contourIntegrate(integrand, variable.symbol, contour);
         let value =
           r.status === 'pole-on-contour' ? singularPathValue(ce, r) : r.value;
         if (value?.isIndeterminate === true)
-          value = noValueContourIntegral(ce, integrand, contour);
+          value = noValueContourIntegral(
+            ce,
+            integrand,
+            variable.symbol,
+            contour
+          );
         return numericApproximation ? value?.N() : value;
       },
     },
@@ -3949,7 +3990,7 @@ volumes
     },
     ContourIntegrate: {
       description:
-        'Symbolic integral over an explicit closed contour, using the residue theorem.',
+        'Symbolic integral over an explicit closed contour or the real line (`RealLineContour`), using the residue theorem.',
       keywords: ['residue theorem', 'contour integral'],
       broadcastable: false,
       lazy: true,
@@ -3965,12 +4006,13 @@ volumes
       evaluate: ([f, x, contour], { engine: ce, numericApproximation }) => {
         const variable = sym(x);
         if (!variable) return undefined;
-        const integrand = liftIntegrand(f);
+        const integrand = contourIntegrand(ce, f, variable);
+        if (integrand === undefined) return undefined;
         const r = ce.contourIntegrate(integrand, variable, contour);
         let value =
           r.status === 'pole-on-contour' ? singularPathValue(ce, r) : r.value;
         if (value?.isIndeterminate === true)
-          value = noValueContourIntegral(ce, integrand, contour);
+          value = noValueContourIntegral(ce, integrand, variable, contour);
         return numericApproximation ? value?.N() : value;
       },
     },

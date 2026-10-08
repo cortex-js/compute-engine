@@ -599,7 +599,7 @@ The [Calculus reference](/epsil/reference/calculus/) has the full description an
 | `bigO` | `BigO` | `(value) -> number` | Landau big-O remainder term. |
 | `circleContour` | `CircleContour` | `(center: complex, radius: real, orientation: integer?) -> expression` | Closed circle: center, positive radius, optional orientation (+1 or -1). |
 | `circularIntegrate` | `CircularIntegrate` | `(function, limits+) -> number` | Closed-path integral. |
-| `contourIntegrate` | `ContourIntegrate` | `(expression, variable: symbol, contour: expression) -> number` | Symbolic integral over an explicit closed contour, using the residue theorem. |
+| `contourIntegrate` | `ContourIntegrate` | `(expression, variable: symbol, contour: expression) -> number` | Symbolic integral over an explicit closed contour or the real line (`RealLineContour`), using the residue theorem. |
 | — | `D` | `(expression, variables: symbol*) -> expression` | Symbolic partial derivative with respect to one or more variables. |
 | `dSolve` | `DSolve` | `(expression, symbol, symbol) -> expression` | Symbolic differential equation solver. |
 | `derivative` | `Derivative` | `(function, order: number*) -> function` | Derivative operator that returns a derivative function. |

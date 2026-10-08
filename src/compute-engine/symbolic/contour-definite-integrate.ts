@@ -1,6 +1,10 @@
 import type { Expression, IComputeEngine } from '../global-types.js';
 import type { ContourIntegralResult } from '../types-contour.js';
-import { isFunction, isSymbol } from '../boxed-expression/type-guards.js';
+import {
+  isFunction,
+  isNumber,
+  isSymbol,
+} from '../boxed-expression/type-guards.js';
 import { freshSymbol } from './series.js';
 import { exactComplexParts, integerExponent } from './contour.js';
 import { realPathDivergence } from './contour-integrate.js';
@@ -22,6 +26,21 @@ function parity(e: Expression, variable: string): 1 | -1 | undefined {
   const exponent = integerExponent(e);
   if (exponent !== undefined) return exponent % 2 === 0 ? 1 : p[0];
   return undefined;
+}
+
+/** The integer k when `e` is k times `variable`, where k is an exact integer
+ * literal: `variable` gives 1, `Negate(variable)` gives -1, and
+ * `Multiply(k, variable)` gives k. Any other expression gives `undefined`. */
+function angleMultiple(e: Expression, variable: string): number | undefined {
+  if (isSymbol(e)) return e.symbol === variable ? 1 : undefined;
+  if (isFunction(e, 'Negate'))
+    return isSymbol(e.op1) && e.op1.symbol === variable ? -1 : undefined;
+  if (!isFunction(e, 'Multiply') || e.nops !== 2) return undefined;
+  const [c, x] = isSymbol(e.op2) ? [e.op1, e.op2] : [e.op2, e.op1];
+  if (!isSymbol(x) || x.symbol !== variable) return undefined;
+  if (!isNumber(c) || !c.isExact || c.im !== 0 || !Number.isSafeInteger(c.re))
+    return undefined;
+  return c.re;
 }
 
 /** The value of a real integral whose path goes through a pole, from the
@@ -157,15 +176,25 @@ export function definiteIntegralByResidues(
         return exactComplexParts(e) ? { n: e, d: ce.One } : undefined;
       if (!isFunction(e)) return undefined;
       if (e.operator === 'Sin' || e.operator === 'Cos') {
-        if (!isSymbol(e.op1) || e.op1.symbol !== v) return undefined;
+        // For an exact integer k, sin(k theta) and cos(k theta) are
+        // polynomials in sin(theta) and cos(theta). With m = |k|,
+        // cos(k theta) = (z^(2m) + 1)/(2 z^m), and
+        // sin(k theta) = sign(k) (z^(2m) - 1)/(2i z^m).
+        // The degree check after the conversion rejects a numerator of degree
+        // above 64. Thus m above 32 is rejected here, before a large power
+        // is built.
+        const k = angleMultiple(e.op1, v);
+        if (k === undefined || k === 0 || Math.abs(k) > 32) return undefined;
+        const m = Math.abs(k);
+        const n = ce.function(e.operator === 'Cos' ? 'Add' : 'Subtract', [
+          z.pow(2 * m),
+          ce.One,
+        ]);
         return {
-          n: ce.function(e.operator === 'Cos' ? 'Add' : 'Subtract', [
-            z.pow(2),
-            ce.One,
-          ]),
+          n: e.operator === 'Sin' && k < 0 ? n.neg() : n,
           d: ce.function(
             'Multiply',
-            e.operator === 'Cos' ? [2, z] : [2, ce.I, z]
+            e.operator === 'Cos' ? [2, z.pow(m)] : [2, ce.I, z.pow(m)]
           ),
         };
       }

@@ -5,8 +5,14 @@ import type {
   ContourPole,
   NormalizedContour,
 } from '../types-contour.js';
-import { isFunction, isNumber, sym } from '../boxed-expression/type-guards.js';
+import {
+  isFunction,
+  isNumber,
+  isSymbol,
+  sym,
+} from '../boxed-expression/type-guards.js';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
+import type { BigDecimal } from '../../big-decimal/index.js';
 import { checkDeadline } from '../../common/interruptible.js';
 import { getPolynomialCoefficients } from '../boxed-expression/polynomials.js';
 import {
@@ -25,6 +31,14 @@ export type ParsedContour =
       /** The real projection is bounded by the minimum and maximum of these
        * exact coordinates. No rounded extrema are used to enumerate poles. */
       realBounds: readonly Expression[];
+      /** True when a coordinate of the contour was a float. The coordinate
+       * is read as the exact rational value that the float holds, so that
+       * the poles are classified exactly. A pole that is nearer to the
+       * contour than the rounding of these floats is classified
+       * `undetermined`, because the value that a float stands for can put
+       * that pole on the contour. Because an operand was a float, the caller
+       * must return the value of the integral as a float. */
+      inexact?: boolean;
     }
   | { status: 'invalid-contour' | 'unsupported'; reason: string };
 
@@ -94,15 +108,19 @@ function algebraicSign(e: Expression): Sign | undefined {
 }
 
 /** The exponent of `e` when `e` is a `Power` whose exponent is an exact real
- * integer literal, otherwise `undefined`. Reading only `op2.re` is not
- * enough: the real part of the complex exponent `2 + i` is the integer 2, and
- * the real part of the symbol `i` is the integer 0. */
+ * integer literal that is a safe JavaScript integer, otherwise `undefined`.
+ * Reading only `op2.re` is not enough: the real part of the complex exponent
+ * `2 + i` is the integer 2, and the real part of the symbol `i` is the
+ * integer 0. The `re` and `im` doubles are also rounded: the exact rational
+ * `(10^20 + 1)/10^20` has `re === 2`, and an exact imaginary part that is
+ * too small for a double has `im === 0`. Thus the exactness, the real type
+ * and the integer type are read from the literal itself. */
 export function integerExponent(e: Expression): number | undefined {
   if (!isFunction(e, 'Power')) return undefined;
   const n = e.op2;
-  if (!isNumber(n) || n.im !== 0 || !Number.isSafeInteger(n.re))
+  if (!isNumber(n) || !n.isExact || n.isComplex || n.isInteger !== true)
     return undefined;
-  return n.re;
+  return Number.isSafeInteger(n.re) ? n.re : undefined;
 }
 
 /** Whether two exact complex constants are equal: `true` or `false` when
@@ -126,8 +144,53 @@ export function exactlyEqual(
 
 const sign = exactSign;
 
+/** The exact real and imaginary parts of a pure constant expression, or
+ * `undefined` when they cannot be computed exactly.
+ *
+ * The callers compute the parts of the same constant many times: a pole is
+ * classified, compared with the other poles, and tested for a zero numerator
+ * and denominator, and each step builds a new expression that contains the
+ * pole. Thus the parts are kept in a memo for each engine, keyed by the
+ * structure of the expression (its hash, then `isSame()`). The memo is used
+ * only for an expression whose symbols are all constants: the value of a
+ * constant cannot change, so the parts stay valid. The parts of `Exp` depend
+ * on the angular unit and the enclosures depend on the precision, thus both
+ * are part of the key. */
 export function exactComplexParts(z: Expression): Point | undefined {
   if (!z.isPure) return undefined;
+  if (!hasOnlyConstantSymbols(z)) return computeExactComplexParts(z);
+  const ce = z.engine;
+  let memo = partsMemo.get(ce);
+  if (!memo || memo.size > MAX_MEMO_SIZE) {
+    memo = new Map();
+    partsMemo.set(ce, memo);
+  }
+  const key = `${ce.angularUnit} ${ce.precision}`;
+  const bucket = memo.get(z.hash);
+  const hit = bucket?.find((entry) => entry.key === key && entry.z.isSame(z));
+  if (hit) return hit.parts;
+  const parts = computeExactComplexParts(z);
+  const entry = { z, key, parts };
+  if (bucket) bucket.push(entry);
+  else memo.set(z.hash, [entry]);
+  return parts;
+}
+
+const partsMemo = new WeakMap<
+  IComputeEngine,
+  Map<number, { z: Expression; key: string; parts: Point | undefined }[]>
+>();
+
+/** When the memo of an engine has more entries than this, it is cleared. */
+const MAX_MEMO_SIZE = 2000;
+
+function hasOnlyConstantSymbols(z: Expression): boolean {
+  if (isSymbol(z)) return z.isConstant === true;
+  if (isFunction(z)) return z.ops.every(hasOnlyConstantSymbols);
+  return true;
+}
+
+function computeExactComplexParts(z: Expression): Point | undefined {
   const ce = z.engine;
   if (isFunction(z, 'Add') || isFunction(z, 'Negate')) {
     const parts = z.ops.map(exactComplexParts);
@@ -144,13 +207,13 @@ export function exactComplexParts(z: Expression): Point | undefined {
     };
   }
   if (isFunction(z, 'Multiply')) {
-    let product: Point = { x: ce.One, y: ce.Zero };
+    let product: Point | undefined;
     for (const op of z.ops) {
       const p = exactComplexParts(op);
       if (!p) return undefined;
-      product = multiplyPoints(product, p);
+      product = product ? multiplyPoints(product, p) : p;
     }
-    return product;
+    return product ?? { x: ce.One, y: ce.Zero };
   }
   if (isFunction(z, 'Divide')) {
     const a = exactComplexParts(z.op1);
@@ -173,8 +236,9 @@ export function exactComplexParts(z: Expression): Point | undefined {
   ) {
     const base = exactComplexParts(z.op1);
     if (!base) return undefined;
-    let product: Point = { x: ce.One, y: ce.Zero };
-    for (let i = 0; i < exponent; i++) product = multiplyPoints(product, base);
+    if (exponent === 0) return { x: ce.One, y: ce.Zero };
+    let product = base;
+    for (let i = 1; i < exponent; i++) product = multiplyPoints(product, base);
     return product;
   }
   // e^(a + ib) = e^a (cos b + i sin b). `Cos` and `Sin` read their argument
@@ -224,17 +288,58 @@ export function exactComplexParts(z: Expression): Point | undefined {
   };
 }
 
+/** (a.x + i·a.y)·(b.x + i·b.y), as exact real and imaginary parts. A
+ * product with a factor that is the literal 0 is left out, and a factor that
+ * is the literal 1 is not multiplied. */
 function multiplyPoints(a: Point, b: Point): Point {
-  return {
-    x: sub(mul(a.x, b.x), mul(a.y, b.y)).simplify(),
-    y: a.x.engine.function('Add', [mul(a.x, b.y), mul(a.y, b.x)]).simplify(),
-  };
+  const ce = a.x.engine;
+  const xx = product(a.x, b.x);
+  const yy = product(a.y, b.y);
+  const xy = product(a.x, b.y);
+  const yx = product(a.y, b.x);
+  const x =
+    xx && yy
+      ? sub(xx, yy)
+      : (xx ?? (yy ? ce.function('Negate', [yy]) : ce.Zero));
+  const y = xy && yx ? add(xy, yx) : (xy ?? yx ?? ce.Zero);
+  return { x: reduceExactly(x), y: reduceExactly(y) };
+}
+
+/** The product `u·v`, or `undefined` when a factor is the literal 0. */
+function product(u: Expression, v: Expression): Expression | undefined {
+  if (u.isSame(0) || v.isSame(0)) return undefined;
+  if (u.isSame(1)) return v;
+  if (v.isSame(1)) return u;
+  return mul(u, v);
+}
+
+/** A shorter form of the exact constant `e`, with the same value. The parts
+ * of a product must be reduced, or they grow with each factor of a power.
+ * `simplify()` applies all the simplification rules and costs much more than
+ * necessary here. An expansion followed by `evaluate()` collects the like
+ * terms and the products of radicals, and both operations are exact.
+ * `evaluate()` can combine √a·√b into √(a·b) with a product of sums in the
+ * radicand, thus expand again until the form does not change, at most a few
+ * times. */
+function reduceExactly(e: Expression): Expression {
+  if (isNumber(e) || isSymbol(e)) return e;
+  const ce = e.engine;
+  let v = ce.function('ExpandAll', [e]).evaluate();
+  for (let i = 0; i < 4; i++) {
+    const w = ce.function('ExpandAll', [v]).evaluate();
+    if (w.isSame(v)) return w;
+    v = w;
+  }
+  return v;
 }
 
 const point = exactComplexParts;
 
 function sub(a: Expression, b: Expression): Expression {
   return a.engine.function('Subtract', [a, b]);
+}
+function add(a: Expression, b: Expression): Expression {
+  return a.engine.function('Add', [a, b]);
 }
 function mul(a: Expression, b: Expression): Expression {
   return a.engine.function('Multiply', [a, b]);
@@ -285,6 +390,30 @@ function intersect(
   return touches.includes(undefined) ? undefined : false;
 }
 
+/** Whether the distance from `p` to the segment from `a` to `b` is proved
+ * to be larger than `e`. The nearest point of the segment is `a` or `b`,
+ * except when the projection of `p` is strictly between `a` and `b`. Then
+ * the nearest point is on the line through `a` and `b`, at the distance
+ * |cross(b − a, p − a)| / |b − a|. */
+function fartherFromSegment(a: Point, b: Point, p: Point, e: Expression) {
+  const e2 = mul(e, e);
+  const square = (u: Point, v: Point) =>
+    add(mul(sub(u.x, v.x), sub(u.x, v.x)), mul(sub(u.y, v.y), sub(u.y, v.y)));
+  if (sign(sub(square(p, a), e2)) !== 1) return false;
+  if (sign(sub(square(p, b), e2)) !== 1) return false;
+  const dot = (u: Point, v: Point, w: Point) =>
+    add(mul(sub(w.x, u.x), sub(v.x, u.x)), mul(sub(w.y, u.y), sub(v.y, u.y)));
+  const fromA = sign(dot(a, b, p));
+  const fromB = sign(dot(b, a, p));
+  if (fromA !== undefined && fromB !== undefined && (fromA <= 0 || fromB <= 0))
+    return true;
+  const c = sub(
+    mul(sub(b.x, a.x), sub(p.y, a.y)),
+    mul(sub(b.y, a.y), sub(p.x, a.x))
+  );
+  return sign(sub(mul(c, c), mul(e2, square(a, b)))) === 1;
+}
+
 function classifyPolygon(vertices: Point[], p: Point): Location {
   let winding = 0;
   for (let i = 0; i < vertices.length; i++) {
@@ -314,11 +443,17 @@ const unsupported = (reason: string): ParsedContour => ({
 });
 
 /** Parse contour data separately from integration so other integration methods
- * can share the same representations and orientation conventions. */
+ * can share the same representations and orientation conventions.
+ *
+ * `margin` is an optional bound on the error in the position of the poles,
+ * for example the rounding of the floats in the integrand. A pole that is
+ * nearer to the contour than `margin` (plus the rounding of the float
+ * coordinates of the contour) is classified `undetermined`. */
 export function parseContour(
   ce: IComputeEngine,
   input: ContourInput,
-  variable?: string
+  variable?: string,
+  margin?: Expression
 ): ParsedContour {
   let kind: string;
   let args: Expression[];
@@ -348,9 +483,16 @@ export function parseContour(
         ? [e.op2, e.op1]
         : [e.op1, e.op2];
       if (isFunction(lhs, 'Abs') && !rhs.has(variable)) {
+        // |a·z + b| = r is the circle with center −b/a and radius r/|a|,
+        // when the coefficient `a` is an exact nonzero number.
         const cs = getPolynomialCoefficients(lhs.op1, variable);
-        if (cs?.length === 2 && cs[1].isSame(1))
-          e = ce.function('CircleContour', [cs[0].neg(), rhs]);
+        const a = cs?.length === 2 ? cs[1] : undefined;
+        if (a?.isSame(1)) e = ce.function('CircleContour', [cs![0].neg(), rhs]);
+        else if (a && isNumber(a) && a.isExact && !a.isSame(0))
+          e = ce.function('CircleContour', [
+            ce.function('Divide', [cs![0].neg(), a]).evaluate(),
+            ce.function('Divide', [rhs, ce.function('Abs', [a])]).evaluate(),
+          ]);
       }
     }
     if (!isFunction(e)) return unsupported('Expected a contour constructor.');
@@ -384,6 +526,22 @@ export function parseContour(
     return invalid('Unknown contour orientation.');
   if (args.some((e) => !e.isValid || !e.isPure))
     return invalid('Contour coordinates must be valid, pure expressions.');
+  // A float coordinate is read as the exact rational value that it holds.
+  // `rounding` is the sum of the rounding bounds of these floats: when every
+  // float moves by at most its bound, no point of the contour moves farther
+  // than `rounding`. The `margin` of the caller is added to it.
+  const floats = args.map(exactValueOfFloat);
+  const inexact = floats.some((f) => f !== undefined);
+  let rounding: Expression | undefined;
+  if (inexact || margin) {
+    args = args.map((z, i) => floats[i]?.value ?? z);
+    rounding = ce
+      .function('Add', [
+        ...floats.filter((f) => f !== undefined).map((f) => f.bound),
+        ...(margin ? [margin] : []),
+      ])
+      .evaluate();
+  }
   const points = args.map(point);
   if (points.some((p) => p === undefined))
     return unsupported(
@@ -400,6 +558,7 @@ export function parseContour(
     const center = ps[0];
     const radius = ps[1].x;
     return {
+      ...(inexact ? { inexact } : {}),
       contour: {
         kind,
         center: args[0],
@@ -407,27 +566,27 @@ export function parseContour(
         orientation: orientation ?? 'counterclockwise',
       },
       realBounds: [
-        sub(center.x, radius),
-        ce.function('Add', [center.x, radius]),
+        sub(center.x, rounding ? add(radius, rounding) : radius),
+        ce.function('Add', [center.x, radius, ...(rounding ? [rounding] : [])]),
       ],
       classify: (z) => {
         const p = point(z);
         if (!p) return 'undetermined';
         const dx = sub(p.x, center.x);
         const dy = sub(p.y, center.y);
-        const s = sign(
-          sub(
-            ce.function('Add', [mul(dx, dx), mul(dy, dy)]),
-            mul(radius, radius)
-          )
-        );
-        return s === undefined
-          ? 'undetermined'
-          : s === 0
-            ? 'boundary'
-            : s < 0
-              ? 'inside'
-              : 'outside';
+        const d2 = ce.function('Add', [mul(dx, dx), mul(dy, dy)]);
+        const s = sign(sub(d2, mul(radius, radius)));
+        if (s === undefined) return 'undetermined';
+        if (s === 0) return 'boundary';
+        // With float coordinates, the distance d from the pole to the center
+        // must differ from the radius r by more than the rounding e:
+        // d < r − e inside, and d > r + e outside. Compare the squares.
+        if (rounding) {
+          const r = s < 0 ? sub(radius, rounding) : add(radius, rounding);
+          if (s < 0 && sign(r) !== 1) return 'undetermined';
+          if (sign(sub(d2, mul(r, r))) !== s) return 'undetermined';
+        }
+        return s < 0 ? 'inside' : 'outside';
       },
     };
   }
@@ -515,15 +674,90 @@ export function parseContour(
     return unsupported('Polygon orientation cannot be decided exactly.');
   if (area === 0) return invalid('The polygon must have nonzero area.');
   return {
+    ...(inexact ? { inexact } : {}),
     contour: {
       kind: 'polygon',
       vertices: args,
       orientation: orientation ?? (area > 0 ? 'counterclockwise' : 'clockwise'),
     },
-    realBounds: ps.map((p) => p.x),
+    realBounds: rounding
+      ? ps.flatMap((p) => [sub(p.x, rounding), add(p.x, rounding)])
+      : ps.map((p) => p.x),
     classify: (z) => {
       const p = point(z);
-      return p ? classifyPolygon(ps, p) : 'undetermined';
+      if (!p) return 'undetermined';
+      const location = classifyPolygon(ps, p);
+      // With float coordinates, a pole inside or outside must be farther
+      // than the rounding from every edge.
+      if (rounding && (location === 'inside' || location === 'outside'))
+        for (let i = 0; i < ps.length; i++) {
+          checkDeadline(ce._deadlineFrame);
+          const a = ps[i];
+          const b = ps[(i + 1) % ps.length];
+          if (!fartherFromSegment(a, b, p, rounding)) return 'undetermined';
+        }
+      return location;
     },
   };
+}
+
+/** Whether `z` is a finite number literal that is not exact (a float). */
+function isFiniteFloat(z: Expression): boolean {
+  return isNumber(z) && !z.isExact && z.isFinite === true;
+}
+
+/** The exact value of the float literal `z`, as an exact complex number
+ * whose real and imaginary parts are rationals, and a bound on the
+ * distance from this value to the value that the float stands for. A double
+ * is a binary fraction `m·2^-k` and a big decimal is
+ * `significand·10^exponent`, so both are exact rationals. `undefined` when
+ * `z` is not a finite float.
+ *
+ * The bound is `(|x| + |y|)·2^-52` for the parts `x` and `y`. A float stands
+ * for any value that rounds to its double, which is at most half a unit in
+ * the last place (`|x|·2^-53`) from the double. The decimal digits that the
+ * literal holds are at most half a unit in the last place from that double.
+ * The sum of the two is at most `|x|·2^-52`. */
+export function exactValueOfFloat(
+  z: Expression
+): { value: Expression; bound: Expression } | undefined {
+  if (!isNumber(z) || !isFiniteFloat(z)) return undefined;
+  const ce = z.engine;
+  const n = z.numericValue;
+  const re = exactRational(typeof n === 'number' ? n : (n.bignumRe ?? n.re));
+  const im = exactRational(typeof n === 'number' ? 0 : (n.bignumIm ?? n.im));
+  if (!re || !im) return undefined;
+  const ulp = (r: [bigint, bigint]) =>
+    ce.number([r[0] < 0n ? -r[0] : r[0], r[1] * 2n ** 52n]);
+  const bound = ce.function('Add', [ulp(re), ulp(im)]).evaluate();
+  if (im[0] === 0n) return { value: ce.number(re), bound };
+  return {
+    value: ce.function('Add', [
+      ce.number(re),
+      ce.function('Multiply', [ce.number(im), ce.I]),
+    ]),
+    bound,
+  };
+}
+
+/** The exact rational `[numerator, denominator]` of a finite double or big
+ * decimal, or `undefined` when the value is not finite. */
+function exactRational(y: number | BigDecimal): [bigint, bigint] | undefined {
+  if (typeof y === 'number') {
+    if (!Number.isFinite(y)) return undefined;
+    // Doubling a double is exact until the double is an integer: at most
+    // 1074 steps, for the smallest subnormal double.
+    let m = y;
+    let k = 0;
+    while (!Number.isInteger(m)) {
+      m *= 2;
+      k += 1;
+    }
+    return [BigInt(m), 2n ** BigInt(k)];
+  }
+  if (!y.isFinite()) return undefined;
+  const e = y.exponent;
+  return e >= 0
+    ? [y.significand * 10n ** BigInt(e), 1n]
+    : [y.significand, 10n ** BigInt(-e)];
 }

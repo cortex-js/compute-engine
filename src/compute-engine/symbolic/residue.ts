@@ -34,6 +34,7 @@ import {
   nonzeroResidueConstant,
   polynomialExponentialSingularity,
 } from './essential-residue.js';
+import { exactlyEqual } from './contour.js';
 
 // The base `Expression` type only exposes operands after a type guard; the
 // boxed objects always have an `ops` getter (see limit.ts for the same idiom).
@@ -81,13 +82,21 @@ export function residue(
 
   // P(z)·exp(c/(z − a)) with a polynomial P has its only finite
   // singularity at a. At another point it is analytic, so the residue is 0.
-  // When the distance to a cannot be proved nonzero (a non-real exact
-  // point, for example), the general methods below decide.
+  // Equality of the point and a must be proved with exact arithmetic. The
+  // `.sub()` method folds two exact literals to a float, and a float
+  // difference of 0 does not prove equality: the rational
+  // 14142135623730951/10^16 and √2 are distinct, but their float difference
+  // can be 0. When exact arithmetic cannot decide (a point that is not an
+  // exact constant, for example), the general methods below decide.
   const essential = polynomialExponentialSingularity(body, varName);
   if (essential) {
-    const distance = point.sub(essential.point).simplify();
-    if (distance.isSame(0)) return essential.residue;
-    if (nonzeroResidueConstant(distance)) return ce.Zero;
+    const same = exactlyEqual(point, essential.point);
+    if (same === true) return essential.residue;
+    if (same === false) return ce.Zero;
+    if (
+      nonzeroResidueConstant(ce.function('Subtract', [point, essential.point]))
+    )
+      return ce.Zero;
   }
 
   // For meromorphic inputs, use the Laurent kernel first: the residue is

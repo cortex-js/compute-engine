@@ -65,9 +65,28 @@ describe('Resolver-backed contour geometry', () => {
   });
 
   test('inexact coordinates are not upgraded to symbolic evidence', () => {
-    expect(
-      integrate('1/z', { kind: 'circle', center: 0, radius: Math.PI }).status
-    ).toBe('unsupported');
+    // A float coordinate is read as the exact value that it holds. A pole far
+    // from the contour is classified, and the value is a float.
+    const far = integrate('1/z', {
+      kind: 'circle',
+      center: 0,
+      radius: Math.PI,
+    });
+    expect(far.status).toBe('success');
+    expect(far.value?.isNumberLiteral && far.value.isExact).toBe(false);
+    expect(far.value?.im).toBeCloseTo(2 * Math.PI, 12);
+    // The double Math.PI is about 1.2e-16 less than π. The float can stand
+    // for π, which puts the pole π on the contour: the pole is neither
+    // inside nor outside, and it is not proved to be on the contour.
+    const near = integrate('1/(z-\\pi)', {
+      kind: 'circle',
+      center: 0,
+      radius: Math.PI,
+    });
+    expect(near.status).not.toBe('success');
+    expect(near.status).not.toBe('pole-on-contour');
+    expect(near.poles[0].location).toBe('undetermined');
+    expect(near.value).toBeUndefined();
   });
 });
 

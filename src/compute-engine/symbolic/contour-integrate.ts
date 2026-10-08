@@ -30,6 +30,7 @@ import {
   exactComplexParts,
   exactlyEqual,
   exactSign,
+  exactValueOfFloat,
   integerExponent,
 } from './contour.js';
 import {
@@ -75,7 +76,17 @@ function nonzero(e: Expression): boolean {
 function exactZero(e: Expression): boolean {
   if (e.isSame(0)) return true;
   const parts = exactComplexParts(e);
-  return !!parts && exactSign(parts.x) === 0 && exactSign(parts.y) === 0;
+  return !!parts && exactZeroPart(parts.x) && exactZeroPart(parts.y);
+}
+
+/** Whether an exact real constant is 0. `evaluate()` and `simplify()` keep a
+ * product of sums factored, so a part such as `1 − √((√2 − 1)(√2 + 1))` stays
+ * undecided although it is 0. When the sign is undecided, expand the part and
+ * try again. The expansion is exact, so a result of 0 is still a proof. */
+function exactZeroPart(part: Expression): boolean {
+  const sign = exactSign(part);
+  if (sign !== undefined) return sign === 0;
+  return exactSign(part.engine.function('ExpandAll', [part]).evaluate()) === 0;
 }
 
 function exactNumber(e: Expression): boolean {
@@ -101,18 +112,58 @@ function polynomialCoefficients(poly: Expression, variable: string) {
  * complex radical. The squared candidate is checked before it is used. */
 function exactSquareRoot(value: Expression): Expression | undefined {
   const ce = value.engine;
+  // Build every intermediate value with `ce.function()`. The `.add()`,
+  // `.sub()`, `.div()` and `.pow()` methods fold two exact literals to a
+  // machine float when one of them is irrational (for example `√2 − 1`), and
+  // a float component makes the root fail the exactness checks below.
+  const residual = (root: Expression) =>
+    ce.function('Subtract', [ce.function('Power', [root, 2]), value]);
   const direct = ce.function('Sqrt', [value]).simplify();
-  if (exactComplexParts(direct) && exactZero(direct.pow(2).sub(value)))
-    return direct;
+  if (exactComplexParts(direct) && exactZero(residual(direct))) return direct;
   const parts = exactComplexParts(value);
   if (!parts) return undefined;
   const signY = exactSign(parts.y);
+  if (signY === 0) {
+    // A real value. `Sqrt` of a negative real, such as `√(−2 + √3)`, has no
+    // exact Cartesian parts, so write it as i·√(−x).
+    const signX = exactSign(parts.x);
+    if (signX === undefined) return undefined;
+    const root =
+      signX === -1
+        ? ce.function(
+            'Multiply',
+            [
+              ce
+                .function('Sqrt', [ce.function('Negate', [parts.x])])
+                .simplify(),
+              ce.I,
+            ],
+            { form: 'structural' }
+          )
+        : ce.function('Sqrt', [parts.x]).simplify();
+    return exactComplexParts(root) && exactZero(residual(root))
+      ? root
+      : undefined;
+  }
   if (signY !== 1 && signY !== -1) return undefined;
   const norm = ce
-    .function('Sqrt', [parts.x.pow(2).add(parts.y.pow(2))])
+    .function('Sqrt', [
+      ce.function('Add', [
+        ce.function('Power', [parts.x, 2]),
+        ce.function('Power', [parts.y, 2]),
+      ]),
+    ])
     .simplify();
-  const re = ce.function('Sqrt', [norm.add(parts.x).div(2)]).simplify();
-  const im = ce.function('Sqrt', [norm.sub(parts.x).div(2)]).simplify();
+  const re = ce
+    .function('Sqrt', [
+      ce.function('Divide', [ce.function('Add', [norm, parts.x]), 2]),
+    ])
+    .simplify();
+  const im = ce
+    .function('Sqrt', [
+      ce.function('Divide', [ce.function('Subtract', [norm, parts.x]), 2]),
+    ])
+    .simplify();
   // Keep the Cartesian components separate: eager complex arithmetic may
   // turn mixed rational/radical components into an approximate complex scalar.
   const root = ce.function(
@@ -120,7 +171,7 @@ function exactSquareRoot(value: Expression): Expression | undefined {
     [re, ce.function('Multiply', [signY, im, ce.I], { form: 'structural' })],
     { form: 'structural' }
   );
-  return exactComplexParts(root) && exactZero(root.pow(2).sub(value))
+  return exactComplexParts(root) && exactZero(residual(root))
     ? root
     : undefined;
 }
@@ -183,7 +234,17 @@ function polynomialZeros(
         ce.function('Multiply', [4, a, c]),
       ])
       .simplify();
-    const radical = ce.function('Sqrt', [discriminant]);
+    // `Sqrt` of a non-real or negative exact discriminant does not always
+    // give exact Cartesian parts, so the roots would not be usable. Construct
+    // the square root of such a discriminant in Cartesian form instead.
+    const discriminantParts = exactComplexParts(discriminant);
+    const imaginarySign = discriminantParts && exactSign(discriminantParts.y);
+    const realSign = discriminantParts && exactSign(discriminantParts.x);
+    const radical =
+      imaginarySign === 1 || imaginarySign === -1 || realSign === -1
+        ? exactSquareRoot(discriminant)
+        : ce.function('Sqrt', [discriminant]);
+    if (!radical) return undefined;
     const denominator = ce.function('Multiply', [2, a]);
     return [1, -1].map((s) =>
       ce
@@ -528,12 +589,20 @@ function contourIntegrateUnbounded(
       );
     }
   }
-  const parsed = parseContour(ce, contour, variable);
+  const original = ce.expr(integrand);
+  // A float in the integrand is read as the exact rational value that it
+  // holds, so that the poles are found and classified exactly. A pole that
+  // is nearer to the contour than the rounding of these floats is classified
+  // `undetermined`. Because an operand is a float, the value is a float.
+  const exact =
+    original.isValid && original.isPure
+      ? exactFloatLiterals(original)
+      : undefined;
+  const parsed = parseContour(ce, contour, variable, exact?.rounding);
   if ('status' in parsed) return { ...report, ...parsed };
   report.contour = parsed.contour;
   if (!variable || !isSymbol(ce.expr(variable)))
     return { ...report, reason: 'The integration variable must be a symbol.' };
-  const original = ce.expr(integrand);
   if (!original.isValid || !original.isPure)
     return {
       ...report,
@@ -546,7 +615,9 @@ function contourIntegrateUnbounded(
   ce.pushScope();
   try {
     ce.declare(v, 'complex');
-    const body = original.subs({ [variable]: ce.symbol(v) });
+    const body = (exact?.value ?? original).subs({
+      [variable]: ce.symbol(v),
+    });
     if (ce.angularUnit !== 'rad' && (body.has('Sin') || body.has('Cos')))
       return {
         ...report,
@@ -629,17 +700,53 @@ function contourIntegrateUnbounded(
         .simplify()
     );
     const direction = parsed.contour.orientation === 'clockwise' ? -2 : 2;
+    const value = ce
+      .function('Multiply', [ce.number(direction), ce.Pi, ce.I, sum])
+      .simplify();
     return {
       ...report,
       status: 'success',
       residueSum: sum,
-      value: ce
-        .function('Multiply', [ce.number(direction), ce.Pi, ce.I, sum])
-        .simplify(),
+      // A float contour coordinate or a float in the integrand makes the
+      // value a float, as a float operand does elsewhere.
+      value: parsed.inexact || exact ? value.N() : value,
     };
   } finally {
     ce.popScope();
   }
+}
+
+/** Replace each finite float literal of `e` by the exact rational value that
+ * it holds (see `exactValueOfFloat()`). The result has the expression with
+ * the exact values, and `rounding`, the sum of the rounding bounds of the
+ * replaced floats. `undefined` when `e` has no float literal.
+ *
+ * The rounding of a coefficient is not a bound on the displacement of a
+ * root in all cases: the root of a·z − b moves by about |b/a²| times the
+ * error in `a`, and a multiple root moves by a fractional power of the
+ * error. The margin only keeps the classification of a pole that is very
+ * near the contour from depending on the last bit of a float. */
+function exactFloatLiterals(
+  e: Expression
+): { value: Expression; rounding: Expression } | undefined {
+  const ce = e.engine;
+  const bounds: Expression[] = [];
+  const visit = (x: Expression): Expression => {
+    checkDeadline(ce._deadlineFrame);
+    const exact = exactValueOfFloat(x);
+    if (exact) {
+      bounds.push(exact.bound);
+      return exact.value;
+    }
+    if (!isFunction(x)) return x;
+    const ops = x.ops.map(visit);
+    return ops.every((op, i) => op === x.ops[i])
+      ? x
+      : ce.function(x.operator, ops);
+  };
+  const value = visit(e);
+  if (bounds.length === 0) return undefined;
+  return { value, rounding: ce.function('Add', bounds).evaluate() };
 }
 
 /** `simplify()` does not always combine residues written with complex
@@ -650,8 +757,13 @@ function contourIntegrateUnbounded(
 function realOrImaginaryForm(e: Expression): Expression {
   const parts = exactComplexParts(e);
   if (!parts) return e;
-  const x = parts.x.simplify();
-  const y = parts.y.simplify();
+  // `simplify()` can leave a part that is 0 as a sum of terms that do not
+  // cancel, for example (1 − √3)⁻² − (√3 − 1)⁻². Replace a part with 0 when
+  // `exactZeroPart()` proves that it is 0.
+  const zeroOr = (part: Expression) =>
+    !part.isSame(0) && exactZeroPart(part) ? e.engine.Zero : part;
+  const x = zeroOr(parts.x.simplify());
+  const y = zeroOr(parts.y.simplify());
   if (y.isSame(0)) return x;
   if (x.isSame(0)) return e.engine.function('Multiply', [y, e.engine.I]);
   return e;

@@ -36,6 +36,31 @@ describe('Essential residues through the shared Residue operator', () => {
     expect(residue('z^2 e^{1/z}', '2').isSame(0)).toBe(true);
   });
 
+  // At machine precision, the float difference of the rational
+  // 14142135623730951/10^16 and √2 is 0. Only exact arithmetic shows that the
+  // two points are distinct, so the residue at the rational point is 0.
+  test('the centre is identified exactly, not by a float difference', () => {
+    const f = ['Exp', ['Divide', 1, ['Subtract', 'z', ['Sqrt', 2]]]];
+    const at = (point: unknown) =>
+      ce.expr(['Residue', f, 'z', point] as any).evaluate();
+    const precision = ce.precision;
+    try {
+      ce.precision = 'machine';
+      expect(
+        at(['Rational', '14142135623730951', '10000000000000000']).isSame(0)
+      ).toBe(true);
+      expect(at(['Sqrt', 2]).isSame(1)).toBe(true);
+      expect(at(['Add', 1, ['Sqrt', 2]]).isSame(0)).toBe(true);
+    } finally {
+      ce.precision = precision;
+    }
+    expect(
+      at(['Rational', '14142135623730951', '10000000000000000']).isSame(0)
+    ).toBe(true);
+    expect(at(['Sqrt', 2]).isSame(1)).toBe(true);
+    expect(at(['Add', 1, ['Sqrt', 2]]).isSame(0)).toBe(true);
+  });
+
   test('zero exponential coefficient and zero prefactor are not essential', () => {
     expect(residue('z^2 e^{0/z}').isSame(0)).toBe(true);
     expect(residue('0 e^{1/z}').isSame(0)).toBe(true);

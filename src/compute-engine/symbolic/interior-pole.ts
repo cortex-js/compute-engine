@@ -25,10 +25,12 @@
 // the compile targets, which try a closed-form antiderivative before falling
 // back to quadrature), so a pole is reported only when it has been both
 // located exactly and confirmed numerically. Anything the analysis cannot
-// settle — symbolic or infinite bounds, a denominator that is neither a
+// settle — symbolic bounds, a denominator that is neither a
 // polynomial nor one of the circular functions above, a denominator with free
 // symbols besides the integration variable — is reported as "no pole", leaving
-// the caller's previous behavior untouched.
+// the caller's previous behavior untouched. An infinite bound is accepted by
+// `interiorPoleVerdict` (a pole at a finite point is inside `(−∞, b)` when it
+// is less than `b`), but not by the checks that need a finite range.
 
 import type {
   Expression,
@@ -73,8 +75,10 @@ const MIN_POLE_ORDER = 0.9;
 /**
  * The real value of `expr`, or `null` when it is not a finite real number.
  *
- * Used for the integration bounds: a symbolic bound (`∫₀^a`), an infinite one,
- * or a complex one yields `null`, which switches the whole detection off.
+ * Used for the integration bounds when the check needs a finite range
+ * ({@link endpointPoleVerdict}, {@link isRealOnInterval}): a symbolic bound
+ * (`∫₀^a`), an infinite one, or a complex one yields `null`, which switches
+ * that check off.
  */
 function finiteRealValue(expr: Expression | undefined): number | null {
   if (expr === undefined) return null;
@@ -82,6 +86,22 @@ function finiteRealValue(expr: Expression | undefined): number | null {
   if (!isNumber(n) || !n.isNumberLiteral) return null;
   if (n.isComplex) return null;
   return Number.isFinite(n.re) ? n.re : null;
+}
+
+/**
+ * The real value of `expr`, `+Infinity` or `-Infinity` for a real infinity,
+ * or `null` when it is not a real number or a real infinity.
+ *
+ * Used for the bounds of {@link interiorPoleVerdict}, which accepts an
+ * infinite bound. A symbolic bound, a complex bound (`~∞` included) and
+ * `NaN` give `null`.
+ */
+function realBoundValue(expr: Expression | undefined): number | null {
+  if (expr === undefined) return null;
+  const n = expr.N();
+  if (!isNumber(n) || !n.isNumberLiteral) return null;
+  if (n.isComplex) return null;
+  return Number.isNaN(n.re) ? null : n.re;
 }
 
 /**
@@ -236,11 +256,25 @@ function addLatticeSites(
   const [c0, c1] = linear;
   // `k` at each endpoint; which one is the smaller depends on the sign of `c₁`.
   const kAt = (t: number) => (c1 * t + c0 - phase) / Math.PI;
-  const kLo = Math.ceil(Math.min(kAt(lo), kAt(hi)));
+  let kLo = Math.ceil(Math.min(kAt(lo), kAt(hi)));
   let kHi = Math.floor(Math.max(kAt(lo), kAt(hi)));
-  if (!Number.isFinite(kLo) || !Number.isFinite(kHi)) return false;
+  if (Number.isNaN(kLo) || Number.isNaN(kHi)) return false;
   let truncated = false;
-  if (kHi - kLo >= MAX_PERIODIC_SITES) {
+  // An infinite bound puts infinitely many sites in the range. The
+  // enumeration then starts at the finite end of the range of `k` (around
+  // `k = 0` when both ends are infinite), and is cut short at
+  // `MAX_PERIODIC_SITES`.
+  if (!Number.isFinite(kLo) && !Number.isFinite(kHi)) {
+    kLo = -Math.floor(MAX_PERIODIC_SITES / 2);
+    kHi = kLo + MAX_PERIODIC_SITES - 1;
+    truncated = true;
+  } else if (!Number.isFinite(kLo)) {
+    kLo = kHi - MAX_PERIODIC_SITES + 1;
+    truncated = true;
+  } else if (!Number.isFinite(kHi)) {
+    kHi = kLo + MAX_PERIODIC_SITES - 1;
+    truncated = true;
+  } else if (kHi - kLo >= MAX_PERIODIC_SITES) {
     kHi = kLo + MAX_PERIODIC_SITES - 1;
     truncated = true;
   }
@@ -666,17 +700,23 @@ export type PoleVerdict = {
  * `(t² − 1)/(t − 1)` — bounded at `t = 1` — and an integrable singularity such
  * as `1/√(t − r)` report `undefined`.
  *
- * `undefined` means "not proven", never "no pole": bounds that are not finite
- * real numbers, a denominator that is neither polynomial nor one of the
- * circular, hyperbolic or logarithmic functions above (`ln(t²)`, `eᵗ − 1`),
- * a denominator with another free symbol, or a root finder that did not
- * converge all report `undefined` so the caller keeps its existing
- * behavior. Every candidate is
- * examined (no early exit) so that the verdict's sign accounts for every
- * pole in the range.
+ * `undefined` means "not proven", never "no pole": bounds that are not real
+ * numbers or real infinities, a denominator that is neither polynomial nor
+ * one of the circular, hyperbolic or logarithmic functions above (`ln(t²)`,
+ * `eᵗ − 1`), a denominator with another free symbol, or a root finder that
+ * did not converge all report `undefined` so the caller keeps its existing
+ * behavior. Every candidate is examined (no early exit) so that the
+ * verdict's sign accounts for every pole in the range.
  *
- * The bounds may be expressions or plain numbers; a symbolic or infinite
- * bound switches the detection off.
+ * The bounds may be expressions or plain numbers; a symbolic bound switches
+ * the detection off. A bound can be `+∞` or `−∞`: a finite site is then
+ * inside the range when it is on the finite side of the other bound. An
+ * infinite range has infinitely many sites of a pole lattice (`tan t`), so
+ * that enumeration is cut short and gives `unknown`, as above. With an
+ * infinite bound, the integral over the tail can also diverge: a `positive`
+ * or `negative` verdict becomes `unknown` when the samples of the tail do
+ * not show that its integral is finite or diverges with the same sign (see
+ * `tailAgrees`).
  */
 export function interiorPoleVerdict(
   integrand: Expression,
@@ -685,9 +725,9 @@ export function interiorPoleVerdict(
   upper: Expression | number | undefined,
   ce: ComputeEngine
 ): PoleVerdict | undefined {
-  const a = typeof lower === 'number' ? lower : finiteRealValue(lower);
-  const b = typeof upper === 'number' ? upper : finiteRealValue(upper);
-  if (a === null || b === null || !Number.isFinite(a) || !Number.isFinite(b))
+  const a = typeof lower === 'number' ? lower : realBoundValue(lower);
+  const b = typeof upper === 'number' ? upper : realBoundValue(upper);
+  if (a === null || b === null || Number.isNaN(a) || Number.isNaN(b))
     return undefined;
 
   // The bounds may be given in either order (`∫₂¹`); the interior is the same.
@@ -699,16 +739,24 @@ export function interiorPoleVerdict(
   if (scan === null || scan.sites.length === 0) return undefined;
   const sites = scan.sites;
 
+  // The distance from `t` to the bound `bound`. For an infinite bound, a
+  // finite distance on the scale of `t` is used instead, so that the samples
+  // next to a site stay at a finite point.
+  const distance = (t: number, bound: number) =>
+    Number.isFinite(bound) ? Math.abs(bound - t) : Math.max(1, Math.abs(t));
+
   let verdict: PoleVerdict | undefined;
   for (const site of sites) {
     // Outside the range, or AT a bound (an endpoint singularity, not an
-    // interior pole — see `PoleSite`).
+    // interior pole — see `PoleSite`). A finite site is never at an infinite
+    // bound.
     if (!(site.t > lo && site.t < hi)) continue;
-    if (site.atBound(lo) || site.atBound(hi)) continue;
+    if (Number.isFinite(lo) && site.atBound(lo)) continue;
+    if (Number.isFinite(hi) && site.atBound(hi)) continue;
 
     // Sample close enough to the site to stay inside the interval and clear of
     // every other candidate site.
-    let reach = Math.min(site.t - lo, hi - site.t) / 100;
+    let reach = Math.min(distance(site.t, lo), distance(site.t, hi)) / 100;
     for (const other of sites)
       if (other !== site && other.t !== site.t)
         reach = Math.min(reach, Math.abs(other.t - site.t) / 100);
@@ -733,12 +781,85 @@ export function interiorPoleVerdict(
   // (a proven pole suffices for that) but its direction is not established.
   if (scan.truncated && verdict.sign !== 'mixed') verdict = { sign: 'unknown' };
 
+  // An infinite bound: the integral over the tail can diverge too. The
+  // verdict `positive` or `negative` stays only when every infinite tail is
+  // finite or diverges with the same sign (see `tailAgrees`). Otherwise the
+  // integral still diverges at the pole, but its direction is not
+  // established: `∫₋₁^∞ (1/t² − 1) dt` is `+∞ − ∞`.
+  if (verdict.sign === 'positive' || verdict.sign === 'negative') {
+    const scale = Math.max(
+      1,
+      ...[lo, hi].filter((x) => Number.isFinite(x)).map((x) => Math.abs(x)),
+      ...sites.map((site) => Math.abs(site.t))
+    );
+    for (const [bound, side] of [
+      [lo, -1],
+      [hi, 1],
+    ] as const) {
+      if (Number.isFinite(bound)) continue;
+      if (!tailAgrees(integrand, variable, side, scale, verdict.sign, ce)) {
+        verdict = { sign: 'unknown' };
+        break;
+      }
+    }
+  }
+
   // Orientation: a reversed range negates the integral.
   if (a > b) {
     if (verdict.sign === 'positive') verdict = { sign: 'negative' };
     else if (verdict.sign === 'negative') verdict = { sign: 'positive' };
   }
   return verdict;
+}
+
+/**
+ * Minimum decay order of the integrand at an infinite bound for its tail to
+ * count as integrable in {@link tailAgrees}. `∫^∞ dt/t^p` is finite exactly
+ * when `p > 1`; the margin above 1 allows for floating-point error and for a
+ * slowly varying factor (`1/(t·ln t)` measures an order a little above 1, and
+ * is not integrable).
+ */
+const MIN_TAIL_ORDER = 1.1;
+
+/**
+ * Whether the integral of `integrand` over the infinite tail on the given
+ * `side` (`+1` toward `+∞`, `−1` toward `−∞`) is finite, or diverges with the
+ * sign `sign`. The integrand is sampled at `side · scale · 10ᵏ` for
+ * `k = 2, 3, 5, 8`, where `scale` is at least the magnitude of every finite
+ * bound and pole site, so that every sample is past all of them.
+ *
+ * - When every sample is zero or has the sign `sign`, the tail is taken to
+ *   keep that sign: its integral is then finite or diverges with that sign.
+ * - Otherwise, when the magnitudes of the last two samples decrease at least
+ *   as fast as `t^(−MIN_TAIL_ORDER)`, the tail is taken to be integrable.
+ * - Otherwise (a sample is not a real number, a tail of the other sign that
+ *   does not decrease fast enough), the result is `false`.
+ *
+ * This is a test from samples: it cannot exclude an integrand that changes
+ * its behavior past the last sample.
+ */
+function tailAgrees(
+  integrand: Expression,
+  variable: string,
+  side: 1 | -1,
+  scale: number,
+  sign: DivergenceSign,
+  ce: ComputeEngine
+): boolean {
+  const points = [2, 3, 5, 8].map((k) => side * scale * 10 ** k);
+  const values = points.map((x) => valueAt(integrand, variable, x, ce));
+  if (values.some((v) => Number.isNaN(v))) return false;
+  const expected = sign === 'positive' ? 1 : -1;
+  if (values.every((v) => v === 0 || Math.sign(v) === expected)) return true;
+  const [near, far] = [Math.abs(values[2]), Math.abs(values[3])];
+  if (!Number.isFinite(near) || !Number.isFinite(far)) return false;
+  // The far sample is below the smallest double: the tail decreases faster
+  // than any power.
+  if (far === 0) return true;
+  if (near === 0) return false;
+  const order =
+    Math.log(near / far) / Math.log(Math.abs(points[3] / points[2]));
+  return order >= MIN_TAIL_ORDER;
 }
 
 /**

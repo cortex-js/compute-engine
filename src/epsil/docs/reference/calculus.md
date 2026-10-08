@@ -43,7 +43,7 @@ Closed-path integral. Evaluates supported explicit contours by the residue theor
 
 MathJSON `ContourIntegrate` · `(expression, variable: symbol, contour: expression) -> number`
 
-Symbolic integral over an explicit closed contour, using the residue theorem.
+Symbolic integral over an explicit closed contour or the real line (`RealLineContour`), using the residue theorem.
 
 ### D
 

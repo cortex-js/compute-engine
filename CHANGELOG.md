@@ -101,6 +101,41 @@
 
 ### Issues Resolved
 
+- **A literal list of numbers compiles to one constant on the `interval-js`
+  target.** A `List` whose every element is a number literal, written in the
+  expression or held as a symbol's value, was emitted as one point interval
+  per element, and the constant table of the compiled function then declared
+  one `const` per element before the array of their names: a 9,540-element
+  list that a graphing document inlines compiled to a 508 KB preamble of
+  9,541 statements, about 50 bytes per element, where the `javascript` target
+  wrote the same list as one 189 KB array literal. Such a list is now one
+  call over the array of numbers, `_IA.points([4, 4.5, …])`, bound to one
+  name: the preamble holds no per-element statement and costs about what the
+  `javascript` target's array literal does. The run-time value is the same
+  array of degenerate intervals, so `At`, `Length`, `Map`, the element-wise
+  broadcast and a list-valued result are unchanged. The written-out elements
+  of a literal `Range` take the same spelling. A list with an element that is
+  not a plain number literal — a variable, a loop index, a nested list, a
+  literal no double holds such as `1/49` — keeps the elementwise array, whose
+  constant elements are still shared. A compiled function that reads the
+  emitted `code` and `preamble` (a code-generation audit) sees the new
+  spelling.
+
+- **`evaluateAsync` yields under `N`, `Add`, `Multiply`, `Evaluate` and
+  `ReleaseHold`** ([#392](https://github.com/cortex-js/compute-engine/issues/392)).
+  `Sum` yields to the event loop under `evaluateAsync` and honours an abort
+  signal, but wrapped in one of these lazy heads it ran to the end
+  synchronously: `N(Sum(1/k^2, k, 1, 400000))` aborted after 50 ms finished
+  after about 5 s, with no event-loop tick. These heads had only a synchronous
+  `evaluate` handler, which evaluates the held operands itself; each now has
+  an asynchronous twin that evaluates its held operands with `evaluateAsync`,
+  in order, and folds the values as the synchronous handler does. The
+  aborted evaluation above now rejects with a `CancellationError` after about
+  50 ms. `N(x, p)` rounds as before; the forms that raise the precision of
+  the engine for the computation (`N(x, p)` with `p` above the engine's
+  precision, and a goal `N(x, [p, a])`) keep the synchronous handler, since
+  the raised precision cannot span an `await` while other evaluations run.
+
 - **`Solve` gives exact roots for a polynomial whose roots have a closed form.**
   `x^3 - 2x + 1 = 0` gave `[1, -1.618…, 0.618…]`; it is now
   `[1, (-1 + √5)/2, (-1 - √5)/2]`. Each rational root is divided out, with its
@@ -256,6 +291,91 @@
   reads its elements through `at`. They are now `[1, 2, 3]` and `2`. The
   appended values have no position after an infinite source, so a negative
   index still has no element.
+
+- **`ContourIntegrate` and `CircularIntegrate` integrate the body of a user
+  function that has a library name.** With `Sin := z ↦ 1/z`,
+  `∮_{|z|=1} Sin(z) dz` gave `0`: the contour driver classified `Sin` as an
+  entire function by its name. The two operators now replace such a call by
+  the body of the user function before the residue analysis, as `Integrate`
+  does, and give `2πi`. When the body cannot replace the call (the function
+  has an `evaluate` handler, or the body reads the integration variable as a
+  free symbol), the integral stays unevaluated.
+
+- **A contour integral with no value answers `NaN` when an assigned symbol
+  holds a float.** With `a := 1.5` and a pole on the contour,
+  `ContourIntegrate(a/(z − 1), z, CircleContour(0, 1))` gave `Indeterminate`
+  where the literal `1.5/(z − 1)` gave `NaN`. The values of the assigned
+  symbols are now substituted before the exact-or-float decision, as for a
+  definite integral.
+
+- **The residue of `P(z)·exp(c/(z − a))` at a point near `a` is decided
+  exactly.** The distance to the essential singularity was computed with
+  machine arithmetic, so at machine precision the rational
+  `14142135623730951/10^16` and `√2` had the distance `0`, and
+  `Residue(exp(1/(z − √2)), z, 14142135623730951/10^16)` gave the essential
+  residue `1`. Equality with `a` is now proved with exact arithmetic, and the
+  residue at such a point is `0`.
+
+- **Period integrals accept multiple angles.** `∫₀^{2π}` and `∫₀^{π}` of a
+  rational function of `sin` and `cos` mapped only `sin(t)` and `cos(t)` to
+  the unit circle, so `∫₀^{2π} cos(2t)/(5 − 4cos t) dt` stayed unevaluated.
+  `sin(kt)` and `cos(kt)` with an exact integer `k`, `|k| ≤ 32`, are now
+  mapped too: the integral is `π/6`, and `∫₀^{2π} cos(3t)/(5 − 4cos t) dt` is
+  `π/12`.
+
+- **A power with an exact non-integer exponent near an integer is not an
+  integer power in a contour integral.** `z^((10^20 + 1)/10^20)` on
+  `|z| = 2` gave `0`: the exponent was read from its double, which is `2`.
+  The exponent is now read from the exact literal, the power has a branch
+  point, and the integral is declined.
+
+- **A contour with a float radius, center or vertex is evaluated.**
+  `\oint_{|z|=1.5} \frac{1}{z}\,dz` stayed unevaluated under both
+  `evaluate()` and `.N()`. Each float is now read as the exact value it
+  holds to place the poles, and the value is returned as a float
+  (`6.283185307179586i`). A pole closer to the contour than the rounding of
+  the floats (the pole `π` with the radius `Math.PI`) is not classified, so
+  the integral is not evaluated; a pole exactly on the contour gives `NaN`.
+
+- **A circle written `|a z + b| = r` is accepted.** `|3 − z| = 4` gave
+  "Unknown contour constructor." because only a coefficient of 1 was read.
+  With an exact nonzero `a`, the circle has the center `−b/a` and the radius
+  `r/|a|`: `\oint_{|3-z|=4} \frac{dz}{z}` is `2πi`, and with `|3 − z| = 2`
+  it is `0`.
+
+- **Contour and real-line residue integrals whose poles are square roots of
+  non-real or negative numbers give exact values.** The Cartesian square
+  root used the `.add()` and `.sub()` methods, which turn an exact radical
+  into a float, so no root of `z² = −1 ± i` or `z² = −2 ± √3` was ever
+  certified: `∫_{-∞}^{∞} dx/(x⁴ + 2x² + 2)` fell back to a float
+  (`1.0109554884…`), `1/(z² − 1 − i)` on a circle was "unsupported", and
+  `∫₀^{2π} dz/(2 + cos 2z)` stayed unevaluated. The roots are now built
+  with exact operations: the first integral is `(π/2)·√(√2 − 1)`, the third
+  is `2π/√3`, and a residue sum whose real or imaginary part is provably `0`
+  drops that part.
+
+- **A definite integral with an infinite bound and a pole inside the range
+  no longer gets a wrong finite value.** The interior-pole check was off
+  for an infinite bound, so the antiderivative was subtracted across the
+  pole: `\int_{-1}^{\infty} \frac{dx}{x^3}` was `1/2` (it is
+  `Indeterminate`), `\int_{-\infty}^{\infty} \frac{1.5}{x^2}dx` was `0`
+  (it is `+∞`), `\int_{-\infty}^{1} \frac{1.5}{x^3}dx` was `−0.75` (it is
+  `NaN`), and `\int_{0}^{\infty} \frac{dx}{(x-1)^2}` was `−1` (it is `+∞`).
+  The check now accepts `±∞` bounds, and `.N()`, which gave a large
+  `Measurement` for these integrals, gives the same answers. When the tail
+  at infinity can diverge with the other sign
+  (`\int_{-1}^{\infty} (\frac{1}{x^2} - 1)dx`, which was `−∞`), the
+  integral stays unevaluated under `evaluate()` and is `NaN` under `.N()`.
+
+- **A float in the integrand of a contour integral is read as the exact
+  value it holds.** `\oint_{|z|=2} \frac{dz}{z-1.5}` stayed unevaluated
+  because a pole at a float position was never classified. The float is
+  now read as the exact rational it holds, the poles are found and
+  classified exactly, and the result is a float (`6.283185307179586i`). A
+  pole closer to the contour than the rounding of the floats is reported as
+  undetermined, and a pole exactly on the contour gives `NaN`.
+  `\oint_{|z|=2} \frac{0.5}{z}dz`, which gave the half-symbolic
+  `Complex(0, 1)·Pi`, is the float `3.141592653589793i`.
 
 ## 0.149.0 _2026-10-07_
 

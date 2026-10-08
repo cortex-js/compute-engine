@@ -2536,6 +2536,60 @@ describe('INTEGRATE: divergence verdict — orientation, sign crossings, truncat
   });
 });
 
+describe('INTEGRATE: interior pole with an infinite bound', () => {
+  // A pole at a finite point is inside `(−∞, b)` when it is less than `b`.
+  // Before the interior-pole check accepted an infinite bound, these
+  // integrals were differenced at the bounds and got a finite value.
+  const ce = new ComputeEngine();
+  const ev = (latex: string) => ce.parse(latex).evaluate().toString();
+  const n = (latex: string) => ce.parse(latex).N().toString();
+
+  test('a sign change across the pole has no value (was 1/2)', () => {
+    expect(ev('\\int_{-1}^{\\infty} \\frac{1}{x^3} dx')).toBe('Indeterminate');
+    expect(n('\\int_{-1}^{\\infty} \\frac{1}{x^3} dx')).toBe('NaN');
+  });
+
+  test('a positive integrand with a pole diverges to +oo (was 0)', () => {
+    expect(ev('\\int_{-\\infty}^{\\infty} \\frac{1.5}{x^2} dx')).toBe('+oo');
+    expect(n('\\int_{-\\infty}^{\\infty} \\frac{1.5}{x^2} dx')).toBe('+oo');
+    expect(ev('\\int_{-1}^{\\infty} \\frac{1}{x^2} dx')).toBe('+oo');
+  });
+
+  test('a float operand with no value gives NaN (was 0 and -0.75)', () => {
+    expect(ev('\\int_{-\\infty}^{\\infty} \\frac{1.5}{x^3} dx')).toBe('NaN');
+    expect(ev('\\int_{-\\infty}^{1} \\frac{1.5}{x^3} dx')).toBe('NaN');
+    expect(n('\\int_{-\\infty}^{1} \\frac{1.5}{x^3} dx')).toBe('NaN');
+  });
+
+  test('reversed bounds negate the infinity', () => {
+    expect(ev('\\int_{\\infty}^{-1} \\frac{1}{x^2} dx')).toBe('-oo');
+  });
+
+  test('a pole lattice in an infinite range is found', () => {
+    expect(ev('\\int_{1}^{\\infty} \\tan(x) dx')).toBe('Indeterminate');
+  });
+
+  test('a tail that diverges with the other sign leaves no direction', () => {
+    // `+∞` at the pole and `−∞` from the tail: the integral stays inert.
+    expect(ev('\\int_{-1}^{\\infty} \\frac{1}{x^2} - 1 dx')).toContain('int');
+    // The tail is negative but integrable: the pole decides.
+    expect(ev('\\int_{-1}^{\\infty} \\frac{1}{x^4} - \\frac{1}{x^2} dx')).toBe(
+      '+oo'
+    );
+  });
+
+  test('integrals with no interior pole keep their value', () => {
+    expect(ev('\\int_{1}^{\\infty} \\frac{1}{x^2} dx')).toBe('1');
+    expect(ev('\\int_{-\\infty}^{-1} \\frac{1}{x^2} dx')).toBe('1');
+    expect(ev('\\int_{0}^{\\infty} e^{-x} dx')).toBe('1');
+    expect(ev('\\int_{-\\infty}^{\\infty} \\frac{1}{1+x^2} dx')).toBe('pi');
+    // A removable singularity is not a pole.
+    expect(ev('\\int_{-\\infty}^{\\infty} \\frac{\\sin(x)}{x} dx')).toBe('pi');
+    // A pole AT the finite bound is an endpoint pole, not an interior one.
+    expect(ev('\\int_{0}^{\\infty} \\frac{1}{x^2} dx')).toBe('+oo');
+  });
+});
+
 describe('INTEGRATE: Abs and Sign of a linear argument (issue #352)', () => {
   // The antiderivative of such an integrand can have a `Sign(u)` term, which
   // jumps where `u` changes sign. A definite integral is split at those
