@@ -41,7 +41,10 @@ import {
   machineListOf,
 } from '../boxed-expression/machine-broadcast.js';
 import { boxStoreElement } from '../boxed-expression/machine-number.js';
-import { withEvaluationEffects } from '../effects-registry.js';
+import {
+  runWithEvaluationEffects,
+  withEvaluationEffects,
+} from '../effects-registry.js';
 import { polynomialGCDMulti } from '../boxed-expression/polynomials.js';
 import {
   asSmallInteger,
@@ -308,6 +311,7 @@ import {
   isRealLiteral,
 } from '../boxed-expression/infinite-point.js';
 import type {
+  EvaluateHandlerOptions,
   OperandDescriptor,
   PureEngineView,
   TypeHandlerContext,
@@ -4416,187 +4420,42 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             ? x.evaluate({ numericApproximation: true })
             : x.evaluate()
         );
-        const rethreaded = threadOperandsThatBecameConditional(
-          engine!,
-          'Add',
-          ops,
-          evaluated,
-          numericApproximation
-        );
-        if (rethreaded !== undefined) return rethreaded;
-        const nonNumeric = nonNumericOperandError(engine!, evaluated);
-        if (nonNumeric !== undefined) return nonNumeric;
-        // A tuple with a list coordinate is data, not a point: arithmetic
-        // over it is an error (see `listCoordinateTupleOperandError`).
-        const listTuple = listCoordinateTupleOperandError(engine!, evaluated);
-        if (listTuple !== undefined) return listTuple;
-        // The driver's missing-value gate saw the operands UNEVALUATED
-        // (`Add` is lazy), so an absence produced by the evaluation above —
-        // a piecewise with no default arm, `g(3)` — has not been absorbed
-        // yet. Apply the same normalization here: the absence becomes the
-        // quiet marker of the codomain (`docs/ERROR-MODEL.md` §3), which is
-        // `NaN` in a numeric slot and `Missing` in any other. It runs
-        // AFTER the non-numeric check, and only when every evaluated operand
-        // is valid, because an error or a non-numeric operand outranks an
-        // absence: `Error` is the absorbing element of evaluation, and a
-        // type error names the offending operand where `NaN` would hide it.
-        if (evaluated.every((x) => x.isValid)) {
-          // An absent addend beside a POINT makes the point absent: the tuple
-          // is atomic, so there is no cell for the absence to land in, and a
-          // tuple of absent components is not a value any consumer reads.
-          // This arm has to run before `addTuples` below, which would
-          // otherwise leave the sum as symbolic residue. It stands aside when
-          // a LIST (any non-tuple collection) is also an operand: that sum is
-          // a broadcast over the list, and the absent point lands in each
-          // cell through the collection kernel instead.
-          //
-          // A negated or scaled absence is an absent addend too:
-          // `(1, 2) - Missing` is canonically `Add(Negate(Missing), (1, 2))`,
-          // and the evaluation above made `-Missing` the number `NaN`
-          // (a numeric codomain). The operand as it was written still says
-          // that the term is absent (`isAbsentArithmeticOperand`), so the
-          // difference is `Missing`, as the sum `(1, 2) + Missing` is.
-          // Before, the `NaN` term met the point and the difference was
-          // an `incompatible-type` error.
-          if (
-            evaluated.some(
-              (x, i) =>
-                isAbsentScalarSymbol(x) ||
-                (x.isNaN === true && isAbsentArithmeticOperand(ops[i]))
-            ) &&
-            evaluated.some((x) => isTuple(x)) &&
-            !evaluated.some((x) => isNonTupleCollectionOperand(x))
-          )
-            return engine!.Missing;
-          if (hasAbsentScalarOperand(evaluated))
-            return absentScalarMarker(engine!, expression);
-        }
-        // A sum with a residue class is folded by the residue rules only.
-        // The generic sum below does not know the ring of the class. A
-        // collection operand is first broadcast by the generic sum, and each
-        // element sum then comes back here: `ResidueClass(1, 5) + [1, 2]` is
-        // `[ResidueClass(2, 5), ResidueClass(3, 5)]`.
-        if (evaluated.some(containsResidueClass)) {
-          // The broadcast is the exact `add()`, also under `.N()`: the
-          // numeric route does not evaluate the elements it builds.
-          if (evaluated.some((x) => x.isCollection)) {
-            const r = add(
-              ...exactOperands(ops, evaluated, numericApproximation)
-            );
-            return numericApproximation ? r.N() : r;
-          }
-          return residueOperands(
-            engine!,
-            ops,
-            evaluated,
+        return addEvaluatedOperands(ops, evaluated, {
+          numericApproximation,
+          engine,
+          expression,
+        });
+      },
+      // The asynchronous twin of `evaluate`: each held operand is evaluated
+      // with `evaluateAsync`, in order, so that a long operand (a `Sum` over
+      // many terms) yields to the event loop and honours the abort signal; the
+      // synchronous handler ran it to the end (GitHub issue #392). The fold
+      // of the values is the same (`addEvaluatedOperands()`).
+      evaluateAsync: async (
+        ops,
+        { numericApproximation, engine, expression, signal, effects }
+      ) => {
+        if (ops.some((x) => isContinuationOperand(x))) return undefined;
+        const evaluated: Expression[] = [];
+        for (const x of ops)
+          evaluated.push(
+            await x.evaluateAsync(
+              numericApproximation
+                ? { numericApproximation: true, signal, _effects: effects }
+                : { signal, _effects: effects }
+            )
+          );
+        // The fold runs after the `await`s: it evaluates again (a conditional
+        // operand, the exact operands), and a synchronous evaluation after an
+        // `await` must run with this evaluation's registry
+        // (`docs/EFFECTS-MODEL.md`, rule 3 for an asynchronous handler).
+        return runWithEvaluationEffects(engine, effects, () =>
+          addEvaluatedOperands(ops, evaluated, {
             numericApproximation,
-            'Add'
-          );
-        }
-        if (evaluated.some((x) => x.operator === 'Quantity')) {
-          const r = quantityAdd(engine!, evaluated);
-          if (
-            numericApproximation &&
-            r &&
-            isQuantity(r) &&
-            isMeasurement(r.op1)
-          )
-            return r.N();
-          return r;
-        }
-        if (evaluated.some((x) => x.operator === 'Measurement')) {
-          const r = measurementAdd(engine!, evaluated);
-          return numericApproximation ? r?.N() : r;
-        }
-        // Only a pure number literal or a pure symbol goes to
-        // `addNEvaluated` raw, to be numericized there. Every other operand
-        // goes as its numeric value from the map above, marked as already
-        // numeric, so it is not numericized again.
-        // - A function operand is evaluated once. When `addN` numericized
-        //   the raw operand again, each nested `Add` or `Multiply` evaluated its
-        //   operands two or three times, and the cost grew by that factor at
-        //   each level (a polynomial in Horner form of degree 12 made about
-        //   17 million evaluations).
-        // - An IMPURE operand passes its evaluated form, so its side effects
-        //   run once: a framed `Random()` consumed two draw indices under
-        //   `N()` and one under `evaluate()`, which broke the rule that each
-        //   evaluation consumes one draw.
-        // - A number literal passes raw: `addNEvaluated` keeps a fraction
-        //   exact until the final fold (late rounding, e.g.
-        //   `\\frac{2}{3}+\\frac{12345678912345678}{987654321987654321}+\\frac{987654321987654321}{12345678912345678}`).
-        // - A symbol passes raw: a SELF-REFERENTIAL frame binding
-        //   (`t → t + 1`, Tycho item 46) makes the evaluated form of the
-        //   symbol loop, through the re-entry of this handler and through the
-        //   type-level `isFinite` → value → `type` cycle. The guard that
-        //   substitutes the value only once is on the `.N()` of the raw
-        //   symbol.
-        // - A symbol whose stored value is impure (`r` holds `Random()`)
-        //   passes its evaluated form, as an impure operand does. `isPure`
-        //   of a symbol is always true, but the `.N()` of the raw symbol
-        //   reads the stored value again, and an impure value is not
-        //   remembered between reads, so `r + π` drew two numbers.
-        if (numericApproximation) {
-          const raw = ops.map(
-            (op) =>
-              op.isPure === true &&
-              (isNumber(op) || (isSymbol(op) && isTransitivelyPure(op)))
-          );
-          const terms = ops.map((op, i) => (raw[i] ? op : evaluated[i]));
-          // A pure operand whose float is 0, ±∞ or NaN can have an exact
-          // value that is not (`10^{400}` is an integer above the largest
-          // double). It is passed as its exact value, so that the exact terms
-          // are added before the sum becomes a float: `10^{400} - 10^{400} +
-          // 1` is then 1, not `∞ - ∞ + 1 = NaN`.
-          for (let i = 0; i < ops.length; i++) {
-            if (raw[i]) continue;
-            const exact = exactValueOutOfDoubleRange(engine!, ops[i], terms[i]);
-            if (exact !== undefined) {
-              terms[i] = exact;
-              raw[i] = true;
-            }
-          }
-          const r = addNEvaluated(
-            terms,
-            raw.map((x) => !x)
-          );
-          // An operand may only have BECOME a Quantity or Measurement through
-          // `addN`'s numericization, past the `evaluated` checks above
-          // (Tycho item 101). Quantity first, matching the handler precedence.
-          return (
-            foldQuantityOperands(engine!, r) ??
-            foldMeasurementOperands(engine!, r) ??
-            markAbsentPointCells(engine!, expression, r)
-          );
-        }
-        const result = add(...evaluated);
-        // D2: an inexact (float) operand has no exactness to preserve, so it
-        // numericizes the whole sum even when mixed with an exact symbolic
-        // constant that the numeric-literal fold above can't reach (`Pi`,
-        // `ExponentialE`, …) — `Add(0.5, Pi)` → 3.64…, matching
-        // `Add(0.5, Sqrt(2))` (which already folds via the numeric-literal
-        // path since `Sqrt(2)` is itself a number literal). Only when the
-        // sum is a closed constant: `0.5 + x` must stay symbolic. The gate
-        // is `isConstant` (lexical: every symbol is a constant binding), NOT
-        // `unknowns.length === 0`: `unknowns` resolves through the *dynamic*
-        // scope chain, so inside a function application a bound parameter
-        // counts as known and a symbolic `0.3 + z²` body would fire a
-        // full-subtree `N()` walk that cannot make progress — and since
-        // nested `Add`/`Power` evaluates re-fire it at every level, the
-        // cost compounds exponentially with nesting depth (the 2026-07-19
-        // recursive-unwind blowup). `evaluate()` has already substituted
-        // every valued symbol, so constants are exactly the symbols `N()`
-        // can still numericize.
-        // `isExactNumber` (not plain `isExact`) additionally protects a
-        // Gaussian-integer term still carried by the inexact lane (e.g. the
-        // machine `i` constant); exact complex literals (`1/2 + i`, since
-        // D12-A an ExactNumericValue) are already covered by `isExact`.
-        if (
-          result.operator === 'Add' &&
-          result.isConstant &&
-          evaluated.some((x) => !isExactNumber(x))
-        )
-          return result.N();
-        return markAbsentPointCells(engine!, expression, result);
+            engine,
+            expression,
+          })
+        );
       },
     },
 
@@ -7696,144 +7555,42 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             ? x.evaluate({ numericApproximation: true })
             : x.evaluate()
         );
-        const rethreaded = threadOperandsThatBecameConditional(
-          engine!,
-          'Multiply',
-          ops,
-          evaluated,
-          numericApproximation
-        );
-        if (rethreaded !== undefined) return rethreaded;
-        const nonNumeric = nonNumericOperandError(engine!, evaluated);
-        if (nonNumeric !== undefined) return nonNumeric;
-        // A tuple with a list coordinate is data, not a point: arithmetic
-        // over it is an error (see `listCoordinateTupleOperandError`).
-        const listTuple = listCoordinateTupleOperandError(engine!, evaluated);
-        if (listTuple !== undefined) return listTuple;
-        // See the matching note in `Add`: `Multiply` is lazy, so the driver's
-        // missing-value gate never saw the EVALUATED operands, and the
-        // absence normalization to the codomain's quiet marker — `NaN` in a
-        // numeric slot, `Missing` in any other — has to run here, after the
-        // non-numeric check and only over valid operands.
-        if (evaluated.every((x) => x.isValid)) {
-          // An absent factor beside a POINT makes the point absent: the tuple
-          // is atomic, so there is no cell for the absence to land in, and a
-          // tuple of absent components is not a value any consumer reads.
-          // This arm has to run before `mulTuples` below, which would
-          // otherwise scale each coordinate into its own `Missing`. It
-          // stands aside in two cases. When a LIST (any non-tuple collection)
-          // is also a factor, the product is a broadcast over the list and
-          // the absent point lands in each cell through the collection
-          // kernel. When TWO points are factors, there is no product between
-          // points, and that error outranks the absence: `mulTuples` reports
-          // it, as it did before this arm existed.
-          if (
-            evaluated.some(isAbsentScalarSymbol) &&
-            evaluated.filter((x) => isTuple(x)).length === 1 &&
-            !evaluated.some((x) => isNonTupleCollectionOperand(x))
-          )
-            return engine!.Missing;
-          if (hasAbsentScalarOperand(evaluated))
-            return absentScalarMarker(engine!, expression);
-        }
-        // A product with a residue class: see the matching comment in `Add`.
-        if (evaluated.some(containsResidueClass)) {
-          if (evaluated.some((x) => x.isCollection)) {
-            const r = mulFactored(
-              ...exactOperands(ops, evaluated, numericApproximation)
-            );
-            return numericApproximation ? r.N() : r;
-          }
-          return residueOperands(
-            engine!,
-            ops,
-            evaluated,
+        return mulEvaluatedOperands(ops, evaluated, {
+          numericApproximation,
+          engine,
+          expression,
+        });
+      },
+      // The asynchronous twin of `evaluate`: each held operand is evaluated
+      // with `evaluateAsync`, in order, so that a long operand (a `Sum` over
+      // many terms) yields to the event loop and honours the abort signal; the
+      // synchronous handler ran it to the end (GitHub issue #392). The fold
+      // of the values is the same (`mulEvaluatedOperands()`).
+      evaluateAsync: async (
+        ops,
+        { numericApproximation, engine, expression, signal, effects }
+      ) => {
+        if (ops.some((x) => isContinuationOperand(x))) return undefined;
+        const evaluated: Expression[] = [];
+        for (const x of ops)
+          evaluated.push(
+            await x.evaluateAsync(
+              numericApproximation
+                ? { numericApproximation: true, signal, _effects: effects }
+                : { signal, _effects: effects }
+            )
+          );
+        // The fold runs after the `await`s: it evaluates again (a conditional
+        // operand, the exact operands), and a synchronous evaluation after an
+        // `await` must run with this evaluation's registry
+        // (`docs/EFFECTS-MODEL.md`, rule 3 for an asynchronous handler).
+        return runWithEvaluationEffects(engine, effects, () =>
+          mulEvaluatedOperands(ops, evaluated, {
             numericApproximation,
-            'Multiply'
-          );
-        }
-        if (evaluated.some((x) => x.operator === 'Quantity')) {
-          const r = quantityMultiply(engine!, evaluated);
-          if (
-            numericApproximation &&
-            r &&
-            isQuantity(r) &&
-            isMeasurement(r.op1)
-          )
-            return r.N();
-          return r;
-        }
-        if (evaluated.some((x) => x.operator === 'Measurement')) {
-          const r = measurementMultiply(engine!, evaluated);
-          return numericApproximation ? r?.N() : r;
-        }
-        // Only a pure number literal or a pure symbol passes raw; every other
-        // operand passes its numeric value, so it is evaluated once and its
-        // side effects run once — see the matching comment in `Add`. A
-        // symbol whose stored value is impure is not a pure symbol here
-        // (`isTransitivelyPure()`): its raw `.N()` would read that value a
-        // second time, and `2r` would draw two numbers for one `r`.
-        // `mulNEvaluated` keeps a product of sums FACTORED exactly as
-        // `mulFactored` does below — the two routes must agree on shape,
-        // differing only in floats.
-        if (numericApproximation) {
-          const raw = ops.map(
-            (op) =>
-              op.isPure === true &&
-              (isNumber(op) || (isSymbol(op) && isTransitivelyPure(op)))
-          );
-          const factors = ops.map((op, i) => (raw[i] ? op : evaluated[i]));
-          // A pure operand whose float is 0 or ±∞ can have an exact value
-          // that is not (`10^{-400}` is `1/10^400`, `1 + 10^{400}` is an
-          // integer). It is passed as its exact value, so that `mulNEvaluated`
-          // can fold it with the other factors before it becomes a float:
-          // `10^{-400}·10^{300}` is then `1e-100`, not `0·1e300`.
-          for (let i = 0; i < ops.length; i++) {
-            if (raw[i]) continue;
-            const exact = exactValueOutOfDoubleRange(
-              engine!,
-              ops[i],
-              factors[i]
-            );
-            if (exact !== undefined) {
-              factors[i] = exact;
-              raw[i] = true;
-            }
-          }
-          rescueExactCoefficients(engine!, ops, factors, raw);
-          const r = mulNEvaluated(
-            factors,
-            raw.map((x) => !x)
-          );
-          // See the matching comment in `Add` (Tycho item 101).
-          return (
-            foldQuantityOperands(engine!, r) ??
-            foldMeasurementOperands(engine!, r) ??
-            markAbsentPointCells(engine!, expression, r)
-          );
-        }
-        // `mulFactored`, not `mul`: `evaluate()` promises the most EXACT form,
-        // and a product of sums is exactly as exact factored as expanded while
-        // being smaller — expanding multiplies the term count at every factor,
-        // which is what made a `Product` of linear factors superlinear. So
-        // `(a + b)(c + d)` reaches the user as written; `Expand` opens it and
-        // reproduces the expanded form verbatim (user ruling, 2026-08-20).
-        // Internal callers keep `mul()`, whose distribution several
-        // normalization paths need to reach a fixpoint — see `mulFactored`.
-        const result = mulFactored(...evaluated);
-        // D2: see the matching comment in `Add` — an inexact (float) operand
-        // numericizes the whole product even when mixed with an exact
-        // symbolic constant (`Multiply(0.5, Pi)` → 1.57…). Only when the
-        // product is a closed constant (`isConstant`, lexical — NOT the
-        // dynamic-scope `unknowns`; see `Add`): `0.5 * x` must stay
-        // symbolic, including a bound parameter `x` inside an application.
-        if (
-          result.operator === 'Multiply' &&
-          result.isConstant &&
-          evaluated.some((x) => !isExactNumber(x))
-        )
-          return result.N();
-        return markAbsentPointCells(engine!, expression, result);
+            engine,
+            expression,
+          })
+        );
       },
     },
 
@@ -12973,4 +12730,349 @@ function bigRealOf(x: Expression | undefined): BigDecimal | undefined {
  */
 function floorModFloat(a: Expression, b: Expression): Expression | undefined {
   return apply2(a, b, floorModDouble, (a, b) => a.mod(b).add(b).mod(b));
+}
+
+/**
+ * The value of `Add(...ops)` from the values `evaluated` of its operands (one
+ * value per operand, in order). `Add` is lazy: the handler evaluates the
+ * operands itself, synchronously in `evaluate` and with `evaluateAsync` in
+ * `evaluateAsync`, and both hand the values to this fold. The operands `ops`
+ * as written are read for the absence marks and the exact operands.
+ */
+function addEvaluatedOperands(
+  ops: ReadonlyArray<Expression>,
+  evaluated: ReadonlyArray<Expression>,
+  {
+    numericApproximation,
+    engine,
+    expression,
+  }: Pick<
+    EvaluateHandlerOptions,
+    'numericApproximation' | 'engine' | 'expression'
+  >
+): Expression | undefined {
+  const rethreaded = threadOperandsThatBecameConditional(
+    engine!,
+    'Add',
+    ops,
+    evaluated,
+    numericApproximation
+  );
+  if (rethreaded !== undefined) return rethreaded;
+  const nonNumeric = nonNumericOperandError(engine!, evaluated);
+  if (nonNumeric !== undefined) return nonNumeric;
+  // A tuple with a list coordinate is data, not a point: arithmetic
+  // over it is an error (see `listCoordinateTupleOperandError`).
+  const listTuple = listCoordinateTupleOperandError(engine!, evaluated);
+  if (listTuple !== undefined) return listTuple;
+  // The driver's missing-value gate saw the operands UNEVALUATED
+  // (`Add` is lazy), so an absence produced by the evaluation above —
+  // a piecewise with no default arm, `g(3)` — has not been absorbed
+  // yet. Apply the same normalization here: the absence becomes the
+  // quiet marker of the codomain (`docs/ERROR-MODEL.md` §3), which is
+  // `NaN` in a numeric slot and `Missing` in any other. It runs
+  // AFTER the non-numeric check, and only when every evaluated operand
+  // is valid, because an error or a non-numeric operand outranks an
+  // absence: `Error` is the absorbing element of evaluation, and a
+  // type error names the offending operand where `NaN` would hide it.
+  if (evaluated.every((x) => x.isValid)) {
+    // An absent addend beside a POINT makes the point absent: the tuple
+    // is atomic, so there is no cell for the absence to land in, and a
+    // tuple of absent components is not a value any consumer reads.
+    // This arm has to run before `addTuples` below, which would
+    // otherwise leave the sum as symbolic residue. It stands aside when
+    // a LIST (any non-tuple collection) is also an operand: that sum is
+    // a broadcast over the list, and the absent point lands in each
+    // cell through the collection kernel instead.
+    //
+    // A negated or scaled absence is an absent addend too:
+    // `(1, 2) - Missing` is canonically `Add(Negate(Missing), (1, 2))`,
+    // and the evaluation above made `-Missing` the number `NaN`
+    // (a numeric codomain). The operand as it was written still says
+    // that the term is absent (`isAbsentArithmeticOperand`), so the
+    // difference is `Missing`, as the sum `(1, 2) + Missing` is.
+    // Before, the `NaN` term met the point and the difference was
+    // an `incompatible-type` error.
+    if (
+      evaluated.some(
+        (x, i) =>
+          isAbsentScalarSymbol(x) ||
+          (x.isNaN === true && isAbsentArithmeticOperand(ops[i]))
+      ) &&
+      evaluated.some((x) => isTuple(x)) &&
+      !evaluated.some((x) => isNonTupleCollectionOperand(x))
+    )
+      return engine!.Missing;
+    if (hasAbsentScalarOperand(evaluated))
+      return absentScalarMarker(engine!, expression);
+  }
+  // A sum with a residue class is folded by the residue rules only.
+  // The generic sum below does not know the ring of the class. A
+  // collection operand is first broadcast by the generic sum, and each
+  // element sum then comes back here: `ResidueClass(1, 5) + [1, 2]` is
+  // `[ResidueClass(2, 5), ResidueClass(3, 5)]`.
+  if (evaluated.some(containsResidueClass)) {
+    // The broadcast is the exact `add()`, also under `.N()`: the
+    // numeric route does not evaluate the elements it builds.
+    if (evaluated.some((x) => x.isCollection)) {
+      const r = add(...exactOperands(ops, evaluated, numericApproximation));
+      return numericApproximation ? r.N() : r;
+    }
+    return residueOperands(
+      engine!,
+      ops,
+      evaluated,
+      numericApproximation,
+      'Add'
+    );
+  }
+  if (evaluated.some((x) => x.operator === 'Quantity')) {
+    const r = quantityAdd(engine!, evaluated);
+    if (numericApproximation && r && isQuantity(r) && isMeasurement(r.op1))
+      return r.N();
+    return r;
+  }
+  if (evaluated.some((x) => x.operator === 'Measurement')) {
+    const r = measurementAdd(engine!, evaluated);
+    return numericApproximation ? r?.N() : r;
+  }
+  // Only a pure number literal or a pure symbol goes to
+  // `addNEvaluated` raw, to be numericized there. Every other operand
+  // goes as its numeric value from the map above, marked as already
+  // numeric, so it is not numericized again.
+  // - A function operand is evaluated once. When `addN` numericized
+  //   the raw operand again, each nested `Add` or `Multiply` evaluated its
+  //   operands two or three times, and the cost grew by that factor at
+  //   each level (a polynomial in Horner form of degree 12 made about
+  //   17 million evaluations).
+  // - An IMPURE operand passes its evaluated form, so its side effects
+  //   run once: a framed `Random()` consumed two draw indices under
+  //   `N()` and one under `evaluate()`, which broke the rule that each
+  //   evaluation consumes one draw.
+  // - A number literal passes raw: `addNEvaluated` keeps a fraction
+  //   exact until the final fold (late rounding, e.g.
+  //   `\\frac{2}{3}+\\frac{12345678912345678}{987654321987654321}+\\frac{987654321987654321}{12345678912345678}`).
+  // - A symbol passes raw: a SELF-REFERENTIAL frame binding
+  //   (`t → t + 1`, Tycho item 46) makes the evaluated form of the
+  //   symbol loop, through the re-entry of this handler and through the
+  //   type-level `isFinite` → value → `type` cycle. The guard that
+  //   substitutes the value only once is on the `.N()` of the raw
+  //   symbol.
+  // - A symbol whose stored value is impure (`r` holds `Random()`)
+  //   passes its evaluated form, as an impure operand does. `isPure`
+  //   of a symbol is always true, but the `.N()` of the raw symbol
+  //   reads the stored value again, and an impure value is not
+  //   remembered between reads, so `r + π` drew two numbers.
+  if (numericApproximation) {
+    const raw = ops.map(
+      (op) =>
+        op.isPure === true &&
+        (isNumber(op) || (isSymbol(op) && isTransitivelyPure(op)))
+    );
+    const terms = ops.map((op, i) => (raw[i] ? op : evaluated[i]));
+    // A pure operand whose float is 0, ±∞ or NaN can have an exact
+    // value that is not (`10^{400}` is an integer above the largest
+    // double). It is passed as its exact value, so that the exact terms
+    // are added before the sum becomes a float: `10^{400} - 10^{400} +
+    // 1` is then 1, not `∞ - ∞ + 1 = NaN`.
+    for (let i = 0; i < ops.length; i++) {
+      if (raw[i]) continue;
+      const exact = exactValueOutOfDoubleRange(engine!, ops[i], terms[i]);
+      if (exact !== undefined) {
+        terms[i] = exact;
+        raw[i] = true;
+      }
+    }
+    const r = addNEvaluated(
+      terms,
+      raw.map((x) => !x)
+    );
+    // An operand may only have BECOME a Quantity or Measurement through
+    // `addN`'s numericization, past the `evaluated` checks above
+    // (Tycho item 101). Quantity first, matching the handler precedence.
+    return (
+      foldQuantityOperands(engine!, r) ??
+      foldMeasurementOperands(engine!, r) ??
+      markAbsentPointCells(engine!, expression, r)
+    );
+  }
+  const result = add(...evaluated);
+  // D2: an inexact (float) operand has no exactness to preserve, so it
+  // numericizes the whole sum even when mixed with an exact symbolic
+  // constant that the numeric-literal fold above can't reach (`Pi`,
+  // `ExponentialE`, …) — `Add(0.5, Pi)` → 3.64…, matching
+  // `Add(0.5, Sqrt(2))` (which already folds via the numeric-literal
+  // path since `Sqrt(2)` is itself a number literal). Only when the
+  // sum is a closed constant: `0.5 + x` must stay symbolic. The gate
+  // is `isConstant` (lexical: every symbol is a constant binding), NOT
+  // `unknowns.length === 0`: `unknowns` resolves through the *dynamic*
+  // scope chain, so inside a function application a bound parameter
+  // counts as known and a symbolic `0.3 + z²` body would fire a
+  // full-subtree `N()` walk that cannot make progress — and since
+  // nested `Add`/`Power` evaluates re-fire it at every level, the
+  // cost compounds exponentially with nesting depth (the 2026-07-19
+  // recursive-unwind blowup). `evaluate()` has already substituted
+  // every valued symbol, so constants are exactly the symbols `N()`
+  // can still numericize.
+  // `isExactNumber` (not plain `isExact`) additionally protects a
+  // Gaussian-integer term still carried by the inexact lane (e.g. the
+  // machine `i` constant); exact complex literals (`1/2 + i`, since
+  // D12-A an ExactNumericValue) are already covered by `isExact`.
+  if (
+    result.operator === 'Add' &&
+    result.isConstant &&
+    evaluated.some((x) => !isExactNumber(x))
+  )
+    return result.N();
+  return markAbsentPointCells(engine!, expression, result);
+}
+
+/**
+ * The value of `Multiply(...ops)` from the values `evaluated` of its operands (one
+ * value per operand, in order). `Multiply` is lazy: the handler evaluates the
+ * operands itself, synchronously in `evaluate` and with `evaluateAsync` in
+ * `evaluateAsync`, and both hand the values to this fold. The operands `ops`
+ * as written are read for the absence marks and the exact operands.
+ */
+function mulEvaluatedOperands(
+  ops: ReadonlyArray<Expression>,
+  evaluated: ReadonlyArray<Expression>,
+  {
+    numericApproximation,
+    engine,
+    expression,
+  }: Pick<
+    EvaluateHandlerOptions,
+    'numericApproximation' | 'engine' | 'expression'
+  >
+): Expression | undefined {
+  const rethreaded = threadOperandsThatBecameConditional(
+    engine!,
+    'Multiply',
+    ops,
+    evaluated,
+    numericApproximation
+  );
+  if (rethreaded !== undefined) return rethreaded;
+  const nonNumeric = nonNumericOperandError(engine!, evaluated);
+  if (nonNumeric !== undefined) return nonNumeric;
+  // A tuple with a list coordinate is data, not a point: arithmetic
+  // over it is an error (see `listCoordinateTupleOperandError`).
+  const listTuple = listCoordinateTupleOperandError(engine!, evaluated);
+  if (listTuple !== undefined) return listTuple;
+  // See the matching note in `Add`: `Multiply` is lazy, so the driver's
+  // missing-value gate never saw the EVALUATED operands, and the
+  // absence normalization to the codomain's quiet marker — `NaN` in a
+  // numeric slot, `Missing` in any other — has to run here, after the
+  // non-numeric check and only over valid operands.
+  if (evaluated.every((x) => x.isValid)) {
+    // An absent factor beside a POINT makes the point absent: the tuple
+    // is atomic, so there is no cell for the absence to land in, and a
+    // tuple of absent components is not a value any consumer reads.
+    // This arm has to run before `mulTuples` below, which would
+    // otherwise scale each coordinate into its own `Missing`. It
+    // stands aside in two cases. When a LIST (any non-tuple collection)
+    // is also a factor, the product is a broadcast over the list and
+    // the absent point lands in each cell through the collection
+    // kernel. When TWO points are factors, there is no product between
+    // points, and that error outranks the absence: `mulTuples` reports
+    // it, as it did before this arm existed.
+    if (
+      evaluated.some(isAbsentScalarSymbol) &&
+      evaluated.filter((x) => isTuple(x)).length === 1 &&
+      !evaluated.some((x) => isNonTupleCollectionOperand(x))
+    )
+      return engine!.Missing;
+    if (hasAbsentScalarOperand(evaluated))
+      return absentScalarMarker(engine!, expression);
+  }
+  // A product with a residue class: see the matching comment in `Add`.
+  if (evaluated.some(containsResidueClass)) {
+    if (evaluated.some((x) => x.isCollection)) {
+      const r = mulFactored(
+        ...exactOperands(ops, evaluated, numericApproximation)
+      );
+      return numericApproximation ? r.N() : r;
+    }
+    return residueOperands(
+      engine!,
+      ops,
+      evaluated,
+      numericApproximation,
+      'Multiply'
+    );
+  }
+  if (evaluated.some((x) => x.operator === 'Quantity')) {
+    const r = quantityMultiply(engine!, evaluated);
+    if (numericApproximation && r && isQuantity(r) && isMeasurement(r.op1))
+      return r.N();
+    return r;
+  }
+  if (evaluated.some((x) => x.operator === 'Measurement')) {
+    const r = measurementMultiply(engine!, evaluated);
+    return numericApproximation ? r?.N() : r;
+  }
+  // Only a pure number literal or a pure symbol passes raw; every other
+  // operand passes its numeric value, so it is evaluated once and its
+  // side effects run once — see the matching comment in `Add`. A
+  // symbol whose stored value is impure is not a pure symbol here
+  // (`isTransitivelyPure()`): its raw `.N()` would read that value a
+  // second time, and `2r` would draw two numbers for one `r`.
+  // `mulNEvaluated` keeps a product of sums FACTORED exactly as
+  // `mulFactored` does below — the two routes must agree on shape,
+  // differing only in floats.
+  if (numericApproximation) {
+    const raw = ops.map(
+      (op) =>
+        op.isPure === true &&
+        (isNumber(op) || (isSymbol(op) && isTransitivelyPure(op)))
+    );
+    const factors = ops.map((op, i) => (raw[i] ? op : evaluated[i]));
+    // A pure operand whose float is 0 or ±∞ can have an exact value
+    // that is not (`10^{-400}` is `1/10^400`, `1 + 10^{400}` is an
+    // integer). It is passed as its exact value, so that `mulNEvaluated`
+    // can fold it with the other factors before it becomes a float:
+    // `10^{-400}·10^{300}` is then `1e-100`, not `0·1e300`.
+    for (let i = 0; i < ops.length; i++) {
+      if (raw[i]) continue;
+      const exact = exactValueOutOfDoubleRange(engine!, ops[i], factors[i]);
+      if (exact !== undefined) {
+        factors[i] = exact;
+        raw[i] = true;
+      }
+    }
+    rescueExactCoefficients(engine!, ops, factors, raw);
+    const r = mulNEvaluated(
+      factors,
+      raw.map((x) => !x)
+    );
+    // See the matching comment in `Add` (Tycho item 101).
+    return (
+      foldQuantityOperands(engine!, r) ??
+      foldMeasurementOperands(engine!, r) ??
+      markAbsentPointCells(engine!, expression, r)
+    );
+  }
+  // `mulFactored`, not `mul`: `evaluate()` promises the most EXACT form,
+  // and a product of sums is exactly as exact factored as expanded while
+  // being smaller — expanding multiplies the term count at every factor,
+  // which is what made a `Product` of linear factors superlinear. So
+  // `(a + b)(c + d)` reaches the user as written; `Expand` opens it and
+  // reproduces the expanded form verbatim (user ruling, 2026-08-20).
+  // Internal callers keep `mul()`, whose distribution several
+  // normalization paths need to reach a fixpoint — see `mulFactored`.
+  const result = mulFactored(...evaluated);
+  // D2: see the matching comment in `Add` — an inexact (float) operand
+  // numericizes the whole product even when mixed with an exact
+  // symbolic constant (`Multiply(0.5, Pi)` → 1.57…). Only when the
+  // product is a closed constant (`isConstant`, lexical — NOT the
+  // dynamic-scope `unknowns`; see `Add`): `0.5 * x` must stay
+  // symbolic, including a bound parameter `x` inside an application.
+  if (
+    result.operator === 'Multiply' &&
+    result.isConstant &&
+    evaluated.some((x) => !isExactNumber(x))
+  )
+    return result.N();
+  return markAbsentPointCells(engine!, expression, result);
 }

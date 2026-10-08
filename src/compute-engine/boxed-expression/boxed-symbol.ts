@@ -1555,12 +1555,19 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     // An option set whose only key is `numericApproximation` is one of the
     // two cached forms: `true` is the numeric entry, and `false` or
     // `undefined` is the same evaluation as no options (several handlers
-    // pass `{ numericApproximation }` through unchanged). Any other key
-    // takes the uncached dereference.
+    // pass `{ numericApproximation }` through unchanged). The abort signal
+    // and the effects registry of an asynchronous evaluation (`signal`,
+    // `_effects`) do not select a different form: they do not change the
+    // value of a pure expression, and only a pure value is memoized
+    // (`_memoizedStoredValue()`). Any other key takes the uncached
+    // dereference.
     const numeric = options?.numericApproximation === true;
     if (
       options !== undefined &&
-      Object.keys(options).some((k) => k !== 'numericApproximation')
+      Object.keys(options).some(
+        (k) =>
+          k !== 'numericApproximation' && k !== 'signal' && k !== '_effects'
+      )
     )
       return this._dereference(value, options);
     return this._memoizedStoredValue(value, numeric ? 1 : 0, () =>

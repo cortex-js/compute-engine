@@ -147,6 +147,9 @@ import type {
   ProtocolMembersInput,
   Tri,
 } from '../global-types.js';
+import type { EvaluateHandlerOptions } from '../types-definitions.js';
+import { awaitAsyncOnlyDescendants } from '../boxed-expression/async-only-descendants.js';
+import { runWithEvaluationEffects } from '../effects-registry.js';
 import type { EffectHandlers } from '../types-effects.js';
 import type { FunctionInterface } from '../types-expression.js';
 import type {
@@ -3887,6 +3890,16 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         if (isFunction(v, 'Hold')) return v.op1.canonical.evaluate(options);
         return v;
       },
+      // The asynchronous twin: the released expression is evaluated with
+      // `evaluateAsync`, so that a long one yields to the event loop and
+      // honours the abort signal (GitHub issue #392).
+      evaluateAsync: async ([x], { numericApproximation, signal, effects }) => {
+        const opts = { numericApproximation, signal, _effects: effects };
+        if (isFunction(x, 'Hold')) return x.op1.canonical.evaluateAsync(opts);
+        const v = await x.canonical.evaluateAsync(opts);
+        if (isFunction(v, 'Hold')) return v.op1.canonical.evaluateAsync(opts);
+        return v;
+      },
     },
 
     HorizontalSpacing: {
@@ -7088,6 +7101,11 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         return ce._fn('Evaluate', xs);
       },
       evaluate: ([x], options) => x.evaluate(options),
+      // The asynchronous twin: the operand is evaluated with `evaluateAsync`,
+      // so that a long operand yields to the event loop and honours the abort
+      // signal (GitHub issue #392).
+      evaluateAsync: ([x], { numericApproximation, signal, effects }) =>
+        x.evaluateAsync({ numericApproximation, signal, _effects: effects }),
     },
 
     // Evaluate an expression at a specific point, potentially symbolically
@@ -7672,137 +7690,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
 
         return ce._fn('N', xs);
       },
-      evaluate: (ops, { engine: ce }) => {
-        // `N` is lazy, so its operand is held unbound. Calling `.N()` on an
-        // unbound expression is a no-op (e.g. an unbound `Pi` symbol returns
-        // itself), so canonicalize (bind) the operand first. This makes
-        // `["N", expr]` equivalent to `expr.N()`.
-        const x = ops[0];
-
-        // Single-argument form: evaluate at the engine's current precision.
-        if (ops.length < 2) return inexactResult(ce, x.canonical.N());
-
-        // Optional second argument: the requested number of significant
-        // digits, or a list `[p, a]` of a precision goal and an accuracy
-        // goal. Resolve it numerically (it may be `2 + 3` or a bound symbol).
-        let request = ops[1].canonical.N();
-        // A lazy indexed collection (`Range(30, 31)`, or a symbol whose value
-        // is one) is a goal when it has two elements, as a list is: its
-        // elements are read into a list. With another number of elements,
-        // the goal is not valid and the call stays unevaluated.
-        if (request.isLazyCollection && request.isIndexedCollection) {
-          if (request.count !== 2) return undefined;
-          request = ce.function('List', [...request.each()]);
-        }
-        if (isFunction(request, 'List') || isFunction(request, 'Tuple')) {
-          const goal = numericGoal(request);
-          // A goal that is not valid leaves the call unevaluated.
-          if (goal === undefined) return undefined;
-          return evaluateToGoal(x.canonical, goal, request);
-        }
-
-        let p = request.re;
-        if (!Number.isFinite(p) || p < 1)
-          return inexactResult(ce, x.canonical.N());
-        p = Math.min(Math.trunc(p), 1000); // cap to avoid runaway precision
-
-        // The requested digits reach every `evaluate` handler run inside this
-        // call as `options.precision` (see `IComputeEngine._requestedPrecision`).
-        // Restored after the call, so a nested `N(y, q)` applies to `y` only.
-        const enclosingRequest = ce._requestedPrecision;
-        ce._requestedPrecision = p;
-        try {
-          // The value is computed with guard digits, then rounded to `p`
-          // digits: a value computed at `p` digits can have an error of a
-          // few units in its last digit (`N(Exp(i), 30)` had a real part
-          // that ended with ...444, not ...443). With the guard digits, a
-          // digit is wrong only when the exact value is within that error
-          // of a point halfway between two `p`-digit numbers.
-          const global = ce.precision;
-          const working = p + guardDigits(p);
-          const source = x.canonical;
-          if (working <= global) {
-            // The working precision of the engine has the guard digits:
-            // round the value down to `p` significant digits. The precision
-            // is not lowered (it has a machine-digit floor, so lowering it
-            // can't reach a small `p`).
-            return inexactResult(
-              ce,
-              roundToSignificantDigits(source.N(), p),
-              p,
-              source
-            );
-          }
-
-          // Compute at `working` digits, then restore the precision of the
-          // engine, also when the evaluation throws: `N(x, p)` does not
-          // change `ce.precision` (GitHub issue #391). The precision is
-          // raised without a reset of the engine
-          // (`_withTransientPrecision`): the value of a constant such as
-          // `Pi` is computed again at `working` digits, and is not read from
-          // the value that the engine keeps at its precision. The handlers
-          // receive `p` as `options.precision`: it is the number of digits
-          // that the call requests.
-          //
-          // The result is rounded to `p` digits. When `p` is more than the
-          // precision of the engine, each float that the window computed is
-          // displayed with its `p` digits (`showComputedDigits()`), also a
-          // float in a symbolic result (`x + 3.14159…`). An operation on the
-          // result later computes at the precision of the engine, and its
-          // result is displayed with that precision. The elements of a lazy
-          // collection are read after the precision is restored: each one
-          // is computed from the operand by its own `N(_, p)`
-          // (`inexactResult()`).
-          //
-          // The value at the precision of the engine is computed only when
-          // a float has more digits than that precision, and only for a pure
-          // operand: a second evaluation of `Random()` would give another
-          // value. It is also not computed for a float with more digits
-          // than a machine float when the operand reads no float that is
-          // already computed (`mayReadFixedFloat()`): such a float was
-          // computed by the window, at its precision. Thus `N(Pi, 50)` or
-          // `N(Integrate(…), 50)` evaluates the operand one time only.
-          const referenceValue = once(() => {
-            // `isPure` does not read the stored values: `r + Pi` is pure
-            // also when `r` holds `Random()` (`isTransitivelyPure()`).
-            if (!isTransitivelyPure(source)) return undefined;
-            ce._requestedPrecision = enclosingRequest;
-            try {
-              return ce._withTransientPrecision(global, () => source.N());
-            } finally {
-              ce._requestedPrecision = p;
-            }
-          });
-          const readsFixedFloat = once(() => mayReadFixedFloat(source));
-          const reference = (shown: number): Expression | undefined =>
-            shown <= MACHINE_FLOAT_DIGITS || readsFixedFloat()
-              ? referenceValue()
-              : undefined;
-          const result = ce._withTransientPrecision(working, () => {
-            const value = inexactResult(
-              ce,
-              roundToSignificantDigits(source.N(), p),
-              p,
-              source
-            );
-            if (p <= global) return value;
-            return showComputedDigits(
-              value,
-              p,
-              global,
-              reference,
-              once(() => source.evaluate())
-            );
-          });
-          // A float with no more digits than the precision of the engine is
-          // a float of the kind that the engine makes: a machine float at
-          // machine precision (`N(1/3, 11)` is computed at 16 digits, which
-          // makes a big decimal).
-          return followEnginePrecision(ce, result);
-        } finally {
-          ce._requestedPrecision = enclosingRequest;
-        }
-      },
+      evaluate: evaluateN,
+      evaluateAsync: evaluateNAsync,
     },
 
     // Engine-internal: the numeric marker of a lazy `Map`. When the `.N()`
@@ -11042,4 +10931,266 @@ function isUnicodeScalarSource(expr: Expression): boolean {
 /** A finite, non-negative integer: the only number that can be a code point. */
 function isCodePointCandidate(x: Expression): boolean {
   return x.isInteger === true && x.isFinite === true && x.re >= 0;
+}
+
+/**
+ * The second operand of `N`, resolved to a request: `plain` for no
+ * request, or a request that is not a number of digits of 1 or more (the
+ * value at the precision of the engine); `invalid` for a lazy collection
+ * with a number of elements other than 2, or a goal that is not valid (the
+ * call stays unevaluated); `goal` for a list `[p, a]` of a precision goal
+ * and an accuracy goal; `digits` for a number of significant digits, capped
+ * at 1000. The operand is given evaluated numerically (it may be `2 + 3`
+ * or a bound symbol), by the caller.
+ */
+type NRequest =
+  | { kind: 'plain' }
+  | { kind: 'invalid' }
+  | { kind: 'goal'; goal: NumericGoal; request: Expression }
+  | { kind: 'digits'; p: number };
+
+function resolveNRequest(ce: ComputeEngine, requested: Expression): NRequest {
+  let request = requested;
+  // A lazy indexed collection (`Range(30, 31)`, or a symbol whose value
+  // is one) is a goal when it has two elements, as a list is: its
+  // elements are read into a list.
+  if (request.isLazyCollection && request.isIndexedCollection) {
+    if (request.count !== 2) return { kind: 'invalid' };
+    request = ce.function('List', [...request.each()]);
+  }
+  if (isFunction(request, 'List') || isFunction(request, 'Tuple')) {
+    const goal = numericGoal(request);
+    return goal === undefined
+      ? { kind: 'invalid' }
+      : { kind: 'goal', goal, request };
+  }
+  const p = request.re;
+  if (!Number.isFinite(p) || p < 1) return { kind: 'plain' };
+  return { kind: 'digits', p: Math.min(Math.trunc(p), 1000) };
+}
+
+/**
+ * The `evaluate` handler of `N`: the numeric value of its operand, at the
+ * precision of the engine or at the requested digits. The request is
+ * resolved once (`resolveNRequest()`) and the value is computed by
+ * `evaluateNResolved()`, which the asynchronous twin (`evaluateNAsync()`)
+ * shares.
+ */
+function evaluateN(
+  ops: ReadonlyArray<Expression>,
+  { engine: ce }: EvaluateHandlerOptions
+): Expression | undefined {
+  // `N` is lazy, so its operand is held unbound. Calling `.N()` on an
+  // unbound expression is a no-op (e.g. an unbound `Pi` symbol returns
+  // itself), so canonicalize (bind) the operand first. This makes
+  // `["N", expr]` equivalent to `expr.N()`.
+  const source = ops[0].canonical;
+  const request: NRequest =
+    ops.length < 2
+      ? { kind: 'plain' }
+      : resolveNRequest(ce, ops[1].canonical.N());
+  return evaluateNResolved(ce, source, request);
+}
+
+/** The value of `N(source, request)` for a resolved request. */
+function evaluateNResolved(
+  ce: ComputeEngine,
+  source: Expression,
+  request: NRequest
+): Expression | undefined {
+  if (request.kind === 'invalid') return undefined;
+  if (request.kind === 'plain') return inexactResult(ce, source.N());
+  if (request.kind === 'goal')
+    return evaluateToGoal(source, request.goal, request.request);
+  const p = request.p;
+
+  // The requested digits reach every `evaluate` handler run inside this
+  // call as `options.precision` (see `IComputeEngine._requestedPrecision`).
+  // Restored after the call, so a nested `N(y, q)` applies to `y` only.
+  const enclosingRequest = ce._requestedPrecision;
+  ce._requestedPrecision = p;
+  try {
+    // The value is computed with guard digits, then rounded to `p`
+    // digits: a value computed at `p` digits can have an error of a
+    // few units in its last digit (`N(Exp(i), 30)` had a real part
+    // that ended with ...444, not ...443). With the guard digits, a
+    // digit is wrong only when the exact value is within that error
+    // of a point halfway between two `p`-digit numbers.
+    const global = ce.precision;
+    const working = p + guardDigits(p);
+    if (working <= global) {
+      // The working precision of the engine has the guard digits:
+      // round the value down to `p` significant digits. The precision
+      // is not lowered (it has a machine-digit floor, so lowering it
+      // can't reach a small `p`).
+      return inexactResult(
+        ce,
+        roundToSignificantDigits(source.N(), p),
+        p,
+        source
+      );
+    }
+
+    // Compute at `working` digits, then restore the precision of the
+    // engine, also when the evaluation throws: `N(x, p)` does not
+    // change `ce.precision` (GitHub issue #391). The precision is
+    // raised without a reset of the engine
+    // (`_withTransientPrecision`): the value of a constant such as
+    // `Pi` is computed again at `working` digits, and is not read from
+    // the value that the engine keeps at its precision. The handlers
+    // receive `p` as `options.precision`: it is the number of digits
+    // that the call requests.
+    //
+    // The result is rounded to `p` digits. When `p` is more than the
+    // precision of the engine, each float that the window computed is
+    // displayed with its `p` digits (`showComputedDigits()`), also a
+    // float in a symbolic result (`x + 3.14159…`). An operation on the
+    // result later computes at the precision of the engine, and its
+    // result is displayed with that precision. The elements of a lazy
+    // collection are read after the precision is restored: each one
+    // is computed from the operand by its own `N(_, p)`
+    // (`inexactResult()`).
+    //
+    // The value at the precision of the engine is computed only when
+    // a float has more digits than that precision, and only for a pure
+    // operand: a second evaluation of `Random()` would give another
+    // value. It is also not computed for a float with more digits
+    // than a machine float when the operand reads no float that is
+    // already computed (`mayReadFixedFloat()`): such a float was
+    // computed by the window, at its precision. Thus `N(Pi, 50)` or
+    // `N(Integrate(…), 50)` evaluates the operand one time only.
+    const referenceValue = once(() => {
+      // `isPure` does not read the stored values: `r + Pi` is pure
+      // also when `r` holds `Random()` (`isTransitivelyPure()`).
+      if (!isTransitivelyPure(source)) return undefined;
+      ce._requestedPrecision = enclosingRequest;
+      try {
+        return ce._withTransientPrecision(global, () => source.N());
+      } finally {
+        ce._requestedPrecision = p;
+      }
+    });
+    const readsFixedFloat = once(() => mayReadFixedFloat(source));
+    const reference = (shown: number): Expression | undefined =>
+      shown <= MACHINE_FLOAT_DIGITS || readsFixedFloat()
+        ? referenceValue()
+        : undefined;
+    const result = ce._withTransientPrecision(working, () => {
+      const value = inexactResult(
+        ce,
+        roundToSignificantDigits(source.N(), p),
+        p,
+        source
+      );
+      if (p <= global) return value;
+      return showComputedDigits(
+        value,
+        p,
+        global,
+        reference,
+        once(() => source.evaluate())
+      );
+    });
+    // A float with no more digits than the precision of the engine is
+    // a float of the kind that the engine makes: a machine float at
+    // machine precision (`N(1/3, 11)` is computed at 16 digits, which
+    // makes a big decimal).
+    return followEnginePrecision(ce, result);
+  } finally {
+    ce._requestedPrecision = enclosingRequest;
+  }
+}
+
+/**
+ * The asynchronous requests of digits that are in flight on an engine
+ * (`evaluateNAsync()`). An asynchronous request sets
+ * `ce._requestedPrecision` across an `await`, and two such requests on one
+ * engine can finish in either order: a save-and-restore around each one
+ * would leave the field set to the other's digits for the life of the
+ * engine when the first to start finishes first. The field follows the
+ * entries instead: the last entry still in flight, or the value the field
+ * had before the first entry, once none is left.
+ */
+const activeAsyncDigitRequests = new WeakMap<
+  ComputeEngine,
+  { entries: { p: number }[]; base: number | undefined }
+>();
+
+/**
+ * The asynchronous twin of `evaluateN()`: the operand is evaluated with
+ * `evaluateAsync({ numericApproximation: true })`, so that a long operand
+ * (a `Sum` over many terms) yields to the event loop and honours the abort
+ * signal, where the synchronous handler ran it to the end (GitHub issue
+ * #392). `N(x)` and `N(x, p)` for a `p` within the precision of the engine
+ * are asynchronous, with the same rounding as the synchronous handler. The
+ * forms that need a precision window (`N(x, p)` for a `p` above the
+ * precision of the engine, and a goal `N(x, [p, a])`) keep the engine's
+ * precision raised for the time of the computation, which cannot span an
+ * `await` while other evaluations run: they are computed by the
+ * synchronous `evaluateNResolved()`, after the asynchronous-only
+ * applications of the operand are awaited (the driver skips that pre-pass
+ * for an operator that has an asynchronous handler). A symbol or a number
+ * operand keeps its own `N()` route, as in the synchronous handler (a
+ * symbol's `N()` resolves the names of its value through the ambient
+ * scope chain); a leaf has no asynchronous work.
+ */
+async function evaluateNAsync(
+  ops: ReadonlyArray<Expression>,
+  options: EvaluateHandlerOptions
+): Promise<Expression | undefined> {
+  const { engine: ce, signal, effects } = options;
+  const opts = { numericApproximation: true, signal, _effects: effects };
+  const source = ops[0].canonical;
+  const numeric = (): Promise<Expression> =>
+    isFunction(source)
+      ? source.evaluateAsync(opts)
+      : Promise.resolve(source.N());
+  const request: NRequest =
+    ops.length < 2
+      ? { kind: 'plain' }
+      : resolveNRequest(ce, await ops[1].canonical.evaluateAsync(opts));
+  if (request.kind === 'invalid') return undefined;
+  if (request.kind === 'plain') return inexactResult(ce, await numeric());
+  if (
+    request.kind === 'goal' ||
+    request.p + guardDigits(request.p) > ce.precision
+  ) {
+    const [resolved] = await awaitAsyncOnlyDescendants([source], {
+      signal,
+      _effects: effects,
+    });
+    // A synchronous evaluation after an `await` runs with this evaluation's
+    // registry (`docs/EFFECTS-MODEL.md`, rule 3).
+    return runWithEvaluationEffects(ce, effects, () =>
+      evaluateNResolved(ce, resolved, request)
+    );
+  }
+
+  // The working precision of the engine has the guard digits: the value is
+  // rounded to `p` digits. The requested digits reach the handlers run by
+  // the evaluation as `options.precision`, as in `evaluateNResolved()`;
+  // the field follows the requests in flight (`activeAsyncDigitRequests`).
+  const p = request.p;
+  let active = activeAsyncDigitRequests.get(ce);
+  if (active === undefined) {
+    active = { entries: [], base: undefined };
+    activeAsyncDigitRequests.set(ce, active);
+  }
+  if (active.entries.length === 0) active.base = ce._requestedPrecision;
+  const entry = { p };
+  active.entries.push(entry);
+  ce._requestedPrecision = p;
+  try {
+    const value = await numeric();
+    return runWithEvaluationEffects(ce, effects, () =>
+      inexactResult(ce, roundToSignificantDigits(value, p), p, source)
+    );
+  } finally {
+    const i = active.entries.indexOf(entry);
+    if (i >= 0) active.entries.splice(i, 1);
+    ce._requestedPrecision =
+      active.entries.length === 0
+        ? active.base
+        : active.entries[active.entries.length - 1].p;
+  }
 }
