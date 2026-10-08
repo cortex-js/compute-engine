@@ -27,6 +27,7 @@ import type {
   Scope,
 } from './global-types.js';
 import type { EffectHandlers } from './types-effects.js';
+import { runWithEvaluationEffects } from './effects-registry.js';
 import {
   isSymbol,
   isFunction,
@@ -1895,6 +1896,16 @@ export type ApplyOptions = Partial<EvaluateOptions> & {
    * binder's own. Only meaningful with `holdArguments`.
    */
   bindParameters?: readonly string[];
+  /**
+   * Run the body statements with `evaluateStatementsAsync()`, so that the
+   * application returns a `Promise` that yields between time slices and
+   * honors the abort signal. Set by the asynchronous route of a named
+   * function (`applyFunctionLiteralAsync`) and by nothing else, together
+   * with the `_effects` and `_contextStack` of that evaluation. Declined
+   * (the application is synchronous) when another application of the same
+   * literal is already suspended, or when an argument has a free symbol.
+   */
+  awaitStatements?: boolean;
 };
 
 /**
@@ -2938,6 +2949,16 @@ class SymbolicRecursion {
 const activeApplications = new Map<number, number>();
 
 /**
+ * The literals (by structural hash) with an application suspended at an
+ * `await` (`ApplyOptions.awaitStatements`). A suspended application leaves
+ * the body scope re-parented to its call frame, and the scope has room for one
+ * such frame: a second application of the literal, from a concurrent
+ * evaluation or from a recursive call in the body, runs synchronously, to
+ * completion, inside it.
+ */
+const asyncInFlight = new Set<number>();
+
+/**
  * Does an evaluated argument contain a free symbol — a symbol occurrence,
  * not bound by a binder inside the argument, whose binding has no value? That
  * is the argument a recursive definition is not unrolled over.
@@ -3031,15 +3052,30 @@ function guardSymbolicRecursion(
   return (params, options) => {
     const depth = activeApplications.get(key) ?? 0;
     activeApplications.set(key, depth + 1);
+    let pending = false;
     try {
-      return fn(params, options);
+      const result = fn(params, options);
+      // A suspended application keeps its count until it settles. Its
+      // arguments are ground (`awaitStatements`), so it raises no
+      // `SymbolicRecursion` of its own.
+      if (isPromise(result)) {
+        pending = true;
+        return result.finally(() => {
+          const live = (activeApplications.get(key) ?? 1) - 1;
+          if (live <= 0) activeApplications.delete(key);
+          else activeApplications.set(key, live);
+        }) as unknown as Expression;
+      }
+      return result;
     } catch (e) {
       if (e instanceof SymbolicRecursion && e.literal === key && depth === 0)
         return undefined;
       throw e;
     } finally {
-      if (depth === 0) activeApplications.delete(key);
-      else activeApplications.set(key, depth);
+      if (!pending) {
+        if (depth === 0) activeApplications.delete(key);
+        else activeApplications.set(key, depth);
+      }
     }
   };
 }
@@ -3056,12 +3092,26 @@ function wrapRecursion(
 ) => Expression | undefined {
   return (params, options) => {
     ce._enterRecursion();
+    let pending = false;
     try {
-      return fn(params, options);
+      const result = fn(params, options);
+      // A suspended application (`awaitStatements`) holds its level until it
+      // settles.
+      if (isPromise(result)) {
+        pending = true;
+        return result.finally(() =>
+          ce._exitRecursion()
+        ) as unknown as Expression;
+      }
+      return result;
     } finally {
-      ce._exitRecursion();
+      if (!pending) ce._exitRecursion();
     }
   };
+}
+
+function isPromise(x: unknown): x is Promise<unknown> {
+  return x instanceof Promise;
 }
 
 /**
@@ -4310,11 +4360,10 @@ function makeLambda(
     // The exact answer of a numerically requested application, kept for
     // the memo (see the numeric pass below).
     let exactResult: Expression | undefined = undefined;
-    try {
-      result = unwrapReturn(
-        ce,
-        evaluateStatements(ce, iterationStatements ?? bodyFn.ops)
-      );
+    // What follows the statements runs the same on both routes: `settle` in
+    // the frame, `cleanup` when the frame leaves, `conclude` after.
+    const settle = (statements: Expression): void => {
+      result = unwrapReturn(ce, statements);
 
       // A function body whose final value is a *bare symbol* bound to a
       // user-defined function literal (`helper(x) = …`, which creates an
@@ -4409,33 +4458,80 @@ function makeLambda(
           numericApproximation: true,
         });
       }
-    } finally {
+    };
+    const cleanup = (): void => {
       ce.popScope();
       bodyScope.parent = savedParent;
       exitAppliedBodyScope(bodyScope);
       restoreBodyScopeParams(bodyScope, hiddenBindings);
       exitNestedBodyScopes(ce, nested);
-    }
-
-    if (
-      memoKey !== undefined &&
-      sequenceReadStopCount() === sequenceStopsBefore
-    ) {
-      // The exact entry is stored whether or not the numeric pass produced
-      // a valid result: the exact answer is what a recursive body, which
-      // applies itself exactly, looks up.
-      const exactEntry = exactResult?.isValid ? exactResult : undefined;
-      const resultEntry = result.isValid ? result : undefined;
-      if (exactEntry !== undefined || resultEntry !== undefined) {
-        const memo = applicationMemoForStore(ce, fnExpr);
-        if (memo !== undefined) {
-          if (exactEntry !== undefined)
-            memo.results.set(`E${precisionKey}${memoArgs}`, exactEntry);
-          if (resultEntry !== undefined) memo.results.set(memoKey, resultEntry);
+    };
+    const conclude = (): Expression => {
+      if (
+        memoKey !== undefined &&
+        sequenceReadStopCount() === sequenceStopsBefore
+      ) {
+        // The exact entry is stored whether or not the numeric pass produced
+        // a valid result: the exact answer is what a recursive body, which
+        // applies itself exactly, looks up.
+        const exactEntry = exactResult?.isValid ? exactResult : undefined;
+        const resultEntry = result.isValid ? result : undefined;
+        if (exactEntry !== undefined || resultEntry !== undefined) {
+          const memo = applicationMemoForStore(ce, fnExpr);
+          if (memo !== undefined) {
+            if (exactEntry !== undefined)
+              memo.results.set(`E${precisionKey}${memoArgs}`, exactEntry);
+            if (resultEntry !== undefined)
+              memo.results.set(memoKey, resultEntry);
+          }
         }
       }
+      return bodyResultValue(result);
+    };
+
+    // Await the statements (`awaitStatements`). Everything after the first
+    // `await` runs with this evaluation's registry and context stack in
+    // place of the engine's: other evaluations run in between. A recursive
+    // body is not entered twice (`asyncInFlight`), nor an application with a
+    // free symbol in an argument, whose recursion guard is the synchronous
+    // one above.
+    if (
+      options?.awaitStatements === true &&
+      options._effects !== undefined &&
+      iterationStatements === undefined &&
+      !asyncInFlight.has(fnExpr.hash) &&
+      !evaluatedArgs.some((a) => containsFreeSymbol(a))
+    ) {
+      const { signal, _effects: effects, _contextStack: stack } = options;
+      const inContext = <T>(f: () => T): T =>
+        runWithEvaluationEffects(ce, effects, f, stack);
+      asyncInFlight.add(fnExpr.hash);
+      return (async () => {
+        try {
+          const statements = await evaluateStatementsAsync(
+            ce,
+            bodyFn.ops,
+            signal,
+            effects,
+            stack
+          );
+          inContext(() => settle(statements));
+        } finally {
+          inContext(cleanup);
+          asyncInFlight.delete(fnExpr.hash);
+        }
+        return inContext(conclude);
+        // The lambda is typed synchronous: a `Promise` comes back only for
+        // the caller that set `awaitStatements`.
+      })() as unknown as Expression;
     }
-    return bodyResultValue(result);
+
+    try {
+      settle(evaluateStatements(ce, iterationStatements ?? bodyFn.ops));
+    } finally {
+      cleanup();
+    }
+    return conclude();
   };
 
   return wrapRecursion(ce, guardSymbolicRecursion(fnExpr, invoke));

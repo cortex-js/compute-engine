@@ -57,7 +57,8 @@ import type {
   TypeProvenanceEntry,
 } from '../global-types.js';
 
-import { applicable } from '../function-utils.js';
+import { applicable, type ApplyOptions } from '../function-utils.js';
+import { runWithEvaluationEffects } from '../effects-registry.js';
 
 import { DEFAULT_COMPLEXITY } from './constants.js';
 import { isExpression, isFunction } from './type-guards.js';
@@ -108,6 +109,7 @@ const OPERATOR_DEF_KEYS = new Set([
   'threadsConditionals',
   'inspectsErrors',
   'selectsOperands',
+  'evaluatesOperands',
   'namedArgumentsRequired',
   'missingBehavior',
   'missingStrip',
@@ -307,6 +309,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
 
   inspectsErrors = false;
   selectsOperands = false;
+  evaluatesOperands = false;
   namedArgumentsRequired = false;
   missingBehavior?: 'reject' | 'propagate' | 'handle';
   missingStrip: 'all' | number[] = 'all';
@@ -1582,6 +1585,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       threadsConditionals: this.threadsConditionals,
       inspectsErrors: this.inspectsErrors,
       selectsOperands: this.selectsOperands,
+      evaluatesOperands: this.evaluatesOperands,
       namedArgumentsRequired: this.namedArgumentsRequired,
       missingBehavior: this.missingBehavior,
       missingStrip: this.missingStrip,
@@ -1654,6 +1658,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     this.threadsConditionals = s.threadsConditionals ?? false;
     this.inspectsErrors = s.inspectsErrors;
     this.selectsOperands = s.selectsOperands;
+    this.evaluatesOperands = s.evaluatesOperands ?? false;
     this.namedArgumentsRequired = s.namedArgumentsRequired;
     this.missingBehavior = s.missingBehavior;
     this.missingStrip = s.missingStrip;
@@ -1836,6 +1841,13 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     console.assert(
       !this.selectsOperands || this.lazy,
       `Operator Definition "${this.name}": 'selectsOperands' requires 'lazy'`
+    );
+    this.evaluatesOperands = def.evaluatesOperands ?? this.evaluatesOperands;
+    // A strict operator's operands are already evaluated when its handler
+    // runs, so there is nothing left for the flag to do.
+    console.assert(
+      !this.evaluatesOperands || this.lazy,
+      `Operator Definition "${this.name}": 'evaluatesOperands' requires 'lazy'`
     );
     this.namedArgumentsRequired =
       def.namedArgumentsRequired ?? this.namedArgumentsRequired;
@@ -2324,6 +2336,35 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       Object.defineProperty(evaluate, 'toString', {
         value: () => boxedFn.toString(),
       }); // For debugging/_printScope
+      // The asynchronous route applies the literal with its statements
+      // awaited (`ApplyOptions.awaitStatements`), on a private copy of the
+      // evaluation-context stack: the frame of the call stays on it while
+      // the application is suspended, and an application of another
+      // evaluation does not see it. It travels with the handler, so a
+      // handler that replaces this one takes it away.
+      Object.defineProperty(evaluate, 'applyAwaiting', {
+        value: (xs: ReadonlyArray<Expression>, options: ApplyOptions) => {
+          const engine = this.engine;
+          const effects =
+            options._effects ?? engine._evaluationEffects ?? engine.effects;
+          const stack = [
+            ...(options._contextStack ?? engine._evalContextStack),
+          ];
+          const carried: ApplyOptions = {
+            ...options,
+            _effects: effects,
+            _contextStack: stack,
+            awaitStatements: true,
+          };
+          return runWithEvaluationEffects(
+            engine,
+            effects,
+            () =>
+              fn(xs, this.lazy ? { ...carried, holdArguments: true } : carried),
+            stack
+          );
+        },
+      });
     } else if (typeof def.evaluate === 'function') {
       evaluate = def.evaluate;
     } else {

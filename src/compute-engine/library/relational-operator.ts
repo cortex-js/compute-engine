@@ -471,6 +471,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     signature: '(any, any) -> boolean',
 
     lazy: true,
+    evaluatesOperands: true,
 
     // Comparisons follow IEEE 754 for `NaN` and Kleene for the `Missing` symbol
     // (the Julia model, §3.D amended 2026-07-24). A `Missing` operand makes the
@@ -687,6 +688,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     // `lazy` for the same reason as `Equal`: the `canonical` handler needs the
     // raw, direction-intact operands to decompose a chain (`a ≡ b ≡ c`).
     lazy: true,
+    evaluatesOperands: true,
 
     // Same absence semantics as `Equal` (§3.D): a `Missing` operand makes the
     // comparison `Missing` (Kleene), a `NaN` operand makes it `False` (IEEE).
@@ -829,6 +831,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     // for chain decomposition (see `canonicalComparisonChain`); a chained
     // `a ≠ b ≠ c` becomes `And(a ≠ b, b ≠ c)`.
     lazy: true,
+    evaluatesOperands: true,
 
     canonical: (args, { engine: ce }) =>
       canonicalRelational(ce, 'NotEqual', args),
@@ -964,6 +967,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
       ),
 
     lazy: true,
+    evaluatesOperands: true,
     // Broadcast element-wise over a list operand so `L > 0` (canonicalizes to
     // `Less(0, L)`) yields a `list<boolean>` mask for Desmos `L[L>0]` filtering.
     broadcastable: true,
@@ -1100,6 +1104,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
       ),
 
     lazy: true,
+    evaluatesOperands: true,
     // Broadcast element-wise over a list operand (see `Less`).
     broadcastable: true,
     canonical: (ops, { engine: ce }) =>

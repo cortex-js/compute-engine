@@ -1,3 +1,38 @@
+## Unreleased
+
+### Issues Resolved
+
+- **`evaluateAsync` yields under the relations**
+  ([#392](https://github.com/cortex-js/compute-engine/issues/392), contributed by
+  [enumeratio](https://github.com/enumeratio)). `Less(Sum(1/k^2, k, 1, 400000), 2)`
+  aborted after 50 ms still ran to the end, seconds later, with no event-loop
+  tick: a lazy operator with a synchronous handler evaluates its held operands
+  itself. An operator can now declare `evaluatesOperands: true`, meaning its
+  handler only evaluates its held operands and reads nothing else of their
+  structure; under `evaluateAsync` the operands are then awaited with
+  `evaluateAsync`, in order, and the handler runs on the values. The flag is set
+  on `Equal`, `NotEqual`, `Less`, `LessEqual` (and so `Greater` and
+  `GreaterEqual`, which canonicalize to them) and `IdenticallyEqual`, so the
+  aborted evaluation above rejects with a `CancellationError` after about 50 ms.
+  The values are those of `evaluate()`: an undecidable `x^2 = 2 + 2` is still
+  `x^2 == 4`. A lazy operator that reads the structure of an operand
+  (`Numerator`, `IsSame`, `Same`) does not set the flag, and `.N()` keeps the
+  synchronous handler (a comparison near a tie re-reads the operand as
+  written). A chain of three or more operands awaits them all, where
+  `evaluate()` stops at the first `False` pair.
+
+- **`evaluateAsync` yields in the body of a user function**
+  ([#392](https://github.com/cortex-js/compute-engine/issues/392), contributed by
+  [enumeratio](https://github.com/enumeratio)). With `f(n) = Σ 1/k²`,
+  `f(400000)` aborted after 50 ms ran to the end: the body statements were
+  evaluated with the synchronous `evaluate()`. Under `evaluateAsync` they are now
+  awaited in order (`evaluateStatementsAsync`, as `Block` does) and so are the
+  arguments, so `f(400000)` rejects with a `CancellationError` after about 50
+  ms, and the values are those of `evaluate()`. An application of a literal
+  that is already suspended (a recursive body, or a second call from another
+  evaluation) and an application whose argument has a free symbol still run
+  synchronously. `evaluate()` is unchanged.
+
 ## 0.150.0 _2026-10-08_
 
 ### Behavior Changes
