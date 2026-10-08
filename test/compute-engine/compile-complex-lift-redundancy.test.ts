@@ -58,17 +58,20 @@ describe('complex mode: the lift-at-use wrap on a user-function call', () => {
     });
   });
 
-  test('a selection body keeps the wrap, and its value is the object it builds', () => {
-    // `If(x > 0, x, 3)` over an unannotated `x` types `integer` (the
-    // `unknown` arm is a placeholder the other arm absorbs), but the emitter
-    // lifts the wide arm, so the body returns `{re, im}` in both arms. The
-    // call-site analysis reads the block's VALUE, not its type, so the call
-    // is complex-valued and the consumer reads `.re`/`.im` off the object.
-    // It used to read the block's type, and compiled
+  test('a selection body is complex-shaped by construction, and its value is the object it builds', () => {
+    // `If(x > 0, x, 3)` over an unannotated `x` types `unknown` (an untyped
+    // symbol arm makes the conditional unknown), and the emitter lifts every
+    // arm as soon as one arm is wide, so the body returns `{re, im}` in both
+    // arms. The call-site analysis reads the block's VALUE, not its type, so
+    // the call is complex-valued and the consumer reads `.re`/`.im` off the
+    // object. It used to read the block's type, and compiled
     // `(_.z).re + _fn_b(_.z)` around the object: `"1[object Object]"`.
+    // The body is complex-shaped by construction, so the call skips the
+    // idempotent wrap. (While the conditional was typed `integer`, the
+    // analysis read the type as real and the call kept the wrap.)
     const ce = engineWith('x \\mapsto \\mathrm{If}(x > 0, x, 3)');
     const call = compile(ce.box(['b', 'z']), CX);
-    expect(call.code).toBe('_SYS.cplx(_fn_b(_.z))');
+    expect(call.code).toBe('_fn_b(_.z)');
     const consumer = compile(ce.box(['Add', ['b', 'z'], 'z']), CX);
     const value = consumer.run!({ z: { re: 1, im: 2 } });
     // A complex `z` is not real, so `z > 0` is false and the arm is `3`.

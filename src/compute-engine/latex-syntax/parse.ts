@@ -826,9 +826,20 @@ export class _Parser implements Parser {
 
   // Cache for `sourceOffsets()`: cumulative character offset of each token
   // prefix. Entry `k` is the length of `tokensToString(this._tokens.slice(0,
-  // k))`, so the array has `this._tokens.length + 1` entries. The token stream
-  // is immutable, so this is built once on demand.
+  // k))`, so the array has `this._tokens.length + 1` entries, with the text
+  // in `_inputText` for the tokens that it holds. The token stream is
+  // immutable, so this is built once on demand.
   private _tokenPrefixOffsets: number[] | null = null;
+  // The text in the input of the tokens that the tokenizer made when it
+  // expanded a Unicode superscript or subscript (`x²` is `x^{2}`), by token
+  // index: empty for the `^` or `_`, `{` and `}`, and the Unicode character
+  // for the others (see `tokenize()`). `sourceOffsets()` measures these
+  // tokens with this text, so the spans after them match the input.
+  private readonly _inputText: ReadonlyMap<number, string> | undefined;
+  // The text that the offsets of `sourceOffsets()` index into: the
+  // normalized LaTeX, with the text in `_inputText` for the tokens that it
+  // holds. Built with `_tokenPrefixOffsets`.
+  private _sourceText: string | null = null;
   // The character offset at which the text of each token starts, after the
   // space that separates a command from a letter. Built with
   // `_tokenPrefixOffsets` (see `tokenPrefixOffsets()`).
@@ -880,8 +891,10 @@ export class _Parser implements Parser {
 
   /**
    * Record a parse diagnostic spanning `[startToken, endToken)` (token
-   * indices, mapped to normalized-LaTeX character offsets via
-   * `sourceOffsets`). No-op unless diagnostics collection is enabled.
+   * indices, mapped to character offsets into `sourceText()` via
+   * `sourceOffsets`: the normalized LaTeX, except that a token made from a
+   * Unicode superscript or subscript is measured with its input text).
+   * No-op unless diagnostics collection is enabled.
    */
   emitDiagnostic(
     code: string,
@@ -1147,6 +1160,14 @@ export class _Parser implements Parser {
   // this index although a letter comes before it.
   private _bareFunctionStart = -1;
 
+  // The token index of the letters after an argument of one letter that
+  // `parseToken()` read, when no name starts at the argument and these
+  // letters are neither one spelled-out name nor one bare function name
+  // (`alphax` in `e^xalphax_1`), or -1. `tryParseBareRun()` segments the
+  // letters at this index although a letter comes before it, when they hold
+  // a spelled-out name.
+  private _bareRunStart = -1;
+
   // The bracket nesting level of each token (see `layoutOf()` in
   // `lenient-ambiguity.ts`), computed on first use. The token stream does
   // not change, so it is computed once.
@@ -1293,9 +1314,11 @@ export class _Parser implements Parser {
   constructor(
     tokens: LatexToken[],
     dictionary: IndexedLatexDictionary,
-    options: Readonly<ParseLatexOptions>
+    options: Readonly<ParseLatexOptions>,
+    inputText?: ReadonlyMap<number, string>
   ) {
     this._tokens = tokens;
+    this._inputText = inputText;
     this.options = options;
     this._dictionary = dictionary;
     // `onAmbiguity: 'error'` needs the `ambiguous-*` diagnostics of the
@@ -1514,7 +1537,10 @@ export class _Parser implements Parser {
     // is immutable), so each call is O(1) instead of re-serializing the prefix
     // on every error. For input that round-trips through `tokensToString`
     // unchanged (e.g. editor-generated LaTeX, which has no comments or Unicode
-    // normalization), these offsets match the original input string.
+    // normalization), these offsets match the original input string. They
+    // also match it after a Unicode superscript or subscript, which the
+    // tokenizer expands (`x²! + 1` is `x^{2}! + 1`): the tokens that the
+    // expansion inserted have no length (see `_inputText`).
     const offsets = this.tokenPrefixOffsets();
     const n = this._tokens.length;
     // A span starts at the text of its first token, after the space that
@@ -1529,7 +1555,11 @@ export class _Parser implements Parser {
 
   /**
    * Cumulative character offsets of the token prefixes, built once and cached.
-   * Entry `k` is the length of `tokensToString(this._tokens.slice(0, k))`.
+   * Entry `k` is the length of the first `k` tokens of `sourceText()`: the
+   * length of `tokensToString(this._tokens.slice(0, k))`, except that a token
+   * made from a Unicode superscript or subscript (`_inputText`) is measured
+   * with its input text (`²` has length 1; the `^`, `{` and `}` inserted for
+   * it have length 0).
    *
    * This replicates the `tokensToString()`/`joinLatex()` join semantics in a
    * single pass (the same approach as `lookAhead()`), so all prefix lengths are
@@ -1544,22 +1574,50 @@ export class _Parser implements Parser {
     offsets[0] = 0;
     let len = 0;
     let sep = '';
+    let text = '';
     for (let i = 0; i < tokens.length; i++) {
+      // A token made by the expansion of a Unicode superscript or subscript
+      // has its text in the input (empty for an inserted `^`, `{` or `}`)
+      const input = this._inputText?.get(i);
+      if (input !== undefined) {
+        starts[i] = len;
+        len += input.length;
+        text += input;
+        offsets[i + 1] = len;
+        sep = '';
+        continue;
+      }
       const segment = LOOKAHEAD_TOKEN_TO_STRING[tokens[i]] ?? tokens[i];
       // If the segment begins with a char that *could* be in a command name,
       // insert the pending separator (see `joinLatex()`)
-      if (/[a-zA-Z]/.test(segment[0])) len += sep.length;
+      if (/[a-zA-Z]/.test(segment[0])) {
+        len += sep.length;
+        text += sep;
+      }
       // The text of token `i` starts after that separator
       starts[i] = len;
       // If the segment ends in a command, a space precedes the next segment
       sep = /\\[a-zA-Z]+\*?$/.test(segment) ? ' ' : '';
       len += segment.length;
+      text += segment;
       offsets[i + 1] = len;
     }
 
     this._tokenPrefixOffsets = offsets;
     this._tokenStartOffsets = starts;
+    this._sourceText = text;
     return offsets;
+  }
+
+  /**
+   * The text that the offsets of `sourceOffsets()` index into: the
+   * normalized LaTeX of the tokens, with the text in the input of the tokens
+   * made by the expansion of a Unicode superscript or subscript (see
+   * `_inputText`). `x²! + 1` gives `x²! + 1`, not `x^{2}! + 1`.
+   */
+  sourceText(): string {
+    this.tokenPrefixOffsets();
+    return this._sourceText!;
   }
 
   // latexBefore(): string {
@@ -1584,6 +1642,11 @@ export class _Parser implements Parser {
    *
    * `[empty, '\\sqrt', '\\sqrt{', '\\sqrt{2', '\\sqrt{2}']`
    *
+   * A white-space token directly before a `_` adds nothing to the strings,
+   * and no entry ends at it: LaTeX ignores that space, so `\mathbb{R} _{>0}`
+   * matches the trigger `\mathbb{R}_{>0}` as `\mathbb{R}_{>0}` does. The
+   * count of an entry includes the skipped space.
+   *
    */
   lookAhead(): [count: number, tokens: string][] {
     // The result depends only on the (immutable) token stream, the current
@@ -1599,7 +1662,6 @@ export class _Parser implements Parser {
     // empty and no trigger can match.
     const maxN =
       this._dictionary.triggerStartMax.get(this._tokens[this.index]) ?? 0;
-    const n = Math.min(maxN, this._tokens.length - this.index);
 
     const result: [number, string][] = [];
 
@@ -1608,8 +1670,21 @@ export class _Parser implements Parser {
     // the token slice from scratch for each length.
     let s = '';
     let sep = '';
-    for (let i = 0; i < n; i++) {
+    // `matched` counts the tokens that add to the strings: at most `maxN`
+    let matched = 0;
+    for (
+      let i = 0;
+      matched < maxN && this.index + i < this._tokens.length;
+      i++
+    ) {
       const token = this._tokens[this.index + i];
+      // Skip a white space before a `_` (not the first token)
+      if (
+        i > 0 &&
+        token === '<space>' &&
+        this._tokens[this.index + i + 1] === '_'
+      )
+        continue;
       const segment = LOOKAHEAD_TOKEN_TO_STRING[token] ?? token;
       // If the segment begins with a char that *could* be in a command
       // name, insert the pending separator (see `joinLatex()`)
@@ -1617,9 +1692,11 @@ export class _Parser implements Parser {
       // If the segment ends in a command, add a space before the next one
       sep = /\\[a-zA-Z]+\*?$/.test(segment) ? ' ' : '';
       s += segment;
-      // Entries are ordered by decreasing token count
-      result[n - 1 - i] = [i + 1, s];
+      matched += 1;
+      result.push([i + 1, s]);
     }
+    // Entries are ordered by decreasing token count
+    result.reverse();
 
     this._lookAheadCache = result;
     this._lookAheadIndex = this.index;
@@ -2225,6 +2302,11 @@ export class _Parser implements Parser {
         this._bareNameStart = this.index;
       else if (!nameAtStart && isFunctionName(rest))
         this._bareFunctionStart = this.index;
+      // The letters after the argument are a run that holds a spelled-out
+      // name (`e^xalphax_1`): `tryParseBareRun()` segments it, so the
+      // reading is `e^x·alpha·x_1`, as `xalphax_1` is `x·alpha·x_1`.
+      // Before, it was `e^x·a·l·p·h·a·x_1`.
+      else if (!nameAtStart) this._bareRunStart = this.index;
     }
     return result;
   }
@@ -4171,7 +4253,15 @@ export class _Parser implements Parser {
     const start = this.index;
 
     // Word boundary: don't match in the middle of a partially consumed word.
-    if (start > 0 && /^[a-zA-Z]$/.test(this._tokens[start - 1])) return null;
+    // The exception is the letters after an argument of one letter (see
+    // `_bareRunStart`): `alphax` in `e^xalphax_1`.
+    const afterArgument = start === this._bareRunStart;
+    if (
+      start > 0 &&
+      /^[a-zA-Z]$/.test(this._tokens[start - 1]) &&
+      !afterArgument
+    )
+      return null;
 
     // Collect the letter run.
     let name = '';
@@ -4234,6 +4324,14 @@ export class _Parser implements Parser {
         segments.push(name[i]);
         i += 1;
       }
+    }
+
+    // After an argument, only a run that holds a spelled-out name is read
+    // here. Other letters stay one letter at a time, as they were: `x^foo`
+    // is `x^f·o·o`.
+    if (!matchedConstant && afterArgument) {
+      this.index = start;
+      return null;
     }
 
     if (!matchedConstant) {
@@ -4827,7 +4925,13 @@ export class _Parser implements Parser {
           )
             sub = this.parseEnclosure();
           sub ??= this.parseStringGroup();
-          if (sub === null) return this.error('missing', index);
+          // A `_` with nothing after it keeps the base, with the error as
+          // its subscript: `t2 _` is `Subscript(t_2, Error)`, as `x _` is
+          // `Subscript(x, Error)`. Before, the error replaced the base.
+          if (sub === null) {
+            subscripts.push(this.error('missing', this.index));
+            continue;
+          }
           this._emitScriptLetterRunSplit(subIndex, sub);
 
           subscripts.push(sub);
@@ -4848,7 +4952,14 @@ export class _Parser implements Parser {
           const sup = doubleStar
             ? this.parseDoubleStarExponent()
             : this.parseUnbracedSuperscript();
-          if (sup === null) return this.error('missing', index);
+          // A `^` with nothing after it keeps the base, with the error as
+          // its exponent: `x^(n+1)` in the strict grammar is
+          // `Power(x, Error)·(n+1)`, as `a_(k+m)` is `Subscript(a, Error)·
+          // (k+m)`. Before, the error replaced the base.
+          if (sup === null) {
+            superscripts.push(this.error('missing', this.index));
+            continue;
+          }
           this._emitScriptLetterRunSplit(subIndex, sup);
           // A second superscript is an error (see below): not reported
           if (superscripts.length === 0)
@@ -4876,7 +4987,32 @@ export class _Parser implements Parser {
     const nonEmptySubscripts = subscripts.filter(
       (x) => !isEmptySequence(x)
     ) as MathJsonExpression[];
-    if (nonEmptySubscripts.length > 0) {
+    // A subscript on an indexed collection (a symbol of an
+    // `indexed_collection` type, or a list literal) is an index: it gives
+    // `At`, as the postfix `_` entry of the dictionary gives when the
+    // subscript comes first. So the raw form of `B^2_{2}` is
+    // `Power(At(B, 2), 2)`, as the raw form of `B_{2}^2` is. Before, it was
+    // `Power(Subscript(B, 2), 2)`, and only the canonical forms were the
+    // same.
+    const baseSymbol = symbol(result);
+    if (
+      nonEmptySubscripts.length === 1 &&
+      operator(nonEmptySubscripts[0]) !== 'Error' &&
+      ((baseSymbol !== null &&
+        this.resolveSymbol(baseSymbol)?.type.matches(
+          'indexed_collection<any>'
+        )) ||
+        operator(result) === 'List')
+    ) {
+      let at = nonEmptySubscripts[0];
+      // As the postfix `_` entry does: remove a `Delimiter` around the
+      // index, and give each index of a `Sequence` as an operand of `At`
+      if (operator(at) === 'Delimiter') at = operand(at, 1) ?? 'Nothing';
+      result =
+        operator(at) === 'Sequence'
+          ? ['At', result, ...operands(at)]
+          : ['At', result, at];
+    } else if (nonEmptySubscripts.length > 0) {
       // The `infixByTrigger` index buckets are in priority order
       // (later definitions first), same as filtering `getDefs('infix')`
       const defs = this._dictionary.infixByTrigger.get('_') ?? [];
@@ -6620,10 +6756,12 @@ function parseCore(
   options: Readonly<ParseLatexOptions>,
   comments?: DiscardedComment[]
 ): { expr: MathJsonExpression | null; parser: _Parser } {
+  const inputText = new Map<number, string>();
   const parser = new _Parser(
-    tokenize(latex, [], comments),
+    tokenize(latex, [], comments, inputText),
     dictionary,
-    options
+    options,
+    inputText
   );
 
   let expr = parser.parseExpression();
@@ -6655,8 +6793,9 @@ function functionElements(
  * Replace, in the parse result `expr`, the smallest expression that holds the
  * span of each `ambiguous-*` diagnostic of `parser` with an `Error` node:
  * `["Error", "'ambiguous-sign'", ["LatexString", "'--'"]]`. The error code is
- * the diagnostic code, and the `LatexString` is the normalized LaTeX of the
- * span.
+ * the diagnostic code, and the `LatexString` is the text of the span in
+ * `parser.sourceText()`: the normalized LaTeX, with a Unicode superscript or
+ * subscript as written in the input (`x²!`, not `x^{2}!`).
  *
  * An expression qualifies when the parser recorded its span (see
  * `_exprSpans` in `_Parser`) and that span holds the diagnostic span. A
@@ -6674,7 +6813,7 @@ function functionElements(
  * nested expressions, the outer replacement is kept.
  *
  * `extra` holds diagnostics that the parser did not record, in the same
- * normalized-LaTeX coordinates (`ambiguous-percent`).
+ * coordinates (`ambiguous-percent`).
  *
  * `expr` is not modified: the expressions along each replaced path are
  * copied.
@@ -6690,7 +6829,7 @@ function ambiguityErrors(
   if (diagnostics.length === 0) return expr;
   const spans = parser._exprSpans!;
   const primitiveSpans = parser._primitiveSpans!;
-  const source = parser.latex(0);
+  const source = parser.sourceText();
 
   const holds = (start: number, end: number, d: ParseDiagnostic): boolean =>
     start <= d.start && d.end <= end;
@@ -6923,7 +7062,7 @@ export function parse(
         adoptedParser.latex(tokenStart, tokenEnd) ===
           latex.slice(number[0], number[1])
           ? adoptedParser.sourceOffsets(tokenStart, tokenEnd)
-          : [0, adoptedParser.latex(0).length];
+          : [0, adoptedParser.sourceText().length];
       normalizedPercents.push({ code: 'ambiguous-percent', start, end });
     }
   }

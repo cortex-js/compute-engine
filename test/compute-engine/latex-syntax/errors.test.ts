@@ -364,6 +364,22 @@ check('Supsub syntax error', () =>
   )
 );
 
+// A `_` with nothing after it keeps the base, with the error as the
+// subscript. Before, the error replaced the base: `t2 _` was
+// `Error('missing')` alone, and `xy2 _` was `x·Error('missing')`.
+check('Missing script keeps the base', () => {
+  const raw = (s: string) =>
+    engine.parse(s, { strict: false, form: 'raw' }).json;
+  const missing = ['Error', "'missing'"];
+  expect(raw('t2 _')).toEqual(['Subscript', ['Subscript', 't', 2], missing]);
+  expect(raw('xy2 _')).toEqual([
+    'InvisibleOperator',
+    'x',
+    ['Subscript', ['Subscript', 'y', 2], missing],
+  ]);
+  expect(raw('x _')).toEqual(['Subscript', 'x', missing]);
+});
+
 check('Supsub syntax error', () =>
   expect(engine.parse('x_{a')).toMatchInlineSnapshot(`
     [

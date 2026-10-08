@@ -8748,7 +8748,9 @@ Spans for `undeclared-symbol`, `juxtaposition-as-multiply` and every
 `ambiguous-*` code except `ambiguous-percent` are offsets into CE's
 **normalized** LaTeX (the
 re-serialized token stream), which matches the original input only when
-the input round-trips unchanged.
+the input round-trips unchanged. A Unicode superscript or subscript is the
+exception: it is measured as written, not as its expansion, so `x²! + 1`
+reports the span `x²!` (offsets 0 to 3), not `x^{2}!`.
 `comment-discarded` is the exception: because the comment is precisely what
 was stripped before tokenization, its span is in **original-input**
 coordinates. `recovered` spans are a best-effort original-input range (equal

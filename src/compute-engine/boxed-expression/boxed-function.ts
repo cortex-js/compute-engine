@@ -11144,14 +11144,21 @@ async function exactIntegerOperandAsync(
   x: Expression,
   options: Partial<EvaluateOptions> | undefined
 ): Promise<Expression> {
+  // The spread already copies the captured registry (`_effects`) and the
+  // context stack; `_effects` is named again only so that the source-text
+  // audit in `effects-registry.test.ts`, which reads the object literal,
+  // finds it.
+  const nested = operandOptions(options) ?? {};
   const exact = await x.evaluateAsync({
-    ...(operandOptions(options) ?? {}),
+    ...nested,
     numericApproximation: false,
+    _effects: nested._effects,
   });
   if (isExactIntegerOperandValue(exact)) return exact;
   return await exact.evaluateAsync({
-    ...(operandOptions(options) ?? {}),
+    ...nested,
     numericApproximation: true,
+    _effects: nested._effects,
   });
 }
 

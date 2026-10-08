@@ -348,6 +348,20 @@ function reportFactorial(
 }
 
 /**
+ * Whether the token `k` is a letter or a digit that is a whole base of a
+ * script: not a subscript or a superscript itself. In `x_1^2!`, the `1` is
+ * the subscript of `x`, not the base of `^2`, so a span that starts at the
+ * base does not start at the `1`.
+ */
+function isOneTokenBase(tokens: readonly string[], k: number): boolean {
+  return (
+    (isLetter(tokens[k]) || isDigit(tokens[k])) &&
+    tokens[k - 1] !== '_' &&
+    tokens[k - 1] !== '^'
+  );
+}
+
+/**
  * `ambiguous-factorial`: a `!` next to an unbraced exponent or radicand,
  * where the operand of the `!` has a second common reading.
  *
@@ -449,7 +463,7 @@ function reportFactorialOperand(
       if (caret >= 0) {
         start = caret;
         const base = tokens[caret - 1];
-        if (isLetter(base) || isDigit(base)) start = caret - 1;
+        if (isOneTokenBase(tokens, caret - 1)) start = caret - 1;
         else if (MATCH_CLOSE.has(base)) {
           const open = matchingBracket(at, caret - 1);
           if (open >= 0) start = open;
@@ -488,8 +502,7 @@ function reportFactorialOperand(
     if (script < 0) continue;
     // The span starts at the base of the `^` when it is one letter or digit
     const start =
-      tokens[script] === '^' &&
-      (isLetter(tokens[script - 1]) || isDigit(tokens[script - 1]))
+      tokens[script] === '^' && isOneTokenBase(tokens, script - 1)
         ? script - 1
         : script;
     if (spaced && afterFunctionName(start)) continue;
@@ -968,7 +981,8 @@ function reportNumberNotation(
       prev === '.' ||
       prev === '_' ||
       prev === '^' ||
-      isCommand(prev)
+      isCommand(prev) ||
+      isScriptNumber(tokens, s)
     )
       continue;
 
@@ -996,6 +1010,26 @@ function reportNumberNotation(
       emit('ambiguous-number-notation', s, e, { notation: 'digit-grouping' });
     s = e - 1;
   }
+}
+
+/**
+ * Whether the digit at token `s` starts the unbraced number of an exponent
+ * that has white space or a sign before the number: `x^ 2`, `x^-2`, `x^ -2`,
+ * `x**2`, `x**-2`. A `_` after that number starts a subscript of the base,
+ * not a digit group: `x^-2_01` is `Power(x_01, -2)`, as `x^2_01` is. (The
+ * caller already skips a digit directly after a `^` or a `_`.)
+ *
+ * The sign must be directly before the digit, and only a `^` or `**` is
+ * read through a sign: with white space after the sign (`A^+ 1_000`) the
+ * parser reads `^+` as the postfix pseudo-inverse, and a `_` with a sign
+ * (`x_-1_000`) as the postfix `Subminus`, so the number is a separate
+ * factor and keeps its diagnostic.
+ */
+function isScriptNumber(tokens: readonly string[], s: number): boolean {
+  let p = s - 1;
+  if (tokens[p] === '-' || tokens[p] === '+') p -= 1;
+  while (p >= 0 && tokens[p] === SPACE) p -= 1;
+  return tokens[p] === '^' || (tokens[p] === '*' && tokens[p - 1] === '*');
 }
 
 // The tokens that can be on the left (`BEFORE`) or on the right (`AFTER`) of

@@ -145,13 +145,9 @@ describe('NON-STRICT MODE (Math-ASCII/Typst-like syntax)', () => {
   describe('Parentheses for superscripts and subscripts', () => {
     test('Superscript with parentheses: x^(n+1)', () => {
       // Strict mode (default) - should fail
-      expect(parse('x^(n+1)')).toMatchInlineSnapshot(`
-        [
-          "Tuple",
-          ["Error", "'missing'", ["LatexString", "^"]],
-          ["Add", "n", 1]
-        ]
-      `);
+      expect(parse('x^(n+1)')).toMatchInlineSnapshot(
+        `["Tuple", ["Power", "x", ["Error", "'missing'"]], ["Add", "n", 1]]`
+      );
 
       // Non-strict mode - should work
       expect(ce.parse('x^(n+1)', { strict: false })).toMatchInlineSnapshot(

@@ -46,7 +46,50 @@
   under a text lambda the `incompatible-type` error that `ToUpperCase(Missing)`
   gives.
 
+- **Diagnostic spans after a Unicode superscript or subscript are measured
+  on the input.** The tokenizer expands `²` to `^{2}` before parsing, so the
+  spans of `undeclared-symbol`, `juxtaposition-as-multiply` and the
+  `ambiguous-*` diagnostics after such a character were offsets into the
+  expanded text: `x²! + 1` reported the span `x²! + ` for
+  `ambiguous-factorial`. The span is now `x²!`, and the `LatexString` of an
+  `Error` under `onAmbiguity: 'error'` is `x²!` where it was the broken
+  `x^{`. Other differences between the input and the normalized LaTeX
+  (comments, removed bidi marks, the space after a command) still give
+  normalized offsets.
+
+- **A `^` or `_` with nothing after it keeps its base.** `t2 _` parsed to the
+  error alone and `xy2 _` to `x·Error`; in the strict grammar `x^(n+1)` was
+  `Error·(n+1)`. The error is now the script of the base: `t2 _` is
+  `Subscript(t_2, Error)` and `x^(n+1)` is `Power(x, Error)·(n+1)`, as `x _`
+  and `a_(k+m)` already were.
+
+- **The raw form of a subscript on a collection no longer depends on the
+  order of the scripts.** With `B` a list, `B^2_{2}` parsed in raw form to
+  `Power(Subscript(B, 2), 2)` while `B_{2}^2` gave `Power(At(B, 2), 2)`; the
+  canonical forms were the same. Both orders now give `At`, so a host that
+  reads the raw form (`form: "raw"`) sees one structure.
+
+- **A Greek name after a one-letter argument is read as a name.** In the
+  lenient grammar, `e^xalphax_1` was `e^x·a·l·p·h·a·x_1` while `xalphax_1`
+  was `x·alpha·x_1`; it is now `e^x·alpha·x_1`. `\sqrt beta` stays
+  `√b·e·t·a` and `x^foo` stays `x^f·o·o`.
+
 ### Issues Resolved
+
+- **A dictionary trigger with a subscript matches across a space.**
+  `\mathbb{R} _{>0}^2` parsed to `Subscript(RealNumbers, Error)^2` and
+  `\mathbb{N} _0` to `Subscript(NonNegativeIntegers, 0)`, while without the
+  space they are `PositiveNumbers^2` and `NonNegativeIntegers`. LaTeX ignores
+  the space, and the readings now agree in both grammars.
+
+- **`x^-2_01` no longer reports a false `ambiguous-number-notation`.** The
+  `01` is the subscript of the base (`Power(x_01, -2)`), not a digit group;
+  the check now skips the unbraced number of an exponent written with a sign
+  or white space (`x^-2`, `x^ 2`, `x**-2`). A number after a sign the parser
+  reads as a postfix operator (`A^+ 1_000`, `x_-1_000`) keeps its diagnostic.
+
+- **The `ambiguous-factorial` span of `x_1^2!` starts at the `^`**, as for
+  `x_{1}^{2}!`; it started at the subscript digit.
 
 - **`GCD` and `LCM` of large integers were wrong.** The exact fold accumulated
   in a machine number or a big decimal at the working precision, so

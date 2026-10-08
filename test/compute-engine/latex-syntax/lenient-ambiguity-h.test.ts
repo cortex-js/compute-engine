@@ -842,3 +842,39 @@ describe('the base in the detail of a digit subscript', () => {
     ).toEqual(detail);
   });
 });
+
+describe('the spans after a Unicode superscript or subscript', () => {
+  // The tokenizer reads `x²` as `x^{2}`. The spans are measured on the
+  // input: `x²! + 1` reported the span `x²! + `, the length of `x^{2}!`.
+  test.each([
+    ['x²! + 1', ['x²!']],
+    ['x²y³! + 1', ['y³!']],
+    ['x₁²! + 1', ['²!']],
+    // The `1` is a subscript, not the base of the exponent: the span starts
+    // at the `^`, as for `x_{1}^{2}!`. It started at the `1`.
+    ['x_1^2! + 1', ['^2!']],
+    ['x_{1}^{2}! + 1', ['^{2}!']],
+  ])('%s', (input, expected) => {
+    expect(spans(input, 'ambiguous-factorial')).toEqual(expected);
+  });
+  test('the span of a symbol after a superscript', () => {
+    const e = new ComputeEngine().parse('x²y³! + 1', {
+      strict: false,
+      diagnostics: true,
+    });
+    const names = (e.parseDiagnostics ?? [])
+      .filter((d) => d.code === 'undeclared-symbol')
+      .map((d) => 'x²y³! + 1'.slice(d.start, d.end));
+    expect(names).toEqual(['x', 'y']);
+  });
+  test('the error that replaces an expression holds the input text', () => {
+    const e = new ComputeEngine().parse('x²! + 1', {
+      strict: false,
+      form: 'raw',
+      onAmbiguity: 'error',
+    });
+    expect(JSON.stringify(e.json)).toBe(
+      `["Add",["Error","'ambiguous-factorial'",["LatexString","'x²!'"]],1]`
+    );
+  });
+});

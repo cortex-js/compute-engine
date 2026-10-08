@@ -128,6 +128,11 @@ const REPORTED: [string, string[]][] = [
 
   // ambiguous-number-notation
   ['1_000', ['ambiguous-number-notation: 1_000']],
+  // A sign after a script that the parser reads as a postfix operator
+  // (`^+` is the pseudo-inverse, `_-` is `Subminus`) leaves the number a
+  // separate factor, which keeps its diagnostic.
+  ['A^+ 1_000', ['ambiguous-number-notation: 1_000']],
+  ['x_-1_000', ['ambiguous-number-notation: 1_000']],
   ['1_000_000', ['ambiguous-number-notation: 1_000_000']],
   ['0x10', ['ambiguous-number-notation: 0x10']],
   ['y = 0xff', ['ambiguous-number-notation: 0xff']],
@@ -194,6 +199,13 @@ const NOT_REPORTED = [
   'y = x^2 + 1',
   'x_1 = 2',
   'x^{1_000}',
+  // The number of an exponent with a sign or white space before it, then a
+  // subscript of the base: `x^-2_01` is `Power(x_01, -2)`, as `x^2_01` is
+  'x^-2_01',
+  'x^+2_01',
+  'x^ -2_01',
+  'x**2_01',
+  'x**-2_01',
   '(1) + 2',
   // A line that is only `(x)` is a variable, not a label
   '(x)',

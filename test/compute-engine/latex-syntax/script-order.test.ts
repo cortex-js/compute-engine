@@ -233,6 +233,30 @@ describe('a subscript that the symbol parser does not join', () => {
     expect(ce.parse('B^2_{2}').json).toEqual(['Power', 'B_2', 2]);
     expect(ce.parse('B_{2}^2').json).toEqual(['Power', 'B_2', 2]);
   });
+  // The raw form is the same in each order of the scripts. With the
+  // superscript first, it was `Power(Subscript(B, 2), 2)`.
+  for (const strict of [true, false]) {
+    test(`the raw form of an index on a collection, strict: ${strict}`, () => {
+      const ce = new ComputeEngine();
+      ce.declare('B', 'list<number>');
+      ce.declare('M', 'matrix');
+      const raw = (input: string) =>
+        ce.parse(input, { strict, form: 'raw' }).json;
+      for (const [first, second, json] of [
+        ['B^2_{2}', 'B_{2}^2', ['Power', ['At', 'B', 2], 2]],
+        ['B^2_2', 'B_2^2', ['Power', ['At', 'B', 2], 2]],
+        ['M^2_{1,2}', 'M_{1,2}^2', ['Power', ['At', 'M', 1, 2], 2]],
+        [
+          '[1,2,3]^2_1',
+          '[1,2,3]_1^2',
+          ['Power', ['At', ['List', 1, 2, 3], 1], 2],
+        ],
+      ] as const) {
+        expect(raw(first)).toEqual(json);
+        expect(raw(second)).toEqual(json);
+      }
+    });
+  }
 });
 
 describe('a subscript after prime marks', () => {
@@ -572,6 +596,20 @@ describe('a symbol whose subscript is read by a dictionary entry', () => {
           '\\mathbb{R}_{>0}^2',
           '["Power","PositiveNumbers",2]',
         ],
+        // White space before the `_` does not stop a dictionary entry when
+        // the subscript comes first. `\mathbb{R} _{>0}^2` was a `Subscript`
+        // of `RealNumbers` with an error, and `\mathbb{N} _0^2` was
+        // `Subscript(NonNegativeIntegers, 0)^2`.
+        [
+          '\\mathbb{R} _{>0}^2',
+          '\\mathbb{R}_{>0}^2',
+          '["Power","PositiveNumbers",2]',
+        ],
+        [
+          '\\mathbb{N} _0^2',
+          '\\mathbb{N}_0^2',
+          '["Power","NonNegativeIntegers",2]',
+        ],
       ]);
     });
   }
@@ -603,6 +641,24 @@ describe('a spelled-out name after an argument of one letter', () => {
       '["Multiply","alpha_1",["Sqrt","x"]]',
     ],
     ['e^xpi', 'e^x\\pi', '["Multiply","Pi",["Power","ExponentialE","x"]]'],
+    // The letters after the argument are a run that holds a name, as in
+    // `xalphax_1`, which is `x·alpha·x_1`. They were read one letter at a
+    // time: `e^xalphax_1` was `e^x·a·l·p·h·a·x_1`.
+    [
+      'e^xalphax_1',
+      'e^x\\alpha x_1',
+      '["Multiply","alpha","x_1",["Power","ExponentialE","x"]]',
+    ],
+    [
+      'e^xyalpha',
+      'e^xy\\alpha',
+      '["Multiply","alpha","y",["Power","ExponentialE","x"]]',
+    ],
+    [
+      '\\sqrt xalphay',
+      '\\sqrt x\\alpha y',
+      '["Multiply","alpha","y",["Sqrt","x"]]',
+    ],
   ])('%s is %s', (first, second, json) => {
     expect(parse(first, false).json).toBe(json);
     expect(parse(second, false).json).toBe(json);
@@ -618,17 +674,17 @@ describe('a spelled-out name after an argument of one letter', () => {
     ['\\sqrt beta', '["Multiply","ExponentialE","a","t",["Sqrt","b"]]'],
     // `oo` is not a Greek name: `foo` is not `f·∞`
     ['x^foo', '["Multiply","o","o",["Power","x","f"]]'],
-    // `alphax` is not one name
-    [
-      'e^xalphax_1',
-      '["Multiply","a","a","h","l","p","x_1",["Power","ExponentialE","x"]]',
-    ],
+    // A run after the argument that holds no Greek name is not split
+    ['x^foo(t)', '["Multiply","o",["o","t"],["Power","x","f"]]'],
   ])('%s is not split', (input, json) => {
     expect(parse(input, false).json).toBe(json);
   });
   test('the strict grammar does not change', () => {
     expect(parse('e^xalpha_1', true).json).toBe(
       '["Multiply","a","a_1","h","l","p",["Power","ExponentialE","x"]]'
+    );
+    expect(parse('e^xalphax_1', true).json).toBe(
+      '["Multiply","a","a","h","l","p","x_1",["Power","ExponentialE","x"]]'
     );
   });
   // A bare function name is read as the function, as after white space.

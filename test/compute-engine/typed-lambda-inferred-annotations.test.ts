@@ -114,17 +114,16 @@ describe('inferred parameter annotations are not printed', () => {
     ];
     const d = ce.box(['Dictionary', ['KeyValuePair', { str: 'f' }, filter]]);
     // A function literal is not plain data, so the dictionary serializes in
-    // its `KeyValuePair` form on both routes.
+    // its `KeyValuePair` form on both routes. The values are serialized with
+    // the caller's options, as a tuple's operands are, so the
+    // single-statement `Block` body of the literal is unwrapped here as it
+    // is in `.toMathJson()` of the literal itself.
     expect(d.toMathJson()).toEqual([
       'Dictionary',
       [
         'KeyValuePair',
         { str: 'f' },
-        [
-          'Filter',
-          'C',
-          ['Function', ['Block', ['Less', 0, ['Abs', 'Z']]], 'Z'],
-        ],
+        ['Filter', 'C', ['Function', ['Less', 0, ['Abs', 'Z']], 'Z']],
       ],
     ]);
     expect(d.toMathJson({ inferredAnnotations: true })).toEqual([

@@ -31,12 +31,6 @@ const UNICODE_SUPERSCRIPT_MAP: Record<string, string> = {
   '\u02B8': 'y', // ʸ
 };
 
-/** Matches a run of the characters of `UNICODE_SUPERSCRIPT_MAP` */
-const UNICODE_SUPERSCRIPT_RUN = new RegExp(
-  `[${Object.keys(UNICODE_SUPERSCRIPT_MAP).join('')}]+`,
-  'g'
-);
-
 const UNICODE_SUBSCRIPT_MAP: Record<string, string> = {
   '\u2080': '0', // ₀
   '\u2081': '1', // ₁
@@ -50,6 +44,15 @@ const UNICODE_SUBSCRIPT_MAP: Record<string, string> = {
   '\u2089': '9', // ₉
   '\u208B': '-', // ₋
 };
+
+/** Matches a run of the characters of `UNICODE_SUPERSCRIPT_MAP` (group 1)
+ * or a run of the characters of `UNICODE_SUBSCRIPT_MAP` (group 2) */
+const UNICODE_SCRIPT_RUN = new RegExp(
+  `([${Object.keys(UNICODE_SUPERSCRIPT_MAP).join('')}]+)|([${Object.keys(
+    UNICODE_SUBSCRIPT_MAP
+  ).join('')}]+)`,
+  'g'
+);
 
 // The 'special' tokens must be of length > 1 to distinguish
 // them from literals.
@@ -117,6 +120,14 @@ class Tokenizer {
 
   obeyspaces = false;
 
+  /** The characters that the constructor wrote when it expanded a Unicode
+   * superscript or subscript (`²` is `^{2}`): the offset of each in
+   * `joined`, with its text in the input. The text of the `^` or `_`, of
+   * the `{` and of the `}` is empty, and the text of the other characters
+   * is the Unicode character they replace. `null` if there was no
+   * expansion. */
+  private replaced: Map<number, string> | null = null;
+
   constructor(s: string) {
     // Normalize to Unicode NFC so decomposed sequences (e.g. "e" + combining
     // acute accent) are treated identically to their precomposed form ("\u00E9").
@@ -135,21 +146,33 @@ class Tokenizer {
 
     // Replace Unicode superscript sequences with ^{...}
     // Handles: ⁰¹²³⁴⁵⁶⁷⁸⁹⁻⁺⁽⁾ⁱⁿˣʸ
-    s = s.replace(UNICODE_SUPERSCRIPT_RUN, (m) => {
-      const digits = Array.from(m)
-        .map((c) => UNICODE_SUPERSCRIPT_MAP[c])
-        .join('');
-      return `^{${digits}}`;
-    });
-
     // Replace Unicode subscript sequences with _{...}
     // Handles: ₀₁₂₃₄₅₆₇₈₉ and ₋ (subscript minus)
-    s = s.replace(/[₀₁₂₃₄₅₆₇₈₉₋]+/g, (m) => {
-      const digits = Array.from(m)
-        .map((c) => UNICODE_SUBSCRIPT_MAP[c])
-        .join('');
-      return `_{${digits}}`;
-    });
+    // Each Unicode character becomes one ASCII character, and the `^{` or
+    // `_{` before a run and the `}` after it are inserted. Record the text in
+    // the input of each character of the expansion (see `inputText()`).
+    if (s.search(UNICODE_SCRIPT_RUN) >= 0) {
+      const replaced = new Map<number, string>();
+      let result = '';
+      let last = 0;
+      for (const m of s.matchAll(UNICODE_SCRIPT_RUN)) {
+        const sup = m[1] !== undefined;
+        const map = sup ? UNICODE_SUPERSCRIPT_MAP : UNICODE_SUBSCRIPT_MAP;
+        result += s.slice(last, m.index);
+        replaced.set(result.length, '');
+        replaced.set(result.length + 1, '');
+        result += sup ? '^{' : '_{';
+        for (const c of m[0]) {
+          replaced.set(result.length, c);
+          result += map[c];
+        }
+        replaced.set(result.length, '');
+        result += '}';
+        last = m.index + m[0].length;
+      }
+      s = result + s.slice(last);
+      this.replaced = replaced;
+    }
 
     this.s = splitGraphemes(s);
     this.pos = 0;
@@ -171,6 +194,32 @@ class Tokenizer {
       this.offsets = offsets;
     }
   }
+
+  /** The offset in `joined` (UTF-16 code units) of the current position */
+  get offset(): number {
+    if (typeof this.s === 'string') return this.pos;
+    return this.offsets![Math.min(this.pos, this.s.length)];
+  }
+
+  /**
+   * The text in the input of the characters from the offset `from` to the
+   * offset `to` (see `offset`), when some of them were written by the
+   * expansion of a Unicode superscript or subscript (see `replaced`).
+   * Otherwise, `undefined`: the text is the same as in the input.
+   */
+  inputText(from: number, to: number): string | undefined {
+    const replaced = this.replaced;
+    if (replaced === null) return undefined;
+    let result = '';
+    let found = false;
+    for (let i = from; i < to; i++) {
+      const text = replaced.get(i);
+      if (text !== undefined) found = true;
+      result += text ?? this.joined[i];
+    }
+    return found ? result : undefined;
+  }
+
   /**
    * @return True if we reached the end of the stream
    */
@@ -429,11 +478,17 @@ function expand(lex: Tokenizer, args: string[]): Token[] {
  *
  * @param s - A string of LaTeX. It can include comments (with the `%`
  * marker) and multiple lines.
+ * @param inputText - If given, receives the index and the text in `s` of
+ * each token made by the expansion of a Unicode superscript or subscript
+ * (`x²` is `x^{2}`). The text of the `^` or `_`, `{` and `}` tokens is
+ * empty, and the text of the other tokens is the Unicode character they
+ * replace (`²` for the token `2`).
  */
 export function tokenize(
   s: string,
   args: string[] = [],
-  comments?: DiscardedComment[]
+  comments?: DiscardedComment[],
+  inputText?: Map<number, string>
 ): Token[] {
   // Merge multiple lines into one, and remove comments.
   // Split keeping the line separators (capture group) so the exact separator
@@ -477,8 +532,15 @@ export function tokenize(
   const tokenizer = new Tokenizer(stream);
   const result: Token[] = [];
 
-  do result.push(...expand(tokenizer, args));
-  while (!tokenizer.end());
+  do {
+    const from = tokenizer.offset;
+    const tokens = expand(tokenizer, args);
+    if (inputText !== undefined && tokens.length === 1) {
+      const text = tokenizer.inputText(from, tokenizer.offset);
+      if (text !== undefined) inputText.set(result.length, text);
+    }
+    result.push(...tokens);
+  } while (!tokenizer.end());
 
   return result;
 }

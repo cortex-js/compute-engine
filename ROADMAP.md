@@ -750,59 +750,6 @@ its roots are `0` and `π` plus multiples of `2π`: it was `[0, π]`. A test for
 an argument that is itself a periodic function of a linear argument would
 give this answer again.
 
-### White space before `_` stops a dictionary trigger when the subscript comes first (OPEN, small — found 2026-10-04 by the script-order review fixes)
-
-In both grammars, a dictionary entry whose trigger is a base with a
-subscript does not match when a white space token comes before the `_`:
-`\mathbb{R} _{>0}^2` is `Subscript(RealNumbers, Error)^2` and `\mathbb{N} _0`
-is `Subscript(NonNegativeIntegers, 0)`, while `\mathbb{R}_{>0}^2` is
-`PositiveNumbers^2` and `\mathbb{N}_0` is `NonNegativeIntegers`. LaTeX ignores
-the space, so the readings must be the same. The superscript-first order
-already matches across the space (`\mathbb{R}^2 _{>0}` is
-`PositiveNumbers^2`, in `parseSupsub()`), so the two orders now differ for
-this input. The tokenizer drops the space after a command, so `\R _-` and
-`\mu _0` are not affected; a base that ends with `}` is. A fix makes the
-trigger matcher of the dictionary skip a white space token before `_`.
-
-### A Greek name inside a run of letters after a one-letter argument is read one letter at a time (OPEN, small — found 2026-10-04 by the script-order review fixes)
-
-In the lenient grammar, `e^xalphax_1` is `e^x·a·l·p·h·a·x_1`, while
-`xalphax_1` is `x·alpha·x_1`. After an argument of one letter without braces
-(an exponent, a radicand), `parseToken()` in `latex-syntax/parse.ts` marks a
-word boundary only when the letters after the argument are exactly one Greek
-name (`e^xalpha_1` is `e^x·alpha_1`) or one function name (`e^xsin(t)` is
-`e^x·sin(t)`). The run `alphax` is neither, and `tryParseBareRun()` does not
-split a run that starts after a letter. A fix lets `tryParseBareRun()`
-segment the run at that boundary, with care for the words that start at the
-argument (`\sqrt beta` must stay `\sqrt{b}·e·t·a`, and `x^foo` must stay
-`x^f·o·o`).
-
-### A `_` with nothing after it drops the symbol before it (OPEN, small — found 2026-10-04 by the letter-run fix)
-
-In the lenient grammar, a symbol followed by white space and a `_` at the
-end of the input is lost: `x _`, `x_2 _` and `t2 _` parse to
-`Error('missing', ' _')` alone, and `xy2 _` to `x·Error(…)`. The `x` or
-`x_2` operand is not in the result: the error for the missing subscript
-replaces the base instead of being kept with it. `parseSupsub()` in
-`latex-syntax/parse.ts` is the place to look: a fix keeps the base and
-gives the error as its subscript.
-
-### Lenient grammar: `x^-2_01` reports a false `ambiguous-number-notation` (OPEN, small — found 2026-10-04 by the script-order fix)
-
-`x^-2_01` reads correctly as `x_01^{-2}`, but the line check
-(`reportNumberNotation()` in `latex-syntax/lenient-ambiguity.ts`) reports
-`2_01` as a digit group, while `x^2_01` reports nothing. The check does not
-see that the digits after `^-` are an exponent of a base that has a
-subscript. A fix skips a digit run that is the exponent of a scripted base.
-
-### Raw form of a subscript on a collection depends on the order of the scripts (OPEN, small — found 2026-10-04 by the script-order fix)
-
-With `B` a list, `B^2_{2}` parses in raw form to `Power(Subscript(B, 2), 2)`,
-but `B_{2}^2` to `Power(At(B, 2), 2)`. The canonical forms are the same. A host
-that reads the raw form (Tycho uses `form: "raw"`) sees two structures for one
-input. A fix makes `parseSupsub()` build the same raw node as the
-subscript-first route.
-
 ### Results built with the library π change value on a JSON round trip when the user shadows `Pi` (OPEN, medium — found 2026-10-04 by the audit of the `Pi` sites)
 
 A user can declare `Pi` with another value (`ce.declare('Pi', { value: 3 })`;
@@ -837,17 +784,6 @@ operand, and a call of a local declared `function` is typed `any`. A fix lets
 `At` accept an operand that the target recorded as spelled as a collection
 value (the same record that makes `f(x) + 1` decline with a reason), and reads
 the enclosure at the index.
-
-### Diagnostic spans after a Unicode superscript are shifted (OPEN, small — found 2026-10-04 by the review of the lenient ambiguity codes)
-
-In the lenient grammar, the span of an `ambiguous-*` diagnostic is wrong when
-the input has a Unicode superscript before it: `x²! + 1` reports the span
-`x²! + ` for `ambiguous-factorial`, not `x²!`. The tokenizer expands `²` to
-`^{2}` before parsing, so the token offsets no longer match the source text,
-and `sourceOffsets()` (`latex-syntax/`) is documented as exact only for input
-that serializes back to itself. The code and the reading are right; only the
-span that a host shows to the user is off. A fix keeps a map from expanded
-tokens to source offsets when the tokenizer expands a Unicode character.
 
 ### The type of a call can be out of date after its function is reassigned (OPEN, design decision — found 2026-10-04 by the review of boxing-time refusal)
 

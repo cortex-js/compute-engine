@@ -97,6 +97,15 @@ describe('Tier 4 #2 — subscript/superscript-qualified blackboard sets', () => 
     expect(json('\\mathbb{N}_0')).toEqual('NonNegativeIntegers');
   });
 
+  test('white space before the `_` does not change the set', () => {
+    // LaTeX ignores the space. `\mathbb{N} _0` was
+    // `Subscript(NonNegativeIntegers, 0)`, and `\mathbb{R} _{>0}` was a
+    // `Subscript` of `RealNumbers` with an error.
+    expect(json('\\mathbb{N} _0')).toEqual('NonNegativeIntegers');
+    expect(json('\\mathbb{R} _{>0}')).toEqual('PositiveNumbers');
+    expect(json('\\mathbb{Z}  _{\\ge 0}')).toEqual('NonNegativeIntegers');
+  });
+
   test('named-set forms round-trip', () => {
     const ce = new ComputeEngine();
     expect(ce.parse('\\mathbb{R}_{>0}').toLatex()).toEqual('\\mathbb{R}_{>0}');
