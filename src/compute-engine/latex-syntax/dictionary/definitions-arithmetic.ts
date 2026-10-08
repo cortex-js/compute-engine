@@ -45,6 +45,7 @@ import {
   getSymbolToUnicode,
   isLetterToken,
   isOperandStartToken,
+  matchingBracket,
   operandEnd,
 } from '../lenient-ambiguity.js';
 
@@ -328,6 +329,69 @@ function parseRootGlyph(parser: Parser): MathJsonExpression | null {
 }
 
 /**
+ * True when the token `t`, written directly after an unbraced radicand, has
+ * the second reading of a factor inside the radical: an operand start
+ * (`√2x`, `√2π`) or an infinity (`√2∞` is `√2·∞`, and a person can mean
+ * `√(2∞)`). A radical glyph directly after a radicand (`√2√3`) is not one:
+ * that spelling is reported by the digit-before-the-glyph rule of
+ * `emitRadicalAmbiguity()` (`2√3` can be the cube root of 3), and a second
+ * report with a wider span would say the same thing twice.
+ */
+function isRadicalFollowerToken(t: string | undefined): boolean {
+  return isOperandStartToken(t) || t === '∞' || t === '\\infty';
+}
+
+/**
+ * True when the token `t`, written after an unbraced radicand and white
+ * space, has the second reading of a factor inside the radical: everything
+ * `isRadicalFollowerToken()` admits, and a radical glyph (`√2 √3` is
+ * `√2·√3`, and a person can mean `√(2√3)`; `√x √y` likewise). After white
+ * space there is no digit before the glyph, so no other rule reports the
+ * spelling.
+ */
+function isSpacedRadicalFollowerToken(t: string | undefined): boolean {
+  return isRadicalFollowerToken(t) || t === '√' || t === '\\sqrt';
+}
+
+/**
+ * The index after the operand that starts at token `i` and follows a
+ * radicand (`isSpacedRadicalFollowerToken()`). A radical glyph extends over
+ * its own extent, read as the root parser reads it: white space, an optional
+ * degree in brackets (`\\sqrt[3]{8}`), then the radicand — a number with its
+ * decimal part (`√2.5`, as `parseRadicandNumber()` reads one), a nested
+ * radical (`√√3`), or an operand as `operandEnd()` reads one (a letter, a
+ * braced or parenthesized group). Any other operand ends where
+ * `operandEnd()` says.
+ */
+function radicalFollowerEnd(
+  at: (k: number) => string | undefined,
+  i: number
+): number {
+  const t = at(i);
+  if (t !== '√' && t !== '\\sqrt') return operandEnd(at, i);
+  const isDigit = (k: number) => /^[0-9]$/.test(at(k) ?? '');
+  let k = i + 1;
+  while (at(k) === ' ') k += 1;
+  if (at(k) === '[') {
+    const close = matchingBracket(at, k);
+    if (close < 0) return k + 1;
+    k = close + 1;
+    while (at(k) === ' ') k += 1;
+  }
+  if (at(k) === undefined) return k;
+  if (at(k) === '√' || at(k) === '\\sqrt') return radicalFollowerEnd(at, k);
+  if (isDigit(k) || (at(k) === '.' && isDigit(k + 1))) {
+    while (isDigit(k)) k += 1;
+    if (at(k) === '.' && isDigit(k + 1)) {
+      k += 1;
+      while (isDigit(k)) k += 1;
+    }
+    return k;
+  }
+  return operandEnd(at, k);
+}
+
+/**
  * In non-strict mode, read a number directly after the square root glyph
  * `√` at token `glyph` as the whole radicand: `√12` is `Sqrt(12)` and
  * `√2.5` is `Sqrt(2.5)`, as `sqrt12` and `sqrt2.5` are. The number is a run
@@ -375,14 +439,17 @@ function parseRadicandNumber(
   // reported once, with this span.
   let j = end;
   while (token(j) === ' ') j += 1;
-  // White space then an operand of one letter or a constant (`√12 x`,
-  // `√2 π`) is reported by `emitRadicalAmbiguity()` too, with a span that
-  // holds the operand; a number of more than one token is then reported
-  // once, with that wider span. A word of two or more letters (`√12 sin x`)
-  // is not an operand there, so the number is reported here.
+  // White space then an operand of one letter, a constant, a radical or an
+  // infinity (`√12 x`, `√2 π`, `√12 √3`, `√12 ∞`) is reported by
+  // `emitRadicalAmbiguity()` too, with a span that holds the operand; a
+  // number of more than one token is then reported once, with that wider
+  // span. A word of two or more letters (`√12 sin x`) is not an operand
+  // there, so the number is reported here.
   const isLatin = (i: number) => /^[a-zA-Z]$/.test(token(i));
   const spacedOperand =
-    j > end && isOperandStartToken(token(j)) && !(isLatin(j) && isLatin(j + 1));
+    j > end &&
+    isSpacedRadicalFollowerToken(token(j)) &&
+    !(isLatin(j) && isLatin(j + 1));
   if (j > end && isDigit(j)) {
     let k = j;
     while (isDigit(k)) k += 1;
@@ -390,7 +457,7 @@ function parseRadicandNumber(
   } else if (
     end - first > 1 &&
     next !== '^' &&
-    !isOperandStartToken(next) &&
+    !isRadicalFollowerToken(next) &&
     !spacedOperand
   )
     parser._emitAmbiguity?.('ambiguous-radical', glyph, end);
@@ -403,7 +470,8 @@ function parseRadicandNumber(
  * second common reading:
  *
  * - an unbraced radicand directly followed by an operand: `√2π` is `√2·π`,
- *   and a person can mean `√(2π)` (also `√2x`, `√xy`);
+ *   and a person can mean `√(2π)` (also `√2x`, `√xy`, and an infinity:
+ *   `√2∞`);
  * - an unbraced radicand directly followed by `^`: `√x²` is `(√x)²`, and a
  *   person can mean `√(x²)`;
  * - a digit directly before the glyph: `3√8` is `3·√8`, and a person can
@@ -411,11 +479,13 @@ function parseRadicandNumber(
  *   person can mean the root of index `t`;
  * - a radicand that is one letter or a number, then white space and an
  *   operand: `√a b` is `√a·b` and `√2 x` is `√2·x`, and a person can mean
- *   `√(ab)` or `√(2x)`.
+ *   `√(ab)` or `√(2x)`. A radical or an infinity is such an operand: `√2 √3`
+ *   is `√2·√3` and `√2 ∞` is `√2·∞`, and a person can mean `√(2√3)` or
+ *   `√(2∞)`.
  *
  * The span starts at the glyph and ends after the operand that has the
- * second reading (`√2π`, `√x²`, `√xy`, `√a b`, `√2 x`). The reading does not
- * change.
+ * second reading (`√2π`, `√x²`, `√xy`, `√a b`, `√2 x`, `√2 √3`). The reading
+ * does not change.
  */
 function emitRadicalAmbiguity(
   parser: Parser,
@@ -455,7 +525,7 @@ function emitRadicalAmbiguity(
   )
     return;
   const next = token(parser.index);
-  if (next === '^' || isOperandStartToken(next)) {
+  if (next === '^' || isRadicalFollowerToken(next)) {
     parser._emitAmbiguity(
       'ambiguous-radical',
       glyph,
@@ -485,10 +555,10 @@ function emitRadicalAmbiguity(
   let j = parser.index;
   while (token(j) === ' ') j += 1;
   const operand = token(j);
-  if (!isOperandStartToken(operand)) return;
+  if (!isSpacedRadicalFollowerToken(operand)) return;
   if (numberRadicand && /^[0-9]$/.test(operand)) return;
   if (/^[a-zA-Z]$/.test(operand) && /^[a-zA-Z]$/.test(token(j + 1))) return;
-  parser._emitAmbiguity('ambiguous-radical', glyph, operandEnd(at, j));
+  parser._emitAmbiguity('ambiguous-radical', glyph, radicalFollowerEnd(at, j));
 }
 
 /** The letter of a LaTeX command for a letter (`\alpha` is `α`), or `''`. */

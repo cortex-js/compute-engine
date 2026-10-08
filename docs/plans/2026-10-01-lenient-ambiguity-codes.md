@@ -320,7 +320,14 @@ or a library constant.
   not reported before, by analogy with the exponent `x^2 y`, but `√(2π)`
   is a common reading and `e^2 x` is reported. A braced or parenthesized
   radicand (`\sqrt{a} b`, `√(a) b`) and a word of two or more letters after
-  the white space (`√x sin x`, `√2 sin x`, `√x dx`) are not reported.
+  the white space (`√x sin x`, `√2 sin x`, `√x dx`) are not reported. A
+  radical or an infinity after the white space is an operand too: `√2 √3`,
+  `√2 ∞`, `√x √y` (`√2·√3` / `√(2√3)`), with a span that holds the second
+  radical and its radicand (`√2 √(3)`); an infinity directly after the
+  radicand (`√2∞`) is reported as `√2x` is. User decision 2026-10-08 (row
+  367 of the Tycho ledger). A radical directly after a one-digit radicand
+  (`√2√3`) is reported once, by the digit-before-the-glyph rule, with the
+  span `√3`.
   Decided not ambiguous (user decision 2026-10-07, row 366): an operand
   before the glyph that is not a Latin letter or a digit written directly
   before it — a Greek letter (`θ√y`), a group (`(x)√y`), an absolute value

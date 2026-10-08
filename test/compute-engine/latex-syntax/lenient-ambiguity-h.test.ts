@@ -207,8 +207,12 @@ describe('the end of a radical', () => {
   expectReported('ambiguous-radical', [
     ['√a_1 b', '["InvisibleOperator",["Sqrt","a_1"],"b"]'],
     ['√a_b c', '["InvisibleOperator",["Sqrt","a_b"],"c"]'],
+    // A radical or an infinity after a letter radicand and white space is
+    // an operand too (`√(x√y)`, `√(x∞)`), as after a number radicand.
+    ['√x √y', '["InvisibleOperator",["Sqrt","x"],["Sqrt","y"]]'],
+    ['√x ∞', '["InvisibleOperator",["Sqrt","x"],"PositiveInfinity"]'],
   ]);
-  expectNotReported('ambiguous-radical', ['√a_1 sin x', '√a_1']);
+  expectNotReported('ambiguous-radical', ['√a_1 sin x', '√a_1', '√x√y']);
 
   // A run of letters read one letter at a time before the glyph
   test('xy√i reports ambiguous-radical and the letter run', () => {
@@ -262,7 +266,30 @@ describe('a number after the radical glyph', () => {
     ['√{}2 x', '["InvisibleOperator",["Sqrt",2],"x"]'],
     ['√{}12 x', '["InvisibleOperator",["Sqrt",12],"x"]'],
   ]);
-  expectNotReported('ambiguous-radical', ['√2 sin x', '√2 (x)', '√2 + 1']);
+  // A radical or an infinity after the radicand is such an operand too:
+  // `√2 √3` is `√2·√3` and `√2 ∞` is `√2·∞`, and a person can mean `√(2√3)`
+  // or `√(2∞)` (row 367 of the Tycho ledger). An infinity directly after the
+  // radicand (`√2∞`) is reported as `√2x` is. A radical directly after the
+  // radicand (`√2√3`) is reported once, by the digit-before-the-glyph rule
+  // (`2√3` can be the cube root of 3), with the span `√3`.
+  expectReported('ambiguous-radical', [
+    ['√2 √3', '["InvisibleOperator",["Sqrt",2],["Sqrt",3]]'],
+    ['√2 \\sqrt{3}', '["InvisibleOperator",["Sqrt",2],["Sqrt",3]]'],
+    ['√2 √x', '["InvisibleOperator",["Sqrt",2],["Sqrt","x"]]'],
+    ['√2 ∞', '["InvisibleOperator",["Sqrt",2],"PositiveInfinity"]'],
+    ['√2 \\infty', '["InvisibleOperator",["Sqrt",2],"PositiveInfinity"]'],
+    ['√2∞', '["InvisibleOperator",["Sqrt",2],"PositiveInfinity"]'],
+    ['√12 √3', '["InvisibleOperator",["Sqrt",12],["Sqrt",3]]'],
+    ['√12∞', '["InvisibleOperator",["Sqrt",12],"PositiveInfinity"]'],
+    ['√2√3', '["InvisibleOperator",["Sqrt",2],["Sqrt",3]]'],
+  ]);
+  expectNotReported('ambiguous-radical', [
+    '√2 sin x',
+    '√2 (x)',
+    '√2 + 1',
+    '\\sqrt{2} √3',
+    '√(2) √3',
+  ]);
   test('the number ends the radicand', () => {
     expect(lenient('√1.5.5').json).toBe(
       '["InvisibleOperator",["Sqrt",1.5],0.5]'
@@ -281,6 +308,26 @@ describe('a number after the radical glyph', () => {
     expect(spans('√1 000', 'ambiguous-radical')).toEqual(['√1 000']);
     expect(spans('√12 000', 'ambiguous-radical')).toEqual(['√12 000']);
     expect(spans('√{}12 x', 'ambiguous-radical')).toEqual(['√{}12 x']);
+    // The span holds the following radical and its radicand, or the infinity
+    expect(spans('√2 √3', 'ambiguous-radical')).toEqual(['√2 √3']);
+    expect(spans('√2 √ 3', 'ambiguous-radical')).toEqual(['√2 √ 3']);
+    expect(spans('√2 √(3)', 'ambiguous-radical')).toEqual(['√2 √(3)']);
+    // The two-token radicand of the second radical is its own report, as
+    // `√1.5` alone is (the TeX reading is `√1·.5`).
+    expect(spans('√2 √1.5', 'ambiguous-radical')).toEqual(['√2 √1.5', '√1.5']);
+    expect(spans('√2 \\sqrt[3]{8}', 'ambiguous-radical')).toEqual([
+      '√2 \\sqrt[3]{8}',
+    ]);
+    expect(spans('√2 √√3', 'ambiguous-radical')).toEqual(['√2 √√3']);
+    expect(spans('√12 √3', 'ambiguous-radical')).toEqual(['√12 √3']);
+    expect(spans('√2 ∞', 'ambiguous-radical')).toEqual(['√2 ∞']);
+    expect(spans('√2∞', 'ambiguous-radical')).toEqual(['√2∞']);
+    expect(spans('√12∞', 'ambiguous-radical')).toEqual(['√12∞']);
+    // Directly after a one-digit radicand, the digit-before-the-glyph rule
+    // reports the second radical alone; a two-token radicand is reported
+    // too, on its own span.
+    expect(spans('√2√3', 'ambiguous-radical')).toEqual(['√3']);
+    expect(spans('√12√3', 'ambiguous-radical')).toEqual(['√12', '√3']);
   });
   test('the strict grammar keeps the TeX reading', () => {
     expect(strict('\\sqrt12').json).toBe('["InvisibleOperator",["Sqrt",1],2]');

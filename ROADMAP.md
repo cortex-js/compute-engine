@@ -283,23 +283,6 @@ fold. The interpreter's `.N()` itself is not fixed.
 0.698… (`.N()` gives it). The exact route reads the irrational operand as an
 integer somewhere in `Mod`'s evaluate handler.
 
-### A constant list of any length compiles into a shader as a constant array, with no limit and no diagnostic (OPEN, question — asked 2026-10-07 by Tycho ledger row 368)
-
-The `glsl` and `wgsl` targets write a literal list of numbers as a constant
-array constructor (`float[9540](…)`), however long the list. A 9,540-element
-list that a graphing document inlines compiles to a 100 KB array in the
-shader body with no size limit and no diagnostic; whether such a shader
-compiles, and how long it takes, is up to the GPU driver. The consumer asked
-for a limit, or a decline that names the size, so that a host knows to ship
-such a list as a texture (`storage: sampler2D`) instead. Decision needed:
-keep compiling any size (today), or decline a constant list above a size
-limit with a `capability` diagnostic that names the element count and the
-limit. A decline changes the behavior of documents that compile today (the
-consumer's fallback is another target); the limit itself cannot be derived
-from the specification, which sets no bound on a constant array. The
-`interval-js` and `javascript` targets are not concerned: their lists are
-one array constant.
-
 ### Compiled `Mod` of an infinite dividend throws where a plot kernel may prefer `NaN` (OPEN, question — found 2026-10-07 by the compiled integer-range guard)
 
 Compiled `Mod`, `Remainder`, `GCD` and `LCM` now throw a `RangeError` for an

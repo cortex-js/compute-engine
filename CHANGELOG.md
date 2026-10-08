@@ -2,6 +2,29 @@
 
 ### Behavior Changes
 
+- **A shader target declines a constant collection of more than 256 elements.**
+  The `glsl` and `wgsl` targets wrote a literal `List`, `Tuple` or `PointList`
+  of any length into the shader as a constant array constructor
+  (`float[9540](…)`), while a `Range` of more than 256 elements was already
+  declined. Whether a shader with thousands of constant elements compiled, and
+  how long the driver took, was left to the GPU driver. Such a collection is now
+  declined on both targets with a `capability` diagnostic, code
+  `inline-collection-too-large`, whose message names the element count and the
+  limit, so a host can ship the collection as a texture (a `storage: sampler2D`
+  input read with `At`) instead. The `javascript` and `interval-js` targets are
+  unchanged: a list of any length is one array constant there. Row 368 of the
+  Tycho ledger.
+
+- **A radical or an infinity after a radicand and white space reports
+  `ambiguous-radical`.** In the lenient grammar, `√2 √3` and `√2 ∞` are read as
+  `√2·√3` and `√2·∞`, and a person can mean `√(2√3)` or `√(2∞)`, as for `√2 x`,
+  which is reported. They now report `ambiguous-radical`, with a span that holds
+  the second radical and its radicand (`√2 √3`, `√2 √(3)`, `√12 √3`); `√x √y`,
+  `√x ∞` and an infinity written directly after the radicand (`√2∞`, `√12∞`) are
+  reported too. `√2√3` is unchanged: the digit before the second glyph already
+  reports it once (`2√3` can be the cube root of 3). The strict grammar reports
+  none of these. Row 367 of the Tycho ledger.
+
 - **`Solve` gives every complex root of a polynomial of degree 3 or more.** With
   no domain, or over the complex numbers, `x^2 + 1 = 0` gave `[i, -i]`, but a
   polynomial of degree 3 or more gave only some of its roots: `x^3 = 8` gave

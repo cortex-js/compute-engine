@@ -2,6 +2,7 @@ import type { Expression } from '../global-types.js';
 import type { CompiledFunctions } from './types.js';
 import {
   GPUShaderTarget,
+  assertGPUInlineElementCount,
   compileGPUMatrix,
   assertGPUScalarComponents,
   gpuUniformVectorWidth,
@@ -21,8 +22,14 @@ import { tryGetConstant } from './constant-folding.js';
  */
 function compileWGSLList(
   args: ReadonlyArray<Expression>,
-  compile: (expr: Expression) => string
+  compile: (expr: Expression) => string,
+  // The operator the literal was written with, named in the decline below
+  head: 'List' | 'Tuple' | 'PointList' = 'List'
 ) {
+  // A literal above the element limit of a shader array constructor is
+  // declined, whatever its element shape, with a message that names the
+  // operator and the count (`GPU_MAX_INLINE_ELEMENTS`).
+  assertGPUInlineElementCount(head, args.length);
   // A list of points of one arity is an array of vectors.
   const vector = gpuUniformVectorWidth(args);
   if (vector !== undefined)
@@ -126,7 +133,7 @@ const WGSL_FUNCTIONS: CompiledFunctions<Expression> = {
     return `length(vec2f(${compile(x)}, ${compile(y)}))`;
   },
 
-  List: compileWGSLList,
+  List: (args, compile) => compileWGSLList(args, compile, 'List'),
   Matrix: (args, compile) =>
     compileGPUMatrix(
       args,
@@ -136,7 +143,7 @@ const WGSL_FUNCTIONS: CompiledFunctions<Expression> = {
       (n) => `array<f32, ${n}>`
     ),
   // Tuple compiles identically to List
-  Tuple: compileWGSLList,
+  Tuple: (args, compile) => compileWGSLList(args, compile, 'Tuple'),
   // A `PointList` that reaches this table is ONE point (the library handler
   // declines a collection-valued component before it gets here). A point is
   // a `vecNf` of floats, so every component must be a scalar. The check
@@ -148,7 +155,7 @@ const WGSL_FUNCTIONS: CompiledFunctions<Expression> = {
       args,
       args.length >= 2 && args.length <= 4 ? `vec${args.length}f` : 'array<f32>'
     );
-    return compileWGSLList(args, compile);
+    return compileWGSLList(args, compile, 'PointList');
   },
 };
 

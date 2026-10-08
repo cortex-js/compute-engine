@@ -3,6 +3,7 @@ import type { CompiledFunctions } from './types.js';
 import { tryGetConstant } from './constant-folding.js';
 import {
   GPUShaderTarget,
+  assertGPUInlineElementCount,
   compileGPUMatrix,
   assertGPUScalarComponents,
   gpuUniformVectorWidth,
@@ -19,8 +20,14 @@ import {
  */
 function compileGLSLList(
   args: ReadonlyArray<Expression>,
-  compile: (expr: Expression) => string
+  compile: (expr: Expression) => string,
+  // The operator the literal was written with, named in the decline below
+  head: 'List' | 'Tuple' | 'PointList' = 'List'
 ) {
+  // A literal above the element limit of a shader array constructor is
+  // declined, whatever its element shape, with a message that names the
+  // operator and the count (`GPU_MAX_INLINE_ELEMENTS`).
+  assertGPUInlineElementCount(head, args.length);
   // A list of points of one arity is an array of vectors.
   const vector = gpuUniformVectorWidth(args);
   if (vector !== undefined)
@@ -69,7 +76,7 @@ const GLSL_FUNCTIONS: CompiledFunctions<Expression> = {
     return `mod(${compile(a)}, ${compile(b)})`;
   },
 
-  List: compileGLSLList,
+  List: (args, compile) => compileGLSLList(args, compile, 'List'),
   Matrix: (args, compile) =>
     compileGPUMatrix(
       args,
@@ -79,7 +86,7 @@ const GLSL_FUNCTIONS: CompiledFunctions<Expression> = {
       (n) => `float[${n}]`
     ),
   // Tuple compiles identically to List
-  Tuple: compileGLSLList,
+  Tuple: (args, compile) => compileGLSLList(args, compile, 'Tuple'),
   // A `PointList` that reaches this table is ONE point (the library handler
   // declines a collection-valued component before it gets here). A point is
   // a `vecN` of floats, so every component must be a scalar. The check comes
@@ -91,7 +98,7 @@ const GLSL_FUNCTIONS: CompiledFunctions<Expression> = {
       args,
       args.length >= 2 && args.length <= 4 ? `vec${args.length}` : 'float[]'
     );
-    return compileGLSLList(args, compile);
+    return compileGLSLList(args, compile, 'PointList');
   },
 };
 

@@ -46,7 +46,11 @@ import type {
   CompilationResult,
   StorageKind,
 } from './types.js';
-import { compileDiagnosticOf, compileSubject } from './diagnostics.js';
+import {
+  CompileDeclineError,
+  compileDiagnosticOf,
+  compileSubject,
+} from './diagnostics.js';
 import { colorSpaceIsUnsettled, colorSpaceOf } from './color-space-fact.js';
 import { resolveStorageHints } from './storage-hints.js';
 import {
@@ -135,16 +139,44 @@ export const GPU_OPERATORS: CompiledOperators = {
  * constructor (`float[n](…)` / `array<f32, n>(…)`).
  *
  * Shared by the `Range` handler, which materializes a constant range as such
- * a literal, and by `CompileTarget.maxInlineElements`, which bounds
- * constant-collection FOLDING. The two must agree: a fold cap below this
- * would refuse a constant collection that the `Range` handler compiles
- * happily, and one above it would emit an array the handler considers too
- * large. Unlike the JavaScript default, this is a capability limit rather
- * than a source-size preference — a dynamic collection has no shader
- * lowering at all, so for a constant one the literal is the only emission
- * that can compile.
+ * a literal, by the `List`/`Tuple`/`PointList` compilers of the GLSL and
+ * WGSL targets (`assertGPUInlineElementCount`), and by
+ * `CompileTarget.maxInlineElements`, which bounds constant-collection
+ * FOLDING. They must agree: a fold cap below this would refuse a constant
+ * collection that the handlers compile happily, and one above it would emit
+ * an array the handlers consider too large. Unlike the JavaScript default,
+ * this is a capability limit rather than a source-size preference — a
+ * dynamic collection has no shader lowering at all, so for a constant one
+ * the literal is the only emission that can compile.
+ *
+ * The shading languages set no bound on a constant array, so the number is
+ * this target's own: the driver's compile time grows with the constructor,
+ * and whether a constructor of thousands of elements compiles at all is up
+ * to the driver. A longer collection is declined, and the decline tells the
+ * host to ship it as a texture (`storage: sampler2D`, read with `At`).
  */
 const GPU_MAX_INLINE_ELEMENTS = 256;
+
+/**
+ * Decline a constant collection of `count` elements that a shader array
+ * constructor would have to hold when `count` is above
+ * `GPU_MAX_INLINE_ELEMENTS`. The decline is a `capability` diagnostic with
+ * the code `inline-collection-too-large`; its message names the operator
+ * (`head`), the element count and the limit, so a host can tell this decline
+ * from one it cannot act on and ship the collection as a texture.
+ */
+export function assertGPUInlineElementCount(head: string, count: number): void {
+  if (count <= GPU_MAX_INLINE_ELEMENTS) return;
+  throw new CompileDeclineError({
+    code: 'inline-collection-too-large',
+    kind: 'capability',
+    message:
+      `Could not compile \`${head}\`: a constant collection of ${count} elements ` +
+      `is above the ${GPU_MAX_INLINE_ELEMENTS} elements a shader array constructor ` +
+      `takes on this target. Ship the collection as a texture (a \`storage: sampler2D\` ` +
+      `input, read with \`At\`) instead.`,
+  });
+}
 
 const GLSL_RESERVED: ReadonlySet<string> = new Set([
   // storage/parameter qualifiers
@@ -7865,11 +7897,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
         'Could not compile `Range`: empty range (lo > hi for positive step, or lo < hi for negative step)'
       );
     }
-    if (count > GPU_MAX_INLINE_ELEMENTS) {
-      throw new Error(
-        `Could not compile \`Range\`: GPU compile inlines ranges up to ${GPU_MAX_INLINE_ELEMENTS} elements (got ${count})`
-      );
-    }
+    assertGPUInlineElementCount('Range', count);
     const values: number[] = [];
     for (let i = 0; i < count; i++) values.push(lo + i * step);
     const isWGSL = target.language === 'wgsl';
@@ -9005,6 +9033,8 @@ export function compileGPUMatrix(
     );
     if (numRows >= 2 && numRows <= 4)
       return `${vecFn(numRows)}(${elements.join(', ')})`;
+    // The array form is bounded as every shader array constructor is.
+    assertGPUInlineElementCount('Matrix', numRows);
     return `${arrayFn(numRows)}(${elements.join(', ')})`;
   }
 
