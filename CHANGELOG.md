@@ -25,6 +25,21 @@
   reports it once (`2√3` can be the cube root of 3). The strict grammar reports
   none of these. Row 367 of the Tycho ledger.
 
+- **A collection passed in a self-call types the parameter as a collection.**
+  When a user function calls itself and passes a collection (a list literal,
+  a range, a set, a comprehension, a `filter` result) at a parameter's
+  position, that parameter now takes a whole collection, and a call no longer
+  maps over a list argument. With `f(n, s) = s if n == 0 else f(n - 1, [1, 2])`,
+  `f(1, [0])` gives `[1, 2]` (it gave `[[1, 2]]`, one nesting level per
+  recursion depth, because the body never indexed or iterated `s` and the
+  parameter was a scalar slot), and the inferred signature is
+  `(unknown, list<any>) -> …`. This applies however the function is defined:
+  a named definition, a `let`-bound lambda, or a MathJSON `DefineFunction`.
+  A self-call that forwards a parameter unchanged, or passes a scalar, is no
+  evidence, so `f(x) = x * 2; f([1, 2, 3])` still gives `[2, 4, 6]`, and a
+  function with no self-call still maps a scalar parameter over a list
+  argument (`s: list` passes the list whole).
+
 - **`Solve` gives every complex root of a polynomial of degree 3 or more.** With
   no domain, or over the complex numbers, `x^2 + 1 = 0` gave `[i, -i]`, but a
   polynomial of degree 3 or more gave only some of its roots: `x^3 = 8` gave

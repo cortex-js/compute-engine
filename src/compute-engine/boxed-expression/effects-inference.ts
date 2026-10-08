@@ -22,6 +22,13 @@ import {
   provablyDisjoint,
   widenAll,
 } from '../../common/type/subtype.js';
+import {
+  COLLECTION_SHAPE_TYPE,
+  INDEXED_COLLECTION_SHAPE_TYPE,
+} from '../../common/type/primitive.js';
+import { isRecordShapedType, isTupleShapedType } from '../collection-utils.js';
+import { isInferredTypedParameter } from './inferred-annotations.js';
+import { declaredBinders } from './binding-sites.js';
 import { reduceType } from '../../common/type/reduce.js';
 import { parseType } from '../../common/type/parse.js';
 import {
@@ -1045,6 +1052,371 @@ function wholeCollectionSlotArm(
       !isSubtype(m, 'record')
   );
   return collections.length === 0 ? undefined : widenAll(collections);
+}
+
+/**
+ * The collection type that the SELF-CALLS of a named user function give to
+ * each of its parameters, by position. An entry is `undefined` when no
+ * self-call gives evidence for that parameter. `params` is the whole
+ * parameter list of the function literal, a rest parameter included.
+ *
+ * A call of the function to itself that passes a collection at the position
+ * of a parameter is strong evidence that the parameter takes a whole
+ * collection (user decision 2026-10-08). Without this evidence, the body of
+ * `f(n, s) = s if n == 0 else f(n - 1, [1, 2])` never indexes, measures or
+ * iterates `s`, so the slot of `s` reads as a scalar and `f(1, [0])` maps
+ * over `[0]` and gives `[[1, 2]]`. With it, the slot of `s` is
+ * `list<any>`, the list argument binds whole, and the result is `[1, 2]`.
+ *
+ * The evidence is read from the body SYNTACTICALLY: the static type of each
+ * argument of each self-call, as the canonical body records it. The function
+ * is not re-derived against its own signature, because that is the signature
+ * this evidence helps to build. While a recursive body canonicalizes, a
+ * self-call types `unknown`, so a self-call nested in an argument
+ * (`f(n - 1, f(n - 1, s))`) gives no evidence.
+ *
+ * Rules:
+ * - A self-call is an application whose operator is `selfName`, at any depth
+ *   of the body (inside `If` branches, blocks and nested function literals).
+ *   When `literal` is given, an application whose operator is another name
+ *   that holds `literal` as its value now is a self-call too. The same
+ *   function can be held by two names (`b = a`), and the evidence must not
+ *   change with the name a call uses.
+ * - An argument gives evidence only when its static type is a collection
+ *   (`collection<any>` shape) and is not a string, a tuple or a record. Those
+ *   three are read as one atomic value, and a broadcast never descends into
+ *   them. The tuple and the record tests read the shape of the type, so a
+ *   tuple or a record with an absent slot (`tuple<integer, missing>`) is
+ *   excluded too.
+ * - Only a parameter that is a bare symbol takes evidence (or one that
+ *   carries an annotation written by inference, not by the author). An
+ *   annotated parameter keeps the type its author wrote, a destructuring
+ *   parameter keeps its tuple type, and a rest parameter has no position.
+ * - An argument that is a parameter of the function, forwarded bare, gives no
+ *   new information: `walk(xs, k - 1)` leaves `xs` as it is. A scalar
+ *   argument (`n - 1`) gives no evidence either.
+ * - A self-call that contains a spread argument is skipped, because its
+ *   arguments do not map to positions.
+ * - The walk does not enter a part of the body where `selfName` is bound to
+ *   something else, because a call of that name there calls another function.
+ *   Such a part is a nested function literal with a parameter of that name
+ *   (bare, annotated, destructuring or rest), or an expression whose local
+ *   scope binds the name: a block with a local declaration (`let f = 0`), a
+ *   comprehension or a loop with an index of that name, a `Sum` or a
+ *   `Product` with an index of that name. The self-calls in the other parts
+ *   of the body are still evidence.
+ * - There is no evidence at all when a parameter has the same name as the
+ *   function, or when the body assigns or defines the name outside every
+ *   local scope that binds it (`f = g`): after such an assignment, the name
+ *   can refer to another function.
+ *
+ * The type of an entry is `list<any>` when every argument at that position
+ * is a list, `indexed_collection<any>` when every argument is indexed, and
+ * `collection<any>` otherwise. The type excludes every scalar, so the
+ * parameter is not a scalar slot and a call does not broadcast over a
+ * collection argument.
+ *
+ * The element type of the arguments is NOT kept. A self-call shows only
+ * that the parameter takes a collection; the callers outside the function
+ * can pass any elements. A caller that forwards its own parameter to this
+ * slot is narrowed to the slot type, so `list<integer>` (from `[1, 2]`)
+ * made `h(t) = f(0, t)[1]` claim an `integer` result while `h([0.25])`
+ * gives `0.25`.
+ */
+export function selfCallCollectionParameterTypes(
+  selfName: string,
+  params: readonly Expression[],
+  body: Expression | undefined,
+  literal?: Expression
+): (Type | undefined)[] {
+  const sites = selfCallSites(selfName, params, body);
+  if (sites === undefined) return [];
+  return selfCallEvidence(sites, readSelfCalls(sites, selfName, literal));
+}
+
+/** The parts of the body of a function literal that the self-call evidence
+ * reads, for one name of the function. They depend only on the structure of
+ * the literal and on the name, so they are found once for each pair. See
+ * {@link selfCallCollectionParameterTypes}. */
+interface SelfCallSites {
+  /** The names the parameter list binds. */
+  paramNames: ReadonlySet<string>;
+  /** For each parameter before the rest parameter: whether it takes
+   * evidence. */
+  takesEvidence: readonly boolean[];
+  /** The applications with no spread argument, outside every part of the body
+   * where the name is bound to something else, that are a self-call or can
+   * become one: the operator is the name, or the operator is a name that is
+   * held as a value (it can hold the function literal now or later). */
+  calls: readonly (Expression & FunctionInterface)[];
+}
+
+/** The {@link SelfCallSites} of the function named `selfName`, or `undefined`
+ * when its self-calls give no evidence at all. See
+ * {@link selfCallCollectionParameterTypes} for the rules. */
+function selfCallSites(
+  selfName: string,
+  params: readonly Expression[],
+  body: Expression | undefined
+): SelfCallSites | undefined {
+  if (body === undefined || params.length === 0) return undefined;
+  // Every name the parameter list binds: the names in a destructuring
+  // pattern, the name of an annotated parameter and the rest parameter.
+  const paramNames = new Set(functionLiteralBoundNames(params));
+  if (paramNames.has(selfName)) return undefined;
+  const restAt = restParameterIndex(params);
+  const positional = restAt < 0 ? params : params.slice(0, restAt);
+  const takesEvidence = positional.map(
+    (p) => isSymbol(p) || isInferredTypedParameter(p)
+  );
+
+  const calls: (Expression & FunctionInterface)[] = [];
+  let rebound = false;
+  const seen = new Set<Expression>();
+  const visit = (expr: Expression): void => {
+    if (rebound || !isFunction(expr) || seen.has(expr)) return;
+    seen.add(expr);
+    if (bindsNameLocally(expr, selfName)) return;
+    const head = expr.operator;
+    if (
+      (head === 'DefineFunction' || head === 'Declare' || head === 'Assign') &&
+      sym(expr.op1) === selfName
+    ) {
+      rebound = true;
+      return;
+    }
+    if (
+      (head === selfName || expr.valueDefinition !== undefined) &&
+      !expr.ops.some((x) => x.operator === 'Spread')
+    )
+      calls.push(expr);
+    for (const op of expr.ops) visit(op);
+  };
+  visit(body);
+  if (rebound) return undefined;
+  return { paramNames, takesEvidence, calls };
+}
+
+/** True when the expression `expr` binds `name` for its own operands, so that
+ * the name does not refer to the enclosing function inside it. See
+ * {@link selfCallCollectionParameterTypes}. Three cases:
+ *
+ * - a function literal with a parameter of that name (bare, annotated,
+ *   destructuring or rest);
+ * - a binder with an index of that name (a comprehension, a loop, a `Sum`
+ *   or a `Product`), as its binding sites declare it (`declaredBinders`);
+ * - a block with a statement that declares or defines the name
+ *   (`let f = 0` is `Declare(f, …)`).
+ *
+ * The local scope of a block is not read. A name that a body calls before
+ * it is defined (`let r = (n, s) => … r(n - 1, [1, 2])`) is declared in the
+ * local scope of the body's block when the body canonicalizes, although the
+ * call reaches the outer function. A binding there is not a shadow. */
+function bindsNameLocally(expr: Expression, name: string): boolean {
+  if (isFunction(expr, 'Function'))
+    return functionLiteralBoundNames(expr.ops.slice(1)).includes(name);
+  if (isFunction(expr, 'Block'))
+    return expr.ops.some(
+      (x) =>
+        (x.operator === 'Declare' || x.operator === 'DefineFunction') &&
+        isFunction(x) &&
+        sym(x.op1) === name
+    );
+  return declaredBinders(expr, 'post')?.visibleFrom.has(name) === true;
+}
+
+/** The kind of collection a self-call argument is, as evidence: a list, an
+ * indexed collection that is not a list, or another collection. */
+type SelfCallArgumentKind = 'list' | 'indexed' | 'collection';
+
+/**
+ * What the calls of `sites` give now: for each call, the kind of each
+ * argument that is evidence (`undefined` for an argument that is not), or
+ * `null` when the call is not a self-call now.
+ *
+ * A call is a self-call when its operator is `selfName`, or when its operator
+ * is a name that holds `literal` as its value now. The same function can be
+ * held by two names (`b = a`), and the evidence must not change with the
+ * name a call uses.
+ *
+ * This reads the static types of the arguments and the values of the callee
+ * names, which assignments can change. It does not walk the body.
+ */
+function readSelfCalls(
+  sites: SelfCallSites,
+  selfName: string,
+  literal: Expression | undefined
+): ((SelfCallArgumentKind | undefined)[] | null)[] {
+  return sites.calls.map((call) => {
+    if (
+      call.operator !== selfName &&
+      (literal === undefined || call.valueDefinition?.value !== literal)
+    )
+      return null;
+    const n = Math.min(call.nops, sites.takesEvidence.length);
+    const kinds: (SelfCallArgumentKind | undefined)[] = [];
+    for (let i = 0; i < n; i++) {
+      const arg = call.ops[i];
+      kinds.push(
+        !sites.takesEvidence[i] ||
+          (isSymbol(arg) && sites.paramNames.has(arg.symbol))
+          ? undefined
+          : selfCallArgumentKind(arg.type.type)
+      );
+    }
+    return kinds;
+  });
+}
+
+/** The kind of a self-call argument of type `t` when it is evidence that the
+ * parameter takes a whole collection, or `undefined`. See
+ * {@link selfCallCollectionParameterTypes}. */
+function selfCallArgumentKind(t: Type): SelfCallArgumentKind | undefined {
+  if (
+    t === 'unknown' ||
+    t === 'any' ||
+    t === 'nothing' ||
+    !isSubtype(t, COLLECTION_SHAPE_TYPE) ||
+    isSubtype(t, 'string') ||
+    isTupleShapedType(t) ||
+    isRecordShapedType(t)
+  )
+    return undefined;
+  if (isSubtype(t, 'list<any>')) return 'list';
+  if (isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE)) return 'indexed';
+  return 'collection';
+}
+
+/** The parameter types that the self-calls read by {@link readSelfCalls}
+ * give, by position: `list<any>` when every argument at that position is a
+ * list, `indexed_collection<any>` when every argument is indexed, and
+ * `collection<any>` otherwise. */
+function selfCallEvidence(
+  sites: SelfCallSites,
+  reads: readonly ((SelfCallArgumentKind | undefined)[] | null)[]
+): (Type | undefined)[] {
+  return sites.takesEvidence.map((_, i) => {
+    let found = false;
+    let allLists = true;
+    let allIndexed = true;
+    for (const kinds of reads) {
+      const kind = kinds?.[i];
+      if (kind === undefined) continue;
+      found = true;
+      if (kind !== 'list') allLists = false;
+      if (kind === 'collection') allIndexed = false;
+    }
+    if (!found) return undefined;
+    if (allLists) return { kind: 'list', elements: 'any' };
+    return allIndexed ? INDEXED_COLLECTION_SHAPE_TYPE : COLLECTION_SHAPE_TYPE;
+  });
+}
+
+/** The memo of {@link namedLiteralSignatureType}. For each function literal,
+ * there is one entry for each name the literal was read under. */
+const NAMED_LITERAL_SIGNATURES = new WeakMap<
+  Expression,
+  Map<
+    string,
+    {
+      /** The parts of the body the evidence reads, `undefined` when there is
+       * no evidence. */
+      sites: SelfCallSites | undefined;
+      /** What the self-calls gave when `evidence` was computed, as a
+       * string. */
+      reads: string;
+      evidence: (Type | undefined)[];
+      /** The last signature the evidence was applied to, and the result. */
+      base: Type;
+      type: Type;
+    }
+  >
+>();
+
+/**
+ * The signature type of the function literal `literal` when it is held as
+ * the VALUE of the symbol `name`, with the self-call evidence of
+ * {@link selfCallCollectionParameterTypes} applied to its parameter slots
+ * that are `unknown`. A slot that takes evidence is a bare parameter, so a
+ * slot the author annotated keeps its type, also when the annotation is
+ * `unknown`.
+ *
+ * The literal's own type (`functionLiteralSignatureType`) cannot read the
+ * self-calls, because a literal does not know the name it is stored under.
+ * A function installed as an operator definition reads them when its
+ * signature is derived. A function held as a value (a name that already had
+ * a value binding, or a top-level `DefineFunction` on the MathJSON route)
+ * has no derived signature, so the sites that apply or type a call of such
+ * a value read the literal's type through this function instead. Without
+ * it, the same program gives a different answer depending on the name of
+ * the function.
+ *
+ * `base` is the signature to apply the evidence to. It is the literal's own
+ * type by default. A value definition whose type was INFERRED from the
+ * literal (`let r = (n, s) => …`) passes that inferred type, and an
+ * operator definition whose signature was derived from an annotated literal
+ * passes that signature.
+ *
+ * Returns `base` unchanged when it is not a signature, when it is generic,
+ * or when no self-call gives evidence.
+ *
+ * The walk of the body runs once for each pair of literal and name. The
+ * evidence depends on the static types of the self-call arguments and on
+ * the names that hold the literal, which assignments can change (`v = [1, 2]`
+ * for a variable `v` passed in a self-call, or `b = a`). So each use reads
+ * the calls the walk found again (`readSelfCalls`), and computes the
+ * evidence again only when that read differs. A key made of the engine's
+ * version counters did not work: the evaluation of a call writes to the
+ * engine, so each call in a loop of 1000 iterations walked the body again.
+ */
+export function namedLiteralSignatureType(
+  name: string,
+  literal: Expression,
+  base: Type = literal.type.type
+): Type {
+  if (
+    !isFunction(literal, 'Function') ||
+    typeof base !== 'object' ||
+    base.kind !== 'signature' ||
+    base.args === undefined ||
+    isPolymorphicType(base)
+  )
+    return base;
+  let memos = NAMED_LITERAL_SIGNATURES.get(literal);
+  if (memos === undefined) {
+    memos = new Map();
+    NAMED_LITERAL_SIGNATURES.set(literal, memos);
+  }
+  let memo = memos.get(name);
+  const sites =
+    memo !== undefined
+      ? memo.sites
+      : selfCallSites(name, literal.ops.slice(1), functionLiteralBody(literal));
+  const read =
+    sites === undefined ? undefined : readSelfCalls(sites, name, literal);
+  const reads = JSON.stringify(read ?? null);
+  if (memo !== undefined && memo.reads === reads && memo.base === base)
+    return memo.type;
+  const evidence =
+    memo !== undefined && memo.reads === reads
+      ? memo.evidence
+      : sites === undefined
+        ? []
+        : selfCallEvidence(sites, read!);
+  let type: Type = base;
+  if (evidence.some((t) => t !== undefined)) {
+    type = {
+      ...base,
+      args: base.args.map((arg, i) =>
+        arg.type === 'unknown' && evidence[i] !== undefined
+          ? { ...arg, type: evidence[i] }
+          : arg
+      ),
+    };
+  }
+  memo = { sites, reads, evidence, base, type };
+  memos.set(name, memo);
+  return type;
 }
 
 export function functionLiteralSignatureType(expr: Expression): Type {

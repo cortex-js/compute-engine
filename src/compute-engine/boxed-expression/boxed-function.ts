@@ -276,7 +276,10 @@ import {
   isAbsentableCollectionOperand,
   settledAbsentableValue,
 } from './validate.js';
-import { functionLiteralSignatureType } from './effects-inference.js';
+import {
+  functionLiteralSignatureType,
+  namedLiteralSignatureType,
+} from './effects-inference.js';
 import {
   functionLiteralParameterType,
   isScalarType,
@@ -8686,10 +8689,19 @@ function type(expr: BoxedFunction): Type | BoxedType {
     // a type handler), so a declare-then-assign function agrees with a
     // library operator on an empty-typed argument.
     if (expr.ops.some((x) => x.type.type === 'never')) return 'never';
+    // The assigned literal is read under the name it is held by, as in
+    // `applyFunctionLiteral` (`namedLiteralSignatureType`). A signature
+    // INFERRED from the literal is read the same way.
     const declaredType = expr.valueDefinition.type.type;
-    const sigSource = isWildcardFunctionType(declaredType)
-      ? (expr.valueDefinition.value?.type.type ?? declaredType)
-      : declaredType;
+    const heldValue = expr.valueDefinition.value;
+    const sigSource =
+      heldValue === undefined
+        ? declaredType
+        : isWildcardFunctionType(declaredType)
+          ? namedLiteralSignatureType(expr.operator, heldValue)
+          : expr.valueDefinition.inferredType
+            ? namedLiteralSignatureType(expr.operator, heldValue, declaredType)
+            : declaredType;
     const sig = resolvedArm(expr, sigSource) ?? sigSource;
     // As on the operator-def route: a polytype arm is instantiated at the call
     // site so no open type escapes as the expression's `.type` (§4.2). The
@@ -8903,11 +8915,18 @@ function applyFunctionLiteral(
   // the declared-signature reconciliation): a collection-typed parameter
   // (e.g. `(tuple | list<tuple>) -> any`) binds its argument WHOLE. The
   // literal's own inferred type is only the fallback.
+  //
+  // The literal's type is read under the name it is held by, so that a
+  // collection passed in a self-call types its parameter as on the
+  // operator-definition route (`namedLiteralSignatureType`). A signature
+  // INFERRED from the literal (`let r = (n, s) => …`) is read the same way.
   const declaredType = def.type?.type;
   const broadcastGateType =
     typeof declaredType === 'object' && declaredType.kind === 'signature'
-      ? declaredType
-      : value.type.type;
+      ? def.inferredType
+        ? namedLiteralSignatureType(expr.operator, value, declaredType)
+        : declaredType
+      : namedLiteralSignatureType(expr.operator, value);
   // The check of the evaluated arguments against the scalar parameter types
   // the author declared (`declaredScalarConformance`). Only for a DECLARED
   // signature: an inferred one is a reading of the literal, which checks its

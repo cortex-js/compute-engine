@@ -862,3 +862,322 @@ describe('wildcard-declared callees', () => {
     expect(takeProvisionalDependents(ce, 'never2')).toHaveLength(1);
   });
 });
+
+//
+// A call of the function to ITSELF that passes a collection at a parameter's
+// position is evidence that the parameter takes a whole collection (user
+// decision 2026-10-08). The body of `f` below never indexes, measures or
+// iterates `s`, so without this evidence the slot of `s` read as a scalar and
+// a list argument was broadcast: `f(1, [0])` gave `[f(1, 0)]` = `[[1, 2]]`.
+// The evidence is read from the body syntactically
+// (`selfCallCollectionParameterTypes`, effects-inference.ts). A self-call that
+// forwards a bare parameter or passes a scalar gives no evidence, so those
+// functions keep the broadcast.
+//
+describe('a collection passed in a self-call types the parameter', () => {
+  const F = 'f(n, s) = s if n == 0 else f(n - 1, [1, 2])\n';
+
+  test('the inferred signature reads the parameter as a list', () => {
+    // The element type of `[1, 2]` is not kept: callers outside the
+    // function can pass any elements. Only the parameters are checked: the
+    // result type does not include the type of `s`, which the `n == 0`
+    // branch returns.
+    expect(signatureOf(F).startsWith('(unknown, list<any>) ->')).toBe(true);
+  });
+
+  test.each([
+    ['f(1, [0])', '[1,2]'],
+    ['f(1, [0, 0, 0])', '[1,2]'],
+    ['f(2, [0])', '[1,2]'],
+    ['length(f(1, [0]))', '2'],
+  ])('%s binds the list whole', (call, expected) => {
+    expect(run(F + call)).toBe(expected);
+  });
+
+  test('a range in the self-call', () => {
+    // The result is the `Range` itself, not its listing.
+    const ce = new ComputeEngine();
+    const r = executeEpsil(
+      ce,
+      'f3(n, s) = s if n == 0 else f3(n - 1, 1..2)\nf3(1, [0])'
+    );
+    expect(r.value?.json).toEqual(['Range', 1, 2]);
+  });
+
+  test('a comprehension in the self-call', () => {
+    // The result is the (lazy) `Comprehension` itself; its elements are 1, 2.
+    const ce = new ComputeEngine();
+    const r = executeEpsil(
+      ce,
+      'f7(n, s) = s if n == 0 else f7(n - 1, [x for x in 1..2])\nf7(2, [0])'
+    );
+    expect(r.value?.operator).toBe('Comprehension');
+    expect(r.value?.evaluate().toString()).toBe('[1,2]');
+  });
+
+  test('the collection parameter in the first position', () => {
+    expect(
+      run('r5(s, n) = s if n == 0 else r5([1, 2], n - 1)\nr5([0], 1)')
+    ).toBe('[1,2]');
+  });
+
+  test('the MathJSON route (DefineFunction in a Block)', () => {
+    const ce = new ComputeEngine();
+    const result = ce
+      .box([
+        'Block',
+        [
+          'DefineFunction',
+          'q',
+          [
+            'Function',
+            [
+              'If',
+              ['Equal', 'n', 0],
+              's',
+              ['q', ['Subtract', 'n', 1], ['List', 1, 2]],
+            ],
+            'n',
+            's',
+          ],
+        ],
+        ['q', 1, ['List', 0]],
+      ])
+      .evaluate();
+    expect(result.toString()).toBe('[1,2]');
+  });
+
+  //
+  // A function held as a VALUE (a name that already has a value binding, a
+  // top-level `DefineFunction` on the MathJSON route, a `let`-bound lambda)
+  // has no derived signature: the call reads the literal's own type, under
+  // the name it is held by. The answer must not depend on the name.
+  //
+  describe('a function held as a value', () => {
+    test('a name that already has a value binding (Epsil route)', () => {
+      // `m` is bound as a value before the program runs, so the definition is
+      // held as a value; the same program named `f` is an operator.
+      const ce = new ComputeEngine();
+      const r = executeEpsil(
+        ce,
+        'm(n, s) = s if n == 0 else m(n - 1, [1, 2])\nm(1, [0])'
+      );
+      expect(r.value?.toString()).toBe('[1,2]');
+      const def = ce.lookupDefinition('m');
+      expect(def !== undefined && 'value' in def).toBe(true);
+    });
+
+    test('a top-level DefineFunction (MathJSON route)', () => {
+      const ce = new ComputeEngine();
+      ce.box([
+        'DefineFunction',
+        'm',
+        [
+          'Function',
+          [
+            'If',
+            ['Equal', 'n', 0],
+            's',
+            ['m', ['Subtract', 'n', 1], ['List', 1, 2]],
+          ],
+          'n',
+          's',
+        ],
+      ]).evaluate();
+      expect(
+        ce
+          .box(['m', 1, ['List', 0]])
+          .evaluate()
+          .toString()
+      ).toBe('[1,2]');
+      expect(
+        ce
+          .box(['m', 2, ['List', 0, 0, 0]])
+          .evaluate()
+          .toString()
+      ).toBe('[1,2]');
+    });
+
+    test('a let-bound lambda', () => {
+      expect(
+        run('let r = (n, s) => s if n == 0 else r(n - 1, [1, 2])\nr(1, [0])')
+      ).toBe('[1,2]');
+    });
+
+    test('a value-held function with no self-call still broadcasts', () => {
+      expect(run('m(x) = x * 2\nm([1, 2, 3])')).toBe('[2,4,6]');
+      expect(run('let r = (x) => x * 2\nr([1, 2, 3])')).toBe('[2,4,6]');
+      expect(run('m(n, s) = s if n == 0 else [1, 2]\nm(1, [0])')).toBe(
+        '[[1,2]]'
+      );
+    });
+  });
+
+  //
+  // A call is a self-call only where the name refers to the function. A
+  // parameter, a binder index or a local declaration of the same name in a
+  // part of the body makes the calls in that part calls of another function,
+  // and only that part is left out.
+  //
+  describe('a name bound to something else in a part of the body', () => {
+    test.each([
+      [
+        'an annotated parameter of a nested function',
+        'f(n, s) = s if n == 0 else ((f: function) => f(n - 1, [1, 2]))((a, b) => b)\nf(1, [0])',
+      ],
+      [
+        'a destructuring parameter of a nested function',
+        'f(n, s) = s if n == 0 else (((f, g)) => f(n - 1, [1, 2]))(((a, b) => b, 0))\nf(1, [0])',
+      ],
+      [
+        'the index of a comprehension',
+        'f(n, s) = s if n == 0 else [f(n - 1, [1, 2]) for f in [(a, b) => b]][1]\nf(1, [0])',
+      ],
+    ])('%s is not a self-call', (_, source) => {
+      // The inner `f` returns its second argument, so the call gives the
+      // list `[1, 2]`, and the outer `f` broadcasts over `[0]`.
+      expect(run(source)).toBe('[[1,2]]');
+    });
+
+    test.each([
+      [
+        'a local declaration in a nested function',
+        'function f(n, s) {\n  function g(x) { let f = 0\n f + x }\n  if n == 0 { s } else { f(n - 1, [1, 2]) }\n}\nf(1, [0])',
+      ],
+      [
+        'a local declaration in a nested block',
+        'function f(n, s) {\n  if n > 5 { let f = 0\n f }\n  if n == 0 { s } else { f(n - 1, [1, 2]) }\n}\nf(1, [0])',
+      ],
+      [
+        'a local declaration in a function held as a value',
+        'function m(n, s) {\n  function g(x) { let m = 0\n m + x }\n  if n == 0 { s } else { m(n - 1, [1, 2]) }\n}\nm(1, [0])',
+      ],
+    ])('%s does not cancel the other self-calls', (_, source) => {
+      expect(run(source)).toBe('[1,2]');
+    });
+
+    test('a shadowed call and a real self-call in other branches', () => {
+      // Only the self-call in the `else` branch is evidence.
+      expect(
+        run(
+          'function f(n, s) {\n  if n > 5 { let f = (a, b) => b\n f(n - 1, [1, 2]) } else { if n == 0 { s } else { f(n - 1, [3, 4]) } }\n}\nf(1, [0])'
+        )
+      ).toBe('[3,4]');
+    });
+  });
+
+  //
+  // An annotation on another parameter (or on the result) gives the
+  // function a signature derived from the literal. Its bare slots take the
+  // self-call evidence too; a slot the author annotated keeps its type.
+  //
+  describe('a function with an annotation', () => {
+    const G = 'f(n: number, s) = s if n == 0 else f(n - 1, [1, 2])\n';
+
+    test('the bare slot reads the self-call', () => {
+      expect(run(G + 'f(1, [0])')).toBe('[1,2]');
+      expect(signatureOf(G).startsWith('(n: number, list<any>) ->')).toBe(true);
+    });
+
+    test('held as a value', () => {
+      expect(
+        run(
+          'let r = (n: number, s) => s if n == 0 else r(n - 1, [1, 2])\nr(1, [0])'
+        )
+      ).toBe('[1,2]');
+    });
+
+    test('a slot annotated `unknown` keeps the broadcast', () => {
+      expect(
+        run('f(n, s: unknown) = s if n == 0 else f(n - 1, [1, 2])\nf(1, [0])')
+      ).toBe('[[1,2]]');
+    });
+  });
+
+  //
+  // A tuple and a record are one atomic value, also when a slot or a field
+  // is absent (`tuple<integer, missing>` is not a subtype of the bare
+  // `tuple`, which admits values only).
+  //
+  test.each([
+    ['a tuple with an absent slot', '(1, missing)'],
+    ['a record with an absent field', '{"a" -> 1, "b" -> missing}'],
+    ['a tuple', '(1, 2)'],
+    ['a record', '{"a" -> 1}'],
+  ])('%s in a self-call is no evidence', (_, arg) => {
+    expect(
+      signatureOf(`f(n, s) = s if n == 0 else f(n - 1, ${arg})`).startsWith(
+        '(unknown, unknown) ->'
+      )
+    ).toBe(true);
+  });
+
+  //
+  // The same function literal held by two names: a call of either name in
+  // the body is a self-call, whichever name the outer call uses.
+  //
+  test('a function held by two names', () => {
+    const ce = new ComputeEngine();
+    ce.declare('a', 'function');
+    ce.declare('b', 'function');
+    ce.assign(
+      'a',
+      ce.box([
+        'Function',
+        [
+          'If',
+          ['Equal', 'n', 0],
+          's',
+          ['a', ['Subtract', 'n', 1], ['List', 1, 2]],
+        ],
+        'n',
+        's',
+      ])
+    );
+    const def = ce.lookupDefinition('a');
+    const literal =
+      def !== undefined && 'value' in def ? def.value.value : undefined;
+    expect(literal?.operator).toBe('Function');
+    ce.assign('b', literal!);
+    // The calls alternate between the two names.
+    for (const name of ['a', 'b', 'a', 'b'])
+      expect(
+        ce
+          .box([name, 1, ['List', 0]])
+          .evaluate()
+          .toString()
+      ).toBe('[1,2]');
+  });
+
+  describe('unchanged: no collection in a self-call', () => {
+    test('no self-call: the function still broadcasts', () => {
+      expect(run('g(n, s) = s if n == 0 else [1, 2]\ng(1, [0])')).toBe(
+        '[[1,2]]'
+      );
+    });
+
+    test('a constant body still broadcasts', () => {
+      expect(run('k(s) = 5\nk([1, 2])')).toBe('[5,5]');
+    });
+
+    test('a scalar body still broadcasts', () => {
+      expect(run('f(x) = x * 2\nf([1, 2, 3])')).toBe('[2,4,6]');
+    });
+
+    test('a self-call that forwards a bare parameter', () => {
+      expect(
+        run(
+          'function walk(xs, k) { if k == 0 { 0 } else { walk(xs, k - 1) } }\nwalk([1,2],3)'
+        )
+      ).toBe('[0,0]');
+    });
+
+    test('an accumulator that is already a collection', () => {
+      expect(
+        run(
+          'rev(xs, acc) = acc if xs == [] else rev(rest(xs), [first(xs), ...acc])\nrev([1, 2, 3], [])'
+        )
+      ).toBe('[3,2,1]');
+    });
+  });
+});

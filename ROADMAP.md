@@ -191,24 +191,6 @@ frame and draw live at each read. A fix needs a rule for which eager
 operators store an operand in their result; it is a separate change from the
 lazy-view rule.
 
-### A recursive function whose parameter is only returned maps itself over a list argument (OPEN, question — found 2026-10-07 by the review of the lazy-argument capture)
-
-`f(n, s) = s if n == 0 else f(n - 1, [1, 2])` then `f(1, [0])` gives
-`[[1, 2]]`, and `length(f(1, [0]))` is 1. The body never indexes, measures,
-spreads or iterates `s`, so the inferred signature keeps `s` as a scalar
-slot, and under the broadcast rule (`docs/BROADCAST-MODEL.md`, rule 1) the
-call runs once per element of `[0]`: `f(1, [0])` is `[f(1, 0)]`, and
-`f(1, 0)` is `[1, 2]`. Recursion is not needed (`g(n, s) = s if n == 0 else
-[1, 2]` behaves the same way), and an annotation removes the effect
-(`f(n, s: list) = …` gives `[1, 2]`). The rule is locked in by
-`test/compute-engine/lambda-param-collection-inference.test.ts`. Decision
-needed: keep the rule and document the annotation, or count a self-call
-that passes a collection (a list literal, a range, a comprehension) at a
-parameter's position as evidence that the parameter takes the whole
-collection (`inferredCollectionParameterType`,
-`boxed-expression/effects-inference.ts`). The second option fixes the
-recursive shapes and changes nothing for `f(x) = x * 2; f([1, 2, 3])`.
-
 ### A host value that is not a collection reaches a compiled `Sum` over a `missing | list<number>` parameter as a JavaScript error (OPEN, small — found 2026-10-07 by the compiled-entry string refusal)
 
 With `S: missing | list<number>`, compiled `Sum(S)` of the number 5 throws
@@ -241,6 +223,50 @@ contours read a float as the exact rational it holds and answer a float. The
 antiderivative. Extending the residue route needs a rule for a pole whose
 imaginary part is within the rounding of 0, because the float can move the
 pole onto or off the real axis.
+
+### The type of `If` drops a branch of type `unknown` (OPEN, small — found 2026-10-08 by the self-call collection evidence review)
+
+`If(n = 0, s, [1, 2])` with an untyped `s` is typed `vector<integer^2>`: the
+branch whose type is `unknown` is dropped instead of widening the result. So
+the inferred signature of `f(n, s) = s if n == 0 else f(n - 1, [1, 2])` claims
+the result `vector<integer^2>`, while `f(0, [0.5])` is a `vector<real^1>` and
+`f(0, 5)` is `5`. The value is right; only the static type is wrong. The
+result of a conditional with an `unknown` branch should be `unknown` (or the
+union with `unknown`), as for any other operator.
+
+### A forwarding caller of a value-held recursive function does not learn its collection parameter (OPEN, small — found 2026-10-08 by the self-call collection evidence review)
+
+With `let r = (n, s) => s if n == 0 else r(n - 1, [1, 2])` and
+`h(t) = r(1, t)`, `h([5])` gives `[[1, 2]]`: the narrowing of a forwarding
+caller (`box.ts`, the value-definition branch of
+`makeCanonicalFunctionCore`) reads the callee's evidence only when the callee
+is declared with the bare `function` type, not when its value definition has
+an inferred signature (a `let`-bound lambda), and not when the caller is
+defined before the callee. The same program with `r` as a named function
+gives `[1, 2]`. The gap is older than the self-call evidence: with the body
+evidence `s[1]` the same shapes give element-wise `incompatible-type` errors.
+
+### After a reassignment, a value-held recursive function is typed against its previous literal (OPEN, small — found 2026-10-08 by the self-call collection evidence review)
+
+When `m` is reassigned a new recursive literal, the self-call inside the new
+body is typed against the literal that `m` held before, so the literal's own
+result type comes from the previous function: after assigning A, then B, then
+A again, `m(1, [0])` is typed `list<vector<integer^2>>` and evaluates to
+`[1, 2]`. The operator route types a self-call `unknown` while the literal
+canonicalizes; the value route (`boxed-function.ts`, `type()`) should do the
+same.
+
+### A comprehension or `map` whose element is a function and is applied in the body stays unevaluated (OPEN, small — found 2026-10-08 by the self-call collection evidence review)
+
+`[q(1) for q in [(a) => 0, (a) => a + 5]]` evaluates to the unevaluated
+`Comprehension(q(1), Element(q, [...]))`, and
+`map(w => w(1), [(a) => 0, (a) => a + 5])` stays a `Map`; the `for` loop
+`for fn in [(a) => 0, (a) => a + 5] { out = [...out, fn(1)] }` gives
+`[0, 6]`. Inside a lazy collection callback, a bound variable that holds a
+function literal is not applied when it is called by name; the loop route
+binds the variable as a value and applies it. The comprehension and the
+`map` should give `[0, 6]`. This does not depend on shadowing: the same
+decline happens when no outer function has the index's name.
 
 ### `subs()` does not reach into a canonical dictionary (OPEN, small — found 2026-10-07 by the dictionary seed-frame work)
 

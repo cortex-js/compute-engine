@@ -136,6 +136,7 @@ import { isInferredTypedParameter } from './inferred-annotations.js';
 import { symbolAtSite, replaceAtSite } from './binding-sites.js';
 import { beginDormantPop, endDormantPop } from './binding-tombstone.js';
 import { markBinderVariable, rebindToBindings } from './binders.js';
+import { namedLiteralSignatureType } from './effects-inference.js';
 import {
   isProvisionalCaptureOpen,
   noteProvisionalCall,
@@ -2787,8 +2788,15 @@ function makeCanonicalFunctionCore(
     // permanent dependent that every later re-assignment would re-derive. A
     // SCALAR assignment writes nothing (scalar parameter types are not
     // evidence), so those callers stay narrowable and do still park.
+    // The literal is read under the name it is held by, so that a collection
+    // passed in a self-call is evidence here as on the operator path
+    // (`namedLiteralSignatureType`).
     if (wildcardCallee) {
-      const assignedType = def.value.value?.type.type;
+      const assigned = def.value.value;
+      const assignedType =
+        assigned === undefined
+          ? undefined
+          : namedLiteralSignatureType(name, assigned);
       if (assignedType !== undefined)
         narrowArgsFromInferredSignature(assignedType, boxedOps);
     }

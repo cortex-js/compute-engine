@@ -63,6 +63,13 @@ describe('The Function-literal construction seam is the only builder', () => {
     // consumer that builds an arrow ITSELF (rather than delegating) is the
     // bypass this whole seam exists to prevent.
     const ALLOWED = [
+      // The canonical call builder's narrowing of a forwarding caller: when a
+      // caller forwards its own parameter to a callee held as a value whose
+      // body passes a collection to itself (the self-call collection
+      // evidence, user ruling 2026-10-08), the caller's parameter takes the
+      // callee's collection slot. It READS the callee's named signature
+      // through `namedLiteralSignatureType`; it never builds an arrow.
+      'compute-engine/boxed-expression/box.ts',
       'compute-engine/boxed-expression/boxed-function.ts',
       'compute-engine/boxed-expression/boxed-operator-definition.ts',
       // (The runtime effect channel, `effects-of.ts`, no longer appears here:

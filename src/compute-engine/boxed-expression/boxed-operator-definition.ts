@@ -30,6 +30,8 @@ import {
   EffectContractError,
   inferFunctionLiteralEffects,
   inferredCollectionParameterType,
+  namedLiteralSignatureType,
+  selfCallCollectionParameterTypes,
   wholeCollectionParameterType,
   signatureEffects,
   stripArrowEffects,
@@ -2130,6 +2132,16 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
           // not have.
           const restAt = restParameterIndex(params);
           const fixedParams = restAt < 0 ? params : params.slice(0, restAt);
+          // A call of the function to itself that passes a collection at a
+          // parameter's position is evidence that the parameter takes a
+          // whole collection (`selfCallCollectionParameterTypes`). It has
+          // one entry for each parameter in `fixedParams`.
+          const selfCallTypes = selfCallCollectionParameterTypes(
+            this.name,
+            params,
+            body,
+            boxedFn
+          );
           const signature: Type = {
             kind: 'signature',
             // A parameter slot is `unknown` unless the body's uses inferred a
@@ -2139,12 +2151,16 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
             // element-wise over it. Same rule, same helper as the literal's
             // own arrow (`functionLiteralSignatureType`). A parameter the body
             // consumes WHOLE (`Mean(xs)`) is lifted the same way, although its
-            // type admits a scalar (`wholeCollectionParameterType`).
+            // type admits a scalar (`wholeCollectionParameterType`). So is a
+            // parameter that a self-call gives a collection to. The literal's
+            // own arrow does not know the function's name, so only this
+            // signature reads the self-calls.
             ...(fixedParams.length > 0
               ? {
-                  args: fixedParams.map((p) => ({
+                  args: fixedParams.map((p, i) => ({
                     type:
                       inferredCollectionParameterType(p) ??
+                      selfCallTypes[i] ??
                       wholeCollectionParameterType(p, body) ??
                       'unknown',
                   })),
@@ -2155,6 +2171,28 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
           };
           return new BoxedType(signature, this.engine._typeResolver);
         });
+      } else if (
+        this._derivedSignature &&
+        isFunction(boxedFn) &&
+        boxedFn.operator === 'Function'
+      ) {
+        // The signature was derived from a literal with an annotation
+        // (`f(n: number, s) = …`, see `assignValueAsOperatorDef`). Its bare
+        // parameter slots are `unknown`, so the self-call evidence applies to
+        // them as in the inferred signature above. Without it, a bare `s`
+        // stayed a scalar slot here while the same function held as a value
+        // binds a list argument to `s` whole. An annotated slot keeps the
+        // type its author wrote (`namedLiteralSignatureType`).
+        const derived = this.signature.type;
+        const withEvidence = namedLiteralSignatureType(
+          this.name,
+          boxedFn,
+          derived
+        );
+        if (withEvidence !== derived)
+          this._setSignature(
+            () => new BoxedType(withEvidence, this.engine._typeResolver)
+          );
       }
 
       // Mark this operator definition as backed by a user-defined function
