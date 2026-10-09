@@ -1718,6 +1718,38 @@ describe('SUM', () => {
     ).toMatchInlineSnapshot(`4/5`);
   });
 
+  // The telescoping rule compares the body with its pattern as a rational
+  // function of the index, so other spellings of `1/(k(k+1))` land too.
+  it.each([
+    '\\sum_{k=1}^{b} \\frac{1}{k^2+k}',
+    '\\sum_{k=1}^{b} (\\frac{1}{k} - \\frac{1}{k+1})',
+  ])('should simplify the respelled telescoping sum %s', (input) => {
+    expect(ce.parse(input).simplify().toString()).toBe('b / (b + 1)');
+  });
+
+  // With an infinite upper bound the rule gives the limit of `n/(n+1)`,
+  // which is 1; substituting `n = +∞` gave `Indeterminate`.
+  it('should simplify the infinite telescoping sum to 1', () => {
+    expect(
+      ce.parse('\\sum_{k=1}^{\\infty} \\frac{1}{k(k+1)}').simplify().json
+    ).toEqual(1);
+    expect(
+      ce.parse('\\sum_{k=2}^{\\infty} \\frac{1}{k(k-1)}').simplify().json
+    ).toEqual(1);
+  });
+
+  it('should simplify the infinite telescoping sum of a float body to a float', () => {
+    const e = ce.parse('\\sum_{k=1}^{\\infty} \\frac{1.0}{k(k+1)}').simplify();
+    expect(e.isExact).toBe(false);
+    expect(e.re).toBeCloseTo(1, 12);
+  });
+
+  it('should simplify the infinite Wallis-like product to 1/2', () => {
+    expect(
+      ce.parse('\\prod_{k=2}^{\\infty} (1 - \\frac{1}{k^2})').simplify().json
+    ).toEqual(['Rational', 1, 2]);
+  });
+
   // Partial fractions / telescoping with k*(k-1): Sum(1/(k*(k-1)), [k, 2, n]) = (n-1)/n
   it('should simplify partial fractions 1/(k*(k-1))', () => {
     expect(

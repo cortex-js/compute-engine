@@ -1,5 +1,10 @@
 import type { Expression, RuleStep } from '../global-types.js';
 import { isFunction, isNumber, sym } from '../boxed-expression/type-guards.js';
+import {
+  hasInexactLiteral,
+  matchesRationalPattern,
+} from '../boxed-expression/rational-body.js';
+import { asFloat } from '../boxed-expression/float-result.js';
 
 /**
  * Sum simplification rules extracted from simplify-rules.ts.
@@ -515,67 +520,36 @@ export function simplifySum(x: Expression): RuleStep | undefined {
     }
   }
 
-  // Partial fractions / telescoping: Sum(1/(k*(k+1)), [k, 1, n]) → n/(n+1)
-  // Pattern: Divide with 1 over Multiply(k, k+1) or k*(k-1)
-  if (
-    isFunction(body, 'Divide') &&
-    body.op1.isSame(1) &&
-    body.op2.operator === 'Multiply' &&
-    isFunction(body.op2)
-  ) {
-    const denom = body.op2;
-    if (denom.ops.length === 2) {
-      const [d1, d2] = denom.ops;
-      // Check for k * (k+1) pattern with lower=1
-      if (lower.isSame(1)) {
-        const isKTimesKPlus1 =
-          (sym(d1) === index &&
-            d2.operator === 'Add' &&
-            isFunction(d2) &&
-            d2.ops.length === 2 &&
-            d2.ops.some((op) => sym(op) === index) &&
-            d2.ops.some((op) => op.isSame(1))) ||
-          (sym(d2) === index &&
-            d1.operator === 'Add' &&
-            isFunction(d1) &&
-            d1.ops.length === 2 &&
-            d1.ops.some((op) => sym(op) === index) &&
-            d1.ops.some((op) => op.isSame(1)));
-
-        if (isKTimesKPlus1) {
-          // n / (n + 1)
-          const n = upper;
-          const result = n.div(n.add(ce.One));
-          return { value: result, because: 'partial fractions (telescoping)' };
-        }
-      }
-
-      // Check for k * (k-1) pattern with lower=2: Sum(1/(k*(k-1)), [k, 2, n]) → (n-1)/n
-      if (lower.isSame(2)) {
-        const isKTimesKMinus1 =
-          (sym(d1) === index &&
-            d2.operator === 'Add' &&
-            isFunction(d2) &&
-            d2.ops.length === 2 &&
-            d2.ops.some((op) => sym(op) === index) &&
-            d2.ops.some((op) => op.isSame(-1))) ||
-          (sym(d2) === index &&
-            d1.operator === 'Add' &&
-            isFunction(d1) &&
-            d1.ops.length === 2 &&
-            d1.ops.some((op) => sym(op) === index) &&
-            d1.ops.some((op) => op.isSame(-1)));
-
-        if (isKTimesKMinus1) {
-          // (n - 1) / n
-          const n = upper;
-          const result = n.sub(ce.One).div(n);
-          return {
-            value: result,
-            because: 'partial fractions (telescoping k*(k-1))',
-          };
-        }
-      }
+  // Partial fractions / telescoping: Sum(1/(k·(k+1)), [k, 1, n]) → n/(n+1)
+  // and Sum(1/(k·(k−1)), [k, 2, n]) → (n−1)/n. The body is compared with
+  // the pattern as a rational function of the index
+  // (`matchesRationalPattern`), so `1/(k² + k)` and `1/k − 1/(k+1)` are
+  // recognized too, and a body with a pole or a `0/0` factor in the domain
+  // stays symbolic. An infinite upper bound gives the limit, 1, directly:
+  // substituting `n = +∞` into the finite form gives `∞/∞`. A float literal
+  // in the body gives a float.
+  if (lower.isSame(1) || lower.isSame(2)) {
+    const a = lower.re;
+    const pattern =
+      a === 1
+        ? ce.box(['Divide', 1, ['Multiply', index, ['Add', index, 1]]])
+        : ce.box(['Divide', 1, ['Multiply', index, ['Add', index, -1]]]);
+    if (matchesRationalPattern(body, pattern, index, a)) {
+      const n = upper;
+      const infinite = n.isInfinity === true && n.isPositive === true;
+      const exact = infinite
+        ? ce.One
+        : a === 1
+          ? n.div(n.add(ce.One))
+          : n.sub(ce.One).div(n);
+      const value = hasInexactLiteral(body) ? asFloat(exact.N()) : exact;
+      return {
+        value,
+        because:
+          a === 1
+            ? 'partial fractions (telescoping)'
+            : 'partial fractions (telescoping k*(k-1))',
+      };
     }
   }
 

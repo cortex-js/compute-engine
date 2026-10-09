@@ -191,6 +191,119 @@ describe('Logarithmic series Σ rᵏ/k = −ln(1−r)', () => {
   });
 });
 
+describe('Respelled bodies reach the closed form (evaluate route)', () => {
+  // The recognizers read one spelling of each body; an equivalent spelling
+  // is normalized to it first (`normalizedSeriesBody`, `library/utils.ts`).
+  test.each([
+    ['\\sum_{k=1}^{\\infty} \\frac{k}{k^3}', Math.PI ** 2 / 6],
+    ['\\sum_{k=1}^{\\infty} \\frac{1}{k\\cdot k}', Math.PI ** 2 / 6],
+    ['\\sum_{k=1}^{\\infty} \\frac{1}{(k+1)^2}', Math.PI ** 2 / 6 - 1],
+    ['\\sum_{k=1}^{\\infty} \\frac{1}{k^2+2k+1}', Math.PI ** 2 / 6 - 1],
+    ['\\sum_{k=2}^{\\infty} \\frac{1}{(k-1)^2}', Math.PI ** 2 / 6],
+    ['\\sum_{k=0}^{\\infty} \\frac{3^k}{6^k}', 2],
+    ['\\sum_{k=0}^{\\infty} \\frac{2^k}{3^k}', 3],
+    ['\\sum_{k=0}^{\\infty} \\frac{1}{2^{k+1}}', 1],
+    ['\\sum_{k=0}^{\\infty} \\frac{5}{2^{k+2}}', 2.5],
+    ['\\sum_{k=0}^{\\infty} \\frac{1}{\\Gamma(k+1)}', Math.E],
+    ['\\sum_{k=0}^{\\infty} \\frac{1}{4k^2+4k+1}', Math.PI ** 2 / 8],
+    ['\\sum_{k=1}^{\\infty} \\frac{1}{4k^2-4k+1}', Math.PI ** 2 / 8],
+    ['\\sum_{k=0}^{\\infty} \\frac{(-1)^k}{4k^2+4k+1}', 0.915965594177219],
+    ['\\sum_{k=1}^{\\infty} \\frac{(-1)^k k}{k^3}', -(Math.PI ** 2) / 12],
+    ['\\sum_{k=1}^{\\infty} \\frac{1}{k(k+1)}', 1],
+    ['\\sum_{k=1}^{\\infty} \\frac{1}{k^2+k}', 1],
+    ['\\sum_{k=1}^{\\infty} (\\frac{1}{k} - \\frac{1}{k+1})', 1],
+    ['\\sum_{k=3}^{\\infty} \\frac{1}{k(k+1)}', 1 / 3],
+    ['\\sum_{k=2}^{\\infty} \\frac{1}{k(k-1)}', 1],
+  ])('%s has a closed form', (input, expected) => {
+    const e = ce.parse(input).evaluate();
+    expect(e.operator).not.toBe('Sum');
+    expect(e.N().re).toBeCloseTo(expected, 12);
+  });
+
+  test('the shifted exponential series keeps its free variable', () => {
+    expect(
+      ce.parse('\\sum_{k=0}^{\\infty} \\frac{x^k}{\\Gamma(k+1)}').evaluate()
+        .json
+    ).toEqual(['Power', 'ExponentialE', 'x']);
+  });
+
+  test.each([
+    // A divergent ratio, spelled as a quotient of powers.
+    '\\sum_{k=0}^{\\infty} \\frac{6^k}{3^k}',
+    // The telescoping identity needs k ≥ 2; at k = 1 the body is 1/0.
+    '\\sum_{k=1}^{\\infty} \\frac{1}{k(k-1)}',
+    // A pole inside the domain.
+    '\\sum_{k=1}^{\\infty} \\frac{1}{(k-5)^2}',
+    // A 0/0 factor inside the domain that a cancellation would hide.
+    '\\sum_{k=1}^{\\infty} \\frac{k-5}{(k-5)k^2}',
+    // No closed form in the table.
+    '\\sum_{k=1}^{\\infty} \\frac{1}{k^2+1}',
+    '\\sum_{k=1}^{\\infty} \\frac{1}{k}',
+  ])('%s stays symbolic', (input) => {
+    expect(ce.parse(input).evaluate().operator).toBe('Sum');
+  });
+
+  test.each([
+    ['\\sum_{k=1}^{\\infty} \\frac{1}{k^2+2.0k+1}', Math.PI ** 2 / 6 - 1],
+    ['\\sum_{k=0}^{\\infty} \\frac{1}{4k^2+4.0k+1}', Math.PI ** 2 / 8],
+  ])('a float literal survives the normalization: %s', (input, expected) => {
+    const e = ce.parse(input).evaluate();
+    expect(isNumber(e) && !e.isExact).toBe(true);
+    expect(e.re).toBeCloseTo(expected, 12);
+  });
+
+  test('a denominator that only approximates a repeated factor is not rewritten', () => {
+    // k² + 2k + 1 + 10⁻¹⁰ is not (k + 1)²; every term is smaller than the
+    // shifted p-series would say.
+    expect(
+      ce
+        .parse(
+          '\\sum_{k=1}^{\\infty} \\frac{1}{k^2+2k+\\frac{10000000001}{10000000000}}'
+        )
+        .evaluate().operator
+    ).toBe('Sum');
+  });
+
+  test('a finite telescoping product with an impure body is not sampled', () => {
+    let calls = 0;
+    ce.declare('impureFactor', {
+      signature: '(integer) -> number',
+      pure: false,
+      evaluate: () => {
+        calls += 1;
+        return ce.number(1);
+      },
+    });
+    const e = ce
+      .parse('\\prod_{k=1}^{n} \\frac{k + \\operatorname{impureFactor}(k)}{k}')
+      .evaluate();
+    expect(e.operator).toBe('Product');
+    expect(calls).toBe(0);
+  });
+
+  test('a float literal in a telescoping body gives a float', () => {
+    const e = ce.parse('\\sum_{k=1}^{\\infty} \\frac{1.0}{k(k+1)}').evaluate();
+    expect(isNumber(e) && !e.isExact).toBe(true);
+    expect(e.re).toBeCloseTo(1, 12);
+  });
+
+  test.each([
+    ['\\prod_{k=1}^{n} \\frac{k^2+k}{k^2}', ['Add', 'n', 1]],
+    ['\\prod_{k=1}^{n} (1+\\frac{1}{k})', ['Add', 'n', 1]],
+    ['\\prod_{k=1}^{n} \\frac{k}{k+1}', ['Divide', 1, ['Add', 'n', 1]]],
+    ['\\prod_{k=1}^{n} \\frac{(k+1)^2}{k^2}', ['Power', ['Add', 'n', 1], 2]],
+  ])('finite telescoping product %s', (input, expected) => {
+    expect(ce.parse(input).evaluate().json).toEqual(expected);
+  });
+
+  test('a finite telescoping product with a 0/0 factor stays symbolic', () => {
+    expect(
+      ce.parse('\\prod_{k=1}^{n} \\frac{(k-3)(k+1)}{(k-3)k}').evaluate()
+        .operator
+    ).toBe('Product');
+  });
+});
+
 describe('Infinite product closed forms', () => {
   test('Π (1 − 1/k²) (k from 2) = 1/2', () => {
     expect(

@@ -109,6 +109,32 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
+### `evaluate()` of a finite Wallis-like product stays symbolic where `simplify()` has a closed form (OPEN, design decision — found 2026-10-09 by the survey of spelling-sensitive recognizers)
+
+`\prod_{k=2}^{n} (1 - \frac{1}{k^2})` is `(n+1)/(2n)` under `.simplify()`
+(`simplify-product.ts`, in every spelling of the body, because the pipeline
+simplifies the body first) and stays symbolic under `.evaluate()`. The
+evaluate route of a product with a symbolic bound has only the telescoping
+and factorial families (`symbolicProductClosedForm`, `library/utils.ts`).
+The engine keeps most symbolic-bound products unevaluated on purpose, so
+whether `evaluate()` should give this closed form too is a decision, not a
+bug. If yes, the rule moves to `symbolicProductClosedForm` and is compared
+algebraically with `sameRationalFunction`
+(`boxed-expression/rational-body.ts`), as the other families are.
+
+### `simplify()` of a `Sum` cancels a shared factor of its body, which hides a `0/0` term (OPEN, small, design — found 2026-10-09 by the review of the algebraic telescoping rule)
+
+`\sum_{k=1}^{n} \frac{k-4}{(k-4)k(k+1)}` has an undefined term at k = 4:
+`\sum_{k=1}^{10}` of it evaluates to `Indeterminate`. `.simplify()` gives
+`n/(n+1)`: the pipeline simplifies the body before the `Sum` rules see it
+again, and that simplification cancels `(k-4)/(k-4)` as it would anywhere.
+The telescoping rule itself declines such a body (`reducedRationalBody`
+checks the denominator as written for an integer root in the domain), but
+it never sees it. A fix would carry the domain of the index into the body
+simplification, or make the `Sum` and `Product` simplification keep the
+cancelled factors of a body as a side condition. The same applies to the
+`Product` rules.
+
 ### Asynchronous materialization walks a lazy view synchronously (OPEN, small — found 2026-10-08 by the listing of lazy elements)
 
 `Map(AsyncOnly, [1, 2]).evaluateAsync({ materialization: true })`, with

@@ -169,8 +169,11 @@ export function simplifyProduct(x: Expression): RuleStep | undefined {
     }
 
     if (hasOne && hasNegInvSq) {
-      // (n+1)/(2n)
+      // (n+1)/(2n); for an infinite upper bound its limit, 1/2, directly:
+      // substituting `n = +∞` into the finite form gives `∞/∞`.
       const n = upper;
+      if (n.isInfinity === true && n.isPositive === true)
+        return { value: ce.Half, because: 'Wallis-like product' };
       const result = ce.function('Divide', [
         ce.function('Add', [n, ce.One]),
         ce.function('Multiply', [ce.number(2), n]),

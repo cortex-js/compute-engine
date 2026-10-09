@@ -12,56 +12,6 @@ import { isNumber, isFunction, isSymbol } from './type-guards.js';
 export { totalDegree, maxDegree, lex, revlex } from './polynomial-degree.js';
 
 /**
- * Coefficient of a univariate (single variable) polynomial.
- *
- * The first element is a constant.
- * The second element is the coefficient of the variable.
- * The third element is the coefficient of the variable squared.
- * ...etc
- *
- * `3x^3 + 5x + √5 + 2` -> ['√5 + 2', 5, null, 3]
- *
- * If a coefficient does not apply (there are no corresponding term), it is `null`.
- *
- */
-export type UnivariateCoefficients = (null | Expression)[];
-export type MultivariateCoefficients = (null | (null | Expression)[])[];
-
-/**
- * Return a list of coefficient of powers of `vars` in `poly`,
- * starting with power 0.
- *
- * If `poly`  is not a polynomial, return `null`.
- */
-export function coefficients(
-  poly: Expression,
-  vars: string
-): UnivariateCoefficients | null;
-export function coefficients(
-  poly: Expression,
-  vars: string[]
-): MultivariateCoefficients | null;
-export function coefficients(
-  _poly: Expression,
-  _vars: string | string[]
-): UnivariateCoefficients | MultivariateCoefficients | null {
-  // Coefficient extraction is not implemented. Retain the existing empty
-  // coefficient table until callers can handle an explicit unsupported result.
-  return univariateCoefficients([[]]) ?? [[]];
-}
-
-/** If possible, attempt to return a UnivariateCoefficient.
- * If the coefficients really are multivariate, return `null` */
-function univariateCoefficients(
-  _coefs: UnivariateCoefficients | MultivariateCoefficients
-): UnivariateCoefficients | null {
-  // Multivariate-to-univariate conversion is not implemented.
-  const _result: UnivariateCoefficients = [];
-
-  return null;
-}
-
-/**
  * Return the sum of positive integer exponents for an expression.
  */
 function _getDegree(expr: Expression | undefined): number {

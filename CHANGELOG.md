@@ -20,6 +20,38 @@
 
 ### Issues Resolved
 
+- **`simplify()` of an infinite telescoping sum or Wallis-like product was
+  `Indeterminate`.** `\sum_{k=1}^{\infty} \frac{1}{k(k+1)}`,
+  `\sum_{k=2}^{\infty} \frac{1}{k(k-1)}` and
+  `\prod_{k=2}^{\infty} (1 - \frac{1}{k^2})` simplified to `Indeterminate`:
+  the rules substituted `n = +∞` into their finite closed forms `n/(n+1)`,
+  `(n-1)/n` and `(n+1)/(2n)`. They now give the limits, `1`, `1` and `1/2`.
+  `evaluate()` was unaffected and gives the same values.
+
+- **Closed forms of sums and products are recognized in every spelling of
+  the body.** The recognizers read one spelling of each body, so an
+  equivalent spelling stayed symbolic. The body is now compared with each
+  known pattern as a rational function of the index, and normalized before a
+  second attempt: its rational factors are reduced to lowest terms, a
+  denominator that is a power of one linear factor is spelled as the
+  recognizers expect (an integer root shifts the index, a half-integer root
+  gives `(2k + b)^s`), a quotient of powers with the same exponent is one
+  ratio, and `\Gamma(k+1)` is `k!`. Under `evaluate()`:
+  `\sum_{k=1}^{\infty} \frac{k}{k^3}` and `\frac{1}{k \cdot k}` are
+  `\pi^2/6`; `\sum_{k=1}^{\infty} \frac{1}{(k+1)^2}` and
+  `\frac{1}{k^2+2k+1}` are `\pi^2/6 - 1`;
+  `\sum_{k=0}^{\infty} \frac{3^k}{6^k}` is `2` and `\frac{1}{2^{k+1}}` is
+  `1`; `\sum_{k=0}^{\infty} \frac{1}{4k^2+4k+1}` is `\pi^2/8`;
+  `\sum_{k=0}^{\infty} \frac{x^k}{\Gamma(k+1)}` is `e^x`;
+  `\sum_{k=1}^{\infty} \frac{1}{k^2+k}` and `\frac{1}{k} - \frac{1}{k+1}`
+  are `1`; `\prod_{k=1}^{n} \frac{k^2+k}{k^2}` is `n + 1`. Under
+  `simplify()`, `\sum_{k=1}^{n} \frac{1}{k^2+k}` and
+  `\frac{1}{k} - \frac{1}{k+1}` are `n/(n+1)`. The comparison runs only for
+  a pure body whose denominator, as written, is zero at no integer index of
+  the domain: a pole or a `0/0` factor there (`\frac{k-5}{(k-5)k^2}` from
+  `k = 1`) keeps the sum symbolic, since the cancellation that proves the
+  equality would also remove it. A float literal in the body gives a float.
+
 - **The Wallis product evaluates to π in every spelling**
   ([#323](https://github.com/cortex-js/compute-engine/issues/323), reported by
   [314systems](https://github.com/314systems)).

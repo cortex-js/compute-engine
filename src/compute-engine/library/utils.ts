@@ -22,12 +22,16 @@ import {
 } from '../../common/type/utils.js';
 import { activeRollbackFrame } from '../inference-rollback.js';
 import { conditionalValue } from '../boxed-expression/conditional-value.js';
-import { togetherReduced } from '../boxed-expression/factor.js';
+import { asFloat } from '../boxed-expression/float-result.js';
+import { polynomialDegree } from '../boxed-expression/polynomials.js';
 import {
-  polynomialDegree,
-  polynomialGCD,
-} from '../boxed-expression/polynomials.js';
-import { isTransitivelyPure } from '../boxed-expression/transitive-purity.js';
+  hasInexactLiteral,
+  matchesRationalPattern,
+  rationalPartsAsWritten,
+  reducedRationalBody,
+  repeatedLinearFactor,
+  sameRationalFunction,
+} from '../boxed-expression/rational-body.js';
 import {
   bignumPreferred,
   collectBinderNames,
@@ -743,17 +747,31 @@ export function symbolicProductClosedForm(
   if (isSymbol(body) && body.symbol === index && lower.isSame(1))
     return ce.function('Factorial', [upper]);
 
-  // Telescoping product: body = h(k+1)/h(k).
-  const { num, den } = asSingleFraction(body, ce);
+  // Telescoping product: body = h(k+1)/h(k). The body is first reduced to
+  // lowest terms when that is safe (`(k² + k)/k²` is `(k + 1)/k`), and the
+  // shifted part is compared with the other as a rational function, so the
+  // spelling of `h` does not matter.
+  const from =
+    lower.isInteger && Number.isSafeInteger(lower.re) ? lower.re : -Infinity;
+  const reduced = reducedRationalBody(body, index, from);
+  const parts = reduced ? rationalPartsAsWritten(reduced) : undefined;
+  const { num, den } = parts
+    ? { num: parts[0], den: parts[1] }
+    : asSingleFraction(body, ce);
+  // A body the reduction declined (impure, not rational, a pole in the
+  // domain) is compared structurally only: the algebraic comparison
+  // evaluates its operands.
+  const same = (x: Expression, y: Expression): boolean =>
+    parts ? sameRationalFunction(x, y, index) : x.isSame(y);
   if (new Set(num.unknowns).has(index) && new Set(den.unknowns).has(index)) {
     // forward: den shifted by k→k+1 equals num ⇒ body = h(k+1)/h(k), h = den.
-    if (shiftIndex(den, index, ce).isSame(num))
+    if (same(shiftIndex(den, index, ce), num))
       return ce.function('Divide', [
         num.subs({ [index]: upper }),
         den.subs({ [index]: lower }),
       ]);
     // mirror: num shifted by k→k+1 equals den ⇒ body = h(k)/h(k+1), h = num.
-    if (shiftIndex(num, index, ce).isSame(den))
+    if (same(shiftIndex(num, index, ce), den))
       return ce.function('Divide', [
         num.subs({ [index]: lower }),
         den.subs({ [index]: upper }),
@@ -889,8 +907,22 @@ function geometricSumClosedForm(
   const r = negatedIndex
     ? ce.function('Divide', [ce.One, base]).evaluate()
     : base;
+  return geometricValue(coeff, r, n0, ce);
+}
 
-  // value = c·r^{n₀} / (1 − r)
+/**
+ * The value of the geometric series `Σ_{k=n₀}^∞ c·rᵏ = c·r^{n₀}/(1 − r)`,
+ * guarded by `|r| < 1` through the `conditionalValue` chokepoint: the bare
+ * value for a numeric ratio inside the unit disk, undefined for a numeric
+ * ratio outside it (the caller keeps the sum symbolic), and a `When` for a
+ * symbolic ratio.
+ */
+function geometricValue(
+  coeff: Expression,
+  r: Expression,
+  n0: number,
+  ce: ComputeEngine
+): Expression | undefined {
   const rPow = n0 === 0 ? ce.One : ce.function('Power', [r, ce.number(n0)]);
   const numerator = coeff.isSame(1)
     ? rPow
@@ -944,16 +976,38 @@ function decomposeSeriesBody(
   let linear: { b: number; s: number } | undefined = undefined;
   let factorialDen = false;
 
-  // `expr` is the exponent of a geometric factor: `k` or `k + m` (integer
-  // literal `m`). Returns `m`, or undefined if not of that shape.
-  const geometricShift = (expr: Expression): number | undefined => {
-    if (isSymbol(expr) && expr.symbol === index) return 0;
+  // `expr` is the exponent of a geometric factor: `±k` or `±k + m` (integer
+  // literal `m`). Returns the sign of the index and `m`, or undefined if
+  // not of that shape. A negated index is the reciprocal ratio: `2^(−k−1)`,
+  // the canonical form of `1/2^(k+1)`, is `(1/2)·(1/2)^k`.
+  const geometricShift = (
+    expr: Expression
+  ): { sign: 1 | -1; m: number } | undefined => {
+    const signedIndex = (e: Expression): 1 | -1 | undefined => {
+      if (isSymbol(e) && e.symbol === index) return 1;
+      if (isFunction(e, 'Negate') && isSymbol(e.op1) && e.op1.symbol === index)
+        return -1;
+      if (
+        isFunction(e, 'Multiply') &&
+        e.nops === 2 &&
+        e.op1.isSame(-1) &&
+        isSymbol(e.op2) &&
+        e.op2.symbol === index
+      )
+        return -1;
+      return undefined;
+    };
+    const bare = signedIndex(expr);
+    if (bare !== undefined) return { sign: bare, m: 0 };
     if (isFunction(expr, 'Add') && expr.nops === 2) {
-      const [a, b] = expr.ops;
-      if (isSymbol(a) && a.symbol === index && isNumber(b) && b.isInteger)
-        return b.re;
-      if (isSymbol(b) && b.symbol === index && isNumber(a) && a.isInteger)
-        return a.re;
+      for (const [a, b] of [
+        [expr.op1, expr.op2],
+        [expr.op2, expr.op1],
+      ] as const) {
+        const sign = signedIndex(a);
+        if (sign !== undefined && isNumber(b) && b.isInteger)
+          return { sign, m: b.re };
+      }
     }
     return undefined;
   };
@@ -999,6 +1053,13 @@ function decomposeSeriesBody(
       factorialDen = true;
       return true;
     }
+    // `Γ(k + 1)` is `k!`.
+    if (isFunction(f, 'Gamma')) {
+      if (!inDen || factorialDen) return false;
+      if (!ce.box(['Add', index, 1]).isSame(f.op1)) return false;
+      factorialDen = true;
+      return true;
+    }
     // A bare linear `2k + b` denominator is `(2k + b)^1` (the s = 1 case,
     // e.g. the Leibniz series `Σ (−1)ᵏ/(2k+1)`).
     if (inDen) {
@@ -1016,11 +1077,13 @@ function decomposeSeriesBody(
     if (isFunction(f, 'Power')) {
       const base = f.op1;
       const exp = f.op2;
-      // Geometric factor r^(k+m), index-free base.
+      // Geometric factor r^(±k+m), index-free base.
       if (!base.has(index)) {
-        const m = geometricShift(exp);
-        if (m === undefined) return false;
-        (inDen ? ratioDen : ratioNum).push(base);
+        const shift = geometricShift(exp);
+        if (shift === undefined) return false;
+        const { sign, m } = shift;
+        const reciprocal = sign < 0 !== inDen;
+        (reciprocal ? ratioDen : ratioNum).push(base);
         if (m !== 0)
           (inDen ? coeffDen : coeffNum).push(
             ce.function('Power', [base, ce.number(m)])
@@ -1203,6 +1266,11 @@ function namedSeriesClosedForm(
 
   if (ratio === undefined) return undefined;
 
+  // Geometric: c·rᵏ with the ratio assembled from several factors
+  // (`3ᵏ/6ᵏ`, `2^(−k−1)`); the single-power spelling is recognized earlier
+  // by `geometricSumClosedForm`.
+  if (kPower === 0) return geometricValue(coeff, ratio, a, ce);
+
   // First-moment geometric: c·k·rᵏ → c·r/(1−r)², valid for |r| < 1.
   if (kPower === 1 && (a === 0 || a === 1)) {
     const value = times(
@@ -1261,99 +1329,173 @@ export function infiniteSumClosedForm(
 
   if (isFunction(body, 'Add')) {
     const pieces: Expression[] = [];
+    let complete = true;
     for (const term of body.ops) {
       const cf = pSeriesClosedForm(term, index, lower, ce);
-      if (!cf) return undefined; // any piece without a closed form ⇒ stay symbolic
+      // A piece without a closed form: the sum is tried whole, below.
+      if (!cf) {
+        complete = false;
+        break;
+      }
       pieces.push(cf);
     }
-    return ce.function('Add', pieces, { form: 'structural' });
+    if (complete) return ce.function('Add', pieces, { form: 'structural' });
   }
 
-  return (
-    pSeriesClosedForm(body, index, lower, ce) ??
-    geometricSumClosedForm(body, index, lower, ce) ??
-    namedSeriesClosedForm(body, index, lower, ce)
-  );
+  const attempt = (b: Expression, from: Expression): Expression | undefined =>
+    pSeriesClosedForm(b, index, from, ce) ??
+    geometricSumClosedForm(b, index, from, ce) ??
+    namedSeriesClosedForm(b, index, from, ce) ??
+    rationalSumClosedForm(b, index, from, ce);
+
+  const direct = attempt(body, lower);
+  if (direct) return direct;
+
+  // The recognizers read one spelling of each body. A body spelled another
+  // way is normalized to that spelling and tried once more.
+  if (!lower.isInteger) return undefined;
+  const a = lower.re;
+  if (!Number.isSafeInteger(a)) return undefined;
+  const normalized = normalizedSeriesBody(body, index, a, ce);
+  if (!normalized || normalized.body.isSame(body)) return undefined;
+  const value = attempt(normalized.body, ce.number(normalized.lower));
+  if (!value) return undefined;
+  // The normalization rebuilds the body from exact parts; a float literal
+  // in the ORIGINAL body still makes the result a float.
+  return hasInexactLiteral(body) ? asFloat(value.N()) : value;
 }
 
 /**
- * The numerator and denominator of `expr` as a rational function of the
- * index, read from the expression AS WRITTEN: no factor is cancelled.
- * `(k − 5)(k² − 1) / ((k − 5)k²)` gives the numerator `(k − 5)(k² − 1)` and
- * the denominator `(k − 5)k²`, where `together()` would divide the common
- * factor out. The parts are built with `Multiply` and `Add` only, which
- * never introduce a division, so a common factor survives in both parts.
- * Returns undefined when `expr` is not a rational function (a radical, a
- * transcendental function, a non-integer exponent).
+ * Closed forms of infinite sums of a rational body that telescopes:
+ *   `Σ_{k=a}^∞ 1/(k(k+1)) = 1/a`         for a ≥ 1
+ *   `Σ_{k=a}^∞ 1/(k(k−1)) = 1/(a − 1)`   for a ≥ 2
+ * (partial fractions `1/k − 1/(k+1)`; the terms cancel in pairs and the
+ * tail tends to 0). The body is compared with each pattern as a rational
+ * function (`matchesRationalPattern`), so `1/(k² + k)` and `1/k − 1/(k+1)`
+ * are recognized too, under the guards of `reducedRationalBody` (pure, no
+ * pole or `0/0` in the domain). A float literal in the body gives a float.
  */
-function rationalPartsAsWritten(
-  expr: Expression,
+function rationalSumClosedForm(
+  body: Expression,
+  index: string,
+  lower: Expression,
   ce: ComputeEngine
-): [Expression, Expression] | undefined {
-  if (isNumber(expr) || isSymbol(expr)) return [expr, ce.One];
-  if (!isFunction(expr)) return undefined;
-  const parts = (e: Expression) => rationalPartsAsWritten(e, ce);
-  switch (expr.operator) {
-    case 'Negate': {
-      const p = parts(expr.op1);
-      return p && [ce.function('Negate', [p[0]]), p[1]];
-    }
-    case 'Add': {
-      // n₁/d₁ + n₂/d₂ = (n₁·d₂ + n₂·d₁) / (d₁·d₂)
-      let num = ce.Zero;
-      let den = ce.One;
-      for (const term of expr.ops) {
-        const p = parts(term);
-        if (!p) return undefined;
-        num = ce.function('Add', [
-          ce.function('Multiply', [num, p[1]]),
-          ce.function('Multiply', [p[0], den]),
-        ]);
-        den = ce.function('Multiply', [den, p[1]]);
-      }
-      return [num, den];
-    }
-    case 'Multiply': {
-      const nums: Expression[] = [];
-      const dens: Expression[] = [];
-      for (const factor of expr.ops) {
-        const p = parts(factor);
-        if (!p) return undefined;
-        nums.push(p[0]);
-        dens.push(p[1]);
-      }
-      return [ce.function('Multiply', nums), ce.function('Multiply', dens)];
-    }
-    case 'Divide': {
-      const n = parts(expr.op1);
-      const d = parts(expr.op2);
-      if (!n || !d) return undefined;
-      return [
-        ce.function('Multiply', [n[0], d[1]]),
-        ce.function('Multiply', [n[1], d[0]]),
-      ];
-    }
-    case 'Power': {
-      const base = parts(expr.op1);
-      const exponent = expr.op2;
-      if (!base || !isNumber(exponent) || !exponent.isInteger) return undefined;
-      const n = exponent.re;
-      if (!Number.isSafeInteger(n)) return undefined;
-      if (n === 0) return [ce.One, ce.One];
-      const [b0, b1] = n > 0 ? base : [base[1], base[0]];
-      const k = ce.number(Math.abs(n));
-      return [ce.function('Power', [b0, k]), ce.function('Power', [b1, k])];
-    }
-    default:
-      return undefined;
+): Expression | undefined {
+  if (!lower.isInteger) return undefined;
+  const a = lower.re;
+  if (!Number.isSafeInteger(a) || a < 1) return undefined;
+  const table: {
+    pattern: Expression;
+    minLower: number;
+    value: () => Expression;
+  }[] = [
+    {
+      pattern: ce.box(['Divide', 1, ['Multiply', index, ['Add', index, 1]]]),
+      minLower: 1,
+      value: () => ce.function('Divide', [ce.One, ce.number(a)]),
+    },
+    {
+      pattern: ce.box(['Divide', 1, ['Multiply', index, ['Add', index, -1]]]),
+      minLower: 2,
+      value: () => ce.function('Divide', [ce.One, ce.number(a - 1)]),
+    },
+  ];
+  for (const entry of table) {
+    if (a < entry.minLower) continue;
+    if (!matchesRationalPattern(body, entry.pattern, index, a)) continue;
+    const value = entry.value();
+    return hasInexactLiteral(body) ? asFloat(value.N()) : value;
   }
+  return undefined;
 }
 
-/** Does `expr` contain a number literal that is not exact (a float)? */
-function hasInexactLiteral(expr: Expression): boolean {
-  if (isNumber(expr)) return !expr.isExact;
-  if (!isFunction(expr)) return false;
-  return expr.ops.some(hasInexactLiteral);
+/**
+ * The body of a series rewritten into the spelling the recognizers read,
+ * with the lower bound that goes with it. The factors of the body that are
+ * rational in the index are combined and reduced to lowest terms
+ * (`k/k³ → k⁻²`, `(1/k − 1/(k+1)) → 1/(k(k+1))`), under the guards of
+ * `reducedRationalBody`; the other factors (`rᵏ`, `(−1)ᵏ`, `k!`) are kept.
+ * A denominator that is a power of one linear factor, `c·(k − r)^s`, is
+ * then spelled as the recognizers expect:
+ *   - integer `r`: the index is shifted, `Σ_{k=a} f(k − r)·g(k) =
+ *     Σ_{j=a−r} f(j)·g(j + r)`, so `1/(k+1)²` from 1 is `1/j²` from 2;
+ *   - half-odd `r` (`b = −2r` odd): `c·(k − r)^s = (c/2^s)·(2k + b)^s`, so
+ *     `1/(4k² + 4k + 1)` is `1/(2k + 1)²`.
+ * Undefined when the body has no rational factor, or the reduction is not
+ * safe.
+ */
+function normalizedSeriesBody(
+  body: Expression,
+  index: string,
+  lower: number,
+  ce: ComputeEngine
+): { body: Expression; lower: number } | undefined {
+  type Factor = { e: Expression; inDen: boolean };
+  const rational: Factor[] = [];
+  const other: Factor[] = [];
+  const collect = (e: Expression, inDen: boolean): void => {
+    if (isFunction(e, 'Multiply')) {
+      for (const f of e.ops) collect(f, inDen);
+      return;
+    }
+    if (isFunction(e, 'Divide')) {
+      collect(e.op1, inDen);
+      collect(e.op2, !inDen);
+      return;
+    }
+    const parts = rationalPartsAsWritten(e);
+    const isRational =
+      parts !== undefined &&
+      polynomialDegree(parts[0], index) >= 0 &&
+      polynomialDegree(parts[1], index) >= 0;
+    (isRational ? rational : other).push({ e, inDen });
+  };
+  collect(body, false);
+  if (rational.length === 0) return undefined;
+
+  const build = (factors: Factor[]): Expression => {
+    const nums = factors.filter((f) => !f.inDen).map((f) => f.e);
+    const dens = factors.filter((f) => f.inDen).map((f) => f.e);
+    const num = nums.length === 0 ? ce.One : ce.function('Multiply', nums);
+    if (dens.length === 0) return num;
+    return ce.function('Divide', [num, ce.function('Multiply', dens)]);
+  };
+
+  const reduced = reducedRationalBody(build(rational), index, lower);
+  if (!reduced) return undefined;
+  let rest = other.length === 0 ? undefined : build(other);
+  let normalized = reduced;
+  let shift = 0;
+
+  const parts = rationalPartsAsWritten(reduced);
+  if (parts && !parts[0].has(index) && polynomialDegree(parts[1], index) >= 1) {
+    const [num, den] = parts;
+    const linear = repeatedLinearFactor(den, index);
+    if (linear && Number.isInteger(2 * linear.r)) {
+      const { c, r, s } = linear;
+      if (Number.isInteger(r)) {
+        shift = -r;
+        normalized = ce.function('Divide', [
+          num,
+          ce.function('Multiply', [c, ce.box(['Power', index, s])]),
+        ]);
+        if (rest) rest = rest.subs({ [index]: ce.box(['Add', index, r]) });
+      } else {
+        normalized = ce.function('Divide', [
+          num,
+          ce.function('Multiply', [
+            ce.function('Divide', [c, ce.number(2 ** s)]),
+            ce.box(['Power', ['Add', ['Multiply', 2, index], -2 * r], s]),
+          ]),
+        ]);
+      }
+    }
+  }
+
+  const result = rest
+    ? ce.function('Multiply', [rest, normalized])
+    : normalized;
+  return { body: result, lower: lower + shift };
 }
 
 /**
@@ -1370,20 +1512,15 @@ function hasInexactLiteral(expr: Expression): boolean {
  * reciprocal value: `Π 4k²/(4k² − 1) = π/2` (GitHub issue #323). Returns
  * undefined when nothing matches (the caller keeps the product symbolic).
  *
- * The algebraic comparison is restricted to a body that is a rational
- * function of the index with no common factor between its numerator and
- * denominator as written. A common factor can hide a 0/0 factor at an
- * integer index (`(k − 5)(k² − 1) / ((k − 5)k²)` is undefined at k = 5),
- * and the cancellation that proves the equality would also remove the hole.
- * Such a body stays symbolic. A body with a float literal (`1 − 0.25/k²`)
+ * The algebraic comparison (`sameRationalFunction`,
+ * `boxed-expression/rational-body.ts`) is restricted to a pure rational
+ * body whose denominator, as written, is zero at no integer index of the
+ * domain. A zero there is a pole or a `0/0` factor
+ * (`(k − 5)(k² − 1) / ((k − 5)k²)` is undefined at k = 5), and the
+ * cancellation that proves the equality would also remove it. Such a body
+ * stays symbolic, as does an impure body (`k + Random()`), whose sampling
+ * would run its effects. A body with a float literal (`1 − 0.25/k²`)
  * numericizes: a float operand gives a float result, as everywhere else.
- *
- * Cost: the algebraic comparison (`togetherReduced` on the difference) can
- * take over 100 ms when it FAILS, so it only runs for a pattern that first
- * agrees with the body numerically at three sample index values. A product
- * that matches nothing pays a few substitutions and no algebra. The samples
- * evaluate the body, so an impure body (`k + Random()`) is not sampled and
- * stays symbolic unless it matches a pattern structurally.
  */
 export function infiniteProductClosedForm(
   body: Expression | undefined,
@@ -1465,54 +1602,22 @@ export function infiniteProductClosedForm(
   for (const entry of entries)
     if (entry.pattern.isSame(body)) return entry.value();
 
-  // The algebraic route is for a pure rational body with no common factor
-  // between numerator and denominator (see the function comment). The
-  // GCD test is conservative: a common factor with no integer root
-  // (`k² + 1`) also declines, and the product stays symbolic.
-  if (!isTransitivelyPure(body)) return undefined;
-  const parts = rationalPartsAsWritten(body, ce);
-  if (!parts) return undefined;
-  const [num, den] = parts;
-  if (polynomialDegree(num, index) < 0 || polynomialDegree(den, index) < 0)
-    return undefined;
-  if (polynomialDegree(polynomialGCD(num, den, index), index) !== 0)
-    return undefined;
+  // The algebraic route is for a pure rational body whose denominator, as
+  // written, is zero at no integer index in the domain (see the function
+  // comment): `reducedRationalBody` checks that and cancels.
+  const reduced = reducedRationalBody(body, index, a);
+  if (!reduced) return undefined;
 
-  // Numeric prefilter. Sample the body at three index values where no
-  // pattern is zero or singular (1 − 1/k² is 0 at k = 1), as machine floats.
-  // A pattern whose samples agree (direct or reciprocal) is a candidate for
-  // the algebraic check below; everything else is dismissed here cheaply.
-  const SAMPLES = [2, 3, 7];
-  const valueAt = (e: Expression, k: number): number | undefined => {
-    const v = e.subs({ [index]: ce.number(k) }).N();
-    if (!isNumber(v)) return undefined;
-    const x = v.re;
-    return Number.isFinite(x) && x !== 0 ? x : undefined;
-  };
-  const close = (x: number, y: number): boolean =>
-    Math.abs(x - y) <= 1e-9 * Math.max(1, Math.abs(x), Math.abs(y));
-  const bodySamples = SAMPLES.map((k) => valueAt(body, k));
-  if (bodySamples.some((x) => x === undefined)) return undefined;
-
-  // Two rational bodies are the same function of the index when their
-  // difference, put over a common denominator and cancelled, is zero.
-  const sameAs = (candidate: Expression, pattern: Expression): boolean =>
-    togetherReduced(ce.function('Subtract', [candidate, pattern])).isSame(0);
-
-  // A float literal in the body makes the result a float.
+  // A float literal in the body makes the result a float (`asFloat`: `.N()`
+  // alone keeps an integer value exact).
   const result = (value: Expression): Expression =>
-    hasInexactLiteral(body) ? value.N() : value;
+    hasInexactLiteral(body) ? asFloat(value.N()) : value;
 
-  const reciprocal = ce.function('Divide', [ce.One, body]);
+  const reciprocal = ce.function('Divide', [ce.One, reduced]);
   for (const entry of entries) {
-    const patternSamples = SAMPLES.map((k) => valueAt(entry.pattern, k));
-    if (patternSamples.some((x) => x === undefined)) continue;
-    const direct = patternSamples.every((x, i) => close(x!, bodySamples[i]!));
-    if (direct && sameAs(body, entry.pattern)) return result(entry.value());
-    const inverse = patternSamples.every((x, i) =>
-      close(x!, 1 / bodySamples[i]!)
-    );
-    if (inverse && sameAs(reciprocal, entry.pattern))
+    if (sameRationalFunction(reduced, entry.pattern, index))
+      return result(entry.value());
+    if (sameRationalFunction(reciprocal, entry.pattern, index))
       return result(entry.inverse());
   }
 
