@@ -444,3 +444,366 @@ describe('evaluatesOperands is declared on a lazy operator', () => {
     );
   });
 });
+
+// The audit of the lazy operators with a synchronous handler only (issue
+// #392, third part). An operator whose handler demands and evaluates every
+// held operand takes the `evaluatesOperands` route; one that evaluates only
+// some of its operands, or stops early, has an `evaluateAsync` twin that
+// shares its code with the synchronous handler.
+
+// A callback that is long for a collection operator: for the element `k`, the
+// sum has `200 k` terms.
+const SLOW_TERM = [
+  'Sum',
+  ['Divide', 1, ['Power', 'j', 2]],
+  ['Limits', 'j', 1, ['Multiply', 200, 'k']],
+];
+const SLOW_CALLBACK = ['Function', ['Less', SLOW_TERM, 0], 'k'];
+const SLOW_KEY = ['Function', ['Negate', SLOW_TERM], 'k'];
+const SLOW_ROWS = ['Range', 1, 5000];
+const FLOOR_SUM = ['Floor', ['Multiply', 100, SLOW_SUM]];
+
+describe('the audited operators yield and honour the abort signal', () => {
+  const ce = new ComputeEngine();
+
+  const abortsPromptly = async (expr: any) => {
+    const ac = new AbortController();
+    setTimeout(() => ac.abort(), 50);
+    let yielded = false;
+    setImmediate(() => {
+      yielded = true;
+    });
+    await expect(
+      ce.box(expr).evaluateAsync({ signal: ac.signal })
+    ).rejects.toMatchObject({ name: 'CancellationError' });
+    expect(yielded).toBe(true);
+  };
+
+  const cases: [string, any][] = [
+    // The flag route
+    ['Measurement(Sum, 0.1)', ['Measurement', SLOW_SUM, 0.1]],
+    ['PowerMod(Floor(Sum), 3, 7)', ['PowerMod', FLOOR_SUM, 3, 7]],
+    ['PowerModList(Floor(Sum), 1, 7)', ['PowerModList', FLOOR_SUM, 1, 7]],
+    ['ResidueClass(Floor(Sum), 7)', ['ResidueClass', FLOOR_SUM, 7]],
+    // The twins that evaluate one operand, or the operands in order
+    [
+      'Annotated(Sum, style)',
+      ['Annotated', SLOW_SUM, ['Dictionary', ['Tuple', "'color'", "'blue'"]]],
+    ],
+    ["Typed(Sum, 'real')", ['Typed', SLOW_SUM, "'real'"]],
+    ['Delimiter(Sum)', ['Delimiter', SLOW_SUM]],
+    ['Delimiter(Sequence(Sum, 1))', ['Delimiter', ['Sequence', SLOW_SUM, 1]]],
+    ['IsError(Sum)', ['IsError', SLOW_SUM]],
+    ['Simplify(Sum)', ['Simplify', SLOW_SUM]],
+    [
+      'Matrix([[Sum, 2], [3, 4]])',
+      ['Matrix', ['List', ['List', SLOW_SUM, 2], ['List', 3, 4]]],
+    ],
+    ["Quantity(Sum, 'm')", ['Quantity', SLOW_SUM, 'm']],
+    [
+      "UnitConvert(Quantity(Sum, 'm'), 'km')",
+      ['UnitConvert', ['Quantity', SLOW_SUM, 'm'], 'km'],
+    ],
+    // The twins that walk a collection, one element at a time
+    ['Any(xs, slow callback)', ['Any', SLOW_ROWS, SLOW_CALLBACK]],
+    [
+      'All(xs, slow callback)',
+      ['All', SLOW_ROWS, ['Function', ['Not', ['Less', SLOW_TERM, 0]], 'k']],
+    ],
+    ['MaxBy(xs, slow key)', ['MaxBy', SLOW_ROWS, SLOW_KEY]],
+    ['MinBy(xs, slow key)', ['MinBy', SLOW_ROWS, SLOW_KEY]],
+    ['ArgMax(xs, slow key)', ['ArgMax', SLOW_ROWS, SLOW_KEY]],
+    ['ArgMin(xs, slow key)', ['ArgMin', SLOW_ROWS, SLOW_KEY]],
+    [
+      'Reduce(xs, (a, k) => a + Sum, 0)',
+      ['Reduce', SLOW_ROWS, ['Function', ['Add', 'a', SLOW_TERM], 'a', 'k'], 0],
+    ],
+    [
+      'Fold((a, k) => a + Sum, 0, xs)',
+      ['Fold', ['Function', ['Add', 'a', SLOW_TERM], 'a', 'k'], 0, SLOW_ROWS],
+    ],
+  ];
+  for (const [name, expr] of cases)
+    test(name, async () => abortsPromptly(expr));
+});
+
+describe('the audited operators give the values of evaluate()', () => {
+  const small = [
+    'Sum',
+    ['Divide', 1, ['Power', 'k', 2]],
+    ['Limits', 'k', 1, 20],
+  ];
+  const addK = ['Function', ['Add', 'a', 'k'], 'a', 'k'];
+  const cases: [string, any][] = [
+    ['Measurement', ['Measurement', small, 0.1]],
+    ['PowerMod', ['PowerMod', ['Floor', ['Multiply', 100, small]], 3, 7]],
+    ['PowerMod, inert (modulus 0)', ['PowerMod', ['Add', 2, 3], 3, 0]],
+    ['PowerMod, symbolic', ['PowerMod', 'x', 3, 7]],
+    [
+      'PowerModList',
+      ['PowerModList', ['Floor', ['Multiply', 100, small]], 1, 7],
+    ],
+    ['PowerModList, inert', ['PowerModList', ['Add', 2, 3], 1, 'y']],
+    ['ResidueClass', ['ResidueClass', ['Floor', ['Multiply', 100, small]], 7]],
+    ['ResidueClass, symbolic', ['ResidueClass', ['Add', 'x', 1], 7]],
+    [
+      'Annotated',
+      ['Annotated', small, ['Dictionary', ['Tuple', "'color'", "'blue'"]]],
+    ],
+    ['Typed', ['Typed', small, "'real'"]],
+    ['Delimiter', ['Delimiter', small]],
+    ['Delimiter of a Sequence', ['Delimiter', ['Sequence', small, 1]]],
+    ['IsError', ['IsError', small]],
+    ['Simplify', ['Simplify', ['Add', small, 'x', ['Negate', 'x']]]],
+    [
+      'Simplify under an assumption',
+      ['Simplify', ['Sqrt', ['Power', 'x', 2]], ['Greater', 'x', 0]],
+    ],
+    ['Matrix', ['Matrix', ['List', ['List', small, 2], ['List', 3, 4]]]],
+    ['Quantity', ['Quantity', small, 'm']],
+    ['UnitConvert', ['UnitConvert', ['Quantity', small, 'm'], 'km']],
+    ['UnitConvert of a number', ['UnitConvert', 5, 'km']],
+    ['Any', ['Any', ['Range', 1, 5], ['Function', ['Equal', 'k', 3], 'k']]],
+    [
+      'Any, none',
+      ['Any', ['Range', 1, 5], ['Function', ['Equal', 'k', 9], 'k']],
+    ],
+    ['All', ['All', ['Range', 1, 5], ['Function', ['Less', 'k', 3], 'k']]],
+    ['All, empty', ['All', ['List'], ['Function', ['Less', 'k', 3], 'k']]],
+    ['MaxBy', ['MaxBy', ['List', 3, 1, 2], ['Function', ['Negate', 'k'], 'k']]],
+    ['MinBy', ['MinBy', ['List', 3, 1, 2], ['Function', ['Negate', 'k'], 'k']]],
+    ['ArgMax', ['ArgMax', ['List', 3, 1, 2]]],
+    ['ArgMin', ['ArgMin', ['List', 3, 1, 2]]],
+    ['Reduce', ['Reduce', ['Range', 1, 5], addK, 0]],
+    ['Reduce, no seed', ['Reduce', ['Range', 1, 5], 'Add']],
+    ['Fold', ['Fold', addK, small, ['Range', 1, 5]]],
+    ['Fold, empty', ['Fold', addK, ['Add', 1, 2], ['List']]],
+  ];
+  for (const [name, expr] of cases) {
+    for (const numeric of [false, true]) {
+      test(`${name}${numeric ? ', N' : ''}`, async () => {
+        const ce = new ComputeEngine();
+        const sync = ce
+          .box(expr)
+          .evaluate({ numericApproximation: numeric })
+          .toString();
+        const async_ = (
+          await ce.box(expr).evaluateAsync({ numericApproximation: numeric })
+        ).toString();
+        expect(async_).toBe(sync);
+      });
+    }
+  }
+
+  test('MemberCall: the resolved call is evaluated', async () => {
+    const ce = new ComputeEngine();
+    const expr = ce.parse('[3, 1, 2].Sort()');
+    expect((await expr.evaluateAsync()).toString()).toBe(
+      expr.evaluate().toString()
+    );
+  });
+});
+
+describe('the audited twins stop where the synchronous handler stops', () => {
+  const probed = () => {
+    const ce = new ComputeEngine();
+    const calls: number[] = [];
+    ce.declare('Probe', {
+      signature: '(number) -> number',
+      evaluate: ([x]) => {
+        calls.push(x.re);
+        return x;
+      },
+    } as never);
+    return { ce, calls };
+  };
+
+  const cases: [string, any, string][] = [
+    [
+      'Any stops at the first True',
+      ['Any', ['Range', 1, 5], ['Function', ['Equal', ['Probe', 'k'], 2], 'k']],
+      'True',
+    ],
+    [
+      'All stops at the first False',
+      ['All', ['Range', 1, 5], ['Function', ['Less', ['Probe', 'k'], 3], 'k']],
+      'False',
+    ],
+    // The unit stays as written: it is not evaluated.
+    ['Quantity does not evaluate its unit', ['Quantity', 2, ['Probe', 3]], ''],
+    [
+      'UnitConvert does not evaluate its target',
+      ['UnitConvert', ['Quantity', 2, 'm'], ['Probe', 3]],
+      '',
+    ],
+  ];
+  for (const [name, expr, expected] of cases)
+    test(name, async () => {
+      const a = probed();
+      const sync = a.ce.box(expr).evaluate();
+      const b = probed();
+      const async_ = await b.ce.box(expr).evaluateAsync();
+      expect(async_.toString()).toBe(sync.toString());
+      if (expected) expect(async_.toString()).toBe(`"${expected}"`);
+      expect(b.calls).toEqual(a.calls);
+    });
+
+  test('the elements after the decision are not visited', async () => {
+    const { ce, calls } = probed();
+    await ce
+      .box([
+        'Any',
+        ['Range', 1, 5],
+        ['Function', ['Equal', ['Probe', 'k'], 2], 'k'],
+      ])
+      .evaluateAsync();
+    expect(calls).toEqual([1, 2]);
+  });
+});
+
+describe('every lazy operator with a synchronous handler is accounted for', () => {
+  // The lazy operators that have a synchronous handler and neither an
+  // `evaluateAsync` twin nor `evaluatesOperands`, and that no other route
+  // covers (`selectsOperands`, `scoped`, `holdClass: 'quote'`). Each reads
+  // the structure of its operand, builds a definition or a binding, or hands
+  // the operand to a synchronous computation. Adding a lazy operator means
+  // deciding which of the three routes it takes, and adding it here if none.
+  const SYNCHRONOUS = new Set([
+    'About',
+    'Apart',
+    'Assign',
+    'Assume',
+    'Cancel',
+    'CoefficientList',
+    'Condition',
+    'Conforms',
+    'Declare',
+    'DeclareConformance',
+    'DeclareProtocol',
+    'DeclareSumType',
+    'DeclareType',
+    'DefineFunction',
+    'Denominator',
+    'Derivative',
+    'Discriminant',
+    'Distribute',
+    'DSolve',
+    'EvaluateAt',
+    'Expand',
+    'ExpandAll',
+    'Factor',
+    'FindFit',
+    'FindRoot',
+    'FlatMap',
+    'Function',
+    'Head',
+    'HoldValues',
+    'InterpolatingFunction',
+    'Interpret',
+    'InverseFunction',
+    'IsCompatibleUnit',
+    'IsSame',
+    'JacobianMatrix',
+    'Limit',
+    'Match',
+    'MatchesType',
+    'ND',
+    'NDSolve',
+    'NIntegrate',
+    'NLimit',
+    'Numerator',
+    'NumeratorDenominator',
+    'NumericApproximation',
+    'PartialFraction',
+    'Pipe',
+    'Polynomial',
+    'PolynomialDegree',
+    'PolynomialGCD',
+    'PolynomialQuotient',
+    'PolynomialRemainder',
+    'PolynomialRoots',
+    'Predicate',
+    'ReplaceAll',
+    'Residue',
+    'Resultant',
+    'RSolve',
+    'Rule',
+    'Same',
+    'Signature',
+    'Solve',
+    'Spread',
+    'Subscript',
+    'Symbol',
+    'Tail',
+    'Timing',
+    'Together',
+    'TrigExpand',
+    'TrigReduce',
+    'TrigToExp',
+    'Type',
+    'Unevaluated',
+    'UnitDimension',
+    'When',
+    'WithRandomSeed',
+  ]);
+
+  test('the set is exact', () => {
+    const ce = new ComputeEngine() as any;
+    const found: string[] = [];
+    for (
+      let scope = ce.context.lexicalScope;
+      scope !== undefined;
+      scope = scope.parent
+    )
+      for (const [name, def] of scope.bindings) {
+        const d = def.operator ?? def;
+        if (
+          d?.lazy === true &&
+          d.evaluate !== undefined &&
+          d.evaluateAsync === undefined &&
+          !d.evaluatesOperands &&
+          !d.selectsOperands &&
+          !d.scoped &&
+          d.holdClass !== 'quote'
+        )
+          found.push(name);
+      }
+    expect(found.sort()).toEqual([...SYNCHRONOUS].sort());
+  });
+
+  test('the operators with the flag, and the twins', () => {
+    const ce = new ComputeEngine();
+    const def = (name: string) => (ce.lookupDefinition(name) as any)?.operator;
+    for (const name of [
+      'IdenticallyEqual',
+      'Measurement',
+      'PowerMod',
+      'PowerModList',
+      'ResidueClass',
+    ]) {
+      expect(def(name).evaluatesOperands).toBe(true);
+      expect(def(name).evaluateAsync).toBeUndefined();
+    }
+    for (const name of [
+      'Annotated',
+      'Typed',
+      'Delimiter',
+      'IsError',
+      'Simplify',
+      'Matrix',
+      'Quantity',
+      'UnitConvert',
+      'MemberCall',
+      'Any',
+      'All',
+      'MaxBy',
+      'MinBy',
+      'ArgMax',
+      'ArgMin',
+      'Reduce',
+    ]) {
+      expect(def(name).evaluatesOperands).toBe(false);
+      expect(typeof def(name).evaluateAsync).toBe('function');
+    }
+  });
+});

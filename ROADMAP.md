@@ -1,6 +1,6 @@
 # Compute Engine — Roadmap
 
-**Last updated:** 2026-10-08.
+**Last updated:** 2026-10-09.
 
 This document tracks **remaining** work; an item leaves this file once it lands.
 Detail on completed work lives in git history, `CHANGELOG.md`, the linked source
@@ -170,23 +170,53 @@ it. What remains:
   `Sum`) compiles real. Found 2026-10-08 by the review of the real-lane
   ascription.
 
-### Some lazy heads and two forms of `N` still run their operands synchronously under `evaluateAsync` (OPEN, issue #392, found 2026-10-07)
+### Two forms of `N` and some lazy heads still run synchronously under `evaluateAsync` (OPEN, issue #392, found 2026-10-07)
 
 `N`, `Add`, `Multiply`, `Evaluate`, `ReleaseHold` and the four chainable
 relations `Equal`, `NotEqual`, `Less`, `LessEqual` have an asynchronous twin
 that evaluates the held operands with `evaluateAsync`, so a `Sum` under them
-yields and honours an abort signal. The decision for the other lazy operators
-with a synchronous handler (about 140) is made: an operator opts in with
+yields and honours an abort signal. An operator opts in with
 `evaluatesOperands` ("the handler demands and evaluates every held operand and
 reads nothing else of their structure"), and the asynchronous route then awaits
-each held operand in order and runs the handler on the values. A default for
-the whole class of operators that demand every operand is not safe:
-`Numerator`, `Denominator` and `Interpret` read the structure of the operand,
-and a handler that stops early (a chain at its first `False` pair) needs a
-twin of its own. The flag is set on `IdenticallyEqual`, and the application of
-a user function awaits its body statements and its arguments
-(`evaluateStatementsAsync()`), so `Less(Sum(1/k^2, k, 1, 400000), 2)` and
-`f(400000)` with `f(n) = Σ 1/k²` now yield. What remains:
+each held operand in order and runs the handler on the values; a handler that
+stops early, or evaluates only some of its operands, has a twin of its own. The
+lazy operators with a synchronous handler were audited one by one (2026-10-09):
+
+- Flag: `IdenticallyEqual`, `Measurement`, `PowerMod`, `PowerModList`,
+  `ResidueClass`.
+- Twin on the operand: `Annotated`, `Typed`, `Matrix`, `Quantity`,
+  `UnitConvert`, `IsError`, `Simplify`, `Delimiter`, `MemberCall`.
+- Twin on the walk of a collection (the generator of `evaluate()` driven by
+  `runAsync`, so it yields and honours the signal between two elements):
+  `Any`, `All`, `MaxBy`, `MinBy`, `ArgMax`, `ArgMin`, `Reduce` (and so `Fold`).
+  A callback that is itself long runs to its end first; an asynchronous
+  application of the callback (`ApplyOptions.awaitStatements`) would remove
+  that.
+- Left synchronous, by reason. They read the structure of an operand or build a
+  definition: `Numerator`, `Denominator`, `NumeratorDenominator`, `Interpret`,
+  `Head`, `Tail`, `Type`, `Signature`, `About`, `Symbol`, `Subscript`,
+  `Unevaluated`, `Function`, `Rule`, `Predicate`, `IsSame`, `Same`,
+  `MatchesType`, `Conforms`, `IsCompatibleUnit`, `UnitDimension`, `Spread`,
+  `Declare*`, `DefineFunction`, `Assume`, `Condition`. They transform an
+  operand symbolically: the polynomial heads, `Together`, `Apart`,
+  `PartialFraction`, `Cancel`, `Expand*`, `Factor`, `Distribute`, `TrigExpand`,
+  `TrigReduce`, `TrigToExp`, `ReplaceAll`, `Derivative`, `JacobianMatrix`,
+  `InverseFunction`. They hand a held function or expression to a synchronous
+  solver or quadrature: `Solve`, `DSolve`, `RSolve`, `FindRoot`, `FindFit`,
+  `NIntegrate`, `NLimit`, `Limit`, `Residue`, `ND`, `NDSolve`,
+  `InterpolatingFunction`, `EvaluateAt`. Their long step is that computation,
+  which an `await` between operands does not interrupt.
+- Left synchronous, with a longer operand plausible, and a design needed:
+  `Assign` (the right-hand side is evaluated in about ten branches, interleaved
+  with writes to the scope), `Pipe` (the topic is handed unevaluated to
+  `apply()`, and the shape of the stage decides how), `When` and `Match`
+  (conditional evaluation of a branch, with a large handler), `FlatMap` (its
+  materialization walks a lazy view without a generator), `Timing` (a wall-clock
+  measure that would include the yields), `WithRandomSeed` and `HoldValues`
+  (their frame, a seed or a value shield, cannot span an `await`), and
+  `NumericApproximation` (the marker of a lazy `Map`, evaluated per element).
+
+What remains:
 
 - The two forms of `N` that block: `N(x, p)` with `p` above the precision of
   the engine minus the guard digits (`p ≥ 17` on a default engine), and a goal
@@ -194,16 +224,7 @@ a user function awaits its body statements and its arguments
   engine, a global of the bignum library, for the time of the computation, and
   the raised precision cannot span an `await` while other evaluations run. A
   per-evaluation working precision would remove that limit.
-- The operators that have not been audited for the flag. Each handler has to be
-  read: it must demand every operand and evaluate it, and it must not read the
-  operand as written. The route accounts for two readings of the operand as
-  written (an operand that evaluates to `Missing` is handed over as written,
-  because its meaning can depend on the declared type of the operand; and
-  `.N()` keeps the synchronous handler, because a comparison near a tie
-  re-reads the operand to decide it exactly). `Greater` and `GreaterEqual`
-  have no handler of their own (they canonicalize to `Less` and `LessEqual`),
-  `IsSame` and `Same` compare structure, and the remaining relations are not
-  lazy.
+- The operators of the last list above.
 - A user function whose body is already suspended on this engine (a recursive
   body, or a second call of the literal from another evaluation) and one with
   a free symbol in an argument run synchronously, because the scope of the body

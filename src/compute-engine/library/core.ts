@@ -176,6 +176,7 @@ import {
   withDrawRollback,
   updateDef,
   boxBignumResult,
+  awaitedOperandOptions,
 } from '../boxed-expression/utils.js';
 import {
   checkTypeConstructorNamespace,
@@ -330,6 +331,44 @@ const ABSENCE_MARKERS: ReadonlySet<string> = new Set([
   'Missing',
   'Undefined',
 ]);
+
+/** The simplification of the evaluated operand `x` of `Simplify`, under the
+ * assumptions `assumptions` when given. */
+function simplifyUnder(
+  ce: ComputeEngine,
+  x: Expression,
+  assumptions: Expression | undefined
+): Expression | undefined {
+  if (assumptions === undefined) return x.simplify() ?? undefined;
+  // A `List`/`And`/`Set` bundles several assumptions; a bare predicate is
+  // one. Each is asserted in a temporary scope so the assumptions do not
+  // leak past this call.
+  const conjuncts =
+    isFunction(assumptions, 'List') ||
+    isFunction(assumptions, 'And') ||
+    isFunction(assumptions, 'Set')
+      ? [...assumptions.ops]
+      : [assumptions];
+  ce.pushScope();
+  try {
+    for (const a of conjuncts) ce.assume(a);
+    return x.simplify() ?? undefined;
+  } finally {
+    ce.popScope();
+  }
+}
+
+/** The operands of a `Delimiter` to evaluate: a leading `Sequence` or
+ * `Delimiter` stands for its own operands. */
+function delimitedOperands(
+  ops: ReadonlyArray<Expression>
+): ReadonlyArray<Expression> {
+  const op1 = ops[0];
+  return (op1.operator === 'Sequence' || op1.operator === 'Delimiter') &&
+    isFunction(op1)
+    ? flattenSequence(op1.ops)
+    : ops;
+}
 
 /** The `absence-marker-binding` error when `name` is an absence marker. */
 function absenceMarkerBindingError(
@@ -3632,21 +3671,25 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       evaluate: (ops, options) => {
         const ce = options.engine;
         if (ops.length === 0) return ce.Nothing;
-
-        const op1 = ops[0];
-
-        if (
-          (op1.operator === 'Sequence' || op1.operator === 'Delimiter') &&
-          isFunction(ops[0])
-        )
-          ops = flattenSequence(ops[0].ops);
-
+        ops = delimitedOperands(ops);
         if (ops.length === 1) return ops[0].evaluate(options);
 
         return ce._fn(
           'Tuple',
           ops.map((x) => x.evaluate(options))
         );
+      },
+      // The operands are awaited in order.
+      evaluateAsync: async (ops, options) => {
+        const ce = options.engine;
+        if (ops.length === 0) return ce.Nothing;
+        ops = delimitedOperands(ops);
+        const awaited = awaitedOperandOptions(options);
+        if (ops.length === 1) return ops[0].evaluateAsync(awaited);
+
+        const values: Expression[] = [];
+        for (const x of ops) values.push(await x.evaluateAsync(awaited));
+        return ce._fn('Tuple', values);
       },
     },
 
@@ -3968,6 +4011,9 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         return ce._fn('Annotated', [x, style]);
       },
       evaluate: ([x, _style], options) => x.evaluate(options),
+      // Only the annotated operand is evaluated, not the style.
+      evaluateAsync: ([x, _style], options) =>
+        x.evaluateAsync(awaitedOperandOptions(options)),
       // Annotated is transparent at run time; a custom compile handler could
       // lower it to its value: `compile: (args, compile) => compile(args[0])`.
     },
@@ -4026,6 +4072,9 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       },
       // Ascription is transparent at evaluation.
       evaluate: ([x], options) => x?.evaluate(options),
+      // Only the ascribed operand is evaluated, not the type.
+      evaluateAsync: ([x], options) =>
+        x?.evaluateAsync(awaitedOperandOptions(options)),
     },
 
     Object: {
@@ -7117,6 +7166,18 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         x !== undefined && errorValue(x.canonical.evaluate()) !== undefined
           ? ce.True
           : ce.False,
+      evaluateAsync: async ([x], options) => {
+        // Evaluated exactly, as on the synchronous route.
+        const value =
+          x === undefined
+            ? undefined
+            : await x.canonical.evaluateAsync(
+                awaitedOperandOptions(options, { numericApproximation: false })
+              );
+        return value !== undefined && errorValue(value) !== undefined
+          ? options.engine.True
+          : options.engine.False;
+      },
     },
 
     Evaluate: {
@@ -7353,25 +7414,22 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // performs for the other, reduce-not-evaluate transformers. The held
         // operand arrives UNBOUND, so `.canonical` first — `.evaluate()` on an
         // unbound expression does not resolve its operator definition.
-        const x = raw.canonical.evaluate();
-        const assumptions = ops[1];
-        if (assumptions === undefined) return x.simplify() ?? undefined;
-        // A `List`/`And`/`Set` bundles several assumptions; a bare predicate is
-        // one. Each is asserted in a temporary scope so the assumptions do not
-        // leak past this call.
-        const conjuncts =
-          isFunction(assumptions, 'List') ||
-          isFunction(assumptions, 'And') ||
-          isFunction(assumptions, 'Set')
-            ? [...assumptions.ops]
-            : [assumptions];
-        ce.pushScope();
-        try {
-          for (const a of conjuncts) ce.assume(a);
-          return x.simplify() ?? undefined;
-        } finally {
-          ce.popScope();
-        }
+        return simplifyUnder(ce, raw.canonical.evaluate(), ops[1]);
+      },
+      // The operand is evaluated with `evaluateAsync`; the simplification
+      // that follows is synchronous, in this evaluation's context.
+      evaluateAsync: async (ops, options) => {
+        const raw = ops[0];
+        if (raw === undefined) return undefined;
+        const x = await raw.canonical.evaluateAsync(
+          awaitedOperandOptions(options, { numericApproximation: false })
+        );
+        return runWithEvaluationEffects(
+          options.engine,
+          options.effects,
+          () => simplifyUnder(options.engine, x, ops[1]),
+          options._contextStack
+        );
       },
     },
 
