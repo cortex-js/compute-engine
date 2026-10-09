@@ -422,13 +422,19 @@ describe('HurwitzZeta at a non-positive integer order: the cost is bounded', () 
 });
 
 describe('HurwitzZeta at a non-positive integer order: the compiled JavaScript lane', () => {
-  test('a literal complex operand constant-folds to the same accurate value', () => {
+  // The JavaScript lowering of `HurwitzZeta` is real-only, like `Erf`,
+  // `Gamma` and `Zeta`. A literal operand that is certainly not real
+  // declines at compile time with `non-real-operand`, as it does for those
+  // heads. The constant fold does not rescue it: a fold whose value is
+  // complex on a node the lane analysis reads as real is refused, because an
+  // enclosing real lowering (`x + HurwitzZeta(-3, 1 + i)`) would otherwise
+  // add a `{re, im}` object to a number. The value is the interpreter's
+  // job (the `.N()` test above: 1/120 + i/2).
+  test('a literal complex operand declines at compile time, like every real-only head', () => {
     const expr = hurwitzZeta(-3, ['Complex', 1, 1]);
     const compiled = compile(expr);
-    expect(compiled.success).toBe(true);
-    const value = compiled.run() as { re: number; im: number };
-    expect(value.re).toBeCloseTo(1 / 120, 12);
-    expect(value.im).toBeCloseTo(0.5, 12);
+    expect(compiled.success).toBe(false);
+    expect(compiled.diagnostic?.code).toBe('non-real-operand');
   });
 
   test('a genuinely complex free variable declines to NaN, not a wrong value', () => {
