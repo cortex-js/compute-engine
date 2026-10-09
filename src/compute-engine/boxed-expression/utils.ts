@@ -2047,3 +2047,39 @@ export function awaitedOperandOptions(
     ...overrides,
   };
 }
+
+/**
+ * The partial result of a numeric fold, rounded to twice the working
+ * precision.
+ *
+ * The `add` and `mul` of a big decimal are exact: they keep every digit of
+ * the sum or product. A running sum of big floats whose exponents differ
+ * (`Sum(n^n, n, 1, k).N()`, terms from `10^0` to `10^6600`) then keeps a
+ * significand as wide as the exponent span, and a running product of big
+ * floats grows by one working precision per factor. Each step costs time
+ * proportional to the width, so the fold was quadratic in the number of
+ * terms: at k = 8000 the sum of `n^n` took more than ten seconds for a
+ * 31,225-digit accumulator where the answer has 21 digits.
+ *
+ * The rounding keeps one working precision of guard digits: a partial
+ * result rounded to exactly the working precision loses half a unit of the
+ * last place at each step, so a fold of k terms could be off by k/2 units,
+ * and a term below half a unit of the accumulator (`400` beside `10^23` at
+ * 21 digits) would be lost whole. With the guard digits the error of a fold
+ * of up to 10^20 steps stays below the digits the answer keeps, and the
+ * width of the accumulator is still a constant. The compensated summation
+ * of `addSumTerm` recovers what a rounding did lose, so a term cancelled by
+ * a later term of the opposite sign (`10^30 + 1 − 10^30`) is answered as the
+ * scalar `Add` answers it.
+ *
+ * Only a number literal holding a big float can have more digits than the
+ * precision: an exact value and a machine float are returned as they are, as
+ * is a symbolic partial result.
+ */
+export function roundedToWorkingPrecision(x: Expression): Expression {
+  if (!isNumber(x)) return x;
+  const value = x.numericValue;
+  if (typeof value === 'number') return x;
+  const rounded = value.roundToPrecision(2 * BigDecimal.precision);
+  return rounded === value ? x : x.engine.number(rounded);
+}

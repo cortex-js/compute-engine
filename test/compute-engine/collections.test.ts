@@ -1,5 +1,6 @@
 import { Expression } from '../../src/math-json/types.ts';
 import { ComputeEngine } from '../../src/compute-engine';
+import { BigDecimal } from '../../src/big-decimal';
 import { isTensor } from '../../src/compute-engine/boxed-expression/type-guards';
 import { engine, exprToString } from '../utils';
 
@@ -1882,17 +1883,46 @@ describe('OPERATIONS ON NON-INDEXED COLLECTIONS', () => {
   // answered -6 (`((nothing - 1) - 2) - 3`) where `Scan`'s last element is -4,
   // division 1/32 instead of 2, and a non-splicing reducer leaked the sentinel
   // into the result (`Power` → `Nothing^12`).
-  describe('Reduce, an element whose value needs an evaluation', () => {
-    // The compiled fast path (taken under `N()`) read `item.re`, which is
-    // NaN on `Ln(2)`, `Cos(1)` or `10^400` (a `Power`, not a literal), and
-    // folded the NaN: `Reduce([Ln(2), 1], Add).N()` was `NaN`. An element
-    // or a step whose double is not finite, or has underflowed to 0, hands
-    // the fold to the interpreted reducer, which folds in the numbers of
-    // the engine (21 digits here): `[10^400, 2]` gave `+oo`.
+  describe('Reduce under .N() on a 21-digit engine', () => {
+    // The compiled fast path folds in doubles, so it is taken at machine
+    // precision only. On the default engine (21 digits) the fold is
+    // interpreted and each step numericized in bignums: the digits are those
+    // of the engine, and a double overflow or underflow cannot happen
+    // (`[10^400, 2]` gave `+oo`, `[10^-400, 10^300]` gave `0`, and
+    // `[Ln(2), 1]` gave `NaN` because the double of `Ln(2)` was read without
+    // an evaluation).
+    //
+    // `BigDecimal.precision` is global and constructing an engine sets it;
+    // the shared `engine` of this file says 100 digits while the global is
+    // whatever the last constructed engine set. A fresh default engine keeps
+    // the two in step (21), and the precision is restored after.
+    let ce: ComputeEngine;
+    let saved: number;
+    beforeAll(() => {
+      saved = BigDecimal.precision;
+      ce = new ComputeEngine();
+    });
+    afterAll(() => {
+      BigDecimal.precision = saved;
+    });
     test.each([
-      [['List', ['Ln', 2], 1], 'Add', undefined, '1.6931471805599454'],
-      [['List', ['Cos', 1], 2], 'Add', undefined, '2.5403023058681398'],
-      [['List', ['Sqrt', 2], 2], 'Add', undefined, '3.414213562373095'],
+      [['List', ['Ln', 2], 1], 'Add', undefined, '1.69314718055994530942'],
+      // A seedless fold of one element is that element, numericized.
+      [['List', ['Ln', 2]], 'Add', undefined, '0.693147180559945309417'],
+      [
+        ['List', ['Rational', 1, 3]],
+        'Add',
+        undefined,
+        '0.333333333333333333333',
+      ],
+      [['List', ['Cos', 1], 2], 'Add', undefined, '2.5403023058681397174'],
+      [['List', ['Sqrt', 2], 2], 'Add', undefined, '3.4142135623730950488'],
+      [
+        ['List', ['Rational', 1, 3], 2],
+        'Add',
+        undefined,
+        '2.33333333333333333333',
+      ],
       [['List', ['Power', 10, 400], 2], 'Multiply', undefined, '2e+400'],
       [['List', ['Power', 10, 400], 2], 'Multiply', 1.5, '3e+400'],
       [['List', ['Power', 10, 400], 0], 'Multiply', undefined, '0'],
@@ -1900,7 +1930,7 @@ describe('OPERATIONS ON NON-INDEXED COLLECTIONS', () => {
         ['List', 'Pi', ['Power', 10, 400], -1],
         'Multiply',
         undefined,
-        '-3.141592653589793e+400',
+        '-3.14159265358979323846e+400',
       ],
       [
         ['List', ['Power', 10, -400], ['Power', 10, 300]],
@@ -1913,31 +1943,110 @@ describe('OPERATIONS ON NON-INDEXED COLLECTIONS', () => {
       async (xs, f, seed, result) => {
         const expr: Expression =
           seed === undefined ? ['Reduce', xs, f] : ['Reduce', xs, f, seed];
-        expect(engine.expr(expr).N().toString()).toBe(result);
+        expect(ce.expr(expr).N().toString()).toBe(result);
         expect(
           (
-            await engine
-              .expr(expr)
-              .evaluateAsync({ numericApproximation: true })
+            await ce.expr(expr).evaluateAsync({ numericApproximation: true })
           ).toString()
         ).toBe(result);
       }
     );
 
+    test('a rational sum stays exact under evaluate(), and is a 21-digit float under N()', () => {
+      // `a + 1/k` over Range(1, 5) is 137/60 under evaluate(); under .N() the
+      // interpreted fold rounds each step to the working precision of THIS
+      // engine (the shared `engine` of the file says 100 digits while the
+      // global precision is whatever the last constructed engine set).
+      const fold: Expression = [
+        'Reduce',
+        ['Range', 1, 5],
+        ['Function', ['Add', 'a', ['Divide', 1, 'k']], 'a', 'k'],
+        0,
+      ];
+      expect(ce.box(fold).evaluate().toString()).toBe('137/60');
+      expect(ce.box(fold).N().toString()).toBe('2.28333333333333333333');
+    });
+
+    test('N(Reduce(…), 30) gives thirty digits', () => {
+      expect(
+        ce
+          .expr(['N', ['Reduce', ['List', ['Ln', 2], 1], 'Add'], 30])
+          .evaluate()
+          .toString()
+      ).toBe('1.69314718055994530941723212146');
+    });
+  });
+
+  describe('Reduce under .N() at machine precision (the compiled fast path)', () => {
+    // `BigDecimal.precision` is global and constructing an engine sets it:
+    // the machine engine is made here and the precision restored after.
+    let m: ComputeEngine;
+    let saved: number;
+    beforeAll(() => {
+      saved = BigDecimal.precision;
+      m = new ComputeEngine({ precision: 'machine' });
+    });
+    afterAll(() => {
+      BigDecimal.precision = saved;
+    });
+
+    // The fast path read `item.re`, which is NaN on `Ln(2)` or `10^400` (a
+    // `Power`, not a literal), and folded the NaN. The element is evaluated
+    // once now.
+    test.each([
+      [['List', ['Ln', 2], 1], 'Add', '1.6931471805599454'],
+      [['List', ['Cos', 1], 2], 'Add', '2.5403023058681398'],
+      [['List', ['Sqrt', 2], 2], 'Add', '3.414213562373095'],
+      [['List', ['Power', 10, 400], 2], 'Multiply', '+oo'],
+    ] as [Expression, Expression, string][])(
+      'Reduce(%j, %j).N() is %s',
+      (xs, f, result) => {
+        expect(m.expr(['Reduce', xs, f]).N().toString()).toBe(result);
+      }
+    );
+
+    test('an exact integer beyond the double range is handed to the interpreted reducer', () => {
+      // The double of the first element is ∞; the exact literal is kept and
+      // the step runs interpreted: 1 / √(10^400) = 10^-200.
+      expect(
+        m
+          .box([
+            'Reduce',
+            ['List', { num: '1' + '0'.repeat(400) }, 1],
+            ['Function', ['Divide', 'b', ['Sqrt', 'a']], 'a', 'b'],
+          ])
+          .N()
+          .toString()
+      ).toBe('1e-200');
+    });
+
+    test('a seed that underflows is recovered from the exact fold', () => {
+      expect(
+        m
+          .box([
+            'Reduce',
+            ['List', ['Power', 10, 300]],
+            'Multiply',
+            ['Power', 10, -400],
+          ])
+          .N()
+          .toString()
+      ).toBe('1e-100');
+    });
+
     test('an element is evaluated once when the fast path hands over a step', () => {
       // The reducer's result is complex, so the fast path redoes the step
       // through the interpreted reducer: it receives the evaluated element,
       // not the element as written, which would run `Probe` again.
-      const ce = new ComputeEngine();
       const calls: number[] = [];
-      ce.declare('Probe', {
+      m.declare('Probe', {
         signature: '(number) -> number',
         evaluate: ([x]) => {
           calls.push(x.re);
           return x;
         },
       } as never);
-      const result = ce
+      const result = m
         .box([
           'Reduce',
           ['List', ['Probe', 1], ['Probe', 2]],
@@ -1955,8 +2064,18 @@ describe('OPERATIONS ON NON-INDEXED COLLECTIONS', () => {
     const DIV: Expression = ['Function', ['Divide', 'a', 'b'], 'a', 'b'];
     const POW: Expression = ['Function', ['Power', 'a', 'b'], 'a', 'b'];
 
-    // The interpreted path (`evaluate`) and the compiled fast path (`N`, which
-    // is the only route that takes it) must agree on every case.
+    // The interpreted path (`evaluate`, and `N` on this 21-digit engine) and
+    // the compiled fast path (`N` at machine precision, the only route that
+    // takes it) must agree on every case.
+    let m: ComputeEngine;
+    let saved: number;
+    beforeAll(() => {
+      saved = BigDecimal.precision;
+      m = new ComputeEngine({ precision: 'machine' });
+    });
+    afterAll(() => {
+      BigDecimal.precision = saved;
+    });
     test.each([
       // [name, collection, reducer, result]
       [
@@ -1981,6 +2100,7 @@ describe('OPERATIONS ON NON-INDEXED COLLECTIONS', () => {
           result
         );
         expect(engine.expr(['Reduce', xs, f]).N().toString()).toBe(result);
+        expect(m.expr(['Reduce', xs, f]).N().toString()).toBe(result);
       }
     );
 
@@ -2003,25 +2123,6 @@ describe('OPERATIONS ON NON-INDEXED COLLECTIONS', () => {
           .toString()
       ).toBe('-6');
     });
-  });
-
-  test('Fold rational sum stays exact under evaluate(), float under N()', () => {
-    // Regression: the compiled fast path folds with JS numbers and returns a
-    // float, violating the Evaluate-vs-N exactness contract. `a + 1/k` over
-    // Range(1,5) must stay exact (137/60) under evaluate(), and only numericize
-    // under .N().
-    const fold: Expression = [
-      'Reduce',
-      ['Range', 1, 5],
-      ['Function', ['Add', 'a', ['Divide', 1, 'k']], 'a', 'k'],
-      0,
-    ];
-    expect(engine.box(fold).evaluate().toString()).toMatchInlineSnapshot(
-      `137/60`
-    );
-    expect(engine.box(fold).N().toString()).toMatchInlineSnapshot(
-      `2.283333333333333`
-    );
   });
 
   test('Product of a complex-valued Map keeps imaginary parts', () => {

@@ -1,5 +1,23 @@
 ## Unreleased
 
+### Behavior Changes
+
+- **`Reduce(…).N()` folds in the numbers of the engine; the compiled double
+  fold is taken at machine precision only.** The compiled fast path of
+  `Reduce` folds in doubles (17 digits) at every precision, so on the default
+  engine (21 digits) `Reduce([Ln(2), 1], Add).N()` gave `1.6931471805599454`
+  where `Sum([Ln(2), 1]).N()` gives `1.69314718055994530942`, a 50-digit
+  engine got 17 digits too, `N(Reduce(…), 30)` gave 17, and a product past the
+  double range was `+oo` (`Reduce([10^400, 2], Multiply).N()`) where the engine
+  represents `2e+400`. On an engine that prefers bignums the fold is now
+  interpreted, with each step numericized in bignums: the digits are those of
+  the engine, `N(Reduce(…), 30)` gives thirty, and `Reduce([10^400, 2],
+  Multiply).N()` is `2e+400`. The cost is the per-element cost of the
+  interpreted path: a 2000-element fold takes about 270 ms on the default
+  engine where the double fold took 7 ms (the exact fold, then `.N()`, took
+  1.1 s). An engine constructed with `precision: 'machine'` keeps the double
+  fold, and `Sum`/`Product` have their own bignum folds.
+
 ### Issues Resolved
 
 - **An empty `Fold` or `Reduce` returns its initial value evaluated**
@@ -69,21 +87,17 @@
   value the body reads is not memoized. `evaluate()` is unchanged.
 
 - **`Reduce(…).N()` of an element whose value needs an evaluation is no longer
-  `NaN`, and a fold of doubles that overflows is finished in the numbers of the
-  engine.** The compiled fast path of `Reduce` (taken under `.N()`) read the
-  machine value of each element without evaluating it, which is `NaN` for
-  `Ln(2)`, `Cos(1)` or `10^400` (a `Power`, not a literal), and folded the
-  `NaN`: `Reduce([Ln(2), 1], Add).N()` was `NaN` where `evaluate()` gave
-  `1 + ln(2)`; it is now `1.6931471805599454`. The fast path folds with doubles
-  at every precision of the engine; when an element, a seed or a step is not a
-  finite double, or an element has underflowed to 0, the fold now continues on
-  the interpreted path, in the numbers of the engine:
-  `Reduce([10^400, 2], Multiply).N()` is `2e+400` where it was `+oo`, and
-  `Reduce([10^-400, 10^300], Multiply).N()` is `1e-100` where it was `0`. At
-  machine precision the float of the exact fold remains the last resort, and it
-  is now read when the exact fold is symbolic (`π`). The asynchronous twin of
-  `Reduce` awaits that fallback with the signal, registry and context stack of
-  its evaluation.
+  `NaN`.** The compiled fast path of `Reduce` read the machine value of each
+  element without evaluating it, which is `NaN` for `Ln(2)`, `Cos(1)` or
+  `10^400` (a `Power`, not a literal), and folded the `NaN`:
+  `Reduce([Ln(2), 1], Add).N()` was `NaN` where `evaluate()` gave `1 + ln(2)`;
+  it is `1.6931471805599454` at machine precision and
+  `1.69314718055994530942` on the default engine. An element that underflows
+  to 0 at machine precision (`10^-400`) is recovered from the exact fold like
+  an overflow: `Reduce([10^-400, 10^300], Multiply).N()` is `1e-100` where it
+  was `0`, and the exact fold is read as its float when it is symbolic
+  (`π`). The asynchronous twin of `Reduce` awaits that fallback with the
+  signal, registry and context stack of its evaluation.
 
 - **`evaluateAsync` yields under the remaining lazy operators that evaluate
   their operands**

@@ -163,12 +163,15 @@ import type {
 import { canonical } from '../boxed-expression/canonical-utils.js';
 import {
   awaitedOperandOptions,
+  bignumPreferred,
   declaredOperator,
   isOperatorDef,
   isValueDef,
   numericFromExactValue,
   numericFromExactValueAsync,
+  roundedToWorkingPrecision,
 } from '../boxed-expression/utils.js';
+import { isTransitivelyPure } from '../boxed-expression/transitive-purity.js';
 import { flatten } from '../boxed-expression/flatten.js';
 import {
   hasConstantTimeCount,
@@ -5115,15 +5118,22 @@ async function withExactFoldFallbackAsync(
  */
 function machineStep(
   ce: ComputeEngine,
-  item: Expression
+  item: Expression,
+  // The seed of the fold, already evaluated under the fold's options (it is
+  // evaluated once, `seed()`); `item` is then the seed as written.
+  evaluated?: Expression
 ): { value: Expression; re: number } {
-  let value = item;
-  let re = item.re;
-  if (Number.isNaN(re)) {
+  let value = evaluated ?? item;
+  let re = value.re;
+  if (evaluated === undefined && Number.isNaN(re)) {
     value = item.N();
     re = value.re;
   }
-  if (re === 0) {
+  // The exact value decides whether a double of 0 is an underflow. It is read
+  // only from a pure expression: an impure one (`Floor(Random())`) must not
+  // run a second time, and its fold is not recovered from the exact fold
+  // anyway (`numericFromExactValue` asks for purity too).
+  if (re === 0 && isTransitivelyPure(item)) {
     const exact = isNumber(item) ? item : item.evaluate();
     if (!(isNumber(exact) && exact.isSame(0))) {
       re = NaN;
@@ -5208,6 +5218,19 @@ const reduceEvaluate = <R>(
     return seedValue;
   };
 
+  // Under `.N()` each step, and a first element that seeds the fold, is
+  // numericized and rounded to the working precision, as the `Sum` and
+  // `Product` folds are (`roundedToWorkingPrecision`): a symbolic partial
+  // result (`π · 10^400`) is not a numeric answer, an exact rational grows
+  // with every step (`Reduce(Range(1, 2000), (a, k) ↦ a + 1/k²)` took 1.1 s
+  // as exact rationals), and the `mul` of two big decimals is exact, so a
+  // product of big floats grew by one digit per factor. An exact INTEGER
+  // stays exact under `.N()`, by the convention of the engine
+  // (`Multiply(3^100, 7^100).N()` is the exact integer, as `BoxedNumber.N()`
+  // keeps it), so an integer accumulator can grow.
+  const numeric = (r: Expression): Expression =>
+    numericApproximation ? roundedToWorkingPrecision(r.N()) : r;
+
   // The compiled fast path folds with JS numbers, so it always yields a
   // float. Under exact evaluation that violates the Evaluate-vs-N
   // exactness contract (e.g. `a + 1/k` over a Range would collapse the
@@ -5215,11 +5238,19 @@ const reduceEvaluate = <R>(
   // approximation, or when the inputs are already inexact (a float result
   // is then correct anyway). Otherwise fall through to the interpreted
   // path, which is contract-correct.
+  //
+  // A double has 17 digits, so the fast path is taken at MACHINE precision
+  // only. On an engine that prefers bignums (the default engine has 21
+  // digits), `.N()` promises the precision of the engine, and
+  // `N(Reduce(…), 30)` thirty digits: the interpreted path folds in the
+  // numbers of the engine, one `.N()` per step (`step` below), where the
+  // fast path gave 17 digits and `+oo` for `Reduce([10^400, 2], Multiply)`.
   const inputsInexact =
     numericApproximation || (isNumber(initial) && !initial.isExact);
 
   if (
     inputsInexact &&
+    !bignumPreferred(ce) &&
     // A SEEDLESS fold has no initial value to type-check: its seed is the
     // first element, covered by the collection check. (Testing `nothing`
     // against `real` used to make this whole branch unreachable without an
@@ -5241,7 +5272,7 @@ const reduceEvaluate = <R>(
       // The interpreted reducer, needed by the fast path too (below).
       const fInterp = applicable(fn);
       const stepInterp = (acc: Expression, x: Expression): Expression =>
-        fInterp([acc, x]) ?? absenceMarker(ce, collection);
+        numeric(fInterp([acc, x]) ?? absenceMarker(ce, collection));
       return drive(
         (function* () {
           // With an explicit initial value, fold it in from the start; do
@@ -5278,8 +5309,10 @@ const reduceEvaluate = <R>(
           for (const item of collection.each()) {
             empty = false;
             if (first && hasInitial) {
-              const start = seed();
-              accumulator = Number.isFinite(start.re) ? start.re : start;
+              // The seed takes the same reading as an element: an underflowed
+              // seed (`10^-400`) is NaN, so that the exact fold recovers it.
+              const { value, re } = machineStep(ce, initial!, seed());
+              accumulator = Number.isFinite(re) ? re : value;
             }
             if (first && !hasInitial) {
               const { value, re } = machineStep(ce, item);
@@ -5316,7 +5349,7 @@ const reduceEvaluate = <R>(
   // A reducer that produced no value is a computation failure: fold in
   // the marker rather than the erasure symbol.
   const step = (acc: Expression, x: Expression): Expression =>
-    f([acc, x]) ?? absenceMarker(ce, collection);
+    numeric(f([acc, x]) ?? absenceMarker(ce, collection));
 
   if (!hasInitial) {
     // SEEDLESS: seed with the FIRST element and fold from the second —
@@ -5333,7 +5366,7 @@ const reduceEvaluate = <R>(
       (function* (): Generator<Expression | undefined, Expression | undefined> {
         let acc: Expression | undefined = undefined;
         for (const x of collection.each()) {
-          acc = acc === undefined ? x : step(acc, x);
+          acc = acc === undefined ? numeric(x) : step(acc, x);
           yield acc;
         }
         if (enumerationDeclinedAfterWalk(collection, acc === undefined ? 0 : 1))
