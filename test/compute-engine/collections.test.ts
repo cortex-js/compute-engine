@@ -1882,6 +1882,74 @@ describe('OPERATIONS ON NON-INDEXED COLLECTIONS', () => {
   // answered -6 (`((nothing - 1) - 2) - 3`) where `Scan`'s last element is -4,
   // division 1/32 instead of 2, and a non-splicing reducer leaked the sentinel
   // into the result (`Power` → `Nothing^12`).
+  describe('Reduce, an element whose value needs an evaluation', () => {
+    // The compiled fast path (taken under `N()`) read `item.re`, which is
+    // NaN on `Ln(2)`, `Cos(1)` or `10^400` (a `Power`, not a literal), and
+    // folded the NaN: `Reduce([Ln(2), 1], Add).N()` was `NaN`. An element
+    // or a step whose double is not finite, or has underflowed to 0, hands
+    // the fold to the interpreted reducer, which folds in the numbers of
+    // the engine (21 digits here): `[10^400, 2]` gave `+oo`.
+    test.each([
+      [['List', ['Ln', 2], 1], 'Add', undefined, '1.6931471805599454'],
+      [['List', ['Cos', 1], 2], 'Add', undefined, '2.5403023058681398'],
+      [['List', ['Sqrt', 2], 2], 'Add', undefined, '3.414213562373095'],
+      [['List', ['Power', 10, 400], 2], 'Multiply', undefined, '2e+400'],
+      [['List', ['Power', 10, 400], 2], 'Multiply', 1.5, '3e+400'],
+      [['List', ['Power', 10, 400], 0], 'Multiply', undefined, '0'],
+      [
+        ['List', 'Pi', ['Power', 10, 400], -1],
+        'Multiply',
+        undefined,
+        '-3.141592653589793e+400',
+      ],
+      [
+        ['List', ['Power', 10, -400], ['Power', 10, 300]],
+        'Multiply',
+        undefined,
+        '1e-100',
+      ],
+    ] as [Expression, Expression, number | undefined, string][])(
+      'Reduce(%j, %j, %j).N() is %s',
+      async (xs, f, seed, result) => {
+        const expr: Expression =
+          seed === undefined ? ['Reduce', xs, f] : ['Reduce', xs, f, seed];
+        expect(engine.expr(expr).N().toString()).toBe(result);
+        expect(
+          (
+            await engine
+              .expr(expr)
+              .evaluateAsync({ numericApproximation: true })
+          ).toString()
+        ).toBe(result);
+      }
+    );
+
+    test('an element is evaluated once when the fast path hands over a step', () => {
+      // The reducer's result is complex, so the fast path redoes the step
+      // through the interpreted reducer: it receives the evaluated element,
+      // not the element as written, which would run `Probe` again.
+      const ce = new ComputeEngine();
+      const calls: number[] = [];
+      ce.declare('Probe', {
+        signature: '(number) -> number',
+        evaluate: ([x]) => {
+          calls.push(x.re);
+          return x;
+        },
+      } as never);
+      const result = ce
+        .box([
+          'Reduce',
+          ['List', ['Probe', 1], ['Probe', 2]],
+          ['Function', ['Add', 'a', 'x', 'ImaginaryUnit'], 'a', 'x'],
+          0,
+        ])
+        .N();
+      expect([result.re, result.im]).toEqual([3, 2]);
+      expect(calls).toEqual([1, 2]);
+    });
+  });
+
   describe('Reduce, seedless', () => {
     const SUB: Expression = ['Function', ['Subtract', 'a', 'b'], 'a', 'b'];
     const DIV: Expression = ['Function', ['Divide', 'a', 'b'], 'a', 'b'];
@@ -3469,7 +3537,10 @@ describe('THE MATERIALIZATION OPTION DESCRIBES THE RESULT, NOT THE OPERANDS', ()
     ce.declare('f', '(list) -> integer');
     ce.assign('f', ce.box(['Function', ['Length', 'x'], 'x']));
     expect(
-      ce.box(['f', ['Range', 1, 5000]]).evaluate({ materialization: true }).toString()
+      ce
+        .box(['f', ['Range', 1, 5000]])
+        .evaluate({ materialization: true })
+        .toString()
     ).toBe('5000');
     // A lift that reveals a lazy collection is broadcast over the whole
     // collection, not over its preview.
@@ -5859,9 +5930,7 @@ describe('SPAN CONSTRUCTORS: an infinite endpoint is extent, not a member', () =
 
   test('the element type does not leak the endpoint', () => {
     // Every member of `Range(1, +oo)` is a finite integer.
-    expect(String(ce2.expr(['Range', 1, OO]).type)).toBe(
-      'list<integer>'
-    );
+    expect(String(ce2.expr(['Range', 1, OO]).type)).toBe('list<integer>');
     // An `Interval` reports the same elements however far it reaches.
     expect(String(ce2.expr(['Interval', 0, OO]).type)).toBe('set<real>');
   });
@@ -6056,8 +6125,18 @@ describe('Length of an infinite collection', () => {
     ['Cycle', ['List', 1, 2]],
     ['Range', 1, 'PositiveInfinity'],
   ])('%j', (xs) => {
-    expect(ce.box(['Length', xs] as any).evaluate().toString()).toBe('+oo');
-    expect(ce.box(['Count', xs] as any).evaluate().toString()).toBe('+oo');
+    expect(
+      ce
+        .box(['Length', xs] as any)
+        .evaluate()
+        .toString()
+    ).toBe('+oo');
+    expect(
+      ce
+        .box(['Count', xs] as any)
+        .evaluate()
+        .toString()
+    ).toBe('+oo');
   });
 
   test('a collection whose size is not known stays unevaluated', () => {

@@ -167,6 +167,7 @@ import {
   isOperatorDef,
   isValueDef,
   numericFromExactValue,
+  numericFromExactValueAsync,
 } from '../boxed-expression/utils.js';
 import { flatten } from '../boxed-expression/flatten.js';
 import {
@@ -5075,6 +5076,63 @@ function withExactFoldFallback(
   );
 }
 
+/** The asynchronous form of {@link withExactFoldFallback}: the exact fold is
+ * the whole fold once more, and it runs after an `await`, so it is awaited
+ * with the signal, registry and context stack of this evaluation. */
+async function withExactFoldFallbackAsync(
+  options: EvaluateHandlerOptions,
+  folded: Expression | undefined
+): Promise<Expression | undefined> {
+  if (!options.numericApproximation || folded === undefined) return folded;
+  return (
+    (await numericFromExactValueAsync(
+      options.engine,
+      options.expression,
+      folded,
+      awaitedOperandOptions(options)
+    )) ?? folded
+  );
+}
+
+/**
+ * The element of one step on the compiled fast path of `Reduce`, and its
+ * double. `.re` reads a number literal, a constant and a radical without
+ * evaluation, but it is NaN on an expression whose value exists only once it
+ * is evaluated (`Ln(2)`, `Cos(1)`, `10^400`, or a symbol assigned such a
+ * value), and the fast path folded that NaN: `Reduce([Ln(2), 1], Add).N()` was
+ * `NaN`. Such an element is evaluated once; the evaluated element is also what
+ * the interpreted reducer receives when the fast path hands it the step, so an
+ * impure element (`Random()`) is not drawn twice.
+ *
+ * A double that is not finite (`10^400`) makes the fast path hand the step to
+ * the interpreted reducer, which folds in the numbers of the engine. A double
+ * of 0 for a value that is not zero (`10^-400`) has underflowed and would lose
+ * the value in silence (`[10^-400, 10^300]` folded to 0, not `1e-100`): it is
+ * reported as NaN, so that the step is handed over as well. When `.N()` itself
+ * underflowed (at machine precision `10^-400` is 0 there), the element is
+ * NaN, so that the fold ends NaN and `withExactFoldFallback` recovers the value
+ * from the exact fold.
+ */
+function machineStep(
+  ce: ComputeEngine,
+  item: Expression
+): { value: Expression; re: number } {
+  let value = item;
+  let re = item.re;
+  if (Number.isNaN(re)) {
+    value = item.N();
+    re = value.re;
+  }
+  if (re === 0) {
+    const exact = isNumber(item) ? item : item.evaluate();
+    if (!(isNumber(exact) && exact.isSame(0))) {
+      re = NaN;
+      if (isNumber(value) && value.isSame(0)) value = ce.NaN;
+    }
+  }
+  return { value, re };
+}
+
 /**
  * The evaluation of `Reduce(collection, fn, initial)`, before the machine
  * overflow check in the `Reduce` definition.
@@ -5206,19 +5264,35 @@ const reduceEvaluate = <R>(
           // still-numeric accumulator, and the fold stays interpreted
           // from there. The static result type cannot decide this
           // upstream: such a body types the wide `number`.
+          //
+          // A result that is a number but not finite is handed over the
+          // same way, and so is an element or a seed whose double is not
+          // finite (`machineStep`): doubles overflow where the numbers of
+          // the engine do not, so `Reduce([10^400, 2], Multiply).N()` gave
+          // `∞` on a 21-digit engine, which represents `2e+400`. At machine
+          // precision the interpreted fold overflows too, and the exact
+          // fold of `withExactFoldFallback` is the last resort.
           let accumulator: number | Expression = NaN;
           let first = true;
           let empty = true;
           for (const item of collection.each()) {
             empty = false;
-            if (first && hasInitial) accumulator = seed().re;
-            if (first && !hasInitial) accumulator = item.re;
-            else if (typeof accumulator === 'number') {
-              const next: unknown = compiled.run!(accumulator, item.re);
+            if (first && hasInitial) {
+              const start = seed();
+              accumulator = Number.isFinite(start.re) ? start.re : start;
+            }
+            if (first && !hasInitial) {
+              const { value, re } = machineStep(ce, item);
+              accumulator = Number.isFinite(re) ? re : value;
+            } else if (typeof accumulator === 'number') {
+              const { value, re } = machineStep(ce, item);
+              const next: unknown = Number.isFinite(re)
+                ? compiled.run!(accumulator, re)
+                : undefined;
               accumulator =
-                typeof next === 'number'
+                typeof next === 'number' && Number.isFinite(next)
                   ? next
-                  : stepInterp(ce.number(accumulator), item);
+                  : stepInterp(ce.number(accumulator), value);
             } else accumulator = stepInterp(accumulator, item);
             first = false;
             yield;
@@ -8623,7 +8697,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       ),
     // The same fold, suspended between time slices.
     evaluateAsync: async (ops, options) =>
-      withExactFoldFallback(
+      withExactFoldFallbackAsync(
         options,
         await reduceEvaluate(ops, options, (fold) =>
           runWalkAsync(fold, options)

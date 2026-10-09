@@ -1847,9 +1847,10 @@ export function numericFromExactValue(
   if (expression === undefined || !isTransitivelyPure(expression))
     return undefined;
   if (bignumPreferred(ce)) return undefined;
-  const exact = expression.evaluate();
+  // The exact fold can be symbolic (`-π · 10^400`): its float is the result.
+  const exact = expression.evaluate().N();
   if (!isNumber(exact) || exact.isNaN === true) return undefined;
-  return exact.N();
+  return exact;
 }
 
 /**
@@ -1869,13 +1870,15 @@ export async function numericFromExactValueAsync(
   if (expression === undefined || !isTransitivelyPure(expression))
     return undefined;
   if (bignumPreferred(ce)) return undefined;
-  const exact = await expression.evaluateAsync({
-    signal: options?.signal,
-    _effects: options?._effects,
-    _contextStack: options?._contextStack,
-  });
+  const exact = (
+    await expression.evaluateAsync({
+      signal: options?.signal,
+      _effects: options?._effects,
+      _contextStack: options?._contextStack,
+    })
+  ).N();
   if (!isNumber(exact) || exact.isNaN === true) return undefined;
-  return exact.N();
+  return exact;
 }
 
 /**

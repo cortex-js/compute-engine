@@ -563,12 +563,34 @@ describe('MACHINE NUMERIC VALUE OF A PRODUCT OVER A LIST', () => {
     ],
     [['Product', ['List', ['Power', 10, 400], 2]], '+oo'],
     [['Product', ['List', 1.5, 2]], '3'],
-  ])('%j .N() is %s', (expr, expected) => {
+    [['Reduce', ['List', ['Power', 10, 400], 0], 'Multiply'], '0'],
+    // The double of `10^-400` is 0: an underflow, recovered like an overflow.
+    [
+      ['Reduce', ['List', ['Power', 10, -400], ['Power', 10, 300]], 'Multiply'],
+      '1e-100',
+    ],
+    // The exact fold is symbolic (`π`); its float is the result.
+    [
+      [
+        'Reduce',
+        ['List', 'Pi', ['Power', 10, 400], ['Power', 10, -400]],
+        'Multiply',
+      ],
+      '3.141592653589793',
+    ],
+  ])('%j .N() is %s', async (expr, expected) => {
     expect(
       m
         .box(expr as never)
         .N()
         .toString()
+    ).toBe(expected);
+    // The asynchronous routes (`Product` in arithmetic.ts, the `Reduce` twin)
+    // take the same fallback.
+    expect(
+      (
+        await m.box(expr as never).evaluateAsync({ numericApproximation: true })
+      ).toString()
     ).toBe(expected);
   });
 });
