@@ -8,6 +8,8 @@ import type {
   BoxedOperatorDefinition,
   BoxedValueDefinition,
   DictionaryInterface,
+  EvaluateHandlerOptions,
+  EvaluateOptions,
   Scope,
 } from '../global-types.js';
 
@@ -2021,4 +2023,24 @@ export function withOwnHead<T extends Expression | undefined | null>(
     return xs.every((x, i) => x === e.ops[i]) ? e : ce._fn(e.operator, xs);
   };
   return rename(result) as T;
+}
+
+/**
+ * The options with which an `evaluateAsync` handler awaits one of its
+ * operands: the numeric request, the abort signal, and the registry and
+ * context stack of this evaluation, which the operand's own evaluation must
+ * continue after the handler has suspended.
+ */
+export function awaitedOperandOptions(
+  options: EvaluateHandlerOptions,
+  overrides?: Partial<EvaluateOptions>
+): Partial<EvaluateOptions> {
+  const { numericApproximation, signal, effects, _contextStack } = options;
+  return {
+    numericApproximation,
+    signal,
+    _effects: effects,
+    _contextStack,
+    ...overrides,
+  };
 }

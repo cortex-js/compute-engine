@@ -1353,6 +1353,8 @@ export const SETS_LIBRARY: SymbolDefinitions = {
       return reduced ?? ce._fn('ResidueClass', args);
     },
     // The operands are evaluated exactly, also under `.N()` (see `lazy`).
+    // Both operands are evaluated, and nothing else is read of them.
+    evaluatesOperands: true,
     evaluate: (ops, { engine: ce }) => {
       if (ops.length !== 2 || !ops.every((x) => x.isValid)) return undefined;
       const [k, n] = ops.map((x) => x.evaluate());

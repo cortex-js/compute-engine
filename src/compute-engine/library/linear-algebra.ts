@@ -65,7 +65,10 @@ import {
   isSymbol,
 } from '../boxed-expression/type-guards.js';
 import { asRational, toInteger } from '../boxed-expression/numerics.js';
-import { boxBignumResult } from '../boxed-expression/utils.js';
+import {
+  awaitedOperandOptions,
+  boxBignumResult,
+} from '../boxed-expression/utils.js';
 import { machineScaledNorm } from './utils.js';
 import { add } from '../boxed-expression/arithmetic-add.js';
 import { infinitePoint } from '../boxed-expression/infinite-point.js';
@@ -1891,6 +1894,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         BoxedType.forResult(matrix?.type, context.engine._typeResolver),
       canonical: canonicalMatrix,
       evaluate: (ops, options) => ops[0].evaluate(options),
+      // Only the matrix is evaluated, not the delimiters.
+      evaluateAsync: (ops, options) =>
+        ops[0].evaluateAsync(awaitedOperandOptions(options)),
     },
     // Vector is a specialized collection to represent a column vector.
     // ["Vector", a, b, c] is a shorthand for ["List", ["List", a], ["List", b], ["List", c]]

@@ -1,4 +1,10 @@
-import type { SymbolDefinitions, Expression } from '../global-types.js';
+import type {
+  SymbolDefinitions,
+  Expression,
+  IComputeEngine as ComputeEngine,
+} from '../global-types.js';
+import { runWithEvaluationEffects } from '../effects-registry.js';
+import { awaitedOperandOptions } from '../boxed-expression/utils.js';
 import {
   isSymbol,
   isString,
@@ -57,6 +63,68 @@ export function boxedToUnitExpression(expr: Expression): UnitExpression | null {
   return null;
 }
 
+/**
+ * The conversion of the evaluated `quantity` to the unit `targetUnitExpr`,
+ * shared by the synchronous and the asynchronous `UnitConvert` handlers.
+ */
+function convertQuantity(
+  ce: ComputeEngine,
+  quantity: Expression | undefined,
+  targetUnitExpr: Expression,
+  numericApproximation: boolean | undefined
+): Expression | undefined {
+  if (!quantity || !isFunction(quantity) || quantity.operator !== 'Quantity')
+    return undefined;
+
+  // A Measurement magnitude scales (nominal and error) by the conversion
+  // factor; unit conversion is affine, so the linear factor is
+  // `convert(1) − convert(0)` and the offset shifts the nominal only.
+  const magExpr = quantity.op1;
+  const magIsMeasurement = isMeasurement(magExpr);
+  const mag = magExpr.re;
+  if (!magIsMeasurement && mag === undefined) return undefined;
+
+  // Try simple symbol-based conversion first
+  const fromUnit = quantity.op2;
+  const fromSymbol = isSymbol(fromUnit) ? fromUnit.symbol : null;
+  const toSymbol = isSymbol(targetUnitExpr) ? targetUnitExpr.symbol : null;
+
+  if (fromSymbol && toSymbol) {
+    if (magIsMeasurement) {
+      const c0 = convertUnit(0, fromSymbol, toSymbol);
+      const c1 = convertUnit(1, fromSymbol, toSymbol);
+      if (c0 === null || c1 === null) return ce.error('incompatible-type');
+      const convertedMag = measurementAffine(ce, magExpr, c1 - c0, c0);
+      const r = ce._fn('Quantity', [convertedMag, ce.symbol(toSymbol)]);
+      return numericApproximation ? r.N() : r;
+    }
+    const converted = convertUnit(mag!, fromSymbol, toSymbol);
+    if (converted !== null)
+      return ce._fn('Quantity', [ce.number(converted), ce.symbol(toSymbol)]);
+    // If conversion returned null, units are incompatible
+    return ce.error('incompatible-type');
+  }
+
+  // Fall back to compound unit conversion
+  const fromUE = boxedToUnitExpression(fromUnit);
+  const toUE = boxedToUnitExpression(targetUnitExpr);
+  if (!fromUE || !toUE) return undefined;
+
+  if (magIsMeasurement) {
+    const c0 = convertCompoundUnit(0, fromUE, toUE);
+    const c1 = convertCompoundUnit(1, fromUE, toUE);
+    if (c0 === null || c1 === null) return ce.error('incompatible-type');
+    const convertedMag = measurementAffine(ce, magExpr, c1 - c0, c0);
+    const r = ce._fn('Quantity', [convertedMag, targetUnitExpr]);
+    return numericApproximation ? r.N() : r;
+  }
+
+  const converted = convertCompoundUnit(mag!, fromUE, toUE);
+  if (converted === null) return ce.error('incompatible-type');
+
+  return ce._fn('Quantity', [ce.number(converted), targetUnitExpr]);
+}
+
 export const UNITS_LIBRARY: SymbolDefinitions = {
   // Internal marker produced by the \mathrm/\text expression handler in
   // definitions-units.ts.  When juxtaposed with a number the
@@ -110,6 +178,22 @@ export const UNITS_LIBRARY: SymbolDefinitions = {
       const mag = numericApproximation ? ops[0].N() : ops[0].evaluate();
       return ce._fn('Quantity', [mag, ops[1]]);
     },
+    // Only the magnitude is evaluated, not the unit.
+    evaluateAsync: async (ops, options) => {
+      const { numericApproximation, engine: ce } = options;
+      // A leaf keeps its own `N()`, which reads its value through the
+      // ambient scope chain.
+      const mag =
+        numericApproximation && !isFunction(ops[0])
+          ? runWithEvaluationEffects(
+              ce,
+              options.effects,
+              () => ops[0].N(),
+              options._contextStack
+            )
+          : await ops[0].evaluateAsync(awaitedOperandOptions(options));
+      return ce._fn('Quantity', [mag, ops[1]]);
+    },
   },
 
   QuantityMagnitude: {
@@ -146,65 +230,26 @@ export const UNITS_LIBRARY: SymbolDefinitions = {
     },
     evaluate: (ops, { numericApproximation, engine: ce }) => {
       if (!ce) return undefined;
-      const quantity = ops[0]?.evaluate();
-      const targetUnitExpr = ops[1];
-      if (
-        !quantity ||
-        !isFunction(quantity) ||
-        quantity.operator !== 'Quantity'
-      )
-        return undefined;
-
-      // A Measurement magnitude scales (nominal and error) by the conversion
-      // factor; unit conversion is affine, so the linear factor is
-      // `convert(1) − convert(0)` and the offset shifts the nominal only.
-      const magExpr = quantity.op1;
-      const magIsMeasurement = isMeasurement(magExpr);
-      const mag = magExpr.re;
-      if (!magIsMeasurement && mag === undefined) return undefined;
-
-      // Try simple symbol-based conversion first
-      const fromUnit = quantity.op2;
-      const fromSymbol = isSymbol(fromUnit) ? fromUnit.symbol : null;
-      const toSymbol = isSymbol(targetUnitExpr) ? targetUnitExpr.symbol : null;
-
-      if (fromSymbol && toSymbol) {
-        if (magIsMeasurement) {
-          const c0 = convertUnit(0, fromSymbol, toSymbol);
-          const c1 = convertUnit(1, fromSymbol, toSymbol);
-          if (c0 === null || c1 === null) return ce.error('incompatible-type');
-          const convertedMag = measurementAffine(ce, magExpr, c1 - c0, c0);
-          const r = ce._fn('Quantity', [convertedMag, ce.symbol(toSymbol)]);
-          return numericApproximation ? r.N() : r;
-        }
-        const converted = convertUnit(mag!, fromSymbol, toSymbol);
-        if (converted !== null)
-          return ce._fn('Quantity', [
-            ce.number(converted),
-            ce.symbol(toSymbol),
-          ]);
-        // If conversion returned null, units are incompatible
-        return ce.error('incompatible-type');
-      }
-
-      // Fall back to compound unit conversion
-      const fromUE = boxedToUnitExpression(fromUnit);
-      const toUE = boxedToUnitExpression(targetUnitExpr);
-      if (!fromUE || !toUE) return undefined;
-
-      if (magIsMeasurement) {
-        const c0 = convertCompoundUnit(0, fromUE, toUE);
-        const c1 = convertCompoundUnit(1, fromUE, toUE);
-        if (c0 === null || c1 === null) return ce.error('incompatible-type');
-        const convertedMag = measurementAffine(ce, magExpr, c1 - c0, c0);
-        const r = ce._fn('Quantity', [convertedMag, targetUnitExpr]);
-        return numericApproximation ? r.N() : r;
-      }
-
-      const converted = convertCompoundUnit(mag!, fromUE, toUE);
-      if (converted === null) return ce.error('incompatible-type');
-
-      return ce._fn('Quantity', [ce.number(converted), targetUnitExpr]);
+      return convertQuantity(
+        ce,
+        ops[0]?.evaluate(),
+        ops[1],
+        numericApproximation
+      );
+    },
+    // Only the quantity is evaluated, not the target unit.
+    evaluateAsync: async (ops, options) => {
+      const { numericApproximation, engine: ce } = options;
+      if (!ce) return undefined;
+      const quantity = await ops[0]?.evaluateAsync(
+        awaitedOperandOptions(options, { numericApproximation: false })
+      );
+      return runWithEvaluationEffects(
+        ce,
+        options.effects,
+        () => convertQuantity(ce, quantity, ops[1], numericApproximation),
+        options._contextStack
+      );
     },
   },
 
