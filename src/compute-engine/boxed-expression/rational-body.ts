@@ -119,10 +119,13 @@ export function machineCoefficients(
  * Does the polynomial with machine coefficients `c` (constant term first)
  * have an integer root at or above `from`? Every root has an absolute value
  * at most `1 + max|cᵢ/cₙ|` (the Cauchy bound), so the integers from `from`
- * to that bound are tried with Horner's rule. A value within rounding of
- * zero counts as a root (conservative). Returns undefined when the bound
- * leaves more than 100 000 integers to try, when a bound is not a safe
- * integer, or for the zero polynomial, whose every integer is a root.
+ * to that bound are tried with Horner's rule, unless the coefficients are
+ * all of one sign and `from ≥ 0`, where there is no root to find. A value
+ * within rounding of zero counts as a root (conservative). Returns undefined when the bound
+ * leaves more than 10 000 000 integers to try (about 30 ms of Horner steps
+ * for a quadratic; `1/(k² + 10⁶)` is within the bound, `1/(k² − 10¹²)` is
+ * not), when a bound is not a safe integer, or for the zero polynomial,
+ * whose every integer is a root.
  */
 export function hasIntegerRootFrom(
   c: readonly number[],
@@ -131,6 +134,13 @@ export function hasIntegerRootFrom(
   let n = c.length - 1;
   while (n > 0 && c[n] === 0) n -= 1;
   if (n === 0) return c[0] === 0 ? undefined : false;
+  // Coefficients all of one sign (zeros aside) and a constant term other
+  // than 0: the polynomial has no root at or above 0, so none at or above
+  // a `from ≥ 0`, without a scan (`k² + 10¹³`).
+  if (from >= 0 && c[0] !== 0) {
+    const sign = Math.sign(c[0]);
+    if (c.every((a) => a === 0 || Math.sign(a) === sign)) return false;
+  }
   const lead = Math.abs(c[n]);
   let ratio = 0;
   for (let i = 0; i < n; i++) ratio = Math.max(ratio, Math.abs(c[i]) / lead);
@@ -139,7 +149,7 @@ export function hasIntegerRootFrom(
   // Past 2^53 the counter cannot advance by 1.
   if (!Number.isSafeInteger(top) || !Number.isSafeInteger(start))
     return undefined;
-  if (top - start > 100_000) return undefined;
+  if (top - start > 10_000_000) return undefined;
   for (let k = start; k <= top; k++) {
     let value = c[n];
     let scale = Math.abs(c[n]);

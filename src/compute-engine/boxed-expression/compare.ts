@@ -632,11 +632,18 @@ function eqImpl(
         );
       if (a.isNaN || b.isNaN) return false;
       if (a.isInfinity && b.isInfinity && a.sgn === b.sgn) return true;
-      // One side is (determinately) infinite and it is not the same infinity
-      // as the other: they are provably unequal.
-      if (a.isInfinity || b.isInfinity) return false;
-      // Finiteness could not be determined (e.g. an inert expression whose
-      // value did not resolve to a number). Don't assert a definitive `false`.
+      // Two infinities of different signs are provably unequal, and so are
+      // an infinity and a value known to be finite.
+      if (a.isInfinity && b.isInfinity) return false;
+      if (
+        (a.isInfinity && b.isFinite === true) ||
+        (b.isInfinity && a.isFinite === true)
+      )
+        return false;
+      // The finiteness of one side could not be determined (an expression
+      // whose value did not resolve to a number: a series whose convergence
+      // is not established, compared with `+∞`). Don't assert a definitive
+      // `false`.
       return undefined;
     }
 

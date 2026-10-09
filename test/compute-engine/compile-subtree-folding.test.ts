@@ -65,7 +65,9 @@ describe('COMPILE constant folding - whole expression', () => {
 
 describe('COMPILE constant folding - subtree inside a live expression', () => {
   it('folds the constant subtree, keeps the free variable live', () => {
-    const e = ce.parse('x + \\mathrm{Sum}(\\mathrm{Map}(\\_ \\mapsto \\_^2, 1..5))');
+    const e = ce.parse(
+      'x + \\mathrm{Sum}(\\mathrm{Map}(\\_ \\mapsto \\_^2, 1..5))'
+    );
     const r = compile(e);
     expect(r.code).toBe('_.x + 55');
     expect(r.run?.({ x: 1 })).toBe(56);
@@ -138,7 +140,11 @@ describe('COMPILE constant folding - constant collections', () => {
     // collection was refused on GLSL purely by a JavaScript source-size
     // number, even though `float[60](…)` is an ordinary array constructor.
     const many = (n: number) =>
-      ce.box(['Map', ['Function', ['Square', 'y'], 'y'], ['Range', 1, n]] as any);
+      ce.box([
+        'Map',
+        ['Function', ['Square', 'y'], 'y'],
+        ['Range', 1, n],
+      ] as any);
 
     expect(compile(many(60)).code).toContain('_SYS.rangeCount('); // JS: structural
     expect(compile(many(60), { to: 'glsl' }).code).toContain('float[60](');
@@ -149,9 +155,7 @@ describe('COMPILE constant folding - constant collections', () => {
     // it, which is the off-by-one the two-number arrangement invited.
     expect(compile(many(256), { to: 'glsl' }).code).toContain('float[256](');
     // Past that limit it declines, as its Range does.
-    expect(() =>
-      compile(many(257), { to: 'glsl', fallback: false })
-    ).toThrow();
+    expect(() => compile(many(257), { to: 'glsl', fallback: false })).toThrow();
   });
 
   it('the cap boundary matches the Range handler exactly', () => {
@@ -161,9 +165,9 @@ describe('COMPILE constant folding - constant collections', () => {
     expect(compile(ce.box(['At', MAP_SQUARES(49), 'k'] as any)).code).toContain(
       '_SYS.at(['
     );
-    expect(
-      compile(ce.box(['At', MAP_SQUARES(50), 'k'] as any)).code
-    ).toContain('_SYS.rangeCount(');
+    expect(compile(ce.box(['At', MAP_SQUARES(50), 'k'] as any)).code).toContain(
+      '_SYS.rangeCount('
+    );
   });
 
   it('a non-indexed collection (a Set) never folds — no defined order', () => {
@@ -343,9 +347,7 @@ describe('COMPILE constant folding - eligibility is deterministic', () => {
     const nested = new ComputeEngine();
     const outputs = new Set<string>();
     for (let i = 0; i < 5; i++) {
-      const r = compile(
-        nested.parse('\\int_0^1\\int_0^1 \\sin(xy)\\,dx\\,dy')
-      );
+      const r = compile(nested.parse('\\int_0^1\\int_0^1 \\sin(xy)\\,dx\\,dy'));
       expect(r.success).toBe(true);
       outputs.add(r.code as string);
     }
@@ -452,9 +454,9 @@ describe('COMPILE constant folding - eligibility is deterministic', () => {
     // nodes — the generic pricing let `Sum(Range(1, 1000000))` fold, taking
     // 1.07s, close enough to the anti-hang deadline that load could decide
     // the outcome again. The multiplying construct is the collection.
-    expect(compile(ce.box(['Sum', ['Range', 1, 1000000]] as any)).code).toContain(
-      '_SYS.range(1, 1000000, 1)'
-    );
+    expect(
+      compile(ce.box(['Sum', ['Range', 1, 1000000]] as any)).code
+    ).toContain('_SYS.range(1, 1000000, 1)');
     // A small one still folds — the form is priced, not refused.
     expect(compile(ce.box(['Sum', ['Range', 1, 50]] as any)).code).toBe('1275');
   });
@@ -499,7 +501,11 @@ describe('COMPILE constant folding - eligibility is deterministic', () => {
       'Sum',
       [
         'Take',
-        ['Map', ['Function', ['Square', 'y'], 'y'], ['Range', 1, { num: '+Infinity' }]],
+        [
+          'Map',
+          ['Function', ['Square', 'y'], 'y'],
+          ['Range', 1, { num: '+Infinity' }],
+        ],
         10,
       ],
     ] as any);
@@ -574,10 +580,12 @@ describe('COMPILE constant folding - declines', () => {
       ] as any);
       const r = compile(e);
       expect(r.code).not.toBe('50015001');
-      // The structural lowering's own non-finite trip-count guard then
-      // answers NaN at run time (its documented projection) — never the
-      // truncated partial sum.
-      expect(r.run?.()).toBeNaN();
+      expect(r.success).toBe(false);
+      // The run falls back to the interpreter, which certifies the
+      // divergence of `Σ i` and answers `+∞` — never the truncated partial
+      // sum. (Before the divergence certificate, the interpreter left the
+      // sum symbolic and the fallback projected it to NaN.)
+      expect(r.run?.()).toBe(Infinity);
     } finally {
       ce.forget('inftyBoundProbe');
     }

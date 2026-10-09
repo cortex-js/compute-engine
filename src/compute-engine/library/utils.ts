@@ -26,12 +26,17 @@ import { asFloat } from '../boxed-expression/float-result.js';
 import { polynomialDegree } from '../boxed-expression/polynomials.js';
 import {
   hasInexactLiteral,
+  hasIntegerRootFrom,
+  machineCoefficients,
   matchesRationalPattern,
   rationalPartsAsWritten,
   reducedRationalBody,
   repeatedLinearFactor,
   sameRationalFunction,
 } from '../boxed-expression/rational-body.js';
+import { isTransitivelyPure } from '../boxed-expression/transitive-purity.js';
+import { symbolicLimit } from '../symbolic/limit.js';
+import { implicitCompileNumeric } from '../implicit-compile.js';
 import {
   bignumPreferred,
   collectBinderNames,
@@ -1366,6 +1371,324 @@ export function infiniteSumClosedForm(
 }
 
 /**
+ * `+∞` or `−∞` when the series `Σ_{k=n₀}^{∞} f(k)` provably diverges to that
+ * infinity; `undefined` when it converges, when its divergence is not
+ * established, or when it has no value (an oscillating series such as
+ * `Σ (−1)^k`, or a term that is not a finite real number).
+ *
+ * The certificate is the limit comparison with the harmonic series. Let
+ * `L = lim_{k→∞} k·f(k)`. When `L > 0` or `L = +∞`, the terms are positive
+ * for every large `k` and `f(k) ≥ c/k` for some `c > 0`, so the sum is `+∞`
+ * because `Σ 1/k` is. When `L < 0` or `L = −∞`, the sum is `−∞`. `L = 0` is
+ * inconclusive (`Σ 1/k²` converges, `Σ 1/(k ln k)` diverges), and the sum
+ * stays symbolic.
+ *
+ * Three guards keep the verdict cheap and sound:
+ *
+ * - The body must be pure: the samples below evaluate it at indices the sum
+ *   never reaches, which must not be observable (`Σ (k + Random())` stays
+ *   symbolic).
+ * - A numeric prefilter samples `k·f(k)` at `k = 10³, 10⁴, 10⁵, 10⁶` and at
+ *   the odd neighbour `k + 1` of each (scaled up when `n₀` is larger), with
+ *   the compiled body. When a sample is not a number (`6^k/3^k` at
+ *   `k = 1000` is `∞/∞` in doubles), the nearer ladder `k = 10, 30, 100,
+ *   300` is tried instead; a ladder whose samples have both signs or decay
+ *   declines without a second try. The samples must be real, of one sign,
+ *   and not decaying, or the symbolic limit (which can cost hundreds of
+ *   milliseconds) is not run. The sign of the symbolic verdict must agree
+ *   with the samples.
+ * - Every term must be a finite real number, by the structure of the body
+ *   (`termsDefinedFrom`): each denominator has no zero at an integer at or
+ *   above `n₀`, and each root or logarithm has a positive argument there. A
+ *   body this proof does not cover (`1/(ln k − ln 1000)`, whose `k = 1000`
+ *   term is a division by zero) is not certified, whatever its samples say.
+ *
+ * `indexSymbol` is the bound index as it appears in `body` (the first operand
+ * of the `Limits`), so that the limit variable is that binding and not the
+ * library symbol of the same name.
+ */
+export function divergentInfiniteSum(
+  body: Expression,
+  indexSymbol: Expression,
+  lower: Expression,
+  ce: ComputeEngine
+): Expression | undefined {
+  const index = isSymbol(indexSymbol) ? indexSymbol.symbol : undefined;
+  if (!index) return undefined;
+  if (!lower.isInteger) return undefined;
+  const n0 = lower.re;
+  if (!Number.isSafeInteger(n0) || n0 < 0 || n0 > 10_000) return undefined;
+  if (body.unknowns.some((u) => u !== index)) return undefined;
+  if (!isTransitivelyPure(body)) return undefined;
+
+  // The machine value of `f(k)` from the compiled body: `±Infinity` for a
+  // value beyond the double range or at a pole, `NaN` for a complex or
+  // undefined value. Machine arithmetic keeps a sample cheap: `f(10⁶)` for
+  // `f(k) = k!` is an overflow in doubles where the exact `.N()` is a
+  // million bignum multiplications. A body that does not compile is not
+  // certified.
+  const compiled = implicitCompileNumeric(ce, body);
+  if (compiled === undefined) return undefined;
+  const termAt = (k: number): number => compiled({ [index]: k });
+
+  // Prefilter: `k·f(k)` at four large indices, and at the odd neighbour of
+  // each (a period-2 body such as `(−1)^k` has one sign on even indices),
+  // must be real, of one sign, and not decaying. When `L` is a number other
+  // than 0 the samples settle near `L`, and when `L = ±∞` they grow; a
+  // convergent series with monotone terms has `k·f(k) → 0`, and `Σ 1/k^p`
+  // with `p > 1` falls by a factor `10^{p−1}` per decade of `k`. The last
+  // sample must be at least a quarter of the first. `'nan'` reports a
+  // sample that is not a number (an overflow in doubles), `0` a ladder with
+  // samples of both signs, or that decays.
+  const sampleSign = (ladder: readonly number[]): number | 'nan' => {
+    let sign = 0;
+    let first = 0;
+    let last = 0;
+    for (const base of ladder) {
+      const k0 = Math.max(base, n0 * Math.max(1, base / 100));
+      for (const k of [k0, k0 + 1]) {
+        const scaled = k * termAt(k);
+        if (Number.isNaN(scaled)) return 'nan';
+        if (scaled === 0) return 0;
+        const s = Math.sign(scaled);
+        if (sign === 0) sign = s;
+        else if (s !== sign) return 0;
+        if (first === 0) first = Math.abs(scaled);
+        last = Math.abs(scaled);
+      }
+    }
+    return last >= first / 4 ? sign : 0;
+  };
+  let sign = sampleSign([1e3, 1e4, 1e5, 1e6]);
+  if (sign === 'nan') sign = sampleSign([10, 30, 100, 300]);
+  if (sign === 'nan' || sign === 0) return undefined;
+
+  // The symbolic limit of `k·f(k)` at `+∞`, read as a signed verdict.
+  const limit = symbolicLimit(
+    ce.function('Multiply', [indexSymbol, body]),
+    index,
+    ce.PositiveInfinity,
+    undefined,
+    ce
+  );
+  if (limit === undefined) return undefined;
+  let limitSign = 0;
+  if (limit.isInfinity === true) {
+    if (limit.isPositive === true) limitSign = 1;
+    else if (limit.isNegative === true) limitSign = -1;
+  } else {
+    const l = numericValueOf(limit);
+    if (l === undefined || l === 0) return undefined;
+    limitSign = Math.sign(l);
+  }
+  if (limitSign !== sign) return undefined;
+
+  // Every term must be a finite real number.
+  if (!termsDefinedFrom(body, index, n0)) return undefined;
+
+  return sign > 0 ? ce.PositiveInfinity : ce.NegativeInfinity;
+}
+
+/**
+ * The domain of a series index: the integers at or above `from`, at or
+ * below `to`, or all of them.
+ */
+type IndexDomain = { from: number } | { to: number } | 'all';
+
+/**
+ * Does the polynomial `poly` in `index`, with numeric coefficients, have an
+ * integer root in `domain`? `undefined` when the root scan of
+ * `hasIntegerRootFrom` is too long to run; `'not-polynomial'` when `poly`
+ * is not such a polynomial. A domain bounded above is reflected
+ * (`k → −k` negates the odd coefficients), so that the one scan serves both
+ * directions.
+ */
+function polynomialIntegerRootIn(
+  poly: Expression,
+  index: string,
+  domain: IndexDomain
+): boolean | undefined | 'not-polynomial' {
+  const c = machineCoefficients(poly, index);
+  if (!c) return 'not-polynomial';
+  if (domain === 'all') return hasIntegerRootFrom(c, -Infinity);
+  if ('from' in domain) return hasIntegerRootFrom(c, domain.from);
+  const reflected = c.map((a, i) => (i % 2 === 0 ? a : -a));
+  return hasIntegerRootFrom(reflected, -domain.to);
+}
+
+/**
+ * Every denominator of `expr`, as written: the second operand of each
+ * `Divide`, and the base of each `Power` with a negative integer exponent,
+ * at any depth.
+ */
+function denominatorsOf(expr: Expression): Expression[] {
+  const result: Expression[] = [];
+  const visit = (e: Expression): void => {
+    if (!isFunction(e)) return;
+    if (e.operator === 'Divide' && e.op2) result.push(e.op2);
+    if (
+      e.operator === 'Power' &&
+      isNumber(e.op2) &&
+      e.op2.isInteger &&
+      e.op2.re < 0
+    )
+      result.push(e.op1);
+    for (const op of e.ops) visit(op);
+  };
+  visit(expr);
+  return result;
+}
+
+/**
+ * Is `f(k)` a finite real number at every integer `k ≥ n0`, by the
+ * structure of `body`? A sufficient proof, from these rules:
+ *
+ * - A finite real number, a symbol with such a value (`Pi`), and the index
+ *   are defined. A sum, a product, a negation and the functions `Exp`,
+ *   `Sin`, `Cos`, `Sinh`, `Cosh`, `Tanh`, `Arctan`, `Abs` of defined
+ *   operands are defined.
+ * - `a / b` and `b^p` with a negative integer `p` need `b` nonvanishing:
+ *   a number other than 0; a polynomial with no integer root at or above
+ *   `n0` (`hasIntegerRootFrom`); a product of nonvanishing factors; `c^g`
+ *   with a number `c ≠ 0` (never zero, whatever `g`); `b^p` with a
+ *   nonvanishing `b` and a number `p`; `exp(x)`; `x!` of a defined
+ *   argument; `ln x` with `x ≥ 2` by the positivity rule.
+ * - `√x`, `x^p` with a number `p` that is not an integer, `c^g` with a
+ *   non-numeric exponent, and `ln x` need a positive argument: a number
+ *   `> 0`; a polynomial whose coefficients are all `≥ 0` with a positive
+ *   value at `n0` (it then grows with `k ≥ n0 ≥ 0`); a product of positive
+ *   factors; `exp(x)`, `√x` and `x!` of a defined (positive, for the root)
+ *   argument; `c^g` with `c > 0`; `b^p` with a positive `b` and a number
+ *   `p`; `ln x` with `x ≥ 2` by the polynomial rule (`ln(ln n)` from 2).
+ * - `x!` needs `x ≥ 0`: a polynomial whose coefficients are all `≥ 0`.
+ *
+ * Any other shape is not proved, and the series is not certified.
+ */
+function termsDefinedFrom(
+  body: Expression,
+  index: string,
+  n0: number
+): boolean {
+  const isIndex = (e: Expression) => isSymbol(e) && e.symbol === index;
+  const finiteNumber = (e: Expression): number | undefined => {
+    if (e.has(index)) return undefined;
+    return numericValueOf(e);
+  };
+  // `poly` evaluated at `n0`, when its coefficients are all at least 0 (so
+  // that it is positive at every `k ≥ n0` when it is positive at `n0`).
+  const nonNegativePolynomialAt = (poly: Expression): number | undefined => {
+    const c = machineCoefficients(poly, index);
+    if (!c || c.some((a) => a < 0)) return undefined;
+    let value = 0;
+    for (let i = c.length - 1; i >= 0; i--) value = value * n0 + c[i];
+    return value;
+  };
+  const positive = (e: Expression): boolean => {
+    const n = finiteNumber(e);
+    if (n !== undefined) return n > 0;
+    const at = nonNegativePolynomialAt(e);
+    if (at !== undefined) return at > 0;
+    if (!isFunction(e)) return false;
+    switch (e.operator) {
+      case 'Multiply':
+        return e.ops.every(positive);
+      case 'Exp':
+        return defined(e.op1);
+      case 'Sqrt':
+        return positive(e.op1);
+      case 'Power': {
+        const c = finiteNumber(e.op1);
+        if (c !== undefined) return c > 0 && defined(e.op2);
+        return finiteNumber(e.op2) !== undefined && positive(e.op1);
+      }
+      case 'Factorial':
+        return defined(e);
+      case 'Ln': {
+        // `ln x > 0` needs `x > 1`: `x ≥ 2` at `n0`, growing with `k`.
+        const arg = nonNegativePolynomialAt(e.op1);
+        return e.nops === 1 && arg !== undefined && arg >= 2;
+      }
+      default:
+        return false;
+    }
+  };
+  const nonvanishing = (e: Expression): boolean => {
+    const n = finiteNumber(e);
+    if (n !== undefined) return n !== 0;
+    if (polynomialIntegerRootIn(e, index, { from: n0 }) === false) return true;
+    if (!isFunction(e)) return false;
+    switch (e.operator) {
+      case 'Multiply':
+        return e.ops.every(nonvanishing);
+      case 'Negate':
+        return nonvanishing(e.op1);
+      case 'Power': {
+        const base = e.op1;
+        const exponent = e.op2;
+        const c = finiteNumber(base);
+        if (c !== undefined) return c !== 0 && defined(exponent);
+        return finiteNumber(exponent) !== undefined && nonvanishing(base);
+      }
+      case 'Sqrt':
+        return nonvanishing(e.op1);
+      case 'Exp':
+        return defined(e.op1);
+      case 'Factorial':
+        return defined(e);
+      case 'Ln': {
+        const at = nonNegativePolynomialAt(e.op1);
+        return at !== undefined && at >= 2;
+      }
+      default:
+        return false;
+    }
+  };
+  const defined = (e: Expression): boolean => {
+    if (isIndex(e)) return true;
+    if (finiteNumber(e) !== undefined) return true;
+    if (!isFunction(e)) return false;
+    switch (e.operator) {
+      case 'Add':
+      case 'Multiply':
+        return e.ops.every(defined);
+      case 'Negate':
+      case 'Subtract':
+      case 'Exp':
+      case 'Sin':
+      case 'Cos':
+      case 'Sinh':
+      case 'Cosh':
+      case 'Tanh':
+      case 'Arctan':
+      case 'Abs':
+        return e.ops.every(defined);
+      case 'Divide':
+        return defined(e.op1) && defined(e.op2) && nonvanishing(e.op2);
+      case 'Power': {
+        const base = e.op1;
+        const exponent = e.op2;
+        if (!defined(base) || !defined(exponent)) return false;
+        const p = finiteNumber(exponent);
+        if (p === undefined) return positive(base);
+        if (Number.isInteger(p)) return p >= 0 || nonvanishing(base);
+        return positive(base);
+      }
+      case 'Sqrt':
+        return defined(e.op1) && positive(e.op1);
+      case 'Ln':
+        return e.nops === 1 && defined(e.op1) && positive(e.op1);
+      case 'Factorial': {
+        const at = nonNegativePolynomialAt(e.op1);
+        return at !== undefined;
+      }
+      default:
+        return false;
+    }
+  };
+  return defined(body);
+}
+
+/**
  * Closed forms of infinite sums of a rational body that telescopes:
  *   `Σ_{k=a}^∞ 1/(k(k+1)) = 1/a`         for a ≥ 1
  *   `Σ_{k=a}^∞ 1/(k(k−1)) = 1/(a − 1)`   for a ≥ 2
@@ -1913,6 +2236,24 @@ export function acceleratedInfiniteSum(
   const walk = infiniteSeriesWalk(limits);
   if (walk === undefined) return undefined;
   const { index, termIndexAt, doubly } = walk;
+
+  // A polynomial denominator with a zero at an integer index of the domain
+  // makes the sum undefined. The walk below evaluates at most 2¹⁵ terms
+  // (`MAX_TERMS`), so a pole beyond them (`Σ_{k≥1} 1/(k² − 10¹²)`, pole at
+  // k = 10⁶) is never seen, and the extrapolation would return a finite
+  // number for a sum that has none. The domain follows the walk: upward
+  // from the lower bound, downward from the upper bound, or all integers. A
+  // denominator whose root scan is too long to run is not proved pole-free,
+  // and declines too.
+  const domain: IndexDomain = doubly
+    ? 'all'
+    : termIndexAt(1) > termIndexAt(0)
+      ? { from: termIndexAt(0) }
+      : { to: termIndexAt(0) };
+  for (const den of denominatorsOf(body)) {
+    const root = polynomialIntegerRootIn(den, index, domain);
+    if (root === true || root === undefined) return undefined;
+  }
 
   // Numeric value of the body at integer index `k` (real series only).
   const term = (k: number): number => {

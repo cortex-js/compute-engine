@@ -59,6 +59,24 @@ describe('a.isEqual(b)', () => {
   }
 });
 
+describe('a.isEqual(b) against an infinity', () => {
+  test('a finite value and an infinity are unequal', () => {
+    expect(ce.parse('5').isEqual(ce.PositiveInfinity)).toBe(false);
+    expect(ce.PositiveInfinity.isEqual(ce.NegativeInfinity)).toBe(false);
+    expect(ce.PositiveInfinity.isEqual(ce.PositiveInfinity)).toBe(true);
+  });
+
+  test('a value whose finiteness is unknown is undecided, not unequal', () => {
+    // `Σ (−1)^n` has no value: `.N()` leaves it symbolic, so neither its
+    // finiteness nor its sign is known. It used to compare `false` against
+    // `+∞` ("one side is infinite, so they differ"), a definitive answer
+    // for an undecided comparison (GitHub #326).
+    const oscillating = ce.parse('\\sum_{n=1}^\\infty (-1)^n');
+    expect(oscillating.isEqual(ce.PositiveInfinity)).toBeUndefined();
+    expect(ce.PositiveInfinity.isEqual(oscillating)).toBeUndefined();
+  });
+});
+
 describe('a.isIdenticallyEqual(b) — free-variable identities', () => {
   for (const test of IDENTITIES) {
     const [a, b] = test;

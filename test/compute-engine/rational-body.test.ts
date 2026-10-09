@@ -46,7 +46,16 @@ describe('hasIntegerRootFrom', () => {
   });
 
   test('a bound past 2^53 is declined', () => {
-    expect(hasIntegerRootFrom([2 ** 53, 1], 2 ** 53 - 1)).toBeUndefined();
+    // Mixed signs, so that the one-sign rule does not answer first.
+    expect(hasIntegerRootFrom([-(2 ** 53), 1], 2 ** 53 - 1)).toBeUndefined();
+  });
+
+  test('coefficients of one sign have no root at or above 0 without a scan', () => {
+    expect(hasIntegerRootFrom([2 ** 53, 1], 2 ** 53 - 1)).toBe(false);
+    expect(hasIntegerRootFrom([1e13, 0, 1], 1)).toBe(false);
+    expect(hasIntegerRootFrom([-1e13, 0, -1], 0)).toBe(false);
+    // A negative `from` still needs the scan (`k + 2` is zero at −2).
+    expect(hasIntegerRootFrom([2, 1], -5)).toBe(true);
   });
 
   test('the zero polynomial and a constant', () => {

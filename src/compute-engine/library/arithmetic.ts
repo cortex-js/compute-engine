@@ -203,6 +203,7 @@ import {
   symbolicSumClosedForm,
   symbolicProductClosedForm,
   infiniteSumClosedForm,
+  divergentInfiniteSum,
   infiniteProductClosedForm,
   acceleratedInfiniteSum,
   acceleratedInfiniteProduct,
@@ -10774,7 +10775,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         }
         if (mode === 'numeric' && !numeric) {
           if (rest.length === 1)
-            return infiniteSumClosedForm(first, rest[0], engine);
+            return (
+              infiniteSumClosedForm(first, rest[0], engine) ??
+              divergentInfiniteSumN(first, rest[0], engine)
+            );
           return undefined;
         }
         // Infinite domain under `.N()`: accelerate with Richardson
@@ -10783,6 +10787,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           if (rest.length === 1) {
             const accel =
               closedFormInfiniteSumN(first, rest[0], engine) ??
+              divergentInfiniteSumN(first, rest[0], engine) ??
               acceleratedInfiniteSum(first, rest[0], engine);
             if (accel !== undefined) return accel;
           }
@@ -10954,13 +10959,17 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           if (mode === 'numeric' && asyncTerms) return undefined;
           if (mode === 'numeric' && !numeric) {
             if (rest.length === 1)
-              return infiniteSumClosedForm(first, rest[0], engine);
+              return (
+                infiniteSumClosedForm(first, rest[0], engine) ??
+                divergentInfiniteSumN(first, rest[0], engine)
+              );
             return undefined;
           }
           if (mode === 'numeric' && numeric) {
             if (rest.length === 1) {
               const accel =
                 closedFormInfiniteSumN(first, rest[0], engine) ??
+                divergentInfiniteSumN(first, rest[0], engine) ??
                 acceleratedInfiniteSum(first, rest[0], engine);
               if (accel !== undefined) return accel;
             }
@@ -11109,6 +11118,26 @@ function closedFormInfiniteSumN(
   if (closed === undefined) return undefined;
   const value = closed.N();
   return isNumber(value) && value.isFinite === true ? value : undefined;
+}
+
+/**
+ * `±∞` for the infinite sum `Σ body` over `limits` whose divergence to that
+ * infinity is certified (`divergentInfiniteSum()`), else `undefined`. Runs
+ * after the closed forms under `evaluate()`, and before the extrapolation of
+ * `acceleratedInfiniteSum()` under `.N()`, which spends its whole budget
+ * (about a second) on a divergent series before it declines.
+ */
+function divergentInfiniteSumN(
+  body: Expression,
+  limits: Expression,
+  ce: ComputeEngine
+): Expression | undefined {
+  if (!isFunction(limits, 'Limits')) return undefined;
+  const [index, lower, upper] = limits.ops;
+  if (!index || !lower || !upper) return undefined;
+  if (!(upper.isInfinity === true && upper.isPositive === true))
+    return undefined;
+  return divergentInfiniteSum(body, index, lower, ce);
 }
 
 /**

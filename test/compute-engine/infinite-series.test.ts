@@ -58,10 +58,16 @@ describe('Odd p-series λ(s) = (1 − 2^{−s})ζ(s)', () => {
     expect(e.N().re).toBeCloseTo(Math.PI ** 4 / 96, 12);
   });
 
-  test('the divergent s = 1 case (odd harmonic) stays symbolic', () => {
+  test('the divergent s = 1 case (odd harmonic) is +∞', () => {
+    // No closed form in this family, but the divergence is certified by the
+    // limit comparison with the harmonic series (see the divergence block
+    // below).
     expect(
-      ce.parse('\\sum_{k=1}^\\infty \\frac{1}{2k-1}').evaluate().operator
-    ).toBe('Sum');
+      ce
+        .parse('\\sum_{k=1}^\\infty \\frac{1}{2k-1}')
+        .evaluate()
+        .isSame(ce.PositiveInfinity)
+    ).toBe(true);
   });
 
   test('a non-standard start (odd denominators from 3) stays symbolic', () => {
@@ -164,10 +170,13 @@ describe('First-moment geometric Σ k·rᵏ = r/(1−r)²', () => {
     expect(atHalf).toBeCloseTo(0.5 / 0.25, 12);
   });
 
-  test('a divergent numeric ratio stays symbolic', () => {
+  test('a divergent numeric ratio above 1 is +∞', () => {
     expect(
-      ce.parse('\\sum_{k=1}^\\infty k \\cdot 2^k').evaluate().operator
-    ).toBe('Sum');
+      ce
+        .parse('\\sum_{k=1}^\\infty k \\cdot 2^k')
+        .evaluate()
+        .isSame(ce.PositiveInfinity)
+    ).toBe(true);
   });
 });
 
@@ -184,10 +193,13 @@ describe('Logarithmic series Σ rᵏ/k = −ln(1−r)', () => {
     expect(atHalf).toBeCloseTo(Math.log(2), 12);
   });
 
-  test('the divergent harmonic series (r = 1) stays symbolic', () => {
+  test('the divergent harmonic series (r = 1) is +∞', () => {
     expect(
-      ce.parse('\\sum_{k=1}^\\infty \\frac{1}{k}').evaluate().operator
-    ).toBe('Sum');
+      ce
+        .parse('\\sum_{k=1}^\\infty \\frac{1}{k}')
+        .evaluate()
+        .isSame(ce.PositiveInfinity)
+    ).toBe(true);
   });
 });
 
@@ -227,18 +239,26 @@ describe('Respelled bodies reach the closed form (evaluate route)', () => {
     ).toEqual(['Power', 'ExponentialE', 'x']);
   });
 
+  test('a divergent ratio spelled as a quotient of powers is +∞', () => {
+    // No closed form; the divergence is certified (see the divergence
+    // block below).
+    expect(
+      ce
+        .parse('\\sum_{k=0}^{\\infty} \\frac{6^k}{3^k}')
+        .evaluate()
+        .isSame(ce.PositiveInfinity)
+    ).toBe(true);
+  });
+
   test.each([
-    // A divergent ratio, spelled as a quotient of powers.
-    '\\sum_{k=0}^{\\infty} \\frac{6^k}{3^k}',
     // The telescoping identity needs k ≥ 2; at k = 1 the body is 1/0.
     '\\sum_{k=1}^{\\infty} \\frac{1}{k(k-1)}',
     // A pole inside the domain.
     '\\sum_{k=1}^{\\infty} \\frac{1}{(k-5)^2}',
     // A 0/0 factor inside the domain that a cancellation would hide.
     '\\sum_{k=1}^{\\infty} \\frac{k-5}{(k-5)k^2}',
-    // No closed form in the table.
+    // No closed form in the table (and convergent, so no divergence either).
     '\\sum_{k=1}^{\\infty} \\frac{1}{k^2+1}',
-    '\\sum_{k=1}^{\\infty} \\frac{1}{k}',
   ])('%s stays symbolic', (input) => {
     expect(ce.parse(input).evaluate().operator).toBe('Sum');
   });
@@ -301,6 +321,172 @@ describe('Respelled bodies reach the closed form (evaluate route)', () => {
       ce.parse('\\prod_{k=1}^{n} \\frac{(k-3)(k+1)}{(k-3)k}').evaluate()
         .operator
     ).toBe('Product');
+  });
+});
+
+/**
+ * A series whose divergence to `+∞` or `−∞` is certified evaluates to that
+ * infinity, under `evaluate()` and under `.N()`. The certificate is the limit
+ * comparison with the harmonic series: `lim k·f(k)` is a number other than 0,
+ * or an infinity (`divergentInfiniteSum`, `library/utils.ts`). A series with
+ * no value (oscillating, or with a term that is a division by zero) and a
+ * series whose divergence is not established stay symbolic: a truncated
+ * partial sum is never returned (GitHub #326).
+ */
+describe('Divergent series (GitHub #326)', () => {
+  const sum = (body: string, lower = 1) =>
+    ce.parse(`\\sum_{n=${lower}}^\\infty ${body}`);
+  const isPlusInfinity = (e: ReturnType<typeof ce.parse>) =>
+    e.isSame(ce.PositiveInfinity);
+
+  test.each([
+    ['\\frac{1}{n}', 'the harmonic series'],
+    ['n', 'a growing term'],
+    ['1', 'a constant term'],
+    ['\\frac{1}{\\sqrt{n}}', 'a p-series with p = 1/2'],
+    ['\\frac{n+1}{n^2-3}', 'a rational function of degree −1'],
+    ['\\frac{\\ln n}{n}', 'a logarithmic factor'],
+    ['2^n', 'a geometric series with ratio 2'],
+    ['\\frac{1}{n}+\\frac{1}{n^2}', 'a sum with one divergent piece'],
+    ['\\frac{0.001}{n}', 'a small constant factor'],
+  ])('Σ %s (%s) evaluates to +∞ and numericizes to +∞', (body) => {
+    expect(isPlusInfinity(sum(body).evaluate())).toBe(true);
+    expect(isPlusInfinity(sum(body).N())).toBe(true);
+  });
+
+  test('a negative divergent series is −∞', () => {
+    expect(sum('\\frac{-3}{n}').evaluate().isSame(ce.NegativeInfinity)).toBe(
+      true
+    );
+    expect(sum('\\frac{-3}{n}').N().isSame(ce.NegativeInfinity)).toBe(true);
+  });
+
+  test('a lower bound other than 1 is accepted', () => {
+    expect(isPlusInfinity(sum('\\frac{1}{n}', 5).evaluate())).toBe(true);
+  });
+
+  test.each([
+    ['(-1)^n', 1, 'an oscillating series has no value'],
+    ['\\sin n', 1, 'a bounded oscillating term'],
+    ['\\frac{1}{n-3}', 1, 'a division by zero at n = 3'],
+    ['\\frac{1}{n}', 0, 'a division by zero at n = 0'],
+    ['\\frac{1}{\\ln n}', 1, 'a division by zero at n = 1 (ln 1 = 0)'],
+    ['\\frac{1}{n \\ln n}', 2, 'lim n·f(n) = 0: the test is inconclusive'],
+    ['n!', 1, 'no symbolic limit for n·n!'],
+  ])('Σ %s from %i stays symbolic (%s)', (body, lower) => {
+    expect(sum(body, lower).evaluate().operator).toBe('Sum');
+  });
+
+  test('a convergent series is not touched', () => {
+    expect(
+      sum('\\frac{1}{n^2}').evaluate().isEqual(ce.parse('\\frac{\\pi^2}{6}'))
+    ).toBe(true);
+    expect(sum('\\frac{1}{n^2+1}').evaluate().operator).toBe('Sum');
+    expect(sum('\\frac{1}{n^2+1}').N().re).toBeCloseTo(1.0766740474685907, 10);
+  });
+
+  test('.N() of a rational body with a far division by zero stays symbolic', () => {
+    // The extrapolation walks at most 2¹⁵ terms and never sees the pole at
+    // n = 10⁶; it used to return a finite number for a sum that is undefined.
+    expect(sum('\\frac{1}{n^2-10^{12}}').N().operator).toBe('Sum');
+    // The denominator is read under any numerator.
+    expect(sum('\\frac{\\sqrt{n}}{n^2-10^{12}}').N().operator).toBe('Sum');
+  });
+
+  test('.N() of a sum that runs downward checks the poles below its bound', () => {
+    const INF = { num: '-Infinity' };
+    const value = (expr: unknown) => ce.box(expr as never).N();
+    // No pole at or below the bound: the value is ζ(2).
+    expect(
+      value(['Sum', ['Divide', 1, ['Power', 'k', 2]], ['Limits', 'k', INF, -1]])
+        .re
+    ).toBeCloseTo(Math.PI ** 2 / 6, 9);
+    expect(
+      value([
+        'Sum',
+        ['Divide', 1, ['Power', ['Subtract', 'k', 1], 2]],
+        ['Limits', 'k', INF, 0],
+      ]).re
+    ).toBeCloseTo(Math.PI ** 2 / 6, 9);
+    // A pole at k = −3, inside the domain.
+    expect(
+      value([
+        'Sum',
+        ['Divide', 1, ['Power', ['Add', 'k', 3], 2]],
+        ['Limits', 'k', INF, -1],
+      ]).operator
+    ).toBe('Sum');
+  });
+
+  test('a denominator with coefficients of one sign needs no root scan', () => {
+    // The Cauchy root bound of these denominators is beyond the scan limit;
+    // the one-sign rule of `hasIntegerRootFrom` proves the absence of a root
+    // instead, so neither the certificate nor the extrapolation declines.
+    expect(
+      sum('\\frac{n^4}{n^5+10^{8}}').evaluate().isSame(ce.PositiveInfinity)
+    ).toBe(true);
+    expect(sum('\\frac{1}{n^2+10^{13}}').N().re).toBeCloseTo(4e-13, 20);
+  });
+
+  // The certificate needs a structural proof that every term is a finite
+  // real number (`termsDefinedFrom`, `library/utils.ts`). A sampled
+  // prefilter and a symbolic limit can both miss a division by zero far
+  // down the series, or a complex term near its start: each of these was
+  // certified before the proof was required.
+  test.each([
+    ['\\frac{1}{(\\ln k - \\ln 500)^2}', 1, 'a 1/0 term at k = 500'],
+    ['\\frac{\\sqrt{k}}{k-500}', 1, 'a polynomial denominator under a root'],
+    ['\\frac{\\ln k}{k-500}', 1, 'a polynomial denominator under a logarithm'],
+    ['\\frac{1}{\\sqrt{k}-50}', 1, 'a 1/0 term at k = 2500'],
+    ['\\frac{k}{\\sqrt{k}-50}', 10, 'the same denominator, growing numerator'],
+    ['\\frac{1}{\\ln k - \\ln 1000}', 1, 'a 1/0 term at k = 1000'],
+    ['\\sqrt{k-3}', 1, 'complex terms at k = 1 and 2'],
+  ])('Σ %s from %i is not certified (%s)', (body, lower) => {
+    const e = ce.parse(`\\sum_{k=${lower}}^\\infty ${body}`);
+    expect(e.evaluate().operator).toBe('Sum');
+    expect(e.N().operator).toBe('Sum');
+  });
+
+  test('an impure body is never sampled', () => {
+    const e = ce.box([
+      'Sum',
+      ['Add', 'k', ['Random']],
+      ['Limits', 'k', 1, { num: '+Infinity' }],
+    ]);
+    expect(e.evaluate().operator).toBe('Sum');
+  });
+
+  test('a body the definedness proof does not cover is not certified', () => {
+    // `Σ 1/(ln n + 1)` from 2 diverges (`1/(ln n + 1) > 1/n`), but the
+    // proof has no rule for a sum with a logarithm below the line, so it
+    // declines.
+    expect(
+      ce.parse('\\sum_{n=2}^\\infty \\frac{1}{\\ln n + 1}').evaluate().operator
+    ).toBe('Sum');
+    // `ln n` under a root is covered (`ln n ≥ ln 2 > 0` for `n ≥ 2`):
+    // `Σ 1/√(ln n)` is certified.
+    expect(
+      ce
+        .parse('\\sum_{n=2}^\\infty \\frac{1}{\\sqrt{\\ln n}}')
+        .evaluate()
+        .isSame(ce.PositiveInfinity)
+    ).toBe(true);
+    // `n/(n ln n)` canonicalizes to `1/ln n`, which the logarithm rule
+    // covers (`ln n ≥ ln 2` for `n ≥ 2`): certified.
+    expect(
+      ce
+        .parse('\\sum_{n=2}^\\infty \\frac{n}{n \\ln n}')
+        .evaluate()
+        .isSame(ce.PositiveInfinity)
+    ).toBe(true);
+  });
+
+  test('isEqual against an infinity reads the certified divergence', () => {
+    const harmonic = sum('\\frac{1}{n}');
+    expect(harmonic.isEqual(ce.PositiveInfinity)).toBe(true);
+    expect(harmonic.isEqual(ce.NegativeInfinity)).toBe(false);
+    expect(harmonic.isEqual(5)).toBe(false);
+    expect(harmonic.isEqual(ce.parse('9.787706026045382'))).toBe(false);
   });
 });
 

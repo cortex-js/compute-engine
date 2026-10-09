@@ -449,8 +449,12 @@ describe('Convergence guards (Phase 3a)', () => {
     expect(r.isEqual(ce.box(['Add', 2, ['Sqrt', 2]]))).toBe(true);
   });
 
-  it('numeric divergent geometric (Σ 2ⁿ) stays symbolic', () => {
-    expect(ce.parse('\\sum_{n=0}^\\infty 2^n').evaluate().operator).toBe('Sum');
+  it('numeric divergent geometric (Σ 2ⁿ) is +∞', () => {
+    // The geometric closed form declines (`|r| ≥ 1`); the divergence is then
+    // certified by the limit comparison with the harmonic series.
+    expect(
+      ce.parse('\\sum_{n=0}^\\infty 2^n').evaluate().isSame(ce.PositiveInfinity)
+    ).toBe(true);
   });
 
   it('.N() of Σ (1/2)ⁿ composes to 2', () => {

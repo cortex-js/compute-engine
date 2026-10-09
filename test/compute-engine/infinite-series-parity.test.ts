@@ -111,17 +111,26 @@ describe('A CONVERGENT SERIES WITH A NON-INTEGER-POWER TAIL HAS A VALUE UNDER N(
     expect(ce.parse(latex).N().re).toBeCloseTo(expected, 10);
   });
 
+  // A divergent series whose divergence is certified by the limit
+  // comparison with the harmonic series (`divergentInfiniteSum`,
+  // `library/utils.ts`) is `+∞` under `.N()` as under `evaluate()`.
   test.each([
     '\\sum_{n=1}^\\infty \\frac{1}{n}',
     '\\sum_{n=1}^\\infty \\frac{1}{\\sqrt{n}}',
-    '\\sum_{n=1}^\\infty (-1)^n',
     '\\sum_{n=1}^\\infty n',
-    '\\sum_{n=1}^\\infty (-1)^n\\sqrt{n}',
     '\\sum_{n=1}^\\infty \\frac{\\ln(n)}{n}',
-    '\\sum_{n=2}^\\infty \\frac{1}{n\\ln(n)}',
-    // The decay rate of the partial sums still drifts at 2^15 terms: the
-    // fitted route requires the last three exponent estimates to agree.
     '\\sum_{n=2}^\\infty \\frac{\\ln(\\ln(n))}{n}',
+  ])('the divergent %s is +∞', (latex) => {
+    expect(ce.parse(latex).N().isSame(ce.PositiveInfinity)).toBe(true);
+  });
+
+  // A series with no value, and a divergent series the certificate does
+  // not reach (`lim n·f(n) = 0`), stay unevaluated: never a truncated
+  // partial sum.
+  test.each([
+    '\\sum_{n=1}^\\infty (-1)^n',
+    '\\sum_{n=1}^\\infty (-1)^n\\sqrt{n}',
+    '\\sum_{n=2}^\\infty \\frac{1}{n\\ln(n)}',
     // Oscillating partial sums: the exponent estimates are not finite.
     '\\sum_{n=1}^\\infty \\frac{\\sin(n)}{\\sqrt{n}} \\cdot n',
   ])('the divergent %s stays unevaluated', (latex) => {

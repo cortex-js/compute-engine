@@ -760,14 +760,14 @@ function limitRatioAtPosInf(
   if (cmp !== undefined) {
     if (cmp < 0) return ce.Zero; // numerator grows slower → 0
     if (cmp > 0) {
-      // The sign of each term is read from a numeric probe. A probe with no
-      // value (a symbolic coefficient, as in `a·eˣ/x`) leaves the sign of
-      // the infinity undecided: decline.
-      const sn = numericAt(n, x, 120, ce);
-      const sd = numericAt(d, x, 120, ce);
-      if (Number.isNaN(sn) || Number.isNaN(sd) || sn === 0 || sd === 0)
-        return undefined;
-      return sn < 0 !== sd < 0 ? ce.NegativeInfinity : ce.PositiveInfinity;
+      // The sign of each term is read from numeric probes at three growing
+      // points. A probe with no value (a symbolic coefficient, as in
+      // `a·eˣ/x`), or probes that disagree (`√x − 50` is negative at 120 and
+      // positive at 10⁴), leave the sign of the infinity undecided: decline.
+      const sn = stableSignAtInf(n, x, ce);
+      const sd = stableSignAtInf(d, x, ce);
+      if (sn === 0 || sd === 0) return undefined;
+      return sn !== sd ? ce.NegativeInfinity : ce.PositiveInfinity;
     }
     // Same growth order → ratio of leading coefficients.
     const r = n.div(d).simplify();
@@ -1571,9 +1571,27 @@ function lnOfLimit(
 }
 
 function leadingSignAtInf(e: Expression, x: string, ce: ComputeEngine): number {
-  const v = numericAt(e, x, 120, ce);
-  if (Number.isNaN(v) || v === 0) return 1;
-  return v < 0 ? -1 : 1;
+  const sign = stableSignAtInf(e, x, ce);
+  return sign === 0 ? 1 : sign;
+}
+
+/**
+ * The sign of `e` as `x → +∞`, read from numeric probes at `x = 120`, `10⁴`
+ * and `10⁸`: `1` or `−1` when the three probes have values of that sign,
+ * `0` when a probe has no value or is zero, or when the probes disagree (a
+ * term that changes sign past the first probe, `√x − 50`). A single probe
+ * at 120 read `x/(√x − 50)` as `−∞`.
+ */
+function stableSignAtInf(e: Expression, x: string, ce: ComputeEngine): number {
+  let sign = 0;
+  for (const point of [120, 1e4, 1e8]) {
+    const v = numericAt(e, x, point, ce);
+    if (Number.isNaN(v) || v === 0) return 0;
+    const s = v < 0 ? -1 : 1;
+    if (sign === 0) sign = s;
+    else if (s !== sign) return 0;
+  }
+  return sign;
 }
 
 function leadingCoefficientRatio(

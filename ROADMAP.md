@@ -580,6 +580,25 @@ cut into parts with at most 12 radians each). The GPU helper is used only for
 s ≤ 0 after the other methods decline. To do: measure it against the f32 model
 of the GPU code, and cut its panels the same way if it is wrong.
 
+### `.N()` of a slowly divergent series takes about 30 seconds to decline (OPEN, performance — found 2026-10-09 by the divergence test for issue #326; present before)
+
+`\sum_{n=2}^\infty \frac{1}{n \ln n}` diverges, but so slowly that the
+limit comparison with the harmonic series is inconclusive
+(`lim n·f(n) = 0`), so `divergentInfiniteSum()` declines and `.N()` goes to
+the Richardson extrapolation (`acceleratedInfiniteSum()`, `library/utils.ts`).
+The extrapolation does not converge either, and evaluates its whole budget of
+32768 terms (`MAX_TERMS`) before it leaves the sum symbolic. Each term is
+evaluated by the interpreter (`assignLoopIndex` then `numericValueOf(body)`),
+at about 0.9 ms for a body with `ln` (measured on the shared machine under
+load: 29 seconds in total; about 1 second for the harmonic series before the
+divergence test, whose body costs about 30 µs per term). Two remedies, which
+can be combined: evaluate the terms with the compiled body, as
+`divergentInfiniteSum()` does (`implicitCompileNumeric`), which would make
+the whole budget cost milliseconds; and a divergence test for the family
+`1/(n (\ln n)^p)`, `p ≤ 1` (the Cauchy condensation test `Σ 2^k f(2^k)`
+reduces it to `Σ 1/k^p`), so that this family returns `+∞` instead of
+declining.
+
 ### `Limit` at infinity: two sign reads that still default to `+` (OPEN, small — found 2026-10-04 by the complex-valued limit fix for issue #396)
 
 The polynomial rule, the product rule and the quotient rule of the limit at

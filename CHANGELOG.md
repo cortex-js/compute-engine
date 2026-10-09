@@ -2,6 +2,16 @@
 
 ### Behavior Changes
 
+- **A divergent series evaluates to its infinity, and a comparison with an
+  infinity is undecided when the other side is not known to be finite.**
+  `\sum_{n=1}^{\infty} \frac{1}{n}`, `\sum n`, `\sum 2^n` and the other
+  series whose divergence the engine can certify now evaluate to `+∞` (or
+  `−∞`) under `evaluate()` and `.N()`, where they stayed symbolic.
+  `expr.isEqual(ce.PositiveInfinity)` answers `undefined` instead of `false`
+  when `expr` is a value whose finiteness could not be determined (a series
+  left symbolic). See the entry under Issues Resolved
+  ([#326](https://github.com/cortex-js/compute-engine/issues/326)).
+
 - **`Reduce(…).N()` folds in the numbers of the engine; the compiled double fold
   is taken at machine precision only.** The compiled fast path of `Reduce` folds
   in doubles (17 digits) at every precision, so on the default engine (21
@@ -19,6 +29,31 @@
   `Sum`/`Product` have their own bignum folds.
 
 ### Issues Resolved
+
+- **A divergent series evaluates to `+∞` or `−∞`, and a comparison with an
+  infinity is never a false `false`**
+  ([#326](https://github.com/cortex-js/compute-engine/issues/326)). The harmonic
+  series `\sum_{n=1}^{\infty} \frac{1}{n}` came back unchanged from
+  `evaluate()`, `.N()` spent about a second to reach the same conclusion, and
+  `isEqual(\infty)` answered `false` ("one side is infinite, so they differ")
+  for a value whose finiteness was simply unknown. A series whose divergence is
+  certified now evaluates to its infinity, under `evaluate()` and under `.N()`:
+  `\sum 1/n`, `\sum n`, `\sum 1/\sqrt{n}`, `\sum (n+1)/(n^2-3)`,
+  `\sum \ln(n)/n`, `\sum 2^n` and `\sum_{k=1}^\infty k\cdot 2^k` give `+∞`,
+  `\sum -3/n` gives `−∞`, and `\sum 1/n` is `isEqual` to `+∞` and not to any
+  number. The certificate is the limit comparison with the harmonic series:
+  `L = \lim_{n\to\infty} n\cdot f(n)` is a number other than 0 or an infinity,
+  with a numeric prefilter on the sign and decay of the samples and a check that
+  no term is a division by zero. A series with no value (`\sum (-1)^n`,
+  `\sum_{n=1}^\infty 1/(n-3)`) and a series whose divergence the test cannot
+  establish (`\sum 1/(n \ln n)`) stay symbolic, as before, and `isEqual` against
+  an infinity now answers `undefined` for them instead of `false`. Two related
+  fixes: `.N()` of a rational body with a division by zero beyond the
+  extrapolated terms (`\sum_{n=1}^\infty 1/(n^2 - 10^{12})`, pole at `n = 10^6`)
+  returned a finite number for a sum that is undefined, and stays symbolic; and
+  a comparison of a Taylor series with its sum (`\sum x^n/n!` against `e^x`) is
+  a free-variable identity, answered by `isIdenticallyEqual()` (`true`), not by
+  `isEqual()`, which does not evaluate an operand with free variables.
 
 - **`simplify()` of an infinite telescoping sum or Wallis-like product was
   `Indeterminate`.** `\sum_{k=1}^{\infty} \frac{1}{k(k+1)}`,

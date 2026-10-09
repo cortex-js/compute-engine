@@ -162,7 +162,8 @@ describe('arithmetic', () => {
   test('a geometric series with a negated index', () => {
     expect(run('sum(2^(-k), (k, 0, oo))')).toBe('2');
     expect(run('sum(3 * 2^(-k), (k, 0, oo))')).toBe('6');
-    expect(run('sum(2^k, (k, 0, oo))')).toBe('sum_(k=0)^(+oo)(2^k)');
+    // A divergent geometric series is certified `+∞` (it used to stay symbolic).
+    expect(run('sum(2^k, (k, 0, oo))')).toBe('+oo');
   });
 
   test('the complex roots are exact for a rational and in degree mode', () => {
