@@ -1,4 +1,5 @@
 import { engine as ce } from '../utils';
+import { isNumber } from '../../src/compute-engine/boxed-expression/type-guards';
 
 /**
  * Closed-form table for infinite sums and products (ROADMAP B13 "the
@@ -107,9 +108,8 @@ describe('Dirichlet beta β(s)', () => {
 
   test('β(4) has no tabled closed form and stays symbolic', () => {
     expect(
-      ce
-        .parse('\\sum_{k=0}^\\infty \\frac{(-1)^k}{(2k+1)^4}')
-        .evaluate().operator
+      ce.parse('\\sum_{k=0}^\\infty \\frac{(-1)^k}{(2k+1)^4}').evaluate()
+        .operator
     ).toBe('Sum');
   });
 });
@@ -194,25 +194,16 @@ describe('Logarithmic series Σ rᵏ/k = −ln(1−r)', () => {
 describe('Infinite product closed forms', () => {
   test('Π (1 − 1/k²) (k from 2) = 1/2', () => {
     expect(
-      ce
-        .parse('\\prod_{k=2}^\\infty (1 - \\frac{1}{k^2})')
-        .evaluate()
-        .json
+      ce.parse('\\prod_{k=2}^\\infty (1 - \\frac{1}{k^2})').evaluate().json
     ).toEqual(['Rational', 1, 2]);
   });
 
   test('Π (1 − 1/k²) (k from a) = (a−1)/a', () => {
     expect(
-      ce
-        .parse('\\prod_{k=3}^\\infty (1 - \\frac{1}{k^2})')
-        .evaluate()
-        .json
+      ce.parse('\\prod_{k=3}^\\infty (1 - \\frac{1}{k^2})').evaluate().json
     ).toEqual(['Rational', 2, 3]);
     expect(
-      ce
-        .parse('\\prod_{k=10}^\\infty (1 - \\frac{1}{k^2})')
-        .evaluate()
-        .json
+      ce.parse('\\prod_{k=10}^\\infty (1 - \\frac{1}{k^2})').evaluate().json
     ).toEqual(['Rational', 9, 10]);
   });
 
@@ -224,9 +215,7 @@ describe('Infinite product closed forms', () => {
   });
 
   test('Π (1 + 1/k²) (k from 1) = sinh(π)/π', () => {
-    const e = ce
-      .parse('\\prod_{k=1}^\\infty (1 + \\frac{1}{k^2})')
-      .evaluate();
+    const e = ce.parse('\\prod_{k=1}^\\infty (1 + \\frac{1}{k^2})').evaluate();
     expect(e.N().re).toBeCloseTo(Math.sinh(Math.PI) / Math.PI, 12);
   });
 
@@ -237,12 +226,114 @@ describe('Infinite product closed forms', () => {
     expect(e.N().re).toBeCloseTo(2 / Math.PI, 12);
   });
 
+  // GitHub issue #323: the Wallis product written as a fraction, and as the
+  // reciprocal `4n²/(4n² − 1)`, must land too. The recognizer compares the
+  // body with each pattern algebraically, so every spelling of the same
+  // rational function of the index is one body.
+  describe('spellings of a known body (GitHub #323)', () => {
+    test('2 Π 4n²/(4n² − 1) = π (the issue as reported)', () => {
+      const e = ce.parse('2\\prod_{n=1}^{\\infty} \\frac{4n^2}{4n^2-1}');
+      expect(e.evaluate().json).toEqual('Pi');
+    });
+
+    test('evaluateAsync lands the same closed form', async () => {
+      const e = ce.parse('2\\prod_{n=1}^{\\infty} \\frac{4n^2}{4n^2-1}');
+      expect((await e.evaluateAsync()).json).toEqual('Pi');
+    });
+
+    test('Π 4n²/(4n² − 1) = π/2 (reciprocal of the Wallis body)', () => {
+      const e = ce
+        .parse('\\prod_{n=1}^{\\infty} \\frac{4n^2}{4n^2-1}')
+        .evaluate();
+      expect(e.operator).not.toBe('Product');
+      expect(e.N().re).toBeCloseTo(Math.PI / 2, 12);
+    });
+
+    test.each([
+      ['\\frac{4k^2-1}{4k^2}', 2 / Math.PI],
+      ['(1 - \\frac{1}{4k^2})', 2 / Math.PI],
+      ['\\frac{(2k+1)^2}{(2k+1)^2-1}', 4 / Math.PI],
+      ['\\frac{4k^2+4k}{4k^2+4k+1}', Math.PI / 4],
+      ['\\frac{k^2}{k^2+1}', Math.PI / Math.sinh(Math.PI)],
+    ])('Π %s (k from 1) is recognized', (body, expected) => {
+      const e = ce.parse(`\\prod_{k=1}^{\\infty} ${body}`).evaluate();
+      expect(e.operator).not.toBe('Product');
+      expect(e.N().re).toBeCloseTo(expected, 12);
+    });
+
+    test('Π k²/(k² − 1) (k from a) = a/(a − 1)', () => {
+      expect(
+        ce.parse('\\prod_{k=2}^{\\infty} \\frac{k^2}{k^2-1}').evaluate().json
+      ).toEqual(2);
+      expect(
+        ce.parse('\\prod_{k=3}^{\\infty} \\frac{k^2}{k^2-1}').evaluate().json
+      ).toEqual(['Rational', 3, 2]);
+    });
+
+    test('a common factor that hides a 0/0 factor declines', () => {
+      // (k − 5)(k² − 1) / ((k − 5)k²) is the telescoping body with a hole
+      // at k = 5: the finite product over k = 2…10 is Indeterminate, so the
+      // infinite product must not be (a − 1)/a. The same with the factor
+      // expanded away: (4k³ − 16k² − k + 4)/(4k³ − 16k²) = (4k² − 1)(k − 4)
+      // / (4k²(k − 4)) is the Wallis body with a hole at k = 4.
+      expect(
+        ce
+          .parse('\\prod_{k=2}^{\\infty} \\frac{(k-5)(k^2-1)}{(k-5)k^2}')
+          .evaluate().operator
+      ).toBe('Product');
+      expect(
+        ce
+          .parse('\\prod_{k=1}^{\\infty} \\frac{4k^3-16k^2-k+4}{4k^3-16k^2}')
+          .evaluate().operator
+      ).toBe('Product');
+    });
+
+    test('a float literal in the body gives a float', () => {
+      const e = ce
+        .parse('\\prod_{k=1}^{\\infty} (1 - \\frac{0.25}{k^2})')
+        .evaluate();
+      expect(isNumber(e) && !e.isExact).toBe(true);
+      expect(e.re).toBeCloseTo(2 / Math.PI, 12);
+    });
+
+    test('an impure body is not sampled and stays symbolic', () => {
+      let calls = 0;
+      ce.declare('impureTerm', {
+        signature: '(integer) -> number',
+        pure: false,
+        evaluate: () => {
+          calls += 1;
+          return ce.number(1);
+        },
+      });
+      const e = ce
+        .parse(
+          '\\prod_{k=1}^{\\infty} (1 - \\frac{1}{4k^2} + \\operatorname{impureTerm}(k) - 1)'
+        )
+        .evaluate();
+      expect(e.operator).toBe('Product');
+      expect(calls).toBe(0);
+    });
+
+    test('a body that matches no pattern stays symbolic', () => {
+      // Same shape as the Wallis body, different constant: not in the table.
+      expect(
+        ce.parse('\\prod_{k=1}^{\\infty} \\frac{4k^2}{4k^2+1}').evaluate()
+          .operator
+      ).toBe('Product');
+      // The Wallis identity holds from k = 1 only; a tail is a different
+      // product.
+      expect(
+        ce.parse('\\prod_{k=2}^{\\infty} \\frac{4k^2}{4k^2-1}').evaluate()
+          .operator
+      ).toBe('Product');
+    });
+  });
+
   test('Π (1 − 1/k²) from k = 1 stays symbolic (the k = 1 factor is 0…', () => {
     // …times a divergence-free tail — the product IS 0, but the (a−1)/a
     // family requires a ≥ 2; the zero factor makes any recognizer moot).
-    const e = ce
-      .parse('\\prod_{k=1}^\\infty (1 - \\frac{1}{k^2})')
-      .evaluate();
+    const e = ce.parse('\\prod_{k=1}^\\infty (1 - \\frac{1}{k^2})').evaluate();
     // Either inert or 0 is acceptable; it must not be (a−1)/a = 0/1 by luck.
     expect(['Product', 'Number'].includes(e.operator)).toBe(true);
   });

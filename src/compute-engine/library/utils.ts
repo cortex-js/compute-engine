@@ -22,6 +22,12 @@ import {
 } from '../../common/type/utils.js';
 import { activeRollbackFrame } from '../inference-rollback.js';
 import { conditionalValue } from '../boxed-expression/conditional-value.js';
+import { togetherReduced } from '../boxed-expression/factor.js';
+import {
+  polynomialDegree,
+  polynomialGCD,
+} from '../boxed-expression/polynomials.js';
+import { isTransitivelyPure } from '../boxed-expression/transitive-purity.js';
 import {
   bignumPreferred,
   collectBinderNames,
@@ -1271,12 +1277,113 @@ export function infiniteSumClosedForm(
 }
 
 /**
- * Attempt a closed form for `Product(body, [index, 1, +∞])` on an infinite
- * upper domain. Currently recognizes the Wallis product
- *   `Π_{k=1}^∞ (1 − 1/(2k)²) = 2/π`
- * matched structurally against the canonicalized body (the bound index is
- * arbitrary, so the pattern is rebuilt on `index`). Returns undefined
- * otherwise (caller keeps it symbolic).
+ * The numerator and denominator of `expr` as a rational function of the
+ * index, read from the expression AS WRITTEN: no factor is cancelled.
+ * `(k − 5)(k² − 1) / ((k − 5)k²)` gives the numerator `(k − 5)(k² − 1)` and
+ * the denominator `(k − 5)k²`, where `together()` would divide the common
+ * factor out. The parts are built with `Multiply` and `Add` only, which
+ * never introduce a division, so a common factor survives in both parts.
+ * Returns undefined when `expr` is not a rational function (a radical, a
+ * transcendental function, a non-integer exponent).
+ */
+function rationalPartsAsWritten(
+  expr: Expression,
+  ce: ComputeEngine
+): [Expression, Expression] | undefined {
+  if (isNumber(expr) || isSymbol(expr)) return [expr, ce.One];
+  if (!isFunction(expr)) return undefined;
+  const parts = (e: Expression) => rationalPartsAsWritten(e, ce);
+  switch (expr.operator) {
+    case 'Negate': {
+      const p = parts(expr.op1);
+      return p && [ce.function('Negate', [p[0]]), p[1]];
+    }
+    case 'Add': {
+      // n₁/d₁ + n₂/d₂ = (n₁·d₂ + n₂·d₁) / (d₁·d₂)
+      let num = ce.Zero;
+      let den = ce.One;
+      for (const term of expr.ops) {
+        const p = parts(term);
+        if (!p) return undefined;
+        num = ce.function('Add', [
+          ce.function('Multiply', [num, p[1]]),
+          ce.function('Multiply', [p[0], den]),
+        ]);
+        den = ce.function('Multiply', [den, p[1]]);
+      }
+      return [num, den];
+    }
+    case 'Multiply': {
+      const nums: Expression[] = [];
+      const dens: Expression[] = [];
+      for (const factor of expr.ops) {
+        const p = parts(factor);
+        if (!p) return undefined;
+        nums.push(p[0]);
+        dens.push(p[1]);
+      }
+      return [ce.function('Multiply', nums), ce.function('Multiply', dens)];
+    }
+    case 'Divide': {
+      const n = parts(expr.op1);
+      const d = parts(expr.op2);
+      if (!n || !d) return undefined;
+      return [
+        ce.function('Multiply', [n[0], d[1]]),
+        ce.function('Multiply', [n[1], d[0]]),
+      ];
+    }
+    case 'Power': {
+      const base = parts(expr.op1);
+      const exponent = expr.op2;
+      if (!base || !isNumber(exponent) || !exponent.isInteger) return undefined;
+      const n = exponent.re;
+      if (!Number.isSafeInteger(n)) return undefined;
+      if (n === 0) return [ce.One, ce.One];
+      const [b0, b1] = n > 0 ? base : [base[1], base[0]];
+      const k = ce.number(Math.abs(n));
+      return [ce.function('Power', [b0, k]), ce.function('Power', [b1, k])];
+    }
+    default:
+      return undefined;
+  }
+}
+
+/** Does `expr` contain a number literal that is not exact (a float)? */
+function hasInexactLiteral(expr: Expression): boolean {
+  if (isNumber(expr)) return !expr.isExact;
+  if (!isFunction(expr)) return false;
+  return expr.ops.some(hasInexactLiteral);
+}
+
+/**
+ * Attempt a closed form for `Product(body, [index, a, +∞])` on an infinite
+ * upper domain. The table of known products:
+ *   `Π_{k=a}^∞ (1 − 1/k²) = (a − 1)/a`        for integer a ≥ 2
+ *   `Π_{k=1}^∞ (1 − 1/(2k)²) = 2/π`           (Wallis)
+ *   `Π_{k=1}^∞ (1 − 1/(2k+1)²) = π/4`         (odd-index Wallis analog)
+ *   `Π_{k=1}^∞ (1 + 1/k²) = sinh(π)/π`
+ * The body is compared ALGEBRAICALLY with each pattern, not only
+ * structurally: `(4k² − 1)/(4k²)`, `1 − 1/(4k²)` and `1 − 1/(2k)²` are the
+ * same Wallis body spelled three ways, and a structural `isSame` sees only
+ * the last. The reciprocal of a known body is recognized too, with the
+ * reciprocal value: `Π 4k²/(4k² − 1) = π/2` (GitHub issue #323). Returns
+ * undefined when nothing matches (the caller keeps the product symbolic).
+ *
+ * The algebraic comparison is restricted to a body that is a rational
+ * function of the index with no common factor between its numerator and
+ * denominator as written. A common factor can hide a 0/0 factor at an
+ * integer index (`(k − 5)(k² − 1) / ((k − 5)k²)` is undefined at k = 5),
+ * and the cancellation that proves the equality would also remove the hole.
+ * Such a body stays symbolic. A body with a float literal (`1 − 0.25/k²`)
+ * numericizes: a float operand gives a float result, as everywhere else.
+ *
+ * Cost: the algebraic comparison (`togetherReduced` on the difference) can
+ * take over 100 ms when it FAILS, so it only runs for a pattern that first
+ * agrees with the body numerically at three sample index values. A product
+ * that matches nothing pays a few substitutions and no algebra. The samples
+ * evaluate the body, so an impure body (`k + Random()`) is not sampled and
+ * stays symbolic unless it matches a pattern structurally.
  */
 export function infiniteProductClosedForm(
   body: Expression | undefined,
@@ -1290,44 +1397,124 @@ export function infiniteProductClosedForm(
   if (!index || !lower || !upper) return undefined;
   if (!(upper.isInfinity === true && upper.isPositive === true))
     return undefined;
+  if (!lower.isInteger) return undefined;
+  const a = lower.re;
+  if (!Number.isSafeInteger(a) || a < 1) return undefined;
 
-  // Π_{k=a}^∞ (1 − 1/k²) = (a − 1)/a for integer a ≥ 2 (telescoping:
-  // (k−1)(k+1)/k²). Numerically verified (a = 2 → 1/2, a = 3 → 2/3).
-  const oneMinusInvSq = ce.box([
-    'Subtract',
-    1,
-    ['Divide', 1, ['Power', index, 2]],
-  ]);
-  if (oneMinusInvSq.isSame(body)) {
-    if (!lower.isInteger) return undefined;
-    const a = lower.re;
-    if (!Number.isSafeInteger(a) || a < 2) return undefined;
-    return ce.function('Divide', [ce.number(a - 1), ce.number(a)]);
+  // Each entry: the body pattern built on the bound index, the lower bounds
+  // the identity holds for, the closed-form value, and the value of the
+  // reciprocal product (spelled directly so that `Π 1/f` prints as `4/π`,
+  // not `1/(π/4)`). The patterns are boxed once per call because they
+  // depend on the index name.
+  type LowerBoundRule = { exactly: number } | { atLeast: number };
+  const table: {
+    pattern: Expression;
+    lowerBound: LowerBoundRule;
+    value: () => Expression;
+    inverse: () => Expression;
+  }[] = [
+    // Telescoping: (k−1)(k+1)/k², verified numerically (a = 2 → 1/2,
+    // a = 3 → 2/3). From a = 1 the first factor is 0, so the family does
+    // not apply there.
+    {
+      pattern: ce.box(['Subtract', 1, ['Divide', 1, ['Power', index, 2]]]),
+      lowerBound: { atLeast: 2 },
+      value: () => ce.function('Divide', [ce.number(a - 1), ce.number(a)]),
+      inverse: () => ce.function('Divide', [ce.number(a), ce.number(a - 1)]),
+    },
+    {
+      pattern: ce.box([
+        'Subtract',
+        1,
+        ['Divide', 1, ['Power', ['Multiply', 2, index], 2]],
+      ]),
+      lowerBound: { exactly: 1 },
+      value: () => ce.function('Divide', [ce.number(2), ce.Pi]),
+      inverse: () => ce.function('Divide', [ce.Pi, ce.number(2)]),
+    },
+    {
+      pattern: ce.box([
+        'Subtract',
+        1,
+        ['Divide', 1, ['Power', ['Add', ['Multiply', 2, index], 1], 2]],
+      ]),
+      lowerBound: { exactly: 1 },
+      value: () => ce.function('Divide', [ce.Pi, ce.number(4)]),
+      inverse: () => ce.function('Divide', [ce.number(4), ce.Pi]),
+    },
+    // From the sine product formula at z = i.
+    {
+      pattern: ce.box(['Add', 1, ['Divide', 1, ['Power', index, 2]]]),
+      lowerBound: { exactly: 1 },
+      value: () => ce.function('Divide', [ce.function('Sinh', [ce.Pi]), ce.Pi]),
+      inverse: () =>
+        ce.function('Divide', [ce.Pi, ce.function('Sinh', [ce.Pi])]),
+    },
+  ];
+
+  // An identity with an exact lower bound holds for that bound only; a
+  // larger lower bound is a different product (a tail). The telescoping
+  // family holds from any bound at or above its minimum, as a function of
+  // `a`.
+  const applies = (rule: LowerBoundRule): boolean =>
+    'atLeast' in rule ? a >= rule.atLeast : a === rule.exactly;
+  const entries = table.filter((entry) => applies(entry.lowerBound));
+
+  // Structural match first: free, and the spelling the parser produces for
+  // the patterns as written.
+  for (const entry of entries)
+    if (entry.pattern.isSame(body)) return entry.value();
+
+  // The algebraic route is for a pure rational body with no common factor
+  // between numerator and denominator (see the function comment). The
+  // GCD test is conservative: a common factor with no integer root
+  // (`k² + 1`) also declines, and the product stays symbolic.
+  if (!isTransitivelyPure(body)) return undefined;
+  const parts = rationalPartsAsWritten(body, ce);
+  if (!parts) return undefined;
+  const [num, den] = parts;
+  if (polynomialDegree(num, index) < 0 || polynomialDegree(den, index) < 0)
+    return undefined;
+  if (polynomialDegree(polynomialGCD(num, den, index), index) !== 0)
+    return undefined;
+
+  // Numeric prefilter. Sample the body at three index values where no
+  // pattern is zero or singular (1 − 1/k² is 0 at k = 1), as machine floats.
+  // A pattern whose samples agree (direct or reciprocal) is a candidate for
+  // the algebraic check below; everything else is dismissed here cheaply.
+  const SAMPLES = [2, 3, 7];
+  const valueAt = (e: Expression, k: number): number | undefined => {
+    const v = e.subs({ [index]: ce.number(k) }).N();
+    if (!isNumber(v)) return undefined;
+    const x = v.re;
+    return Number.isFinite(x) && x !== 0 ? x : undefined;
+  };
+  const close = (x: number, y: number): boolean =>
+    Math.abs(x - y) <= 1e-9 * Math.max(1, Math.abs(x), Math.abs(y));
+  const bodySamples = SAMPLES.map((k) => valueAt(body, k));
+  if (bodySamples.some((x) => x === undefined)) return undefined;
+
+  // Two rational bodies are the same function of the index when their
+  // difference, put over a common denominator and cancelled, is zero.
+  const sameAs = (candidate: Expression, pattern: Expression): boolean =>
+    togetherReduced(ce.function('Subtract', [candidate, pattern])).isSame(0);
+
+  // A float literal in the body makes the result a float.
+  const result = (value: Expression): Expression =>
+    hasInexactLiteral(body) ? value.N() : value;
+
+  const reciprocal = ce.function('Divide', [ce.One, body]);
+  for (const entry of entries) {
+    const patternSamples = SAMPLES.map((k) => valueAt(entry.pattern, k));
+    if (patternSamples.some((x) => x === undefined)) continue;
+    const direct = patternSamples.every((x, i) => close(x!, bodySamples[i]!));
+    if (direct && sameAs(body, entry.pattern)) return result(entry.value());
+    const inverse = patternSamples.every((x, i) =>
+      close(x!, 1 / bodySamples[i]!)
+    );
+    if (inverse && sameAs(reciprocal, entry.pattern))
+      return result(entry.inverse());
   }
-
-  if (!lower.isSame(1)) return undefined;
-
-  // Wallis: Π_{k=1}^∞ (1 − 1/(2k)²) = 2/π. Match the canonicalized body.
-  const wallis = ce.box([
-    'Subtract',
-    1,
-    ['Divide', 1, ['Power', ['Multiply', 2, index], 2]],
-  ]);
-  if (wallis.isSame(body)) return ce.function('Divide', [ce.number(2), ce.Pi]);
-
-  // Odd-index Wallis analog: Π_{k=1}^∞ (1 − 1/(2k+1)²) = π/4.
-  const wallisOdd = ce.box([
-    'Subtract',
-    1,
-    ['Divide', 1, ['Power', ['Add', ['Multiply', 2, index], 1], 2]],
-  ]);
-  if (wallisOdd.isSame(body))
-    return ce.function('Divide', [ce.Pi, ce.number(4)]);
-
-  // Π_{k=1}^∞ (1 + 1/k²) = sinh(π)/π (from the sin product formula at z = i).
-  const onePlusInvSq = ce.box(['Add', 1, ['Divide', 1, ['Power', index, 2]]]);
-  if (onePlusInvSq.isSame(body))
-    return ce.function('Divide', [ce.function('Sinh', [ce.Pi]), ce.Pi]);
 
   return undefined;
 }
