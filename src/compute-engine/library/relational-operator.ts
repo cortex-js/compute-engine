@@ -4,10 +4,12 @@ import type {
   OperandDescriptor,
   OperatorDefinition,
   SymbolDefinitions,
+  EvaluateOptions,
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
 
 import { isRelationalOperator } from '../latex-syntax/utils.js';
+import { runWithEvaluationEffects } from '../effects-registry.js';
 import {
   isCollectionShaped,
   isFiniteBroadcastParticipant,
@@ -214,22 +216,99 @@ function evaluateChainOperands(
   }
   const ops: Expression[] = [];
   for (let i = 0; i < rawOps.length; i++) {
-    let v = rawOps[i].evaluate(evalOptions);
-    if (!v.isValid) return v;
-    if (numericApproximation && ops.length > 0) {
-      const exact = exactPairAtNearTie(
-        rawOps[i - 1],
-        ops[ops.length - 1],
-        rawOps[i],
-        v
-      );
-      if (exact !== undefined) {
-        ops[ops.length - 1] = exact[0];
-        v = exact[1];
-      }
+    const stop = chainStep(
+      ce,
+      rawOps,
+      i,
+      rawOps[i].evaluate(evalOptions),
+      ops,
+      numericApproximation,
+      pairIsFalse
+    );
+    if (stop !== undefined) return stop;
+  }
+  return ops;
+}
+
+/**
+ * One step of a chain of three or more operands, shared by
+ * `evaluateChainOperands` and `evaluateChainOperandsAsync`: `v` is the value
+ * of operand `i`, and `ops` the values before it. Appends `v` to `ops` and
+ * returns `undefined` to go on, or the early answer of the chain: `v` when
+ * it is invalid, `False` when the pair `(ops[i-1], v)` is `False`. Under
+ * `.N()` a near tie is decided exactly first (`exactPairAtNearTie`).
+ */
+function chainStep(
+  ce: ComputeEngine,
+  rawOps: ReadonlyArray<Expression>,
+  i: number,
+  v: Expression,
+  ops: Expression[],
+  numericApproximation: boolean | undefined,
+  pairIsFalse: (lhs: Expression, rhs: Expression) => boolean
+): Expression | undefined {
+  if (!v.isValid) return v;
+  if (numericApproximation && ops.length > 0) {
+    const exact = exactPairAtNearTie(
+      rawOps[i - 1],
+      ops[ops.length - 1],
+      rawOps[i],
+      v
+    );
+    if (exact !== undefined) {
+      ops[ops.length - 1] = exact[0];
+      v = exact[1];
     }
-    if (ops.length > 0 && pairIsFalse(ops[ops.length - 1], v)) return ce.False;
-    ops.push(v);
+  }
+  if (ops.length > 0 && pairIsFalse(ops[ops.length - 1], v)) return ce.False;
+  ops.push(v);
+  return undefined;
+}
+
+/**
+ * The asynchronous twin of `evaluateChainOperands`: each operand is
+ * evaluated with `evaluateAsync`, in order, so that a long operand yields to
+ * the event loop and honours the abort signal, with the same early stop
+ * (an invalid operand, a `False` adjacent pair) and the same near-tie
+ * handling under `.N()`. The synchronous work after an `await` (the pair
+ * decider, the exact re-evaluation at a near tie) runs with this
+ * evaluation's registry and context stack (`runWithEvaluationEffects`).
+ */
+async function evaluateChainOperandsAsync(
+  ce: ComputeEngine,
+  rawOps: ReadonlyArray<Expression>,
+  options: {
+    numericApproximation: boolean | undefined;
+    signal: AbortSignal | undefined;
+    _effects: EvaluateOptions['_effects'];
+    _contextStack: EvaluateOptions['_contextStack'] | undefined;
+  },
+  pairIsFalse: (lhs: Expression, rhs: Expression) => boolean
+): Promise<Expression[] | Expression> {
+  const { numericApproximation, _effects: effects, _contextStack } = options;
+  const inContext = <T>(f: () => T): T =>
+    runWithEvaluationEffects(ce, effects, f, _contextStack);
+  const ops: Expression[] = [];
+  if (rawOps.some(isCollectionShaped) || rawOps.length <= 2) {
+    for (const op of rawOps) ops.push(await op.evaluateAsync(options));
+    if (
+      numericApproximation &&
+      ops.length === 2 &&
+      !rawOps.some(isCollectionShaped)
+    ) {
+      const exact = inContext(() =>
+        exactPairAtNearTie(rawOps[0], ops[0], rawOps[1], ops[1])
+      );
+      if (exact !== undefined) return exact;
+    }
+    return ops;
+  }
+  for (let i = 0; i < rawOps.length; i++) {
+    const v = await rawOps[i].evaluateAsync(options);
+    const stop = inContext(() =>
+      chainStep(ce, rawOps, i, v, ops, numericApproximation, pairIsFalse)
+    );
+    if (stop !== undefined) return stop;
   }
   return ops;
 }
@@ -412,6 +491,342 @@ function inertRelation(
   return ce._fn(op, ops);
 }
 
+/**
+ * The `evaluate` and `evaluateAsync` handlers of a chainable relation
+ * (`Equal`, `NotEqual`, `Less`, `LessEqual`).
+ *
+ * These operators are `lazy`: their `canonical` handler needs the raw,
+ * direction-intact operands to decompose a chain (`a < b ≤ c`), and `lazy`
+ * also skips evaluating the arguments before the handler runs. So the
+ * handler evaluates them itself — otherwise a compound operand such as
+ * `Im(𝑖)` or `R^2` (with `R = [1,2,3]`) never folds — and a chain stops at
+ * the first adjacent pair that is `False` (`evaluateChainOperands`). The
+ * asynchronous twin awaits each operand with `evaluateAsync`, in order and
+ * with the same stop, so that a long operand (`Σ 1/k²` over many terms)
+ * yields to the event loop and honours the abort signal (GitHub issue
+ * #392); the synchronous handler ran it to the end. The verdict over the
+ * values (`decide`) is the same function on both routes.
+ */
+function chainedRelationHandlers(
+  op: keyof typeof CHAIN_PAIR_IS_FALSE,
+  decide: (
+    ce: ComputeEngine,
+    rawOps: ReadonlyArray<Expression>,
+    chain: Expression[] | Expression,
+    numericApproximation: boolean | undefined
+  ) => Expression | undefined
+): Pick<OperatorDefinition, 'evaluate' | 'evaluateAsync'> {
+  return {
+    evaluate: (rawOps, { engine: ce, numericApproximation }) =>
+      decide(
+        ce,
+        rawOps,
+        evaluateChainOperands(
+          ce,
+          rawOps,
+          numericApproximation,
+          CHAIN_PAIR_IS_FALSE[op](ce)
+        ),
+        numericApproximation
+      ),
+    evaluateAsync: async (
+      rawOps,
+      { engine: ce, numericApproximation, signal, effects, _contextStack }
+    ) => {
+      const chain = await evaluateChainOperandsAsync(
+        ce,
+        rawOps,
+        { numericApproximation, signal, _effects: effects, _contextStack },
+        CHAIN_PAIR_IS_FALSE[op](ce)
+      );
+      // The verdict runs after the `await`s: it may evaluate (an exact
+      // operand at a near tie, an assumption), and a synchronous evaluation
+      // after an `await` must run with this evaluation's registry and
+      // context stack (`docs/EFFECTS-MODEL.md`, rule 3 for an asynchronous
+      // handler).
+      return runWithEvaluationEffects(
+        ce,
+        effects,
+        () => decide(ce, rawOps, chain, numericApproximation),
+        _contextStack
+      );
+    },
+  };
+}
+
+/**
+ * The verdict of `Equal` over its evaluated operands. `chain` is what
+ * `evaluateChainOperands` (or its asynchronous twin) gave: the values, or
+ * the early answer of a chain (`False` at the first adjacent pair that is
+ * `False`, or an invalid operand). `rawOps` are the operands as written;
+ * they decide what an absent value means (`readComparisonAbsence`) and
+ * whether an inert answer changed anything (`inertRelation`).
+ */
+function decideEqual(
+  ce: ComputeEngine,
+  rawOps: ReadonlyArray<Expression>,
+  chain: Expression[] | Expression,
+  numericApproximation: boolean | undefined
+): Expression | undefined {
+  if (!Array.isArray(chain)) return chain;
+  const ops = chain;
+  // Element-wise broadcast when an operand evaluated to a collection, so a
+  // named list behaves like a literal one: `x^2+y^2 = R^2` broadcasts to a
+  // list of `Equal`s, matching the inequality operators (which already
+  // broadcast via the same helper) and Desmos semantics (Tycho report).
+  // Restricted to the list-vs-scalar case: when two or more operands are
+  // collections, whole-list equality stays a scalar boolean — broadcasting
+  // there would also recurse forever, since re-dispatching `Equal` on the
+  // same two collections re-enters this handler (`skipBroadcastForVectorOps`
+  // enforces the same rule for the engine-level broadcast).
+  if (broadcastableComparisonOperands(ops)) {
+    const bc = broadcastComparison(ce, 'Equal', ops, numericApproximation);
+    if (bc) return bc;
+  }
+  if (undecidedCollectionComparison(ops))
+    return inertRelation(ce, 'Equal', rawOps, ops);
+  // One element pair with no answer makes the WHOLE comparison undecided
+  // (user ruling of 2026-09-21): see `absentCollectionComparison`. The
+  // answer is the absent marker `Missing`, which compiled code spells
+  // `NaN`.
+  if (absentCollectionComparison(ops)) return ce.Missing;
+  // Absence semantics (§3.D, amended 2026-07-24): once broadcast has had
+  // its chance (so a list-vs-scalar operand comparison is per-cell), a
+  // SCALAR `Missing` operand makes the comparison `Missing` (Kleene), while
+  // a `NaN` operand makes it `False` (IEEE: `NaN == NaN` is `false`).
+  // `Missing` wins over `NaN` (Kleene propagation). Per-cell broadcast
+  // re-enters this handler on scalar cells, so the rule applies
+  // element-wise too. A `Missing` read from a numeric-domain slot
+  // (`number | missing`) is `NaN`, not Kleene (`readComparisonAbsence`).
+  const vals = readComparisonAbsence(ce, rawOps, ops);
+  if (vals.some((op) => isSymbol(op, 'Missing'))) return ce.Missing;
+  if (vals.some((op) => isNumber(op) && op.isNaN === true)) return ce.False;
+  let lhs: Expression | undefined = undefined;
+  for (const arg of ops) {
+    if (!lhs) lhs = arg;
+    else {
+      // Try quantity comparison first
+      const qcmp = quantityCompare(lhs, arg);
+      if (qcmp !== null) {
+        if (Math.abs(qcmp) > ce.tolerance) return ce.False;
+        lhs = arg;
+        continue;
+      }
+
+      const order = exactLiteralOrder(lhs, arg);
+      const test = order !== undefined ? order === 0 : eq(lhs, arg);
+      if (test === false) return ce.False;
+
+      // An undecidable comparison (free variables present, no proof
+      // either way) stays INERT: `x^2 = 4` is a *condition*, not a
+      // falsity — it evaluates to itself, like the inequality operators
+      // (`x^2 < 4` already stays symbolic) and like Mathematica's `==`.
+      // Decidable comparisons are unchanged (`2+2=4` → True,
+      // `x = x+1` → False when provable). This replaced the earlier
+      // pragmatic collapse-to-False, which silently ruined equations
+      // that were later piped into `Solve` (Tycho 0.72.0 report,
+      // item 8). Three-valued verification mode (`ce.isVerifying`)
+      // behaves identically. `inertRelation` keeps the *evaluated*
+      // operands (`x^2 = 2+2` → `x^2 = 4`).
+      if (test === undefined) return inertRelation(ce, 'Equal', rawOps, ops);
+    }
+  }
+  return ce.True;
+}
+
+/**
+ * The verdict of `NotEqual` over its evaluated operands. `chain` is what
+ * `evaluateChainOperands` (or its asynchronous twin) gave: the values, or
+ * the early answer of a chain (`False` at the first adjacent pair that is
+ * `False`, or an invalid operand). `rawOps` are the operands as written;
+ * they decide what an absent value means (`readComparisonAbsence`) and
+ * whether an inert answer changed anything (`inertRelation`).
+ */
+function decideNotEqual(
+  ce: ComputeEngine,
+  rawOps: ReadonlyArray<Expression>,
+  chain: Expression[] | Expression,
+  numericApproximation: boolean | undefined
+): Expression | undefined {
+  if (!Array.isArray(chain)) return chain;
+  const ops = chain;
+  if (ops.length < 2) return ce.False;
+  // Broadcast over a list operand that only appeared after evaluation (e.g.
+  // `R^2` with `R = [1,2,3]`), matching `Equal` and the literal-list form;
+  // list-vs-scalar only (see `Equal`'s handler for why 2+ collections stay
+  // a scalar boolean and would otherwise recurse).
+  if (broadcastableComparisonOperands(ops)) {
+    const bc = broadcastComparison(ce, 'NotEqual', ops, numericApproximation);
+    if (bc) return bc;
+  }
+  if (undecidedCollectionComparison(ops))
+    return inertRelation(ce, 'NotEqual', rawOps, ops);
+  // The same undecided marker as `Equal`, never its negation (user ruling
+  // of 2026-09-21): a comparison with no answer has no answer under
+  // negation either, so `NotEqual` must not report a confident `True`
+  // where `Equal` could not report `False`.
+  if (absentCollectionComparison(ops)) return ce.Missing;
+  // Absence semantics (§3.D, amended 2026-07-24): Kleene over `Missing`
+  // (`NotEqual(Missing, x) = Missing`), IEEE over `NaN` (`NotEqual(NaN, x)
+  // = True`). `Missing` wins over `NaN`; a numeric-domain slot's `Missing`
+  // reads as `NaN` (`readComparisonAbsence`).
+  const vals = readComparisonAbsence(ce, rawOps, ops);
+  if (vals.some((op) => isSymbol(op, 'Missing'))) return ce.Missing;
+  if (vals.some((op) => isNumber(op) && op.isNaN === true)) return ce.True;
+  let lhs: Expression | undefined = undefined;
+  for (const arg of ops!) {
+    if (!lhs) lhs = arg;
+    else {
+      const order = exactLiteralOrder(lhs, arg);
+      const test = order !== undefined ? order === 0 : lhs.isEqual(arg);
+      if (test === true) return ce.False;
+
+      // An undecidable comparison stays INERT (three-valued logic in
+      // every mode, matching `Equal` and the inequality operators) —
+      // but first try to *prove* the two sides distinct from assumed
+      // bounds. A proven strict inequality in either direction entails
+      // ≠ (e.g. `assume(z > 0)` ⇒ `z ≠ 0`), so rule guards like
+      // `; z ≠ 0` fire under such assumptions. If distinctness is not
+      // provable, stay symbolic: `x ≠ 4` is a condition, not a truth.
+      // (This replaced the earlier pragmatic collapse-to-True in normal
+      // evaluation mode — Tycho 0.72.0 report, item 8.)
+      if (test === undefined) {
+        const distinct =
+          compareFromAssumedBounds(lhs, arg, true) === true ||
+          compareFromAssumedBounds(arg, lhs, true) === true;
+        if (!distinct) return inertRelation(ce, 'NotEqual', rawOps, ops);
+      }
+      // Continue the loop - if all comparisons are not equal, return True
+    }
+  }
+  return ce.True;
+}
+
+/**
+ * The verdict of `Less` over its evaluated operands. `chain` is what
+ * `evaluateChainOperands` (or its asynchronous twin) gave: the values, or
+ * the early answer of a chain (`False` at the first adjacent pair that is
+ * `False`, or an invalid operand). `rawOps` are the operands as written;
+ * they decide what an absent value means (`readComparisonAbsence`) and
+ * whether an inert answer changed anything (`inertRelation`).
+ */
+function decideLess(
+  ce: ComputeEngine,
+  rawOps: ReadonlyArray<Expression>,
+  chain: Expression[] | Expression,
+  numericApproximation: boolean | undefined
+): Expression | undefined {
+  if (!Array.isArray(chain)) return chain;
+  const ops = chain;
+  // Element-wise broadcast when an operand evaluated to a collection (e.g.
+  // `|[1...5]-2| > 0`, canonical `Less(0, Abs(…))`). See `broadcastComparison`.
+  const bc = broadcastComparison(ce, 'Less', ops, numericApproximation);
+  if (bc) return bc;
+  // Absence semantics (§3.D, amended 2026-07-24): Kleene over `Missing`,
+  // IEEE over `NaN` (unordered ⇒ `False`). Applies per-cell too (broadcast
+  // re-enters this handler on scalar cells). A numeric-domain slot's
+  // `Missing` reads as `NaN` (`readComparisonAbsence`).
+  const vals = readComparisonAbsence(ce, rawOps, ops);
+  if (vals.some((op) => isSymbol(op, 'Missing'))) return ce.Missing;
+  if (vals.some((op) => isNumber(op) && op.isNaN === true)) return ce.False;
+  if (ops.length === 2) {
+    const [lhs, rhs] = ops;
+    // Try quantity comparison first
+    const qcmp = quantityCompare(lhs, rhs);
+    if (qcmp !== null) return qcmp < 0 ? ce.True : ce.False;
+    const order = exactLiteralOrder(lhs, rhs);
+    const cmp =
+      order !== undefined
+        ? order < 0
+        : (lhs.isLess(rhs) ?? compareFromAssumedBounds(lhs, rhs, true));
+    if (cmp === undefined) return inertRelation(ce, 'Less', rawOps, ops);
+    return cmp ? ce.True : ce.False;
+  }
+  if (ops.length < 2) return ce.True;
+  // Less can have multiple arguments, i.e. a < b < c < d
+  let lhs: Expression | undefined = undefined;
+  for (const arg of ops!) {
+    if (!lhs) lhs = arg;
+    else {
+      const qcmp = quantityCompare(lhs, arg);
+      if (qcmp !== null) {
+        if (qcmp >= 0) return ce.False;
+      } else {
+        const order = exactLiteralOrder(lhs, arg);
+        const cmp =
+          order !== undefined
+            ? order < 0
+            : (lhs.isLess(arg) ?? compareFromAssumedBounds(lhs, arg, true));
+        if (cmp === undefined) return inertRelation(ce, 'Less', rawOps, ops);
+        if (cmp === false) return ce.False;
+      }
+      lhs = arg;
+    }
+  }
+  return ce.True;
+}
+
+/**
+ * The verdict of `LessEqual` over its evaluated operands. `chain` is what
+ * `evaluateChainOperands` (or its asynchronous twin) gave: the values, or
+ * the early answer of a chain (`False` at the first adjacent pair that is
+ * `False`, or an invalid operand). `rawOps` are the operands as written;
+ * they decide what an absent value means (`readComparisonAbsence`) and
+ * whether an inert answer changed anything (`inertRelation`).
+ */
+function decideLessEqual(
+  ce: ComputeEngine,
+  rawOps: ReadonlyArray<Expression>,
+  chain: Expression[] | Expression,
+  numericApproximation: boolean | undefined
+): Expression | undefined {
+  if (!Array.isArray(chain)) return chain;
+  const ops = chain;
+  // Element-wise broadcast when an operand evaluated to a collection.
+  const bc = broadcastComparison(ce, 'LessEqual', ops, numericApproximation);
+  if (bc) return bc;
+  // Absence semantics (§3.D, amended 2026-07-24): Kleene over `Missing`,
+  // IEEE over `NaN` (unordered ⇒ `False`). See `Less`.
+  const vals = readComparisonAbsence(ce, rawOps, ops);
+  if (vals.some((op) => isSymbol(op, 'Missing'))) return ce.Missing;
+  if (vals.some((op) => isNumber(op) && op.isNaN === true)) return ce.False;
+  if (ops.length === 2) {
+    const [lhs, rhs] = ops;
+    const qcmp = quantityCompare(lhs, rhs);
+    if (qcmp !== null) return qcmp <= 0 ? ce.True : ce.False;
+    const order = exactLiteralOrder(lhs, rhs);
+    const cmp =
+      order !== undefined
+        ? order <= 0
+        : (lhs.isLessEqual(rhs) ?? compareFromAssumedBounds(lhs, rhs, false));
+    if (cmp === undefined) return inertRelation(ce, 'LessEqual', rawOps, ops);
+    return cmp ? ce.True : ce.False;
+  }
+  if (ops.length < 2) return ce.True;
+  // LessEqual can have multiple arguments, i.e. a <= b <= c <= d
+  let lhs: Expression | undefined = undefined;
+  for (const arg of ops!) {
+    if (!lhs) lhs = arg;
+    else {
+      const qcmp = quantityCompare(lhs, arg);
+      if (qcmp !== null) {
+        if (qcmp > 0) return ce.False;
+      } else {
+        const order = exactLiteralOrder(lhs, arg);
+        const cmp =
+          order !== undefined
+            ? order <= 0
+            : (lhs.isLessEqual(arg) ??
+              compareFromAssumedBounds(lhs, arg, false));
+        if (cmp === undefined)
+          return inertRelation(ce, 'LessEqual', rawOps, ops);
+        if (cmp === false) return ce.False;
+      }
+      lhs = arg;
+    }
+  }
+  return ce.True;
+}
 export const RELOP_LIBRARY: SymbolDefinitions = {
   Congruent: {
     description: 'Indicate that two expressions are congruent modulo a number',
@@ -593,86 +1008,9 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
       return undefined;
     },
 
-    evaluate: (rawOps, { engine: ce, numericApproximation }) => {
-      if (rawOps.length < 2) return ce.True;
-      // This operator is `lazy` (so its `canonical` handler sees raw,
-      // direction-intact operands for chain decomposition). `lazy` also skips
-      // evaluating the arguments before this handler runs, so evaluate them
-      // here — otherwise a compound operand like `R^2` (with `R = [1,2,3]`)
-      // never folds to the list `[1,4,9]`. A chain (`a = b = c`) stops at
-      // the first adjacent pair that is `False` (`evaluateChainOperands`).
-      const chain = evaluateChainOperands(
-        ce,
-        rawOps,
-        numericApproximation,
-        CHAIN_PAIR_IS_FALSE.Equal(ce)
-      );
-      if (!Array.isArray(chain)) return chain;
-      const ops = chain;
-      // Element-wise broadcast when an operand evaluated to a collection, so a
-      // named list behaves like a literal one: `x^2+y^2 = R^2` broadcasts to a
-      // list of `Equal`s, matching the inequality operators (which already
-      // broadcast via the same helper) and Desmos semantics (Tycho report).
-      // Restricted to the list-vs-scalar case: when two or more operands are
-      // collections, whole-list equality stays a scalar boolean — broadcasting
-      // there would also recurse forever, since re-dispatching `Equal` on the
-      // same two collections re-enters this handler (`skipBroadcastForVectorOps`
-      // enforces the same rule for the engine-level broadcast).
-      if (broadcastableComparisonOperands(ops)) {
-        const bc = broadcastComparison(ce, 'Equal', ops, numericApproximation);
-        if (bc) return bc;
-      }
-      if (undecidedCollectionComparison(ops))
-        return inertRelation(ce, 'Equal', rawOps, ops);
-      // One element pair with no answer makes the WHOLE comparison undecided
-      // (user ruling of 2026-09-21): see `absentCollectionComparison`. The
-      // answer is the absent marker `Missing`, which compiled code spells
-      // `NaN`.
-      if (absentCollectionComparison(ops)) return ce.Missing;
-      // Absence semantics (§3.D, amended 2026-07-24): once broadcast has had
-      // its chance (so a list-vs-scalar operand comparison is per-cell), a
-      // SCALAR `Missing` operand makes the comparison `Missing` (Kleene), while
-      // a `NaN` operand makes it `False` (IEEE: `NaN == NaN` is `false`).
-      // `Missing` wins over `NaN` (Kleene propagation). Per-cell broadcast
-      // re-enters this handler on scalar cells, so the rule applies
-      // element-wise too. A `Missing` read from a numeric-domain slot
-      // (`number | missing`) is `NaN`, not Kleene (`readComparisonAbsence`).
-      const vals = readComparisonAbsence(ce, rawOps, ops);
-      if (vals.some((op) => isSymbol(op, 'Missing'))) return ce.Missing;
-      if (vals.some((op) => isNumber(op) && op.isNaN === true)) return ce.False;
-      let lhs: Expression | undefined = undefined;
-      for (const arg of ops) {
-        if (!lhs) lhs = arg;
-        else {
-          // Try quantity comparison first
-          const qcmp = quantityCompare(lhs, arg);
-          if (qcmp !== null) {
-            if (Math.abs(qcmp) > ce.tolerance) return ce.False;
-            lhs = arg;
-            continue;
-          }
-
-          const order = exactLiteralOrder(lhs, arg);
-          const test = order !== undefined ? order === 0 : eq(lhs, arg);
-          if (test === false) return ce.False;
-
-          // An undecidable comparison (free variables present, no proof
-          // either way) stays INERT: `x^2 = 4` is a *condition*, not a
-          // falsity — it evaluates to itself, like the inequality operators
-          // (`x^2 < 4` already stays symbolic) and like Mathematica's `==`.
-          // Decidable comparisons are unchanged (`2+2=4` → True,
-          // `x = x+1` → False when provable). This replaced the earlier
-          // pragmatic collapse-to-False, which silently ruined equations
-          // that were later piped into `Solve` (Tycho 0.72.0 report,
-          // item 8). Three-valued verification mode (`ce.isVerifying`)
-          // behaves identically. `inertRelation` keeps the *evaluated*
-          // operands (`x^2 = 2+2` → `x^2 = 4`).
-          if (test === undefined)
-            return inertRelation(ce, 'Equal', rawOps, ops);
-        }
-      }
-      return ce.True;
-    },
+    // The operands are evaluated by the handlers (this operator is `lazy`,
+    // see `chainedRelationHandlers`); the verdict is `decideEqual`.
+    ...chainedRelationHandlers('Equal', decideEqual),
   } as OperatorDefinition,
 
   IdenticallyEqual: {
@@ -687,6 +1025,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     // `lazy` for the same reason as `Equal`: the `canonical` handler needs the
     // raw, direction-intact operands to decompose a chain (`a ≡ b ≡ c`).
     lazy: true,
+    evaluatesOperands: true,
 
     // Same absence semantics as `Equal` (§3.D): a `Missing` operand makes the
     // comparison `Missing` (Kleene), a `NaN` operand makes it `False` (IEEE).
@@ -858,75 +1197,9 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
       return undefined;
     },
 
-    evaluate: (rawOps, { engine: ce, numericApproximation }) => {
-      // `lazy` skips argument evaluation before this handler runs (see the
-      // `Less` handler): evaluate the operands here so compound operands fold.
-      // A chain stops at the first adjacent pair that is `False`
-      // (`evaluateChainOperands`).
-      const chain = evaluateChainOperands(
-        ce,
-        rawOps,
-        numericApproximation,
-        CHAIN_PAIR_IS_FALSE.NotEqual(ce)
-      );
-      if (!Array.isArray(chain)) return chain;
-      const ops = chain;
-      if (ops.length < 2) return ce.False;
-      // Broadcast over a list operand that only appeared after evaluation (e.g.
-      // `R^2` with `R = [1,2,3]`), matching `Equal` and the literal-list form;
-      // list-vs-scalar only (see `Equal`'s handler for why 2+ collections stay
-      // a scalar boolean and would otherwise recurse).
-      if (broadcastableComparisonOperands(ops)) {
-        const bc = broadcastComparison(
-          ce,
-          'NotEqual',
-          ops,
-          numericApproximation
-        );
-        if (bc) return bc;
-      }
-      if (undecidedCollectionComparison(ops))
-        return inertRelation(ce, 'NotEqual', rawOps, ops);
-      // The same undecided marker as `Equal`, never its negation (user ruling
-      // of 2026-09-21): a comparison with no answer has no answer under
-      // negation either, so `NotEqual` must not report a confident `True`
-      // where `Equal` could not report `False`.
-      if (absentCollectionComparison(ops)) return ce.Missing;
-      // Absence semantics (§3.D, amended 2026-07-24): Kleene over `Missing`
-      // (`NotEqual(Missing, x) = Missing`), IEEE over `NaN` (`NotEqual(NaN, x)
-      // = True`). `Missing` wins over `NaN`; a numeric-domain slot's `Missing`
-      // reads as `NaN` (`readComparisonAbsence`).
-      const vals = readComparisonAbsence(ce, rawOps, ops);
-      if (vals.some((op) => isSymbol(op, 'Missing'))) return ce.Missing;
-      if (vals.some((op) => isNumber(op) && op.isNaN === true)) return ce.True;
-      let lhs: Expression | undefined = undefined;
-      for (const arg of ops!) {
-        if (!lhs) lhs = arg;
-        else {
-          const order = exactLiteralOrder(lhs, arg);
-          const test = order !== undefined ? order === 0 : lhs.isEqual(arg);
-          if (test === true) return ce.False;
-
-          // An undecidable comparison stays INERT (three-valued logic in
-          // every mode, matching `Equal` and the inequality operators) —
-          // but first try to *prove* the two sides distinct from assumed
-          // bounds. A proven strict inequality in either direction entails
-          // ≠ (e.g. `assume(z > 0)` ⇒ `z ≠ 0`), so rule guards like
-          // `; z ≠ 0` fire under such assumptions. If distinctness is not
-          // provable, stay symbolic: `x ≠ 4` is a condition, not a truth.
-          // (This replaced the earlier pragmatic collapse-to-True in normal
-          // evaluation mode — Tycho 0.72.0 report, item 8.)
-          if (test === undefined) {
-            const distinct =
-              compareFromAssumedBounds(lhs, arg, true) === true ||
-              compareFromAssumedBounds(arg, lhs, true) === true;
-            if (!distinct) return inertRelation(ce, 'NotEqual', rawOps, ops);
-          }
-          // Continue the loop - if all comparisons are not equal, return True
-        }
-      }
-      return ce.True;
-    },
+    // The operands are evaluated by the handlers (this operator is `lazy`,
+    // see `chainedRelationHandlers`); the verdict is `decideNotEqual`.
+    ...chainedRelationHandlers('NotEqual', decideNotEqual),
   } as OperatorDefinition,
 
   // Every relation of this family accepts a single operand as the degenerate
@@ -971,69 +1244,9 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
 
     eq: (a, b, prover) => inequalityEq(a, b, 'Greater', prover),
 
-    evaluate: (rawOps, { engine: ce, numericApproximation }) => {
-      // This operator is `lazy` (so its `canonical` handler can see raw,
-      // direction-intact operands for chain decomposition). `lazy` also skips
-      // evaluating the arguments before this handler runs, so evaluate them
-      // here — otherwise a compound operand like `Im(𝑖)` never folds to `1`.
-      // A chain (`a < b < c`) stops at the first adjacent pair that is `False`
-      // (`evaluateChainOperands`).
-      const chain = evaluateChainOperands(
-        ce,
-        rawOps,
-        numericApproximation,
-        CHAIN_PAIR_IS_FALSE.Less(ce)
-      );
-      if (!Array.isArray(chain)) return chain;
-      const ops = chain;
-      // Element-wise broadcast when an operand evaluated to a collection (e.g.
-      // `|[1...5]-2| > 0`, canonical `Less(0, Abs(…))`). See `broadcastComparison`.
-      const bc = broadcastComparison(ce, 'Less', ops, numericApproximation);
-      if (bc) return bc;
-      // Absence semantics (§3.D, amended 2026-07-24): Kleene over `Missing`,
-      // IEEE over `NaN` (unordered ⇒ `False`). Applies per-cell too (broadcast
-      // re-enters this handler on scalar cells). A numeric-domain slot's
-      // `Missing` reads as `NaN` (`readComparisonAbsence`).
-      const vals = readComparisonAbsence(ce, rawOps, ops);
-      if (vals.some((op) => isSymbol(op, 'Missing'))) return ce.Missing;
-      if (vals.some((op) => isNumber(op) && op.isNaN === true)) return ce.False;
-      if (ops.length === 2) {
-        const [lhs, rhs] = ops;
-        // Try quantity comparison first
-        const qcmp = quantityCompare(lhs, rhs);
-        if (qcmp !== null) return qcmp < 0 ? ce.True : ce.False;
-        const order = exactLiteralOrder(lhs, rhs);
-        const cmp =
-          order !== undefined
-            ? order < 0
-            : (lhs.isLess(rhs) ?? compareFromAssumedBounds(lhs, rhs, true));
-        if (cmp === undefined) return inertRelation(ce, 'Less', rawOps, ops);
-        return cmp ? ce.True : ce.False;
-      }
-      if (ops.length < 2) return ce.True;
-      // Less can have multiple arguments, i.e. a < b < c < d
-      let lhs: Expression | undefined = undefined;
-      for (const arg of ops!) {
-        if (!lhs) lhs = arg;
-        else {
-          const qcmp = quantityCompare(lhs, arg);
-          if (qcmp !== null) {
-            if (qcmp >= 0) return ce.False;
-          } else {
-            const order = exactLiteralOrder(lhs, arg);
-            const cmp =
-              order !== undefined
-                ? order < 0
-                : (lhs.isLess(arg) ?? compareFromAssumedBounds(lhs, arg, true));
-            if (cmp === undefined)
-              return inertRelation(ce, 'Less', rawOps, ops);
-            if (cmp === false) return ce.False;
-          }
-          lhs = arg;
-        }
-      }
-      return ce.True;
-    },
+    // The operands are evaluated by the handlers (this operator is `lazy`,
+    // see `chainedRelationHandlers`); the verdict is `decideLess`.
+    ...chainedRelationHandlers('Less', decideLess),
   } as OperatorDefinition,
 
   NotLess: {
@@ -1107,69 +1320,9 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
 
     eq: (a, b, prover) => inequalityEq(a, b, 'LessGreater', prover),
 
-    evaluate: (rawOps, { engine: ce, numericApproximation }) => {
-      // `lazy` skips argument evaluation (see `Less` above): evaluate here.
-      // A chain stops at the first `False` pair (`evaluateChainOperands`).
-      const chain = evaluateChainOperands(
-        ce,
-        rawOps,
-        numericApproximation,
-        CHAIN_PAIR_IS_FALSE.LessEqual(ce)
-      );
-      if (!Array.isArray(chain)) return chain;
-      const ops = chain;
-      // Element-wise broadcast when an operand evaluated to a collection.
-      const bc = broadcastComparison(
-        ce,
-        'LessEqual',
-        ops,
-        numericApproximation
-      );
-      if (bc) return bc;
-      // Absence semantics (§3.D, amended 2026-07-24): Kleene over `Missing`,
-      // IEEE over `NaN` (unordered ⇒ `False`). See `Less`.
-      const vals = readComparisonAbsence(ce, rawOps, ops);
-      if (vals.some((op) => isSymbol(op, 'Missing'))) return ce.Missing;
-      if (vals.some((op) => isNumber(op) && op.isNaN === true)) return ce.False;
-      if (ops.length === 2) {
-        const [lhs, rhs] = ops;
-        const qcmp = quantityCompare(lhs, rhs);
-        if (qcmp !== null) return qcmp <= 0 ? ce.True : ce.False;
-        const order = exactLiteralOrder(lhs, rhs);
-        const cmp =
-          order !== undefined
-            ? order <= 0
-            : (lhs.isLessEqual(rhs) ??
-              compareFromAssumedBounds(lhs, rhs, false));
-        if (cmp === undefined)
-          return inertRelation(ce, 'LessEqual', rawOps, ops);
-        return cmp ? ce.True : ce.False;
-      }
-      if (ops.length < 2) return ce.True;
-      // LessEqual can have multiple arguments, i.e. a <= b <= c <= d
-      let lhs: Expression | undefined = undefined;
-      for (const arg of ops!) {
-        if (!lhs) lhs = arg;
-        else {
-          const qcmp = quantityCompare(lhs, arg);
-          if (qcmp !== null) {
-            if (qcmp > 0) return ce.False;
-          } else {
-            const order = exactLiteralOrder(lhs, arg);
-            const cmp =
-              order !== undefined
-                ? order <= 0
-                : (lhs.isLessEqual(arg) ??
-                  compareFromAssumedBounds(lhs, arg, false));
-            if (cmp === undefined)
-              return inertRelation(ce, 'LessEqual', rawOps, ops);
-            if (cmp === false) return ce.False;
-          }
-          lhs = arg;
-        }
-      }
-      return ce.True;
-    },
+    // The operands are evaluated by the handlers (this operator is `lazy`,
+    // see `chainedRelationHandlers`); the verdict is `decideLessEqual`.
+    ...chainedRelationHandlers('LessEqual', decideLessEqual),
   } as OperatorDefinition,
 
   NotLessNotEqual: {

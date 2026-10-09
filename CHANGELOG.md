@@ -1,3 +1,42 @@
+## Unreleased
+
+### Issues Resolved
+
+- **`evaluateAsync` yields under the relations**
+  ([#392](https://github.com/cortex-js/compute-engine/issues/392), contributed by
+  [enumeratio](https://github.com/enumeratio)). `Less(Sum(1/k^2, k, 1, 400000), 2)`
+  aborted after 50 ms still ran to the end, seconds later, with no event-loop
+  tick: a lazy operator with a synchronous handler evaluates its held operands
+  itself. `Equal`, `NotEqual`, `Less` and `LessEqual` (and so `Greater` and
+  `GreaterEqual`, which canonicalize to them) now have an `evaluateAsync`
+  handler that awaits each operand with `evaluateAsync`, in order, with the
+  same early stop as `evaluate()` (a chain `3 < 2 < X` is `False` without
+  evaluating `X`) and the same exact re-read of a near tie under `.N()`, so
+  the aborted evaluation above rejects with a `CancellationError` after about
+  50 ms. The values are those of `evaluate()`: an undecidable `x^2 = 2 + 2` is
+  still `x^2 == 4`. An operator can also declare `evaluatesOperands: true`,
+  meaning its handler demands and evaluates every held operand and reads
+  nothing else of their structure; under `evaluateAsync` the operands are then
+  awaited, in order, and the handler runs on the values. The flag is set on
+  `IdenticallyEqual`. A lazy operator that reads the structure of an operand
+  (`Numerator`, `IsSame`, `Same`) does not set it, and the route is skipped
+  under `.N()`.
+
+- **`evaluateAsync` yields in the body of a user function**
+  ([#392](https://github.com/cortex-js/compute-engine/issues/392), contributed by
+  [enumeratio](https://github.com/enumeratio)). With `f(n) = Σ 1/k²`,
+  `f(400000)` aborted after 50 ms ran to the end: the body statements were
+  evaluated with the synchronous `evaluate()`. Under `evaluateAsync` they are now
+  awaited in order (`evaluateStatementsAsync`, as `Block` does) and so are the
+  arguments, so `f(400000)` rejects with a `CancellationError` after about 50
+  ms, and the values are those of `evaluate()`. An application of a literal
+  whose body is already suspended on this engine (a recursive body, or a
+  second call from another evaluation) and an application whose argument has
+  a free symbol still run synchronously; a suspended application holds back
+  nothing else, neither a concurrent symbolic call nor the same literal on
+  another engine. A result computed while another evaluation reassigned a
+  value the body reads is not memoized. `evaluate()` is unchanged.
+
 ## 0.151.0 _2026-10-08_
 
 ### Behavior Changes

@@ -6022,7 +6022,7 @@ export class BoxedFunction
       //
 
       if (isValueDef(this._def))
-        return applyFunctionLiteral(this, this._def.value, options);
+        return applyFunctionLiteralAsync(this, this._def.value, options);
 
       const def = this._def.operator;
 
@@ -6924,15 +6924,48 @@ export class BoxedFunction
         // one that SCOPES them (`Block`, a big operator) orders and binds
         // their evaluation itself; one that QUOTES them holds data. An
         // `evaluateAsync` handler awaits its own operands.
-        const handlerOps =
-          this.engine._hasAsyncOnlyOperator &&
+        const demandsOperands =
           def.lazy === true &&
           def.evaluateAsync === undefined &&
           !def.selectsOperands &&
           !def.scoped &&
-          def.holdClass !== 'quote'
-            ? await awaitAsyncOnlyDescendants(tail, options)
-            : tail;
+          def.holdClass !== 'quote';
+        // An operator whose handler only evaluates its operands
+        // (`evaluatesOperands`) has them evaluated here, in order, so that a
+        // long operand yields and honors the abort signal; the handler then
+        // evaluates values. Not under `.N()`: a comparison near a tie
+        // re-reads the operand as written to decide it exactly.
+        let handlerOps: ReadonlyArray<Expression> = tail;
+        let operandsEvaluated = false;
+        if (
+          demandsOperands &&
+          def.evaluatesOperands &&
+          def.evaluate !== undefined &&
+          !numericApproximation
+        ) {
+          const operandOpts = {
+            ...operandOptions(options),
+            _effects: effects,
+            _contextStack: contextStack,
+          };
+          const values: Expression[] = [];
+          for (const x of tail) values.push(await x.evaluateAsync(operandOpts));
+          // What an absent value (`Missing`) means can depend on the declared
+          // type of the operand it came from (`x: number | missing` reads as
+          // `NaN`), which only the operand as written carries: at such a
+          // position the handler gets the operand as written, as on the
+          // synchronous route, and evaluates it again (a symbol read); the
+          // other positions keep their value, so no long operand runs twice.
+          handlerOps = values.map((v, i) =>
+            isAbsentScalarSymbol(v) ? tail[i] : v
+          );
+          // An operand kept as written may hold an asynchronous-only
+          // operator, which the synchronous handler cannot evaluate.
+          if (this.engine._hasAsyncOnlyOperator)
+            handlerOps = await awaitAsyncOnlyDescendants(handlerOps, options);
+          operandsEvaluated = true;
+        } else if (this.engine._hasAsyncOnlyOperator && demandsOperands)
+          handlerOps = await awaitAsyncOnlyDescendants(tail, options);
         // The handler call itself is synchronous (an `evaluateAsync` handler
         // returns its promise at its first `await`). For that synchronous
         // part, publish this evaluation's registry in the engine slot, so
@@ -6945,10 +6978,32 @@ export class BoxedFunction
         value = await runWithEvaluationEffects(
           engine,
           effects,
-          () =>
-            def.evaluateAsync?.(tail, opts) ?? def.evaluate?.(handlerOps, opts),
+          () => {
+            if (def.evaluateAsync !== undefined)
+              return def.evaluateAsync(tail, opts);
+            // A user function: the body statements are awaited.
+            const applyAwaiting = (
+              def.evaluate as
+                | {
+                    applyAwaiting?: (
+                      xs: ReadonlyArray<Expression>,
+                      o: typeof opts
+                    ) =>
+                      Promise<Expression | undefined> | Expression | undefined;
+                  }
+                | undefined
+            )?.applyAwaiting;
+            return applyAwaiting !== undefined
+              ? applyAwaiting(handlerOps, opts)
+              : def.evaluate?.(handlerOps, opts);
+          },
           contextStack
         );
+        // A handler that answers `undefined` leaves the operator as it is;
+        // over evaluated operands that is the operator over the values, as
+        // an inert comparison answers on the synchronous route.
+        if (value === undefined && operandsEvaluated)
+          value = engine._fn(this._operator, [...handlerOps]);
       } catch (e) {
         value = handlerThrowToErrorValue(this.engine, e, def, this._operator);
       } finally {
@@ -9000,15 +9055,90 @@ function declaredScalarConformance(
   );
 }
 
+/**
+ * The asynchronous route of {@link applyFunctionLiteral}: the arguments are
+ * awaited with `evaluateAsync`, and the body of the function literal runs
+ * its statements with `evaluateStatementsAsync` (`awaitStatements`), so that
+ * `f(400000)` with `f(n) = Σ 1/k²` yields and honors the abort signal. Every
+ * other step (broadcast, conformance, currying) is the synchronous one.
+ */
+async function applyFunctionLiteralAsync(
+  expr: BoxedFunction,
+  def: BoxedValueDefinition,
+  options?: Partial<EvaluateOptions>
+): Promise<Expression> {
+  const engine = expr.engine;
+  // This application keeps its frames on its own copy of the context stack,
+  // as a scoped operator does (step 4 of `evaluateAsync`).
+  const effects =
+    options?._effects ?? engine._evaluationEffects ?? engine.effects;
+  const contextStack = [
+    ...(options?._contextStack ?? engine._evalContextStack),
+  ];
+  const carried = {
+    ...options,
+    _effects: effects,
+    _contextStack: contextStack,
+  };
+  // The callee is read once, before the arguments are evaluated, and handed
+  // to the application: an argument that reassigns the function (an
+  // `Assign` in it) must not change which literal is applied, as it does
+  // not on the synchronous route, where the one read precedes the
+  // arguments.
+  const value = calleeValue(expr, def);
+  let ops: Expression[] | undefined;
+  if (value && value.type.matches('function') && !value.type.isUnknown) {
+    ops = [];
+    for (const x of expr.ops)
+      ops.push(await x.evaluateAsync(operandOptions(carried)));
+  }
+  return await runWithEvaluationEffects(
+    engine,
+    effects,
+    () => applyFunctionLiteralWith(expr, def, carried, value, ops, true),
+    contextStack
+  );
+}
+
+/** The function literal that an application of `expr` applies: the value
+ * of its definition, read now. */
+function calleeValue(
+  expr: BoxedFunction,
+  def: BoxedValueDefinition
+): Expression | undefined {
+  return def.isConstant
+    ? def.value
+    : expr.engine._getSymbolValue(expr.operator);
+}
+
 function applyFunctionLiteral(
   expr: BoxedFunction,
   def: BoxedValueDefinition,
   options?: Partial<EvaluateOptions>
 ): Expression {
-  const value = def.isConstant
-    ? def.value
-    : expr.engine._getSymbolValue(expr.operator);
+  return applyFunctionLiteralWith(
+    expr,
+    def,
+    options,
+    calleeValue(expr, def)
+  ) as Expression;
+}
 
+/**
+ * `value` is the literal to apply (`calleeValue`), read by the caller before
+ * anything else ran. `evaluatedOps` are the arguments when the caller has
+ * evaluated them already. With `awaitBody`, the final application of the
+ * literal may answer a `Promise` (`ApplyOptions.awaitStatements`); no other
+ * step does.
+ */
+function applyFunctionLiteralWith(
+  expr: BoxedFunction,
+  def: BoxedValueDefinition,
+  options: Partial<EvaluateOptions> | undefined,
+  value: Expression | undefined,
+  evaluatedOps?: Expression[],
+  awaitBody = false
+): Expression | Promise<Expression> {
   if (value && !value.type.matches('function')) {
     if (!value.isValid) return expr;
     return expr.engine.typeError('function', value.type, value.toString());
@@ -9018,7 +9148,8 @@ function applyFunctionLiteral(
   // (`operandOptions`), so a body that reads a lazy argument as a collection
   // reads the whole collection, not its display preview. The body itself
   // keeps the caller's options, since it produces the result.
-  const ops = expr.ops.map((x) => x.evaluate(operandOptions(options)));
+  const ops =
+    evaluatedOps ?? expr.ops.map((x) => x.evaluate(operandOptions(options)));
   if (!value || value.type.isUnknown) {
     // The cached `_def` may be a function-typed *value* placeholder (created
     // by the `Assign`/`Declare` canonical pass, e.g. a block-local one-step
@@ -9310,7 +9441,7 @@ function applyFunctionLiteral(
   return apply(
     value,
     ops,
-    options,
+    awaitBody ? { ...options, awaitStatements: true } : options,
     'bubble',
     expr._withParseScope(() => expr.engine.function(expr.operator, ops))
   );

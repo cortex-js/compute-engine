@@ -253,6 +253,10 @@ type OperatorDefinitionFlags = {
    * to evaluate, so an error in an operand it does not choose is dead code.
    * Only valid on a `lazy` operator. See `types-definitions.ts`. */
   selectsOperands: boolean;
+  /** True when this lazy operator's handler only evaluates its held operands,
+   * so the asynchronous route may evaluate them for it. Only valid on a
+   * `lazy` operator. See `types-definitions.ts`. */
+  evaluatesOperands: boolean;
   /** True when every argument must be written with its parameter's name (an
    * object-type constructor). See `types-definitions.ts`. */
   namedArgumentsRequired: boolean;

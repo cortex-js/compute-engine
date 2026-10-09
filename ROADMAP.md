@@ -1,6 +1,6 @@
 # Compute Engine — Roadmap
 
-**Last updated:** 2026-09-30.
+**Last updated:** 2026-10-08.
 
 This document tracks **remaining** work; an item leaves this file once it lands.
 Detail on completed work lives in git history, `CHANGELOG.md`, the linked source
@@ -170,35 +170,45 @@ it. What remains:
   `Sum`) compiles real. Found 2026-10-08 by the review of the real-lane
   ascription.
 
-### A user function, a relation and most other lazy heads still run their operands synchronously under `evaluateAsync` (OPEN, design decision — issue #392, found 2026-10-07)
+### Some lazy heads and two forms of `N` still run their operands synchronously under `evaluateAsync` (OPEN, issue #392, found 2026-10-07)
 
-`N`, `Add`, `Multiply`, `Evaluate` and `ReleaseHold` now have an
-asynchronous twin that evaluates the held operands with `evaluateAsync`, so
-a `Sum` under them yields and honours an abort signal. The other lazy
-operators with a synchronous handler only (about 140, among them the nine
-relations `Equal`, `Less`, …, and the application of a user function, whose
-body statements are evaluated by `applyFunctionLiteral()` in
-`boxed-function.ts` with the synchronous `evaluateStatements()`) still run
-their operands to the end: `Less(Sum(1/k^2, k, 1, 400000), 2)` and `f(400000)`
-with `f(n) = Σ 1/k²` do not yield and cannot be aborted. Two forms of `N`
-block too: `N(x, p)` with `p` above the precision of the engine minus the
-guard digits (`p ≥ 17` on a default engine), and a goal `N(x, [p, a])`,
-because `_withTransientPrecision` raises the precision of the engine, a
-global of the bignum library, for the time of the computation, and the
-raised precision cannot span an `await` while other evaluations run; a
-per-evaluation working precision would remove that limit. The asynchronous
-route already has a classification of the lazy operators that DEMAND every
-held operand (not `selectsOperands`, not `scoped`, not `holdClass:
-'quote'`), used to await asynchronous-only descendants
-(`awaitAsyncOnlyDescendants()`). Decision needed: give that class a default
-asynchronous behavior (await each held operand with `evaluateAsync`, then
-run the synchronous handler on the values), or add twins one by one. The
-default is not safe as it stands: a lazy operator that reads the structure
-of its operand (`Numerator`, `Denominator`, `Interpret`, `N` before its
-twin) must not receive an evaluated operand, so the class would need a flag
-that says "the handler only evaluates its operands". The function body
-needs its own asynchronous application (`evaluateStatementsAsync()` exists
-and is used by `Block`).
+`N`, `Add`, `Multiply`, `Evaluate`, `ReleaseHold` and the four chainable
+relations `Equal`, `NotEqual`, `Less`, `LessEqual` have an asynchronous twin
+that evaluates the held operands with `evaluateAsync`, so a `Sum` under them
+yields and honours an abort signal. The decision for the other lazy operators
+with a synchronous handler (about 140) is made: an operator opts in with
+`evaluatesOperands` ("the handler demands and evaluates every held operand and
+reads nothing else of their structure"), and the asynchronous route then awaits
+each held operand in order and runs the handler on the values. A default for
+the whole class of operators that demand every operand is not safe:
+`Numerator`, `Denominator` and `Interpret` read the structure of the operand,
+and a handler that stops early (a chain at its first `False` pair) needs a
+twin of its own. The flag is set on `IdenticallyEqual`, and the application of
+a user function awaits its body statements and its arguments
+(`evaluateStatementsAsync()`), so `Less(Sum(1/k^2, k, 1, 400000), 2)` and
+`f(400000)` with `f(n) = Σ 1/k²` now yield. What remains:
+
+- The two forms of `N` that block: `N(x, p)` with `p` above the precision of
+  the engine minus the guard digits (`p ≥ 17` on a default engine), and a goal
+  `N(x, [p, a])`, because `_withTransientPrecision` raises the precision of the
+  engine, a global of the bignum library, for the time of the computation, and
+  the raised precision cannot span an `await` while other evaluations run. A
+  per-evaluation working precision would remove that limit.
+- The operators that have not been audited for the flag. Each handler has to be
+  read: it must demand every operand and evaluate it, and it must not read the
+  operand as written. The route accounts for two readings of the operand as
+  written (an operand that evaluates to `Missing` is handed over as written,
+  because its meaning can depend on the declared type of the operand; and
+  `.N()` keeps the synchronous handler, because a comparison near a tie
+  re-reads the operand to decide it exactly). `Greater` and `GreaterEqual`
+  have no handler of their own (they canonicalize to `Less` and `LessEqual`),
+  `IsSame` and `Same` compare structure, and the remaining relations are not
+  lazy.
+- A user function whose body is already suspended on this engine (a recursive
+  body, or a second call of the literal from another evaluation) and one with
+  a free symbol in an argument run synchronously, because the scope of the body
+  has room for one suspended frame. A recursive function yields in the
+  statements of its outermost call only.
 
 ### `.N()` of a user function evaluates the body exactly, then numericizes the result (OPEN, performance — found 2026-10-07 by issue #392)
 

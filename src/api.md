@@ -5500,6 +5500,7 @@ type OperatorDefinitionFlags = {
   threadsConditionals: boolean | number[];
   inspectsErrors: boolean;
   selectsOperands: boolean;
+  evaluatesOperands: boolean;
   namedArgumentsRequired: boolean;
   missingBehavior: "reject" | "propagate" | "handle";
   missingStrip: "all" | number[];

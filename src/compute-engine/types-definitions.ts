@@ -2294,6 +2294,43 @@ export type OperatorDefinitionFlags = {
   selectsOperands: boolean;
 
   /**
+   * If `true`, this `lazy` operator's `evaluate` handler only EVALUATES its
+   * held operands (with the options it receives) and reads nothing else of
+   * their structure, so the asynchronous route may evaluate them for it.
+   *
+   * **Only valid on a `lazy` operator** (asserted in
+   * `_BoxedOperatorDefinition`). A lazy operator with a synchronous handler
+   * and no `evaluateAsync` runs its operands to the end under
+   * `evaluateAsync()`: `Less(Sum(1/k^2, k, 1, 400000), 2)` neither yields
+   * nor honors an abort signal. With this flag, the asynchronous route
+   * awaits each held operand with `evaluateAsync()`, in operand order, and
+   * then runs the synchronous handler on the values, so the sum yields.
+   *
+   * The contract on the handler: it demands every operand and evaluates it,
+   * and does nothing else with the operand as written. A handler that reads
+   * the structure of an operand (`Numerator`, `Interpret`, `IsSame`), or that
+   * treats an evaluated operand differently from the one as written, must
+   * not set it. A handler that stops before it has evaluated every operand
+   * (a chain `a < b < c` that stops at the first `False` pair) must not set
+   * it either: the route evaluates all of them first. Such an operator
+   * declares an `evaluateAsync` handler instead (the four chainable
+   * relations do). On this route a handler that answers `undefined` ("leave
+   * the expression as it is") leaves the operator over the VALUES of its
+   * operands, where the synchronous route leaves it over the operands as
+   * written: a handler that sets the flag must answer the same on both
+   * routes, as an inert comparison does (`inertRelation`). An operand whose
+   * value is absent (`Missing`) is handed to the handler as written, since
+   * what the absence means depends on the declared type of that operand.
+   * Two further limits, for now: an operator that is `selectsOperands`,
+   * `scoped` or `holdClass: 'quote'` never takes this route, and the route
+   * is skipped under a numeric evaluation (`N()`), where a handler may need
+   * the exact operand to decide a tie.
+   *
+   * **Default**: `false`
+   */
+  evaluatesOperands: boolean;
+
+  /**
    * Whether every argument of an application MUST be written with its
    * parameter's name (`Person(firstName: "Alan", age: 42)`).
    *
