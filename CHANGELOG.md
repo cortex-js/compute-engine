@@ -1,6 +1,54 @@
 ## Unreleased
 
+### Behavior Changes
+
+- **An `Apply` callee of unknown type is held, not read as a function of its
+  free symbols**
+  ([#426](https://github.com/cortex-js/compute-engine/issues/426), reported by
+  [enumeratio](https://github.com/enumeratio)). A callee of `Apply` that is not
+  a function literal is read as a shorthand function literal whose parameters
+  are its unknowns: `Apply(x + 1, 2)` is `3`. That rule also read `g(f)`, for an
+  undefined `g`, as `f ↦ g(f)`, so `Apply(g(f), [a, b])` was `g([a, b])`,
+  `Apply(g(f), a, b)` threw "Too many arguments", and the answer changed once
+  `g` was defined. An expression whose type is `unknown` may be a function, so
+  it is now kept as a function value: `Apply(g(f), x)` and the compound-head
+  spelling `[["g", "f"], "x"]` stay `Apply(g(f), x)`, and once `g` is
+  `(a, b) ↦ a + b` they evaluate to `f + x`, the curried `g(f)` applied to `x`.
+  A pipe into such a stage stays a `Pipe`, as a pipe into an undefined symbol
+  does. A callee of a known non-function type keeps the shorthand
+  (`Apply(x + 1, 2)` is still `3`, `Apply(3, 5)` is still `3`), and a body with
+  a wildcard is a shorthand literal whatever its type. One consequence:
+  `Map(f(x), xs)` for a fully undefined `f` used to give `[f(1), f(2)]` and now
+  holds each application, `[Apply(f(x), 1), Apply(f(x), 2)]`. Declare `f`
+  (`ce.declare("f", "(number) -> number")`) or write `Map(f(_), xs)` or
+  `Map(x ↦ f(x), xs)` for the mapped form. `Simplify(expr)` and
+  `HoldValues(expr, …)`, which hold their operand, now read the operand's type
+  from its structure (they typed every held operand `unknown`), so
+  `Limit(Simplify(sin(x)/x), 0)` still reads its operand as `x ↦ sin(x)/x`.
+  `Hold(expr)` keeps its opaque type, so a `Hold` callee is held:
+  `Apply(Hold(x + 1), 2)` stays as written where it gave `Hold(2 + 1)`. A
+  partial application of a function literal is typed as the function it is: with
+  `g := (a, b) ↦ a + b`, `g(f)` is typed `(unknown) -> number`, not `number`.
+
+- **A function literal applied to too many arguments is an error value, not a
+  thrown exception**. `h(1, 2, 3)` for `h := (x, y) ↦ x + y` evaluates to
+  `Error("unexpected-argument", "3")` where `evaluate()` used to throw
+  `Too many arguments for function "(x, y) => x + y": expected 2, got 3`. A
+  function with a declared signature already reported the surplus argument as
+  this error.
+
 ### Issues Resolved
+
+- **A lazy operator with a missing operand reports it**
+  ([#426](https://github.com/cortex-js/compute-engine/issues/426)).
+  `Filter(xs)`, `Filter(IsEven)`, `Reduce(xs)` and `Map(f)` canonicalized to a
+  non-canonical expression that reported itself valid and evaluated to itself;
+  as the callee of `Apply` such a call read as a constant function and the
+  applied argument was dropped silently (`Apply(Filter(IsEven), [1, 2, 3, 4])`
+  was `Filter(IsEven)`). A lazy operator whose canonical handler declines a call
+  with fewer operands than its signature requires now marks each absent operand
+  `Error("missing")`, as a head without a handler does, and
+  `Apply(Filter(IsEven), [1, 2, 3, 4])` is that error.
 
 - **An empty `Fold` or `Reduce` returns its initial value evaluated**
   ([#425](https://github.com/cortex-js/compute-engine/issues/425), reported by

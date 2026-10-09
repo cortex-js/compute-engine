@@ -316,7 +316,8 @@ describe('FUNCTIONS', () => {
   });
 
   it('should correctly serialize function expressions', () => {
-    expect(check(['Function'])).toMatchInlineSnapshot(`() => "Nothing"`);
+    // A literal with no body is missing its required operand.
+    expect(check(['Function'])).toMatchInlineSnapshot(`() => Error("missing")`);
     expect(check(['Function', 1])).toMatchInlineSnapshot(`() => 1`);
     // A body that uses anonymous parameters makes them the parameter list, so
     // `["Function", "_"]` is the identity, not a nullary returning a free `_`.
@@ -472,9 +473,9 @@ describe('POWER BASE', () => {
     expect(check(['Power', ['When', 'x', ['Greater', 'x', 0]], 2])).toBe(
       '(x {0 < x})^2'
     );
-    expect(
-      ce.box(['Power', ['Not', 'p'], 2], { form: 'raw' }).toString()
-    ).toBe('(!p)^2');
+    expect(ce.box(['Power', ['Not', 'p'], 2], { form: 'raw' }).toString()).toBe(
+      '(!p)^2'
+    );
   });
   it('keeps a name, a call and a bracketed group bare', () => {
     expect(check(['Power', ['Negate', 'x'], 3])).toBe('(-x)^3');

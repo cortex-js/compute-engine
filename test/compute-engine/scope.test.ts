@@ -518,14 +518,20 @@ describe('REGRESSION: BigOp scope isolation', () => {
 // FUNCTIONS: edge cases
 // ─────────────────────────────────────────────────────────────────────────
 describe('FUNCTIONS: edge cases', () => {
-  test('calling a function with too many arguments throws', () => {
+  test('calling a function with too many arguments is an error value', () => {
     // f(x) = x * 2 — only one parameter
     ce.pushScope();
     try {
       ce.declare('edge_f', 'function');
       ce.assign('edge_f', ce.expr(['Function', ['Multiply', 'edge_x', 2], 'edge_x']));
-      // Calling with two arguments should throw "Too many arguments"
-      expect(() => ce.expr(['edge_f', 3, 4]).evaluate()).toThrow('Too many arguments');
+      // Calling with two arguments is an `unexpected-argument` error value
+      // (it used to throw "Too many arguments").
+      expect(ce.expr(['edge_f', 3, 4]).evaluate().json).toEqual([
+        'Error',
+        "'unexpected-argument'",
+        "'4'",
+        ['ErrorTrace', ['ErrorFrame', "'edge_f'", 2]],
+      ]);
     } finally {
       ce.popScope();
     }
@@ -1125,8 +1131,9 @@ describe('SCOPE EDGE CASES', () => {
   });
 
   test('scope cleanup after evaluation error in function', () => {
-    // If a function body throws during evaluation, the scope should
-    // still be properly cleaned up (no leaked scope frames).
+    // If a function body throws during evaluation, or the call answers an
+    // error value, the scope should still be properly cleaned up (no leaked
+    // scope frames).
     const stackDepthBefore = ce._evalContextStack.length;
     ce.pushScope();
     try {
@@ -1136,8 +1143,19 @@ describe('SCOPE EDGE CASES', () => {
       // Normal call should work
       expect(ce.expr(['err_f', 5]).evaluate().valueOf()).toEqual(6);
 
-      // Too many arguments should throw but not leak scope frames
-      expect(() => ce.expr(['err_f', 1, 2]).evaluate()).toThrow();
+      // Too many arguments is an error value, and must not leak scope frames
+      expect(ce.expr(['err_f', 1, 2]).evaluate().operator).toBe('Error');
+
+      // A body that throws by contract (a `CountIf` predicate that does not
+      // return a boolean) unwinds through the call without leaking scope
+      // frames.
+      ce.declare('err_p', 'any');
+      ce.assign('err_p', ['Function', 'err_z', 'err_z']);
+      ce.assign('err_g', [
+        'Function',
+        ['Block', ['CountIf', ['List', 1, 2, 3], 'err_p']],
+      ]);
+      expect(() => ce.expr(['err_g']).evaluate()).toThrow(/must return/);
     } finally {
       ce.popScope();
     }

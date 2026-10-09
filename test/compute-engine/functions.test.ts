@@ -113,13 +113,27 @@ describe('Anonymous function with missing param', () => {
 });
 
 describe('Anonymous function with too many params', () => {
+  // The surplus argument is the value of the application, as an error. This
+  // used to throw a JavaScript exception out of `evaluate()`.
   test('Too many params: Function', () =>
-    expect(() => evaluate(['f1', 10, 20])).toThrowErrorMatchingInlineSnapshot(
-      `Too many arguments for function "(q) => q + 1": expected 1, got 2`
-    ));
+    expect(evaluate(['f1', 10, 20])).toMatchInlineSnapshot(`
+      [
+        "Error",
+        "unexpected-argument",
+        "'20'",
+        ["ErrorTrace", ["ErrorFrame", "'f1'", 2]]
+      ]
+    `));
 
   test('Too many params: Expression', () =>
-    expect(() => evaluate(['f2', 10, 20])).toThrow());
+    expect(evaluate(['f2', 10, 20])).toMatchInlineSnapshot(`
+      [
+        "Error",
+        "unexpected-argument",
+        "'20'",
+        ["ErrorTrace", ["ErrorFrame", "'f2'", 2]]
+      ]
+    `));
 
   test('Too many params: JS Function', () =>
     expect(evaluate(['f3', 10, 20])).toMatchInlineSnapshot(`11`));

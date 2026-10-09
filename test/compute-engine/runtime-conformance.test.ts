@@ -166,21 +166,30 @@ describe('handler crashes become error values (§4.4 hardening)', () => {
     // Assigning to a constant throws by contract (the same scenario
     // `attrs-bag-encoding.test.ts` pins) — the catch must not convert a
     // LAZY handler's throw.
-    ce.box(['Declare', 'c2', { dict: { constant: true, value: 5 } } as any]).evaluate();
+    ce.box([
+      'Declare',
+      'c2',
+      { dict: { constant: true, value: 5 } } as any,
+    ]).evaluate();
     expect(() => ce.box(['Assign', 'c2', 7]).evaluate()).toThrow();
   });
 
-  test('a user function keeps its over-application throw', () => {
+  test('over-application of a user function is an error value', () => {
+    // Converted from a contractual throw (`docs/ERROR-MODEL.md` §1): the
+    // surplus argument is the value.
     ce.assign('g', ce.box(['Function', ['Add', 'x', 1], 'x']));
-    expect(() => ce.box(['g', 1, 2, 3]).evaluate()).toThrow(/Too many/);
+    expect(ce.box(['g', 1, 2, 3]).evaluate().json).toEqual([
+      'Error',
+      "'unexpected-argument'",
+      "'2'",
+      ['ErrorTrace', ['ErrorFrame', "'g'", 2]],
+    ]);
   });
 });
 
 describe('unknown rule-condition names fail closed', () => {
   test('Condition with a nonsense condition name does not throw', () => {
     anySym('cc', 2.5);
-    expect(() =>
-      ce.box(['Condition', 'x', 'cc']).evaluate()
-    ).not.toThrow();
+    expect(() => ce.box(['Condition', 'x', 'cc']).evaluate()).not.toThrow();
   });
 });

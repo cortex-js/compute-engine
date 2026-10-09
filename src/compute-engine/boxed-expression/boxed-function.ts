@@ -331,6 +331,33 @@ let _lazyValueProvisionalReads = 0;
  * Monotonic; only ever compared before/after an operation. @internal */
 let _effectsComputeCount = 0;
 
+/**
+ * The signature of a partial application: `sig` applied to the arguments
+ * `ops`, when they are fewer than its fixed parameters and the literal
+ * would be curried by `makeLambda` (function-utils.ts) — a plain signature
+ * with no optional parameter, no variadic tail and no type parameter.
+ * `undefined` when the call is saturated or is not curried, and when an
+ * argument is a `Spread` (`g(...args)`), whose element count is unknown
+ * until it is evaluated.
+ */
+function curriedSignature(
+  sig: Type,
+  ops: ReadonlyArray<Expression>
+): Type | undefined {
+  if (typeof sig === 'string' || sig.kind !== 'signature') return undefined;
+  if (ops.some((x) => x.operator === 'Spread')) return undefined;
+  const argCount = ops.length;
+  if (
+    sig.variadicArg !== undefined ||
+    (sig.optArgs !== undefined && sig.optArgs.length > 0) ||
+    (sig.typeParams !== undefined && sig.typeParams.length > 0)
+  )
+    return undefined;
+  const args = sig.args ?? [];
+  if (argCount >= args.length) return undefined;
+  return { ...sig, args: args.slice(argCount) };
+}
+
 /** Read {@link _effectsComputeCount} — for tests. @internal */
 export function effectsComputeCount(): number {
   return _effectsComputeCount;
@@ -8799,6 +8826,17 @@ function type(expr: BoxedFunction): Type | BoxedType {
       if (tupleType) return applyContractB(tupleType);
     }
 
+    // A PARTIAL application of a function literal held by an operator
+    // definition is typed as the function of its remaining parameters
+    // (`curriedSignature`), for the reason given on the value-definition
+    // route below.
+    if (def instanceof _BoxedOperatorDefinition && def._isLambda) {
+      const base = resolvedOf() ?? sig;
+      const curried =
+        base === undefined ? undefined : curriedSignature(base, expr.ops);
+      if (curried !== undefined) return curried;
+    }
+
     if (
       def instanceof _BoxedOperatorDefinition &&
       def._isLambda &&
@@ -8884,6 +8922,19 @@ function type(expr: BoxedFunction): Type | BoxedType {
             ? namedLiteralSignatureType(expr.operator, heldValue, declaredType)
             : declaredType;
     const sig = resolvedArm(expr, sigSource) ?? sigSource;
+    // A call with fewer arguments than the literal's fixed parameters is a
+    // PARTIAL application, and its value is the function of the remaining
+    // parameters (`makeLambda` curries it: `g := (a, b) ↦ a + b` makes
+    // `g(f)` the literal `(_) ↦ _ + f`). Its type is that function's, not the
+    // literal's result: typed `number`, `g(f)` was read as a shorthand body
+    // over `f` by a callback slot that re-reads it once `g` has a value
+    // (`canonicalFunctionLiteral`), where `Apply(g(f), x)`, which evaluates
+    // its callee first, applied the curried value. The rules under which
+    // `makeLambda` does NOT curry are excluded: a rest parameter (the
+    // variadic tail collects a short argument list), an optional parameter,
+    // and a generic literal (refused with an error).
+    const curried = curriedSignature(sig, expr.ops);
+    if (curried !== undefined) return curried;
     // As on the operator-def route: a polytype arm is instantiated at the call
     // site so no open type escapes as the expression's `.type` (§4.2). The
     // solve sees the SAME `threadable` gate this route hands
@@ -9150,6 +9201,9 @@ function applyFunctionLiteralWith(
   // keeps the caller's options, since it produces the result.
   const ops =
     evaluatedOps ?? expr.ops.map((x) => x.evaluate(operandOptions(options)));
+  // The breadcrumb of a surplus argument (`ApplyOptions.arityFrame`): this
+  // call's head, whose first argument is its first operand.
+  const arityFrame = { operator: expr.operator, firstArgumentIndex: 1 };
   if (!value || value.type.isUnknown) {
     // The cached `_def` may be a function-typed *value* placeholder (created
     // by the `Assign`/`Declare` canonical pass, e.g. a block-local one-step
@@ -9323,7 +9377,10 @@ function applyFunctionLiteralWith(
             )
               ? expr.engine._fn(expr.operator, zipped).evaluate(options)
               : (scalarConformance(zipped) ??
-                  appliedOrRefused(apply(value, zipped, options), zipped))
+                  appliedOrRefused(
+                    apply(value, zipped, { ...options, arityFrame }),
+                    zipped
+                  ))
           );
         }
       } catch (e) {
@@ -9441,7 +9498,9 @@ function applyFunctionLiteralWith(
   return apply(
     value,
     ops,
-    awaitBody ? { ...options, awaitStatements: true } : options,
+    awaitBody
+      ? { ...options, awaitStatements: true, arityFrame }
+      : { ...options, arityFrame },
     'bubble',
     expr._withParseScope(() => expr.engine.function(expr.operator, ops))
   );
@@ -10678,8 +10737,11 @@ function isUserFunctionDef(
  * - a LAZY operator's throw: `Assign`'s redefinition discipline throws by
  *   contract (`attrs-bag-encoding.test.ts` pins it), and a lazy handler owns
  *   its operands' evaluation, errors included;
- * - a USER function's throw: over-application ("Too many arguments") throws
- *   by contract (`bare-function-wildcard-contract.test.ts` pins it).
+ * - a USER function's throw: its body runs user statements, whose
+ *   contractual throws (an `Assign` to a constant) must reach the caller as
+ *   they do at the top level. Over-application of a literal is not a throw
+ *   any more: it is the `unexpected-argument` error value (`makeLambda`,
+ *   `function-utils.ts`).
  *
  * The native classes are safe to test with `instanceof` across the
  * host/plugin bundle boundary (they are platform globals, not re-bundled

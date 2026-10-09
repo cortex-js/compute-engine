@@ -264,11 +264,11 @@ describe('Rest parameter — shadowing', () => {
 
 describe('Rest parameter — arity', () => {
   test('a rest parameter removes the upper arity limit', () => {
-    // Without a rest parameter, a surplus argument throws.
+    // Without a rest parameter, a surplus argument is an error value.
     const ce = new ComputeEngine();
     const fixed = ce.box(['Function', ['Add', 'a', 'b'], 'a', 'b']);
-    expect(() => applyNumbers(ce, fixed, 1, 2, 3)).toThrow(
-      /Too many arguments/
+    expect(applyNumbers(ce, fixed, 1, 2, 3)).toBe(
+      'Error("unexpected-argument", "3")'
     );
     const rest = ce.box([
       'Function',

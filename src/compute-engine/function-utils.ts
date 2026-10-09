@@ -53,7 +53,7 @@ import {
   resolveFunctionLiteralTypes,
 } from './boxed-expression/function-literal.js';
 import { collectTuplePattern } from './boxed-expression/tuple-pattern.js';
-import { errorValue } from './boxed-expression/error-value.js';
+import { errorValue, withErrorFrames } from './boxed-expression/error-value.js';
 import { canonicalFailureOf } from './boxed-expression/canonical-failure.js';
 import {
   listRecursionPlan,
@@ -347,8 +347,31 @@ export function canonicalFunctionLiteral(
 
     // Check if we have some unknowns
     // We'll need the canonical form of the expression, so we'll create a block if necessary
-    if (body.operator !== 'Block') body = ce.function('Block', [body]);
+    const explicitBlock = body.operator === 'Block';
+    const written = body;
+    if (!explicitBlock) body = ce.function('Block', [body]);
     else body = body.canonical;
+    // A bare expression of UNKNOWN type is a callee the engine cannot read
+    // as a lambda body: it is returned as a function VALUE, like the
+    // expressions of step 5.5 (`isHeldCallee`). The test runs on the
+    // canonical expression, inside the block built for it: the raw operand
+    // of a lazy operator reads `unknown` whatever it is, so step 5.5 could
+    // not answer for it either, and an expression that DENOTES a function
+    // once canonical (`g(f)` for a two-parameter `g`, a partial application
+    // typed as a function) is a function value here as well. The callee is
+    // returned CANONICAL, bound in the caller's scope — not the raw operand,
+    // whose type still reads `unknown` to the consumer of the callback
+    // (`Map(g(0), xs)` for `g := (a, b) ↦ "s"` typed its result from the
+    // source, as a list of integers), and not the statement of the block,
+    // whose symbols are bound in the block's own scope. A `Block` the author
+    // wrote is a literal body and is never a callee.
+    if (
+      !explicitBlock &&
+      isFunction(body) &&
+      body.nops === 1 &&
+      (isHeldCallee(body.op1) || denotesFunction(body.op1))
+    )
+      return written.canonical;
     // A slot name (`_`, `_1`…`_9`) is never a parameter here: the body has
     // no free slot (`anonymousParameters` found none), so each slot it still
     // mentions belongs to a nested literal or to the stage of a nested
@@ -1842,6 +1865,38 @@ function denotesFunction(e: Expression | undefined | null): boolean {
 }
 
 /**
+ * A function application whose result type is UNKNOWN is held as a callee:
+ * `g(f)` for an undeclared `g`, `xs[1]` for a list of unknown elements,
+ * `Filter(IsEven)` with its collection operand missing. The engine cannot
+ * tell whether such an expression is a function, so it does not read it as
+ * a shorthand function literal over its free symbols. Doing so answered
+ * `Apply(g(f), x)` with `g(x)` — the lambda `f ↦ g(f)` applied to `x` — and
+ * the answer changed once `g` got a value, because `g(f)` is then a
+ * (curried) function and `Apply(g(f), x)` is `g(f, x)`. Instead the
+ * application stays `Apply(g(f), x)` and evaluates once the callee has a
+ * value (GitHub issue #426).
+ *
+ * The shorthand literal keeps every callee of a KNOWN non-function type:
+ * `Apply(x + 1, 2)` is `3` because `x + 1` is a `number`, and `Apply(3, 5)`
+ * is `3`. A body with a wildcard (`_`, `_1`…) is a shorthand literal
+ * whatever its type. A `Block` is never a callee: it is the body of a
+ * literal.
+ *
+ * Consulted where {@link denotesFunction} is: by `apply()` and by
+ * `canonicalFunctionLiteral` (on the canonical body, since a raw operand of
+ * a lazy operator reads `unknown` whatever it is).
+ */
+function isHeldCallee(e: Expression | undefined | null): boolean {
+  return (
+    isFunction(e) &&
+    e.operator !== 'Function' &&
+    e.operator !== 'Block' &&
+    e.type.isUnknown &&
+    freeAnonymousSlots(e).size === 0
+  );
+}
+
+/**
  * A `Field(⟨symbol⟩, ⟨string⟩)` expression whose base names a protocol with
  * that FUNCTION member — the qualified protocol member `Comparable.compare`,
  * which evaluates to the protocol-dispatching function literal.
@@ -1906,6 +1961,16 @@ export type ApplyOptions = Partial<EvaluateOptions> & {
    * literal is already suspended, or when an argument has a free symbol.
    */
   awaitStatements?: boolean;
+  /**
+   * The breadcrumb of the call, for the error a surplus argument produces:
+   * `operator` is the head the caller applied (the name a literal is held
+   * by, or `Apply`), and `firstArgumentIndex` the 1-based operand position
+   * of the first argument at that head (`1` for `h(1, 2, 3)`, `2` for
+   * `Apply(h, 1, 2, 3)`, whose first operand is the callee). The literal
+   * does not know the head it is applied through, so the caller supplies
+   * it; without it the error carries no frame.
+   */
+  arityFrame?: { operator: string; firstArgumentIndex: number };
 };
 
 /**
@@ -1941,7 +2006,8 @@ export function apply(
     if (err !== undefined) return err;
   }
 
-  if (denotesFunction(fn)) return fn.engine._fn('Apply', [fn, ...args]);
+  if (denotesFunction(fn) || isHeldCallee(fn))
+    return fn.engine._fn('Apply', [fn, ...args]);
 
   if (isFunction(fn, 'Apply') && denotesFunction(fn.op1))
     return fn.engine._fn('Apply', [fn.op1, ...args]);
@@ -3872,11 +3938,29 @@ function makeLambda(
     //
     // A literal with a REST parameter has no upper arity: the surplus is what
     // the rest parameter collects (below, after the error check).
+    // The first surplus argument is the value of the application, as an
+    // error: `h(1, 2, 3)` for a two-parameter `h` is
+    // `Error("unexpected-argument", "3")` with the frame `(h, 3)`, as a call
+    // of a declared function reports it (`checkArity()` marks the surplus
+    // operand, and the call frames it). A call of a symbol that holds a
+    // literal is not checked against the literal's arity when it is boxed
+    // (an inferred signature carries no constraint), so this is where the
+    // surplus is found. A literal with NO parameter, including the shorthand
+    // constant function (`Apply(3, 5)` is `3`), ignores its arguments: it
+    // takes the nullary route above, not this one. See `docs/ERROR-MODEL.md`
+    // §1.
     if (restIndex < 0 && args.length > params.length) {
-      throw new Error(
-        `Too many arguments for function "${expr.toString()}": expected ${
-          params.length
-        }, got ${args.length}`
+      const frame = options?.arityFrame;
+      return withErrorFrames(
+        ce.error('unexpected-argument', args[params.length].toString()),
+        frame === undefined
+          ? []
+          : [
+              {
+                operator: frame.operator,
+                index: frame.firstArgumentIndex + params.length,
+              },
+            ]
       );
     }
 

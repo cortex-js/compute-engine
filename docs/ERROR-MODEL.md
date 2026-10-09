@@ -153,14 +153,19 @@ throw-friendly than this model proposes, in two distinct ways:
   (`handlerThrowToErrorValue`, `boxed-function.ts`; pinned in
   `test/compute-engine/runtime-conformance.test.ts`).
 - **A set of language-level contractual throws exists and is
-  test-pinned**: the `Assign` redefinition discipline, function
-  over-application ("Too many arguments"), a predicate returning a
+  test-pinned**: the `Assign` redefinition discipline, a predicate returning a
   non-boolean (`Count`/`Filter`), a
   mistyped key function (`GroupBy`), element-wise failures enriched with
   broadcast context. *Proposed amendment (2026-08-25 review, pending
   ratification):* convert these to `Error` values; the inventory above is
   the migration list, and each is pinned by a test that will need an
-  inline update.
+  inline update. Function over-application ("Too many arguments") was
+  converted on 2026-10-09 (user decision): a function literal applied to
+  more arguments than it declares evaluates to
+  `Error("unexpected-argument", <the first surplus argument>)`, with the
+  frame of the call (`makeLambda`, `function-utils.ts`). A literal with no
+  parameter — including the shorthand constant function, `Apply(3, 5)` is
+  `3` — ignores its arguments.
 
 ## 2. Which channel, when — Proposed (codifies current behavior, with the deviations listed in §7)
 

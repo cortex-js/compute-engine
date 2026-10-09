@@ -103,6 +103,7 @@ import {
   isWildcardFunctionType,
   resolveTypeForCompilation as resolveType,
   placeholderSlotsAs,
+  signatureArms,
 } from '../../common/type/utils.js';
 import { typeToString } from '../../common/type/serialize.js';
 import {
@@ -2388,6 +2389,40 @@ function admissibleElementType(t: Type): boolean {
   }
 }
 
+/**
+ * The smallest number of operands a call of `type` must supply: the fixed
+ * parameters of its signature, and, when the variadic tail must not be empty,
+ * every optional position (validation fills them before the tail) plus one;
+ * the minimum over the arms of an overload set. `0` for the bare `function`
+ * type and for a type that is not a signature, which require nothing. The
+ * same count `triviallyAdmittedCall` makes for one signature.
+ */
+function requiredOperandCount(type: Type): number {
+  const arms = signatureArms(type);
+  if (arms === undefined) return 0;
+  let count: number | undefined;
+  for (const sig of arms) {
+    const required = sig.args?.length ?? 0;
+    const n =
+      sig.variadicArg !== undefined && sig.variadicMin === 1
+        ? required + (sig.optArgs?.length ?? 0) + 1
+        : required;
+    if (count === undefined || n < count) count = n;
+  }
+  return count ?? 0;
+}
+
+/**
+ * The number of operands a RAW operand list supplies: a top-level `Sequence`
+ * operand supplies each of its elements (the operands of a lazy operator are
+ * not flattened before its canonical handler runs).
+ */
+function suppliedOperandCount(xs: ReadonlyArray<Expression>): number {
+  let n = 0;
+  for (const x of xs) n += isFunction(x, 'Sequence') ? x.nops : 1;
+  return n;
+}
+
 function makeCanonicalFunction(
   ce: ComputeEngine,
   name: string,
@@ -3325,15 +3360,30 @@ function applyOperatorDefinition(
         );
         failure = { error: e };
       }
-      // The canonical handler gave up, return a non-canonical expression
-      result = new BoxedFunction(ce, name, xs, {
-        metadata,
-        canonical: false,
-      });
-      // Keep the exception with the expression, for a caller that cannot
-      // continue without the canonical form (`canonical-failure.ts`).
-      if (failure !== undefined) recordCanonicalFailure(result, failure.error);
-      return result;
+      // The canonical handler gave up. A call with fewer operands than the
+      // signature requires is not something the handler can decide: it
+      // declined because an operand it reads is absent (`Filter(xs)`,
+      // `Filter(IsEven)` with no collection). Such a call falls through to
+      // the signature validation below, which marks each absent operand
+      // `Error("missing")` as it does for a head without a handler. Kept
+      // as written, the call was non-canonical, reported valid, and
+      // evaluated to itself; as the callee of `Apply` it read as a constant
+      // function, and the applied argument was dropped (GitHub issue #426).
+      if (
+        failure !== undefined ||
+        opDef.inferredSignature ||
+        suppliedOperandCount(xs) >= requiredOperandCount(opDef.signature.type)
+      ) {
+        result = new BoxedFunction(ce, name, xs, {
+          metadata,
+          canonical: false,
+        });
+        // Keep the exception with the expression, for a caller that cannot
+        // continue without the canonical form (`canonical-failure.ts`).
+        if (failure !== undefined)
+          recordCanonicalFailure(result, failure.error);
+        return result;
+      }
     }
 
     if (opDef.inferredSignature) {

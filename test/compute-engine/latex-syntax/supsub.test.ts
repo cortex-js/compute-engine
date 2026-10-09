@@ -616,21 +616,13 @@ describe('PRIMED SYMBOLS WITH SUBSCRIPTS', () => {
       [
         Derivative,
         [
-          Function,
-          [
-            Block,
-            [
-              Subscript,
-              f,
-              [
-                Add,
-                n,
-                1,
-              ],
-            ],
-          ],
+          Subscript,
           f,
-          n,
+          [
+            Add,
+            n,
+            1,
+          ],
         ],
       ]
     `);

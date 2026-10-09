@@ -37,8 +37,13 @@ describe('bare `function` is a wildcard contract, not a signature adopter', () =
     const ce = new ComputeEngine();
     ce.declare('g', 'function');
     ce.assign('g', ce.expr(['Function', ['Multiply', 'g_x', 2], 'g_x']));
-    // Over-application throws at evaluation (not a box-time error value)…
-    expect(() => ce.expr(['g', 3, 4]).evaluate()).toThrow('Too many');
+    // Over-application is found at evaluation (not a box-time error value)…
+    expect(ce.expr(['g', 3, 4]).evaluate().json).toEqual([
+      'Error',
+      "'unexpected-argument'",
+      "'4'",
+      ['ErrorTrace', ['ErrorFrame', "'g'", 2]],
+    ]);
     // …and a unary lambda in a binary callback slot is admitted at boxing
     // (the arity is checked where the callback is applied), unlike an
     // EXPLICIT wrong-arity signature, which is refused at boxing.

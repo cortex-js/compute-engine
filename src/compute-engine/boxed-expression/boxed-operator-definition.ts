@@ -2331,8 +2331,17 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       // unevaluated; the literal must then bind them as written rather than
       // evaluate them itself, or the flag would be silently undone one level
       // down. Read at call time, so a later `_update({ lazy })` is honored.
+      // The breadcrumb of a surplus argument names this definition
+      // (`ApplyOptions.arityFrame`): `h(1, 2, 3)` for a two-parameter `h`
+      // is `Error("unexpected-argument", "3")` with the frame `(h, 3)`.
+      const arityFrame = { operator: this.name, firstArgumentIndex: 1 };
       evaluate = (xs, options) =>
-        fn(xs, this.lazy ? { ...options, holdArguments: true } : options);
+        fn(
+          xs,
+          this.lazy
+            ? { ...options, holdArguments: true, arityFrame }
+            : { ...options, arityFrame }
+        );
       Object.defineProperty(evaluate, 'toString', {
         value: () => boxedFn.toString(),
       }); // For debugging/_printScope
@@ -2355,6 +2364,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
             _effects: effects,
             _contextStack: stack,
             awaitStatements: true,
+            arityFrame,
           };
           return runWithEvaluationEffects(
             engine,

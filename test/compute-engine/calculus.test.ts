@@ -2011,14 +2011,19 @@ describe('D with no operand does not crash', () => {
   afterAll(() => errorSpy.mockRestore());
 
   test('canonicalizing D() does not log an internal error', () => {
+    // The missing operand is marked, as for any operator that requires one.
     const canon = engine.box(['D']);
-    expect(canon.json).toEqual(['D']);
+    expect(canon.json).toEqual(['D', ['Error', "'missing'"]]);
     expect(errorSpy).not.toHaveBeenCalled();
   });
 
   test('evaluating D() does not log an internal error', () => {
     const result = engine.box(['D'], { canonical: false }).evaluate();
-    expect(result.json).toEqual(['D']);
+    expect(result.json).toEqual([
+      'Error',
+      "'missing'",
+      ['ErrorTrace', ['ErrorFrame', "'D'", 1]],
+    ]);
     expect(errorSpy).not.toHaveBeenCalled();
   });
 });

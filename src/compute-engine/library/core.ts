@@ -4533,7 +4533,11 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           numericApproximation
         );
         if (tupleMapped !== undefined) return tupleMapped;
-        const result = apply(ops[0], ops.slice(1));
+        // The breadcrumb of a surplus argument names this `Apply`, whose
+        // first argument is its second operand (`ApplyOptions.arityFrame`).
+        const result = apply(ops[0], ops.slice(1), {
+          arityFrame: { operator: 'Apply', firstArgumentIndex: 2 },
+        });
         // An argument that the literal refuses (a parameter declared `real`
         // and a string argument) is the value of the application, as for a
         // call of a named function (`_refusedArgumentError` in
@@ -4747,7 +4751,15 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           // lifted here, so that `apply()` does not lift it a second time.
           if (isFunction(lifted, 'Function') && lifted.nops > 1)
             callee = lifted;
-          if (isFunction(lifted, 'Function') && lifted.nops === 1) {
+          // A stage of UNKNOWN type comes back unchanged from
+          // `canonicalFunctionLiteral`, held as a function value (its
+          // `isHeldCallee`): `Compose(Sqrt, Sqrt)` for an undefined
+          // `Compose`. Its VALUE decides, as for a constant lift below: a
+          // value that is still of unknown type leaves the pipe
+          // unevaluated, where `apply()` would answer an inert `Apply`.
+          const held =
+            lifted === f && !isFunction(f, 'Function') && f.type.isUnknown;
+          if ((isFunction(lifted, 'Function') && lifted.nops === 1) || held) {
             callee = f.evaluate();
             if (isRefutablePipeTarget(callee))
               return ce.typeError('function', callee.type, callee.toString());
@@ -7310,9 +7322,19 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       signature: '(any, any?) -> expression',
       examples: ['Simplify(Sin(x)^2 + Cos(x)^2)', 'Simplify(Sqrt(x^2), x > 0)'],
       // Simplification is type-preserving in the handler's view: report the
-      // operand's own type.
+      // operand's own type. The operand is held (raw), so its descriptor
+      // carries `unknown` where a bound operand carries a type; the type is
+      // read from its structure instead (`heldOperandType`): `number` for
+      // `sin(x)/x`, `unknown` for `h(x)` with an undeclared `h`. An `unknown`
+      // result for every held operand made `Simplify(sin(x)/x)` a callee of
+      // unknown type, which `Apply` and the two-operand `Limit(expr, point)`
+      // hold as a function value (`isHeldCallee`, function-utils.ts) rather
+      // than reading as the shorthand `x ↦ sin(x)/x`.
       type: ([x], context) =>
-        BoxedType.forResult(x?.type ?? undefined, context.engine._typeResolver),
+        BoxedType.forResult(
+          heldOperandType(context, x),
+          context.engine._typeResolver
+        ),
       canonical: (ops, { engine: ce }) => {
         if (ops.length === 0) return ce._fn('Simplify', checkArity(ce, ops, 1));
         if (ops.length > 2) return ce._fn('Simplify', checkArity(ce, ops, 2));
@@ -7373,7 +7395,12 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         'let x = 5\nlet y = 2\n(x + y, HoldValues(x + y), HoldValues(x + y, [y]))',
       ],
       type: ([x], context) =>
-        BoxedType.forResult(x?.type ?? undefined, context.engine._typeResolver),
+        // The operand is held: its type is read from its structure, for the
+        // reason given at `Simplify` above.
+        BoxedType.forResult(
+          heldOperandType(context, x),
+          context.engine._typeResolver
+        ),
       canonical: (rawOps, { engine: ce }) => {
         // The held operands arrive UNBOUND on the box/parse routes, so a
         // `type` handler reading `body.type` would see `unknown`. `.canonical`
