@@ -1400,14 +1400,37 @@ function foldSeedType(
  * Whether the type a fold's bare accumulator was inferred from its uses says
  * too little for the fold's result to be typed: a top type (`unknown`,
  * `any`, `value`), an abstract collection (`collection<T>`, what a use in
- * `Join` infers, since `Join` also accepts a set), or a collection whose
- * element type is `unknown` or `any`.
+ * `Join` infers, since `Join` also accepts a set), a collection whose
+ * element type is `unknown` or `any`, or a collection whose element type
+ * is a union of a collection and a scalar (what a use at the index position
+ * of `At` infers).
  */
 function accumulatorTypeIsImprecise(t: Type): boolean {
   if (isKindOpenOperandType(t)) return true;
   if (isAbstractCollectionTypeOf(t)) return true;
   const elt = collectionElementType(t);
-  return elt === 'unknown' || elt === 'any';
+  if (elt === undefined) return false;
+  if (elt === 'unknown' || elt === 'any') return true;
+  // A use at a parameter that accepts every kind of value infers an element
+  // type that admits a collection and a scalar at once: the index of `At` is
+  // typed `boolean | character | indexed_collection | number | string`, so
+  // `(s, k) => [p[s[1]], 0]` inferred `s: indexed_collection<boolean |
+  // character | indexed_collection<any> | number | string>`. Such an element
+  // type says as little as `any`, and left in place it made the JavaScript
+  // target refuse `s[1]` ("may be text at run time") for an accumulator
+  // whose seed `[a, 0]` is a list of integers (issue #425). A collection arm
+  // is a composite type (`indexed_collection<any>`, `list<integer>`): the
+  // primitive `string` is a collection of characters in the type lattice,
+  // and a plain mixed scalar element type such as `string | integer` is not
+  // an imprecise one.
+  return (
+    typeof elt !== 'string' &&
+    elt.kind === 'union' &&
+    elt.types.some(
+      (arm) => typeof arm !== 'string' && isSubtype(arm, 'collection<any>')
+    ) &&
+    elt.types.some((arm) => !isSubtype(arm, 'collection<any>'))
+  );
 }
 
 /**
@@ -5052,8 +5075,9 @@ function elementsAreCollections(collection: Expression): boolean {
 
 const reduceEvaluate = (
   [source, fn, initial]: ReadonlyArray<Expression>,
-  { engine: ce, numericApproximation }: EvaluateHandlerOptions
+  options: EvaluateHandlerOptions
 ): Expression | undefined => {
+  const { engine: ce, numericApproximation } = options;
   // `Reduce` holds its operands, so a source that is an EAGER operator (an
   // element read `At(t, 1)` whose value is a list, a `Sort`) arrives
   // unevaluated. Such an operator has no collection handlers before it is
@@ -5074,7 +5098,35 @@ const reduceEvaluate = (
   // probing starts a second enumeration, which re-runs the element
   // callback of a lazy `Map`/`Filter` once more than there are elements.
   const hasInitial = initial !== undefined;
-  const seed = initial ?? ce.Nothing;
+  // The initial value is held too (`Reduce` is lazy), so it arrives as
+  // written, and the reducer receives its VALUE: `Fold((v, i) => v + i,
+  // 1 + Mod(4, 3), [5])` folds from `2` (a reducer that holds its
+  // arguments sees `2` as well, and under `.N()` the float of the seed).
+  // A fold over an EMPTY collection returns that value, where it returned
+  // the seed as written, `1 + Mod(4, 3)` (issue #425).
+  //
+  // The seed is evaluated at most once, when it is first needed: at the
+  // first step, or at the return of an empty fold. It is never evaluated
+  // when the walk declines: the node then stays inert, and an effect of
+  // the seed (an assignment, a random draw) must not run on every
+  // evaluation of it. It is evaluated under the fold's options minus
+  // `materialization`: that option describes the RESULT of the evaluation,
+  // and forwarded to the seed it turned a `Range(1, 5000)` seed into its
+  // eleven-element display preview before the first step, so
+  // `Fold((a, x) => Length(a), Range(1, 5000), [0])` answered `11`
+  // (`operandOptions`, `boxed-expression/boxed-function.ts`, states the
+  // rule for the operands of every operator).
+  let seedValue: Expression | undefined = undefined;
+  const seed = (): Expression => {
+    if (seedValue === undefined)
+      seedValue =
+        initial?.evaluate(
+          (options.materialization ?? false) === false
+            ? options
+            : { ...options, materialization: false }
+        ) ?? ce.Nothing;
+    return seedValue;
+  };
 
   // The compiled fast path folds with JS numbers, so it always yields a
   // float. Under exact evaluation that violates the Evaluate-vs-N
@@ -5084,7 +5136,7 @@ const reduceEvaluate = (
   // is then correct anyway). Otherwise fall through to the interpreted
   // path, which is contract-correct.
   const inputsInexact =
-    numericApproximation || (isNumber(seed) && !seed.isExact);
+    numericApproximation || (isNumber(initial) && !initial.isExact);
 
   if (
     inputsInexact &&
@@ -5092,7 +5144,7 @@ const reduceEvaluate = (
     // first element, covered by the collection check. (Testing `nothing`
     // against `real` used to make this whole branch unreachable without an
     // initial value.)
-    (!hasInitial || seed.type.matches('real')) &&
+    (initial === undefined || initial.type.matches('real')) &&
     collection.type.matches(ce.type('collection<real>')) &&
     // A matrix (a list of rows) also matches `collection<real>`, since a
     // nested list is read as its flat shape, but it enumerates its ROWS, and
@@ -5132,11 +5184,12 @@ const reduceEvaluate = (
           // still-numeric accumulator, and the fold stays interpreted
           // from there. The static result type cannot decide this
           // upstream: such a body types the wide `number`.
-          let accumulator: number | Expression = hasInitial ? seed.re : NaN;
+          let accumulator: number | Expression = NaN;
           let first = true;
           let empty = true;
           for (const item of collection.each()) {
             empty = false;
+            if (first && hasInitial) accumulator = seed().re;
             if (first && !hasInitial) accumulator = item.re;
             else if (typeof accumulator === 'number') {
               const next: unknown = compiled.run!(accumulator, item.re);
@@ -5150,9 +5203,10 @@ const reduceEvaluate = (
           }
           if (enumerationDeclinedAfterWalk(collection, empty ? 0 : 1))
             return undefined;
-          // A seedless fold of an empty collection has nothing to seed
-          // from — `Nothing`, as the interpreted path answers.
-          if (empty && !hasInitial) return ce.Nothing;
+          // An empty fold is its seed; a seedless fold of an empty
+          // collection has nothing to seed from — `Nothing`, as the
+          // interpreted path answers.
+          if (empty) return hasInitial ? seed() : ce.Nothing;
           return typeof accumulator === 'number'
             ? ce.expr(accumulator)
             : accumulator;
@@ -5198,21 +5252,23 @@ const reduceEvaluate = (
     );
   }
 
-  let walked = 0;
-  const folded = run(
-    reduceCollection<Expression>(
-      collection,
-      (acc, x) => {
+  // SEEDED: the seed is read at the first step, or at the return of an
+  // empty fold, and not at all when the walk declines (see `seed` above).
+  return run(
+    (function* (): Generator<Expression | undefined, Expression | undefined> {
+      let acc: Expression | undefined = undefined;
+      let walked = 0;
+      for (const x of collection.each()) {
+        acc = step(acc ?? seed(), x);
         walked += 1;
-        return step(acc, x);
-      },
-      seed
-    ) as Generator<Expression | undefined, Expression | undefined>,
+        yield acc;
+      }
+      if (enumerationDeclinedAfterWalk(collection, walked)) return undefined;
+      return acc ?? seed();
+    })(),
     ce._timeRemaining,
     ce._deadlineFrame
   );
-  if (enumerationDeclinedAfterWalk(collection, walked)) return undefined;
-  return folded;
 };
 
 /**

@@ -2,6 +2,37 @@
 
 ### Issues Resolved
 
+- **An empty `Fold` or `Reduce` returns its initial value evaluated**
+  ([#425](https://github.com/cortex-js/compute-engine/issues/425), reported by
+  [enumeratio](https://github.com/enumeratio)). `Reduce` holds its operands, so
+  the initial value arrives as written. A fold over a non-empty collection
+  evaluates it inside its first step, but a fold over an empty collection
+  returned it as it was: `Fold((v, i) => v + i, 1 + Mod(4, 3), [])` was
+  `1 + Mod(4, 3)` where the same fold over `[5]` was `7`, and since 0.151.0,
+  which lists the elements of a lazy `Map`, a list of such folds showed the
+  unevaluated seeds. The initial value is now evaluated once, at the first
+  step or at the return of an empty fold, under the same options as the fold
+  (`Fold(f, √2, []).N()` is `1.414…`, `.evaluate()` keeps `√2`). The reducer
+  always receives the value of the seed: a user function that holds its
+  arguments sees `2` where it saw `1 + Mod(4, 3)` written out, and under
+  `.N()` the first step receives the float of the seed, where a compound seed
+  used to start the numeric fast path from `NaN`.
+
+- **A list accumulator indexed by its own element compiles again**
+  ([#425](https://github.com/cortex-js/compute-engine/issues/425), reported by
+  [enumeratio](https://github.com/enumeratio)). With `p: list<integer>` and
+  `a, n: integer`, `Fold((s, k) => [p[s[1]], 0], [a, 0], 1..n)` compiled in
+  0.149.0 and was refused by the JavaScript target since 0.150.0 ("Could not
+  compile `At`: the first operand may be text at run time"), which left the
+  fold on the interpreter. The index parameter of `At` accepts every kind of
+  value, so the use `s[1]` at an index position inferred the accumulator
+  `indexed_collection<boolean | character | indexed_collection<any> | number
+  | string>`, and the fixpoint typing of a bare accumulator from its seed
+  only ran for an element type of `unknown` or `any`. An element type that
+  admits a collection and a scalar at once now counts as imprecise too, so
+  the accumulator is typed `list<integer | nan>` from its seed and the fold
+  compiles; the compiled and interpreted results agree.
+
 - **`evaluateAsync` yields under the relations**
   ([#392](https://github.com/cortex-js/compute-engine/issues/392), contributed by
   [enumeratio](https://github.com/enumeratio)). `Less(Sum(1/k^2, k, 1, 400000), 2)`
