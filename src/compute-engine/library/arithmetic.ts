@@ -7889,6 +7889,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // The error is a 1σ absolute magnitude: canonicalize to |error|.
         return ce._fn('Measurement', [value, error.abs()]);
       },
+      // Both operands are evaluated, and nothing else is read of them.
+      evaluatesOperands: true,
       evaluate: (ops, { numericApproximation, engine: ce }) => {
         const value = numericApproximation ? ops[0].N() : ops[0].evaluate();
         const error = numericApproximation ? ops[1].N() : ops[1].evaluate();

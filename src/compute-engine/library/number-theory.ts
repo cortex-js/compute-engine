@@ -690,6 +690,8 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
             ['integer', 'rational', 'integer']
           )
         ),
+      // All three operands are evaluated, and nothing else is read of them.
+      evaluatesOperands: true,
       evaluate: (ops, { engine: ce }) => {
         const [aOp, bOp, mOp] = ops.map((x) => x.evaluate());
         if (bOp.isInteger !== true) {
@@ -746,6 +748,8 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
             ['integer', 'rational', 'integer']
           )
         ),
+      // All three operands are evaluated, and nothing else is read of them.
+      evaluatesOperands: true,
       evaluate: (ops, { engine: ce }) => {
         const [aOp, sOp, mOp] = ops.map((x) => x.evaluate());
         const exponent = asRational(sOp);

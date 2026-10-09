@@ -68,6 +68,29 @@
   another engine. A result computed while another evaluation reassigned a
   value the body reads is not memoized. `evaluate()` is unchanged.
 
+- **`evaluateAsync` yields under the remaining lazy operators that evaluate
+  their operands**
+  ([#392](https://github.com/cortex-js/compute-engine/issues/392), contributed by
+  [enumeratio](https://github.com/enumeratio)). The lazy operators with a
+  synchronous handler only were audited one by one. `Measurement`, `PowerMod`,
+  `PowerModList` and `ResidueClass` evaluate every held operand and read nothing
+  else of it, so they declare `evaluatesOperands`. `Annotated`, `Typed`,
+  `Matrix`, `Quantity`, `UnitConvert`, `IsError`, `Simplify`, `Delimiter` and
+  `MemberCall` evaluate some of their operands, or the operands in order, and
+  have an `evaluateAsync` twin: `Annotated(Σ 1/k², style)` and `Quantity(Σ 1/k²,
+  m)` with 400000 terms, aborted after 50 ms, now reject with a
+  `CancellationError` after about 50 ms, where they ran to the end. `Any`, `All`,
+  `MaxBy`, `MinBy`, `ArgMax`, `ArgMin` and `Reduce` (so `Fold`) drive the same
+  walk as `evaluate()` with `runAsync`: they yield between two elements and
+  honor the abort signal there, and `Any` and `All` stop at the same element
+  (`Any([1, 2, 3], k => Probe(k) == 1)` calls `Probe` once). The values are those
+  of `evaluate()`, exact and under `.N()`. A callback that is itself long still
+  runs to its end before the abort is seen. The other lazy operators read the
+  structure of their operand, bind a name, or pass the operand to a synchronous
+  computation, and keep the synchronous handler; `ROADMAP.md` lists them, and a
+  test fails when a new lazy operator is neither flagged, given a twin, nor
+  listed.
+
 ## 0.151.0 _2026-10-08_
 
 ### Behavior Changes

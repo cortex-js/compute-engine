@@ -4,7 +4,9 @@ import {
   CancellationError,
   checkDeadline,
   run,
+  runAsync,
 } from '../../common/interruptible.js';
+import { withEvaluationEffects } from '../effects-registry.js';
 import {
   checkArity,
   checkType,
@@ -160,6 +162,7 @@ import type {
 // BoxedDictionary dynamically imported to avoid circular dependency
 import { canonical } from '../boxed-expression/canonical-utils.js';
 import {
+  awaitedOperandOptions,
   declaredOperator,
   isOperatorDef,
   isValueDef,
@@ -1058,7 +1061,7 @@ function isPredicateShorthand(op: Expression): boolean {
  * `docs/plans/2026-09-26-absent-values-in-collection-operators.md`.) The
  * quantifiers `Any` and `All` do NOT use this verdict: they combine the
  * predicate's answers by Kleene logic, as `Or` and `And` do
- * (`evaluateQuantifier`).
+ * (`quantifierWalk`).
  */
 function selectionVerdict(
   applied: Expression | undefined
@@ -5057,6 +5060,22 @@ function pointComponentAt(
 // Diagonal(list) -> [[list[1, 1], 0, 0], [0, list[2, 2], 0], ...]
 
 /**
+ * The result of a fold under `Reduce`. At machine precision, a fold of
+ * doubles can overflow where the exact fold does not: `Product([10^400, 0])`
+ * gives `∞ · 0 = NaN`, but the exact product is 0. When the numeric fold is NaN
+ * or infinite, the float of the exact fold is the result.
+ */
+function withExactFoldFallback(
+  options: EvaluateHandlerOptions,
+  folded: Expression | undefined
+): Expression | undefined {
+  if (!options.numericApproximation || folded === undefined) return folded;
+  return (
+    numericFromExactValue(options.engine, options.expression, folded) ?? folded
+  );
+}
+
+/**
  * The evaluation of `Reduce(collection, fn, initial)`, before the machine
  * overflow check in the `Reduce` definition.
  */
@@ -5073,10 +5092,13 @@ function elementsAreCollections(collection: Expression): boolean {
   );
 }
 
-const reduceEvaluate = (
+const reduceEvaluate = <R>(
   [source, fn, initial]: ReadonlyArray<Expression>,
-  options: EvaluateHandlerOptions
-): Expression | undefined => {
+  options: EvaluateHandlerOptions,
+  // Runs a fold to its end: `runWalk` on the synchronous route, and
+  // `runWalkAsync` (which answers a promise) on the asynchronous one.
+  drive: (fold: Generator<any, Expression | undefined, any>) => R
+): Expression | undefined | R => {
   const { engine: ce, numericApproximation } = options;
   // `Reduce` holds its operands, so a source that is an EAGER operator (an
   // element read `At(t, 1)` whose value is a list, a `Sort`) arrives
@@ -5162,7 +5184,7 @@ const reduceEvaluate = (
       const fInterp = applicable(fn);
       const stepInterp = (acc: Expression, x: Expression): Expression =>
         fInterp([acc, x]) ?? absenceMarker(ce, collection);
-      return run(
+      return drive(
         (function* () {
           // With an explicit initial value, fold it in from the start; do
           // not overwrite it with the first element (that is only the seed
@@ -5210,9 +5232,7 @@ const reduceEvaluate = (
           return typeof accumulator === 'number'
             ? ce.expr(accumulator)
             : accumulator;
-        })(),
-        ce._timeRemaining,
-        ce._deadlineFrame
+        })()
       );
     }
   }
@@ -5235,7 +5255,7 @@ const reduceEvaluate = (
     // (`Reduce([2, 3, 2], Power)` → `Nothing^12`). It also made the
     // `Nothing` sentinel the accumulator's first VALUE, which apply-time
     // validation rejects for an annotated reducer.
-    return run(
+    return drive(
       (function* (): Generator<Expression | undefined, Expression | undefined> {
         let acc: Expression | undefined = undefined;
         for (const x of collection.each()) {
@@ -5246,15 +5266,13 @@ const reduceEvaluate = (
           return undefined;
         // Nothing to seed from: an empty seedless fold has no value.
         return acc ?? ce.Nothing;
-      })(),
-      ce._timeRemaining,
-      ce._deadlineFrame
+      })()
     );
   }
 
   // SEEDED: the seed is read at the first step, or at the return of an
   // empty fold, and not at all when the walk declines (see `seed` above).
-  return run(
+  return drive(
     (function* (): Generator<Expression | undefined, Expression | undefined> {
       let acc: Expression | undefined = undefined;
       let walked = 0;
@@ -5265,9 +5283,7 @@ const reduceEvaluate = (
       }
       if (enumerationDeclinedAfterWalk(collection, walked)) return undefined;
       return acc ?? seed();
-    })(),
-    ce._timeRemaining,
-    ce._deadlineFrame
+    })()
   );
 };
 
@@ -7832,7 +7848,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       return engine._fn('Any', [collection, fn]);
     },
     evaluate: ([collection, fn], { engine: ce }) =>
-      evaluateQuantifier('Any', collection, fn, ce),
+      runWalk(quantifierWalk('Any', collection, fn, ce), ce),
+    // The same walk, suspended between time slices; the abort signal is
+    // honored between two elements.
+    evaluateAsync: ([collection, fn], options) =>
+      runWalkAsync(
+        quantifierWalk('Any', collection, fn, options.engine),
+        options
+      ),
   },
 
   // All(collection, predicate?): True if the predicate holds for every element
@@ -7868,7 +7891,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       return engine._fn('All', [collection, fn]);
     },
     evaluate: ([collection, fn], { engine: ce }) =>
-      evaluateQuantifier('All', collection, fn, ce),
+      runWalk(quantifierWalk('All', collection, fn, ce), ce),
+    evaluateAsync: ([collection, fn], options) =>
+      runWalkAsync(
+        quantifierWalk('All', collection, fn, options.engine),
+        options
+      ),
   },
 
   // { f(x) for x in xs }
@@ -8588,18 +8616,19 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         engine._typeResolver
       ),
 
-    evaluate: (ops, options) => {
-      const folded = reduceEvaluate(ops, options);
-      // At machine precision, a fold of doubles can overflow where the exact
-      // fold does not: `Product([10^400, 0])` gives `∞ · 0 = NaN`, but the
-      // exact product is 0. When the numeric fold is NaN or infinite, the
-      // float of the exact fold is the result.
-      if (!options.numericApproximation || folded === undefined) return folded;
-      return (
-        numericFromExactValue(options.engine, options.expression, folded) ??
-        folded
-      );
-    },
+    evaluate: (ops, options) =>
+      withExactFoldFallback(
+        options,
+        reduceEvaluate(ops, options, (fold) => runWalk(fold, options.engine))
+      ),
+    // The same fold, suspended between time slices.
+    evaluateAsync: async (ops, options) =>
+      withExactFoldFallback(
+        options,
+        await reduceEvaluate(ops, options, (fold) =>
+          runWalkAsync(fold, options)
+        )
+      ),
   },
 
   // Mathematica `Fold[f, x, list]`: a thin variant of `Reduce` (Haskell
@@ -9948,6 +9977,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const resolved = canonicalMemberCall(options.engine, ops);
       if (resolved.operator === 'MemberCall') return resolved;
       return resolved.evaluate(options);
+    },
+    // The resolved call is evaluated with `evaluateAsync`.
+    evaluateAsync: async (ops, options) => {
+      const resolved = canonicalMemberCall(options.engine, ops);
+      if (resolved.operator === 'MemberCall') return resolved;
+      return resolved.evaluateAsync(awaitedOperandOptions(options));
     },
   },
 
@@ -12770,15 +12805,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         collectionElementType(ops[0].type) ?? 'any',
         context.engine._typeResolver
       ),
-    evaluate: ([xs, fn], { engine: ce }) => {
-      if (!isWalkableFiniteCollection(xs)) return undefined;
-      const f = applicable(fn);
-      return run(
-        extremumBy(xs, f, ce, 'max', 'element'),
-        ce._timeRemaining,
-        ce._deadlineFrame
-      );
-    },
+    evaluate: ([xs, fn], { engine: ce }) =>
+      runWalk(extremumWalk(xs, fn, ce, 'max', 'element'), ce),
+    evaluateAsync: ([xs, fn], options) =>
+      runWalkAsync(
+        extremumWalk(xs, fn, options.engine, 'max', 'element'),
+        options
+      ),
   },
 
   MinBy: {
@@ -12810,15 +12843,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         collectionElementType(ops[0].type) ?? 'any',
         context.engine._typeResolver
       ),
-    evaluate: ([xs, fn], { engine: ce }) => {
-      if (!isWalkableFiniteCollection(xs)) return undefined;
-      const f = applicable(fn);
-      return run(
-        extremumBy(xs, f, ce, 'min', 'element'),
-        ce._timeRemaining,
-        ce._deadlineFrame
-      );
-    },
+    evaluate: ([xs, fn], { engine: ce }) =>
+      runWalk(extremumWalk(xs, fn, ce, 'min', 'element'), ce),
+    evaluateAsync: ([xs, fn], options) =>
+      runWalkAsync(
+        extremumWalk(xs, fn, options.engine, 'min', 'element'),
+        options
+      ),
   },
 
   // Return the 1-based index (Julia semantics) of the element maximizing/
@@ -12860,15 +12891,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       if (!fn) return null;
       return engine._fn('ArgMax', [collection, fn]);
     },
-    evaluate: ([xs, fn], { engine: ce }) => {
-      if (!isWalkableFiniteCollection(xs)) return undefined;
-      const f = fn ? applicable(fn) : undefined;
-      return run(
-        extremumBy(xs, f, ce, 'max', 'index'),
-        ce._timeRemaining,
-        ce._deadlineFrame
-      );
-    },
+    evaluate: ([xs, fn], { engine: ce }) =>
+      runWalk(extremumWalk(xs, fn, ce, 'max', 'index'), ce),
+    evaluateAsync: ([xs, fn], options) =>
+      runWalkAsync(
+        extremumWalk(xs, fn, options.engine, 'max', 'index'),
+        options
+      ),
   },
 
   ArgMin: {
@@ -12901,15 +12930,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       if (!fn) return null;
       return engine._fn('ArgMin', [collection, fn]);
     },
-    evaluate: ([xs, fn], { engine: ce }) => {
-      if (!isWalkableFiniteCollection(xs)) return undefined;
-      const f = fn ? applicable(fn) : undefined;
-      return run(
-        extremumBy(xs, f, ce, 'min', 'index'),
-        ce._timeRemaining,
-        ce._deadlineFrame
-      );
-    },
+    evaluate: ([xs, fn], { engine: ce }) =>
+      runWalk(extremumWalk(xs, fn, ce, 'min', 'index'), ce),
+    evaluateAsync: ([xs, fn], options) =>
+      runWalkAsync(
+        extremumWalk(xs, fn, options.engine, 'min', 'index'),
+        options
+      ),
   },
 
   // Randomize the order of the elements in the collection. Seeding is
@@ -14896,16 +14923,17 @@ function isSymbolicOperand(op: Expression | undefined): boolean {
  * the failing one still wins — the quantifier never looked at the rest — while
  * an error met before any decision surfaces instead of being skipped past.
  *
- * Enumeration is driven through `run(…, ce._timeRemaining)` so that an infinite
- * or lazy collection with no short-circuit aborts on the deadline instead of
- * hanging.
+ * The walk is driven with `runWalk` (`run(…, ce._timeRemaining)`) so that an
+ * infinite or lazy collection with no short-circuit aborts on the deadline
+ * instead of hanging; `runWalkAsync` drives the same walk under
+ * `evaluateAsync`.
  */
-function evaluateQuantifier(
+function quantifierWalk(
   kind: 'Any' | 'All',
   collection: Expression,
   fn: Expression | undefined,
   ce: ComputeEngine
-): Expression | undefined {
+): Generator<undefined, Expression | undefined> | undefined {
   const f = fn ? applicable(fn) : undefined;
   // A source that cannot be enumerated decides nothing: the walk below would
   // see no elements and fall to `defaultValue` — `Any(xs, p) → False`,
@@ -14921,29 +14949,54 @@ function evaluateQuantifier(
 
   let sawUndetermined = false;
   let sawAbsent = false;
-  return run(
-    (function* (): Generator<undefined, Expression | undefined> {
-      for (const item of collection.each()) {
-        const result = f ? f([item]) : item.evaluate();
-        const s = sym(result);
-        if (s === shortSym) return shortValue;
-        if (s !== definiteSym) {
-          // See `predicateErrorValue`: an element-valued predicate failure is
-          // surfaced as the operator's result, not absorbed as "undetermined".
-          const err = predicateErrorValue(result);
-          if (err) return err;
-          // An absent answer is Kleene's third value; anything else is
-          // evidence that has not arrived yet.
-          if (result !== undefined && isAbsentSymbol(result)) sawAbsent = true;
-          else sawUndetermined = true;
-        }
-        yield;
+  return (function* (): Generator<undefined, Expression | undefined> {
+    for (const item of collection.each()) {
+      const result = f ? f([item]) : item.evaluate();
+      const s = sym(result);
+      if (s === shortSym) return shortValue;
+      if (s !== definiteSym) {
+        // See `predicateErrorValue`: an element-valued predicate failure is
+        // surfaced as the operator's result, not absorbed as "undetermined".
+        const err = predicateErrorValue(result);
+        if (err) return err;
+        // An absent answer is Kleene's third value; anything else is
+        // evidence that has not arrived yet.
+        if (result !== undefined && isAbsentSymbol(result)) sawAbsent = true;
+        else sawUndetermined = true;
       }
-      if (sawUndetermined) return undefined;
-      if (sawAbsent) return ce.symbol('Missing');
-      return defaultValue;
-    })(),
+      yield;
+    }
+    if (sawUndetermined) return undefined;
+    if (sawAbsent) return ce.symbol('Missing');
+    return defaultValue;
+  })();
+}
+
+/** Runs a collection walk to its end, within the time left to the engine. A
+ * walk that is `undefined` declines. */
+function runWalk<R>(
+  walk: Generator<any, R, any> | undefined,
+  ce: ComputeEngine
+): R | undefined {
+  return walk === undefined
+    ? undefined
+    : run(walk, ce._timeRemaining, ce._deadlineFrame);
+}
+
+/** The asynchronous twin of {@link runWalk}: `runAsync` suspends the handler
+ * between time slices and honors the abort signal between two steps of the
+ * walk. Every step runs in the registry and context stack of this
+ * evaluation. */
+async function runWalkAsync<R>(
+  walk: Generator<any, R, any> | undefined,
+  options: EvaluateHandlerOptions
+): Promise<R | undefined> {
+  if (walk === undefined) return undefined;
+  const ce = options.engine;
+  return runAsync(
+    withEvaluationEffects(ce, options.effects, walk, options._contextStack),
     ce._timeRemaining,
+    options.signal,
     ce._deadlineFrame
   );
 }
@@ -17186,6 +17239,17 @@ function canonicalOptimumForm(
  * ties. Yields per element for interruptibility. Returns the winning element
  * (or its 1-based index when `want === 'index'`), or `undefined` (inert) on an
  * empty collection or an undetermined key comparison. */
+function extremumWalk(
+  xs: Expression,
+  fn: Expression | undefined,
+  ce: ComputeEngine,
+  mode: 'max' | 'min',
+  want: 'element' | 'index'
+): Generator<undefined, Expression | undefined, unknown> | undefined {
+  if (!isWalkableFiniteCollection(xs)) return undefined;
+  return extremumBy(xs, fn ? applicable(fn) : undefined, ce, mode, want);
+}
+
 function* extremumBy(
   xs: Expression,
   f: ((xs: ReadonlyArray<Expression>) => Expression | undefined) | undefined,
