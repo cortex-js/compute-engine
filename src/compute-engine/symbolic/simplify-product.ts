@@ -132,9 +132,24 @@ export function simplifyProduct(x: Expression): RuleStep | undefined {
     }
   }
 
-  // Product(1 - 1/k^2, [k, 2, n]) → (n+1)/(2n)
+  // Product(1 - 1/k^2, [k, a, n]) → (a-1)(n+1)/(a·n), for a positive integer
+  // lower bound a (each factor is the product of the telescoping ratios
+  // (k-1)/k and (k+1)/k; the evaluate route, `symbolicProductClosedForm` in
+  // `library/utils.ts`, gives the same form for any spelling of the body).
+  // Both bounds must be safe integers when they are numbers: the
+  // empty-range check above handles only those, and the closed form of an
+  // empty range is 1, not the formula.
   // Canonical form is: Add(1, Negate(Power(k, -2))) = 1 + (-k^(-2))
-  if (isFunction(body, 'Add') && body.ops.length === 2 && lower.isSame(2)) {
+  if (
+    isFunction(body, 'Add') &&
+    body.ops.length === 2 &&
+    lower.isInteger === true &&
+    Number.isSafeInteger(lower.re) &&
+    lower.re >= 1 &&
+    (!isNumber(upper) ||
+      upper.isInfinity === true ||
+      Number.isSafeInteger(upper.re))
+  ) {
     let hasOne = false;
     let hasNegInvSq = false;
 
@@ -169,14 +184,21 @@ export function simplifyProduct(x: Expression): RuleStep | undefined {
     }
 
     if (hasOne && hasNegInvSq) {
-      // (n+1)/(2n); for an infinite upper bound its limit, 1/2, directly:
-      // substituting `n = +∞` into the finite form gives `∞/∞`.
+      // (a-1)(n+1)/(a·n); for an infinite upper bound its limit, (a-1)/a,
+      // directly: substituting `n = +∞` into the finite form gives `∞/∞`.
       const n = upper;
+      // From a = 1 the first factor is 0.
+      if (lower.isSame(1))
+        return { value: ce.Zero, because: 'Wallis-like product' };
+      const aMinusOne = lower.sub(ce.One);
       if (n.isInfinity === true && n.isPositive === true)
-        return { value: ce.Half, because: 'Wallis-like product' };
+        return {
+          value: ce.function('Divide', [aMinusOne, lower]),
+          because: 'Wallis-like product',
+        };
       const result = ce.function('Divide', [
-        ce.function('Add', [n, ce.One]),
-        ce.function('Multiply', [ce.number(2), n]),
+        ce.function('Multiply', [aMinusOne, ce.function('Add', [n, ce.One])]),
+        ce.function('Multiply', [lower, n]),
       ]);
       return { value: result, because: 'Wallis-like product' };
     }

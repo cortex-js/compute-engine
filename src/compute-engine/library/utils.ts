@@ -733,6 +733,7 @@ function asSingleFraction(
  * Attempt a symbolic closed form for `Product(body, [index, lower, upper])` when
  * the domain is symbolic (free bounds). Handles:
  *   - Π_{k=1}^{n} k = n!
+ *   - the Wallis-like product Π_{k=a}^{n} (1 − 1/k²) = (a−1)(n+1)/(a·n)
  *   - telescoping products: Π_{k=a}^{b} h(k+1)/h(k) = h(b+1)/h(a)
  *     (and the mirror orientation Π h(k)/h(k+1) = h(a)/h(b+1)).
  * Returns undefined when no closed form applies (caller keeps it symbolic).
@@ -752,12 +753,60 @@ export function symbolicProductClosedForm(
   if (isSymbol(body) && body.symbol === index && lower.isSame(1))
     return ce.function('Factorial', [upper]);
 
+  const from =
+    lower.isInteger && Number.isSafeInteger(lower.re) ? lower.re : -Infinity;
+
+  // A float literal in the body, or a float lower bound (`k = 2.0`), makes
+  // the closed form a float, as the other closed forms of this file do: a
+  // numeric value through `asFloat` (`.N()` alone keeps an integer value
+  // exact), and a symbolic form through float coefficients (`coefficient`),
+  // since `asFloat` leaves a symbolic expression as it is.
+  const inexact =
+    hasInexactLiteral(body) || (isNumber(lower) && !lower.isExact);
+  const result = (value: Expression): Expression =>
+    inexact ? asFloat(value.N()) : value;
+  const coefficient = (v: number): Expression =>
+    inexact ? ce.number(ce._inexactNumericValue(v)) : ce.number(v);
+
+  // Wallis-like product: Π_{k=a}^{n} (1 − 1/k²) = (a−1)(n+1)/(a·n). Each
+  // factor is (k−1)(k+1)/k², the product of the two telescoping ratios
+  // (k−1)/k and (k+1)/k, whose products from a to n are (a−1)/n and
+  // (n+1)/a. The body is compared as a rational function, so `1 − 1/k²`,
+  // `(k² − 1)/k²` and `(k−1)(k+1)/k²` are all recognized. The guard
+  // `from >= 1` declines a lower bound that is not a positive integer: k = 0
+  // is a pole of the body, and a symbolic lower bound could reach it.
+  // Checked against the finite products: a = 2, n = 10 gives 11/20; a = 3,
+  // n = 10 gives 11/15; a = 5, n = 7 gives 32/35; a = 1 gives 0, as the
+  // first factor does. Mathematica gives the same closed form under
+  // evaluation.
+  if (from >= 1) {
+    const wallis = ce.box([
+      'Divide',
+      ['Subtract', ['Square', index], 1],
+      ['Square', index],
+    ]);
+    if (matchesRationalPattern(body, wallis, index, from)) {
+      // From a = 1 the first factor is 0 (the folded form `0·(n+1)/n` would
+      // keep the product open, since `n` is not known to be finite).
+      if (from === 1) return result(ce.Zero);
+      // The coefficients are built from the integer value of the lower
+      // bound: a float bound `2.0` would leave `-1 + 2` unfolded.
+      return result(
+        ce.function('Divide', [
+          ce.function('Multiply', [
+            coefficient(from - 1),
+            ce.function('Add', [upper, ce.One]),
+          ]),
+          ce.function('Multiply', [coefficient(from), upper]),
+        ])
+      );
+    }
+  }
+
   // Telescoping product: body = h(k+1)/h(k). The body is first reduced to
   // lowest terms when that is safe (`(k² + k)/k²` is `(k + 1)/k`), and the
   // shifted part is compared with the other as a rational function, so the
   // spelling of `h` does not matter.
-  const from =
-    lower.isInteger && Number.isSafeInteger(lower.re) ? lower.re : -Infinity;
   const reduced = reducedRationalBody(body, index, from);
   const parts = reduced ? rationalPartsAsWritten(reduced) : undefined;
   const { num, den } = parts
@@ -771,16 +820,20 @@ export function symbolicProductClosedForm(
   if (new Set(num.unknowns).has(index) && new Set(den.unknowns).has(index)) {
     // forward: den shifted by k→k+1 equals num ⇒ body = h(k+1)/h(k), h = den.
     if (same(shiftIndex(den, index, ce), num))
-      return ce.function('Divide', [
-        num.subs({ [index]: upper }),
-        den.subs({ [index]: lower }),
-      ]);
+      return result(
+        ce.function('Divide', [
+          num.subs({ [index]: upper }),
+          den.subs({ [index]: lower }),
+        ])
+      );
     // mirror: num shifted by k→k+1 equals den ⇒ body = h(k)/h(k+1), h = num.
     if (same(shiftIndex(num, index, ce), den))
-      return ce.function('Divide', [
-        num.subs({ [index]: lower }),
-        den.subs({ [index]: upper }),
-      ]);
+      return result(
+        ce.function('Divide', [
+          num.subs({ [index]: lower }),
+          den.subs({ [index]: upper }),
+        ])
+      );
   }
 
   return undefined;
@@ -1875,7 +1928,7 @@ export function infiniteProductClosedForm(
   }[] = [
     // Telescoping: (k−1)(k+1)/k², verified numerically (a = 2 → 1/2,
     // a = 3 → 2/3). From a = 1 the first factor is 0, so the family does
-    // not apply there.
+    // not apply there: that product is 0, handled before the table.
     {
       pattern: ce.box(['Subtract', 1, ['Divide', 1, ['Power', index, 2]]]),
       lowerBound: { atLeast: 2 },
@@ -1911,6 +1964,16 @@ export function infiniteProductClosedForm(
         ce.function('Divide', [ce.Pi, ce.function('Sinh', [ce.Pi])]),
     },
   ];
+
+  // Π_{k=1}^{∞} (1 − 1/k²) = 0: the first factor is 0, as for the finite
+  // product from 1 (`symbolicProductClosedForm`); Mathematica gives 0 too.
+  // The reciprocal, Π k²/(k² − 1), has a pole at k = 1 and is declined by
+  // the pole check of `reducedRationalBody` below.
+  if (a === 1) {
+    const wallis = ce.box(['Subtract', 1, ['Divide', 1, ['Power', index, 2]]]);
+    if (matchesRationalPattern(body, wallis, index, 1))
+      return hasInexactLiteral(body) ? asFloat(ce.Zero.N()) : ce.Zero;
+  }
 
   // An identity with an exact lower bound holds for that bound only; a
   // larger lower bound is a different product (a tail). The telescoping

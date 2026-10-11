@@ -1750,6 +1750,27 @@ describe('SUM', () => {
     ).toEqual(['Rational', 1, 2]);
   });
 
+  // A shared factor of the body that is 0 at one index of the domain:
+  // `simplify()` cancels it and gives the closed form, and the finite sum is
+  // `Indeterminate` at that index. This is the decision Mathematica takes
+  // too (checked with the Wolfram Engine):
+  // `Sum[(k-4)/((k-4) k (k+1)), {k, 1, n}]` is `1 - 1/(1 + n)`, and
+  // `Sum[(k-4)/((k-4) k (k+1)), {k, 1, 10}]` is `Indeterminate`.
+  it('simplifies a sum whose body has a cancelling factor, and the finite sum is Indeterminate', () => {
+    expect(
+      ce
+        .parse('\\sum_{k=1}^{n} \\frac{k-4}{(k-4)k(k+1)}')
+        .simplify()
+        .toString()
+    ).toBe('n / (n + 1)');
+    expect(
+      ce
+        .parse('\\sum_{k=1}^{10} \\frac{k-4}{(k-4)k(k+1)}')
+        .evaluate()
+        .toString()
+    ).toBe('Indeterminate');
+  });
+
   // Partial fractions / telescoping with k*(k-1): Sum(1/(k*(k-1)), [k, 2, n]) = (n-1)/n
   it('should simplify partial fractions 1/(k*(k-1))', () => {
     expect(
@@ -2174,6 +2195,75 @@ describe('PRODUCT', () => {
     expect(
       ce.parse('\\prod_{k=2}^{4}(1 - \\frac{1}{k^2})').evaluate().toString()
     ).toMatchInlineSnapshot(`5/8`);
+  });
+
+  // `evaluate()` gives the closed form too, as Mathematica does
+  // (`Product[1 - 1/k^2, {k, 2, n}]` is `(1 + n)/(2 n)`), for any spelling
+  // of the body and any positive integer lower bound a:
+  // Π_{k=a}^{n} (1 − 1/k²) = (a−1)(n+1)/(a·n).
+  describe('Wallis-like product under evaluate()', () => {
+    it('gives the closed form for the three spellings of the body', () => {
+      for (const body of [
+        '(1 - \\frac{1}{k^2})',
+        '\\frac{k^2 - 1}{k^2}',
+        '\\frac{(k-1)(k+1)}{k^2}',
+      ])
+        expect(
+          ce.parse(`\\prod_{k=2}^{n} ${body}`).evaluate().toString()
+        ).toBe('(n + 1) / (2n)');
+    });
+
+    it('takes the lower bound into account', () => {
+      const from3 = ce.parse('\\prod_{k=3}^{n}(1 - \\frac{1}{k^2})').evaluate();
+      expect(from3.toString()).toBe('(2(n + 1)) / (3n)');
+      // The closed form agrees with the finite product.
+      expect(from3.subs({ n: 10 }).evaluate().toString()).toBe('11/15');
+      expect(
+        ce.parse('\\prod_{k=3}^{10}(1 - \\frac{1}{k^2})').evaluate().toString()
+      ).toBe('11/15');
+      // From 1 the first factor is 0.
+      expect(
+        ce.parse('\\prod_{k=1}^{n}(1 - \\frac{1}{k^2})').evaluate().toString()
+      ).toBe('0');
+      expect(
+        ce.parse('\\prod_{k=3}^{n}(1 - \\frac{1}{k^2})').simplify().toString()
+      ).toBe('2 / (3n) + 2/3');
+    });
+
+    it('a float in the body or in the lower bound gives a float form', () => {
+      const f = ce.parse('\\prod_{k=2}^{n}(1 - \\frac{1.0}{k^2})').evaluate();
+      expect(f.has('Product')).toBe(false);
+      expect(f.subs({ n: 10 }).evaluate().toString()).toBe('0.55');
+      const g = ce.parse('\\prod_{k=2.0}^{n}(1 - \\frac{1}{k^2})').evaluate();
+      expect(g.toString()).not.toContain('-1 + 2');
+      expect(g.subs({ n: 10 }).evaluate().toString()).toBe('0.55');
+    });
+
+    it('the infinite product from 1 is 0, as the finite one', () => {
+      expect(
+        ce.parse('\\prod_{k=1}^{\\infty}(1 - \\frac{1}{k^2})').evaluate().toString()
+      ).toBe('0');
+      expect(
+        ce.parse('\\prod_{k=3}^{\\infty}(1 - \\frac{1}{k^2})').evaluate().toString()
+      ).toBe('2/3');
+    });
+
+    it('the simplify rule leaves an empty range alone', () => {
+      // A lower bound past the safe-integer range skips the empty-range
+      // check, so the closed form must not fire for it.
+      const empty = ce.box([
+        'Product',
+        ['Subtract', 1, ['Divide', 1, ['Square', 'k']]],
+        ['Limits', 'k', ['Power', 10, 20], 1],
+      ]);
+      expect(empty.simplify().toString()).not.toContain('10^20 + 1');
+    });
+
+    it('declines a body that is not the Wallis-like one', () => {
+      expect(
+        ce.parse('\\prod_{k=2}^{n}(1 - \\frac{1}{k^3})').evaluate().toString()
+      ).toBe('prod_(k=2)^(n)(1 - k^(-3))');
+    });
   });
 });
 

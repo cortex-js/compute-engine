@@ -28,6 +28,18 @@
   (`evaluate`, `evaluateAsync`) and for a nullary body. A precision request
   reaches the body too: `N(f(10), 40)` is computed at forty digits.
 
+- **`evaluate()` of a Wallis-like product with a symbolic upper bound gives
+  its closed form.** `\prod_{k=2}^{n} \left(1 - \frac{1}{k^2}\right)` evaluates
+  to `(n+1)/(2n)`, as Mathematica does, where it stayed symbolic and only
+  `simplify()` gave the form. The body is compared as a rational function,
+  so `\frac{k^2-1}{k^2}` and `\frac{(k-1)(k+1)}{k^2}` are recognized too, and
+  any positive integer lower bound a gives `(a-1)(n+1)/(a·n)`:
+  `\prod_{k=3}^{n}` is `2(n+1)/(3n)`, `\prod_{k=1}^{n}` is `0`, and so is
+  `\prod_{k=1}^{\infty}`, which stayed symbolic. A float literal in the body
+  or in the lower bound gives a float form (`0.5(n+1)/n`), as the other
+  closed forms do. The `simplify()` rule takes the lower bound into account
+  the same way (it handled 2 only).
+
 ### Issues Resolved
 
 - **A mapping function held by a parameter is the one mapped under `.N()`.**

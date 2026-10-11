@@ -629,11 +629,12 @@ describe('Infinite product closed forms', () => {
     });
   });
 
-  test('Π (1 − 1/k²) from k = 1 stays symbolic (the k = 1 factor is 0…', () => {
-    // …times a divergence-free tail — the product IS 0, but the (a−1)/a
-    // family requires a ≥ 2; the zero factor makes any recognizer moot).
+  test('Π (1 − 1/k²) from k = 1 is 0 (the k = 1 factor is 0)', () => {
+    // The (a−1)/a family requires a ≥ 2; from 1 the first factor is 0 and
+    // the product is 0, as Mathematica gives (`Product[1 - 1/k^2, {k, 1,
+    // Infinity}]` is 0). The finite product from 1 evaluates to 0 too
+    // (`symbolicProductClosedForm`).
     const e = ce.parse('\\prod_{k=1}^\\infty (1 - \\frac{1}{k^2})').evaluate();
-    // Either inert or 0 is acceptable; it must not be (a−1)/a = 0/1 by luck.
-    expect(['Product', 'Number'].includes(e.operator)).toBe(true);
+    expect(e.isSame(0)).toBe(true);
   });
 });
