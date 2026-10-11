@@ -585,6 +585,21 @@ function snapshotDepsUnderChain(
     // The `seen` set terminates self- and mutually-recursive definitions.
     const stored = valueDef.value;
     if (stored !== undefined) {
+      // A stored value that is IMPURE to evaluate (`r := Random()`, which
+      // draws again at each read of `r`) has a different value at each
+      // read. No stamp of the definition can express that (a read writes
+      // nothing), so an instance that reads such a symbol is not
+      // memoizable: a memoized `f(1)`, with `f(x) := x + r`, would answer a
+      // second `f(1)` of the same seeded frame with the first draw, where a
+      // second evaluation draws again. A stored function literal is pure to
+      // evaluate (applying it is another matter, and the walk of its body
+      // below finds what it reads), so a helper function is not affected.
+      if (!stored.isPure) {
+        if (DEBUG_DEPS)
+          console.log(`[deps] ineligible: '${name}' holds an impure value`);
+        eligible = false;
+        return;
+      }
       // The stored value's own binding sites (a helper literal's
       // parameters) are as excluded as the instance's own.
       collectParameterDefs(stored, excluded);

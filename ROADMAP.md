@@ -1,6 +1,6 @@
 # Compute Engine — Roadmap
 
-**Last updated:** 2026-10-09.
+**Last updated:** 2026-10-11.
 
 This document tracks **remaining** work; an item leaves this file once it lands.
 Detail on completed work lives in git history, `CHANGELOG.md`, the linked source
@@ -256,22 +256,6 @@ What remains:
   a free symbol in an argument run synchronously, because the scope of the body
   has room for one suspended frame. A recursive function yields in the
   statements of its outermost call only.
-
-### `.N()` of a user function evaluates the body exactly, then numericizes the result (OPEN, performance — found 2026-10-07 by issue #392)
-
-With `f(n) = Σ_{k=1}^{n} 1/k²`, `f(2000).N()` takes 1432 ms where
-`Sum(1/k^2, k, 1, 2000).N()` takes 68 ms: the body is evaluated with a bare
-`evaluate()` (`evaluateStatements()`, `function-utils.ts`), which sums 2000
-exact rationals, and only the result is numericized
-(`result.evaluate({ numericApproximation: true })` after the statements).
-This is by design for the statements of a block (a numeric request must not
-reach the statements on one route and not the other), but for a body that
-is a single numeric expression it costs the exact evaluation for nothing,
-and `f(400000).N()` does not finish. Decision needed: forward the numeric
-request to the body when the body is a single expression (the value of the
-last statement is the value of the function), or keep the exact
-evaluation. The same applies to the memo of the application, which keys on
-the request (`memoKey`).
 
 ### Compiled Python code counts code points on a string parameter (OPEN, small — found 2026-10-07 by the compiled-entry string refusal)
 

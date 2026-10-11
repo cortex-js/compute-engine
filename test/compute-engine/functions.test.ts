@@ -1078,6 +1078,166 @@ describe('N() through user-defined function application', () => {
       (await ce.parse('f(2)').evaluateAsync({ numericApproximation: true }))
         .isExact
     ).toBe(false));
+
+  // A body that is ONE statement takes the numeric request itself, so a
+  // `Sum` in it sums floats (`f(400000).N()` with `f(n) = Σ 1/k²` did not
+  // finish when the body ran exactly first). A body with several statements,
+  // and a self-recursive body, run exactly and only the value is
+  // numericized. The evidence is the request the body's operator sees, read
+  // by a handler-backed operator, not the wall clock.
+  describe('the numeric request reaches a one-statement body', () => {
+    const ce2 = new ComputeEngine();
+    const seen: boolean[] = [];
+    const precisions: number[] = [];
+    ce2.declare('probe', {
+      signature: '(number) -> number',
+      evaluate: (ops, { numericApproximation }) => {
+        seen.push(numericApproximation === true);
+        precisions.push(ce2.precision);
+        return ops[0];
+      },
+    });
+    ce2.declare('one', 'function');
+    ce2.assign('one', ce2.box(['Function', ['probe', 'x'], 'x']));
+    ce2.declare('nullary', 'function');
+    ce2.assign('nullary', ce2.box(['Function', ['probe', 7]]));
+    ce2.declare('several', 'function');
+    ce2.assign(
+      'several',
+      ce2.box([
+        'Function',
+        [
+          'Block',
+          ['Declare', 'a', 'real'],
+          ['Assign', 'a', ['probe', 'x']],
+          'a',
+        ],
+        'x',
+      ])
+    );
+    ce2.declare('self', 'function');
+    ce2.assign(
+      'self',
+      ce2.box([
+        'Function',
+        [
+          'Which',
+          ['Equal', 'n', 0],
+          ['probe', 0],
+          'True',
+          ['Add', ['self', ['Subtract', 'n', 1]], 1],
+        ],
+        'n',
+      ])
+    );
+    const requests = (): boolean[] => {
+      const r = [...seen];
+      seen.length = 0;
+      return r;
+    };
+
+    test('a one-statement body sees the request', () => {
+      ce2.box(['one', 2]).N();
+      expect(requests()).toEqual([true]);
+      ce2.box(['one', 3]).evaluate();
+      expect(requests()).toEqual([false]);
+    });
+
+    test('a nullary one-statement body sees the request', () => {
+      ce2.box(['nullary']).N();
+      expect(requests()).toEqual([true]);
+    });
+
+    test('a body with several statements runs exactly', () => {
+      ce2.box(['several', 2]).N();
+      expect(requests()).toEqual([false]);
+    });
+
+    test('a self-recursive body runs exactly', () => {
+      expect(ce2.box(['self', 2]).N().re).toBe(2);
+      expect(requests()).toEqual([false]);
+    });
+
+    // `s(n) := …` stores the literal in an OPERATOR definition, and a second
+    // clause moves both to clause storage; the recursion check reads all
+    // three representations.
+    test('a self-recursive body defined by a statement runs exactly', () => {
+      ce2.parse(
+        's(n) := \\begin{cases} \\operatorname{probe}(0) & n = 0 \\\\ s(n-1) + 1 & \\text{otherwise} \\end{cases}'
+      ).evaluate();
+      expect(ce2.parse('s(3)').N().re).toBe(3);
+      expect(requests()).toEqual([false]);
+      // Two clauses (a second `DefineFunction` with another parameter domain
+      // appends; a second `c(n) := …` statement would replace the first).
+      ce2.box([
+        'DefineFunction',
+        'c',
+        ['Function', ['probe', 0], ['Typed', 'a', { str: '0' }]],
+      ]).evaluate();
+      ce2.box([
+        'DefineFunction',
+        'c',
+        [
+          'Function',
+          ['Add', ['c', ['Subtract', 'n', 1]], 1],
+          ['Typed', 'n', { str: 'integer' }],
+        ],
+      ]).evaluate();
+      expect(ce2.box(['c', 3]).N().re).toBe(3);
+      expect(requests()).toEqual([false]);
+    });
+
+    test('the asynchronous route forwards the same request', async () => {
+      await ce2.box(['one', 4]).evaluateAsync({ numericApproximation: true });
+      expect(requests()).toEqual([true]);
+      await ce2
+        .box(['several', 4])
+        .evaluateAsync({ numericApproximation: true });
+      expect(requests()).toEqual([false]);
+    });
+
+    // The numeric rewrap of a lazy `Map` with a bare symbol callback used to
+    // build the callback again from the NAME of the symbol: read after the
+    // call returned, `h(_1)` resolved `h` to a global function of the same
+    // name (`[1, 4, 9]`), or to nothing (`[k(1), k(2), k(3)]`).
+    test('a mapping function held by a parameter is the one mapped', () => {
+      const ce3 = new ComputeEngine();
+      ce3.parse('h(x) := x^2').evaluate();
+      ce3.declare('mapH', 'function');
+      ce3.assign(
+        'mapH',
+        ce3.box(['Function', ['Map', 'h', ['List', 1, 2, 3]], 'h'])
+      );
+      ce3.declare('mapK', 'function');
+      ce3.assign(
+        'mapK',
+        ce3.box(['Function', ['Map', 'k', ['List', 1, 2, 3]], 'k'])
+      );
+      const plusTen = ['Function', ['Add', 'y', 10], 'y'];
+      const twice = ['Function', ['Multiply', 2, 'y'], 'y'];
+      expect(ce3.box(['mapH', plusTen]).N().toString()).toBe('[11,12,13]');
+      expect(ce3.box(['mapK', plusTen]).N().toString()).toBe('[11,12,13]');
+      expect(ce3.box(['mapH', plusTen]).evaluate().toString()).toBe(
+        '[11,12,13]'
+      );
+      // The numeric form of the body's `Map` is one instance for every
+      // application: it must not keep the callback of the first one.
+      expect(ce3.box(['mapH', twice]).N().toString()).toBe('[2,4,6]');
+      expect(ce3.box(['mapK', twice]).N().toString()).toBe('[2,4,6]');
+    });
+
+    test('a precision request reaches the body', () => {
+      // `N(x, 40)` raises the precision of the engine for the computation;
+      // the body's operator sees the raised precision when the request
+      // reached it. Under an exact run of the body it saw 21 digits.
+      precisions.length = 0;
+      ce2.box(['N', ['one', 2], 40]).evaluate();
+      expect(requests()).toEqual([true]);
+      expect(precisions.length).toBe(1);
+      expect(precisions[0]).toBeGreaterThanOrEqual(40);
+      expect(ce2.precision).toBe(21);
+    });
+  });
 });
 
 describe('MAPSTO BODY PRECEDENCE', () => {

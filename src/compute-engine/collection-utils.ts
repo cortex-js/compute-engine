@@ -2806,8 +2806,14 @@ export function lazyBroadcastMapIfNeeded(
  * state keyed on the rewrapped `Map` (the auto-compile cache in
  * `library/map-auto-compile.ts`) survives across top-level drains. The rewrap
  * is purely structural (built from `fn.json`, or around `fn` itself for a
- * closure), so the memo needs no invalidation. Per-instance semantics stay as item 40 ratified: a `subs()`
- * or re-boxed copy is a new original and runs cold.
+ * closure), so the memo needs no invalidation — with one exception: a rewrap
+ * whose callback is the function literal that a value-bound SYMBOL holds at
+ * this moment (see `boundLiteral` below) depends on the frame it was made
+ * in, and is not memoized. The body `Map(h, [1, 2, 3])` of `f(h) := …` is one
+ * instance for every application of `f`; a memoized rewrap would map the
+ * callback of the first application in all later ones. Per-instance
+ * semantics stay as item 40 ratified: a `subs()` or re-boxed copy is a new
+ * original and runs cold.
  */
 const lazyMapNRewraps = new WeakMap<Expression, Expression>();
 
@@ -2835,6 +2841,9 @@ export function lazyMapNumericApproximation(
   }
 
   let wrappedFn: Expression;
+  // The function literal a value-bound symbol callback holds in the current
+  // frame, when that is what the rewrap applies (closure branch below).
+  let boundLiteral: Expression | undefined = undefined;
   if (readsOtherBindings(ce, fn)) {
     // A callback that reads a name that the current scope binds to another
     // definition (a closure, such as `x ↦ x/c` for a `c` local to a `Block`)
@@ -2848,6 +2857,27 @@ export function lazyMapNumericApproximation(
     // is removed from `f`: it is the type of the exact elements of the
     // source (`rational` for a source of halves), and the marker applies `f`
     // to a float. The body of `f` is kept as it is, with its scope.
+    //
+    // A bare symbol callback that the current scope binds to a VALUE that is
+    // a function literal (the parameter `h` of `f(h) := Map(h, [1, 2, 3])`
+    // while `f` is applied, or a local `h := z ↦ 2z` of a `Block`) is
+    // replaced by that literal. The elements of the lazy result are read
+    // after the frame that binds `h` is gone, and the symbol does not
+    // survive the canonicalization of the new callback as an operand:
+    // `Apply(h, _1)` canonicalizes to the application `h(_1)`, whose head is
+    // a NAME, resolved in the scope of the reader (a global function of the
+    // same name, or nothing). The parameter substitution that runs when the
+    // application returns rewrites symbol operands only
+    // (`bindingKeyedSubs`, `function-utils.ts`), so it does not reach that
+    // head either. The literal itself has no name to lose.
+    boundLiteral = (() => {
+      if (!isSymbol(fn)) return undefined;
+      const def = ce.lookupDefinition(fn.symbol);
+      const value = isValueDef(def) ? def.value.value : undefined;
+      return value !== undefined && isFunction(value, 'Function')
+        ? value
+        : undefined;
+    })();
     const callee =
       isFunction(fn, 'Function') &&
       fn.ops.slice(1).some(isInferredTypedParameter)
@@ -2859,7 +2889,7 @@ export function lazyMapNumericApproximation(
                 isFunction(p) && isInferredTypedParameter(p) ? p.op1 : p
               ),
           ])
-        : fn;
+        : (boundLiteral ?? fn);
     const symbols = new Set(fn.symbols);
     const params: Expression[] = [];
     let k = 0;
@@ -2904,7 +2934,9 @@ export function lazyMapNumericApproximation(
   }
   if (!wrappedFn.isValid) return undefined;
   const rewrapped = ce.function('Map', [wrappedFn, ...expr.ops.slice(1)]);
-  lazyMapNRewraps.set(expr, rewrapped);
+  // A rewrap around the literal a symbol holds NOW is valid for this frame
+  // only (see the memo note in the JSDoc).
+  if (boundLiteral === undefined) lazyMapNRewraps.set(expr, rewrapped);
   return rewrapped;
 }
 

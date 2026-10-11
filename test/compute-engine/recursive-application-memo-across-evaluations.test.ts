@@ -112,6 +112,35 @@ describe('pure-application memo across top-level evaluations', () => {
     expect(calls()).toBe(2);
   });
 
+  test('a body that reads a symbol whose value is impure is not memoized', () => {
+    // `r` holds the expression `Random()`, which draws again at each read of
+    // `r`. The purity of the body stops at the symbol, so without the
+    // dependency walk's refusal `f(1) + f(1)` in one seeded frame gave twice
+    // the first draw, where the compiled code (and two evaluations) draw
+    // twice. The count of the handler is the evidence.
+    const ce = new ComputeEngine();
+    let draws = 0;
+    ce.declare('draw', {
+      signature: '() -> number',
+      pure: false,
+      evaluate: () => {
+        draws += 1;
+        return ce.number(draws);
+      },
+    });
+    ce.declare('x', 'number');
+    ce.assign('r', ce.box(['draw']));
+    ce.box([
+      'DefineFunction',
+      'f',
+      ['Function', ['Add', 'x', 'r'], 'x'],
+    ]).evaluate();
+    expect(ce.box(['Add', ['f', 1], ['f', 1]]).evaluate().re).toBe(1 + 1 + 1 + 2);
+    expect(draws).toBe(2);
+    expect(ce.box(['List', ['f', 1], ['f', 1]]).N().toString()).toBe('[4,5]');
+    expect(draws).toBe(4);
+  });
+
   test('an assignment between two evaluations still invalidates the memo', () => {
     const ce = new ComputeEngine();
     ce.declare('c', 'real');

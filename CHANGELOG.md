@@ -1,3 +1,55 @@
+## [Unreleased]
+
+### Behavior Changes
+
+- **`.N()` of a user function whose body is one statement evaluates that
+  statement in floats.** The body of a user function ran exactly under a
+  numeric request, and only its value was numericized. Now, when the body is
+  a single statement, the numeric request reaches the statement, so the body
+  computes the way the same expression does under `.N()` at the top level.
+  The value can differ from the exact value rounded once where the float
+  computation cancels: with
+  `g(x) := \frac{1}{x+1} - \frac{1}{x} + \frac{1}{x^2+x}`, `g(10^{20}).N()`
+  gives `-1e-60` where it gave `0` (`\frac{1}{10^{20}+1} - \frac{1}{10^{20}} +
+  \frac{1}{10^{40}+10^{20}}` under `.N()` gives `-1e-60` too), and the last
+  digits of a long float sum can differ from the exact sum rounded. An
+  operator handler in the body now sees the `numericApproximation` option
+  of the request. A body with several statements still runs exactly and
+  only its value is numericized (an intermediate value a later statement
+  reads is not rounded on the way), and so does a body that applies the
+  function itself, whose exact run gives the application memo the exact
+  entry a later exact request is answered from. `evaluate()` is unchanged.
+
+  The reason is performance. With `f(n) := \sum_{k=1}^{n} \frac{1}{k^2}`,
+  `f(2000).N()` summed two thousand exact rationals: 804 ms where
+  `\sum_{k=1}^{2000} \frac{1}{k^2}` under `.N()` takes 40 ms, and
+  `f(400000).N()` did not finish. Now the sum is a float sum: 60 ms for
+  `f(2000).N()`, 7 s for `f(400000).N()`, on both evaluation routes
+  (`evaluate`, `evaluateAsync`) and for a nullary body. A precision request
+  reaches the body too: `N(f(10), 40)` is computed at forty digits.
+
+### Issues Resolved
+
+- **A mapping function held by a parameter is the one mapped under `.N()`.**
+  With `f(h) := Map(h, [1, 2, 3])` and a global `h(x) := x^2`,
+  `f(y ↦ y + 10).N()` gave `[1, 4, 9]`, and `[k(1), k(2), k(3)]` when the
+  parameter had no global of its name: the numeric form of a lazy `Map` with
+  a bare symbol callback built the callback again from the NAME of the
+  symbol, read after the call returned. The callback is now the function
+  literal the symbol holds in the frame of the call, and such a form is made
+  again at each call (`f(y ↦ 2y).N()` after `f(y ↦ y + 10).N()` gives
+  `[2, 4, 6]`). Reached by the compiled JavaScript of such a function too.
+
+- **A user function that reads a symbol whose stored value is impure is not
+  memoized.** With `ce.assign('r', ce.box(['Random']))`, which stores the
+  unevaluated expression `Random()` (the statement `r := Random()` evaluates
+  its right-hand side and stores a number), and `f(x) := x + r`,
+  `f(1) + f(1)` in one `WithRandomSeed` frame gave twice the first draw: the
+  purity of the body stopped at the symbol `r`, and the second application
+  was answered from the application memo. Each read of `r` draws again, so
+  the memo now refuses a dependency whose stored value is impure; the lazy
+  element memo, which shares the dependency walk, does the same.
+
 ## 0.152.0 _2026-10-11_
 
 ### Behavior Changes
