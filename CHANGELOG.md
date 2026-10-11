@@ -42,6 +42,24 @@
 
 ### Issues Resolved
 
+- **`N(x, p)` with more digits than the engine has, and a goal `N(x, [p, a])`,
+  yield under `evaluateAsync`** ([#392](https://github.com/cortex-js/compute-engine/issues/392)).
+  `N(\sum_{k=1}^{400000} \frac{1}{k^2}, 30)` and `N(…, [10, 5])` ran to the
+  end synchronously and ignored the abort signal, where `N(…)` and `N(…, 10)`
+  yielded: the precision of the big decimals is one value for the whole
+  module and was raised for the time of the computation, which could not
+  span an `await` while other evaluations run. The working precision and
+  the requested digits now travel with the asynchronous evaluation, and each
+  synchronous slice of it installs them when it starts and restores the
+  previous values when it returns, so two evaluations at different
+  precisions interleave on one engine, each computes with its own digits,
+  and a handler that reads `options.precision` sees the digits of its own
+  call. The values are those of the synchronous handler, also for a nested
+  call (`N(N(e^{10^{-40}} - 1, 30), 100)` is `1e-40`); a constant such as
+  `Pi` is still not cached at the raised precision, and the lazy element
+  memo neither serves nor stores an element inside such a window (on both
+  routes).
+
 - **A mapping function held by a parameter is the one mapped under `.N()`.**
   With `f(h) := Map(h, [1, 2, 3])` and a global `h(x) := x^2`,
   `f(y ↦ y + 10).N()` gave `[1, 4, 9]`, and `[k(1), k(2), k(3)]` when the

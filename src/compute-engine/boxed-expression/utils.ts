@@ -1,4 +1,5 @@
 import { isOperatorDef, isValueDef } from './definition-guards.js';
+import { runWithEvaluationEffects } from '../effects-registry.js';
 import type {
   Expression,
   OperatorDefinition,
@@ -1870,13 +1871,21 @@ export async function numericFromExactValueAsync(
   if (expression === undefined || !isTransitivelyPure(expression))
     return undefined;
   if (bignumPreferred(ce)) return undefined;
-  const exact = (
-    await expression.evaluateAsync({
-      signal: options?.signal,
-      _effects: options?._effects,
-      _contextStack: options?._contextStack,
-    })
-  ).N();
+  const exactValue = await expression.evaluateAsync({
+    signal: options?.signal,
+    _effects: options?._effects,
+    _contextStack: options?._contextStack,
+    _precisionWindow: options?._precisionWindow,
+  });
+  // After the `await`: the float of the exact value is computed inside the
+  // precision window of the evaluation, with its context stack in place.
+  const exact = runWithEvaluationEffects(
+    ce,
+    options?._effects ?? ce._evaluationEffects ?? ce.effects,
+    () => exactValue.N(),
+    options?._contextStack,
+    options?._precisionWindow
+  );
   if (!isNumber(exact) || exact.isNaN === true) return undefined;
   return exact;
 }
@@ -2030,20 +2039,27 @@ export function withOwnHead<T extends Expression | undefined | null>(
 
 /**
  * The options with which an `evaluateAsync` handler awaits one of its
- * operands: the numeric request, the abort signal, and the registry and
- * context stack of this evaluation, which the operand's own evaluation must
- * continue after the handler has suspended.
+ * operands: the numeric request, the abort signal, and the registry, context
+ * stack and working precision of this evaluation, which the operand's own
+ * evaluation must continue after the handler has suspended.
  */
 export function awaitedOperandOptions(
   options: EvaluateHandlerOptions,
   overrides?: Partial<EvaluateOptions>
 ): Partial<EvaluateOptions> {
-  const { numericApproximation, signal, effects, _contextStack } = options;
+  const {
+    numericApproximation,
+    signal,
+    effects,
+    _contextStack,
+    _precisionWindow,
+  } = options;
   return {
     numericApproximation,
     signal,
     _effects: effects,
     _contextStack,
+    _precisionWindow,
     ...overrides,
   };
 }

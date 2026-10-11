@@ -4,6 +4,7 @@ import type {
   EffectHandlers,
   EntropyHandler,
 } from './types-effects.js';
+import type { PrecisionWindow } from './types-kernel-evaluation.js';
 
 // The host capability registry — the value behind `ce.effects`
 // (`docs/EFFECTS-MODEL.md`, "Host capabilities"). This module holds the
@@ -140,30 +141,53 @@ export function deriveEffectHandlers(
  *   so that a concurrent evaluation does not see them, and they do not hide
  *   the concurrent evaluation's own scopes.
  *
+ * - The precision window (`precisionWindow`), when a `N(x, p)` call
+ *   encloses the evaluation (`EvaluateOptions._precisionWindow`): the
+ *   working precision of the big decimals, when the call raises it above
+ *   the precision of the engine, and the digits the call requests, which the
+ *   handlers receive as `options.precision` (`engine._requestedPrecision`).
+ *   Both are one value for the whole engine or module, so they are
+ *   installed for each synchronous slice and restored before the slice
+ *   returns; the working precision through `_withTransientPrecision`, which
+ *   also keeps a constant such as `Pi` from being cached at the raised
+ *   precision.
+ *
  * This puts the right registry in the slot, and the evaluation's own array
  * in place of the engine's array (by reference, so that a scope `fn` pushes
  * and holds across a later `await` stays on that array), for the duration
  * of `fn`. It restores both before control returns. When `contextStack` is
- * `undefined`, the engine's array is left as it is.
+ * `undefined`, the engine's array is left as it is; when `precisionWindow`
+ * is `undefined`, the precisions are left as they are.
  */
 export function runWithEvaluationEffects<T, C>(
   engine: {
     _evaluationEffects: EffectHandlers | undefined;
     _evalContextStack: C[];
+    _requestedPrecision?: number | undefined;
+    _withTransientPrecision?: <R>(digits: number, fn: () => R) => R;
   },
   effects: EffectHandlers,
   fn: () => T,
-  contextStack?: C[]
+  contextStack?: C[],
+  precisionWindow?: PrecisionWindow
 ): T {
   const enclosing = engine._evaluationEffects;
   const enclosingStack = engine._evalContextStack;
+  const enclosingRequest = engine._requestedPrecision;
   engine._evaluationEffects = effects;
   if (contextStack !== undefined) engine._evalContextStack = contextStack;
+  if (precisionWindow?.requested !== undefined)
+    engine._requestedPrecision = precisionWindow.requested;
   try {
+    const working = precisionWindow?.working;
+    if (working !== undefined && engine._withTransientPrecision)
+      return engine._withTransientPrecision(working, fn);
     return fn();
   } finally {
     engine._evaluationEffects = enclosing;
     if (contextStack !== undefined) engine._evalContextStack = enclosingStack;
+    if (precisionWindow?.requested !== undefined)
+      engine._requestedPrecision = enclosingRequest;
   }
 }
 
@@ -179,17 +203,20 @@ export function runWithEvaluationEffects<T, C>(
  * engine state that another, concurrent evaluation left: an empty registry
  * slot, and an evaluation-context stack without this evaluation's scopes. A
  * `Sum` would then assign its index in the wrong scope. This puts the right
- * registry and stack in place around each step, and restores the previous
- * ones before control returns to `runAsync`.
+ * registry, stack and working precision in place around each step, and
+ * restores the previous ones before control returns to `runAsync`.
  */
 export function* withEvaluationEffects<T, R, N, C>(
   engine: {
     _evaluationEffects: EffectHandlers | undefined;
     _evalContextStack: C[];
+    _requestedPrecision?: number | undefined;
+    _withTransientPrecision?: <Q>(digits: number, fn: () => Q) => Q;
   },
   effects: EffectHandlers,
   gen: Generator<T, R, N>,
-  contextStack?: C[]
+  contextStack?: C[],
+  precisionWindow?: PrecisionWindow
 ): Generator<T, R, N> {
   let sent: N | undefined = undefined;
   for (;;) {
@@ -197,7 +224,8 @@ export function* withEvaluationEffects<T, R, N, C>(
       engine,
       effects,
       () => gen.next(sent as N),
-      contextStack
+      contextStack,
+      precisionWindow
     );
     if (step.done) return step.value;
     sent = yield step.value;

@@ -644,20 +644,30 @@ capabilities from there — never from `ce.effects`.
 
 **Rules for the author of an `evaluateAsync` handler.** (1) When the
 handler builds a new options object for a nested `evaluateAsync()` call,
-it copies the registry: `{ signal, _effects: options.effects }`. (2) When
-the handler drives a generator with `runAsync` and the generator's steps
-call the synchronous `evaluate()` (a loop body, the terms of a sum), it
-wraps the generator with `withEvaluationEffects(engine, options.effects,
-gen)` (`effects-registry.ts`): `runAsync` suspends the handler between
-time slices, and a step that runs after a suspension would otherwise
-capture whichever registry is installed at that moment. (3) When the
-handler calls a synchronous helper that evaluates, after one of its own
-`await`s — `If` and `Which` hand a non-boolean condition to their
-synchronous twins — it runs the call inside
-`runWithEvaluationEffects(engine, options.effects, () => …)`. The rules
-are applied in `Block`, `If`, `Which`, `Loop`, the short-circuit
-connectives, `List`, `Set`, `Sum` and `Product`; the first is checked
-mechanically by the "coupling rule audit" tests. A handler that breaks a rule does not
+it copies the registry, the context stack and the working precision:
+`{ signal, _effects: options.effects, _contextStack: options._contextStack,
+_precisionWindow: options._precisionWindow }`. (2) When the handler
+drives a generator with `runAsync` and the generator's steps call the
+synchronous `evaluate()` (a loop body, the terms of a sum), it wraps the
+generator with `withEvaluationEffects(engine, options.effects, gen,
+options._contextStack, options._precisionWindow)`
+(`effects-registry.ts`): `runAsync` suspends the handler between time
+slices, and a step that runs after a suspension would otherwise capture
+whichever registry is installed at that moment. (3) When the handler
+calls a synchronous helper that evaluates, after one of its own `await`s
+— `If` and `Which` hand a non-boolean condition to their synchronous
+twins — it runs the call inside `runWithEvaluationEffects(engine,
+options.effects, () => …, options._contextStack,
+options._precisionWindow)`. The working precision is the third part of
+engine state an asynchronous evaluation carries for itself: the precision
+of the big decimals is one value for the whole module, so a `N(x, p)` call
+with more digits than the engine has does not keep it raised across an
+`await` (another evaluation would compute at the raised precision); each
+slice raises it when it starts and restores it when it returns
+(`EvaluateOptions._precisionWindow`). The rules are applied in `Block`,
+`If`, `Which`, `Loop`, the short-circuit connectives, `List`, `Set`, `Sum`
+and `Product`; the first is checked mechanically by the "coupling rule
+audit" tests. A handler that breaks a rule does not
 fail: its nested evaluations use the installed registry, which is wrong
 only while another evaluation's `withEffects` call is open.
 

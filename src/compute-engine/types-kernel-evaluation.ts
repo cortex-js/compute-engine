@@ -183,6 +183,36 @@ export type EvaluateOptions = {
    * @internal
    */
   _contextStack: EvalContext<any, any, any>[];
+
+  /**
+   * The precision window of the asynchronous evaluation these options belong
+   * to, when a call `N(x, p)` encloses it: the working precision `working`
+   * (significant digits of the big decimals; set when `p` plus the guard
+   * digits is above the precision of the engine, or for a goal
+   * `N(x, [p, a])`), and the digits `requested` by the call, which the
+   * handlers receive as `options.precision`. Both are one value for the
+   * whole engine or module (`BigDecimal.precision`,
+   * `ce._requestedPrecision`), so neither can stay set across an `await`:
+   * another evaluation would compute at the raised precision or read the
+   * other call's digits, and the restores would race. Instead the window
+   * travels with the options, as `_effects` and `_contextStack` do, and each
+   * synchronous slice of the evaluation installs it when it starts and
+   * restores the previous values when it returns (`runWithEvaluationEffects`,
+   * through `_withTransientPrecision` for the working precision). The
+   * synchronous route has no such option: there the window of `N(x, p)` is
+   * one synchronous call. Not an input.
+   * @internal
+   */
+  _precisionWindow: PrecisionWindow;
+};
+
+/** See `EvaluateOptions._precisionWindow`. */
+export type PrecisionWindow = {
+  /** The working precision of the big decimals, when it is raised above the
+   * precision of the engine. */
+  working?: number;
+  /** The digits requested by the enclosing `N(x, p)` call. */
+  requested?: number;
 };
 
 /**

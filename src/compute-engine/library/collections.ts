@@ -5752,16 +5752,19 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         signal,
         effects,
         _contextStack,
+        _precisionWindow,
       }
     ) => {
-      // `_effects` and `_contextStack` hand the host capability registry and
-      // the context stack this evaluation captured to each element's evaluation.
+      // `_effects`, `_contextStack` and `_precisionWindow` hand the host
+      // capability registry, the context stack and the working precision this
+      // evaluation captured to each element's evaluation.
       const options = {
         numericApproximation,
         materialization,
         signal,
         _effects: effects,
         _contextStack,
+        _precisionWindow,
       };
       const evaluated = async (
         xs: ReadonlyArray<Expression>
@@ -5881,16 +5884,19 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         signal,
         effects,
         _contextStack,
+        _precisionWindow,
       }
     ) => {
-      // `_effects` and `_contextStack` hand the host capability registry and
-      // the context stack this evaluation captured to each nested evaluation.
+      // `_effects`, `_contextStack` and `_precisionWindow` hand the host
+      // capability registry, the context stack and the working precision this
+      // evaluation captured to each nested evaluation.
       const options = {
         numericApproximation,
         materialization,
         signal,
         _effects: effects,
         _contextStack,
+        _precisionWindow,
       };
       const comp = parseSetComprehension(ops);
       if (comp !== null) {
@@ -15101,7 +15107,13 @@ async function runWalkAsync<R>(
   if (walk === undefined) return undefined;
   const ce = options.engine;
   return runAsync(
-    withEvaluationEffects(ce, options.effects, walk, options._contextStack),
+    withEvaluationEffects(
+      ce,
+      options.effects,
+      walk,
+      options._contextStack,
+      options._precisionWindow
+    ),
     ce._timeRemaining,
     options.signal,
     ce._deadlineFrame

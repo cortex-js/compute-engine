@@ -170,7 +170,7 @@ it. What remains:
   `Sum`) compiles real. Found 2026-10-08 by the review of the real-lane
   ascription.
 
-### Two forms of `N` and some lazy heads still run synchronously under `evaluateAsync` (OPEN, issue #392, found 2026-10-07)
+### Some lazy heads still run synchronously under `evaluateAsync` (OPEN, issue #392, found 2026-10-07)
 
 `N`, `Add`, `Multiply`, `Evaluate`, `ReleaseHold` and the four chainable
 relations `Equal`, `NotEqual`, `Less`, `LessEqual` have an asynchronous twin
@@ -218,12 +218,6 @@ lazy operators with a synchronous handler were audited one by one (2026-10-09):
 
 What remains:
 
-- The two forms of `N` that block: `N(x, p)` with `p` above the precision of
-  the engine minus the guard digits (`p ≥ 17` on a default engine), and a goal
-  `N(x, [p, a])`, because `_withTransientPrecision` raises the precision of the
-  engine, a global of the bignum library, for the time of the computation, and
-  the raised precision cannot span an `await` while other evaluations run. A
-  per-evaluation working precision would remove that limit.
 - The operators of the last list above.
 - A user function whose body is already suspended on this engine (a recursive
   body, or a second call of the literal from another evaluation) and one with

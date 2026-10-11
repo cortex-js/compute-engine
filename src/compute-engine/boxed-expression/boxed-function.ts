@@ -1,4 +1,5 @@
 import { isScratchBinding } from '../scratch-scopes.js';
+import type { PrecisionWindow } from '../types-kernel-evaluation.js';
 import { callResultType } from './call-result-type.js';
 import { isPolymorphicType } from '../../common/type/instantiate.js';
 import type { MathJsonExpression } from '../../math-json/types.js';
@@ -3340,11 +3341,21 @@ export class BoxedFunction
       options?._effects ??
       this.engine._evaluationEffects ??
       this.engine.effects;
-    if (options?._effects === undefined || options._contextStack === undefined)
+    // The precision window is captured the same way: an evaluation started
+    // inside the window of a `N(x, p)` call (a user handler that passes its
+    // operand to `evaluateAsync` with options of its own) runs its later
+    // slices inside that window too (`EvaluateOptions._precisionWindow`).
+    if (
+      options?._effects === undefined ||
+      options._contextStack === undefined ||
+      options._precisionWindow === undefined
+    )
       options = {
         ...options,
         _effects: effects,
         _contextStack: options?._contextStack ?? this.engine._evalContextStack,
+        _precisionWindow:
+          options?._precisionWindow ?? capturedPrecisionWindow(this.engine),
       };
     this.engine._inFlightAsyncEvaluations += 1;
     let promise: Promise<Expression>;
@@ -3360,7 +3371,8 @@ export class BoxedFunction
         this.engine,
         effects,
         () => this._evaluateAsyncUncounted(options),
-        options._contextStack
+        options._contextStack,
+        options._precisionWindow
       );
     } catch (error) {
       this.engine._inFlightAsyncEvaluations -= 1;
@@ -6194,7 +6206,8 @@ export class BoxedFunction
             this.engine._evaluationEffects ??
             this.engine.effects,
           () => this.engine.function(this.operator, held),
-          options?._contextStack
+          options?._contextStack,
+          options?._precisionWindow
         );
       }
       if (lambdaElementwise) {
@@ -6878,7 +6891,8 @@ export class BoxedFunction
       // `opts._contextStack`, and each synchronous segment of the handler
       // puts it in place of the engine's stack while it runs
       // (`runWithEvaluationEffects`, `withEvaluationEffects`), exactly as the
-      // capability registry travels in `opts._effects`. A nested scoped
+      // capability registry travels in `opts._effects` and the working
+      // precision in `opts._precisionWindow`. A nested scoped
       // evaluation makes its own copy in turn, so two operands evaluated at
       // the same time do not see the frames of each other.
       const engine = this.engine;
@@ -6895,7 +6909,8 @@ export class BoxedFunction
             engine._pushEvalContext(this._localScope!, undefined, {
               ambient: true,
             }),
-          contextStack
+          contextStack,
+          options?._precisionWindow
         );
       }
       const localContext = isScoped
@@ -6917,16 +6932,24 @@ export class BoxedFunction
           engine,
           signal: options?.signal,
           // An `evaluateAsync` handler passes these options to the operands
-          // it awaits; the registry and the context stack must go with them.
+          // it awaits; the registry, the context stack and the working
+          // precision must go with them.
           _effects: effects,
           _contextStack: contextStack,
+          _precisionWindow: options?._precisionWindow,
           materialization: options?.materialization,
           // See the matching comment (and `EvaluateHandlerOptions.expression`)
           // on the sync path.
           expression: this,
-          // See the matching comment on the sync path.
+          // See the matching comment on the sync path. The options are built
+          // after the operands were awaited, outside any slice of this
+          // evaluation, so the digits come from the precision window the
+          // evaluation carries, not from the engine field, which another
+          // evaluation may have set.
           precision: numericApproximation
-            ? (engine._requestedPrecision ?? engine.precision)
+            ? (options?._precisionWindow?.requested ??
+              engine._requestedPrecision ??
+              engine.precision)
             : undefined,
           effects,
         };
@@ -6974,6 +6997,7 @@ export class BoxedFunction
             ...operandOptions(options),
             _effects: effects,
             _contextStack: contextStack,
+            _precisionWindow: options?._precisionWindow,
           };
           const values: Expression[] = [];
           for (const x of tail) values.push(await x.evaluateAsync(operandOpts));
@@ -7024,7 +7048,8 @@ export class BoxedFunction
               ? applyAwaiting(handlerOps, opts)
               : def.evaluate?.(handlerOps, opts);
           },
-          contextStack
+          contextStack,
+          options?._precisionWindow
         );
         // A handler that answers `undefined` leaves the operator as it is;
         // over evaluated operands that is the operator over the values, as
@@ -7041,7 +7066,8 @@ export class BoxedFunction
             engine,
             effects,
             () => engine._removeEvalContext(localContext),
-            contextStack
+            contextStack,
+            options?._precisionWindow
           );
       }
 
@@ -7088,7 +7114,8 @@ export class BoxedFunction
             return applyPoleOverride(engine, this._operator, tail, result);
           return result;
         },
-        contextStack
+        contextStack,
+        options?._precisionWindow
       );
     };
   }
@@ -9130,6 +9157,7 @@ async function applyFunctionLiteralAsync(
     ...options,
     _effects: effects,
     _contextStack: contextStack,
+    _precisionWindow: options?._precisionWindow,
   };
   // The callee is read once, before the arguments are evaluated, and handed
   // to the application: an argument that reassigns the function (an
@@ -9147,7 +9175,8 @@ async function applyFunctionLiteralAsync(
     engine,
     effects,
     () => applyFunctionLiteralWith(expr, def, carried, value, ops, true),
-    contextStack
+    contextStack,
+    options?._precisionWindow
   );
 }
 
@@ -11864,4 +11893,20 @@ function indeterminateAsNaN(result: Expression): Expression {
     return y;
   });
   return changed ? result.engine.function(result.operator, ops) : result;
+}
+
+/**
+ * The precision window in force on `engine` when an asynchronous evaluation
+ * starts without one in its options: the working precision when the engine
+ * is inside a transient window (`_withTransientPrecision`, the window of a
+ * `N(x, p)` call), and the digits requested by the enclosing `N(x, p)` call.
+ * `undefined` when neither is set.
+ */
+function capturedPrecisionWindow(
+  engine: ComputeEngine
+): PrecisionWindow | undefined {
+  const working = engine._atTransientPrecision ? engine.precision : undefined;
+  const requested = engine._requestedPrecision;
+  if (working === undefined && requested === undefined) return undefined;
+  return { working, requested };
 }

@@ -3549,7 +3549,8 @@ export async function evaluateBigOpTermAsync(
   numericApproximation: boolean | undefined,
   signal?: AbortSignal,
   effects?: EffectHandlers,
-  contextStack?: EvaluateOptions['_contextStack']
+  contextStack?: EvaluateOptions['_contextStack'],
+  precisionWindow?: EvaluateOptions['_precisionWindow']
 ): Promise<Expression | undefined> {
   // `effects` is the host capability registry the enclosing asynchronous
   // evaluation captured, and `contextStack` its evaluation-context stack,
@@ -3560,6 +3561,7 @@ export async function evaluateBigOpTermAsync(
     signal,
     _effects: effects,
     _contextStack: contextStack,
+    _precisionWindow: precisionWindow,
   });
   if (bindings === undefined || bindings.length === 0) return term;
   // The repair runs after the `await` above. It finds the binding of the
@@ -3580,7 +3582,8 @@ export async function evaluateBigOpTermAsync(
           ce,
           effects ?? ce._evaluationEffects ?? ce.effects,
           repair,
-          contextStack
+          contextStack,
+          precisionWindow
         );
   if (repaired === undefined) return undefined;
   return repaired === term
@@ -3590,6 +3593,7 @@ export async function evaluateBigOpTermAsync(
         signal,
         _effects: effects,
         _contextStack: contextStack,
+        _precisionWindow: precisionWindow,
       });
 }
 

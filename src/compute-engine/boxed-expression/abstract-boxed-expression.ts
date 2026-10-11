@@ -1,4 +1,5 @@
 import { BigDecimal } from '../../big-decimal/index.js';
+import { runWithEvaluationEffects } from '../effects-registry.js';
 
 import type {
   MathJsonExpression,
@@ -1312,18 +1313,26 @@ export abstract class _BoxedExpression implements Expression {
   // index of a `Sum`), an asynchronous evaluation keeps its scopes on its
   // own stack (`EvaluateOptions._contextStack`), so that stack is put in
   // place of the engine's stack while the leaf is evaluated.
+  //
+  // Inside the window of a `N(x, p)` call with more digits than the engine
+  // has (`EvaluateOptions._precisionWindow`), the leaf is evaluated at the
+  // working precision: a symbol's `N()` computes the value of a constant at
+  // that precision.
   evaluateAsync(options?: Partial<EvaluateOptions>): Promise<Expression> {
     const contextStack = options?._contextStack;
-    if (contextStack === undefined)
+    const window = options?._precisionWindow;
+    if (contextStack === undefined && window === undefined)
       return Promise.resolve(this.evaluate(options));
     const engine = this.engine;
-    const enclosingStack = engine._evalContextStack;
-    engine._evalContextStack = contextStack;
-    try {
-      return Promise.resolve(this.evaluate(options));
-    } finally {
-      engine._evalContextStack = enclosingStack;
-    }
+    return Promise.resolve(
+      runWithEvaluationEffects(
+        engine,
+        options?._effects ?? engine._evaluationEffects ?? engine.effects,
+        () => this.evaluate(options),
+        contextStack,
+        window
+      )
+    );
   }
 
   N(): Expression {

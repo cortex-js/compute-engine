@@ -315,6 +315,7 @@ function evaluateOptionsOf(
     signal,
     _effects,
     _contextStack,
+    _precisionWindow,
   } = options;
   return {
     numericApproximation,
@@ -322,6 +323,7 @@ function evaluateOptionsOf(
     signal,
     _effects,
     _contextStack,
+    _precisionWindow,
   };
 }
 
@@ -363,7 +365,8 @@ function finishShortCircuit(
           ce,
           evalOptions._effects,
           rebuild,
-          evalOptions._contextStack
+          evalOptions._contextStack,
+          evalOptions._precisionWindow
         );
   }
   return reduce(values, { engine: ce });

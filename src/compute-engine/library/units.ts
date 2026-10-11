@@ -189,7 +189,8 @@ export const UNITS_LIBRARY: SymbolDefinitions = {
               ce,
               options.effects,
               () => ops[0].N(),
-              options._contextStack
+              options._contextStack,
+              options._precisionWindow
             )
           : await ops[0].evaluateAsync(awaitedOperandOptions(options));
       return ce._fn('Quantity', [mag, ops[1]]);
@@ -248,7 +249,8 @@ export const UNITS_LIBRARY: SymbolDefinitions = {
         ce,
         options.effects,
         () => convertQuantity(ce, quantity, ops[1], numericApproximation),
-        options._contextStack
+        options._contextStack,
+        options._precisionWindow
       );
     },
   },

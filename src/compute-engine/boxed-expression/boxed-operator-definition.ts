@@ -2371,7 +2371,8 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
             effects,
             () =>
               fn(xs, this.lazy ? { ...carried, holdArguments: true } : carried),
-            stack
+            stack,
+            options._precisionWindow
           );
         },
       });

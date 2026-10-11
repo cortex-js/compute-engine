@@ -78,8 +78,8 @@ describe('the asynchronous twins give the value of the synchronous handlers', ()
     );
     expect((await same(['N', 'Pi', 10])).toString()).toBe('3.141592654');
     expect((await same(['N', ['Divide', 1, 3], 5])).toString()).toBe('0.33333');
-    // A goal `[p, a]` and a request above the precision of the engine are
-    // computed by the synchronous handler.
+    // A goal `[p, a]` and a request above the precision of the engine have
+    // their own asynchronous windows (`evaluate-async-precision-window.test.ts`).
     await same(['N', 'Pi', ['List', 5, 10]]);
     expect((await same(['N', 'Pi', 30])).toString()).toBe(
       '3.14159265358979323846264338328'
@@ -135,9 +135,11 @@ describe('the asynchronous twins give the value of the synchronous handlers', ()
   // operator that suspends until the test releases it, so the test chooses
   // the order of completion. (A first version let a sum over 20000 terms
   // finish after a sum over 200 terms; under the load of the continuous
-  // integration machine it crossed the time limit of the test.) The field
-  // follows the requests in flight: while one request is still running, it
-  // holds that request's digits; once none is left, it is cleared.
+  // integration machine it crossed the time limit of the test.) The digits
+  // requested by an asynchronous call travel with the evaluation
+  // (`EvaluateOptions._precisionWindow`) and are installed on the engine
+  // for each synchronous slice only: while the evaluations are suspended,
+  // the field is clear, whatever the order in which they finish.
   test('concurrent N(x, p) calls leave no requested precision behind', async () => {
     const engine = new ComputeEngine();
     let release: () => void = () => {};
@@ -163,7 +165,7 @@ describe('the asynchronous twins give the value of the synchronous handlers', ()
     const a = engine.box(['N', SMALL_SUM, 10]).evaluateAsync();
     const b = engine.box(['N', ['Gated', SMALL_SUM], 12]).evaluateAsync();
     expect((await a).toString()).toBe(expected(10));
-    expect(requested()).toBe(12);
+    expect(requested()).toBeUndefined();
     release();
     expect((await b).toString()).toBe(expected(12));
     expect(requested()).toBeUndefined();
@@ -173,7 +175,7 @@ describe('the asynchronous twins give the value of the synchronous handlers', ()
     const c = engine.box(['N', ['Gated', SMALL_SUM], 10]).evaluateAsync();
     const d = engine.box(['N', SMALL_SUM, 12]).evaluateAsync();
     expect((await d).toString()).toBe(expected(12));
-    expect(requested()).toBe(10);
+    expect(requested()).toBeUndefined();
     release();
     expect((await c).toString()).toBe(expected(10));
     expect(requested()).toBeUndefined();
@@ -190,8 +192,8 @@ describe('the asynchronous twins give the value of the synchronous handlers', ()
         await engine.box(['N', 'Pi', ['AsyncOnly', 2]]).evaluateAsync()
       ).toString()
     ).toBe('3.141593');
-    // p = 30 is above the precision of the engine: the synchronous window,
-    // after the asynchronous-only application is awaited.
+    // p = 30 is above the precision of the engine: the asynchronous-only
+    // application is awaited inside the window.
     expect(
       (await engine.box(['N', ['AsyncOnly', 2], 30]).evaluateAsync()).re
     ).toBe(7);

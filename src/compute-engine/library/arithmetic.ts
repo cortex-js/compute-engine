@@ -4512,6 +4512,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           signal,
           effects,
           _contextStack,
+          _precisionWindow,
         }
       ) => {
         if (ops.some((x) => isContinuationOperand(x))) return undefined;
@@ -4525,8 +4526,14 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
                     signal,
                     _effects: effects,
                     _contextStack,
+                    _precisionWindow,
                   }
-                : { signal, _effects: effects, _contextStack }
+                : {
+                    signal,
+                    _effects: effects,
+                    _contextStack,
+                    _precisionWindow,
+                  }
             )
           );
         // The fold runs after the `await`s: it evaluates again (a conditional
@@ -4542,7 +4549,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               engine,
               expression,
             }),
-          _contextStack
+          _contextStack,
+          _precisionWindow
         );
       },
     },
@@ -7677,6 +7685,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           signal,
           effects,
           _contextStack,
+          _precisionWindow,
         }
       ) => {
         if (ops.some((x) => isContinuationOperand(x))) return undefined;
@@ -7690,8 +7699,14 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
                     signal,
                     _effects: effects,
                     _contextStack,
+                    _precisionWindow,
                   }
-                : { signal, _effects: effects, _contextStack }
+                : {
+                    signal,
+                    _effects: effects,
+                    _contextStack,
+                    _precisionWindow,
+                  }
             )
           );
         // The fold runs after the `await`s: it evaluates again (a conditional
@@ -7707,7 +7722,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               engine,
               expression,
             }),
-          _contextStack
+          _contextStack,
+          _precisionWindow
         );
       },
     },
@@ -10497,7 +10513,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (result === NON_ENUMERABLE_BOUNDS)
           return bigOpBoundsError(ce, bounds);
         // Evaluate the accumulated result to combine numeric factors
-        const product = result?.evaluate({ numericApproximation: numeric });
+        // After the `await`: the evaluation of the product runs inside the
+        // window, at the working precision.
+        const product = runWithEvaluationEffects(
+          ce,
+          options.effects,
+          () => result?.evaluate({ numericApproximation: numeric }),
+          options._contextStack,
+          options._precisionWindow
+        );
         if (product === undefined) return ce.NaN;
         // A factor above the largest double is ±∞ at machine precision, and
         // `∞ · 0` is NaN. The float of the exact product is used then.
@@ -10541,6 +10565,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
                       signal: options.signal,
                       _effects: options.effects,
                       _contextStack: options._contextStack,
+                      _precisionWindow: options._precisionWindow,
                     })
                   : term;
               if (asyncTerms) return undefined;
@@ -10612,12 +10637,24 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
                       numeric,
                       options.signal,
                       options.effects,
-                      options._contextStack
-                    ).then((xe) => accumulate(acc, xe))
+                      options._contextStack,
+                      options._precisionWindow
+                    ).then((xe) =>
+                      // After the `await`: the accumulation rounds at the
+                      // working precision, so it runs inside the window.
+                      runWithEvaluationEffects(
+                        ce,
+                        options.effects,
+                        () => accumulate(acc, xe),
+                        options._contextStack,
+                        options._precisionWindow
+                      )
+                    )
                   : accumulate(acc, numericTerm(x, bindings)),
               ce.One
             ),
-            options._contextStack
+            options._contextStack,
+            options._precisionWindow
           ),
           ce._timeRemaining,
           options.signal,
@@ -10630,7 +10667,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         }
         if (result === NON_ENUMERABLE_BOUNDS)
           return bigOpBoundsError(ce, bounds);
-        const product = result?.evaluate({ numericApproximation: numeric });
+        // After the `await`: the evaluation of the product runs inside the
+        // window, at the working precision.
+        const product = runWithEvaluationEffects(
+          ce,
+          options.effects,
+          () => result?.evaluate({ numericApproximation: numeric }),
+          options._contextStack,
+          options._precisionWindow
+        );
         if (product === undefined) return ce.NaN;
         // The same recovery as the sync handler, with an asynchronous exact
         // evaluation.
@@ -10639,6 +10684,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           signal: options.signal,
           _effects: options.effects,
           _contextStack: options._contextStack,
+          _precisionWindow: options._precisionWindow,
         });
       },
     },
@@ -10859,6 +10905,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           effects,
           expression,
           _contextStack,
+          _precisionWindow,
         }
       ) => {
         // Arity-1 form over an operand that can be absent as a whole: as in
@@ -10878,6 +10925,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               signal,
               _effects: effects,
               _contextStack,
+              _precisionWindow,
             });
           if (first.isFiniteCollection !== true) return undefined;
           // An exact `Range` has a closed form — see the sync handler.
@@ -10907,7 +10955,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
                   );
                 return addSumTerm(acc, term, numericApproximation);
               }),
-              _contextStack
+              _contextStack,
+              _precisionWindow
             ),
             engine._timeRemaining,
             signal,
@@ -10915,7 +10964,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           );
           if (enumerationDeclinedAfterWalk(first, walked)) return undefined;
           if (result === undefined) return engine.NaN;
-          const sum = finishSum(engine, result, numericApproximation);
+          // After the `await`: the correction of the accumulator rounds at
+          // the working precision, so it runs inside the window.
+          const sum = runWithEvaluationEffects(
+            engine,
+            effects,
+            () => finishSum(engine, result, numericApproximation),
+            _contextStack,
+            _precisionWindow
+          );
           // The same recovery as the synchronous handler, with an
           // asynchronous exact evaluation.
           if (!numericApproximation) return sum;
@@ -10923,6 +10980,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             signal,
             _effects: effects,
             _contextStack,
+            _precisionWindow,
           });
         }
 
@@ -10949,6 +11007,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
                       signal,
                       _effects: effects,
                       _contextStack,
+                      _precisionWindow,
                     })
                   : term;
               if (asyncTerms) return undefined;
@@ -11022,8 +11081,19 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
                       numeric,
                       signal,
                       effects,
-                      _contextStack
-                    ).then((term) => accumulate(acc, term))
+                      _contextStack,
+                      _precisionWindow
+                    ).then((term) =>
+                      // After the `await`: the accumulation rounds at the
+                      // working precision, so it runs inside the window.
+                      runWithEvaluationEffects(
+                        engine,
+                        effects,
+                        () => accumulate(acc, term),
+                        _contextStack,
+                        _precisionWindow
+                      )
+                    )
                   : accumulate(acc, numericTerm(x, bindings)),
               new SumTerms(),
               {
@@ -11039,7 +11109,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
                 numericApproximation: numeric,
               }
             ),
-            _contextStack
+            _contextStack,
+            _precisionWindow
           ),
           engine._timeRemaining,
           signal,
@@ -11050,7 +11121,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (result === NON_ENUMERABLE_BOUNDS)
           return bigOpBoundsError(engine, rest);
         if (result === undefined || result === null) return engine.NaN;
-        const sum = finishSum(engine, result, numeric);
+        // After the `await`: the correction of the accumulator rounds at the
+        // working precision, so it runs inside the window.
+        const sum = runWithEvaluationEffects(
+          engine,
+          effects,
+          () => finishSum(engine, result, numeric),
+          _contextStack,
+          _precisionWindow
+        );
         // The same recovery as the synchronous handler, with an asynchronous
         // exact evaluation.
         if (!numeric) return sum;
@@ -11058,6 +11137,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           signal,
           _effects: effects,
           _contextStack,
+          _precisionWindow,
         });
       },
     },

@@ -1957,7 +1957,8 @@ export type ApplyOptions = Partial<EvaluateOptions> & {
    * application returns a `Promise` that yields between time slices and
    * honors the abort signal. Set by the asynchronous route of a named
    * function (`applyFunctionLiteralAsync`) and by nothing else, together
-   * with the `_effects` and `_contextStack` of that evaluation. Declined
+   * with the `_effects`, `_contextStack` and `_precisionWindow` of that
+   * evaluation. Declined
    * (the application is synchronous) when another application of the same
    * literal is already suspended, or when an argument has a free symbol.
    */
@@ -2103,7 +2104,8 @@ export async function evaluateStatementsAsync(
   signal?: AbortSignal,
   effects?: EffectHandlers,
   contextStack?: EvaluateOptions['_contextStack'],
-  numericApproximation?: true
+  numericApproximation?: true,
+  precisionWindow?: EvaluateOptions['_precisionWindow']
 ): Promise<Expression> {
   let result: Expression = ce.Nothing;
   for (const op of ops) {
@@ -2118,6 +2120,7 @@ export async function evaluateStatementsAsync(
       numericApproximation,
       _effects: effects,
       _contextStack: contextStack,
+      _precisionWindow: precisionWindow,
     });
     if (
       debugStatementResultHook !== undefined &&
@@ -4609,9 +4612,14 @@ function makeLambda(
       !asyncInFlight.has(bodyScope) &&
       !evaluatedArgs.some((a) => containsFreeSymbol(a))
     ) {
-      const { signal, _effects: effects, _contextStack: stack } = options;
+      const {
+        signal,
+        _effects: effects,
+        _contextStack: stack,
+        _precisionWindow: precision,
+      } = options;
       const inContext = <T>(f: () => T): T =>
-        runWithEvaluationEffects(ce, effects, f, stack);
+        runWithEvaluationEffects(ce, effects, f, stack, precision);
       asyncInFlight.add(bodyScope);
       // Other evaluations run while the statements are awaited. A result
       // computed before one of them wrote a value the body reads must not
@@ -4631,7 +4639,8 @@ function makeLambda(
               signal,
               effects,
               stack,
-              statementRequest?.numericApproximation
+              statementRequest?.numericApproximation,
+              precision
             );
             inContext(() => settle(statements));
           } finally {

@@ -1998,7 +1998,8 @@ export class ComputeEngine implements IComputeEngine {
       this,
       options?._effects ?? this._evaluationEffects ?? this._effects,
       fn,
-      options?._contextStack
+      options?._contextStack,
+      options?._precisionWindow
     );
   }
 

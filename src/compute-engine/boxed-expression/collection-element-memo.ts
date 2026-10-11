@@ -904,12 +904,18 @@ function memoDepsStillValidUnderChain(
 export function validElementMemo(
   expr: Expression
 ): { elements: ReadonlyArray<Expression>; complete: boolean } | undefined {
+  const ce = expr.engine;
+  // Inside a transient precision window (`_withTransientPrecision`, the
+  // window of a `N(x, p)` call), the elements that a read would compute have
+  // more digits than the ones a memo holds, and the ones a read inside the
+  // window would store would be served later at the precision of the
+  // engine: no entry is served or stored there (see the store sites).
+  if (ce._atTransientPrecision) return undefined;
   const entry = elementMemoCaches.get(expr);
   if (!entry) {
     if (CACHE_STATS) recordCache('elementMemo', 'missCold');
     return undefined;
   }
-  const ce = expr.engine;
   if (entry.worldVersion !== ce._worldVersion) {
     if (CACHE_STATS) recordCache('elementMemo', 'missEpoch');
     return undefined;
@@ -1030,6 +1036,9 @@ function commitRecordedWalk(
     )
       return;
   }
+  // Elements computed inside a transient precision window are not stored
+  // (see `validElementMemo`).
+  if (expr.engine._atTransientPrecision) return;
   elementMemoCaches.set(expr, {
     worldVersion: expr.engine._worldVersion,
     factsHidden: expr.engine._factsHidden(),
@@ -1238,7 +1247,10 @@ export function elementMemoFillTo(
   if (
     deps !== undefined &&
     !elements.some(containsObject) &&
-    sequenceReadStopCount() === sequenceStopsBefore
+    sequenceReadStopCount() === sequenceStopsBefore &&
+    // Elements computed inside a transient precision window are not stored
+    // (see `validElementMemo`).
+    !expr.engine._atTransientPrecision
   ) {
     const ce = expr.engine;
     elementMemoCaches.set(expr, {

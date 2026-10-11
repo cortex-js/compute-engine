@@ -458,7 +458,14 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
       },
       evaluateAsync: async (
         ops,
-        { engine: ce, signal, effects, expression, _contextStack }
+        {
+          engine: ce,
+          signal,
+          effects,
+          expression,
+          _contextStack,
+          _precisionWindow,
+        }
       ) => {
         const nested = enterNestedBodyScopes(expression, {
           includeRoot: true,
@@ -474,7 +481,8 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
               ce,
               effects,
               runLoop(ops[0], ops.slice(1), ce),
-              _contextStack
+              _contextStack,
+              _precisionWindow
             ),
             ce._timeRemaining,
             signal,
@@ -2110,6 +2118,7 @@ async function evaluateIfAsync(
     signal: options.signal,
     _effects: options._effects,
     _contextStack: options._contextStack,
+    _precisionWindow: options._precisionWindow,
   };
   const evaluated =
     cond === undefined ? undefined : await cond.evaluateAsync(evalOptions);
@@ -2123,7 +2132,8 @@ async function evaluateIfAsync(
           engine,
           options._effects,
           () => evaluateIf(ops, options),
-          options._contextStack
+          options._contextStack,
+          options._precisionWindow
         );
   if (evaluated === undefined) return fallback(ops);
   const { value, undecided } = evaluateCondition(evaluated);
@@ -2159,6 +2169,7 @@ async function evaluateWhichAsync(
     signal: options.signal,
     _effects: options._effects,
     _contextStack: options._contextStack,
+    _precisionWindow: options._precisionWindow,
   };
   // The synchronous fallbacks below run after an `await`, so the arms they
   // evaluate must be given this evaluation's host capability registry and
@@ -2170,7 +2181,8 @@ async function evaluateWhichAsync(
           engine,
           options._effects,
           () => evaluateWhich(args, options),
-          options._contextStack
+          options._contextStack,
+          options._precisionWindow
         );
   let i = 0;
   while (i < args.length - 1) {
@@ -2358,7 +2370,9 @@ async function evaluateBlockAsync(
     ops,
     options.signal,
     options._effects,
-    options._contextStack
+    options._contextStack,
+    undefined,
+    options._precisionWindow
   );
   // `resolveEscapingLambda` reads the block scope as the current lexical
   // scope. It runs after an `await`, so the context stack of this evaluation
@@ -2369,7 +2383,8 @@ async function evaluateBlockAsync(
         ce,
         options._effects,
         () => resolveEscapingLambda(ce, result),
-        options._contextStack
+        options._contextStack,
+        options._precisionWindow
       );
 }
 

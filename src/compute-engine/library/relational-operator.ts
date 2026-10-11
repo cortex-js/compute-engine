@@ -282,12 +282,18 @@ async function evaluateChainOperandsAsync(
     signal: AbortSignal | undefined;
     _effects: EvaluateOptions['_effects'];
     _contextStack: EvaluateOptions['_contextStack'] | undefined;
+    _precisionWindow: EvaluateOptions['_precisionWindow'] | undefined;
   },
   pairIsFalse: (lhs: Expression, rhs: Expression) => boolean
 ): Promise<Expression[] | Expression> {
-  const { numericApproximation, _effects: effects, _contextStack } = options;
+  const {
+    numericApproximation,
+    _effects: effects,
+    _contextStack,
+    _precisionWindow,
+  } = options;
   const inContext = <T>(f: () => T): T =>
-    runWithEvaluationEffects(ce, effects, f, _contextStack);
+    runWithEvaluationEffects(ce, effects, f, _contextStack, _precisionWindow);
   const ops: Expression[] = [];
   if (rawOps.some(isCollectionShaped) || rawOps.length <= 2) {
     for (const op of rawOps) ops.push(await op.evaluateAsync(options));
@@ -531,12 +537,25 @@ function chainedRelationHandlers(
       ),
     evaluateAsync: async (
       rawOps,
-      { engine: ce, numericApproximation, signal, effects, _contextStack }
+      {
+        engine: ce,
+        numericApproximation,
+        signal,
+        effects,
+        _contextStack,
+        _precisionWindow,
+      }
     ) => {
       const chain = await evaluateChainOperandsAsync(
         ce,
         rawOps,
-        { numericApproximation, signal, _effects: effects, _contextStack },
+        {
+          numericApproximation,
+          signal,
+          _effects: effects,
+          _contextStack,
+          _precisionWindow,
+        },
         CHAIN_PAIR_IS_FALSE[op](ce)
       );
       // The verdict runs after the `await`s: it may evaluate (an exact
@@ -548,7 +567,8 @@ function chainedRelationHandlers(
         ce,
         effects,
         () => decide(ce, rawOps, chain, numericApproximation),
-        _contextStack
+        _contextStack,
+        _precisionWindow
       );
     },
   };

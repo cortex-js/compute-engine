@@ -93,9 +93,11 @@ export type EvaluateHandlerOptions = Partial<EvaluateOptions> & {
    *   it is `ce.precision`, the precision of the engine.
    *
    * A handler can use it to compute to the requested number of digits
-   * without reading `ce.precision`. Note that `N(x, p)` with a `p` greater
-   * than the precision of the engine also sets `ce.precision` to `p`, and
-   * leaves it there after the call.
+   * without reading `ce.precision`. `N(x, p)` with a `p` greater than the
+   * precision of the engine computes at `p` digits plus guard digits for the
+   * time of the call and restores the precision of the engine after it; on
+   * the asynchronous route the raised precision travels with the evaluation
+   * (`EvaluateOptions._precisionWindow`).
    */
   precision?: number;
 
@@ -999,6 +1001,14 @@ export type OperatorDefinition = Partial<BaseDefinition> &
     /**
      * An asynchronous version of `evaluate`.
      *
+     * A handler that evaluates an operand with `evaluateAsync` passes its
+     * own `options` on (`x.evaluateAsync(options)`, or a copy that keeps the
+     * `_effects`, `_contextStack` and `_precisionWindow` fields): they carry
+     * the state of the evaluation across the handler's `await`s, among which
+     * the precision window of an enclosing `N(x, p)` call. An operand
+     * evaluation started with options of the handler's own inherits the
+     * window in force when it starts, but a handler that awaits BEFORE it
+     * evaluates its operand starts that evaluation outside the window.
      */
     evaluateAsync?: (
       ops: ReadonlyArray<Expression>,

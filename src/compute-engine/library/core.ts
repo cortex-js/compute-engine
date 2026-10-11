@@ -1,4 +1,5 @@
 import { BoxedType } from '../../common/type/boxed-type.js';
+import type { PrecisionWindow } from '../types-kernel-evaluation.js';
 import { joinLatex } from '../latex-syntax/tokenizer.js';
 import { activeRollbackFrame } from '../inference-rollback.js';
 import {
@@ -3955,13 +3956,20 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // honours the abort signal (GitHub issue #392).
       evaluateAsync: async (
         [x],
-        { numericApproximation, signal, effects, _contextStack }
+        {
+          numericApproximation,
+          signal,
+          effects,
+          _contextStack,
+          _precisionWindow,
+        }
       ) => {
         const opts = {
           numericApproximation,
           signal,
           _effects: effects,
           _contextStack,
+          _precisionWindow,
         };
         if (isFunction(x, 'Hold')) return x.op1.canonical.evaluateAsync(opts);
         const v = await x.canonical.evaluateAsync(opts);
@@ -7204,13 +7212,20 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // signal (GitHub issue #392).
       evaluateAsync: (
         [x],
-        { numericApproximation, signal, effects, _contextStack }
+        {
+          numericApproximation,
+          signal,
+          effects,
+          _contextStack,
+          _precisionWindow,
+        }
       ) =>
         x.evaluateAsync({
           numericApproximation,
           signal,
           _effects: effects,
           _contextStack,
+          _precisionWindow,
         }),
     },
 
@@ -7428,7 +7443,8 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           options.engine,
           options.effects,
           () => simplifyUnder(options.engine, x, ops[1]),
-          options._contextStack
+          options._contextStack,
+          options._precisionWindow
         );
       },
     },
@@ -10537,17 +10553,95 @@ function evaluateToGoal(
   request: Expression
 ): Expression | undefined {
   const ce = x.engine;
-  // `isPure` of `x` does not read the stored value of a symbol: `r` is pure
-  // also when its value is `Random()`, and each evaluation of `r` then
-  // draws again. Thus the values and the function bodies that `x` reads are
-  // checked too (`isTransitivelyPure()`).
+  const { run, first } = startGoalRun(x, goal, request);
+  let digits = first;
+  const enclosingRequest = ce._requestedPrecision;
+  try {
+    while (true) {
+      // The handlers that run inside the evaluation receive the working
+      // precision as `options.precision`.
+      ce._requestedPrecision = digits;
+      const result = ce._withTransientPrecision(digits, () =>
+        goalStep(run, x.N(), digits)
+      );
+      if (result === null) return undefined;
+      if (result !== undefined) return followEnginePrecision(ce, result);
+      const next = nextGoalDigits(digits);
+      if (next === undefined) return undefined;
+      digits = next;
+    }
+  } finally {
+    ce._requestedPrecision = enclosingRequest;
+  }
+}
+
+/**
+ * The asynchronous twin of `evaluateToGoal()`: the value at each working
+ * precision is awaited (`numericAt`, inside the precision window
+ * `windowFor(digits)`), so that a long operand yields and honours the abort
+ * signal, and the comparison of the values runs in a synchronous slice
+ * inside the same window (`slice`). The comparison itself is `goalStep()`,
+ * the same as on the synchronous route.
+ */
+async function evaluateToGoalAsync(
+  x: Expression,
+  goal: NumericGoal,
+  request: Expression,
+  numericAt: (window: PrecisionWindow | undefined) => Promise<Expression>,
+  slice: <T>(fn: () => T, window?: PrecisionWindow) => T,
+  windowFor: (requested: number, working: number) => PrecisionWindow
+): Promise<Expression | undefined> {
+  const ce = x.engine;
+  const { run, first } = slice(() => startGoalRun(x, goal, request));
+  let digits = first;
+  while (true) {
+    const working = digits;
+    const window = windowFor(working, working);
+    const value = await numericAt(window);
+    const result = slice(() => goalStep(run, value, working), window);
+    if (result === null) return undefined;
+    if (result !== undefined)
+      return slice(() => followEnginePrecision(ce, result));
+    const next = nextGoalDigits(digits);
+    if (next === undefined) return undefined;
+    digits = next;
+  }
+}
+
+/**
+ * The state of one run of `evaluateToGoal()` or `evaluateToGoalAsync()`:
+ * what `goalStep()` compares the value of each working precision with.
+ */
+type GoalRun = {
+  x: Expression;
+  goal: NumericGoal;
+  request: Expression;
+  /** `isPure` of `x` does not read the stored value of a symbol: `r` is pure
+   * also when its value is `Random()`, and each evaluation of `r` then
+   * draws again. Thus the values and the function bodies that `x` reads are
+   * checked too (`isTransitivelyPure()`). */
+  pure: boolean;
+  enginePrecision: number;
+  /** The value at the previous working precision. */
+  previous: Expression | undefined;
+  /** The number of successive values that are the rounding noise of `0`. */
+  zeroNoise: number;
+  exact: () => Expression;
+};
+
+/** The state of a new run, and its first working precision. */
+function startGoalRun(
+  x: Expression,
+  goal: NumericGoal,
+  request: Expression
+): { run: GoalRun; first: number } {
+  const ce = x.engine;
   const pure = isTransitivelyPure(x);
-  const enginePrecision = ce.precision;
   // The working precision is above machine precision: at machine precision,
   // a value is computed with machine floats, which overflow to an infinity
   // (`e^1000`) or underflow to `0` (`e^−1000`), and an infinity is an exact
   // value that needs no second evaluation.
-  let digits = Math.min(
+  let first = Math.min(
     GOAL_MAX_PRECISION,
     Math.max(
       ce.precision,
@@ -10558,71 +10652,78 @@ function evaluateToGoal(
   // Two values are compared: when the first working precision is the
   // largest one, the first value is computed at half of it. An impure
   // operand is evaluated one time only, at the first working precision.
-  if (pure && digits >= GOAL_MAX_PRECISION) digits = GOAL_MAX_PRECISION / 2;
-  let previous: Expression | undefined = undefined;
-  // The number of successive values that are the rounding noise of `0`
-  let zeroNoise = 0;
-  const exact = once(() => x.evaluate());
-  const enclosingRequest = ce._requestedPrecision;
-  try {
-    while (true) {
-      // The handlers that run inside the evaluation receive the working
-      // precision as `options.precision`.
-      ce._requestedPrecision = digits;
-      // `null`: the call stays unevaluated. `undefined`: the next working
-      // precision.
-      const result = ce._withTransientPrecision(
-        digits,
-        (): Expression | null | undefined => {
-          const value = x.N();
-          // A value with no float (`N(2, [PositiveInfinity, 20])`, or `y`
-          // for a symbol `y` with no value) needs no second evaluation. The
-          // value of an impure operand (`Random()`) is not computed again: a
-          // second evaluation gives another value.
-          if (isExactValue(value) || !pure)
-            return roundToGoal(value, goal, request, x) ?? null;
-          if (goal.accuracy === Infinity) {
-            zeroNoise = hasZeroNoise(value, digits) ? zeroNoise + 1 : 0;
-            if (zeroNoise >= ZERO_NOISE_COUNT) return null;
-          }
-          // A float that is exactly `0` does not meet a goal, also an
-          // accuracy goal, unless the exact value at the same place is the
-          // number `0`: the terms of the value can cancel at this working
-          // precision. `e^(10^−100) − 1` is `0` below about 100 digits, and
-          // `10^100·(e^(10^−100) − 1)`, whose value is about `1`, is thus
-          // also `0`. The digits lost to such a cancellation are not known,
-          // so the zero is not compared with the previous value: the
-          // working precision is raised until the float is not `0`, and at
-          // `GOAL_MAX_PRECISION` digits the call stays unevaluated.
-          if (hasInexactZero(value, exact, () => x)) {
-            previous = value;
-            return undefined;
-          }
-          if (previous !== undefined && valuesAgree(previous, value, goal)) {
-            if (
-              isPrecisionIndependent(
-                previous,
-                value,
-                exact,
-                goal,
-                enginePrecision
-              )
-            )
-              return null;
-            return roundToGoal(value, goal, request, x) ?? null;
-          }
-          previous = value;
-          return undefined;
-        }
-      );
-      if (result === null) return undefined;
-      if (result !== undefined) return followEnginePrecision(ce, result);
-      if (digits >= GOAL_MAX_PRECISION) return undefined;
-      digits = Math.min(GOAL_MAX_PRECISION, 2 * digits);
-    }
-  } finally {
-    ce._requestedPrecision = enclosingRequest;
+  if (pure && first >= GOAL_MAX_PRECISION) first = GOAL_MAX_PRECISION / 2;
+  return {
+    run: {
+      x,
+      goal,
+      request,
+      pure,
+      enginePrecision: ce.precision,
+      previous: undefined,
+      zeroNoise: 0,
+      exact: once(() => x.evaluate()),
+    },
+    first,
+  };
+}
+
+/** The working precision after `digits`, or `undefined` at the largest one. */
+function nextGoalDigits(digits: number): number | undefined {
+  if (digits >= GOAL_MAX_PRECISION) return undefined;
+  return Math.min(GOAL_MAX_PRECISION, 2 * digits);
+}
+
+/**
+ * One step of a goal run: `value` is the value of `x` at the working
+ * precision `digits`, and this runs AT that precision. `null`: the call
+ * stays unevaluated. `undefined`: the next working precision. Otherwise the
+ * value rounded to the goal.
+ */
+function goalStep(
+  run: GoalRun,
+  value: Expression,
+  digits: number
+): Expression | null | undefined {
+  const { x, goal, request } = run;
+  // A value with no float (`N(2, [PositiveInfinity, 20])`, or `y`
+  // for a symbol `y` with no value) needs no second evaluation. The
+  // value of an impure operand (`Random()`) is not computed again: a
+  // second evaluation gives another value.
+  if (isExactValue(value) || !run.pure)
+    return roundToGoal(value, goal, request, x) ?? null;
+  if (goal.accuracy === Infinity) {
+    run.zeroNoise = hasZeroNoise(value, digits) ? run.zeroNoise + 1 : 0;
+    if (run.zeroNoise >= ZERO_NOISE_COUNT) return null;
   }
+  // A float that is exactly `0` does not meet a goal, also an
+  // accuracy goal, unless the exact value at the same place is the
+  // number `0`: the terms of the value can cancel at this working
+  // precision. `e^(10^−100) − 1` is `0` below about 100 digits, and
+  // `10^100·(e^(10^−100) − 1)`, whose value is about `1`, is thus
+  // also `0`. The digits lost to such a cancellation are not known,
+  // so the zero is not compared with the previous value: the
+  // working precision is raised until the float is not `0`, and at
+  // `GOAL_MAX_PRECISION` digits the call stays unevaluated.
+  if (hasInexactZero(value, run.exact, () => x)) {
+    run.previous = value;
+    return undefined;
+  }
+  if (run.previous !== undefined && valuesAgree(run.previous, value, goal)) {
+    if (
+      isPrecisionIndependent(
+        run.previous,
+        value,
+        run.exact,
+        goal,
+        run.enginePrecision
+      )
+    )
+      return null;
+    return roundToGoal(value, goal, request, x) ?? null;
+  }
+  run.previous = value;
+  return undefined;
 }
 
 /**
@@ -11128,12 +11229,6 @@ function evaluateNResolved(
   const enclosingRequest = ce._requestedPrecision;
   ce._requestedPrecision = p;
   try {
-    // The value is computed with guard digits, then rounded to `p`
-    // digits: a value computed at `p` digits can have an error of a
-    // few units in its last digit (`N(Exp(i), 30)` had a real part
-    // that ended with ...444, not ...443). With the guard digits, a
-    // digit is wrong only when the exact value is within that error
-    // of a point halfway between two `p`-digit numbers.
     const global = ce.precision;
     const working = p + guardDigits(p);
     if (working <= global) {
@@ -11158,57 +11253,16 @@ function evaluateNResolved(
     // the value that the engine keeps at its precision. The handlers
     // receive `p` as `options.precision`: it is the number of digits
     // that the call requests.
-    //
-    // The result is rounded to `p` digits. When `p` is more than the
-    // precision of the engine, each float that the window computed is
-    // displayed with its `p` digits (`showComputedDigits()`), also a
-    // float in a symbolic result (`x + 3.14159…`). An operation on the
-    // result later computes at the precision of the engine, and its
-    // result is displayed with that precision. The elements of a lazy
-    // collection are read after the precision is restored: each one
-    // is computed from the operand by its own `N(_, p)`
-    // (`inexactResult()`).
-    //
-    // The value at the precision of the engine is computed only when
-    // a float has more digits than that precision, and only for a pure
-    // operand: a second evaluation of `Random()` would give another
-    // value. It is also not computed for a float with more digits
-    // than a machine float when the operand reads no float that is
-    // already computed (`mayReadFixedFloat()`): such a float was
-    // computed by the window, at its precision. Thus `N(Pi, 50)` or
-    // `N(Integrate(…), 50)` evaluates the operand one time only.
-    const referenceValue = once(() => {
-      // `isPure` does not read the stored values: `r + Pi` is pure
-      // also when `r` holds `Random()` (`isTransitivelyPure()`).
-      if (!isTransitivelyPure(source)) return undefined;
-      ce._requestedPrecision = enclosingRequest;
-      try {
-        return ce._withTransientPrecision(global, () => source.N());
-      } finally {
-        ce._requestedPrecision = p;
-      }
-    });
-    const readsFixedFloat = once(() => mayReadFixedFloat(source));
-    const reference = (shown: number): Expression | undefined =>
-      shown <= MACHINE_FLOAT_DIGITS || readsFixedFloat()
-        ? referenceValue()
-        : undefined;
-    const result = ce._withTransientPrecision(working, () => {
-      const value = inexactResult(
+    const result = ce._withTransientPrecision(working, () =>
+      roundWindowValue(
         ce,
-        roundToSignificantDigits(source.N(), p),
-        p,
-        source
-      );
-      if (p <= global) return value;
-      return showComputedDigits(
-        value,
+        source,
         p,
         global,
-        reference,
-        once(() => source.evaluate())
-      );
-    });
+        source.N(),
+        syncReferenceValue(ce, source, global, enclosingRequest)
+      )
+    );
     // A float with no more digits than the precision of the engine is
     // a float of the kind that the engine makes: a machine float at
     // machine precision (`N(1/3, 11)` is computed at 16 digits, which
@@ -11220,112 +11274,249 @@ function evaluateNResolved(
 }
 
 /**
- * The asynchronous requests of digits that are in flight on an engine
- * (`evaluateNAsync()`). An asynchronous request sets
- * `ce._requestedPrecision` across an `await`, and two such requests on one
- * engine can finish in either order: a save-and-restore around each one
- * would leave the field set to the other's digits for the life of the
- * engine when the first to start finishes first. The field follows the
- * entries instead: the last entry still in flight, or the value the field
- * had before the first entry, once none is left.
+ * The value of `N(source, p)` from `value`, the numeric value of `source`
+ * computed at the working precision `p + guardDigits(p)`, which is above
+ * the precision `global` of the engine. Runs AT the working precision (in
+ * the synchronous window of `evaluateNResolved()`, or in a slice of the
+ * asynchronous `evaluateNAsync()`), with `ce._requestedPrecision` at `p`.
+ *
+ * The value is computed with guard digits, then rounded to `p` digits: a
+ * value computed at `p` digits can have an error of a few units in its last
+ * digit (`N(Exp(i), 30)` had a real part that ended with ...444, not
+ * ...443). With the guard digits, a digit is wrong only when the exact value
+ * is within that error of a point halfway between two `p`-digit numbers.
+ *
+ * When `p` is more than the precision of the engine, each float that the
+ * window computed is displayed with its `p` digits (`showComputedDigits()`),
+ * also a float in a symbolic result (`x + 3.14159…`). An operation on the
+ * result later computes at the precision of the engine, and its result is
+ * displayed with that precision. The elements of a lazy collection are read
+ * after the precision is restored: each one is computed from the operand by
+ * its own `N(_, p)` (`inexactResult()`).
+ *
+ * `referenceValue` gives the value at the precision of the engine, computed
+ * once, or `undefined` (see `syncReferenceValue()` for when it is needed and
+ * how the synchronous route computes it; the asynchronous route computes it
+ * before this call, as an awaited evaluation).
  */
-const activeAsyncDigitRequests = new WeakMap<
-  ComputeEngine,
-  { entries: { p: number }[]; base: number | undefined }
->();
+function roundWindowValue(
+  ce: ComputeEngine,
+  source: Expression,
+  p: number,
+  global: number,
+  value: Expression,
+  referenceValue: () => Expression | undefined
+): Expression {
+  const rounded = inexactResult(
+    ce,
+    roundToSignificantDigits(value, p),
+    p,
+    source
+  );
+  if (p <= global) return rounded;
+  const readsFixedFloat = once(() => mayReadFixedFloat(source));
+  const reference = (shown: number): Expression | undefined =>
+    shown <= MACHINE_FLOAT_DIGITS || readsFixedFloat()
+      ? referenceValue()
+      : undefined;
+  return showComputedDigits(
+    rounded,
+    p,
+    global,
+    reference,
+    once(() => source.evaluate())
+  );
+}
+
+/**
+ * The reference value of a window of `N(source, p)`, for the synchronous
+ * route: the value of `source` at the precision `global` of the engine,
+ * computed once, on demand, inside the window (the precision is lowered to
+ * `global` for it), with the request of digits that encloses the call
+ * (`enclosingRequest`), not with `p`.
+ *
+ * It is computed only when a float has more digits than the precision of
+ * the engine, and only for a pure operand: a second evaluation of
+ * `Random()` would give another value. It is also not computed for a float
+ * with more digits than a machine float when the operand reads no float
+ * that is already computed (`mayReadFixedFloat()`): such a float was
+ * computed by the window, at its precision. Thus `N(Pi, 50)` or
+ * `N(Integrate(…), 50)` evaluates the operand one time only.
+ */
+function syncReferenceValue(
+  ce: ComputeEngine,
+  source: Expression,
+  global: number,
+  enclosingRequest: number | undefined
+): () => Expression | undefined {
+  return once(() => {
+    // `isPure` does not read the stored values: `r + Pi` is pure
+    // also when `r` holds `Random()` (`isTransitivelyPure()`).
+    if (!isTransitivelyPure(source)) return undefined;
+    const request = ce._requestedPrecision;
+    ce._requestedPrecision = enclosingRequest;
+    try {
+      return ce._withTransientPrecision(global, () => source.N());
+    } finally {
+      ce._requestedPrecision = request;
+    }
+  });
+}
+
+/**
+ * Whether the asynchronous window of `N(source, p)` needs the reference
+ * value (see `syncReferenceValue()`), decided before the rounding slice so
+ * that the value is computed as an awaited evaluation, which yields and
+ * honours the abort signal, and not synchronously inside the slice. The
+ * rounding asks for the reference for a float that shows no more digits
+ * than a machine float, or when the operand reads a fixed float; a float
+ * that the window computed shows more than `global` digits, so the first
+ * case is possible only on an engine whose precision is below the digits of
+ * a machine float.
+ */
+function asyncWindowNeedsReference(
+  source: Expression,
+  global: number
+): boolean {
+  if (!isTransitivelyPure(source)) return false;
+  return global < MACHINE_FLOAT_DIGITS || mayReadFixedFloat(source);
+}
 
 /**
  * The asynchronous twin of `evaluateN()`: the operand is evaluated with
  * `evaluateAsync({ numericApproximation: true })`, so that a long operand
  * (a `Sum` over many terms) yields to the event loop and honours the abort
  * signal, where the synchronous handler ran it to the end (GitHub issue
- * #392). `N(x)` and `N(x, p)` for a `p` within the precision of the engine
- * are asynchronous, with the same rounding as the synchronous handler. The
- * forms that need a precision window (`N(x, p)` for a `p` above the
- * precision of the engine, and a goal `N(x, [p, a])`) keep the engine's
- * precision raised for the time of the computation, which cannot span an
- * `await` while other evaluations run: they are computed by the
- * synchronous `evaluateNResolved()`, after the asynchronous-only
- * applications of the operand are awaited (the driver skips that pre-pass
- * for an operator that has an asynchronous handler). A symbol or a number
- * operand keeps its own `N()` route, as in the synchronous handler (a
- * symbol's `N()` resolves the names of its value through the ambient
- * scope chain); a leaf has no asynchronous work.
+ * #392). All the forms are asynchronous, with the same rounding as the
+ * synchronous handler.
+ *
+ * The forms that compute at a precision above the precision of the engine
+ * (`N(x, p)` for a `p` whose working precision is above it, and a goal
+ * `N(x, [p, a])`) do not keep the precision of the engine raised across an
+ * `await`, where another evaluation would compute at it, and no form keeps
+ * `ce._requestedPrecision` set across one, where another evaluation's
+ * handlers would read this call's digits: the precision window travels with
+ * the options of the operand's evaluation (`EvaluateOptions._precisionWindow`),
+ * and each synchronous slice of that evaluation installs it when it starts
+ * and restores the previous values when it returns. The rounding of the
+ * value, which must run inside the window too, is one more such slice
+ * (`slice`).
+ *
+ * A nested call computes at the WIDER of its own working precision and the
+ * one of the enclosing window, as on the synchronous route, where the inner
+ * call reads the raised precision of the engine as its precision
+ * (`windowFor`). A symbol or a number operand keeps its own `N()` route, as
+ * in the synchronous handler (a symbol's `N()` resolves the names of its
+ * value through the ambient scope chain); a leaf has no asynchronous work.
  */
 async function evaluateNAsync(
   ops: ReadonlyArray<Expression>,
   options: EvaluateHandlerOptions
 ): Promise<Expression | undefined> {
-  const { engine: ce, signal, effects, _contextStack } = options;
+  const {
+    engine: ce,
+    signal,
+    effects,
+    _contextStack,
+    _precisionWindow: enclosing,
+  } = options;
   const opts = {
     numericApproximation: true,
     signal,
     _effects: effects,
     _contextStack,
+    _precisionWindow: enclosing,
   };
-  const source = ops[0].canonical;
-  // `numeric()` can run after an `await`: a symbol's `N()` reads its value
-  // through the current scope, so it runs with this evaluation's context
-  // stack (and registry) in place.
-  const numeric = (): Promise<Expression> =>
-    isFunction(source)
-      ? source.evaluateAsync(opts)
-      : Promise.resolve(
-          runWithEvaluationEffects(ce, effects, () => source.N(), _contextStack)
-        );
+  // A synchronous computation after an `await` runs with this evaluation's
+  // registry, context stack and precision window in place
+  // (`docs/EFFECTS-MODEL.md`, rule 3). `window` is the window of this call;
+  // with none, the enclosing window applies, if any.
+  const slice = <T>(fn: () => T, window?: PrecisionWindow): T =>
+    runWithEvaluationEffects(
+      ce,
+      effects,
+      fn,
+      _contextStack,
+      window ?? enclosing
+    );
+  // The precision of the engine as this call sees it: the working precision
+  // of the enclosing window when there is one. Read in a slice: after an
+  // `await`, the precision of the engine is the base one.
+  const global = slice(() => ce.precision);
+  // The window of this call: the requested digits, and the working
+  // precision when it is above the precision in force, else the enclosing
+  // one.
+  const windowFor = (requested: number, working: number): PrecisionWindow => ({
+    working: working > global ? working : enclosing?.working,
+    requested,
+  });
   const request: NRequest =
     ops.length < 2
       ? { kind: 'plain' }
       : resolveNRequest(ce, await ops[1].canonical.evaluateAsync(opts));
   if (request.kind === 'invalid') return undefined;
-  if (request.kind === 'plain') return inexactResult(ce, await numeric());
-  if (
-    request.kind === 'goal' ||
-    request.p + guardDigits(request.p) > ce.precision
-  ) {
-    const [resolved] = await awaitAsyncOnlyDescendants([source], {
-      signal,
-      _effects: effects,
-      _contextStack,
-    });
-    // A synchronous evaluation after an `await` runs with this evaluation's
-    // registry and context stack (`docs/EFFECTS-MODEL.md`, rule 3).
-    return runWithEvaluationEffects(
-      ce,
-      effects,
-      () => evaluateNResolved(ce, resolved, request),
-      _contextStack
+  // The operand, with its asynchronous-only applications evaluated: the
+  // synchronous evaluations below (the exact value of a goal run, the exact
+  // value and the lazy elements of a window) cannot run them.
+  const source = ce._hasAsyncOnlyOperator
+    ? (
+        await awaitAsyncOnlyDescendants([ops[0].canonical], {
+          signal,
+          _effects: effects,
+          _contextStack,
+          _precisionWindow: enclosing,
+        })
+      )[0]
+    : ops[0].canonical;
+  // The numeric value of the operand, computed inside `window`. It can run
+  // after an `await`: a symbol's `N()` reads its value through the current
+  // scope, so it runs as a slice.
+  const numericAt = (
+    window: PrecisionWindow | undefined
+  ): Promise<Expression> =>
+    isFunction(source)
+      ? source.evaluateAsync({
+          ...opts,
+          _effects: effects,
+          _precisionWindow: window,
+        })
+      : Promise.resolve(slice(() => source.N(), window));
+  if (request.kind === 'plain')
+    return inexactResult(ce, await numericAt(enclosing));
+  if (request.kind === 'goal')
+    return evaluateToGoalAsync(
+      source,
+      request.goal,
+      request.request,
+      numericAt,
+      slice,
+      windowFor
     );
-  }
 
-  // The working precision of the engine has the guard digits: the value is
-  // rounded to `p` digits. The requested digits reach the handlers run by
-  // the evaluation as `options.precision`, as in `evaluateNResolved()`;
-  // the field follows the requests in flight (`activeAsyncDigitRequests`).
   const p = request.p;
-  let active = activeAsyncDigitRequests.get(ce);
-  if (active === undefined) {
-    active = { entries: [], base: undefined };
-    activeAsyncDigitRequests.set(ce, active);
-  }
-  if (active.entries.length === 0) active.base = ce._requestedPrecision;
-  const entry = { p };
-  active.entries.push(entry);
-  ce._requestedPrecision = p;
-  try {
-    const value = await numeric();
-    return runWithEvaluationEffects(
-      ce,
-      effects,
+  const working = p + guardDigits(p);
+  const window = windowFor(p, working);
+  const value = await numericAt(window);
+  if (working <= global) {
+    // The working precision in force has the guard digits: the value is
+    // rounded to `p` digits.
+    return slice(
       () => inexactResult(ce, roundToSignificantDigits(value, p), p, source),
-      _contextStack
+      window
     );
-  } finally {
-    const i = active.entries.indexOf(entry);
-    if (i >= 0) active.entries.splice(i, 1);
-    ce._requestedPrecision =
-      active.entries.length === 0
-        ? active.base
-        : active.entries[active.entries.length - 1].p;
   }
+  // The window: the operand was computed at `working` digits, and the
+  // rounding runs at `working` digits too; then the precision in force
+  // decides the kind of float (`followEnginePrecision()`), outside the
+  // window, as in `evaluateNResolved()`. The reference value, when the
+  // rounding needs one, is computed as an awaited evaluation at the
+  // precision in force, with the enclosing request of digits.
+  const reference = asyncWindowNeedsReference(source, global)
+    ? await numericAt(enclosing)
+    : undefined;
+  const result = slice(
+    () => roundWindowValue(ce, source, p, global, value, () => reference),
+    window
+  );
+  return slice(() => followEnginePrecision(ce, result));
 }
