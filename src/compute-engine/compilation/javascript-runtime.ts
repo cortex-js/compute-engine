@@ -4541,6 +4541,58 @@ export const SYS_HELPERS = {
     };
     return Array.isArray(i) ? i.map((k) => pick(k)) : pick(i);
   },
+  // The boolean-mask form of a host `At` lowering, as `atNoWrap` is its
+  // positional form. `mask` is read as a FILTER over the positions of `arr`
+  // when it is an array whose members are all booleans or holes (`undefined`,
+  // or `NaN` for a condition that could not be decided) with at least one
+  // boolean: the answer is the elements of `arr` at the positions where the
+  // mask is `true`, in order. A hole keeps nothing. A mask shorter than the
+  // base keeps nothing past its own end, and a longer one is read over the
+  // positions of the base only. An index that is not such a mask — a
+  // position, a list of positions, an empty list — is read by `atNoWrap`, so
+  // one call serves a site whose index may be either at run time, and the
+  // no-wrap rule holds for the positions. A base that is neither an array
+  // nor a numeric typed array reads `NaN`, as in `atNoWrap`; a typed array
+  // is accepted as the base in both forms, as `elts` accepts one, and is
+  // read as a plain array. An absent slot of a sparse base is not kept, as
+  // `Array.prototype.filter` does not visit it.
+  //
+  // It differs from the mask branch of `at` in two ways: the lengths of the
+  // mask and of the base need not agree (`at` answers `NaN` for a mask of
+  // another length), and a hole in the mask is a position not kept rather
+  // than the sign that the index is not a mask.
+  //
+  // A host whose index language reads `L[K = 1]` as this filter emitted the
+  // selection as a function expression at every site — 101 sites in the
+  // setup rows of one plotting corpus — and allocated its helper closures
+  // again on every call; this helper makes the site one call.
+  atMask: (arr: unknown, mask: unknown): unknown => {
+    const base: unknown[] | undefined = Array.isArray(arr)
+      ? arr
+      : isNumericTypedArray(arr)
+        ? Array.from(arr)
+        : undefined;
+    if (Array.isArray(mask)) {
+      let booleans = 0;
+      let isMask = true;
+      for (const m of mask) {
+        if (typeof m === 'boolean') booleans += 1;
+        else if (m !== undefined && !(typeof m === 'number' && Number.isNaN(m))) {
+          isMask = false;
+          break;
+        }
+      }
+      if (isMask && booleans > 0) {
+        if (base === undefined) return NaN;
+        const kept: unknown[] = [];
+        const n = Math.min(base.length, mask.length);
+        for (let k = 0; k < n; k++)
+          if (mask[k] === true && k in base) kept.push(base[k]);
+        return kept;
+      }
+    }
+    return SYS_HELPERS.atNoWrap(base ?? arr, mask);
+  },
   // The element at 0-based position `k` of `arr`, for the compiled
   // `First`/`Second`/`Third` (`compileNthElement`). An absent collection
   // (`undefined`, the run-time spelling of `Missing`) reads the marker of the
@@ -5992,7 +6044,13 @@ function restoreEntryPlan(stored: StoredEntryPlan): EntryPlan {
  * imaginary part tells "outside the real domain" from a genuine `NaN`.
  * Booleans pass through (never coerced), and so does anything else; a
  * collection is normalized element by element (a fresh array — the compiled
- * value may alias caller data).
+ * value may alias caller data, or be a definition the runner evaluated once
+ * and keeps for every later call: a hoisted constant list literal, a bound
+ * symbol value). A FUNCTION the kernel returns is returned under a wrapper
+ * that applies this convention to what the function answers, for the same
+ * reason: `x ↦ (y ↦ [1, 2, 3])` answers a function whose value is the
+ * artifact's one copy of the literal, and a caller writing to that array
+ * must not change what the next call answers.
  *
  * The test is EXACT, not a chop: the transcendental kernels give an exact
  * zero part where the value has one (`kernelResult`), and chopping here would
@@ -6031,6 +6089,13 @@ export function normalizeRunResult(r: unknown): unknown {
   // (`twoStageRunner`), and a caller writing to the returned object's `re`
   // must not change what the next call answers.
   if (isComplexObject(r)) return { re: r.re, im: r.im };
+  if (typeof r === 'function') {
+    const fn = r as (...args: unknown[]) => unknown;
+    const wrapped = (...args: unknown[]): unknown =>
+      normalizeRunResult(fn(...args));
+    Object.defineProperty(wrapped, 'length', { value: fn.length });
+    return wrapped;
+  }
   return r;
 }
 

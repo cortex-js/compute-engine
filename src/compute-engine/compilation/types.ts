@@ -1646,6 +1646,20 @@ export interface CompileTarget<Expr = unknown> {
      */
     hoistable?: Set<string>;
     /**
+     * The emitted constant list literals, by the text of the literal, to the
+     * local name that holds it: two occurrences of the same literal read one
+     * local. Recorded by `BaseCompiler.hoistConstantListLiteral`.
+     */
+    listLiterals?: Map<string, string>;
+    /**
+     * The number of constant list literal locals handed out so far, the
+     * source of the next local's id. A counter, not the size of
+     * `listLiterals`: an abandoned compilation removes its literals from
+     * that map (`BaseCompiler.removeDefinitionsAddedSince`), and an id taken
+     * from the size would then name a local already handed out.
+     */
+    listLiteralCount?: number;
+    /**
      * The ids of the emitted user functions whose body was compiled in the
      * complex lane and returns a `{re, im}` object by construction — its
      * value position is a complex-propagating head, a non-real-typed node,

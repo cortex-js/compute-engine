@@ -298,7 +298,7 @@ describe('G3 lift — a collection bound reaches the BODY', () => {
       'xs',
     ]);
     const r = build(ce, ['g', LIST]);
-    expect(r?.code).toBe('_fn_g([4, 5, 4])');
+    expect(r?.code).toBe('_fn_g(_lit_1)');
     expect(r?.code).not.toContain('_SYS.bcastFn');
   });
 });

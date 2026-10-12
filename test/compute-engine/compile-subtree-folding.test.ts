@@ -93,15 +93,18 @@ describe('COMPILE constant folding - constant collections', () => {
   it('folds a constant collection under a runtime index', () => {
     // The whole expression cannot fold (`k` is an unknown), but its BASE is
     // constant: indexing a baked array beats building the range and mapping
-    // over it on every call.
+    // over it on every call. The baked array is a preamble local the runner
+    // evaluates once (`BaseCompiler.hoistConstantListLiteral`).
     const r = compile(ce.box(['At', MAP_SQUARES(6), 'k'] as any));
-    expect(r.code).toBe('_SYS.at([1, 4, 9, 16, 25, 36], _.k)');
+    expect(r.code).toBe('_SYS.at(_lit_1, _.k)');
+    expect(r.preambleOnce).toBe('const _lit_1 = [1, 4, 9, 16, 25, 36];\n');
     expect(r.run?.({ k: 3 })).toBe(9);
   });
 
   it('folds a bare constant collection to a literal', () => {
     const r = compile(ce.box(MAP_SQUARES(6) as any));
-    expect(r.code).toBe('[1, 4, 9, 16, 25, 36]');
+    expect(r.code).toBe('_lit_1');
+    expect(r.preambleOnce).toBe('const _lit_1 = [1, 4, 9, 16, 25, 36];\n');
     expect(r.run?.()).toEqual([1, 4, 9, 16, 25, 36]);
   });
 
@@ -117,7 +120,8 @@ describe('COMPILE constant folding - constant collections', () => {
       ['Function', ['Equal', ['Mod', 'y', 2], 0], 'y'],
     ] as any);
     const r = compile(e);
-    expect(r.code).toBe('[2, 4, 6, 8, 10]');
+    expect(r.code).toBe('_lit_1');
+    expect(r.preambleOnce).toBe('const _lit_1 = [2, 4, 6, 8, 10];\n');
     expect(r.run?.()).toEqual([2, 4, 6, 8, 10]);
     expect(e.N().toString()).toBe('[2,4,6,8,10]');
   });
@@ -161,10 +165,10 @@ describe('COMPILE constant folding - constant collections', () => {
   it('the cap boundary matches the Range handler exactly', () => {
     // The fold declines at `count >= 50` and the JavaScript `Range` handler
     // inlines at `len < 50`, so the two agree at the boundary instead of
-    // straddling it: 49 elements inline, 50 do not.
-    expect(compile(ce.box(['At', MAP_SQUARES(49), 'k'] as any)).code).toContain(
-      '_SYS.at(['
-    );
+    // straddling it: 49 elements fold (to a hoisted literal), 50 do not.
+    const folded = compile(ce.box(['At', MAP_SQUARES(49), 'k'] as any));
+    expect(folded.code).toBe('_SYS.at(_lit_1, _.k)');
+    expect(folded.preambleOnce).toMatch(/^const _lit_1 = \[1, 4, 9, .*, 2401\];\n$/);
     expect(compile(ce.box(['At', MAP_SQUARES(50), 'k'] as any)).code).toContain(
       '_SYS.rangeCount('
     );
@@ -238,7 +242,7 @@ describe('COMPILE constant folding - constant collections', () => {
     expect(compile(at).code).toBe('10');
     expect(compile(at).run!({})).toBe(10);
     expect(compile(at, { constantFold: false }).code).toBe(
-      '_SYS.at([10, 20, 30], ({ re: 1, im: 2 }))'
+      '_SYS.at(_lit_1, ({ re: 1, im: 2 }))'
     );
   });
 
@@ -658,10 +662,13 @@ describe('COMPILE Take/Drop - literal count peephole', () => {
   // RUNTIME collection — the case the last two tests cover without the
   // opt-out.
   const NO_FOLD = { constantFold: false } as const;
+  // The list literal itself is a preamble local the runner evaluates once
+  // (`_lit_1`, see `BaseCompiler.hoistConstantListLiteral`); the code pins
+  // the slice.
 
   it('emits a bare literal count', () => {
     const r = compile(ce.box(['Take', ['List', 1, 2, 3, 4], 2]), NO_FOLD);
-    expect(r.code).toBe('([1, 2, 3, 4]).slice(0, 2)');
+    expect(r.code).toBe('(_lit_1).slice(0, 2)');
     expect(r.run?.()).toEqual([1, 2]);
   });
 
@@ -671,19 +678,19 @@ describe('COMPILE Take/Drop - literal count peephole', () => {
       ce.box(['Take', ['List', 1, 2, 3, 4], ['Divide', 5, 2]]),
       NO_FOLD
     );
-    expect(r.code).toBe('([1, 2, 3, 4]).slice(0, 3)');
+    expect(r.code).toBe('(_lit_1).slice(0, 3)');
   });
 
   it('a negative literal count takes the last elements', () => {
     const r = compile(ce.box(['Take', ['List', 1, 2, 3], -2]), NO_FOLD);
-    expect(r.code).toBe('([1, 2, 3]).slice(-2)');
+    expect(r.code).toBe('(_lit_1).slice(-2)');
     expect(r.run?.()).toEqual([2, 3]);
   });
 
   it('chooses the slice at run time for a non-constant count', () => {
     const r = compile(ce.box(['Take', ['List', 1, 2, 3, 4], 'n']));
     expect(r.code).toBe(
-      '((_a, _n) => _n < 0 ? _a.slice(_n) : _a.slice(0, _n))([1, 2, 3, 4], Math.round(_.n))'
+      '((_a, _n) => _n < 0 ? _a.slice(_n) : _a.slice(0, _n))(_lit_1, Math.round(_.n))'
     );
     expect(r.run?.({ n: 2.5 })).toEqual([1, 2, 3]);
     expect(r.run?.({ n: -2.5 })).toEqual([3, 4]);
@@ -691,7 +698,7 @@ describe('COMPILE Take/Drop - literal count peephole', () => {
 
   it('Drop emits a bare literal count', () => {
     const r = compile(ce.box(['Drop', ['List', 1, 2, 3, 4], 2]), NO_FOLD);
-    expect(r.code).toBe('([1, 2, 3, 4]).slice(2)');
+    expect(r.code).toBe('(_lit_1).slice(2)');
     expect(r.run?.()).toEqual([3, 4]);
   });
 

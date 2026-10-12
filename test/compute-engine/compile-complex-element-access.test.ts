@@ -216,7 +216,7 @@ describe('run-time index into a MIXED collection fails closed', () => {
     )!;
     expect(structural.success).toBe(true);
     expect(structural.code).toEqual(
-      '_SYS.at([10, 20, 30], ({ re: 1, im: 2 }))'
+      '_SYS.at(_lit_1, ({ re: 1, im: 2 }))'
     );
     // On the DEFAULT path the read is a closed constant expression, so the
     // constant folder gets there first and inlines the interpreter's own

@@ -436,7 +436,11 @@ describe('COMPILE', () => {
           'Matrix',
           ['List', ['List', 1, 2], ['List', 3, 4]],
         ]);
-        expect(compile(expr)?.code).toMatchInlineSnapshot(`[[1, 2], [3, 4]]`);
+        // The constant matrix is a preamble local the runner evaluates once
+        // (`BaseCompiler.hoistConstantListLiteral`).
+        const r = compile(expr);
+        expect(r?.code).toMatchInlineSnapshot(`_lit_1`);
+        expect(r?.preambleOnce).toBe('const _lit_1 = [[1, 2], [3, 4]];\n');
       });
 
       it('should compile a matrix and execute it', () => {
@@ -592,14 +596,14 @@ describe('COMPILE', () => {
         compile(int.box(['MatrixPower', D, 'mpN'] as any), {
           fallback: false,
         }).code
-      ).toBe('_SYS.matpow([[4, 0], [0, 9]], _.mpN)');
+      ).toBe('_SYS.matpow(_lit_1, _.mpN)');
       // So is a literal integer.
       const lit = new ComputeEngine();
       expect(
         compile(lit.box(['MatrixPower', D, 2] as any), {
           fallback: false,
         }).code
-      ).toBe('_SYS.matpow([[4, 0], [0, 9]], 2)');
+      ).toBe('_SYS.matpow(_lit_1, 2)');
     });
 
     it('Rank is the TENSOR rank (ndim), not the linear-algebra rank', () => {

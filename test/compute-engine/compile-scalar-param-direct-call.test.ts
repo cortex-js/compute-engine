@@ -262,7 +262,7 @@ describe('an ATOMIC argument does not switch off the sibling broadcast', () => {
     );
     expect(r0.diagnostics.map((d) => String(d.message))).toEqual([]);
     const r = build(ce, ['size', ['bag', ['List', 1, 2, 3]]]);
-    expect(r.code).toBe('_fn_size([1, 2, 3])');
+    expect(r.code).toBe('_fn_size(_lit_1)');
     expect(r.code).not.toContain('bcastFn');
     expect(r.run({})).toBe(42);
   });

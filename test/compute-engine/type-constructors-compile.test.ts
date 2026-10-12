@@ -663,7 +663,7 @@ describe('NOMINAL ATOMICITY at a user-function call site (ruled 2026-08-12)', ()
     // emit its value (42) instead of the call these tests pin; off here.
     const r = compile(expr, { fallback: false, constantFold: false });
     // …and so does the emitted call: no runtime broadcast dispatch at all.
-    expect(r.code).toBe('_fn_size([1, 2, 3])');
+    expect(r.code).toBe('_fn_size(_lit_1)');
     expect(r.code).not.toContain('bcastFn');
     expect(r.run!({})).toBe(42);
   });
@@ -768,7 +768,7 @@ describe('NOMINAL ATOMICITY at a user-function call site (ruled 2026-08-12)', ()
     expect(expr.evaluate().re).toBe(11);
     // Constant folding off: this pins the emitted call, not its value.
     const r = compile(expr, { fallback: false, constantFold: false });
-    expect(r.code).toBe('_fn_g(10, [1, 2, 3])');
+    expect(r.code).toBe('_fn_g(10, _lit_1)');
     expect(r.code).not.toContain('bcastFn');
     expect(r.run!({})).toBe(11);
   });

@@ -257,7 +257,7 @@ describe('a complex-declared function LITERAL spliced in value position', () => 
     // parameter is scalar, so the literal is still handed out through the
     // broadcast-aware wrapper that an element which is a collection needs.
     expect(r?.code).toBe(
-      '((_f) => ([1, 2, 3]).map((_x) => _f(_x)))(((_tv1) => (_tv2) => ' +
+      '((_f) => (_lit_1).map((_x) => _f(_x)))(((_tv1) => (_tv2) => ' +
         'Array.isArray(_tv2) ? _SYS.bcastFn(_tv1, _tv2) : _tv1(_tv2))(((x) => 2 * x)))'
     );
     expect(r?.code).not.toContain('_SYS.cplx');
@@ -278,7 +278,7 @@ describe('a complex-declared function LITERAL spliced in value position', () => 
     // [3, 4]])` maps `Q` over each row), so the reference takes the
     // broadcasting form `$b`. It wraps the coercing shim, so a scalar element
     // still reaches the body coerced.
-    expect(r?.code).toBe('((_f) => ([1, 2, 3]).map((_x) => _f(_x)))(_fn_Q$b)');
+    expect(r?.code).toBe('((_f) => (_lit_1).map((_x) => _f(_x)))(_fn_Q$b)');
     // The shim temporaries are numbered after the two the complex product in
     // `Q`'s own body takes (`2x` binds each factor to a hygienic temporary).
     expect(r?.preamble).toContain(

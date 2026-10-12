@@ -62,7 +62,7 @@ describe('Tycho item 214: a point multiplied by a list compiles to a list of poi
     // Every operand is bound once (the immediately-applied arrow), the list
     // broadcasts outside and the point's components inside.
     expect(result.code).toBe(
-      '((_tv3, _tv4) => _SYS.bcast((_tv5) => _SYS.bcast((_tv1, _tv2) => (_tv1 * _tv2), _tv3, _tv5), _tv4))([Math.cos(_.a), Math.sin(_.a)], [1, 2, 3])'
+      '((_tv3, _tv4) => _SYS.bcast((_tv5) => _SYS.bcast((_tv1, _tv2) => (_tv1 * _tv2), _tv3, _tv5), _tv4))([Math.cos(_.a), Math.sin(_.a)], _lit_1)'
     );
   });
 

@@ -5296,6 +5296,13 @@ export class BaseCompiler {
       registry.defs.delete(added);
       registry.literals?.delete(added);
       registry.memoizable?.delete(added);
+      // A hoisted constant list literal (`hoistConstantListLiteral`) is
+      // found again by its text: without this, the next occurrence of the
+      // literal would read a local whose declaration was removed here.
+      registry.hoistable?.delete(added);
+      if (registry.listLiterals !== undefined)
+        for (const [text, name] of registry.listLiterals)
+          if (name === added) registry.listLiterals.delete(text);
       lanes.byName.delete(added);
       lanes.elementByName.delete(added);
       lanes.onAsk.delete(added);
@@ -12609,6 +12616,27 @@ export class BaseCompiler {
   }
 
   /**
+   * The emitted text of a hoisted constant list literal when `code` is the
+   * name of one (`hoistConstantListLiteral`), else `code` itself. The
+   * component fan-outs read the elements of an array literal from its text
+   * ({@link arrayLiteralElements}); a literal that was hoisted is read
+   * through its text too, so `[1, 2, 3] x` is still written component by
+   * component with the numbers in place, and the local nothing reads any
+   * more is removed (`pruneUnreferencedVariantBases`). Only the fan-out
+   * reads the text: a source bound whole, or handed to a run-time helper,
+   * keeps the name, and with it the one-time evaluation.
+   */
+  private static hoistedListLiteralText(
+    target: CompileTarget<Expression>,
+    code: string
+  ): string {
+    const literals = target.userFunctions?.listLiterals;
+    if (literals === undefined || !code.startsWith('_lit_')) return code;
+    for (const [text, name] of literals) if (name === code) return text;
+    return code;
+  }
+
+  /**
    * The element source texts of an emitted array LITERAL — `[a, b + 1]`
    * gives `['a', '(b + 1)']` — or `undefined` when the text is anything else,
    * or when `width` is given and the count differs from it. The rules are
@@ -12807,9 +12835,12 @@ export class BaseCompiler {
       }
     }
     const codes = args.map((a) => BaseCompiler.compile(a, target));
-    const needsGuard = codes.map(
-      (code, i) =>
-        BaseCompiler.arrayLiteralWidth(code) !== n &&
+    const texts = codes.map((code) =>
+      BaseCompiler.hoistedListLiteralText(target, code)
+    );
+    const needsGuard = texts.map(
+      (text, i) =>
+        BaseCompiler.arrayLiteralWidth(text) !== n &&
         provenPointWidth(args[i], target) !== n
     );
     const anyGuard = needsGuard.some((g) => g);
@@ -12818,7 +12849,7 @@ export class BaseCompiler {
     const guarded: string[] = [];
     const parts: (string | string[])[] = codes.map((code, i) => {
       if (!anyGuard) {
-        const elements = BaseCompiler.arrayLiteralElements(code, n);
+        const elements = BaseCompiler.arrayLiteralElements(texts[i], n);
         if (elements !== undefined) return elements;
       }
       if (!needsGuard[i] && BaseCompiler.REPEATABLE_SOURCE.test(code))
@@ -14049,7 +14080,9 @@ export class BaseCompiler {
       const needsGuard = compiledArgs.map(
         (code, i) =>
           isArrayOperand(args[i]) &&
-          BaseCompiler.arrayLiteralWidth(code) !== componentWidth &&
+          BaseCompiler.arrayLiteralWidth(
+            BaseCompiler.hoistedListLiteralText(target, code)
+          ) !== componentWidth &&
           provenPointWidth(args[i], target) !== componentWidth
       );
       // When no source needs the run-time test, a source that is one array
@@ -14062,7 +14095,10 @@ export class BaseCompiler {
       const anyGuard = needsGuard.some((g) => g);
       const literalParts = compiledArgs.map((code, i) =>
         !anyGuard && isArrayOperand(args[i])
-          ? BaseCompiler.arrayLiteralElements(code, componentWidth)
+          ? BaseCompiler.arrayLiteralElements(
+              BaseCompiler.hoistedListLiteralText(target, code),
+              componentWidth
+            )
           : undefined
       );
       const sources = compiledArgs.map((code, i) => {
@@ -23794,7 +23830,7 @@ export class BaseCompiler {
       // The preamble local is read by every reference: it compiles with the
       // promotion of the compile mode, also when the reference is in the
       // value of a real ascription (see `withPromotionUnsuppressed`).
-      const code = BaseCompiler.withLocalShapeFrame(
+      const compiled = BaseCompiler.withLocalShapeFrame(
         new Map(),
         new Map(),
         () =>
@@ -23805,6 +23841,13 @@ export class BaseCompiler {
           ),
         true
       );
+      // A value that is a constant list literal — written as one, or a
+      // constant collection the fold materialized as one — compiles to the
+      // name of a hoisted local (`hoistConstantListLiteral`). This local
+      // holds the literal itself rather than an alias of that one; the
+      // hoisted local is then unread and removed
+      // (`pruneUnreferencedVariantBases`), unless another site reads it.
+      const code = BaseCompiler.hoistedListLiteralText(root, compiled);
       registry.defs.set(
         name,
         javascriptStatements(root)?.initialize(name, code) ??
@@ -23831,6 +23874,120 @@ export class BaseCompiler {
       BaseCompiler._promoted = outerPromoted || valuePromoted;
     }
     return name;
+  }
+
+  /**
+   * Number count from which a constant list literal is emitted once as a
+   * preamble local (`hoistConstantListLiteral`) instead of inline, counted
+   * over every nesting level (a matrix of two rows of three numbers holds
+   * six). A one- or two-number literal is cheaper to build than a name is to
+   * read in the code that reads it, and keeps the emitted code readable;
+   * above this the per-call allocation is the measurable cost.
+   */
+  private static readonly HOISTED_LIST_LITERAL_MIN_LENGTH = 3;
+
+  /**
+   * Emit a constant list literal ONCE as a preamble local and return the
+   * local's name, or `undefined` when the literal must stay inline.
+   *
+   * A `List` whose elements are all finite real number literals, or such
+   * lists nested to any depth, is the same array on every call. Emitted
+   * inline, it is allocated again on every call of the compiled function: a
+   * plot row that read one cell of a 9 801-number literal per sample spent
+   * the whole of its paint building the literal, where the same list
+   * assigned to a symbol was read from a local the runner evaluates once
+   * (`ensureFoldedValueEmitted`). This gives the literal the same treatment.
+   *
+   * The conditions are those of `bindsFoldedValue`. The target must own the
+   * default user-function registry, with no `lowering` of its own: the local
+   * lands in the preamble next to `_fn_*` and `_val_*`. The compile must
+   * carry no caller-supplied functions (`foldExcludedOps`): such a function
+   * receives the array itself and may keep or mutate it, so every reference
+   * must hand it a fresh array, which the inline literal does. A literal
+   * with fewer than `HOISTED_LIST_LITERAL_MIN_LENGTH` numbers stays inline.
+   *
+   * A lowering a host supplies through an operator definition's `compile`
+   * hook is not covered by that guard: it receives the local's name as its
+   * operand text, as it receives the name of a bound symbol value
+   * (`_val_*`), and the code it emits must treat an array operand as
+   * read-only. Every lowering of this compiler does (`Reverse` and `Sort`
+   * copy first; a fold that updates its accumulator in place works on
+   * `_SYS.ownedCopy`), and the runner never hands the array itself to the
+   * caller (`normalizeRunResult` copies a returned collection, also one a
+   * returned function answers).
+   *
+   * The local is built from the compiler's own emission of number literals
+   * only, so it reads no per-call binding and no caller-supplied source: it
+   * is recorded on `userFunctions.hoistable` unconditionally, and the runner
+   * evaluates it once per artifact. Two occurrences of the same literal, by
+   * emitted text, read one local (`userFunctions.listLiterals`); the local's
+   * id comes from a counter that never goes back, so a literal removed by an
+   * abandoned compilation (`removeDefinitionsAddedSince`) is never confused
+   * with a later one. A number literal is emitted the same way on the real
+   * and on the complex lane (the parent lifts a real operand where it needs
+   * `{re, im}`), so the local is correct for every reference.
+   */
+  static hoistConstantListLiteral(
+    target: CompileTarget<Expression>,
+    elements: ReadonlyArray<Expression>
+  ): string | undefined {
+    const registry = target.userFunctions;
+    if (!registry || registry.lowering !== undefined) return undefined;
+    if (target.foldExcludedOps !== undefined && target.foldExcludedOps.size > 0)
+      return undefined;
+    const root = registry.valueRoot ?? registry.root ?? target;
+    const literal = BaseCompiler.constantListLiteral(elements, root);
+    if (
+      literal === undefined ||
+      literal.numbers < BaseCompiler.HOISTED_LIST_LITERAL_MIN_LENGTH
+    )
+      return undefined;
+    const text = literal.text;
+    const literals = (registry.listLiterals ??= new Map());
+    const known = literals.get(text);
+    if (known !== undefined) return known;
+    registry.listLiteralCount = (registry.listLiteralCount ?? 0) + 1;
+    const name = BaseCompiler.registryLocalName(
+      registry,
+      '_lit_',
+      String(registry.listLiteralCount)
+    );
+    registry.defs.set(
+      name,
+      javascriptStatements(root)?.initialize(name, text) ??
+        `const ${name} = ${text};`
+    );
+    (registry.hoistable ??= new Set()).add(name);
+    literals.set(text, name);
+    return name;
+  }
+
+  /**
+   * The emitted text of a list literal whose elements are all finite real
+   * number literals or such lists, compiled against `root`, with the count
+   * of numbers over every nesting level; `undefined` when an element is
+   * anything else (a symbol, an application, a complex or non-finite
+   * number).
+   */
+  private static constantListLiteral(
+    elements: ReadonlyArray<Expression>,
+    root: CompileTarget<Expression>
+  ): { text: string; numbers: number } | undefined {
+    const parts: string[] = [];
+    let numbers = 0;
+    for (const x of elements) {
+      if (isNumber(x)) {
+        if (x.im !== 0 || !Number.isFinite(x.re)) return undefined;
+        parts.push(BaseCompiler.compile(x, root));
+        numbers += 1;
+      } else if (isFunction(x, 'List')) {
+        const inner = BaseCompiler.constantListLiteral(x.ops, root);
+        if (inner === undefined) return undefined;
+        parts.push(inner.text);
+        numbers += inner.numbers;
+      } else return undefined;
+    }
+    return { text: `[${parts.join(', ')}]`, numbers };
   }
 
   /**
@@ -24569,6 +24726,13 @@ export class BaseCompiler {
     const known = names.get(key);
     if (known !== undefined) return known;
     const taken = (registry.taken ??= new Set());
+    // A name the compiled expression itself uses — a parameter, a binder
+    // index, a symbol handed in through `vars` — is not available either:
+    // a local declared under it would shadow it, or be declared twice in a
+    // lambda whose parameter carries that name. The inventory is the one
+    // the generated temporaries consult (`tempVar`).
+    const owner = registry.valueRoot ?? registry.root;
+    const used = owner === undefined ? undefined : BaseCompiler.namingContext(owner).usedNames;
     const raw = prefix + id.replace(/[^\w$]/g, '_');
     // Shader identifiers cannot contain dollar signs or consecutive
     // underscores. Normalize before collision allocation so distinct
@@ -24577,7 +24741,8 @@ export class BaseCompiler {
       registry.root?.language === 'glsl' || registry.root?.language === 'wgsl';
     const base = shader ? raw.replace(/[$_]+/g, '_').replace(/_+$/, '') : raw;
     let name = base;
-    for (let k = 2; taken.has(name); k++) name = `${base}_${k}`;
+    for (let k = 2; taken.has(name) || used?.has(name) === true; k++)
+      name = `${base}_${k}`;
     taken.add(name);
     names.set(key, name);
     return name;
@@ -31163,7 +31328,11 @@ export class BaseCompiler {
    * call was compiled (`userCallDefinition`) are removed on the same terms:
    * the call may have been folded, or compiled through another route. A
    * definition's declaration has no effect on any target, so an
-   * unreferenced one is dead text. Only these definitions are removed: every
+   * unreferenced one is dead text. A hoisted constant list literal
+   * (`registry.listLiterals`, recorded by `hoistConstantListLiteral`) is
+   * removed on the same terms: the literal is emitted when its `List` node
+   * compiles, and a parent that then folds the read of a literal cell to the
+   * cell itself leaves the local unread. Only these definitions are removed: every
    * other definition is kept whether or not the artifact names it, so an
    * artifact without them is emitted exactly as before. Repeated to a fixed point, since
    * removing one definition can leave another that only it referenced
@@ -31182,6 +31351,8 @@ export class BaseCompiler {
       candidates.add(variant);
       candidates.add(base);
     }
+    for (const name of registry.listLiterals?.values() ?? [])
+      candidates.add(name);
     if (candidates.size === 0) return;
     for (let changed = true; changed;) {
       changed = false;

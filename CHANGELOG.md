@@ -1,6 +1,40 @@
 ## [Unreleased]
 
+### New Features
+
+- **`_SYS.atMask(base, mask)`, the boolean-mask form of a host `At` lowering.**
+  A host that replaces the `At` lowering on the `javascript` target can read a
+  list through a boolean mask with one runtime helper, as it reads a position
+  with `_SYS.atNoWrap` since 0.127.0. When `mask` is a list whose members are
+  all booleans or holes (`undefined`, or `NaN` for a condition that could not
+  be decided) with at least one boolean, the answer is the elements of `base`
+  at the positions where the mask is `true`; a hole keeps nothing, a mask
+  shorter than the base keeps nothing past its own end, and a longer one is
+  read over the positions of the base only. Any other index — a position, a
+  list of positions, an empty list — is read by `_SYS.atNoWrap`, so one call
+  serves a site whose index may be either at run time. A base that is
+  neither an array nor a numeric typed array reads `NaN`; a typed array is
+  read as a plain array in both forms. It differs from the mask form of
+  `_SYS.at` in that the lengths need not agree. A host emitted the selection as a function
+  expression at every mask site (101 sites in one plotting corpus), with its
+  helper closures allocated again on every call.
+
 ### Behavior Changes
+
+- **`code` of a compiled JavaScript expression that holds a constant list
+  literal reads a preamble local.** A `List` of three or more finite real
+  number literals (or such lists nested) in a compiled body is emitted once
+  as `const _lit_<n> = […];` in `preamble` and `preambleOnce`, and `code`
+  reads the name, as it reads `_val_*` for a bound symbol value and `_fn_*`
+  for a user function: `["At", ["List", 1, 2, 3, 4, 5, 6, 7, 8], "k"]` gives
+  the code `_SYS.at(_lit_1, _.k)` where it gave
+  `_SYS.at([1, 2, 3, 4, 5, 6, 7, 8], _.k)`. A consumer that evaluates `code`
+  on its own, without the preamble, must now include it (`preamble`, or
+  `preambleOnce` once and `preamblePerCall` on every call); `run()` is
+  unchanged. A lowering a host supplies through an operator definition's
+  `compile` hook receives the local's name as its operand text and must treat
+  an array operand as read-only, as for a bound symbol value. See the
+  Performance entry below for what is hoisted and what stays inline.
 
 - **`.N()` of a user function whose body is one statement evaluates that
   statement in floats.** The body of a user function ran exactly under a
@@ -39,6 +73,32 @@
   or in the lower bound gives a float form (`0.5(n+1)/n`), as the other
   closed forms do. The `simplify()` rule takes the lower bound into account
   the same way (it handled 2 only).
+
+### Performance
+
+- **A constant list literal in a compiled body is built once per artifact,
+  not on every call.** On the `javascript` target, a `List` whose elements are
+  all finite real number literals (or such lists nested, a matrix) is emitted
+  as a preamble local the runner evaluates once (`preambleOnce`), and the
+  site reads the name, as a list assigned to a symbol already was: `["At",
+  ["List", 1, 2, 3, 4, 5, 6, 7, 8], ["Floor", ["Multiply", 8, "x"]]]` compiles
+  to `_SYS.at(_lit_1, Math.floor(8 * _.x))` with `const _lit_1 = [1, 2, 3, 4,
+  5, 6, 7, 8];` in `preambleOnce`, where the literal was written into the
+  per-call code. A plotting consumer that substitutes a resolved document list
+  by value into a row's body compiled a 9 801-number literal into a kernel it
+  sampled 1.2 million times, and spent the whole of the row's paint building
+  the literal; the bound form of the same list ran 40× to 660× faster per
+  call. Two occurrences of the same literal read one local. A literal of fewer
+  than three elements, one with a non-literal, complex or non-finite element,
+  and one handed to a caller-supplied function (which may keep or mutate the
+  array) stay inline; a component fan-out (`[1, 2, 3] x`) still writes the
+  numbers in place; the threshold counts the numbers over every nesting
+  level, so a two-row matrix is hoisted whole. The spliced `preamble`
+  carries the local as it carries `_val_*` and `_fn_*` (see the Behavior
+  Changes entry above). A function the kernel returns is returned under a
+  wrapper that copies what it answers, so the artifact's one copy of the
+  literal never reaches the caller. The `interval-js` target already folded
+  such a list to a constant and is unchanged.
 
 ### Issues Resolved
 

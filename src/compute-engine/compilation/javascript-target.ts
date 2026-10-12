@@ -4151,7 +4151,12 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // A name bound to a SEQUENCE (the `...rest` of a list pattern,
   // `target.sequenceVars`) splices into the literal, as its interpreter
   // `Sequence` value does: `[h, ...t] => [t]` is the tail itself.
+  // A literal whose elements are all number literals is the same array on
+  // every call: it is emitted once as a preamble local the runner evaluates
+  // once per artifact, and the site reads the name
+  // (`BaseCompiler.hoistConstantListLiteral`).
   List: (args, compile, target) =>
+    BaseCompiler.hoistConstantListLiteral(target, args) ??
     `[${args.map((x) => spreadIfSequence(x, compile, target)).join(', ')}]`,
   // Matrix wraps List(List(...), ...) — compile the body (first arg) which
   // is the nested List structure; remaining args are delimiters/column spec

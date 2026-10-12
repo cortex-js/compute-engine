@@ -543,3 +543,131 @@ describe('J7: a constant index into an assigned literal list folds', () => {
     expect([...deps]).toContain('P');
   });
 });
+
+//
+// Tycho row 369 — `_SYS.atMask`, the boolean-mask form of a host `At`
+// lowering
+//
+
+// The selection a host emitted at every mask site, verbatim but for the
+// floor it applies to a position (the helper leaves a position to
+// `_SYS.atNoWrap`, and the floor is the host's own rule). It is the reference
+// implementation: `_SYS.atMask` must answer the same value for every base and
+// mask shape.
+const REFERENCE_MASK_LAMBDA =
+  '((b, m) => { const arrayLike = (v) => v !== null && typeof v === "object" && typeof v.length === "number"; ' +
+  'const undecided = (v) => v === undefined || (typeof v === "number" && Number.isNaN(v)); ' +
+  'if (arrayLike(m) && Array.prototype.every.call(m, (v) => typeof v === "boolean" || undecided(v)) && ' +
+  'Array.prototype.some.call(m, (v) => typeof v === "boolean")) ' +
+  'return arrayLike(b) ? Array.prototype.filter.call(b, (_, i) => m[i] === true) : NaN; ' +
+  'return _SYS.atNoWrap(b, m); })(_.b, _.m)';
+
+describe('Tycho row 369: _SYS.atMask reproduces the per-site mask lambda', () => {
+  const ce = new ComputeEngine();
+  const reference = new ComputeEngineFunction(
+    ce as any,
+    REFERENCE_MASK_LAMBDA
+  );
+  const helper = new ComputeEngineFunction(
+    ce as any,
+    '_SYS.atMask(_.b, _.m)'
+  );
+
+  const same = (b: unknown, m: unknown): unknown => {
+    const expected = (reference as any)({ b, m });
+    expect((helper as any)({ b, m })).toEqual(expected);
+    return expected;
+  };
+
+  test('a mask keeps the elements at the positions that are true', () => {
+    expect(same([10, 20, 30, 40], [true, false, true, false])).toEqual([
+      10, 30,
+    ]);
+    expect(same([10, 20, 30], [false, false, false])).toEqual([]);
+  });
+
+  test('a hole in the mask (undefined or NaN) keeps nothing', () => {
+    expect(same([10, 20, 30, 40], [true, undefined, NaN, true])).toEqual([
+      10, 40,
+    ]);
+  });
+
+  test('a mask shorter than the base keeps nothing past its end', () => {
+    expect(same([10, 20, 30, 40, 50], [true, false, true])).toEqual([10, 30]);
+  });
+
+  test('a mask longer than the base reads the positions of the base only', () => {
+    expect(same([10, 20], [true, true, true, true])).toEqual([10, 20]);
+  });
+
+  test('a base that is not an array reads nothing', () => {
+    expect(same(5, [true])).toBeNaN();
+    expect(same('abc', [true, true, true])).toBeNaN();
+    expect(same(undefined, [true])).toBeNaN();
+  });
+
+  test('a base of rows keeps whole rows', () => {
+    expect(
+      same(
+        [
+          [1, 2],
+          [3, 4],
+          [5, 6],
+        ],
+        [false, true, true]
+      )
+    ).toEqual([
+      [3, 4],
+      [5, 6],
+    ]);
+  });
+
+  test('a list with no boolean is not a mask: it is read as positions', () => {
+    expect(same([10, 20, 30], [1, 3])).toEqual([10, 30]);
+    expect(same([10, 20, 30], [undefined, NaN])).toEqual([NaN, NaN]);
+    expect(same([10, 20, 30], [])).toEqual([]);
+  });
+
+  test('a scalar index is read as a position, without the from-the-end rule', () => {
+    expect(same([10, 20, 30], 2)).toBe(20);
+    expect(same([10, 20, 30], -1)).toBeNaN();
+    expect(same([10, 20, 30], 0)).toBeNaN();
+    expect(same([10, 20, 30], 1.5)).toBeNaN();
+  });
+
+  test('a typed-array base is read like an array, for a mask and a position', () => {
+    expect(
+      (helper as any)({ b: new Float64Array([1, 2, 3]), m: [true, false, true] })
+    ).toEqual([1, 3]);
+    expect((helper as any)({ b: new Float64Array([1, 2, 3]), m: 2 })).toBe(2);
+    expect((helper as any)({ b: new Float64Array([1, 2, 3]), m: [3, 1] })).toEqual([3, 1]);
+  });
+
+  test('an absent slot of a sparse base is not kept, as `filter` skips it', () => {
+    // eslint-disable-next-line no-sparse-arrays
+    expect(same([, 20, , 40], [true, true, true, true])).toEqual([20, 40]);
+  });
+
+  test('it differs from `_SYS.at`, which requires equal lengths', () => {
+    const at = new ComputeEngineFunction(ce as any, '_SYS.at(_.b, _.m)');
+    expect((at as any)({ b: [10, 20, 30], m: [true, false] })).toBeNaN();
+    expect((helper as any)({ b: [10, 20, 30], m: [true, false] })).toEqual([
+      10,
+    ]);
+  });
+
+  test('a host `At` lowering to `_SYS.atMask` filters `L[L > 15]`', () => {
+    const engine = new ComputeEngine();
+    engine.declare('L', 'list<real>');
+    const atDef: any = (engine as any).lookupDefinition('At')?.operator;
+    atDef.compile = (args: any[], c: (e: any) => string, context: any) =>
+      context.language === 'javascript'
+        ? `_SYS.atMask(${c(args[0])},${c(args[1])})`
+        : undefined;
+    const expr = engine.parse('L\\left[L > 15\\right]');
+    const src = code(expr);
+    expect(src).toContain('_SYS.atMask(');
+    expect(kernel(expr)({ L: [10, 20, 30] })).toEqual([20, 30]);
+    expect(kernel(expr)({ L: [1, 2] })).toEqual([]);
+  });
+});
