@@ -260,18 +260,6 @@ Cover synchronous and asynchronous evaluation, equality and duplicate removal,
 callback counts and error timing, nested collections, and oversized or infinite
 inputs. The proposal remains separate from the collection snapshot bug fixes.
 
-### A list literal whose lazy spread has no cheap count can run impure callbacks twice (OPEN, small — found 2026-10-07 by the review of the list-literal snapshot)
-
-`snapshotListJoin` (`library/collections.ts`) lists the elements of a list
-literal with a spread. It adds the cheap counts of the operands before the
-walk and keeps the lazy view when their sum exceeds `ce.maxCollectionSize`,
-so no callback runs for a literal that is too large. An operand whose count
-is not cheap (a `filter`, a `map` over a set) is bounded only during the
-walk: when such an operand takes the snapshot over the bound, the callbacks
-that already ran (random draws, for example) are discarded, and they run
-again when the kept view is read. A fix must either know the size of such an
-operand before the walk, or keep the elements that the walk produced.
-
 ### A `WithRandomSeed` body that returns an eager operator holding a drawing view is reported pure (OPEN, small — found 2026-10-07 by the review of the seed-frame escape check)
 
 `WithRandomSeed(7, Repeat(Map(u ↦ Random(), Range(1, 3)), 2))` reports

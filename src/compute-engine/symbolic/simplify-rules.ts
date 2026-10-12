@@ -14,7 +14,6 @@ import {
   isNumber,
   isSymbol,
   numericValue,
-  sym,
 } from '../boxed-expression/type-guards.js';
 import { expand } from '../boxed-expression/expand.js';
 import {
@@ -376,31 +375,14 @@ export const SIMPLIFY_RULES: Rule[] = [
     if (!isFunction(x, 'Add')) return undefined;
     // A term that is or may be a collection: see `elementWise()`.
     if (x.ops.some(isCollectionShaped)) return elementWise(x, 'addition');
-    // The Add function has a 'lazy' property, so we need to ensure operands are canonical.
-    // Also evaluate purely numeric operands (no unknowns) to simplify expressions like √(1+2) → √3.
+    // The Add function has a 'lazy' property, so we need to ensure operands
+    // are canonical. A constant operand (`3!`, `ln(e)`) is already folded by
+    // `simplify()` before the rule runs (`foldConstants()` in
+    // `boxed-expression/simplify.ts`); constant folding is not the job of a
+    // rule, so that a caller's own rule list gets the same folding.
     // IMPORTANT: Don't call .simplify() on operands to avoid infinite recursion.
     return {
-      value: add(
-        ...x.ops.map((op) => {
-          const canonical = op.canonical;
-          // Evaluate GENUINELY numeric operands (no unknowns, no assigned
-          // value) to simplify them — `√(1+2) → √3`. Value-blindness: an
-          // operand that is constant only because it mentions a value-bound
-          // symbol (`w²` with `w := 5`) must NOT fold, or `simplify()` would
-          // substitute the value. `hasAssignedVariable` excludes true constants
-          // (`Pi`, `e`), so those still fold.
-          if (
-            canonical.unknowns.length === 0 &&
-            isFunction(canonical) &&
-            !hasAssignedVariable(canonical)
-          ) {
-            const evaluated = canonical.evaluate();
-            // Only use evaluated form if it's simpler (a number literal)
-            if (isNumber(evaluated)) return evaluated;
-          }
-          return canonical;
-        })
-      ),
+      value: add(...x.ops.map((op) => op.canonical)),
       because: 'addition',
     };
   },
@@ -503,46 +485,15 @@ export const SIMPLIFY_RULES: Rule[] = [
     )
       return undefined;
 
-    // The Multiply function has a 'lazy' property, so we need to ensure operands are canonical.
-    // Also evaluate purely numeric operands (no unknowns) to simplify expressions.
+    // The Multiply function has a 'lazy' property, so we need to ensure
+    // operands are canonical. A constant operand is already folded by
+    // `simplify()` before the rule runs (`foldConstants()` in
+    // `boxed-expression/simplify.ts`), and the exactness contract of
+    // `evaluate()` keeps `e^n` and `2^(3/5)` symbolic there, so the power
+    // combination rules still see them.
     // IMPORTANT: Don't call .simplify() on operands to avoid infinite recursion.
     return {
-      value: mul(
-        ...ops.map((op) => {
-          const canonical = op.canonical;
-          // Evaluate GENUINELY numeric operands (no unknowns, no assigned
-          // value — value-blindness, so `w²` with `w := 5` stays symbolic;
-          // `hasAssignedVariable` still lets true constants fold) to simplify
-          // them. BUT skip Power expressions that should stay symbolic:
-          // - e^n (for potential combination with e^x)
-          // - n^{p/q} where result is irrational (e.g., 2^{3/5})
-          if (
-            canonical.unknowns.length === 0 &&
-            isFunction(canonical) &&
-            !hasAssignedVariable(canonical)
-          ) {
-            if (canonical.operator === 'Power') {
-              // Skip evaluation for e^n to allow power combination rules to work
-              if (sym(canonical.op1) === 'ExponentialE') {
-                return canonical;
-              }
-              // Skip evaluation for n^{p/q} with non-integer exponent
-              // These produce irrational results that should stay symbolic
-              // e.g., 2^{3/5} should stay as 2^{3/5}, not 1.5157...
-              if (
-                canonical.op2.isRational === true &&
-                canonical.op2.isInteger === false
-              ) {
-                return canonical;
-              }
-            }
-            const evaluated = canonical.evaluate();
-            // Only use evaluated form if it's simpler (a number literal)
-            if (isNumber(evaluated)) return evaluated;
-          }
-          return canonical;
-        })
-      ),
+      value: mul(...ops.map((op) => op.canonical)),
       because: 'multiplication',
     };
   },
@@ -1371,6 +1322,19 @@ function simplifyRelationalOperator(expr: Expression): RuleStep | undefined {
   const op1 = expr.op1.simplify();
   const op2 = expr.op2.simplify();
   expr = ce._fn(expr.operator, [op1, op2]);
+
+  // A relation between two number literals is a truth value, not an
+  // equation to factor: `3 = 3` is `True`, where the factoring below gave
+  // `1 == 1` (both sides divided by their common factor). The value comes
+  // from `evaluate()`, which decides the relation; a relation it leaves
+  // undecided (an order relation with a complex operand, `i < 1`) is kept
+  // as it is.
+  if (isNumber(op1) && isNumber(op2)) {
+    const value = expr.evaluate();
+    if (isSymbol(value, 'True') || isSymbol(value, 'False'))
+      return { value, because: 'relation of two numbers' };
+    return undefined;
+  }
 
   //
   // 2/ Try to factor terms across the relational operator

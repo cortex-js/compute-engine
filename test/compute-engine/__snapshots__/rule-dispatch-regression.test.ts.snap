@@ -46,7 +46,7 @@ exports[`simplify: arithmetic -23 1`] = `-23`;
 
 exports[`simplify: arithmetic -1234 - 5678 1`] = `-6912`;
 
-exports[`simplify: arithmetic 0! 1`] = `["Factorial", 0]`;
+exports[`simplify: arithmetic 0! 1`] = `1`;
 
 exports[`simplify: arithmetic 0.3 1`] = `0.3`;
 
@@ -54,7 +54,7 @@ exports[`simplify: arithmetic 1.234 + 5.678 1`] = `6.912`;
 
 exports[`simplify: arithmetic 2 + 4 1`] = `6`;
 
-exports[`simplify: arithmetic 5! 1`] = `["Factorial", 5]`;
+exports[`simplify: arithmetic 5! 1`] = `120`;
 
 exports[`simplify: logarithms and exponentials (e^x)^2 1`] = `["Exp", ["Multiply", 2, "x"]]`;
 
@@ -234,7 +234,7 @@ exports[`simplify: rational expressions x/(2/y)^3 1`] = `["Multiply", ["Rational
 
 exports[`simplify: rational expressions x/(y/2)^3 1`] = `["Divide", ["Multiply", 8, "x"], ["Power", "y", 3]]`;
 
-exports[`simplify: relational 2\\pi < 4\\pi 1`] = `["Less", 1, 2]`;
+exports[`simplify: relational 2\\pi < 4\\pi 1`] = `True`;
 
 exports[`simplify: relational 2a < 4b 1`] = `["Less", "a", ["Multiply", 2, "b"]]`;
 

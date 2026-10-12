@@ -21,6 +21,51 @@
 
 ### Behavior Changes
 
+- **`simplify()` folds every constant subexpression, whatever the rule
+  list.** Constant folding is now part of the method itself and does not
+  depend on the `rules` option: the default rules, a caller's own list and
+  `rules: null` fold the same subexpressions (issue #306). A subexpression is
+  folded when it is pure, has no unknowns, mentions no variable with an
+  assigned value, and its evaluation is a number literal. Before, the
+  addition and multiplication rules evaluated their constant operands, so
+  `3! + 1` was `7` while `3!` alone stayed `3!`, `\max(3, 5)` stayed, and
+  with a rule list that held only the addition rule `\ln e + \ln e` was `2`
+  while `3!` stayed unevaluated inside a product. Now `3!`, `\max(3, 5)`,
+  the determinant of a numeric matrix, `\int_0^1 t^2\,dt` and
+  `\prod_{n=1}^{3}(2n-1)` fold at the top level too (`6`, `5`, a number,
+  `1/3` and `15`, where the last was `Factorial2(5)`), and a constant sum or
+  product that holds a float folds to one float, as under `evaluate()`
+  (`1.1+2+5+\frac57+\frac79+\sqrt2+\pi` is `14.147…` where it was
+  `11.006… + \pi`; `\cos(5.1)` is `0.3779…`). An exact constant that
+  `evaluate()` keeps symbolic (`\ln 2`, `\sqrt2`, `2^{3/5}`, `e^2`) still
+  stays, so the power combination rules still see `e^2 \cdot e^x`. An
+  impure subexpression is no longer evaluated: `\mathrm{Random}() + 1` stays
+  as it is, where it was replaced by a float. With `rules: null`,
+  `y \cdot \ln e` is `y`, where it was a `Multiply(y, 1)` flagged canonical,
+  and `10!/(3!\,7!)` is `120`, where it was `10!/30240`. The method stays
+  value-blind: `9 - w^2` with `w := 5` stays `9 - w^2`. A `Hold` or an
+  `Annotated` wrapper is not folded (the operand of `Annotated` is), nor a
+  node that holds one, nor an iterated `\sum` or `\prod` (the value of a sum
+  comes from its closed-form rules; folding never enumerates terms, so
+  `\sum_{k=1}^{100000}\sin k` is kept at once), nor a node whose type says
+  its value is not a number (a function value such as
+  `Derivative((z) \mapsto \operatorname{sinc}(z), 2)`, a boolean, a
+  string, a collection). An evaluation that throws declines the fold:
+  `g(3)` with `g(n) := g(n-1) + 1` simplifies to `g(3)`. A `\sum` or
+  `\prod` in a quotient now reaches its closed-form rules
+  (`\frac{\sum_{k=1}^{10} k^2}{x}` is `385/x`). The absolute-value rule
+  no longer evaluates a constant operand itself (`|3+4i|` is `5` by the
+  fold), so an annotated operand keeps its annotation.
+
+- **A relation between two number literals simplifies to its truth value.**
+  `(3 = 3).simplify()` is `True` and `(3 < 4).simplify()` is `True`, where
+  `3 = 3` and `2 + 3 = 5` gave `1 == 1` (the relational rule divided both
+  sides by their common factor), and `2\pi < 4\pi` is `True` where it was
+  `1 < 2` (the common factor is removed first, as before). A relation with
+  an unknown is unchanged (`x = x` stays). Found by the constant folding
+  above, which made `\lceil e\rceil = \lfloor\pi\rfloor` reach that rule
+  as `3 = 3`.
+
 - **`code` of a compiled JavaScript expression that holds a constant list
   literal reads a preamble local.** A `List` of three or more finite real
   number literals (or such lists nested) in a compiled body is emitted once

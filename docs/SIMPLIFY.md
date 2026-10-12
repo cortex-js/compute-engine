@@ -28,13 +28,27 @@ different contracts.
 
 ### The method is rule-based and value-blind
 
-`expr.simplify()` applies simplification rules and folds purely numeric
-subexpressions. It does not invoke an operator's `evaluate` handler and does not
-substitute assigned symbol values.
+`expr.simplify()` applies simplification rules and folds constant
+subexpressions. It does not substitute assigned symbol values.
+
+Constant folding is part of the method, not of a rule, so it does not depend
+on the rule list: the default rules, a caller's own list and `rules: null` fold
+the same subexpressions (decision of 2026-10-12, issue #306). A subexpression
+is folded when it is pure, has no unknowns, mentions no variable with an
+assigned value, and its evaluation is a number literal (or a residue class). A
+symbol bound by an enclosing `Integrate` or function literal is not an
+unknown. So `3!`, `ln(e)`, `sin(π)`, `∫_0^1 t² dt` and the determinant of a
+numeric matrix fold, at the top level as well as inside a sum. `ln 2`, `√2`
+and `2^(3/5)` stay, because `evaluate()` keeps them symbolic (the exactness
+contract). `Random() + 1` stays, because `Random` is not pure. `w²` with
+`w := 5` stays, because the method is value-blind. An iterated `Sum` or
+`Product`, and a node that holds one, a `Hold` or an `Annotated` wrapper, are
+never folded: folding does not enumerate terms, and the value of a sum comes
+from its closed-form rules. An evaluation that throws declines the fold.
 
 Consequently, a head whose result comes only from an evaluation handler — such
-as `Determinant`, `Trace`, `Length`, `D`, or `Integrate` — can remain unchanged
-under the method when no simplification rule covers it.
+as `Determinant`, `Trace`, `Length`, `D`, or `Integrate` — remains unchanged
+under the method when it has an unknown and no simplification rule covers it.
 
 For an evaluate-then-simplify operation, use:
 

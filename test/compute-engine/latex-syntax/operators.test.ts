@@ -489,7 +489,7 @@ describe('OPERATOR postfix', () => {
   test('-5! // Precedence', () =>
     expect(check('-5!')).toMatchInlineSnapshot(`
       box       = ["Negate", ["Factorial", 5]]
-      eval-auto = -120
+      simplify  = -120
     `));
   test('-n!', () =>
     expect(check('-n!')).toMatchInlineSnapshot(

@@ -65,16 +65,6 @@ type InternalSimplifyOptions = SimplifyOptions & {
   shadowedCallsMasked?: boolean;
 };
 
-const BASIC_ARITHMETIC = [
-  'Add',
-  'Subtract',
-  'Multiply',
-  'Divide',
-  'Negate',
-  'Power',
-  'Rational',
-];
-
 // Trig functions with constructible special values
 const CONSTRUCTIBLE_TRIG = ['Sin', 'Cos', 'Tan', 'Csc', 'Sec', 'Cot'];
 
@@ -140,75 +130,138 @@ function containsNegatedOddEvenCall(expr: Expression): boolean {
 }
 
 /**
- * Recursively evaluate purely numeric subexpressions without full simplification.
- * This handles cases like Power(x, Add(1,2)) where Add(1,2) should become 3.
- * Unlike full simplification, this won't expand polynomial factors.
+ * The value that a constant function expression folds to, or `undefined`
+ * when `expr` is not a foldable constant.
+ *
+ * `simplify()` folds a constant subexpression whatever the rule list says:
+ * constant folding is part of the method itself, not a rewrite rule, so a
+ * caller that gives its own rules, or `rules: null`, gets the same folding
+ * as the default rules. The rule list controls the symbolic rewrites only.
+ * (Decision on GitHub issue #306.)
+ *
+ * A subexpression folds when all of these hold:
+ * - it is pure: evaluating it has no effect and gives the same value each
+ *   time (`Random() + 1` is not folded);
+ * - it has no unknowns (a symbol bound by an enclosing `Integrate` or
+ *   function literal is not an unknown, so `∫_0^1 t² dt` folds);
+ * - it is value-blind: none of its symbols is a variable with an assigned
+ *   value (`w²` with `w := 5` stays `w²`, since substituting a value is the
+ *   job of `evaluate()`, not of `simplify()`); the library constants (`Pi`,
+ *   `ExponentialE`) are not variables, so `cos(π)` folds;
+ * - its evaluation is a number literal or a residue class. The exactness
+ *   contract of `evaluate()` keeps `ln 2`, `√2`, `2^(3/5)` and `e²`
+ *   symbolic, so those are not folded; `ln e`, `3!`, `sin π`, `|−3|` and the
+ *   determinant of a numeric matrix are.
+ *
+ * Three kinds of node are never folded, at the node and when the node holds
+ * one of them anywhere inside (`UNFOLDABLE_HEADS`):
+ * - a `Hold` or an `Annotated` wrapper: the first withholds its operand from
+ *   evaluation, the second carries presentation (`\\displaystyle`) that
+ *   evaluation drops, so `Abs(Annotated(3!, …))` keeps its annotation (the
+ *   `3!` inside it folds at its own node);
+ * - an iterated `Sum` or `Product`: its evaluation enumerates the terms,
+ *   which is unbounded work (`Σ_{k=1}^{10⁹} k`) and gives a symbolic sum
+ *   that is not a number when there is no closed form
+ *   (`Σ_{k=1}^{10⁵} sin k`). The value of such a sum comes from its
+ *   closed-form rules, as it did before constant folding existed;
+ * - a node whose type says the value cannot be a number: a function value,
+ *   a boolean, a string or a collection. The type check is cheaper than the
+ *   evaluation it avoids, and it is what keeps a `Derivative` of a function
+ *   literal (type `(unknown) -> number`, no unknowns because the parameter
+ *   is bound) out of the fold: its evaluate handler simplifies the body, and
+ *   a fold there that evaluated the same node again did not terminate.
+ *
+ * A node is not folded while a fold of the same node (syntactically) is in
+ * progress: an evaluate handler that calls `simplify()` (the `Derivative`
+ * and `Integrate` handlers do) can return an expression that still holds
+ * the node being folded, and the inner fold would re-enter the outer one.
+ * The inner `simplify()` keeps its folding of every other constant.
+ *
+ * A fold is an optimization: an evaluation that throws (a recursion limit,
+ * a stack overflow in a user function) declines the fold and the node is
+ * kept. A `CancellationError` (the deadline of `withTimeLimit`) is thrown
+ * again, so a time limit still stops `simplify()`.
+ *
+ * The checks are ordered by cost: the operator and the type are cheap,
+ * `isPure` is memoized, `unknowns` walks the expression,
+ * `hasAssignedVariable` walks it and consults the scope, and the walk for
+ * an unfoldable head runs only on a node that passed every other check.
  */
-function evaluateNumericSubexpressions(expr: Expression): Expression {
-  // Number literals are already simplified
-  if (isNumber(expr)) return expr;
+const UNFOLDABLE_HEADS = new Set(['Hold', 'Annotated', 'Sum', 'Product']);
 
-  // No ops means symbol or other atomic - return as is
+function containsUnfoldableHead(expr: Expression): boolean {
+  if (!isFunction(expr)) return false;
+  if (UNFOLDABLE_HEADS.has(expr.operator)) return true;
+  return expr.ops.some((op) => containsUnfoldableHead(op));
+}
+
+const foldsInProgress: Expression[] = [];
+
+function foldedConstant(expr: Expression): Expression | undefined {
+  if (!isFunction(expr)) return undefined;
+  if (UNFOLDABLE_HEADS.has(expr.operator)) return undefined;
+  const type = expr.type;
+  if (
+    type.matches('function') ||
+    type.matches('boolean') ||
+    type.matches('string') ||
+    type.matches('collection<any>')
+  )
+    return undefined;
+  if (expr.isPure !== true) return undefined;
+  if (expr.unknowns.length !== 0) return undefined;
+  if (hasAssignedVariable(expr)) return undefined;
+  if (containsUnfoldableHead(expr)) return undefined;
+  if (foldsInProgress.some((x) => sameSyntactic(x, expr))) return undefined;
+  foldsInProgress.push(expr);
+  let evaluated: Expression;
+  try {
+    evaluated = expr.evaluate();
+  } catch (e) {
+    if (e instanceof CancellationError) throw e;
+    return undefined;
+  } finally {
+    foldsInProgress.pop();
+  }
+  if (!isNumber(evaluated) && !isResidueClass(evaluated)) return undefined;
+  // A residue class evaluates to itself: no fold, and no step to report.
+  if (sameSyntactic(evaluated, expr)) return undefined;
+  return evaluated;
+}
+
+/**
+ * Fold every constant subexpression of `expr` (see `foldedConstant()`), top
+ * down, and return the result; `expr` itself when nothing folded.
+ *
+ * This is the operand treatment of the routes that do not simplify an
+ * operand recursively: the operands of a lazy operator (`Add`, `Multiply`)
+ * that have no dedicated treatment, and the operands of `Divide`. The
+ * operand of a `Hold` is left as it is; the operand of an `Annotated` is
+ * folded, the wrapper is kept.
+ *
+ * An ancestor of a folded node is rebuilt with the canonicalizing
+ * constructor, so `y · ln(e)` becomes `y`, not a `Multiply(y, 1)` flagged
+ * canonical. A head that holds a body or a scope (`Sum`, `Integrate`, a
+ * function literal, a block) is rebuilt with `_fn` and its scope carried
+ * over, as `simplifyBinderBodies()` does, because its `canonical` handler
+ * would re-wrap the body.
+ */
+function foldConstants(expr: Expression): Expression {
   if (!isFunction(expr)) return expr;
-
-  // Don't evaluate Power expressions that should stay symbolic:
-  // - e^n (for potential combination with e^x)
-  // - n^{p/q} where result is irrational (e.g., 2^{3/5})
-  if (expr.operator === 'Power') {
-    if (isSymbol(expr.op1, 'ExponentialE')) {
-      return expr;
-    }
-    // Skip n^{p/q} with non-integer exponent - these produce irrational results
-    if (expr.op2?.isRational === true && expr.op2?.isInteger === false) {
-      return expr;
-    }
-  }
-
-  // Value-blindness (see the `hasAssignedVariable` guard below): fold only a
-  // GENUINELY constant subexpression (literals and built-in constants). A
-  // subexpression with no free unknowns must NOT be folded when its
-  // constant-ness comes from an assigned value — `9 - w²` with `w := 5` stays
-  // symbolic, not `-72`, and a binder body `Add(x,1)` with a global `x := 5`
-  // stays `x + 1`. `simplify()` never substitutes assigned values; that is
-  // `.evaluate()`'s job. The `hasAssignedVariable` check is ordered LAST (after
-  // the cheap `unknowns`/operator gates) so it runs only on fold candidates.
-
-  // If purely numeric (no unknowns), evaluate the whole expression.
+  if (expr.operator === 'Hold') return expr;
+  const folded = foldedConstant(expr);
+  if (folded !== undefined) return folded;
+  const newOps = expr.ops.map((op) => foldConstants(op));
+  if (newOps.every((op, i) => op === expr.ops[i])) return expr;
+  const ce = expr.engine;
   if (
-    expr.unknowns.length === 0 &&
-    BASIC_ARITHMETIC.includes(expr.operator) &&
-    !hasAssignedVariable(expr)
-  ) {
-    const evaluated = expr.evaluate();
-    if (isNumber(evaluated) || isResidueClass(evaluated)) return evaluated;
-  }
-
-  // Constant logarithms are folded to their exact value even when they are
-  // not BASIC_ARITHMETIC and are buried inside another operand. This closes
-  // the Divide-context gap where `(ln(e)·y)/x` kept its `ln(e)` factor: the
-  // lazy-Multiply branch simplifies bare `Ln` operands, but the Divide
-  // branch only runs this numeric fold on its operands, so a constant `Ln`
-  // in a Divide numerator/denominator was never reduced. The exactness
-  // contract keeps genuinely-symbolic logs (Ln(2)) as non-literal, so only
-  // closed-form constants (Ln(e) -> 1, Log(1000,10) -> 3) fold here.
-  if (
-    (expr.operator === 'Ln' || expr.operator === 'Log') &&
-    expr.unknowns.length === 0 &&
-    !hasAssignedVariable(expr)
-  ) {
-    const evaluated = expr.evaluate();
-    if (isNumber(evaluated) && !evaluated.isSame(expr)) return evaluated;
-  }
-
-  // Otherwise, recursively process operands
-  const newOps = expr.ops.map((op) => evaluateNumericSubexpressions(op));
-
-  // Check if anything changed
-  const changed = newOps.some((op, i) => op !== expr.ops[i]);
-  if (!changed) return expr;
-
-  // Reconstruct with _fn to avoid re-canonicalization
-  return expr.engine._fn(expr.operator, newOps);
+    hasBodyAtOperand0(expr) ||
+    expr.operator === 'Function' ||
+    expr.operator === 'Block' ||
+    (expr.operatorDefinition?.scoped ?? false) !== false
+  )
+    return ce._fn(expr.operator, newOps, { scope: expr.localScope });
+  return ce.function(expr.operator, newOps);
 }
 
 /**
@@ -839,6 +892,10 @@ function simplifyOperands(
 ): Expression {
   if (!isFunction(expr)) return expr;
 
+  // A `Hold` withholds its operand from every rewrite, the constant folding
+  // of the lazy branch below included: `Hold(3!)` stays `Hold(3!)`.
+  if (expr.operator === 'Hold') return expr;
+
   const def = expr.operatorDefinition;
 
   // For scoped functions (Sum, Product, D), use holdMap but simplify non-body operands
@@ -901,8 +958,8 @@ function simplifyOperands(
   // For lazy functions (Multiply, Add), only simplify Sum/Product operands
   // and expressions containing constructible trig functions
   // to avoid interfering with their special handling in simplify-rules.
-  // However, always evaluate purely numeric subexpressions (like 2*3 in exponents)
-  // so that (x^3)^2 * (y^2)^2 becomes x^6 * y^4.
+  // Every other operand gets constant folding only (`foldConstants()`), so
+  // the rules see `3!` as `6` and `ln(e)` as `1` whatever the rule list.
   // Also simplify Power expressions with negative bases and fractional exponents
   // to ensure proper sign factoring (e.g., (-2x)^{3/5} -> -(2x)^{3/5}).
   //
@@ -958,8 +1015,8 @@ function simplifyOperands(
         !x.op2.isInteger
       )
         simplifiedOps.push(full(x, i));
-      // Evaluate purely numeric subexpressions in all operands
-      else simplifiedOps.push(evaluateNumericSubexpressions(x));
+      // Fold the constant subexpressions of every other operand
+      else simplifiedOps.push(foldConstants(x));
     }
     return build(simplifiedOps);
   }
@@ -968,7 +1025,7 @@ function simplifyOperands(
   // recursively simplify operands. This ensures expressions like Factorial2(-1 + 2*3)
   // become Factorial2(5) and Degrees(tan(90-0.000001)) becomes Degrees(tan(89.999999)).
   //
-  // EXCEPTION: For Divide expressions, only evaluate purely numeric subexpressions
+  // EXCEPTION: For Divide expressions, only fold the constant subexpressions
   // but don't do full recursive simplification. This preserves factored polynomial
   // structure for the cancelCommonFactors rule.
   // e.g., (x-1)(x+2)/((x-1)(x+3)) should cancel to (x+2)/(x+3), not expand first.
@@ -982,10 +1039,16 @@ function simplifyOperands(
       // the Add/Multiply branch above makes): identities such as
       // r·sin²θ + r·cos²θ → r fire only inside the operand, so skipping it
       // left e.g. (r·cosθ)/(r·sin²θ + r·cos²θ) entirely un-simplified even
-      // though the denominator alone simplifies. Other operands get numeric
-      // folding only, preserving factored polynomial structure for the
-      // cancelCommonFactors rule.
-      if (containsConstructibleTrig(x))
+      // though the denominator alone simplifies. A `Sum` or `Product`
+      // operand gets the full recursion too, so that its closed-form rules
+      // run (constant folding never iterates a sum). Other operands get
+      // constant folding only, preserving factored polynomial structure for
+      // the cancelCommonFactors rule.
+      if (
+        containsConstructibleTrig(x) ||
+        x.operator === 'Sum' ||
+        x.operator === 'Product'
+      )
         simplifiedOps.push(
           simplifyOperandCapture(
             x,
@@ -997,7 +1060,7 @@ function simplifyOperands(
             build
           )
         );
-      else simplifiedOps.push(evaluateNumericSubexpressions(x));
+      else simplifiedOps.push(foldConstants(x));
     }
     const changed = simplifiedOps.some((op, i) => !sameSyntactic(op, ops[i]));
     if (!changed) return expr;
@@ -1009,33 +1072,8 @@ function simplifyOperands(
   const simplifiedOps: Expression[] = [];
   for (let i = 0; i < ops.length; i++) {
     const x = ops[i];
-    // For purely numeric basic arithmetic expressions, evaluate directly
-    // to get simpler results like √(1+2) → √3
-    // BUT skip Power expressions that should stay symbolic:
-    // - e^n and n^{p/q} with non-integer exponent
-    if (
-      !isNumber(x) &&
-      isFunction(x) &&
-      x.unknowns.length === 0 &&
-      !hasAssignedVariable(x) &&
-      BASIC_ARITHMETIC.includes(x.operator)
-    ) {
-      // Don't evaluate Power expressions that produce irrational results
-      const symbolicPower =
-        x.operator === 'Power' &&
-        (isSymbol(x.op1, 'ExponentialE') ||
-          (x.op2?.isRational === true && x.op2?.isInteger === false));
-      if (symbolicPower) {
-        simplifiedOps.push(x);
-        continue;
-      }
-      const evaluated = x.evaluate();
-      if (isNumber(evaluated) || isResidueClass(evaluated)) {
-        simplifiedOps.push(evaluated);
-        continue;
-      }
-    }
-    // For other expressions with ops (like Tan, Sqrt, etc.), recursively simplify
+    // A function operand is simplified recursively; a constant one is folded
+    // by `simplifyExpression()` at its own node (`√(1+2)` is `√3`).
     if (isFunction(x))
       simplifiedOps.push(
         simplifyOperandCapture(
@@ -1205,6 +1243,16 @@ function simplifyExpression(
   }
 
   if (result.length > steps.length) return result;
+
+  // No rule rewrote the node. A constant node is folded to its value here,
+  // whatever the rule list: `3!` is `6` and `Determinant([[1,2],[3,4]])` is
+  // `-2`, at the top level as well as inside a sum. The conditions are in
+  // `foldedConstant()`; a `Sum` or `Product` is never folded, so the value
+  // of `Σ_{k=1}^{10^9} k` comes from its closed-form rule, without
+  // iterating.
+  const folded = foldedConstant(expr);
+  if (folded !== undefined)
+    return [...steps, { value: folded, because: 'constant folding' }];
 
   // NOTE: Trying permutations of operands for commutative functions is
   // NOT needed:

@@ -1,6 +1,7 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { Expression } from '../../src/math-json/types.ts';
 import { simplify } from '../utils';
+import { isNumber } from '../../src/compute-engine/boxed-expression/type-guards';
 
 export const ce = new ComputeEngine();
 
@@ -108,8 +109,10 @@ describe('Canonicalization: Others', () => {
     checkSimplify(['Add', 1, 2, 1.0001], 4.0001));
   test('2a < 4b simplifies to a < 2b', () =>
     checkSimplify('2a < 4b', 'a < 2b'));
-  test('2pi < 4pi simplifies to 1 < 2', () =>
-    checkSimplify('2\\pi < 4\\pi', '1 < 2'));
+  // The common factor is removed (`1 < 2`), and a relation between two
+  // number literals is then its truth value.
+  test('2pi < 4pi simplifies to True', () =>
+    checkSimplify('2\\pi < 4\\pi', '\\top'));
   test.skip('(2pi+2pi*e) < 4pi simplifies -- needs factor() to extract common factors from Add', () =>
     checkSimplify('(2\\pi + 2 \\pi e) < 4\\pi', '1 + e < 2'));
 });
@@ -2384,12 +2387,15 @@ describe('Simplify with assumptions', () => {
   });
 });
 
-// Ruling 2026-07-24 (docs/SCOPING-MODEL.md, end of
-// Item 1): the `.simplify()` METHOD is rule-driven and value-blind — it runs no
-// operator `evaluate` handler, so a structural head (`Determinant`, `Trace`,
-// `Transpose`, `Length`) whose result comes from a handler rather than a rule is
-// returned UNCHANGED. The `Simplify` OPERATOR evaluates its argument first, then
-// simplifies, so it (and `evaluate()`) is how those heads reduce.
+// The `.simplify()` METHOD is rule-driven and value-blind (decision of
+// 2026-07-24, `docs/SCOPING-MODEL.md`): a structural head (`Determinant`,
+// `Trace`, `Transpose`, `Length`) that has an unknown and whose result comes
+// from a handler rather than a rule is returned UNCHANGED. A CONSTANT
+// application (pure, no unknowns, no assigned variable) is folded to its value
+// instead, whatever the rule list (decision of 2026-10-12, issue #306), so
+// `Max(3, 5)` is `5` while `Max(a, 5)` stays. The `Simplify` OPERATOR
+// evaluates its argument first, then simplifies, so it (and `evaluate()`) is
+// how a head with unknowns reduces.
 describe('simplify() METHOD leaves structural operators unchanged', () => {
   const ce9 = new ComputeEngine();
 
@@ -2402,9 +2408,9 @@ describe('simplify() METHOD leaves structural operators unchanged', () => {
     expect(ce9.parse(latex).simplify().operator).toBe(head);
   });
 
-  test('Max/Min are left to evaluate()', () => {
-    expect(ce9.parse('\\mathrm{Max}(3, 5)').simplify().operator).toBe('Max');
-    expect(ce9.parse('\\mathrm{Max}(3, 5)').evaluate().toString()).toBe('5');
+  test('a constant Max folds; a Max with an unknown is left to evaluate()', () => {
+    expect(ce9.parse('\\mathrm{Max}(3, 5)').simplify().toString()).toBe('5');
+    expect(ce9.parse('\\mathrm{Max}(a, 5)').simplify().operator).toBe('Max');
   });
 
   // `simplify()` is value-blind (ROADMAP Item E): `(a + 2).simplify()` is
@@ -2792,5 +2798,162 @@ describe('simplify() is value-blind for sign/parity (ROADMAP Item E)', () => {
     const ce = new ComputeEngine();
     // Pi is a constant, not an assigned variable: its sign is not blinded.
     expect(ce.parse('|{-\\pi}|').simplify().toString()).toBe('pi');
+  });
+});
+
+// Decision of 2026-10-12 (issue #306): constant folding is part of
+// `simplify()` itself, not of a rule. A pure subexpression with no unknowns
+// and no assigned variable whose evaluation is a number literal is folded
+// whatever the rule list says — the default rules, a caller's own list, or
+// `rules: null`. The rule list controls the symbolic rewrites only.
+describe('simplify() folds constants whatever the rule list (issue #306)', () => {
+  const ce306 = new ComputeEngine();
+  // A rule list that has nothing to say about arithmetic, logarithms or
+  // factorials: only the folding of the method itself can change a constant.
+  const unrelatedRules = [
+    { match: ['Floor', ['Floor', '_x']], replace: ['Floor', '_x'] },
+  ] as const;
+  const modes: [string, { rules?: any }][] = [
+    ['the default rules', {}],
+    ['rules: null', { rules: null }],
+    ['an unrelated rule list', { rules: unrelatedRules }],
+  ];
+
+  test.each(modes)('ln(e) folds inside a sum under %s', (_label, options) => {
+    const r = ce306
+      .parse('(x \\cdot x) + (x \\cdot x) + \\ln{e} + \\ln{e}')
+      .simplify(options);
+    // `x·x + x·x → 2x²` is the like-term collection of the addition rule,
+    // so it happens only under the default rules; the folding of `ln(e)`
+    // happens under every list.
+    expect(r.toString()).toBe(
+      options.rules === undefined ? '2x^2 + 2' : 'x * x + x * x + 2'
+    );
+  });
+
+  test.each(modes)('3!, sin(π) and ln(e) fold under %s', (_label, options) => {
+    expect(
+      ce306.parse('\\ln{e} + 3! + 2 \\cdot 3 + \\sin(\\pi)').simplify(options).toString()
+    ).toBe('13');
+  });
+
+  test.each(modes)('10!/(3!·7!) folds under %s', (_label, options) => {
+    expect(ce306.parse('\\frac{10!}{3!\\,7!}').simplify(options).toString()).toBe(
+      '120'
+    );
+  });
+
+  test('a constant folds at the top level too', () => {
+    expect(ce306.parse('3!').simplify().toString()).toBe('6');
+    expect(
+      ce306
+        .box(['Determinant', ['List', ['List', 1, 2], ['List', 3, 4]]])
+        .simplify()
+        .toString()
+    ).toBe('-2');
+    expect(ce306.parse('\\int_0^1 t^2\\,dt').simplify().toString()).toBe('1/3');
+  });
+
+  test('a Sum is never folded: its value comes from its closed-form rule', () => {
+    // The closed-form rule of the default set gives the value.
+    expect(ce306.parse('\\sum_{k=1}^{10} k^2').simplify().toString()).toBe('385');
+    // With no rules the sum is kept: constant folding does not iterate.
+    expect(
+      ce306.parse('\\sum_{k=1}^{10} k^2').simplify({ rules: null }).operator
+    ).toBe('Sum');
+    // A sum with no closed form is kept, inside a product or alone, and
+    // its terms are not enumerated (this would take seconds).
+    const noClosedForm = '\\sum_{k=1}^{100000} \\sin(k)';
+    expect(ce306.parse(noClosedForm).simplify().operator).toBe('Sum');
+    expect(ce306.parse(`2 \\cdot ${noClosedForm}`).simplify().toString()).toBe(
+      `2${ce306.parse(noClosedForm).toString()}`
+    );
+    // A sum in a quotient reaches its closed-form rule.
+    expect(
+      ce306.parse('\\frac{\\sum_{k=1}^{10} k^2}{x}').simplify().toString()
+    ).toBe('385 / x');
+  });
+
+  test('the fold rebuilds the ancestor canonically (y·ln(e) is y, not y·1)', () => {
+    const r = ce306.parse('2 \\cdot 3 \\cdot x + \\ln(e) \\cdot y').simplify({ rules: null });
+    expect(r.json).toEqual(['Add', ['Multiply', 6, 'x'], 'y']);
+  });
+
+  test('an exact constant that evaluate() keeps symbolic is not folded', () => {
+    expect(ce306.parse('\\ln 2 + \\ln 2').simplify().toString()).toBe('2ln(2)');
+    expect(ce306.parse('2^{3/5} + x').simplify().toString()).toBe('x + 2^(3/5)');
+    // `e^2` stays a power, so the power combination rule still sees it.
+    expect(ce306.parse('e^2 \\cdot e^x').simplify().toString()).toBe('e^(x + 2)');
+  });
+
+  test('an inexact constant folds to a float, as under evaluate()', () => {
+    expect(isNumber(ce306.parse('\\cos(5.1)').simplify())).toBe(true);
+  });
+
+  test('an impure subexpression is not folded', () => {
+    expect(ce306.box(['Add', ['Random'], 1]).simplify().toString()).toBe(
+      '1 + Random()'
+    );
+  });
+
+  test('the method stays value-blind with no rules', () => {
+    const ce = new ComputeEngine();
+    ce.assign('w', 5);
+    expect(ce.parse('9 - w^2').simplify({ rules: null }).toString()).toBe('9 - w^2');
+  });
+
+  test('a Hold or an Annotated wrapper is kept; the operand of Annotated folds', () => {
+    expect(
+      ce306.box(['Add', ['Hold', ['Add', 2, 3]], 1]).simplify().toString()
+    ).toBe('1 + Hold(2 + 3)');
+    expect(
+      ce306.box(['Hold', ['Factorial', 3]]).simplify({ rules: null }).toString()
+    ).toBe('Hold(3!)');
+    // The fold of an enclosing node would drop the wrapper: it is declined.
+    expect(
+      ce306
+        .box(['Abs', ['Annotated', ['Factorial', 3], { dict: { mathStyle: 'normal' } }]])
+        .simplify().json
+    ).toEqual(['Abs', ['Annotated', 6, { dict: { mathStyle: 'normal' } }]]);
+    const annotated = ce306
+      .box(['Equal', 'a', ['Annotated', ['Factorial', 3], { dict: { mathStyle: 'normal' } }]])
+      .simplify();
+    expect(annotated.json).toEqual([
+      'Equal',
+      'a',
+      ['Annotated', 6, { dict: { mathStyle: 'normal' } }],
+    ]);
+  });
+
+  test('a node whose value is a function is not folded, and the fold does not re-enter itself', () => {
+    const ce = new ComputeEngine();
+    ce.declare('z', 'complex');
+    // The `Derivative` handler simplifies the body; a fold there that
+    // evaluated `Derivative((z) => Sinc(z), 2)` again did not terminate.
+    const d2 = ce.box([
+      'Apply',
+      ['Derivative', ['Function', ['Block', ['Sinc', 'z']], 'z'], 2],
+      'z',
+    ]);
+    expect(() => d2.simplify()).not.toThrow();
+    expect(() => d2.evaluate()).not.toThrow();
+  });
+
+  test('an evaluation that throws declines the fold instead of failing simplify()', () => {
+    const ce = new ComputeEngine();
+    ce.assign('g', ce.parse('n \\mapsto g(n-1) + 1'));
+    expect(ce.parse('g(3)').simplify().toString()).toBe('g(3)');
+  });
+
+  test('a relation between two number literals is its truth value', () => {
+    expect(ce306.parse('3 = 3').simplify().symbol).toBe('True');
+    expect(ce306.parse('3 = 4').simplify().symbol).toBe('False');
+    expect(ce306.parse('2 + 3 = 5').simplify().symbol).toBe('True');
+    expect(
+      ce306.parse('\\lceil e\\rceil = \\lfloor\\pi\\rfloor').simplify().symbol
+    ).toBe('True');
+    expect(ce306.parse('3 < 4').simplify().symbol).toBe('True');
+    // A relation with an unknown is not a truth value.
+    expect(ce306.parse('x = x').simplify().toString()).toBe('x == x');
   });
 });

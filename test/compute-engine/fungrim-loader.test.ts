@@ -2212,7 +2212,10 @@ describe('M5 negative controls: guards fail closed without assumptions', () => {
   });
 
   it('eval guard definitively false: Totient(6) does NOT rewrite (IsPrime(6) ⇒ False)', () => {
-    staysPut(['Totient', 6]);
+    // The rule `Totient(p) → p − 1` for a prime `p` would give 5. The
+    // constant application is folded by `simplify()` itself to the value
+    // `evaluate()` gives, 2, whatever the rule list.
+    expect(ce.expr(['Totient', 6]).simplify().toString()).toBe('2');
   });
 
   it('eval guard undecided: Totient(j) does NOT rewrite for a symbolic integer j', () => {
@@ -2371,11 +2374,14 @@ describe('identities with an angle operator apply only in radians', () => {
 
   test.each(angleCases)(
     '%j does not apply in degrees, and simplify keeps the value',
-    (input) => {
+    (input, expected) => {
       ce.angularUnit = 'deg';
       const expr = ce.box(input as never);
       const simplified = expr.simplify();
-      expect(simplified.isSame(expr)).toBe(true);
+      // The radian identity is not applied. A constant application may
+      // still fold to its value in degrees (`Argument(i)` is `90`), which
+      // the numeric comparison below accepts.
+      expect(simplified.toString()).not.toBe(expected);
       expect(
         simplified.subs(sample()).N().isEqual(expr.subs(sample()).N())
       ).toBe(true);

@@ -86,7 +86,7 @@ describe('TRIGONOMETRIC DEGREES', () => {
     expect(check('\\tan (90-0.000001)\\degree')).toMatchInlineSnapshot(`
       box       = ["Degrees", ["Tan", ["Subtract", 90, 0.000001]]]
       canonical = ["Degrees", ["Tan", ["Add", 90, -0.000001]]]
-      simplify  = Degrees(tan(89.999999))
+      simplify  = -0.0348229033621455533306
       eval-auto = -0.0348229033621455533306
       eval-mach = -0.03482290336214534
     `));

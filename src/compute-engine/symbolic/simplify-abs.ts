@@ -1,6 +1,5 @@
 import type { Expression, RuleStep } from '../global-types.js';
-import { isFunction, isNumber } from '../boxed-expression/type-guards.js';
-import { hasAssignedVariable } from '../boxed-expression/utils.js';
+import { isFunction } from '../boxed-expression/type-guards.js';
 import { isEligibleRealRewrite } from '../function-properties/index.js';
 
 /**
@@ -80,19 +79,14 @@ function simplifyAbsCore(x: Expression): RuleStep | undefined {
     return { value: op.neg(), because: '|x| -> -x' };
 
   // |z| -> exact modulus when z is a constant complex expression whose
-  // magnitude reduces to a real number: |3+4i| -> 5, |1+i| -> √2, and the
-  // Kahan value |3 - √7 + i√(6√7 - 15)| -> 1. The evaluate() handler
-  // (arithmetic.ts, evaluateAbs) computes the exact √(a²+b²) split and only
-  // succeeds when it genuinely folds, so a non-reducing complex Abs stays
-  // symbolic. Gate on a genuinely-constant operand (no unknowns AND no assigned
-  // value) so this never touches a symbolic |x| nor value-substitutes: |w| with
-  // `w := 5` must stay |w|, not fold to 5. `hasAssignedVariable` still lets a
-  // true constant modulus (|3+4i| -> 5) fold.
-  if (op.unknowns.length === 0 && !hasAssignedVariable(op)) {
-    const evaluated = x.evaluate();
-    if (isNumber(evaluated) && !evaluated.isComplex && !evaluated.isSame(x))
-      return { value: evaluated, because: '|z| -> exact modulus' };
-  }
+  // magnitude reduces to a real number (|3+4i| -> 5, |1+i| -> √2, the Kahan
+  // value |3 - √7 + i√(6√7 - 15)| -> 1) is the constant folding of
+  // `simplify()` itself (`foldedConstant()` in `boxed-expression/simplify.ts`),
+  // which runs on this node when no rule rewrites it: the evaluate() handler
+  // (arithmetic.ts, evaluateAbs) computes the exact √(a²+b²) split and gives
+  // a number only when it genuinely folds. The fold is value-blind (|w| with
+  // `w := 5` stays |w|) and keeps an `Annotated` operand, which an
+  // evaluation here dropped.
 
   const opOperator = op.operator;
 

@@ -1312,6 +1312,11 @@ export type SimplifyOptions = {
   /**
    * The set of rules to apply. If `null`, use no rules. If not provided,
    * use the default simplification rules.
+   *
+   * The rules control the symbolic rewrites only. A constant subexpression
+   * (pure, with no unknowns and no assigned variable) whose evaluation is a
+   * number is folded whatever this option says, `null` included: `3! + x`
+   * simplifies to `6 + x` with no rules.
    */
   rules?: null | Rule | ReadonlyArray<BoxedRule | Rule> | BoxedRuleSet;
 

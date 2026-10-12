@@ -681,8 +681,8 @@ function explanationFromRuleSteps(
       s.substeps.length > 0
     ) {
       for (const sub of s.substeps) emit(sub);
-      // Residue not captured in substeps (e.g. a numeric fold via
-      // `evaluateNumericSubexpressions`): close the gap to the aggregate value
+      // Residue not captured in substeps (e.g. a constant fold via
+      // `foldConstants()` in `simplify.ts`): close the gap to the aggregate value
       // with a generic step so no work is silently dropped.
       if (!s.value.isSame(prev)) {
         const { id, description } = labelFor('simplify-terms');

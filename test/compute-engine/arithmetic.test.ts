@@ -881,13 +881,13 @@ describe('Min/Max', () => {
       simplify  = 2.5
     `));
   expect(checkJson(['Min', 2.5, 1.1])).toMatchInlineSnapshot(`
-      box       = ["Min", 2.5, 1.1]
-      eval-auto = 1.1
-    `);
+    box       = ["Min", 2.5, 1.1]
+    simplify  = 1.1
+  `);
   expect(checkJson(['Min', 2.5, -1.1, 18.4])).toMatchInlineSnapshot(`
-      box       = ["Min", 2.5, -1.1, 18.4]
-      eval-auto = -1.1
-    `);
+    box       = ["Min", 2.5, -1.1, 18.4]
+    simplify  = -1.1
+  `);
   expect(checkJson(['Min', 2.5, -1.1, 'NaN', 18.4])).toMatchInlineSnapshot(`
     box       = ["Min", 2.5, -1.1, "NaN", 18.4]
     simplify  = NaN
@@ -2046,7 +2046,7 @@ describe('PRODUCT', () => {
   it('should simplify product with index shift (n+1)', () => {
     expect(
       ce.parse('\\prod_{n=1}^{b}(n+1)').simplify().toString()
-    ).toMatchInlineSnapshot(`(b + 1)! / 1!`);
+    ).toMatchInlineSnapshot(`(b + 1)!`);
   });
 
   it('should evaluate product with index shift (n+1)', () => {
@@ -2059,7 +2059,7 @@ describe('PRODUCT', () => {
   it('should simplify product with larger index shift (n+3)', () => {
     expect(
       ce.parse('\\prod_{n=1}^{b}(n+3)').simplify().toString()
-    ).toMatchInlineSnapshot(`(b + 3)! / 3!`);
+    ).toMatchInlineSnapshot(`1/6 * (b + 3)!`);
   });
 
   it('should evaluate product with larger index shift (n+3)', () => {
@@ -2092,7 +2092,7 @@ describe('PRODUCT', () => {
     // 1 * 3 * 5 = 15
     expect(
       ce.parse('\\prod_{n=1}^{3}(2n-1)').simplify().toString()
-    ).toMatchInlineSnapshot(`Factorial2(5)`);
+    ).toMatchInlineSnapshot(`15`);
   });
 
   it('should simplify even double factorial prod(2n)', () => {

@@ -105,7 +105,7 @@ describe('NUMERIC MODE', () => {
     expect(check('e^{i\\pi}')).toMatchInlineSnapshot(`
       box       = ["Power", "e", ["InvisibleOperator", "i", "Pi"]]
       canonical = ["Exp", ["Multiply", ["Complex", 0, 1], "Pi"]]
-      eval-auto = -1
+      simplify  = -1
     `));
 });
 

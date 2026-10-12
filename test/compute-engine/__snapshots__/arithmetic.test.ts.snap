@@ -34,7 +34,7 @@ canonical = [
   ["Multiply", 2, ["Sqrt", 5]],
   "Pi"
 ]
-simplify  = 16.6591489420125664058 + pi
+simplify  = 19.8007415956023596443
 eval-auto = 19.8007415956023596443
 eval-mach = 19.800741595602357
 `;
@@ -178,7 +178,7 @@ box       = [
   "Pi"
 ]
 canonical = ["Add", ["Rational", 535, 63], 1.1, ["Sqrt", 2], "Pi"]
-simplify  = 11.0062770544365871123 + pi
+simplify  = 14.1478697080263803508
 eval-auto = 14.1478697080263803508
 eval-mach = 14.14786970802638
 `;
@@ -217,6 +217,7 @@ N-mach    = 0.7555613467006966
 
 exports[`EXACT EVALUATION Cos: Inexact Fractional part 1`] = `
 box       = ["Cos", 5.1]
+simplify  = 0.377977742712980563321
 eval-auto = 0.377977742712980563321
 eval-mach = 0.37797774271298024
 `;
@@ -322,6 +323,7 @@ N-mach    = 2.718281828459045
 
 exports[`EXP Exp 1.1 1`] = `
 box       = ["Exp", 1.1]
+simplify  = 3.00416602394643311206
 eval-auto = 3.00416602394643311206
 eval-mach = 3.0041660239464334
 `;
@@ -759,7 +761,7 @@ box       = [
   "Pi"
 ]
 canonical = ["Multiply", 1.1, ["Rational", 50, 9], ["Sqrt", 2], "Pi"]
-simplify  = 8.64241621450224752045 * pi
+simplify  = 27.1509512887455715095
 eval-auto = 27.1509512887455715095
 eval-mach = 27.15095128874557
 N-mach    = 27.150951288745574
@@ -845,12 +847,12 @@ simplify  = 2.5
 
 exports[`Min/Max Max 2`] = `
 box       = ["Max", 2.5, 1.1]
-eval-auto = 2.5
+simplify  = 2.5
 `;
 
 exports[`Min/Max Max 3`] = `
 box       = ["Max", 2.5, -1.1, 18.4]
-eval-auto = 18.4
+simplify  = 18.4
 `;
 
 exports[`NEGATE -(+Infinity) 1`] = `NegativeInfinity`;
@@ -993,12 +995,12 @@ N-mach    = 0.75
 
 exports[`RATIONAL Rational approximation 1`] = `
 box       = ["Rational", 2.5]
-eval-auto = 5/2
+simplify  = 5/2
 `;
 
 exports[`RATIONAL Rational approximation 2`] = `
 box       = ["Rational", "Pi"]
-eval-auto = 80143857/25510582
+simplify  = 80143857/25510582
 `;
 
 exports[`RATIONAL Rational with non-integer arguments is rejected 1`] = `

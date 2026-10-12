@@ -344,7 +344,7 @@ describe('⌈e⌉ = ⌊π⌋', () =>
     expect(check('⌈e⌉ = ⌊π⌋')).toMatchInlineSnapshot(`
       box       = ["Equal", ["Ceil", "e"], ["Floor", "Pi"]]
       canonical = ["Equal", ["Ceil", "ExponentialE"], ["Floor", "Pi"]]
-      eval-auto = "True"
+      simplify  = "True"
     `)));
 
 //  Ramanujan factorial approximation
