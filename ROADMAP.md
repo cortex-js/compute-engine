@@ -109,40 +109,6 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
-### `simplify()` with no rules can return a non-canonical product (OPEN, small — found 2026-10-12 by the review of issue #306)
-
-`ce.parse('2\cdot 3\cdot x + \ln(e)\cdot y').simplify({ rules: null })`
-returns `6x + y * 1`, whose JSON is
-`["Add", ["Multiply", 6, "x"], ["Multiply", "y", 1]]` and whose `isCanonical`
-is `true`. The operand folding of `evaluateNumericSubexpressions`
-(`boxed-expression/simplify.ts`) folds `ln(e)` to `1` and rebuilds the product
-with `_fn`, which does not canonicalize, so the unit factor stays. The same
-routine folds `3!·7!` to `30240` in a denominator while the numerator `10!` is
-kept (`10!/(3!·7!)` with no rules gives `10!/30240`), because it evaluates a
-constant subtree only when its root is a basic arithmetic operator. Both are
-consequences of the design question in the next entry; a fix that stands alone
-rebuilds with `ce.function` (canonical) instead of `_fn`.
-
-
-### Which constant subexpressions `simplify()` folds does not follow a stated principle (OPEN, design ruling pending — issue #306, reviewed 2026-10-12)
-
-Issue #306 asks that `simplify({ rules: [onlyTheAdditionRule] })` not evaluate
-operands that no rule in the list covers: `(x·x)+(x·x)+ln(e)+ln(e)` gives
-`2x^2 + 2` and the reporter expects `2·x·x + 2·ln(e)`. Today the addition and
-multiplication rules (`symbolic/simplify-rules.ts`) call `.evaluate()` on every
-operand that has no unknowns and no assigned variable, so `3! + sin(π) + ln(e)`
-becomes a number with the addition rule alone, while at top level `3!`,
-`ln(e)` and `Determinant([[1,2],[3,4]])` stay unevaluated under the default
-rules. The guide (`doc/11-guide-simplify.md`, "The method vs. the `Simplify`
-operator") says the method does not run an operator's evaluation. Options
-under review: (A) constant folding is a fixed part of `simplify()` that does
-not depend on the rule list, applied the same way at every depth; (B) folding
-is done by rules only, the exact-constant evaluation of each operator being a
-rule of the default set; (C) keep the current split and document it. The
-like-term collection `x·x + x·x → 2x^2` is done by the `add()` primitive and is
-not under review.
-
-
 ### Asynchronous materialization walks a lazy view synchronously (OPEN, small — found 2026-10-08 by the listing of lazy elements)
 
 `Map(AsyncOnly, [1, 2]).evaluateAsync({ materialization: true })`, with
