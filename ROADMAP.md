@@ -270,6 +270,30 @@ a parameter whose type a string does not inhabit, and for
 does inhabit, the collection lowerings fail closed at compile time and the
 interpreter evaluates them.
 
+### Snapshot finite lazy members of Set literals (OPEN, feature proposal — identified 2026-10-12)
+
+Evaluating a `List` or `Tuple` literal snapshots small, finite lazy collection
+members. A literal `Set` evaluates its members but can retain a lazy `Map`
+inside the set. For example, with `Tick(x)` returning `x + 10` and counting
+calls, evaluating `{Map(Tick, [1, 2])}` currently keeps the map and makes no
+calls. The proposed behavior is `{[11, 12]}`, with two calls during literal
+evaluation. The outer set still has one member; the inner collection is not
+flattened. Boxing or parsing the literal must not invoke the callback.
+
+Decide whether to extend the List/Tuple snapshot contract to Set literals.
+This is a behavior change, not a confirmed defect in the existing contract:
+it can affect equality, duplicate removal, and when callbacks or errors occur.
+If adopted, reuse the bounded snapshot helpers in
+`boxed-expression/listed-element.ts`, preserve the inner collection kind,
+and retain lazy views when they cannot be safely materialized within
+`ce.maxCollectionSize`. Do not consume and discard impure callback results
+while attempting a snapshot. Keep set comprehensions under their existing
+contract.
+
+Cover synchronous and asynchronous evaluation, equality and duplicate removal,
+callback counts and error timing, nested collections, and oversized or infinite
+inputs. The proposal remains separate from the collection snapshot bug fixes.
+
 ### A list literal whose lazy spread has no cheap count can run impure callbacks twice (OPEN, small — found 2026-10-07 by the review of the list-literal snapshot)
 
 `snapshotListJoin` (`library/collections.ts`) lists the elements of a list
