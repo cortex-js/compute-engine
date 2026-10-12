@@ -1870,7 +1870,16 @@ export async function numericFromExactValueAsync(
   if (!isNumber(value) || value.isFinite === true) return undefined;
   if (expression === undefined || !isTransitivelyPure(expression))
     return undefined;
-  if (bignumPreferred(ce)) return undefined;
+  // Called after the `await` of the fold: the precision in force is the one
+  // of the window of the evaluation, read in a slice.
+  const preferred = runWithEvaluationEffects(
+    ce,
+    options?._effects ?? ce._evaluationEffects ?? ce.effects,
+    () => bignumPreferred(ce),
+    options?._contextStack,
+    options?._precisionWindow
+  );
+  if (preferred) return undefined;
   const exactValue = await expression.evaluateAsync({
     signal: options?.signal,
     _effects: options?._effects,

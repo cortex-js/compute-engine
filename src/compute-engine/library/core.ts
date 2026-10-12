@@ -10578,26 +10578,50 @@ function evaluateToGoal(
 /**
  * The asynchronous twin of `evaluateToGoal()`: the value at each working
  * precision is awaited (`numericAt`, inside the precision window
- * `windowFor(digits)`), so that a long operand yields and honours the abort
- * signal, and the comparison of the values runs in a synchronous slice
- * inside the same window (`slice`). The comparison itself is `goalStep()`,
- * the same as on the synchronous route.
+ * `windowFor(digits, digits)`), so that a long operand yields and honours
+ * the abort signal, and the comparison of the values runs in a synchronous
+ * slice inside the same window (`slice`). The comparison itself is
+ * `goalStep()`, the same as on the synchronous route. The exact value that
+ * a step can read is awaited too (`exactAt`), before the step, when the
+ * value shows that the step will read it (`goalStepNeedsExact()`).
+ *
+ * The operand is first resolved (`resolve`): its asynchronous-only
+ * applications are evaluated, inside the window of the first working
+ * precision, because the synchronous parts of the run cannot run them.
  */
 async function evaluateToGoalAsync(
   x: Expression,
   goal: NumericGoal,
   request: Expression,
-  numericAt: (window: PrecisionWindow | undefined) => Promise<Expression>,
+  resolve: (window: PrecisionWindow) => Promise<Expression>,
+  numericAt: (
+    source: Expression,
+    window: PrecisionWindow | undefined
+  ) => Promise<Expression>,
+  exactAt: (source: Expression, window: PrecisionWindow) => Promise<Expression>,
   slice: <T>(fn: () => T, window?: PrecisionWindow) => T,
   windowFor: (requested: number, working: number) => PrecisionWindow
 ): Promise<Expression | undefined> {
   const ce = x.engine;
-  const { run, first } = slice(() => startGoalRun(x, goal, request));
+  // The first working precision depends on the goal and the precision in
+  // force only (`startGoalRun`); it gives the window of the resolution.
+  const { first } = slice(() => startGoalRun(x, goal, request));
+  const source = await resolve(windowFor(first, first));
+  const { run } = slice(() => startGoalRun(source, goal, request));
+  let exactValue: Expression | undefined = undefined;
   let digits = first;
   while (true) {
     const working = digits;
     const window = windowFor(working, working);
-    const value = await numericAt(window);
+    const value = await numericAt(source, window);
+    if (
+      exactValue === undefined &&
+      slice(() => goalStepNeedsExact(run, value), window)
+    ) {
+      exactValue = await exactAt(source, window);
+      const awaited = exactValue;
+      run.exact = () => awaited;
+    }
     const result = slice(() => goalStep(run, value, working), window);
     if (result === null) return undefined;
     if (result !== undefined)
@@ -10626,7 +10650,10 @@ type GoalRun = {
   previous: Expression | undefined;
   /** The number of successive values that are the rounding noise of `0`. */
   zeroNoise: number;
-  exact: () => Expression;
+  /** The exact value of `x`, computed once, on demand. On the synchronous
+   * route a synchronous evaluation; on the asynchronous route the value
+   * awaited before the step that needs it (`goalStepNeedsExact()`). */
+  exact: () => Expression | undefined;
 };
 
 /** The state of a new run, and its first working precision. */
@@ -10672,6 +10699,33 @@ function startGoalRun(
 function nextGoalDigits(digits: number): number | undefined {
   if (digits >= GOAL_MAX_PRECISION) return undefined;
   return Math.min(GOAL_MAX_PRECISION, 2 * digits);
+}
+
+/**
+ * Whether `goalStep()` will read the exact value of the operand for `value`:
+ * when a float of `value` is exactly `0` (`hasInexactZero()`), or when the
+ * value agrees with the previous one (`isPrecisionIndependent()`). The
+ * asynchronous route awaits the exact value before such a step, so that a
+ * long exact evaluation yields and honours the abort signal instead of
+ * running synchronously inside the step.
+ */
+function goalStepNeedsExact(run: GoalRun, value: Expression): boolean {
+  if (isExactValue(value) || !run.pure) return false;
+  if (containsInexactZero(value)) return true;
+  return (
+    run.previous !== undefined && valuesAgree(run.previous, value, run.goal)
+  );
+}
+
+/** True when a float of `value` is exactly `0` (the shape `hasInexactZero()`
+ * reads, without the exact value). */
+function containsInexactZero(value: Expression): boolean {
+  if (isNumber(value)) return !value.isExact && isZeroNumber(value);
+  return (
+    isFunction(value) &&
+    !isRoundingBoundary(value) &&
+    value.ops.some(containsInexactZero)
+  );
 }
 
 /**
@@ -11260,7 +11314,8 @@ function evaluateNResolved(
         p,
         global,
         source.N(),
-        syncReferenceValue(ce, source, global, enclosingRequest)
+        syncReferenceValue(ce, source, global, enclosingRequest),
+        once(() => source.evaluate())
       )
     );
     // A float with no more digits than the precision of the engine is
@@ -11297,7 +11352,10 @@ function evaluateNResolved(
  * `referenceValue` gives the value at the precision of the engine, computed
  * once, or `undefined` (see `syncReferenceValue()` for when it is needed and
  * how the synchronous route computes it; the asynchronous route computes it
- * before this call, as an awaited evaluation).
+ * before this call, as an awaited evaluation). `exactValue` gives the exact
+ * value of `source`, computed once, read only when a reference agreed with
+ * the value (`showComputedDigits()`): a synchronous evaluation on the
+ * synchronous route, an awaited one on the asynchronous route.
  */
 function roundWindowValue(
   ce: ComputeEngine,
@@ -11305,7 +11363,8 @@ function roundWindowValue(
   p: number,
   global: number,
   value: Expression,
-  referenceValue: () => Expression | undefined
+  referenceValue: () => Expression | undefined,
+  exactValue: () => Expression | undefined
 ): Expression {
   const rounded = inexactResult(
     ce,
@@ -11319,13 +11378,7 @@ function roundWindowValue(
     shown <= MACHINE_FLOAT_DIGITS || readsFixedFloat()
       ? referenceValue()
       : undefined;
-  return showComputedDigits(
-    rounded,
-    p,
-    global,
-    reference,
-    once(() => source.evaluate())
-  );
+  return showComputedDigits(rounded, p, global, reference, exactValue);
 }
 
 /**
@@ -11455,23 +11508,12 @@ async function evaluateNAsync(
       ? { kind: 'plain' }
       : resolveNRequest(ce, await ops[1].canonical.evaluateAsync(opts));
   if (request.kind === 'invalid') return undefined;
-  // The operand, with its asynchronous-only applications evaluated: the
-  // synchronous evaluations below (the exact value of a goal run, the exact
-  // value and the lazy elements of a window) cannot run them.
-  const source = ce._hasAsyncOnlyOperator
-    ? (
-        await awaitAsyncOnlyDescendants([ops[0].canonical], {
-          signal,
-          _effects: effects,
-          _contextStack,
-          _precisionWindow: enclosing,
-        })
-      )[0]
-    : ops[0].canonical;
-  // The numeric value of the operand, computed inside `window`. It can run
+  const raw = ops[0].canonical;
+  // The numeric value of `source`, computed inside `window`. It can run
   // after an `await`: a symbol's `N()` reads its value through the current
   // scope, so it runs as a slice.
   const numericAt = (
+    source: Expression,
     window: PrecisionWindow | undefined
   ): Promise<Expression> =>
     isFunction(source)
@@ -11481,14 +11523,46 @@ async function evaluateNAsync(
           _precisionWindow: window,
         })
       : Promise.resolve(slice(() => source.N(), window));
+  // The exact value of `source`, computed inside `window` (the synchronous
+  // route evaluates it inside its window too).
+  const exactAt = (
+    source: Expression,
+    window: PrecisionWindow
+  ): Promise<Expression> =>
+    source.evaluateAsync({
+      signal,
+      _effects: effects,
+      _contextStack,
+      _precisionWindow: window,
+    });
+  // The operand with its asynchronous-only applications evaluated, inside
+  // `window`: the synchronous parts of a window form (the rounding, the
+  // lazy elements of `inexactResult()`) and of a goal run cannot run them.
+  // Only those forms resolve the operand: the plain form and a request
+  // within the precision in force evaluate the operand whole, in order, so
+  // an asynchronous-only application is not run ahead of a synchronous
+  // sibling that has an effect.
+  const resolve = async (window: PrecisionWindow): Promise<Expression> =>
+    ce._hasAsyncOnlyOperator
+      ? (
+          await awaitAsyncOnlyDescendants([raw], {
+            signal,
+            _effects: effects,
+            _contextStack,
+            _precisionWindow: window,
+          })
+        )[0]
+      : raw;
   if (request.kind === 'plain')
-    return inexactResult(ce, await numericAt(enclosing));
+    return inexactResult(ce, await numericAt(raw, enclosing));
   if (request.kind === 'goal')
     return evaluateToGoalAsync(
-      source,
+      raw,
       request.goal,
       request.request,
+      resolve,
       numericAt,
+      exactAt,
       slice,
       windowFor
     );
@@ -11496,12 +11570,12 @@ async function evaluateNAsync(
   const p = request.p;
   const working = p + guardDigits(p);
   const window = windowFor(p, working);
-  const value = await numericAt(window);
   if (working <= global) {
     // The working precision in force has the guard digits: the value is
     // rounded to `p` digits.
+    const value = await numericAt(raw, window);
     return slice(
-      () => inexactResult(ce, roundToSignificantDigits(value, p), p, source),
+      () => inexactResult(ce, roundToSignificantDigits(value, p), p, raw),
       window
     );
   }
@@ -11510,12 +11584,35 @@ async function evaluateNAsync(
   // decides the kind of float (`followEnginePrecision()`), outside the
   // window, as in `evaluateNResolved()`. The reference value, when the
   // rounding needs one, is computed as an awaited evaluation at the
-  // precision in force, with the enclosing request of digits.
-  const reference = asyncWindowNeedsReference(source, global)
-    ? await numericAt(enclosing)
+  // precision in force, with the enclosing request of digits, and so is
+  // the exact value that the rounding reads when a reference agreed with
+  // the value. Whether they are needed is read in a slice: the check
+  // resolves the names of the operand through the context stack. It reads
+  // the operand AS WRITTEN: in the resolved operand, the value of an
+  // asynchronous-only application stands as a float literal, which the
+  // check would take for a fixed float of the source, where it is a float
+  // the window computed, shown with the requested digits.
+  const source = await resolve(window);
+  const value = await numericAt(source, window);
+  const needsReference = slice(
+    () => asyncWindowNeedsReference(raw, global),
+    window
+  );
+  const reference = needsReference
+    ? await numericAt(source, enclosing)
     : undefined;
+  const exactValue = needsReference ? await exactAt(source, window) : undefined;
   const result = slice(
-    () => roundWindowValue(ce, source, p, global, value, () => reference),
+    () =>
+      roundWindowValue(
+        ce,
+        source,
+        p,
+        global,
+        value,
+        () => reference,
+        () => exactValue
+      ),
     window
   );
   return slice(() => followEnginePrecision(ce, result));

@@ -201,8 +201,11 @@ describe('windows of different precisions interleave on one engine', () => {
     const ce = new ComputeEngine();
     const release = gated(ce);
     const seen: number[] = [];
+    // Impure, so that `Probe(1)` is never folded at canonicalization (a
+    // pure application over a literal is), where it would see no request.
     ce.declare('Probe', {
       signature: '(number) -> number',
+      pure: false,
       evaluate: ([x], { precision }) => {
         seen.push(precision ?? -1);
         return x;
@@ -324,5 +327,115 @@ describe('the asynchronous windows agree with the synchronous route in the cases
         await ce.box(['N', ['Add', ['AsyncOnly', 2], 'Pi'], 30]).evaluateAsync()
       ).toString()
     ).toBe('10.1415926535897932384626433833');
+  });
+});
+
+describe('the asynchronous windows agree with the synchronous route: second review round', () => {
+  const ce = new ComputeEngine();
+  const same = async (mj: any) => {
+    const sync = ce.box(mj).evaluate().toString();
+    const async = (await ce.box(mj).evaluateAsync()).toString();
+    expect(async).toBe(sync);
+    return async;
+  };
+
+  test('a fixed float local to a Block is seen by the reference decision', async () => {
+    // The decision whether the rounding needs a reference value resolves
+    // the names of the operand through the context stack of the evaluation,
+    // so it runs in a slice. A fixed float shows the precision of the engine
+    // on both routes.
+    expect(
+      await same([
+        'Block',
+        ['Declare', 'c', 'real'],
+        ['Assign', 'c', { num: '1.234567890123456789012345678901234' }],
+        ['N', ['Add', 'c', 'x'], 30],
+      ])
+    ).toBe('x + 1.23456789012345678901');
+  });
+
+  test('a goal whose values cancel to zero awaits the exact value', async () => {
+    expect(
+      await same([
+        'N',
+        [
+          'Sum',
+          ['Subtract', ['Exp', ['Divide', 'k', ['Power', 10, 100]]], 1],
+          ['Limits', 'k', 1, 50],
+        ],
+        ['List', 10, 'PositiveInfinity'],
+      ])
+    ).toBe('1.275e-97');
+    // The exact value of a long operand is awaited, so the goal still
+    // honours the abort signal when its first values are a float `0`.
+    const ac = new AbortController();
+    setTimeout(() => ac.abort(), 50);
+    await expect(
+      ce
+        .box([
+          'N',
+          [
+            'Sum',
+            ['Subtract', ['Exp', ['Divide', 'k', ['Power', 10, 100]]], 1],
+            ['Limits', 'k', 1, 400000],
+          ],
+          ['List', 10, 'PositiveInfinity'],
+        ])
+        .evaluateAsync({ signal: ac.signal })
+    ).rejects.toMatchObject({ name: 'CancellationError' });
+    expect(ce.precision).toBe(21);
+    expect(BigDecimal.precision).toBe(21);
+  });
+
+  test('the plain form evaluates an asynchronous-only application in order with its siblings', async () => {
+    // Only the window and goal forms resolve the asynchronous-only
+    // applications of the operand ahead of its evaluation; the plain form
+    // and a request within the precision of the engine evaluate the operand
+    // whole, so a synchronous sibling with an effect runs first, as in the
+    // evaluation of the list itself.
+    let counter = 0;
+    ce.declare('Tick', {
+      signature: '() -> number',
+      pure: false,
+      evaluate: () => {
+        counter += 1;
+        return ce.number(counter);
+      },
+    } as never);
+    ce.declare('AsyncRead', {
+      signature: '() -> number',
+      pure: false,
+      evaluateAsync: async () => ce.number(counter),
+    } as never);
+    const list = ['List', ['Tick'], ['AsyncRead']];
+    counter = 0;
+    const reference = (
+      await ce.box(list).evaluateAsync({ numericApproximation: true })
+    ).toString();
+    counter = 0;
+    expect((await ce.box(['N', list]).evaluateAsync()).toString()).toBe(
+      reference
+    );
+    counter = 0;
+    expect((await ce.box(['N', list, 10]).evaluateAsync()).toString()).toBe(
+      reference
+    );
+    expect(reference).toBe('[1,1]');
+  });
+
+  test('an asynchronous-only application of a window computes at the working precision', async () => {
+    const seen: number[] = [];
+    ce.declare('AsyncPi', {
+      signature: '() -> number',
+      evaluateAsync: async () => {
+        seen.push(ce.precision);
+        return ce.box('Pi').N();
+      },
+    } as never);
+    // The applications are resolved inside the window of the call (`p` plus
+    // the guard digits), not at the precision of the engine.
+    await ce.box(['N', ['Add', ['AsyncPi'], 0], 50]).evaluateAsync();
+    expect(seen).toEqual([55]);
+    expect(ce.precision).toBe(21);
   });
 });
