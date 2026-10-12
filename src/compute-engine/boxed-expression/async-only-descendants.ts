@@ -1,6 +1,6 @@
 import type { Expression, EvaluateOptions } from '../global-types.js';
-import { isFunction } from './type-guards.js';
-import { isOperatorDef } from './definition-guards.js';
+import { isDictionary, isFunction, isSymbol } from './type-guards.js';
+import { isOperatorDef, isValueDef } from './definition-guards.js';
 
 /**
  * Await the ASYNCHRONOUS-ONLY descendants of a lazy operator's held operands
@@ -84,7 +84,9 @@ async function awaitAsyncOnlyIn(
   if (ops === undefined) return x;
   // A value-safe rebuild: the values stand where the applications stood, as
   // they would after the handler evaluated the operand itself.
-  return x.engine.function(x.operator, ops);
+  return x.engine.withEvaluationContext(options, () =>
+    x.engine.function(x.operator, ops)
+  );
 }
 
 /**
@@ -98,9 +100,12 @@ async function awaitAsyncOnlyIn(
  * `Product`, `Block`) ask this before taking their asynchronous per-term
  * route, so the synchronous fold stays the common path.
  */
-export function hasAsyncOnlyApplication(x: Expression): boolean {
+export function hasAsyncOnlyApplication(
+  x: Expression,
+  includeSymbolCallbacks = false
+): boolean {
   if (!x.engine._hasAsyncOnlyOperator) return false;
-  return containsAsyncOnly(x);
+  return containsAsyncOnly(x, false, includeSymbolCallbacks);
 }
 
 /**
@@ -108,23 +113,51 @@ export function hasAsyncOnlyApplication(x: Expression): boolean {
  * not bound, so its applications carry no operator definition: the
  * definition is then looked up by name in the current scope.
  */
-function containsAsyncOnly(x: Expression, held = false): boolean {
-  if (!isFunction(x)) return false;
-  let def = x.operatorDefinition;
-  if (def === undefined && held) {
-    const binding = x.engine.lookupDefinition(x.operator);
-    if (isOperatorDef(binding)) def = binding.operator;
-  }
-  if (def !== undefined) {
-    if (def.evaluateAsync !== undefined && def.evaluate === undefined)
+function containsAsyncOnly(
+  x: Expression,
+  held = false,
+  includeSymbolCallbacks = false
+): boolean {
+  // A released quote can reach the same raw node as an ordinary operand,
+  // so keep those two resolution contexts separate. Shared nodes and
+  // recursive helper definitions are each examined once per context.
+  const seen = [new Set<Expression>(), new Set<Expression>()];
+  const visit = (e: Expression, inHeld: boolean): boolean => {
+    const visited = seen[inHeld ? 1 : 0];
+    if (visited.has(e)) return false;
+    visited.add(e);
+    if (isDictionary(e)) return e.values.some((v) => visit(v, inHeld));
+    if (!isFunction(e) && !isSymbol(e)) return false;
+    const name = isSymbol(e) ? e.symbol : e.operator;
+    const binding =
+      e.baseDefinition === undefined &&
+      (inHeld || (includeSymbolCallbacks && isSymbol(e)))
+        ? e.engine.lookupDefinition(name)
+        : undefined;
+    const def =
+      e.operatorDefinition ??
+      (isOperatorDef(binding) ? binding.operator : undefined);
+    if (def !== undefined) {
+      if (
+        (isFunction(e) || includeSymbolCallbacks) &&
+        def.evaluateAsync !== undefined &&
+        def.evaluate === undefined
+      )
+        return true;
+      if (def.holdClass === 'quote') return false;
+    }
+    // A helper application can hide the only asynchronous application in
+    // its body. Follow callable values and operator literals transitively.
+    const valueDef =
+      e.valueDefinition ?? (isValueDef(binding) ? binding.value : undefined);
+    const body = def?._lambdaLiteral ?? def?.lambda?.body;
+    if (body !== undefined && visit(body, false)) return true;
+    if (valueDef?.value !== undefined && visit(valueDef.value, false))
       return true;
-    if (def.holdClass === 'quote') return false;
-  }
-  // `ReleaseHold(Hold(y))` evaluates `y`, so an asynchronous-only
-  // application in `y` must be found. Else a `Sum` with the term
-  // `ReleaseHold(Hold(f(k)))` takes its synchronous fold, which cannot run
-  // `f`, and keeps `f(1) + f(2) + …` unevaluated.
-  if (x.operator === 'ReleaseHold' && isFunction(x.op1, 'Hold'))
-    return containsAsyncOnly(x.op1.op1, true);
-  return x.ops.some((op) => containsAsyncOnly(op, held));
+    if (!isFunction(e) || e._numericStore !== undefined) return false;
+    if (e.operator === 'ReleaseHold' && isFunction(e.op1, 'Hold'))
+      return visit(e.op1.op1, true);
+    return e.ops.some((op) => visit(op, inHeld));
+  };
+  return visit(x, held);
 }

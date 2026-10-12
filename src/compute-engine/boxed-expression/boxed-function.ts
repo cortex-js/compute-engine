@@ -1,4 +1,9 @@
 import { isScratchBinding } from '../scratch-scopes.js';
+import {
+  ambientChainParent,
+  registerScopeActivation,
+  scopeActivationTemplate,
+} from './ambient-chain.js';
 import type { PrecisionWindow } from '../types-kernel-evaluation.js';
 import { callResultType } from './call-result-type.js';
 import { isPolymorphicType } from '../../common/type/instantiate.js';
@@ -823,6 +828,9 @@ export class BoxedFunction
    * promise to a caller nested inside the very computation it is waiting for
    * would deadlock; no such route exists. */
   private _lazyValuePending: Promise<Expression> | undefined = undefined;
+  private _lazyValuePendingOptions: Partial<EvaluateOptions> | undefined;
+  private _lazyValuePendingGeneration: number | undefined;
+  private _lazyValuePendingEpoch: number | undefined;
 
   /** Memo for the nullary collection facets (`count`, `isEmptyCollection`,
    * `isFiniteCollection`) — see `_memoizedFacet()`. One lazily-allocated slot
@@ -3348,7 +3356,9 @@ export class BoxedFunction
     if (
       options?._effects === undefined ||
       options._contextStack === undefined ||
-      options._precisionWindow === undefined
+      (options._precisionWindow === undefined &&
+        (this.engine._atTransientPrecision ||
+          this.engine._requestedPrecision !== undefined))
     )
       options = {
         ...options,
@@ -3433,15 +3443,47 @@ export class BoxedFunction
     const hit = this._lazyCollectionMemoHit();
     if (hit !== undefined) return Promise.resolve(hit);
 
-    if (this._lazyValuePending !== undefined) return this._lazyValuePending;
+    if (this._lazyValuePending !== undefined) {
+      const previous = this._lazyValuePendingOptions;
+      if (
+        previous?.signal === options?.signal &&
+        previous?._effects === options?._effects &&
+        previous?._contextStack === options?._contextStack &&
+        previous?._precisionWindow?.working ===
+          options?._precisionWindow?.working &&
+        previous?._precisionWindow?.requested ===
+          options?._precisionWindow?.requested &&
+        this._lazyValuePendingGeneration === this.engine._anyVersion &&
+        this._lazyValuePendingEpoch === this.engine._worldVersion
+      )
+        return this._lazyValuePending;
+      // Each caller owns its cancellation and resolution environment. A
+      // different caller must not join a walk that captured someone else's.
+      return Promise.resolve().then(() =>
+        this.engine.withEvaluationContext(options, () =>
+          this._settledLazyCollectionValueAsync(options)
+        )
+      );
+    }
 
     const pending: Promise<Expression> = Promise.resolve()
-      .then(() => this._settledLazyCollectionValueAsync(options))
+      .then(() =>
+        this.engine.withEvaluationContext(options, () =>
+          this._settledLazyCollectionValueAsync(options)
+        )
+      )
       .finally(() => {
-        if (this._lazyValuePending === pending)
+        if (this._lazyValuePending === pending) {
           this._lazyValuePending = undefined;
+          this._lazyValuePendingOptions = undefined;
+          this._lazyValuePendingGeneration = undefined;
+          this._lazyValuePendingEpoch = undefined;
+        }
       });
     this._lazyValuePending = pending;
+    this._lazyValuePendingOptions = options;
+    this._lazyValuePendingGeneration = this.engine._anyVersion;
+    this._lazyValuePendingEpoch = this.engine._worldVersion;
     return pending;
   }
 
@@ -3481,7 +3523,9 @@ export class BoxedFunction
       return result;
     }
 
-    this._storeLazyCollectionValue(result, generation, options);
+    this.engine.withEvaluationContext(options, () =>
+      this._storeLazyCollectionValue(result, generation, options)
+    );
 
     return result;
   }
@@ -6906,9 +6950,10 @@ export class BoxedFunction
           engine,
           effects,
           () =>
-            engine._pushEvalContext(this._localScope!, undefined, {
-              ambient: true,
-            }),
+            engine._pushEvalContext(
+              asyncScopeActivation(engine, this._localScope!),
+              undefined
+            ),
           contextStack,
           options?._precisionWindow
         );
@@ -9384,6 +9429,56 @@ function applyFunctionLiteralWith(
         cell: ReadonlyArray<Expression>
       ) =>
         refusedLiteralArgumentError(result, cell, expr.operator, 0) ?? result;
+      if (awaitBody) {
+        return (async () => {
+          const inContext = <T>(fn: () => T): T =>
+            expr.engine.withEvaluationContext(options, fn);
+          try {
+            while (true) {
+              const { done, value: zipped } = inContext(() => items.next());
+              if (done) break;
+              const applied = await inContext(() =>
+                zipped.some(
+                  (x, i) =>
+                    isFiniteBroadcastParticipant(x) ||
+                    (isScalarParam?.(i) === true &&
+                      isTupleBroadcastParticipant(x))
+                )
+                  ? expr.engine
+                      ._fn(expr.operator, zipped)
+                      .evaluateAsync(options)
+                  : (scalarConformance(zipped) ??
+                      apply(value, zipped, {
+                        ...options,
+                        awaitStatements: true,
+                        arityFrame,
+                      }))
+              );
+              results.push(inContext(() => appliedOrRefused(applied, zipped)));
+            }
+          } catch (e) {
+            throw withBroadcastThrowContext(
+              e,
+              expr.operator,
+              ops,
+              results.length + 1
+            );
+          }
+          return inContext(() =>
+            expr.engine._fn(
+              'List',
+              annotateBroadcastErrors(
+                expr.operator,
+                listedBroadcastCells(
+                  expr.engine,
+                  results,
+                  options?.numericApproximation
+                )
+              )
+            )
+          );
+        })();
+      }
       try {
         while (true) {
           const { done, value: zipped } = items.next();
@@ -9448,6 +9543,30 @@ function applyFunctionLiteralWith(
       );
     if (cells !== undefined) {
       if (!Array.isArray(cells)) return cells;
+      if (awaitBody) {
+        return (async () => {
+          const results: Expression[] = [];
+          for (const cell of cells)
+            results.push(
+              await expr.engine.withEvaluationContext(options, () =>
+                expr.engine._fn(expr.operator, cell).evaluateAsync(options)
+              )
+            );
+          return expr.engine.withEvaluationContext(options, () =>
+            expr.engine._fn(
+              'Tuple',
+              annotateBroadcastErrors(
+                expr.operator,
+                listedBroadcastCells(
+                  expr.engine,
+                  results,
+                  options?.numericApproximation
+                )
+              )
+            )
+          );
+        })();
+      }
       return expr.engine._fn(
         'Tuple',
         annotateBroadcastErrors(
@@ -9474,15 +9593,73 @@ function applyFunctionLiteralWith(
   const scalarBesideMap = scalarConformance(ops, true);
   if (scalarBesideMap !== undefined) return scalarBesideMap;
 
-  // The declared-`broadcastable<T>` elementwise map (Option A) — the value-def
-  // twin of `_computeValue`'s step 2c. This is the route the
-  // declare-then-assign spelling takes (`ce.declare('f',
-  // '(broadcastable<value>) -> unknown')` then `ce.assign('f', x ↦ …)`), which
-  // resolves to a VALUE definition rather than an operator definition. Reached
-  // only when the broadcast above declined: `paramsAreScalar` is false for a
-  // `broadcastable<T>` signature by design.
+  const applyWhole = (): Expression | Promise<Expression> => {
+    // The value is a function literal. Apply the arguments to it, threading
+    // the caller's options — `numericApproximation` is honored inside the
+    // function's scope frame (see makeLambda), preserving lexical scoping. A
+    // declined application (a recursive definition re-entered with a symbolic
+    // argument, which is not unrolled) keeps its name over the EVALUATED
+    // operands — `R(3, 0, y)` for `R(3, Sin(0), y)`, the same inert form an
+    // operator-definition-backed literal leaves — rather than becoming an
+    // `Apply` of the literal.
+    const nonconforming = scalarConformance(ops);
+    if (nonconforming !== undefined) return nonconforming;
+    return apply(
+      value,
+      ops,
+      awaitBody
+        ? { ...options, awaitStatements: true, arityFrame }
+        : { ...options, arityFrame },
+      'bubble',
+      expr._withParseScope(() => expr.engine.function(expr.operator, ops))
+    );
+  };
+  const pointPlan = pointListParamSlots(broadcastGateType);
+  const applyPointOrWhole = (): Expression | Promise<Expression> => {
+    if (pointPlan) {
+      const canonicalOps = ops.length === expr.ops.length ? expr.ops : undefined;
+      if (awaitBody)
+        return pointListBroadcastAsync(
+          expr.engine,
+          expr.operator,
+          value,
+          pointPlan,
+          ops,
+          canonicalOps,
+          options
+        ).then(
+          (mapped) =>
+            mapped ?? expr.engine.withEvaluationContext(options, applyWhole)
+        );
+      const mapped = pointListBroadcast(
+        expr.engine,
+        expr.operator,
+        value,
+        pointPlan,
+        ops,
+        canonicalOps,
+        options
+      );
+      if (mapped) return mapped;
+    }
+    return applyWhole();
+  };
   const declaredPlan = broadcastableParamSlots(broadcastGateType);
   if (declaredPlan) {
+    if (awaitBody)
+      return declaredBroadcastAsync(
+        expr.engine,
+        expr.operator,
+        value,
+        declaredPlan,
+        ops,
+        (x) => isFiniteBroadcastParticipant(x),
+        options
+      ).then(
+        (mapped) =>
+          mapped ??
+          expr.engine.withEvaluationContext(options, applyPointOrWhole)
+      );
     const mapped = declaredBroadcast(
       expr.engine,
       expr.operator,
@@ -9494,45 +9671,7 @@ function applyFunctionLiteralWith(
     );
     if (mapped) return mapped;
   }
-
-  // A list of points at a parameter declared as a point maps over the points
-  // (`pointListParamSlots`, user decision 2026-09-25): the value-definition
-  // twin of `_computeValue`'s step 4b-point, and the route the
-  // declare-then-assign spelling takes (`ce.declare('k', '(tuple<real, real>)
-  // -> real')` then `ce.assign('k', P ↦ …)`).
-  const pointPlan = pointListParamSlots(broadcastGateType);
-  if (pointPlan) {
-    const mapped = pointListBroadcast(
-      expr.engine,
-      expr.operator,
-      value,
-      pointPlan,
-      ops,
-      ops.length === expr.ops.length ? expr.ops : undefined,
-      options
-    );
-    if (mapped) return mapped;
-  }
-
-  // The value is a function literal. Apply the arguments to it, threading
-  // the caller's options — `numericApproximation` is honored inside the
-  // function's scope frame (see makeLambda), preserving lexical scoping. A
-  // declined application (a recursive definition re-entered with a symbolic
-  // argument, which is not unrolled) keeps its name over the EVALUATED
-  // operands — `R(3, 0, y)` for `R(3, Sin(0), y)`, the same inert form an
-  // operator-definition-backed literal leaves — rather than becoming an
-  // `Apply` of the literal.
-  const nonconforming = scalarConformance(ops);
-  if (nonconforming !== undefined) return nonconforming;
-  return apply(
-    value,
-    ops,
-    awaitBody
-      ? { ...options, awaitStatements: true, arityFrame }
-      : { ...options, arityFrame },
-    'bubble',
-    expr._withParseScope(() => expr.engine.function(expr.operator, ops))
-  );
+  return applyPointOrWhole();
 }
 
 /**
@@ -11909,4 +12048,35 @@ function capturedPrecisionWindow(
   const requested = engine._requestedPrecision;
   if (working === undefined && requested === undefined) return undefined;
   return { working, requested };
+}
+
+function asyncScopeActivation(ce: ComputeEngine, scope: Scope): Scope {
+  const ambient = ambientChainParent(ce.context?.lexicalScope, scope);
+  let parent = ambient ?? scope.parent;
+  // An ambient descendant can carry intervening locals. Only look for the
+  // parent's activation when the ambient chain cannot be used, such as a
+  // re-entrant evaluation of this same scoped node.
+  if (ambient === undefined) {
+    for (let i = ce._evalContextStack.length - 1; i >= 0; i--) {
+      const active = ce._evalContextStack[i].lexicalScope;
+      if (scopeActivationTemplate(active) === scope.parent) {
+        parent = active;
+        break;
+      }
+    }
+  }
+  const result: Scope = { ...scope, parent, bindings: new Map() };
+  for (const [name, binding] of scope.bindings) {
+    if (isValueDef(binding)) {
+      const value = binding.value as BoxedValueDefinition & {
+        _cloneForActivation(): BoxedValueDefinition;
+      };
+      result.bindings.set(name, {
+        ...binding,
+        value: value._cloneForActivation(),
+      });
+    } else result.bindings.set(name, binding);
+  }
+  registerScopeActivation(result, scope);
+  return result;
 }

@@ -2226,10 +2226,12 @@ function pythonBeyondSafeInteger(x: string): string {
   );
 }
 
-/** The Python test that the operand `_a` or `_b` is a float, which makes
- * `np.mod` compute on floats. */
+/** The Python test that `np.mod` computes on floats. Two integer dtypes
+ * can also promote to a float, such as `int64` combined with `uint64`. */
 const PYTHON_FLOAT_OPERANDS =
-  "np.asarray(_a).dtype.kind == 'f' or np.asarray(_b).dtype.kind == 'f'";
+  "np.asarray(_a).dtype.kind == 'f' or np.asarray(_b).dtype.kind == 'f' or " +
+  'np.result_type(_a if np.isscalar(_a) else np.asarray(_a), ' +
+  "_b if np.isscalar(_b) else np.asarray(_b)).kind == 'f'";
 
 /** The message of the `ValueError` for the operand `x` (a name) of `op` (a
  * Python expression). */

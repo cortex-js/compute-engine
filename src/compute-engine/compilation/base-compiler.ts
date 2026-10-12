@@ -7440,8 +7440,10 @@ export class BaseCompiler {
    * bound for the values that each iteration computes when the operand is
    * the result of the iteration, as in `Mod(Sum(n^n, …), 10^10)`. An
    * operand with an unknown digit count has the largest size that the fold
-   * accepts, `EXACT_FOLD_MAX_DIGITS`, so the estimate does not depend on the
-   * values. Thus `Sum(Mod(n^n, 10^10), n, 1, 1000)` declines (1000
+   * accepts, `EXACT_FOLD_MAX_DIGITS`, only when its syntax and integer ranges
+   * prove that it fits that size (`exactFoldOperandFits`). Otherwise the
+   * fold declines before evaluating it. Thus
+   * `Sum(Mod(n^n, 10^10), n, 1, 1000)` declines (1000
    * iterations of 264 words), and its compiled loop refuses the large
    * operand at run time.
    *
@@ -7458,8 +7460,16 @@ export class BaseCompiler {
     );
     if (!(digits <= EXACT_FOLD_MAX_DIGITS)) return undefined;
     const unknown = unsafe.filter((u) => u.digits === undefined);
+    const callbackRanges =
+      unknown.length === 0
+        ? undefined
+        : BaseCompiler.exactFoldCallbackRanges(expr);
     if (
-      !unknown.every((u) => isSubtype(compilationType(u.operand), 'rational'))
+      !unknown.every(
+        (u) =>
+          isSubtype(compilationType(u.operand), 'rational') &&
+          BaseCompiler.exactFoldOperandFits(u.operand, callbackRanges)
+      )
     )
       return undefined;
     const words = Math.ceil(digits / EXACT_FOLD_DIGITS_PER_WORD);
@@ -7529,27 +7539,304 @@ export class BaseCompiler {
     return allItems(v, (x) => isNumber(x) && x.isExact) ? v.N() : undefined;
   }
 
+  /** Bound both parts of a rational before exact evaluation. A numeric range
+   * bounds an integer's digits, but does not bound a rational's denominator.
+   * Unsupported operations therefore decline rather than evaluate to find
+   * their size. Each shared node is measured once in this binding context. */
+  private static exactFoldOperandFits(
+    expr: Expression,
+    callbackRanges?: ReadonlyMap<object, Type | undefined>
+  ): boolean {
+    type Size = { numerator: number; denominator: number };
+    const memo = new Map<Expression, Size | undefined>();
+    let visits = 0;
+    const digits = (x: number | bigint): number =>
+      typeof x === 'bigint'
+        ? (x < 0n ? -x : x).toString().length
+        : Math.max(1, Math.floor(Math.log10(Math.abs(x))) + 1);
+    const typeOf = (node: Expression): Type =>
+      (isSymbol(node) && node.valueDefinition !== undefined
+        ? callbackRanges?.get(node.valueDefinition)
+        : undefined) ?? compilationType(node);
+    const bound = (node: Expression): Size | undefined => {
+      if (memo.has(node)) return memo.get(node);
+      if (++visits > CONSTANT_FOLD_MAX_VISITS) return undefined;
+      // Install the decline first to stop a cyclic graph.
+      memo.set(node, undefined);
+      const result = measure(node);
+      if (
+        result !== undefined &&
+        result.numerator <= EXACT_FOLD_MAX_DIGITS &&
+        result.denominator <= EXACT_FOLD_MAX_DIGITS
+      ) {
+        memo.set(node, result);
+        return result;
+      }
+      return undefined;
+    };
+    const measure = (node: Expression): Size | undefined => {
+      if (isNumber(node)) {
+        const rational = node.isExact ? asRational(node) : undefined;
+        if (rational === undefined || rational === null) return undefined;
+        return {
+          numerator: digits(rational[0]),
+          denominator:
+            rational[1] === 1 || rational[1] === 1n
+              ? 0
+              : digits(rational[1]),
+        };
+      }
+      const t = typeOf(node);
+      const range = BaseCompiler.numericRangeOf(t);
+      if (
+        isSubtype(t, 'integer') &&
+        range !== undefined &&
+        Number.isFinite(range.lower) &&
+        Number.isFinite(range.upper)
+      )
+        return {
+          numerator:
+            digits(Math.max(Math.abs(range.lower), Math.abs(range.upper))) + 1,
+          denominator: 0,
+        };
+      if (!isFunction(node)) return undefined;
+      const ops = node.ops;
+      const h = node.operator;
+      if (h === 'Negate' || h === 'Abs' || h === 'Typed') return bound(ops[0]);
+      if (h === 'Power' || h === 'Square') {
+        const base = bound(ops[0]);
+        const exponent =
+          h === 'Square'
+            ? { lower: 2, upper: 2 }
+            : BaseCompiler.numericRangeOf(typeOf(ops[1]));
+        if (
+          base === undefined ||
+          exponent === undefined ||
+          (h === 'Power' && !isSubtype(typeOf(ops[1]), 'integer')) ||
+          !Number.isFinite(exponent.lower) ||
+          !Number.isFinite(exponent.upper)
+        )
+          return undefined;
+        const magnitude = Math.max(
+          Math.abs(exponent.lower),
+          Math.abs(exponent.upper)
+        );
+        const numerator = Math.max(1, base.numerator * magnitude);
+        const denominator = base.denominator * magnitude;
+        // Negative exponents can exchange numerator and denominator.
+        return exponent.lower < 0
+          ? {
+              numerator: Math.max(numerator, denominator),
+              denominator: numerator,
+            }
+          : { numerator, denominator };
+      }
+      if (!['Add', 'Subtract', 'Multiply', 'Divide'].includes(h))
+        return undefined;
+      const sizes = ops.map(bound);
+      if (sizes.some((s) => s === undefined) || sizes.length === 0)
+        return undefined;
+      const known = sizes as Size[];
+      if (h === 'Multiply')
+        return {
+          numerator: known.reduce((sum, s) => sum + s.numerator, 0),
+          denominator: known.reduce((sum, s) => sum + s.denominator, 0),
+        };
+      if (h === 'Divide') {
+        if (known.length !== 2) return undefined;
+        return {
+          numerator: known[0].numerator + known[1].denominator,
+          denominator: known[0].denominator + known[1].numerator,
+        };
+      }
+      const denominator = known.reduce((sum, s) => sum + s.denominator, 0);
+      return {
+        numerator:
+          Math.max(
+            ...known.map((s) => s.numerator + denominator - s.denominator)
+          ) + Math.ceil(Math.log10(known.length)) + 1,
+        denominator,
+      };
+    };
+    return bound(expr) !== undefined;
+  }
+
+  /** A literal pipeline callback receives the elements of its source. Keep
+   * that range as local evidence, keyed by the parameter binding, rather
+   * than changing the function's declared type. Any use with an unknown
+   * source, a parameter write, or an ordinary function-value use removes
+   * the evidence for that binding. */
+  private static exactFoldCallbackRanges(
+    expr: Expression
+  ): ReadonlyMap<object, Type | undefined> {
+    const ranges = new Map<object, Type | undefined>();
+    const visited = [new Set<Expression>(), new Set<Expression>()];
+    let visits = 0;
+    let exhausted = false;
+    const sourceRange = (source: Expression | undefined): Type | undefined => {
+      if (isFunction(source, 'List')) {
+        let lower = Infinity;
+        let upper = -Infinity;
+        const values = source._numericStore ?? source.ops;
+        for (const item of values) {
+          if (++visits > CONSTANT_FOLD_MAX_VISITS) {
+            exhausted = true;
+            return undefined;
+          }
+          const value =
+            typeof item === 'number'
+              ? item
+              : isNumber(item) && item.isInteger === true ? item.re : NaN;
+          if (!Number.isSafeInteger(value)) return undefined;
+          lower = Math.min(lower, value);
+          upper = Math.max(upper, value);
+        }
+        return lower <= upper
+          ? makeNumericRangeType('integer', lower, upper)
+          : undefined;
+      }
+      if (!isFunction(source, 'Range')) return undefined;
+      const [a, b, step] = source.ops;
+      if (
+        !isNumber(a) ||
+        !isNumber(b) ||
+        a.isInteger !== true ||
+        b.isInteger !== true ||
+        !Number.isSafeInteger(a.re) ||
+        !Number.isSafeInteger(b.re) ||
+        (step !== undefined &&
+          (!isNumber(step) ||
+            step.isInteger !== true ||
+            !Number.isSafeInteger(step.re) ||
+            step.re === 0))
+      )
+        return undefined;
+      return makeNumericRangeType(
+        'integer',
+        Math.min(a.re, b.re),
+        Math.max(a.re, b.re)
+      );
+    };
+    const record = (
+      literal: Expression & FunctionInterface,
+      sources: ReadonlyArray<Expression>
+    ): void => {
+      const writable = !BaseCompiler.parametersCanBeTyped(literal);
+      literal.ops.slice(1).forEach((p, i) => {
+        const symbol = isFunction(p, 'Typed') ? p.op1 : p;
+        const binding = isSymbol(symbol) ? symbol.valueDefinition : undefined;
+        if (binding === undefined) return;
+        const type = writable ? undefined : sourceRange(sources[i]);
+        if (!ranges.has(binding)) ranges.set(binding, type);
+        else {
+          const before = ranges.get(binding);
+          ranges.set(
+            binding,
+            before === undefined || type === undefined
+              ? undefined
+              : widen(before, type)
+          );
+        }
+      });
+    };
+    const visit = (node: Expression, callback = false): void => {
+      if (!isFunction(node) || node._numericStore !== undefined) return;
+      const seen = visited[callback ? 1 : 0];
+      if (seen.has(node)) return;
+      seen.add(node);
+      if (++visits > CONSTANT_FOLD_MAX_VISITS) {
+        exhausted = true;
+        return;
+      }
+      if (isFunction(node, 'Function') && !callback) record(node, []);
+      const ops = node.ops;
+      if (node.operator === 'Map' || node.operator === 'Filter') {
+        const callbackIndex = node.operator === 'Map' ? 0 : 1;
+        const literal = ops[callbackIndex];
+        if (isFunction(literal, 'Function')) {
+          record(literal, node.operator === 'Map' ? ops.slice(1) : [ops[0]]);
+          ops.forEach((op, i) => visit(op, i === callbackIndex));
+          return;
+        }
+      }
+      for (const op of ops) visit(op);
+    };
+    visit(expr);
+    return exhausted ? new Map() : ranges;
+  }
+
   /**
-   * The number of times the `Sum` and `Product` operators of `expr` repeat
-   * their body: the product of the iteration counts along the most expensive
-   * chain of nested operators, `0` when there is none, and `Infinity` when a
-   * count is not static. The count of the one-operand form (`Sum(xs)`) is
-   * the size of its collection, `1` when that size is not static, as in
-   * `foldCostEstimate`. For the cost of an exact fold (`exactFoldValue`).
+   * The repetition work of an exact fold: `Sum` and `Product` multiply their
+   * nested body's work, and pipelines add their source work and the number
+   * of callback invocations. A filter's input bounds its work even when it
+   * keeps few elements. `Infinity` means there is no static bound.
+   * A collection reducer adds its source work and its upper element count,
+   * using `1` when that size is not static, as in `foldCostEstimate`.
+   * For the cost of an exact fold (`exactFoldValue`).
    */
   private static bigOpIterations(expr: Expression, depth = 0): number {
-    if (!isFunction(expr)) return 0;
+    if (!isFunction(expr) || expr._numericStore !== undefined) return 0;
     if (depth > CONSTANT_FOLD_MAX_DEPTH) return Infinity;
+    const ops = expr.ops;
+    if (
+      (expr.operator === 'Map' || expr.operator === 'Filter') &&
+      ops.length >= 2
+    ) {
+      const [callback, sources] =
+        expr.operator === 'Map'
+          ? [ops[0], ops.slice(1)]
+          : [ops[1], [ops[0]]];
+      let trips: number | undefined;
+      let sourceWork = 0;
+      for (const source of sources) {
+        const size = BaseCompiler.exactFoldCollectionSize(source, depth + 1);
+        if (size !== undefined && (trips === undefined || size < trips))
+          trips = size;
+        sourceWork += BaseCompiler.bigOpIterations(source, depth + 1);
+      }
+      if (trips === undefined) return Infinity;
+      return (
+        sourceWork +
+        trips * Math.max(
+          1,
+          BaseCompiler.bigOpIterations(callback, depth + 1)
+        )
+      );
+    }
     let inner = 0;
-    for (const op of expr.ops)
+    for (const op of ops)
       inner = Math.max(inner, BaseCompiler.bigOpIterations(op, depth + 1));
     if (expr.operator !== 'Sum' && expr.operator !== 'Product') return inner;
-    const trips =
-      expr.ops.length >= 2
-        ? BaseCompiler.bigOpTripCount(expr)
-        : (BaseCompiler.staticCollectionSize(expr.ops[0], depth + 1) ?? 1);
+    if (ops.length === 1)
+      return (
+        inner + (BaseCompiler.exactFoldCollectionSize(ops[0], depth + 1) ?? 1)
+      );
+    const trips = BaseCompiler.bigOpTripCount(expr);
     if (trips === undefined) return Infinity;
     return trips * Math.max(1, inner);
+  }
+
+  /** An upper bound on pipeline output size without reading its count facet.
+   * A filter can keep every input element; nested maps stop at the shortest
+   * source. The actual survivor count could evaluate an expensive callback. */
+  private static exactFoldCollectionSize(
+    expr: Expression,
+    depth: number
+  ): number | undefined {
+    if (depth > CONSTANT_FOLD_MAX_DEPTH || !isFunction(expr)) return undefined;
+    if (expr.operator === 'List' || expr.operator === 'Set') return expr.nops;
+    if (expr.operator === 'Filter')
+      return BaseCompiler.exactFoldCollectionSize(expr.op1, depth + 1);
+    if (expr.operator === 'Map') {
+      let size: number | undefined;
+      for (const source of expr.ops.slice(1)) {
+        const bound = BaseCompiler.exactFoldCollectionSize(source, depth + 1);
+        if (bound !== undefined && (size === undefined || bound < size))
+          size = bound;
+      }
+      return size;
+    }
+    return BaseCompiler.staticCollectionSize(expr, depth);
   }
 
   /**
@@ -28564,13 +28851,19 @@ export class BaseCompiler {
     registry: UserFunctionRegistry,
     visiting: Set<string>
   ): number {
-    let count = 0;
-    const visit = (node: Expression): void => {
-      if (!isFunction(node)) return;
+    // This memo belongs to this walk's binding and recursion context. Add a
+    // cached subtotal at every occurrence, so shared nodes keep their weight.
+    const subtotals = new Map<Expression, number>();
+    const visit = (node: Expression): number => {
+      if (!isFunction(node) || node._numericStore !== undefined) return 0;
+      const cached = subtotals.get(node);
+      if (cached !== undefined) return cached;
       const h = node.operator;
-      if (BaseCompiler.radicalNeedsSignProof(h, node.ops)) count += 1;
+      let count = BaseCompiler.radicalNeedsSignProof(h, node.ops) ? 1 : 0;
       if (!visiting.has(h)) count += calleeCount(h, node.ops);
-      for (const op of node.ops) visit(op);
+      for (const op of node.ops) count += visit(op);
+      subtotals.set(node, count);
+      return count;
     };
     const calleeCount = (
       h: string,
@@ -28637,8 +28930,7 @@ export class BaseCompiler {
     // The body is read as an emitted definition is compiled: the sign facts
     // of the caller (the values of an unrolled `Sum` index, the shapes of
     // its locals) do not apply to it.
-    BaseCompiler.withCallerBindingsHidden(() => visit(body));
-    return count;
+    return BaseCompiler.withCallerBindingsHidden(() => visit(body));
   }
 
   /** A key for the definition of `h` with the parameter types `types`. */
@@ -28685,11 +28977,21 @@ export class BaseCompiler {
     if (params.some((p) => isRestParameter(p) || isDestructuringParameter(p)))
       return false;
     const names = new Set(params.map(functionLiteralParameterName));
-    const writes = (expr: Expression): boolean =>
-      isFunction(expr) &&
-      ((expr.operator === 'Assign' &&
-        expr.op1.symbols.some((name) => names.has(name))) ||
-        expr.ops.some(writes));
+    const visited = new Set<Expression>();
+    const writes = (expr: Expression): boolean => {
+      if (
+        !isFunction(expr) ||
+        expr._numericStore !== undefined ||
+        visited.has(expr)
+      )
+        return false;
+      visited.add(expr);
+      return (
+        (expr.operator === 'Assign' &&
+          expr.op1.symbols.some((name) => names.has(name))) ||
+        expr.ops.some(writes)
+      );
+    };
     return !writes(literal.op1);
   }
 
@@ -35294,6 +35596,10 @@ export class BaseCompiler {
     if (candidate === undefined)
       return BaseCompiler._compileInner(expr, target, prec);
 
+    const inlineCode = BaseCompiler._cseInlineCode.get(top)?.get(candidate);
+    if (inlineCode !== undefined)
+      return prec === 0 ? inlineCode : `(${inlineCode})`;
+
     const state = top.state.get(candidate);
     if (state === 'bound') return top.names.get(candidate)!;
     if (state === 'defining')
@@ -35321,9 +35627,17 @@ export class BaseCompiler {
     // not bound either: a temporary would hide the constant from the fold of
     // every expression that reads it. The candidate stays `'defining'` for
     // the same reason as above, so each later occurrence compiles to the
-    // same constant code.
-    if (target.cseInlineConstant?.(rhs) === true)
-      return prec === 0 ? rhs : BaseCompiler._compileInner(expr, target, prec);
+    // same constant code. Cache that code in this instance: compiling every
+    // occurrence again would expand all paths through a shared graph.
+    if (target.cseInlineConstant?.(rhs) === true) {
+      let inlined = BaseCompiler._cseInlineCode.get(top);
+      if (inlined === undefined) {
+        inlined = new Map();
+        BaseCompiler._cseInlineCode.set(top, inlined);
+      }
+      inlined.set(candidate, rhs);
+      return prec === 0 ? rhs : `(${rhs})`;
+    }
 
     const name = BaseCompiler.cseTempVar(target);
     if (target.cseMaterialize) {
@@ -35336,6 +35650,13 @@ export class BaseCompiler {
     top.names.set(candidate, name);
     return name;
   }
+
+  /** Constant source is local to one region instance, including one unrolled
+   * iteration. Weak keys release the cache when the instance is discarded. */
+  private static _cseInlineCode = new WeakMap<
+    CseRegionInstance,
+    Map<object, string>
+  >();
 
   /**
    * A target-owned fold of a function node's emitted code

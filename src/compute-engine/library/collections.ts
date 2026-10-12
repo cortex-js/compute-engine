@@ -178,6 +178,7 @@ import {
   holdsAsyncOnlyOperator,
   listedElement,
   listedLiteralElements,
+  listingCountUpperBound,
   producesKeyed,
   producesSet,
   type SnapshotBudget,
@@ -16428,11 +16429,11 @@ function foldLiteralListAppend(
  * runs for a snapshot that would be abandoned. The count of a `Filter`
  * walks the filter and calls the predicate, so the walk would call the
  * predicate a second time, and an error of the predicate would escape from
- * the count instead of keeping the view. Such an operand is bounded by the
- * budget during the single walk. This is a known limit: when such an
- * operand makes the snapshot exceed the budget during the walk, the
- * callbacks that the walk ran before it stopped run again when the kept
- * view is read.
+ * the count instead of keeping the view. A pure operand can use the bounded
+ * walk. When any operand is impure, callback-free upper bounds for all
+ * operands must fit before a walk starts. The outer cells are reserved
+ * before nested elements are listed, so a nested listing cannot cause the
+ * snapshot to discard effects from an earlier operand.
  *
  * A `Join` (`join(xs, ys)` in Epsil) is not changed: it is a lazy operator,
  * not a literal.
@@ -16447,6 +16448,7 @@ function snapshotListJoin(
 ): Expression | undefined {
   const budget: SnapshotBudget = { used: 0, max: ce.maxCollectionSize };
   const elements: Expression[] = [];
+  let reserved: number | undefined;
   // The checks of the operands are in the `try` too: the finiteness of an
   // operand can call its callbacks, and a failure of a callback keeps the
   // view.
@@ -16456,10 +16458,14 @@ function snapshotListJoin(
     // added, because the budget is for the whole snapshot: two operands
     // that are each in the budget can be over it together.
     let knownCount = 0;
+    let upperCount: number | undefined = 0;
+    let impure = false;
+    const bounds = new Map<Expression, number | undefined>();
     for (const op of ops) {
       if (!op.isValid || mayBeAbsentCollectionOperand(op)) return undefined;
       if (isAtomicJoinOperand(op) || isProvablyScalarJoinOperand(op)) {
         knownCount += 1;
+        if (upperCount !== undefined) upperCount += 1;
         if (knownCount > budget.max) return undefined;
         continue;
       }
@@ -16468,6 +16474,10 @@ function snapshotListJoin(
       // an `evaluateAsync` handler keeps the view: the walk below is
       // synchronous and would store the applications unevaluated.
       if (holdsAsyncOnlyOperator(op)) return undefined;
+      impure ||= !isTransitivelyPure(op);
+      const bound = listingCountUpperBound(op, bounds);
+      if (upperCount !== undefined)
+        upperCount = bound === undefined ? undefined : upperCount + bound;
       if (!hasConstantTimeCount(op)) continue;
       const count = op.count;
       if (count === undefined) continue;
@@ -16476,10 +16486,21 @@ function snapshotListJoin(
       knownCount += Number(count);
       if (knownCount > budget.max) return undefined;
     }
+    // A later operand must not overflow after an earlier one performed
+    // effects. Pure operands with unknown counts can still use the bounded
+    // walk, but that route does not start impure nested listings.
+    if (impure && (upperCount === undefined || upperCount > budget.max))
+      return undefined;
+    if (upperCount !== undefined && upperCount <= budget.max) {
+      reserved = upperCount;
+      budget.used += reserved;
+    }
     for (const op of ops) {
       if (isAtomicJoinOperand(op) || isProvablyScalarJoinOperand(op)) {
-        if (budget.used >= budget.max) return undefined;
-        budget.used += 1;
+        if (reserved === undefined) {
+          if (budget.used >= budget.max) return undefined;
+          budget.used += 1;
+        }
         elements.push(op);
         continue;
       }
@@ -16490,9 +16511,13 @@ function snapshotListJoin(
       // is. Only the elements that a spread operand enumerates are listed.
       const isListLiteral = isFunction(op, 'List') && op.isCanonical;
       for (const x of op.each()) {
-        if (budget.used >= budget.max) return undefined;
-        budget.used += 1;
-        const element = isListLiteral ? x : listedElement(ce, x, budget);
+        if (reserved === undefined) {
+          if (budget.used >= budget.max) return undefined;
+          budget.used += 1;
+        }
+        const element = isListLiteral
+          ? x
+          : listedElement(ce, x, budget, reserved !== undefined);
         elements.push(
           numericApproximation
             ? element.evaluate({ numericApproximation })

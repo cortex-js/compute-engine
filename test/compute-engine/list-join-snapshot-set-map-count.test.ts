@@ -4,9 +4,11 @@
  * before the walk only when the count is known without a walk
  * (`hasConstantTimeCount`). A set-producing `Map` (a `Map` over a `Set`)
  * counts its DISTINCT results by walking `each()`, which calls the callback
- * on every element, so its count is not read before the walk. What must
- * remain true: the callback runs once per element that the walk reads, also
- * when the snapshot is abandoned at the collection size limit.
+ * on every element, so its count is not read before the walk. Its source
+ * count supplies a callback-free upper bound instead. A fitting snapshot
+ * calls the callback once per source element. An impure snapshot whose
+ * upper bound exceeds the collection size limit stays lazy before any
+ * callback runs, so a later drain does not repeat discarded effects.
  */
 import { ComputeEngine } from '../../src/compute-engine';
 
@@ -32,7 +34,12 @@ function countedSnapshot(
     },
   });
   const value = ce.box(['ListJoin', operand, ['List', 0]]).evaluate();
-  return { calls, value };
+  return {
+    get calls() {
+      return calls;
+    },
+    value,
+  };
 }
 
 describe('SNAPSHOT OF A SPREAD SET-PRODUCING MAP', () => {
@@ -42,12 +49,18 @@ describe('SNAPSHOT OF A SPREAD SET-PRODUCING MAP', () => {
     expect(calls).toBe(10);
   });
 
-  test('past the collection size limit, once per walked element', () => {
-    const { calls, value } = countedSnapshot(5);
-    // The view is kept. The single walk lists five elements, pulls a sixth
-    // from the iterator, and stops at the budget: six calls, not twelve.
+  test('past the collection size limit, callbacks wait for the drain', () => {
+    const snapshot = countedSnapshot(5);
+    const { value } = snapshot;
+    // The source count bounds the set map without calling Tick. The view
+    // is kept before a partial snapshot can consume and discard effects.
     expect(value.operator).toBe('ListJoin');
-    expect(calls).toBe(6);
+    expect(snapshot.calls).toBe(0);
+    const expected = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 0];
+    expect([...value.each()].map((x) => x.re)).toEqual(expected);
+    expect(snapshot.calls).toBe(10);
+    expect([...value.each()].map((x) => x.re)).toEqual(expected);
+    expect(snapshot.calls).toBe(10);
   });
 
   test('a set-producing map that is an ELEMENT of a spread operand', () => {

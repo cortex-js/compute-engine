@@ -2412,7 +2412,7 @@ export function resolveEscapingLambda(
  * `resolveEscapingLambda` does for a bare symbol.
  */
 function bindEscapingLocals(ce: ComputeEngine, expr: Expression): Expression {
-  if (!isFunction(expr)) return expr;
+  if (!isFunction(expr) && !isDictionary(expr)) return expr;
   const scope = ce.context.lexicalScope;
   const names: string[] = [];
   for (const [name, binding] of scope.bindings) {
@@ -2426,12 +2426,16 @@ function bindEscapingLocals(ce: ComputeEngine, expr: Expression): Expression {
     )
       names.push(name);
   }
-  if (names.length === 0 || !expr.has(names)) return expr;
+  if (names.length === 0 || !hasReferencedName(expr, names)) return expr;
 
   // The bindings already replaced on the current branch of the walk: a value
   // that reads its own local (directly or through another local) is left as
   // a symbol at the second visit, so the walk ends.
   const visiting = new Set<BoxedDefinition>();
+  const memo = [
+    new Map<Expression, Expression>(),
+    new Map<Expression, Expression>(),
+  ];
 
   const localValue = (
     s: Expression & { symbol: string }
@@ -2459,6 +2463,21 @@ function bindEscapingLocals(ce: ComputeEngine, expr: Expression): Expression {
 
   const walk = (e: Expression, inLazy: boolean): Expression => {
     if (isSymbol(e)) return inLazy ? (localValue(e) ?? e) : e;
+    if (!isFunction(e) && !isDictionary(e)) return e;
+    const cache = memo[inLazy ? 1 : 0];
+    const hit = cache.get(e);
+    if (hit !== undefined) return hit;
+    if (isDictionary(e)) {
+      let changed = false;
+      const entries = e.entries.map(([key, value]) => {
+        const next = walk(value, inLazy);
+        changed ||= next !== value;
+        return ce._fn('KeyValuePair', [ce.string(key), next]);
+      });
+      const result = changed ? ce.function('Dictionary', entries) : e;
+      cache.set(e, result);
+      return result;
+    }
     if (!isFunction(e)) return e;
     if (e.operator === 'Function')
       return inLazy ? (captureNestedLocals(ce, e) ?? e) : e;
@@ -2469,14 +2488,41 @@ function bindEscapingLocals(ce: ComputeEngine, expr: Expression): Expression {
     const lazy = inLazy || e.isLazyCollection;
     const ops = e.ops;
     const next = ops.map((op) => walk(op, lazy));
-    if (next.every((op, i) => op === ops[i])) return e;
-    return ce.function(e.operator, next, {
-      form: e.isCanonical ? 'canonical' : e.isStructural ? 'structural' : 'raw',
-      scope: e.localScope,
-    });
+    const result = next.every((op, i) => op === ops[i])
+      ? e
+      : ce.function(e.operator, next, {
+          form: e.isCanonical
+            ? 'canonical'
+            : e.isStructural
+              ? 'structural'
+              : 'raw',
+          scope: e.localScope,
+        });
+    cache.set(e, result);
+    return result;
   };
 
   return walk(expr, false);
+}
+
+/** Find a referenced name in a value, including dictionary cells. A
+ * dictionary's `has()` checks its keys, not the names in its values. */
+function hasReferencedName(expr: Expression, names: string | string[]): boolean {
+  const wanted = new Set(typeof names === 'string' ? [names] : names);
+  const seen = new Set<Expression>();
+  const pending = [expr];
+  while (pending.length > 0) {
+    const e = pending.pop()!;
+    if (seen.has(e)) continue;
+    seen.add(e);
+    if (isSymbol(e) && wanted.has(e.symbol)) return true;
+    if (isDictionary(e)) pending.push(...e.values);
+    else if (isFunction(e)) {
+      if (wanted.has(e.operator)) return true;
+      if (e._numericStore === undefined) pending.push(...e.ops);
+    }
+  }
+  return false;
 }
 
 /**
@@ -2724,9 +2770,12 @@ function declaredLocalNames(body: Expression): ReadonlySet<string> {
   const cached = DECLARED_LOCAL_NAMES.get(body);
   if (cached !== undefined) return cached;
   const names = new Set<string>();
+  const seen = new Set<Expression>();
   const visit = (e: Expression): void => {
     if (!isFunction(e) || e.operator === 'Function') return;
     if (e._numericStore !== undefined) return;
+    if (seen.has(e)) return;
+    seen.add(e);
     if (e.operator === 'Declare') {
       for (const name of functionLiteralParameterNames(e.op1)) names.add(name);
     } else if (e.operator === 'DefineFunction') {
@@ -2770,7 +2819,7 @@ function captureClosures(
   // reached under two different captured chains is two different closures.
   memo: Map<Scope, Map<Expression, Expression>> = new Map()
 ): Expression {
-  if (!isFunction(expr)) return expr;
+  if (!isFunction(expr) && !isDictionary(expr)) return expr;
   let byNode = memo.get(closureParent);
   const hit = byNode?.get(expr);
   if (hit !== undefined) return hit;
@@ -2790,6 +2839,15 @@ function captureClosuresUncached(
   closureParent: Scope,
   memo: Map<Scope, Map<Expression, Expression>>
 ): Expression {
+  if (isDictionary(expr)) {
+    let changed = false;
+    const entries = expr.entries.map(([key, value]) => {
+      const next = captureClosures(ce, value, closureParent, memo);
+      changed ||= next !== value;
+      return ce._fn('KeyValuePair', [ce.string(key), next]);
+    });
+    return changed ? ce.function('Dictionary', entries) : expr;
+  }
   if (expr.operator === 'Function' && isFunction(expr)) {
     const innerBlock = expr.op1;
     if (innerBlock && isFunction(innerBlock) && innerBlock.localScope) {
@@ -4513,7 +4571,7 @@ function makeLambda(
       // three fall out of asking the right question: a re-binding lambda
       // declares a DIFFERENT binding, and an `x` that came from the argument's
       // value carries the caller's binding, so neither matches.
-      if (result.has(paramNames)) {
+      if (hasReferencedName(result, paramNames)) {
         // ONE binding per parameter — the literal's own. `hideBodyScopeParams`
         // has removed it from `bodyScope` for the duration of the call, and
         // the call's value lives in a SEPARATE definition in `freshScope`; the
@@ -4523,12 +4581,12 @@ function makeLambda(
         // name-keyed — a raw symbol carries no binding at all.
         const subs: ParameterSub[] = [];
         for (const leaf of leaves) {
-          if (!result.has(leaf.name)) continue;
+          if (!hasReferencedName(result, leaf.name)) continue;
           subs.push([
             staticParameterBinding(leaf.site, leaf.name, bodyScope),
             leaf.name,
             leaf.value,
-            leaf.value.has(leaf.name),
+            hasReferencedName(leaf.value, leaf.name),
           ]);
         }
         if (subs.length > 0) result = bindingKeyedSubs(result, subs);
@@ -4733,7 +4791,13 @@ function singleStatementRequest(
  * not seen: the forwarded request then reaches the recursive body, which
  * costs the exact memo entry of its applications and nothing else.
  */
-function appliesLiteral(expr: Expression, literal: Expression): boolean {
+function appliesLiteral(
+  expr: Expression,
+  literal: Expression,
+  seen = new Set<Expression>()
+): boolean {
+  if (seen.has(expr)) return false;
+  seen.add(expr);
   if (isFunction(expr) || isSymbol(expr)) {
     if (expr.valueDefinition?.value === literal) return true;
     const opDef = expr.operatorDefinition as
@@ -4750,7 +4814,9 @@ function appliesLiteral(expr: Expression, literal: Expression): boolean {
         return true;
     }
   }
-  return isFunction(expr) && expr.ops.some((op) => appliesLiteral(op, literal));
+  if (!isFunction(expr) || expr._numericStore !== undefined) return false;
+  if (expr.operatorDefinition?.holdClass === 'quote') return false;
+  return expr.ops.some((op) => appliesLiteral(op, literal, seen));
 }
 
 /**

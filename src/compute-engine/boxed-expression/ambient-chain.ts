@@ -1,5 +1,18 @@
 import type { Scope } from '../global-types.js';
 
+// Runtime activations have private bindings but denote their template's
+// lexical level. Both synchronous and asynchronous children need this link
+// when their canonical parent is the template rather than the active scope.
+const scopeTemplates = new WeakMap<Scope, Scope>();
+
+export function registerScopeActivation(scope: Scope, template: Scope): void {
+  scopeTemplates.set(scope, template);
+}
+
+export function scopeActivationTemplate(scope: Scope): Scope | undefined {
+  return scopeTemplates.get(scope);
+}
+
 /**
  * Whether `scope` is reached by walking the parent links up from `from`
  * (`from` itself included). A root scope's parent link may be `undefined`
@@ -10,7 +23,8 @@ export function chainContains(
   from: Scope | null | undefined,
   scope: Scope
 ): boolean {
-  for (let s = from; s != null; s = s.parent) if (s === scope) return true;
+  for (let s = from; s != null; s = s.parent)
+    if (s === scope || scopeTemplates.get(s) === scope) return true;
   return false;
 }
 

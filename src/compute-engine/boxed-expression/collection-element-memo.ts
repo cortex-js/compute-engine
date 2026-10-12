@@ -529,14 +529,8 @@ function snapshotDepsUnderChain(
           resolved,
         });
         // Stream 2 — the binding the chain actually resolves the name to.
-        seen.add(resolved.value);
-        deps.push({
-          occurrence,
-          name,
-          valueDef: resolved.value,
-          version: resolved.value._writeVersion,
-          resolved,
-        });
+        if (!seen.has(resolved.value))
+          visitValueDef(occurrence, resolved.value, true);
         return;
       }
       if (!isValueDef(resolved)) {

@@ -306,6 +306,10 @@ export class _BoxedValueDefinition
   // definition keeps the same object shape as every other one.
   _activationOf: BoxedValueDefinition | undefined = undefined;
 
+  // A runtime copy of an ordinary scoped binding. Unlike a parameter
+  // activation, this binding can escape in a lazy collection's result.
+  _scopeActivationOf: BoxedValueDefinition | undefined = undefined;
+
   // True when this binding is a SHIELD: a valueless shadow declared solely to
   // hide an enclosing binding's value (`withValueShield` in `utils.ts`,
   // `simplifyValueBlind` in `simplify.ts`). Read by `evaluateInOwnBindings`'s
@@ -795,6 +799,7 @@ export class _BoxedValueDefinition
       _deadStack: this._deadStack,
       _deadScope: this._deadScope,
       _activationOf: this._activationOf,
+      _scopeActivationOf: this._scopeActivationOf,
       _isShield: this._isShield,
       _isDevolvedShadow: this._isDevolvedShadow,
       // A definition disposed inside a checkpoint window comes back alive on
@@ -808,6 +813,25 @@ export class _BoxedValueDefinition
       collection: this.collection,
       subscriptEvaluate: this.subscriptEvaluate,
     };
+  }
+
+  /** A private runtime binding for an asynchronous activation of a binder.
+   * Copy the definition's state without sharing its subscription handle or
+   * re-inferring its type. The template remains alive for later evaluations. */
+  _cloneForActivation(): _BoxedValueDefinition {
+    const result = new _BoxedValueDefinition(this._engine, this.name, {});
+    result._restoreCheckpointSnapshot(this._checkpointSnapshot());
+    result.disposed = false;
+    result._deadStack = undefined;
+    result._deadScope = undefined;
+    result._scopeActivationOf = this._scopeActivationOf ?? this;
+    if (
+      (this as unknown as { _isBinderVariable?: true })._isBinderVariable === true
+    )
+      (
+        result as _BoxedValueDefinition & { _isBinderVariable?: true }
+      )._isBinderVariable = true;
+    return result;
   }
 
   /** Restore the fields captured by {@link _checkpointSnapshot}, verbatim and
@@ -843,6 +867,9 @@ export class _BoxedValueDefinition
     this._deadStack = s._deadStack as string | undefined;
     this._deadScope = s._deadScope as string | undefined;
     this._activationOf = s._activationOf as BoxedValueDefinition | undefined;
+    this._scopeActivationOf = s._scopeActivationOf as
+      | BoxedValueDefinition
+      | undefined;
     this._isShield = s._isShield as true | undefined;
     this._isDevolvedShadow = s._isDevolvedShadow as true | undefined;
     this.disposed = s.disposed as boolean;

@@ -164,11 +164,13 @@ function rangeIndexTypeOf(
   // Limits(k, 5, 7))`, or the flat `Sum(k, k, 1, 3, k, 5, 7)`) assign the
   // values of both ranges to one symbol, so neither range is its type.
   const bindsIndex = (x: Expression, i: number): boolean =>
-    isFunction(x)
-      ? INDEXING_SET_OPERATORS.has(x.operator) &&
-        isSymbol(x.ops[0]) &&
-        x.ops[0].symbol === index.symbol
-      : flatIndexes.has(i) && isSymbol(x) && x.symbol === index.symbol;
+    isFunction(x, 'Hold') && x.nops === 1
+      ? bindsIndex(x.op1, i)
+      : isFunction(x)
+        ? (x.operator === 'Element' || INDEXING_SET_OPERATORS.has(x.operator)) &&
+          isSymbol(x.ops[0]) &&
+          x.ops[0].symbol === index.symbol
+        : flatIndexes.has(i) && isSymbol(x) && x.symbol === index.symbol;
   if (ops.filter(bindsIndex).length > 1) return type;
   // Only number LITERALS: a symbol bound (`Limits(k, 1, n)` with `n := 10`)
   // can be reassigned after this binding, which would leave the index type
@@ -233,14 +235,13 @@ export function rangeElementIndexType(
   }
   // `rangeIndexTypeOf` reads its bounds in ascending order.
   const [lo, hi] = descending ? [b, a] : [a, b];
-  const clauses = ops.filter(
-    (x) =>
-      isFunction(x, 'Element') &&
-      isSymbol(x.ops[0]) &&
-      x.ops[0].symbol === index.symbol
-  );
-  if (clauses.length > 1) return undefined;
-  const type = rangeIndexTypeOf(index, lo, hi, 'integer', ops, NO_FLAT_INDEXES);
+  const flatIndexes = new Set<number>();
+  for (let i = 1; i < ops.length; i++) {
+    if (!isSymbol(ops[i])) continue;
+    flatIndexes.add(i);
+    i += flatLimitsSpan(ops, i) - 1;
+  }
+  const type = rangeIndexTypeOf(index, lo, hi, 'integer', ops, flatIndexes);
   return type === 'integer' ? undefined : type;
 }
 

@@ -423,19 +423,63 @@ describe('the asynchronous windows agree with the synchronous route: second revi
     expect(reference).toBe('[1,1]');
   });
 
-  test('an asynchronous-only application of a window computes at the working precision', async () => {
-    const seen: number[] = [];
+  test('opaque pure handlers compute in the window and allow reference evaluations', async () => {
+    const syncSeen: number[] = [];
+    const asyncSeen: number[] = [];
+    ce.declare('SyncPi', {
+      signature: '() -> number',
+      evaluate: () => {
+        syncSeen.push(ce.precision);
+        return ce.box('Pi').N();
+      },
+    });
     ce.declare('AsyncPi', {
       signature: '() -> number',
       evaluateAsync: async () => {
-        seen.push(ce.precision);
+        asyncSeen.push(ce.precision);
         return ce.box('Pi').N();
       },
     } as never);
-    // The applications are resolved inside the window of the call (`p` plus
-    // the guard digits), not at the precision of the engine.
-    await ce.box(['N', ['Add', ['AsyncPi'], 0], 50]).evaluateAsync();
-    expect(seen).toEqual([55]);
+    const sync = ce.box(['N', ['Add', ['SyncPi'], 0], 50]).evaluate();
+    const async = await ce
+      .box(['N', ['Add', ['AsyncPi'], 0], 50])
+      .evaluateAsync();
+    expect(async.toString()).toBe(sync.toString());
+    expect(async.toString()).toBe(
+      '3.1415926535897932384626433832795028841971693993751'
+    );
+    expect(syncSeen).toEqual([55, 21]);
+    // An opaque handler can return a stored float instead of computing at
+    // the working precision. Both routes need a base-precision reference
+    // to distinguish those cases. The async route also awaits the exact
+    // value before the rounding slice, where another await is not possible.
+    // A pure handler does not have a single-invocation contract.
+    expect(asyncSeen[0]).toBe(55);
+    expect(asyncSeen).toContain(21);
+    expect(
+      asyncSeen.every((precision) => precision === 55 || precision === 21)
+    ).toBe(true);
+    expect(ce.precision).toBe(21);
+  });
+
+  test('opaque handlers returning a fixed float retain its base display precision', async () => {
+    const fixed = ce.box({
+      num: '1.234567890123456789012345678901234567890123456789',
+    });
+    ce.declare('SyncFixed', {
+      signature: '() -> number',
+      evaluate: () => fixed,
+    });
+    ce.declare('AsyncFixed', {
+      signature: '() -> number',
+      evaluateAsync: async () => fixed,
+    } as never);
+    const sync = ce.box(['N', ['Add', ['SyncFixed'], 0], 50]).evaluate();
+    const async = await ce
+      .box(['N', ['Add', ['AsyncFixed'], 0], 50])
+      .evaluateAsync();
+    expect(async.toString()).toBe(sync.toString());
+    expect(async.toString()).toBe('1.23456789012345678901');
     expect(ce.precision).toBe(21);
   });
 });

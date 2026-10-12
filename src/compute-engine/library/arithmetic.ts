@@ -5240,7 +5240,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           return undefined;
         }
       },
-      evaluateAsync: async ([x], { signal, numericApproximation }) => {
+      evaluateAsync: async ([x], options) => {
+        const { signal, numericApproximation } = options;
         const ce = x.engine;
 
         // If argument is symbolic (not a number literal), keep unevaluated
@@ -5290,15 +5291,22 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             : undefined;
 
         try {
-          const result = ce.number(
-            await runAsync(
-              bigFactorial(BigInt((x.bignumRe ?? x.re).toFixed())),
-              (ce._deadline ?? Infinity) - Date.now(),
-              signal,
-              ce._deadlineFrame
-            )
+          const factorial = await runAsync(
+            bigFactorial(BigInt((x.bignumRe ?? x.re).toFixed())),
+            (ce._deadline ?? Infinity) - Date.now(),
+            signal,
+            ce._deadlineFrame
           );
-          return float ? asFloat(result) : result;
+          return runWithEvaluationEffects(
+            ce,
+            options.effects,
+            () => {
+              const result = ce.number(factorial);
+              return float ? asFloat(result) : result;
+            },
+            options._contextStack,
+            options._precisionWindow
+          );
         } catch (e) {
           if (e instanceof CancellationError) throw e;
           // We can get here if the factorial is too large
@@ -11522,11 +11530,24 @@ function addSumTerm(
       acc.literal = term;
       return acc;
     }
+    // Compensation applies only to finite arithmetic. Subtracting an
+    // infinity from itself while measuring rounding loss would make a
+    // finite partial sum followed by infinity become NaN.
+    if (literal.isFinite !== true || term.isFinite !== true) {
+      acc.literal = literal.add(term);
+      acc.compensation = undefined;
+      return acc;
+    }
     // Compensated summation (see `SumTerms.compensation`): the term is
     // added together with what the last rounding lost.
     const addend =
       acc.compensation === undefined ? term : term.sub(acc.compensation);
     const sum = literal.add(addend);
+    if (addend.isFinite !== true || sum.isFinite !== true) {
+      acc.literal = sum;
+      acc.compensation = undefined;
+      return acc;
+    }
     if (
       !numericApproximation &&
       isNumber(literal) &&

@@ -3,7 +3,7 @@ import type {
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
 import { CancellationError } from '../../common/interruptible.js';
-import { isFunction, isSymbol } from './type-guards.js';
+import { isFunction, isNumber, isSymbol } from './type-guards.js';
 import {
   collectionSourceOperands,
   isRecordShapedType,
@@ -14,7 +14,7 @@ import {
   isKindOpenOperandType,
 } from './broadcast-lift-type.js';
 import { hasAsyncOnlyApplication } from './async-only-descendants.js';
-import { isOperatorDef, isValueDef } from './definition-guards.js';
+import { isTransitivelyPure } from './transitive-purity.js';
 
 //
 // The listing of a finite lazy collection that a VALUE holds as an element:
@@ -59,6 +59,54 @@ export function hasConstantTimeCount(x: Expression): boolean {
   return false;
 }
 
+/** An upper bound on emitted cells that does not enumerate a view or call
+ * its callback. Filters and set maps can shrink their sources. An unknown
+ * bound stays unknown; it must not be obtained by reading a filter's count. */
+export function listingCountUpperBound(
+  x: Expression,
+  memo = new Map<Expression, number | undefined>()
+): number | undefined {
+  if (memo.has(x)) return memo.get(x);
+  // Mark an active node too, so symbols whose values form a cycle stop.
+  memo.set(x, undefined);
+  let count: number | undefined;
+  if (isSymbol(x)) {
+    const value = x.value;
+    if (value !== undefined) count = listingCountUpperBound(value, memo);
+  } else if (isFunction(x, 'Map') && x.nops >= 2) {
+    const bounds = x.ops.slice(1).map((op) => listingCountUpperBound(op, memo));
+    const known = bounds.filter((n): n is number => n !== undefined);
+    if (known.length > 0) count = Math.min(...known);
+  } else if (
+    isFunction(x) &&
+    [
+      'Filter',
+      'Dedup',
+      'Unique',
+      'TakeWhile',
+      'DropWhile',
+      'Drop',
+      'Rest',
+      'Most',
+      'Reverse',
+      'Scan',
+    ].includes(x.operator)
+  ) {
+    count = listingCountUpperBound(x.op1, memo);
+  } else if (isFunction(x, 'Take') && isNumber(x.op2)) {
+    const n = x.op2.re;
+    if (Number.isSafeInteger(n)) {
+      const source = listingCountUpperBound(x.op1, memo);
+      count = Math.min(Math.abs(n), source ?? Infinity);
+    }
+  } else if (hasConstantTimeCount(x)) {
+    const n = x.count;
+    if (n !== undefined) count = Number(n);
+  }
+  memo.set(x, count);
+  return count;
+}
+
 /**
  * An element of a `ListJoin` operand, as the snapshot of the literal holds
  * it: a finite lazy collection is replaced by the list (or the set) of its
@@ -79,7 +127,8 @@ export function hasConstantTimeCount(x: Expression): boolean {
 export function listedElement(
   ce: ComputeEngine,
   x: Expression,
-  budget: SnapshotBudget
+  budget: SnapshotBudget,
+  allowImpure = true
 ): Expression {
   if (!x.isValid || !x.isLazyCollection) return x;
   if (isFunction(x, 'When') || isFunction(x, 'Which') || isFunction(x, 'If'))
@@ -90,18 +139,30 @@ export function listedElement(
   if (holdsAsyncOnlyOperator(x)) return x;
   const elements: Expression[] = [];
   let isSet = false;
+  let reserved: number | undefined;
   try {
     if (!isWalkableFiniteCollection(x)) return x;
     isSet = !x.isIndexedCollection && x.type.matches('set<any>');
     if (!isSet && !x.isIndexedCollection) return x;
-    if (hasConstantTimeCount(x)) {
-      const count = x.count;
-      if (count === undefined || count > budget.max - budget.used) return x;
+    const bound = listingCountUpperBound(x);
+    const pure = isTransitivelyPure(x);
+    const fits = bound !== undefined && bound <= budget.max - budget.used;
+    if (!pure && (!allowImpure || !fits)) return x;
+    if (!fits && bound !== undefined && hasConstantTimeCount(x)) return x;
+    // Reserve the parent's cells before listing children. A child that
+    // uses the remaining budget must not force this walk to discard effects.
+    if (bound !== undefined && fits) {
+      reserved = bound;
+      budget.used += bound;
     }
     for (const y of x.each()) {
-      if (budget.used >= budget.max) return x;
-      budget.used += 1;
-      elements.push(listedElement(ce, y, budget));
+      if (reserved === undefined) {
+        if (budget.used >= budget.max) return x;
+        budget.used += 1;
+      }
+      elements.push(
+        listedElement(ce, y, budget, allowImpure && reserved !== undefined)
+      );
     }
   } catch (e) {
     if (
@@ -110,6 +171,8 @@ export function listedElement(
     )
       throw e;
     return x;
+  } finally {
+    if (reserved !== undefined) budget.used -= reserved - elements.length;
   }
   return isSet ? ce.function('Set', elements) : ce._fn('List', elements);
 }
@@ -139,9 +202,10 @@ export function listedElement(
  * already. An element whose elements would use more than the rest of the
  * budget stays lazy. When its count is cheap (`hasConstantTimeCount`), it
  * is compared with the budget before any walk, so no callback runs.
- * Otherwise (a `Filter`), the walk stops at the budget, and the callbacks
- * that the walk ran run again when the kept view is read, the same limit
- * as in `snapshotListJoin`.
+ * An impure view is listed only when a callback-free upper bound fits. Its
+ * outer cells are reserved before nested elements are listed, so the walk
+ * does not discard effects when a nested element uses the remaining budget.
+ * A pure view with an unknown count uses the bounded walk instead.
  *
  * Under a numeric approximation, a listed element is approximated too, as
  * `List` approximates each of its elements.
@@ -162,7 +226,7 @@ export function listedLiteralElements(
   for (let i = 0; i < elements.length; i++) {
     const x = elements[i];
     let listed = x;
-    if (x.isValid && x.isLazyCollection && !holdsAsyncOnlyOperator(x)) {
+    if (x.isValid && x.isLazyCollection) {
       budget ??= { used: 0, max: ce.maxCollectionSize };
       listed = listedElement(ce, x, budget);
       if (listed !== x && numericApproximation)
@@ -186,47 +250,12 @@ export function listedLiteralElements(
  * callback given by name: a symbol whose operator definition has only an
  * `evaluateAsync` handler, and a symbol that holds a function literal (a
  * user function, or a value that is a `Function`) whose body holds or names
- * such an operator. The walk looks into the function literal of a symbol
- * only once: it does not look into the symbols that this body names in turn.
- * This bounds the walk, also for symbols that refer to each other. An
+ * such an operator. Helper application bodies and stored values are followed
+ * transitively. Shared nodes and recursive helpers are visited once. An
  * operand that an operator quotes (`Hold`) is data and is not examined.
  */
 export function holdsAsyncOnlyOperator(x: Expression): boolean {
-  if (!x.engine._hasAsyncOnlyOperator) return false;
-  return hasAsyncOnlyApplication(x) || namesAsyncOnlyOperator(x, true);
-}
-
-/** Whether `x` names an operator that has only an `evaluateAsync` handler
- * (see `holdsAsyncOnlyOperator`). When `followValues` is true, the function
- * literal that a symbol holds is examined too, with `followValues` false. */
-function namesAsyncOnlyOperator(x: Expression, followValues: boolean): boolean {
-  if (isSymbol(x)) {
-    // The callback of a lazy view can be a symbol that is not bound (the
-    // symbol `AsyncOnly` in `Map(AsyncOnly, xs)` has no definition): its
-    // definition is then looked up by name in the current scope.
-    const binding =
-      x.baseDefinition === undefined
-        ? x.engine.lookupDefinition(x.symbol)
-        : undefined;
-    const def =
-      x.operatorDefinition ??
-      (isOperatorDef(binding) ? binding.operator : undefined);
-    if (def?.evaluateAsync !== undefined && def.evaluate === undefined)
-      return true;
-    if (!followValues) return false;
-    const valueDef =
-      x.valueDefinition ?? (isValueDef(binding) ? binding.value : undefined);
-    const literal = def?._lambdaLiteral ?? valueDef?.value;
-    return (
-      literal !== undefined &&
-      isFunction(literal, 'Function') &&
-      (hasAsyncOnlyApplication(literal) ||
-        namesAsyncOnlyOperator(literal, false))
-    );
-  }
-  if (!isFunction(x)) return false;
-  if (x.operatorDefinition?.holdClass === 'quote') return false;
-  return x.ops.some((op) => namesAsyncOnlyOperator(op, followValues));
+  return hasAsyncOnlyApplication(x, true);
 }
 
 /** Does this node promise a SET?

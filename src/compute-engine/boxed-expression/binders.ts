@@ -3,6 +3,7 @@ import type {
   BoxedDefinition,
   BoxedValueDefinition,
   Expression,
+  EvaluateOptions,
   IComputeEngine as ComputeEngine,
   Scope,
   TaggedValueDefinition,
@@ -93,7 +94,10 @@ export function boundVariableNamesInOperand(
  * tombstone: it is an internal detail of the binder machinery, not part of the
  * definition contract.
  */
-type Activated = { _activationOf?: BoxedValueDefinition };
+type Activated = {
+  _activationOf?: BoxedValueDefinition;
+  _scopeActivationOf?: BoxedValueDefinition;
+};
 
 /**
  * Record that `activation` — the per-call definition a `Function` literal's
@@ -124,7 +128,8 @@ export function markActivation(
  * activation.
  */
 function staticBindingOf(def: BoxedBaseDefinition): BoxedBaseDefinition {
-  return (def as Activated)._activationOf ?? def;
+  const activated = def as Activated;
+  return activated._activationOf ?? activated._scopeActivationOf ?? def;
 }
 
 /**
@@ -762,6 +767,43 @@ export function evaluateInOwnBindings(
   // taken here.
   if (isFunction(value) && value._isLiteralData()) return evaluated();
 
+  const env = ownBindingEnvironment(ce, value);
+  if (env === undefined) return evaluated();
+
+  // A re-pointing is about to happen: the value reads a binding the ambient
+  // chain does not resolve to. The stored-value memo of `BoxedSymbol` reads
+  // this count to keep such an evaluation out of its cache (see
+  // `ownBindingRewriteCount`).
+  _ownBindingRewrites += 1;
+  // The entries carry the occurrences' OWN value definitions, so the value
+  // resolves the very bindings it references — and an assignment performed
+  // during the evaluation reaches the real definition.
+  const borrowed = [...env];
+  ce.pushScope({ parent: ce.context.lexicalScope, bindings: env });
+  try {
+    return evaluated();
+  } finally {
+    // Hand the borrowed definitions back BEFORE popping. Popping a scope
+    // disposes every value definition among its bindings (`discardEvalContext`,
+    // `engine-scope.ts`) — which is right for definitions the scope owns, and
+    // wrong for these: they belong to the caller's scopes, and disposing one
+    // bumps its write version and permanently unsubscribes it from
+    // configuration changes, leaving a dynamic constant stale after a
+    // precision change.
+    //
+    // Only entries still identical to what was injected are withdrawn, so a
+    // definition genuinely created inside this scope — or one that REPLACED a
+    // borrowed entry — is left for normal disposal.
+    for (const [name, def] of borrowed)
+      if (env.get(name) === def) env.delete(name);
+    ce.popScope();
+  }
+}
+
+function ownBindingEnvironment(
+  ce: ComputeEngine,
+  value: Expression
+): Map<string, BoxedDefinition> | undefined {
   let env: Map<string, BoxedDefinition> | undefined;
   rewriteWithBinders(value, (sym, shadowed) => {
     const name = sym.symbol;
@@ -810,34 +852,38 @@ export function evaluateInOwnBindings(
     return sym;
   });
 
-  if (env === undefined) return evaluated();
+  return env;
+}
 
-  // A re-pointing is about to happen: the value reads a binding the ambient
-  // chain does not resolve to. The stored-value memo of `BoxedSymbol` reads
-  // this count to keep such an evaluation out of its cache (see
-  // `ownBindingRewriteCount`).
-  _ownBindingRewrites += 1;
-  // The entries carry the occurrences' OWN value definitions, so the value
-  // resolves the very bindings it references — and an assignment performed
-  // during the evaluation reaches the real definition.
+/** Await a stored expression while protecting the free bindings it denotes.
+ * The borrowed frame belongs to a private context stack and is removed only
+ * after the value settles; borrowed definitions are never disposed. */
+export async function evaluateInOwnBindingsAsync(
+  ce: ComputeEngine,
+  value: Expression,
+  options?: Partial<EvaluateOptions>
+): Promise<Expression> {
+  const contextStack = [...(options?._contextStack ?? ce._evalContextStack)];
+  const carried = { ...options, _contextStack: contextStack };
+  const inContext = <T>(fn: () => T): T => ce.withEvaluationContext(carried, fn);
+  const env = inContext(() =>
+    isNumber(value) || (isFunction(value) && value._isLiteralData())
+      ? undefined
+      : ownBindingEnvironment(ce, value)
+  );
+  if (env === undefined) return value.evaluateAsync(carried);
   const borrowed = [...env];
-  ce.pushScope({ parent: ce.context.lexicalScope, bindings: env });
+  inContext(() => {
+    _ownBindingRewrites += 1;
+    ce.pushScope({ parent: ce.context.lexicalScope, bindings: env });
+  });
   try {
-    return evaluated();
+    return await value.evaluateAsync(carried);
   } finally {
-    // Hand the borrowed definitions back BEFORE popping. Popping a scope
-    // disposes every value definition among its bindings (`discardEvalContext`,
-    // `engine-scope.ts`) — which is right for definitions the scope owns, and
-    // wrong for these: they belong to the caller's scopes, and disposing one
-    // bumps its write version and permanently unsubscribes it from
-    // configuration changes, leaving a dynamic constant stale after a
-    // precision change.
-    //
-    // Only entries still identical to what was injected are withdrawn, so a
-    // definition genuinely created inside this scope — or one that REPLACED a
-    // borrowed entry — is left for normal disposal.
-    for (const [name, def] of borrowed)
-      if (env.get(name) === def) env.delete(name);
-    ce.popScope();
+    inContext(() => {
+      for (const [name, def] of borrowed)
+        if (env.get(name) === def) env.delete(name);
+      ce.popScope();
+    });
   }
 }

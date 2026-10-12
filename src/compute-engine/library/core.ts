@@ -150,7 +150,6 @@ import type {
   Tri,
 } from '../global-types.js';
 import type { EvaluateHandlerOptions } from '../types-definitions.js';
-import { awaitAsyncOnlyDescendants } from '../boxed-expression/async-only-descendants.js';
 import { runWithEvaluationEffects } from '../effects-registry.js';
 import type { EffectHandlers } from '../types-effects.js';
 import type { FunctionInterface } from '../types-expression.js';
@@ -4653,6 +4652,15 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       evaluate: (ops, { numericApproximation }) => {
         const result = apply(ops[0], ops.slice(1));
         return numericApproximation ? result.N() : result;
+      },
+      evaluateAsync: async (ops, options) => {
+        const result = await apply(ops[0], ops.slice(1), {
+          ...awaitedOperandOptions(options),
+          awaitStatements: true,
+        });
+        return options.engine.withEvaluationContext(options, () =>
+          options.numericApproximation ? result.N() : result
+        );
       },
     },
 
@@ -10585,15 +10593,14 @@ function evaluateToGoal(
  * a step can read is awaited too (`exactAt`), before the step, when the
  * value shows that the step will read it (`goalStepNeedsExact()`).
  *
- * The operand is first resolved (`resolve`): its asynchronous-only
- * applications are evaluated, inside the window of the first working
- * precision, because the synchronous parts of the run cannot run them.
+ * Each numeric evaluation uses the original operand. Pure asynchronous
+ * applications must run again when the working precision changes, and all
+ * operands must retain their normal evaluation order.
  */
 async function evaluateToGoalAsync(
   x: Expression,
   goal: NumericGoal,
   request: Expression,
-  resolve: (window: PrecisionWindow) => Promise<Expression>,
   numericAt: (
     source: Expression,
     window: PrecisionWindow | undefined
@@ -10603,22 +10610,18 @@ async function evaluateToGoalAsync(
   windowFor: (requested: number, working: number) => PrecisionWindow
 ): Promise<Expression | undefined> {
   const ce = x.engine;
-  // The first working precision depends on the goal and the precision in
-  // force only (`startGoalRun`); it gives the window of the resolution.
-  const { first } = slice(() => startGoalRun(x, goal, request));
-  const source = await resolve(windowFor(first, first));
-  const { run } = slice(() => startGoalRun(source, goal, request));
+  const { run, first } = slice(() => startGoalRun(x, goal, request));
   let exactValue: Expression | undefined = undefined;
   let digits = first;
   while (true) {
     const working = digits;
     const window = windowFor(working, working);
-    const value = await numericAt(source, window);
+    const value = await numericAt(x, window);
     if (
       exactValue === undefined &&
       slice(() => goalStepNeedsExact(run, value), window)
     ) {
-      exactValue = await exactAt(source, window);
+      exactValue = await exactAt(x, window);
       const awaited = exactValue;
       run.exact = () => awaited;
     }
@@ -11508,21 +11511,27 @@ async function evaluateNAsync(
       ? { kind: 'plain' }
       : resolveNRequest(ce, await ops[1].canonical.evaluateAsync(opts));
   if (request.kind === 'invalid') return undefined;
-  const raw = ops[0].canonical;
+  const raw = slice(() => ops[0].canonical);
   // The numeric value of `source`, computed inside `window`. It can run
   // after an `await`: a symbol's `N()` reads its value through the current
   // scope, so it runs as a slice.
   const numericAt = (
     source: Expression,
     window: PrecisionWindow | undefined
-  ): Promise<Expression> =>
-    isFunction(source)
-      ? source.evaluateAsync({
-          ...opts,
-          _effects: effects,
-          _precisionWindow: window,
-        })
-      : Promise.resolve(slice(() => source.N(), window));
+  ): Promise<Expression> => {
+    const numericOptions = {
+      ...opts,
+      _effects: effects,
+      _precisionWindow: window,
+    };
+    return isSymbol(source)
+      ? (source as typeof source & {
+          _NAsync(
+            options: Parameters<Expression['evaluateAsync']>[0]
+          ): Promise<Expression>;
+        })._NAsync(numericOptions)
+      : source.evaluateAsync(numericOptions);
+  };
   // The exact value of `source`, computed inside `window` (the synchronous
   // route evaluates it inside its window too).
   const exactAt = (
@@ -11535,24 +11544,6 @@ async function evaluateNAsync(
       _contextStack,
       _precisionWindow: window,
     });
-  // The operand with its asynchronous-only applications evaluated, inside
-  // `window`: the synchronous parts of a window form (the rounding, the
-  // lazy elements of `inexactResult()`) and of a goal run cannot run them.
-  // Only those forms resolve the operand: the plain form and a request
-  // within the precision in force evaluate the operand whole, in order, so
-  // an asynchronous-only application is not run ahead of a synchronous
-  // sibling that has an effect.
-  const resolve = async (window: PrecisionWindow): Promise<Expression> =>
-    ce._hasAsyncOnlyOperator
-      ? (
-          await awaitAsyncOnlyDescendants([raw], {
-            signal,
-            _effects: effects,
-            _contextStack,
-            _precisionWindow: window,
-          })
-        )[0]
-      : raw;
   if (request.kind === 'plain')
     return inexactResult(ce, await numericAt(raw, enclosing));
   if (request.kind === 'goal')
@@ -11560,7 +11551,6 @@ async function evaluateNAsync(
       raw,
       request.goal,
       request.request,
-      resolve,
       numericAt,
       exactAt,
       slice,
@@ -11592,7 +11582,7 @@ async function evaluateNAsync(
   // asynchronous-only application stands as a float literal, which the
   // check would take for a fixed float of the source, where it is a float
   // the window computed, shown with the requested digits.
-  const source = await resolve(window);
+  const source = raw;
   const value = await numericAt(source, window);
   const needsReference = slice(
     () => asyncWindowNeedsReference(raw, global),

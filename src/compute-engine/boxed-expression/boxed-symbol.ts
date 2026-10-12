@@ -108,6 +108,7 @@ import { checkDeadline } from '../../common/interruptible.js';
 import { sameBinding } from './compare.js';
 import {
   evaluateInOwnBindings,
+  evaluateInOwnBindingsAsync,
   ownBindingRewriteCount,
   valueDefinitionInContext,
 } from './binders.js';
@@ -1512,6 +1513,71 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     return this;
   }
 
+  evaluateAsync(options?: Partial<EvaluateOptions>): Promise<Expression> {
+    return this.engine.withEvaluationContext(options, () =>
+      this._evaluateAsyncValue(options)
+    );
+  }
+
+  /** The asynchronous numeric read used by N, which has the same hold
+   * semantics as this symbol's N() method rather than evaluate(). */
+  _NAsync(options?: Partial<EvaluateOptions>): Promise<Expression> {
+    const numeric = { ...options, numericApproximation: true };
+    return this.engine.withEvaluationContext(numeric, () =>
+      this._evaluateAsyncValue(numeric, true)
+    );
+  }
+
+  private async _evaluateAsyncValue(
+    options?: Partial<EvaluateOptions>,
+    numericRead = false
+  ): Promise<Expression> {
+    const canonical = this._canonicalToEvaluate();
+    if (canonical) return canonical.evaluateAsync(options);
+    const def = this.valueDefinition;
+    if (!def) return this;
+    if (this.engine._debugBindings) assertLiveBinding(def, this._id);
+    const numeric = options?.numericApproximation === true;
+    if (
+      !numericRead &&
+      def.holdUntil !== 'never' &&
+      def.holdUntil !== 'evaluate' &&
+      !(numeric && def.holdUntil === 'N')
+    )
+      return this;
+    const value = def.isConstant
+      ? def.value
+      : numericRead ? this._value : this._contextValue();
+    if (value === undefined) return this;
+    if (isNumber(value))
+      return numeric ? value.N() : value.evaluate(options);
+    if (numericRead && !def.isConstant && value.symbols.includes(this._id))
+      return value;
+
+    const stack = options?._contextStack ?? this.engine._evalContextStack;
+    let parent: AsyncDereference | undefined;
+    for (let i = stack.length - 1; i >= 0; i--) {
+      parent = asyncDereferences.get(stack[i]);
+      if (parent !== undefined) break;
+    }
+    for (let node = parent; node !== undefined; node = node.parent) {
+      if (node.definition !== this._def) continue;
+      // Only the frames inside this cycle abandon their results. A sibling
+      // evaluation on another context stack cannot poison this chain.
+      for (let inner = parent; inner !== node; inner = inner!.parent)
+        inner!.abandoned = true;
+      node.cyclic = true;
+      return this;
+    }
+    const node: AsyncDereference = { definition: this._def, parent };
+    const frame = { ...stack[stack.length - 1] };
+    asyncDereferences.set(frame, node);
+    const carried = { ...options, _contextStack: [...stack, frame] };
+    const result = await evaluateInOwnBindingsAsync(this.engine, value, carried);
+    if (node.cyclic) return parent === undefined ? value : this;
+    return node.abandoned ? this : result;
+  }
+
   /**
    * `_dereference`, with the result of evaluating a stored EXPRESSION value
    * remembered across reads.
@@ -2156,3 +2222,16 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     }
   }
 }
+
+// A dereference chain travels with context frames, so asynchronous siblings
+// and unrelated evaluations do not share the synchronous cycle flags.
+type AsyncDereference = {
+  definition: BoxedDefinition | undefined;
+  parent: AsyncDereference | undefined;
+  cyclic?: boolean;
+  abandoned?: boolean;
+};
+const asyncDereferences = new WeakMap<
+  ComputeEngine['_evalContextStack'][number],
+  AsyncDereference
+>();
