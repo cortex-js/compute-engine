@@ -21,6 +21,10 @@
 
 ### Behavior Changes
 
+- **`Gamma(n)` at an exact positive integer `n` evaluates to the integer
+  `(n − 1)!`** instead of staying `Gamma(n)` ([#429](https://github.com/cortex-js/compute-engine/issues/429)):
+  `Gamma(4)` is `6`, `Gamma(1)` is `1`. `Gamma(1/2)` and a float argument
+  are unchanged. See "Issues Resolved".
 - **`simplify()` folds every constant subexpression, whatever the rule
   list.** Constant folding is now part of the method itself and does not
   depend on the `rules` option: the default rules, a caller's own list and
@@ -147,6 +151,17 @@
 
 ### Issues Resolved
 
+- **`Gamma(n)` at a positive integer `n` evaluates to the exact integer
+  `(n − 1)!`** ([#429](https://github.com/cortex-js/compute-engine/issues/429)).
+  `Gamma(4)` evaluated to itself under `evaluate()` and `evaluateAsync()`,
+  and only `.N()` gave `6`, while `Factorial(3)` evaluated to `6`. The value
+  is now the exact integer on every route (`ce.expr(["Gamma", 4])`,
+  `ce.parse("\\Gamma(4)")`, `simplify()`, `evaluateAsync()`, where the
+  product of a large argument yields to the abort signal), also past the
+  double range (`Gamma(172)` is the exact `171!`). A float argument with an
+  integer value still gives a float, an exact non-integer such as
+  `Gamma(1/2)` still stays symbolic, and an argument past the exact-digit
+  cap of `Factorial` keeps the `Gamma` head.
 - **`N(x, p)` with more digits than the engine has, and a goal `N(x, [p, a])`,
   yield under `evaluateAsync`** ([#392](https://github.com/cortex-js/compute-engine/issues/392)).
   `N(\sum_{k=1}^{400000} \frac{1}{k^2}, 30)` and `N(…, [10, 5])` ran to the

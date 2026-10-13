@@ -885,9 +885,13 @@ describe('D2 — inexact arguments numericize under evaluate() (all numeric oper
     });
   });
 
-  describe('controls — exact arguments are unaffected (still stay symbolic under evaluate())', () => {
-    test('Gamma(5) — exact integer (not a D2 case; poles/exact folds unchanged)', () => {
-      expect(num(['Gamma', 5]).operator).toEqual('Gamma');
+  describe('controls — exact arguments are unaffected (never numericized to a float under evaluate())', () => {
+    test('Gamma(5) — exact integer folds to the integer 24, not to a float', () => {
+      // Γ(5) = 4! is an exact integer, so the exact route answers it
+      // (GitHub issue #429). The float route is not involved: the result is
+      // the exact literal, not the numeric kernel's float.
+      expect(num(['Gamma', 5]).isSame(24)).toBe(true);
+      expect(num(['Gamma', 5]).isExact).toBe(true);
     });
     test('Gamma(1/2) — exact rational stays symbolic', () => {
       expect(num(['Gamma', ['Rational', 1, 2]]).operator).toEqual('Gamma');

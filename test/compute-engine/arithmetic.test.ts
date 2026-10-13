@@ -3016,6 +3016,52 @@ describe('the Γ family at ±∞', () => {
   });
 });
 
+// Γ(n) = (n − 1)! at a positive integer n is an exact integer, so
+// `evaluate()` answers it (GitHub issue #429: `Gamma(4)` evaluated to
+// itself while `Factorial(3)` evaluated to `6`).
+describe('Gamma at a positive integer evaluates to the exact factorial', () => {
+  const value = (expr: any) => ce.expr(expr).evaluate().toString();
+
+  it('folds on the box route, the parse route and the async route', async () => {
+    expect(value(['Gamma', 4])).toBe('6');
+    expect(value(['Gamma', 1])).toBe('1');
+    expect(value(['Gamma', 2])).toBe('1');
+    expect(ce.parse('\\Gamma(4)').evaluate().toString()).toBe('6');
+    const r = await ce.expr(['Gamma', 4]).evaluateAsync();
+    expect(r.toString()).toBe('6');
+    // The answer is the exact integer, not the numeric kernel's float.
+    expect(ce.expr(['Gamma', 4]).evaluate().isExact).toBe(true);
+  });
+
+  it('is exact above the double range', () => {
+    // 171! ≈ 1.24·10³⁰⁹ is past the largest double (≈ 1.8·10³⁰⁸), so a
+    // float route would answer +oo; the exact route answers the integer.
+    const r = ce.expr(['Gamma', 172]).evaluate();
+    expect(r.isExact).toBe(true);
+    expect(r.isFinite).toBe(true);
+    expect(r.isSame(ce.expr(['Factorial', 171]).evaluate())).toBe(true);
+  });
+
+  it('keeps its own head past the exact-digit cap of Factorial', () => {
+    // 1000000! has more digits than the exact route holds, so `Factorial`
+    // stays symbolic there; `Gamma` keeps its head instead of rewriting
+    // itself as a factorial.
+    expect(value(['Gamma', 1000001])).toBe('Gamma(1000001)');
+  });
+
+  it('leaves a float, a non-integer and the incomplete form alone', () => {
+    // A float with an integer value is a float answer of the numeric route.
+    const f = ce.parse('\\Gamma(4.0)').evaluate();
+    expect(f.toString()).toBe('6');
+    expect(f.isExact).toBe(false);
+    // An exact non-integer has no integer value: it stays symbolic.
+    expect(value(['Gamma', ['Rational', 1, 2]])).toBe('Gamma(1/2)');
+    // The incomplete form Γ(s, z) is unchanged; Γ(s, 0) = Γ(s) now folds.
+    expect(value(['Gamma', 2, 1])).toBe('Gamma(2, 1)');
+    expect(value(['Gamma', 4, 0])).toBe('6');
+  });
+});
+
 // An infinite base raised to an infinite exponent (user ruling 2026-08-31).
 // `(+∞)^∞` used to canonicalize to the direction-less `~∞` although the
 // direction is knowable: nⁿ grows through +∞ without ever changing sign

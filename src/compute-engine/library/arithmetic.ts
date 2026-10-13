@@ -4361,6 +4361,107 @@ function withAbsentableOperandResolved(
   return [value];
 }
 
+/**
+ * Whether `Gamma(x)` on the exact route is Γ(n) = (n − 1)! for an exact
+ * positive integer n: the value is an integer, so `evaluate()` answers it
+ * (`Gamma(4)` is `6`, as `Factorial(3)` is). Only an EXACT integer takes this
+ * branch; a float with an integer value (`Gamma(4.0)`) is a float answer of
+ * the numeric route, as for `Factorial`. Under `numericApproximation` the
+ * numeric route answers as well, as before: `Gamma(5).N()` is the float `24`,
+ * and a large argument is a big decimal of `ce.precision` digits, not a
+ * million-digit integer. An infinity is not an integer, so no finiteness test
+ * is needed.
+ */
+function isExactIntegerGammaArgument(
+  x: Expression,
+  numericApproximation: boolean | undefined
+): x is Expression & NumberLiteralInterface {
+  return (
+    !numericApproximation &&
+    isNumber(x) &&
+    x.isExact &&
+    !x.isComplex &&
+    x.isInteger === true &&
+    x.isPositive === true
+  );
+}
+
+/**
+ * The synchronous `evaluate` handler of `Gamma`, shared with its
+ * `evaluateAsync` handler (which awaits the exact positive-integer branch
+ * through `Factorial.evaluateAsync` and hands every other argument here).
+ */
+function evaluateGamma(
+  ops: ReadonlyArray<Expression>,
+  { numericApproximation, engine }: EvaluateHandlerOptions
+): Expression | undefined {
+  if (ops.length === 2) {
+    const [s, z] = ops;
+    // The infinite points (`Γ(s, +∞) = 0`, `Γ(±∞, z)`, `NaN` for the
+    // rest) are exact, so they are answered regardless of
+    // numericApproximation.
+    const infinite = incompleteGammaValueAtInfinity(s, z, engine);
+    if (infinite !== undefined) return infinite;
+    // Γ(s, 0) = Γ(s): reduce so the 1-arg exact paths (incl. poles)
+    // apply.
+    if (isNumber(z) && z.isSame(0))
+      return engine.function('Gamma', [s]).evaluate({
+        numericApproximation,
+      });
+    return shouldNumericize(numericApproximation, s, z)
+      ? applyN(
+          [s, z],
+          (s, z) => incompleteGammaUpper(s, z),
+          undefined,
+          (s, z) => incompleteGammaUpperComplex(s, z)
+        )
+      : undefined;
+  }
+
+  const x = ops[0];
+  // Gamma has poles at the non-positive integers (0, -1, -2, ...).
+  // This is exact, so return it regardless of numericApproximation.
+  if (isNumber(x) && !x.isComplex && x.isInteger && x.isNonPositive)
+    return engine.ComplexInfinity;
+  // Γ(n) = (n − 1)! at an exact positive integer n — see
+  // `isExactIntegerGammaArgument`. The `Factorial` handler owns the
+  // exact-digit cap and the big-integer product, so the shifted
+  // argument is handed to it. Past the cap `Factorial` stays symbolic,
+  // and `Gamma` then keeps its own head rather than rewriting itself
+  // as a factorial. (GitHub issue #429: `Gamma(4)` evaluated to
+  // itself.)
+  if (isExactIntegerGammaArgument(x, numericApproximation)) {
+    const shifted = engine
+      .function('Factorial', [x.sub(engine.One)])
+      .evaluate();
+    return isNumber(shifted) ? shifted : undefined;
+  }
+  // Γ at an infinite argument. Also exact, so it does not wait for
+  // `numericApproximation` either.
+  const infinite = infiniteGammaFamilyValue(x, engine);
+  if (infinite !== undefined) return infinite;
+  // A complex value outside the double range is formed from ln Γ.
+  if (isNumber(x) && x.isComplex && shouldNumericize(numericApproximation, x)) {
+    const big = boxExpOfComplexLog(
+      engine,
+      logGammaComplex(engine.complex(x.re, x.im))
+    );
+    if (big === null) return undefined;
+    if (big !== undefined) return big;
+  }
+  return shouldNumericize(numericApproximation, x)
+    ? gammaInRange(
+        engine,
+        apply(
+          x,
+          (x) => gamma(x),
+          (x) => bigGamma(engine, x),
+          (x) => gammaComplex(x)
+        )
+      )
+    : undefined;
+}
+
 export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
   {
     //
@@ -5640,64 +5741,38 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               ? 'unsigned'
               : undefined
           : undefined,
-      evaluate: (ops, { numericApproximation, engine }) => {
-        // Upper incomplete gamma Γ(s, z) (Mathematica/Rubi `Gamma[s, z]`).
-        if (ops.length === 2) {
-          const [s, z] = ops;
-          // The infinite points (`Γ(s, +∞) = 0`, `Γ(±∞, z)`, `NaN` for the
-          // rest) are exact, so they are answered regardless of
-          // numericApproximation.
-          const infinite = incompleteGammaValueAtInfinity(s, z, engine);
-          if (infinite !== undefined) return infinite;
-          // Γ(s, 0) = Γ(s): reduce so the 1-arg exact paths (incl. poles)
-          // apply.
-          if (isNumber(z) && z.isSame(0))
-            return engine.function('Gamma', [s]).evaluate({
-              numericApproximation,
-            });
-          return shouldNumericize(numericApproximation, s, z)
-            ? applyN(
-                [s, z],
-                (s, z) => incompleteGammaUpper(s, z),
-                undefined,
-                (s, z) => incompleteGammaUpperComplex(s, z)
-              )
-            : undefined;
-        }
-
+      evaluate: evaluateGamma,
+      // The exact positive-integer branch of `evaluateGamma` runs the
+      // big-integer product of `Factorial`, which can take seconds below the
+      // exact-digit cap (`Gamma(100001)`). The synchronous product reads the
+      // deadline only; on the asynchronous route it must also yield to the
+      // abort signal, which `Factorial.evaluateAsync` does by running the
+      // product in interruptible slices. So that branch is awaited through
+      // `Factorial`, and every other argument is `evaluateGamma`'s, which
+      // does no long work for it. Without this handler `evaluateAsync()`
+      // fell back to the synchronous one and could not be cancelled.
+      evaluateAsync: async (ops, options) => {
+        const { engine, numericApproximation } = options;
         const x = ops[0];
-        // Gamma has poles at the non-positive integers (0, -1, -2, ...).
-        // This is exact, so return it regardless of numericApproximation.
-        if (isNumber(x) && !x.isComplex && x.isInteger && x.isNonPositive)
-          return engine.ComplexInfinity;
-        // Γ at an infinite argument. Also exact, so it does not wait for
-        // `numericApproximation` either.
-        const infinite = infiniteGammaFamilyValue(x, engine);
-        if (infinite !== undefined) return infinite;
-        // A complex value outside the double range is formed from ln Γ.
         if (
-          isNumber(x) &&
-          x.isComplex &&
-          shouldNumericize(numericApproximation, x)
+          ops.length === 1 &&
+          isExactIntegerGammaArgument(x, numericApproximation)
         ) {
-          const big = boxExpOfComplexLog(
-            engine,
-            logGammaComplex(engine.complex(x.re, x.im))
-          );
-          if (big === null) return undefined;
-          if (big !== undefined) return big;
+          const { signal, _effects, _contextStack, _precisionWindow } = options;
+          const shifted = await engine
+            .function('Factorial', [x.sub(engine.One)])
+            .evaluateAsync({
+              numericApproximation,
+              signal,
+              _effects,
+              _contextStack,
+              _precisionWindow,
+            });
+          // Past the exact-digit cap `Factorial` stays symbolic, and `Gamma`
+          // keeps its own head — as the synchronous handler answers.
+          return isNumber(shifted) ? shifted : undefined;
         }
-        return shouldNumericize(numericApproximation, x)
-          ? gammaInRange(
-              engine,
-              apply(
-                x,
-                (x) => gamma(x),
-                (x) => bigGamma(engine, x),
-                (x) => gammaComplex(x)
-              )
-            )
-          : undefined;
+        return evaluateGamma(ops, options);
       },
     },
 
