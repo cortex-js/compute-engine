@@ -612,6 +612,31 @@ describe('ROOT', () => {
     expect(ce.expr(['Root', -8, 3]).evaluate().json).toEqual(-2);
   });
 
+  // A power that reaches `pow()` with both operands as numbers, but whose
+  // `Power` node survived canonicalization — an element of a broadcast
+  // over a list of exponents, or a symbol exponent that holds a unit
+  // fraction — evaluates its root like the literal `(-8)^{1/3}` does, in
+  // one evaluation (issue #430).
+  test(`Unit-fraction exponent evaluates inside a broadcast and through a symbol`, () => {
+    expect(
+      ce.box(['Power', -8, ['List', ['Rational', 1, 3], 5]]).evaluate().json
+    ).toEqual(['List', -2, -32768]);
+    expect(
+      ce.box(['Power', 16, ['List', ['Rational', 1, 4], 2]]).evaluate().json
+    ).toEqual(['List', 2, 256]);
+    expect(
+      ce.box(['Power', 16, ['List', ['Rational', -1, 4]]]).evaluate().json
+    ).toEqual(['List', ['Rational', 1, 2]]);
+    expect(
+      ce.box(['Power', 2, ['List', ['Rational', 1, 2]]]).evaluate().json
+    ).toEqual(['List', ['Sqrt', 2]]);
+    const local = new ComputeEngine();
+    local.assign('y', ['Rational', 1, 3]);
+    expect(local.parse('(-8)^y').evaluate().json).toEqual(-2);
+    local.assign('z', ['Rational', 1, 4]);
+    expect(local.parse('16^z').evaluate().json).toEqual(2);
+  });
+
   // NU-P1-3: a complex value's imaginary part is always a machine double, so a
   // full-precision bignum real part printed a garbage tail (50+ digits, ~16
   // correct). The real part is now rounded to double precision.

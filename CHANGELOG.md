@@ -18,6 +18,26 @@
   `_SYS.at` in that the lengths need not agree. A host emitted the selection as a function
   expression at every mask site (101 sites in one plotting corpus), with its
   helper closures allocated again on every call.
+- **`contract: 'host'`: the calling host guarantees the `run()` contract,
+  and the compiled JavaScript runner does no per-call check, conversion or
+  copy.** By default the runner, on every call, checks and converts each
+  input (a `{re, im}` value bound to a real binding throws, a plain number
+  bound to a complex binding is lifted, a typed array bound to a list binding
+  is copied to a plain array, every entry of a list read on the real lane is
+  visited) and returns a collection as a fresh array, so that a caller who
+  writes to the result does not change a value the runner keeps for its later
+  calls. For a kernel called a million times with a 9 801-element list
+  input, that entry walk was the whole per-call cost (3 µs, growing with the
+  length). With `compile(expr, { to: 'javascript', contract: 'host' })` the
+  host promises that every input already has the shape the compiled code
+  reads (a plain `Array`, a number, a `{re, im}` object) and that it does
+  not write to a returned value, and the per-call cost no longer depends on
+  the length of a list input or output. The result convention is kept: a
+  `{re, im: 0}` still reads as a plain number, inside a collection too, and a
+  collection is copied only when such a cell has to be rewritten.
+  `CompilationResult.contract` reports `'host'`, and a stored result carries
+  it, so a runtime that loads the code applies the same contract.
+  `contract: 'host'` implies `entryChecks: false`.
 
 ### Behavior Changes
 
@@ -150,6 +170,21 @@
   such a list to a constant and is unchanged.
 
 ### Issues Resolved
+
+- **`Power` over a list of exponents, and a symbol exponent that holds a unit
+  fraction, evaluate the root**
+  ([#430](https://github.com/cortex-js/compute-engine/issues/430)).
+  `(-8)^{[1/3, 5]}` gave `[Root(-8, 3), -32768]` and needed a second
+  `evaluate()` to give `[-2, -32768]`; `(-8)^y` with `y := 1/3` stayed
+  `Root(-8, 3)` where `(-8)^{1/3}` gave `-2`. The canonical form of
+  `(-8)^{1/3}` is `Root(-8, 3)`, which canonicalization leaves symbolic and
+  the `Root` handler evaluates; a `Power` node that survives canonicalization
+  reached the power kernel with both operands as numbers and returned that
+  root without evaluating it. The kernel now evaluates the root it builds
+  from two number literals. The `.pow()` method goes through the same kernel,
+  so `ce.number(-8).pow(ce.number([1, 3]))` is now `-2` instead of
+  `Root(-8, 3)`, and a float base gives a float: `ce.number(0.5).pow(1/3)`
+  is `0.7937…`, as `Power(0.5, 1/3).evaluate()` already was.
 
 - **`Gamma(n)` at a positive integer `n` evaluates to the exact integer
   `(n − 1)!`** ([#429](https://github.com/cortex-js/compute-engine/issues/429)).
