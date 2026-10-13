@@ -156,8 +156,8 @@ the helper table is internal and may change in any release. `load()` evaluates
 the definitions that read nothing per call (`preambleOnce`) once, as `run()`
 does, and the rest (`preamblePerCall`) on every call, and applies the input
 conversions of `run()` from `entryPlan` (a real given to a complex-declared
-symbol is lifted, a typed array for a list symbol is copied, a complex value for
-a real symbol is refused). The
+symbol is lifted, a complex value for a real symbol is refused, a string or a
+typed array for a symbol read as an array is refused). The
 engine-bound helpers take their state as options: `random` (draws outside a
 `WithRandomSeed` frame and the integrals' Monte-Carlo samples; `null` denies),
 `frame` (the enclosing frame, set with `setFrame()` and read back from
@@ -194,15 +194,42 @@ their shape. Target entry checks reject values incompatible with the compiled
 lane assumptions.
 
 The list carrier of the JavaScript target is the plain `Array`, in both
-directions. On a binding whose declared type proves a JS array, a plain
-`Array` passes as it is, and a numeric typed array (`Float64Array`,
-`Int32Array`, …) gets a plain-array copy once, at entry. Any other value
-passes untouched and the lowerings dispatch on its runtime shape, as before: a
-scalar there is not an error, because a declared type is routinely wider than
-the value a caller binds and several lowerings project on the runtime shape —
-a `list`-typed summand of an element-wise big operator bound to a number gives
-the scalar sum. A list-valued result always comes back as a fresh plain
-`Array`, never as a typed array and never aliasing caller data.
+directions, and the contract of `run()` is: **inputs of the shape the
+compiled code reads, results read-only** (decided by the user, 2026-10-13).
+The runner does a constant amount of work per binding on each call — one
+`typeof`, to refuse a `{re, im}` object in a real slot, lift a plain number
+into a complex slot, project the unsigned pole, and refuse a string for a
+binding the code reads as an array, and one brand check to refuse a numeric
+typed array (`Float64Array`, `Int32Array`, …) there — and nothing whose cost
+grows with an input. On a binding whose declared type proves a JS array, the
+value passes as it is: its entries are never read, and a typed array is not
+converted but refused with a `TypeError` that names the binding, so a host
+converts it to a plain `Array` once, on its side (a typed array nested as a
+row is an entry, and is not read). A
+`{re, im}` object or a string at an entry of a list read on the real lane
+computes with that value, as it would in plain JavaScript; the interpreter
+is the route that validates. Any other value passes untouched and the
+lowerings dispatch on its runtime shape: a scalar there is not an error,
+because a declared type is routinely wider than the value a caller binds and
+several lowerings project on the runtime shape — a `list`-typed summand of
+an element-wise big operator bound to a number gives the scalar sum. A
+collection or a `{re, im}` result comes back as the code built it, with no
+copy: it may be a value the runner keeps for every later call (a hoisted
+constant list literal, a bound symbol value), so a caller that writes to a
+result changes what the next call answers. The result convention is kept —
+a `{re, im: 0}` cell reads as a plain number — and a collection is copied
+only when such a cell has to be rewritten, never in place. That walk, one
+`typeof` per cell of a returned collection with no allocation, is the one
+per-call cost at the boundary that grows with the data.
+
+Before 2026-10-13 the runner walked every entry of a list input read on the
+real lane on every call (to refuse a complex or non-numeric entry), copied a
+typed-array input to a plain array on every call, and returned every
+collection as a fresh array. For a kernel called 1.2 million times with a
+9 801-element list input, the entry walk was the whole per-call cost (Tycho
+ledger row 371, filed 2026-10-12); the typed-array copy and the result copy
+were as long as the data. The engine-initiated compilations already ran with
+`entryChecks: false`.
 
 A string is the one value the entry refuses for a binding whose declared type
 is a list, an indexed collection or a `collection`, bare (`indexed_collection`)

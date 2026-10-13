@@ -277,19 +277,15 @@ describe('strictTypes', () => {
     }
   });
 
-  it('a matrix type is spelled as in the entry diagnostic', () => {
+  it('a matrix type is spelled as in the string refusal', () => {
+    // The runner refuses a string for a binding that the compiled code reads
+    // as an array, and its message spells the type of the binding as the
+    // type report does.
     const ce = new ComputeEngine();
     ce.declare('N', 'matrix');
     const r = run(ce, 'javascript', '\\det(N)');
     expect(r.freeSymbolTypes.N.type).toBe('matrix<number>');
-    expect(() =>
-      r.run({
-        N: [
-          [1, { re: 2, im: 3 }],
-          [3, 4],
-        ],
-      })
-    ).toThrow(/"N" \(type `matrix<number>`\)/);
+    expect(() => r.run({ N: 'abc' })).toThrow(/"N" \(type `matrix<number>`\)/);
   });
 
   it('is off by default', () => {

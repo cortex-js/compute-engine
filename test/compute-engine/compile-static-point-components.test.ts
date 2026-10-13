@@ -189,8 +189,12 @@ describe('the inner product of two static-width points is written out', () => {
     // real: the elements of a literal are read one by one, and an undeclared
     // scalar is a real number in the default mode, so `(x, y)` is real; a
     // `vector<real^5>` is real by its type. A `vector<5>` (whose entries are
-    // `number`) is read as real in the default mode too, and the runner
-    // refuses a complex entry when it is called.
+    // `number`) is read as real in the default mode too. The runner does not
+    // read the entries of a list input (user decision of 2026-10-13: the
+    // compiled `run()` requires inputs of the shape the compiled code reads;
+    // a per-call walk of the entries was the whole cost of the kernel of
+    // Tycho ledger row 371), so a complex entry is not refused, and the value
+    // the real `_SYS.matmul` computes with it is not specified.
     const ce = newEngine({
       V: 'vector<5>',
       W: 'vector<5>',
@@ -205,7 +209,7 @@ describe('the inner product of two static-width points is written out', () => {
     expect(vw.run({ V: [1, 2, 3, 4, 5], W: [1, 1, 1, 1, 2] })).toBe(20);
     expect(() =>
       vw.run({ V: [1, 2, 3, 4, { re: 0, im: 1 }], W: [1, 1, 1, 1, 1] })
-    ).toThrow(/"V" \(type `vector<number\^5>`\).*entry \[4\] is a complex/);
+    ).not.toThrow();
     expect(compiled(ce, '\\operatorname{Dot}(A, B)').code).toBe(
       '_SYS.matmul(_.A, _.B)'
     );

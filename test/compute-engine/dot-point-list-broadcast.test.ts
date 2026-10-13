@@ -502,9 +502,14 @@ describe('Dot over a list of points', () => {
       });
 
       // A `number` coordinate is read as real in the default mode (user
-      // decision of 2026-09-24, option B), and the runner refuses a complex
-      // coordinate when it is called. Under `mode: 'complex'` it is complex.
-      test('a `number` coordinate is read as real, and a complex one is refused at run time', () => {
+      // decision of 2026-09-24, option B). The runner does not read the
+      // entries of a list input (user decision of 2026-10-13: the compiled
+      // `run()` requires inputs of the shape the compiled code reads; a
+      // per-call walk of the entries was the whole cost of the kernel of
+      // Tycho ledger row 371). A complex coordinate is therefore not
+      // refused, and the value the real helper computes with it is not
+      // specified. Under `mode: 'complex'` it is complex.
+      test('a `number` coordinate is read as real, and a complex one is not checked at run time', () => {
         const ce = new ComputeEngine();
         ce.declare('P', 'list<tuple<number, number>>');
         const expr = ce.box(['Dot', 'P', TUPLE_POINT]);
@@ -521,9 +526,7 @@ describe('Dot over a list of points', () => {
           [{ re: 0, im: 1 }, 1],
           [2, 1],
         ];
-        expect(() => r.run!({ P: complexP })).toThrow(
-          /"P" \(type `list<tuple<number, number>>`\) was compiled with real entries, but its entry \[0\]\[0\] is a complex/
-        );
+        expect(() => r.run!({ P: complexP })).not.toThrow();
         const c = compile(expr, {
           fallback: false,
           constantFold: false,

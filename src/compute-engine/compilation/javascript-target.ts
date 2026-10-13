@@ -7,7 +7,6 @@ import {
   namedEntryError,
   storeEntryPlan,
   type EntryPlan,
-  type RealEntryCheck,
   setNestedQuadratureBudget,
   setReconstructionDigits,
   RUNTIME_VERSION,
@@ -82,8 +81,6 @@ import {
   resolveTypeForCompilation,
   stripMissingFromType,
   typeContainsMissing,
-  unfoldAliasOnDescent,
-  type AliasDescent,
 } from '../../common/type/utils.js';
 import { couldMatch, isSubtype } from '../../common/type/subtype.js';
 import type { Type, TupleType } from '../../common/type/types.js';
@@ -9559,8 +9556,8 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
 
 /**
  * True when a declared type PROVES the caller's value is a JS array, and so
- * names a binding whose typed-array value the D3 entry check copies to a plain
- * array.
+ * names a binding that the D3 entry check reads as one: the value passes
+ * unchanged, and a string or a typed array bound to it is refused.
  *
  * The shape question is the one `isIndexedCollectionOperand` asks — does this
  * lower to a JS array? — asked against the absence-admitting family tops
@@ -9687,101 +9684,12 @@ function admitsStringAsText(t: Type): boolean {
 }
 
 /**
- * The run-time entry check of a binding with the type `t`, or `undefined`
- * when the entries are not checked (`BaseCompiler.realLaneEntryCheck`).
- * `label` names the binding in the diagnostic.
- */
-function realEntryCheckOf(
-  t: Type,
-  complexMode: boolean,
-  label: string
-): RealEntryCheck | undefined {
-  const check = BaseCompiler.realLaneEntryCheck(t, complexMode);
-  if (check === undefined) return undefined;
-  const numbers = check === 'numbers';
-  return {
-    numbers,
-    depth: numbers ? entryArrayDepth(t) : Infinity,
-    label: `${label} (type \`${BaseCompiler.declaredTypeText(t)}\`)`,
-  };
-}
-
-/**
- * The number of array levels below the top-level array of a value of type
- * `t`, when every entry type of `t` is at the same level: 0 for a
- * `vector<real>`, 1 for a `matrix<real>` or a `list<tuple<number, number>>`.
- * `Infinity` when the levels differ (`list<number | vector<number>>`), or
- * when the type does not fix them: a bare `list`, a self-referential alias,
- * or a list of scalars with no dimensions (`list<number>`,
- * `indexed_collection<real>`). The engine reads a list of numbers with no
- * dimensions as a tensor of any rank: `Norm` over a `list<number>` symbol
- * bound to a matrix is the matrix norm. The entry check then accepts any
- * depth.
- */
-function entryArrayDepth(t: Type): number {
-  const depths = new Set<number>();
-  entryLeafDepths(t, 0, false, depths, undefined);
-  return depths.size === 1 ? [...depths][0] : Infinity;
-}
-
-/** Add to `out` the depth of each entry type of `t`, where `level` is the
- * number of array levels above `t` (the walk of
- * `BaseCompiler.arrayEntryLeaves`) and `anyRank` is whether `t` is the
- * element type of a list with no dimensions: an entry there may be an
- * array of any depth. */
-function entryLeafDepths(
-  t: Type,
-  level: number,
-  anyRank: boolean,
-  out: Set<number>,
-  seen: AliasDescent
-): void {
-  const unfolded = unfoldAliasOnDescent(t, seen);
-  if (unfolded === undefined) {
-    out.add(Infinity);
-    return;
-  }
-  const r = unfolded.type;
-  seen = unfolded.seen;
-  if (r === 'list' || r === 'tuple') {
-    out.add(Infinity);
-    return;
-  }
-  if (typeof r !== 'string') {
-    if (r.kind === 'union') {
-      for (const m of r.types) entryLeafDepths(m, level, anyRank, out, seen);
-      return;
-    }
-    if (r.kind === 'tuple') {
-      for (const e of r.elements)
-        entryLeafDepths(e.type, level + 1, false, out, seen);
-      return;
-    }
-    if (r.kind === 'list' || r.kind === 'indexed_collection') {
-      const elt = collectionElementType(r);
-      const open = r.kind !== 'list' || r.dimensions === undefined;
-      entryLeafDepths(elt ?? 'unknown', level + 1, open, out, seen);
-      return;
-    }
-  }
-  if (level > 0) out.add(anyRank ? Infinity : level - 1);
-}
-
-/**
  * The D3 entry plan of the LAMBDA route: parameter `i` is list-shaped when its
  * annotation proves a JS array, complex-shaped when its annotation is a
  * non-real number type, real-shaped otherwise (an unannotated parameter is
- * wide, which the analysis shapes real).
- *
- * The entries of a collection-valued parameter are checked when the
- * parameter is read on the real lane (`realEntryCheckOf`). The type of this
- * check is the annotation when there is one, and otherwise the type the
- * engine inferred for the parameter from its uses in the body: in
- * `(M) ↦ det(M)` the parameter `M` is inferred `matrix`, and the body reads
- * it with the real `det` helper, so a `{re, im}` entry must throw here as it
- * does for `(M: matrix<real>) ↦ det(M)`, not give `NaN`. The inferred type
- * decides the entry check only: an unannotated parameter keeps the
- * real/complex shape rule above.
+ * wide, which the analysis shapes real). The entries of a collection-valued
+ * parameter are never read at entry: they are the caller's responsibility
+ * (see `EntryPlan`).
  */
 function lambdaEntryPlan(
   literalParams: ReadonlyArray<Expression>,
@@ -9790,18 +9698,11 @@ function lambdaEntryPlan(
   const real: number[] = [];
   const complex: number[] = [];
   const lists: number[] = [];
-  const entries = new Map<number, RealEntryCheck>();
   const strings = new Map<number, string>();
   literalParams.forEach((p, i) => {
     // The shared accessor reads a user-declared type name too (with the
     // engine's type resolver), not only a built-in type.
     const t = functionLiteralParameterType(p);
-    const checkType = t ?? (isSymbol(p) ? p.type.type : undefined);
-    const check =
-      checkType === undefined
-        ? undefined
-        : realEntryCheckOf(checkType, mode === 'complex', `argument ${i + 1}`);
-    if (check !== undefined) entries.set(i, check);
     // A string is refused for an annotated parameter and for an unannotated
     // one whose type the engine inferred from its uses alike: either way the
     // compiled code reads the parameter as an array, and the refusal is
@@ -9826,7 +9727,7 @@ function lambdaEntryPlan(
         : mode === 'complex';
     (isComplex ? complex : real).push(i);
   });
-  return { kind: 'args', real, complex, lists, entries, strings };
+  return { kind: 'args', real, complex, lists, strings };
 }
 
 /**
@@ -9846,7 +9747,6 @@ function varsEntryPlan(
   const real: string[] = [];
   const complex: string[] = [];
   const lists: string[] = [];
-  const entries = new Map<string, RealEntryCheck>();
   const strings = new Map<string, string>();
   for (const id of refs) {
     const sym = engine.symbol(id);
@@ -9854,11 +9754,6 @@ function varsEntryPlan(
     // instead of as a number: the real/complex rules read the value as a
     // scalar, which an array is not.
     const declared = sym.type?.type;
-    const check =
-      declared === undefined
-        ? undefined
-        : realEntryCheckOf(declared, mode === 'complex', `"${id}"`);
-    if (check !== undefined) entries.set(id, check);
     // A declared type and a type the engine inferred for an undeclared
     // symbol from its uses refuse a string alike (the same rule as the
     // lambda route above): the compiled code reads the symbol as an array
@@ -9879,7 +9774,7 @@ function varsEntryPlan(
       (mode === 'complex' && BaseCompiler.wideNumericType(sym.type?.type));
     (isComplex ? complex : real).push(id);
   }
-  return { kind: 'vars', real, complex, lists, entries, strings };
+  return { kind: 'vars', real, complex, lists, strings };
 }
 
 function compileToTarget(
@@ -10561,9 +10456,9 @@ function emitLazyStream(
  *
  * An operand whose type admits real and complex entries (`matrix<number>`)
  * has the lane `'wide'` in `strict` and `auto` mode, and is read as real: the
- * real helper is emitted, and the compiled runner checks the entries of each
- * collection-valued binding when it is called (`realLaneEntryCheck`), so a
- * `{re, im}` entry throws instead of reading as NaN.
+ * real helper is emitted, and a `{re, im}` entry a caller binds there
+ * computes as a non-number (`NaN`); the entries of a binding are the
+ * caller's responsibility (see `EntryPlan` in `javascript-runtime.ts`).
  */
 function linearAlgebraHelper(
   _head: string,
@@ -10841,8 +10736,10 @@ function assertNumericSortElements(kind: string, arg: Expression): boolean {
   // A complex value has no order: the interpreter leaves such a sort
   // unevaluated, and the comparator would read a `{re, im}` pair as a tie.
   // A complex value that arrives at run time under a `number` element type
-  // is caught by the entry check of the binding; a written complex element
-  // (`Sort([3, 1 + 2i, 1])`) or a `complex` element type is refused here.
+  // is not checked (the entries of a binding are the caller's
+  // responsibility, see `EntryPlan`) and sorts as a tie, in an unspecified
+  // order; a written complex element (`Sort([3, 1 + 2i, 1])`) or a `complex`
+  // element type is refused here.
   // (`real` is a subtype of `complex` in this lattice, so the element type
   // is refused only when it is complex AND not real.)
   if (

@@ -359,6 +359,13 @@ describe('the entry point has no engine in it', () => {
 });
 
 describe('load() applies the input conversions of run()', () => {
+  // `run()` and `load()` share one entry: each lifts a plain number bound to
+  // a complex symbol, and each passes a plain-array list input as it is. A
+  // numeric typed array is not converted to a plain array by either one: both
+  // refuse it with the same `TypeError` that names the binding, and the host
+  // converts it once, on its side (the user replaced the per-call copy with
+  // this refusal on 2026-10-13; Tycho ledger row 371 was the motivating
+  // case).
   const typed = new ComputeEngine();
   typed.declare('z', 'complex');
   typed.declare('L', 'list<real>');
@@ -371,9 +378,9 @@ describe('load() applies the input conversions of run()', () => {
       6,
     ],
     [
-      'a Float64Array for a list symbol, the sum of L',
+      'a plain array for a list symbol, the sum of L',
       ['Sum', ['At', 'L', 'i'], ['Limits', 'i', 1, 3]],
-      { L: new Float64Array([1, 2, 3]) },
+      { L: [1, 2, 3] },
       6,
     ],
   ];
@@ -387,6 +394,19 @@ describe('load() applies the input conversions of run()', () => {
       expect(viaLoad).toEqual(expected);
     });
   }
+
+  test('a Float64Array for a list symbol is refused, by load() as by run()', () => {
+    const result = compile(
+      typed.box(['Sum', ['At', 'L', 'i'], ['Limits', 'i', 1, 3]]),
+      { fallback: false }
+    )!;
+    expect(result.success).toBe(true);
+    const vars = { L: new Float64Array([1, 2, 3]) };
+    const refusal =
+      /"L" \(type `list<real>`\) is compiled as a JavaScript array, and compiled code does not accept a typed array/;
+    expect(() => result.run!(vars as any)).toThrow(refusal);
+    expect(() => createJavaScriptRuntime().load(result)(vars)).toThrow(refusal);
+  });
 
   test('a complex value for a real symbol is refused by load() as by run()', () => {
     const result = compile(ce.box(['Add', 'q', 1]), { fallback: false })!;

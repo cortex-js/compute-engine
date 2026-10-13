@@ -18,29 +18,39 @@
   `_SYS.at` in that the lengths need not agree. A host emitted the selection as a function
   expression at every mask site (101 sites in one plotting corpus), with its
   helper closures allocated again on every call.
-- **`contract: 'host'`: the calling host guarantees the `run()` contract,
-  and the compiled JavaScript runner does no per-call check, conversion or
-  copy.** By default the runner, on every call, checks and converts each
-  input (a `{re, im}` value bound to a real binding throws, a plain number
-  bound to a complex binding is lifted, a typed array bound to a list binding
-  is copied to a plain array, every entry of a list read on the real lane is
-  visited) and returns a collection as a fresh array, so that a caller who
-  writes to the result does not change a value the runner keeps for its later
-  calls. For a kernel called a million times with a 9 801-element list
-  input, that entry walk was the whole per-call cost (3 µs, growing with the
-  length). With `compile(expr, { to: 'javascript', contract: 'host' })` the
-  host promises that every input already has the shape the compiled code
-  reads (a plain `Array`, a number, a `{re, im}` object) and that it does
-  not write to a returned value, and the per-call cost no longer depends on
-  the length of a list input or output. The result convention is kept: a
-  `{re, im: 0}` still reads as a plain number, inside a collection too, and a
-  collection is copied only when such a cell has to be rewritten.
-  `CompilationResult.contract` reports `'host'`, and a stored result carries
-  it, so a runtime that loads the code applies the same contract.
-  `contract: 'host'` implies `entryChecks: false`.
 
 ### Behavior Changes
 
+- **Compiled JavaScript `run()` requires inputs of the shape the code reads
+  and treats its results as read-only.** The runner no longer does per-call
+  work whose cost grows with an input, and no longer copies a result: it
+  does not read the entries of a list input (before, every entry of a list
+  read on the real lane was visited on every call to refuse a `{re, im}` or
+  non-numeric entry), does not convert a typed-array input (before, a
+  `Float64Array` bound to a list symbol was copied to a plain array on every
+  call; now it is refused with a `TypeError` that names the binding), and
+  does not copy a returned collection or `{re, im}` object (before, every
+  collection came back as a fresh array; the one remaining per-call cost
+  that grows with a result is one `typeof` per cell of a returned
+  collection, with no allocation). For a kernel called 1.2 million times
+  with a 9 801-element list input, the entry walk was the whole per-call
+  cost. What a caller must do now: pass plain arrays (convert a typed array
+  once with `Array.from`; a typed array nested as a row is not refused and
+  not read), keep the entries of a list the compiled code reads on the real
+  lane numeric (a `{re, im}` entry is no longer refused: the compiled code
+  computes with it as plain JavaScript would — often `NaN`, sometimes a
+  string, or a value read from the real part), and not write to a result
+  (it may be a value the runner keeps for every later call, such as a
+  hoisted constant list; copy it first). The constant-cost checks stay: a
+  `{re, im}` object in a real scalar slot still throws a `TypeError` that
+  names the binding, a plain number in a complex slot is still lifted, and a
+  string for a binding the code reads as an array is still refused. The
+  result convention is kept: a `{re, im: 0}` still reads as a plain number,
+  inside a collection too. The interpreter is the route that validates an
+  input.
+  `CompilationResult.entryPlan` and a stored plan no longer carry the
+  per-entry checks (`entries`); a runtime that loads an older stored plan
+  ignores the field.
 - **`Gamma(n)` at an exact positive integer `n` evaluates to the integer
   `(n − 1)!`** instead of staying `Gamma(n)` ([#429](https://github.com/cortex-js/compute-engine/issues/429)):
   `Gamma(4)` is `6`, `Gamma(1)` is `1`. `Gamma(1/2)` and a float argument
