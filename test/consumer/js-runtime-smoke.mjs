@@ -82,8 +82,10 @@ same(
   power.run({ x })
 );
 
-// The conversions run() applies at entry: a real for a complex symbol, a
-// typed array for a list symbol.
+// The conversions run() applies at entry: a real for a complex symbol is
+// lifted; a typed array for a list symbol is REFUSED with a named error (the
+// compiled code reads plain arrays only, and the caller converts once), by
+// run() and by load() alike; a plain array passes as it is.
 const typed = new ComputeEngine();
 typed.declare('z', 'complex');
 typed.declare('L', 'list<real>');
@@ -100,11 +102,24 @@ const total = compile(
   }
 );
 if (!total?.success) fail('the list sum did not compile');
-const list = new Float64Array([1, 2, 3]);
+const list = Array.from(new Float64Array([1, 2, 3]));
 same(
   'list sum',
   total.run({ L: list }),
   createJavaScriptRuntime().load(total)({ L: list })
 );
+if (total.run({ L: list }) !== 6) fail('the list sum is not 6');
+for (const [label, run] of [
+  ['run()', (v) => total.run(v)],
+  ['load()', createJavaScriptRuntime().load(total)],
+]) {
+  let refused = false;
+  try {
+    run({ L: new Float64Array([1, 2, 3]) });
+  } catch (e) {
+    refused = e instanceof TypeError && /typed array/.test(e.message);
+  }
+  if (!refused) fail(`${label} did not refuse a typed array for a list symbol`);
+}
 
 console.log('js-runtime-smoke: OK');
