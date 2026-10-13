@@ -210,6 +210,12 @@ function literalEnclosureType(
   let lower: number;
   let upper: number;
   const re = v.re;
+  // `re` is `±Infinity` only for a value past the double range (an infinite
+  // literal is classified before this point), and both padded bounds would
+  // then have to be finite doubles: there is no enclosure. The bignum
+  // projection below would round a 200 000-digit integer to the working
+  // precision, ~20 ms, to reach the same answer.
+  if (re === Infinity || re === -Infinity) return undefined;
   if (Number.isFinite(re) && re !== 0 && Math.abs(re) >= MIN_NORMAL_DOUBLE) {
     const pad = Math.abs(re) * ENCLOSURE_PADDING;
     const lo = re - pad;

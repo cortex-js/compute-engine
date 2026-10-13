@@ -229,11 +229,38 @@ export function bigintDigits(n: bigint): number {
   // ~2·log2(bits) per-step `tmp >> BigInt(shift)` calls each allocated a fresh
   // full-width bigint. Byte-identical result; ~2–4× faster in the 30–500-digit
   // working-precision range that dominates div/cmp operand sizing.
-  const bits = n.toString(16).length * 4;
+  const hex = n.toString(16);
+  const bits = hex.length * 4;
   let approx = Math.ceil(bits * 0.30102999566398);
+  // Past the pow10 cache the boundary walk would build a power of ten as large
+  // as `n` on every call (`7n * 10n ** 200000n` took ~10 ms).
+  if (approx >= POW10_CACHE_MAX) return bigintDigitsLarge(n, hex);
   while (n < pow10(approx - 1)) approx--;
   while (n >= pow10(approx)) approx++;
   return approx;
+}
+
+/**
+ * Decimal digit count of a bigint whose power-of-ten boundary is too large to
+ * cache. `log10(n)` is estimated from the top 13 hex digits (52 bits, exact in
+ * a double) and the length of the rest, with a margin that covers the double
+ * rounding of the estimate. When the margin straddles an integer `k`, the
+ * estimate cannot tell `10^k - 1` from `10^k`, and one exact comparison against
+ * `10^k` settles it; a digit count off by one would corrupt `cmp` and
+ * `toPrecision`, as in the small-`n` ladder above.
+ */
+function bigintDigitsLarge(n: bigint, hex: string): number {
+  const shift = (hex.length - 13) * 4;
+  const log10 =
+    Math.log10(parseInt(hex.slice(0, 13), 16)) + shift * Math.LOG10E * Math.LN2;
+  // The truncated tail is below 2^-48 relative (1.5e-15 in log10), and the
+  // `shift * log10(2)` product carries ~3e-16 relative error. A truncated
+  // 14-digit log10(2) is off by 1.2e-15 per unit of `shift`: `10^99999` then
+  // counted one digit short.
+  const margin = 1e-14 + log10 * 1e-15;
+  const k = Math.floor(log10 + margin);
+  if (Math.floor(log10 - margin) === k) return k + 1;
+  return n >= pow10(k) ? k + 1 : k;
 }
 
 /**

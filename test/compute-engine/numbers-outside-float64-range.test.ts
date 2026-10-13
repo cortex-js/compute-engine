@@ -1299,6 +1299,52 @@ describe('DOUBLE PROJECTION OF AN EXACT RATIONAL OUTSIDE THE FLOAT64 RANGE', () 
       true
     );
   });
+
+  // A numerator wider than the denominator is shifted alone before the
+  // division, so the bits it shifts out must still break a tie: the
+  // numerators below sit exactly halfway between two doubles, or one unit
+  // above.
+  {
+    const two = (k: number) => 2n ** BigInt(k);
+    const tie = two(53) + 1n; // halfway between 2^53 and 2^53 + 2
+    const cases: [string, bigint, bigint, number][] = [
+      [
+        '3·2^1100 / (3·2^100) = 2^1000',
+        3n * two(1100),
+        3n * two(100),
+        2 ** 1000,
+      ],
+      [
+        '(2^53+1)·2^1100 / 2^100 ties to even',
+        tie * two(1100),
+        two(100),
+        2 ** 1053,
+      ],
+      [
+        '((2^53+1)·2^1100 + 1) / 2^100 is above the tie',
+        tie * two(1100) + 1n,
+        two(100),
+        (2 ** 53 + 2) * 2 ** 1000,
+      ],
+      [
+        '3·(2^53+1)·2^1100 / (3·2^100) ties to even',
+        3n * tie * two(1100),
+        3n * two(100),
+        2 ** 1053,
+      ],
+      [
+        '(3·(2^53+1)·2^1100 + 1) / (3·2^100) is above the tie',
+        3n * tie * two(1100) + 1n,
+        3n * two(100),
+        (2 ** 53 + 2) * 2 ** 1000,
+      ],
+      ['-2^2000 / 1 is out of range', -two(2000), 1n, -Infinity],
+    ];
+    for (const [name, n, d, expected] of cases)
+      test(`${name} = ${expected}`, () => {
+        expect(Object.is(rationalAsFloat([n, d]), expected)).toBe(true);
+      });
+  }
 });
 
 // §2.2, `eq` between an inexact value and an exact one. The inexact classes
@@ -1394,4 +1440,19 @@ describe('BIG-DECIMAL REAL PART OUTSIDE THE FLOAT64 RANGE, BOXED ROUTES', () => 
       expect(r.bignumRe!.eq(-4)).toBe(true);
       expect(r.bignumIm!.eq(ce.bignum('4e-800'))).toBe(true);
     }));
+});
+
+// The type of an integer literal past the double range is its sign range. It
+// does not round the integer to the working precision to find that out,
+// which took ~20 ms at 200 000 digits (#431).
+describe('TYPE OF A HUGE INTEGER LITERAL', () => {
+  for (const digits of [400, 200000]) {
+    const n = 7n * 10n ** BigInt(digits) + 12345n;
+    test(`7·10^${digits} + 12345 has type integer<1..>`, () => {
+      expect(ce.number(n).type.toString()).toBe('integer<1..>');
+    });
+    test(`-(7·10^${digits} + 12345) has type integer<..-1>`, () => {
+      expect(ce.number(-n).type.toString()).toBe('integer<..-1>');
+    });
+  }
 });
