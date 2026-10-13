@@ -281,6 +281,11 @@ export function callResultType(
         ].includes(expr.operator)
       )
         return undefined;
+      // A call whose head is a parameter or a local of the literal (a
+      // function-valued parameter `h` in `(h, a) ↦ h(a)`) is not a call of
+      // the function of that name in the engine's scope: nothing is known
+      // about it here, and `derive` would read the global one.
+      if (env.has(expr.operator)) return undefined;
       if (memo.has(expr)) return memo.get(expr);
       const children = expr.ops.map(walk);
       if (children.some((x) => x === undefined)) return undefined;

@@ -181,6 +181,51 @@
 
 ### Issues Resolved
 
+- **A user-function call over a list argument is typed from the body, so a
+  pass-through parameter no longer reads `unknown` in the result.** A
+  parameter that flows into the result unchanged (`f(x, y, z) := (−y, z,
+  x)`, or a rotation helper `r_{zz}(x, y, z, θ) := z`) is never narrowed by a
+  use, so the function's declared result carries `unknown` for it
+  (`tuple<number, unknown, unknown>`). A call with scalar arguments was
+  already typed from the body with each parameter typed as its argument,
+  but a call that broadcasts over a list argument was lifted from the
+  declared per-element result: `f([1, 2], [3, 4], [5, 6])` typed
+  `list<tuple<number, unknown, unknown>>` while its value is `[(−3, 5, 1),
+  (−4, 6, 2)]`, and a chain of such helpers called with a list of angles
+  typed `list<tuple<broadcastable<number>, broadcastable<number>,
+  broadcastable<unknown>>>`. The lifted element is now the body's type with
+  each mapped argument typed as the cell the broadcast maps over (a nested
+  list at its leaves), on the operator-definition and the value-definition
+  routes alike: `f([1, 2], [3, 4], [5, 6])` types `list<tuple<integer,
+  integer, integer>>`, and the chain `list<tuple<number, number, number>>`.
+  A function declared as a bare `function` and then assigned a literal
+  (the route of a document manager that lets the assignment infer the
+  signature) is now derived from the literal's own signature when it is
+  called inside another function's body; before, such a nested call could
+  not be derived and the enclosing call fell back to its declared result
+  even with literal arguments.
+  A collection-valued body keeps its nested lift and now carries the
+  element's type (`x ↦ [x, −x]` over `[1, 2]` is `list<vector<integer^2>>`,
+  before `list<vector<2>>`). Under a declared `broadcastable<T>` parameter
+  the cell is the element one rank down, as the call maps exactly one rank
+  (`(x: broadcastable<value>) ↦ (x, x)` over `[[1, 2], [3, 4]]` is
+  `list<tuple<vector<integer^2>, vector<integer^2>>>`); a generic literal
+  is not derived. Two more lift gaps are closed with it: when the mapped
+  arguments of a scalar-parameter function have different ranks (a matrix
+  beside a list) the call now types to the deepest rank (`f(x, y) := x`
+  over `[[1, 2], [3, 4]]` and `[5, 6]` is `list<list<integer>>`, before
+  `list<R>` with one level), and a call inside a function body whose head
+  is a function-valued PARAMETER is no longer typed from a global function
+  of the same name. A nested call that hands a numeric tuple to a scalar
+  parameter now types `any`, as the application-site typing already did,
+  instead of the signature result written for a scalar argument. In the
+  compiled `Dot` of two points, an impure operand (a point whose
+  coordinates draw a random number) is bound once, in operand order, and
+  the sum is written out as for a pure one. An argument whose type is `unknown` (an
+  undeclared symbol) is unchanged. Reported through the Tycho ledger (row
+  373): a plot classifier that must not evaluate read the `unknown` as
+  inconclusive and evaluated the row.
+
 - **`Power` over a list of exponents, and a symbol exponent that holds a unit
   fraction, evaluate the root**
   ([#430](https://github.com/cortex-js/compute-engine/issues/430)).

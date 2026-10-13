@@ -70,8 +70,13 @@ describe('Dot over constructed scalar coordinates with broad static types', () =
   );
 
   test('retained helper locals prove scalar components without narrowing the signature', () => {
-    const { expr } = fixture();
-    expect(expr.op1.type.toString()).toContain('broadcastable');
+    const { expr, ce } = fixture();
+    // The call is typed from the body — `q` is assigned `angle(u)`, a
+    // number — while the declared signature of `point` stays the bare
+    // `function`; the compiler's helper-local proof is what writes out the
+    // components.
+    expect(expr.op1.type.toString()).toBe('tuple<number, number>');
+    expect(ce.box('point').type.toString()).toBe('function');
     const r = compile(expr);
     expect(r.success).toBe(true);
     expect(source(r)).not.toMatch(/_SYS\.(?:bcast|matmul)|Array\.isArray/);
@@ -104,11 +109,20 @@ describe('Dot over constructed scalar coordinates with broad static types', () =
   });
 
   test('a caller override cannot inherit the helper body proof', () => {
+    // The static type of `point(x)` is derived from the body, which a
+    // `functions` override replaces, so the inner product must not read the
+    // override's value by the body's width: it tests the run-time shape and
+    // falls back to `_SYS.matmul`, which answers a width mismatch as the
+    // interpreter does (NaN), and the override's own values otherwise.
     const { expr } = fixture();
-    const r = compile(expr, { functions: { point: '(u => [[1, 2], 3])' } });
-    expect(r.success).toBe(true);
-    expect(source(r)).toContain('_SYS.bcast');
-    expect(r.run!({ x: 0, y: -2 })).toEqual([7, 8]);
+    const wide = compile(expr, { functions: { point: '(u => [1, 2, 3])' } });
+    expect(wide.success).toBe(true);
+    expect(source(wide)).toContain('Array.isArray');
+    expect(source(wide)).toContain('_SYS.matmul');
+    expect(wide.run!({ x: 0, y: -2 })).toBeNaN();
+    const same = compile(expr, { functions: { point: '(u => [u + 10, 3])' } });
+    // `(10, 3) · (1, 2)` with `x = 0`, `y = -2`.
+    expect(same.run!({ x: 0, y: -2 })).toBe(16);
   });
 
   test('a scalar caller parameter cannot hide a callee capture of a global list', () => {
@@ -165,7 +179,15 @@ describe('Dot over constructed scalar coordinates with broad static types', () =
     );
     expect(r.success).toBe(true);
     expect(source(r)).toContain('_SYS.bcast');
-    expect(r.run!({ x: 0, P: [[1, 2], [3, 4]] })).toEqual([5, 11]);
+    expect(
+      r.run!({
+        x: 0,
+        P: [
+          [1, 2],
+          [3, 4],
+        ],
+      })
+    ).toEqual([5, 11]);
   });
 
   test('declared runtime points keep width checks and matrix fallback', () => {
@@ -178,6 +200,23 @@ describe('Dot over constructed scalar coordinates with broad static types', () =
     expect(source(r)).toContain('_SYS.matmul');
     expect(r.run!({ a: [1, [1, 2]], b: [3, 4] })).toEqual([7, 11]);
     expect(r.run!({ a: [1, 2, 3], b: [4, 5, 6] })).toBe(32);
+  });
+
+  test('an impure operand does not reorder the reads of a pure one', () => {
+    // Both operands are bound once, in operand order, before the sum reads
+    // them: an assignment inside the second operand must not be seen by
+    // the first operand's reads, as the interpreter evaluates the first
+    // operand first.
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    const expr = ce.box([
+      'Dot',
+      ['Tuple', 'x', 1],
+      ['Tuple', ['Block', ['Assign', 'x', 2], 1], 1],
+    ]);
+    const r = compile(expr);
+    expect(r.success).toBe(true);
+    expect(r.run!({ x: 1 })).toBe(2);
   });
 
   test('each impure point operand is evaluated once', () => {

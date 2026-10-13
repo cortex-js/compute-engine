@@ -32,12 +32,14 @@ import type {
   BoxedValueDefinition,
   ExpressionInput,
   FunctionInterface,
+  OperandDescriptor,
 } from '../global-types.js';
 import type { EffectHandlers } from '../types-effects.js';
 import { runWithEvaluationEffects } from '../effects-registry.js';
 
 import {
   describe as describeOperand,
+  describeType,
   type DescriptorMemo,
   guardedTypeHandlerCall,
 } from './operand-descriptor.js';
@@ -180,6 +182,7 @@ import {
   codomainMarkerType,
   stripMissingFromType,
   collectionElementType,
+  resolveTypeAlias,
   typeContainsMissing,
   typeHasNanFreeNumericCell,
   widen,
@@ -8222,7 +8225,11 @@ function lambdaBroadcastType(
   perElementResult: Type,
   slots: ReturnType<typeof broadcastableParamSlots>,
   inferredResult: boolean,
-  generic = false
+  generic = false,
+  // The per-element result derived from the body for the mapped operands
+  // (`derivedBroadcastElementResult`), called once the lift is known to
+  // apply; `undefined` keeps `perElementResult`.
+  derive?: (mappedAt: ReadonlyArray<boolean>) => Type | undefined
 ): Type | undefined {
   // A numeric-tuple argument binds WHOLE to a scalar parameter (atomic,
   // never mapped), then the body's own arithmetic decides the shape:
@@ -8269,6 +8276,16 @@ function lambdaBroadcastType(
     );
     if (loneUnionResult !== undefined) return loneUnionResult;
 
+    // From here the lift applies: the per-element result is the body's
+    // type with each mapped operand typed as its cell, when that can be
+    // derived. A generic literal is not derived: its type solver bound the
+    // type parameter, and `perElementResult` is that instantiation.
+    if (!generic && derive !== undefined)
+      perElementResult =
+        derive(
+          ops.map((x, i) => mappable(i) && isLambdaBroadcastParticipant(x))
+        ) ?? perElementResult;
+
     // A collection-valued per-element result keeps the plain nested lift
     // (`f := x ↦ [x,-x]` over `[1,2]` → `list<vector<2>>`): installing the
     // collection result as the element of a dimensioned list mixes
@@ -8285,8 +8302,10 @@ function lambdaBroadcastType(
     // mapped at its leaves (`nestedBroadcastResultType`). Two exceptions
     // take one level: a GENERIC signature, whose type solver bound its type
     // parameter to the element one rank down, so `perElementResult` already
-    // reflects the argument's rank; and a declared `broadcastable<T>` slot
-    // plan (`slots`), which maps exactly one rank.
+    // reflects the argument's rank, and one list level is the whole lift
+    // (the dimensioned encoding of the value makes it a member of that
+    // type: a `list<tuple<…>^(2x2)>` is a `list<tuple<…>>`); and a declared
+    // `broadcastable<T>` slot plan (`slots`), which maps exactly one rank.
     if (collectionValued)
       return generic || slots !== undefined
         ? broadcastResultType(perElementResult)
@@ -8294,11 +8313,19 @@ function lambdaBroadcastType(
             mapped.map((x) => x.type.type),
             perElementResult
           );
-    // Shape-aware (§D6.1): the map preserves the source's structure.
-    return broadcastShapedResultType(
-      mapped.map((x) => x.type.type),
-      perElementResult
-    );
+    // Shape-aware (§D6.1): the map preserves the source's structure. When
+    // the mapped operands have different ranks (a matrix beside a list),
+    // the shape-aware form gives one plain list level, but the value is
+    // mapped to the DEEPEST rank (`[[1,2],[3,4]]` beside `[5,6]` gives a
+    // matrix), so the nested form, which wraps one level per rank of the
+    // deepest operand, is the one the value is a member of. A generic
+    // signature and a declared slot plan keep the shape-aware form, for the
+    // reasons given above (one list level is their whole lift).
+    const types = mapped.map((x) => x.type.type);
+    const shaped = broadcastShapedResultType(types, perElementResult);
+    if (generic || slots !== undefined) return shaped;
+    const nested = nestedBroadcastResultType(types, perElementResult);
+    return listRank(nested) > listRank(shaped) ? nested : shaped;
   }
   // No operand is a statically-visible collection, but an operand's
   // collection-ness may not be statically knowable — it might broadcast at
@@ -8320,6 +8347,97 @@ function lambdaBroadcastType(
   )
     return { kind: 'broadcastable', elements: perElementResult };
   return undefined;
+}
+
+/**
+ * The per-element result of a BROADCAST user-function call, derived from
+ * the body, or `undefined` when nothing is derived.
+ *
+ * `lambdaBroadcastType` wraps a per-element result in one list level per
+ * rank. Its callers hand it the instantiated signature result, which for a
+ * lambda whose result was inferred from the body is the body's type with
+ * every parameter `unknown`. A parameter that flows into the result
+ * unchanged — `f(x, y, z) := (−y, z, x)` — is therefore `unknown` in that
+ * result (`tuple<number, unknown, unknown>`), and the lifted type carried
+ * the `unknown` into every cell, although the call maps a number into each
+ * cell: `f([1, 2], [3, 4], [5, 6])` evaluates to `[(−3, 5, 1), (−4, 6, 2)]`
+ * and typed `list<tuple<number, unknown, unknown>>`. A scalar call never
+ * had the gap, because `callResultType` derives its type from the body with
+ * each parameter typed as its argument. This helper does the same for the
+ * broadcast call: each mapped operand (a `mappable` slot that is a
+ * `isLambdaBroadcastParticipant`) is described by the LEAF cell type the
+ * broadcast maps over (`broadcastLeafType`), every other operand by itself,
+ * and the body's type under those descriptors is the per-element result.
+ * `callResultType` keeps its guards — the result is accepted only when it
+ * is a subtype of `perElementResult`, and a recursive or unsupported body
+ * answers `undefined` — so a caller that gets `undefined` lifts the
+ * signature result as before. `lambdaBroadcastType` calls this helper
+ * after its early exits (a numeric-tuple argument, a lone scalar-or-list
+ * union) and not for a generic literal, whose type solver binds the type
+ * parameter itself. The motivating case is a chain of rotation helpers
+ * whose innermost one is a pass-through, called with a list of angles
+ * (Tycho ledger row 373).
+ */
+function derivedBroadcastElementResult(
+  expr: BoxedFunction,
+  mappedAt: ReadonlyArray<boolean>,
+  perElementResult: Type,
+  oneRank: boolean
+): Type | undefined {
+  const args: OperandDescriptor[] = [];
+  // By position, not by identity: one boxed expression may fill a mapped
+  // slot and a slot that binds whole.
+  for (const [i, x] of expr.ops.entries()) {
+    if (mappedAt[i]) {
+      // A declared `broadcastable<T>` slot plan maps exactly one rank (a
+      // nested row binds whole), so the cell is the element one rank down;
+      // a scalar-parameter broadcast descends to the leaves.
+      const cell = oneRank
+        ? collectionElementType(resolveTypeAlias(x.type.type))
+        : broadcastLeafType(x.type.type);
+      if (cell === undefined) return undefined;
+      args.push(describeType(cell));
+    } else args.push(describeOperand(x));
+  }
+  return callResultType(
+    expr.engine,
+    expr.operator,
+    args,
+    perElementResult,
+    (h, a) => deriveApplicationType(expr.engine, h, a)
+  );
+}
+
+/**
+ * The type of the cells a scalar-parameter broadcast maps over in a
+ * collection of type `t`: the element type, descended through nested
+ * indexed collections to the leaves, as `nestedBroadcastResultType`
+ * descends them (a list of lists is mapped at its leaves; a tuple, a string
+ * or a non-indexed collection is a cell). `undefined` for a type with no
+ * element type (a bare `list`), for a union (whose cells may differ), and
+ * for a nesting deeper than any type nests in practice.
+ */
+function broadcastLeafType(t0: Type): Type | undefined {
+  const MAX_RANK = 8;
+  let t = resolveTypeAlias(t0);
+  for (let d = 0; d < MAX_RANK; d++) {
+    if (typeof t === 'object' && t.kind === 'union') return undefined;
+    if (typeof t === 'object' && t.kind === 'tuple') return t;
+    if (isSubtype(t, 'string')) return t;
+    if (!isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE)) return t;
+    const e = collectionElementType(t);
+    if (e === undefined) return undefined;
+    t = resolveTypeAlias(e);
+  }
+  return undefined;
+}
+
+/** The number of list levels of `t` (a dimensioned list counts one per
+ * dimension): 0 for a non-list, 1 for `list<integer>`, 2 for
+ * `list<list<integer>>` and for `list<integer^(2x2)>`. */
+function listRank(t: Type): number {
+  if (typeof t !== 'object' || t.kind !== 'list') return 0;
+  return (t.dimensions?.length ?? 1) + listRank(t.elements);
 }
 
 function type(expr: BoxedFunction): Type | BoxedType {
@@ -8930,12 +9048,22 @@ function type(expr: BoxedFunction): Type | BoxedType {
         threadable: true,
       });
       const lambdaResult = instantiated ?? sigResult;
+      // The per-element result is derived from the body when it can be
+      // (`derivedBroadcastElementResult`): the signature result types a
+      // pass-through parameter `unknown`.
       const lifted = lambdaBroadcastType(
         expr.ops,
         lambdaResult,
         declaredSlots,
         def.inferredSignature,
-        instantiated !== undefined
+        instantiated !== undefined,
+        (mappedAt) =>
+          derivedBroadcastElementResult(
+            expr,
+            mappedAt,
+            lambdaResult,
+            declaredSlots !== undefined
+          )
       );
       // Through `applyContractB` directly, NOT `maybeAbsorb`: the
       // missing-value absorption never applied on this return, and the
@@ -9063,7 +9191,16 @@ function type(expr: BoxedFunction): Type | BoxedType {
         sigResult,
         valueSlots,
         expr.valueDefinition.inferredType,
-        isPolymorphicType(sig)
+        isPolymorphicType(sig),
+        // As on the operator-definition route: the body's per-element
+        // result when it can be derived (`derivedBroadcastElementResult`).
+        (mappedAt) =>
+          derivedBroadcastElementResult(
+            expr,
+            mappedAt,
+            sigResult,
+            valueSlots !== undefined
+          )
       );
       if (lifted !== undefined) return lifted;
     }

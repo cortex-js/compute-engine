@@ -88,13 +88,15 @@ describe('DECLARED broadcastable<T> — application-site typing (Tycho 157(1))',
     // Since placeholder-signature refinement (2026-08-15) the assignment
     // refines the declared `unknown` result to the body's `tuple<…>`; the
     // LIFT under test is unchanged — a list argument still types `list<R>`,
-    // a scalar the bare `R`. A concrete scalar call additionally refines the
-    // tuple elements without changing the broad declaration.
+    // a scalar the bare `R`. A concrete call, scalar or list, additionally
+    // refines the tuple elements from the body with the parameter typed as
+    // the argument (or, under the lift, as its element), without changing
+    // the broad declaration.
     expect(ce.box('vf').type.toString()).toBe(
       '(broadcastable<number>) -> tuple<unknown, unknown>'
     );
     expect(ce.box(['vf', 'L']).type.toString()).toBe(
-      'list<tuple<unknown, unknown>>'
+      'list<tuple<number, number>>'
     );
     expectTypeBetween(ce.box(['vf', 7]), { atMost: 'tuple<number, number>' });
   });

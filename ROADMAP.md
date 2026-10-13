@@ -109,6 +109,23 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
+### A declared result computed through a numeric-tuple argument to a scalar parameter (OPEN, small — found 2026-10-13 by the review of the row 373 call typing)
+
+With `f := x ↦ (−x, x)` and `g := a ↦ f((a, a))`, both declared `function`,
+`g(1)` evaluates to `((−1, −1), (1, 1))` but types `tuple<number, number>`.
+A numeric tuple binds whole to a scalar parameter and the body's arithmetic
+decides the shape, so the signature result of `f`, written for a scalar
+argument, does not describe the value. The application-site typing of a
+direct call answers `any` for this case (`lambdaBroadcastType`), and the
+descriptor route of `deriveApplicationType` now does too, but the declared
+result of `g` is inferred at its definition, where `a` is open and `(a, a)`
+is not yet a numeric tuple, so the inference reads `f`'s signature result and
+every call of `g` inherits it. The fix is in the result inference of a
+literal whose body hands a tuple built from an open parameter to a scalar
+parameter: the result is `any` (or the tuple shape, when the callee's body
+can be typed with the tuple). Pinned as the descriptor-route half in
+`test/compute-engine/tycho-373-passthrough-broadcast-typing.test.ts`.
+
 ### Asynchronous materialization walks a lazy view synchronously (OPEN, small — found 2026-10-08 by the listing of lazy elements)
 
 `Map(AsyncOnly, [1, 2]).evaluateAsync({ materialization: true })`, with

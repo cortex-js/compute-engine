@@ -103,6 +103,30 @@ export function installBroadcastLiftHooks(hooks: BroadcastLiftHooks): void {
  *
  * Returns `undefined` when `operator` has no operator definition.
  */
+/** Whether `t` is a tuple whose every component is a number. */
+function isNumericTupleType(t: Type): boolean {
+  return (
+    typeof t === 'object' &&
+    t.kind === 'tuple' &&
+    t.elements.every((e) => isSubtype(e.type, 'number'))
+  );
+}
+
+/** Whether parameter `i` of the signature `ft` is typed to take a tuple
+ * (a tuple, a collection, or any type a tuple inhabits other than the open
+ * `unknown`/`any`, which bind a tuple whole as a scalar parameter does). */
+function parameterAdmitsTuple(ft: Type, i: number): boolean {
+  if (typeof ft !== 'object' || ft.kind !== 'signature') return false;
+  const param =
+    ft.args?.[i]?.type ??
+    ft.optArgs?.[i - (ft.args?.length ?? 0)]?.type ??
+    ft.variadicArg?.type;
+  if (param === undefined || param === 'unknown' || param === 'any')
+    return false;
+  if (isSubtype(param, 'number')) return false;
+  return true;
+}
+
 export function deriveApplicationType(
   engine: ComputeEngine,
   operator: string,
@@ -117,8 +141,21 @@ export function deriveApplicationType(
   // function literal) has no operator definition: its application types from
   // its function type alone, a polytype instantiated against the operands.
   if (!('operator' in binding)) {
-    const ft = binding.value.type.type;
-    if (typeof ft !== 'object' || ft.kind !== 'signature') return undefined;
+    let ft = binding.value.type.type;
+    if (typeof ft !== 'object' || ft.kind !== 'signature') {
+      // A bare `function` declaration later assigned a literal (the
+      // document-manager route of a consumer that declares every function
+      // `function` and lets the assignment infer the signature): the
+      // declared type says nothing, and the literal's own type is the
+      // signature the engine inferred from the body. Without this fallback
+      // a call to such a function inside another function's body could not
+      // be derived, and the enclosing call fell back to its declared
+      // result, in which a pass-through parameter reads `unknown`.
+      const literal = binding.value.value;
+      const lt = literal === undefined ? undefined : literal.type.type;
+      if (typeof lt !== 'object' || lt.kind !== 'signature') return undefined;
+      ft = lt;
+    }
     const inferred = callResultType(
       engine,
       operator,
@@ -127,6 +164,18 @@ export function deriveApplicationType(
       (h, a) => deriveApplicationType(engine, h, a)
     );
     if (inferred !== undefined) return inferred;
+    // A numeric tuple binds WHOLE to a parameter the signature types as a
+    // scalar or leaves open, and the body's arithmetic then decides the
+    // shape of the value (`(a, a)` through `x ↦ (−x, x)` is a pair of
+    // pairs), which the signature result, written for a scalar argument,
+    // does not describe. The application-site typing of a lambda answers
+    // `any` for this case (`lambdaBroadcastType`), and so does this route.
+    if (
+      operands.some(
+        (d, i) => isNumericTupleType(d.type) && !parameterAdmitsTuple(ft, i)
+      )
+    )
+      return 'any';
     return (
       instantiatedResultTypeOverActuals(ft, operands.map(actualOfDescriptor), {
         threadable: true,

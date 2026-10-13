@@ -12988,8 +12988,8 @@ export class BaseCompiler {
    * `dot(vec2, vec2)` for the same expression.
    *
    * The admission is that of the component fan-out in
-   * {@link tryCompileBroadcast}: both operands pure and of one static width
-   * below {@link MIN_UNROLLED_WIDTH} ({@link staticCollectionWidth} — a numeric
+   * {@link tryCompileBroadcast}: both operands of one static width below
+   * {@link MIN_UNROLLED_WIDTH} ({@link staticCollectionWidth} — a numeric
    * tuple type or a dimensioned numeric list type), no operand of unprovable
    * run-time shape, and no complex component, since the scalar `*` and `+`
    * written here are the real lowering. As in the fan-out, a source that is
@@ -12997,7 +12997,10 @@ export class BaseCompiler {
    * time, because a declared width constrains what the ENGINE assigns and not
    * what a caller puts in `vars`; the failing shapes go to `_SYS.matmul`,
    * which answers them the way the interpreter does. Without a test, a
-   * literal is read component by component from its text.
+   * literal is read component by component from its text. An IMPURE operand
+   * (a point whose coordinates draw a random number) is always bound once,
+   * in operand order, never read from its text or repeated: it is evaluated
+   * exactly once per call, as the interpreter evaluates it.
    */
   static compileStaticInnerProduct(
     args: ReadonlyArray<Expression>,
@@ -13018,7 +13021,6 @@ export class BaseCompiler {
     // sum written by hand (`p_0 q_0 + p_1 q_1`) is.
     if (BaseCompiler.linearAlgebraLane(args) === 'complex') return undefined;
     for (const a of args) {
-      if (a.isPure !== true) return undefined;
       if (isBoundPossiblyCollectionTyped(a, target)) return undefined;
       const t = compilationType(a);
       if (typeof t === 'string') return undefined;
@@ -13033,21 +13035,37 @@ export class BaseCompiler {
     const texts = codes.map((code) =>
       BaseCompiler.hoistedListLiteralText(target, code)
     );
+    // A point whose coordinates a user function builds from scalars is
+    // proved by `provenScalarPointWidth` (the proof that admits an impure
+    // body, read through its helper locals); `provenPointWidth` adds the
+    // constructed-list sources.
     const needsGuard = texts.map(
       (text, i) =>
         BaseCompiler.arrayLiteralWidth(text) !== n &&
-        provenPointWidth(args[i], target) !== n
+        provenPointWidth(args[i], target) !== n &&
+        provenScalarPointWidth(args[i], target) !== n
     );
     const anyGuard = needsGuard.some((g) => g);
     const bindings: string[] = [];
     const bound: string[] = [];
     const guarded: string[] = [];
+    // With an impure operand, BOTH operands are bound once, in operand
+    // order, before the sum reads them: an operand read from its literal
+    // text or repeated inline would be evaluated after the bound one, and
+    // an assignment inside the impure operand would then be seen by the
+    // other operand's reads, where the interpreter evaluates the operands
+    // in order.
+    const anyImpure = args.some((a) => a.isPure !== true);
     const parts: (string | string[])[] = codes.map((code, i) => {
-      if (!anyGuard) {
+      if (!anyGuard && !anyImpure) {
         const elements = BaseCompiler.arrayLiteralElements(texts[i], n);
         if (elements !== undefined) return elements;
       }
-      if (!needsGuard[i] && BaseCompiler.REPEATABLE_SOURCE.test(code))
+      if (
+        !needsGuard[i] &&
+        !anyImpure &&
+        BaseCompiler.REPEATABLE_SOURCE.test(code)
+      )
         return code;
       const v = BaseCompiler.tempVar(target);
       bindings.push(v);
