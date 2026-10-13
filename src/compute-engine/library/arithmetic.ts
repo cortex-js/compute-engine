@@ -3961,10 +3961,34 @@ function evaluateLerchPhi(
       .evaluate({ numericApproximation: numeric });
 
   // Φ(0,s,a) = a^(−s): only the k = 0 term survives (0⁰ = 1).
-  if (zIsZero)
+  if (zIsZero) {
+    // The term is the principal power (DLMF 25.14.1), as in the series the
+    // kernel sums: e^(−s·Ln a). `Power` reads a float exponent as the
+    // nearest p/q and takes the real root for an odd q, so a < 0 with
+    // s = 2.976 gave the real 0.0542 where Φ(0, 2.976, −2.664) is
+    // −0.0540 − 0.0041i.
+    if (
+      numeric &&
+      isNumber(a) &&
+      !a.isComplex &&
+      a.re < 0 &&
+      isNumber(s) &&
+      !s.isComplex &&
+      Number.isFinite(s.re) &&
+      !Number.isInteger(s.re)
+    )
+      return engine
+        .function('Exp', [
+          engine.function('Multiply', [
+            engine.function('Negate', [s]),
+            engine.function('Ln', [a]),
+          ]),
+        ])
+        .evaluate({ numericApproximation: true });
     return engine
       .function('Power', [a, engine.function('Negate', [s])])
       .evaluate({ numericApproximation: numeric });
+  }
 
   // Φ(z,0,a) = 1/(1 − z), independent of a — the geometric series and its
   // continuation.
@@ -5894,12 +5918,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
 
     // Riemann zeta function ζ(s) = Σ_{n=1}^∞ 1/n^s, and its two-argument
-    // (Hurwitz) form ζ(s,a) = Σ_{n=0}^∞ (n+a)^{-s} — Wolfram's `Zeta[s,a]`;
-    // `HurwitzZeta` below is the same function under its own name.
+    // form, Wolfram's generalized `Zeta[s,a]` = Σ_{n=0}^∞ |n+a|^{-s}.
+    // It equals `HurwitzZeta` for a > 0; for a ≤ 0 the terms are real and
+    // `HurwitzZeta` sums the complex (n+a)^{-s}.
     // Converges for Re(s) > 1, analytically continued elsewhere
     Zeta: {
       description:
-        'Riemann zeta function; with two arguments, the Hurwitz zeta function ζ(s,a) = Σ_{n=0}^∞ (n+a)^{-s}.',
+        "Riemann zeta function; with two arguments, Wolfram's generalized zeta ζ(s,a) = Σ_{n=0}^∞ |n+a|^{-s} (a term with n+a = 0 omitted), which is HurwitzZeta(s,a) for a > 0.",
       wikidata: 'Q187235',
       complexity: 8500,
       broadcastable: true,

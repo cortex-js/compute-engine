@@ -147,6 +147,25 @@
 
 ### Issues Resolved
 
+- **`LerchPhi(0, s, a)` with a negative `a` and a float `s` is the principal
+  power `a^(−s)`,** as the series terms are (DLMF 25.14.1)
+  ([#428](https://github.com/cortex-js/compute-engine/issues/428), contributed
+  by [enumeratio](https://github.com/enumeratio)). The z = 0 shortcut went
+  through `Power`, which reads a float exponent as the nearest p/q and takes
+  the real root for an odd q: `LerchPhi(0, 2.976, -2.664).N()` was the real
+  `0.05415`, and is `-0.053998 - 0.004079i`. Every other z already summed
+  principal powers (`LerchPhi(0.5, 2.976, -2.664)` is `2.23287 - 0.07605i`),
+  and `Power` is unchanged.
+
+- **The two-argument `Zeta` is documented as Wolfram's generalized zeta,**
+  Σ |n + a|^(−s) with the n + a = 0 term omitted
+  ([#428](https://github.com/cortex-js/compute-engine/issues/428), contributed
+  by [enumeratio](https://github.com/enumeratio)). Its description gave the
+  Hurwitz sum Σ (n + a)^(−s), which differs for a ≤ 0: `Zeta(2.976, -2.664)`
+  is the real `29.90244`, `HurwitzZeta(2.976, -2.664)` is
+  `22.60026 - 0.27542i`. The description now says so and points to
+  `HurwitzZeta`.
+
 - **`N(x, p)` with more digits than the engine has, and a goal `N(x, [p, a])`,
   yield under `evaluateAsync`** ([#392](https://github.com/cortex-js/compute-engine/issues/392)).
   `N(\sum_{k=1}^{400000} \frac{1}{k^2}, 30)` and `N(…, [10, 5])` ran to the

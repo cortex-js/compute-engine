@@ -1,6 +1,6 @@
 # Compute Engine — Roadmap
 
-**Last updated:** 2026-10-12.
+**Last updated:** 2026-10-13.
 
 This document tracks **remaining** work; an item leaves this file once it lands.
 Detail on completed work lives in git history, `CHANGELOG.md`, the linked source
@@ -108,6 +108,16 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 ---
 
 ## Remaining work
+
+### Compiled `LerchPhi` and `HurwitzZeta` answer NaN for a complex value (OPEN, small — found 2026-10-13 by #428)
+
+`_SYS.lerchPhi`, `_gpu_lerch_phi`, `_SYS.hurwitzZeta` and `_gpu_hurwitz_zeta` are
+real-only and return NaN for a < 0 with a non-integer s (and, for LerchPhi, real
+z > 1), where the interpreter has a complex value; the lowering still reports
+success. The existing tests pin that NaN. Fix: decline once those tests move to a
+proven-real base point and order.
+Separately, an exact odd-denominator order (`LerchPhi(0, 1/3, -8).evaluate()`)
+still goes through `Power`'s real root, where `.N()` is the principal power.
 
 ### Asynchronous materialization walks a lazy view synchronously (OPEN, small — found 2026-10-08 by the listing of lazy elements)
 
