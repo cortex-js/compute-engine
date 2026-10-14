@@ -7685,20 +7685,35 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     const re = BaseCompiler.tempVar(target);
     const im = BaseCompiler.tempVar(target);
 
-    // Accumulate with intermediate variables
+    // Accumulate with intermediate variables.
+    //
+    // The running product is REAL until the first complex factor: it starts
+    // as the first factor when that factor is real. Canonical order puts
+    // numeric literals and symbols before function expressions such as a
+    // promoted radical, so a plotted term with several real coefficients and
+    // one promoted radical runs real for most of the chain. Symbols are
+    // sorted by name, not by type, so a complex symbol can still come before
+    // real ones; the code below handles any order. While the running product
+    // is real, only `re` is updated and `im` is not declared yet. An
+    // imaginary accumulator initialised to
+    // `0` and multiplied by every real factor would cost one multiplication
+    // per factor for a value known to be zero, and would be WRONG for an
+    // infinite real factor: `0 * Infinity` is `NaN`, so `3 · x · z` with
+    // `x = Infinity` returned `{ re: NaN, im: NaN }` where the two-operand
+    // `x · z` returns `{ re: Infinity, im: Infinity }` and the interpreter
+    // returns complex infinity.
     const firstIsComplex = BaseCompiler.isComplexValued(args[0]);
+    let accumulatorIsReal = !firstIsComplex;
     parts.push(`let ${re} = ${firstIsComplex ? `${temps[0]}.re` : temps[0]};`);
-    parts.push(`let ${im} = ${firstIsComplex ? `${temps[0]}.im` : '0'};`);
+    if (firstIsComplex) parts.push(`let ${im} = ${temps[0]}.im;`);
 
     for (let i = 1; i < args.length; i++) {
       const t = temps[i];
       const tIsComplex = BaseCompiler.isComplexValued(args[i]);
       if (!tIsComplex) {
-        // A REAL factor scales the two components. The full complex step below
-        // would instead emit four multiplications and two temporaries per
-        // factor to compute an imaginary half that is known to be zero — the
-        // shape a plotted expression with one promoted radical and several
-        // real factors per term has.
+        // A REAL factor scales the components in place. The full complex step
+        // below would instead emit four multiplications and two temporaries
+        // per factor to compute an imaginary half that is known to be zero.
         //
         // The accumulation stays SEQUENTIAL and in argument order, so the
         // ROUNDING ORDER is preserved: each factor multiplies the running
@@ -7708,7 +7723,20 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         // `z = {re: 1e-200, im: 1e-200}` and `a = b = 1e200`, `a * b`
         // overflows to infinity while the stepwise product stays finite.
         parts.push(`${re} = ${re} * ${t};`);
-        parts.push(`${im} = ${im} * ${t};`);
+        if (!accumulatorIsReal) parts.push(`${im} = ${im} * ${t};`);
+        continue;
+      }
+      if (accumulatorIsReal) {
+        // The first complex factor scales its two components by the real
+        // running product: two multiplications, and this is where `im` is
+        // declared. The product has at least one complex factor (checked at
+        // the top of the handler), so `im` is always declared before the
+        // result reads it.
+        const nre = BaseCompiler.tempVar(target);
+        parts.push(`const ${nre} = ${re} * ${t}.re;`);
+        parts.push(`let ${im} = ${re} * ${t}.im;`);
+        parts.push(`${re} = ${nre};`);
+        accumulatorIsReal = false;
         continue;
       }
       const nre = BaseCompiler.tempVar(target);

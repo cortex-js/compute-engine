@@ -865,7 +865,8 @@ export async function evaluateInOwnBindingsAsync(
 ): Promise<Expression> {
   const contextStack = [...(options?._contextStack ?? ce._evalContextStack)];
   const carried = { ...options, _contextStack: contextStack };
-  const inContext = <T>(fn: () => T): T => ce.withEvaluationContext(carried, fn);
+  const inContext = <T>(fn: () => T): T =>
+    ce.withEvaluationContext(carried, fn);
   const env = inContext(() =>
     isNumber(value) || (isFunction(value) && value._isLiteralData())
       ? undefined
