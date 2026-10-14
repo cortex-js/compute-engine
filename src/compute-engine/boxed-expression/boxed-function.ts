@@ -9585,11 +9585,11 @@ function applyFunctionLiteralWith(
                       ._fn(expr.operator, zipped)
                       .evaluateAsync(options)
                   : (scalarConformance(zipped) ??
-                      apply(value, zipped, {
-                        ...options,
-                        awaitStatements: true,
-                        arityFrame,
-                      }))
+                    apply(value, zipped, {
+                      ...options,
+                      awaitStatements: true,
+                      arityFrame,
+                    }))
               );
               results.push(inContext(() => appliedOrRefused(applied, zipped)));
             }
@@ -9754,7 +9754,8 @@ function applyFunctionLiteralWith(
   const pointPlan = pointListParamSlots(broadcastGateType);
   const applyPointOrWhole = (): Expression | Promise<Expression> => {
     if (pointPlan) {
-      const canonicalOps = ops.length === expr.ops.length ? expr.ops : undefined;
+      const canonicalOps =
+        ops.length === expr.ops.length ? expr.ops : undefined;
       if (awaitBody)
         return pointListBroadcastAsync(
           expr.engine,

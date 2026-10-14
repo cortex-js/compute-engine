@@ -11525,11 +11525,13 @@ async function evaluateNAsync(
       _precisionWindow: window,
     };
     return isSymbol(source)
-      ? (source as typeof source & {
-          _NAsync(
-            options: Parameters<Expression['evaluateAsync']>[0]
-          ): Promise<Expression>;
-        })._NAsync(numericOptions)
+      ? (
+          source as typeof source & {
+            _NAsync(
+              options: Parameters<Expression['evaluateAsync']>[0]
+            ): Promise<Expression>;
+          }
+        )._NAsync(numericOptions)
       : source.evaluateAsync(numericOptions);
   };
   // The exact value of `source`, computed inside `window` (the synchronous

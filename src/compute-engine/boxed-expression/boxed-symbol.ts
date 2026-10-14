@@ -1547,10 +1547,11 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       return this;
     const value = def.isConstant
       ? def.value
-      : numericRead ? this._value : this._contextValue();
+      : numericRead
+        ? this._value
+        : this._contextValue();
     if (value === undefined) return this;
-    if (isNumber(value))
-      return numeric ? value.N() : value.evaluate(options);
+    if (isNumber(value)) return numeric ? value.N() : value.evaluate(options);
     if (numericRead && !def.isConstant && value.symbols.includes(this._id))
       return value;
 
@@ -1573,7 +1574,11 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     const frame = { ...stack[stack.length - 1] };
     asyncDereferences.set(frame, node);
     const carried = { ...options, _contextStack: [...stack, frame] };
-    const result = await evaluateInOwnBindingsAsync(this.engine, value, carried);
+    const result = await evaluateInOwnBindingsAsync(
+      this.engine,
+      value,
+      carried
+    );
     if (node.cyclic) return parent === undefined ? value : this;
     return node.abandoned ? this : result;
   }

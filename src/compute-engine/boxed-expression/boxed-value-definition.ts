@@ -826,7 +826,8 @@ export class _BoxedValueDefinition
     result._deadScope = undefined;
     result._scopeActivationOf = this._scopeActivationOf ?? this;
     if (
-      (this as unknown as { _isBinderVariable?: true })._isBinderVariable === true
+      (this as unknown as { _isBinderVariable?: true })._isBinderVariable ===
+      true
     )
       (
         result as _BoxedValueDefinition & { _isBinderVariable?: true }
@@ -868,8 +869,7 @@ export class _BoxedValueDefinition
     this._deadScope = s._deadScope as string | undefined;
     this._activationOf = s._activationOf as BoxedValueDefinition | undefined;
     this._scopeActivationOf = s._scopeActivationOf as
-      | BoxedValueDefinition
-      | undefined;
+      BoxedValueDefinition | undefined;
     this._isShield = s._isShield as true | undefined;
     this._isDevolvedShadow = s._isDevolvedShadow as true | undefined;
     this.disposed = s.disposed as boolean;

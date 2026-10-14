@@ -2507,7 +2507,10 @@ function bindEscapingLocals(ce: ComputeEngine, expr: Expression): Expression {
 
 /** Find a referenced name in a value, including dictionary cells. A
  * dictionary's `has()` checks its keys, not the names in its values. */
-function hasReferencedName(expr: Expression, names: string | string[]): boolean {
+function hasReferencedName(
+  expr: Expression,
+  names: string | string[]
+): boolean {
   const wanted = new Set(typeof names === 'string' ? [names] : names);
   const seen = new Set<Expression>();
   const pending = [expr];

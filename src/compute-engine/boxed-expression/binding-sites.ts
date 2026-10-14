@@ -167,7 +167,8 @@ function rangeIndexTypeOf(
     isFunction(x, 'Hold') && x.nops === 1
       ? bindsIndex(x.op1, i)
       : isFunction(x)
-        ? (x.operator === 'Element' || INDEXING_SET_OPERATORS.has(x.operator)) &&
+        ? (x.operator === 'Element' ||
+            INDEXING_SET_OPERATORS.has(x.operator)) &&
           isSymbol(x.ops[0]) &&
           x.ops[0].symbol === index.symbol
         : flatIndexes.has(i) && isSymbol(x) && x.symbol === index.symbol;
