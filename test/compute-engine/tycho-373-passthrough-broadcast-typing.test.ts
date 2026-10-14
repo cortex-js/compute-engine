@@ -370,11 +370,8 @@ describe('Tycho 373 — a pass-through parameter under list broadcast', () => {
   test('the descriptor route types a numeric tuple handed to a scalar parameter as any', () => {
     // A numeric tuple binds whole to a scalar parameter and the body's
     // arithmetic decides the shape, so the signature result, written for a
-    // scalar argument, does not describe the value. The declared result of
-    // a function whose BODY makes such a call is still computed at its
-    // definition with open parameters and can read the signature result
-    // (`ROADMAP.md`, "A declared result computed through a numeric-tuple
-    // argument to a scalar parameter").
+    // scalar argument, does not describe the value. The test below checks
+    // the result inferred for a function whose BODY makes such a call.
     const ce = new ComputeEngine();
     ce.declare('f', 'function');
     ce.assign('f', ['Function', ['Tuple', ['Negate', 'x'], 'x'], 'x'] as any);
@@ -400,6 +397,127 @@ describe('Tycho 373 — a pass-through parameter under list broadcast', () => {
   // (`mayBeNumericTupleType`, `derive-application-type.ts`), and the result
   // is `any`. Both definition routes: a bare `function` declaration (a value
   // definition) and an undeclared assignment (an operator definition).
+  describe('a tuple built from an open parameter, handed to a scalar parameter', () => {
+    function engine(declared: boolean): ComputeEngine {
+      const ce = new ComputeEngine();
+      if (declared)
+        for (const name of ['f', 'g', 'h', 'k', 'k_1', 'm'])
+          ce.declare(name, 'function');
+      const def = (s: string) => ce.parse(s).evaluate();
+      def('f(x) := (-x, x)');
+      def('g(a) := f((a, a))');
+      def('h(a) := f([a, a])');
+      def('k(a) := f(a)');
+      def('k_1(a) := f(a + 1)');
+      def('m(a) := f((a, u))');
+      return ce;
+    }
+
+    function signature(ce: ComputeEngine, name: string): string {
+      const def = ce.lookupDefinition(name)!;
+      return 'value' in def
+        ? `${def.value.value!.type}`
+        : `${new BoxedType(def.operator.signature.type, ce._typeResolver)}`;
+    }
+
+    for (const declared of [true, false]) {
+      const route = declared ? 'declared function' : 'undeclared';
+      test(`${route}: the inferred result is any, and the value fits`, () => {
+        const ce = engine(declared);
+        expect(signature(ce, 'g')).toBe('(unknown) -> any');
+        const call = ce.parse('g(1)');
+        expect(call.type.toString()).toBe('any');
+        expect(call.evaluate().toString()).toBe('((-1, -1), (1, 1))');
+        // A tuple with a free symbol as a component reads the same way.
+        expect(signature(ce, 'm')).toBe('(unknown) -> any');
+        expect(ce.parse('m(1)').type.toString()).toBe('any');
+        expect(ce.parse('m(1)').evaluate().toString()).toBe(
+          '((-1, -u), (1, u))'
+        );
+        // A direct call with a numeric tuple, or with a tuple of free
+        // symbols.
+        expect(ce.parse('f((1, 1))').type.toString()).toBe('any');
+        const free = ce.parse('f((v, v))');
+        expect(free.type.toString()).toBe('any');
+        expect(free.evaluate().toString()).toBe('((-v, -v), (v, v))');
+      });
+
+      test(`${route}: a scalar or a list argument keeps its type`, () => {
+        const ce = engine(declared);
+        expect(signature(ce, 'k')).toBe('(unknown) -> tuple<number, number>');
+        expect(ce.parse('k(1)').type.toString()).toBe(
+          'tuple<integer, integer>'
+        );
+        expect(signature(ce, 'k_1')).toBe('(unknown) -> tuple<number, number>');
+        // A list broadcasts: each element is a scalar argument of `f`.
+        expect(signature(ce, 'h')).toBe(
+          '(unknown) -> list<tuple<number, number>>'
+        );
+        const h = ce.parse('h(1)');
+        expect(h.type.toString()).toBe('list<tuple<number, number>>');
+        expect(h.evaluate().toString()).toBe('[(-1, 1),(-1, 1)]');
+        expect(ce.parse('f(1)').type.toString()).toBe(
+          'tuple<integer, integer>'
+        );
+      });
+    }
+
+    test('a tuple at a parameter the body never reads keeps the signature result', () => {
+      // The value of `outer` does not depend on its argument, so the
+      // signature result describes it, and a `Dot` over the call compiles
+      // (`compile-scalar-point-dot.test.ts` has the compiled form).
+      for (const declared of [true, false]) {
+        const ce = new ComputeEngine();
+        ce.declare('x', 'real');
+        ce.declare('P', 'list<tuple<real, real>>');
+        if (declared) ce.declare('outer', 'function');
+        ce.assign('outer', [
+          'Function',
+          ['Tuple', ['PointX', 'P'], ['PointY', 'P']],
+          'u',
+        ]);
+        expect(ce.box(['outer', ['Tuple', 'x', 2]]).type.toString()).toBe(
+          'tuple<list<number>, list<number>>'
+        );
+      }
+    });
+
+    test('a parameter declared as a tuple keeps the declared result', () => {
+      const ce = new ComputeEngine();
+      ce.declare('f2', '(tuple<number, number>) -> number');
+      ce.assign('f2', [
+        'Function',
+        ['Add', ['At', 'x', 1], ['At', 'x', 2]],
+        'x',
+      ]);
+      ce.declare('g2', 'function');
+      ce.assign('g2', ['Function', ['f2', ['Tuple', 'a', 'a']], 'a']);
+      expect(signature(ce, 'g2')).toBe('(unknown) -> number');
+      const call = ce.box(['g2', 1]);
+      expect(call.type.toString()).toBe('number');
+      expect(call.evaluate().toString()).toBe('2');
+    });
+
+    test('a pass-through callee types the call from its body', () => {
+      // The result of `p` is derived from its body with the parameter typed
+      // as the tuple (`callResultType`), so the call of `q` is precise,
+      // although the inferred result of `q` is `any`.
+      const ce = new ComputeEngine();
+      ce.assign('p', ['Function', 'x', 'x']);
+      ce.assign('q', ['Function', ['p', ['Tuple', 'a', 'a']], 'a']);
+      expect(signature(ce, 'q')).toBe('(unknown) -> any');
+      expect(ce.box(['q', 1]).type.toString()).toBe('tuple<integer, integer>');
+      expect(ce.box(['q', 1]).evaluate().toString()).toBe('(1, 1)');
+    });
+  });
+
+  // Tycho ledger row 374: the index read `L[k]` of a declared point list is
+  // typed `missing | tuple<number, number, number>` (the index may be out of
+  // range). The call typing stopped at that union and fell back to the
+  // declared signature result, with `broadcastable` components, while
+  // `PointX(L[k])` already typed `number`. The body is now typed under the
+  // present part of the argument, as for a plain `Missing` argument
+  // (`presentPart`, `call-result-type.ts`).
   test('row 374: an argument typed `missing | tuple` is typed from the body, present and absent', () => {
     const ce = new ComputeEngine();
     ce.declare('L', 'list<tuple<number, number, number>>');

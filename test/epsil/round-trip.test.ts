@@ -227,7 +227,11 @@ const CORPUS: [label: string, expr: MathJsonExpression][] = [
   // `(x: integer) => …`).
   [
     'typed math-style def',
-    ['DefineFunction', 'f', ['Function', ['Add', 'x', 1], ['Typed', 'x', { str: 'integer' }]]],
+    [
+      'DefineFunction',
+      'f',
+      ['Function', ['Add', 'x', 1], ['Typed', 'x', { str: 'integer' }]],
+    ],
   ],
   [
     'typed math-style def with return type',
@@ -559,6 +563,90 @@ describe('EPSIL UNSPELLABLE PARAMETER PATTERN', () => {
 });
 
 //
+// Rule arguments and pair keys: serialize, parse, then resolve library names.
+//
+// A pair key is a label, not a reference, so the name resolution pass does
+// not rewrite it: the serializer must write a library name in key position
+// with its MathJSON spelling (`IsPrime -> Teal`, not `isPrime -> Teal`). And
+// `name -> value` as the only argument of a call is a rule argument, as it
+// is after a `,`: the serializer writes a rule argument that way. (GitHub
+// issue #435.)
+//
+describe('EPSIL RULE ARGUMENTS AND PAIR KEYS', () => {
+  const roundTrip = (
+    expr: MathJsonExpression
+  ): { src: string; back: unknown; messages: unknown[] } => {
+    const src = serializeEpsil(expr);
+    const [value, diagnostics] = parseEpsil(src);
+    return {
+      src,
+      back: normalize(resolveLibraryNames(value, src, new ComputeEngine())),
+      messages: diagnostics.map((d) => d.message),
+    };
+  };
+
+  test.each<[label: string, expr: MathJsonExpression, src: string]>([
+    [
+      'a library name as the key of a pair in a list',
+      ['List', ['KeyValuePair', 'IsPrime', 'Teal']],
+      '[IsPrime -> Teal]',
+    ],
+    [
+      'a rule as the only argument of a call',
+      ['f', ['KeyValuePair', 'GridLines', ['List', 10, 10]]],
+      'f(GridLines -> [10, 10])',
+    ],
+    [
+      'a rule as the second argument of a call',
+      ['f', 'x', ['KeyValuePair', 'GridLines', ['List', 10, 10]]],
+      'f(x, GridLines -> [10, 10])',
+    ],
+    [
+      'a rule with a library-name key as the only argument of a call',
+      ['f', ['KeyValuePair', 'Max', 10]],
+      'f(Max -> 10)',
+    ],
+    [
+      'a plain name that is also an Epsil spelling, as a key',
+      ['List', ['KeyValuePair', 'max', 10]],
+      '[max -> 10]',
+    ],
+  ])('%s', (_label, expr, src) => {
+    const result = roundTrip(expr);
+    expect(result.src).toBe(src);
+    expect(result.messages).toEqual([]);
+    expect(result.back).toEqual(normalize(expr));
+  });
+
+  test('a library name outside key position keeps its Epsil spelling', () => {
+    // Only the key keeps the MathJSON spelling: the value `IsPrime` is a
+    // reference, which the resolution pass reads back from `isPrime`.
+    const expr: MathJsonExpression = [
+      'List',
+      ['KeyValuePair', 'IsPrime', 'IsPrime'],
+    ];
+    const result = roundTrip(expr);
+    expect(result.src).toBe('[IsPrime -> isPrime]');
+    expect(result.back).toEqual(normalize(expr));
+  });
+
+  test('source keys are not resolved to library names', () => {
+    const resolved = (src: string): unknown =>
+      normalize(
+        resolveLibraryNames(parseEpsil(src)[0], src, new ComputeEngine())
+      );
+    expect(resolved('[max -> 10]')).toEqual([
+      'List',
+      ['KeyValuePair', 'max', { num: '10' }],
+    ]);
+    expect(resolved('[IsPrime -> Teal]')).toEqual([
+      'List',
+      ['KeyValuePair', 'IsPrime', 'Teal'],
+    ]);
+  });
+});
+
+//
 // Loose-syntax compatibility spot-check (Phase 3, item 5).
 //
 // Epsil is a *programming-language* syntax; the engine's loose math parser
@@ -572,7 +660,8 @@ describe('EPSIL UNSPELLABLE PARAMETER PATTERN', () => {
 describe('EPSIL vs loose math parser', () => {
   const ce = new ComputeEngine();
   const epsil = (s: string) => normalize(parseEpsil(s)[0]);
-  const loose = (s: string) => normalize(ce.parse(s, { canonical: false }).json);
+  const loose = (s: string) =>
+    normalize(ce.parse(s, { canonical: false }).json);
 
   test('[1, 2, 3] — SAME (List)', () => {
     expect(epsil('[1, 2, 3]')).toEqual(loose('[1, 2, 3]'));
@@ -635,5 +724,4 @@ describe('EPSIL FLOAT LITERAL ROUND-TRIP', () => {
     expect(y.isExact).toBe(exact);
     expect(y.isSame(x)).toBe(true);
   });
-
 });

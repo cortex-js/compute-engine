@@ -6,6 +6,12 @@ import {
   intervalContains,
   intervalSubset,
 } from '../../../src/compute-engine/numerics/interval';
+import {
+  add as rationalAdd,
+  div as rationalDiv,
+  mul as rationalMul,
+  pow as rationalPow,
+} from '../../../src/compute-engine/numerics/rationals';
 
 describe('constructor', () => {
   it('should create from an integer', () => {
@@ -237,11 +243,17 @@ describe('Numeric-value correctness (REVIEW.md D1–D4)', () => {
   // D3: exact pow with a 1/n exponent took the n-th root of the numerator
   // (always 1) instead of the denominator, so it returned the base unchanged.
   it('D3: exact n-th root (8^(1/3) = 2, 27^(1/3) = 3)', () => {
-    expect(ce._numericValue(8).pow(ce._numericValue([1, 3])).toString()).toEqual(
-      '2'
-    );
     expect(
-      ce._numericValue(27).pow(ce._numericValue([1, 3])).toString()
+      ce
+        ._numericValue(8)
+        .pow(ce._numericValue([1, 3]))
+        .toString()
+    ).toEqual('2');
+    expect(
+      ce
+        ._numericValue(27)
+        .pow(ce._numericValue([1, 3]))
+        .toString()
     ).toEqual('3');
   });
 
@@ -342,11 +354,15 @@ describe('Numeric-value correctness (REVIEW.md D11–D19)', () => {
   // D18: complex-exponent pow used ln(Re z) and dropped the exp(−im·arg z)
   // magnitude factor — correct only for positive real bases.
   it('D18: complex-exponent pow (i^i and (1+i)^(1+i))', () => {
-    const ii = machine._numericValue(machine.complex(0, 1)).pow({ re: 0, im: 1 });
+    const ii = machine
+      ._numericValue(machine.complex(0, 1))
+      .pow({ re: 0, im: 1 });
     expect(ii.re).toBeCloseTo(Math.exp(-Math.PI / 2), 12); // 0.20787957635
     expect(ii.im).toBeCloseTo(0, 12);
 
-    const z = machine._numericValue(machine.complex(1, 1)).pow({ re: 1, im: 1 });
+    const z = machine
+      ._numericValue(machine.complex(1, 1))
+      .pow({ re: 1, im: 1 });
     expect(z.re).toBeCloseTo(0.2739572538301211, 10);
     expect(z.im).toBeCloseTo(0.5837007587586147, 10);
   });
@@ -374,5 +390,99 @@ describe('Numeric-value correctness (REVIEW.md D11–D19)', () => {
     const o1 = { start: 0, end: 5, openStart: true, openEnd: false };
     const o2 = { start: 0, end: 10, openStart: true, openEnd: false };
     expect(intervalSubset(o1, o2)).toBe(true);
+  });
+});
+
+// The exact lane gives `n/0` the value of a pole and carries a signed
+// infinity through its rational arithmetic. Before, `5.div(0)` (a JavaScript
+// `0` divisor) and the rational `[5, 0]` were NaN, `∞·2` was NaN, `∞ − ∞` was
+// `∞`, and `5/∞` threw a RangeError. No boxed route reaches these values:
+// the boxed folds answer `5/0` with `~oo` first (see `indeterminate.test.ts`).
+describe('Exact lane: division by zero and signed infinity', () => {
+  const exact = (x: number | [number, number]) => ce._numericValue(x);
+  const inf = () => exact(0).inv();
+  const str = (x: { toString(): string }) => x.toString();
+
+  it('n/0 with a number divisor is the infinity with the sign of n', () => {
+    expect(str(exact(5).div(0))).toBe('Infinity');
+    expect(str(exact(-5).div(0))).toBe('-Infinity');
+    expect(str(exact(2).sqrt().div(0))).toBe('Infinity');
+    expect(exact(0).div(0).isNaN).toBe(true);
+    // Same answers as with an exact 0 divisor
+    expect(str(exact(5).div(exact(0)))).toBe('Infinity');
+    expect(str(exact(-5).div(exact(0)))).toBe('-Infinity');
+  });
+
+  it('a complex n/0 is the complex infinity', () => {
+    const z = ce._numericValue(ce.complex(2, 3));
+    expect(z.div(0).isComplexInfinity).toBe(true);
+    expect(z.div(exact(0)).isComplexInfinity).toBe(true);
+  });
+
+  it('a rational with a zero denominator is a signed infinity', () => {
+    expect(str(exact([5, 0]))).toBe('Infinity');
+    expect(str(exact([-5, 0]))).toBe('-Infinity');
+    expect(exact([0, 0]).isNaN).toBe(true);
+  });
+
+  it('an infinite numerator is divided by its denominator', () => {
+    // The sign of a negative denominator applies, and `∞/∞` has no value
+    expect(str(exact([Infinity, -2]))).toBe('-Infinity');
+    expect(str(exact([-Infinity, -2]))).toBe('Infinity');
+    expect(exact([Infinity, Infinity]).isNaN).toBe(true);
+  });
+
+  it('a signed infinity times a finite value keeps its sign', () => {
+    expect(str(inf().mul(2))).toBe('Infinity');
+    expect(str(inf().mul(-2))).toBe('-Infinity');
+    expect(str(inf().mul(exact([1, 2])))).toBe('Infinity');
+    expect(str(inf().mul(exact(2).sqrt()))).toBe('Infinity');
+    expect(str(inf().mul(inf()))).toBe('Infinity');
+    expect(str(inf().mul(inf().neg()))).toBe('-Infinity');
+    expect(inf().mul(0).isNaN).toBe(true);
+    expect(str(inf().div(2))).toBe('Infinity');
+    expect(str(inf().div(-2))).toBe('-Infinity');
+  });
+
+  it('infinite sums and quotients follow IEEE 754', () => {
+    expect(str(inf().add(1))).toBe('Infinity');
+    expect(str(inf().add(inf()))).toBe('Infinity');
+    expect(inf().sub(inf()).isNaN).toBe(true);
+    expect(inf().div(inf()).isNaN).toBe(true);
+    expect(str(exact(5).div(inf()))).toBe('0');
+  });
+
+  it('the rational helpers carry a signed infinity', () => {
+    expect(rationalMul([Infinity, 1], [2, 1])).toEqual([Infinity, 1]);
+    expect(rationalMul([Infinity, 1], [1, -2])).toEqual([-Infinity, 1]);
+    expect(rationalMul([Infinity, 1], [1n, 3n])).toEqual([Infinity, 1]);
+    expect(rationalMul([Infinity, 1], [0, 1])).toEqual([NaN, 1]);
+    expect(rationalAdd([Infinity, 1], [1, 1])).toEqual([Infinity, 1]);
+    expect(rationalAdd([1n, 3n], [-Infinity, 1])).toEqual([-Infinity, 1]);
+    expect(rationalAdd([Infinity, 1], [-Infinity, 1])).toEqual([NaN, 1]);
+    // `[1, Infinity]` (the inverse of an infinity) is 0
+    expect(rationalAdd([1, Infinity], [3, 4])).toEqual([3, 4]);
+    expect(rationalDiv([5, 1], [Infinity, 1])).toEqual([0, 1]);
+    expect(rationalDiv([Infinity, 1], [Infinity, 1])).toEqual([NaN, 1]);
+  });
+
+  it('the rational pow() of a non-finite base follows IEEE 754', () => {
+    expect(rationalPow([Infinity, 1], 3)).toEqual([Infinity, 1]);
+    expect(rationalPow([-Infinity, 1], 3)).toEqual([-Infinity, 1]);
+    expect(rationalPow([-Infinity, 1], 2)).toEqual([Infinity, 1]);
+    expect(rationalPow([-Infinity, 1], -3)).toEqual([0, 1]);
+    expect(rationalPow([Infinity, 1], -2)).toEqual([0, 1]);
+    expect(rationalPow([-Infinity, 1], 0)).toEqual([1, 1]);
+    expect(rationalPow([NaN, 1], 2)).toEqual([NaN, 1]);
+    expect(rationalPow([NaN, 1], 0)).toEqual([NaN, 1]);
+    // Finite bases are unchanged
+    expect(rationalPow([-2, 3], 3)).toEqual([-8n, 27n]);
+    expect(rationalPow([2, 3], 0)).toEqual([1, 1]);
+  });
+
+  it('the boxed routes still answer n/0 with the complex infinity', () => {
+    expect(ce.parse('\\frac{5}{0}').evaluate().toString()).toBe('~oo');
+    expect(ce.box(['Rational', 5, 0]).evaluate().toString()).toBe('~oo');
+    expect(ce.number([5, 0]).toString()).toBe('~oo');
   });
 });

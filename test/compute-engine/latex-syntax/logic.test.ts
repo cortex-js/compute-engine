@@ -1167,6 +1167,67 @@ describe('Kronecker Delta', () => {
     ]);
   });
 
+  // A spacing command between two indices is white space, in both
+  // grammars. The spacing command was an index: `\delta_{n\,m}` was
+  // `KroneckerDelta(n, HorizontalSpacing(3), m)`, and `\delta_{1\,2}` was
+  // `KroneckerDelta(12)`.
+  it('should skip a spacing command between indices', () => {
+    for (const strict of [true, false]) {
+      const parse = (s: string) => ce.parse(s, { strict, form: 'raw' }).json;
+      for (const latex of [
+        '\\delta_{n\\,m}',
+        '\\delta_{n\;m}',
+        '\\delta_{n\\:m}',
+        '\\delta_{n\\!m}',
+        '\\delta_{n\\quad m}',
+        '\\delta_{n\\qquad m}',
+        '\\delta_{n~m}',
+        '\\delta_{n\\ m}',
+        '\\delta_{n m}',
+        '\\delta_{n\\hspace{1em}m}',
+        '\\delta_{\\,n\\,m\\,}',
+        '\\delta_{n,\\,m}',
+        '\\delta_{n\\, ,\\, m}',
+      ])
+        expect(parse(latex)).toEqual(['KroneckerDelta', 'n', 'm']);
+      expect(parse('\\delta_{\\alpha\\,\\beta}')).toEqual([
+        'KroneckerDelta',
+        'alpha',
+        'beta',
+      ]);
+      expect(parse('\\delta_{1\\,2}')).toEqual(['KroneckerDelta', 1, 2]);
+      expect(parse('\\delta_{n\\,}')).toEqual(['KroneckerDelta', 'n']);
+      expect(parse('\\delta_{\\,n}')).toEqual(['KroneckerDelta', 'n']);
+      expect(parse('\\delta_{n\\,m}^2')).toEqual([
+        'Power',
+        ['KroneckerDelta', 'n', 'm'],
+        2,
+      ]);
+      expect(ce.parse('\\delta_{n\\,m}', { strict }).latex).toBe(
+        '\\delta_{nm}'
+      );
+    }
+  });
+
+  // All the indices of a group with separators are arguments. With three
+  // or more indices, the indices were one `Tuple` argument: `\delta_{1,1,1}`
+  // was `KroneckerDelta(Tuple(1, 1, 1))`, which is 0.
+  it('should read three indices with separators', () => {
+    expect(ce.parse('\\delta_{a, b, c}', { form: 'raw' }).json).toEqual([
+      'KroneckerDelta',
+      'a',
+      'b',
+      'c',
+    ]);
+    expect(ce.parse('\\delta_{1,1,1}').evaluate().json).toBe(1);
+    expect(ce.parse('\\delta_{1,1,2}').evaluate().json).toBe(0);
+    const json = ['KroneckerDelta', 1, 'x', 2];
+    const latex = ce.box(json).latex;
+    expect(latex).toBe('\\delta_{1, x, 2}');
+    for (const strict of [true, false])
+      expect(ce.parse(latex, { strict }).json).toEqual(json);
+  });
+
   // The number 0 is an index, as 1 is. `\delta_0` was the symbol `delta_0`.
   it('should read the index 0', () => {
     expect(ce.parse('\\delta_0').json).toEqual(['KroneckerDelta', 0]);

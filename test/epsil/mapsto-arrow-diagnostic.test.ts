@@ -1,5 +1,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
+import { parseEpsil } from '../../src/epsil/parse-epsil';
 
 //
 // The `->` / `=>` typo diagnostic — see the companion-diagnostics section of
@@ -7,10 +8,11 @@ import { executeEpsil } from '../../src/epsil/execute-epsil';
 //
 // A `KeyValuePair` whose left side is shaped like a parameter list — a typed
 // parameter, a tuple of parameters, an empty `()`, or a bare symbol right
-// after `(` or `=` — is a function written with the wrong arrow. None of
-// these shapes is a valid dictionary key (keys are strings), so the parser
-// reports `mapsto-arrow-expected` with a fixit on the arrow and RECOVERS as
-// the intended lambda. Legitimate dictionary spellings stay silent.
+// after a grouping `(` or a `=` — is a function written with the wrong
+// arrow. None of these shapes is a valid dictionary key (keys are strings),
+// so the parser reports `mapsto-arrow-expected` with a fixit on the arrow and
+// RECOVERS as the intended lambda. Legitimate dictionary spellings, and a
+// rule argument right after the `(` of a call, stay silent.
 //
 
 /** Run an Epsil program against a fresh engine. */
@@ -56,6 +58,35 @@ describe('EPSIL MAPSTO-ARROW DIAGNOSTIC — wrong-arrow lambdas', () => {
       'mapsto-arrow-expected',
     ]);
     expect(value.re).toBe(42);
+  });
+
+  test('a parenthesized parameter in a call argument is diagnosed and recovered', () => {
+    // The `(` before `x` opens a group, not the call's argument list, so
+    // `(x) -> x^2` is the lambda `(x) => x^2` with the wrong arrow.
+    const { value, diagnostics } = run('apply((x) -> x^2, 3)');
+    expect(diagnostics.map((d) => d.message[0])).toEqual([
+      'mapsto-arrow-expected',
+    ]);
+    expect(value.re).toBe(9);
+  });
+
+  test('a bare symbol as the first of several call arguments is diagnosed and recovered', () => {
+    // A function is the usual first argument (`map(f, xs)`), so `->` there
+    // is read as the wrong-arrow spelling of `=>`. Only the ONLY argument
+    // of a call is read as a rule.
+    const { value, diagnostics } = run('map(x -> x^2, [1, 2])');
+    expect(diagnostics.map((d) => d.message[0])).toEqual([
+      'mapsto-arrow-expected',
+    ]);
+    expect(value.toString()).toBe('[1,4]');
+  });
+
+  test('a bare symbol after a grouping `(` before `->` is diagnosed and recovered', () => {
+    const { value, diagnostics } = run('const g = (x -> x + 1)\ng(3)');
+    expect(diagnostics.map((d) => d.message[0])).toEqual([
+      'mapsto-arrow-expected',
+    ]);
+    expect(value.re).toBe(4);
   });
 
   test('a bare symbol after `=` before `->` is diagnosed and recovered', () => {
@@ -109,6 +140,25 @@ describe('EPSIL MAPSTO-ARROW DIAGNOSTIC — legitimate `->` stays silent', () =>
 
   test('a string-keyed pair outside braces', () => {
     const { diagnostics } = run('const e = "a" -> 1\ne');
+    expect(diagnostics).toEqual([]);
+  });
+
+  test('a rule as the only argument of a call', () => {
+    // When a call has only one argument, a bare symbol right after the call's
+    // `(` is the key of a rule argument, in the same way as after a `,`: the
+    // serializer writes a rule argument this way. (GitHub issue #435.)
+    for (const src of [
+      'f(GridLines -> [10, 10])',
+      'f(GridLines -> [10, 10],)',
+      'f(x, GridLines -> [10, 10])',
+      'c.m(GridLines -> 1)',
+    ]) {
+      const [value, diagnostics] = parseEpsil(src);
+      expect(diagnostics).toEqual([]);
+      expect(JSON.stringify(value)).not.toContain('"Function"');
+      expect(JSON.stringify(value)).toContain('"KeyValuePair"');
+    }
+    const { diagnostics } = run('f(GridLines -> [10, 10])');
     expect(diagnostics).toEqual([]);
   });
 

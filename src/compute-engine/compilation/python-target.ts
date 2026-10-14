@@ -3829,10 +3829,14 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     if (
       BaseCompiler.isComplexValued(args[0]) ||
       BaseCompiler.isComplexValued(args[1])
-    )
+    ) {
+      // Recorded for the `promoted` report when the base is complex only by
+      // wideness (see `promotesRadicalToComplex`; a no-op otherwise).
+      BaseCompiler.recordPromotion('Power', args);
       return negativeBase !== undefined && withHelper
         ? `_ce_pow(${compile(args[0])}, ${compile(args[1])})`
         : `(${pyOperand(compile(args[0]))} ** ${pyOperand(compile(args[1]))})`;
+    }
     const realPower =
       BaseCompiler.realPowerExponent(args) ??
       (typeof negativeBase === 'object' ? negativeBase : undefined);
@@ -3887,8 +3891,12 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     // (`Root(-8, 3)` is `-2`); any other pair takes the principal value
     // `z ** (1 / n)`, as the interpreter does. The parity test runs when the
     // code runs because the value of the radicand is only known then.
-    if (BaseCompiler.isComplexValued(x) || BaseCompiler.isComplexValued(n))
+    if (BaseCompiler.isComplexValued(x) || BaseCompiler.isComplexValued(n)) {
+      // Recorded for the `promoted` report when the radicand is complex only
+      // by wideness (see `promotesRadicalToComplex`; a no-op otherwise).
+      BaseCompiler.recordPromotion('Root', args);
       return `(lambda _z, _n: complex(np.sign(_z.real) * np.power(abs(_z.real), 1.0 / _n.real)) if _z.imag == 0 and _n.imag == 0 and _n.real % 2 == 1 else _z ** (1.0 / _n))(complex(${compile(x)}), complex(${compile(n)}))`;
+    }
     const nConst = tryGetConstant(n);
     // Odd integer degree: `np.power` is NaN for a negative base, but the real
     // root exists (interpreter convention, e.g. Root(-8, 3) = -2). Emit the

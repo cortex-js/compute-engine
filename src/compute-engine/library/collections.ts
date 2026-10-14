@@ -2922,7 +2922,11 @@ function isAtomicJoinOperandD(d: OperandDescriptor): boolean {
  * elements are. A tuple operand is one element (it does not splice), and any
  * other operand contributes its elements, whatever the kind of collection it
  * is: a set, a range, a dictionary (its entries) or a string (its
- * characters).
+ * characters). An operand whose type says nothing about its elements
+ * contributes the same element type as it does for `Append` (see
+ * `appendResultTypeD`): `any` for a source declared `any` or `value`, whose
+ * elements can be anything, absent values included, and the placeholder
+ * `unknown` for a source typed `unknown`, which the other operands refine.
  */
 function joinedElementTypeD(
   ops: ReadonlyArray<OperandDescriptor>
@@ -2934,8 +2938,10 @@ function joinedElementTypeD(
       continue;
     }
     const elt = collectionElementType(op.type);
-    if (elt === undefined) return undefined;
-    eltTypes.push(elt);
+    if (elt !== undefined) eltTypes.push(elt);
+    else if (isKindOpenOperandType(op.type))
+      eltTypes.push(op.type === 'unknown' ? 'unknown' : 'any');
+    else return undefined;
   }
   if (eltTypes.length === 0) return undefined;
   return widenAll(eltTypes);
@@ -2982,11 +2988,27 @@ function joinResultTypeD(ops: ReadonlyArray<OperandDescriptor>): Type {
  *
  * As for `Join` (see `joinResultTypeD`), a source whose type is an abstract
  * collection may hold a set, and the result is then typed `collection<T>`.
- * Unlike `Join`, a source whose type says nothing (`unknown`, `any`,
- * `value`) keeps the result typed `list`: in the structural form of a
- * nested `Append`, the source of the inner node is typed `unknown`, and
- * typing that node `collection` made the outer node `collection<T>` while
- * the flattened canonical form is `list<T>` (`append-variadic.test.ts`).
+ * A source whose type says nothing (`unknown`, `any`, `value`, such as a
+ * symbol declared `any` or an unresolved call `f(x)`) may hold a set too,
+ * so it also makes the result `collection`. Such a type does not say what
+ * the elements of the source are either:
+ * - For `any` and `value`, the author stated that the source can be
+ *   anything, so its elements can be anything, absent values included. The
+ *   element type of the result is then `any`. This is also the type that
+ *   the canonical form gives when the source is a symbol declared
+ *   `unknown`, because canonicalization infers that symbol as
+ *   `collection<any>` from the signature.
+ * - For `unknown`, nothing is stated yet. The element type of the source is
+ *   then the placeholder `unknown`, as for a bare `collection`, and the
+ *   appended values refine it (`widen` reads the placeholder as no
+ *   constraint). A recursive call whose declared result is `unknown` is
+ *   such a source: with an element type `any`, the result type that is
+ *   derived for `F(n) = Append(F(n + 1), n)` lost its element type
+ *   (`recursive-function-result-type.test.ts`).
+ * The flattened canonical form and the nested form must give the same type
+ * (`append-variadic.test.ts`). The two readings keep that agreement,
+ * because the inner node of the nested form gives the outer node a source
+ * whose element type is the one that the flattened form computes.
  */
 function appendResultTypeD(ops: ReadonlyArray<OperandDescriptor>): Type {
   if (ops.length === 0) return 'list';
@@ -2994,8 +3016,10 @@ function appendResultTypeD(ops: ReadonlyArray<OperandDescriptor>): Type {
   if (isRecordShapedType(source)) return 'record';
   if (isSubtype(source, DICTIONARY_SHAPE_TYPE)) return 'dictionary';
   if (isSubtype(source, SET_SHAPE_TYPE)) return 'set';
-  const kind = isAbstractCollectionTypeOf(source) ? 'collection' : 'list';
-  const elements = collectionElementType(source);
+  const kind = isKindOpenOperandType(source) ? 'collection' : 'list';
+  let elements = collectionElementType(source);
+  if (elements === undefined && kind === 'collection')
+    elements = source === 'unknown' ? 'unknown' : 'any';
   if (elements === undefined) return kind;
   if (ops.length === 1) return { kind, elements };
   return {

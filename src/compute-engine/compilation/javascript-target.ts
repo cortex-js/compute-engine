@@ -7128,12 +7128,20 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // node's type does not select this branch: `Root(x + iy, 3)` types
     // `number`, while the enclosing expression's analysis reads the operands
     // (`BaseCompiler.isComplexValued`) and expects `{re, im}` from this node.
-    if (BaseCompiler.isComplexValued(arg) || BaseCompiler.isComplexValued(exp))
+    if (
+      BaseCompiler.isComplexValued(arg) ||
+      BaseCompiler.isComplexValued(exp)
+    ) {
+      // A radicand complex only by WIDENESS under an even degree is a
+      // promotion for the `promoted` report, as in `Sqrt` below (a no-op
+      // otherwise; the lowering is the same).
+      BaseCompiler.recordPromotion('Root', [arg, exp]);
       return spliceJSValues(
         target,
         [compile(arg), compile(exp)],
         ([z, n]) => `_SYS.croot(${z}, ${n})`
       );
+    }
     if (
       resultIsComplexValued('Root', [arg, exp]) ||
       BaseCompiler.promotesRadicalToComplex('Root', [arg, exp])

@@ -1,6 +1,7 @@
 import { callResultType } from './call-result-type.js';
 import type {
   BoxedOperatorDefinition,
+  Expression,
   IComputeEngine as ComputeEngine,
   OperandDescriptor,
   TypeHandlerContext,
@@ -20,10 +21,17 @@ import type { Type } from '../../common/type/types.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import {
   functionResult,
+  resolveTypeAlias,
   stripMissingFromType,
   typeContainsMissing,
 } from '../../common/type/utils.js';
 import { describeType, guardedTypeHandlerCall } from './operand-descriptor.js';
+import {
+  functionLiteralParameterName,
+  isDestructuringParameter,
+  isRestParameter,
+} from './function-literal.js';
+import { isFunction } from './type-guards.js';
 import {
   instantiatedResultTypeOverActuals,
   type SolveActual,
@@ -112,6 +120,54 @@ function isNumericTupleType(t: Type): boolean {
   );
 }
 
+/**
+ * Whether `t` is a tuple type that is not provably a numeric tuple, but that
+ * is one when its open components hold numbers: every component is a number
+ * type or the open `unknown`/`any`, and at least one is open. The tuple
+ * `(a, a)` in the body of `g := a ↦ f((a, a))` has the type
+ * `tuple<unknown, unknown>` when `g` is defined, and `g(1)` binds `(1, 1)`
+ * to the parameter of `f`. A numeric-tuple argument at a scalar or open
+ * parameter makes the signature result of a function literal wrong (see
+ * `lambdaBroadcastType`, `boxed-function.ts`), so the callers that check for
+ * a numeric tuple check for this type too. A tuple that is already numeric
+ * answers false.
+ */
+export function mayBeNumericTupleType(t0: Type): boolean {
+  const t = resolveTypeAlias(t0);
+  if (typeof t !== 'object' || t.kind !== 'tuple') return false;
+  const open = (e: Type) => e === 'unknown' || e === 'any';
+  return (
+    t.elements.some((e) => open(e.type)) &&
+    t.elements.every((e) => open(e.type) || isSubtype(e.type, 'number'))
+  );
+}
+
+/**
+ * Whether parameter `i` of the function literal `literal` can reach the
+ * value of its body: true when the body mentions the parameter's name, and
+ * true when that cannot be told (no literal, a rest or destructuring
+ * parameter, a position past the fixed parameters). A numeric tuple bound
+ * whole to a parameter that the body never reads does not change the value,
+ * so the signature result still describes it: `outer := P ↦ (PointX(q),
+ * PointY(q))`, where `q` is read from elsewhere, gives the same value for
+ * any argument.
+ */
+export function parameterReachesBody(
+  literal: Expression | undefined,
+  i: number
+): boolean {
+  if (literal === undefined || !isFunction(literal, 'Function')) return true;
+  const param = literal.ops[i + 1];
+  if (
+    param === undefined ||
+    isRestParameter(param) ||
+    isDestructuringParameter(param)
+  )
+    return true;
+  const name = functionLiteralParameterName(param);
+  return name === '' || literal.op1.has(name);
+}
+
 /** Whether parameter `i` of the signature `ft` is typed to take a tuple
  * (a tuple, a collection, or any type a tuple inhabits other than the open
  * `unknown`/`any`, which bind a tuple whole as a scalar parameter does). */
@@ -125,6 +181,29 @@ function parameterAdmitsTuple(ft: Type, i: number): boolean {
     return false;
   if (isSubtype(param, 'number')) return false;
   return true;
+}
+
+/**
+ * The exponent `k` of `Power(A, k)` when canonicalization writes that power
+ * as a matrix power: `A` is typed a matrix and `k` is a number LITERAL with
+ * an integer value. `undefined` otherwise. This is the test that
+ * `canonicalPower()` (`arithmetic-power.ts`) makes on the expression: a
+ * symbol or a function exponent (`A^n`, `A^(n+1)`) is not rewritten there.
+ * The empty bottom type `never` is a subtype of every type, so it is
+ * excluded before the matrix test.
+ */
+function matrixPowerLiteralExponent(
+  base: OperandDescriptor,
+  exponent: OperandDescriptor
+): number | undefined {
+  if (base.type === 'never' || !isSubtype(base.type, 'matrix'))
+    return undefined;
+  if (!isSubtype(exponent.type, 'integer')) return undefined;
+  const structure = exponent.structureOf?.();
+  if (structure?.kind !== 'number') return undefined;
+  const rational = structure.rational;
+  if (rational === undefined || rational[1] !== 1n) return undefined;
+  return Number(rational[0]);
 }
 
 export function deriveApplicationType(
@@ -170,9 +249,14 @@ export function deriveApplicationType(
     // pairs), which the signature result, written for a scalar argument,
     // does not describe. The application-site typing of a lambda answers
     // `any` for this case (`lambdaBroadcastType`), and so does this route.
+    // A tuple with an open component (`mayBeNumericTupleType`) is one such
+    // tuple when the component holds a number.
     if (
       operands.some(
-        (d, i) => isNumericTupleType(d.type) && !parameterAdmitsTuple(ft, i)
+        (d, i) =>
+          (isNumericTupleType(d.type) || mayBeNumericTupleType(d.type)) &&
+          !parameterAdmitsTuple(ft, i) &&
+          parameterReachesBody(binding.value.value, i)
       )
     )
       return 'any';
@@ -186,6 +270,22 @@ export function deriveApplicationType(
     );
   }
   const def = binding.operator;
+
+  // Canonicalization writes a power of a matrix to an integer literal as
+  // the matrix power (`canonicalPower()`, `arithmetic-power.ts`): `A^1` is
+  // `A`, `A^-1` is `Inverse(A)`, and any other `A^k` is `MatrixPower(A,
+  // k)`. The expression route therefore types the rewritten node, never
+  // `Power` over those operands. This route types the same node, so that
+  // the two routes give the same type for a matrix base. Without this, the
+  // broadcast lift of `Power` typed the power element by element.
+  if (operator === 'Power' && operands.length === 2) {
+    const k = matrixPowerLiteralExponent(operands[0], operands[1]);
+    if (k === 1) return operands[0].type;
+    if (k === -1)
+      return deriveApplicationType(engine, 'Inverse', [operands[0]]);
+    if (k !== undefined)
+      return deriveApplicationType(engine, 'MatrixPower', operands);
+  }
 
   // Arithmetic over a tuple with a list coordinate always evaluates to an
   // error, and is typed `error`, as at the call site (`type()` in
@@ -334,6 +434,29 @@ export function deriveApplicationType(
     (h, a) => deriveApplicationType(engine, h, a)
   );
   if (inferred !== undefined) return absorb(inferred);
+  // A function literal held by an operator definition (a literal assigned
+  // to an undeclared name): a numeric tuple at a parameter its signature
+  // types as a scalar or leaves open binds whole, as on the value-definition
+  // branch above, and the signature result does not describe the value. The
+  // application-site typing (`lambdaBroadcastType`, `boxed-function.ts`)
+  // answers `any` when the result was inferred or is a number type, and
+  // keeps any other declared result (a declared tuple result describes the
+  // tuple argument). This branch applies the same rule.
+  if (
+    broadcastLiftHooks?.isLambda(def) === true &&
+    (def.inferredSignature ||
+      isSubtype(functionResult(sig) ?? 'unknown', 'number')) &&
+    operands.some(
+      (d, i) =>
+        (isNumericTupleType(d.type) || mayBeNumericTupleType(d.type)) &&
+        !parameterAdmitsTuple(sig, i) &&
+        parameterReachesBody(
+          (def as { _lambdaLiteral?: Expression })._lambdaLiteral,
+          i
+        )
+    )
+  )
+    return 'any';
   const actuals: SolveActual[] = operands.map(actualOfDescriptor);
   return absorb(
     lift(

@@ -187,3 +187,158 @@ describe('LIMIT AT INFINITY: A SIGN THAT IS NOT DECIDED', () => {
     expect(lim(['Divide', 1, ['Gamma', 't']]).evaluate().json).toBe(0);
   });
 });
+
+describe('LIMIT AT INFINITY: THE GROWTH OF AN EXPONENTIAL', () => {
+  // The growth rank of `e^g` and `b^g` (constant `b > 1`) depends on the
+  // sign of `g` as `t → +∞`. That sign is read from numeric probes. A probe
+  // with no value (a symbolic parameter) was read as `+`, and a `g` whose
+  // growth was not classified (`√t`) was read as bounded.
+  const pos = new ComputeEngine();
+  pos.declare('p', 'real');
+  pos.assume(pos.parse('p > 0'));
+  pos.declare('q', 'real');
+  pos.assume(pos.parse('q < 0'));
+  const limIn = (engine: ComputeEngine, body: unknown) =>
+    engine.box(['Limit', ['Function', body, 't'], 'PositiveInfinity'] as any);
+
+  test('a constant exponent sign still answers', () => {
+    expect(lim(['Exp', 't']).evaluate().json).toBe('PositiveInfinity');
+    expect(lim(['Power', 2, 't']).evaluate().json).toBe('PositiveInfinity');
+    expect(lim(['Negate', ['Exp', 't']]).evaluate().json).toBe(
+      'NegativeInfinity'
+    );
+    expect(lim(['Power', ['Rational', 1, 2], 't']).evaluate().json).toBe(0);
+    expect(lim(['Exp', ['Negate', 't']]).evaluate().json).toBe(0);
+    expect(lim(['Divide', 't', ['Exp', 't']]).evaluate().json).toBe(0);
+    expect(lim(['Divide', ['Power', 2, 't'], 't']).evaluate().json).toBe(
+      'PositiveInfinity'
+    );
+  });
+
+  test('an unknown coefficient gives no answer', () => {
+    for (const body of [
+      ['Multiply', 'a', ['Exp', 't']],
+      ['Multiply', 'a', ['Power', 2, 't']],
+      ['Exp', ['Multiply', 'a', 't']],
+      ['Power', 'a', 't'],
+    ])
+      expect(isUnevaluated(lim(body).evaluate())).toBe(true);
+  });
+
+  test('an exponent with an unknown sign gives no answer', () => {
+    // `t/e^{a·t}` is `0` for `a > 0` and `+∞` for `a ≤ 0`. It was `0`.
+    for (const body of [
+      ['Divide', 't', ['Exp', ['Multiply', 'a', 't']]],
+      ['Divide', ['Power', 't', 2], ['Exp', ['Multiply', 'a', 't']]],
+      ['Divide', 't', ['Power', 2, ['Multiply', 'a', 't']]],
+      ['Divide', ['Exp', ['Exp', ['Multiply', 'a', 't']]], 't'],
+    ])
+      expect(isUnevaluated(lim(body).evaluate())).toBe(true);
+  });
+
+  test('an exponent with an assumed sign answers', () => {
+    // `p > 0`: `t/e^{p·t}` → 0. `q < 0`: `e^{q·t}/t` → 0.
+    expect(
+      limIn(pos, ['Divide', 't', ['Exp', ['Multiply', 'p', 't']]]).evaluate()
+        .json
+    ).toBe(0);
+    expect(
+      limIn(pos, [
+        'Divide',
+        't',
+        ['Power', 2, ['Multiply', 'p', 't']],
+      ]).evaluate().json
+    ).toBe(0);
+    expect(
+      limIn(pos, ['Divide', ['Exp', ['Multiply', 'q', 't']], 't']).evaluate()
+        .json
+    ).toBe(0);
+    // `t/e^{q·t} = t·e^{|q|·t}` → `+∞`. It was `0`. The probes cannot read
+    // the sign of `e^{q·t}`, so the quotient rule uses the proved sign.
+    const eq = ['Exp', ['Multiply', 'q', 't']];
+    expect(limIn(pos, ['Divide', 't', eq]).evaluate().json).toBe(
+      'PositiveInfinity'
+    );
+    expect(limIn(pos, ['Divide', ['Negate', 't'], eq]).evaluate().json).toBe(
+      'NegativeInfinity'
+    );
+    // The sign of the numerator must still be known.
+    expect(
+      isUnevaluated(
+        limIn(pos, ['Divide', ['Multiply', 'a', 't'], eq]).evaluate()
+      )
+    ).toBe(true);
+  });
+
+  test('an exponent that goes to −∞ makes the exponential decay', () => {
+    // `t/e^{t − t²} = t·e^{t² − t}` → `+∞`. It was `0`. The probes of
+    // `e^{t − t²}` underflow to 0, so the quotient rule uses the proved sign.
+    const d = ['Exp', ['Subtract', 't', ['Power', 't', 2]]];
+    expect(lim(['Divide', 't', d]).evaluate().json).toBe('PositiveInfinity');
+    expect(lim(['Divide', ['Negate', 't'], d]).evaluate().json).toBe(
+      'NegativeInfinity'
+    );
+    expect(
+      lim([
+        'Multiply',
+        ['Power', 't', 5],
+        ['Exp', ['Subtract', 't', ['Power', 't', 2]]],
+      ]).evaluate().json
+    ).toBe(0);
+  });
+
+  test('an exponent that is not a polynomial', () => {
+    // `e^{√t}` grows faster than any power of `t`. It was ranked as bounded:
+    // `t/e^{√t}` gave `+∞` and `e^{√t}/t` gave `0`.
+    expect(lim(['Divide', 't', ['Exp', ['Sqrt', 't']]]).evaluate().json).toBe(
+      0
+    );
+    expect(lim(['Divide', ['Exp', ['Sqrt', 't']], 't']).evaluate().json).toBe(
+      'PositiveInfinity'
+    );
+    // `√t − 50` is negative at small `t` and goes to `+∞`.
+    const g = ['Add', ['Sqrt', 't'], -50];
+    expect(lim(['Divide', ['Exp', g], 't']).evaluate().json).toBe(
+      'PositiveInfinity'
+    );
+    expect(lim(['Divide', 't', ['Exp', g]]).evaluate().json).toBe(0);
+  });
+
+  test('a root has the growth class of its radicand', () => {
+    // `(√t − 50)/ln t` → `+∞`. It was `0`: the probes at small `t`, where
+    // `−50` dominates, ranked `√t − 50` below `ln t`.
+    const r = lim([
+      'Divide',
+      ['Add', ['Sqrt', 't'], -50],
+      ['Ln', 't'],
+    ]).evaluate();
+    expect(r.json === 'PositiveInfinity' || isUnevaluated(r)).toBe(true);
+    expect(lim(['Divide', ['Root', 't', 3], ['Ln', 't']]).evaluate().json).toBe(
+      'PositiveInfinity'
+    );
+    expect(lim(['Divide', 't', ['Sqrt', ['Exp', 't']]]).evaluate().json).toBe(
+      0
+    );
+  });
+
+  test('a root with a degree that is not a positive constant', () => {
+    // `Root(t, t) = t^{1/t}` → 1. It was ranked polynomial, and
+    // `Root(t, t)/ln t` gave `+∞`. `Root(t, t)` alone also gave `+∞`: the
+    // rule for a root used the limit of the radicand and ignored the degree.
+    expect(lim(['Root', 't', 't']).evaluate().json).toBe(1);
+    expect(
+      lim(['Divide', ['Root', 't', 't'], ['Ln', 't']]).evaluate().json
+    ).toBe(0);
+    // `Root(t, a)` tends to `+∞` for `a > 0` and to 0 for `a < 0`.
+    expect(isUnevaluated(lim(['Root', 't', 'a']).evaluate())).toBe(true);
+  });
+
+  test('an exponent that is real at the first probe only', () => {
+    // `√(200 − t)` is real at `t = 120` and imaginary for `t > 200`, so
+    // `e^{√(200−t)}` is not positive for large `t`: `t/e^{√(200−t)}` has
+    // modulus `t` and a phase that does not settle, so it has no limit. It
+    // was `+∞`.
+    const d = ['Exp', ['Sqrt', ['Subtract', 200, 't']]];
+    expect(isUnevaluated(lim(['Divide', 't', d]).evaluate())).toBe(true);
+  });
+});

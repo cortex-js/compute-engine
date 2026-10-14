@@ -46,6 +46,8 @@ import {
 import {
   deriveApplicationType,
   installBroadcastLiftHooks,
+  mayBeNumericTupleType,
+  parameterReachesBody,
   typeHandlerContext,
   withCodomainForAbsentAnswer,
 } from './derive-application-type.js';
@@ -8229,7 +8231,9 @@ function lambdaBroadcastType(
   // The per-element result derived from the body for the mapped operands
   // (`derivedBroadcastElementResult`), called once the lift is known to
   // apply; `undefined` keeps `perElementResult`.
-  derive?: (mappedAt: ReadonlyArray<boolean>) => Type | undefined
+  derive?: (mappedAt: ReadonlyArray<boolean>) => Type | undefined,
+  // The function literal that is applied, when it is known.
+  literal?: Expression
 ): Type | undefined {
   // A numeric-tuple argument binds WHOLE to a scalar parameter (atomic,
   // never mapped), then the body's own arithmetic decides the shape:
@@ -8244,8 +8248,18 @@ function lambdaBroadcastType(
   // A DECLARED result that is not a number type is kept: a generic
   // `(x: T) -> T where T` instantiates `T` to the tuple, and a declared
   // tuple result describes the tuple argument.
+  // A tuple with an open component (`(a, a)` for a parameter `a` of an
+  // enclosing function literal, or for an undeclared symbol) is treated the
+  // same way, because it is a numeric tuple when the component holds a
+  // number (`mayBeNumericTupleType`). A tuple bound to a parameter that the
+  // body of `literal` never reads does not change the value, and the
+  // signature result stands (`parameterReachesBody`).
   if (
-    ops.some((x) => isNumericTuple(x)) &&
+    ops.some(
+      (x, i) =>
+        (isNumericTuple(x) || mayBeNumericTupleType(x.type.type)) &&
+        parameterReachesBody(literal, i)
+    ) &&
     (inferredResult || isSubtype(perElementResult, 'number'))
   )
     return 'any';
@@ -9063,7 +9077,8 @@ function type(expr: BoxedFunction): Type | BoxedType {
             mappedAt,
             lambdaResult,
             declaredSlots !== undefined
-          )
+          ),
+        lambdaLiteralOf(def)
       );
       // Through `applyContractB` directly, NOT `maybeAbsorb`: the
       // missing-value absorption never applied on this return, and the
@@ -9190,7 +9205,11 @@ function type(expr: BoxedFunction): Type | BoxedType {
         expr.ops,
         sigResult,
         valueSlots,
-        expr.valueDefinition.inferredType,
+        // A bare `function` declaration gives no signature, so the signature
+        // read above is the one inferred from the assigned literal, and its
+        // result is inferred too.
+        expr.valueDefinition.inferredType ||
+          isWildcardFunctionType(declaredType),
         isPolymorphicType(sig),
         // As on the operator-definition route: the body's per-element
         // result when it can be derived (`derivedBroadcastElementResult`).
@@ -9200,7 +9219,8 @@ function type(expr: BoxedFunction): Type | BoxedType {
             mappedAt,
             sigResult,
             valueSlots !== undefined
-          )
+          ),
+        heldValue
       );
       if (lifted !== undefined) return lifted;
     }

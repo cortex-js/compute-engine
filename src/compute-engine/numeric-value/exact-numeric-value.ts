@@ -447,13 +447,34 @@ export class ExactNumericValue extends NumericValue {
       if (this.isComplex) this._clearIm();
       return;
     }
-    // a/0 -> NaN
     const [n, d] = this.rational;
+    // a/0 is a pole: the signed infinity with the sign of `a` when `a ≠ 0`.
+    // 0/0 has no value: NaN. A value with a non-zero imaginary part is NaN
+    // too, because the exact lane has no representation of a complex
+    // infinity.
     // Use double equal to catch both number and bigint
     if (d == 0) {
-      w.rational = [NaN, 1];
+      w.rational =
+        n == 0 || Number.isNaN(n) || this.isComplex
+          ? [NaN, 1]
+          : [n > 0 ? Infinity : -Infinity, 1];
       w.radical = 1;
       if (this.isComplex) this._clearIm();
+      return;
+    }
+    // An infinite or NaN real part has no radical factor: `∞·√2` is `∞`.
+    // The infinity is stored as `[±Infinity, 1]`. The value is `n / d`, so
+    // the sign of a negative denominator applies (`[∞, -2]` is `−∞`), and an
+    // infinite denominator gives NaN (`[∞, ∞]`). This test runs before the
+    // sign of the denominator is normalized below. A bigint denominator is
+    // converted to a double, as `nonFiniteValue()` in `numerics/rationals.ts`
+    // does. Because `n` is not finite and `d` is not zero, `v` is never
+    // finite.
+    if (typeof n === 'number' && !Number.isFinite(n)) {
+      const v = n / Number(d);
+      w.rational = [Number.isNaN(v) ? NaN : v, 1];
+      w.radical = 1;
+      if (Number.isNaN(v) && this.isComplex) this._clearIm();
       return;
     }
 
@@ -881,7 +902,15 @@ export class ExactNumericValue extends NumericValue {
     if (typeof other === 'number') {
       if (other === 1) return this;
       if (other === -1) return this.neg();
-      if (other === 0) return this.clone(NaN);
+      if (other === 0) {
+        // The same answers as for an exact 0 divisor below: `0/0` and
+        // `NaN/0` are NaN, a complex value over 0 is the complex infinity,
+        // and a real value over 0 is the infinity with the sign of the
+        // value (`5/0 = ∞`, `−5/0 = −∞`).
+        if (this.isNaN || this.isZero) return this.clone(NaN);
+        if (this.isComplex) return this.factory({ im: Infinity });
+        return this.clone(this.sign * Infinity);
+      }
       if (!this.isComplex)
         return this.clone({
           rational: mul(this.rational, [1, other]),
@@ -943,6 +972,14 @@ export class ExactNumericValue extends NumericValue {
       if (oi instanceof ExactNumericValue) return this.mul(oi);
       return this._toFloat().div(exactOther);
     }
+
+    // A finite value over ±∞ is 0, and ±∞/±∞ has no value. The code below
+    // converts the parts of the divisor to bigints, which throws for an
+    // infinite part.
+    if (exactOther.isPositiveInfinity || exactOther.isNegativeInfinity)
+      return this.clone(
+        this.isPositiveInfinity || this.isNegativeInfinity ? NaN : 0
+      );
 
     // (a/b √c) / (d/e √f) = (ae/bdf) * √(cf)
     const rational = mul(this.rational, [

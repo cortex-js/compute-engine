@@ -1519,9 +1519,7 @@ describe('Constant matrices: hybrid laziness for huge dimensions', () => {
     // parameters of the nested `Tabulate` generators are annotated `integer`
     // (`lazyConstantMatrix`), so the lambda-body widening has no `unknown`
     // parameter slot to widen the cell's finite claim against.
-    expect(result.type.toString()).toBe(
-      'list<list<integer>>'
-    );
+    expect(result.type.toString()).toBe('list<list<integer>>');
   });
 
   it('the lazy IdentityMatrix is a GENUINE identity, not an all-zero matrix', () => {
@@ -1565,7 +1563,10 @@ describe('Constant matrices: hybrid laziness for huge dimensions', () => {
     // bigint and prints in the compact exponent form (the item-178(b)
     // residual storage normalization).
     expect(
-      ce.expr(['IdentityMatrix', { num: '1e16' }]).evaluate().toString()
+      ce
+        .expr(['IdentityMatrix', { num: '1e16' }])
+        .evaluate()
+        .toString()
     ).toBe('Error("expected-positive-integer", "1e+16")');
     // The JavaScript number `1e16` is past the safe integers, so it boxes as
     // a float, which prints in full.
@@ -1601,15 +1602,9 @@ describe('Constant matrices: hybrid laziness for huge dimensions', () => {
 describe('Norm — result type is real', () => {
   it('a fixed numeric point norms to a finite real', () => {
     const eng = new ComputeEngine();
-    expect(eng.expr(['Norm', ['Tuple', 3, 4]]).type.toString()).toBe(
-      'real'
-    );
-    expect(eng.expr(['Abs', ['Tuple', 3, 4]]).type.toString()).toBe(
-      'real'
-    );
-    expect(eng.expr(['Norm', ['List', 3, 4]]).type.toString()).toBe(
-      'real'
-    );
+    expect(eng.expr(['Norm', ['Tuple', 3, 4]]).type.toString()).toBe('real');
+    expect(eng.expr(['Abs', ['Tuple', 3, 4]]).type.toString()).toBe('real');
+    expect(eng.expr(['Norm', ['List', 3, 4]]).type.toString()).toBe('real');
   });
 
   it('a COMPLEX component still norms to a real', () => {
@@ -1619,9 +1614,7 @@ describe('Norm — result type is real', () => {
     // so the norm of one is `real` — real either way, which is the
     // point. A component that admitted an infinity would norm to `number`
     // (see the finiteness test below).
-    expect(eng.expr(['Norm', ['Tuple', 'z', 1]]).type.toString()).toBe(
-      'real'
-    );
+    expect(eng.expr(['Norm', ['Tuple', 'z', 1]]).type.toString()).toBe('real');
     expect(
       eng
         .expr(['Norm', ['Tuple', 'z', 1]])
@@ -2733,7 +2726,7 @@ describe('Tensor linear algebra regressions (REVIEW.md F1–F4)', () => {
     // Phase C representation unification: the `.tensor` accessor is removed;
     // a kernel tensor is obtained operation-locally via `packTensor`.
     const e = ce.expr(m).evaluate();
-    return isTensor(e) ? packTensor(ce, e) ?? null : null;
+    return isTensor(e) ? (packTensor(ce, e) ?? null) : null;
   };
 
   // F1: determinant() threw for n >= 4 (flat array indexed as 2D, rowIndices[-1]
@@ -3280,6 +3273,64 @@ describe('MatrixPower', () => {
         .evaluate().json
     ).toEqual(['List', ['List', 37, 38], ['List', 38, 75]]);
   });
+
+  describe('the type keeps the shape and the element type', () => {
+    // [declared type of `A`, exponent, type of `MatrixPower(A, k)`].
+    const cases: [string, Expression, string][] = [
+      ['matrix<integer^(2x2)>', 2, 'matrix<integer^(2x2)>'],
+      // The identity matrix has integer entries.
+      ['matrix<integer^(2x2)>', 0, 'matrix<integer^(2x2)>'],
+      // A negative power is an inverse: rational entries.
+      ['matrix<integer^(2x2)>', -2, 'matrix<rational^(2x2)>'],
+      // An integer exponent of unknown sign can be negative.
+      ['matrix<integer^(2x2)>', 'n', 'matrix<rational^(2x2)>'],
+      // A half-integer power is a matrix square root: no element tier.
+      ['matrix<integer^(2x2)>', ['Rational', 1, 2], 'matrix<2x2>'],
+      ['matrix<real^(3x3)>', 3, 'matrix<real^(3x3)>'],
+      ['matrix<real^(3x3)>', -1, 'matrix<real^(3x3)>'],
+      ['matrix<rational^(2x2)>', -3, 'matrix<rational^(2x2)>'],
+      ['matrix<complex^(2x2)>', 2, 'matrix<complex^(2x2)>'],
+      // A nested spelling of a 2×2 matrix types as the flat one.
+      ['list<list<integer^2>^2>', 2, 'matrix<integer^(2x2)>'],
+      // The shape is unknown: the element type is kept.
+      ['matrix<integer>', 2, 'matrix<integer>'],
+      // A non-square matrix has no power: the declared `matrix` is kept.
+      ['matrix<integer^(2x3)>', 2, 'matrix'],
+      ['matrix', 2, 'matrix'],
+    ];
+    it.each(cases)('MatrixPower(%s, %j) is %s', (type, k, expected) => {
+      const engine = new ComputeEngine();
+      engine.declare('A', type);
+      engine.declare('n', 'integer');
+      expect(engine.box(['MatrixPower', 'A', k]).type.toString()).toBe(
+        expected
+      );
+    });
+
+    it('agrees with the type of the evaluated power', () => {
+      const engine = new ComputeEngine();
+      for (const k of [2, 0, -2]) {
+        const e = engine.box(['MatrixPower', m, k]);
+        expect(e.type.toString()).toBe(e.evaluate().type.toString());
+      }
+      // The value: [[7,10],[15,22]], [[1,0],[0,1]], [[11/2,-5/2],[-15/4,7/4]].
+      expect(engine.box(['MatrixPower', m, -2]).type.toString()).toBe(
+        'matrix<rational^(2x2)>'
+      );
+    });
+
+    it('is the type of `m^2` on the parse and box routes', () => {
+      const engine = new ComputeEngine();
+      engine.declare('m', 'matrix<integer^(2x2)>');
+      expect(engine.parse('m^2').type.toString()).toBe('matrix<integer^(2x2)>');
+      expect(engine.box(['Power', 'm', 2]).type.toString()).toBe(
+        'matrix<integer^(2x2)>'
+      );
+      expect(engine.box(['Power', m, 3]).type.toString()).toBe(
+        'matrix<integer^(2x2)>'
+      );
+    });
+  });
 });
 
 describe('Power of a matrix (^)', () => {
@@ -3751,7 +3802,9 @@ describe('Norm — a point with an EMPTY broadcasting component is zero points',
     expect(ce.box(['Abs', P]).evaluate().json).toEqual(['List']);
     expect(ce.box(['Norm', P, 1]).evaluate().json).toEqual(['List']);
     expect(ce.box(['Norm', P, 3]).evaluate().json).toEqual(['List']);
-    expect(ce.box(['Norm', ['Tuple', ['List'], ['List']]]).evaluate().json).toEqual(['List']);
+    expect(
+      ce.box(['Norm', ['Tuple', ['List'], ['List']]]).evaluate().json
+    ).toEqual(['List']);
   });
 
   test('an empty component beside a NON-EMPTY list component is a length mismatch', () => {
@@ -3763,20 +3816,40 @@ describe('Norm — a point with an EMPTY broadcasting component is zero points',
     eng.assign('L', eng.box(['List', 1, 2, 3]));
     eng.assign('M', eng.box(['List']));
     eng.assign('K', eng.box(['List', 1, 2]));
-    const error = (a: string) => ['Error', "'incompatible-dimensions'", `'${a}'`];
+    const error = (a: string) => [
+      'Error',
+      "'incompatible-dimensions'",
+      `'${a}'`,
+    ];
     for (const order of [[], [1], [3], [{ str: 'Infinity' }]]) {
-      expect(eng.box(['Norm', ['Tuple', 'L', 'M'], ...order]).evaluate().json).toEqual(error('3 vs 0'));
-      expect(eng.box(['Norm', ['Tuple', 'M', 'L'], ...order]).evaluate().json).toEqual(error('0 vs 3'));
+      expect(
+        eng.box(['Norm', ['Tuple', 'L', 'M'], ...order]).evaluate().json
+      ).toEqual(error('3 vs 0'));
+      expect(
+        eng.box(['Norm', ['Tuple', 'M', 'L'], ...order]).evaluate().json
+      ).toEqual(error('0 vs 3'));
       // The L∞ order did not zip its components and left this inert.
-      expect(eng.box(['Norm', ['Tuple', 'L', 'K'], ...order]).evaluate().json).toEqual(error('3 vs 2'));
+      expect(
+        eng.box(['Norm', ['Tuple', 'L', 'K'], ...order]).evaluate().json
+      ).toEqual(error('3 vs 2'));
     }
-    expect(eng.box(['Abs', ['Tuple', 'L', 'M']]).evaluate().json).toEqual(error('3 vs 0'));
-    expect(eng.box(['Norm', ['Tuple', ['List'], ['List', 1, 2]]]).evaluate().json).toEqual(error('0 vs 2'));
+    expect(eng.box(['Abs', ['Tuple', 'L', 'M']]).evaluate().json).toEqual(
+      error('3 vs 0')
+    );
+    expect(
+      eng.box(['Norm', ['Tuple', ['List'], ['List', 1, 2]]]).evaluate().json
+    ).toEqual(error('0 vs 2'));
     // The same error as the element-wise operators give.
-    expect(eng.box(['Hypot', 'L', 'M']).evaluate().json).toEqual(error('3 vs 0'));
+    expect(eng.box(['Hypot', 'L', 'M']).evaluate().json).toEqual(
+      error('3 vs 0')
+    );
     expect(eng.box(['Add', 'L', 'M']).evaluate().json).toEqual(error('3 vs 0'));
-    expect(eng.box(['Norm', ['Tuple', 'L', 'M']]).N().json).toEqual(error('3 vs 0'));
-    expect(eng.box(['Norm', ['Tuple', 'L', 'M']]).type.toString()).toBe('list<number>');
+    expect(eng.box(['Norm', ['Tuple', 'L', 'M']]).N().json).toEqual(
+      error('3 vs 0')
+    );
+    expect(eng.box(['Norm', ['Tuple', 'L', 'M']]).type.toString()).toBe(
+      'list<number>'
+    );
   });
 
   test('a PointList with an empty component is zero points, and its norm is []', () => {
@@ -3790,21 +3863,37 @@ describe('Norm — a point with an EMPTY broadcasting component is zero points',
     eng.assign('M', eng.box(['List']));
     eng.assign('K', eng.box(['List', 1, 2]));
     for (const order of [[], [1], [3], [{ str: 'Infinity' }]]) {
-      for (const pl of [['PointList', 'L', 'M'], ['PointList', 'M', 'L'], ['PointList', 'M', 3]]) {
+      for (const pl of [
+        ['PointList', 'L', 'M'],
+        ['PointList', 'M', 'L'],
+        ['PointList', 'M', 3],
+      ]) {
         const e = eng.box(['Norm', pl, ...order]);
         expect(e.type.toString()).toBe('list<number>');
         expect(e.evaluate().json).toEqual(['List']);
         expect(e.N().json).toEqual(['List']);
       }
     }
-    expect(eng.box(['Abs', ['PointList', 'L', 'M']]).evaluate().json).toEqual(['List']);
+    expect(eng.box(['Abs', ['PointList', 'L', 'M']]).evaluate().json).toEqual([
+      'List',
+    ]);
     // A symbol that holds the empty point list reads the same.
     eng.assign('P', eng.box(['PointList', 'L', 'M']));
     expect(eng.box(['Norm', 'P']).evaluate().json).toEqual(['List']);
     expect(eng.box(['Norm', 'P']).type.toString()).toBe('list<number>');
     // Unequal non-empty components zip to the shorter: two points, two norms.
-    expect(eng.box(['Norm', ['PointList', 'L', 'K']]).evaluate().toString()).toBe('[sqrt(2),2sqrt(2)]');
-    expect(eng.box(['Norm', ['PointList', 'L', 'K'], 1]).evaluate().toString()).toBe('[2,4]');
+    expect(
+      eng
+        .box(['Norm', ['PointList', 'L', 'K']])
+        .evaluate()
+        .toString()
+    ).toBe('[sqrt(2),2sqrt(2)]');
+    expect(
+      eng
+        .box(['Norm', ['PointList', 'L', 'K'], 1])
+        .evaluate()
+        .toString()
+    ).toBe('[2,4]');
     // The empty VECTOR keeps the norm 0.
     expect(eng.box(['Norm', ['List']]).evaluate().json).toBe(0);
     expect(eng.box(['Norm', ['List'], 1]).evaluate().json).toBe(0);
@@ -3819,7 +3908,12 @@ describe('Norm — a point with an EMPTY broadcasting component is zero points',
       expect(r.success).toBe(true);
       return r.run!({ L: [1, 2, 3], M: [], K: [1, 2] });
     };
-    for (const order of [[], [1], ['PositiveInfinity'], [{ str: 'Infinity' }]]) {
+    for (const order of [
+      [],
+      [1],
+      ['PositiveInfinity'],
+      [{ str: 'Infinity' }],
+    ]) {
       expect(run(['Norm', ['Tuple', 'L', 'M'], ...order])).toBeNaN();
       expect(run(['Norm', ['Tuple', 'L', 'K'], ...order])).toBeNaN();
       expect(run(['Norm', ['PointList', 'L', 'M'], ...order])).toEqual([]);
@@ -3832,8 +3926,12 @@ describe('Norm — a point with an EMPTY broadcasting component is zero points',
   test('zero points have no infinite or NaN norm either', () => {
     // The empty component is decided before the infinite-component
     // dominance and the NaN answer: there is no point for them to dominate.
-    expect(ce.box(['Norm', ['Tuple', ['List'], 'PositiveInfinity']]).evaluate().json).toEqual(['List']);
-    expect(ce.box(['Norm', ['Tuple', ['List'], 'NaN']]).evaluate().json).toEqual(['List']);
+    expect(
+      ce.box(['Norm', ['Tuple', ['List'], 'PositiveInfinity']]).evaluate().json
+    ).toEqual(['List']);
+    expect(
+      ce.box(['Norm', ['Tuple', ['List'], 'NaN']]).evaluate().json
+    ).toEqual(['List']);
   });
 
   test('an empty nested TUPLE component is an atomic point of norm 0', () => {
@@ -3846,24 +3944,47 @@ describe('Norm — a point with an EMPTY broadcasting component is zero points',
     expect(ce.box(['Hypot', P, 4]).evaluate().json).toEqual(['List']);
     expect(ce.box(['Hypot', 4, P]).N().json).toEqual(['List']);
     // Decided before the infinite-leg and NaN-leg dominance, as `Norm` is.
-    expect(ce.box(['Hypot', ['Tuple', ['List'], 'PositiveInfinity'], 3]).evaluate().json).toEqual(['List']);
-    expect(ce.box(['Hypot', P, 'PositiveInfinity']).evaluate().json).toEqual(['List']);
-    expect(ce.box(['Hypot', ['Tuple', ['List'], 'NaN'], 4]).evaluate().json).toEqual(['List']);
+    expect(
+      ce.box(['Hypot', ['Tuple', ['List'], 'PositiveInfinity'], 3]).evaluate()
+        .json
+    ).toEqual(['List']);
+    expect(ce.box(['Hypot', P, 'PositiveInfinity']).evaluate().json).toEqual([
+      'List',
+    ]);
+    expect(
+      ce.box(['Hypot', ['Tuple', ['List'], 'NaN'], 4]).evaluate().json
+    ).toEqual(['List']);
   });
 
   test('the non-empty broadcast and the plain point are unchanged', () => {
-    expect(ce.box(['Norm', ['Tuple', ['List', 1, 2], 3]]).N().ops!.map((x) => x.re)).toEqual([
+    expect(
+      ce
+        .box(['Norm', ['Tuple', ['List', 1, 2], 3]])
+        .N()
+        .ops!.map((x) => x.re)
+    ).toEqual([
       expect.closeTo(Math.sqrt(10), 12),
       expect.closeTo(Math.sqrt(13), 12),
     ]);
-    expect(ce.box(['Hypot', ['Tuple', ['List', 1, 2], 3], 4]).N().ops!.map((x) => x.re)).toEqual([
+    expect(
+      ce
+        .box(['Hypot', ['Tuple', ['List', 1, 2], 3], 4])
+        .N()
+        .ops!.map((x) => x.re)
+    ).toEqual([
       expect.closeTo(Math.sqrt(26), 12),
       expect.closeTo(Math.sqrt(29), 12),
     ]);
-    expect(ce.box(['Norm', ['Tuple', ['List', 1, 2], 'PositiveInfinity']]).evaluate().json).toBe('PositiveInfinity');
+    expect(
+      ce.box(['Norm', ['Tuple', ['List', 1, 2], 'PositiveInfinity']]).evaluate()
+        .json
+    ).toBe('PositiveInfinity');
     expect(ce.box(['Norm', ['Tuple', 3, 4]]).evaluate().re).toBe(5);
     expect(ce.box(['Hypot', ['Tuple', 3, 4], 12]).evaluate().re).toBe(13);
-    expect(ce.box(['Hypot', ['Tuple', 1, 1], 1]).evaluate().json).toEqual(['Sqrt', 3]);
+    expect(ce.box(['Hypot', ['Tuple', 1, 1], 1]).evaluate().json).toEqual([
+      'Sqrt',
+      3,
+    ]);
   });
 });
 
@@ -3884,17 +4005,35 @@ describe('Norm — the L∞ norm of a point with a broadcasting component', () =
       expect(e.evaluate().json).toEqual(['List', 4, 5, 3]);
       expect(e.N().json).toEqual(['List', 4, 5, 3]);
       // A scalar component is a coordinate of every point.
-      expect(eng.box(['Norm', ['Tuple', 'L', 4], order]).evaluate().json).toEqual(['List', 4, 5, 4]);
+      expect(
+        eng.box(['Norm', ['Tuple', 'L', 4], order]).evaluate().json
+      ).toEqual(['List', 4, 5, 4]);
       // A nested point is one coordinate of every point: its norm is 5.
-      expect(eng.box(['Norm', ['Tuple', 'L', ['Tuple', 3, 4]], order]).evaluate().json).toEqual(['List', 5, 5, 5]);
+      expect(
+        eng.box(['Norm', ['Tuple', 'L', ['Tuple', 3, 4]], order]).evaluate()
+          .json
+      ).toEqual(['List', 5, 5, 5]);
       // The maximum stays exact.
       expect(
-        eng.box(['Norm', ['Tuple', ['List', 1, 'Pi'], ['List', 'ExponentialE', -1]], order]).evaluate().json
+        eng
+          .box([
+            'Norm',
+            ['Tuple', ['List', 1, 'Pi'], ['List', 'ExponentialE', -1]],
+            order,
+          ])
+          .evaluate().json
       ).toEqual(['List', 'ExponentialE', 'Pi']);
       // An absent coordinate makes the norm of that point `NaN`.
-      expect(eng.box(['Norm', ['Tuple', ['List', 1, 'Missing'], 2], order]).evaluate().toString()).toBe('[2,NaN]');
+      expect(
+        eng
+          .box(['Norm', ['Tuple', ['List', 1, 'Missing'], 2], order])
+          .evaluate()
+          .toString()
+      ).toBe('[2,NaN]');
       // A coordinate with no value leaves the norm undecided.
-      expect(eng.box(['Norm', ['Tuple', 'L', 'z'], order]).evaluate().operator).toBe('Norm');
+      expect(
+        eng.box(['Norm', ['Tuple', 'L', 'z'], order]).evaluate().operator
+      ).toBe('Norm');
     }
   });
 
@@ -3902,7 +4041,10 @@ describe('Norm — the L∞ norm of a point with a broadcasting component', () =
     const c = new ComputeEngine();
     for (const s of ['L', 'K']) c.declare(s, 'list<real>');
     for (const order of ORDERS) {
-      const r = compile(c.box(['Norm', ['Tuple', 'L', 'K'], order]), { to: 'javascript', fallback: false });
+      const r = compile(c.box(['Norm', ['Tuple', 'L', 'K'], order]), {
+        to: 'javascript',
+        fallback: false,
+      });
       expect(r.success).toBe(true);
       expect(r.run!({ L: [1, -5, 3], K: [-4, 2, 1] })).toEqual([4, 5, 3]);
     }
@@ -3921,26 +4063,59 @@ describe('Norm — the string order "Infinity" compiles as the symbol order', ()
   eng.declare('A', 'matrix<real>');
   eng.declare('L', 'list<real>');
   eng.declare('K', 'list<real>');
-  const ARGS = { x: 3, y: -4, V: [3, -4, 1], A: [[1, -2], [3, 4]], L: [1, -5, 3], K: [-4, 2, 1] };
-  const OPERANDS: Expression[] = [['Tuple', 'x', 'y'], 'V', 'A', ['Tuple', 'L', 'K'], ['PointList', 'L', 'K']];
+  const ARGS = {
+    x: 3,
+    y: -4,
+    V: [3, -4, 1],
+    A: [
+      [1, -2],
+      [3, 4],
+    ],
+    L: [1, -5, 3],
+    K: [-4, 2, 1],
+  };
+  const OPERANDS: Expression[] = [
+    ['Tuple', 'x', 'y'],
+    'V',
+    'A',
+    ['Tuple', 'L', 'K'],
+    ['PointList', 'L', 'K'],
+  ];
 
   test('on JavaScript, both spellings give the interpreter value', () => {
     const expected = [4, 4, 7, [4, 5, 3], [4, 5, 3]];
     OPERANDS.forEach((x, i) => {
-      for (const order of ['PositiveInfinity', { str: 'Infinity' }] as Expression[]) {
-        const r = compile(eng.box(['Norm', x, order]), { to: 'javascript', fallback: false });
+      for (const order of [
+        'PositiveInfinity',
+        { str: 'Infinity' },
+      ] as Expression[]) {
+        const r = compile(eng.box(['Norm', x, order]), {
+          to: 'javascript',
+          fallback: false,
+        });
         expect(r.success).toBe(true);
         expect(r.run!(ARGS)).toEqual(expected[i]);
       }
     });
     // The matrix ∞-norm (the largest row sum) in the interpreter.
-    expect(eng.box(['Norm', ['List', ['List', 1, -2], ['List', 3, 4]], { str: 'Infinity' }]).evaluate().json).toBe(7);
+    expect(
+      eng
+        .box([
+          'Norm',
+          ['List', ['List', 1, -2], ['List', 3, 4]],
+          { str: 'Infinity' },
+        ])
+        .evaluate().json
+    ).toBe(7);
   });
 
   test('on the GPU and interval targets, both spellings decline the same way', () => {
     const message = (to: string, order: Expression): string => {
       try {
-        const r = compile(eng.box(['Norm', ['Tuple', 'x', 'y'], order]), { to, fallback: false });
+        const r = compile(eng.box(['Norm', ['Tuple', 'x', 'y'], order]), {
+          to,
+          fallback: false,
+        });
         return r.success ? 'compiled' : String(r.error);
       } catch (err) {
         return (err as Error).message;
@@ -4010,17 +4185,15 @@ describe('Norm order 1 and order ∞ of exact entries outside the float64 range'
     });
   }
   it('a machine matrix still uses the machine sums', () => {
+    expect(eng.box(['Norm', diag(1.5, 2.5), 1]).evaluate().re).toBe(2.5);
     expect(
       eng
-        .box(['Norm', diag(1.5, 2.5), 1])
-        .evaluate()
-        .re
-    ).toBe(2.5);
-    expect(
-      eng
-        .box(['Norm', ['List', ['List', 1.5, -3.25], ['List', 0.5, 1]], 'PositiveInfinity'])
-        .evaluate()
-        .re
+        .box([
+          'Norm',
+          ['List', ['List', 1.5, -3.25], ['List', 0.5, 1]],
+          'PositiveInfinity',
+        ])
+        .evaluate().re
     ).toBe(4.75);
   });
 });
@@ -4052,9 +4225,7 @@ describe('Float kernels decline an entry a float64 cannot hold', () => {
       ['List', 1, 1, 0],
       ['List', 0, 0, 2],
     ];
-    expect(eng.box(['Eigenvalues', m]).evaluate().operator).toBe(
-      'Eigenvalues'
-    );
+    expect(eng.box(['Eigenvalues', m]).evaluate().operator).toBe('Eigenvalues');
   });
   it('a matrix in the float64 range still decomposes', () => {
     expect(eng.box(['LUDecomposition', m2(2)]).evaluate().operator).not.toBe(

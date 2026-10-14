@@ -24,6 +24,7 @@ import type {
 
 import { isDictionary, isFunction } from './boxed-expression/type-guards.js';
 import { updateDef, defIsCallableShaped } from './boxed-expression/utils.js';
+import { isReplaceableOperatorShell } from './boxed-expression/definition-guards.js';
 import { functionLiteralParameters } from './boxed-expression/function-literal.js';
 import { apply } from './function-utils.js';
 import { sumVariantInfo } from './sum-representation.js';
@@ -141,10 +142,7 @@ export function checkTypeConstructorNamespace(
     ('value' in existing &&
       existing.value.inferredType &&
       existing.value.value === undefined) ||
-    ('operator' in existing &&
-      existing.operator.inferredSignature &&
-      existing.operator.evaluate === undefined &&
-      existing.operator.canonical === undefined);
+    ('operator' in existing && isReplaceableOperatorShell(existing.operator));
   if (inferred) return;
 
   throw Error(

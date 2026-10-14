@@ -799,6 +799,17 @@ function limitAtPosInf(
   // √u and ⁿ√u (canonical forms of u^{1/2}, u^{1/n}): monotone for a real
   // radicand, so they carry the argument's limit. A radicand → −∞ heads to an
   // imaginary infinity — deferred (undefined) rather than resolved.
+  // These rules are correct only for a degree that is a constant known to be
+  // positive. Any other degree (`Root(x, x) = x^{1/x}`, which tends to 1, or
+  // a degree with an unknown sign) goes to the rule for `u^{1/n}`.
+  if (op === 'Root' && !(!o2(e).has(x) && o2(e).isPositive === true))
+    return limitPowerAtPosInf(
+      o1(e),
+      ce.function('Divide', [ce.One, o2(e)]),
+      x,
+      ce,
+      depth
+    );
   if (op === 'Sqrt' || op === 'Root') {
     const inner = limitAtPosInf(o1(e), x, ce, depth + 1);
     if (!inner) return undefined;
@@ -905,11 +916,14 @@ function limitRatioAtPosInf(
     if (cmp < 0) return ce.Zero; // numerator grows slower → 0
     if (cmp > 0) {
       // The sign of each term is read from numeric probes at three growing
-      // points. A probe with no value (a symbolic coefficient, as in
-      // `a·eˣ/x`), or probes that disagree (`√x − 50` is negative at 120 and
-      // positive at 10⁴), leave the sign of the infinity undecided: decline.
-      const sn = stableSignAtInf(n, x, ce);
-      const sd = stableSignAtInf(d, x, ce);
+      // points. When the probes give no sign (a symbolic coefficient, as in
+      // `x/e^{q·x}`, or a value that underflows to 0, as `e^{x − x²}` does),
+      // use the sign that the engine can prove (`e^g` is always positive).
+      // If the sign is still not known (`a·eˣ/x` with `a` unknown, or
+      // `√x − 50`, which is negative at 120 and positive at 10⁴), the sign
+      // of the infinity is undecided: decline.
+      const sn = stableSignAtInf(n, x, ce) || provenSignAtInf(n, x, ce);
+      const sd = stableSignAtInf(d, x, ce) || provenSignAtInf(d, x, ce);
       if (sn === 0 || sd === 0) return undefined;
       return sn !== sd ? ce.NegativeInfinity : ce.PositiveInfinity;
     }
@@ -1382,14 +1396,38 @@ function growthLevel(
 
   if (op === 'Negate') return growthLevel(o1(e), x, ce, depth + 1);
 
+  // A root keeps the growth class of its radicand: `√x` is polynomial,
+  // `√(eˣ) = e^{x/2}` is exponential, `√(ln x)` is logarithmic. Without this
+  // level, `√x − 50` was ranked by numeric probes at small `x`, where the
+  // constant dominates, and `(√x − 50)/ln x` gave `0` instead of `+∞`.
+  // This is true only for a degree that is a constant known to be positive
+  // (`Sqrt` has degree 2). A constant negative degree gives a root that
+  // decays (level 0). Any other degree has no level here: `Root(x, x)` is
+  // `x^{1/x}`, which tends to 1, and is not polynomial.
+  if (op === 'Sqrt') return growthLevel(o1(e), x, ce, depth + 1);
+  if (op === 'Root') {
+    const n = o2(e);
+    if (n.has(x)) return undefined;
+    if (n.isPositive === true) return growthLevel(o1(e), x, ce, depth + 1);
+    if (n.isNegative === true) return 0;
+    return undefined;
+  }
+
   if (op === 'Ln' || op === 'Log') {
     const gl = growthLevel(o1(e), x, ce, depth + 1);
     if (gl === undefined || gl <= 0) return undefined;
     return gl <= 2 ? 1 : gl - 1; // ln(poly)→log; ln(expᴸ)→L−1
   }
 
+  // `e^g` and `b^g` (constant `b > 1`) grow only when `g → +∞`. When `g` is
+  // bounded or negative they are bounded (level 0). When it is not known
+  // whether `g` grows, or with which sign (`e^{a·x}` with `a` unknown, or
+  // `e^{√x}`, which `tendsToInfinity` does not classify), the level is not
+  // known: reading it as 0 ranked `e^{√x}` below `x`, and `x/e^{√x}` gave
+  // `+∞` instead of `0`.
   if (op === 'Exp') {
-    if (tendsToInfinity(o1(e), x, ce) !== true) return 0; // e^(bounded / →−∞)
+    const t = exponentialTendsToInfinity(o1(e), x, ce);
+    if (t !== true) return t === false ? 0 : undefined;
     const gl = growthLevel(o1(e), x, ce, depth + 1);
     return gl === undefined ? undefined : Math.max(3, gl + 1);
   }
@@ -1399,7 +1437,8 @@ function growthLevel(
     const expo = o2(e);
     if (!base.has(x) && expo.has(x)) {
       if (base.isGreater?.(ce.One) === true) {
-        if (tendsToInfinity(expo, x, ce) !== true) return 0;
+        const t = exponentialTendsToInfinity(expo, x, ce);
+        if (t !== true) return t === false ? 0 : undefined;
         const gl = growthLevel(expo, x, ce, depth + 1);
         return gl === undefined ? undefined : Math.max(3, gl + 1);
       }
@@ -1467,11 +1506,7 @@ function tendsToInfinity(
   if (deg > 0) return true;
   if (deg === 0) return false;
 
-  if (op === 'Exp') {
-    const t = tendsToInfinity(o1(e), x, ce);
-    if (t === false) return false; // e^(bounded) bounded
-    return leadingSignAtInf(o1(e), x, ce) > 0 ? true : false; // e^(+∞)→∞, e^(−∞)→0
-  }
+  if (op === 'Exp') return exponentialTendsToInfinity(o1(e), x, ce);
   if (op === 'Ln' || op === 'Log') return tendsToInfinity(o1(e), x, ce);
 
   if (op === 'Power') {
@@ -1484,10 +1519,7 @@ function tendsToInfinity(
     }
     if (!base.has(x)) {
       if (base.isGreater?.(ce.One) === true)
-        return (
-          tendsToInfinity(expo, x, ce) === true &&
-          leadingSignAtInf(expo, x, ce) > 0
-        );
+        return exponentialTendsToInfinity(expo, x, ce);
       if (base.isPositive === true && base.isLess?.(ce.One) === true)
         return false;
     }
@@ -1498,20 +1530,55 @@ function tendsToInfinity(
   if (op === 'Add') {
     // → ∞ if at least one term → ∞ and the dominant term(s) don't cancel.
     const dom = dominantTerms(oo(e), x, ce);
-    if (dom.some((t) => tendsToInfinity(t, x, ce) === true)) {
+    const domInf = dom.map((t) => tendsToInfinity(t, x, ce));
+    if (domInf.some((t) => t === true)) {
       const reduced = (
         dom.length === 1 ? dom[0] : ce.function('Add', dom)
       ).simplify();
       if (reduced.has(x)) return numericTendsToInfinity(reduced, x, ce);
       return false;
     }
-    return false;
+    // The sum is bounded only when each dominant term is bounded. A dominant
+    // term that is not classified (`√x` in `√x − 50`) leaves the answer
+    // unknown.
+    return domInf.every((t) => t === false) ? false : undefined;
   }
 
   if (op === 'Multiply' || op === 'Divide')
     return numericTendsToInfinity(e, x, ce);
 
   return numericTendsToInfinity(e, x, ce);
+}
+
+/**
+ * Does `b^g` → ∞ as x → +∞, for a constant base `b > 1` (`e^g` included)?
+ * `true` when `|g|` → ∞ and `g` is positive, `false` when `g` is bounded
+ * (then `b^g` is bounded) or negative (then `b^g` is in `(0, 1)`), and
+ * `undefined` otherwise.
+ *
+ * The sign of `g` is read from numeric probes. When a probe has no value (a
+ * symbolic parameter, as in `e^{a·x}`) or the probes disagree, a polynomial
+ * `g` takes the sign of its leading coefficient, when that sign is known
+ * (`a > 0` assumed). Otherwise the sign is not known: `a·x` goes to `+∞` or
+ * to `−∞` depending on `a`, so the answer is `undefined`, not `true`.
+ */
+function exponentialTendsToInfinity(
+  g: Expression,
+  x: string,
+  ce: ComputeEngine
+): boolean | undefined {
+  const t = tendsToInfinity(g, x, ce);
+  if (t === false) return false;
+  let sign = stableSignAtInf(g, x, ce);
+  if (sign === 0) {
+    const deg = polynomialDegree(g, x);
+    const lead = deg > 0 ? getPolynomialCoefficients(g, x)?.[deg] : undefined;
+    if (lead?.isPositive === true) sign = 1;
+    else if (lead?.isNegative === true) sign = -1;
+  }
+  if (sign < 0) return false;
+  if (sign > 0 && t === true) return true;
+  return undefined;
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -1714,10 +1781,8 @@ function lnOfLimit(
   return undefined;
 }
 
-function leadingSignAtInf(e: Expression, x: string, ce: ComputeEngine): number {
-  const sign = stableSignAtInf(e, x, ce);
-  return sign === 0 ? 1 : sign;
-}
+/** The values of `x` where `stableSignAtInf` and `provenSignAtInf` probe. */
+const SIGN_PROBE_POINTS = [120, 1e4, 1e8];
 
 /**
  * The sign of `e` as `x → +∞`, read from numeric probes at `x = 120`, `10⁴`
@@ -1728,7 +1793,7 @@ function leadingSignAtInf(e: Expression, x: string, ce: ComputeEngine): number {
  */
 function stableSignAtInf(e: Expression, x: string, ce: ComputeEngine): number {
   let sign = 0;
-  for (const point of [120, 1e4, 1e8]) {
+  for (const point of SIGN_PROBE_POINTS) {
     const v = numericAt(e, x, point, ce);
     if (Number.isNaN(v) || v === 0) return 0;
     const s = v < 0 ? -1 : 1;
@@ -1736,6 +1801,47 @@ function stableSignAtInf(e: Expression, x: string, ce: ComputeEngine): number {
     else if (s !== sign) return 0;
   }
   return sign;
+}
+
+/**
+ * The sign of `e` for large positive `x`, when it can be proved without a
+ * numeric probe: `1` or `−1`, else `0`.
+ *
+ * The engine does not know that the limit variable `x` is real, so it cannot
+ * prove that `e^{q·x}` is positive. This function proves it from the form:
+ * `e^g` and `b^g` (a constant `b > 0`) are positive when `g` is real. `g` is
+ * taken as real when its type is real with `x` replaced by each of the
+ * three probe points of `stableSignAtInf` (`q·x` with `q` declared real).
+ * This is a check at three points, not a proof for all large `x`: it
+ * rejects `√(200 − x)`, which is real at 120 and imaginary past 200, but
+ * it does not reject an exponent that is real at the three points and
+ * not real between them. A product or a quotient takes the
+ * product of the signs of its parts. Any other form uses the sign that the
+ * engine proves for it.
+ */
+function provenSignAtInf(e: Expression, x: string, ce: ComputeEngine): number {
+  if (e.isPositive === true) return 1;
+  if (e.isNegative === true) return -1;
+  const op = e.operator;
+  if (op === 'Negate') return -provenSignAtInf(o1(e), x, ce);
+  if (op === 'Multiply' || op === 'Divide') {
+    let sign = 1;
+    for (const f of oo(e)) sign *= provenSignAtInf(f, x, ce);
+    return sign;
+  }
+  let g: Expression | undefined;
+  if (op === 'Exp') g = o1(e);
+  else if (op === 'Power' && !o1(e).has(x) && o1(e).isPositive === true)
+    g = o2(e);
+  if (
+    g !== undefined &&
+    !hasNonRealConstant(g) &&
+    SIGN_PROBE_POINTS.every((point) =>
+      g!.subs({ [x]: ce.number(point) }).type.matches('real')
+    )
+  )
+    return 1;
+  return 0;
 }
 
 function leadingCoefficientRatio(

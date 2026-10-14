@@ -245,6 +245,22 @@ describe('ce.loadLibrary()', () => {
     expect(ce.lookupDefinition('T')).toBeUndefined();
   });
 
+  test('a library cannot replace an operator declared without a signature', () => {
+    // The operator has an inferred signature because it has no `signature`,
+    // but the author declared it, so it is not a binding declared from a use.
+    const ce = new ComputeEngine();
+    ce.declare('Sq', { evaluate: ([x]) => x.mul(x) });
+    expect(
+      errorOf(() =>
+        ce.loadLibrary({
+          name: 'other',
+          definitions: { Sq: { evaluate: ['Function', 'x', 'x'] } },
+        })
+      )
+    ).toBe(`Library "other": "Sq" is already declared in the global scope`);
+    expect(ce.box(['Sq', 3]).evaluate().toString()).toBe('9');
+  });
+
   test('a definition that declare() rejects: nothing is declared', () => {
     const ce = new ComputeEngine();
     const bad = {

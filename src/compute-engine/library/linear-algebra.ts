@@ -6,10 +6,13 @@ import {
 import { parseType } from '../../common/type/parse.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import {
+  broadcastCellType,
   collectionElementType,
   isPointElementType,
+  nonNegativeRangeType,
   resolveTypeAlias,
   resolveTypeForCompilation as resolveType,
+  staticCollectionDims,
   stripMissingFromType,
   widen,
 } from '../../common/type/utils.js';
@@ -1878,6 +1881,63 @@ function canEnumerateTensorOperands(expr: Expression): boolean | undefined {
   return undefined;
 }
 
+/**
+ * The type of a power `A^k` of a square matrix `A`, for the `MatrixPower`
+ * type handler. `exponent` tells what is known about `k`:
+ *
+ * - `'non-negative-integer'`: the result is a sum of products of the
+ *   entries (the identity matrix when `k = 0`), so it stays inside the ring
+ *   the entries live in: an integer matrix has an integer power.
+ * - `'integer'`: `k` can be negative, and a negative power is an inverse.
+ *   An inverse of an integer matrix has rational entries (`[[1, 2], [3,
+ *   4]]^-1` is `[[-2, 1], [3/2, -1/2]]`), so the narrowest tier is
+ *   `rational`.
+ * - `'any'`: `k` is not known to be an integer (a half-integer power is a
+ *   matrix square root). No element tier is claimed, only `number`.
+ *
+ * The result has the shape of the operand, and the shape is square: when
+ * only one extent is known, the other extent of a power that has a value
+ * is the same. The element tiers are tested from the narrowest outwards,
+ * as the `Determinant` handler does. An element type that is in no tier
+ * (it admits an infinity or NaN, which can give `∞ − ∞`) gives `number`.
+ *
+ * This DECLINES (returns `undefined`, so the declared result applies) when
+ * the operand is not a matrix of known rank 2, or when its two extents are
+ * known and not equal. A non-square matrix has no power: the evaluate
+ * handlers answer `expected-square-matrix`. The empty bottom type `never`
+ * also declines: it is a subtype of every type, so a tier test would let it
+ * claim `integer`.
+ */
+function squareMatrixPowerType(
+  m: OperandDescriptor | undefined,
+  exponent: 'non-negative-integer' | 'integer' | 'any',
+  context: TypeHandlerContext
+): BoxedType | undefined {
+  if (m === undefined || isSubtype(m.type, 'never')) return undefined;
+  if (!isSubtype(m.type, 'matrix')) return undefined;
+  const dims = staticCollectionDims(m.type);
+  if (dims === null || dims.length !== 2) return undefined;
+  const [rows, columns] = dims;
+  if (rows >= 0 && columns >= 0 && rows !== columns) return undefined;
+  const size = rows >= 0 ? rows : columns;
+  // The cell type reads through a nested spelling (`list<list<integer^2>^2>`)
+  // to the entries, as it reads through the flat one (`matrix<integer^(2x2)>`).
+  const cell = broadcastCellType(m.type);
+  if (isSubtype(cell, 'never')) return undefined;
+  const tiers =
+    exponent === 'non-negative-integer'
+      ? (['integer', 'rational', 'real', 'complex'] as const)
+      : exponent === 'integer'
+        ? (['rational', 'real', 'complex'] as const)
+        : [];
+  const elements: Type =
+    tiers.find((tier) => isSubtype(cell, tier)) ?? 'number';
+  return BoxedType.forResult(
+    { kind: 'list', elements, dimensions: [size, size] },
+    context.engine._typeResolver
+  );
+}
+
 export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
   {
     Matrix: {
@@ -3593,6 +3653,25 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       // `docs/plans/2026-08-30-error-model-implementation.md`.
       signature: '(matrix, real) -> matrix',
       nanBehavior: 'reject',
+      // A power of a square matrix keeps its shape, and its element type
+      // follows from the element type of the operand and from what is known
+      // about the exponent (`squareMatrixPowerType`): with `m` declared
+      // `matrix<integer^(2x2)>`, `MatrixPower(m, 2)` is
+      // `matrix<integer^(2x2)>`, and `MatrixPower(m, -2)` is
+      // `matrix<rational^(2x2)>`. A non-square operand or an operand of
+      // unknown rank keeps the declared `matrix`.
+      type: ([m, exponent], context) =>
+        squareMatrixPowerType(
+          m,
+          exponent === undefined
+            ? 'any'
+            : isSubtype(exponent.type, nonNegativeRangeType('integer'))
+              ? 'non-negative-integer'
+              : isSubtype(exponent.type, 'integer')
+                ? 'integer'
+                : 'any',
+          context
+        ),
       evaluate: (
         [mat, exponent],
         { engine: ce, numericApproximation, expression }

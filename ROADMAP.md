@@ -128,6 +128,27 @@ does (tried 2026-10-14 and reverted: a product over a `-> unknown` result must
 keep `Missing`, `absent-point-arithmetic.test.ts`). A plot consumer drops a
 `NaN` point and a hole alike, so no consumer reading is known to differ.
 
+### An Epsil rule that is the first of several call arguments reads back as a lambda (OPEN, decision — found 2026-10-14 by the fix for issue #435)
+
+`["f", ["KeyValuePair", "GridLines", 1], ["KeyValuePair", "Axes", 2]]`
+serializes as `f(GridLines -> 1, Axes -> 2)`, and the parser reads the first
+argument as the wrong-arrow spelling of the lambda `GridLines => 1` (with a
+`mapsto-arrow-expected` diagnostic and a fixit); the second argument is a
+pair. Epsil's lambda arrow is `=>`; a `->` with a bare name on its left is
+read as a lambda only as a typo recovery, and only in the first argument
+position of a call, so that `map(x -> x^2, xs)` is recovered as
+`map(x => x^2, xs)`. A rule that is the ONLY argument (`f(GridLines -> 1)`)
+and a rule after a comma (`f(x, GridLines -> 1)`) are read as rules. The
+options: (A) read a bare `name -> value` right after a call's `(` as a rule
+always, which fixes every rule-argument round trip but turns the typo
+`map(x -> x^2, xs)` into a confusing static type error; (B) keep the current
+reading, so `f(GridLines -> 1, Axes -> 2)` and `f(GridLines -> 1, x)` do not
+round-trip; (C) read the first argument as a rule when another argument of
+the same call is a rule, which fixes `f(GridLines -> 1, Axes -> 2)` and keeps
+the recovery of `map(x -> x^2, xs)`, but needs the parser to delay the
+diagnostic until the whole argument list is read, and `f(GridLines -> 1, x)`
+still breaks. If nothing is decided, B stays.
+
 ### Compiled `LerchPhi` and `HurwitzZeta` answer `NaN` for a complex value (OPEN, small — found 2026-10-13 by issue #428)
 
 `_SYS.lerchPhi`, `_gpu_lerch_phi`, `_SYS.hurwitzZeta` and `_gpu_hurwitz_zeta`
@@ -144,35 +165,55 @@ The contributor who filed the issue offered one pull request that covers all
 the special-function heads; this entry waits for that pull request and does
 not need a separate fix.
 
-### `.N()` of an integral with a doubly logarithmic divergence at a bound gives a finite value (OPEN, small — found 2026-10-14 by the review of the shell divergence test)
+### `.N()` of a `1/(x·ln x)` divergence at a nonzero bound or at infinity gives a finite value (OPEN, small — found 2026-10-14 by the power-law divergence test)
 
-`\int_0^{1/2} \frac{-1}{t\ln t}\,dt` is `+∞` (the antiderivative is
-`−ln(−ln t)`), but `.N()` gives `6.9 ± 1.6`. The divergence test of the
-quadrature (`shellsDiverge`, `numerics/gauss-kronrod.ts`) compares blocks of 20
-dyadic shells next to the bound and reads a block ratio of at least `0.99` as a
-divergence. The shells of this integrand are about `1/k` at depth `k`, so the
-block ratio is about `1 − 20/k`: it reaches `0.99` only at `k = 2000`, past the
-deepest shell the doubles allow (about 1070 next to 0). The ratio rises toward 1
-at every depth, which is itself the signature of a sub-geometric tail whose
-terms do not shrink geometrically; a test on the trend of the ratio (as
-`shellsDiverge` already extrapolates a FALLING ratio) could detect it. The
-`evaluate()` route gives `+∞`.
-### A declared result computed through a numeric-tuple argument to a scalar parameter (OPEN, small — found 2026-10-13 by the review of the row 373 call typing)
+`\int_2^\infty \frac{dx}{x\ln x}` gives `4.0 ± 1.5` and
+`\int_{1/2}^{1} \frac{-1}{(1-t)\ln(1-t)}\,dt` gives `4.0 ± 1.7`; both are
+`+∞`, and `evaluate()` gives `+∞` for both. Next to `0` the quadrature can
+bisect about 1070 dyadic shells, which is enough for the power-law test
+(`shellsDecayAsPower`, `numerics/gauss-kronrod.ts`) to read the exponent of
+`1/k` shells as `1`. Next to a nonzero bound, or at infinity after the
+change of variable, the corner panel can be bisected only about 48 times.
+At that depth the estimated exponent is `0.87` for the divergent
+`1/(x ln x)` and `0.95` for the convergent `1/(x ln^{1.1} x)`, so no
+threshold separates them. A fix needs a deeper shell structure next to a
+nonzero bound (for example, a change of variable that moves the bound to
+`0`). Also: two integrands that the test reports divergent get different
+verdicts, `(−ln t)^{-1.001}/t` gives `+∞` and `−t^{0.00001}/(t ln t)` gives
+`NaN`; the sign read of a detected divergence is not the same on the two.
 
-With `f := x ↦ (−x, x)` and `g := a ↦ f((a, a))`, both declared `function`,
-`g(1)` evaluates to `((−1, −1), (1, 1))` but types `tuple<number, number>`.
-A numeric tuple binds whole to a scalar parameter and the body's arithmetic
-decides the shape, so the signature result of `f`, written for a scalar
-argument, does not describe the value. The application-site typing of a
-direct call answers `any` for this case (`lambdaBroadcastType`), and the
-descriptor route of `deriveApplicationType` now does too, but the declared
-result of `g` is inferred at its definition, where `a` is open and `(a, a)`
-is not yet a numeric tuple, so the inference reads `f`'s signature result and
-every call of `g` inherits it. The fix is in the result inference of a
-literal whose body hands a tuple built from an open parameter to a scalar
-parameter: the result is `any` (or the tuple shape, when the callee's body
-can be typed with the tuple). Pinned as the descriptor-route half in
-`test/compute-engine/tycho-373-passthrough-broadcast-typing.test.ts`.
+### `.N()` of an integral whose shells decay as `k^{-p}` with `1 < p < 1.5` gives a wrong value whose error bar does not cover it (OPEN, small — found 2026-10-14 by the power-law divergence test; present before)
+
+`\int_0^{1/2} \frac{dt}{t(-\ln t)^{1.1}}` gives `5.19 ± 0.79`; the exact
+value is `10.37`. With exponent `1.2` it gives `4.04 ± 0.38` (exact `5.38`),
+with `1.05` it gives `6.0 ± 2.0` (exact `20.4`), and
+`\int_0^{1/2} \frac{-t^{0.0001}}{t\ln t}\,dt` gives `6.9 ± 1.3` (exact
+`9.00`). The shells next to the bound are about `k^{-p}`; the Levin
+extrapolation of the tail needs a decay exponent of at least `1.5`
+(`LEVIN_MIN_DECAY`), so these tails are not extrapolated, and the reported
+error does not include the missing tail. A fix in `resolveSingularEndpoints`
+adds the tail `C·K^{1-p}/(p-1)` from the exponent that `shellsDecayAsPower`
+fits, or at least widens the error to cover it.
+
+### `Multiply` typed from argument types alone keeps the component types of a tuple times a real (OPEN, small — found 2026-10-14 by the fix of the tuple-at-scalar-parameter result inference; present before)
+
+`deriveApplicationType(ce, 'Multiply', [tuple<integer, integer>, real])`
+returns `tuple<integer, integer>`, while the expression `T·r` with
+`T: tuple<integer, integer>` and `r: real` is typed `tuple<real, real>`. So
+with `f := P ↦ P·Norm(P)` and `g := a ↦ f((a, a))`, `g(1)` is typed
+`tuple<integer, integer>` but its value is `(√2, √2)`. The descriptor route
+of the `Multiply` type handler (`library/arithmetic.ts`) does not widen the
+components of a tuple by the scalar factor. The comment in
+`lambdaBroadcastType` (`boxed-expression/boxed-function.ts`) that warns of
+"wrong narrow types for `P·Norm(P)`" is this defect.
+
+### A tuple with a string component at a scalar parameter is typed as if numeric (OPEN, decision — found 2026-10-14 by the same fix)
+
+With `f(x) := (-x, x)`, `f(("s", a))` is typed `tuple<number, number>`, but
+its value is `(-("s", 1), ("s", 1))`. The numeric-tuple rule covers numeric
+and open components only. The options: such a call is an
+`incompatible-type` error (a string is not a number), or its result is `any`
+like a numeric tuple. If nothing is decided, the wrong narrow type stays.
 
 ### Asynchronous materialization walks a lazy view synchronously (OPEN, small — found 2026-10-08 by the listing of lazy elements)
 
@@ -224,9 +265,17 @@ it. What remains:
   the inferred narrowing, which the first assignment of an index value widens
   to `integer`; only a clause whose raw form has integer literal bounds is
   declared ranged.
-- The `promoted` report can still read `true` for a promotion recorded by
-  the analysis of a subtree that is never emitted (documented at the
-  `finally` block of `compile`).
+- A dead branch of a `Which` or `If` whose condition is a constant still
+  puts the result on the complex lane. `x + Which(1 > 0, y, True, √(y − 1))`
+  under `auto` emits a complex object around `y` where `strict` emits
+  `_.x + _.y`. The values are correct, but the result is an object where a
+  number is expected, and it is slower. The lane analysis reads every branch
+  while the emitter drops the dead one.
+- On the Python target, `Power` with a float exponent is emitted from the
+  operator table (`t ** 0.3`) in every mode, so the `np.emath.power`
+  promotion branch of its handler is never used for that form, while the
+  analysis still reads the node as promoted. Python numbers are dynamically
+  typed, so no value is wrong, but the analysis and the emission disagree.
 - A helper passed BY NAME inside a real-ascribed body declines: with
   `g: (integer<1..16>) -> unknown` and `p: (real) -> real`,
   `p := y ↦ √y · Total(Map(Range(1, 16), g))` refuses to compile, because the
@@ -628,16 +677,15 @@ the whole budget cost milliseconds; and a divergence test for the family
 reduces it to `Σ 1/k^p`), so that this family returns `+∞` instead of
 declining.
 
-### `Limit` at infinity: two sign reads that still default to `+` (OPEN, small — found 2026-10-04 by the complex-valued limit fix for issue #396)
+### `Limit` at infinity of a difference of radicals stays unevaluated (OPEN, small — found 2026-10-14 by the fix of the exponential growth ranking)
 
-The polynomial rule, the product rule and the quotient rule of the limit at
-infinity (`symbolic/limit.ts`) answer `±∞` only when the sign is decided.
-Two reads in the growth oracles still use `leadingSignAtInf`, which returns
-`+1` when its numeric probe at `x = 120` has no value (a symbolic
-parameter): the `Exp` case and the constant-base `Power` case near
-`tendsToInfinity`. No wrong limit is known to come from them — the probes
-tried (`a·eᵗ`, `a·ln t`, `(a·t)³`, `a·eᵗ + t`) all stay unevaluated — but
-each read must decline when the probe has no value.
+`\lim_{t\to\infty} \sqrt{t+1} - \sqrt{t}` stays unevaluated; the limit is
+`0`. No wrong value is given. The leading-order rewrite of the limit at
+infinity (`symbolic/limit.ts`) ranks the two radicals at the same growth
+level and has no rule that cancels them; the usual route multiplies by the
+conjugate (`(\sqrt{t+1} - \sqrt{t}) = 1/(\sqrt{t+1} + \sqrt{t})`) and then
+reads the quotient. A fix adds that rewrite for a difference of two radicals
+with the same growth level.
 
 ### A complex-valued limit that is not finite has no answer (OPEN, design — found 2026-10-04, issue #396)
 
@@ -664,13 +712,19 @@ ratio) is not a cancellation and could be told apart from one. A related
 point: a function that decays to 0 gives a residue such as `−9e-46`, not
 `0` (`NLimit(t ↦ |Gamma(i·t)|, ∞)`).
 
-### A spacing command inside a KroneckerDelta subscript becomes an index (OPEN, small — found 2026-10-04 by the δ-group change)
+### A spacing command inside a KroneckerDelta subscript with an expression index is read as a product (OPEN, decision — found 2026-10-14 by the fix that skips spacing between indices)
 
-`\delta_{n\,m}` parses to `KroneckerDelta(n, HorizontalSpacing(3), m)` in
-both grammars: the thin space is read as a third index. A spacing command
-(`\,`, `\;`, `\quad`, `~`) between indices must be skipped as white space,
-so this reads `KroneckerDelta(n, m)`. The KroneckerDelta parser is in
-`latex-syntax/dictionary/definitions-logic.ts`.
+`\delta_{n\,m}` and `\delta_{1\,2}` now read the thin space as a separator
+between two indices. When an index is an expression, the expression parser
+reads the spacing as an implicit multiplication instead: `\delta_{n+1\,m}`
+gives `KroneckerDelta(n + m)` (the thin space makes `1\,m` the product
+`1·m`), where an author probably means `KroneckerDelta(n + 1, m)`. The same
+ambiguity exists for `\delta_{n+1 m}`, and in ordinary mathematics a thin space
+can be a product. The options: split a delta subscript at every spacing
+command (a parsing design decision that treats the subscript of `\delta`
+differently from every other subscript), keep the product reading, or keep
+it and add a lenient-grammar ambiguity warning. If nothing is decided, the
+product reading stays.
 
 ### `Solve` of a periodic equation could return the exact family instead of the principal set (OPEN, design — found 2026-10-04 by the review of the `Solve` completeness rule)
 
@@ -1209,22 +1263,6 @@ shape (`Integrate(1, Limits(x, 0, 1), Limits(y, 0, x))` is `1/2`).
   placeholder. Check those callers, then restore the previous binding there
   too.
 
-### A second `ce.declare()` of an operator declared without a signature silently replaces it (OPEN, small — found 2026-10-01 by the work on `ce.loadLibrary()` for issue #393)
-
-`ce.declare()` refuses to declare a name already declared in the same scope,
-except when the existing binding was only inferred from use
-(`engine-declarations.ts`, the check before "Declaring a symbol or function
-with a definition or type"). For an operator, the check reads
-`inferredSignature`, which is also true for an operator declared EXPLICITLY
-without a `signature`. So `ce.declare('Sq', { evaluate: … })` followed by a
-second `ce.declare('Sq', { evaluate: () => -1 })` is accepted and `Sq(3)`
-gives `-1`, while the same pair with a `signature` throws "The symbol "Sq" is
-already declared in this scope". The check must tell an operator declared
-from use (by `ce.parse('f(x)')`) from one declared by the author.
-`ce.loadLibrary()` already guards against this between libraries. Fix after
-the extend mode for `ce.declare()` (issue #394) lands: it changes the same
-check.
-
 ### Rule strings are parsed without the engine's own LaTeX notation (OPEN, decision — found 2026-10-01 by the work on `LatexSyntax.addEntries()` for issue #393)
 
 A rule given as a LaTeX string is parsed with the default dictionary plus the
@@ -1449,17 +1487,35 @@ dropping the axis changes the rank of the type. Until decided, the behavior is
 unchanged from before the dimension-variables round, which only kept the
 dimension-variable names aligned with the surviving axes.
 
-### `MatrixPower` is typed `matrix`, with no element type or shape (OPEN, small — found 2026-10-01 by the fix that reads a nested spelling as its flat shape)
+### A matrix power inside a function body is computed element by element (OPEN, decision — found 2026-10-14 by the `MatrixPower` type handler)
 
-With `m` declared `matrix<integer^(2x2)>`, `Power(m, 2)` canonicalizes to
-`MatrixPower(m, 2)`, typed `matrix` (`matrix<number>` of any shape), although
-its value is a 2×2 matrix of integers (`[[7,10],[15,22]]` for
-`[[1,2],[3,4]]`). The descriptor route of `Power`'s type handler, which does
-not see the canonical rewrite, answers `matrix<2x2>`, so the two routes
-disagree on a matrix base (`derive-broadcast-lift.test.ts` compares them on a
-nested list that is not a matrix for that reason). A fix gives `MatrixPower`
-a type handler that keeps the shape and the element type of a square
-operand.
+`[[1,2],[3,4]]^2` written directly is the matrix power `[[7,10],[15,22]]`:
+canonicalization rewrites `Power` of a matrix-typed base to `MatrixPower`.
+Inside a function body the base is an untyped parameter, so `A^2` stays a
+`Power`, and at evaluation the broadcast of `Power` over the substituted
+matrix squares each entry: `g(A) := A^2; g([[1,2],[3,4]])` gives
+`[[1,4],[9,16]]`, and `Apply((A) => A^2, [[1,2],[3,4]])` does the same. The
+two spellings of the same computation disagree. The options: make the
+`Power` evaluate handler (or the broadcast driver) read an integer power of
+a square nested list as a matrix power, which changes evaluation results for
+a user who meant the element-wise square of a list of lists; or keep the
+element-wise reading inside a body and document that a matrix power of a
+parameter must be written `MatrixPower(A, 2)`. The type of `g(m)` is
+`matrix<2x2>` on both readings.
+
+### `Inverse` is typed with the integer entries of its operand (OPEN, decision — found 2026-10-14 by the `MatrixPower` type handler)
+
+`Inverse([[1,2],[3,4]])` is typed `matrix<integer^(2x2)>`, but its value
+`[[-2,1],[3/2,-1/2]]` is `matrix<rational^(2x2)>`; a non-square `Inverse` is
+typed `matrix<integer^(2x3)>` while its value is an error. So `m^-1` (which
+canonicalizes to `Inverse(m)`) is typed `matrix<integer^(2x2)>` while `m^-2`
+(a `MatrixPower`) is typed `matrix<rational^(2x2)>`.
+`test/compute-engine/type-variables-linalg.test.ts` pins on purpose that
+`Inverse` has no imperative type handler and keeps the signature
+`(T) -> T where T: matrix`. The options: keep that signature with its
+unsound integer claim, or give `Inverse` the handler that `MatrixPower`
+uses for a negative exponent (`squareMatrixPowerType` in
+`library/linear-algebra.ts`) and update the pinned expectations.
 
 ### A nested list spelling is not a subtype of a list type with no dimensions (OPEN, small — found 2026-10-01 by the fix that reads a nested spelling as its flat shape)
 
@@ -1536,19 +1592,6 @@ the error named the internal `ContinuationPlaceholder` symbol). `Append` of a
 dictionary and a value that is not an entry gives the same error. The open
 question is whether a dictionary joined with a list should instead give a list
 of the entries followed by the elements. Until decided, the error stays.
-
-### `Append` over an operand typed `any` is typed `list` (OPEN, small — found 2026-09-29, measured again 2026-09-30)
-
-`Join` over an operand typed `unknown` or `any` is typed `collection`, because
-the operand may hold a set. For `Append`, measured 2026-09-30: with `u`
-declared `unknown`, `Append(u, 1)` is typed `collection<any>` (canonicalization
-infers `u` as `collection<any>` from the signature), but with `a` declared
-`any`, `Append(a, 1)` is typed `list`, and the structural nested form
-`Append(Append(u, 1), 2)` is typed `list<integer>`, where the flattened
-canonical form is `collection<any>`. `appendResultTypeD`
-(`library/collections.ts`) types a source whose type says nothing as a list on
-purpose, so that the nested and flattened forms in `append-variadic.test.ts`
-agree; a fix must type both forms `collection` together.
 
 ### A list-building self-recursion assigned WITHOUT a declaration is still typed `collection` (OPEN, small — found 2026-09-29 by the fix for Tycho row 338)
 
@@ -2237,24 +2280,6 @@ replaced by `±u` and `Sign(u)` by `±1` (`integrateAcrossKinks`,
   check today: the built-in antiderivative and the Rubi rules both leave
   `\int_2^3 x\operatorname{sgn}(x^2-1)\,dx` unevaluated, before and after the
   change.
-
-### The exact numeric lane answers `n/0` and `∞·2` with `NaN` (OPEN, small — found 2026-09-28 by Phase 0 of `docs/plans/2026-09-28-indeterminate-value.md`)
-
-`ExactNumericValue.div(0)` (a JavaScript number `0`) returns `NaN` for every
-dividend (`numeric-value/exact-numeric-value.ts:907`): `5.div(0)` is `NaN`,
-while `5.div(<exact 0>)` is `Infinity`. The normalization of a rational with a
-zero denominator also makes `[n, 0]` `NaN` for `n ≠ 0` (`:474`). And an exact
-infinity (made by `inv()` of `0`, `:664`) times an integer is `NaN`, because the
-rational helpers map any non-finite machine rational to `NaN`
-(`numerics/rationals.ts:192`, `:208`, `:213`): `inv(0).mul(2)` is `NaN`, not
-`Infinity`. No boxed route reaches these today (the boxed folds answer `~oo` and
-`∞` before the lane is used). Phase 2 of the plan above switched no producer
-that routes through the lane, so a pole is not read as an indeterminate form
-(`5/0`, `Rational(5, 0)`, `Divide(5, 0)`, `1/0` and `-1/0` are still `~oo`,
-pinned in `test/compute-engine/indeterminate.test.ts`); a later change that maps
-an exact-lane `NaN` to `Indeterminate` must fix this first. The fix gives `n/0`
-the value `±∞` (or `~oo` for a complex `n`) and lets the rational helpers carry
-a signed infinity.
 
 ### Three special-function points answer `NaN` where a signed or complex infinity exists (OPEN, decision — found 2026-09-29 by Phase 2 of `docs/plans/2026-09-28-indeterminate-value.md`)
 

@@ -611,10 +611,16 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
       // `KroneckerDelta(Pi, 1)`. A run of letters split around a name
       // reports `ambiguous-letter-run`, as other letter runs do. The strict
       // grammar has no spelled-out names: one index for each letter.
+      // A spacing command between two indices (`\,`, `\;`, `\quad`,
+      // `\hspace{1em}`) is white space, in both grammars: `\delta_{n\,m}`
+      // is `KroneckerDelta(n, m)` and `\delta_{1\,2}` is
+      // `KroneckerDelta(1, 2)`. The spacing command was a third index,
+      // `KroneckerDelta(n, HorizontalSpacing(3), m)`, and `\delta_{1\,2}`
+      // was the number 12, as `1\,000` is the number 1000.
       const start = parser.index;
       if (parser.match('<{>')) {
         const indexes: MathJsonExpression[] = [];
-        parser.skipSpace();
+        parser.skipVisualSpace();
         while (
           /^[0-9a-zA-Z]$/.test(parser.peek) ||
           parser.peek.startsWith('\\')
@@ -637,7 +643,7 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
               indexes.push(index);
             }
           }
-          parser.skipSpace();
+          parser.skipVisualSpace();
         }
         if (indexes.length > 1 && parser.match('<}>'))
           return ['KroneckerDelta', ...indexes];
@@ -658,8 +664,8 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
         parser.index = runStart;
       }
 
-      const group = parser.parseGroup();
-      if (group === null) {
+      const parsed = parser.parseGroup();
+      if (parsed === null) {
         const token = parser.parseToken();
         // The number 0 is a token: `\delta_0` is `KroneckerDelta(0)`, as
         // `\delta_1` is `KroneckerDelta(1)`. It was the symbol `delta_0`.
@@ -668,10 +674,22 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
         return ['KroneckerDelta', token];
       }
 
+      // A spacing command is white space, not an index: `\delta_{\,n}` is
+      // `KroneckerDelta(n)`. A group that holds only spacing commands is
+      // read as the empty group `\delta_{}`.
+      const group = withoutSpacing(parsed) ?? 'Nothing';
+
       const seq = getSequence(group);
 
-      // \\delta_{n, m}
-      if (seq && seq.length <= 2) return ['KroneckerDelta', ...seq];
+      // \\delta_{n, m}, \\delta_{n, m, k}. All the indices are arguments:
+      // `\delta_{1, x, 2}` is `KroneckerDelta(1, x, 2)`, which is what the
+      // serializer writes for this expression. With three or more indices,
+      // the indices were one `Tuple` argument, and `\delta_{1,1,1}` was 0.
+      if (seq)
+        return [
+          'KroneckerDelta',
+          ...seq.map((index) => withoutSpacing(index) ?? 'Nothing'),
+        ];
 
       // \\delta_{nm}
       if (operator(group) === 'InvisibleOperator')
@@ -734,6 +752,25 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
     },
   },
 ];
+
+/**
+ * Remove the spacing commands from an index of a Kronecker delta. A spacing
+ * command (`\,`, `\;`, `\quad`, `\hspace{1em}`) parses to
+ * `["HorizontalSpacing", n]`. It is white space, and not an index. Return
+ * `null` if the expression is only spacing commands. An implicit product
+ * that has one operand after the spacing commands are removed is replaced
+ * by that operand: `\delta_{n\,}` is `KroneckerDelta(n)`.
+ */
+function withoutSpacing(expr: MathJsonExpression): MathJsonExpression | null {
+  const isSpacing = (x: MathJsonExpression) =>
+    operator(x) === 'HorizontalSpacing' && nops(x) === 1;
+  if (isSpacing(expr)) return null;
+  if (operator(expr) !== 'InvisibleOperator') return expr;
+  const rest = operands(expr).filter((x) => !isSpacing(x));
+  if (rest.length === 0) return null;
+  if (rest.length === 1) return rest[0];
+  return ['InvisibleOperator', ...rest];
+}
 
 function serializeQuantifier(
   quantifierSymbol: string

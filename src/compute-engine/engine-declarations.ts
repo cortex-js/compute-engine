@@ -108,6 +108,7 @@ import {
 } from './inference-rollback.js';
 import { tombstoneBinding } from './boxed-expression/binding-tombstone.js';
 import { latestDeclaredEffectsSite } from './boxed-expression/effects-provenance.js';
+import { isReplaceableOperatorShell } from './boxed-expression/definition-guards.js';
 import {
   isValidOperatorDef,
   isValidValueDef,
@@ -2353,11 +2354,18 @@ export function declareFn(
     // binding that carries a value — a function argument, or an outer explicit
     // declaration — is a genuine conflict and still throws. This mirrors the
     // upgrade rule in the `Declare` operator handler (library/core.ts).
+    //
+    // For an operator, `inferredSignature` alone does not show that the
+    // binding came from a use: an operator that the author declared with a
+    // handler but no `signature` also has an inferred signature, and so does
+    // a function literal given to `ce.assign()`. Only an operator that holds
+    // nothing the author gave is upgradable (`isReplaceableOperatorShell()`).
     const inferred =
       (isValueDef(existing) &&
         existing.value.inferredType &&
         existing.value.value === undefined) ||
-      (isOperatorDef(existing) && existing.operator.inferredSignature);
+      (isOperatorDef(existing) &&
+        isReplaceableOperatorShell(existing.operator));
     if (!inferred)
       throw new Error(`The symbol "${id}" is already declared in this scope`);
   }

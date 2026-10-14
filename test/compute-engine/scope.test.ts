@@ -75,6 +75,124 @@ describe('DECLARING', () => {
     );
   });
 
+  // An operator declared without a `signature` has an inferred signature,
+  // like a binding declared from a use. It is still an explicit declaration,
+  // so a second declaration of the same name must throw, as it does when the
+  // first declaration has a `signature`.
+  test('re-declaring an operator declared without a signature throws', () => {
+    const ce2 = new ComputeEngine();
+    ce2.declare('Sq', { evaluate: ([x]) => x.mul(x) });
+    expect(() => ce2.declare('Sq', { evaluate: () => ce2.number(-1) })).toThrow(
+      `The symbol "Sq" is already declared in this scope`
+    );
+    expect(ce2.box(['Sq', 3]).evaluate().toString()).toBe('9');
+  });
+
+  test('re-declaring an operator declared with a signature throws', () => {
+    const ce2 = new ComputeEngine();
+    ce2.declare('Sq', {
+      signature: '(number) -> number',
+      evaluate: ([x]) => x.mul(x),
+    });
+    expect(() =>
+      ce2.declare('Sq', {
+        signature: '(number) -> number',
+        evaluate: () => ce2.number(-1),
+      })
+    ).toThrow(`The symbol "Sq" is already declared in this scope`);
+  });
+
+  test('re-declaring an operator with only a canonical handler throws', () => {
+    const ce2 = new ComputeEngine();
+    ce2.declare('Twice', {
+      canonical: ([x], { engine }) => engine.function('Multiply', [2, x]),
+    });
+    expect(() =>
+      ce2.declare('Twice', { evaluate: () => ce2.number(-1) })
+    ).toThrow(`The symbol "Twice" is already declared in this scope`);
+  });
+
+  test('re-declaring an operator with only an sgn handler throws', () => {
+    const ce2 = new ComputeEngine();
+    ce2.declare('Pos', { sgn: () => 'positive' });
+    expect(() =>
+      ce2.declare('Pos', { evaluate: () => ce2.number(-1) })
+    ).toThrow(`The symbol "Pos" is already declared in this scope`);
+  });
+
+  test('re-declaring an operator marked with an inferred signature and a lazy flag throws', () => {
+    // The `lazy` flag is a statement of the author, so the definition is not
+    // a host marker that a second declaration can replace.
+    const ce2 = new ComputeEngine();
+    ce2.declare('Held', {
+      signature: '(unknown) -> unknown',
+      inferredSignature: true,
+      lazy: true,
+    });
+    expect(() =>
+      ce2.declare('Held', { evaluate: () => ce2.number(-1) })
+    ).toThrow(`The symbol "Held" is already declared in this scope`);
+  });
+
+  test('re-declaring an operator marked with an inferred signature and pure: false throws', () => {
+    // `pure: false` sets the effect set but not `effectsDeclared`, so the
+    // replace test must also look at the effect set.
+    const ce2 = new ComputeEngine();
+    ce2.declare('Impure', {
+      signature: '(unknown) -> unknown',
+      inferredSignature: true,
+      pure: false,
+    });
+    expect(() =>
+      ce2.declare('Impure', { evaluate: () => ce2.number(-1) })
+    ).toThrow(`The symbol "Impure" is already declared in this scope`);
+  });
+
+  test('re-declaring an operator with only a complexity throws', () => {
+    const ce2 = new ComputeEngine();
+    ce2.declare('Heavy', { complexity: 3 });
+    expect(() =>
+      ce2.declare('Heavy', { evaluate: () => ce2.number(-1) })
+    ).toThrow(`The symbol "Heavy" is already declared in this scope`);
+  });
+
+  test('re-declaring a function assigned from a literal throws', () => {
+    const ce2 = new ComputeEngine();
+    ce2.assign('sq', ce2.parse('x \\mapsto x^2'));
+    expect(() => ce2.declare('sq', { evaluate: () => ce2.number(-1) })).toThrow(
+      `The symbol "sq" is already declared in this scope`
+    );
+    expect(ce2.box(['sq', 3]).evaluate().toString()).toBe('9');
+  });
+
+  test('declare() still defines an operator declared from a use', () => {
+    const ce2 = new ComputeEngine();
+    ce2.parse('f(x)');
+    ce2.declare('f', { evaluate: ([x]) => x.add(1) });
+    expect(ce2.parse('f(2)').evaluate().toString()).toBe('3');
+  });
+
+  test('declare() still defines an operator marked with an inferred signature', () => {
+    // A host can declare a name as an operator, with no handler, before it
+    // gives a definition.
+    const ce2 = new ComputeEngine();
+    ce2.declare('q', {
+      signature: '(unknown) -> unknown',
+      inferredSignature: true,
+    });
+    ce2.declare('q', { evaluate: ([x]) => x.add(1) });
+    expect(ce2.box(['q', 2]).evaluate().toString()).toBe('3');
+  });
+
+  test('extend mode still changes an operator declared without a signature', () => {
+    const ce2 = new ComputeEngine();
+    ce2.declare('Sq', { evaluate: ([x]) => x.mul(x) });
+    ce2.declare('Sq', { description: 'square' }, { extend: true });
+    const def = ce2.lookupDefinition('Sq')!.operator!;
+    expect(def.description).toBe('square');
+    expect(ce2.box(['Sq', 3]).evaluate().toString()).toBe('9');
+  });
+
   test('Declare a variable and widen type', () => {
     ce.declare('g', { value: 5 }); // Inferred as integer
     expect(ce.expr('g').type.toString()).toEqual('integer');
@@ -467,9 +585,14 @@ describe('REGRESSION: Lexical scoping', () => {
         'reclc_f',
         ce.expr([
           'Function',
-          ['Block',
-            ['If', ['LessEqual', 'reclc_n', 0], 0,
-              ['Add', 'reclc_n', ['reclc_f', ['Subtract', 'reclc_n', 1]]]]
+          [
+            'Block',
+            [
+              'If',
+              ['LessEqual', 'reclc_n', 0],
+              0,
+              ['Add', 'reclc_n', ['reclc_f', ['Subtract', 'reclc_n', 1]]],
+            ],
           ],
           'reclc_n',
         ])
@@ -492,7 +615,11 @@ describe('REGRESSION: BigOp scope isolation', () => {
   test('Sum localScope.bindings contains only the index variable', () => {
     // Sum(k*x, Limits(k, 0, M)) — only k should be in the BigOp local scope.
     // Before the fix, x and M are also auto-declared there (scope pollution).
-    const sum = ce.expr(['Sum', ['Multiply', 'k', 'x'], ['Limits', 'k', 0, 'M']]);
+    const sum = ce.expr([
+      'Sum',
+      ['Multiply', 'k', 'x'],
+      ['Limits', 'k', 0, 'M'],
+    ]);
     const keys = [...(sum.localScope?.bindings.keys() ?? [])];
     expect(keys).toEqual(['k']);
   });
@@ -523,7 +650,10 @@ describe('FUNCTIONS: edge cases', () => {
     ce.pushScope();
     try {
       ce.declare('edge_f', 'function');
-      ce.assign('edge_f', ce.expr(['Function', ['Multiply', 'edge_x', 2], 'edge_x']));
+      ce.assign(
+        'edge_f',
+        ce.expr(['Function', ['Multiply', 'edge_x', 2], 'edge_x'])
+      );
       // Calling with two arguments is an `unexpected-argument` error value
       // (it used to throw "Too many arguments").
       expect(ce.expr(['edge_f', 3, 4]).evaluate().json).toEqual([
@@ -545,10 +675,7 @@ describe('FUNCTIONS: edge cases', () => {
     try {
       ce.assume(ce.expr(['Greater', 'isc_a', 0]));
       // Evaluate a Block that references isc_a — the sign should reflect the assumption
-      const sign = ce
-        .expr(['Block', 'isc_a'])
-        .evaluate()
-        .sgn;
+      const sign = ce.expr(['Block', 'isc_a']).evaluate().sgn;
       expect(sign).toBe('positive');
     } finally {
       ce.popScope();
@@ -653,7 +780,10 @@ describe('BigOp + Function interaction', () => {
         'prodfn_f',
         ce.expr([
           'Function',
-          ['Block', ['Product', 'prodfn_k', ['Limits', 'prodfn_k', 1, 'prodfn_n']]],
+          [
+            'Block',
+            ['Product', 'prodfn_k', ['Limits', 'prodfn_k', 1, 'prodfn_n']],
+          ],
           'prodfn_n',
         ])
       );
@@ -682,8 +812,16 @@ describe('BigOp + Function interaction', () => {
           [
             'Block',
             ['Declare', 'clbigop_total', 'number'],
-            ['Assign', 'clbigop_total', ['Sum', 'clbigop_k', ['Limits', 'clbigop_k', 1, 'clbigop_n']]],
-            ['Function', ['Block', ['Add', 'clbigop_total', 'clbigop_y']], 'clbigop_y'],
+            [
+              'Assign',
+              'clbigop_total',
+              ['Sum', 'clbigop_k', ['Limits', 'clbigop_k', 1, 'clbigop_n']],
+            ],
+            [
+              'Function',
+              ['Block', ['Add', 'clbigop_total', 'clbigop_y']],
+              'clbigop_y',
+            ],
           ],
           'clbigop_n',
         ])
@@ -1168,7 +1306,11 @@ describe('SCOPE EDGE CASES', () => {
     try {
       ce.declare('mut_c', { value: 10 });
       ce.declare('mut_f', 'function');
-      ce.assign('mut_f', ['Function', ['Block', ['Add', 'mut_x', 'mut_c']], 'mut_x']);
+      ce.assign('mut_f', [
+        'Function',
+        ['Block', ['Add', 'mut_x', 'mut_c']],
+        'mut_x',
+      ]);
 
       // f(1) = 1 + 10 = 11
       expect(ce.expr(['mut_f', 1]).evaluate().valueOf()).toEqual(11);

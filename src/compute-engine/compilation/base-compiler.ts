@@ -3348,10 +3348,13 @@ export class BaseCompiler {
       // unconditionally here would hand `buildInterpreterFallback` — which
       // spreads `modeReport()` onto a `success: false` result whose `run` is
       // interpreter-backed — a `{mode: 'complex', promoted: true}` describing
-      // code that does not exist. `_promoted` is especially unsafe there: it
-      // is set from `promotesRadicalToComplex`, which the contextless
-      // ANALYSIS predicate `isComplexValued` also calls, so it can be true
-      // for a subtree that was never emitted at all. On the throw path the
+      // code that does not exist: before the decline, the emitters of the
+      // operands compiled so far can have recorded promotions in
+      // `_promoted`. The ANALYSIS predicate `isComplexValued` calls the same
+      // `promotesRadicalToComplex` as the emitters, but it restores
+      // `_promoted` after the call, because the subtree it reads can be
+      // folded or never emitted. So on the success path `_promoted` records
+      // the promotions of emitted code only. On the throw path the
       // neutral `{mode: 'strict', promoted: false}` installed at depth-0 entry
       // stands. (User ruling 2026-08-17, on Tycho consumer item 201.)
       if (BaseCompiler._compileDepth === 0 && emitted) {
@@ -3785,6 +3788,80 @@ export class BaseCompiler {
     args: ReadonlyArray<Expression>
   ): void {
     void BaseCompiler.promotesRadicalToComplex(head, args);
+  }
+
+  /**
+   * Record, for the `promoted` report, the promotions of a subtree that the
+   * constant fold replaces with a COMPLEX literal. The subtree is not
+   * compiled, so no emitter records its promotable heads. But the literal is
+   * complex because those heads promote: with promotion off, the fold
+   * declines and the real kernel gives NaN (`√(Σ cos k)` for k = 1..5 is
+   * `1.11…i` under `auto` and NaN under `strict`). So each promotable head
+   * of the subtree is given to `promotesRadicalToComplex`, which records the
+   * same promotions that the emitters record for the same heads.
+   *
+   * A call of a user function in the subtree is folded with its body, so
+   * the body of the function is read too (once for each function, which
+   * also stops a recursive function). With `g := k ↦ √(k − 5)`, `x + g(3)`
+   * folds to `x + 1.41…i` under `auto`, and the promotion is in the body of
+   * `g`.
+   *
+   * A descendant that folds on its own to a REAL number supplies no part of
+   * the complex value, so its subtree is not read. With
+   * `i + Sum(√(2 + sin k), k, 1, 16)`, the sum folds to `22.85…` and the
+   * imaginary unit supplies the imaginary part: the radical in the sum is not
+   * a promotion. A descendant that does not fold on its own (it mentions a
+   * bound index or a parameter, for example) is read, and its promotable
+   * heads are recorded. The root is not folded again: the caller folded it
+   * to a complex literal.
+   */
+  private static recordFoldedPromotions(
+    expr: Expression,
+    target: CompileTarget<Expression>,
+    visited: Set<string> = new Set(),
+    root = true
+  ): void {
+    if (!isFunction(expr)) return;
+    if (!root) {
+      // The fold evaluates the subtree and can compile a callback, which can
+      // record a promotion. That code is not emitted, so the record is
+      // restored.
+      const recorded = BaseCompiler._promoted;
+      let folded: ReturnType<typeof BaseCompiler.constantFoldValue>;
+      try {
+        folded = BaseCompiler.constantFoldValue(expr, target);
+      } finally {
+        BaseCompiler._promoted = recorded;
+      }
+      if (
+        folded !== undefined &&
+        folded.elements === undefined &&
+        isNumber(folded.value) &&
+        !folded.value.isComplex
+      )
+        return;
+    }
+    const h = expr.operator;
+    if (
+      h === 'Power' ||
+      h === 'Root' ||
+      BaseCompiler.PROMOTABLE_RADICAL_HEADS.has(h)
+    )
+      void BaseCompiler.promotesRadicalToComplex(h, expr.ops);
+    if (!visited.has(h)) {
+      const literal = BaseCompiler.userFunctionLiteral(expr.engine, h);
+      if (literal !== undefined) {
+        visited.add(h);
+        BaseCompiler.recordFoldedPromotions(
+          literal.op1,
+          target,
+          visited,
+          false
+        );
+      }
+    }
+    for (const op of expr.ops)
+      BaseCompiler.recordFoldedPromotions(op, target, visited, false);
   }
 
   /**
@@ -6745,7 +6822,19 @@ export class BaseCompiler {
     // shape analyses (`isProvablyRealValued`), whose answers describe the
     // runtime value and must not change with the emission style.
     if (target.constantFold === false) return undefined;
-    const folded = BaseCompiler.constantFoldValue(expr, target);
+    // The fold evaluates the subtree with `.N()`, and the evaluation can
+    // compile a lazy `Map` callback inside this compilation. The code
+    // generation of that callback can record a promotion in `_promoted`,
+    // but that code is not emitted, so the record is restored. A complex
+    // fold result records its own promotions below
+    // (`recordFoldedPromotions`), after the restore.
+    const recorded = BaseCompiler._promoted;
+    let folded: ReturnType<typeof BaseCompiler.constantFoldValue>;
+    try {
+      folded = BaseCompiler.constantFoldValue(expr, target);
+    } finally {
+      BaseCompiler._promoted = recorded;
+    }
     if (folded === undefined) return undefined;
     const { value, elements } = folded;
     const engine = expr.engine;
@@ -6888,6 +6977,15 @@ export class BaseCompiler {
         target,
         prec
       );
+
+    // A complex value that reaches this point is on a node that the analysis
+    // reads as complex (the gates above decline or project every other
+    // complex value), and it is emitted as a complex literal. When the node
+    // is complex because a promotable head promotes, the literal is a
+    // promotion: the analysis does not record it (see `isComplexValued`), and
+    // no emitter sees the subtree, so it is recorded here.
+    if (isNumber(value) && value.isComplex)
+      BaseCompiler.recordFoldedPromotions(expr, target);
 
     // `~oo` on a node that IS complex-valued folds to the complex lane's
     // spelling of the pole, `{re: ∞, im: ∞}` (`complexPole()` in
@@ -11901,11 +11999,10 @@ export class BaseCompiler {
         BaseCompiler.promotionActive &&
         BaseCompiler.isRealScalarAscription(typed)
       ) {
-        // The analysis records a promotion for each promotable head that it
-        // reads as promoted (`notePromoted`), but it emits nothing. The
-        // compilation that follows records the promotions of the code that
-        // it emits, so the record of the analysis is removed. A decline
-        // emits nothing either.
+        // The analysis emits nothing, so it must not change the `promoted`
+        // report: the record is restored after it. The compilation that
+        // follows records the promotions of the code that it emits. A
+        // decline emits nothing either.
         const promoted = BaseCompiler._promoted;
         const complexWithPromotion = BaseCompiler.isComplexValued(value);
         BaseCompiler._promoted = promoted;
@@ -19896,8 +19993,28 @@ export class BaseCompiler {
         return BaseCompiler.foldLaneIsComplex(coll, init);
     }
     if (BaseCompiler.promotionActive) {
-      if (BaseCompiler.promotesRadicalToComplex(expr.operator, expr.ops))
-        return true;
+      // The predicate records a promotion for the `promoted` report
+      // (`notePromoted`), but this analysis emits nothing: the node can be
+      // folded to a literal, or be part of a subtree that is never emitted.
+      // The emitter of the head calls the same predicate when it lowers the
+      // node, and that call records the promotion of the emitted code. So
+      // the record of the analysis is removed here. With `x` real,
+      // `x + Sum(√(2 + sin k), k, 1, 16)` folds the sum to `22.85…`, and the
+      // report stays `promoted: false`.
+      // The record is restored in a `finally`, so a throw from the predicate
+      // (a type read, a cancellation at the deadline) that a caller catches
+      // does not leave the promotion in the report.
+      const recorded = BaseCompiler._promoted;
+      let promotes: boolean;
+      try {
+        promotes = BaseCompiler.promotesRadicalToComplex(
+          expr.operator,
+          expr.ops
+        );
+      } finally {
+        BaseCompiler._promoted = recorded;
+      }
+      if (promotes) return true;
     }
     // `Apply(Derivative(f, n), …)` — the compiled `f''(x)` — takes the value
     // shape of the EXPRESSION THE EMITTER WILL PRODUCE, not the one this

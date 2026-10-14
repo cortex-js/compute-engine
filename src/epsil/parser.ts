@@ -461,6 +461,13 @@ export class Parser {
   /** Stack of open-bracket tokens, for bracket-level panic recovery. */
   private brackets: Token[] = [];
 
+  /** The local start offsets of the `(` tokens that open a CALL argument
+   * list (`f(…)`, `c.m(…)`), as opposed to a grouping or a lambda parameter
+   * list. `lambdaMistypedAsPair` reads it: when a call has only one
+   * argument, a bare symbol right after the call's `(` is the key of a rule
+   * argument (`f(GridLines -> [10, 10])`), not a lambda parameter. */
+  private callArgumentOpens = new Set<number>();
+
   /** Implicit guards accumulated while patternizing a single `match` case:
    * one `Element(name, type)` per type-annotated binding (`n: integer`). Reset
    * at the start of each case's pattern parse and conjoined with the explicit
@@ -7659,12 +7666,23 @@ export class Parser {
 
   /** Is a `KeyValuePair`'s left operand shaped like a parameter list — a
    * `Typed` parameter (`(x: number) -> …`), a tuple of parameters
-   * (`(x, y) -> …`), or a bare symbol right after a `(`, a `=`, or a pipe
-   * operator (`(x) -> …`, `f = x -> …`, `xs |> x -> …`)? None of these is a
-   * valid dictionary key, so the `->` was almost certainly meant to be `=>`.
-   * A bare symbol in any other position (`{one -> 1}`, a list element) is
-   * left alone: inside a brace literal an unquoted name is a legitimate
-   * string key. */
+   * (`(x, y) -> …`), or a bare symbol right after a grouping `(`, a `=`, or
+   * a pipe operator (`(x) -> …`, `(x -> …)`, `f = x -> …`, `xs |> x -> …`)?
+   * None of these is a valid dictionary key, so the `->` was almost
+   * certainly meant to be `=>`. A bare symbol in any other position
+   * (`{one -> 1}`, a list element) is left alone: inside a brace literal an
+   * unquoted name is a legitimate string key.
+   *
+   * A bare symbol right after the `(` of a CALL argument list is also left
+   * alone when the pair is the ONLY argument (the `)` of the call follows
+   * the pair): `f(GridLines -> [10, 10])` is a call with one rule argument,
+   * the same reading as the later arguments of `f(x, GridLines -> [10, 10])`.
+   * The serializer writes a rule argument this way, so a lambda reading
+   * here broke the round trip of a call whose only argument is a rule
+   * (GitHub issue #435). The FIRST of several arguments keeps the lambda
+   * reading, because a function is the usual first argument and `->` is a
+   * usual typo for `=>` there: `map(x -> x^2, xs)` is diagnosed and
+   * recovered as `map(x => x^2, xs)`. */
   private lambdaMistypedAsPair(left: MathJsonExpression): boolean {
     const isTypedParam = (p: MathJsonExpression): boolean => {
       const pops = fnOps(p);
@@ -7706,7 +7724,14 @@ export class Parser {
       let i = start - 1;
       while (i >= 0 && /\s/.test(this.source[i])) i -= 1;
       if (i < 0) return false;
-      if (this.source[i] === '(' || this.source[i] === '=') return true;
+      if (this.source[i] === '(') {
+        // A trailing comma (`f(k -> v,)`) still leaves one argument.
+        const soleArgument =
+          this.current.type === 'CLOSE_PAREN' ||
+          (this.current.type === 'COMMA' && this.peek().type === 'CLOSE_PAREN');
+        return !(this.callArgumentOpens.has(i) && soleArgument);
+      }
+      if (this.source[i] === '=') return true;
       // A pipe stage: `xs |> x -> x^2` is a stage lambda written with the
       // wrong arrow. Only a function can follow `|>`, never a dictionary
       // entry, so a bare symbol followed by `->` in that position is the
@@ -8721,6 +8746,9 @@ export class Parser {
   } {
     const open = this.advance(); // the opening bracket
     this.brackets.push(open);
+    // Only a call argument list admits named arguments, so this records
+    // the `(` of every call argument list.
+    if (allowNamedArgs) this.callArgumentOpens.add(open.start);
 
     const values: MathJsonExpression[] = [];
     let typed = false;

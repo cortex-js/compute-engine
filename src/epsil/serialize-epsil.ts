@@ -205,9 +205,37 @@ export function serializeEpsil(
     ...options,
   });
 
+  /**
+   * True only while `serializeExpression` starts on the bare-symbol key of
+   * a `KeyValuePair` (see `serializePairKey`). The name resolution pass
+   * that runs after parsing (`resolveLibraryNames`) does not rewrite a
+   * pair key, because a key is a label, not a reference: `[max -> 10]`
+   * keeps the key `max`. So a library name in key position must keep its
+   * MathJSON spelling: `["KeyValuePair", "IsPrime", "Teal"]` is written
+   * `IsPrime -> Teal`, since `isPrime -> Teal` reads back with the key
+   * `isPrime` (GitHub issue #435).
+   */
+  let atPairKey = false;
+
+  /** Serialize the key operand of a `KeyValuePair`: a bare symbol keeps its
+   * name as is, any other key is serialized as usual. */
+  function serializePairKey(key: MathJsonExpression | null): FormattingBlock {
+    if (symbol(key) === null) return serializeExpression(key);
+    atPairKey = true;
+    try {
+      return serializeExpression(key);
+    } finally {
+      atPairKey = false;
+    }
+  }
+
   function serializeExpression(
     expr: MathJsonExpression | null
   ): FormattingBlock {
+    // Read and clear the flag at once, so that it applies to the key symbol
+    // only and never to an expression serialized inside it.
+    const isPairKey = atPairKey;
+    atPairKey = false;
     if (expr === null) return new EmptyBlock(fmt);
     // Is this a string literal?
     if (typeof expr === 'string' && matchesString(expr)) {
@@ -236,7 +264,9 @@ export function serializeEpsil(
       // verbatim form).
       if (symName === 'Indeterminate') body = fmt.text('Indeterminate');
       else if (symName !== null)
-        body = fmt.text(escapeSymbol(libraryName(symName)));
+        body = fmt.text(
+          escapeSymbol(isPairKey ? symName : libraryName(symName))
+        );
     }
     if (
       !body &&
@@ -2915,6 +2945,8 @@ export function serializeEpsil(
     const operandBlocks = operands(expr).map((arg, index) => {
       if (needsOperandParens(arg, op, opName, index === 0 ? 'left' : 'right'))
         return fmt.line('(', serializeExpression(arg), ')');
+      if (opName === 'KeyValuePair' && index === 0)
+        return serializePairKey(arg);
       return serializeExpression(arg);
     });
 

@@ -343,3 +343,169 @@ describe('Targets that never promote are unchanged', () => {
       );
     });
 });
+
+// The `promoted` report must describe the code that is emitted. The analysis
+// that decides the lane of a node (`isComplexValued`) also reads the
+// promotable heads of subtrees that are never emitted: a subtree that the
+// constant fold replaces with a literal, or the argument of a call that is
+// then inlined in the value of a real ascription. A promotion is recorded
+// only by the emission of a promotable head, or by a constant fold that
+// gives a complex literal only because the head promotes.
+describe('The promoted report describes the emitted code', () => {
+  it('a sum folded to a real literal is not promoted', () => {
+    // `√(2 + sin k)` has an operand of unknown sign for the analysis, but
+    // the sum folds to the real literal `22.85…`.
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    const sum = [
+      'Sum',
+      ['Sqrt', ['Add', 2, ['Sin', 'k']]],
+      ['Limits', 'k', 1, 16],
+    ];
+    const r = compile(ce.box(['Add', 'x', sum] as any), {
+      to: 'javascript',
+      fallback: false,
+    } as any) as any;
+    expect(r.success).toBe(true);
+    expect(r.code).toBe('_.x + 22.8515546553601');
+    expect(r.promoted).toBe(false);
+    expect(r.mode).toBe('strict');
+    expect(r.run({ x: 1 })).toBeCloseTo(
+      ce.box(['Add', 1, sum] as any).N().re,
+      12
+    );
+  });
+
+  it('a complex literal whose complex part does not come from a promotion is not promoted', () => {
+    // The whole expression folds to the complex literal `22.85… + i`. The
+    // imaginary unit supplies the imaginary part. The sum folds on its own to
+    // the real `22.85…`, so the radical of unknown sign in the sum is not a
+    // promotion.
+    const ce = new ComputeEngine();
+    const sum = [
+      'Sum',
+      ['Sqrt', ['Add', 2, ['Sin', 'k']]],
+      ['Limits', 'k', 1, 16],
+    ];
+    const expr = ['Add', 'ImaginaryUnit', sum];
+    const r = compile(ce.box(expr as any), {
+      to: 'javascript',
+      fallback: false,
+    } as any) as any;
+    expect(r.success).toBe(true);
+    expect(r.code).toBe('({ re: 22.8515546553601, im: 1 })');
+    expect(r.promoted).toBe(false);
+    expect(r.mode).toBe('strict');
+    const v = r.run({});
+    const expected = ce.box(expr as any).N();
+    expect(v.re).toBeCloseTo(expected.re, 12);
+    expect(v.im).toBeCloseTo(expected.im, 12);
+  });
+
+  it('an argument inlined in a real ascription is not promoted', () => {
+    // The call `q(√(y − 1))` is inlined, and its value compiles on the real
+    // lane. The argument `√(y − 1)` is not emitted on the complex lane.
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    ce.declare('y', 'real');
+    ce.declare('q', '(unknown) -> real');
+    ce.assign('q', ce.box(['Function', ['Multiply', 'z', 'z'], 'z']));
+    const r = compile(
+      ce.box(['Add', 'x', ['q', ['Sqrt', ['Subtract', 'y', 1]]]]),
+      { to: 'javascript', fallback: false } as any
+    ) as any;
+    expect(r.success).toBe(true);
+    expect(r.code).toBe('_.x + Math.sqrt(_.y + -1) * Math.sqrt(_.y + -1)');
+    expect(r.promoted).toBe(false);
+    expect(r.run({ x: 1, y: 5 })).toBe(5);
+  });
+
+  it('a sum folded to a complex literal only by promotion is promoted', () => {
+    // `Σ cos k` for k = 1..5 is −1.2358…: `strict` gives NaN, `auto` folds
+    // the square root to the complex literal `1.1116…i`.
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    const expr = [
+      'Add',
+      'x',
+      ['Sqrt', ['Sum', ['Cos', 'k'], ['Limits', 'k', 1, 5]]],
+    ];
+    const r = compile(ce.box(expr as any), {
+      to: 'javascript',
+      fallback: false,
+    } as any) as any;
+    expect(r.success).toBe(true);
+    expect(r.promoted).toBe(true);
+    expect(r.mode).toBe('complex');
+    const v = r.run({ x: 1 });
+    const expected = ce
+      .box(expr as any)
+      .subs({ x: 1 })
+      .N();
+    expect(v.re).toBeCloseTo(expected.re, 12);
+    expect(v.im).toBeCloseTo(expected.im, 12);
+    const strict = compile(ce.box(expr as any), {
+      to: 'javascript',
+      fallback: false,
+      mode: 'strict',
+    } as any) as any;
+    expect(strict.promoted).toBe(false);
+    expect(Number.isNaN(strict.run({ x: 1 }))).toBe(true);
+  });
+
+  it('a call folded to a complex literal only by promotion is promoted', () => {
+    // The promotion is in the body of `g`, which the fold reads: `g(3)` is
+    // `√(−2)`, NaN under `strict`.
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    ce.assign('g', ce.box(['Function', ['Sqrt', ['Subtract', 'k', 5]], 'k']));
+    const expr = ce.box(['Add', 'x', ['g', 3]]);
+    const r = compile(expr, {
+      to: 'javascript',
+      fallback: false,
+    } as any) as any;
+    expect(r.success).toBe(true);
+    expect(r.promoted).toBe(true);
+    expect(r.run({ x: 1 })).toEqual({ re: 1, im: Math.SQRT2 });
+    const strict = compile(expr, {
+      to: 'javascript',
+      fallback: false,
+      mode: 'strict',
+    } as any) as any;
+    expect(strict.promoted).toBe(false);
+    expect(Number.isNaN(strict.run({ x: 1 }))).toBe(true);
+  });
+
+  it('an emitted promoted radical is promoted', () => {
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    ce.declare('y', 'real');
+    const r = compile(ce.box(['Add', 'x', ['Sqrt', ['Subtract', 'y', 1]]]), {
+      to: 'javascript',
+      fallback: false,
+    } as any) as any;
+    expect(r.success).toBe(true);
+    expect(r.code).toContain('_SYS.csqrt');
+    expect(r.promoted).toBe(true);
+    expect(r.run({ x: 1, y: 0 })).toEqual({ re: 1, im: 1 });
+  });
+
+  it('an even root of a wide operand under `complex` is promoted', () => {
+    // The emitter of `Root` records the promotion: the root is lowered
+    // through the complex kernel because the operand of type `number` is
+    // complex only by wideness.
+    const ce = new ComputeEngine();
+    ce.declare('t', 'number');
+    const r = compile(ce.box(['Root', 't', 4]), {
+      to: 'javascript',
+      fallback: false,
+      mode: 'complex',
+    } as any) as any;
+    expect(r.success).toBe(true);
+    expect(r.code).toContain('_SYS.croot');
+    expect(r.promoted).toBe(true);
+    const v = r.run({ t: -16 });
+    expect(v.re).toBeCloseTo(Math.SQRT2, 14);
+    expect(v.im).toBeCloseTo(Math.SQRT2, 14);
+  });
+});

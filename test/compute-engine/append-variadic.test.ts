@@ -336,9 +336,13 @@ describe('Append: a non-finite source is not forced', () => {
   // without walking the rest of the source, and the appended values have no
   // position. A negative index counts from an end that does not exist.
   test('at() reads the source and declines a negative index', () =>
-    expect(
-      [1, 2, 3, -1, 0].map((i) => ce.box(inf).at(i)?.toString())
-    ).toEqual(['1', '2', '1', undefined, undefined]));
+    expect([1, 2, 3, -1, 0].map((i) => ce.box(inf).at(i)?.toString())).toEqual([
+      '1',
+      '2',
+      '1',
+      undefined,
+      undefined,
+    ]));
 
   test('flattening a non-finite chain reports the same as the nested form', () => {
     const flat = ce.box([
@@ -525,10 +529,6 @@ describe('Append: the result type folds the appended values in', () => {
     ));
 
   test('the flattened form agrees with the nested form', () => {
-    // A declared symbol source for the tuple pair: a list-literal source
-    // folds into a shaped literal (`list<…^3>`) that the structural nested
-    // form cannot produce.
-    ce.declare('ts', 'list<tuple<integer, integer>>');
     const pairs: [Expression, Expression][] = [
       [
         ['Append', ['Append', ['Range', 1, 2], 3], { str: 'x' }],
@@ -538,15 +538,34 @@ describe('Append: the result type folds the appended values in', () => {
         ['Append', ['Append', ['Tuple', 1, 2], 3], 4],
         ['Append', ['Tuple', 1, 2], 3, 4],
       ],
-      [
-        ['Append', ['Append', 'ts', ['Tuple', 3, 4]], ['Tuple', 5, 6]],
-        ['Append', 'ts', ['Tuple', 3, 4], ['Tuple', 5, 6]],
-      ],
     ];
     for (const [nested, flat] of pairs)
       expect(ce.box(flat).type.toString()).toBe(
         structural(nested).type.toString()
       );
+  });
+
+  test('the flattened form agrees with the nested form (a symbol source)', () => {
+    // A declared symbol source for the tuple pair: a list-literal source
+    // folds into a shaped literal (`list<…^3>`) that the structural nested
+    // form cannot produce. The structural form does not bind a symbol, so a
+    // symbol in it is typed `unknown`. The nested reference is therefore
+    // built from canonical operands, where the symbol has its declared type.
+    ce.declare('ts', 'list<tuple<integer, integer>>');
+    const nested = ce.function(
+      'Append',
+      [
+        ce.function('Append', [ce.box('ts'), ce.box(['Tuple', 3, 4])], {
+          form: 'structural',
+        }),
+        ce.box(['Tuple', 5, 6]),
+      ],
+      { form: 'structural' }
+    );
+    const flat = ce.box(['Append', 'ts', ['Tuple', 3, 4], ['Tuple', 5, 6]]);
+    expect(nested.op1.operator).toBe('Append');
+    expect(flat.type.toString()).toBe('list<tuple<integer, integer>>');
+    expect(flat.type.toString()).toBe(nested.type.toString());
   });
 
   test('a point list keeps matching list<tuple<…>>', () =>
@@ -560,6 +579,104 @@ describe('Append: the result type folds the appended values in', () => {
         ])
         .type.matches('list<tuple<number, number>>')
     ).toBe(true));
+});
+
+describe('Append: a source whose type does not fix its kind', () => {
+  // A source typed `any`, `unknown` or `collection<T>` can hold a set, and
+  // `Append` of a set is a set. So the result type must admit a set: it is
+  // `collection`, not `list`. A source typed `any` gives the element type
+  // `any`, because its elements can be anything, absent values included. A
+  // source typed `unknown` (an unresolved call) gives the placeholder
+  // element type, which the appended values refine. A source that is known
+  // to be a list, a tuple or an indexed collection keeps the result typed
+  // `list`.
+  const fresh = new ComputeEngine();
+  fresh.declare('u', 'unknown');
+  fresh.declare('a', 'any');
+  fresh.declare('c', 'collection<integer>');
+  fresh.declare('ic', 'indexed_collection<integer>');
+  fresh.declare('l', 'list<integer>');
+  fresh.declare('t', 'tuple<integer, integer>');
+  fresh.declare('s', 'set<integer>');
+  const freshStructural = (expr: Expression) =>
+    fresh.expr(expr, { form: 'structural' } as any);
+  // The nested form `Append(Append(src, 1), 2)` with structural nodes over
+  // canonical operands, so that a symbol source has its declared type. The
+  // structural form of the whole expression does not bind the symbol.
+  const nestedOver = (src: Expression) =>
+    fresh.function(
+      'Append',
+      [
+        fresh.function('Append', [fresh.box(src), fresh.box(1)], {
+          form: 'structural',
+        }),
+        fresh.box(2),
+      ],
+      { form: 'structural' }
+    );
+  const typeOf = (expr: Expression) => fresh.box(expr).type.toString();
+
+  test.each([
+    ['a symbol declared any', ['Append', 'a', 1], 'collection<any>'],
+    ['a symbol declared unknown', ['Append', 'u', 1], 'collection<any>'],
+    ['an unresolved call', ['Append', ['f', 'x'], 1], 'collection<integer>'],
+    ['collection<integer>', ['Append', 'c', 1], 'collection<integer>'],
+    [
+      'collection<integer> and a rational',
+      ['Append', 'c', ['Rational', 1, 2]],
+      'collection<rational>',
+    ],
+    ['indexed_collection<integer>', ['Append', 'ic', 1], 'list<integer>'],
+    ['list<integer>', ['Append', 'l', 1], 'list<integer>'],
+    ['tuple<integer, integer>', ['Append', 't', 1], 'list<integer>'],
+    ['set<integer>', ['Append', 's', 1], 'set'],
+  ] as [string, Expression, string][])('%s', (_label, expr, expected) =>
+    expect(typeOf(expr)).toBe(expected)
+  );
+
+  test.each([
+    ['any', 'a', 'collection<any>'],
+    ['unknown', 'u', 'collection<any>'],
+    ['collection<integer>', 'c', 'collection<integer>'],
+    ['list<integer>', 'l', 'list<integer>'],
+    ['an unresolved call', ['f', 'x'], 'collection<integer>'],
+  ] as [string, Expression, string][])(
+    'the flattened form agrees with the nested form (%s)',
+    (_label, src, expected) => {
+      expect(typeOf(['Append', src, 1, 2])).toBe(expected);
+      expect(nestedOver(src).type.toString()).toBe(expected);
+    }
+  );
+
+  test.each(['a', 'u'])(
+    'the structural form of the nested expression over %s is a collection',
+    (src) =>
+      // The structural form does not bind the symbol, so the inner node sees
+      // a source typed `unknown` whatever the declaration is, and the
+      // appended values refine the placeholder element type. The canonical
+      // form reads the declaration (`a`) or infers `u` as `collection<any>`
+      // from the signature, so it gives `collection<any>`. Both forms are
+      // `collection`.
+      expect(
+        freshStructural(['Append', ['Append', src, 1], 2]).type.toString()
+      ).toBe('collection<integer>')
+  );
+
+  test('the value of an `any` source decides the kind', () => {
+    const e = new ComputeEngine();
+    e.declare('p', 'any');
+    e.declare('q', 'any');
+    e.assign('p', e.box(['List', 1, 2]));
+    e.assign('q', e.box(['Set', 1, 2]));
+    const overList = e.box(['Append', 'p', 3]);
+    const overSet = e.box(['Append', 'q', 3]);
+    // The static type admits both values.
+    expect(overList.type.toString()).toBe('collection<any>');
+    expect(overSet.type.toString()).toBe('collection<any>');
+    expect(overList.evaluate().toString()).toBe('[1,2,3]');
+    expect(overSet.evaluate().toString()).toBe('Set(1, 2, 3)');
+    expect(overSet.evaluate().type.matches(overSet.type)).toBe(true);
+  });
 });
 
 describe('Append: a tuple SOURCE contributes its ELEMENT type', () => {

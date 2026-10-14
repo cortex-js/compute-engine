@@ -83,6 +83,7 @@ import {
   isValueDef,
   updateDef,
 } from './boxed-expression/utils.js';
+import { isReplaceableOperatorShell } from './boxed-expression/definition-guards.js';
 import { checkArity, checkType } from './boxed-expression/validate.js';
 import { settleTypeText } from './library/type-value-utils.js';
 import { apply, lookup } from './function-utils.js';
@@ -3890,12 +3891,7 @@ export function syncProtocolDispatchers(ce: IComputeEngine): void {
 function isUpgradableShell(def: BoxedDefinition): boolean {
   if (isValueDef(def))
     return def.value.inferredType && def.value.value === undefined;
-  if (isOperatorDef(def))
-    return (
-      def.operator.inferredSignature &&
-      def.operator.evaluate === undefined &&
-      def.operator.canonical === undefined
-    );
+  if (isOperatorDef(def)) return isReplaceableOperatorShell(def.operator);
   return false;
 }
 

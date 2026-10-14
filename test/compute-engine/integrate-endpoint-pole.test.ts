@@ -281,6 +281,64 @@ describe('ITERATED INTEGRAL WITH A POLE THAT MOVES WITH ANOTHER VARIABLE', () =>
   });
 });
 
+describe('DOUBLY LOGARITHMIC DIVERGENCE AT A BOUND', () => {
+  // `∫₀^½ −1/(t·ln t) dt = +∞`: the antiderivative is `−ln(−ln t)`. The
+  // dyadic shells next to 0 are about `1/k` at depth `k`, so they shrink, but
+  // too slowly for their sum to converge. The quadrature gave `6.9 ± 1.6`.
+  const divergent = ['Divide', -1, ['Multiply', 't', ['Ln', 't']]];
+  // `∫₀^½ 1/(t·ln²t) dt = 1/ln 2`: the shells are about `1/k²`, and their
+  // sum converges. The divergence test must keep these two apart.
+  const convergent = [
+    'Divide',
+    1,
+    ['Multiply', 't', ['Power', ['Ln', 't'], 2]],
+  ];
+  const half = ['Rational', 1, 2];
+
+  test('∫₀^½ −1/(t·ln t) dt = +∞', () => {
+    const e = integral(divergent, 't', 0, half);
+    expect(e.evaluate().toString()).toBe('+oo');
+    expect(e.N().toString()).toBe('+oo');
+    expect(nIntegrate(divergent, 0, half).toString()).toBe('+oo');
+    expect(
+      ce.parse('\\int_0^{1/2} \\frac{-1}{t\\ln t}\\,dt').N().toString()
+    ).toBe('+oo');
+  });
+
+  test('∫₀^½ 1/(t·ln²t) dt = 1/ln 2', () => {
+    const e = integral(convergent, 't', 0, half);
+    expect(e.N().re).toBeCloseTo(1 / Math.LN2, 10);
+    expect(nIntegrate(convergent, 0, half).re).toBeCloseTo(1 / Math.LN2, 10);
+  });
+
+  test('the shells decrease as a power of the depth', () => {
+    const quadrature = (f: (t: number) => number, b = 0.5) =>
+      adaptiveQuadrature(f, 0, b);
+    // Divergent: the shells are about `k^(−p)` with `p ≤ 1`.
+    expect(quadrature((t) => -1 / (t * Math.log(t))).divergent).toBe(true);
+    expect(quadrature((t) => 1 / (t * Math.log(t) ** 2)).divergent).toBe(false);
+    expect(quadrature((t) => -1 / (t * Math.log(t / 1000))).divergent).toBe(
+      true
+    );
+    expect(quadrature((t) => (-Math.log(t)) ** -0.9 / t).divergent).toBe(true);
+    expect(
+      quadrature((t) => Math.log(-Math.log(t)) / (-t * Math.log(t))).divergent
+    ).toBe(true);
+    // Convergent: `p > 1`. The value of `1/(t·(−ln t)^1.02)` (about 50.4)
+    // is out of reach of the quadrature, but it is not a divergence.
+    expect(quadrature((t) => (-Math.log(t)) ** -1.02 / t).divergent).toBe(
+      false
+    );
+    expect(
+      quadrature((t) => Math.log(-Math.log(t)) / (t * Math.log(t) ** 2))
+        .divergent
+    ).toBe(false);
+    // Convergent: the shells decrease geometrically, slowly.
+    expect(quadrature((t) => t ** -0.9999, 1).divergent).toBe(false);
+    expect(quadrature((t) => t ** -0.9, 1).divergent).toBe(false);
+  });
+});
+
 describe('QUADRATURE DIVERGENCE TEST', () => {
   test('a logarithmic factor is not a divergence', () => {
     // `∫₀¹ t^(−0.95)·ln(c·t) dt = 20·ln c − 400`, at every scale `c`.

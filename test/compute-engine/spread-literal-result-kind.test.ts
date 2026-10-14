@@ -479,12 +479,15 @@ describe('Only the sources decide the kind of an abstract-typed node', () => {
 describe('Join over an operand whose type says nothing', () => {
   // An operand typed `any` (or an unresolved call, typed `unknown`) may hold
   // a set, so the join is typed `collection`, and its kind follows the value
-  // the operand holds.
+  // the operand holds. The element type follows the rule of `Append`: a
+  // source declared `any` can hold anything, absent values included, so the
+  // elements are `any`; a source typed `unknown` says nothing yet, so the
+  // other operands fix the element type.
   test('a symbol declared any', () => {
     const ce = new ComputeEngine();
     ce.declare('q', 'any');
     const e = ce.box(['Join', 'q', ['List', 0]]);
-    expect(e.type.toString()).toBe('collection');
+    expect(e.type.toString()).toBe('collection<any>');
     ce.assign('q', ce.box(['List', 1, 2]));
     expect(e.isIndexedCollection).toBe(true);
     expect(e.evaluate().toString()).toBe('[1,2,0]');
@@ -500,7 +503,7 @@ describe('Join over an operand whose type says nothing', () => {
   test('an unresolved call', () => {
     const ce = new ComputeEngine();
     expect(ce.box(['Join', ['f', 'x'], ['List', 0]]).type.toString()).toBe(
-      'collection'
+      'collection<integer>'
     );
   });
 });

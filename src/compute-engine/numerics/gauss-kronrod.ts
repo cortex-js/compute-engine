@@ -263,9 +263,11 @@ const SHELL_BLOCK = 20;
  * Erring high is deliberate: a false positive rejects a legitimate integral,
  * a false negative only leaves the pre-existing Monte-Carlo fallback in place.
  * The same choice makes `1/(x·ln x)` (divergent) and `1/(x·ln²x)` (convergent)
- * BOTH read as non-divergent — their block ratios are `1 − B/n` and `1 − 2B/n`
- * at refinement depth `n`, i.e. both approach 1 from below and neither reaches
- * 0.99 inside the panel budget.
+ * BOTH stay below this threshold: their block ratios are `1 − B/n` and
+ * `1 − 2B/n` at refinement depth `n`, i.e. both approach 1 from below and
+ * neither reaches 0.99 inside the panel budget. A different test separates
+ * them: the exponent of the power of the depth that the shells follow (see
+ * `shellsDecayAsPower`).
  *
  * A slowly varying factor can push the ratio of a CONVERGENT integral above
  * this threshold for a while: `x^(−0.95)·ln x` sheds blocks in the ratio
@@ -299,9 +301,8 @@ const SHELL_TREND_FLAT = 2e-4;
  * are about `1/k` at depth `k`) changes by about `20/k²` per shell, `2e-5`
  * at the deepest shells a bound at 0 allows, far more than this. (That
  * integrand is not a case for this test: its ratio stays below
- * `SHELL_DECAY` at every reachable depth, and its divergence is not
- * detected at all — see `ROADMAP.md`, "`.N()` of an integral with a doubly
- * logarithmic divergence at a bound gives a finite value".)
+ * `SHELL_DECAY` at every reachable depth, and its divergence is found by
+ * `shellsDecayAsPower`.)
  */
 const SHELL_GEOMETRIC_SAME = 1e-9;
 
@@ -330,6 +331,47 @@ const SHELL_GEOMETRIC_FALL = 0.6;
  * margin only delays a diagnosis of divergence; it never makes one.
  */
 const SHELL_DEPTH_MARGIN = 2 * SHELL_BLOCK;
+
+/**
+ * The smallest number of shells with which `shellsDecayAsPower` estimates the
+ * exponent of the shells. The estimate assumes that the shells are a power
+ * `C·k^(−p)` of the depth `k`, and the terms of lower order make it too low:
+ * for the shells `ln(1 + 1/k)` of `−1/(t·ln t)` at 0 on `[0, ½]` (exactly
+ * `p = 1`), the estimate is `0.878` after 60 shells, `0.981` after 100 and
+ * `0.9967` after 200. Next to a nonzero endpoint the corner panel is
+ * bisected only about 48 times (see `shellsDiverge`), so there the test is
+ * not available: at 48 shells, the estimate for `1/(x·ln x)` at `∞` (`0.87`)
+ * and for the convergent `1/(x·ln^1.1 x)` (`0.95`) are on the same side of 1.
+ */
+const SHELL_POWER_MIN_SHELLS = 10 * SHELL_BLOCK;
+
+/**
+ * The largest exponent `p` of the shells `C·k^(−p)` (see
+ * `shellsDecayAsPower`) that is read as a divergence. The series of the
+ * terms `k^(−p)` diverges for `p ≤ 1` and converges for `p > 1`. The margin
+ * above 1 is for the terms of lower order: `−1/(t·ln t) − 5/(t·ln²t)`
+ * (divergent) gives an estimate of `1.003` after 200 shells. Measured after
+ * 200 shells at 0 on `[0, ½]`: `−1/(t·ln t)` gives `0.9967`, and the
+ * convergent `1/(t·ln²t)` gives `1.99`, `1/(t·(−ln t)^1.02)` gives `1.017`,
+ * and `−t^0.0001/(t·ln t)` gives `1.021`. The convergent integrands that
+ * this test reads as divergent have shells whose exponent is within 0.01 of
+ * 1 at every reachable depth: `1/(t·(−ln t)^p)` with `p` from 1 to about
+ * `1.008` (`∫₀^½ = (ln 2)^(1−p)/(p − 1)`, at least 125), and
+ * `−t^ε/(t·ln t)` with `ε` up to about `3·10⁻⁵`. The quadrature cannot find
+ * the value of these integrals: the part of the tail past the deepest shell
+ * is most of the integral, and before this test the result was a wrong
+ * finite value.
+ */
+const SHELL_POWER_DIVERGENT = 1.005;
+
+/**
+ * The largest difference between the exponents that `shellsDecayAsPower`
+ * estimates from three successive pairs of blocks. The estimates for a power
+ * of the depth agree to within `0.003` after 200 shells. Shells whose sum
+ * oscillates slowly (`(2 + sin(ln t))/(t·ln t)`) give estimates that change
+ * sign from one pair to the next.
+ */
+const SHELL_POWER_SPREAD = 0.05;
 
 /**
  * The smallest `|Σ shells| / Σ|shells|` a block must have for its sum to mean
@@ -389,6 +431,57 @@ function blockRatio(shells: number[], end: number): number | undefined {
   )
     return undefined;
   return recent / prior;
+}
+
+/**
+ * Whether the shells toward an endpoint decrease as a power `C·k^(−p)` of the
+ * depth `k` with `p ≤ SHELL_POWER_DIVERGENT`: the signature of a divergent
+ * integral whose block ratio stays below `SHELL_DECAY` at every depth that
+ * the doubles allow. The shells of `−1/(t·ln t)` at 0 are `ln(1 + 1/k)`,
+ * about `1/k`, and `∫₀^½ −1/(t·ln t) dt` is `+∞` (the antiderivative is
+ * `−ln(−ln t)`), but the block ratio is about `1 − 20/k` and reaches 0.99
+ * only at `k = 2000`, past the deepest shell (about 1070 next to 0).
+ *
+ * The series of the terms `k^(−p)` diverges when `p ≤ 1`, because its
+ * partial sums grow as `ln k` (`p = 1`) or as `k^(1−p)` (`p < 1`), and
+ * converges when `p > 1`. Shells that decrease geometrically (a pure power
+ * of `t`, a bounded integrand) decrease faster than every power of `k`.
+ *
+ * The exponent is read from the change of the block ratio `r` with the
+ * depth. For shells `C·k^(−p)`, the block ratio at depth `m` is about
+ * `((m + B)/m)^(−p)` for `B = SHELL_BLOCK`, so `−ln r` is about `B·p/m`,
+ * and `−1/ln r` is about `m/(B·p)`: it increases by `1/p` when the blocks
+ * move `B` shells deeper. This estimate does not need the depth `m` itself,
+ * which is not known when the logarithm in the integrand has a different
+ * scale (`ln(t/1000)`).
+ *
+ * The exponent is estimated from the four block ratios that end at the last
+ * shell and `B`, `2·B` and `3·B` shells before it, which gives three
+ * estimates. The test is true when all of the block ratios are in `(0, 1)`,
+ * the three estimates are positive, at most `SHELL_POWER_DIVERGENT`, and
+ * agree to within `SHELL_POWER_SPREAD`. A
+ * geometric decrease has a constant block ratio, so the change of `−1/ln r`
+ * is zero or a rounding error, and the estimate is very large or negative.
+ */
+function shellsDecayAsPower(shells: number[]): boolean {
+  const n = shells.length;
+  if (n < SHELL_POWER_MIN_SHELLS) return false;
+  let lowest = Infinity;
+  let highest = -Infinity;
+  let previous: number | undefined;
+  for (let j = 3; j >= 0; j--) {
+    const ratio = blockRatio(shells, n - j * SHELL_BLOCK);
+    if (ratio === undefined || !(ratio > 0 && ratio < 1)) return false;
+    const inverse = -1 / Math.log(ratio);
+    if (previous !== undefined) {
+      const p = 1 / (inverse - previous);
+      if (!(p > 0 && p <= SHELL_POWER_DIVERGENT)) return false;
+      lowest = Math.min(lowest, p);
+      highest = Math.max(highest, p);
+    }
+    previous = inverse;
+  }
+  return highest - lowest <= SHELL_POWER_SPREAD;
 }
 
 /**
@@ -522,7 +615,10 @@ function shellsDiverge(
   const first = ratioAt(n - 2);
   if (last === undefined || before === undefined || first === undefined)
     return false;
-  if (!(last >= SHELL_DECAY) || !(before > 0) || !(first > 0)) return false;
+  // A ratio below `SHELL_DECAY`: the shells shrink, but they can shrink too
+  // slowly for the series to converge (see `shellsDecayAsPower`).
+  if (!(last >= SHELL_DECAY)) return shellsDecayAsPower(shells);
+  if (!(before > 0) || !(first > 0)) return false;
 
   // The ratio has stopped falling: a pole of order 1 or more — unless the
   // three ratios are the same ratio BELOW 1. The shells then shrink

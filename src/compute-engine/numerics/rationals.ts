@@ -164,7 +164,18 @@ export function div(lhs: Rational, rhs: Rational): Rational {
  * @returns
  */
 export function add(lhs: Rational, rhs: Rational): Rational {
-  if (typeof lhs[0] === 'number' && !Number.isFinite(lhs[0])) return lhs;
+  // A sum with an infinite or NaN operand is computed on the doubles, before
+  // any promotion to bigint (`BigInt(Infinity)` throws). The rules are those
+  // of IEEE 754: `∞ + 1 = ∞`, `∞ + ∞ = ∞`, `∞ − ∞ = NaN`, `NaN + x = NaN`. A
+  // non-finite rational whose value is 0 (`[1, Infinity]`, the inverse of an
+  // infinity) adds nothing.
+  const a = nonFiniteValue(lhs);
+  const b = nonFiniteValue(rhs);
+  if (a !== undefined || b !== undefined) {
+    if (a === 0) return b === undefined ? rhs : [b === 0 ? 0 : b, 1];
+    if (b === 0) return a === undefined ? lhs : [a, 1];
+    return [(a ?? 0) + (b ?? 0), 1];
+  }
 
   const rhsNum = rhs;
 
@@ -174,7 +185,6 @@ export function add(lhs: Rational, rhs: Rational): Rational {
     lhs = [BigInt(lhs[0]), BigInt(lhs[1])];
     return [rhsNum[1] * lhs[0] + rhsNum[0] * lhs[1], rhsNum[1] * lhs[1]];
   }
-  if (!Number.isFinite(rhsNum[0])) return rhsNum;
   if (isBigRational(lhs)) {
     const bigRhs = [BigInt(rhsNum[0]), BigInt(rhsNum[1])];
     return [bigRhs[1] * lhs[0] + bigRhs[0] * lhs[1], bigRhs[1] * lhs[1]];
@@ -188,18 +198,9 @@ export function add(lhs: Rational, rhs: Rational): Rational {
   if (n <= 9007199254740991 && n >= -9007199254740991 && d <= 9007199254740991)
     return [n, d];
 
-  // Only map to NaN when an *input* is non-finite (e.g. a `[1, Infinity]`
-  // denominator): those cannot be promoted to BigInt (`BigInt(Infinity)`
-  // throws). Finite inputs whose machine sum merely overflowed fall through
-  // to the exact BigInt promotion below.
-  if (
-    !Number.isFinite(lhs[0]) ||
-    !Number.isFinite(lhs[1]) ||
-    !Number.isFinite(rhsNum[0]) ||
-    !Number.isFinite(rhsNum[1])
-  )
-    return [NaN, 1];
-
+  // The inputs are finite (the non-finite operands returned above), so a
+  // machine sum that left the safe-integer range is computed again exactly
+  // with bigints.
   return [
     BigInt(rhsNum[1]) * BigInt(lhs[0]) + BigInt(rhsNum[0]) * BigInt(lhs[1]),
     BigInt(rhsNum[1]) * BigInt(lhs[1]),
@@ -207,19 +208,19 @@ export function add(lhs: Rational, rhs: Rational): Rational {
 }
 
 export function mul(lhs: Rational, rhs: Rational): Rational {
-  // A non-finite machine rational ([NaN, 1] is the NaN encoding, and
-  // inverse() can produce [1, NaN]) cannot be promoted to bigint:
-  // BigInt(NaN) throws. Propagate NaN instead.
-  if (
-    isMachineRational(lhs) &&
-    (!Number.isFinite(lhs[0]) || !Number.isFinite(lhs[1]))
-  )
-    return [NaN, 1];
-  if (
-    isMachineRational(rhs) &&
-    (!Number.isFinite(rhs[0]) || !Number.isFinite(rhs[1]))
-  )
-    return [NaN, 1];
+  // A non-finite machine rational cannot be promoted to bigint
+  // (`BigInt(Infinity)` and `BigInt(NaN)` throw), so a product with such an
+  // operand is computed on the doubles. A finite operand counts only by its
+  // sign, because its double can underflow to 0 (`1/10^400`). The rules are
+  // those of IEEE 754: `∞·2 = ∞`, `∞·(−2) = −∞`, `∞·0 = NaN`, `∞·∞ = ∞`,
+  // `NaN·x = NaN`. A non-finite rational whose value is 0 (`[1, Infinity]`,
+  // the inverse of an infinity) gives 0 with a finite operand.
+  const a = nonFiniteValue(lhs);
+  const b = nonFiniteValue(rhs);
+  if (a !== undefined || b !== undefined) {
+    const r = (a ?? rationalSign(lhs)) * (b ?? rationalSign(rhs));
+    return [r === 0 ? 0 : r, 1];
+  }
 
   if (isMachineRational(lhs) && isMachineRational(rhs)) {
     const n = lhs[0] * rhs[0];
@@ -252,6 +253,27 @@ export function mul(lhs: Rational, rhs: Rational): Rational {
   return [lhs[0] * rhs[0], lhs[1] * rhs[1]];
 }
 
+/**
+ * The double value of a machine rational that has a non-finite part, or
+ * `undefined` when both parts are finite. A bigint rational is always finite.
+ *
+ * The exact lane stores `+∞`, `−∞` and `NaN` as the machine rationals
+ * `[Infinity, 1]`, `[-Infinity, 1]` and `[NaN, 1]`. The inverse of an
+ * infinity is `[1, Infinity]` or `[-1, Infinity]`, whose value is `0` (or
+ * `-0`), and the inverse of `NaN` is `[1, NaN]`, whose value is `NaN`.
+ */
+function nonFiniteValue(x: Rational): number | undefined {
+  if (!isMachineRational(x)) return undefined;
+  if (Number.isFinite(x[0]) && Number.isFinite(x[1])) return undefined;
+  return x[0] / x[1];
+}
+
+/** The sign of a finite rational, from the signs of both of its parts: the
+ * denominator of a rational that is not reduced can be negative. */
+function rationalSign(x: Rational): number {
+  return Math.sign(Number(x[0])) * Math.sign(Number(x[1]));
+}
+
 export function neg(
   x: [SmallInteger, SmallInteger]
 ): [SmallInteger, SmallInteger];
@@ -276,6 +298,18 @@ export function asMachineRational(r: Rational): [SmallInteger, SmallInteger] {
 
 export function pow(r: Rational, exp: SmallInteger): Rational {
   console.assert(Number.isInteger(exp));
+  // A non-finite base cannot be promoted to bigint (`BigInt(Infinity)`
+  // throws), so its power is computed on the doubles, with the rules of
+  // IEEE 754: `(−∞)^3 = −∞`, `(−∞)^2 = ∞`, `∞^(−1) = 0`, `∞^0 = 1`. A NaN
+  // base gives NaN for every exponent, also for `0`, as `pow()` of the exact
+  // numeric lane does (IEEE 754 gives `NaN^0 = 1`). The exponent is an
+  // integer (see the assert above), so it is never infinite or NaN.
+  const base = nonFiniteValue(r);
+  if (base !== undefined) {
+    if (Number.isNaN(base)) return [NaN, 1];
+    const p = Math.pow(base, exp);
+    return [p === 0 ? 0 : p, 1];
+  }
   if (exp === 0) return [1, 1];
   if (exp < 0) {
     r = inverse(r);

@@ -10,6 +10,7 @@ import { assertLibraryDefinitionContract } from './engine-extension-contracts.js
 import { journalCheckpointMapEntry } from './checkpoint-journal.js';
 import {
   isOperatorDef,
+  isReplaceableOperatorShell,
   isValueDef,
 } from './boxed-expression/definition-guards.js';
 import { isValidSymbol, validateSymbol } from '../math-json/symbols.js';
@@ -259,13 +260,18 @@ export function loadLibraryLate(
 
 /** Can `ce.declare()` replace this binding? Only when there is none, or when
  * it is a declaration the engine inferred from a use, with no value: the same
- * rule `ce.declare()` applies (`declareFn()`, `engine-declarations.ts`). */
+ * rule `ce.declare()` applies (`declareFn()`, `engine-declarations.ts`). An
+ * operator with an inferred signature is upgradable only when it holds nothing
+ * the author gave (`isReplaceableOperatorShell()`): an operator that the
+ * author declared with a handler but no `signature` also has an inferred
+ * signature. */
 function isUpgradable(existing: BoxedDefinition | undefined): boolean {
   if (existing === undefined) return true;
   if (isValueDef(existing))
     return (
       existing.value.inferredType === true && existing.value.value === undefined
     );
-  if (isOperatorDef(existing)) return existing.operator.inferredSignature;
+  if (isOperatorDef(existing))
+    return isReplaceableOperatorShell(existing.operator);
   return false;
 }

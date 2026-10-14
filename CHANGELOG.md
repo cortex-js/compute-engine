@@ -2,6 +2,22 @@
 
 ### Behavior Changes
 
+- **`Append` and `Join` over a source whose type does not fix its kind are
+  typed `collection<T>`, not `list` or bare `collection`.** With `a` declared
+  `any`, `Append(a, 1)` is now typed `collection<any>`, where it was `list`;
+  `Join(a, [1])` is `collection<any>`, where it was bare `collection`. The old
+  `list` type was wrong when `a` holds a set: `Append(a, 3)` with `a = Set(1, 2)`
+  evaluates to `Set(1, 2, 3)`. An unresolved call is typed the same way:
+  `Append(f(x), 1)` and `Join(f(x), [1])` are `collection<integer>`. A source
+  declared `any` gives the element type `any`, because its elements can be
+  anything, absent values included. A source typed `unknown` keeps the
+  placeholder element type, which the other operands refine, so a
+  self-recursive list builder declared `-> unknown` is still typed
+  `list<number>`. A source that is known to be a list, a tuple or an indexed
+  collection still gives `list<T>`; a set, a dictionary or a record source is
+  unchanged. The flattened form `Append(a, 1, 2)` and the nested form
+  `Append(Append(a, 1), 2)` give the same type.
+
 - **A tuple whose every coordinate is absent evaluates to `Missing`.**
   `("Missing", "Missing")` evaluated to itself; it is now `Missing`, the
   absent value: a tuple is atomic, and a tuple of absent coordinates is not a
@@ -79,6 +95,148 @@
   integral `∫ t^{-n}\,dt` is still `t^{1 − n}/(1 − n)`.
 
 ### Issues Resolved
+
+- **A function that hands a tuple built from its own parameter to a scalar
+  parameter has the result type `any`.** With `f(x) := (-x, x)` and
+  `g(a) := f((a, a))`, `g(1)` evaluates to `((-1, -1), (1, 1))` but was typed
+  `tuple<number, number>`. That is the result of `f` for a scalar argument,
+  read when `g` was defined: `a` was still open, so `(a, a)` was typed
+  `tuple<unknown, unknown>` and was not seen as a numeric tuple. A tuple whose
+  components are numbers or open is now read as a numeric tuple. It binds
+  whole to a scalar parameter, and the body's arithmetic decides the shape,
+  so `g` is typed `(unknown) -> any` and `g(1)` is typed `any`. The same was
+  true of a direct call `f((1, 1))` when `f` was declared `function`, and of
+  the typing of a call to a function assigned without a declaration when that
+  call is inside another function's body; both now answer `any`. If the
+  function never reads the parameter that gets the tuple, its result type is
+  kept. A list argument (`f([a, a])`, which maps) and a parameter declared as
+  a tuple keep their types.
+
+- **An Epsil rule round-trips through `serializeEpsil` → `parseEpsil` →
+  `resolveLibraryNames` when its key is a library name or when it is the
+  only argument of a call.** Before, `["List", ["KeyValuePair", "IsPrime",
+  "Teal"]]` serialized as `[isPrime -> Teal]` and read back with the key
+  `isPrime`, because the resolution pass does not rewrite a pair key (a key is
+  a label, so `[max -> 10]` keeps `max`). Now the serializer keeps the MathJSON
+  spelling of a bare-symbol key: `[IsPrime -> Teal]`. Also,
+  `["f", ["KeyValuePair", "GridLines", ["List", 10, 10]]]` serialized as
+  `f(GridLines -> [10, 10])`, and the parser read that sole argument as the
+  wrong-arrow spelling of the lambda `GridLines => [10, 10]`. Now a bare
+  `name -> value` that is the only argument of a call is a rule, as it already
+  was after a comma (`f(x, GridLines -> [10, 10])`). The first of several
+  arguments still keeps the wrong-arrow diagnostic and its fixit:
+  `map(x -> x^2, xs)` is recovered as `map(x => x^2, xs)`. (#435)
+
+- **The `promoted` field of a JavaScript compile result describes only the
+  code that is emitted.** Before, under the default `auto` mode,
+  `x + Sum(√(2 + sin k), k, 1, 16)` compiled to `_.x + 22.8515546553601` but
+  reported `promoted: true` and `mode: 'complex'`. A function declared
+  `(unknown) -> real` and called with `√(y − 1)` was inlined on the real lane
+  but also reported `promoted: true`. Both now report `promoted: false`. The
+  lane analysis recorded a promotion for every unknown-sign radical it read,
+  including subtrees that the constant fold replaced and arguments that were
+  inlined. Now only the emitter of a radical records a promotion, and so does
+  a constant fold whose result is complex only because a radical promotes. So
+  `x + g(3)` with `g := k ↦ √(k − 5)`, which folds to `x + 1.41…i`, now
+  reports `promoted: true`; under `mode: 'strict'` it gives `NaN`.
+
+- **Limits at infinity that compare an exponential, or a root, with another
+  term no longer give a wrong `0` or `+∞`.** `\lim_{t\to\infty} t/e^{\sqrt t}`
+  was `+∞` and is now `0`. `e^{\sqrt t}/t` and `e^{\sqrt t-50}/t` were `0`
+  and are now `+∞`. `t/e^{t-t^2}` was `0` and is now `+∞`. With `q < 0`
+  assumed, `t/e^{qt}` was `0` and is now `+∞`, and `-t/e^{qt}` is now `−∞`.
+  `t/e^{at}` with `a` unknown, `a t/e^{qt}` and `(\sqrt t - 50)/\ln t` were
+  `0`; they now stay unevaluated. The growth ranking of `e^g` and `b^g`
+  (constant `b > 1`) treated an exponent it could not classify as bounded. It
+  also ignored the sign of the exponent, read "no probe value" as positive,
+  and had no rank for `√` and `ⁿ√`. Now the ranking reads the exponent's sign
+  from the probes, or from the sign of a polynomial exponent's leading
+  coefficient, and declines when the sign stays unknown. A root takes the
+  growth class of its radicand. When the probes cannot give the sign of a
+  term (a symbolic parameter, or a value that underflows to `0`), the
+  quotient rule uses a sign it can prove: `e^g` and `b^g` are positive for a
+  real exponent `g`. A root whose degree is not a positive constant is read
+  as a power: `\lim_{t\to\infty} \sqrt[t]{t}` was `+∞` and is now `1`, and
+  `\sqrt[t]{t}/\ln t` is `0`.
+
+- **`.N()` of an integral whose integrand diverges like `1/(t·ln t)` at a
+  bound gives `+∞`, not a finite value.** `\int_0^{1/2} \frac{-1}{t\ln t}\,dt`
+  gave `6.9 ± 1.6` and is now `+∞`, as `evaluate()` already gave (the
+  antiderivative is `−ln(−ln t)`). The shells that the quadrature cuts off next
+  to the bound are about `1/k` at depth `k`. They shrink too slowly for their
+  sum to converge, but they also never reach the "stopped shrinking" ratio
+  that the divergence test needs. The test now also estimates the exponent `p`
+  of a power law `k^(−p)` from how the block ratio changes with depth, and
+  reads `p ≤ 1` as a divergence (`shellsDecayAsPower`,
+  `numerics/gauss-kronrod.ts`). The convergent
+  `∫₀^½ dt/(t·ln²t) = 1/ln 2` (shells about `1/k²`, `p = 2`) keeps its value.
+  An integrand whose shells decay with an exponent within about `0.008` of
+  `1` (`∫₀^½ dt/(t·(−ln t)^{1.001})`, exact value `1000.4`) is now reported
+  divergent; it was a wrong finite value (`6.9 ± 1.7`) before, because most
+  of the integral lies past the deepest shell the doubles allow.
+
+- **`ce.declare()` refuses to declare again an operator that was declared
+  without a `signature`.** Before, `ce.declare('Sq', { evaluate: ([x]) =>
+  x.mul(x) })` followed by `ce.declare('Sq', { evaluate: () => ce.number(-1) })`
+  silently replaced the first definition, and `Sq(3)` gave `-1`. The same pair
+  with a `signature` threw. Now both throw
+  `The symbol "Sq" is already declared in this scope`, and `Sq(3)` stays `9`.
+  This also applies to an operator declared with only `sgn`, `complexity`,
+  `canonical` or any other handler, to a function given to `ce.assign()`, and
+  to `ce.loadLibrary()` when a library defines a name the user declared that
+  way. The check read `inferredSignature`, which is also true for an operator
+  that has handlers but no `signature`. Now an operator can be declared again
+  only when it holds nothing the author gave: no handler, and each flag
+  (such as `lazy`, `scoped`, `broadcastable`, `pure: false` or `effects`)
+  and each description field at its default value
+  (`isReplaceableOperatorShell`, shared by `ce.declare()`,
+  `ce.loadLibrary()`, protocol declarations and type constructors). A name
+  first seen in use, such as `ce.parse('f(x)')`, can still be defined with
+  `ce.declare('f', {...})`, and a name marked only with
+  `{ signature, inferredSignature: true }` can still be declared again. To
+  change an existing definition, use `ce.declare(name, patch, { extend: true })`.
+
+- **A power of a square matrix keeps the shape and the element type of the
+  matrix.** With `m` declared `matrix<integer^(2x2)>`, `m^2` (which
+  canonicalizes to `MatrixPower(m, 2)`) was typed `matrix`, a matrix of numbers
+  of any shape, although its value is a 2×2 matrix of integers. It is now typed
+  `matrix<integer^(2x2)>`. A negative or symbolic integer exponent gives
+  `matrix<rational^(2x2)>`, because the inverse of an integer matrix has
+  rational entries. A half-integer exponent keeps only the shape
+  (`matrix<2x2>`). A non-square matrix, whose power is the
+  `expected-square-matrix` error, keeps `matrix`. The type that a type handler
+  gets for `Power` through `context.derive` now makes the same rewrite to
+  `MatrixPower` that canonicalization makes for an integer literal exponent, so
+  both routes give the same type for a matrix base.
+
+- **The exact numeric lane gives `n/0` the value `±∞` and keeps the sign of
+  an infinity in its products.** Internally, `5.div(0)` and the rational
+  `[5, 0]` were `NaN`, `∞·2` was `NaN`, `∞ − ∞` was `∞`, and `5/∞` threw a
+  `RangeError`. They are now `∞`, `∞`, `∞` and `NaN`, and `5/∞` is `0`; `0/0`
+  stays `NaN`, a complex value over `0` is the complex infinity, and `∞·0` is
+  `NaN`. There is no change to expression results: the boxed routes answer
+  `5/0`, `Rational(5, 0)` and `Divide(5, 0)` with `~oo` before this code is
+  used, as before. The `add` and `mul` rational helpers exported by
+  `@cortex-js/compute-engine/numerics` now return `[±Infinity, 1]` for an
+  infinite operand times a finite non-zero one, where they returned `[NaN, 1]`,
+  and `pow` of an infinite base now follows IEEE 754 (`pow([-Infinity, 1], 3)`
+  is `[-Infinity, 1]`, a negative exponent gives `[0, 1]`) where it threw a
+  `RangeError`; a `NaN` base gives `[NaN, 1]` for every exponent.
+
+- **A spacing command between the indices of a Kronecker delta is read as
+  white space, and every comma-separated index is an argument.** `\delta_{n\,m}`
+  parsed to `KroneckerDelta(n, HorizontalSpacing(3), m)` in both grammars, and
+  `\delta_{1\,2}` parsed to `KroneckerDelta(12)`. They now parse to
+  `KroneckerDelta(n, m)` and `KroneckerDelta(1, 2)`. The same holds for `\;`,
+  `\:`, `\!`, `\quad`, `\qquad` and `\hspace{…}`, and for spacing before the
+  first index or after the last one (`\delta_{\,n}` is `KroneckerDelta(n)`).
+  Three or more comma-separated indices were one `Tuple` argument:
+  `\delta_{1,1,1}` was `KroneckerDelta(Tuple(1, 1, 1))`, which evaluates to
+  `0`, and `KroneckerDelta(1, x, 2)` serialized to `\delta_{1, x, 2}` but did
+  not parse back to the same expression. Each index is now an argument, so
+  `\delta_{1,1,1}` evaluates to `1`. The parser skips spacing with the same
+  helper as the number parser, and removes spacing items from the indices of
+  a braced group.
 
 - **A user-function call whose argument may be absent is typed from the
   function body.** With `L` declared `list<tuple<number, number, number>>`,
