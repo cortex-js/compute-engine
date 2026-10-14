@@ -169,21 +169,60 @@ describe('a product with exactly one complex factor', () => {
     const code = String(
       compile(ce.parse('a\\cdot b\\cdot z\\cdot c'), { to: 'javascript' }).code
     );
-    // Each REAL factor is two multiplications in place. The four-product
-    // complex step, with its two extra temporaries, is left for the one factor
-    // that is actually complex.
+    // Canonical order sorts these symbols by name (`a`, `b`, `c`, then `z`),
+    // so the running product is REAL until `z`: each real factor is ONE
+    // multiplication in place, with no imaginary accumulator, and the one
+    // complex factor scales its two components by the real running product.
+    // No four-product complex step at all.
     //
     // Every temporary is a hygienic name the compilation allocates
     // (`BaseCompiler.tempVar`), so the SHAPES are matched here rather than
     // fixed spellings: the product may sit inside an enclosing block, where a
     // fixed spelling would shadow a binding of the same name.
     const scalings = code.match(/(_tv\d+) = \1 \* _tv\d+;/g) ?? [];
-    expect(scalings).toHaveLength(4); // two real factors × two components
-    const steps =
-      code.match(
-        /const _tv\d+ = _tv\d+ \* _tv\d+\.re - _tv\d+ \* _tv\d+\.im;/g
-      ) ?? [];
-    expect(steps).toHaveLength(1);
+    expect(scalings).toHaveLength(2); // two real factors, one component
+    expect(code).not.toMatch(/let _tv\d+ = 0;/);
+    expect(code).not.toContain('.re - ');
+    expect(code).toMatch(
+      /const (_tv\d+) = (_tv\d+) \* (_tv\d+)\.re; let _tv\d+ = \2 \* \3\.im; \2 = \1;/
+    );
+  });
+
+  test('an infinite real factor gives an infinite product, as the two-factor product does', () => {
+    // The imaginary accumulator used to start at `0` and be multiplied by each
+    // real factor; `0 * Infinity` is `NaN`, so a three-factor product with an
+    // infinite real factor returned `{ NaN, NaN }` where `x · z` alone
+    // returns `{ Infinity, Infinity }`.
+    const ce = engine();
+    const z = { re: 1, im: 2 };
+    const three = compile(ce.parse('3\\cdot a\\cdot z'), { to: 'javascript' });
+    const two = compile(ce.parse('a\\cdot z'), { to: 'javascript' });
+    const v3 = three.run!({ a: Infinity, z }) as { re: number; im: number };
+    const v2 = two.run!({ a: Infinity, z }) as { re: number; im: number };
+    expect(v3).toEqual({ re: Infinity, im: Infinity });
+    expect(v3).toEqual(v2);
+  });
+
+  test('a real factor after the complex factor scales both components', () => {
+    // Canonical order sorts symbols by name, so the complex `p` sits between
+    // the real `a` and `w`: the running product is real through `a`, becomes
+    // complex at `p`, and `w` then has to scale BOTH components.
+    const ce = engine();
+    ce.declare('p', 'complex');
+    ce.declare('w', 'number');
+    const e = ce.parse('a\\cdot p\\cdot w');
+    const r = compile(e, { to: 'javascript' });
+    const code = String(r.code);
+    expect(code).toMatch(
+      /let (_tv\d+) = _tv\d+ \* _tv\d+\.im; _tv\d+ = _tv\d+; _tv\d+ = _tv\d+ \* (_tv\d+); \1 = \1 \* \2;/
+    );
+    const value = r.run!({ a: 2, w: 5, p: { re: 1, im: -2 } }) as {
+      re: number;
+      im: number;
+    };
+    const expected = e.subs({ a: 2, w: 5, p: ce.box(['Complex', 1, -2]) }).N();
+    expect(value.re).toBeCloseTo(expected.re, 12);
+    expect(value.im).toBeCloseTo(expected.im, 12);
   });
 
   test('a leading complex factor leaves no complex step at all', () => {
@@ -259,10 +298,12 @@ describe('a product with exactly one complex factor', () => {
     const ce = engine();
     const e = ce.parse('a\\cdot z\\cdot b\\cdot z');
     const code = String(compile(e, { to: 'javascript' }).code);
-    // One four-product complex step per complex factor.
+    // Canonical order is `a`, `b`, `z`, `z`. The first `z` scales the real
+    // running product (two multiplications); only the second `z` needs the
+    // four-product complex step.
     expect(
       code.match(/const _tv\d+ = _tv\d+ \* _tv\d+\.re - _tv\d+ \* _tv\d+\.im;/g)
-    ).toHaveLength(2);
+    ).toHaveLength(1);
     const r = compile(e, { to: 'javascript' });
     const value = r.run!({ a: 2, b: 3, z: { re: 1, im: -2 } }) as {
       re: number;

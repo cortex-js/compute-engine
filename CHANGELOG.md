@@ -55,6 +55,24 @@
 
 ### Issues Resolved
 
+- **A compiled product of three or more factors with one complex factor no
+  longer runs the real factors through a zero imaginary accumulator.** On the
+  JavaScript target, `3 · x · z` with `x` real and `z` complex compiled to a
+  running pair `(re, im)` that started at `(3, 0)`, multiplied both parts by
+  `x`, then ran the four-multiplication complex step against `z`. For a finite
+  `x` that was wasted work (the Tycho codegen review of CE 0.149.0 reported the
+  shape); for `x = Infinity` it was wrong: `0 * Infinity` is `NaN`, so the
+  product answered `{ re: NaN, im: NaN }` where the two-factor `x · z` answers
+  `{ re: Infinity, im: Infinity }` and the interpreter answers complex
+  infinity. The running product now stays a real number until the first
+  complex factor, which scales its two components by it (two multiplications);
+  only a second complex factor runs the complex step. The factors are still
+  multiplied one at a time in operand order, so the rounding order and the
+  overflow behavior of the chain are unchanged. Canonical order puts literals
+  and symbols before function expressions such as a promoted radical, so this
+  is the shape of every plotted term with real coefficients and one promoted
+  radical; a complex factor in any other position is handled too.
+
 - **`LerchPhi(0, s, a)` with a negative `a` and a non-integer `s` is the
   principal power `a^(−s)`,** as the series terms are (DLMF 25.14.1)
   ([#428](https://github.com/cortex-js/compute-engine/issues/428), contributed
