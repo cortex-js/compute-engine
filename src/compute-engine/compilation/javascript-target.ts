@@ -45,6 +45,7 @@ import {
 } from './in-place-update.js';
 import { resolveStorageHints } from './storage-hints.js';
 import {
+  isAbsentSymbol,
   isExpression,
   isSymbol,
   isNumber,
@@ -83,6 +84,7 @@ import {
   typeContainsMissing,
 } from '../../common/type/utils.js';
 import { couldMatch, isSubtype } from '../../common/type/subtype.js';
+import { isTupleShapedType } from '../collection-utils.js';
 import type { Type, TupleType } from '../../common/type/types.js';
 import { parseType } from '../../common/type/parse.js';
 import {
@@ -3734,6 +3736,29 @@ function isSafeNonNegativeInteger(expr: Expression): boolean {
   return t !== undefined && isSubtype(t, SAFE_NON_NEGATIVE_INTEGER_TYPE);
 }
 
+/** Whether a tuple coordinate is present for sure at run time (never
+ * `undefined`). A written absence symbol is not; a coordinate whose type has
+ * a `missing` arm (an index read that may be out of range) is not. Any other
+ * SYMBOL is: a free plot variable (typed `unknown`) is a numeric parameter of
+ * the compiled function, and `(x, y)` must stay a plain array literal. An
+ * application is present when its type is a number, a boolean, a string or
+ * a collection; one typed `unknown` or `broadcastable<…>` (`s·PointX(p)`
+ * inside a user function body) may evaluate to `undefined`. See the `Tuple`
+ * lowering. */
+function provablyPresentCoordinate(x: Expression): boolean {
+  if (isAbsentSymbol(x)) return false;
+  const t = x.type.type;
+  if (typeContainsMissing(t)) return false;
+  if (isSymbol(x) || isNumber(x) || isString(x)) return true;
+  return (
+    isSubtype(t, 'number') ||
+    isSubtype(t, 'boolean') ||
+    isSubtype(t, 'string') ||
+    isSubtype(t, 'collection<any>') ||
+    isTupleShapedType(t)
+  );
+}
+
 const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   __proto__: null as never,
   // Tolerance-aware equality (see compileJSEquality). Not operators — a raw
@@ -4167,9 +4192,24 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // Matrix wraps List(List(...), ...) — compile the body (first arg) which
   // is the nested List structure; remaining args are delimiters/column spec
   Matrix: (args, compile) => compile(args[0]),
-  // Tuple compiles identically to List
-  Tuple: (args, compile, target) =>
-    `[${args.map((x) => spreadIfSequence(x, compile, target)).join(', ')}]`,
+  // Tuple compiles identically to List, except that a tuple with NO
+  // coordinate that is provably present goes through `_SYS.tupleOrAbsent`,
+  // which answers `undefined` when every coordinate is absent at run time:
+  // the interpreter's `Tuple` evaluate handler answers `Missing` for a tuple
+  // of absent coordinates (`W(L[k], 2)` with `L[k]` out of range). A
+  // coordinate is provably present when its type, less a `missing` arm it
+  // does not have, is a number, a boolean, a string or a collection: inside
+  // a user function body `s·PointX(p)` is typed `broadcastable<number>`
+  // (the parameter may be a list of points), and its compiled value for an
+  // absent `p` IS `undefined`, so the type alone cannot prove presence
+  // there. A point of numeric coordinates, the common case, stays a plain
+  // array literal.
+  Tuple: (args, compile, target) => {
+    const parts = args.map((x) => spreadIfSequence(x, compile, target));
+    if (args.length > 0 && !args.some(provablyPresentCoordinate))
+      return `_SYS.tupleOrAbsent(${parts.join(', ')})`;
+    return `[${parts.join(', ')}]`;
+  },
   // Element count of a compiled collection. Only an indexed collection lowers
   // to a JS array; a dictionary or string operand fails closed.
   Length: (args, compile, target) => {

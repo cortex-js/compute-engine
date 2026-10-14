@@ -397,7 +397,11 @@ it is a point, a collection, or any type that is not provably numeric. An
 absent addend or an absent factor beside a tuple makes the whole point
 absent, because a tuple is atomic — there is no cell for the absence to
 land in, and a tuple of absent coordinates is not a value any consumer
-reads. For example, with `P` declared `list<tuple<number, number, number>>`
+reads — so a tuple whose EVERY coordinate evaluates to an absence marker is
+itself `Missing` (the `Tuple` evaluate handler; a user function that builds
+a point from the coordinates of an absent point answers `Missing`, typed
+`missing | tuple<…>`), while a tuple with one present coordinate stays a
+tuple. For example, with `P` declared `list<tuple<number, number, number>>`
 and holding two points, the out-of-range access `P[0]` is `Missing`, so
 `2 · P[0]` is `Missing` — an absent point scaled is an absent point — and
 `2 · P[0] + (1, 1, 1)` is `Missing` in turn. It was the scalar `NaN`

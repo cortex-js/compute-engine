@@ -3325,6 +3325,14 @@ function stepMultiple(
 
 export const SYS_HELPERS = {
   ...JET_HELPERS,
+  // A tuple whose every coordinate may be absent (`undefined` at run time,
+  // the spelling of `Missing`): the absent value when every coordinate is
+  // absent, the array otherwise — as the interpreter's `Tuple` evaluate
+  // handler answers `Missing` for a tuple of absent coordinates. Emitted
+  // only when the static type of every coordinate admits absence; a tuple
+  // with a coordinate that is never absent is a plain array literal.
+  tupleOrAbsent: (...xs: unknown[]): unknown =>
+    xs.length > 0 && xs.every((x) => x === undefined) ? undefined : xs,
   // The element count of an arithmetic `Range`, shared with the interpreter
   // (`numerics/range-count.ts`), so the compiled length agrees with the
   // interpreter's `count`.

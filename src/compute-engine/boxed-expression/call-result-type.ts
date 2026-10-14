@@ -10,7 +10,9 @@ import { factsOf } from '../../common/type/facts.js';
 import {
   collectionElementType,
   resolveTypeAlias,
+  stripMissingFromType,
 } from '../../common/type/utils.js';
+import { absentMarkerIsNumeric } from './validate.js';
 import { describe, describeType } from './operand-descriptor.js';
 import {
   functionLiteralParameterName,
@@ -321,14 +323,69 @@ export function callResultType(
       const children = expr.ops.map(walk);
       if (children.some((x) => x === undefined)) return undefined;
       const operands = children as OperandDescriptor[];
-      // The descriptor fallback does not model a lambda's elementwise lift.
-      // Do not let its whole-argument result refine the enclosing call. A
-      // function that binds its arguments whole has no such lift, and its
-      // call is typed from its own body (`callResultType`, through `derive`).
-      if (operands.some((x) => mayBroadcast(x.type))) {
-        const callee = userFunctionLiteral(engine, expr.operator);
-        if (callee && !bindsArgumentsWhole(engine, expr.operator, callee))
-          return undefined;
+      // An application over an ABSENT operand (a parameter typed `missing`,
+      // or a value derived as absent) is typed as the evaluation of the body
+      // answers it, not as the operator's type handler types a literal
+      // `Missing` operand. At evaluation, an operator that propagates
+      // absence answers the marker of its codomain read off the type of the
+      // application AS WRITTEN in the body (`absentMarkerIsNumeric`,
+      // `validate.ts`): `NaN` when that type is numeric, `Missing` otherwise.
+      // The written type is fixed by the parameter's declared type: inside
+      // `(p, s) ↦ (s·PointX(p), …)` with `p` inferred `collection<any> |
+      // tuple`, `PointX(p)` is typed `unknown` and its absent value is
+      // `Missing`, where the type handler of `PointX` over a literal
+      // `Missing` says `number` (the top-level `PointX(Missing)` is `NaN`).
+      // The condition is the evaluation's (step 4a of `BoxedFunction.
+      // evaluate`): no operand is a collection (beside one, the absence
+      // lands in each cell through the operator's own kernel); a
+      // broadcastable operator answers for an absent operand anywhere, any
+      // other only for one at a position that strips `missing`
+      // (`Contains(c, Missing)` runs its handler: a search for an absent
+      // value finds nothing). An operator that handles or passes absence
+      // through (a container such as `Tuple`, `IsMissing`, a user function)
+      // is typed by its handler.
+      const absentAt = (i: number) =>
+        resolveTypeAlias(operands[i].type) === 'missing';
+      const absentOperand = operands.some((_, i) => absentAt(i));
+      // A tuple whose every coordinate is absent evaluates to `Missing`
+      // (the `Tuple` evaluate handler, `library/collections.ts`). Its type
+      // handler says so too, but the application boundary widens an absent
+      // answer to `missing | tuple` (`withCodomainForAbsentAnswer`), which
+      // would absorb the present arm's `tuple<number, …>` in the join; the
+      // exact `missing` is read here.
+      if (
+        absentOperand &&
+        expr.operator === 'Tuple' &&
+        operands.every((_, i) => absentAt(i))
+      ) {
+        const result = describeType('missing');
+        memo.set(expr, result);
+        return result;
+      }
+      if (absentOperand && !operands.some((x) => mayBroadcast(x.type))) {
+        const def = expr.operatorDefinition as
+          | {
+              resolvedMissingBehavior: string;
+              broadcastable: boolean;
+              signature: { type: Type };
+              stripsMissingAt?: (i: number) => boolean;
+            }
+          | undefined;
+        if (
+          def?.resolvedMissingBehavior === 'propagate' &&
+          (def.broadcastable ||
+            operands.some(
+              (_, i) => absentAt(i) && def.stripsMissingAt?.(i) === true
+            ))
+        ) {
+          const result = describeType(
+            absentMarkerIsNumeric(expr.type.type, def.signature.type)
+              ? 'number'
+              : 'missing'
+          );
+          memo.set(expr, result);
+          return result;
+        }
       }
       const t = derive(expr.operator, operands);
       const result = t === undefined ? undefined : describeType(t);
@@ -336,24 +393,41 @@ export function callResultType(
       return result;
     };
     let result = walk(literal.op1)?.type;
-    if (result !== undefined && present.some((t, i) => t !== args[i].type)) {
-      // The absent arm: every argument with a `missing` arm is absent at
-      // once, and the body is typed under that. (Absent in one and present
-      // in another is covered by the join of the two arms for a body that
-      // reads each parameter on its own; a body that combines two such
-      // parameters is rare, and the declared result still bounds the join.)
+    // The absent arms: for every combination of the arguments that may be
+    // absent (each one present or absent on its own), the body is typed with
+    // those parameters typed `missing`, and the results are joined with the
+    // present arm. With `(p, q) ↦ (p, q)` over two index reads, one absent
+    // and one present gives a tuple with one absent coordinate, which neither
+    // the all-present nor the all-absent arm contains. More than three such
+    // arguments (eight combinations) is declined: the call keeps the declared
+    // result.
+    const gated = present
+      .map((t, i) => (t !== args[i].type ? i : -1))
+      .filter((i) => i >= 0);
+    if (result !== undefined && gated.length > 3) result = undefined;
+    for (
+      let mask = 1;
+      result !== undefined && mask < 1 << gated.length;
+      mask++
+    ) {
+      const absentAt = new Set(gated.filter((_, j) => (mask >> j) & 1));
       env = new Map(
         names.map((name, i) => [
           name,
-          describeType(present[i] === args[i].type ? present[i] : 'missing'),
+          describeType(absentAt.has(i) ? 'missing' : present[i]),
         ])
       );
       memo.clear();
-      const absent = walk(literal.op1)?.type;
-      result = absent === undefined ? undefined : widen(result, absent);
+      const arm = walk(literal.op1)?.type;
+      result = arm === undefined ? undefined : widen(result, arm);
     }
+    // The declared result bounds the PRESENT values; a `missing` arm the
+    // absent arm added is outside it by nature (`missing` is a subtype of no
+    // values-only type), so the bound is checked with that arm stripped.
     const refined =
-      result === undefined || result === 'never' || !isSubtype(result, declared)
+      result === undefined ||
+      result === 'never' ||
+      !isSubtype(stripMissingFromType(result), declared)
         ? undefined
         : result;
     // Repeated calls with literal argument types must not retain an unbounded

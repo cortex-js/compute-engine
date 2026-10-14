@@ -1010,23 +1010,42 @@ export function absentScalarMarker(
   expression: Expression | undefined
 ): Expression {
   if (expression === undefined) return ce.NaN;
-  const t = stripMissingFromType(expression.type.type);
-  // An application typed `missing` alone (`Sort(Missing)`), or `never` (a
-  // numeric operator over a symbol assigned `Missing`, which types `never`),
-  // strips to `never`, a subtype of everything, so the type says nothing
-  // about the codomain: it is read off the operator's declared result
-  // instead, `NaN` for a numeric one and `Missing` otherwise.
+  return absentMarkerIsNumeric(
+    expression.type.type,
+    expression.operatorDefinition?.signature.type
+  )
+    ? ce.NaN
+    : ce.Missing;
+}
+
+/**
+ * The decision behind {@link absentScalarMarker}: whether the marker an
+ * application answers for an absent operand is the numeric `NaN` (true) or
+ * the position-preserving `Missing` (false). `applicationType` is the type
+ * of the application as written, `signature` the operator's signature. The
+ * user-function call typing (`callResultType`, `call-result-type.ts`) makes
+ * the same decision for a body typed under an absent parameter, so the two
+ * cannot diverge.
+ *
+ * An application typed `missing` alone (`Sort(Missing)`), or `never` (a
+ * numeric operator over a symbol assigned `Missing`, which types `never`),
+ * strips to `never`, a subtype of everything, so the type says nothing
+ * about the codomain: it is read off the operator's declared result
+ * instead, `NaN` for a numeric one and `Missing` otherwise.
+ */
+export function absentMarkerIsNumeric(
+  applicationType: Type,
+  signature: Type | undefined
+): boolean {
+  const t = stripMissingFromType(applicationType);
   if (t === 'never') {
-    const sig = expression.operatorDefinition?.signature.type;
     const declared =
-      sig === undefined
+      signature === undefined
         ? undefined
-        : functionResult(readTypeVariablesAsBounds(sig));
-    return declared !== undefined && isSubtype(declared, 'number')
-      ? ce.NaN
-      : ce.Missing;
+        : functionResult(readTypeVariablesAsBounds(signature));
+    return declared !== undefined && isSubtype(declared, 'number');
   }
-  return isSubtype(t, 'number') ? ce.NaN : ce.Missing;
+  return isSubtype(t, 'number');
 }
 
 /**

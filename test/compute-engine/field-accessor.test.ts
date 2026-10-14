@@ -167,13 +167,16 @@ const p = pt(1, 2)`
 
   test('an absent base propagates the marker through a chain (At parity)', () => {
     const ce = new ComputeEngine();
+    // The two results are held side by side in a LIST: a tuple whose every
+    // coordinate is absent is itself the absent value, `Missing` (user
+    // decision 2026-10-14), so a tuple would hide which chain answered.
     const r = executeEpsil(
       ce,
       `const d = {a -> {b -> 1}}
-(d.zz.x, d["zz"]["x"])`
+[d.zz.x, d["zz"]["x"]]`
     );
     expect(r.diagnostics ?? []).toEqual([]);
-    expect(r.value!.toString()).toBe('("Missing", "Missing")');
+    expect(r.value!.toString()).toBe('["Missing","Missing"]');
   });
 });
 

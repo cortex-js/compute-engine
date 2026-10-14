@@ -56,6 +56,7 @@ import {
   TRIG_POLE_EPSILON,
 } from '../numerics/numeric.js';
 import {
+  isAbsentSymbol,
   isFunction,
   isNumber,
   isString,
@@ -4610,7 +4611,19 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   // comma: `(True)` is a parenthesized SCALAR, not a 1-tuple, so `len(...)`
   // raises and `_ce_eqcoll` would see a scalar where the interpreter has a
   // point. `()` is already the empty tuple.
+  //
+  // A tuple whose EVERY coordinate may be absent is refused: the interpreter
+  // answers `Missing` for a tuple of absent coordinates, and this target
+  // spells an absence as `math.nan`, which is also a legitimate numeric
+  // coordinate, so the collapse cannot be decided at run time.
   Tuple: (args, compile) => {
+    if (
+      args.length > 0 &&
+      args.every((x) => isAbsentSymbol(x) || typeContainsMissing(x.type.type))
+    )
+      throw new Error(
+        'Could not compile `Tuple`: every coordinate may be absent, and the Python target cannot tell an absent coordinate from a NaN one'
+      );
     const parts = args.map((x) => compile(x));
     if (parts.length === 1) return `(${parts[0]},)`;
     return `(${parts.join(', ')})`;

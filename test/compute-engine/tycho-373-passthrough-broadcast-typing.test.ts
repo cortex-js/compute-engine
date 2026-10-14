@@ -390,14 +390,17 @@ describe('Tycho 373 — a pass-through parameter under list broadcast', () => {
     );
   });
 
-  // Tycho ledger row 374: the index read `L[k]` of a declared point list is
-  // typed `missing | tuple<number, number, number>` (the index may be out of
-  // range). The call typing stopped at that union and fell back to the
-  // declared signature result, with `broadcastable` components, while
-  // `PointX(L[k])` already typed `number`. The body is now typed under the
-  // present part of the argument, as for a plain `Missing` argument
-  // (`presentPart`, `call-result-type.ts`).
-  test('row 374: an argument typed `missing | tuple` types the body under the tuple', () => {
+  // A function literal whose body hands a tuple built from its own open
+  // parameter to a scalar parameter: `g := a ↦ f((a, a))`. When `g` is
+  // defined, `a` is open and `(a, a)` is typed `tuple<unknown, unknown>`,
+  // not yet a numeric tuple, and the inferred result of `g` was the
+  // signature result of `f`, `tuple<number, number>`, which every call of
+  // `g` inherited, while `g(1)` evaluates to a pair of pairs. A tuple whose
+  // components are numbers or open is now read as a numeric tuple there
+  // (`mayBeNumericTupleType`, `derive-application-type.ts`), and the result
+  // is `any`. Both definition routes: a bare `function` declaration (a value
+  // definition) and an undeclared assignment (an operator definition).
+  test('row 374: an argument typed `missing | tuple` is typed from the body, present and absent', () => {
     const ce = new ComputeEngine();
     ce.declare('L', 'list<tuple<number, number, number>>');
     ce.declare('k', 'integer');
@@ -414,60 +417,122 @@ describe('Tycho 373 — a pass-through parameter under list broadcast', () => {
       'number'
     );
     expect(ce.parse('W(L[k], 2)').type.toString()).toBe(
-      'tuple<number, number, number>'
+      'missing | tuple<number, number, number>'
     );
-    // A plain absent argument reads the same way, and the two literal-shaped
-    // readings of row 373 are unchanged.
-    expect(ce.box(['W', 'Missing', 2]).type.toString()).toBe(
-      'tuple<number, number, number>'
-    );
+    // A plain absent argument is the absent arm alone, and the two
+    // literal-shaped readings of row 373 are unchanged.
+    expect(ce.box(['W', 'Missing', 2]).type.toString()).toBe('missing');
     expect(ce.parse('W((1,2,3), 2)').type.toString()).toBe(
       'tuple<integer | nan, integer | nan, integer | nan>'
     );
     expect(ce.parse('W(L, 2)').type.toString()).toBe(
       'tuple<list<number>, list<number>, list<number>>'
     );
-    // An in-range index gives the scaled point. An out-of-range one gives a
-    // tuple of three `Missing` coordinates: inside the body `PointX(p)` is
-    // typed `unknown` (the parameter is inferred `collection<any> | tuple`),
-    // and an absence in a codomain that is not provably numeric keeps
-    // `Missing` (`absent-point-arithmetic.test.ts`). The static type
-    // `tuple<number, number, number>` does not contain that value; the
-    // disagreement is older than the derivation (the declared result of `W`
-    // and the plain `W(Missing, 2)` read the same type) and is an open
-    // ROADMAP entry ("A user function applied to an absent point gives a
-    // tuple of absent coordinates").
+    // An in-range index gives the scaled point. An out-of-range one gives
+    // `Missing`: inside the body `PointX(p)` is typed `unknown` (the
+    // parameter is inferred `collection<any> | tuple`), so each coordinate
+    // keeps the `Missing` marker, and a tuple whose every coordinate is
+    // absent is the absent value (the `Tuple` evaluate handler; user
+    // decision 2026-10-14). The value is in the type.
     ce.assign('L', ce.parse('[(1,2,3),(4,5,6)]'));
     ce.assign('k', 1);
     expect(ce.parse('W(L[k], 2)').evaluate().toString()).toBe('(2, 4, 6)');
     ce.assign('k', 5);
-    expect(ce.parse('W(L[k], 2)').evaluate().toString()).toBe(
-      '("Missing", "Missing", "Missing")'
+    const absent = ce.parse('W(L[k], 2)').evaluate();
+    expect(absent.toString()).toBe('"Missing"');
+    expect(isSubtype(absent.type.type, ce.parse('W(L[k], 2)').type.type)).toBe(
+      true
     );
+    expect(ce.box(['W', 'Missing', 2]).evaluate().toString()).toBe('"Missing"');
   });
 
-  test('row 374: a body that passes the argument through is not typed as always present', () => {
+  test('row 374: a body that passes the argument through keeps the absent case', () => {
     const ce = new ComputeEngine();
     ce.declare('L', 'list<tuple<number, number, number>>');
     ce.declare('k', 'integer');
     ce.assign('f', ce.parse('p \\mapsto p'));
     ce.assign('g', ce.parse('(p, s) \\mapsto (p, s)'));
+    ce.assign('V', ce.parse('(p) \\mapsto (\\operatorname{PointX}(p), 1)'));
     ce.assign('L', ce.parse('[(1,2,3),(4,5,6)]'));
     ce.assign('k', 5);
-    // The derivation joins the present arm with the absent arm: `missing |
-    // tuple<…>` for `f`, `tuple<missing, integer> | tuple<tuple<…>,
-    // integer>` for `g`. Neither fits the declared result (`unknown`, a
-    // values-only type with no absence marker), so the call keeps the
-    // declared result, as before the derivation read a `missing | T`
-    // argument at all. A first version typed the body under the present
-    // part alone and read `f(L[k])` as a point.
-    expect(ce.parse('f(L[k])').type.toString()).toBe('unknown');
-    expect(ce.parse('f(L[k])').type.toString()).not.toContain('tuple');
-    expect(ce.parse('g(L[k], 2)').type.toString()).toBe(
-      'tuple<unknown, unknown>'
+    // The derivation joins the present arm with the absent arm. A first
+    // version typed the body under the present part alone and read
+    // `f(L[k])` as a point. A tuple with one present coordinate stays a
+    // tuple, so `g` and `V` carry the absent coordinate in a tuple arm.
+    expect(ce.parse('f(L[k])').type.toString()).toBe(
+      'missing | tuple<number, number, number>'
     );
+    expect(ce.parse('g(L[k], 2)').type.toString()).toBe(
+      'tuple<missing, integer> | tuple<tuple<number, number, number>, integer>'
+    );
+    expect(ce.parse('V(L[k])').type.toString()).toBe(
+      'tuple<missing, integer> | tuple<number, integer>'
+    );
+    for (const call of ['f(L[k])', 'g(L[k], 2)', 'V(L[k])']) {
+      const e = ce.parse(call);
+      const v = e.evaluate();
+      expect(isSubtype(v.type.type, e.type.type)).toBe(true);
+    }
     expect(ce.parse('f(L[k])').evaluate().toString()).toBe('"Missing"');
     expect(ce.parse('g(L[k], 2)').evaluate().toString()).toBe('("Missing", 2)');
+    expect(ce.parse('V(L[k])').evaluate().toString()).toBe('("Missing", 1)');
+  });
+
+  test('row 374: two arguments that may be absent derive every presence combination', () => {
+    const ce = new ComputeEngine();
+    ce.declare('L', 'list<tuple<number, number, number>>');
+    ce.declare('k', 'integer');
+    ce.declare('j', 'integer');
+    ce.assign('F', ce.parse('(p, q) \\mapsto (p, q)'));
+    const e = ce.parse('F(L[k], L[j])');
+    expect(e.type.toString()).toBe(
+      'missing | tuple<missing, tuple<number, number, number>> | tuple<tuple<number, number, number>, missing> | tuple<tuple<number, number, number>, tuple<number, number, number>>'
+    );
+    ce.assign('L', ce.parse('[(1,2,3),(4,5,6)]'));
+    for (const [k, j] of [
+      [5, 2],
+      [2, 5],
+      [5, 7],
+      [1, 2],
+    ]) {
+      ce.assign('k', k);
+      ce.assign('j', j);
+      const v = ce.parse('F(L[k], L[j])').evaluate();
+      expect(isSubtype(v.type.type, e.type.type)).toBe(true);
+    }
+  });
+
+  test('row 374: the absent arm runs the handler at a position that keeps absence', () => {
+    // `Contains(c, Missing)` is `False` (a search for an absent value finds
+    // nothing): the operator keeps the absent operand at its needle
+    // position, so the derivation types the body by the handler, not by the
+    // absence marker.
+    const ce = new ComputeEngine();
+    ce.assign(
+      'V',
+      ce.box(['Function', ['Tuple', ['Contains', { str: 'abc' }, 'p'], 1], 'p'])
+    );
+    const e = ce.box(['V', 'Missing']);
+    expect(e.type.toString()).toBe('tuple<boolean, integer>');
+    const v = e.evaluate();
+    expect(v.toString()).toBe('("False", 1)');
+    expect(isSubtype(v.type.type, e.type.type)).toBe(true);
+  });
+
+  test('row 374: an absent point keeps the point rule outside a body', () => {
+    const ce = new ComputeEngine();
+    ce.declare('L', 'list<tuple<number, number, number>>');
+    ce.declare('k', 'integer');
+    ce.assign('L', ce.parse('[(1,2,3),(4,5,6)]'));
+    ce.assign('k', 5);
+    // The written type of these applications is a point: an absent point
+    // scaled or negated is an absent point (`docs/ERROR-MODEL.md`), not
+    // `NaN`.
+    expect(ce.parse('-L[k]').evaluate().toString()).toBe('"Missing"');
+    expect(ce.parse('2 L[k]').evaluate().toString()).toBe('"Missing"');
+    expect(ce.parse('2 L[k] + (1,1,1)').evaluate().toString()).toBe(
+      '"Missing"'
+    );
   });
 
   test('an untyped (undeclared) argument still reads unknown: no promise is made', () => {

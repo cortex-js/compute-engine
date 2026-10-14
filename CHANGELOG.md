@@ -2,6 +2,31 @@
 
 ### Behavior Changes
 
+- **A tuple whose every coordinate is absent evaluates to `Missing`.**
+  `("Missing", "Missing")` evaluated to itself; it is now `Missing`, the
+  absent value: a tuple is atomic, and a tuple of absent coordinates is not a
+  value any consumer reads (the rule `docs/ERROR-MODEL.md` already applied to
+  `Missing · (1, 1, 1)`). The case arises when a user function builds a point
+  from the coordinates of an absent point: with
+  `W = (p, s) ↦ (s·PointX(p), s·PointY(p), s·PointZ(p))` and `L` a list of
+  two points, `W(L[5], 2)` is `Missing` (it was a tuple of three `Missing`
+  coordinates), and its type reads `missing | tuple<number, number, number>`.
+  A tuple with one present coordinate is unchanged (`(Missing, 1)` stays a
+  tuple, typed `tuple<missing, integer>`), and so is the empty tuple. A tuple
+  whose every coordinate MAY be absent is typed `missing | tuple<…>`
+  (`(L[k], L[j])` over two index reads). A destructuring parameter
+  (`((a, b)) ↦ …`) binds each leaf to `Missing` when the value is absent, so
+  a pair of optional values destructures the same way when both are absent.
+  The JavaScript target builds such a tuple through `_SYS.tupleOrAbsent`,
+  which answers `undefined` when every coordinate is absent at run time (a
+  point of numeric coordinates stays a plain array literal); the Python
+  target, which spells an absence as `nan`, refuses a tuple whose every
+  coordinate is typed as possibly absent. One divergence remains and is on
+  the ROADMAP: the compiled point accessor spells the coordinate of an absent
+  point as `NaN`, so the compiled `W(L[5], 2)` is `[NaN, NaN, NaN]` where the
+  interpreter answers `Missing` (before this change the two already differed,
+  `[NaN, NaN, NaN]` against a tuple of three `Missing`).
+
 - **`LerchPhi(0, s, a)` with a negative `a` and a non-integer `s` gives a
   complex value where it gave a real one.** `LerchPhi(0, 2.976, -2.664).N()` is
   `-0.053998 - 0.004079i` (it was `0.05415`), and the exact
@@ -68,8 +93,18 @@
   of a `missing | T` argument and once more with the parameter typed
   `missing`, and joins the two results, so a body that passes its parameter
   through (`p ↦ p`) is not typed as if the argument were always present.
-  `W(L[k], 2)` is typed `tuple<number, number, number>`. `W((1,2,3), 2)` and
-  `W(L, 2)` are unchanged.
+  `W(L[k], 2)` is typed `missing | tuple<number, number, number>`: the
+  present arm from the tuple, the absent arm from the body evaluated with an
+  absent point, which gives `Missing` (see the behavior change above). The
+  absent arm follows the evaluation's own rule: an operator that propagates
+  absence answers `NaN` when its application, as written in the body, is
+  numeric, and `Missing` otherwise, so `p ↦ p` and `(p, s) ↦ (p, s)` keep
+  their absent case (`missing | tuple<…>`, `tuple<missing, integer> | …`);
+  an operator that keeps the absent operand at a position (`Contains(c,
+  Missing)` is `False`) is typed by its handler. Up to three arguments that
+  may be absent are derived in every presence combination (`(p, q) ↦ (p, q)`
+  over two index reads carries the one-absent arms); beyond three the call
+  keeps its declared result. `W((1,2,3), 2)` and `W(L, 2)` are unchanged.
 
 - **A compiled product of three or more factors with one complex factor no
   longer runs the real factors through a zero imaginary accumulator.** On the

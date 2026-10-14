@@ -1,4 +1,5 @@
 import { ComputeEngine, compile } from '../../src/compute-engine';
+import { isSubtype } from '../../src/common/type/subtype';
 
 /**
  * An absent POINT stays absent through arithmetic.
@@ -139,6 +140,122 @@ describe('an absent operand beside a point', () => {
     expect(
       ce.box(['Multiply', 'Missing', ['Tuple', 1, 1, 1]]).evaluate().symbol
     ).toBe('Missing');
+  });
+});
+
+describe('a tuple whose every coordinate is absent', () => {
+  // A tuple is atomic, and a tuple of absent coordinates is not a value any
+  // consumer reads: it evaluates to `Missing` (user decision 2026-10-14,
+  // Tycho ledger row 374). A tuple with one present coordinate is a value
+  // (the absent coordinate is positioned), and the empty tuple is not absent.
+  test('evaluates to `Missing`', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(['Tuple', 'Missing', 'Missing']).evaluate().symbol).toBe(
+      'Missing'
+    );
+    expect(ce.box(['Tuple', 'Undefined', 'Missing']).evaluate().symbol).toBe(
+      'Missing'
+    );
+    expect(ce.box(['Tuple', 'Missing']).evaluate().symbol).toBe('Missing');
+  });
+
+  test('is typed `missing` (widened to `missing | tuple` at the boundary)', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(['Tuple', 'Missing', 'Missing']).type.toString()).toBe(
+      'missing | tuple'
+    );
+  });
+
+  test('a tuple with one present coordinate, and the empty tuple, are values', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(['Tuple', 'Missing', 1]).evaluate().toString()).toBe(
+      '("Missing", 1)'
+    );
+    expect(ce.box(['Tuple', 'Missing', 1]).type.toString()).toBe(
+      'tuple<missing, integer>'
+    );
+    expect(ce.box(['Tuple']).evaluate().toString()).toBe('()');
+  });
+
+  test('a tuple of two index reads: both absent is `Missing`, one absent is a tuple', () => {
+    const ce = engineWithPointList();
+    ce.declare('k', 'integer');
+    ce.declare('j', 'integer');
+    const e = ce.parse('(P[k], P[j])');
+    expect(e.type.toString()).toBe(
+      'missing | tuple<missing | tuple<number, number, number>, missing | tuple<number, number, number>>'
+    );
+    ce.assign('k', 0);
+    ce.assign('j', 7);
+    const both = ce.parse('(P[k], P[j])').evaluate();
+    expect(both.symbol).toBe('Missing');
+    expect(isSubtype(both.type.type, e.type.type)).toBe(true);
+    ce.assign('j', 2);
+    const one = ce.parse('(P[k], P[j])').evaluate();
+    expect(one.toString()).toBe('("Missing", (4, 5, 6))');
+    expect(isSubtype(one.type.type, e.type.type)).toBe(true);
+  });
+
+  test('a destructuring parameter binds each leaf to `Missing`', () => {
+    const ce = engineWithPointList();
+    const f = ['Function', ['IsMissing', 'a'], ['Tuple', 'a', 'b']];
+    expect(
+      ce.box(['Apply', f, ['Tuple', 'Missing', 'Missing']]).evaluate().symbol
+    ).toBe('True');
+    expect(
+      ce.box(['Apply', f, ['Tuple', ['At', 'P', 0], ['At', 'P', 7]]]).evaluate()
+        .symbol
+    ).toBe('True');
+    expect(
+      ce.box(['Apply', f, ['Tuple', 'Missing', 1]]).evaluate().symbol
+    ).toBe('True');
+    const g = ['Function', ['IsMissing', 'b'], ['Tuple', 'a', 'b']];
+    expect(
+      ce.box(['Apply', g, ['Tuple', 'Missing', 1]]).evaluate().symbol
+    ).toBe('False');
+  });
+
+  test('compiled to JavaScript: a tuple with no provably present coordinate collapses', () => {
+    const ce = engineWithPointList();
+    ce.declare('k', 'integer');
+    const both = compile(
+      ce.box(['Tuple', ['At', 'P', 'k'], ['At', 'P', 'k']]),
+      {
+        to: 'javascript',
+        fallback: false,
+      } as never
+    );
+    expect(both.success).toBe(true);
+    expect(String(both.code)).toContain('_SYS.tupleOrAbsent(');
+    expect(both.run!({ P: [[1, 2, 3]], k: 5 } as never)).toBeUndefined();
+    expect(both.run!({ P: [[1, 2, 3]], k: 1 } as never)).toEqual([
+      [1, 2, 3],
+      [1, 2, 3],
+    ]);
+    // A coordinate that is provably present keeps the plain array literal.
+    const one = compile(ce.box(['Tuple', ['At', 'P', 'k'], 1]), {
+      to: 'javascript',
+      fallback: false,
+    } as never);
+    expect(String(one.code)).not.toContain('tupleOrAbsent');
+    expect(one.run!({ P: [[1, 2, 3]], k: 5 } as never)).toEqual([undefined, 1]);
+    const point = compile(ce.parse('(x^2, 2x)'), {
+      to: 'javascript',
+      fallback: false,
+    } as never);
+    expect(String(point.code)).not.toContain('tupleOrAbsent');
+  });
+
+  test('a user function that builds a point from an absent point gives `Missing`', () => {
+    const ce = engineWithPointList();
+    ce.assign(
+      'W',
+      ce.parse(
+        '(p, s) \\mapsto (s\\cdot\\operatorname{PointX}(p), s\\cdot\\operatorname{PointY}(p), s\\cdot\\operatorname{PointZ}(p))'
+      )
+    );
+    expect(ce.parse('W(P[0], 2)').evaluate().symbol).toBe('Missing');
+    expect(ce.parse('W(P[1], 2)').evaluate().toString()).toBe('(2, 4, 6)');
   });
 });
 

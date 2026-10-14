@@ -1,6 +1,6 @@
 import type { Expression } from '../global-types.js';
 import { parseType } from '../../common/type/parse.js';
-import { isFunction, sym } from './type-guards.js';
+import { isAbsentSymbol, isFunction, sym } from './type-guards.js';
 
 /**
  * Every name a destructuring `Tuple` pattern binds, in pattern order: the
@@ -51,6 +51,25 @@ export function collectTuplePattern(
   const ce = pattern.engine;
   if (!isFunction(pattern, 'Tuple'))
     return ce.typeError('tuple', pattern.type, pattern.toString());
+  // An absent value binds each leaf of the pattern to `Missing`: a tuple
+  // whose every coordinate is absent evaluates to `Missing` (the `Tuple`
+  // evaluate handler), so a pair of optional values arrives as the absent
+  // value exactly when both are absent, and `((a, b)) ↦ IsMissing(a)` must
+  // read it as it reads `(Missing, Missing)`.
+  if (isAbsentSymbol(v)) {
+    for (const p of pattern.ops) {
+      if (isFunction(p, 'Tuple')) {
+        const err = collectTuplePattern(p, v, out);
+        if (err) return err;
+        continue;
+      }
+      const name = sym(p);
+      if (!name) return ce.typeError('symbol', p.type, p.toString());
+      if (name === '_') continue;
+      out.push([name, ce.Missing]);
+    }
+    return null;
+  }
   if (!isFunction(v, 'Tuple'))
     return ce.typeError('tuple', v.type, v.toString());
   if (v.nops !== pattern.nops)

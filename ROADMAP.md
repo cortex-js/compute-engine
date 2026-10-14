@@ -109,40 +109,24 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
-### A user function applied to an absent point gives a tuple of absent coordinates, which its type does not contain (OPEN, design decision — found 2026-10-14 by the review of the Tycho row 374 call typing)
+### The compiled body of a user function spells the coordinate of an absent point as `NaN`, where the interpreter keeps `Missing` (OPEN, small — found 2026-10-14 by the review of the Tycho row 374 tuple collapse)
 
-With `L` declared `list<tuple<number, number, number>>`, `k` declared
-`integer`, and `W = (p, s) ↦ (s·PointX(p), s·PointY(p), s·PointZ(p))`, the
-call `W(L[k], 2)` is typed `tuple<number, number, number>` (both the present
-arm and the absent arm of the derivation read that; the declared result of
-`W` and the plain `W(Missing, 2)` read the same), but for an out-of-range `k`
-it evaluates to `("Missing", "Missing", "Missing")`: inside the body
-`PointX(p)` is typed `unknown` (the parameter is inferred
-`collection<any> | tuple`, so the accessor may read a list of points), and an
-absence in a codomain that is not provably numeric keeps `Missing`
-(`absent-point-arithmetic.test.ts`, user ruling 2026-09-25). At the top level
-`2·PointX(Missing)` is `NaN`. `docs/ERROR-MODEL.md` §3 says a tuple of absent
-coordinates is not a value any consumer reads, and `Multiply(Missing, (1, 1,
-1))` already collapses to `Missing` on that ground. Three answers, each with a
-cost:
-
-- collapse a tuple whose every coordinate is an absence marker to `Missing`
-  at the function application (or in the `Tuple` constructor): the type is
-  then `missing | tuple<number, number, number>`, which the graphing consumer
-  reads as "one point or a hole"; but `(Missing, 1)` must stay a tuple (an
-  absent-but-positioned coordinate is a documented value);
-- read the absence marker off the application re-typed over its evaluated
-  operands when the written type says nothing (`unknown`, `any`,
-  `broadcastable<…>`): the coordinates become `NaN` and the type holds, but a
-  product over a `-> unknown` function result then reads `NaN` where the
-  2026-09-25 ruling keeps `Missing` (the result may be a point) — tried and
-  reverted 2026-10-14, the pinned test fails;
-- type the component as `missing | number` in the absent arm (mirror the
-  evaluation rule in the derivation): sound, but the join no longer fits the
-  declared result and the call falls back to it, which reopens Tycho row 374.
-
-Until the user rules, the type reads `tuple<number, number, number>` and the
-row 374 test records the value.
+With `W = (p, s) ↦ (s·PointX(p), s·PointY(p), s·PointZ(p))` and `L` a list of
+two points, the interpreter answers `Missing` for `W(L[5], 2)`: inside the
+body `PointX(p)` is not provably numeric (the parameter is inferred
+`collection<any> | tuple`), so each coordinate keeps the `Missing` marker, and
+a tuple of absent coordinates is the absent value. The JavaScript target
+compiles the same accessor as `undefined[idx]` guarded to `NaN` (the
+top-level reading, `PointX(Missing)` is `NaN`), so the compiled call answers
+`[NaN, NaN, NaN]`; `_SYS.tupleOrAbsent` collapses only coordinates that are
+`undefined` at run time. The two lanes already differed before the collapse
+(`[NaN, NaN, NaN]` against a tuple of three `Missing`). Closing it means one
+of: the compiled accessor keeps `undefined` for an absent point when its
+written type is not provably numeric (then `tupleOrAbsent` collapses the
+tuple), or the interpreter's body route normalizes to `NaN` as the top level
+does (tried 2026-10-14 and reverted: a product over a `-> unknown` result must
+keep `Missing`, `absent-point-arithmetic.test.ts`). A plot consumer drops a
+`NaN` point and a hole alike, so no consumer reading is known to differ.
 
 ### Compiled `LerchPhi` and `HurwitzZeta` answer `NaN` for a complex value (OPEN, small — found 2026-10-13 by issue #428)
 

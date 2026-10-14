@@ -3279,6 +3279,23 @@ function tupleComponentType(t: Type, position: number): Type | undefined {
   return undefined;
 }
 
+/** Whether a tuple coordinate is absent for sure: typed `missing`, or the
+ * written absence symbol `Missing` or `Undefined` (typed `unknown`). */
+function absentCoordinateD(op: OperandDescriptor): boolean {
+  if (resolveTypeAlias(op.type) === 'missing') return true;
+  const s = op.structureOf?.();
+  return (
+    s?.kind === 'symbol' && (s.name === 'Missing' || s.name === 'Undefined')
+  );
+}
+
+/** Whether a tuple coordinate may be absent: absent for sure, or typed with
+ * a `missing` arm (`missing | tuple<…>`, an index read that may be out of
+ * range). */
+function mayBeAbsentCoordinateD(op: OperandDescriptor): boolean {
+  return absentCoordinateD(op) || typeContainsMissing(op.type);
+}
+
 /** Descriptor twin of {@link pointComponentType}. */
 function pointComponentTypeD(xs: OperandDescriptor, position: number): Type {
   const t = xs.type;
@@ -6159,8 +6176,26 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     invokes: false,
     complexity: 8200,
     signature: '(any*) -> tuple',
-    type: (ops, context) =>
-      BoxedType.forResult(tupleTypeOfD(ops), context.engine._typeResolver),
+    // A tuple whose EVERY coordinate is absent is the absent value: the
+    // evaluate handler below answers `Missing` for it, so its type is
+    // `missing` when every coordinate is typed `missing` (or is a written
+    // absence symbol), and `missing | tuple<…>` when every coordinate MAY be
+    // absent (`(L[k], L[j])` over two index reads: both out of range is
+    // `Missing`, one is a tuple with an absent coordinate). A tuple with a
+    // coordinate that is never absent is a tuple (`(Missing, 1)` is a value,
+    // the absent coordinate is positioned).
+    type: (ops, context) => {
+      const resolver = context.engine._typeResolver;
+      if (ops.length > 0 && ops.every(absentCoordinateD))
+        return BoxedType.forResult('missing', resolver);
+      const t = tupleTypeOfD(ops);
+      if (ops.length > 0 && ops.every(mayBeAbsentCoordinateD))
+        return BoxedType.forResult(
+          { kind: 'union', types: ['missing', t] },
+          resolver
+        );
+      return BoxedType.forResult(t, resolver);
+    },
     // Run the framework's default flatten step, which a custom `canonical`
     // handler would otherwise short-circuit. It does two things here, and
     // both change the ARITY (and therefore the type) of the tuple:
@@ -6190,7 +6225,22 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // evaluated, because `Tuple` is not `lazy`. When no operand is listed,
     // the handler declines and the tuple is built from its evaluated
     // operands.
+    //
+    // A tuple whose every coordinate evaluates to an absence marker
+    // (`Missing`, `Undefined`) is the absent value, `Missing`: a tuple is
+    // atomic, and a tuple of absent coordinates is not a value any consumer
+    // reads (`docs/ERROR-MODEL.md` §3; the product `Missing · (1, 1, 1)`
+    // collapses on the same ground). The case arises when a user function
+    // builds a point from the coordinates of an absent point: with `W = (p,
+    // s) ↦ (s·PointX(p), s·PointY(p), s·PointZ(p))` and `L[k]` out of range,
+    // each coordinate is `Missing` (inside the body the accessor is not
+    // provably numeric, so the absence keeps its marker), and `W(L[k], 2)`
+    // is `Missing`, as its type `missing | tuple<number, number, number>`
+    // says (user decision 2026-10-14, Tycho ledger row 374). A tuple with
+    // one present coordinate is a value: `(Missing, 1)` stays a tuple. The
+    // empty tuple is not absent.
     evaluate: (ops, { engine, numericApproximation }) => {
+      if (ops.length > 0 && ops.every(isAbsentSymbol)) return engine.Missing;
       const listed = listedLiteralElements(
         engine,
         ops,
