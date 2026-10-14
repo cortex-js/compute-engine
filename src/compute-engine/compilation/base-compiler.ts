@@ -243,6 +243,10 @@ import { rangeCount, RANGE_COUNT_JS_SOURCE } from '../numerics/range-count.js';
 import { isBeyondSafeInteger } from '../numerics/numeric.js';
 import { smallCount } from '../boxed-expression/collection-count.js';
 
+import {
+  COMPLEX_CONTINUATION_HEADS,
+  complexContinuation,
+} from './complex-continuation.js';
 /** `real<0..>`: every real number that is not negative. */
 const NON_NEGATIVE_REAL_TYPE = nonNegativeRangeType('real');
 
@@ -4921,6 +4925,55 @@ export class BaseCompiler {
     )
       BaseCompiler.notePromoted();
     return true;
+  }
+
+  /**
+   * Whether `head(...args)` takes the complex lane on account of its VALUE:
+   * the operands are real but the interpreter's kernel continues the head
+   * into the complex plane (`LerchPhi(z, s, a)` for `z > 1`), and the facts
+   * on the operands do not prove the value real
+   * (`complexContinuation`). `auto` and `complex` promote, as for `Sqrt` and
+   * `Ln` of an operand of unknown sign; `strict` keeps the real lane and its
+   * `NaN`. A complex operand is not decided here: the head's complex kernel
+   * takes it in every mode.
+   *
+   * `isComplexValued` and the emitters of these heads both read this, so a
+   * parent and its child agree on the shape of the value.
+   */
+  static continuesToComplex(
+    head: MathJsonSymbol,
+    args: ReadonlyArray<Expression>
+  ): boolean {
+    if (!COMPLEX_CONTINUATION_HEADS.has(head)) return false;
+    if (!BaseCompiler.promotionActive) return false;
+    // A broadcast closure re-asks with element temps that carry no facts;
+    // the verdict of the node-level operands stands (see
+    // `promotesRadicalToComplex`).
+    for (
+      let i = BaseCompiler._broadcastRadicalVerdict.length - 1;
+      i >= 0;
+      i--
+    ) {
+      const frame = BaseCompiler._broadcastRadicalVerdict[i];
+      if (
+        frame.head === head &&
+        args.length > 0 &&
+        args.every(
+          (a) => a !== undefined && isSymbol(a) && frame.params.has(a.symbol)
+        )
+      )
+        return frame.promotes;
+    }
+    const lane = complexContinuation(head, args);
+    if (lane === 'real') return false;
+    if (lane === 'unknown') BaseCompiler.notePromoted();
+    return true;
+  }
+
+  /** Does the target in progress lower the continuation heads on the
+   * complex lane (the JavaScript target)? */
+  private static get hasComplexContinuationLowering(): boolean {
+    return BaseCompiler._callSiteTarget?.language === 'javascript';
   }
 
   /**
@@ -14177,11 +14230,14 @@ export class BaseCompiler {
       radicalFrame =
         h === 'Power' ||
         h === 'Root' ||
+        COMPLEX_CONTINUATION_HEADS.has(h) ||
         BaseCompiler.PROMOTABLE_RADICAL_HEADS.has(h)
           ? {
               head: h,
               params: new Set(params),
-              promotes: BaseCompiler.promotesRadicalToComplex(h, args),
+              promotes: COMPLEX_CONTINUATION_HEADS.has(h)
+                ? BaseCompiler.continuesToComplex(h, args)
+                : BaseCompiler.promotesRadicalToComplex(h, args),
               realPower:
                 h === 'Power'
                   ? BaseCompiler.realPowerExponent(args)
@@ -19752,6 +19808,17 @@ export class BaseCompiler {
     // `Real(±∞)` can type `+oo | -oo` (so the `isNonRealNumber`
     // branch would too) — yet every target emits a real scalar for both.
     if (BaseCompiler.REAL_BY_DEFINITION_HEADS.has(expr.operator)) return false;
+    // A continuation head on a target that lowers its complex kernel is
+    // complex when an operand is, or when its value can be (see
+    // `continuesToComplex`).
+    if (
+      COMPLEX_CONTINUATION_HEADS.has(expr.operator) &&
+      BaseCompiler.hasComplexContinuationLowering
+    )
+      return (
+        expr.ops.some((a) => BaseCompiler.isComplexValued(a)) ||
+        BaseCompiler.continuesToComplex(expr.operator, expr.ops)
+      );
     // A head the CURRENT compilation's target lowers with a REAL-ONLY
     // lowering (`Floor`, `Mod`, `Max`, the statistics family, a real-only
     // helper such as JavaScript's `_SYS.erf`) yields a real value by

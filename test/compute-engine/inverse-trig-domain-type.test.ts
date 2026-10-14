@@ -122,8 +122,8 @@ const SYMBOLIC_CASES: [string, string, string, string][] = [
   ['Artanh', 'complex | signed_infinity', 'complex', 'real'],
   ['Arcoth', 'complex | signed_infinity', 'real', 'complex'],
   ['Arsech', 'complex | signed_infinity', 'complex', 'real'],
-  ['Arcsec', 'number', 'real', 'complex'],
-  ['Arccsc', 'number', 'real', 'complex'],
+  ['Arcsec', 'complex | infinity | nan', 'real', 'complex'],
+  ['Arccsc', 'complex | infinity | nan', 'real', 'complex'],
 ];
 
 /** A fresh engine with `u` a bare real, `w ≥ 2` and `0 < v < 1`. */

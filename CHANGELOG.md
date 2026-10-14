@@ -55,6 +55,29 @@
 
 ### Issues Resolved
 
+- **A compiled special function answers its complex value from real operands in
+  `auto` and `complex` mode,** as `Sqrt` and `Ln` do
+  ([#434](https://github.com/cortex-js/compute-engine/issues/434), contributed
+  by [enumeratio](https://github.com/enumeratio)). `HurwitzZeta`, `LerchPhi`,
+  `PolyLog`, `EllipticK`, the complete `EllipticE`, `Hypergeometric2F1` and
+  `LambertW` lowered to the real kernel in every mode, which is `NaN` where the
+  value is complex: compiled `LerchPhi(3, 2, 1)` was `NaN` and is
+  `0.7734 - 1.1505i`, as `.N()` gives, and `HurwitzZeta(0.5, -0.5)` is
+  `-0.6049 - 1.4142i`, `PolyLog(1.5, 2)` is `1.5489 - 2.9513i`, `EllipticK(2)`
+  is `1.3110 - 1.3110i` and `LambertW(-1)` is `-0.3181 + 1.3372i`. The complex
+  lane is taken where the operand facts do not prove the value real (`a >= 0`
+  or an integer `s` for `HurwitzZeta`, `z <= 1` for `LerchPhi`, `PolyLog` and
+  `Hypergeometric2F1`, `m <= 1` for the elliptic integrals, `x >= -1/e` for
+  `LambertW`), and the kernel is the interpreter's: the real value where it has
+  one, its complex kernel elsewhere. A complex operand takes the complex kernel
+  in every mode. `strict` keeps the real lowering and its `NaN`. The GLSL and
+  WGSL targets have no complex lane for these heads and decline a provably
+  complex value (`LerchPhi(3, 2.5, 1)` compiled to a helper that answered
+  `NaN`). `Arcsec` and `Arccsc` of a real operand of unknown magnitude type
+  `complex | infinity | nan`, where they typed `number`, so the compiled lanes
+  read the complex value as they do for `Arcosh`: `Arcsec(x)` at `x = 0.5`
+  compiled to `NaN` and is `1.3170i`.
+
 - **`LerchPhi(0, s, a)` with a negative `a` and a non-integer `s` is the
   principal power `a^(−s)`,** as the series terms are (DLMF 25.14.1)
   ([#428](https://github.com/cortex-js/compute-engine/issues/428), contributed

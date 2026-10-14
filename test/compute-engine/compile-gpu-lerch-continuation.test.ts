@@ -516,6 +516,8 @@ describe('GPU LerchPhi / PolyLog continuation: f32 model of the GLSL helpers', (
     });
   });
 
+  // The helpers are real-only; compiling a provably complex value declines
+  // (compile-complex-continuation.test.ts).
   test('a genuinely complex value is NaN', () => {
     // mpmath: lerchphi(3, 2.5, 1) = 1.0942742369637423 - 0.90711i
     expect(gpuLerchPhiModel(3, 2.5, 1)).toBeNaN();

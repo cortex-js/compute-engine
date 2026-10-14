@@ -394,16 +394,6 @@ describe('COMPILE: complex RESULT of a real argument (assigned symbol)', () => {
  */
 describe('COMPILE: an in-domain bounded inverse-trig argument returns a plain number', () => {
   // head, LaTeX command, in-domain probe, out-of-domain probe
-  //
-  // `Arcsec`/`Arccsc` are deliberately absent. Over an argument of unknown
-  // magnitude they type `number`, not `complex`: their pole at 0 numericizes
-  // to NaN (`arcsec(0).N()` is NaN, and NaN is a member only of `number`), so
-  // the sound join over the whole real line is `number` — see `ARCSEC_DOMAIN`
-  // in `library/type-handlers.ts`, which states the precondition for widening
-  // it. The compiler honors that claim and emits the real lowering
-  // (`Math.acos(1 / u)`), so an out-of-domain argument is a real NaN there
-  // rather than the interpreter's complex value. That divergence belongs to
-  // the type claim, not to this describe; it is pinned separately below.
   const HEADS = [
     ['Arcsin', '\\arcsin', 0.5, 2],
     ['Arccos', '\\arccos', 0.5, 2],
@@ -411,6 +401,11 @@ describe('COMPILE: an in-domain bounded inverse-trig argument returns a plain nu
     ['Artanh', '\\operatorname{artanh}', 0.5, 2],
     ['Arcoth', '\\operatorname{arcoth}', 2, 0.5],
     ['Arsech', '\\operatorname{arsech}', 0.5, 2],
+    // Over an operand of unknown magnitude they type `complex | infinity |
+    // nan` (the pole at 0 is `~oo` or NaN), so the complex value out of
+    // domain is not lost to a real `NaN`.
+    ['Arcsec', '\\operatorname{arcsec}', 2, 0.5],
+    ['Arccsc', '\\operatorname{arccsc}', 2, 0.5],
   ] as const;
 
   for (const [name, cmd, inDomain, outOfDomain] of HEADS) {
@@ -442,39 +437,6 @@ describe('COMPILE: an in-domain bounded inverse-trig argument returns a plain nu
       });
     }
   }
-
-  // The two heads left out of `HEADS`. This pins a KNOWN COMPILED/INTERPRETER
-  // DIVERGENCE, not a contract to rely on: out of domain the compiled code
-  // answers a real `NaN` where the interpreter answers a complex value. It is
-  // pinned rather than hidden so that a change to `ARCSEC_DOMAIN` or to
-  // `Arcsec`/`Arccsc` evaluation shows up here as a failing test. The ruling
-  // that would close it is recorded in ROADMAP.md under the `Arcsec`/`Arccsc`
-  // note; the divergence predates the removal of the `realOnly` option, which
-  // projected the other six heads' complex results to `NaN` too and so made
-  // all eight look alike.
-  it.each([
-    ['Arcsec', '\\operatorname{arcsec}', 2, 1.0471975511965979],
-    ['Arccsc', '\\operatorname{arccsc}', 2, 0.5235987755982989],
-  ])(
-    '%s: KNOWN DIVERGENCE — types `number`, so out of domain compiled NaN vs interpreter complex',
-    (_name, cmd, inDomain, expected) => {
-      const ce = new ComputeEngine();
-      ce.declare('u', 'real');
-      const expr = ce.parse(`${cmd}(u)`);
-      expect(expr.type.toString()).toBe('number');
-      const result = compile(expr, { fallback: false });
-      expect(result.success).toBe(true);
-      expect(result.run!({ u: inDomain as number })).toBeCloseTo(
-        expected as number,
-        12
-      );
-      // Out of domain the real lowering yields NaN, while the interpreter
-      // answers a complex value — the consequence of the `number` type claim,
-      // not of anything the emitter decides.
-      expect(result.run!({ u: 0.5 })).toBeNaN();
-      expect(ce.parse(`${cmd}(0.5)`).N().im).not.toBe(0);
-    }
-  );
 
   it('a genuinely complex value stays complex', () => {
     // No part is removed: a small imaginary part keeps the value complex —

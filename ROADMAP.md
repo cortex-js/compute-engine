@@ -1,6 +1,6 @@
 # Compute Engine — Roadmap
 
-**Last updated:** 2026-10-12.
+**Last updated:** 2026-10-14.
 
 This document tracks **remaining** work; an item leaves this file once it lands.
 Detail on completed work lives in git history, `CHANGELOG.md`, the linked source
@@ -108,18 +108,6 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 ---
 
 ## Remaining work
-
-### Compiled `LerchPhi` and `HurwitzZeta` answer `NaN` for a complex value (OPEN, small — found 2026-10-13 by issue #428)
-
-`_SYS.lerchPhi`, `_gpu_lerch_phi`, `_SYS.hurwitzZeta` and `_gpu_hurwitz_zeta`
-are real-only and return `NaN` for `a < 0` with a non-integer `s` (and, for
-`LerchPhi`, a real `z > 1`), where the interpreter has a complex value; the
-lowering still reports success, and the existing tests pin that `NaN`. The rule
-for a complex value from real operands across the special functions
-(`HurwitzZeta`, `LerchPhi`, `PolyLog`, `EllipticK`, `Hypergeometric2F1`,
-`LambertW`, `Arcsec`) is the question of issue #434: follow the compile mode as
-`Sqrt` does, decline, or keep `NaN`. `Gamma` took the first answer on 2026-10-14
-(`_SYS.cgamma`).
 
 ### `.N()` of an integral with a doubly logarithmic divergence at a bound gives a finite value (OPEN, small — found 2026-10-14 by the review of the shell divergence test)
 
