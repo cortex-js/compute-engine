@@ -110,6 +110,33 @@ describe('bigintDigits', () => {
     for (let d = -3n; d <= 3n; d++)
       expect(bigintDigits(seam + d)).toBe(oracle(seam + d));
   });
+
+  // Past the pow10 cache the count comes from a log10 estimate, with one exact
+  // comparison when the estimate cannot tell which side of 10^k the value is.
+  test('exact digit count around large powers of ten', () => {
+    const oracle = (n: bigint) => n.toString(10).length;
+    // 99 998…100 002 straddle the cache limit; the rest are far past it.
+    for (const k of [99998, 99999, 100000, 100001, 100002, 150000, 262144]) {
+      const p = 10n ** BigInt(k);
+      for (const n of [p - 1n, p, p + 1n, 2n * p - 1n, 9n * p, 10n * p - 1n])
+        expect(bigintDigits(n)).toBe(oracle(n));
+    }
+  });
+
+  test('exact digit count of large random values', () => {
+    // A deterministic generator, so a failure reproduces.
+    let seed = 0x2545f491;
+    const next = () => {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      return seed;
+    };
+    for (let i = 0; i < 12; i++) {
+      let n = 1n;
+      const words = 11000 + (next() % 4000);
+      for (let w = 0; w < words; w++) n = (n << 32n) | BigInt(next());
+      expect(bigintDigits(n)).toBe(n.toString(10).length);
+    }
+  });
 });
 
 // ================================================================

@@ -1,3 +1,23 @@
+## [Unreleased]
+
+### Performance
+
+- **The type of a 200 000-digit integer literal takes 0.3 ms, not 21 ms,** and
+  `bigintDigits()` no longer builds a power of ten as large as its argument
+  (#431, contributed by [enumeratio](https://github.com/enumeratio)).
+  `ce.number(7n * 10n ** 200000n + 12345n).type` took 21 ms per new literal at
+  200 000 digits (0.4 and 6 ms at 25 000 and 100 000) and now takes 0.3 ms; at a
+  million digits 150 ms is now under 2 ms. A literal past the double range has
+  no double enclosure, and its type is the sign range, as before
+  (`integer<1..>`); the type no longer rounds the integer to the working
+  precision to reach that answer. `bigintDigits()` above 100 000 digits
+  estimates the count from the leading hex digits and compares against `10^k`
+  only when the estimate falls within a hair of an integer, so the count stays
+  exact at `10^k - 1`, `10^k` and `10^k + 1`; at 200 000 digits it takes 0.13 ms
+  where it took 10 ms. `rationalAsFloat()` of a huge bigint shifts the numerator
+  alone and reads bit lengths from the hex form, which also speeds up `.re` of
+  such a literal.
+
 ## 0.153.0 _2026-10-13_
 
 ### New Features
