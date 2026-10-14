@@ -5,7 +5,7 @@ import type {
 } from '../global-types.js';
 import type { Type } from '../../common/type/types.js';
 import { typeToString } from '../../common/type/serialize.js';
-import { isSubtype } from '../../common/type/subtype.js';
+import { isSubtype, widen } from '../../common/type/subtype.js';
 import { factsOf } from '../../common/type/facts.js';
 import {
   collectionElementType,
@@ -37,6 +37,27 @@ function userFunctionLiteral(engine: IComputeEngine, head: string) {
       ? (binding.operator as { _lambdaLiteral?: Expression })._lambdaLiteral
       : binding.value.value);
   return literal && isFunction(literal, 'Function') ? literal : undefined;
+}
+
+/**
+ * The present part of an argument type with a `missing` arm: `missing | T`
+ * reads as `T`. The index read `L[k]` of a declared `L: list<tuple<number,
+ * number, number>>` is typed `missing | tuple<number, number, number>` (the
+ * index may be out of range). The derivation types the body under the
+ * present part, then once more with the parameter typed `missing`, and joins
+ * the two (Tycho ledger row 374: `W(L[k], 2)` was typed from the declared
+ * signature, with `broadcastable` components, because the union argument
+ * stopped the derivation). The remaining arms are kept as the union they
+ * were, not widened: `real | nan` stays a scalar union, which the parameter
+ * guard below admits, where `widen` would make it `number`. A type with no
+ * `missing` arm is returned unchanged.
+ */
+function presentPart(type: Type): Type {
+  const t = resolveTypeAlias(type);
+  if (typeof t === 'string' || t.kind !== 'union') return type;
+  const arms = t.types.filter((x) => resolveTypeAlias(x) !== 'missing');
+  if (arms.length === t.types.length || arms.length === 0) return type;
+  return arms.length === 1 ? arms[0] : { kind: 'union', types: arms };
 }
 
 /** Lists may bind elementwise; only known atomic arguments can bind whole. */
@@ -108,7 +129,7 @@ export function callResultType(
   const literal = userFunctionLiteral(engine, head);
   if (
     !literal ||
-    (args.some((x) => mayBroadcast(x.type)) &&
+    (args.some((x) => mayBroadcast(presentPart(x.type))) &&
       !bindsArgumentsWhole(engine, head, literal))
   )
     return undefined;
@@ -121,11 +142,21 @@ export function callResultType(
   const running = active.get(engine) ?? new Set<Expression>();
   if (running.has(literal)) return undefined;
   active.set(engine, running);
+  // Each parameter is typed as the PRESENT part of its argument. An argument
+  // that may be absent (`missing | T`) is derived a second time below with
+  // that parameter typed `missing`, and the two results are joined: a body
+  // that passes the parameter through (`p ↦ p`) or stores it (`(p, s) ↦
+  // (p, s)`) gives the absent value back, and the first derivation alone
+  // would type the call as if the argument were always present.
+  const names: string[] = [];
+  const present: Type[] = [];
   let env = new Map<string, OperandDescriptor>();
   for (let i = 0; i < params.length; i++) {
     const name = functionLiteralParameterName(params[i]);
     if (!name) return undefined;
-    const t = args[i].type;
+    const t = presentPart(args[i].type);
+    names.push(name);
+    present.push(t);
     // Unknown arguments may be collections at runtime. Do not infer a scalar
     // result by treating an unknown parameter as a numeric operand. A union
     // whose every member is a scalar (`real | nan`, the type of a value that
@@ -304,7 +335,23 @@ export function callResultType(
       memo.set(expr, result);
       return result;
     };
-    const result = walk(literal.op1)?.type;
+    let result = walk(literal.op1)?.type;
+    if (result !== undefined && present.some((t, i) => t !== args[i].type)) {
+      // The absent arm: every argument with a `missing` arm is absent at
+      // once, and the body is typed under that. (Absent in one and present
+      // in another is covered by the join of the two arms for a body that
+      // reads each parameter on its own; a body that combines two such
+      // parameters is rare, and the declared result still bounds the join.)
+      env = new Map(
+        names.map((name, i) => [
+          name,
+          describeType(present[i] === args[i].type ? present[i] : 'missing'),
+        ])
+      );
+      memo.clear();
+      const absent = walk(literal.op1)?.type;
+      result = absent === undefined ? undefined : widen(result, absent);
+    }
     const refined =
       result === undefined || result === 'never' || !isSubtype(result, declared)
         ? undefined

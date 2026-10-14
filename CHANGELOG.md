@@ -55,6 +55,22 @@
 
 ### Issues Resolved
 
+- **A user-function call whose argument may be absent is typed from the
+  function body.** With `L` declared `list<tuple<number, number, number>>`,
+  `k` declared `integer` and
+  `W = (p, s) ↦ (s·PointX(p), s·PointY(p), s·PointZ(p))`, the index read
+  `L[k]` is typed `missing | tuple<number, number, number>` (the index may be
+  out of range), and the call `W(L[k], 2)` was typed from the declared
+  signature of `W`, `tuple<broadcastable<number>, broadcastable<number>,
+  broadcastable<number>>`, which proves neither one point nor a list; the
+  accessor `PointX(L[k])` on the same argument typed `number`. The call typing
+  stopped at the union argument. It now types the body under the present part
+  of a `missing | T` argument and once more with the parameter typed
+  `missing`, and joins the two results, so a body that passes its parameter
+  through (`p ↦ p`) is not typed as if the argument were always present.
+  `W(L[k], 2)` is typed `tuple<number, number, number>`. `W((1,2,3), 2)` and
+  `W(L, 2)` are unchanged.
+
 - **A compiled product of three or more factors with one complex factor no
   longer runs the real factors through a zero imaginary accumulator.** On the
   JavaScript target, `3 · x · z` with `x` real and `z` complex compiled to a

@@ -390,6 +390,86 @@ describe('Tycho 373 — a pass-through parameter under list broadcast', () => {
     );
   });
 
+  // Tycho ledger row 374: the index read `L[k]` of a declared point list is
+  // typed `missing | tuple<number, number, number>` (the index may be out of
+  // range). The call typing stopped at that union and fell back to the
+  // declared signature result, with `broadcastable` components, while
+  // `PointX(L[k])` already typed `number`. The body is now typed under the
+  // present part of the argument, as for a plain `Missing` argument
+  // (`presentPart`, `call-result-type.ts`).
+  test('row 374: an argument typed `missing | tuple` types the body under the tuple', () => {
+    const ce = new ComputeEngine();
+    ce.declare('L', 'list<tuple<number, number, number>>');
+    ce.declare('k', 'integer');
+    ce.assign(
+      'W',
+      ce.parse(
+        '(p, s) \\mapsto (s\\cdot\\operatorname{PointX}(p), s\\cdot\\operatorname{PointY}(p), s\\cdot\\operatorname{PointZ}(p))'
+      )
+    );
+    expect(ce.parse('L[k]').type.toString()).toBe(
+      'missing | tuple<number, number, number>'
+    );
+    expect(ce.parse('\\operatorname{PointX}(L[k])').type.toString()).toBe(
+      'number'
+    );
+    expect(ce.parse('W(L[k], 2)').type.toString()).toBe(
+      'tuple<number, number, number>'
+    );
+    // A plain absent argument reads the same way, and the two literal-shaped
+    // readings of row 373 are unchanged.
+    expect(ce.box(['W', 'Missing', 2]).type.toString()).toBe(
+      'tuple<number, number, number>'
+    );
+    expect(ce.parse('W((1,2,3), 2)').type.toString()).toBe(
+      'tuple<integer | nan, integer | nan, integer | nan>'
+    );
+    expect(ce.parse('W(L, 2)').type.toString()).toBe(
+      'tuple<list<number>, list<number>, list<number>>'
+    );
+    // An in-range index gives the scaled point. An out-of-range one gives a
+    // tuple of three `Missing` coordinates: inside the body `PointX(p)` is
+    // typed `unknown` (the parameter is inferred `collection<any> | tuple`),
+    // and an absence in a codomain that is not provably numeric keeps
+    // `Missing` (`absent-point-arithmetic.test.ts`). The static type
+    // `tuple<number, number, number>` does not contain that value; the
+    // disagreement is older than the derivation (the declared result of `W`
+    // and the plain `W(Missing, 2)` read the same type) and is an open
+    // ROADMAP entry ("A user function applied to an absent point gives a
+    // tuple of absent coordinates").
+    ce.assign('L', ce.parse('[(1,2,3),(4,5,6)]'));
+    ce.assign('k', 1);
+    expect(ce.parse('W(L[k], 2)').evaluate().toString()).toBe('(2, 4, 6)');
+    ce.assign('k', 5);
+    expect(ce.parse('W(L[k], 2)').evaluate().toString()).toBe(
+      '("Missing", "Missing", "Missing")'
+    );
+  });
+
+  test('row 374: a body that passes the argument through is not typed as always present', () => {
+    const ce = new ComputeEngine();
+    ce.declare('L', 'list<tuple<number, number, number>>');
+    ce.declare('k', 'integer');
+    ce.assign('f', ce.parse('p \\mapsto p'));
+    ce.assign('g', ce.parse('(p, s) \\mapsto (p, s)'));
+    ce.assign('L', ce.parse('[(1,2,3),(4,5,6)]'));
+    ce.assign('k', 5);
+    // The derivation joins the present arm with the absent arm: `missing |
+    // tuple<…>` for `f`, `tuple<missing, integer> | tuple<tuple<…>,
+    // integer>` for `g`. Neither fits the declared result (`unknown`, a
+    // values-only type with no absence marker), so the call keeps the
+    // declared result, as before the derivation read a `missing | T`
+    // argument at all. A first version typed the body under the present
+    // part alone and read `f(L[k])` as a point.
+    expect(ce.parse('f(L[k])').type.toString()).toBe('unknown');
+    expect(ce.parse('f(L[k])').type.toString()).not.toContain('tuple');
+    expect(ce.parse('g(L[k], 2)').type.toString()).toBe(
+      'tuple<unknown, unknown>'
+    );
+    expect(ce.parse('f(L[k])').evaluate().toString()).toBe('"Missing"');
+    expect(ce.parse('g(L[k], 2)').evaluate().toString()).toBe('("Missing", 2)');
+  });
+
   test('an untyped (undeclared) argument still reads unknown: no promise is made', () => {
     const ce = rotationChain();
     expect(ce.parse('R_{Z2}(u,u,u,0,0,18)').type.toString()).toBe(
