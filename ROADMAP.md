@@ -629,16 +629,6 @@ ratio) is not a cancellation and could be told apart from one. A related
 point: a function that decays to 0 gives a residue such as `−9e-46`, not
 `0` (`NLimit(t ↦ |Gamma(i·t)|, ∞)`).
 
-### Compiled JavaScript `Gamma` of a non-real argument is `NaN` (OPEN, small — found 2026-10-04, issue #396)
-
-`compile(Gamma(i·t))` succeeds and the function returns `NaN` for every
-`t`: the generated code is `cisreal(z) ? gamma(re(z)) : NaN`. The
-interpreter has a complex `gamma()` (`numerics/numeric-complex.ts`) and
-answers `Gamma(5i) ≈ −0.00027 + 0.00034i`. The compiled function must call
-a complex kernel, or the compilation must decline, so the two routes agree.
-For this reason the numeric `Limit` of a complex-valued function samples
-through the interpreter (`numericLimitValue`, `library/calculus.ts`).
-
 ### A spacing command inside a KroneckerDelta subscript becomes an index (OPEN, small — found 2026-10-04 by the δ-group change)
 
 `\delta_{n\,m}` parses to `KroneckerDelta(n, HorizontalSpacing(3), m)` in
@@ -1653,25 +1643,6 @@ without touching the literal's own parameters. The host function `ce.assign()`
 stores the value it is given, on purpose: a host that defines one name from
 another wants the live view.
 
-### A parameter that reaches a whole-collection operator indirectly is still applied element by element (OPEN — recorded 2026-09-29 with the decision on whole-collection parameters)
-
-The decision of 2026-09-29 binds a list whole only when the bare parameter is
-the ONLY operand of `Mean`, `Median`, `Variance`, `StandardDeviation`, `Mode`,
-`Quartiles`, `Flatten`, `SetFrom` or `TupleFrom`. Three shapes still differ from
-the body with the list substituted: a use through another operator
-(`function h(xs) { mean(xs^2) }` over `[1, 2, 3]` gives `[1, 4, 9]`, the
-substitution gives `14/3`), a use through a local (`let ys = xs; mean(ys)`), and
-`Max`/`Min`/`GCD`/`LCM`/`ListFrom` of the parameter. The first and the third are
-held back by the compiled route: the compiled definition types an undeclared
-parameter from its uses, so `xs^2` compiles to scalar code and an array argument
-gives `NaN`. They can follow once the compiled definition types a lifted
-parameter from its signature slot. (A parameter DECLARED `collection<any>` or
-`collection<any> | number` already compiles under `Max`, `Min`, `Sum` and
-`Product` since the fix for issue #385; the gap is the undeclared parameter.) `norm(v)` over a
-list of numbers gives the list itself (the norm of each number), on both routes;
-whether `Norm` of an untyped parameter should read a list of numbers as one
-vector is part of the same question.
-
 ### The static type of a block local narrowed by a use depends on statement order (OPEN, small — found 2026-09-28 by the fixpoint re-read of assignment evidence)
 
 The re-read of `let`/`Assign` value types (`library/assignment-evidence.ts`)
@@ -1971,18 +1942,6 @@ comment). No corpus row reaches it since the round-trip fix of 2026-09-22
 (`f(yf(x))(x + y)` now parses as the application it is;
 `test/compute-engine/juxtaposition-application.test.ts`).
 
-### `Dot` of a tuple of points stays symbolic in the interpreter but compiles to a matrix product (OPEN — found 2026-09-22 while making `Dot` broadcast over a point list)
-
-`Dot(((1, 2), (3, 4)), (5, 6))` stays symbolic in the interpreter, because a
-tuple of tuples is read as ONE point with nested coordinates (`Norm` of it is
-the flattened 4-vector, `PointX` of it is `(3, 4)`), while the compiled
-JavaScript route lowers it to `_SYS.matmul([[1, 2], [3, 4]], [5, 6])` and
-answers `[17, 39]`. Pre-existing; the fail-closed guard does not catch the
-shape. Either the compiled route declines a tuple-of-tuples operand of `Dot`, or
-the interpreter reads it as a point list; the point-list broadcast of 2026-09-22
-excludes a tuple operand on all three routes and pins the exclusion
-(`test/compute-engine/dot-point-list-broadcast.test.ts`).
-
 ### Findings of the Tycho code-generation audit of 2026-09-09 (OPEN — CE 0.127.0; report `~/dev/tycho/_TASK/desmos/desmos-corpus/codegen-audit/2026-09-09-report.md`, records in `ce-0.127.0.json` of that folder)
 
 The report was reviewed on 2026-09-09 and each item was reproduced against HEAD
@@ -2204,23 +2163,6 @@ Iverson bracket, so no product reading). `4]1,2[` canonicalizes to
   `Equivalent(A, A)` stay unevaluated while `And(True, A)` evaluates to `A`;
   each value is correct. Folding them (to `¬A`, `¬A`, `A`, `¬A`, `True`, `¬A`,
   `True`) is new work.
-
-### A callback ignores the callee's parameter annotation on both routes, and a folded `Map` over per-element errors (OPEN — found 2026-09-27, widened 2026-09-29)
-
-`Map(k ↦ h(k), [1, 2.5])` with `h` declared `(x: integer) -> …` compiles to
-JavaScript and runs to `[2, 5]`, and since 2026-09-29 the interpreter answers
-`[2, 5]` too, although a direct `h(2.5)` is an `incompatible-type` error:
-neither route checks the parameter annotation inside a callback. The bare-symbol
-form `Map(h, …)` now compiles (to the constant `[2, 5]`) where it refused
-before. Related, recorded convention rather than a defect: under `.N()` a `Map`
-whose callback errors per element answers `NaN` cells (the lowered broadcast in
-`library/map-lowering.ts` turns a bad element into the collection's absence
-marker, pinned by `test/epsil/programs.test.ts` "errors are values: a bad
-element becomes NaN" and two more), while `evaluate()` keeps the `Error`
-elements. Since 2026-09-27 the constant fold declines a collection with a `NaN`
-element, because it cannot tell an error's `NaN` from a computed one, so
-`compile(Map(w, [1, 2, 3]))` with an unemittable `w` refuses as before instead
-of compiling `[NaN, NaN, NaN]`.
 
 ### `Map` with a bare symbol callback: what the 2026-09-27 decision left (OPEN, low)
 

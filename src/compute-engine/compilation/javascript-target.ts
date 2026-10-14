@@ -3365,7 +3365,7 @@ const JS_COLLECTION_AWARE_HEADS: ReadonlySet<string> = new Set([
  * its imaginary part was zero at run time. `Hypot` is `Math.hypot`, spelled
  * as a function so that it can take a point operand as one leg. The heads
  * this target maps to a plain helper name (`Erf: '_SYS.erf'`,
- * `Gamma: '_SYS.gamma'`) are real-only by that mapping
+ * `GammaLn: '_SYS.lngamma'`) are real-only by that mapping
  * (`BaseCompiler.stringHelperIsRealOnly`); several of them are listed here as
  * well, so the set names every special function without complex lowering.
  * `Mean`, `Variance` and `StandardDeviation` have a complex value in the
@@ -4044,7 +4044,16 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       compile(x)
     );
   },
-  Gamma: '_SYS.gamma',
+  // A maybe-complex operand takes the complex kernel (`_SYS.cgamma`, the
+  // interpreter's), as `Sin` and `Exp` do; a real one the real kernel. The
+  // head is then not real-only on this target: `Gamma(i·t)` compiled gave
+  // `NaN` for every `t` under the real-operand guard, where the interpreter
+  // answers a complex number.
+  Gamma: (args, compile, target) => {
+    if (BaseCompiler.isComplexValued(args[0]))
+      return complexUnary(target, '_SYS.cgamma', compile(args[0]));
+    return `_SYS.gamma(${compile(args[0])})`;
+  },
   // n-ary GCD/LCM. The `_SYS.gcd`/`_SYS.lcm` runtime helpers are BINARY with a
   // third `eps` (tolerance) argument, so a bare `_SYS.gcd(a, b, c)` string map
   // would silently consume the third *operand* `c` as the tolerance. Instead
@@ -6192,6 +6201,18 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         `${listFlags[0]}, ${listFlags[1]})`
       );
     }
+    // A TUPLE whose elements are tuples (`((1, 2), (3, 4))`) is ONE point
+    // with nested coordinates for the interpreter, which leaves its `Dot`
+    // unevaluated; the matrix product below would read it as a matrix and
+    // answer `[17, 39]` for `Dot(((1, 2), (3, 4)), (5, 6))`. The compilation
+    // declines, so the two routes agree (`BaseCompiler.isTupleOfTuples`).
+    for (const arg of [args[0], args[1]])
+      if (BaseCompiler.isTupleOfTuples(arg))
+        throw new Error(
+          'Could not compile `Dot`: a tuple of tuples is one point with ' +
+            'nested coordinates, which the interpreter does not contract; ' +
+            'write a list of points or a matrix.'
+        );
     // Tuple coordinates with numeric list components use the broadcast path
     // above. Other point-list spellings have no faithful component expansion;
     // passing their nested arrays to matrix multiplication changes the result.

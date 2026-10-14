@@ -40,6 +40,7 @@ import {
 } from './boxed-expression/definition-guards.js';
 import { typeToString } from '../common/type/serialize.js';
 import { Type } from '../common/type/types.js';
+import type { Scope } from './types-evaluation.js';
 import { CancellationError, checkDeadline } from '../common/interruptible.js';
 import {
   Expression,
@@ -2844,7 +2845,19 @@ export function lazyMapNumericApproximation(
   // The function literal a value-bound symbol callback holds in the current
   // frame, when that is what the rewrap applies (closure branch below).
   let boundLiteral: Expression | undefined = undefined;
-  if (readsOtherBindings(ce, fn)) {
+  // A bare symbol bound in the GLOBAL scope (`h` declared with
+  // `ce.declare`, or assigned at the top level) survives every frame: its
+  // name resolves to the same definition wherever the lazy result is read.
+  // It takes the symbol branch below, whose callback APPLIES THE NAME, so
+  // the application is checked against the definition's declared parameter
+  // types (`h` declared `(x: integer) -> integer`: `Map(h, [1, 2.5])` under
+  // `.N()` answered `[2, 5]` through the literal the symbol holds, which
+  // carries no annotation, where `evaluate()` answers an error at the second
+  // element) and broadcasts a collection element as a direct application
+  // does. The closure branch is for a callback bound in a frame that the
+  // reader of the lazy result does not see (a parameter, a block local).
+  const globalCallback = isSymbol(fn) && isGlobalBinding(ce, fn.symbol);
+  if (!globalCallback && readsOtherBindings(ce, fn)) {
     // A callback that reads a name that the current scope binds to another
     // definition (a closure, such as `x ↦ x/c` for a `c` local to a `Block`)
     // is not made again from MathJSON: a callback made again reads `c` in
@@ -2938,6 +2951,27 @@ export function lazyMapNumericApproximation(
   // only (see the memo note in the JSDoc).
   if (boundLiteral === undefined) lazyMapNRewraps.set(expr, rewrapped);
   return rewrapped;
+}
+
+/**
+ * True when `name` is bound in the GLOBAL scope of `ce` as seen from the
+ * current scope: the scope that binds it is the root of the scope chain
+ * (the library's definitions) or the root's child (the engine's global
+ * scope, where `ce.declare` and a top-level assignment bind). A parameter
+ * of an enclosing function or a local of a block is bound in a scope below
+ * those, which a reader outside the frame does not see.
+ */
+function isGlobalBinding(ce: Expression['engine'], name: string): boolean {
+  let scope: Scope | null = ce.context.lexicalScope;
+  let holder: Scope | null = null;
+  let top: Scope | null = scope;
+  while (scope) {
+    if (holder === null && scope.bindings.has(name)) holder = scope;
+    top = scope;
+    scope = scope.parent;
+  }
+  if (holder === null || top === null) return false;
+  return holder === top || holder.parent === top;
 }
 
 /**

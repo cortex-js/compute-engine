@@ -390,7 +390,9 @@ describe('complex mode — D2/D6 runtime rules', () => {
     // `{re: NaN, im: NaN}` at every point (measured 2026-08-16, `auto` and
     // `complex` modes alike). The value must be the plain real product.
     for (const mode of ['auto', 'complex'] as const) {
-      for (const h of ['Erf', 'Gamma'] as const) {
+      // `Gamma` is no longer in this list: its JavaScript lowering takes a
+      // complex kernel for a maybe-complex operand (see the `Arsinh` case).
+      for (const h of ['Erf'] as const) {
         const e = ce.box(['Multiply', 2, [h, ['Sqrt', 'y']]]);
         const r = compile(e, { mode, fallback: false });
         // Reference: the interpreter's own value at y = 2.
@@ -401,15 +403,22 @@ describe('complex mode — D2/D6 runtime rules', () => {
         expect(r.run!({ y: -2 })).toBeNaN();
       }
       // `Arsinh` of a complex operand compiles to a complex helper
-      // (`_SYS.casinh`) since 2026-10-01, so it gives the interpreter's
-      // value at a negative radicand instead of NaN.
-      const e = ce.box(['Multiply', 2, ['Arsinh', ['Sqrt', 'y']]]);
-      const r = compile(e, { mode, fallback: false });
-      expect(r.run!({ y: 2 })).toBeCloseTo(e.subs({ y: 2 }).N().re, 6);
-      const ref = e.subs({ y: -2 }).N();
-      const out = r.run!({ y: -2 }) as { re: number; im: number };
-      expect(out.re).toBeCloseTo(ref.re, 12);
-      expect(out.im).toBeCloseTo(ref.im, 12);
+      // (`_SYS.casinh`) since 2026-10-01, and `Gamma` to `_SYS.cgamma`, so
+      // each gives the interpreter's value at a negative radicand instead
+      // of NaN.
+      for (const h of ['Arsinh', 'Gamma'] as const) {
+        const e = ce.box(['Multiply', 2, [h, ['Sqrt', 'y']]]);
+        const r = compile(e, { mode, fallback: false });
+        const at2 = r.run!({ y: 2 }) as number | { re: number; im: number };
+        expect(typeof at2 === 'number' ? at2 : at2.re).toBeCloseTo(
+          e.subs({ y: 2 }).N().re,
+          6
+        );
+        const ref = e.subs({ y: -2 }).N();
+        const out = r.run!({ y: -2 }) as { re: number; im: number };
+        expect(out.re).toBeCloseTo(ref.re, 12);
+        expect(out.im).toBeCloseTo(ref.im, 12);
+      }
     }
   });
 

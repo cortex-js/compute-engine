@@ -7489,9 +7489,7 @@ export class BaseCompiler {
         return {
           numerator: digits(rational[0]),
           denominator:
-            rational[1] === 1 || rational[1] === 1n
-              ? 0
-              : digits(rational[1]),
+            rational[1] === 1 || rational[1] === 1n ? 0 : digits(rational[1]),
         };
       }
       const t = typeOf(node);
@@ -7562,7 +7560,9 @@ export class BaseCompiler {
         numerator:
           Math.max(
             ...known.map((s) => s.numerator + denominator - s.denominator)
-          ) + Math.ceil(Math.log10(known.length)) + 1,
+          ) +
+          Math.ceil(Math.log10(known.length)) +
+          1,
         denominator,
       };
     };
@@ -7594,7 +7594,9 @@ export class BaseCompiler {
           const value =
             typeof item === 'number'
               ? item
-              : isNumber(item) && item.isInteger === true ? item.re : NaN;
+              : isNumber(item) && item.isInteger === true
+                ? item.re
+                : NaN;
           if (!Number.isSafeInteger(value)) return undefined;
           lower = Math.min(lower, value);
           upper = Math.max(upper, value);
@@ -7691,9 +7693,7 @@ export class BaseCompiler {
       ops.length >= 2
     ) {
       const [callback, sources] =
-        expr.operator === 'Map'
-          ? [ops[0], ops.slice(1)]
-          : [ops[1], [ops[0]]];
+        expr.operator === 'Map' ? [ops[0], ops.slice(1)] : [ops[1], [ops[0]]];
       let trips: number | undefined;
       let sourceWork = 0;
       for (const source of sources) {
@@ -7705,10 +7705,7 @@ export class BaseCompiler {
       if (trips === undefined) return Infinity;
       return (
         sourceWork +
-        trips * Math.max(
-          1,
-          BaseCompiler.bigOpIterations(callback, depth + 1)
-        )
+        trips * Math.max(1, BaseCompiler.bigOpIterations(callback, depth + 1))
       );
     }
     let inner = 0;
@@ -12322,6 +12319,25 @@ export class BaseCompiler {
    */
   private static readonly SCALAR_ARITHMETIC_HEADS: ReadonlySet<string> =
     new Set(['Add', 'Subtract', 'Multiply', 'Divide', 'Negate', 'Power']);
+
+  /**
+   * Whether `arg` is a tuple with a tuple element: the literal
+   * `((1, 2), (3, 4))`, or a symbol or call whose type is a tuple with a
+   * tuple element type — one point with nested coordinates. The interpreter
+   * does not contract such an operand of `Dot` (its `Norm` is the flattened
+   * vector, its `PointX` is the first inner tuple), so the targets decline
+   * it rather than hand its nested arrays to a matrix product.
+   */
+  static isTupleOfTuples(arg: Expression): boolean {
+    if (isFunction(arg, 'Tuple') && arg.ops.some((op) => isTuple(op)))
+      return true;
+    const t = resolveTypeForCompilation(arg.type.type);
+    return (
+      typeof t !== 'string' &&
+      t.kind === 'tuple' &&
+      t.elements.some((e) => isSubtype(e.type, 'tuple'))
+    );
+  }
 
   /**
    * Heads whose lowering is real-only on EVERY target, because the operation
@@ -24946,7 +24962,10 @@ export class BaseCompiler {
     // lambda whose parameter carries that name. The inventory is the one
     // the generated temporaries consult (`tempVar`).
     const owner = registry.valueRoot ?? registry.root;
-    const used = owner === undefined ? undefined : BaseCompiler.namingContext(owner).usedNames;
+    const used =
+      owner === undefined
+        ? undefined
+        : BaseCompiler.namingContext(owner).usedNames;
     const raw = prefix + id.replace(/[^\w$]/g, '_');
     // Shader identifiers cannot contain dollar signs or consecutive
     // underscores. Normalize before collision allocation so distinct
@@ -25476,8 +25495,18 @@ export class BaseCompiler {
       node === undefined
         ? undefined
         : BaseCompiler._prefixCallOverrides.get(node);
+    // Whether an argument must be checked against its parameter's declared
+    // type at run time (`parameterCheckNeeded`): the call is then emitted
+    // through the checking shim of the function, in every form the call
+    // takes (the direct call, the broadcast dispatch over a list argument).
+    // The invariant-prefix variant below has no shim (its extra parameters
+    // are held values): a checked call takes the ordinary definition.
+    const checked = args.some((a, i) =>
+      BaseCompiler.parameterCheckNeeded(engine, h, a, i, target)
+    );
     if (
       prefixed !== undefined &&
+      !checked &&
       prefixed.values.every((v) => BaseCompiler._codeOverrides.has(v))
     ) {
       let variant: string | undefined;
@@ -25557,8 +25586,11 @@ export class BaseCompiler {
     const lowering = target.userFunctions?.lowering;
     if (lowering) return lowering.call({ id: h, name, args, target });
 
+    const callee = checked
+      ? (BaseCompiler.checkingShimName(engine, h, name, target) ?? name)
+      : name;
     return BaseCompiler.emitUserFunctionCall(
-      name,
+      callee,
       args,
       target,
       coerceToComplex,
@@ -25567,6 +25599,126 @@ export class BaseCompiler {
       [],
       BaseCompiler.absentArgumentChecks(h, literal, args, target)
     );
+  }
+
+  /**
+   * The declared type of parameter `i` of the user function `h` that a
+   * compiled call or a function value must test at run time, or `undefined`
+   * when there is nothing to test: no declared type; `number`, which every
+   * number a compiled value holds satisfies (a plain number or a `{re, im}`
+   * object); a complex type, whose argument is coerced instead
+   * (`coerceToComplex`); or a type with no faithful JavaScript test
+   * (`jsClauseParamGuard`). Only on the JavaScript target, for a function
+   * with a single literal: a multi-clause function guards each clause in
+   * its dispatcher.
+   */
+  private static checkedParameterType(
+    engine: ComputeEngine,
+    h: string,
+    i: number,
+    target: CompileTarget<Expression>
+  ): Type | undefined {
+    if (target.language !== 'javascript') return undefined;
+    if (BaseCompiler.userFunctionLiteral(engine, h) === undefined)
+      return undefined;
+    const declared = BaseCompiler.userFunctionParamType(engine, h, i);
+    if (declared === undefined) return undefined;
+    if (declared === 'number' || isNonRealNumber(declared)) return undefined;
+    const test = BaseCompiler.jsClauseParamGuard(declared, '_$v');
+    return test === null || test === undefined ? undefined : declared;
+  }
+
+  /**
+   * Whether the argument `a` at position `i` of a call of `h` must be
+   * checked against the parameter's declared type at run time: the type is
+   * one `checkedParameterType` tests, and the argument's static type does
+   * not prove it. A list argument is checked through its ELEMENT type, since
+   * the call maps over it and each element reaches the body; an element
+   * type that is not known counts as unproven.
+   *
+   * The interpreter checks an argument against the parameter's annotation
+   * at every application: `h(2.5)` with `h` declared `(x: integer) -> …` is
+   * an `incompatible-type` error, and so is the second element of
+   * `h([1, 2.5])` and of `Map(k ↦ h(k), [1, 2.5])`. The compiled call ran
+   * the body on the value (`5`).
+   */
+  private static parameterCheckNeeded(
+    engine: ComputeEngine,
+    h: string,
+    a: Expression,
+    i: number,
+    target: CompileTarget<Expression>
+  ): boolean {
+    const declared = BaseCompiler.checkedParameterType(engine, h, i, target);
+    if (declared === undefined) return false;
+    const t = a.type.type;
+    if (BaseCompiler.provablyScalarArg(a)) return !isSubtype(t, declared);
+    const element = collectionElementType(resolveTypeForCompilation(t));
+    if (element === undefined) return true;
+    return !isSubtype(element, declared);
+  }
+
+  /**
+   * The name of the CHECKING SHIM of the user function `h` emitted as
+   * `name`, emitted once next to it, or `undefined` when no parameter needs
+   * a test (`checkedParameterType`). The shim tests each such parameter and
+   * calls the function when every test passes:
+   *
+   *     const _fn_h$t = (_$0) =>
+   *       Number.isInteger(_SYS.creal(_$0)) ? _fn_h(_$0) : NaN;
+   *
+   * `NaN` is the value compiled code has for an element the interpreter
+   * answers with an error (the convention of the lowered `Map`,
+   * `library/map-lowering.ts`). The test reads the REAL PROJECTION of the
+   * argument (`_SYS.creal`), and the function receives that projection: a
+   * value the complex lane carries is a `{re, im}` object, with `im: 0`
+   * when it is real (`h(√y)` at `y = 4` hands the shim `{re: 2, im: 0}`),
+   * and the body of a function whose parameter is declared `real` or
+   * `integer` is compiled for a plain number (`2 * x` over the object is
+   * `NaN`, `x + 1` is a string), so the projected `2` is what it must
+   * receive, and `h(√y)` answers `4` as the interpreter does. A genuinely
+   * complex value projects to itself, so it fails a `real` or `integer`
+   * test as the interpreter's check does. A parameter with no test receives
+   * its argument as it was handed in.
+   *
+   * Shared by the call route (`tryCompileUserFunction`, which emits a
+   * checked call through the shim in every form the call takes) and the
+   * value route (`ensureUserFunctionValueRef`, whose broadcasting wrapper
+   * wraps the shim, so an element of a collection is checked after the
+   * descent to it).
+   */
+  private static checkingShimName(
+    engine: ComputeEngine,
+    h: string,
+    name: string,
+    target: CompileTarget<Expression>
+  ): string | undefined {
+    const registry = target.userFunctions;
+    if (!registry || target.language !== 'javascript') return undefined;
+    const literal = BaseCompiler.userFunctionLiteral(engine, h);
+    if (literal === undefined) return undefined;
+    const nParams = literal.ops.length - 1;
+    const params = Array.from({ length: nParams }, (_, i) => `_$${i}`);
+    const passed = [...params];
+    const tests: string[] = [];
+    for (let i = 0; i < nParams; i++) {
+      const pt = BaseCompiler.checkedParameterType(engine, h, i, target);
+      if (pt === undefined) continue;
+      const projected = `_SYS.creal(${params[i]})`;
+      const test = BaseCompiler.jsClauseParamGuard(pt, projected);
+      if (test === null || test === undefined) continue;
+      tests.push(test);
+      passed[i] = projected;
+    }
+    if (tests.length === 0) return undefined;
+    const shim = `${name}$t`;
+    if (!registry.defs.has(shim))
+      registry.defs.set(
+        shim,
+        `const ${shim} = (${params.join(', ')}) => ` +
+          `(${tests.join(' && ')}) ? ${name}(${passed.join(', ')}) : NaN;`
+      );
+    return shim;
   }
 
   /**
@@ -28223,9 +28375,23 @@ export class BaseCompiler {
     )
       return true;
     const resolved = resolveTypeForCompilation(declared);
-    if (!isSubtype(resolved, 'collection<any>')) return false;
-    const element = collectionElementType(resolved);
-    return element === undefined || element === 'unknown' || element === 'any';
+    // A union with a collection arm (`collection<any> | number`, the slot of
+    // a parameter the body consumes whole) is open when that arm is: the
+    // generic definition compiles the body against the scalar arm, so a
+    // list argument needs the helper specialized to its own list type
+    // (`mean(xs^2)` over an array read `xs * xs` as scalar arithmetic and
+    // answered `NaN`).
+    const members =
+      typeof resolved !== 'string' && resolved.kind === 'union'
+        ? resolved.types
+        : [resolved];
+    return members.some((m) => {
+      if (!isSubtype(m, 'collection<any>')) return false;
+      const element = collectionElementType(m);
+      return (
+        element === undefined || element === 'unknown' || element === 'any'
+      );
+    });
   }
 
   /** Compile one shared helper for each proven argument representation.
@@ -29872,9 +30038,25 @@ export class BaseCompiler {
         );
     }
 
+    // A parameter with a DECLARED type takes the checking shim
+    // (`checkingShimName`): the consumer of a value reference hands the body
+    // a raw element, which the interpreter would have checked against the
+    // annotation. The broadcasting wrapper below wraps the shim, so an
+    // element of a collection argument is checked after the descent to it.
+    callee = BaseCompiler.checkingShimName(engine, h, callee, target) ?? callee;
+
     // A parameterless function has no argument that could be a collection.
     if (nParams === 0) return callee;
-    if (!BaseCompiler.userFunctionParamsAreScalar(engine, h)) return callee;
+    if (!BaseCompiler.userFunctionParamsAreScalar(engine, h))
+      return (
+        BaseCompiler.listSpecializedValueRef(
+          engine,
+          h,
+          literal,
+          callee,
+          target
+        ) ?? callee
+      );
     // A parameter that lowers to an array or object (a tuple, a record, a
     // nominal value) must reach the body whole — see
     // `signatureParamsLowerToScalars`.
@@ -29904,6 +30086,78 @@ export class BaseCompiler {
         )};`
       );
     return wrapperName;
+  }
+
+  /**
+   * The value reference of a ONE-parameter user function `h` whose parameter
+   * binds a collection whole and has an open element type (a lifted slot
+   * such as `collection<any> | value`, see `wholeCollectionParameterType`,
+   * or a declared `collection<any> | number`): a dispatcher that hands an
+   * array element to the definition SPECIALIZED to `list<number>` and any
+   * other element to `callee`:
+   *
+   *     const _fn_h$l = (_$0) =>
+   *       Array.isArray(_$0) ? _fn_h_list_number_(_$0) : _fn_h(_$0);
+   *
+   * The generic definition is compiled against the scalar arm of the slot
+   * (`_SYS.mean(xs * xs)` for `h(xs) := mean(xs^2)`), so a row of
+   * `Map(h, rows)` handed to it computed `NaN` where the interpreter binds
+   * the row whole and answers its mean of squares; the specialization maps
+   * the element-wise operators over the array
+   * (`ensureSpecializedUserCallEmitted` does the same for a direct call with
+   * a list argument). `undefined` when the specialization cannot be emitted
+   * (the parameters cannot be typed again, a target with its own definition
+   * lowering), or when the function has not exactly one parameter or its
+   * slot's element type is not open.
+   */
+  private static listSpecializedValueRef(
+    engine: ComputeEngine,
+    h: string,
+    literal: Expression & FunctionInterface,
+    callee: string,
+    target: CompileTarget<Expression>
+  ): string | undefined {
+    const registry = target.userFunctions;
+    if (!registry || registry.lowering || target.language !== 'javascript')
+      return undefined;
+    if (literal.ops.length !== 2) return undefined;
+    if (!BaseCompiler.paramElementTypeIsOpen(engine, h, 0)) return undefined;
+    if (!BaseCompiler.parametersCanBeTyped(literal)) return undefined;
+    if (registry.specializing?.has(h)) return undefined;
+    const types: Type[] = [{ kind: 'list', elements: 'number' }];
+    const specialized = BaseCompiler.cachedLiteralWithParameterTypes(
+      engine,
+      h,
+      literal,
+      types,
+      registry
+    );
+    if (specialized === undefined) return undefined;
+    const active = (registry.specializing ??= new Set());
+    active.add(h);
+    let name: string | undefined;
+    try {
+      name = BaseCompiler.emitFunctionLiteralDefinition(
+        h,
+        specialized,
+        target,
+        registry,
+        { key: BaseCompiler.parameterTypesKey(h, types), types }
+      );
+    } catch (e) {
+      if (e instanceof Error && e.name === 'CancellationError') throw e;
+      name = undefined;
+    } finally {
+      active.delete(h);
+    }
+    if (name === undefined) return undefined;
+    const dispatcher = `${callee}$l`;
+    if (!registry.defs.has(dispatcher))
+      registry.defs.set(
+        dispatcher,
+        `const ${dispatcher} = (_$0) => Array.isArray(_$0) ? ${name}(_$0) : ${callee}(_$0);`
+      );
+    return dispatcher;
   }
 
   /**

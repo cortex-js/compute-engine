@@ -2,9 +2,11 @@
  * A user function whose body passes its parameter, as the LONE operand, to
  * an operator that is NOT element-wise and whose declared operand type has a
  * collection arm, binds a list argument WHOLE (user decision 2026-09-29).
- * `Norm` is excluded, and a use through an element-wise operator
- * (`mean(xs^2)`) or with other operands (`mean(x, 1)`) does not count: see
- * the doc comment of `wholeCollectionParameterType` for the reasons.
+ * The operand may reach the parameter through element-wise operators
+ * (`mean(xs^2)`) or through a local of the body (`let ys = xs; mean(ys)`).
+ * `Norm` is excluded, and a use with other operands (`mean(x, 1)`) does not
+ * count: see the doc comment of `wholeCollectionParameterType` for the
+ * reasons.
  *
  * A user function with an `unknown` parameter is applied to each element of a
  * list argument (auto-broadcast). Before this rule, a parameter reached the
@@ -307,36 +309,45 @@ describe('Whole-collection parameter: box route', () => {
   });
 });
 
-describe('Not lifted yet: Max, Min, GCD, LCM, ListFrom', () => {
-  // These operators read a collection operand whole, but their slot type is
-  // `value` or `any`, and the compiled body of a user function types its
-  // parameter from the body's uses, not from the lifted signature slot. So
-  // lifting them would make the interpreter answer `3` for
-  // `function h(xs) { max(xs) }` applied to `[1, 2, 3]` while the compiled
-  // function answers `NaN` (`Math.max(<array>)`). Until the compiled route
-  // reads the lifted type, they keep the element-wise application, on both
-  // routes. See `TOP_SLOT_WHOLE_COLLECTION_OPERATORS` in
-  // `boxed-expression/effects-inference.ts`.
-  for (const [op, body] of [
-    ['Max', 'max(xs)'],
-    ['Min', 'min(xs)'],
-    ['GCD', 'gcd(xs)'],
-    ['LCM', 'lcm(xs)'],
+describe('Lifted: Max, Min, GCD, LCM, Sum, Product, ListFrom', () => {
+  // These operators read a collection operand whole; their slot type is
+  // `value` or `any`, so they are listed by name
+  // (`TOP_SLOT_WHOLE_COLLECTION_OPERATORS` in
+  // `boxed-expression/effects-inference.ts`). The compiled form follows: a
+  // call with a list argument compiles a helper specialized to the list type
+  // (`ensureSpecializedUserCallEmitted`), which reduces the array.
+  for (const [op, body, arg, value] of [
+    ['Max', 'max(xs)', '[1, 2, 3]', '3'],
+    ['Min', 'min(xs)', '[1, 2, 3]', '1'],
+    ['GCD', 'gcd(xs)', '[4, 6, 8]', '2'],
+    ['LCM', 'lcm(xs)', '[2, 3, 4]', '12'],
   ]) {
     test(op, () => {
       const ce = new ComputeEngine();
-      expect(epsilValue(ce, `function h(xs) { ${body} }\nh([1, 2, 3])`)).toBe(
-        '[1,2,3]'
+      expect(epsilValue(ce, `function h(xs) { ${body} }\nh(${arg})`)).toBe(
+        value
       );
-      expect(ce.symbol('h').type.toString()).toBe('(unknown) -> number');
+      expect(ce.symbol('h').type.toString()).toBe(
+        '(collection<any> | value) -> number'
+      );
     });
   }
+
+  test('Sum and Product', () => {
+    const ce = new ComputeEngine();
+    expect(epsilValue(ce, 'function h(xs) { sum(xs) }\nh([1, 2, 3])')).toBe(
+      '6'
+    );
+    expect(epsilValue(ce, 'function p(xs) { product(xs) }\np([1, 2, 3])')).toBe(
+      '6'
+    );
+  });
 
   test('ListFrom', () => {
     const ce = new ComputeEngine();
     expect(
       epsilValue(ce, 'function h(xs) { listFrom(xs) }\nh([1, 2, 3])')
-    ).toBe('[[1],[2],[3]]');
+    ).toBe('[1,2,3]');
   });
 });
 
@@ -453,14 +464,15 @@ const ROUTE_CASES: [string, string, Arg[], string, unknown][] = [
     '[3,4,5]',
     [3, 4, 5],
   ],
-  // A use through an element-wise operator is element-wise: the compiled
-  // function types the parameter from `xs^2`, a scalar use.
+  // A use through an element-wise operator reaches the parameter: the list
+  // binds whole, and the compiled call takes the helper specialized to the
+  // list type, whose body maps the power over the array.
   [
     'mean(xs^2) over a list',
     'function h(xs) { mean(xs^2) }',
     [L123],
-    '[1,4,9]',
-    [1, 4, 9],
+    '14/3',
+    14 / 3,
   ],
   ['mean(xs^2) over a scalar', 'function h(xs) { mean(xs^2) }', [A5], '25', 25],
   // With a second operand, `Mean` reads each operand as one datum: one
@@ -563,12 +575,26 @@ describe('Interpreter and compiled function agree', () => {
 });
 
 describe('Limitations of the rule, as they behave today', () => {
-  test('a use through a local alias is not followed', () => {
+  test('a use through a local alias is followed', () => {
+    // `let ys = xs` is a `Declare` whose operands are held raw, so the local
+    // is recorded by name (see `wholeCollectionParameterType`).
     const ce = new ComputeEngine();
     expect(
       epsilValue(ce, 'function h(xs) { let ys = xs\nmean(ys) }\nh([1, 2, 3])')
-    ).toBe('[1,2,3]');
-    expect(ce.symbol('h').type.toString()).toBe('(unknown) -> number');
+    ).toBe('2');
+    expect(ce.symbol('h').type.toString()).toBe(
+      '(collection<any> | value) -> number'
+    );
+  });
+
+  test('a use through a local assigned AFTER the use is not followed', () => {
+    const ce = new ComputeEngine();
+    expect(
+      epsilValue(
+        ce,
+        'function h(xs) { let ys = 0\nlet m = mean(ys)\nys = xs\nm }\nh([1, 2, 3])'
+      )
+    ).toBe('[0,0,0]');
   });
 
   test('a call to a lifted user function is a whole use, in either order', () => {

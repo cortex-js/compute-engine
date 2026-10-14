@@ -135,6 +135,7 @@ import {
   complexPow,
   complexSqrt,
   cosSinPi,
+  gamma as complexGamma,
   scaledComplexDivide,
 } from '../numerics/numeric-complex.js';
 import {
@@ -4580,7 +4581,10 @@ export const SYS_HELPERS = {
       let isMask = true;
       for (const m of mask) {
         if (typeof m === 'boolean') booleans += 1;
-        else if (m !== undefined && !(typeof m === 'number' && Number.isNaN(m))) {
+        else if (
+          m !== undefined &&
+          !(typeof m === 'number' && Number.isNaN(m))
+        ) {
           isMask = false;
           break;
         }
@@ -4909,6 +4913,13 @@ export const SYS_HELPERS = {
   cinvhav: (z: ComplexResult) =>
     kernelResult(complexAsin(complexSqrt(new Complex(z.re, z.im))).mul(2)),
   cexp: (z: ComplexResult) => kernelResult(new Complex(z.re, z.im).exp()),
+  // The gamma function of a complex argument: the interpreter's kernel
+  // (`gamma` in `numerics/numeric-complex.ts`, Lanczos with the reflection
+  // formula), so that `Gamma(i·t)` compiled answers what `Gamma(5i)`
+  // evaluated does, `−0.00027 + 0.00034i` at `t = 5`, where the real-only
+  // `gamma` gave `NaN` for every `t`.
+  cgamma: (z: ComplexResult) =>
+    kernelResult(complexGamma(new Complex(z.re, z.im))),
   cln: (z: ComplexResult) => kernelResult(new Complex(z.re, z.im).log()),
   // The complex sign `z/|z|`: the point of the unit circle in the direction
   // of `z`, and `0` for `0` — the interpreter's `Sign` off the real line. A

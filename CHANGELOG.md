@@ -2,6 +2,30 @@
 
 ### Behavior Changes
 
+- **A parameter that reaches a whole-collection operator through an element-wise
+  operator or a local alias binds a list whole.** With `h(xs) := mean(xs^2)`,
+  `h([1, 2, 3])` is now `14/3`, where it was `[1, 4, 9]` (the function mapped
+  over the list, and the mean of each number was the number). The rule that
+  binds a list whole at a parameter consumed by `Mean`, `Median`, `Variance`,
+  `StandardDeviation`, `Mode`, `Quartiles`, `Flatten`, `SetFrom` or `TupleFrom`
+  applied only when the bare parameter was the operand. It now follows the
+  parameter through the element-wise operators (`mean(xs^2)`,
+  `variance(xs - c)`, `mean(sin(xs))`) and through a local of the body assigned
+  from it (`let ys = xs; mean(ys)`), and it covers `Max`, `Min`, `GCD`, `LCM`,
+  `Sum`, `Product` and `ListFrom` too (`max(xs)` over `[1, 2, 3]` is `3`,
+  `sum(xs^2)` is `14`). A body with no such operator still maps over a list
+  (`xs^2 + 1` gives `[2, 5, 10]`), a scalar argument gives the scalar value, and
+  `norm(v)` of an untyped parameter is still applied per element. The compiled
+  JavaScript form follows on every shape: a call with a list argument compiles a
+  helper specialized to the argument's list type, which maps the element-wise
+  operators over the array. A parameter declared `collection<any> | number` took
+  the generic definition, whose body read the array as a scalar (`mean(xs^2)`
+  compiled answered `NaN`, `sum(xs^2)` threw); it takes the specialized helper
+  now. A one-parameter function of this kind handed to `Map` as a value
+  dispatches each array element to that helper (`Map(h, rows)` with
+  `h(xs) := mean(xs^2)` answers the mean of squares of each row on both routes)
+  and any other element to the generic definition.
+
 - **A definite integral of a power with a symbolic exponent carries the
   condition under which its closed form is the value.** `∫₋₁¹ t^{-n}\,dt` gave
   `1/(1 − n) − (−1)^{1 − n}/(1 − n)` for every `n`, although the integral
@@ -22,6 +46,38 @@
   integral `∫ t^{-n}\,dt` is still `t^{1 − n}/(1 − n)`.
 
 ### Issues Resolved
+
+- **Compiled `Gamma` of a maybe-complex argument calls the complex kernel.**
+  `compile(Gamma(i·t))` answered `NaN` for every `t` (the real-only `_SYS.gamma`
+  under the real-operand guard), where the interpreter answers
+  `Gamma(5i) ≈ −0.00027 + 0.00034i`. The JavaScript lowering now takes the
+  complex kernel (`_SYS.cgamma`, the interpreter's Lanczos kernel) for a
+  maybe-complex operand, as `Sin` and `Exp` do; a real operand keeps the real
+  kernel.
+- **`Dot` of a tuple of tuples declines to compile.** The interpreter reads
+  `((1, 2), (3, 4))` as one point with nested coordinates and leaves
+  `Dot(((1, 2), (3, 4)), (5, 6))` unevaluated, while the compiled JavaScript and
+  Python forms handed the nested arrays to a matrix product and answered
+  `[17, 39]`. Both targets now decline such an operand, so the routes agree.
+- **A compiled call checks the declared parameter types of a user function, and
+  so does a function value handed to `Map`.** With `h` declared
+  `(x: integer) -> integer`, the interpreter answers an `incompatible-type`
+  error for `h(2.5)` and at the second element of `Map(k ↦ h(k), [1, 2.5])`,
+  while the compiled forms ran the body and answered `5`. A compiled call whose
+  argument's static type does not prove the declared type (the element type, for
+  a list argument the call maps over) now goes through a checking shim,
+  `const _fn_h$t = (a) => Number.isInteger(_SYS.creal(a)) ? _fn_h(…) : NaN`,
+  which answers `NaN` when the test fails, the value compiled code has for an
+  element the interpreter answers with an error; an argument already typed below
+  the declared type needs no test, and a parameter typed `number` or `complex`
+  none. The test reads the real projection of a value the complex lane carries,
+  and the body receives it: `h(√y)` at `y = 4` answers `4`. A function value
+  (`Map(h, L)`) is handed out through the same shim, so each element is checked
+  after the broadcast descent. Under `.N()`, `Map(h, [1, 2.5])` with a
+  bare-symbol callback answered `[2, 5]`: the lazy map substituted the literal
+  the symbol holds, which carries no annotation. A symbol bound in the global
+  scope now keeps its name in the numeric callback, so the application is
+  checked against the definition, and the element is an error there too.
 
 - **`∫₀¹ ln t\,dt` evaluates to `−1`.** It stayed unevaluated: the
   antiderivative `t·ln t − t` has no value at `0` (`0·(−∞)`). The value at a

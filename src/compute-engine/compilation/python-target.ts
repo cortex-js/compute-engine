@@ -4087,9 +4087,17 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   Dot: (args, compile) => {
     if (args[0] == null || args[1] == null)
       throw new Error('Could not compile `Dot`: missing argument');
-    // A TUPLE is a point even when its coordinates are points — the
-    // interpreter flattens `((1, 2), (3, 4))` into one four-component vector
-    // — so only a non-tuple collection of points is a list here.
+    // A TUPLE is a point even when its coordinates are points, and the
+    // interpreter leaves `Dot(((1, 2), (3, 4)), (5, 6))` unevaluated, where
+    // `np.dot` would contract the nested tuple as a matrix: the compilation
+    // declines (`BaseCompiler.isTupleOfTuples`). Only a non-tuple
+    // collection of points is a list here.
+    if (args.some((a) => BaseCompiler.isTupleOfTuples(a)))
+      throw new Error(
+        'Could not compile `Dot`: a tuple of tuples is one point with ' +
+          'nested coordinates, which the interpreter does not contract; ' +
+          'write a list of points or a matrix.'
+      );
     if (args.some((a) => !isTuple(a) && isPointListValue(a)))
       throw new Error(
         'Could not compile `Dot`: a list of points has no single numpy spelling — `np.dot` ' +

@@ -96,9 +96,11 @@ describe('Real-only lowerings over a statically non-real operand', () => {
   // no compiled form: before, the run-time rule emitted
   // `cisreal(x + i) ? erf(…) : NaN`, which was NaN at every point, where the
   // interpreter answers `Erf(0.5 + i) = 1.3162 + 0.1905i`.
+  // `\Gamma(x+\imaginaryI)` is not in this list: `Gamma` takes the
+  // complex kernel `_SYS.cgamma` for a maybe-complex operand (see the test
+  // below).
   for (const latex of [
     '\\operatorname{erf}(x+\\imaginaryI)',
-    '\\Gamma(x+\\imaginaryI)',
     '\\operatorname{erfc}(1-2\\imaginaryI+x)',
   ])
     for (const mode of ['auto', 'complex'] as const)
@@ -111,6 +113,21 @@ describe('Real-only lowerings over a statically non-real operand', () => {
           } as any)
         ).toThrow(/is certainly not a real number/);
       });
+
+  for (const mode of ['auto', 'complex'] as const)
+    it(`JavaScript ${mode}: \\Gamma(x+\\imaginaryI) compiles to the complex kernel`, () => {
+      const ce = engine();
+      const r = compile(ce.parse('\\Gamma(x+\\imaginaryI)'), {
+        to: 'javascript',
+        mode,
+        fallback: false,
+      } as any) as any;
+      expect(String(r.code)).toContain('_SYS.cgamma');
+      const out = r.run({ x: 0.5 }) as { re: number; im: number };
+      const ref = ce.box(['Gamma', ['Complex', 0.5, 1]]).N();
+      expect(out.re).toBeCloseTo(ref.re, 12);
+      expect(out.im).toBeCloseTo(ref.im, 12);
+    });
 
   // A `complex`-typed symbol MAY hold a real value, so it keeps the run-time
   // rule: the real helper runs when the imaginary part is zero.

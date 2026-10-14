@@ -67,6 +67,7 @@ import {
 import { substituteDeclaredBounds } from './generic-instantiation.js';
 import { isPolymorphicType } from '../../common/type/instantiate.js';
 import {
+  functionLiteralParameterNames,
   destructuringParameterType,
   functionLiteralBody,
   functionLiteralBoundNames,
@@ -897,15 +898,18 @@ function excludesEveryScalar(t: Type): boolean {
  * use then broadcasts inside the body, as it does in the substituted body.
  *
  * A use is WHOLE only when all of these hold:
- * - The parameter ITSELF is the operand. A chain through element-wise
- *   operators does not count: `mean(xs^2)` and `variance(xs - c)` are applied
- *   to each element. The compiled form of a user function types an
- *   undeclared parameter from its uses, not from this signature slot, so
- *   `xs^2` compiles to scalar code and an array argument gives `NaN`, while
- *   the interpreter would give the mean of the squares. Until the compiled
- *   function reads the lifted slot, a chained use stays element-wise so that
- *   the two routes agree.
- * - The parameter is the ONLY operand of that application: `mean(xs)`
+ * - The operand REACHES the parameter: it is the parameter itself, a local
+ *   of the body assigned the parameter (`let ys = xs; mean(ys)`), or an
+ *   application of an element-wise (`broadcastable`) operator with such an
+ *   operand (`mean(xs^2)`, `variance(xs - c)`): with the list bound whole,
+ *   the element-wise operator maps over it and the reducer reads the
+ *   result, the mean of the squares. The compiled form of such a function
+ *   follows: a call with a list argument at the lifted slot compiles a
+ *   helper specialized to the argument's list type, whose body maps the
+ *   element-wise operators over the array
+ *   (`ensureSpecializedUserCallEmitted`, `compilation/base-compiler.ts`),
+ *   so the two routes agree.
+ * - The operand is the ONLY operand of that application: `mean(xs)`
  *   counts, `mean(x, 1)`, `max(x, 0)` and `hypot(x, 1)` do not. With several
  *   operands the operator reads each operand as one datum, and a function
  *   such as `g(x) = mean(x, 1)` called with a list of sample values must give
@@ -927,9 +931,10 @@ function excludesEveryScalar(t: Type): boolean {
  *   norm of the whole matrix.
  *
  * So the operators covered are `Mean`, `Median`, `Variance`,
- * `StandardDeviation`, `Mode`, `Quartiles`, `Flatten`, `SetFrom` and
- * `TupleFrom`. `String` is element-wise: `label(p) = String(p)` over a list
- * gives one string per element.
+ * `StandardDeviation`, `Mode`, `Quartiles`, `Max`, `Min`, `GCD`, `LCM`,
+ * `Sum`, `Product`, `Flatten`, `ListFrom`, `SetFrom` and `TupleFrom`. `String` is
+ * element-wise: `label(p) = String(p)` over a list gives one string per
+ * element.
  *
  * The returned slot is the unreduced union `collection<any> | value`. The
  * collection arm makes `paramsAreScalar` read the slot as one that admits a
@@ -945,11 +950,10 @@ function excludesEveryScalar(t: Type): boolean {
  * returns `undefined` for it and the declaration is the slot.
  *
  * Limitations:
- * - Only direct uses in the body are followed. A parameter that reaches the
- *   operator through a local alias (`let ys = xs; mean(ys)`), through an
- *   assignment or through a destructuring is not seen, and the function
- *   stays element-wise. A call to another user function is a use like any
- *   other: `k(xs) = h(xs)` is lifted when the slot of `h` is lifted, because
+ * - A parameter that reaches the operator through a destructuring, or
+ *   through a local assigned AFTER the use that reads it, is not seen, and
+ *   the function stays element-wise. A call to another user function is a
+ *   use like any other: `k(xs) = h(xs)` is lifted when the slot of `h` is lifted, because
  *   that slot then has a collection arm. It is the only way the lift reaches
  *   through a function, and it reads the signature of `h` as it is when the
  *   signature of `k` is derived (the tests in
@@ -971,27 +975,111 @@ export function wholeCollectionParameterType(
   const binding = param.valueDefinition;
   if (binding === undefined) return undefined;
 
+  // The bindings that hold the parameter's value: the parameter itself and
+  // each local of the body assigned an expression that reaches it
+  // (`let ys = xs`), in the order the body is walked; a local assigned an
+  // expression that does NOT reach it stops holding it (`ys = 0`). A bound
+  // symbol is matched by its binding. A local is also recorded by NAME
+  // (`aliasNames`): the operands of a canonical `Declare` are held raw
+  // (unbound), so neither the declared symbol nor the value expression
+  // carries a binding there, and the body's later read of the local is a
+  // bound symbol of that name. A RAW symbol (one with no binding, inside a
+  // `Declare`) is matched by name against the parameter and the aliases; a
+  // bound symbol is matched by name against the aliases only, so an index
+  // of a `Sum` or a parameter of an inner function with the parameter's
+  // name is not taken for it.
+  const holders = new Set<unknown>([binding]);
+  const aliasNames = new Set<string>();
+  // The alias names that an enclosing inner function literal binds as its
+  // own parameters: inside it, that name is the inner parameter, not the
+  // alias (`map(ys => mean(ys), …)` after `let ys = xs`).
+  let shadowed = new Set<string>();
+  const holderByName = (e: Expression & { symbol: string }): boolean =>
+    e.valueDefinition === undefined
+      ? e.symbol === param.symbol || aliasNames.has(e.symbol)
+      : aliasNames.has(e.symbol) && !shadowed.has(e.symbol);
+  // Whether `e` reaches the parameter: it is a holder, or an element-wise
+  // (`broadcastable`) application with an operand that does (`xs^2`,
+  // `xs - c`, `sin(ys)`).
+  const reaches = (e: Expression): boolean => {
+    if (isSymbol(e))
+      return (
+        (e.valueDefinition !== undefined && holders.has(e.valueDefinition)) ||
+        holderByName(e)
+      );
+    if (!isFunction(e)) return false;
+    const def = e.operatorDefinition;
+    if (def === undefined || !def.broadcastable) return false;
+    return e.ops.some(reaches);
+  };
+
   // A shared subexpression is walked once.
   const seen = new Set<Expression>();
   const arms: Type[] = [];
   const visit = (expr: Expression): void => {
     if (!isFunction(expr) || seen.has(expr)) return;
     seen.add(expr);
-    const def = expr.operatorDefinition;
+    // `ys := xs` is an `Assign`; the canonical `let ys = xs` of a block is
+    // a `Declare` whose second operand is a dictionary with the entry
+    // `value: xs`.
     if (
-      def !== undefined &&
-      expr.nops === 1 &&
-      isSymbol(expr.op1) &&
-      expr.op1.valueDefinition === binding
+      (expr.operator === 'Assign' || expr.operator === 'Declare') &&
+      expr.nops === 2 &&
+      isSymbol(expr.op1)
     ) {
+      const value =
+        expr.operator === 'Assign' ? expr.op2 : declaredValueOf(expr.op2);
+      const local = expr.op1;
+      if (value !== undefined && reaches(value)) {
+        if (local.valueDefinition !== undefined)
+          holders.add(local.valueDefinition);
+        aliasNames.add(local.symbol);
+      } else if (local.symbol !== param.symbol) {
+        if (local.valueDefinition !== undefined)
+          holders.delete(local.valueDefinition);
+        aliasNames.delete(local.symbol);
+      }
+    }
+    const def = expr.operatorDefinition;
+    if (def !== undefined && expr.nops === 1 && reaches(expr.op1)) {
       const arm = wholeCollectionSlotArm(expr.operator, def);
       if (arm !== undefined) arms.push(arm);
+    }
+    if (expr.operator === 'Function') {
+      const names = expr.ops
+        .slice(1)
+        .flatMap((p) => functionLiteralParameterNames(p))
+        .filter((n) => aliasNames.has(n));
+      if (names.length > 0) {
+        const outer = shadowed;
+        shadowed = new Set([...outer, ...names]);
+        for (const op of expr.ops) visit(op);
+        shadowed = outer;
+        return;
+      }
     }
     for (const op of expr.ops) visit(op);
   };
   visit(body);
   if (arms.length === 0) return undefined;
   return { kind: 'union', types: [widenAll(arms), 'value'] };
+}
+
+/**
+ * The `value` entry of the dictionary operand of a canonical `Declare`
+ * (`Declare(ys, {value: xs})`, the form of `let ys = xs` in a block: the
+ * operand is a dictionary VALUE, written `Dictionary(KeyValuePair("value",
+ * xs))` in MathJSON), or `undefined` when there is none.
+ */
+function declaredValueOf(spec: Expression): Expression | undefined {
+  if (isDictionary(spec)) return spec.get('value');
+  if (!isFunction(spec, 'Dictionary')) return undefined;
+  for (const entry of spec.ops) {
+    if (!isFunction(entry, 'KeyValuePair') || entry.nops !== 2) continue;
+    const key = entry.op1;
+    if (isString(key) && key.string === 'value') return entry.op2;
+  }
+  return undefined;
 }
 
 /**
@@ -1004,21 +1092,28 @@ export function wholeCollectionParameterType(
  * So the fact is recorded here, where only the signature of a user function
  * reads it.
  *
- * `Max`, `Min`, `GCD`, `LCM` and `ListFrom` read a collection operand whole
- * too, but they are NOT listed. The compiled body of a user function types
- * its parameter from the body's uses (`value` here), not from the lifted
- * signature slot, so these five compile their operand as a scalar:
- * `Math.max(<array>)` is `NaN`. Listing them would make the interpreter
- * answer `max([1, 2, 3])` = `3` while the compiled function answers `NaN`.
- * The three operators listed do not compile such an operand: `SetFrom` and
- * `TupleFrom` have no JavaScript lowering, and `Flatten` declines an operand
- * that is not typed as an indexed collection. The compiled function then
- * falls back to the interpreter, so the two routes agree.
+ * `Max`, `Min`, `GCD`, `LCM`, `Sum`, `Product` and `ListFrom` read a
+ * collection operand whole too, and are listed. A compiled call with a list
+ * argument at a lifted slot compiles a helper specialized to the argument's
+ * list type, which reduces the array (`ensureSpecializedUserCallEmitted`,
+ * `compilation/base-compiler.ts`); where no such helper can be emitted the
+ * compilation declines and the interpreter answers, so the two routes
+ * agree. `SetFrom` and `TupleFrom` have no JavaScript lowering, and
+ * `Flatten` declines an operand that is not typed as an indexed collection.
  */
 const TOP_SLOT_WHOLE_COLLECTION_OPERATORS: ReadonlySet<string> = new Set([
   'Flatten',
   'SetFrom',
   'TupleFrom',
+  'Max',
+  'Min',
+  'GCD',
+  'LCM',
+  'ListFrom',
+  // `Sum(L)` and `Product(L)` with one operand reduce the collection; their
+  // slot is `any` because the operand is a body under `Limits` otherwise.
+  'Sum',
+  'Product',
 ]);
 
 /**
