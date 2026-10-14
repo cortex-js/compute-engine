@@ -93,6 +93,7 @@ import {
   endpointPoleVerdict,
   isRealOnInterval,
   interiorPoleVerdict,
+  symbolicExponentBaseZeros,
   symbolicPoleMayBeInside,
   type PoleVerdict,
 } from '../symbolic/interior-pole.js';
@@ -255,13 +256,19 @@ function resolveEndpointLeaks(
 }
 
 /**
- * Evaluate the definite value `F(upper) − F(lower)` of an antiderivative when a
- * bound is improper (±∞). At an infinite bound, naive substitution can leave an
- * `∞·0` product — an antiderivative term such as `poly(var)·e^{−c·var}` — which
- * `evaluate()` collapses to `NaN`; the mathematically correct endpoint value is
- * the limit `lim_{var→±∞} F(var)`. A finite bound is still a direct
- * substitution. Returns `undefined` (caller falls back to an inert integral)
- * when an endpoint cannot be resolved to a definite value.
+ * Evaluate the definite value `F(upper) − F(lower)` of an antiderivative when
+ * the value of `F` at a bound is a limit. At an infinite bound, naive
+ * substitution can leave an `∞·0` product — an antiderivative term such as
+ * `poly(var)·e^{−c·var}` — which `evaluate()` collapses to `NaN`; the
+ * mathematically correct endpoint value is the limit `lim_{var→±∞} F(var)`.
+ * A finite bound is a direct substitution, and when that has no value either
+ * (`t·ln t − t` at `0` is `0·(−∞)`, for `∫₀¹ ln t dt`), the value is the
+ * one-sided limit from inside the interval (`t·ln t → 0` as `t → 0⁺`, so the
+ * integral is `−1`). Only a FINITE limit is taken at a finite bound: an
+ * infinite one is the sign of a pole at the bound, which the caller decides
+ * from the integrand (`endpointPoleVerdict`), not from the antiderivative.
+ * Returns `undefined` (caller falls back to an inert integral) when an
+ * endpoint cannot be resolved to a definite value.
  */
 function improperEndpointValue(
   antideriv: Expression,
@@ -271,7 +278,14 @@ function improperEndpointValue(
   ce: ComputeEngine,
   numericApproximation: boolean
 ): Expression | undefined {
-  const endpoint = (bound: Expression): Expression | undefined => {
+  // The direction of integration: `1` when `lower < upper`. The one-sided
+  // limit at the lower bound is taken in that direction, at the upper bound
+  // in the opposite one.
+  const orientation = decidedSign(ce.function('Subtract', [upper, lower]));
+  const endpoint = (
+    bound: Expression,
+    side: 1 | -1
+  ): Expression | undefined => {
     if (bound.isInfinity === true) {
       const lim = symbolicLimit(antideriv, variable, bound, undefined, ce);
       if (lim === undefined || lim.operator === 'Limit' || lim.isNaN === true)
@@ -281,11 +295,33 @@ function improperEndpointValue(
     const v = antideriv
       .subs({ [variable]: bound })
       .evaluate({ numericApproximation });
-    return v.isNaN === true ? undefined : v;
+    // An error (`cos(1/t)` at `0` is `cos(~∞)`, an incompatible-type error)
+    // is no value either.
+    if (v.isNaN !== true && v.isValid) return v;
+    if (orientation !== 1 && orientation !== -1) return undefined;
+    const lim = symbolicLimit(
+      antideriv,
+      variable,
+      bound,
+      orientation * side,
+      ce
+    );
+    // A limit that holds an infinity anywhere (`−∞·0^n`, whose finiteness
+    // depends on `n`) is not a finite value.
+    if (
+      lim === undefined ||
+      lim.operator === 'Limit' ||
+      lim.isNaN === true ||
+      lim.isInfinity === true ||
+      lim.has(['PositiveInfinity', 'NegativeInfinity', 'ComplexInfinity']) ||
+      lim.has(variable)
+    )
+      return undefined;
+    return numericApproximation ? lim.N() : lim;
   };
-  const fUpper = endpoint(upper);
+  const fUpper = endpoint(upper, -1);
   if (fUpper === undefined) return undefined;
-  const fLower = endpoint(lower);
+  const fLower = endpoint(lower, 1);
   if (fLower === undefined) return undefined;
   const result = fUpper.sub(fLower).evaluate({ numericApproximation });
   return result.isNaN === true ? undefined : result;
@@ -496,6 +532,65 @@ function integrateAcrossKinks(
   return ce.function('Add', pieces).evaluate({ numericApproximation });
 }
 
+/**
+ * Evaluate a definite integral whose integrand has a power with a symbolic
+ * exponent whose base is zero at a point strictly inside the bounds —
+ * `∫₋₁¹ t^(−n) dt`, `∫₀² (t − 1)^(−n) dt`, `∫₋₁¹ t^n dt` — by splitting the
+ * interval at those points (see `symbolicExponentBaseZeros`).
+ *
+ * The antiderivative difference over the whole interval is a closed form
+ * (`1/(1 − n) − (−1)^(1 − n)/(1 − n)`) whatever `n` is, although the integral
+ * diverges for every `n ≥ 1`: the fundamental theorem of calculus needs an
+ * integrand that is bounded between the bounds. Each piece has the zero AT a
+ * bound, where the antiderivative route resolves the endpoint `0^(1 − n)`
+ * into a convergence guard (`resolveEndpointLeaks`), and the pieces add up
+ * to `1/(1 − n) − (−1)^(1 − n)/(1 − n) {n < 1}`: the value, with the
+ * condition under which it is the value of the integral. (Mathematica gives
+ * the same: `ConditionalExpression[(1 + E^(-I n π))/(1 − n), Re[n] < 1]`.)
+ *
+ * Returns the sum when every piece has a value, `'inert'` when a piece stays
+ * unevaluated (the caller keeps the whole integral unevaluated rather than a
+ * partial sum) or a zero cannot be given exactly, and `undefined` when there
+ * is no such zero or a bound is not a finite real number.
+ */
+function integrateAtSymbolicExponentZeros(
+  ce: ComputeEngine,
+  integrand: Expression,
+  variable: string,
+  lower: Expression,
+  upper: Expression,
+  numericApproximation: boolean
+): Expression | 'inert' | undefined {
+  const zeros = symbolicExponentBaseZeros(
+    integrand,
+    variable,
+    lower,
+    upper,
+    ce
+  );
+  // A zero that cannot be given exactly (a base of degree 3 or more): the
+  // whole-interval closed form would be wrong, and a float cut would lose
+  // the condition, so the integral stays unevaluated.
+  if (zeros === null) return 'inert';
+  if (zeros === undefined || zeros.length === 0) return undefined;
+  // The cuts in the direction of integration, which keeps
+  // `∫_a^b = Σ ∫_{p_i}^{p_{i+1}}` valid for reversed bounds too.
+  const reversed = decidedSign(ce.function('Subtract', [upper, lower])) === -1;
+  const points = [lower, ...(reversed ? [...zeros].reverse() : zeros), upper];
+  const pieces: Expression[] = [];
+  for (let i = 0; i + 1 < points.length; i++) {
+    const piece = ce
+      .function('Integrate', [
+        integrand,
+        ce.function('Limits', [ce.symbol(variable), points[i], points[i + 1]]),
+      ])
+      .evaluate({ numericApproximation });
+    if (piece.has('Integrate')) return 'inert';
+    pieces.push(piece);
+  }
+  return ce.function('Add', pieces).evaluate({ numericApproximation });
+}
+
 /** `expr` with each inner `Integrate` subexpression replaced by its value,
  * when that value has no `Integrate` left. Otherwise the inner integral is
  * kept as it is. An inner integral binds its own variable, so its value can
@@ -673,6 +768,87 @@ function poleVerdictValue(
     : pole.sign === 'negative'
       ? ce.NegativeInfinity
       : ce.NaN;
+}
+
+/**
+ * The condition under which the closed form that the power rule gives for
+ * `∫ c·(a·x + b)^e dx`, `c·(a·x + b)^(e + 1) / (a·(e + 1))`, is the
+ * antiderivative: the symbolic exponent `e` is not `−1`. At `e = −1` the
+ * antiderivative is `c·ln|a·x + b| / a` instead, and the closed form has no
+ * value: `∫₁² t^(−n) dt` is `(2^(1 − n) − 1)/(1 − n)` for `n ≠ 1` and `ln 2`
+ * at `n = 1`. A definite integral evaluated by the power rule carries the
+ * condition as a guard, `(2^(1 − n) − 1)/(1 − n) {n ≠ 1}`, which is
+ * discharged when the exponent is known not to be `−1` (`n` declared greater
+ * than 2; see `conditionalValue`). The power may be written as a quotient
+ * (`a / t^n`), and each term of a sum contributes its own guard. `undefined`
+ * when the integrand has no term that is a constant times a power of a
+ * linear base with a symbolic exponent (a number literal, an exponent that
+ * depends on the variable, or a constant such as `π` give no guard), or
+ * when a term has several factors that depend on the variable.
+ */
+function powerRuleParameterGuard(
+  ce: ComputeEngine,
+  integrand: Expression,
+  variable: string
+): Expression | undefined {
+  let e = integrand;
+  while (isFunction(e, 'Block') && e.nops === 1) e = e.op1;
+  // Each term of a sum is integrated by its own rule: the guards of the
+  // terms are conjoined (`∫₁² (t^(−n) + t^(−m)) dt` needs `n ≠ 1` and
+  // `m ≠ 1`).
+  if (isFunction(e, 'Add')) {
+    const guards: Expression[] = [];
+    for (const term of e.ops) {
+      const g = powerRuleParameterGuard(ce, term, variable);
+      if (g !== undefined && !guards.some((h) => h.isSame(g))) guards.push(g);
+    }
+    if (guards.length === 0) return undefined;
+    return guards.length === 1 ? guards[0] : ce.function('And', guards);
+  }
+  // `c / (a·x + b)^e` is the power with the exponent `−e`.
+  if (isFunction(e, 'Divide') && !e.op1.has(variable)) {
+    const d = e.op2;
+    if (!isFunction(d, 'Power')) return undefined;
+    return powerRuleParameterGuard(
+      ce,
+      ce.function('Power', [d.op1, ce.function('Negate', [d.op2])]),
+      variable
+    );
+  }
+  let power: Expression = e;
+  if (isFunction(e, 'Multiply')) {
+    const dependent = e.ops.filter((op) => op.has(variable));
+    if (dependent.length !== 1) return undefined;
+    power = dependent[0];
+  }
+  if (!isFunction(power, 'Power')) return undefined;
+  const [base, exponent] = [power.op1, power.op2];
+  if (
+    isNumber(exponent) ||
+    exponent.has(variable) ||
+    exponent.unknowns.length === 0
+  )
+    return undefined;
+  if (polynomialDegree(base, variable) !== 1) return undefined;
+  // An exponent linear in its one unknown gives the guard on that unknown:
+  // `n ≠ 1` for the exponent `−n`, not `−n ≠ −1`.
+  const unknowns = exponent.unknowns;
+  if (unknowns.length === 1) {
+    const coeffs = getPolynomialCoefficients(exponent, unknowns[0]);
+    if (coeffs !== null && coeffs.length === 2) {
+      const [c0, c1] = coeffs;
+      if (isNumber(c1) && c1.isNumberLiteral && !c1.isSame(0)) {
+        const at = ce
+          .function('Divide', [
+            ce.function('Subtract', [ce.number(-1), c0]),
+            c1,
+          ])
+          .evaluate();
+        return ce.function('NotEqual', [ce.symbol(unknowns[0]), at]);
+      }
+    }
+  }
+  return ce.function('NotEqual', [exponent, ce.number(-1)]);
 }
 
 /**
@@ -4651,9 +4827,21 @@ volumes
               continue;
             }
             if (isDefinite) {
+              // A power with a symbolic exponent whose base is zero strictly
+              // inside the bounds (`∫₋₁¹ t^(−n) dt`) is split at the zero,
+              // where the pieces resolve the convergence condition (see
+              // `integrateAtSymbolicExponentZeros`).
               const split =
                 integratePiecewise(ce, integrand, variable, lower, upper) ??
                 integrateAcrossKinks(
+                  ce,
+                  integrand,
+                  variable,
+                  lower,
+                  upper,
+                  numericApproximation ?? false
+                ) ??
+                integrateAtSymbolicExponentZeros(
                   ce,
                   integrand,
                   variable,
@@ -4824,14 +5012,19 @@ volumes
               // `When`, or keep the integral inert (fail closed) rather than leak
               // an indeterminate form (`0^…`, `∞^…`).
               let raw = at.evaluate({ numericApproximation });
+              // An antiderivative with no value at a bound can evaluate to
+              // an error rather than `NaN` (`cos(1/t)` at `0` is `cos(~∞)`,
+              // an incompatible-type error): it is no value either, and is
+              // read as `NaN` so that the integral stays unevaluated below
+              // instead of returning the error.
+              if (!raw.isValid) raw = ce.NaN;
               // FTC at an infinite bound can leave a `poly(var)·e^{−c·var}`-type
-              // `∞·0` product that naive substitution collapses to NaN. Re-resolve
-              // each improper endpoint as a genuine limit of the antiderivative.
+              // `∞·0` product that naive substitution collapses to NaN, and so
+              // can a finite bound (`t·ln t − t` at `0`). Re-resolve each such
+              // endpoint as a genuine limit of the antiderivative (see
+              // `improperEndpointValue`).
               let viaLimit: Expression | undefined;
-              if (
-                raw.isNaN === true &&
-                (lower.isInfinity === true || upper.isInfinity === true)
-              ) {
+              if (raw.isNaN === true) {
                 viaLimit = improperEndpointValue(
                   antideriv,
                   variable,
@@ -4897,7 +5090,30 @@ volumes
                 // When a limit re-resolved an improper endpoint, `raw` holds
                 // that limit value already (and `at` itself would still
                 // collapse to NaN), so `raw` covers both cases.
-                expr = raw;
+                //
+                // A closed form from the power rule with a symbolic exponent
+                // is the value only when the exponent is not `−1`
+                // (`∫₁² t^(−n) dt` is `ln 2` at `n = 1`): the condition is
+                // carried as a guard (see `powerRuleParameterGuard`). When
+                // the exponent IS `−1` (an assumption `n = 1`), the closed
+                // form is not the value and the integral stays unevaluated.
+                const parameterGuard = powerRuleParameterGuard(
+                  ce,
+                  integrand,
+                  variable
+                );
+                expr =
+                  parameterGuard === undefined
+                    ? raw
+                    : (conditionalValue(ce, raw, parameterGuard) ??
+                      ce.function('Integrate', [
+                        expr,
+                        ce.function('Limits', [
+                          ce.symbol(variable),
+                          lower,
+                          upper,
+                        ]),
+                      ]));
               } else {
                 const guarded =
                   resolved === null

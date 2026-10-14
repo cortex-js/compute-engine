@@ -1,5 +1,65 @@
 ## [Unreleased]
 
+### Behavior Changes
+
+- **A definite integral of a power with a symbolic exponent carries the
+  condition under which its closed form is the value.** `∫₋₁¹ t^{-n}\,dt` gave
+  `1/(1 − n) − (−1)^{1 − n}/(1 − n)` for every `n`, although the integral
+  diverges for every `n ≥ 1` (the pole at `0` is inside the bounds). The
+  integral is now split at the zero of the base, and the pieces resolve the
+  convergence condition at the bound: the result is
+  `1/(1 − n) − (−1)^{1 − n}/(1 − n) {0 < 1 − n}`, as Mathematica's
+  `ConditionalExpression[…, Re[n] < 1]`. The same holds for `∫₋₁¹ t^n\,dt`
+  (`{0 < n + 1}`), `∫_0^2 (t − 1)^{-n}\,dt` and `∫_{-1}^{1} x^{-a^2 - 1}\,dx`
+  (`{0 < −a²}`). A zero AT a bound was already guarded (`∫_0^1 t^n\,dt` is
+  `1/(n + 1) {0 < n + 1}`); a number exponent is unchanged (`∫₋₁¹ t^{-2}\,dt` is
+  `+∞`). The closed form from the power rule also carries the exponent that it
+  does not cover: `∫_1^2 t^{-n}\,dt` is `(2^{1 − n} − 1)/(1 − n) {n ≠ 1}`, since
+  the integral is `ln 2` at `n = 1` (it gave `~∞` there). The condition is on
+  the symbol when the exponent is linear in it (`{n ≠ 1}` for `t^{2n−3}`,
+  `{a + b ≠ −1}` for `t^{a+b}`), is discharged by an assumption (`n > 2`), and
+  is not added for a constant exponent (`t^π`) or a number. The indefinite
+  integral `∫ t^{-n}\,dt` is still `t^{1 − n}/(1 − n)`.
+
+### Issues Resolved
+
+- **`∫₀¹ ln t\,dt` evaluates to `−1`.** It stayed unevaluated: the
+  antiderivative `t·ln t − t` has no value at `0` (`0·(−∞)`). The value at a
+  finite bound where the substitution has no value is now the one-sided limit of
+  the antiderivative from inside the interval, as it was at an infinite bound;
+  only a finite limit is taken, a pole at the bound being decided from the
+  integrand as before. `∫_0^1 t\ln t\,dt` is `−1/4` and `∫_0^1 t^2\ln t\,dt` is
+  `−1/9`. The limits behind it are new: `\lim_{t\to 0^+} t\ln t` is `0` (a
+  product with a factor that tends to 0 and one that does not goes through
+  L'Hôpital, as at infinity), and a sum, a product or a power whose parts have
+  definite or infinite limits combines them when no indeterminate form arises
+  (`\lim_{t\to 0^+} \ln(t)^2` is `+∞`, `\lim_{t\to 0^+} (2\ln t − 1)` is `−∞`).
+- **A pole at which the integrand is a complex number on one side is a
+  divergence.** `∫_{-1}^{1} x^{-1.5}\,dx` gave `−2 − 2i` under `evaluate()` and
+  a finite complex number with a large error under `.N()`; the integral diverges
+  at `0` (`|x|^{-1.5}` is not integrable on either side). The pole check now
+  reads the magnitude of a complex sample, and a divergence on a side where the
+  integrand is complex gives the integral no value: `NaN` on both routes. The
+  pole check of the quadrature also locates the zero under `Abs`, `Sqrt`,
+  `Negate` and `Divide`, as the symbolic check did: `∫_{-1}^{1} |x|^{-1.5}\,dx`
+  under `.N()` is `+∞`, not `28000 ± 21000`.
+- **`.N()` of `∫_0^1 x^{-p}\,dx` for `p` just below 1 gives the value.**
+  `x^{-0.9999}` (10 000) gave `+∞`, and `p` from `0.9993` to `0.9998` gave
+  `NaN`: the shells of the quadrature next to the bound shrink by `2^{p−1}`
+  each, which its divergence test read as a pole. Three equal block ratios below
+  1 are now a geometric tail, which converges, and the extrapolation of the
+  shells gives `10000.000001 ± 0.0000004`. The sign of a pole at a bound is
+  claimed with a margin that matches how precisely the order of the pole was
+  extrapolated: a constant order is exact, so `x^{-0.9999}` is no longer a pole;
+  with a logarithmic factor (`x^{-0.9999}\ln x`, whose mass is at
+  `x ≈ 10^{-4343}`) the result is `NaN` with no sign, not `−∞`.
+- **`\int_0^1 t\ln t\,dt` reads `t·ln t` as the integrand.** The argument of
+  `\ln` without parentheses extended over the differential, giving `\ln(t\,dt)`
+  with `d` as a second integration variable; `\sin` already stopped at it. The
+  parsers of `\ln`, `\log`, `\lg`, `\lb`, `\exp`, `\operatorname{Li}_s` and the
+  subscripted `\operatorname{W}_k` and Bessel functions now stop their implicit
+  argument where the enclosing expression ends, as `\sin` does.
+
 ### Performance
 
 - **The type of a 200 000-digit integer literal takes 0.3 ms, not 21 ms,** and

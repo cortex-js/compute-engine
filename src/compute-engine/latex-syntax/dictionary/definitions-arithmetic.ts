@@ -1777,12 +1777,13 @@ function parseFraction(parser: Parser): MathJsonExpression | null {
 function parseSubscriptedFunction(
   parser: Parser,
   head: string,
-  subscriptPosition: 'first' | 'last'
+  subscriptPosition: 'first' | 'last',
+  until?: Readonly<Terminator>
 ): MathJsonExpression | null {
   if (parser.match('_')) {
     const sub = parser.parseGroup() ?? parser.parseToken();
     if (sub === null) return null;
-    const args = parser.parseArguments('implicit');
+    const args = parser.parseArguments('implicit', until);
     if (args === null || args.length === 0) return null;
     return subscriptPosition === 'first'
       ? [head, sub, ...args]
@@ -2553,11 +2554,13 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   {
     kind: 'function',
     symbolTrigger: 'exp',
-    parse: (parser: Parser) => parseExp(parser),
+    parse: (parser: Parser, until?: Readonly<Terminator>) =>
+      parseExp(parser, until),
   },
   {
     latexTrigger: '\\exp',
-    parse: (parser: Parser) => parseExp(parser),
+    parse: (parser: Parser, until?: Readonly<Terminator>) =>
+      parseExp(parser, until),
   },
   {
     name: 'ImaginaryUnit',
@@ -3051,8 +3054,8 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     // (BesselJ-style), e.g. W₋₁(x) → `\operatorname{W}_{-1}(x)`. The branch is
     // the SECOND argument (the value is first); one-argument W(x) prints
     // without a subscript.
-    parse: (parser: Parser) =>
-      parseSubscriptedFunction(parser, 'LambertW', 'last'),
+    parse: (parser: Parser, until) =>
+      parseSubscriptedFunction(parser, 'LambertW', 'last', until),
     serialize: (serializer, expr) => {
       const x = operand(expr, 1);
       const k = operand(expr, 2);
@@ -3073,8 +3076,8 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     name: 'BesselJ',
     latexTrigger: ['\\operatorname{J}'],
     kind: 'function',
-    parse: (parser: Parser) =>
-      parseSubscriptedFunction(parser, 'BesselJ', 'first'),
+    parse: (parser: Parser, until) =>
+      parseSubscriptedFunction(parser, 'BesselJ', 'first', until),
     serialize: (serializer, expr) => {
       const order = operand(expr, 1);
       const x = operand(expr, 2);
@@ -3093,8 +3096,8 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     name: 'BesselY',
     latexTrigger: ['\\operatorname{Y}'],
     kind: 'function',
-    parse: (parser: Parser) =>
-      parseSubscriptedFunction(parser, 'BesselY', 'first'),
+    parse: (parser: Parser, until) =>
+      parseSubscriptedFunction(parser, 'BesselY', 'first', until),
     serialize: (serializer, expr) => {
       const order = operand(expr, 1);
       const x = operand(expr, 2);
@@ -3113,8 +3116,8 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     name: 'BesselI',
     latexTrigger: ['\\operatorname{I}'],
     kind: 'function',
-    parse: (parser: Parser) =>
-      parseSubscriptedFunction(parser, 'BesselI', 'first'),
+    parse: (parser: Parser, until) =>
+      parseSubscriptedFunction(parser, 'BesselI', 'first', until),
     serialize: (serializer, expr) => {
       const order = operand(expr, 1);
       const x = operand(expr, 2);
@@ -3133,8 +3136,8 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     name: 'BesselK',
     latexTrigger: ['\\operatorname{K}'],
     kind: 'function',
-    parse: (parser: Parser) =>
-      parseSubscriptedFunction(parser, 'BesselK', 'first'),
+    parse: (parser: Parser, until) =>
+      parseSubscriptedFunction(parser, 'BesselK', 'first', until),
     serialize: (serializer, expr) => {
       const order = operand(expr, 1);
       const x = operand(expr, 2);
@@ -3158,11 +3161,11 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     name: 'PolyLog',
     latexTrigger: ['\\operatorname{Li}'],
     kind: 'function',
-    parse: (parser: Parser) => {
+    parse: (parser: Parser, until) => {
       if (!parser.match('_')) return null;
       const order = parser.parseGroup() ?? parser.parseToken();
       if (order === null) return null;
-      const args = parser.parseArguments('implicit');
+      const args = parser.parseArguments('implicit', until);
       if (args === null) return ['PolyLog', order];
       return ['PolyLog', order, ...args];
     },
@@ -3246,7 +3249,8 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
       symbol(expr) !== null
         ? '\\lg'
         : '\\log_{10}' + serializer.wrapArguments(expr),
-    parse: (parser: Parser) => parseLg(parser),
+    parse: (parser: Parser, until?: Readonly<Terminator>) =>
+      parseLg(parser, until),
   },
   // Function-style alias: `\operatorname{lg}(x)`. Reuses the native `\lg`
   // parser so call-binding is identical (prefix minus binds after the call,
@@ -3254,13 +3258,15 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   {
     kind: 'function',
     symbolTrigger: 'lg',
-    parse: (parser: Parser) => parseLg(parser),
+    parse: (parser: Parser, until?: Readonly<Terminator>) =>
+      parseLg(parser, until),
   },
   {
     name: 'Lb',
     standaloneSymbol: true,
     latexTrigger: '\\lb',
-    parse: (parser: Parser) => parseLb(parser),
+    parse: (parser: Parser, until?: Readonly<Terminator>) =>
+      parseLb(parser, until),
     // `\lb` is not a standard LaTeX command, so an *applied* `Lb` writes the
     // conventional `\log_2(x)` (which already parses back to `Lb`, see
     // `parseLog`'s `sub === 2` case). The bare function symbol still
@@ -3275,7 +3281,8 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   {
     kind: 'function',
     symbolTrigger: 'lb',
-    parse: (parser: Parser) => parseLb(parser),
+    parse: (parser: Parser, until?: Readonly<Terminator>) =>
+      parseLb(parser, until),
   },
   // `Log2` and `Log10` are not standard LaTeX either; both are written as a
   // subscripted `\log` and read back as `Log(x, 2)` and `Log(x)`.
@@ -3299,7 +3306,8 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     name: 'Ln',
     standaloneSymbol: true,
     latexTrigger: ['\\ln'],
-    parse: (parser: Parser) => parseLog('Ln', parser),
+    parse: (parser: Parser, until?: Readonly<Terminator>) =>
+      parseLog('Ln', parser, until),
     serialize: (serializer, expr) =>
       symbol(expr) !== null ? '\\ln' : '\\ln' + serializer.wrapArguments(expr),
   },
@@ -3308,13 +3316,15 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   {
     kind: 'function',
     symbolTrigger: 'ln',
-    parse: (parser: Parser) => parseLog('Ln', parser),
+    parse: (parser: Parser, until?: Readonly<Terminator>) =>
+      parseLog('Ln', parser, until),
   },
   {
     name: 'Log',
     standaloneSymbol: true,
     latexTrigger: ['\\log'],
-    parse: (parser: Parser) => parseLog('Log', parser),
+    parse: (parser: Parser, until?: Readonly<Terminator>) =>
+      parseLog('Log', parser, until),
     serialize: (serializer, expr) => {
       if (symbol(expr) !== null) return '\\log';
       const [body, base] = operands(expr)!;
@@ -3337,7 +3347,8 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
   {
     kind: 'function',
     symbolTrigger: 'log',
-    parse: (parser: Parser) => parseLog('Log', parser),
+    parse: (parser: Parser, until?: Readonly<Terminator>) =>
+      parseLog('Log', parser, until),
   },
 
   {
@@ -4585,9 +4596,12 @@ function applyFunctionSup(
   return ['Power', applied, sup] as MathJsonExpression;
 }
 
-function parseExp(parser: Parser): MathJsonExpression {
+function parseExp(
+  parser: Parser,
+  until?: Readonly<Terminator>
+): MathJsonExpression {
   const sup = parseFunctionSup(parser);
-  const args = parser.parseArguments('implicit');
+  const args = parser.parseArguments('implicit', until);
   if (args === null)
     return sup === null
       ? ('Exp' as MathJsonExpression)
@@ -4600,7 +4614,11 @@ function parseExp(parser: Parser): MathJsonExpression {
   );
 }
 
-function parseLog(command: string, parser: Parser): MathJsonExpression | null {
+function parseLog(
+  command: string,
+  parser: Parser,
+  until?: Readonly<Terminator>
+): MathJsonExpression | null {
   let sub: MathJsonExpression | null = null;
 
   if (parser.match('_')) sub = parser.parseGroup() ?? parser.parseToken();
@@ -4609,7 +4627,11 @@ function parseLog(command: string, parser: Parser): MathJsonExpression | null {
   // `\ln^2 x` → `(\ln x)^2`, `\ln^{-1} x` → the inverse (`exp`).
   const sup = parseFunctionSup(parser);
 
-  let args = parser.parseArguments('implicit');
+  // The terminator of the enclosing expression ends the argument: inside an
+  // integral it is the differential, so `\int_0^1 t\ln t\,dt` reads
+  // `\ln t`, not `\ln(t\,dt)` (which made `d` a second integration
+  // variable). `\sin` forwards it the same way (`parseTrig`).
+  let args = parser.parseArguments('implicit', until);
 
   // No argument, base or superscript: a bare function symbol
   // (`12 |> \ln` → `Ln`), matching the behavior of `\cos`, `\lg` and `\lb`.
@@ -4647,9 +4669,12 @@ function parseLog(command: string, parser: Parser): MathJsonExpression | null {
   return applyFunctionSup(applied, sup, inverse);
 }
 
-function parseLg(parser: Parser): MathJsonExpression {
+function parseLg(
+  parser: Parser,
+  until?: Readonly<Terminator>
+): MathJsonExpression {
   const sup = parseFunctionSup(parser);
-  let args = parser.parseArguments('implicit');
+  let args = parser.parseArguments('implicit', until);
   if (args === null && sup === null) return 'Lg' as MathJsonExpression;
   // A superscript but no argument (`\lg^{-1}`): the topic marker stands
   // in for the argument so a pipeline can fill it.
@@ -4662,8 +4687,11 @@ function parseLg(parser: Parser): MathJsonExpression {
   );
 }
 
-function parseLb(parser: Parser): MathJsonExpression {
-  const args = parser.parseArguments('implicit');
+function parseLb(
+  parser: Parser,
+  until?: Readonly<Terminator>
+): MathJsonExpression {
+  const args = parser.parseArguments('implicit', until);
   // Bare `\lb` is the binary-log function symbol (`12 |> \lb` → log₂ 12),
   // not `Log` (base 10).
   if (args === null) return 'Lb' as MathJsonExpression;

@@ -109,6 +109,19 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
+### `.N()` of an integral with a doubly logarithmic divergence at a bound gives a finite value (OPEN, small — found 2026-10-14 by the review of the shell divergence test)
+
+`\int_0^{1/2} \frac{-1}{t\ln t}\,dt` is `+∞` (the antiderivative is
+`−ln(−ln t)`), but `.N()` gives `6.9 ± 1.6`. The divergence test of the
+quadrature (`shellsDiverge`, `numerics/gauss-kronrod.ts`) compares blocks of 20
+dyadic shells next to the bound and reads a block ratio of at least `0.99` as a
+divergence. The shells of this integrand are about `1/k` at depth `k`, so the
+block ratio is about `1 − 20/k`: it reaches `0.99` only at `k = 2000`, past the
+deepest shell the doubles allow (about 1070 next to 0). The ratio rises toward 1
+at every depth, which is itself the signature of a sub-geometric tail whose
+terms do not shrink geometrically; a test on the trend of the ratio (as
+`shellsDiverge` already extrapolates a FALLING ratio) could detect it. The
+`evaluate()` route gives `+∞`.
 ### A declared result computed through a numeric-tuple argument to a scalar parameter (OPEN, small — found 2026-10-13 by the review of the row 373 call typing)
 
 With `f := x ↦ (−x, x)` and `g := a ↦ f((a, a))`, both declared `function`,
@@ -822,16 +835,6 @@ The values are correct, but `simplify()` does not reduce them.
 read the complex literal `−i` as a negation. `∫ (x² − 1)/((x − 1)(x⁴ + 1)) dx`
 over `(−∞, ∞)` gives `π/(2(2 − √2)) − π/(2(2 + √2))` instead of `π/√2`.
 
-### `∫ dx/x` over `(−∞, ∞)` stays unevaluated (OPEN, small — found 2026-10-04 by the review of PR #410; present before)
-
-The integral has no value: the integrand changes sign at its simple pole at
-0. The residue route declines because the integrand decays only like `1/x`,
-so it cannot prove that the closing arc contributes nothing. The other routes
-give no answer, and `.N()` is `NaN`. A pole of odd order on the path makes the
-integral have no value whatever the behavior at infinity, so the pole
-classification (`realPathDivergence()` in `symbolic/contour-integrate.ts`)
-could also run when the decay test fails.
-
 ### Symbolic integration and `DSolve` have no default budget (OPEN, design decision — found 2026-10-03 by the `x^x` hang in integration by parts)
 
 A plain `evaluate()` of `Integrate` or `DSolve` has no deadline unless the
@@ -1119,37 +1122,6 @@ User decision (2026-10-04): until a method gives a value, the result stays
 (true value `-0.0019`) and `0.072 ± 0.018` for `∫₀^∞ sin t·cos(√2·t)/t dt`
 (true value 0, four times the error away).
 
-### A pole at a number is missed when the integrand is not real on one side of it (OPEN, small — found 2026-10-01 by the review of the pole proofs; present before)
-
-`.evaluate()` of an integral over `[−1, 1]` of a power of `x` whose exponent
-is not an integer, or depends on a symbol, gives the antiderivative
-difference, although the pole at `x = 0` is inside the bounds:
-
-- `\int_{-1}^{1} x^{-a^2-1} dx` → `-a^(-2) + (-1)^(-(a^2)) / a^2`, which is
-  `−2` at `a = 1`. Expected: unevaluated (for `a = 1` the integral is `+∞`).
-- `\int_{-1}^{1} x^{-2-a^2} dx` → `1 / (-1 - a^2) - ((-1)^(-1 - a^2)) /
-  (-1 - a^2)`, which is `0` at `a = 1`. Expected: unevaluated (`+∞` for
-  `a = 1`).
-- `\int_{-1}^{1} x^{-1.5} dx` → `-2 - 2i`. Expected: no value (the integral
-  diverges at 0).
-
-For `x < 0`, `x^p` with a non-integer `p` is not real, so the pole check
-(`interiorPoleVerdict`, `symbolic/interior-pole.ts`) does not find a pole
-with a sign on that side. A pole at `x = 0` with `|x^p| → ∞` on the real side
-is enough to make the integral diverge.
-
-### `∫₀¹ x^(−p) dx` for `p` very close to 1 is `+∞` or `NaN` (OPEN, small — found 2026-10-01 by the review of the endpoint quadrature; present before)
-
-`.N()` of `\int_0^1 x^{-0.9999}\,dx` (`= 10000`) gives `+∞`;
-`\int_0^1 x^{-0.9999}\ln(x)\,dx` (`= −10⁸`) gives `−∞`; for `p` from
-`0.9993` to `0.9998` both give `NaN` (`p = 0.9992` gives
-`1250.0000000060 ± 0.0000000070`). Expected: the value, or `NaN` with no
-sign. The divergence test of the shells (`shellsDiverge`,
-`numerics/gauss-kronrod.ts`) reads the ratio of consecutive shells,
-`2^(p−1) ≈ 0.99993`, as a divergence, and then the sign of a pole at the
-bound (`endpointPoleVerdict`, `library/calculus.ts`) turns the divergence
-into `+∞` or `−∞`.
-
 ### A nested iterated integral on the parse route loses the error of the inner integral (OPEN, small — found 2026-10-01 by the review of the endpoint quadrature; present before)
 
 `.N()` of `\int_0^1\int_0^1 e^{-xy}/x^{0.99} dx dy` gives
@@ -1160,17 +1132,6 @@ integral, to `_SYS.integrate` (`compilation/javascript-target.ts`). That
 call returns a plain number, so the error of the inner quadrature is not
 added to the error of the outer one, as `nIntegrateMultiple`
 (`library/calculus.ts`) does for `Integrate(f, Limits(x, …), Limits(y, …))`.
-
-### `∫₀¹ ln t dt` stays unevaluated under `.evaluate()` (OPEN, small — found 2026-10-01 by the fix for a pole at a bound)
-
-`Integrate(Ln(t), Limits(t, 0, 1)).evaluate()` stays unevaluated, although
-the integral is `−1` (`.N()` gives `-1.000000000000 ± 0.000000000086`). The
-antiderivative `t·ln t − t` evaluated at `0` is `0·(−∞)`, which is `NaN`, and
-a `NaN` difference keeps the integral unevaluated. The value at a finite
-bound must be the one-sided limit from inside the interval, as
-`improperEndpointValue` (`library/calculus.ts`) does for an infinite bound.
-`symbolicLimit(t·ln t − t, t, 0, +1)` gives `undefined` today, so that limit
-must be found first (`t·ln t → 0` as `t → 0⁺`).
 
 ### The order of several `Limits` of `Integrate`: the parser and the documentation disagree with the evaluation (OPEN, decided 2026-10-01 — found by the review of the pole proofs. Decision: keep "first = outer", as Mathematica does; change the parser so that `\iint f\,dx\,dy` gives `Limits(y), Limits(x)`, and correct the reference)
 
@@ -1205,27 +1166,6 @@ a number, and the interior-pole check of `.N()` saw no pole (it now unwraps
 the `Block` in `valueAt`, `symbolic/interior-pole.ts`). The `Block` evaluate
 handler (`library/control-structures.ts`) should pass the numeric request
 to the expressions it evaluates.
-
-### `∫₋₁¹ t^(−n) dt` gives a closed form that is wrong for `n ≥ 1` (OPEN, small — found 2026-10-01 by the review of the pole proofs)
-
-`\int_{-1}^1 t^{-n}\,dt` evaluates to `1/(1 − n) − (−1)^(1 − n)/(1 − n)`,
-but the integral diverges for every `n ≥ 1` (the pole at `0` is inside).
-`symbolicPoleMayBeInside` (`symbolic/interior-pole.ts`) handles a base whose
-zero moves with a free symbol (`(t − a)^(−n)`), and it samples the free
-symbols to confirm a pole at a number, but `n = 2.236`, its only sample with
-a pole, makes `t^(−n)` complex for `t < 0`, so the pole is not confirmed. A
-power whose exponent is not a number and not proven positive, with a base
-that has a zero at a number strictly inside the interval, should keep the
-integral unevaluated. A zero AT a bound must not: `∫₀¹ tⁿ dt` is the
-correct guarded `1/(n + 1)` for `n + 1 > 0`.
-
-### The antiderivative of `t^(−n)` has no case for `n = 1` (OPEN, small — found 2026-10-01 by the review of the pole proofs)
-
-`\int t^{-n}\,dt` is `t^(1 − n)/(1 − n)` and `\int (t-a)^{-n}\,dt` is
-`(t − a)^(1 − n)/(1 − n)`, with no case for `n = 1`. So
-`\int_1^2 t^{-n}\,dt` is `(2^(1 − n) − 1)/(1 − n)`, which gives `~∞` at
-`n = 1`, where the integral is `ln 2`. The result should be a conditional
-value (`ln|t|` when `n = 1`), or carry the condition `n ≠ 1`.
 
 ### A sum or product with a bound that depends on another index stays unevaluated (OPEN, small — found 2026-10-01 by the review of the flat spelling of indexes)
 

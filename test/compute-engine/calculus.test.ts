@@ -2204,12 +2204,14 @@ describe('INTEGRATE: interior pole', () => {
   });
 
   test('a pole AT a bound is not interior', () => {
-    // Improper but the engine already answers these; unchanged by the check.
+    // Improper but the engine answers these; unchanged by the check. The
+    // last one is the one-sided limit of the antiderivative `t·ln t − t`
+    // at `0` (see `improperEndpointValue`).
     expect(evaluated('\\int_{0}^{1} \\frac{1}{\\sqrt{t}} dt').toString()).toBe(
       '2'
     );
     expect(evaluated('\\int_{0}^{1} \\frac{1}{t} dt').toString()).toBe('+oo');
-    expect(evaluated('\\int_{0}^{1} \\ln t \\, dt').operator).toBe('Integrate');
+    expect(evaluated('\\int_{0}^{1} \\ln t \\, dt').toString()).toBe('-1');
   });
 
   test('a pole at a bound with a free symbol in the other bound', () => {

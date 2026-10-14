@@ -73,6 +73,32 @@ const MAX_PERIODIC_SITES = 64;
 const MIN_POLE_ORDER = 0.9;
 
 /**
+ * The rounding within which an order measured by {@link divergesOnSide} is
+ * 1: the samples of a pure power are exact to a few units in the last place,
+ * so the order of `1/t` is 1 to about `1e-15`.
+ */
+const POLE_ORDER_ROUNDING = 1e-9;
+
+/**
+ * The factor by which the distance of a measured order to 1 must shrink
+ * from one range of samples to the next, one hundred times closer, for
+ * {@link divergesOnSide} to read an order below 1 as a pole with a term
+ * that lowers it. A term `t^(−q)` next to a pole `1/t` lowers the order by
+ * about `t^(1−q)`, which shrinks by `100^(1−q)` between the ranges: by 10
+ * for `1/√t`, by 100 for a constant. An integrable singularity `t^(−p)` has
+ * the same order at every distance, so its distance to 1 does not shrink.
+ */
+const POLE_ORDER_APPROACH = 5;
+
+/**
+ * The largest change of the phase of a complex integrand between two
+ * samples that {@link divergesOnSide} reads as a constant phase. The phase
+ * of `x^(−1.5)` at `x < 0` is `−3π/2` at every sample, to the rounding of
+ * the power.
+ */
+const POLE_PHASE_TOLERANCE = 1e-6;
+
+/**
  * The real value of `expr`, or `null` when it is not a finite real number.
  *
  * Used for the integration bounds when the check needs a finite range
@@ -381,6 +407,17 @@ function poleSites(
       for (const factor of d.ops) addDenominatorSites(factor);
       return;
     }
+    // The zeros of `−u`, `√u`, `|u|` and `u/v` are zeros of `u`: `|x|^(−1.5)`
+    // is unbounded at `x = 0`.
+    if (
+      d.operator === 'Negate' ||
+      d.operator === 'Sqrt' ||
+      d.operator === 'Abs' ||
+      d.operator === 'Divide'
+    ) {
+      addDenominatorSites(d.op1);
+      return;
+    }
     if (d.operator === 'Power') {
       const exponent = d.op2;
       if (isNumber(exponent) && exponent.isNumberLiteral && exponent.re > 0)
@@ -432,6 +469,38 @@ function poleSites(
 }
 
 /**
+ * `f(x)` as a sample for the divergence tests: `value` is the real value of
+ * the integrand, or its MAGNITUDE `|f(x)|` with `complex` set when the
+ * integrand is a complex number there (`x^(−1.5)` at `x < 0`), and `phase`
+ * is its argument; `NaN` when it is not a number at all (an unevaluated
+ * symbol).
+ */
+function sampleAt(
+  integrand: Expression,
+  variable: string,
+  x: number,
+  ce: ComputeEngine
+): { value: number; complex: boolean; phase: number } {
+  // The body of a function literal can be a `Block` of one expression
+  // (`\int_{-1}^1 \frac{\pi}{t}\,dt` on the parse route). `.N()` of a `Block`
+  // does not make its body numeric (`Block(π/0.001).N()` is `1000π`), so the
+  // sample would not be a number: the one expression is sampled instead.
+  while (isFunction(integrand, 'Block') && integrand.nops === 1)
+    integrand = integrand.op1;
+  const v = integrand.subs({ [variable]: ce.number(x) }).N();
+  if (!isNumber(v) || !v.isNumberLiteral)
+    return { value: NaN, complex: false, phase: NaN };
+  // `phase` is the argument of the value: `0` or `π` for a real number.
+  if (v.isComplex)
+    return {
+      value: Math.hypot(v.re, v.im),
+      complex: true,
+      phase: Math.atan2(v.im, v.re),
+    };
+  return { value: v.re, complex: false, phase: v.re < 0 ? Math.PI : 0 };
+}
+
+/**
  * `f(x)` as a real number, or `NaN` when the integrand does not evaluate to a
  * real number there (a complex branch, an unevaluated symbol).
  */
@@ -441,15 +510,8 @@ function valueAt(
   x: number,
   ce: ComputeEngine
 ): number {
-  // The body of a function literal can be a `Block` of one expression
-  // (`\int_{-1}^1 \frac{\pi}{t}\,dt` on the parse route). `.N()` of a `Block`
-  // does not make its body numeric (`Block(π/0.001).N()` is `1000π`), so the
-  // sample would not be a number: the one expression is sampled instead.
-  while (isFunction(integrand, 'Block') && integrand.nops === 1)
-    integrand = integrand.op1;
-  const v = integrand.subs({ [variable]: ce.number(x) }).N();
-  if (!isNumber(v) || !v.isNumberLiteral || v.isComplex) return NaN;
-  return v.re;
+  const sample = sampleAt(integrand, variable, x, ce);
+  return sample.complex ? NaN : sample.value;
 }
 
 /** The sign of a divergence, as the integrand's sign on the way into it. */
@@ -460,7 +522,10 @@ export type DivergenceSign = 'positive' | 'negative';
  * `site` — i.e. whether the singularity is strong enough to make the integral
  * diverge — and with what sign: `undefined` when it does not diverge there,
  * `'unknown'` when it does but the sign has not settled by the closest
- * sample.
+ * sample, `'complex'` when it does but the integrand is a complex number on
+ * that side (`x^(−1.5)` for `x < 0`): the magnitude `|f|` then grows like
+ * `1/|t − site|` or faster, so the integral has no value, real or complex,
+ * and no real sign.
  *
  * `side` is `+1` or `−1`; `reach` is how far from the site the sampling may go
  * without leaving the interval or crossing another candidate site. The order
@@ -479,12 +544,29 @@ function divergesOnSide(
   side: 1 | -1,
   reach: number,
   ce: ComputeEngine
-): DivergenceSign | 'unknown' | undefined {
-  const near = valueAt(integrand, variable, site + side * reach, ce);
-  const nearer = valueAt(integrand, variable, site + (side * reach) / 100, ce);
+): DivergenceSign | 'unknown' | 'complex' | undefined {
+  const nearSample = sampleAt(integrand, variable, site + side * reach, ce);
+  const nearerSample = sampleAt(
+    integrand,
+    variable,
+    site + (side * reach) / 100,
+    ce
+  );
+  // The order of the pole is read off the magnitudes: for a complex sample,
+  // `|f|`.
+  const near = nearSample.value;
+  const nearer = nearerSample.value;
 
-  // A sample that is not a real number at all is no evidence of a pole.
+  // A sample that is not a number at all is no evidence of a pole.
   if (Number.isNaN(near) || Number.isNaN(nearer)) return undefined;
+
+  const nearestSample = sampleAt(
+    integrand,
+    variable,
+    site + (side * reach) / 1e4,
+    ce
+  );
+  const nearest = nearestSample.value;
 
   let diverges: boolean;
   if (!Number.isFinite(nearer)) {
@@ -499,11 +581,54 @@ function divergesOnSide(
   } else {
     const ratio = Math.abs(nearer) / Math.abs(near);
     if (!(ratio > 1)) return undefined;
-    diverges = Math.log(ratio) / Math.log(100) >= MIN_POLE_ORDER;
+    const order = Math.log(ratio) / Math.log(100);
+    if (!(order >= MIN_POLE_ORDER)) return undefined;
+    // An order below 1 is a pole only when it is on its way to 1: the
+    // order of `1/t + 1/√t` measured at `δ = 0.01` is `0.98`, and `0.998`
+    // one hundred times closer, since the term that lowers it shrinks
+    // relative to the pole. The order of an integrable singularity
+    // `|t|^(−0.95)` or `t^(−0.95)` (read on its magnitude, for `t < 0`) is
+    // `0.95` at every distance, and its integral is finite: the order
+    // closer in must be 1 within rounding, or its distance to 1 must have
+    // shrunk by a factor of at least `POLE_ORDER_APPROACH` between the two
+    // ranges.
+    if (order < 1 - POLE_ORDER_ROUNDING) {
+      if (Number.isNaN(nearest)) return undefined;
+      if (!Number.isFinite(nearest)) diverges = true;
+      else {
+        const closerRatio = Math.abs(nearest) / Math.abs(nearer);
+        if (!(closerRatio > 1)) return undefined;
+        const closerOrder = Math.log(closerRatio) / Math.log(100);
+        diverges =
+          closerOrder >= 1 - POLE_ORDER_ROUNDING ||
+          (closerOrder > order &&
+            1 - closerOrder <= (1 - order) / POLE_ORDER_APPROACH);
+      }
+    } else diverges = true;
   }
   if (!diverges) return undefined;
 
-  const nearest = valueAt(integrand, variable, site + (side * reach) / 1e4, ce);
+  if (nearSample.complex || nearerSample.complex || nearestSample.complex) {
+    // The magnitude of a complex integrand can grow like a pole while its
+    // integral converges: `e^(i/x)/x` has the magnitude `1/|x|`, and its
+    // integral over `(0, 1]` is `∫₁^∞ e^(iu)/u du`, which converges by the
+    // rotation of the phase. The divergence is claimed only when the phase
+    // of the three samples is the same, as for `x^(−1.5)` at `x < 0`
+    // (`−3π/2` everywhere): the integrand is then a constant complex factor
+    // times a positive function that grows like a pole.
+    const phases = [nearSample, nearerSample, nearestSample].map(
+      (p) => p.phase
+    );
+    if (phases.some((p) => Number.isNaN(p))) return undefined;
+    const turn = (p: number, q: number) =>
+      Math.abs(Math.atan2(Math.sin(p - q), Math.cos(p - q)));
+    if (
+      turn(phases[0], phases[1]) > POLE_PHASE_TOLERANCE ||
+      turn(phases[1], phases[2]) > POLE_PHASE_TOLERANCE
+    )
+      return undefined;
+    return 'complex';
+  }
   if (Number.isNaN(nearest) || nearer === 0 || nearest === 0) return 'unknown';
   if (Math.sign(nearer) !== Math.sign(nearest)) return 'unknown';
   return nearest > 0 ? 'positive' : 'negative';
@@ -511,13 +636,16 @@ function divergesOnSide(
 
 /**
  * The smallest pole order, measured at the closest samples, that
- * {@link endpointDivergesOnSide} accepts. See {@link ENDPOINT_LIMIT_ORDER}.
+ * {@link endpointDivergesOnSide} accepts. See {@link ENDPOINT_SHORT_MARGIN}.
  */
 const ENDPOINT_MIN_ORDER = 0.99;
 
 /**
- * The smallest EXTRAPOLATED pole order that {@link endpointDivergesOnSide}
- * accepts.
+ * How far below 1 the EXTRAPOLATED pole order may be for
+ * {@link endpointDivergesOnSide} to accept it, when the order is read over a
+ * short range of distances (fewer than {@link ENDPOINT_LONG_RANGE_DECADES}
+ * decades: next to a nonzero bound, where the samples stop at the spacing of
+ * the doubles).
  *
  * A slowly varying factor raises the measured order of an integrable
  * singularity: `|f| = δ^(−p)·|ln δ|ᵏ` at a distance `δ` from the bound has
@@ -527,11 +655,38 @@ const ENDPOINT_MIN_ORDER = 0.99;
  * trend is extrapolated to the bound: a pole (`1/t`, `tan t` at `π/2`) has a
  * constant order, or an order that approaches 1 geometrically (a regular part
  * such as the `−100` in `1/t − 100`), while a logarithmic factor makes the
- * order approach `p` as `k/L`. The extrapolated order must be 1 within this
- * margin, which is far below the change the model `p + k/L` attributes to a
- * logarithmic factor at the sampled distances.
+ * order approach `p` as `k/L`. Over ten decades the two models reproduce the
+ * order of a mixed integrand (`t^(−1)·ln t + t^(−1/2)`) to about `1e-5` only,
+ * and of `t^(−0.9999)·(1 + t^(0.2))` to `1e-2`, so the margin is wide.
  */
-const ENDPOINT_LIMIT_ORDER = 1 - 1e-4;
+const ENDPOINT_SHORT_MARGIN = 1e-4;
+
+/**
+ * The number of decades of distance over which the trend of the order is
+ * extrapolated precisely enough for {@link ENDPOINT_LONG_MARGIN}: next to a
+ * bound at 0, the samples span {@link ENDPOINT_MAX_DECADES} decades.
+ */
+const ENDPOINT_LONG_RANGE_DECADES = 30;
+
+/**
+ * The margin of {@link ENDPOINT_SHORT_MARGIN} when the order is read over
+ * {@link ENDPOINT_LONG_RANGE_DECADES} decades or more. Over 60 decades the
+ * two trend models reproduce the order of `t^(−p)·ln t`, `1/t − 100`,
+ * `t^(−1)·ln t + t^(−1/2)`, `t^(−1)·(1 + t^(0.3)/2)·ln t` and
+ * `1/(t·ln²t) + t^(−1/2)` to `1e-11` or better (measured on the sampled
+ * values), so `t^(−0.9999)·ln t` (convergent, `∫₀¹ = −10⁸`) extrapolates to
+ * `0.9999` and is not read as a pole.
+ */
+const ENDPOINT_LONG_MARGIN = 1e-7;
+
+/**
+ * The margin of {@link ENDPOINT_SHORT_MARGIN} when the three measured orders
+ * agree, as they do for a pure power `t^(−p)`: the order is then `p` to the
+ * rounding of the samples, and `t^(−0.9999)` (convergent, `∫₀¹ = 10000`) is
+ * not a pole. A pole of order 1 with a regular part (`1/t − 100`) also
+ * measures a constant order, exactly 1.
+ */
+const ENDPOINT_FLAT_MARGIN = 1e-9;
 
 /**
  * The largest quotient of two successive changes of the measured order that
@@ -571,9 +726,12 @@ const ENDPOINT_MAX_DECADES = 60;
  * samples; the farthest sample is skipped, so that a large regular part
  * (`1/t − 100`, which is 0 at `t = 0.01`) does not distort the measure. The
  * integral diverges when the closest order is at least `ENDPOINT_MIN_ORDER`
- * and the order extrapolated to the bound is at least `ENDPOINT_LIMIT_ORDER`
- * (see `ENDPOINT_GEOMETRIC_QUOTIENT`). The sign is the sign of the two
- * closest samples, which must agree.
+ * and the order extrapolated to the bound is 1 within a margin that depends
+ * on how precisely it could be extrapolated: `ENDPOINT_FLAT_MARGIN` for a
+ * constant order, `ENDPOINT_LONG_MARGIN` over a long range of distances and
+ * `ENDPOINT_SHORT_MARGIN` over a short one (see
+ * `ENDPOINT_GEOMETRIC_QUOTIENT`). The sign is the sign of the four closest
+ * samples, which must agree.
  *
  * A sample that overflows is the sign of a steep pole: it is accepted when
  * the samples closer to the bound overflow too, and either the first
@@ -636,8 +794,11 @@ function endpointDivergesOnSide(
   const change = near - nearer;
   const previousChange = far - near;
   let limit: number;
-  if (Math.abs(change) <= 1e-9) limit = nearer;
-  else if (
+  let margin = ENDPOINT_SHORT_MARGIN;
+  if (Math.abs(change) <= 1e-9) {
+    limit = nearer;
+    margin = ENDPOINT_FLAT_MARGIN;
+  } else if (
     Number.isFinite(previousChange) &&
     previousChange !== 0 &&
     Math.abs(change / previousChange) <= ENDPOINT_GEOMETRIC_QUOTIENT
@@ -656,11 +817,21 @@ function endpointDivergesOnSide(
     const mNearer = mean(L[3], L[4]);
     limit = (nearer * mNearer - near * mNear) / (mNearer - mNear);
   }
-  if (!(limit >= ENDPOINT_LIMIT_ORDER)) return undefined;
+  if (
+    margin === ENDPOINT_SHORT_MARGIN &&
+    decades >= ENDPOINT_LONG_RANGE_DECADES
+  )
+    margin = ENDPOINT_LONG_MARGIN;
+  if (!(limit >= 1 - margin)) return undefined;
 
-  const [a, b] = [points[3].value, points[4].value];
-  if (Math.sign(a) !== Math.sign(b)) return undefined;
-  return b > 0 ? 'positive' : 'negative';
+  // The sign is read on the four closest samples, which must agree: an
+  // integrand that oscillates on its way into the bound (`sin(1/t)/t²`,
+  // whose integral has no value) can have the same sign at two samples,
+  // seldom at four. The farthest sample is left out, as for the order: a
+  // large regular part can turn it (`1/t − 100` is 0 at `t = 0.01`).
+  const signs = points.slice(1).map((p) => Math.sign(p.value));
+  if (signs.some((sign) => sign !== signs[0])) return undefined;
+  return signs[0] > 0 ? 'positive' : 'negative';
 }
 
 /**
@@ -766,12 +937,17 @@ export function interiorPoleVerdict(
     const right = divergesOnSide(integrand, variable, site.t, 1, reach, ce);
     if (left === undefined || right === undefined) continue;
 
+    // A side on which the integrand is a complex number and `|f|` diverges
+    // (`x^(−1.5)` for `x < 0`) gives the integral no value, real or complex:
+    // `mixed`, as a sign change across the pole does.
     const sign: PoleVerdict['sign'] =
-      left === 'unknown' || right === 'unknown'
-        ? 'unknown'
-        : left === right
-          ? left
-          : 'mixed';
+      left === 'complex' || right === 'complex'
+        ? 'mixed'
+        : left === 'unknown' || right === 'unknown'
+          ? 'unknown'
+          : left === right
+            ? left
+            : 'mixed';
     if (verdict === undefined) verdict = { sign };
     else if (verdict.sign !== sign) verdict = { sign: 'mixed' };
   }
@@ -1508,6 +1684,145 @@ export function symbolicPoleMayBeInside(
     return true;
   }
   return false;
+}
+
+/**
+ * The points strictly between the finite real bounds `lower` and `upper` at
+ * which the base of a power of `integrand` with a SYMBOLIC exponent is zero:
+ * `t = 0` for `t^(−n)` over `[−1, 1]`, `t = 1/2` for `(2t − 1)^(−n)` over
+ * `[0, 3]`. A symbolic exponent is one that is not a number literal, does not
+ * depend on the variable, and is not proven positive (`realSign`): the
+ * integrand may then be unbounded at the zero, and the fundamental theorem
+ * of calculus does not apply across it (see `integrateAtSymbolicExponentZeros`,
+ * `library/calculus.ts`, which splits the integral there).
+ *
+ * Only a base that is a polynomial in the variable with numeric coefficients
+ * contributes its real roots; another base contributes nothing. The root of
+ * a linear base is `−c₀/c₁` and the roots of a quadratic base are given by
+ * the quadratic formula, both EXACT when the coefficients are, so that the
+ * bounds of the pieces stay exact: a float cut point is not a zero of the
+ * base (`t² − 2` at the double nearest `√2` is `1.4e-16`, not 0), so the
+ * pieces would see no endpoint `0^(1 − n)` and no convergence condition. A
+ * zero of a base of degree 3 or more cannot be given exactly: the result is
+ * then `null`, and the caller keeps the integral unevaluated. A root at a
+ * bound (within the rounding slack of `rootSite`) is not inside. The points
+ * are sorted in increasing order, without duplicates. `undefined` when a
+ * bound is not a finite real number or the bounds are equal.
+ */
+export function symbolicExponentBaseZeros(
+  integrand: Expression,
+  variable: string,
+  lower: Expression,
+  upper: Expression,
+  ce: ComputeEngine
+): Expression[] | null | undefined {
+  const a = finiteRealValue(lower);
+  const b = finiteRealValue(upper);
+  if (a === null || b === null) return undefined;
+  const lo = Math.min(a, b);
+  const hi = Math.max(a, b);
+  if (!(lo < hi)) return undefined;
+
+  const zeros: { t: number; point: Expression }[] = [];
+  let inexact = false;
+  let budget = SCAN_NODE_BUDGET;
+
+  // The exact roots of the polynomial with the coefficients `exact`
+  // (constant term first), in the order of the numeric `roots`: the one
+  // root of a linear base, the two of a quadratic one by the quadratic
+  // formula (`(−c₁ ∓ √(c₁² − 4c₂c₀)) / (2c₂)`, the `−` root first when `c₂`
+  // is positive). `null` for a higher degree.
+  const exactRoots = (
+    exact: ReadonlyArray<Expression>,
+    roots: ReadonlyArray<number>
+  ): Expression[] | null => {
+    if (exact.length === 2)
+      return [
+        ce
+          .function('Divide', [ce.function('Negate', [exact[0]]), exact[1]])
+          .evaluate(),
+      ];
+    if (exact.length !== 3 || roots.length !== 2) return null;
+    const [c0, c1, c2] = exact;
+    const root = ce.function('Sqrt', [
+      ce.function('Subtract', [
+        ce.function('Power', [c1, ce.number(2)]),
+        ce.function('Multiply', [ce.number(4), c2, c0]),
+      ]),
+    ]);
+    const twice = ce.function('Multiply', [ce.number(2), c2]);
+    const candidates = [
+      ce
+        .function('Divide', [
+          ce.function('Subtract', [ce.function('Negate', [c1]), root]),
+          twice,
+        ])
+        .evaluate(),
+      ce
+        .function('Divide', [
+          ce.function('Add', [ce.function('Negate', [c1]), root]),
+          twice,
+        ])
+        .evaluate(),
+    ];
+    // Pair each numeric root with the exact root that evaluates to it.
+    return roots.map((r) => {
+      const values = candidates.map((c) => finiteRealValue(c));
+      let best = 0;
+      for (let k = 1; k < candidates.length; k++) {
+        const value = values[k];
+        const bestValue = values[best];
+        if (
+          value !== null &&
+          (bestValue === null || Math.abs(value - r) < Math.abs(bestValue - r))
+        )
+          best = k;
+      }
+      return candidates[best];
+    });
+  };
+
+  const walk = (e: Expression): void => {
+    if (budget-- <= 0 || !isFunction(e)) return;
+    if (e.operator === 'Power') {
+      const base = e.op1;
+      const exponent = e.op2;
+      if (
+        !(isNumber(exponent) && exponent.isNumberLiteral) &&
+        !exponent.has(variable) &&
+        base.has(variable) &&
+        realSign(exponent, ce) !== 1
+      ) {
+        const coeffs = numericCoefficients(base, variable);
+        const roots =
+          coeffs !== null && coeffs.length >= 2
+            ? realPolynomialRoots(coeffs, ce._deadline)
+            : null;
+        if (roots !== null) {
+          const inside = roots.filter((r) => {
+            if (!(r > lo && r < hi)) return false;
+            const site = rootSite(r, coeffs!);
+            return !site.atBound(lo) && !site.atBound(hi);
+          });
+          if (inside.length > 0) {
+            const exact = getPolynomialCoefficients(base, variable);
+            const points = exact === null ? null : exactRoots(exact, roots);
+            if (points === null) inexact = true;
+            else
+              for (const r of inside)
+                zeros.push({ t: r, point: points[roots.indexOf(r)] });
+          }
+        }
+      }
+    }
+    for (const op of e.ops) walk(op);
+  };
+  walk(integrand);
+  if (inexact) return null;
+  zeros.sort((p, q) => p.t - q.t);
+  return zeros
+    .filter((z, i) => i === 0 || z.t !== zeros[i - 1].t)
+    .map((z) => z.point);
 }
 
 /**

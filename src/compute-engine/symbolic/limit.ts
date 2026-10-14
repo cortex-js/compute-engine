@@ -524,26 +524,59 @@ function limitAtFinite(
   //    which preserves the quotient that `simplify` would distribute away).
   const ratio = asRatio(e, ce);
   if (ratio) {
-    const n0 = limitDispatch(ratio.num, x, a, dir, ce, depth + 1);
-    const d0 = limitDispatch(ratio.den, x, a, dir, ce, depth + 1);
-    if (n0 && d0 && isIndeterminateRatio(n0, d0)) {
-      const dn = differentiate(ratio.num, x);
-      const dd = differentiate(ratio.den, x);
-      if (dn && dd) {
-        const next = ce.function('Divide', [dn, dd]);
-        return limitAtFinite(next, x, a, dir, ce, depth + 1);
-      }
-    }
-    // Determinate quotient: n0 / d0 when d0 ≠ 0 and both finite.
-    if (
-      n0 &&
-      d0 &&
-      !d0.is(0) &&
-      isDefiniteValue(n0, x) &&
-      isDefiniteValue(d0, x)
-    )
-      return n0.div(d0).evaluate();
+    const r = limitOfQuotientAtFinite(
+      ratio.num,
+      ratio.den,
+      x,
+      a,
+      dir,
+      ce,
+      depth
+    );
+    if (r !== undefined) return r;
   }
+
+  // 2a. A product with a factor that tends to 0 and a factor that does not
+  //     (`t·ln t` at 0⁺, where the substitution gives `0·(−∞)`): L'Hôpital
+  //     on the quotient `(other factors) / (1 / zero factor)`, as
+  //     `limitProductAtPosInf` does at infinity. The quotient is handed to
+  //     the L'Hôpital step as two parts, not as a `Divide` node, which
+  //     canonicalization would fold back into the product.
+  // The limits of the parts of a sum, a product or a power, computed once
+  // for steps 2a and 2b.
+  const partLimits =
+    e.operator === 'Multiply' || e.operator === 'Add' || e.operator === 'Power'
+      ? oo(e).map((part) => limitDispatch(part, x, a, dir, ce, depth + 1))
+      : [];
+  if (e.operator === 'Multiply') {
+    const zero: Expression[] = [];
+    const rest: Expression[] = [];
+    oo(e).forEach((f, i) => {
+      const l = partLimits[i];
+      if (l !== undefined && l.is(0)) zero.push(f);
+      else rest.push(f);
+    });
+    if (zero.length > 0 && rest.length > 0) {
+      const num = rest.length === 1 ? rest[0] : ce.function('Multiply', rest);
+      const reciprocal = (f: Expression) =>
+        ce.function('Power', [f, ce.number(-1)]);
+      const den =
+        zero.length === 1
+          ? reciprocal(zero[0])
+          : ce.function('Multiply', zero.map(reciprocal));
+      const r = limitOfQuotientAtFinite(num, den, x, a, dir, ce, depth);
+      if (r !== undefined) return r;
+    }
+  }
+
+  // 2b. The arithmetic of the limits of the parts, when each part has a
+  //     limit that is a definite value or a signed infinity: the terms of
+  //     `t·ln t − t` at 0⁺ tend to 0 and 0 (the substitution gave
+  //     `0·(−∞) − 0`), so the sum does; `2·ln t − 1` tends to `−∞`;
+  //     `ln²t` to `+∞`. Indeterminate combinations (`∞ − ∞`, `0·∞`, which
+  //     step 2a handles for a product) are left to the strategies below.
+  const combined = combineLimitsOfParts(e, partLimits, x, ce);
+  if (combined !== undefined) return combined;
 
   // 3. Pole resolution (7c follow-up; the 2026-07-10 convention decision —
   //    directional limits at poles resolve to ±∞, two-sided only when both
@@ -583,6 +616,117 @@ function limitAtFinite(
   const L = laurentData(e, x, a, ce, 3);
   if (L) return signedPoleInfinity(L, dir, ce);
 
+  return undefined;
+}
+
+/**
+ * The limit at the finite point `a` of a sum, a product or a power from the
+ * limits of its parts, when those combine without an indeterminate form:
+ *
+ * - a sum: the sum of definite limits; a signed infinity when every
+ *   infinite term has that sign (`2·ln t − 1 → −∞`); `undefined` for
+ *   infinities of both signs;
+ * - a product: the product of definite limits; a signed infinity when some
+ *   factor is infinite and the product of the finite factors has a decided
+ *   nonzero sign (`−ln t / 2 → +∞`); `undefined` when that product is 0 or
+ *   of unknown sign;
+ * - a power `u^k` with a REAL number `k`: for `u → ±∞`, `0` when `k < 0`,
+ *   and an infinity when `k > 0` — of the sign `(±1)^k` for an integer `k`
+ *   (`ln²t → +∞`; the parity is read exactly, not from a double), `+∞` for
+ *   `u → +∞` otherwise; `undefined` for a non-integer `k` and `u → −∞`. A
+ *   complex `k` gives no limit here: `|u^k|` grows but its phase turns.
+ *
+ * `partLimits` are the limits of the operands of `e`, in order. `undefined`
+ * when a part has no limit, or when `e` is none of these.
+ */
+function combineLimitsOfParts(
+  e: Expression,
+  partLimits: ReadonlyArray<Expression | undefined>,
+  x: string,
+  ce: ComputeEngine
+): Expression | undefined {
+  const op = e.operator;
+  if (op !== 'Add' && op !== 'Multiply' && op !== 'Power') return undefined;
+  const limits: Expression[] = [];
+  for (const l of partLimits) {
+    if (l === undefined) return undefined;
+    if (!isDefiniteValue(l, x) && l.isInfinity !== true) return undefined;
+    limits.push(l);
+  }
+  const infinite = limits.filter((l) => l.isInfinity === true);
+  const finite = limits.filter((l) => l.isInfinity !== true);
+  if (infinite.some((l) => l.isPositive !== true && l.isNegative !== true))
+    return undefined;
+
+  if (op === 'Add') {
+    if (infinite.length === 0) return ce.function('Add', finite).evaluate();
+    const positive = infinite.every((l) => l.isPositive === true);
+    const negative = infinite.every((l) => l.isNegative === true);
+    if (positive) return ce.PositiveInfinity;
+    if (negative) return ce.NegativeInfinity;
+    return undefined;
+  }
+
+  if (op === 'Multiply') {
+    const product =
+      finite.length === 0 ? ce.One : ce.function('Multiply', finite).evaluate();
+    if (infinite.length === 0) return product;
+    let sign =
+      product.isPositive === true ? 1 : product.isNegative === true ? -1 : 0;
+    if (sign === 0) return undefined;
+    for (const l of infinite) if (l.isNegative === true) sign = -sign;
+    return sign > 0 ? ce.PositiveInfinity : ce.NegativeInfinity;
+  }
+
+  // Power
+  const [u, k] = limits;
+  const exponent = o2(e);
+  if (
+    !isNumber(exponent) ||
+    exponent.has(x) ||
+    !exponent.isNumberLiteral ||
+    exponent.isComplex
+  )
+    return undefined;
+  if (u.isInfinity !== true || k.isInfinity === true) return undefined;
+  const kv = exponent.re;
+  if (kv < 0) return ce.Zero;
+  if (!(kv > 0)) return undefined;
+  if (u.isPositive === true) return ce.PositiveInfinity;
+  if (exponent.isEven === true) return ce.PositiveInfinity;
+  if (exponent.isOdd === true) return ce.NegativeInfinity;
+  return undefined;
+}
+
+/**
+ * The limit of the quotient `num / den` at the finite point `a`: L'Hôpital
+ * when the limits of the parts are `0/0` or `∞/∞` (differentiate both and
+ * take the limit of the new quotient, through `limitAtFinite`, which can
+ * apply the rule again); the quotient of the limits when both are definite
+ * values and the denominator's is not 0. `undefined` otherwise.
+ */
+function limitOfQuotientAtFinite(
+  num: Expression,
+  den: Expression,
+  x: string,
+  a: Expression,
+  dir: number,
+  ce: ComputeEngine,
+  depth: number
+): Expression | undefined {
+  const n0 = limitDispatch(num, x, a, dir, ce, depth + 1);
+  const d0 = limitDispatch(den, x, a, dir, ce, depth + 1);
+  if (n0 && d0 && isIndeterminateRatio(n0, d0)) {
+    const dn = differentiate(num, x);
+    const dd = differentiate(den, x);
+    if (dn && dd) {
+      const next = ce.function('Divide', [dn, dd]);
+      return limitAtFinite(next, x, a, dir, ce, depth + 1);
+    }
+  }
+  // Determinate quotient: n0 / d0 when d0 ≠ 0 and both finite.
+  if (n0 && d0 && !d0.is(0) && isDefiniteValue(n0, x) && isDefiniteValue(d0, x))
+    return n0.div(d0).evaluate();
   return undefined;
 }
 

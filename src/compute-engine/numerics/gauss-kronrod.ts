@@ -291,6 +291,21 @@ const SHELL_DECAY = 0.99;
 const SHELL_TREND_FLAT = 2e-4;
 
 /**
+ * The relative difference within which three successive block ratios of
+ * {@link shellsDiverge} are the SAME ratio. The shells of a pure power
+ * `t^(−p)` shrink geometrically, each `2^(p−1)` of the one before, so their
+ * block ratio is constant to the rounding of the block sums (about `1e-15`).
+ * A ratio that rises toward 1 (the shells of `1/(t·ln t)`, which diverges,
+ * are about `1/k` at depth `k`) changes by about `20/k²` per shell, `2e-5`
+ * at the deepest shells a bound at 0 allows, far more than this. (That
+ * integrand is not a case for this test: its ratio stays below
+ * `SHELL_DECAY` at every reachable depth, and its divergence is not
+ * detected at all — see `ROADMAP.md`, "`.N()` of an integral with a doubly
+ * logarithmic divergence at a bound gives a finite value".)
+ */
+const SHELL_GEOMETRIC_SAME = 1e-9;
+
+/**
  * The largest quotient of two successive falls of the logarithm of the block
  * ratio that is read as a GEOMETRIC fall.
  *
@@ -509,8 +524,22 @@ function shellsDiverge(
     return false;
   if (!(last >= SHELL_DECAY) || !(before > 0) || !(first > 0)) return false;
 
-  // The ratio has stopped falling: a pole of order 1 or more.
-  if (last >= before * (1 - SHELL_TREND_FLAT)) return true;
+  // The ratio has stopped falling: a pole of order 1 or more — unless the
+  // three ratios are the same ratio BELOW 1. The shells then shrink
+  // geometrically, and a geometric series converges, however slowly:
+  // `t^(−0.9999)` sheds `2^(−0.0001)` of the previous shell every time, a
+  // block ratio of `0.9986`, and `∫₀¹ t^(−0.9999) dt` is `10000`; the tail
+  // past the deepest shell is found by the extrapolation of the shells
+  // (`resolveSingularEndpoints`). A pole of order 1 has a ratio of exactly 1
+  // (`1/t` sheds `ln 2` per shell) and a steeper pole a ratio above 1, so a
+  // constant ratio below 1 by more than the rounding of the block sums is
+  // not a pole (see `SHELL_GEOMETRIC_SAME`).
+  if (last >= before * (1 - SHELL_TREND_FLAT)) {
+    const same =
+      Math.abs(last - before) <= SHELL_GEOMETRIC_SAME * last &&
+      Math.abs(before - first) <= SHELL_GEOMETRIC_SAME * before;
+    return !(same && last < 1 - SHELL_GEOMETRIC_SAME);
+  }
 
   // The ratio is still falling: extrapolate its limit. The integral diverges
   // only when the limit ratio is still at least `SHELL_DECAY`.
