@@ -371,12 +371,17 @@ describe('LINEAR ALGEBRA OVER A COMPLEX ENTRY', () => {
 // always `{re, im}`, and a parent expression reads it as complex. A symbol
 // declared `matrix<number>` is read as REAL in `strict` and `auto` mode (user
 // decision of 2026-09-24, option B), as a `number`-typed scalar is: the
-// compiler emits the real-only helper, and the compiled runner checks the
-// entries of the symbol when it is called, so a `{re, im}` entry throws a
-// diagnostic that names the symbol and the entry. Before the entry check,
-// `Determinant(W) + 1` over such a symbol returned the string
-// `"[object Object]1"` behind `success: true` for complex entries; between
-// 2026-09-23 and 2026-09-24 the compilation failed closed instead.
+// compiler emits the real-only helper. The compiled runner does not read the
+// entries of the symbol when it is called: `run()` requires inputs of the
+// shape the compiled code reads, so a caller with complex entries declares
+// the symbol `matrix<complex>` or compiles with `mode: 'complex'`. A `{re, im}`
+// entry bound to a `matrix<number>` symbol is not refused, and the value the
+// real helper computes with it is not specified. Until the user's decision of
+// 2026-10-13 the runner walked every entry on each call and threw a
+// diagnostic that named the symbol and the entry; the walk was removed
+// because its cost grew with the data (Tycho ledger row 371 was the
+// motivating case: a kernel called a million times with a 9 801-element list
+// input).
 describe('A MATRIX SYMBOL BOUND TO COMPLEX ENTRIES AT RUN TIME', () => {
   function complexEngine(): ComputeEngine {
     const ce = new ComputeEngine();
@@ -443,7 +448,8 @@ describe('A MATRIX SYMBOL BOUND TO COMPLEX ENTRIES AT RUN TIME', () => {
   // The same heads over `matrix<number>`/`vector<number>` symbols compile on
   // the real lane in the default modes, including under a parent
   // expression: real entries give the interpreter's value, and a complex
-  // entry throws the entry diagnostic when the code is called.
+  // entry is not refused when the code is called (its value is not
+  // specified).
   const W_REAL = [
     [2, 1],
     [1, 3],
@@ -495,24 +501,23 @@ describe('A MATRIX SYMBOL BOUND TO COMPLEX ENTRIES AT RUN TIME', () => {
           result.run({ W: W_REAL, u: U_REAL, w: WV_REAL, PC: PC_REAL }),
           expected
         );
-        // A complex entry is refused when the code is called, with the name
-        // of the symbol and the position of the entry.
+        // A complex entry is not refused when the code is called: the real
+        // helper reads it, and the value it computes is not specified. The
+        // complex entry of `PC` is in the row that the expression reads.
         const PC_COMPLEX = [
-          [1, 2],
-          [{ re: 0, im: 1 }, 4],
+          [{ re: 0, im: 1 }, 2],
+          [3, 4],
         ];
         expect(() =>
           result.run({ W, u, w: WV_REAL, PC: PC_COMPLEX })
-        ).toThrow(
-          /"(W|u|PC)" \(type `[^`]+`\) was compiled with real entries, but its entry \[[01]\](\[0\])? is a complex \{re, im\} value/
-        );
+        ).not.toThrow();
       });
 
   // `Distance` reads either representation of a coordinate
-  // (`_SYS.distanceAny`), but the entry check of a `vector<number>` symbol
-  // refuses a complex entry in the default modes, as for every other use
-  // of the symbol. Under `mode: 'complex'` the entries are complex and the
-  // distance is ‖u − w‖.
+  // (`_SYS.distanceAny`). The runner does not read the entries of a
+  // `vector<number>` symbol, so in the default modes a complex coordinate
+  // reaches the helper, and the distance is ‖u − w‖, as under
+  // `mode: 'complex'`.
   it('javascript: Distance(u, w) over vector<number> operands', () => {
     const ce = wideEngine();
     const result = compile(ce.box(['Distance', 'u', 'w']), {
@@ -520,9 +525,6 @@ describe('A MATRIX SYMBOL BOUND TO COMPLEX ENTRIES AT RUN TIME', () => {
       fallback: false,
     } as any) as any;
     expect(result.code).toBe('_SYS.distanceAny(_.u, _.w)');
-    expect(() => result.run({ u, w })).toThrow(
-      /"u" \(type `vector<number>`\) was compiled with real entries, but its entry \[0\] is a complex/
-    );
     const complex = compile(ce.box(['Distance', 'u', 'w']), {
       to: 'javascript',
       mode: 'complex',
@@ -530,6 +532,7 @@ describe('A MATRIX SYMBOL BOUND TO COMPLEX ENTRIES AT RUN TIME', () => {
     } as any) as any;
     const norm = ce.parse(`\\operatorname{Norm}(${U_LATEX} - ${WV_LATEX})`).N();
     expect(complex.run({ u, w })).toBeCloseTo(norm.re, 12);
+    expect(result.run({ u, w })).toBeCloseTo(norm.re, 12);
   });
 
   it('javascript: RowReduce of a matrix<complex> symbol fails closed', () => {

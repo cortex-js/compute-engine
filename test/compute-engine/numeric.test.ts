@@ -16,19 +16,13 @@ describe('NUMERIC gamma', () => {
   test(`Gamma(1)`, () =>
     expect(checkJson(['Gamma', 1])).toMatchInlineSnapshot(`
       box       = ["Gamma", 1]
-      eval-auto = Gamma(1)
-      eval-mach = Gamma(1)
-      N-auto    = 1
-      N-mach    = 1
+      simplify  = 1
     `));
 
   test(`Gamma(5)`, () =>
     expect(checkJson(['Gamma', 5])).toMatchInlineSnapshot(`
       box       = ["Gamma", 5]
-      eval-auto = Gamma(5)
-      eval-mach = Gamma(5)
-      N-auto    = 24
-      N-mach    = 24
+      simplify  = 24
     `));
 });
 

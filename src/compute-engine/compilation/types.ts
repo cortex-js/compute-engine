@@ -2085,6 +2085,10 @@ export interface CompilationOptions<Expr = unknown> {
    * and a string bound to one declared with a list or collection type whose
    * elements are not text (`indexed_collection`, `list<number>`) throws a
    * `TypeError` naming it, because the compiled code reads it as an array.
+   * The entries of a list are never read and a returned collection is never
+   * copied: the compiled route requires inputs of the shape the code reads
+   * (plain arrays, not typed arrays) and its results are read-only by
+   * contract (see the `EntryPlan` description in `javascript-runtime.ts`).
    * One `typeof` per checked binding per call — which is one READ of each
    * checked free symbol on the vars object, whether or not the compiled code
    * would read it on that call (a getter-backed vars object sees the read).
@@ -2394,10 +2398,13 @@ export interface CompiledColor {
  * expression answers `NaN` rather than its string. The union still covers
  * what comes back; the mapping from expression to member is what changes.
  *
- * The array member is mutable on purpose: the runner builds a fresh array per
- * call and hands ownership to the caller, so there is nothing for a `readonly`
- * to protect and it would only block passing the result to code that expects
- * an ordinary array.
+ * The array member is not `readonly`, although a result is read-only by
+ * contract: the runner hands back the array the compiled code built, which
+ * may be a value it keeps for every later call (a hoisted constant list, a
+ * bound symbol value), and a caller that writes to it changes what the next
+ * call answers. The contract is documented, not enforced by the type, because
+ * a `readonly` member would block passing the result to code that expects an
+ * ordinary array; a caller that needs to change a result copies it first.
  *
  * A caller that knows which of these its own expression produces can say so
  * with the `R` type parameter — `compile<'javascript', number>(expr)` — and
@@ -2517,11 +2524,6 @@ export type StoredEntryPlan = {
   real: (string | number)[];
   complex: (string | number)[];
   lists: (string | number)[];
-  /** The per-binding entry checks of the collection-valued bindings. */
-  entries: [
-    string | number,
-    { numbers: boolean; depth: number; label: string },
-  ][];
   /** The bindings that refuse a string argument, each with the label of the
    * binding and its declared type that the error message shows. A binding
    * is here when its declared type is a collection type that compiled code
@@ -2601,10 +2603,12 @@ export type CompilationResult<
 
   /**
    * JavaScript only. How `run()` checks and converts its inputs before the
-   * code reads them: a complex-declared symbol given a real is lifted to
-   * `{re, im: 0}`, a numeric typed array bound to a list symbol is copied to a
-   * plain array, a complex value bound to a real symbol is refused. A runtime
-   * that loads the stored code applies the same plan. Absent when there is
+   * code reads them, at a constant cost per binding: a complex-declared
+   * symbol given a real is lifted to `{re, im: 0}`, a complex value bound to
+   * a real symbol is refused, a string bound to a symbol the code reads as an
+   * array is refused. The entries of a list are never read, and a typed
+   * array is not converted: the caller passes plain arrays. A runtime that
+   * loads the stored code applies the same plan. Absent when there is
    * nothing to check.
    */
   entryPlan?: StoredEntryPlan;

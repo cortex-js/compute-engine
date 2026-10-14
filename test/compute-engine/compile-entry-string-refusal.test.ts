@@ -456,12 +456,24 @@ describe('COMPILE entry: a body error caused by a scalar in an array-read bindin
     const ce = new ComputeEngine();
     ce.declare('S', 'list<number>');
     const r = compile(ce.box(['Sum', 'S']), { constantFold: false })!;
-    // The binding holds an array: a body error (none here) would pass
-    // through; a wrong-typed entry is reported by the entry check itself.
-    expect(r.run!({ S: new Float64Array([1, 2]) } as any)).toBe(3);
-    // A body error of another shape is not renamed: the complex entry check
-    // reports an object entry itself, before the body runs.
-    expect(() => r.run!({ S: [{ re: 1, im: 2 }] } as any)).toThrow(/entry/);
+    // A typed array is refused at entry, with its own message (the host
+    // converts it once, with `Array.from`): it is not a body error, so the
+    // renaming of a failed array read does not apply to it.
+    expect(() => r.run!({ S: new Float64Array([1, 2]) } as any)).toThrow(
+      /"S" \(type `list<number>`\) is compiled as a JavaScript array, and compiled code does not accept a typed array/
+    );
+    // The runner does not read the entries of a list input (user decision
+    // of 2026-10-13: the compiled `run()` requires inputs of the shape the
+    // compiled code reads; a per-call walk of the entries was the whole cost
+    // of the kernel of Tycho ledger row 371). A complex entry is therefore
+    // not refused, and the body computes with it as plain JavaScript does:
+    // the value is not specified, only that the call does not throw.
+    expect(() => r.run!({ S: [{ re: 1, im: 2 }] } as any)).not.toThrow();
+    // A body error while the binding holds an array is not renamed: the
+    // error of the body comes through as it is.
+    expect(() => r.run!({ S: [1, Symbol('x')] } as any)).toThrow(
+      /^Cannot convert a Symbol value to a number$/
+    );
   });
 
   it('names every candidate binding when several hold a scalar', () => {

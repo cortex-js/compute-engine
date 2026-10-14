@@ -1,13 +1,25 @@
 import vm from 'node:vm';
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
+import { isNumericTypedArray } from '../../src/compute-engine/compilation/javascript-runtime';
 
 /**
- * The list carrier of the `javascript` target: on a binding whose declared
- * type proves a JS array, a plain `Array` passes through untouched and a
- * numeric typed array is copied into a plain one at entry. Every other value
- * passes untouched too — the lowerings dispatch on the runtime shape, so a
- * declared type narrower than the bound value is not enforced here. See
+ * The list carrier of the `javascript` target is the plain `Array`. The
+ * contract of `run()` is: inputs of the shape the compiled code reads,
+ * results read-only. On a binding whose declared type proves a JS array, the
+ * entry refuses a string and a numeric typed array (`Float64Array`,
+ * `Int32Array`, ...), and passes every other value as it is. A plain `Array`
+ * gives the expected result. The typed array is refused with a `TypeError`
+ * that names the binding (one brand check per binding per call): the
+ * compiled code reads plain arrays only, and a host that holds a typed array
+ * converts it once, on its side, with `Array.from`.
+ *
+ * Until 2026-10-13 the runner copied a typed-array input to a plain array on
+ * every call. The user replaced that copy with the refusal on 2026-10-13,
+ * because its cost grew with the data on every call (Tycho ledger row 371, a
+ * kernel called about 1.2 million times with a 9 801-element list input, was
+ * the motivating case). The design text is in `docs/COMPILATION-MODEL.md` (search for
+ * "inputs of the shape"); the earlier typed-array study is in
  * `docs/plans/2026-09-07-numeric-list-store-and-typed-array-boundary.md`.
  */
 
@@ -57,31 +69,38 @@ describe('COMPILE list entry check (vars route)', () => {
     expect(unit.seen()).toBe(board);
   });
 
-  it('accepts a numeric typed array and copies it into a plain array', () => {
+  it('refuses a numeric typed array at entry, before the body runs', () => {
+    // The runner does not convert a typed array to a plain array: it throws
+    // a `TypeError` that names the binding, and the compiled code never
+    // receives the value.
     const unit = probeUnit();
     const board = new Float64Array([1, 2, 3, 4]);
-    unit.run(board);
-    const seen = unit.seen();
-    expect(Array.isArray(seen)).toBe(true);
-    expect(seen).toEqual([1, 2, 3, 4]);
-    // The copy is fresh: the caller's buffer is not aliased.
-    expect(seen).not.toBe(board);
-    (seen as number[])[0] = 99;
-    expect(board[0]).toBe(1);
+    expect(() => unit.run(board)).toThrow(
+      /"S" \(type `list<number>`\) is compiled as a JavaScript array, and compiled code does not accept a typed array/
+    );
+    expect(unit.seen()).toBeUndefined();
   });
 
-  it('gives a typed array the same result as the plain array', () => {
+  it('refuses a typed array; the converted array gives the plain-array result', () => {
+    // `RotateLeft` reads its operand as a plain array. A typed array is
+    // refused at entry, and a caller converts with `Array.from` first.
     const e = listEngine();
     const r = compile(e.box(['Add', ['RotateLeft', 'S', 1], 'S']), {
       to: 'javascript',
     })!;
     expect(r.success).toBe(true);
     const plain = r.run!({ S: [1, 2, 3, 4] } as any);
-    const typed = r.run!({ S: new Float64Array([1, 2, 3, 4]) } as any);
-    expect(typed).toEqual(plain);
+    expect(plain).toEqual([3, 5, 7, 5]);
+    expect(() => r.run!({ S: new Float64Array([1, 2, 3, 4]) } as any)).toThrow(
+      /does not accept a typed array/
+    );
+    const converted = r.run!({
+      S: Array.from(new Float64Array([1, 2, 3, 4])),
+    } as any);
+    expect(converted).toEqual(plain);
   });
 
-  it('accepts every numeric typed-array flavor', () => {
+  it('refuses every numeric typed-array flavor', () => {
     const unit = probeUnit();
     for (const board of [
       new Float32Array([1, 2, 3]),
@@ -89,15 +108,13 @@ describe('COMPILE list entry check (vars route)', () => {
       new Uint8Array([1, 2, 3]),
       new Int16Array([1, 2, 3]),
     ]) {
-      unit.run(board);
-      expect(Array.isArray(unit.seen())).toBe(true);
-      expect(unit.seen()).toEqual([1, 2, 3]);
+      expect(() => unit.run(board)).toThrow(/does not accept a typed array/);
+      expect(unit.seen()).toBeUndefined();
     }
   });
 
   it('passes a scalar, an object and `undefined` through untouched', () => {
-    // The entry check copies a typed array and refuses a string, and does
-    // nothing else. Any other value the declared type does not admit is left
+    // The entry check refuses a string, and does nothing else. Any other value the declared type does not admit is left
     // to the lowerings, which dispatch on the runtime shape.
     const unit = probeUnit();
     for (const value of [5, { length: 3 }, undefined, null]) {
@@ -129,17 +146,22 @@ describe('COMPILE list entry check (vars route)', () => {
 
   it('recognizes views from another realm by their brand', () => {
     // A view built in another realm has a foreign constructor, so an
-    // `instanceof` test would misclassify it. The brand test does not: a
-    // foreign `Float64Array` is copied, a foreign `DataView` or `BigInt64Array`
-    // passes through untouched.
+    // `instanceof` test would misclassify it. `isNumericTypedArray()` (the
+    // entry's brand check) tests the brand instead: a foreign
+    // `Float64Array` is numeric, a foreign `DataView` or `BigInt64Array` is
+    // not. At the entry of `run()`, the foreign `Float64Array` is refused and
+    // the other two pass as they are.
     const foreign = vm.runInNewContext(
       '({ f64: new Float64Array([1, 2, 3]), dv: new DataView(new ArrayBuffer(8)), big: new BigInt64Array(2) })'
     ) as { f64: Float64Array; dv: DataView; big: BigInt64Array };
     expect(foreign.f64 instanceof Float64Array).toBe(false);
+    expect(isNumericTypedArray(foreign.f64)).toBe(true);
+    expect(isNumericTypedArray(foreign.dv)).toBe(false);
+    expect(isNumericTypedArray(foreign.big)).toBe(false);
     const unit = probeUnit();
-    unit.run(foreign.f64);
-    expect(Array.isArray(unit.seen())).toBe(true);
-    expect(unit.seen()).toEqual([1, 2, 3]);
+    expect(() => unit.run(foreign.f64)).toThrow(
+      /does not accept a typed array/
+    );
     for (const value of [foreign.dv, foreign.big]) {
       unit.run(value);
       expect(unit.seen()).toBe(value);
@@ -210,17 +232,21 @@ describe('COMPILE list entry check (args route)', () => {
     return r.run as unknown as (arg: unknown) => unknown;
   }
 
-  it('accepts a plain array and a numeric typed array', () => {
+  it('accepts a plain array; refuses a numeric typed array', () => {
+    // The argument is not converted: the entry throws a `TypeError` that
+    // names the parameter. A caller converts with `Array.from`.
     const run = lambdaUnit();
     expect(run([10, 20])).toBe(11);
-    expect(run(new Float64Array([10, 20]))).toBe(11);
+    expect(() => run(new Float64Array([10, 20]))).toThrow(
+      /argument 1 \(type `list<number>`\) is compiled as a JavaScript array, and compiled code does not accept a typed array/
+    );
+    expect(run(Array.from(new Float64Array([10, 20])))).toBe(11);
   });
 
   it('passes a non-array argument through untouched', () => {
-    // As on the free-symbol route, only a typed array is rewritten and a
-    // string is refused. `At` on a non-array base answers `NaN`, which is
-    // what the interpreter's `Nothing` projects to — the behavior before the
-    // typed-array copy existed.
+    // As on the free-symbol route, only a string is refused. `At` on a
+    // non-array base answers `NaN`, which is what the interpreter's
+    // `Nothing` projects to.
     const run = lambdaUnit();
     for (const value of [
       5,
@@ -266,19 +292,27 @@ describe('COMPILE list entry: interpreter fallback with text', () => {
 });
 
 describe('COMPILE list entry check: a step over a board', () => {
-  // The shape of the caller that asked for the typed-array boundary: a board
-  // held outside the engine, bound at `run()` time, and stepped once.
-  it('takes a Float64Array board in and gives a plain array out', () => {
+  // The shape of the caller that asked for the typed-array boundary (Tycho
+  // items 261-264): a board held outside the engine, bound at `run()` time,
+  // and stepped once. The board must be a plain array. A caller that holds
+  // a `Float64Array` board converts it first, with `Array.from`, because
+  // `run()` refuses a typed array.
+  it('takes a plain-array board in and gives a plain array out', () => {
     const e = listEngine();
     const r = compile(e.box(['Add', ['RotateLeft', 'S', 1], 'S']), {
       to: 'javascript',
     })!;
     expect(r.success).toBe(true);
-    const board = new Float64Array([1, 0, 1, 0, 1]);
+    const held = new Float64Array([1, 0, 1, 0, 1]);
+    expect(() => r.run!({ S: held } as any)).toThrow(
+      /does not accept a typed array/
+    );
+    const board = Array.from(held);
     const out = r.run!({ S: board } as any);
     expect(Array.isArray(out)).toBe(true);
     expect(out).toEqual([1, 1, 1, 1, 2]);
     // The board the caller holds is untouched.
-    expect(Array.from(board)).toEqual([1, 0, 1, 0, 1]);
+    expect(board).toEqual([1, 0, 1, 0, 1]);
+    expect(Array.from(held)).toEqual([1, 0, 1, 0, 1]);
   });
 });

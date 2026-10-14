@@ -114,10 +114,42 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 `_SYS.lerchPhi`, `_gpu_lerch_phi`, `_SYS.hurwitzZeta` and `_gpu_hurwitz_zeta` are
 real-only and return NaN for a < 0 with a non-integer s (and, for LerchPhi, real
 z > 1), where the interpreter has a complex value; the lowering still reports
-success. The existing tests pin that NaN. Fix: decline once those tests move to a
-proven-real base point and order.
+success. The existing tests pin that NaN. The rule for a complex value from real operands
+across the special functions is open in #434.
 Separately, an exact odd-denominator order (`LerchPhi(0, 1/3, -8).evaluate()`)
 still goes through `Power`'s real root, where `.N()` is the principal power.
+
+### Three bit-length helpers for a bigint, with three speeds (OPEN, small — found 2026-10-14 by the review of PR #432)
+
+`bitLength()` in `src/big-decimal/utils.ts` (exported, used by
+`transcendentals.ts`) brackets the length with a doubling search and a binary
+search, each step allocating a shifted copy of the bigint. `bitLength()` in
+`src/compute-engine/numerics/bigint.ts` reads `toString(2).length`, a base-2
+stringification that is several times slower than the base-16 one at 200 000
+digits. `bitLength()` in `src/compute-engine/numerics/rationals.ts`, added by PR
+#432, reads the hex string length and the leading-digit bit count and is the
+fastest of the three. The fix is one exported hex-based helper in
+`src/big-decimal/utils.ts` that the other two files import, with the two local
+copies removed. Expected results are unchanged: a bit length is exact under all
+three. A test should pin the hex helper at `0`, `1`, `2^k - 1`, `2^k` and a
+200 000-digit value against `toString(2).length`.
+
+### A declared result computed through a numeric-tuple argument to a scalar parameter (OPEN, small — found 2026-10-13 by the review of the row 373 call typing)
+
+With `f := x ↦ (−x, x)` and `g := a ↦ f((a, a))`, both declared `function`,
+`g(1)` evaluates to `((−1, −1), (1, 1))` but types `tuple<number, number>`.
+A numeric tuple binds whole to a scalar parameter and the body's arithmetic
+decides the shape, so the signature result of `f`, written for a scalar
+argument, does not describe the value. The application-site typing of a
+direct call answers `any` for this case (`lambdaBroadcastType`), and the
+descriptor route of `deriveApplicationType` now does too, but the declared
+result of `g` is inferred at its definition, where `a` is open and `(a, a)`
+is not yet a numeric tuple, so the inference reads `f`'s signature result and
+every call of `g` inherits it. The fix is in the result inference of a
+literal whose body hands a tuple built from an open parameter to a scalar
+parameter: the result is `any` (or the tuple shape, when the callee's body
+can be typed with the tuple). Pinned as the descriptor-route half in
+`test/compute-engine/tycho-373-passthrough-broadcast-typing.test.ts`.
 
 ### Asynchronous materialization walks a lazy view synchronously (OPEN, small — found 2026-10-08 by the listing of lazy elements)
 

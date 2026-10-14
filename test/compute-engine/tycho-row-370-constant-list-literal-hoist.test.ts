@@ -139,14 +139,17 @@ describe('Tycho row 370: a constant list literal is hoisted out of the per-call 
     expect((r.run as unknown as (k: number) => number)(2)).toBe(20);
   });
 
-  test('a function the kernel returns never answers the shared local', () => {
+  test('a function the kernel returns answers the shared local, read-only by contract', () => {
     const r = js(ce, ['Function', ['Function', ['List', 1, 2, 3], 'y'], 'x']);
     // `run` is the outer lambda; it answers the inner one, which answers
-    // the literal.
+    // the literal. A result of compiled code is read-only by contract (the
+    // runner makes no defensive copy), so the inner function answers the
+    // one local every time, and a caller that wrote to it would change what
+    // the next call answers.
     const inner = (r.run as unknown as (x: number) => (y: number) => number[])(0);
     const first = inner(0);
-    first[0] = 99;
-    expect(inner(0)).toEqual([1, 2, 3]);
+    expect(first).toEqual([1, 2, 3]);
+    expect(inner(0)).toBe(first);
   });
 
   test('a literal with a complex or non-finite element stays inline', () => {
@@ -168,12 +171,14 @@ describe('Tycho row 370: a constant list literal is hoisted out of the per-call 
     expect(r.code).toBe('Foo([1, 2, 3])');
   });
 
-  test('the value a call returns is never the shared local itself', () => {
+  test('the value a call returns is the shared local itself, read-only by contract', () => {
     const r = js(ce, ['List', 1, 2, 3]);
     expect(r.code).toBe('_lit_1');
     const first = r.run!({}) as number[];
-    first[0] = 99;
-    expect(r.run!({})).toEqual([1, 2, 3]);
+    expect(first).toEqual([1, 2, 3]);
+    // No defensive copy: the same array on every call. A caller that needs
+    // to change it copies it first (`compile-run-contract.test.ts`).
+    expect(r.run!({})).toBe(first);
   });
 
   test('a local no read reaches any more is not emitted', () => {

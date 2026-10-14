@@ -5,8 +5,8 @@ import { ComputeEngine, compile } from '../../src/compute-engine';
 // call from what the compiler can prove about the operands. These tests pin
 // four cases where that choice went wrong: a matrix written with a `Matrix`
 // head, a recursive user function whose lane is only known once its body is
-// compiled, a mutually recursive pair, and the diagnostic of a wide operand
-// (now the run-time entry check of the symbol it comes from).
+// compiled, a mutually recursive pair, and a wide operand, which is read as
+// real.
 
 const MODES = ['strict', 'auto', 'complex'] as const;
 
@@ -229,59 +229,62 @@ describe('A RECURSIVE CALL HAS THE ENTRY LANE OF THE BODY OF ITS DEFINITION', ()
 });
 
 // A wide operand (`matrix<number>`, `vector<number>`) is read as real in
-// `strict` and `auto` mode (user decision of 2026-09-24, option B). Before,
-// the compilation failed closed and its diagnostic named the symbol to
-// declare. Now the compiled runner checks the entries of the symbol when it
-// is called, and its diagnostic names the symbol, its declared type, and the
-// complex entry, also when the operand is computed from the symbol.
-describe('THE ENTRY CHECK OF A WIDE OPERAND NAMES WHAT TO DECLARE', () => {
-  function entryError(
+// `strict` and `auto` mode (user decision of 2026-09-24, option B), also when
+// the operand is computed from the symbol. Before, the compilation failed
+// closed and its diagnostic named the symbol to declare.
+//
+// The compiled `run()` requires inputs of the shape the compiled code reads,
+// and does not read the entries of a list input. Until the user's decision of
+// 2026-10-13, the runner walked every entry on each call and threw a
+// diagnostic that named the symbol, its declared type and the complex entry.
+// That walk was the whole per-call cost of a kernel called a million times
+// with a 9 801-element list (Tycho ledger row 371), so it was removed. A
+// complex entry now computes as plain JavaScript does, and the value the real
+// helper computes with it is not specified: the tests pin only that the call
+// does not throw. The interpreter is the route that validates the entries.
+describe('A WIDE OPERAND IS READ AS REAL, AND ITS ENTRIES ARE NOT CHECKED', () => {
+  function runStrict(
     decl: Record<string, string>,
     json: any,
     vars: Record<string, unknown>
-  ): string {
+  ): unknown {
     const ce = new ComputeEngine();
     for (const [k, v] of Object.entries(decl)) ce.declare(k, v);
     const result = js(ce.box(json), 'strict');
     expect(result.success).toBe(true);
-    try {
-      result.run(vars);
-    } catch (e) {
-      return (e as Error).message;
-    }
-    throw new Error('expected the entry check to throw');
+    return result.run(vars);
   }
   const M = [
     [1, 2],
     [{ re: 0, im: 1 }, 4],
   ];
 
-  it('a symbol: its type as declared', () => {
-    const msg = entryError({ M: 'matrix<number>' }, ['Determinant', 'M'], {
-      M,
-    });
-    expect(msg).toContain(
-      '"M" (type `matrix<number>`) was compiled with real entries, but its entry [1][0] is a complex {re, im} value'
-    );
-    expect(msg).toContain("compile with `mode: 'complex'`");
+  it('a symbol', () => {
+    const decl = { M: 'matrix<number>' };
+    const json = ['Determinant', 'M'];
+    const real = [
+      [1, 2],
+      [3, 4],
+    ];
+    expect(runStrict(decl, json, { M: real })).toBe(-2);
+    expect(() => runStrict(decl, json, { M })).not.toThrow();
   });
 
-  it('a computed operand: the symbol it comes from', () => {
-    const msg = entryError(
-      { M: 'matrix<number>' },
-      ['Determinant', ['Transpose', 'M']],
-      { M }
-    );
-    expect(msg).toContain('"M" (type `matrix<number>`)');
+  it('a computed operand', () => {
+    expect(() =>
+      runStrict({ M: 'matrix<number>' }, ['Determinant', ['Transpose', 'M']], {
+        M,
+      })
+    ).not.toThrow();
   });
 
   it('a computed vector operand', () => {
-    const msg = entryError(
-      { u: 'vector<number>' },
-      ['Dot', ['Reverse', 'u'], 'u'],
-      { u: [1, { re: 2, im: 1 }, 3] }
-    );
-    expect(msg).toMatch(/"u" \(type `vector<number>`\).*entry \[1\]/);
+    const decl = { u: 'vector<number>' };
+    const json = ['Dot', ['Reverse', 'u'], 'u'];
+    expect(runStrict(decl, json, { u: [1, 2, 3] })).toBe(10);
+    expect(() =>
+      runStrict(decl, json, { u: [1, { re: 2, im: 1 }, 3] })
+    ).not.toThrow();
   });
 });
 

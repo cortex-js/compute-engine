@@ -612,6 +612,31 @@ describe('ROOT', () => {
     expect(ce.expr(['Root', -8, 3]).evaluate().json).toEqual(-2);
   });
 
+  // A power that reaches `pow()` with both operands as numbers, but whose
+  // `Power` node survived canonicalization — an element of a broadcast
+  // over a list of exponents, or a symbol exponent that holds a unit
+  // fraction — evaluates its root like the literal `(-8)^{1/3}` does, in
+  // one evaluation (issue #430).
+  test(`Unit-fraction exponent evaluates inside a broadcast and through a symbol`, () => {
+    expect(
+      ce.box(['Power', -8, ['List', ['Rational', 1, 3], 5]]).evaluate().json
+    ).toEqual(['List', -2, -32768]);
+    expect(
+      ce.box(['Power', 16, ['List', ['Rational', 1, 4], 2]]).evaluate().json
+    ).toEqual(['List', 2, 256]);
+    expect(
+      ce.box(['Power', 16, ['List', ['Rational', -1, 4]]]).evaluate().json
+    ).toEqual(['List', ['Rational', 1, 2]]);
+    expect(
+      ce.box(['Power', 2, ['List', ['Rational', 1, 2]]]).evaluate().json
+    ).toEqual(['List', ['Sqrt', 2]]);
+    const local = new ComputeEngine();
+    local.assign('y', ['Rational', 1, 3]);
+    expect(local.parse('(-8)^y').evaluate().json).toEqual(-2);
+    local.assign('z', ['Rational', 1, 4]);
+    expect(local.parse('16^z').evaluate().json).toEqual(2);
+  });
+
   // NU-P1-3: a complex value's imaginary part is always a machine double, so a
   // full-precision bignum real part printed a garbage tail (50+ digits, ~16
   // correct). The real part is now rounded to double precision.
@@ -3013,6 +3038,52 @@ describe('the Γ family at ±∞', () => {
     expect(value(['GammaLn', 0])).toBe('+oo');
     expect(value(['Factorial', -1])).toBe('~oo');
     expect(numeric(['Gamma', 5])).toBe('24');
+  });
+});
+
+// Γ(n) = (n − 1)! at a positive integer n is an exact integer, so
+// `evaluate()` answers it (GitHub issue #429: `Gamma(4)` evaluated to
+// itself while `Factorial(3)` evaluated to `6`).
+describe('Gamma at a positive integer evaluates to the exact factorial', () => {
+  const value = (expr: any) => ce.expr(expr).evaluate().toString();
+
+  it('folds on the box route, the parse route and the async route', async () => {
+    expect(value(['Gamma', 4])).toBe('6');
+    expect(value(['Gamma', 1])).toBe('1');
+    expect(value(['Gamma', 2])).toBe('1');
+    expect(ce.parse('\\Gamma(4)').evaluate().toString()).toBe('6');
+    const r = await ce.expr(['Gamma', 4]).evaluateAsync();
+    expect(r.toString()).toBe('6');
+    // The answer is the exact integer, not the numeric kernel's float.
+    expect(ce.expr(['Gamma', 4]).evaluate().isExact).toBe(true);
+  });
+
+  it('is exact above the double range', () => {
+    // 171! ≈ 1.24·10³⁰⁹ is past the largest double (≈ 1.8·10³⁰⁸), so a
+    // float route would answer +oo; the exact route answers the integer.
+    const r = ce.expr(['Gamma', 172]).evaluate();
+    expect(r.isExact).toBe(true);
+    expect(r.isFinite).toBe(true);
+    expect(r.isSame(ce.expr(['Factorial', 171]).evaluate())).toBe(true);
+  });
+
+  it('keeps its own head past the exact-digit cap of Factorial', () => {
+    // 1000000! has more digits than the exact route holds, so `Factorial`
+    // stays symbolic there; `Gamma` keeps its head instead of rewriting
+    // itself as a factorial.
+    expect(value(['Gamma', 1000001])).toBe('Gamma(1000001)');
+  });
+
+  it('leaves a float, a non-integer and the incomplete form alone', () => {
+    // A float with an integer value is a float answer of the numeric route.
+    const f = ce.parse('\\Gamma(4.0)').evaluate();
+    expect(f.toString()).toBe('6');
+    expect(f.isExact).toBe(false);
+    // An exact non-integer has no integer value: it stays symbolic.
+    expect(value(['Gamma', ['Rational', 1, 2]])).toBe('Gamma(1/2)');
+    // The incomplete form Γ(s, z) is unchanged; Γ(s, 0) = Γ(s) now folds.
+    expect(value(['Gamma', 2, 1])).toBe('Gamma(2, 1)');
+    expect(value(['Gamma', 4, 0])).toBe('6');
   });
 });
 

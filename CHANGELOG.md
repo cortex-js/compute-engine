@@ -1,5 +1,46 @@
 ## [Unreleased]
 
+### Performance
+
+- **The type of a 200 000-digit integer literal takes 0.3 ms, not 21 ms,** and
+  `bigintDigits()` no longer builds a power of ten as large as its argument
+  (#431, contributed by [enumeratio](https://github.com/enumeratio)).
+  `ce.number(7n * 10n ** 200000n + 12345n).type` took 21 ms per new literal at
+  200 000 digits (0.4 and 6 ms at 25 000 and 100 000) and now takes 0.3 ms; at a
+  million digits 150 ms is now under 2 ms. A literal past the double range has
+  no double enclosure, and its type is the sign range, as before
+  (`integer<1..>`); the type no longer rounds the integer to the working
+  precision to reach that answer. `bigintDigits()` above 100 000 digits
+  estimates the count from the leading hex digits and compares against `10^k`
+  only when the estimate falls within a hair of an integer, so the count stays
+  exact at `10^k - 1`, `10^k` and `10^k + 1`; at 200 000 digits it takes 0.13 ms
+  where it took 10 ms. `rationalAsFloat()` of a huge bigint shifts the numerator
+  alone and reads bit lengths from the hex form, which also speeds up `.re` of
+  such a literal.
+
+### Issues Resolved
+
+- **`LerchPhi(0, s, a)` with a negative `a` and a float `s` is the principal
+  power `a^(−s)`,** as the series terms are (DLMF 25.14.1)
+  ([#428](https://github.com/cortex-js/compute-engine/issues/428), contributed
+  by [enumeratio](https://github.com/enumeratio)). The z = 0 shortcut went
+  through `Power`, which reads a float exponent as the nearest p/q and takes
+  the real root for an odd q: `LerchPhi(0, 2.976, -2.664).N()` was the real
+  `0.05415`, and is `-0.053998 - 0.004079i`. Every other z already summed
+  principal powers (`LerchPhi(0.5, 2.976, -2.664)` is `2.23287 - 0.07605i`),
+  and `Power` is unchanged.
+
+- **The two-argument `Zeta` is documented as Wolfram's generalized zeta,**
+  Σ |n + a|^(−s) with the n + a = 0 term omitted
+  ([#428](https://github.com/cortex-js/compute-engine/issues/428), contributed
+  by [enumeratio](https://github.com/enumeratio)). Its description gave the
+  Hurwitz sum Σ (n + a)^(−s), which differs for a ≤ 0: `Zeta(2.976, -2.664)`
+  is the real `29.90244`, `HurwitzZeta(2.976, -2.664)` is
+  `22.60026 - 0.27542i`. The description now says so and points to
+  `HurwitzZeta`.
+
+## 0.153.0 _2026-10-13_
+
 ### New Features
 
 - **`_SYS.atMask(base, mask)`, the boolean-mask form of a host `At` lowering.**
@@ -21,6 +62,40 @@
 
 ### Behavior Changes
 
+- **Compiled JavaScript `run()` requires inputs of the shape the code reads
+  and treats its results as read-only.** The runner no longer does per-call
+  work whose cost grows with an input, and no longer copies a result: it
+  does not read the entries of a list input (before, every entry of a list
+  read on the real lane was visited on every call to refuse a `{re, im}` or
+  non-numeric entry), does not convert a typed-array input (before, a
+  `Float64Array` bound to a list symbol was copied to a plain array on every
+  call; now it is refused with a `TypeError` that names the binding), and
+  does not copy a returned collection or `{re, im}` object (before, every
+  collection came back as a fresh array; the one remaining per-call cost
+  that grows with a result is one `typeof` per cell of a returned
+  collection, with no allocation). For a kernel called 1.2 million times
+  with a 9 801-element list input, the entry walk was the whole per-call
+  cost. What a caller must do now: pass plain arrays (convert a typed array
+  once with `Array.from`; a typed array nested as a row is not refused and
+  not read), keep the entries of a list the compiled code reads on the real
+  lane numeric (a `{re, im}` entry is no longer refused: the compiled code
+  computes with it as plain JavaScript would — often `NaN`, sometimes a
+  string, or a value read from the real part), and not write to a result
+  (it may be a value the runner keeps for every later call, such as a
+  hoisted constant list; copy it first). The constant-cost checks stay: a
+  `{re, im}` object in a real scalar slot still throws a `TypeError` that
+  names the binding, a plain number in a complex slot is still lifted, and a
+  string for a binding the code reads as an array is still refused. The
+  result convention is kept: a `{re, im: 0}` still reads as a plain number,
+  inside a collection too. The interpreter is the route that validates an
+  input.
+  `CompilationResult.entryPlan` and a stored plan no longer carry the
+  per-entry checks (`entries`); a runtime that loads an older stored plan
+  ignores the field.
+- **`Gamma(n)` at an exact positive integer `n` evaluates to the integer
+  `(n − 1)!`** instead of staying `Gamma(n)` ([#429](https://github.com/cortex-js/compute-engine/issues/429)):
+  `Gamma(4)` is `6`, `Gamma(1)` is `1`. `Gamma(1/2)` and a float argument
+  are unchanged. See "Issues Resolved".
 - **`simplify()` folds every constant subexpression, whatever the rule
   list.** Constant folding is now part of the method itself and does not
   depend on the `rules` option: the default rules, a caller's own list and
@@ -147,25 +222,77 @@
 
 ### Issues Resolved
 
-- **`LerchPhi(0, s, a)` with a negative `a` and a float `s` is the principal
-  power `a^(−s)`,** as the series terms are (DLMF 25.14.1)
-  ([#428](https://github.com/cortex-js/compute-engine/issues/428), contributed
-  by [enumeratio](https://github.com/enumeratio)). The z = 0 shortcut went
-  through `Power`, which reads a float exponent as the nearest p/q and takes
-  the real root for an odd q: `LerchPhi(0, 2.976, -2.664).N()` was the real
-  `0.05415`, and is `-0.053998 - 0.004079i`. Every other z already summed
-  principal powers (`LerchPhi(0.5, 2.976, -2.664)` is `2.23287 - 0.07605i`),
-  and `Power` is unchanged.
+- **A user-function call over a list argument is typed from the body, so a
+  pass-through parameter no longer reads `unknown` in the result.** A
+  parameter that flows into the result unchanged (`f(x, y, z) := (−y, z,
+  x)`, or a rotation helper `r_{zz}(x, y, z, θ) := z`) is never narrowed by a
+  use, so the function's declared result carries `unknown` for it
+  (`tuple<number, unknown, unknown>`). A call with scalar arguments was
+  already typed from the body with each parameter typed as its argument,
+  but a call that broadcasts over a list argument was lifted from the
+  declared per-element result: `f([1, 2], [3, 4], [5, 6])` typed
+  `list<tuple<number, unknown, unknown>>` while its value is `[(−3, 5, 1),
+  (−4, 6, 2)]`, and a chain of such helpers called with a list of angles
+  typed `list<tuple<broadcastable<number>, broadcastable<number>,
+  broadcastable<unknown>>>`. The lifted element is now the body's type with
+  each mapped argument typed as the cell the broadcast maps over (a nested
+  list at its leaves), on the operator-definition and the value-definition
+  routes alike: `f([1, 2], [3, 4], [5, 6])` types `list<tuple<integer,
+  integer, integer>>`, and the chain `list<tuple<number, number, number>>`.
+  A function declared as a bare `function` and then assigned a literal
+  (the route of a document manager that lets the assignment infer the
+  signature) is now derived from the literal's own signature when it is
+  called inside another function's body; before, such a nested call could
+  not be derived and the enclosing call fell back to its declared result
+  even with literal arguments.
+  A collection-valued body keeps its nested lift and now carries the
+  element's type (`x ↦ [x, −x]` over `[1, 2]` is `list<vector<integer^2>>`,
+  before `list<vector<2>>`). Under a declared `broadcastable<T>` parameter
+  the cell is the element one rank down, as the call maps exactly one rank
+  (`(x: broadcastable<value>) ↦ (x, x)` over `[[1, 2], [3, 4]]` is
+  `list<tuple<vector<integer^2>, vector<integer^2>>>`); a generic literal
+  is not derived. Two more lift gaps are closed with it: when the mapped
+  arguments of a scalar-parameter function have different ranks (a matrix
+  beside a list) the call now types to the deepest rank (`f(x, y) := x`
+  over `[[1, 2], [3, 4]]` and `[5, 6]` is `list<list<integer>>`, before
+  `list<R>` with one level), and a call inside a function body whose head
+  is a function-valued PARAMETER is no longer typed from a global function
+  of the same name. A nested call that hands a numeric tuple to a scalar
+  parameter now types `any`, as the application-site typing already did,
+  instead of the signature result written for a scalar argument. In the
+  compiled `Dot` of two points, an impure operand (a point whose
+  coordinates draw a random number) is bound once, in operand order, and
+  the sum is written out as for a pure one. An argument whose type is `unknown` (an
+  undeclared symbol) is unchanged. Reported through the Tycho ledger (row
+  373): a plot classifier that must not evaluate read the `unknown` as
+  inconclusive and evaluated the row.
 
-- **The two-argument `Zeta` is documented as Wolfram's generalized zeta,**
-  Σ |n + a|^(−s) with the n + a = 0 term omitted
-  ([#428](https://github.com/cortex-js/compute-engine/issues/428), contributed
-  by [enumeratio](https://github.com/enumeratio)). Its description gave the
-  Hurwitz sum Σ (n + a)^(−s), which differs for a ≤ 0: `Zeta(2.976, -2.664)`
-  is the real `29.90244`, `HurwitzZeta(2.976, -2.664)` is
-  `22.60026 - 0.27542i`. The description now says so and points to
-  `HurwitzZeta`.
+- **`Power` over a list of exponents, and a symbol exponent that holds a unit
+  fraction, evaluate the root**
+  ([#430](https://github.com/cortex-js/compute-engine/issues/430)).
+  `(-8)^{[1/3, 5]}` gave `[Root(-8, 3), -32768]` and needed a second
+  `evaluate()` to give `[-2, -32768]`; `(-8)^y` with `y := 1/3` stayed
+  `Root(-8, 3)` where `(-8)^{1/3}` gave `-2`. The canonical form of
+  `(-8)^{1/3}` is `Root(-8, 3)`, which canonicalization leaves symbolic and
+  the `Root` handler evaluates; a `Power` node that survives canonicalization
+  reached the power kernel with both operands as numbers and returned that
+  root without evaluating it. The kernel now evaluates the root it builds
+  from two number literals. The `.pow()` method goes through the same kernel,
+  so `ce.number(-8).pow(ce.number([1, 3]))` is now `-2` instead of
+  `Root(-8, 3)`, and a float base gives a float: `ce.number(0.5).pow(1/3)`
+  is `0.7937…`, as `Power(0.5, 1/3).evaluate()` already was.
 
+- **`Gamma(n)` at a positive integer `n` evaluates to the exact integer
+  `(n − 1)!`** ([#429](https://github.com/cortex-js/compute-engine/issues/429)).
+  `Gamma(4)` evaluated to itself under `evaluate()` and `evaluateAsync()`,
+  and only `.N()` gave `6`, while `Factorial(3)` evaluated to `6`. The value
+  is now the exact integer on every route (`ce.expr(["Gamma", 4])`,
+  `ce.parse("\\Gamma(4)")`, `simplify()`, `evaluateAsync()`, where the
+  product of a large argument yields to the abort signal), also past the
+  double range (`Gamma(172)` is the exact `171!`). A float argument with an
+  integer value still gives a float, an exact non-integer such as
+  `Gamma(1/2)` still stays symbolic, and an argument past the exact-digit
+  cap of `Factorial` keeps the `Gamma` head.
 - **`N(x, p)` with more digits than the engine has, and a goal `N(x, [p, a])`,
   yield under `evaluateAsync`** ([#392](https://github.com/cortex-js/compute-engine/issues/392)).
   `N(\sum_{k=1}^{400000} \frac{1}{k^2}, 30)` and `N(…, [10, 5])` ran to the

@@ -4335,12 +4335,15 @@ export const SYS_HELPERS = {
   // `scalar` reads a single value as a collection of one element: a number
   // when it is `'real'`, a number or a complex value `{re, im}` when it is
   // `'complex'` (see `iterableCollectionCode` for when each applies).
-  // A numeric typed array is copied into a plain array, as the binding
-  // boundary copies one for a parameter typed `list<real>`. When `real` is
-  // true (`Max`, `Min`), every element must be a number: a complex value
-  // `{re, im}` has no order, and `Math.max` would read it as `NaN`. A
-  // parameter typed `list` gets this check at the binding boundary; a
-  // parameter typed `collection` does not, so it is made here.
+  // A numeric typed array is copied into a plain array here, as
+  // `_SYS.ownedCopy` does for a fold: the binding boundary converts nothing
+  // (it refuses a typed array for a list binding; a caller converts once on
+  // its side), so a typed array can reach a helper only from a lowering's
+  // own value or a `collection`-typed binding. When
+  // `real` is true (`Max`, `Min`), every element must be a number: a complex
+  // value `{re, im}` has no order, and `Math.max` would read it as `NaN`.
+  // The binding boundary reads no entry of a collection, so the check is
+  // made here for every collection kind.
   elts: (
     x: unknown,
     kind: string,
@@ -5607,27 +5610,25 @@ export function copyToPlainArray(x: ArrayLike<number>): number[] {
  * - analyzed COMPLEX (a `complex`-typed symbol or annotated parameter): a
  *   plain number is LIFTED to `{re, im: 0}` — a real IS a complex, and the
  *   compiled code reads `.re`/`.im` off it;
- * - analyzed as a LIST (a binding whose declared type proves a JS array): a
- *   plain `Array` passes as it is, with no copy, and a numeric typed array
- *   (`Float64Array`, `Int32Array`, ...) is COPIED into a fresh plain `Array`,
- *   because the compiled body reads plain arrays only. Any other value passes
- *   UNTOUCHED and the lowerings dispatch on its runtime shape, as before: a
- *   scalar there is not an error, because the declared type is routinely wider
- *   than the value a caller binds and several lowerings project on the runtime
- *   shape. The element-wise big-operator lane is the witness — a `list`-typed
+ * - analyzed as a LIST (a binding whose declared type proves a JS array): the
+ *   value passes as it is, with no copy and no read of its entries. The
+ *   compiled body reads plain arrays only, so a numeric typed array
+ *   (`Float64Array`, `Int32Array`, ...) THROWS a `TypeError` that names the
+ *   binding (one brand check, `refuseTypedArrayEntry`): a host converts it
+ *   to a plain `Array` once, on its side, not the runner on every call. A
+ *   typed array nested as a row is an entry, and is not read. The entries
+ *   are the host's responsibility: a `{re, im}` object or a string at an
+ *   entry of a list the code reads on the real lane computes with that
+ *   value, as it would in plain JavaScript. Any other value passes
+ *   UNTOUCHED and the lowerings dispatch on its runtime shape: a scalar there
+ *   is not an error, because the declared type is routinely wider than the
+ *   value a caller binds and several lowerings project on the runtime shape.
+ *   The element-wise big-operator lane is the witness — a `list`-typed
  *   summand bound to a number gives the scalar sum, not `NaN` (see
- *   `test/compute-engine/compile-elementwise-bigop.test.ts`). Carrier contract:
+ *   `test/compute-engine/compile-elementwise-bigop.test.ts`). The plain-array
+ *   carrier, and the earlier design in which the entry copied a typed array
+ *   on every call (replaced by this refusal), are in
  *   `docs/plans/2026-09-07-numeric-list-store-and-typed-array-boundary.md`;
- * - analyzed as a collection whose ENTRIES are read on the real lane (a
- *   declared type with a collection member and no complex leaf, in `strict`
- *   or `auto` mode, or a type that proves every entry real, in any mode —
- *   `BaseCompiler.realLaneEntryCheck`): when the value is a plain `Array`,
- *   every entry is visited, through nested arrays, and a `{re, im}` entry
- *   THROWS a `TypeError` that names the binding and the entry. When the type
- *   proves every entry a number, any other entry that is not a number (a
- *   string, `null`) throws too, except `undefined`, an absent cell. The linear-algebra heads read a
- *   `matrix<number>` operand as real in these modes, and would otherwise
- *   give `NaN` or a wrong number for a complex entry;
  * - declared with a collection type that the compiled code reads as a
  *   JavaScript array, and whose elements are not text (`strings`, built by
  *   `stringRefusedEntryType` in `javascript-target.ts`): a string THROWS a
@@ -5638,9 +5639,14 @@ export function copyToPlainArray(x: ArrayLike<number>): number[] {
  * - anything else (a string for any other binding, a boolean, an array,
  *   `undefined`) is left to today's behavior.
  *
- * One `typeof` per checked binding per call, plus one per entry of each
- * collection whose entries are checked. The vars object is never mutated (a
- * lifted copy is built only when a lift or a typed-array copy is needed).
+ * One `typeof` (and, for a list binding, one brand check) per checked
+ * binding per call, and never a read of the entries of a collection: the
+ * work at the boundary is constant per binding, however long a list input
+ * is. A per-call walk of a list input costs as much as the kernel it guards
+ * when the kernel reads one element and is called a million times, so the
+ * compiled route requires shaped inputs instead, and the interpreter is the
+ * route that validates. The vars object is never mutated (a lifted copy is
+ * built only when a lift is needed).
  */
 export type EntryPlan =
   | {
@@ -5648,7 +5654,6 @@ export type EntryPlan =
       real: string[];
       complex: string[];
       lists: string[];
-      entries: Map<string, RealEntryCheck>;
       strings: Map<string, string>;
     }
   | {
@@ -5656,7 +5661,6 @@ export type EntryPlan =
       real: number[];
       complex: number[];
       lists: number[];
-      entries: Map<number, RealEntryCheck>;
       strings: Map<number, string>;
     };
 
@@ -5676,166 +5680,17 @@ function refuseStringEntry<K>(strings: Map<K, string>, key: K): void {
 }
 
 /**
- * The entry check of one collection-valued binding read on the real lane,
- * keyed in `EntryPlan.entries` by the name of the free symbol or the index
- * of the parameter: `numbers` is whether every entry must be a number
- * (otherwise only a `{re, im}` entry is refused), and `label` the binding
- * and its declared type as the diagnostic shows them. Every key of
- * `entries` is also in `real`, `complex` or `lists`, and the check runs in
- * that loop, on the value it has read: the vars object is read once per
- * binding (a getter on it runs once).
+ * Throw for a numeric typed array bound to a binding the compiled code reads
+ * as a JavaScript array. The compiled code reads plain arrays only, and the
+ * runner does not convert the value (a copy on every call cost as much as
+ * the array): the host converts it once, on its side. One brand check per
+ * list binding per call (`isNumericTypedArray`). `label` names the binding
+ * as the diagnostic shows it.
  */
-export type RealEntryCheck = { numbers: boolean; depth: number; label: string };
-
-/**
- * Run the entry check `check` of a binding on its value `x`, when `x` is a
- * plain array, and return the value the compiled code reads: `x` itself, or,
- * when an entry of `x` at any depth is a numeric typed array (a
- * `Float64Array` row of a matrix), a copy of `x` in which each such typed
- * array is replaced by a plain `Array`. The compiled code reads plain arrays
- * only: the `det` helper, for one, answers `NaN` for a typed-array row. A
- * top-level typed array is not an `Array` and is returned unchanged; the
- * list rule of `checkEntry` copies it.
- */
-function checkBindingEntries(
-  check: RealEntryCheck | undefined,
-  x: unknown
-): unknown {
-  if (check === undefined || !Array.isArray(x)) return x;
-  sawTypedArrayEntry = false;
-  checkRealEntries(x, check.numbers, check.depth, check.label);
-  return sawTypedArrayEntry ? copyNestedTypedArrays(x) : x;
-}
-
-/**
- * Set by `realEntryAdmitted` when it admits a numeric typed array as an
- * entry, and reset by `checkBindingEntries` before each walk. A flag, and
- * not a return value of the walk, so that the walk of an array of numbers
- * (the common case) does no extra work.
- */
-let sawTypedArrayEntry = false;
-
-/** A copy of the array `x` in which each numeric typed array, at any depth,
- * is a plain `Array`. A hole of `x` stays a hole. */
-function copyNestedTypedArrays(x: unknown[]): unknown[] {
-  return x.map((e) =>
-    Array.isArray(e)
-      ? copyNestedTypedArrays(e)
-      : isNumericTypedArray(e)
-        ? copyToPlainArray(e)
-        : e
+function refuseTypedArrayEntry(label: string): never {
+  throw new TypeError(
+    `${label} is compiled as a JavaScript array, and compiled code does not accept a typed array for it: it reads plain arrays only. Convert it once with Array.from(…) and pass the plain array.`
   );
-}
-
-/**
- * Throw when an entry of the array `x`, at any depth, is a `{re, im}` object
- * or, when `numbers` is set, anything that is not a number or `undefined`
- * (`realEntryAdmitted`). `label` names the binding. The walk goes into an
- * array at ANY depth and never refuses one: a declared type constrains what
- * the engine assigns, not what a caller supplies, and a caller may pass a
- * matrix where a point was declared (the compiled code then hands the value
- * to the run-time helper, which reads its rank; pinned in
- * `compile-static-point-components.test.ts`). `depth` is kept for the
- * diagnostic path only.
- *
- * The walk is split in two functions that call each other, one for the
- * arrays at an even depth and one for the arrays at an odd depth, so that
- * the element read of each function sees one kind of array in a vector or a
- * matrix: the outer array of a matrix holds arrays, and its rows hold
- * numbers. A single recursive function that read both kinds made the `det`
- * helper that ran next on the same matrix more than twice as slow (100×100:
- * 320 → 720 µs, measured 2026-09-24 on Node, reproducible in a separate
- * process), while this form leaves it at 320 µs and walks the matrix in
- * about 1.4 µs. The entry path of the diagnostic is found by a second walk
- * (`realEntryError`), only when the check fails.
- */
-function checkRealEntries(
-  x: unknown[],
-  numbers: boolean,
-  depth: number,
-  label: string
-): void {
-  if (!realEntriesEven(x, numbers, depth))
-    throw realEntryError(x, numbers, depth, label);
-}
-
-function realEntriesEven(
-  x: unknown[],
-  numbers: boolean,
-  depth: number
-): boolean {
-  const n = x.length;
-  for (let i = 0; i < n; i++) {
-    const e = x[i];
-    if (typeof e === 'number') continue;
-    if (Array.isArray(e)) {
-      if (!realEntriesOdd(e, numbers, depth - 1)) return false;
-    } else if (!realEntryAdmitted(e, numbers)) return false;
-  }
-  return true;
-}
-
-function realEntriesOdd(
-  x: unknown[],
-  numbers: boolean,
-  depth: number
-): boolean {
-  const n = x.length;
-  for (let i = 0; i < n; i++) {
-    const e = x[i];
-    if (typeof e === 'number') continue;
-    if (Array.isArray(e)) {
-      if (!realEntriesEven(e, numbers, depth - 1)) return false;
-    } else if (!realEntryAdmitted(e, numbers)) return false;
-  }
-  return true;
-}
-
-/** Whether an entry that is neither a number nor an array is admitted: never
- * a `{re, im}` object; `undefined` always, because an absent cell (a hole,
- * or a written `Missing`) is read by the lowerings that accept one (the
- * numeric selection fusion tests every cell for it); a typed array of
- * numbers at any depth, recorded in `sawTypedArrayEntry` so that the value
- * is copied to plain arrays; anything else only when `numbers` is not
- * set. */
-function realEntryAdmitted(e: unknown, numbers: boolean): boolean {
-  if (e === undefined) return true;
-  if (isComplexObject(e)) return false;
-  if (isNumericTypedArray(e)) {
-    sawTypedArrayEntry = true;
-    return true;
-  }
-  return !numbers;
-}
-
-/** The diagnostic of `checkRealEntries`: the first entry of `x` that is not
- * admitted, with its path (`[1][0]`). */
-function realEntryError(
-  x: unknown[],
-  numbers: boolean,
-  depth: number,
-  label: string,
-  path = ''
-): TypeError {
-  for (let i = 0; i < x.length; i++) {
-    const e = x[i];
-    if (typeof e === 'number') continue;
-    const at = `${path}[${i}]`;
-    if (Array.isArray(e)) {
-      const error = realEntryError(e, numbers, depth - 1, label, at);
-      if (error.message !== '') return error;
-      continue;
-    }
-    if (isComplexObject(e))
-      return new TypeError(
-        `${label} was compiled with real entries, but its entry ${at} is a complex {re, im} value. Declare complex entries (for example \`matrix<complex>\` or \`list<complex>\`), or compile with \`mode: 'complex'\`.`
-      );
-    if (!realEntryAdmitted(e, numbers))
-      return new TypeError(
-        `${label} was compiled with number entries, but its entry ${at} is ${e === null ? 'null' : typeof e === 'object' ? 'an object' : `a ${typeof e}`}, not a number.`
-      );
-  }
-  return new TypeError('');
 }
 
 function entryCheckError(binding: string): TypeError {
@@ -5921,12 +5776,6 @@ export function checkEntry(
     for (const id of plan.real) {
       const x = v[id];
       if (typeof x === 'string') refuseStringEntry(plan.strings, id);
-      const read = checkBindingEntries(plan.entries.get(id), x);
-      if (read !== x) {
-        lifted ??= { ...v };
-        lifted[id] = read;
-        continue;
-      }
       if (!isComplexObject(x)) continue;
       if (!isUnsignedPole(x)) throw entryCheckError(`"${id}"`);
       lifted ??= { ...v };
@@ -5935,31 +5784,19 @@ export function checkEntry(
     for (const id of plan.complex) {
       const x = v[id];
       if (typeof x === 'string') refuseStringEntry(plan.strings, id);
-      const read = checkBindingEntries(plan.entries.get(id), x);
-      if (read !== x) {
-        lifted ??= { ...v };
-        lifted[id] = read;
-      } else if (typeof x === 'number') {
+      if (typeof x === 'number') {
         lifted ??= { ...v };
         lifted[id] = { re: x, im: 0 };
       }
     }
-    // A numeric typed array on a list-declared symbol is copied into a plain
-    // one, which is what the compiled body reads. Every other value passes
-    // untouched, including a scalar: the lowerings dispatch on the runtime
-    // shape, so a narrower declaration is not enforced here.
+    // A list-declared binding is read as it is: one `typeof` refuses a
+    // string, one brand check refuses a typed array, and nothing else is
+    // read or converted (see the plan's description above).
     for (const id of plan.lists) {
       const x = v[id];
       if (typeof x === 'string') refuseStringEntry(plan.strings, id);
-      const read = checkBindingEntries(plan.entries.get(id), x);
-      if (read !== x) {
-        lifted ??= { ...v };
-        lifted[id] = read;
-        continue;
-      }
-      if (!isNumericTypedArray(x)) continue;
-      lifted ??= { ...v };
-      lifted[id] = copyToPlainArray(x);
+      else if (isNumericTypedArray(x))
+        refuseTypedArrayEntry(plan.strings.get(id) ?? `"${id}"`);
     }
     return lifted === undefined ? argumentsList : [lifted];
   }
@@ -5969,12 +5806,6 @@ export function checkEntry(
   for (const i of plan.real) {
     const x = argumentsList[i];
     if (typeof x === 'string') refuseStringEntry(plan.strings, i);
-    const read = checkBindingEntries(plan.entries.get(i), x);
-    if (read !== x) {
-      lifted ??= [...argumentsList];
-      lifted[i] = read;
-      continue;
-    }
     if (!isComplexObject(x)) continue;
     if (!isUnsignedPole(x)) throw entryCheckError(`argument ${i + 1}`);
     lifted ??= [...argumentsList];
@@ -5983,11 +5814,7 @@ export function checkEntry(
   for (const i of plan.complex) {
     const x = argumentsList[i];
     if (typeof x === 'string') refuseStringEntry(plan.strings, i);
-    const read = checkBindingEntries(plan.entries.get(i), x);
-    if (read !== x) {
-      lifted ??= [...argumentsList];
-      lifted[i] = read;
-    } else if (typeof x === 'number') {
+    if (typeof x === 'number') {
       lifted ??= [...argumentsList];
       lifted[i] = { re: x, im: 0 };
     }
@@ -5997,15 +5824,8 @@ export function checkEntry(
   for (const i of plan.lists) {
     const x = argumentsList[i];
     if (typeof x === 'string') refuseStringEntry(plan.strings, i);
-    const read = checkBindingEntries(plan.entries.get(i), x);
-    if (read !== x) {
-      lifted ??= [...argumentsList];
-      lifted[i] = read;
-      continue;
-    }
-    if (!isNumericTypedArray(x)) continue;
-    lifted ??= [...argumentsList];
-    lifted[i] = copyToPlainArray(x);
+    else if (isNumericTypedArray(x))
+      refuseTypedArrayEntry(plan.strings.get(i) ?? `argument ${i + 1}`);
   }
   return lifted ?? argumentsList;
 }
@@ -6019,15 +5839,16 @@ export function storeEntryPlan(plan: EntryPlan): StoredEntryPlan {
     real: [...plan.real],
     complex: [...plan.complex],
     lists: [...plan.lists],
-    entries: [...plan.entries],
     strings: [...plan.strings],
   };
 }
 
 function restoreEntryPlan(stored: StoredEntryPlan): EntryPlan {
   return {
-    ...stored,
-    entries: new Map(stored.entries),
+    kind: stored.kind,
+    real: [...stored.real],
+    complex: [...stored.complex],
+    lists: [...stored.lists],
     // A plan stored without the field refuses no string.
     strings: new Map(stored.strings ?? []),
   } as EntryPlan;
@@ -6043,14 +5864,18 @@ function restoreEntryPlan(stored: StoredEntryPlan): EntryPlan {
  * is the single `typeof v === 'number'`, and a `{re, im}` with a non-zero
  * imaginary part tells "outside the real domain" from a genuine `NaN`.
  * Booleans pass through (never coerced), and so does anything else; a
- * collection is normalized element by element (a fresh array — the compiled
- * value may alias caller data, or be a definition the runner evaluated once
- * and keeps for every later call: a hoisted constant list literal, a bound
- * symbol value). A FUNCTION the kernel returns is returned under a wrapper
- * that applies this convention to what the function answers, for the same
- * reason: `x ↦ (y ↦ [1, 2, 3])` answers a function whose value is the
- * artifact's one copy of the literal, and a caller writing to that array
- * must not change what the next call answers.
+ * collection is normalized cell by cell WITHOUT a defensive copy
+ * (`normalizeSharedArray`): it is returned as it is unless one of its cells
+ * has to be rewritten by the convention, and a complex object is returned as
+ * it is. The value may be a definition the runner evaluated once and keeps
+ * for every later call (a hoisted constant list literal, a bound symbol
+ * value), so a RESULT IS READ-ONLY BY CONTRACT: a caller that writes to a
+ * returned array or `{re, im}` object changes what the next call answers.
+ * The walk is one `typeof` per cell of a returned collection and allocates
+ * nothing; it is the one per-call cost at the boundary that grows with the
+ * result, and a defensive copy on top of it cost as much as the kernel for
+ * a long result. A FUNCTION the kernel returns is returned under a wrapper
+ * that applies this convention to what the function answers.
  *
  * The test is EXACT, not a chop: the transcendental kernels give an exact
  * zero part where the value has one (`kernelResult`), and chopping here would
@@ -6059,23 +5884,7 @@ function restoreEntryPlan(stored: StoredEntryPlan): EntryPlan {
  */
 export function normalizeRunResult(r: unknown): unknown {
   if (typeof r === 'number' || typeof r === 'boolean') return r;
-  if (Array.isArray(r)) {
-    // A number or boolean element copies through as it is; only another
-    // shape is normalized recursively. The recursive `map` this replaced
-    // was a full pass through a function call per element, which on a
-    // 40 000-element result cost as much as the computation it followed
-    // (Tycho item 264).
-    const n = r.length;
-    const out: unknown[] = new Array(n);
-    for (let i = 0; i < n; i++) {
-      const x = r[i];
-      out[i] =
-        typeof x === 'number' || typeof x === 'boolean'
-          ? x
-          : normalizeRunResult(x);
-    }
-    return out;
-  }
+  if (Array.isArray(r)) return normalizeSharedArray(r);
   if (
     typeof r === 'object' &&
     r !== null &&
@@ -6084,11 +5893,9 @@ export function normalizeRunResult(r: unknown): unknown {
     (r as ComplexResult).im === 0
   )
     return (r as ComplexResult).re;
-  // A complex cell is returned as a FRESH object: the value may be part of a
-  // definition the runner evaluated once and keeps for every later call
-  // (`twoStageRunner`), and a caller writing to the returned object's `re`
-  // must not change what the next call answers.
-  if (isComplexObject(r)) return { re: r.re, im: r.im };
+  // A complex object with a non-zero imaginary part is returned as it is
+  // (read-only by contract, as a collection is).
+  if (isComplexObject(r)) return r;
   if (typeof r === 'function') {
     const fn = r as (...args: unknown[]) => unknown;
     const wrapped = (...args: unknown[]): unknown =>
@@ -6097,6 +5904,32 @@ export function normalizeRunResult(r: unknown): unknown {
     return wrapped;
   }
   return r;
+}
+
+/**
+ * The result convention of `normalizeRunResult` applied to an array without
+ * a defensive copy. The array is walked once; when no cell has to be
+ * rewritten (every cell is a number, a boolean, or a nested array or complex
+ * object that normalizes to itself), the array itself is returned. A copy is
+ * built only when a cell changes, for example a `{re, im: 0}` cell that the
+ * convention reads as a plain number, and only the cells that change are
+ * rewritten in it, so the array the runner keeps is never written to. The
+ * walk is one `typeof` per cell. (A number or boolean cell is tested inline:
+ * a recursive call per cell cost as much as the computation it followed on
+ * a 40 000-element result — Tycho item 264.)
+ */
+function normalizeSharedArray(r: unknown[]): unknown[] {
+  const n = r.length;
+  let out: unknown[] | undefined;
+  for (let i = 0; i < n; i++) {
+    const x = r[i];
+    if (typeof x === 'number' || typeof x === 'boolean') continue;
+    const y = normalizeRunResult(x);
+    if (y === x) continue;
+    out ??= r.slice();
+    out[i] = y;
+  }
+  return out ?? r;
 }
 
 /**

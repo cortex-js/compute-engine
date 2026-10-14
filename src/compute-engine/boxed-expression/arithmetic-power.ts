@@ -1439,7 +1439,24 @@ export function pow(
   // In some cases, an op. may apply, but a 'Power' expr. is still the result ('(a^b)^c -> a^(b*c)'
   // for instance). For these cases, proceed.
   const canonicalResult = canonicalPower(x, ce.expr(exp));
-  if (canonicalResult.operator !== 'Power') return canonicalResult;
+  if (canonicalResult.operator !== 'Power') {
+    // Two number literals whose canonical power is a root (`(-8)^{1/3}` is
+    // `Root(-8, 3)`, `16^{-1/4}` is `1/Root(16, 4)`): the root is a value,
+    // so evaluate it. `canonicalRoot` keeps an integer radicand symbolic on
+    // purpose, and the caller does not evaluate the result of `pow()`
+    // again, so a power that only reaches `pow()` with its operands as
+    // numbers — an element of a broadcast over a list of exponents, or a
+    // symbol exponent that holds `1/3` — stayed `Root(-8, 3)` where the
+    // literal `(-8)^{1/3}` gave `-2` (issue #430). Under a numeric
+    // approximation, a number base never reaches this line.
+    if (
+      isFunction(canonicalResult) &&
+      isNumber(x) &&
+      (typeof exp === 'number' || isNumber(exp))
+    )
+      return canonicalResult.evaluate({ numericApproximation });
+    return canonicalResult;
+  }
 
   const e =
     typeof exp === 'number'

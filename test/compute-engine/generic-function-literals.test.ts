@@ -1507,7 +1507,10 @@ describe('§follow-up — operator-route broadcastability derives from `paramsAr
       e2(ce, ['List', 'x', 'x'], '(x: number) -> list<number>', 'x')
     );
     const call = ce.box(['f', ['List', 1, 2]] as any);
-    expect(call.type.toString()).toBe('list<list<number>>');
+    // The per-element result is the body's type with the parameter typed as
+    // the element (`derivedBroadcastElementResult`): a 2-vector of integers,
+    // nested under the lift, never flattened.
+    expect(call.type.toString()).toBe('list<vector<integer^2>>');
     expect(call.evaluate().toString()).toBe('[[1,1],[2,2]]');
     // …and the scalar call is unchanged.
     expectTypeBetween(ce.box(['f', 3] as any), {atMost: 'list<number>'});

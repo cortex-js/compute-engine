@@ -295,18 +295,19 @@ describe('At index/source admissibility — fail closed, never diverge', () => {
     // (`number` is a supertype of both), so no static gate can classify it —
     // which is exactly why the projection lives at run time.
     //
-    // In `strict` and `auto` mode the entries of a `list<number>` binding are
-    // read as real (user decision of 2026-09-24, option B), as a scalar
-    // `number` index is, so the runner refuses a complex entry when it is
-    // called. Under `mode: 'complex'` the projection answers.
+    // The runner does not read the entries of a list input (user decision
+    // of 2026-10-13: the compiled `run()` requires inputs of the shape the
+    // compiled code reads; a per-call walk of the entries was the whole cost
+    // of the kernel of Tycho ledger row 371). A complex entry of a
+    // `list<number>` binding therefore reaches `_SYS.at`, whose run-time
+    // projection indexes by its real part, in the default mode as under
+    // `mode: 'complex'`.
     const engine = new ComputeEngine();
     engine.declare('ys', 'list<number>');
     const r = compile(engine.box(['At', P, 'ys'] as any));
     expect(r?.success).toBe(true);
     expect(r!.run!({ ys: [1, 2] })).toEqual([10, 20]);
-    expect(() => r!.run!({ ys: [1, { re: 1, im: 2 }] })).toThrow(
-      /"ys" \(type `list<number>`\) was compiled with real entries, but its entry \[1\] is a complex/
-    );
+    expect(r!.run!({ ys: [1, { re: 1, im: 2 }] })).toEqual([10, 10]);
     const c = compile(engine.box(['At', P, 'ys'] as any), {
       mode: 'complex',
     } as any);

@@ -6228,11 +6228,10 @@ export class BaseCompiler {
    *   `list<unknown>`, an undeclared collection) and the mode is `strict` or
    *   `auto`. The heads READ A WIDE OPERAND AS REAL: the target emits the
    *   real-only helper, and a parent reads the value of the head as real.
-   *   This is the reading of a `number`-typed scalar in the same modes. The
-   *   compiled runner checks the entries of each collection-valued binding
-   *   read this way when it is called (`realLaneEntryCheck`), so a
-   *   `{re, im}` entry throws a diagnostic instead of giving a wrong value.
-   *   The value is kept separate from `'real'` because a head whose value
+   *   This is the reading of a `number`-typed scalar in the same modes. A
+   *   `{re, im}` entry a caller binds to such an operand computes as a
+   *   non-number: the entries of a binding are the caller's responsibility
+   *   (`EntryPlan`, `javascript-runtime.ts`). The value is kept separate from `'real'` because a head whose value
    *   is correct for either representation (`Distance`) still chooses the
    *   helper that reads both.
    *
@@ -6257,97 +6256,6 @@ export class BaseCompiler {
     const structural = BaseCompiler.structuralOperandLane(a);
     if (structural !== undefined) return structural;
     return BaseCompiler.complexDiscipline ? 'complex' : 'wide';
-  }
-
-  /**
-   * The run-time entry check of a collection-valued binding (a free symbol,
-   * or an annotated parameter of a function literal) with the declared type
-   * `t`, whose entries the compiled code reads on the REAL lane:
-   *
-   * - `'numbers'`: every entry of the value must be a JavaScript number. The
-   *   type proves every entry a number (`matrix<real>`, `list<number>`,
-   *   `list<tuple<number, number>>`), so a `{re, im}` object or any other
-   *   value at an entry is an error, except `undefined`, an absent cell.
-   * - `'no-complex'`: no entry of the value may be a `{re, im}` object. The
-   *   type does not prove every entry a number (`list<tuple>`, an entry type
-   *   `unknown`), so another kind of entry (a string) is left to the
-   *   lowerings.
-   * - `undefined`: no check. The type has no collection member that lowers
-   *   to an array (a scalar, a set, a dictionary), a complex leaf decides
-   *   the complex lane (`matrix<complex>`), its entries cannot be numbers
-   *   (`list<string>`), or `complexMode` is set and the type does not prove
-   *   every entry real: `mode: 'complex'` reads a `number` entry as complex.
-   *
-   * The linear-algebra heads read a `number` entry as real in `strict` and
-   * `auto` mode (`linearAlgebraOperandLane`), and so do the other real
-   * lowerings of an array (`At(L, 1) + 1`). Without this check a `{re, im}`
-   * entry gives `NaN`, a string (`"[object Object]1"`), or a wrong number.
-   */
-  static realLaneEntryCheck(
-    t: Type,
-    complexMode: boolean
-  ): 'numbers' | 'no-complex' | undefined {
-    if (BaseCompiler.typeHasComplexLeaf(t)) return undefined;
-    const leaves: Type[] = [];
-    BaseCompiler.arrayEntryLeaves(t, false, leaves);
-    if (leaves.length === 0) return undefined;
-    // A leaf that cannot hold a number (`string`, `boolean`) needs no check.
-    if (!leaves.some((l) => isSubtype('integer', l) || isSubtype(l, 'number')))
-      return undefined;
-    if (
-      complexMode &&
-      !leaves.every((l) =>
-        isSubtype(finitePartOfType(stripMissingFromType(l)), 'real')
-      )
-    )
-      return undefined;
-    return leaves.every((l) => isSubtype(l, 'number'))
-      ? 'numbers'
-      : 'no-complex';
-  }
-
-  /**
-   * Collect in `out` the types of the entries of the ARRAYS that a value of
-   * type `t` can be at run time: the element types of a `list` or an
-   * `indexed_collection`, and the component types of a tuple, descended
-   * until they are not arrays. A bare `list` or `tuple` gives an `unknown`
-   * entry. `inside` is true below the top level: there, a type that is not
-   * an array (`number`, a set) is an entry; at the top level it is a scalar
-   * member of a union and gives nothing. A self-referential alias stops the
-   * descent at its second occurrence (`unfoldAliasOnDescent`).
-   */
-  private static arrayEntryLeaves(
-    t: Type,
-    inside: boolean,
-    out: Type[],
-    seen?: AliasDescent
-  ): void {
-    const unfolded = unfoldAliasOnDescent(t, seen);
-    if (unfolded === undefined) return;
-    const r = unfolded.type;
-    seen = unfolded.seen;
-    if (r === 'list' || r === 'tuple') {
-      out.push('unknown');
-      return;
-    }
-    if (typeof r !== 'string') {
-      if (r.kind === 'union') {
-        for (const m of r.types)
-          BaseCompiler.arrayEntryLeaves(m, inside, out, seen);
-        return;
-      }
-      if (r.kind === 'tuple') {
-        for (const e of r.elements)
-          BaseCompiler.arrayEntryLeaves(e.type, true, out, seen);
-        return;
-      }
-      if (r.kind === 'list' || r.kind === 'indexed_collection') {
-        const elt = collectionElementType(r);
-        BaseCompiler.arrayEntryLeaves(elt ?? 'unknown', true, out, seen);
-        return;
-      }
-    }
-    if (inside) out.push(r);
   }
 
   /**
@@ -13080,8 +12988,8 @@ export class BaseCompiler {
    * `dot(vec2, vec2)` for the same expression.
    *
    * The admission is that of the component fan-out in
-   * {@link tryCompileBroadcast}: both operands pure and of one static width
-   * below {@link MIN_UNROLLED_WIDTH} ({@link staticCollectionWidth} — a numeric
+   * {@link tryCompileBroadcast}: both operands of one static width below
+   * {@link MIN_UNROLLED_WIDTH} ({@link staticCollectionWidth} — a numeric
    * tuple type or a dimensioned numeric list type), no operand of unprovable
    * run-time shape, and no complex component, since the scalar `*` and `+`
    * written here are the real lowering. As in the fan-out, a source that is
@@ -13089,7 +12997,10 @@ export class BaseCompiler {
    * time, because a declared width constrains what the ENGINE assigns and not
    * what a caller puts in `vars`; the failing shapes go to `_SYS.matmul`,
    * which answers them the way the interpreter does. Without a test, a
-   * literal is read component by component from its text.
+   * literal is read component by component from its text. An IMPURE operand
+   * (a point whose coordinates draw a random number) is always bound once,
+   * in operand order, never read from its text or repeated: it is evaluated
+   * exactly once per call, as the interpreter evaluates it.
    */
   static compileStaticInnerProduct(
     args: ReadonlyArray<Expression>,
@@ -13110,7 +13021,6 @@ export class BaseCompiler {
     // sum written by hand (`p_0 q_0 + p_1 q_1`) is.
     if (BaseCompiler.linearAlgebraLane(args) === 'complex') return undefined;
     for (const a of args) {
-      if (a.isPure !== true) return undefined;
       if (isBoundPossiblyCollectionTyped(a, target)) return undefined;
       const t = compilationType(a);
       if (typeof t === 'string') return undefined;
@@ -13125,21 +13035,37 @@ export class BaseCompiler {
     const texts = codes.map((code) =>
       BaseCompiler.hoistedListLiteralText(target, code)
     );
+    // A point whose coordinates a user function builds from scalars is
+    // proved by `provenScalarPointWidth` (the proof that admits an impure
+    // body, read through its helper locals); `provenPointWidth` adds the
+    // constructed-list sources.
     const needsGuard = texts.map(
       (text, i) =>
         BaseCompiler.arrayLiteralWidth(text) !== n &&
-        provenPointWidth(args[i], target) !== n
+        provenPointWidth(args[i], target) !== n &&
+        provenScalarPointWidth(args[i], target) !== n
     );
     const anyGuard = needsGuard.some((g) => g);
     const bindings: string[] = [];
     const bound: string[] = [];
     const guarded: string[] = [];
+    // With an impure operand, BOTH operands are bound once, in operand
+    // order, before the sum reads them: an operand read from its literal
+    // text or repeated inline would be evaluated after the bound one, and
+    // an assignment inside the impure operand would then be seen by the
+    // other operand's reads, where the interpreter evaluates the operands
+    // in order.
+    const anyImpure = args.some((a) => a.isPure !== true);
     const parts: (string | string[])[] = codes.map((code, i) => {
-      if (!anyGuard) {
+      if (!anyGuard && !anyImpure) {
         const elements = BaseCompiler.arrayLiteralElements(texts[i], n);
         if (elements !== undefined) return elements;
       }
-      if (!needsGuard[i] && BaseCompiler.REPEATABLE_SOURCE.test(code))
+      if (
+        !needsGuard[i] &&
+        !anyImpure &&
+        BaseCompiler.REPEATABLE_SOURCE.test(code)
+      )
         return code;
       const v = BaseCompiler.tempVar(target);
       bindings.push(v);
@@ -24199,9 +24125,10 @@ export class BaseCompiler {
    * (`_val_*`), and the code it emits must treat an array operand as
    * read-only. Every lowering of this compiler does (`Reverse` and `Sort`
    * copy first; a fold that updates its accumulator in place works on
-   * `_SYS.ownedCopy`), and the runner never hands the array itself to the
-   * caller (`normalizeRunResult` copies a returned collection, also one a
-   * returned function answers).
+   * `_SYS.ownedCopy`). The runner hands the array itself to the caller
+   * (`normalizeRunResult` makes no copy): a result of compiled code is
+   * read-only by contract, and a caller that writes to it changes what the
+   * next call answers.
    *
    * The local is built from the compiler's own emission of number literals
    * only, so it reads no per-call binding and no caller-supplied source: it

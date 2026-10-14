@@ -7,11 +7,17 @@ import { ComputeEngine, compile } from '../../src/compute-engine';
 // scalar is. `mode: 'complex'` reads it as complex. A `complex` entry type
 // keeps the complex lane in every mode.
 //
-// The compiled runner checks the entries of each collection-valued binding
-// read on the real lane when it is called, for `number`- and `real`-typed
-// entries alike, so a `{re, im}` entry throws a diagnostic that names the
-// binding and the entry, instead of giving `NaN`, `null` or the string
-// `"[object Object]1"`.
+// The compiled runner does not read the entries of a collection-valued
+// binding when it is called: `run()` requires inputs of the shape the
+// compiled code reads. A `{re, im}` entry of a collection read on the real
+// lane is not refused; the real helper computes with it as plain JavaScript
+// would, and the result is not specified (the tests pin only that the call
+// does not throw). A caller with complex entries declares the symbol
+// `matrix<complex>` or compiles with `mode: 'complex'`. The runner walked every entry on each call until the
+// user's decision of 2026-10-13, which removed the walk because its cost grew
+// with the data (Tycho ledger row 371 was the motivating case: a kernel
+// called a million times with a 9 801-element list input). See "inputs of
+// the shape" in `docs/COMPILATION-MODEL.md`.
 //
 // (`Trace(M)` over an undeclared `M` is not listed: the use infers
 // `M: number | list<number>`, which may be a scalar, and `Trace` declines a
@@ -122,7 +128,9 @@ describe('AN UNDECLARED COLLECTION OPERAND IS READ AS REAL', () => {
       ]);
     });
 
-  it('an undeclared operand bound to a complex entry throws the entry diagnostic', () => {
+  it('an undeclared operand bound to a complex entry is not refused', () => {
+    // The runner does not read the entries; the value the real helper
+    // computes with the complex entry is not specified.
     const ce = new ComputeEngine();
     const result = js(ce.parse('\\det(M)'));
     expect(() =>
@@ -132,20 +140,29 @@ describe('AN UNDECLARED COLLECTION OPERAND IS READ AS REAL', () => {
           [1, { re: 0, im: 1 }],
         ],
       })
-    ).toThrow(
-      /"M" \(type `matrix<number>`\) was compiled with real entries, but its entry \[1\]\[1\] is a complex \{re, im\} value/
-    );
+    ).not.toThrow();
   });
 });
 
-describe('THE ENTRY CHECK OF A COLLECTION READ ON THE REAL LANE', () => {
+// A collection read on the real lane is passed to the compiled code as it
+// is: the runner does not read its entries and does not copy a typed array
+// into a plain array (a typed array bound to the collection itself is
+// refused; a typed-array row is an entry, and is not read). Until the user's
+// decision of 2026-10-13 the runner walked every entry on each call and threw
+// a diagnostic that named the binding and the complex or non-numeric entry;
+// the walk was removed because its cost grew with the data (Tycho ledger row
+// 371). The caller now supplies plain arrays with real entries, or declares
+// the entries `complex`. The checks that stay are constant per binding; the
+// one tested here is that a `{re, im}` object bound to a real SCALAR binding
+// throws.
+describe('A COLLECTION READ ON THE REAL LANE IS NOT CHECKED ENTRY BY ENTRY', () => {
   const COMPLEX_M = [
     [2, 1],
     [1, { re: 0, im: 1 }],
   ];
   for (const type of ['matrix<real>', 'matrix<number>'])
     for (const mode of MODES)
-      it(`${mode}: det(M) + 1, M: ${type}, with a complex entry throws`, () => {
+      it(`${mode}: det(M) + 1, M: ${type}, with a complex entry is not refused`, () => {
         const ce = new ComputeEngine();
         ce.declare('M', type);
         const result = js(ce.parse('\\det(M) + 1'), mode);
@@ -158,13 +175,9 @@ describe('THE ENTRY CHECK OF A COLLECTION READ ON THE REAL LANE', () => {
             ],
           })
         ).toBe(6);
-        // Before the entry check, the real helper read the complex entry as
-        // NaN, and the runner answered NaN (`matrix<real>`).
-        expect(() => result.run({ M: COMPLEX_M })).toThrow(
-          new RegExp(
-            `"M" \\(type \`${type}\`\\) was compiled with real entries, but its entry \\[1\\]\\[1\\] is a complex \\{re, im\\} value`
-          )
-        );
+        // The runner does not read the entries: the value the real helper
+        // computes with the complex entry is not specified.
+        expect(() => result.run({ M: COMPLEX_M })).not.toThrow();
       });
 
   it('complex: det(M) + 1 over matrix<number> computes with complex entries', () => {
@@ -191,29 +204,28 @@ describe('THE ENTRY CHECK OF A COLLECTION READ ON THE REAL LANE', () => {
     }
   });
 
-  // The check is not limited to the linear-algebra heads: an element read of
-  // a `number`-typed list added to 1 returned the string `"[object Object]1"`.
-  it('At(L, 1) + 1 over a list<number> bound to a complex entry throws', () => {
+  // The same holds outside the linear-algebra heads: an element read of a
+  // `number`-typed list added to 1 computes with the complex object as plain
+  // JavaScript would, and the result is not specified.
+  it('At(L, 1) + 1 over a list<number> bound to a complex entry is not refused', () => {
     const ce = new ComputeEngine();
     ce.declare('L', 'list<number>');
     const result = js(ce.box(['Add', ['At', 'L', 1], 1]));
     expect(result.run({ L: [2, 3] })).toBe(3);
-    expect(() => result.run({ L: [{ re: 1, im: 2 }, 3] })).toThrow(
-      /"L" \(type `list<number>`\) was compiled with real entries, but its entry \[0\] is a complex/
-    );
+    expect(() => result.run({ L: [{ re: 1, im: 2 }, 3] })).not.toThrow();
   });
 
-  it('a list<number> entry that is not a number throws; an absent entry does not', () => {
+  it('a list<number> entry that the code does not read has no effect, whatever it holds', () => {
+    // The runner does not read the entries, so a string or an absent entry
+    // that the compiled code does not read changes nothing.
     const ce = new ComputeEngine();
     ce.declare('L', 'list<number>');
     const result = js(ce.box(['Add', ['At', 'L', 2], 1]));
-    expect(() => result.run({ L: ['a', 2] })).toThrow(
-      /"L" \(type `list<number>`\) was compiled with number entries, but its entry \[0\] is a string, not a number/
-    );
+    expect(result.run({ L: ['a', 2] })).toBe(3);
     expect(result.run({ L: [undefined, 2] })).toBe(3);
   });
 
-  it('a typed parameter of a function literal is checked too', () => {
+  it('a typed parameter of a function literal is not checked either', () => {
     const ce = new ComputeEngine();
     const result = js(
       ce.box([
@@ -228,15 +240,13 @@ describe('THE ENTRY CHECK OF A COLLECTION READ ON THE REAL LANE', () => {
         [1, 3],
       ])
     ).toBe(5);
-    expect(() => result.run(COMPLEX_M)).toThrow(
-      /argument 1 \(type `matrix<number>`\) was compiled with real entries, but its entry \[1\]\[1\] is a complex/
-    );
+    expect(() => result.run(COMPLEX_M)).not.toThrow();
   });
 
-  it('an untyped parameter is checked from its inferred type, on both routes', () => {
+  it('an untyped parameter is read as real from its inferred type, on both routes', () => {
     // `(M) ↦ det(M)` infers `M: matrix` from the body, which reads it with
-    // the real `det` helper: a complex entry throws as it does for an
-    // annotated parameter, instead of giving NaN.
+    // the real `det` helper: a complex entry is not refused, as for an
+    // annotated parameter, and the result is not specified.
     const ce = new ComputeEngine();
     for (const f of [
       js(ce.parse('(M) \\mapsto \\det(M)')),
@@ -248,67 +258,68 @@ describe('THE ENTRY CHECK OF A COLLECTION READ ON THE REAL LANE', () => {
           [1, 3],
         ])
       ).toBe(5);
-      expect(() => f.run(COMPLEX_M)).toThrow(
-        /argument 1 \(type `matrix<number>`\) was compiled with real entries, but its entry \[1\]\[1\] is a complex/
-      );
+      expect(() => f.run(COMPLEX_M)).not.toThrow();
     }
-    // A scalar parameter has no entries to check.
+    // A scalar parameter with a real value is not affected.
     expect(js(ce.parse('(x) \\mapsto x+1')).run(2)).toBe(3);
   });
 
-  it('typed-array rows are copied to plain arrays at entry', () => {
+  it('typed-array rows are not copied to plain arrays at entry', () => {
+    // The compiled code reads plain arrays only. A `Float64Array` row reads
+    // as a non-array and the result is not the determinant: the host converts
+    // a typed array to a plain `Array` once, on its side.
     const ce = new ComputeEngine();
     ce.declare('M', 'matrix<real>');
     const det = js(ce.parse('\\det(M)'));
+    expect(
+      det.run({
+        M: [
+          [1, 2],
+          [3, 4],
+        ],
+      })
+    ).toBe(-2);
     const M = [new Float64Array([1, 2]), new Float64Array([3, 4])];
-    expect(det.run({ M })).toBe(-2);
+    let value: any;
+    expect(() => {
+      value = det.run({ M });
+    }).not.toThrow();
+    expect(value).not.toBe(-2);
     // The caller's value is not changed.
     expect(M[0]).toBeInstanceOf(Float64Array);
     const f = js(ce.parse('(A: matrix<real>) \\mapsto \\det(A)'));
-    expect(f.run([new Float64Array([1, 2]), new Float64Array([3, 4])])).toBe(
-      -2
-    );
     const g = js(ce.parse('(A) \\mapsto \\det(A)'));
-    expect(g.run([new Float64Array([1, 2]), new Float64Array([3, 4])])).toBe(
-      -2
+    for (const h of [f, g]) {
+      expect(
+        h.run([
+          [1, 2],
+          [3, 4],
+        ])
+      ).toBe(-2);
+      expect(() => {
+        value = h.run([new Float64Array([1, 2]), new Float64Array([3, 4])]);
+      }).not.toThrow();
+      expect(value).not.toBe(-2);
+    }
+  });
+
+  it('a complex value bound to a real scalar is refused; entryChecks: false turns that off', () => {
+    // The check that stays costs one `typeof` per binding: a `{re, im}`
+    // object bound to a binding read as a real scalar throws.
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    expect(() => js(ce.parse('x + 1')).run({ x: { re: 0, im: 1 } })).toThrow(
+      /"x" was compiled as a real number but received a complex \{re, im\} value/
     );
-  });
-
-  it('an array nested deeper than the declared type is walked, not refused', () => {
-    // A declared type constrains what the engine assigns, never what a caller
-    // supplies: a caller may pass a matrix where a point was declared, and the
-    // compiled code hands the value to the run-time helper (pinned in
-    // compile-static-point-components.test.ts). The entry check therefore
-    // walks into an array at any depth and refuses only a complex entry.
-    const ce = new ComputeEngine();
-    ce.declare('M', 'matrix<real>');
-    const det = js(ce.parse('\\det(M)'));
-    expect(() =>
-      det.run({
-        M: [
-          [[1], 2],
-          [3, 4],
-        ],
-      })
-    ).not.toThrow();
-    expect(() =>
-      det.run({
-        M: [
-          [[{ re: 1, im: 1 }], 2],
-          [3, 4],
-        ],
-      })
-    ).toThrow(/its entry \[0\]\[0\]\[0\] is a complex \{re, im\} value/);
-  });
-
-  it('entryChecks: false turns the check off', () => {
-    const ce = new ComputeEngine();
-    ce.declare('M', 'matrix<number>');
-    const result = compile(ce.parse('\\det(M)'), {
+    const result = compile(ce.parse('x + 1'), {
       to: 'javascript',
       fallback: false,
       entryChecks: false,
     } as any) as any;
-    expect(result.run({ M: COMPLEX_M })).toBeNaN();
+    let value: any;
+    expect(() => {
+      value = result.run({ x: { re: 0, im: 1 } });
+    }).not.toThrow();
+    expect(typeof value).not.toBe('number');
   });
 });

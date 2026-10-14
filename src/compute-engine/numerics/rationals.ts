@@ -80,6 +80,16 @@ export function rationalAsFloat(x: Rational): number {
 }
 
 /**
+ * Bit length of a positive bigint. The hex string is a near-linear native
+ * conversion; the binary one is several times slower, and a 200 000-digit
+ * integer literal paid for two of them per `.type`.
+ */
+function bitLength(x: bigint): number {
+  const hex = x.toString(16);
+  return (hex.length - 1) * 4 + (32 - Math.clz32(parseInt(hex[0], 16)));
+}
+
+/**
  * The double nearest `n/d` for bigints of any size (`d ≠ 0`), computed
  * without converting `n` or `d` to a double first.
  *
@@ -110,8 +120,8 @@ function bigRatioToFloat(n: bigint, d: bigint): number {
   const negative = n < 0n !== d < 0n;
   const a = n < 0n ? -n : n;
   const b = d < 0n ? -d : d;
-  const la = a.toString(2).length;
-  const lb = b.toString(2).length;
+  const la = bitLength(a);
+  const lb = bitLength(b);
   // `a/b < 2^(la - lb + 1)`, so the value can be subnormal only when
   // `la - lb + 1 <= -1022`.
   if (la - lb <= -1023) {
@@ -126,10 +136,21 @@ function bigRatioToFloat(n: bigint, d: bigint): number {
     }
   }
   const e = la - lb - 64;
-  const num = e < 0 ? a << BigInt(-e) : a;
-  const den = e > 0 ? b << BigInt(e) : b;
-  let q = num / den;
-  if (q * den !== num) q |= 1n;
+  let q: bigint;
+  if (e > 0) {
+    // `⌊⌊a / 2^e⌋ / b⌋ = ⌊a / (b·2^e)⌋`, so the shift is applied to `a` alone:
+    // dividing by a `b·2^e` as wide as `a` costs ~1 ms for a 200 000-digit
+    // integer, a shift of `a` alone ~0.01 ms. The remainder is nonzero when
+    // either division was inexact.
+    const sh = BigInt(e);
+    const high = a >> sh;
+    q = high / b;
+    if (q * b !== high || high << sh !== a) q |= 1n;
+  } else {
+    const num = a << BigInt(-e);
+    q = num / b;
+    if (q * b !== num) q |= 1n;
+  }
   const half = Math.trunc(e / 2);
   const result = Number(q) * 2 ** half * 2 ** (e - half);
   return negative ? -result : result;

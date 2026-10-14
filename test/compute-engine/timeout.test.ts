@@ -48,6 +48,17 @@ describe('TIMEOUT', () => {
         ce.parse('200000!').evaluateAsync({ signal: ctrl.signal })
       ).rejects.toThrow(CancellationError);
     });
+
+    it('a huge Gamma of an exact integer aborts via an AbortSignal (async)', async () => {
+      // Γ(n) = (n − 1)! runs the same big-integer product; the asynchronous
+      // `Gamma` handler awaits it through `Factorial.evaluateAsync`, so the
+      // abort is delivered here too (GitHub issue #429 follow-up).
+      const ctrl = new AbortController();
+      setTimeout(() => ctrl.abort(), 50);
+      await expect(
+        ce.expr(['Gamma', 200001]).evaluateAsync({ signal: ctrl.signal })
+      ).rejects.toThrow(CancellationError);
+    });
   });
 
   describe('Factorial2', () => {

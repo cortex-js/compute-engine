@@ -418,7 +418,9 @@ describe('broadcastable<T> typing (phase E — application-site typing)', () => 
     const ce = new ComputeEngine();
     ce.assign('f', ce.parse('x \\mapsto \\lbrack x, -x \\rbrack'));
     const app = ce.box(['f', ['List', 1, 2]]);
-    expect(app.type.toString()).toBe('list<vector<2>>');
+    // The element type is the body's type with `x` typed as the list's
+    // element, an integer, so the 2-vector carries `integer`.
+    expect(app.type.toString()).toBe('list<vector<integer^2>>');
     const ev = app.evaluate();
     expect(ev.toString()).toBe('[[1,-1],[2,-2]]');
     expect(ev.type.toString()).toBe('matrix<integer^(2x2)>');
