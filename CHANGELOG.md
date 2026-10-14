@@ -2,6 +2,14 @@
 
 ### Behavior Changes
 
+- **`LerchPhi(0, s, a)` with a negative `a` and a non-integer `s` gives a
+  complex value where it gave a real one.** `LerchPhi(0, 2.976, -2.664).N()` is
+  `-0.053998 - 0.004079i` (it was `0.05415`), and the exact
+  `LerchPhi(0, 1/3, -8)` evaluates to `e^(-1/3 ln(-8))` (it was `-1/2`): the
+  principal power of the series term, as for every other `z`. See the entry
+  under Issues Resolved for the reason and for Mathematica's different
+  convention.
+
 - **A parameter that reaches a whole-collection operator through an element-wise
   operator or a local alias binds a list whole.** With `h(xs) := mean(xs^2)`,
   `h([1, 2, 3])` is now `14/3`, where it was `[1, 4, 9]` (the function mapped
@@ -47,6 +55,27 @@
 
 ### Issues Resolved
 
+- **`LerchPhi(0, s, a)` with a negative `a` and a non-integer `s` is the
+  principal power `a^(−s)`,** as the series terms are (DLMF 25.14.1)
+  ([#428](https://github.com/cortex-js/compute-engine/issues/428), contributed
+  by [enumeratio](https://github.com/enumeratio)). The `z = 0` shortcut went
+  through `Power`, which takes the real root of a negative base for a rational
+  exponent with an odd denominator and reads a float exponent as the nearest
+  such fraction: `LerchPhi(0, 2.976, -2.664).N()` was the real `0.05415`, and is
+  `-0.053998 - 0.004079i`; the exact `LerchPhi(0, 1/3, -8)` evaluated to `-1/2`
+  where `.N()` gives `0.25 - 0.433i`, and is now `e^(-1/3 ln(-8))`. Every other
+  `z` already summed principal powers (`LerchPhi(0.5, 2.976, -2.664)` is
+  `2.23287 - 0.07605i`), and `Power` is unchanged. Mathematica's `LerchPhi` sums
+  `|k + a|^(−s)` instead, as its generalized `Zeta[s, a]` does, and answers the
+  real `0.05415` and `1/2` for these: the engine follows the series it sums,
+  which is DLMF's and mpmath's.
+- **The two-argument `Zeta` is documented as Wolfram's generalized zeta,**
+  `Σ |n + a|^(−s)` with the `n + a = 0` term omitted
+  ([#428](https://github.com/cortex-js/compute-engine/issues/428), contributed
+  by [enumeratio](https://github.com/enumeratio)). Its description gave the
+  Hurwitz sum `Σ (n + a)^(−s)`, which differs for `a ≤ 0`: `Zeta(2.976, -2.664)`
+  is the real `29.90244`, `HurwitzZeta(2.976, -2.664)` is `22.60026 - 0.27542i`.
+  The description now says so and points to `HurwitzZeta`.
 - **Compiled `Gamma` of a maybe-complex argument calls the complex kernel.**
   `compile(Gamma(i·t))` answered `NaN` for every `t` (the real-only `_SYS.gamma`
   under the real-operand guard), where the interpreter answers

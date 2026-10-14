@@ -3961,10 +3961,48 @@ function evaluateLerchPhi(
       .evaluate({ numericApproximation: numeric });
 
   // Φ(0,s,a) = a^(−s): only the k = 0 term survives (0⁰ = 1).
-  if (zIsZero)
-    return engine
+  if (zIsZero) {
+    const viaPower = engine
       .function('Power', [a, engine.function('Negate', [s])])
       .evaluate({ numericApproximation: numeric });
+    // The term is the principal power (DLMF 25.14.1), as in the series the
+    // kernel sums: e^(−s·Ln a). `Power` takes the REAL root of a negative
+    // base for a rational exponent with an odd denominator, and reads a
+    // float exponent as the nearest p/q: a < 0 with s = 2.976 gave the real
+    // 0.0542 where Φ(0, 2.976, −2.664) is −0.0540 − 0.0041i, and the exact
+    // Φ(0, 1/3, −8) gave −1/2 where it is (1/2)·e^(−iπ/3). When `Power`
+    // answers a real number for a negative base and a non-integer order,
+    // it took that root, and the exponential form is the value instead:
+    // the exact `e^(−s·ln a)` under `evaluate()`, whose `.N()` is the
+    // principal value. The real answer is read off its TYPE, not its form:
+    // `Power` folds `(−8)^(−1/3)` to the literal `−1/2` but leaves
+    // `(−3)^(−1/3)` as the symbolic `−1/root(3)(3)`, typed `real`, and both
+    // are the real root. A `Power` that answers a complex value (an even
+    // denominator, `(−4)^(−1/2) = −i/2`) is already the principal value and
+    // is kept. The base may be an exact negative number that is not a
+    // literal (`−√2`), so its sign is read with `isNegative`. (Mathematica's
+    // `LerchPhi` sums `|k + a|^(−s)` instead, as its generalized `Zeta[s, a]`
+    // does, and answers the real `1/2` for Φ(0, 1/3, −8); the engine follows
+    // the series it sums for every other `z`, which is DLMF's and mpmath's.)
+    if (
+      a.isNegative === true &&
+      a.type.matches('real') &&
+      isNumber(s) &&
+      !s.isComplex &&
+      Number.isFinite(s.re) &&
+      !Number.isInteger(s.re) &&
+      viaPower.type.matches('real')
+    )
+      return engine
+        .function('Exp', [
+          engine.function('Multiply', [
+            engine.function('Negate', [s]),
+            engine.function('Ln', [a]),
+          ]),
+        ])
+        .evaluate({ numericApproximation: numeric });
+    return viaPower;
+  }
 
   // Φ(z,0,a) = 1/(1 − z), independent of a — the geometric series and its
   // continuation.
@@ -5969,12 +6007,14 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
     },
 
     // Riemann zeta function ζ(s) = Σ_{n=1}^∞ 1/n^s, and its two-argument
-    // (Hurwitz) form ζ(s,a) = Σ_{n=0}^∞ (n+a)^{-s} — Wolfram's `Zeta[s,a]`;
-    // `HurwitzZeta` below is the same function under its own name.
+    // form, Wolfram's generalized `Zeta[s,a]`: for a real a, Σ_{n=0}^∞
+    // |n+a|^{-s} (the term with n+a = 0 omitted), which equals `HurwitzZeta`
+    // for a > 0 while for a ≤ 0 the terms are real and `HurwitzZeta` sums
+    // the complex (n+a)^{-s}; for a complex a, the Hurwitz sum itself.
     // Converges for Re(s) > 1, analytically continued elsewhere
     Zeta: {
       description:
-        'Riemann zeta function; with two arguments, the Hurwitz zeta function ζ(s,a) = Σ_{n=0}^∞ (n+a)^{-s}.',
+        "Riemann zeta function; with two arguments, Wolfram's generalized zeta: for a real a, ζ(s,a) = Σ_{n=0}^∞ |n+a|^{-s} (a term with n+a = 0 omitted), which is HurwitzZeta(s,a) for a > 0; for a complex a, the Hurwitz sum.",
       wikidata: 'Q187235',
       complexity: 8500,
       broadcastable: true,

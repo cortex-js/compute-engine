@@ -1419,7 +1419,7 @@ Rounds a number towards zero (removes the fractional part), or with a step to th
 
 MathJSON `Zeta` · `(complex | infinity, (complex | infinity)?) -> number`
 
-Riemann zeta function; with two arguments, the Hurwitz zeta function ζ(s,a) = Σ_&#123;n=0&#125;^∞ (n+a)^&#123;-s&#125;.
+Riemann zeta function; with two arguments, Wolfram's generalized zeta: for a real a, ζ(s,a) = Σ_&#123;n=0&#125;^∞ |n+a|^&#123;-s&#125; (a term with n+a = 0 omitted), which is HurwitzZeta(s,a) for a &gt; 0; for a complex a, the Hurwitz sum.
 
 ```epsil
 [zeta(2), zeta(-1), N(zeta(3))]
