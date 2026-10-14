@@ -1,4 +1,5 @@
 import { BigDecimal } from '../../big-decimal/index.js';
+import { bitLength } from '../../big-decimal/utils.js';
 
 export function bigint(
   a: BigDecimal | number | bigint | string
@@ -74,11 +75,6 @@ export function bigint(
   }
 }
 
-/** The number of bits of a non-negative bigint (0 for 0). */
-function bitLength(v: bigint): number {
-  return v === 0n ? 0 : v.toString(2).length;
-}
-
 /**
  * Exact integer n-th root of a non-negative bigint: the integer `r` with
  * `r^n = v`, or `null` when `v` is not a perfect n-th power.
@@ -129,13 +125,19 @@ export function bigintMaximalPerfectPower(
   if (bitLength(v) > maxBits) return undefined;
   let base = v;
   let exponent = 1;
-  for (let p = 2; p < bitLength(base); p++) {
+  // An exponent of `bits` or more would need a base below 2. Each read of
+  // the bound is a hex conversion of the base, so it is kept in `bits` and
+  // read again only when a root shrinks the base. Reading it at every
+  // candidate exponent would cost 199 conversions for a 200-bit value.
+  let bits = bitLength(base);
+  for (let p = 2; p < bits; p++) {
     if (!isSmallPrime(p)) continue;
     for (;;) {
       const r = bigintNthRoot(base, p);
       if (r === null) break;
       base = r;
       exponent *= p;
+      bits = bitLength(base);
     }
   }
   return exponent > 1 ? { base, exponent } : undefined;

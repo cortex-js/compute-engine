@@ -165,6 +165,26 @@ describe('bitLength', () => {
   test('large value', () => {
     expect(bitLength(1n << 1000n)).toBe(1001);
   });
+
+  // The length is read from the hex string, so every leading-digit width
+  // (1 to 4 bits) and both sides of each hex-digit boundary are pinned
+  // against the base-2 string.
+  test('matches toString(2).length at power-of-two boundaries', () => {
+    for (const k of [
+      1, 2, 3, 4, 5, 7, 8, 9, 15, 16, 17, 31, 32, 33, 63, 64, 65, 100, 1023,
+      1024, 4000,
+    ]) {
+      const p = 1n << BigInt(k);
+      for (const n of [p - 1n, p, p + 1n, 3n * p, 15n * p, 15n * p + 7n])
+        expect(bitLength(n)).toBe(n.toString(2).length);
+    }
+  });
+
+  test('matches toString(2).length on a 200 000-digit value', () => {
+    const n = 7n * 10n ** 200000n + 12345n;
+    expect(bitLength(n)).toBe(n.toString(2).length);
+    expect(bitLength(-n)).toBe(n.toString(2).length);
+  });
 });
 
 // ================================================================

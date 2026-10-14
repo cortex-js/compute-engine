@@ -1,3 +1,4 @@
+import { bitLength } from '../../big-decimal/utils.js';
 import { canonicalInteger, gcd, lcm } from './numeric.js';
 import {
   gcd as bigGcd,
@@ -77,16 +78,6 @@ export function rationalAsFloat(x: Rational): number {
   if (typeof x[0] === 'bigint' && (!Number.isFinite(n) || !Number.isFinite(d)))
     return bigRatioToFloat(x[0], x[1] as bigint);
   return n / d;
-}
-
-/**
- * Bit length of a positive bigint. The hex string is a near-linear native
- * conversion; the binary one is several times slower, and a 200 000-digit
- * integer literal paid for two of them per `.type`.
- */
-function bitLength(x: bigint): number {
-  const hex = x.toString(16);
-  return (hex.length - 1) * 4 + (32 - Math.clz32(parseInt(hex[0], 16)));
 }
 
 /**

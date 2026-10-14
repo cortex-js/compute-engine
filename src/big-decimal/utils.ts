@@ -1,6 +1,11 @@
 /**
  * Fixed-point BigInt utilities for internal use by transcendental functions.
  *
+ * `bitLength()` is also used outside this directory, by
+ * `compute-engine/numerics/bigint.ts` and `compute-engine/numerics/rationals.ts`.
+ * Its contract, the bits of |n| and 0 for zero, must stay stable for those
+ * callers.
+ *
  * A "fixed-point BigInt" represents a real number as `value = n / 2^bits`
  * (a *binary* grid). Scaling by the radix is therefore a bit-shift
  * (`>> bits` / `<< bits`) rather than a division by `10^p` — the dominant
@@ -43,22 +48,21 @@ export function pow10(n: number): bigint {
   return 10n ** BigInt(n);
 }
 
-/** Bit length of |n| (the number of bits in its binary representation). */
+/**
+ * Bit length of |n| (the number of bits in its binary representation; 0 for
+ * zero).
+ *
+ * The length is read from the hex string: four bits per hex digit past the
+ * first, plus the bits of the leading digit. The hex conversion is a single
+ * near-linear native pass. A base-2 string is several times slower at
+ * 200 000 digits, and a shift-based search (doubling, then binary) allocates
+ * a shifted copy of the bigint at every step.
+ */
 export function bitLength(n: bigint): number {
   if (n < 0n) n = -n;
   if (n === 0n) return 0;
-  let bits = 0;
-  // Doubling search to bracket the bit length.
-  let high = 1;
-  while (n >> BigInt(high) > 0n) high *= 2;
-  // Binary search within [0, high].
-  for (let shift = high >> 1; shift >= 1; shift >>= 1) {
-    if (n >> BigInt(shift) > 0n) {
-      bits += shift;
-      n >>= BigInt(shift);
-    }
-  }
-  return bits + 1;
+  const hex = n.toString(16);
+  return (hex.length - 1) * 4 + (32 - Math.clz32(parseInt(hex[0], 16)));
 }
 
 /** Fixed-point multiply on the base-2 grid: (a * b) >> bits */

@@ -109,21 +109,6 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
-### Three bit-length helpers for a bigint, with three speeds (OPEN, small — found 2026-10-14 by the review of PR #432)
-
-`bitLength()` in `src/big-decimal/utils.ts` (exported, used by
-`transcendentals.ts`) brackets the length with a doubling search and a binary
-search, each step allocating a shifted copy of the bigint. `bitLength()` in
-`src/compute-engine/numerics/bigint.ts` reads `toString(2).length`, a base-2
-stringification that is several times slower than the base-16 one at 200 000
-digits. `bitLength()` in `src/compute-engine/numerics/rationals.ts`, added by PR
-#432, reads the hex string length and the leading-digit bit count and is the
-fastest of the three. The fix is one exported hex-based helper in
-`src/big-decimal/utils.ts` that the other two files import, with the two local
-copies removed. Expected results are unchanged: a bit length is exact under all
-three. A test should pin the hex helper at `0`, `1`, `2^k - 1`, `2^k` and a
-200 000-digit value against `toString(2).length`.
-
 ### A declared result computed through a numeric-tuple argument to a scalar parameter (OPEN, small — found 2026-10-13 by the review of the row 373 call typing)
 
 With `f := x ↦ (−x, x)` and `g := a ↦ f((a, a))`, both declared `function`,
