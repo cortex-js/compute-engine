@@ -184,7 +184,12 @@
   `\max` is the `Measurement`; `Max(1, Measurement(1, 0.01))` is `1` (a tie
   gives the number literal, whatever the operand order); `Sort` of a list with a
   measurement places it by its nominal. A measurement whose nominal cannot be
-  ordered (a symbol) leaves the operator unevaluated, as a symbol operand does.
+  ordered (a symbol, a complex number) leaves the operator unevaluated, as such
+  a bare operand does; two measurements with equal nominals and different
+  uncertainties are not ordered either, so `Max(Measurement(1, 0.1),
+  Measurement(1, 0.5))` stays unevaluated in both operand orders rather than
+  answer whichever came first; and a measurement with a float nominal counts
+  as a float operand (`Max(Measurement(1.5, 0.1), Indeterminate)` is `NaN`).
   Found by the Tycho consumer (its ledger row 375).
 
 - **A compiled special function answers its complex value from real operands in
