@@ -1919,7 +1919,12 @@ declare(arg1, arg2?, arg3?): IComputeEngine
   `canEnumerate`: (`expr`) => `boolean` \| `undefined`;
   `elementCount`: (`expr`) => `number` \| `undefined`;
   `inferOperandTypes`: (`ops`, `requirement`) => 
-     \| readonly ([`Type`](#type-3) \| `undefined`)[]
+     \| readonly (
+     \| [`Type`](#type-3)
+     \| \{
+     `replace`: ...;
+    \}
+     \| `undefined`)[]
      \| `undefined`;
  \}\>\>
   \| `Partial`\<`OnlyFirst`\<[`OperatorDefinition`](#operatordefinition), [`BaseDefinition`](#basedefinition) & \{
@@ -1994,7 +1999,12 @@ declare(arg1, arg2?, arg3?): IComputeEngine
   `canEnumerate`: (`expr`) => `boolean` \| `undefined`;
   `elementCount`: (`expr`) => `number` \| `undefined`;
   `inferOperandTypes`: (`ops`, `requirement`) => 
-     \| readonly ([`Type`](#type-3) \| `undefined`)[]
+     \| readonly (
+     \| [`Type`](#type-3)
+     \| \{
+     `replace`: ...;
+    \}
+     \| `undefined`)[]
      \| `undefined`;
  \}\>\>
   \| [`BoxedOperatorDefinition`](#boxedoperatordefinition)
@@ -5824,7 +5834,12 @@ The eager producer's element count — see the `elementCount` contract on
 
 ```ts
 optional inferOperandTypes?: (ops, requirement) => 
-  | readonly (Type | undefined)[]
+  | readonly (
+  | Type
+  | {
+  replace: Type;
+ }
+  | undefined)[]
   | undefined;
 ```
 
@@ -10106,7 +10121,12 @@ type OperatorDefinition = Partial<BaseDefinition> & Partial<OperatorDefinitionFl
   canEnumerate: (expr) => boolean | undefined;
   elementCount: (expr) => number | undefined;
   inferOperandTypes: (ops, requirement) => 
-     | ReadonlyArray<Type | undefined>
+     | ReadonlyArray<
+     | Type
+     | {
+     replace: Type;
+    }
+     | undefined>
      | undefined;
 };
 ```
@@ -10561,7 +10581,12 @@ a declared `count` owns the answer, including its `undefined`.
 
 ```ts
 optional inferOperandTypes?: (ops, requirement) => 
-  | ReadonlyArray<Type | undefined>
+  | ReadonlyArray<
+  | Type
+  | {
+  replace: Type;
+ }
+  | undefined>
   | undefined;
 ```
 
@@ -10585,11 +10610,19 @@ Only a VALUE requirement reaches the handler: never `any`, `unknown`,
 `value`, `nothing`, an absence marker alone, or a function type. An
 absence arm (`real | missing`) is stripped before the call.
 
+An entry can also be `{ replace: t }`: the handler has combined the
+operand's current inferred type with this requirement itself, and `t`
+replaces that type instead of being intersected with it. This is for a
+combination that is not an intersection, such as a tuple that gets one
+more component. The same guards apply: a declared type never moves.
+
 `At` answers `dictionary<r> | indexed_collection<r>` for its base and
 `First`/`Second`/`Third`/`Last` answer `indexed_collection<r>`. The
 scalar reading is written on purpose: `xs[1] + 1` requires `number`
 of the element, exactly as `x + 1` infers a bare `x` as `number`.
-Design and rulings: `docs/INFERENCE_ROADMAP.md` §5.
+For a base that is a bare function parameter, `At` answers a
+`replace` entry that records each index read separately (a tuple for
+literal indices). Design and rulings: `docs/INFERENCE_ROADMAP.md` §5.
 
 </MemberCard>
 
@@ -10607,6 +10640,41 @@ type SymbolDefinitions = Readonly<{}>;
 
 Minimal interface for a LaTeX parser/serializer.
  Structurally compatible with `LatexSyntax` without importing it.
+
+<MemberCard>
+
+##### ILatexSyntax.dictionary? {#dictionary-2}
+
+```ts
+readonly optional dictionary?: readonly Partial<OnlyFirst<
+  | ExpressionEntry
+  | MatchfixEntry
+  | InfixEntry
+  | PostfixEntry
+  | PrefixEntry
+  | SymbolEntry
+  | FunctionEntry
+  | EnvironmentEntry
+  | DefaultEntry, {} & 
+  | ExpressionEntry
+  | MatchfixEntry
+  | InfixEntry
+  | PostfixEntry
+  | PrefixEntry
+  | SymbolEntry
+  | FunctionEntry
+  | EnvironmentEntry
+  | DefaultEntry>>[];
+```
+
+The dictionary entries, including the entries added with
+ `addEntries()`. A call to `addEntries()` gives a new array, so a
+ different array means a different dictionary. Rule strings are parsed
+ with these entries plus the rule entries. Optional: a minimal injected
+ syntax may not have it, and then rule strings are parsed with the
+ default dictionary. See `LatexSyntax.dictionary`.
+
+</MemberCard>
 
 <MemberCard>
 
@@ -12833,7 +12901,12 @@ declare(arg1, arg2?, arg3?): IComputeEngine
   `canEnumerate`: (`expr`) => `boolean` \| `undefined`;
   `elementCount`: (`expr`) => `number` \| `undefined`;
   `inferOperandTypes`: (`ops`, `requirement`) => 
-     \| readonly ([`Type`](#type-3) \| `undefined`)[]
+     \| readonly (
+     \| [`Type`](#type-3)
+     \| \{
+     `replace`: ...;
+    \}
+     \| `undefined`)[]
      \| `undefined`;
  \}\>\>
   \| `Partial`\<`OnlyFirst`\<[`OperatorDefinition`](#operatordefinition), [`BaseDefinition`](#basedefinition) & \{
@@ -12908,7 +12981,12 @@ declare(arg1, arg2?, arg3?): IComputeEngine
   `canEnumerate`: (`expr`) => `boolean` \| `undefined`;
   `elementCount`: (`expr`) => `number` \| `undefined`;
   `inferOperandTypes`: (`ops`, `requirement`) => 
-     \| readonly ([`Type`](#type-3) \| `undefined`)[]
+     \| readonly (
+     \| [`Type`](#type-3)
+     \| \{
+     `replace`: ...;
+    \}
+     \| `undefined`)[]
      \| `undefined`;
  \}\>\>
   \| [`BoxedOperatorDefinition`](#boxedoperatordefinition)
@@ -16865,6 +16943,25 @@ optional rank?: number;
 ```ts
 data: DataTypeMap[DT][];
 ```
+
+</MemberCard>
+
+<MemberCard>
+
+##### TensorData.holdsFloat? {#holdsfloat}
+
+```ts
+optional holdsFloat?: boolean;
+```
+
+Is the tensor a float tensor? `true` when an entry of the matrix the
+tensor was packed from is a float (a number literal that is not exact,
+such as `1.5` or `2.0`), or when the tensor was computed from a float
+tensor. Every cell of a float tensor is read back as a float, even when
+its value is an integer: the determinant of `[[1.5, 0], [0, 2]]` is the
+float `3`, not the exact `3`. Only the numeric dtypes (`float64`,
+`complex128`, …) use it: a cell of the `expression` dtype keeps its own
+exactness.
 
 </MemberCard>
 
