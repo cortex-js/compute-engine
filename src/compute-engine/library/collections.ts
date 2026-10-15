@@ -2633,12 +2633,12 @@ function provenLengthD(d: OperandDescriptor): number | undefined {
           : [bounds[0]!, bounds[1]!, bounds[2]!];
     const n = rangeCount(lower, upper, step);
     // The `count` handler uses the exact count when every operand is an
-    // exact rational. A descriptor gives the rational value of a literal,
-    // but not whether the literal is exact: `3.0` and `3` have the same
-    // descriptor, and an integer-valued float makes the handler use the
-    // machine count. When the exact count of the rational values is not the
-    // machine count (`Range(0, 9999999999999/10^12, 1)`: 10 and 11), the
-    // count of the handler is not known here, and no length is proved.
+    // exact rational. A descriptor gives the rational value of an exact
+    // literal only (a float bound such as `3.0` has none), so the exact
+    // count below applies when every bound is exact, as in the handler.
+    // When the exact count of the rational values is not the machine count
+    // (`Range(0, 9999999999999/10^12, 1)`: 10 and 11), the count of the
+    // handler is not known here, and no length is proved.
     const rationals = s.children.map((c) => {
       const st = c.structureOf?.();
       return st?.kind === 'number' ? st.rational : undefined;

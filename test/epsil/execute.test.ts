@@ -1704,18 +1704,213 @@ describe('EPSIL EXECUTE — named calls to `:=`-assigned callees (static tier)',
       expect(d.range[1]).toBeLessThanOrEqual(firstLineEnd);
   });
 
-  test('reassignment: the FIRST pinned signature owns the names', () => {
-    // Mirror of the runtime, where the first assignment pins the binding's
-    // declared type — the place parameter names live — and a later
-    // reassignment never re-pins it: the second literal's names are unknown
-    // at runtime, and the static tier reports the same problem.
-    const src =
-      'f := (x: number, y: number) => x + 3\nf := (a: number, b: number) => a * b\nf(a: 2, b: 5)';
-    const { value, diagnostics } = run(src);
-    expect(diagnostics.map((d) => [d.message[0], d.message[3]])).toEqual([
-      ['static-type-error', 'argument-name-unknown'],
-    ]);
-    expect(value.errors.length).toBeGreaterThan(0);
+  test('reassignment: the LATEST annotated literal owns the names', () => {
+    // The signature derived from an annotated literal is a record of that
+    // literal, so a reassignment of another annotated literal with the same
+    // parameter types replaces its names: the call is matched against the
+    // names of the literal that runs. The names of the first literal are
+    // then unknown, at runtime and in the static tier.
+    const head =
+      'f := (x: number, y: number) => x + 3\nf := (a: number, b: number) => a * b\n';
+    const latest = run(head + 'f(a: 2, b: 5)');
+    expect(latest.diagnostics).toEqual([]);
+    expect(latest.value.re).toBe(10);
+
+    const first = run(head + 'f(x: 2, y: 5)');
+    expect(
+      first.diagnostics.map((d) => [d.message[0], d.message[3]])
+    ).toEqual([['static-type-error', 'argument-name-unknown']]);
+    expect(first.value.errors.length).toBeGreaterThan(0);
+  });
+
+  test('reassignment with another inferred result: the latest literal owns the names', () => {
+    // The result of the first literal is a record of that literal, not a
+    // contract: the run time accepts a second literal with another result,
+    // and the static tier takes its names and its result.
+    const head =
+      'h := (x: integer, y: integer) => x - y\nh := (a: integer, b: integer) => (a - b) / 2\n';
+    const latest = run(head + 'h(a: 3, b: 5)');
+    expect(latest.diagnostics).toEqual([]);
+    expect(latest.value.re).toBe(-1);
+    const first = run(head + 'h(x: 3, y: 5)');
+    expect(
+      first.diagnostics.map((d) => [d.message[0], d.message[3]])
+    ).toEqual([['static-type-error', 'argument-name-unknown']]);
+    expect(first.value.errors.length).toBeGreaterThan(0);
+
+    const text = run(
+      'h := (x: real, y: real) => x - y\nh := (a: real, b: real) => "s"\nh(a: 3, b: 5)'
+    );
+    expect(text.diagnostics).toEqual([]);
+    expect(text.value.toString()).toBe('"s"');
+  });
+
+  test('reassignment of a partly annotated literal: a bare parameter has no name', () => {
+    // The signature of a partly annotated literal names only its annotated
+    // parameters, at run time and in the static tier.
+    const head =
+      'h := (x: real, y: real) => x - y\nh := (y, x: real) => x - y\n';
+    const named = run(head + 'h(y: 5, x: 3)');
+    expect(
+      named.diagnostics.map((d) => [d.message[0], d.message[3]])
+    ).toEqual([['static-type-error', 'argument-name-unknown']]);
+    expect(named.value.errors.length).toBeGreaterThan(0);
+    const mixed = run(head + 'h(5, x: 3)');
+    expect(mixed.diagnostics).toEqual([]);
+    expect(mixed.value.re).toBe(-2);
+  });
+
+  test('a refused reassignment of an annotated literal with no parameter names keeps the pin', () => {
+    // A literal with bare parameters and a stated result is annotated: the
+    // run time checks it against the signature that `h` has, and refuses
+    // `(unknown) -> string` over `(x: integer) -> integer`. The binding
+    // keeps its signature, so the static tier keeps the pin and its names.
+    // An Epsil arrow cannot state a result, so the literal is written in
+    // MathJSON.
+    const ce = new ComputeEngine();
+    const literal: MathJsonExpression = [
+      'Function',
+      ['Typed', ['Block', "'s'"], "'string'"],
+      'u',
+    ];
+    ce.assign('h', ce.box(['Function', 'x', ['Typed', 'x', 'integer']]));
+    expect(() => ce.assign('h', ce.box(literal))).toThrow(/not compatible/);
+
+    const source = 'h := (x: integer) => x\nh := (u) => "s"\nh(x: 3)';
+    const [ast] = parseEpsil(source);
+    const statements = (ast as { fn: MathJsonExpression[] }).fn;
+    const assign = statements[2] as { fn: MathJsonExpression[] };
+    assign.fn[2] = literal;
+    expect(staticDiagnostics(new ComputeEngine(), ast!, source)).toEqual([]);
+  });
+
+  // A `function` statement and an assignment of a function literal change
+  // the same definition, in either order. The static tier must see the
+  // definition that the run time has.
+  const codes = (r: ReturnType<typeof run>) =>
+    r.diagnostics.map((d) => [d.message[0], d.message[3]]);
+  const NAME_UNKNOWN = [['static-type-error', 'argument-name-unknown']];
+
+  test('a `function` statement over an assigned literal adds a clause', () => {
+    // At run time the assigned literal is the first clause of `h`, and the
+    // `function` statement with another parameter domain adds a clause.
+    const head = 'h := (x: integer) => x\nfunction h(u) -> string { "s" }\n';
+    const first = run(head + 'h(x: 3)');
+    expect(first.diagnostics).toEqual([]);
+    expect(first.value.re).toBe(3);
+    const second = run(head + 'h(u: 3)');
+    expect(codes(second)).toEqual(NAME_UNKNOWN);
+    expect(second.value.errors.length).toBeGreaterThan(0);
+
+    // The same for a `let` binding that holds a literal.
+    const declared = run(
+      'let h = (x: integer) => x\nfunction h(u: string) { u }\nh(x: 3)'
+    );
+    expect(declared.diagnostics).toEqual([]);
+    expect(declared.value.re).toBe(3);
+  });
+
+  test('a `function` statement with the same parameter domain replaces the assigned literal', () => {
+    const head = 'h := (x: integer) => x\nfunction h(u: integer) { u + 1 }\n';
+    const latest = run(head + 'h(u: 3)');
+    expect(latest.diagnostics).toEqual([]);
+    expect(latest.value.re).toBe(4);
+    const old = run(head + 'h(x: 3)');
+    expect(codes(old)).toEqual(NAME_UNKNOWN);
+    expect(old.value.errors.length).toBeGreaterThan(0);
+  });
+
+  test('an assignment over a `function` statement follows the reassignment rules', () => {
+    // An unannotated literal replaces the definition: no parameter names.
+    const bare = 'function h(x: integer) { x }\nh := (u) => "s"\n';
+    const named = run(bare + 'h(x: 3)');
+    expect(codes(named)).toEqual(NAME_UNKNOWN);
+    expect(named.value.toString()).toBe(
+      'Error(ErrorCode("argument-name-unknown", "x", "this function declares no parameter names"))'
+    );
+    const positional = run(bare + 'h(3)');
+    expect(positional.diagnostics).toEqual([]);
+    expect(positional.value.toString()).toBe('"s"');
+
+    // A compatible annotated literal gives its names.
+    const annotated =
+      'function h(x: integer) { x }\nh := (u: integer) => u + 1\n';
+    const latest = run(annotated + 'h(u: 3)');
+    expect(latest.diagnostics).toEqual([]);
+    expect(latest.value.re).toBe(4);
+    expect(codes(run(annotated + 'h(x: 3)'))).toEqual(NAME_UNKNOWN);
+
+    // A definition with several clauses is replaced by the literal.
+    const clauses = run(
+      'function h(x: integer) { x }\nfunction h(x: string) { x }\n' +
+        'h := (u: integer) => u + 1\nh(u: 3)'
+    );
+    expect(clauses.diagnostics).toEqual([]);
+    expect(clauses.value.re).toBe(4);
+  });
+
+  test('the pass does not change a function defined by an earlier program', () => {
+    const ce = new ComputeEngine();
+    executeEpsil(ce, 'function h(x: integer) { x }');
+    const source = 'h := (u) => "s"\nh(x: 3)';
+    const [ast] = parseEpsil(source);
+    staticDiagnostics(ce, ast!, source);
+    expect(ce.lookupDefinition('h')!.operator!.signature.toString()).toBe(
+      '(x: integer) -> integer'
+    );
+  });
+
+  test('reassignment that annotates a bare parameter: the annotation replaces the inferred type', () => {
+    // The type of the bare `p` is inferred from `p[1]`. It is not a contract:
+    // the run time accepts a literal that annotates the parameter with
+    // another type, and takes its names.
+    const head =
+      'h := (p, n: number) => p[1] + n\nh := (q: string, m: number) => m\n';
+    const latest = run(head + 'h(q: "s", m: 1)');
+    expect(latest.diagnostics).toEqual([]);
+    expect(latest.value.re).toBe(1);
+    const old = run(head + 'h(p: "s", n: 1)');
+    expect(
+      old.diagnostics.map((d) => [d.message[0], d.message[3]])
+    ).toEqual([['static-type-error', 'argument-name-unknown']]);
+    expect(old.value.errors.length).toBeGreaterThan(0);
+  });
+
+  test('reassignment that leaves a bare parameter bare: the inferred type stays', () => {
+    const ce = new ComputeEngine();
+    const r = executeEpsil(
+      ce,
+      'h := (p, n: number) => p[1] + n\nh := (q, m: number) => q[1] * m\nh(q: [5], m: 2)'
+    );
+    expect(r.diagnostics).toEqual([]);
+    expect(r.value.re).toBe(10);
+    expect(ce.lookupDefinition('h')!.operator!.signature.toString()).toBe(
+      '(q: tuple<number>, m: number) -> number'
+    );
+  });
+
+  test('reassignment of an unannotated literal: the names are gone', () => {
+    // At run time the unannotated literal replaces the signature that the
+    // first literal gave, and the new signature has no parameter names. The
+    // static tier replaces the pin too, and reports the same error.
+    const head =
+      'f := (x: number, y: number) => x + 3\nf := (a, b) => a * b\n';
+    const named = run(head + 'f(x: 2, y: 5)');
+    expect(
+      named.diagnostics.map((d) => [d.message[0], d.message[3]])
+    ).toEqual([['static-type-error', 'argument-name-unknown']]);
+    expect(named.value.toString()).toBe(
+      'Error(ErrorCode("argument-name-unknown", "x", "this function declares no parameter names"))'
+    );
+    const positional = run(head + 'f(2, 5)');
+    expect(positional.diagnostics).toEqual([]);
+    expect(positional.value.re).toBe(10);
+    // A later annotated literal gives the names again.
+    const again = run(
+      head + 'f := (u: number, v: number) => u - v\nf(v: 5, u: 2)'
+    );
+    expect(again.diagnostics).toEqual([]);
+    expect(again.value.re).toBe(-3);
   });
 
   test('incompatible reassignment: the first names keep working, no false static diagnostics', () => {

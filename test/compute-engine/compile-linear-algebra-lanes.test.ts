@@ -340,6 +340,63 @@ describe('A `Power` WHOSE BASE IS A MATRIX ONLY AFTER THE PARSE', () => {
         expect(actual[i][j]).toBeCloseTo(x, 12);
   });
 
+  it('javascript: a float exponent with an integer value keeps the element-wise power', () => {
+    // A float exponent is not an integer, so `B^{2.0}` is the square of each
+    // entry, on the interpreter and in the compiled code.
+    const expr = assignedAfterParse('B^{2.0}', '[[1, 2], [3, 4]]');
+    expect(expr.evaluate().toString()).toBe('[[1,4],[9,16]]');
+    const result = js(expr, 'strict');
+    expect(result.code).not.toContain('matpow');
+    expect(result.code).toContain('_SYS.bcast(');
+    expect(result.run()).toEqual([
+      [1, 4],
+      [9, 16],
+    ]);
+    // A declared matrix: canonicalization keeps the `Power`.
+    const ce = new ComputeEngine();
+    ce.declare('A', 'matrix<real^(2x2)>');
+    const declared = js(ce.parse('A^{2.0}'), 'strict');
+    expect(declared.code).not.toContain('matpow');
+    expect(js(ce.parse('A^2'), 'strict').code).toContain('_SYS.matpow(');
+  });
+
+  it('javascript: an exponent typed integer is the matrix power, as on evaluate()', () => {
+    // The written exponent decides (`isSquareMatrixPower`): `n + 1.0` with
+    // `n: integer`, and `n` holding the float `2.0`, are typed `integer`.
+    const m = '[[1, 2], [3, 4]]';
+    const power = [
+      [7, 10],
+      [15, 22],
+    ];
+    const ce = new ComputeEngine();
+    ce.declare('n', 'integer');
+    ce.assign('n', 1);
+    const sum = ce.box(['Power', ce.parse(m), ['Add', 'n', { num: '1.0' }]]);
+    expect(sum.evaluate().toString()).toBe('[[7,10],[15,22]]');
+    const compiledSum = js(sum, 'strict');
+    expect(compiledSum.code).toContain('_SYS.matpow(');
+    expect(compiledSum.run({ n: 1 })).toEqual(power);
+    const held = new ComputeEngine();
+    held.declare('n', 'integer');
+    held.assign('n', held.parse('2.0'));
+    const byN = held.box(['Power', held.parse(m), 'n']);
+    expect(byN.evaluate().toString()).toBe('[[7,10],[15,22]]');
+    const compiledN = js(byN, 'strict');
+    expect(compiledN.code).toContain('_SYS.matpow(');
+    expect(compiledN.run({ n: 2 })).toEqual(power);
+  });
+
+  it('javascript: an exponent typed real over a matrix declines', () => {
+    // Only the value of such an exponent decides, so the compilation
+    // declines (`isSquareMatrixPower` answers `undefined`).
+    const ce = new ComputeEngine();
+    ce.declare('k', 'real');
+    ce.declare('A', 'matrix<real^(2x2)>');
+    expect(() => js(ce.parse('A^k'), 'strict')).toThrow(
+      /Could not compile `Power`: the base is a matrix/
+    );
+  });
+
   it('javascript: an integer power of a matrix that is not square declines', () => {
     // `evaluate()` gives the `expected-square-matrix` error, as `B^2` parsed
     // after the assignment does (`MatrixPower(B, 2)`). Compiled code cannot

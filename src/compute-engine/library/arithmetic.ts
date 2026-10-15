@@ -1470,11 +1470,11 @@ function negativeBaseIsComplexBranch(exp: OperandDescriptor): boolean {
   const structure = exp.structureOf?.();
   const literal = structure?.kind === 'number' ? structure : undefined;
   const exact = literal?.rational;
-  // A LITERAL's integrality is settled by those terms: `asRational` — the
-  // channel that fills them — answers for every exact rational and for
-  // every machine float that is a whole number, so a literal with no terms
-  // at all is not an integer. Everything else (a symbol, a compound) is
-  // decided by the type, where an undecided answer hedges.
+  // A LITERAL's integrality is settled by those terms: the descriptor fills
+  // them for an exact rational only (a float literal has no exact terms, so
+  // `2.0` is read here as not an integer, and `realPowerBranchTerms` below
+  // rebuilds its terms from the machine value). Everything else (a symbol,
+  // a compound) is decided by the type, where an undecided answer hedges.
   const notInteger =
     literal !== undefined
       ? exact === undefined || exact[1] !== 1n

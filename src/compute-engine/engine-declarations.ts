@@ -27,6 +27,7 @@ import {
   widen,
   containsSignatureArm,
   placeholderSlotsAs,
+  withParameterNamesOf,
 } from '../common/type/utils.js';
 import { parseType, parseTypeParameterClause } from '../common/type/parse.js';
 import { clearClauseProvenance } from './clause-identity.js';
@@ -3063,6 +3064,20 @@ export function assignFn(
         )
           throw declaredTypeError(id, reconciled, declaredType);
 
+        // The parameter names of a DERIVED signature are a record of the
+        // previous literal too, and the latest literal owns them. The new
+        // literal is applied to the operands in its own parameter order, so
+        // a named call must match the names of the new literal. Example:
+        // after `h := (x: real, factor: real) ↦ x - factor`, the re-assign
+        // `h := (factor: real, x: real) ↦ x - factor` gives
+        // `h(factor: 5, x: 3) = -2`. With the old names, the call puts `3` in
+        // the first slot, `factor`, and gives `2`. A signature declared on
+        // the name is a contract, and keeps its names.
+        if (def.operator._derivedSignature)
+          declaredType = ce.type(
+            withParameterNamesOf(declaredType.type, reconciled.type.type)
+          );
+
         // A definition that ALREADY carries a user lambda keeps its OPERATOR
         // representation: re-running `ce.assign('f', ⟨annotated literal⟩)` on
         // the same symbol must land where the first run did (notebook re-run
@@ -3771,7 +3786,7 @@ export function assignValueAsOperatorDef(
  * runs it and the same function with `acc` bare accepts it. `any`, not
  * `unknown`, because `unknown` excludes the absence markers.
  */
-function validationSignatureOf(
+export function validationSignatureOf(
   literal: Expression,
   signature: Type
 ): Type | undefined {
@@ -3821,7 +3836,7 @@ function validationSignatureOf(
  * slot is annotated) or when the signatures and the literal do not pair slot
  * by slot.
  */
-function bareSlotsAsPlaceholders(
+export function bareSlotsAsPlaceholders(
   signature: Type,
   validation: Type | undefined,
   literal: Expression
@@ -3857,7 +3872,7 @@ function bareSlotsAsPlaceholders(
  * A full-signature marker with a WIDE result (`(…) scope -> unknown`) declares
  * no return type and may annotate no parameter, yet IS an annotation: the
  * effects it states are the author's contract. */
-function functionLiteralHasAnnotation(literal: Expression): boolean {
+export function functionLiteralHasAnnotation(literal: Expression): boolean {
   if (functionLiteralReturnType(literal) !== undefined) return true;
   if (functionLiteralDeclaredEffects(literal) !== undefined) return true;
   // A GENERIC literal (a whole-signature `where` marker) is the strongest

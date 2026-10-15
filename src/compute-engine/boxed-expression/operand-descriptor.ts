@@ -187,7 +187,9 @@ function structureOfExpression(
       get rational(): readonly [bigint, bigint] | undefined {
         if (!rationalComputed) {
           rationalComputed = true;
-          const r = asRational(op);
+          // A float has no exact value, even when it is an integer (`2.0`):
+          // `asRational` reads its value as `[2, 1]`.
+          const r = op.isExact ? asRational(op) : undefined;
           if (r !== undefined) rational = [BigInt(r[0]), BigInt(r[1])];
         }
         return rational;

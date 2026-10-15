@@ -3105,6 +3105,21 @@ export class BoxedFunction
   /** Is this node bound to the definition the standard library gives its
    * operator name — the binding of that name in the outermost scope — and
    * not to a definition a host declared under the same name? */
+  /**
+   * Whether this evaluation reads the exponent of this `Power` exactly
+   * (`evaluatesExponentExactly()`): the node is the library `Power`, and
+   * only the value of its exponent decides between the matrix power and
+   * the element-wise power.
+   */
+  private _evaluatesExponentExactly(
+    options: Partial<EvaluateOptions> | undefined
+  ): boolean {
+    return (
+      evaluatesExponentExactly(this, options) &&
+      this._isBoundToLibraryDefinition()
+    );
+  }
+
   private _isBoundToLibraryDefinition(): boolean {
     let scope = this.engine.context?.lexicalScope;
     if (scope === undefined || scope === null || this._def === undefined)
@@ -5230,13 +5245,26 @@ export class BoxedFunction
         // shortest source, so deferring them would make the SIZE of a
         // collection decide the semantics — a mismatch erroring under the eager
         // threshold and silently truncating above it.
-        const bops = evaluateBroadcastLiftsOnce(this._ops!, options);
+        const bops = this._evaluatesExponentExactly(options)
+          ? [
+              ...evaluateBroadcastLiftsOnce([this._ops![0]], options),
+              normalizeLiftedAbsence(
+                this._ops![1],
+                exactIntegerOperand(this._ops![1], options)
+              ),
+            ]
+          : evaluateBroadcastLiftsOnce(this._ops!, options);
         const liftError = this._liftedOperandError(bops);
         if (liftError !== undefined) return liftError;
         // An integer power of a square matrix is the matrix power, not the
         // element-wise power. See `squareMatrixPower()`.
         if (this.operator === 'Power' && this._isBoundToLibraryDefinition()) {
-          const matrixPower = squareMatrixPower(this.engine, bops, options);
+          const matrixPower = squareMatrixPower(
+            this.engine,
+            bops,
+            options,
+            this._ops![1]
+          );
           if (matrixPower !== undefined) return matrixPower.evaluate(options);
         }
         const mismatch = broadcastLengthMismatch(this.engine, bops);
@@ -5537,11 +5565,16 @@ export class BoxedFunction
       // as an integer, and the float of a large one is rounded to the
       // working precision before it is read, so `DigitSum(2^1000).N()` gave
       // 84 where the digit sum is 1366.
+      // The exponent of a `Power` whose value decides between the matrix
+      // power and the element-wise power is evaluated exactly too
+      // (`evaluatesExponentExactly()`).
+      const exactExponent = this._evaluatesExponentExactly(options);
       const exactIntegerAt = numericApproximation
         ? integerParameterPositions(def)
         : undefined;
       const tail = holdMap(this, (x, index) =>
-        exactIntegerAt !== undefined && exactIntegerAt(index)
+        (exactIntegerAt !== undefined && exactIntegerAt(index)) ||
+        (exactExponent && index === 1)
           ? exactIntegerOperand(x, options)
           : // A value that the finiteness read of this evaluation computed
             // for the operand (`_isMemoizableLazyCollection()`); such a read
@@ -5884,7 +5917,12 @@ export class BoxedFunction
         // (`Power(Add(B, B), 2)`) takes the matrix power, as in step 2. See
         // `squareMatrixPower()`.
         if (this.operator === 'Power' && this._isBoundToLibraryDefinition()) {
-          const matrixPower = squareMatrixPower(this.engine, tail, options);
+          const matrixPower = squareMatrixPower(
+            this.engine,
+            tail,
+            options,
+            this._ops![1]
+          );
           if (matrixPower !== undefined) return matrixPower.evaluate(options);
         }
         // Hybrid laziness: past the eager threshold — and for a materialized
@@ -6395,12 +6433,28 @@ export class BoxedFunction
         // broadcast (mirrors the sync path).
         // Broadcast rulings (2026-07-24) — mirrors the sync path in step 2,
         // including running before the lazy form.
-        const bops = await evaluateBroadcastLiftsOnceAsync(this._ops!, options);
+        const bops = this._evaluatesExponentExactly(options)
+          ? [
+              ...(await evaluateBroadcastLiftsOnceAsync(
+                [this._ops![0]],
+                options
+              )),
+              normalizeLiftedAbsence(
+                this._ops![1],
+                await exactIntegerOperandAsync(this._ops![1], options)
+              ),
+            ]
+          : await evaluateBroadcastLiftsOnceAsync(this._ops!, options);
         const liftError = this._liftedOperandError(bops);
         if (liftError !== undefined) return liftError;
         // The matrix power of a square matrix (mirrors the sync path).
         if (this.operator === 'Power' && this._isBoundToLibraryDefinition()) {
-          const matrixPower = squareMatrixPower(this.engine, bops, options);
+          const matrixPower = squareMatrixPower(
+            this.engine,
+            bops,
+            options,
+            this._ops![1]
+          );
           if (matrixPower !== undefined)
             return matrixPower.evaluateAsync(options);
         }
@@ -6707,11 +6761,15 @@ export class BoxedFunction
       // the sync route's step 4 (`operandOptions`).
       // An operand at an `integer`-typed parameter is evaluated exactly
       // under `.N()`, as on the sync route's step 4 (`exactIntegerOperand()`).
+      // The exponent of a `Power` is evaluated exactly when its value decides
+      // the matrix power, as on the sync route's step 4.
+      const exactExponent = this._evaluatesExponentExactly(options);
       const exactIntegerAt = numericApproximation
         ? integerParameterPositions(def)
         : undefined;
       const tail = await holdMapAsync(this, async (x, index) =>
-        exactIntegerAt !== undefined && exactIntegerAt(index)
+        (exactIntegerAt !== undefined && exactIntegerAt(index)) ||
+        (exactExponent && index === 1)
           ? await exactIntegerOperandAsync(x, options)
           : await x.evaluateAsync(operandOptions(options))
       );
@@ -6976,7 +7034,12 @@ export class BoxedFunction
       if (postEvalBroadcast && !unresolvedTailOperand) {
         // The matrix power of a square matrix (mirrors the sync step 4b).
         if (this.operator === 'Power' && this._isBoundToLibraryDefinition()) {
-          const matrixPower = squareMatrixPower(this.engine, tail, options);
+          const matrixPower = squareMatrixPower(
+            this.engine,
+            tail,
+            options,
+            this._ops![1]
+          );
           if (matrixPower !== undefined)
             return matrixPower.evaluateAsync(options);
         }
@@ -7966,12 +8029,12 @@ function withBroadcastThrowContext(
 function squareMatrixPower(
   ce: ComputeEngine,
   ops: ReadonlyArray<Expression>,
-  options: Partial<EvaluateOptions> | undefined
+  options: Partial<EvaluateOptions> | undefined,
+  written: Expression | undefined
 ): Expression | undefined {
   if (ops.length !== 2) return undefined;
   const [base, exponent] = ops;
-  // This function decides on values: the exponent is already evaluated, and
-  // only a number literal can make a matrix power here.
+  // The exponent is already evaluated, and the matrix power needs a number.
   if (!isNumber(exponent) || exponent.isInteger !== true) return undefined;
   const isMatrixValue = (x: Expression): boolean =>
     x.type.type !== 'never' && x.type.matches('matrix');
@@ -7980,16 +8043,103 @@ function squareMatrixPower(
     (isFunction(base) && base.operator !== 'List' && isMatrixValue(base));
   const value = readValue ? base.evaluate(operandOptions(options)) : base;
   if (!isFunction(value, 'List')) return undefined;
-  // The type of a `List` value has both extents, so the result is `true` or
-  // `false` here, never `undefined`.
-  if (isSquareMatrixPower(value.type, exponent) === true)
-    return ce.function('MatrixPower', [value, exponent]);
+  // The shape is read before the exponent: a base that is not a matrix (a
+  // vector) has no matrix power, whatever the exponent. The type of a
+  // `List` value has both extents, so the shape is known.
+  const shape = matrixShapeOf(value.type);
+  if (shape !== 'square' && shape !== 'non-square') return undefined;
+  // The written exponent decides, not its value: see `isSquareMatrixPower`.
+  if (!isMatrixPowerExponent(written ?? exponent, exponent)) return undefined;
+  if (shape === 'square') return ce.function('MatrixPower', [value, exponent]);
   // `B^2` parsed after `B` holds a matrix that is not square is
   // `MatrixPower(B, 2)`, which is the `expected-square-matrix` error. The
-  // same `Power` built before the assignment gives the same error.
-  if (isNonSquareMatrixPower(value.type, exponent))
+  // same `Power` built before the assignment gives the same error. The
+  // exponent 1 keeps the broadcast, which gives the matrix itself.
+  if (exponent.re !== 1)
     return ce.error('expected-square-matrix', value.toString());
   return undefined;
+}
+
+/**
+ * Whether the exponent of a `Power` of a matrix value makes the matrix
+ * power, for the evaluation of the `Power` (`squareMatrixPower()`).
+ * `written` is the exponent as written, `evaluated` its value.
+ *
+ * The written exponent decides when its form tells (`integerExponentOf`): an
+ * exact integer literal is a matrix power, a float literal is an
+ * element-wise power, and an expression typed `integer` is a matrix power
+ * whatever value it evaluates to (`n + 1.0` with `n: integer`). The value
+ * decides only for an expression whose type is not `integer`: an exact
+ * integer value is a matrix power. Under a numeric approximation such an
+ * exponent is evaluated exactly, once (`evaluatesExponentExactly()`), so
+ * that `evaluated` holds the exact integer and `evaluate()` and `.N()`
+ * decide alike.
+ */
+function isMatrixPowerExponent(
+  written: Expression,
+  evaluated: Expression
+): boolean {
+  const known = integerExponentOf(written);
+  if (known !== undefined) return known;
+  return isExactIntegerLiteral(evaluated);
+}
+
+/**
+ * Whether the evaluation of `expr`, a `Power`, under the options `options`
+ * evaluates the exponent exactly (`exactIntegerOperand()`): an exact integer
+ * value is kept as it is, and any other value is then approximated, from
+ * that one result. This applies under a numeric approximation when only the
+ * value of the exponent can decide between the matrix power and the
+ * element-wise power (`integerExponentOf()` answers `undefined`) and the
+ * base may be a matrix (its type is not a number type).
+ *
+ * Under `.N()` an exact integer value would otherwise be a float, and the
+ * float `2.0` is an element-wise power while the exact `2` is a matrix
+ * power: `B^k` with `k: real` holding 2 gave the element-wise power under
+ * `.N()` and the matrix power under `evaluate()`. Evaluating the exponent a
+ * second time to read its exact value would repeat its side effects.
+ */
+function evaluatesExponentExactly(
+  expr: Expression,
+  options: Partial<EvaluateOptions> | undefined
+): boolean {
+  if (options?.numericApproximation !== true) return false;
+  if (!isFunction(expr, 'Power') || expr.nops !== 2) return false;
+  if (integerExponentOf(expr.op2) !== undefined) return false;
+  // A collection exponent is broadcast over, and is not read here.
+  if (isBroadcastParticipant(expr.op2)) return false;
+  return !isSubtype(expr.op1.type.type, 'number');
+}
+
+/**
+ * Whether the written exponent `exponent` is an integer exponent of a matrix
+ * power: `true` for an exact integer literal and for an expression that is
+ * not a literal and whose type is `integer`, `false` for any other number
+ * literal (a float, even `2.0`, and a non-integer), and `undefined` for an
+ * expression whose type is not `integer`, which only its value decides.
+ */
+function integerExponentOf(exponent: Expression): boolean | undefined {
+  if (isNumber(exponent)) return isExactIntegerLiteral(exponent);
+  if (isSubtype(exponent.type.type, 'integer')) return true;
+  return undefined;
+}
+
+/**
+ * The shape of a matrix type for a matrix power: `'square'` or
+ * `'non-square'` when the type is a matrix (its entries are numbers) of rank
+ * 2 with two known extents, `'unknown'` when an extent is not known, and
+ * `'none'` when the type is not a matrix (a vector, a ragged list, a list of
+ * entries that are not numbers, a scalar, or the empty type `never`).
+ */
+function matrixShapeOf(
+  baseType: BoxedType
+): 'square' | 'non-square' | 'unknown' | 'none' {
+  if (baseType.type === 'never' || !baseType.matches('matrix')) return 'none';
+  const dims = staticCollectionDims(baseType.type);
+  if (dims === null || dims.length !== 2) return 'unknown';
+  const [rows, columns] = dims;
+  if (rows < 0 || columns < 0) return 'unknown';
+  return rows === columns ? 'square' : 'non-square';
 }
 
 /**
@@ -8013,14 +8163,17 @@ export function isNonSquareMatrixPower(
   baseType: BoxedType,
   exponent: Expression
 ): boolean {
-  if (baseType.type === 'never' || !baseType.matches('matrix')) return false;
-  const dims = staticCollectionDims(baseType.type);
-  if (dims === null || dims.length !== 2) return false;
-  const [rows, columns] = dims;
-  if (rows < 0 || columns < 0 || rows === columns) return false;
-  if (isNumber(exponent))
-    return exponent.isInteger === true && !exponent.isSame(1);
-  return isSubtype(exponent.type.type, 'integer');
+  if (matrixShapeOf(baseType) !== 'non-square') return false;
+  return integerExponentOf(exponent) === true && !exponent.isSame(1);
+}
+
+/**
+ * Whether `x` is a number literal with an exact integer value. A float with
+ * an integer value (`2.0`) is not one: a float exponent of a matrix is an
+ * element-wise power (`isSquareMatrixPower`).
+ */
+function isExactIntegerLiteral(x: Expression): boolean {
+  return isNumber(x) && x.isExact && x.isInteger === true;
 }
 
 /**
@@ -8033,29 +8186,50 @@ export function isNonSquareMatrixPower(
  *
  * - `true`: a matrix power. The base type is a matrix (its entries are
  *   numbers) of rank 2 with two known extents that are equal, and the
- *   exponent is an integer: an integer number literal, or an expression
- *   whose type is an integer.
+ *   exponent is an integer: an EXACT integer number literal, or an
+ *   expression that is not a literal and whose type is an integer.
  * - `false`: an element-wise power. The base type is not a matrix (a vector,
  *   a ragged list, a list of entries that are not numbers, a scalar, or the
  *   empty type `never`), or it is a matrix with two known extents that are
- *   not equal, or the exponent is a number literal that is not an integer.
+ *   not equal, or the exponent is a number literal that is not an exact
+ *   integer.
  * - `undefined`: the type does not tell. The base type is a matrix with an
  *   extent that is not known, or the exponent is not a literal and its type
  *   is not an integer. Only the value at run time can decide.
+ *
+ * A float exponent is never a matrix power, even when its value is an
+ * integer, as a float exponent is never a polynomial degree: a float is not
+ * an integer. So `[[1, 2], [3, 4]]^{2.0}` is `[[1, 4], [9, 16]]`, the square
+ * of each entry, as `M^{2.5}` is the power of each entry, and `M^2` is the
+ * matrix power `[[7, 10], [15, 22]]` (user decision). Canonicalization
+ * applies the same rule (`canonicalPower()` in `arithmetic-power.ts`).
+ *
+ * The rule reads the exponent as WRITTEN, never its value, so that every
+ * route gives the same power (`integerExponentOf`):
+ * - an exact integer literal is a matrix power;
+ * - any other number literal, a float such as `2.0` included, is an
+ *   element-wise power;
+ * - an expression that is not a literal and whose type is `integer` is a
+ *   matrix power, whatever value it evaluates to: `M^{n + 1.0}` with
+ *   `n: integer`, `M^{Floor(5/2)}`, and `M^n` with `n` holding `2.0` are
+ *   matrix powers under `evaluate()`, under `.N()` (which makes their value
+ *   a float) and in compiled code;
+ * - for an expression whose type is not `integer`, this function answers
+ *   `undefined` and compilation declines. The evaluation then decides from
+ *   the exact value of the exponent: under `.N()` the exponent is evaluated
+ *   exactly, once, and that value is approximated afterwards, so that
+ *   `evaluate()` and `.N()` agree and a side effect of the exponent runs
+ *   once (`isMatrixPowerExponent`, `evaluatesExponentExactly`).
  */
 export function isSquareMatrixPower(
   baseType: BoxedType,
   exponent: Expression
 ): boolean | undefined {
-  if (baseType.type === 'never' || !baseType.matches('matrix')) return false;
-  const dims = staticCollectionDims(baseType.type);
-  if (dims === null || dims.length !== 2) return undefined;
-  const [rows, columns] = dims;
-  if (rows >= 0 && columns >= 0 && rows !== columns) return false;
-  if (isNumber(exponent)) {
-    if (exponent.isInteger !== true) return false;
-  } else if (!isSubtype(exponent.type.type, 'integer')) return undefined;
-  return rows >= 0 && columns >= 0 ? true : undefined;
+  const shape = matrixShapeOf(baseType);
+  if (shape === 'none' || shape === 'non-square') return false;
+  const integer = integerExponentOf(exponent);
+  if (integer === false) return false;
+  return shape === 'square' && integer === true ? true : undefined;
 }
 
 /**

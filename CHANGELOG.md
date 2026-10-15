@@ -565,6 +565,32 @@
   or tuple that holds a call refused at boxing now evaluates its other elements:
   `[a, h("abc")]` with `a := 5` is `[5, Error(…)]`.
 
+- **The parameter names of a redefined function are those of the latest
+  annotated literal.** With `h := (x: real, factor: real) ↦ x - factor` and then
+  `h := (factor: real, x: real) ↦ x - factor`, `h(factor: 5, x: 3)` gives `-2`,
+  also for a call boxed before the redefinition; the names of the first literal
+  stayed, and the call gave `2`. The Epsil static checks follow the same rule:
+  after `f := (x, y) => …` and `f := (a, b) => …`, `f(a: …, b: …)` is accepted
+  and `f(x: …, y: …)` is reported as `argument-name-unknown`, and after an
+  unannotated literal replaces an annotated one (`f := (a, b) => a * b`), a
+  named call `f(x: 2, y: 5)` is reported as `argument-name-unknown`, as it fails
+  at run time. A signature declared on the name keeps its names, because it is a
+  contract.
+
+- **A float exponent on a matrix is an element-wise power.**
+  `[[1,2],[3,4]]^{2.0}` is `[[1,4],[9,16]]`, the square of each entry as a
+  float, as `M^{2.5}` is the power of each entry; it was the matrix power
+  `[[7,10],[15,22]]`. Only an exact integer exponent gives the matrix power:
+  `M^2` is unchanged, and `(M^{2.0})^2` is the matrix power of the element-wise
+  square. The decision reads the exponent as written, not its value: an exponent
+  that is not a literal and is typed `integer` (`M^{Floor(5/2)}`, `M^{n + 1.0}`
+  with `n: integer`) is the matrix power on `evaluate()`, `.N()` and in compiled
+  code alike; an exponent typed otherwise (`k: real` holding 2) is decided from
+  its exact value, and compiling it declines. The same holds when `B^{2.0}` is
+  parsed before `B` holds a matrix, on the structural form, in the type of the
+  power, and in compiled JavaScript, which uses the element-wise kernel for
+  `A^{2.0}`. `MatrixPower(M, 2.0)`, written by name, is still the matrix power.
+
 - **The value a call returns is checked against the declared result type.** A
   definition whose body cannot meet its declaration is still accepted, and the
   compiler still declines it, as before. With `g` declared
@@ -26592,13 +26618,13 @@ corpus went from 85% to ~96%, and the one crash it exposed is fixed. See
 - **3×3 `Eigenvalues`
 
   returned wrong values — fixed.** The analytic solver used
-                              a sign-flipped term in its depressed cubic, mirroring every eigenvalue about
-                              $\operatorname{tr}/3$: e.g. $[[5,-3,-7],[-2,1,2],[2,-3,-4]]$ returned
-                              $\{\tfrac{10}{3}, -\tfrac53, \tfrac13\}$ instead of $\{1, -2, 3\}$. (Spectra
-                              symmetric about their mean — like $\{1,2,3\}$ — were unaffected, which is how
-                              it escaped notice.) Additionally, a complex-conjugate eigenvalue pair was
-                              returned as its real part twice ($\{2, \pm i\}$ came back $\{2, 0, 0\}$);
-                              complex eigenvalues are now returned as complex numbers.
+                                  a sign-flipped term in its depressed cubic, mirroring every eigenvalue about
+                                  $\operatorname{tr}/3$: e.g. $[[5,-3,-7],[-2,1,2],[2,-3,-4]]$ returned
+                                  $\{\tfrac{10}{3}, -\tfrac53, \tfrac13\}$ instead of $\{1, -2, 3\}$. (Spectra
+                                  symmetric about their mean — like $\{1,2,3\}$ — were unaffected, which is how
+                                  it escaped notice.) Additionally, a complex-conjugate eigenvalue pair was
+                                  returned as its real part twice ($\{2, \pm i\}$ came back $\{2, 0, 0\}$);
+                                  complex eigenvalues are now returned as complex numbers.
 
 ### Rules and Pattern Matching
 

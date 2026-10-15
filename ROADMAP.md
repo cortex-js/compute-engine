@@ -146,6 +146,34 @@ later. Related question: `Reverse(n)` evaluates to `Reverse(Error(…))`, not to
 the error, by the rule that a collection head keeps a failed cell in place;
 whether the OPERAND of a lazy view counts as a cell is not written down.
 
+### The type of a float power of an exact number claims an exact integer (OPEN, small — found 2026-10-15 by the change that makes a float exponent on a matrix element-wise)
+
+`(-8)^{2.0}` is typed `integer<64..64>` and `2^{3.0}` is typed `integer<8..8>`,
+while their values are the floats `64.0` and `8.0` (the spelling rule: a float
+exponent makes a float result, and `evaluate()` gives `{num: "64.0"}`). The
+`Power` type handler folds two number literals to the exact literal type without
+reading the exactness of the exponent. The type must be `real` (or the float
+literal type) when either literal is a float.
+
+### The Epsil static check and the run time disagree on two reassignment shapes (OPEN, small — found 2026-10-15 by the change that gives a redefined function the names of its latest literal)
+
+Since 2026-10-15 the static check follows the run time on an assignment over an
+assigned pin and on the `function`-statement route in both directions
+(`installAssignedLiteralBeforeClause()`, `assignOverUserFunction()` in
+`src/epsil/static-diagnostics.ts`). Two shapes are left. (1) A `function`
+statement after a `const` function binding: with `const h = (x: integer) => x`,
+then `function h(u: string) { u }`, then `h(x: 3)`, the run time refuses the
+`function` statement and `h(x: 3)` gives `3`, but the static check installs the
+new clause and reports `argument-name-unknown`; marking the binding as a
+constant in the static check prints "error canonicalizing `DefineFunction`: The
+type of the constant "h" cannot be changed" to the console, so the fix must
+leave a `function` statement on a constant binding unchanged without that route.
+(2) A function defined by an EARLIER program on the same engine, then an
+unannotated assignment in a new program (`h := (u) => "s"`, then `h(x: 3)`): the
+static check reports nothing because it never changes a binding from an earlier
+program, while the run time gives `argument-name-unknown`; a missed warning, not
+a false error.
+
 ### `Solve` and the general power rule make a float root exact (OPEN, small — found 2026-10-15 by the change that keeps a float exponent out of the polynomial degree)
 
 `ce.function('Divide', [ce.One, 2.0])` gives the exact `1/2`, while
@@ -157,16 +185,6 @@ must give float roots. Until the fold is fixed, `Solve` leaves an equation whose
 float exponent has an integer value unsolved (`x^{2.0} = 4`, `x^{3.0} - 8 = 0`);
 `x^{2.5} = 4` keeps its float root. After the fix, `x^{2.0} = 4` should give the
 float root `2.0`.
-
-### A matrix power with a float exponent is read as an integer power (OPEN, decision — found 2026-10-15 by the change that keeps a float exponent out of the polynomial degree)
-
-`B^{2.0}` over a square matrix value is still the matrix power:
-`isSquareMatrixPower` and `squareMatrixPower`
-(`boxed-expression/boxed-function.ts`) test `exponent.isInteger`, which is true
-for the float `2.0`. The decision of 2026-10-15 says a float exponent is not an
-integer for the polynomial operations; whether the same holds for a matrix power
-(`B^{2.0}` is then the element-wise power of the entries, as `B^{2.5}` is) is a
-separate question. If nothing is decided, the matrix power stays.
 
 ### The product of a point and a scalar-or-list value is typed without the single-point arm (OPEN, small — found 2026-10-15 by the point-valued body typing)
 
@@ -185,22 +203,6 @@ from, so the rule also applies to a tuple inferred from a call: with
 `h := p ↦ g(p)` and `g: (tuple<number, number>) -> number`, `h(zs)` types `zs`
 as `indexed_collection<number>`, where it was `tuple<number, number>`. Recording
 the origin of the inferred tuple on the slot would keep the call-derived tuple.
-
-### The parameter names of a redefined function stay those of the first annotated literal (OPEN, decision — found 2026-10-15 by the re-read of a named call after a redefinition)
-
-With `h := (x: real, factor: real) ↦ x - factor` and then
-`h := (factor: real, x: real) ↦ x - factor`, the engine keeps the names of the
-FIRST literal and runs the new literal by position: `h(factor: 5, x: 3)` gives
-`2`, because the old names put `3` in the first slot, which is `factor` in the
-new literal; a call written after the redefinition gives the same. The pin
-"reassignment: the FIRST pinned signature owns the names" in
-`test/epsil/execute.test.ts` records the rule: with `f := (x, y)` then
-`f := (a, b)`, the call `f(a: 2, b: 5)` is `argument-name-unknown`. The
-question: should the names follow the latest literal? Yes: about 30 lines in
-`engine-declarations.ts` take the new literal's names, and that pin changes
-(`f(a: 2, b: 5)` then works, `f(x: 2, y: 5)` is the error). No: a named call can
-put a value into a parameter other than the one its name says, with no warning.
-If nothing is decided, the first literal's names stay.
 
 ### `.N()` of a `1/(x·ln x)` divergence at a nonzero bound or at infinity gives a finite value (OPEN, small — found 2026-10-14 by the power-law divergence test)
 

@@ -325,10 +325,12 @@ describe('A NAMED CALL THROUGH AN UNTYPED VARIABLE MATCHES THE NAMES AT EVALUATI
 describe('A NAMED CALL OF A USER FUNCTION MATCHES THE NAMES AT EVALUATION', () => {
   // The assignment of a function literal with annotated parameters makes `h`
   // an operator definition whose signature has the names of the parameters.
-  // A later assignment of an annotated literal keeps these names (pinned in
-  // `test/epsil/execute.test.ts`, "reassignment: the FIRST pinned signature
-  // owns the names"). A later assignment of a literal with no annotation
-  // replaces the signature, which then has no parameter names.
+  // A later assignment of a compatible annotated literal gives the signature
+  // the names of that literal: the latest literal owns the names, because it
+  // is the one that runs (the Epsil pin is "reassignment: the LATEST
+  // annotated literal owns the names" in `test/epsil/execute.test.ts`). A
+  // later assignment of a literal with no annotation replaces the signature,
+  // which then has no parameter names.
   //
   // The call keeps the names it was written with, and they are matched
   // again against the definition that `h` holds when the call is evaluated.
@@ -341,6 +343,70 @@ describe('A NAMED CALL OF A USER FUNCTION MATCHES THE NAMES AT EVALUATION', () =
     ['Typed', 'factor', 'real'],
   ];
   const BARE_FX = ['Function', ['Subtract', 'x', 'factor'], 'factor', 'x'];
+  // The same body, with the annotated parameters in the other order.
+  const FX = [
+    'Function',
+    ['Subtract', 'x', 'factor'],
+    ['Typed', 'factor', 'real'],
+    ['Typed', 'x', 'real'],
+  ];
+  const MINUS_2 = { type: 'real', value: '-2', asyncValue: '-2' };
+
+  test('box route: the parameters of the new literal in another order', async () => {
+    const ce = new ComputeEngine();
+    ce.assign('h', ce.box(XF));
+    const call = ce.box(['h', N('factor', 5), N('x', 3)]);
+    expect(await observe(call)).toEqual(MINUS_2);
+
+    ce.assign('h', ce.box(FX));
+    expect(ce.lookupDefinition('h')!.operator!.signature.toString()).toBe(
+      '(factor: real, x: real) -> real'
+    );
+    const fresh = ce.box(['h', N('factor', 5), N('x', 3)]);
+    expect(await observe(fresh)).toEqual(MINUS_2);
+    expect(await observe(call)).toEqual(MINUS_2);
+    // The names of the first literal are not names of `h` any more.
+    expect(
+      ce.box(['h', N('y', 5), N('x', 3)]).evaluate().toString()
+    ).toContain('argument-name-unknown');
+  });
+
+  test('`ce.function` route: the parameters of the new literal in another order', async () => {
+    const ce = new ComputeEngine();
+    ce.assign('h', ce.box(XF));
+    const named = () => [
+      ce.box(N('factor', 5), { form: 'raw' }),
+      ce.box(N('x', 3), { form: 'raw' }),
+    ];
+    const call = ce.function('h', named());
+    expect(await observe(call)).toEqual(MINUS_2);
+    ce.assign('h', ce.box(FX));
+    expect(await observe(ce.function('h', named()))).toEqual(MINUS_2);
+    expect(await observe(call)).toEqual(MINUS_2);
+  });
+
+  test('Epsil: the parameters of the new literal in another order', async () => {
+    const ce = new ComputeEngine();
+    const r = executeEpsil(
+      ce,
+      'h := (x: real, factor: real) => x - factor\n' +
+        'function g() { h(factor: 5, x: 3) }\nlet a = g()\n' +
+        'h := (factor: real, x: real) => x - factor\n' +
+        '[a, g(), h(factor: 5, x: 3)]'
+    );
+    expect(r.diagnostics).toEqual([]);
+    expect(r.value.toString()).toBe('[-2,-2,-2]');
+    // A call boxed before the redefinition, evaluated after it.
+    const before = new ComputeEngine();
+    executeEpsil(before, 'h := (x: real, factor: real) => x - factor');
+    const call = before.box(['h', N('factor', 5), N('x', 3)]);
+    expect(await observe(call)).toEqual(MINUS_2);
+    expect(
+      executeEpsil(before, 'h := (factor: real, x: real) => x - factor')
+        .diagnostics
+    ).toEqual([]);
+    expect(await observe(call)).toEqual(MINUS_2);
+  });
 
   test('box route', async () => {
     const ce = new ComputeEngine();

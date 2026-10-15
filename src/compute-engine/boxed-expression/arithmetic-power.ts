@@ -177,6 +177,17 @@ function isExactLiteral(x: Expression, n: number): boolean {
   return isNumber(x) && x.isExact && x.isSame(n);
 }
 
+/**
+ * True if `x` is an integer that is not a float: an exact integer literal,
+ * or an expression that is not a literal and whose value is an integer. A
+ * float literal with an integer value (`2.0`) is not one, so it does not
+ * make the power of a matrix a matrix power.
+ */
+function isExactInteger(x: Expression): boolean {
+  if (x.isInteger !== true) return false;
+  return !isNumber(x) || x.isExact;
+}
+
 function isSqrt(expr: Expression): boolean {
   if (!isFunction(expr)) return false;
   return (
@@ -296,7 +307,7 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
     // is the matrix power (see the `MatrixPower` rewrite below), so
     // `(e^A)^2` is `e^A·e^A` (matrix product), not `e^{2A}`. The node falls
     // through to the `MatrixPower` rewrite.
-    const elementWiseMatrix = aPow.isInteger !== true && isMatrixTyped(a);
+    const elementWiseMatrix = !isExactInteger(aPow) && isMatrixTyped(a);
 
     if ((baseNonNeg || outerIsInteger) && !elementWiseMatrix) {
       return ce._fn('Power', [
@@ -370,7 +381,12 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
   // `never` (an EMPTY declared range, `integer<2<..<3>`) matches every
   // type, and a shape REWRITE keyed on that vacuous match turned
   // `Power(never, 2)` into a `MatrixPower` typed `matrix`.
-  if (b.isInteger === true && isMatrixTyped(a)) {
+  // A float exponent is not an integer, even when its value is one:
+  // `M^{2.0}` is the element-wise power of the entries, as `M^{2.5}` is,
+  // and only an exact integer gives the matrix power (user decision; the
+  // evaluation and the compilation of a `Power` read the same rule from
+  // `isSquareMatrixPower()`, `boxed-function.ts`).
+  if (isExactInteger(b) && isMatrixTyped(a)) {
     const n = b.re;
     if (n === 1) return a;
     // Preserve the existing canonical form for the inverse.

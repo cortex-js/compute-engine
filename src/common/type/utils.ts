@@ -2446,6 +2446,36 @@ export function signatureSlotType(
   return sig.variadicArg?.type;
 }
 
+/** `t` with the parameter names of the signature `source`, slot by slot.
+ * `t` itself when one of the two is not a signature, or when they do not
+ * have the same required, optional and variadic slots. A slot that has no
+ * name in `source` has no name in the result. */
+export function withParameterNamesOf(t: Type, source: Type): Type {
+  if (typeof t !== 'object' || t.kind !== 'signature') return t;
+  if (typeof source !== 'object' || source.kind !== 'signature') return t;
+  const sameLength = (a?: unknown[], b?: unknown[]) =>
+    (a?.length ?? 0) === (b?.length ?? 0);
+  if (
+    !sameLength(t.args, source.args) ||
+    !sameLength(t.optArgs, source.optArgs) ||
+    (t.variadicArg === undefined) !== (source.variadicArg === undefined)
+  )
+    return t;
+  const named = (
+    slots: FunctionSignature['args'],
+    names: FunctionSignature['args']
+  ) => slots?.map((a, i) => ({ ...a, name: names![i].name }));
+  return {
+    ...t,
+    args: named(t.args, source.args),
+    optArgs: named(t.optArgs, source.optArgs),
+    variadicArg:
+      t.variadicArg === undefined
+        ? undefined
+        : { ...t.variadicArg, name: source.variadicArg!.name },
+  };
+}
+
 /**
  * `derived` (a declared signature with its `unknown` slots refined from the
  * assigned body) with every PARAMETER that is a placeholder in `skeleton`

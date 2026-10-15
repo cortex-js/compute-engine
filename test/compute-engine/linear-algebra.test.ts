@@ -3474,6 +3474,151 @@ describe('MatrixPower', () => {
       );
     });
 
+    // A float exponent is not an integer, even when its value is one, so
+    // `B^{2.0}` is the square of each entry, as `B^{2.5}` is the power of
+    // each entry, and only `B^2` is the matrix power (user decision).
+    it('keeps the element-wise power for a float exponent with an integer value', () => {
+      const squares = '[[1,4],[9,16]]';
+      const e = before('B^{2.0}', m);
+      expect(e.evaluate().toString()).toBe(squares);
+      // The entries are floats.
+      expect(e.evaluate().json).toEqual([
+        'List',
+        ['List', { num: '1.0' }, { num: '4.0' }],
+        ['List', { num: '9.0' }, { num: '16.0' }],
+      ]);
+      expect(e.N().toString()).toBe(squares);
+      expect(e.evaluate({ numericApproximation: true }).toString()).toBe(
+        squares
+      );
+      expect(before('B^{3.0}', m).evaluate().toString()).toBe(
+        '[[1,8],[27,64]]'
+      );
+    });
+
+    it('keeps the element-wise power for a float exponent on the asynchronous route', async () => {
+      const e = before('B^{2.0}', m);
+      expect((await e.evaluateAsync()).toString()).toBe('[[1,4],[9,16]]');
+    });
+
+    it('keeps the element-wise power for a float exponent on the structural form', () => {
+      const engine = new ComputeEngine();
+      const literal = engine.function(
+        'Power',
+        [engine.box(m), engine.parse('2.0')],
+        { form: 'structural' }
+      );
+      expect(literal.evaluate().toString()).toBe('[[1,4],[9,16]]');
+    });
+
+    it('keeps the element-wise power for a float exponent parsed after the assignment', () => {
+      const engine = new ComputeEngine();
+      engine.assign('B', engine.box(m));
+      const e = engine.parse('B^{2.0}');
+      expect(e.operator).toBe('Power');
+      expect(e.evaluate().toString()).toBe('[[1,4],[9,16]]');
+      // The exact exponent is the matrix power.
+      expect(engine.parse('B^2').evaluate().toString()).toBe(
+        '[[7,10],[15,22]]'
+      );
+      // A matrix literal reads the same rule.
+      const direct = engine.box(['Power', m, { num: '2.0' }]);
+      expect(direct.operator).toBe('Power');
+      expect(direct.evaluate().toString()).toBe('[[1,4],[9,16]]');
+      // The square of the element-wise squares is a matrix power.
+      expect(
+        engine
+          .box(['Power', ['Power', m, { num: '2.0' }], 2])
+          .evaluate()
+          .toString()
+      ).toBe('[[37,68],[153,292]]');
+    });
+
+    // The written exponent decides, not its value (`isSquareMatrixPower`):
+    // an exponent typed `integer` is a matrix power on every route, even
+    // when `.N()` makes its value a float.
+    it('reads an exponent typed integer as a matrix power on every route', async () => {
+      const power = '[[7,10],[15,22]]';
+      const engine = new ComputeEngine();
+      const e = engine.box(['Power', 'B', ['Floor', ['Divide', 5, 2]]]);
+      engine.assign('B', engine.box(m));
+      expect(e.evaluate().toString()).toBe(power);
+      expect(e.N().toString()).toBe(power);
+      expect((await e.evaluateAsync()).toString()).toBe(power);
+      // `n + 1.0` with `n: integer` is typed `integer`.
+      const withN = new ComputeEngine();
+      withN.declare('n', 'integer');
+      withN.assign('n', 1);
+      const sum = withN.box(['Power', m, ['Add', 'n', { num: '1.0' }]]);
+      expect(sum.evaluate().toString()).toBe(power);
+      expect(sum.N().toString()).toBe(power);
+      // `n: integer` holding the float `2.0`.
+      const held = new ComputeEngine();
+      held.declare('n', 'integer');
+      held.assign('n', held.parse('2.0'));
+      const byN = held.box(['Power', m, 'n']);
+      expect(byN.evaluate().toString()).toBe(power);
+      expect(byN.N().toString()).toBe(power);
+    });
+
+    it('reads the exact value of an exponent typed real under `.N()`', () => {
+      // `k: real` holding 2: only the value decides, and `.N()` reads it
+      // without the numeric approximation, so it agrees with `evaluate()`.
+      const engine = new ComputeEngine();
+      engine.declare('k', 'real');
+      engine.assign('k', 2);
+      const e = engine.box(['Power', 'B', 'k']);
+      engine.assign('B', engine.box(m));
+      expect(e.evaluate().toString()).toBe('[[7,10],[15,22]]');
+      expect(e.N().toString()).toBe('[[7,10],[15,22]]');
+    });
+
+    it('evaluates an exponent typed real once on every route', async () => {
+      // `next()` declares a `real` result, so only its value decides between
+      // the matrix power and the element-wise power. Under `.N()` the
+      // exponent is evaluated exactly, once, and then approximated; it was
+      // evaluated a second time to read its exact value.
+      const run = async (
+        base: Expression,
+        route: 'evaluate' | 'N' | 'async' | 'async-N'
+      ) => {
+        const engine = new ComputeEngine();
+        let count = 0;
+        engine.declare('next', {
+          signature: '() -> real',
+          evaluate: () => {
+            count += 1;
+            return engine.number(2);
+          },
+        });
+        const e = engine.box(['Power', base, ['next']]);
+        const value =
+          route === 'evaluate'
+            ? e.evaluate()
+            : route === 'N'
+              ? e.N()
+              : route === 'async'
+                ? await e.evaluateAsync()
+                : await e.evaluateAsync({ numericApproximation: true });
+        return [value.toString(), count];
+      };
+      for (const route of ['evaluate', 'N', 'async', 'async-N'] as const) {
+        expect(await run(m, route)).toEqual(['[[7,10],[15,22]]', 1]);
+        expect(await run(['List', 2, 3], route)).toEqual(['[4,9]', 1]);
+      }
+    });
+
+    it('keeps the matrix power for MatrixPower called with a float exponent', () => {
+      // `MatrixPower` is the matrix power by name: its signature,
+      // `(matrix, real) -> matrix`, admits the float `2.0`.
+      expect(
+        ce
+          .box(['MatrixPower', m, { num: '2.0' }])
+          .evaluate()
+          .toString()
+      ).toBe('[[7,10],[15,22]]');
+    });
+
     it('keeps the element-wise power for a shape that is not a square matrix', () => {
       // A vector.
       expect(before('B^2', ['List', 1, 2, 3]).evaluate().toString()).toBe(
