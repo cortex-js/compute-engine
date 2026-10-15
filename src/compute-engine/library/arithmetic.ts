@@ -4799,7 +4799,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       evaluate: ([x0, step0], { numericApproximation, expression }) => {
         // A `Measurement` rounds as its nominal (see `Floor`).
         const x = measurementNominal(x0);
-        const step = step0 === undefined ? undefined : measurementNominal(step0);
+        const step =
+          step0 === undefined ? undefined : measurementNominal(step0);
         // The operand as written, for the exact recovery near a rounding
         // jump, read through its nominal when it is a `Measurement`.
         const written = originalOperand(expression, 0);
@@ -5673,7 +5674,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // result is zero and the answer is the bare value
         // (`measurementNominal`; the same for `Ceil`, `Round` and `Mod`).
         const x = measurementNominal(x0);
-        const step = step0 === undefined ? undefined : measurementNominal(step0);
+        const step =
+          step0 === undefined ? undefined : measurementNominal(step0);
         // The operand as written, for the exact recovery near a rounding
         // jump, read through its nominal when it is a `Measurement`.
         const written = originalOperand(expression, 0);
@@ -7145,7 +7147,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         }
         return undefined;
       },
-      evaluate: ([a0, b0], { engine: ce, numericApproximation, expression }) => {
+      evaluate: (
+        [a0, b0],
+        { engine: ce, numericApproximation, expression }
+      ) => {
         // A `Measurement` operand stands for its nominal (see `Floor`); the
         // operands as written are read through their nominals too, for the
         // exact recovery near a jump.
@@ -9175,7 +9180,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       ) => {
         // A `Measurement` rounds as its nominal (see `Floor`).
         const x = measurementNominal(x0);
-        const step = step0 === undefined ? undefined : measurementNominal(step0);
+        const step =
+          step0 === undefined ? undefined : measurementNominal(step0);
         // A value halfway between two integers is rounded with the rule of
         // `ce.roundingTies` at every precision (by default away from zero:
         // `Round(-0.5)` is `-1`, `Round(2.5)` is `3`). The machine lane
@@ -9671,7 +9677,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       evaluate: ([x0, step0], { numericApproximation, expression }) => {
         // A `Measurement` truncates as its nominal (see `Floor`).
         const x = measurementNominal(x0);
-        const step = step0 === undefined ? undefined : measurementNominal(step0);
+        const step =
+          step0 === undefined ? undefined : measurementNominal(step0);
         // The operand as written, for the exact recovery near a rounding
         // jump, read through its nominal when it is a `Measurement`.
         const written = originalOperand(expression, 0);

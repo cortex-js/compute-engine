@@ -80,7 +80,10 @@ import {
 import '../symbolic/explain-derivative.js';
 import { antiderivative } from '../symbolic/antiderivative.js';
 import { integratePiecewise } from '../symbolic/piecewise-integrate.js';
-import { withRadianConvention } from '../symbolic/angular-unit.js';
+import {
+  withRadianConvention,
+  rewriteAngularUnit,
+} from '../symbolic/angular-unit.js';
 import {
   integrateBoseMoment,
   polygammaDomainKnown,
@@ -112,7 +115,6 @@ import {
   symbolOrListArg,
 } from '../differential-equation-utils.js';
 import { evalDenseRows } from '../numerics/differential-equations.js';
-import { rewriteAngularUnit } from '../symbolic/angular-unit.js';
 import { hasNonRealConstant, symbolicLimit } from '../symbolic/limit.js';
 import { residue } from '../symbolic/residue.js';
 import { computeSeries, normalStrip } from '../symbolic/series.js';

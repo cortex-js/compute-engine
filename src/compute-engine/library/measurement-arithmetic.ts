@@ -465,8 +465,7 @@ export function measurementUnaryByHead(
       ? measurementUnaryByHead(ce, 'Gamma', shifted)
       : ce.function('Gamma', [shifted]).evaluate();
   }
-  if (unaryDerivativeFormula(ce, head, arg.op1) === undefined)
-    return undefined;
+  if (unaryDerivativeFormula(ce, head, arg.op1) === undefined) return undefined;
   return measurementUnary(
     ce,
     arg,

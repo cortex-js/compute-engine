@@ -711,8 +711,12 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         // Data with a `Measurement`: the boxed accumulation propagates the
         // uncertainties through `Add` and `Divide` (independent data).
         if (xs.some(isMeasurement))
-          return measurementStatistic(engine, 'Mean', xs, numericApproximation, () =>
-            boxedMean(engine, xs)
+          return measurementStatistic(
+            engine,
+            'Mean',
+            xs,
+            numericApproximation,
+            () => boxedMean(engine, xs)
           );
         // Complex data: the arithmetic mean is linear over the complex
         // numbers, so no convention has to be chosen and the answer is the
@@ -892,8 +896,12 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         if (!Array.isArray(xs)) return xs;
         // Data with a `Measurement`: see `measurementVariance`.
         if (xs.some(isMeasurement))
-          return measurementStatistic(engine, 'Variance', xs, numericApproximation, () =>
-            measurementVariance(engine, xs, false)
+          return measurementStatistic(
+            engine,
+            'Variance',
+            xs,
+            numericApproximation,
+            () => measurementVariance(engine, xs, false)
           );
         // Complex data: the variance is E[|X − μ|²] — a real, non-negative
         // number (see `complexVariance`).
@@ -967,7 +975,13 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         // or empty input (`NaN`), a provably non-numeric datum (an error), or
         // symbolic data (stay inert rather than fold a valueless symbol to
         // `NaN`) — and feeds both paths below. See `collectData`.
-        const xs = collectData(engine, 'PopulationVariance', ops, undefined, true);
+        const xs = collectData(
+          engine,
+          'PopulationVariance',
+          ops,
+          undefined,
+          true
+        );
         if (xs === null) return undefined;
         if (!Array.isArray(xs)) return xs;
         // Data with a `Measurement`: see `measurementVariance`.
@@ -1050,7 +1064,13 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         // or empty input (`NaN`), a provably non-numeric datum (an error), or
         // symbolic data (stay inert rather than fold a valueless symbol to
         // `NaN`) — and feeds both paths below. See `collectData`.
-        const xs = collectData(engine, 'StandardDeviation', ops, undefined, true);
+        const xs = collectData(
+          engine,
+          'StandardDeviation',
+          ops,
+          undefined,
+          true
+        );
         if (xs === null) return undefined;
         if (!Array.isArray(xs)) return xs;
         // Data with a `Measurement`: the square root of the measurement
@@ -1133,7 +1153,13 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         // or empty input (`NaN`), a provably non-numeric datum (an error), or
         // symbolic data (stay inert rather than fold a valueless symbol to
         // `NaN`) — and feeds both paths below. See `collectData`.
-        const xs = collectData(engine, 'PopulationStandardDeviation', ops, undefined, true);
+        const xs = collectData(
+          engine,
+          'PopulationStandardDeviation',
+          ops,
+          undefined,
+          true
+        );
         if (xs === null) return undefined;
         if (!Array.isArray(xs)) return xs;
         // Data with a `Measurement`: the square root of the measurement
@@ -2425,29 +2451,27 @@ function measurementVariance(
   const n = xs.length;
   const denominator = ce.number(population ? n : n - 1);
   const mean = boxedMean(ce, nominals);
-  const terms = xs
-    .filter(isMeasurement)
-    .map((x) =>
-      powi(
-        ce,
-        multiply(ce, [
-          divide(
-            ce,
-            multiply(ce, [
-              ce.number(2),
-              // The real part of the deviation: for complex plain data the
-              // variance is E[|X − μ|²], whose derivative along a real
-              // measured datum is 2·Re(xᵢ − m)/(n − 1); on real data `Re`
-              // is the identity.
-              ce.function('Re', [subtract(ce, x.op1, mean)]).evaluate(),
-            ]),
-            denominator
-          ),
-          x.op2,
-        ]),
-        2
-      )
-    );
+  const terms = xs.filter(isMeasurement).map((x) =>
+    powi(
+      ce,
+      multiply(ce, [
+        divide(
+          ce,
+          multiply(ce, [
+            ce.number(2),
+            // The real part of the deviation: for complex plain data the
+            // variance is E[|X − μ|²], whose derivative along a real
+            // measured datum is 2·Re(xᵢ − m)/(n − 1); on real data `Re`
+            // is the identity.
+            ce.function('Re', [subtract(ce, x.op1, mean)]).evaluate(),
+          ]),
+          denominator
+        ),
+        x.op2,
+      ]),
+      2
+    )
+  );
   const error = ce.function('Sqrt', [ce.function('Add', terms)]).evaluate();
   return ce.function('Measurement', [nominal, error]).evaluate();
 }

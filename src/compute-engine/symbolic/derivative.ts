@@ -403,8 +403,7 @@ export function unaryDerivativeFormula(
   arg: Expression
 ): Expression | undefined {
   const h = DERIVATIVES_TABLE[operator as keyof typeof DERIVATIVES_TABLE] as
-    | ExpressionInput
-    | undefined;
+    ExpressionInput | undefined;
   if (h === undefined) return undefined;
   return scaleForAngularUnit(ce.expr(h).subs({ _: arg }), operator);
 }
