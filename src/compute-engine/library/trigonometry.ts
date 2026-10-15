@@ -80,7 +80,11 @@ import {
   iv,
   type RealDomain,
 } from './type-handlers.js';
-import { isMeasurement, measurementTrig } from './measurement-arithmetic.js';
+import {
+  isMeasurement,
+  measurementArctan2,
+  measurementUnaryByHead,
+} from './measurement-arithmetic.js';
 import { trigExpand, trigToExp, trigReduce } from '../symbolic/trig-rewrite.js';
 import { angularChainFactor } from '../symbolic/angular-unit.js';
 import { getUnitScale } from './unit-data.js';
@@ -711,6 +715,11 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       evaluate: ([x], { numericApproximation, engine, expression }) => {
         const nonNumeric = nonNumericOperandError(engine, [x]);
         if (nonNumeric !== undefined) return nonNumeric;
+        // A `Measurement` argument: arctan(a ± σ) is arctan(a) ± σ/(1 + a²)
+        // (`measurementUnaryByHead`; this head is not built by
+        // `trigFunction`, which carries the hook for the others).
+        const m = measurementUnaryByHead(engine, 'Arctan', x);
+        if (m !== undefined) return numericApproximation ? m.N() : m;
         // An argument outside the range of a double, read from the operand
         // before its numeric evaluation (`.N()` at machine precision makes
         // `10^{400}·(1 + i)` the double `~oo`).
@@ -820,6 +829,11 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         return ce.function('Divide', [partial, angularChainFactor(ce)]);
       },
       evaluate: ([y, x], { engine: ce, numericApproximation }) => {
+        // A `Measurement` operand: the angle of the nominals, with the
+        // uncertainty propagated through both partial derivatives
+        // (`measurementArctan2`).
+        const m = measurementArctan2(ce, y, x);
+        if (m !== undefined) return numericApproximation ? m.N() : m;
         // NaN in → NaN out, in BOTH the evaluate and the N() paths. A NaN
         // operand is not finite, so without this early return it would slip
         // through the isFinite/isPositive guards below (isPositive is
@@ -2094,11 +2108,14 @@ function trigFunction(
         if (v !== undefined && !holdsShadowedPi(engine, v)) return v;
         return engine._fn(operator, [x]);
       }
-      // Measurement error propagation (Sin/Cos/Tan only; other operators fall
-      // through). Guard on the evaluated argument being a Measurement.
+      // Measurement error propagation for every head built here (circular,
+      // hyperbolic and inverse functions), from the derivative table. Guard
+      // on the evaluated argument being a Measurement. Without this a
+      // measurement fell through to the numeric kernel, which read it as `0`
+      // (`Sec(Measurement(0.7468, 0.001))` was `1`).
       const evalX = x.evaluate();
       if (isMeasurement(evalX)) {
-        const r = measurementTrig(engine, operator, evalX);
+        const r = measurementUnaryByHead(engine, operator, evalX);
         if (r !== undefined) return numericApproximation ? r.N() : r;
       }
       // Exact hyperbolic values (`sinh(0) = 0`, `coth(0) = ~oo`,

@@ -386,6 +386,30 @@ function scaleForAngularUnit(
 }
 
 /**
+ * The derivative of the unary function `operator` at `arg`, from the
+ * derivative table, scaled for the engine's angular unit; `undefined` for a
+ * head the table does not know. The formula is built with `subs()`, not
+ * evaluated, so an exact `arg` keeps an exact derivative (`ln 10` stays
+ * symbolic). A step function (`Floor`, `Ceil`, `Round`, `Sign`) has the
+ * derivative `0`: its slope is zero almost everywhere.
+ *
+ * Used by the error propagation of a `Measurement` operand
+ * (`measurementUnaryByHead`, `library/measurement-arithmetic.ts`): the
+ * first-order uncertainty of `f(a ± σ)` is `|f′(a)|·σ`, and this is `f′(a)`.
+ */
+export function unaryDerivativeFormula(
+  ce: Expression['engine'],
+  operator: string,
+  arg: Expression
+): Expression | undefined {
+  const h = DERIVATIVES_TABLE[operator as keyof typeof DERIVATIVES_TABLE] as
+    | ExpressionInput
+    | undefined;
+  if (h === undefined) return undefined;
+  return scaleForAngularUnit(ce.expr(h).subs({ _: arg }), operator);
+}
+
+/**
  * True if `sym` names a user-defined function whose body can be resolved by
  * applying the symbol to wildcards and evaluating. Two definition shapes
  * qualify: an operator definition (a bare `f(x) := …` assignment), or a value

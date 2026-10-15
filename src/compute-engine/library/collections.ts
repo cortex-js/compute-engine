@@ -5116,6 +5116,10 @@ function withExactFoldFallback(
   folded: Expression | undefined
 ): Expression | undefined {
   if (!options.numericApproximation || folded === undefined) return folded;
+  // A `Measurement` is a numeric answer with its uncertainty; the float of
+  // the exact value of the fold would drop the uncertainty
+  // (`Product([∫₀¹ e^(−x²) dx, 0.5]).N()` was the bare `0.3734`).
+  if (isFunction(folded, 'Measurement')) return folded;
   return (
     numericFromExactValue(options.engine, options.expression, folded) ?? folded
   );
@@ -5129,6 +5133,8 @@ async function withExactFoldFallbackAsync(
   folded: Expression | undefined
 ): Promise<Expression | undefined> {
   if (!options.numericApproximation || folded === undefined) return folded;
+  // See `withExactFoldFallback`: a `Measurement` keeps its uncertainty.
+  if (isFunction(folded, 'Measurement')) return folded;
   return (
     (await numericFromExactValueAsync(
       options.engine,
@@ -5171,6 +5177,11 @@ function machineStep(
     value = item.N();
     re = value.re;
   }
+  // A `Measurement(a, σ)` reads `re` as its nominal `a`, but folding it as a
+  // double drops the uncertainty: `Product([Measurement(0.7468, 0.001),
+  // 0.5]).N()` was the bare `0.3734`. Reported as not machine-foldable, so
+  // the fold continues with boxed arithmetic, which propagates it.
+  if (isFunction(value, 'Measurement')) re = NaN;
   // The exact value decides whether a double of 0 is an underflow. It is read
   // only from a pure expression: an impure one (`Floor(Random())`) must not
   // run a second time, and its fold is not recovered from the exact fold

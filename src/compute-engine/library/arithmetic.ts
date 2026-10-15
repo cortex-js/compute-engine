@@ -373,6 +373,8 @@ import {
   measurementLn,
   measurementLog,
   measurementLipschitzUnary,
+  measurementNominal,
+  measurementUnaryByHead,
 } from './measurement-arithmetic.js';
 import {
   range,
@@ -4457,6 +4459,10 @@ function evaluateGamma(
   }
 
   const x = ops[0];
+  // A `Measurement` argument: Γ(a ± σ) is Γ(a) ± |Γ(a)·ψ(a)|·σ
+  // (`measurementUnaryByHead`).
+  const m = measurementUnaryByHead(engine, 'Gamma', x);
+  if (m !== undefined) return numericApproximation ? m.N() : m;
   // Gamma has poles at the non-positive integers (0, -1, -2, ...).
   // This is exact, so return it regardless of numericApproximation.
   if (isNumber(x) && !x.isComplex && x.isInteger && x.isNonPositive)
@@ -4737,8 +4743,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (x.isNonPositive) return 'non-positive';
         return undefined;
       },
-      evaluate: ([x, step], { numericApproximation, expression }) => {
-        const original = originalOperand(expression, 0);
+      evaluate: ([x0, step0], { numericApproximation, expression }) => {
+        // A `Measurement` rounds as its nominal (see `Floor`).
+        const x = measurementNominal(x0);
+        const step = step0 === undefined ? undefined : measurementNominal(step0);
+        // The operand as written, for the exact recovery near a rounding
+        // jump, read through its nominal when it is a `Measurement`.
+        const written = originalOperand(expression, 0);
+        const original =
+          written === undefined ? undefined : measurementNominal(written);
         const round = (v: Expression, original?: Expression) =>
           applyRounding(
             v,
@@ -5301,6 +5314,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       evaluate: ([x], { numericApproximation }) => {
         const ce = x.engine;
 
+        // A `Measurement` argument: (a ± σ)! is Γ(a + 1) with the same
+        // uncertainty, propagated (`measurementUnaryByHead`).
+        const m = measurementUnaryByHead(ce, 'Factorial', x);
+        if (m !== undefined) return numericApproximation ? m.N() : m;
+
         // If argument is symbolic (not a number literal), keep unevaluated
         if (!isNumber(x)) return undefined;
 
@@ -5596,8 +5614,18 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (x.isNonNegative) return 'non-negative';
         return undefined;
       },
-      evaluate: ([x, step], { numericApproximation, expression }) => {
-        const original = originalOperand(expression, 0);
+      evaluate: ([x0, step0], { numericApproximation, expression }) => {
+        // A `Measurement` rounds as its nominal: the slope of a step function
+        // is zero almost everywhere, so the first-order uncertainty of the
+        // result is zero and the answer is the bare value
+        // (`measurementNominal`; the same for `Ceil`, `Round` and `Mod`).
+        const x = measurementNominal(x0);
+        const step = step0 === undefined ? undefined : measurementNominal(step0);
+        // The operand as written, for the exact recovery near a rounding
+        // jump, read through its nominal when it is a `Measurement`.
+        const written = originalOperand(expression, 0);
+        const original =
+          written === undefined ? undefined : measurementNominal(written);
         const round = (v: Expression, original?: Expression) =>
           applyRounding(
             v,
@@ -5673,6 +5701,16 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         return undefined;
       },
       evaluate: ([x], { numericApproximation, engine: ce, expression }) => {
+        // A `Measurement` argument: the fractional part has slope 1 away
+        // from the integers, so the uncertainty is unchanged
+        // (`Fract(Measurement(2.5, 0.01))` is `Measurement(0.5, 0.01)`).
+        if (isMeasurement(x)) {
+          const r = ce.function('Measurement', [
+            ce.function('Fract', [x.op1]).evaluate({ numericApproximation }),
+            x.op2,
+          ]);
+          return numericApproximation ? r.N() : r.evaluate();
+        }
         // Exact fractional part for an exact real argument: x - floor(x),
         // computed exactly (rational arithmetic) so `Fract(1/2) → 1/2`, not
         // `0.5`. Only an inexact (float) argument numericizes.
@@ -7054,7 +7092,24 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         }
         return undefined;
       },
-      evaluate: ([a, b], { engine: ce, numericApproximation, expression }) => {
+      evaluate: ([a0, b0], { engine: ce, numericApproximation, expression }) => {
+        // A `Measurement` operand stands for its nominal (see `Floor`); the
+        // operands as written are read through their nominals too, for the
+        // exact recovery near a jump.
+        const a = measurementNominal(a0);
+        const b = measurementNominal(b0);
+        if (
+          expression !== undefined &&
+          (isMeasurement(a0) || isMeasurement(b0))
+        ) {
+          const wa = originalOperand(expression, 0);
+          const wb = originalOperand(expression, 1);
+          if (wa !== undefined && wb !== undefined)
+            expression = ce._fn('Mod', [
+              measurementNominal(wa),
+              measurementNominal(wb),
+            ]);
+        }
         // Under `.N()`, `Mod` jumps where `a/b` is an integer: the exact
         // values of exact operands are used near such a point
         // (`exactModUnderN()`).
@@ -9004,9 +9059,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         return undefined;
       },
       evaluate: (
-        [x, step],
+        [x0, step0],
         { engine: ce, numericApproximation, expression }
       ) => {
+        // A `Measurement` rounds as its nominal (see `Floor`).
+        const x = measurementNominal(x0);
+        const step = step0 === undefined ? undefined : measurementNominal(step0);
         // A value halfway between two integers is rounded with the rule of
         // `ce.roundingTies` at every precision (by default away from zero:
         // `Round(-0.5)` is `-1`, `Round(2.5)` is `3`). The machine lane
@@ -9016,7 +9074,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // helpers. `applyRounding()` boxes the rounded quotient as an exact
         // integer also for a float `x`, so the multiple of an exact step is
         // exact (`Round(3.14159, 1/100)` is `157/50`, as in Mathematica).
-        const original = originalOperand(expression, 0);
+        // The operand as written, read through its nominal (see `Floor`).
+        const written = originalOperand(expression, 0);
+        const original =
+          written === undefined ? undefined : measurementNominal(written);
         const ties = ce.roundingTies;
         const roundValue = (v: Expression, original?: Expression) =>
           applyRounding(
@@ -9496,8 +9557,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (x.isNonPositive) return 'non-positive';
         return undefined;
       },
-      evaluate: ([x, step], { numericApproximation, expression }) => {
-        const original = originalOperand(expression, 0);
+      evaluate: ([x0, step0], { numericApproximation, expression }) => {
+        // A `Measurement` truncates as its nominal (see `Floor`).
+        const x = measurementNominal(x0);
+        const step = step0 === undefined ? undefined : measurementNominal(step0);
+        // The operand as written, for the exact recovery near a rounding
+        // jump, read through its nominal when it is a `Measurement`.
+        const written = originalOperand(expression, 0);
+        const original =
+          written === undefined ? undefined : measurementNominal(written);
         const round = (v: Expression, original?: Expression) =>
           applyRounding(
             v,
@@ -11793,6 +11861,10 @@ function numericOfFold(
   seen: NonFiniteTerm
 ): Expression {
   if (seen.kind === 'exact' && value.isNaN !== true) return value;
+  // A `Measurement` is the value of the fold with its uncertainty
+  // (`Product([Measurement(0.7468, 0.001), 0.5, 0.9])`); the float of the
+  // exact value would drop the uncertainty.
+  if (isMeasurement(value)) return value;
   return numericFromExactValue(ce, expression, value) ?? value;
 }
 

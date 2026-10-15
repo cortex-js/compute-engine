@@ -24,7 +24,8 @@ import type {
   Expression,
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
-import { isFunction } from '../boxed-expression/type-guards.js';
+import { isFunction, isNumber } from '../boxed-expression/type-guards.js';
+import { unaryDerivativeFormula } from '../symbolic/derivative.js';
 
 // ---------------------------------------------------------------------------
 // Type guard
@@ -100,7 +101,9 @@ export function measurementAdd(
   let acc = toPair(ce, ops[0]);
   for (let i = 1; i < ops.length; i++) {
     const b = toPair(ce, ops[i]);
-    const value = acc.value.add(b.value);
+    // The boxed `Add`, not `.add()`: the method folds two exact radicals to
+    // a float (`√2 + 1`), and the nominal must stay exact under `evaluate()`.
+    const value = ce.function('Add', [acc.value, b.value]).evaluate();
     const error = ce.function('Sqrt', [
       ce.function('Add', [square(ce, acc.error), square(ce, b.error)]),
     ]);
@@ -122,7 +125,9 @@ export function measurementMultiply(
   for (let i = 1; i < ops.length; i++) {
     const b = toPair(ce, ops[i]);
     const a = acc.value;
-    const value = a.mul(b.value);
+    // The boxed `Multiply`, not `.mul()`, for the same reason as in
+    // `measurementAdd`: the nominal stays exact under `evaluate()`.
+    const value = ce.function('Multiply', [a, b.value]).evaluate();
     const error = ce.function('Sqrt', [
       ce.function('Add', [
         ce.function('Multiply', [square(ce, b.value), square(ce, acc.error)]),
@@ -414,66 +419,109 @@ export function measurementLog(
 }
 
 /**
- * The chain factor dθ/da converting the engine's angular unit to radians, so
- * the trig derivatives (`cos`, `−sin`, `sec²`) are taken in the SAME
- * convention `Sin`/`Cos`/`Tan` use to evaluate (they interpret their argument
- * in `ce.angularUnit`).  In radian mode this is 1 (no chain factor); in degree
- * mode it is π/180, etc. — matching `angleToRadians` in
- * `boxed-expression/utils.ts`.
+ * The nominal value of `x`: the first operand of a `Measurement`, or `x`
+ * itself. For an operator that reads a value but does not propagate an
+ * uncertainty — a comparison (`Less`, `Equal`), a step function (`Floor`,
+ * `Round`, `Mod`), whose slope is zero almost everywhere so the first-order
+ * uncertainty of its result is zero — the measurement stands for its
+ * nominal: a comparison decides by the nominal, and a step function answers
+ * the bare value.
  */
-function angularChainFactor(ce: ComputeEngine): Expression {
-  switch (ce.angularUnit) {
-    case 'deg':
-      return ce.function('Divide', [ce.Pi, 180]);
-    case 'grad':
-      return ce.function('Divide', [ce.Pi, 200]);
-    case 'turn':
-      return ce.function('Multiply', [2, ce.Pi]);
-    default:
-      return ce.number(1); // 'rad'
-  }
+export function measurementNominal(x: Expression): Expression {
+  return isMeasurement(x) ? x.op1 : x;
 }
 
 /**
- * Sin/Cos/Tan error propagation.  σ_f = |f'(a)|·σ_a with the derivative taken
- * in the engine's angular convention (see `angularChainFactor`).  Returns
- * `undefined` for any other operator (the caller then falls through to the
- * normal trig evaluate path).
+ * Error propagation through any unary function `head` whose derivative the
+ * engine knows (`unaryDerivativeFormula`, `symbolic/derivative.ts`: the trig,
+ * hyperbolic and inverse functions, `Gamma`, `LogGamma`, `Erf`, `Erfc`, the
+ * step functions, …), plus `Factorial`, read as `Gamma(a + 1)`. The nominal
+ * is `head(a)` evaluated — exact for an exact `a`, a float for a float `a` —
+ * and the uncertainty is `|f′(a)|·σ_a`, with the derivative taken in the
+ * engine's angular unit, which is the convention `Sin`/`Cos`/`Tan` evaluate
+ * in. A derivative that is not a finite real at `a` (a pole, the edge of the
+ * domain, `arcsin` at 1) leaves the bare nominal: the error bar is dropped
+ * rather than answer `NaN`. Returns `undefined` when `arg` is not a
+ * `Measurement`, or when `head` has no known derivative, so the caller falls
+ * through to its ordinary evaluation.
+ *
+ * The trig handlers used to carry their own three formulas; the table covers
+ * them, so `Cot`, `Sec`, `Csc` and the hyperbolic family (which fell through
+ * to the numeric kernel, and read the measurement as `0`) now propagate too.
  */
-export function measurementTrig(
+export function measurementUnaryByHead(
   ce: ComputeEngine,
-  operator: string,
+  head: string,
   arg: Expression
 ): Expression | undefined {
-  const k = angularChainFactor(ce);
-  if (operator === 'Sin')
-    return measurementUnary(
-      ce,
-      arg,
-      (a) => ce.function('Sin', [a]),
-      (a) => ce.function('Multiply', [k, ce.function('Cos', [a])])
-    );
-  if (operator === 'Cos')
-    return measurementUnary(
-      ce,
-      arg,
-      (a) => ce.function('Cos', [a]),
-      // |−k·sin a| = |k·sin a|; the sign folds under the helper's Abs.
-      (a) => ce.function('Multiply', [k, ce.function('Sin', [a])])
-    );
-  if (operator === 'Tan')
-    return measurementUnary(
-      ce,
-      arg,
-      (a) => ce.function('Tan', [a]),
-      (a) => {
-        // k·sec²a = k / cos²a; undefined at a pole (cos a = 0 → infinite error).
-        const cosA = ce.function('Cos', [a]).evaluate();
-        if (cosA.isSame(0)) return undefined;
-        return ce.function('Divide', [k, ce.function('Power', [cosA, 2])]);
-      }
-    );
-  return undefined;
+  if (!isMeasurement(arg)) return undefined;
+  if (head === 'Factorial') {
+    // n! = Γ(n + 1): the uncertainty of the shifted argument is unchanged.
+    const shifted = ce.function('Measurement', [
+      ce.function('Add', [arg.op1, 1]).evaluate(),
+      arg.op2,
+    ]);
+    return isMeasurement(shifted)
+      ? measurementUnaryByHead(ce, 'Gamma', shifted)
+      : ce.function('Gamma', [shifted]).evaluate();
+  }
+  if (unaryDerivativeFormula(ce, head, arg.op1) === undefined)
+    return undefined;
+  return measurementUnary(
+    ce,
+    arg,
+    (a) => ce.function(head, [a]).evaluate(),
+    (a) => {
+      const d = unaryDerivativeFormula(ce, head, a)!.evaluate();
+      if (isNumber(d) && (d.isNaN === true || d.isFinite !== true))
+        return undefined;
+      if (isNumber(d) && d.isComplex) return undefined;
+      return d;
+    }
+  );
+}
+
+/**
+ * `Arctan2(y, x)` with at least one `Measurement` operand: the angle of the
+ * nominals, with the uncertainty `√((x·σ_y)² + (y·σ_x)²) / (x² + y²)` from
+ * the two partial derivatives `∂θ/∂y = x/(x² + y²)` and
+ * `∂θ/∂x = −y/(x² + y²)`, divided by the angular chain factor so the
+ * uncertainty is in the engine's angular unit, as the angle is
+ * (`unaryDerivativeFormula` does the same for `Arctan`). At the origin the
+ * angle has no derivative, and the bare nominal is returned. Returns
+ * `undefined` when neither operand is a `Measurement`.
+ */
+export function measurementArctan2(
+  ce: ComputeEngine,
+  y: Expression,
+  x: Expression
+): Expression | undefined {
+  if (!isMeasurement(y) && !isMeasurement(x)) return undefined;
+  const Y = toPair(ce, y);
+  const X = toPair(ce, x);
+  const value = ce.function('Arctan2', [Y.value, X.value]).evaluate();
+  const r2 = ce
+    .function('Add', [square(ce, X.value), square(ce, Y.value)])
+    .evaluate();
+  if (r2.isSame(0) || (isNumber(r2) && r2.isNaN === true)) return value;
+  // The radian uncertainty, then the unit conversion: the derivative of an
+  // angle in the engine's unit is the radian derivative divided by the
+  // chain factor (`unaryDerivativeFormula` applies the same factor to
+  // `Arctan`).
+  const radians = ce.function('Divide', [
+    ce.function('Sqrt', [
+      ce.function('Add', [
+        square(ce, ce.function('Multiply', [X.value, Y.error])),
+        square(ce, ce.function('Multiply', [Y.value, X.error])),
+      ]),
+    ]),
+    r2,
+  ]);
+  const unit = unaryDerivativeFormula(ce, 'Arctan', ce.Zero)!;
+  // `unit` is the derivative of `Arctan` at 0 in the engine's unit: `1` in
+  // radians, `1/k` otherwise.
+  const error = ce.function('Multiply', [radians, unit]).evaluate();
+  return makeMeasurement(ce, value, error);
 }
 
 /**
@@ -495,5 +543,10 @@ export function measurementLipschitzUnary(
 ): Expression | undefined {
   if (!isMeasurement(m)) return undefined;
   const value = ce.function(head, [m.op1]).evaluate();
+  // The imaginary part of a REAL measurement is exactly `0`: the whole
+  // uncertainty lies on the real axis, and none of it reaches the other
+  // axis. (`Im(Measurement(0.7468, 0.001))` used to be `Measurement(0,
+  // 0.001)`.) A complex nominal keeps the conservative bound.
+  if (head === 'Imaginary' && m.op1.type.matches('real')) return value;
   return makeMeasurement(ce, value, m.op2);
 }

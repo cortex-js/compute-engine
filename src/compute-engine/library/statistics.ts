@@ -1,3 +1,8 @@
+import {
+  isMeasurement,
+  measurementNominal,
+  measurementUnaryByHead,
+} from './measurement-arithmetic.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import {
   operandLiteralValue,
@@ -43,6 +48,7 @@ import {
   isNumber,
   isString,
   isSymbol,
+  isInexactOperand,
 } from '../boxed-expression/type-guards.js';
 import { exactOrder } from '../boxed-expression/compare.js';
 import {
@@ -413,6 +419,10 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         return BoxedType.forResult('number', context.engine._typeResolver);
       },
       evaluate: ([x], { numericApproximation, engine: ce }) => {
+        // A `Measurement` argument: erf(a ± σ) is erf(a) ± (2/√π)e^(−a²)·σ
+        // (`measurementUnaryByHead`).
+        const m = measurementUnaryByHead(ce, 'Erf', x);
+        if (m !== undefined) return numericApproximation ? m.N() : m;
         if (!isNumber(x)) return undefined;
         if (!x.isComplex) {
           // Exact special values, regardless of numericApproximation
@@ -469,6 +479,10 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         return BoxedType.forResult('number', context.engine._typeResolver);
       },
       evaluate: ([x], { numericApproximation, engine: ce }) => {
+        // A `Measurement` argument: erfc(a ± σ) is erfc(a) ± (2/√π)e^(−a²)·σ
+        // (`measurementUnaryByHead`).
+        const m = measurementUnaryByHead(ce, 'Erfc', x);
+        if (m !== undefined) return numericApproximation ? m.N() : m;
         if (!isNumber(x)) return undefined;
         if (!x.isComplex) {
           // Exact special values, regardless of numericApproximation
@@ -691,9 +705,15 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         // or empty input (`NaN`), a provably non-numeric datum (an error), or
         // symbolic data (stay inert rather than fold a valueless symbol to
         // `NaN`) — and feeds both paths below. See `collectData`.
-        const xs = collectData(engine, 'Mean', ops);
+        const xs = collectData(engine, 'Mean', ops, undefined, true);
         if (xs === null) return undefined;
         if (!Array.isArray(xs)) return xs;
+        // Data with a `Measurement`: the boxed accumulation propagates the
+        // uncertainties through `Add` and `Divide` (independent data).
+        if (xs.some(isMeasurement))
+          return measurementStatistic(engine, 'Mean', xs, numericApproximation, () =>
+            boxedMean(engine, xs)
+          );
         // Complex data: the arithmetic mean is linear over the complex
         // numbers, so no convention has to be chosen and the answer is the
         // complex mean — `Mean([1, 1+2i])` is `1 + i`. The boxed accumulation
@@ -766,9 +786,26 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         // or empty input (`NaN`), a provably non-numeric datum (an error), or
         // symbolic data (stay inert rather than fold a valueless symbol to
         // `NaN`) — and feeds both paths below. See `collectData`.
-        const xs = collectData(engine, 'Median', ops);
+        const xs = collectData(engine, 'Median', ops, undefined, true);
         if (xs === null) return undefined;
         if (!Array.isArray(xs)) return xs;
+        // Data with a `Measurement`: ordered by the nominals (`exactOrder`
+        // reads a measurement through its nominal); the middle datum is the
+        // answer, uncertainty included, and the mean of the two middle data
+        // propagates theirs. Two data whose order is undecided leave the
+        // median unevaluated.
+        if (xs.some(isMeasurement)) {
+          const sorted = sortByNominal(xs);
+          if (sorted === undefined) return undefined;
+          return measurementStatistic(
+            engine,
+            'Median',
+            xs,
+            // A float datum makes the median a float, as for plain data.
+            numericApproximation || xs.some(isInexactOperand),
+            () => exactMedianOf(engine, sorted)
+          );
+        }
         const nonReal = nonRealUnivariateError(engine, 'Median', xs);
         if (nonReal) return nonReal;
         // A datum with no real value leaves the sort with nothing to order by
@@ -850,9 +887,14 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         // or empty input (`NaN`), a provably non-numeric datum (an error), or
         // symbolic data (stay inert rather than fold a valueless symbol to
         // `NaN`) — and feeds both paths below. See `collectData`.
-        const xs = collectData(engine, 'Variance', ops);
+        const xs = collectData(engine, 'Variance', ops, undefined, true);
         if (xs === null) return undefined;
         if (!Array.isArray(xs)) return xs;
+        // Data with a `Measurement`: see `measurementVariance`.
+        if (xs.some(isMeasurement))
+          return measurementStatistic(engine, 'Variance', xs, numericApproximation, () =>
+            measurementVariance(engine, xs, false)
+          );
         // Complex data: the variance is E[|X − μ|²] — a real, non-negative
         // number (see `complexVariance`).
         if (nonRealDatum(xs)) {
@@ -925,9 +967,18 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         // or empty input (`NaN`), a provably non-numeric datum (an error), or
         // symbolic data (stay inert rather than fold a valueless symbol to
         // `NaN`) — and feeds both paths below. See `collectData`.
-        const xs = collectData(engine, 'PopulationVariance', ops);
+        const xs = collectData(engine, 'PopulationVariance', ops, undefined, true);
         if (xs === null) return undefined;
         if (!Array.isArray(xs)) return xs;
+        // Data with a `Measurement`: see `measurementVariance`.
+        if (xs.some(isMeasurement))
+          return measurementStatistic(
+            engine,
+            'PopulationVariance',
+            xs,
+            numericApproximation,
+            () => measurementVariance(engine, xs, true)
+          );
         // Complex data: the variance is E[|X − μ|²] — a real, non-negative
         // number (see `complexVariance`).
         if (nonRealDatum(xs)) {
@@ -999,9 +1050,22 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         // or empty input (`NaN`), a provably non-numeric datum (an error), or
         // symbolic data (stay inert rather than fold a valueless symbol to
         // `NaN`) — and feeds both paths below. See `collectData`.
-        const xs = collectData(engine, 'StandardDeviation', ops);
+        const xs = collectData(engine, 'StandardDeviation', ops, undefined, true);
         if (xs === null) return undefined;
         if (!Array.isArray(xs)) return xs;
+        // Data with a `Measurement`: the square root of the measurement
+        // variance (`Sqrt` propagates: σ_s = σ_Var / (2s)).
+        if (xs.some(isMeasurement))
+          return measurementStatistic(
+            engine,
+            'StandardDeviation',
+            xs,
+            numericApproximation,
+            () =>
+              engine
+                .function('Sqrt', [measurementVariance(engine, xs, false)])
+                .evaluate()
+          );
         // Complex data: the standard deviation is the square root of
         // E[|X − μ|²], which is real and non-negative (see `complexVariance`).
         if (nonRealDatum(xs)) {
@@ -1069,9 +1133,22 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         // or empty input (`NaN`), a provably non-numeric datum (an error), or
         // symbolic data (stay inert rather than fold a valueless symbol to
         // `NaN`) — and feeds both paths below. See `collectData`.
-        const xs = collectData(engine, 'PopulationStandardDeviation', ops);
+        const xs = collectData(engine, 'PopulationStandardDeviation', ops, undefined, true);
         if (xs === null) return undefined;
         if (!Array.isArray(xs)) return xs;
+        // Data with a `Measurement`: the square root of the measurement
+        // population variance (`Sqrt` propagates).
+        if (xs.some(isMeasurement))
+          return measurementStatistic(
+            engine,
+            'PopulationStandardDeviation',
+            xs,
+            numericApproximation,
+            () =>
+              engine
+                .function('Sqrt', [measurementVariance(engine, xs, true)])
+                .evaluate()
+          );
         // Complex data: the standard deviation is the square root of
         // E[|X − μ|²], which is real and non-negative (see `complexVariance`).
         if (nonRealDatum(xs)) {
@@ -1885,8 +1962,19 @@ function collectData(
   ce: ComputeEngine,
   name: string,
   ops: ReadonlyArray<Expression>,
-  absentAnswer?: (ce: ComputeEngine, marker: Expression) => Expression
+  absentAnswer?: (ce: ComputeEngine, marker: Expression) => Expression,
+  acceptMeasurement = false
 ): Expression[] | Expression | null {
+  // A `Measurement(a, σ)` is a datum with an uncertainty for the statistics
+  // that propagate it (`Mean`, `Median`, the variance family: they pass
+  // `acceptMeasurement`), when its nominal `a` is itself finite real data.
+  // Every other statistic, and a measurement whose nominal is symbolic,
+  // complex or infinite, keeps the inert verdict a non-number datum gets.
+  const isMeasurementDatum = (v: Expression): boolean =>
+    acceptMeasurement &&
+    isMeasurement(v) &&
+    ((isNumber(v.op1) && v.op1.isFinite === true && !v.op1.isComplex) ||
+      isRealConstantDatum(v.op1));
   const data: Expression[] = [];
   // An absent datum was seen: the head answers absent unless a refused datum
   // outranks it later in the walk.
@@ -1919,6 +2007,7 @@ function collectData(
         if (isAbsentValue(v)) absent = true;
         else if (v.isIndeterminate) indeterminate = true;
         else if (isRealConstantDatum(v)) data.push(v);
+        else if (isMeasurementDatum(v)) data.push(v);
         else if (!isNumber(v)) {
           if (isNonNumericDatum(v))
             return dataConstraintError(ce, name, v, 'number');
@@ -1934,6 +2023,7 @@ function collectData(
       if (isAbsentValue(op)) absent = true;
       else if (op.isIndeterminate) indeterminate = true;
       else if (isRealConstantDatum(op)) data.push(op);
+      else if (isMeasurementDatum(op)) data.push(op);
       else if (!isNumber(op)) {
         // A COLLECTION-typed operand is a container, not a datum, even when
         // it has no value yet to enumerate: `Mean(L)` for a declared but
@@ -2252,6 +2342,114 @@ function exactVariance(
     divide(ce, powi(ce, sum, 2), ce.number(n))
   );
   return divide(ce, numerator, ce.number(population ? n : n - 1));
+}
+
+/**
+ * The answer of the statistic `head` over data `xs` that hold at least one
+ * `Measurement`: `compute()` propagates the uncertainties, under `.N()` as a
+ * float. When a plain datum is not finite (`+∞`, `NaN`), the uncertainties
+ * have no reading (`+∞ ± 0.1` is not a value), and the answer is the
+ * statistic of the nominals, as the plain handler computes it for such
+ * data (`Mean([Measurement(1, 0.1), +∞])` is `+∞`, `Variance` of it `NaN`).
+ */
+function measurementStatistic(
+  ce: ComputeEngine,
+  head: string,
+  xs: Expression[],
+  numericApproximation: boolean | undefined,
+  compute: () => Expression
+): Expression {
+  if (xs.some((x) => !isMeasurement(x) && x.isFinite !== true))
+    return ce
+      .function(head, [ce.function('List', xs.map(measurementNominal))])
+      .evaluate({ numericApproximation });
+  const r = compute();
+  return numericApproximation ? r.N() : r;
+}
+
+/**
+ * The data `xs` sorted by their nominals (`exactOrder` over
+ * `measurementNominal`), for the median of data with a `Measurement`: two
+ * measurements with equal nominals and different uncertainties are a tie
+ * here, where `sortExact` leaves them undecided (an extremum of the two has
+ * no answer, but their median does: their mean). Returns `undefined` when
+ * the order of two nominals is undecided.
+ */
+function sortByNominal(xs: Expression[]): Expression[] | undefined {
+  let undecided = false;
+  const sorted = [...xs].sort((a, b) => {
+    const order = exactOrder(measurementNominal(a), measurementNominal(b));
+    if (order === undefined) {
+      undecided = true;
+      return 0;
+    }
+    return order;
+  });
+  return undecided ? undefined : sorted;
+}
+
+/**
+ * The sample (`population = false`) or population variance of data that
+ * hold at least one `Measurement(a, σ)`, as a `Measurement` of the variance
+ * of the nominals.
+ *
+ * The uncertainty is the first-order propagation through the gradient of
+ * the variance, with independent data: `∂Var/∂xᵢ = 2(xᵢ − m)/(n − 1)` (or
+ * `/n` for the population variance), where `m` is the mean of the nominals,
+ * so `σ_Var² = Σ (∂Var/∂xᵢ)²·σᵢ²` over the measured data. The formula is NOT
+ * built as a boxed expression of the measurements: `Add`/`Power` treat two
+ * occurrences of one measurement as independent (`M − M` has a nonzero
+ * uncertainty, see the measurement tests), and the mean occurs inside every
+ * term, so a boxed `Σ(xᵢ − m)²` would overstate the uncertainty.
+ *
+ * A single datum has no sample variance (the nominal is `exactVariance`'s
+ * answer, as for plain data), and a zero propagated uncertainty collapses to
+ * the bare variance through the `Measurement` canonical form.
+ */
+function measurementVariance(
+  ce: ComputeEngine,
+  xs: Expression[],
+  population: boolean
+): Expression {
+  const nominals = xs.map(measurementNominal);
+  // The nominal is the variance of the nominals as the operator computes it
+  // for plain data (exact on exact data, the float kernel on floats), so a
+  // measurement datum changes nothing but the uncertainty.
+  const nominal = ce
+    .function(population ? 'PopulationVariance' : 'Variance', [
+      ce.function('List', nominals),
+    ])
+    .evaluate();
+  // No sample variance of one datum: the plain answer (`NaN`) stands.
+  if (nominal.isNaN === true) return nominal;
+  const n = xs.length;
+  const denominator = ce.number(population ? n : n - 1);
+  const mean = boxedMean(ce, nominals);
+  const terms = xs
+    .filter(isMeasurement)
+    .map((x) =>
+      powi(
+        ce,
+        multiply(ce, [
+          divide(
+            ce,
+            multiply(ce, [
+              ce.number(2),
+              // The real part of the deviation: for complex plain data the
+              // variance is E[|X − μ|²], whose derivative along a real
+              // measured datum is 2·Re(xᵢ − m)/(n − 1); on real data `Re`
+              // is the identity.
+              ce.function('Re', [subtract(ce, x.op1, mean)]).evaluate(),
+            ]),
+            denominator
+          ),
+          x.op2,
+        ]),
+        2
+      )
+    );
+  const error = ce.function('Sqrt', [ce.function('Add', terms)]).evaluate();
+  return ce.function('Measurement', [nominal, error]).evaluate();
 }
 
 function exactMedianOf(ce: ComputeEngine, sorted: Expression[]): Expression {
