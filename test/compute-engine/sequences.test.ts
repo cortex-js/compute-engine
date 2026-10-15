@@ -7,6 +7,40 @@ import { expectTypeBetween } from '../utils';
 
 describe('DECLARATIVE SEQUENCE DEFINITIONS', () => {
   describe('Programmatic API (declareSequence)', () => {
+    test('A base value that is neither a number nor an expression is refused', () => {
+      // The TypeScript type forbids a raw string, but a JavaScript caller can
+      // pass one. Before, the definition was accepted and the first read of a
+      // term failed inside the memo code with a `TypeError`.
+      const ce = new ComputeEngine();
+      expect(() =>
+        ce.declareSequence('U', {
+          base: { 0: 'Undefined' as unknown as number },
+          recurrence: 'U_{n-1}',
+        })
+      ).toThrow(
+        'Invalid base case for "U": the value at index 0 must be a number or an expression'
+      );
+      // The refusal comes before the name is declared, so a corrected
+      // definition of the same name succeeds.
+      ce.declareSequence('U', { base: { 0: 1 }, recurrence: 'U_{n-1} + 1' });
+      expect(ce.parse('U_{3}').evaluate().re).toBe(4);
+    });
+
+    test('A constraints value that is neither a string nor an expression is refused', () => {
+      const ce = new ComputeEngine();
+      expect(() =>
+        ce.declareSequence('V', {
+          base: { 0: 1 },
+          recurrence: 'V_{n-1} + 1',
+          constraints: { foo: 1 } as unknown as string,
+        })
+      ).toThrow(
+        'Invalid constraints for "V": the value must be a LaTeX string or an expression'
+      );
+      ce.declareSequence('V', { base: { 0: 1 }, recurrence: 'V_{n-1} + 1' });
+      expect(ce.parse('V_{2}').evaluate().re).toBe(3);
+    });
+
     test('Arithmetic sequence', () => {
       const ce = new ComputeEngine();
       ce.declareSequence('A', {

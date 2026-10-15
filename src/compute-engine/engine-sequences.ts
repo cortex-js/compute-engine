@@ -9,6 +9,7 @@ import type {
 } from './global-types.js';
 
 import { isValueDef } from './boxed-expression/utils.js';
+import { isExpression } from './boxed-expression/type-guards.js';
 
 import {
   createSequenceHandler,
@@ -39,6 +40,31 @@ export function declareSequence(
   if (!def.recurrence) {
     throw new Error(`Sequence "${name}" requires a recurrence relation`);
   }
+
+  // Each base value must be a number or a boxed expression, and the
+  // constraints a LaTeX string or a boxed expression. Both go into the
+  // sources that the memo stamp snapshots (`takeMemoStamp()` in
+  // `sequence.ts`), and the snapshot reads the engine of each source
+  // (`expr.engine.context`), so a raw string or a plain object (which the
+  // TypeScript types forbid, but a JavaScript caller can pass) would fail
+  // deep inside the memo code with a `TypeError` on the first read of a
+  // term. The checks run before the placeholder declaration below, so a
+  // refused definition does not reserve the name: the caller can correct
+  // the definition and declare it again.
+  for (const [k, v] of Object.entries(def.base)) {
+    if (typeof v !== 'number' && !isExpression(v))
+      throw new Error(
+        `Invalid base case for "${name}": the value at index ${k} must be a number or an expression`
+      );
+  }
+  if (
+    def.constraints !== undefined &&
+    typeof def.constraints !== 'string' &&
+    !isExpression(def.constraints)
+  )
+    throw new Error(
+      `Invalid constraints for "${name}": the value must be a LaTeX string or an expression`
+    );
 
   // Declare the symbol first with a placeholder handler
   // This ensures the symbol exists when we parse the recurrence

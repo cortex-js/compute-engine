@@ -96,6 +96,32 @@
 
 ### Issues Resolved
 
+- **A shader `Loop` over a `Range` follows the step, and a decline names the
+  requirement.** `Loop(body, Element(j, Range(1, 10, 3)))` compiled on the
+  GLSL and WGSL targets to a loop over every integer from 1 to 10, where the
+  JavaScript target visits 1, 4, 7 and 10; a negative step gave a loop with no
+  iteration. The shader loop now advances the counter by the step
+  (`j += 3`), counting down for a negative step, and declines a step that is
+  not a non-zero integer known at compile time. A loop over `Range(1, n)`
+  with `n` a symbol with no value declined with "bounds must be finite
+  numbers", which describes an infinite literal bound, not a symbolic one; the
+  decline now reads "the bounds of the `Range` must be numbers known at
+  compile time (a number literal, or a symbol with a value)". A symbol with a
+  value (`N := 4`) still compiles, with the value folded in as the JavaScript
+  target does, and an infinite literal bound keeps the "finite" message.
+
+- **`declareSequence()` rejects a base value or a constraints value of the
+  wrong kind before it declares the name.**
+  `ce.declareSequence('U', { base: { 0: 'Undefined' }, … })` (a raw string,
+  which the TypeScript type forbids but a JavaScript caller can pass) was
+  accepted, and the first read of a term failed inside the memo code with
+  `TypeError: Cannot read properties of undefined (reading 'context')`; a
+  `constraints` value that is not a string or an expression failed the same
+  way. The definition is now refused with `Invalid base case for "U": the
+  value at index 0 must be a number or an expression` (or `Invalid constraints
+  for "U": …`), before the name is declared, so a corrected
+  `declareSequence('U', …)` succeeds afterwards.
+
 - **The application memo refills for each element of a lazy `Map` built inside a
   `Fold` step (#438).** A `Fold` whose step returns a lazy `Map` over the step's
   own state, with an inner `Fold` whose step reads the state and the `Map` index

@@ -7951,13 +7951,47 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     const index = indexExpr.symbol;
     // The loop index is declared and referenced bare — reject a reserved name.
     gpuCheckIdentifier(index, target.language);
-    const lower = Math.floor(rangeExpr.ops[0].re);
-    const upper = Math.floor(rangeExpr.ops[1].re);
+
+    // A shader loop needs its bounds and its step at compile time. A number
+    // literal, or a symbol whose value is known when the shader is compiled
+    // (`Range(1, N)` with `N := 4`), gives a finite value through `.re`, and
+    // the JavaScript target folds such a value the same way. The JavaScript
+    // target also reads a symbolic bound with no value (`Range(1, n)`) at run
+    // time, but a shader has no such lowering, so the decline names the
+    // requirement. A number literal that is not finite (`Range(1, +oo)`) is
+    // declined below with its own message.
+    const lowerValue = rangeExpr.ops[0].re;
+    const upperValue = rangeExpr.ops[1].re;
+    if (
+      (!Number.isFinite(lowerValue) && !isNumber(rangeExpr.ops[0])) ||
+      (!Number.isFinite(upperValue) && !isNumber(rangeExpr.ops[1]))
+    )
+      throw new Error(
+        'Could not compile `Loop` on this target: the bounds of the `Range` must be numbers known at compile time (a number literal, or a symbol with a value)'
+      );
+
+    const lower = Math.floor(lowerValue);
+    const upper = Math.floor(upperValue);
 
     if (!Number.isFinite(lower) || !Number.isFinite(upper))
       throw new Error(
         'Could not compile `Loop`: bounds must be finite numbers'
       );
+
+    // The step of the range. The JavaScript target advances the counter by
+    // it (`Range(1, 10, 3)` visits 1, 4, 7 and 10); the shader loop visited
+    // every integer of the range instead. The counter is a shader integer,
+    // so the step must be a non-zero integer known at compile time; a
+    // negative step counts down.
+    let step = 1;
+    if (rangeExpr.ops.length >= 3) {
+      const stepValue = rangeExpr.ops[2].re;
+      if (!Number.isInteger(stepValue) || stepValue === 0)
+        throw new Error(
+          'Could not compile `Loop` on this target: the step of the `Range` must be a non-zero integer known at compile time'
+        );
+      step = stepValue;
+    }
 
     const isWGSL = target.language === 'wgsl';
     const intType = isWGSL ? 'i32' : 'int';
@@ -7988,7 +8022,10 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       .split('\n')
       .map((line) => `  ${line}`)
       .join('\n');
-    return `for (${indexDecl} = ${lower}; ${index} <= ${upper}; ${index}++) {\n${body}\n}`;
+    const condition =
+      step > 0 ? `${index} <= ${upper}` : `${index} >= ${upper}`;
+    const advance = step === 1 ? `${index}++` : `${index} += ${step}`;
+    return `for (${indexDecl} = ${lower}; ${condition}; ${advance}) {\n${body}\n}`;
   },
 
   // Statistical functions
