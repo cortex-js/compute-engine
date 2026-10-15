@@ -60,9 +60,11 @@ describe('only the annotated slots of a function literal are a contract', () => 
         'for gap in [(A, C)] { acc0 = k(gap[2], 1, acc0) }\nacc0'
     );
     expect(errorsIn(expr)).toEqual([]);
-    // The reported signature keeps the inferred type of the bare slot.
+    // The reported signature keeps the inferred type of the bare slot. The
+    // slot is read at the literal index 1 only, so it is a one-component
+    // tuple (`docs/INFERENCE_ROADMAP.md` §5).
     expect(signatureOf(expr, 'k')).toBe(
-      '(p: indexed_collection<number>, unknown, acc: list<number>) -> list<number>'
+      '(p: tuple<number>, unknown, acc: list<number>) -> list<number>'
     );
     expect(expr.evaluate().toString()).toBe('[1,5]');
   });
@@ -70,7 +72,7 @@ describe('only the annotated slots of a function literal are a contract', () => 
   test('an argument that does not fit a bare slot is no longer a static error', () => {
     const { expr } = box('function k(p, n: number) { p[1] + n }\nk(5, 1)');
     expect(signatureOf(expr, 'k')).toBe(
-      '(p: indexed_collection<number>, n: number) -> number'
+      '(p: tuple<number>, n: number) -> number'
     );
     expect(errorsIn(expr)).toEqual([]);
   });
@@ -148,7 +150,7 @@ describe('only the annotated slots of a function literal are a contract', () => 
       'function k(n: number, p, ...rest) { p[1] + n }\nk(1, 5, 3)'
     );
     expect(signatureOf(expr, 'k')).toBe(
-      '(n: number, p: indexed_collection<number>, any*) -> number'
+      '(n: number, p: tuple<number>, any*) -> number'
     );
     expect(errorsIn(expr)).toEqual([]);
     const { expr: refused } = box(
@@ -162,7 +164,7 @@ describe('a declared placeholder slot is not a contract', () => {
   // `(unknown) -> unknown` is what a host writes when it declares a function
   // before its body is known (Tycho's document manager does). The reported
   // signature refines the placeholder from the body, `p[1]` giving
-  // `indexed_collection<number>`; that type is inferred, not written by the
+  // `tuple<number>`; that type is inferred, not written by the
   // author, so it refuses nothing, at boxing or at run time.
   const PRESENT = ['First', ['List', ['Tuple', 1, 2]]];
   const ABSENT = ['First', ['List']];
@@ -180,9 +182,7 @@ describe('a declared placeholder slot is not a contract', () => {
       ['Add', ['At', 'p', 1], 1],
       'p',
     ]);
-    expect(ce.box('f').type.toString()).toBe(
-      '(indexed_collection<number>) -> number'
-    );
+    expect(ce.box('f').type.toString()).toBe('(tuple<number>) -> number');
     expect(ce.box(['f', PRESENT]).isValid).toBe(true);
     expect(ce.box(['f', PRESENT]).evaluate().toString()).toBe('2');
     // As the same body does with no declaration.

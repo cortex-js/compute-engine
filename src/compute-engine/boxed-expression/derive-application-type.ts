@@ -7,8 +7,17 @@ import type {
   TypeHandlerContext,
 } from '../global-types.js';
 import { reduceType } from '../../common/type/reduce.js';
-import { readTypeVariablesAsBounds } from '../../common/type/instantiate.js';
-import { isSubtype } from '../../common/type/subtype.js';
+import {
+  freeTypeVariables,
+  paramAt,
+  readTypeVariablesAsBounds,
+  substituteTypeVariables,
+} from '../../common/type/instantiate.js';
+import {
+  isSubtype,
+  provablyDisjoint,
+  widen,
+} from '../../common/type/subtype.js';
 import { COLLECTION_SHAPE_TYPE } from '../../common/type/primitive.js';
 import {
   appliesToListCoordinateTuple,
@@ -17,7 +26,7 @@ import {
   scalarOrListUnionCellType,
   typeCouldBeUnkeyedCollection,
 } from '../collection-utils.js';
-import type { Type } from '../../common/type/types.js';
+import type { FunctionSignature, Type } from '../../common/type/types.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import {
   functionResult,
@@ -34,8 +43,12 @@ import {
 import { isFunction } from './type-guards.js';
 import {
   instantiatedResultTypeOverActuals,
+  isThreadableAt,
+  solveArmOverActuals,
   type SolveActual,
+  type Threadable,
 } from './generic-instantiation.js';
+import { arityBounds, isMoreSpecific, overloadArms } from './overload.js';
 import {
   ABSENT_CELLS_STAY_MISSING,
   absorbOperandAbsence,
@@ -111,9 +124,14 @@ export function isNumericTupleType(t0: Type): boolean {
  * `lambdaBroadcastType`, `boxed-function.ts`), so the callers that check for
  * a numeric tuple check for this type too. A tuple that is already numeric
  * answers false.
+ *
+ * The bare type `tuple` names no component, so every component is open: a
+ * symbol declared `tuple` can hold `(1, 2)`, and `f := x ↦ (-x, x)` then
+ * makes `f(w)` a pair of pairs.
  */
 export function mayBeNumericTupleType(t0: Type): boolean {
   const t = resolveTypeAlias(t0);
+  if (t === 'tuple') return true;
   if (typeof t !== 'object' || t.kind !== 'tuple') return false;
   const open = (e: Type) => e === 'unknown' || e === 'any';
   return (
@@ -517,6 +535,11 @@ export function deriveApplicationType(
         lazy: def.lazy,
         resolver: engine._typeResolver,
       }) ??
+        overloadResultType(engine, sig, operands, actuals, {
+          threadable: def.broadcastable,
+          stripMissing: (i) => def.stripsMissingAt(i) && !passedThrough[i],
+          lazy: def.lazy,
+        }) ??
         functionResult(sig) ??
         'unknown'
     )
@@ -590,6 +613,172 @@ export function deriveApplicationType(
       }) ?? perElement
     );
   }
+}
+
+/**
+ * The result type of applying an OVERLOAD SET `sig` (an intersection of
+ * signatures) to operands known only by their types. `undefined` when `sig`
+ * is not an overload set, or when no arm can take the operands.
+ *
+ * The expression route resolves an overload set with `resolveOverload`
+ * (`overload.ts`), which reads boxed operands. A type handler that types a
+ * call it does not hold (the completed call of a pipe stage, `xs |>
+ * Take(2)`) has only descriptors, and without this resolution the call was
+ * typed `unknown`. The rule is the same as on the expression route, read
+ * from types only:
+ *
+ * - Each generic arm is first solved against the operand types
+ *   (`instantiateArmOverActuals`), and the tests below read the solved
+ *   parameters. An arm whose bound the operands violate is not taken.
+ * - An arm takes the operands when it admits their count, and when no
+ *   operand is provably disjoint from the parameter that it binds. An
+ *   operand of a lazy operator, an `unknown` or `any` operand, and a
+ *   collection operand at a threadable position refute no arm.
+ * - When every operand is a subtype of its parameter in every arm that
+ *   takes the operands, the types decide the arm, ranked as
+ *   `resolveOverload` ranks it: the arm whose solved parameters are more
+ *   specific (`isMoreSpecific`) wins, a ground arm wins over a generic arm
+ *   with the same solved parameters, and the first one declared wins a tie
+ *   that remains. So `((T) -> T where T) & ((number) -> number)` over an
+ *   `integer` operand is `integer`: the generic arm solves to `(integer) ->
+ *   integer`, which is more specific than `(number) -> number`.
+ * - Otherwise the types do not decide the arm, and the result is the join
+ *   of the results of every arm that takes the operands. A result `unknown`
+ *   makes the join `unknown`, as on the expression route (`resolvedArm`,
+ *   `boxed-function.ts`).
+ *
+ * The result of each arm is its declared result, with the type variables of
+ * a generic arm solved against the operands. In the join, a variable that
+ * the operands leave unsolved is read as its declared bound.
+ */
+function overloadResultType(
+  engine: ComputeEngine,
+  sig: Type,
+  operands: ReadonlyArray<OperandDescriptor>,
+  actuals: ReadonlyArray<SolveActual>,
+  options: {
+    threadable: Threadable | undefined;
+    stripMissing: (i: number) => boolean;
+    lazy: boolean | undefined;
+  }
+): Type | undefined {
+  const arms = overloadArms(sig);
+  if (arms === undefined) return undefined;
+  const n = operands.length;
+  const ctx = { ...options, resolver: engine._typeResolver };
+  const taken: {
+    arm: FunctionSignature;
+    instance: FunctionSignature;
+    generic: boolean;
+  }[] = [];
+  let decided = true;
+  for (const arm of arms) {
+    const { min, max } = arityBounds(arm);
+    if (n < min || n > max) continue;
+    const instance = instantiateArmOverActuals(arm, actuals, ctx);
+    if (instance === undefined) continue;
+    let takes = true;
+    let subtypes = true;
+    for (let i = 0; i < n && takes; i++) {
+      const param = paramAt(instance, i);
+      if (param === undefined) {
+        takes = false;
+        break;
+      }
+      const t = operands[i].type;
+      if (isSubtype(t, param)) continue;
+      subtypes = false;
+      if (options.lazy || t === 'unknown' || t === 'any') continue;
+      if (isThreadableAt(options.threadable, i) && actuals[i].liftable === true)
+        continue;
+      if (provablyDisjoint(t, param)) takes = false;
+    }
+    if (!takes) continue;
+    if (!subtypes) decided = false;
+    taken.push({ arm, instance, generic: isGenericSignature(arm) });
+  }
+  if (taken.length === 0) return undefined;
+  const resultOf = (arm: FunctionSignature): Type =>
+    instantiatedResultTypeOverActuals(arm, actuals, {
+      ...options,
+      resolver: engine._typeResolver,
+    }) ??
+    functionResult(arm) ??
+    'unknown';
+  if (decided) {
+    // The ranking of `resolveOverload` (`outranks`, `overload.ts`): an arm
+    // wins when its instance is more specific, and, when the two instances
+    // have the same parameters, a ground arm wins over a generic one. A tie
+    // that remains goes to the arm declared first.
+    const outranks = (a: (typeof taken)[number], b: (typeof taken)[number]) =>
+      isMoreSpecific(a.instance, b.instance, n) ||
+      (!a.generic &&
+        b.generic &&
+        sameParameters(a.instance, b.instance, n) &&
+        !isMoreSpecific(b.instance, a.instance, n));
+    let selected = taken[0];
+    for (const candidate of taken.slice(1))
+      if (outranks(candidate, selected)) selected = candidate;
+    return resultOf(selected.arm);
+  }
+  // An operand that does not decide the arm gives no solution to a type
+  // variable that it binds, and the solve answers `unknown`. The result of
+  // the arm is then read with each variable as its declared bound, as the
+  // expression route reads it: `Take(u, 2)` for an `unknown` operand `u` is
+  // `list<unknown> | string`.
+  const results = taken.map(({ arm }) => {
+    const r = resultOf(arm);
+    return r === 'unknown'
+      ? (functionResult(readTypeVariablesAsBounds(arm)) ?? 'unknown')
+      : r;
+  });
+  if (results.some((r) => r === 'unknown')) return 'unknown';
+  return widen(...results);
+}
+
+/**
+ * The signature `arm` at a call whose operands are `actuals`: each type
+ * variable of a generic arm solved against the operands, as the expression
+ * route does (`instantiateArm`, `overload.ts`). A variable that the solve
+ * leaves open is read as its declared bound. `undefined` when the operands
+ * violate a bound of the arm, which the call then cannot take. A ground arm
+ * is returned unchanged.
+ */
+function instantiateArmOverActuals(
+  arm: FunctionSignature,
+  actuals: ReadonlyArray<SolveActual>,
+  ctx: Parameters<typeof solveArmOverActuals>[2]
+): FunctionSignature | undefined {
+  if (!isGenericSignature(arm)) return arm;
+  const solved = solveArmOverActuals(arm, actuals, ctx);
+  if (solved.failures.length > 0) return undefined;
+  const substituted = substituteTypeVariables(arm, solved.bindings);
+  return (
+    freeTypeVariables(substituted).size === 0
+      ? substituted
+      : readTypeVariablesAsBounds(substituted)
+  ) as FunctionSignature;
+}
+
+/** Whether `arm` has a `where` clause. */
+function isGenericSignature(arm: FunctionSignature): boolean {
+  return arm.typeParams !== undefined && arm.typeParams.length > 0;
+}
+
+/** Whether `a` and `b` have parameters that are subtypes of each other at
+ * each of the `n` positions of a call. */
+function sameParameters(
+  a: FunctionSignature,
+  b: FunctionSignature,
+  n: number
+): boolean {
+  for (let i = 0; i < n; i++) {
+    const pa = paramAt(a, i);
+    const pb = paramAt(b, i);
+    if (pa === undefined || pb === undefined) return false;
+    if (!isSubtype(pa, pb) || !isSubtype(pb, pa)) return false;
+  }
+  return true;
 }
 
 /** The context every `'types'`-shape handler call receives. */

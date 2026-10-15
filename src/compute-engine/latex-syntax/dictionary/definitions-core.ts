@@ -2308,15 +2308,28 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       delims ??= '(,)';
 
       // Check if there are custom delimiters specified
+      let custom = false;
       if (nops(expr) > 1) {
         const op2 = stringValue(operand(expr, 2));
-        if (typeof op2 === 'string' && op2.length <= 3) delims = op2;
+        if (typeof op2 === 'string' && op2.length <= 3) {
+          delims = op2;
+          custom = true;
+        }
       }
 
       let [open, sep, close] = ['', '', ''];
       if (delims.length === 3) [open, sep, close] = delims;
       else if (delims.length === 2) [open, close] = delims;
       else if (delims.length === 1) sep = delims;
+
+      // A delimiter string with no separator (`')['`, `'()'`, `''`) gives no
+      // character to write between two operands. Two operands written with
+      // nothing between them touch and read back as one expression: without
+      // a separator, `["Delimiter", ["Sequence", 1, 2, 3], "'()'"]` is
+      // `(123)`, which reads back as the number `123`, and `x+1` followed by
+      // `-2` is `(x+1-2)`. So a comma is written between two operands, as for
+      // a group with no delimiter string: `(1,2,3)`.
+      if (custom && sep === '') sep = ',';
 
       // A group in square brackets is written with parentheses. The parser
       // has no reading of square brackets as a group: it reads

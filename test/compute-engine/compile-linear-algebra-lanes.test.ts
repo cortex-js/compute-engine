@@ -340,12 +340,15 @@ describe('A `Power` WHOSE BASE IS A MATRIX ONLY AFTER THE PARSE', () => {
         expect(actual[i][j]).toBeCloseTo(x, 12);
   });
 
-  it('javascript: a matrix that is not square keeps the element-wise power', () => {
+  it('javascript: an integer power of a matrix that is not square declines', () => {
+    // `evaluate()` gives the `expected-square-matrix` error, as `B^2` parsed
+    // after the assignment does (`MatrixPower(B, 2)`). Compiled code cannot
+    // return that error, so the compilation declines.
     const expr = assignedAfterParse('B^2', '[[1, 2, 3], [4, 5, 6]]');
-    expect(expr.evaluate().toString()).toBe('[[1,4,9],[16,25,36]]');
-    const result = js(expr, 'strict');
-    expect(result.code).not.toContain('matpow');
-    expect(JSON.stringify(result.run())).toBe('[[1,4,9],[16,25,36]]');
+    expect(expr.evaluate().toString()).toMatch(/expected-square-matrix/);
+    expect(() => js(expr, 'strict')).toThrow(
+      /Could not compile `Power`: the base is a matrix that is not square/
+    );
   });
 
   it('javascript: a vector keeps the element-wise power', () => {

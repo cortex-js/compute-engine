@@ -459,18 +459,20 @@ export function checkCollectionOperand(
   // `incompatible-type` error.
   if (isAbsentScalarSymbol(x)) return x;
   const t = x.type.type;
-  if (t === 'unknown' || t === 'any' || t === 'value') {
-    // Value-aware refinement: an indeterminate-TYPED operand with a concrete
-    // bound value that is provably NOT a collection (a declared-`unknown`
-    // symbol assigned `5`) must still reject — admitting it would silently
-    // canonicalize e.g. `Any(x)` and quantify over an empty element stream
-    // (`Any(5)` → False). `isCollection` on a symbol consults its value, so
-    // an unresolved symbol (no value yet) and a non-symbol (an application,
-    // whose value is undefined) stay fail-open.
-    if (x.value !== undefined && !x.isCollection)
-      return checkType(engine, x, type);
-    return x;
-  }
+  // An operand typed `unknown`, `any` or `value` is admitted, even when it is
+  // a symbol whose current value is not a collection (a declared-`unknown`
+  // symbol assigned `5`). A canonical form must not depend on the value
+  // assigned to a symbol: the symbol can be reassigned to a collection
+  // before the call is evaluated. The evaluation reads the value: a value
+  // that cannot be a collection is an `incompatible-type` error there
+  // (`heldEagerSources()` in `boxed-function.ts`), so `Any(x)` does not
+  // quantify over an empty element stream and answer `False`.
+  if (t === 'unknown' || t === 'any' || t === 'value') return x;
+  // For the same reason, a symbol whose type was inferred (from its assigned
+  // value: a declared-`unknown` symbol assigned `5` is typed `integer`, or
+  // from an earlier use) is admitted. The refusal reads declared types only,
+  // as the refusal of the boxing does (`refusedCollectionSourceOperands`).
+  if (isSymbol(x) && x.valueDefinition?.inferredType) return x;
   if (typeof t !== 'string' && t.kind === 'broadcastable') return x;
   return checkType(engine, x, type);
 }
@@ -498,6 +500,10 @@ export function refusedCollectionSourceOperands(
     return undefined;
   let refused = false;
   const ops = xs.map((x, i) => {
+    // A symbol with no definition stays undeclared: canonicalizing it, or
+    // reading its type, would declare it, and a held `Map(R, f)` must leave
+    // `R` as it was.
+    if (isSymbol(x) && !ce.lookupDefinition(x.symbol)) return x;
     const operand = x.canonical;
     const kind = collectionSourceSlot(signature, i);
     // A function at a source slot is most likely a call with its operands
@@ -2550,6 +2556,21 @@ export interface ValidateArgumentsInternals {
    * parameter whose annotation is not numeric and has no `missing` member —
    * see `refusesAbsentArgument`. */
   enforcesParameterAnnotations?: boolean;
+  /** Whether a symbol with an inferred type is admitted provisionally at a
+   * collection parameter (`isProvisionalCollectionOperand`). Unset, the
+   * answer is true for a library operator and false for a user function
+   * (`userFunction`). A trial of an overload arm receives the answer of the
+   * call it is a trial for. */
+  provisionalCollectionOperands?: boolean;
+}
+
+/** See `ValidateArgumentsInternals.provisionalCollectionOperands`. */
+function admitsProvisionalCollectionOperands(
+  internals: ValidateArgumentsInternals | undefined
+): boolean {
+  return (
+    internals?.provisionalCollectionOperands ?? internals?.userFunction !== true
+  );
 }
 
 /**
@@ -2619,6 +2640,38 @@ export function refusesAbsentArgument(
   if (ce._staticAssignmentEvidence === undefined) return false;
   if (typeof t === 'string' || t.kind !== 'union') return false;
   return t.types.some((arm) => resolveTypeAlias(arm) === 'missing');
+}
+
+/**
+ * True when `op` is a symbol that holds a value and whose type was inferred
+ * from that value (a symbol declared `unknown` and assigned `5` is typed
+ * `integer`), `param` is a collection parameter, and the type of the symbol
+ * does not match it.
+ *
+ * Validation admits such an operand provisionally at a parameter of a
+ * library operator. A canonical form must not depend on the value assigned
+ * to a symbol: refused at boxing, `Sort(n)` kept its error after `n` was
+ * assigned a list. The refusal reads declared types only, as the refusal of
+ * a source of a lazy collection operator does
+ * (`refusedCollectionSourceOperands`). The evaluation checks the value: a
+ * value that is not a collection is an `incompatible-type` error there.
+ *
+ * Two cases are not included:
+ * - A symbol with no value whose type was inferred from an earlier use (`x`
+ *   in `3x + 2` is typed `number`). Its type does not depend on a value, and
+ *   a use of a symbol with no value narrows its type (`Length(m)` in the
+ *   body of a function makes the parameter `m` a collection); a provisional
+ *   admission is not narrowed.
+ * - The parameters of a user function: the check of the arguments at the
+ *   call is the contract of its declaration, and a refused call is checked
+ *   again at evaluation (`_refusedOps` in `boxed-function.ts`).
+ */
+function isProvisionalCollectionOperand(op: Expression, param: Type): boolean {
+  if (!isSymbol(op)) return false;
+  const def = op.valueDefinition;
+  if (def?.inferredType !== true || def.value === undefined) return false;
+  if (param === 'any' || param === 'unknown') return false;
+  return isSubtype(param, COLLECTION_SHAPE_TYPE) && !op.type.matches(param);
 }
 
 /**
@@ -2737,6 +2790,12 @@ export function validateArguments(
       stripMissing,
       freshMatrixRepair: (op: Expression, param: Type) =>
         couldRepairFreshMatrixInference(ce, op, param, freshlyInferred),
+      // The provisional admission of a symbol with an inferred type at a
+      // collection parameter, which full validation performs for a library
+      // operator (see `isProvisionalCollectionOperand`).
+      provisionalOperand: admitsProvisionalCollectionOperands(internals)
+        ? isProvisionalCollectionOperand
+        : undefined,
     };
     // Trial admission (phase 2c): an arm is viable iff running THIS function
     // on it, in trial mode, succeeds. The trial runs under a rollback frame,
@@ -2780,6 +2839,11 @@ export function validateArguments(
                   // rank that arm viable, and final validation would then
                   // refuse the call instead of selecting a string arm.
                   checkNumericCollections: internals?.checkNumericCollections,
+                  // The provisional admission of a symbol with an inferred
+                  // type at a collection parameter is the operator's too
+                  // (`isProvisionalCollectionOperand`).
+                  provisionalCollectionOperands:
+                    admitsProvisionalCollectionOperands(internals),
                 }
               );
               // `null` = valid, operands unchanged. In trial mode no repair
@@ -2964,6 +3028,22 @@ export function validateArguments(
       ? undefined
       : groundParam(sig.variadicArg.type);
   const varParamCount = sig.variadicMin ?? 0;
+
+  // A symbol whose type was inferred, at a collection parameter of a
+  // library operator, is admitted provisionally: the refusal reads declared
+  // types only (`isProvisionalCollectionOperand`).
+  if (admitsProvisionalCollectionOperands(internals)) {
+    ops.forEach((op, k) => {
+      const param =
+        k < params.length
+          ? params[k]
+          : k - params.length < optParams.length
+            ? optParams[k - params.length]
+            : varParam;
+      if (param !== undefined && isProvisionalCollectionOperand(op, param))
+        provisionalIdx.add(k);
+    });
+  }
 
   // §8 DISPLAY ONLY. A variable that got no call-site bound and carries no
   // declared bound falls to S3's `unknown`, so the instantiated parameter

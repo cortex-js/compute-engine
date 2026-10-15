@@ -44,6 +44,45 @@ describe('MAP WITH ITS ARGUMENTS REVERSED', () => {
     expect(ce.lookupDefinition('R')).toBeUndefined();
   });
 
+  // The first operand cannot be a function and the last one is
+  // callback-shaped: the call is the reversed spelling, whatever the first
+  // operand is.
+  test('a number first and a function literal last', () => {
+    const expr = ce.box(['Map', 5, ['Function', 'x', 'x']]);
+    expect(expr.isValid).toBe(false);
+    expect(expr.evaluate().toString()).toBe(
+      'Map(Error(ErrorCode("incompatible-type", "function", "5"), 5), (x) => x)'
+    );
+  });
+
+  test('a call that returns an integer first and a function literal last', () => {
+    const local = new ComputeEngine();
+    local.declare('f', '(integer) -> integer');
+    const expr = local.box(['Map', ['f', 1], ['Function', 'x', 'x']]);
+    expect(expr.isValid).toBe(false);
+    expect(expr.evaluate().toString()).toBe(
+      'Map(Error(ErrorCode("incompatible-type", "function", "integer"), f(1)), (x) => x)'
+    );
+  });
+
+  // A bare operator name last is a callback too. On the parse route the
+  // symbol `Sin` is unbound and has the type `unknown`, so its definition is
+  // read by name.
+  test.each([
+    ['box route', (c: ComputeEngine) => c.box(['Map', ['List', 1, 2], 'Sin'])],
+    [
+      'parse route',
+      (c: ComputeEngine) =>
+        c.parse('\\mathrm{Map}(\\bigl\\lbrack1, 2\\bigr\\rbrack, \\sin)'),
+    ],
+  ])('a bare operator name last, %s', (_route, build) => {
+    const expr = build(ce);
+    expect(expr.isValid).toBe(false);
+    expect(expr.toString()).toBe(
+      'Map(Error(ErrorCode("incompatible-type", "function", "vector<integer^2>"), [1,2]), sin)'
+    );
+  });
+
   test('the correct order still maps', () => {
     expect(
       ce

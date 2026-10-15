@@ -170,6 +170,23 @@ export function asSmallInteger(
 }
 
 /**
+ * `asSmallInteger(expr)` for an exact number, and `null` for a machine or big
+ * float.
+ *
+ * Use it to read an exponent as a polynomial degree. A float exponent is not
+ * a polynomial degree, even when its value is an integer: `x^{2.0}` is not a
+ * polynomial term in `x`, as `x^{2.5}` is not. If the polynomial operations
+ * read the float `2.0` as the integer `2`, `x^{2.0}/x` simplifies to the exact
+ * `x` and the float exponent is lost.
+ */
+export function asExactSmallInteger(
+  expr: Expression | undefined
+): number | null {
+  if (expr === undefined || !isNumber(expr) || !expr.isExact) return null;
+  return asSmallInteger(expr);
+}
+
+/**
  * Convert a boxed expression to a machine integer.
  * Returns null if the expression cannot be converted to an integer.
  * If the expression is a complex number, only the real part is considered.

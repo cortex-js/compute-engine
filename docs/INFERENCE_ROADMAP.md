@@ -427,7 +427,16 @@ Limits of the rule:
 - It applies only to the parameter of the function literal whose body is
   being canonicalized. A free symbol (`xs[1] + 1` at the top level) keeps
   rule R1-A, and so the top-level mirror case (`And(b[1], B)` followed by
-  `b[2] + 1`) is still refused.
+  `b[2] + 1`) is still refused. The user decided on 2026-10-15 to keep the
+  two rules. A parameter is local to one body, and all of its reads are in
+  that body. A top-level symbol lives across statements, and a tuple type
+  that grows with each statement that reads it is surprising. A free symbol
+  passed to a bare parameter of a tuple type keeps one element type too: the
+  symbol learns the indexed collection whose element type is the union of
+  the known components of the tuple. With `k := (p, n: number) ↦ p[1] + n`
+  (`p: tuple<number>`), the call `k(zs, 1)` types `zs` as
+  `indexed_collection<number>` (`oneElementTypeOf()`,
+  `boxed-expression/box.ts`).
 - A use is validated against the type made by the earlier reads BEFORE its
   own read is recorded, and a refused read is not recorded. So the union
   forms only when the current type admits the new requirement. After `!p[1]`

@@ -96,7 +96,7 @@ import {
   resolveContextualArm,
   type OverloadResolution,
 } from './overload.js';
-import { isSubtype } from '../../common/type/subtype.js';
+import { isSubtype, widen } from '../../common/type/subtype.js';
 import { typesOverlap } from '../../common/type/reduce.js';
 import {
   COLLECTION_SHAPE_TYPE,
@@ -2784,17 +2784,20 @@ function makeCanonicalFunctionCore(
       // minted.
       if (normalized.kind === 'ok') {
         ops = normalized.ops;
-        // A variable with an INFERRED type: the names were matched against
-        // the function it holds now, and a later assignment can give it a
-        // function with other parameter names. Keep the names, so that the
-        // call is matched again against the function the variable holds
-        // when the call is evaluated (`BoxedFunction._reboxedForCallee()`).
-        // A DECLARED type is a contract that every assigned value
-        // satisfies, so its names do not change.
+        // A variable with an INFERRED type, or a user function (an operator
+        // definition made by the assignment of a function literal): the
+        // names were matched against the function the name holds now, and a
+        // later assignment can give it a function with other parameter
+        // names. Keep the names, so that the call is matched again against
+        // the function the name holds when the call is evaluated
+        // (`BoxedFunction._reboxedForCallee()`). A DECLARED type of a
+        // variable is a contract that every assigned value satisfies, so its
+        // names do not change.
         if (
-          isValueDef(def) &&
-          def.value.inferredType &&
-          normalized.permutation !== undefined
+          normalized.permutation !== undefined &&
+          (isValueDef(def)
+            ? def.value.inferredType
+            : def.operator.isUserFunctionDefinition)
         )
           writtenArguments = writtenArgumentSlots(
             split,
@@ -3156,13 +3159,18 @@ function makeCanonicalFunctionCore(
   // that its type and its value are those of the same call boxed against
   // the new definition (`BoxedFunction._reboxedForCallee()`). The call is
   // boxed again from the operands as written, not from the operands that
-  // the check against the old definition replaced.
+  // the check against the old definition replaced. The names of a named
+  // call are kept with the record. They index the operands in declaration
+  // order, so they are kept only when no operand was spliced or removed.
   if (
     opDef.isUserFunctionDefinition &&
     result instanceof BoxedFunction &&
     result.operator === name
   )
-    result._stampCallee(undefined, checked.ops);
+    result._stampCallee(
+      checked.ops?.length === ops.length ? writtenArguments : undefined,
+      checked.ops
+    );
   return result;
 }
 
@@ -3214,10 +3222,20 @@ function hasNarrowableArg(args: ReadonlyArray<Expression>): boolean {
  */
 function narrowArgsFromInferredSignature(
   sig: Type,
-  args: ReadonlyArray<Expression>
+  args: ReadonlyArray<Expression>,
+  validation?: Type
 ): void {
   if (typeof sig === 'string' || sig.kind !== 'signature' || !sig.args) return;
   const sigArgs = sig.args;
+  // A slot of a partly annotated literal is bare when its validation
+  // signature types it `any` (`OperatorDefinition._validationSignature`).
+  // Every slot of an inferred signature is bare.
+  const validationArgs =
+    typeof validation === 'object' && validation.kind === 'signature'
+      ? validation.args
+      : undefined;
+  const isBare = (i: number): boolean =>
+    validationArgs === undefined || validationArgs[i]?.type === 'any';
   const n = Math.min(args.length, sigArgs.length);
   if (n === 0) return;
   // The eligibility test reads each argument's EFFECTIVE type, so it runs
@@ -3231,9 +3249,40 @@ function narrowArgsFromInferredSignature(
       if (arg.type.type !== 'unknown') continue;
       const paramType = sigArgs[i].type;
       if (!isCollectionOnlyType(paramType)) continue;
-      arg._infer(() => paramType, 'narrow');
+      const argType =
+        !isBare(i) || arg.engine._isShadowedParameter(arg.symbol)
+          ? paramType
+          : oneElementTypeOf(paramType);
+      arg._infer(() => argType, 'narrow');
     }
   });
+}
+
+/**
+ * The type that a FREE symbol (a symbol that is not a parameter of the
+ * function literal being canonicalized) learns from the collection type
+ * `t` of an inferred parameter slot.
+ *
+ * The bare parameter of a function literal is typed as a tuple with one
+ * component per index that its body reads (`p[1] + n` gives `p` the type
+ * `tuple<number>`, `parameterIndexReadType()` in `library/collections.ts`).
+ * A free symbol keeps one element type for every index, as a free symbol
+ * that is read by index directly does (`docs/INFERENCE_ROADMAP.md` §5): a
+ * parameter is local to one body, but a symbol at the top level lives across
+ * statements, and a tuple type that grows with each use is surprising. So a
+ * tuple slot with unnamed components gives the indexed collection whose
+ * element type is the union of the known components: `k(zs, 1)` types `zs`
+ * as `indexed_collection<number>`. Another type is returned as it is. A
+ * slot that the author annotated is a contract, and is not read here.
+ */
+function oneElementTypeOf(t: Type): Type {
+  if (typeof t !== 'object' || t.kind !== 'tuple') return t;
+  if (t.elements.some((x) => x.name !== undefined)) return t;
+  const known = t.elements.map((x) => x.type).filter((x) => x !== 'unknown');
+  return {
+    kind: 'indexed_collection',
+    elements: known.length === 0 ? 'unknown' : widen(...known),
+  };
 }
 
 /**
@@ -3758,7 +3807,11 @@ function applyOperatorDefinition(
   // slots still narrow an untyped symbol argument, as they do for a literal
   // with no annotation above.
   if (opDef._validationSignature !== undefined)
-    narrowArgsFromInferredSignature(opDef.signature.type, args);
+    narrowArgsFromInferredSignature(
+      opDef.signature.type,
+      args,
+      opDef._validationSignature
+    );
   const adjustedArgs = opDef.inferredSignature
     ? null
     : validateArguments(

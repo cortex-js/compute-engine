@@ -322,6 +322,77 @@ describe('A NAMED CALL THROUGH AN UNTYPED VARIABLE MATCHES THE NAMES AT EVALUATI
   });
 });
 
+describe('A NAMED CALL OF A USER FUNCTION MATCHES THE NAMES AT EVALUATION', () => {
+  // The assignment of a function literal with annotated parameters makes `h`
+  // an operator definition whose signature has the names of the parameters.
+  // A later assignment of an annotated literal keeps these names (pinned in
+  // `test/epsil/execute.test.ts`, "reassignment: the FIRST pinned signature
+  // owns the names"). A later assignment of a literal with no annotation
+  // replaces the signature, which then has no parameter names.
+  //
+  // The call keeps the names it was written with, and they are matched
+  // again against the definition that `h` holds when the call is evaluated.
+  // Without the names, the call was boxed again from its operands in
+  // declaration order, `h(3, 5)`, and gave `2`.
+  const XF = [
+    'Function',
+    ['Subtract', 'x', 'factor'],
+    ['Typed', 'x', 'real'],
+    ['Typed', 'factor', 'real'],
+  ];
+  const BARE_FX = ['Function', ['Subtract', 'x', 'factor'], 'factor', 'x'];
+
+  test('box route', async () => {
+    const ce = new ComputeEngine();
+    ce.assign('h', ce.box(XF));
+    const call = ce.box(['h', N('factor', 5), N('x', 3)]);
+    expect(call.evaluate().toString()).toBe('-2');
+
+    ce.assign('h', ce.box(BARE_FX));
+    const fresh = ce.box(['h', N('factor', 5), N('x', 3)]);
+    expect(fresh.evaluate().toString()).toContain('argument-name-unknown');
+    expect(await observe(call)).toEqual(await observe(fresh));
+
+    // The names are matched again against an annotated literal.
+    ce.assign('h', ce.box(XF));
+    expect(call.evaluate().toString()).toBe('-2');
+  });
+
+  test('`ce.function` route: a positional and a named argument', () => {
+    const ce = new ComputeEngine();
+    ce.assign('h', ce.box(XF));
+    const call = ce.function('h', [
+      ce.number(3),
+      ce.box(N('factor', 5), { form: 'raw' }),
+    ]);
+    expect(call.evaluate().toString()).toBe('-2');
+    ce.assign('h', ce.box(BARE_FX));
+    const fresh = ce.function('h', [
+      ce.number(3),
+      ce.box(N('factor', 5), { form: 'raw' }),
+    ]);
+    expect(call.evaluate().toString()).toBe(fresh.evaluate().toString());
+    expect(call.evaluate().toString()).toContain('argument-name-unknown');
+  });
+
+  test('Epsil: a `function` redefined by an assignment', () => {
+    const r = executeEpsil(
+      new ComputeEngine(),
+      'function h(x: number, factor: number) { x - factor }\n' +
+        'function g() { h(factor: 5, x: 3) }\nlet a = g()\n' +
+        'h = (factor, x) => x - factor\n[a, g()]'
+    );
+    expect(r.diagnostics).toEqual([]);
+    const direct = executeEpsil(
+      new ComputeEngine(),
+      'function h(x: number, factor: number) { x - factor }\n' +
+        'h = (factor, x) => x - factor\nh(factor: 5, x: 3)'
+    );
+    expect(direct.value.toString()).toContain('argument-name-unknown');
+    expect(r.value.toString()).toBe(`[-2,${direct.value.toString()}]`);
+  });
+});
+
 describe('A CALL THROUGH A VARIABLE THAT HOLDS A LAZY OPERATOR', () => {
   // `bob_H` is lazy: its handler receives its operand unevaluated. A call
   // through a variable that holds `bob_H` must hold the operand too, as the

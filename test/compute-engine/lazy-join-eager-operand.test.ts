@@ -58,6 +58,30 @@ describe('a lazy view over an eager collection operator', () => {
     ]);
   });
 
+  // A plain `evaluate()` of a view with an element memo reads the finiteness
+  // of the view first, and that read evaluates an eager operand. The operand
+  // step of the same evaluation uses that value: the operand is evaluated
+  // once.
+  test('a plain evaluate() evaluates an eager operand once', () => {
+    const local = new ComputeEngine();
+    let calls = 0;
+    local.declare('src', {
+      signature: '(integer) -> list<integer>',
+      evaluate: () => {
+        calls += 1;
+        return local.box(['List', 3, 1, 2]);
+      },
+    });
+    for (const [input, expected] of [
+      [['Join', ['src', 1], ['List', 4]], '[3,1,2,4]'],
+      [['Append', ['src', 1], 4], '[3,1,2,4]'],
+    ] as [any, string][]) {
+      calls = 0;
+      expect(local.box(input).evaluate().toString()).toBe(expected);
+      expect(calls).toBe(1);
+    }
+  });
+
   // An absent operand makes the whole `Join` absent (user decision
   // 2026-09-26): unchanged by the finiteness fix.
   test('Join(Missing, [3]) stays absent', () => {

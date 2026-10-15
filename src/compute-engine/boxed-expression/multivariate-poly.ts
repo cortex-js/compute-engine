@@ -405,9 +405,12 @@ export function mpolyToBoxed(ce: ComputeEngine, poly: MPoly): Expression {
   return terms.length === 1 ? terms[0] : ce.function('Add', terms);
 }
 
-/** Exact `bigint` of an integer-valued boxed number, else `null`. */
+/** Exact `bigint` of an integer-valued boxed number, else `null`. A float
+ * with an integer value (`2.0`) gives `null`: it is not an exponent or a
+ * coefficient of a polynomial over ℚ. */
 function readInt(e: Expression): bigint | null {
   if (!e.isInteger) return null;
+  if (isNumber(e) && !e.isExact) return null;
   try {
     return BigInt(e.toString());
   } catch {

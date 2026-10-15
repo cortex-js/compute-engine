@@ -379,6 +379,11 @@ export interface AdmissionPolicies {
   stripMissing?: (index: number) => boolean;
   /** Write-free precondition of the fresh-matrix-inference repair. */
   freshMatrixRepair?: (op: Expression, param: Type) => boolean;
+  /** True when full validation admits `op` at `param` provisionally because
+   * the type of the symbol `op` was inferred, not declared (a symbol at a
+   * collection parameter of a library operator, see
+   * `isProvisionalCollectionOperand` in `validate.ts`). */
+  provisionalOperand?: (op: Expression, param: Type) => boolean;
 }
 
 /**
@@ -482,6 +487,7 @@ function prefilterAdmits(
     return true;
   if (isRepairableOperatorSymbol(ce, op)) return true;
   if (policies?.freshMatrixRepair?.(op, param)) return true;
+  if (policies?.provisionalOperand?.(op, param)) return true;
 
   return false;
 }

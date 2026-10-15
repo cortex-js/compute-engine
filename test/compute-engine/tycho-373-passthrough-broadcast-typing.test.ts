@@ -586,6 +586,22 @@ describe('Tycho 373 — a pass-through parameter under list broadcast', () => {
           deriveApplicationType(ce as any, 'f', [describeType('missing')])
         ).not.toBe('any');
       });
+
+      test(`${route}: an argument declared as a bare tuple is typed any`, () => {
+        // The bare type `tuple` names no component, so the argument may be
+        // a numeric tuple, and `f(w)` is then a pair of pairs. It was typed
+        // with the signature result `tuple<number, number>`.
+        const ce = engine(declared);
+        ce.declare('w', 'tuple');
+        expect(ce.box(['f', 'w']).type.toString()).toBe('any');
+        expect(
+          deriveApplicationType(ce as any, 'f', [describeType('tuple')])
+        ).toBe('any');
+        ce.assign('w', ce.box(['Tuple', 1, 2]));
+        expect(ce.box(['f', 'w']).evaluate().toString()).toBe(
+          '((-1, -2), (1, 2))'
+        );
+      });
     }
 
     test('a tuple at a parameter the body never reads keeps the signature result', () => {

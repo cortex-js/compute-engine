@@ -2920,11 +2920,23 @@ export function assignFn(
         // slots reports a signature derived from that lambda
         // (`_signatureSkeleton`). The new literal refines the skeleton, not
         // that derived signature, which has no placeholder left.
+        // A DERIVED signature types each slot that the previous literal left
+        // bare from the uses of the parameter. That type is not a contract:
+        // when the new literal annotates the parameter, the annotation
+        // replaces it (`bareSlotsAsPlaceholders`).
         const opSkeleton = def.operator._signatureSkeleton;
         const declaredType0 =
           opSkeleton !== undefined
             ? ce.type(opSkeleton)
-            : def.operator.signature;
+            : def.operator._derivedSignature
+              ? ce.type(
+                  bareSlotsAsPlaceholders(
+                    def.operator.signature.type,
+                    def.operator._validationSignature,
+                    literal
+                  )
+                )
+              : def.operator.signature;
         // The body's result under the declared parameter types, as on the
         // value-slot route above.
         const typedResult = resultUnderDeclaredParameters(
@@ -3782,6 +3794,58 @@ function validationSignatureOf(
     args: args.map((a, i) =>
       leading[i].type === undefined ? { ...a, type: 'any' } : a
     ),
+  };
+}
+
+/**
+ * `signature`, the signature that a partly annotated function literal
+ * derived, with the placeholder `unknown` in each slot that the literal left
+ * bare and that the new literal `literal` annotates. `validation` is the
+ * signature that the calls are validated against (`validationSignatureOf`):
+ * it types a bare slot `any`, and an annotated slot as `signature` does.
+ *
+ * The type of a bare slot is inferred from the uses of the parameter: `p[1]`
+ * gives `p: tuple<number>`. When a new literal that annotates the parameter
+ * is assigned over the derived signature, the annotation must replace the
+ * inferred type. Kept as it was, it refused calls that the new literal
+ * accepts: after `k := (p, n: number) ↦ p[1] + n`, the new literal
+ * `(p: indexed_collection<number>, n: number) ↦ p[1] + n` was installed with
+ * `p: tuple<number>`, and `k((1, 2), 1)` was refused.
+ *
+ * A slot that the new literal leaves bare keeps its inferred type. That type
+ * can hold evidence that the literal does not carry: the argument of a
+ * self-call (`f(n: number, s) = s if n == 0 else f(n - 1, [1, 2])` types `s`
+ * as `list<any>`), which the assignment of the same literal again must keep.
+ *
+ * `signature` is returned as it is when `validation` is `undefined` (every
+ * slot is annotated) or when the signatures and the literal do not pair slot
+ * by slot.
+ */
+function bareSlotsAsPlaceholders(
+  signature: Type,
+  validation: Type | undefined,
+  literal: Expression
+): Type {
+  if (
+    validation === undefined ||
+    typeof signature !== 'object' ||
+    signature.kind !== 'signature' ||
+    typeof validation !== 'object' ||
+    validation.kind !== 'signature'
+  )
+    return signature;
+  const args = signature.args ?? [];
+  const params = functionLiteralParameters(literal);
+  const bare = (validation.args ?? []).map(
+    (a, i) =>
+      a.type === 'any' &&
+      args[i]?.type !== 'any' &&
+      params[i]?.type !== undefined
+  );
+  if (bare.length !== args.length || !bare.some((x) => x)) return signature;
+  return {
+    ...signature,
+    args: args.map((a, i) => (bare[i] ? { ...a, type: 'unknown' } : a)),
   };
 }
 

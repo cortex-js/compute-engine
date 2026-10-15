@@ -50,6 +50,27 @@ function engine(): ComputeEngine {
   return ce;
 }
 
+describe('the body of a point-valued function is typed as a point', () => {
+  test('a scalar coordinate times a point keeps the point shape', () => {
+    // `V.x` is `list<number> | missing | number | tuple<number, number>` for
+    // a parameter typed `PT`. The product of a point and that coordinate is
+    // typed for each arm of the coordinate: a point for a number, a list of
+    // points for a list, `missing` for an absent coordinate. It was typed
+    // `number`, and only the declared result gave the call its type.
+    const ce = new ComputeEngine();
+    ce.declare('r', `(${PT}, unknown) -> unknown`);
+    ce.assign(
+      'r',
+      ce.parse(
+        String.raw`(V, a) \mapsto V.x\cdot\left(\cos\left(a\right),\sin\left(a\right)\right)+V.y\cdot\left(-\sin\left(a\right),\cos\left(a\right)\right)`
+      )
+    );
+    expect(ce.box('r').type.toString()).toBe(
+      `(${PT}, unknown) -> list<tuple<number, number>> | missing | tuple<number, number>`
+    );
+  });
+});
+
 describe('a point argument with a complex-shaped coordinate', () => {
   test('a written-out point with a complex coordinate inlines and matches the interpreter', () => {
     const ce = engine();

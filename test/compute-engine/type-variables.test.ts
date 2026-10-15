@@ -1202,7 +1202,7 @@ describe('GROUND-TYPE INVARIANT — no open type escapes as an expression type',
     );
     const ce = fresh();
     ce.declare('gid', '(T) -> T where T');
-    const mapped = ce.box(['Map', ['List', 1, 2, 3], 'gid']);
+    const mapped = ce.box(['Map', 'gid', ['List', 1, 2, 3]]);
     expect(mapped.isValid).toBe(true);
     expect(freeTypeVariables(mapped.type.type).size).toBe(0);
   });

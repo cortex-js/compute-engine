@@ -94,15 +94,21 @@ describe('lazy broadcast over a declared-unknown symbol (Tycho item 42)', () => 
   });
 
   test('an indeterminate-typed symbol holding a SCALAR still rejects as a collection operand', () => {
-    // Fail-open admission is value-aware: `x` declared `unknown` but bound
-    // to `5` is provably not a collection — `Any(x)` must not canonicalize
-    // and silently quantify over an empty element stream (→ False).
+    // `x` declared `unknown` but bound to `5` is not a collection. The
+    // canonical form does not read the value of a symbol, so `Any(x)` is
+    // canonical; its evaluation reads the value and reports the
+    // `incompatible-type` error. It must not quantify over an empty element
+    // stream (→ False).
     const ce = new ComputeEngine();
     ce.declare('x', { type: 'unknown' });
     ce.assign('x', 5);
     const anyx = ce.box(['Any', 'x']);
-    expect(anyx.isCanonical).toBe(false);
-    expect(anyx.evaluate().symbol).not.toBe('False');
+    expect(anyx.isCanonical).toBe(true);
+    const value = anyx.evaluate();
+    expect(value.symbol).not.toBe('False');
+    expect(value.toString()).toBe(
+      'Error(ErrorCode("incompatible-type", "collection", "5"), 5)'
+    );
     // An unresolved symbol (no value) stays fail-open (canonical, inert).
     ce.declare('u', { type: 'unknown' });
     expect(

@@ -12,6 +12,7 @@ import {
 import { mapAutoCompileRunner } from './map-auto-compile.js';
 import { errorValue } from '../boxed-expression/error-value.js';
 import { isNumber } from '../boxed-expression/type-guards.js';
+import { liveScopeOf } from '../boxed-expression/ambient-chain.js';
 
 // The broadcast-shape walk moved to `map-broadcast-shape.js` (a leaf shared
 // with `map-auto-compile.js`, which cannot import this module — it is imported
@@ -310,7 +311,16 @@ export function makeSpineRunner(
             // element — the global definitions when the function was written
             // at the top level, which dropped their assumptions and made
             // every memo that reads a global symbol outdated.
-            const closureParent = level.closureScope?.parent;
+            //
+            // An asynchronous evaluation of a scoped node runs with an
+            // activation of the node's local scope in place of the scope
+            // itself, and the activation holds the values of the current
+            // iteration: the chain starts at that activation when the
+            // closure's parent is such a scope (`liveScopeOf`).
+            const templateParent = level.closureScope?.parent;
+            const closureParent = templateParent
+              ? liveScopeOf(ce._evalContextStack, templateParent)
+              : templateParent;
             if (closureParent) {
               ce.pushScope({ parent: closureParent, bindings: new Map() });
               try {

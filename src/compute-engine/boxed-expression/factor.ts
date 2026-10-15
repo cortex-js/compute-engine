@@ -13,7 +13,7 @@ import {
   fromCoefficients,
   cancelCommonFactors,
 } from './polynomials.js';
-import { asSmallInteger } from './numerics.js';
+import { asExactSmallInteger, asSmallInteger } from './numerics.js';
 import { expand } from './expand.js';
 import { hasVolatileDigest } from './utils.js';
 import { cycleDetectionCount } from './cycle-guard.js';
@@ -210,7 +210,7 @@ function stripAbs(expr: Expression): Expression {
 
 /**
  * Is `expr` a polynomial (no radicals, and every power has a non-negative
- * integer exponent)? Used to gate the square-root extraction so it never
+ * exact integer exponent)? Used to gate the square-root extraction so it never
  * introduces `Sqrt`/`Abs`/`Root` or fractional powers — e.g. `√(x³) = x·√x`
  * is rejected (ROADMAP B4).
  */
@@ -221,6 +221,8 @@ function isPolynomialForm(expr: Expression): boolean {
   if (op === 'Power') {
     const exp = expr.op2;
     if (exp.isInteger !== true || exp.isNegative === true) return false;
+    // A float exponent such as `2.0` is not a polynomial degree.
+    if (isNumber(exp) && !exp.isExact) return false;
   }
   return expr.ops.every(isPolynomialForm);
 }
@@ -255,7 +257,7 @@ function perfectSquareRoot(term: Expression): Expression | null {
   // `u^(2k) → u^k` (even non-negative integer exponent). `√(u²) = u` returns the
   // bare polynomial base (no `Abs`); a non-polynomial base is rejected.
   if (isFunction(term, 'Power')) {
-    const exp = asSmallInteger(term.op2);
+    const exp = asExactSmallInteger(term.op2);
     if (exp === null || exp < 0 || exp % 2 !== 0) return null;
     if (!isPolynomialForm(term.op1)) return null;
     if (exp === 0) return ce.One;
@@ -718,7 +720,7 @@ function refactorProductFactors(
   // intact. collectFactors/partial fractions need irreducible factors, not
   // (f·g)^n.
   if (isFunction(product, 'Power')) {
-    const exp = asSmallInteger(product.op2);
+    const exp = asExactSmallInteger(product.op2);
     if (exp === null || exp <= 0) return product;
     const factoredBase = factorPolynomial(product.op1, variable);
     if (factoredBase.isSame(product.op1)) return product; // base irreducible
@@ -1029,7 +1031,7 @@ function collectFactorsRaw(
 
   if (isFunction(expr, 'Power')) {
     const base = expr.op1;
-    const exp = asSmallInteger(expr.op2);
+    const exp = asExactSmallInteger(expr.op2);
     if (exp !== null && exp > 0 && base.has(variable)) {
       const deg = polynomialDegree(base, variable);
       result.push({ factor: base, multiplicity: exp, degree: deg });

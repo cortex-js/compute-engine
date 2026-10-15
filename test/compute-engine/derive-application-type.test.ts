@@ -60,6 +60,50 @@ describe('deriveApplicationType', () => {
     expect(derive('idf', 'string')).toBe('string');
   });
 
+  test('an overload set with no type handler is resolved from the operand types', () => {
+    // `Take` has one signature for a string and one for a collection, and no
+    // type handler. The arm is selected from the operand types, and the
+    // result agrees with the expression route.
+    ce.declare('takeList', 'list<integer>');
+    ce.declare('takeString', 'string');
+    ce.declare('takeOpen', 'unknown');
+    expect(derive('Take', 'list<integer>', 'integer')).toBe('list<integer>');
+    expect(derive('Take', 'list<integer>', 'integer')).toBe(
+      ce.box(['Take', 'takeList', 2]).type.toString()
+    );
+    expect(derive('Take', 'string', 'integer')).toBe('string');
+    expect(derive('Take', 'string', 'integer')).toBe(
+      ce.box(['Take', 'takeString', 2]).type.toString()
+    );
+    // An operand that does not decide the arm: the join of the results of
+    // the arms that can take it.
+    expect(derive('Take', 'unknown', 'integer')).toBe(
+      ce.box(['Take', 'takeOpen', 2]).type.toString()
+    );
+    // No arm takes a boolean.
+    expect(derive('Take', 'boolean', 'integer')).toBe('unknown');
+  });
+
+  test('a generic arm is ranked by its instance, as on the expression route', () => {
+    // The generic arm solves to `(integer) -> integer` for an `integer`
+    // operand, which is more specific than `(number) -> number`, so the call
+    // is `integer` on both routes, whatever the order of the arms. When the
+    // two instances have the same parameters, the ground arm wins.
+    ce.declare('ovlGenericFirst', {
+      signature: '((T) -> T where T) & ((number) -> number)',
+    });
+    ce.declare('ovlGroundFirst', {
+      signature: '((number) -> number) & ((T) -> T where T)',
+    });
+    ce.declare('ovlSameInstance', {
+      signature: '((T) -> T where T) & ((integer) -> integer)',
+    });
+    for (const op of ['ovlGenericFirst', 'ovlGroundFirst', 'ovlSameInstance']) {
+      expect(derive(op, 'integer')).toBe('integer');
+      expect(derive(op, 'integer')).toBe(ce.box([op, 'n']).type.toString());
+    }
+  });
+
   test('a propagate operator absorbs an absent operand as the call site does', () => {
     // `Add` propagates absence: an `integer | missing` operand is handed to
     // the handler stripped, and the result admits the `NaN` an absent

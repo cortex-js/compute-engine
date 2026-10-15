@@ -2026,3 +2026,43 @@ describe('a fused Map does not dispose the definitions of the scope of its funct
     expect(ce.symbol('q').isPositive).toBe(true);
   });
 });
+
+describe('SEQUENCE MEMO: a value that changes between calls', () => {
+  // The memo of the terms is valid while the dependencies of the recurrence
+  // keep their write versions (`memoStampIsValid` in `sequence.ts`), not only
+  // while the world version is unchanged. The index of an enclosing `Sum` is
+  // written at each iteration, and each iteration reads the term again. A
+  // parameter of a function literal does not reach the recurrence: the
+  // recurrence reads the global `x`, so each call gives the same term.
+  function engine(): ComputeEngine {
+    const ce = new ComputeEngine();
+    ce.declareSequence('A', {
+      variable: 'n',
+      base: { 0: 0 },
+      recurrence: 'x A_{n-1} + 1',
+    });
+    return ce;
+  }
+
+  test('a Sum over the symbol that the recurrence reads', () => {
+    // 3 + 7 + 13: A_3 = x^2 + x + 1 at x = 1, 2, 3.
+    expect(engine().parse('\\sum_{x=1}^{3} A_3').evaluate().json).toBe(23);
+  });
+
+  test('a function parameter with the same name', () => {
+    expect(
+      engine()
+        .parse('\\mathrm{Map}(x \\mapsto A_3, [1,2,3])')
+        .evaluate({ materialization: true })
+        .toString()
+    ).toBe('[x * (x + 1) + 1,x * (x + 1) + 1,x * (x + 1) + 1]');
+  });
+
+  test('an assignment between two reads', () => {
+    const ce = engine();
+    ce.assign('x', 2);
+    expect(ce.parse('A_3').evaluate().json).toBe(7);
+    ce.assign('x', 3);
+    expect(ce.parse('A_3').evaluate().json).toBe(13);
+  });
+});

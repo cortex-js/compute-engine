@@ -456,8 +456,10 @@ function isRefutablePipeTarget(f: Expression): boolean {
  * callback-first `Map(f)` goes second (`Map(f, _)`), and one piped into
  * `Fold(f, 10)` goes third (`Fold(f, 10, _)`: the list also fits `initial:
  * value`, but `10` cannot fit the collection slot it would be pushed into).
- * When no slot qualifies — an unknown-typed topic that satisfies nothing
- * provably — it defaults to first.
+ * When no slot qualifies — a topic or a written argument that does not fit,
+ * or an unknown-typed topic that satisfies nothing provably — the topic
+ * takes the slot that leaves the fewest values that do not fit, and the
+ * first such slot on a tie (see `implicitTopicSlot`).
  *
  * A complete call keeps its existing meaning — `5 |> Max(3)` still applies
  * the value of `Max(3)` — so this sugar only gives meaning to stages that
@@ -597,34 +599,53 @@ function implicitTopicSlot(
   // list). Under the first-fit rule `xs |> Fold(Join, "H;")` chose slot 1
   // (a string is a collection, so `"H;"` "fit" the collection slot it was
   // pushed into) and produced an inert `Fold(Join, xs, "H;")`.
-  let at = 0;
-  placement: for (const a of arms) {
+  //
+  // When no slot fits the topic and every written argument, the call is
+  // wrong however it is completed, and the slot decides which argument the
+  // error names. The topic then takes the slot that leaves the FEWEST
+  // values (the topic and the written arguments) that do not fit, and the
+  // first such slot on a tie. So `xs |> Fold(5, 0)` is `Fold(5, 0, xs)`,
+  // which names `5` in the callback slot, as the call written directly
+  // does: the first slot (`Fold(xs, 5, 0)`) leaves two values that do not
+  // fit, the list and `0`. And `5 |> Take(2)` stays `Take(5, 2)`, which
+  // names `5`: the second slot (`Take(2, 5)`) leaves one value that does
+  // not fit too, and the first slot wins the tie.
+  let fallback = { at: 0, misfits: Infinity };
+  for (const a of arms) {
     const params = [
       ...(a.args ?? []).map((p) => p.type),
       ...(a.optArgs ?? []).map((p) => p.type),
       ...(a.variadicArg !== undefined ? [a.variadicArg.type] : []),
     ];
-    for (let i = Math.min(params.length - 1, n); i >= 0; i--) {
-      if (!slotAccepts(a, params[i])) continue;
-      // The written arguments before `i` stay put; those from `i` on shift
-      // one slot right (a variadic tail absorbs any overflow).
-      const last = params.length - 1;
-      const displacedFit = argTypes.every((arg, k) => {
-        const slot = k < i ? k : k + 1;
-        const param =
-          slot <= last
-            ? params[slot]
-            : a.variadicArg !== undefined
-              ? a.variadicArg.type
-              : undefined;
-        return param !== undefined && argAccepts(a, arg, param);
-      });
-      if (!displacedFit) continue;
-      at = i;
-      break placement;
+    const last = params.length - 1;
+    // The parameter that a written argument at `k` binds when the topic
+    // takes slot `i`: the written arguments before `i` stay put; those from
+    // `i` on shift one slot right (a variadic tail absorbs any overflow).
+    const paramFor = (k: number, i: number): Type | undefined => {
+      const slot = k < i ? k : k + 1;
+      return slot <= last
+        ? params[slot]
+        : a.variadicArg !== undefined
+          ? a.variadicArg.type
+          : undefined;
+    };
+    for (let i = Math.min(last, n); i >= 0; i--) {
+      const topicFits = slotAccepts(a, params[i]);
+      const misfits =
+        (topicFits ? 0 : 1) +
+        argTypes.filter((arg, k) => {
+          const param = paramFor(k, i);
+          return param === undefined || !argAccepts(a, arg, param);
+        }).length;
+      if (topicFits && misfits === 0) return i;
+      if (
+        misfits < fallback.misfits ||
+        (misfits === fallback.misfits && i < fallback.at)
+      )
+        fallback = { at: i, misfits };
     }
   }
-  return at;
+  return fallback.at;
 }
 
 /**
@@ -5134,6 +5155,27 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // usual.
         const stageForMap =
           pipeStageWithImplicitTopic(ce, rawStage, x) ?? rawStage;
+
+        // The completed call is built with the piped value IN its slot, not
+        // through the `_` placeholder, which is the identity-function
+        // shorthand at a function slot: `[2] |> Map("s")` put `_` in the
+        // callback slot of `Map`, so the stage became `Map(x ↦ x, "s")`,
+        // whose value `["s"]` was reported as the stage that is not a
+        // function. With the piped value in its slot, the call is
+        // `Map([2], "s")`, which reports `[2]` and its type, as the direct
+        // call does. This is the call that the static check canonicalizes
+        // (`pipeStageAsCall`). A piped `Nothing` is erased below, as on the
+        // direct route, so it keeps the placeholder route. The value is the
+        // value the placeholder route gave: an error that the call embeds is
+        // the value of the pipe (`errorValue`), as for the application of a
+        // function literal whose body evaluates to that call.
+        if (stageForMap !== rawStage && !isSymbol(x, 'Nothing')) {
+          const completed = pipeStageAsCall(ce, x, rawStage);
+          if (completed?.topicAt !== undefined) {
+            const result = completed.call.evaluate({ numericApproximation });
+            return result.isValid ? result : (errorValue(result) ?? result);
+          }
+        }
 
         // A unary function-literal stage is a call: `xs |> x ↦ x^2` and
         // `xs |> _^2` are `Apply(x ↦ x^2, xs)`, which maps over a list or

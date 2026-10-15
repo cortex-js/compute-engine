@@ -179,8 +179,11 @@ function containsNegatedOddEvenCall(expr: Expression): boolean {
  *
  * A fold is an optimization: an evaluation that throws (a recursion limit,
  * a stack overflow in a user function) declines the fold and the node is
- * kept. A `CancellationError` (the deadline of `withTimeLimit`) is thrown
- * again, so a time limit still stops `simplify()`.
+ * kept. The recursion limit and the iteration limit are `CancellationError`s
+ * too, but they are limits of the evaluation of the node, not of the caller
+ * (`isEvaluationLimit()`), so they also decline the fold. Every other
+ * `CancellationError` (the deadline of `withTimeLimit`, a step budget, an
+ * abort) is thrown again, so a time limit still stops `simplify()`.
  *
  * The checks are ordered by cost: the operator and the type are cheap,
  * `isPure` is memoized, `unknowns` walks the expression,
@@ -196,6 +199,20 @@ function containsUnfoldableHead(expr: Expression): boolean {
 }
 
 const foldsInProgress: Expression[] = [];
+
+/** True when `e` is the cancellation that the engine throws when an
+ * evaluation exceeds `recursionLimit` or `iterationLimit`. Such a limit is
+ * reached by the expression that is evaluated (a user function that recurses
+ * without bound), not by the caller: the caller did not set a deadline that
+ * expired. Which of a stack overflow and the recursion limit occurs first
+ * depends on the size of the stack frames, so the two must give the same
+ * result. */
+function isEvaluationLimit(e: CancellationError): boolean {
+  const cause = (e as { cause?: unknown }).cause;
+  return (
+    cause === 'recursion-depth-exceeded' || cause === 'iteration-limit-exceeded'
+  );
+}
 
 function foldedConstant(expr: Expression): Expression | undefined {
   if (!isFunction(expr)) return undefined;
@@ -218,7 +235,7 @@ function foldedConstant(expr: Expression): Expression | undefined {
   try {
     evaluated = expr.evaluate();
   } catch (e) {
-    if (e instanceof CancellationError) throw e;
+    if (e instanceof CancellationError && !isEvaluationLimit(e)) throw e;
     return undefined;
   } finally {
     foldsInProgress.pop();
@@ -1340,8 +1357,9 @@ function propagatedNanOperand(expr: Expression): Expression | undefined {
  * `propagatedNanOperand()`, including a `NaN` at a `reject` position (left
  * to `evaluate()`, which reports the error), plus an operator that is not
  * pure, whose handler must not run outside an evaluation. A cancellation
- * (a deadline, an abort) is passed on; any other failure of the handler
- * leaves the expression as it is.
+ * (a deadline, an abort) is passed on; any other failure of the handler,
+ * including the recursion limit or the iteration limit
+ * (`isEvaluationLimit()`), leaves the expression as it is.
  */
 function handledNanOperand(expr: Expression): Expression | undefined {
   if (!isFunction(expr)) return undefined;
@@ -1381,7 +1399,7 @@ function handledNanOperand(expr: Expression): Expression | undefined {
       effects: ce.effects,
     });
   } catch (e) {
-    if (e instanceof CancellationError) throw e;
+    if (e instanceof CancellationError && !isEvaluationLimit(e)) throw e;
     return undefined;
   }
   if (result === undefined || !isNumber(result) || result.isNaN !== true)

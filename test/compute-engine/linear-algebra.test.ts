@@ -3485,11 +3485,40 @@ describe('MatrixPower', () => {
           .evaluate()
           .toString()
       ).toBe('[[1,4],[9]]');
-      // A matrix that is not square. Written directly, `[[1,2,3],[4,5,6]]^2`
-      // is a `MatrixPower`, which is an `expected-square-matrix` error.
-      expect(before('B^2', m23_n).evaluate().toString()).toBe(
-        '[[1,4,9],[16,25,36]]'
+    });
+
+    it('gives the square-matrix error for a matrix that is not square', () => {
+      // Written directly, or parsed after `B` holds the value,
+      // `[[1,2,3],[4,5,6]]^2` is a `MatrixPower`, which is an
+      // `expected-square-matrix` error. The `Power` built before the
+      // assignment gives the same error.
+      const after = new ComputeEngine();
+      after.assign('B', after.box(m23_n));
+      const expected = after.parse('B^2').evaluate().toString();
+      expect(expected).toMatch(/expected-square-matrix/);
+      expect(before('B^2', m23_n).evaluate().toString()).toBe(expected);
+      expect(before('B^0', m23_n).evaluate().toString()).toMatch(
+        /expected-square-matrix/
       );
+      expect(before('B^3', m23_n).evaluate().toString()).toMatch(
+        /expected-square-matrix/
+      );
+      // A row matrix is a matrix that is not square too.
+      expect(
+        before('B^2', ['List', ['List', 1, 2, 3]])
+          .evaluate()
+          .toString()
+      ).toMatch(/expected-square-matrix/);
+      // The exponent 1 gives the matrix, as `B^1` canonicalizes to `B`. The
+      // structural form keeps the `Power`.
+      const engine = new ComputeEngine();
+      const one = engine.function(
+        'Power',
+        [engine.symbol('B'), engine.number(1)],
+        { form: 'structural' }
+      );
+      engine.assign('B', engine.box(m23_n));
+      expect(one.evaluate().toString()).toBe('[[1,2,3],[4,5,6]]');
     });
 
     it('keeps the element-wise power for entries that are not numbers', () => {
@@ -4405,5 +4434,39 @@ describe('Float kernels decline an entry a float64 cannot hold', () => {
     expect(eng.box(['LUDecomposition', m2(2)]).evaluate().operator).not.toBe(
       'LUDecomposition'
     );
+  });
+});
+
+describe('a matrix with a zero extent', () => {
+  test('a matrix with a zero extent takes the collection route', () => {
+    // `[[], []]` is typed `matrix<never^(2x0)>`. It has no cell, so the
+    // tensor kernels decline it, and each operator answers as for a
+    // collection.
+    const engine = new ComputeEngine();
+    const E: Expression = ['List', ['List'], ['List']];
+    const E1: Expression = ['List', ['List']];
+    const ev = (json: Expression) => engine.box(json).evaluate().toString();
+    expect(ev(['Flatten', E])).toBe('[]');
+    expect(ev(['Flatten', E1])).toBe('[]');
+    expect(ev(['Trace', E])).toBe('Error("expected-square-matrix", "[[],[]]")');
+    expect(ev(['Trace', E1])).toBe('Error("expected-square-matrix", "[[]]")');
+    expect(ev(['Norm', E])).toBe('0');
+    expect(ev(['Norm', E1])).toBe('0');
+    expect(ev(['Dimension', E])).toBe('0');
+  });
+
+  test('an integer power of a 2x0 matrix is the square-matrix error', () => {
+    const E: Expression = ['List', ['List'], ['List']];
+    const error = 'Error("expected-square-matrix", "[[],[]]")';
+    expect(new ComputeEngine().box(['Power', E, 2]).evaluate().toString()).toBe(
+      error
+    );
+    const before = new ComputeEngine();
+    const e = before.parse('B^2');
+    before.assign('B', before.box(E));
+    expect(e.evaluate().toString()).toBe(error);
+    const after = new ComputeEngine();
+    after.assign('B', after.box(E));
+    expect(after.parse('B^2').evaluate().toString()).toBe(error);
   });
 });

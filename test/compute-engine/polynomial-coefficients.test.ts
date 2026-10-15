@@ -153,3 +153,110 @@ describe('polynomialRoots', () => {
     expect(roots!.length).toBe(0);
   });
 });
+
+// A float exponent is not a polynomial degree, even when its value is an
+// integer: `x^{2.0}` is not a polynomial term in `x`, as `x^{2.5}` is not.
+// Before, the polynomial operations read the float `2.0` as the integer
+// degree `2`.
+describe('a float exponent is not a polynomial degree', () => {
+  test('the coefficients and the degree decline it', () => {
+    expect(ce.parse('x^{2.0} + 1').polynomialCoefficients('x')).toBeUndefined();
+    expect(
+      ce.box(['PolynomialDegree', ce.parse('x^{2.0} + 1'), 'x']).evaluate()
+        .operator
+    ).toBe('PolynomialDegree');
+    expect(
+      ce.box(['Degree', ce.parse('x^{2.0} + 1')]).evaluate().operator
+    ).toBe('Degree');
+    // The exact exponent is still a degree.
+    expect(
+      ce
+        .box(['Degree', ce.parse('x^{2} + 1')])
+        .evaluate()
+        .toString()
+    ).toBe('2');
+  });
+
+  test('Degree reads a numeric constant as a coefficient', () => {
+    const degree = (s: string) =>
+      ce
+        .box(['Degree', ce.parse(s)])
+        .evaluate()
+        .toString();
+    expect(degree('\\pi x^2 + 1')).toBe('2');
+    expect(degree('x^2 + \\pi')).toBe('2');
+    expect(degree('e x^3')).toBe('3');
+  });
+
+  test('Degree declines an expression that is not a polynomial', () => {
+    // `isNumber` of `sin(x) + 1` (its value is a number) read it as a
+    // constant, of degree 0.
+    expect(
+      ce.box(['Degree', ce.parse('\\sin(x) + 1')]).evaluate().operator
+    ).toBe('Degree');
+    expect(ce.box(['Degree', ce.parse('\\sqrt{x}')]).evaluate().operator).toBe(
+      'Degree'
+    );
+  });
+
+  test('the polynomial division declines it', () => {
+    const q = ce
+      .box([
+        'PolynomialQuotient',
+        ce.parse('x^{2.0} - 1'),
+        ce.parse('x - 1'),
+        'x',
+      ])
+      .evaluate();
+    expect(q.operator).toBe('PolynomialQuotient');
+  });
+
+  test('Factor keeps the float exponent', () => {
+    const f = ce.box(['Factor', ce.parse('x^{2.0} - 1')]).evaluate();
+    expect(f.json).toEqual(['Add', ['Power', 'x', { num: '2.0' }], -1]);
+    expect(
+      ce
+        .box(['Factor', ce.parse('x^{2} - 1')])
+        .evaluate()
+        .toString()
+    ).toBe('(x - 1) * (x + 1)');
+  });
+
+  test('Solve does not read it as an integer degree', () => {
+    const roots = (s: string) =>
+      ce
+        .parse(s)
+        .solve('x')
+        ?.map((r) => JSON.stringify(r.json)) ?? null;
+    // The parity of `2.0` is not read: no root `-2`. The general power
+    // template is left out for a float with an integer value, whose root
+    // `4^(1/2.0)` folded to the exact `2`.
+    expect(roots('x^{2.0} = 4')).toBeNull();
+    expect(roots('x^{3.0} - 8 = 0')).toBeNull();
+    // A float exponent whose value is not an integer keeps the general power
+    // template, and its root is a float.
+    expect(roots('x^{2.5} = 4')).toEqual(['{"num":"1.74110112659224827827"}']);
+    // A float power of a base that contains the unknown.
+    expect(roots('(x+1)^{2.0} = 4')).toBeNull();
+    // `x^{2.0}` is not a polynomial in `sqrt(x)`.
+    expect(roots('x^{2.0} + \\sqrt{x} - 2 = 0')).toBeNull();
+    // The exact exponents are unchanged.
+    expect(roots('x^{2} = 4')).toEqual(['2', '-2']);
+    // The two complex cube roots are listed too.
+    expect(roots('x^{3} - 8 = 0')).toContain('2');
+    expect(roots('(x+1)^{2} = 4')).toEqual(['1', '-3']);
+    expect(roots('x^{2} + \\sqrt{x} - 2 = 0')).toEqual(['1']);
+  });
+
+  test('Solve does not read it as a quadratic', () => {
+    // As `x^{2.5} + 3x + 2 = 0`, the equation is not solved.
+    expect(ce.parse('x^{2.0} + 3x + 2').solve('x')).toBeNull();
+    expect(ce.parse('x^{2.5} + 3x + 2').solve('x')).toBeNull();
+    expect(
+      ce
+        .parse('x^{2} + 3x + 2')
+        .solve('x')
+        ?.map((r) => r.toString())
+    ).toEqual(['-1', '-2']);
+  });
+});

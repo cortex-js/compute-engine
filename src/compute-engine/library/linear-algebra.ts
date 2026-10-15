@@ -22,6 +22,7 @@ import {
   packTensor,
   packStructural,
   tensorCellExpression,
+  tensorShape,
 } from '../boxed-expression/tensor-view.js';
 import { totalDegree } from '../boxed-expression/polynomial-degree.js';
 import {
@@ -2744,6 +2745,16 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         // Trace of scalar is the scalar itself
         if (op1.isNumber) return op1;
 
+        // A matrix with a zero extent (`[[], []]`, typed
+        // `matrix<never^(2x0)>`) has no cell, and the tensor kernels decline
+        // it (`isTensorValue`). Such a matrix that is not square has no
+        // trace, as a 2×3 matrix has none; a square one has the empty sum 0.
+        const zeroShape = tensorShape(op1);
+        if (zeroShape?.length === 2 && zeroShape.includes(0) && ops.length < 3)
+          return zeroShape[0] === zeroShape[1]
+            ? ce.Zero
+            : ce.error('expected-square-matrix', op1.toString());
+
         if (isTensorValue(op1)) {
           const op1Tensor = packTensor(ce, op1);
           if (!op1Tensor) return undefined;
@@ -3761,6 +3772,18 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         { engine: ce, numericApproximation, expression }
       ) => {
         const A = mat;
+        // A matrix with a zero extent (`[[], []]`) has no cell, and the tensor
+        // kernels decline it (`isTensorValue`). One that is not square is
+        // refused as a 2×3 matrix is, so that `[[], []]^2` gives the error
+        // that `B^2` built before `B` holds `[[], []]` gives
+        // (`isNonSquareMatrixPower()`).
+        const zeroShape = tensorShape(A);
+        if (
+          zeroShape?.length === 2 &&
+          zeroShape.includes(0) &&
+          zeroShape[0] !== zeroShape[1]
+        )
+          return ce.error('expected-square-matrix', A.toString());
         if (!isTensorValue(A)) return undefined;
         const aTensor = packTensor(ce, A, { numeric: numericApproximation });
         if (!aTensor) return undefined;
@@ -4628,6 +4651,20 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           }
           return ce.Zero;
         }
+
+        // A matrix with a zero extent (`[[], []]`, typed
+        // `matrix<never^(2x0)>`) has no cell, and the tensor kernels decline
+        // it (`isTensorValue`). Every norm order that this handler computes
+        // is then the sum or the maximum of no terms, 0, as for `[]`.
+        const zeroShape = tensorShape(x);
+        if (
+          zeroShape !== null &&
+          zeroShape.length >= 2 &&
+          zeroShape.includes(0) &&
+          (normType === 'infinity' ||
+            (typeof normType === 'number' && normType > 0))
+        )
+          return ce.Zero;
 
         // A finite collection that is not a tensor — a lazy `Map`, which is
         // what a broadcast over more than a hundred elements answers, or a
@@ -7411,8 +7448,12 @@ function kernelBasisDimension(value: Expression): number | undefined {
  * Return true if `value` is a polynomial expression in its unknowns.
  */
 function isPolynomialExpression(value: Expression): boolean {
-  if (value.isNumber) return true;
-  if (isSymbol(value)) return !value.isConstant;
+  // A number literal. (`value.isNumber` is true for every expression whose
+  // value is a number, such as `sin(x) + 1`, so it cannot be the test.)
+  if (isNumber(value)) return true;
+  // A variable is a polynomial of degree 1. A constant with a numeric value
+  // (`Pi`, `ExponentialE`) is a coefficient, of degree 0.
+  if (isSymbol(value)) return !value.isConstant || value.isNumber === true;
   if (!isFunction(value)) return false;
   if (value.unknowns.length === 0) return true;
 
@@ -7430,9 +7471,11 @@ function isPolynomialExpression(value: Expression): boolean {
 
   if (value.operator === 'Power') {
     const exp = value.op2.re;
+    // A float exponent such as `2.0` is not a polynomial degree.
     return (
       isPolynomialExpression(value.op1) &&
       value.op2.unknowns.length === 0 &&
+      !(isNumber(value.op2) && !value.op2.isExact) &&
       exp !== undefined &&
       Number.isInteger(exp) &&
       exp >= 0

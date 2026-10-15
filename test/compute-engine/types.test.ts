@@ -293,4 +293,26 @@ describe('ZERO-LENGTH AXES IN LIST TYPES', () => {
     ce.declare('w', 'list<integer^(2x0)>');
     expect(ce.symbol('w').type.toString()).toBe('matrix<integer^(2x0)>');
   });
+
+  test('a literal with empty rows is a value of a matrix type with a zero axis', () => {
+    const ce = new ComputeEngine();
+    const rows = ce.box(['List', ['List'], ['List']]);
+    // `matrix<never^(2x0)>`: the serializer writes the `matrix` head for a
+    // numeric element type only.
+    expect(rows.type.toString()).toBe('list<never^(2x0)>');
+    const t = parseType('matrix<never^(2x0)>');
+    expect(isSubtype(rows.type.type, t) && isSubtype(t, rows.type.type)).toBe(
+      true
+    );
+    // `never` is a subtype of every element type.
+    expect(isSubtype(rows.type.type, parseType('matrix<integer^(2x0)>'))).toBe(
+      true
+    );
+    expect(rows.type.matches('list<string^(2x0)>')).toBe(true);
+    expect(rows.type.matches('matrix<integer^(2x1)>')).toBe(false);
+    expect(rows.type.matches('matrix<integer^(3x0)>')).toBe(false);
+    ce.declare('w', 'matrix<integer^(2x0)>');
+    ce.assign('w', rows);
+    expect(ce.symbol('w').evaluate().toString()).toBe('[[],[]]');
+  });
 });

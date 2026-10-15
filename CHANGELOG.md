@@ -97,30 +97,30 @@
 ### Issues Resolved
 
 - **A shader `Loop` over a `Range` follows the step, and a decline names the
-  requirement.** `Loop(body, Element(j, Range(1, 10, 3)))` compiled on the
-  GLSL and WGSL targets to a loop over every integer from 1 to 10, where the
+  requirement.** `Loop(body, Element(j, Range(1, 10, 3)))` compiled on the GLSL
+  and WGSL targets to a loop over every integer from 1 to 10, where the
   JavaScript target visits 1, 4, 7 and 10; a negative step gave a loop with no
-  iteration. The shader loop now advances the counter by the step
-  (`j += 3`), counting down for a negative step, and declines a step that is
-  not a non-zero integer known at compile time. A loop over `Range(1, n)`
-  with `n` a symbol with no value declined with "bounds must be finite
-  numbers", which describes an infinite literal bound, not a symbolic one; the
-  decline now reads "the bounds of the `Range` must be numbers known at
-  compile time (a number literal, or a symbol with a value)". A symbol with a
-  value (`N := 4`) still compiles, with the value folded in as the JavaScript
-  target does, and an infinite literal bound keeps the "finite" message.
+  iteration. The shader loop now advances the counter by the step (`j += 3`),
+  counting down for a negative step, and declines a step that is not a non-zero
+  integer known at compile time. A loop over `Range(1, n)` with `n` a symbol
+  with no value declined with "bounds must be finite numbers", which describes
+  an infinite literal bound, not a symbolic one; the decline now reads "the
+  bounds of the `Range` must be numbers known at compile time (a number literal,
+  or a symbol with a value)". A symbol with a value (`N := 4`) still compiles,
+  with the value folded in as the JavaScript target does, and an infinite
+  literal bound keeps the "finite" message.
 
-- **`declareSequence()` rejects a base value or a constraints value of the
-  wrong kind before it declares the name.**
+- **`declareSequence()` rejects a base value or a constraints value of the wrong
+  kind before it declares the name.**
   `ce.declareSequence('U', { base: { 0: 'Undefined' }, … })` (a raw string,
   which the TypeScript type forbids but a JavaScript caller can pass) was
   accepted, and the first read of a term failed inside the memo code with
   `TypeError: Cannot read properties of undefined (reading 'context')`; a
-  `constraints` value that is not a string or an expression failed the same
-  way. The definition is now refused with `Invalid base case for "U": the
-  value at index 0 must be a number or an expression` (or `Invalid constraints
-  for "U": …`), before the name is declared, so a corrected
-  `declareSequence('U', …)` succeeds afterwards.
+  `constraints` value that is not a string or an expression failed the same way.
+  The definition is now refused with
+  `Invalid base case for "U": the value at index 0 must be a number or an expression`
+  (or `Invalid constraints for "U": …`), before the name is declared, so a
+  corrected `declareSequence('U', …)` succeeds afterwards.
 
 - **The application memo refills for each element of a lazy `Map` built inside a
   `Fold` step (#438).** A `Fold` whose step returns a lazy `Map` over the step's
@@ -212,11 +212,12 @@
   measurement places it by its nominal. A measurement whose nominal cannot be
   ordered (a symbol, a complex number) leaves the operator unevaluated, as such
   a bare operand does; two measurements with equal nominals and different
-  uncertainties are not ordered either, so `Max(Measurement(1, 0.1),
-  Measurement(1, 0.5))` stays unevaluated in both operand orders rather than
-  answer whichever came first; and a measurement with a float nominal counts
-  as a float operand (`Max(Measurement(1.5, 0.1), Indeterminate)` is `NaN`).
-  Found by the Tycho consumer (its ledger row 375).
+  uncertainties are not ordered either, so
+  `Max(Measurement(1, 0.1), Measurement(1, 0.5))` stays unevaluated in both
+  operand orders rather than answer whichever came first; and a measurement with
+  a float nominal counts as a float operand
+  (`Max(Measurement(1.5, 0.1), Indeterminate)` is `NaN`). Found by the Tycho
+  consumer (its ledger row 375).
 
 - **A compiled special function answers its complex value from real operands in
   `auto` and `complex` mode,** as `Sqrt` and `Ln` do
@@ -414,11 +415,13 @@
   cannot be a collection is an error when it is boxed: `Map(x => x, 5)`,
   `Dedup(5)`, `ArgMax(5)` and `Filter(5, p)` are the operator over an
   `incompatible-type` error, invalid and typed `error`, as `Sort(5)` is (the
-  call was valid, typed `unknown`, and evaluated to itself). An unevaluated view
-  prints without evaluating its operands: `Join(src(1), [4]).toLatex()` prints
-  the call as written, where it evaluated `src(1)` three times. The rules are
-  stated in `docs/COLLECTIONS-MODEL.md`. Fixed on the way: a `Slice` in the body
-  of a function used the bounds of its first call for every later call
+  call was valid, typed `unknown`, and evaluated to itself); the refusal reads
+  declared types only, and a symbol with no definition stays undeclared. An
+  unevaluated view prints without evaluating its operands:
+  `Join(src(1), [4]).toLatex()` prints the call as written, where it evaluated
+  `src(1)` three times. The rules are stated in `docs/COLLECTIONS-MODEL.md`.
+  Fixed on the way: a `Slice` in the body of a function used the bounds of its
+  first call for every later call
   (`Map(i ↦ Characters(Slice("49142", i, i + 2)), 1..3)` was three copies of the
   first slice).
 
@@ -471,6 +474,96 @@
   non-real `b` with a negative real part. `GammaRegularized(a, -oo)` is `~oo`
   for a real non-integer `a`. The values were checked against mpmath at large
   finite arguments.
+
+- **A named call of a user function, boxed before the function was assigned
+  again, matches its argument names against the new definition.** It used the
+  operands in the parameter order of the old definition.
+
+- **A `Delimiter` whose delimiter string names no separator writes a comma
+  between its operands.** `["Delimiter", ["Sequence", 1, 2, 3], "'()'"]` is
+  written `(1,2,3)`, not `(123)`, which read back as the number 123; `x + 1`
+  followed by `-2` is written `(x+1,-2)`, not `(x+1-2)`.
+
+- **`simplify()` no longer throws
+  `CancellationError: Recursion limit exceeded`** when a constant subexpression
+  is a call of a user function that recurses without bound. The fold is declined
+  and the subexpression is kept, as it already was when the stack overflowed
+  first; a timeout, a step budget or an abort still reaches the caller.
+
+- **A pipe into an operator with several signatures is typed from the signature
+  the operand types select.** `[1, 2, 3] |> take(2)` is `list<integer>`, like
+  `take([1, 2, 3], 2)`, so a later wrong stage (`|> map("s")`) gets its static
+  error. The type-only overload resolution (`overloadResultType` in
+  `derive-application-type.ts`) picks the most specific signature whose
+  parameters the operand types satisfy, or the join of the candidates' results.
+  When a stage's written arguments fit no slot, the piped value takes the slot
+  that leaves the fewest values that do not fit: `xs |> fold(5, 0)` reports
+  "expected `function`, got `5`", like `fold(5, 0, xs)`; an `unknown` topic no
+  longer always goes to the first slot (`u |> fold(f, 10)` is `Fold(f, 10, u)`).
+  The run-time error of `[2] |> map("s")` names the piped value `[2]` and its
+  type (it named `["s"]` and the type `list`), and the static error for a
+  non-function in the callback slot of `map`, `filter`, `fold` and the other
+  callback operators names the real type of the operand (`map([2], "s")` says
+  "got `vector<integer^1>` at `[2]`", not "got `unknown`").
+
+- **A static error in a call that canonicalization renames is underlined on the
+  written argument.** `fold(a => a, "0", xs)` canonicalizes to
+  `Reduce(xs, (a) => a, "0")`; the `callback-arity` error now underlines
+  `a => a`, not the whole statement, and `fold(x -> x, 0, xs)` reports only the
+  wrong-arrow diagnostic.
+
+- **A float exponent is not a polynomial degree.** `x^{2.0}` is not a polynomial
+  term in `x`, as `x^{2.5}` is not. `x^{2.0}/x` simplifies to `x^{1.0}` (it was
+  the exact `x`); `Degree`, `PolynomialDegree`, `Factor`, the polynomial
+  division and the cancellation of common factors leave such an expression
+  unchanged, and `Solve` does not read `x^{2.0} + 3x + 2 = 0` as a quadratic,
+  nor `x^{2.0} = 4`, `x^{3.0} - 8 = 0` or `(x+1)^{2.0} = 4` as power equations
+  with an integer degree (they stay unsolved, while `x^{2.5} = 4` keeps its
+  float root). `Degree` also no longer gives `0` for an expression that is not a
+  polynomial (`sin(x) + 1`, `√x`).
+
+- **A literal with empty rows has a shape type.** `[[], []]` is typed
+  `matrix<never^(2x0)>` (it was `list<list<never>>`), so it is a value of
+  `matrix<integer^(2x0)>` and can initialize a symbol declared with that type.
+  `[]` is still `list<never>`. The matrix operators treat the zero extent as a
+  shape: `Flatten([[], []])` is `[]`, `Dimension([[], []])` is `0` (it counts
+  entries; it was `2`), `Norm([[], []])` is `0`, and `Trace([[], []])` and
+  `[[], []]^2` are the `expected-square-matrix` error on every route.
+
+- **An integer power of a non-square matrix is an error on every route.** `B^2`
+  built before `B` holds `[[1,2,3],[4,5,6]]` evaluates to the
+  `expected-square-matrix` error, as `B^2` parsed after the assignment does; it
+  was the matrix of the squared entries. Compiling it declines.
+
+- **Call and body types.** A free symbol passed to a parameter that its
+  function's body reads by index learns one element type: with
+  `k := (p, n: number) ↦ p[1] + n`, `k(zs, 1)` types `zs` as
+  `indexed_collection<number>` (a parameter inside a body is typed per index; a
+  top-level symbol is not, by decision). A function literal that annotates a
+  parameter, assigned over a partly annotated one, replaces the inferred type of
+  that parameter. `f(w)` with `w` declared `tuple` and `f := x ↦ (-x, x)` is
+  typed `any`. The product of a point and a value that may be a number, a list
+  or a point is typed arm by arm, so `(cos a, sin a)·PointX(V)` is typed as a
+  point, not as `number`.
+
+- **A function literal in the body of a `Sum` or `Product` reads the index of
+  its own iteration with `evaluateAsync()`.**
+  `Sum(Reduce(Map(x ↦ k·x, [1, 1]), Add, 0), k ∈ 1..2)` gave 8 after a
+  synchronous evaluation had given 6: the async route pushes a copy of the
+  node's local scope, and a function literal chained its frame to the original
+  scope, which still held the last index value. A plain `evaluate()` of `Join`
+  or `Append` over an eager operand evaluates that operand once, not twice.
+
+- **A `Map` call with the callback last reports the order also when the first
+  operand is not a collection.** `Map(5, x => x)` and `Map(f(1), x => x)` are an
+  `incompatible-type` error on the first operand, and a bare operator name
+  counts as a callback (`Map([1, 2], Sin)` on the box and the parse routes). A
+  lazy collection call over a symbol declared `unknown` and holding `5` is now
+  canonical and evaluates to an `incompatible-type` error; an eager call such as
+  `Sort(n)`, where `n` holds `5` and its type was inferred from that value, is
+  no longer refused at boxing. Both follow a later assignment of a list. A list
+  or tuple that holds a call refused at boxing now evaluates its other elements:
+  `[a, h("abc")]` with `a := 5` is `[5, Error(…)]`.
 
 - **The value a call returns is checked against the declared result type.** A
   definition whose body cannot meet its declaration is still accepted, and the
@@ -1496,11 +1589,11 @@
   an array failed inside the body with `_tv1.reduce is not a function`, which
   names a generated variable. Such an error now names the bindings that may
   explain it, with the body's message kept as its `cause`:
-  `"S" (type \`list<number> | missing\`) received a number: compiled code reads
-  such a binding as a JavaScript array, and the compiled body failed (…). Pass
-  an
-  array.`A scalar that the lowering accepts still runs. Compiled`Mod`, `Remainder`, `GCD`and`LCM`keep throwing a`RangeError`for an infinite or out-of-range operand of any type (the interpreter gives a type error for`Mod(+oo,
-  10)`); a plot host catches the error at that sample.
+  ``"S" (type `list<number> | missing`) received a number: compiled code reads such a binding as a JavaScript array, and the compiled body failed (…). Pass an array.``
+  A scalar that the lowering accepts still runs. Compiled `Mod`, `Remainder`,
+  `GCD` and `LCM` keep throwing a `RangeError` for an infinite or out-of-range
+  operand of any type (the interpreter gives a type error for `Mod(+oo, 10)`); a
+  plot host catches the error at that sample.
 
 - **A dictionary trigger with a subscript matches across a space.**
   `\mathbb{R} _{>0}^2` parsed to `Subscript(RealNumbers, Error)^2` and
@@ -26499,13 +26592,13 @@ corpus went from 85% to ~96%, and the one crash it exposed is fixed. See
 - **3×3 `Eigenvalues`
 
   returned wrong values — fixed.** The analytic solver used
-                            a sign-flipped term in its depressed cubic, mirroring every eigenvalue about
-                            $\operatorname{tr}/3$: e.g. $[[5,-3,-7],[-2,1,2],[2,-3,-4]]$ returned
-                            $\{\tfrac{10}{3}, -\tfrac53, \tfrac13\}$ instead of $\{1, -2, 3\}$. (Spectra
-                            symmetric about their mean — like $\{1,2,3\}$ — were unaffected, which is how
-                            it escaped notice.) Additionally, a complex-conjugate eigenvalue pair was
-                            returned as its real part twice ($\{2, \pm i\}$ came back $\{2, 0, 0\}$);
-                            complex eigenvalues are now returned as complex numbers.
+                              a sign-flipped term in its depressed cubic, mirroring every eigenvalue about
+                              $\operatorname{tr}/3$: e.g. $[[5,-3,-7],[-2,1,2],[2,-3,-4]]$ returned
+                              $\{\tfrac{10}{3}, -\tfrac53, \tfrac13\}$ instead of $\{1, -2, 3\}$. (Spectra
+                              symmetric about their mean — like $\{1,2,3\}$ — were unaffected, which is how
+                              it escaped notice.) Additionally, a complex-conjugate eigenvalue pair was
+                              returned as its real part twice ($\{2, \pm i\}$ came back $\{2, 0, 0\}$);
+                              complex eigenvalues are now returned as complex numbers.
 
 ### Rules and Pattern Matching
 

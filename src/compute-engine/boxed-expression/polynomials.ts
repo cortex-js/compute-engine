@@ -1,7 +1,7 @@
 import { checkDeadline } from '../../common/interruptible.js';
 import { BigDecimal } from '../../big-decimal/index.js';
 import type { Expression } from '../global-types.js';
-import { asSmallInteger } from './numerics.js';
+import { asExactSmallInteger } from './numerics.js';
 import { add } from './arithmetic-add.js';
 import { expand } from './expand.js';
 import { multivariateGCD } from './multivariate-gcd.js';
@@ -105,8 +105,9 @@ export function polynomialDegree(expr: Expression, variable: string): number {
       return 0;
     }
 
-    // Exponent must be a non-negative integer
-    const exp = asSmallInteger(expr.op2);
+    // Exponent must be a non-negative exact integer: a float exponent such
+    // as `2.0` is not a polynomial degree (`asExactSmallInteger`)
+    const exp = asExactSmallInteger(expr.op2);
     if (exp === null || exp < 0) return -1;
     return baseDeg * exp;
   }
@@ -199,7 +200,7 @@ export function getPolynomialCoefficients(
     if (isFunction(term, 'Power')) {
       // x^n case
       if (isSymbol(term.op1, variable)) {
-        const exp = asSmallInteger(term.op2);
+        const exp = asExactSmallInteger(term.op2);
         if (exp !== null && exp >= 0) {
           return addCoefficient(ce.One, exp);
         }
@@ -228,7 +229,7 @@ export function getPolynomialCoefficients(
           isFunction(factor, 'Power') &&
           isSymbol(factor.op1, variable)
         ) {
-          const exp = asSmallInteger(factor.op2);
+          const exp = asExactSmallInteger(factor.op2);
           if (exp !== null && exp >= 0) {
             varDeg += exp;
           } else {

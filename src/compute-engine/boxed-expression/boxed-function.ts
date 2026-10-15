@@ -1,5 +1,10 @@
 import { isScratchBinding } from '../scratch-scopes.js';
 import {
+  readSharingEagerSourceValues,
+  releaseEagerSourceValues,
+  takeEagerSourceValue,
+} from './eager-source-values.js';
+import {
   ambientChainParent,
   registerScopeActivation,
   scopeActivationTemplate,
@@ -638,10 +643,11 @@ export class BoxedFunction
    * one comparison of the definition and one of the counter.
    *
    * `written` is set for a named call through a variable with an inferred
-   * type: the name of each written argument, in written order, and the index
-   * of the operand that holds its value (-1 for an argument written with the
-   * value `Nothing`). The call is boxed again with these names, so that they
-   * are matched against the function that the variable holds now.
+   * type, and for a named call of a user function: the name of each written
+   * argument, in written order, and the index of the operand that holds its
+   * value (-1 for an argument written with the value `Nothing`). The call is
+   * boxed again with these names, so that they are matched against the
+   * function that the name holds now.
    *
    * `ops` is set when the operands of the call are not the operands as
    * boxed before the check: the check against the old definition can
@@ -3081,13 +3087,16 @@ export class BoxedFunction
       const canonical = this._canonicalToEvaluate();
       const result = canonical
         ? canonical.evaluate(options)
-        : this._isMemoizableLazyCollection(options)
+        : this._isMemoizableLazyCollection(options, true)
           ? this._memoizedLazyCollectionValue(options)
           : this._computeValue(options)();
       return options?.numericApproximation
         ? indeterminateAsNaN(result)
         : result;
     } finally {
+      // The values of eager sources that the eligibility test above
+      // evaluated are kept for this evaluation only.
+      releaseEagerSourceValues(this);
       engine._evaluationDepth -= 1;
       if (capturesEffects) engine._evaluationEffects = undefined;
     }
@@ -3209,7 +3218,8 @@ export class BoxedFunction
    * more than memoizing an infinite view.
    */
   private _isMemoizableLazyCollection(
-    options?: Partial<EvaluateOptions>
+    options?: Partial<EvaluateOptions>,
+    sharesSourceValues = false
   ): boolean {
     if ((options?.materialization ?? false) !== false) return false;
     if ((options?.numericApproximation ?? false) !== false) return false;
@@ -3217,11 +3227,17 @@ export class BoxedFunction
     const def = this.operatorDefinition;
     if (!def || def.lazy === true) return false;
     if (!this.isLazyCollection) return false;
-    if (
-      def.collection?.elementMemo === true &&
-      this.isFiniteCollection !== true
-    )
-      return false;
+    if (def.collection?.elementMemo === true) {
+      // The finiteness of a view over an eager operand (`Join(src(1), [4])`)
+      // is known only after the operand is evaluated. Called from
+      // `evaluate()`, the values that this read computes are kept for the
+      // operand step of the same evaluation, which then does not evaluate
+      // the operand again (`eager-source-values.ts`).
+      const finite = sharesSourceValues
+        ? readSharingEagerSourceValues(this, () => this.isFiniteCollection)
+        : this.isFiniteCollection;
+      if (finite !== true) return false;
+    }
     return true;
   }
 
@@ -4768,9 +4784,12 @@ export class BoxedFunction
     // still replace the callee before the handler evaluates the call
     // (`Block(Assign(h, u ↦ 7), h("a") + 1)`), so the error is not certain
     // yet (`_holdsRefusedCall()`). Run the handler, and absorb an error from
-    // its result (`_absorbsErrorAfterHandler()`). A collection keeps the
-    // error of a cell in place, as before.
-    if (this._holdsRefusedCall() && !isCollectionHead(this)) return undefined;
+    // its result (`_absorbsErrorAfterHandler()`). A collection runs its
+    // handler too, which evaluates its other cells, and keeps the error of
+    // the refused cell in place (a collection absorbs no error after its
+    // handler): with `a := 5`, `[a, h("abc")]` is `[5, Error(…)]`, not
+    // `[a, Error(…)]`.
+    if (this._holdsRefusedCall()) return undefined;
 
     if (isValueDef(def)) {
       // A value-def head is a callee only when its value is a FUNCTION — the
@@ -5524,7 +5543,11 @@ export class BoxedFunction
       const tail = holdMap(this, (x, index) =>
         exactIntegerAt !== undefined && exactIntegerAt(index)
           ? exactIntegerOperand(x, options)
-          : x.evaluate(operandOptions(options))
+          : // A value that the finiteness read of this evaluation computed
+            // for the operand (`_isMemoizableLazyCollection()`); such a read
+            // happens under a plain `evaluate()` only.
+            (takeEagerSourceValue(this, x) ??
+            x.evaluate(operandOptions(options)))
       );
 
       //
@@ -7901,8 +7924,9 @@ function withBroadcastThrowContext(
 /**
  * The matrix power for `Power(base, exponent)` when the base is a square
  * matrix value and the exponent is an integer, as an unevaluated
- * `MatrixPower` call. `undefined` when the element-wise broadcast of
- * `Power` must apply.
+ * `MatrixPower` call, or the `expected-square-matrix` error when the base
+ * is a matrix value that is not square. `undefined` when the element-wise
+ * broadcast of `Power` must apply.
  *
  * Canonicalization writes `A^n` as `MatrixPower(A, n)` when the type of `A`
  * is a matrix and `n` is an integer (`canonicalPower()` in
@@ -7920,9 +7944,10 @@ function withBroadcastThrowContext(
  *   columns,
  * - every entry of the base is a number (the base value has a `matrix`
  *   type).
- * A non-integer exponent, a matrix that is not square, a vector, a ragged
- * list and a list with entries that are not numbers keep the element-wise
- * broadcast.
+ * A non-integer exponent, a vector, a ragged list and a list with entries
+ * that are not numbers keep the element-wise broadcast. A matrix that is not
+ * square gives the `expected-square-matrix` error, as `MatrixPower` does,
+ * except under the exponent 1.
  *
  * The exponent `-1` never reaches this function when the base has no value
  * at canonicalization: `B^{-1}` canonicalizes to `Divide(1, B)`, and the
@@ -7957,8 +7982,45 @@ function squareMatrixPower(
   if (!isFunction(value, 'List')) return undefined;
   // The type of a `List` value has both extents, so the result is `true` or
   // `false` here, never `undefined`.
-  if (isSquareMatrixPower(value.type, exponent) !== true) return undefined;
-  return ce.function('MatrixPower', [value, exponent]);
+  if (isSquareMatrixPower(value.type, exponent) === true)
+    return ce.function('MatrixPower', [value, exponent]);
+  // `B^2` parsed after `B` holds a matrix that is not square is
+  // `MatrixPower(B, 2)`, which is the `expected-square-matrix` error. The
+  // same `Power` built before the assignment gives the same error.
+  if (isNonSquareMatrixPower(value.type, exponent))
+    return ce.error('expected-square-matrix', value.toString());
+  return undefined;
+}
+
+/**
+ * Whether `Power(base, exponent)` is an integer power of a matrix that is
+ * not square, decided from the type of the base and from the exponent:
+ * the base type is a matrix (its entries are numbers) of rank 2 with two
+ * known extents that are not equal, and the exponent is an integer other
+ * than the literal 1 (an integer number literal, or an expression whose type
+ * is an integer).
+ *
+ * Such a power is the `expected-square-matrix` error: canonicalization
+ * writes it as `MatrixPower(base, exponent)` when the base type is a matrix
+ * (`canonicalPower()` in `arithmetic-power.ts`), and `MatrixPower` refuses a
+ * matrix that is not square. The exponent 1 is excluded, because `A^1`
+ * canonicalizes to `A`. The evaluation of a `Power` (`squareMatrixPower()`)
+ * and its compilation (`compileExpr()` in `compilation/base-compiler.ts`)
+ * use this function, so that a `Power` built before its base holds the
+ * matrix does not compute the element-wise power instead.
+ */
+export function isNonSquareMatrixPower(
+  baseType: BoxedType,
+  exponent: Expression
+): boolean {
+  if (baseType.type === 'never' || !baseType.matches('matrix')) return false;
+  const dims = staticCollectionDims(baseType.type);
+  if (dims === null || dims.length !== 2) return false;
+  const [rows, columns] = dims;
+  if (rows < 0 || columns < 0 || rows === columns) return false;
+  if (isNumber(exponent))
+    return exponent.isInteger === true && !exponent.isSame(1);
+  return isSubtype(exponent.type.type, 'integer');
 }
 
 /**
@@ -12075,7 +12137,11 @@ function settleAbsentableLazyOperands(
  * handlers (an element read `At(t, 1)`, an eager operator such as `Sort`, a
  * call of a user function), or a symbol whose value is such an application.
  * Such an operand has a value only when it is evaluated: before that, its
- * `isFiniteCollection` and `isEnumerableCollection` are `undefined`.
+ * `isFiniteCollection` and `isEnumerableCollection` are `undefined`. A
+ * symbol whose value is a scalar (`n := 5` with `n` declared `unknown`) is
+ * also such an operand: its value is known, and it is selected so that
+ * `settleHeldEagerSources()` reports the `incompatible-type` error at
+ * evaluation, where the boxing admitted the symbol.
  *
  * A function literal is not such an operand. A held conditional (`When`,
  * `Which`, `If`) is not one either: the evaluation lifts it out of the
@@ -12091,7 +12157,14 @@ function isHeldEagerSource(x: Expression): boolean {
     );
   if (!isSymbol(x) || x.valueDefinition?.isSelfReferential) return false;
   const value = x.value;
-  return value !== undefined && isFunction(value) && isHeldEagerSource(value);
+  if (value === undefined) return false;
+  if (isFunction(value)) return isHeldEagerSource(value);
+  // A symbol whose value is a scalar (a symbol declared `unknown` and
+  // assigned `5`). The boxing admits it: a canonical form does not read the
+  // value of a symbol (`checkCollectionOperand()` in `validate.ts`). The
+  // evaluation reads the value, and a value that cannot be a collection is
+  // an `incompatible-type` error (`settleHeldEagerSources()`).
+  return !value.isCollection;
 }
 
 /**

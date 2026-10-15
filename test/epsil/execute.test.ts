@@ -1204,15 +1204,17 @@ describe('EPSIL EXECUTE — static errors inside a pipe stage', () => {
       ],
     ]);
     // The direct call is the same error: the filtered list is in the
-    // callback slot of `map`. Its message reads `unknown` because `map`
-    // holds its operands, and reads the type of the filter call before it
-    // is canonicalized.
+    // callback slot of `map`. `map` holds its operands, and the type in the
+    // message is read from the canonical form of the operand, so it is the
+    // same type as in the pipe, not `unknown`.
     expect(
       report('map(filter([1, 2], x => x > 1), "s")').map((d) => [
-        d[0].slice(0, 'expected `function`'.length),
+        d[0].slice(0, 'expected `function`, got `list<integer>`'.length),
         d[1],
       ])
-    ).toEqual([['expected `function`', 'incompatible-type']]);
+    ).toEqual([
+      ['expected `function`, got `list<integer>`', 'incompatible-type'],
+    ]);
     // A correct chain reports nothing.
     expect(report('[1, 2] |> filter(x => x > 1) |> map(x => x + 1)')).toEqual(
       []
@@ -1220,6 +1222,57 @@ describe('EPSIL EXECUTE — static errors inside a pipe stage', () => {
     expect(
       report('[1, 2, 3] |> map(x => x + 1) |> filter(x => x > 2)')
     ).toEqual([]);
+  });
+
+  test('a stage after a stage into an operator with several signatures', () => {
+    // `take` has one signature for a string and one for a collection. The
+    // pipe `[1, 2, 3] |> take(2)` has the type of the call `take([1, 2, 3],
+    // 2)`, `list<integer>`, read from the signature that the types select.
+    // When the pipe was typed `unknown`, the wrong stage below was not
+    // reported.
+    const src = '[1, 2, 3] |> take(2) |> map("s")';
+    expect(report(src)).toEqual([
+      [
+        'expected `function`, got `list<integer>` at `[1, 2, 3] |> take(2)`',
+        'incompatible-type',
+        src,
+      ],
+    ]);
+    expect(report('"abc" |> take(2) |> map(c => c)')).toEqual([]);
+  });
+
+  test('a held operand reports its own type', () => {
+    // `map` holds its operands. The list in its callback slot is reported
+    // with its type, in the direct call and in the pipe.
+    const piped = report('[2] |> map("s")');
+    expect(piped).toEqual([
+      [
+        'expected `function`, got `vector<integer^1>` at `[2]`',
+        'incompatible-type',
+        '[2]',
+      ],
+    ]);
+    expect(report('map([2], "s")')).toEqual(piped);
+    // The value of the pipe names the piped value and its type too. It used
+    // to name `["s"]` and the type `list`: the piped value went into the
+    // callback slot as the placeholder `_`, which is the identity function
+    // there, and the stage `map(x => x, "s")` was the value that was not a
+    // function.
+    expect(run('[2] |> map("s")').value.toString()).toBe(
+      'Error(ErrorCode("incompatible-type", "function", "vector<integer^1>"), [2])'
+    );
+  });
+
+  test('a stage whose written arguments do not fit any slot', () => {
+    // No slot of `fold(reducer, initial, collection)` takes the list and
+    // both written arguments. The list then takes the slot that leaves the
+    // fewest values that do not fit, the collection slot, and the error is
+    // the error of the call written directly: `5` is not a function.
+    const piped = report('let xs = [1, 2]\nxs |> fold(5, 0)');
+    expect(piped).toEqual([
+      ['expected `function`, got `5` at `5`', 'incompatible-type', '5'],
+    ]);
+    expect(report('let xs = [1, 2]\nfold(5, 0, xs)')).toEqual(piped);
   });
 
   test('valid stages report nothing', () => {
@@ -1899,5 +1952,28 @@ describe('EPSIL CHECK — `CharacterFrom` of a bad literal is a STATIC error', (
     expect(checkSource('let s = "ab"\nCharacterFrom(s)').diagnostics).toEqual(
       []
     );
+  });
+});
+
+describe('EPSIL EXECUTE — a collection that holds a refused call', () => {
+  // The call `h("abc")` is refused when it is boxed: the parameter of `h` is
+  // a `real`. The error is the value of that cell only. The other cells of
+  // the collection are evaluated.
+  const REFUSED =
+    'Error(ErrorCode("incompatible-type", "real", "string"), "abc")';
+
+  test.each([
+    ['[a, h("abc")]', `[5,${REFUSED}]`],
+    ['[a + 1, h("abc"), a]', `[6,${REFUSED},5]`],
+    ['(a, h("abc"))', `(5, ${REFUSED})`],
+    ['[a, [a, h("abc")]]', `[5,[5,${REFUSED}]]`],
+  ])('%s', (expression, expected) => {
+    const { value } = run(`let a = 5\nh(u: real) = 7\n${expression}`);
+    expect(value.toString()).toBe(expected);
+  });
+
+  test('an arithmetic operand bubbles the error', () => {
+    const { value } = run('let a = 5\nh(u: real) = 7\nh("abc") + a');
+    expect(value.toString()).toBe(REFUSED);
   });
 });

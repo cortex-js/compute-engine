@@ -168,7 +168,14 @@ function structuralShapeOfOps(ops: ReadonlyArray<Expression>): number[] | null {
  * `Expression & TensorInterface` collapses the else branch to `never`.
  */
 export function isTensorValue(x: Expression): boolean {
-  return isTensor(x);
+  if (!isTensor(x)) return false;
+  // A value with a zero extent (`[[], []]`, typed `list<never^(2x0)>`) has
+  // no cell, so the tensor kernels have nothing to pack and decline it. The
+  // consumers then take the route of a general collection: `Flatten([[],
+  // []])` is `[]`, and `Trace` and `Norm` refuse the operand with an
+  // `incompatible-type` error, as for any list that is not a tensor.
+  const shape = tensorShape(x);
+  return shape === null || !shape.includes(0);
 }
 
 /** The qualified shape of a tensor value, or `null` (see `isTensorValue`). */
@@ -192,7 +199,7 @@ export function packTensor(
   x: Expression,
   { numeric = false }: { numeric?: boolean } = {}
 ): Tensor<TensorDataType> | undefined {
-  if (!isFunction(x, 'List') || !isTensor(x)) return undefined;
+  if (!isFunction(x, 'List') || !isTensorValue(x)) return undefined;
 
   // Kernel admissibility gate (§D5 retirement, type-based): only number- or
   // boolean-celled lists may enter a packed kernel. `isTensor` guarantees a

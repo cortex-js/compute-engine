@@ -99,10 +99,12 @@ describe('Shape and Rank of a lazy collection or a set', () => {
     expect(evalString(json)).toBe(expected);
   });
 
-  test('the static type of a list of empty lists is unchanged', () => {
+  test('the static type of a list of empty lists has its zero axis', () => {
     expect(ce.box(['List']).type.toString()).toBe('list<never>');
+    // `matrix<never^(2x0)>`: the literal has no cell, so its element type is
+    // `never` (`shapedListTypeD()`, `library/collections.ts`).
     expect(ce.box(['List', ['List'], ['List']]).type.toString()).toBe(
-      'list<list<never>>'
+      'list<never^(2x0)>'
     );
   });
 });

@@ -422,6 +422,62 @@ describe('A REFUSAL AT BOXING DOES NOT READ THE VALUE OF A SYMBOL', () => {
   });
 });
 
+describe('A SYMBOL WHOSE VALUE IS NOT A COLLECTION', () => {
+  // The symbol `n` is declared `unknown` and assigned `5`. The call is
+  // canonical (the boxing does not read the value), and its evaluation reads
+  // the value: `5` is not a collection, so the value of the call is an
+  // `incompatible-type` error. After `n` is assigned a list, the same call
+  // evaluates over the list.
+  test.each([
+    [
+      ['Map', ['Function', ['Multiply', 2, 'x'], 'x'], 'n'],
+      'collection',
+      '[2,4,4]',
+    ],
+    [['Dedup', 'n'], 'collection', '[1,2]'],
+    [['Reduce', 'n', 'Add', 0], 'collection', '5'],
+    [['ArgMax', 'n'], 'indexed_collection', '2'],
+  ])('lazy: %j', async (input, expected, afterList) => {
+    const ce = new ComputeEngine();
+    ce.declare('n', 'unknown');
+    ce.assign('n', 5);
+    const e = ce.box(input as never);
+    expect(e.isCanonical).toBe(true);
+    const error = `Error(ErrorCode("incompatible-type", "${expected}", "5"), 5)`;
+    expect(e.evaluate().toString()).toBe(error);
+    expect((await e.evaluateAsync()).toString()).toBe(error);
+    ce.assign('n', ce.box(['List', 1, 2, 2]));
+    expect(e.evaluate({ materialization: true }).toString()).toBe(afterList);
+  });
+
+  // An eager operator: the type `integer` of `n` is inferred from its value,
+  // so the boxing does not refuse the call on it. The evaluation reports the
+  // error, and the call follows a later assignment.
+  test.each([
+    [['Sort', 'n'], '[1,2,2]'],
+    [['Count', 'n'], '3'],
+    [['Length', 'n'], '3'],
+  ])('eager: %j', (input, afterList) => {
+    const ce = new ComputeEngine();
+    ce.assign('n', 5);
+    const e = ce.box(input as never);
+    expect(e.isValid).toBe(true);
+    expect(e.evaluate().isValid).toBe(false);
+    ce.assign('n', ce.box(['List', 2, 1, 2]));
+    expect(e.evaluate({ materialization: true }).toString()).toBe(afterList);
+  });
+
+  test('a symbol declared with a scalar type is refused at boxing', () => {
+    const ce = new ComputeEngine();
+    ce.declare('n', 'integer');
+    ce.assign('n', 5);
+    expect(ce.box(['Sort', 'n']).isValid).toBe(false);
+    expect(
+      ce.box(['Map', ['Function', ['Multiply', 2, 'x'], 'x'], 'n']).isValid
+    ).toBe(false);
+  });
+});
+
 describe('A REFUSAL AT BOXING DOES NOT READ AN INFERRED TYPE', () => {
   // One engine for both uses: `Apply(Add(_, 1), 2)` infers the type `number`
   // for the wildcard `_`. The later `Filter(_, IsEven)` is not refused for
@@ -498,6 +554,64 @@ describe('THE ASYNCHRONOUS ROUTE INSIDE A SUM', () => {
   });
 });
 
+describe('A lazy node inside a Sum', () => {
+  // A function literal in the body of a `Sum` or a `Product` reads the index
+  // of the current iteration. An asynchronous evaluation runs the body in an
+  // activation of the local scope of the big operator (a copy with its own
+  // index), and a call of the literal must chain to that activation, not to
+  // the local scope, which holds the value that the last synchronous
+  // evaluation assigned. Each node is evaluated synchronously first, then
+  // asynchronously: the two values are the same.
+  test.each([
+    [
+      'Sum',
+      [
+        'Reduce',
+        ['Map', ['Function', ['Multiply', 'k', 'x'], 'x'], ['List', 1, 1]],
+        'Add',
+        0,
+      ],
+      '6',
+    ],
+    [
+      'Sum',
+      [
+        'Reduce',
+        ['At', 't', 'k'],
+        ['Function', ['Add', 'a', 'b', 'k'], 'a', 'b'],
+        0,
+      ],
+      '29',
+    ],
+    [
+      'Product',
+      [
+        'Reduce',
+        ['Map', ['Function', ['Multiply', 'k', 'x'], 'x'], ['List', 1, 1]],
+        'Add',
+        0,
+      ],
+      '8',
+    ],
+    [
+      'Product',
+      [
+        'Reduce',
+        ['At', 't', 'k'],
+        ['Function', ['Add', 'a', 'b', 'k'], 'a', 'b'],
+        0,
+      ],
+      '180',
+    ],
+  ])('%s of %j', async (op, body, expected) => {
+    const ce = new ComputeEngine();
+    ce.assign('t', ce.box(['List', ['List', 3, 1, 2], ['List', 4, 9, 1]]));
+    const e = ce.box([op, body, ['Element', 'k', ['Range', 1, 2]]] as never);
+    expect(json(e.evaluate())).toBe(expected);
+    expect(json(await e.evaluateAsync())).toBe(expected);
+  });
+});
+
 describe('A SLICE IN A FUNCTION BODY READS THE CURRENT ARGUMENT', () => {
   // The bounds of a `Slice` are memoized on the node. The node in the body of
   // a function is the same node for every call, so the memo must be
@@ -516,5 +630,35 @@ describe('A SLICE IN A FUNCTION BODY READS THE CURRENT ARGUMENT', () => {
     expect(e.evaluate({ materialization: true }).toString()).toBe(
       '[["4","9","1"],["9","1","4"],["1","4","2"]]'
     );
+  });
+
+  // The facts that a type handler reads (the sign of an operand, through
+  // `ExpressionOperandFacts` in `operand-descriptor.ts`) are computed for
+  // one derivation and are not kept between two calls; the sign of a node is
+  // memoized on the engine generation, which a call moves. Each call reads
+  // the value of its own argument.
+  test.each([
+    [
+      '\\mathrm{Map}(i \\mapsto \\operatorname{sgn}(i), [-1, 2, 0])',
+      '[-1,1,0]',
+    ],
+    ['\\mathrm{Map}(i \\mapsto \\sqrt{i^2}, [-2, 3])', '[2,3]'],
+    ['\\mathrm{Map}(i \\mapsto |i| + i, [-2, 3])', '[0,6]'],
+    [
+      '\\mathrm{Map}(i \\mapsto \\operatorname{sgn}(i) \\cdot i, [-1, 2, -3])',
+      '[1,2,3]',
+    ],
+  ])('a sign read in the body: %s', (latex, expected) => {
+    const ce = new ComputeEngine();
+    expect(ce.parse(latex).evaluate({ materialization: true }).toString()).toBe(
+      expected
+    );
+  });
+
+  test('a sign read in the body of a function called twice', () => {
+    const ce = new ComputeEngine();
+    ce.assign('h', ce.parse('i \\mapsto \\operatorname{sgn}(i) \\cdot i'));
+    expect(ce.parse('h(-2)').evaluate().toString()).toBe('2');
+    expect(ce.parse('h(3)').evaluate().toString()).toBe('3');
   });
 });

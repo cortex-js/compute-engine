@@ -219,6 +219,44 @@ describe('EPSIL MAPSTO-ARROW DIAGNOSTIC — a rule at a function parameter', () 
     ).toEqual([['static-type-error', 'callback-arity', 'a => a']]);
   });
 
+  test('a direct call that canonicalization renames and reorders', () => {
+    // `fold(f, init, xs)` canonicalizes to `Reduce(xs, f, init)`, and the raw
+    // statement has no call named `Reduce`. The canonical call is mapped back
+    // to the written call, as on the pipe route: the error that the wrong
+    // arrow causes is hidden, and a real error is underlined on the argument
+    // at fault, not on the whole statement.
+    const { diagnostics } = run('let xs = [1, 2]\nfold(x -> x, 0, xs)');
+    expect(diagnostics.map((d) => d.message)).toEqual([
+      ['mapsto-arrow-expected', 'fold', '1'],
+    ]);
+
+    for (const src of [
+      'let xs = [1, 2]\nfold(a => a, "0", xs)',
+      'fold(a => a, "0", [1, 2])',
+    ]) {
+      const real = run(src).diagnostics;
+      expect(
+        real.map((d) => [
+          d.message[0],
+          d.message[3],
+          src.slice(d.range[0], d.range[1]),
+        ])
+      ).toEqual([['static-type-error', 'callback-arity', 'a => a']]);
+    }
+  });
+
+  test('a call made by canonicalization is not mapped to an unrelated call', () => {
+    // `sqrt(y) - "a"` canonicalizes to `Add(Sqrt(y), Negate(Error(…)))`. The
+    // raw statement has no `Negate`, and the only operand of the canonical
+    // `Negate` is the error, so no operand of `Sqrt(y)` matches it. The
+    // error is not put on `y`: the anchor stays on the whole statement.
+    const src = 'sqrt(y) - "a"';
+    const { diagnostics } = run(src);
+    expect(
+      diagnostics.map((d) => [d.message[3], src.slice(d.range[0], d.range[1])])
+    ).toEqual([['incompatible-type', src]]);
+  });
+
   test('a hidden error does not hide a different error with the same description', () => {
     // Both rules give the error "a key must be a string". The one of `map`
     // is hidden, because it is reported as a rule at a function slot. The

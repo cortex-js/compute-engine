@@ -12,6 +12,7 @@ import {
   snapshotMemoDeps,
 } from '../boxed-expression/collection-element-memo.js';
 import type { MemoDeps } from '../boxed-expression/collection-element-memo.js';
+import { noteEagerSourceValue } from '../boxed-expression/eager-source-values.js';
 import {
   checkArity,
   checkType,
@@ -1567,8 +1568,21 @@ function canonicalCallbackOperand(
   // operators' `validateArguments` verdict byte for byte — including the SITE
   // operand (the faulted operand itself) `validateArguments` attaches via
   // `ce.typeError`.
+  //
+  // A lazy operator holds its operands, so a raw operand reads `unknown`,
+  // and `map([2], "s")` reported "got `unknown`" while the same operand in a
+  // pipe, where it is already canonical, reported its real type. The type
+  // in the message is therefore read from the canonical form of the
+  // operand. That is value-safe: canonicalization binds the structure and
+  // does not substitute assigned values. The site stays the operand as
+  // written. A symbol, whose canonicalization would declare it, never gets
+  // here without a type of its own (see the symbol branch below).
   const reject = (actual?: Type) =>
-    op.engine.typeError('function', actual ?? op.type.type, op);
+    op.engine.typeError(
+      'function',
+      actual ?? (op.isCanonical ? op.type.type : op.canonical.type.type),
+      op
+    );
   // A STRING is `canonicalFunctionLiteral`'s own step-0 exclusion, declined
   // there for this very reason — reported here instead of leaving the
   // application silently inert.
@@ -1600,6 +1614,23 @@ function canonicalCallbackOperand(
   // `["Function", body, ...params]`: a lift with no parameter is a constant.
   if (isFunction(fn, 'Function') && fn.nops < 2) return reject();
   return accept(fn);
+}
+
+/**
+ * True when the raw operand `op` has the shape of a callback: a function
+ * literal, an expression typed as a function, or a symbol (not a wildcard)
+ * that the current scope defines as an operator or as a value of a function
+ * type. The operand is not canonicalized, so an undeclared symbol is not
+ * declared. A raw symbol reads the type `unknown` (on the parse route a bare
+ * `Sin` is such a symbol), so the definition is read by name.
+ */
+function isCallbackShaped(op: Expression): boolean {
+  if (isFunction(op, 'Function') || op.type.matches('function')) return true;
+  if (!isSymbol(op) || isWildcard(op)) return false;
+  const def = op.engine.lookupDefinition(op.symbol);
+  if (def === undefined) return false;
+  if (isOperatorDef(def)) return true;
+  return isValueDef(def) && def.value.type.matches('function');
 }
 
 /**
@@ -1799,6 +1830,9 @@ function mapSource(xs: Expression): Expression {
   // puts `Map` on the same symbolic-residual behavior as `Filter`.
   if (xs.valueDefinition?.isSelfReferential) return xs;
   const evaluated = xs.evaluate();
+  // A finiteness read during a plain `evaluate()` of a view keeps the value
+  // for the operand step of that evaluation (`eager-source-values.ts`).
+  noteEagerSourceValue(xs, evaluated);
   return evaluated.isCollection ? evaluated : xs;
 }
 
@@ -3686,7 +3720,9 @@ type LevelShape = { dims: number[]; cells: Type[] };
 /**
  * Analyze one level of a literal-`List` structure whose elements are
  * `ops`: `null` when this level (or anything nested under it) blocks a
- * shape claim, otherwise its dimensions and distinct cell types.
+ * shape claim, otherwise its dimensions and distinct cell types. An empty
+ * level has the dimension 0 and no cell: `[[], []]` has the dimensions
+ * `[2, 0]`.
  *
  * `memo` holds the analysis of every nested list already visited, by
  * descriptor. A structure walk describes a shared node ONCE (the descriptor
@@ -3704,7 +3740,7 @@ function analyzeLevelD(
   ops: ReadonlyArray<OperandDescriptor>,
   memo: Map<OperandDescriptor, LevelShape | null>
 ): LevelShape | null {
-  if (ops.length === 0) return null;
+  if (ops.length === 0) return { dims: [0], cells: [] };
 
   const childShapes: LevelShape[] = [];
   const cellTypes: Type[] = [];
@@ -3779,9 +3815,16 @@ function literalElementType(types: ReadonlyArray<Type>): Readonly<Type> {
  *
  * A shape claim requires: no blocked element (`classifyCellD`); no level
  * mixing cells and nested lists; for rank ≥ 2 every child a literal `List`
- * with identical dimensions (cell types need not match row to row); no
- * empty level (a zero-length axis is never claimed); and a union-free
- * widened cell type.
+ * with identical dimensions (cell types need not match row to row); and a
+ * union-free widened cell type.
+ *
+ * A literal whose levels are all empty below the first has no cell, and its
+ * element type is `never`: `[[], []]` is `list<never^(2x0)>` (the matrix type
+ * `matrix<never^(2x0)>`). Since `never` is a subtype of every type, that is a
+ * subtype of `matrix<integer^(2x0)>`, and the literal can be assigned to a
+ * symbol declared with that type. The empty literal `[]` claims no shape and
+ * stays `list<never>`, which is already a subtype of `list<T^0>` for every
+ * `T`.
  *
  * The element type is the widened cell type reported honestly (`integer`,
  * `real`, `color`, `tuple<…>`, …), never lifted to `number`: the broadcast
@@ -3800,7 +3843,10 @@ function shapedListTypeD(ops: ReadonlyArray<OperandDescriptor>): Type | null {
   if (analysis === null) return null;
 
   const { dims, cells } = analysis;
-  if (cells.length === 0) return null;
+  if (cells.length === 0)
+    return dims.length < 2
+      ? null
+      : internType({ kind: 'list', elements: 'never', dimensions: dims });
 
   const widened = widenElementTypes(cells);
 
@@ -8411,12 +8457,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         collections.some((c) => !c.isValid)
       ) {
         // Diagnose the former callback-last spelling: a call written with a
-        // provable collection first and a function-shaped operand
-        // last would otherwise just decline here and sit as an inert
-        // symbolic `Map`. Surface the callback-slot type error instead, so
-        // the misorder is loud and names the offending operand. The operands
-        // arrive raw (every type reads `unknown`), so the first is
-        // canonicalized to read its type. An undeclared bare symbol is not
+        // first operand that cannot be a function (a provable collection, or
+        // any other value whose type is disjoint from `function`, such as
+        // `5` or the call `f(1)` of a function that returns an integer) and a
+        // callback-shaped operand last would otherwise just decline here and
+        // sit as an inert symbolic `Map`. Surface the callback-slot type error
+        // instead, so the misorder is loud and names the offending operand.
+        // The operands arrive raw (every type reads `unknown`), so the first
+        // is canonicalized to read its type. An undeclared bare symbol is not
         // canonicalized: that would declare it as a side effect, and its
         // callback slot defers to a later definition by design. A symbol
         // that is already declared has no such side effect, and when its
@@ -8432,8 +8480,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
             : undefined;
         if (
           first !== undefined &&
-          first.type.matches('collection<any>') &&
-          (isFunction(last, 'Function') || last.type.matches('function'))
+          (first.type.matches('collection<any>') ||
+            provablyDisjoint(first.type.type, 'function')) &&
+          isCallbackShaped(last)
         )
           return engine._fn('Map', [
             engine.typeError('function', first.type, first),

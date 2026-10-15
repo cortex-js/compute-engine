@@ -248,6 +248,7 @@ import {
   SIGNED_INFINITY_TYPE,
 } from '../../common/type/primitive.js';
 import type {
+  AlgebraicType,
   ListType,
   NamedElement,
   TupleType,
@@ -7391,6 +7392,64 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             shape === undefined ? undefined : mapProductCells(shape, cellOf);
           if (product !== undefined)
             return BoxedType.forResult(product, engine._typeResolver);
+        }
+        // A factor that may be a point or something else (a union with a
+        // tuple arm and other arms) beside another factor that may be a
+        // point: the product is typed for each arm of that factor, and the
+        // result is the union of the arm results. The coordinate read
+        // `PointX(V)` of a parameter typed `tuple<…> | list<tuple<…>>` is
+        // `list<number> | missing | number | tuple<number, number>`, and
+        // `(cos a, sin a)·PointX(V)` is a point when the coordinate is a
+        // number, a list of points when it is a list, and `Missing` when it
+        // is absent. The branches below read such a factor as a second
+        // point, and the product was typed `number`. A tuple arm beside a
+        // factor that is a tuple has no value (the product of two points is
+        // an error), and is left out.
+        {
+          const mayBePoint = ops.filter((x) => typeCouldBeNumericTuple(x.type));
+          const isTupleType = (t: Type): boolean => {
+            const r = resolveTypeAlias(t);
+            return (
+              r === 'tuple' || (typeof r === 'object' && r.kind === 'tuple')
+            );
+          };
+          const i = ops.findIndex((x) => {
+            const t = resolveTypeAlias(x.type);
+            return (
+              mayBePoint.length > 1 &&
+              mayBePoint.includes(x) &&
+              typeof t === 'object' &&
+              t.kind === 'union' &&
+              t.types.some((arm) => !typeCouldBeNumericTuple(arm))
+            );
+          });
+          if (i >= 0) {
+            const arms = (resolveTypeAlias(ops[i].type) as AlgebraicType).types;
+            const results: Type[] = [];
+            for (const arm of arms) {
+              if (
+                isTupleType(arm) &&
+                mayBePoint.some((x) => x !== ops[i] && isTupleType(x.type))
+              )
+                continue;
+              const t = derive(
+                'Multiply',
+                ops.map((x, j) =>
+                  j === i ? describeType(arm, x.facts.closed) : x
+                )
+              );
+              if (t === undefined) {
+                results.length = 0;
+                break;
+              }
+              if (t !== 'error' && t !== 'never') results.push(t);
+            }
+            if (results.length > 0)
+              return BoxedType.forResult(
+                reduceType({ kind: 'union', types: results }),
+                engine._typeResolver
+              );
+          }
         }
         // A dimensionless list/indexed-collection factor together with a
         // numeric-tuple (point) factor broadcasts the collection while scaling

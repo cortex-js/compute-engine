@@ -128,182 +128,79 @@ interpreter's body route normalizes to `NaN` as the top level does (tried
 `Missing`, `absent-point-arithmetic.test.ts`). A plot consumer drops a `NaN`
 point and a hole alike, so no consumer reading is known to differ.
 
-### An argument declared as a bare `tuple` keeps a scalar result type (OPEN, small — found 2026-10-15 by the all-absent tuple typing)
+### `evaluateAsync()` of `Join` over an eager operand evaluates the operand twice (OPEN, small — found 2026-10-15 by the one-shot store of eager operand values)
 
-With `f(x) := (-x, x)` and `w` declared `tuple` (no component types), `f(w)` is
-typed `tuple<number, number>`, which the pair of pairs it evaluates to does not
-fit. The numeric-tuple predicates (`isNumericTupleType`, `mayBeNumericTupleType`
-in `derive-application-type.ts`) accept no tuple without components; a bare
-`tuple` at a scalar parameter should give `any`, as a numeric tuple does.
+A plain `evaluate()` of `Join(src(1), [4])` or `Append(src(1), 4)` calls `src`
+once since 2026-10-15: the finiteness read records the operand value in a
+one-shot store (`boxed-expression/eager-source-values.ts`) that the operand step
+reads. The async route has no such store, so `evaluateAsync()` still calls `src`
+twice. The store needs an async twin, cleared in the `finally` of
+`evaluateAsync()`.
 
-### A point-valued body is inferred `number` (OPEN, small — found 2026-10-15 by the declared-result check)
+### Two evaluation-time errors of a collection operator lack their `ErrorTrace` frame (OPEN, small — found 2026-10-15 by the admission of a symbol whose value is not a collection)
 
-In `test/compute-engine/compile-point-complex-coordinate.test.ts`, the body of
-`r`, `(cos a, sin a)·PointX(V) + …`, is a point, but the inference types it
-`number`; only the declared result `-> tuple<…>` gives the call its type. The
-scalar times a tuple keeps the tuple shape at evaluation, so the inference of
-`Multiply` and `Add` over a tuple operand is wrong here (the `Multiply`
-descriptor route is also the subject of the entry on the tuple component types
-times a real).
+With `n` declared `unknown` and holding `5`, `Count(n)` and `Length(n)` evaluate
+to the `incompatible-type` error without an `ErrorTrace` frame, while `Sort(n)`
+carries one. The same was true before for a valueless `unknown` symbol assigned
+later. Related question: `Reverse(n)` evaluates to `Reverse(Error(…))`, not to
+the error, by the rule that a collection head keeps a failed cell in place;
+whether the OPERAND of a lazy view counts as a cell is not written down.
 
-### A `Delimiter` with no separator glues its number operands (OPEN, small — found 2026-10-15 by the change that writes a bracket group with parentheses)
+### `Solve` and the general power rule make a float root exact (OPEN, small — found 2026-10-15 by the change that keeps a float exponent out of the polynomial degree)
 
-`["Delimiter", ["Sequence", 1, 2, 3], "')['"]` names two fences and no
-separator. The writer puts nothing between the operands (`serializeOps('')` in
-`latex-syntax/dictionary/definitions-core.ts`), so the group is written
-`)123\lbrack`, which reads back as the number `123` between stray fences, pinned
-in `test/compute-engine/latex-syntax/sequences.test.ts`. The square-bracket case
-`"[]"` is written `(1,2,3)` since the group is written through the `Tuple` rule.
-The `Sequence` serializer puts a comma between two digits; the delimiter writer
-needs the same guard, or a space, between two operands that would otherwise
-touch. Which separator to write is the open question.
+`ce.function('Divide', [ce.One, 2.0])` gives the exact `1/2`, while
+`ce.box(['Divide', 1, {num: '2.0'}])` gives `0.5`: `canonicalDivide`
+(`boxed-expression/arithmetic-mul-div.ts`) folds a float divisor to a rational
+on the function route. So the general power rule gives `x^{2.0} - 2 = 0` the
+exact roots `±√2`, and `x^{2.0} - 4 = 0` the exact `±2`, where a float exponent
+must give float roots. Until the fold is fixed, `Solve` leaves an equation whose
+float exponent has an integer value unsolved (`x^{2.0} = 4`, `x^{3.0} - 8 = 0`);
+`x^{2.5} = 4` keeps its float root. After the fix, `x^{2.0} = 4` should give the
+float root `2.0`.
 
-### A float exponent is read as an integer degree by the polynomial operations (OPEN, decision — found 2026-10-15 by the change that keeps a float exponent in products and in `simplify()`)
+### A matrix power with a float exponent is read as an integer power (OPEN, decision — found 2026-10-15 by the change that keeps a float exponent out of the polynomial degree)
 
-`x^{2.0}/x` simplifies to the exact `x`: the step "cancel common polynomial
-factors" reads the float `2.0` as the integer degree `2`, while `x^{2.5}/x`
-gives `x^{1.5}`. The same reading is in every polynomial operation (degree,
-factor, solve, the polynomial division). The options: a float exponent is not a
-polynomial degree (the expression is then not a polynomial in `x`, and the
-cancellation keeps `x^{2.0}/x` as `x^{1.0}`), or the degree is read from the
-float and the result keeps a float exponent (`x^{1.0}`). If nothing is decided,
-the exact `x` stays.
+`B^{2.0}` over a square matrix value is still the matrix power:
+`isSquareMatrixPower` and `squareMatrixPower`
+(`boxed-expression/boxed-function.ts`) test `exponent.isInteger`, which is true
+for the float `2.0`. The decision of 2026-10-15 says a float exponent is not an
+integer for the polynomial operations; whether the same holds for a matrix power
+(`B^{2.0}` is then the element-wise power of the entries, as `B^{2.5}` is) is a
+separate question. If nothing is decided, the matrix power stays.
 
-### `simplify()` let a recursion-limit error escape once under load (OPEN, small — seen 2026-10-15)
+### The product of a point and a scalar-or-list value is typed without the single-point arm (OPEN, small — found 2026-10-15 by the point-valued body typing)
 
-In `test/compute-engine/simplify.test.ts`, the test "an evaluation that throws
-declines the fold instead of failing simplify()" failed once with
-`CancellationError: Recursion limit exceeded` on a box at load 100+, and passed
-on three reruns, alone and with its file. `simplify()` must catch that error and
-decline the fold; one escape means a route where the catch is missing or where
-the limit is reached outside the guarded call.
+`(cos a, sin a)·u` with `u: number | list<number>` is typed `list<tuple<…>>`
+alone: the arm for `u` a number (a single point) is missing. The collection
+branch of the `Multiply` type handler (`library/arithmetic.ts`) reads the list
+arm first; the new arm-by-arm typing covers a union factor with a tuple arm, not
+a union of a scalar and a list.
 
-### A free symbol read by index keeps one element type for every index (OPEN, decision — found 2026-10-15 by the per-index narrowing of a function parameter)
+### A free symbol at any inferred tuple slot learns one element type (OPEN, small — found 2026-10-15 by the per-index narrowing)
 
-Since 2026-10-15 an index read of a bare function PARAMETER narrows per index:
-while every read uses a literal index, the parameter is a tuple with one
-component per read index (`p => !p[1] if p[2] % 2 == 0 else p[1]` types `p` as
-`tuple<boolean, real>`), and a non-literal index makes it an indexed collection
-whose element type is the union of the read requirements
-(`parameterIndexReadType()` in `library/collections.ts`). A valueless FREE
-symbol keeps the older rule that one numeric index read decides the element type
-of every element (`docs/INFERENCE_ROADMAP.md` §5, ruling R1-A): at the top
-level, `And(b[1], B)` followed by `b[2] + 1` is still refused, pinned in
-`test/compute-engine/use-driven-element-inference.test.ts`; `First`, `Second`,
-`Third` and `Last` keep that rule too. The question: does the per-index rule
-also apply to a free symbol? It would type `xs[1] + 1` at the top level as
-`tuple<number>` instead of `indexed_collection<number>` and change many pins. A
-limit of the parameter rule that is independent of this question: the union
-depends on the order of the reads, because a use is checked against the type
-made by the earlier reads before its own read is recorded (`!p[1]` then
-`p[k] + 1` is refused, and so is the reverse); the fix is a validation that
-infers before it checks. If nothing is decided, the free-symbol rule stays.
+A free symbol passed to a bare parameter whose inferred type is a tuple learns
+`indexed_collection<union of the components>` (decision of 2026-10-15 for a
+tuple that came from index reads). The slot type does not record where it came
+from, so the rule also applies to a tuple inferred from a call: with
+`h := p ↦ g(p)` and `g: (tuple<number, number>) -> number`, `h(zs)` types `zs`
+as `indexed_collection<number>`, where it was `tuple<number, number>`. Recording
+the origin of the inferred tuple on the slot would keep the call-derived tuple.
 
-### An empty-celled literal has no shape in its type (OPEN, decision — found 2026-10-15 by the change that keeps a zero-length axis in a list type)
+### The parameter names of a redefined function stay those of the first annotated literal (OPEN, decision — found 2026-10-15 by the re-read of a named call after a redefinition)
 
-`[[], []]` is typed `list<list<never>>`: `shapedListTypeD` (the typing of a
-list literal) makes no shape claim when the cells are empty, pinned in
-`test/compute-engine/list-shape-typing.test.ts` ("[[],[]] → no shape
-claim"). Since 2026-10-15 a zero-length axis is kept in a list type
-(`list<integer^(2x0)>` is `matrix<integer^(2x0)>`), and the empty literal
-`[]` is a value of a list type whose first axis has length 0, but
-`[[], []]` does not match `matrix<integer^(2x0)>` and cannot be assigned to a
-symbol declared with that type. The question: should `[[], []]` be typed
-`matrix<never^(2x0)>`? If nothing is decided, the type stays `list<list<never>>`.
-
-### A plain `evaluate()` of `Join` over an eager operand evaluates the operand twice (OPEN, small — found 2026-10-15 by the printing contract of an unevaluated view)
-
-`Join(src(1), [4]).evaluate()` calls `src` twice: `_isMemoizableLazyCollection`
-(`boxed-expression/boxed-function.ts`) reads `isFiniteCollection` of the view,
-and that read evaluates the eager operand through `eagerViewSource`
-(`library/collections.ts`) before the operand evaluation step evaluates it
-again. Reading the finiteness from the operand's static `list` type instead
-would report a symbolic `Sort(xs)` as finite, and a consumer such as `Sum` could
-walk it as empty, so the fix must keep the value read and share it with the
-operand step.
-
-### A lazy collection call with its operands in the wrong order stays as written (OPEN, small — found 2026-10-15 by the refusal of a non-collection source at boxing)
-
-`Map(5, x => x)` and `Map(f(1), x => x)` (the collection and the callback
-swapped) are kept as written: the misorder check in the handler of `Map` reports
-the order only when the first operand is a provable collection, and on the parse
-route a bare callback such as `Sin` has the type `unknown`. A fix reads a
-callback-shaped LAST operand too; it touches two pins in
-`test/compute-engine/operator-symbol-value-serialization.test.ts`.
-
-### Two memos are checked against the world version only (OPEN, small — found 2026-10-15 by the `Slice` bounds fault)
-
-The memo of `Slice` bounds reused the bounds of the first call for every later
-call of a function, because the world version does not change when a parameter
-takes a new value; it now records the node's dependencies as `_memoizedFacet`
-does. Two other memos check only the world version: `operand-descriptor.ts`
-(about line 745) and `sequence.ts` (about line 1137). No fault was reproduced in
-them; each needs a probe with a function parameter that changes between calls,
-and the dependency record if the probe fails.
-
-### The async route of `Sum` reads the last value of the index inside a lazy body (OPEN, medium — found 2026-10-15 by the review of the eager-source rule)
-
-`Sum(Reduce(Map(x ↦ k·x, [1, 1]), Add, 0), k ∈ 1..2)` evaluates to `6`
-synchronously and to `8` with `evaluateAsync()`; with `t` holding two lists,
-`Sum(Reduce(At(t, k), (a, b) ↦ a + b + k, 0), …)` gives 29 against 32. The async
-route evaluates the lazy `Map` body after the index has moved on, so the
-callback reads the last value of `k`. The source is a literal list, so the fault
-is in the async binder scoping of a lazy view, not in the eager-source rule.
-Pins to write in `test/compute-engine/lazy-operator-eager-source.test.ts` ("A
-lazy node inside a Sum") once fixed; today those tests only compare the sync
-value.
-
-### A symbol declared `unknown` whose value is not a collection keeps a lazy call unevaluated (OPEN, small — found 2026-10-15 by the refusal of a non-collection source at boxing)
-
-With `n` declared `unknown` and assigned `5`, `Map(f, n).evaluate()` returns
-`Map((x) => 2x, n)` with no error: the lazy canonical handler refuses on the
-VALUE (`checkCollectionOperand`, `boxed-expression/validate.ts`), the node stays
-non-canonical, and the evaluation rule for an eager source never runs on it.
-Reporting the `incompatible-type` error at evaluation needs the lazy handlers to
-admit such a symbol and check the value when the node is evaluated;
-`checkCollectionOperand` also guards `Any(5)` → `False`, so that guard must move
-with it. The eager operators have the mirror fault: `Sort(n)` with an
-inferred-integer `n` is refused at boxing and keeps the error after `n` is
-reassigned to a list, a canonical form that depends on the value of a symbol.
-
-### A pipe into an operator with several signatures is typed `unknown` (OPEN, small — found 2026-10-15 by the `Pipe` type handler)
-
-`[1, 2, 3] |> take(2)` is typed `unknown`, while `take([1, 2, 3], 2)` is typed
-from the matching signature. The `Pipe` type handler (`library/core.ts`,
-`pipeImplicitTopicCallType`) places the piped value and types the completed call
-with `context.derive`, and `derive` cannot choose between the signatures of an
-operator that has several of them and no type handler: overload resolution
-exists only for boxed expressions (`resolveOverload`,
-`boxed-expression/overload.ts`), not for a call described by types. A type-only
-resolution in `derive-application-type.ts` closes the gap; a stage after such a
-pipe then also gets its static diagnostic.
-
-### A static error in a call that canonicalization renames is anchored on the whole statement (OPEN, small — found 2026-10-15 by the pipe-stage frame fix)
-
-`fold(a => a, "0", xs)` canonicalizes to `Reduce(xs, (a) => a, "0")`. The static
-checker builds the error's frame from the canonical call, and the locator
-(`locateError`, `src/epsil/static-diagnostics.ts`) matches by operator name in
-the raw statement, where the name is `fold`, so the `callback-arity` error
-underlines the whole call instead of `a => a`, and `fold(x -> x, 0, xs)` reports
-the `callback-arity` error on the whole statement in addition to the
-`mapsto-arrow-expected` diagnostic. The pipe route maps each canonical operand
-back to its written position (`writtenPositions()`), so
-`xs |> fold(a => a, "0")` underlines `a => a`; the direct route needs the same
-map from a canonical call back to the raw call. Also, `xs |> fold(5, 0)` gets no
-static error although `fold(5, 0, xs)` reports "expected `function`": the piped
-value takes slot 0 and the written `5` lands in the function slot without a
-check.
-
-### A held operand reads as `unknown` in the type error of `Map` (OPEN, small — found 2026-10-15 by the pipe-stage static diagnostics)
-
-`map([2], "s")` and `map(filter([1, 2], x => x > 1), "s")` report "expected
-`function`, got `unknown`": `Map` holds its operands and reads the type of the
-function argument before it is canonicalized. The piped spelling
-`[2] |> map("s")` reports the real type (`list<integer>`), so the two spellings
-share only the error code and the expected type. The run-time value of the piped
-spelling is also imprecise:
-`["Error", ["ErrorCode", "incompatible-type", "function", "list"], "[\"s\"]"]`
-names the site `["s"]` and the type `list`, not the piped value and its type.
+With `h := (x: real, factor: real) ↦ x - factor` and then
+`h := (factor: real, x: real) ↦ x - factor`, the engine keeps the names of the
+FIRST literal and runs the new literal by position: `h(factor: 5, x: 3)` gives
+`2`, because the old names put `3` in the first slot, which is `factor` in the
+new literal; a call written after the redefinition gives the same. The pin
+"reassignment: the FIRST pinned signature owns the names" in
+`test/epsil/execute.test.ts` records the rule: with `f := (x, y)` then
+`f := (a, b)`, the call `f(a: 2, b: 5)` is `argument-name-unknown`. The
+question: should the names follow the latest literal? Yes: about 30 lines in
+`engine-declarations.ts` take the new literal's names, and that pin changes
+(`f(a: 2, b: 5)` then works, `f(x: 2, y: 5)` is the error). No: a named call can
+put a value into a parameter other than the one its name says, with no warning.
+If nothing is decided, the first literal's names stay.
 
 ### `.N()` of a `1/(x·ln x)` divergence at a nonzero bound or at infinity gives a finite value (OPEN, small — found 2026-10-14 by the power-law divergence test)
 
@@ -1344,26 +1241,6 @@ The options:
 
 If nothing is decided, option 3 applies.
 
-### A named call of a user function redefined with other parameter names is re-read without its names (OPEN, small — found 2026-10-15 by the change that re-checks a call after its function is reassigned)
-
-A call of a user function is checked again when its type is read or when it is
-evaluated after the function's definition changed (`_calleeStamp` in
-`boxed-expression/boxed-function.ts`). For a call through a VARIABLE with an
-inferred function type, the written argument names are kept with the stamp, and
-the re-read matches them against the function the variable holds now. For a call
-of an OPERATOR definition (`h := (x, factor) ↦ …`, then `h := (factor, x) ↦ …`),
-the stamp keeps no names, so the re-read uses the positional operands of the
-first match. Keep the written names on that route too.
-
-### A collection that holds a call refused at boxing does not evaluate its other elements (OPEN, small — found 2026-10-15 by the change that re-checks a call after its function is reassigned)
-
-With `a := 5` and `h` a function that refuses `"abc"`, the Epsil list
-`[a, h("abc")]` evaluates to `[a, Error(…)]`: the first element stays the symbol
-`a`. The rule "a collection keeps the refused call in its cell" (pinned) makes
-the whole list invalid at boxing, and an invalid list does not evaluate its
-elements. The other elements should evaluate; only the refused cell is the
-error.
-
 ### A compiled loop that assigns `xs = ReplaceAt(xs, i, v)` copies the whole list at each assignment (OPEN, small — issue #386, 2026-10-01)
 
 A compiled `Fold` whose step only updates its accumulator now updates a copy of
@@ -1420,23 +1297,17 @@ were not checked against a regrouped tree. Fix: find the step that regroups
 the line checks on the final raw tree with the `onAmbiguity` span map kept
 valid, or prove that no other checked shape is regrouped.
 
-### A non-square matrix under `B^2` built before the assignment is squared cell by cell (OPEN, small — found 2026-10-15 by the change that reads an integer power of a square matrix value as a matrix power)
+### An untyped `B^2` compiles to scalar code, and `B^{-1}` built before the assignment is the matrix of the reciprocals (recorded — both by decision or by typing, 2026-10-15)
 
-`const e = ce.parse('B^2'); ce.assign('B', [[1,2,3],[4,5,6]]); e.evaluate()`
-gives the cells squared, while `B^2` parsed after the assignment is the
-`expected-square-matrix` error: the value route (`squareMatrixPower()`,
-`boxed-expression/boxed-function.ts`) answers "not a matrix power" for a
-non-square value and falls back to the element-wise broadcast, where the
-canonicalization route refuses. The two routes should agree; the error is the
-documented answer. Also, an untyped `B^2` compiles on the JavaScript target to
-the scalar code `(_.B * _.B)`, which returns `null` for a matrix input, because
-the compiler types `B` as a number; a declared `B: matrix` compiles to the
-matrix power. Not a defect, recorded here because the same comparison of the two
-routes finds it: `B^{-1}` built before `B` holds a matrix is the matrix of the
-reciprocals, since `x^{-1}` canonicalizes to `Divide(1, x)` when `x` has no
-value and the division of a number by a matrix is element-wise, while `B^{-1}`
-parsed after the assignment is `Inverse(B)`. The user decided 2026-10-15 to keep
-the rewrite (see the comment on `squareMatrixPower()`).
+An untyped `B^2` compiles on the JavaScript target to the scalar code
+`(_.B * _.B)`, which returns `null` for a matrix input, because the compiler
+types `B` as a number; a declared `B: matrix` compiles to the matrix power. Not
+a defect, recorded here because the same comparison of the two routes finds it:
+`B^{-1}` built before `B` holds a matrix is the matrix of the reciprocals, since
+`x^{-1}` canonicalizes to `Divide(1, x)` when `x` has no value and the division
+of a number by a matrix is element-wise, while `B^{-1}` parsed after the
+assignment is `Inverse(B)`. The user decided 2026-10-15 to keep the rewrite (see
+the comment on `squareMatrixPower()`).
 
 ### A nested list spelling is not a subtype of a list type with no dimensions (OPEN, small — found 2026-10-01 by the fix that reads a nested spelling as its flat shape)
 

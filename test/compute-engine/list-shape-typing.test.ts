@@ -167,10 +167,17 @@ describe('Phase A — degenerate lists keep prior (no-claim) behavior', () => {
     expect(boxed.type.toString()).toBe('list<integer | vector<integer^1>>');
   });
 
-  test('[[],[]] empty inner levels → no shape claim', () => {
+  test('[[],[]] empty inner levels → a shape with a zero axis', () => {
+    // The literal has no cell, so its element type is `never`, a subtype of
+    // every element type: the type is `matrix<never^(2x0)>`.
     const boxed = ce.box(['List', ['List'], ['List']]);
-    expect(boxed.type.matches('matrix<2x0>')).toBe(false);
-    expect(boxed.type.toString()).toBe('list<list<never>>');
+    expect(boxed.type.matches('matrix<2x0>')).toBe(true);
+    expect(boxed.type.matches('matrix<integer^(2x0)>')).toBe(true);
+    expect(boxed.type.toString()).toBe('list<never^(2x0)>');
+    // A ragged literal with an empty row claims no shape.
+    expect(ce.box(['List', ['List'], ['List', 1]]).type.toString()).toBe(
+      'list<list<never> | vector<integer^1>>'
+    );
   });
 });
 

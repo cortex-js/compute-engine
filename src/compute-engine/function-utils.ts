@@ -54,6 +54,7 @@ import {
   resolveFunctionLiteralTypes,
 } from './boxed-expression/function-literal.js';
 import { collectTuplePattern } from './boxed-expression/tuple-pattern.js';
+import { liveScopeOf } from './boxed-expression/ambient-chain.js';
 import { errorValue, withErrorFrames } from './boxed-expression/error-value.js';
 import { canonicalFailureOf } from './boxed-expression/canonical-failure.js';
 import {
@@ -3326,9 +3327,14 @@ function exitAppliedBodyScope(bodyScope: Scope): void {
  * lazy argument that reads a local of the caller by name resolved it in the
  * frame of the callee.
  */
-function definingScopeOf(bodyScope: Scope): Scope | null {
+function definingScopeOf(ce: ComputeEngine, bodyScope: Scope): Scope | null {
   const entry = appliedBodyScopes.get(bodyScope);
-  return entry !== undefined ? entry.definingScope : bodyScope.parent;
+  const scope = entry !== undefined ? entry.definingScope : bodyScope.parent;
+  // When the defining scope is the local scope of a scoped node that an
+  // asynchronous evaluation is running, the frame chains to the activation
+  // of that scope, which holds the values of the current iteration
+  // (`liveScopeOf`).
+  return scope ? liveScopeOf(ce._evalContextStack, scope) : scope;
 }
 
 /**
@@ -3719,7 +3725,7 @@ function makeLambda(
     return wrapRecursion(ce, (_args, options) => {
       const bodyScope = nullaryBody.localScope!;
       const capturedScope =
-        definingScopeOf(bodyScope) ?? ce.context.lexicalScope;
+        definingScopeOf(ce, bodyScope) ?? ce.context.lexicalScope;
       const freshScope: Scope = { parent: capturedScope, bindings: new Map() };
       const savedParent = bodyScope.parent;
       bodyScope.parent = freshScope;
@@ -3977,7 +3983,7 @@ function makeLambda(
     // (step 5), and the chain a held argument's symbols must be resolvable
     // through (`inlineFrameLocals`).
     const capturedScope =
-      definingScopeOf(bodyFn.localScope!) ?? ce.context.lexicalScope;
+      definingScopeOf(ce, bodyFn.localScope!) ?? ce.context.lexicalScope;
 
     // A `hold` application binds each argument as WRITTEN. `.canonical` is
     // value-safe — it binds structure (a held operand reaching here from the
@@ -4254,7 +4260,7 @@ function makeLambda(
       }
 
       const capturedScope =
-        definingScopeOf(bodyFn.localScope!) ?? ce.context.lexicalScope;
+        definingScopeOf(ce, bodyFn.localScope!) ?? ce.context.lexicalScope;
       const freshScope: Scope = {
         parent: capturedScope,
         bindings: new Map(),

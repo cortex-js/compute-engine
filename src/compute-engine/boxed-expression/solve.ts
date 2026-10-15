@@ -18,7 +18,7 @@ import {
   getPolynomialCoefficients,
   fromCoefficients,
 } from './polynomials.js';
-import { asSmallInteger } from './numerics.js';
+import { asExactSmallInteger, asSmallInteger } from './numerics.js';
 import type { Complex } from 'complex.js';
 import {
   durandKernerRoots,
@@ -1119,6 +1119,93 @@ function hostSolveRules(rules: SolveRuleSet): {
 }
 
 /**
+ * The ids of the built-in root templates that read the exponent of a power
+ * of the unknown as an integer degree: the quadratic templates match the
+ * literal `Power(_x, 2)`, and `solve.power-negative-root` reads the parity of
+ * the exponent (an even `n` gives the root `-x` beside `x`). A float exponent
+ * is not an integer degree, so these templates are left out when the
+ * equation has one (`floatPowerOfUnknown`).
+ */
+const DEGREE_TEMPLATE_IDS: ReadonlySet<string> = new Set([
+  'solve.quadratic-no-constant-zero',
+  'solve.quadratic-no-constant',
+  'solve.quadratic-formula-positive',
+  'solve.quadratic-formula-negative',
+  'solve.power-negative-root',
+]);
+
+/**
+ * `DEGREE_TEMPLATE_IDS` and the general power template `solve.power`. The
+ * root `(-b/a)^(1/n)` of that template folds `1/2.0` to the exact `1/2`, so
+ * for a float exponent with an integer value it reads `2.0` as the degree
+ * `2`: `x^{2.0} = 4` gave the exact root `2`. For such an exponent the
+ * template is left out too. A float exponent with a value that is not an
+ * integer (`x^{2.5} = 4`) keeps the template, and its root is a float.
+ */
+const INTEGER_DEGREE_TEMPLATE_IDS: ReadonlySet<string> = new Set([
+  ...DEGREE_TEMPLATE_IDS,
+  'solve.power',
+]);
+
+/** The rule set `rules` without the templates whose ids are in `ids`. */
+const WITHOUT_TEMPLATES = new WeakMap<
+  ReadonlySet<string>,
+  WeakMap<SolveRuleSet, SolveRuleSet>
+>();
+function withoutTemplates(
+  rules: SolveRuleSet,
+  ids: ReadonlySet<string>
+): SolveRuleSet {
+  let byRules = WITHOUT_TEMPLATES.get(ids);
+  if (byRules === undefined) {
+    byRules = new WeakMap();
+    WITHOUT_TEMPLATES.set(ids, byRules);
+  }
+  let result = byRules.get(rules);
+  if (result === undefined) {
+    result = {
+      rules: rules.rules.filter(
+        (rule) => rule.id === undefined || !ids.has(rule.id)
+      ),
+    };
+    byRules.set(rules, result);
+  }
+  return result;
+}
+
+/**
+ * Whether `expr` has a power whose base contains the unknown `_x` and whose
+ * exponent is a float, such as `x^{2.0}` or `(x + 1)^{2.0}`: `'integer'` when
+ * one such exponent has an integer value (`2.0`), `'float'` when every one
+ * has a value that is not an integer (`2.5`), and `undefined` when there is
+ * none.
+ *
+ * A float exponent is not a polynomial degree, even when its value is an
+ * integer, so the templates that read a degree must not match it. The
+ * pattern matcher compares number literals by value: without this test, the
+ * literal `2` of the quadratic templates matches the float `2.0`, and
+ * `x^{2.0} + 3x + 2 = 0` was solved as the quadratic `x^2 + 3x + 2 = 0`.
+ */
+function floatPowerOfUnknown(
+  expr: Expression
+): 'integer' | 'float' | undefined {
+  if (!isFunction(expr)) return undefined;
+  let result: 'integer' | 'float' | undefined = undefined;
+  if (
+    expr.operator === 'Power' &&
+    expr.op1.has('_x') &&
+    isNumber(expr.op2) &&
+    !expr.op2.isExact
+  )
+    result = expr.op2.isInteger === true ? 'integer' : 'float';
+  for (const op of expr.ops) {
+    if (result === 'integer') return result;
+    result = floatPowerOfUnknown(op) ?? result;
+  }
+  return result;
+}
+
+/**
  * Clear *symbolic* denominators from an Add expression by multiplying through
  * by the LCM of those denominators. For example, `F - 3x/h` becomes `F*h - 3x`.
  *
@@ -2022,9 +2109,13 @@ function lcm2(a: number, b: number): number {
 }
 
 /** If `e` is a rational constant, return it as `[numerator, denominator]`
- * (denominator > 0); otherwise `null`. */
+ * (denominator > 0); otherwise `null`. A float such as `2.0` is not a
+ * rational constant: `x^{2.0}` is not a polynomial term in `x`. */
 function rationalExponent(e: Expression): [number, number] | null {
-  const k = asSmallInteger(e);
+  // `isRational` is true for a float with an integer value, so the
+  // exactness is tested before both readings.
+  if (!isNumber(e) || !e.isExact) return null;
+  const k = asExactSmallInteger(e);
   if (k !== null) return [k, 1];
   if (e.isNumber && e.isRational) {
     const p = asSmallInteger(e.numerator);
@@ -2324,7 +2415,7 @@ function substituteGenerator(
     isFunction(node, 'Power') &&
     node.op1.isSame(g.op1)
   ) {
-    const k = asSmallInteger(node.op2.div(g.op2).simplify());
+    const k = asExactSmallInteger(node.op2.div(g.op2).simplify());
     if (k !== null && k >= 1) return ce.function('Power', [u, ce.number(k)]);
   }
   if (isFunction(node))
@@ -3765,6 +3856,16 @@ export function findUnivariateRoots(
     // `stats.userRule` is set (see `hostSolveRules()`). A root that a host
     // template gives and that a built-in template also gives is listed once.
     const ruleParts = hostSolveRules(rules);
+    // The built-in templates for `expr`: without the ones that read an
+    // integer degree when `expr` has a float power of the unknown.
+    const builtInTemplatesFor = (expr: Expression): SolveRuleSet => {
+      const float = floatPowerOfUnknown(expr);
+      if (float === undefined) return ruleParts.builtIn;
+      return withoutTemplates(
+        ruleParts.builtIn,
+        float === 'integer' ? INTEGER_DEGREE_TEMPLATE_IDS : DEGREE_TEMPLATE_IDS
+      );
+    };
     const matchRootsSteps = (expr: Expression): RuleSteps => {
       const matchOptions = {
         useVariations: true,
@@ -3772,7 +3873,7 @@ export function findUnivariateRoots(
       } as const;
       const matches = matchAnyRulesWithSteps(
         expr,
-        ruleParts.builtIn,
+        builtInTemplatesFor(expr),
         { _x: ce.symbol('_x') },
         matchOptions
       );

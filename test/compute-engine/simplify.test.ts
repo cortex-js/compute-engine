@@ -2945,6 +2945,35 @@ describe('simplify() folds constants whatever the rule list (issue #306)', () =>
     expect(ce.parse('g(3)').simplify().toString()).toBe('g(3)');
   });
 
+  // The evaluation of `g(3)` stops at the recursion limit or at a stack
+  // overflow, whichever occurs first. Which one occurs first depends on the
+  // size of the stack frames, which changes with the optimization of the
+  // code. With a low recursion limit, the limit always occurs first. The
+  // limit is a `CancellationError`, but the fold must not throw it again as
+  // it throws the deadline of the caller.
+  test('the recursion limit in the evaluation declines the fold', () => {
+    const ce = new ComputeEngine();
+    ce.recursionLimit = 20;
+    ce.assign('g', ce.parse('n \\mapsto g(n-1) + 1'));
+    expect(() => ce.parse('g(3)').evaluate()).toThrow(
+      'Recursion limit exceeded'
+    );
+    expect(ce.parse('g(3)').simplify().toString()).toBe('g(3)');
+    expect(ce.parse('2g(3)').simplify().toString()).toBe('2g(3)');
+    expect(ce.parse('x + g(3)').simplify().toString()).toBe('x + g(3)');
+    // The recursion depth is restored: a function that recurses less deep
+    // than the limit still evaluates.
+    ce.assign(
+      'f',
+      ce.box([
+        'Function',
+        ['If', ['LessEqual', 'n', 0], 0, ['Add', ['f', ['Subtract', 'n', 1]], 1]],
+        'n',
+      ])
+    );
+    expect(ce.box(['f', 15]).evaluate().toString()).toBe('15');
+  });
+
   test('a relation between two number literals is its truth value', () => {
     expect(ce306.parse('3 = 3').simplify().symbol).toBe('True');
     expect(ce306.parse('3 = 4').simplify().symbol).toBe('False');
@@ -2955,5 +2984,33 @@ describe('simplify() folds constants whatever the rule list (issue #306)', () =>
     expect(ce306.parse('3 < 4').simplify().symbol).toBe('True');
     // A relation with an unknown is not a truth value.
     expect(ce306.parse('x = x').simplify().toString()).toBe('x == x');
+  });
+});
+
+// A float exponent is not a polynomial degree: the step
+// that cancels common polynomial factors declines `x^{2.0}/x`, and the
+// general power rule gives `x^{1.0}`, as it gives `x^{1.5}` for `x^{2.5}/x`.
+// Before, the float `2.0` was read as the degree `2` and the result was the
+// exact `x`.
+describe('simplify() keeps a float exponent out of the polynomial steps', () => {
+  test('x^{2.0}/x is x^{1.0}', () => {
+    expect(ce.parse('x^{2.0}/x').simplify().json).toEqual([
+      'Power',
+      'x',
+      { num: '1.0' },
+    ]);
+    expect(ce.parse('x^{2.5}/x').simplify().json).toEqual(['Power', 'x', 1.5]);
+    expect(ce.parse('x^{2}/x').simplify().json).toEqual('x');
+  });
+
+  test('a quotient of polynomials with a float exponent is not cancelled', () => {
+    expect(ce.parse('\\frac{x^{2.0}-1}{x-1}').simplify().json).toEqual([
+      'Divide',
+      ['Add', ['Power', 'x', { num: '2.0' }], -1],
+      ['Add', 'x', -1],
+    ]);
+    expect(ce.parse('\\frac{x^{2}-1}{x-1}').simplify().toString()).toBe(
+      'x + 1'
+    );
   });
 });

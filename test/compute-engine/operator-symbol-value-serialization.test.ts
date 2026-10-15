@@ -69,24 +69,27 @@ describe('OPERATOR NAME IN SYMBOL POSITION', () => {
       }
     );
 
+    // The callback is the first operand of `Map`. With the callback last,
+    // the call is the reversed spelling, which is an `incompatible-type`
+    // error on the first operand.
     test('an operator used as a callback keeps its standalone notation', () => {
-      expect(ce.box(['Map', ['List', 1, 2], 'Sin']).toLatex()).toContain(
+      expect(ce.box(['Map', 'Sin', ['List', 1, 2]]).toLatex()).toContain(
         '\\sin'
       );
       expect(
-        ce.parse('\\mathrm{Map}(\\bigl\\lbrack1, 2\\bigr\\rbrack, \\sin)').op2
+        ce.parse('\\mathrm{Map}(\\sin, \\bigl\\lbrack1, 2\\bigr\\rbrack)').op1
           .symbol
       ).toBe('Sin');
     });
 
     test('an operator whose notation needs operands is spelled out', () => {
-      expect(ce.box(['Map', ['List', 1, 2], 'Abs']).toLatex()).toContain(
+      expect(ce.box(['Map', 'Abs', ['List', 1, 2]]).toLatex()).toContain(
         '\\mathrm{Abs}'
       );
       expect(
         ce.parse(
-          '\\mathrm{Map}(\\bigl\\lbrack1, 2\\bigr\\rbrack, \\mathrm{Abs})'
-        ).op2.symbol
+          '\\mathrm{Map}(\\mathrm{Abs}, \\bigl\\lbrack1, 2\\bigr\\rbrack)'
+        ).op1.symbol
       ).toBe('Abs');
     });
   });

@@ -541,7 +541,13 @@ describe('A FUNCTION LITERAL APPLIED TO A COLLECTION', () => {
           'Error(ErrorCode("incompatible-type", "real", "string"), "abc")'
         );
         expect(nested.evaluate().operator).toBe('Error');
-        expect(list.evaluate().json).toEqual(list.json);
+        // The list evaluates its cells: the cell of the refused call is the
+        // value of that call, the error.
+        expect(list.evaluate().json).toEqual([
+          'List',
+          ce.box(call as never).evaluate().json,
+          1,
+        ]);
 
         ce.assign(name, ce.box(replacement as never));
         expect(sum.type.toString()).toBe('integer');

@@ -5,6 +5,7 @@ import {
 } from '../common/interruptible.js';
 import {
   isDictionaryObject,
+  machineValue,
   operand,
   operands,
   operator,
@@ -1081,7 +1082,7 @@ function canonicalizationDiagnostics(
       // notes explain.
       const frame = pipeStageFrames.has(error)
         ? pipeStageFrames.get(error)
-        : enclosingFrame(canonical, error);
+        : writtenFrame(canonical, error, statement);
       const located = locateError(
         frame === undefined ? [] : [frame],
         statement,
@@ -2399,6 +2400,142 @@ function writtenPositions(
     return at.map((i) => i ?? free);
   }
   return at;
+}
+
+/**
+ * The frame of a canonicalization error on the direct route (no pipe), with
+ * the operator and the argument position of the call AS WRITTEN in the raw
+ * statement `statement`, which is what `locateError` looks for.
+ *
+ * The frame is first read from the canonical tree (`enclosingFrame`).
+ * Canonicalization can rename a call and reorder its operands:
+ * `Fold(a => a, "0", xs)` becomes `Reduce(xs, Error(…), "0")`. The raw
+ * statement then has no call named `Reduce`, and the locator fell back to
+ * the range of the whole statement. In that case the canonical call is
+ * mapped back to the written call here (`writtenCallPositions`), and the
+ * frame names the written operator (`Fold`) and the written position of the
+ * argument at fault (the callback, 1). A frame whose operator is in the raw
+ * statement is returned unchanged. When the written call cannot be found
+ * with certainty, the canonical frame is returned, and the anchor is the
+ * whole statement, as before.
+ *
+ * The pipe route has its own map, from boxed operands (`writtenPositions`).
+ */
+function writtenFrame(
+  canonical: MathJsonExpression,
+  error: MathJsonExpression,
+  statement: MathJsonExpression
+): ErrorFrameRef | undefined {
+  const frame = enclosingFrame(canonical, error);
+  if (frame === undefined) return undefined;
+  if (containsOperator(statement, frame.name)) return frame;
+  const call = enclosingCall(canonical, error);
+  if (call === undefined) return frame;
+  const callOps = [...operands(call)];
+  const callKeys = callOps.map(operandKey);
+  let found: ErrorFrameRef | undefined;
+  let count = 0;
+  const visit = (node: MathJsonExpression): void => {
+    const head = operator(node);
+    if (head === '' || count > 1) return;
+    const ops = [...operands(node)];
+    // A call with a named argument was permuted into declaration order
+    // before canonicalization, and its written order is read by the
+    // locator from the declared slot names. It is not mapped here.
+    if (
+      head !== frame.name &&
+      ops.length === callOps.length &&
+      !ops.some((op) => operator(op) === 'NamedArgument')
+    ) {
+      const at = writtenCallPositions(callKeys, ops.map(operandKey));
+      const position = at?.[frame.index - 1];
+      if (position !== undefined) {
+        count += 1;
+        found = { name: head, index: position + 1 };
+      }
+    }
+    for (const op of ops) visit(op);
+  };
+  visit(statement);
+  return count === 1 ? found : frame;
+}
+
+/**
+ * For each operand of a canonical call, its 0-based position among the
+ * operands of a written call, or `undefined` when the two calls do not
+ * correspond. The operands are compared by their key (`operandKey`). Each
+ * canonical operand takes the first written operand with the same key that
+ * no other operand took. Canonicalization changes some operands (an
+ * argument that became an `Error`, a function literal that got a `Block`):
+ * when exactly one canonical operand and one written operand are left, and
+ * at least one other operand matched by its key, they are the same operand.
+ * Otherwise the calls do not correspond with certainty.
+ */
+function writtenCallPositions(
+  canonicalKeys: ReadonlyArray<string | undefined>,
+  writtenKeys: ReadonlyArray<string | undefined>
+): number[] | undefined {
+  const used = new Set<number>();
+  const at = canonicalKeys.map((key) => {
+    if (key === undefined) return undefined;
+    const i = writtenKeys.findIndex((w, k) => w === key && !used.has(k));
+    if (i < 0) return undefined;
+    used.add(i);
+    return i;
+  });
+  const left = at.filter((i) => i === undefined).length;
+  if (left === 0) return at as number[];
+  // The pairing needs at least one operand matched by its key. Without one,
+  // any written call with the same number of operands would pair: a unary
+  // `Negate(Error(…))` that canonicalization made from `sqrt(y) - "a"` would
+  // pair with `Sqrt(y)` and put the error on `y`.
+  if (left !== 1 || used.size === 0 || writtenKeys.length - used.size !== 1)
+    return undefined;
+  const free = writtenKeys.findIndex((_, k) => !used.has(k));
+  return at.map((i) => i ?? free);
+}
+
+/**
+ * A text that is the same for a raw operand and for its canonical form when
+ * canonicalization does not change it: a number, a string, a symbol, or a
+ * call of these. The raw form carries source offsets and spells numbers and
+ * strings as objects, so the JSON texts of the two forms are not compared.
+ * `undefined` for an operand that cannot be compared (a dictionary).
+ */
+function operandKey(expr: MathJsonExpression): string | undefined {
+  const n = machineValue(expr);
+  if (n !== null) return `#${n}`;
+  const str = stringValue(expr);
+  if (str !== null) return `'${str}'`;
+  const sym = symbol(expr);
+  if (sym !== null) return `$${sym}`;
+  const head = operator(expr);
+  if (head === '') return undefined;
+  const keys = [...operands(expr)].map(operandKey);
+  if (keys.some((k) => k === undefined)) return undefined;
+  return `${head}(${keys.join(',')})`;
+}
+
+/** Whether a call with the operator `name` is in `expr`. */
+function containsOperator(expr: MathJsonExpression, name: string): boolean {
+  if (operator(expr) === '') return false;
+  if (operator(expr) === name) return true;
+  return [...operands(expr)].some((op) => containsOperator(op, name));
+}
+
+/** The call whose operand is the node `error`, found by identity in `root`
+ * (see `enclosingFrame`, which gives the operator and position only). */
+function enclosingCall(
+  root: MathJsonExpression,
+  error: MathJsonExpression
+): MathJsonExpression | undefined {
+  if (operator(root) === '') return undefined;
+  for (const op of operands(root)) {
+    if (op === error) return root;
+    const nested = enclosingCall(op, error);
+    if (nested !== undefined) return nested;
+  }
+  return undefined;
 }
 
 /** The error code of an `["Error", cause, where?]` node: the head of its

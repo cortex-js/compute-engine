@@ -46,6 +46,7 @@ import {
   declaredScalarParams,
   declaresBroadcastableParam,
   isDeclaredScalarType,
+  isNonSquareMatrixPower,
   isSquareMatrixPower,
   paramsAreScalar,
   type BroadcastSlotPlan,
@@ -9926,6 +9927,14 @@ export class BaseCompiler {
         throw new Error(
           'Could not compile `Power`: the base is a matrix, and only its shape or the exponent at run time ' +
             'tells if the power is a matrix power (a square matrix with an integer exponent) or an element-wise power.'
+        );
+      // `evaluate()` gives the `expected-square-matrix` error for an integer
+      // power of a matrix that is not square, and compiled code cannot
+      // return that error, so the compilation declines.
+      if (isNonSquareMatrixPower(args[0].type, args[1]))
+        throw new Error(
+          'Could not compile `Power`: the base is a matrix that is not square, and an integer power of it ' +
+            'is the `expected-square-matrix` error.'
         );
     }
 

@@ -5,12 +5,49 @@ import type { Scope } from '../global-types.js';
 // when their canonical parent is the template rather than the active scope.
 const scopeTemplates = new WeakMap<Scope, Scope>();
 
+// The scopes that have had at least one activation. A scope that is not in
+// this set cannot have an activation on a context stack, so `liveScopeOf`
+// answers it without a walk of the stack.
+const activatedTemplates = new WeakSet<Scope>();
+
 export function registerScopeActivation(scope: Scope, template: Scope): void {
   scopeTemplates.set(scope, template);
+  activatedTemplates.add(template);
 }
 
 export function scopeActivationTemplate(scope: Scope): Scope | undefined {
   return scopeTemplates.get(scope);
+}
+
+/**
+ * The scope that stands for `scope` in the evaluation whose context stack is
+ * `stack`: the innermost runtime activation of `scope` on the stack, or
+ * `scope` itself when the stack holds no activation of it, or holds `scope`
+ * itself above every activation of it.
+ *
+ * An asynchronous evaluation of a scoped node (a `Sum`, a `Product`) does not
+ * push the node's local scope. It pushes an activation: a copy with its own
+ * value definitions, so that two evaluations of the node that run at the same
+ * time do not write the index of each other. A function literal created in
+ * the body of the node has the local scope (the template) as its defining
+ * scope, and a call frame of the literal chains to its defining scope. With
+ * the template in the chain, the body of the literal reads the index in the
+ * template, which holds the value that an earlier synchronous evaluation
+ * assigned last, not the value of the current iteration:
+ * `Sum(Reduce(Map(x ↦ k·x, [1, 1]), Add, 0), k ∈ 1..2)` gave 8 with
+ * `evaluateAsync()` after a synchronous `evaluate()` had given 6.
+ */
+export function liveScopeOf(
+  stack: ReadonlyArray<{ lexicalScope: Scope }>,
+  scope: Scope
+): Scope {
+  if (!activatedTemplates.has(scope)) return scope;
+  for (let i = stack.length - 1; i >= 0; i--) {
+    const active = stack[i].lexicalScope;
+    if (active === scope) return scope;
+    if (scopeTemplates.get(active) === scope) return active;
+  }
+  return scope;
 }
 
 /**

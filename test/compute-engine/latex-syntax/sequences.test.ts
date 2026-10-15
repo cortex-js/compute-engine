@@ -108,9 +108,33 @@ describe('DELIMITERS SERIALIZING', () => {
       .toMatchInlineSnapshot(`
       box       = ["Delimiter", ["Sequence", 1, 2, 3], ")["]
       canonical = ["Triple", 1, 2, 3]
-      box-latex = )123\\lbrack
+      box-latex = )1,2,3\\lbrack
       latex     = (1,2,3)
     `));
+
+  // A delimiter string with two fences and no separator: a comma is written
+  // between two operands, so that they do not touch. Written with nothing
+  // between them, `1`, `2`, `3` would read back as the number `123`, and
+  // `x+1`, `-2` as the sum `x+1-2`.
+  test('Sequence with parentheses and no separator', () => {
+    expect(check(['Delimiter', ['Sequence', 1, 2, 3], "'()'"]))
+      .toMatchInlineSnapshot(`
+      box       = ["Delimiter", ["Sequence", 1, 2, 3], "()"]
+      canonical = ["Triple", 1, 2, 3]
+      box-latex = (1,2,3)
+      latex     = (1,2,3)
+    `);
+    // The value round-trips through LaTeX.
+    for (const xs of [
+      [1, 2, 3],
+      [['Add', 'x', 1], -2],
+    ]) {
+      const boxed = engine.expr(['Delimiter', ['Sequence', ...xs], "'()'"], {
+        form: 'raw',
+      });
+      expect(engine.parse(boxed.latex).isSame(boxed.canonical)).toBe(true);
+    }
+  });
 
   test('Sequence with custom separator', () =>
     expect(check(['Delimiter', ['Sequence', 1, 2, 3], "'(;)'"]))
