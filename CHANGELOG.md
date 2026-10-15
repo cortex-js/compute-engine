@@ -96,6 +96,23 @@
 
 ### Issues Resolved
 
+- **The application memo refills for each element of a lazy `Map` built inside a
+  `Fold` step (#438).** A `Fold` whose step returns a lazy `Map` over the step's
+  own state, with an inner `Fold` whose step reads the state and the `Map` index
+  from the enclosing calls, evaluated to `[-19, 24, 24, 24]` where the value is
+  `[-21, 26, 28, 30]` (0.152 gave `[-21, 24, 24, 24]`). The inner step literal
+  is applied to numbers only, so its results are memoized per argument tuple,
+  and the memo tracks the names the body reads from the enclosing calls as
+  dependencies. Each outer step substitutes the value of its state parameter
+  into the result, so the inner literal of one step embeds the previous step's
+  copy of the same `Map` lambda, whose parameter `i` carries the same static
+  binding as the free `i` in the inner step body. The dependency walk excluded
+  every parameter binding found anywhere in the tree, so the free `i` was never
+  a dependency and the memo served the `i = 0` result for every element. A
+  parameter binding, or a binder's index, is now excluded only while the walk is
+  inside the literal or binder that declares it; the same binding outside that
+  node is a dependency.
+
 - **The symbolic integrator follows the angular unit.** With
   `ce.angularUnit = 'deg'`, `\int_0^{180} \sin x\,dx` evaluated to `2`, where
   the value is `360/\pi`, and `\int \sin x\,dx` was `-\cos x`, where it is

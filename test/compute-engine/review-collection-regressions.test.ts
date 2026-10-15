@@ -231,6 +231,97 @@ test('chain-resolved memo dependencies validate pure shadows and follow their va
   }
 });
 
+/**
+ * Issue #438. A `Fold` whose step returns a lazy `Map` over the step's own
+ * state: the state is `[rank, g1, g2, g3]`, each step takes `g1 + g2` off
+ * the rank, and the new `g` is `Σ_{s=1,2} (g[s+1] + i)` for `i = 0..2`,
+ * computed by an inner `Fold` whose step reads `g` and `i` from the
+ * enclosing calls and is applied to numbers only.
+ *
+ * Each outer step substitutes the value of `g` into the result it returns,
+ * so the inner step literal of step `k` embeds the `Map` lambda of step
+ * `k − 1` — a closure copy whose parameter `i` carries the same static
+ * binding as the free `i` in the inner step body. The dependency walk of
+ * the application memo excluded that binding for the whole tree, so the
+ * memo had no dependency on `i` and served the `i = 0` result for every
+ * element of the `Map`.
+ */
+function foldOverLazyMapOfOwnState(steps: number): number[] {
+  const ce = new ComputeEngine();
+  const at = (xs: Expression, i: Expression): Expression => ['At', xs, i];
+  const fold = (body: Expression, over: Expression): Expression => [
+    'Fold',
+    ['Function', ['Add', 'a', body], 'a', 's'],
+    0,
+    over,
+  ];
+  const step: Expression = [
+    'Apply',
+    [
+      'Function',
+      [
+        'Join',
+        ['List', ['Subtract', at('st', 1), ['Add', at('g', 1), at('g', 2)]]],
+        [
+          'Map',
+          [
+            'Function',
+            fold(['Add', at('g', ['Add', 's', 1]), 'i'], ['Range', 1, 2, 1]),
+            'i',
+          ],
+          ['Range', 0, 2, 1],
+        ],
+      ],
+      'g',
+    ],
+    ['Drop', 'st', 1],
+  ];
+  const seed: Expression = [
+    'Join',
+    ['List', 9],
+    ['Map', ['Function', 1, 'i'], ['Range', 0, ['Subtract', 'N', 1], 1]],
+  ];
+  const expr: Expression = [
+    'Apply',
+    [
+      'Function',
+      ['Fold', ['Function', step, 'st', 't'], seed, ['Range', 1, steps, 1]],
+      'N',
+    ],
+    3,
+  ];
+  const v = ce.box(expr).evaluate();
+  return [1, 2, 3, 4].map((i) => ce.box(['At', v, i]).evaluate().re);
+}
+
+test("application memo refills per element of a lazy Map over a Fold step's own state (issue #438)", () => {
+  // By hand: g goes [1,1,1] → [2,4,6] → [10,12,14] → [26,28,30] → [58,60,62],
+  // the rank 9 → 7 → 1 → −21 → −75.
+  expect(foldOverLazyMapOfOwnState(3)).toEqual([-21, 26, 28, 30]);
+  expect(foldOverLazyMapOfOwnState(4)).toEqual([-75, 58, 60, 62]);
+});
+
+test.each(['literal first', 'body first'])(
+  'a subtree shared inside and outside the literal that binds its symbol is a dependency (%s)',
+  (order) => {
+    // The body of `fn` binds `a` as a parameter inside `fn`. The SAME body
+    // node placed beside `fn` in the instance is outside that literal, where
+    // its `a` is a dependency. The walk visits a shared node once per
+    // exclusion state, so the dependency is recorded whichever side is
+    // reached first.
+    const ce = new ComputeEngine();
+    const fn = ce.box(['Function', ['Add', 'a', 1], 'a']);
+    const body = fn.op1;
+    const tree = ce._fn(
+      'List',
+      order === 'literal first' ? [fn, body] : [body, fn]
+    );
+    const deps = snapshotMemoDeps(tree);
+    expect(deps).toBeDefined();
+    expect(deps!.some((d) => d.name === 'a')).toBe(true);
+  }
+);
+
 test('chain-resolved memo dependencies reject impure stored shadows', () => {
   const ce = new ComputeEngine();
   ce.declare('Draw', {

@@ -217,43 +217,61 @@ export function exitParanoidCheck(): void {
 export const ELEMENT_MEMO_CAP = 100_000;
 
 /**
- * Collect the value definitions of every `Function` literal's PARAMETER
- * sites in the tree. Parameters are supplied by the walk itself (activation
- * copies in a fresh call scope), never assigned from outside, and their
- * static bindings hold no value — without this exclusion the valueless-
- * binding gate below would mark every lambda-bearing instance ineligible.
+ * The value definitions a node BINDS for the walk: the parameter sites of a
+ * `Function` literal, and the binding sites a BINDER operator declares (a
+ * `Comprehension`'s indices, a `Series`' expansion variable — the
+ * operator's own `bindingSites` selector is the authority). These are the
+ * walk's own machinery, not dependencies: a parameter is supplied by the
+ * walk itself (an activation copy in a fresh call scope), and a binder's
+ * index is written during the walk and RESTORED to valueless afterwards
+ * (`ComprehensionIndexFrame` save→install→restore). Tracking one would
+ * either churn or trip the valueless-binding gate, which would mark every
+ * lambda-bearing instance ineligible.
  *
- * Deliberately NOT excluded: the local bindings of scoped subexpressions. A
+ * Deliberately NOT included: the local bindings of scoped subexpressions. A
  * nested `Sum`'s index definition holds the value its last iteration wrote,
  * so it self-stabilizes as an ordinary dep (only this instance's own walks
  * write it); and an AUTO-DECLARED unknown living in the same scope (a free
  * symbol the body references but nothing has assigned) must stay visible to
  * the valueless-binding gate — a later `assign` of that name installs a
  * value in a different definition, which no version or counter tracks.
+ *
+ * The exclusion these definitions receive is POSITIONAL: it holds only
+ * while the walk is inside the node that binds them (see `visit`). The same
+ * static binding can occur elsewhere in the tree and mean something else
+ * there. A call substitutes each parameter's value into its result
+ * (`bindingKeyedSubs`, `function-utils.ts`), and a closure copy made by
+ * `captureClosures` keeps the template's parameter operands, so a `Fold`
+ * whose step returns a lazy `Map` over its own state embeds, in each step's
+ * literal, the previous step's copy of the SAME `Map` lambda. The free `i`
+ * in the step body and the parameter `i` of that embedded copy carry one
+ * binding: inside the copy it is the copy's parameter; outside it, it
+ * denotes the enclosing call's activation — a dependency that changes with
+ * every element of the `Map`. Excluding it for the whole tree let the
+ * application memo serve one element's result for all of them (issue #438,
+ * `test/compute-engine/review-collection-regressions.test.ts`).
  */
-function collectParameterDefs(
-  expr: Expression,
-  out: Set<BoxedValueDefinition>,
-  // A subtree reached through several operands contributes the same
-  // definitions each time, so it is walked once: a value that shares its
-  // operands (a user function applied to its own previous result) unfolds
-  // exponentially in the nesting depth otherwise.
-  visited: Set<Expression> = new Set()
-): void {
-  if (!isFunction(expr) || visited.has(expr)) return;
-  visited.add(expr);
-  // A store-backed list (`ce.list()`) holds numbers only: no parameter to
-  // find, and reading its `ops` would box every element.
-  if (expr._numericStore !== undefined) return;
+function boundDefsOf(expr: Expression): BoxedValueDefinition[] {
+  const out: BoxedValueDefinition[] = [];
+  if (!isFunction(expr)) return out;
   if (expr.operator === 'Function') {
     for (let i = 1; i < expr.nops; i++) {
       const op = expr.ops[i];
       const site = isFunction(op, 'Typed') ? op.op1 : op;
       if (isSymbol(site) && site.valueDefinition !== undefined)
-        out.add(site.valueDefinition);
+        out.push(site.valueDefinition);
     }
+    return out;
   }
-  for (const op of expr.ops) collectParameterDefs(op, out, visited);
+  const sites = expr.operatorDefinition?.bindingSites?.(expr.ops, 'post');
+  if (sites)
+    for (const s of sites) {
+      let node: Expression | undefined = expr;
+      for (const p of s.path) node = isFunction(node) ? node.ops[p] : undefined;
+      if (isSymbol(node) && node.valueDefinition !== undefined)
+        out.push(node.valueDefinition);
+    }
+  return out;
 }
 
 /**
@@ -355,8 +373,30 @@ function snapshotDepsUnderChain(
 ): ElementMemoDep[] | undefined {
   const ce = expr.engine;
   const depScope = depResolutionScope(expr);
-  const excluded = new Set<BoxedValueDefinition>();
-  collectParameterDefs(expr, excluded);
+  /** The bindings of the nodes the walk is currently inside (see
+   * `boundDefsOf`): a parameter site of an enclosing literal, or an
+   * enclosing binder's index. Entered and left with the node in `visit`. */
+  let excluded = new Set<BoxedValueDefinition>();
+  /** Walk an independently defined expression — a stored value, a user
+   * operator's lambda body, a sequence handler's registered read — with NO
+   * positional exclusion inherited from the occurrence that reached it: the
+   * bindings of the literals and binders around that occurrence in the
+   * instance tree do not enclose the expression, which is evaluated in its
+   * own environment, so a binding of theirs occurring in it is a dependency
+   * there. The expression's own literals and binders exclude their bindings
+   * as usual, while the walk is inside them. */
+  const visitAcrossDefinitionBoundary = (
+    e: Expression,
+    skipNames?: ReadonlySet<string>
+  ): void => {
+    const saved = excluded;
+    excluded = new Set();
+    try {
+      visit(e, skipNames);
+    } finally {
+      excluded = saved;
+    }
+  };
 
   const seen = new Set<BoxedValueDefinition>();
   /** User-defined operator heads whose lambda body was already walked —
@@ -410,18 +450,17 @@ function snapshotDepsUnderChain(
     }
     if (seenOperators.has(opDef)) return;
     seenOperators.add(opDef);
-    // Mirror the stored-value branch: pre-register NESTED literals'
-    // parameter sites anywhere in this body, so a helper that builds its
-    // own lazy collection is not wrongly disqualified by the valueless
-    // gate seeing an inner literal's parameter binding.
-    collectParameterDefs(lambda.body, excluded);
+    // A nested literal inside this body excludes its own parameters while
+    // the walk is inside it (`visit`), so a helper that builds its own lazy
+    // collection is not disqualified by the valueless gate seeing an inner
+    // literal's parameter binding.
     // DEFINITION BOUNDARY (see the stored-value branch): the skip set
     // is built FRESH from this lambda's OWN parameters — never seeded
     // from the caller's, whose spellings mean something else in this
     // definition's environment.
     const bodySkip = new Set<string>();
     for (const p of lambda.parameters) bodySkip.add(p.name);
-    visit(lambda.body, bodySkip);
+    visitAcrossDefinitionBoundary(lambda.body, bodySkip);
   };
 
   /** Record a value-definition dependency reached through `occurrence`
@@ -594,18 +633,15 @@ function snapshotDepsUnderChain(
         eligible = false;
         return;
       }
-      // The stored value's own binding sites (a helper literal's
-      // parameters) are as excluded as the instance's own.
-      collectParameterDefs(stored, excluded);
       // DEFINITION BOUNDARY: a stored value is an independently defined
       // expression that resolves names in ITS OWN environment — the
       // caller's parameter names must NOT be inherited, or a helper reading
       // a global that happens to share a caller-parameter's spelling would
       // have that dependency silently dropped (a stale serve under
       // epoch-only validation). The stored literal's own parameters are
-      // covered by the SITE-def exclusion above, so no name skips are
-      // needed here at all.
-      visit(stored, undefined);
+      // excluded by `visit` while the walk is inside that literal, so no
+      // name skips are needed here.
+      visitAcrossDefinitionBoundary(stored, undefined);
     }
   };
 
@@ -620,20 +656,45 @@ function snapshotDepsUnderChain(
    * is what keeps this walk linear in the number of distinct nodes instead of
    * exponential in the nesting depth. Keyed on the skip set's IDENTITY: one
    * set is carried through a whole lambda body, and `undefined` is the
-   * instance's own tree. */
-  const visited = new Map<Expression, Set<object>>();
+   * instance's own tree.
+   *
+   * The value is the set of bindings that were EXCLUDED when the node was
+   * walked (see `boundDefsOf`): every dependency of the subtree outside that
+   * set is recorded. A second visit under an exclusion set that covers the
+   * recorded one has nothing to add and is skipped. A second visit under a
+   * smaller set — the same node reached inside a literal that binds `i` and
+   * then outside it, where `i` is a dependency — walks the subtree again,
+   * and the recorded set shrinks to the intersection, which is the set
+   * outside of which every dependency is now recorded. The empty set is
+   * shared, not copied: most nodes are walked under no exclusion at all. */
+  const visited = new Map<Expression, Map<object, Set<BoxedValueDefinition>>>();
   const NO_SKIP = {};
+  const NO_EXCLUSION: Set<BoxedValueDefinition> = new Set();
   const visit = (e: Expression, skipNames?: ReadonlySet<string>): void => {
     if (!eligible) return;
     if (isFunction(e)) {
       const skipKey: object = skipNames ?? NO_SKIP;
       let under = visited.get(e);
-      if (under?.has(skipKey)) return;
       if (under === undefined) {
-        under = new Set();
+        under = new Map();
         visited.set(e, under);
       }
-      under.add(skipKey);
+      const walkedUnder = under.get(skipKey);
+      if (walkedUnder !== undefined) {
+        let covered = true;
+        for (const def of walkedUnder)
+          if (!excluded.has(def)) {
+            covered = false;
+            break;
+          }
+        if (covered) return;
+        for (const def of walkedUnder)
+          if (!excluded.has(def)) walkedUnder.delete(def);
+      } else
+        under.set(
+          skipKey,
+          excluded.size === 0 ? NO_EXCLUSION : new Set(excluded)
+        );
     }
     if (isSymbol(e)) {
       if (skipNames?.has(e.symbol)) return;
@@ -653,8 +714,7 @@ function snapshotDepsUnderChain(
           seenHandlers.add(handler);
           for (const read of subscriptEvaluateReads(handler) ?? []) {
             if (read === undefined || read === null) continue;
-            collectParameterDefs(read, excluded);
-            visit(read, undefined);
+            visitAcrossDefinitionBoundary(read, undefined);
           }
         }
       } else if (
@@ -734,23 +794,19 @@ function snapshotDepsUnderChain(
       eligible = false;
       return;
     }
-    if (isFunction(e)) {
-      // A BINDER's declared binding sites (a Comprehension's indices, a
-      // Series' expansion variable) are the walk's own machinery, not
-      // dependencies: their definitions are written during the walk and
-      // RESTORED to valueless afterwards (`ComprehensionIndexFrame`
-      // save→install→restore), so tracking one would either churn or trip
-      // the valueless gate. The operator's own `bindingSites` selector is
-      // the authority on which operands those are.
-      const sites = e.operatorDefinition?.bindingSites?.(e.ops, 'post');
-      if (sites)
-        for (const s of sites) {
-          let node: Expression | undefined = e;
-          for (const p of s.path)
-            node = isFunction(node) ? node.ops[p] : undefined;
-          if (isSymbol(node) && node.valueDefinition !== undefined)
-            excluded.add(node.valueDefinition);
-        }
+    if (!isFunction(e)) return;
+    // The bindings this node declares — a literal's parameters, a binder's
+    // indices — are excluded for the walk of ITS subtree only, and released
+    // when the walk leaves it: the same binding outside this node is a
+    // dependency (see `boundDefsOf`). A binding an enclosing node already
+    // excluded stays excluded after this one is left.
+    const entered: BoxedValueDefinition[] = [];
+    for (const def of boundDefsOf(e))
+      if (!excluded.has(def)) {
+        excluded.add(def);
+        entered.push(def);
+      }
+    try {
       // An application whose HEAD is a symbol bound to a value definition
       // (`Map(f, xs)` applied with `f` a stored literal) reaches that
       // binding through operator position, where no symbol operand appears —
@@ -773,6 +829,8 @@ function snapshotDepsUnderChain(
       // inside it, and reading its `ops` would box every element.
       if (e._numericStore !== undefined) return;
       for (const op of e.ops) visit(op, skipNames);
+    } finally {
+      for (const def of entered) excluded.delete(def);
     }
   };
   visit(expr);
