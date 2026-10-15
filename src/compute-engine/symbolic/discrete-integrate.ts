@@ -4,6 +4,7 @@ import { getPolynomialCoefficients } from '../boxed-expression/polynomials.js';
 import { exactSign } from './contour.js';
 import { shadowsLibraryName } from '../library-shadowing.js';
 import { checkDeadline } from '../../common/interruptible.js';
+import { angularChainFactor } from './angular-unit.js';
 
 // These reductions avoid enumerating integer crossings. Unsupported arguments
 // still go through the bounded piecewise partitioner.
@@ -144,10 +145,6 @@ export function integrateDiscrete(
     shadowsLibraryName(ce, selector.op1.operator)
   )
     return undefined;
-  // The period 2π and the value 4 of the integral of |sin| or |cos| over one
-  // period are the values in radians. With another angular unit, `Sin` and
-  // `Cos` have a different period, so the bounded partitioner handles them.
-  if (ce.angularUnit !== 'rad') return undefined;
   if (shadowsLibraryName(ce, 'Pi')) return undefined;
   const p = affine(selector.op1.op1);
   if (!p) return undefined;
@@ -156,7 +153,12 @@ export function integrateDiscrete(
   if (direction === undefined || direction === 0) return undefined;
   const u = add(m, mul(k, direction > 0 ? lo : hi));
   const v = add(m, mul(k, direction > 0 ? hi : lo));
-  const period = mul(ce.Pi, ce.number(2));
+  // The period of `Sin` and `Cos` in the engine's angular unit is 2π/chain,
+  // where chain is the factor from the unit to radians (π/180 in degree
+  // mode, so the period is 360), and one period of |sin| integrates to
+  // 4/chain.
+  const chain = angularChainFactor(ce);
+  const period = div(mul(ce.Pi, ce.number(2)), chain);
   const count = floor(div(sub(v, u), period));
   if (!count || exactSign(count) !== 1) return undefined;
   const start = floor(div(u, period));
@@ -181,7 +183,13 @@ export function integrateDiscrete(
   )
     return undefined;
   return div(
-    add(mul(count, ce.number(selector.operator === 'Abs' ? 4 : 0)), tail),
+    add(
+      mul(
+        count,
+        selector.operator === 'Abs' ? div(ce.number(4), chain) : ce.Zero
+      ),
+      tail
+    ),
     direction > 0 ? k : neg(k)
   );
 }

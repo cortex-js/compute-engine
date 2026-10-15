@@ -80,6 +80,7 @@ import {
 import '../symbolic/explain-derivative.js';
 import { antiderivative } from '../symbolic/antiderivative.js';
 import { integratePiecewise } from '../symbolic/piecewise-integrate.js';
+import { withRadianConvention } from '../symbolic/angular-unit.js';
 import {
   integrateBoseMoment,
   polygammaDomainKnown,
@@ -4876,7 +4877,14 @@ volumes
             }
             if (ce._integrationProvider) {
               try {
-                antideriv = ce._integrationProvider(integrand, variable);
+                // The provider's rules are the radian ones, as the built-in
+                // antiderivative's are: in another angular unit it runs on
+                // the integrand rewritten to the radian convention
+                // (`withRadianConvention`).
+                const provider = ce._integrationProvider;
+                antideriv = withRadianConvention(integrand, variable, (f) =>
+                  provider(f, variable)
+                );
               } catch (e) {
                 // A cancellation (deadline/interrupt) thrown inside the provider
                 // must propagate — swallowing it would turn a timeout into a

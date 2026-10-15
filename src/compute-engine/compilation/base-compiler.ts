@@ -21375,7 +21375,14 @@ export class BaseCompiler {
         },
         () => {
           budget = engine._deadlineFrame?.budgets?.at(-1);
-          return engine.function('Integrate', ops).evaluate();
+          // The operands are in the radian convention (`rewriteAngularUnit`
+          // runs at the compile entry), so the attempt evaluates in radian
+          // mode: the interpreter's `Integrate` would otherwise rewrite them
+          // for the engine's unit a second time (`withRadianConvention`),
+          // and the closed form is handed to a radian-based code generator.
+          return engine._withTransientAngularUnit('rad', () =>
+            engine.function('Integrate', ops).evaluate()
+          );
         }
       );
     } catch (e) {

@@ -96,6 +96,30 @@
 
 ### Issues Resolved
 
+- **The symbolic integrator follows the angular unit.** With
+  `ce.angularUnit = 'deg'`, `\int_0^{180} \sin x\,dx` evaluated to `2`, where
+  the value is `360/\pi`, and `\int \sin x\,dx` was `-\cos x`, where it is
+  `-(180/\pi)\cos x`; `\int \sin x \cos x\,dx` was a series of powers of
+  `\pi`, because the substitution route combined the unit-aware derivative
+  with the radian rules. The integrator holds the radian antiderivatives, so
+  in another unit the integrand is rewritten to the radian convention with an
+  exact factor (`\sin x` becomes `\sin(\pi x/180)`, `\arctan x` becomes
+  `\arctan(x)/(\pi/180)`), integrated with the engine in radian mode, and
+  the result is mapped back to the unit: `\int \sin x\,dx` is now
+  `-(180/\pi)\cos x` in degree mode, `\int_0^1 dx/(1 + x^2)` is `\pi/4` in
+  every unit, and `\int_0^{360} |\sin x|\,dx` is `720/\pi`. The grad and
+  turn units follow the same rule. The closed form for `|\sin(kx + m)|` over
+  many periods reads the period in the engine's unit (`360` in degree mode).
+  The same holds with the Rubi integration rules loaded, for the closed form
+  the JavaScript target compiles for a definite integral, and for a user
+  function or a symbol value that brings a trigonometric call into the
+  integrand. Also, a coefficient of the variable that is a product of two or more
+  constant factors now matches the integration rules: `\int \tan(2\pi x)\,dx`
+  and `\int \sin^2(\pi x/180)\,dx` stayed unevaluated in every unit while
+  `\int \tan(\pi x)\,dx` did not, because the rules bind the coefficient to
+  one factor of the flattened product; they are now
+  `\ln|\sec(2\pi x)|/(2\pi)` and `x/2 - 45\sin(\pi x/90)/\pi`.
+
 - **`Min`, `Max`, `ElementMin`, `ElementMax`, `Clamp` and `Sort` order a
   `Measurement` by its nominal value.** A quadrature result is a
   `Measurement(nominal, error)` under `.N()`, and `Add`, `Multiply`, `Abs` and

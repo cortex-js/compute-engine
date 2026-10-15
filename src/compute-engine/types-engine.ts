@@ -1260,6 +1260,20 @@ export interface IComputeEngine {
    * @internal */
   readonly _atTransientPrecision: boolean;
 
+  /** Run `fn` with the angular unit `unit`, then restore the previous unit,
+   * without a reset of the engine. The symbolic integrator runs its radian
+   * rules this way in another unit. A value computed inside `fn` is not
+   * stored (see `_atTransientConfiguration`).
+   * @internal */
+  _withTransientAngularUnit<T>(unit: AngularUnit, fn: () => T): T;
+
+  /** True while `_withTransientPrecision` or `_withTransientAngularUnit`
+   * runs a function. The memos of evaluated values are then bypassed, so
+   * that a value computed at the transient precision or in the transient
+   * angular unit is not served afterwards.
+   * @internal */
+  readonly _atTransientConfiguration: boolean;
+
   /** The state-event choke point
    * (`docs/EFFECTS-MODEL.md` §3): write
    * sites report what happened; the lifecycle's dispatch table

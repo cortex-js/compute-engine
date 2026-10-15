@@ -1731,6 +1731,24 @@ export class ComputeEngine implements IComputeEngine {
     return this._numericConfiguration.isTransientPrecision;
   }
 
+  /** Run `fn` with the angular unit `unit` without a reset of the engine:
+   * see `EngineNumericConfiguration.withTransientAngularUnit`.
+   * @internal */
+  _withTransientAngularUnit<T>(unit: AngularUnit, fn: () => T): T {
+    return this._numericConfiguration.withTransientAngularUnit(unit, fn);
+  }
+
+  /** True while `_withTransientPrecision` or `_withTransientAngularUnit`
+   * runs a function: a value computed now must not be stored where a reader
+   * at the working precision, or in the working angular unit, can find it.
+   * @internal */
+  get _atTransientConfiguration(): boolean {
+    return (
+      this._numericConfiguration.isTransientPrecision ||
+      this._numericConfiguration.isTransientAngularUnit
+    );
+  }
+
   /**
    * The unit used for unitless angles in trigonometric functions.
    *

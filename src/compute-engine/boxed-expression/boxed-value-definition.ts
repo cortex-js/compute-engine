@@ -572,7 +572,7 @@ export class _BoxedValueDefinition
     if (
       this._isConstant &&
       this._defValue !== undefined &&
-      this._engine._atTransientPrecision
+      this._engine._atTransientConfiguration
     )
       return dynamicValue(this._engine, this._defValue);
     if (this._value === null)

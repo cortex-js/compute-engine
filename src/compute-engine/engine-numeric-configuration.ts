@@ -25,6 +25,8 @@ export class EngineNumericConfiguration {
   private _negBignumTolerance: BigDecimal;
   /** The number of `withTransientPrecision` calls in progress. */
   private _transientPrecisionDepth = 0;
+  /** The number of `withTransientAngularUnit` calls in progress. */
+  private _transientAngularUnitDepth = 0;
 
   constructor(options?: {
     precision?: number | 'machine';
@@ -103,6 +105,40 @@ export class EngineNumericConfiguration {
   /** True while a `withTransientPrecision` call is in progress. */
   get isTransientPrecision(): boolean {
     return this._transientPrecisionDepth > 0;
+  }
+
+  /**
+   * Run `fn` with the angular unit `unit`, then restore the previous unit.
+   *
+   * Unlike the `angularUnit` setter, this does not reset the engine: no
+   * configuration event, no purge of the caches, no recomputation of the
+   * constants, and the scratch declaration scopes of the running computation
+   * are kept. So, as under `withTransientPrecision`, a reader must not store
+   * a value it computes inside `fn` where a reader in the other unit can
+   * find it: `isTransientAngularUnit` is true while `fn` runs, and the memos
+   * that hold evaluated values (`_atTransientConfiguration`) are bypassed.
+   *
+   * The symbolic integrator uses it: its rules are the radian ones, so in
+   * another unit it integrates an integrand rewritten to the radian
+   * convention with the engine in radian mode (`withRadianConvention` in
+   * `symbolic/angular-unit.ts`).
+   */
+  withTransientAngularUnit<T>(unit: AngularUnit, fn: () => T): T {
+    const previous = this._angularUnit;
+    if (previous === unit) return fn();
+    this._angularUnit = unit;
+    this._transientAngularUnitDepth += 1;
+    try {
+      return fn();
+    } finally {
+      this._transientAngularUnitDepth -= 1;
+      this._angularUnit = previous;
+    }
+  }
+
+  /** True while a `withTransientAngularUnit` call is in progress. */
+  get isTransientAngularUnit(): boolean {
+    return this._transientAngularUnitDepth > 0;
   }
 
   get angularUnit(): AngularUnit {

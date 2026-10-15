@@ -109,22 +109,6 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
-### The antiderivative of `Sin` and `Cos` ignores the degree angular unit (OPEN, small — found 2026-10-15 by the review of the periodic cell sums)
-
-With `ce.angularUnit = 'deg'`, `∫₀^{180} sin x dx` evaluates to `2`, where
-the value is `360/π` (`.N()` gives `114.59`), and `∫ sin x dx` is `−cos x`,
-where it is `−(180/π) cos x`. The derivative is right in the same mode
-(`D(sin x)` is `(π/180) cos x`, from `symbolic/derivative.ts`), but
-`symbolic/antiderivative.ts` has no `angularUnit` handling: its table and the
-power-rule and substitution routes read every trigonometric argument in
-radians. The piecewise partitioner inherits the defect: `∫₀^{360} |sin x| dx`
-evaluates to `4` where it is `720/π`. The period shortcut of
-`symbolic/discrete-integrate.ts` declines outside radian mode so that it does
-not add a second wrong closed form (its test pins the `.N()` value). The fix
-is a chain-rule factor on the antiderivative of a trigonometric function of
-the integration variable when the unit is not radians, mirroring the
-derivative.
-
 ### The compiled body of a user function spells the coordinate of an absent point as `NaN`, where the interpreter keeps `Missing` (OPEN, small — found 2026-10-14 by the review of the Tycho row 374 tuple collapse)
 
 With `W = (p, s) ↦ (s·PointX(p), s·PointY(p), s·PointZ(p))` and `L` a list of

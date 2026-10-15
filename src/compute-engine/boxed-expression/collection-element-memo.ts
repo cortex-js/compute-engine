@@ -904,7 +904,7 @@ export function validElementMemo(
   // more digits than the ones a memo holds, and the ones a read inside the
   // window would store would be served later at the precision of the
   // engine: no entry is served or stored there (see the store sites).
-  if (ce._atTransientPrecision) return undefined;
+  if (ce._atTransientConfiguration) return undefined;
   const entry = elementMemoCaches.get(expr);
   if (!entry) {
     if (CACHE_STATS) recordCache('elementMemo', 'missCold');
@@ -1032,7 +1032,7 @@ function commitRecordedWalk(
   }
   // Elements computed inside a transient precision window are not stored
   // (see `validElementMemo`).
-  if (expr.engine._atTransientPrecision) return;
+  if (expr.engine._atTransientConfiguration) return;
   elementMemoCaches.set(expr, {
     worldVersion: expr.engine._worldVersion,
     factsHidden: expr.engine._factsHidden(),
@@ -1244,7 +1244,7 @@ export function elementMemoFillTo(
     sequenceReadStopCount() === sequenceStopsBefore &&
     // Elements computed inside a transient precision window are not stored
     // (see `validElementMemo`).
-    !expr.engine._atTransientPrecision
+    !expr.engine._atTransientConfiguration
   ) {
     const ce = expr.engine;
     elementMemoCaches.set(expr, {

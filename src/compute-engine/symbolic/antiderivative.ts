@@ -9,6 +9,7 @@ import { add } from '../boxed-expression/arithmetic-add.js';
 import { matchAnyRules } from '../boxed-expression/rules.js';
 import { expandAll } from '../boxed-expression/expand.js';
 import { differentiate } from './derivative.js';
+import { withRadianConvention } from './angular-unit.js';
 import { specialAntiderivative } from './special-integrate.js';
 import { findUnivariateRoots } from '../boxed-expression/solve.js';
 import {
@@ -851,6 +852,57 @@ function tryPolyExpTrigIntegral(
 
   if (hasInexactNumber(result)) return null;
   return result;
+}
+
+/**
+ * Replace each product of two or more constant factors that multiplies the
+ * integration variable (`2·π·x`, `a·b·x`) by one fresh symbol, so that the
+ * rules, whose patterns bind the coefficient of `_x` to the single wildcard
+ * `_a`, match it: `∫ tan(2πx) dx` and `∫ sin²(πx/180) dx` were left
+ * unevaluated while `∫ tan(πx) dx` was not. The returned substitution maps
+ * each symbol back to its product. A product whose value is not real is left
+ * as it is: the rules that require a real coefficient check its numeric
+ * value, which a fresh symbol does not carry.
+ */
+function collapseLinearCoefficients(
+  expr: Expression,
+  index: string
+): [Expression, Record<string, Expression>] {
+  const ce = expr.engine;
+  const restore: Record<string, Expression> = {};
+  const walk = (e: Expression): Expression => {
+    if (!isFunction(e)) return e;
+    if (e.operator === 'Multiply' && e.ops.some((op) => sym(op) === index)) {
+      const constants = e.ops.filter((op) => !op.has(index));
+      const others = e.ops.filter((op) => op.has(index));
+      if (constants.length >= 2 && others.length === 1) {
+        // A factor that is not real (`i`, or a symbol declared complex) is
+        // left as it is: the rules that require a real coefficient check
+        // its numeric value, which a fresh symbol does not carry.
+        const real = constants.every((c) => {
+          if (c.type.matches('imaginary')) return false;
+          const value = c.N();
+          return !(isNumber(value) && value.isComplex);
+        });
+        if (real) {
+          // A name that neither the expression nor the scope chain knows,
+          // so that the symbol is fresh and the restoring substitution
+          // touches no other occurrence.
+          let n = Object.keys(restore).length + 1;
+          let name = `INTEGRALCOEF${n}`;
+          while (expr.has(name) || ce.lookupDefinition(name) !== undefined)
+            name = `INTEGRALCOEF${++n}`;
+          restore[name] = ce.function('Multiply', constants);
+          return ce.function('Multiply', [ce.symbol(name), others[0]]);
+        }
+      }
+    }
+    const ops = e.ops.map(walk);
+    return ops.every((op, i) => op === e.ops[i])
+      ? e
+      : ce.function(e.operator, ops);
+  };
+  return [walk(expr), restore];
 }
 
 function filter(sub: BoxedSubstitution): boolean {
@@ -3024,6 +3076,22 @@ function constantSplitFactors(expr: Expression): Expression[] {
 }
 
 export function antiderivative(fn: Expression, index: string): Expression {
+  const ce = fn.engine;
+  if (ce.angularUnit === 'rad') return antiderivativeInRadians(fn, index);
+  // The table, the rules and the substitution routes below hold the RADIAN
+  // antiderivatives, and the derivative they call scales for the unit, so in
+  // another unit the two disagree (`∫ sin x dx` was `−cos x` in degree mode,
+  // where it is `−(180/π) cos x`). The integrand is rewritten to the radian
+  // convention with an exact factor, integrated with the engine in radian
+  // mode (the evaluations and derivatives inside then read the rewritten
+  // tree in the convention it is written in), and the result is mapped back
+  // to the engine's unit (`withRadianConvention`).
+  return withRadianConvention(fn, index, (radian) =>
+    antiderivativeInRadians(radian, index)
+  );
+}
+
+function antiderivativeInRadians(fn: Expression, index: string): Expression {
   // Bound the symbolic-integration recursion by the engine deadline: some
   // rational/parametric integrands (e.g. a linear numerator over a fully
   // symbolic quadratic) explore an unbounded search here, and without a
@@ -4258,12 +4326,24 @@ export function antiderivative(fn: Expression, index: string): Expression {
   // Apply a pattern matching rule...
   const rules = ce.rules(INTEGRATION_RULES);
   const xfn = expandAll(fn).subs({ [index]: '_x' }, { canonical: true });
-  const result = matchAnyRules(
-    xfn,
-    rules,
-    { _x: ce.symbol('_x') },
-    { useVariations: true, form: 'canonical' }
-  );
+  let result: Expression[] | null = null;
+  // The fresh coefficient symbols of `collapseLinearCoefficients` are
+  // declared in a scope of their own, so that none stays declared in the
+  // caller's scope; they are substituted back before the scope is popped.
+  ce.pushScope();
+  try {
+    const [collapsed, restore] = collapseLinearCoefficients(xfn, '_x');
+    result = matchAnyRules(
+      collapsed,
+      rules,
+      { _x: ce.symbol('_x') },
+      { useVariations: true, form: 'canonical' }
+    );
+    if (result && result[0] && Object.keys(restore).length > 0)
+      result = [result[0].subs(restore, { canonical: true })];
+  } finally {
+    ce.popScope();
+  }
 
   if (result && result[0]) return result[0].subs({ _x: index });
 

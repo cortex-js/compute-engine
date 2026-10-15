@@ -28,6 +28,7 @@ import {
   rootMultiplicity,
   solutionRecord,
 } from './solver-utils.js';
+import { withRadianConvention } from './angular-unit.js';
 
 interface LinearTermCoefficients {
   derivative: Expression;
@@ -652,7 +653,13 @@ function dSolveAntiderivative(expr: Expression, variable: string): Expression {
   const ce = expr.engine;
   if (ce._integrationProvider) {
     try {
-      const provided = ce._integrationProvider(expr, variable);
+      // The provider holds radian antiderivatives: in another angular unit
+      // it runs on the integrand in the radian convention, as `Integrate`
+      // does (`withRadianConvention`).
+      const provider = ce._integrationProvider;
+      const provided = withRadianConvention(expr, variable, (f) =>
+        provider(f, variable)
+      );
       if (provided && !hasOperator(provided, 'Integrate')) return provided;
     } catch {
       // Fall through to the built-in antiderivative, matching Integrate.

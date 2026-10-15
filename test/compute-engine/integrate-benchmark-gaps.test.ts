@@ -84,19 +84,25 @@ describe('nonlinear absolute values and signs', () => {
       integral(['Abs', ['Sin', ['Square', 'x']]], 0, 20).has('Integrate')
     ).toBe(true);
   });
-  test('the period shortcut for |sin| declines when the angular unit is not radians', () => {
+  test('the period shortcut for |sin| follows the angular unit', () => {
     const engine = new ComputeEngine();
     engine.angularUnit = 'deg';
     const body = engine.box(['Abs', ['Sin', 'x']]);
-    expect(
-      integrateDiscrete(engine, body, 'x', engine.Zero, engine.number(360))
-    ).toBeUndefined();
-    // Only the numeric value is checked. The exact value from evaluate()
-    // also depends on the antiderivative of Sin, which does not scale for
-    // degrees.
-    expect(
-      engine.box(['Integrate', body, ['Limits', 'x', 0, 360]]).N().re
-    ).toBeCloseTo(720 / Math.PI, 8);
+    // The period is 360 and one period of |sin| integrates to 720/π
+    const closed = integrateDiscrete(
+      engine,
+      body,
+      'x',
+      engine.Zero,
+      engine.number(360)
+    );
+    expect(closed).toBeDefined();
+    expect(closed!.N().re).toBeCloseTo(720 / Math.PI, 10);
+    const result = engine
+      .box(['Integrate', body, ['Limits', 'x', 0, 36000]])
+      .evaluate();
+    expect(result.has('Integrate')).toBe(false);
+    expect(result.N().re).toBeCloseTo(72000 / Math.PI, 8);
   });
   test('a constant piecewise factor does not make an infinite-bound integral inert', () => {
     const constant = ce.box([
