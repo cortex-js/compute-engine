@@ -98,7 +98,7 @@
 
 - **`Numerator`, `Denominator` and `NumeratorDenominator` keep extra
   operands when they canonicalize**
-  ([#ISSUE](https://github.com/cortex-js/compute-engine/issues/ISSUE),
+  ([#442](https://github.com/cortex-js/compute-engine/issues/442),
   contributed by [enumeratio](https://github.com/enumeratio)). The quotient
   shortcut took the part of a first operand that is a `Divide` or `Rational`
   and dropped the rest of the call, so `Numerator(a/b, x)` canonicalized to `a`
