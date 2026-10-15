@@ -81,6 +81,10 @@ import '../symbolic/explain-derivative.js';
 import { antiderivative } from '../symbolic/antiderivative.js';
 import { integratePiecewise } from '../symbolic/piecewise-integrate.js';
 import {
+  integrateBoseMoment,
+  polygammaDomainKnown,
+} from '../symbolic/special-integrate.js';
+import {
   definiteIntegralByResidues,
   divergentIntegralValue,
   singularPathValue,
@@ -4753,6 +4757,7 @@ volumes
             // case we fall back to the built-in antiderivative. With no provider
             // registered (the default), behavior is unchanged.
             let antideriv: Expression | null = null;
+            let providerEndpoint: Expression | undefined;
             let pole: ReturnType<typeof interiorPoleVerdict>;
             // Work on the LIFTED integrand: both paths below unwrap the
             // `Function`/`Block` scaffolding anyway, and lifting it here
@@ -4832,7 +4837,11 @@ volumes
               // where the pieces resolve the convergence condition (see
               // `integrateAtSymbolicExponentZeros`).
               const split =
+                integrateBoseMoment(integrand, variable, lower, upper) ??
                 integratePiecewise(ce, integrand, variable, lower, upper) ??
+                (!polygammaDomainKnown(integrand, variable, lower, upper)
+                  ? 'inert'
+                  : undefined) ??
                 integrateAcrossKinks(
                   ce,
                   integrand,
@@ -4880,7 +4889,49 @@ volumes
                 antideriv = null;
               }
             }
-            if (!antideriv || antideriv.operator === 'Integrate')
+            // A closed provider primitive need not have usable endpoint values
+            // (or may contain a variable Sign). Prefer a closed built-in
+            // alternative in that case; it still passes all pole, branch and
+            // endpoint checks below. Do not temporarily unregister the provider:
+            // nested evaluations must retain their engine configuration.
+            if (
+              antideriv &&
+              !antideriv.has('Integrate') &&
+              antideriv.isPure &&
+              isDefinite &&
+              integrand.isPure &&
+              lower.isPure &&
+              upper.isPure
+            ) {
+              const candidate = ce
+                .expr([
+                  'EvaluateAt',
+                  ['Function', antideriv, variable],
+                  lower,
+                  upper,
+                ])
+                .evaluate({ numericApproximation });
+              providerEndpoint = candidate;
+              if (
+                hasVariableSign(antideriv, variable) ||
+                !candidate.isValid ||
+                candidate.isNaN === true ||
+                candidate.isInfinity === true ||
+                candidate.has(['EvaluateAt', 'Limit', 'Integrate'])
+              ) {
+                const alternative = antiderivative(integrand, variable);
+                if (
+                  alternative.isValid &&
+                  alternative.isNaN !== true &&
+                  !alternative.has('Integrate') &&
+                  !hasVariableSign(alternative, variable)
+                ) {
+                  antideriv = alternative;
+                  providerEndpoint = undefined;
+                }
+              }
+            }
+            if (!antideriv || antideriv.has('Integrate'))
               antideriv = antiderivative(integrand, variable);
 
             if (sym(lower) === 'Nothing' && sym(upper) === 'Nothing') {
@@ -5011,7 +5062,8 @@ volumes
               // FTC at a limit-point bound (0, ±∞): emit a convergence-guarded
               // `When`, or keep the integral inert (fail closed) rather than leak
               // an indeterminate form (`0^…`, `∞^…`).
-              let raw = at.evaluate({ numericApproximation });
+              let raw =
+                providerEndpoint ?? at.evaluate({ numericApproximation });
               // An antiderivative with no value at a bound can evaluate to
               // an error rather than `NaN` (`cos(1/t)` at `0` is `cos(~∞)`,
               // an incompatible-type error): it is no value either, and is

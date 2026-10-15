@@ -1,0 +1,133 @@
+{
+  "base_revision": "2793af9d1acb105a6976a15beb6f27ae5305b1ed",
+  "date": "2026-10-14",
+  "environment": {
+    "os": "Windows",
+    "node": "v22.14.0",
+    "cpu": "Intel Core Ultra 7 165U",
+    "logical_cpus": 14
+  },
+  "reproduction": {
+    "native_cases": "npx tsx scripts/profile-integration-gaps.ts",
+    "rubi_cases": "npx tsx scripts/profile-integration-gaps.ts --rules",
+    "paired_compilation": "npx tsx scripts/profile-integration-gaps.ts --compile-comparison",
+    "rubi_guard_diagnostics": "npx tsx scripts/profile-integration-gaps.ts --rubi-guards"
+  },
+  "compilation": {
+    "rules": 6574,
+    "distinct_lhs_variable_pairs": 4016,
+    "avoided_duplicate_compilations": 2558,
+    "skipped_rules_in_every_sample": 0,
+    "cache_lifetime": "One compilation call, never shared between engines",
+    "samples_ms": [
+      {
+        "sample": 0,
+        "order": ["uncached", "cached"],
+        "uncached": 3652.5893,
+        "cached": 4388.5508
+      },
+      {
+        "sample": 1,
+        "order": ["cached", "uncached"],
+        "uncached": 5416.5784,
+        "cached": 4272.6251
+      },
+      {
+        "sample": 2,
+        "order": ["uncached", "cached"],
+        "uncached": 5440.9519,
+        "cached": 4264.9934
+      }
+    ],
+    "method": "Fresh Node process and engine for every sample, alternating cached/uncached order. Both implementations retain all compiled rules and skipped-rule metadata. Timing excludes module startup and engine construction. No other agent validation jobs ran concurrently.",
+    "caveat": "Three local samples are not a universal speedup or CI threshold. One cached sample is slower than its pair. Exploratory same-process/count-only timings were excluded because their JIT warmup and output retention were not comparable.",
+    "baseline_cpu_profile": {
+      "method": "node --cpu-prof with the --rules fixture on unchanged main sources",
+      "load_wall_ms": 18893.1717,
+      "samples_under_compileRuleDocs_ms": 18198.924,
+      "idempotent_reload_wall_ms": 0.0718,
+      "caveat": "Sampling and profiler overhead apply; the compilation sample total is inclusive, not per-rule self time. Raw CPU profiles are local diagnostics, not required benchmark inputs."
+    }
+  },
+  "rubi_guard_diagnostics": {
+    "time_limit_ms": 60000,
+    "existing_test_time_limits_ms": { "R30": 30000, "R8": 60000 },
+    "default_step_budget": 300000,
+    "samples": [
+      {
+        "family": "Tanh(x)^2/(a+b*Tanh(x))",
+        "ms": 19564.8643,
+        "closed": true,
+        "steps": 10178,
+        "hangs": []
+      },
+      {
+        "family": "(e+f*x)^3*Sinh(c+d*x)^3/(a+b*Sinh(c+d*x))",
+        "ms": 54672.4358,
+        "closed": true,
+        "steps": 154774,
+        "hangs": []
+      }
+    ],
+    "jest_reruns": {
+      "R8": "Passed on the feature branch when rerun",
+      "R30_baseline": "Passed on unchanged 2793af9d",
+      "R30_feature_serial": "Passed on the final feature branch with no competing validation jobs"
+    },
+    "caveat": "Both closed in a fresh diagnostic run. The 45-suite run under concurrent validation load had two failures in these existing tests. Successful reruns and the measured margin support timing sensitivity, but do not prove the exact cause of the earlier failures. No production or test timeout was raised."
+  },
+  "coverage": {
+    "benchmark": "https://github.com/KingArth0r/integral-benchmark",
+    "benchmark_revision": "830efd3f20829619bd99b235533ae6e94de2165b",
+    "benchmark_working_tree": "Existing local adapter/checkpoint/discrete-corpus extensions; unchanged by this CE PR",
+    "solver_timeout_seconds": 30,
+    "verifier_timeout_seconds": 20,
+    "jobs": 2,
+    "rules": false,
+    "measurement_stage": "Feature development build, pinned by the bundle hash below",
+    "feature_bundle_sha256": "eb23f780f7177a0549e5edb4e536cc4eff3393e924fd1bfaa9fb5b33b9a72ebf",
+    "pilot": {
+      "cases": 68,
+      "corpus_sha256": "361b35a99eda67782c1abb802ba7fd0f2974b99f546ed71b7234ddc37317afbe",
+      "base_verified": 53,
+      "feature_verified": 57,
+      "feature_verdicts": {
+        "identity-checked": 27,
+        "reference-match": 26,
+        "classification-match": 4,
+        "numerically-supported": 2,
+        "safe-rejection": 2,
+        "not-solved": 6,
+        "unverified": 1
+      },
+      "newly_verified": [
+        "pilot:nested-exp",
+        "pilot:erf",
+        "pilot:bessel",
+        "pilot:zeta-moment"
+      ],
+      "new_answer_not_verified": {
+        "id": "pilot:digamma",
+        "answer": ["LogGamma", "x"],
+        "verifier_detail": "Unsupported operator LogGamma"
+      }
+    },
+    "discrete": {
+      "cases": 20,
+      "base_verified": 15,
+      "feature_verified": 19,
+      "feature_verdicts": {
+        "reference-match": 18,
+        "classification-match": 1,
+        "not-solved": 1
+      },
+      "remaining_adapter_gap": "discrete:explicit-which (CE already handles Which, but this adapter does not translate it)"
+    },
+    "caveat": "These small, failure-driven fixtures are not representative CAS-wide coverage or speed rankings. Verification categories are kept distinct; the LogGamma answer is not counted as verified."
+  },
+  "mathematical_references": [
+    "https://dlmf.nist.gov/25.5.E1",
+    "https://dlmf.nist.gov/5.4.E14",
+    "https://dlmf.nist.gov/10.6"
+  ]
+}

@@ -9,6 +9,7 @@ import { add } from '../boxed-expression/arithmetic-add.js';
 import { matchAnyRules } from '../boxed-expression/rules.js';
 import { expandAll } from '../boxed-expression/expand.js';
 import { differentiate } from './derivative.js';
+import { specialAntiderivative } from './special-integrate.js';
 import { findUnivariateRoots } from '../boxed-expression/solve.js';
 import {
   cancelCommonFactors,
@@ -3058,6 +3059,37 @@ export function antiderivative(fn: Expression, index: string): Expression {
 
   // Is it a constant?
   if (!fn.has(index)) return ce.expr(['Multiply', fn, ce.symbol(index)]);
+
+  const special = specialAntiderivative(fn, index);
+  if (special) return special;
+
+  // An exponential of a sum hides the product needed by reverse-chain
+  // matching, e.g. exp(x + exp(x)). Splitting e^(a+b) is branch-safe, unlike
+  // arbitrary complex powers. Only try a bounded number of summands, and do
+  // not recurse through the full integrator if the chain match fails.
+  const exponent = isFunction(fn, 'Exp')
+    ? fn.op1
+    : isFunction(fn, 'Power') && sym(fn.op1) === 'ExponentialE'
+      ? fn.op2
+      : undefined;
+  if (
+    isFunction(exponent, 'Add') &&
+    fn.isPure &&
+    exponent.nops <= 8 &&
+    exponent.ops.some(
+      (op) =>
+        op.has(index) &&
+        (isFunction(op, 'Exp') ||
+          (isFunction(op, 'Power') && sym(op.op1) === 'ExponentialE'))
+    )
+  ) {
+    const product = ce._fn(
+      'Multiply',
+      exponent.ops.map((op) => ce.function('Exp', [op]))
+    );
+    const nested = tryUSubstitution(product, index);
+    if (nested && !nested.has('Integrate')) return nested;
+  }
 
   // ∫√x dx and ∫1/√x dx. `√x` and `x^(−1/2)` canonicalize to `Sqrt(x)` and
   // `Divide(1, Sqrt(x))` — not `Power` nodes — so the Power-based power rule

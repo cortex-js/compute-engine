@@ -311,6 +311,7 @@ const DERIVATIVES_TABLE = {
   ],
   // d/dx ln(Γ(x)) = ψ(x) (digamma function)
   GammaLn: ['Digamma', '_'],
+  LogGamma: ['Digamma', '_'],
   // d/dx ψ(x) = ψ₁(x) (trigamma function)
   // https://en.wikipedia.org/wiki/Trigamma_function
   Digamma: ['Trigamma', '_'],

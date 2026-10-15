@@ -8,6 +8,7 @@ import { differentiate } from './derivative.js';
 import { exactSign } from './contour.js';
 import { checkDeadline } from '../../common/interruptible.js';
 import { shadowsLibraryName } from '../library-shadowing.js';
+import { integrateDiscrete } from './discrete-integrate.js';
 
 const PIECEWISE = new Set([
   'If',
@@ -17,6 +18,8 @@ const PIECEWISE = new Set([
   'Floor',
   'Ceil',
   'Fract',
+  'Abs',
+  'Sign',
 ]);
 const COMPARISONS = new Set([
   'Less',
@@ -76,7 +79,14 @@ export function integratePiecewise(
       return false;
     }
     if (!isFunction(e)) return false;
-    if (PIECEWISE.has(e.operator) && e.has(variable)) return true;
+    if (PIECEWISE.has(e.operator) && e.has(variable)) {
+      if (e.operator !== 'Abs' && e.operator !== 'Sign') return true;
+      // Affine kinks can depend on an enclosing integral's variable. The
+      // existing kink integrator carries those range assumptions; the finite
+      // root partitioner must not intercept that path.
+      const coefficients = getPolynomialCoefficients(e.op1, variable);
+      if (!coefficients || coefficients.length > 2) return true;
+    }
     return e.ops.some((op, i) => !binds(e, i, variable) && contains(op));
   };
   if (!contains(integrand)) return exhausted ? 'inert' : undefined;
@@ -84,12 +94,26 @@ export function integratePiecewise(
   if (!integrand.isPure || !lower.isPure || !upper.isPure) return 'inert';
   const a = lower.evaluate();
   const b = upper.evaluate();
-  if (!finiteReal(a) || !finiteReal(b)) return 'inert';
+  if (!finiteReal(a) || !finiteReal(b))
+    return integrand.has([
+      'If',
+      'Which',
+      'Min',
+      'Max',
+      'Floor',
+      'Ceil',
+      'Fract',
+    ])
+      ? 'inert'
+      : undefined;
   const direction = sign(b.sub(a));
   if (direction === undefined) return 'inert';
   if (direction === 0) return ce.Zero;
   const lo = direction > 0 ? a : b;
   const hi = direction > 0 ? b : a;
+  const discrete = integrateDiscrete(ce, integrand, variable, lo, hi);
+  if (discrete !== undefined)
+    return direction > 0 ? discrete : discrete.neg().evaluate();
   const cuts: Expression[] = [];
   const domainChecks = new Set<Expression>();
   const rootCache = new Map<Expression, readonly Expression[] | undefined>();
