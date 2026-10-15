@@ -20,22 +20,30 @@ export function _setFieldAddN(fn: (...xs: Expression[]) => Expression): void {
   _addN = fn;
 }
 
-/** @category Tensors */
+/**
+ * The field of the cells of a tensor of type `dtype`.
+ *
+ * When `holdsFloat` is true (a float tensor, see `TensorData.holdsFloat`),
+ * the numeric fields read every cell back as a float, also a cell whose
+ * value is an integer. The `expression` field ignores it.
+ *
+ * @category Tensors */
 export function makeTensorField<DT extends keyof DataTypeMap>(
   ce: ComputeEngine,
-  dtype: DT
+  dtype: DT,
+  holdsFloat: boolean = false
 ): TensorField<DataTypeMap[DT]> {
   switch (dtype) {
     case 'float64':
     case 'float32':
     case 'int32':
     case 'uint8':
-      return new TensorFieldNumber(ce) as unknown as TensorField<
+      return new TensorFieldNumber(ce, holdsFloat) as unknown as TensorField<
         DataTypeMap[DT]
       >;
     case 'complex128':
     case 'complex64':
-      return new TensorFieldComplex(ce) as unknown as TensorField<
+      return new TensorFieldComplex(ce, holdsFloat) as unknown as TensorField<
         DataTypeMap[DT]
       >;
     case 'bool':
@@ -45,7 +53,7 @@ export function makeTensorField<DT extends keyof DataTypeMap>(
         DataTypeMap[DT]
       >;
     case undefined:
-      return new TensorFieldNumber(ce) as unknown as TensorField<
+      return new TensorFieldNumber(ce, holdsFloat) as unknown as TensorField<
         DataTypeMap[DT]
       >;
   }
@@ -59,7 +67,14 @@ export class TensorFieldNumber implements TensorField<number> {
   zero = 0;
   nan = NaN;
 
-  constructor(private ce: ComputeEngine) {}
+  /**
+   * @param holdsFloat When true, every cell is read back as a float
+   * (`expression()`), also a cell whose value is an integer.
+   */
+  constructor(
+    private ce: ComputeEngine,
+    private holdsFloat: boolean = false
+  ) {}
 
   cast(x: number, dtype: 'float64'): undefined | number;
   cast(x: number, dtype: 'float32'): undefined | number;
@@ -117,12 +132,21 @@ export class TensorFieldNumber implements TensorField<number> {
       //     ? x.map((x) => Number(x).toString())
       //     : Number(x).toString();
       case 'expression':
-        return Array.isArray(x) ? x.map((x) => ce.number(x)) : ce.number(x);
+        return Array.isArray(x)
+          ? x.map((x) => this.expression(x))
+          : this.expression(x);
     }
     throw new Error(`Cannot cast ${x} to ${dtype}`);
   }
 
+  /**
+   * The value of a cell as a number literal. `ce.number()` boxes a value
+   * that is an integer as an exact integer, and any other value as a float.
+   * In a float tensor, an integer value is boxed as a float too.
+   */
   expression(x: number): Expression {
+    if (this.holdsFloat && Number.isInteger(x))
+      return this.ce.number(this.ce._inexactNumericValue(x + 0));
     return this.ce.number(x);
   }
 
@@ -361,19 +385,25 @@ export class TensorFieldExpression implements TensorField<Expression> {
  * `ce.number()` of a `Complex` would make such a value exact, as it does
  * for a value from the host.
  *
- * A cell with a zero imaginary part is boxed by `ce.number()` of its real
- * part, as a `float64` cell is (`TensorFieldNumber.expression()`): an exact
- * integer entry of a complex matrix (the `0` and `2` of
- * `[[1.5+i, 0], [0, 2]]`) is held in such a cell and reads back exact. A
- * NaN or infinite part is boxed by `ce.number()` too, which maps it to
- * `NaN`, `ComplexInfinity` or a signed infinity.
+ * A cell with a zero imaginary part is real. In a float tensor
+ * (`holdsFloat` is true, see `TensorData.holdsFloat`) it is a float, also
+ * when its value is an integer: the `0` and `2` of `[[1.5+i, 0], [0, 2]]`
+ * read back as floats, as the matrix has a float entry. Otherwise it is
+ * boxed by `ce.number()` of its real part, as a `float64` cell is
+ * (`TensorFieldNumber.expression()`), and an integer value is exact. A NaN
+ * or infinite part is boxed by `ce.number()`, which maps it to `NaN`,
+ * `ComplexInfinity` or a signed infinity.
  */
 export function complexCellExpression(
   ce: ComputeEngine,
-  z: Complex
+  z: Complex,
+  holdsFloat: boolean = false
 ): Expression {
-  if (z.im === 0 || !Number.isFinite(z.re) || !Number.isFinite(z.im))
-    return ce.number(z);
+  if (!Number.isFinite(z.re) || !Number.isFinite(z.im)) return ce.number(z);
+  if (z.im === 0)
+    return holdsFloat && Number.isInteger(z.re)
+      ? ce.number(ce._inexactNumericValue(z.re + 0))
+      : ce.number(z);
   return ce.number(ce._inexactNumericValue({ re: z.re + 0, im: z.im }));
 }
 
@@ -383,9 +413,15 @@ export class TensorFieldComplex implements TensorField<Complex> {
   nan: Complex;
 
   private ce: ComputeEngine;
+  private holdsFloat: boolean;
 
-  constructor(ce: ComputeEngine) {
+  /**
+   * @param holdsFloat When true, every cell is read back as a float
+   * (`expression()`), also a real cell whose value is an integer.
+   */
+  constructor(ce: ComputeEngine, holdsFloat: boolean = false) {
     this.ce = ce;
+    this.holdsFloat = holdsFloat;
     this.one = ce.complex(1);
     this.zero = ce.complex(0);
     this.nan = ce.complex(NaN);
@@ -470,7 +506,7 @@ export class TensorFieldComplex implements TensorField<Complex> {
   }
 
   expression(z: Complex): Expression {
-    return complexCellExpression(this.ce, z);
+    return complexCellExpression(this.ce, z, this.holdsFloat);
   }
 
   isZero(z: Complex): boolean {

@@ -252,14 +252,16 @@ describe('THE COMPLEX RESULT OF A NUMERIC ROUTINE IS A FLOAT', () => {
 describe('A COMPLEX FLOAT IN A TENSOR', () => {
   const z = ce.parse('1.0+1.0i');
 
-  test('Transpose keeps a float entry a float and an exact entry exact', () => {
+  test('Transpose of a matrix with a float entry gives a matrix of floats', () => {
+    // The matrix holds a float, so every cell is read back as a float, also
+    // the cells of the exact entries `3` and `0` (`TensorData.holdsFloat`).
     const t = ce
       .box(['Transpose', ['List', ['List', z, 3], ['List', 0, z]]])
       .evaluate();
     expect(t.json).toEqual([
       'List',
-      ['List', ['Complex', { num: '1.0' }, { num: '1.0' }], 0],
-      ['List', 3, ['Complex', { num: '1.0' }, { num: '1.0' }]],
+      ['List', ['Complex', { num: '1.0' }, { num: '1.0' }], { num: '0.0' }],
+      ['List', { num: '3.0' }, ['Complex', { num: '1.0' }, { num: '1.0' }]],
     ]);
   });
 
@@ -280,7 +282,8 @@ describe('A COMPLEX FLOAT IN A TENSOR', () => {
       ])
       .evaluate();
     expect(isExact(t.ops![0].ops![0])).toBe(false);
-    expect(t.ops![1].ops![1].json).toEqual(2);
+    // A product computed from a matrix with a float entry is a float
+    expect(t.ops![1].ops![1].json).toEqual({ num: '2.0' });
   });
 
   test('Determinant', () => {

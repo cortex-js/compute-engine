@@ -3,7 +3,10 @@ import { Complex } from 'complex.js';
 import type { Expression, BoxedSubstitution, Rule } from '../global-types.js';
 
 import { durandKernerRoots } from '../numerics/polynomial-roots.js';
-import { checkDeadline } from '../../common/interruptible.js';
+import {
+  checkDeadline,
+  throwIfCallerCancellation,
+} from '../../common/interruptible.js';
 import { mul } from '../boxed-expression/arithmetic-mul-div.js';
 import { add } from '../boxed-expression/arithmetic-add.js';
 import { matchAnyRules } from '../boxed-expression/rules.js';
@@ -117,6 +120,8 @@ function tryIntegrationByParts(
 ): Expression | null {
   if (factors.length < 2 || depth > 2) return null; // Limit recursion depth
   if (byPartsFrames >= MAX_BY_PARTS_FRAMES) return null;
+  // One step of the budget of `antiderivative()` for each attempt.
+  checkDeadline(factors[0].engine._deadlineFrame);
 
   byPartsFrames += 1;
   try {
@@ -386,6 +391,8 @@ function tryUSubstitution(fn: Expression, index: string): Expression | null {
     const factor = factors[i];
     const innerFunc = getInnerFunction(factor, index);
     if (!innerFunc) continue;
+    // One step of the budget of `antiderivative()` for each attempt.
+    checkDeadline(ce._deadlineFrame);
 
     const { outer, inner } = innerFunc;
 
@@ -499,6 +506,8 @@ function tryLinearSubstitution(
   const ce = fn.engine;
   const innerInfo = getInnerFunction(fn, index);
   if (!innerInfo) return null;
+  // One step of the budget of `antiderivative()` for each attempt.
+  checkDeadline(ce._deadlineFrame);
 
   const { outer, inner } = innerInfo;
 
@@ -3075,7 +3084,124 @@ function constantSplitFactors(expr: Expression): Expression[] {
   return [expr];
 }
 
+/**
+ * The step budget of one top-level call of the built-in antiderivative
+ * (`antiderivative()`). A step is one `checkDeadline` call on the engine
+ * frame: one entry in the recursive antiderivative, one integration by parts,
+ * one substitution tried, one rule of `INTEGRATION_RULES` tried, one rule
+ * that `replace()` tries (a rule step, which this budget counts and the
+ * budgets of Rubi and of the compiler do not; see `StepBudget` in
+ * `common/interruptible.ts`), and the other checkpoints of the engine code
+ * that the integrator calls (evaluation, expansion, simplification). The
+ * recursive calls, and the integrals that the integrator evaluates inside the
+ * call, spend steps from the same budget.
+ *
+ * When the budget is spent, the result is the unevaluated `Integrate` of the
+ * integrand, as the Rubi driver returns when its budget (`RUBI_STEP_BUDGET`
+ * in `rubi/driver.ts`) is spent. A step budget, not a wall-clock budget,
+ * decides when the search gives up, so the same integrand gives the same
+ * answer on every machine. A deadline of a caller (`ce.withTimeLimit`) or a
+ * step budget of a caller (`ce.withStepBudget`) still applies inside, and its
+ * expiry goes to the caller.
+ */
+//
+// Calibrated with the 93 test files that use `Integrate`, `DSolve` or
+// `antiderivative` (1,663 top-level calls, rule steps counted): the median
+// was 4 steps, the 99th percentile 765, and the most 11,442 (the seven-deep
+// chain of `compile-interval-integrate.test.ts`). The budget is about nine
+// times the most. The integrand `(1 + sin y + cos 2y)^12·e^y`, which has no
+// elementary antiderivative, spends the budget in about 1 s on the
+// development machine.
+export const ANTIDERIVATIVE_STEP_BUDGET = 100_000;
+
+/**
+ * The step budget that `antiderivative()` uses. It is
+ * `ANTIDERIVATIVE_STEP_BUDGET`; a test can set a smaller value, to spend the
+ * budget in less time.
+ *
+ * @internal
+ */
+export const antiderivativeBudget: { steps: number } = {
+  steps: ANTIDERIVATIVE_STEP_BUDGET,
+};
+
+/** The label of the span that holds the budget of `antiderivative()`. */
+const ANTIDERIVATIVE_SPAN = 'integrate:antiderivative';
+
+/**
+ * The steps that the last top-level call of `antiderivative()` spent (see
+ * `ANTIDERIVATIVE_STEP_BUDGET`), and if the budget was spent before the
+ * search ended. A diagnostic: it is shared by every engine.
+ */
+export const antiderivativeStats: { steps: number; spent: boolean } = {
+  steps: 0,
+  spent: false,
+};
+
+/**
+ * Run `fn` in a span labelled `label` that has a step budget of `steps`, and
+ * return `onSpent()` if that budget is spent before `fn` ends.
+ *
+ * The budget counts rule steps (`ruleSteps` of `StepBudget`). Only an
+ * expiry of this span becomes `onSpent()`. An expiry of an enclosing
+ * span (a deadline or a step budget of the caller) is thrown again, to the
+ * caller, and so is every other error. `stats`, when given, receives the
+ * steps that `fn` spent and if the budget was spent.
+ */
+export function withIntegrationStepBudget<T>(
+  ce: Expression['engine'],
+  limit: { steps: number; label: string },
+  fn: () => T,
+  onSpent: () => T,
+  stats?: { steps: number; spent: boolean }
+): T {
+  try {
+    return ce._withBudget({ ...limit, ruleSteps: true }, () => {
+      const budget = ce._deadlineFrame?.budgets?.at(-1);
+      try {
+        return fn();
+      } finally {
+        if (stats) {
+          stats.steps = limit.steps - (budget?.left ?? limit.steps);
+          stats.spent = (budget?.left ?? 0) < 0;
+        }
+      }
+    });
+  } catch (e) {
+    // This runs after the span has closed, so `ce._deadlineFrame` is the
+    // frame of the caller. When that frame has expired, its own expiry is
+    // thrown.
+    throwIfCallerCancellation(e, ce._deadlineFrame);
+    // The name is checked, not `instanceof`: a plugin bundle has its own
+    // copy of the `CancellationError` class.
+    if (
+      e instanceof Error &&
+      e.name === 'CancellationError' &&
+      (e as { cause?: unknown }).cause === 'step-budget' &&
+      (e as { attribution?: string }).attribution === limit.label
+    )
+      return onSpent();
+    throw e;
+  }
+}
+
 export function antiderivative(fn: Expression, index: string): Expression {
+  const ce = fn.engine;
+  // A call made while a call of `antiderivative()` is active (a recursive
+  // call, or an integral that the integrator evaluates) spends steps from the
+  // budget of the outermost call.
+  if (ce._deadlineFrame?.spans.includes(ANTIDERIVATIVE_SPAN))
+    return antiderivativeInUnit(fn, index);
+  return withIntegrationStepBudget(
+    ce,
+    { steps: antiderivativeBudget.steps, label: ANTIDERIVATIVE_SPAN },
+    () => antiderivativeInUnit(fn, index),
+    () => integrate(fn, index),
+    antiderivativeStats
+  );
+}
+
+function antiderivativeInUnit(fn: Expression, index: string): Expression {
   const ce = fn.engine;
   if (ce.angularUnit === 'rad') return antiderivativeInRadians(fn, index);
   // The table, the rules and the substitution routes below hold the RADIAN

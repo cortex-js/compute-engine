@@ -140,6 +140,81 @@ describe('LatexSyntax.addEntries()', () => {
   });
 });
 
+// A rule string is parsed with the notation of the engine: the entries given
+// to the engine's `LatexSyntax`, plus the entries of the rule syntax
+// (wildcards, `->`, conditions).
+describe('Rule strings use the notation of the engine', () => {
+  // A custom notation whose operand can be a wildcard
+  const GROUP_ORDER: Partial<LatexDictionaryEntry> = {
+    name: 'GroupOrder',
+    latexTrigger: '\\operatorname{ord}',
+    parse: (parser) => {
+      const arg = parser.parseGroup();
+      return arg === null ? null : ['GroupOrder', arg];
+    },
+  };
+  const TRIVIAL_RING = '\\mathbb{Z}/1\\mathbb{Z} -> \\lbrace 0\\rbrace';
+  const ORDER_RULE = '\\operatorname{ord}{a} -> a+1';
+
+  test('with ce.latexSyntax.addEntries()', () => {
+    const ce = new ComputeEngine();
+    // Without the entry, the left side is not `IntegerModRing`
+    expect(ce.rules([TRIVIAL_RING]).rules[0].match?.json).not.toEqual([
+      'IntegerModRing',
+      1,
+    ]);
+    expect(ce.box(['IntegerModRing', 1]).replace(TRIVIAL_RING)).toBeNull();
+
+    // The entries added after a first rule string are used by the next one
+    ce.latexSyntax!.addEntries!([INTEGER_MOD_RING, GROUP_ORDER]);
+    expect(ce.rules([TRIVIAL_RING]).rules[0].match?.json).toEqual([
+      'IntegerModRing',
+      1,
+    ]);
+    expect(ce.box(['IntegerModRing', 1]).replace(TRIVIAL_RING)?.json).toEqual(
+      ['Set', 0]
+    );
+    // A wildcard in the operand of a custom notation
+    expect(ce.box(['GroupOrder', 'x']).replace(ORDER_RULE)?.json).toEqual([
+      'Add',
+      'x',
+      1,
+    ]);
+    // The rule entries still apply
+    expect(ce.box(['Add', 'x', 'x']).replace('a+a -> 2a')?.json).toEqual([
+      'Multiply',
+      2,
+      'x',
+    ]);
+  });
+
+  test('with the dictionary of a LatexSyntax given at construction', () => {
+    const ce = new ComputeEngine({
+      latexSyntax: new LatexSyntax({
+        dictionary: [...LATEX_DICTIONARY, INTEGER_MOD_RING, GROUP_ORDER],
+      }),
+    });
+    expect(ce.box(['IntegerModRing', 1]).replace(TRIVIAL_RING)?.json).toEqual(
+      ['Set', 0]
+    );
+    expect(ce.box(['GroupOrder', 'x']).replace(ORDER_RULE)?.json).toEqual([
+      'Add',
+      'x',
+      1,
+    ]);
+  });
+
+  test('the notation of one engine does not apply to the rules of another', () => {
+    const ce1 = new ComputeEngine();
+    const ce2 = new ComputeEngine();
+    ce1.latexSyntax!.addEntries!([INTEGER_MOD_RING]);
+    expect(
+      ce1.box(['IntegerModRing', 1]).replace(TRIVIAL_RING)?.json
+    ).toEqual(['Set', 0]);
+    expect(ce2.box(['IntegerModRing', 1]).replace(TRIVIAL_RING)).toBeNull();
+  });
+});
+
 describe('ce.loadLibrary()', () => {
   test('an expression boxed before the call uses the new definition', () => {
     const ce = new ComputeEngine();

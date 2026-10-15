@@ -1,4 +1,4 @@
-import { antiderivative } from './antiderivative.js';
+import { antiderivative, withIntegrationStepBudget } from './antiderivative.js';
 import type { Expression } from '../global-types.js';
 import {
   isFunction,
@@ -29,6 +29,72 @@ import {
   solutionRecord,
 } from './solver-utils.js';
 import { withRadianConvention } from './angular-unit.js';
+
+/**
+ * The step budget of one variation-of-parameters step of `DSolve`: the two
+ * antiderivatives `u₁ = ∫ −y₂·g/(a·W) dx` and `u₂ = ∫ y₁·g/(a·W) dx` of a
+ * second-order linear equation, with the simplification of their integrands.
+ * A step is one `checkDeadline` call on the engine frame (see
+ * `ANTIDERIVATIVE_STEP_BUDGET` in `antiderivative.ts`, which also bounds each
+ * of the two antiderivatives).
+ *
+ * When the budget is spent, this step gives no solution and the equation
+ * stays an unevaluated `DSolve`, as when an antiderivative does not close. A
+ * deadline or a step budget of a caller still applies inside, and its expiry
+ * goes to the caller.
+ */
+//
+// Calibrated with the 93 test files that use `Integrate`, `DSolve` or
+// `antiderivative`, rule steps counted: the most steps that one
+// variation-of-parameters step took was 1,283 (5 steps were measured, all
+// in `differential-equations.test.ts`), and the most steps that one call of
+// the antiderivative took was 11,442. The budget is the same as
+// `ANTIDERIVATIVE_STEP_BUDGET`, about nine times the larger number, so
+// that the step does not stop an integral that the antiderivative alone
+// would close.
+export const DSOLVE_VARIATION_STEP_BUDGET = 100_000;
+
+/**
+ * The step budget that a variation-of-parameters step uses. It is
+ * `DSOLVE_VARIATION_STEP_BUDGET`; a test can set a smaller value, to spend
+ * the budget in less time.
+ *
+ * @internal
+ */
+export const dSolveVariationBudget: { steps: number } = {
+  steps: DSOLVE_VARIATION_STEP_BUDGET,
+};
+
+/** The label of the span that holds the variation-of-parameters budget. */
+const DSOLVE_VARIATION_SPAN = 'dsolve:variation-of-parameters';
+
+/**
+ * The steps that the last variation-of-parameters step of `DSolve` spent
+ * (see `DSOLVE_VARIATION_STEP_BUDGET`), and if the budget was spent before
+ * the step ended. A diagnostic: it is shared by every engine.
+ */
+export const dSolveVariationStats: { steps: number; spent: boolean } = {
+  steps: 0,
+  spent: false,
+};
+
+/**
+ * Run the variation-of-parameters step `fn` within
+ * `DSOLVE_VARIATION_STEP_BUDGET`. The result is `undefined` (no solution)
+ * when the budget is spent.
+ */
+function withVariationBudget<T>(
+  ce: Expression['engine'],
+  fn: () => T | undefined
+): T | undefined {
+  return withIntegrationStepBudget(
+    ce,
+    { steps: dSolveVariationBudget.steps, label: DSOLVE_VARIATION_SPAN },
+    fn,
+    () => undefined,
+    dSolveVariationStats
+  );
+}
 
 interface LinearTermCoefficients {
   derivative: Expression;
@@ -661,8 +727,13 @@ function dSolveAntiderivative(expr: Expression, variable: string): Expression {
         provider(f, variable)
       );
       if (provided && !hasOperator(provided, 'Integrate')) return provided;
-    } catch {
-      // Fall through to the built-in antiderivative, matching Integrate.
+    } catch (e) {
+      // A cancellation (a deadline, a spent step budget, an abort) must go
+      // to the code that armed it, as in `Integrate`. The name is checked,
+      // not `instanceof`: a provider from a plugin bundle (the Rubi
+      // integration rules) throws its own copy of the `CancellationError`
+      // class. Any other error falls through to the built-in antiderivative.
+      if (e instanceof Error && e.name === 'CancellationError') throw e;
     }
   }
   return antiderivative(expr, variable);
@@ -2640,16 +2711,22 @@ function solveSecondOrderNonhomogeneousConstantCoefficient(
 
   const g = collected.rest.neg().simplify();
   const denominator = a.mul(wronskian).simplify();
-  const u1Integrand = normalizeVariationIntegrand(
-    simplifyFoldingExp(y2.neg().mul(g).div(denominator)),
-    independentName
-  );
-  const u2Integrand = normalizeVariationIntegrand(
-    simplifyFoldingExp(y1.mul(g).div(denominator)),
-    independentName
-  );
-  const u1 = dSolveAntiderivative(u1Integrand, independentName);
-  const u2 = dSolveAntiderivative(u2Integrand, independentName);
+  const integrals = withVariationBudget(ce, () => {
+    const u1Integrand = normalizeVariationIntegrand(
+      simplifyFoldingExp(y2.neg().mul(g).div(denominator)),
+      independentName
+    );
+    const u2Integrand = normalizeVariationIntegrand(
+      simplifyFoldingExp(y1.mul(g).div(denominator)),
+      independentName
+    );
+    return [
+      dSolveAntiderivative(u1Integrand, independentName),
+      dSolveAntiderivative(u2Integrand, independentName),
+    ];
+  });
+  if (!integrals) return undefined;
+  const [u1, u2] = integrals;
 
   if (hasOperator(u1, 'Integrate') || hasOperator(u2, 'Integrate'))
     return undefined;
@@ -3195,16 +3272,22 @@ function solveSecondOrderCauchyEuler(
   if (wronskian.isSame(0)) return undefined;
 
   const denominator = a.mul(x.pow(2)).mul(wronskian).simplify();
-  const u1Integrand = normalizeVariationIntegrand(
-    y2.neg().mul(g).div(denominator).simplify(),
-    independentName
-  );
-  const u2Integrand = normalizeVariationIntegrand(
-    y1.mul(g).div(denominator).simplify(),
-    independentName
-  );
-  const u1 = dSolveAntiderivative(u1Integrand, independentName);
-  const u2 = dSolveAntiderivative(u2Integrand, independentName);
+  const integrals = withVariationBudget(ce, () => {
+    const u1Integrand = normalizeVariationIntegrand(
+      y2.neg().mul(g).div(denominator).simplify(),
+      independentName
+    );
+    const u2Integrand = normalizeVariationIntegrand(
+      y1.mul(g).div(denominator).simplify(),
+      independentName
+    );
+    return [
+      dSolveAntiderivative(u1Integrand, independentName),
+      dSolveAntiderivative(u2Integrand, independentName),
+    ];
+  });
+  if (!integrals) return undefined;
+  const [u1, u2] = integrals;
   if (hasOperator(u1, 'Integrate') || hasOperator(u2, 'Integrate'))
     return undefined;
 

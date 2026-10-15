@@ -4485,7 +4485,17 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // whose array result is legitimate — what must not be an array is a
     // scalar read's value, or any element of a gathered list.
     const baseType = resolveTypeForCompilation(jsType(coll));
-    const tupleBase = typeof baseType !== 'string' && baseType.kind === 'tuple';
+    // A tuple type that INFERENCE wrote on a symbol is checked like any other
+    // inferred type. A bare function parameter read at literal indices is
+    // inferred as a tuple (`v => v[1] + 1` types `v` as `tuple<number>`), but
+    // the argument can be a list of any shape, a matrix too, so its cells are
+    // not what the type says. A DECLARED tuple, and the compiler temporary of
+    // the destructuring lowering (declared with the value's type), are not
+    // checked.
+    const tupleBase =
+      typeof baseType !== 'string' &&
+      baseType.kind === 'tuple' &&
+      !(isSymbol(coll) && coll.valueDefinition?.inferredType === true);
     if (numericElement && !tupleBase && coll.unknowns.length > 0)
       return `_SYS.atNumeric(${stringBase ? `_SYS.chars(${collCode()})` : collCode()}, ${compile(index)}, ${JSON.stringify(typeToString(eltT!))})`;
     return base;

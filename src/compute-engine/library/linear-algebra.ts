@@ -129,7 +129,7 @@ const MAX_LAZY_SHAPE_ELEMENTS = 100_000;
  * a finite indexed lazy collection the shape of the eager `List` with the
  * same elements:
  *
- * - When the elements are scalar numbers, the shape is `[count]` (`[]` for
+ * - When the elements are scalar numbers, the shape is `[count]` (`[0]` for
  *   an empty collection, as for `[]`). The elements are not computed, so
  *   this also applies when the count is known but the elements cannot be
  *   computed (`Linspace(a, 1, 3)` with a symbolic `a`).
@@ -148,7 +148,12 @@ const MAX_LAZY_SHAPE_ELEMENTS = 100_000;
  * A tuple-typed operand is an exception: a tuple always has the shape `()`.
  *
  * An eager `List`, a tuple, a string and a value that is not a collection
- * keep the shape that their `shape` property gives.
+ * keep the shape that their `shape` property gives, with one exception: an
+ * eager `List` that has an empty axis. Its type has no dimensions (`[]` is
+ * `list<never>`, `[[], []]` is `list<list<never>>`), so its `shape` property
+ * gives `[]`, the shape of a scalar. Its shape is read from the value
+ * instead (`emptyAxisListShape`): `[]` has the shape `[0]` and `[[], []]`
+ * the shape `[2, 0]`.
  */
 function shapeOfOperand(
   ce: ComputeEngine,
@@ -161,6 +166,10 @@ function shapeOfOperand(
     !isTupleShapedType(xs.type.type)
   )
     return undefined;
+  if (shape.length === 0 && isFunction(xs, 'List')) {
+    const empty = emptyAxisListShape(xs);
+    if (empty !== undefined) return empty;
+  }
   if (
     shape.length > 0 ||
     isFunction(xs, 'List') ||
@@ -174,10 +183,38 @@ function shapeOfOperand(
   if (count === undefined || !Number.isFinite(count)) return undefined;
   const elementType = collectionElementType(xs.type.type);
   if (elementType !== undefined && isSubtype(elementType, 'number'))
-    return count === 0 ? [] : [count];
+    return [count];
   if (count > MAX_LAZY_SHAPE_ELEMENTS) return undefined;
   if (!isFiniteIndexedCollection(xs)) return undefined;
   return ce.function('List', [...xs.each()]).shape;
+}
+
+/**
+ * The shape of an eager `List` value that has an empty axis, or `undefined`
+ * when the list has no empty axis or is not rectangular.
+ *
+ * The value is read level by level. At each level every item must be an
+ * eager `List`, and all the items must have the same length, which is the
+ * extent of that axis. The walk ends at the first axis of length 0: `[]` has
+ * the shape `[0]`, `[[], []]` the shape `[2, 0]` and `[[[]], [[]]]` the
+ * shape `[2, 1, 0]`. A ragged list (`[[1], []]`) or a level that mixes lists
+ * and other values gives `undefined`, and so does a list with no empty axis,
+ * whose shape comes from its type.
+ */
+function emptyAxisListShape(xs: Expression): number[] | undefined {
+  const dims: number[] = [];
+  let level: ReadonlyArray<Expression> = [xs];
+  while (true) {
+    if (!level.every((x) => isFunction(x, 'List'))) return undefined;
+    const lists = level as ReadonlyArray<
+      Expression & { ops: ReadonlyArray<Expression> }
+    >;
+    const n = lists[0].ops.length;
+    if (lists.some((x) => x.ops.length !== n)) return undefined;
+    dims.push(n);
+    if (n === 0) return dims;
+    level = lists.flatMap((x) => x.ops);
+  }
 }
 
 /** The sum of `terms`, in groups: one `add(...terms)` of more than about a
@@ -2106,7 +2143,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
             // Return first element as scalar
             const flatData = op1Tensor.flatten();
             return flatData.length > 0
-              ? tensorCellExpression(ce, flatData[0])
+              ? tensorCellExpression(ce, flatData[0], op1Tensor.holdsFloat)
               : ce.Zero;
           }
           return undefined;
@@ -2142,7 +2179,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           // Flatten tensor data and reshape with cycling
           // Use tensor.flatten() to get all scalar elements
           const flatData = op1Tensor.flatten();
-          const flatElements = flatData.map((x) => tensorCellExpression(ce, x));
+          const flatElements = flatData.map((x) =>
+            tensorCellExpression(ce, x, op1Tensor.holdsFloat)
+          );
           return reshapeWithCycling(ce, flatElements, targetShape);
         }
 
@@ -2208,7 +2247,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           if (!op1Tensor) return undefined;
           return ce.expr([
             'List',
-            ...op1Tensor.flatten().map((x) => tensorCellExpression(ce, x)),
+            ...op1Tensor
+              .flatten()
+              .map((x) => tensorCellExpression(ce, x, op1Tensor.holdsFloat)),
           ]);
         }
 
@@ -2735,13 +2776,15 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           const result = op1Tensor.trace(axis1, axis2);
           if (result === undefined) return undefined;
 
-          // For scalar result (rank 2), box the value
-          if (typeof result === 'number') return ce.expr(result);
+          // For scalar result (rank 2), box the value. The trace of a float
+          // tensor is a float (`TensorData.holdsFloat`).
+          if (typeof result === 'number')
+            return tensorCellExpression(ce, result, op1Tensor.holdsFloat);
           if (typeof result === 'boolean') return result ? ce.True : ce.False;
 
           // Check if it's a primitive value that needs boxing
           if (!('expression' in result))
-            return tensorCellExpression(ce, result);
+            return tensorCellExpression(ce, result, op1Tensor.holdsFloat);
 
           // For tensor result (rank > 2), return the expression
           return result.expression;
@@ -2918,7 +2961,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
             const aVal = aTensor.at(i + 1) ?? ce.Zero;
             const bVal = bTensor.at(i + 1) ?? ce.Zero;
             terms.push(
-              tensorCellExpression(ce, aVal).mul(tensorCellExpression(ce, bVal))
+              tensorCellExpression(ce, aVal, aTensor.holdsFloat).mul(
+                tensorCellExpression(ce, bVal, bTensor.holdsFloat)
+              )
             );
           }
           return add(...terms).evaluate();
@@ -2944,8 +2989,8 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
               const aVal = aTensor.at(i + 1, k + 1) ?? ce.Zero;
               const bVal = bTensor.at(k + 1) ?? ce.Zero;
               terms.push(
-                tensorCellExpression(ce, aVal).mul(
-                  tensorCellExpression(ce, bVal)
+                tensorCellExpression(ce, aVal, aTensor.holdsFloat).mul(
+                  tensorCellExpression(ce, bVal, bTensor.holdsFloat)
                 )
               );
             }
@@ -2975,8 +3020,8 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
               const aVal = aTensor.at(k + 1) ?? ce.Zero;
               const bVal = bTensor.at(k + 1, j + 1) ?? ce.Zero;
               terms.push(
-                tensorCellExpression(ce, aVal).mul(
-                  tensorCellExpression(ce, bVal)
+                tensorCellExpression(ce, aVal, aTensor.holdsFloat).mul(
+                  tensorCellExpression(ce, bVal, bTensor.holdsFloat)
                 )
               );
             }
@@ -3014,8 +3059,8 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
                 const aVal = aTensor.at(i + 1, k + 1) ?? ce.Zero;
                 const bVal = bTensor.at(k + 1, j + 1) ?? ce.Zero;
                 terms.push(
-                  tensorCellExpression(ce, aVal).mul(
-                    tensorCellExpression(ce, bVal)
+                  tensorCellExpression(ce, aVal, aTensor.holdsFloat).mul(
+                    tensorCellExpression(ce, bVal, bTensor.holdsFloat)
                   )
                 );
               }
@@ -3632,12 +3677,36 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
             'cross product requires two 3-vectors'
           );
 
-        const a1 = tensorCellExpression(ce, aTensor.at(1) ?? ce.Zero);
-        const a2 = tensorCellExpression(ce, aTensor.at(2) ?? ce.Zero);
-        const a3 = tensorCellExpression(ce, aTensor.at(3) ?? ce.Zero);
-        const b1 = tensorCellExpression(ce, bTensor.at(1) ?? ce.Zero);
-        const b2 = tensorCellExpression(ce, bTensor.at(2) ?? ce.Zero);
-        const b3 = tensorCellExpression(ce, bTensor.at(3) ?? ce.Zero);
+        const a1 = tensorCellExpression(
+          ce,
+          aTensor.at(1) ?? ce.Zero,
+          aTensor.holdsFloat
+        );
+        const a2 = tensorCellExpression(
+          ce,
+          aTensor.at(2) ?? ce.Zero,
+          aTensor.holdsFloat
+        );
+        const a3 = tensorCellExpression(
+          ce,
+          aTensor.at(3) ?? ce.Zero,
+          aTensor.holdsFloat
+        );
+        const b1 = tensorCellExpression(
+          ce,
+          bTensor.at(1) ?? ce.Zero,
+          bTensor.holdsFloat
+        );
+        const b2 = tensorCellExpression(
+          ce,
+          bTensor.at(2) ?? ce.Zero,
+          bTensor.holdsFloat
+        );
+        const b3 = tensorCellExpression(
+          ce,
+          bTensor.at(3) ?? ce.Zero,
+          bTensor.holdsFloat
+        );
 
         return ce
           .function(head, [
@@ -3827,7 +3896,8 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           for (let j = 0; j < n; j++) {
             const entry = tensorCellExpression(
               ce,
-              aTensor.at(i + 1, j + 1) ?? ce.Zero
+              aTensor.at(i + 1, j + 1) ?? ce.Zero,
+              aTensor.holdsFloat
             );
             row.push(i === j ? x.sub(entry) : entry.neg());
           }
@@ -3945,7 +4015,11 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
             const diagonal: Expression[] = [];
             for (let i = 0; i < minDim; i++) {
               diagonal.push(
-                tensorCellExpression(ce, op1Tensor.at(i + 1, i + 1) ?? ce.Zero)
+                tensorCellExpression(
+                  ce,
+                  op1Tensor.at(i + 1, i + 1) ?? ce.Zero,
+                  op1Tensor.holdsFloat
+                )
               );
             }
             return ce.expr(['List', ...diagonal]);
@@ -4642,7 +4716,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           for (let i = 0; i < n; i++) {
             const val = xTensor.at(i + 1);
             elements.push(
-              val !== undefined ? tensorCellExpression(ce, val) : ce.Zero
+              val !== undefined
+                ? tensorCellExpression(ce, val, xTensor.holdsFloat)
+                : ce.Zero
             );
           }
           return vectorNorm(elements);
@@ -4672,7 +4748,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
             for (let j = 0; j < n; j++) {
               const val = xTensor.at(i + 1, j + 1);
               entries.push(
-                val !== undefined ? tensorCellExpression(ce, val) : ce.Zero
+                val !== undefined
+                  ? tensorCellExpression(ce, val, xTensor.holdsFloat)
+                  : ce.Zero
               );
             }
 
@@ -4742,7 +4820,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           const entries = xTensor
             .flatten()
             .map((v) =>
-              v !== undefined ? tensorCellExpression(ce, v) : ce.Zero
+              v !== undefined
+                ? tensorCellExpression(ce, v, xTensor.holdsFloat)
+                : ce.Zero
             );
           // An infinite entry dominates the sum of squares, exactly as it
           // does at rank 1 and rank 2, so the scan runs before any folding.
@@ -4804,7 +4884,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           const val = mTensor.at(1, 1);
           return ce.expr([
             'List',
-            val !== undefined ? tensorCellExpression(ce, val) : ce.Zero,
+            val !== undefined
+              ? tensorCellExpression(ce, val, mTensor.holdsFloat)
+              : ce.Zero,
           ]);
         }
 
@@ -4815,7 +4897,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           for (let i = 0; i < n; i++) {
             const val = mTensor.at(i + 1, i + 1);
             eigenvalues.push(
-              val !== undefined ? tensorCellExpression(ce, val) : ce.Zero
+              val !== undefined
+                ? tensorCellExpression(ce, val, mTensor.holdsFloat)
+                : ce.Zero
             );
           }
           return ce.expr(['List', ...eigenvalues]);
@@ -5592,7 +5676,11 @@ function numericMachineMatrix(
   let allExact = true;
   for (let i = 0; i < m; i++)
     for (let j = 0; j < n; j++) {
-      const entry = tensorCellExpression(ce, packed.at(i + 1, j + 1));
+      const entry = tensorCellExpression(
+        ce,
+        packed.at(i + 1, j + 1),
+        packed.holdsFloat
+      );
       if (isNumber(entry) && !entry.isExact) allExact = false;
       const v = entry.N();
       if (!isNumber(v)) return undefined;
@@ -5703,10 +5791,10 @@ function matrixSqrt2x2Exact(
   const aTensor = packTensor(ce, A);
   if (!aTensor) return undefined;
 
-  const a = tensorCellExpression(ce, aTensor.at(1, 1));
-  const b = tensorCellExpression(ce, aTensor.at(1, 2));
-  const c = tensorCellExpression(ce, aTensor.at(2, 1));
-  const d = tensorCellExpression(ce, aTensor.at(2, 2));
+  const a = tensorCellExpression(ce, aTensor.at(1, 1), aTensor.holdsFloat);
+  const b = tensorCellExpression(ce, aTensor.at(1, 2), aTensor.holdsFloat);
+  const c = tensorCellExpression(ce, aTensor.at(2, 1), aTensor.holdsFloat);
+  const d = tensorCellExpression(ce, aTensor.at(2, 2), aTensor.holdsFloat);
 
   const tr = ce.function('Add', [a, d]).evaluate();
   const det = ce
@@ -5937,7 +6025,11 @@ function exactComplexSingularValues(
   for (let i = 0; i < m; i++) {
     const row: Expression[] = [];
     for (let j = 0; j < n; j++) {
-      const entry = tensorCellExpression(ce, packed.at(i + 1, j + 1));
+      const entry = tensorCellExpression(
+        ce,
+        packed.at(i + 1, j + 1),
+        packed.holdsFloat
+      );
       if (!isNumber(entry) || !entry.isExact) return undefined;
       row.push(entry);
     }
@@ -5990,7 +6082,9 @@ function getElement(
   const mTensor = packTensor(ce, M);
   if (!mTensor) return ce.Zero;
   const val = mTensor.at(i, j);
-  return val !== undefined ? tensorCellExpression(ce, val) : ce.Zero;
+  return val !== undefined
+    ? tensorCellExpression(ce, val, mTensor.holdsFloat)
+    : ce.Zero;
 }
 
 /**
@@ -6990,7 +7084,7 @@ function tensorToRationalMatrix(
         tensor.rank === 1
           ? tensorPacked.at(j + 1)
           : tensorPacked.at(i + 1, j + 1);
-      const boxed = tensorCellExpression(ce, value);
+      const boxed = tensorCellExpression(ce, value, tensorPacked.holdsFloat);
       if (!isNumber(boxed) || !boxed.isExact) return undefined;
       const r = asRational(boxed);
       if (r === undefined) return undefined;
@@ -7025,7 +7119,11 @@ function decimalRationalMatrix(
   for (let i = 0; i < rows; i++) {
     const row: BigRat[] = [];
     for (let j = 0; j < cols; j++) {
-      const boxed = tensorCellExpression(ce, packed.at(i + 1, j + 1));
+      const boxed = tensorCellExpression(
+        ce,
+        packed.at(i + 1, j + 1),
+        packed.holdsFloat
+      );
       if (!isNumber(boxed) || boxed.isComplex) return undefined;
       if (boxed.isExact) {
         const r = asRational(boxed);

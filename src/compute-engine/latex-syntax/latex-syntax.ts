@@ -214,6 +214,19 @@ export class LatexSyntax {
     this._options = options ?? {};
   }
 
+  /**
+   * The dictionary entries of this instance: the `dictionary` option given
+   * to the constructor (or the default dictionary), followed by the entries
+   * added with `addEntries()`.
+   *
+   * `addEntries()` puts a new array in the place of the current one and does
+   * not change the current one. So a caller can keep the array and compare
+   * it with a later value to know if the dictionary changed.
+   */
+  get dictionary(): ReadonlyArray<Partial<LatexDictionaryEntry>> {
+    return this._options.dictionary ?? LATEX_DICTIONARY;
+  }
+
   /** Lazily built indexed dictionary. */
   private get indexed(): IndexedLatexDictionary {
     if (!this._indexed) {

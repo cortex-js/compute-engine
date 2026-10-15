@@ -5,6 +5,7 @@ import {
   factorDifferenceOfSquares,
 } from '../boxed-expression/factor.js';
 import { isFunction, isNumber } from '../boxed-expression/type-guards.js';
+import { asFloat, hasFloatOperand } from '../boxed-expression/float-result.js';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
 import { isEligibleRealRewrite } from '../function-properties/index.js';
 import { isCollectionShaped } from '../collection-utils.js';
@@ -893,15 +894,21 @@ export function simplifyPower(x: Expression): RuleStep | undefined {
 
     if (!base || !exp) return undefined;
 
-    // x^1 -> x
-    if (exp.isSame(1)) {
+    // x^1 -> x. Only for the exact exponent `1`: a float exponent `1.0` is
+    // not an identity, and `x^{1.0}` keeps its float.
+    if (isNumber(exp) && exp.isExact && exp.isSame(1)) {
       return { value: base, because: 'x^1 -> x' };
     }
 
     // 0^x -> 0 when x is positive (including symbolic like π)
     // Note: 0^0 = NaN and 0^(-x) = ComplexInfinity are handled elsewhere
+    // A float base or exponent (`0.0^x`, `0^{2.5}`) gives the float `0`, as
+    // `canonicalPower` does for a number exponent.
     if (base.isSame(0) && exp.isPositive === true) {
-      return { value: ce.Zero, because: '0^x -> 0 when x > 0' };
+      return {
+        value: hasFloatOperand([base, exp]) ? asFloat(ce.Zero) : ce.Zero,
+        because: '0^x -> 0 when x > 0',
+      };
     }
 
     // (-1)^{p/q} -> -1 when both p and q are odd (real odd root of -1)

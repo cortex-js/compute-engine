@@ -290,11 +290,14 @@ function gammaIsPositiveAt(a: Expression): boolean {
  * - `Q(a, −∞) = 0` for a NON-POSITIVE integer `a`, where `1/Γ(a)` vanishes:
  *   the finite branch gives `Q(a, z) = 0` at every nonzero `z` there, so the
  *   limit is `0` too.
- * - `Q(a, −∞) = NaN` for a real literal `a` that is provably not an integer:
- *   the value is complex on the negative half-line (`Q(0.5, −1) = 1 − 1.65i`),
- *   so it has no limit on the extended real line. An `a` that is not a
+ * - `Q(a, −∞) = ~oo` for a real literal `a` that is provably not an
+ *   integer: the value is complex on the negative half-line
+ *   (`Q(0.5, −1) = 1 − 1.65i`) and its modulus grows without bound, so the
+ *   limit is the complex infinity. Measured with mpmath: Q(½, −100) =
+ *   −1.5·10⁴²·i, Q(−½, −100) = 1 − 7.7·10³⁹·i, Q(3/2, −1000) =
+ *   +7.0·10⁴³⁵·i, Q(5/2, −1000) = −4.7·10⁴³⁸·i. An `a` that is not a
  *   literal stays SYMBOLIC — a symbol declared `integer` may hold a positive
- *   integer, whose value is `±∞` by the rows above, and `NaN` could not be
+ *   integer, whose value is `±∞` by the rows above, and `~oo` could not be
  *   taken back.
  * - `Q(−∞, z)`: `Indeterminate`. `Q` is identically 0 at every negative integer `a`
  *   (a pole of `Γ(a)`) and diverges to `−∞` between consecutive poles
@@ -304,7 +307,7 @@ function gammaIsPositiveAt(a: Expression): boolean {
  *
  * `Indeterminate` is the exact answer to a form with no value; a float
  * operand makes it `NaN` (`indeterminateFormAnswer()`). `Q(a, −∞)` for a
- * non-integer `a` is `NaN`, not `Indeterminate`: there the value is complex
+ * non-integer `a` is `~oo`, not `Indeterminate`: there the value is complex
  * with an unbounded modulus, not a form with no value.
  */
 function gammaRegularizedValueAtInfinity(
@@ -322,7 +325,7 @@ function gammaRegularizedValueAtInfinity(
   if (pz === '-oo') {
     // Only a LITERAL `a` is classified. A symbol — declared `integer`, or
     // fresh — may later hold a positive integer, whose value here is `±∞`
-    // rather than the `NaN` a blanket answer would freeze in, so it stays
+    // rather than the `~oo` a blanket answer would freeze in, so it stays
     // symbolic.
     if (!isRealLiteral(a)) return undefined;
     if (a.isInteger === true && a.isPositive === true)
@@ -331,11 +334,13 @@ function gammaRegularizedValueAtInfinity(
     // finite `z` (`1/Γ(a)` vanishes at a pole of `Γ`), so the limit as
     // `z → −∞` is `0` as well.
     if (isNonPositiveIntegerLiteral(a)) return ce.Zero;
+    // A `NaN` literal gives `NaN`, matching the `NaN` policy the framework
+    // applies on the other routes.
+    if (a.isNaN === true) return ce.NaN;
     // A real literal that is provably not an integer: `Q` is complex on the
-    // negative half-line (`Q(0.5, −1) = 1 − 1.65i`), so it has no limit on
-    // the extended real line. (A `NaN` literal answers here too, matching
-    // the `NaN` policy the framework applies on the other routes.)
-    if (a.isInteger === false) return ce.NaN;
+    // negative half-line (`Q(0.5, −1) = 1 − 1.65i`) and its modulus grows
+    // without bound: the complex infinity.
+    if (a.isInteger === false) return ce.ComplexInfinity;
     return undefined;
   }
   if (pz !== undefined) return indeterminateFormAnswer(ce, [a, z]);

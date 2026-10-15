@@ -291,6 +291,8 @@ import {
   runtimeConformanceError,
   isAbsentableCollectionOperand,
   settledAbsentableValue,
+  collectionSourceSlot,
+  isCollectionSourceOperator,
 } from './validate.js';
 import {
   functionLiteralSignatureType,
@@ -614,8 +616,161 @@ export class BoxedFunction
   _recheckedCall(): Expression | undefined {
     const ops = this._refusedOps;
     if (ops === undefined) return undefined;
-    const call = this.engine.function(this._operator, ops);
+    const call = this.engine.function(
+      this._operator,
+      this._writtenOperands(ops)
+    );
     return call.isSame(this) ? undefined : call;
+  }
+
+  /** The definition that the name of this call held when the call was
+   * boxed, and the change counter of that definition then (`_writeVersion`
+   * of the value or operator definition). The construction site (`box.ts`)
+   * sets it on a call of a user function, and on a call through a variable
+   * whose function a later assignment can replace with one that checks the
+   * operands differently.
+   *
+   * The call was checked, and its named arguments were put in declaration
+   * order, against that definition. When the name holds another definition,
+   * or the same one changed, the call is boxed again against the definition
+   * as it is now, and its type and its value are those of the new call
+   * (`_reboxedForCallee()`). When the definition did not change, the cost is
+   * one comparison of the definition and one of the counter.
+   *
+   * `written` is set for a named call through a variable with an inferred
+   * type: the name of each written argument, in written order, and the index
+   * of the operand that holds its value (-1 for an argument written with the
+   * value `Nothing`). The call is boxed again with these names, so that they
+   * are matched against the function that the variable holds now.
+   *
+   * `ops` is set when the operands of the call are not the operands as
+   * boxed before the check: the check against the old definition can
+   * replace an operand (a one-cluster string becomes a `character` at a
+   * `character` parameter, matrix inference repairs an operand). The call is
+   * boxed again from `ops`, so that the new definition checks the operands
+   * as written, not the operands that the old definition replaced.
+   *
+   * `rechecked` keeps the last new call, with the definition and the counter
+   * it was boxed against, so that the call is boxed again only once for
+   * each change.
+   * @internal */
+  _calleeStamp:
+    | {
+        half: { _writeVersion: number };
+        version: number;
+        written:
+          ReadonlyArray<{ name: string | undefined; slot: number }> | undefined;
+        ops?: ReadonlyArray<Expression>;
+        rechecked?: {
+          half: { _writeVersion: number };
+          version: number;
+          call: Expression;
+        };
+      }
+    | undefined = undefined;
+
+  /** Record the definition that the name of this call holds now
+   * (`_calleeStamp`). A call that has a record keeps it. `ops` are the
+   * operands, in declaration order, as boxed before the check against that
+   * definition.
+   *
+   * A self-call in a clause body that is made canonical under the recursion
+   * knot of its function (`IComputeEngine._recursionKnots`) is not
+   * recorded. It is bound to the placeholder of the knot, which the install
+   * of the clause replaces, so the record would always be out of date, and
+   * the type of such a call already follows the installed clause (see
+   * `type()`). Boxing it again when its type is read changes the effects
+   * derived for the function.
+   * @internal */
+  _stampCallee(
+    written?: ReadonlyArray<{ name: string | undefined; slot: number }>,
+    ops?: ReadonlyArray<Expression>
+  ): void {
+    if (this._calleeStamp !== undefined) return;
+    if (this.engine._recursionKnots.has(this._operator)) return;
+    const half = calleeHalf(this._def);
+    if (half === undefined) return;
+    this._calleeStamp = { half, version: half._writeVersion, written };
+    const own = this._ops;
+    if (
+      ops !== undefined &&
+      (ops.length !== own.length || ops.some((x, i) => x !== own[i]))
+    )
+      this._calleeStamp.ops = ops;
+  }
+
+  /** The operands `ops` (in declaration order) written again as the call
+   * was written, with its named arguments, when the call has a record of
+   * them (`_calleeStamp.written`). Otherwise `ops` itself. */
+  private _writtenOperands(
+    ops: ReadonlyArray<Expression>
+  ): ReadonlyArray<Expression> {
+    const written = this._calleeStamp?.written;
+    if (written === undefined) return ops;
+    const ce = this.engine;
+    return written.map(({ name, slot }) => {
+      const value = slot < 0 ? ce.symbol('Nothing') : ops[slot];
+      if (name === undefined) return value;
+      return ce._fn('NamedArgument', [ce.string(name), value], {
+        canonical: false,
+      });
+    });
+  }
+
+  /** This call boxed again against the definition that its name holds now,
+   * when that definition is not the one the call was boxed against
+   * (`_calleeStamp`) and the new call is different from this one.
+   * `undefined` otherwise.
+   *
+   * Example: with `h := (u) ↦ 1`, the call `h("abc")` is valid and typed
+   * `integer`. After `h := (u: real) ↦ 7`, the call boxed again refuses the
+   * string, so the type of the call is `error` and its value is the
+   * `incompatible-type` error, as for a call boxed after the assignment.
+   * The call itself does not change, so its `isValid` stays `true`.
+   *
+   * The new call is used only when it is bound to the same binding as this
+   * call: when the type is read in a scope where the name has another
+   * binding, the call is not boxed again.
+   * @internal */
+  _reboxedForCallee(): Expression | undefined {
+    const stamp = this._calleeStamp;
+    if (stamp === undefined) return undefined;
+    const half = calleeHalf(this._def);
+    if (
+      half === undefined ||
+      (half === stamp.half && half._writeVersion === stamp.version)
+    )
+      return undefined;
+    const memo = stamp.rechecked;
+    if (
+      memo !== undefined &&
+      memo.half === half &&
+      memo.version === half._writeVersion
+    )
+      return memo.call;
+    const fresh = this.engine.function(
+      this._operator,
+      this._writtenOperands(stamp.ops ?? this._ops)
+    );
+    // The counter is read after the new call was boxed: boxing it can
+    // write the signature of the definition (an inference).
+    const version = half._writeVersion;
+    if (!(fresh instanceof BoxedFunction) || fresh._def !== this._def)
+      return undefined;
+    // When the check replaced an operand (`stamp.ops`), `isSame()` cannot
+    // tell the two calls apart: it treats a `character` and a one-cluster
+    // `string` with the same content as the same value. The new call is then
+    // used, because the new definition can check that operand differently.
+    if (stamp.ops === undefined && fresh.isSame(this)) {
+      // The new definition gives the same call: record it, so that the next
+      // read costs one comparison again.
+      stamp.half = half;
+      stamp.version = version;
+      stamp.rechecked = undefined;
+      return undefined;
+    }
+    stamp.rechecked = { half, version, call: fresh };
+    return fresh;
   }
 
   /** The cached answer of `_holdsRefusedCall()`. The operands of a node do
@@ -1034,8 +1189,13 @@ export class BoxedFunction
         let any = false;
         writes.forEach((w, i) => {
           const op = this._ops[i];
-          if (w !== undefined && op !== undefined && op._infer(() => w))
-            any = true;
+          if (w === undefined || op === undefined) return;
+          // A `replace` entry is a type the handler already combined with
+          // the operand's current type, so it replaces that type instead of
+          // being intersected with it.
+          if (typeof w === 'object' && 'replace' in w) {
+            if (op._infer(() => w.replace, 'replace')) any = true;
+          } else if (op._infer(() => w)) any = true;
         });
         return any;
       });
@@ -3565,6 +3725,14 @@ export class BoxedFunction
     if (!this.isValid) {
       const rechecked = this._recheckedTree();
       if (rechecked !== this) return rechecked;
+    } else {
+      // A call that its callee accepted, when the definition of the name
+      // changed after the call was boxed, is evaluated as the same call
+      // boxed against the definition as it is now (`_reboxedForCallee()`):
+      // the new function can refuse the operands, or give other parameter
+      // names to the named arguments.
+      const reboxed = this._reboxedForCallee();
+      if (reboxed !== undefined) return reboxed;
     }
     // Only the two non-canonical TIERS are routed. `isCanonical` is false for
     // a third shape — an expression that WAS canonicalized but whose operator
@@ -5270,12 +5438,31 @@ export class BoxedFunction
       // Otherwise the operator is evaluated over the collection the operand
       // holds.
       //
-      {
+      // The display preview of a view does not evaluate its operands (see
+      // `heldEagerSources()`), and the preview check of step 3 answers for it.
+      if (!isDisplayPreviewOf(this, options)) {
         const resolved = resolveAbsentableLazyOperands(def, this._ops!, (x) =>
           x.evaluate(operandOptions(options))
         );
         if (resolved !== undefined) {
           if (resolved.absent) return absentScalarMarker(this.engine, this);
+          return this._withParseScope(() =>
+            this.engine.function(this._operator, resolved.ops)
+          ).evaluate(options);
+        }
+      }
+
+      //
+      // 2c''/ A LAZY operator over a source that is not a collection value
+      // yet (`heldEagerSources`): an element read `At(t, 1)`, an eager
+      // operator, a call of a user function. The source is evaluated once,
+      // and the operator is evaluated again over its value. An error value
+      // is the value of the node.
+      //
+      {
+        const resolved = resolveHeldEagerSources(this, def, options);
+        if (resolved !== undefined) {
+          if ('error' in resolved) return resolved.error;
           return this._withParseScope(() =>
             this.engine.function(this._operator, resolved.ops)
           ).evaluate(options);
@@ -5289,15 +5476,23 @@ export class BoxedFunction
       if (preserved) return preserved;
 
       //
-      // 3/ Handle evaluation of lazy collections
+      // 3/ Handle evaluation of lazy collections. A view over an operand that
+      // is not a collection value yet is materialized after its operands are
+      // evaluated (`materializesAfterOperands`).
       //
-      if (
-        materialization !== false &&
-        !def.evaluate &&
-        this.isLazyCollection &&
-        !mayBeAbsentAsWhole(this)
-      )
-        return materialize(this, def, options);
+      if (materialization !== false && !def.evaluate && this.isLazyCollection) {
+        // The display preview of a view over an operand that is not a
+        // collection value yet is the view as written. This test comes
+        // before the test for a node that can be absent: the type of such a
+        // view can include `missing`, and the evaluation of the operands
+        // (step 4) then evaluated the operand for the preview.
+        if (previewHoldsEagerOperand(this, options)) return this;
+        if (
+          !mayBeAbsentAsWhole(this) &&
+          !materializesAfterOperands(this, def, options)
+        )
+          return materialize(this, def, options);
+      }
 
       //
       // 3b/ `.N()` of an already-evaluated lazy `Map` (the hybrid-laziness
@@ -6407,7 +6602,7 @@ export class BoxedFunction
       // the asynchronous route, so an operand that holds an
       // asynchronous-only application is evaluated as its operator would
       // evaluate it.
-      {
+      if (!isDisplayPreviewOf(this, options)) {
         const resolved = await resolveAbsentableLazyOperandsAsync(
           def,
           this._ops!,
@@ -6415,9 +6610,34 @@ export class BoxedFunction
         );
         if (resolved !== undefined) {
           if (resolved.absent) return absentScalarMarker(this.engine, this);
-          return await this._withParseScope(() =>
-            this.engine.function(this._operator, resolved.ops)
-          ).evaluateAsync(options);
+          // The call is rebuilt after an `await`, so it is canonicalized in
+          // the context of this evaluation (the scope of an enclosing `Sum`
+          // index, for example), not in the global scope.
+          return await this.engine
+            .withEvaluationContext(options, () =>
+              this._withParseScope(() =>
+                this.engine.function(this._operator, resolved.ops)
+              )
+            )
+            .evaluateAsync(options);
+        }
+      }
+
+      // A lazy operator over a source that is not a collection value yet:
+      // mirrors the sync path's step 2c''. The source is evaluated on the
+      // asynchronous route.
+      {
+        const resolved = await resolveHeldEagerSourcesAsync(this, def, options);
+        if (resolved !== undefined) {
+          if ('error' in resolved) return resolved.error;
+          // As above: the call is rebuilt after an `await`.
+          return await this.engine
+            .withEvaluationContext(options, () =>
+              this._withParseScope(() =>
+                this.engine.function(this._operator, resolved.ops)
+              )
+            )
+            .evaluateAsync(options);
         }
       }
 
@@ -6429,14 +6649,22 @@ export class BoxedFunction
 
       const materialization = options?.materialization ?? false;
       // As on the sync route (step 3): a node that can be absent as a whole
-      // is evaluated the ordinary way (`mayBeAbsentAsWhole`).
-      if (
-        materialization !== false &&
-        !def.evaluate &&
-        this.isLazyCollection &&
-        !mayBeAbsentAsWhole(this)
-      )
-        return materialize(this, def, options);
+      // is evaluated the ordinary way (`mayBeAbsentAsWhole`), and a view over
+      // an operand that is not a collection value yet is materialized after
+      // its operands are evaluated (`materializesAfterOperands`).
+      if (materialization !== false && !def.evaluate && this.isLazyCollection) {
+        // The display preview of a view over an operand that is not a
+        // collection value yet is the view as written. This test comes
+        // before the test for a node that can be absent: the type of such a
+        // view can include `missing`, and the evaluation of the operands
+        // (step 4) then evaluated the operand for the preview.
+        if (previewHoldsEagerOperand(this, options)) return this;
+        if (
+          !mayBeAbsentAsWhole(this) &&
+          !materializesAfterOperands(this, def, options)
+        )
+          return materialize(this, def, options);
+      }
 
       //
       // 2d/ `.N()` of an already-evaluated lazy `Map` — mirrors the sync
@@ -8624,6 +8852,18 @@ function listRank(t: Type): number {
   return (t.dimensions?.length ?? 1) + listRank(t.elements);
 }
 
+/** The definition half (value or operator) of the binding `def`, which a
+ * call records to know later whether its callee changed
+ * (`BoxedFunction._calleeStamp`). */
+function calleeHalf(
+  def: BoxedDefinition | undefined | null
+): { _writeVersion: number } | undefined {
+  if (!def) return undefined;
+  if (isOperatorDef(def)) return def.operator;
+  if (isValueDef(def)) return def.value;
+  return undefined;
+}
+
 function type(expr: BoxedFunction): Type | BoxedType {
   // A call that its callee refused when it was boxed has the type of the
   // same call boxed against the function that the name holds now, as its
@@ -8633,6 +8873,11 @@ function type(expr: BoxedFunction): Type | BoxedType {
     const rechecked = expr._recheckedTree();
     return rechecked === expr ? 'error' : rechecked.type;
   }
+  // A call that its callee accepted has the type of the same call boxed
+  // against the definition that the name holds now, when that definition
+  // changed after the call was boxed (`_reboxedForCallee()`).
+  const reboxed = expr._reboxedForCallee();
+  if (reboxed !== undefined) return reboxed.type;
 
   // Is this a 'Function' expression?
   // The arrow — parameters, result AND effect specifier — is built by the
@@ -9567,7 +9812,14 @@ async function applyFunctionLiteralAsync(
   // arguments.
   const value = calleeValue(expr, def);
   let ops: Expression[] | undefined;
-  if (value && value.type.matches('function') && !value.type.isUnknown) {
+  // A lazy operator receives its operands unevaluated
+  // (`lazyOperatorCallee()`), so they are not evaluated here.
+  if (
+    value &&
+    value.type.matches('function') &&
+    !value.type.isUnknown &&
+    lazyOperatorCallee(engine, value) === undefined
+  ) {
     ops = [];
     for (const x of expr.ops)
       ops.push(await x.evaluateAsync(operandOptions(carried)));
@@ -9579,6 +9831,24 @@ async function applyFunctionLiteralAsync(
     contextStack,
     options?._precisionWindow
   );
+}
+
+/** The name of the operator that `value` names, when `value` is the symbol
+ * of a `lazy` operator definition (`aliasH` holds `bob_H`, and `bob_H` is
+ * lazy). A call through the variable then applies that operator to the
+ * operands unevaluated, as the direct call `bob_H(y·z)` does: with
+ * `y := 10`, both give `Hold(y·z)`, and not `Hold(10z)`. `undefined`
+ * otherwise. */
+function lazyOperatorCallee(
+  ce: ComputeEngine,
+  value: Expression
+): string | undefined {
+  if (!isSymbol(value)) return undefined;
+  const name = value.symbol;
+  const def = ce.lookupDefinition(name);
+  return def !== undefined && isOperatorDef(def) && def.operator.lazy
+    ? name
+    : undefined;
 }
 
 /** The function literal that an application of `expr` applies: the value
@@ -9623,6 +9893,15 @@ function applyFunctionLiteralWith(
   if (value && !value.type.matches('function')) {
     if (!value.isValid) return expr;
     return expr.engine.typeError('function', value.type, value.toString());
+  }
+
+  // The variable holds the name of a lazy operator: apply it to the
+  // operands as they were written, before any of them is evaluated.
+  const lazyName =
+    value === undefined ? undefined : lazyOperatorCallee(expr.engine, value);
+  if (lazyName !== undefined) {
+    const call = expr.engine.function(lazyName, expr.ops);
+    return awaitBody ? call.evaluateAsync(options) : call.evaluate(options);
   }
 
   // The arguments are operands: evaluated without `materialization`
@@ -11788,6 +12067,305 @@ function settleAbsentableLazyOperands(
     resolved[i] = value;
   });
   return resolved === undefined ? undefined : { ops: resolved, absent };
+}
+
+/**
+ * Whether `x`, an operand that a lazy operator holds, is a source collection
+ * that is not a collection value yet: an application that has no collection
+ * handlers (an element read `At(t, 1)`, an eager operator such as `Sort`, a
+ * call of a user function), or a symbol whose value is such an application.
+ * Such an operand has a value only when it is evaluated: before that, its
+ * `isFiniteCollection` and `isEnumerableCollection` are `undefined`.
+ *
+ * A function literal is not such an operand. A held conditional (`When`,
+ * `Which`, `If`) is not one either: the evaluation lifts it out of the
+ * operator (step 4c). A symbol whose value mentions the symbol itself is not
+ * one either: its value is not resolved (see `mapSource()` in
+ * `library/collections.ts`).
+ */
+function isHeldEagerSource(x: Expression): boolean {
+  if (isFunction(x, 'Function') || x.isCollection) return false;
+  if (isFunction(x))
+    return (
+      x.operator !== 'When' && x.operator !== 'Which' && x.operator !== 'If'
+    );
+  if (!isSymbol(x) || x.valueDefinition?.isSelfReferential) return false;
+  const value = x.value;
+  return value !== undefined && isFunction(value) && isHeldEagerSource(value);
+}
+
+/**
+ * Whether `options` are those of the display preview (`toString()`, the
+ * `latex` getter, `toLatex()` without a `materialization` option) and `expr`
+ * is a lazy view. The preview passes the exact `DISPLAY_MATERIALIZATION`
+ * object, so an explicit `materialization: [5, 5]` is not the preview.
+ */
+function isDisplayPreviewOf(
+  expr: Expression,
+  options: Partial<EvaluateOptions> | undefined
+): boolean {
+  return (
+    options?.materialization === DISPLAY_MATERIALIZATION &&
+    expr.isLazyCollection
+  );
+}
+
+/** A source collection held by a lazy operator, see `heldEagerSources()`. */
+type HeldEagerSource = {
+  /** The position of the operand that holds the source. */
+  index: number;
+  /** The source: the operand itself, or the collection of the `Element`
+   * clause at that operand. */
+  source: Expression;
+  /** The collection type that the value of the source must have, or
+   * `undefined` when a value that is not a collection is accepted (the
+   * operand of a broadcast). */
+  expected: 'collection' | 'indexed_collection' | undefined;
+};
+
+/**
+ * The sources of a LAZY operator that are not collection values yet
+ * (`isHeldEagerSource`), or an empty array.
+ *
+ * A lazy operator holds its operands, and a source that is not a collection
+ * value has no collection handlers. A lazy view over it cannot walk it, and
+ * an operator with a handler cannot read it: with `t` a pair of lists,
+ * `Dedup(At(t, 1))`, `Scan(At(t, 1), f)` and `ArgMax(At(t, 1))` stayed
+ * unevaluated, and `Numerator(At(t, 1))` read the list as one number. The
+ * sources are:
+ * - for an operator of `COLLECTION_SOURCE_OPERATORS` (`Map`, `Filter`,
+ *   `Reduce`, `ArgMax`, `Dedup`, ...), the operands at a slot whose declared
+ *   type is a collection type (`collectionSourceSlot()`);
+ * - for a `Comprehension`, the collection of its first `Element` clause,
+ *   when it does not mention the index of a clause. The collection of a
+ *   later clause can mention the index of an earlier clause, which has no
+ *   value here;
+ * - for a lazy broadcastable operator with numeric parameters (`Numerator`,
+ *   `Denominator`), each operand at a numeric parameter whose type is a
+ *   collection type. The value is then broadcast as a literal list is. An
+ *   operator whose `evaluate` handler does the broadcast itself (`Add`,
+ *   `Multiply`, `'evaluated-operands'`) is not included.
+ *
+ * The display preview (`toString()`, the `latex` getter and `toLatex()`
+ * without a `materialization` option) evaluates a lazy view with the exact
+ * `DISPLAY_MATERIALIZATION` object, and a lazy VIEW gets no sources there:
+ * printing a view must not evaluate its operands, so a view over a symbolic
+ * carrier prints as written (`\mathrm{Join}(q)`). The preview evaluates
+ * the elements of a view with the same options. An element that is not a
+ * view (`Reduce(At(t, 1), Add, 0)`) still gets its sources, so that its
+ * value is printed.
+ */
+function heldEagerSources(
+  expr: BoxedFunction,
+  def: BoxedOperatorDefinition,
+  options: Partial<EvaluateOptions> | undefined
+): HeldEagerSource[] {
+  if (def.lazy !== true) return [];
+  if (isDisplayPreviewOf(expr, options)) return [];
+  const ops = expr.ops;
+  if (def.scoped !== false) {
+    if (expr.operator !== 'Comprehension') return [];
+    const clause = ops[1];
+    if (!isFunction(clause, 'Element') || clause.nops < 2) return [];
+    const source = clause.op2;
+    if (!isHeldEagerSource(source)) return [];
+    const indexes = ops
+      .slice(1)
+      .flatMap((c) => (isFunction(c, 'Element') ? c.op1.symbols : []));
+    if (indexes.length > 0 && source.has(indexes)) return [];
+    return [{ index: 1, source, expected: 'collection' }];
+  }
+  const sources: HeldEagerSource[] = [];
+  if (isCollectionSourceOperator(expr.operator)) {
+    ops.forEach((x, index) => {
+      if (!isHeldEagerSource(x)) return;
+      const expected = collectionSourceSlot(def.signature.type, index);
+      if (expected !== undefined) sources.push({ index, source: x, expected });
+    });
+    return sources;
+  }
+  if (
+    def.broadcastable &&
+    !def.broadcastExemptions.includes('evaluated-operands')
+  ) {
+    const signature = def.signature.type;
+    if (typeof signature === 'string' || signature.kind !== 'signature')
+      return [];
+    ops.forEach((x, index) => {
+      const slot = signatureSlotType(signature, index);
+      if (slot === undefined || !isSubtype(slot, 'number')) return;
+      if (isHeldEagerSource(x) && isTypedAsCollection(x))
+        sources.push({ index, source: x, expected: undefined });
+    });
+  }
+  return sources;
+}
+
+/**
+ * The result of evaluating the held sources of a lazy operator once
+ * (`heldEagerSources()`): the operands with each source replaced by its
+ * value, an error that is the value of the node, or `undefined` when no
+ * source has a value that settles anything.
+ *
+ * - A value that is an error is the value of the node, with a breadcrumb that
+ *   names the operator and the position of the operand.
+ * - A value that is a collection, or the absent value, replaces the source.
+ *   The node is then evaluated again over the value, and the source is not
+ *   evaluated again.
+ * - A value that cannot be a collection (its type is disjoint from every
+ *   collection type, such as the number `5`) at a source slot is an
+ *   `incompatible-type` error, the error that the boxing gives for a
+ *   literal operand of an eager collection operator (`Sort(5)`).
+ * - Any other value (the source stays symbolic) leaves the source as it is.
+ */
+function settleHeldEagerSources(
+  expr: BoxedFunction,
+  sources: ReadonlyArray<HeldEagerSource>,
+  values: ReadonlyArray<Expression>
+): { ops: ReadonlyArray<Expression> } | { error: Expression } | undefined {
+  const ce = expr.engine;
+  let ops: Expression[] | undefined;
+  for (let k = 0; k < sources.length; k++) {
+    const { index, source, expected } = sources[k];
+    const value = values[k];
+    const frame = { operator: expr.operator, index: index + 1 };
+    if (!value.isValid) return { error: errorValue(value, frame) ?? value };
+    if (value === source || value.isSame(source)) continue;
+    if (value.isCollection || isAbsentScalarSymbol(value)) {
+      ops ??= [...expr.ops];
+      const operand = ops[index];
+      ops[index] =
+        operand === source
+          ? value
+          : ce._fn('Element', [
+              (operand as BoxedFunction).op1,
+              value,
+              ...(operand as BoxedFunction).ops.slice(2),
+            ]);
+      continue;
+    }
+    if (
+      expected !== undefined &&
+      value.type.isDisjointFrom(COLLECTION_SHAPE_TYPE)
+    ) {
+      const error = ce.typeError(expected, value.type, value);
+      return { error: errorValue(error, frame) ?? error };
+    }
+  }
+  return ops === undefined ? undefined : { ops };
+}
+
+/**
+ * Evaluate once each held source of a lazy operator that is not a
+ * collection value yet, see `heldEagerSources()` and
+ * `settleHeldEagerSources()`.
+ */
+function resolveHeldEagerSources(
+  expr: BoxedFunction,
+  def: BoxedOperatorDefinition,
+  options: Partial<EvaluateOptions> | undefined
+): { ops: ReadonlyArray<Expression> } | { error: Expression } | undefined {
+  const sources = heldEagerSources(expr, def, options);
+  if (sources.length === 0) return undefined;
+  return settleHeldEagerSources(
+    expr,
+    sources,
+    sources.map(({ source }) => source.evaluate(operandOptions(options)))
+  );
+}
+
+/** `resolveHeldEagerSources` on the asynchronous evaluation route: the
+ * sources are evaluated with the asynchronous evaluator.
+ *
+ * This function can run after an `await` of the caller, and the settlement
+ * runs after the `await` of each source. The discovery of the sources and
+ * the settlement read types and bindings, and build canonical expressions,
+ * so they run in the context of the evaluation
+ * (`engine.withEvaluationContext()`): otherwise they see the global scope,
+ * not the scope of an enclosing `Sum` index or of a function activation.
+ * The asynchronous evaluation of each source is not in that bracket: the
+ * options carry the context to that evaluation. */
+async function resolveHeldEagerSourcesAsync(
+  expr: BoxedFunction,
+  def: BoxedOperatorDefinition,
+  options: Partial<EvaluateOptions> | undefined
+): Promise<
+  { ops: ReadonlyArray<Expression> } | { error: Expression } | undefined
+> {
+  const ce = expr.engine;
+  const sources = ce.withEvaluationContext(options, () =>
+    heldEagerSources(expr, def, options)
+  );
+  if (sources.length === 0) return undefined;
+  const values: Expression[] = [];
+  for (const { source } of sources)
+    values.push(await source.evaluateAsync(operandOptions(options)));
+  return ce.withEvaluationContext(options, () =>
+    settleHeldEagerSources(expr, sources, values)
+  );
+}
+
+/**
+ * Whether `expr` is a lazy view evaluated for the display preview
+ * (`isDisplayPreviewOf`) and one of its operands is typed as a collection but
+ * is not a collection value yet (`isHeldEagerSource`). The preview then
+ * prints the view as written, and does not materialize it.
+ *
+ * The walk of such an operand evaluates it, and so do the facets of the view
+ * that the materialization reads before the walk: `Join(src(1), [4])`
+ * evaluated `src(1)` three times to print one preview, once for
+ * `isFiniteCollection`, once for `count` (both through `eagerViewSource()` in
+ * `library/collections.ts`) and once for the walk. Printing an unevaluated
+ * view does not evaluate its operands: `Join(src(1), [4])` prints
+ * `\mathrm{Join}(\mathrm{src}(1), [4])`, and its value is printed after an
+ * evaluation, which evaluates the operand once (step 4).
+ */
+function previewHoldsEagerOperand(
+  expr: BoxedFunction,
+  options: Partial<EvaluateOptions> | undefined
+): boolean {
+  if (!isDisplayPreviewOf(expr, options)) return false;
+  return expr.ops.some((x) => isTypedAsCollection(x) && isHeldEagerSource(x));
+}
+
+/**
+ * Whether the materialization of the lazy view `expr` must wait until its
+ * operands are evaluated: the operator evaluates its operands (it is not
+ * `lazy`), and an operand that is typed as a collection is not a collection
+ * value yet (`isHeldEagerSource`).
+ *
+ * The materialization step (step 3) runs before the operands are evaluated,
+ * and the walk of such an operand cannot start, so `materialize()` returned
+ * the view as written: `Reverse(At(t, 1)).evaluate({ materialization: true
+ * })` was `Reverse(At(t, 1))`. When this is true, the step is skipped: the
+ * operands are evaluated (step 4), and the view over their values is
+ * materialized (`materializeLazyResult`, step 6b).
+ *
+ * The display preview is not included (see `heldEagerSources()`): printing
+ * an expression must not evaluate its operands.
+ */
+function materializesAfterOperands(
+  expr: BoxedFunction,
+  def: BoxedOperatorDefinition,
+  options: Partial<EvaluateOptions> | undefined
+): boolean {
+  if (def.lazy === true) return false;
+  if (isDisplayPreviewOf(expr, options)) return false;
+  return expr.ops.some((x) => isTypedAsCollection(x) && isHeldEagerSource(x));
+}
+
+/**
+ * Whether the type of `x`, without its absence option, is a collection type.
+ *
+ * An element read can be out of range, so its type can include `missing`:
+ * with `t` an undeclared list of lists, `At(t, 1)` is typed
+ * `missing | vector<integer^1> | vector<integer^3>`. That type does not
+ * match a collection type, but every value of it that is present is a
+ * collection. The type `missing` alone is not a collection type.
+ */
+function isTypedAsCollection(x: Expression): boolean {
+  const t = stripMissingFromType(x.type.type);
+  return t !== 'never' && isSubtype(t, COLLECTION_SHAPE_TYPE);
 }
 
 /**

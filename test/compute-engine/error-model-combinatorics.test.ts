@@ -431,8 +431,10 @@ describe('GammaRegularized', () => {
     bothRoutes(ce, ['GammaRegularized', POS, 2], isValue(1));
     bothRoutes(ce, ['GammaRegularized', POS, -5], isValue(1));
     // Q(a, −∞) for a NON-INTEGER a: complex on the negative half-line
-    // (Q(0.5, −1) = 1 − 1.65i), so no limit on the extended real line.
-    bothRoutes(ce, ['GammaRegularized', 0.5, NEG], isNaNv);
+    // (Q(0.5, −1) = 1 − 1.65i) with a modulus that grows without bound
+    // (mpmath: Q(½, −100) = −1.5·10⁴²·i, Q(½, −1000) = −3.5·10⁴³²·i), so
+    // the limit is the complex infinity.
+    bothRoutes(ce, ['GammaRegularized', 0.5, NEG], isValue(ce.ComplexInfinity));
     // Q(−∞, z): identically 0 at every negative integer a, diverging to −∞
     // between consecutive poles (Q(−10⁶−¼, 2) = −7·10^5264672).
     // The points with no limit are Indeterminate (NaN under N()).
@@ -472,8 +474,9 @@ describe('GammaRegularized', () => {
     bothRoutes(ce, ['GammaRegularized', -1, NEG], isValue(0));
     bothRoutes(ce, ['GammaRegularized', 0, NEG], isValue(0));
     bothRoutes(ce, ['GammaRegularized', -3, NEG], isValue(0));
-    // A real literal that is provably not an integer keeps `NaN`.
-    bothRoutes(ce, ['GammaRegularized', 2.5, NEG], isNaNv);
+    // A real literal that is provably not an integer gives `~oo` (mpmath:
+    // Q(5/2, −100) = −2.0·10⁴⁶·i, Q(5/2, −1000) = −4.7·10⁴³⁸·i).
+    bothRoutes(ce, ['GammaRegularized', 2.5, NEG], isValue(ce.ComplexInfinity));
     // A SYMBOL stays symbolic: it may hold a positive integer, whose value
     // here is ±∞, and `NaN` could not be taken back.
     const e = new ComputeEngine();

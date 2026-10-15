@@ -566,6 +566,19 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
   /** See `OperatorDefinition._derivedSignature`. */
   _derivedSignature = false;
 
+  /** A counter that increases at each change of this definition in place:
+   * an update of its handlers or flags (`_update`), a write of its
+   * signature (`_setSignature`), and a restore of a snapshot. A call of a
+   * user function records this counter, with the identity of the
+   * definition, when it is boxed (`BoxedFunction._calleeStamp`). When either
+   * one is different when the type of the call is read or when the call is
+   * evaluated, the call is boxed again against the definition as it is now.
+   * The counter is never restored: a restore increases it, because a check
+   * that runs without need costs only time, and a check that does not run
+   * gives an out-of-date answer.
+   * @internal */
+  _writeVersion = 0;
+
   /** See `OperatorDefinition._validationSignature`. */
   _validationSignature: Type | undefined = undefined;
 
@@ -648,7 +661,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
   inferOperandTypes?: (
     ops: ReadonlyArray<Expression>,
     requirement: Type
-  ) => ReadonlyArray<Type | undefined> | undefined;
+  ) => ReadonlyArray<Type | { readonly replace: Type } | undefined> | undefined;
 
   even?: (
     ops: ReadonlyArray<Expression>,
@@ -951,6 +964,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     this.engine._withoutFacts(() => {
       this._signature = thunk();
     });
+    this._writeVersion += 1;
   }
 
   constructor(ce: ComputeEngine, name: string, def: OperatorDefinition) {
@@ -1714,6 +1728,8 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     this.compile = s.compile;
     this.derivative = s.derivative;
     this.collection = s.collection;
+    // `_signature` is written directly above, not by `_setSignature`.
+    this._writeVersion += 1;
   }
 
   /**
@@ -1771,6 +1787,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     // partially mutated, and only a snapshot taken ahead of the first write
     // captures the true pre-update state whatever later throw lands.
     journalDefinitionRecord(this.engine, this, 'redefine');
+    this._writeVersion += 1;
 
     if (this.engine.strict) {
       for (const key in def) {

@@ -29,10 +29,10 @@ describe('A value outside the declared result type: interpreter and compiled cod
   // declines a declaration it can prove wrong at compile time (a complex
   // value under a real ascription, below) and emits the body otherwise. So
   // `f: (integer) -> integer` with the body `n/2` is an error for `f(3)` in
-  // the interpreter and `1.5` in compiled code. The difference is recorded
-  // in `ROADMAP.md` ("Compiled code returns a value that the interpreter
-  // refuses under the declared result type"); this test pins it until that
-  // entry is decided.
+  // the interpreter and `1.5` in compiled code. This difference is a user
+  // decision: the compiler trusts a declaration it cannot prove wrong, and a
+  // check of every returned value would cost every compiled call for an
+  // author error. This test pins the difference.
   it('JavaScript: a rational under an integer result is an error in the interpreter and a float in compiled code', () => {
     const ce = new ComputeEngine();
     ce.declare('f', '(integer) -> integer');

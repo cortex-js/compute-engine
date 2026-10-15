@@ -76,9 +76,10 @@ interface MapCompileDep {
   version: number;
   /** The inner OPERATOR definition at compile time — a user-function
    * redefinition (`ce.assign('f', newLambda)`) keeps the binding wrapper but
-   * swaps this object, and operator defs carry no `_writeVersion`, so the
-   * identity comparison is the only signal that catches it (review finding:
-   * without this, the global generation bump alone gets re-stamped away). */
+   * swaps this object, and the identity comparison catches it (without
+   * this, the global generation bump alone gets re-stamped away). The
+   * `_writeVersion` of an operator definition, which counts its changes in
+   * place, is not read here. */
   operatorDef: unknown;
 }
 

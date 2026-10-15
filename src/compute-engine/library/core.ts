@@ -365,7 +365,9 @@ function simplifyUnder(
 }
 
 /** The operands of a `Delimiter` to evaluate: a leading `Sequence` or
- * `Delimiter` stands for its own operands. */
+ * `Delimiter` stands for its own operands. The second operand, the string of
+ * delimiters (`"[,]"`), is not a value and is never included: if it were,
+ * `Delimiter(x, "[,]")` would evaluate to the tuple `(x, "[,]")`. */
 function delimitedOperands(
   ops: ReadonlyArray<Expression>
 ): ReadonlyArray<Expression> {
@@ -373,7 +375,7 @@ function delimitedOperands(
   return (op1.operator === 'Sequence' || op1.operator === 'Delimiter') &&
     isFunction(op1)
     ? flattenSequence(op1.ops)
-    : ops;
+    : [op1];
 }
 
 /** The `absence-marker-binding` error when `name` is an absence marker. */

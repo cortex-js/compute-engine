@@ -41,6 +41,45 @@ An eager producer may declare `canEnumerate` when its elements can be walked
 without first replacing the expression with a materialized list. Unknown
 enumerability stays `undefined`; callers must not collapse it to `false`.
 
+A lazy operator holds its operands. When its source is not a collection
+value yet, the evaluation of the lazy node evaluates that source once and
+applies the operator to the value. Such a source is an eager operator call
+(the element read `At(t, 1)`, a `Sort`), a call of a user function, or a
+symbol whose value is such a call. With `t` assigned `([3, 1, 2], [4])`,
+`Dedup(At(t, 1))` evaluates to `Dedup([3, 1, 2])`, a view that materializes
+to `[3, 1, 2]`, and `ArgMax(At(t, 1))` evaluates to `1`. The rule applies to:
+
+- the source slots (the slots typed as a collection) of `Map`, `Filter`,
+  `Reduce`, `Scan`, `Any`, `All`, `TakeWhile`, `DropWhile`, `FlatMap`,
+  `MaxBy`, `MinBy`, `ArgMax`, `ArgMin`, `Dedup` and `Differences`;
+- the collection of the first `Element` clause of a `Comprehension`, when it
+  does not mention the index of a clause;
+- a collection-typed operand at a numeric parameter of a lazy broadcastable
+  operator (`Numerator`, `Denominator`, `NumeratorDenominator`), which then
+  broadcasts over the value as it does over a literal list;
+- a view whose operands are evaluated (`Reverse`, `Join`, `Take`, ...) under
+  an explicit `materialization` option: the view is materialized after its
+  operands are evaluated, so `Reverse(At(t, 1)).evaluate({ materialization:
+  true })` is `[2, 1, 3]`.
+
+If the value of the source is an error, the error is the value of the node,
+with a breadcrumb that names the operator and the operand. If the value cannot
+be a collection (the number `5`), the value of the node is the
+`incompatible-type` error that names the expected collection type. If the
+source stays symbolic (`Sort(xs)` for a valueless `xs`), the node stays as it
+is. The display preview (`toString()`, the `latex` getter, `toLatex()` without
+a `materialization` option) does not evaluate an operand of a view that is not
+a collection value yet: an unevaluated view over such an operand prints as
+written (`\mathrm{Reverse}(t[1])`, `\mathrm{Join}(\mathrm{src}(1), [4])`), and
+its value prints after an evaluation. The implementation is
+`heldEagerSources()`, `materializesAfterOperands()` and
+`previewHoldsEagerOperand()` in `boxed-expression/boxed-function.ts`.
+
+A source that is provably not a collection is refused when the call is boxed,
+as for an eager operator: `Dedup(5)` is `Dedup(Error(incompatible-type,
+collection, 5))`, an invalid call typed `error`
+(`refusedCollectionSourceOperands()` in `boxed-expression/validate.ts`).
+
 Memoized collection elements record their actual dependencies. A state event
 invalidates only entries whose dependency axes changed. Cyclic lazy views stay
 symbolic rather than recursing without bound.

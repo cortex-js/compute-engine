@@ -32,9 +32,11 @@ const BODY = 'P \\mapsto \\sqrt{P[1]^2+P[2]^2}';
 // parameters are contravariant, so an UNREFINED `(unknown) -> …` signature is
 // a subtype of this one and would pass a bare `.matches(CONCRETE)`. Only the
 // result tier may refine (`broadcastable<number>` still passes).
-// The body indexes its parameter and adds 1 to the element, so the
-// parameter's element refines to `number` (use-driven element inference).
-const PARAMS = '(indexed_collection<number>)';
+// The body indexes its parameter at the literal indices 1 and 2 and squares
+// each element, so the parameter refines to a tuple of two numbers (index
+// reads of a bare parameter are recorded per index,
+// `docs/INFERENCE_ROADMAP.md` §5).
+const PARAMS = '(tuple<number, number>)';
 const CONCRETE = `${PARAMS} -> broadcastable<number>`;
 function expectRefinedSignature(expr: { readonly type: BoxedType }): void {
   expect(expr.type.toString().slice(0, PARAMS.length + 4)).toBe(

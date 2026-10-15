@@ -132,6 +132,14 @@ export interface ILatexSyntax {
    *  may not. If the same instance is used by several engines, the entries
    *  apply to all of them. See `LatexSyntax.addEntries()`. */
   addEntries?(entries: ReadonlyArray<Partial<LatexDictionaryEntry>>): void;
+
+  /** The dictionary entries, including the entries added with
+   *  `addEntries()`. A call to `addEntries()` gives a new array, so a
+   *  different array means a different dictionary. Rule strings are parsed
+   *  with these entries plus the rule entries. Optional: a minimal injected
+   *  syntax may not have it, and then rule strings are parsed with the
+   *  default dictionary. See `LatexSyntax.dictionary`. */
+  readonly dictionary?: ReadonlyArray<Partial<LatexDictionaryEntry>>;
 }
 
 export type OperatorInfo = {
@@ -1385,11 +1393,13 @@ export interface IComputeEngine {
    * (`steps`), or both. A step budget bounds an internal search on every
    * machine at the same point, so its result does not depend on the speed or
    * the load of the machine. A spent budget throws a timeout
-   * `CancellationError` with the span's `label` as its attribution.
+   * `CancellationError` with the span's `label` as its attribution. With
+   * `ruleSteps`, each rule that `replace()` tries is a step of this budget
+   * too (see `StepBudget` in `common/interruptible.ts`).
    * @internal
    */
   _withBudget<T>(
-    limit: { ms?: number; steps?: number; label?: string },
+    limit: { ms?: number; steps?: number; label?: string; ruleSteps?: boolean },
     fn: () => T
   ): T;
 

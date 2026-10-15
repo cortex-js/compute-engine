@@ -113,29 +113,63 @@
   inside the literal or binder that declares it; the same binding outside that
   node is a dependency.
 
+- **A `Measurement` operand is propagated by the elementary and special
+  functions, the comparisons, the step functions and the main statistics; `Cot`,
+  `Sec`, `Csc` and the product of a list no longer lose it.** A
+  `Measurement(nominal, error)` carries a 1σ uncertainty, and a numeric
+  quadrature result is one under `.N()`. An audit of the numeric operators found
+  three wrong answers: `Cot`, `Sec` and `Csc` of a measurement under `.N()` gave
+  `ComplexInfinity`, `1` and `ComplexInfinity` (the numeric kernel read the
+  measurement as `0`), `Product([Measurement(0.7468, 0.001), 0.5, 0.9]).N()` was
+  the bare `0.33606` (the fold dropped the uncertainty that `evaluate()` kept),
+  and `Im(Measurement(0.7468, 0.001))` was `Measurement(0, 0.001)` where the
+  imaginary part of a real measurement is exactly `0`. It also found operators
+  that stayed unevaluated where the bare nominal evaluates. All now propagate
+  the uncertainty, first order (`|f′(a)|·σ`, the derivative from the engine's
+  derivative table, taken in the engine's angular unit): the circular,
+  hyperbolic and inverse functions (`Arcsin`, `Arctan`, `Arctan2`, `Sinh`,
+  `Artanh`, …), `Gamma`, `LogGamma`, `Erf`, `Erfc` and `Factorial`; `Mean`,
+  `Median`, `Variance`, `StandardDeviation` and their population forms (`Median`
+  orders by the nominal and returns the middle datum; the variance propagates
+  through its gradient, so `Variance([Measurement(0.7468, 0.001), 0.5, 0.9])` is
+  `0.0407 ± 0.0000312`); and `Reduce`. Two readings were decided: a comparison
+  decides by the nominal, so `Less(Measurement(0.7468, 0.001), 1)` is `True` and
+  a `Which` whose condition compares an integral evaluates under `.N()` (it
+  stayed unevaluated); and a step function (`Floor`, `Ceil`, `Round`, `Mod`)
+  answers the bare value of the nominal, since its slope is zero almost
+  everywhere (`Floor(Measurement(0.7468, 0.001))` is `0`; `Truncate` the same,
+  while `Fract` keeps the uncertainty, its slope being 1). At a point where the
+  derivative is not finite (`Arcsin(Measurement(1, 0.01))`) the bare nominal is
+  returned, the error bar dropped, as `Sqrt` already did. `Kurtosis`,
+  `Skewness`, `Mode`, `Quartiles` and `InterquartileRange` have no propagation
+  rule and stay unevaluated over a measurement, as before; so does any statistic
+  over a measurement whose nominal is symbolic or complex. The nominal of a sum
+  or product of measurements is now computed with the boxed `Add`/`Multiply`, so
+  an exact radical nominal stays exact under `evaluate()`
+  (`Measurement(√2, 1/10) + 1` is `(1 + √2) ± 1/10`; it was a float).
+
 - **The symbolic integrator follows the angular unit.** With
   `ce.angularUnit = 'deg'`, `\int_0^{180} \sin x\,dx` evaluated to `2`, where
   the value is `360/\pi`, and `\int \sin x\,dx` was `-\cos x`, where it is
-  `-(180/\pi)\cos x`; `\int \sin x \cos x\,dx` was a series of powers of
-  `\pi`, because the substitution route combined the unit-aware derivative
-  with the radian rules. The integrator holds the radian antiderivatives, so
-  in another unit the integrand is rewritten to the radian convention with an
-  exact factor (`\sin x` becomes `\sin(\pi x/180)`, `\arctan x` becomes
-  `\arctan(x)/(\pi/180)`), integrated with the engine in radian mode, and
-  the result is mapped back to the unit: `\int \sin x\,dx` is now
-  `-(180/\pi)\cos x` in degree mode, `\int_0^1 dx/(1 + x^2)` is `\pi/4` in
-  every unit, and `\int_0^{360} |\sin x|\,dx` is `720/\pi`. The grad and
-  turn units follow the same rule. The closed form for `|\sin(kx + m)|` over
-  many periods reads the period in the engine's unit (`360` in degree mode).
-  The same holds with the Rubi integration rules loaded, for the closed form
-  the JavaScript target compiles for a definite integral, and for a user
-  function or a symbol value that brings a trigonometric call into the
-  integrand. Also, a coefficient of the variable that is a product of two or more
-  constant factors now matches the integration rules: `\int \tan(2\pi x)\,dx`
-  and `\int \sin^2(\pi x/180)\,dx` stayed unevaluated in every unit while
-  `\int \tan(\pi x)\,dx` did not, because the rules bind the coefficient to
-  one factor of the flattened product; they are now
-  `\ln|\sec(2\pi x)|/(2\pi)` and `x/2 - 45\sin(\pi x/90)/\pi`.
+  `-(180/\pi)\cos x`; `\int \sin x \cos x\,dx` was a series of powers of `\pi`,
+  because the substitution route combined the unit-aware derivative with the
+  radian rules. The integrator holds the radian antiderivatives, so in another
+  unit the integrand is rewritten to the radian convention with an exact factor
+  (`\sin x` becomes `\sin(\pi x/180)`, `\arctan x` becomes
+  `\arctan(x)/(\pi/180)`), integrated with the engine in radian mode, and the
+  result is mapped back to the unit: `\int \sin x\,dx` is now `-(180/\pi)\cos x`
+  in degree mode, `\int_0^1 dx/(1 + x^2)` is `\pi/4` in every unit, and
+  `\int_0^{360} |\sin x|\,dx` is `720/\pi`. The grad and turn units follow the
+  same rule. The closed form for `|\sin(kx + m)|` over many periods reads the
+  period in the engine's unit (`360` in degree mode). The same holds with the
+  Rubi integration rules loaded, for the closed form the JavaScript target
+  compiles for a definite integral, and for a user function or a symbol value
+  that brings a trigonometric call into the integrand. Also, a coefficient of
+  the variable that is a product of two or more constant factors now matches the
+  integration rules: `\int \tan(2\pi x)\,dx` and `\int \sin^2(\pi x/180)\,dx`
+  stayed unevaluated in every unit while `\int \tan(\pi x)\,dx` did not, because
+  the rules bind the coefficient to one factor of the flattened product; they
+  are now `\ln|\sec(2\pi x)|/(2\pi)` and `x/2 - 45\sin(\pi x/90)/\pi`.
 
 - **`Min`, `Max`, `ElementMin`, `ElementMax`, `Clamp` and `Sort` order a
   `Measurement` by its nominal value.** A quadrature result is a
@@ -272,6 +306,141 @@
   `[1, 2, 3] |> take(2)`, `"hello" |> take(2)` and `xs |> fold(f, 10)` do not
   change.
 
+- **A rule written as a LaTeX string is parsed with the engine's own notation.**
+  The entries of the engine's `LatexSyntax`, given to its constructor or added
+  with `ce.latexSyntax.addEntries()`, now apply inside a rule string, together
+  with the rule syntax (wildcards, `->`, conditions). Before, a rule string used
+  only the default dictionary: with `\mathbb{Z}/n\mathbb{Z}` mapped to
+  `IntegerModRing`, the rule `\mathbb{Z}/1\mathbb{Z} -> \{0\}` read its left
+  side as `QuotientRing(Integers, 1)`. The rule syntax is built once per engine
+  dictionary instead of once per rule string. New: `LatexSyntax.dictionary`
+  returns the entries of an instance. The number-format options of the engine
+  (`decimalSeparator` and the others) do not reach rule strings.
+
+- **A `Delimiter` group in square brackets is written with parentheses.**
+  `["Delimiter", "x", "'[,]'"]` was written `\lbrack x\rbrack`, which the parser
+  reads as the list `["List", "x"]`, so a round trip changed the value. It is
+  now written `(x)`: the value round-trips and the bracket spelling is lost. A
+  `List` operand keeps its brackets, a sequence with a list-valued element is
+  written `\operatorname{Tuple}(…)` (parentheses would read back as a
+  `PointList`), and other fences are unchanged. Also, `Delimiter(x, "[,]")`
+  evaluated to the tuple `(x, "[,]")`; it now evaluates to `x`.
+
+- **A call of a user function follows a reassignment of the function for its
+  type as well as its value.** With `h := (u) ↦ 1`, the boxed call `h("abc")` is
+  typed `integer`; after `h := (u: real) ↦ 7`, the same call is typed `error`
+  and evaluates to the `incompatible-type` error, as a call boxed after the
+  assignment does. This applies to operator definitions, to variables declared
+  `function` or with no declaration, and to Epsil `let` and `function` names. A
+  call whose function did not change costs one comparison of its definition and
+  of a change counter.
+
+- **A named call through a variable with no declared type matches its names
+  against the function the variable holds when the call is evaluated.** With
+  `let alias = bob_S` where `bob_S(x, factor)`,
+  `function g() { alias(x: 3, factor: 5) }`, and then `alias = other` where
+  `other(factor, x)`, `g()` now calls `other(5, 3)`; it kept the parameter order
+  of `bob_S`. A call through a variable that holds a lazy operator now holds its
+  operands, as the direct call does: with `y := 10` and `aliasH` holding the
+  lazy `bob_H`, `aliasH(y·z)` evaluates to `Hold(y·z)`; it evaluated the operand
+  first and gave `Hold(10z)`.
+
+- **A matrix with a float entry is a float matrix.** The matrix operators
+  (`Determinant`, `Trace`, `Transpose`, `Inverse`, `MatrixPower`,
+  `MatrixMultiply`, `Dot`, `Reshape`, `Flatten` and the others) now give a float
+  result, or a matrix of floats, also where a value is an integer:
+  `\det([[1.5, 0], [0, 2]])` is `3.0`, not the exact `3`, and
+  `Transpose([[2.0, 1.5], [3, 4]])` is `[[2.0, 3.0], [1.5, 4.0]]`. The packed
+  cells of doubles did not record which entries were floats, so an integer value
+  was read back exact. A matrix of exact entries is unchanged, and a `NaN` entry
+  does not make a matrix a float matrix. Element-wise arithmetic over lists
+  keeps the exactness of each element, as before.
+
+- **The exact `0` divided by a float is the float `0`**: `0 / 2.5` is `0.0`, and
+  `\frac{0}{\pi}.N()` is `0.0`. `Expand` and `simplify()` no longer read a float
+  exponent as an integer: `x^{0.0}` and `(a + b)^{2.0}` keep their float
+  exponent, `2^{1.0}` simplifies to `2.0`, and a finite base to the exponent
+  `0.0` evaluates to `1.0`. A float exponent is kept by `simplify()` and in
+  products: `x^{1.0}.simplify()` stays `x^{1.0}`, `3x^{2.0}` evaluates to
+  `3x^{2.0}` (it was `3x^2`), `x^{2.0} x` simplifies to `x^{3.0}`, and `1.0^y`
+  and `0.0^x` (for `x > 0`) simplify to the float `1` and the float `0`.
+  Element-wise arithmetic over lists keeps the exactness of each element also
+  for a list packed as doubles: `[2.0, 1.5] + [1, 1]` is `[3.0, 2.5]` (it was
+  `[3, 2.5]`), and `[1.5, 1] + [1, 1]` is `[2.5, 2]`.
+
+- **A lazy collection operator evaluates a source that is not a collection value
+  yet, once, when the lazy node is evaluated.** With `t` assigned
+  `([3, 1, 2], [4])`, `ArgMax(At(t, 1))` is `1` and `ArgMin(At(t, 1))` is `2`;
+  `Dedup`, `Differences`, `FlatMap`, `Scan`, `TakeWhile` and `DropWhile` of
+  `At(t, 1)` evaluate to the view over `[3, 1, 2]` (they stayed unevaluated);
+  `Numerator(At(t, 1))` and `Denominator(At(t, 1))` broadcast over the list
+  (they were an `incompatible-type` error naming `vector<integer^3>`);
+  `Reverse(At(t, 1)).evaluate({ materialization: true })` is `[2, 1, 3]`. When
+  the value of the source is an error, that error is the value of the node:
+  `Map(x => x, h(1))` and `Comprehension(x, Element(x, f(1)))` evaluate to the
+  error of the call. When the value cannot be a collection, the result is an
+  `incompatible-type` error. A lazy collection operator over a source that
+  cannot be a collection is an error when it is boxed: `Map(x => x, 5)`,
+  `Dedup(5)`, `ArgMax(5)` and `Filter(5, p)` are the operator over an
+  `incompatible-type` error, invalid and typed `error`, as `Sort(5)` is (the
+  call was valid, typed `unknown`, and evaluated to itself). An unevaluated view
+  prints without evaluating its operands: `Join(src(1), [4]).toLatex()` prints
+  the call as written, where it evaluated `src(1)` three times. The rules are
+  stated in `docs/COLLECTIONS-MODEL.md`. Fixed on the way: a `Slice` in the body
+  of a function used the bounds of its first call for every later call
+  (`Map(i ↦ Characters(Slice("49142", i, i + 2)), 1..3)` was three copies of the
+  first slice).
+
+- **An index read of a bare function parameter narrows the parameter per
+  index.** While every read uses a literal index, the parameter is a tuple whose
+  component at each index is the requirement of that read:
+  `p => !p[1] if p[2] % 2 == 0 else p[1]` types `p` as `tuple<boolean, real>`
+  and accepts `(true, 4)`; it was refused with "expected `boolean`, got
+  `nan | real`", because one numeric index read decided the element type of
+  every element. When some read uses a non-literal index, the parameter is an
+  indexed collection whose element type is the union of the read requirements.
+  Inferred arrows such as `v => v[1] + 1` now print
+  `(v: tuple<number>) -> number`. The inferred tuple is not enforced at
+  application, and compiled JavaScript still fails loudly when the argument does
+  not have the shape the static type says. A valueless free symbol keeps the
+  older rule.
+
+- **A zero-length axis is kept in a list type.** `list<integer^(2x0)>` (two
+  empty rows) is `matrix<integer^(2x0)>`, not `vector<integer^2>`, and
+  `list<integer^0>` is `vector<integer^0>`, not `nothing`. `list<integer^(0x2)>`
+  now parses as a 0x2 shape; it was read as the hexadecimal literal `0x2`. In a
+  dimension, `0x` always separates a zero-length axis from the next dimension:
+  `list<integer^(0xa)>` is a matrix with no rows and `a` columns (`a` a
+  dimension variable), not a list of length 10, and `0X2` (capital X) is a parse
+  error. The empty list `[]` is a value of a list type whose first axis has
+  length 0. `Shape` and `Rank` count an empty axis: `Shape([])` is `(0)` with
+  rank 1, `Shape([[], []])` is `(2, 0)` with rank 2, and an empty result of
+  `Take(xs, 0)` or of a lazy collection has the shape `(0)`; all of them had the
+  shape `()` of a scalar.
+
+- **The built-in antiderivative and the variation-of-parameters step of `DSolve`
+  have a step budget.** `ANTIDERIVATIVE_STEP_BUDGET` and
+  `DSOLVE_VARIATION_STEP_BUDGET` are 100,000 steps each, about ten times the
+  largest count measured over the test suite. The budget counts steps, not time,
+  so the result is the same on every machine. When it is spent, the result is
+  the unevaluated `Integrate` or `DSolve`, as with the Rubi rules. A
+  `ce.withTimeLimit()` deadline or a `ce.withStepBudget()` budget of the caller
+  still applies, and its expiry reaches the caller. These two budgets also count
+  each simplification rule tried, so an integral that makes no progress, such as
+  `∫(1+sin y+cos 2y)^12·e^y dy`, returns the unevaluated `Integrate` in about
+  one second; the budgets of the Rubi rules and of the compiler do not count
+  these steps and are unchanged. `DSolve` no longer swallows a cancellation
+  raised inside an integration provider.
+
+- **Three special-function points answer the limit instead of `NaN`.**
+  `Gamma(n, -oo)` is `(-1)^(n-1)·oo` for a positive integer `n` (`Gamma(2, -oo)`
+  is `-oo`, `Gamma(3, -oo)` is `+oo`) and `~oo` for every other number `s`, an
+  integer `s ≤ 0` included. `Beta(+oo, b)` for a real non-integer `b ≤ 0` is the
+  infinity with the sign of `Γ(b)` (`Beta(+oo, -1/2)` is `-oo`), and `~oo` for a
+  non-real `b` with a negative real part. `GammaRegularized(a, -oo)` is `~oo`
+  for a real non-integer `a`. The values were checked against mpmath at large
+  finite arguments.
+
 - **The value a call returns is checked against the declared result type.** A
   definition whose body cannot meet its declaration is still accepted, and the
   compiler still declines it, as before. With `g` declared
@@ -293,12 +462,13 @@
   grouped function type as the result, `(integer) -> ((integer) -> integer)`, is
   checked: a string returned under it is the error. Compiled code does not check
   the returned value: `f: (integer) -> integer` with the body `n / 2` is an
-  error for `f(3)` in the interpreter and `1.5` in compiled code (recorded in
-  `ROADMAP.md`). A `Typed` ascription written by the user is checked the same
-  way: `Typed("s", "integer")` is the error, `Typed(2 + 3, "integer")` is `5`. A
-  redefinition of a function whose signature was derived from its first body now
-  takes the result type from the new body: after `h := (a: integer) ↦ 1` and
-  then `h := (a: integer) ↦ "s"`, `h(0)` is typed `string` (it was `integer`).
+  error for `f(3)` in the interpreter and `1.5` in compiled code (a decision:
+  the compiler trusts a declaration it cannot prove wrong). A `Typed` ascription
+  written by the user is checked the same way: `Typed("s", "integer")` is the
+  error, `Typed(2 + 3, "integer")` is `5`. A redefinition of a function whose
+  signature was derived from its first body now takes the result type from the
+  new body: after `h := (a: integer) ↦ 1` and then `h := (a: integer) ↦ "s"`,
+  `h(0)` is typed `string` (it was `integer`).
 
 - **A function that hands a tuple built from its own parameter to a scalar
   parameter has the result type `any`.** With `f(x) := (-x, x)` and
@@ -26298,13 +26468,13 @@ corpus went from 85% to ~96%, and the one crash it exposed is fixed. See
 - **3×3 `Eigenvalues`
 
   returned wrong values — fixed.** The analytic solver used
-                          a sign-flipped term in its depressed cubic, mirroring every eigenvalue about
-                          $\operatorname{tr}/3$: e.g. $[[5,-3,-7],[-2,1,2],[2,-3,-4]]$ returned
-                          $\{\tfrac{10}{3}, -\tfrac53, \tfrac13\}$ instead of $\{1, -2, 3\}$. (Spectra
-                          symmetric about their mean — like $\{1,2,3\}$ — were unaffected, which is how
-                          it escaped notice.) Additionally, a complex-conjugate eigenvalue pair was
-                          returned as its real part twice ($\{2, \pm i\}$ came back $\{2, 0, 0\}$);
-                          complex eigenvalues are now returned as complex numbers.
+                            a sign-flipped term in its depressed cubic, mirroring every eigenvalue about
+                            $\operatorname{tr}/3$: e.g. $[[5,-3,-7],[-2,1,2],[2,-3,-4]]$ returned
+                            $\{\tfrac{10}{3}, -\tfrac53, \tfrac13\}$ instead of $\{1, -2, 3\}$. (Spectra
+                            symmetric about their mean — like $\{1,2,3\}$ — were unaffected, which is how
+                            it escaped notice.) Additionally, a complex-conjugate eigenvalue pair was
+                            returned as its real part twice ($\{2, \pm i\}$ came back $\{2, 0, 0\}$);
+                            complex eigenvalues are now returned as complex numbers.
 
 ### Rules and Pattern Matching
 

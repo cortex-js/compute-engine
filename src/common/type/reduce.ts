@@ -949,25 +949,14 @@ function reduceListType(type: ListType): Type {
   if (reducedType === 'nothing')
     return decorate({ kind: 'list', elements: 'nothing' });
 
-  let dimensions = type.dimensions;
-  let dimensionVariables = type.dimensionVariables;
-  if (dimensions) {
-    // `-1` means "any size" — a valid, non-degenerate dimension (e.g. a bare
-    // `matrix` is `list<list<...>^-1>^-1`). Only a literal `0` makes the list
-    // empty; dropping `-1` here turned `matrix` into `nothing`, annihilating
-    // any intersection it appeared in. A dimension VARIABLE rides on a `-1`
-    // axis, so the names are filtered in step with the lengths.
-    const kept = dimensions
-      .map((dim, i) => i)
-      .filter((i) => dimensions![i] >= 1 || dimensions![i] === -1);
-    if (kept.length === 0) return 'nothing';
-    if (kept.length !== dimensions.length) {
-      dimensions = kept.map((i) => dimensions![i]);
-      dimensionVariables = dimensionVariables?.map
-        ? kept.map((i) => dimensionVariables![i])
-        : dimensionVariables;
-    }
-  }
+  // Every axis is kept, a zero-length axis too. `list<integer^(2x0)>` is two
+  // empty rows: a value the engine can hold, of rank 2 and with 0 elements.
+  // Dropping the zero axis changed the rank of the type (it became
+  // `vector<integer^2>`, a list of two integers), and an all-zero shape is
+  // the type of an empty list with its axes, not the type `nothing`.
+  // `-1` ("any size", the axis a dimension variable rides on) is kept too.
+  const dimensions = type.dimensions;
+  const dimensionVariables = type.dimensionVariables;
 
   // Bare `list` is the canonical spelling of `list<unknown>` (user ruling
   // 2026-08-17) — but only when no dimensions constrain the rank, which the

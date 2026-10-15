@@ -390,6 +390,59 @@ assumptions, resolve-only regions, speculative-parse confinement and the
 assignment-evidence guard are inherited from the symbol write. Pins:
 `test/compute-engine/use-driven-element-inference.test.ts`.
 
+**Index reads of a bare function parameter are recorded per index (user
+decision 2026-10-15).** Rule R1-A gives one element type to every element:
+the first typed read decides it. For a bare (unannotated) parameter of a
+function literal this refused correct programs. In
+`p => !p[1] if p[2] % 2 == 0 else p[1]`, the read `p[2] % 2` made `p` an
+`indexed_collection<real>`, so `!p[1]` was "expected `boolean`, got
+`nan | real`", but the tuple `(true, 4)` fits both reads. The rule for such
+a parameter is now:
+
+- While every index read of the parameter uses a literal positive integer
+  index, the parameter is a tuple. The component at each read index is the
+  requirement of the reads at that index, a component that no read uses is
+  `unknown`, and the length is the largest literal index. The program above
+  types `p` as `tuple<boolean, real>`; `v => v[3] + 1` types `v` as
+  `tuple<unknown, unknown, number>`. A literal index above 32 counts as a
+  non-literal index.
+- When some read uses an index that is not a literal, the parameter is an
+  indexed collection whose element type is the union (join) of the
+  requirements of all the reads: `!p[1]`, `p[2] + 1` and `p[k] + 1` type `p`
+  as `indexed_collection<boolean | real>`.
+- Two reads at the same literal index with requirements that have no common
+  value (`!p[1]` and `p[1] + 1`) are a conflict, and the second use is an
+  error, as before.
+
+The mirror case named in the Phase 3 design below is safe for a parameter:
+`xs => And(xs[1], b) …` followed by `xs[2] + 1` types `xs` as
+`tuple<boolean, real>` and is not refused. The `At` handler computes the new
+type from the current inferred type (the reads seen so far) and REPLACES it,
+through a `{ replace: t }` entry of the `inferOperandTypes` contract,
+because adding a tuple component or joining element types is not an
+intersection (`parameterIndexReadType`, `library/collections.ts`).
+
+Limits of the rule:
+
+- It applies only to the parameter of the function literal whose body is
+  being canonicalized. A free symbol (`xs[1] + 1` at the top level) keeps
+  rule R1-A, and so the top-level mirror case (`And(b[1], B)` followed by
+  `b[2] + 1`) is still refused.
+- A use is validated against the type made by the earlier reads BEFORE its
+  own read is recorded, and a refused read is not recorded. So the union
+  forms only when the current type admits the new requirement. After `!p[1]`
+  alone, `p` is `tuple<boolean>`, a read `p[k]` at an unknown index is a
+  boolean, and `p[k] + 1` is refused. After a first read at a non-literal
+  index, `p` has one element type, and a later read with a requirement
+  outside it is refused.
+- `First`/`Second`/`Third`/`Last` keep rule R1-A.
+- An inferred tuple type is not a contract: it is not enforced at
+  application, so `(v => v[1] + 1)([1, 2, 3])` is `2` and a list argument is
+  still read whole. The JavaScript target checks the run-time value of a
+  numeric read of an INFERRED tuple base as it does for an inferred indexed
+  collection (`_SYS.atNumeric`), so a matrix given to a kernel compiled for
+  `v: tuple<number>` fails loudly instead of returning a concatenated string.
+
 **Facts measured during the design round (2026-09-05).** The scalar reading
 a bare symbol gets from `x + 1` is `number` on today's tree (the guide's
 older `real` is out of date), so the element write is `number` too. An

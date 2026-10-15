@@ -6,6 +6,7 @@ import type {
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
 import {
+  elementFloatMask,
   isTensorValue,
   packTensor,
   tensorCellExpression,
@@ -26,7 +27,7 @@ import {
   nanOperandAnswer,
   indeterminateFormAnswer,
 } from './type-guards.js';
-import { asFloat } from './float-result.js';
+import { asFloat, hasFloatOperand } from './float-result.js';
 import {
   isImaginaryPartFinite,
   isImaginaryUnitValue,
@@ -139,6 +140,18 @@ function isLiteral(op: Expression, n: number): boolean {
   if (!isNumber(op)) return false;
   if (n !== 0 && !op.isExact) return false;
   return op.isSame(n);
+}
+
+/**
+ * The exponent `x` of a power (or the index of a root) as a rational, when
+ * it is exact. A float exponent is not read as a rational, also when its
+ * value is an integer: `x^{2.0}` keeps its float exponent, and is grouped as
+ * a term with an exponent that is not a rational, as `x^{2.5}` is. Reading
+ * `2.0` as the rational `2` made `3x^{2.0}` evaluate to `3x^2`.
+ */
+function exactRationalExponent(x: Expression): Rational | undefined {
+  if (isNumber(x) && !x.isExact) return undefined;
+  return asRational(x);
 }
 
 //
@@ -507,8 +520,9 @@ export class Product {
 
     // If this is a power expression, extract the exponent
     if (isFunction(term, 'Power')) {
-      // Term is `Power(op1, op2)`
-      const r = asRational(term.op2);
+      // Term is `Power(op1, op2)`. The exponent is read as a rational only
+      // when it is exact (`exactRationalExponent()`).
+      const r = exactRationalExponent(term.op2);
       if (r) {
         // Don't extract non-integer exponents for numeric bases
         // This would cause 2^{3/5} to evaluate numerically instead of staying symbolic
@@ -556,7 +570,7 @@ export class Product {
 
     if (isFunction(term, 'Root')) {
       // Term is `Root(op1, op2)`
-      const r = asRational(term.op2);
+      const r = exactRationalExponent(term.op2);
       if (r) {
         // Don't extract non-integer exponents for numeric bases
         // This keeps ∛2 symbolic instead of evaluating to 1.259...
@@ -1355,8 +1369,10 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
       return ce.function('Divide', [op1, op2], {
         form: 'structural',
       });
-    // A float `0` gives a float `0`
-    return isNumber(op1) && !op1.isExact ? op1 : ce.Zero;
+    // A float `0` gives a float `0`. A float divisor gives a float `0` too
+    // (`0/2.5` is `0.0`): a float operand makes a numeric result a float.
+    if (isNumber(op1) && !op1.isExact) return op1;
+    return hasFloatOperand([op2]) ? asFloat(ce.Zero) : ce.Zero;
   }
 
   // a/∞ = 0, ∞/∞ = Indeterminate (check before a/a = 1 rule)
@@ -1708,6 +1724,11 @@ export function div(num: Expression, denom: number | Expression): Expression {
       // as `canonicalDivide` answers for `Divide(0, ∞)`: it is not an
       // indeterminate form (it answered `NaN` here before).
       if (denom === 0) return indeterminateFormAnswer(ce, [num, ce.Zero]);
+      // A JavaScript number that is not an integer is a float (`ce.number()`
+      // boxes it as a float), so the exact `0` divided by it is the float
+      // `0`, as for a boxed float divisor below.
+      if (Number.isFinite(denom) && !Number.isInteger(denom))
+        return asFloat(num);
       return num; // 0
     }
     // a/1 = a
@@ -1749,8 +1770,10 @@ export function div(num: Expression, denom: number | Expression): Expression {
       // `NaN` before). A `NaN` divisor was handled above.
       if (isLiteral(denom, 0)) return indeterminateFormAnswer(ce, [num, denom]);
       // A float `0` numerator is kept (`0.0/∞` is the float `0`), as in the
-      // JavaScript-number branch above.
-      return isNumber(num) && !num.isExact ? num : ce.Zero;
+      // JavaScript-number branch above. A float divisor gives a float `0`
+      // (`0/2.5` is `0.0`).
+      if (isNumber(num) && !num.isExact) return num;
+      return hasFloatOperand([denom]) ? asFloat(ce.Zero) : ce.Zero;
     }
 
     // a/1 = a
@@ -3088,11 +3111,23 @@ function mulTensors(
       const productTensor = packTensor(ce, product);
       const nextTensorPacked = packTensor(ce, nextTensor);
       if (!productTensor || !nextTensorPacked) return ce._fn('Multiply', xs);
+      // Each element is a float when its own element of the list is a float
+      // (`elementFloatMask()`).
+      const aFloats = elementFloatMask(product, productTensor);
+      const bFloats = elementFloatMask(nextTensor, nextTensorPacked);
       const n = product.shape[0];
       const elements: Expression[] = [];
       for (let k = 1; k <= n; k++) {
-        const a = tensorCellExpression(ce, productTensor.at(k) ?? ce.Zero);
-        const b = tensorCellExpression(ce, nextTensorPacked.at(k) ?? ce.Zero);
+        const a = tensorCellExpression(
+          ce,
+          productTensor.at(k) ?? ce.Zero,
+          aFloats?.[k - 1] === true
+        );
+        const b = tensorCellExpression(
+          ce,
+          nextTensorPacked.at(k) ?? ce.Zero,
+          bFloats?.[k - 1] === true
+        );
         // Use the module-level `mul`/`mulN` helpers (not `.mul()`) so exact
         // elements stay exact under `evaluate()`; finished as a cell product
         // so an inexact element floats an exact-constant one (`[0.5,1]·[π,1]`
@@ -3222,12 +3257,19 @@ function scaleTensor(
   // Pack once for the whole scaling. A pack failure leaves the scaling inert.
   const packed = packTensor(ce, tensor);
   if (!packed) return ce._fn('Multiply', [scalar, tensor]);
+  // Each element is a float when its own element of the list is a float
+  // (`elementFloatMask()`).
+  const floats = elementFloatMask(tensor, packed);
 
   // Vector (rank 1)
   if (shape.length === 1) {
     const result: Expression[] = [];
     for (let i = 0; i < shape[0]; i++) {
-      const val = tensorCellExpression(ce, packed.at(i + 1) ?? ce.Zero);
+      const val = tensorCellExpression(
+        ce,
+        packed.at(i + 1) ?? ce.Zero,
+        floats?.[i] === true
+      );
       result.push(multiply(scalar, val));
     }
     return ce.function('List', result);
@@ -3242,7 +3284,8 @@ function scaleTensor(
       for (let j = 0; j < n; j++) {
         const val = tensorCellExpression(
           ce,
-          packed.at(i + 1, j + 1) ?? ce.Zero
+          packed.at(i + 1, j + 1) ?? ce.Zero,
+          floats?.[i * n + j] === true
         );
         row.push(multiply(scalar, val));
       }

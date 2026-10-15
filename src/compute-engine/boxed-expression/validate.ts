@@ -10,7 +10,10 @@ import {
 } from '../collection-utils.js';
 
 import { readTypeVariablesAsBounds } from '../../common/type/instantiate.js';
-import { COLLECTION_SHAPE_TYPE } from '../../common/type/primitive.js';
+import {
+  COLLECTION_SHAPE_TYPE,
+  INDEXED_COLLECTION_SHAPE_TYPE,
+} from '../../common/type/primitive.js';
 import { flatten, flattenHoldingBarriers } from './flatten.js';
 import { functionLiteralParameterType } from './function-literal.js';
 import {
@@ -392,6 +395,135 @@ const COLLECTION_SOURCE_OPERATORS: ReadonlySet<string> = new Set([
 
 export function isCollectionSourceOperator(name: string): boolean {
   return COLLECTION_SOURCE_OPERATORS.has(name);
+}
+
+/**
+ * The collection type that operand `i` of an operator with the signature
+ * `signature` must have when that operand is a SOURCE collection, or
+ * `undefined` when the operand is not at a source slot.
+ *
+ * The slot is read as `inferCollectionSourceArgs` reads it: the type
+ * variables of the signature read as their bounds, and a slot is a source
+ * slot when its type is a collection type. The answer is
+ * `'indexed_collection'` for a slot that requires positions (`ArgMax`), and
+ * `'collection'` otherwise. The caller decides that the operator is one of
+ * `COLLECTION_SOURCE_OPERATORS` (`isCollectionSourceOperator`).
+ */
+export function collectionSourceSlot(
+  signature: Type,
+  i: number
+): 'collection' | 'indexed_collection' | undefined {
+  if (typeof signature === 'string' || signature.kind !== 'signature')
+    return undefined;
+  const grounded = readTypeVariablesAsBounds(signature);
+  if (typeof grounded === 'string' || grounded.kind !== 'signature')
+    return undefined;
+  const slot = signatureSlotType(grounded, i);
+  if (slot === undefined || freeTypeVariables(slot).size > 0) return undefined;
+  if (!isSubtype(slot, COLLECTION_SHAPE_TYPE)) return undefined;
+  return isSubtype(slot, INDEXED_COLLECTION_SHAPE_TYPE)
+    ? 'indexed_collection'
+    : 'collection';
+}
+
+/**
+ * Validate the collection operand of a LAZY collection operator's canonical
+ * handler. This is like `checkType(engine, op, type)`, but fail-open: an
+ * operand whose type is not PROVABLY incompatible (`unknown`/`any`/`value`,
+ * or a `broadcastable<T>`) is admitted as it is. The lazy-broadcast
+ * machinery needs this: `mod(L, N)` over a declared-`unknown` symbol `L`
+ * holding a >100-element `List` builds `Map(…, L)` over the SYMBOL, whose
+ * static type is `unknown` even though its value is a collection. Mirrors the
+ * free-variable leniency of the signature-validation path in `box.ts` (an
+ * operand whose type is provisional may satisfy the parameter at runtime).
+ *
+ * A refused operand is returned as an error expression. The canonical
+ * handler then returns `null`, and the boxing builds the operator over the
+ * error (`refusedCollectionSourceOperands`), as for an eager operator:
+ * `Dedup(5)` is `Dedup(Error(incompatible-type, collection, 5))`.
+ */
+export function checkCollectionOperand(
+  engine: ComputeEngine,
+  arg: Expression | undefined | null,
+  type: 'collection' | 'indexed_collection' = 'collection'
+): Expression {
+  if (arg === undefined || arg === null) return engine.error('missing');
+  const x = arg.canonical;
+  if (!x.isValid) return x;
+  // An ABSENT operand (`Missing`, `Undefined`) is admitted: every collection
+  // operator propagates absence (`signatureParamsPropagateAbsence`,
+  // `boxed-operator-definition.ts`, user decision 2026-09-25), so the
+  // evaluation driver answers the marker of the codomain for it (`Missing`
+  // for a collection result). Refused here, `Map(f, Missing)` stayed a raw
+  // node that no gate could reach, and `Filter(Missing, p)` was an
+  // `incompatible-type` error.
+  if (isAbsentScalarSymbol(x)) return x;
+  const t = x.type.type;
+  if (t === 'unknown' || t === 'any' || t === 'value') {
+    // Value-aware refinement: an indeterminate-TYPED operand with a concrete
+    // bound value that is provably NOT a collection (a declared-`unknown`
+    // symbol assigned `5`) must still reject — admitting it would silently
+    // canonicalize e.g. `Any(x)` and quantify over an empty element stream
+    // (`Any(5)` → False). `isCollection` on a symbol consults its value, so
+    // an unresolved symbol (no value yet) and a non-symbol (an application,
+    // whose value is undefined) stay fail-open.
+    if (x.value !== undefined && !x.isCollection)
+      return checkType(engine, x, type);
+    return x;
+  }
+  if (typeof t !== 'string' && t.kind === 'broadcastable') return x;
+  return checkType(engine, x, type);
+}
+
+/**
+ * The operands of a call to the lazy collection operator with the signature
+ * `signature`, canonicalized, when an operand at a source slot
+ * (`collectionSourceSlot`) is refused by `checkCollectionOperand`; or
+ * `undefined` when every source operand is admitted.
+ *
+ * The canonical handler of such an operator returns `null` when it refuses
+ * its source, and the boxing kept the call as a non-canonical node: valid,
+ * typed `unknown`, and evaluated to itself, so the error was lost
+ * (`Map(x => x, 5)`, `Dedup(5)`). The boxing builds the operator over these
+ * operands instead: the refused operand is the error, so the call is invalid
+ * and typed `error`, as `Sort(5)` is. A call with a spread operand is not
+ * checked: the positions of its operands are not known.
+ */
+export function refusedCollectionSourceOperands(
+  ce: ComputeEngine,
+  signature: Type,
+  xs: ReadonlyArray<Expression>
+): Expression[] | undefined {
+  if (xs.some((x) => isFunction(x, 'Sequence') || isFunction(x, 'Spread')))
+    return undefined;
+  let refused = false;
+  const ops = xs.map((x, i) => {
+    const operand = x.canonical;
+    const kind = collectionSourceSlot(signature, i);
+    // A function at a source slot is most likely a call with its operands
+    // in the wrong order (`Map([1, 2], Sin)`, where the mapping comes
+    // first). That is not a refusal of the source: the handler of `Map`
+    // reports the order when the first operand is a collection, and
+    // otherwise the call is kept as written.
+    if (kind === undefined || operand.type.matches('function')) return operand;
+    // A canonical form must not depend on the value assigned to a symbol:
+    // the symbol can be reassigned to a collection before the call is
+    // evaluated. Thus the refusal reads a type that is not derived from a
+    // value. An operand typed `unknown`, `any` or `value` is not refused
+    // here, even when its current value is not a collection, and neither
+    // is a symbol whose type was inferred: from its assigned value (a
+    // declared-`unknown` symbol assigned `5` is typed `integer`), or from an
+    // earlier use (the wildcard `_` is typed `number` after `Add(_, 1)`). The
+    // evaluation step reports a non-collection value as `incompatible-type`.
+    const t = operand.type.type;
+    if (t === 'unknown' || t === 'any' || t === 'value') return operand;
+    if (isSymbol(operand) && operand.valueDefinition?.inferredType)
+      return operand;
+    const checked = checkCollectionOperand(ce, operand, kind);
+    if (!checked.isValid) refused = true;
+    return checked;
+  });
+  return refused ? ops : undefined;
 }
 
 export function checkArity(

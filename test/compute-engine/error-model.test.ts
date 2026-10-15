@@ -1577,14 +1577,24 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
       both([h, 'NaN'], isNaNv);
     }
     // The incomplete Γ(s, z): `Γ(s, +∞) = 0` (a symbolic s included),
-    // `Γ(±∞, z)` for a positive finite z, NaN for the rest.
+    // `Γ(±∞, z)` for a positive finite z, the limit at `z = −∞`.
     both(['Gamma', 2, POS], is(0));
     expect(ce2.parse('\\Gamma(s, \\infty)').evaluate().isSame(0)).toBe(true);
     both(['Gamma', POS, 5], isPos);
     both(['Gamma', NEG, 5], is(0)); // z ≥ 1: the z^s factor vanishes
     both(['Gamma', NEG, 1], is(0));
     both(['Gamma', NEG, ['Rational', 1, 2]], isPos); // 0 < z < 1: it explodes
-    both(['Gamma', 2, NEG], isNaNv);
+    // Γ(n, −∞) = (−1)^(n−1)·∞ for a positive integer n (mpmath:
+    // Γ(2, −100) = −2.7·10⁴⁵, Γ(3, −100) = +2.6·10⁴⁷); `~oo` for a
+    // non-integer s (Γ(½, −100) = −2.7·10⁴²·i) and for an integer s ≤ 0,
+    // where the real part is unbounded and the imaginary part finite
+    // (Γ(0, −1000) = −2.0·10⁴³¹ − πi, Γ(−3, −1000) = 2.0·10⁴²² + 0.52i).
+    both(['Gamma', 2, NEG], isNeg);
+    both(['Gamma', 3, NEG], isPos);
+    both(['Gamma', ['Rational', 1, 2], NEG], isCoo);
+    both(['Gamma', 0, NEG], isCoo);
+    both(['Gamma', -3, NEG], isCoo);
+    both(['Gamma', 'NaN', NEG], isNaNv);
     both(['Gamma', POS, POS], isIndet);
     both(['Gamma', 2, COO], isIndet);
 
@@ -1634,13 +1644,17 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
 
     // Beta: 0 at every infinity against a positive-integer partner (the
     // exact rational form; `Beta(~oo, 2)` answered NaN), 0 at +∞ against a
-    // finite partner with a positive real part, NaN otherwise; a non-real
+    // finite partner with a positive real part, and against a real
+    // non-integer partner b ≤ 0 the infinity with the sign of Γ(b)
+    // (mpmath: B(10⁶, −½) = −3545, B(10⁶, −3/2) = +2.4·10⁹); a non-real
     // finite operand stays symbolic (N() used to answer B(1, 2) for
     // B(1+2i, 2)).
     both(['Beta', COO, 2], is(0));
     both(['Beta', 2, NEG], is(0));
     both(['Beta', POS, ['Rational', 1, 2]], is(0));
-    both(['Beta', POS, ['Rational', -1, 2]], isNaNv);
+    both(['Beta', POS, ['Rational', -1, 2]], isNeg);
+    both(['Beta', POS, ['Rational', -3, 2]], isPos);
+    both(['Beta', POS, -1], isNaNv);
     both(['Beta', NEG, ['Rational', 1, 2]], isIndet);
     both(['Beta', ANON, 2], isNaNv);
     both(['Beta', ['Complex', 1, 2], 2], symbolic('Beta'));

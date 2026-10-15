@@ -619,3 +619,71 @@ describe('DELIMITER IN A FRACTION OR AN EXPONENT', () => {
     );
   });
 });
+
+// A `Delimiter` group in square brackets is written with parentheses. The
+// parser reads `\lbrack x\rbrack` as `["List", "x"]`, so a group written with
+// its brackets reads back as a list. With parentheses, the value of the group
+// round-trips and the bracket spelling is lost.
+describe('DELIMITER WITH SQUARE BRACKETS', () => {
+  const one: MathJsonExpression = ['Delimiter', 'x', "'[,]'"];
+  const seq: MathJsonExpression = [
+    'Delimiter',
+    ['Sequence', 'a', 'b'],
+    "'[,]'",
+  ];
+
+  test('a group of one operand round-trips its value', () => {
+    expect(ce.box(one).latex).toBe('(x)');
+    expect(ce.parse(ce.box(one).latex).isSame(ce.symbol('x'))).toBe(true);
+    expect(ce.box(['Delimiter', 'x', "'[]'"]).latex).toBe('(x)');
+
+    const product: MathJsonExpression = [
+      'Multiply',
+      ['Delimiter', ['Add', 'a', 'b'], "'[,]'"],
+      'c',
+    ];
+    const latex = ce.box(product, { form: 'raw' }).latex;
+    expect(latex).toBe('(a+b)c');
+    expect(
+      ce.parse(latex).isSame(ce.box(['Multiply', ['Add', 'a', 'b'], 'c']))
+    ).toBe(true);
+  });
+
+  test('the value of a group of one operand is the operand', () => {
+    // The string of delimiters is not a value: the group does not evaluate
+    // to a tuple that holds it.
+    expect(ce.box(one).evaluate().json).toEqual('x');
+  });
+
+  test('a group of a sequence round-trips its value', () => {
+    // The canonical form of the group is the tuple `(a, b)`.
+    expect(ce.box(seq).json).toEqual(['Tuple', 'a', 'b']);
+    for (const form of ['canonical', 'raw'] as const) {
+      const latex = ce.box(seq, { form }).latex;
+      expect(latex).toBe('(a,b)');
+      expect(ce.parse(latex).isSame(ce.box(seq))).toBe(true);
+    }
+  });
+
+  test('a collection operand round-trips its value', () => {
+    // A list keeps the brackets: its elements read back as the same list
+    const list: MathJsonExpression = ['Delimiter', ['List', 'x', 'y'], "'[,]'"];
+    expect(ce.box(list).latex).toBe('\\lbrack x,y\\rbrack');
+    expect(ce.parse(ce.box(list).latex).json).toEqual(['List', 'x', 'y']);
+    // A different collection is written whole inside the parentheses
+    const set: MathJsonExpression = ['Delimiter', ['Set', 'x', 'y'], "'[,]'"];
+    expect(ce.box(set).latex).toBe('(\\lbrace x, y\\rbrace)');
+    expect(ce.parse(ce.box(set).latex).json).toEqual(['Set', 'x', 'y']);
+  });
+
+  test('other fences are not changed', () => {
+    const latexOf = (json: MathJsonExpression) =>
+      ce.box(json, { form: 'raw' }).latex;
+    expect(latexOf(['Delimiter', 'x', "'{,}'"])).toBe('\\lbrace x\\rbrace');
+    expect(latexOf(['Delimiter', 'x', "'|,|'"])).toBe('\\lvert x\\rvert');
+    expect(latexOf(['Delimiter', 'x', "'<,>'"])).toBe('\\langle x\\rangle');
+    expect(latexOf(['Delimiter', ['Sequence', 'a', 'b'], "'[,)'"])).toBe(
+      '\\lbrack a,b)'
+    );
+  });
+});

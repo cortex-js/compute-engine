@@ -78,6 +78,33 @@ describe('Shape and Rank of a lazy collection or a set', () => {
   ])('positive control: %j evaluates to %s', (json, expected) => {
     expect(evalString(json)).toBe(expected);
   });
+
+  // An empty axis is an axis: the empty list has rank 1 and the extent 0,
+  // and a list of two empty lists has rank 2 and the extents 2 and 0. The
+  // type of such a list has no dimensions (`[]` is `list<never>`), so the
+  // shape is read from the value. A ragged list still has no shape.
+  test.each<[Json, string]>([
+    [['Shape', ['List']], '(0)'],
+    [['Rank', ['List']], '1'],
+    [['Shape', ['List', ['List'], ['List']]], '(2, 0)'],
+    [['Rank', ['List', ['List'], ['List']]], '2'],
+    [['Shape', ['List', ['List', ['List']], ['List', ['List']]]], '(2, 1, 0)'],
+    [['Rank', ['List', ['List', ['List']], ['List', ['List']]]], '3'],
+    [['Shape', ['Take', ['List', 1, 2], 0]], '(0)'],
+    [['Shape', ['Range', 3, 1, 1]], '(0)'],
+    [['Rank', ['Range', 3, 1, 1]], '1'],
+    [['Shape', ['List', ['List', 1], ['List']]], '()'],
+    [['Shape', ['List', ['List', 1, 2], ['List', 3]]], '()'],
+  ])('empty axis: %j evaluates to %s', (json, expected) => {
+    expect(evalString(json)).toBe(expected);
+  });
+
+  test('the static type of a list of empty lists is unchanged', () => {
+    expect(ce.box(['List']).type.toString()).toBe('list<never>');
+    expect(ce.box(['List', ['List'], ['List']]).type.toString()).toBe(
+      'list<list<never>>'
+    );
+  });
 });
 
 /**

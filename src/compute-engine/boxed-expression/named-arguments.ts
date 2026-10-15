@@ -95,8 +95,11 @@ export type NamedArgumentNormalization =
    * in place; each reports `argument-names-unavailable` when it canonicalizes.
    */
   | { kind: 'unavailable' }
-  /** The written arguments, permuted into declaration order. */
-  | { kind: 'ok'; ops: ExpressionInput[] }
+  /** The written arguments, permuted into declaration order. `permutation`
+   * maps each argument that supplies a value to its declaration slot, when
+   * the arguments were matched against one signature (see
+   * {@link ArmNormalization}). */
+  | { kind: 'ok'; ops: ExpressionInput[]; permutation?: number[] }
   /** Sub-ruling R5 enforcement: the names determined ONE clause of a
    * multi-clause callee, and the ordinary call would not land on it — the
    * emitted expression applies that clause's function literal directly instead
@@ -400,6 +403,27 @@ export function splitNamedArguments(
   return { args, malformed };
 }
 
+/** One written argument of a named call, in written order: its name
+ * (`undefined` for a positional argument) and the index of the operand of the
+ * normalized call that holds its value, or -1 for an argument written with
+ * the value `Nothing`, which fills no slot. */
+export type WrittenArgumentSlot = { name: string | undefined; slot: number };
+
+/** The written arguments of `split`, with the operand that each one fills
+ * after the normalization that gave `permutation`. From this list and the
+ * operands of the normalized call, the call can be written again as it was
+ * written, and its names matched against another signature
+ * (`BoxedFunction._reboxedForCallee()`). */
+export function writtenArgumentSlots(
+  split: NamedArgumentSplit,
+  permutation: ReadonlyArray<number>
+): WrittenArgumentSlot[] {
+  return split.args.map((a) => ({
+    name: a.name,
+    slot: isOmitted(a) ? -1 : permutation[a.fillIndex],
+  }));
+}
+
 /** The declared name of each `args`/`optArgs` slot, `undefined` for a slot that
  * has none. A parameter WITHOUT a declared name is positional-only: most of the
  * library is in that shape, and a name can never address such a slot. */
@@ -461,7 +485,11 @@ export function calleeSlotNames(
  *   result with no error.
  * - An INFERRED type (no declaration: `alias := bob_S`, a function
  *   parameter with no annotation) is unchanged: the type itself, or the
- *   current value's signature for an inferred `function` wildcard.
+ *   current value's signature for an inferred `function` wildcard. This
+ *   type follows each assignment, so the call keeps the names it was
+ *   written with ({@link writtenArgumentSlots}), and when the variable holds
+ *   another function at evaluation, the names are matched against that
+ *   function (`BoxedFunction._reboxedForCallee()`).
  *
  * A type alias is followed to its body. The same rule applies to a call
  * through a record field (`resolveFieldCallee`, `field-callee.ts`): a name is

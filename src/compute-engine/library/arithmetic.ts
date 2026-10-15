@@ -2986,9 +2986,22 @@ function evaluateAiry(
  *   form `B(a, m) = (m−1)!/(a(a+1)⋯(a+m−1))` holds at every point, and its
  *   denominator is infinite at `±∞` and at `~∞` alike: the value is 0.
  * - `B(+∞, b) → 0` whenever the real part of a finite b is positive
- *   (B(10⁶, ½) = 0.0018, decaying like `a^(−b)`); for a non-positive real
- *   part the modulus diverges with a sign that depends on b
- *   (B(10⁶, −½) = −3545), so the value is `NaN`.
+ *   (B(10⁶, ½) = 0.0018, decaying like `a^(−b)`). For a non-positive real
+ *   part, `B(a, b) ~ Γ(b)·a^(−b)` as `a → +∞`, so:
+ *   - for a real b that is not an integer, the value is `±∞` with the sign
+ *     of `Γ(b)`, which is `(−1)^(k+1)` with `k = ⌊−b⌋`. Measured with
+ *     mpmath: B(10³, −½) = −112, B(10⁶, −½) = −3545 (Γ(−½) = −2√π);
+ *     B(10³, −3/2) = +7.5·10⁴, B(10⁶, −3/2) = +2.4·10⁹; B(10³, −5/2) =
+ *     −3.0·10⁷, B(10⁶, −5/2) = −9.5·10¹⁴; B(10⁶, −¼) = −155.
+ *   - for a real b that is an integer (0, −1, −2, …), `Γ(b)` has a pole
+ *     and `B(a, b)` is infinite at every a: `NaN`.
+ *   - for a non-real b with a negative real part, the modulus grows like
+ *     `a^(−Re b)` and the phase of `a^(−i·Im b)` turns without end
+ *     (B(10³, −½ + i) = −13.1 + 6.7i, B(10⁶, −½ + i) = −212 + 414i): the
+ *     complex infinity `~oo`.
+ *   - for a non-real b with a zero real part, the value stays bounded and
+ *     turns without a limit (B(10³, i) = −0.42 − 0.31i, B(10⁶, i) =
+ *     −0.52 − 0.01i): `NaN`.
  * - `−∞` and `~∞` otherwise: `Indeterminate`. The Γ-poles of the first
  *   operand accumulate at `−∞`, so there is no limit.
  * - Two infinite operands: `B(+∞, +∞) = 0` (`B(a, b) ≤ 1/a` for `b ≥ 1`;
@@ -3032,10 +3045,28 @@ function betaValueAtInfinity(
       ? ce.Zero
       : indeterminateFormAnswer(ce, [a, b]);
   // One infinite operand. `B(+∞, b)` for a finite `b` with a non-positive
-  // real part stays `NaN` (the sign of the divergence depends on `b`, see
-  // above). At `−∞` and `~oo` there is no limit: the indeterminate form.
-  if (pa === '+oo' || pb === '+oo') return ce.NaN;
+  // real part: see above. At `−∞` and `~oo` there is no limit: the
+  // indeterminate form.
+  if (pa === '+oo' || pb === '+oo')
+    return betaAtPositiveInfinity(pa === '+oo' ? b : a, ce);
   return indeterminateFormAnswer(ce, [a, b]);
+}
+
+/**
+ * The limit of `B(a, b)` as `a → +∞`, for a finite number literal `b` with a
+ * non-positive real part (see `betaValueAtInfinity`). `B(a, b) ~ Γ(b)·a^(−b)`
+ * there.
+ */
+function betaAtPositiveInfinity(b: Expression, ce: ComputeEngine): Expression {
+  if (!isNumber(b) || b.isNaN === true) return ce.NaN;
+  if (b.isComplex) return b.re < 0 ? ce.ComplexInfinity : ce.NaN;
+  // A real `b ≤ 0`. At an integer, `Γ(b)` has a pole. Otherwise the sign of
+  // `Γ(b)` is `(−1)^(k+1)` with `k = ⌊−b⌋`: negative on (−1, 0), positive
+  // on (−2, −1), and so on.
+  if (b.isInteger !== false) return ce.NaN;
+  const k = Math.floor(-b.re);
+  if (!Number.isSafeInteger(k)) return ce.NaN;
+  return k % 2 === 0 ? ce.NegativeInfinity : ce.PositiveInfinity;
 }
 
 /**
@@ -3055,10 +3086,22 @@ function betaValueAtInfinity(
  *   0 < z < 1 (Γ(−10⁴, 0.9) overflows the double range; the integrand is
  *   positive, so the sign is fixed). For any other finite z nothing is
  *   verified, so the application stays symbolic there.
- * - `Γ(s, −∞)`: `NaN`. For an integer s the value is `±∞` with a sign
- *   that alternates with the parity of s (Γ(2, −100) = −2.7·10⁴⁵,
- *   Γ(3, −100) = +2.6·10⁴⁷), and for a non-integer s it is a complex
- *   infinity, so there is no single limit to encode.
+ * - `Γ(s, −∞)` for a positive integer s = n: `(−1)^(n−1)·∞`. The closed
+ *   form `Γ(n, z) = (n−1)!·e^(−z)·Σ_{k<n} z^k/k!` has the leading term
+ *   `(n−1)!·e^(−z)·z^(n−1)/(n−1)!`, whose sign is `(−1)^(n−1)` for a
+ *   negative z. Measured with mpmath: Γ(1, −100) = +2.7·10⁴³,
+ *   Γ(2, −100) = −2.7·10⁴⁵, Γ(3, −100) = +2.6·10⁴⁷, Γ(4, −100) =
+ *   −2.6·10⁴⁹, and the same signs at z = −1000.
+ * - `Γ(s, −∞)` for a number s that is not an integer (real or complex):
+ *   the value is complex and its modulus grows without bound, so the limit
+ *   is the complex infinity `~oo`. Measured with mpmath: Γ(½, −100) =
+ *   −2.7·10⁴²·i, Γ(−½, −100) = −3.5 + 2.7·10⁴⁰·i, Γ(5/2, −1000) =
+ *   −6.2·10⁴³⁸·i, Γ(i, −100) = 1.4·10³⁹ + 1.2·10⁴⁰·i.
+ * - `Γ(s, −∞)` for an integer s ≤ 0: `~oo` too. The real part grows
+ *   without bound and the imaginary part stays finite, so the modulus is
+ *   unbounded. Measured with mpmath: Γ(0, −100) = −2.7·10⁴¹ − πi,
+ *   Γ(0, −1000) = −2.0·10⁴³¹ − πi, Γ(−1, −100) = 2.7·10³⁹ + πi,
+ *   Γ(−3, −1000) = 2.0·10⁴²² + 0.52i.
  * - `~∞` or two infinite operands: `Indeterminate` (`Γ(∞, ∞)` is an
  *   indeterminate form); an anonymous infinity (a float literal): `NaN`.
  */
@@ -3074,9 +3117,18 @@ function incompleteGammaValueAtInfinity(
     return indeterminateFormAnswer(ce, [s, z]);
   if (pz === '+oo')
     return s.isFinite === false ? indeterminateFormAnswer(ce, [s, z]) : ce.Zero;
-  // `Γ(s, −∞)` stays `NaN` (the sign of the divergence depends on `s`, see
-  // above); `Γ(s, ~oo)` has no limit: the indeterminate form.
-  if (pz === '-oo') return isNumber(s) ? ce.NaN : undefined;
+  // `Γ(s, −∞)`: see above. `Γ(s, ~oo)` has no limit: the indeterminate
+  // form.
+  if (pz === '-oo') {
+    if (!isNumber(s)) return undefined;
+    if (s.isNaN === true) return ce.NaN;
+    if (isRealLiteral(s) && s.isInteger === true && s.isPositive === true)
+      return s.isOdd === true ? ce.PositiveInfinity : ce.NegativeInfinity;
+    // A number that is not a positive integer: an integer s ≤ 0, or a real
+    // or complex s that is not an integer.
+    if (s.isInteger !== undefined) return ce.ComplexInfinity;
+    return ce.NaN;
+  }
   if (pz !== undefined)
     return isNumber(s) ? indeterminateFormAnswer(ce, [s, z]) : undefined;
   // s is the infinite operand and z is finite.

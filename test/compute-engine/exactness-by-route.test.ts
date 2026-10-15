@@ -235,6 +235,89 @@ describe('A FLOAT ±1 OR 0 IS NOT AN IDENTITY', () => {
     );
   });
 
+  test('a float exponent 1.0 keeps the power on every route', () => {
+    // The MathJSON keeps the float exponent, so it survives a round trip.
+    const one = { num: '1.0' };
+    for (const e of [ce.parse('x^{1.0}'), ce.box(['Power', 'x', one])]) {
+      expect(e.json).toEqual(['Power', 'x', one]);
+      expect(e.evaluate().json).toEqual(['Power', 'x', one]);
+      expect(e.N().json).toEqual(['Power', 'x', one]);
+      expect(ce.box(e.json).json).toEqual(['Power', 'x', one]);
+      // Expanding the power does not read `1.0` as the integer `1`
+      expect(ce.function('Expand', [e]).evaluate().json).toEqual([
+        'Power',
+        'x',
+        one,
+      ]);
+    }
+    expect(leaves(ce.parse('x^{2.0}').evaluate())).toBe('Power(x, 2~)');
+    expect(
+      leaves(ce.function('Expand', [ce.parse('x^{2.0}')]).evaluate())
+    ).toBe('Power(x, 2~)');
+    expect(leaves(ce.parse('2^{1.0}').simplify())).toBe('2~');
+    // Simplification keeps the float exponent too
+    expect(leaves(ce.parse('x^{1.0}').simplify())).toBe('Power(x, 1~)');
+    // A product groups a float exponent as it groups `x^{2.5}`: it is not
+    // read as the rational `2`
+    expect(leaves(ce.parse('3x^{2.0}').evaluate())).toBe(
+      'Multiply(3, Power(x, 2~))'
+    );
+    expect(leaves(ce.parse('3(x+1)^{2.0}').evaluate())).toBe(
+      'Multiply(3, Power(Add(x, 1), 2~))'
+    );
+    expect(leaves(ce.parse('x^{2.0}x^{2.0}').evaluate())).toBe('Power(x, 4~)');
+    expect(leaves(ce.parse('x^{2.0}x').simplify())).toBe('Power(x, 3~)');
+    // A `.N()` with a value gives the float value
+    const engine = new ComputeEngine();
+    engine.assign('t', 3);
+    expect(leaves(engine.parse('t^{1.0}').N())).toBe('3~');
+  });
+
+  test('a finite base to the float exponent 0.0 is the float 1', () => {
+    const engine = new ComputeEngine();
+    engine.declare('y', 'finite_real');
+    const zero = { num: '0.0' };
+    for (const e of [engine.parse('y^{0.0}'), engine.box(['Power', 'y', zero])]) {
+      expect(e.json).toEqual(['Power', 'y', zero]);
+      expect(leaves(e.evaluate())).toBe('1~');
+      expect(leaves(e.N())).toBe('1~');
+      expect(leaves(e.simplify())).toBe('1~');
+    }
+    expect(leaves(engine.parse('1.0^y').simplify())).toBe('1~');
+    // As for the exact `x^0`, a base that may be infinite keeps the power
+    expect(leaves(ce.parse('x^0').evaluate())).toBe('Power(x, 0)');
+    expect(leaves(ce.parse('x^{0.0}').evaluate())).toBe('Power(x, 0~)');
+    expect(
+      leaves(ce.function('Expand', [ce.parse('x^{0.0}')]).evaluate())
+    ).toBe('Power(x, 0~)');
+    // `0^0` is the indeterminate form, also with a float exponent
+    expect(ce.parse('0^{0.0}').evaluate().isNaN).toBe(true);
+  });
+
+  test('the exact 0 divided by a float is the float 0', () => {
+    for (const e of [
+      ce.parse('\\frac{0}{2.5}'),
+      ce.box(['Divide', 0, 2.5]),
+      ce.box(['Divide', 0, { num: '2.0' }]),
+      ce.parse('\\frac{0}{1.0}'),
+    ]) {
+      expect(leaves(e)).toBe('0~');
+      expect(leaves(e.evaluate())).toBe('0~');
+      expect(e.json).toEqual({ num: '0.0' });
+    }
+    expect(leaves(ce.Zero.div(ce.parse('2.5')))).toBe('0~');
+    expect(leaves(ce.Zero.div(2.5))).toBe('0~');
+    // A symbol whose value is 0, divided by a float
+    const engine = new ComputeEngine();
+    engine.assign('a', 0);
+    expect(leaves(engine.parse('\\frac{a}{2.5}').evaluate())).toBe('0~');
+    // An exact divisor keeps the exact 0
+    expect(leaves(ce.parse('\\frac{0}{2}'))).toBe('0');
+    expect(leaves(ce.Zero.div(2))).toBe('0');
+    expect(leaves(ce.parse('\\frac{0}{x}'))).toBe('0');
+    expect(leaves(engine.parse('\\frac{a}{2}').evaluate())).toBe('0');
+  });
+
   test('an exact ±1 or 0 is still an identity', () => {
     expect(leaves(ce.parse('x^1'))).toBe('x');
     expect(leaves(ce.parse('1^x'))).toBe('1');
@@ -481,6 +564,23 @@ describe('FLOAT OPERANDS OF NUMERIC OPERATORS', () => {
       expect(leaves(mce.parse('[0.5, 1, 2] \\cdot 2').evaluate())).toBe(
         'List(1~, 2, 4)'
       );
+    });
+
+    // An element-wise operation computes on a packed tensor of doubles when a
+    // list has a float element that is not an integer (`1.5`). Each element
+    // of the result follows its own operands: a float element with an
+    // integer value (`2.0`) gives a float, an exact element an exact result.
+    test.each([
+      ['[2.0,1.5]+[1,1]', 'List(3~, 2.5~)'],
+      ['[1.5,1]+[1,1]', 'List(2.5~, 2)'],
+      ['[1.5,0]+[1.5,0]', 'List(3~, 0)'],
+      ['3\\cdot[2.0,1.5]', 'List(6~, 4.5~)'],
+      ['[2.0,1.5]\\cdot[1,2]', 'List(2~, 3~)'],
+      ['[[2.0,1.5],[1,3]]+[[1,1],[1,1]]', 'List(List(3~, 2.5~), List(2, 4))'],
+      ['2[[2.0,1.5],[1,3]]', 'List(List(4~, 3~), List(2, 6))'],
+    ])('element-wise: %s', (latex, expected) => {
+      expect(leaves(mce.parse(latex).evaluate())).toBe(expected);
+      expect(leaves(ce.parse(latex).evaluate())).toBe(expected);
     });
 
     test('ce.list() of integer doubles is exact', () => {

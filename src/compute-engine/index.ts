@@ -1900,15 +1900,17 @@ export class ComputeEngine implements IComputeEngine {
    * steps.
    *
    * Spans nest: the effective deadline is the earliest one, and a step
-   * counts against every active budget.
+   * counts against every active budget. With `ruleSteps`, each rule that
+   * `replace()` tries is also a step of this budget, and only of the
+   * budgets that set it (see `StepBudget`).
    *
    * @internal
    */
   _withBudget<T>(
-    limit: { ms?: number; steps?: number; label?: string },
+    limit: { ms?: number; steps?: number; label?: string; ruleSteps?: boolean },
     fn: () => T
   ): T {
-    const { ms, steps, label } = limit;
+    const { ms, steps, label, ruleSteps } = limit;
     const prevFrame = this._runtimeState.deadlineFrame;
     const own = ms === undefined ? Infinity : Date.now() + ms;
     const spans = [
@@ -1918,7 +1920,12 @@ export class ComputeEngine implements IComputeEngine {
     const budgets =
       steps === undefined
         ? prevFrame?.budgets
-        : [...(prevFrame?.budgets ?? []), { left: steps, owner: label, spans }];
+        : [
+            ...(prevFrame?.budgets ?? []),
+            ruleSteps === true
+              ? { left: steps, owner: label, spans, ruleSteps }
+              : { left: steps, owner: label, spans },
+          ];
 
     // Nesting stays `min()`: if an enclosing span's deadline is already at or
     // before our own, it remains the effective one (and keeps its owner);

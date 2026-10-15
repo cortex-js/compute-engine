@@ -1848,6 +1848,17 @@ export function isSubtype(
 
     // Check that the dimensions match
     if (rhs.dimensions) {
+      // The type of the empty list literal, `list<never>`, has no dimensions,
+      // and its only value `[]` has length 0. So it is a subtype of a list
+      // type whose first axis has length 0: `[]` is a value of
+      // `list<integer^0>`, and of `list<integer^(0x2)>` (a matrix with no
+      // rows).
+      if (
+        !lhs.dimensions &&
+        lhs.elements === 'never' &&
+        rhs.dimensions[0] === 0
+      )
+        return true;
       // If rhs has some dimensions, lhs must have dimensions as well
       if (!lhs.dimensions) return false;
       // The shape (number of dimensions) must match

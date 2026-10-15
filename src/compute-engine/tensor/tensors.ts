@@ -107,8 +107,10 @@ export abstract class AbstractTensor<
     // Broadcast the data
     const data = lhs_.data.map((v, i) => fn(v, rhs_.data[i]));
 
+    // A result computed from a float tensor is a float tensor.
     return makeTensor(lhs_.ce, {
       dtype: lhs_.dtype,
+      holdsFloat: lhs_.holdsFloat || rhs_.holdsFloat,
       shape: lhs_.shape,
       data,
     });
@@ -121,6 +123,15 @@ export abstract class AbstractTensor<
   readonly shape: number[];
   readonly rank: number;
 
+  /**
+   * Is this a float tensor (see `TensorData.holdsFloat`)? Then the field
+   * reads every cell back as a float, also a cell whose value is an
+   * integer. Every operation that computes a tensor from this one gives the
+   * new tensor the same flag: a result computed from a float tensor is a
+   * float tensor.
+   */
+  readonly holdsFloat: boolean;
+
   private readonly _strides: number[];
 
   constructor(
@@ -130,7 +141,8 @@ export abstract class AbstractTensor<
     this.shape = tensorData.shape;
     this.rank = this.shape.length;
     this._strides = getStrides(this.shape);
-    this.field = makeTensorField<DT>(ce, tensorData.dtype);
+    this.holdsFloat = tensorData.holdsFloat === true;
+    this.field = makeTensorField<DT>(ce, tensorData.dtype, this.holdsFloat);
   }
 
   abstract get dtype(): DT;
@@ -434,6 +446,7 @@ export abstract class AbstractTensor<
 
     return makeTensor(this.ce, {
       dtype: this.dtype,
+      holdsFloat: this.holdsFloat,
       shape: resultShape,
       data: resultData,
     });
@@ -447,6 +460,7 @@ export abstract class AbstractTensor<
   reshape(...shape: number[]): AbstractTensor<DT> {
     return makeTensor(this.ce, {
       dtype: this.dtype,
+      holdsFloat: this.holdsFloat,
       shape,
       data: this.data,
     });
@@ -461,6 +475,7 @@ export abstract class AbstractTensor<
       const value = this.data[index - 1];
       return makeTensor(this.ce, {
         dtype: this.dtype,
+        holdsFloat: this.holdsFloat,
         shape: [],
         data: [value],
       });
@@ -474,6 +489,7 @@ export abstract class AbstractTensor<
 
     return makeTensor(this.ce, {
       dtype: this.dtype,
+      holdsFloat: this.holdsFloat,
       shape: this.shape.slice(1),
       data: this.data.slice(start, end),
     });
@@ -488,6 +504,7 @@ export abstract class AbstractTensor<
     if (data === undefined) throw Error(`Cannot cast tensor to ${dtype}`);
     return makeTensor(this.ce, {
       dtype,
+      holdsFloat: this.holdsFloat,
       shape: this.shape,
       data: data as DataTypeMap[DT][],
     });
@@ -541,6 +558,7 @@ export abstract class AbstractTensor<
       }
       return makeTensor(this.ce, {
         dtype: this.dtype,
+        holdsFloat: this.holdsFloat,
         shape: newShape,
         data: result,
       });
@@ -579,6 +597,7 @@ export abstract class AbstractTensor<
 
     return makeTensor(this.ce, {
       dtype: this.dtype,
+      holdsFloat: this.holdsFloat,
       shape: newShape,
       data: result,
     });
@@ -800,6 +819,7 @@ export abstract class AbstractTensor<
 
       return makeTensor(this.ce, {
         dtype: this.dtype,
+        holdsFloat: this.holdsFloat,
         shape: [n, n],
         data: inverseData,
       });
@@ -857,6 +877,7 @@ export abstract class AbstractTensor<
 
     return makeTensor(this.ce, {
       dtype: this.dtype,
+      holdsFloat: this.holdsFloat,
       shape: [n, n],
       data: inverseData,
     });
@@ -925,7 +946,12 @@ export abstract class AbstractTensor<
           sum = add(sum, mul(lhs.data[i * k + t], rhs.data[t * n + j]));
         data.push(sum);
       }
-    return makeTensor(this.ce, { dtype: this.dtype, shape: [m, n], data });
+    return makeTensor(this.ce, {
+      dtype: this.dtype,
+      holdsFloat: lhs.holdsFloat || rhs.holdsFloat,
+      shape: [m, n],
+      data,
+    });
   }
 
   // The adjugate, classical adjoint, or adjunct of a square matrix is the transpose of its cofactor matrix. https://en.wikipedia.org/wiki/Adjugate_matrix
@@ -947,6 +973,7 @@ export abstract class AbstractTensor<
     if (n === 1)
       return makeTensor(this.ce, {
         dtype: this.dtype,
+        holdsFloat: this.holdsFloat,
         shape: [1, 1],
         data: [this.field.one],
       });
@@ -958,7 +985,12 @@ export abstract class AbstractTensor<
         if (minor === undefined) return undefined;
         data.push((i + j) % 2 === 0 ? minor : neg(minor));
       }
-    return makeTensor(this.ce, { dtype: this.dtype, shape: [n, n], data });
+    return makeTensor(this.ce, {
+      dtype: this.dtype,
+      holdsFloat: this.holdsFloat,
+      shape: [n, n],
+      data,
+    });
   }
 
   // The determinant of the matrix obtained by deleting row i and column j from this matrix. https://en.wikipedia.org/wiki/Minor_(linear_algebra)
@@ -977,6 +1009,7 @@ export abstract class AbstractTensor<
     }
     return makeTensor(this.ce, {
       dtype: this.dtype,
+      holdsFloat: this.holdsFloat,
       shape: [n - 1, n - 1],
       data,
     }).determinant();
@@ -988,6 +1021,7 @@ export abstract class AbstractTensor<
   ): AbstractTensor<DT> {
     return makeTensor(this.ce, {
       dtype: this.dtype,
+      holdsFloat: this.holdsFloat,
       shape: this.shape,
       data: this.data.map((v) => fn(v, scalar)),
     });
@@ -1000,6 +1034,7 @@ export abstract class AbstractTensor<
     const rhsData = rhs.data;
     return makeTensor(this.ce, {
       dtype: this.dtype,
+      holdsFloat: this.holdsFloat || rhs.holdsFloat,
       shape: this.shape,
       data: this.data.map((v, i) => fn(v, rhsData[i])),
     });

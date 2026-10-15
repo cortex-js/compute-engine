@@ -413,7 +413,9 @@ describe('Join over operands that may hold a set or a dictionary', () => {
     ['a set and a list', ['Set', 1, 2], ['List', 2, 3], 'Set(1, 2, 3)'],
     // A dictionary and a list: the result is keyed, as the static
     // `Join(Dictionary(…), List(…))` is, and a list element is not an
-    // entry, so the value is the error value the static join gives.
+    // entry, so the value is the error value the static join gives. The
+    // error is a user decision: a list of the entries followed by the
+    // elements would hide a mixed-kind mistake.
     ['a dictionary and a list', D1, ['List', 2, 3], undefined],
   ];
   for (const [name, a, b, expected] of CASES) {

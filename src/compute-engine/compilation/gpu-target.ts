@@ -6520,7 +6520,10 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // A constant exponent is decided now. A variable one cannot be decided
     // in the shader (the recovery reads the exponent to 15 to 17 digits,
     // and a shader holds an f32), and keeps the lowering below: `pow`, with
-    // no value for a negative base, as before.
+    // no value for a negative base. This is a user decision: a run-time
+    // helper on an f32 cannot recover the same `p/q` as the interpreter, and
+    // a refusal of every shader power of an undeclared base would break
+    // ordinary plot expressions.
     const negativeBase = BaseCompiler.negativeBaseFloatPower(args);
     if (
       BaseCompiler.isComplexValued(base) ||
