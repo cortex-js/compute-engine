@@ -470,7 +470,7 @@ identityMatrix(3)
 
 ### inverse
 
-MathJSON `Inverse` · `(T) -> T where T: matrix`
+MathJSON `Inverse` · `(matrix) -> matrix`
 
 Multiplicative inverse of a square matrix.
 

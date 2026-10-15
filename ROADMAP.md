@@ -144,37 +144,6 @@ does (tried 2026-10-14 and reverted: a product over a `-> unknown` result must
 keep `Missing`, `absent-point-arithmetic.test.ts`). A plot consumer drops a
 `NaN` point and a hole alike, so no consumer reading is known to differ.
 
-### A declared result type that the body cannot meet is accepted, and the call evaluates to a value of another type (OPEN, decision — found 2026-10-15 by the follow-up to the operator re-declaration refusal)
-
-After `ce.declare('g', '(integer) -> integer')`, the assignment
-`g := n ↦ "s"` is accepted: the stored body is `Typed("s", "integer")`,
-`g(5)` is typed `integer` and evaluates to `"s"` with no error. The Epsil
-clause route (`let g: (integer) -> integer` then `g(n) = "s"`) does the
-same. The same silent addition of a result type happens on a redefinition
-over a derived signature: after `h := (a: integer) ↦ 1` and then
-`h := (a: integer) ↦ "s"`, `h(0)` is typed `integer` and evaluates to `"s"`
-(the pin "a body edit changing the inferred result type still replaces" in
-`define-function.test.ts` passes only because the old result is added), and
-a clause replacement keeps the old parameter name. Refusing the definition
-when the body type is disjoint from the declared result was tried: 102 tests
-in three files fail, because the ruling of 2026-08-12 (recorded in the header
-of `test/compute-engine/list-valued-summand-compile.test.ts`) says that a
-declaration contradicted by its body is accepted and the COMPILER declines
-("declarations stay authoritative everywhere else; we only refuse to emit
-code we can prove wrong"); `at-gpu-compile.test.ts` and
-`compile-point-complex-coordinate.test.ts` depend on it too, and in the last
-one the body is a point that the inference types `number`, so only the
-declared result rescues it. The draft of that refusal, with tests for every
-route, is kept at the session scratchpad path
-`patches/absent-defect2-proposal.patch` (not in the repo). The options:
-(A) refuse at definition time, which reverses the ruling of 2026-08-12 and
-needs the body-inference defect fixed first and a re-inference of the result
-on a redefinition over a derived signature; (B) keep accepting, and check the
-returned value against the declared result at application time, so `g(5)`
-evaluates to `Error(incompatible-type, integer, "s")` while the type contract
-and the compiler decline stay the same; (C) change nothing. If nothing is
-decided, C stays. Recommendation: B.
-
 ### An argument declared as a bare `tuple` keeps a scalar result type (OPEN, small — found 2026-10-15 by the all-absent tuple typing)
 
 With `f(x) := (-x, x)` and `w` declared `tuple` (no component types),
@@ -194,6 +163,25 @@ inference of `Multiply` and `Add` over a tuple operand is wrong here (the
 `Multiply` descriptor route is also the subject of the entry on the tuple
 component types times a real).
 
+### Compiled code returns a value that the interpreter refuses under the declared result type (OPEN, decision — found 2026-10-15 by the review of the check of a returned value against the declared result)
+
+The interpreter checks the value a call returns against the declared result
+type: with `f` declared `(integer) -> integer` and the body `n/2`, `f(3)`
+evaluates to `Error(incompatible-type, "integer", 3/2)`. Compiled code has no
+such check: `compile(f(3))` returns `1.5`. The compiler declines only a
+declaration it can prove wrong at compile time (a complex value under a real
+ascription, a complex entry under a real collection ascription; `Typed` in
+`compilation/base-compiler.ts`), and emits the body otherwise. The two
+routes should agree. The options: (a) compiled code checks the returned value
+at run time where the target can (`Number.isInteger` for an integer result,
+a real check for a real result), at a cost per call and with no check for a
+rational or a string on a shader target; (b) the compiler declines a `Typed`
+whose ascribed type the emitted code cannot be proved to meet, which refuses
+every `(integer) -> integer` body with a division; (c) keep the difference.
+`test/compute-engine/compile-lane-agreement.test.ts` ("a rational under an
+integer result…") pins the difference until this is decided. If nothing is
+decided, (c) stays.
+
 ### A pipe into an operator with several signatures is typed `unknown` (OPEN, small — found 2026-10-15 by the `Pipe` type handler)
 
 `[1, 2, 3] |> take(2)` is typed `unknown`, while `take([1, 2, 3], 2)` is
@@ -204,13 +192,7 @@ between the signatures of an operator that has several of them and no type
 handler: overload resolution exists only for boxed expressions
 (`resolveOverload`, `boxed-expression/overload.ts`), not for a call described
 by types. A type-only resolution in `derive-application-type.ts` closes the
-gap; a stage after such a pipe then also gets its static diagnostic. A
-related placement gap: `implicitTopicSlot` replaces every type variable with
-`any`, so the string signature of `Take` (`(xs: T, count: number) where T:
-string`) accepts `2` in its first slot and `5 |> take(2)` builds `Take(2, 5)`;
-the message then blames `2` when the problem is the piped `5`. Replacing a
-variable with its declared bound fixes the placement but changes the run-time
-placement too, so it is a decision.
+gap; a stage after such a pipe then also gets its static diagnostic.
 
 ### A static error in a call that canonicalization renames is anchored on the whole statement (OPEN, small — found 2026-10-15 by the pipe-stage frame fix)
 
@@ -238,22 +220,6 @@ share only the error code and the expected type. The run-time value of the
 piped spelling is also imprecise: `["Error", ["ErrorCode", "incompatible-type",
 "function", "list"], "[\"s\"]"]` names the site `["s"]` and the type `list`,
 not the piped value and its type.
-
-### The `->` typo at the first argument of `apply` has no `=>` hint any more (OPEN, decision — found 2026-10-15 by the change that reads a bare `name -> value` call argument as a rule)
-
-A bare `name -> value` call argument is a rule in every position. The static
-checker reports the typo `map(x -> x^2, xs)` with a fixit to `=>` when the
-parameter at that position is typed `function`. `Apply` declares its first
-parameter `any` (`(name: any, arguments: any*)`), because it accepts a
-function or the symbol of one, so `apply(x -> x^2, 3)` gets no hint: it is
-only the static type error "expected `string`, got `number` at `x`" (a pair
-key must be a string). Before the change the parser turned it into a lambda
-and the call gave 9. The options: declare the first parameter of `Apply` as
-`function | symbol` in the engine library, so the same check fires; or add a
-second rule to the checker, "the key symbol also occurs free in the value",
-which also catches `apply`, but reports a rule such as `n -> n + 1` passed
-to a dictionary-building function as a typo. If nothing is decided, the
-plain type error stays.
 
 ### `.N()` of a `1/(x·ln x)` divergence at a nonzero bound or at infinity gives a finite value (OPEN, small — found 2026-10-14 by the power-law divergence test)
 
@@ -1555,66 +1521,24 @@ dropping the axis changes the rank of the type. Until decided, the behavior is
 unchanged from before the dimension-variables round, which only kept the
 dimension-variable names aligned with the surviving axes.
 
-### A user function with an untyped parameter is mapped over the cells of a matrix argument (OPEN, decision — found 2026-10-14 by the `MatrixPower` type handler; mechanism measured 2026-10-15)
+### A non-square matrix under `B^2` built before the assignment is squared cell by cell (OPEN, small — found 2026-10-15 by the change that reads an integer power of a square matrix value as a matrix power)
 
-`[[1,2],[3,4]]^2` written directly is the matrix power `[[7,10],[15,22]]`,
-but `g(A) := A^2; g([[1,2],[3,4]])` gives `[[1,4],[9,16]]`, and
-`Apply((A) => A^2, [[1,2],[3,4]])` the same. The `Power` handler never sees
-the matrix: `g` gets the signature `(unknown) -> number`, `paramsAreScalar()`
-(`boxed-expression/boxed-function.ts`) treats an `unknown` parameter as a
-scalar, and the evaluation driver maps `g` itself over the leaves of the
-nested list, so the body only ever runs with `A` = 1, 2, 3, 4 (the error for
-`g([["x", 2], [3, 4]])` says "while applying 'g' element-wise"). The same
-mapping changes every body that is not element-wise: `f(A) := A A` gives
-`[[1,4],[9,16]]` where `M M` is the matrix product, and `A^2 + 1` gives
-`[[2,5],[10,17]]` where `M^2 + 1` is `[[8,11],[16,23]]`.
-`test/compute-engine/apply-literal-maps.test.ts` ("a nested list is mapped at
-its leaves, and typed so") pins the mapping. The question: when a user
-function has an untyped parameter and is called with a square numeric matrix,
-does it get the whole matrix, or is it mapped over the cells? The options:
-(1) keep the mapping; the matrix power of a parameter needs a declared
-parameter, `g(A: matrix) := A^2`; (2) pass a square numeric matrix whole,
-which makes `g(M)` agree with `M^2` but gives `f(x) := \sin x` applied to a
-matrix `Sin(M)` instead of the element-wise sines, changes the pinned test
-and the broadcast model (`docs/BROADCAST-MODEL.md`), with a snapshot blast
-radius not yet measured; (3) map unless the body applies a matrix-sensitive
-operation (an integer `Power`, a `Multiply` of the parameter with itself) to
-the parameter, a rule that depends on the shape of the body and breaks for a
-symbolic exponent or an alias. If nothing is decided, option 1 stays. A
-related gap: a non-square matrix through a function is squared cell by cell
-while `[[1,2,3],[4,5,6]]^2` written directly is the `expected-square-matrix`
-error.
-
-### `B^{-1}` built before `B` holds a matrix is the element-wise reciprocal (OPEN, decision — found 2026-10-15 by the change that reads an integer power of a square matrix value as a matrix power)
-
-An integer power of a symbol that later holds a square matrix is now a matrix
-power: `const e = ce.parse('B^2'); ce.assign('B', [[1,2],[3,4]]); e.evaluate()`
-gives `[[7,10],[15,22]]`, as `B^2` parsed after the assignment does. The
-exponent `-1` is the exception: `B^{-1}` and `ce.function('Power', [B, -1])`
-canonicalize to `Divide(1, B)` when `B` has no value, and `1/B` over a matrix
-is element-wise by convention, so after the assignment the value is
-`[[1, 1/2], [1/3, 1/4]]`, while `B^{-1}` parsed after the assignment is
-`Inverse(B)` = `[[-2, 1], [3/2, -1/2]]`. After canonicalization the engine
-cannot tell `B^{-1}` from `1/B`. The options: keep `x^{-1}` as a `Power` when
-`x` has no value (the `Divide` rewrite then happens only for a base known to
-be a scalar), or read `Divide(1, matrix)` as the inverse, which changes `1/B`
-for every matrix `B`. If nothing is decided, the reciprocal stays. A related
-gap: a 2×3 matrix value under `B^2` built before the assignment is squared
-cell by cell, while `B^2` parsed after the assignment is the
-`expected-square-matrix` error; and an untyped `B^2` compiles on the
-JavaScript target to the scalar code `(_.B * _.B)`, which returns `null` for
-a matrix input.
-
-### The scalar branches of `Inverse` and `PseudoInverse` cannot run (OPEN, decision — found 2026-10-15 by the `Inverse` type handler)
-
-The evaluate handlers of `Inverse` and `PseudoInverse`
-(`library/linear-algebra.ts`) start with a branch for a number operand
-(`Inverse(5)` → `1/5`). Both signatures are `(matrix) -> matrix`, so a scalar
-is refused with `incompatible-type` at binding on every route, and tests in
-`linear-algebra.test.ts` and `type-variables-linalg.test.ts` pin that error.
-The options: delete the two branches, or accept a scalar in both signatures
-(`(matrix | number) -> matrix | number`, with type handlers that pick the
-side) and change the pins. If nothing is decided, the dead branches stay.
+`const e = ce.parse('B^2'); ce.assign('B', [[1,2,3],[4,5,6]]); e.evaluate()`
+gives the cells squared, while `B^2` parsed after the assignment is the
+`expected-square-matrix` error: the value route (`squareMatrixPower()`,
+`boxed-expression/boxed-function.ts`) answers "not a matrix power" for a
+non-square value and falls back to the element-wise broadcast, where the
+canonicalization route refuses. The two routes should agree; the error is
+the documented answer. Also, an untyped `B^2` compiles on the JavaScript
+target to the scalar code `(_.B * _.B)`, which returns `null` for a matrix
+input, because the compiler types `B` as a number; a declared `B: matrix`
+compiles to the matrix power. Not a defect, recorded here because the same
+comparison of the two routes finds it: `B^{-1}` built before `B` holds a
+matrix is the matrix of the reciprocals, since `x^{-1}` canonicalizes to
+`Divide(1, x)` when `x` has no value and the division of a number by a
+matrix is element-wise, while `B^{-1}` parsed after the assignment is
+`Inverse(B)`. The user decided 2026-10-15 to keep the rewrite (see the
+comment on `squareMatrixPower()`).
 
 ### A nested list spelling is not a subtype of a list type with no dimensions (OPEN, small — found 2026-10-01 by the fix that reads a nested spelling as its flat shape)
 
@@ -1740,7 +1664,13 @@ return. `Reduce` and the count of `Filter` resolve such a source with
 `eagerViewSource` since 2026-09-30, as `Join`, `Reverse` and `Take` did before;
 the operators above do not. A general fix would evaluate an eager source once
 when the lazy node is evaluated, which is a change to the laziness contract
-(`docs/COLLECTIONS-MODEL.md`) and needs a decision.
+(`docs/COLLECTIONS-MODEL.md`) and needs a decision. The same holding keeps an
+error from propagating: with `f` declared `(integer) -> integer` and a body
+that returns a string, `f(1)` evaluates to an `incompatible-type` error, but
+`Map(f(1), x => x)` and `Comprehension(x, Element(x, f(1)))` built with
+`ce.box` are valid, typed `unknown`, and evaluate to themselves instead of
+the error; `Map(5, x => x)` on the box route is held the same way, where
+`Sum(x, Element(x, 5))` is refused at boxing.
 
 ### An operator result that may be absent is typed `number` when it is numeric (OPEN, small — found 2026-09-30)
 

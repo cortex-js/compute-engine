@@ -7696,6 +7696,14 @@ function withBroadcastThrowContext(
  * list and a list with entries that are not numbers keep the element-wise
  * broadcast.
  *
+ * The exponent `-1` never reaches this function when the base has no value
+ * at canonicalization: `B^{-1}` canonicalizes to `Divide(1, B)`, and the
+ * division of a number by a matrix is element-wise. So `B^{-1}` built
+ * before `B` holds a matrix is the matrix of the reciprocals, while
+ * `B^{-1}` parsed after the assignment is `Inverse(B)`. This is a user
+ * decision: the rewrite to a division stays, because `x^{-1}` and `1/x`
+ * must remain one expression for every scalar `x`.
+ *
  * `ops` are the operands of the `Power` as the broadcast sees them. A base
  * that is a symbol is read through its value. A base that is a function
  * expression other than a `List` is evaluated only when its type is a

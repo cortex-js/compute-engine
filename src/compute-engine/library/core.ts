@@ -112,6 +112,7 @@ import {
   stripMissingFromType,
   widen,
   containsSignatureArm,
+  isGroupedTypeText,
   resolveTypeAlias,
   broadcastResultType,
   broadcastShapedResultType,
@@ -157,6 +158,7 @@ import type {
   Type,
   TypeParameter,
   DeclarationOrigin,
+  FunctionSignature,
 } from '../../common/type/types.js';
 import { isSubtype, provablyDisjoint } from '../../common/type/subtype.js';
 import {
@@ -166,6 +168,10 @@ import {
 } from '../../common/type/instantiate.js';
 import type { Rule } from '../types-evaluation.js';
 import { canonical } from '../boxed-expression/canonical-utils.js';
+import {
+  admissionOf,
+  concreteValueOf,
+} from '../boxed-expression/value-membership.js';
 import {
   isDictionary,
   isValueDef,
@@ -527,12 +533,20 @@ function implicitTopicSlot(
   argTypes: ReadonlyArray<BoxedType>
 ): number {
   const n = argTypes.length;
-  // Placement: first slot (across the arms, in order) whose declared
-  // parameter type the topic provably satisfies, bounded by the written
+  // Placement: the arms are tried in order, and within an arm the LAST slot
+  // whose declared parameter type the topic provably satisfies wins (the
+  // rule and its reason are at the loop below), bounded by the written
   // argument count (the topic can at most be appended). The declared type is
-  // grounded for the test: a free type variable (`collection<T>`) is
-  // substituted with `any` — the question here is "could the topic belong in
-  // this slot", not the solve itself.
+  // grounded for the test (`groundTypeVariables`): a free type variable is
+  // substituted with the upper bound that the `where` clause of the arm
+  // declares for it, or with `any` when the clause declares no bound. The
+  // question here is "could the topic belong in this slot", not the solve
+  // itself. The bound is necessary: in the arm
+  // `(xs: T, count: number) -> T where T: string` of `Take`, the slot `xs`
+  // admits strings only, so in `5 |> Take(2)` the written `2` cannot move
+  // into it and the topic `5` takes the first slot. The completed call
+  // `Take(5, 2)` then reports `5` as the wrong argument. With `any`, the
+  // slot `xs` admits `2`, and the call `Take(2, 5)` blames the written `2`.
   // An arrow-typed slot admits callbacks by compatibility, so for placement —
   // "could this belong here" — any function-shaped candidate
   // fits an arrow slot. Strict contravariant `matches` refused the very
@@ -549,14 +563,8 @@ function implicitTopicSlot(
     t !== 'any' &&
     freeTypeVariables(t).size === 0 &&
     !provablyDisjoint(t, 'function');
-  const slotAccepts = (param: Type): boolean => {
-    let p = param;
-    const vars = freeTypeVariables(p);
-    if (vars.size > 0) {
-      const bindings: Record<string, Type> = Object.create(null);
-      for (const v of vars) bindings[v] = 'any';
-      p = substituteTypeVariables(p, bindings);
-    }
+  const slotAccepts = (arm: FunctionSignature, param: Type): boolean => {
+    const p = groundTypeVariables(arm, param);
     if (couldBeCallbackAt(topicType.type, p)) return true;
     return topicType.matches(p);
   };
@@ -567,15 +575,13 @@ function implicitTopicSlot(
   // where everything fits. A written argument whose type cannot be read yet
   // (a held, unbound operand reads `unknown`) is taken to fit — the question
   // is placement, not validation, which the canonical call performs after.
-  const argAccepts = (arg: BoxedType, param: Type): boolean => {
+  const argAccepts = (
+    arm: FunctionSignature,
+    arg: BoxedType,
+    param: Type
+  ): boolean => {
     if (arg.isUnknown) return true;
-    let p = param;
-    const vars = freeTypeVariables(p);
-    if (vars.size > 0) {
-      const bindings: Record<string, Type> = Object.create(null);
-      for (const v of vars) bindings[v] = 'any';
-      p = substituteTypeVariables(p, bindings);
-    }
+    const p = groundTypeVariables(arm, param);
     // Compatibility placement at an arrow slot — see `couldBeCallbackAt`.
     if (couldBeCallbackAt(arg.type, p)) return true;
     return arg.matches(p);
@@ -597,7 +603,7 @@ function implicitTopicSlot(
       ...(a.variadicArg !== undefined ? [a.variadicArg.type] : []),
     ];
     for (let i = Math.min(params.length - 1, n); i >= 0; i--) {
-      if (!slotAccepts(params[i])) continue;
+      if (!slotAccepts(a, params[i])) continue;
       // The written arguments before `i` stay put; those from `i` on shift
       // one slot right (a variadic tail absorbs any overflow).
       const last = params.length - 1;
@@ -609,7 +615,7 @@ function implicitTopicSlot(
             : a.variadicArg !== undefined
               ? a.variadicArg.type
               : undefined;
-        return param !== undefined && argAccepts(arg, param);
+        return param !== undefined && argAccepts(a, arg, param);
       });
       if (!displacedFit) continue;
       at = i;
@@ -617,6 +623,25 @@ function implicitTopicSlot(
     }
   }
   return at;
+}
+
+/**
+ * `type`, a parameter type of the signature arm `arm`, with each free type
+ * variable replaced by the upper bound that the `where` clause of `arm`
+ * declares for it. A variable that the clause does not bound, or that the
+ * clause does not list, is replaced by `any`. The result has no free type
+ * variables, so a `matches` test against it is meaningful.
+ *
+ * The bound is the widest type that the variable can take. `implicitTopicSlot`
+ * uses the grounded type to decide which slots a value could take.
+ */
+function groundTypeVariables(arm: FunctionSignature, type: Type): Type {
+  const vars = freeTypeVariables(type);
+  if (vars.size === 0) return type;
+  const bindings: Record<string, Type> = Object.create(null);
+  for (const v of vars)
+    bindings[v] = arm.typeParams?.find((p) => p.name === v)?.bound ?? 'any';
+  return substituteTypeVariables(type, bindings);
 }
 
 /**
@@ -2147,6 +2172,155 @@ function typeTextOf(d: OperandDescriptor): string | undefined {
   if (s?.kind === 'string') return s.text;
   if (s?.kind === 'symbol') return s.name;
   return undefined;
+}
+
+/** The parsed type of a `Typed` type operand, keyed on the string node. The
+ * body of a function literal is evaluated at every application, and parsing
+ * the type text each time is a measurable part of the cost of a call. A type
+ * operand belongs to one stored body, so it names the same type at every
+ * application of that body. */
+const ASCRIBED_TYPES = new WeakMap<Expression, Type>();
+
+/**
+ * The `incompatible-type` error for a `Typed` ascription whose operand
+ * evaluated to a concrete value outside the ascribed type, or `undefined`
+ * when the value conforms or cannot be judged.
+ *
+ * The ascription is a contract on the type system, and the engine keeps it
+ * when a body cannot meet it: a function declared `(integer) -> integer`
+ * whose body is `"s"` is accepted, and its stored body is `Typed("s",
+ * 'integer')`. Without this check the call `g(5)` was typed `integer` and
+ * evaluated to `"s"`. The check makes the value agree with the type: a
+ * returned value that provably does not conform is an error value.
+ *
+ * Only a CONCRETE value is judged: a number, a string, a character, a
+ * boolean, or a `List`/`Tuple` of such values (`concreteValueOf`). A symbolic
+ * value (an unknown, an operator that did not evaluate) passes unchanged,
+ * because its value can still conform. These values also pass, because a
+ * declared result type constrains only successful values
+ * (`docs/ERROR-MODEL.md`, section 4): an error value, `NaN`, and the absence
+ * markers `Missing` and `Nothing`.
+ *
+ * Two kinds of ascribed type are not checked. An ungrouped signature text,
+ * `(x: number) -> number`, is the marker form of a function literal, where
+ * the body-slot `Typed` holds the literal's own full signature and not the
+ * type of the body value; a grouped signature, `((x: number) -> number)`, is
+ * the type of a returned function and is checked (`isGroupedTypeText`, the
+ * same test as `functionLiteralDeclaredSignature`). A type that mentions a
+ * free type variable cannot be judged before instantiation.
+ *
+ * A real number that is not exact conforms to every type that admits a real
+ * number. Under a numeric approximation the operand evaluates to a float,
+ * and the float of a rational or of an integer that rounding moved off the
+ * integer is still the value the ascription promised: `g: (integer) ->
+ * rational` with the body `1/n` gives `1/3` for `g(3)`, and `g(3).N()`
+ * gives `0.333…`, not an error. A character conforms when the one-cluster string
+ * with the same content conforms: the two are the same value (`isSame`),
+ * and a function declared `-> string` returns a character for `s[1]`.
+ *
+ * A value that is the BROADCAST of the ascribed type conforms. A function
+ * declared `(point | list<point>) -> number` whose body is `|P - (1, 2)|`
+ * returns a list of numbers for a list of points, and a body that reads the
+ * coordinates of a list of points returns a tuple of lists where a point is
+ * declared: the compiled code returns these shapes too, and the interpreter
+ * must agree with it (`conformsUnderBroadcast`).
+ */
+function ascriptionViolation(
+  ce: ComputeEngine,
+  value: Expression,
+  typeOperand: Expression
+): Expression | undefined {
+  if (!value.isValid || value.isNaN === true) return undefined;
+  if (concreteValueOf(value) === undefined && !isCharacter(value))
+    return undefined;
+  // The canonical handler normalizes the type operand to a string literal.
+  if (!isString(typeOperand)) return undefined;
+  let ascribed = ASCRIBED_TYPES.get(typeOperand);
+  if (ascribed === undefined) {
+    try {
+      ascribed = parseType(typeOperand.string, ce._typeResolver);
+    } catch {
+      return undefined;
+    }
+    if (ascribed === undefined) return undefined;
+    ASCRIBED_TYPES.set(typeOperand, ascribed);
+  }
+  if (freeTypeVariables(ascribed).size > 0) return undefined;
+  const resolved = resolveTypeAlias(ascribed);
+  if (
+    typeof resolved !== 'string' &&
+    resolved.kind === 'signature' &&
+    !isGroupedTypeText(typeOperand.string)
+  )
+    return undefined;
+  if (conformsUnderBroadcast(ce, value, ascribed)) return undefined;
+  return ce.typeError(ascribed, value.type, value);
+}
+
+/**
+ * Does `value` conform to `type`, or is it the element-wise broadcast of a
+ * value that conforms? A value conforms when its admission is not refuted. A
+ * `List` conforms when each of its elements conforms under broadcast to the
+ * element type of a list type in `type`, or to `type` itself (the declared
+ * result, computed once per element of a list argument). A `Tuple`
+ * conforms when some tuple of the same length in `type` has components that
+ * the tuple's components conform to under broadcast (a point whose
+ * coordinates were computed over a list of points is a tuple of lists). The
+ * recursion stops at the leaves, which are scalars.
+ */
+function conformsUnderBroadcast(
+  ce: ComputeEngine,
+  value: Expression,
+  type: Type
+): boolean {
+  if (admissionOf(value, type) !== 'refute') return true;
+  // A real float stands for the exact real number the ascription promised
+  // (see the comment on `ascriptionViolation`). A float with an imaginary
+  // part gets no allowance: a complex value under a `real` ascription is an
+  // error on every route, and the compiler refuses it too.
+  if (isNumber(value) && !value.isExact && value.im === 0)
+    return !provablyDisjoint(type, 'real');
+  if (isCharacter(value))
+    return admissionOf(ce.string(value.string), type) !== 'refute';
+  if (isFunction(value, 'List')) {
+    // A list type in `type` judges each element by its element type: a list
+    // of floats conforms to `list<rational>` under a numeric approximation.
+    // Otherwise the list is the broadcast of `type` over its elements.
+    const elementTypes = unionMembers(type).flatMap((member) => {
+      const t = resolveTypeAlias(member);
+      if (typeof t === 'string') return [];
+      return t.kind === 'list' ||
+        t.kind === 'collection' ||
+        t.kind === 'indexed_collection'
+        ? [t.elements]
+        : [];
+    });
+    return value.ops.every(
+      (op) =>
+        elementTypes.some((et) => conformsUnderBroadcast(ce, op, et)) ||
+        conformsUnderBroadcast(ce, op, type)
+    );
+  }
+  if (isFunction(value, 'Tuple')) {
+    const arity = value.nops;
+    return unionMembers(type).some((member) => {
+      const t = resolveTypeAlias(member);
+      if (typeof t === 'string' || t.kind !== 'tuple') return false;
+      if (t.elements.length !== arity) return false;
+      return value.ops.every((op, i) =>
+        conformsUnderBroadcast(ce, op, t.elements[i].type)
+      );
+    });
+  }
+  return false;
+}
+
+/** The members of a union type, or the type itself when it is not a union. */
+function unionMembers(type: Type): Type[] {
+  const t = resolveTypeAlias(type);
+  if (typeof t !== 'string' && t.kind === 'union')
+    return t.types.flatMap(unionMembers);
+  return [type];
 }
 
 /** The absence-admitting dictionary family top, the gate `isDictionary`
@@ -4205,8 +4379,10 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     Typed: {
       description:
         'Ascribe a type to an expression. The type is asserted for the type ' +
-        'system (ascription, not a check); evaluation is transparent. Used to ' +
-        'annotate `Function` literal parameters and return types.',
+        'system. At evaluation, a concrete value that does not conform to ' +
+        'the type is an `incompatible-type` error; any other value is ' +
+        'returned unchanged. Used to annotate `Function` literal parameters ' +
+        'and return types.',
       complexity: 9000,
       // `lazy` so the type operand stays raw (a type-name symbol such as `real`
       // is not auto-declared as a variable).
@@ -4254,11 +4430,19 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         const typeOp = isString(t) ? t : s !== undefined ? ce.string(s) : t;
         return ce._fn('Typed', [x.canonical, typeOp]);
       },
-      // Ascription is transparent at evaluation.
-      evaluate: ([x], options) => x?.evaluate(options),
+      // The ascribed operand is evaluated, and the value is checked against
+      // the ascribed type (see `ascriptionViolation`).
+      evaluate: ([x, t], options) => {
+        const v = x?.evaluate(options);
+        if (v === undefined || t === undefined) return v;
+        return ascriptionViolation(options.engine, v, t) ?? v;
+      },
       // Only the ascribed operand is evaluated, not the type.
-      evaluateAsync: ([x], options) =>
-        x?.evaluateAsync(awaitedOperandOptions(options)),
+      evaluateAsync: async ([x, t], options) => {
+        const v = await x?.evaluateAsync(awaitedOperandOptions(options));
+        if (v === undefined || t === undefined) return v;
+        return ascriptionViolation(options.engine, v, t) ?? v;
+      },
     },
 
     Object: {

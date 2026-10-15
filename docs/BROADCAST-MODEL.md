@@ -23,6 +23,17 @@ wrote**, not by the operand shapes:
    for `a + b`, not for a pairing; truncation would return a plausible answer
    that silently discards data.
 
+   A parameter with no declared type counts as a scalar parameter here, and
+   the function is mapped over the leaves of a nested list before its body
+   runs. So `g(A) := A^2` applied to `[[1, 2], [3, 4]]` gives the cells
+   squared, `[[1, 4], [9, 16]]`, while `[[1, 2], [3, 4]]^2` written directly
+   is the matrix power `[[7, 10], [15, 22]]`. A body that takes the whole
+   matrix needs a declared parameter: `g(A: matrix) := A^2`. The user decided
+   (2026-10-15) to keep this mapping instead of passing a square matrix whole,
+   because the alternative gives `f(x) := \sin x` the matrix sine instead of
+   the sines of the cells. Pinned by `test/compute-engine/apply-literal-maps.test.ts`
+   ("a nested list is mapped at its leaves, and typed so").
+
 2. **An explicit PAIRING constructor defines its length as the shortest
    input.** `Zip`, the variadic `Map`, and `PointList` are operations whose
    *defined output* is the pairing up to the shorter operand — the shortest

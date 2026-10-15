@@ -2960,6 +2960,26 @@ export function assignFn(
           declaredType.toString()
         );
 
+        // A DERIVED signature is a record of the literal assigned before, so
+        // its result is what that literal returned (inferred from its body,
+        // or its own return ascription), not a contract on the name. When the
+        // new literal states no return type, its inferred result replaces the
+        // recorded one, as an untyped re-assign replaces the whole signature.
+        // Ascribing the old result instead kept a result type the new body
+        // cannot meet: after `h := (a: integer) ↦ 1`, the re-assign
+        // `h := (a: integer) ↦ "s"` stored `Typed("s", 'integer')`, so `h(0)`
+        // was typed `integer`, and the `Typed` evaluate handler refuses the
+        // value `"s"` there. A new literal that states a return type is still
+        // checked against the recorded result (a different stated type is an
+        // error), and a signature declared on the name keeps its result as a
+        // contract.
+        const resultIsRecord =
+          def.operator._derivedSignature &&
+          functionLiteralReturnType(literal) === undefined &&
+          functionLiteralDeclaredSignature(literal) === undefined &&
+          !declaredType.isPolymorphic &&
+          typeof declaredType.type === 'object' &&
+          declaredType.type.kind === 'signature';
         // As on the value-slot route: reconciled against the DECLARED result.
         const reconciled = reconcileFunctionLiteralReturn(
           ce,
@@ -2990,13 +3010,22 @@ export function assignFn(
                   'unknown'
                 )
           ),
-          typedResult === undefined
+          typedResult === undefined && !resultIsRecord
             ? declaredType.type
             : withSignatureResult(declaredType.type, 'unknown')
         );
         // Second refinement pass — adopt the post-ascription result.
         const reconciledType = withTypedResult(reconciled.type);
         declaredType = refineDeclaredType(ce, declaredType, reconciledType);
+        // The new literal's own result replaces a result that is only a
+        // record of the previous literal (see `resultIsRecord`).
+        if (resultIsRecord) {
+          const result = functionResult(reconciledType.type);
+          if (result !== undefined)
+            declaredType = ce.type(
+              withSignatureResult(declaredType.type, result)
+            );
+        }
         // The effects axis is judged by its own provenance. The operator
         // definition carries the bit (`effectsDeclared`), and it has to travel
         // with the value definition this route installs: the declared type

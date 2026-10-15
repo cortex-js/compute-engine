@@ -22,6 +22,30 @@ import { BaseCompiler } from '../../src/compute-engine/compilation/base-compiler
  *    emit a definition before the call itself compiles.
  */
 
+describe('A value outside the declared result type: interpreter and compiled code', () => {
+  // The interpreter checks the value a call returns against the declared
+  // result type, and answers an `incompatible-type` error for a concrete
+  // value outside it. Compiled code does not check the value: the compiler
+  // declines a declaration it can prove wrong at compile time (a complex
+  // value under a real ascription, below) and emits the body otherwise. So
+  // `f: (integer) -> integer` with the body `n/2` is an error for `f(3)` in
+  // the interpreter and `1.5` in compiled code. The difference is recorded
+  // in `ROADMAP.md` ("Compiled code returns a value that the interpreter
+  // refuses under the declared result type"); this test pins it until that
+  // entry is decided.
+  it('JavaScript: a rational under an integer result is an error in the interpreter and a float in compiled code', () => {
+    const ce = new ComputeEngine();
+    ce.declare('f', '(integer) -> integer');
+    ce.assign('f', ce.parse('n \\mapsto n/2'));
+    expect(ce.parse('f(3)').evaluate().toString()).toBe(
+      'Error(ErrorCode("incompatible-type", "integer", "rational<1.5..1.5>"), 3/2)'
+    );
+    const compiled = compile(ce.parse('f(3)'), { to: 'javascript' });
+    expect(compiled.success).toBe(true);
+    expect(compiled.run!({})).toBe(1.5);
+  });
+});
+
 describe('A `Typed` ascription and the lane of its value', () => {
   function withSignature(signature: string, body: string): ComputeEngine {
     const ce = new ComputeEngine();
@@ -34,7 +58,9 @@ describe('A `Typed` ascription and the lane of its value', () => {
   // `q: (unknown) -> real` and `q := z ↦ z²`: `q(1 + i)` is `2i`. The body
   // is `Typed(z², real)`. The emitted `_fn_q` returned the `{re, im}` object,
   // and the call site read the lane from the ascription, so `q(w) + 1`
-  // compiled to `_fn_q(_.w) + 1` and returned `"[object Object]1"`.
+  // compiled to `_fn_q(_.w) + 1` and returned `"[object Object]1"`. The
+  // interpreter checks the returned value against the ascription: `2i` is not
+  // real, so the call is an `incompatible-type` error, and `Add` propagates it.
   for (const mode of ['auto', 'complex'] as const)
     it(`JavaScript ${mode}: a complex value under a real result fails closed`, () => {
       const ce = withSignature('(unknown) -> real', 'z \\mapsto z^2');
@@ -44,7 +70,7 @@ describe('A `Typed` ascription and the lane of its value', () => {
           .subs({ w: ce.parse('1+\\imaginaryI') })
           .N()
           .toString()
-      ).toBe('(1 + 2i)');
+      ).toBe('Error(ErrorCode("incompatible-type", "real", "imaginary"), 2i)');
       expect(() =>
         compile(expr, { to: 'javascript', mode, fallback: false } as any)
       ).toThrow(

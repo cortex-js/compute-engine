@@ -1146,6 +1146,15 @@ describe('Inverse', () => {
     );
   });
 
+  it('rejects a scalar operand on the parse route', () => {
+    // The signature is `(matrix) -> matrix`, so a number operand is an
+    // `incompatible-type` error on every route: the evaluate handler has no
+    // scalar branch.
+    expect(
+      ce.parse('\\operatorname{Inverse}(5)').evaluate().toString()
+    ).toBe('Error(ErrorCode("incompatible-type", "matrix", "5"), 5)');
+  });
+
   it('should calculate the inverse of a numeric vector', () => {
     const result = ce.expr(['Inverse', v7_n]).evaluate();
     // Type checking rejects vector (not a matrix).
@@ -1325,6 +1334,15 @@ describe('PseudoInverse', () => {
     expect(result.toString()).toMatchInlineSnapshot(
       `Error(ErrorCode("incompatible-type", "matrix", "42"), 42)`
     );
+  });
+
+  it('rejects a scalar operand on the parse route', () => {
+    // The signature is `(matrix) -> matrix`, so a number operand is an
+    // `incompatible-type` error on every route: the evaluate handler has no
+    // scalar branch.
+    expect(
+      ce.parse('\\operatorname{PseudoInverse}(5)').evaluate().toString()
+    ).toBe('Error(ErrorCode("incompatible-type", "matrix", "5"), 5)');
   });
 
   it('should calculate the pseudo inverse of a numeric vector', () => {

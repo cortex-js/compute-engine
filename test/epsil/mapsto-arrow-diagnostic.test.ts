@@ -281,6 +281,21 @@ describe('EPSIL MAPSTO-ARROW DIAGNOSTIC — a rule at a function parameter', () 
       ).toEqual([]);
     }
   });
+
+  test('the first argument of `apply` gets no hint', () => {
+    // `Apply` declares its first parameter `any`, because it accepts a
+    // function or the symbol of one, so the checker cannot see that
+    // `x -> x^2` was meant as a function. Only the ordinary static type
+    // error is reported (a rule key must be a string). The user decided to
+    // leave it so: a narrower parameter type for `Apply`, or a second rule
+    // that reads the key of a rule as a parameter when it occurs free in
+    // the value, would both report legitimate rules as typos.
+    const { diagnostics } = run('apply(x -> x^2, 3)');
+    expect(diagnostics.map((d) => d.message[0])).toEqual([
+      'static-type-error',
+    ]);
+    expect(diagnostics[0].fixits ?? null).toBeNull();
+  });
 });
 
 describe('EPSIL MAPSTO-ARROW DIAGNOSTIC — legitimate `->` stays silent', () => {

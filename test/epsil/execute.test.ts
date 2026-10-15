@@ -1021,6 +1021,9 @@ describe('EPSIL EXECUTE — pipe-stage sugar', () => {
       run('let header = "H;"\n["a", "b", "c"] |> Fold(Join, header)').value
         .string
     ).toBe('H;abc');
+    expect(run('["a", "b", "c"] |> fold(Join, "H;")').value.string).toBe(
+      'H;abc'
+    );
     expect(run('1..3 |> n => "\\(n);" |> Fold(Join, "")').value.string).toBe(
       '1;2;3;'
     );
@@ -1155,6 +1158,20 @@ describe('EPSIL EXECUTE — static errors inside a pipe stage', () => {
         'True',
       ],
     ]);
+    // The string arm of `take` is `(xs: T, count: number) -> T where
+    // T: string`. Its slot `xs` is grounded with the bound `string`, so the
+    // written `2` cannot move into it: the piped `5` takes the first slot,
+    // and the error names `5`, not `2`.
+    expect(report('5 |> take(2)')).toEqual([
+      [
+        'expected `indexed_collection`, got `5` at `5`',
+        'incompatible-type',
+        '5',
+      ],
+    ]);
+    // A list or a string topic still takes the first slot without error.
+    expect(run('[1, 2, 3] |> take(2)').value.toString()).toBe('[1,2]');
+    expect(run('"hello" |> take(2)').value.string).toBe('he');
   });
 
   test('a stage of a chain, in a declaration, in a function body', () => {

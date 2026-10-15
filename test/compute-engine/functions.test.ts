@@ -729,6 +729,24 @@ describe('Pipe — stage sugar (box route)', () => {
     ).toBe('[2,4,6]');
   });
 
+  test('a type variable is grounded with its declared bound for placement', () => {
+    const ce = new ComputeEngine();
+    // The string arm of `Take` is `(xs: T, count: number) -> T where
+    // T: string`. Grounded with the bound `string`, the slot `xs` does not
+    // admit the written `2`, so the topic `5` takes the first slot and the
+    // error names `5`. Grounded with `any`, the call was `Take(2, 5)` and
+    // the error named `2`.
+    expect(ce.box(['Pipe', 5, ['Take', 2]]).evaluate().toString()).toBe(
+      'Error(ErrorCode("incompatible-type", "indexed_collection", "5"), 5)'
+    );
+    expect(
+      ce.box(['Pipe', ['List', 1, 2, 3], ['Take', 2]]).evaluate().toString()
+    ).toBe('[1,2]');
+    expect(
+      ce.box(['Pipe', { str: 'hello' }, ['Take', 2]]).evaluate().toString()
+    ).toBe('"he"');
+  });
+
   test('a complete call whose value is not a function is an error', () => {
     const ce = new ComputeEngine();
     // Max(3) is a complete call, so the implicit topic does not apply. Its
