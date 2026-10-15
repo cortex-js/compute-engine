@@ -12401,6 +12401,27 @@ function processMinMaxItem(
   }
 
   if (isNumber(item)) return [item, []];
+  // A `Measurement(v, σ)` is a value ordered by its nominal `v`
+  // (`exactOrder`), and the chosen operand is returned as it is, uncertainty
+  // included: `Max(0.1, Measurement(0.7468, 6.6e-16))` is the measurement.
+  // A quadrature result is a measurement under `.N()`, so this is how
+  // `min(k, ∫…)` folds. The nominal decides as a bare operand would: a
+  // nominal that is `NaN` absorbs (`Max(1, Measurement(NaN, 0.1))` is `NaN`),
+  // a complex or symbolic nominal leaves the measurement in the unevaluated
+  // result (`Max(Measurement(z, 0.1))` stays unevaluated, as `Max(z)` does),
+  // and a float nominal makes the extremum inexact, as a float operand does
+  // (`isInexactOperand()` reads the nominal: `Max(Measurement(1.5, 0.1),
+  // Indeterminate)` is `NaN`, not `Indeterminate`).
+  if (isMeasurement(item)) {
+    const [nominal] = processMinMaxItem(item.op1, mode, walk);
+    // A complex number literal is reported as a value by the number branch
+    // below and set aside by `foldExtremumValue`, which sees only the bare
+    // literal; the measurement is set aside here.
+    if (nominal === undefined || (isNumber(nominal) && nominal.isComplex))
+      return [undefined, [item]];
+    if (nominal.isNaN) return [nominal, []];
+    return [item, []];
+  }
   // A real constant that is not a number literal (`π`, `√10`, `e²`) has a
   // value, and `exactOrder` orders it against the other values:
   // `Max(π, 3)` is `π`. Any other operand (a symbol with no value, a complex
@@ -12574,11 +12595,19 @@ function scalarExtremum(
   numericApproximation: boolean
 ): Expression | undefined {
   const ce = a.engine;
+  // A `Measurement(v, σ)` is read through its nominal `v` by the guards
+  // below, as `Max`/`Min` read it (`processMinMaxItem`): a `NaN` nominal
+  // absorbs, a complex nominal is unordered, and a float nominal makes an
+  // `Indeterminate` answer `NaN`. The winner returned is still the operand
+  // itself, uncertainty included.
+  const an = isMeasurement(a) ? a.op1 : a;
+  const bn = isMeasurement(b) ? b.op1 : b;
   // A `NaN` operand gives `NaN`; an `Indeterminate` operand gives
   // `Indeterminate` when the other operand is neither `NaN` nor inexact
   // (`nanOperandAnswer()`, the rule of the reducers, see `evaluateMinMax`).
-  if (a.isNaN === true || b.isNaN === true) return nanOperandAnswer(ce, [a, b]);
-  if ((isNumber(a) && a.isComplex) || (isNumber(b) && b.isComplex))
+  if (an.isNaN === true || bn.isNaN === true)
+    return nanOperandAnswer(ce, [an, bn]);
+  if ((isNumber(an) && an.isComplex) || (isNumber(bn) && bn.isComplex))
     return undefined;
   // `undefined` when the comparison is not decidable (a free symbol); ties
   // keep `a`, unless `b` is a number literal and `a` is not (see

@@ -1326,6 +1326,27 @@ export function exactOrder(
   b: Expression,
   options?: { tieWithinTolerance?: boolean }
 ): -1 | 0 | 1 | undefined {
+  // A `Measurement(v, σ)` is ordered by its nominal value `v`; the
+  // uncertainty `σ` takes no part in the order, and two measurements with
+  // equal nominals are a tie. This is the reading of the arithmetic rules for
+  // a measurement (`Abs(Measurement(v, σ))` is `Measurement(|v|, σ)`), and
+  // it is what lets `Max`, `Min`, `Clamp` and `Sort` fold a quadrature
+  // result, which `.N()` answers as a `Measurement`: `min(0.1, ∫₀¹ e^(−x²) dx)`
+  // is `0.1`. Without it, the comparison of a measurement with a number was
+  // undecided at every step, and the extremum stayed unevaluated.
+  //
+  // Two measurements with EQUAL nominals and DIFFERENT uncertainties are not
+  // ordered (`undefined`), not a tie: a tie makes the caller keep its first
+  // operand, and `Max(Measurement(1, 0.1), Measurement(1, 0.5))` would then
+  // answer a different value than `Max(Measurement(1, 0.5), Measurement(1,
+  // 0.1))`. Undecided, the extremum stays unevaluated in both orders.
+  if (isFunction(a, 'Measurement') && isFunction(b, 'Measurement')) {
+    const order = exactOrder(a.op1, b.op1, options);
+    if (order === 0 && !a.op2.isSame(b.op2)) return undefined;
+    return order;
+  }
+  if (isFunction(a, 'Measurement')) return exactOrder(a.op1, b, options);
+  if (isFunction(b, 'Measurement')) return exactOrder(a, b.op1, options);
   const order = orderAtWorkingPrecision(a, b);
   if (order !== undefined) return order;
   const ce = a.engine;

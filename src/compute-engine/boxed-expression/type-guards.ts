@@ -136,6 +136,10 @@ export function isAbsentValue(expr: Expression | null | undefined): boolean {
  * `NaN`).
  */
 export function isInexactOperand(x: Expression): boolean {
+  // A `Measurement(v, σ)` is as inexact as its nominal `v`: a measurement
+  // with a float nominal is a float datum, so `Max(Measurement(1.5, 0.1),
+  // Indeterminate)` is `NaN`, as `Max(1.5, Indeterminate)` is.
+  if (isFunction(x, 'Measurement')) return isInexactOperand(x.op1);
   if (!isNumber(x) || x.isIndeterminate) return false;
   if (x.isNaN === true) return true;
   return x.isFinite === true && !x.isExact;
@@ -158,7 +162,10 @@ export function nanOperandAnswer(
   ops: ReadonlyArray<Expression>
 ): Expression {
   let sawIndeterminate = false;
-  for (const x of ops) {
+  for (let x of ops) {
+    // A `Measurement(v, σ)` answers as its nominal `v` does
+    // (`isInexactOperand()`).
+    if (isFunction(x, 'Measurement')) x = x.op1;
     if (isNumber(x)) {
       if (x.isIndeterminate) sawIndeterminate = true;
       else if (isInexactOperand(x)) return ce.NaN;
