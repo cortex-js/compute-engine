@@ -96,6 +96,15 @@
 
 ### Issues Resolved
 
+- **`Numerator`, `Denominator` and `NumeratorDenominator` keep extra
+  operands when they canonicalize**
+  ([#ISSUE](https://github.com/cortex-js/compute-engine/issues/ISSUE),
+  contributed by [enumeratio](https://github.com/enumeratio)). The quotient
+  shortcut took the part of a first operand that is a `Divide` or `Rational`
+  and dropped the rest of the call, so `Numerator(a/b, x)` canonicalized to `a`
+  before a handler that takes options could see `x`. The shortcut now applies
+  to a one-operand call only; `Numerator(a/b)` is still `a`.
+
 - **A function that hands a tuple built from its own parameter to a scalar
   parameter has the result type `any`.** With `f(x) := (-x, x)` and
   `g(a) := f((a, a))`, `g(1)` evaluates to `((-1, -1), (1, 1))` but was typed

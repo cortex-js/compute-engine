@@ -10028,6 +10028,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (ops.length === 0) return engine.Nothing;
         const op = ops[0];
         if (
+          ops.length === 1 &&
           (op.operator === 'Rational' || op.operator === 'Divide') &&
           isFunction(op)
         )
@@ -10074,6 +10075,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (ops.length === 0) return engine.Nothing;
         const op = ops[0];
         if (
+          ops.length === 1 &&
           (op.operator === 'Rational' || op.operator === 'Divide') &&
           isFunction(op)
         )
@@ -10118,6 +10120,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (ops.length === 0) return engine.Nothing;
         const op = ops[0];
         if (
+          ops.length === 1 &&
           (op.operator === 'Rational' || op.operator === 'Divide') &&
           isFunction(op)
         )
