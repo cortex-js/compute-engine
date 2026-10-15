@@ -13,6 +13,7 @@ import {
   nops,
   operand,
   operands,
+  stringValue,
   symbol,
 } from '../../../math-json/utils.js';
 import type { MathJsonExpression } from '../../../math-json.js';
@@ -650,6 +651,13 @@ export const DEFINITIONS_LOGIC: LatexDictionary = [
         parser.index = start;
       }
 
+      // \\delta_{n+1\\,m}: a spacing command separates two indices also when
+      // an index is an expression, so `\delta_{n+1\,m}` is
+      // `KroneckerDelta(n + 1, m)` and not `KroneckerDelta(n + 1·m)`. See
+      // `parseIndexesSplitAtSpacing()`.
+      const splitIndexes = parseIndexesSplitAtSpacing(parser);
+      if (splitIndexes !== null) return ['KroneckerDelta', ...splitIndexes];
+
       // \\delta_11: in non-strict mode, an unbraced run of digits is the
       // whole subscript, as `x_11` is `x_{11}`, and it is read as the
       // braced run: `\delta_11` is `KroneckerDelta(1, 1)` and `\delta_01`
@@ -770,6 +778,180 @@ function withoutSpacing(expr: MathJsonExpression): MathJsonExpression | null {
   if (rest.length === 0) return null;
   if (rest.length === 1) return rest[0];
   return ['InvisibleOperator', ...rest];
+}
+
+/**
+ * Return `true` if the parser is at a spacing command: a command that
+ * `skipVisualSpace()` skips, such as `\,`, `\;`, `\:`, `\!`, `\quad`,
+ * `\qquad` or `\hspace{1em}`. White space and the empty group `{}` alone are
+ * not a spacing command. The parser index is restored before returning.
+ *
+ * The tokenizer changes `\ ` and `~` to the same white space token as a
+ * plain space, so they are not spacing commands here.
+ */
+function atSpacingCommand(parser: Parser): boolean {
+  const start = parser.index;
+  parser.skipSpace();
+  const afterSpace = parser.index;
+  parser.skipVisualSpace();
+  const result = parser.index > afterSpace;
+  parser.index = start;
+  return result;
+}
+
+/** The tokens that open or close a group or a delimiter, for the depth
+ * count in `parseIndexesSplitAtSpacing()`. `\left(` opens two levels and
+ * `\right)` closes two levels, so the count stays balanced. */
+const OPENING_TOKENS = new Set(['<{>', '(', '[', '\\{', '\\left']);
+const CLOSING_TOKENS = new Set(['<}>', ')', ']', '\\}', '\\right']);
+
+/**
+ * The items of a list that has a separator and no fence, or the expression
+ * alone. `n+1, m` parses to `["Delimiter", ["Sequence", …], "','"]` and
+ * `n+1; m` to the same with `"';'"`: the delimiter string is the separator
+ * alone. A list in parentheses, such as `(1, 2)`, has the delimiter string
+ * `"'(,)'"`: it is one item, and one index of a Kronecker delta.
+ */
+function separatedListItems(
+  expr: MathJsonExpression
+): ReadonlyArray<MathJsonExpression> {
+  if (operator(expr) === 'Sequence') return operands(expr);
+  if (
+    operator(expr) === 'Delimiter' &&
+    stringValue(operand(expr, 2))?.length === 1 &&
+    operator(operand(expr, 1)) === 'Sequence'
+  )
+    return operands(operand(expr, 1));
+  return [expr];
+}
+
+/**
+ * Read the braced subscript of `\delta` as a list of indices, split at each
+ * spacing command at the top level of the group. Each part between two
+ * spacing commands is read as an expression, and a part with commas gives
+ * one index for each item: `\delta_{n+1\,m}` is `KroneckerDelta(n + 1, m)`,
+ * `\delta_{n+1\,m+2}` is `KroneckerDelta(n + 1, m + 2)`, and
+ * `\delta_{n+1, m\,k}` is `KroneckerDelta(n + 1, m, k)`.
+ *
+ * This is different from all other subscripts on purpose. In other
+ * subscripts, the expression parser reads a spacing command between two
+ * operands as an implicit product: `x_{n+1\,m}` is `x_{n + 1·m}`. In the
+ * subscript of a Kronecker delta, a thin space between two indices is the
+ * usual way to separate them, and a product in an index is rare.
+ *
+ * A spacing command in a nested group or in a delimiter, such as
+ * `\frac{a\,b}{2}` or `(a\,b)`, does not split the subscript. A spacing
+ * command next to a comma or a semicolon is white space around that
+ * separator: `\delta_{n\, ,\, m}` has two indices.
+ *
+ * A spacing command between two digits separates two indices too:
+ * `\delta_{n+1\,2}` is `KroneckerDelta(n + 1, 2)` and `\delta_{1.5\,2}` is
+ * `KroneckerDelta(1.5, 2)`. Elsewhere, the number parser reads `\,` between
+ * two digits as a digit group separator (`1\,000` is 1000), and the number
+ * parser is called from inside `parseExpression()`. So, while a part is read,
+ * the token indices of the runs of spacing commands are in
+ * `parser._visualSpaceStops`: then `skipVisualSpace()` does not skip a run
+ * and the number parser does not read a run as a digit group separator. A
+ * spacing command in a nested group is not a stop:
+ * `\delta_{\frac{1\,000}{2}\,3}` has the indices `1000/2` and `3`.
+ *
+ * A part ends when the parser index is in a run, found by token position: a
+ * run can start with white space, and the parser can stop before or after
+ * that white space.
+ *
+ * Limitations:
+ * - The tokenizer changes `\ ` and `~` to the same white space token as a
+ *   plain space. So they are not spacing commands here, and they do not
+ *   split the subscript: `\delta_{n+1~m}` is read as `\delta_{n+1 m}`, with
+ *   the implicit product `1·m`.
+ * - A spacing command directly after an operator, as in `\delta_{n+\,m}`,
+ *   does not split the subscript. The part before the spacing command,
+ *   `n+`, has no right operand, so the part does not end at the run. Then
+ *   this function returns `null`, and the caller reads the subscript in the
+ *   usual way, as one index with the spacing command in it.
+ *
+ * Return `null`, with the parser index not moved, if the parser is not at a
+ * `{` group, if the group has no spacing command at its top level, or if the
+ * group does not close after the indices. The caller then reads the group in
+ * the usual way.
+ */
+function parseIndexesSplitAtSpacing(
+  parser: Parser
+): MathJsonExpression[] | null {
+  const start = parser.index;
+  if (!parser.match('<{>')) return null;
+
+  // Find each run of spacing commands at the top level of the group, as the
+  // token index where the run starts and the token index after the run. A
+  // run in a nested group or in a delimiter (`{…}`, `(…)`, `[…]`, `\{…\}`,
+  // `\left…\right`) is not at the top level.
+  const runs: [number, number][] = [];
+  // The token index of each token of the runs, for `_visualSpaceStops`.
+  const stops = new Set<number>();
+  let depth = 0;
+  let previous = '';
+  while (!parser.atEnd) {
+    if (depth === 0 && atSpacingCommand(parser)) {
+      const runStart = parser.index;
+      parser.skipVisualSpace();
+      // A spacing command next to a separator is white space around the
+      // separator, and not one more separator: `\delta_{n\, ,\, m}` has two
+      // indices.
+      if (previous !== ',' && previous !== ';' && !/^[,;]$/.test(parser.peek)) {
+        runs.push([runStart, parser.index]);
+        for (let i = runStart; i < parser.index; i++) stops.add(i);
+      }
+      continue;
+    }
+    const token = parser.nextToken();
+    if (token !== '<space>') previous = token;
+    if (token === '<}>' && depth === 0) break;
+    if (OPENING_TOKENS.has(token)) depth += 1;
+    else if (CLOSING_TOKENS.has(token)) depth = Math.max(0, depth - 1);
+  }
+  if (runs.length === 0) {
+    parser.index = start;
+    return null;
+  }
+  parser.index = start + 1;
+
+  // The end of the run that contains the current token index, or -1.
+  const runEnd = (p: Parser): number =>
+    runs.find(([s, e]) => p.index >= s && p.index <= e)?.[1] ?? -1;
+
+  const checkpoint = parser._diagnosticsCheckpoint();
+  parser.addBoundary(['<}>']);
+  const indexes: MathJsonExpression[] = [];
+  parser.skipVisualSpace();
+  while (!parser.atBoundary) {
+    // The part ends at a run of spacing commands. The run that ends where
+    // this part starts is the run before the part: it does not end it.
+    const partStart = parser.index;
+    const savedStops = parser._visualSpaceStops;
+    parser._visualSpaceStops = stops;
+    let part: MathJsonExpression | null;
+    try {
+      part = parser.parseExpression({
+        minPrec: 0,
+        condition: (p) => p.index > partStart && runEnd(p) >= 0,
+      });
+    } finally {
+      parser._visualSpaceStops = savedStops;
+    }
+    if (part === null) break;
+    for (const index of separatedListItems(part))
+      indexes.push(withoutSpacing(index) ?? 'Nothing');
+    const end = runEnd(parser);
+    if (end < 0) break;
+    parser.index = end;
+  }
+  parser.skipSpace();
+  if (indexes.length > 0 && parser.matchBoundary()) return indexes;
+
+  parser.removeBoundary();
+  parser._rollbackDiagnostics(checkpoint);
+  parser.index = start;
+  return null;
 }
 
 function serializeQuantifier(

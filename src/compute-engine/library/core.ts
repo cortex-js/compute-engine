@@ -112,6 +112,7 @@ import {
   stripMissingFromType,
   widen,
   containsSignatureArm,
+  isGroupedTypeText,
   resolveTypeAlias,
   broadcastResultType,
   broadcastShapedResultType,
@@ -157,6 +158,7 @@ import type {
   Type,
   TypeParameter,
   DeclarationOrigin,
+  FunctionSignature,
 } from '../../common/type/types.js';
 import { isSubtype, provablyDisjoint } from '../../common/type/subtype.js';
 import {
@@ -166,6 +168,10 @@ import {
 } from '../../common/type/instantiate.js';
 import type { Rule } from '../types-evaluation.js';
 import { canonical } from '../boxed-expression/canonical-utils.js';
+import {
+  admissionOf,
+  concreteValueOf,
+} from '../boxed-expression/value-membership.js';
 import {
   isDictionary,
   isValueDef,
@@ -359,7 +365,9 @@ function simplifyUnder(
 }
 
 /** The operands of a `Delimiter` to evaluate: a leading `Sequence` or
- * `Delimiter` stands for its own operands. */
+ * `Delimiter` stands for its own operands. The second operand, the string of
+ * delimiters (`"[,]"`), is not a value and is never included: if it were,
+ * `Delimiter(x, "[,]")` would evaluate to the tuple `(x, "[,]")`. */
 function delimitedOperands(
   ops: ReadonlyArray<Expression>
 ): ReadonlyArray<Expression> {
@@ -367,7 +375,7 @@ function delimitedOperands(
   return (op1.operator === 'Sequence' || op1.operator === 'Delimiter') &&
     isFunction(op1)
     ? flattenSequence(op1.ops)
-    : ops;
+    : [op1];
 }
 
 /** The `absence-marker-binding` error when `name` is an absence marker. */
@@ -474,26 +482,73 @@ function pipeStageWithImplicitTopic(
     def !== undefined && 'operator' in def ? def.operator : undefined;
   const arms = signatureArms(opDef?.signature.type);
   if (arms === undefined) return undefined;
-  const n = rhs.nops;
+  if (!implicitTopicArityFits(arms, rhs.nops)) return undefined;
+  const at = implicitTopicSlot(
+    arms,
+    topic.type,
+    rhs.ops.map((op) => op.type)
+  );
+
+  const args = [...rhs.ops];
+  args.splice(at, 0, ce.symbol('_', { canonical: false }));
+  return ce._fn(name, args, { canonical: false });
+}
+
+/**
+ * Whether a stage call with `n` written arguments gets the piped value as
+ * an implicit argument: the call is incomplete under every signature arm of
+ * its operator, and one more argument fits some arm. See
+ * `pipeStageWithImplicitTopic`.
+ */
+function implicitTopicArityFits(
+  arms: NonNullable<ReturnType<typeof signatureArms>>,
+  n: number
+): boolean {
   const minArity = (a: (typeof arms)[number]): number =>
     (a.args?.length ?? 0) +
     (a.variadicArg !== undefined ? (a.variadicMin ?? 0) : 0);
   // Complete under some arm: the written call already means something.
-  if (arms.some((a) => n >= minArity(a))) return undefined;
-  const fits = arms.some((a) => {
+  if (arms.some((a) => n >= minArity(a))) return false;
+  return arms.some((a) => {
     const req = a.args?.length ?? 0;
     const max =
       a.variadicArg !== undefined ? Infinity : req + (a.optArgs?.length ?? 0);
     return n + 1 <= max;
   });
-  if (!fits) return undefined;
+}
 
-  // Placement: first slot (across the arms, in order) whose declared
-  // parameter type the topic provably satisfies, bounded by the written
+/**
+ * The 0-based slot that the piped value takes in a stage call that gets it
+ * as an implicit argument (`implicitTopicArityFits`). See
+ * `pipeStageWithImplicitTopic` for the placement rule.
+ *
+ * `arms` are the signature arms of the stage's operator, `topicType` is the
+ * type of the piped value, and `argTypes` are the types of the arguments
+ * written in the stage, in order. The function reads types only, so the
+ * evaluate handler of `Pipe` (with expressions in hand) and its type
+ * handler (with operand descriptors only) place the piped value in the same
+ * slot.
+ */
+function implicitTopicSlot(
+  arms: NonNullable<ReturnType<typeof signatureArms>>,
+  topicType: BoxedType,
+  argTypes: ReadonlyArray<BoxedType>
+): number {
+  const n = argTypes.length;
+  // Placement: the arms are tried in order, and within an arm the LAST slot
+  // whose declared parameter type the topic provably satisfies wins (the
+  // rule and its reason are at the loop below), bounded by the written
   // argument count (the topic can at most be appended). The declared type is
-  // grounded for the test: a free type variable (`collection<T>`) is
-  // substituted with `any` — the question here is "could the topic belong in
-  // this slot", not the solve itself.
+  // grounded for the test (`groundTypeVariables`): a free type variable is
+  // substituted with the upper bound that the `where` clause of the arm
+  // declares for it, or with `any` when the clause declares no bound. The
+  // question here is "could the topic belong in this slot", not the solve
+  // itself. The bound is necessary: in the arm
+  // `(xs: T, count: number) -> T where T: string` of `Take`, the slot `xs`
+  // admits strings only, so in `5 |> Take(2)` the written `2` cannot move
+  // into it and the topic `5` takes the first slot. The completed call
+  // `Take(5, 2)` then reports `5` as the wrong argument. With `any`, the
+  // slot `xs` admits `2`, and the call `Take(2, 5)` blames the written `2`.
   // An arrow-typed slot admits callbacks by compatibility, so for placement —
   // "could this belong here" — any function-shaped candidate
   // fits an arrow slot. Strict contravariant `matches` refused the very
@@ -510,16 +565,10 @@ function pipeStageWithImplicitTopic(
     t !== 'any' &&
     freeTypeVariables(t).size === 0 &&
     !provablyDisjoint(t, 'function');
-  const slotAccepts = (param: Type): boolean => {
-    let p = param;
-    const vars = freeTypeVariables(p);
-    if (vars.size > 0) {
-      const bindings: Record<string, Type> = Object.create(null);
-      for (const v of vars) bindings[v] = 'any';
-      p = substituteTypeVariables(p, bindings);
-    }
-    if (couldBeCallbackAt(topic.type.type, p)) return true;
-    return topic.type.matches(p);
+  const slotAccepts = (arm: FunctionSignature, param: Type): boolean => {
+    const p = groundTypeVariables(arm, param);
+    if (couldBeCallbackAt(topicType.type, p)) return true;
+    return topicType.matches(p);
   };
   // …AND whose written arguments still fit the slots they are displaced
   // into. Without the second half, `xs |> Fold(f, 10)` put the list at slot 1
@@ -528,18 +577,16 @@ function pipeStageWithImplicitTopic(
   // where everything fits. A written argument whose type cannot be read yet
   // (a held, unbound operand reads `unknown`) is taken to fit — the question
   // is placement, not validation, which the canonical call performs after.
-  const argAccepts = (arg: Expression, param: Type): boolean => {
-    if (arg.type.isUnknown) return true;
-    let p = param;
-    const vars = freeTypeVariables(p);
-    if (vars.size > 0) {
-      const bindings: Record<string, Type> = Object.create(null);
-      for (const v of vars) bindings[v] = 'any';
-      p = substituteTypeVariables(p, bindings);
-    }
+  const argAccepts = (
+    arm: FunctionSignature,
+    arg: BoxedType,
+    param: Type
+  ): boolean => {
+    if (arg.isUnknown) return true;
+    const p = groundTypeVariables(arm, param);
     // Compatibility placement at an arrow slot — see `couldBeCallbackAt`.
-    if (couldBeCallbackAt(arg.type.type, p)) return true;
-    return arg.type.matches(p);
+    if (couldBeCallbackAt(arg.type, p)) return true;
+    return arg.matches(p);
   };
   //
   // Among the slots that fit, the LAST one wins — the one that displaces the
@@ -558,11 +605,11 @@ function pipeStageWithImplicitTopic(
       ...(a.variadicArg !== undefined ? [a.variadicArg.type] : []),
     ];
     for (let i = Math.min(params.length - 1, n); i >= 0; i--) {
-      if (!slotAccepts(params[i])) continue;
+      if (!slotAccepts(a, params[i])) continue;
       // The written arguments before `i` stay put; those from `i` on shift
       // one slot right (a variadic tail absorbs any overflow).
       const last = params.length - 1;
-      const displacedFit = rhs.ops.every((arg, k) => {
+      const displacedFit = argTypes.every((arg, k) => {
         const slot = k < i ? k : k + 1;
         const param =
           slot <= last
@@ -570,17 +617,79 @@ function pipeStageWithImplicitTopic(
             : a.variadicArg !== undefined
               ? a.variadicArg.type
               : undefined;
-        return param !== undefined && argAccepts(arg, param);
+        return param !== undefined && argAccepts(a, arg, param);
       });
       if (!displacedFit) continue;
       at = i;
       break placement;
     }
   }
+  return at;
+}
 
-  const args = [...rhs.ops];
-  args.splice(at, 0, ce.symbol('_', { canonical: false }));
-  return ce._fn(name, args, { canonical: false });
+/**
+ * `type`, a parameter type of the signature arm `arm`, with each free type
+ * variable replaced by the upper bound that the `where` clause of `arm`
+ * declares for it. A variable that the clause does not bound, or that the
+ * clause does not list, is replaced by `any`. The result has no free type
+ * variables, so a `matches` test against it is meaningful.
+ *
+ * The bound is the widest type that the variable can take. `implicitTopicSlot`
+ * uses the grounded type to decide which slots a value could take.
+ */
+function groundTypeVariables(arm: FunctionSignature, type: Type): Type {
+  const vars = freeTypeVariables(type);
+  if (vars.size === 0) return type;
+  const bindings: Record<string, Type> = Object.create(null);
+  for (const v of vars)
+    bindings[v] = arm.typeParams?.find((p) => p.name === v)?.bound ?? 'any';
+  return substituteTypeVariables(type, bindings);
+}
+
+/**
+ * The canonical form of a held pipe stage, for a static check that must see
+ * the errors inside the stage. `Pipe` holds its stage unbound, so the
+ * canonical form of `xs |> Filter("a")` has no error in it: the stage is
+ * canonicalized only when the pipe is evaluated. This function does the same
+ * canonicalization as the `Pipe` evaluate handler, and evaluates nothing:
+ *
+ * - A stage that gets the piped value as an implicit argument
+ *   (`pipeStageWithImplicitTopic`) becomes the call with `topic` in the slot
+ *   that the evaluate handler selects, so `xs |> Filter("a")` is checked as
+ *   `Filter(xs, "a")`. `topicAt` is the 0-based position of `topic` in the
+ *   operands of that call BEFORE canonicalization, and `written` is that
+ *   call before canonicalization. Canonicalization can change the operator
+ *   and the order of the operands (`Fold(f, 0, xs)` becomes
+ *   `Reduce(xs, f, 0)`), so `topicAt` and the positions of the other
+ *   operands are positions in `written`, not in `call`.
+ * - Any other stage is canonicalized alone, with its placeholders bound in a
+ *   fresh scope (`canonicalWithFreshPlaceholders`), as the evaluate handler
+ *   binds them. There is no `topicAt`.
+ *
+ * `topic` is the canonical piped value. Returns `undefined` when the stage is
+ * already canonical: the canonical handler of `Pipe` canonicalizes a
+ * function-literal stage itself, so its errors are already in the tree.
+ */
+export function pipeStageAsCall(
+  ce: ComputeEngine,
+  topic: Expression,
+  stage: Expression
+): { call: Expression; topicAt?: number; written?: Expression } | undefined {
+  if (stage.isCanonical) return undefined;
+  const implicit = pipeStageWithImplicitTopic(ce, stage, topic);
+  if (isFunction(implicit)) {
+    // The stage has no placeholder of its own (a condition of the implicit
+    // argument), so the `_` that `pipeStageWithImplicitTopic` inserted is the
+    // only placeholder operand of the call.
+    const ops = [...implicit.ops];
+    const topicAt = ops.findIndex((op) => isSymbol(op, '_'));
+    if (topicAt >= 0) {
+      ops[topicAt] = topic;
+      const call = ce._fn(implicit.operator, ops, { canonical: false });
+      return { call: call.canonical, topicAt, written: call };
+    }
+  }
+  return { call: canonicalWithFreshPlaceholders(stage) };
 }
 
 /**
@@ -1089,6 +1198,49 @@ function pipeImplicitMapType(
     functionResult(stage.type) ??
     'unknown';
   return pipeMapResultType(topicType, cell);
+}
+
+/**
+ * The static type of a `Pipe` whose stage is a call that gets the piped
+ * value as an implicit argument (`pipeStageWithImplicitTopic`): `xs |>
+ * Filter(p)` is `Filter(xs, p)`, so its type is the type of that call.
+ * Returns `undefined` for any other stage.
+ *
+ * The call is typed the way the evaluate handler builds it. The stage must
+ * be an application with no placeholder of its own (a stage with `_` is
+ * typed by `pipeShorthandApplicationType`), on an operator with a known
+ * signature, and the written call must be incomplete. The piped value takes
+ * the slot that `implicitTopicSlot` selects, from the same types, and
+ * `context.derive` types the completed call. This canonicalizes and
+ * evaluates nothing. Without this, `[1, 2] |> Filter(x ↦ x > 1)` typed
+ * `unknown`, and a later stage of a chain had no type to check the piped
+ * value against.
+ */
+function pipeImplicitTopicCallType(
+  context: TypeHandlerContext,
+  topic: OperandDescriptor | undefined,
+  stage: OperandDescriptor
+): Type | undefined {
+  if (topic === undefined) return undefined;
+  const st = stage.structureOf?.();
+  if (st?.kind !== 'application' || st.head === 'Function') return undefined;
+  const placeholders = new Set<string>();
+  collectPlaceholderNames(st, placeholders);
+  if (placeholders.size > 0) return undefined;
+  const arms = signatureArms(
+    context.engine.lookupDefinition(st.head)?.operator?.signature.type
+  );
+  if (arms === undefined) return undefined;
+  if (!implicitTopicArityFits(arms, st.children.length)) return undefined;
+  const topicType = heldOperandType(context, topic);
+  const at = implicitTopicSlot(
+    arms,
+    context.engine.type(topicType),
+    st.children.map((c) => context.engine.type(c.type))
+  );
+  const operands = [...st.children];
+  operands.splice(at, 0, describeType(topicType));
+  return context.derive(st.head, operands);
 }
 
 /**
@@ -2024,6 +2176,155 @@ function typeTextOf(d: OperandDescriptor): string | undefined {
   return undefined;
 }
 
+/** The parsed type of a `Typed` type operand, keyed on the string node. The
+ * body of a function literal is evaluated at every application, and parsing
+ * the type text each time is a measurable part of the cost of a call. A type
+ * operand belongs to one stored body, so it names the same type at every
+ * application of that body. */
+const ASCRIBED_TYPES = new WeakMap<Expression, Type>();
+
+/**
+ * The `incompatible-type` error for a `Typed` ascription whose operand
+ * evaluated to a concrete value outside the ascribed type, or `undefined`
+ * when the value conforms or cannot be judged.
+ *
+ * The ascription is a contract on the type system, and the engine keeps it
+ * when a body cannot meet it: a function declared `(integer) -> integer`
+ * whose body is `"s"` is accepted, and its stored body is `Typed("s",
+ * 'integer')`. Without this check the call `g(5)` was typed `integer` and
+ * evaluated to `"s"`. The check makes the value agree with the type: a
+ * returned value that provably does not conform is an error value.
+ *
+ * Only a CONCRETE value is judged: a number, a string, a character, a
+ * boolean, or a `List`/`Tuple` of such values (`concreteValueOf`). A symbolic
+ * value (an unknown, an operator that did not evaluate) passes unchanged,
+ * because its value can still conform. These values also pass, because a
+ * declared result type constrains only successful values
+ * (`docs/ERROR-MODEL.md`, section 4): an error value, `NaN`, and the absence
+ * markers `Missing` and `Nothing`.
+ *
+ * Two kinds of ascribed type are not checked. An ungrouped signature text,
+ * `(x: number) -> number`, is the marker form of a function literal, where
+ * the body-slot `Typed` holds the literal's own full signature and not the
+ * type of the body value; a grouped signature, `((x: number) -> number)`, is
+ * the type of a returned function and is checked (`isGroupedTypeText`, the
+ * same test as `functionLiteralDeclaredSignature`). A type that mentions a
+ * free type variable cannot be judged before instantiation.
+ *
+ * A real number that is not exact conforms to every type that admits a real
+ * number. Under a numeric approximation the operand evaluates to a float,
+ * and the float of a rational or of an integer that rounding moved off the
+ * integer is still the value the ascription promised: `g: (integer) ->
+ * rational` with the body `1/n` gives `1/3` for `g(3)`, and `g(3).N()`
+ * gives `0.333…`, not an error. A character conforms when the one-cluster string
+ * with the same content conforms: the two are the same value (`isSame`),
+ * and a function declared `-> string` returns a character for `s[1]`.
+ *
+ * A value that is the BROADCAST of the ascribed type conforms. A function
+ * declared `(point | list<point>) -> number` whose body is `|P - (1, 2)|`
+ * returns a list of numbers for a list of points, and a body that reads the
+ * coordinates of a list of points returns a tuple of lists where a point is
+ * declared: the compiled code returns these shapes too, and the interpreter
+ * must agree with it (`conformsUnderBroadcast`).
+ */
+function ascriptionViolation(
+  ce: ComputeEngine,
+  value: Expression,
+  typeOperand: Expression
+): Expression | undefined {
+  if (!value.isValid || value.isNaN === true) return undefined;
+  if (concreteValueOf(value) === undefined && !isCharacter(value))
+    return undefined;
+  // The canonical handler normalizes the type operand to a string literal.
+  if (!isString(typeOperand)) return undefined;
+  let ascribed = ASCRIBED_TYPES.get(typeOperand);
+  if (ascribed === undefined) {
+    try {
+      ascribed = parseType(typeOperand.string, ce._typeResolver);
+    } catch {
+      return undefined;
+    }
+    if (ascribed === undefined) return undefined;
+    ASCRIBED_TYPES.set(typeOperand, ascribed);
+  }
+  if (freeTypeVariables(ascribed).size > 0) return undefined;
+  const resolved = resolveTypeAlias(ascribed);
+  if (
+    typeof resolved !== 'string' &&
+    resolved.kind === 'signature' &&
+    !isGroupedTypeText(typeOperand.string)
+  )
+    return undefined;
+  if (conformsUnderBroadcast(ce, value, ascribed)) return undefined;
+  return ce.typeError(ascribed, value.type, value);
+}
+
+/**
+ * Does `value` conform to `type`, or is it the element-wise broadcast of a
+ * value that conforms? A value conforms when its admission is not refuted. A
+ * `List` conforms when each of its elements conforms under broadcast to the
+ * element type of a list type in `type`, or to `type` itself (the declared
+ * result, computed once per element of a list argument). A `Tuple`
+ * conforms when some tuple of the same length in `type` has components that
+ * the tuple's components conform to under broadcast (a point whose
+ * coordinates were computed over a list of points is a tuple of lists). The
+ * recursion stops at the leaves, which are scalars.
+ */
+function conformsUnderBroadcast(
+  ce: ComputeEngine,
+  value: Expression,
+  type: Type
+): boolean {
+  if (admissionOf(value, type) !== 'refute') return true;
+  // A real float stands for the exact real number the ascription promised
+  // (see the comment on `ascriptionViolation`). A float with an imaginary
+  // part gets no allowance: a complex value under a `real` ascription is an
+  // error on every route, and the compiler refuses it too.
+  if (isNumber(value) && !value.isExact && value.im === 0)
+    return !provablyDisjoint(type, 'real');
+  if (isCharacter(value))
+    return admissionOf(ce.string(value.string), type) !== 'refute';
+  if (isFunction(value, 'List')) {
+    // A list type in `type` judges each element by its element type: a list
+    // of floats conforms to `list<rational>` under a numeric approximation.
+    // Otherwise the list is the broadcast of `type` over its elements.
+    const elementTypes = unionMembers(type).flatMap((member) => {
+      const t = resolveTypeAlias(member);
+      if (typeof t === 'string') return [];
+      return t.kind === 'list' ||
+        t.kind === 'collection' ||
+        t.kind === 'indexed_collection'
+        ? [t.elements]
+        : [];
+    });
+    return value.ops.every(
+      (op) =>
+        elementTypes.some((et) => conformsUnderBroadcast(ce, op, et)) ||
+        conformsUnderBroadcast(ce, op, type)
+    );
+  }
+  if (isFunction(value, 'Tuple')) {
+    const arity = value.nops;
+    return unionMembers(type).some((member) => {
+      const t = resolveTypeAlias(member);
+      if (typeof t === 'string' || t.kind !== 'tuple') return false;
+      if (t.elements.length !== arity) return false;
+      return value.ops.every((op, i) =>
+        conformsUnderBroadcast(ce, op, t.elements[i].type)
+      );
+    });
+  }
+  return false;
+}
+
+/** The members of a union type, or the type itself when it is not a union. */
+function unionMembers(type: Type): Type[] {
+  const t = resolveTypeAlias(type);
+  if (typeof t !== 'string' && t.kind === 'union')
+    return t.types.flatMap(unionMembers);
+  return [type];
+}
+
 /** The absence-admitting dictionary family top, the gate `isDictionary`
  * (`boxed-expression/utils.ts`) asks against: bare `dictionary` is the
  * values-only `dictionary<unknown>` synonym, and an attributes bag whose
@@ -2657,6 +2958,58 @@ function withStatementRoute<T>(
   } finally {
     ce._epsilDeclarationRoute = onStatementRoute;
   }
+}
+
+/**
+ * Binding records that hold a clause which the `DefineFunction` canonical
+ * handler installed AHEAD of its statement: the definition statement was
+ * canonicalized, but it has not been evaluated yet.
+ *
+ * A `Block` canonicalizes all of its statements before it evaluates the first
+ * one, and the canonical handler of `DefineFunction` installs its clause at
+ * that time, so that the calls in later statements are checked against the
+ * real signature. In the form that declares a signature and then defines the
+ * function (`let f: (integer) -> integer` followed by `f(n) = …`, the form
+ * that a recursive definition with typed parameters must use), the `Declare`
+ * statement therefore evaluates over a binding that already holds the
+ * definition of the NEXT statement. That definition was installed without the
+ * declaration, because the declaration had not run.
+ *
+ * The `Declare` statement may replace such a binding: the definition
+ * statement runs after it, and installs its clause again, this time under the
+ * declared signature, which it then checks the clause against. A binding whose
+ * definition statement has evaluated is not in this set, so a declaration
+ * that follows a definition (`f(n) = …` then `let f: …`) is still refused.
+ *
+ * Weakly keyed on the binding record, which an install mutates in place.
+ */
+const CLAUSE_INSTALLED_AHEAD = new WeakSet<object>();
+
+/**
+ * Add `record` to `CLAUSE_INSTALLED_AHEAD` (`ahead` true) or remove it from
+ * the set (`ahead` false), and journal the change for the active checkpoint
+ * window.
+ *
+ * The marker decides whether a `Declare` statement drops the binding, so a
+ * restore must put it back as it was when the checkpoint was taken. If not, a
+ * clause canonicalized after the checkpoint marks a function that was
+ * defined before it: the restore gives the record its earlier definition back
+ * but keeps the marker, and a later declaration then discards that restored
+ * definition.
+ */
+function setClauseInstalledAhead(
+  ce: ComputeEngine,
+  record: object,
+  ahead: boolean
+): void {
+  const was = CLAUSE_INSTALLED_AHEAD.has(record);
+  if (was === ahead) return;
+  ce._checkpointWindow?.record(record, 'clause-installed-ahead', () => {
+    if (was) CLAUSE_INSTALLED_AHEAD.add(record);
+    else CLAUSE_INSTALLED_AHEAD.delete(record);
+  });
+  if (ahead) CLAUSE_INSTALLED_AHEAD.add(record);
+  else CLAUSE_INSTALLED_AHEAD.delete(record);
 }
 
 /**
@@ -4028,8 +4381,10 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
     Typed: {
       description:
         'Ascribe a type to an expression. The type is asserted for the type ' +
-        'system (ascription, not a check); evaluation is transparent. Used to ' +
-        'annotate `Function` literal parameters and return types.',
+        'system. At evaluation, a concrete value that does not conform to ' +
+        'the type is an `incompatible-type` error; any other value is ' +
+        'returned unchanged. Used to annotate `Function` literal parameters ' +
+        'and return types.',
       complexity: 9000,
       // `lazy` so the type operand stays raw (a type-name symbol such as `real`
       // is not auto-declared as a variable).
@@ -4077,11 +4432,19 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         const typeOp = isString(t) ? t : s !== undefined ? ce.string(s) : t;
         return ce._fn('Typed', [x.canonical, typeOp]);
       },
-      // Ascription is transparent at evaluation.
-      evaluate: ([x], options) => x?.evaluate(options),
+      // The ascribed operand is evaluated, and the value is checked against
+      // the ascribed type (see `ascriptionViolation`).
+      evaluate: ([x, t], options) => {
+        const v = x?.evaluate(options);
+        if (v === undefined || t === undefined) return v;
+        return ascriptionViolation(options.engine, v, t) ?? v;
+      },
       // Only the ascribed operand is evaluated, not the type.
-      evaluateAsync: ([x], options) =>
-        x?.evaluateAsync(awaitedOperandOptions(options)),
+      evaluateAsync: async ([x, t], options) => {
+        const v = await x?.evaluateAsync(awaitedOperandOptions(options));
+        if (v === undefined || t === undefined) return v;
+        return ascriptionViolation(options.engine, v, t) ?? v;
+      },
     },
 
     Object: {
@@ -4685,12 +5048,15 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       examples: ['Pipe([3, 1, 2], Sort)', '16 |> Sqrt'],
       // `Pipe(x, f)` is `f(x)`, so its type is `f`'s result type — EXCEPT when
       // the stage implicitly maps (`pipeImplicitMapType`), where the pipe is a
-      // collection of that result rather than the result itself.
+      // collection of that result rather than the result itself, and when the
+      // stage is a call that gets the piped value as an implicit argument
+      // (`pipeImplicitTopicCallType`), where the pipe is that completed call.
       type: ([x, f], context) =>
         BoxedType.forResult(
           f
             ? (pipeImplicitMapType(context, x, f) ??
                 pipeShorthandApplicationType(context, x, f) ??
+                pipeImplicitTopicCallType(context, x, f) ??
                 functionResult(f.type) ??
                 'unknown')
             : undefined,
@@ -5180,6 +5546,12 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
                     attributes
                   )
                 );
+                // The statement has not run yet: a `Declare` statement that
+                // runs before it may replace this binding
+                // (`CLAUSE_INSTALLED_AHEAD`).
+                const installed = ce.lookupDefinition(symbolName);
+                if (installed !== undefined)
+                  setClauseInstalledAhead(ce, installed, true);
               } catch (e) {
                 // A malformed or conflicting clause is diagnosed on the
                 // evaluate route, which runs the same installation and turns
@@ -5242,6 +5614,11 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
               attributes
             )
           );
+          // The definition has now run, so a later `Declare` statement must
+          // not replace it (`CLAUSE_INSTALLED_AHEAD`).
+          const installed = ce.lookupDefinition(name);
+          if (installed !== undefined)
+            setClauseInstalledAhead(ce, installed, false);
         } catch (e) {
           if (e instanceof RedefinitionError)
             return ce._fn('Error', [ce.string(e.code), ce.string(e.message)]);
@@ -6245,6 +6622,27 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             // Checkpoint journal (funnel 4): the statement-redeclare path
             // drops the previous statement-scoped binding by direct map
             // surgery.
+            journalCheckpointMapEntry(
+              ce,
+              currentScope.bindings,
+              symbolName,
+              symbolName,
+              'declare'
+            );
+            currentScope.bindings.delete(symbolName);
+            existing = undefined;
+          } else if (
+            existing &&
+            isOperatorDef(existing) &&
+            CLAUSE_INSTALLED_AHEAD.has(existing)
+          ) {
+            // The binding holds the clause of a later `DefineFunction`
+            // statement of this scope, installed when that statement was
+            // canonicalized, before this declaration ran. That statement
+            // installs its clause again when it runs, under the signature this
+            // declaration gives, so drop the binding and declare the name
+            // fresh. `ce.declare()` alone refuses to replace an operator that
+            // holds a definition (`isReplaceableOperatorShell()`).
             journalCheckpointMapEntry(
               ce,
               currentScope.bindings,

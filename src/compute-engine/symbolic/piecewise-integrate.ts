@@ -8,6 +8,7 @@ import { differentiate } from './derivative.js';
 import { exactSign } from './contour.js';
 import { checkDeadline } from '../../common/interruptible.js';
 import { shadowsLibraryName } from '../library-shadowing.js';
+import { integrateDiscrete } from './discrete-integrate.js';
 
 const PIECEWISE = new Set([
   'If',
@@ -17,6 +18,8 @@ const PIECEWISE = new Set([
   'Floor',
   'Ceil',
   'Fract',
+  'Abs',
+  'Sign',
 ]);
 const COMPARISONS = new Set([
   'Less',
@@ -70,26 +73,52 @@ export function integratePiecewise(
   if (!integrand.has([...PIECEWISE])) return undefined;
   let nodes = 0;
   let exhausted = false;
+  // True when the walk meets a piecewise head other than `Abs` or `Sign` that
+  // depends on the variable. A constant factor such as `Floor(a)` or
+  // `Max(a, b)` does not set it.
+  let switches = false;
   const contains = (e: Expression): boolean => {
     if (++nodes > MAX_NODES) {
       exhausted = true;
       return false;
     }
     if (!isFunction(e)) return false;
-    if (PIECEWISE.has(e.operator) && e.has(variable)) return true;
-    return e.ops.some((op, i) => !binds(e, i, variable) && contains(op));
+    let found = false;
+    if (PIECEWISE.has(e.operator) && e.has(variable)) {
+      if (e.operator !== 'Abs' && e.operator !== 'Sign') {
+        switches = true;
+        return true;
+      }
+      // Affine kinks can depend on an enclosing integral's variable. The
+      // existing kink integrator carries those range assumptions; the finite
+      // root partitioner must not intercept that path.
+      const coefficients = getPolynomialCoefficients(e.op1, variable);
+      if (!coefficients || coefficients.length > 2) found = true;
+    }
+    // After a non-affine `Abs` or `Sign`, continue the walk: the infinite
+    // bound branch below must know if a switching head also occurs.
+    for (let i = 0; i < e.ops.length && !switches; i++)
+      if (!binds(e, i, variable) && contains(e.ops[i])) found = true;
+    return found;
   };
   if (!contains(integrand)) return exhausted ? 'inert' : undefined;
   // Partitioning and resolving must observe the same function and bounds.
   if (!integrand.isPure || !lower.isPure || !upper.isPure) return 'inert';
   const a = lower.evaluate();
   const b = upper.evaluate();
-  if (!finiteReal(a) || !finiteReal(b)) return 'inert';
+  // With an infinite bound, the methods that follow can integrate `Abs` and
+  // `Sign`, but not the other piecewise heads. An exhausted walk can have
+  // missed one of those heads.
+  if (!finiteReal(a) || !finiteReal(b))
+    return switches || exhausted ? 'inert' : undefined;
   const direction = sign(b.sub(a));
   if (direction === undefined) return 'inert';
   if (direction === 0) return ce.Zero;
   const lo = direction > 0 ? a : b;
   const hi = direction > 0 ? b : a;
+  const discrete = integrateDiscrete(ce, integrand, variable, lo, hi);
+  if (discrete !== undefined)
+    return direction > 0 ? discrete : discrete.neg().evaluate();
   const cuts: Expression[] = [];
   const domainChecks = new Set<Expression>();
   const rootCache = new Map<Expression, readonly Expression[] | undefined>();

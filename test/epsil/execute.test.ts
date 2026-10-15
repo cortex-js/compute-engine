@@ -1021,6 +1021,9 @@ describe('EPSIL EXECUTE — pipe-stage sugar', () => {
       run('let header = "H;"\n["a", "b", "c"] |> Fold(Join, header)').value
         .string
     ).toBe('H;abc');
+    expect(run('["a", "b", "c"] |> fold(Join, "H;")').value.string).toBe(
+      'H;abc'
+    );
     expect(run('1..3 |> n => "\\(n);" |> Fold(Join, "")').value.string).toBe(
       '1;2;3;'
     );
@@ -1103,6 +1106,131 @@ describe('EPSIL EXECUTE — pipe-stage sugar', () => {
     // Map, even over a collection topic.
     expect(run('1..10 |> Take(_, 3)').value.toString()).toBe('[1,2,3]');
     expect(run('1..5 |> Map(_^2, _)').value.toString()).toBe('[1,4,9,16,25]');
+  });
+});
+
+/**
+ * Static errors inside a pipe stage. `Pipe` holds its stage unbound until it
+ * is evaluated, so the canonical form of `xs |> f(bad)` does not contain the
+ * errors of `f(bad)`. The static pass canonicalizes each held stage as the
+ * evaluation does (`pipeStageErrors` in `src/epsil/static-diagnostics.ts`),
+ * so a mistake in a stage is reported as the same mistake in the call
+ * `f(xs, bad)` is: same description, same code, and an anchor on the same
+ * written argument.
+ */
+describe('EPSIL EXECUTE — static errors inside a pipe stage', () => {
+  /** `[description, code, underlined text]` of each diagnostic. */
+  const report = (src: string): [string, string, string][] =>
+    run(src).diagnostics.map((d) => [
+      String(d.message[1]),
+      String(d.message[3]),
+      src.slice(d.range[0], d.range[1]),
+    ]);
+
+  test('an error inside a lambda argument of a stage', () => {
+    const piped = report('[1, 2, 3] |> map(x => x + "a")');
+    expect(piped).toEqual([
+      ['expected `number`, got `string` at `a`', 'incompatible-type', '"a"'],
+    ]);
+    expect(report('map(x => x + "a", [1, 2, 3])')).toEqual(piped);
+  });
+
+  test('an argument after the implicit piped value', () => {
+    // The piped value fills the first slot of `filter`, so the written
+    // argument is the second argument of the call; the anchor is still on
+    // the argument as written.
+    const piped = report('[1, 2, 3] |> filter("notafunction")');
+    expect(piped).toEqual([
+      [
+        'expected `function`, got `string` at `notafunction`',
+        'incompatible-type',
+        '"notafunction"',
+      ],
+    ]);
+    expect(report('filter([1, 2, 3], "notafunction")')).toEqual(piped);
+  });
+
+  test('a piped value that does not fit its slot', () => {
+    expect(report('True |> take(2)')).toEqual([
+      [
+        'expected `indexed_collection`, got `boolean` at `True`',
+        'incompatible-type',
+        'True',
+      ],
+    ]);
+    // The string arm of `take` is `(xs: T, count: number) -> T where
+    // T: string`. Its slot `xs` is grounded with the bound `string`, so the
+    // written `2` cannot move into it: the piped `5` takes the first slot,
+    // and the error names `5`, not `2`.
+    expect(report('5 |> take(2)')).toEqual([
+      [
+        'expected `indexed_collection`, got `5` at `5`',
+        'incompatible-type',
+        '5',
+      ],
+    ]);
+    // A list or a string topic still takes the first slot without error.
+    expect(run('[1, 2, 3] |> take(2)').value.toString()).toBe('[1,2]');
+    expect(run('"hello" |> take(2)').value.string).toBe('he');
+  });
+
+  test('a stage of a chain, in a declaration, in a function body', () => {
+    const takeError = [
+      'expected `number`, got `string` at `a`',
+      'incompatible-type',
+      '"a"',
+    ];
+    expect(report('[1, 2] |> filter(x => x > 1) |> take("a")')).toEqual([
+      takeError,
+    ]);
+    expect(report('let y = [1, 2, 3] |> take("a")')).toEqual([takeError]);
+    expect(report('function f() { [1, 2, 3] |> take("a") }')).toEqual([
+      takeError,
+    ]);
+  });
+
+  test('a stage after a stage with an implicit argument', () => {
+    // `[1, 2] |> filter(x => x > 1)` is `filter([1, 2], x => x > 1)`, and the
+    // pipe has the type of that call, `list<integer>`. The next stage is
+    // then checked against that type. When the pipe was typed `unknown`, the
+    // wrong stage below was not reported, and it evaluated to an error value.
+    const src = '[1, 2] |> filter(x => x > 1) |> map("s")';
+    const piped = report(src);
+    expect(piped).toEqual([
+      [
+        'expected `function`, got `list<integer>` at `[1, 2] |> filter(Function(x > 1, x))`',
+        'incompatible-type',
+        src,
+      ],
+    ]);
+    // The direct call is the same error: the filtered list is in the
+    // callback slot of `map`. Its message reads `unknown` because `map`
+    // holds its operands, and reads the type of the filter call before it
+    // is canonicalized.
+    expect(
+      report('map(filter([1, 2], x => x > 1), "s")').map((d) => [
+        d[0].slice(0, 'expected `function`'.length),
+        d[1],
+      ])
+    ).toEqual([['expected `function`', 'incompatible-type']]);
+    // A correct chain reports nothing.
+    expect(report('[1, 2] |> filter(x => x > 1) |> map(x => x + 1)')).toEqual(
+      []
+    );
+    expect(
+      report('[1, 2, 3] |> map(x => x + 1) |> filter(x => x > 2)')
+    ).toEqual([]);
+  });
+
+  test('valid stages report nothing', () => {
+    expect(report('1..10 |> Take(3)')).toEqual([]);
+    expect(report('let f = x => x * 2\n[1,2,3] |> Map(f)')).toEqual([]);
+    expect(report('[1,2,3] |> Map(_^2, _)')).toEqual([]);
+    expect(report('1..oo |> Take(10) |> x => x^2 |> Sum')).toEqual([]);
+    // A name bound by the enclosing function is resolved in its scope.
+    expect(report('function f(k) { [1, 2, 3] |> map(x => x + k) }')).toEqual(
+      []
+    );
   });
 });
 

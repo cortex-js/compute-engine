@@ -1168,18 +1168,24 @@ describe('INDETERMINATE — the producers: special functions at an infinite poin
     expect(parse('\\Gamma(-\\infty)').toString()).toBe('Indeterminate');
   });
 
-  test('a divergence whose sign depends on the other operand stays NaN', () => {
-    expect(box(['Gamma', 2, 'NegativeInfinity']).toString()).toBe('NaN');
+  test('a divergence whose sign depends on the other operand answers the limit', () => {
+    // Γ(n, z) = (n−1)!·e^(−z)·Σ_{k<n} z^k/k!, so Γ(2, −∞) = −∞
+    // (mpmath: Γ(2, −100) = −2.7·10⁴⁵, Γ(2, −1000) = −2.0·10⁴³⁷).
+    expect(box(['Gamma', 2, 'NegativeInfinity']).toString()).toBe('-oo');
+    // B(a, b) ~ Γ(b)·a^(−b) as a → +∞ and Γ(−½) = −2√π, so B(+∞, −½) = −∞
+    // (mpmath: B(10³, −½) = −112, B(10⁶, −½) = −3545).
     expect(
       box(['Beta', 'PositiveInfinity', ['Rational', -1, 2]]).toString()
-    ).toBe('NaN');
+    ).toBe('-oo');
+    // Complex with a modulus that grows without bound (mpmath:
+    // Q(½, −100) = −1.5·10⁴²·i, Q(½, −1000) = −3.5·10⁴³²·i).
     expect(
       box([
         'GammaRegularized',
         ['Rational', 1, 2],
         'NegativeInfinity',
       ]).toString()
-    ).toBe('NaN');
+    ).toBe('~oo');
   });
 
   test('an anonymous infinity (a float literal) gives NaN', () => {
@@ -1376,11 +1382,11 @@ describe('INDETERMINATE — the producers: review round', () => {
         b,
         'Indeterminate',
       ]);
-    // One infinite operand with a finite b of non-positive real part keeps
-    // the recorded NaN.
+    // One infinite operand with a finite real b of non-positive real part
+    // that is not an integer: the infinity with the sign of Γ(b).
     expect(
       box(['Beta', 'PositiveInfinity', ['Rational', -1, 2]]).toString()
-    ).toBe('NaN');
+    ).toBe('-oo');
   });
 
   test('a float numerator over an infinity is the float 0', () => {

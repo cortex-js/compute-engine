@@ -362,7 +362,10 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
   // for negative `n` — consistent with `*`/`\cdot`/`\times` being the matrix
   // product. (Element-wise power of a matrix is not expressed via `^`.) Routing
   // at canonicalization keeps `A^2` from element-wise broadcasting at
-  // evaluation. Vectors and non-integer exponents are left to other handling.
+  // evaluation. Vectors and non-integer exponents are left to other handling:
+  // a non-integer exponent is the element-wise power of the entries
+  // (`M^{1/2}` is the square root of each entry, as in Mathematica), by a
+  // user decision; the matrix square root has no operator.
   // `isMatrixTyped`, not a bare `matches('matrix')`: the bottom type
   // `never` (an EMPTY declared range, `integer<2<..<3>`) matches every
   // type, and a shape REWRITE keyed on that vacuous match turned
@@ -1457,6 +1460,23 @@ export function pow(
       return canonicalResult.evaluate({ numericApproximation });
     return canonicalResult;
   }
+
+  // A finite base to the float exponent `0.0` is the float `1`, as `y^0` is
+  // the exact `1` for a finite `y` (`canonicalPower` folds only the exact
+  // exponent `0`). The bases are the ones that `canonicalPower` folds for
+  // the exact `0`: a number, a symbol or a negation that has a finite value.
+  // A literal zero base does not get here: `0^{0.0}` is the indeterminate
+  // form, which `canonicalPower` answers above.
+  if (
+    typeof exp !== 'number' &&
+    isNumber(exp) &&
+    !exp.isExact &&
+    exp.isSame(0) &&
+    x.isFinite === true &&
+    x.type.matches('number' as NumericPrimitiveType) &&
+    (!isFunction(x) || x.operator === 'Negate')
+  )
+    return asFloat(ce.One);
 
   const e =
     typeof exp === 'number'

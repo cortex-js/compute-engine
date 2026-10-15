@@ -1862,10 +1862,16 @@ export class _Parser implements Parser {
       this.index = start;
   }
 
+  _visualSpaceStops: ReadonlySet<number> | null = null;
+
   skipVisualSpace(): void {
     if (!this.options.skipSpace) return;
 
     this.skipSpace();
+
+    // A spacing command at a stop index is a separator for the parselet that
+    // set the stops, so it is not skipped. See `_visualSpaceStops`.
+    if (this._visualSpaceStops?.has(this.index)) return;
 
     if (VISUAL_SPACE_COMMANDS.has(this.peek)) {
       this.nextToken();

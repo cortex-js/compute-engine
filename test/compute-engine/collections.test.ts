@@ -4376,10 +4376,14 @@ describe('ZIP-SHAPED LAZINESS (review findings)', () => {
         .evaluate().operator
     ).toBe('Sort'));
 
-  test('ArgMax over a non-indexed collection stays inert', () =>
-    expect(engine.box(['ArgMax', ['Set', 1, 2]]).evaluate().operator).toBe(
-      'ArgMax'
-    ));
+  // `ArgMax` answers a position, so its source must be indexed. A set is
+  // refused at boxing, and the call is the operator over the error, as for an
+  // eager operator (`Sort(5)`); it was a valid call that evaluated to itself.
+  test('ArgMax over a non-indexed collection is an incompatible-type error', () => {
+    const e = engine.box(['ArgMax', ['Set', 1, 2]]);
+    expect(e.isValid).toBe(false);
+    expect(e.evaluate().operator).toBe('Error');
+  });
 });
 
 describe('COLLECTION NITS (Take preview, Sort boolean comparator, GroupBy typo)', () => {

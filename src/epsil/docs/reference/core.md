@@ -1639,7 +1639,7 @@ TypeFrom("integer | real") == TypeFrom("real")
 
 `(any, string | symbol) -> unknown`
 
-Ascribe a type to an expression. The type is asserted for the type system (ascription, not a check); evaluation is transparent. Used to annotate `Function` literal parameters and return types.
+Ascribe a type to an expression. The type is asserted for the type system. At evaluation, a concrete value that does not conform to the type is an `incompatible-type` error; any other value is returned unchanged. Used to annotate `Function` literal parameters and return types.
 
 ```epsil
 Typed(2 + 3, "integer")

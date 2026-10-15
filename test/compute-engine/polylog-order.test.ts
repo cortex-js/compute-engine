@@ -585,8 +585,15 @@ describe('PolyLog JS compile', () => {
     // Every row has a numeric interpreter value, so a NaN from both sides
     // cannot pass as agreement.
     expect(isNumber(n)).toBe(true);
-    if (n.im !== 0) expect(got).toBeNaN();
-    else
+    if (n.im !== 0) {
+      const v = got as { re: number; im: number };
+      expect(Math.abs(v.re - n.re)).toBeLessThan(
+        1e-9 * Math.max(1, Math.abs(n.re))
+      );
+      expect(Math.abs(v.im - n.im)).toBeLessThan(
+        1e-9 * Math.max(1, Math.abs(n.im))
+      );
+    } else
       expect(Math.abs((got as number) - n.re)).toBeLessThan(
         1e-9 * Math.max(1, Math.abs(n.re))
       );
@@ -619,9 +626,16 @@ describe('PolyLog JS compile', () => {
     expect(run?.({ pl_s: -1, pl_z: 1 })).toBe(Infinity);
   });
 
-  test('a complex value on the cut z > 1 is NaN in the real-only compiled lane', () => {
-    expect(run?.({ pl_s: 2.5, pl_z: 3 })).toBeNaN();
-    expect(run?.({ pl_s: 2, pl_z: 3 })).toBeNaN();
+  test('a complex value on the cut z > 1 is the interpreter value', () => {
+    for (const [s, z] of [
+      [2.5, 3],
+      [2, 3],
+    ]) {
+      const n = li(s, z).N();
+      const v = run?.({ pl_s: s, pl_z: z }) as { re: number; im: number };
+      expect(v.re).toBeCloseTo(n.re, 9);
+      expect(v.im).toBeCloseTo(n.im, 9);
+    }
   });
 });
 

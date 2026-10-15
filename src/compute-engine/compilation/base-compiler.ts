@@ -46,6 +46,7 @@ import {
   declaredScalarParams,
   declaresBroadcastableParam,
   isDeclaredScalarType,
+  isSquareMatrixPower,
   paramsAreScalar,
   type BroadcastSlotPlan,
 } from '../boxed-expression/boxed-function.js';
@@ -243,6 +244,10 @@ import { rangeCount, RANGE_COUNT_JS_SOURCE } from '../numerics/range-count.js';
 import { isBeyondSafeInteger } from '../numerics/numeric.js';
 import { smallCount } from '../boxed-expression/collection-count.js';
 
+import {
+  COMPLEX_CONTINUATION_HEADS,
+  complexContinuation,
+} from './complex-continuation.js';
 /** `real<0..>`: every real number that is not negative. */
 const NON_NEGATIVE_REAL_TYPE = nonNegativeRangeType('real');
 
@@ -4998,6 +5003,55 @@ export class BaseCompiler {
     )
       BaseCompiler.notePromoted();
     return true;
+  }
+
+  /**
+   * Whether `head(...args)` takes the complex lane on account of its VALUE:
+   * the operands are real but the interpreter's kernel continues the head
+   * into the complex plane (`LerchPhi(z, s, a)` for `z > 1`), and the facts
+   * on the operands do not prove the value real
+   * (`complexContinuation`). `auto` and `complex` promote, as for `Sqrt` and
+   * `Ln` of an operand of unknown sign; `strict` keeps the real lane and its
+   * `NaN`. A complex operand is not decided here: the head's complex kernel
+   * takes it in every mode.
+   *
+   * `isComplexValued` and the emitters of these heads both read this, so a
+   * parent and its child agree on the shape of the value.
+   */
+  static continuesToComplex(
+    head: MathJsonSymbol,
+    args: ReadonlyArray<Expression>
+  ): boolean {
+    if (!COMPLEX_CONTINUATION_HEADS.has(head)) return false;
+    if (!BaseCompiler.promotionActive) return false;
+    // A broadcast closure re-asks with element temps that carry no facts;
+    // the verdict of the node-level operands stands (see
+    // `promotesRadicalToComplex`).
+    for (
+      let i = BaseCompiler._broadcastRadicalVerdict.length - 1;
+      i >= 0;
+      i--
+    ) {
+      const frame = BaseCompiler._broadcastRadicalVerdict[i];
+      if (
+        frame.head === head &&
+        args.length > 0 &&
+        args.every(
+          (a) => a !== undefined && isSymbol(a) && frame.params.has(a.symbol)
+        )
+      )
+        return frame.promotes;
+    }
+    const lane = complexContinuation(head, args);
+    if (lane === 'real') return false;
+    if (lane === 'unknown') BaseCompiler.notePromoted();
+    return true;
+  }
+
+  /** Does the target in progress lower the continuation heads on the
+   * complex lane (the JavaScript target)? */
+  private static get hasComplexContinuationLowering(): boolean {
+    return BaseCompiler._callSiteTarget?.language === 'javascript';
   }
 
   /**
@@ -9848,6 +9902,33 @@ export class BaseCompiler {
       return `_SYS.absShape(${BaseCompiler.compile(args[0], target)})`;
     }
 
+    // An integer power of a square matrix is the matrix power, not the
+    // element-wise power. Canonicalization writes `A^n` as `MatrixPower(A,
+    // n)` only when the type of `A` is a matrix when the `Power` is built.
+    // A `Power` built before its base has a matrix type (`B^2` parsed before
+    // `B` holds a matrix, or a structural `Power`) is still a `Power` here,
+    // and `evaluate()` computes the matrix power for it. The same decision
+    // (`isSquareMatrixPower()`) selects the lowering here: a matrix power
+    // compiles as `MatrixPower` (a target without a `MatrixPower` lowering
+    // declines it). When only the value at run time can decide, the
+    // compilation declines, because the two powers give different values.
+    if (h === 'Power' && args.length === 2) {
+      const matrixPower = isSquareMatrixPower(args[0].type, args[1]);
+      if (matrixPower === true)
+        return BaseCompiler.compileExpr(
+          engine,
+          'MatrixPower',
+          args,
+          prec,
+          target
+        );
+      if (matrixPower === undefined)
+        throw new Error(
+          'Could not compile `Power`: the base is a matrix, and only its shape or the exponent at run time ' +
+            'tells if the power is a matrix power (a square matrix with an integer exponent) or an element-wise power.'
+        );
+    }
+
     // Element-wise broadcast of a `broadcastable` head (arithmetic + unary
     // math) over one or more list-valued operands, for the JavaScript target.
     // Emits a `_SYS.bcast` call wrapping the head's own scalar codegen — see
@@ -14274,11 +14355,14 @@ export class BaseCompiler {
       radicalFrame =
         h === 'Power' ||
         h === 'Root' ||
+        COMPLEX_CONTINUATION_HEADS.has(h) ||
         BaseCompiler.PROMOTABLE_RADICAL_HEADS.has(h)
           ? {
               head: h,
               params: new Set(params),
-              promotes: BaseCompiler.promotesRadicalToComplex(h, args),
+              promotes: COMPLEX_CONTINUATION_HEADS.has(h)
+                ? BaseCompiler.continuesToComplex(h, args)
+                : BaseCompiler.promotesRadicalToComplex(h, args),
               realPower:
                 h === 'Power'
                   ? BaseCompiler.realPowerExponent(args)
@@ -19837,6 +19921,22 @@ export class BaseCompiler {
   }
 
   /**
+   * `true` when a user definition shadows the library operator `head`
+   * (`shadowsLibraryName()`) and that definition has its own `compile`
+   * handler. The compiler consults that handler before the built-in
+   * lowering of the head, so the built-in lowering does not apply.
+   */
+  private static hasShadowingCompileHandler(
+    engine: ComputeEngine,
+    head: string
+  ): boolean {
+    if (!shadowsLibraryName(engine, head, { customLibrary: false }))
+      return false;
+    const shadow = engine.lookupDefinition(head);
+    return isOperatorDef(shadow) && shadow.operator.compile !== undefined;
+  }
+
+  /**
    * The FUNCTION arm of `isComplexValued`, split out so the public entry can
    * memoize it (Tycho item 148). Never call directly — the memo lives above.
    */
@@ -19849,6 +19949,23 @@ export class BaseCompiler {
     // `Real(±∞)` can type `+oo | -oo` (so the `isNonRealNumber`
     // branch would too) — yet every target emits a real scalar for both.
     if (BaseCompiler.REAL_BY_DEFINITION_HEADS.has(expr.operator)) return false;
+    // A continuation head on a target that lowers its complex kernel is
+    // complex when an operand is, or when its value can be (see
+    // `continuesToComplex`). A user definition that shadows the library
+    // operator and has its own `compile` handler is exempt: the compiler
+    // runs that handler before the built-in lowering (`compileExpr`), so
+    // the emitted value is whatever the handler returns, not the result of
+    // the complex continuation helper. For such a head, the type-based
+    // branches below decide.
+    if (
+      COMPLEX_CONTINUATION_HEADS.has(expr.operator) &&
+      BaseCompiler.hasComplexContinuationLowering &&
+      !BaseCompiler.hasShadowingCompileHandler(expr.engine, expr.operator)
+    )
+      return (
+        expr.ops.some((a) => BaseCompiler.isComplexValued(a)) ||
+        BaseCompiler.continuesToComplex(expr.operator, expr.ops)
+      );
     // A head the CURRENT compilation's target lowers with a REAL-ONLY
     // lowering (`Floor`, `Mod`, `Max`, the statistics family, a real-only
     // helper such as JavaScript's `_SYS.erf`) yields a real value by
@@ -21258,7 +21375,14 @@ export class BaseCompiler {
         },
         () => {
           budget = engine._deadlineFrame?.budgets?.at(-1);
-          return engine.function('Integrate', ops).evaluate();
+          // The operands are in the radian convention (`rewriteAngularUnit`
+          // runs at the compile entry), so the attempt evaluates in radian
+          // mode: the interpreter's `Integrate` would otherwise rewrite them
+          // for the engine's unit a second time (`withRadianConvention`),
+          // and the closed form is handed to a radian-based code generator.
+          return engine._withTransientAngularUnit('rad', () =>
+            engine.function('Integrate', ops).evaluate()
+          );
         }
       );
     } catch (e) {

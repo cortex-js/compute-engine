@@ -62,7 +62,11 @@ import { documentBindings } from './occurrences.js';
 import { binderSitesOf } from './resolve-library-names.js';
 import { serializeEpsil } from './serialize-epsil.js';
 import { definitionSites } from './definition-sites.js';
-import { enclosingFrame, locateError } from './error-location.js';
+import {
+  enclosingFrame,
+  locateError,
+  type ErrorFrameRef,
+} from './error-location.js';
 import {
   calleeSlotNames,
   errorIndexCountsWrittenArguments,
@@ -863,6 +867,18 @@ function canonicalizationDiagnostics(
     if (variableRedeclaration !== undefined)
       diagnostics.push(variableRedeclaration);
 
+    // A rule (`name -> value`) passed where the callee expects a function is
+    // the `->`-for-`=>` typo. It is read from the RAW statement, the only tree
+    // that still has the arrow's source offsets, and runs before boxing so a
+    // statement the engine cannot box still gets it. The engine reports the
+    // same mistake as a confusing type error about the key (a key must be a
+    // string) or about the callback (a rule is not a function), so the
+    // canonicalization errors anchored on a reported pair or on its key are
+    // suppressed below. An error anchored inside the VALUE of the pair is a
+    // different mistake and is reported.
+    const ruleSites = ruleAtFunctionSlotDiagnostics(ce, statement, source);
+    for (const site of ruleSites) diagnostics.push(site.diagnostic);
+
     // Provenance: the `Error` nodes the statement already carries *before*
     // canonicalization are source-authored values, not static problems.
     const authored = authoredErrors(statement);
@@ -991,32 +1007,25 @@ function canonicalizationDiagnostics(
       string,
       ReturnType<ComputeEngine['box']>
     >();
-    {
-      // Depth-first, LEFT-TO-RIGHT — the same visit order as
-      // `collectErrors`' JSON walk, so when two byte-identical errors exist
-      // the first-wins entry pairs with the FIRST collected JSON error (the
-      // one the dedup loop keeps) rather than a same-looking twin with a
-      // different binding. Children are pushed reversed because the stack
-      // pops from the end.
-      const stack = [boxed];
-      while (stack.length > 0) {
-        const node = stack.pop()!;
-        if (node.operator === 'Error') {
-          const key = JSON.stringify(node.json);
-          if (!boxedErrorByJson.has(key)) boxedErrorByJson.set(key, node);
-        }
-        // `ops` (functions) and `values` (dictionaries — the `let` initializer
-        // shape `collectErrors` descends) live on narrowed interfaces this
-        // module cannot prove without engine runtime guards; read them
-        // structurally. `values` exists on no other expression kind, so the
-        // read cannot trigger a collection materialization.
-        const values = (node as { values?: readonly (typeof node)[] }).values;
-        if (Array.isArray(values))
-          for (let i = values.length - 1; i >= 0; i--) stack.push(values[i]);
-        const ops = (node as { ops?: readonly (typeof node)[] }).ops;
-        if (ops !== undefined)
-          for (let i = ops.length - 1; i >= 0; i--) stack.push(ops[i]);
-      }
+    indexBoxedErrors(boxed, boxedErrorByJson);
+
+    // The errors inside the held stage of a pipe (`xs |> Filter("a")`). The
+    // canonical form of a pipe does not contain them, because `Pipe` holds
+    // its stage unbound until it is evaluated, so `collectErrors` above
+    // cannot see them. `pipeStageErrors` canonicalizes each held stage as
+    // the evaluation would, and gives the frame of each error: the call
+    // whose argument is at fault, with the argument counted in the stage
+    // AS WRITTEN, so the locator below finds it in the raw statement.
+    const pipeStageFrames = new Map<
+      MathJsonExpression,
+      ErrorFrameRef | undefined
+    >();
+    for (const site of pipeStageErrors(ce, boxed)) {
+      errors.push(site.error);
+      pipeStageFrames.set(site.error, site.frame);
+      const key = JSON.stringify(site.error);
+      if (site.boxed !== undefined && !boxedErrorByJson.has(key))
+        boxedErrorByJson.set(key, site.boxed);
     }
     if (errors.length === 0 && declMismatch === undefined) continue;
 
@@ -1055,8 +1064,13 @@ function canonicalizationDiagnostics(
         authored.set(key, authoredCount - 1);
         continue;
       }
+      // The error is taken out of the dedup below only when it is kept. An
+      // error that is hidden because it is reported as a rule at a function
+      // slot must not hide a different error later in the statement that has
+      // the same description: `(map(x -> x + 1, [1]), f(y -> y + 1))` has
+      // two errors "a key must be a string", and only the one of `map` is
+      // reported as a rule.
       if (seen.has(key)) continue;
-      seen.add(key);
 
       // Where the error sits in the canonical tree names the call it belongs
       // to — the stand-in for the `ErrorTrace` breadcrumb a runtime error
@@ -1065,7 +1079,9 @@ function canonicalizationDiagnostics(
       // argument, so a mistake inside a 40-line function definition does not
       // underline the definition; and it names the callee whose signature the
       // notes explain.
-      const frame = enclosingFrame(canonical, error);
+      const frame = pipeStageFrames.has(error)
+        ? pipeStageFrames.get(error)
+        : enclosingFrame(canonical, error);
       const located = locateError(
         frame === undefined ? [] : [frame],
         statement,
@@ -1080,6 +1096,23 @@ function canonicalizationDiagnostics(
         frameOrderOf(code)
       );
       const [from, to] = located.range;
+      // The problem is already reported as a rule at a function slot. The
+      // error on a key is recognized by its frame and its operand too, for
+      // the case where the locator cannot find the pair (two pairs in one
+      // statement) and falls back to the range of the statement.
+      const keyError =
+        frame?.name === 'KeyValuePair' && frame.index === 1
+          ? symbol(operand(error, 2))
+          : null;
+      if (
+        ruleSites.some(
+          ({ anchors, keyName }) =>
+            keyName === keyError ||
+            anchors.some(([s, e]) => from === s && to === e)
+        )
+      )
+        continue;
+      seen.add(key);
 
       const diagnostic: ParsingDiagnostic = {
         severity: 'error',
@@ -1955,6 +1988,177 @@ function dedupKey(error: MathJsonExpression): string {
 }
 
 /**
+ * The `->`-for-`=>` typo in a call argument: a rule `name -> value` (a
+ * `KeyValuePair` whose key is a bare name) passed at a position where the
+ * callee expects a FUNCTION, as in `map(x -> x^2, xs)`.
+ *
+ * The parser reads a bare `name -> value` after the `(` or a `,` of a call as
+ * a rule in every argument position, because a rule is a legitimate argument
+ * (`f(GridLines -> 1, Axes -> 2)`) and the serializer writes rule arguments
+ * this way. Only the callee's signature can tell that a function was meant,
+ * so the typo is found here, with the engine's definitions in hand. Each
+ * result is a `mapsto-arrow-expected` diagnostic on the arrow, with a fixit
+ * that replaces `->` by `=>`, and the source range of the pair.
+ *
+ * A position expects a function when its parameter type is `function`, a
+ * signature, or a union of those, in at least one arm of the callee's
+ * signature (an overload set such as `Sort`'s has several arms). Positions
+ * are counted only up to the first spread or named argument: after one of
+ * those, the written position no longer names a parameter. A call that is a
+ * pipe stage with no `_` receives the piped value in the first slot that
+ * fits its type, which can be before the written arguments
+ * (`xs |> filter(x -> x > 1)` fills the collection slot first), so for such
+ * a call the next parameter is checked as well.
+ */
+function ruleAtFunctionSlotDiagnostics(
+  ce: ComputeEngine,
+  statement: MathJsonExpression,
+  source: string
+): RuleAtFunctionSlot[] {
+  const result: RuleAtFunctionSlot[] = [];
+
+  const visit = (node: MathJsonExpression, pipeStage: boolean): void => {
+    const head = operator(node);
+    const args = [...operands(node)];
+    if (head === '') return;
+    if (head === 'Pipe') {
+      args.forEach((arg, i) => visit(arg, i > 0));
+      return;
+    }
+    if (head !== 'KeyValuePair') {
+      const piped = pipeStage && !args.some((arg) => symbol(arg) === '_');
+      let arms: FunctionSignature[] | undefined;
+      for (const [i, arg] of args.entries()) {
+        const argHead = operator(arg);
+        if (argHead === 'Spread' || argHead === 'NamedArgument') break;
+        if (argHead !== 'KeyValuePair') continue;
+        const [key, value] = operands(arg);
+        if (key === undefined || value === undefined || symbol(key) === null)
+          continue;
+        arms ??= calleeSignatureArms(ce, head);
+        const slot = (piped ? [i, i + 1] : [i]).find((slot) =>
+          arms!.some((arm) => slotIsFunction(arm, slot))
+        );
+        if (slot === undefined) continue;
+        // The message gives the position AS WRITTEN: in a pipe stage, the
+        // slot of the piped value comes before the written arguments, so
+        // `slot` can be one more than `i`.
+        const site = ruleAtFunctionSlot(node, arg, i, key, value, source);
+        if (site !== undefined) result.push(site);
+      }
+    }
+    for (const arg of args) visit(arg, false);
+  };
+  visit(statement, false);
+  return result;
+}
+
+/** A rule `key -> value` at a parameter that expects a function: the
+ * `mapsto-arrow-expected` diagnostic, and the source ranges on which the
+ * engine anchors the errors that the wrong arrow causes. These are the range
+ * of the pair (where the callback-type error is anchored) and the range of
+ * the key (where the error "a key must be a string" is anchored). The pair
+ * has two ranges for its node: its own source offsets, and the range from
+ * the start of the key to the end of the value. */
+type RuleAtFunctionSlot = {
+  diagnostic: ParsingDiagnostic;
+  anchors: [number, number][];
+  /** The name that is the key of the pair. */
+  keyName: string;
+};
+
+/** The arms of the callable type of `name` — one for a plain signature,
+ * several for an overload set — or none when `name` resolves to nothing
+ * callable. */
+function calleeSignatureArms(
+  ce: ComputeEngine,
+  name: string
+): FunctionSignature[] {
+  let def: ReturnType<ComputeEngine['lookupDefinition']>;
+  try {
+    def = ce.lookupDefinition(name);
+  } catch {
+    return [];
+  }
+  if (def === undefined) return [];
+  const type =
+    'operator' in def ? def.operator.signature.type : def.value.type.type;
+  if (typeof type !== 'object') return [];
+  if (type.kind === 'signature') return [type];
+  if (type.kind === 'intersection')
+    return type.types.filter(
+      (t): t is FunctionSignature =>
+        typeof t === 'object' && t.kind === 'signature'
+    );
+  return [];
+}
+
+/** Whether the parameter at 0-based position `index` of `sig` expects a
+ * function value. */
+function slotIsFunction(sig: FunctionSignature, index: number): boolean {
+  const required = sig.args?.length ?? 0;
+  const param =
+    sig.args?.[index] ?? sig.optArgs?.[index - required] ?? sig.variadicArg;
+  if (param === undefined) return false;
+  const isFunctionType = (t: Type): boolean =>
+    isWildcardFunctionType(t) ||
+    (typeof t === 'object' &&
+      (t.kind === 'signature' ||
+        (t.kind === 'union' &&
+          t.types.length > 0 &&
+          t.types.every(isFunctionType))));
+  return isFunctionType(param.type);
+}
+
+/** The `mapsto-arrow-expected` diagnostic for the rule `pair`, which is
+ * `key -> value`, the argument of `call` at the 0-based position `index` as
+ * written, with the anchors of the errors it causes (see
+ * `RuleAtFunctionSlot`). The diagnostic underlines the arrow and carries a
+ * fixit to `=>` when the arrow is found in the source between the key and
+ * the value; otherwise it underlines the whole rule and has no fixit.
+ * `undefined` when the rule has no source offsets. */
+function ruleAtFunctionSlot(
+  call: MathJsonExpression,
+  pair: MathJsonExpression,
+  index: number,
+  key: MathJsonExpression,
+  value: MathJsonExpression,
+  source: string
+): RuleAtFunctionSlot | undefined {
+  const keyRange = sourceRangeOf(key);
+  const valueRange = sourceRangeOf(value);
+  if (keyRange === undefined || valueRange === undefined) return undefined;
+  const range: [number, number] = [keyRange[0], valueRange[1]];
+  const anchors: [number, number][] = [range, keyRange];
+  const pairRange = sourceRangeOf(pair);
+  if (pairRange !== undefined) anchors.push(pairRange);
+  let arrow: [number, number] | undefined;
+  const gap = source.slice(keyRange[1], valueRange[0]);
+  for (const spelling of ['->', '→']) {
+    const at = gap.indexOf(spelling);
+    if (at >= 0) {
+      arrow = [keyRange[1] + at, keyRange[1] + at + spelling.length];
+      break;
+    }
+  }
+  // The callee as written (`map`, not the library name `Map`): the source
+  // text from the start of the call to its `(`, when that is a plain name.
+  const callRange = sourceRangeOf(call);
+  const open = callRange === undefined ? -1 : source.indexOf('(', callRange[0]);
+  const written = open < 0 ? '' : source.slice(callRange![0], open);
+  const callee = /^[\p{L}_][\p{L}\p{N}_]*$/u.test(written)
+    ? written
+    : operator(call);
+  const diagnostic: ParsingDiagnostic = {
+    severity: 'error',
+    message: ['mapsto-arrow-expected', callee, String(index + 1)],
+    range: arrow ?? range,
+  };
+  if (arrow !== undefined) diagnostic.fixits = [[arrow[0], arrow[1], '=>']];
+  return { diagnostic, anchors, keyName: symbol(key)! };
+}
+
+/**
  * Collect the `["Error", …]` nodes of a canonical expression, keeping only
  * the **innermost** one of a nest: an error carrying another error as an
  * operand is a cascade of the inner one, and reporting both would double up
@@ -1976,14 +2180,225 @@ function collectErrors(
   // or every canonicalization error inside an initializer stays invisible
   // (`let g = "a" + 1`, or a `KeyValuePair` with a non-string key — the
   // common `->`/`=>` typo shapes are recovered by the parser as lambdas
-  // with a `mapsto-arrow-expected` diagnostic, but a bare-symbol key in an
-  // unclaimed position, e.g. `let f = [n -> n + 1]`, still lands here).
+  // with a `mapsto-arrow-expected` diagnostic, and a rule at a call's
+  // function parameter gets the same diagnostic from
+  // `ruleAtFunctionSlotDiagnostics`, but a bare-symbol key in an unclaimed
+  // position, e.g. `let f = [n -> n + 1]`, still lands here).
   if (isDictionaryObject(expr)) {
     for (const value of Object.values(expr.dict))
       collectErrors(value as MathJsonExpression, result);
     return;
   }
   for (const op of operands(expr)) collectErrors(op, result);
+}
+
+/**
+ * Record each `Error` node of the boxed tree `root` in `into`, keyed by its
+ * serialized JSON, so that a JSON error found by `collectErrors` can be
+ * paired with its BOXED twin. The boxed error's site operand carries the
+ * binding of the operand at fault, which the provenance note reads.
+ *
+ * The walk is depth-first and LEFT-TO-RIGHT, the same visit order as the
+ * JSON walk of `collectErrors`: when two byte-identical errors exist, the
+ * entry kept (the first one) pairs with the FIRST collected JSON error,
+ * which is the one the dedup loop keeps. An entry already in `into` is not
+ * replaced. Children are pushed reversed because the stack pops from the
+ * end.
+ */
+function indexBoxedErrors(
+  root: ReturnType<ComputeEngine['box']>,
+  into: Map<string, ReturnType<ComputeEngine['box']>>
+): void {
+  const stack = [root];
+  while (stack.length > 0) {
+    const node = stack.pop()!;
+    if (node.operator === 'Error') {
+      const key = JSON.stringify(node.json);
+      if (!into.has(key)) into.set(key, node);
+    }
+    // `ops` (functions) and `values` (dictionaries — the `let` initializer
+    // shape `collectErrors` descends) live on narrowed interfaces this
+    // module cannot prove without engine runtime guards; read them
+    // structurally. `values` exists on no other expression kind, so the
+    // read cannot trigger a collection materialization.
+    const values = (node as { values?: readonly (typeof node)[] }).values;
+    if (Array.isArray(values))
+      for (let i = values.length - 1; i >= 0; i--) stack.push(values[i]);
+    const ops = (node as { ops?: readonly (typeof node)[] }).ops;
+    if (ops !== undefined)
+      for (let i = ops.length - 1; i >= 0; i--) stack.push(ops[i]);
+  }
+}
+
+/**
+ * The canonicalization errors inside the held operands of the pipes of the
+ * boxed statement `root`.
+ *
+ * `Pipe` is a lazy operator: its canonical form holds the piped value and
+ * the stage unbound, and canonicalizes them only when it is evaluated. A
+ * function-literal stage and a chained pipe are the exceptions, which the
+ * canonical handler of `Pipe` canonicalizes itself. So the canonical form of
+ * `xs |> Filter("a")` has no error in it, while the call `Filter(xs, "a")`
+ * has one. This function canonicalizes each held operand as the evaluation
+ * does (`_pipeStageAsCall`, which puts the piped value in the slot that
+ * evaluation selects), in the lexical scope of the pipe, and collects the
+ * errors of the result. It evaluates nothing.
+ *
+ * Each result has the JSON error, its boxed twin (see `indexBoxedErrors`),
+ * and the frame of the error: the call that contains it and the 1-based
+ * position of the argument at fault. When the stage gets the piped value as
+ * an implicit argument, the frame gives the operator and the position AS
+ * WRITTEN, which is what `locateError` finds in the raw statement: the
+ * position in the call is one more than the written position for the
+ * arguments after the piped value, and canonicalization can also rename the
+ * call and reorder its operands (`writtenPositions`). An error in the slot
+ * of the piped value itself has the frame of the first operand of the
+ * `Pipe`. An error at a position that is not known has no frame.
+ *
+ * The walk goes only through canonical nodes: the held operands of other
+ * lazy operators are not canonical, and the evaluation decides what they
+ * mean. Each node is visited once, so a chain `a |> f(1) |> g(2)`, whose
+ * inner pipe is both an operand of the outer pipe and the piped value of the
+ * outer call, is not walked twice per level.
+ */
+function pipeStageErrors(
+  ce: ComputeEngine,
+  root: ReturnType<ComputeEngine['box']>
+): {
+  error: MathJsonExpression;
+  frame: ErrorFrameRef | undefined;
+  boxed: ReturnType<ComputeEngine['box']> | undefined;
+}[] {
+  type Boxed = ReturnType<ComputeEngine['box']>;
+  type Scope = Parameters<ComputeEngine['_inScope']>[0];
+  const result: ReturnType<typeof pipeStageErrors> = [];
+  const visited = new Set<Boxed>();
+
+  const report = (
+    checked: Boxed,
+    stage?: { topicAt: number; written: Boxed }
+  ): void => {
+    const json = checked.json;
+    const errors: MathJsonExpression[] = [];
+    collectErrors(json, errors);
+    if (errors.length === 0) return;
+    const twins = new Map<string, Boxed>();
+    indexBoxedErrors(checked, twins);
+    const head = operator(json);
+    const args = [...operands(json)];
+    const writtenAt =
+      stage === undefined
+        ? undefined
+        : writtenPositions(checked, stage.written);
+    for (const error of errors) {
+      let frame = enclosingFrame(json, error);
+      // Only an error that is an argument of the call itself is moved: the
+      // piped value is an operand of that call and of no nested one. The
+      // frame names the call as written (`Fold`, not the canonical
+      // `Reduce`) and counts the argument as written, without the piped
+      // value, because the locator looks for both in the raw statement.
+      if (
+        stage !== undefined &&
+        frame !== undefined &&
+        frame.name === head &&
+        args[frame.index - 1] === error
+      ) {
+        const at = writtenAt?.[frame.index - 1];
+        const { topicAt } = stage;
+        if (at === undefined) frame = undefined;
+        else if (at === topicAt) frame = { name: 'Pipe', index: 1 };
+        else
+          frame = {
+            name: stage.written.operator,
+            index: at < topicAt ? at + 1 : at,
+          };
+      }
+      result.push({ error, frame, boxed: twins.get(JSON.stringify(error)) });
+    }
+  };
+
+  const visit = (node: Boxed, scope: Scope): void => {
+    if (visited.has(node) || !node.isCanonical) return;
+    visited.add(node);
+    // `ops` and `values` are read structurally, as in `indexBoxedErrors`.
+    const ops = (node as { ops?: readonly Boxed[] }).ops;
+    if (node.operator === 'Pipe' && ops !== undefined && ops.length === 2) {
+      const [heldTopic, heldStage] = ops;
+      ce._inScope(scope, () => {
+        const topic = heldTopic.isCanonical ? heldTopic : heldTopic.canonical;
+        const checked = ce._pipeStageAsCall(topic, heldStage);
+        // A piped value that is not in the checked call has errors of its
+        // own to report. A piped value that was already canonical is part of
+        // the canonical tree, and its errors are collected with it.
+        if (topic !== heldTopic && checked?.topicAt === undefined)
+          report(topic);
+        if (checked !== undefined)
+          report(
+            checked.call,
+            checked.topicAt === undefined || checked.written === undefined
+              ? undefined
+              : { topicAt: checked.topicAt, written: checked.written }
+          );
+        visit(topic, scope);
+        if (checked !== undefined) visit(checked.call, scope);
+      });
+      visit(heldStage, scope);
+      return;
+    }
+    const inner = node.localScope ?? scope;
+    const values = (node as { values?: readonly Boxed[] }).values;
+    if (Array.isArray(values)) for (const value of values) visit(value, inner);
+    if (ops !== undefined) for (const op of ops) visit(op, inner);
+  };
+
+  visit(root, undefined);
+  return result;
+}
+
+/**
+ * For each operand of the canonical call `call`, its 0-based position in
+ * `written`, the same call before canonicalization. `undefined` for an
+ * operand whose position is not known.
+ *
+ * Canonicalization can change the operator and the order of the operands
+ * (`Fold(f, 0, xs)` becomes `Reduce(xs, f, 0)`). An operand that was already
+ * canonical before (the piped value, a number, a string) is the same object
+ * after, so its position is found by identity. An operand that
+ * canonicalization replaced (an argument that became an `Error`) is not
+ * found that way. When the call kept its operator and every operand found by
+ * identity is at its own position, the order did not change, and each
+ * operand has the position it has in `call`. Otherwise, when exactly one
+ * operand of each call is not found by identity, these two are the same
+ * operand. Any other operand that is not found has no known position.
+ */
+function writtenPositions(
+  call: ReturnType<ComputeEngine['box']>,
+  written: ReturnType<ComputeEngine['box']>
+): (number | undefined)[] {
+  type Boxed = ReturnType<ComputeEngine['box']>;
+  // `ops` is read structurally, as in `indexBoxedErrors`.
+  const ops = (call as { ops?: readonly Boxed[] }).ops ?? [];
+  const writtenOps = (written as { ops?: readonly Boxed[] }).ops ?? [];
+  const used = new Set<number>();
+  const at = ops.map((op) => {
+    const i = writtenOps.findIndex((w, k) => w === op && !used.has(k));
+    if (i < 0) return undefined;
+    used.add(i);
+    return i;
+  });
+  if (
+    call.operator === written.operator &&
+    ops.length === writtenOps.length &&
+    at.every((i, k) => i === undefined || i === k)
+  )
+    return ops.map((_, k) => k);
+  const missing = at.filter((i) => i === undefined).length;
+  const unused = writtenOps.length - used.size;
+  if (missing === 1 && unused === 1) {
+    const free = writtenOps.findIndex((_, k) => !used.has(k));
+    return at.map((i) => i ?? free);
+  }
+  return at;
 }
 
 /** The error code of an `["Error", cause, where?]` node: the head of its
@@ -2042,18 +2457,21 @@ export function describeError(error: MathJsonExpression): string {
     } else code = text(cause);
   }
 
-  // `where` is the error's site — a bare argument index when the engine
-  // validated a signature positionally, the offending subexpression, or
-  // (some minters) a full explanatory sentence, each phrased differently.
+  // `where` is the error's site: the offending subexpression, or (some
+  // minters) a full explanatory sentence, each phrased differently. The
+  // engine never puts an argument INDEX in this slot: `ce.typeError()` and
+  // `ce.error()` receive the offending operand itself (or its text), so a
+  // site that is an integer is the offending VALUE. Reading a bare integer
+  // as an argument position printed "got `5` for argument 5" for
+  // `take(5, 2)`. An integer site is therefore quoted like any other
+  // subexpression.
   const siteText = where === null ? '' : text(where);
   const site =
     siteText === ''
       ? ''
-      : /^\d+$/.test(siteText)
-        ? `for argument ${siteText}`
-        : siteText.length <= 40
-          ? `at \`${siteText}\``
-          : `— ${siteText}`;
+      : siteText.length <= 40
+        ? `at \`${siteText}\``
+        : `— ${siteText}`;
 
   let detail: string;
   switch (code) {

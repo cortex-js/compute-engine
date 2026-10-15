@@ -2318,6 +2318,44 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       else if (delims.length === 2) [open, close] = delims;
       else if (delims.length === 1) sep = delims;
 
+      // A group in square brackets is written with parentheses. The parser
+      // has no reading of square brackets as a group: it reads
+      // `\lbrack x\rbrack` as `["List", "x"]` and `\lbrack a, b\rbrack` as
+      // `["List", "a", "b"]`. So `["Delimiter", "x", "'[,]'"]` written with
+      // its brackets changes from `x` to a list of one element on a round
+      // trip through LaTeX. With parentheses, the value round-trips and the
+      // bracket spelling is lost. Two kinds of operand are written another way:
+      //  - a `List` operand keeps the brackets: its elements inside the
+      //    brackets read back as the same list;
+      //  - an operand that is a different collection with its own fences (a
+      //    `Set`, `Tuple`, `Pair`, `Triple` or `Single`) is written whole
+      //    inside the parentheses, as for a group without a delimiter string
+      //    above. Its elements inside the parentheses would read back as a
+      //    tuple.
+      //  - a `Sequence` with a list-valued element is written as a `Tuple`
+      //    through `serializeTuple`, which spells it `\operatorname{Tuple}(…)`:
+      //    the parenthesized `([1, 2], 0)` would read back as a `PointList`,
+      //    not as the tuple that the canonical form of the group is.
+      // Other fences (`\{`, `|`, `\langle`) and the mixed fences of an
+      // interval (`[a, b)`) are not changed.
+      if (open === '[' && close === ']' && operator(arg1) !== 'List') {
+        const argOp = operator(arg1);
+        if (
+          argOp === 'Set' ||
+          argOp === 'Tuple' ||
+          argOp === 'Pair' ||
+          argOp === 'Triple' ||
+          argOp === 'Single'
+        )
+          return serializer.wrapString(serializer.serialize(arg1), style, '()');
+        if (argOp === 'Sequence' && nops(arg1) > 1)
+          return serializeTuple(serializer, [
+            'Tuple',
+            ...operands(arg1),
+          ] as MathJsonExpression);
+        [open, close] = ['(', ')'];
+      }
+
       // Test for ABSENCE, not for falsiness: `Delimiter(0)` has a body, and a
       // truthiness test on the literal `0` emitted an empty pair of fences.
       // `items` is only ever `arg1` or a `Sequence` wrapper, both truthy.

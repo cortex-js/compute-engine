@@ -1,6 +1,6 @@
 # Compute Engine — Roadmap
 
-**Last updated:** 2026-10-14.
+**Last updated:** 2026-10-15.
 
 This document tracks **remaining** work; an item leaves this file once it lands.
 Detail on completed work lives in git history, `CHANGELOG.md`, the linked source
@@ -112,198 +112,327 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 ### The compiled body of a user function spells the coordinate of an absent point as `NaN`, where the interpreter keeps `Missing` (OPEN, small — found 2026-10-14 by the review of the Tycho row 374 tuple collapse)
 
 With `W = (p, s) ↦ (s·PointX(p), s·PointY(p), s·PointZ(p))` and `L` a list of
-two points, the interpreter answers `Missing` for `W(L[5], 2)`: inside the
-body `PointX(p)` is not provably numeric (the parameter is inferred
-`collection<any> | tuple`), so each coordinate keeps the `Missing` marker, and
-a tuple of absent coordinates is the absent value. The JavaScript target
-compiles the same accessor as `undefined[idx]` guarded to `NaN` (the
-top-level reading, `PointX(Missing)` is `NaN`), so the compiled call answers
-`[NaN, NaN, NaN]`; `_SYS.tupleOrAbsent` collapses only coordinates that are
-`undefined` at run time. The two lanes already differed before the collapse
-(`[NaN, NaN, NaN]` against a tuple of three `Missing`). Closing it means one
-of: the compiled accessor keeps `undefined` for an absent point when its
-written type is not provably numeric (then `tupleOrAbsent` collapses the
-tuple), or the interpreter's body route normalizes to `NaN` as the top level
-does (tried 2026-10-14 and reverted: a product over a `-> unknown` result must
-keep `Missing`, `absent-point-arithmetic.test.ts`). A plot consumer drops a
-`NaN` point and a hole alike, so no consumer reading is known to differ.
+two points, the interpreter answers `Missing` for `W(L[5], 2)`: inside the body
+`PointX(p)` is not provably numeric (the parameter is inferred
+`collection<any> | tuple`), so each coordinate keeps the `Missing` marker, and a
+tuple of absent coordinates is the absent value. The JavaScript target compiles
+the same accessor as `undefined[idx]` guarded to `NaN` (the top-level reading,
+`PointX(Missing)` is `NaN`), so the compiled call answers `[NaN, NaN, NaN]`;
+`_SYS.tupleOrAbsent` collapses only coordinates that are `undefined` at run
+time. The two lanes already differed before the collapse (`[NaN, NaN, NaN]`
+against a tuple of three `Missing`). Closing it means one of: the compiled
+accessor keeps `undefined` for an absent point when its written type is not
+provably numeric (then `tupleOrAbsent` collapses the tuple), or the
+interpreter's body route normalizes to `NaN` as the top level does (tried
+2026-10-14 and reverted: a product over a `-> unknown` result must keep
+`Missing`, `absent-point-arithmetic.test.ts`). A plot consumer drops a `NaN`
+point and a hole alike, so no consumer reading is known to differ.
 
-### An Epsil rule that is the first of several call arguments reads back as a lambda (OPEN, decision — found 2026-10-14 by the fix for issue #435)
+### An argument declared as a bare `tuple` keeps a scalar result type (OPEN, small — found 2026-10-15 by the all-absent tuple typing)
 
-`["f", ["KeyValuePair", "GridLines", 1], ["KeyValuePair", "Axes", 2]]`
-serializes as `f(GridLines -> 1, Axes -> 2)`, and the parser reads the first
-argument as the wrong-arrow spelling of the lambda `GridLines => 1` (with a
-`mapsto-arrow-expected` diagnostic and a fixit); the second argument is a
-pair. Epsil's lambda arrow is `=>`; a `->` with a bare name on its left is
-read as a lambda only as a typo recovery, and only in the first argument
-position of a call, so that `map(x -> x^2, xs)` is recovered as
-`map(x => x^2, xs)`. A rule that is the ONLY argument (`f(GridLines -> 1)`)
-and a rule after a comma (`f(x, GridLines -> 1)`) are read as rules. The
-options: (A) read a bare `name -> value` right after a call's `(` as a rule
-always, which fixes every rule-argument round trip but turns the typo
-`map(x -> x^2, xs)` into a confusing static type error; (B) keep the current
-reading, so `f(GridLines -> 1, Axes -> 2)` and `f(GridLines -> 1, x)` do not
-round-trip; (C) read the first argument as a rule when another argument of
-the same call is a rule, which fixes `f(GridLines -> 1, Axes -> 2)` and keeps
-the recovery of `map(x -> x^2, xs)`, but needs the parser to delay the
-diagnostic until the whole argument list is read, and `f(GridLines -> 1, x)`
-still breaks. If nothing is decided, B stays.
+With `f(x) := (-x, x)` and `w` declared `tuple` (no component types), `f(w)` is
+typed `tuple<number, number>`, which the pair of pairs it evaluates to does not
+fit. The numeric-tuple predicates (`isNumericTupleType`, `mayBeNumericTupleType`
+in `derive-application-type.ts`) accept no tuple without components; a bare
+`tuple` at a scalar parameter should give `any`, as a numeric tuple does.
 
-### Compiled `LerchPhi` and `HurwitzZeta` answer `NaN` for a complex value (OPEN, small — found 2026-10-13 by issue #428)
+### A point-valued body is inferred `number` (OPEN, small — found 2026-10-15 by the declared-result check)
 
-`_SYS.lerchPhi`, `_gpu_lerch_phi`, `_SYS.hurwitzZeta` and `_gpu_hurwitz_zeta`
-are real-only and return `NaN` for `a < 0` with a non-integer `s` (and, for
-`LerchPhi`, a real `z > 1`), where the interpreter has a complex value; the
-lowering still reports success, and the existing tests pin that `NaN`. The rule
-for a complex value from real operands across the special functions
-(`HurwitzZeta`, `LerchPhi`, `PolyLog`, `EllipticK`, `Hypergeometric2F1`,
-`LambertW`, `Arcsec`) was the question of issue #434. DECIDED 2026-10-14: the
-compiled code follows the compile mode, as `Sqrt` does (a complex value on the
-complex lane, a decline on the real lane), and the GPU targets decline, since
-they have no complex lane. `Gamma` already follows this rule (`_SYS.cgamma`).
-The contributor who filed the issue offered one pull request that covers all
-the special-function heads; this entry waits for that pull request and does
-not need a separate fix.
+In `test/compute-engine/compile-point-complex-coordinate.test.ts`, the body of
+`r`, `(cos a, sin a)·PointX(V) + …`, is a point, but the inference types it
+`number`; only the declared result `-> tuple<…>` gives the call its type. The
+scalar times a tuple keeps the tuple shape at evaluation, so the inference of
+`Multiply` and `Add` over a tuple operand is wrong here (the `Multiply`
+descriptor route is also the subject of the entry on the tuple component types
+times a real).
+
+### A `Delimiter` with no separator glues its number operands (OPEN, small — found 2026-10-15 by the change that writes a bracket group with parentheses)
+
+`["Delimiter", ["Sequence", 1, 2, 3], "')['"]` names two fences and no
+separator. The writer puts nothing between the operands (`serializeOps('')` in
+`latex-syntax/dictionary/definitions-core.ts`), so the group is written
+`)123\lbrack`, which reads back as the number `123` between stray fences, pinned
+in `test/compute-engine/latex-syntax/sequences.test.ts`. The square-bracket case
+`"[]"` is written `(1,2,3)` since the group is written through the `Tuple` rule.
+The `Sequence` serializer puts a comma between two digits; the delimiter writer
+needs the same guard, or a space, between two operands that would otherwise
+touch. Which separator to write is the open question.
+
+### A float exponent is read as an integer degree by the polynomial operations (OPEN, decision — found 2026-10-15 by the change that keeps a float exponent in products and in `simplify()`)
+
+`x^{2.0}/x` simplifies to the exact `x`: the step "cancel common polynomial
+factors" reads the float `2.0` as the integer degree `2`, while `x^{2.5}/x`
+gives `x^{1.5}`. The same reading is in every polynomial operation (degree,
+factor, solve, the polynomial division). The options: a float exponent is not a
+polynomial degree (the expression is then not a polynomial in `x`, and the
+cancellation keeps `x^{2.0}/x` as `x^{1.0}`), or the degree is read from the
+float and the result keeps a float exponent (`x^{1.0}`). If nothing is decided,
+the exact `x` stays.
+
+### `simplify()` let a recursion-limit error escape once under load (OPEN, small — seen 2026-10-15)
+
+In `test/compute-engine/simplify.test.ts`, the test "an evaluation that throws
+declines the fold instead of failing simplify()" failed once with
+`CancellationError: Recursion limit exceeded` on a box at load 100+, and passed
+on three reruns, alone and with its file. `simplify()` must catch that error and
+decline the fold; one escape means a route where the catch is missing or where
+the limit is reached outside the guarded call.
+
+### A free symbol read by index keeps one element type for every index (OPEN, decision — found 2026-10-15 by the per-index narrowing of a function parameter)
+
+Since 2026-10-15 an index read of a bare function PARAMETER narrows per index:
+while every read uses a literal index, the parameter is a tuple with one
+component per read index (`p => !p[1] if p[2] % 2 == 0 else p[1]` types `p` as
+`tuple<boolean, real>`), and a non-literal index makes it an indexed collection
+whose element type is the union of the read requirements
+(`parameterIndexReadType()` in `library/collections.ts`). A valueless FREE
+symbol keeps the older rule that one numeric index read decides the element type
+of every element (`docs/INFERENCE_ROADMAP.md` §5, ruling R1-A): at the top
+level, `And(b[1], B)` followed by `b[2] + 1` is still refused, pinned in
+`test/compute-engine/use-driven-element-inference.test.ts`; `First`, `Second`,
+`Third` and `Last` keep that rule too. The question: does the per-index rule
+also apply to a free symbol? It would type `xs[1] + 1` at the top level as
+`tuple<number>` instead of `indexed_collection<number>` and change many pins. A
+limit of the parameter rule that is independent of this question: the union
+depends on the order of the reads, because a use is checked against the type
+made by the earlier reads before its own read is recorded (`!p[1]` then
+`p[k] + 1` is refused, and so is the reverse); the fix is a validation that
+infers before it checks. If nothing is decided, the free-symbol rule stays.
+
+### An empty-celled literal has no shape in its type (OPEN, decision — found 2026-10-15 by the change that keeps a zero-length axis in a list type)
+
+`[[], []]` is typed `list<list<never>>`: `shapedListTypeD` (the typing of a
+list literal) makes no shape claim when the cells are empty, pinned in
+`test/compute-engine/list-shape-typing.test.ts` ("[[],[]] → no shape
+claim"). Since 2026-10-15 a zero-length axis is kept in a list type
+(`list<integer^(2x0)>` is `matrix<integer^(2x0)>`), and the empty literal
+`[]` is a value of a list type whose first axis has length 0, but
+`[[], []]` does not match `matrix<integer^(2x0)>` and cannot be assigned to a
+symbol declared with that type. The question: should `[[], []]` be typed
+`matrix<never^(2x0)>`? If nothing is decided, the type stays `list<list<never>>`.
+
+### A plain `evaluate()` of `Join` over an eager operand evaluates the operand twice (OPEN, small — found 2026-10-15 by the printing contract of an unevaluated view)
+
+`Join(src(1), [4]).evaluate()` calls `src` twice: `_isMemoizableLazyCollection`
+(`boxed-expression/boxed-function.ts`) reads `isFiniteCollection` of the view,
+and that read evaluates the eager operand through `eagerViewSource`
+(`library/collections.ts`) before the operand evaluation step evaluates it
+again. Reading the finiteness from the operand's static `list` type instead
+would report a symbolic `Sort(xs)` as finite, and a consumer such as `Sum` could
+walk it as empty, so the fix must keep the value read and share it with the
+operand step.
+
+### A lazy collection call with its operands in the wrong order stays as written (OPEN, small — found 2026-10-15 by the refusal of a non-collection source at boxing)
+
+`Map(5, x => x)` and `Map(f(1), x => x)` (the collection and the callback
+swapped) are kept as written: the misorder check in the handler of `Map` reports
+the order only when the first operand is a provable collection, and on the parse
+route a bare callback such as `Sin` has the type `unknown`. A fix reads a
+callback-shaped LAST operand too; it touches two pins in
+`test/compute-engine/operator-symbol-value-serialization.test.ts`.
+
+### Two memos are checked against the world version only (OPEN, small — found 2026-10-15 by the `Slice` bounds fault)
+
+The memo of `Slice` bounds reused the bounds of the first call for every later
+call of a function, because the world version does not change when a parameter
+takes a new value; it now records the node's dependencies as `_memoizedFacet`
+does. Two other memos check only the world version: `operand-descriptor.ts`
+(about line 745) and `sequence.ts` (about line 1137). No fault was reproduced in
+them; each needs a probe with a function parameter that changes between calls,
+and the dependency record if the probe fails.
+
+### The async route of `Sum` reads the last value of the index inside a lazy body (OPEN, medium — found 2026-10-15 by the review of the eager-source rule)
+
+`Sum(Reduce(Map(x ↦ k·x, [1, 1]), Add, 0), k ∈ 1..2)` evaluates to `6`
+synchronously and to `8` with `evaluateAsync()`; with `t` holding two lists,
+`Sum(Reduce(At(t, k), (a, b) ↦ a + b + k, 0), …)` gives 29 against 32. The async
+route evaluates the lazy `Map` body after the index has moved on, so the
+callback reads the last value of `k`. The source is a literal list, so the fault
+is in the async binder scoping of a lazy view, not in the eager-source rule.
+Pins to write in `test/compute-engine/lazy-operator-eager-source.test.ts` ("A
+lazy node inside a Sum") once fixed; today those tests only compare the sync
+value.
+
+### A symbol declared `unknown` whose value is not a collection keeps a lazy call unevaluated (OPEN, small — found 2026-10-15 by the refusal of a non-collection source at boxing)
+
+With `n` declared `unknown` and assigned `5`, `Map(f, n).evaluate()` returns
+`Map((x) => 2x, n)` with no error: the lazy canonical handler refuses on the
+VALUE (`checkCollectionOperand`, `boxed-expression/validate.ts`), the node stays
+non-canonical, and the evaluation rule for an eager source never runs on it.
+Reporting the `incompatible-type` error at evaluation needs the lazy handlers to
+admit such a symbol and check the value when the node is evaluated;
+`checkCollectionOperand` also guards `Any(5)` → `False`, so that guard must move
+with it. The eager operators have the mirror fault: `Sort(n)` with an
+inferred-integer `n` is refused at boxing and keeps the error after `n` is
+reassigned to a list, a canonical form that depends on the value of a symbol.
+
+### A pipe into an operator with several signatures is typed `unknown` (OPEN, small — found 2026-10-15 by the `Pipe` type handler)
+
+`[1, 2, 3] |> take(2)` is typed `unknown`, while `take([1, 2, 3], 2)` is typed
+from the matching signature. The `Pipe` type handler (`library/core.ts`,
+`pipeImplicitTopicCallType`) places the piped value and types the completed call
+with `context.derive`, and `derive` cannot choose between the signatures of an
+operator that has several of them and no type handler: overload resolution
+exists only for boxed expressions (`resolveOverload`,
+`boxed-expression/overload.ts`), not for a call described by types. A type-only
+resolution in `derive-application-type.ts` closes the gap; a stage after such a
+pipe then also gets its static diagnostic.
+
+### A static error in a call that canonicalization renames is anchored on the whole statement (OPEN, small — found 2026-10-15 by the pipe-stage frame fix)
+
+`fold(a => a, "0", xs)` canonicalizes to `Reduce(xs, (a) => a, "0")`. The static
+checker builds the error's frame from the canonical call, and the locator
+(`locateError`, `src/epsil/static-diagnostics.ts`) matches by operator name in
+the raw statement, where the name is `fold`, so the `callback-arity` error
+underlines the whole call instead of `a => a`, and `fold(x -> x, 0, xs)` reports
+the `callback-arity` error on the whole statement in addition to the
+`mapsto-arrow-expected` diagnostic. The pipe route maps each canonical operand
+back to its written position (`writtenPositions()`), so
+`xs |> fold(a => a, "0")` underlines `a => a`; the direct route needs the same
+map from a canonical call back to the raw call. Also, `xs |> fold(5, 0)` gets no
+static error although `fold(5, 0, xs)` reports "expected `function`": the piped
+value takes slot 0 and the written `5` lands in the function slot without a
+check.
+
+### A held operand reads as `unknown` in the type error of `Map` (OPEN, small — found 2026-10-15 by the pipe-stage static diagnostics)
+
+`map([2], "s")` and `map(filter([1, 2], x => x > 1), "s")` report "expected
+`function`, got `unknown`": `Map` holds its operands and reads the type of the
+function argument before it is canonicalized. The piped spelling
+`[2] |> map("s")` reports the real type (`list<integer>`), so the two spellings
+share only the error code and the expected type. The run-time value of the piped
+spelling is also imprecise:
+`["Error", ["ErrorCode", "incompatible-type", "function", "list"], "[\"s\"]"]`
+names the site `["s"]` and the type `list`, not the piped value and its type.
 
 ### `.N()` of a `1/(x·ln x)` divergence at a nonzero bound or at infinity gives a finite value (OPEN, small — found 2026-10-14 by the power-law divergence test)
 
 `\int_2^\infty \frac{dx}{x\ln x}` gives `4.0 ± 1.5` and
-`\int_{1/2}^{1} \frac{-1}{(1-t)\ln(1-t)}\,dt` gives `4.0 ± 1.7`; both are
-`+∞`, and `evaluate()` gives `+∞` for both. Next to `0` the quadrature can
-bisect about 1070 dyadic shells, which is enough for the power-law test
+`\int_{1/2}^{1} \frac{-1}{(1-t)\ln(1-t)}\,dt` gives `4.0 ± 1.7`; both are `+∞`,
+and `evaluate()` gives `+∞` for both. Next to `0` the quadrature can bisect
+about 1070 dyadic shells, which is enough for the power-law test
 (`shellsDecayAsPower`, `numerics/gauss-kronrod.ts`) to read the exponent of
-`1/k` shells as `1`. Next to a nonzero bound, or at infinity after the
-change of variable, the corner panel can be bisected only about 48 times.
-At that depth the estimated exponent is `0.87` for the divergent
-`1/(x ln x)` and `0.95` for the convergent `1/(x ln^{1.1} x)`, so no
-threshold separates them. A fix needs a deeper shell structure next to a
-nonzero bound (for example, a change of variable that moves the bound to
-`0`). Also: two integrands that the test reports divergent get different
-verdicts, `(−ln t)^{-1.001}/t` gives `+∞` and `−t^{0.00001}/(t ln t)` gives
-`NaN`; the sign read of a detected divergence is not the same on the two.
+`1/k` shells as `1`. Next to a nonzero bound, or at infinity after the change of
+variable, the corner panel can be bisected only about 48 times. At that depth
+the estimated exponent is `0.87` for the divergent `1/(x ln x)` and `0.95` for
+the convergent `1/(x ln^{1.1} x)`, so no threshold separates them. A fix needs a
+deeper shell structure next to a nonzero bound (for example, a change of
+variable that moves the bound to `0`). Also: two integrands that the test
+reports divergent get different verdicts, `(−ln t)^{-1.001}/t` gives `+∞` and
+`−t^{0.00001}/(t ln t)` gives `NaN`; the sign read of a detected divergence is
+not the same on the two.
 
 ### `.N()` of an integral whose shells decay as `k^{-p}` with `1 < p < 1.5` gives a wrong value whose error bar does not cover it (OPEN, small — found 2026-10-14 by the power-law divergence test; present before)
 
-`\int_0^{1/2} \frac{dt}{t(-\ln t)^{1.1}}` gives `5.19 ± 0.79`; the exact
-value is `10.37`. With exponent `1.2` it gives `4.04 ± 0.38` (exact `5.38`),
-with `1.05` it gives `6.0 ± 2.0` (exact `20.4`), and
-`\int_0^{1/2} \frac{-t^{0.0001}}{t\ln t}\,dt` gives `6.9 ± 1.3` (exact
-`9.00`). The shells next to the bound are about `k^{-p}`; the Levin
-extrapolation of the tail needs a decay exponent of at least `1.5`
-(`LEVIN_MIN_DECAY`), so these tails are not extrapolated, and the reported
-error does not include the missing tail. A fix in `resolveSingularEndpoints`
-adds the tail `C·K^{1-p}/(p-1)` from the exponent that `shellsDecayAsPower`
-fits, or at least widens the error to cover it.
+`\int_0^{1/2} \frac{dt}{t(-\ln t)^{1.1}}` gives `5.19 ± 0.79`; the exact value
+is `10.37`. With exponent `1.2` it gives `4.04 ± 0.38` (exact `5.38`), with
+`1.05` it gives `6.0 ± 2.0` (exact `20.4`), and
+`\int_0^{1/2} \frac{-t^{0.0001}}{t\ln t}\,dt` gives `6.9 ± 1.3` (exact `9.00`).
+The shells next to the bound are about `k^{-p}`; the Levin extrapolation of the
+tail needs a decay exponent of at least `1.5` (`LEVIN_MIN_DECAY`), so these
+tails are not extrapolated, and the reported error does not include the missing
+tail. A fix in `resolveSingularEndpoints` adds the tail `C·K^{1-p}/(p-1)` from
+the exponent that `shellsDecayAsPower` fits, or at least widens the error to
+cover it.
 
 ### `Multiply` typed from argument types alone keeps the component types of a tuple times a real (OPEN, small — found 2026-10-14 by the fix of the tuple-at-scalar-parameter result inference; present before)
 
-`deriveApplicationType(ce, 'Multiply', [tuple<integer, integer>, real])`
-returns `tuple<integer, integer>`, while the expression `T·r` with
-`T: tuple<integer, integer>` and `r: real` is typed `tuple<real, real>`. So
-with `f := P ↦ P·Norm(P)` and `g := a ↦ f((a, a))`, `g(1)` is typed
-`tuple<integer, integer>` but its value is `(√2, √2)`. The descriptor route
-of the `Multiply` type handler (`library/arithmetic.ts`) does not widen the
-components of a tuple by the scalar factor. The comment in
-`lambdaBroadcastType` (`boxed-expression/boxed-function.ts`) that warns of
-"wrong narrow types for `P·Norm(P)`" is this defect.
-
-### A tuple with a string component at a scalar parameter is typed as if numeric (OPEN, decision — found 2026-10-14 by the same fix)
-
-With `f(x) := (-x, x)`, `f(("s", a))` is typed `tuple<number, number>`, but
-its value is `(-("s", 1), ("s", 1))`. The numeric-tuple rule covers numeric
-and open components only. The options: such a call is an
-`incompatible-type` error (a string is not a number), or its result is `any`
-like a numeric tuple. If nothing is decided, the wrong narrow type stays.
+`deriveApplicationType(ce, 'Multiply', [tuple<integer, integer>, real])` returns
+`tuple<integer, integer>`, while the expression `T·r` with
+`T: tuple<integer, integer>` and `r: real` is typed `tuple<real, real>`. So with
+`f := P ↦ P·Norm(P)` and `g := a ↦ f((a, a))`, `g(1)` is typed
+`tuple<integer, integer>` but its value is `(√2, √2)`. The descriptor route of
+the `Multiply` type handler (`library/arithmetic.ts`) does not widen the
+components of a tuple by the scalar factor. The comment in `lambdaBroadcastType`
+(`boxed-expression/boxed-function.ts`) that warns of "wrong narrow types for
+`P·Norm(P)`" is this defect.
 
 ### Asynchronous materialization walks a lazy view synchronously (OPEN, small — found 2026-10-08 by the listing of lazy elements)
 
 `Map(AsyncOnly, [1, 2]).evaluateAsync({ materialization: true })`, with
 `AsyncOnly` an operator that has only an `evaluateAsync` handler, gives
-`[AsyncOnly(1), AsyncOnly(2)]`: the materialization enumerates the view with
-the synchronous iterator, which cannot run an asynchronous-only application,
-and the unevaluated applications are stored. The inline-lambda spelling
+`[AsyncOnly(1), AsyncOnly(2)]`: the materialization enumerates the view with the
+synchronous iterator, which cannot run an asynchronous-only application, and the
+unevaluated applications are stored. The inline-lambda spelling
 (`Map(x ↦ AsyncOnly(x), …)`) does the same, inside a list literal or not. The
 listing of a lazy element of a literal or of a spread keeps such a view lazy
 (`holdsAsyncOnlyOperator`, `boxed-expression/listed-element.ts`); the
-materialization option needs an asynchronous walk of the view
-(`materialize` in `boxed-function.ts`, and the `materialization` branch of
-the `List` handlers in `library/collections.ts`). The name check of
-`holdsAsyncOnlyOperator` looks one level into the function literal a symbol
-holds and does not look into the clauses of a multi-clause user function.
-
+materialization option needs an asynchronous walk of the view (`materialize` in
+`boxed-function.ts`, and the `materialization` branch of the `List` handlers in
+`library/collections.ts`). The name check of `holdsAsyncOnlyOperator` looks one
+level into the function literal a symbol holds and does not look into the
+clauses of a multi-clause user function.
 
 ### A declared real result, a ranged index or a ranged argument keeps a compiled user function on the real lane: what remains (OPEN, small — found 2026-10-08 by the review of the Tycho codegen audit of CE 0.149.0)
 
-Landed 2026-10-08 (CHANGELOG, Unreleased): under the JavaScript target's
-default `auto` mode, a function declared `-> real` compiles its body on the
-real lane instead of declining; the index of a sum, product, loop or
-comprehension over literal bounds is typed `integer<a..b>` on every route; a
-user function is compiled for the range of its argument when the range
-proves the sign of a radical in its body. Measured on the Voronoi showcase
-row of the Tycho corpus: about 40 µs per sample instead of 1,540 µs, 14 KB
-instead of 52 KB, same values. Tycho was asked whether it passes
-`mode: 'strict'` for plot sampling (its ledger, 2026-10-08) and is acting on
-it. What remains:
+Landed 2026-10-08 (CHANGELOG, Unreleased): under the JavaScript target's default
+`auto` mode, a function declared `-> real` compiles its body on the real lane
+instead of declining; the index of a sum, product, loop or comprehension over
+literal bounds is typed `integer<a..b>` on every route; a user function is
+compiled for the range of its argument when the range proves the sign of a
+radical in its body. Measured on the Voronoi showcase row of the Tycho corpus:
+about 40 µs per sample instead of 1,540 µs, 14 KB instead of 52 KB, same values.
+Tycho was asked whether it passes `mode: 'strict'` for plot sampling (its
+ledger, 2026-10-08) and is acting on it. What remains:
 
-- Under `mode: 'complex'`, a function declared `(real) -> real` that is
-  emitted as a shared definition (a recursive function, or one whose call is
-  not inlined) still declines: the literal's parameter carries no type from
-  the declared signature, so a `number`-typed node over the parameter is read
-  as complex in that mode whether or not promotion is on. The inlined call
-  compiles. Carrying the declared parameter types into the body in complex
-  mode closes it (the `auto` route already rebuilds the generic definition
-  with the declared types when that removes a promoted head).
+- Under `mode: 'complex'`, a function declared `(real) -> real` that is emitted
+  as a shared definition (a recursive function, or one whose call is not
+  inlined) still declines: the literal's parameter carries no type from the
+  declared signature, so a `number`-typed node over the parameter is read as
+  complex in that mode whether or not promotion is on. The inlined call
+  compiles. Carrying the declared parameter types into the body in complex mode
+  closes it (the `auto` route already rebuilds the generic definition with the
+  declared types when that removes a promoted head).
 - A real-ascribed body that reads an assigned symbol whose value promotes
   (`a := √(c − 1)`) still declines under `auto`: the symbol's value compiles
-  with the promotion of the mode, because its preamble local is shared by
-  every reader.
-- The range copies of a user function are shared by containment of the
-  argument range, in emission order: `1..16` compiled after `2..10` gives two
-  copies (`integer<2..>` and `integer<1..>`), where one would do. A copy
-  already emitted is not widened.
-- A clause that becomes a literal `Range` only after canonicalization gets
-  the inferred narrowing, which the first assignment of an index value widens
-  to `integer`; only a clause whose raw form has integer literal bounds is
-  declared ranged.
-- A dead branch of a `Which` or `If` whose condition is a constant still
-  puts the result on the complex lane. `x + Which(1 > 0, y, True, √(y − 1))`
-  under `auto` emits a complex object around `y` where `strict` emits
-  `_.x + _.y`. The values are correct, but the result is an object where a
-  number is expected, and it is slower. The lane analysis reads every branch
-  while the emitter drops the dead one.
+  with the promotion of the mode, because its preamble local is shared by every
+  reader.
+- The range copies of a user function are shared by containment of the argument
+  range, in emission order: `1..16` compiled after `2..10` gives two copies
+  (`integer<2..>` and `integer<1..>`), where one would do. A copy already
+  emitted is not widened.
+- A clause that becomes a literal `Range` only after canonicalization gets the
+  inferred narrowing, which the first assignment of an index value widens to
+  `integer`; only a clause whose raw form has integer literal bounds is declared
+  ranged.
+- A dead branch of a `Which` or `If` whose condition is a constant still puts
+  the result on the complex lane. `x + Which(1 > 0, y, True, √(y − 1))` under
+  `auto` emits a complex object around `y` where `strict` emits `_.x + _.y`. The
+  values are correct, but the result is an object where a number is expected,
+  and it is slower. The lane analysis reads every branch while the emitter drops
+  the dead one.
 - On the Python target, `Power` with a float exponent is emitted from the
-  operator table (`t ** 0.3`) in every mode, so the `np.emath.power`
-  promotion branch of its handler is never used for that form, while the
-  analysis still reads the node as promoted. Python numbers are dynamically
-  typed, so no value is wrong, but the analysis and the emission disagree.
+  operator table (`t ** 0.3`) in every mode, so the `np.emath.power` promotion
+  branch of its handler is never used for that form, while the analysis still
+  reads the node as promoted. Python numbers are dynamically typed, so no value
+  is wrong, but the analysis and the emission disagree.
 - A helper passed BY NAME inside a real-ascribed body declines: with
   `g: (integer<1..16>) -> unknown` and `p: (real) -> real`,
   `p := y ↦ √y · Total(Map(Range(1, 16), g))` refuses to compile, because the
-  analysis reads the declared `unknown` result of `g` as complex and the
-  real ascription fails closed. The same helper CALLED (`g(k)` under a
-  `Sum`) compiles real. Found 2026-10-08 by the review of the real-lane
-  ascription.
+  analysis reads the declared `unknown` result of `g` as complex and the real
+  ascription fails closed. The same helper CALLED (`g(k)` under a `Sum`)
+  compiles real. Found 2026-10-08 by the review of the real-lane ascription.
 
 ### Some lazy heads still run synchronously under `evaluateAsync` (OPEN, issue #392, found 2026-10-07)
 
 `N`, `Add`, `Multiply`, `Evaluate`, `ReleaseHold` and the four chainable
 relations `Equal`, `NotEqual`, `Less`, `LessEqual` have an asynchronous twin
 that evaluates the held operands with `evaluateAsync`, so a `Sum` under them
-yields and honours an abort signal. An operator opts in with
-`evaluatesOperands` ("the handler demands and evaluates every held operand and
-reads nothing else of their structure"), and the asynchronous route then awaits
-each held operand in order and runs the handler on the values; a handler that
-stops early, or evaluates only some of its operands, has a twin of its own. The
-lazy operators with a synchronous handler were audited one by one (2026-10-09):
+yields and honours an abort signal. An operator opts in with `evaluatesOperands`
+("the handler demands and evaluates every held operand and reads nothing else of
+their structure"), and the asynchronous route then awaits each held operand in
+order and runs the handler on the values; a handler that stops early, or
+evaluates only some of its operands, has a twin of its own. The lazy operators
+with a synchronous handler were audited one by one (2026-10-09):
 
 - Flag: `IdenticallyEqual`, `Measurement`, `PowerMod`, `PowerModList`,
   `ResidueClass`.
 - Twin on the operand: `Annotated`, `Typed`, `Matrix`, `Quantity`,
   `UnitConvert`, `IsError`, `Simplify`, `Delimiter`, `MemberCall`.
 - Twin on the walk of a collection (the generator of `evaluate()` driven by
-  `runAsync`, so it yields and honours the signal between two elements):
-  `Any`, `All`, `MaxBy`, `MinBy`, `ArgMax`, `ArgMin`, `Reduce` (and so `Fold`).
-  A callback that is itself long runs to its end first; an asynchronous
+  `runAsync`, so it yields and honours the signal between two elements): `Any`,
+  `All`, `MaxBy`, `MinBy`, `ArgMax`, `ArgMin`, `Reduce` (and so `Fold`). A
+  callback that is itself long runs to its end first; an asynchronous
   application of the callback (`ApplyOptions.awaitStatements`) would remove
   that.
 - Left synchronous, by reason. They read the structure of an operand or build a
@@ -311,15 +440,15 @@ lazy operators with a synchronous handler were audited one by one (2026-10-09):
   `Head`, `Tail`, `Type`, `Signature`, `About`, `Symbol`, `Subscript`,
   `Unevaluated`, `Function`, `Rule`, `Predicate`, `IsSame`, `Same`,
   `MatchesType`, `Conforms`, `IsCompatibleUnit`, `UnitDimension`, `Spread`,
-  `Declare*`, `DefineFunction`, `Assume`, `Condition`. They transform an
-  operand symbolically: the polynomial heads, `Together`, `Apart`,
-  `PartialFraction`, `Cancel`, `Expand*`, `Factor`, `Distribute`, `TrigExpand`,
-  `TrigReduce`, `TrigToExp`, `ReplaceAll`, `Derivative`, `JacobianMatrix`,
-  `InverseFunction`. They hand a held function or expression to a synchronous
-  solver or quadrature: `Solve`, `DSolve`, `RSolve`, `FindRoot`, `FindFit`,
-  `NIntegrate`, `NLimit`, `Limit`, `Residue`, `ND`, `NDSolve`,
-  `InterpolatingFunction`, `EvaluateAt`. Their long step is that computation,
-  which an `await` between operands does not interrupt.
+  `Declare*`, `DefineFunction`, `Assume`, `Condition`. They transform an operand
+  symbolically: the polynomial heads, `Together`, `Apart`, `PartialFraction`,
+  `Cancel`, `Expand*`, `Factor`, `Distribute`, `TrigExpand`, `TrigReduce`,
+  `TrigToExp`, `ReplaceAll`, `Derivative`, `JacobianMatrix`, `InverseFunction`.
+  They hand a held function or expression to a synchronous solver or quadrature:
+  `Solve`, `DSolve`, `RSolve`, `FindRoot`, `FindFit`, `NIntegrate`, `NLimit`,
+  `Limit`, `Residue`, `ND`, `NDSolve`, `InterpolatingFunction`, `EvaluateAt`.
+  Their long step is that computation, which an `await` between operands does
+  not interrupt.
 - Left synchronous, with a longer operand plausible, and a design needed:
   `Assign` (the right-hand side is evaluated in about ten branches, interleaved
   with writes to the scope), `Pipe` (the topic is handed unevaluated to
@@ -334,8 +463,8 @@ What remains:
 
 - The operators of the last list above.
 - A user function whose body is already suspended on this engine (a recursive
-  body, or a second call of the literal from another evaluation) and one with
-  a free symbol in an argument run synchronously, because the scope of the body
+  body, or a second call of the literal from another evaluation) and one with a
+  free symbol in an argument run synchronously, because the scope of the body
   has room for one suspended frame. A recursive function yields in the
   statements of its outermost call only.
 
@@ -344,10 +473,10 @@ What remains:
 The Python target has no entry check (`compileFunction` emits a plain `def`),
 and Python's `len` counts code points, so compiled Python disagrees with the
 interpreter on any string that has a combining sequence or a multi-code-point
-emoji. The JavaScript target is not affected: its entry refuses a string for
-a parameter whose type a string does not inhabit, and for
-`indexed_collection<character>` and `collection<character>`, which a string
-does inhabit, the collection lowerings fail closed at compile time and the
+emoji. The JavaScript target is not affected: its entry refuses a string for a
+parameter whose type a string does not inhabit, and for
+`indexed_collection<character>` and `collection<character>`, which a string does
+inhabit, the collection lowerings fail closed at compile time and the
 interpreter evaluates them.
 
 ### Snapshot finite lazy members of Set literals (OPEN, feature proposal — identified 2026-10-12)
@@ -360,15 +489,14 @@ calls. The proposed behavior is `{[11, 12]}`, with two calls during literal
 evaluation. The outer set still has one member; the inner collection is not
 flattened. Boxing or parsing the literal must not invoke the callback.
 
-Decide whether to extend the List/Tuple snapshot contract to Set literals.
-This is a behavior change, not a confirmed defect in the existing contract:
-it can affect equality, duplicate removal, and when callbacks or errors occur.
-If adopted, reuse the bounded snapshot helpers in
-`boxed-expression/listed-element.ts`, preserve the inner collection kind,
-and retain lazy views when they cannot be safely materialized within
-`ce.maxCollectionSize`. Do not consume and discard impure callback results
-while attempting a snapshot. Keep set comprehensions under their existing
-contract.
+Decide whether to extend the List/Tuple snapshot contract to Set literals. This
+is a behavior change, not a confirmed defect in the existing contract: it can
+affect equality, duplicate removal, and when callbacks or errors occur. If
+adopted, reuse the bounded snapshot helpers in
+`boxed-expression/listed-element.ts`, preserve the inner collection kind, and
+retain lazy views when they cannot be safely materialized within
+`ce.maxCollectionSize`. Do not consume and discard impure callback results while
+attempting a snapshot. Keep set comprehensions under their existing contract.
 
 Cover synchronous and asynchronous evaluation, equality and duplicate removal,
 callback counts and error timing, nested collections, and oversized or infinite
@@ -379,13 +507,12 @@ inputs. The proposal remains separate from the collection snapshot bug fixes.
 `WithRandomSeed(7, Repeat(Map(u ↦ Random(), Range(1, 3)), 2))` reports
 `isPure === true`. The escape check (`escapesAsDrawingLazyView`,
 `boxed-expression/effects-of.ts`) follows the operands of a LAZY view and the
-cells of a literal container, so a lazy `Take`, `Join` or `ListJoin` that
-holds a drawing view is impure, as it should be. The two-argument `Repeat`
-is an eager application before it is evaluated, so the check treats it as
-opaque, yet it evaluates to a `List` of two drawing views, which escape the
-frame and draw live at each read. A fix needs a rule for which eager
-operators store an operand in their result; it is a separate change from the
-lazy-view rule.
+cells of a literal container, so a lazy `Take`, `Join` or `ListJoin` that holds
+a drawing view is impure, as it should be. The two-argument `Repeat` is an eager
+application before it is evaluated, so the check treats it as opaque, yet it
+evaluates to a `List` of two drawing views, which escape the frame and draw live
+at each read. A fix needs a rule for which eager operators store an operand in
+their result; it is a separate change from the lazy-view rule.
 
 ### The rounding margin of a float contour or integrand is not a strict bound on the pole position (OPEN, design — found 2026-10-07 by the contour integration review)
 
@@ -393,13 +520,13 @@ A float radius, center, vertex or integrand coefficient is read as the exact
 value it holds, and the sum of the half-ulp rounding bounds of the replaced
 floats is a margin: a pole closer to the contour than the margin is
 `undetermined` (`symbolic/contour.ts`, `parseContour()`;
-`symbolic/contour-integrate.ts`, `exactFloatLiterals()`). The margin is a
-bound on the coordinates, not on the poles: the root of `a·z − b` moves by
-about `|b/a²|` times the error in `a`, and a multiple root moves by a
-fractional power of the error. The margin stops the last bit of a float
-from deciding a pole that sits on the contour; it does not prove that a pole
-farther away than the margin is on the right side. A strict bound needs a
-root-perturbation bound for each polynomial factor.
+`symbolic/contour-integrate.ts`, `exactFloatLiterals()`). The margin is a bound
+on the coordinates, not on the poles: the root of `a·z − b` moves by about
+`|b/a²|` times the error in `a`, and a multiple root moves by a fractional power
+of the error. The margin stops the last bit of a float from deciding a pole that
+sits on the contour; it does not prove that a pole farther away than the margin
+is on the right side. A strict bound needs a root-perturbation bound for each
+polynomial factor.
 
 ### The real-line residue route rejects a float integrand (OPEN, small — found 2026-10-07 by the contour integration review)
 
@@ -408,229 +535,205 @@ returns "unsupported: Rational coefficients must be exact", while the closed
 contours read a float as the exact rational it holds and answer a float. The
 `\int_{-\infty}^{\infty}` route is not affected: it integrates through the
 antiderivative. Extending the residue route needs a rule for a pole whose
-imaginary part is within the rounding of 0, because the float can move the
-pole onto or off the real axis.
+imaginary part is within the rounding of 0, because the float can move the pole
+onto or off the real axis.
 
 ### A forwarding caller of a value-held recursive function does not learn its collection parameter (OPEN, small — found 2026-10-08 by the self-call collection evidence review)
 
-With `let r = (n, s) => s if n == 0 else r(n - 1, [1, 2])` and
-`h(t) = r(1, t)`, `h([5])` gives `[[1, 2]]`: the narrowing of a forwarding
-caller (`box.ts`, the value-definition branch of
-`makeCanonicalFunctionCore`) reads the callee's evidence only when the callee
-is declared with the bare `function` type, not when its value definition has
-an inferred signature (a `let`-bound lambda), and not when the caller is
-defined before the callee. The same program with `r` as a named function
-gives `[1, 2]`. The gap is older than the self-call evidence: with the body
-evidence `s[1]` the same shapes give element-wise `incompatible-type` errors.
+With `let r = (n, s) => s if n == 0 else r(n - 1, [1, 2])` and `h(t) = r(1, t)`,
+`h([5])` gives `[[1, 2]]`: the narrowing of a forwarding caller (`box.ts`, the
+value-definition branch of `makeCanonicalFunctionCore`) reads the callee's
+evidence only when the callee is declared with the bare `function` type, not
+when its value definition has an inferred signature (a `let`-bound lambda), and
+not when the caller is defined before the callee. The same program with `r` as a
+named function gives `[1, 2]`. The gap is older than the self-call evidence:
+with the body evidence `s[1]` the same shapes give element-wise
+`incompatible-type` errors.
 
 ### After a reassignment, a value-held recursive function is typed against its previous literal (OPEN, small — found 2026-10-08 by the self-call collection evidence review)
 
 When `m` is reassigned a new recursive literal, the self-call inside the new
 body is typed against the literal that `m` held before, so the literal's own
-result type comes from the previous function: after assigning A, then B, then
-A again, `m(1, [0])` is typed `list<vector<integer^2>>` and evaluates to
-`[1, 2]`. The operator route types a self-call `unknown` while the literal
-canonicalizes; the value route (`boxed-function.ts`, `type()`) should do the
-same.
+result type comes from the previous function: after assigning A, then B, then A
+again, `m(1, [0])` is typed `list<vector<integer^2>>` and evaluates to `[1, 2]`.
+The operator route types a self-call `unknown` while the literal canonicalizes;
+the value route (`boxed-function.ts`, `type()`) should do the same.
 
 ### Binding a large list to a parameter recomputes its type at every call (OPEN, performance — found 2026-10-07 by the lazy-argument capture review)
 
-A recursion of depth 200 that passes a 3000-element list of strings takes 7
-to 10 s; a CPU profile puts most of it in `declareParameterActivation` →
+A recursion of depth 200 that passes a 3000-element list of strings takes 7 to
+10 s; a CPU profile puts most of it in `declareParameterActivation` →
 `_BoxedValueDefinition` → `inferTypeFromValue` → the `type` of the list, about
 20 ms per call, growing with the list length, repeated at every call
 (`boxed-expression/boxed-value-definition.ts` and the parameter binding in
-`function-utils.ts`). A list value's type could be memoized on the value, or
-the parameter activation could reuse the type the argument already carries.
+`function-utils.ts`). A list value's type could be memoized on the value, or the
+parameter activation could reuse the type the argument already carries.
 
 ### A parameter used inside a tuple makes the call broadcast over its argument (OPEN, small — found 2026-10-07 by the lazy-argument capture review)
 
-`g(s) = do { let q = (s, 0); 1 }` applied to a list is applied to EACH
-element of the list (with `incompatible-type` errors), and with the infinite
+`g(s) = do { let q = (s, 0); 1 }` applied to a list is applied to EACH element
+of the list (with `incompatible-type` errors), and with the infinite
 `map(x => x * 2, 1..oo)` it does not end. The use of `s` as a tuple component
-seems to infer `s` as a scalar parameter, which turns the call into a
-broadcast. `let (a, b) = (s, 0)` behaves the same. A use as a tuple component
-says nothing about the parameter being scalar.
-
-### A numeric index read types every element of an untyped lambda parameter as a number (OPEN, design decision — found 2026-10-07 by the zipped-tuple fix)
-
-`let f = p => !p[1] if p[2] % 2 == 0 else p[1]` is refused: "expected
-`boolean`, got `nan | real`". The parameter `p` has no type, and the first
-use typed, `p[2] % 2`, narrows `p` to `indexed_collection<real>` by the
-rule that one numeric index read decides the element type of every element
-(`docs/INFERENCE_ROADMAP.md` §5, ruling R1-A). A tuple `(boolean, integer)`
-fits both uses, and §5 itself names the mirror case as the risk to design
-against ("`And(xs[1], …)` must not poison `xs` for later numeric use"). With
-a typed source (`zip(open, 1..3)` now types its tuples) the program works;
-the bare lambda does not. Decision needed: narrow an untyped parameter from
-an index read to an indexed collection whose element type is the JOIN of the
-requirements of each index read (`p[1]` boolean, `p[2]` real), or to a tuple
-when the indices are literals, instead of one element type for all.
+seems to infer `s` as a scalar parameter, which turns the call into a broadcast.
+`let (a, b) = (s, 0)` behaves the same. A use as a tuple component says nothing
+about the parameter being scalar.
 
 ### Corpus playground follow-ups: compiled values that differ silently, bound names read as free, and timing outliers (OPEN, medium — found 2026-10-06 by the Epsil corpus playground)
 
-`npm run epsil:corpus-report` runs every program of `test/epsil/corpus/`
-through the interpreter and through the JavaScript compile target and writes
-`temp-docs/epsil-corpus/index.html` (see `test/epsil/corpus/README.md`). The
-run of 2026-10-06 over 107 programs: interpreted 101 as expected (the 6
-others are the recorded known failures); compiled 43 ran, 59 were declined,
-5 read a symbol with no value. The items below come from that run; rerun the
-report after a fix and read the page for the next ones.
+`npm run epsil:corpus-report` runs every program of `test/epsil/corpus/` through
+the interpreter and through the JavaScript compile target and writes
+`temp-docs/epsil-corpus/index.html` (see `test/epsil/corpus/README.md`). The run
+of 2026-10-06 over 107 programs: interpreted 101 as expected (the 6 others are
+the recorded known failures); compiled 43 ran, 59 were declined, 5 read a symbol
+with no value. The items below come from that run; rerun the report after a fix
+and read the page for the next ones.
 
-**Bound names read as free by the compile route (5 programs, status
-"unbound symbol").** Each is a construct the interpreter binds and the
-compiler does not: a top-level assignment without `let` (`exercism/grains`:
-`total = sum(…)`, reported as `total has no value`); a library function
-passed by name to a higher-order operator (`euler/005`:
-`reduce(1..20, lcm, 1)`, reported as `LCM`); the variable of a comprehension
-(`rosetta/100-doors-by-squares`: `[k for k in 1..100 if …]`, reported as
-`k`); and `symbolic/integrals`, reported as `Nothing has no value`, which
-names no symbol of the program at all. Three more declines are of the same
-family: "Could not compile invalid expression" on a body with `Declare`
-(`rosetta/100-doors`, `exercism/rna-transcription`), and "Unknown operator
-`m`" for the forward declaration `let m` of `rosetta/mutual-recursion`.
+**Bound names read as free by the compile route (5 programs, status "unbound
+symbol").** Each is a construct the interpreter binds and the compiler does not:
+a top-level assignment without `let` (`exercism/grains`: `total = sum(…)`,
+reported as `total has no value`); a library function passed by name to a
+higher-order operator (`euler/005`: `reduce(1..20, lcm, 1)`, reported as `LCM`);
+the variable of a comprehension (`rosetta/100-doors-by-squares`:
+`[k for k in 1..100 if …]`, reported as `k`); and `symbolic/integrals`, reported
+as `Nothing has no value`, which names no symbol of the program at all. Three
+more declines are of the same family: "Could not compile invalid expression" on
+a body with `Declare` (`rosetta/100-doors`, `exercism/rna-transcription`), and
+"Unknown operator `m`" for the forward declaration `let m` of
+`rosetta/mutual-recursion`.
 
-**Declines by missing lowering (46 of the 59 declines).** Operators the
-corpus uses that the JavaScript target does not lower, by number of programs
-blocked: `IntegerDigits` 7, `StringSplit` 3, `Set` 3, `Simplify` 3,
-`Divisors` 2, `UnicodeScalars` 2, `NumberFrom` 2, `N` 2, `DigitSum` 2, and
-one each of `Iterate`, `IntegerString`, `Permutations`, `LinearSolve`,
-`FactorInteger`, `PolynomialQuotient`, `Factor`, `Solve`. The symbolic ones
-are expected; the integer and string ones are candidates for a lowering.
-The other declines are typing refusals (`At` on a value not provably an
-indexed collection, 4; `String`/`Characters` on a value not provably text,
-5; a `Loop` or `Sum` bound that is not a finite number, 4; multi-index `At`,
-2; a `Find` over an infinite range; a `Sort` of characters; a mixed-string
-ordering; a `Filter` over a value that may be text).
+**Declines by missing lowering (46 of the 59 declines).** Operators the corpus
+uses that the JavaScript target does not lower, by number of programs blocked:
+`IntegerDigits` 7, `StringSplit` 3, `Set` 3, `Simplify` 3, `Divisors` 2,
+`UnicodeScalars` 2, `NumberFrom` 2, `N` 2, `DigitSum` 2, and one each of
+`Iterate`, `IntegerString`, `Permutations`, `LinearSolve`, `FactorInteger`,
+`PolynomialQuotient`, `Factor`, `Solve`. The symbolic ones are expected; the
+integer and string ones are candidates for a lowering. The other declines are
+typing refusals (`At` on a value not provably an indexed collection, 4;
+`String`/`Characters` on a value not provably text, 5; a `Loop` or `Sum` bound
+that is not a finite number, 4; multi-index `At`, 2; a `Find` over an infinite
+range; a `Sort` of characters; a mixed-string ordering; a `Filter` over a value
+that may be text).
 
 **Timing outliers.** The interpreted median is 98 ms. Programs above 5 s:
-`euler/004` 14.7 s (a comprehension of 5050 products with a palindrome
-test), `euler/030` 12.7 s (9000 elements, a digit-power sum each),
-`rosetta/100-doors` 12.4 s (100 passes of a `map` over a `zip` of 100: about
-1.2 ms per lambda application), `exercism/nth-prime` 9.2 s,
-`exercism/armstrong-numbers` 8.0 s (500 elements: 16 ms per element for
-`integerDigits`, a `map` and a `sum`), `rosetta/kaprekar-numbers` 6.1 s (100
-elements), `euler/036` 5.7 s, `euler/010` 5.2 s. The per-element cost of a
-user function applied inside `Filter`/`Map`/`Any` is the common factor (see
-the next entry). Compile time: median 7 ms, but `euler/010`
-(`sum(filter(1..99999, isPrime))`) took 6.9 s to compile and 0.02 ms to run,
-so the compile step evaluated the whole sum (constant folding of a closed
-program). The report should show that fold as what it is, or the target
-should bound it. Compiled run times are all under 12 ms.
+`euler/004` 14.7 s (a comprehension of 5050 products with a palindrome test),
+`euler/030` 12.7 s (9000 elements, a digit-power sum each), `rosetta/100-doors`
+12.4 s (100 passes of a `map` over a `zip` of 100: about 1.2 ms per lambda
+application), `exercism/nth-prime` 9.2 s, `exercism/armstrong-numbers` 8.0 s
+(500 elements: 16 ms per element for `integerDigits`, a `map` and a `sum`),
+`rosetta/kaprekar-numbers` 6.1 s (100 elements), `euler/036` 5.7 s, `euler/010`
+5.2 s. The per-element cost of a user function applied inside
+`Filter`/`Map`/`Any` is the common factor (see the next entry). Compile time:
+median 7 ms, but `euler/010` (`sum(filter(1..99999, isPrime))`) took 6.9 s to
+compile and 0.02 ms to run, so the compile step evaluated the whole sum
+(constant folding of a closed program). The report should show that fold as what
+it is, or the target should bound it. Compiled run times are all under 12 ms.
 
 ### A user function applied per element of a lazy collection costs about 100 µs per application (OPEN, performance — found 2026-10-06 by the Epsil program corpus, profiled 2026-10-07)
 
-With the iteration limit removed for Epsil programs, the full-size Project
-Euler programs give the right answers but are slow: `sum(filter(2..9999,
-isAmicable))` took about 20 s on a loaded machine, `filter(10..50000,
-isCurious)` about 20 s per walk. The corpus keeps reduced sizes for
-`euler/021`, `euler/029` and `euler/034`, and `rosetta/kaprekar-numbers`
-stops at 100.
+With the iteration limit removed for Epsil programs, the full-size Project Euler
+programs give the right answers but are slow: `sum(filter(2..9999, isAmicable))`
+took about 20 s on a loaded machine, `filter(10..50000, isCurious)` about 20 s
+per walk. The corpus keeps reduced sizes for `euler/021`, `euler/029` and
+`euler/034`, and `rosetta/kaprekar-numbers` stops at 100.
 
-**The second walk is fixed (2026-10-07).** A lazy `Filter`, `Map` or `Any`
-whose callback is a bare name (`filter(1..500, isArmstrong)`) was refused by
-the element memo (`snapshotDeps`,
-`boxed-expression/collection-element-memo.ts` declared the raw callback
-symbol an unbound dependency), where the same pipeline with an inline lambda
-was memoized. Printing the value walked it once for the preview and the host
-then walked it again, and two consumers of one `let` walked it twice: the
-application memo answered the body of a pure predicate on the second walk,
-but each element paid the boxing of its application again (about 100 µs per
-element: the second display of a 3000-element filter cost about 300 ms). The
-snapshot now records the resolution of the name, and a repeated walk of an
-unmodified instance is served from the memo. So a finite lazy collection DOES
-keep its elements after a complete walk; the named-callback case was a
-defect, not a design gap.
+**The second walk is fixed (2026-10-07).** A lazy `Filter`, `Map` or `Any` whose
+callback is a bare name (`filter(1..500, isArmstrong)`) was refused by the
+element memo (`snapshotDeps`, `boxed-expression/collection-element-memo.ts`
+declared the raw callback symbol an unbound dependency), where the same pipeline
+with an inline lambda was memoized. Printing the value walked it once for the
+preview and the host then walked it again, and two consumers of one `let` walked
+it twice: the application memo answered the body of a pure predicate on the
+second walk, but each element paid the boxing of its application again (about
+100 µs per element: the second display of a 3000-element filter cost about 300
+ms). The snapshot now records the resolution of the name, and a repeated walk of
+an unmodified instance is served from the memo. So a finite lazy collection DOES
+keep its elements after a complete walk; the named-callback case was a defect,
+not a design gap.
 
-**The first walk remains: about 100 µs per application of a named user
-function, measured 2026-10-07 by a CPU profile of `isEven(n) = n % 2 == 0`
-inside `filter(1..20000, isEven)` (box loaded, so an upper bound).** An
-inline lambda with an arithmetic body inside `map` costs 7 µs per element
-because it is lowered to a broadcast and never applied as a function; a body
-such as `sum(map(d => d^4, integerDigits(n))) == n` costs 0.25 to 1 ms per
-element. Where the time of a trivial body goes:
+**The first walk remains: about 100 µs per application of a named user function,
+measured 2026-10-07 by a CPU profile of `isEven(n) = n % 2 == 0` inside
+`filter(1..20000, isEven)` (box loaded, so an upper bound).** An inline lambda
+with an arithmetic body inside `map` costs 7 µs per element because it is
+lowered to a broadcast and never applied as a function; a body such as
+`sum(map(d => d^4, integerDigits(n))) == n` costs 0.25 to 1 ms per element.
+Where the time of a trivial body goes:
 
-- The body is typed again at every call (about a quarter of the call). A
-  call frame declares its parameters with `ce.declare`; every declaration
-  advances the `any` version axis
-  (`engine-configuration-lifecycle.ts`), and the type cache of every
-  expression keys on that axis (`BoxedFunction.type`), so `Mod(n, 2) == 0`
-  derives the types of its operands at each call. The read comes from the
-  broadcast check of `Equal` (`skipBroadcastForVectorOps`), which asks
-  whether each operand is a text atom, and `isTextAtom` reads the operand's
+- The body is typed again at every call (about a quarter of the call). A call
+  frame declares its parameters with `ce.declare`; every declaration advances
+  the `any` version axis (`engine-configuration-lifecycle.ts`), and the type
+  cache of every expression keys on that axis (`BoxedFunction.type`), so
+  `Mod(n, 2) == 0` derives the types of its operands at each call. The read
+  comes from the broadcast check of `Equal` (`skipBroadcastForVectorOps`), which
+  asks whether each operand is a text atom, and `isTextAtom` reads the operand's
   type. This is by design: the type of a body expression depends on what the
-  frame binds (`f(s) = s < "m"` broadcasts for a list and compares whole for
-  a string), and the `definitionVersion` axis exists for memos that must
-  survive these declarations.
+  frame binds (`f(s) = s < "m"` broadcasts for a list and compares whole for a
+  string), and the `definitionVersion` axis exists for memos that must survive
+  these declarations.
 - The application is boxed and canonicalized again at every call (about a
   quarter): `makeLambda` for a symbol callee builds `ce.function(name, args)`
   and evaluates it, so the direct-call route decides error bubbling and
-  validation. The application memo answers a repeated call with the same
-  number arguments, but a fresh argument pays the full boxing.
+  validation. The application memo answers a repeated call with the same number
+  arguments, but a fresh argument pays the full boxing.
 - The parameter declaration builds a full value definition
   (`declareSymbolValue`, about an eighth), and the application memo key
   serializes each argument to JSON.
 
 Candidates, none decided: key the type cache of a function body on the call
-frame instead of the engine generation (a redesign of cache invalidation);
-apply the literal of a symbol callee directly instead of boxing an
-application per call (the direct-call route's error and validation
-decisions would have to be kept); extend the compiled element function of
-`Map` (`library/map-auto-compile.ts`, lambdas only today) to a named user
-function whose body it can compile.
+frame instead of the engine generation (a redesign of cache invalidation); apply
+the literal of a symbol callee directly instead of boxing an application per
+call (the direct-call route's error and validation decisions would have to be
+kept); extend the compiled element function of `Map`
+(`library/map-auto-compile.ts`, lambdas only today) to a named user function
+whose body it can compile.
 
 ### A determinant with float entries keeps unfolded constants (OPEN, small — found 2026-10-06 by the review of the exact determinant fix; present before)
 
-The determinant is returned as the tensor field builds it, and neither the
-field `add` nor the `.add()` method folds an exact integer with a float. So
-`CharacteristicPolynomial([[1.5, 2], [3, 4]], x)` is
-`x^2 - 5.5 * x - 6 + 6`, and `Determinant([[x + 1.5, 1], [1, 2]])` is
-`2x - 1 + 3`. A second `.evaluate()` of the first result gives
-`x^2 - 5.5x + 0`, which still keeps a `+ 0`. To do: fold the numeric terms of
-the determinant when an entry is inexact, and find why `evaluate()` keeps the
-`+ 0` term.
+The determinant is returned as the tensor field builds it, and neither the field
+`add` nor the `.add()` method folds an exact integer with a float. So
+`CharacteristicPolynomial([[1.5, 2], [3, 4]], x)` is `x^2 - 5.5 * x - 6 + 6`,
+and `Determinant([[x + 1.5, 1], [1, 2]])` is `2x - 1 + 3`. A second
+`.evaluate()` of the first result gives `x^2 - 5.5x + 0`, which still keeps a
+`+ 0`. To do: fold the numeric terms of the determinant when an entry is
+inexact, and find why `evaluate()` keeps the `+ 0` term.
 
 ### A determinant above the size limit of the cofactor expansion is a nested quotient (OPEN, small — found 2026-10-06 by the exact determinant fix)
 
-`AbstractTensor.determinant()` (`tensor/tensors.ts`) expands the cofactors of
-a matrix with a symbolic entry up to 6×6, and of a matrix with exact
-irrational numbers up to 8×8. A larger matrix goes through Bareiss
-elimination, which divides by the previous pivot. A quotient by a sum of
-radicals or symbols is not reduced, so each step nests the previous one: the
-7×7 symbolic case and a 9×9 radical case give results of many thousand
-characters. The values are correct. To do: rationalize each exact Bareiss
-quotient, or use a division-free elimination. A radical whose square-free
-radicand is above 10⁶ also still becomes a float in a product
-(`ExactNumericValue.mul`), because such a radicand is not stored.
+`AbstractTensor.determinant()` (`tensor/tensors.ts`) expands the cofactors of a
+matrix with a symbolic entry up to 6×6, and of a matrix with exact irrational
+numbers up to 8×8. A larger matrix goes through Bareiss elimination, which
+divides by the previous pivot. A quotient by a sum of radicals or symbols is not
+reduced, so each step nests the previous one: the 7×7 symbolic case and a 9×9
+radical case give results of many thousand characters. The values are correct.
+To do: rationalize each exact Bareiss quotient, or use a division-free
+elimination. A radical whose square-free radicand is above 10⁶ also still
+becomes a float in a product (`ExactNumericValue.mul`), because such a radicand
+is not stored.
 
 ### `PolyLog` past |z| = 1 at an order above 170 stays unevaluated for a very large |z| (OPEN, small — found 2026-10-06 by the fix for issue #412)
 
-Past the unit circle, a real order uses the first terms of the power series
-when they give the value (`polylogSeriesOutsideDisk`,
-`numerics/numeric-complex.ts`). The series stops answering when its terms
-grow before they fall, which happens when |z| is large compared with 2ˢ,
-and on the branch cut z > 1 when the imaginary part −π·(ln z)^{s−1}/Γ(s)
-is above 1e−20. The other routes do not answer above the order 170: the
-inversion formula of the integer orders needs n!, which overflows a double
-at n = 171, and Jonquière's inversion of the non-integer orders needs
-Γ(s), which overflows at s ≈ 171.6. So `.N()` stays unevaluated for these
-points, although the values exist (mpmath gives
+Past the unit circle, a real order uses the first terms of the power series when
+they give the value (`polylogSeriesOutsideDisk`, `numerics/numeric-complex.ts`).
+The series stops answering when its terms grow before they fall, which happens
+when |z| is large compared with 2ˢ, and on the branch cut z > 1 when the
+imaginary part −π·(ln z)^{s−1}/Γ(s) is above 1e−20. The other routes do not
+answer above the order 170: the inversion formula of the integer orders needs
+n!, which overflows a double at n = 171, and Jonquière's inversion of the
+non-integer orders needs Γ(s), which overflows at s ≈ 171.6. So `.N()` stays
+unevaluated for these points, although the values exist (mpmath gives
 `polylog(250, 1e100) = 8.997e99 − 3.778e98i`):
 
-- integer orders: `PolyLog(171, z)`, `PolyLog(200, z)` and
-  `PolyLog(250, z)` for z = 1e100, −1e100, 1e100·i and 1e300 + 1e300·i;
-  `PolyLog(500, 1e100)`, `PolyLog(500, 1e300 + 1e300i)`,
-  `PolyLog(1000, 1e300 + 1e300i)`;
+- integer orders: `PolyLog(171, z)`, `PolyLog(200, z)` and `PolyLog(250, z)` for
+  z = 1e100, −1e100, 1e100·i and 1e300 + 1e300·i; `PolyLog(500, 1e100)`,
+  `PolyLog(500, 1e300 + 1e300i)`, `PolyLog(1000, 1e300 + 1e300i)`;
 - non-integer orders: `PolyLog(250.5, z)` for the same four z,
   `PolyLog(171.5, 1e300 + 1e300i)`, `PolyLog(1000.5, 1e300 + 1e300i)`,
   `PolyLog(200.5, 1e40)`, and also `PolyLog(20.25, 1e300 + 1e300i)`;
 - the compiled lane (`_SYS.polyLog`, real values only) gives `NaN` for
-  `PolyLog(171, −1e100)`, `PolyLog(200, −1e100)` and
-  `PolyLog(250, −1e100)`.
+  `PolyLog(171, −1e100)`, `PolyLog(200, −1e100)` and `PolyLog(250, −1e100)`.
 
-A possible route: the asymptotic expansion of Liₛ(z) for a large |ln z|
-(DLMF 25.12.12 with the Hurwitz zeta form of Jonquière's formula), with
-(2π)ˢ/Γ(s) computed from logarithms so that it does not overflow.
+A possible route: the asymptotic expansion of Liₛ(z) for a large |ln z| (DLMF
+25.12.12 with the Hurwitz zeta form of Jonquière's formula), with (2π)ˢ/Γ(s)
+computed from logarithms so that it does not overflow.
 
 ### `Norm` and `Hypot` in the other compile targets at extreme magnitudes (OPEN, investigation — found 2026-10-06 by the machine-precision `Norm` fix)
 
@@ -639,165 +742,147 @@ JavaScript `Norm`, `Hypot` and `Distance` scale the components by a power of 2
 when the largest one is outside the range where its square is a normal double
 (`scaledPNorm()` in `numerics/linear-algebra.ts`); the Python lowering scales
 the default, order-2 and Frobenius norms the same way (`pyNorm` in
-`compilation/python-target.ts`). Not done: a literal p-norm with p other than
-1, 2 and ∞ in Python (`|x|³` overflows above about 5.6e102, inside the range
-that the power-of-2 rule leaves alone), the interval `Hypot`
+`compilation/python-target.ts`). Not done: a literal p-norm with p other than 1,
+2 and ∞ in Python (`|x|³` overflows above about 5.6e102, inside the range that
+the power-of-2 rule leaves alone), the interval `Hypot`
 (`interval/elementary.ts`), the GLSL and WGSL lowerings (f32, whose range is
-much smaller), and the spectral norm `Norm(M, 2)`. To do: measure each at
-1e-200 and 1e200 (1e-30 and 1e30 for f32), and scale where the result
-underflows or overflows.
+much smaller), and the spectral norm `Norm(M, 2)`. To do: measure each at 1e-200
+and 1e200 (1e-30 and 1e30 for f32), and scale where the result underflows or
+overflows.
 
 ### The GPU Lerch tail integral may be inaccurate at a large order (OPEN, investigation — found 2026-10-06 by the Lerch kernel fix)
 
 `_gpu_lerch_hermite` in `compilation/gpu-target.ts` limits the width of an
-integration panel to 4/|ln |z|| but does not account for the phase rate
-|s|/b of the integrand. At s = −30 and b = 1, the first panel (width 1.5) has
-about 30 radians of phase for an 8-point rule. The interpreter's tail
-integral had the same problem (`hermiteTail` in `numerics/lerch-phi.ts`, now
-cut into parts with at most 12 radians each). The GPU helper is used only for
-s ≤ 0 after the other methods decline. To do: measure it against the f32 model
-of the GPU code, and cut its panels the same way if it is wrong.
+integration panel to 4/|ln |z|| but does not account for the phase rate |s|/b of
+the integrand. At s = −30 and b = 1, the first panel (width 1.5) has about 30
+radians of phase for an 8-point rule. The interpreter's tail integral had the
+same problem (`hermiteTail` in `numerics/lerch-phi.ts`, now cut into parts with
+at most 12 radians each). The GPU helper is used only for s ≤ 0 after the other
+methods decline. To do: measure it against the f32 model of the GPU code, and
+cut its panels the same way if it is wrong.
 
 ### `.N()` of a slowly divergent series takes about 30 seconds to decline (OPEN, performance — found 2026-10-09 by the divergence test for issue #326; present before)
 
-`\sum_{n=2}^\infty \frac{1}{n \ln n}` diverges, but so slowly that the
-limit comparison with the harmonic series is inconclusive
-(`lim n·f(n) = 0`), so `divergentInfiniteSum()` declines and `.N()` goes to
-the Richardson extrapolation (`acceleratedInfiniteSum()`, `library/utils.ts`).
-The extrapolation does not converge either, and evaluates its whole budget of
-32768 terms (`MAX_TERMS`) before it leaves the sum symbolic. Each term is
-evaluated by the interpreter (`assignLoopIndex` then `numericValueOf(body)`),
-at about 0.9 ms for a body with `ln` (measured on the shared machine under
-load: 29 seconds in total; about 1 second for the harmonic series before the
-divergence test, whose body costs about 30 µs per term). Two remedies, which
-can be combined: evaluate the terms with the compiled body, as
-`divergentInfiniteSum()` does (`implicitCompileNumeric`), which would make
-the whole budget cost milliseconds; and a divergence test for the family
-`1/(n (\ln n)^p)`, `p ≤ 1` (the Cauchy condensation test `Σ 2^k f(2^k)`
-reduces it to `Σ 1/k^p`), so that this family returns `+∞` instead of
-declining.
+`\sum_{n=2}^\infty \frac{1}{n \ln n}` diverges, but so slowly that the limit
+comparison with the harmonic series is inconclusive (`lim n·f(n) = 0`), so
+`divergentInfiniteSum()` declines and `.N()` goes to the Richardson
+extrapolation (`acceleratedInfiniteSum()`, `library/utils.ts`). The
+extrapolation does not converge either, and evaluates its whole budget of 32768
+terms (`MAX_TERMS`) before it leaves the sum symbolic. Each term is evaluated by
+the interpreter (`assignLoopIndex` then `numericValueOf(body)`), at about 0.9 ms
+for a body with `ln` (measured on the shared machine under load: 29 seconds in
+total; about 1 second for the harmonic series before the divergence test, whose
+body costs about 30 µs per term). Two remedies, which can be combined: evaluate
+the terms with the compiled body, as `divergentInfiniteSum()` does
+(`implicitCompileNumeric`), which would make the whole budget cost milliseconds;
+and a divergence test for the family `1/(n (\ln n)^p)`, `p ≤ 1` (the Cauchy
+condensation test `Σ 2^k f(2^k)` reduces it to `Σ 1/k^p`), so that this family
+returns `+∞` instead of declining.
 
 ### `Limit` at infinity of a difference of radicals stays unevaluated (OPEN, small — found 2026-10-14 by the fix of the exponential growth ranking)
 
-`\lim_{t\to\infty} \sqrt{t+1} - \sqrt{t}` stays unevaluated; the limit is
-`0`. No wrong value is given. The leading-order rewrite of the limit at
-infinity (`symbolic/limit.ts`) ranks the two radicals at the same growth
-level and has no rule that cancels them; the usual route multiplies by the
-conjugate (`(\sqrt{t+1} - \sqrt{t}) = 1/(\sqrt{t+1} + \sqrt{t})`) and then
-reads the quotient. A fix adds that rewrite for a difference of two radicals
-with the same growth level.
+`\lim_{t\to\infty} \sqrt{t+1} - \sqrt{t}` stays unevaluated; the limit is `0`.
+No wrong value is given. The leading-order rewrite of the limit at infinity
+(`symbolic/limit.ts`) ranks the two radicals at the same growth level and has no
+rule that cancels them; the usual route multiplies by the conjugate
+(`(\sqrt{t+1} - \sqrt{t}) = 1/(\sqrt{t+1} + \sqrt{t})`) and then reads the
+quotient. A fix adds that rewrite for a difference of two radicals with the same
+growth level.
 
 ### A complex-valued limit that is not finite has no answer (OPEN, design — found 2026-10-04, issue #396)
 
-`Limit(t ↦ i·t, ∞)` and `Limit(t ↦ Erf(i·t), ∞)` stay unevaluated: the
-engine has no directed complex infinity, and by the 2026-07-10 convention a
-limit never answers `ComplexInfinity`. Deciding that a limit whose modulus
-goes to `+∞` answers `ComplexInfinity` would give these an answer. The code
-is `complexLimitAtPosInf` in `symbolic/limit.ts`. Also not covered: a
-complex-valued function whose parts cannot be separated (only sums,
-products, quotients, integer powers and the exponential are), for example
-`t·Gamma(2 + i·t)`, whose symbolic limit is `0`; `.N()` gives a value near
-`0` for it.
+`Limit(t ↦ i·t, ∞)` and `Limit(t ↦ Erf(i·t), ∞)` stay unevaluated: the engine
+has no directed complex infinity, and by the 2026-07-10 convention a limit never
+answers `ComplexInfinity`. Deciding that a limit whose modulus goes to `+∞`
+answers `ComplexInfinity` would give these an answer. The code is
+`complexLimitAtPosInf` in `symbolic/limit.ts`. Also not covered: a
+complex-valued function whose parts cannot be separated (only sums, products,
+quotients, integer powers and the exponential are), for example
+`t·Gamma(2 + i·t)`, whose symbolic limit is `0`; `.N()` gives a value near `0`
+for it.
 
 ### `NLimit` gives `NaN` for a function that rises before it decays to 0 (OPEN, small — found 2026-10-04, issue #396; present before)
 
 `NLimit(t ↦ 7t/(t² + 9), ∞)` is `NaN`; the limit is `0`. The sample test
-`reliableLimitSamples` (`numerics/numeric.ts`) reads "the magnitude grew to
-a peak, then fell below `1e-8` of the peak" as catastrophic cancellation,
-and this function has that shape (0.7 at `t = 1`, 0.77 at `t = 8`, then a
-`7/t` decay). `Limit` answers it symbolically, so only the numeric route
-shows it — including the imaginary part of `(2t + i)/(t − 3i)`. A decay
-that is regular (each sample smaller than the one before by a near-constant
-ratio) is not a cancellation and could be told apart from one. A related
-point: a function that decays to 0 gives a residue such as `−9e-46`, not
-`0` (`NLimit(t ↦ |Gamma(i·t)|, ∞)`).
-
-### A spacing command inside a KroneckerDelta subscript with an expression index is read as a product (OPEN, decision — found 2026-10-14 by the fix that skips spacing between indices)
-
-`\delta_{n\,m}` and `\delta_{1\,2}` now read the thin space as a separator
-between two indices. When an index is an expression, the expression parser
-reads the spacing as an implicit multiplication instead: `\delta_{n+1\,m}`
-gives `KroneckerDelta(n + m)` (the thin space makes `1\,m` the product
-`1·m`), where an author probably means `KroneckerDelta(n + 1, m)`. The same
-ambiguity exists for `\delta_{n+1 m}`, and in ordinary mathematics a thin space
-can be a product. The options: split a delta subscript at every spacing
-command (a parsing design decision that treats the subscript of `\delta`
-differently from every other subscript), keep the product reading, or keep
-it and add a lenient-grammar ambiguity warning. If nothing is decided, the
-product reading stays.
+`reliableLimitSamples` (`numerics/numeric.ts`) reads "the magnitude grew to a
+peak, then fell below `1e-8` of the peak" as catastrophic cancellation, and this
+function has that shape (0.7 at `t = 1`, 0.77 at `t = 8`, then a `7/t` decay).
+`Limit` answers it symbolically, so only the numeric route shows it — including
+the imaginary part of `(2t + i)/(t − 3i)`. A decay that is regular (each sample
+smaller than the one before by a near-constant ratio) is not a cancellation and
+could be told apart from one. A related point: a function that decays to 0 gives
+a residue such as `−9e-46`, not `0` (`NLimit(t ↦ |Gamma(i·t)|, ∞)`).
 
 ### `Solve` of a periodic equation could return the exact family instead of the principal set (OPEN, design — found 2026-10-04 by the review of the `Solve` completeness rule)
 
-Since 2026-10-04, a `Solve` list holds all the solutions in the domain, with
-one exception: with no domain, or over ℝ or ℂ, a trigonometric equation gives
-its principal set (`Solve(sin x = 1/2, x)` is `[π/6, 5π/6]`), and the
-documentation says that every solution is one of these plus a multiple of the
-period. A cleaner result is the family itself, with an integer parameter, as
-the integer (diophantine) solver already returns (`n = 4t − 7` for all
-integers `t`): `sin x = 1/2` → `[π/6 + 2πt, 5π/6 + 2πt]`. This removes the
-only case where a `Solve` list is not every solution. It changes the result
-shape for every trigonometric equation without a domain, so it needs a
-decision on the parameter naming (the diophantine solver uses `t`, `t_1`, …)
-and a measurement of the snapshots it changes.
+Since 2026-10-04, a `Solve` list holds all the solutions in the domain, with one
+exception: with no domain, or over ℝ or ℂ, a trigonometric equation gives its
+principal set (`Solve(sin x = 1/2, x)` is `[π/6, 5π/6]`), and the documentation
+says that every solution is one of these plus a multiple of the period. A
+cleaner result is the family itself, with an integer parameter, as the integer
+(diophantine) solver already returns (`n = 4t − 7` for all integers `t`):
+`sin x = 1/2` → `[π/6 + 2πt, 5π/6 + 2πt]`. This removes the only case where a
+`Solve` list is not every solution. It changes the result shape for every
+trigonometric equation without a domain, so it needs a decision on the parameter
+naming (the diophantine solver uses `t`, `t_1`, …) and a measurement of the
+snapshots it changes.
 
 ### `Solve` over a bounded domain stays unevaluated in some cases that have a complete answer (OPEN, small — found 2026-10-04 by the completeness scan)
 
-Since 2026-10-04, a `Solve` over a bounded domain returns a list only when it
-is shown to be complete (`rootListIsComplete()` in
+Since 2026-10-04, a `Solve` over a bounded domain returns a list only when it is
+shown to be complete (`rootListIsComplete()` in
 `boxed-expression/solve-domain.ts`); otherwise it stays unevaluated (user
 decision). These cases stay unevaluated although a complete answer exists:
-- Far from 0, `rootSetDivisor()` compares `f(x)` with `f(x + T/n)` to a
-  relative 1e-9, which fails near `10^8`, so `sin(13x)·cos(x) = 0` over
+
+- Far from 0, `rootSetDivisor()` compares `f(x)` with `f(x + T/n)` to a relative
+  1e-9, which fails near `10^8`, so `sin(13x)·cos(x) = 0` over
   `[10^8, 10^8 + 7]` stays unevaluated. Sampling near 0 instead of near the
-  lower bound would fix it. (`sin(13x) = 0` over `[10^8, 10^8 + 1]` now has
-  its answer: the root finder gives both principal roots `0` and `π/13`.)
+  lower bound would fix it. (`sin(13x) = 0` over `[10^8, 10^8 + 1]` now has its
+  answer: the root finder gives both principal roots `0` and `π/13`.)
 - Near `10^12`, one ulp moves `sin` by about 1e-4, more than the scan's
   `1e-6·scale` threshold, so the scan declines (0.147.0 gave a correct list
   there).
-- `checkNonPeriodicRoots()` returns no answer when the solver finds no root,
-  so an equation that is not periodic never gets a certified `[]`.
-- An equation with the unknown in a function that the root finder cannot
-  invert (`hasNonInvertibleHead()`) gets no answer over a bounded interval,
-  also when the function has no root: `sin(x)·(BesselJ(0, 50x) + 2) = 0`
-  over `[0.5, 3]` was `[]` and now stays unevaluated. A bound on how fast
-  such a function can oscillate would let the scan check it.
-- Over a domain that is not bounded and is not ℝ or ℂ, a periodic equation
-  gets no answer, also when its roots are finite in number:
-  `x·sin(x) = 0` over `ℤ` (only `0`) and `sin(x) = 0` over `ℤ` were `[0]`
-  and now stay unevaluated. A proof that the periods have no common
-  multiple with the integers would give the answer.
-- `sin(x) = 1 - 10^-18` over `[0, 3]` or over ℝ: with the unknown
-  declared `real` (`symbolicRoots()`), `findUnivariateRoots()` gives no
-  root, so the `Solve` stays unevaluated. Without a domain, it gives both
-  roots `π/2 ± 1.4·10^-9`. The same occurs for `1 - c·10^-17` with
-  `c ≤ 8`.
-- When a factor of a product is not solved (`stats.partial`), the scan
-  accepts the list only when each root it finds is a change of sign of `f`
-  located to `10^-9·max(1, |x|)` and matches exactly one listed value
-  (`strict` in `rootListIsComplete()`). Thus a root at an end of the domain
-  (`sin(x)·(x + e^x + 5) = 0` over `[0, 4]`, root `0` at the lower bound),
-  and a root where `f` touches zero, give no answer. (The scan cannot tell
-  three roots in one cell of the scan from one root, but it no longer
-  accepts a list alone: the interval proof of the next entry rejects a list
-  that misses a root, except a root inside the window around a listed
-  root.)
+- `checkNonPeriodicRoots()` returns no answer when the solver finds no root, so
+  an equation that is not periodic never gets a certified `[]`.
+- An equation with the unknown in a function that the root finder cannot invert
+  (`hasNonInvertibleHead()`) gets no answer over a bounded interval, also when
+  the function has no root: `sin(x)·(BesselJ(0, 50x) + 2) = 0` over `[0.5, 3]`
+  was `[]` and now stays unevaluated. A bound on how fast such a function can
+  oscillate would let the scan check it.
+- Over a domain that is not bounded and is not ℝ or ℂ, a periodic equation gets
+  no answer, also when its roots are finite in number: `x·sin(x) = 0` over `ℤ`
+  (only `0`) and `sin(x) = 0` over `ℤ` were `[0]` and now stay unevaluated. A
+  proof that the periods have no common multiple with the integers would give
+  the answer.
+- `sin(x) = 1 - 10^-18` over `[0, 3]` or over ℝ: with the unknown declared
+  `real` (`symbolicRoots()`), `findUnivariateRoots()` gives no root, so the
+  `Solve` stays unevaluated. Without a domain, it gives both roots
+  `π/2 ± 1.4·10^-9`. The same occurs for `1 - c·10^-17` with `c ≤ 8`.
+- When a factor of a product is not solved (`stats.partial`), the scan accepts
+  the list only when each root it finds is a change of sign of `f` located to
+  `10^-9·max(1, |x|)` and matches exactly one listed value (`strict` in
+  `rootListIsComplete()`). Thus a root at an end of the domain
+  (`sin(x)·(x + e^x + 5) = 0` over `[0, 4]`, root `0` at the lower bound), and a
+  root where `f` touches zero, give no answer. (The scan cannot tell three roots
+  in one cell of the scan from one root, but it no longer accepts a list alone:
+  the interval proof of the next entry rejects a list that misses a root, except
+  a root inside the window around a listed root.)
 
 ### An unevaluated `Solve` from a parse keeps parse forms in its MathJSON (OPEN, small — found 2026-10-04)
 
 `Solve` holds its arguments, and `canonicalSolve()`
-(`boxed-expression/solve-domain.ts`) keeps the equation operand as written,
-on purpose. When `Solve` cannot give a complete list, it stays unevaluated,
-and the result holds that operand as it came from the parser:
+(`boxed-expression/solve-domain.ts`) keeps the equation operand as written, on
+purpose. When `Solve` cannot give a complete list, it stays unevaluated, and the
+result holds that operand as it came from the parser:
 `ce.parse('\operatorname{Solve}((x-2)(x+e^x)=0, x)').evaluate().json` is
-`["Solve", ["Equal", ["InvisibleOperator", ["Delimiter", …], ["Delimiter",
-…]], 0], "x"]`. The same input from `ce.box(...)` gives
-`["Multiply", …]`. The LaTeX is the same on both routes, but a host that
-reads the MathJSON sees `InvisibleOperator` and `Delimiter`. A canonical form
-of an equation stays an equation (`x - x = 0` keeps its `Equal`), so a
-possible fix is to return `Solve` with the canonical equation when the solver
-gives no answer. Before that change, find why the comment in
-`canonicalSolve()` says not to canonicalize the equation (for example, a
-symbol declared too early, before the domain spec is read).
+`["Solve", ["Equal", ["InvisibleOperator", ["Delimiter", …], ["Delimiter", …]], 0], "x"]`.
+The same input from `ce.box(...)` gives `["Multiply", …]`. The LaTeX is the same
+on both routes, but a host that reads the MathJSON sees `InvisibleOperator` and
+`Delimiter`. A canonical form of an equation stays an equation (`x - x = 0`
+keeps its `Equal`), so a possible fix is to return `Solve` with the canonical
+equation when the solver gives no answer. Before that change, find why the
+comment in `canonicalSolve()` says not to canonicalize the equation (for
+example, a symbol declared too early, before the domain spec is read).
 
 ### `Solve` over a bounded domain does not see a root that is very near a listed root (OPEN, medium — found 2026-10-04 by the interval proof of complete lists)
 
@@ -806,44 +891,42 @@ domain is complete (`enclosureShowsNoOtherRoot()` in
 `boxed-expression/solve-domain.ts`): each cell of the domain must have an
 enclosure of the equation that excludes 0, except the cells in the window
 `[v − t, v + t]` around each listed root `v`. The window tolerance `t` is
-`10^−6·max(1, |v|)` (at most 1/16 of a sample step), or `10^−9·max(1, |v|)`
-when the list is known to be partial. A second root inside a window is not
-seen: the two roots of `(sin x − 1/2)(sin x − 1/2 − 10^−8) = 0` are
-`1.15·10^−8` apart, and a list that holds only one of them passes the proof
-(the root finder gives both, thus the result is correct today). A proof of
-uniqueness would close this gap for a simple root: when the enclosure of
-the derivative `f'` over the window excludes 0, `f` is monotonic there and
-has at most one root.
-A root of higher multiplicity (`sin(x)^10` at `π`) has no such proof, so it
-needs a decision: keep the tolerance for it, or give no answer.
+`10^−6·max(1, |v|)` (at most 1/16 of a sample step), or `10^−9·max(1, |v|)` when
+the list is known to be partial. A second root inside a window is not seen: the
+two roots of `(sin x − 1/2)(sin x − 1/2 − 10^−8) = 0` are `1.15·10^−8` apart,
+and a list that holds only one of them passes the proof (the root finder gives
+both, thus the result is correct today). A proof of uniqueness would close this
+gap for a simple root: when the enclosure of the derivative `f'` over the window
+excludes 0, `f` is monotonic there and has at most one root. A root of higher
+multiplicity (`sin(x)^10` at `π`) has no such proof, so it needs a decision:
+keep the tolerance for it, or give no answer.
 
 ### `Solve` gives a periodic product the principal roots of each factor (OPEN, question — found 2026-10-04)
 
-Over ℝ or with no domain, `sin(2x)·cos(3x) = 0` gives the union of the
-principal roots of each factor: `[0, π/2, π/6, −π/6]`. Each root stands for
-its family with the period of its own factor (π and 2π/3). With the period of
-the product (2π), the translates of this list do not give every root (`π` is
-a root). Decide whether the principal roots of a product are per factor (the
-current result, which the documentation must then say) or per period of the
-whole equation.
+Over ℝ or with no domain, `sin(2x)·cos(3x) = 0` gives the union of the principal
+roots of each factor: `[0, π/2, π/6, −π/6]`. Each root stands for its family
+with the period of its own factor (π and 2π/3). With the period of the product
+(2π), the translates of this list do not give every root (`π` is a root). Decide
+whether the principal roots of a product are per factor (the current result,
+which the documentation must then say) or per period of the whole equation.
 
 ### `sin(sin(x)) = 0` has no answer (OPEN, small — found 2026-10-04)
 
 Since 2026-10-04, a trig function whose argument is not linear in the unknown
 gives no answer (`hasNonInvertibleHead()` in
-`boxed-expression/solve-domain.ts`), because the equation is not periodic in
-the unknown. `sin(sin(x)) = 0` is periodic (its argument is periodic), and
-its roots are `0` and `π` plus multiples of `2π`: it was `[0, π]`. A test for
-an argument that is itself a periodic function of a linear argument would
-give this answer again.
+`boxed-expression/solve-domain.ts`), because the equation is not periodic in the
+unknown. `sin(sin(x)) = 0` is periodic (its argument is periodic), and its roots
+are `0` and `π` plus multiples of `2π`: it was `[0, π]`. A test for an argument
+that is itself a periodic function of a linear argument would give this answer
+again.
 
 ### Results built with the library π change value on a JSON round trip when the user shadows `Pi` (OPEN, medium — found 2026-10-04 by the audit of the `Pi` sites)
 
 A user can declare `Pi` with another value (`ce.declare('Pi', { value: 3 })`;
 `ce.assign('Pi', 3)` is refused). A result built with `ce.Pi` holds a symbol
 bound to the library constant, so its `.N()` is right in the same expression,
-but its MathJSON is the name `"Pi"`, which boxes again with the user value.
-On 2026-10-04, `evaluate()` was made to stay symbolic at the sites in
+but its MathJSON is the name `"Pi"`, which boxes again with the user value. On
+2026-10-04, `evaluate()` was made to stay symbolic at the sites in
 `boxed-expression/trigonometry.ts`, `library/trigonometry.ts`,
 `library/complex.ts` and `boxed-expression/arithmetic-power.ts` when `Pi` is
 shadowed. These sites still build results with the library π: `K(0) = π/2` in
@@ -860,76 +943,38 @@ symbolic at each site, as done for the trigonometric sites).
 
 ### interval-js declines an index into the tuple that a block-local function returns (OPEN, small — found 2026-10-04 by the collection-valued function bodies)
 
-On the interval target, a block-local function whose body returns a tuple or
-a list now compiles to an array of enclosures, and so does a `Block` whose
-value is a tuple (`compileCollectionValueBlock`,
-`compilation/base-compiler.ts`). But `At(f(x), 1)` over such a local `f`
-declines with "first operand is not an indexed collection", while the
-interpreter gives the component (4 for `f := (u) ↦ (u+1, 2)` at `x = 3`). The
-`At` lowering of the interval target reads the static type of its first
-operand, and a call of a local declared `function` is typed `any`. A fix lets
-`At` accept an operand that the target recorded as spelled as a collection
-value (the same record that makes `f(x) + 1` decline with a reason), and reads
-the enclosure at the index.
-
-### The type of a call can be out of date after its function is reassigned (OPEN, design decision — found 2026-10-04 by the review of boxing-time refusal)
-
-A call of a user function is checked against the function's parameters when
-it is boxed. Since 2026-10-04, a call that was REFUSED at boxing is checked
-again at evaluation and when its type is read, so it follows a later
-reassignment of the function (`_refusedOps` and `_recheckedCall()` in
-`boxed-expression/boxed-function.ts`; the rule is in `docs/ERROR-MODEL.md`).
-The opposite direction is not covered: a call that was ACCEPTED at boxing,
-whose function is then replaced by one that refuses the operand, evaluates to
-the correct error, but its `.type` keeps the type of the old function.
-Example: `g := (u: string) ↦ 1`, box `g("abc")` (type `integer`), then
-`g := (u: real) ↦ 7`: the call evaluates to an `incompatible-type` error and is
-still typed `integer`. The same holds on the operator-definition route
-(`h := (u) ↦ 1`, then `h := (u: real) ↦ 7`). A fix checks every user-function
-call again when its type is read after the function's definition changed (a
-version stamp on the definition makes this cheap for calls whose function did
-not change), or re-canonicalizes the calls that depend on a function when it
-is reassigned.
+On the interval target, a block-local function whose body returns a tuple or a
+list now compiles to an array of enclosures, and so does a `Block` whose value
+is a tuple (`compileCollectionValueBlock`, `compilation/base-compiler.ts`). But
+`At(f(x), 1)` over such a local `f` declines with "first operand is not an
+indexed collection", while the interpreter gives the component (4 for
+`f := (u) ↦ (u+1, 2)` at `x = 3`). The `At` lowering of the interval target
+reads the static type of its first operand, and a call of a local declared
+`function` is typed `any`. A fix lets `At` accept an operand that the target
+recorded as spelled as a collection value (the same record that makes `f(x) + 1`
+decline with a reason), and reads the enclosure at the index.
 
 ### Contour integration does not certify the complex roots of most polynomials of degree 3 or more (OPEN, small — found 2026-10-04 by the review of PR #410)
 
-`ce.contourIntegrate()` needs every root of a denominator in exact form. For
-a polynomial of degree 3 or more that is not even, it uses `solve()`, which
-returns only the real roots. The pole set is then not certified and the
-status is `unsupported`: `1/(z³ − 2)` and `z/(z⁷ − 1)` on `|z| = 2` stay
-unevaluated. An attempt that wrote the roots of `zⁿ − c` as
-`|c|^(1/n)(cos θ + i sin θ)` gave correct values, but took 1.2 s to 1.5 s for
-`n = 3` and reached the 5 s time limit for `n = 5` and `n = 7`. Most of the
-time goes to the exact sign tests and the Laurent expansions at points that
-contain `cos(2π/n)`. A fix needs a cheaper residue at a simple pole of
-`h(z)/(zⁿ − c)`, which is `h(p)·p/(n·c)`, computed before the Laurent kernel
-runs, and a measurement of where the remaining time goes.
+`ce.contourIntegrate()` needs every root of a denominator in exact form. For a
+polynomial of degree 3 or more that is not even, it uses `solve()`, which
+returns only the real roots. The pole set is then not certified and the status
+is `unsupported`: `1/(z³ − 2)` and `z/(z⁷ − 1)` on `|z| = 2` stay unevaluated.
+An attempt that wrote the roots of `zⁿ − c` as `|c|^(1/n)(cos θ + i sin θ)` gave
+correct values, but took 1.2 s to 1.5 s for `n = 3` and reached the 5 s time
+limit for `n = 5` and `n = 7`. Most of the time goes to the exact sign tests and
+the Laurent expansions at points that contain `cos(2π/n)`. A fix needs a cheaper
+residue at a simple pole of `h(z)/(zⁿ − c)`, which is `h(p)·p/(n·c)`, computed
+before the Laurent kernel runs, and a measurement of where the remaining time
+goes.
 
 ### Residue sums and real integrals are not always in a simple form (OPEN, small — found 2026-10-04 by the review of PR #410)
 
-The values are correct, but `simplify()` does not reduce them.
-`cos z/(z² + 1)²` on `|z| = 2` gives
-`2iπ(¼ sin(−i) + ¼ sin(i) − ¼i cos(i) + ¼i cos(−i))`, which is 0:
-`sin(−i) + sin(i)` is not combined, because the odd-function rule does not
+The values are correct, but `simplify()` does not reduce them. `cos z/(z² + 1)²`
+on `|z| = 2` gives `2iπ(¼ sin(−i) + ¼ sin(i) − ¼i cos(i) + ¼i cos(−i))`, which
+is 0: `sin(−i) + sin(i)` is not combined, because the odd-function rule does not
 read the complex literal `−i` as a negation. `∫ (x² − 1)/((x − 1)(x⁴ + 1)) dx`
 over `(−∞, ∞)` gives `π/(2(2 − √2)) − π/(2(2 + √2))` instead of `π/√2`.
-
-### Symbolic integration and `DSolve` have no default budget (OPEN, design decision — found 2026-10-03 by the `x^x` hang in integration by parts)
-
-A plain `evaluate()` of `Integrate` or `DSolve` has no deadline unless the
-caller opens one with `ce.withTimeLimit(...)`, and the built-in antiderivative
-(`symbolic/antiderivative.ts`) and `DSolve` count no steps (only the Rubi
-driver and the compiler have a step budget). The only bound that is always on
-is the cap of 8 nested integration-by-parts frames, which does not bound the
-total work. One cause of runaway work was fixed on 2026-10-03: integration by
-parts chose `u = x^x`, whose derivative contains `x^x` again, and it accepted a
-result that still held an `Integrate`, so `∫ e^x x^x dx` overflowed the stack
-and `y'' + y = x^x` ran for more than 300 s. Other integrands that make no
-progress can still run for a long time. A fix gives the built-in antiderivative
-(and the variation-of-parameters step of `DSolve`) a step budget like
-`RUBI_STEP_BUDGET` in `rubi/driver.ts`, so that the result does not depend on
-the machine, and decides what an exhausted budget returns (the unevaluated
-`Integrate`, as Rubi does).
 
 ### Whole-number powers of one matrix do not combine (OPEN, small — found 2026-10-05 by the matrix fix for issue #415)
 
@@ -938,54 +983,52 @@ the machine, and decides what an exhausted budget returns (the unevaluated
 whole-number power of a matrix is the matrix power and the powers of one matrix
 commute. The products stay because canonicalization writes these powers as
 `MatrixPower(…)`, and no rule merges two `MatrixPower` factors with the same
-base. The same-base rules in `simplify-power.ts` (`canCombineSameBase()`)
-refuse every other combination of matrix factors on purpose (the product of
-matrices is the matrix product, while `Exp` and a non-integer `Power` of a
-matrix are element-wise).
+base. The same-base rules in `simplify-power.ts` (`canCombineSameBase()`) refuse
+every other combination of matrix factors on purpose (the product of matrices is
+the matrix product, while `Exp` and a non-integer `Power` of a matrix are
+element-wise).
 
 ### Indexing and slicing a collection whose count is a `bigint` (OPEN, decided 2026-10-06 — issue #416)
 
-A collection count that is not a safe integer is a `bigint` (`expr.count`,
-the `count` collection handler; see `smallCount()` in
+A collection count that is not a safe integer is a `bigint` (`expr.count`, the
+`count` collection handler; see `smallCount()` in
 `boxed-expression/collection-count.ts`). The readers that index or slice with
-the count still take a `number`, so they treat such a count as unknown:
-`at()` takes a `number` index, and `Last(Range(1, 10^20))` stays unevaluated
-because the last index, 10^20, is not a safe integer. Decision: make `at()`
-and the readers that compute an index from the count (`Last`, a negative
-index, `Take`/`Drop` with a negative count, `Most`, the rotations) accept a
-`bigint` index, so that these give their value.
+the count still take a `number`, so they treat such a count as unknown: `at()`
+takes a `number` index, and `Last(Range(1, 10^20))` stays unevaluated because
+the last index, 10^20, is not a safe integer. Decision: make `at()` and the
+readers that compute an index from the count (`Last`, a negative index,
+`Take`/`Drop` with a negative count, `Most`, the rotations) accept a `bigint`
+index, so that these give their value.
 
 ### Reducers over a `Range`: three cases still walk or round (OPEN, small — found 2026-10-06 by the closed forms of `Sum` and `Mean` over a `Range`)
 
-`Sum`, `Mean`, `Median`, `Variance`, `PopulationVariance`, `Max` and `Min`
-of a literal `Range` with exact bounds and step use a closed form
+`Sum`, `Mean`, `Median`, `Variance`, `PopulationVariance`, `Max` and `Min` of a
+literal `Range` with exact bounds and step use a closed form
 (`library/range-closed-form.ts`). Three cases do not:
 
-- A `Range` held by a symbol (`r := Range(1, 10^6)`, then `Sum(r)`) still
-  walks every element, because the check reads only a literal `Range`
-  operand.
-- Under `.N()`, `Mean`, `Median` and the variances receive their operand
-  already made numeric, so `Range(-17, 0, 1/3)` arrives with the float step
-  0.333…, the closed form does not apply, and the walk gives
-  `-8.50000000000000060577` instead of `-8.5`. A fix: read the operand before
-  it is made numeric (hold it), as `Sum` does.
+- A `Range` held by a symbol (`r := Range(1, 10^6)`, then `Sum(r)`) still walks
+  every element, because the check reads only a literal `Range` operand.
+- Under `.N()`, `Mean`, `Median` and the variances receive their operand already
+  made numeric, so `Range(-17, 0, 1/3)` arrives with the float step 0.333…, the
+  closed form does not apply, and the walk gives `-8.50000000000000060577`
+  instead of `-8.5`. A fix: read the operand before it is made numeric (hold
+  it), as `Sum` does.
 - Compiled JavaScript builds the whole array before it reduces it
-  (`_SYS.range(1, n, …).reduce(…)`, `_SYS.mean(_SYS.range(…))`), so the
-  memory use grows with `n`. The closed form, or a counted loop, would not.
+  (`_SYS.range(1, n, …).reduce(…)`, `_SYS.mean(_SYS.range(…))`), so the memory
+  use grows with `n`. The closed form, or a counted loop, would not.
 
 ### Symbolic interval arithmetic in `evaluate()` (OPEN, investigation — issue #416, 2026-10-05)
 
 `Interval(a, b)` is a set of reals, so a numeric function of an interval is a
 type error (`Sin(Interval(0, 1))`), and `Abs(Interval(−1, 2))` is the
-cardinality of the set, `+∞`. Interval arithmetic exists only in compiled
-code: `compile(expr, {to: 'interval-js'})` and the `IntervalArithmetic`
-functions of `@cortex-js/compute-engine/interval` give `|[−1, 2]| = [0, 2]`.
-To investigate: a way for `evaluate()` to compute the image of an interval
-under a numeric function (`Sin(Interval(0, 1))` → `Interval(0, sin 1)`),
-exact where the endpoints are exact, without a second meaning for the
-operators that already accept a set (`Abs` as the cardinality). One possible
-form is a separate head for an interval value, distinct from the set
-`Interval`.
+cardinality of the set, `+∞`. Interval arithmetic exists only in compiled code:
+`compile(expr, {to: 'interval-js'})` and the `IntervalArithmetic` functions of
+`@cortex-js/compute-engine/interval` give `|[−1, 2]| = [0, 2]`. To investigate:
+a way for `evaluate()` to compute the image of an interval under a numeric
+function (`Sin(Interval(0, 1))` → `Interval(0, sin 1)`), exact where the
+endpoints are exact, without a second meaning for the operators that already
+accept a set (`Abs` as the cardinality). One possible form is a separate head
+for an interval value, distinct from the set `Interval`.
 
 ### `simplify()` does not fully simplify the terms of a quotient's numerator (OPEN, small — found 2026-10-03 by the odd and even function rules)
 
@@ -995,75 +1038,75 @@ circular trigonometric function (`boxed-expression/simplify.ts`); the rule for
 odd and even functions of a negated argument was added to that list on
 2026-10-03. The numerator of a quotient gets only numeric folding, so
 `(Si(1) − Si(−1))/2` stays as it is, while `Si(1) − Si(−1)` simplifies to
-`2Si(1)`. The same holds for trigonometric terms. A fix simplifies the
-numerator and the denominator of a `Divide` like the operands of a sum, with
-the same guards against runaway rewriting.
+`2Si(1)`. The same holds for trigonometric terms. A fix simplifies the numerator
+and the denominator of a `Divide` like the operands of a sum, with the same
+guards against runaway rewriting.
 
 ### A quotient has two canonical forms: `x·(1/y)` and `x/y` (OPEN, medium — measured 2026-10-03; user decision: not now)
 
-`ce.box(['Multiply', 'x', ['Divide', 1, 'y']])` stays `Multiply(x, Divide(1, y))`,
-and `.isSame(ce.box(['Divide', 'x', 'y']))` is `false`. Parsing
-`x\times(y^2+z^2)^{-1}` gives the same product form, because
+`ce.box(['Multiply', 'x', ['Divide', 1, 'y']])` stays
+`Multiply(x, Divide(1, y))`, and `.isSame(ce.box(['Divide', 'x', 'y']))` is
+`false`. Parsing `x\times(y^2+z^2)^{-1}` gives the same product form, because
 `canonicalPower` turns `Power(D, -1)` into `Divide(1, D)` and
 `canonicalMultiply()` (`boxed-expression/arithmetic-mul-div.ts`) never merges a
 `Divide` factor with the other factors. `evaluate()` and `simplify()` give
 `Divide(x, y)` for both, so only `isSame`, hashing and pattern matching see two
 forms. A fold in `canonicalMultiply()` that returns
 `canonicalDivide(numerators, denominators)` for a product of scalars with a
-`Divide` factor was measured on the full suite. It must not land until these
-are fixed first:
+`Divide` factor was measured on the full suite. It must not land until these are
+fixed first:
 
-1. `expandProduct()` (called by `mul()` through `expandProducts()`) has
-   branches for `Divide` operands that distribute into a sum numerator and
-   call `.mul()`/`.div()` recursively. With the fold, product-rule terms
-   become `Divide` nodes and the derivative of a nested radical takes
-   exponential time (depth 12: 670 ms → 2,760 ms; `derivatives.test.ts` and
-   both `compile-derivative-numeric-fallback` test files did not finish).
+1. `expandProduct()` (called by `mul()` through `expandProducts()`) has branches
+   for `Divide` operands that distribute into a sum numerator and call
+   `.mul()`/`.div()` recursively. With the fold, product-rule terms become
+   `Divide` nodes and the derivative of a nested radical takes exponential time
+   (depth 12: 670 ms → 2,760 ms; `derivatives.test.ts` and both
+   `compile-derivative-numeric-fallback` test files did not finish).
 2. A factor `Power(y, -n)` with `n ≠ 1` must go to the denominator too, or
    `x·y^{-2}` and `x/y^2` stay two forms (and `Divide(2,x)·x^{-2}` prints as a
    nested fraction).
 3. `.N()` must give floats for the literals of a quotient it builds:
    `(1/3)·(1/x)` stayed the exact `1/(3x)` with the fold.
-4. Three integrals stayed unevaluated with the fold (`\int_{-1}^1 a\frac{\sin
-   t}{t}dt`, `\int\frac{\mathrm{arcsinh}(x)}{x}dx` and the Rubi case `#544`),
-   because a constant factor ended up inside a numerator. The integrator now
-   splits constant numerator factors (fixed 2026-10-03), so re-measure this.
+4. Three integrals stayed unevaluated with the fold
+   (`\int_{-1}^1 a\frac{\sin t}{t}dt`, `\int\frac{\mathrm{arcsinh}(x)}{x}dx` and
+   the Rubi case `#544`), because a constant factor ended up inside a numerator.
+   The integrator now splits constant numerator factors (fixed 2026-10-03), so
+   re-measure this.
 
-After these, about 7 snapshots and 3 assertions change, all to a single
-quotient form. The measured patch was `/tmp/recipfold.patch` (one file,
+After these, about 7 snapshots and 3 assertions change, all to a single quotient
+form. The measured patch was `/tmp/recipfold.patch` (one file,
 `arithmetic-mul-div.ts`); it is not kept in the repository.
 
 ### The Python target does not compile a block-local function (OPEN, small — found 2026-10-03 by the compilation of reassigned block-local functions)
 
-A `Block` that binds a function literal to a local name and calls it compiles
-on the JavaScript target (`let k = (u) => 2 * u; return k(_.x)`) and on the
+A `Block` that binds a function literal to a local name and calls it compiles on
+the JavaScript target (`let k = (u) => 2 * u; return k(_.x)`) and on the
 interval target, but the Python target declines every form of it: the
-`const`/`let` form, `Declare` + `Assign`, and a name assigned again. It gives
-no wrong value, but the messages do not say why: "Unknown operator `k`", "If:
-wrong number of arguments", or the list-arithmetic decline. Python has local
-function values (`k = lambda u: 2 * u`), so the JavaScript lowering of
-block-local functions (`noteLocalFunction`, `tryCompileLocalFunctionCall` and
+`const`/`let` form, `Declare` + `Assign`, and a name assigned again. It gives no
+wrong value, but the messages do not say why: "Unknown operator `k`", "If: wrong
+number of arguments", or the list-arithmetic decline. Python has local function
+values (`k = lambda u: 2 * u`), so the JavaScript lowering of block-local
+functions (`noteLocalFunction`, `tryCompileLocalFunctionCall` and
 `reboundLocalNames` in `compilation/base-compiler.ts`) can be given a Python
 spelling. Until then, the decline must name the cause. Tests to mirror:
 `test/compute-engine/compile-block-local-function.test.ts`.
 
 ### Nested `D` costs about 1.5 times more when its variables were declared before (OPEN, small — found 2026-10-03 by the fix of the index form of a partial derivative)
 
-`D(D(D(D(D(D(Arctan2(y, x), y), y), y), x), x), x)` in a new engine takes
-about 0.3 s of CPU time. If `Arctan2(y, x)` is boxed first, so that `y` and
-`x` are declared before the `D` expression is boxed, the same evaluation
-takes about 0.5 s. A chain of `differentiate()` calls
-(`symbolic/derivative.ts`) on symbols declared in an enclosing scope costs
-about 2 times as much as the nested `D`. The result is the same in all three
-cases, and the types of `x` and `y` are the same (`real | signed_infinity`).
-The slow cases compute FEWER types that are not in the cache (4,547 against
-6,203 for the nested `D`), but each costs more: a CPU profile shows about 10
-times more time in `isSubtype`, `reduceUnionType` and `deriveApplicationType`
-under `get type` (`boxed-expression/boxed-function.ts`), called from
-`sortProductOperands` (`isTensorProductOperand`) and from the product and
-sum code in `arithmetic-mul-div.ts` and `arithmetic-add.ts`. Find why the
-type of a new product or sum costs more when its symbols are declared in an
-outer scope than when a `D` declares them, and remove the difference. The
+`D(D(D(D(D(D(Arctan2(y, x), y), y), y), x), x), x)` in a new engine takes about
+0.3 s of CPU time. If `Arctan2(y, x)` is boxed first, so that `y` and `x` are
+declared before the `D` expression is boxed, the same evaluation takes about 0.5
+s. A chain of `differentiate()` calls (`symbolic/derivative.ts`) on symbols
+declared in an enclosing scope costs about 2 times as much as the nested `D`.
+The result is the same in all three cases, and the types of `x` and `y` are the
+same (`real | signed_infinity`). The slow cases compute FEWER types that are not
+in the cache (4,547 against 6,203 for the nested `D`), but each costs more: a
+CPU profile shows about 10 times more time in `isSubtype`, `reduceUnionType` and
+`deriveApplicationType` under `get type` (`boxed-expression/boxed-function.ts`),
+called from `sortProductOperands` (`isTensorProductOperand`) and from the
+product and sum code in `arithmetic-mul-div.ts` and `arithmetic-add.ts`. Find
+why the type of a new product or sum costs more when its symbols are declared in
+an outer scope than when a `D` declares them, and remove the difference. The
 index form `Derivative(f, k₁, …, kₙ)` avoids it: it evaluates the nested `D`
 over symbols that no outer scope declares (`library/calculus.ts`).
 
@@ -1071,180 +1114,174 @@ over symbols that no outer scope declares (`library/calculus.ts`).
 
 The same numeric integral takes 7 ms under `tsx` and 185 ms under jest (one
 inner `_SYS.integrate` call); the nested integral
-`\int_0^{10}\int_3^4 (y-x)^{-2} dx dy` takes 1.6 s under `tsx` and about
-117 s under jest, so it has no end-to-end test. The test group "an iterated
-integral with a singular endpoint"
-(`test/compute-engine/quadrature-endpoint-singularity.test.ts`) takes about
-60 s. The transpile target is modern, so the cause is elsewhere in the jest
+`\int_0^{10}\int_3^4 (y-x)^{-2} dx dy` takes 1.6 s under `tsx` and about 117 s
+under jest, so it has no end-to-end test. The test group "an iterated integral
+with a singular endpoint"
+(`test/compute-engine/quadrature-endpoint-singularity.test.ts`) takes about 60
+s. The transpile target is modern, so the cause is elsewhere in the jest
 environment (the `vm` context, the coverage or transform settings in
-`config/jest.config.cjs`). Find it: it inflates the full-suite time and
-makes timing tests of numeric code unreliable.
+`config/jest.config.cjs`). Find it: it inflates the full-suite time and makes
+timing tests of numeric code unreliable.
 
 ### A numeric integral next to a singular bound: remaining cases (OPEN, small — found 2026-10-01 by the review of quadrature for an integrand that does not compile)
 
 `Integrate(f, x, a, b).N()` and `NIntegrate` (`integrateRealPart`,
-`library/calculus.ts`) find the part of an integral next to a singular bound
-by extrapolation of the shells of the corner panel, and check a converged
-result against the tanh-sinh rule (`resolveSingularEndpoints`,
-`numerics/endpoint-quadrature.ts`). The compiled `_SYS.integrate` and the
-levels of an iterated integral (`nIntegrateMultiple`) do the same. These
-cases remain (measured 2026-10-01):
+`library/calculus.ts`) find the part of an integral next to a singular bound by
+extrapolation of the shells of the corner panel, and check a converged result
+against the tanh-sinh rule (`resolveSingularEndpoints`,
+`numerics/endpoint-quadrature.ts`). The compiled `_SYS.integrate` and the levels
+of an iterated integral (`nIntegrateMultiple`) do the same. These cases remain
+(measured 2026-10-01):
 
 - ∫₀¹ t^(−0.995)·ln t dt = −1/0.005² = −40000 gives `NaN` under `.N()` and
-  `NIntegrate` with a COMPILED integrand: with 1500 panels the divergence
-  test of the shells (`shellsDiverge`, `numerics/gauss-kronrod.ts`) reads it
-  as divergent before the extrapolation runs. An integrand that does not
-  compile (330 panels) gives `-39999.99995 ± 0.00025`.
+  `NIntegrate` with a COMPILED integrand: with 1500 panels the divergence test
+  of the shells (`shellsDiverge`, `numerics/gauss-kronrod.ts`) reads it as
+  divergent before the extrapolation runs. An integrand that does not compile
+  (330 panels) gives `-39999.99995 ± 0.00025`.
 - A pole with a large regular part at a NONZERO bound is not found by the
-  quadrature: ∫₀¹ (1/(1 − t) − 10⁵) dt (`+∞`) gives a Monte-Carlo value such
-  as `-99963 ± 32` under `.N()`, and ∫₀^{π/2} (tan t − 10⁴) dt (`+∞`)
-  gives `-15676.4 ± 9.0`. `.evaluate()` gives `+∞` for both.
+  quadrature: ∫₀¹ (1/(1 − t) − 10⁵) dt (`+∞`) gives a Monte-Carlo value such as
+  `-99963 ± 32` under `.N()`, and ∫₀^{π/2} (tan t − 10⁴) dt (`+∞`) gives
+  `-15676.4 ± 9.0`. `.evaluate()` gives `+∞` for both.
 - ∫₀^½ dt/(t·ln t) diverges to `−∞` (`.evaluate()` gives `−∞`). The shells
   shrink like `1/n`, which the divergence test reads as convergent. The
-  Gauss–Kronrod value (`-6.9392539460415 ± 0.0000000000048` before) differs
-  from the tanh-sinh value and no extrapolation agrees, so its error is
-  widened, and `.N()` gives `-6.9 ± 1.6` (the Gauss–Kronrod value, kept
-  next to a singular corner that is not resolved, `singularCorner`). The
-  model fitted to the shells (`shellTrend`, `numerics/endpoint-quadrature.ts`)
-  gives the power `q = −1.0` for this integral and `q = −2.0` for the
-  convergent `1/(t·ln²t)`: it declines the extrapolation, but does not report
-  the divergence. A power `q ≥ −1` with no geometric decrease (`ρ ≈ 0`) could
-  be reported as divergent.
-- ∫₀¹ t⁻³⁰⁰ dt gives `+oo ± NaN` under `.N()` (a `Measurement` with no
-  error) instead of `+∞`: the integrand overflows at every node close to 0, so
-  the quadrature never sees a divergence.
-- A converged error can be smaller than the rounding of the value:
-  ∫₀¹ sin x dx under `.N()` gives
-  `0.4596976941318603460118 ± 0.0000000000000000000085`, an error below the
-  spacing of the doubles near the value (`5.6e-17`), and digits that a double
-  does not have. QUADPACK keeps the error of a panel at least
+  Gauss–Kronrod value (`-6.9392539460415 ± 0.0000000000048` before) differs from
+  the tanh-sinh value and no extrapolation agrees, so its error is widened, and
+  `.N()` gives `-6.9 ± 1.6` (the Gauss–Kronrod value, kept next to a singular
+  corner that is not resolved, `singularCorner`). The model fitted to the shells
+  (`shellTrend`, `numerics/endpoint-quadrature.ts`) gives the power `q = −1.0`
+  for this integral and `q = −2.0` for the convergent `1/(t·ln²t)`: it declines
+  the extrapolation, but does not report the divergence. A power `q ≥ −1` with
+  no geometric decrease (`ρ ≈ 0`) could be reported as divergent.
+- ∫₀¹ t⁻³⁰⁰ dt gives `+oo ± NaN` under `.N()` (a `Measurement` with no error)
+  instead of `+∞`: the integrand overflows at every node close to 0, so the
+  quadrature never sees a divergence.
+- A converged error can be smaller than the rounding of the value: ∫₀¹ sin x dx
+  under `.N()` gives `0.4596976941318603460118 ± 0.0000000000000000000085`, an
+  error below the spacing of the doubles near the value (`5.6e-17`), and digits
+  that a double does not have. QUADPACK keeps the error of a panel at least
   `50·ε·∫|f|` over the panel; `gk15` (`numerics/gauss-kronrod.ts`) has no such
   floor.
-- An oscillation in `ln(1 − t)` whose period is longer than the shells next
-  to 1 is not found: ∫₀¹ sin(0.05·ln(1 − t))/(1 − t) dt has no value, but its
-  28 shells next to 1 have one sign and fit the model of a convergent series
+- An oscillation in `ln(1 − t)` whose period is longer than the shells next to 1
+  is not found: ∫₀¹ sin(0.05·ln(1 − t))/(1 − t) dt has no value, but its 28
+  shells next to 1 have one sign and fit the model of a convergent series
   (`x^(−p)·lnᵠx`) to `7e-4` in logarithm (`SHELL_MODEL_RESIDUAL` is `1e-3`;
   convergent integrands measured fit to `3.2e-4`), and `.N()` gives
   `-19.99999999 ± 0.00000020`. With `0.1·ln` the fit is `8.7e-3`, and `.N()`
   gives `-18.7 ± 8.5`.
-- A convergent integral whose oscillation shrinks slowly is reported as
-  having no value when the shells are few: ∫₀¹ cos(ln t)/t^0.999 dt
-  (`0.000999999`) gives `NaN` on a level of an iterated integral (100
-  panels: the largest shell in the last quarter is 0.96 times the largest in
-  the first quarter, above `SHELL_OSCILLATION_STEADY`). With 330 or 1500
-  panels it is not reported, but the Gauss–Kronrod value is wrong (`1.15` or
-  `-0.105`) and the error does not converge.
+- A convergent integral whose oscillation shrinks slowly is reported as having
+  no value when the shells are few: ∫₀¹ cos(ln t)/t^0.999 dt (`0.000999999`)
+  gives `NaN` on a level of an iterated integral (100 panels: the largest shell
+  in the last quarter is 0.96 times the largest in the first quarter, above
+  `SHELL_OSCILLATION_STEADY`). With 330 or 1500 panels it is not reported, but
+  the Gauss–Kronrod value is wrong (`1.15` or `-0.105`) and the error does not
+  converge.
 - Next to a bound of large magnitude, the corner panel reaches the spacing of
-  the doubles after few bisections, and fewer than 12 shells are accurate,
-  so no extrapolation is possible: ∫ (t − 10⁶)^(−0.99) dt = 100 on
-  `[10⁶, 10⁶ + 1]` gives `20.31 ± 0.59` under `.N()`. For
-  ∫ (t − 10⁶)^(−½) dt = 2 the adaptive quadrature gives
-  `1.9999772 ± 0.0000106` (true error 2.3e-5); the error reported by `.N()`
-  (`± 0.00063`, the Monte-Carlo floor) covers it.
+  the doubles after few bisections, and fewer than 12 shells are accurate, so no
+  extrapolation is possible: ∫ (t − 10⁶)^(−0.99) dt = 100 on `[10⁶, 10⁶ + 1]`
+  gives `20.31 ± 0.59` under `.N()`. For ∫ (t − 10⁶)^(−½) dt = 2 the adaptive
+  quadrature gives `1.9999772 ± 0.0000106` (true error 2.3e-5); the error
+  reported by `.N()` (`± 0.00063`, the Monte-Carlo floor) covers it.
 - The display of a `Measurement` with an error below `1e-100` fails:
-  `ce.box(['Measurement', 1e-297, 1e-306]).toString()` returns the text of
-  the exception `toFixed() digits argument must be between 0 and 100`
+  `ce.box(['Measurement', 1e-297, 1e-306]).toString()` returns the text of the
+  exception `toFixed() digits argument must be between 0 and 100`
   (`roundMeasurementForDisplay`, `numerics/strings.ts`, calls `toFixed` with
-  more than 100 digits). So `.N()` of ∫₀¹ 10⁻³⁰⁰·t^(−0.999) dt prints that
-  text, although its value is `1.0000000000095e-297`.
-- The compile-time fold price of a numeric integral
-  (`FOLD_QUADRATURE_EVALS`, `compilation/base-compiler.ts`) covers the
-  Gauss–Kronrod quadrature and the tanh-sinh check, but not the oscillatory
-  quadrature of a semi-infinite interval (`integrateSemiInfiniteOscillatory`,
+  more than 100 digits). So `.N()` of ∫₀¹ 10⁻³⁰⁰·t^(−0.999) dt prints that text,
+  although its value is `1.0000000000095e-297`.
+- The compile-time fold price of a numeric integral (`FOLD_QUADRATURE_EVALS`,
+  `compilation/base-compiler.ts`) covers the Gauss–Kronrod quadrature and the
+  tanh-sinh check, but not the oscillatory quadrature of a semi-infinite
+  interval (`integrateSemiInfiniteOscillatory`,
   `numerics/oscillatory-quadrature.ts`), which `integrateRealPart` and
-  `_SYS.integrate` run first. It integrates up to 2000 lobes, each by
-  adaptive Gauss–Kronrod with up to 256 panels (`LOBE_PANELS`), after a scan
-  of up to 200 000 steps for each zero, and when no value is found it runs
-  the adaptive quadrature over the whole interval, so its worst case is far
-  above the price. A typical run takes about 3e3 evaluations
-  (∫₀^∞ sin x/√x dx: 3000).
+  `_SYS.integrate` run first. It integrates up to 2000 lobes, each by adaptive
+  Gauss–Kronrod with up to 256 panels (`LOBE_PANELS`), after a scan of up to 200
+  000 steps for each zero, and when no value is found it runs the adaptive
+  quadrature over the whole interval, so its worst case is far above the price.
+  A typical run takes about 3e3 evaluations (∫₀^∞ sin x/√x dx: 3000).
 
 ### An oscillatory integral with two frequencies whose ratio is not rational is `NaN` (OPEN, small — found 2026-10-03 by the fix for issue #405)
 
 `∫₀^∞ sin t·cos(√2·t)/t dt = 0` and `∫₀^∞ sin t·cos(√3·t)/√t dt` are `NaN`
-(`integrateSemiInfiniteOscillatory`, `numerics/oscillatory-quadrature.ts`).
-The lobes of such an integrand have no period, so their sums are not
-accelerated by the ε-algorithm (the values move irregularly) or by the Levin
-u-transform of the sums of one period of lobes (there is no period). After
-2000 lobes, the routine returns `NaN` rather than a value with an error that
-is too small; before the fix, Monte Carlo gave `0.072 ± 0.018` for the first
-integral. A method that does not depend on the lobes is necessary: for
-example, write the integral as `∫ₐ^X f + ∫_X^∞ f` and find the tail from an
-asymptotic expansion of `f`, or accelerate the partial integrals `∫ₐ^X f` as
-a function of `X` (Sidi's mW transformation with a period of each
-frequency). `(sin t + sin(√2·t))/t` has a value after 2000 lobes, with an
-error of `6.8e-6`.
+(`integrateSemiInfiniteOscillatory`, `numerics/oscillatory-quadrature.ts`). The
+lobes of such an integrand have no period, so their sums are not accelerated by
+the ε-algorithm (the values move irregularly) or by the Levin u-transform of the
+sums of one period of lobes (there is no period). After 2000 lobes, the routine
+returns `NaN` rather than a value with an error that is too small; before the
+fix, Monte Carlo gave `0.072 ± 0.018` for the first integral. A method that does
+not depend on the lobes is necessary: for example, write the integral as
+`∫ₐ^X f + ∫_X^∞ f` and find the tail from an asymptotic expansion of `f`, or
+accelerate the partial integrals `∫ₐ^X f` as a function of `X` (Sidi's mW
+transformation with a period of each frequency). `(sin t + sin(√2·t))/t` has a
+value after 2000 lobes, with an error of `6.8e-6`.
 
 ### An oscillatory integral from a lower bound far from 0 whose lobes repeat a pattern is `NaN` (OPEN, small — found 2026-10-04 by the review fixes for issue #405)
 
 From 0, `∫ sin t·cos 3t/t dt`, `∫ sin t·(2 + cos t)/t dt` and
-`∫ (sin t + sin 2t)/t dt` have a value. From `a = 100`, `1000` or `10⁴` they
-are `NaN` (`integrateSemiInfiniteOscillatory`,
+`∫ (sin t + sin 2t)/t dt` have a value. From `a = 100`, `1000` or `10⁴` they are
+`NaN` (`integrateSemiInfiniteOscillatory`,
 `numerics/oscillatory-quadrature.ts`). The sums of their lobes converge as
 `1/k`, so the ε-algorithm does not find the integral, and they need the Levin
 u-transform of the block sums (`blockLevin`). Far from 0, the block sums
-decrease slowly in the index `j` of the block (as `(a/W + j)^(−2)`, with `W`
-the width of a block), the estimate of the exponent of the decrease is less
-than `LEVIN_MIN_BLOCK_DECAY`, and no Levin value is returned. A Levin
-u-transform with the index shifted by `a/W` was tried: for
-`sin t·(2 + cos t)/t` from `10⁴` its value was `1.8e-4` from the integral,
-with a range of its values of only `7e-8`, so it was not kept. Possible
-methods: write the integral as the sum of the integrals of each frequency
-when the integrand is a known product of sines and cosines; or accelerate
-the partial integrals as a function of the upper bound (Sidi's mW
-transformation). `∫ₐ^∞ sin(t/2)·cos 2t/t dt` has a value from these bounds,
-because its ε values converge.
+decrease slowly in the index `j` of the block (as `(a/W + j)^(−2)`, with `W` the
+width of a block), the estimate of the exponent of the decrease is less than
+`LEVIN_MIN_BLOCK_DECAY`, and no Levin value is returned. A Levin u-transform
+with the index shifted by `a/W` was tried: for `sin t·(2 + cos t)/t` from `10⁴`
+its value was `1.8e-4` from the integral, with a range of its values of only
+`7e-8`, so it was not kept. Possible methods: write the integral as the sum of
+the integrals of each frequency when the integrand is a known product of sines
+and cosines; or accelerate the partial integrals as a function of the upper
+bound (Sidi's mW transformation). `∫ₐ^∞ sin(t/2)·cos 2t/t dt` has a value from
+these bounds, because its ε values converge.
 
 User decision (2026-10-04): until a method gives a value, the result stays
 `NaN`. Do not let these integrals fall back to Monte Carlo. Before the fix for
-#405, Monte Carlo gave `-0.033 ± 0.027` for `∫_{100}^∞ sin t·cos 3t/t dt`
-(true value `-0.0019`) and `0.072 ± 0.018` for `∫₀^∞ sin t·cos(√2·t)/t dt`
-(true value 0, four times the error away).
+#405, Monte Carlo gave `-0.033 ± 0.027` for `∫_{100}^∞ sin t·cos 3t/t dt` (true
+value `-0.0019`) and `0.072 ± 0.018` for `∫₀^∞ sin t·cos(√2·t)/t dt` (true value
+0, four times the error away).
 
 ### A nested iterated integral on the parse route loses the error of the inner integral (OPEN, small — found 2026-10-01 by the review of the endpoint quadrature; present before)
 
 `.N()` of `\int_0^1\int_0^1 e^{-xy}/x^{0.99} dx dy` gives
-`99.575857194449625 ± 0.000000000000000011`; the integral is
-`99.5758571944484`, so the true error is `1.2e-12`, 1e5 times the reported
-error. The outer integral compiles its integrand, which holds the inner
-integral, to `_SYS.integrate` (`compilation/javascript-target.ts`). That
-call returns a plain number, so the error of the inner quadrature is not
-added to the error of the outer one, as `nIntegrateMultiple`
-(`library/calculus.ts`) does for `Integrate(f, Limits(x, …), Limits(y, …))`.
+`99.575857194449625 ± 0.000000000000000011`; the integral is `99.5758571944484`,
+so the true error is `1.2e-12`, 1e5 times the reported error. The outer integral
+compiles its integrand, which holds the inner integral, to `_SYS.integrate`
+(`compilation/javascript-target.ts`). That call returns a plain number, so the
+error of the inner quadrature is not added to the error of the outer one, as
+`nIntegrateMultiple` (`library/calculus.ts`) does for
+`Integrate(f, Limits(x, …), Limits(y, …))`.
 
 ### The order of several `Limits` of `Integrate`: the parser and the documentation disagree with the evaluation (OPEN, decided 2026-10-01 — found by the review of the pole proofs. Decision: keep "first = outer", as Mathematica does; change the parser so that `\iint f\,dx\,dy` gives `Limits(y), Limits(x)`, and correct the reference)
 
-`Integrate(f, Limits(x, …), Limits(y, …))` is evaluated with the FIRST
-`Limits` as the OUTERMOST integral (the Mathematica convention): the
-`evaluate()` loop integrates the last `Limits` first, `nIntegrateMultiple`
-(`library/calculus.ts`) lets the bounds of limit `i` depend on the variables
-of limits `0…i−1`, and two tests in `test/compute-engine/calculus.test.ts`
-("dependent inner bound: triangle", "a bound referencing an INNER
-integration variable declines") lock this in. `Sum` and `Product` document
-the same order (`doc/82-reference-collections.md`: "the first spec being the
-outermost"). But the parser reads `\iint f\,dx\,dy` as `Limits(x),
-Limits(y)`, with the innermost variable (`dx`) first, and the double-integral
-example of `doc/81-reference-calculus.md` lists `Tuple(x, 0, 2)` (the inner
-integral of `\int_1^3\int_0^2 … dx dy`) first. With constant bounds the
-order does not change the value. With a dependent bound it does:
-`Integrate(x·y, Limits(x, 0, 2y), Limits(y, 0, 1))` evaluates to `y²` (the
-`y` in the bound of `x` is a free `y`), while the reviewer read it as
-`∫₀¹ ∫₀^{2y} x·y dx dy = 1/2`. A bounded iterated integral on the parse route
-is a nested `Integrate`, which is not affected. Decision needed: keep the
+`Integrate(f, Limits(x, …), Limits(y, …))` is evaluated with the FIRST `Limits`
+as the OUTERMOST integral (the Mathematica convention): the `evaluate()` loop
+integrates the last `Limits` first, `nIntegrateMultiple` (`library/calculus.ts`)
+lets the bounds of limit `i` depend on the variables of limits `0…i−1`, and two
+tests in `test/compute-engine/calculus.test.ts` ("dependent inner bound:
+triangle", "a bound referencing an INNER integration variable declines") lock
+this in. `Sum` and `Product` document the same order
+(`doc/82-reference-collections.md`: "the first spec being the outermost"). But
+the parser reads `\iint f\,dx\,dy` as `Limits(x), Limits(y)`, with the innermost
+variable (`dx`) first, and the double-integral example of
+`doc/81-reference-calculus.md` lists `Tuple(x, 0, 2)` (the inner integral of
+`\int_1^3\int_0^2 … dx dy`) first. With constant bounds the order does not
+change the value. With a dependent bound it does:
+`Integrate(x·y, Limits(x, 0, 2y), Limits(y, 0, 1))` evaluates to `y²` (the `y`
+in the bound of `x` is a free `y`), while the reviewer read it as
+`∫₀¹ ∫₀^{2y} x·y dx dy = 1/2`. A bounded iterated integral on the parse route is
+a nested `Integrate`, which is not affected. Decision needed: keep the
 first-outermost convention (then change the `\iint` parse order and the
 documentation example), or change to innermost-first (then change the
 evaluation, `nIntegrateMultiple` and the two tests).
 
 ### `.N()` of a `Block` does not make its body numeric (OPEN, small — found 2026-10-01 by the parity fix for `∫₋₁¹ π/t dt`)
 
-`ce.box(["Block", ["Sin", 1]]).N()` gives `sin(1)`, and
-`Block(π/0.001).N()` gives `1000π`, where `["Sin", 1]` alone gives
-`0.841…`. The body of a function literal parsed from LaTeX is a `Block` of
-one expression, so every sample of such an integrand with a constant was not
-a number, and the interior-pole check of `.N()` saw no pole (it now unwraps
-the `Block` in `valueAt`, `symbolic/interior-pole.ts`). The `Block` evaluate
-handler (`library/control-structures.ts`) should pass the numeric request
-to the expressions it evaluates.
+`ce.box(["Block", ["Sin", 1]]).N()` gives `sin(1)`, and `Block(π/0.001).N()`
+gives `1000π`, where `["Sin", 1]` alone gives `0.841…`. The body of a function
+literal parsed from LaTeX is a `Block` of one expression, so every sample of
+such an integrand with a constant was not a number, and the interior-pole check
+of `.N()` saw no pole (it now unwraps the `Block` in `valueAt`,
+`symbolic/interior-pole.ts`). The `Block` evaluate handler
+(`library/control-structures.ts`) should pass the numeric request to the
+expressions it evaluates.
 
 ### A sum or product with a bound that depends on another index stays unevaluated (OPEN, small — found 2026-10-01 by the review of the flat spelling of indexes)
 
@@ -1255,25 +1292,12 @@ shape (`Integrate(1, Limits(x, 0, 1), Limits(y, 0, x))` is `1/2`).
 
 ### Two leftovers of the extend mode of `ce.declare()` (OPEN, small — found 2026-10-01 by the work on issue #394)
 
-- A `ce.declare()` of a VALUE that throws leaves the name bound to a
-  placeholder value. The same leak on the operator route was fixed with the
-  extend mode (`declareSymbolOperator`, `engine-declarations.ts`, restores the
-  previous binding while the placeholder is still in place); the value route
-  was left unchanged because callers on the assignment route may depend on the
-  placeholder. Check those callers, then restore the previous binding there
-  too.
-
-### Rule strings are parsed without the engine's own LaTeX notation (OPEN, decision — found 2026-10-01 by the work on `LatexSyntax.addEntries()` for issue #393)
-
-A rule given as a LaTeX string is parsed with the default dictionary plus the
-rule entries (`boxed-expression/rules.ts`, the parse of rule strings), not with
-the engine's `latexSyntax`. So notation added with
-`ce.latexSyntax.addEntries()`, or given as the `dictionary` of a `LatexSyntax`
-at construction, does not apply in rule strings: with `\mathbb{Z}/n\mathbb{Z}`
-mapped to `IntegerModRing`, a rule `\mathbb{Z}/n\mathbb{Z} -> …` reads it as
-`QuotientRing(Integers, n)`. This was already true before `addEntries()`. The
-decision: parse rule strings with the engine's notation (rules then depend on
-the engine), or keep the default dictionary and document it.
+- A `ce.declare()` of a VALUE that throws leaves the name bound to a placeholder
+  value. The same leak on the operator route was fixed with the extend mode
+  (`declareSymbolOperator`, `engine-declarations.ts`, restores the previous
+  binding while the placeholder is still in place); the value route was left
+  unchanged because callers on the assignment route may depend on the
+  placeholder. Check those callers, then restore the previous binding there too.
 
 ### Epsil has no lowercase spelling for an operator of a caller library (OPEN, design — issue #393, evaluated 2026-10-01)
 
@@ -1282,257 +1306,154 @@ Epsil writes a standard operator with an initial lowercase letter (`sin` for
 (`epsilLibraryNames()`, `src/epsil/library-names.ts`), and a decision of
 2026-09-05 makes it the same for every engine
 (`docs/plans/2026-09-05-epsil-standard-library-lowercase-aliases.md`, §9
-decision 2, §11 and §12). An operator of a caller library has no spelling.
-With `IntegerModRing` loaded from a library (constructor `libraries` option
-or `ce.loadLibrary()`):
+decision 2, §11 and §12). An operator of a caller library has no spelling. With
+`IntegerModRing` loaded from a library (constructor `libraries` option or
+`ce.loadLibrary()`):
 
-- `executeEpsil(ce, "integerModRing(5)")` gives `integerModRing(5)`, an
-  unknown head. Wanted: `IntegerModRing(5)`.
-- `serializeEpsil(["IntegerModRing", 5])` gives `IntegerModRing(5)`. Wanted,
-  for symmetry with the standard names: `integerModRing(5)`.
+- `executeEpsil(ce, "integerModRing(5)")` gives `integerModRing(5)`, an unknown
+  head. Wanted: `IntegerModRing(5)`.
+- `serializeEpsil(["IntegerModRing", 5])` gives `IntegerModRing(5)`. Wanted, for
+  symmetry with the standard names: `integerModRing(5)`.
 
 Why it was not done with the library work: the parse side has the engine
 (`resolveLibraryNames(ast, source, ce)`), but `serializeEpsil()` is a free
-function over MathJSON with no engine, and its callers (`epsil format`, the
-MCP `serialize` tool, the static diagnostics snippets) do not have the engine
-that loaded the library. A per-engine table that only the parse side reads
-would make `integerModRing(5)` read as `IntegerModRing(5)` but print as
-`IntegerModRing(5)`, which breaks the symmetry of §12. The other readers of
-the table (`binderSitesOf()`, the did-you-mean of `executeEpsil`, `epsil doc`)
-would also need the engine.
+function over MathJSON with no engine, and its callers (`epsil format`, the MCP
+`serialize` tool, the static diagnostics snippets) do not have the engine that
+loaded the library. A per-engine table that only the parse side reads would make
+`integerModRing(5)` read as `IntegerModRing(5)` but print as
+`IntegerModRing(5)`, which breaks the symmetry of §12. The other readers of the
+table (`binderSitesOf()`, the did-you-mean of `executeEpsil`, `epsil doc`) would
+also need the engine.
 
 The options:
 
 1. A per-engine extension of the table, filled from the provenance that
    `ce.loadLibrary()` and the constructor record (`ce.libraryOf()`): each
    caller-library name gets the spelling `epsilNameOf()` gives, with the same
-   exclusions, and is refused when the spelling is already a standard
-   spelling or is bound by the engine. The serializer gets a new option (for
-   example `libraryNames: { extra: ReadonlyMap<string, string> }`, or an
-   engine), and every caller that has an engine passes it. Larger than the
-   other options: all the readers above change.
+   exclusions, and is refused when the spelling is already a standard spelling
+   or is bound by the engine. The serializer gets a new option (for example
+   `libraryNames: { extra: ReadonlyMap<string, string> }`, or an engine), and
+   every caller that has an engine passes it. Larger than the other options: all
+   the readers above change.
 2. An optional `epsilName` on a library (a map from the MathJSON name to the
    spelling, for example `{ IntegerModRing: 'integerModRing' }`), checked with
-   the same rules as option 1. Gives the library author control of the
-   spelling; the same plumbing as option 1.
+   the same rules as option 1. Gives the library author control of the spelling;
+   the same plumbing as option 1.
 3. Leave the table as is: an author writes the MathJSON name
    (`IntegerModRing(5)`), which already works on both sides. Nothing to do.
 
 If nothing is decided, option 3 applies.
 
-### A named call through a variable with an INFERRED function type keeps the parameter order of the value it held when the call was made canonical (OPEN, decision — found 2026-10-01 by the fix for a variable declared `function`)
+### A named call of a user function redefined with other parameter names is re-read without its names (OPEN, small — found 2026-10-15 by the change that re-checks a call after its function is reassigned)
 
-The decision of 2026-10-01 rejects the names of a call through a variable
-whose DECLARED type gives no parameter names (`valueCalleeSignature`,
-`boxed-expression/named-arguments.ts`). A variable with no declaration
-(`let alias = bob_S` in Epsil, `ce.assign('alias', …)` with no
-`ce.declare`) still matches the names against its INFERRED type, and that
-type follows each assignment of a function symbol. So the old defect remains
-for it. Example in Epsil, with `bob_S(x, factor)` computing `x * factor` and
-`other(factor, x)` computing `factor - x`:
+A call of a user function is checked again when its type is read or when it is
+evaluated after the function's definition changed (`_calleeStamp` in
+`boxed-expression/boxed-function.ts`). For a call through a VARIABLE with an
+inferred function type, the written argument names are kept with the stamp, and
+the re-read matches them against the function the variable holds now. For a call
+of an OPERATOR definition (`h := (x, factor) ↦ …`, then `h := (factor, x) ↦ …`),
+the stamp keeps no names, so the re-read uses the positional operands of the
+first match. Keep the written names on that route too.
 
-```
-let alias = bob_S
-function g() { alias(3, factor: 5) }
-alias = other
-g()
-```
+### A collection that holds a call refused at boxing does not evaluate its other elements (OPEN, small — found 2026-10-15 by the change that re-checks a call after its function is reassigned)
 
-gives `-2`, while the names ask for `2`: the body of `g` was made canonical
-as `alias(3, 5)`. Rejecting the names for an inferred type would also reject
-`f := (x: number, y: string) => …` followed by `f(y: "a", x: 1)`, a
-documented and tested use. The options: keep the parameter names of the first
-assigned value in the inferred type (a later assignment with other names is
-then an error), match the names again when the call is evaluated, or leave it.
-
-The same kind of callee also loses `lazy`: with `y := 10`, a lazy `bob_H` and
-`aliasH: function` holding `bob_H`, `aliasH(y·z)` gives `Hold(10·z)`, while
-`bob_H(y·z)` gives `Hold(y·z)`.
+With `a := 5` and `h` a function that refuses `"abc"`, the Epsil list
+`[a, h("abc")]` evaluates to `[a, Error(…)]`: the first element stays the symbol
+`a`. The rule "a collection keeps the refused call in its cell" (pinned) makes
+the whole list invalid at boxing, and an invalid list does not evaluate its
+elements. The other elements should evaluate; only the refused cell is the
+error.
 
 ### A compiled loop that assigns `xs = ReplaceAt(xs, i, v)` copies the whole list at each assignment (OPEN, small — issue #386, 2026-10-01)
 
-A compiled `Fold` whose step only updates its accumulator now updates a copy
-of the seed in place (`inPlaceUpdateChains`,
-`compilation/in-place-update.ts`, used by the `Reduce` lowerings of the
-JavaScript and Python targets). A loop that keeps the list in a local
-variable and replaces it at each turn, `xs = ReplaceAt(xs, i, v)`, still
-copies the list at each assignment: O(n) per turn, O(n²) for a loop that
-visits each element once. The same analysis applies: the assignment can write
-in place when the variable holds an array the loop created (copy it once
-before the loop) and no other value can hold a reference to it (every other
-use of `xs` is a read in `NON_RETAINING_READS`). Not requested yet; the
-reporter of #386 mentions a cycle walk that may be written as a loop.
+A compiled `Fold` whose step only updates its accumulator now updates a copy of
+the seed in place (`inPlaceUpdateChains`, `compilation/in-place-update.ts`, used
+by the `Reduce` lowerings of the JavaScript and Python targets). A loop that
+keeps the list in a local variable and replaces it at each turn,
+`xs = ReplaceAt(xs, i, v)`, still copies the list at each assignment: O(n) per
+turn, O(n²) for a loop that visits each element once. The same analysis applies:
+the assignment can write in place when the variable holds an array the loop
+created (copy it once before the loop) and no other value can hold a reference
+to it (every other use of `xs` is a read in `NON_RETAINING_READS`). Not
+requested yet; the reporter of #386 mentions a cycle walk that may be written as
+a loop.
 
 ### The lenient grammar makes reading choices that a host cannot detect (IN PROGRESS — decided 2026-10-01, design `docs/plans/2026-10-01-lenient-ambiguity-codes.md`)
 
-Goal (Arno, 2026-10-01): a host that converts pasted plain text, such as
-Tycho's `plainTextToLatex`, should not need its own parser; the lenient
-grammar (`ce.parse(text, { strict: false })`) should give it what it needs.
-Tycho's converter keeps a first stage (a closed list of tokens and an
-adjacency table) because the lenient grammar reads almost any text and gives
-no signal when it picks one of two common readings. Tycho will remove that
-stage if CE publishes the list of reading choices the lenient grammar makes,
-with a diagnostic code (one `ambiguous-*` group) for each choice that has
-another common reading, and counts a choice with no code as a CE defect.
-Arno made that commitment on 2026-10-01, and decided that a parenthesized
-name is never a function head and that lenient `+-` is `±`. Of 300 inputs that the converter refuses
+Goal (Arno, 2026-10-01): a host that converts pasted plain text, such as Tycho's
+`plainTextToLatex`, should not need its own parser; the lenient grammar
+(`ce.parse(text, { strict: false })`) should give it what it needs. Tycho's
+converter keeps a first stage (a closed list of tokens and an adjacency table)
+because the lenient grammar reads almost any text and gives no signal when it
+picks one of two common readings. Tycho will remove that stage if CE publishes
+the list of reading choices the lenient grammar makes, with a diagnostic code
+(one `ambiguous-*` group) for each choice that has another common reading, and
+counts a choice with no code as a CE defect. Arno made that commitment on
+2026-10-01, and decided that a parenthesized name is never a function head and
+that lenient `+-` is `±`. Of 300 inputs that the converter refuses
 (`tycho/scripts/repros/2026-10-01-paste-refused-inputs.json`), the lenient
-grammar on CE main reads about 210 with no signal. The classes, with
-examples: the end of an unbraced exponent (`e^2pi`, `x^2y`); an implicit
-subscript (`x2`); a comma outside brackets (`1,5`); `5!=120`; a name, a
-space and a number (`x 2`); a function name with no parentheses before
-several factors (`sin x y`, `log 2 x` = `log_2 x`); a document function
-with no parentheses (`f x`); list labels (`1. y = x`); equation numbers
-(`y = x^2 (2)`); juxtaposed groups (`(a)(b)`); the extent of a radical
-(`3√8`, `√2π`); `+-` and `±`; `<-`; `a..b..c`; `in` after an equation;
-`Δx`; chains of `=`; bars that pair two ways; dates and phone numbers;
-`atan3(y)`; Greek capitals that look like Latin letters. Readings that
-may be defects rather than ambiguities: `(a)(b)` is the call `a(b)` in the
-canonical form (strict too), `±1` is `Measurement(0, 1)`, `+-` is two
-signs, `mod`/`pow`/`trunc`/`Re`/`Im` are not lenient function names.
-The full reply is in Tycho's `docs/COMPUTE_ENGINE.md`, "CE reply 2026-10-01
-to answer 4".
+grammar on CE main reads about 210 with no signal. The classes, with examples:
+the end of an unbraced exponent (`e^2pi`, `x^2y`); an implicit subscript (`x2`);
+a comma outside brackets (`1,5`); `5!=120`; a name, a space and a number
+(`x 2`); a function name with no parentheses before several factors (`sin x y`,
+`log 2 x` = `log_2 x`); a document function with no parentheses (`f x`); list
+labels (`1. y = x`); equation numbers (`y = x^2 (2)`); juxtaposed groups
+(`(a)(b)`); the extent of a radical (`3√8`, `√2π`); `+-` and `±`; `<-`;
+`a..b..c`; `in` after an equation; `Δx`; chains of `=`; bars that pair two ways;
+dates and phone numbers; `atan3(y)`; Greek capitals that look like Latin
+letters. Readings that may be defects rather than ambiguities: `(a)(b)` is the
+call `a(b)` in the canonical form (strict too), `±1` is `Measurement(0, 1)`,
+`+-` is two signs, `mod`/`pow`/`trunc`/`Re`/`Im` are not lenient function names.
+The full reply is in Tycho's `docs/COMPUTE_ENGINE.md`, "CE reply 2026-10-01 to
+answer 4".
 
 ### The lenient line-level ambiguity checks read the raw tree before ranges are regrouped (OPEN, small — found 2026-10-01 by the `ambiguous-range` rule for Tycho row 357)
 
-`reportLineAmbiguities` (`latex-syntax/lenient-ambiguity.ts`) runs in
-`parse()` on the raw result before `ambiguityErrors()` and before a later step
-regroups an operation next to a range: for `2*1..5` the check sees
+`reportLineAmbiguities` (`latex-syntax/lenient-ambiguity.ts`) runs in `parse()`
+on the raw result before `ambiguityErrors()` and before a later step regroups an
+operation next to a range: for `2*1..5` the check sees
 `Multiply(2, Range(1, 5))`, and the caller gets `Range(Multiply(2, 1), 5)`.
-`reportRange` accepts both shapes, so it is correct; the other line checks
-match on `NotEqual`, `Less`, `Equal`, `Element`, `Range` and `Delimiter`
-nodes and were not checked against a regrouped tree. Fix: find the step that
-regroups (probably the range-precedence repair of `resolveApplications`), and
-either run the line checks on the final raw tree with the `onAmbiguity` span
-map kept valid, or prove that no other checked shape is regrouped.
+`reportRange` accepts both shapes, so it is correct; the other line checks match
+on `NotEqual`, `Less`, `Equal`, `Element`, `Range` and `Delimiter` nodes and
+were not checked against a regrouped tree. Fix: find the step that regroups
+(probably the range-precedence repair of `resolveApplications`), and either run
+the line checks on the final raw tree with the `onAmbiguity` span map kept
+valid, or prove that no other checked shape is regrouped.
 
-### A `Delimiter` with square brackets reads back as a `List` (OPEN, decision — found 2026-10-01 by the fix of the parentheses written twice in a fraction)
+### A non-square matrix under `B^2` built before the assignment is squared cell by cell (OPEN, small — found 2026-10-15 by the change that reads an integer power of a square matrix value as a matrix power)
 
-`["Delimiter", "x", "'[,]'"]` (a group written with square brackets, for
-example `[a+b]c` in a physics formula built by a host) stays a `Delimiter` in
-the canonical form, and the LaTeX writer writes it `\lbrack x\rbrack`. That
-LaTeX parses as `["List", "x"]`, so a round trip through LaTeX changes the
-value from `x` to a list of one element; `["Delimiter", ["Sequence", "a",
-"b"], "'[,]'"]` comes back as `["List", "a", "b"]`. The parser has no reading
-of square brackets as a group, so no LaTeX spelling round-trips today. The
-decision: (a) the writer writes such a group with parentheses (the value
-round-trips, the brackets are lost), or (b) the parser reads one spelling as a
-bracket group (for example `\left[ … \right]` with one operand), which
-changes what that spelling gives today. Writer: the `Delimiter` serializer in
-`latex-syntax/dictionary/definitions-core.ts`.
-
-### A shader `x^y` with a variable exponent has no value for a negative base (OPEN, decision — found 2026-10-02 by the parity of the real root of a negative base)
-
-For a negative base under a float exponent, the interpreter recovers the
-rational `p/q` that the double came from (`realPowerBranchTerms()`,
-`boxed-expression/arithmetic-power.ts`) and gives the real root when `q` is
-odd: `(−8)^{0.4}` is `2.297`. Compiled JavaScript (`_SYS.pow`, `_SYS.cpow`)
-and Python `compileFunction` (the helper `_ce_pow`) do the same, and GLSL and
-WGSL do it for a CONSTANT exponent (`BaseCompiler.negativeBaseFloatPower`).
-For a VARIABLE exponent, GLSL and WGSL keep `pow(x, y)`, which the shading
-languages leave undefined for a negative base, and Python `compileLambda`
-keeps `x ** y` (the principal value; a bare lambda has no place for the
-module helper). Options for the shaders: (a) a run-time helper that recovers
-`p/q` from the exponent — it reads an f32 (about 7 digits), so it cannot
-decide the same `p/q` as the interpreter for every exponent, and it adds a
-continued-fraction loop to every power; (b) fail closed when the base may be
-negative and the exponent may be a float — this breaks the pinned emissions
-`pow(x, y)` and `pow(x, p)` of `tycho-item-231-gpu-vectorized-power.test.ts`
-and `tycho-item-286-unrolled-literal-call-fold.test.ts` and every shader
-`x^y` of an undeclared base. Kept as is (2026-10-02): `pow`.
-
-### A float matrix gives exact results when a value is an integer (OPEN, decision — found 2026-10-02 by the change that makes a complex number from the host with integer parts exact)
-
-A matrix whose entries are numbers is packed into cells of doubles
-(`float64` for real entries, `complex128` for complex entries) before
-`Determinant`, `Trace`, `Transpose` and the other matrix operators compute.
-A cell does not record whether its entry was exact. When a cell is read back
-as an expression, a real value that is an integer is boxed exact
-(`TensorFieldNumber.expression()` and `complexCellExpression()`,
-`tensor/tensor-fields.ts`), so a float result or entry becomes exact when its
-value is an integer. Measured 2026-10-02:
-`\det([[1.5,0],[0,2]])` is the exact `3` (it must be `3.0`),
-`\operatorname{Trace}([[1.5,0],[0,2.5]])` is the exact `4`,
-`\operatorname{Transpose}([[2.0,1.5],[3,4]])` changes the entry `2.0` to the
-exact `2`, and `\det([[1.0+1.0i,0],[0,1.0-1.0i]])` is the exact `2`. A
-complex cell with a nonzero imaginary part is already read back as a float.
-The exactness contract (a float operand makes a numeric result a float) is
-broken for these inputs. Options: (a) keep exact integers out of the cells of
-doubles when the matrix also holds a float — such a matrix uses the
-`expression` dtype, so its exact entries stay exact and its results follow
-the arithmetic of expressions (float contagion), but every matrix that mixes
-floats and integers (`[[1.5, 0], [0, 2]]`) is computed with expressions,
-which is slower, and its `0` entries stay exact; then a cell of doubles holds
-only floats and is always read back as a float. (b) record the exactness of
-each cell (for example a parallel array of flags) and read an integer cell
-back exact only when its entry was exact — the fast numeric computation is
-kept, but every operator that computes a new cell must set its flag (a cell
-computed from a float is a float), and the packing code and the tensor
-kernels change. With either option, results of real float matrices that are
-integers become floats (`3.0` instead of `3`), which changes printed results
-and can change test expectations.
-
-### `list<integer^(2x0)>` reduces to `vector<integer^2>` (OPEN, decision — found 2026-09-29 by the review of the dimension-variables round)
-
-`reduceListType` (`src/common/type/reduce.ts`) drops every zero-length axis and
-reads an all-zero shape as `nothing`. So `list<integer^(2x0)>`, two empty rows,
-reduces to `vector<integer^2>`, a list of two integers, and
-`list<integer^(0x2)>`, no rows, reduces the same way. Measured 2026-09-29:
-`2x0 → vector<integer^2>`, `0x2 → vector<integer^2>`, `0 → nothing`. The
-question is what a zero axis should mean: keep the axis (`matrix<integer^(2x0)>`
-stays as written, and a value of that shape is two empty lists), or read any
-zero axis as the empty type. Recommendation: keep the axis, since a 2x0 matrix
-is a value the engine can hold and its element count is 0 by multiplication;
-dropping the axis changes the rank of the type. Until decided, the behavior is
-unchanged from before the dimension-variables round, which only kept the
-dimension-variable names aligned with the surviving axes.
-
-### A matrix power inside a function body is computed element by element (OPEN, decision — found 2026-10-14 by the `MatrixPower` type handler)
-
-`[[1,2],[3,4]]^2` written directly is the matrix power `[[7,10],[15,22]]`:
-canonicalization rewrites `Power` of a matrix-typed base to `MatrixPower`.
-Inside a function body the base is an untyped parameter, so `A^2` stays a
-`Power`, and at evaluation the broadcast of `Power` over the substituted
-matrix squares each entry: `g(A) := A^2; g([[1,2],[3,4]])` gives
-`[[1,4],[9,16]]`, and `Apply((A) => A^2, [[1,2],[3,4]])` does the same. The
-two spellings of the same computation disagree. The options: make the
-`Power` evaluate handler (or the broadcast driver) read an integer power of
-a square nested list as a matrix power, which changes evaluation results for
-a user who meant the element-wise square of a list of lists; or keep the
-element-wise reading inside a body and document that a matrix power of a
-parameter must be written `MatrixPower(A, 2)`. The type of `g(m)` is
-`matrix<2x2>` on both readings.
-
-### `Inverse` is typed with the integer entries of its operand (OPEN, decision — found 2026-10-14 by the `MatrixPower` type handler)
-
-`Inverse([[1,2],[3,4]])` is typed `matrix<integer^(2x2)>`, but its value
-`[[-2,1],[3/2,-1/2]]` is `matrix<rational^(2x2)>`; a non-square `Inverse` is
-typed `matrix<integer^(2x3)>` while its value is an error. So `m^-1` (which
-canonicalizes to `Inverse(m)`) is typed `matrix<integer^(2x2)>` while `m^-2`
-(a `MatrixPower`) is typed `matrix<rational^(2x2)>`.
-`test/compute-engine/type-variables-linalg.test.ts` pins on purpose that
-`Inverse` has no imperative type handler and keeps the signature
-`(T) -> T where T: matrix`. The options: keep that signature with its
-unsound integer claim, or give `Inverse` the handler that `MatrixPower`
-uses for a negative exponent (`squareMatrixPowerType` in
-`library/linear-algebra.ts`) and update the pinned expectations.
+`const e = ce.parse('B^2'); ce.assign('B', [[1,2,3],[4,5,6]]); e.evaluate()`
+gives the cells squared, while `B^2` parsed after the assignment is the
+`expected-square-matrix` error: the value route (`squareMatrixPower()`,
+`boxed-expression/boxed-function.ts`) answers "not a matrix power" for a
+non-square value and falls back to the element-wise broadcast, where the
+canonicalization route refuses. The two routes should agree; the error is the
+documented answer. Also, an untyped `B^2` compiles on the JavaScript target to
+the scalar code `(_.B * _.B)`, which returns `null` for a matrix input, because
+the compiler types `B` as a number; a declared `B: matrix` compiles to the
+matrix power. Not a defect, recorded here because the same comparison of the two
+routes finds it: `B^{-1}` built before `B` holds a matrix is the matrix of the
+reciprocals, since `x^{-1}` canonicalizes to `Divide(1, x)` when `x` has no
+value and the division of a number by a matrix is element-wise, while `B^{-1}`
+parsed after the assignment is `Inverse(B)`. The user decided 2026-10-15 to keep
+the rewrite (see the comment on `squareMatrixPower()`).
 
 ### A nested list spelling is not a subtype of a list type with no dimensions (OPEN, small — found 2026-10-01 by the fix that reads a nested spelling as its flat shape)
 
-Since 2026-10-01 a list of dimensioned lists is read as the flat shape it
-spells at a target with two or more dimensions: `list<vector<integer^3>^2>` is
-a subtype of `matrix<integer^(2x3)>` and of `matrix<integer>`, and the
-dimension solver pins `cols(nl)` to `3` (`flattenNestedListType`,
+Since 2026-10-01 a list of dimensioned lists is read as the flat shape it spells
+at a target with two or more dimensions: `list<vector<integer^3>^2>` is a
+subtype of `matrix<integer^(2x3)>` and of `matrix<integer>`, and the dimension
+solver pins `cols(nl)` to `3` (`flattenNestedListType`,
 `common/type/instantiate.ts`). A target with no dimensions is left out:
 `matrix<integer^(2x3)>` is a subtype of `list<integer>` (a list type with no
-dimensions accepts any shape) and of `tensor<integer>`, which parses to the
-same type, but `list<vector<integer^3>^2>` is not. Code that reads the element
-type of a `list<integer>` operand expects scalars, and a nested type would give
-it rows, so extending the conversion needs a check of those readers first.
-Also not accepted: a nesting of three levels at a target whose elements are
-still rows (`list<vector<vector<integer^2>^3>^4>` at
-`list<vector<integer^2>^(4x3)>`), because every level is merged at once; a
-fix would merge only as many levels as the target has dimensions.
+dimensions accepts any shape) and of `tensor<integer>`, which parses to the same
+type, but `list<vector<integer^3>^2>` is not. Code that reads the element type
+of a `list<integer>` operand expects scalars, and a nested type would give it
+rows, so extending the conversion needs a check of those readers first. Also not
+accepted: a nesting of three levels at a target whose elements are still rows
+(`list<vector<vector<integer^2>^3>^4>` at `list<vector<integer^2>^(4x3)>`),
+because every level is merged at once; a fix would merge only as many levels as
+the target has dimensions.
 
 ### Registering a chain of `-> unknown` functions reads the declared signatures a number of times that grows faster than the depth (OPEN, low — narrowed 2026-10-01)
 
@@ -1543,11 +1464,11 @@ depth 20 (measured 2026-10-01). The doubling per level is gone (89 794 reads at
 depth 12 before): the effects inference walked a callee once per call, and now
 skips a callee already walked into the same accumulator (`expandedLiterals`,
 `effects-inference.ts`). What remains is polynomial: each assignment types its
-body again, and each read of a signature whose cache generation has moved
-reads the type of the function value before its memo key is built. A cache of
-the derived signature stamped with the cache generation, checked before the
-key is built, was tried and gave no measurable gain at these depths, so it was
-not kept. Single-call chains are linear.
+body again, and each read of a signature whose cache generation has moved reads
+the type of the function value before its memo key is built. A cache of the
+derived signature stamped with the cache generation, checked before the key is
+built, was tried and gave no measurable gain at these depths, so it was not
+kept. Single-call chains are linear.
 
 ### A signature derivation that runs inside a cached type read does not see a widening made in its own temporary scope until the read finishes (OPEN, small — found 2026-09-29 by the review of the fix for Tycho item 336)
 
@@ -1583,16 +1504,6 @@ probable cause is the pre-evaluation broadcast in
 `boxed-expression/boxed-function.ts`, whose test for a valueless operand does
 not see the union declaration.
 
-### What `Join` of a dictionary and a list gives (OPEN, decision — found 2026-09-29 by the review fixes for the spread literal)
-
-`Join(Dictionary(x: 1), [2, 3])` is a type error that names the first
-element that is not a key-value entry:
-`Error(incompatible-type, tuple<string, any>, 2)` (since 2026-09-30; before,
-the error named the internal `ContinuationPlaceholder` symbol). `Append` of a
-dictionary and a value that is not an entry gives the same error. The open
-question is whether a dictionary joined with a list should instead give a list
-of the entries followed by the elements. Until decided, the error stays.
-
 ### A list-building self-recursion assigned WITHOUT a declaration is still typed `collection` (OPEN, small — found 2026-09-29 by the fix for Tycho row 338)
 
 With `F` declared `(unknown, unknown) -> unknown` and assigned
@@ -1621,40 +1532,17 @@ stays `-> unknown` on later reads), so the hypothesis pass reads `unknown` from
 call graph as one unit, or retire a callee's memo when the function it was
 derived inside settles.
 
-### Lazy collection operators over an eager source stay unevaluated (OPEN, decision — found 2026-09-30 by the fix for issue #383)
-
-With `t: tuple<list<integer>, list<integer>>` assigned `([3, 1, 2], [4])`, the
-read `At(t, 1)` is typed `list<integer>` and its value is the list, but it is an
-eager operator with no collection handlers before it is evaluated. A lazy view
-over it reads `isFiniteCollection` and `isEnumerableCollection` off the
-unevaluated read, both `undefined`, and stays unevaluated: `ArgMax(At(t, 1))`,
-`ArgMin`, `Dedup`, `Differences`, `FlatMap`, `Scan(At(t, 1), f)` and
-`TakeWhile`/`DropWhile` under a plain `evaluate()`; `Numerator(At(t, 1))` and
-`Denominator` report an `incompatible-type` error naming `vector<integer^3>`
-where the literal list broadcasts.
-`Reverse(At(t, 1)).evaluate({ materialization: true })` also returns the
-unevaluated view: the materialization step (step 3 of `_computeValue`,
-`boxed-function.ts`) runs before the operands are evaluated, and `materialize()`
-returns the node itself when the walk cannot start; the `toLatex()` contract of
-Tycho item 247 (a symbolic carrier prints without evaluation) depends on that
-return. `Reduce` and the count of `Filter` resolve such a source with
-`eagerViewSource` since 2026-09-30, as `Join`, `Reverse` and `Take` did before;
-the operators above do not. A general fix would evaluate an eager source once
-when the lazy node is evaluated, which is a change to the laziness contract
-(`docs/COLLECTIONS-MODEL.md`) and needs a decision.
-
 ### An operator result that may be absent is typed `number` when it is numeric (OPEN, small — found 2026-09-30)
 
 With `xs` declared `list<list<real>>`, `Length(At(xs, 1))` is typed `number`,
 where its values are the integers, `+oo` and `NaN`. `At(xs, 1)` is typed
-`list<real> | missing`, and `Length` propagates the absent operand. The type
-of an absent operand in a numeric result is removed by
-`absorbNumericAbsence` (`common/type/utils.ts`), which replaces every numeric
-arm by `number` instead of adding `nan` to the arms the type handler
-answered (`integer | +oo`). The type is wide but not wrong. The same rule
-types `Sin(x)` as `number` for an `x` that may be absent. A fix would add
-`nan` to the handler's arms, and changes the types of many expressions:
-measure the snapshot changes before landing it.
+`list<real> | missing`, and `Length` propagates the absent operand. The type of
+an absent operand in a numeric result is removed by `absorbNumericAbsence`
+(`common/type/utils.ts`), which replaces every numeric arm by `number` instead
+of adding `nan` to the arms the type handler answered (`integer | +oo`). The
+type is wide but not wrong. The same rule types `Sin(x)` as `number` for an `x`
+that may be absent. A fix would add `nan` to the handler's arms, and changes the
+types of many expressions: measure the snapshot changes before landing it.
 
 ### An absent argument at a function parameter: what the decisions of 2026-09-30 left open (OPEN — two defects)
 
@@ -1775,22 +1663,21 @@ to GLSL/WGSL helpers and wire them into `GPU_FUNCTIONS`.
 
 ### `HurwitzZeta(s, a)` of an order that is not an integer stays symbolic far left of the imaginary axis (OPEN, capability gap — found 2026-09-28 reviewing #340, narrowed 2026-09-30)
 
-`hurwitzEMComplex` (`numerics/numeric-complex.ts`) sums one direct term for
-each unit of −Re(a) before its Euler-Maclaurin tail, so the kernel declines
-when more than `HURWITZ_MAX_PASSED_TERMS` (2²⁰) terms lie between a and the
-right half-plane: `HurwitzZeta(2.5, −10^7 + i).N()` stays unevaluated (at
-once; before the limit, `HurwitzZeta(2, −10^12 + i).N()` did not finish).
-Since 2026-09-30 an integer order has a route whose cost does not depend on
-Re(a) (`hurwitzZetaFarLeft`): the polygamma reflection for 2 ≤ s ≤ 10 001,
-and the Bernoulli polynomial for s = −n ≤ 0 (n ≤ 60). What still declines:
-an order that is not an integer, which needs a representation whose cost
-does not grow with −Re(a) (for example the Hurwitz functional equation for a
-real a); an order above about 3 000 at a small Im(a), where the error of the
-reflection grows past 1e−12 of the value; and a real a that is a
-non-positive integer, at every order (there `HurwitzZeta` drops the
-(a + k) = 0 term, while ψ has a pole). The generalized `Zeta(s, a)` follows
-for an even order only: for an odd order its terms left of the axis are
-((k + a)²)^(−s/2), which is not (k + a)^(−s).
+`hurwitzEMComplex` (`numerics/numeric-complex.ts`) sums one direct term for each
+unit of −Re(a) before its Euler-Maclaurin tail, so the kernel declines when more
+than `HURWITZ_MAX_PASSED_TERMS` (2²⁰) terms lie between a and the right
+half-plane: `HurwitzZeta(2.5, −10^7 + i).N()` stays unevaluated (at once; before
+the limit, `HurwitzZeta(2, −10^12 + i).N()` did not finish). Since 2026-09-30 an
+integer order has a route whose cost does not depend on Re(a)
+(`hurwitzZetaFarLeft`): the polygamma reflection for 2 ≤ s ≤ 10 001, and the
+Bernoulli polynomial for s = −n ≤ 0 (n ≤ 60). What still declines: an order that
+is not an integer, which needs a representation whose cost does not grow with
+−Re(a) (for example the Hurwitz functional equation for a real a); an order
+above about 3 000 at a small Im(a), where the error of the reflection grows past
+1e−12 of the value; and a real a that is a non-positive integer, at every order
+(there `HurwitzZeta` drops the (a + k) = 0 term, while ψ has a pole). The
+generalized `Zeta(s, a)` follows for an even order only: for an odd order its
+terms left of the axis are ((k + a)²)^(−s/2), which is not (k + a)^(−s).
 
 ### `PolyGamma(m, z)` of an order above 100 stays symbolic close to a half-integer on the real axis (OPEN — found 2026-09-28 reviewing #340)
 
@@ -1953,16 +1840,6 @@ operands of a numeric evaluation with guard digits, or pass exact operands
 through) or a per-operator one (hold the operands of `Zeta`, `HurwitzZeta`,
 `Digamma` and similar functions and evaluate them in the handler).
 
-### A matrix to a non-integer power is element-wise (OPEN, decision — found 2026-09-28 by the agents writing the linear-algebra examples)
-
-`[[1, 2], [3, 4]] ^ (1/2)` is `[[1, √2], [√3, 2]]`, the square root of each
-entry, while an integer exponent is the matrix power (`^2` is
-`[[7, 10], [15, 22]]`, `^-1` the inverse). `canonicalPower`
-(`arithmetic-power.ts`) says element-wise power "is not expressed via `^`" and
-leaves non-integer exponents "to other handling", which is the broadcast. The
-decision: a matrix function (`A^(1/2)` the principal square root, computed or
-left symbolic), an error, or the element-wise reading kept and documented.
-
 ### A calculus operator over a function parameter is folded before the argument arrives (OPEN — found 2026-09-27 while writing the core reference examples)
 
 `g(f) = D(f, x); g(x^2)` evaluates to `0`, and so do `(f => D(f, x))(x^2)` and
@@ -1997,12 +1874,12 @@ user-written call. The fix direction: engine-built nodes resolve their head
 against the system scope (a construction route that does not consult the current
 scope), leaving scope-based resolution to user-written code.
 
-The same happens at the top level, through the formulas of the derivative
-table (measured 2026-10-01): after `Sinh(x) := 3x`, `D(Cosh(t), t)` gives
-`3t`, because the rule for `Cosh` is the formula `Sinh(x)`, and that formula
-picks up the user's `Sinh`. (`D(Sinh(t), t)` itself is `3` since 2026-10-01:
-`D` now checks whether a user definition shadows the name before it uses the
-rule for that name.)
+The same happens at the top level, through the formulas of the derivative table
+(measured 2026-10-01): after `Sinh(x) := 3x`, `D(Cosh(t), t)` gives `3t`,
+because the rule for `Cosh` is the formula `Sinh(x)`, and that formula picks up
+the user's `Sinh`. (`D(Sinh(t), t)` itself is `3` since 2026-10-01: `D` now
+checks whether a user definition shadows the name before it uses the rule for
+that name.)
 
 ### A function-typed factor is a product under juxtaposition and a type error under an explicit operator (OPEN, ruling — found 2026-09-22 while fixing the MathNet round-trip check)
 
@@ -2150,13 +2027,6 @@ and `ce.number(bigDecimal)` is exact for an integer-valued big decimal at any
 magnitude (`doc/12-guide-numerical-evaluations.md`, "Exact and Inexact Numbers:
 the Spelling Decides"). What that left:
 
-1. **A float exponent `1.0` is still an identity in `Power`, and exact `0`
-   divided by a float is exact.** `x^{1.0}` evaluates to `x` (its MathJSON is
-   `"x"`, so the float does not survive a round trip) and exact `0` divided by a
-   float is exact `0`. `Add` and `Multiply` keep the float since 2026-09-29
-   (`1.0x` stays `1.0·x`, `1.0^x` stays `Power(1.0, x)`, `0.0 + x` stays
-   `Add(x, 0.0)`, `0.0x` is a float `0`, `2.0x + x` is `3.0x`); `Power` and the
-   exact-zero quotient need the same decision.
 2. **An exponent literal with no fraction part (`1e3`) is exact**, as
    Mathematica's `1*^3` is; `1.5e3` is a float. It cannot become a float without
    first changing the MathJSON serialization of a large exact integer, which is
@@ -2168,8 +2038,8 @@ the Spelling Decides"). What that left:
    mark for an inexact number.
 4. `.N()` of an exact small integer stays exact (`\sqrt{4}.N()` at precision 30
    is the exact `2`, `(\sqrt{2})^2.N()` too): `BoxedNumber.N()` returns a small
-   exact integer unchanged, on purpose. Under the exactness contract `.N()`
-   produces a float; changing it has a large effect and is a decision.
+   exact integer unchanged, on purpose. Decided 2026-10-15: it stays so; the
+   change would touch a large number of printed results for no gain.
 
 ### Residues of the fixes for Tycho asks 306–315 (OPEN — found 2026-09-24)
 
@@ -2281,22 +2151,6 @@ replaced by `±u` and `Sign(u)` by `±1` (`integrateAcrossKinks`,
   `\int_2^3 x\operatorname{sgn}(x^2-1)\,dx` unevaluated, before and after the
   change.
 
-### Three special-function points answer `NaN` where a signed or complex infinity exists (OPEN, decision — found 2026-09-29 by Phase 2 of `docs/plans/2026-09-28-indeterminate-value.md`)
-
-Three values at an infinite point are `NaN` by a recorded ruling (Phase F batch
-8 of `docs/plans/2026-08-30-error-model-implementation.md`) because the answer
-depends on the other operand, although for given operands a limit exists:
-`Gamma(s, −∞)` (for a positive integer `s`,
-`Γ(n, x) = (n−1)!·e^{−x}·Σ_{k<n} x^k/k!` gives `(−1)^{n−1}·∞`:
-`Γ(2, −100) = −2.7·10⁴⁵`, `Γ(3, −100) = +2.6·10⁴⁷`; for a non-integer `s` the
-value is complex with an unbounded modulus, `~oo`); `Beta(+∞, b)` for a `b` with
-a non-positive real part (`B(a, b) ~ Γ(b)·a^{−b}`, so `B(+∞, −1/2) = −∞` since
-`Γ(−1/2) = −2√π`); `GammaRegularized(a, −∞)` for a non-integer `a` (complex,
-with an unbounded modulus). Phase 2 kept `NaN` there, because `Indeterminate`
-would state that the form has no value. Example today: `Gamma(2, -oo)` → `NaN`.
-Options: (a) answer the limit (`-oo` for `Gamma(2, −∞)`, `~oo` for a non-integer
-`s`), (b) keep `NaN` (nothing changes).
-
 ### A float absorbed by an infinity is not seen by the float rule of `Indeterminate` (OPEN, small — found 2026-09-29 in the review of Phase 2 of `docs/plans/2026-09-28-indeterminate-value.md`)
 
 An indeterminate form with a float operand answers `NaN` (`0.0·∞` is `NaN`), but
@@ -2315,13 +2169,13 @@ With `w := 4`, `ce.number(2).mul(ce.box(['Tuple', 'w', 2]))` is the point
 point product (`mulTuples`, `arithmetic-mul-div.ts`) evaluates each component
 before it multiplies, and the list product does the same, so the result keeps
 the value `w` holds now. A later `w := 5` does not change it. The canonical
-`Multiply(2, (w, 2))` keeps the product and reads the value at evaluation. For
-a zero factor this also hides a `NaN`: with `w := NaN`,
-`ce.Zero.mul((w, 2))` is `(NaN, 0)` now and stays so after `w := 4`. A scalar
-factor no longer has this defect (`0·w` is kept since 2026-09-30). A fix would
-multiply the components without evaluating them, as `mul()` does for a
-scalar; the evaluation of a component is there so that a component such as
-`0.3n` with `n` a list is broadcast, and that case must keep working.
+`Multiply(2, (w, 2))` keeps the product and reads the value at evaluation. For a
+zero factor this also hides a `NaN`: with `w := NaN`, `ce.Zero.mul((w, 2))` is
+`(NaN, 0)` now and stays so after `w := 4`. A scalar factor no longer has this
+defect (`0·w` is kept since 2026-09-30). A fix would multiply the components
+without evaluating them, as `mul()` does for a scalar; the evaluation of a
+component is there so that a component such as `0.3n` with `n` a list is
+broadcast, and that case must keep working.
 
 ### Residues of the absent-value round (OPEN, small — found 2026-09-25)
 
@@ -4327,12 +4181,11 @@ named signature — those two receivers take names since 2026-10-01, GitHub issu
   (`effects-contracts`, `application-validation-regressions`, callback-contract
   and lambda-inference batteries) — a dedicated follow-up round, not a snapshot
   refresh. The same loss reaches a field call in Epsil: in
-  `const ns = {D -> ((x, k) => x - k)}` then `ns.D(k: 1, x: 10)`, the run
-  gives 9, but the static check reports `argument-names-unavailable`. The static
-  check makes the program canonical before `ns` has its value, so it can only
-  read the type of `ns`, `record{D: (unknown, unknown) -> number}`, which has no
-  names. An annotated literal (`(x: number, k: number) => x - k`) has no such
-  problem.
+  `const ns = {D -> ((x, k) => x - k)}` then `ns.D(k: 1, x: 10)`, the run gives
+  9, but the static check reports `argument-names-unavailable`. The static check
+  makes the program canonical before `ns` has its value, so it can only read the
+  type of `ns`, `record{D: (unknown, unknown) -> number}`, which has no names.
+  An annotated literal (`(x: number, k: number) => x - k`) has no such problem.
 
 ### `Derivative` compile time vs body nesting depth (perf ask)
 
@@ -5730,20 +5583,19 @@ The analytic-property store (`ce.functionProperties`, pole-aware `N()`), the
 the store are only partially built:
 
 - **(a) Branch-cut-safe simplification — largely complete.** The logarithm
-  family is guarded: `ln(a) + ln(b) → ln(ab)` (`simplify-log.ts`) requires
-  every argument to be provably non-negative (decision of 2026-10-01), and the
-  `.ln()` expansions `ln(bⁿ) → n·ln(b)` / `ln(a/b)` / `ln(root)`
-  (`boxed-function.ts`) consult `onBranchCut` and stay symbolic when an operand
-  is provably on the negative-real cut. Power/root _products_ (`√a·√b → √(ab)`,
-  `(ab)^p`) were already safe — gated on `isNonNegative` in
-  `arithmetic-mul-div.ts` (see also the `foldIsSound` `(base^r)^e → base^(r·e)`
-  gate). What's left is **not** store- driven: a guarded `arctan(x) + arctan(y)`
-  addition would be a _new capability_ (CE doesn't combine inverse-trig today),
-  and its validity region (`xy < 1`) is an arithmetic condition, not an
-  `onBranchCut` cut-membership test — so the store doesn't serve it.
-  Complex-domain Fungrim rules already carry their own loader guards. (The
-  generic-real simplification policy for even/odd/irrational exponents is
-  settled and documented in
+  family is guarded: `ln(a) + ln(b) → ln(ab)` (`simplify-log.ts`) requires every
+  argument to be provably non-negative (decision of 2026-10-01), and the `.ln()`
+  expansions `ln(bⁿ) → n·ln(b)` / `ln(a/b)` / `ln(root)` (`boxed-function.ts`)
+  consult `onBranchCut` and stay symbolic when an operand is provably on the
+  negative-real cut. Power/root _products_ (`√a·√b → √(ab)`, `(ab)^p`) were
+  already safe — gated on `isNonNegative` in `arithmetic-mul-div.ts` (see also
+  the `foldIsSound` `(base^r)^e → base^(r·e)` gate). What's left is **not**
+  store- driven: a guarded `arctan(x) + arctan(y)` addition would be a _new
+  capability_ (CE doesn't combine inverse-trig today), and its validity region
+  (`xy < 1`) is an arithmetic condition, not an `onBranchCut` cut-membership
+  test — so the store doesn't serve it. Complex-domain Fungrim rules already
+  carry their own loader guards. (The generic-real simplification policy for
+  even/odd/irrational exponents is settled and documented in
   [`docs/SIMPLIFY.md`](./docs/SIMPLIFY.md#generic-real-simplification-policy).)
 
 - **(c) Exact asymptotics at special-function poles — one rung remains** (the
@@ -5962,19 +5814,18 @@ that targeted review missed — keep running it.
 
 ### A residue class that only a function returns is not protected from number rules (OPEN, found 2026-10-04)
 
-An expression that holds a `ResidueClass` is folded only by the rules of
-its ring: `c/c` is not cancelled to the integer 1 when `c` has no inverse.
-The engine finds the class by a walk through the expression and through the
-values of its symbols (`containsResidueClass()` in
-`boxed-expression/residue-class.ts`). The walk does not look inside a
-function definition, so it cannot see a class that only a function
-returns. With `g := k ↦ ResidueClass(k, 4)`, `g(2)/g(2)` simplifies to `1`,
-although `g(2)` is `ResidueClass(2, 4)`, which has no inverse, and
-`evaluate()` keeps the quotient. The same is true for an application of a
-function with no definition, `f(c)/f(c)` (the engine treats every
-application of an unknown function as one value). A fix needs the type of
-a class to be a type that no ordinary expression has, so that the check can
-use the type of the application instead of a walk.
+An expression that holds a `ResidueClass` is folded only by the rules of its
+ring: `c/c` is not cancelled to the integer 1 when `c` has no inverse. The
+engine finds the class by a walk through the expression and through the values
+of its symbols (`containsResidueClass()` in
+`boxed-expression/residue-class.ts`). The walk does not look inside a function
+definition, so it cannot see a class that only a function returns. With
+`g := k ↦ ResidueClass(k, 4)`, `g(2)/g(2)` simplifies to `1`, although `g(2)` is
+`ResidueClass(2, 4)`, which has no inverse, and `evaluate()` keeps the quotient.
+The same is true for an application of a function with no definition,
+`f(c)/f(c)` (the engine treats every application of an unknown function as one
+value). A fix needs the type of a class to be a type that no ordinary expression
+has, so that the check can use the type of the application instead of a walk.
 
 ### Load-sensitive test flakes under a full-suite run (observed 2026-08-31)
 
@@ -5994,9 +5845,9 @@ units) read 6251 in a six-worker full run on a box at load 4 and passed alone
 HEAD `33444a04` on a box at load average 43 to 55 on 8 cores, two-worker runs:
 `item-395-dirichlet-l.test.ts` "DirichletL(997, 500, 1.5) at precision 300 is
 fast and a double" read 22,514 ms against a raw `Date.now()` limit of 5000 ms.
-This limit is a wall-clock time, not a canary-normalized one, so it can fail
-on any loaded box. `integration-rules-substitutions.test.ts` failed 1 test
-(R30 `∫Tanh(x)²/(a+b·Tanh(x))`) in one run and 5 tests (R29, R30, R8 and their
+This limit is a wall-clock time, not a canary-normalized one, so it can fail on
+any loaded box. `integration-rules-substitutions.test.ts` failed 1 test (R30
+`∫Tanh(x)²/(a+b·Tanh(x))`) in one run and 5 tests (R29, R30, R8 and their
 `RUBI_NO_*` gating tests) in another: a closed form was expected and the
 integral stayed inert, which agrees with the 10-second rule-engine time limit
 running out under contention. Neither suite was run on an idle box.
@@ -6004,15 +5855,14 @@ running out under contention. Neither suite was run on an idle box.
 ### `LerchPhi` past |z| = 1 still declines for a complex `a` whose shift terms dwarf the value (OPEN — residue of the two 2026-09-30 rounds, #340, #353)
 
 `lerchPhiComplex` (`numerics/lerch-phi.ts`) declines (`N()` stays symbolic)
-where no route can vouch for 1e−11 relative accuracy; it does not return a
-wrong number (every returned value on about 30 000 sweep points is within
-1.1e−12 of a reference; on a 2026-10-06 sweep of 12 000 points with orders up to
-200 and |z| up to 1e300, after the continuation was fixed for those, within
-8.8e−13). The routes past the circle: for `Re(s) > 0` off the cut, the leading
-terms of the series with a proven bound of the rest (`lerchSeriesOutsideDisk`);
-the continuation (`lerchContinuedWithError`), the sum over the Fourier modes of
-the base point
-for a real `a` and every `s` that is not a positive integer
+where no route can vouch for 1e−11 relative accuracy; it does not return a wrong
+number (every returned value on about 30 000 sweep points is within 1.1e−12 of a
+reference; on a 2026-10-06 sweep of 12 000 points with orders up to 200 and |z|
+up to 1e300, after the continuation was fixed for those, within 8.8e−13). The
+routes past the circle: for `Re(s) > 0` off the cut, the leading terms of the
+series with a proven bound of the rest (`lerchSeriesOutsideDisk`); the
+continuation (`lerchContinuedWithError`), the sum over the Fourier modes of the
+base point for a real `a` and every `s` that is not a positive integer
 (`lerchModesComplex`), an integral route for `Re(s) > 0`
 (`lerchIntegralComplex`), and Lerch's transformation formula for a complex `a`
 (`lerchFunctionalComplex`); a Taylor series in `a` was tried and removed (it

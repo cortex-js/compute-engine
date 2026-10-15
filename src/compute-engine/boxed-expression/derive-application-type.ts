@@ -75,55 +75,35 @@ export function installBroadcastLiftHooks(hooks: BroadcastLiftHooks): void {
 }
 
 /**
- * The type of applying `operator` to operands a handler holds only as
- * DESCRIPTORS — the recursive entry point a `type` handler needs to type an
- * application it does not have in hand: the body of a mapping literal
- * (`Map`, `Pipe`), a set comprehension's element, a broadcast per element.
- * Reachable from every `'types'`-shape handler as `context.derive`.
- *
- * The derivation is the handler-visible core of what the engine does for a
- * real application: the operator's own `type` handler answers first (run
- * under the same purity guard as a top-level call, so a state write inside
- * it is reported the same way); otherwise the declared signature's result
- * stands, with a polytype arm instantiated against the operands through
- * the same solver the expression route uses. An operand typed `never` (the
- * empty type) makes the application `never`, as at the call site.
- *
- * Absent operands are handled as at the call site: for a `propagate`
- * operator, an operand whose type carries a `missing` arm is handed to the
- * handler with that arm stripped (a bare `missing` keeps its type), and the
- * result absorbs the absence — every `missing` arm stripped, every numeric
- * cell widened to admit the `NaN` an absent numeric operand contributes.
- * Without that, `Map(k ↦ k + 1, xs)` over `integer | missing` elements
- * would advertise elements no evaluation produces. The one exception is a
- * whole-value absence that reaches a result that is not numeric (a
- * restricted point under `Sin`): the result keeps a `missing` arm, because
- * the value is then `Missing` (`absorbOperandAbsence`).
- *
- * It deliberately stops there. The other boxing-time steps that need the
- * expression — argument validation and its error types, the Contract B
- * widening of a signature result, the broadcast wrap of a threadable
- * operator's declared result — are not reproduced: the handlers that
- * matter for a mapping body (`Add`, `Multiply`, the comparison and
- * collection heads) derive their broadcast shape themselves, and a caller
- * that gets `undefined` keeps its own conservative answer. Reads nothing
- * but definitions and types, so it is pure by construction.
- *
- * Returns `undefined` when `operator` has no operator definition.
+ * The components of a numeric tuple: a number, or an absence marker. An
+ * absent component (`Missing`, or `Undefined`, which a tuple literal also
+ * types `missing`) reads as `NaN` in a numeric slot, so it does not stop the
+ * tuple from being a point: `-(1, Missing)` is `(-1, NaN)`. This is the rule
+ * that the arithmetic handlers apply (`couldBeNumericElement`,
+ * `collection-utils.ts`). A union of the two (`integer | missing`, the
+ * component of an index read that can be out of range) is also accepted.
  */
-/** Whether `t` is a tuple whose every component is a number. */
-function isNumericTupleType(t: Type): boolean {
+const NUMERIC_TUPLE_COMPONENT: Type = {
+  kind: 'union',
+  types: ['number', 'missing'],
+};
+
+/** Whether `t` is a tuple whose every component is a number or an absence
+ * marker (see `NUMERIC_TUPLE_COMPONENT`). */
+export function isNumericTupleType(t0: Type): boolean {
+  const t = resolveTypeAlias(t0);
   return (
     typeof t === 'object' &&
     t.kind === 'tuple' &&
-    t.elements.every((e) => isSubtype(e.type, 'number'))
+    t.elements.every((e) => isSubtype(e.type, NUMERIC_TUPLE_COMPONENT))
   );
 }
 
 /**
  * Whether `t` is a tuple type that is not provably a numeric tuple, but that
  * is one when its open components hold numbers: every component is a number
- * type or the open `unknown`/`any`, and at least one is open. The tuple
+ * type, an absence marker (see `NUMERIC_TUPLE_COMPONENT`) or the open
+ * `unknown`/`any`, and at least one is open. The tuple
  * `(a, a)` in the body of `g := a ↦ f((a, a))` has the type
  * `tuple<unknown, unknown>` when `g` is defined, and `g(1)` binds `(1, 1)`
  * to the parameter of `f`. A numeric-tuple argument at a scalar or open
@@ -138,8 +118,41 @@ export function mayBeNumericTupleType(t0: Type): boolean {
   const open = (e: Type) => e === 'unknown' || e === 'any';
   return (
     t.elements.some((e) => open(e.type)) &&
-    t.elements.every((e) => open(e.type) || isSubtype(e.type, 'number'))
+    t.elements.every(
+      (e) => open(e.type) || isSubtype(e.type, NUMERIC_TUPLE_COMPONENT)
+    )
   );
+}
+
+/**
+ * Whether an argument of type `t` binds as a numeric tuple at a scalar or
+ * open parameter of a function literal: `t` is a numeric tuple
+ * (`isNumericTupleType`) or may be one (`mayBeNumericTupleType`), or `t` is
+ * such a tuple with a whole-value `missing` arm.
+ *
+ * The `missing` arm comes from an argument that may be absent as a whole:
+ * an index read that can be out of range (`L[k]` over a list of points is
+ * `missing | tuple<integer, integer>`), or a tuple literal whose every
+ * coordinate is absent (`(Missing, Missing)` is `missing | tuple<missing,
+ * missing>`, because it evaluates to `Missing`). Each arm of the argument
+ * types the call on its own, and the call is the union of the arms. With
+ * `f := x ↦ (-x, x)`, the `missing` arm gives `tuple<number, missing>`, as
+ * `f(Missing)` is `(NaN, Missing)`, and the tuple arm gives `any`, as
+ * `f((1, 2))` does. The union of the two is `any`, so the callers answer
+ * `any` for such an argument, the same as for a numeric tuple. Without the
+ * `missing` arm read here, the call kept the signature result
+ * `tuple<number, number>`, which the pair of pairs that a present argument
+ * gives does not fit. An argument that is only `missing` is not a tuple and
+ * answers false.
+ *
+ * The callers apply this rule only after the derivation from the body
+ * (`callResultType`) declined. That derivation types each arm from the
+ * body, and it is more precise for a body that passes the argument through:
+ * `p ↦ p` over `L[k]` is `missing | tuple<number, number, number>`.
+ */
+export function isNumericTupleArgumentType(t: Type): boolean {
+  const present = stripMissingFromType(resolveTypeAlias(t), 'keep');
+  return isNumericTupleType(present) || mayBeNumericTupleType(present);
 }
 
 /**
@@ -206,6 +219,43 @@ function matrixPowerLiteralExponent(
   return Number(rational[0]);
 }
 
+/**
+ * The type of applying `operator` to operands a handler holds only as
+ * DESCRIPTORS — the recursive entry point a `type` handler needs to type an
+ * application it does not have in hand: the body of a mapping literal
+ * (`Map`, `Pipe`), a set comprehension's element, a broadcast per element.
+ * Reachable from every `'types'`-shape handler as `context.derive`.
+ *
+ * The derivation is the handler-visible core of what the engine does for a
+ * real application: the operator's own `type` handler answers first (run
+ * under the same purity guard as a top-level call, so a state write inside
+ * it is reported the same way); otherwise the declared signature's result
+ * stands, with a polytype arm instantiated against the operands through
+ * the same solver the expression route uses. An operand typed `never` (the
+ * empty type) makes the application `never`, as at the call site.
+ *
+ * Absent operands are handled as at the call site: for a `propagate`
+ * operator, an operand whose type carries a `missing` arm is handed to the
+ * handler with that arm stripped (a bare `missing` keeps its type), and the
+ * result absorbs the absence — every `missing` arm stripped, every numeric
+ * cell widened to admit the `NaN` an absent numeric operand contributes.
+ * Without that, `Map(k ↦ k + 1, xs)` over `integer | missing` elements
+ * would advertise elements no evaluation produces. The one exception is a
+ * whole-value absence that reaches a result that is not numeric (a
+ * restricted point under `Sin`): the result keeps a `missing` arm, because
+ * the value is then `Missing` (`absorbOperandAbsence`).
+ *
+ * It deliberately stops there. The other boxing-time steps that need the
+ * expression — argument validation and its error types, the Contract B
+ * widening of a signature result, the broadcast wrap of a threadable
+ * operator's declared result — are not reproduced: the handlers that
+ * matter for a mapping body (`Add`, `Multiply`, the comparison and
+ * collection heads) derive their broadcast shape themselves, and a caller
+ * that gets `undefined` keeps its own conservative answer. Reads nothing
+ * but definitions and types, so it is pure by construction.
+ *
+ * Returns `undefined` when `operator` has no operator definition.
+ */
 export function deriveApplicationType(
   engine: ComputeEngine,
   operator: string,
@@ -250,11 +300,12 @@ export function deriveApplicationType(
     // does not describe. The application-site typing of a lambda answers
     // `any` for this case (`lambdaBroadcastType`), and so does this route.
     // A tuple with an open component (`mayBeNumericTupleType`) is one such
-    // tuple when the component holds a number.
+    // tuple when the component holds a number, and so is such a tuple with a
+    // whole-value `missing` arm (`isNumericTupleArgumentType`).
     if (
       operands.some(
         (d, i) =>
-          (isNumericTupleType(d.type) || mayBeNumericTupleType(d.type)) &&
+          isNumericTupleArgumentType(d.type) &&
           !parameterAdmitsTuple(ft, i) &&
           parameterReachesBody(binding.value.value, i)
       )
@@ -448,7 +499,7 @@ export function deriveApplicationType(
       isSubtype(functionResult(sig) ?? 'unknown', 'number')) &&
     operands.some(
       (d, i) =>
-        (isNumericTupleType(d.type) || mayBeNumericTupleType(d.type)) &&
+        isNumericTupleArgumentType(d.type) &&
         !parameterAdmitsTuple(sig, i) &&
         parameterReachesBody(
           (def as { _lambdaLiteral?: Expression })._lambdaLiteral,

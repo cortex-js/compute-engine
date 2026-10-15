@@ -3,12 +3,17 @@ import { Complex } from 'complex.js';
 import type { Expression, BoxedSubstitution, Rule } from '../global-types.js';
 
 import { durandKernerRoots } from '../numerics/polynomial-roots.js';
-import { checkDeadline } from '../../common/interruptible.js';
+import {
+  checkDeadline,
+  throwIfCallerCancellation,
+} from '../../common/interruptible.js';
 import { mul } from '../boxed-expression/arithmetic-mul-div.js';
 import { add } from '../boxed-expression/arithmetic-add.js';
 import { matchAnyRules } from '../boxed-expression/rules.js';
 import { expandAll } from '../boxed-expression/expand.js';
 import { differentiate } from './derivative.js';
+import { withRadianConvention } from './angular-unit.js';
+import { specialAntiderivative } from './special-integrate.js';
 import { findUnivariateRoots } from '../boxed-expression/solve.js';
 import {
   cancelCommonFactors,
@@ -115,6 +120,8 @@ function tryIntegrationByParts(
 ): Expression | null {
   if (factors.length < 2 || depth > 2) return null; // Limit recursion depth
   if (byPartsFrames >= MAX_BY_PARTS_FRAMES) return null;
+  // One step of the budget of `antiderivative()` for each attempt.
+  checkDeadline(factors[0].engine._deadlineFrame);
 
   byPartsFrames += 1;
   try {
@@ -384,6 +391,8 @@ function tryUSubstitution(fn: Expression, index: string): Expression | null {
     const factor = factors[i];
     const innerFunc = getInnerFunction(factor, index);
     if (!innerFunc) continue;
+    // One step of the budget of `antiderivative()` for each attempt.
+    checkDeadline(ce._deadlineFrame);
 
     const { outer, inner } = innerFunc;
 
@@ -497,6 +506,8 @@ function tryLinearSubstitution(
   const ce = fn.engine;
   const innerInfo = getInnerFunction(fn, index);
   if (!innerInfo) return null;
+  // One step of the budget of `antiderivative()` for each attempt.
+  checkDeadline(ce._deadlineFrame);
 
   const { outer, inner } = innerInfo;
 
@@ -850,6 +861,57 @@ function tryPolyExpTrigIntegral(
 
   if (hasInexactNumber(result)) return null;
   return result;
+}
+
+/**
+ * Replace each product of two or more constant factors that multiplies the
+ * integration variable (`2·π·x`, `a·b·x`) by one fresh symbol, so that the
+ * rules, whose patterns bind the coefficient of `_x` to the single wildcard
+ * `_a`, match it: `∫ tan(2πx) dx` and `∫ sin²(πx/180) dx` were left
+ * unevaluated while `∫ tan(πx) dx` was not. The returned substitution maps
+ * each symbol back to its product. A product whose value is not real is left
+ * as it is: the rules that require a real coefficient check its numeric
+ * value, which a fresh symbol does not carry.
+ */
+function collapseLinearCoefficients(
+  expr: Expression,
+  index: string
+): [Expression, Record<string, Expression>] {
+  const ce = expr.engine;
+  const restore: Record<string, Expression> = {};
+  const walk = (e: Expression): Expression => {
+    if (!isFunction(e)) return e;
+    if (e.operator === 'Multiply' && e.ops.some((op) => sym(op) === index)) {
+      const constants = e.ops.filter((op) => !op.has(index));
+      const others = e.ops.filter((op) => op.has(index));
+      if (constants.length >= 2 && others.length === 1) {
+        // A factor that is not real (`i`, or a symbol declared complex) is
+        // left as it is: the rules that require a real coefficient check
+        // its numeric value, which a fresh symbol does not carry.
+        const real = constants.every((c) => {
+          if (c.type.matches('imaginary')) return false;
+          const value = c.N();
+          return !(isNumber(value) && value.isComplex);
+        });
+        if (real) {
+          // A name that neither the expression nor the scope chain knows,
+          // so that the symbol is fresh and the restoring substitution
+          // touches no other occurrence.
+          let n = Object.keys(restore).length + 1;
+          let name = `INTEGRALCOEF${n}`;
+          while (expr.has(name) || ce.lookupDefinition(name) !== undefined)
+            name = `INTEGRALCOEF${++n}`;
+          restore[name] = ce.function('Multiply', constants);
+          return ce.function('Multiply', [ce.symbol(name), others[0]]);
+        }
+      }
+    }
+    const ops = e.ops.map(walk);
+    return ops.every((op, i) => op === e.ops[i])
+      ? e
+      : ce.function(e.operator, ops);
+  };
+  return [walk(expr), restore];
 }
 
 function filter(sub: BoxedSubstitution): boolean {
@@ -3022,7 +3084,140 @@ function constantSplitFactors(expr: Expression): Expression[] {
   return [expr];
 }
 
+/**
+ * The step budget of one top-level call of the built-in antiderivative
+ * (`antiderivative()`). A step is one `checkDeadline` call on the engine
+ * frame: one entry in the recursive antiderivative, one integration by parts,
+ * one substitution tried, one rule of `INTEGRATION_RULES` tried, one rule
+ * that `replace()` tries (a rule step, which this budget counts and the
+ * budgets of Rubi and of the compiler do not; see `StepBudget` in
+ * `common/interruptible.ts`), and the other checkpoints of the engine code
+ * that the integrator calls (evaluation, expansion, simplification). The
+ * recursive calls, and the integrals that the integrator evaluates inside the
+ * call, spend steps from the same budget.
+ *
+ * When the budget is spent, the result is the unevaluated `Integrate` of the
+ * integrand, as the Rubi driver returns when its budget (`RUBI_STEP_BUDGET`
+ * in `rubi/driver.ts`) is spent. A step budget, not a wall-clock budget,
+ * decides when the search gives up, so the same integrand gives the same
+ * answer on every machine. A deadline of a caller (`ce.withTimeLimit`) or a
+ * step budget of a caller (`ce.withStepBudget`) still applies inside, and its
+ * expiry goes to the caller.
+ */
+//
+// Calibrated with the 93 test files that use `Integrate`, `DSolve` or
+// `antiderivative` (1,663 top-level calls, rule steps counted): the median
+// was 4 steps, the 99th percentile 765, and the most 11,442 (the seven-deep
+// chain of `compile-interval-integrate.test.ts`). The budget is about nine
+// times the most. The integrand `(1 + sin y + cos 2y)^12·e^y`, which has no
+// elementary antiderivative, spends the budget in about 1 s on the
+// development machine.
+export const ANTIDERIVATIVE_STEP_BUDGET = 100_000;
+
+/**
+ * The step budget that `antiderivative()` uses. It is
+ * `ANTIDERIVATIVE_STEP_BUDGET`; a test can set a smaller value, to spend the
+ * budget in less time.
+ *
+ * @internal
+ */
+export const antiderivativeBudget: { steps: number } = {
+  steps: ANTIDERIVATIVE_STEP_BUDGET,
+};
+
+/** The label of the span that holds the budget of `antiderivative()`. */
+const ANTIDERIVATIVE_SPAN = 'integrate:antiderivative';
+
+/**
+ * The steps that the last top-level call of `antiderivative()` spent (see
+ * `ANTIDERIVATIVE_STEP_BUDGET`), and if the budget was spent before the
+ * search ended. A diagnostic: it is shared by every engine.
+ */
+export const antiderivativeStats: { steps: number; spent: boolean } = {
+  steps: 0,
+  spent: false,
+};
+
+/**
+ * Run `fn` in a span labelled `label` that has a step budget of `steps`, and
+ * return `onSpent()` if that budget is spent before `fn` ends.
+ *
+ * The budget counts rule steps (`ruleSteps` of `StepBudget`). Only an
+ * expiry of this span becomes `onSpent()`. An expiry of an enclosing
+ * span (a deadline or a step budget of the caller) is thrown again, to the
+ * caller, and so is every other error. `stats`, when given, receives the
+ * steps that `fn` spent and if the budget was spent.
+ */
+export function withIntegrationStepBudget<T>(
+  ce: Expression['engine'],
+  limit: { steps: number; label: string },
+  fn: () => T,
+  onSpent: () => T,
+  stats?: { steps: number; spent: boolean }
+): T {
+  try {
+    return ce._withBudget({ ...limit, ruleSteps: true }, () => {
+      const budget = ce._deadlineFrame?.budgets?.at(-1);
+      try {
+        return fn();
+      } finally {
+        if (stats) {
+          stats.steps = limit.steps - (budget?.left ?? limit.steps);
+          stats.spent = (budget?.left ?? 0) < 0;
+        }
+      }
+    });
+  } catch (e) {
+    // This runs after the span has closed, so `ce._deadlineFrame` is the
+    // frame of the caller. When that frame has expired, its own expiry is
+    // thrown.
+    throwIfCallerCancellation(e, ce._deadlineFrame);
+    // The name is checked, not `instanceof`: a plugin bundle has its own
+    // copy of the `CancellationError` class.
+    if (
+      e instanceof Error &&
+      e.name === 'CancellationError' &&
+      (e as { cause?: unknown }).cause === 'step-budget' &&
+      (e as { attribution?: string }).attribution === limit.label
+    )
+      return onSpent();
+    throw e;
+  }
+}
+
 export function antiderivative(fn: Expression, index: string): Expression {
+  const ce = fn.engine;
+  // A call made while a call of `antiderivative()` is active (a recursive
+  // call, or an integral that the integrator evaluates) spends steps from the
+  // budget of the outermost call.
+  if (ce._deadlineFrame?.spans.includes(ANTIDERIVATIVE_SPAN))
+    return antiderivativeInUnit(fn, index);
+  return withIntegrationStepBudget(
+    ce,
+    { steps: antiderivativeBudget.steps, label: ANTIDERIVATIVE_SPAN },
+    () => antiderivativeInUnit(fn, index),
+    () => integrate(fn, index),
+    antiderivativeStats
+  );
+}
+
+function antiderivativeInUnit(fn: Expression, index: string): Expression {
+  const ce = fn.engine;
+  if (ce.angularUnit === 'rad') return antiderivativeInRadians(fn, index);
+  // The table, the rules and the substitution routes below hold the RADIAN
+  // antiderivatives, and the derivative they call scales for the unit, so in
+  // another unit the two disagree (`∫ sin x dx` was `−cos x` in degree mode,
+  // where it is `−(180/π) cos x`). The integrand is rewritten to the radian
+  // convention with an exact factor, integrated with the engine in radian
+  // mode (the evaluations and derivatives inside then read the rewritten
+  // tree in the convention it is written in), and the result is mapped back
+  // to the engine's unit (`withRadianConvention`).
+  return withRadianConvention(fn, index, (radian) =>
+    antiderivativeInRadians(radian, index)
+  );
+}
+
+function antiderivativeInRadians(fn: Expression, index: string): Expression {
   // Bound the symbolic-integration recursion by the engine deadline: some
   // rational/parametric integrands (e.g. a linear numerator over a fully
   // symbolic quadratic) explore an unbounded search here, and without a
@@ -3058,6 +3253,39 @@ export function antiderivative(fn: Expression, index: string): Expression {
 
   // Is it a constant?
   if (!fn.has(index)) return ce.expr(['Multiply', fn, ce.symbol(index)]);
+
+  const special = specialAntiderivative(fn, index);
+  if (special) return special;
+
+  // An exponential of a sum hides the product needed by reverse-chain
+  // matching, e.g. exp(x + exp(x)). Splitting e^(a+b) is branch-safe, unlike
+  // arbitrary complex powers. Only try a bounded number of summands, and do
+  // not recurse through the full integrator if the chain match fails.
+  const exponent = isFunction(fn, 'Exp')
+    ? fn.op1
+    : isFunction(fn, 'Power') && sym(fn.op1) === 'ExponentialE'
+      ? fn.op2
+      : undefined;
+  if (
+    isFunction(exponent, 'Add') &&
+    fn.isPure &&
+    exponent.nops <= 8 &&
+    exponent.ops.some(
+      (op) =>
+        op.has(index) &&
+        (isFunction(op, 'Exp') ||
+          (isFunction(op, 'Power') && sym(op.op1) === 'ExponentialE'))
+    )
+  ) {
+    // `ce._fn` and not `ce.function`: a canonical `Multiply` of exponentials
+    // folds `e^a · e^b` back to `e^(a + b)`, which is the form being split.
+    const product = ce._fn(
+      'Multiply',
+      exponent.ops.map((op) => ce.function('Exp', [op]))
+    );
+    const nested = tryUSubstitution(product, index);
+    if (nested && !nested.has('Integrate')) return nested;
+  }
 
   // ∫√x dx and ∫1/√x dx. `√x` and `x^(−1/2)` canonicalize to `Sqrt(x)` and
   // `Divide(1, Sqrt(x))` — not `Power` nodes — so the Power-based power rule
@@ -4224,12 +4452,24 @@ export function antiderivative(fn: Expression, index: string): Expression {
   // Apply a pattern matching rule...
   const rules = ce.rules(INTEGRATION_RULES);
   const xfn = expandAll(fn).subs({ [index]: '_x' }, { canonical: true });
-  const result = matchAnyRules(
-    xfn,
-    rules,
-    { _x: ce.symbol('_x') },
-    { useVariations: true, form: 'canonical' }
-  );
+  let result: Expression[] | null = null;
+  // The fresh coefficient symbols of `collapseLinearCoefficients` are
+  // declared in a scope of their own, so that none stays declared in the
+  // caller's scope; they are substituted back before the scope is popped.
+  ce.pushScope();
+  try {
+    const [collapsed, restore] = collapseLinearCoefficients(xfn, '_x');
+    result = matchAnyRules(
+      collapsed,
+      rules,
+      { _x: ce.symbol('_x') },
+      { useVariations: true, form: 'canonical' }
+    );
+    if (result && result[0] && Object.keys(restore).length > 0)
+      result = [result[0].subs(restore, { canonical: true })];
+  } finally {
+    ce.popScope();
+  }
 
   if (result && result[0]) return result[0].subs({ _x: index });
 

@@ -767,8 +767,15 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
               ),
             ])
             .evaluate({ numericApproximation });
+        // The bignum parts, when there are some, so that past a double's
+        // digits the angle is the bignum `atan2(im, re)` that `Arctan2`
+        // computes: `N(Argument(e + iπ), 25)` carries the parts at 25 digits,
+        // and their doubles gave an angle wrong from the 17th.
         return ce
-          .function('Arctan2', [op.im, op.re])
+          .function('Arctan2', [
+            ce.number(op.bignumIm ?? op.im),
+            ce.number(op.bignumRe ?? op.re),
+          ])
           .evaluate({ numericApproximation });
       },
     },

@@ -311,6 +311,7 @@ const DERIVATIVES_TABLE = {
   ],
   // d/dx ln(Γ(x)) = ψ(x) (digamma function)
   GammaLn: ['Digamma', '_'],
+  LogGamma: ['Digamma', '_'],
   // d/dx ψ(x) = ψ₁(x) (trigamma function)
   // https://en.wikipedia.org/wiki/Trigamma_function
   Digamma: ['Trigamma', '_'],
@@ -382,6 +383,30 @@ function scaleForAngularUnit(
   if (INVERSE_TRIG_OPERATORS.has(operator))
     return ce.function('Divide', [formula, angularChainFactor(ce)]);
   return formula;
+}
+
+/**
+ * The derivative of the unary function `operator` at `arg`, from the
+ * derivative table, scaled for the engine's angular unit; `undefined` for a
+ * head the table does not know. The formula is built with `subs()`, not
+ * evaluated, so an exact `arg` keeps an exact derivative (`ln 10` stays
+ * symbolic). A step function (`Floor`, `Ceil`, `Round`, `Sign`) has the
+ * derivative `0`: its slope is zero almost everywhere.
+ *
+ * Used by the error propagation of a `Measurement` operand
+ * (`measurementUnaryByHead`, `library/measurement-arithmetic.ts`): the
+ * first-order uncertainty of `f(a ± σ)` is `|f′(a)|·σ`, and this is `f′(a)`.
+ */
+export function unaryDerivativeFormula(
+  ce: Expression['engine'],
+  operator: string,
+  arg: Expression
+): Expression | undefined {
+  const h = DERIVATIVES_TABLE[operator as keyof typeof DERIVATIVES_TABLE] as
+    | ExpressionInput
+    | undefined;
+  if (h === undefined) return undefined;
+  return scaleForAngularUnit(ce.expr(h).subs({ _: arg }), operator);
 }
 
 /**

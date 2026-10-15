@@ -81,7 +81,13 @@ function parseDecimalDigits(
         fmt.decimalSeparatorTokens[0] === '<{>' &&
         fmt.decimalSeparatorTokens[1] === ',' &&
         fmt.decimalSeparatorTokens[2] === '<}>';
-      if (
+      // A token at a stop index of `_visualSpaceStops` separates two
+      // operands for the parselet that set the stops. It is not a digit
+      // group separator, also when it is the configured separator (by
+      // default `\,`): `\delta_{1.5\,2}` has the indices 1.5 and 2.
+      if (parser._visualSpaceStops?.has(parser.index)) {
+        parser.index = savedIndex;
+      } else if (
         (group.length > 0 && parser.matchAll(group)) ||
         (!decimalIsBracedComma && parser.matchAll(['<{>', ',', '<}>']))
       ) {

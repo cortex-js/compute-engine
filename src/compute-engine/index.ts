@@ -113,6 +113,7 @@ import {
 } from './map-auto-compile-stats.js';
 
 import { getStandardLibrary } from './library/library.js';
+import { pipeStageAsCall } from './library/core.js';
 
 import { DEFAULT_COST_FUNCTION } from './cost-function.js';
 
@@ -1730,6 +1731,24 @@ export class ComputeEngine implements IComputeEngine {
     return this._numericConfiguration.isTransientPrecision;
   }
 
+  /** Run `fn` with the angular unit `unit` without a reset of the engine:
+   * see `EngineNumericConfiguration.withTransientAngularUnit`.
+   * @internal */
+  _withTransientAngularUnit<T>(unit: AngularUnit, fn: () => T): T {
+    return this._numericConfiguration.withTransientAngularUnit(unit, fn);
+  }
+
+  /** True while `_withTransientPrecision` or `_withTransientAngularUnit`
+   * runs a function: a value computed now must not be stored where a reader
+   * at the working precision, or in the working angular unit, can find it.
+   * @internal */
+  get _atTransientConfiguration(): boolean {
+    return (
+      this._numericConfiguration.isTransientPrecision ||
+      this._numericConfiguration.isTransientAngularUnit
+    );
+  }
+
   /**
    * The unit used for unitless angles in trigonometric functions.
    *
@@ -1881,15 +1900,17 @@ export class ComputeEngine implements IComputeEngine {
    * steps.
    *
    * Spans nest: the effective deadline is the earliest one, and a step
-   * counts against every active budget.
+   * counts against every active budget. With `ruleSteps`, each rule that
+   * `replace()` tries is also a step of this budget, and only of the
+   * budgets that set it (see `StepBudget`).
    *
    * @internal
    */
   _withBudget<T>(
-    limit: { ms?: number; steps?: number; label?: string },
+    limit: { ms?: number; steps?: number; label?: string; ruleSteps?: boolean },
     fn: () => T
   ): T {
-    const { ms, steps, label } = limit;
+    const { ms, steps, label, ruleSteps } = limit;
     const prevFrame = this._runtimeState.deadlineFrame;
     const own = ms === undefined ? Infinity : Date.now() + ms;
     const spans = [
@@ -1899,7 +1920,12 @@ export class ComputeEngine implements IComputeEngine {
     const budgets =
       steps === undefined
         ? prevFrame?.budgets
-        : [...(prevFrame?.budgets ?? []), { left: steps, owner: label, spans }];
+        : [
+            ...(prevFrame?.budgets ?? []),
+            ruleSteps === true
+              ? { left: steps, owner: label, spans, ruleSteps }
+              : { left: steps, owner: label, spans },
+          ];
 
     // Nesting stays `min()`: if an enclosing span's deadline is already at or
     // before our own, it remains the effective one (and keeps its owner);
@@ -2947,6 +2973,14 @@ export class ComputeEngine implements IComputeEngine {
   /** @internal */
   _inScope<T>(scope: Scope | undefined, f: () => T): T {
     return inScopeImpl(this, scope, f);
+  }
+
+  /** See `IComputeEngine._pipeStageAsCall`. @internal */
+  _pipeStageAsCall(
+    topic: Expression,
+    stage: Expression
+  ): { call: Expression; topicAt?: number; written?: Expression } | undefined {
+    return pipeStageAsCall(this, topic, stage);
   }
 
   /** @internal Depth of the enclosing resolve-only regions. */

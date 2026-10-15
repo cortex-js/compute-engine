@@ -515,8 +515,15 @@ describe('LerchPhi JS compile', () => {
 
   function expectParity(got: unknown, z: number, s: number, a: number) {
     const n = phi(z, s, a).N();
-    if (n.im !== 0) expect(got).toBeNaN();
-    else
+    if (n.im !== 0) {
+      const v = got as { re: number; im: number };
+      expect(Math.abs(v.re - n.re)).toBeLessThan(
+        1e-9 * Math.max(1, Math.abs(n.re))
+      );
+      expect(Math.abs(v.im - n.im)).toBeLessThan(
+        1e-9 * Math.max(1, Math.abs(n.im))
+      );
+    } else
       expect(Math.abs((got as number) - n.re)).toBeLessThan(
         1e-9 * Math.max(1, Math.abs(n.re))
       );
@@ -537,12 +544,18 @@ describe('LerchPhi JS compile', () => {
     expectParity(run?.({ lp_z: z, lp_s: s, lp_a: a }), z, s, a);
   });
 
-  test('real z > 1 is on the branch cut, where the value is complex: NaN', () => {
-    expect(run?.({ lp_z: 3, lp_s: 2, lp_a: 1 })).toBeNaN();
+  test('real z > 1 is on the branch cut, where the value is complex', () => {
+    expect(run?.({ lp_z: 3, lp_s: 2, lp_a: 1 })).toEqual({
+      re: phi(3, 2, 1).N().re,
+      im: phi(3, 2, 1).N().im,
+    });
     // Just past z = 1 the imaginary part is tiny (mpmath: lerchphi(1.0000000001,
     // 2, 1) = 1.6449340690863183 − 3.1415929e-10j), but it is not rounding
     // noise: the value is complex.
-    expect(run?.({ lp_z: 1.0000000001, lp_s: 2, lp_a: 1 })).toBeNaN();
+    const near = run?.({ lp_z: 1.0000000001, lp_s: 2, lp_a: 1 }) as {
+      im: number;
+    };
+    expect(near.im).toBeCloseTo(-3.141592913055096e-10, 15);
     expect(phi(1.0000000001, 2, 1).N().im).toBeCloseTo(
       -3.141592913055096e-10,
       15
@@ -986,9 +999,12 @@ describe('LerchPhi at a large order next to the branch cut, with |z| above 1e154
     // and 2.5^(−1369) is below the range of a double.
     [1000.5, 2.5, 1e184],
     [1000.5, 2.5, -1e184],
-  ])('Φ(z, s, a) at s = %p, a = %p, z = 1e200 + %pi stays unevaluated', (s, a, im) => {
-    expect(phi(z(im), s, a).N().operator).toBe('LerchPhi');
-  });
+  ])(
+    'Φ(z, s, a) at s = %p, a = %p, z = 1e200 + %pi stays unevaluated',
+    (s, a, im) => {
+      expect(phi(z(im), s, a).N().operator).toBe('LerchPhi');
+    }
+  );
 });
 
 describe('LerchPhi past the unit circle where 1/Γ(s) underflows', () => {
@@ -1005,9 +1021,15 @@ describe('LerchPhi past the unit circle where 1/Γ(s) underflows', () => {
   const z = ['Complex', 1632497323.917026, 0.007528495710047928];
   const a = ['Complex', 3.629238796234131, -0.38984060287475586];
   test.each([
-    [6.94003701210022, -1.167881854689397656244e-98, -1.92697635871759495702e-99],
+    [
+      6.94003701210022, -1.167881854689397656244e-98,
+      -1.92697635871759495702e-99,
+    ],
     [3, -9.47034134416640372738e-99, 1.535904514165654334556e-98],
-    [-6.94003701210022, -3.948127087819597250381e-98, 3.425786630046654381784e-98],
+    [
+      -6.94003701210022, -3.948127087819597250381e-98,
+      3.425786630046654381784e-98,
+    ],
   ])('Φ(z, 173.578309237957 + %pi, a)', (sIm, re, im) => {
     const v = phi(z, ['Complex', 173.578309237957, sIm], a).N();
     expect(v.isNumberLiteral).toBe(true);

@@ -132,6 +132,14 @@ export interface ILatexSyntax {
    *  may not. If the same instance is used by several engines, the entries
    *  apply to all of them. See `LatexSyntax.addEntries()`. */
   addEntries?(entries: ReadonlyArray<Partial<LatexDictionaryEntry>>): void;
+
+  /** The dictionary entries, including the entries added with
+   *  `addEntries()`. A call to `addEntries()` gives a new array, so a
+   *  different array means a different dictionary. Rule strings are parsed
+   *  with these entries plus the rule entries. Optional: a minimal injected
+   *  syntax may not have it, and then rule strings are parsed with the
+   *  default dictionary. See `LatexSyntax.dictionary`. */
+  readonly dictionary?: ReadonlyArray<Partial<LatexDictionaryEntry>>;
 }
 
 export type OperatorInfo = {
@@ -1260,6 +1268,20 @@ export interface IComputeEngine {
    * @internal */
   readonly _atTransientPrecision: boolean;
 
+  /** Run `fn` with the angular unit `unit`, then restore the previous unit,
+   * without a reset of the engine. The symbolic integrator runs its radian
+   * rules this way in another unit. A value computed inside `fn` is not
+   * stored (see `_atTransientConfiguration`).
+   * @internal */
+  _withTransientAngularUnit<T>(unit: AngularUnit, fn: () => T): T;
+
+  /** True while `_withTransientPrecision` or `_withTransientAngularUnit`
+   * runs a function. The memos of evaluated values are then bypassed, so
+   * that a value computed at the transient precision or in the transient
+   * angular unit is not served afterwards.
+   * @internal */
+  readonly _atTransientConfiguration: boolean;
+
   /** The state-event choke point
    * (`docs/EFFECTS-MODEL.md` §3): write
    * sites report what happened; the lifecycle's dispatch table
@@ -1371,11 +1393,13 @@ export interface IComputeEngine {
    * (`steps`), or both. A step budget bounds an internal search on every
    * machine at the same point, so its result does not depend on the speed or
    * the load of the machine. A spent budget throws a timeout
-   * `CancellationError` with the span's `label` as its attribution.
+   * `CancellationError` with the span's `label` as its attribution. With
+   * `ruleSteps`, each rule that `replace()` tries is a step of this budget
+   * too (see `StepBudget` in `common/interruptible.ts`).
    * @internal
    */
   _withBudget<T>(
-    limit: { ms?: number; steps?: number; label?: string },
+    limit: { ms?: number; steps?: number; label?: string; ruleSteps?: boolean },
     fn: () => T
   ): T;
 
@@ -1972,6 +1996,24 @@ export interface IComputeEngine {
    * executes the function `f` in that scope and returns the result.
    * @internal */
   _inScope<T>(scope: Scope | undefined, f: () => T): T;
+
+  /**
+   * The canonical form of the held stage of a pipe `topic |> stage`, for the
+   * Epsil static pass (`src/epsil/static-diagnostics.ts`). `Pipe` holds its
+   * stage unbound until it is evaluated, so the canonical form of the pipe
+   * does not contain the errors of the stage. A stage that gets the piped
+   * value as an implicit argument is returned as the canonical call with
+   * `topic` in the slot that evaluation selects, at the 0-based position
+   * `topicAt` (`xs |> Filter("a")` is `Filter(xs, "a")`); any other stage is
+   * canonicalized alone. `written` is the call before canonicalization, which
+   * `topicAt` counts in: canonicalization can rename the call and reorder its
+   * operands. Nothing is evaluated. `undefined` when the stage is already
+   * canonical. See `pipeStageAsCall` in `library/core.ts`.
+   * @internal */
+  _pipeStageAsCall(
+    topic: Expression,
+    stage: Expression
+  ): { call: Expression; topicAt?: number; written?: Expression } | undefined;
 
   /**
    * Execute `f` in a **resolve-only** region: while it runs, boxing a symbol

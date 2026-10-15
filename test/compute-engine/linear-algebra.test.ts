@@ -1146,6 +1146,15 @@ describe('Inverse', () => {
     );
   });
 
+  it('rejects a scalar operand on the parse route', () => {
+    // The signature is `(matrix) -> matrix`, so a number operand is an
+    // `incompatible-type` error on every route: the evaluate handler has no
+    // scalar branch.
+    expect(
+      ce.parse('\\operatorname{Inverse}(5)').evaluate().toString()
+    ).toBe('Error(ErrorCode("incompatible-type", "matrix", "5"), 5)');
+  });
+
   it('should calculate the inverse of a numeric vector', () => {
     const result = ce.expr(['Inverse', v7_n]).evaluate();
     // Type checking rejects vector (not a matrix).
@@ -1242,6 +1251,26 @@ describe('Inverse', () => {
     );
   });
 
+  // The static type of `Inverse` is the type of the power with exponent -1:
+  // an integer matrix has an inverse with rational entries, and a
+  // non-square matrix (which has no inverse) keeps the declared `matrix`.
+  it('is typed with the entries and shape of the inverse', () => {
+    const A: Expression = ['List', ['List', 2, 1], ['List', 1, 3]];
+    expect(ce.expr(['Inverse', A]).type.toString()).toBe(
+      'matrix<rational^(2x2)>'
+    );
+    expect(ce.expr(['Inverse', A]).type.toString()).toBe(
+      ce.expr(['MatrixPower', A, -1]).type.toString()
+    );
+    const F: Expression = ['List', ['List', 0.5, 1], ['List', 1, 3]];
+    expect(ce.expr(['Inverse', F]).type.toString()).toBe('matrix<real^(2x2)>');
+    const N: Expression = ['List', ['List', 1, 2, 3], ['List', 4, 5, 6]];
+    expect(ce.expr(['Inverse', N]).type.toString()).toBe('matrix');
+    expect(ce.expr(['Inverse', N]).evaluate().toString()).toBe(
+      'Error("expected-square-matrix", "[[1,2,3],[4,5,6]]")'
+    );
+  });
+
   it('returns a matrix-typed result that Dot accepts', () => {
     const A: Expression = ['List', ['List', 2, 1], ['List', 1, 3]];
     const b: Expression = ['List', 1, 1];
@@ -1305,6 +1334,15 @@ describe('PseudoInverse', () => {
     expect(result.toString()).toMatchInlineSnapshot(
       `Error(ErrorCode("incompatible-type", "matrix", "42"), 42)`
     );
+  });
+
+  it('rejects a scalar operand on the parse route', () => {
+    // The signature is `(matrix) -> matrix`, so a number operand is an
+    // `incompatible-type` error on every route: the evaluate handler has no
+    // scalar branch.
+    expect(
+      ce.parse('\\operatorname{PseudoInverse}(5)').evaluate().toString()
+    ).toBe('Error(ErrorCode("incompatible-type", "matrix", "5"), 5)');
   });
 
   it('should calculate the pseudo inverse of a numeric vector', () => {
@@ -3329,6 +3367,142 @@ describe('MatrixPower', () => {
       expect(engine.box(['Power', m, 3]).type.toString()).toBe(
         'matrix<integer^(2x2)>'
       );
+    });
+  });
+
+  // A `Power` that is built before its base has a value stays a scalar
+  // `Power`: canonicalization writes `A^n` as `MatrixPower(A, n)` only when
+  // the type of `A` is already a matrix. When the base later holds a square
+  // matrix of numbers and the exponent is an integer, the evaluation gives
+  // the matrix power, the same value as `B^2` parsed after the assignment.
+  // Other shapes keep the element-wise power.
+  describe('a `Power` whose base gets a matrix value later', () => {
+    const before = (latex: string, value: Expression) => {
+      const engine = new ComputeEngine();
+      const e = engine.parse(latex);
+      engine.assign('B', engine.box(value));
+      return e;
+    };
+
+    it.each([
+      [2, '[[7,10],[15,22]]'],
+      [3, '[[37,54],[81,118]]'],
+      [0, '[[1,0],[0,1]]'],
+      [1, '[[1,2],[3,4]]'],
+      [-2, '[[11/2,-5/2],[-15/4,7/4]]'],
+      [-3, '[[-59/4,27/4],[81/8,-37/8]]'],
+    ])('B^%j is MatrixPower(B, %j)', (k, expected) => {
+      const e = before(`B^{${k}}`, m);
+      expect(e.evaluate().toString()).toBe(expected);
+      expect(ce.expr(['MatrixPower', m, k]).evaluate().toString()).toBe(
+        expected
+      );
+    });
+
+    it('takes the matrix power under `.N()` and a numeric approximation', () => {
+      const e = before('B^2', m);
+      expect(e.N().toString()).toBe('[[7,10],[15,22]]');
+      expect(e.evaluate({ numericApproximation: true }).toString()).toBe(
+        '[[7,10],[15,22]]'
+      );
+      // A negative power is a numeric approximation of the inverse too.
+      expect(before('B^{-2}', m).N().toString()).toBe(
+        '[[5.5,-2.5],[-3.75,1.75]]'
+      );
+    });
+
+    it('takes the matrix power on the asynchronous route', async () => {
+      const e = before('B^2', m);
+      expect((await e.evaluateAsync()).toString()).toBe('[[7,10],[15,22]]');
+    });
+
+    it('takes the matrix power of a 3×3 matrix', () => {
+      const m3: Expression = [
+        'List',
+        ['List', 2, 0, 1],
+        ['List', 1, 3, 2],
+        ['List', 1, 1, 2],
+      ];
+      expect(before('B^2', m3).evaluate().toString()).toBe(
+        '[[5,1,4],[7,11,11],[5,5,7]]'
+      );
+      expect(before('B^2', m3).evaluate().toString()).toBe(
+        ce.expr(['MatrixPower', m3, 2]).evaluate().toString()
+      );
+    });
+
+    it('takes the matrix power when the exponent is a symbol', () => {
+      const engine = new ComputeEngine();
+      const e = engine.parse('B^k');
+      engine.assign('B', engine.box(m));
+      engine.assign('k', 2);
+      expect(e.evaluate().toString()).toBe('[[7,10],[15,22]]');
+    });
+
+    it('takes the matrix power of a base that becomes a matrix at evaluation', () => {
+      // `(B + B)^2` = `(2B)^2` = `4·B^2`.
+      expect(before('(B+B)^2', m).evaluate().toString()).toBe(
+        '[[28,40],[60,88]]'
+      );
+    });
+
+    it('takes the matrix power on the structural form', () => {
+      const engine = new ComputeEngine();
+      const literal = engine.function(
+        'Power',
+        [engine.box(m), engine.number(2)],
+        {
+          form: 'structural',
+        }
+      );
+      expect(literal.evaluate().toString()).toBe('[[7,10],[15,22]]');
+      const symbolic = engine.function(
+        'Power',
+        [engine.symbol('B'), engine.number(2)],
+        { form: 'structural' }
+      );
+      engine.assign('B', engine.box(m));
+      expect(symbolic.evaluate().toString()).toBe('[[7,10],[15,22]]');
+    });
+
+    it('keeps the element-wise power for a non-integer exponent', () => {
+      expect(before('B^{1/2}', m).evaluate().toString()).toBe(
+        '[[1,sqrt(2)],[sqrt(3),2]]'
+      );
+      expect(before('B^{2.5}', m).evaluate().toString()).toBe(
+        '[[1,5.65685424949238019521],[15.5884572681198956417,32]]'
+      );
+    });
+
+    it('keeps the element-wise power for a shape that is not a square matrix', () => {
+      // A vector.
+      expect(before('B^2', ['List', 1, 2, 3]).evaluate().toString()).toBe(
+        '[1,4,9]'
+      );
+      // A ragged list.
+      expect(
+        before('B^2', ['List', ['List', 1, 2], ['List', 3]])
+          .evaluate()
+          .toString()
+      ).toBe('[[1,4],[9]]');
+      // A matrix that is not square. Written directly, `[[1,2,3],[4,5,6]]^2`
+      // is a `MatrixPower`, which is an `expected-square-matrix` error.
+      expect(before('B^2', m23_n).evaluate().toString()).toBe(
+        '[[1,4,9],[16,25,36]]'
+      );
+    });
+
+    it('keeps the element-wise power for entries that are not numbers', () => {
+      const e = before('B^2', [
+        'List',
+        ['List', "'a'", "'b'"],
+        ['List', "'c'", "'d'"],
+      ]);
+      const value = e.evaluate();
+      // Each cell is a `Power` of a string, which is a type error.
+      expect(value.operator).toBe('List');
+      expect(value.nops).toBe(2);
+      expect(value.isValid).toBe(false);
     });
   });
 });

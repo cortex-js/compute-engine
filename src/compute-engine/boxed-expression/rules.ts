@@ -505,15 +505,28 @@ function parseRulePart(
   return ce.expr(rule, { form: canonical ? 'canonical' : 'raw' });
 }
 
-/** A rule can be expressed as a string of the form
- * `<match> -> <replace>; <condition>`
- * where `<match>`, `<replace>` and `<condition>` are LaTeX expressions.
- */
-function parseRule(
-  ce: ComputeEngine,
-  rule: string,
-  options?: { canonical?: boolean; purpose?: RulePurpose }
-): BoxedRule {
+/* The state of the parse of one rule string: a mapping from a symbol to a
+ wildcard, and a mapping from a symbol to its conditions. The rule entries of
+ `ruleEntries()` write to these two objects while a rule string is parsed,
+ and the entry of `->` reads them. `parseRule()` empties them before each
+ parse. One module-level state is enough: a parse is synchronous, and a rule
+ entry never starts the parse of another rule string. The state cannot be
+ local to `parseRule()`, because the rule entries are made once and kept in
+ the cache of `ruleSyntax()`. */
+const wildcards: Record<string, string> = {};
+const wildcardConditions: Record<string, string> = {};
+
+function resetRuleParseState(): void {
+  for (const id of Object.keys(wildcards)) delete wildcards[id];
+  for (const id of Object.keys(wildcardConditions))
+    delete wildcardConditions[id];
+}
+
+/* The LaTeX dictionary entries that are special to rule strings: the
+ wildcards (`a`, `...a`, `...a?`), the conditions attached to a wildcard
+ (`a:positive`), and the `->` that separates the match, the replacement and
+ the condition (`a + b -> c; a > 0`). */
+function ruleEntries(): ReadonlyArray<object> {
   const makeWildcardEntry = (x: string) => {
     return {
       kind: 'symbol',
@@ -536,16 +549,9 @@ function parseRule(
   // Setup custom dictionary entries for ...x, ...x?
   // mapping to wildcard sequence, wildcard optional sequence
 
-  // A mapping from a symbol to a wildcard
-  const wildcards: Record<string, string> = {};
-
-  // A mapping from a symbol to a condition
-  const wildcardConditions: Record<string, string> = {};
-
   // Add wildcard entries for all lowercase letters, except
   // for e (natural number), d (differential) and i (imaginary unit)
-  const ruleDict = [
-    ...LATEX_DICTIONARY,
+  return [
     {
       kind: 'prefix',
       precedence: 100,
@@ -639,20 +645,62 @@ function parseRule(
       },
     },
   ];
-  const canonical = options?.canonical ?? false;
+}
 
-  // Use a standalone LatexSyntax instance with the custom dictionary.
+type RuleSyntax = InstanceType<
+  typeof import('../latex-syntax/latex-syntax.js').LatexSyntax
+>;
+
+/* The rule syntaxes made so far, by engine dictionary. `addEntries()` puts a
+ new array in the place of the dictionary of a `LatexSyntax`, so the identity
+ of the array changes each time the notation of an engine changes, and a
+ rule syntax made from an earlier dictionary is not used again. Engines that
+ use the default dictionary share one rule syntax. The class is recorded with
+ the syntax because the rule syntax is made with the class of the engine's
+ `LatexSyntax`. */
+const RULE_SYNTAXES = new WeakMap<
+  object,
+  { syntax: RuleSyntax; LatexSyntaxClass: unknown }
+>();
+
+/* The `LatexSyntax` that parses the rule strings of `ce`: the dictionary of
+ the engine's `LatexSyntax` (the default dictionary, the `dictionary` given
+ to its constructor, and the entries added with `addEntries()`), followed by
+ the rule entries. The rule entries come last, so they win over an engine
+ entry with the same trigger: a lowercase letter is always a wildcard in a
+ rule string. If the engine's `LatexSyntax` does not show its dictionary, the
+ default dictionary is used. */
+function ruleSyntax(ce: ComputeEngine): RuleSyntax {
+  const engineSyntax = ce._requireLatexSyntax();
+  const dictionary = engineSyntax.dictionary ?? LATEX_DICTIONARY;
   // Construct via the injected LatexSyntax class (avoids static import).
-  const LatexSyntaxClass = ce._requireLatexSyntax().constructor as new (
+  const LatexSyntaxClass = engineSyntax.constructor as new (
     options?: Record<string, unknown>
-  ) => InstanceType<
-    typeof import('../latex-syntax/latex-syntax.js').LatexSyntax
-  >;
-  const ruleSyntax = new LatexSyntaxClass({
-    dictionary: ruleDict as ReadonlyArray<
+  ) => RuleSyntax;
+  const cached = RULE_SYNTAXES.get(dictionary);
+  if (cached?.LatexSyntaxClass === LatexSyntaxClass) return cached.syntax;
+  const syntax = new LatexSyntaxClass({
+    dictionary: [...dictionary, ...ruleEntries()] as ReadonlyArray<
       Partial<import('../latex-syntax/types.js').LatexDictionaryEntry>
     >,
   });
+  RULE_SYNTAXES.set(dictionary, { syntax, LatexSyntaxClass });
+  return syntax;
+}
+
+/** A rule can be expressed as a string of the form
+ * `<match> -> <replace>; <condition>`
+ * where `<match>`, `<replace>` and `<condition>` are LaTeX expressions.
+ * The string is parsed with the notation of the engine, plus the rule
+ * entries (see `ruleSyntax()`).
+ */
+function parseRule(
+  ce: ComputeEngine,
+  rule: string,
+  options?: { canonical?: boolean; purpose?: RulePurpose }
+): BoxedRule {
+  const canonical = options?.canonical ?? false;
+  const syntax = ruleSyntax(ce);
 
   // Push a clean scope that only inherits from the system scope (index 0),
   // not from the global scope or user-defined scopes. This prevents user-defined
@@ -665,7 +713,8 @@ function parseRule(
 
   let expr: Expression;
   try {
-    expr = ce.expr(ruleSyntax.parse(rule) ?? 'Nothing');
+    resetRuleParseState();
+    expr = ce.expr(syntax.parse(rule) ?? 'Nothing');
 
     if (!expr.isValid || expr.operator !== 'Rule') {
       throw new Error(
@@ -1350,6 +1399,15 @@ export function replace(
   // Returns the step if the rule applied AND changed the expression,
   // `null` otherwise. Exceptions from `applyRule` propagate to the caller.
   const stepOf = (rule: BoxedRule): RuleStep | null => {
+    // One rule step for each rule tried, when a budget that counts rule
+    // steps is active (the budget of the built-in antiderivative and of the
+    // variation-of-parameters step of `DSolve`). Without it, those budgets
+    // counted few steps for a rule scan of `simplify()` that ran for seconds
+    // on a large expression. The other budgets do not count rule steps, so
+    // their step counts stay as they were calibrated.
+    const frame = expr.engine._deadlineFrame;
+    if (frame?.budgets?.some((b) => b.ruleSteps === true))
+      checkDeadline(frame, true);
     const result = applyRule(rule, expr, {}, options);
     // "Did the rule change anything" is a SYNTACTIC question: rules rewrite
     // spelling, and their machinery re-boxes values in a clean scope, so a

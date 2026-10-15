@@ -63,6 +63,7 @@ import {
   statementBodyHead,
 } from './base-compiler.js';
 import type { LoopInvariantBinding } from './base-compiler.js';
+import { complexContinuation } from './complex-continuation.js';
 import {
   signatureEffects,
   finitePartOfType,
@@ -937,6 +938,21 @@ function gpuResultIsComplexValued(
   } catch {
     return false;
   }
+}
+
+/**
+ * Decline a special function whose value is provably not real: the shader
+ * helper is real-only (`NaN` there), and there is no complex kernel to
+ * lower to (`complexContinuation`).
+ */
+function declineComplexContinuation(
+  head: string,
+  args: ReadonlyArray<Expression>
+): void {
+  if (complexContinuation(head, args) === 'complex')
+    throw new Error(
+      `Could not compile \`${head}\`: its value is not real for these operands, and the shader targets have no complex lane for it`
+    );
 }
 
 /**
@@ -6504,7 +6520,10 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // A constant exponent is decided now. A variable one cannot be decided
     // in the shader (the recovery reads the exponent to 15 to 17 digits,
     // and a shader holds an f32), and keeps the lowering below: `pow`, with
-    // no value for a negative base, as before.
+    // no value for a negative base. This is a user decision: a run-time
+    // helper on an f32 cannot recover the same `p/q` as the interpreter, and
+    // a refusal of every shader power of an undeclared base would break
+    // ordinary plot expressions.
     const negativeBase = BaseCompiler.negativeBaseFloatPower(args);
     if (
       BaseCompiler.isComplexValued(base) ||
@@ -7160,6 +7179,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       throw new Error(
         'Could not compile `HurwitzZeta`: only the two-operand form `HurwitzZeta(s, a)` compiles'
       );
+    declineComplexContinuation('HurwitzZeta', args);
     return `_gpu_hurwitz_zeta(${compile(args[0])}, ${compile(args[1])})`;
   },
   // Real-only (`GPU_REAL_ONLY_LOWERINGS`): `_gpu_lerch_phi` takes real
@@ -7171,6 +7191,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       throw new Error(
         'Could not compile `LerchPhi`: it takes exactly three operands'
       );
+    declineComplexContinuation('LerchPhi', args);
     return `_gpu_lerch_phi(${compile(args[0])}, ${compile(args[1])}, ${compile(args[2])})`;
   },
   // Real-only (`GPU_REAL_ONLY_LOWERINGS`): `_gpu_poly_log` answers the
@@ -7183,6 +7204,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       throw new Error(
         'Could not compile `PolyLog`: it takes exactly two operands'
       );
+    declineComplexContinuation('PolyLog', args);
     return `_gpu_poly_log(${compile(args[0])}, ${compile(args[1])})`;
   },
   Binomial: gpuBinomial,

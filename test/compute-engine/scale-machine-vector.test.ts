@@ -55,9 +55,11 @@ describe('A scalar times a vector of machine numbers', () => {
     const L = ['List', 1.5, 2, -0.25];
     expect(ce.box(['Sum', ['Multiply', 2, L]]).evaluate().re).toBe(6.5);
     expect(ce.box(['At', ['Multiply', 2, L], 3]).evaluate().re).toBe(-0.5);
+    // `2·L` is `[3.0, 4, -0.5]`: each element of the sum follows its own
+    // operands, so `3.0 + 1` is the float `4`, and `4 + 1` the exact `5`.
     expect(
       ce.box(['Add', ['Multiply', 2, L], ['List', 1, 1, 1]]).evaluate().json
-    ).toEqual(['List', 4, 5, 0.5]);
+    ).toEqual(['List', { num: '4.0' }, 5, 0.5]);
     expect(
       ce.box(['Dot', ['Multiply', 2, L], ['List', 1, 1, 1]]).evaluate().re
     ).toBe(6.5);

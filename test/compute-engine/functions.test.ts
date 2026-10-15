@@ -729,6 +729,24 @@ describe('Pipe — stage sugar (box route)', () => {
     ).toBe('[2,4,6]');
   });
 
+  test('a type variable is grounded with its declared bound for placement', () => {
+    const ce = new ComputeEngine();
+    // The string arm of `Take` is `(xs: T, count: number) -> T where
+    // T: string`. Grounded with the bound `string`, the slot `xs` does not
+    // admit the written `2`, so the topic `5` takes the first slot and the
+    // error names `5`. Grounded with `any`, the call was `Take(2, 5)` and
+    // the error named `2`.
+    expect(ce.box(['Pipe', 5, ['Take', 2]]).evaluate().toString()).toBe(
+      'Error(ErrorCode("incompatible-type", "indexed_collection", "5"), 5)'
+    );
+    expect(
+      ce.box(['Pipe', ['List', 1, 2, 3], ['Take', 2]]).evaluate().toString()
+    ).toBe('[1,2]');
+    expect(
+      ce.box(['Pipe', { str: 'hello' }, ['Take', 2]]).evaluate().toString()
+    ).toBe('"he"');
+  });
+
   test('a complete call whose value is not a function is an error', () => {
     const ce = new ComputeEngine();
     // Max(3) is a complete call, so the implicit topic does not apply. Its
@@ -924,6 +942,42 @@ describe('Pipe — stage sugar (box route)', () => {
     ];
     for (const s of scalars)
       expect(s.type.matches('collection')).toBe(false);
+  });
+
+  // A stage written as a call that is missing an argument gets the piped
+  // value in that slot (`xs |> Filter(p)` is `Filter(xs, p)`), so the pipe
+  // has the type of the completed call. The type handler used to read only
+  // the stage's declared result, so such a pipe typed `unknown`, and the
+  // next stage of a chain had no type to check the piped value against.
+  test('a stage with an implicit argument types the pipe as the completed call', () => {
+    const ce = new ComputeEngine();
+    const greater = ['Function', ['Greater', 'x', 1], 'x'];
+    const inc = ['Function', ['Add', 'x', 1], 'x'];
+    const cases: [any, any][] = [
+      [
+        ['Pipe', ['List', 1, 2], ['Filter', greater]],
+        ['Filter', ['List', 1, 2], greater],
+      ],
+      [
+        ['Pipe', ['List', 1, 2, 3], ['Map', inc]],
+        ['Map', inc, ['List', 1, 2, 3]],
+      ],
+    ];
+    for (const [piped, call] of cases) {
+      const pipe = ce.box(piped);
+      const direct = ce.box(call);
+      expect(pipe.type.toString()).not.toBe('unknown');
+      expect(pipe.type.toString()).toBe(direct.type.toString());
+      // Typing the pipe evaluates nothing: the value is the same call.
+      expect(pipe.evaluate().json).toEqual(direct.evaluate().json);
+    }
+    expect(ce.box(cases[0][0]).type.toString()).toBe('list<integer>');
+    // A chain types through the inner pipe: the outer stage is typed over
+    // the inner pipe's type.
+    const chained = ce.box(['Pipe', cases[0][0], ['Map', inc]]);
+    expect(chained.type.toString()).toBe(
+      ce.box(['Map', inc, cases[0][1]]).type.toString()
+    );
   });
 
   test('a BARE placeholder expression keeps the topic reading (divergence)', () => {

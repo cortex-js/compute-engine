@@ -794,12 +794,19 @@ describe('Compiled Zeta / HurwitzZeta match N()', () => {
   const runH = compile(ce.box(['HurwitzZeta', 'cp_s', 'cp_a']))?.run;
 
   // Compare a compiled value with the interpreter's `.N()`: `~oo` is
-  // `+Infinity` compiled; a complex value is NaN compiled.
+  // `+Infinity` compiled; a complex value is a `{ re, im }` object.
   function expectParity(got: unknown, expr: any) {
     const n = ce.expr(expr).N();
     if (n.isSame(ce.ComplexInfinity)) expect(got).toBe(Infinity);
-    else if (n.im !== 0) expect(got).toBeNaN();
-    else
+    else if (n.im !== 0) {
+      const v = got as { re: number; im: number };
+      expect(Math.abs(v.re - n.re)).toBeLessThan(
+        1e-10 * Math.max(1, Math.abs(n.re))
+      );
+      expect(Math.abs(v.im - n.im)).toBeLessThan(
+        1e-10 * Math.max(1, Math.abs(n.im))
+      );
+    } else
       expect(Math.abs((got as number) - n.re)).toBeLessThan(
         1e-10 * Math.max(1, Math.abs(n.re))
       );
@@ -1258,7 +1265,10 @@ describe('HurwitzZeta of an integer order far left of the imaginary axis', () =>
     [7, -1999999.3, -3, 3.3256356929075904879e-6, 1.0805659976352723948e-6],
     [50, -1999999.9, 1, -0.20877314007791948322, 0.75130034122675305096],
     // Mathematica needs `$MaxExtraPrecision = 3000` for this one.
-    [300, -1999999.6, 0.2, 4.5489250607216150177e104, -5.3289981170249605142e104],
+    [
+      300, -1999999.6, 0.2, 4.5489250607216150177e104,
+      -5.3289981170249605142e104,
+    ],
   ])('HurwitzZeta(%d, %d + %di)', (s, aRe, aIm, re, im) => {
     const start = Date.now();
     const r = hurwitzZetaComplexWithError(
@@ -1354,9 +1364,7 @@ describe('HurwitzZeta of an integer order far left of the imaginary axis', () =>
     expect(h(1, -9999999.75, 1)).toEqual(
       new Complex(-50000002499999.49, 10000000.25)
     );
-    expect(h(3, -2999999.5, 0)).toEqual(
-      new Complex(-2.0249999999998875e25, 0)
-    );
+    expect(h(3, -2999999.5, 0)).toEqual(new Complex(-2.0249999999998875e25, 0));
     expect(h(3, -2999999.7, 0.7)).toEqual(
       new Complex(-2.0250005399992807e25, 1.89000037799987e19)
     );

@@ -193,6 +193,49 @@ describe('DECLARING', () => {
     expect(ce2.box(['Sq', 3]).evaluate().toString()).toBe('9');
   });
 
+  // A `Block` canonicalizes all its statements before it evaluates them, and
+  // the canonical pass of `DefineFunction` installs the clause at that time.
+  // So when the `Declare` statement of the "declare, then define" form runs,
+  // the name already holds the clause of the next statement. The `Declare`
+  // statement may replace it, because the definition runs after it and
+  // installs the clause again under the declared signature. A declaration
+  // that follows a definition that has run is still refused.
+  test('a Declare statement before a definition in a Block gives the signature', () => {
+    const ce2 = new ComputeEngine();
+    const fact = [
+      'DefineFunction',
+      'fact',
+      [
+        'Function',
+        [
+          'If',
+          ['LessEqual', 'n', 0],
+          1,
+          ['Multiply', 'n', ['fact', ['Subtract', 'n', 1]]],
+        ],
+        'n',
+      ],
+    ];
+    const program = ce2.box([
+      'Block',
+      ['Declare', 'fact', "'(integer) -> integer'"],
+      fact,
+      ['fact', 5],
+    ] as any);
+    expect(program.evaluate().toString()).toBe('120');
+
+    const ce3 = new ComputeEngine();
+    const late = ce3.box([
+      'Block',
+      ['DefineFunction', 'h', ['Function', ['Add', 'n', 1], 'n']],
+      ['Declare', 'h', "'(integer) -> integer'"],
+      ['h', 5],
+    ] as any);
+    expect(() => late.evaluate()).toThrow(
+      `The symbol "h" is already declared in this scope`
+    );
+  });
+
   test('Declare a variable and widen type', () => {
     ce.declare('g', { value: 5 }); // Inferred as integer
     expect(ce.expr('g').type.toString()).toEqual('integer');

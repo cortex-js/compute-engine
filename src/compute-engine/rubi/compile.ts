@@ -248,13 +248,34 @@ export function compileRuleDocs(
 ): CompileResult {
   const rules: CompiledRule[] = [];
   const skipped: CompileResult['skipped'] = [];
+  // Rules with the same LHS differ in guards and right-hand sides, not in
+  // their matcher pattern. Keep this cache local: boxed constants belong to
+  // this engine and its current bindings, not to a process-wide rule pack.
+  const patterns = new Map<string, ReturnType<typeof compileRule>>();
   let priority = 0;
   for (const doc of docs) {
     for (const r of doc.rules) {
       const id = `${doc.file}#${r.index}`;
-      const { rule, reason } = compileRule(ce, r, id, priority++);
-      if (rule) rules.push(rule);
+      const key = JSON.stringify([r.variable, r.lhs]);
+      let compiled = patterns.get(key);
+      if (!compiled) {
+        compiled = compileRule(ce, r, id, priority);
+        patterns.set(key, compiled);
+      }
+      const { rule, reason } = compiled;
+      if (rule)
+        rules.push({
+          ...rule,
+          id,
+          priority,
+          bindings: r.bindings,
+          condition: r.condition,
+          innerCondition: r.innerCondition,
+          rhs: r.rhs,
+          source: r.source ?? '',
+        });
       else skipped.push({ id, reason: reason! });
+      priority++;
     }
   }
   return { rules, skipped };

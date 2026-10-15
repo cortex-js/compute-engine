@@ -971,6 +971,11 @@ plain-language questions (Arno, 2026-09-01), each recommendation ratified:
    infinity against a positive-integer partner; `Γ(+∞, z) = +∞`,
    `Γ(−∞, z) = 0` for finite z > 0, `Γ(s, −∞)` NaN (the sign alternates
    with the parity of s).
+   *Changed by a user decision of 2026-10-15:* `Γ(n, −∞) = (−1)^(n−1)·∞`
+   for a positive integer n and `~oo` for every other number s;
+   `B(+∞, b) = sign(Γ(b))·∞` for a real non-integer b ≤ 0 (`~oo` for a
+   non-real b with a negative real part); `Q(a, −∞) = ~oo` for a
+   non-integer real a. The other `NaN` values above stay.
 3. **`LambertW` outside its real branch stays symbolic** (`W₀(−1)`,
    `W₋₁(0.5)`): the value is a finite complex number the real kernels
    cannot compute; the old `NaN` misreported a capability gap as an
@@ -1918,7 +1923,9 @@ for a positive integer `k`, `C(~oo, k) = ~oo` for a positive integer `k`;
 `(+∞)_k`/`(−∞)_k` alike, `(a)_{+∞} = +∞` for `a > 0`, `sign(Γ(a))·∞` for a
 negative non-integer `a`, `0` for a non-positive integer `a`;
 `Q(a, +∞) = 0`, `Q(+∞, z) = 1`, `Q(a, −∞)` and `Q(−∞, z)` `NaN` (both
-alternate through the poles). The `CDF` delegations (`Poisson` → `Q`,
+alternate through the poles). (Later changed: `Q(n, −∞)` is `±∞` for a
+positive integer n, `0` for a non-positive integer, and, by a user decision
+of 2026-10-15, `~oo` for a non-integer real a.) The `CDF` delegations (`Poisson` → `Q`,
 `Binomial` → `I`) keep their finite values to the digit; `CDF(Poisson(2),
 3)` now evaluates exactly to `19/(3e²)`.
 

@@ -1423,6 +1423,31 @@ answer and the fix landed. An entry with no FIXED date is still open.
   evaluates to a value: `isValid` reports the tree as it was boxed. A
   declared signature (`ce.declare('k', '(real) -> real')`) is a contract
   that an assignment cannot change, and its refusal is not checked again.
+  The opposite direction is covered too: a call that the function
+  ACCEPTED when it was boxed records the definition of its name and a
+  change counter of that definition (`BoxedFunction._calleeStamp`; the
+  counter is `_writeVersion` on the value or operator definition). When
+  the type of the call is read, or the call is evaluated, after the name
+  got another definition or the definition changed, the call is boxed
+  again against the definition as it is now, and the type and the value
+  are those of the new call (`BoxedFunction._reboxedForCallee()`). With
+  `h := (u) ↦ 1`, the call `h("abc")` is typed `integer`; after
+  `h := (u: real) ↦ 7` the same call is typed `error` and evaluates to the
+  `incompatible-type` error, as a call boxed after the assignment. Its
+  `isValid` stays `true`, for the reason given above. When the definition
+  did not change, the cost is one comparison of the definition and one of
+  the counter. This applies to a call of a user function (an operator
+  definition from an assigned function literal or an Epsil `function`) and
+  to a call through a variable declared `function` or with no declaration;
+  a variable declared with a signature is not checked again, because the
+  signature is a contract. The new call is used only when it is bound to
+  the same binding as the old one. A named call through a variable with no
+  declared type also keeps the names it was written with, so that its names
+  are matched against the function the variable holds when the call is
+  evaluated: with `alias = bob_S` (`(x, factor)`), the call
+  `alias(x: 3, factor: 5)` evaluates to `bob_S(3, 5)`, and after
+  `alias = other` (`(factor, x)`) to `other(5, 3)`. Pinned by
+  `test/compute-engine/call-follows-function-reassignment.test.ts`.
 - **RULED and IMPLEMENTED 2026-09-03: `RuntimeError(code)` constructs an
   error value at run time.** A written `Error(…)` stays what §1 says it is —
   a static diagnostic node that invalidates its tree, so a function whose

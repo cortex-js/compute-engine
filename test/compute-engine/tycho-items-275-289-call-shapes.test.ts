@@ -55,6 +55,12 @@ test('scalar point calls use shared helpers and retain list admission', () => {
     ['Tuple', 1, 1, 1],
   ]);
   expect(list.isValid).toBe(true);
+  // The body applies `PointX`, `PointY` and `PointZ` to the whole list, so
+  // the call returns the tuple of lists `([2, 5], [3, 6], [4, 7])`: the
+  // declared point result, broadcast over the list argument. The check of
+  // the returned value against the declared result accepts a broadcast
+  // shape, so the call is not an error, and the compiled code returns the
+  // same tuple of lists.
   expect(list.evaluate().isValid).toBe(true);
 });
 

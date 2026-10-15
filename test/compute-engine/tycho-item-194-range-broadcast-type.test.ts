@@ -174,25 +174,37 @@ describe('Tycho item 194: scalar broadcast over a collection', () => {
   //
   // Robustness of the binder itself, independent of the typing fix above: a
   // binder's index type is INFERRED from the collection's declared element
-  // type, so when that declaration understates the values (here a lambda
-  // assigned under a `list<integer>` signature that actually yields
+  // type, so when that declaration understates the values (here a host
+  // operator declared `list<integer>` whose native handler actually yields
   // rationals) the per-iteration assignment must widen the guess rather than
   // throw `incompatible-type`.
   //
+  // A LAMBDA assigned under the same signature cannot produce such a value:
+  // the declared result is ascribed onto its body, and the application checks
+  // the returned list against it, so `f(1)` is an `incompatible-type` error.
+  //
   test('a binder whose collection under-declares its element type still iterates', () => {
+    const ce = new ComputeEngine();
+    ce.declare('f', {
+      signature: '(integer) -> list<integer>',
+      evaluate: (_ops, { engine }) =>
+        engine.box(['List', ['Rational', 1, 2], ['Rational', 3, 2]]),
+    });
+    const comp = ce.box(['Comprehension', 'x', ['Element', 'x', ['f', 1]]]);
+    const items = [...comp.evaluate().each()].map((x) => x.toString());
+    expect(items).toEqual(['1/2', '3/2']);
+  });
+
+  test('a lambda whose body under-declares its result is an error at application', () => {
     const ce = new ComputeEngine();
     ce.declare('f', '(integer) -> list<integer>');
     ce.assign(
       'f',
       ce.parse('n \\mapsto \\left[\\frac{1}{2}, \\frac{3}{2}\\right]')
     );
-    const comp = ce.box([
-      'Comprehension',
-      'x',
-      ['Element', 'x', ['f', 1]],
-    ]);
-    const items = [...comp.evaluate().each()].map((x) => x.toString());
-    expect(items).toEqual(['1/2', '3/2']);
+    expect(ce.box(['f', 1]).evaluate().toString()).toBe(
+      'Error(ErrorCode("incompatible-type", "list<integer>", "vector<rational^2>"), [1/2,3/2])'
+    );
   });
 });
 

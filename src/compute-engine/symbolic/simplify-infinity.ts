@@ -1,5 +1,6 @@
 import type { Expression, RuleStep } from '../global-types.js';
 import { isFunction, isSymbol } from '../boxed-expression/type-guards.js';
+import { asFloat, hasFloatOperand } from '../boxed-expression/float-result.js';
 
 /**
  * Infinity simplification rules consolidated from simplify-rules.ts.
@@ -200,9 +201,13 @@ export function simplifyInfinity(x: Expression): RuleStep | undefined {
         return { value: ce.Zero, because: 'e^(-inf) -> 0' };
       }
 
-      // 1^x -> 1 when x is finite
+      // 1^x -> 1 when x is finite. A float base or exponent (`1.0^y`)
+      // gives the float `1`: a float operand makes a numeric result a float.
       if (base.isSame(1) && exp.isFinite === true) {
-        return { value: ce.One, because: '1^finite -> 1' };
+        return {
+          value: hasFloatOperand([base, exp]) ? asFloat(ce.One) : ce.One,
+          because: '1^finite -> 1',
+        };
       }
 
       // a^0 -> NaN when a is infinity
@@ -210,9 +215,13 @@ export function simplifyInfinity(x: Expression): RuleStep | undefined {
         return { value: ce.NaN, because: 'inf^0 -> NaN' };
       }
 
-      // x^0 -> 1 when x is not zero and finite
+      // x^0 -> 1 when x is not zero and finite. A float exponent `0.0` (or
+      // a float base) gives the float `1`, as `pow()` does for `y^{0.0}`.
       if (exp.isSame(0) && base.isSame(0) === false && base.isFinite === true) {
-        return { value: ce.One, because: 'x^0 -> 1' };
+        return {
+          value: hasFloatOperand([base, exp]) ? asFloat(ce.One) : ce.One,
+          because: 'x^0 -> 1',
+        };
       }
 
       // a^PositiveInfinity patterns

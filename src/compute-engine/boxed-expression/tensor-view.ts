@@ -37,7 +37,7 @@ import {
 } from '../tensor/tensor-fields.js';
 import { makeTensor } from '../tensor/tensors.js';
 
-import { isFunction, isTensor } from './type-guards.js';
+import { isFunction, isNumber, isTensor } from './type-guards.js';
 
 /**
  * The value of a cell of a packed tensor (a value from `AbstractTensor.at()`
@@ -48,13 +48,64 @@ import { isFunction, isTensor } from './type-guards.js';
  * (`complexCellExpression()`). `ce.expr()` of a `Complex` would make such a
  * value exact, as it does for a value from the host. Any other cell (a
  * double, a boolean, an expression) is boxed by `ce.expr()`.
+ *
+ * `holdsFloat` is the flag of the tensor the cell comes from
+ * (`TensorData.holdsFloat`). When it is true, a double or a real `Complex`
+ * whose value is an integer is a float, not an exact integer: the tensor
+ * was packed from a matrix with a float entry, or computed from such a
+ * tensor.
  */
 export function tensorCellExpression(
   ce: ComputeEngine,
-  cell: unknown
+  cell: unknown,
+  holdsFloat: boolean = false
 ): Expression {
-  if (cell instanceof Complex) return complexCellExpression(ce, cell);
+  if (cell instanceof Complex)
+    return complexCellExpression(ce, cell, holdsFloat);
+  if (holdsFloat && typeof cell === 'number' && Number.isInteger(cell))
+    return ce.number(ce._inexactNumericValue(cell + 0));
   return ce.expr(cell as Parameters<ComputeEngine['expr']>[0]);
+}
+
+/**
+ * For an element-wise operation (`Add`, `Multiply` over lists): which
+ * elements of the list `x` are floats, in the row-major order of the cells
+ * of `packed`, the tensor packed from `x`.
+ *
+ * Each element of the result of an element-wise operation follows its own
+ * operands: a float element makes a float result, and an exact element
+ * keeps an exact one (`[2.0, 1.5] + [1, 1]` is `[3.0, 2.5]`, and
+ * `[1.5, 1] + [1, 1]` is `[2.5, 2]`). A cell of a packed tensor does not
+ * record whether its element was exact, and the flag of the tensor
+ * (`TensorData.holdsFloat`) applies to all its cells, so the elements are
+ * read from `x`. Pass `mask[i]` as the `holdsFloat` argument of
+ * `tensorCellExpression()` for the cell at index `i`.
+ *
+ * `undefined` when `packed` does not hold a float: then no element is a
+ * float, and no walk is needed. A list of machine numbers (`ce.list()`)
+ * gives `_numericStoreFloats` for every element: its integer values are
+ * all floats or all exact.
+ */
+export function elementFloatMask(
+  x: Expression,
+  packed: Tensor<TensorDataType>
+): readonly boolean[] | undefined {
+  if (!packed.holdsFloat) return undefined;
+  if (isFunction(x) && x._numericStore !== undefined)
+    return new Array<boolean>(x._numericStore.length).fill(
+      x._numericStoreFloats
+    );
+  const mask: boolean[] = [];
+  const visit = (e: Expression): void => {
+    if (isFunction(e, 'List')) {
+      for (const op of e.ops) visit(op);
+      return;
+    }
+    mask.push(isNumber(e) && !e.isExact);
+  };
+  visit(x);
+  if (mask.length !== packed.data.length) return undefined;
+  return mask;
 }
 
 /**
@@ -166,6 +217,12 @@ export function packTensor(
   // classifier (`getExpressionDatatype`, `tensor-fields.ts`) packs as
   // `expression` so its products stay exact. Those cases fall through and
   // box the elements as the operand walk does.
+  //
+  // The tensor is a float tensor when an element of the store is a float:
+  // the integer values of the store are floats (`_numericStoreFloats`), or
+  // a finite value is not an integer. An infinity is boxed as an exact value,
+  // and a NaN does not make the tensor a float tensor (see
+  // `expressionTensorInfo()`).
   const store = x._numericStore;
   if (
     store !== undefined &&
@@ -178,6 +235,9 @@ export function packTensor(
       rank: 1,
       data: store.slice(),
       dtype: 'float64',
+      holdsFloat:
+        x._numericStoreFloats ||
+        store.some((v) => Number.isFinite(v) && !Number.isInteger(v)),
     });
 
   const info = expressionTensorInfo(x.ops);
@@ -198,7 +258,10 @@ export function packTensor(
       : info.dtype;
   const td = expressionAsTensor(ce, x.ops, info.shape, dtype);
   if (!td) return undefined;
-  return makeTensor(ce, td as any);
+  // A matrix with a float entry is a float tensor: every cell, and every
+  // result computed from it, is read back as a float (`TensorData.holdsFloat`).
+  // So `\det([[1.5, 0], [0, 2]])` is the float `3`, not the exact `3`.
+  return makeTensor(ce, { ...td, holdsFloat: info.holdsFloat } as any);
 }
 
 /**
@@ -238,11 +301,19 @@ function expressionTensorInfo(rows: ReadonlyArray<Expression>):
   | {
       shape: number[];
       dtype: TensorDataType;
+      /**
+       * Is an entry a float: a number literal that is not exact, and is not
+       * `NaN`? A `NaN` entry is not a float value. It reads back as `NaN`
+       * from any cell, and the other cells keep their exactness:
+       * `[1, NaN] / 2` is `[1/2, NaN]`.
+       */
+      holdsFloat: boolean;
     }
   | undefined {
   let dtype: TensorDataType | undefined = undefined;
   const shape: number[] = [];
   let valid = true;
+  let holdsFloat = false;
 
   const visit = (t: ReadonlyArray<Expression>, axis = 0) => {
     if (!valid) return;
@@ -281,12 +352,19 @@ function expressionTensorInfo(rows: ReadonlyArray<Expression>):
     else {
       for (const item of t) {
         dtype = getSupertype(dtype, getExpressionDatatype(item));
+        if (
+          !holdsFloat &&
+          isNumber(item) &&
+          !item.isExact &&
+          item.isNaN !== true
+        )
+          holdsFloat = true;
       }
     }
   };
 
   visit(rows);
-  return valid ? { shape, dtype: dtype! } : undefined;
+  return valid ? { shape, dtype: dtype!, holdsFloat } : undefined;
 }
 
 function expressionAsTensor<T extends TensorDataType = 'expression'>(

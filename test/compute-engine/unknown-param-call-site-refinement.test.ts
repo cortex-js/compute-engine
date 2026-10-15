@@ -108,12 +108,14 @@ describe('half 1 — the D-240 indexed-access class (fixed by the ruling)', () =
     // list WHOLE instead of broadcasting over its elements. The result slot
     // is read from the body AFTER the refined parameter type is applied to
     // it, so the element reads `p[1]`, `p[2]` are numbers and the result is
-    // `number`.
+    // `number`. The reads use the literal indices 1 and 2, so the parameter
+    // is the tuple `tuple<number, number>` (index reads of a bare parameter
+    // are recorded per index, `docs/INFERENCE_ROADMAP.md` §5).
     const ce = new ComputeEngine();
     ce.declare('g', { signature: '(unknown) -> unknown' });
     ce.parse('g(p) \\coloneq p[1] + p[2]', { strict: false }).evaluate();
     expect(ce.box('g').type.toString()).toEqual(
-      '(indexed_collection<number>) -> number'
+      '(tuple<number, number>) -> number'
     );
     const r = compile(ce.parse('g([3,4])', { strict: false }))!;
     expect(r.success).toBe(true);

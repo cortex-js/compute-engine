@@ -60,7 +60,7 @@ export interface IntegrationRulesLoadReport {
   skippedRules: { id: string; reason: string }[];
 }
 
-// Compiling the ~2.6k rules costs ~300 ms; cache the full compile result
+// Cache the full compile result
 // (rules + skip reasons) per engine so repeated `loadIntegrationRules(ce)`
 // calls (idempotent) don't recompile AND still report the honest skip count.
 const compiledCache = new WeakMap<object, CompileResult>();
@@ -74,14 +74,6 @@ export function loadIntegrationRules(
   ce: ComputeEngine,
   options?: IntegrationRulesLoadOptions
 ): IntegrationRulesLoadReport {
-  let result = compiledCache.get(ce);
-  if (!result) {
-    result = compileRuleDocs(ce, RUBI_RULES_DATA as unknown as RubiRuleDoc[]);
-    compiledCache.set(ce, result);
-  }
-  const compiled = result.rules;
-  const skipped = result.skipped;
-
   const stepBudget = options?.stepBudget;
   if (
     stepBudget !== undefined &&
@@ -93,6 +85,13 @@ export function loadIntegrationRules(
     throw new RangeError(
       `loadIntegrationRules: stepBudget must be a non-negative integer or Infinity, not ${stepBudget}`
     );
+  let result = compiledCache.get(ce);
+  if (!result) {
+    result = compileRuleDocs(ce, RUBI_RULES_DATA as unknown as RubiRuleDoc[]);
+    compiledCache.set(ce, result);
+  }
+  const compiled = result.rules;
+  const skipped = result.skipped;
   const driver = new RubiDriver(ce, compiled, {
     timeLimitMs: options?.timeLimitMs ?? DEFAULT_TIME_LIMIT_MS,
     stepBudget,

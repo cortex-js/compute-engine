@@ -1,3 +1,4 @@
+import { measurementNominal } from './measurement-arithmetic.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import type {
   Expression,
@@ -204,10 +205,15 @@ function evaluateChainOperands(
   pairIsFalse: (lhs: Expression, rhs: Expression) => boolean
 ): Expression[] | Expression {
   const evalOptions = { numericApproximation };
+  // A `Measurement(v, σ)` operand is compared through its nominal `v`
+  // (`measurementNominal`): `0.1 < ∫₀¹ e^(−x²) dx` under `.N()` is decided,
+  // where the measurement that the quadrature answers left it unevaluated.
   if (rawOps.some(isCollectionShaped))
-    return rawOps.map((op) => op.evaluate(evalOptions));
+    return rawOps.map((op) => measurementNominal(op.evaluate(evalOptions)));
   if (rawOps.length <= 2) {
-    const ops = rawOps.map((op) => op.evaluate(evalOptions));
+    const ops = rawOps.map((op) =>
+      measurementNominal(op.evaluate(evalOptions))
+    );
     if (numericApproximation && ops.length === 2) {
       const exact = exactPairAtNearTie(rawOps[0], ops[0], rawOps[1], ops[1]);
       if (exact !== undefined) return exact;
@@ -220,7 +226,7 @@ function evaluateChainOperands(
       ce,
       rawOps,
       i,
-      rawOps[i].evaluate(evalOptions),
+      measurementNominal(rawOps[i].evaluate(evalOptions)),
       ops,
       numericApproximation,
       pairIsFalse
@@ -296,7 +302,10 @@ async function evaluateChainOperandsAsync(
     runWithEvaluationEffects(ce, effects, f, _contextStack, _precisionWindow);
   const ops: Expression[] = [];
   if (rawOps.some(isCollectionShaped) || rawOps.length <= 2) {
-    for (const op of rawOps) ops.push(await op.evaluateAsync(options));
+    // A measurement is compared through its nominal, as in the synchronous
+    // form (`evaluateChainOperands`).
+    for (const op of rawOps)
+      ops.push(measurementNominal(await op.evaluateAsync(options)));
     if (
       numericApproximation &&
       ops.length === 2 &&
@@ -310,7 +319,7 @@ async function evaluateChainOperandsAsync(
     return ops;
   }
   for (let i = 0; i < rawOps.length; i++) {
-    const v = await rawOps[i].evaluateAsync(options);
+    const v = measurementNominal(await rawOps[i].evaluateAsync(options));
     const stop = inContext(() =>
       chainStep(ce, rawOps, i, v, ops, numericApproximation, pairIsFalse)
     );

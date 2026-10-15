@@ -58,6 +58,17 @@ function* powers(n: number, exp: number): Generator<number[]> {
     for (const p of powers(n - 1, exp - i)) yield [i, ...p];
 }
 
+/**
+ * Is `x` a float literal, such as `1.0` or `2.0`? A power with a float
+ * exponent is not expanded as an integer power: the expansion would drop the
+ * float (`x^{1.0}` would become `x`, `x^{0.0}` the exact `1`, and
+ * `(a+b)^{2.0}` would have exact coefficients). A float operand makes a
+ * numeric result a float.
+ */
+function isFloatLiteral(x: Expression): boolean {
+  return isNumber(x) && !x.isExact;
+}
+
 /** Use the multinomial theorem (https://en.wikipedia.org/wiki/Multinomial_theorem) to expand the expression.
  * The expression must be a power of a sum of terms.
  * The power must be a positive integer.
@@ -158,7 +169,8 @@ export function expandFunction(
       if (
         isFunction(op, 'Power') &&
         isFunction(op.op1) &&
-        op.op1.operator === 'Add'
+        op.op1.operator === 'Add' &&
+        !isFloatLiteral(op.op2)
       ) {
         const exp = asSmallInteger(op.op2);
         if (exp !== null && exp >= 2) return expandPower(op.op1, exp) ?? op;
@@ -185,7 +197,8 @@ export function expandFunction(
   //
   if (h === 'Power') {
     const exp = asSmallInteger(ops[1]);
-    result = exp !== null ? expandPower(ops[0], exp) : null;
+    result =
+      exp !== null && !isFloatLiteral(ops[1]) ? expandPower(ops[0], exp) : null;
     // A number-literal base has no structural expansion, but "expanding" a
     // constant power still computes it — Expand((2+3i)^1000) yields the exact
     // Gaussian integer, matching SymPy's expand(). The evaluation is the

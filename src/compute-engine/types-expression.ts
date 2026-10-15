@@ -429,6 +429,10 @@ interface BoxedOperatorDefinition
    * `types-definitions.ts`.
    * @internal */
   _setSignature(thunk: () => BoxedType): void;
+  /** The in-place change counter — mirror of the member documented in
+   * `types-definitions.ts`.
+   * @internal */
+  _writeVersion: number;
   /** The binding-site selector of the declaration's `scoped` flag, when one
    * was given — `undefined` for a plain `scoped: true` and for an unscoped
    * operator. Narrowed to the operand PATH here: `BindingSiteSelector` lives
@@ -692,6 +696,17 @@ export interface TensorData<DT extends TensorDataType> {
   shape: number[]; // dimension of each axis
   rank?: number; // number of dimensions
   data: DataTypeMap[DT][]; // flattened data, stored in row-major order
+  /**
+   * Is the tensor a float tensor? `true` when an entry of the matrix the
+   * tensor was packed from is a float (a number literal that is not exact,
+   * such as `1.5` or `2.0`), or when the tensor was computed from a float
+   * tensor. Every cell of a float tensor is read back as a float, even when
+   * its value is an integer: the determinant of `[[1.5, 0], [0, 2]]` is the
+   * float `3`, not the exact `3`. Only the numeric dtypes (`float64`,
+   * `complex128`, …) use it: a cell of the `expression` dtype keeps its own
+   * exactness.
+   */
+  holdsFloat?: boolean;
 }
 
 /** @category Tensors */

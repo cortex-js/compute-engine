@@ -637,7 +637,11 @@ Kept `NaN`, each for a stated reason: an anonymous infinity such as
 because the divergence has a sign or a complex direction that depends on
 the other operand, not because the form has no value — switching them
 would state a false "no value"; the correct answers would be signed or
-complex infinities, a decision for the user); `AGM` with two infinite
+complex infinities, a decision for the user — the user decided on
+2026-10-15 to answer those limits, so these three are no longer `NaN`
+except where no limit exists; see `incompleteGammaValueAtInfinity()` and
+`betaValueAtInfinity()` in `library/arithmetic.ts` and
+`gammaRegularizedValueAtInfinity()` in `library/distributions.ts`); `AGM` with two infinite
 operands (not documented as "no limit"); `Root(x, 0)` and `root(0)` (a
 precondition error on the boxed route); the numeric-only cases of the
 Hurwitz and Lerch zeta at `Re(s) = 0` (they run under `.N()` only); the

@@ -159,10 +159,15 @@ describe('a tuple whose every coordinate is absent', () => {
     expect(ce.box(['Tuple', 'Missing']).evaluate().symbol).toBe('Missing');
   });
 
-  test('is typed `missing` (widened to `missing | tuple` at the boundary)', () => {
+  // The literal is typed as its value may be: `Missing`, or the tuple as
+  // written. The tuple arm keeps the component types, so a call that reads
+  // the argument as a numeric tuple sees one (see the test "a tuple whose
+  // every coordinate is absent is typed any" in
+  // `tycho-373-passthrough-broadcast-typing.test.ts`).
+  test('is typed `missing | tuple<missing, missing>`', () => {
     const ce = new ComputeEngine();
     expect(ce.box(['Tuple', 'Missing', 'Missing']).type.toString()).toBe(
-      'missing | tuple'
+      'missing | tuple<missing, missing>'
     );
   });
 

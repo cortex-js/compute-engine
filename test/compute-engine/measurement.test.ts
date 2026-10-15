@@ -775,3 +775,125 @@ describe('Measurement — complex-valued numeric integrals', () => {
     expect(m.op1.im).toBeCloseTo(1, 9);
   });
 });
+
+// A `Measurement` is ordered by its nominal value, so the extremum operators
+// fold it as `Add` and `Multiply` do. Found by the Tycho consumer (its ledger
+// row 375, 2026-10-15): `\min(k, \int …)` under `.N()` stayed an unevaluated
+// `Min` over the quadrature result, which is a `Measurement`.
+describe('Measurement — ordered by the nominal in the extremum operators', () => {
+  test('min/max over a quadrature result fold under .N()', () => {
+    // The decimal precision is module-global, so the machine precision is
+    // set on the shared engine and restored for the tests that follow.
+    const saved = ce.precision;
+    ce.precision = 'machine';
+    try {
+      const min = ce.parse('\\min(0.1, \\int_0^1 e^{-x^2}dx)').N();
+      expect(min.json).toEqual(0.1);
+      const max = ce.parse('\\max(0.1, \\int_0^1 e^{-x^2}dx)').N();
+      expect(max.operator).toBe('Measurement');
+      expect(nominal(max)).toBeCloseTo(0.7468241328, 9);
+    } finally {
+      ce.precision = saved;
+    }
+  });
+
+  test('Max returns the measurement itself when it is the largest, Min the number', () => {
+    const max = ce.box(['Max', 0.1, ['Measurement', 0.7468, 0.001]]).evaluate();
+    expect(max.json).toEqual(['Measurement', 0.7468, 0.001]);
+    const min = ce.box(['Min', 0.1, ['Measurement', 0.7468, 0.001]]).N();
+    expect(min.json).toEqual(0.1);
+  });
+
+  test('two measurements are ordered by their nominals', () => {
+    const min = ce.box(['Min', ['Measurement', 0.7, 0.02], ['Measurement', 0.1, 0.01]]).N();
+    expect(min.json).toEqual(['Measurement', 0.1, 0.01]);
+    const max = ce.box(['Max', ['Measurement', 0.7, 0.02], ['Measurement', 0.1, 0.01]]).N();
+    expect(max.json).toEqual(['Measurement', 0.7, 0.02]);
+  });
+
+  test('a tie with a number literal gives the literal, whatever the operand order', () => {
+    expect(ce.box(['Max', 1, ['Measurement', 1, 0.01]]).N().json).toEqual(1);
+    expect(ce.box(['Max', ['Measurement', 1, 0.01], 1]).N().json).toEqual(1);
+  });
+
+  test('a measurement inside a list operand folds too', () => {
+    const r = ce.box(['Min', ['List', 2, ['Measurement', 0.7, 0.02], 0.1]]).N();
+    expect(r.json).toEqual(0.1);
+  });
+
+  test('ElementMin, ElementMax and Clamp order the measurement by its nominal', () => {
+    const m = ['Measurement', 0.7468, 0.001];
+    expect(ce.box(['ElementMin', 0.1, m]).N().json).toEqual(0.1);
+    expect(ce.box(['ElementMax', 0.1, m]).N().json).toEqual(m);
+    expect(ce.box(['Clamp', m, 0, 0.5]).N().json).toEqual(0.5);
+    expect(ce.box(['Clamp', m, 0, 1]).N().json).toEqual(m);
+  });
+
+  test('Sort places the measurement by its nominal', () => {
+    const r = ce.box(['Sort', ['List', ['Measurement', 0.7, 0.01], 2, 0.1]]).N();
+    expect(r.json).toEqual(['List', 0.1, ['Measurement', 0.7, 0.01], 2]);
+  });
+
+  test('a constant nominal with a symbolic error still folds', () => {
+    const r = ce
+      .box(['Min', 0.1, ['Measurement', 0.7468, ['Multiply', 0.001, 'y']]])
+      .evaluate();
+    expect(r.json).toEqual(0.1);
+  });
+
+  test('a nominal that cannot be ordered leaves the extremum unevaluated', () => {
+    const r = ce.box(['Max', 1, ['Measurement', 'z', 0.1]]).evaluate();
+    expect(r.operator).toBe('Max');
+    // Alone or first, the measurement is not taken as the answer either:
+    // `Max(z)` stays unevaluated, and so does `Max(Measurement(z, 0.1))`.
+    expect(ce.box(['Max', ['Measurement', 'z', 0.1]]).evaluate().operator).toBe('Max');
+    expect(ce.box(['Max', ['Measurement', 'z', 0.1], 1]).evaluate().operator).toBe('Max');
+  });
+
+  test('a complex nominal is unordered, in Max and in ElementMax', () => {
+    const m = ['Measurement', ['Complex', 1, 1], 0.1];
+    expect(ce.box(['Max', m]).evaluate().operator).toBe('Max');
+    expect(ce.box(['Max', m, 2]).evaluate().operator).toBe('Max');
+    expect(ce.box(['ElementMax', m, 2]).evaluate().operator).toBe('ElementMax');
+  });
+
+  test('a NaN nominal absorbs in Max, as a NaN operand does', () => {
+    expect(ce.box(['Max', 1, ['Measurement', 'NaN', 0.1]]).evaluate().isNaN).toBe(true);
+    // `ElementMax` is declared over the extended real line, and a measurement
+    // with a `NaN` nominal is typed `nan`, so the signature check refuses it
+    // at boxing (`incompatible-type`), as it refuses any `nan`-typed operand
+    // that is not the `NaN` literal.
+    const r = ce.box(['ElementMax', 1, ['Measurement', 'NaN', 0.1]]).evaluate();
+    expect(r.operator).toBe('Error');
+  });
+
+  test('equal nominals with different uncertainties stay unevaluated in both orders', () => {
+    const a = ['Measurement', 1, 0.1];
+    const b = ['Measurement', 1, 0.5];
+    expect(ce.box(['Max', a, b]).evaluate().operator).toBe('Max');
+    expect(ce.box(['Max', b, a]).evaluate().operator).toBe('Max');
+    expect(ce.box(['ElementMin', a, b]).evaluate().operator).toBe('ElementMin');
+    // Equal nominals AND equal uncertainties are one value: the first is kept.
+    expect(ce.box(['Max', a, ['Measurement', 1, 0.1]]).evaluate().json).toEqual(a);
+  });
+
+  test('ElementMax and Clamp read inexactness off the nominal, as Max does', () => {
+    const r = ce.box(['ElementMax', ['Measurement', 1.5, 0.1], 'Indeterminate']).evaluate();
+    expect(r.isNaN).toBe(true);
+    expect(r.isIndeterminate).toBe(false);
+    const exact = ce
+      .box(['ElementMax', ['Measurement', ['Rational', 3, 2], ['Rational', 1, 10]], 'Indeterminate'])
+      .evaluate();
+    expect(exact.isIndeterminate).toBe(true);
+  });
+
+  test('a float nominal makes the extremum inexact: Indeterminate becomes NaN', () => {
+    const inexact = ce.box(['Max', ['Measurement', 1.5, 0.1], 'Indeterminate']).evaluate();
+    expect(inexact.isNaN).toBe(true);
+    expect(inexact.isIndeterminate).toBe(false);
+    const exact = ce
+      .box(['Max', ['Measurement', ['Rational', 3, 2], ['Rational', 1, 10]], 'Indeterminate'])
+      .evaluate();
+    expect(exact.isIndeterminate).toBe(true);
+  });
+});

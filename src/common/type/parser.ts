@@ -1704,7 +1704,22 @@ export class Parser {
       return [this.createNode<DimensionNode>('dimension', { size: null })];
 
     if (this.current.type === 'NUMBER_LITERAL') {
-      const size = parseInt(this.advance().value);
+      // In a dimension position a number is never hexadecimal. The lexer
+      // reads `0x2` and `0xa` as hexadecimal literals, but here they are the
+      // shapes `0 x 2` and `0 x a`: a zero-length axis, the `x` separator and
+      // the next dimension (`a` is a dimension variable). So only the `0` is
+      // taken, and the lexer starts again at the `x`. The next token is then
+      // an identifier such as `x2`, `xa` or `x`, which `parseDimensions`
+      // reads as the separator and the dimensions after it.
+      if (/^0[xX]/.test(this.current.value)) {
+        const tok = this.current;
+        this._end = tok.position + 1;
+        this.lexer.resumeAt(tok.position + 1, tok.line, tok.column + 1);
+        this.current = this.lexer.consumeToken();
+        return [this.createNode<DimensionNode>('dimension', { size: 0 })];
+      }
+      const tok = this.advance();
+      const size = parseInt(tok.value);
       return [this.createNode<DimensionNode>('dimension', { size })];
     }
 
@@ -1782,9 +1797,9 @@ export class Parser {
     token: Token
   ): DimensionNode[] {
     return segments.map((segment) => {
-      // `0` is admitted as before; what a zero-length axis means is decided
-      // by `reduceListType` (`reduce.ts`), which drops such an axis and reads
-      // an all-zero shape as `nothing`.
+      // `0` is admitted: a zero-length axis is kept in the type
+      // (`reduceListType`, `reduce.ts`), so `list<integer^(2x0)>` is two
+      // empty rows.
       if (/^[0-9]+$/.test(segment))
         return this.createNode<DimensionNode>('dimension', {
           size: parseInt(segment),

@@ -373,6 +373,8 @@ import {
   measurementLn,
   measurementLog,
   measurementLipschitzUnary,
+  measurementNominal,
+  measurementUnaryByHead,
 } from './measurement-arithmetic.js';
 import {
   range,
@@ -2984,9 +2986,22 @@ function evaluateAiry(
  *   form `B(a, m) = (m−1)!/(a(a+1)⋯(a+m−1))` holds at every point, and its
  *   denominator is infinite at `±∞` and at `~∞` alike: the value is 0.
  * - `B(+∞, b) → 0` whenever the real part of a finite b is positive
- *   (B(10⁶, ½) = 0.0018, decaying like `a^(−b)`); for a non-positive real
- *   part the modulus diverges with a sign that depends on b
- *   (B(10⁶, −½) = −3545), so the value is `NaN`.
+ *   (B(10⁶, ½) = 0.0018, decaying like `a^(−b)`). For a non-positive real
+ *   part, `B(a, b) ~ Γ(b)·a^(−b)` as `a → +∞`, so:
+ *   - for a real b that is not an integer, the value is `±∞` with the sign
+ *     of `Γ(b)`, which is `(−1)^(k+1)` with `k = ⌊−b⌋`. Measured with
+ *     mpmath: B(10³, −½) = −112, B(10⁶, −½) = −3545 (Γ(−½) = −2√π);
+ *     B(10³, −3/2) = +7.5·10⁴, B(10⁶, −3/2) = +2.4·10⁹; B(10³, −5/2) =
+ *     −3.0·10⁷, B(10⁶, −5/2) = −9.5·10¹⁴; B(10⁶, −¼) = −155.
+ *   - for a real b that is an integer (0, −1, −2, …), `Γ(b)` has a pole
+ *     and `B(a, b)` is infinite at every a: `NaN`.
+ *   - for a non-real b with a negative real part, the modulus grows like
+ *     `a^(−Re b)` and the phase of `a^(−i·Im b)` turns without end
+ *     (B(10³, −½ + i) = −13.1 + 6.7i, B(10⁶, −½ + i) = −212 + 414i): the
+ *     complex infinity `~oo`.
+ *   - for a non-real b with a zero real part, the value stays bounded and
+ *     turns without a limit (B(10³, i) = −0.42 − 0.31i, B(10⁶, i) =
+ *     −0.52 − 0.01i): `NaN`.
  * - `−∞` and `~∞` otherwise: `Indeterminate`. The Γ-poles of the first
  *   operand accumulate at `−∞`, so there is no limit.
  * - Two infinite operands: `B(+∞, +∞) = 0` (`B(a, b) ≤ 1/a` for `b ≥ 1`;
@@ -3030,10 +3045,28 @@ function betaValueAtInfinity(
       ? ce.Zero
       : indeterminateFormAnswer(ce, [a, b]);
   // One infinite operand. `B(+∞, b)` for a finite `b` with a non-positive
-  // real part stays `NaN` (the sign of the divergence depends on `b`, see
-  // above). At `−∞` and `~oo` there is no limit: the indeterminate form.
-  if (pa === '+oo' || pb === '+oo') return ce.NaN;
+  // real part: see above. At `−∞` and `~oo` there is no limit: the
+  // indeterminate form.
+  if (pa === '+oo' || pb === '+oo')
+    return betaAtPositiveInfinity(pa === '+oo' ? b : a, ce);
   return indeterminateFormAnswer(ce, [a, b]);
+}
+
+/**
+ * The limit of `B(a, b)` as `a → +∞`, for a finite number literal `b` with a
+ * non-positive real part (see `betaValueAtInfinity`). `B(a, b) ~ Γ(b)·a^(−b)`
+ * there.
+ */
+function betaAtPositiveInfinity(b: Expression, ce: ComputeEngine): Expression {
+  if (!isNumber(b) || b.isNaN === true) return ce.NaN;
+  if (b.isComplex) return b.re < 0 ? ce.ComplexInfinity : ce.NaN;
+  // A real `b ≤ 0`. At an integer, `Γ(b)` has a pole. Otherwise the sign of
+  // `Γ(b)` is `(−1)^(k+1)` with `k = ⌊−b⌋`: negative on (−1, 0), positive
+  // on (−2, −1), and so on.
+  if (b.isInteger !== false) return ce.NaN;
+  const k = Math.floor(-b.re);
+  if (!Number.isSafeInteger(k)) return ce.NaN;
+  return k % 2 === 0 ? ce.NegativeInfinity : ce.PositiveInfinity;
 }
 
 /**
@@ -3053,10 +3086,22 @@ function betaValueAtInfinity(
  *   0 < z < 1 (Γ(−10⁴, 0.9) overflows the double range; the integrand is
  *   positive, so the sign is fixed). For any other finite z nothing is
  *   verified, so the application stays symbolic there.
- * - `Γ(s, −∞)`: `NaN`. For an integer s the value is `±∞` with a sign
- *   that alternates with the parity of s (Γ(2, −100) = −2.7·10⁴⁵,
- *   Γ(3, −100) = +2.6·10⁴⁷), and for a non-integer s it is a complex
- *   infinity, so there is no single limit to encode.
+ * - `Γ(s, −∞)` for a positive integer s = n: `(−1)^(n−1)·∞`. The closed
+ *   form `Γ(n, z) = (n−1)!·e^(−z)·Σ_{k<n} z^k/k!` has the leading term
+ *   `(n−1)!·e^(−z)·z^(n−1)/(n−1)!`, whose sign is `(−1)^(n−1)` for a
+ *   negative z. Measured with mpmath: Γ(1, −100) = +2.7·10⁴³,
+ *   Γ(2, −100) = −2.7·10⁴⁵, Γ(3, −100) = +2.6·10⁴⁷, Γ(4, −100) =
+ *   −2.6·10⁴⁹, and the same signs at z = −1000.
+ * - `Γ(s, −∞)` for a number s that is not an integer (real or complex):
+ *   the value is complex and its modulus grows without bound, so the limit
+ *   is the complex infinity `~oo`. Measured with mpmath: Γ(½, −100) =
+ *   −2.7·10⁴²·i, Γ(−½, −100) = −3.5 + 2.7·10⁴⁰·i, Γ(5/2, −1000) =
+ *   −6.2·10⁴³⁸·i, Γ(i, −100) = 1.4·10³⁹ + 1.2·10⁴⁰·i.
+ * - `Γ(s, −∞)` for an integer s ≤ 0: `~oo` too. The real part grows
+ *   without bound and the imaginary part stays finite, so the modulus is
+ *   unbounded. Measured with mpmath: Γ(0, −100) = −2.7·10⁴¹ − πi,
+ *   Γ(0, −1000) = −2.0·10⁴³¹ − πi, Γ(−1, −100) = 2.7·10³⁹ + πi,
+ *   Γ(−3, −1000) = 2.0·10⁴²² + 0.52i.
  * - `~∞` or two infinite operands: `Indeterminate` (`Γ(∞, ∞)` is an
  *   indeterminate form); an anonymous infinity (a float literal): `NaN`.
  */
@@ -3072,9 +3117,18 @@ function incompleteGammaValueAtInfinity(
     return indeterminateFormAnswer(ce, [s, z]);
   if (pz === '+oo')
     return s.isFinite === false ? indeterminateFormAnswer(ce, [s, z]) : ce.Zero;
-  // `Γ(s, −∞)` stays `NaN` (the sign of the divergence depends on `s`, see
-  // above); `Γ(s, ~oo)` has no limit: the indeterminate form.
-  if (pz === '-oo') return isNumber(s) ? ce.NaN : undefined;
+  // `Γ(s, −∞)`: see above. `Γ(s, ~oo)` has no limit: the indeterminate
+  // form.
+  if (pz === '-oo') {
+    if (!isNumber(s)) return undefined;
+    if (s.isNaN === true) return ce.NaN;
+    if (isRealLiteral(s) && s.isInteger === true && s.isPositive === true)
+      return s.isOdd === true ? ce.PositiveInfinity : ce.NegativeInfinity;
+    // A number that is not a positive integer: an integer s ≤ 0, or a real
+    // or complex s that is not an integer.
+    if (s.isInteger !== undefined) return ce.ComplexInfinity;
+    return ce.NaN;
+  }
   if (pz !== undefined)
     return isNumber(s) ? indeterminateFormAnswer(ce, [s, z]) : undefined;
   // s is the infinite operand and z is finite.
@@ -4457,6 +4511,10 @@ function evaluateGamma(
   }
 
   const x = ops[0];
+  // A `Measurement` argument: Γ(a ± σ) is Γ(a) ± |Γ(a)·ψ(a)|·σ
+  // (`measurementUnaryByHead`).
+  const m = measurementUnaryByHead(engine, 'Gamma', x);
+  if (m !== undefined) return numericApproximation ? m.N() : m;
   // Gamma has poles at the non-positive integers (0, -1, -2, ...).
   // This is exact, so return it regardless of numericApproximation.
   if (isNumber(x) && !x.isComplex && x.isInteger && x.isNonPositive)
@@ -4737,8 +4795,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (x.isNonPositive) return 'non-positive';
         return undefined;
       },
-      evaluate: ([x, step], { numericApproximation, expression }) => {
-        const original = originalOperand(expression, 0);
+      evaluate: ([x0, step0], { numericApproximation, expression }) => {
+        // A `Measurement` rounds as its nominal (see `Floor`).
+        const x = measurementNominal(x0);
+        const step = step0 === undefined ? undefined : measurementNominal(step0);
+        // The operand as written, for the exact recovery near a rounding
+        // jump, read through its nominal when it is a `Measurement`.
+        const written = originalOperand(expression, 0);
+        const original =
+          written === undefined ? undefined : measurementNominal(written);
         const round = (v: Expression, original?: Expression) =>
           applyRounding(
             v,
@@ -5301,6 +5366,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       evaluate: ([x], { numericApproximation }) => {
         const ce = x.engine;
 
+        // A `Measurement` argument: (a ± σ)! is Γ(a + 1) with the same
+        // uncertainty, propagated (`measurementUnaryByHead`).
+        const m = measurementUnaryByHead(ce, 'Factorial', x);
+        if (m !== undefined) return numericApproximation ? m.N() : m;
+
         // If argument is symbolic (not a number literal), keep unevaluated
         if (!isNumber(x)) return undefined;
 
@@ -5596,8 +5666,18 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (x.isNonNegative) return 'non-negative';
         return undefined;
       },
-      evaluate: ([x, step], { numericApproximation, expression }) => {
-        const original = originalOperand(expression, 0);
+      evaluate: ([x0, step0], { numericApproximation, expression }) => {
+        // A `Measurement` rounds as its nominal: the slope of a step function
+        // is zero almost everywhere, so the first-order uncertainty of the
+        // result is zero and the answer is the bare value
+        // (`measurementNominal`; the same for `Ceil`, `Round` and `Mod`).
+        const x = measurementNominal(x0);
+        const step = step0 === undefined ? undefined : measurementNominal(step0);
+        // The operand as written, for the exact recovery near a rounding
+        // jump, read through its nominal when it is a `Measurement`.
+        const written = originalOperand(expression, 0);
+        const original =
+          written === undefined ? undefined : measurementNominal(written);
         const round = (v: Expression, original?: Expression) =>
           applyRounding(
             v,
@@ -5673,6 +5753,16 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         return undefined;
       },
       evaluate: ([x], { numericApproximation, engine: ce, expression }) => {
+        // A `Measurement` argument: the fractional part has slope 1 away
+        // from the integers, so the uncertainty is unchanged
+        // (`Fract(Measurement(2.5, 0.01))` is `Measurement(0.5, 0.01)`).
+        if (isMeasurement(x)) {
+          const r = ce.function('Measurement', [
+            ce.function('Fract', [x.op1]).evaluate({ numericApproximation }),
+            x.op2,
+          ]);
+          return numericApproximation ? r.N() : r.evaluate();
+        }
         // Exact fractional part for an exact real argument: x - floor(x),
         // computed exactly (rational arithmetic) so `Fract(1/2) → 1/2`, not
         // `0.5`. Only an inexact (float) argument numericizes.
@@ -7054,7 +7144,24 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         }
         return undefined;
       },
-      evaluate: ([a, b], { engine: ce, numericApproximation, expression }) => {
+      evaluate: ([a0, b0], { engine: ce, numericApproximation, expression }) => {
+        // A `Measurement` operand stands for its nominal (see `Floor`); the
+        // operands as written are read through their nominals too, for the
+        // exact recovery near a jump.
+        const a = measurementNominal(a0);
+        const b = measurementNominal(b0);
+        if (
+          expression !== undefined &&
+          (isMeasurement(a0) || isMeasurement(b0))
+        ) {
+          const wa = originalOperand(expression, 0);
+          const wb = originalOperand(expression, 1);
+          if (wa !== undefined && wb !== undefined)
+            expression = ce._fn('Mod', [
+              measurementNominal(wa),
+              measurementNominal(wb),
+            ]);
+        }
         // Under `.N()`, `Mod` jumps where `a/b` is an integer: the exact
         // values of exact operands are used near such a point
         // (`exactModUnderN()`).
@@ -9004,9 +9111,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         return undefined;
       },
       evaluate: (
-        [x, step],
+        [x0, step0],
         { engine: ce, numericApproximation, expression }
       ) => {
+        // A `Measurement` rounds as its nominal (see `Floor`).
+        const x = measurementNominal(x0);
+        const step = step0 === undefined ? undefined : measurementNominal(step0);
         // A value halfway between two integers is rounded with the rule of
         // `ce.roundingTies` at every precision (by default away from zero:
         // `Round(-0.5)` is `-1`, `Round(2.5)` is `3`). The machine lane
@@ -9016,7 +9126,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // helpers. `applyRounding()` boxes the rounded quotient as an exact
         // integer also for a float `x`, so the multiple of an exact step is
         // exact (`Round(3.14159, 1/100)` is `157/50`, as in Mathematica).
-        const original = originalOperand(expression, 0);
+        // The operand as written, read through its nominal (see `Floor`).
+        const written = originalOperand(expression, 0);
+        const original =
+          written === undefined ? undefined : measurementNominal(written);
         const ties = ce.roundingTies;
         const roundValue = (v: Expression, original?: Expression) =>
           applyRounding(
@@ -9496,8 +9609,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (x.isNonPositive) return 'non-positive';
         return undefined;
       },
-      evaluate: ([x, step], { numericApproximation, expression }) => {
-        const original = originalOperand(expression, 0);
+      evaluate: ([x0, step0], { numericApproximation, expression }) => {
+        // A `Measurement` truncates as its nominal (see `Floor`).
+        const x = measurementNominal(x0);
+        const step = step0 === undefined ? undefined : measurementNominal(step0);
+        // The operand as written, for the exact recovery near a rounding
+        // jump, read through its nominal when it is a `Measurement`.
+        const written = originalOperand(expression, 0);
+        const original =
+          written === undefined ? undefined : measurementNominal(written);
         const round = (v: Expression, original?: Expression) =>
           applyRounding(
             v,
@@ -11796,6 +11916,10 @@ function numericOfFold(
   seen: NonFiniteTerm
 ): Expression {
   if (seen.kind === 'exact' && value.isNaN !== true) return value;
+  // A `Measurement` is the value of the fold with its uncertainty
+  // (`Product([Measurement(0.7468, 0.001), 0.5, 0.9])`); the float of the
+  // exact value would drop the uncertainty.
+  if (isMeasurement(value)) return value;
   return numericFromExactValue(ce, expression, value) ?? value;
 }
 
@@ -12404,6 +12528,27 @@ function processMinMaxItem(
   }
 
   if (isNumber(item)) return [item, []];
+  // A `Measurement(v, σ)` is a value ordered by its nominal `v`
+  // (`exactOrder`), and the chosen operand is returned as it is, uncertainty
+  // included: `Max(0.1, Measurement(0.7468, 6.6e-16))` is the measurement.
+  // A quadrature result is a measurement under `.N()`, so this is how
+  // `min(k, ∫…)` folds. The nominal decides as a bare operand would: a
+  // nominal that is `NaN` absorbs (`Max(1, Measurement(NaN, 0.1))` is `NaN`),
+  // a complex or symbolic nominal leaves the measurement in the unevaluated
+  // result (`Max(Measurement(z, 0.1))` stays unevaluated, as `Max(z)` does),
+  // and a float nominal makes the extremum inexact, as a float operand does
+  // (`isInexactOperand()` reads the nominal: `Max(Measurement(1.5, 0.1),
+  // Indeterminate)` is `NaN`, not `Indeterminate`).
+  if (isMeasurement(item)) {
+    const [nominal] = processMinMaxItem(item.op1, mode, walk);
+    // A complex number literal is reported as a value by the number branch
+    // below and set aside by `foldExtremumValue`, which sees only the bare
+    // literal; the measurement is set aside here.
+    if (nominal === undefined || (isNumber(nominal) && nominal.isComplex))
+      return [undefined, [item]];
+    if (nominal.isNaN) return [nominal, []];
+    return [item, []];
+  }
   // A real constant that is not a number literal (`π`, `√10`, `e²`) has a
   // value, and `exactOrder` orders it against the other values:
   // `Max(π, 3)` is `π`. Any other operand (a symbol with no value, a complex
@@ -12577,11 +12722,19 @@ function scalarExtremum(
   numericApproximation: boolean
 ): Expression | undefined {
   const ce = a.engine;
+  // A `Measurement(v, σ)` is read through its nominal `v` by the guards
+  // below, as `Max`/`Min` read it (`processMinMaxItem`): a `NaN` nominal
+  // absorbs, a complex nominal is unordered, and a float nominal makes an
+  // `Indeterminate` answer `NaN`. The winner returned is still the operand
+  // itself, uncertainty included.
+  const an = isMeasurement(a) ? a.op1 : a;
+  const bn = isMeasurement(b) ? b.op1 : b;
   // A `NaN` operand gives `NaN`; an `Indeterminate` operand gives
   // `Indeterminate` when the other operand is neither `NaN` nor inexact
   // (`nanOperandAnswer()`, the rule of the reducers, see `evaluateMinMax`).
-  if (a.isNaN === true || b.isNaN === true) return nanOperandAnswer(ce, [a, b]);
-  if ((isNumber(a) && a.isComplex) || (isNumber(b) && b.isComplex))
+  if (an.isNaN === true || bn.isNaN === true)
+    return nanOperandAnswer(ce, [an, bn]);
+  if ((isNumber(an) && an.isComplex) || (isNumber(bn) && bn.isComplex))
     return undefined;
   // `undefined` when the comparison is not decidable (a free symbol); ties
   // keep `a`, unless `b` is a number literal and `a` is not (see

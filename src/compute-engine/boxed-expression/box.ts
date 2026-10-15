@@ -55,6 +55,8 @@ import {
   qualifiedFieldParts,
   splitNamedArguments,
   valueCalleeSignature,
+  writtenArgumentSlots,
+  type WrittenArgumentSlot,
 } from './named-arguments.js';
 import { qualifiedMemberRequirementShape } from '../engine-protocols.js';
 import { resolveFieldCallee } from './field-callee.js';
@@ -82,6 +84,7 @@ import {
   validateArguments,
   inferCollectionSourceArgs,
   isCollectionSourceOperator,
+  refusedCollectionSourceOperands,
   inferGenericBoundArgs,
   inferNumericArgs,
   refusesAbsentArgument,
@@ -2660,6 +2663,10 @@ function makeCanonicalFunctionCore(
     else if (field?.kind === 'signature') fieldSignature = field.signature;
   }
 
+  // The name and the operand of each written argument of a named call
+  // through a variable with an inferred type (see below).
+  let writtenArguments: WrittenArgumentSlot[] | undefined;
+
   const qualified = !named
     ? undefined
     : name === 'Apply'
@@ -2775,7 +2782,25 @@ function makeCanonicalFunctionCore(
       // `unavailable` leaves `ops` alone: the carriers survive to their own
       // canonicalization, which is where `argument-names-unavailable` is
       // minted.
-      if (normalized.kind === 'ok') ops = normalized.ops;
+      if (normalized.kind === 'ok') {
+        ops = normalized.ops;
+        // A variable with an INFERRED type: the names were matched against
+        // the function it holds now, and a later assignment can give it a
+        // function with other parameter names. Keep the names, so that the
+        // call is matched again against the function the variable holds
+        // when the call is evaluated (`BoxedFunction._reboxedForCallee()`).
+        // A DECLARED type is a contract that every assigned value
+        // satisfies, so its names do not change.
+        if (
+          isValueDef(def) &&
+          def.value.inferredType &&
+          normalized.permutation !== undefined
+        )
+          writtenArguments = writtenArgumentSlots(
+            split,
+            normalized.permutation
+          );
+      }
     }
   }
 
@@ -2794,6 +2819,10 @@ function makeCanonicalFunctionCore(
       : annotateCallbacksFromSignature(ce, ops, calleeSignatureType(def.value));
 
     const boxedOps = flatten(semiCanonical(ce, calleeOps));
+    // The written arguments index the operands in declaration order, so they
+    // are kept only when no operand was spliced or removed.
+    const written =
+      boxedOps.length === calleeOps.length ? writtenArguments : undefined;
 
     // A function-typed value definition that was INFERRED is not a user
     // constraint but a placeholder — typically the auto-declaration the
@@ -2992,6 +3021,9 @@ function makeCanonicalFunctionCore(
         // (`BoxedFunction._recheckedCall()`).
         if (pinned && cleaned.some((x) => !x.isValid))
           fn._refusedOps = boxedOps;
+        // The call is boxed again from the operands as written, not from the
+        // operands that this check replaced.
+        if (pinned) fn._stampCallee(written, boxedOps);
         return fn;
       }
       const fn = new BoxedFunction(ce, name, boxedOps, {
@@ -2999,6 +3031,11 @@ function makeCanonicalFunctionCore(
         canonical: true,
       });
       fn._resolvedOverload = valueResolutionOut.resolution;
+      // The operands were checked against the literal that the name holds
+      // now. A later assignment can replace it with a literal that refuses
+      // them, so the call records the definition it was checked against
+      // (`BoxedFunction._reboxedForCallee()`).
+      if (pinned) fn._stampCallee(written, boxedOps);
       return fn;
     }
 
@@ -3050,10 +3087,25 @@ function makeCanonicalFunctionCore(
       );
     }
 
-    return new BoxedFunction(ce, name, boxedOps, {
+    const fn = new BoxedFunction(ce, name, boxedOps, {
       metadata,
       canonical: true,
     });
+    // A variable declared `function`, or with no declaration, can later hold
+    // a function that refuses the operands (an assignment can also make the
+    // name an operator definition), and a named call matches its names
+    // against the function the variable holds now. The call records the
+    // definition, so that it is boxed again after an assignment
+    // (`BoxedFunction._reboxedForCallee()`). A variable declared with a
+    // signature is not recorded: the signature is a contract that every
+    // assigned function satisfies.
+    if (
+      written !== undefined ||
+      wildcardCallee ||
+      (def.value.inferredType && def.value.type.matches('function'))
+    )
+      fn._stampCallee(written, boxedOps);
+    return fn;
   }
 
   const opDef = def.operator;
@@ -3087,7 +3139,31 @@ function makeCanonicalFunctionCore(
       applyOperatorDefinition(ce, name, ops, metadata, scope, opDef)
     );
 
-  return applyOperatorDefinition(ce, name, ops, metadata, scope, opDef);
+  // Receives the operands as boxed before the check against `opDef`.
+  const checked: { ops?: ReadonlyArray<Expression> } = {};
+  const result = applyOperatorDefinition(
+    ce,
+    name,
+    ops,
+    metadata,
+    scope,
+    opDef,
+    undefined,
+    checked
+  );
+  // An assignment can replace a user function (`h := (u: real) ↦ 7`) after
+  // the call was checked against it. The call records the definition, so
+  // that its type and its value are those of the same call boxed against
+  // the new definition (`BoxedFunction._reboxedForCallee()`). The call is
+  // boxed again from the operands as written, not from the operands that
+  // the check against the old definition replaced.
+  if (
+    opDef.isUserFunctionDefinition &&
+    result instanceof BoxedFunction &&
+    result.operator === name
+  )
+    result._stampCallee(undefined, checked.ops);
+  return result;
 }
 
 /** Every value of `t` is a collection — a union qualifies only when all its
@@ -3289,7 +3365,8 @@ function applyOperatorDefinition(
   metadata: Metadata | undefined,
   scope: Scope | undefined,
   opDef: BoxedOperatorDefinition,
-  rawOps?: ReadonlyArray<Expression>
+  rawOps?: ReadonlyArray<Expression>,
+  checkedOut?: { ops?: ReadonlyArray<Expression> }
 ): Expression {
   let result: Expression | null;
 
@@ -3374,6 +3451,31 @@ function applyOperatorDefinition(
         opDef.inferredSignature ||
         suppliedOperandCount(xs) >= requiredOperandCount(opDef.signature.type)
       ) {
+        // A collection operator whose handler refused a SOURCE operand
+        // (`Map(x => x, 5)`, `Dedup(5)`) is the operator over the error, as
+        // `Sort(5)` is: invalid and typed `error`. Kept as written, the call
+        // was valid, typed `unknown`, and evaluated to itself, so the error
+        // was lost. See `refusedCollectionSourceOperands`.
+        if (
+          failure === undefined &&
+          !opDef.inferredSignature &&
+          isCollectionSourceOperator(name)
+        ) {
+          const refused = refusedCollectionSourceOperands(
+            ce,
+            opDef.signature.type,
+            xs
+          );
+          if (refused !== undefined)
+            return withSourceOffsets(
+              new BoxedFunction(ce, name, refused, {
+                metadata,
+                canonical: true,
+                scope,
+              }),
+              metadata
+            );
+        }
         result = new BoxedFunction(ce, name, xs, {
           metadata,
           canonical: false,
@@ -3649,6 +3751,8 @@ function applyOperatorDefinition(
   // signature is attached to the constructed call for result typing
   // (`_resolvedOverload`, phase 2c).
   const resolutionOut: { resolution?: OverloadResolution } = {};
+  // The operands before the check, which can replace an operand.
+  if (checkedOut !== undefined) checkedOut.ops = args;
   // A partly annotated literal validates its bare slots as `any`
   // (`OperatorDefinition._validationSignature`). The inferred types of those
   // slots still narrow an untyped symbol argument, as they do for a literal

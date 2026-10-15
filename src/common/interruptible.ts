@@ -85,6 +85,13 @@ export interface StepBudget {
   left: number;
   readonly owner?: string;
   readonly spans: string[];
+  /**
+   * If true, a rule step (`checkDeadline(frame, true)`) counts against this
+   * budget too. A rule step is one rule tried by `replace()`. Only the
+   * budgets that were calibrated with rule steps set this, so that rule steps
+   * do not change the step count of the other budgets.
+   */
+  readonly ruleSteps?: boolean;
 }
 
 /** Has the time of `frame` passed, or has one of its step budgets been
@@ -169,9 +176,14 @@ export class CancellationError<T = unknown> extends Error {
  * amortize the cost with `checkDeadlineEvery(ce._deadlineFrame, 0x3ff)`,
  * which keeps its counter on the frame (a module-level counter would make
  * the step count of a step budget depend on earlier work).
+ *
+ * With `ruleStep`, the check is a rule step: it counts only against the
+ * budgets that have `ruleSteps` set (see `StepBudget`). The time is checked
+ * as usual.
  */
 export function checkDeadline(
-  deadline: number | DeadlineFrame | undefined
+  deadline: number | DeadlineFrame | undefined,
+  ruleStep = false
 ): void {
   if (deadline === undefined) return;
   const at = typeof deadline === 'number' ? deadline : deadline.at;
@@ -193,6 +205,7 @@ export function checkDeadline(
   // outermost one owns the error, as the earliest deadline does for time.
   let spent: StepBudget | undefined;
   for (const b of deadline.budgets) {
+    if (ruleStep && b.ruleSteps !== true) continue;
     b.left -= 1;
     if (b.left < 0 && spent === undefined) spent = b;
   }

@@ -2,7 +2,10 @@ import { ComputeEngine } from '../../src/compute-engine';
 import type { MathJsonExpression } from '../../src/math-json/types';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
-import { staticDiagnostics } from '../../src/epsil/static-diagnostics';
+import {
+  describeError,
+  staticDiagnostics,
+} from '../../src/epsil/static-diagnostics';
 
 // The Epsil static pre-pass reports a call whose argument cannot satisfy the
 // parameter annotation of a FUNCTION LITERAL bound to the callee's name:
@@ -82,11 +85,30 @@ describe('EPSIL STATIC — arguments of a call to a function literal', () => {
     const src = 'let k = (n: integer, m: string) => n\nk(1, 2)';
     expect(check(src)).toEqual([
       [
-        'expected `string`, got `2` for argument 2',
+        'expected `string`, got `2` at `2`',
         'incompatible-type',
         [src.lastIndexOf('2'), src.lastIndexOf('2') + 1, src.lastIndexOf('2')],
       ],
     ]);
+  });
+
+  test('an integer argument is quoted as a value, never read as a position', () => {
+    // The site of a type error is the offending operand. When that operand
+    // is an integer literal, the message quotes it like any other value: it
+    // read "got `3` for argument 3" for the SECOND argument, and "got `5`
+    // for argument 5" for the first argument of `Take(5, 2)`.
+    const src = 'let k = (n: integer, m: string) => n\nk(1, 3)';
+    expect(check(src).map((d) => d[0])).toEqual([
+      'expected `string`, got `3` at `3`',
+    ]);
+    expect(check('Take(5, 2)').map((d) => d[0])).toEqual([
+      'expected `indexed_collection`, got `5` at `5`',
+    ]);
+    // The error VALUE of the call at run time, whose site is the integer
+    // `3`, reads the same way.
+    expect(describeError(run(src).value.json)).toBe(
+      'expected `string`, got `3` at `3`'
+    );
   });
 
   test('a symbol argument is checked against its assignment evidence', () => {

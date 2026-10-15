@@ -20,6 +20,7 @@ import type {
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
 import {
+  elementFloatMask,
   isTensorValue,
   packTensor,
   tensorCellExpression,
@@ -854,6 +855,9 @@ function addTensors(
   // Separate tensors and scalars. Pack each tensor operand once, here at
   // entry (not per element access below).
   const tensors: Tensor<TensorDataType>[] = [];
+  // For each tensor, which of its elements are floats (`elementFloatMask()`).
+  // Each cell sum is a float when one of its elements is a float.
+  const floatMasks: (readonly boolean[] | undefined)[] = [];
   const scalars: Expression[] = [];
 
   // This kernel is for a sum of two or more tensors (see the decline for a
@@ -875,6 +879,7 @@ function addTensors(
       // to the generic elementwise broadcast path.
       if (!packed) return undefined;
       tensors.push(packed);
+      floatMasks.push(elementFloatMask(evaluated, packed));
     } else {
       // A COLLECTION that is not a tensor value (a `Range`, a `Filter`/
       // `Take`/`Reverse` view, or the lazy `Map` that a broadcast over more
@@ -954,8 +959,12 @@ function addTensors(
       // tensor.at() uses 1-based indexing for vectors
       result.push(
         cellSum(
-          tensors.map((tensor) =>
-            tensorCellExpression(ce, tensor.at(i + 1) ?? ce.Zero)
+          tensors.map((tensor, t) =>
+            tensorCellExpression(
+              ce,
+              tensor.at(i + 1) ?? ce.Zero,
+              floatMasks[t]?.[i] === true
+            )
           )
         )
       );
@@ -973,8 +982,12 @@ function addTensors(
         // tensor.at(row, col) uses 1-based indexing
         row.push(
           cellSum(
-            tensors.map((tensor) =>
-              tensorCellExpression(ce, tensor.at(i + 1, j + 1) ?? ce.Zero)
+            tensors.map((tensor, t) =>
+              tensorCellExpression(
+                ce,
+                tensor.at(i + 1, j + 1) ?? ce.Zero,
+                floatMasks[t]?.[i * n + j] === true
+              )
             )
           )
         );

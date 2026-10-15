@@ -99,7 +99,7 @@ describe('DELIMITERS SERIALIZING', () => {
       .toMatchInlineSnapshot(`
       box       = ["Delimiter", ["Sequence", 1, 2, 3], "[]"]
       canonical = ["Triple", 1, 2, 3]
-      box-latex = \\lbrack123\\rbrack
+      box-latex = (1,2,3)
       latex     = (1,2,3)
     `));
 

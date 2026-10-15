@@ -114,6 +114,21 @@ export class Lexer {
     this.tokens = state.tokens;
   }
 
+  /**
+   * Continue lexing from the character at `position` of the input, which is
+   * on the line `line` at the column `column`, and drop the tokens already
+   * read ahead. The parser calls this to read the text of a token again in a
+   * different way: in a dimension position, `0x2` is the shape `0 x 2`, not
+   * a hexadecimal literal, so the parser takes the `0` and lexes again from
+   * the `x`.
+   */
+  resumeAt(position: number, line: number, column: number): void {
+    this.pos = position;
+    this.line = line;
+    this.column = column;
+    this.tokens = [];
+  }
+
   error(message: string): never {
     throw new Error(
       `Lexer error at line ${this.line}, column ${this.column}: ${message}`

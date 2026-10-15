@@ -77,8 +77,10 @@ describe('the six programs of the plan (box route)', () => {
     const f = ce.box(['Function', ['Add', ['At', 'v', 1], 1], 'v']);
     // The result type is the one of the refined element, `number`. (It read
     // `broadcastable<number>` while the arrow kept the type computed before
-    // the refinement.)
-    expect(f.type.toString()).toBe('(v: indexed_collection<number>) -> number');
+    // the refinement.) The parameter is read at the literal index 1 only, so
+    // it is a one-component tuple: index reads of a bare parameter are
+    // recorded per index (`docs/INFERENCE_ROADMAP.md` §5).
+    expect(f.type.toString()).toBe('(v: tuple<number>) -> number');
   });
 });
 
@@ -92,7 +94,7 @@ describe('route parity', () => {
   test('Epsil route: a lambda and a named function', () => {
     const ce = new ComputeEngine();
     executeEpsil(ce, 'let f = (v) => v[1] + 1');
-    expect(typeOf(ce, 'f')).toBe('(v: indexed_collection<number>) -> number');
+    expect(typeOf(ce, 'f')).toBe('(v: tuple<number>) -> number');
     executeEpsil(ce, 'function g(a) { First(a) + 1 }');
     expect(typeOf(ce, 'g')).toBe('(indexed_collection<number>) -> number');
   });
@@ -378,7 +380,9 @@ describe('the compiled route reads the refined type', () => {
   test('a refined lambda compiles and agrees with the interpreter on a list', () => {
     const ce = new ComputeEngine();
     ce.assign('h', ce.box(['Function', ['Add', ['At', 'v', 1], 1], 'v']));
-    expect(typeOf(ce, 'h')).toBe('(indexed_collection<number>) -> number');
+    // A read at a literal index makes the bare parameter a tuple; the inferred
+    // tuple is not enforced at application, so a list argument still works.
+    expect(typeOf(ce, 'h')).toBe('(tuple<number>) -> number');
     const call = ce.box(['h', 'xs']);
     const compiled = compile(call) as unknown as
       | { run: (env: unknown) => unknown }

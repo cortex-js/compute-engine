@@ -8,6 +8,11 @@ import {
 } from '../../common/interruptible.js';
 import { withEvaluationEffects } from '../effects-registry.js';
 import {
+  memoDepsStillValid,
+  snapshotMemoDeps,
+} from '../boxed-expression/collection-element-memo.js';
+import type { MemoDeps } from '../boxed-expression/collection-element-memo.js';
+import {
   checkArity,
   checkType,
   checkTypes,
@@ -16,6 +21,7 @@ import {
   widenUnannotatedLiteralParams,
   isAbsentScalarSymbol,
   absentScalarMarker,
+  checkCollectionOperand,
 } from '../boxed-expression/validate.js';
 import type { OverloadResolution } from '../boxed-expression/overload.js';
 import {
@@ -111,6 +117,7 @@ import {
   isAtomicValueType,
   isBooleanOrBroadcastableBooleanType,
   isPointElementType,
+  narrow,
   narrowingPreservesEffects,
   resolveTypeAlias,
   staticCollectionDims,
@@ -977,53 +984,6 @@ function searchIndex(
       return undefined;
     throw e;
   }
-}
-
-// Validate the collection operand of a LAZY collection operator's canonical
-// handler — like `checkType(engine, op, type)` but fail-open: an operand whose
-// type is not PROVABLY incompatible (`unknown`/`any`/`value`, or a
-// `broadcastable<T>`) is admitted as-is instead of rejected. A hard reject
-// here is worse than useless: the canonical handler returns `null`, and for a
-// lazy operator `boxFunction` then falls back to a silently NON-canonical
-// expression — valid-looking, but tripping the `Not canonical` asserts in
-// arithmetic (`div`/`mul`) the moment it participates in a computation. The
-// lazy-broadcast machinery hits exactly this: `mod(L, N)` over a
-// declared-`unknown` symbol `L` holding a >100-element `List` builds
-// `Map(…, L)` over the SYMBOL, whose static type is `unknown` even though its
-// value is a collection. Mirrors the free-variable leniency of the
-// signature-validation path in `box.ts` (an operand whose type is provisional
-// may satisfy the parameter at runtime).
-function checkCollectionOperand(
-  engine: ComputeEngine,
-  arg: Expression | undefined | null,
-  type: 'collection' | 'indexed_collection' = 'collection'
-): Expression {
-  if (arg === undefined || arg === null) return engine.error('missing');
-  const x = arg.canonical;
-  if (!x.isValid) return x;
-  // An ABSENT operand (`Missing`, `Undefined`) is admitted: every collection
-  // operator propagates absence (`signatureParamsPropagateAbsence`,
-  // `boxed-operator-definition.ts`, user decision 2026-09-25), so the
-  // evaluation driver answers the marker of the codomain for it (`Missing`
-  // for a collection result). Refused here, `Map(f, Missing)` stayed a raw
-  // node that no gate could reach, and `Filter(Missing, p)` was an
-  // `incompatible-type` error.
-  if (isAbsentScalarSymbol(x)) return x;
-  const t = x.type.type;
-  if (t === 'unknown' || t === 'any' || t === 'value') {
-    // Value-aware refinement: an indeterminate-TYPED operand with a concrete
-    // bound value that is provably NOT a collection (a declared-`unknown`
-    // symbol assigned `5`) must still reject — admitting it would silently
-    // canonicalize e.g. `Any(x)` and quantify over an empty element stream
-    // (`Any(5)` → False). `isCollection` on a symbol consults its value, so
-    // an unresolved symbol (no value yet) and a non-symbol (an application,
-    // whose value is undefined) stay fail-open.
-    if (x.value !== undefined && !x.isCollection)
-      return checkType(engine, x, type);
-    return x;
-  }
-  if (typeof t !== 'string' && t.kind === 'broadcastable') return x;
-  return checkType(engine, x, type);
 }
 
 /** An anonymous (wildcard) parameter name: `_`, `_1`, … `_9`. */
@@ -2759,6 +2719,164 @@ function elementRequirementOfAccessor(
 }
 
 /**
+ * The largest literal index that `parameterIndexReadType` records as a
+ * separate tuple component. A read at a larger literal index is handled as a
+ * read at a non-literal index, so that a read such as `p[1000]` does not
+ * make a tuple type with a thousand components.
+ */
+const MAX_TUPLE_INDEX_READ = 32;
+
+/**
+ * The type of a bare (unannotated) function parameter `xs` after the index
+ * read `xs[index]` whose result must be of type `r`, or `undefined` to use
+ * the general rule of `elementRequirementOfAt`.
+ *
+ * Each index read of the parameter is a separate requirement, because the
+ * elements of the argument can have different types: in
+ * `p => !p[1] if p[2] % 2 == 0 else p[1]` the first element is a boolean and
+ * the second is a number, and the tuple `(true, 4)` is a correct argument.
+ * One element type for all elements would refuse that program.
+ *
+ * - While every index read uses a literal positive integer index, the
+ *   parameter is a tuple. Its component at a read index is the requirement
+ *   of the reads at that index (their intersection), a component that no
+ *   read uses is `unknown`, and the length is the largest index read:
+ *   `p[2] % 2` and `!p[1]` give `tuple<boolean, real>`.
+ * - When a read uses an index that is not a literal (`p[k]`), the parameter
+ *   is an indexed collection whose element type is the union of the
+ *   requirements of all the reads: `!p[1]`, `p[2] + 1` and `p[k] + 1` give
+ *   `indexed_collection<boolean | real>`.
+ *
+ * Limitation: the validation of a use checks the read against the type that
+ * the earlier reads made BEFORE this function records the read. A read that
+ * the current type refuses is an error and is not recorded. So the union
+ * forms only when the current type admits the new requirement: after `!p[1]`
+ * alone, `p` is `tuple<boolean>`, a read `p[k]` at an unknown index of it is
+ * a boolean, and `p[k] + 1` is refused. After a first read at an index that
+ * is not a literal, `p` is an indexed collection with one element type, and
+ * a later read with a requirement outside that type is refused too.
+ *
+ * The result is the new type of the parameter: it is computed from the
+ * current inferred type, which holds the reads seen so far, and it replaces
+ * that type. It is `undefined` (the general rule applies) when:
+ *
+ * - `xs` is not the parameter of the function literal whose body is being
+ *   canonicalized, for example a free symbol at the top level;
+ * - the current type is not one that index reads make (it comes from a
+ *   different use of the parameter);
+ * - the first read uses an index that is not a literal: the general rule
+ *   gives the same element type, and keeps the dictionary option when the
+ *   index kind is open;
+ * - two reads at the same literal index have requirements with no common
+ *   value (`!p[1]` and `p[1] + 1`): nothing is written, and the use is an
+ *   error, as for any other conflict;
+ * - the requirement could be a collection and the index could be a gather
+ *   (the ambiguity that `elementRequirementOfAt` declines).
+ */
+function parameterIndexReadType(
+  xs: Expression,
+  index: Expression,
+  r: Type
+): Type | undefined {
+  if (!isSymbol(xs)) return undefined;
+  const ce = xs.engine;
+  const name = xs.symbol;
+  if (!ce._isShadowedParameter(name)) return undefined;
+  const binding = ce._shadowedParameterDef(name);
+  if (
+    binding === undefined ||
+    !isValueDef(binding) ||
+    binding.value !== xs.valueDefinition
+  )
+    return undefined;
+
+  // The reads seen so far, from the current inferred type: none (the type is
+  // still `unknown`, or it is the `dictionary<any> | indexed_collection<any>`
+  // shape that the validation of `At` writes before the first read is
+  // recorded), the components of a tuple, or the element type of an indexed
+  // collection.
+  const current = resolveTypeAlias(xs.type.type);
+  let components: Type[] | undefined = undefined;
+  let element: Type | undefined = undefined;
+  let keyed = false;
+  const elementOf = (t: Type): Type | undefined => {
+    if (typeof t === 'string') return undefined;
+    if (t.kind === 'indexed_collection') return t.elements;
+    if (t.kind === 'union' && t.types.length === 2) {
+      const d = t.types.find(
+        (x) => typeof x !== 'string' && x.kind === 'dictionary'
+      );
+      const c = t.types.find(
+        (x) => typeof x !== 'string' && x.kind === 'indexed_collection'
+      );
+      if (d === undefined || c === undefined) return undefined;
+      const dv = (d as DictionaryType).values;
+      const cv = (c as { elements: Type }).elements;
+      if (typeToString(dv) !== typeToString(cv)) return undefined;
+      keyed = true;
+      return cv;
+    }
+    return undefined;
+  };
+  if (current === 'unknown') components = [];
+  else if (typeof current !== 'string' && current.kind === 'tuple') {
+    if (current.elements.some((x) => x.name !== undefined)) return undefined;
+    components = current.elements.map((x) => x.type);
+  } else {
+    element = elementOf(current);
+    if (element === undefined) return undefined;
+    if (element === 'any') {
+      // Only the two-option shape of the validation of `At` means "no read
+      // yet". A bare `indexed_collection<any>` comes from another use of the
+      // parameter (`First(p)`, for example), which says that the argument
+      // is an indexed collection, so the general rule applies.
+      if (!keyed) return undefined;
+      element = undefined;
+      components = [];
+    }
+  }
+
+  const indexType = index.type.type;
+  const position = isSubtype(indexType, 'integer') ? toInteger(index) : null;
+  if (
+    position !== null &&
+    position >= 1 &&
+    position <= MAX_TUPLE_INDEX_READ &&
+    components !== undefined
+  ) {
+    const result = [...components];
+    while (result.length < position) result.push('unknown');
+    const previous = result[position - 1];
+    const component = previous === 'unknown' ? r : narrow(previous, r);
+    if (component === 'never') return undefined;
+    result[position - 1] = component;
+    return { kind: 'tuple', elements: result.map((type) => ({ type })) };
+  }
+
+  // A read at an index that is not a literal. With no read seen so far, the
+  // general rule applies.
+  if (components !== undefined && components.length === 0) return undefined;
+  if (typeCouldBeCollection(r) && !isSubtype(indexType, 'number'))
+    return undefined;
+  const reads =
+    components !== undefined
+      ? components.filter((x) => x !== 'unknown')
+      : [element!];
+  const elements = widen(...reads, r);
+  // The dictionary option is kept only when the current type has it and the
+  // index kind is still open. A tuple is read by position only.
+  if (keyed && !isSubtype(indexType, 'number'))
+    return {
+      kind: 'union',
+      types: [
+        { kind: 'dictionary', values: elements },
+        { kind: 'indexed_collection', elements },
+      ],
+    };
+  return { kind: 'indexed_collection', elements };
+}
+
+/**
  * `At`'s side of the same contract. The base learns `indexed_collection<r>`
  * under a numeric index, `dictionary<r>` under a string index, and the
  * two-arm shape its validation already wrote (`dictionary<r> |
@@ -2789,7 +2907,7 @@ function elementRequirementOfAccessor(
 function elementRequirementOfAt(
   ops: ReadonlyArray<Expression>,
   r: Type
-): ReadonlyArray<Type | undefined> | undefined {
+): ReadonlyArray<Type | { readonly replace: Type } | undefined> | undefined {
   if (ops.length !== 2) return undefined;
   const [xs, index] = ops;
   if (isRingConstant(xs)) return undefined;
@@ -2802,6 +2920,8 @@ function elementRequirementOfAt(
   // with the same content.
   if (isSubtype(indexType, 'string') || isSubtype(indexType, 'character'))
     return [{ kind: 'dictionary', values: r }, undefined];
+  const perIndex = parameterIndexReadType(xs, index, r);
+  if (perIndex !== undefined) return [{ replace: perIndex }, undefined];
   if (isSubtype(indexType, 'number'))
     return [{ kind: 'indexed_collection', elements: r }, undefined];
   // A PROVABLE gather or mask (a collection-typed index) selects a LIST of
@@ -5116,6 +5236,10 @@ function withExactFoldFallback(
   folded: Expression | undefined
 ): Expression | undefined {
   if (!options.numericApproximation || folded === undefined) return folded;
+  // A `Measurement` is a numeric answer with its uncertainty; the float of
+  // the exact value of the fold would drop the uncertainty
+  // (`Product([∫₀¹ e^(−x²) dx, 0.5]).N()` was the bare `0.3734`).
+  if (isFunction(folded, 'Measurement')) return folded;
   return (
     numericFromExactValue(options.engine, options.expression, folded) ?? folded
   );
@@ -5129,6 +5253,8 @@ async function withExactFoldFallbackAsync(
   folded: Expression | undefined
 ): Promise<Expression | undefined> {
   if (!options.numericApproximation || folded === undefined) return folded;
+  // See `withExactFoldFallback`: a `Measurement` keeps its uncertainty.
+  if (isFunction(folded, 'Measurement')) return folded;
   return (
     (await numericFromExactValueAsync(
       options.engine,
@@ -5171,6 +5297,11 @@ function machineStep(
     value = item.N();
     re = value.re;
   }
+  // A `Measurement(a, σ)` reads `re` as its nominal `a`, but folding it as a
+  // double drops the uncertainty: `Product([Measurement(0.7468, 0.001),
+  // 0.5]).N()` was the bare `0.3734`. Reported as not machine-foldable, so
+  // the fold continues with boxed arithmetic, which propagates it.
+  if (isFunction(value, 'Measurement')) re = NaN;
   // The exact value decides whether a double of 0 is an underflow. It is read
   // only from a pure expression: an impure one (`Floor(Random())`) must not
   // run a second time, and its fold is not recovered from the exact fold
@@ -5210,14 +5341,12 @@ const reduceEvaluate = <R>(
   drive: (fold: Generator<any, Expression | undefined, any>) => R
 ): Expression | undefined | R => {
   const { engine: ce, numericApproximation } = options;
-  // `Reduce` holds its operands, so a source that is an EAGER operator (an
-  // element read `At(t, 1)` whose value is a list, a `Sort`) arrives
-  // unevaluated. Such an operator has no collection handlers before it is
-  // evaluated, its finiteness is not known, and the fold stayed unevaluated:
-  // `Reduce(At(t, 1), Add, 0)` with `t` a pair of lists, where
-  // `Sum(At(t, 1))` was the sum. The source is resolved as the lazy views
-  // resolve theirs (`eagerViewSource`).
-  const collection = eagerViewSource(source);
+  // `Reduce` holds its operands, but a source that is not a collection value
+  // yet (an element read `At(t, 1)` whose value is a list, a `Sort`) arrives
+  // here evaluated: the evaluation of a lazy operator evaluates such a source
+  // once before the handler runs (`heldEagerSources()`,
+  // `boxed-expression/boxed-function.ts`).
+  const collection = source;
   if (!collection.isFiniteCollection) return undefined;
   // A collection may report a finite count yet decline enumeration
   // (e.g. Linspace(a, 1, 3) with a symbolic endpoint: size 3, but the
@@ -6201,17 +6330,23 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
     signature: '(any*) -> tuple',
     // A tuple whose EVERY coordinate is absent is the absent value: the
-    // evaluate handler below answers `Missing` for it, so its type is
-    // `missing` when every coordinate is typed `missing` (or is a written
-    // absence symbol), and `missing | tuple<…>` when every coordinate MAY be
-    // absent (`(L[k], L[j])` over two index reads: both out of range is
-    // `Missing`, one is a tuple with an absent coordinate). A tuple with a
-    // coordinate that is never absent is a tuple (`(Missing, 1)` is a value,
-    // the absent coordinate is positioned).
+    // evaluate handler below answers `Missing` for it. Its type is
+    // `missing | tuple<…>` when every coordinate MAY be absent (`(L[k],
+    // L[j])` over two index reads: both out of range is `Missing`, one is a
+    // tuple with an absent coordinate). When every coordinate IS absent
+    // (typed `missing`, or a written absence symbol), the type is the same
+    // union: `(Missing, Missing)` is `missing | tuple<missing, missing>`.
+    // The tuple arm describes the unevaluated literal, which is still a
+    // tuple, and it keeps the component types, so a consumer that reads the
+    // components of the argument (the numeric-tuple rule of a call,
+    // `isNumericTupleArgumentType`) sees a tuple of absent components. The
+    // answer `missing` alone strips to `never`, and the application
+    // boundary then widens it to the declared result, the bare `tuple`
+    // (`withCodomainForAbsentAnswer`), which loses the components. A tuple
+    // with a coordinate that is never absent is a tuple (`(Missing, 1)` is
+    // a value, the absent coordinate is positioned).
     type: (ops, context) => {
       const resolver = context.engine._typeResolver;
-      if (ops.length > 0 && ops.every(absentCoordinateD))
-        return BoxedType.forResult('missing', resolver);
       const t = tupleTypeOfD(ops);
       if (ops.length > 0 && ops.every(mayBeAbsentCoordinateD))
         return BoxedType.forResult(
@@ -17600,27 +17735,38 @@ function sliceBounds(
   // would otherwise be re-drawn between two element reads of the same view,
   // and the window would shift mid-iteration.
   //
-  // Keyed by `_worldVersion`, the same validity signal the collection-facet
-  // memo in `boxed-expression/boxed-function.ts` uses: it moves on assume /
-  // forget, redefinition and configuration changes — everything that can
-  // change what the source collection or the span resolves to. That memo is
-  // private to `BoxedFunction` and covers only the nullary `count`/`isEmpty`/
-  // `isFinite` facets, so it is not reachable for this; a WeakMap keyed by the
-  // node holds the entry for exactly as long as the node itself lives.
+  // Keyed as the collection-facet memo in `boxed-expression/boxed-function.ts`
+  // (`_memoizedFacet`) is keyed: by `_worldVersion`, which moves on assume /
+  // forget, redefinition and configuration changes, AND by the dependencies
+  // of the node (`snapshotMemoDeps`), whose write versions move on every
+  // value write, a write to a function parameter or a loop index included.
+  // The world version alone does not move when a parameter takes a new
+  // value, so the node `Slice(s, i, i + 2)` in the body of `i ↦ …` served the
+  // bounds of the first call to every later call: `Map(i ↦ Characters(Slice(
+  // "49142", i, i + 2)), 1..3)` was three copies of the first slice. A node
+  // whose dependencies cannot be tracked (`snapshotMemoDeps` answers
+  // `undefined`) is not stored. That memo is private to `BoxedFunction` and
+  // covers only the nullary `count`/`isEmpty`/`isFinite` facets, so it is not
+  // reachable for this; a WeakMap keyed by the node holds the entry for
+  // exactly as long as the node itself lives.
   const factsHidden = expr.engine._factsHidden();
   const cached = SLICE_BOUNDS_MEMO.get(expr);
   if (
     cached !== undefined &&
     cached.worldVersion === expr.engine._worldVersion &&
-    cached.factsHidden === factsHidden
+    cached.factsHidden === factsHidden &&
+    memoDepsStillValid(expr, cached.deps)
   )
     return cached.bounds;
   const bounds = computeSliceBounds(expr);
-  SLICE_BOUNDS_MEMO.set(expr, {
-    worldVersion: expr.engine._worldVersion,
-    factsHidden,
-    bounds,
-  });
+  const deps = snapshotMemoDeps(expr);
+  if (deps !== undefined)
+    SLICE_BOUNDS_MEMO.set(expr, {
+      worldVersion: expr.engine._worldVersion,
+      factsHidden,
+      deps,
+      bounds,
+    });
   return bounds;
 }
 
@@ -17635,6 +17781,7 @@ const SLICE_BOUNDS_MEMO = new WeakMap<
   {
     worldVersion: number;
     factsHidden: boolean;
+    deps: MemoDeps;
     bounds: { start: number; end: number } | undefined;
   }
 >();

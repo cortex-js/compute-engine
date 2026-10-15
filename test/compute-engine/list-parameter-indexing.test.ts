@@ -152,9 +152,11 @@ describe('(b) inference: an At-indexing body infers a non-scalar parameter', () 
     // The parameter slot is no longer `unknown`, so `paramsAreScalar` is false.
     // The result type is the one of the refined elements, `number` (it read
     // `broadcastable<number>` while the arrow kept the type computed before
-    // the refinement).
+    // the refinement). The body reads the literal indices 1 and 2, so the
+    // bare parameter is a two-component tuple (index reads of a bare
+    // parameter are recorded per index, `docs/INFERENCE_ROADMAP.md` §5).
     expect(ce.box('h').type.toString()).toBe(
-      '(indexed_collection<number>) -> number'
+      '(tuple<number, number>) -> number'
     );
     // Before the fix this was `[h(3),h(4)]`.
     expect(

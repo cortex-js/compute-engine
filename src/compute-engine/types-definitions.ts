@@ -1244,16 +1244,25 @@ export type OperatorDefinition = Partial<BaseDefinition> &
      * `value`, `nothing`, an absence marker alone, or a function type. An
      * absence arm (`real | missing`) is stripped before the call.
      *
+     * An entry can also be `{ replace: t }`: the handler has combined the
+     * operand's current inferred type with this requirement itself, and `t`
+     * replaces that type instead of being intersected with it. This is for a
+     * combination that is not an intersection, such as a tuple that gets one
+     * more component. The same guards apply: a declared type never moves.
+     *
      * `At` answers `dictionary<r> | indexed_collection<r>` for its base and
      * `First`/`Second`/`Third`/`Last` answer `indexed_collection<r>`. The
      * scalar reading is written on purpose: `xs[1] + 1` requires `number`
      * of the element, exactly as `x + 1` infers a bare `x` as `number`.
-     * Design and rulings: `docs/INFERENCE_ROADMAP.md` §5.
+     * For a base that is a bare function parameter, `At` answers a
+     * `replace` entry that records each index read separately (a tuple for
+     * literal indices). Design and rulings: `docs/INFERENCE_ROADMAP.md` §5.
      */
     inferOperandTypes?: (
       ops: ReadonlyArray<Expression>,
       requirement: Type
-    ) => ReadonlyArray<Type | undefined> | undefined;
+    ) =>
+      ReadonlyArray<Type | { readonly replace: Type } | undefined> | undefined;
   };
 
 /**
@@ -2794,6 +2803,13 @@ export interface BoxedOperatorDefinition
   /** The type of the arguments and return value of this function */
   signature: BoxedType;
 
+  /** A counter that increases at each change of this definition in place
+   * (an update, a signature write, a snapshot restore). A call of a user
+   * function compares it with the value it recorded when it was boxed, to
+   * know whether it must be checked again.
+   * @internal */
+  _writeVersion: number;
+
   /** Write the signature, deriving it inside the write's fact-blind bracket:
    * the thunk and the write both run with the assumptions hidden, so a stored
    * arrow never encodes a proof the next `forget()` retracts. The public
@@ -2981,7 +2997,7 @@ export interface BoxedOperatorDefinition
   inferOperandTypes?: (
     ops: ReadonlyArray<Expression>,
     requirement: Type
-  ) => ReadonlyArray<Type | undefined> | undefined;
+  ) => ReadonlyArray<Type | { readonly replace: Type } | undefined> | undefined;
 
   canonical?: (
     ops: ReadonlyArray<Expression>,
