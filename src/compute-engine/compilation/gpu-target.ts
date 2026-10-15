@@ -63,6 +63,7 @@ import {
   statementBodyHead,
 } from './base-compiler.js';
 import type { LoopInvariantBinding } from './base-compiler.js';
+import { complexContinuation } from './complex-continuation.js';
 import {
   signatureEffects,
   finitePartOfType,
@@ -937,6 +938,21 @@ function gpuResultIsComplexValued(
   } catch {
     return false;
   }
+}
+
+/**
+ * Decline a special function whose value is provably not real: the shader
+ * helper is real-only (`NaN` there), and there is no complex kernel to
+ * lower to (`complexContinuation`).
+ */
+function declineComplexContinuation(
+  head: string,
+  args: ReadonlyArray<Expression>
+): void {
+  if (complexContinuation(head, args) === 'complex')
+    throw new Error(
+      `Could not compile \`${head}\`: its value is not real for these operands, and the shader targets have no complex lane for it`
+    );
 }
 
 /**
@@ -7160,6 +7176,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       throw new Error(
         'Could not compile `HurwitzZeta`: only the two-operand form `HurwitzZeta(s, a)` compiles'
       );
+    declineComplexContinuation('HurwitzZeta', args);
     return `_gpu_hurwitz_zeta(${compile(args[0])}, ${compile(args[1])})`;
   },
   // Real-only (`GPU_REAL_ONLY_LOWERINGS`): `_gpu_lerch_phi` takes real
@@ -7171,6 +7188,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       throw new Error(
         'Could not compile `LerchPhi`: it takes exactly three operands'
       );
+    declineComplexContinuation('LerchPhi', args);
     return `_gpu_lerch_phi(${compile(args[0])}, ${compile(args[1])}, ${compile(args[2])})`;
   },
   // Real-only (`GPU_REAL_ONLY_LOWERINGS`): `_gpu_poly_log` answers the
@@ -7183,6 +7201,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       throw new Error(
         'Could not compile `PolyLog`: it takes exactly two operands'
       );
+    declineComplexContinuation('PolyLog', args);
     return `_gpu_poly_log(${compile(args[0])}, ${compile(args[1])})`;
   },
   Binomial: gpuBinomial,

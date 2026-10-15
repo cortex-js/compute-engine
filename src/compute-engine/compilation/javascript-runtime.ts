@@ -92,12 +92,14 @@ import {
 } from '../numerics/special-functions.js';
 import {
   lerchPhiReal,
+  lerchPhiComplex,
   dirichletEtaReal,
   dirichletBetaReal,
 } from '../numerics/lerch-phi.js';
+import { lambertWComplex } from '../numerics/lambert-w-complex.js';
 import { stieltjesGammaReal } from '../numerics/stieltjes.js';
 import { clausen } from '../numerics/clausen.js';
-import { polylogOrderReal } from '../numerics/polylog.js';
+import { polylogOrderComplex, polylogOrderReal } from '../numerics/polylog.js';
 import {
   correlation,
   covariance,
@@ -137,6 +139,11 @@ import {
   cosSinPi,
   gamma as complexGamma,
   scaledComplexDivide,
+  hurwitzZetaComplexWithError,
+  polylogComplex,
+  ellipticKComplex,
+  ellipticEComplex,
+  hypergeometric2F1Complex,
 } from '../numerics/numeric-complex.js';
 import {
   adaptiveQuadrature,
@@ -232,6 +239,26 @@ const negativeBaseRealPow = (
  */
 function kernelResult(c: Complex): { re: number; im: number } {
   return { re: c.re === 0 ? 0 : c.re, im: c.im === 0 ? 0 : c.im };
+}
+
+/**
+ * A special function continued into the complex plane, as the interpreter's
+ * `applyN` does: the real kernel answers where it has a real value (a pole is
+ * its `Infinity`), and where it is `NaN` (the value is complex, or the kernel
+ * declines) the complex kernel answers. A decline of the complex kernel is a
+ * real `NaN`, so the result is never a number the kernel cannot vouch for.
+ */
+function continuedKernel(
+  zs: ReadonlyArray<ComplexResult>,
+  real: (...x: number[]) => number,
+  complex: (...z: Complex[]) => Complex | undefined
+): { re: number; im: number } {
+  if (zs.every((z) => z.im === 0)) {
+    const r = real(...zs.map((z) => z.re));
+    if (!Number.isNaN(r)) return { re: r, im: 0 };
+  }
+  const v = complex(...zs.map((z) => new Complex(z.re, z.im)));
+  return v === undefined || v.isNaN() ? { re: NaN, im: 0 } : kernelResult(v);
 }
 
 /**
@@ -4928,6 +4955,51 @@ export const SYS_HELPERS = {
   // `gamma` gave `NaN` for every `t`.
   cgamma: (z: ComplexResult) =>
     kernelResult(complexGamma(new Complex(z.re, z.im))),
+  // The special functions with a complex continuation: the real kernel where
+  // the value is real, the interpreter's complex kernel elsewhere
+  // (`continuedKernel`), so `LerchPhi(3, 2, 1)` compiled answers what it
+  // evaluates to, `0.773 − 1.150i`, where the real kernel gave `NaN`.
+  // At `s = 1` the Hurwitz zeta function has a pole for every `a`, and the
+  // interpreter answers `ComplexInfinity`. For a real `a`, the real kernel
+  // answers `Infinity`. For a non-real `a`, the complex kernel runs, and it
+  // returns NaN at `s = 1` because its interpreter caller handles the pole,
+  // so this helper returns the compiled unsigned pole itself.
+  churwitzZeta: (s: ComplexResult, a: ComplexResult) =>
+    s.re === 1 && s.im === 0 && a.im !== 0
+      ? complexPole()
+      : continuedKernel(
+          [s, a],
+          hurwitzZeta,
+          (s, a) => hurwitzZetaComplexWithError(s, a)?.value
+        ),
+  clerchPhi: (z: ComplexResult, s: ComplexResult, a: ComplexResult) =>
+    continuedKernel([z, s, a], lerchPhiReal, lerchPhiComplex),
+  cpolyLog: (s: ComplexResult, z: ComplexResult) =>
+    continuedKernel([s, z], polylogOrderReal, (s, z) =>
+      s.im === 0 && Number.isInteger(s.re) && s.re >= 2
+        ? polylogComplex(s, z)
+        : polylogOrderComplex(s, z)
+    ),
+  cellipticK: (m: ComplexResult) =>
+    continuedKernel([m], ellipticK, ellipticKComplex),
+  cellipticE: (m: ComplexResult) =>
+    continuedKernel([m], ellipticE, ellipticEComplex),
+  chypergeometric2F1: (
+    a: ComplexResult,
+    b: ComplexResult,
+    c: ComplexResult,
+    z: ComplexResult
+  ) =>
+    continuedKernel([a, b, c, z], hypergeometric2F1, (a, b, c, z) =>
+      hypergeometric2F1Complex(a, b, c, z)
+    ),
+  // The branch index is read as an integer, as the interpreter's is.
+  clambertW: (x: ComplexResult, k?: ComplexResult) =>
+    continuedKernel(
+      [x],
+      (x) => lambertW(x, k?.re ?? 0),
+      (z) => lambertWComplex(z, k?.re ?? 0)
+    ),
   cln: (z: ComplexResult) => kernelResult(new Complex(z.re, z.im).log()),
   // The complex sign `z/|z|`: the point of the unit circle in the direction
   // of `z`, and `0` for `0` — the interpreter's `Sign` off the real line. A

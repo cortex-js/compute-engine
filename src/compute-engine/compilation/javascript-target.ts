@@ -736,6 +736,32 @@ function complexUnary(
 }
 
 /**
+ * A special function with a complex continuation (`complex-continuation.ts`):
+ * its complex kernel `helper` when an operand is complex or the value may be
+ * (`BaseCompiler.continuesToComplex`), else the real lowering `real()`. The
+ * real operands are lifted to `{ re, im: 0 }`.
+ */
+function continuationCall(
+  head: string,
+  helper: string,
+  args: ReadonlyArray<Expression>,
+  compile: OperandCompiler<Expression>,
+  target: CompileTarget<Expression>,
+  real: () => string
+): string {
+  if (
+    !args.some((x) => BaseCompiler.isComplexValued(x)) &&
+    !BaseCompiler.continuesToComplex(head, args)
+  )
+    return real();
+  return spliceJSValues(
+    target,
+    args.map((x) => complexOperandCode(x, compile)),
+    (zs) => `${helper}(${zs.join(', ')})`
+  );
+}
+
+/**
  * A piece of source safe to prefix a member read (`.re`) to: parenthesized
  * unless it is already a single identifier.
  */
@@ -3397,15 +3423,12 @@ const JS_REAL_ONLY_LOWERINGS: ReadonlySet<string> = new Set([
   'BesselI',
   'BesselK',
   'Zeta',
-  'HurwitzZeta',
   // `PolyGamma` has a complex kernel in the interpreter (`polygammaComplex`,
   // cortex-js/compute-engine#340), but `_SYS.polygamma` below is the
   // real-valued kernel: a function-codegen lowering, so
   // `stringHelperIsRealOnly` does not catch it the way it does
   // `Digamma`/`Trigamma`'s plain-name mappings.
   'PolyGamma',
-  'LerchPhi',
-  'PolyLog',
   'DirichletEta',
   'DirichletBeta',
   'StieltjesGamma',
@@ -7909,36 +7932,54 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   // The three-operand form `HurwitzZeta(s, a, n)` is a derivative the
   // interpreter leaves symbolic, so it declines here.
-  HurwitzZeta: (args, compile) => {
+  HurwitzZeta: (args, compile, target) => {
     if (args.length !== 2)
       throw new Error(
         'Could not compile `HurwitzZeta`: only the two-operand form `HurwitzZeta(s, a)` compiles'
       );
-    return `_SYS.hurwitzZeta(${compile(args[0])}, ${compile(args[1])})`;
+    return continuationCall(
+      'HurwitzZeta',
+      '_SYS.churwitzZeta',
+      args,
+      compile,
+      target,
+      () => `_SYS.hurwitzZeta(${compile(args[0])}, ${compile(args[1])})`
+    );
   },
-  // Real-only (`JS_REAL_ONLY_LOWERINGS`): `_SYS.lerchPhi` (`lerchPhiReal`)
-  // runs the interpreter's machine kernel, the continuation past |z| = 1
-  // included, and is NaN wherever the value is genuinely complex (real
-  // z > 1 is on the branch cut, a < 0 with a non-integer s) or the kernel
-  // declines.
-  LerchPhi: (args, compile) => {
+  // Φ(z, s, a) is complex for z > 1 and for a < 0 with a non-integer s: that
+  // value takes `_SYS.clerchPhi` (the interpreter's `lerchPhiComplex`); the
+  // real lane is `_SYS.lerchPhi`, `NaN` there.
+  LerchPhi: (args, compile, target) => {
     if (args.length !== 3)
       throw new Error(
         'Could not compile `LerchPhi`: it takes exactly three operands'
       );
-    return `_SYS.lerchPhi(${compile(args[0])}, ${compile(args[1])}, ${compile(args[2])})`;
+    return continuationCall(
+      'LerchPhi',
+      '_SYS.clerchPhi',
+      args,
+      compile,
+      target,
+      () =>
+        `_SYS.lerchPhi(${compile(args[0])}, ${compile(args[1])}, ${compile(args[2])})`
+    );
   },
-  // Real-only (`JS_REAL_ONLY_LOWERINGS`): `_SYS.polyLog` is
-  // `polylogOrderReal` (`numerics/polylog.ts`), which answers every order
-  // the way the interpreter does (the closed forms and the dedicated
-  // integer-order kernel first) and is NaN for a complex value or where
-  // the interpreter's kernel declines.
-  PolyLog: (args, compile) => {
+  // Liₛ(z) is complex for z > 1: that value takes `_SYS.cpolyLog` (the
+  // interpreter's `polylogOrderComplex`, `polylogComplex` for an integer
+  // order of 2 or more); the real lane is `_SYS.polyLog`, `NaN` there.
+  PolyLog: (args, compile, target) => {
     if (args.length !== 2)
       throw new Error(
         'Could not compile `PolyLog`: it takes exactly two operands'
       );
-    return `_SYS.polyLog(${compile(args[0])}, ${compile(args[1])})`;
+    return continuationCall(
+      'PolyLog',
+      '_SYS.cpolyLog',
+      args,
+      compile,
+      target,
+      () => `_SYS.polyLog(${compile(args[0])}, ${compile(args[1])})`
+    );
   },
   // Real-only (`JS_REAL_ONLY_LOWERINGS`): η and β on the machine kernels,
   // which sum the alternating series next to s = 1 as the interpreter does.
@@ -7962,7 +8003,17 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       );
     return `_SYS.clausen(${compile(args[0])}, ${compile(args[1])})`;
   },
-  LambertW: '_SYS.lambertW',
+  // W(x) is complex below −1/e on branch 0: `_SYS.clambertW`, the
+  // interpreter's `lambertWComplex`.
+  LambertW: (args, compile, target) =>
+    continuationCall(
+      'LambertW',
+      '_SYS.clambertW',
+      args,
+      compile,
+      target,
+      () => `_SYS.lambertW(${args.map((x) => compile(x)).join(', ')})`
+    ),
 
   // Bessel functions
   BesselJ: (args, compile) =>
@@ -7995,11 +8046,28 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     args.length === 1
       ? `_SYS.agm(1, ${compile(args[0])})`
       : `_SYS.agm(${compile(args[0])}, ${compile(args[1])})`,
-  EllipticK: '_SYS.ellipticK',
-  EllipticE: (args, compile) =>
+  // K(m) and the complete E(m) are complex for m > 1 (`_SYS.cellipticK`,
+  // `_SYS.cellipticE`, the interpreter's kernels).
+  EllipticK: (args, compile, target) =>
+    continuationCall(
+      'EllipticK',
+      '_SYS.cellipticK',
+      args,
+      compile,
+      target,
+      () => `_SYS.ellipticK(${compile(args[0])})`
+    ),
+  EllipticE: (args, compile, target) =>
     args.length === 2
       ? `_SYS.ellipticEIncomplete(${compile(args[0])}, ${compile(args[1])})`
-      : `_SYS.ellipticE(${compile(args[0])})`,
+      : continuationCall(
+          'EllipticE',
+          '_SYS.cellipticE',
+          args,
+          compile,
+          target,
+          () => `_SYS.ellipticE(${compile(args[0])})`
+        ),
   EllipticF: (args, compile) =>
     `_SYS.ellipticF(${compile(args[0])}, ${compile(args[1])})`,
   EllipticPi: (args, compile) =>
@@ -8010,10 +8078,19 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       : `_SYS.ellipticPiComplete(${compile(args[0])}, ${compile(args[1])})`,
 
   // Hypergeometric functions.
-  Hypergeometric2F1: (args, compile) =>
-    `_SYS.hypergeometric2F1(${compile(args[0])}, ${compile(args[1])}, ${compile(
-      args[2]
-    )}, ${compile(args[3])})`,
+  // ₂F₁ is complex for z > 1 (`_SYS.chypergeometric2F1`).
+  Hypergeometric2F1: (args, compile, target) =>
+    continuationCall(
+      'Hypergeometric2F1',
+      '_SYS.chypergeometric2F1',
+      args,
+      compile,
+      target,
+      () =>
+        `_SYS.hypergeometric2F1(${compile(args[0])}, ${compile(args[1])}, ${compile(
+          args[2]
+        )}, ${compile(args[3])})`
+    ),
   Hypergeometric1F1: (args, compile) =>
     `_SYS.hypergeometric1F1(${compile(args[0])}, ${compile(args[1])}, ${compile(
       args[2]

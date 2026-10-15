@@ -1,6 +1,6 @@
 # Compute Engine — Roadmap
 
-**Last updated:** 2026-10-14.
+**Last updated:** 2026-10-15.
 
 This document tracks **remaining** work; an item leaves this file once it lands.
 Detail on completed work lives in git history, `CHANGELOG.md`, the linked source
@@ -108,6 +108,22 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 ---
 
 ## Remaining work
+
+### The antiderivative of `Sin` and `Cos` ignores the degree angular unit (OPEN, small — found 2026-10-15 by the review of the periodic cell sums)
+
+With `ce.angularUnit = 'deg'`, `∫₀^{180} sin x dx` evaluates to `2`, where
+the value is `360/π` (`.N()` gives `114.59`), and `∫ sin x dx` is `−cos x`,
+where it is `−(180/π) cos x`. The derivative is right in the same mode
+(`D(sin x)` is `(π/180) cos x`, from `symbolic/derivative.ts`), but
+`symbolic/antiderivative.ts` has no `angularUnit` handling: its table and the
+power-rule and substitution routes read every trigonometric argument in
+radians. The piecewise partitioner inherits the defect: `∫₀^{360} |sin x| dx`
+evaluates to `4` where it is `720/π`. The period shortcut of
+`symbolic/discrete-integrate.ts` declines outside radian mode so that it does
+not add a second wrong closed form (its test pins the `.N()` value). The fix
+is a chain-rule factor on the antiderivative of a trigonometric function of
+the integration variable when the unit is not radians, mirroring the
+derivative.
 
 ### The compiled body of a user function spells the coordinate of an absent point as `NaN`, where the interpreter keeps `Missing` (OPEN, small — found 2026-10-14 by the review of the Tycho row 374 tuple collapse)
 
@@ -238,22 +254,6 @@ second rule to the checker, "the key symbol also occurs free in the value",
 which also catches `apply`, but reports a rule such as `n -> n + 1` passed
 to a dictionary-building function as a typo. If nothing is decided, the
 plain type error stays.
-
-### Compiled `LerchPhi` and `HurwitzZeta` answer `NaN` for a complex value (OPEN, small — found 2026-10-13 by issue #428)
-
-`_SYS.lerchPhi`, `_gpu_lerch_phi`, `_SYS.hurwitzZeta` and `_gpu_hurwitz_zeta`
-are real-only and return `NaN` for `a < 0` with a non-integer `s` (and, for
-`LerchPhi`, a real `z > 1`), where the interpreter has a complex value; the
-lowering still reports success, and the existing tests pin that `NaN`. The rule
-for a complex value from real operands across the special functions
-(`HurwitzZeta`, `LerchPhi`, `PolyLog`, `EllipticK`, `Hypergeometric2F1`,
-`LambertW`, `Arcsec`) was the question of issue #434. DECIDED 2026-10-14: the
-compiled code follows the compile mode, as `Sqrt` does (a complex value on the
-complex lane, a decline on the real lane), and the GPU targets decline, since
-they have no complex lane. `Gamma` already follows this rule (`_SYS.cgamma`).
-The contributor who filed the issue offered one pull request that covers all
-the special-function heads; this entry waits for that pull request and does
-not need a separate fix.
 
 ### `.N()` of a `1/(x·ln x)` divergence at a nonzero bound or at infinity gives a finite value (OPEN, small — found 2026-10-14 by the power-law divergence test)
 

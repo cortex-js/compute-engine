@@ -349,14 +349,16 @@ describe('FINITE REAL PIECEWISE INTEGRALS', () => {
     ).toBe(true);
   });
 
-  test('unbounded and excessive integer-cell partitions stay unevaluated', () => {
+  test('unbounded and excessive nonlinear partitions stay unevaluated', () => {
     expect(
       integrate(['Floor', 'x'], 0, 'PositiveInfinity').has('Integrate')
     ).toBe(true);
-    expect(integrate(['Fract', 'x'], 0, 1000000).has('Integrate')).toBe(true);
-    expect(integrate(['Floor', ['Divide', 1, 'x']]).has('Integrate')).toBe(
-      true
-    );
+    expect(
+      integrate(['Fract', ['Square', 'x']], 0, 1000000).has('Integrate')
+    ).toBe(true);
+    expect(
+      integrate(['Floor', ['Sin', ['Divide', 1, 'x']]]).has('Integrate')
+    ).toBe(true);
   });
 
   test('an assigned outer variable does not replace the bound variable', () => {

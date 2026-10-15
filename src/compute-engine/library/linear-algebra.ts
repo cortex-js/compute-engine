@@ -1134,25 +1134,33 @@ function isVectorOfNumbers(x: Expression): boolean {
   return isSubtype(t.elements, 'number');
 }
 
-const transposedType: OperatorTypeHandlerOnTypes = (ops, context) => {
-  const m = ops[0];
-  if (m === undefined)
-    return BoxedType.forResult('value', context.engine._typeResolver);
-  if (isSubtype(m.type, 'number'))
-    return BoxedType.forResult(m.type, context.engine._typeResolver);
-  const t = m.type;
-  if (typeof t === 'string' || t.kind !== 'list')
-    return BoxedType.forResult('value', context.engine._typeResolver);
+/**
+ * The type of `Transpose(m, axis1?, axis2?)` for an operand of type `t`.
+ *
+ * A number is returned as is. An operand with no known shape (`unknown`, or
+ * `value`, which is what the `value` parameter types a free symbol) gives
+ * `unknown`, not `value`: `Transpose` keeps the shape of its operand, so
+ * nothing more is known of the result. `MatrixMultiply(q, Transpose(q))`
+ * with a free `q` then stays unevaluated as `MatrixMultiply(q, q)` does,
+ * where a `value` result was an `incompatible-type` error against the
+ * `matrix | vector` parameter. A union (`matrix | vector`, the type
+ * `MatrixMultiply` infers for `q`) is mapped member by member.
+ */
+function transposedShape(t: Type, ops: ReadonlyArray<OperandDescriptor>): Type {
+  if (isSubtype(t, 'number')) return t;
+  if (t === 'unknown' || t === 'value') return 'unknown';
+  if (typeof t === 'string') return 'value';
+  if (t.kind === 'union')
+    return {
+      kind: 'union',
+      types: t.types.map((u) => transposedShape(u, ops)),
+    };
+  if (t.kind !== 'list') return 'value';
   const dims = t.dimensions;
   // Rank unknown: the element type is still preserved, but no shape claim.
-  if (!dims)
-    return BoxedType.forResult(
-      { kind: 'list', elements: t.elements },
-      context.engine._typeResolver
-    );
+  if (!dims) return { kind: 'list', elements: t.elements };
   // Scalar-ish or vector (rank ≤ 1): identity.
-  if (dims.length <= 1)
-    return BoxedType.forResult(t, context.engine._typeResolver);
+  if (dims.length <= 1) return t;
   let axis1 = dims.length - 1;
   let axis2 = dims.length;
   if (ops.length === 3) {
@@ -1166,12 +1174,9 @@ const transposedType: OperatorTypeHandlerOnTypes = (ops, context) => {
       !Number.isInteger(a1) ||
       !Number.isInteger(a2)
     )
-      return BoxedType.forResult(
-        { kind: 'list', elements: t.elements },
-        context.engine._typeResolver
-      );
+      return { kind: 'list', elements: t.elements };
     if (a1 <= 0 || a1 > dims.length || a2 <= 0 || a2 > dims.length)
-      return BoxedType.forResult('value', context.engine._typeResolver);
+      return 'value';
     axis1 = a1;
     axis2 = a2;
   }
@@ -1180,12 +1185,15 @@ const transposedType: OperatorTypeHandlerOnTypes = (ops, context) => {
     swapped[axis2 - 1],
     swapped[axis1 - 1],
   ];
+  return { kind: 'list', elements: t.elements, dimensions: swapped };
+}
+
+const transposedType: OperatorTypeHandlerOnTypes = (ops, context) => {
+  const m = ops[0];
+  if (m === undefined)
+    return BoxedType.forResult('value', context.engine._typeResolver);
   return BoxedType.forResult(
-    {
-      kind: 'list',
-      elements: t.elements,
-      dimensions: swapped,
-    },
+    transposedShape(m.type, ops),
     context.engine._typeResolver
   );
 };
@@ -2473,9 +2481,6 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       evaluate: ([matrix], { engine: ce, numericApproximation }) => {
         const op1 = matrix;
 
-        // Inverse of scalar is 1/scalar
-        if (op1.isNumber) return ce.expr(['Divide', 1, op1]).evaluate();
-
         if (isTensorValue(op1)) {
           // §D2.3: exact evaluate → expression dtype; `.N()` → float64.
           const op1Tensor = packTensor(ce, op1, {
@@ -2543,12 +2548,6 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       signature: '(matrix) -> matrix',
       evaluate: ([matrix], { engine: ce, numericApproximation }) => {
         const op1 = matrix;
-
-        // Pseudoinverse of scalar is 1/scalar (or 0 if scalar is 0)
-        if (op1.isNumber) {
-          if (op1.isSame(0)) return ce.Zero;
-          return ce.expr(['Divide', 1, op1]).evaluate();
-        }
 
         if (isTensorValue(op1)) {
           const op1Tensor = packTensor(ce, op1, {

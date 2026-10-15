@@ -96,6 +96,68 @@
 
 ### Issues Resolved
 
+- **A compiled special function answers its complex value from real operands in
+  `auto` and `complex` mode,** as `Sqrt` and `Ln` do
+  ([#434](https://github.com/cortex-js/compute-engine/issues/434), contributed
+  by [enumeratio](https://github.com/enumeratio)). `HurwitzZeta`, `LerchPhi`,
+  `PolyLog`, `EllipticK`, the complete `EllipticE`, `Hypergeometric2F1` and
+  `LambertW` lowered to the real kernel in every mode, which is `NaN` where the
+  value is complex: compiled `LerchPhi(3, 2, 1)` was `NaN` and is
+  `0.7734 - 1.1505i`, as `.N()` gives, and `HurwitzZeta(0.5, -0.5)` is
+  `-0.6049 - 1.4142i`, `PolyLog(1.5, 2)` is `1.5489 - 2.9513i`, `EllipticK(2)`
+  is `1.3110 - 1.3110i` and `LambertW(-1)` is `-0.3181 + 1.3372i`. The complex
+  lane is taken where the operand facts do not prove the value real (`a >= 0`
+  or an integer `s` for `HurwitzZeta`, `z <= 1` for `LerchPhi`, `PolyLog` and
+  `Hypergeometric2F1`, `m <= 1` for the elliptic integrals, `x >= -1/e` for
+  `LambertW`), and the kernel is the interpreter's: the real value where it has
+  one, its complex kernel elsewhere. A complex operand takes the complex kernel
+  in every mode. `strict` keeps the real lowering and its `NaN`. The GLSL and
+  WGSL targets have no complex lane for these heads and decline a provably
+  complex value (`LerchPhi(3, 2.5, 1)` compiled to a helper that answered
+  `NaN`). `Arcsec` and `Arccsc` of a real operand of unknown magnitude type
+  `complex | infinity | nan`, where they typed `number`, so the compiled lanes
+  read the complex value as they do for `Arcosh`: `Arcsec(x)` at `x = 0.5`
+  compiled to `NaN` and is `1.3170i`.
+
+- **`N(Argument(z), p)` of a complex value carries `p` digits.** The angle is
+  the bignum `atan2(im, re)` that `Arctan2` computes, where it was the double
+  `atan2` of the parts. `N(Argument(e + iπ), 25)` was
+  `0.8575117863558462702910252` and is `0.8575117863558462650068678` (true
+  `0.857511786355846265006867751`, wrong before from the 17th digit);
+  `N(Argument(2 + iπ), 25)` was `1.003884821853887179762058` and is
+  `1.003884821853887214148424`. `Arg` is the same operator. Exact operands and
+  `∞·i` evaluate as before, and the compiled JavaScript lane stays in doubles
+  (#439, contributed by [enumeratio](https://github.com/enumeratio)). Also
+  from #439: `MatrixMultiply(q, Transpose(q))` with a free `q` was an
+  `incompatible-type` error, because `Transpose` of an operand with no known
+  shape was typed `value`, which does not fit the `matrix | vector`
+  parameter, where `MatrixMultiply(q, q)` stays unevaluated. `Transpose` of
+  an operand with no known shape is now typed `unknown`, a union operand type
+  (`matrix | vector`) is transposed member by member, and the product stays
+  unevaluated until `q` has a value.
+
+- **Definite integrals of several more integrand families evaluate in closed
+  form** (contributed by [KingArth0r](https://github.com/KingArth0r)). An
+  absolute value or a sign of a non-affine argument is split at its exact
+  roots: `\int_0^{2\pi} |\sin x| dx` is `4` and `\int_{-2}^{2} |x^2 - 1| dx`
+  is `4`, where both stayed unevaluated. A sum over integer cells no longer
+  grows with the number of cells: `\int_0^{1000000.5} \{x\} dx` is
+  `4000001/8` (it exceeded the crossing budget), also with an affine weight
+  (`\int x\{x\} dx`) and for `|\sin(kx + m)|` and
+  `\operatorname{sign}(\cos(kx + m))` over many periods. `\int_0^1 \{1/x\} dx`
+  is `1 - \gamma`, and `\int_0^1 \lfloor 1/x \rfloor dx` is `+\infty`. `Erf`,
+  `Erfc`, `BesselJ(1, u)`, `BesselI(1, u)`, `Digamma`, `Trigamma` and
+  `PolyGamma` of an affine argument `u` have primitives (`\int \psi(x) dx` is
+  `LogGamma(x)`, and `LogGamma` differentiates to `Digamma`),
+  `\int e^{x + e^x} dx` is `e^{e^x}`, and the Bose moments
+  `\int_0^\infty x^n/(e^{ax} - 1) dx` are `n!\,\zeta(n+1)/a^{n+1}` for a
+  positive `a`. With the Rubi rules loaded, an antiderivative from the rules
+  that has no value at a bound no longer leaves the integral unevaluated: the
+  built-in antiderivative is tried, so `\int_0^1 dx/\sqrt{x(1-x)}` is `\pi`
+  with the rules loaded, as without. Loading the rules compiles each distinct
+  pattern once (2,558 of the 6,574 rules share their pattern with an earlier
+  rule), and an invalid `stepBudget` is rejected before any rule is compiled.
+
 - **An integer power of a symbol that later holds a square matrix is the
   matrix power.** With `const e = ce.parse('B^2')` and then
   `ce.assign('B', [[1, 2], [3, 4]])`, `e.evaluate()` gave `[[1, 4], [9, 16]]`,

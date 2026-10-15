@@ -422,29 +422,27 @@ describe('HurwitzZeta at a non-positive integer order: the cost is bounded', () 
 });
 
 describe('HurwitzZeta at a non-positive integer order: the compiled JavaScript lane', () => {
-  // The JavaScript lowering of `HurwitzZeta` is real-only, like `Erf`,
-  // `Gamma` and `Zeta`. A literal operand that is certainly not real
-  // declines at compile time with `non-real-operand`, as it does for those
-  // heads. The constant fold does not rescue it: a fold whose value is
-  // complex on a node the lane analysis reads as real is refused, because an
-  // enclosing real lowering (`x + HurwitzZeta(-3, 1 + i)`) would otherwise
-  // add a `{re, im}` object to a number. The value is the interpreter's
-  // job (the `.N()` test above: 1/120 + i/2).
-  test('a literal complex operand declines at compile time, like every real-only head', () => {
+  // A complex operand takes the complex kernel (`_SYS.churwitzZeta`), as
+  // `Gamma` does, so the compiled value is the interpreter's (the `.N()` test
+  // above: 1/120 + i/2).
+  test('a literal complex operand compiles to the interpreter value', () => {
     const expr = hurwitzZeta(-3, ['Complex', 1, 1]);
     const compiled = compile(expr);
-    expect(compiled.success).toBe(false);
-    expect(compiled.diagnostic?.code).toBe('non-real-operand');
+    expect(compiled.success).toBe(true);
+    const value = compiled.run() as { re: number; im: number };
+    expect(value.re).toBeCloseTo(1 / 120, 12);
+    expect(value.im).toBeCloseTo(0.5, 12);
   });
 
-  test('a genuinely complex free variable declines to NaN, not a wrong value', () => {
+  test('a genuinely complex free variable takes the complex kernel', () => {
     ce.declare('z374', 'complex');
     const expr = ce.expr(['HurwitzZeta', -3, 'z374']);
     const compiled = compile(expr);
     expect(compiled.success).toBe(true);
     const value = compiled.run({
       z374: { re: 1, im: 1 },
-    }) as number;
-    expect(Number.isNaN(value)).toBe(true);
+    }) as { re: number; im: number };
+    expect(value.re).toBeCloseTo(1 / 120, 12);
+    expect(value.im).toBeCloseTo(0.5, 12);
   });
 });

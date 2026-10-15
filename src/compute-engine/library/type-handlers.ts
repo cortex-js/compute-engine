@@ -91,6 +91,7 @@ import {
  * the finite complex numbers alone. Parsed once at module load.
  */
 const COMPLEX_OR_SIGNED_INFINITY_TYPE = parseType('complex | +oo | -oo');
+const COMPLEX_OR_INFINITY_OR_NAN_TYPE = parseType('complex | infinity | nan');
 
 /**
  * The join of the non-negative FINITE reals with the two signed infinities.
@@ -674,6 +675,11 @@ export type RealDomain = {
    * SIGNED pair alone, so only the top type admits them.
    */
   poleType: Type;
+  /**
+   * The type for an operand of unknown magnitude, when it is narrower than
+   * the join of `complex` with `poleType`.
+   */
+  joinType?: Type;
 };
 
 /** Is the real number `r` inside one of `intervals`? */
@@ -772,6 +778,7 @@ export function boundedInverseTrigType(
   // FINITE complex numbers, so it cannot absorb the pole: a signed-infinity
   // pole (`poleType: SIGNED_INFINITY_TYPE`) is spelled out in the union, and
   // a NaN-or-`~oo`-capable pole (`poleType: 'number'`) forces the top type.
+  if (domain.joinType !== undefined) return domain.joinType;
   return domain.poleType === 'number'
     ? 'number'
     : COMPLEX_OR_SIGNED_INFINITY_TYPE;
@@ -792,17 +799,23 @@ const ARCSIN_DOMAIN: RealDomain = {
  * Mathematically the pole value is `~oo`, whose own singleton type would be
  * the tight pole claim. But the numeric evaluator currently yields **NaN**
  * at 0 (`arcsec(0).N() → NaN`; exact `evaluate()` stays symbolic), and the
- * only type that admits both `~oo` and NaN is `number`. A type claim must
- * not exclude a value the operator actually produces, so the sound pole
- * claim — and hence the unknown-magnitude join — is `number`. Narrowing it
- * requires first changing `Arcsec`/`Arccsc` evaluation to produce `~oo` at
- * the pole.
+ * only primitive type that admits both `~oo` and NaN is `number`. A type
+ * claim must not exclude a value the operator actually produces, so the
+ * pole claim (`poleType`) is `number`. The join over an operand of unknown
+ * magnitude is narrower: `complex | infinity | nan` (`joinType`) admits
+ * `~oo` and NaN as well, and names `complex` for the finite values, which
+ * the compiled lanes read. Narrowing the pole claim itself to `~oo` requires
+ * first changing `Arcsec`/`Arccsc` evaluation to produce `~oo` at the pole.
  */
 const ARCSEC_DOMAIN: RealDomain = {
   real: [iv(-Infinity, false, -1, true), iv(1, true, Infinity, false)],
   complex: [iv(-1, false, 0, false), iv(0, false, 1, false)],
   poles: [0],
   poleType: 'number',
+  // An operand of unknown magnitude is complex inside the unit interval, so
+  // the claim names `complex` (the compiled lanes read it) and the pole
+  // value, `~oo` or NaN, without absorbing the finite part into `number`.
+  joinType: COMPLEX_OR_INFINITY_OR_NAN_TYPE,
 };
 
 /** `Artanh`: real on `(−1, 1)`, finite complex on `|x| > 1`, `±∞` at `±1`. */
