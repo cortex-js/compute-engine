@@ -51,11 +51,10 @@ import {
   functionLiteralReturnType,
 } from '../compute-engine/boxed-expression/function-literal.js';
 import {
-  bareSlotsAsPlaceholders,
   functionLiteralHasAnnotation,
+  reassignmentBaseSignature,
   validationSignatureOf,
 } from '../compute-engine/engine-declarations.js';
-import { refineDeclaredPlaceholders } from '../compute-engine/boxed-expression/effects-inference.js';
 import {
   inferTypeFromValue,
   refineConstructorPlaceholder,
@@ -2042,7 +2041,7 @@ type PinnedSignature = {
  * - A slot that the earlier literal left bare has a type inferred from the
  *   uses of the parameter. When the new literal annotates that parameter,
  *   the annotation replaces it (`bareSlotsAsPlaceholders()`, then
- *   `refineDeclaredPlaceholders()`): after `h := (p, n: number) => p[1] + n`,
+ *   `reassignmentBaseSignature()`): after `h := (p, n: number) => p[1] + n`,
  *   the literal `(q: string, m: number) => m` is accepted, and the slot is
  *   `string`. When the new literal leaves the parameter bare too, the
  *   inferred type stays.
@@ -2060,10 +2059,7 @@ function reassignedPin(
 ): Type | undefined {
   const own = literal.type.type;
   if (typeof own !== 'object' || own.kind !== 'signature') return undefined;
-  const pinned = refineDeclaredPlaceholders(
-    bareSlotsAsPlaceholders(pin.type, pin.validation, literal),
-    own
-  );
+  const pinned = reassignmentBaseSignature(pin.type, pin.validation, literal);
   if (typeof pinned !== 'object' || pinned.kind !== 'signature')
     return undefined;
   if (isPolymorphicType(pinned) || isPolymorphicType(own)) return undefined;

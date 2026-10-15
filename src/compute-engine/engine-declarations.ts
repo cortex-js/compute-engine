@@ -3864,6 +3864,26 @@ export function bareSlotsAsPlaceholders(
   };
 }
 
+/**
+ * The signature that a reassignment compares a new literal against: the
+ * pinned signature with every slot that the earlier literal left bare
+ * replaced by a placeholder (`bareSlotsAsPlaceholders`) and then refined
+ * from the new literal's own signature (`refineDeclaredPlaceholders`). The
+ * Epsil static check reads it through this function, so that the check and
+ * `assignFn` apply one rule, and so that the construction seam of function
+ * literals (`effects-inference.ts`) keeps its reviewed set of importers.
+ */
+export function reassignmentBaseSignature(
+  signature: Type,
+  validation: Type | undefined,
+  literal: Expression
+): Type {
+  return refineDeclaredPlaceholders(
+    bareSlotsAsPlaceholders(signature, validation, literal),
+    literal.type.type
+  );
+}
+
 /** True if a canonical `Function` literal carries at least one type annotation
  * — an annotated parameter or a return-type ascription (the Phase-1 §4.2
  * marker). Untyped literals return `false` and keep the inferred-signature
