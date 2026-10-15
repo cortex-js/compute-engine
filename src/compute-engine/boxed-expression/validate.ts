@@ -850,6 +850,19 @@ export function checkNumericArgs(
  * numeric) are not disjoint from the union. Invalid operands are skipped
  * for the same reason as `error`-typed ones. Returns `undefined` when every
  * operand could still be numeric.
+ *
+ * A tuple operand is also an error when one of its components can be
+ * neither a number nor a numeric collection or tuple, for example a string
+ * or a boolean component: `("s", a)` types `tuple<string, unknown>`, which
+ * is not disjoint from the exempt union, but it is not a point, so
+ * arithmetic cannot consume it. This is the test that `checkNumericArgs`
+ * makes at boxing (`typeCouldBeNumericTuple`), so `-("s", a)` is the same
+ * error at boxing and at evaluation. Evaluation is where the test matters:
+ * with `f(x) := (-x, x)`, the call `f(("s", a))` binds the tuple to `x`
+ * when the body is evaluated, and without this test `-x` stayed the inert
+ * `-("s", a)`, while `f("s")` gives the error. A tuple with a list
+ * component is not refused here: that is the separate error of
+ * `listCoordinateTupleOperandError`.
  */
 // Parsed once: the guard runs for every operand of every numeric
 // evaluation, so it must not re-resolve the type string per call.
@@ -870,11 +883,27 @@ export function nonNumericOperandError(
     (x) =>
       x.isValid &&
       !isNumber(x) &&
-      (x.type.type === 'never' || !x.type.facts.belowNumber) &&
-      x.type.isDisjointFrom(NON_NUMERIC_EXEMPT_TYPE)
+      (((x.type.type === 'never' || !x.type.facts.belowNumber) &&
+        x.type.isDisjointFrom(NON_NUMERIC_EXEMPT_TYPE)) ||
+        isNonNumericTupleType(x.type.type))
   );
   if (bad === undefined) return undefined;
   return ce.typeError('number', bad.type, bad);
+}
+
+/**
+ * Whether `t` is a tuple type with a component that can be neither a
+ * number nor a numeric collection or tuple (a string, a boolean, a list of
+ * strings). A union type answers false: one of its other arms can be a
+ * number.
+ */
+function isNonNumericTupleType(t: Type): boolean {
+  const resolved = resolveTypeAlias(t);
+  return (
+    typeof resolved === 'object' &&
+    resolved.kind === 'tuple' &&
+    !typeCouldBeNumericTuple(resolved)
+  );
 }
 
 /**

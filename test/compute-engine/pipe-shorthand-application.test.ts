@@ -54,11 +54,17 @@ describe('LaTeX pipe shorthand: static type', () => {
 
   test('shapes this derivation cannot type stay undecided, never wrong', () => {
     // A held tuple topic has no pure type; a nested list under a scalar head
-    // broadcasts all the way down, a shape the mapped typing does not name.
+    // is either broadcast all the way down or, for a square matrix of numbers
+    // under an integer power, read as a matrix power, and the mapped typing
+    // names neither shape.
     expect(typeOf(ce, '(1,2) |> \\_^2')).toBe('unknown');
     expect(valueOf(ce, '(1,2) |> \\_^2')).toBe('(1, 4)');
     expect(typeOf(ce, '[[1,2],[3,4]] |> \\_^2')).toBe('unknown');
-    expect(valueOf(ce, '[[1,2],[3,4]] |> \\_^2')).toBe('[[1,4],[9,16]]');
+    // The topic is a square matrix of numbers and the exponent is an
+    // integer, so `\_^2` is the matrix power `[[1,2],[3,4]]·[[1,2],[3,4]]`,
+    // the same value as `[[1,2],[3,4]]^2` written directly. It is not the
+    // element-wise square `[[1,4],[9,16]]`.
+    expect(valueOf(ce, '[[1,2],[3,4]] |> \\_^2')).toBe('[[7,10],[15,22]]');
   });
 });
 

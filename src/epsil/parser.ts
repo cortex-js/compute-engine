@@ -463,9 +463,9 @@ export class Parser {
 
   /** The local start offsets of the `(` tokens that open a CALL argument
    * list (`f(…)`, `c.m(…)`), as opposed to a grouping or a lambda parameter
-   * list. `lambdaMistypedAsPair` reads it: when a call has only one
-   * argument, a bare symbol right after the call's `(` is the key of a rule
-   * argument (`f(GridLines -> [10, 10])`), not a lambda parameter. */
+   * list. `lambdaMistypedAsPair` reads it: a bare symbol right after the
+   * call's `(` is the key of a rule argument (`f(GridLines -> [10, 10])`),
+   * not a lambda parameter. */
   private callArgumentOpens = new Set<number>();
 
   /** Implicit guards accumulated while patternizing a single `match` case:
@@ -7674,15 +7674,16 @@ export class Parser {
    * unquoted name is a legitimate string key.
    *
    * A bare symbol right after the `(` of a CALL argument list is also left
-   * alone when the pair is the ONLY argument (the `)` of the call follows
-   * the pair): `f(GridLines -> [10, 10])` is a call with one rule argument,
-   * the same reading as the later arguments of `f(x, GridLines -> [10, 10])`.
-   * The serializer writes a rule argument this way, so a lambda reading
-   * here broke the round trip of a call whose only argument is a rule
-   * (GitHub issue #435). The FIRST of several arguments keeps the lambda
-   * reading, because a function is the usual first argument and `->` is a
-   * usual typo for `=>` there: `map(x -> x^2, xs)` is diagnosed and
-   * recovered as `map(x => x^2, xs)`. */
+   * alone, whatever the number of arguments: `f(GridLines -> 1, Axes -> 2)`
+   * is a call with two rule arguments, the same reading as the later
+   * arguments of `f(x, GridLines -> 1)`. The serializer writes a rule
+   * argument this way, so a lambda reading here broke the round trip of a
+   * call whose first argument is a rule (GitHub issue #435). The parser
+   * cannot tell a rule from a lambda written with the wrong arrow in this
+   * position; the callee's signature can, so the typo `map(x -> x^2, xs)`
+   * is diagnosed by the static checker instead (see
+   * `ruleAtFunctionSlotDiagnostics` in `static-diagnostics.ts`), with the
+   * same `mapsto-arrow-expected` code and fixit, and is not recovered. */
   private lambdaMistypedAsPair(left: MathJsonExpression): boolean {
     const isTypedParam = (p: MathJsonExpression): boolean => {
       const pops = fnOps(p);
@@ -7724,13 +7725,7 @@ export class Parser {
       let i = start - 1;
       while (i >= 0 && /\s/.test(this.source[i])) i -= 1;
       if (i < 0) return false;
-      if (this.source[i] === '(') {
-        // A trailing comma (`f(k -> v,)`) still leaves one argument.
-        const soleArgument =
-          this.current.type === 'CLOSE_PAREN' ||
-          (this.current.type === 'COMMA' && this.peek().type === 'CLOSE_PAREN');
-        return !(this.callArgumentOpens.has(i) && soleArgument);
-      }
+      if (this.source[i] === '(') return !this.callArgumentOpens.has(i);
       if (this.source[i] === '=') return true;
       // A pipe stage: `xs |> x -> x^2` is a stage lambda written with the
       // wrong arrow. Only a function can follow `|>`, never a dictionary

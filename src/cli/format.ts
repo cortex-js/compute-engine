@@ -582,6 +582,12 @@ function diagnosticMessage(diagnostic: ParsingDiagnostic): string {
     case 'conditional-if-line-start':
       return `An "if" at the start of a line begins a new if-statement; for a conditional expression ("a if c else b"), keep "if" on the same line as the value before it`;
     case 'mapsto-arrow-expected':
+      // With arguments, the static checker found a rule (`x -> x^2`) passed
+      // at a function parameter of a call: the callee and the 1-based
+      // argument position. Without them, the parser found a pair whose left
+      // side is shaped like a parameter list.
+      if (args.length >= 2)
+        return `"->" builds a key-value pair, but argument ${args[1]} of "${args[0]}" must be a function; to write a function, use the mapsto arrow "=>"`;
       return `"->" pairs a key with a value (and the key must be a string); to write a function, use the mapsto arrow "=>"`;
     case 'mapsto-arrow-legacy':
       return `"|->" is the old spelling of the mapsto arrow; write "=>"`;

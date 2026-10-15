@@ -261,6 +261,120 @@ describe('THE LANE OF A NESTED LINEAR-ALGEBRA HEAD', () => {
     });
 });
 
+describe('A `Power` WHOSE BASE IS A MATRIX ONLY AFTER THE PARSE', () => {
+  // Canonicalization writes `A^n` as `MatrixPower(A, n)` only when the type of
+  // `A` is a matrix when the `Power` is built. `B^2` parsed before `B` holds a
+  // matrix stays a `Power`, and `evaluate()` computes the matrix power for a
+  // square matrix and an integer exponent (`isSquareMatrixPower()`). The
+  // compiled code must compute the same power, not the element-wise one.
+  function assignedAfterParse(latex: string, value: string) {
+    const ce = new ComputeEngine();
+    const expr = ce.parse(latex);
+    ce.assign('B', ce.parse(value));
+    return expr;
+  }
+
+  it.each([
+    ['B^2', '[[7,10],[15,22]]'],
+    ['B^{3}', '[[37,54],[81,118]]'],
+    ['B^{0}', '[[1,0],[0,1]]'],
+    ['B^{-2}', '[[5.5,-2.5],[-3.75,1.75]]'],
+  ])('javascript: %s of a square matrix is the matrix power', (latex, value) => {
+    const expr = assignedAfterParse(latex, '[[1, 2], [3, 4]]');
+    expect(expr.N().toString()).toBe(value);
+    const result = js(expr, 'strict');
+    expect(result.code).toContain('_SYS.matpow(_val_B, ');
+    // The inverse in `B^{-2}` has rounding errors in floating point.
+    const actual = result.run();
+    for (const [i, row] of JSON.parse(value).entries())
+      for (const [j, x] of row.entries())
+        expect(actual[i][j]).toBeCloseTo(x, 12);
+  });
+
+  it('javascript: the structural `Power` of a square matrix literal', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.function(
+      'Power',
+      [ce.parse('[[1, 2], [3, 4]]'), ce.number(2)],
+      { form: 'structural' }
+    );
+    const result = compile(expr, {
+      to: 'javascript',
+      constantFold: false,
+      fallback: false,
+    } as any);
+    expect(result.code).toContain('_SYS.matpow(');
+    expect(result.run()).toEqual([
+      [7, 10],
+      [15, 22],
+    ]);
+  });
+
+  it('python: the structural `Power` of a square matrix literal', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.function(
+      'Power',
+      [ce.parse('[[1, 2], [3, 4]]'), ce.number(2)],
+      { form: 'structural' }
+    );
+    const result = compile(expr, {
+      to: 'python',
+      constantFold: false,
+      fallback: false,
+    } as any);
+    expect(result.code).toBe('np.linalg.matrix_power([[1, 2], [3, 4]], 2)');
+  });
+
+  it('javascript: a non-integer exponent keeps the element-wise power', () => {
+    const expr = assignedAfterParse('B^{0.5}', '[[1, 2], [3, 4]]');
+    const result = js(expr, 'strict');
+    expect(result.code).not.toContain('matpow');
+    expect(result.code).toContain('_SYS.bcast(');
+    const expected = [
+      [1, Math.SQRT2],
+      [Math.sqrt(3), 2],
+    ];
+    const actual = result.run();
+    for (const [i, row] of expected.entries())
+      for (const [j, x] of row.entries())
+        expect(actual[i][j]).toBeCloseTo(x, 12);
+  });
+
+  it('javascript: a matrix that is not square keeps the element-wise power', () => {
+    const expr = assignedAfterParse('B^2', '[[1, 2, 3], [4, 5, 6]]');
+    expect(expr.evaluate().toString()).toBe('[[1,4,9],[16,25,36]]');
+    const result = js(expr, 'strict');
+    expect(result.code).not.toContain('matpow');
+    expect(JSON.stringify(result.run())).toBe('[[1,4,9],[16,25,36]]');
+  });
+
+  it('javascript: a vector keeps the element-wise power', () => {
+    const ce = new ComputeEngine();
+    ce.declare('v', 'vector<real>');
+    const expr = ce.function('Power', [ce.symbol('v'), ce.number(2)], {
+      form: 'structural',
+    });
+    const result = js(expr, 'strict');
+    expect(result.code).toBe(
+      '_SYS.bcast((_tv1, _tv2) => _SYS.pow(_tv1, _tv2), _.v, 2)'
+    );
+    expect(result.run({ v: [1, 2, 3] })).toEqual([1, 4, 9]);
+  });
+
+  it('javascript: a matrix of unknown shape declines', () => {
+    // A square matrix gives the matrix power and any other matrix gives the
+    // element-wise power, so only the value at run time can decide.
+    const ce = new ComputeEngine();
+    ce.declare('A', 'matrix<real>');
+    const expr = ce.function('Power', [ce.symbol('A'), ce.number(2)], {
+      form: 'structural',
+    });
+    expect(() => js(expr, 'strict')).toThrow(
+      /Could not compile `Power`: the base is a matrix/
+    );
+  });
+});
+
 describe('THE GPU COMPLEX POWER AT ZERO', () => {
   // `_gpu_cpow(z, w)` is `exp(w · ln z)`, and at `z = 0` the product
   // `w · (−∞, 0)` has a NaN imaginary part. The interpreter answers 0 for a

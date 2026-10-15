@@ -46,6 +46,7 @@ import {
   declaredScalarParams,
   declaresBroadcastableParam,
   isDeclaredScalarType,
+  isSquareMatrixPower,
   paramsAreScalar,
   type BroadcastSlotPlan,
 } from '../boxed-expression/boxed-function.js';
@@ -9846,6 +9847,33 @@ export class BaseCompiler {
       (!unionAdmitsFlatNumericList(args[0]) || isPointSumOperand(args[0]))
     ) {
       return `_SYS.absShape(${BaseCompiler.compile(args[0], target)})`;
+    }
+
+    // An integer power of a square matrix is the matrix power, not the
+    // element-wise power. Canonicalization writes `A^n` as `MatrixPower(A,
+    // n)` only when the type of `A` is a matrix when the `Power` is built.
+    // A `Power` built before its base has a matrix type (`B^2` parsed before
+    // `B` holds a matrix, or a structural `Power`) is still a `Power` here,
+    // and `evaluate()` computes the matrix power for it. The same decision
+    // (`isSquareMatrixPower()`) selects the lowering here: a matrix power
+    // compiles as `MatrixPower` (a target without a `MatrixPower` lowering
+    // declines it). When only the value at run time can decide, the
+    // compilation declines, because the two powers give different values.
+    if (h === 'Power' && args.length === 2) {
+      const matrixPower = isSquareMatrixPower(args[0].type, args[1]);
+      if (matrixPower === true)
+        return BaseCompiler.compileExpr(
+          engine,
+          'MatrixPower',
+          args,
+          prec,
+          target
+        );
+      if (matrixPower === undefined)
+        throw new Error(
+          'Could not compile `Power`: the base is a matrix, and only its shape or the exponent at run time ' +
+            'tells if the power is a matrix power (a square matrix with an integer exponent) or an element-wise power.'
+        );
     }
 
     // Element-wise broadcast of a `broadcastable` head (arithmetic + unary

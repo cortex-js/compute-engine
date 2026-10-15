@@ -2453,7 +2453,23 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       examples: ['Inverse([[1, 2], [3, 4]])'],
       description: 'Multiplicative inverse of a square matrix.',
       complexity: 8200,
-      signature: '(T) -> T where T: matrix',
+      // The declared result is a bare `matrix`, not an echo of the operand
+      // type: the inverse of an integer matrix has rational entries
+      // (`[[1, 2], [3, 4]]^-1` is `[[-2, 1], [3/2, -1/2]]`), so the operand
+      // type is not a valid result type. The type handler narrows this
+      // result.
+      signature: '(matrix) -> matrix',
+      // The inverse is the power with exponent -1, so it is typed as
+      // `MatrixPower` with a negative integer exponent
+      // (`squareMatrixPowerType`): a square integer or rational matrix gives
+      // rational entries, a real matrix real entries and a complex matrix
+      // complex entries, with the shape of the operand. A non-square operand
+      // has no inverse (the evaluate handler answers
+      // `expected-square-matrix`), and the handler declines for it and for
+      // an operand of unknown rank, so the declared `matrix` applies. With
+      // this handler, `m^-1` (canonical form `Inverse(m)`) and `m^-2`
+      // (canonical form `MatrixPower(m, -2)`) have the same element type.
+      type: ([m], context) => squareMatrixPowerType(m, 'integer', context),
       evaluate: ([matrix], { engine: ce, numericApproximation }) => {
         const op1 = matrix;
 
@@ -3773,8 +3789,13 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         // Negative exponent: A^{-n} = (A^n)^{-1}. Inverting the final result
         // (rather than threading the inverse back through MatrixMultiply, whose
         // signature rejects the inverse's `list<list<…>>` type) keeps this
-        // exact and well-typed.
-        if (n < 0) return ce.function('Inverse', [result]).evaluate();
+        // exact and well-typed. Under `.N()` the inverse is computed as a
+        // numeric approximation too: the product of integer entries is still
+        // exact, and an exact inverse of it has rational entries.
+        if (n < 0)
+          return ce
+            .function('Inverse', [result])
+            .evaluate({ numericApproximation });
         return result;
       },
     },

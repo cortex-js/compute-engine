@@ -6201,17 +6201,23 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
     signature: '(any*) -> tuple',
     // A tuple whose EVERY coordinate is absent is the absent value: the
-    // evaluate handler below answers `Missing` for it, so its type is
-    // `missing` when every coordinate is typed `missing` (or is a written
-    // absence symbol), and `missing | tuple<…>` when every coordinate MAY be
-    // absent (`(L[k], L[j])` over two index reads: both out of range is
-    // `Missing`, one is a tuple with an absent coordinate). A tuple with a
-    // coordinate that is never absent is a tuple (`(Missing, 1)` is a value,
-    // the absent coordinate is positioned).
+    // evaluate handler below answers `Missing` for it. Its type is
+    // `missing | tuple<…>` when every coordinate MAY be absent (`(L[k],
+    // L[j])` over two index reads: both out of range is `Missing`, one is a
+    // tuple with an absent coordinate). When every coordinate IS absent
+    // (typed `missing`, or a written absence symbol), the type is the same
+    // union: `(Missing, Missing)` is `missing | tuple<missing, missing>`.
+    // The tuple arm describes the unevaluated literal, which is still a
+    // tuple, and it keeps the component types, so a consumer that reads the
+    // components of the argument (the numeric-tuple rule of a call,
+    // `isNumericTupleArgumentType`) sees a tuple of absent components. The
+    // answer `missing` alone strips to `never`, and the application
+    // boundary then widens it to the declared result, the bare `tuple`
+    // (`withCodomainForAbsentAnswer`), which loses the components. A tuple
+    // with a coordinate that is never absent is a tuple (`(Missing, 1)` is
+    // a value, the absent coordinate is positioned).
     type: (ops, context) => {
       const resolver = context.engine._typeResolver;
-      if (ops.length > 0 && ops.every(absentCoordinateD))
-        return BoxedType.forResult('missing', resolver);
       const t = tupleTypeOfD(ops);
       if (ops.length > 0 && ops.every(mayBeAbsentCoordinateD))
         return BoxedType.forResult(

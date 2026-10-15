@@ -1974,6 +1974,24 @@ export interface IComputeEngine {
   _inScope<T>(scope: Scope | undefined, f: () => T): T;
 
   /**
+   * The canonical form of the held stage of a pipe `topic |> stage`, for the
+   * Epsil static pass (`src/epsil/static-diagnostics.ts`). `Pipe` holds its
+   * stage unbound until it is evaluated, so the canonical form of the pipe
+   * does not contain the errors of the stage. A stage that gets the piped
+   * value as an implicit argument is returned as the canonical call with
+   * `topic` in the slot that evaluation selects, at the 0-based position
+   * `topicAt` (`xs |> Filter("a")` is `Filter(xs, "a")`); any other stage is
+   * canonicalized alone. `written` is the call before canonicalization, which
+   * `topicAt` counts in: canonicalization can rename the call and reorder its
+   * operands. Nothing is evaluated. `undefined` when the stage is already
+   * canonical. See `pipeStageAsCall` in `library/core.ts`.
+   * @internal */
+  _pipeStageAsCall(
+    topic: Expression,
+    stage: Expression
+  ): { call: Expression; topicAt?: number; written?: Expression } | undefined;
+
+  /**
    * Execute `f` in a **resolve-only** region: while it runs, boxing a symbol
    * resolves the name against the scope chain as usual, but a name that
    * resolves to nothing stays UNBOUND instead of being auto-declared into the

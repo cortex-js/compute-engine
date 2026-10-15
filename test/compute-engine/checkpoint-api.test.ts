@@ -130,6 +130,36 @@ describe('identity is preserved across a restore', () => {
     expect(node.evaluate().toString()).toBe('3');
     expect(node.type.toString()).toBe(ce.box(['g', 2]).type.toString());
   });
+
+  // Canonicalizing a `DefineFunction` installs its clause before the
+  // statement runs and marks the binding, so that a `Declare` statement that
+  // runs first may replace the binding. The restore must remove that marker
+  // too. If it does not, the restored function keeps the marker, and a later
+  // declaration discards the function instead of refusing to redeclare it.
+  test('a clause canonicalized after the checkpoint does not let a later declaration discard the restored function', () => {
+    const ce = new ComputeEngine();
+    ce.box([
+      'DefineFunction',
+      'f',
+      ['Function', ['Add', 'n', 1], 'n'],
+    ] as any).evaluate();
+    expect(ce.box(['f', 5]).evaluate().toString()).toBe('6');
+
+    const cp = ce.checkpoint();
+    // Canonicalized only, not evaluated.
+    ce.box([
+      'DefineFunction',
+      'f',
+      ['Function', ['Multiply', 'n', 2], 'n'],
+    ] as any);
+    ce.restore(cp);
+    expect(ce.box(['f', 5]).evaluate().toString()).toBe('6');
+
+    expect(() =>
+      ce.box(['Declare', 'f', "'(integer) -> integer'"] as any).evaluate()
+    ).toThrow(`The symbol "f" is already declared in this scope`);
+    expect(ce.box(['f', 5]).evaluate().toString()).toBe('6');
+  });
 });
 
 describe('the checkpoint stack', () => {

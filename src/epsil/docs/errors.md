@@ -27,7 +27,7 @@ To use a tuple's elements as list elements, convert explicitly: `ListFrom(t)` is
 
 A value's type does not match what its context requires — a typed declaration (`let x: string = …`) whose initializer has a different type, an argument outside a function's signature, or a value that fails a type ascription.
 
-The message reads "expected `T`, got `U`": T is what the context requires, U is what the value actually has. A site may follow — "for argument 2" points at a position in a call, "at `x`" quotes the offending subexpression. A type like `list<string^5>` is a list of exactly 5 strings; `integer` is a whole number, finite like every bare numeric type name.
+The message reads "expected `T`, got `U`": T is what the context requires, U is what the value actually has. A site may follow — "at `x`" quotes the offending subexpression. A type like `list<string^5>` is a list of exactly 5 strings; `integer` is a whole number, finite like every bare numeric type name.
 
 The check runs twice by design: once statically, when the program is canonicalized (reported before anything runs), and again during evaluation, where the mismatch becomes an error value that propagates outward (see `epsil doc runtime-error`).
 
@@ -128,6 +128,8 @@ The last element is `xs[-1]` — negative indices count from the end, which is u
 `->` and `=>` are different operators: `->` pairs a key with a value (the key must be a string, as in a dictionary entry) and also writes function TYPES in annotations (`(number) -> number`), while `=>` is the mapsto arrow that builds a function value.
 
 So `(x) -> x^2` reads as a key-value pair with a malformed key, not a lambda. Write `(x) => x^2` for the function; the fixit in the diagnostic applies exactly that rewrite.
+
+In a call, `name -> value` is a rule argument — a key-value pair whose key is the name, as in `f(GridLines -> 1, Axes -> 2)`. So `map(x -> x^2, xs)` passes a key-value pair where `map` expects a function, and the diagnostic names the argument. Write `map(x => x^2, xs)`; the fixit applies that rewrite too.
 
 ## `mapsto-arrow-legacy`
 

@@ -10,10 +10,21 @@ import { ComputeEngine } from '../../src/compute-engine';
  *   Inverse    `(matrix) -> matrix` + `type: ([m]) => m.type`
  *              →  `(T) -> T where T: matrix`   (§4.7 dimensions row)
  *
- * Every expectation below was probed against the PRE-migration engine and
- * pinned verbatim: the contract of a bounded identity echo is that the
- * declarative form reproduces the imperative handler exactly, kind and
+ * Every `Conjugate` expectation below was probed against the PRE-migration
+ * engine and pinned verbatim: the contract of a bounded identity echo is that
+ * the declarative form reproduces the imperative handler exactly, kind and
  * dimensions included.
+ *
+ * `Inverse` is no longer an identity echo. The echo was not sound: the
+ * inverse of an integer matrix has rational entries (`[[1, 2], [3, 4]]^-1`
+ * is `[[-2, 1], [3/2, -1/2]]`), and a non-square matrix has no inverse at
+ * all, but the echo typed the first as `matrix<integer^(2x2)>` and the second
+ * as `matrix<integer^(2x3)>`. `Inverse` now declares `(matrix) -> matrix` and
+ * has a type handler that types it as `MatrixPower` with a negative integer
+ * exponent (`squareMatrixPowerType()` in `library/linear-algebra.ts`). So
+ * `m^-1` (canonical form `Inverse(m)`) and `m^-2` (canonical form
+ * `MatrixPower(m, -2)`) have the same element type. The `Inverse`
+ * expectations below pin that handler.
  */
 
 /** A fresh engine per test: symbol declarations and inferred symbol types are
@@ -33,10 +44,13 @@ describe('the migrated definitions are declaratively generic', () => {
     expect(conj.signature.isPolymorphic).toBe(true);
     expect(conj.type).toBeUndefined();
 
+    // `Inverse` is the exception: its result is not the operand type (see
+    // the comment at the top of this file), so it has a monomorphic
+    // signature and a type handler.
     const inv = ce.box(['Inverse', M22]).operatorDefinition as any;
-    expect(inv.signature.toString()).toBe('(T) -> T where T: matrix');
-    expect(inv.signature.isPolymorphic).toBe(true);
-    expect(inv.type).toBeUndefined();
+    expect(inv.signature.toString()).toBe('(matrix) -> matrix');
+    expect(inv.signature.isPolymorphic).toBe(false);
+    expect(typeof inv.type).toBe('function');
   });
 });
 
@@ -173,38 +187,85 @@ describe('Conjugate — (T) -> T where T: number', () => {
   });
 });
 
-describe('Inverse — (T) -> T where T: matrix', () => {
-  test('§4.7 identity row — dimensions and kind are preserved verbatim', () => {
+describe('Inverse — (matrix) -> matrix, typed as a power with exponent -1', () => {
+  test('a square integer matrix has rational entries; a non-square one declines', () => {
     const ce = fresh();
     expect(ce.box(['Inverse', M22]).type.toString()).toBe(
-      'matrix<integer^(2x2)>'
+      'matrix<rational^(2x2)>'
     );
-    // Non-square is a runtime error, but the STATIC echo still carries the
-    // operand's dimensions (2x3 in, 2x3 out).
-    expect(ce.box(['Inverse', M23]).type.toString()).toBe(
-      'matrix<integer^(2x3)>'
-    );
+    // A non-square matrix has no inverse (the value is an
+    // `expected-square-matrix` error). The handler declines, so the declared
+    // `matrix` applies, as for `MatrixPower` with a negative exponent.
+    expect(ce.box(['Inverse', M23]).type.toString()).toBe('matrix');
   });
 
-  test('the result type equals the operand type', () => {
+  test('the result type equals the type of MatrixPower(m, -1)', () => {
     const ce = fresh();
-    const e = ce.box(['Inverse', M22]);
-    expect(e.type.toString()).toBe(e.op1.type.toString());
+    for (const m of [M22, M23])
+      expect(ce.box(['Inverse', m]).type.toString()).toBe(
+        ce.box(['MatrixPower', m, -1]).type.toString()
+      );
   });
 
-  test('a declared matrix symbol echoes its declared type', () => {
+  test('a declared matrix symbol is typed from its element type and shape', () => {
     const ce = fresh();
     ce.declare('MM', 'matrix<integer^(2x2)>');
     expect(ce.box(['Inverse', 'MM']).type.toString()).toBe(
-      'matrix<integer^(2x2)>'
+      'matrix<rational^(2x2)>'
+    );
+    ce.declare('R', 'matrix<real^(3x3)>');
+    expect(ce.box(['Inverse', 'R']).type.toString()).toBe('matrix<real^(3x3)>');
+    ce.declare('Z', 'matrix<complex^(2x2)>');
+    expect(ce.box(['Inverse', 'Z']).type.toString()).toBe(
+      'matrix<complex^(2x2)>'
+    );
+    // The nested spelling of a square integer matrix.
+    ce.declare('NN', 'list<list<integer^2>^2>');
+    expect(ce.box(['Inverse', 'NN']).type.toString()).toBe(
+      'matrix<rational^(2x2)>'
     );
   });
 
-  test('nested application preserves the type', () => {
+  test('an operand with no known shape keeps a shape-free matrix type', () => {
+    const ce = fresh();
+    ce.declare('P', 'matrix');
+    expect(ce.box(['Inverse', 'P']).type.toString()).toBe('matrix');
+    ce.declare('Q', 'matrix<integer>');
+    expect(ce.box(['Inverse', 'Q']).type.toString()).toBe('matrix<rational>');
+  });
+
+  test('m^-1 and m^-2 have the same element type', () => {
+    const ce = fresh();
+    ce.declare('MM', 'matrix<integer^(2x2)>');
+    const inverse = ce.parse('\\mathrm{MM}^{-1}');
+    const square = ce.parse('\\mathrm{MM}^{-2}');
+    expect(inverse.operator).toBe('Inverse');
+    expect(square.operator).toBe('MatrixPower');
+    expect(inverse.type.toString()).toBe('matrix<rational^(2x2)>');
+    expect(square.type.toString()).toBe(inverse.type.toString());
+  });
+
+  test('nested application stays rational', () => {
     const ce = fresh();
     expect(ce.box(['Inverse', ['Inverse', M22]]).type.toString()).toBe(
-      'matrix<integer^(2x2)>'
+      'matrix<rational^(2x2)>'
     );
+  });
+
+  test('the type of the value is a subtype of the static type', () => {
+    const ce = fresh();
+    const cases = [
+      M22,
+      ['List', ['List', 1.5, 2], ['List', 3, 5]],
+      ['List', ['List', ['Complex', 1, 1], 2], ['List', 3, 4]],
+      ['Inverse', M22],
+    ];
+    for (const m of cases) {
+      const e = ce.box(['Inverse', m] as any);
+      const value = e.evaluate();
+      expect(value.operator).toBe('List');
+      expect(value.type.matches(e.type)).toBe(true);
+    }
   });
 
   test('bound violation — a set operand reports the declared bound', () => {
@@ -261,17 +322,17 @@ describe('Inverse — (T) -> T where T: matrix', () => {
     expect(viaParse.operator).toBe('Inverse');
     expect(viaParse2.operator).toBe('Inverse');
     for (const e of [viaFunction, viaBox, viaParse, viaParse2])
-      expect(e.type.toString()).toBe('matrix<integer^(2x2)>');
+      expect(e.type.toString()).toBe('matrix<rational^(2x2)>');
   });
 
   test('route parity — a matrix literal on all three routes', () => {
     const ce = fresh();
     const m = ce.box(M22);
     expect(ce.function('Inverse', [m]).type.toString()).toBe(
-      'matrix<integer^(2x2)>'
+      'matrix<rational^(2x2)>'
     );
     expect(ce.box(['Inverse', M22]).type.toString()).toBe(
-      'matrix<integer^(2x2)>'
+      'matrix<rational^(2x2)>'
     );
     expect(
       ce
@@ -279,6 +340,6 @@ describe('Inverse — (T) -> T where T: matrix', () => {
           '\\operatorname{Inverse}(\\lbrack\\lbrack 1,2\\rbrack,\\lbrack 3,4\\rbrack\\rbrack)'
         )
         .type.toString()
-    ).toBe('matrix<integer^(2x2)>');
+    ).toBe('matrix<rational^(2x2)>');
   });
 });

@@ -1,5 +1,6 @@
 import { ComputeEngine } from '../../../src/compute-engine';
 import { engine as ce } from '../../utils';
+import type { MathJsonExpression } from '../../../src/math-json/types';
 
 describe('Logic', () => {
   it('should parse True and False', () => {
@@ -1176,7 +1177,7 @@ describe('Kronecker Delta', () => {
       const parse = (s: string) => ce.parse(s, { strict, form: 'raw' }).json;
       for (const latex of [
         '\\delta_{n\\,m}',
-        '\\delta_{n\;m}',
+        '\\delta_{n\\;m}',
         '\\delta_{n\\:m}',
         '\\delta_{n\\!m}',
         '\\delta_{n\\quad m}',
@@ -1207,6 +1208,182 @@ describe('Kronecker Delta', () => {
         '\\delta_{nm}'
       );
     }
+  });
+
+  // A spacing command separates two indices also when an index is an
+  // expression. In other subscripts, a spacing command between two operands
+  // is an implicit product: `\delta_{n+1\,m}` was `KroneckerDelta(n + 1·m)`.
+  it('should split the indices at a spacing command when an index is an expression', () => {
+    for (const strict of [true, false]) {
+      const parse = (s: string) => ce.parse(s, { strict, form: 'raw' }).json;
+      for (const latex of [
+        '\\delta_{n+1\\,m}',
+        '\\delta_{n+1\\;m}',
+        '\\delta_{n+1\\:m}',
+        '\\delta_{n+1\\!m}',
+        '\\delta_{n+1\\quad m}',
+        '\\delta_{n+1\\qquad m}',
+        '\\delta_{n+1\\hspace{1em}m}',
+        '\\delta_{n+1\\, m}',
+        '\\delta_{n+1\\,\\,m}',
+        '\\delta_{\\,n+1\\,m\\,}',
+        '\\delta_{n+1\\, ,\\, m}',
+        '\\delta_{n+1\\,;\\,m}',
+      ])
+        expect(parse(latex)).toEqual(['KroneckerDelta', ['Add', 'n', 1], 'm']);
+      expect(parse('\\delta_{n+1\\,m+2}')).toEqual([
+        'KroneckerDelta',
+        ['Add', 'n', 1],
+        ['Add', 'm', 2],
+      ]);
+      expect(parse('\\delta_{i\\,j\\,k}')).toEqual([
+        'KroneckerDelta',
+        'i',
+        'j',
+        'k',
+      ]);
+      expect(parse('\\delta_{n-1\\,m}')).toEqual([
+        'KroneckerDelta',
+        ['Subtract', 'n', 1],
+        'm',
+      ]);
+      expect(parse('\\delta_{a\\,-b}')).toEqual([
+        'KroneckerDelta',
+        'a',
+        ['Negate', 'b'],
+      ]);
+      // A separator between two other indices still separates them.
+      expect(parse('\\delta_{n+1, m\\,k}')).toEqual([
+        'KroneckerDelta',
+        ['Add', 'n', 1],
+        'm',
+        'k',
+      ]);
+      // A spacing command in a nested group or in parentheses does not
+      // split the subscript.
+      expect(parse('\\delta_{\\frac{a\\,b}{2}\\,c}')).toEqual([
+        'KroneckerDelta',
+        [
+          'Divide',
+          ['InvisibleOperator', 'a', ['HorizontalSpacing', 3], 'b'],
+          2,
+        ],
+        'c',
+      ]);
+      expect(parse('\\delta_{(a\\,b)\\,c}')).toEqual([
+        'KroneckerDelta',
+        [
+          'Delimiter',
+          ['InvisibleOperator', 'a', ['HorizontalSpacing', 3], 'b'],
+        ],
+        'c',
+      ]);
+      expect(parse('\\delta_{n+1\\,m}^2')).toEqual([
+        'Power',
+        ['KroneckerDelta', ['Add', 'n', 1], 'm'],
+        2,
+      ]);
+      // Subscripts without a spacing command keep their reading.
+      expect(parse('\\delta_{ij}')).toEqual(['KroneckerDelta', 'i', 'j']);
+      expect(parse('\\delta_{n m}')).toEqual(['KroneckerDelta', 'n', 'm']);
+      expect(parse('\\delta_{1,2}')).toEqual(['KroneckerDelta', 1, 2]);
+      expect(parse('\\delta_{n+1}')).toEqual([
+        'KroneckerDelta',
+        ['Add', 'n', 1],
+      ]);
+      // The subscript of a symbol other than `\delta` is not split.
+      expect(parse('x_{n+1\\,m}')).toEqual([
+        'Subscript',
+        'x',
+        ['Add', 'n', ['InvisibleOperator', 1, 'm']],
+      ]);
+    }
+    expect(ce.parse('\\delta_{n+1\\,m}').json).toEqual([
+      'KroneckerDelta',
+      ['Add', 'n', 1],
+      'm',
+    ]);
+    // A new engine: a symbol of the shared engine can have the type boolean
+    // from a test above.
+    const engine = new ComputeEngine();
+    expect(engine.parse('\\delta_{x+1\\,x+1}').evaluate().json).toBe(1);
+    expect(engine.parse('\\delta_{x+1\\,x}').evaluate().json).toBe(0);
+  });
+
+  // A spacing command between two digits separates two indices. Elsewhere,
+  // `\,` between two digits is a digit group separator: `1\,000` is 1000.
+  // These were `KroneckerDelta(n + 12)`, `KroneckerDelta(1, 23)` and
+  // `KroneckerDelta(1.52)`.
+  it('should split the indices at a spacing command between two digits', () => {
+    for (const strict of [true, false]) {
+      const parse = (s: string) => ce.parse(s, { strict, form: 'raw' }).json;
+      expect(parse('\\delta_{n+1\\,2}')).toEqual([
+        'KroneckerDelta',
+        ['Add', 'n', 1],
+        2,
+      ]);
+      expect(parse('\\delta_{1,2\\,3}')).toEqual(['KroneckerDelta', 1, 2, 3]);
+      expect(parse('\\delta_{1.5\\,2}')).toEqual(['KroneckerDelta', 1.5, 2]);
+      expect(parse('\\delta_{1\\,2.5}')).toEqual(['KroneckerDelta', 1, 2.5]);
+      expect(parse('\\delta_{n+1 \\,2}')).toEqual([
+        'KroneckerDelta',
+        ['Add', 'n', 1],
+        2,
+      ]);
+      expect(parse('\\delta_{n+1\\quad 2}')).toEqual([
+        'KroneckerDelta',
+        ['Add', 'n', 1],
+        2,
+      ]);
+      // A spacing command before the decimal separator separates two
+      // indices too.
+      expect(parse('\\delta_{n+1\\,.5}')).toEqual([
+        'KroneckerDelta',
+        ['Add', 'n', 1],
+        0.5,
+      ]);
+      // A spacing command in a nested group is a digit group separator.
+      expect(parse('\\delta_{\\frac{1\\,000}{2}\\,3}')).toEqual([
+        'KroneckerDelta',
+        ['Divide', 1000, 2],
+        3,
+      ]);
+      // A `\delta` in a subscript of a `\delta` splits its own subscript.
+      expect(parse('\\delta_{\\delta_{n+1\\,2}\\,3}')).toEqual([
+        'KroneckerDelta',
+        ['KroneckerDelta', ['Add', 'n', 1], 2],
+        3,
+      ]);
+      // Outside the subscript of `\delta`, `\,` between two digits is
+      // still a digit group separator.
+      expect(parse('1\\,000')).toEqual(1000);
+      expect(parse('1\\,000\\,000')).toEqual(1000000);
+      expect(parse('1.234\\,5')).toEqual(1.2345);
+      expect(parse('x_{1\\,000}')).toEqual(['Subscript', 'x', 1000]);
+      expect(parse('\\delta_{n+1}+1\\,000')).toEqual([
+        'Add',
+        ['KroneckerDelta', ['Add', 'n', 1]],
+        1000,
+      ]);
+    }
+  });
+
+  // An index that is not a symbol is serialized with a comma between the
+  // indices, so the LaTeX reads back as the same indices.
+  it('should round trip indices that are expressions', () => {
+    const jsons: MathJsonExpression[] = [
+      ['KroneckerDelta', ['Add', 'n', 1], 'm'],
+      ['KroneckerDelta', ['Add', 'n', 1], ['Add', 'm', 2]],
+      ['KroneckerDelta', ['Subtract', 'n', 1], 'm'],
+    ];
+    for (const json of jsons) {
+      const expr = ce.box(json);
+      for (const strict of [true, false])
+        expect(ce.parse(expr.latex, { strict }).json).toEqual(expr.json);
+    }
+    const parsed = ce.parse('\\delta_{n+1\\,m}');
+    expect(parsed.latex).toBe('\\delta_{n+1, m}');
+    expect(ce.parse(parsed.latex).json).toEqual(parsed.json);
   });
 
   // All the indices of a group with separators are arguments. With three

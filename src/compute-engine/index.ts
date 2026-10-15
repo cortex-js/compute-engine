@@ -113,6 +113,7 @@ import {
 } from './map-auto-compile-stats.js';
 
 import { getStandardLibrary } from './library/library.js';
+import { pipeStageAsCall } from './library/core.js';
 
 import { DEFAULT_COST_FUNCTION } from './cost-function.js';
 
@@ -2947,6 +2948,14 @@ export class ComputeEngine implements IComputeEngine {
   /** @internal */
   _inScope<T>(scope: Scope | undefined, f: () => T): T {
     return inScopeImpl(this, scope, f);
+  }
+
+  /** See `IComputeEngine._pipeStageAsCall`. @internal */
+  _pipeStageAsCall(
+    topic: Expression,
+    stage: Expression
+  ): { call: Expression; topicAt?: number; written?: Expression } | undefined {
+    return pipeStageAsCall(this, topic, stage);
   }
 
   /** @internal Depth of the enclosing resolve-only regions. */

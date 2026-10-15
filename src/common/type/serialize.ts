@@ -232,17 +232,18 @@ export function typeToString(type: Type, precedence = 0): string {
           // A list with two dimensions is a matrix
           //
           const dims = type.dimensions;
+          // An open extent is stored as `-1` and is spelled `?`
+          // (`matrix<integer^(2x?)>`), which parses back to `-1`. The
+          // negative number does not parse.
+          const shape = dims.map((d) => (d < 0 ? '?' : String(d))).join('x');
           if (type.elements === 'number') {
             // If the elements are 'number', we can use a simplified syntax
             if (dims[0] < 0 && dims[1] < 0) result = 'matrix';
-            else result = `matrix<${dims[0]}x${dims[1]}>`;
+            else result = `matrix<${shape}>`;
           } else {
             if (dims[0] < 0 && dims[1] < 0)
               result = `matrix<${typeToString(type.elements)}>`;
-            else
-              result = `matrix<${typeToString(type.elements)}^(${dims[0]}x${
-                dims[1]
-              })>`;
+            else result = `matrix<${typeToString(type.elements)}^(${shape})>`;
           }
         }
       }
@@ -265,22 +266,14 @@ export function typeToString(type: Type, precedence = 0): string {
           const head = dims.length === 1 ? 'vector' : 'matrix';
           result = `${head}<${typeToString(type.elements)}>`;
         } else if (dims !== undefined && dims.some((d) => d < 0)) {
-          // A wildcard dimension (`-1`, the open-length sentinel `matrix`/
-          // `vector` parse to) has no literal spelling — `^(-1x-1)` neither
-          // parses back nor means a negative length (Tycho item 164 note).
-          // Express the open rank by NESTING instead: `list<list<T>>` parses
-          // back to the same `[-1, -1]` shape (`staticCollectionDims`), and a
-          // bounded dimension keeps its `^n`.
-          let nested = typeToString(type.elements);
-          for (let i = dims.length - 1; i >= 0; i--) {
-            const inner =
-              i === dims.length - 1
-                ? underLength(type.elements, nested)
-                : nested;
-            nested =
-              dims[i] < 0 ? `list<${nested}>` : `list<${inner}^${dims[i]}>`;
-          }
-          result = nested;
+          // An open extent (`-1`, the open-length sentinel) is spelled `?`:
+          // `list<T^(2x?x3)>` parses back to the same `[2, -1, 3]` shape.
+          // The negative number does not parse, and a nested spelling
+          // (`list<list<list<T^3>>^2>`) is weaker, because it allows rows of
+          // different lengths.
+          const shape = dims.map((d) => (d < 0 ? '?' : String(d))).join('x');
+          const elements = typeToString(type.elements);
+          result = `list<${underLength(type.elements, elements)}^(${shape})>`;
         } else {
           // Serialize generic list types
           const dimensions = dims

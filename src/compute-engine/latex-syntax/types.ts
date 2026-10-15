@@ -1306,6 +1306,22 @@ export interface Parser {
   includes space tokens, empty groups `{}`, and commands such as `\,` and `\!` */
   skipVisualSpace(): void;
 
+  /**
+   * @internal
+   * Token indices where the parser does not read past a spacing command
+   * (`\,`, `\quad`, `\hspace{…}`, …): `skipVisualSpace()` does not skip it
+   * (it still skips white space and `{}`), and the number parser does not
+   * read it as a digit group separator. `null` (the default) means that
+   * there is no such index.
+   *
+   * A parselet sets this while it reads a part of its input, and restores the
+   * previous value after. The subscript of `\delta` uses it: each spacing
+   * command at the top level of the subscript separates two indices, so
+   * `\delta_{n+1\,2}` has the indices `n + 1` and `2`, not `n + 12` (the
+   * default digit group separator is `\,`, as in `1\,000`).
+   */
+  _visualSpaceStops: ReadonlySet<number> | null;
+
   /** If the next token matches the target advance and return true. Otherwise
    * return false
    */

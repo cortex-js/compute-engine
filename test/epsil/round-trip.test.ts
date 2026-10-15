@@ -568,9 +568,9 @@ describe('EPSIL UNSPELLABLE PARAMETER PATTERN', () => {
 // A pair key is a label, not a reference, so the name resolution pass does
 // not rewrite it: the serializer must write a library name in key position
 // with its MathJSON spelling (`IsPrime -> Teal`, not `isPrime -> Teal`). And
-// `name -> value` as the only argument of a call is a rule argument, as it
-// is after a `,`: the serializer writes a rule argument that way. (GitHub
-// issue #435.)
+// `name -> value` right after the `(` of a call is a rule argument, as it
+// is after a `,`, whatever the number of arguments: the serializer writes a
+// rule argument that way. (GitHub issue #435.)
 //
 describe('EPSIL RULE ARGUMENTS AND PAIR KEYS', () => {
   const roundTrip = (
@@ -600,6 +600,29 @@ describe('EPSIL RULE ARGUMENTS AND PAIR KEYS', () => {
       'a rule as the second argument of a call',
       ['f', 'x', ['KeyValuePair', 'GridLines', ['List', 10, 10]]],
       'f(x, GridLines -> [10, 10])',
+    ],
+    [
+      'two rules as the arguments of a call',
+      ['f', ['KeyValuePair', 'GridLines', 1], ['KeyValuePair', 'Axes', 2]],
+      'f(GridLines -> 1, Axes -> 2)',
+    ],
+    [
+      'a rule as the first of several arguments of a call',
+      ['f', ['KeyValuePair', 'GridLines', 1], 'x'],
+      'f(GridLines -> 1, x)',
+    ],
+    [
+      'a rule as the first argument of a library call',
+      ['Max', ['KeyValuePair', 'GridLines', 1], 'x'],
+      'max(GridLines -> 1, x)',
+    ],
+    [
+      // The parser reads the rule as written even where the callee expects
+      // a function; the static checker reports that mistake, the parser
+      // does not rewrite it into a lambda.
+      'a rule at the function parameter of `map`',
+      ['Map', ['KeyValuePair', 'x', ['Power', 'x', 2]], ['List', 1, 2]],
+      'map(x -> x ^ 2, [1, 2])',
     ],
     [
       'a rule with a library-name key as the only argument of a call',

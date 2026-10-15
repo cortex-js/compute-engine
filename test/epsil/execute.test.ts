@@ -1107,6 +1107,117 @@ describe('EPSIL EXECUTE — pipe-stage sugar', () => {
 });
 
 /**
+ * Static errors inside a pipe stage. `Pipe` holds its stage unbound until it
+ * is evaluated, so the canonical form of `xs |> f(bad)` does not contain the
+ * errors of `f(bad)`. The static pass canonicalizes each held stage as the
+ * evaluation does (`pipeStageErrors` in `src/epsil/static-diagnostics.ts`),
+ * so a mistake in a stage is reported as the same mistake in the call
+ * `f(xs, bad)` is: same description, same code, and an anchor on the same
+ * written argument.
+ */
+describe('EPSIL EXECUTE — static errors inside a pipe stage', () => {
+  /** `[description, code, underlined text]` of each diagnostic. */
+  const report = (src: string): [string, string, string][] =>
+    run(src).diagnostics.map((d) => [
+      String(d.message[1]),
+      String(d.message[3]),
+      src.slice(d.range[0], d.range[1]),
+    ]);
+
+  test('an error inside a lambda argument of a stage', () => {
+    const piped = report('[1, 2, 3] |> map(x => x + "a")');
+    expect(piped).toEqual([
+      ['expected `number`, got `string` at `a`', 'incompatible-type', '"a"'],
+    ]);
+    expect(report('map(x => x + "a", [1, 2, 3])')).toEqual(piped);
+  });
+
+  test('an argument after the implicit piped value', () => {
+    // The piped value fills the first slot of `filter`, so the written
+    // argument is the second argument of the call; the anchor is still on
+    // the argument as written.
+    const piped = report('[1, 2, 3] |> filter("notafunction")');
+    expect(piped).toEqual([
+      [
+        'expected `function`, got `string` at `notafunction`',
+        'incompatible-type',
+        '"notafunction"',
+      ],
+    ]);
+    expect(report('filter([1, 2, 3], "notafunction")')).toEqual(piped);
+  });
+
+  test('a piped value that does not fit its slot', () => {
+    expect(report('True |> take(2)')).toEqual([
+      [
+        'expected `indexed_collection`, got `boolean` at `True`',
+        'incompatible-type',
+        'True',
+      ],
+    ]);
+  });
+
+  test('a stage of a chain, in a declaration, in a function body', () => {
+    const takeError = [
+      'expected `number`, got `string` at `a`',
+      'incompatible-type',
+      '"a"',
+    ];
+    expect(report('[1, 2] |> filter(x => x > 1) |> take("a")')).toEqual([
+      takeError,
+    ]);
+    expect(report('let y = [1, 2, 3] |> take("a")')).toEqual([takeError]);
+    expect(report('function f() { [1, 2, 3] |> take("a") }')).toEqual([
+      takeError,
+    ]);
+  });
+
+  test('a stage after a stage with an implicit argument', () => {
+    // `[1, 2] |> filter(x => x > 1)` is `filter([1, 2], x => x > 1)`, and the
+    // pipe has the type of that call, `list<integer>`. The next stage is
+    // then checked against that type. When the pipe was typed `unknown`, the
+    // wrong stage below was not reported, and it evaluated to an error value.
+    const src = '[1, 2] |> filter(x => x > 1) |> map("s")';
+    const piped = report(src);
+    expect(piped).toEqual([
+      [
+        'expected `function`, got `list<integer>` at `[1, 2] |> filter(Function(x > 1, x))`',
+        'incompatible-type',
+        src,
+      ],
+    ]);
+    // The direct call is the same error: the filtered list is in the
+    // callback slot of `map`. Its message reads `unknown` because `map`
+    // holds its operands, and reads the type of the filter call before it
+    // is canonicalized.
+    expect(
+      report('map(filter([1, 2], x => x > 1), "s")').map((d) => [
+        d[0].slice(0, 'expected `function`'.length),
+        d[1],
+      ])
+    ).toEqual([['expected `function`', 'incompatible-type']]);
+    // A correct chain reports nothing.
+    expect(report('[1, 2] |> filter(x => x > 1) |> map(x => x + 1)')).toEqual(
+      []
+    );
+    expect(
+      report('[1, 2, 3] |> map(x => x + 1) |> filter(x => x > 2)')
+    ).toEqual([]);
+  });
+
+  test('valid stages report nothing', () => {
+    expect(report('1..10 |> Take(3)')).toEqual([]);
+    expect(report('let f = x => x * 2\n[1,2,3] |> Map(f)')).toEqual([]);
+    expect(report('[1,2,3] |> Map(_^2, _)')).toEqual([]);
+    expect(report('1..oo |> Take(10) |> x => x^2 |> Sum')).toEqual([]);
+    // A name bound by the enclosing function is resolved in its scope.
+    expect(report('function f(k) { [1, 2, 3] |> map(x => x + k) }')).toEqual(
+      []
+    );
+  });
+});
+
+/**
  * Collection-literal spread (2026-08-14, rulings revised same day):
  * `[...xs, c]` splices into list literals, `{a, ...s}` into set literals,
  * and `{-> , ...d, "k" -> v}` merges dictionaries. Handled at

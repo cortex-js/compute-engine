@@ -1,4 +1,7 @@
 import { ComputeEngine } from '../../src/compute-engine';
+import { parseType } from '../../src/common/type/parse';
+import { typeToString } from '../../src/common/type/serialize';
+import { isSubtype } from '../../src/common/type/subtype';
 import { engine as ce } from '../utils';
 
 describe('NUMERIC TYPES', () => {
@@ -158,5 +161,39 @@ describe('BROADCASTABLE FUNCTIONS WITH UNION TYPES', () => {
     ce.assign('b', ['List', 4, 5, 6]);
     const expr = ce.expr(['Multiply', 'a', 'b']);
     expect(expr.evaluate().json).toEqual(['List', 4, 10, 18]);
+  });
+});
+
+// An open extent of a list type is stored as -1. It is printed as `?`, the
+// spelling the type parser reads back, and the printed type parses back to
+// the same type. Before, a mixed shape printed the -1 (`matrix<integer^(2x-1)>`,
+// which does not parse), and a shape of rank 3 or more printed a nested list
+// (`list<list<list<integer^3>>^2>`), a wider type that allows rows of
+// different lengths.
+describe('OPEN EXTENTS IN LIST TYPES', () => {
+  const spellings: [string, string][] = [
+    ['matrix<integer^(2x?)>', 'matrix<integer^(2x?)>'],
+    ['list<integer^(2x?)>', 'matrix<integer^(2x?)>'],
+    ['matrix<integer^(?x3)>', 'matrix<integer^(?x3)>'],
+    ['matrix<2x?>', 'matrix<2x?>'],
+    ['matrix<number^(?x2)>', 'matrix<?x2>'],
+    ['list<string^(2x?)>', 'list<string^(2x?)>'],
+    ['list<integer^(2x?x3)>', 'list<integer^(2x?x3)>'],
+    ['list<integer^(?x?x?)>', 'list<integer^(?x?x?)>'],
+  ];
+  test.each(spellings)('%s prints as %s and parses back', (input, printed) => {
+    const t = parseType(input);
+    expect(typeToString(t)).toBe(printed);
+    const back = parseType(printed);
+    expect(typeToString(back)).toBe(printed);
+    expect(isSubtype(t, back) && isSubtype(back, t)).toBe(true);
+  });
+
+  test('the type of a declared symbol prints the open extent as ?', () => {
+    const ce = new ComputeEngine();
+    ce.declare('h', 'matrix<integer^(2x?)>');
+    expect(ce.symbol('h').type.toString()).toBe('matrix<integer^(2x?)>');
+    ce.declare('k', 'list<integer^(2x?)>');
+    expect(ce.symbol('k').type.toString()).toBe('matrix<integer^(2x?)>');
   });
 });

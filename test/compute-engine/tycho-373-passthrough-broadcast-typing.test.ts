@@ -460,6 +460,132 @@ describe('Tycho 373 — a pass-through parameter under list broadcast', () => {
           'tuple<integer, integer>'
         );
       });
+
+      // A tuple with a component that can be neither a number nor open (a
+      // string, a boolean) is not a numeric tuple, whatever its open
+      // components hold. So the `any` typing above does not apply to it:
+      // the call keeps the signature result, as `f("s")` does.
+      // The body `-x` cannot consume such a tuple, so the value carries the
+      // `incompatible-type` error that `f("s")` carries, with the expected
+      // and the actual type. Before, `-x` stayed the inert `-("s", a)`.
+      test(`${route}: a tuple with a string or boolean component is an incompatible-type error`, () => {
+        const ce = engine(declared);
+        const scalar = ce.parse('f("s")');
+        expect(scalar.type.toString()).toBe('tuple<number, number>');
+        expect(scalar.evaluate().toString()).toBe(
+          '(Error(ErrorCode("incompatible-type", "number", "string"), "s"), "s")'
+        );
+        const expected =
+          '(Error(ErrorCode("incompatible-type", "number", "tuple<string, unknown>"), ("s", a)), ("s", a))';
+        const parsed = ce.parse('f(("s", a))');
+        expect(parsed.type.toString()).toBe('tuple<number, number>');
+        expect(parsed.evaluate().toString()).toBe(expected);
+        const built = ce.function('f', [
+          ce.function('Tuple', [ce.string('s'), ce.symbol('a')]),
+        ]);
+        expect(built.type.toString()).toBe('tuple<number, number>');
+        expect(built.evaluate().toString()).toBe(expected);
+        const boolean = ce.function('f', [
+          ce.function('Tuple', [ce.True, ce.number(1)]),
+        ]);
+        expect(boolean.evaluate().toString()).toBe(
+          '(Error(ErrorCode("incompatible-type", "number", "tuple<boolean, integer>"), ("True", 1)), ("True", 1))'
+        );
+        // A numeric tuple and a tuple of open components are not changed.
+        const open = ce.parse('f((a, a))');
+        expect(open.type.toString()).toBe('any');
+        expect(open.evaluate().toString()).toBe('((-a, -a), (a, a))');
+        const numeric = ce.parse('f((1, 2))');
+        expect(numeric.type.toString()).toBe('any');
+        expect(numeric.evaluate().toString()).toBe('((-1, -2), (1, 2))');
+      });
+
+      // An absent component (`Missing`, or `Undefined`, which a tuple
+      // literal also types `missing`) reads as `NaN` in the body's
+      // arithmetic, so the tuple is a numeric tuple, as it is for `Negate`
+      // and `Add`. The call is typed `any`, as for `f((1, 2))`. Before, it
+      // kept the signature result `tuple<number, number>`, which the pair of
+      // pairs it evaluates to does not fit.
+      test(`${route}: a tuple with an absent component is a numeric tuple`, () => {
+        const ce = engine(declared);
+        for (const absent of ['Missing', 'Undefined']) {
+          const call = ce.box(['f', ['Tuple', 1, absent]]);
+          expect(call.type.toString()).toBe('any');
+          expect(call.evaluate().toString()).toBe(
+            `((-1, NaN), (1, "${absent}"))`
+          );
+        }
+        const open = ce.box(['f', ['Tuple', 'a', 'Missing']]);
+        expect(open.type.toString()).toBe('any');
+        expect(open.evaluate().toString()).toBe('((-a, NaN), (a, "Missing"))');
+        // The descriptor route, with an absent component and with a
+        // component that may be absent.
+        for (const t of [
+          'tuple<integer, missing>',
+          'tuple<integer, integer | missing>',
+        ])
+          expect(
+            deriveApplicationType(ce as any, 'f', [
+              describeType(ce.type(t).type),
+            ])
+          ).toBe('any');
+        // A component that can be a string is not numeric, absent or not.
+        expect(
+          deriveApplicationType(ce as any, 'f', [
+            describeType(ce.type('tuple<integer, string | missing>').type),
+          ])
+        ).not.toBe('any');
+      });
+
+      // An argument that may be absent as a whole: a tuple whose every
+      // coordinate is absent evaluates to `Missing`, so the literal
+      // `(Missing, Missing)` is typed `missing | tuple<missing, missing>`.
+      // The `missing` arm alone gives `tuple<number, missing>`, as
+      // `f(Missing)` does, and the tuple arm gives `any`, as `f((1, 2))`
+      // does. The call is the union of the two, `any`. Before, the
+      // argument was typed `missing | tuple` (no components), and the call
+      // kept the signature result `tuple<number, number>`, which the value
+      // `(NaN, Missing)` does not fit.
+      test(`${route}: a tuple whose every coordinate is absent is typed any`, () => {
+        const ce = engine(declared);
+        const whole = ce.box(['f', 'Missing']);
+        expect(whole.type.toString()).toBe('tuple<number, missing>');
+        expect(whole.evaluate().toString()).toBe('(NaN, "Missing")');
+        for (const call of [
+          ce.box(['f', ['Tuple', 'Missing', 'Missing']]),
+          ce.box(['f', ['Tuple', 'Undefined', 'Missing']]),
+          ce.parse('f((\\operatorname{Missing}, \\operatorname{Missing}))'),
+        ]) {
+          expect(call.op1.type.toString()).toMatch(
+            /^missing \| tuple<(missing|unknown), missing>$/
+          );
+          expect(call.type.toString()).toBe('any');
+          expect(call.evaluate().toString()).toBe('(NaN, "Missing")');
+        }
+        // An index read that may be out of range is the same union with
+        // number components: the tuple arm gives a pair of pairs.
+        ce.declare('L', 'list<tuple<integer, integer>>');
+        ce.assign('L', ce.box(['List', ['Tuple', 1, 2], ['Tuple', 3, 4]]));
+        ce.declare('j', 'integer');
+        expect(ce.box(['At', 'L', 'j']).type.toString()).toBe(
+          'missing | tuple<integer, integer>'
+        );
+        expect(ce.box(['f', ['At', 'L', 'j']]).type.toString()).toBe('any');
+        // The descriptor route reads the same unions.
+        for (const t of [
+          'missing | tuple<missing, missing>',
+          'missing | tuple<integer, integer>',
+        ])
+          expect(
+            deriveApplicationType(ce as any, 'f', [
+              describeType(ce.type(t).type),
+            ])
+          ).toBe('any');
+        // An argument that is only absent is not a tuple.
+        expect(
+          deriveApplicationType(ce as any, 'f', [describeType('missing')])
+        ).not.toBe('any');
+      });
     }
 
     test('a tuple at a parameter the body never reads keeps the signature result', () => {

@@ -96,6 +96,55 @@
 
 ### Issues Resolved
 
+- **An integer power of a symbol that later holds a square matrix is the
+  matrix power.** With `const e = ce.parse('B^2')` and then
+  `ce.assign('B', [[1, 2], [3, 4]])`, `e.evaluate()` gave `[[1, 4], [9, 16]]`,
+  each entry squared, while `B^2` parsed after the assignment gives the
+  matrix power `[[7, 10], [15, 22]]`: the first was a scalar `Power` that the
+  evaluation broadcast over the entries. The `Power` evaluation now reads an
+  integer exponent over a value that is a square matrix of numbers as
+  `MatrixPower`, so both give `[[7, 10], [15, 22]]`; the same holds for
+  `B^0` (the identity), negative exponents, `(B + B)^2`, the structural form
+  `ce.function('Power', [B, 2], { form: 'structural' })`, `.N()` and
+  `evaluateAsync()`, and the pipe shorthand `[[1,2],[3,4]] |> \_^2`. A
+  non-integer exponent, a vector, a ragged list, a non-square matrix and a
+  list with non-numeric entries keep the element-wise result. Also,
+  `MatrixPower(m, -2).N()` returned exact rationals (`[[11/2, …]]`) while
+  `MatrixPower(m, -1).N()` returned floats; the negative-exponent branch now
+  honors the numeric request. `B^{-1}` built before the assignment is still
+  the element-wise reciprocal, because it canonicalizes to `Divide(1, B)`
+  (see `ROADMAP.md`).
+
+- **A type with an open extent prints as it is written.** `ce.declare('h',
+  'matrix<integer^(2x?)>')` and then `ce.symbol('h').type.toString()` gave
+  `matrix<integer^(2x-1)>`, the internal value of an open extent, and a list
+  type with mixed open extents (`list<integer^(2x?x3)>`) printed as the nested
+  spelling `list<list<list<integer^3>>^2>`, a strictly wider type that does
+  not parse back to the same type. Both now print the `?` spelling, which
+  parses back to the same type.
+
+- **Epsil reports a static error inside a pipe stage.** `[1, 2, 3] |> map(x
+  => x + "a")`, `[1, 2, 3] |> filter("notafunction")` and `True |> take(2)`
+  had no static diagnostic; the program evaluated to a value full of errors.
+  `Pipe` is a lazy operator that holds its stage unbound until it is
+  evaluated, so the canonical tree had no `Error` node to report. The static
+  check now builds the stage call the way evaluation does (the piped value in
+  its slot), without evaluating it, and reports the same description, code
+  and underlined argument as the unpiped call; a stage in a chain, in a
+  `let` or in a function body is covered. Also, the `mapsto-arrow-expected`
+  report for `map(x -> "a" + 1, xs)` hid the unrelated `"a" + 1` error; it
+  now hides only the errors that the wrong arrow itself causes. A pipe into
+  a stage with one signature now has the type of the completed call:
+  `[1, 2] |> filter(x => x > 1)` was typed `unknown` and is now
+  `list<integer>`, like `filter([1, 2], x => x > 1)`, so a later stage that
+  is wrong because of the piped value (`… |> map("s")`) gets its static
+  diagnostic; the `Pipe` type handler places the piped value with the same
+  rule as evaluation, from types alone. A pipe into an operator with several
+  signatures and no type handler (`[1, 2, 3] |> take(2)`) is still `unknown`.
+  The site of a static type error is always the offending value: `take(5, 2)`
+  said "got `5` for argument 5", because an integer site was read as an
+  argument position; it now says "got `5` at `5`".
+
 - **A function that hands a tuple built from its own parameter to a scalar
   parameter has the result type `any`.** With `f(x) := (-x, x)` and
   `g(a) := f((a, a))`, `g(1)` evaluates to `((-1, -1), (1, 1))` but was typed
@@ -110,7 +159,21 @@
   call is inside another function's body; both now answer `any`. If the
   function never reads the parameter that gets the tuple, its result type is
   kept. A list argument (`f([a, a])`, which maps) and a parameter declared as
-  a tuple keep their types.
+  a tuple keep their types. A tuple with a component that is neither numeric
+  nor open, handed to a scalar parameter, is an `incompatible-type` error
+  like a string argument is: `f(("s", a))` was the inert `(-("s", a), ("s",
+  a))` typed `tuple<number, number>`; it now evaluates to the error that
+  names the expected type `number` and the actual type
+  `tuple<string, unknown>`, on the parse route and the `ce.function` route.
+  A component that may be absent counts as numeric: `f((1, Missing))` was
+  typed `tuple<number, number>` while its value is `((-1, NaN), (1, Missing))`;
+  it is now typed `any` like the other numeric tuples. A tuple whose every
+  coordinate is absent was typed `missing | tuple`, with no component types
+  (the `Tuple` type handler answered `missing`, which was widened to the
+  declared result); it is now `missing | tuple<missing, missing>`, and
+  `f((Missing, Missing))` and `f(L[k])` over a list of points are typed `any`
+  (the `missing` arm alone would give `tuple<number, missing>`, the tuple arm
+  `any`). `f(Missing)` keeps `tuple<number, missing>`.
 
 - **An Epsil rule round-trips through `serializeEpsil` → `parseEpsil` →
   `resolveLibraryNames` when its key is a library name or when it is the
@@ -122,10 +185,15 @@
   `["f", ["KeyValuePair", "GridLines", ["List", 10, 10]]]` serialized as
   `f(GridLines -> [10, 10])`, and the parser read that sole argument as the
   wrong-arrow spelling of the lambda `GridLines => [10, 10]`. Now a bare
-  `name -> value` that is the only argument of a call is a rule, as it already
-  was after a comma (`f(x, GridLines -> [10, 10])`). The first of several
-  arguments still keeps the wrong-arrow diagnostic and its fixit:
-  `map(x -> x^2, xs)` is recovered as `map(x => x^2, xs)`. (#435)
+  `name -> value` call argument is a rule in every position, as it already
+  was after a comma (`f(x, GridLines -> [10, 10])`), so
+  `f(GridLines -> 1, Axes -> 2)` round-trips too. The parser no longer turns
+  the first of several arguments into a lambda. The typo keeps its help: when
+  a rule with a bare-symbol key is passed at a parameter typed `function`
+  (`map(x -> x^2, xs)`), the static checker reports `mapsto-arrow-expected`
+  on the arrow, with the message `"->" builds a key-value pair, but argument
+  1 of "map" must be a function; to write a function, use the mapsto arrow
+  "=>"` and a fixit that replaces `->` by `=>`. (#435)
 
 - **The `promoted` field of a JavaScript compile result describes only the
   code that is emitted.** Before, under the default `auto` mode,
@@ -195,6 +263,15 @@
   `ce.declare('f', {...})`, and a name marked only with
   `{ signature, inferredSignature: true }` can still be declared again. To
   change an existing definition, use `ce.declare(name, patch, { extend: true })`.
+  A program that declares a signature and then defines the function
+  (`let f: (integer, any*) -> integer` followed by
+  `f(a, ...rest) = a + Length(rest)`, the prescribed form for a recursive
+  definition with declared parameter types) still works in a `Block`: the
+  `Block` canonicalizes every statement before it evaluates any, so the
+  definition installs its clause before the declaration runs; the declaration
+  now replaces a clause that was installed ahead of it, and the definition
+  then checks the clause against the declared signature. A declaration that
+  comes after a definition that has run is still refused.
 
 - **A power of a square matrix keeps the shape and the element type of the
   matrix.** With `m` declared `matrix<integer^(2x2)>`, `m^2` (which
@@ -207,7 +284,14 @@
   `expected-square-matrix` error, keeps `matrix`. The type that a type handler
   gets for `Power` through `context.derive` now makes the same rewrite to
   `MatrixPower` that canonicalization makes for an integer literal exponent, so
-  both routes give the same type for a matrix base.
+  both routes give the same type for a matrix base. `Inverse` is typed the
+  same way as `MatrixPower` with the exponent `-1`: `Inverse([[1, 2], [3,
+  4]])` was typed `matrix<integer^(2x2)>` while its value `[[-2, 1], [3/2,
+  -1/2]]` has rational entries, and a non-square `Inverse` was typed with the
+  shape of its operand while its value is the `expected-square-matrix` error.
+  They are now `matrix<rational^(2x2)>` and `matrix`, so `m^-1` and `m^-2`
+  agree. The signature of `Inverse` is `(matrix) -> matrix` (it was the
+  generic `(T) -> T where T: matrix`, which echoed the integer entries).
 
 - **The exact numeric lane gives `n/0` the value `±∞` and keeps the sign of
   an infinity in its products.** Internally, `5.div(0)` and the rational
@@ -236,7 +320,19 @@
   not parse back to the same expression. Each index is now an argument, so
   `\delta_{1,1,1}` evaluates to `1`. The parser skips spacing with the same
   helper as the number parser, and removes spacing items from the indices of
-  a braced group.
+  a braced group. When an index is an expression, a spacing command at the
+  top level of the subscript separates two indices: `\delta_{n+1\,m}` was
+  `KroneckerDelta(n + m)` (the thin space made `1\,m` the product `1·m`); it
+  is now `KroneckerDelta(n + 1, m)`, and `\delta_{i\,j\,k}` is
+  `KroneckerDelta(i, j, k)`. This treats the subscript of `\delta`
+  differently from every other subscript (`x_{n+1\,m}` is still a product),
+  because a thin space between the indices of a delta is the usual notation
+  and a product inside an index is rare. A digit group on each side of the
+  spacing command is its own index: `\delta_{n+1\,2}` is
+  `KroneckerDelta(n + 1, 2)`, not `n + 12`, although `\,` is the default
+  digit-group separator and `1\,000` is still `1000` elsewhere. Spacing next to a comma, inside a
+  group, a fraction or parentheses, and the plain-space spellings `\ ` and
+  `~` (which the tokenizer reads as an ordinary space) do not split.
 
 - **A user-function call whose argument may be absent is typed from the
   function body.** With `L` declared `list<tuple<number, number, number>>`,

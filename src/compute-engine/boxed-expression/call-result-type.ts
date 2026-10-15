@@ -349,10 +349,10 @@ export function callResultType(
       const absentOperand = operands.some((_, i) => absentAt(i));
       // A tuple whose every coordinate is absent evaluates to `Missing`
       // (the `Tuple` evaluate handler, `library/collections.ts`). Its type
-      // handler says so too, but the application boundary widens an absent
-      // answer to `missing | tuple` (`withCodomainForAbsentAnswer`), which
-      // would absorb the present arm's `tuple<number, …>` in the join; the
-      // exact `missing` is read here.
+      // handler answers `missing | tuple<missing, …>`, because the
+      // unevaluated literal is still a tuple, and that tuple arm would
+      // absorb the present arm's `tuple<number, …>` in the join. In the
+      // body, the tuple is evaluated, so the exact `missing` is read here.
       if (
         absentOperand &&
         expr.operator === 'Tuple' &&

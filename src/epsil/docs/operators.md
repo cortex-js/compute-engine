@@ -401,11 +401,15 @@ expression is still parsed as the function it meant.
 A `->` whose left side is shaped like a parameter list — `(x, y) -> x + y`,
 `(n: integer) -> n^2`, `f = x -> x + 1` — is diagnosed as a wrong-arrow typo
 (with a fixit) and recovered as the intended function: `->` builds a
-`key -> value` pair, and none of those shapes is a valid key. A bare name
-right after the `(` of a call is also recovered as a function when other
-arguments follow (`map(x -> x^2, xs)`), but when it is the only argument it
-is the key of a rule argument: `f(GridLines -> [10, 10])` passes a
-`KeyValuePair`, as `f(x, GridLines -> [10, 10])` does.
+`key -> value` pair, and none of those shapes is a valid key.
+
+A bare name before `->` in a call argument is the key of a rule argument, in
+every argument position: `f(GridLines -> 1, Axes -> 2)` passes two
+`KeyValuePair` arguments, as `f(x, GridLines -> 1)` does. When the parameter
+at that position expects a function, the rule is reported as the same
+wrong-arrow typo, with a fixit to `=>`: `map(x -> x^2, xs)` passes a
+key-value pair where `map` expects a function. That call is not recovered as
+`map(x => x^2, xs)`; apply the fixit.
 
 ## Ranges: `..` {#ranges}
 

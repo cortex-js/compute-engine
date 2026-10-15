@@ -474,20 +474,59 @@ function pipeStageWithImplicitTopic(
     def !== undefined && 'operator' in def ? def.operator : undefined;
   const arms = signatureArms(opDef?.signature.type);
   if (arms === undefined) return undefined;
-  const n = rhs.nops;
+  if (!implicitTopicArityFits(arms, rhs.nops)) return undefined;
+  const at = implicitTopicSlot(
+    arms,
+    topic.type,
+    rhs.ops.map((op) => op.type)
+  );
+
+  const args = [...rhs.ops];
+  args.splice(at, 0, ce.symbol('_', { canonical: false }));
+  return ce._fn(name, args, { canonical: false });
+}
+
+/**
+ * Whether a stage call with `n` written arguments gets the piped value as
+ * an implicit argument: the call is incomplete under every signature arm of
+ * its operator, and one more argument fits some arm. See
+ * `pipeStageWithImplicitTopic`.
+ */
+function implicitTopicArityFits(
+  arms: NonNullable<ReturnType<typeof signatureArms>>,
+  n: number
+): boolean {
   const minArity = (a: (typeof arms)[number]): number =>
     (a.args?.length ?? 0) +
     (a.variadicArg !== undefined ? (a.variadicMin ?? 0) : 0);
   // Complete under some arm: the written call already means something.
-  if (arms.some((a) => n >= minArity(a))) return undefined;
-  const fits = arms.some((a) => {
+  if (arms.some((a) => n >= minArity(a))) return false;
+  return arms.some((a) => {
     const req = a.args?.length ?? 0;
     const max =
       a.variadicArg !== undefined ? Infinity : req + (a.optArgs?.length ?? 0);
     return n + 1 <= max;
   });
-  if (!fits) return undefined;
+}
 
+/**
+ * The 0-based slot that the piped value takes in a stage call that gets it
+ * as an implicit argument (`implicitTopicArityFits`). See
+ * `pipeStageWithImplicitTopic` for the placement rule.
+ *
+ * `arms` are the signature arms of the stage's operator, `topicType` is the
+ * type of the piped value, and `argTypes` are the types of the arguments
+ * written in the stage, in order. The function reads types only, so the
+ * evaluate handler of `Pipe` (with expressions in hand) and its type
+ * handler (with operand descriptors only) place the piped value in the same
+ * slot.
+ */
+function implicitTopicSlot(
+  arms: NonNullable<ReturnType<typeof signatureArms>>,
+  topicType: BoxedType,
+  argTypes: ReadonlyArray<BoxedType>
+): number {
+  const n = argTypes.length;
   // Placement: first slot (across the arms, in order) whose declared
   // parameter type the topic provably satisfies, bounded by the written
   // argument count (the topic can at most be appended). The declared type is
@@ -518,8 +557,8 @@ function pipeStageWithImplicitTopic(
       for (const v of vars) bindings[v] = 'any';
       p = substituteTypeVariables(p, bindings);
     }
-    if (couldBeCallbackAt(topic.type.type, p)) return true;
-    return topic.type.matches(p);
+    if (couldBeCallbackAt(topicType.type, p)) return true;
+    return topicType.matches(p);
   };
   // …AND whose written arguments still fit the slots they are displaced
   // into. Without the second half, `xs |> Fold(f, 10)` put the list at slot 1
@@ -528,8 +567,8 @@ function pipeStageWithImplicitTopic(
   // where everything fits. A written argument whose type cannot be read yet
   // (a held, unbound operand reads `unknown`) is taken to fit — the question
   // is placement, not validation, which the canonical call performs after.
-  const argAccepts = (arg: Expression, param: Type): boolean => {
-    if (arg.type.isUnknown) return true;
+  const argAccepts = (arg: BoxedType, param: Type): boolean => {
+    if (arg.isUnknown) return true;
     let p = param;
     const vars = freeTypeVariables(p);
     if (vars.size > 0) {
@@ -538,8 +577,8 @@ function pipeStageWithImplicitTopic(
       p = substituteTypeVariables(p, bindings);
     }
     // Compatibility placement at an arrow slot — see `couldBeCallbackAt`.
-    if (couldBeCallbackAt(arg.type.type, p)) return true;
-    return arg.type.matches(p);
+    if (couldBeCallbackAt(arg.type, p)) return true;
+    return arg.matches(p);
   };
   //
   // Among the slots that fit, the LAST one wins — the one that displaces the
@@ -562,7 +601,7 @@ function pipeStageWithImplicitTopic(
       // The written arguments before `i` stay put; those from `i` on shift
       // one slot right (a variadic tail absorbs any overflow).
       const last = params.length - 1;
-      const displacedFit = rhs.ops.every((arg, k) => {
+      const displacedFit = argTypes.every((arg, k) => {
         const slot = k < i ? k : k + 1;
         const param =
           slot <= last
@@ -577,10 +616,53 @@ function pipeStageWithImplicitTopic(
       break placement;
     }
   }
+  return at;
+}
 
-  const args = [...rhs.ops];
-  args.splice(at, 0, ce.symbol('_', { canonical: false }));
-  return ce._fn(name, args, { canonical: false });
+/**
+ * The canonical form of a held pipe stage, for a static check that must see
+ * the errors inside the stage. `Pipe` holds its stage unbound, so the
+ * canonical form of `xs |> Filter("a")` has no error in it: the stage is
+ * canonicalized only when the pipe is evaluated. This function does the same
+ * canonicalization as the `Pipe` evaluate handler, and evaluates nothing:
+ *
+ * - A stage that gets the piped value as an implicit argument
+ *   (`pipeStageWithImplicitTopic`) becomes the call with `topic` in the slot
+ *   that the evaluate handler selects, so `xs |> Filter("a")` is checked as
+ *   `Filter(xs, "a")`. `topicAt` is the 0-based position of `topic` in the
+ *   operands of that call BEFORE canonicalization, and `written` is that
+ *   call before canonicalization. Canonicalization can change the operator
+ *   and the order of the operands (`Fold(f, 0, xs)` becomes
+ *   `Reduce(xs, f, 0)`), so `topicAt` and the positions of the other
+ *   operands are positions in `written`, not in `call`.
+ * - Any other stage is canonicalized alone, with its placeholders bound in a
+ *   fresh scope (`canonicalWithFreshPlaceholders`), as the evaluate handler
+ *   binds them. There is no `topicAt`.
+ *
+ * `topic` is the canonical piped value. Returns `undefined` when the stage is
+ * already canonical: the canonical handler of `Pipe` canonicalizes a
+ * function-literal stage itself, so its errors are already in the tree.
+ */
+export function pipeStageAsCall(
+  ce: ComputeEngine,
+  topic: Expression,
+  stage: Expression
+): { call: Expression; topicAt?: number; written?: Expression } | undefined {
+  if (stage.isCanonical) return undefined;
+  const implicit = pipeStageWithImplicitTopic(ce, stage, topic);
+  if (isFunction(implicit)) {
+    // The stage has no placeholder of its own (a condition of the implicit
+    // argument), so the `_` that `pipeStageWithImplicitTopic` inserted is the
+    // only placeholder operand of the call.
+    const ops = [...implicit.ops];
+    const topicAt = ops.findIndex((op) => isSymbol(op, '_'));
+    if (topicAt >= 0) {
+      ops[topicAt] = topic;
+      const call = ce._fn(implicit.operator, ops, { canonical: false });
+      return { call: call.canonical, topicAt, written: call };
+    }
+  }
+  return { call: canonicalWithFreshPlaceholders(stage) };
 }
 
 /**
@@ -1089,6 +1171,49 @@ function pipeImplicitMapType(
     functionResult(stage.type) ??
     'unknown';
   return pipeMapResultType(topicType, cell);
+}
+
+/**
+ * The static type of a `Pipe` whose stage is a call that gets the piped
+ * value as an implicit argument (`pipeStageWithImplicitTopic`): `xs |>
+ * Filter(p)` is `Filter(xs, p)`, so its type is the type of that call.
+ * Returns `undefined` for any other stage.
+ *
+ * The call is typed the way the evaluate handler builds it. The stage must
+ * be an application with no placeholder of its own (a stage with `_` is
+ * typed by `pipeShorthandApplicationType`), on an operator with a known
+ * signature, and the written call must be incomplete. The piped value takes
+ * the slot that `implicitTopicSlot` selects, from the same types, and
+ * `context.derive` types the completed call. This canonicalizes and
+ * evaluates nothing. Without this, `[1, 2] |> Filter(x ↦ x > 1)` typed
+ * `unknown`, and a later stage of a chain had no type to check the piped
+ * value against.
+ */
+function pipeImplicitTopicCallType(
+  context: TypeHandlerContext,
+  topic: OperandDescriptor | undefined,
+  stage: OperandDescriptor
+): Type | undefined {
+  if (topic === undefined) return undefined;
+  const st = stage.structureOf?.();
+  if (st?.kind !== 'application' || st.head === 'Function') return undefined;
+  const placeholders = new Set<string>();
+  collectPlaceholderNames(st, placeholders);
+  if (placeholders.size > 0) return undefined;
+  const arms = signatureArms(
+    context.engine.lookupDefinition(st.head)?.operator?.signature.type
+  );
+  if (arms === undefined) return undefined;
+  if (!implicitTopicArityFits(arms, st.children.length)) return undefined;
+  const topicType = heldOperandType(context, topic);
+  const at = implicitTopicSlot(
+    arms,
+    context.engine.type(topicType),
+    st.children.map((c) => context.engine.type(c.type))
+  );
+  const operands = [...st.children];
+  operands.splice(at, 0, describeType(topicType));
+  return context.derive(st.head, operands);
 }
 
 /**
@@ -2657,6 +2782,58 @@ function withStatementRoute<T>(
   } finally {
     ce._epsilDeclarationRoute = onStatementRoute;
   }
+}
+
+/**
+ * Binding records that hold a clause which the `DefineFunction` canonical
+ * handler installed AHEAD of its statement: the definition statement was
+ * canonicalized, but it has not been evaluated yet.
+ *
+ * A `Block` canonicalizes all of its statements before it evaluates the first
+ * one, and the canonical handler of `DefineFunction` installs its clause at
+ * that time, so that the calls in later statements are checked against the
+ * real signature. In the form that declares a signature and then defines the
+ * function (`let f: (integer) -> integer` followed by `f(n) = …`, the form
+ * that a recursive definition with typed parameters must use), the `Declare`
+ * statement therefore evaluates over a binding that already holds the
+ * definition of the NEXT statement. That definition was installed without the
+ * declaration, because the declaration had not run.
+ *
+ * The `Declare` statement may replace such a binding: the definition
+ * statement runs after it, and installs its clause again, this time under the
+ * declared signature, which it then checks the clause against. A binding whose
+ * definition statement has evaluated is not in this set, so a declaration
+ * that follows a definition (`f(n) = …` then `let f: …`) is still refused.
+ *
+ * Weakly keyed on the binding record, which an install mutates in place.
+ */
+const CLAUSE_INSTALLED_AHEAD = new WeakSet<object>();
+
+/**
+ * Add `record` to `CLAUSE_INSTALLED_AHEAD` (`ahead` true) or remove it from
+ * the set (`ahead` false), and journal the change for the active checkpoint
+ * window.
+ *
+ * The marker decides whether a `Declare` statement drops the binding, so a
+ * restore must put it back as it was when the checkpoint was taken. If not, a
+ * clause canonicalized after the checkpoint marks a function that was
+ * defined before it: the restore gives the record its earlier definition back
+ * but keeps the marker, and a later declaration then discards that restored
+ * definition.
+ */
+function setClauseInstalledAhead(
+  ce: ComputeEngine,
+  record: object,
+  ahead: boolean
+): void {
+  const was = CLAUSE_INSTALLED_AHEAD.has(record);
+  if (was === ahead) return;
+  ce._checkpointWindow?.record(record, 'clause-installed-ahead', () => {
+    if (was) CLAUSE_INSTALLED_AHEAD.add(record);
+    else CLAUSE_INSTALLED_AHEAD.delete(record);
+  });
+  if (ahead) CLAUSE_INSTALLED_AHEAD.add(record);
+  else CLAUSE_INSTALLED_AHEAD.delete(record);
 }
 
 /**
@@ -4685,12 +4862,15 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       examples: ['Pipe([3, 1, 2], Sort)', '16 |> Sqrt'],
       // `Pipe(x, f)` is `f(x)`, so its type is `f`'s result type — EXCEPT when
       // the stage implicitly maps (`pipeImplicitMapType`), where the pipe is a
-      // collection of that result rather than the result itself.
+      // collection of that result rather than the result itself, and when the
+      // stage is a call that gets the piped value as an implicit argument
+      // (`pipeImplicitTopicCallType`), where the pipe is that completed call.
       type: ([x, f], context) =>
         BoxedType.forResult(
           f
             ? (pipeImplicitMapType(context, x, f) ??
                 pipeShorthandApplicationType(context, x, f) ??
+                pipeImplicitTopicCallType(context, x, f) ??
                 functionResult(f.type) ??
                 'unknown')
             : undefined,
@@ -5180,6 +5360,12 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
                     attributes
                   )
                 );
+                // The statement has not run yet: a `Declare` statement that
+                // runs before it may replace this binding
+                // (`CLAUSE_INSTALLED_AHEAD`).
+                const installed = ce.lookupDefinition(symbolName);
+                if (installed !== undefined)
+                  setClauseInstalledAhead(ce, installed, true);
               } catch (e) {
                 // A malformed or conflicting clause is diagnosed on the
                 // evaluate route, which runs the same installation and turns
@@ -5242,6 +5428,11 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
               attributes
             )
           );
+          // The definition has now run, so a later `Declare` statement must
+          // not replace it (`CLAUSE_INSTALLED_AHEAD`).
+          const installed = ce.lookupDefinition(name);
+          if (installed !== undefined)
+            setClauseInstalledAhead(ce, installed, false);
         } catch (e) {
           if (e instanceof RedefinitionError)
             return ce._fn('Error', [ce.string(e.code), ce.string(e.message)]);
@@ -6245,6 +6436,27 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             // Checkpoint journal (funnel 4): the statement-redeclare path
             // drops the previous statement-scoped binding by direct map
             // surgery.
+            journalCheckpointMapEntry(
+              ce,
+              currentScope.bindings,
+              symbolName,
+              symbolName,
+              'declare'
+            );
+            currentScope.bindings.delete(symbolName);
+            existing = undefined;
+          } else if (
+            existing &&
+            isOperatorDef(existing) &&
+            CLAUSE_INSTALLED_AHEAD.has(existing)
+          ) {
+            // The binding holds the clause of a later `DefineFunction`
+            // statement of this scope, installed when that statement was
+            // canonicalized, before this declaration ran. That statement
+            // installs its clause again when it runs, under the signature this
+            // declaration gives, so drop the binding and declare the name
+            // fresh. `ce.declare()` alone refuses to replace an operator that
+            // holds a definition (`isReplaceableOperatorShell()`).
             journalCheckpointMapEntry(
               ce,
               currentScope.bindings,

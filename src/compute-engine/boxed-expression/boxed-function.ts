@@ -46,6 +46,8 @@ import {
 import {
   deriveApplicationType,
   installBroadcastLiftHooks,
+  isNumericTupleArgumentType,
+  isNumericTupleType,
   mayBeNumericTupleType,
   parameterReachesBody,
   typeHandlerContext,
@@ -194,6 +196,7 @@ import {
   widenWithNan,
   signatureSlotType,
   signatureArms,
+  staticCollectionDims,
 } from '../../common/type/utils.js';
 import { NumericValue } from '../numeric-value/types.js';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
@@ -5043,6 +5046,12 @@ export class BoxedFunction
         const bops = evaluateBroadcastLiftsOnce(this._ops!, options);
         const liftError = this._liftedOperandError(bops);
         if (liftError !== undefined) return liftError;
+        // An integer power of a square matrix is the matrix power, not the
+        // element-wise power. See `squareMatrixPower()`.
+        if (this.operator === 'Power' && this._isBoundToLibraryDefinition()) {
+          const matrixPower = squareMatrixPower(this.engine, bops, options);
+          if (matrixPower !== undefined) return matrixPower.evaluate(options);
+        }
         const mismatch = broadcastLengthMismatch(this.engine, bops);
         if (mismatch) return mismatch;
         // A lift can be a set only when it is evaluated: `At([Set(1, 2), 3],
@@ -5653,6 +5662,13 @@ export class BoxedFunction
         if (mismatch) return mismatch;
       }
       if (postEvalBroadcast && !unresolvedTailOperand) {
+        // An operand that only became a square matrix at evaluation
+        // (`Power(Add(B, B), 2)`) takes the matrix power, as in step 2. See
+        // `squareMatrixPower()`.
+        if (this.operator === 'Power' && this._isBoundToLibraryDefinition()) {
+          const matrixPower = squareMatrixPower(this.engine, tail, options);
+          if (matrixPower !== undefined) return matrixPower.evaluate(options);
+        }
         // Hybrid laziness: past the eager threshold — and for a materialized
         // infinite (`Cycle`) or uncountable-finite (`Filter`) source, gated by
         // `isKnownFinitenessBroadcast` so a not-yet-resolved operand held raw by
@@ -6164,6 +6180,12 @@ export class BoxedFunction
         const bops = await evaluateBroadcastLiftsOnceAsync(this._ops!, options);
         const liftError = this._liftedOperandError(bops);
         if (liftError !== undefined) return liftError;
+        // The matrix power of a square matrix (mirrors the sync path).
+        if (this.operator === 'Power' && this._isBoundToLibraryDefinition()) {
+          const matrixPower = squareMatrixPower(this.engine, bops, options);
+          if (matrixPower !== undefined)
+            return matrixPower.evaluateAsync(options);
+        }
         const mismatch = broadcastLengthMismatch(this.engine, bops);
         if (mismatch) return mismatch;
         // A lift can be a set only when it is evaluated (mirrors the sync
@@ -6701,6 +6723,12 @@ export class BoxedFunction
         if (mismatch) return mismatch;
       }
       if (postEvalBroadcast && !unresolvedTailOperand) {
+        // The matrix power of a square matrix (mirrors the sync step 4b).
+        if (this.operator === 'Power' && this._isBoundToLibraryDefinition()) {
+          const matrixPower = squareMatrixPower(this.engine, tail, options);
+          if (matrixPower !== undefined)
+            return matrixPower.evaluateAsync(options);
+        }
         // Hybrid laziness: past the eager threshold — and always for an
         // unknown/infinite-length source — return the lazy `Map` form over the
         // already-evaluated `tail` (mirrors the sync path).
@@ -7643,6 +7671,96 @@ function withBroadcastThrowContext(
 }
 
 /**
+ * The matrix power for `Power(base, exponent)` when the base is a square
+ * matrix value and the exponent is an integer, as an unevaluated
+ * `MatrixPower` call. `undefined` when the element-wise broadcast of
+ * `Power` must apply.
+ *
+ * Canonicalization writes `A^n` as `MatrixPower(A, n)` when the type of `A`
+ * is a matrix and `n` is an integer (`canonicalPower()` in
+ * `arithmetic-power.ts`). A `Power` that is built before its base has a
+ * value cannot get that rewrite: `B^2`, parsed when `B` has no value, stays
+ * a scalar `Power`. When `B` then holds a matrix, the broadcast maps the
+ * scalar power over the entries and gives the element-wise square. The
+ * broadcast calls this function first, so that `B^2` gives the same matrix
+ * power as `B^2` parsed after the assignment.
+ *
+ * The result is a matrix power only when all of these conditions are true:
+ * - the exponent is a number literal that is an integer (`0` gives the
+ *   identity matrix, a negative integer gives a power of the inverse),
+ * - the base value is a nested list of rank 2, with as many rows as
+ *   columns,
+ * - every entry of the base is a number (the base value has a `matrix`
+ *   type).
+ * A non-integer exponent, a matrix that is not square, a vector, a ragged
+ * list and a list with entries that are not numbers keep the element-wise
+ * broadcast.
+ *
+ * `ops` are the operands of the `Power` as the broadcast sees them. A base
+ * that is a symbol is read through its value. A base that is a function
+ * expression other than a `List` is evaluated only when its type is a
+ * matrix. The broadcast after the evaluation of the operands calls this
+ * function with operands that are already evaluated.
+ */
+function squareMatrixPower(
+  ce: ComputeEngine,
+  ops: ReadonlyArray<Expression>,
+  options: Partial<EvaluateOptions> | undefined
+): Expression | undefined {
+  if (ops.length !== 2) return undefined;
+  const [base, exponent] = ops;
+  // This function decides on values: the exponent is already evaluated, and
+  // only a number literal can make a matrix power here.
+  if (!isNumber(exponent) || exponent.isInteger !== true) return undefined;
+  const isMatrixValue = (x: Expression): boolean =>
+    x.type.type !== 'never' && x.type.matches('matrix');
+  const readValue =
+    isSymbol(base) ||
+    (isFunction(base) && base.operator !== 'List' && isMatrixValue(base));
+  const value = readValue ? base.evaluate(operandOptions(options)) : base;
+  if (!isFunction(value, 'List')) return undefined;
+  // The type of a `List` value has both extents, so the result is `true` or
+  // `false` here, never `undefined`.
+  if (isSquareMatrixPower(value.type, exponent) !== true) return undefined;
+  return ce.function('MatrixPower', [value, exponent]);
+}
+
+/**
+ * Whether `Power(base, exponent)` is the matrix power `MatrixPower(base,
+ * exponent)` or the element-wise power, decided from the type of the base
+ * and from the exponent. The evaluation of a `Power` (`squareMatrixPower()`)
+ * and the compilation of a `Power` (`compileExpr()` in
+ * `compilation/base-compiler.ts`) both use this function, so that compiled
+ * code computes the same power as `evaluate()`.
+ *
+ * - `true`: a matrix power. The base type is a matrix (its entries are
+ *   numbers) of rank 2 with two known extents that are equal, and the
+ *   exponent is an integer: an integer number literal, or an expression
+ *   whose type is an integer.
+ * - `false`: an element-wise power. The base type is not a matrix (a vector,
+ *   a ragged list, a list of entries that are not numbers, a scalar, or the
+ *   empty type `never`), or it is a matrix with two known extents that are
+ *   not equal, or the exponent is a number literal that is not an integer.
+ * - `undefined`: the type does not tell. The base type is a matrix with an
+ *   extent that is not known, or the exponent is not a literal and its type
+ *   is not an integer. Only the value at run time can decide.
+ */
+export function isSquareMatrixPower(
+  baseType: BoxedType,
+  exponent: Expression
+): boolean | undefined {
+  if (baseType.type === 'never' || !baseType.matches('matrix')) return false;
+  const dims = staticCollectionDims(baseType.type);
+  if (dims === null || dims.length !== 2) return undefined;
+  const [rows, columns] = dims;
+  if (rows >= 0 && columns >= 0 && rows !== columns) return false;
+  if (isNumber(exponent)) {
+    if (exponent.isInteger !== true) return false;
+  } else if (!isSubtype(exponent.type.type, 'integer')) return undefined;
+  return rows >= 0 && columns >= 0 ? true : undefined;
+}
+
+/**
  * Evaluate the operands that are LIFTED into every cell, once.
  *
  * RULING (user-ratified 2026-07-24): broadcast operands are evaluated ONCE and
@@ -8198,8 +8316,45 @@ function isLambdaBroadcastParticipant(x: Expression): boolean {
   );
 }
 
-/** Return the type of the value of the expression, without actually
- * evaluating it */
+/**
+ * The type of a call of a function literal with an argument that may be
+ * absent as a whole and is otherwise a numeric tuple, at a scalar or open
+ * parameter (`isNumericTupleArgumentType`): `missing | tuple<integer,
+ * integer>` (an index read `L[k]` that can be out of range), or `missing |
+ * tuple<missing, missing>` (the literal `(Missing, Missing)`, which
+ * evaluates to `Missing`). Each arm of the argument types the call on its
+ * own. With `f := x ↦ (-x, x)`, the `missing` arm gives `tuple<number,
+ * missing>`, as `f(Missing)` is `(NaN, Missing)`, and the tuple arm gives
+ * `any`, as `f((1, 2))` does (`lambdaBroadcastType`). The union of the two
+ * is `any`.
+ *
+ * The caller asks only after the derivation from the body
+ * (`callResultType`) declined: that derivation types each arm from the
+ * body, and gives a precise answer for a body that passes the argument
+ * through (`p ↦ p` over `L[k]` is `missing | tuple<number, number,
+ * number>`). The conditions are those of the numeric-tuple rule of
+ * `lambdaBroadcastType`: the parameter reaches the body, and the result was
+ * inferred or is a number type. The descriptor route applies the same rule
+ * in the same order (`deriveApplicationType`).
+ */
+function wholeAbsentTupleArgumentType(
+  ops: ReadonlyArray<Expression>,
+  perElementResult: Type,
+  inferredResult: boolean,
+  literal: Expression | undefined
+): Type | undefined {
+  if (
+    (inferredResult || isSubtype(perElementResult, 'number')) &&
+    ops.some(
+      (x, i) =>
+        isNumericTupleArgumentType(x.type.type) &&
+        parameterReachesBody(literal, i)
+    )
+  )
+    return 'any';
+  return undefined;
+}
+
 /**
  * Application-site broadcast typing for a USER FUNCTION LITERAL — a lambda
  * (`ce.assign('g', x ↦ …)`), whether it resolves through an operator
@@ -8253,11 +8408,18 @@ function lambdaBroadcastType(
   // same way, because it is a numeric tuple when the component holds a
   // number (`mayBeNumericTupleType`). A tuple bound to a parameter that the
   // body of `literal` never reads does not change the value, and the
-  // signature result stands (`parameterReachesBody`).
+  // signature result stands (`parameterReachesBody`). A tuple with an absent
+  // component (`(1, Missing)`) is a numeric tuple too, as it is for the
+  // arithmetic handlers (`isNumericTupleType`). An argument that may be
+  // absent as a whole (`missing | tuple<integer, integer>`) is not read
+  // here: the derivation from the body (`callResultType`) types it first,
+  // and `wholeAbsentTupleArgumentType` applies this rule only when that
+  // derivation declines.
   if (
     ops.some(
       (x, i) =>
-        (isNumericTuple(x) || mayBeNumericTupleType(x.type.type)) &&
+        (isNumericTupleType(x.type.type) ||
+          mayBeNumericTupleType(x.type.type)) &&
         parameterReachesBody(literal, i)
     ) &&
     (inferredResult || isSubtype(perElementResult, 'number'))
@@ -9097,6 +9259,22 @@ function type(expr: BoxedFunction): Type | BoxedType {
       );
       if (inferred !== undefined) return maybeAbsorb(inferred);
     }
+    // An argument that may be absent as a whole and is otherwise a numeric
+    // tuple, at a scalar parameter of a function literal: `any`, when the
+    // derivation from the body declined (`wholeAbsentTupleArgumentType`).
+    if (
+      def instanceof _BoxedOperatorDefinition &&
+      def._isLambda &&
+      (paramsAreScalar(def) || declaredSlots)
+    ) {
+      const whole = wholeAbsentTupleArgumentType(
+        expr.ops,
+        sigResult,
+        def.inferredSignature,
+        lambdaLiteralOf(def)
+      );
+      if (whole !== undefined) return applyContractB(whole);
+    }
     return maybeAbsorb(sigResult);
   }
 
@@ -9231,7 +9409,20 @@ function type(expr: BoxedFunction): Type | BoxedType {
         expr.ops.map((x) => describeOperand(x)),
         sigResult,
         (h, a) => deriveApplicationType(expr.engine, h, a)
-      ) ?? sigResult
+      ) ??
+      // As on the operator-definition route: an argument that may be absent
+      // as a whole and is otherwise a numeric tuple
+      // (`wholeAbsentTupleArgumentType`).
+      (threadable
+        ? wholeAbsentTupleArgumentType(
+            expr.ops,
+            sigResult,
+            expr.valueDefinition.inferredType ||
+              isWildcardFunctionType(declaredType),
+            heldValue
+          )
+        : undefined) ??
+      sigResult
     );
   }
 
