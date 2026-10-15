@@ -96,6 +96,16 @@
 
 ### Issues Resolved
 
+- **`N(Argument(z), p)` of a complex value carries `p` digits.** The angle is
+  the bignum `atan2(im, re)` that `Arctan2` computes, where it was the double
+  `atan2` of the parts. `N(Argument(e + iπ), 25)` was
+  `0.8575117863558462702910252` and is `0.8575117863558462650068678` (true
+  `0.857511786355846265006867751`, wrong before from the 17th digit);
+  `N(Argument(2 + iπ), 25)` was `1.003884821853887179762058` and is
+  `1.003884821853887214148424`. `Arg` is the same operator. Exact operands and
+  `∞·i` evaluate as before, and the compiled JavaScript lane stays in doubles
+  (#439, contributed by [enumeratio](https://github.com/enumeratio))
+
 - **A function that hands a tuple built from its own parameter to a scalar
   parameter has the result type `any`.** With `f(x) := (-x, x)` and
   `g(a) := f((a, a))`, `g(1)` evaluates to `((-1, -1), (1, 1))` but was typed
