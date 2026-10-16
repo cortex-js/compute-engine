@@ -58,6 +58,7 @@ import {
   isNearRoundingJumpValue,
 } from '../boxed-expression/numerics.js';
 import { addOrder } from '../boxed-expression/order.js';
+import { withErrorFrames } from '../boxed-expression/error-value.js';
 import { reduceModulo } from '../boxed-expression/modular-arithmetic.js';
 import {
   hasInfiniteComponent,
@@ -78,7 +79,7 @@ import {
   floatIfFloatOperand,
   hasFloatOperand,
 } from '../boxed-expression/float-result.js';
-import { flatten } from '../boxed-expression/flatten.js';
+import { flatten, flattenSequence } from '../boxed-expression/flatten.js';
 import { numericCanonicalHandler } from '../boxed-expression/canonical-numeric.js';
 import { recordNumericCanonicalDefinitions } from '../boxed-expression/numeric-canonical-registry.js';
 import { rangeCount } from '../numerics/range-count.js';
@@ -501,6 +502,43 @@ References:
 - APS Physical Review Style and Notation Guide  https://cdn.journals.aps.org/files/styleguide-pr.pdf p21
 - AIP style guide:  http://web.mit.edu/me-ugoffice/communication/aip_style_4thed.pdf p23 (page 26 of the pdf)
 */
+
+/**
+ * The error for a surplus operand of `Numerator`, `Denominator` or
+ * `NumeratorDenominator`, or `undefined` for a call with one operand.
+ *
+ * The three operators take one operand. Their `canonical` handlers build the
+ * call with `engine._fn`, which does no arity check, and keep every operand
+ * on purpose: a user definition that extends one of them with options reads
+ * the extra operands in its own handler (issue #442). The built-in `evaluate`
+ * handler reads the first operand only, so it refuses the call the way a
+ * declared one-parameter function refuses a second argument: the
+ * `unexpected-argument` error names the first surplus operand and carries the
+ * frame of the operator at that operand's 1-based position.
+ */
+function surplusOperandError(
+  ce: ComputeEngine,
+  operator: string,
+  ops: ReadonlyArray<Expression>
+): Expression | undefined {
+  if (ops.length <= 1) return undefined;
+  return withErrorFrames(ce.error('unexpected-argument', ops[1].toString()), [
+    { operator, index: 2 },
+  ]);
+}
+
+/**
+ * The operands of a `Numerator`, `Denominator` or `NumeratorDenominator`
+ * call as the handlers read them: a `Sequence` operand is spliced and a
+ * `Nothing` operand is dropped, as the generic canonical form does for every
+ * operator, so that `Numerator(a/b, Sequence())` is the one-operand call
+ * `Numerator(a/b)` and takes the quotient shortcut.
+ */
+function accessorOperands(
+  ops: ReadonlyArray<Expression>
+): ReadonlyArray<Expression> {
+  return flattenSequence(ops).filter((op) => !isSymbol(op, 'Nothing'));
+}
 
 /** Computes the Sign of a number */
 function numberSgn(x: number | undefined): Sign | undefined {
@@ -10191,6 +10229,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       description: 'Numerator of an expression',
       complexity: 1200,
       broadcastable: true,
+      // A call with a surplus operand is refused whole by `evaluate`
+      // (`surplusOperandError`), never fanned over a surplus list.
+      broadcastExemptions: ['surplus-operands'],
 
       lazy: true,
       // A STRUCTURAL accessor, not a numeric function: it reads the
@@ -10211,9 +10252,18 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // **IMPORTANT**: We want Numerator to work on non-canonical
         // expressions, so that you can determine if a user input is
         // reducible, for example.
+        // Every shortcut below applies to a ONE-operand call only. A call with
+        // more operands keeps them all: a user extension of this operator can
+        // read them as options, and the shortcut must not drop them (issue
+        // #442). The built-in `evaluate` handler reads the first operand
+        // only and refuses a call with more (`surplusOperandError`). The
+        // same rule holds for `Denominator` and `NumeratorDenominator`
+        // below.
+        ops = accessorOperands(ops);
         if (ops.length === 0) return engine.Nothing;
         const op = ops[0];
         if (
+          ops.length === 1 &&
           (op.operator === 'Rational' || op.operator === 'Divide') &&
           isFunction(op)
         )
@@ -10224,6 +10274,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       evaluate: (ops, { engine, numericApproximation }) => {
         const ce = engine;
         if (ops.length === 0) return ce.Nothing;
+        const surplus = surplusOperandError(ce, 'Numerator', ops);
+        if (surplus !== undefined) return surplus;
         const op = ops[0];
         if (
           (op.operator === 'Rational' || op.operator === 'Divide') &&
@@ -10246,6 +10298,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       description: 'Denominator of an expression',
       complexity: 1200,
       broadcastable: true,
+      // A call with a surplus operand is refused whole by `evaluate`
+      // (`surplusOperandError`), never fanned over a surplus list.
+      broadcastExemptions: ['surplus-operands'],
 
       lazy: true,
       // A structural accessor over the whole of `number`, `NaN` handled —
@@ -10257,14 +10312,16 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // **IMPORTANT**: We want Denominator to work on non-canonical
         // expressions, so that you can determine if a user input is
         // reductible, for example.
+        ops = accessorOperands(ops);
         if (ops.length === 0) return engine.Nothing;
         const op = ops[0];
         if (
+          ops.length === 1 &&
           (op.operator === 'Rational' || op.operator === 'Divide') &&
           isFunction(op)
         )
           return op.op2;
-        const num = asRational(op);
+        const num = ops.length === 1 ? asRational(op) : undefined;
         if (num !== undefined) return engine.number(num[1]);
         return engine._fn('Denominator', canonical(engine, ops));
       },
@@ -10272,6 +10329,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       evaluate: (ops, { engine, numericApproximation }) => {
         const ce = engine;
         if (ops.length === 0) return ce.Nothing;
+        const surplus = surplusOperandError(ce, 'Denominator', ops);
+        if (surplus !== undefined) return surplus;
         const op = ops[0];
         if (
           (op.operator === 'Rational' || op.operator === 'Divide') &&
@@ -10290,6 +10349,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       description: 'Sequence of Numerator and Denominator of an expression',
       complexity: 1200,
       broadcastable: true,
+      // A call with a surplus operand is refused whole by `evaluate`
+      // (`surplusOperandError`), never fanned over a surplus list.
+      broadcastExemptions: ['surplus-operands'],
 
       lazy: true,
       // A structural accessor over the whole of `number`, `NaN` handled —
@@ -10301,9 +10363,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // **IMPORTANT**: We want NumeratorDenominator to work on non-canonical
         // expressions, so that you can determine if a user input is
         // reductible, for example.
+        ops = accessorOperands(ops);
         if (ops.length === 0) return engine.Nothing;
         const op = ops[0];
         if (
+          ops.length === 1 &&
           (op.operator === 'Rational' || op.operator === 'Divide') &&
           isFunction(op)
         )
@@ -10312,7 +10376,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // above): a rational LITERAL folds here, a symbol holding one does
         // not — its pair is read by `evaluate`, so the canonical form does
         // not depend on the symbol's current assignment.
-        const num = asRational(op);
+        const num = ops.length === 1 ? asRational(op) : undefined;
         if (num !== undefined)
           return engine.tuple(engine.number(num[0]), engine.number(num[1]));
         return engine._fn('NumeratorDenominator', canonical(engine, ops));
@@ -10321,6 +10385,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       evaluate: (ops, { engine, numericApproximation }) => {
         const ce = engine;
         if (ops.length === 0) return ce.Nothing;
+        const surplus = surplusOperandError(ce, 'NumeratorDenominator', ops);
+        if (surplus !== undefined) return surplus;
         const op = ops[0];
         if (
           (op.operator === 'Rational' || op.operator === 'Divide') &&

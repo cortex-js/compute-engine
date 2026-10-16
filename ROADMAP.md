@@ -5498,13 +5498,13 @@ dischargeable) quantifies exactly what it would buy. Let demand justify it.
 
 The TS 7 side-by-side install landed 2026-07-08 (`@typescript/native` drives the
 build/typecheck; the module name `typescript` is aliased to the TS 6 API because
-TS 7.0 ships no programmatic API and ts-jest/typedoc/ typescript-eslint/madge
-all require one; bare `npx tsc` is ambiguous — use the explicit native-binary
+TS 7.0 ships no programmatic API and ts-jest/typedoc/madge all require one
+(typescript-eslint left the list when Oxlint replaced ESLint, 2026-10-16); bare `npx tsc` is ambiguous — use the explicit native-binary
 path). The nodenext `.js`-specifier codemod landed the same day; **new-file
 convention: relative imports in `src/` use `.js` specifiers.**
 
 **Remaining:** drop the TS 6 compat alias once TS 7.1 ships its (new, different)
-programmatic API **and** ts-jest/typedoc/typescript-eslint/madge support it.
+programmatic API **and** ts-jest/typedoc/madge support it.
 Until then the side-by-side install is the intended end state, not a hack.
 **Effort:** small once the ecosystem is ready.
 

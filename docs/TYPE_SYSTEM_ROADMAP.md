@@ -1144,11 +1144,13 @@ The generic broadcast machinery in `boxed-expression/boxed-function.ts`
 carried seven hardcoded operator-name tests — the same disease as the
 closure-assumption narrowing (§9.2 item 6), one level up. All seven are
 now inverted into a declared definition flag,
-`broadcastExemptions: ReadonlyArray<BroadcastExemption>`, with six
+`broadcastExemptions: ReadonlyArray<BroadcastExemption>`, with seven
 labels (`tensors`, `tuples`, `collection-result`, `evaluated-operands`,
-`whole-collection-compare`, `single-collection-join`), declared on
-`Add`, `Multiply`, `Negate`, `Subtract`, `Divide`, `Equal`, `NotEqual`,
-and `String`. The engine keeps only the shape tests
+`whole-collection-compare`, `single-collection-join`,
+`surplus-operands`), declared on `Add`, `Multiply`, `Negate`,
+`Subtract`, `Divide`, `Equal`, `NotEqual`, `String`, and the
+`Numerator` family (`surplus-operands`: a call with more operands than
+the signature admits is refused whole, never broadcast). The engine keeps only the shape tests
 (`skipBroadcastForVectorOps` and the `type()` wrapper); the
 per-operator facts live in the definitions. The two ~110-line duplicate
 lambda broadcast-typing routes in `type()` were also merged into one

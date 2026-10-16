@@ -2134,7 +2134,8 @@ export type BroadcastExemption =
   | 'collection-result'
   | 'evaluated-operands'
   | 'whole-collection-compare'
-  | 'single-collection-join';
+  | 'single-collection-join'
+  | 'surplus-operands';
 
 /**
  * An operator definition can have some flags to indicate specific
@@ -2208,6 +2209,15 @@ export type OperatorDefinitionFlags = {
    *   collection-vs-scalar case broadcasts element-wise.
    * - `'single-collection-join'`: a lone collection operand is consumed
    *   whole by the `evaluate` handler (e.g. joined), never mapped over.
+   * - `'surplus-operands'`: a call that holds more operands than the
+   *   signature admits (a `canonical` handler that builds the call with
+   *   `_fn` keeps every operand, for a user definition that reads the
+   *   extra ones as options) is handed WHOLE to the `evaluate` handler,
+   *   which refuses it with one `unexpected-argument` error; the generic
+   *   broadcast never fans such a call over a surplus collection operand
+   *   (`Denominator(5, [])` is the error, not `[]`). Not for an operator
+   *   that is n-ary at run time beyond its declared signature, such as a
+   *   chained `Equal`, which must keep broadcasting.
    *
    * **Default**: `[]` — the generic broadcast machinery applies uniformly
    * whenever `broadcastable` is `true`.

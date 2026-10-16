@@ -140,6 +140,7 @@ import { isTransitivelyPure } from './transitive-purity.js';
 import { realExponentValue } from './imaginary-part.js';
 import { scopeForRebuild } from './binding-sites.js';
 import {
+  arityBounds,
   armHasValueParam,
   instantiateArms,
   type OverloadResolution,
@@ -498,6 +499,40 @@ function numericStoreType(store: readonly number[]): Type {
     elements: widenElementTypes(numericStoreTiers(store)),
     dimensions: [store.length],
   });
+}
+
+/**
+ * True when `def` opts in with the `'surplus-operands'` broadcast exemption
+ * and `ops` holds more operands than its signature admits: a surplus past a
+ * fixed arity.
+ *
+ * Validation marks such an operand an `unexpected-argument` error when the
+ * call is boxed, so a VALID call reaches the broadcast arms with a surplus
+ * only when the operator's own `canonical` handler built it with `_fn`,
+ * which does no arity check: the `Numerator` family keeps every operand for
+ * a user definition that reads the extra ones as options (issue #442). The
+ * operator broadcast must not fan such a call over a surplus collection
+ * operand, cell by cell: the handler refuses the whole call with one error,
+ * as the declared arity does for every other operator, and a surplus list is
+ * not a source of cells (`Denominator(5, [])` is an error, not `[]`).
+ *
+ * The rule is opt-in because some operators are n-ary at run time beyond
+ * their declared signature: a chained `Equal(L, 3, 3)` is declared
+ * `(any, any)`, and its handler re-enters the broadcast for an operand that
+ * became a collection at evaluation (`broadcastComparison`), so a blanket
+ * rule would loop there.
+ */
+function hasSurplusOperands(
+  def: {
+    readonly signature: { readonly type: Type };
+    readonly broadcastExemptions: ReadonlyArray<string>;
+  },
+  ops: ReadonlyArray<Expression>
+): boolean {
+  if (!def.broadcastExemptions.includes('surplus-operands')) return false;
+  const sig = def.signature.type;
+  if (typeof sig === 'string' || sig.kind !== 'signature') return false;
+  return ops.length > arityBounds(sig).max;
 }
 
 export class BoxedFunction
@@ -5202,6 +5237,9 @@ export class BoxedFunction
         // the literal's own parameters.
         !isUserFunctionDef(def) &&
         !hasRawOperand &&
+        // A call with an operand past the declared arity is refused whole
+        // by its handler, never fanned over a surplus collection operand.
+        !hasSurplusOperands(def, this.ops!) &&
         this.ops!.some((x) => isFiniteBroadcastParticipant(x)) &&
         // A set has no positions, so it cannot supply cells. At a number
         // parameter the operator is not broadcast, and the handler gets the
@@ -5887,6 +5925,10 @@ export class BoxedFunction
           // evaluation; this generic post-evaluation arm must not re-map them.
           (def.broadcastable &&
             !def.broadcastExemptions.includes('evaluated-operands') &&
+            // A call with an operand past the declared arity is refused
+            // whole by its handler, never fanned over a surplus collection
+            // operand (`hasSurplusOperands`, as in step 2).
+            !hasSurplusOperands(def, tail) &&
             // A set has no positions, so it cannot supply cells. At a number
             // parameter the operator is not broadcast, and the handler gets
             // the whole set. At another parameter the set is used whole in
@@ -6409,6 +6451,8 @@ export class BoxedFunction
         // multi-clause definition) takes its own step-2b arm.
         !isUserFunctionDef(def) &&
         !hasRawOperand &&
+        // A surplus operand keeps the call whole (mirrors the sync path).
+        !hasSurplusOperands(def, this.ops!) &&
         this.ops!.some((x) => isFiniteBroadcastParticipant(x)) &&
         // A set has no positions (mirrors the sync path).
         unindexedOperandBroadcast(def, this.ops!) !== 'veto' &&
@@ -7013,6 +7057,8 @@ export class BoxedFunction
           // the operator's own evaluate handler owns this case.
           (def.broadcastable &&
             !def.broadcastExemptions.includes('evaluated-operands') &&
+            // A surplus operand keeps the call whole (mirrors the sync path).
+            !hasSurplusOperands(def, tail) &&
             // A set has no positions (mirrors the sync path).
             unindexedOperandBroadcast(def, tail) !== 'veto')) &&
         isSyncApplicable &&

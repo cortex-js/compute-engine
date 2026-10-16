@@ -243,6 +243,7 @@ type OperatorDefinitionFlags = {
     | 'evaluated-operands'
     | 'whole-collection-compare'
     | 'single-collection-join'
+    | 'surplus-operands'
   >;
   /** Whether a conditional value (`When`, `Which`) in an operand moves out
    * of the application: `true` for every position, or the 0-based

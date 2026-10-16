@@ -1,3 +1,78 @@
+## [Unreleased]
+
+### New Features
+
+- **`ce.undeclare(name)` removes the binding of a name from the current scope**
+  (Tycho ledger row 378). The binding goes whatever it holds: a value, a
+  function given with `ce.assign()` or `ce.declare()`, or a function defined by
+  one or more clauses. A host could not do this for a function defined by two or
+  more clauses: `ce.forget("f")` removes assumptions only,
+  `ce.declare("f", "function")` throws because `f` is already declared in the
+  scope, and `ce.declare(…, { extend: true })` refuses a function defined by
+  clauses.
+
+  ```ts
+  ce.undeclare('f');
+  ce.parse('f(2)').evaluate(); // f(2), where it was 1
+  ```
+
+  After the call, a declaration of the name in an enclosing scope applies again
+  (that scope is not changed), and a later `ce.declare()`, `ce.assign()`,
+  `f(x) := …` or `DefineFunction` of the name is a new declaration. An
+  expression boxed before the call does not use the removed binding either: a
+  call `f(2)` evaluates to `f(2)`, and to the value of the new definition after
+  `f` is defined again. The method also takes a list of names. It throws for a
+  name that is not declared in the current scope, a name defined by a library
+  (`Sin`, or a name of `ce.loadLibrary()`), and the variable of an operator such
+  as `Sum` while it is evaluated; when one name of a list is refused, nothing is
+  removed. Assumptions about the name stay until `ce.forget()`. A checkpoint
+  restore puts the binding back.
+
+### Behavior Changes
+
+- **`Numerator`, `Denominator` and `NumeratorDenominator` keep extra operands
+  when they canonicalize**
+  ([#442](https://github.com/cortex-js/compute-engine/issues/442), contributed
+  by [enumeratio](https://github.com/enumeratio)). The quotient shortcut took
+  the part of a first operand that is a `Divide` or `Rational` and dropped the
+  rest of the call, so `Numerator(a/b, x)` canonicalized to `a` before a handler
+  that takes options could see `x`. The rational-literal shortcut of
+  `Denominator` and `NumeratorDenominator` did the same: `Denominator(5, x)`
+  canonicalized to `1`. Every shortcut now applies to a one-operand call only;
+  `Numerator(a/b)` is still `a` and `Denominator(5)` is still `1`. The
+  extra operands are for a user definition that replaces the `evaluate`
+  handler. The built-in handler reads the first operand only, and it now
+  refuses a call with more: `Numerator(c, x)` and `Numerator(a/b, x)`
+  evaluate to the `unexpected-argument` error that names `x`, with the
+  `ErrorTrace` frame `(Numerator, 2)`, where `Numerator(c, x)` evaluated to
+  `c` before and `Numerator(a/b, x)` canonicalized to `a`. The refusal is
+  one error for the whole call, before any broadcast: `Denominator(5, [])`
+  is the error, not `[]`, and `Numerator([1/2, 3/4], x)` is the error, not
+  a list of two errors (the new `'surplus-operands'` broadcast exemption,
+  which the three definitions set). An empty `Sequence` or a `Nothing`
+  operand does not count:
+  `Numerator(a/b, Sequence())` is still `a`.
+
+- **A `Fold` whose step wraps the accumulator in a lazy view no longer doubles
+  its cost at each step** (issue #444). The accumulator of a `Fold`, a `Reduce`
+  and a `Scan` is a value between two steps: a step result that is a finite
+  lazy view (`Join(acc, Map(k ↦ … acc …, 1..3))`, `Take(acc, k)`) is listed
+  into the literal of its kind, a `List`, a `Set` or a `Dictionary`, with the
+  rules of the list literal with a spread: within the collection size cap, a
+  view over an infinite source kept, an impure view listed only when a
+  callback-free bound on its size fits. A `Range` or `Linspace` result is kept
+  as the compact range. Before, each step substituted the value of the
+  accumulator into the new row, so the accumulator held a copy of every
+  earlier accumulator, and the fold took twice as long for each added step
+  (0.3 s at 8 steps, 5 s at 12). Visible change: such a fold answers the listed
+  value — `Fold((a, k) ↦ Take(a, k), 1..10, [3, 2])` is `[1, 2]` where it was
+  `Take(Take(1..10, 3), 2)` — and the callbacks of the row run at the step
+  rather than at the first read. A `Join`, `ListJoin` or `Append` now has a
+  callback-free bound on its size (the sum of the bounds of its operands, a
+  tuple operand counting one), so an impure join inside a list literal,
+  `[Join(xs, Map(u ↦ Random(), 1..2))]`, is listed into the literal when that
+  bound fits the cap, where it stayed a live view.
+
 ## 0.154.0 _2026-10-15_
 
 ### Behavior Changes
