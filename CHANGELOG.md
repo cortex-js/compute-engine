@@ -73,6 +73,35 @@
   `[Join(xs, Map(u ↦ Random(), 1..2))]`, is listed into the literal when that
   bound fits the cap, where it stayed a live view.
 
+### Issues Resolved
+
+- **`Gamma(s, x)` is accurate for a non-integer `s < −1` and `x < 1`.** The
+  Legendre continued fraction does not converge there and the error grew as `x`
+  shrank: `Gamma(-1.5, 0.001)` was `21020.691761…` (correct: `21020.937167…`, a
+  relative error of 1.2e-5), `Gamma(-1.5, 1e-6)` was `666636761.42` (correct:
+  `666664669.03`, 4.2e-5) and `Gamma(-3.5, 0.001)` was off by 2.0e-10. The
+  kernel now starts from `Γ(s+n, x)` with `−1 < s+n < 0` and applies
+  `Γ(a−1, x) = (Γ(a, x) − x^{a−1}e^{−x})/(a−1)` (DLMF 8.8.2) `n` times; within
+  0.05 of a pole of `Γ(s+n)` it defers to the complex kernel. The relative error
+  against mpmath is below 3e-15 for `s` in {−0.5, −1.5, −2.5, −3.5} and `x` from
+  1e-6 to 1, and below 5e-14 for `s = −(k+f)`, `k` ≤ 12, 0.001 ≤ `f` ≤ 0.999,
+  1e-10 ≤ `x` < 1. The compiled JavaScript lane dropped the second operand:
+  `Gamma(x, y)` compiled to `Γ(x)`, so `Gamma(-1.5, 0.001)` ran as `2.3633`. It
+  now calls the upper incomplete gamma, with the complex kernel for a complex
+  operand, and the interval target declines the two-operand form
+  (#446, contributed by [enumeratio](https://github.com/enumeratio))
+
+- **`Sqrt(-13)/3` is `(√13/3)i`, not `NaN`.** A negative integer radical was
+  sent to the float lane, which took `Math.sqrt(−13)`: `Sqrt(-13)/3`,
+  `Sqrt(-2)/3`, `Sqrt(-13)/2`, `Sqrt(-13)/3.0` and `Sqrt(-13)·(1/3)` (under
+  `evaluate()`) were `NaN`, and so was `Arcosh(Sqrt(-13)/3)`. An exact value with
+  a negative radical `−c` is now the pure-imaginary `√c·i`, in the one place that
+  builds exact values, so canonicalization, `evaluate()` and `.N()` agree:
+  `Sqrt(-13)/3` is `(√13/3)i ≈ 1.2018504251546631i` and `Arcosh(Sqrt(-13)/3)` is
+  `1.0171572086841316 + 1.5707963267948966i`. `Sqrt(-13)/Sqrt(-3)` was
+  `−√39/3` and is `√39/3`
+  (#446, contributed by [enumeratio](https://github.com/enumeratio))
+
 ## 0.154.0 _2026-10-15_
 
 ### Behavior Changes

@@ -2729,7 +2729,15 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // Special functions
   Factorial: (args, compile) => `_IA.factorial(${compile(args[0])})`,
   Factorial2: (args, compile) => `_IA.factorial2(${compile(args[0])})`,
-  Gamma: (args, compile) => `_IA.gamma(${compile(args[0])})`,
+  Gamma: (args, compile) => {
+    // The two-operand form is the upper incomplete gamma Γ(s, z), which has
+    // no interval lowering: `_IA.gamma` is the complete Γ.
+    if (args.length > 1)
+      throw new Error(
+        'Could not compile `Gamma`: the two-operand form is the upper incomplete gamma Γ(s, z), which has no interval lowering'
+      );
+    return `_IA.gamma(${compile(args[0])})`;
+  },
   GammaLn: (args, compile) => `_IA.gammaln(${compile(args[0])})`,
   Binomial: (args, compile) =>
     `_IA.binomial(${compile(args[0])}, ${compile(args[1])})`,

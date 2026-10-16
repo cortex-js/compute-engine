@@ -88,6 +88,7 @@ import {
   hypergeometric2F1,
   hypergeometric1F1,
   gammaQ,
+  incompleteGammaUpper,
   betaRegularized,
 } from '../numerics/special-functions.js';
 import {
@@ -144,6 +145,7 @@ import {
   ellipticKComplex,
   ellipticEComplex,
   hypergeometric2F1Complex,
+  incompleteGammaUpperComplex,
 } from '../numerics/numeric-complex.js';
 import {
   adaptiveQuadrature,
@@ -4839,6 +4841,7 @@ export const SYS_HELPERS = {
   erfInv,
   beta,
   gammaQ,
+  gammaUpper: incompleteGammaUpper,
   betaRegularized,
   digamma,
   trigamma,
@@ -4964,6 +4967,10 @@ export const SYS_HELPERS = {
   // answers `Infinity`. For a non-real `a`, the complex kernel runs, and it
   // returns NaN at `s = 1` because its interpreter caller handles the pole,
   // so this helper returns the compiled unsigned pole itself.
+  // The two-operand `Gamma(s, z)`, the upper incomplete gamma: complex for
+  // `z < 0` with a non-integer `s`, as in the interpreter.
+  cgammaUpper: (s: ComplexResult, z: ComplexResult) =>
+    continuedKernel([s, z], incompleteGammaUpper, incompleteGammaUpperComplex),
   churwitzZeta: (s: ComplexResult, a: ComplexResult) =>
     s.re === 1 && s.im === 0 && a.im !== 0
       ? complexPole()

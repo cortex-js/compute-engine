@@ -31,6 +31,7 @@ import {
 import {
   hurwitzZetaComplex,
   hypergeometric2F1Complex,
+  incompleteGammaUpperComplex,
   polygammaComplex,
   POLYGAMMA_MAX_ORDER,
   POLYLOG_SERIES_MIN_ORDER,
@@ -462,6 +463,39 @@ function upperGammaNegIntReal(s: number, z: number): number {
   return g;
 }
 
+/** Below this z the Legendre continued fraction does not converge in its
+ *  iteration cap for a non-integer s < −1 (Γ(−1.5, 10⁻³) was off by 1e-5), and
+ *  Γ(s) − γ(s, z) is not available either (z < s + 1 fails for s < −1), so
+ *  Γ(s, z) is shifted up to −1 < s < 0 instead. At z ≥ 1 the fraction is
+ *  accurate, and the shift would subtract nearly equal terms. */
+const UPPER_GAMMA_SHIFT_LIMIT = 1;
+
+/** The shifted base order −1 < a < 0 must be at least this far from 0 and −1,
+ *  the poles of Γ(a) that Γ(a, z) = Γ(a) − γ(a, z) cancels. Measured against
+ *  mpmath over s = −(k + f), k ≤ 12, 10⁻¹⁰ ≤ z < 1: the relative error is
+ *  below 3e-14 for 0.05 ≤ f ≤ 0.95, and 1e-11 at f = 0.01 and 1.8e-7 at
+ *  f = 0.999. Closer to a pole the complex kernel answers (about 1e-14). */
+const UPPER_GAMMA_POLE_MARGIN = 0.05;
+
+/** Upper incomplete gamma Γ(s, z), real, non-integer s < −1 and
+ *  0 < z < UPPER_GAMMA_SHIFT_LIMIT. Starts from Γ(s + n, z) with
+ *  −1 < s + n < 0 and applies Γ(a − 1, z) = (Γ(a, z) − z^{a−1} e^{−z})/(a − 1)
+ *  (DLMF 8.8.2) n times. For z < 1 the subtracted term z^{a−1}e^{−z} exceeds
+ *  Γ(a, z) ≈ z^{a}/(−a), so there is no cancellation. */
+function upperGammaShiftedReal(s: number, z: number): number {
+  const n = Math.floor(-s);
+  let a = s + n;
+  if (-a < UPPER_GAMMA_POLE_MARGIN || 1 + a < UPPER_GAMMA_POLE_MARGIN)
+    return incompleteGammaUpperComplex(new Complex(s, 0), new Complex(z, 0)).re;
+  let g = incompleteGammaUpper(a, z);
+  const emz = Math.exp(-z);
+  for (let k = 0; k < n; k++) {
+    g = (g - Math.pow(z, a - 1) * emz) / (a - 1);
+    a -= 1;
+  }
+  return g;
+}
+
 /**
  * Upper incomplete gamma function Γ(s, z) = ∫_z^∞ t^{s−1} e^{−t} dt, for
  * real s and real z ≥ 0. (This is Mathematica/Rubi's `Gamma[s, z]`.)
@@ -490,6 +524,7 @@ export function incompleteGammaUpper(s: number, z: number): number {
   // for z < 1, where it is accurate and the fraction converges slowly.
   if (Number.isInteger(s) && s <= 0)
     return z >= 1 ? upperGammaCFReal(s, z) : upperGammaNegIntReal(s, z);
+  if (s < -1 && z < UPPER_GAMMA_SHIFT_LIMIT) return upperGammaShiftedReal(s, z);
   if (z < s + 1) return gamma(s) - lowerGammaSeriesReal(s, z);
   return upperGammaCFReal(s, z);
 }
