@@ -5,6 +5,10 @@ import { exactSign } from './contour.js';
 import { shadowsLibraryName } from '../library-shadowing.js';
 import { boundVariableNamesInOperand } from '../boxed-expression/binders.js';
 import { checkDeadline } from '../../common/interruptible.js';
+import {
+  definiteArithmetic,
+  definiteUnshadowed,
+} from './definite-integrate.js';
 
 /** Known primitives of special functions with affine arguments. LogGamma is
  * the analytic logarithm, not the principal logarithm of Gamma. These are
@@ -101,9 +105,11 @@ export function polygammaDomainKnown(
   );
 }
 
-/** Bose integrals: expand 1/(exp(a*x)-1) in positive exponentials, then
+/** Bose and Fermi moments: expand 1/(exp(a*x)-1) in positive exponentials, then
  * integrate termwise. For integer n >= 1 and real a > 0, positivity justifies
- * the exchange and the sum is n! Zeta(n+1)/a^(n+1). n=0 diverges at zero. */
+ * the exchange and the sum is n! Zeta(n+1)/a^(n+1). The Fermi denominator
+ * exp(a*x)+1 follows by subtracting twice the Bose moment at 2a. At n=0,
+ * u=exp(-a*x) gives log(2)/a for Fermi; the Bose integral diverges. */
 export function integrateBoseMoment(
   fn: Expression,
   variable: string,
@@ -111,6 +117,7 @@ export function integrateBoseMoment(
   upper: Expression
 ): Expression | undefined {
   const ce = fn.engine;
+  const op = definiteArithmetic(ce);
   // Test the bounds first: most definite integrals are not over [0, +∞), and
   // the constant factors of a product are not evaluated for those.
   let reversed = false;
@@ -119,6 +126,7 @@ export function integrateBoseMoment(
     return undefined;
   if (
     !fn.isPure ||
+    !definiteUnshadowed(fn) ||
     !lower.isPure ||
     !upper.isPure ||
     shadowsLibraryName(ce, 'Zeta') ||
@@ -138,9 +146,8 @@ export function integrateBoseMoment(
       .evaluate();
     if (c.isFinite !== true || exactSign(c) === undefined || exactSign(c) === 0)
       return undefined;
-    return integrateBoseMoment(factors[0], variable, lower, upper)
-      ?.mul(c)
-      .evaluate();
+    const integral = integrateBoseMoment(factors[0], variable, lower, upper);
+    return integral ? op('Multiply', integral, c) : undefined;
   }
   if (!isFunction(fn, 'Divide')) return undefined;
   checkDeadline(ce._deadlineFrame);
@@ -156,7 +163,12 @@ export function integrateBoseMoment(
     exactSign(coefficient) === 0
   )
     return undefined;
-  const exponential = fn.op2.add(1).evaluate();
+  const fermiExponential = op('Subtract', fn.op2, 1);
+  const isExponential = (e: Expression) =>
+    isFunction(e, 'Exp') ||
+    (isFunction(e, 'Power') && sym(e.op1) === 'ExponentialE');
+  const fermi = isExponential(fermiExponential);
+  const exponential = fermi ? fermiExponential : op('Add', fn.op2, 1);
   const exponent = isFunction(exponential, 'Exp')
     ? exponential.op1
     : isFunction(exponential, 'Power') &&
@@ -169,13 +181,21 @@ export function integrateBoseMoment(
     return undefined;
   const value =
     n === 0
-      ? exactSign(coefficient) === 1
-        ? ce.PositiveInfinity
-        : ce.NegativeInfinity
-      : coefficient
-          .mul(ce.function('Factorial', [ce.number(n)]))
-          .mul(ce.function('Zeta', [ce.number(n + 1)]))
-          .div(p[1].pow(n + 1))
-          .evaluate();
+      ? fermi
+        ? op('Divide', op('Multiply', coefficient, op('Ln', 2)), p[1])
+        : exactSign(coefficient) === 1
+          ? ce.PositiveInfinity
+          : ce.NegativeInfinity
+      : op(
+          'Divide',
+          op(
+            'Multiply',
+            coefficient,
+            op('Factorial', n),
+            op('Zeta', n + 1),
+            fermi ? op('Subtract', 1, op('Power', 2, -n)) : ce.One
+          ),
+          op('Power', p[1], n + 1)
+        );
   return reversed ? value.neg() : value;
 }

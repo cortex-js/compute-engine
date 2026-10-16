@@ -81,6 +81,33 @@ import '../symbolic/explain-derivative.js';
 import { antiderivative } from '../symbolic/antiderivative.js';
 import { integratePiecewise } from '../symbolic/piecewise-integrate.js';
 import {
+  integrateBetaMoment,
+  integrateDefiniteElementary,
+  integrateTrigPolynomial,
+} from '../symbolic/definite-integrate.js';
+import { integrateDiscreteMoments } from '../symbolic/definite-discrete.js';
+import { integrateReciprocalRational } from '../symbolic/definite-reciprocal.js';
+import {
+  integrateBySubstitution,
+  generalizedBeta,
+} from '../symbolic/definite-transform.js';
+import {
+  betaLogMoment,
+  logarithmicParameter,
+} from '../symbolic/definite-parameter.js';
+import { integrateRationalTrig } from '../symbolic/definite-trig-transform.js';
+import { integrateWeightedDiscrete } from '../symbolic/definite-periodic.js';
+import {
+  logarithmicSeriesMoment,
+  integratedPowerSeries,
+  telescopingProduct,
+  infiniteTelescopingProduct,
+} from '../symbolic/definite-summation.js';
+import {
+  integrateDefiniteSeries,
+  integrateProductDerivative,
+} from '../symbolic/definite-series.js';
+import {
   withRadianConvention,
   rewriteAngularUnit,
 } from '../symbolic/angular-unit.js';
@@ -4896,11 +4923,10 @@ volumes
               variable = argNames[i];
             if (!variable) variable = 'x';
 
-            // An opt-in integration provider (e.g. the Rubi rule driver loaded
-            // via `loadIntegrationRules`) is consulted first; it returns null or
-            // an inert `Integrate` when it can't close the integrand, in which
-            // case we fall back to the built-in antiderivative. With no provider
-            // registered (the default), behavior is unchanged.
+            // When no definite reduction applies, consult the opt-in integration
+            // provider (e.g. Rubi loaded via `loadIntegrationRules`) before the
+            // built-in antiderivative. A null or inert provider result falls
+            // back to that built-in path.
             let antideriv: Expression | null = null;
             let providerEndpoint: Expression | undefined;
             let pole: ReturnType<typeof interiorPoleVerdict>;
@@ -4977,11 +5003,43 @@ volumes
               continue;
             }
             if (isDefinite) {
+              // Bounded definite reductions can avoid large primitives and
+              // branch-sensitive endpoint subtraction. Each establishes its
+              // domain or convergence conditions before returning a value.
               // A power with a symbolic exponent whose base is zero strictly
               // inside the bounds (`∫₋₁¹ t^(−n) dt`) is split at the zero,
               // where the pieces resolve the convergence condition (see
               // `integrateAtSymbolicExponentZeros`).
               const split =
+                integrateReciprocalRational(
+                  integrand,
+                  variable,
+                  lower,
+                  upper
+                ) ??
+                integrateBySubstitution(integrand, variable, lower, upper, [
+                  generalizedBeta,
+                  betaLogMoment,
+                  logarithmicParameter,
+                  logarithmicSeriesMoment,
+                  integratedPowerSeries,
+                  telescopingProduct,
+                  infiniteTelescopingProduct,
+                ])?.value ??
+                integrateDefiniteElementary(
+                  integrand,
+                  variable,
+                  lower,
+                  upper
+                ) ??
+                integrateBetaMoment(integrand, variable, lower, upper) ??
+                integrateTrigPolynomial(integrand, variable, lower, upper) ??
+                integrateRationalTrig(integrand, variable, lower, upper)
+                  ?.value ??
+                integrateDiscreteMoments(integrand, variable, lower, upper) ??
+                integrateWeightedDiscrete(integrand, variable, lower, upper) ??
+                integrateDefiniteSeries(integrand, variable, lower, upper) ??
+                integrateProductDerivative(integrand, variable, lower, upper) ??
                 integrateBoseMoment(integrand, variable, lower, upper) ??
                 integratePiecewise(ce, integrand, variable, lower, upper) ??
                 (!polygammaDomainKnown(integrand, variable, lower, upper)
