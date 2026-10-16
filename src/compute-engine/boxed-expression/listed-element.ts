@@ -56,6 +56,19 @@ export function hasConstantTimeCount(x: Expression): boolean {
       !producesSet(x) &&
       x.ops.slice(1).every((source) => hasConstantTimeCount(source))
     );
+  // The count of a list-kind join is the sum of the counts of its operands
+  // (a tuple operand is one element), so it is constant-time when each of
+  // them is. A set-kind or keyed join counts distinct elements by a walk.
+  // Without this, the accumulator of a fold that had grown past the
+  // collection size cap (`Join(acc, 1..100)` with `acc` a list of more than
+  // `maxCollectionSize` elements) was walked up to the cap and then kept as
+  // a view, at every later step.
+  if (isFunction(x, 'Join') || isFunction(x, 'ListJoin'))
+    return (
+      x.isIndexedCollection === true &&
+      !producesKeyed(x) &&
+      x.ops.every((op) => op.type.matches('tuple') || hasConstantTimeCount(op))
+    );
   return false;
 }
 
@@ -99,6 +112,29 @@ export function listingCountUpperBound(
       const source = listingCountUpperBound(x.op1, memo);
       count = Math.min(Math.abs(n), source ?? Infinity);
     }
+  } else if (isFunction(x, 'Join') || isFunction(x, 'ListJoin')) {
+    // A join emits at most the sum of the cells of its operands: a set-kind
+    // or keyed join deduplicates, which only shrinks. A tuple operand is ONE
+    // element, whatever its own count (an empty tuple counts zero cells but
+    // is still emitted). Without this case an impure join (`Join(acc,
+    // Map(u ↦ Random(), 1..2))`, the accumulator of a fold) had no
+    // callback-free bound and stayed a view.
+    let total = 0;
+    for (const op of x.ops) {
+      const bound = op.type.matches('tuple')
+        ? 1
+        : listingCountUpperBound(op, memo);
+      if (bound === undefined) {
+        total = -1;
+        break;
+      }
+      total += bound;
+    }
+    if (total >= 0) count = total;
+  } else if (isFunction(x, 'Append') && x.nops >= 1) {
+    // Each appended operand is one element.
+    const source = listingCountUpperBound(x.op1, memo);
+    if (source !== undefined) count = source + x.nops - 1;
   } else if (hasConstantTimeCount(x)) {
     const n = x.count;
     if (n !== undefined) count = Number(n);
@@ -123,12 +159,22 @@ export function listingCountUpperBound(
  * keyed view), when it is a held conditional (`When`, `Which`, `If`: a
  * restricted collection, not a view), when its elements would use more
  * than the rest of the budget, or when the walk throws.
+ *
+ * With `admitKeyed`, a keyed view (a view typed as a dictionary or a record,
+ * such as a `Filter` of a dictionary, or a `Join` or an `Append` that adopts
+ * the keyed kind of an operand, `producesKeyed`) is listed too, into a
+ * `Dictionary` of the entries its iterator yields. The accumulator of a
+ * fold is listed this way (`settledAccumulator`, `library/collections.ts`):
+ * it is the whole value of a step, so each kind of view it can be must have
+ * a literal. An element of a list literal is not: there a keyed view stays
+ * a view, as before.
  */
 export function listedElement(
   ce: ComputeEngine,
   x: Expression,
   budget: SnapshotBudget,
-  allowImpure = true
+  allowImpure = true,
+  admitKeyed = false
 ): Expression {
   if (!x.isValid || !x.isLazyCollection) return x;
   if (isFunction(x, 'When') || isFunction(x, 'Which') || isFunction(x, 'If'))
@@ -139,11 +185,14 @@ export function listedElement(
   if (holdsAsyncOnlyOperator(x)) return x;
   const elements: Expression[] = [];
   let isSet = false;
+  let isKeyed = false;
   let reserved: number | undefined;
   try {
     if (!isWalkableFiniteCollection(x)) return x;
     isSet = !x.isIndexedCollection && x.type.matches('set<any>');
-    if (!isSet && !x.isIndexedCollection) return x;
+    isKeyed =
+      !isSet && !x.isIndexedCollection && admitKeyed && producesKeyed(x);
+    if (!isSet && !isKeyed && !x.isIndexedCollection) return x;
     const bound = listingCountUpperBound(x);
     const pure = isTransitivelyPure(x);
     const fits = bound !== undefined && bound <= budget.max - budget.used;
@@ -174,6 +223,10 @@ export function listedElement(
   } finally {
     if (reserved !== undefined) budget.used -= reserved - elements.length;
   }
+  // The entries of a keyed view are `(key, value)` tuples, which the
+  // `Dictionary` constructor reads as entries, as the display materialization
+  // does (`materialize`, `boxed-function.ts`).
+  if (isKeyed) return ce.function('Dictionary', elements);
   return isSet ? ce.function('Set', elements) : ce._fn('List', elements);
 }
 

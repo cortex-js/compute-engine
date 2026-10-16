@@ -5379,6 +5379,71 @@ function elementsAreCollections(collection: Expression): boolean {
   );
 }
 
+/**
+ * The value of a fold's accumulator after a step: a step result that is a
+ * finite lazy collection view is listed into the literal of its kind (a
+ * `List`, a `Set` or a `Dictionary`), and any other result is returned as it
+ * is. A `Range` or a `Linspace` is kept: it is a compact value with no
+ * callback and holds no accumulator, so `Fold((a, k) ↦ 1..k, 0, [5])` stays
+ * `1..5`.
+ *
+ * A step applies the reducer with the VALUE of the accumulator substituted
+ * into its body, so a step result that is a lazy view holding the
+ * accumulator — `Join(acc, Map(k ↦ … acc …, 1..3))` — holds a copy of the
+ * previous accumulator, which holds the copies the earlier steps made: the
+ * accumulator doubled in size at each step, and every structural walk of it
+ * (its type, its validity, its purity, its serialization) was exponential
+ * in the number of steps. The callbacks were not the cost: the element
+ * memos of the views served each cell once. Listed, the accumulator holds
+ * the elements only, and the callbacks of the new row run at the step
+ * instead of at the first read (issue #444).
+ *
+ * The rules are those of the list literal with a spread (`listedElement`):
+ * one budget of `ce.maxCollectionSize` elements at every depth, past which
+ * the view is kept; a view over a source that is infinite or whose
+ * finiteness is not known is kept (`Map(x ↦ k·x, acc)` over `1..∞`); an
+ * impure view is listed only when a callback-free bound on its size fits;
+ * a view that holds an application of an operator with only an
+ * `evaluateAsync` handler is kept; a held conditional is kept; and a walk
+ * that throws keeps the view. A keyed view is listed into a `Dictionary`
+ * (`admitKeyed`), because the accumulator is the whole value of the step.
+ *
+ * A list-kind `Join` or `ListJoin` is listed operand by operand, as the
+ * spread snapshot lists it (`snapshotListJoin`): the elements of a `List`
+ * operand, the settled accumulator of the previous step in the usual case,
+ * are copied without a walk through the join's iterator and its element
+ * memo, which cost more than the step itself when the accumulator held
+ * thousands of elements. The cheap counts of the operands are compared with
+ * the cap before any walk, so a step past the cap costs no enumeration.
+ *
+ * Under `.N()` the listed elements are approximated too, as `List`
+ * approximates each of its elements; a view that is kept is already in its
+ * numeric form (`reduceEvaluate` numericizes the step result first).
+ */
+function settledAccumulator(
+  ce: ComputeEngine,
+  r: Expression,
+  numericApproximation: boolean
+): Expression {
+  if (!r.isValid || !r.isLazyCollection) return r;
+  if (isFunction(r, 'Range') || isFunction(r, 'Linspace')) return r;
+  if (
+    (isFunction(r, 'Join') || isFunction(r, 'ListJoin')) &&
+    r.isIndexedCollection === true &&
+    !producesKeyed(r)
+  )
+    return snapshotListJoin(ce, r.ops, numericApproximation) ?? r;
+  const listed = listedElement(
+    ce,
+    r,
+    { used: 0, max: ce.maxCollectionSize },
+    true,
+    true
+  );
+  if (listed === r || !numericApproximation) return listed;
+  return listed.evaluate({ numericApproximation: true });
+}
+
 const reduceEvaluate = <R>(
   [source, fn, initial]: ReadonlyArray<Expression>,
   options: EvaluateHandlerOptions,
@@ -5448,6 +5513,11 @@ const reduceEvaluate = <R>(
   const numeric = (r: Expression): Expression =>
     numericApproximation ? roundedToWorkingPrecision(r.N()) : r;
 
+  // The accumulator is a VALUE between two steps: a step result that is a
+  // finite lazy view is listed into a literal (`settledAccumulator`).
+  const settled = (r: Expression): Expression =>
+    settledAccumulator(ce, r, numericApproximation === true);
+
   // The compiled fast path folds with JS numbers, so it always yields a
   // float. Under exact evaluation that violates the Evaluate-vs-N
   // exactness contract (e.g. `a + 1/k` over a Range would collapse the
@@ -5489,7 +5559,7 @@ const reduceEvaluate = <R>(
       // The interpreted reducer, needed by the fast path too (below).
       const fInterp = applicable(fn);
       const stepInterp = (acc: Expression, x: Expression): Expression =>
-        numeric(fInterp([acc, x]) ?? absenceMarker(ce, collection));
+        settled(numeric(fInterp([acc, x]) ?? absenceMarker(ce, collection)));
       return drive(
         (function* () {
           // With an explicit initial value, fold it in from the start; do
@@ -5566,7 +5636,7 @@ const reduceEvaluate = <R>(
   // A reducer that produced no value is a computation failure: fold in
   // the marker rather than the erasure symbol.
   const step = (acc: Expression, x: Expression): Expression =>
-    numeric(f([acc, x]) ?? absenceMarker(ce, collection));
+    settled(numeric(f([acc, x]) ?? absenceMarker(ce, collection)));
 
   if (!hasInitial) {
     // SEEDLESS: seed with the FIRST element and fold from the second —
@@ -5583,7 +5653,7 @@ const reduceEvaluate = <R>(
       (function* (): Generator<Expression | undefined, Expression | undefined> {
         let acc: Expression | undefined = undefined;
         for (const x of collection.each()) {
-          acc = acc === undefined ? numeric(x) : step(acc, x);
+          acc = acc === undefined ? settled(numeric(x)) : step(acc, x);
           yield acc;
         }
         if (enumerationDeclinedAfterWalk(collection, acc === undefined ? 0 : 1))
@@ -9143,13 +9213,24 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           next: () => {
             const { value, done } = source.next();
             if (done) return { value: undefined, done: true };
+            // Each cumulative element is a settled accumulator, as in
+            // `Reduce` (`settledAccumulator`).
             if (!started) {
               started = true;
-              acc = hasInitial
-                ? (f([initial, value]) ?? absenceMarker(expr.engine, expr.op1))
-                : value;
+              acc = settledAccumulator(
+                expr.engine,
+                hasInitial
+                  ? (f([initial, value]) ??
+                      absenceMarker(expr.engine, expr.op1))
+                  : value,
+                false
+              );
             } else {
-              acc = f([acc!, value]) ?? absenceMarker(expr.engine, expr.op1);
+              acc = settledAccumulator(
+                expr.engine,
+                f([acc!, value]) ?? absenceMarker(expr.engine, expr.op1),
+                false
+              );
             }
             return { value: acc!, done: false };
           },
@@ -9170,10 +9251,19 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         for (const item of expr.op1.each()) {
           i += 1;
           if (i === 1)
-            acc = hasInitial
-              ? (f([initial, item]) ?? absenceMarker(expr.engine, expr.op1))
-              : item;
-          else acc = f([acc!, item]) ?? absenceMarker(expr.engine, expr.op1);
+            acc = settledAccumulator(
+              expr.engine,
+              hasInitial
+                ? (f([initial, item]) ?? absenceMarker(expr.engine, expr.op1))
+                : item,
+              false
+            );
+          else
+            acc = settledAccumulator(
+              expr.engine,
+              f([acc!, item]) ?? absenceMarker(expr.engine, expr.op1),
+              false
+            );
           if (i === index) return acc;
         }
         return undefined;
@@ -16728,11 +16818,19 @@ function snapshotListJoin(
         continue;
       }
       if (!op.isCollection || !isWalkableFiniteCollection(op)) return undefined;
-      // A spread operand whose callback applies an operator that has only
-      // an `evaluateAsync` handler keeps the view: the walk below is
-      // synchronous and would store the applications unevaluated.
-      if (holdsAsyncOnlyOperator(op)) return undefined;
-      impure ||= !isTransitivelyPure(op);
+      // The elements of a canonical `List` operand are copied as they are
+      // (see the walk below): no callback runs for them, so the operand is
+      // neither walked for an async-only operator nor for its purity. Both
+      // walks visit every element, and the accumulator of a fold is such an
+      // operand at every step (`settledAccumulator`): with thousands of
+      // elements they cost more than the step.
+      if (!(isFunction(op, 'List') && op.isCanonical)) {
+        // A spread operand whose callback applies an operator that has only
+        // an `evaluateAsync` handler keeps the view: the walk below is
+        // synchronous and would store the applications unevaluated.
+        if (holdsAsyncOnlyOperator(op)) return undefined;
+        impure ||= !isTransitivelyPure(op);
+      }
       const bound = listingCountUpperBound(op, bounds);
       if (upperCount !== undefined)
         upperCount = bound === undefined ? undefined : upperCount + bound;
