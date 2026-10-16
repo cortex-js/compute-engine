@@ -172,7 +172,7 @@ export function serializeNumber(
     return options.negativeInfinity;
   else if (num === 'nan') return options.notANumber;
 
-  if (!/^[-+\.]?[0-9]/.test(num)) return '';
+  if (!/^[-+.]?[0-9]/.test(num)) return '';
 
   num = num.replace(/[nd]$/, '');
 

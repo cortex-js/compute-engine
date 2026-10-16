@@ -145,9 +145,9 @@ export interface FunctionClause {
  *   associative user function is binary; a flattened n-ary call is folded
  *   left by the clause selector. Incompatible with `hold` (the engine's
  *   `lazy` flag is).
- * - `description` — the doc comment (`///` / `/** … *​/`) written before
- *   the definition, surfaced as the definition's `description` (`About`,
- *   editor hovers).
+ * - `description` — the doc comment (a `///` line comment or a `/**` block
+ *   comment) written before the definition, surfaced as the definition's
+ *   `description` (`About`, editor hovers).
  */
 export type ClauseAttributes = {
   hold?: boolean;

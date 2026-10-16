@@ -1161,7 +1161,7 @@ function joinMul(lhs: string, rhs: string) {
 
   // Is it a sequence of digits (integer) followed by a non-digit?
   // e.g. 2x, 3y, 4z, etc.
-  if (lhs.match(/^[-+]?\d+$/) && rhs.match(/^[a-zA-Z\(]/)) return lhs + rhs;
+  if (lhs.match(/^[-+]?\d+$/) && rhs.match(/^[a-zA-Z(]/)) return lhs + rhs;
   return `${lhs} * ${rhs}`;
 }
 

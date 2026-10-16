@@ -3821,7 +3821,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
      *   with a separator between them and delimiters around the whole
      *   group.
      *
-     *   If the first argument is a `Sequence` with a single element,
+     *   If the first argument is a `Sequence` with a single element,
      *   the `Sequence` can be omitted.
      *
      *   The second argument specify the separator and delimiters. If not

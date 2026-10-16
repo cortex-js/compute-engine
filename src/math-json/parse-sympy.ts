@@ -91,7 +91,7 @@ function integer(
   if (result === null) [i, result] = octinteger(s, start);
   if (result === null) [i, result] = hexinteger(s, start);
 
-  if (result === null || /^[eEjJ\.]$/.test(s[i])) return [start, null];
+  if (result === null || /^[eEjJ.]$/.test(s[i])) return [start, null];
 
   return [i, result];
 }

@@ -8934,7 +8934,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
        *   the `index`‑th element that satisfies the predicate is found.
        * * If `index` is negative, first materialise the filtered result (only
        *   possible for finite source collections) and count from the end
-       *   (‑1 → last, ‑2 → penultimate, …).
+       *   (-1 → last, -2 → penultimate, …).
        * * For non‑numeric indexes or out‑of‑range requests, return
        *   `undefined`.
        *

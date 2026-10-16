@@ -380,7 +380,7 @@ export class Lexer {
       // The character before must be part of a BOUND (a digit, `∞`/`oo`, a
       // sign, a decimal point): after the opening bracket `real<..<3>` the
       // `<` is that bracket, not a marker, and `real <..` is not adjacent.
-      /[0-9.∞o+\-]/.test(this.input[this.pos - 1])
+      /[0-9.∞o+-]/.test(this.input[this.pos - 1])
     ) {
       this.match('<..');
       return this.createToken('<..', '<..');

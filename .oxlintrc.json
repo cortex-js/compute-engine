@@ -74,6 +74,8 @@
       }
     ],
     "no-unused-expressions": "error",
+    "no-useless-escape": "error",
+    "no-irregular-whitespace": "error",
     "no-var": "error",
     "prefer-const": "error",
     "prefer-rest-params": "error",

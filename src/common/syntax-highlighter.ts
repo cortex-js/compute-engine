@@ -272,7 +272,7 @@ const defaultGrammar: SyntaxGrammar = {
   keyword: (buf: Buffer) => {
     // If the preceding character is a dot, this is not a keyword
     // i.e. in "foo.done", `done` is not a keyword
-    if (buf.pos > 0 && /[\.]/.test(buf.s[buf.pos - 1])) return undefined;
+    if (buf.pos > 0 && /[.]/.test(buf.s[buf.pos - 1])) return undefined;
 
     const keywords = Object.keys(DEFAULT_KEYWORDS);
 

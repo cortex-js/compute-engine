@@ -4168,7 +4168,7 @@ function sanitizeLatex(s: string | null): string {
   if (s === null) return '';
   // Replace special Latex characters
   return s.replace(
-    /[{}\[\]\\:\-\$%]/g,
+    /[{}[\]\\:\-$%]/g,
     (c) =>
       ({
         '{': '\\lbrace ',

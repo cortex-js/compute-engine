@@ -595,7 +595,7 @@ function scanToClauseComma(text: string, pos: number): number {
       text[pos + 1] === '.' &&
       text[pos + 2] === '.' &&
       pos > 0 &&
-      /[0-9.∞o+\-]/.test(text[pos - 1])
+      /[0-9.∞o+-]/.test(text[pos - 1])
     )
       pos += 2;
     else if (ch === '.' && text[pos + 1] === '.' && text[pos + 2] === '<')

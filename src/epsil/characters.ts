@@ -49,7 +49,7 @@ const PATTERN_SYNTAX: (number | [number, number])[] = expand([
   0x00bf, // ¿
   0x00d7, // ×
   0x00f7, // ÷
-  [0x2010, 0x203e], // ‐‑‒–—―‖‗‘’‚‛“”„‟†‡•‣․‥…‧‪‫‬‭‮ ‰‱′″‴‵‶‷‸‹›※‼‽‾
+  [0x2010, 0x203e], // ‐‑‒–—―‖‗‘’‚‛“”„‟†‡•‣․‥…‧ U+202A–U+202F (bidi controls, narrow no-break space) ‰‱′″‴‵‶‷‸‹›※‼‽‾
   [0x2041, 0x2053], // ⁁⁂⁃⁄⁅⁆⁇⁈⁉⁊⁋⁌⁍⁎⁏⁐⁑⁒⁓
   [0x2190, 0x221a], // ←↑→↓↔↕↖↗↘↙↚↛↜↝↞↟↠↡↢↣↤↥↦↧↨↩↪↫↬↭↮↯↰↱↲↳↴↵↶↷↸↹↺↻↼↽↾↿⇀⇁⇂⇃⇄⇅⇆
   // ⇇⇈⇉⇊⇋⇌⇍⇎⇏⇐⇑⇒⇓⇔⇕⇖⇗⇘⇙⇚⇛⇜⇝⇞⇟⇠⇡⇢⇣⇤⇥⇦⇧⇨⇩⇪⇫⇬⇭⇮⇯⇰⇱⇲⇳⇴⇵⇶⇷⇸⇹⇺⇻⇼⇽⇾⇿∀∁∂∃∄∅∆∇∈∉∊∋∌∍∎
@@ -472,7 +472,7 @@ export const VULGAR_FRACTIONS_UNICODE = new Map<number, string>([
   [0x215c, '3/8'], // ⅜	3⁄8	0.375	Vulgar Fraction Three Eighths
   [0x215d, '5/8'], // ⅝	5⁄8	0.625	Vulgar Fraction Five Eighths
   [0x215e, '7/8'], // ⅞	7⁄8	0.875	Vulgar Fraction Seven Eighths
-  [0x00bd, '1/2'], // ½ VULGAR FRACTION ONE HALF,
+  [0x00bd, '1/2'], // ½ VULGAR FRACTION ONE HALF,
 ]);
 
 export const FANCY_UNICODE = new Map<number, string>([
