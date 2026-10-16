@@ -28,8 +28,8 @@ import type { IComputeEngine } from './global-types.js';
  * sit below `compilation/` in the layering — `type-constructors.ts` (minting a
  * variant's constructor) and `library/collections.ts` (the `At` accessor's
  * compile handler). Filing it under `compilation/` makes those imports cross a
- * layer boundary that the `import/no-restricted-paths` zones in
- * `.eslintrc.cjs` reject.
+ * layer boundary that the per-layer `no-restricted-imports` overrides in
+ * `.oxlintrc.json` reject.
  */
 
 /** The JavaScript representation bucket of an erased variant payload. The

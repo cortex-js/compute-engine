@@ -46,7 +46,19 @@ mv ./temp-docs/math-json ./temp-docs/02
 mv ./temp-docs/common ./temp-docs/03
 
 # https://github.com/ozum/concat-md
-npx concat-md --decrease-title-levels --dir-name-as-title --hide-anchor-links ./temp-docs > ./src/api.md
+# Write to a temporary file first: the shell truncates the redirect target
+# before concat-md runs, so a direct redirect would leave an EMPTY
+# src/api.md when concat-md fails (for example when one of its dependencies
+# is missing). The move happens only on success. The temporary file must not
+# be inside ./temp-docs, which concat-md reads as its input.
+# mktemp creates the file owner-only (mode 0600) and mv keeps that mode, so
+# the mode is set to the usual 0644 before the move. The trap removes the
+# temporary file when concat-md fails; after a successful move it does nothing.
+API_TMP=$(mktemp)
+trap 'rm -f "$API_TMP"' EXIT
+npx concat-md --decrease-title-levels --dir-name-as-title --hide-anchor-links ./temp-docs > "$API_TMP"
+chmod 644 "$API_TMP"
+mv "$API_TMP" ./src/api.md
 
 # Remove `# 01`, `# 02`, `# 03` from the api.md
 sedi 's/# 01//g' ./src/api.md

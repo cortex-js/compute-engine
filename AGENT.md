@@ -22,8 +22,8 @@ Guidance for coding agents working in this repository. Derived from `CLAUDE.md`.
 ### Development
 
 - `npm start` - Development build with watch and local server
-- `npm run lint` - Run every check of `npm run ci` except the test suite: ESLint + Prettier with auto-fix (`npm run lint:code`), the type check, and the corpus and artifact freshness checks (`npm run ci:corpus-pipeline`)
-- `npm run lint:code` - Run only ESLint + Prettier with auto-fix
+- `npm run lint` - Run every check of `npm run ci` except the test suite: Oxlint + Prettier with auto-fix (`npm run lint:code`), the type check, and the corpus and artifact freshness checks (`npm run ci:corpus-pipeline`)
+- `npm run lint:code` - Run only Oxlint + Prettier with auto-fix
 - `npm run doc` - Generate documentation
 
 ### Code Comments
@@ -140,4 +140,4 @@ npx tsx -e "import {ComputeEngine} from './src/compute-engine'; new ComputeEngin
 Warning signs:
 - `ReferenceError: Cannot access '_BoxedExpression' before initialization`
 - Build failures with circular dependency warnings
-- ESLint: `Dependency cycle detected`
+- Oxlint: `import(no-cycle): Dependency cycle detected`

@@ -1,0 +1,511 @@
+// Oxlint configuration. Adopted 2026-10-16 in place of ESLint +
+// typescript-eslint + eslint-plugin-import. The rule set is the former
+// `.eslintrc.cjs` rule for rule: the typescript-eslint `recommended` preset
+// listed out explicitly (with the same four rules turned off), the import
+// hygiene rules, and the browser-global ban. Prettier is run separately by
+// `npm run lint:code`, so no formatting rule is here.
+//
+// `categories.correctness` is OFF so that only the rules listed here run.
+// Turning Oxlint's default correctness category on is a separate decision
+// with its own cleanup.
+//
+// Four ESLint rules have no Oxlint equivalent:
+//   - `import/no-restricted-paths` (the layering zones) is expressed as one
+//     `no-restricted-imports` override per layer directory below. The patterns
+//     match the import SPECIFIER (`../library/x.js`), not the resolved file,
+//     so each banned layer is listed as both `**/<layer>` and `**/<layer>/**`.
+//   - `import/no-extraneous-dependencies` is the top-level
+//     `no-restricted-imports` pattern: every bare package specifier is banned
+//     except the two runtime dependencies and `node:` builtins.
+//   - `import/no-unresolved` is covered by the type check (TS2307).
+//   - `import/no-unused-modules` and `import/no-useless-path-segments` are
+//     dropped; the former was configured without options and reported nothing.
+// The zero-circular-dependency budget stays double-checked: `import/no-cycle`
+// here and `madge` in `npm run check:deps`.
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "import"],
+  "categories": {
+    "correctness": "off"
+  },
+  "env": {
+    "node": true,
+    "es2022": true
+  },
+  "ignorePatterns": [
+    "build/**",
+    "coverage/**",
+    "dist/**",
+    "stage/**",
+    "bin/**",
+    "config/**",
+    "node_modules/**"
+  ],
+  "rules": {
+    "import/named": "error",
+    "import/no-absolute-path": "error",
+    "import/no-cycle": "error",
+    "import/no-duplicates": "error",
+    "import/no-namespace": "error",
+    "no-restricted-imports": [
+      "error",
+      {
+        "patterns": [
+          {
+            "group": [
+              "*",
+              "!./**",
+              "!../**",
+              "!complex.js",
+              "!@arnog/colors",
+              "!node:*",
+              "!node:*/**"
+            ],
+            "message": "src/ may import only its runtime dependencies (complex.js, @arnog/colors) and node: builtins. Any other package would be a devDependency that consumers of the published package do not get."
+          }
+        ]
+      }
+    ],
+    "no-unused-vars": [
+      "warn",
+      {
+        "argsIgnorePattern": "^_",
+        "varsIgnorePattern": "^_"
+      }
+    ],
+    "no-unused-expressions": "error",
+    "no-var": "error",
+    "prefer-const": "error",
+    "prefer-rest-params": "error",
+    "prefer-spread": "error",
+    "no-array-constructor": "error",
+    "typescript/ban-ts-comment": "error",
+    "typescript/no-duplicate-enum-values": "error",
+    "typescript/no-empty-object-type": "error",
+    "typescript/no-explicit-any": "off",
+    "typescript/no-extra-non-null-assertion": "error",
+    "typescript/no-misused-new": "error",
+    "typescript/no-namespace": "error",
+    "typescript/no-non-null-asserted-optional-chain": "error",
+    "typescript/no-non-null-assertion": "off",
+    "typescript/no-require-imports": "off",
+    "typescript/no-this-alias": "error",
+    "typescript/no-unnecessary-type-constraint": "error",
+    "typescript/no-unsafe-declaration-merging": "error",
+    "typescript/no-unsafe-function-type": "error",
+    "typescript/no-wrapper-object-types": "error",
+    "typescript/prefer-as-const": "error",
+    "typescript/prefer-namespace-keyword": "error",
+    "typescript/triple-slash-reference": "error",
+    "no-restricted-globals": [
+      "error",
+      "postMessage",
+      "blur",
+      "focus",
+      "close",
+      "frames",
+      "self",
+      "parent",
+      "opener",
+      "top",
+      "length",
+      "closed",
+      "location",
+      "origin",
+      "name",
+      "locationbar",
+      "menubar",
+      "personalbar",
+      "scrollbars",
+      "statusbar",
+      "toolbar",
+      "status",
+      "frameElement",
+      "navigator",
+      "customElements",
+      "external",
+      "screen",
+      "innerWidth",
+      "innerHeight",
+      "scrollX",
+      "pageXOffset",
+      "scrollY",
+      "pageYOffset",
+      "screenX",
+      "screenY",
+      "outerWidth",
+      "outerHeight",
+      "devicePixelRatio",
+      "clientInformation",
+      "screenLeft",
+      "screenTop",
+      "defaultStatus",
+      "defaultstatus",
+      "styleMedia",
+      "onanimationend",
+      "onanimationiteration",
+      "onanimationstart",
+      "onsearch",
+      "ontransitionend",
+      "onwebkitanimationend",
+      "onwebkitanimationiteration",
+      "onwebkitanimationstart",
+      "onwebkittransitionend",
+      "isSecureContext",
+      "onabort",
+      "onblur",
+      "oncancel",
+      "oncanplay",
+      "oncanplaythrough",
+      "onchange",
+      "onclick",
+      "onclose",
+      "oncontextmenu",
+      "oncuechange",
+      "ondblclick",
+      "ondrag",
+      "ondragend",
+      "ondragenter",
+      "ondragleave",
+      "ondragover",
+      "ondragstart",
+      "ondrop",
+      "ondurationchange",
+      "onemptied",
+      "onended",
+      "onerror",
+      "onfocus",
+      "oninput",
+      "oninvalid",
+      "onkeydown",
+      "onkeypress",
+      "onkeyup",
+      "onload",
+      "onloadeddata",
+      "onloadedmetadata",
+      "onloadstart",
+      "onmousedown",
+      "onmouseenter",
+      "onmouseleave",
+      "onmousemove",
+      "onmouseout",
+      "onmouseover",
+      "onmouseup",
+      "onmousewheel",
+      "onpause",
+      "onplay",
+      "onplaying",
+      "onprogress",
+      "onratechange",
+      "onreset",
+      "onresize",
+      "onscroll",
+      "onseeked",
+      "onseeking",
+      "onselect",
+      "onstalled",
+      "onsubmit",
+      "onsuspend",
+      "ontimeupdate",
+      "ontoggle",
+      "onvolumechange",
+      "onwaiting",
+      "onwheel",
+      "onauxclick",
+      "ongotpointercapture",
+      "onlostpointercapture",
+      "onpointerdown",
+      "onpointermove",
+      "onpointerup",
+      "onpointercancel",
+      "onpointerover",
+      "onpointerout",
+      "onpointerenter",
+      "onpointerleave",
+      "onafterprint",
+      "onbeforeprint",
+      "onbeforeunload",
+      "onhashchange",
+      "onlanguagechange",
+      "onmessage",
+      "onmessageerror",
+      "onoffline",
+      "ononline",
+      "onpagehide",
+      "onpageshow",
+      "onpopstate",
+      "onrejectionhandled",
+      "onstorage",
+      "onunhandledrejection",
+      "onunload",
+      "performance",
+      "stop",
+      "open",
+      "print",
+      "captureEvents",
+      "releaseEvents",
+      "getComputedStyle",
+      "matchMedia",
+      "moveTo",
+      "moveBy",
+      "resizeTo",
+      "resizeBy",
+      "getSelection",
+      "find",
+      "createImageBitmap",
+      "scroll",
+      "scrollTo",
+      "scrollBy",
+      "onappinstalled",
+      "onbeforeinstallprompt",
+      "crypto",
+      "ondevicemotion",
+      "ondeviceorientation",
+      "ondeviceorientationabsolute",
+      "indexedDB",
+      "webkitStorageInfo",
+      "chrome",
+      "visualViewport",
+      "speechSynthesis",
+      "webkitRequestFileSystem",
+      "webkitResolveLocalFileSystemURL",
+      "openDatabase"
+    ]
+  },
+  "overrides": [
+    {
+      "files": ["src/common/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": ["**/compute-engine", "**/compute-engine/**"],
+                "message": "common/ is a lower layer and must not import from compute-engine/."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["src/compute-engine/numerics/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "**/numeric-value",
+                  "**/numeric-value/**",
+                  "**/latex-syntax",
+                  "**/latex-syntax/**",
+                  "**/boxed-expression",
+                  "**/boxed-expression/**",
+                  "**/symbolic",
+                  "**/symbolic/**",
+                  "**/library",
+                  "**/library/**",
+                  "**/compilation",
+                  "**/compilation/**"
+                ],
+                "message": "numerics/ is a lower layer and must not import from numeric-value/, latex-syntax/, boxed-expression/, symbolic/, library/ or compilation/."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["src/compute-engine/numeric-value/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "**/latex-syntax",
+                  "**/latex-syntax/**",
+                  "**/boxed-expression",
+                  "**/boxed-expression/**",
+                  "**/symbolic",
+                  "**/symbolic/**",
+                  "**/library",
+                  "**/library/**",
+                  "**/compilation",
+                  "**/compilation/**"
+                ],
+                "message": "numeric-value/ is a lower layer and must not import from latex-syntax/, boxed-expression/, symbolic/, library/ or compilation/."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["src/compute-engine/latex-syntax/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "**/boxed-expression",
+                  "**/boxed-expression/**",
+                  "**/symbolic",
+                  "**/symbolic/**",
+                  "**/library",
+                  "**/library/**",
+                  "**/compilation",
+                  "**/compilation/**"
+                ],
+                "message": "latex-syntax/ is a lower layer and must not import from boxed-expression/, symbolic/, library/ or compilation/."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["src/compute-engine/boxed-expression/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "**/symbolic",
+                  "**/symbolic/**",
+                  "**/library",
+                  "**/library/**",
+                  "**/compilation",
+                  "**/compilation/**"
+                ],
+                "message": "boxed-expression/ is a lower layer and must not import from symbolic/, library/ or compilation/."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["src/compute-engine/tensor/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "**/symbolic",
+                  "**/symbolic/**",
+                  "**/library",
+                  "**/library/**",
+                  "**/compilation",
+                  "**/compilation/**"
+                ],
+                "message": "tensor/ must not import from symbolic/, library/ or compilation/."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["src/compute-engine/interval/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "**/symbolic",
+                  "**/symbolic/**",
+                  "**/library",
+                  "**/library/**",
+                  "**/compilation",
+                  "**/compilation/**"
+                ],
+                "message": "interval/ must not import from symbolic/, library/ or compilation/."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["src/compute-engine/types-*.ts"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "**/boxed-expression",
+                  "**/boxed-expression/**",
+                  "**/symbolic",
+                  "**/symbolic/**",
+                  "**/library",
+                  "**/library/**",
+                  "**/compilation",
+                  "**/compilation/**",
+                  "**/tensor",
+                  "**/tensor/**",
+                  "**/interval",
+                  "**/interval/**",
+                  "!**/compilation/types",
+                  "!**/compilation/types.js"
+                ],
+                "message": "Type definition files must not import from implementation layers (boxed-expression/, symbolic/, library/, compilation/, tensor/, interval/); compilation/types is allowed."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["src/compute-engine/symbolic/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "**/library",
+                  "**/library/**",
+                  "**/compilation",
+                  "**/compilation/**"
+                ],
+                "message": "symbolic/ is a lower layer and must not import from library/ or compilation/."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["src/compute-engine/library/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": ["**/compilation", "**/compilation/**"],
+                "message": "library/ is a lower layer and must not import from compilation/."
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

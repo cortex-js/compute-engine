@@ -2,8 +2,8 @@
   "editor.defaultFormatter": "esbenp.prettier-vscode",
   "editor.formatOnSave": true,
 
-  // Make sure ESLint runs on target files.
-  "eslint.validate": ["javascript", "typescript"],
+  // Lint with Oxlint (the `oxc.oxc-vscode` extension reads `.oxlintrc.json`).
+  "eslint.enable": false,
   // Check JavaScript by default (using the Typescript engine)
   "js/ts.implicitProjectConfig.checkJs": true,
 

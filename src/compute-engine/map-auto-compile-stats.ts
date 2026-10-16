@@ -4,8 +4,9 @@
  *
  * The counters live in this dependency-free module, rather than next to the
  * implementation, because `types-engine.ts` declares the engine accessor that
- * exposes them (`IComputeEngine._mapAutoCompileStats`) and the ESLint layering
- * rules forbid a `types-*.ts` file from importing anything under `library/`.
+ * exposes them (`IComputeEngine._mapAutoCompileStats`) and the Oxlint layering
+ * rules (`.oxlintrc.json`) forbid a `types-*.ts` file from importing anything
+ * under `library/`.
  * This module imports nothing, so it cannot participate in an import cycle.
  */
 

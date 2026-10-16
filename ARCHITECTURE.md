@@ -140,8 +140,9 @@ A task-oriented index — where to start for the most common kinds of work
 ## Layered module architecture
 
 Within `src/compute-engine/`, modules are organized into layers with a strict,
-acyclic dependency direction (enforced by ESLint `import/no-restricted-paths`
-and a zero-circular-dependency budget checked with `madge`):
+acyclic dependency direction (enforced by the per-layer `no-restricted-imports`
+overrides in `.oxlintrc.json` and a zero-circular-dependency budget checked
+with `madge`):
 
 ```
 4. Composition root      index.ts (ComputeEngine) — composes services, public API
@@ -154,7 +155,7 @@ The `ComputeEngine` class is deliberately an "API shell and integration point":
 business logic lives in the `engine-*.ts` services (startup, scoping,
 declarations, assumptions, numeric configuration, caching, extension contracts,
 compilation-target registry, etc.). The dependency rules below are enforced by
-ESLint boundaries and the zero-cycle check.
+the Oxlint layering overrides and the zero-cycle check.
 
 ## MathJSON: the interchange format
 
@@ -1063,9 +1064,9 @@ experimental `@cortex-js/compute-engine/epsil` published entry.
 - **Test**: `npm run test compute-engine/<name>` runs
   `test/compute-engine/<name>.test.ts` (Jest via `config/jest.config.cjs`).
   `npm run test snapshot` updates snapshots.
-- **Lint**: `npm run lint` runs every check of `npm run ci` except the test suite (ESLint + Prettier, the type check, the corpus and artifact freshness checks). `npm run lint:code` runs only ESLint + Prettier.
+- **Lint**: `npm run lint` runs every check of `npm run ci` except the test suite (Oxlint + Prettier, the type check, the corpus and artifact freshness checks). `npm run lint:code` runs only Oxlint + Prettier.
 - **Dependency check**: `npm run check:deps` (`madge` — zero circular
-  dependencies; ESLint also enforces the layering rules).
+  dependencies; Oxlint also enforces the layering rules and `import/no-cycle`).
 - **Docs**: `npm run doc` (TypeDoc + `concat-md`) regenerates `src/api.md`. It is
   generated — do not edit it by hand.
 
@@ -1077,7 +1078,8 @@ These properties are intentional and enforced; preserve them when contributing:
    type-only), checked with `madge`. See
    [CLAUDE.md](./CLAUDE.md#circular-dependencies).
 2. **Layered imports**: kernel types → wrappers → services → composition root;
-   no upward imports. Enforced by ESLint `import/no-restricted-paths`.
+   no upward imports. Enforced by the per-layer `no-restricted-imports`
+   overrides in `.oxlintrc.json`.
 3. **LaTeX is optional**: the engine depends on the structural `ILatexSyntax`
    interface, never the concrete class.
 4. **Extension points are validated at runtime**: custom libraries, compilation

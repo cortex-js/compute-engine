@@ -9,7 +9,6 @@ import {
   typeIsProvablyNonNumericCollection,
 } from '../collection-utils.js';
 
-import { readTypeVariablesAsBounds } from '../../common/type/instantiate.js';
 import {
   COLLECTION_SHAPE_TYPE,
   INDEXED_COLLECTION_SHAPE_TYPE,
@@ -59,6 +58,7 @@ import { threadedPresentType } from './broadcast-lift-type.js';
 import {
   freeTypeVariables,
   parameterPositions,
+  readTypeVariablesAsBounds,
   type TypeInferenceResult,
 } from '../../common/type/instantiate.js';
 import {

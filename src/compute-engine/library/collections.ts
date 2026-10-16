@@ -20,7 +20,6 @@ import {
   spellCheckMessage,
   validateArguments,
   widenUnannotatedLiteralParams,
-  isAbsentScalarSymbol,
   absentScalarMarker,
   checkCollectionOperand,
 } from '../boxed-expression/validate.js';

@@ -79,7 +79,7 @@ printf "$BASENAME$DOT Building TypeScript declaration files (.d.ts)"
 # TS 7 notes: the .d.ts emission runs on the native (Go) compiler for speed. It
 # is installed side-by-side as `@typescript/native` (npm:typescript@7); the
 # module name `typescript` stays aliased to the TS 6 API (@typescript/typescript6)
-# so ts-jest/typedoc/eslint/madge keep working. Both packages ship a `tsc` bin,
+# so ts-jest/typedoc/madge keep working. Both packages ship a `tsc` bin,
 # so the native one is referenced by its explicit path here (never via npx,
 # whose resolution order is ambiguous).
 #
