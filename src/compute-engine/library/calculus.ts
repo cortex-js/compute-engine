@@ -85,6 +85,10 @@ import {
   rewriteAngularUnit,
 } from '../symbolic/angular-unit.js';
 import {
+  integrateBoseMoment,
+  polygammaDomainKnown,
+} from '../symbolic/special-integrate.js';
+import {
   integrateBetaMoment,
   integrateDefiniteElementary,
   integrateTrigPolynomial,
@@ -111,10 +115,6 @@ import {
   integrateDefiniteSeries,
   integrateProductDerivative,
 } from '../symbolic/definite-series.js';
-import {
-  integrateBoseMoment,
-  polygammaDomainKnown,
-} from '../symbolic/special-integrate.js';
 import {
   definiteIntegralByResidues,
   divergentIntegralValue,
