@@ -81,6 +81,10 @@ import '../symbolic/explain-derivative.js';
 import { antiderivative } from '../symbolic/antiderivative.js';
 import { integratePiecewise } from '../symbolic/piecewise-integrate.js';
 import {
+  withRadianConvention,
+  rewriteAngularUnit,
+} from '../symbolic/angular-unit.js';
+import {
   integrateBetaMoment,
   integrateDefiniteElementary,
   integrateTrigPolynomial,
@@ -107,10 +111,6 @@ import {
   integrateDefiniteSeries,
   integrateProductDerivative,
 } from '../symbolic/definite-series.js';
-import {
-  withRadianConvention,
-  rewriteAngularUnit,
-} from '../symbolic/angular-unit.js';
 import {
   integrateBoseMoment,
   polygammaDomainKnown,
