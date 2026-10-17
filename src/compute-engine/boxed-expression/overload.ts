@@ -38,6 +38,7 @@ import type {
   Scope,
 } from '../global-types.js';
 import { isSymbol } from './type-guards.js';
+import { indexReadTupleExtension } from './index-read-tuple.js';
 import {
   admissionOf,
   hasValueComponent,
@@ -478,16 +479,31 @@ function prefilterAdmits(
   )
     return true;
 
-  // Provably disjoint by TYPE. Three rescues remain, each a write-free
+  // Provably disjoint by TYPE. The rescues below remain, each a write-free
   // precondition of an admission full validation performs on other grounds:
   // a `missing`-carrying operand at a strip-eligible position (§3.B — a
-  // scalar `Missing` strips to `never`, admissible everywhere), and the two
-  // construction-level repairs.
+  // scalar `Missing` strips to `never`, admissible everywhere), the two
+  // construction-level repairs, and the tuple extension of a parameter that
+  // only index reads typed.
   if (policies?.stripMissing?.(index) && typeContainsMissing(op.type.type))
     return true;
   if (isRepairableOperatorSymbol(ce, op)) return true;
   if (policies?.freshMatrixRepair?.(op, param)) return true;
   if (policies?.provisionalOperand?.(op, param)) return true;
+  // A bare parameter typed only by its index reads (`p[1] + 1` gives
+  // `tuple<number>`) at a parameter that requires a LONGER tuple
+  // (`tuple<number, number>`). The two tuples have different lengths, so
+  // they are disjoint, but index reads do not prove the length of the
+  // argument: validation gives the parameter the longer tuple and admits
+  // the call (`indexReadTupleExtension()`, in `validateArguments`). The
+  // conditions are the ones that validation tests, with no write.
+  if (
+    op.valueDefinition?.inferredType &&
+    op.valueDefinition.value === undefined &&
+    ce._withoutFacts(() => indexReadTupleExtension(op.type.type, param)) !==
+      undefined
+  )
+    return true;
 
   return false;
 }

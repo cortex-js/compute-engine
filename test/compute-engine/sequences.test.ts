@@ -1,6 +1,7 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import type { Expression } from '../../src/compute-engine';
 import { expectTypeBetween } from '../utils';
+import { _sequenceRegistrySnapshot } from '../../src/compute-engine/sequence';
 
 // Note: Use single-letter symbols because LaTeX parses multi-letter
 // sequences as products of individual letters (e.g., "abc" becomes a*b*c)
@@ -2171,5 +2172,142 @@ describe('SEQUENCE SCOPE: a sequence is a binding of the scope that declares it'
     expect(ce.getSequence('F')?.baseIndices).toEqual([0, 1]);
     expect(ce.getSequenceCache('F')?.size).toBe(0);
     expect(ce.parse('F_{10}').evaluate().json).toBe(55);
+  });
+});
+
+describe('SEQUENCE SCOPE: a pending definition belongs to one binding', () => {
+  // `F_0 := 10` without a recurrence is a pending sequence definition. Each
+  // binding of a name has its own pending definition, so a declaration of
+  // `F` in a child scope does not share the base cases of the `F` of the
+  // enclosing scope.
+
+  /** The number of pending definitions that the engine keeps, in all
+   * scopes. */
+  function pendingCount(ce: ComputeEngine): number {
+    const snapshot = _sequenceRegistrySnapshot(ce) as {
+      pending?: unknown[];
+    };
+    return snapshot.pending?.length ?? 0;
+  }
+
+  test('a shadowing declaration completes with its own base cases only', () => {
+    const ce = new ComputeEngine();
+    ce.parse('F_0 := 10').evaluate();
+
+    ce.pushScope();
+    ce.declare('F', 'unknown');
+    ce.parse('F_1 := 5').evaluate();
+    let status = ce.getSequenceStatus('F');
+    expect(status.status).toBe('pending');
+    expect(status.baseIndices).toEqual([1]);
+
+    ce.parse('F_n := F_{n-1} + 1').evaluate();
+    status = ce.getSequenceStatus('F');
+    expect(status.status).toBe('complete');
+    expect(status.baseIndices).toEqual([1]);
+    expect(ce.listSequences()).toEqual(['F']);
+    expect(ce.parse('F_3').evaluate().json).toBe(7);
+    // The base case of the enclosing `F` is not a base case of this one
+    expect(ce.parse('F_0').evaluate().json).not.toBe(10);
+
+    ce.popScope();
+
+    status = ce.getSequenceStatus('F');
+    expect(status.status).toBe('pending');
+    expect(status.hasRecurrence).toBe(false);
+    expect(status.baseIndices).toEqual([0]);
+    expect(ce.listSequences()).toEqual([]);
+
+    ce.parse('F_n := 2F_{n-1}').evaluate();
+    status = ce.getSequenceStatus('F');
+    expect(status.status).toBe('complete');
+    expect(status.baseIndices).toEqual([0]);
+    expect(ce.listSequences()).toEqual(['F']);
+    expect(ce.parse('F_3').evaluate().json).toBe(80);
+  });
+
+  // A child scope that does not declare `F` uses the `F` of the enclosing
+  // scope: the recurrence completes the pending definition of that `F`, and
+  // the sequence is declared in the enclosing scope.
+  test('a recurrence in a child scope completes the sequence of the enclosing scope', () => {
+    const ce = new ComputeEngine();
+    ce.parse('F_0 := 10').evaluate();
+
+    ce.pushScope();
+    ce.parse('F_n := F_{n-1} + 1').evaluate();
+    expect(ce.getSequenceStatus('F').status).toBe('complete');
+    expect(ce.parse('F_3').evaluate().json).toBe(13);
+    ce.popScope();
+
+    const status = ce.getSequenceStatus('F');
+    expect(status.status).toBe('complete');
+    expect(status.baseIndices).toEqual([0]);
+    expect(ce.parse('F_3').evaluate().json).toBe(13);
+  });
+
+  test('a checkpoint restore puts back the pending definitions of both scopes', () => {
+    const ce = new ComputeEngine();
+    ce.parse('F_0 := 10').evaluate();
+    ce.pushScope();
+    ce.declare('F', 'unknown');
+    ce.parse('F_1 := 5').evaluate();
+    const cp = ce.checkpoint();
+
+    // Without the declaration of the child scope, `F_2 := 7` is a base case
+    // of the `F` of the enclosing scope.
+    ce.undeclare('F');
+    expect(ce.getSequenceStatus('F').baseIndices).toEqual([0]);
+    ce.parse('F_2 := 7').evaluate();
+    expect(ce.getSequenceStatus('F').baseIndices).toEqual([0, 2]);
+
+    ce.restore(cp);
+
+    let status = ce.getSequenceStatus('F');
+    expect(status.status).toBe('pending');
+    expect(status.baseIndices).toEqual([1]);
+    ce.parse('F_n := F_{n-1} + 1').evaluate();
+    expect(ce.parse('F_3').evaluate().json).toBe(7);
+    ce.popScope();
+
+    status = ce.getSequenceStatus('F');
+    expect(status.status).toBe('pending');
+    expect(status.baseIndices).toEqual([0]);
+    ce.parse('F_n := F_{n-1} + 1').evaluate();
+    expect(ce.parse('F_3').evaluate().json).toBe(13);
+  });
+
+  test('popping a scope removes its pending definitions', () => {
+    const ce = new ComputeEngine();
+    ce.parse('G_0 := 1').evaluate();
+    expect(pendingCount(ce)).toBe(1);
+
+    ce.pushScope();
+    ce.parse('F_0 := 10').evaluate();
+    ce.declare('G', 'unknown');
+    ce.parse('G_0 := 2').evaluate();
+    expect(pendingCount(ce)).toBe(3);
+    ce.popScope();
+
+    expect(pendingCount(ce)).toBe(1);
+    expect(ce.getSequenceStatus('F').status).toBe('not-a-sequence');
+    expect(ce.getSequenceStatus('G').baseIndices).toEqual([0]);
+    ce.parse('F_n := F_{n-1} + 1').evaluate();
+    const status = ce.getSequenceStatus('F');
+    expect(status.status).toBe('pending');
+    expect(status.hasBase).toBe(false);
+  });
+
+  // A name of the standard library (`N`) is declared in the system scope.
+  // A sequence definition for it declares a new binding in the current
+  // scope, which shadows the library definition.
+  test('a sequence for a library name is declared in the current scope', () => {
+    const ce = new ComputeEngine();
+    ce.pushScope();
+    ce.parse('N_0 := 1').evaluate();
+    ce.parse('N_n := N_{n-1} + 1').evaluate();
+    expect(ce.parse('N_3').evaluate().json).toBe(4);
+    ce.popScope();
+    expect(ce.isSequence('N')).toBe(false);
+    expect(ce.getSequenceStatus('N').status).toBe('not-a-sequence');
   });
 });

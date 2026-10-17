@@ -2080,6 +2080,9 @@ function asBoxedType(t: unknown): BoxedType | undefined {
  *   protocol dispatcher), the specifier is removed from the copied
  *   signature: otherwise the new definition reads it as declared effects
  *   (`effectsDeclared`) and never derives them again.
+ * - When the patch states the effects (`effects`, `pure` or `drawsRandom`),
+ *   the specifier is removed from every arrow of the old signature that the
+ *   new definition keeps, so that the stated effects replace the old ones.
  * - When the patch replaces the signature and states no effects, the old
  *   effect set is carried over as the `effects` field, so that an extension
  *   cannot make an impure operator pure.
@@ -2091,8 +2094,10 @@ function asBoxedType(t: unknown): BoxedType | undefined {
  *   and effects as the old one does.
  * - `carry` also records that the new definition extends a standard-library
  *   definition when the patch, and every earlier extension, kept its
- *   `evaluate`, `canonical`, `compile` and `derivative`. Such a definition
- *   does not shadow the library name (`shadowsLibraryName()`,
+ *   `evaluate`, `canonical`, `compile` and `derivative`, and the
+ *   constructor did not remove the library `canonical` handler (it removes
+ *   it when a flag that the handler assumes changes, as with
+ *   `{ associative: false }` for `Add`). Such a definition does not shadow the library name (`shadowsLibraryName()`,
  *   `library-shadowing.ts`): `D`, compilation and the canonical folds keep
  *   treating the operator as the library one.
  *
@@ -2170,6 +2175,16 @@ function extendedOperatorDefinition(
   const armsOf = (t: Type): Type[] =>
     typeof t === 'object' && t.kind === 'intersection' ? t.types : [t];
   const oldSignature = old.signature.type;
+  // A patch that states the effects (`effects`, `pure` or `drawsRandom`)
+  // replaces the effect set of the old definition. The old signature carries
+  // that effect set in the effect specifier of each arrow, and the definition
+  // constructor reads such a specifier as declared effects: it throws when
+  // they differ from the stated ones. So every arrow of the old signature
+  // that the new definition keeps loses its effect specifier.
+  const statesEffects =
+    fields.effects !== undefined ||
+    fields.pure !== undefined ||
+    fields.drawsRandom !== undefined;
   let signature: Type | undefined = undefined;
   if (fields.signature !== undefined) signature = toType(fields.signature);
   else if (addSignature !== undefined) {
@@ -2177,14 +2192,14 @@ function extendedOperatorDefinition(
     // did before.
     signature = {
       kind: 'intersection',
-      types: [...armsOf(oldSignature), ...armsOf(toType(addSignature))],
+      types: [
+        ...armsOf(oldSignature).map((arm) =>
+          statesEffects ? stripArrowEffects(arm) : arm
+        ),
+        ...armsOf(toType(addSignature)),
+      ],
     };
   }
-
-  const statesEffects =
-    fields.effects !== undefined ||
-    fields.pure !== undefined ||
-    fields.drawsRandom !== undefined;
 
   // The effect deriver of a protocol dispatcher does not depend on the
   // definition object, so the new definition can use it. The deriver of a
@@ -2212,6 +2227,15 @@ function extendedOperatorDefinition(
     def.signature = old.effectsDeclared
       ? base
       : ce.type(stripArrowEffects(base.type));
+  }
+
+  if (signature === undefined && statesEffects) {
+    const current = asBoxedType(def.signature)?.type ?? oldSignature;
+    def.signature = ce.type(
+      typeof current === 'object' && current.kind === 'intersection'
+        ? { ...current, types: current.types.map(stripArrowEffects) }
+        : stripArrowEffects(current)
+    );
   }
 
   if (signature !== undefined) {
@@ -2272,7 +2296,17 @@ function extendedOperatorDefinition(
         ...old._typeProvenance,
         ...(installed._typeProvenance ?? []),
       ];
-    if (library !== undefined) markLibraryExtension(installed, library);
+    // The constructor can remove a handler that the patch did not name: it
+    // removes the library `canonical` handler of an arithmetic operator when
+    // the patch changes one of the flags that this handler assumes
+    // (`{ associative: false }` for `Add`). Such a definition no longer
+    // computes the canonical form of the library operator, so it is not
+    // marked as an extension of it, and it shadows the library name.
+    if (
+      library !== undefined &&
+      installed.canonical === (library as { canonical?: unknown }).canonical
+    )
+      markLibraryExtension(installed, library);
   };
 
   return { def, carry };
@@ -2613,7 +2647,7 @@ function removeBinding(ce: IComputeEngine, scope: Scope, name: string): void {
   // sequence definition is complete (`F_0 := 10` without `F_n := …`) are
   // removed with the binding. Otherwise a later declaration of the name
   // completes a sequence with the base cases of the removed declaration.
-  const restorePending = _removePendingSequence(ce, name, binding, scope);
+  const restorePending = _removePendingSequence(ce, name, scope);
   if (restorePending !== undefined)
     activeRollbackFrame(ce)?.record({ undo: restorePending });
 

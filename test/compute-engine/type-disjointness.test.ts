@@ -138,6 +138,34 @@ describe('BoxedType.isDisjointFrom', () => {
     expect(isSubtype('nothing', '!(boolean | nothing)')).toBe(false);
   });
 
+  // A tuple value has exactly as many components as its type, and no empty
+  // value inhabits two tuple types of different lengths, so tuples are
+  // separated by length and by a pair of disjoint components. A component
+  // that admits `nothing` makes the length of the values open (a `Nothing`
+  // written into a slot removes the slot), so no conclusion is drawn then.
+  it('separates tuple types by length and by component', () => {
+    expect(
+      ce.type('tuple<boolean>').isDisjointFrom('tuple<number, number>')
+    ).toBe(true);
+    expect(ce.type('tuple<boolean>').isDisjointFrom('tuple<number>')).toBe(
+      true
+    );
+    expect(
+      ce.type('tuple<string, integer>').isDisjointFrom('tuple<number, number>')
+    ).toBe(true);
+    expect(
+      ce.type('tuple<real, real>').isDisjointFrom('tuple<integer, number>')
+    ).toBe(false);
+    expect(
+      ce.type('tuple<number | boolean>').isDisjointFrom('tuple<boolean>')
+    ).toBe(false);
+    expect(
+      ce
+        .type('tuple<integer, integer | nothing>')
+        .isDisjointFrom('tuple<integer>')
+    ).toBe(false);
+  });
+
   // Characterization, not a guarantee: the predicate errs toward "may
   // overlap". Two same-category composites whose parameters cannot coincide
   // are NOT claimed disjoint — `list<never>` is a subtype of both, so the

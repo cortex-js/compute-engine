@@ -263,9 +263,17 @@ export function compile<
       // made with object spread loses the methods of a class-instance target,
       // and a hook that writes to `this` (such as `reset()`) writes to the
       // copy.
+      // The reachability memo of the constant folder (`foldReachMemo`) is
+      // replaced by an empty one for this call and restored with `varsKeys`.
+      // Its answers depend on the `vars` keys and on the engine's
+      // definitions, and both can change between two calls on the same
+      // target: an answer cached by a call without `u` among the keys would
+      // let a later call with `vars: { u }` fold a function that reads `u`.
       const vars = options.vars;
       const target = options.target;
       const previousVarsKeys = target.varsKeys;
+      const previousFoldReachMemo = target.foldReachMemo;
+      target.foldReachMemo = new Map();
       if (vars !== undefined && Object.keys(vars).length > 0)
         target.varsKeys = new Set([
           ...(previousVarsKeys ?? []),
@@ -318,6 +326,7 @@ export function compile<
         });
       } finally {
         target.varsKeys = previousVarsKeys;
+        target.foldReachMemo = previousFoldReachMemo;
       }
       return strictTypesChecked(expr, direct, options, undefined);
     }

@@ -221,12 +221,20 @@ describe('Tycho item 253: Abs over a union-typed point parameter', () => {
       );
       ce.declare('x', 'list<real>');
       ce.declare('y', 'real');
+      // At `tuple<real, real>`, the call is refused when it is boxed
+      // (`tuple<list<real>, real>` is disjoint from it), so the compiler
+      // sees an invalid expression. The other parameters admit the call, and
+      // the compiler refuses the tuple with a list coordinate.
       expect(() =>
         compile(ce.box(['k', ['Tuple', 'x', 'y']]), {
           to: 'javascript',
           fallback: false,
         } as any)
-      ).toThrow(/tuple with a list coordinate/);
+      ).toThrow(
+        type === 'tuple<real, real>'
+          ? /incompatible-type/
+          : /tuple with a list coordinate/
+      );
       ce.assign('x', ce.box(['List', 1, 2]));
       ce.assign('y', 3);
       const r = ce.box(['k', ['Tuple', 'x', 'y']]).N();

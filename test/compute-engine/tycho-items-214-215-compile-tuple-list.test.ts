@@ -156,13 +156,26 @@ describe('Tycho item 214: a point multiplied by a list compiles to a list of poi
     ]);
   });
 
-  test('Add and Divide of a point against a list fail closed (were a plausible zip)', () => {
-    // Interpreter: `(1,2) + [3,4]` is a per-element `incompatible-type`
-    // error and `(1,2) / [1,2]` stays inert — neither is `[4, 6]` / `[1, 1]`.
-    for (const latex of [String.raw`(1,2)+[3,4]`, String.raw`(1,2)/[1,2]`]) {
-      const { result } = compileJS(latex);
-      expect(result.success).toBe(false);
-    }
+  test('Add of a point and a list fails closed (was a plausible zip)', () => {
+    // Interpreter: `(1,2) + [3,4]` is an `incompatible-type` error, not
+    // `[4, 6]`.
+    const { result } = compileJS(String.raw`(1,2)+[3,4]`);
+    expect(result.success).toBe(false);
+  });
+
+  test('a point divided by a list compiles to the list of points the interpreter gives', () => {
+    // `(1,2) / [1,2]` is the point divided by each element,
+    // `[(1, 2), (1/2, 1)]`, as `(1,2)·[1, 1/2]` is. It was an inert `Divide`
+    // before, and the compiled form failed closed; a flat zip would give
+    // `[1, 1]`.
+    const { ce, result } = compileJS(String.raw`(1,2)/[1,2]`);
+    expect(run(result)).toEqual([
+      [1, 2],
+      [0.5, 1],
+    ]);
+    expect(ce.parse(String.raw`(1,2)/[1,2]`).N().toString()).toBe(
+      '[(1, 2),(0.5, 1)]'
+    );
   });
 
   test('controls: scalar × list and scalar × point keep compiling unchanged', () => {

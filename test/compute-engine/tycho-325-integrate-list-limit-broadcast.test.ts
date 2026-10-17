@@ -287,6 +287,14 @@ describe('Tycho 325: Map(E, G)', () => {
 describe('Tycho 325: s assigned in a child scope', () => {
   test('ce.pushScope(); ce.assign(s, 0.577)', () => {
     const ce = engineWithE();
+    // A free symbol of a stored function body resolves in the scope where the
+    // body was defined, not in the scope of the call. `E` is defined in the
+    // global scope, so a host that assigns `s` in a child scope must first
+    // declare `s` in the global scope: otherwise the assignment declares a
+    // new `s` in the child scope, the body of `E` does not see it, and `E(0)`
+    // stays symbolic. (This test used to pass without the declaration only
+    // because `s`, a unit name, was declared in the system scope.)
+    ce.declare('s', 'number');
     ce.assign('G', ce.parse('[-1, 0, 1]'));
     ce.pushScope();
     try {

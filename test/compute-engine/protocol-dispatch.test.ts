@@ -989,6 +989,112 @@ const r = Map(Negatable.negated, [1, 2])`
       )
     ).toBe('protocol-unknown');
   });
+
+  test('a pre-boxed protocol symbol in an unboxed `Field`: both spellings agree', () => {
+    // `outer` is the symbol `Comparable` boxed at the top level, where it
+    // names the protocol and has no value. An inner scope declares a
+    // constant `Comparable` that holds a dictionary. A symbol whose binding
+    // has no value reads the innermost binding of its name when it is
+    // evaluated (docs/SCOPING-MODEL.md, ruling of 2026-08-22), so in that
+    // scope the call reaches the inner `compare`. The named-argument check
+    // looks the name up for the same reason, and the raw `Field` that holds
+    // `outer` and the pre-boxed `Field` give the same call.
+    const e = ce();
+    const named = (n: string, v: unknown) => ['NamedArgument', { str: n }, v];
+    const outer = e.symbol('Comparable');
+    e.pushScope();
+    try {
+      e.declare('Comparable', {
+        isConstant: true,
+        value: [
+          'Dictionary',
+          ['Tuple', "'compare'", ['Function', { str: 'inner' }, 'x', 'y']],
+        ],
+      } as any);
+      const both = (args: unknown[]) => {
+        const mixed = e.box([
+          'Apply',
+          ['Field', outer, { str: 'compare' }],
+          ...args,
+        ] as any);
+        const boxed = e.box([
+          'Apply',
+          e.function('Field', [outer, e.string('compare')]),
+          ...args,
+        ] as any);
+        expect(mixed.toString()).toBe(boxed.toString());
+        const value = mixed.evaluate().toString();
+        expect(boxed.evaluate().toString()).toBe(value);
+        return value;
+      };
+      expect(both([{ str: 'a' }, { str: 'b' }])).toBe('"inner"');
+      expect(both([named('y', { str: 'b' }), named('x', { str: 'a' })])).toBe(
+        '"inner"'
+      );
+      expect(
+        errorCode(
+          both([named('other', { str: 'b' }), named('self', { str: 'a' })])
+        )
+      ).toBe('argument-name-unknown');
+    } finally {
+      e.popScope();
+    }
+    // Without the inner declaration, the same symbol names the protocol.
+    const top = e.box([
+      'Apply',
+      ['Field', outer, { str: 'compare' }],
+      named('other', { str: 'b' }),
+      named('self', { str: 'a' }),
+    ] as any);
+    expect(top.evaluate().toString()).toBe('"proto"');
+  });
+
+  test('a pre-boxed symbol bound to a constant is not read as the protocol', () => {
+    // `outer` is bound to a CONSTANT `Comparable` that holds a dictionary,
+    // and an inner scope declares `Comparable` again with no value. A
+    // symbol bound to a constant reads that binding when it is evaluated,
+    // so the call runs the field of the dictionary, `g`. The names of a
+    // named call are not matched against the protocol requirement: `g`
+    // gives no names, so they are unavailable.
+    const e = ce();
+    const named = (n: string, v: unknown) => ['NamedArgument', { str: n }, v];
+    e.declare('g', {
+      type: 'function',
+      value: ['Function', ['Tuple', { str: 'g' }, 'p', 'q'], 'p', 'q'],
+    } as any);
+    e.pushScope();
+    try {
+      e.declare('Comparable', {
+        isConstant: true,
+        value: ['Dictionary', ['Tuple', "'compare'", 'g']],
+      } as any);
+      const outer = e.symbol('Comparable');
+      e.pushScope();
+      try {
+        e.declare('Comparable', 'unknown');
+        const callee = ['Field', outer, { str: 'compare' }];
+        expect(
+          e
+            .box(['Apply', callee, { str: 'a' }, { str: 'b' }] as any)
+            .evaluate()
+            .toString()
+        ).toBe('("g", "a", "b")');
+        const viaNames = e.box([
+          'Apply',
+          callee,
+          named('other', { str: 'b' }),
+          named('self', { str: 'a' }),
+        ] as any);
+        expect(errorCode(viaNames.evaluate().toString())).toBe(
+          'argument-names-unavailable'
+        );
+      } finally {
+        e.popScope();
+      }
+    } finally {
+      e.popScope();
+    }
+  });
 });
 
 describe('host implementations dispatch too', () => {

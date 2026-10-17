@@ -170,6 +170,138 @@ describe('the derivative of a caller-library operator', () => {
         .toString()
     ).toBe('2a * t');
   });
+
+  // The `evaluate` handler of `F2` is MathJSON, so its function literal is
+  // stored in a non-canonical form. The multi-index `Derivative`
+  // differentiates the canonical form of the literal.
+  test('a multi-index Derivative of a MathJSON literal', () => {
+    const assert = jest.spyOn(console, 'assert').mockImplementation(() => {});
+    try {
+      // F2(x, y) = x·y², ∂F2/∂y = 2xy, ∂²F2/∂x∂y = 2y
+      const first = ce.box(['Derivative', 'F2', 0, 1]).evaluate();
+      expect(first.toString()).toBe('(x, y) => 2x * y');
+      // The second request finds the closed form of the first in the memo.
+      expect(ce.box(['Derivative', 'F2', 0, 1]).evaluate()).toBe(first);
+      for (let i = 0; i < 2; i++) {
+        expect(
+          ce.box(['Apply', ['Derivative', 'F2', 0, 1], 2, 3]).evaluate().re
+        ).toBe(12);
+        expect(
+          ce.box(['Apply', ['Derivative', 'F2', 1, 1], 2, 3]).evaluate().re
+        ).toBe(6);
+      }
+      const failed = assert.mock.calls.filter((call) => !call[0]);
+      expect(failed).toEqual([]);
+    } finally {
+      assert.mockRestore();
+    }
+  });
+});
+
+// A lazy operator holds its operands: they are statements, conditions or
+// binders. `D` must not run its `evaluate` handler on fabricated wildcard
+// operands to find a body: the handler can run statements, throw, or loop.
+describe('the derivative of a lazy caller-library operator', () => {
+  const calls: string[] = [];
+  const HELD_LIBRARY: LibraryDefinition = {
+    name: 'held',
+    definitions: {
+      Held: {
+        lazy: true,
+        signature: '(any) -> number',
+        evaluate: (ops) => {
+          calls.push(ops.map((op) => op.toString()).join(', '));
+          throw new Error('Held evaluated');
+        },
+      },
+      HeldCube: {
+        lazy: true,
+        signature: '(number) -> number',
+        evaluate: ['Function', ['Power', 'x', 3], 'x'],
+      },
+    },
+  };
+  const ce = new ComputeEngine({
+    libraries: [...ComputeEngine.getStandardLibrary(), HELD_LIBRARY],
+  });
+
+  test('does not run the evaluate handler and stays symbolic', () => {
+    calls.length = 0;
+    const d = ce.box(['D', ['Held', ['Power', 'x', 2]], 'x']).evaluate();
+    expect(d.toString()).toBe('D(Held(x^2), x)');
+    expect(ce.box(['Derivative', 'Held']).evaluate().operator).toBe(
+      'Derivative'
+    );
+    expect(calls).toEqual([]);
+  });
+
+  test('of a declared lazy operator does not run the evaluate handler', () => {
+    const declared = new ComputeEngine();
+    const declaredCalls: string[] = [];
+    declared.declare('Held', {
+      lazy: true,
+      signature: '(any) -> number',
+      evaluate: (ops) => {
+        declaredCalls.push(ops.map((op) => op.toString()).join(', '));
+        throw new Error('Held evaluated');
+      },
+    });
+    const d = declared.box(['D', ['Held', ['Power', 'x', 2]], 'x']).evaluate();
+    expect(d.toString()).toBe('D(Held(x^2), x)');
+    expect(declaredCalls).toEqual([]);
+  });
+
+  test('with a function-literal handler differentiates the literal', () => {
+    expect(
+      ce
+        .box(['D', ['HeldCube', ['Power', 'x', 2]], 'x'])
+        .evaluate()
+        .toString()
+    ).toBe('6x^5');
+    expect(ce.box(['Derivative', 'HeldCube']).evaluate().toString()).toBe(
+      '(x) => 3x^2'
+    );
+  });
+
+  test('of a library lazy operator does not run its loop', () => {
+    expect(ce.box(['Derivative', 'Loop']).evaluate().operator).toBe(
+      'Derivative'
+    );
+  });
+
+  test('of If and Which stays symbolic', () => {
+    // `If(_)` and `Which(_)` are invalid: `If` needs a then branch, and
+    // `Which` an even number of operands. There is no function to
+    // differentiate.
+    expect(ce.box(['Derivative', 'If']).evaluate().operator).toBe('Derivative');
+    expect(ce.box(['Derivative', 'Which']).evaluate().operator).toBe(
+      'Derivative'
+    );
+    // `If(x)` is `If(x, Error("missing"))`, and the error is the value.
+    expect(ce.box(['D', ['If', 'x'], 'x']).evaluate().operator).toBe('Error');
+  });
+
+  test('of Block', () => {
+    // `Block(x)` has the value `x`, so `Block` applied to one argument is the
+    // identity function.
+    expect(ce.box(['Derivative', 'Block']).evaluate().toString()).toBe(
+      '(x) => 1'
+    );
+    expect(
+      ce
+        .box(['D', ['Block', ['Power', 'x', 2]], 'x'])
+        .evaluate()
+        .toString()
+    ).toBe('2x');
+    // A block of several statements has the value of the last one, which
+    // can read a local variable assigned before it: stay symbolic. Before,
+    // the first statement was differentiated, and the result was 3.
+    expect(
+      ce
+        .box(['D', ['Block', ['Multiply', 3, 'x'], ['Power', 'x', 2]], 'x'])
+        .evaluate().operator
+    ).toBe('D');
+  });
 });
 
 describe('the derivative of a user function that shadows a library name', () => {

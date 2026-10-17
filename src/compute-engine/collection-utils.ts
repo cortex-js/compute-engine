@@ -2033,6 +2033,10 @@ export function isProvablyNumberList(expr: Expression): boolean {
     return expr.nops > 0 && expr.ops.every((op) => isProvablyScalarNumber(op));
   if (isFunction(expr, 'When') && expr.nops === 2)
     return isProvablyNumberList(expr.op1);
+  // The negation of a list of numbers is a list of numbers. A difference is
+  // canonicalized to a sum with the negated subtrahend, so without this
+  // `(1, 2) - [1, 2]` was not rejected while `(1, 2) + [1, 2]` was.
+  if (isFunction(expr, 'Negate')) return isProvablyNumberList(expr.op1);
   if (isSymbol(expr)) {
     const def = expr.valueDefinition;
     if (def === undefined || def.inferredType) return false;
@@ -2042,6 +2046,42 @@ export function isProvablyNumberList(expr: Expression): boolean {
     return el !== 'never' && isSubtype(el, 'number');
   }
   return false;
+}
+
+/**
+ * Is `expr` PROVABLY a number or a list of numbers, without saying which —
+ * proof enough to REJECT a sum of it with a point at canonicalization?
+ *
+ * Recognized: a symbol whose DECLARED (not inferred) type, without its
+ * absence arm, is a union whose every arm is a number or a list of numbers,
+ * with at least one list arm (`u: number | list<number>`), and the negation
+ * of such an operand. A point plus a number is an `incompatible-type` error,
+ * and so is a point plus a list of numbers (`isProvablyNumberList`), so the
+ * sum is an error whichever arm the value holds. The definite cases are
+ * `isProvablyScalarNumber` and `isProvablyNumberList`.
+ */
+export function isProvablyNumberOrNumberList(expr: Expression): boolean {
+  if (isFunction(expr, 'Negate')) return isProvablyNumberOrNumberList(expr.op1);
+  if (!isSymbol(expr)) return false;
+  const def = expr.valueDefinition;
+  if (def === undefined || def.inferredType) return false;
+  const t = resolveTypeAlias(
+    stripMissingFromType(resolveTypeAlias(expr.type.type))
+  );
+  if (typeof t === 'string' || t.kind !== 'union') return false;
+  let list = false;
+  for (const arm0 of t.types) {
+    const arm = resolveTypeAlias(arm0);
+    if (arm === 'never') return false;
+    if (typeof arm !== 'string' && arm.kind === 'list') {
+      const el = resolveTypeAlias(arm.elements);
+      if (el === 'never' || !isSubtype(el, 'number')) return false;
+      list = true;
+      continue;
+    }
+    if (!isSubtype(arm, 'number')) return false;
+  }
+  return list;
 }
 
 /**
@@ -4063,6 +4103,37 @@ export function addsPointToNumberCollection(
 }
 
 /**
+ * Whether an application of `operator` to operands of `operandTypes` is one
+ * of the point-arithmetic mistakes that `canonicalAdd` and `canonicalDivide`
+ * reject at boxing, read from the operand types: a sum or difference of a
+ * point (or a list of points) and a SCALAR number (`(1, 2) + 3` is an
+ * `incompatible-type` error), and a quotient whose divisor is a point or a
+ * list of points (`3 / (1, 2)` is the `no-division-by-point` error).
+ *
+ * Canonicalization rejects a scalar only when it is provably a number (a
+ * literal or a declared symbol, not an inferred one), so the caller says
+ * which operands count as scalars (`isScalar`). Used by the derivation from
+ * argument types (`deriveApplicationType`), which types an application it
+ * never canonicalizes and so must give the refusal that canonicalization
+ * gives.
+ */
+export function isPointArithmeticError(
+  operator: string,
+  operandTypes: ReadonlyArray<Type>,
+  isScalar: (i: number) => boolean
+): boolean {
+  const isPointOrPointList = (t: Type) =>
+    tupleCarrierType(t) || pointListElementType(t) !== undefined;
+  if (operator === 'Divide')
+    return operandTypes.slice(1).some(isPointOrPointList);
+  if (operator !== 'Add' && operator !== 'Subtract') return false;
+  return (
+    operandTypes.some(isPointOrPointList) &&
+    operandTypes.some((t, i) => !isPointOrPointList(t) && isScalar(i))
+  );
+}
+
+/**
  * Whether `type`, with its `missing` arm removed, is a list or an indexed
  * collection whose leaf elements are numbers: `list<integer>`,
  * `vector<integer^4>`, `matrix<real^(2x2)>`, `list<list<number>>` or
@@ -4077,6 +4148,20 @@ function isNumberCollectionType(type: Type): boolean {
   // it must be excluded here: `Missing - (1, 2)` is an absent operand beside a
   // point, typed `missing | tuple<…>`, not a list of numbers beside a point.
   if (s === 'never') return false;
+  // A union of numbers and collections of numbers with at least one
+  // collection arm (`number | list<number>`): beside a point, every arm is
+  // an error (a point plus a number, or a point plus a collection of
+  // numbers), so the union counts. A union with no collection arm is a
+  // plain number, which this predicate does not cover.
+  if (typeof s === 'object' && s.kind === 'union')
+    return (
+      s.types.some((arm) => isNumberCollectionType(arm)) &&
+      s.types.every(
+        (arm) =>
+          isNumberCollectionType(arm) ||
+          (resolveTypeAlias(arm) !== 'never' && isSubtype(arm, 'number'))
+      )
+    );
   // A bare spelling that names a list of numbers (`range`, a subtype of
   // `list<integer>`; not the bare `list`, whose elements are unknown).
   if (typeof s === 'string') return isSubtype(s, 'list<number>');

@@ -1124,7 +1124,7 @@ function hostSolveRules(rules: SolveRuleSet): {
  * literal `Power(_x, 2)`, and `solve.power-negative-root` reads the parity of
  * the exponent (an even `n` gives the root `-x` beside `x`). A float exponent
  * is not an integer degree, so these templates are left out when the
- * equation has one (`floatPowerOfUnknown`).
+ * equation has one (`hasFloatPowerOfUnknown`).
  */
 const DEGREE_TEMPLATE_IDS: ReadonlySet<string> = new Set([
   'solve.quadratic-no-constant-zero',
@@ -1132,19 +1132,6 @@ const DEGREE_TEMPLATE_IDS: ReadonlySet<string> = new Set([
   'solve.quadratic-formula-positive',
   'solve.quadratic-formula-negative',
   'solve.power-negative-root',
-]);
-
-/**
- * `DEGREE_TEMPLATE_IDS` and the general power template `solve.power`. The
- * root `(-b/a)^(1/n)` of that template folds `1/2.0` to the exact `1/2`, so
- * for a float exponent with an integer value it reads `2.0` as the degree
- * `2`: `x^{2.0} = 4` gave the exact root `2`. For such an exponent the
- * template is left out too. A float exponent with a value that is not an
- * integer (`x^{2.5} = 4`) keeps the template, and its root is a float.
- */
-const INTEGER_DEGREE_TEMPLATE_IDS: ReadonlySet<string> = new Set([
-  ...DEGREE_TEMPLATE_IDS,
-  'solve.power',
 ]);
 
 /** The rule set `rules` without the templates whose ids are in `ids`. */
@@ -1175,34 +1162,27 @@ function withoutTemplates(
 
 /**
  * Whether `expr` has a power whose base contains the unknown `_x` and whose
- * exponent is a float, such as `x^{2.0}` or `(x + 1)^{2.0}`: `'integer'` when
- * one such exponent has an integer value (`2.0`), `'float'` when every one
- * has a value that is not an integer (`2.5`), and `undefined` when there is
- * none.
+ * exponent is a float, such as `x^{2.0}`, `x^{2.5}` or `(x + 1)^{2.0}`.
  *
  * A float exponent is not a polynomial degree, even when its value is an
  * integer, so the templates that read a degree must not match it. The
  * pattern matcher compares number literals by value: without this test, the
  * literal `2` of the quadratic templates matches the float `2.0`, and
  * `x^{2.0} + 3x + 2 = 0` was solved as the quadratic `x^2 + 3x + 2 = 0`.
+ * The general power template `solve.power` does not read a degree and is
+ * kept: its root `(-b/a)^(1/n)` is a float for a float `n`, so `x^{2.0} = 4`
+ * has the float root `2.0`.
  */
-function floatPowerOfUnknown(
-  expr: Expression
-): 'integer' | 'float' | undefined {
-  if (!isFunction(expr)) return undefined;
-  let result: 'integer' | 'float' | undefined = undefined;
+function hasFloatPowerOfUnknown(expr: Expression): boolean {
+  if (!isFunction(expr)) return false;
   if (
     expr.operator === 'Power' &&
     expr.op1.has('_x') &&
     isNumber(expr.op2) &&
     !expr.op2.isExact
   )
-    result = expr.op2.isInteger === true ? 'integer' : 'float';
-  for (const op of expr.ops) {
-    if (result === 'integer') return result;
-    result = floatPowerOfUnknown(op) ?? result;
-  }
-  return result;
+    return true;
+  return expr.ops.some((op) => hasFloatPowerOfUnknown(op));
 }
 
 /**
@@ -3858,14 +3838,10 @@ export function findUnivariateRoots(
     const ruleParts = hostSolveRules(rules);
     // The built-in templates for `expr`: without the ones that read an
     // integer degree when `expr` has a float power of the unknown.
-    const builtInTemplatesFor = (expr: Expression): SolveRuleSet => {
-      const float = floatPowerOfUnknown(expr);
-      if (float === undefined) return ruleParts.builtIn;
-      return withoutTemplates(
-        ruleParts.builtIn,
-        float === 'integer' ? INTEGER_DEGREE_TEMPLATE_IDS : DEGREE_TEMPLATE_IDS
-      );
-    };
+    const builtInTemplatesFor = (expr: Expression): SolveRuleSet =>
+      hasFloatPowerOfUnknown(expr)
+        ? withoutTemplates(ruleParts.builtIn, DEGREE_TEMPLATE_IDS)
+        : ruleParts.builtIn;
     const matchRootsSteps = (expr: Expression): RuleSteps => {
       const matchOptions = {
         useVariations: true,

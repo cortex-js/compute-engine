@@ -675,6 +675,11 @@ describe('A point parameter called with a list of points maps over the points', 
       const r = ce.box(['k', ['Tuple', 'x', 'y']]).N();
       expect(r.operator).toBe('Error');
       expect(r.op1.op1.string).toBe('incompatible-type');
+      // At a parameter whose components are scalars, the call is refused
+      // when it is boxed: `tuple<list<real>, real>` is disjoint from
+      // `tuple<real, real>`, so the compiler sees an invalid expression. At a
+      // `broadcastable` component, the call is admitted, and the compiler
+      // refuses the tuple with a list coordinate.
       expect(() =>
         compile(
           pointEngine(param, result, false).box(['k', ['Tuple', 'x', 'y']]),
@@ -683,7 +688,11 @@ describe('A point parameter called with a list of points maps over the points', 
             fallback: false,
           } as any
         )
-      ).toThrow(/tuple with a list coordinate/);
+      ).toThrow(
+        param.startsWith('tuple<broadcastable')
+          ? /tuple with a list coordinate/
+          : /incompatible-type/
+      );
     }
   });
 

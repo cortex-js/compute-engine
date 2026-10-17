@@ -602,6 +602,39 @@ export function provablyDisjoint(a: Type, b: Type): boolean {
     stringVsParameterized(a, b) ?? stringVsParameterized(b, a);
   if (stringDisjoint !== undefined) return stringDisjoint;
 
+  // Two tuple types. A tuple value has exactly as many components as its
+  // type has elements (`isSubtype` requires the same length), so two tuple
+  // types of different lengths share no value, and neither do two tuple
+  // types with a pair of disjoint components at the same position. The
+  // "an empty collection inhabits both" caveat at the bottom of this
+  // function does not apply: the empty tuple inhabits `tuple<>` only.
+  //
+  // The rule is not applied when a component admits `nothing`: writing
+  // `Nothing` into a positional slot removes the slot, so such a tuple type
+  // can hold values that are shorter than its type, and the positions of the
+  // following components move.
+  //
+  // `box.ts` keeps an argument-type error only when every candidate
+  // parameter is provably disjoint from the operand
+  // (`keepProvisionalOperands`). Without this rule, a symbol typed
+  // `tuple<boolean>` was accepted at a `tuple<number, number>` parameter,
+  // which a tuple literal `(True)` of the same type is not.
+  if (
+    typeof a === 'object' &&
+    a.kind === 'tuple' &&
+    typeof b === 'object' &&
+    b.kind === 'tuple'
+  ) {
+    const admitsNothing = (e: { type: Type }) => isSubtype('nothing', e.type);
+    if (!a.elements.some(admitsNothing) && !b.elements.some(admitsNothing)) {
+      if (a.elements.length !== b.elements.length) return true;
+      if (
+        a.elements.some((e, i) => provablyDisjoint(e.type, b.elements[i].type))
+      )
+        return true;
+    }
+  }
+
   // Category test: every type sits in a primitive "bucket" the lattice knows
   // about (`list`, `tuple`, `string`, `function`, …). If two buckets have an
   // empty meet, no value can be in both — a `list<integer>` is not a `string`,

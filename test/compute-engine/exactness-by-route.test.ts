@@ -139,6 +139,25 @@ describe('THE API ROUTE', () => {
   test('ce.box() of an integer-valued big decimal is exact', () => {
     expect(ce.box(new BigDecimal('10000000')).isExact).toBe(true);
   });
+
+  // A boxed float divisor or dividend is not folded to a rational, also when
+  // its value is an integer. Before, the function route read the float `2.0`
+  // as the integer `2` and `Divide(1, 2.0)` was the exact `1/2`, while the
+  // MathJSON route gave the float `0.5`.
+  test('a Divide with a float operand is not a rational, on every route', () => {
+    const two = ce.number('2.0');
+    expect(two.isExact).toBe(false);
+    const fn = (a: Expression, b: Expression) =>
+      leaves(ce.function('Divide', [a, b]));
+    expect(fn(ce.One, two)).toBe('0.5~');
+    expect(leaves(ce.box(['Divide', 1, { num: '2.0' }]))).toBe('0.5~');
+    expect(fn(ce.number(3), two)).toBe('Divide(3, 2~)');
+    expect(leaves(ce.box(['Divide', 3, { num: '2.0' }]))).toBe('Divide(3, 2~)');
+    expect(fn(ce.number('3.0'), ce.number(2))).toBe('Divide(3~, 2)');
+    expect(leaves(ce.function('Rational', [ce.One, two]))).toBe('0.5~');
+    // Two exact integers are still a rational.
+    expect(fn(ce.number(3), ce.number(2))).toBe('3/2');
+  });
 });
 
 describe('AN EXACT INTEGER COMPUTATION WITH BIG DECIMALS', () => {

@@ -481,6 +481,30 @@ describe('declare extend: a standard-library operator stays a library operator',
     ce.declare('Sin', { description: 'seven' }, { extend: true });
     expect(ce.box(['D', ['Sin', 'x'], 'x']).evaluate().toString()).toBe('0');
   });
+
+  test('Add extended with associative: false is a user definition', () => {
+    // The library `canonical` handler of `Add` flattens nested sums. The
+    // definition constructor removes it when the flag changes, so the
+    // extension no longer computes the library canonical form, and a nested
+    // `Add` is not flattened.
+    const ce = new ComputeEngine();
+    ce.declare('Add', { associative: false }, { extend: true });
+    const def = ce.lookupDefinition('Add')!.operator!;
+    expect(def.associative).toBe(false);
+    expect(ce.box(['Add', ['Add', 'a', 'b'], 'c']).json).toEqual([
+      'Add',
+      ['Add', 'a', 'b'],
+      'c',
+    ]);
+    // A later extension that keeps the flag does not make it the library
+    // operator again
+    ce.declare('Add', { description: 'sum' }, { extend: true });
+    expect(ce.box(['Add', ['Add', 'a', 'b'], 'c']).json).toEqual([
+      'Add',
+      ['Add', 'a', 'b'],
+      'c',
+    ]);
+  });
 });
 
 describe('declare extend: derived effects and signatures stay derived', () => {
@@ -632,5 +656,45 @@ describe('declare extend: carried fields', () => {
     expect(() =>
       ce.declare('Sq', { signature: '(1) -> integer' }, { extend: true })
     ).toThrow(/is not a subtype/);
+  });
+
+  test('stated effects replace the effects of the old signature', () => {
+    // The old signature carries the effect set (`random`). A patch that
+    // states other effects, with an implementation that matches them,
+    // replaces that effect set.
+    const declareDrawing = (ce: ComputeEngine) =>
+      ce.declare('Draw', {
+        signature: '(number) random -> number',
+        evaluate: (_ops, { engine }) => engine.number(Math.random()),
+      });
+
+    let ce = new ComputeEngine();
+    declareDrawing(ce);
+    ce.declare('Draw', { effects: [], evaluate: ([x]) => x }, { extend: true });
+    let def = ce.lookupDefinition('Draw')!.operator!;
+    expect(def.signature.toString()).toBe('(number) pure -> number');
+    expect(def.effects).toEqual([]);
+    expect(def.drawsRandom).toBe(false);
+    expect(ce.box(['Draw', 3]).evaluate().toString()).toBe('3');
+
+    // The legacy `pure` flag states the effects too
+    ce = new ComputeEngine();
+    declareDrawing(ce);
+    ce.declare('Draw', { pure: true, evaluate: ([x]) => x }, { extend: true });
+    def = ce.lookupDefinition('Draw')!.operator!;
+    expect(def.pure).toBe(true);
+    expect(def.drawsRandom).toBe(false);
+
+    // With `addSignature`, the arms of the old signature lose their effects
+    ce = new ComputeEngine();
+    declareDrawing(ce);
+    ce.declare(
+      'Draw',
+      { effects: [], addSignature: '(string) -> string', evaluate: ([x]) => x },
+      { extend: true }
+    );
+    def = ce.lookupDefinition('Draw')!.operator!;
+    expect(def.effects).toEqual([]);
+    expect(ce.box(['Draw', 3]).evaluate().toString()).toBe('3');
   });
 });

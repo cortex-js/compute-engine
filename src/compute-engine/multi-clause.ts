@@ -62,7 +62,8 @@ import {
   EffectContractError,
   inferFunctionLiteralEffects,
 } from './boxed-expression/effects-inference.js';
-import { apply, lookup } from './function-utils.js';
+import { apply, lookup, type ApplyOptions } from './function-utils.js';
+import { runWithEvaluationEffects } from './effects-registry.js';
 import { paramsAreScalar } from './boxed-expression/boxed-function.js';
 import { isMintedConstructor } from './type-constructors.js';
 import { isProtocolDispatcher } from './engine-protocols.js';
@@ -1297,8 +1298,7 @@ function installClauseList(
     // no clause can consume.
     broadcastable:
       !hold && bindPositions.length === 0 && paramsAreScalar(signature),
-    evaluate: (ops, options) =>
-      selectAndApply(ce, id, frozen, ops, options, hold, attrs),
+    evaluate: selectingEvaluate(ce, id, frozen, hold, attrs),
   };
 
   if (existing !== undefined) updateDef(ce, id, existing, def);
@@ -1368,7 +1368,144 @@ function selectAndApply(
       acc = ce.function(id, [acc, ops[i]]).evaluate(options);
     return acc;
   }
+  const choice = selectClause(ce, id, clauses, ops, options, hold, attrs);
+  if (choice.kind === 'answer') return choice.value;
+  return apply(
+    choice.literal,
+    choice.ops,
+    choice.options,
+    'bubble',
+    choice.declined
+  );
+}
 
+/**
+ * The asynchronous twin of `selectAndApply()`: the same clause is selected
+ * (`selectClause`), and its literal is applied with its statements awaited
+ * (`ApplyOptions.awaitStatements`). An application of an operator that has
+ * only an `evaluateAsync` handler in the body of the clause is then
+ * evaluated: with `h(n: integer) = AsyncOnly(n)`, `h(1).evaluateAsync()`
+ * gave `AsyncOnly(1)` unevaluated, because the asynchronous route ran the
+ * synchronous selector. The steps of an associative fold are awaited too.
+ *
+ * `options` carry the registry, the context stack and the precision window
+ * of the evaluation (`selectingEvaluate` puts them there), and they go to
+ * the application and to each step of the fold.
+ */
+async function selectAndApplyAwaiting(
+  ce: IComputeEngine,
+  id: string,
+  clauses: ReadonlyArray<FunctionClause>,
+  ops: ReadonlyArray<Expression>,
+  options: ApplyOptions,
+  hold: boolean,
+  attrs: ClauseAttributes
+): Promise<Expression | undefined> {
+  const evaluation: ApplyOptions = {
+    numericApproximation: options.numericApproximation,
+    signal: options.signal,
+    _effects: options._effects,
+    _contextStack: options._contextStack,
+    _precisionWindow: options._precisionWindow,
+  };
+  // The associative fold of `selectAndApply()`. The call of each later step
+  // is built after an `await`, so it is built in the context of this
+  // evaluation (`withEvaluationContext`).
+  if (attrs.associative === true && ops.length > 2) {
+    let acc = await ce.function(id, [ops[0], ops[1]]).evaluateAsync(evaluation);
+    for (let i = 2; i < ops.length; i++) {
+      const left = acc;
+      acc = await ce
+        .withEvaluationContext(evaluation, () =>
+          ce.function(id, [left, ops[i]])
+        )
+        .evaluateAsync(evaluation);
+    }
+    return acc;
+  }
+  const choice = selectClause(ce, id, clauses, ops, options, hold, attrs);
+  if (choice.kind === 'answer') return choice.value;
+  return apply(
+    choice.literal,
+    choice.ops,
+    { ...evaluation, ...choice.options, awaitStatements: true },
+    'bubble',
+    choice.declined
+  );
+}
+
+/**
+ * The `evaluate` handler of a clause list: it selects and applies a clause
+ * (`selectAndApply`). The handler carries an `applyAwaiting` property, which
+ * the asynchronous route of a call (`boxed-function.ts`, step 5) calls in
+ * place of the handler: it selects the same clause and awaits its body
+ * (`selectAndApplyAwaiting`). The handler of a single-literal user function
+ * has the same property (`boxed-operator-definition.ts`), and this one
+ * mirrors it: the application runs on a private copy of the
+ * evaluation-context stack, so the frame of the call stays on it while the
+ * application is suspended, and an application of another evaluation does
+ * not see it.
+ */
+function selectingEvaluate(
+  ce: IComputeEngine,
+  id: string,
+  clauses: ReadonlyArray<FunctionClause>,
+  hold: boolean,
+  attrs: ClauseAttributes
+): NonNullable<OperatorDefinition['evaluate']> {
+  const evaluate = (
+    ops: ReadonlyArray<Expression>,
+    options: { numericApproximation?: boolean }
+  ) => selectAndApply(ce, id, clauses, ops, options, hold, attrs);
+  Object.defineProperty(evaluate, 'applyAwaiting', {
+    value: (xs: ReadonlyArray<Expression>, options: ApplyOptions) => {
+      const effects = options._effects ?? ce._evaluationEffects ?? ce.effects;
+      const stack = [...(options._contextStack ?? ce._evalContextStack)];
+      const carried: ApplyOptions = {
+        ...options,
+        _effects: effects,
+        _contextStack: stack,
+      };
+      return runWithEvaluationEffects(
+        ce,
+        effects,
+        () => selectAndApplyAwaiting(ce, id, clauses, xs, carried, hold, attrs),
+        stack,
+        options._precisionWindow
+      );
+    },
+  });
+  return evaluate;
+}
+
+/** The decision of the clause selector for one call: an `answer` (a value,
+ * an error value, or `undefined` for an inert call), or the literal of the
+ * selected clause with the operands and the options to `apply()` it with,
+ * and the expression that a declined application answers. */
+type ClauseChoice =
+  | { kind: 'answer'; value: Expression | undefined }
+  | {
+      kind: 'apply';
+      literal: Expression;
+      ops: ReadonlyArray<Expression>;
+      options: ApplyOptions;
+      declined: Expression;
+    };
+
+/**
+ * The clause selection of `selectAndApply()`, shared by its synchronous and
+ * its asynchronous routes (`selectAndApplyAwaiting`). The callers do the
+ * associative fold before this runs.
+ */
+function selectClause(
+  ce: IComputeEngine,
+  id: string,
+  clauses: ReadonlyArray<FunctionClause>,
+  ops: ReadonlyArray<Expression>,
+  options: { numericApproximation?: boolean },
+  hold: boolean,
+  attrs: ClauseAttributes
+): ClauseChoice {
   // A definition that is in clause storage ONLY because of its attributes —
   // hold, bind, or an algebraic flag on a lone clause — has nothing to
   // select between and is applied like the plain single-function
@@ -1400,33 +1537,39 @@ function selectAndApply(
       const params = functionLiteralParameters(clauses[0].literal);
       for (let i = 0; i < ops.length && i < params.length; i++)
         if (bindNames.includes(params[i].name) && !isSymbol(ops[i]))
-          return ce._fn('Error', [
-            ce.string('bind-symbol-expected'),
-            ce.function(id, [...ops], { form: 'raw' }),
-          ]);
+          return {
+            kind: 'answer',
+            value: ce._fn('Error', [
+              ce.string('bind-symbol-expected'),
+              ce.function(id, [...ops], { form: 'raw' }),
+            ]),
+          };
     }
     // A declined application (a recursive definition re-entered with a
     // symbolic argument is not unrolled — `SymbolicRecursion`,
     // `function-utils.ts`) keeps its name over its operands, held ones as
     // written, rather than becoming an `Apply` of the clause's literal.
     if (armAdmission(ops, clauses[0].signature) !== 'refute')
-      return apply(
-        clauses[0].literal,
+      return {
+        kind: 'apply',
+        literal: clauses[0].literal,
         ops,
-        {
+        options: {
           numericApproximation: options.numericApproximation,
           ...(hold ? { holdArguments: true } : {}),
           ...(hold && attrs.bind !== undefined && attrs.bind.length > 0
             ? { bindParameters: attrs.bind }
             : {}),
         },
-        'bubble',
-        ce.function(id, [...ops], hold ? { form: 'raw' } : {})
-      );
-    return ce._fn('Error', [
-      ce.string('no-matching-clause'),
-      ce.function(id, [...ops], { form: 'raw' }),
-    ]);
+        declined: ce.function(id, [...ops], hold ? { form: 'raw' } : {}),
+      };
+    return {
+      kind: 'answer',
+      value: ce._fn('Error', [
+        ce.string('no-matching-clause'),
+        ce.function(id, [...ops], { form: 'raw' }),
+      ]),
+    };
   }
 
   const verdict = triStateSelect(
@@ -1434,16 +1577,16 @@ function selectAndApply(
     clauses.map((c) => c.signature)
   );
 
-  if (verdict.kind === 'blocked') return undefined; // inert
+  if (verdict.kind === 'blocked') return { kind: 'answer', value: undefined }; // inert
 
   if (verdict.kind === 'selected')
-    return apply(
-      clauses[verdict.index].literal,
+    return {
+      kind: 'apply',
+      literal: clauses[verdict.index].literal,
       ops,
-      { numericApproximation: options.numericApproximation },
-      'bubble',
-      ce.function(id, [...ops])
-    );
+      options: { numericApproximation: options.numericApproximation },
+      declined: ce.function(id, [...ops]),
+    };
 
   // Every clause refuted: the function is not defined at this point (D7).
   //
@@ -1456,10 +1599,13 @@ function selectAndApply(
   // CONSTRUCTION instead: `admissionOf` is one shared implementation for
   // the static filter and this selector, so they cannot diverge on the
   // same operand knowledge.
-  return ce._fn('Error', [
-    ce.string('no-matching-clause'),
-    ce.function(id, [...ops], { form: 'raw' }),
-  ]);
+  return {
+    kind: 'answer',
+    value: ce._fn('Error', [
+      ce.string('no-matching-clause'),
+      ce.function(id, [...ops], { form: 'raw' }),
+    ]),
+  };
 }
 
 //

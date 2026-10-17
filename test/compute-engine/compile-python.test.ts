@@ -697,6 +697,29 @@ describe('PYTHON TARGET', () => {
       );
       expect(python.compileLambda(body, ['x'])).toBe('lambda x: x + 1');
     });
+    it('rejects True and False as a function, parameter or lambda parameter name', () => {
+      // A READ of `True`/`False` is the Python boolean literal, so the check
+      // of a free symbol lets them through. A BINDING of them is a syntax
+      // error (`def True():`, `lambda False: 1`), so the names that the
+      // generated code binds reject them, as they reject every other keyword.
+      const body = ce.box(1);
+      expect(() => python.compileFunction(body, 'True', [])).toThrow(
+        /"True" is a reserved word in python/
+      );
+      expect(() => python.compileFunction(body, 'f', ['False'])).toThrow(
+        /"False" is a reserved word in python/
+      );
+      expect(() => python.compileLambda(body, ['False'])).toThrow(
+        /"False" is a reserved word in python/
+      );
+      // `compileVectorized()` binds its name as `<name> = np.vectorize(…)`.
+      expect(() => python.compileVectorized(body, 'True', ['x'])).toThrow(
+        /"True" is a reserved word in python/
+      );
+      expect(() => python.compileVectorized(body, 'lambda', ['x'])).toThrow(
+        /"lambda" is a reserved word in python/
+      );
+    });
     it('rejects a symbol named None', () => {
       // A bare `None` would read the Python null value, not an input.
       expect(() => python.compile(ce.box(['Add', 'x', 'None']))).toThrow(

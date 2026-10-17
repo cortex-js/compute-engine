@@ -6,9 +6,9 @@
  */
 
 import type {
-  BoxedDefinition,
   Expression,
   IComputeEngine as ComputeEngine,
+  Scope,
   SequenceDefinition,
   SequenceStatus,
   SequenceInfo,
@@ -1464,78 +1464,154 @@ interface PendingSequence {
   /** Whether this appears to be a multi-index sequence */
   isMultiIndex: boolean;
   /**
-   * The binding that the name resolved to from the current scope when the
-   * first base case or the recurrence was assigned, or `undefined` when the
-   * name had no binding then. `ce.undeclare()` removes the pending
-   * definition only with the binding that owns it, so a declaration in a
-   * child scope that shadows the name and is then undeclared does not remove
-   * the pending definition of the enclosing scope.
+   * The scope that the pending definition belongs to. It is the scope that
+   * holds the binding of the name when the first base case or the
+   * recurrence was assigned. When the name had no binding then (a binding in
+   * the system scope does not count, see `pendingScopeOf()`), it is the
+   * current lexical scope, and the pending definition belongs to the binding
+   * that is later declared in that scope. The sequence is declared in this
+   * scope when the definition is complete.
    */
-  owner: BoxedDefinition | undefined;
-  /** The current lexical scope when the pending definition was created. It
-   * identifies the owner when `owner` is `undefined`. */
-  scope: object;
+  scope: Scope;
 }
 
+/**
+ * The pending definitions of each engine, by scope and then by name.
+ *
+ * A scope has at most one binding for a name, so the pair (scope, name)
+ * identifies one binding: each binding has its own pending definition. A
+ * declaration of `F` in a child scope that shadows the `F` of an enclosing
+ * scope gets a pending definition of its own, and the base cases assigned
+ * in the child scope do not join the pending definition of the enclosing
+ * scope. A pending definition is found from the current scope as a binding
+ * is found: the nearest scope of the scope chain that has a binding or a
+ * pending definition for the name (`pendingScopeOf()`).
+ *
+ * When a scope is discarded (`discardEvalContext()` in `engine-scope.ts`),
+ * its pending definitions are removed with it
+ * (`_discardPendingSequencesOfScope()`), as its bindings are disposed.
+ */
 const pendingSequences = new WeakMap<
   ComputeEngine,
-  Map<string, PendingSequence>
+  Map<Scope, Map<string, PendingSequence>>
 >();
+
+/**
+ * The scope that owns the pending definition of `name` visible from the
+ * current scope, or where a new pending definition of `name` goes.
+ *
+ * It is the nearest scope of the scope chain that has a binding or a
+ * pending definition for `name`, and the current scope when there is no
+ * such scope. The system scope is not searched: its bindings are the
+ * standard library, and a sequence definition for a library name (`N_0 :=
+ * 1`, `N_n := N_{n-1} + 1`) declares a new binding that shadows the library
+ * definition, in the scope where the definition is made.
+ */
+function pendingScopeOf(ce: ComputeEngine, name: string): Scope {
+  const current = ce.context.lexicalScope;
+  const system = ce.contextStack[0]?.lexicalScope;
+  const pending = pendingSequences.get(ce);
+  for (
+    let scope: Scope | null | undefined = current;
+    scope && scope !== system;
+    scope = scope.parent
+  ) {
+    if (scope.bindings.has(name) || pending?.get(scope)?.has(name))
+      return scope;
+  }
+  return current;
+}
+
+/** The pending definition of `name` visible from the current scope. */
+function visiblePending(
+  ce: ComputeEngine,
+  name: string
+): PendingSequence | undefined {
+  return pendingSequences
+    .get(ce)
+    ?.get(pendingScopeOf(ce, name))
+    ?.get(name);
+}
 
 function getOrCreatePending(ce: ComputeEngine, name: string): PendingSequence {
   if (!pendingSequences.has(ce)) {
     pendingSequences.set(ce, new Map());
   }
   const map = pendingSequences.get(ce)!;
-  if (!map.has(name)) {
-    map.set(name, {
+  const scope = pendingScopeOf(ce, name);
+  let byName = map.get(scope);
+  if (byName === undefined) {
+    byName = new Map();
+    map.set(scope, byName);
+  }
+  if (!byName.has(name)) {
+    byName.set(name, {
       base: new Map(),
       isMultiIndex: false,
-      owner: ce.lookupDefinition(name),
-      scope: ce.context.lexicalScope,
+      scope,
     });
   }
-  return map.get(name)!;
+  return byName.get(name)!;
+}
+
+/** Remove the pending definition of `name` in the scope `scope`. */
+function deletePending(ce: ComputeEngine, scope: Scope, name: string): void {
+  const map = pendingSequences.get(ce);
+  const byName = map?.get(scope);
+  if (byName === undefined) return;
+  byName.delete(name);
+  if (byName.size === 0) map!.delete(scope);
 }
 
 /**
- * Remove the pending definition of the sequence `name`: the base cases and
- * the recurrence assigned before the definition is complete. `ce.undeclare()`
- * calls it, so that a later declaration of `name` does not complete a
- * sequence with the base cases of the removed declaration.
- *
- * The pending definitions are kept by name, but each one belongs to the
- * binding `binding` that the name resolved to when it was created. Only a
- * pending definition that belongs to `binding` is removed. When the name had
- * no binding at creation, the pending definition belongs to the binding
- * that is later declared in the scope where it was created, `scope`. So
- * undeclaring a declaration that shadows the name in a child scope leaves
- * the pending definition of the enclosing scope unchanged.
+ * Remove the pending definition of the sequence `name` that belongs to the
+ * binding of `name` in `scope`: the base cases and the recurrence assigned
+ * before the definition is complete. `ce.undeclare()` calls it when it
+ * removes that binding, so that a later declaration of `name` does not
+ * complete a sequence with the base cases of the removed declaration. The
+ * pending definition of a binding of `name` in an enclosing scope is not
+ * changed.
  *
  * Return a function that puts the pending definition back, for the rollback
- * frame of an inference trial, or `undefined` when `name` has no pending
- * definition. A checkpoint restore puts it back without this function: the
- * pending definitions are captured whole when a checkpoint is taken
- * (`_sequenceRegistrySnapshot()`).
+ * frame of an inference trial, or `undefined` when the binding has no
+ * pending definition. A checkpoint restore puts it back without this
+ * function: the pending definitions are captured whole when a checkpoint is
+ * taken (`_sequenceRegistrySnapshot()`).
  * @internal
  */
 export function _removePendingSequence(
   ce: ComputeEngine,
   name: string,
-  binding: BoxedDefinition,
-  scope: object
+  scope: Scope
 ): (() => void) | undefined {
-  const pending = pendingSequences.get(ce);
-  const entry = pending?.get(name);
-  if (pending === undefined || entry === undefined) return undefined;
-  if (
-    entry.owner === undefined ? entry.scope !== scope : entry.owner !== binding
-  )
-    return undefined;
-  pending.delete(name);
+  const map = pendingSequences.get(ce);
+  const entry = map?.get(scope)?.get(name);
+  if (map === undefined || entry === undefined) return undefined;
+  deletePending(ce, scope, name);
   return () => {
-    pending.set(name, entry);
+    let byName = map.get(scope);
+    if (byName === undefined) {
+      byName = new Map();
+      map.set(scope, byName);
+    }
+    byName.set(name, entry);
   };
+}
+
+/**
+ * Remove the pending definitions of the scope `scope`. The evaluation
+ * context of the scope is discarded (`discardEvalContext()` in
+ * `engine-scope.ts`), and the pending definitions belong to the bindings of
+ * that scope, which are disposed. Without this call, the engine keeps the
+ * pending definitions of every discarded scope, and a checkpoint captures
+ * them.
+ * @internal
+ */
+export function _discardPendingSequencesOfScope(
+  ce: ComputeEngine,
+  scope: Scope
+): void {
+  pendingSequences.get(ce)?.delete(scope);
 }
 
 /**
@@ -1640,42 +1716,54 @@ function tryFinalizeSequence(ce: ComputeEngine, name: string): void {
     def.variable = pending.recurrence.variable;
   }
 
-  // Validate the definition
-  const validation = validateSequenceDefinition(ce, name, def);
-  if (!validation.valid) {
-    throw new Error(validation.error);
-  }
+  // The sequence is declared in the scope that the pending definition
+  // belongs to. It is the current scope, or an enclosing scope when the
+  // name is declared there (or has a pending definition there) and not in
+  // the current scope: a recurrence assigned in a child scope to the `F` of
+  // an enclosing scope completes the sequence of that `F`, and the sequence
+  // stays when the child scope is popped. The validation parses the
+  // recurrence, and the parse can declare the name in the current scope, so
+  // it runs in that scope too.
+  const scope = pending.scope;
+  const complete = () => {
+    // Validate the definition
+    const validation = validateSequenceDefinition(ce, name, def);
+    if (!validation.valid) {
+      throw new Error(validation.error);
+    }
 
-  // Create the subscriptEvaluate handler
-  const handler = createSequenceHandler(ce, name, def);
+    // Create the subscriptEvaluate handler
+    const handler = createSequenceHandler(ce, name, def);
 
-  // Check if the symbol already exists in the current scope
-  // (it may have been auto-declared when parsing the recurrence expression)
-  const scope = ce.context.lexicalScope;
-  const existingDef = scope.bindings.get(name);
+    // Check if the symbol already exists in that scope
+    // (it may have been auto-declared when parsing the recurrence expression)
+    const existingDef = scope.bindings.get(name);
 
-  if (existingDef) {
-    // Symbol already exists - update it with subscriptEvaluate
-    const callableBefore = defIsCallableShaped(existingDef);
-    updateDef(ce, name, existingDef, {
-      subscriptEvaluate: handler,
-    });
-    // In-place redefinition of an existing binding is a semantic mutation
-    // (a structural change, not a value write: the epoch bumps too).
-    ce._noteStateEvent({
-      kind: 'redefine',
-      callableBefore,
-      callableAfter: true,
-    });
-  } else {
-    // Symbol doesn't exist - declare it with the handler
-    ce.declare(name, {
-      subscriptEvaluate: handler,
-    });
-  }
+    if (existingDef) {
+      // Symbol already exists - update it with subscriptEvaluate
+      const callableBefore = defIsCallableShaped(existingDef);
+      updateDef(ce, name, existingDef, {
+        subscriptEvaluate: handler,
+      });
+      // In-place redefinition of an existing binding is a semantic mutation
+      // (a structural change, not a value write: the epoch bumps too).
+      ce._noteStateEvent({
+        kind: 'redefine',
+        callableBefore,
+        callableAfter: true,
+      });
+    } else {
+      // Symbol doesn't exist - declare it with the handler
+      ce.declare(name, {
+        subscriptEvaluate: handler,
+      });
+    }
+  };
+  if (scope === ce.context.lexicalScope) complete();
+  else ce._inScope(scope, complete);
 
   // Clear pending
-  pendingSequences.get(ce)!.delete(name);
+  deletePending(ce, scope, name);
 }
 
 /**
@@ -1737,8 +1825,7 @@ export function getSequenceStatus(
   name: string
 ): SequenceStatus {
   // Check for pending sequence first
-  const pendingMap = pendingSequences.get(ce);
-  const pending = pendingMap?.get(name);
+  const pending = visiblePending(ce, name);
 
   if (pending) {
     // Sort base indices appropriately
@@ -1872,11 +1959,13 @@ export function _sequenceRegistrySnapshot(ce: ComputeEngine): unknown {
     pending:
       pending === undefined
         ? undefined
-        : [...pending.entries()].map(([name, entry]) => ({
-            name,
-            entry,
-            fields: { ...entry, base: new Map(entry.base) },
-          })),
+        : [...pending.values()].flatMap((byName) =>
+            [...byName.entries()].map(([name, entry]) => ({
+              name,
+              entry,
+              fields: { ...entry, base: new Map(entry.base) },
+            }))
+          ),
   };
 }
 
@@ -1938,9 +2027,10 @@ export function _restoreSequenceRegistrySnapshot(
 
   const pending = pendingSequences.get(ce);
   if (pending !== undefined) {
-    const kept = new Map((s.pending ?? []).map((e) => [e.name, e]));
-    for (const name of [...pending.keys()])
-      if (!kept.has(name)) pending.delete(name);
+    // The pending definitions are put back in the scope that each one
+    // belongs to (`entry.scope`, restored with the other fields), and the
+    // ones created after the checkpoint are dropped.
+    pending.clear();
     for (const { name, entry, fields } of s.pending ?? []) {
       Object.assign(entry, fields);
       entry.base = new Map(fields.base);
@@ -1953,7 +2043,12 @@ export function _restoreSequenceRegistrySnapshot(
       // directly, so the restored engine would report a recurrence a fresh
       // replay never had.
       entry.recurrence = fields.recurrence;
-      pending.set(name, entry);
+      let byName = pending.get(entry.scope);
+      if (byName === undefined) {
+        byName = new Map();
+        pending.set(entry.scope, byName);
+      }
+      byName.set(name, entry);
     }
   }
 }

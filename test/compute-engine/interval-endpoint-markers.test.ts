@@ -72,14 +72,21 @@ describe('Open and Closed endpoint markers', () => {
     for (let i = 0; i < 5; i++)
       expect(engine.parse('A[3]').evaluate().isSame(first)).toBe(true);
     // …and the stored value is served from the memo rather than redrawn:
-    // 2,000 reads of one element complete well within a second, where a
-    // redraw of the 100-element list per read took tens of seconds on the
-    // shape of item 317. The bound is loose on purpose (a shared machine).
+    // 2,000 reads of one element take about 0.9 s when the source runs
+    // directly (`npx tsx`) and about 5 s under jest on an idle 18-core
+    // machine (measured 2026-10-16 at HEAD 6b4cc505 and with the round of
+    // that day applied, the same on both), where a redraw of the 100-element
+    // list per read took tens of seconds on the shape of item 317. The bound
+    // is 10 s: twice the measured jest time, and well under the redraw cost it
+    // guards against. Why jest runs this loop five times slower than the
+    // source is not known (it is not the custom `console.assert` of the test
+    // setup: a no-op assert measured the same); see the ROADMAP entry on the
+    // jest factor of this test.
     const t0 = performance.now();
     for (let i = 0; i < 2000; i++) engine.parse('A[3]').evaluate();
     // The time depends on the load of the machine, so the limit is asserted
     // only in a `CE_PERF=1` run. The value checks above do not depend on time.
     if (process.env.CE_PERF === '1')
-      expect(performance.now() - t0).toBeLessThan(5000);
+      expect(performance.now() - t0).toBeLessThan(10000);
   });
 });

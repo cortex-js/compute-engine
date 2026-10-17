@@ -1688,6 +1688,21 @@ export function div(num: Expression, denom: number | Expression): Expression {
       // this result as-is on the exact route, so an unevaluated component
       // would reach the user.
       return ce.tuple(...num.ops.map((c) => c.div(d).evaluate()));
+    // A point divided by a finite collection of numbers is the list of the
+    // point divided by each element: `(1, 2) / [1, 2]` is
+    // `[(1, 2), (1/2, 1)]`, the same list of points that the product
+    // `(1, 2) · [1, 1/2]` gives (`mulImpl`). The generic broadcast of the
+    // `Divide` operator stands aside for a tuple operand, so without this
+    // the quotient stayed an inert `Divide`. A matrix divisor is not
+    // distributed: `p / M` stays inert, which the `Divide` type handler
+    // expects (`divisorKeepsNumeratorShape`, `library/arithmetic.ts`).
+    if (
+      isFiniteBroadcastParticipant(d) &&
+      !(isTensorValue(d) && d.shape.length !== 1)
+    ) {
+      const r = broadcastOverIndexedCollections(ce, 'Divide', [num, d], false);
+      if (r !== undefined) return r;
+    }
   }
 
   // A residue class in the quotient: only the residue rules apply, after

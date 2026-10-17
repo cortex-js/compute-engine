@@ -563,3 +563,159 @@ describe('compilation of the direct-call rewrite', () => {
     expect((viaField as any).run({ t: 3 })).toBe(15);
   });
 });
+
+describe('a receiver with an inferred record type', () => {
+  /** `sub_xy(x, y)` and `sub_yx(y, x)` both compute `x - y`, but their
+   * parameters are in another order. */
+  function subtractEngine(): ComputeEngine {
+    const ce = new ComputeEngine();
+    ce.declare('sub_xy', {
+      signature: '(x: number, y: number) -> number',
+      evaluate: (ops, { engine }) => engine.number(ops[0].re - ops[1].re),
+    });
+    ce.declare('sub_yx', {
+      signature: '(y: number, x: number) -> number',
+      evaluate: (ops, { engine }) => engine.number(ops[1].re - ops[0].re),
+    });
+    return ce;
+  }
+
+  test('the names are matched again after an assignment', () => {
+    // `r` has no declaration: its type is inferred from the value assigned,
+    // and is not a contract. After `r` is given a record whose `S` takes
+    // `(y, x)`, the call made before must still read `x = 10, y = 1`.
+    const ce = subtractEngine();
+    ce.assign('r', ce.box(['Dictionary', ['Tuple', "'S'", 'sub_xy']] as any));
+    const call = ce.box([
+      'Apply',
+      ['Field', 'r', "'S'"],
+      N('x', 10),
+      N('y', 1),
+    ] as any);
+    expect(call.evaluate().toString()).toBe('9');
+    ce.assign('r', ce.box(['Dictionary', ['Tuple', "'S'", 'sub_yx']] as any));
+    expect(call.evaluate().toString()).toBe('9');
+    expect(call.type.toString()).toBe('number');
+    ce.assign('r', ce.box(['Dictionary', ['Tuple', "'S'", 'sub_xy']] as any));
+    expect(call.evaluate().toString()).toBe('9');
+  });
+});
+
+describe('a bound receiver inside an unboxed Field', () => {
+  test('the binding of the supplied symbol is used, not its name', () => {
+    // `outer` is bound to the outer `ns`. An inner scope declares another
+    // constant `ns`. The `Field` that holds `outer` reads the outer
+    // dictionary, whether the `Field` itself is boxed or not.
+    const ce = engine();
+    ce.declare('ns', {
+      isConstant: true,
+      value: ['Dictionary', ['Tuple', "'S'", 'bob_S']],
+    } as any);
+    const outer = ce.symbol('ns');
+    ce.pushScope();
+    try {
+      ce.declare('ns', {
+        isConstant: true,
+        value: ['Dictionary', ['Tuple', "'S'", 'other_S']],
+      } as any);
+      const mixed = ce.box(['Apply', ['Field', outer, "'S'"], 3] as any);
+      const boxed = ce.box([
+        'Apply',
+        ce.function('Field', [outer, ce.string('S')]),
+        3,
+      ] as any);
+      expect(mixed.toString()).toBe('bob_S(3)');
+      expect(mixed.toString()).toBe(boxed.toString());
+      expect(mixed.evaluate().toString()).toBe('6');
+    } finally {
+      ce.popScope();
+    }
+  });
+
+  test('a symbol bound to a variable: the names follow the name in scope', () => {
+    // A symbol bound to a VARIABLE reads the innermost binding of its name
+    // when it is evaluated (docs/SCOPING-MODEL.md, ruling of 2026-08-22). So
+    // the names of a call made in a scope that declares `rec` again are
+    // matched against the inner `rec`, whose `S` takes `(factor, x)`, for
+    // both spellings of the `Field`.
+    const ce = engine();
+    ce.declare('swap_S', {
+      signature: '(factor: number, x: number) -> number',
+      evaluate: (ops, { engine }) => engine.number(ops[1].re - ops[0].re),
+    });
+    const outer = ce.symbol('rec');
+    ce.pushScope();
+    try {
+      ce.declare('rec', {
+        type: 'record{S: (factor: number, x: number) -> number}',
+        value: ['Dictionary', ['Tuple', "'S'", 'swap_S']],
+      } as any);
+      const args = [N('x', 3), N('factor', 5)];
+      const mixed = ce.box(['Apply', ['Field', outer, "'S'"], ...args] as any);
+      const boxed = ce.box([
+        'Apply',
+        ce.function('Field', [outer, ce.string('S')]),
+        ...args,
+      ] as any);
+      // x - factor
+      expect(mixed.evaluate().toString()).toBe('-2');
+      expect(boxed.evaluate().toString()).toBe('-2');
+    } finally {
+      ce.popScope();
+    }
+  });
+});
+
+describe('a positional call through a constant literal field', () => {
+  function literalEngine(): ComputeEngine {
+    const ce = engine();
+    ce.declare('lib', {
+      isConstant: true,
+      value: [
+        'Dictionary',
+        ['Tuple', "'D'", ['Function', 7, ['Typed', 'x', { str: 'real' }]]],
+        [
+          'Tuple',
+          "'T'",
+          ['Function', ['Multiply', 2, 'u'], ['Typed', 'u', { str: 'real' }]],
+        ],
+      ],
+    } as any);
+    return ce;
+  }
+
+  test('a list argument: typed as the mapped list, as its value is', () => {
+    const ce = literalEngine();
+    const e = ce.box(['MemberCall', 'lib', "'D'", ['List', 1, 2]] as any);
+    const inline = ce.box([
+      'Apply',
+      ['Function', 7, ['Typed', 'x', { str: 'real' }]],
+      ['List', 1, 2],
+    ] as any);
+    expect(e.toString()).toContain('Field("lib", "D")');
+    expect(e.evaluate().toString()).toBe('[7,7]');
+    expect(e.type.toString()).toBe('vector<integer^2>');
+    expect(e.type.toString()).toBe(inline.type.toString());
+  });
+
+  test('a tuple argument at a scalar parameter: typed as a tuple', () => {
+    const ce = literalEngine();
+    const e = ce.box(['MemberCall', 'lib', "'T'", ['Tuple', 'a', 'b']] as any);
+    expect(e.evaluate().toString()).toBe('(2a, 2b)');
+    expect(e.type.toString()).toBe('tuple<real, real>');
+  });
+
+  test('a scalar argument: typed as the result of the literal', () => {
+    const ce = literalEngine();
+    const e = ce.box(['MemberCall', 'lib', "'T'", 3] as any);
+    expect(e.evaluate().toString()).toBe('6');
+    expect(e.type.toString()).toBe('real');
+  });
+
+  test('an argument the literal refuses is an error, as for the literal', () => {
+    const ce = literalEngine();
+    const e = ce.box(['MemberCall', 'lib', "'T'", { str: 'abc' }] as any);
+    expect(errorCodes(e)).toEqual(['incompatible-type']);
+    expect(e.type.toString()).toBe('error');
+  });
+});

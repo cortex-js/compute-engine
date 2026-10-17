@@ -4853,17 +4853,29 @@ export function protocolMemberSignature(
  * evaluation instead of the protocol ({@link protocolOfSymbol}'s guard,
  * mirrored here by name because the seam runs before anything is boxed). A
  * `null` leaves the call exactly as it was: the carriers decline as before.
+ *
+ * `receiverHoldsValue` is given when the base of the `Field` is an
+ * already-boxed symbol bound to a CONSTANT (`['Field', P, "'m'"]` where `P`
+ * was boxed before, in another scope): whether that binding holds a value.
+ * It is used in place of the lookup of the name in `shadowScope`, because a
+ * symbol bound to a constant reads that binding when the call is evaluated,
+ * even in a scope that declares the same name again. Any other symbol reads
+ * the innermost binding of its name when it is evaluated, which the lookup
+ * of the name mirrors.
  */
 export function qualifiedMemberRequirementShape(
   ce: IComputeEngine,
   protocolName: string,
   member: string,
-  shadowScope?: Scope
+  shadowScope?: Scope,
+  receiverHoldsValue?: boolean
 ): FunctionSignature | null {
   const record = ce._protocolRegistry[protocolName];
   if (record === undefined) return null;
   if (record.members[member]?.kind !== 'function') return null;
-  if (shadowScope !== undefined) {
+  if (receiverHoldsValue !== undefined) {
+    if (receiverHoldsValue) return null;
+  } else if (shadowScope !== undefined) {
     const def = lookup(protocolName, shadowScope);
     if (def !== undefined && isValueDef(def) && def.value.value !== undefined)
       return null;

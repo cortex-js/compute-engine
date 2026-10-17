@@ -92,6 +92,7 @@ import {
 // engine — the same arrangement as `unboundSignatureHint` above.
 import {
   canonInstallSkipped,
+  noteCanonInstallSkipped,
   clauseSignatureOf,
   sameParameterDomain,
 } from '../compute-engine/clause-identity.js';
@@ -826,6 +827,12 @@ function canonicalizationDiagnostics(
   // replaces) the pinned signature from this map afterwards.
   const pinned = new Map<string, PinnedSignature>();
 
+  // The names that a top-level `const` declaration of this program binds, in
+  // the order of the walk. The run time refuses a later `function` statement
+  // for such a name, and the binding stays as it is (see
+  // `keepConstantBinding()`).
+  const constants = new Set<string>();
+
   // REDEFINITION DISCIPLINE, static tier — the names THIS UNIT declares, and
   // where. A pass-local map, deliberately not the runtime batch stamp: the
   // static checker also runs with no batch at all (`epsil check` calls
@@ -899,6 +906,10 @@ function canonicalizationDiagnostics(
 
     let canonical: MathJsonExpression;
     let boxed: ReturnType<ComputeEngine['box']> | undefined;
+    // Called after the statement is boxed, when the statement is a
+    // `function` statement for a name that a `const` declaration of this
+    // program pinned (`keepConstantBinding()`).
+    let afterBox: (() => void) | undefined = undefined;
     // REDEFINITION DISCIPLINE — the statement-route marker. Boxing a
     // declaration statement registers it, and only a registration made on
     // THIS route may carry the batch stamp; a `ce.box(["DeclareType", …])`
@@ -913,7 +924,12 @@ function canonicalizationDiagnostics(
       // so check it once per statement here; an expired budget propagates
       // out of the pass — see the catch below.
       checkDeadline(ce._deadlineFrame);
-      installAssignedLiteralBeforeClause(ce, statement, pinned);
+      afterBox = installAssignedLiteralBeforeClause(
+        ce,
+        statement,
+        pinned,
+        constants
+      );
       boxed = ce.box(statement);
       canonical = boxed.json;
     } catch (e) {
@@ -927,6 +943,7 @@ function canonicalizationDiagnostics(
       continue;
     } finally {
       ce._epsilDeclarationRoute = enclosingRoute;
+      afterBox?.();
     }
 
     // The `match` exhaustiveness lint runs on the RAW statement (the patterns
@@ -1001,6 +1018,13 @@ function canonicalizationDiagnostics(
     // source order, so a call written before the assignment still has no
     // names to check, matching the runtime where the callee is unassigned).
     if (declMismatch === undefined) registerPinnedSignature(ce, boxed, pinned);
+
+    // A `const` declaration that the run time installs makes a later
+    // `function` statement for the same name a runtime error.
+    if (declMismatch === undefined) {
+      const name = constantDeclarationName(boxed);
+      if (name !== undefined) constants.add(name);
+    }
 
     // The statement's ASSIGNMENT type effect, visible to the LATER statements
     // of this program (never earlier ones — the walk is in source order,
@@ -1916,9 +1940,10 @@ function passScopeDefinition(
 
 /**
  * An assignment of the function literal `literal` to `name`, when `name` is
- * a user function that a `function` statement of this program defined. The
- * pass makes the change that the run time makes, with the same code
- * (`assignFn`, `engine-declarations.ts`), and returns `true`. The rules of
+ * a user function that a `function` statement defined, in this program or in
+ * an earlier program on the same engine. The pass makes the change that the
+ * run time makes, with the same code (`assignFn`, `engine-declarations.ts`),
+ * and returns `true`. The rules of
  * the run time, in short:
  * - A definition with several clauses, or one whose signature was inferred
  *   (no annotation), is replaced by the literal.
@@ -1932,21 +1957,44 @@ function passScopeDefinition(
  * signature has no parameter names, and `h(x: 3)` is `argument-name-unknown`
  * at run time and in this pass.
  *
- * `false`, and nothing changes, when `name` is not such a definition in the
- * scope of the pass.
+ * The pass never changes a binding of an outer scope. When the definition
+ * comes from an earlier program, the pass first declares, in its own scope,
+ * a binding that holds the same operator definition, and the assignment
+ * then changes that binding. The assignment replaces the operator
+ * definition of the binding with a new one (`updateDef()`), so the operator
+ * definition of the earlier program is not changed, and the binding of the
+ * pass is removed when the pass ends. When the run time refuses the
+ * assignment, the binding of the pass is removed at once: it holds the
+ * operator definition of the earlier program itself, not a copy, so a later
+ * statement of the pass that changes the definition of the binding in place
+ * would change the definition of the earlier program.
+ *
+ * `false`, and nothing changes, when `name` is not such a definition.
  */
 function assignOverUserFunction(
   ce: ComputeEngine,
   name: string,
   literal: ReturnType<ComputeEngine['box']>
 ): boolean {
-  const def = passScopeDefinition(ce, name);
-  if (def === undefined || !isOperatorDef(def)) return false;
+  let def = passScopeDefinition(ce, name);
+  let declared = false;
+  if (def === undefined) {
+    const outer = ce.lookupDefinition(name);
+    if (outer === undefined || !isOperatorDef(outer)) return false;
+    if (!outer.operator.isUserFunctionDefinition) return false;
+    def = ce._declareSymbolOperator(name, outer.operator);
+    declared = true;
+  }
+  if (!isOperatorDef(def)) return false;
   if (!def.operator.isUserFunctionDefinition) return false;
   try {
     ce.assign(name, literal);
   } catch {
-    // The run time refuses the assignment, and the definition stays.
+    // The run time refuses the assignment, and the definition stays. The
+    // binding that this function declared holds the operator definition of
+    // the earlier program, so it is removed, and the name again reads the
+    // binding of the earlier program.
+    if (declared) ce.undeclare(name);
   }
   return true;
 }
@@ -1970,32 +2018,103 @@ function assignOverUserFunction(
  * The pin is then removed: the binding is a user function, and a later
  * assignment to it is handled as an assignment over a user function
  * (`assignOverUserFunction()`).
+ *
+ * When a `const` declaration of this program bound `name` (`constants`),
+ * the run time refuses the `function` statement and the binding stays as it
+ * is: see {@link keepConstantBinding}. The function to call after the
+ * statement is boxed is then returned.
  */
 function installAssignedLiteralBeforeClause(
   ce: ComputeEngine,
   statement: MathJsonExpression,
-  pinned: Map<string, PinnedSignature>
-): void {
-  if (operator(statement) !== 'DefineFunction') return;
+  pinned: Map<string, PinnedSignature>,
+  constants: Set<string>
+): (() => void) | undefined {
+  if (operator(statement) !== 'DefineFunction') return undefined;
   const name = declarationName(operand(statement, 1));
-  if (name === undefined) return;
-  // A `const` pin (not `assigned`, and first-wins) is left alone: the run
-  // time refuses the `function` statement, because the binding is a
-  // constant.
+  if (name === undefined) return undefined;
+  if (constants.has(name)) return keepConstantBinding(ce, name, pinned);
   const pin = pinned.get(name);
-  if (pin === undefined || (!pin.assigned && pin.firstWins)) return;
+  if (pin === undefined) return undefined;
+  // A pin that an annotation made (`let h : (x: integer) -> integer`) is not
+  // `assigned` and is first-wins. It is left alone.
+  if (!pin.assigned && pin.firstWins) return undefined;
   const def = passScopeDefinition(ce, name);
-  if (def === undefined || !isValueDef(def)) return;
+  if (def === undefined || !isValueDef(def)) return undefined;
   const literal = ce._staticPinnedCallees?.get(def.value);
   pinned.delete(name);
   ce._staticPinnedCallees?.delete(def.value);
-  if (literal === undefined) return;
+  if (literal === undefined) return undefined;
   try {
     ce.assign(name, literal);
   } catch {
     // The binding stays a value definition: the `function` statement is
     // then checked as the first definition of the name.
   }
+  return undefined;
+}
+
+/**
+ * Before a `function` statement for `name` is boxed, when a `const`
+ * declaration of this program bound `name`: keep the binding that the run
+ * time has. At run time the binding is a constant, so the `function`
+ * statement does not install its clause (`defineFunctionClause()` refuses it
+ * with `invalid-clause-definition`), and the binding keeps its value and its
+ * type.
+ *
+ * The pass does not run the declaration: the binding in the scope of the
+ * pass is a value definition with an inferred type (with the signature of
+ * the literal when the declaration pinned one, see
+ * `registerPinnedSignature()`), or there is no binding yet. Boxing the
+ * `function` statement would install the clause on it. To prevent this, the
+ * binding gets the mark that the engine gives a binding whose clause it did
+ * not install (`noteCanonInstallSkipped()`), which is also what boxing does
+ * at run time when it cannot install the clause on the constant. The
+ * binding is not marked as a constant: boxing the statement first changes
+ * the type of an inferred binding to `function` (`DefineFunction`,
+ * `library/core.ts`), and that change throws on a constant, which prints an
+ * error to the console.
+ *
+ * When the declaration pinned a signature, the function that is returned
+ * puts it back on the binding after the statement is boxed. Example: after
+ * `const h = (x: integer) => x` and `function h(u: string) { u }`, `h(x: 3)`
+ * is valid and gives `3`, and `h(u: "a")` is `argument-name-unknown`.
+ *
+ * Only a binding in the scope of the pass is marked: the mark is not undone
+ * when the pass ends, so a binding of an outer scope (an earlier program, a
+ * host declaration) must not get it. For such a binding nothing changes.
+ */
+function keepConstantBinding(
+  ce: ComputeEngine,
+  name: string,
+  pinned: Map<string, PinnedSignature>
+): (() => void) | undefined {
+  // No binding at all: declare one in the scope of the pass, as boxing the
+  // statement would.
+  if (ce.lookupDefinition(name) === undefined) ce.box(name);
+  const def = passScopeDefinition(ce, name);
+  if (def === undefined || !isValueDef(def)) return undefined;
+  noteCanonInstallSkipped(def);
+  const pin = pinned.get(name);
+  if (pin === undefined) return undefined;
+  return () => {
+    ce.box(name)._infer(() => pin.type, 'narrow');
+  };
+}
+
+/** The name that `boxed` binds when it is a `const` declaration
+ * (`["Declare", name, type?, {constant: True, …}]`), else `undefined`. */
+function constantDeclarationName(
+  boxed: ReturnType<ComputeEngine['box']>
+): string | undefined {
+  if (!isFunction(boxed, 'Declare')) return undefined;
+  const target = boxed.ops[0];
+  if (!isSymbol(target)) return undefined;
+  const last = boxed.ops[boxed.ops.length - 1];
+  const constant = isDictionary(last) ? last.get('constant') : undefined;
+  return constant !== undefined && isSymbol(constant, 'True')
+    ? target.symbol
+    : undefined;
 }
 
 /** A function signature the pass registered for a name (see

@@ -95,8 +95,8 @@ export interface QuadratureResult {
    * uncertainty of the corners. A caller must not replace such a result by
    * a Monte-Carlo estimate: uniform samples under-weight the neighborhood of
    * the singularity, and Monte Carlo gave `0.3220 ± 0.0063` for
-   * `∫₀^0.01 dx/(x·(−ln x)·ln²(−ln x)) = 0.6548…`, where this result was
-   * `0.5028 ± 0.0176`. */
+   * `∫₀^0.01 dx/(x·(−ln x)·ln²(−ln x)) = 0.6548…`, where this result is
+   * `0.5028 ± 0.223`. */
   singularCorner?: true;
 }
 
@@ -391,8 +391,15 @@ export function levinU(
  * series does, the range of the partial sums of the last half of the shells
  * (the values of the extrapolations are then antilimits, which can be
  * anything: `8.96e13` for `∫₀¹ dx/(10⁻⁶ + x)`). `spread` is 0 when there are
- * too few accurate shells. `oscillates` is set when the shells oscillate
- * without shrinking (see `shellTrend`): the integral has no value.
+ * too few accurate shells.
+ *
+ * When the extrapolations do not agree, or the trend of the shells is not
+ * known, `value` can also be the sum of the shells plus the tail of a model
+ * of the shells (see `shellTail`). When no model is accepted, `spread`
+ * includes the part of the corner past the last accurate shell, estimated
+ * from the tail of a power fitted to the shells. `oscillates` is set when
+ * the shells oscillate without shrinking (see `shellTrend`): the integral
+ * has no value.
  */
 export function extrapolateCorner(
   corner: CornerSeries
@@ -433,12 +440,49 @@ export function extrapolateCorner(
     sums.push(sum);
   }
 
+  // Shells that decrease too slowly for the ε-algorithm and the Levin
+  // u-transform: the limit is the sum of the shells plus the tail past the
+  // last accurate shell, from a model of the shells (see `shellTail`). When
+  // no model is accepted, the tail past the last shell is part of the
+  // uncertainty of the value of the corner: `missing` is the difference
+  // between the value of the corner and the sum of the shells plus the tail
+  // of the power model, plus twice that tail, or 0 when the power model has
+  // no finite tail. The tail of a power fitted to shells that are not a
+  // power can be off by more than its own size: for `((−ln t)^(−1.1) +
+  // (−ln t)^(−1.6))/t` at 0 on `[0, ½]`, the missing tail is 1.18 times the
+  // tail of the power model, and for `1/(x·(−ln x)·ln²(−ln x))` at 0 on
+  // `[0, 0.01]`, whose shells decrease more slowly than any power, it is 2.04
+  // times that tail (`0.152` for `0.0744`). Without `missing`, the result
+  // was `7.24 ± 0.39` for the integral `12.45`.
+  const modelled = ():
+    | { ok: true; value: number; error: number }
+    | { ok: false; missing: number } => {
+    const t = shellTail(shells, beta);
+    if (t.ok)
+      return {
+        ok: true,
+        value: sum + t.tail,
+        error: Math.max(t.error, 4 * Number.EPSILON * magnitude) + shellError,
+      };
+    const missing =
+      t.tail === undefined
+        ? 0
+        : Math.abs(sum + t.tail - corner.value) + 2 * Math.abs(t.tail);
+    return { ok: false, missing: Number.isFinite(missing) ? missing : 0 };
+  };
+
   // Shells that do not decrease as a convergent series does have no limit to
   // find (see `shellTrend`).
   const trend = shellTrend(shells, beta);
   if (trend !== 'converges') {
+    let missing = 0;
+    if (trend === 'unknown') {
+      const m = modelled();
+      if (m.ok) return m;
+      missing = m.missing;
+    }
     const recent = sums.slice(Math.floor(n / 2));
-    const spread = Math.max(...recent) - Math.min(...recent);
+    const spread = Math.max(Math.max(...recent) - Math.min(...recent), missing);
     return trend === 'oscillates'
       ? { ok: false, spread, oscillates: true }
       : { ok: false, spread };
@@ -499,7 +543,10 @@ export function extrapolateCorner(
     if (best === undefined || difference < best.difference)
       best = { value: u, difference };
   }
-  if (best === undefined) return { ok: false, spread };
+  if (best === undefined) {
+    const m = modelled();
+    return m.ok ? m : { ok: false, spread: Math.max(spread, m.missing) };
+  }
 
   // The error is the difference of the two extrapolations, enlarged, plus
   // the errors of the shells, and at least the rounding error of the sum of
@@ -560,6 +607,322 @@ function shellsDecayAsPower(shells: number[], offset: number): boolean {
     offset
   );
   return early > 0 && late > 0 && late <= POWER_DECAY_RATIO * early;
+}
+
+/**
+ * The smallest number of accurate shells with which `shellTail` accepts the
+ * tail of a model of the shells. With fewer shells, it returns the tail of a
+ * power fitted to the shells only as an estimate of the part that is
+ * missing. Next to 0 a corner has about 1000 accurate shells with the
+ * default budget of 1500 panels, and more than 64 with a budget of 100
+ * panels, with which the tail of `1/(t·(−ln t)^1.1)` at 0 is found within
+ * `0.003` (error `0.0099`). Next to a nonzero endpoint a corner has fewer
+ * than 30 accurate shells (see `ACCURATE_SHELL_SPACINGS`), too few to tell a
+ * power of the depth from other decreases.
+ */
+const SHELL_TAIL_MIN_SHELLS = 64;
+
+/**
+ * The largest difference, in natural logarithm, between the logarithm of a
+ * shell and the model of `shellTail` that accepts the model. Measured on the
+ * last half of the 1023 accurate shells at 0 on `[0, ½]`: the power model
+ * gives at most `1e-7` for `1/(t·(−ln t)^p)` (`p` from 1.02 to 2), and `2e-3`
+ * for `−t^0.0001/(t·ln t)`, for which the model with a rate gives `7e-9`. For
+ * `1/(t·(ln 1000 − ln t)^1.1)` (the scale of the logarithm is not 1), the
+ * power model gives `7e-4`, the model with a rate `9e-5`, and the model with
+ * a term in `1/y` `1.4e-6`.
+ */
+const SHELL_TAIL_RESIDUAL = 1e-5;
+
+/**
+ * A model of the shells for `shellTail`: the logarithm of the magnitude of
+ * the integrand per unit of depth `y` is `c + q·ln y + rate·y + d/y`.
+ */
+type ShellModel = { c: number; q: number; rate: number; d: number };
+
+/**
+ * The least-squares fit of the model `basis` (see `ShellModel`; `c` and `q`
+ * are always fitted) to the logarithms of the magnitudes of the shells
+ * `from` to `to − 1`, with the depth `y = k + beta + ½` for shell `k`, and
+ * the largest difference between the model and the logarithm of a shell.
+ * The fit uses the QR decomposition of the matrix of the basis functions
+ * (modified Gram–Schmidt): the normal equations square the condition
+ * number, which is large because `ln y`, `y` and `1/y` are close to linear
+ * on the range of the fit.
+ */
+function fitShellModel(
+  shells: number[],
+  from: number,
+  to: number,
+  beta: number,
+  basis: 'power' | 'rate' | 'offset'
+): { model: ShellModel; residual: number } | undefined {
+  const rows = to - from;
+  const target: number[] = [];
+  const columns: number[][] = [[], [], []];
+  for (let k = from; k < to; k++) {
+    const y = k + beta + 0.5;
+    target.push(Math.log(Math.abs(shells[k])));
+    columns[0].push(1);
+    columns[1].push(Math.log(y));
+    columns[2].push(basis === 'rate' ? y : 1 / y);
+  }
+  const m = basis === 'power' ? 2 : 3;
+  const q = columns.slice(0, m).map((column) => column.slice());
+  const r: number[][] = Array.from({ length: m }, () => new Array(m).fill(0));
+  for (let j = 0; j < m; j++) {
+    for (let i = 0; i < j; i++) {
+      let dot = 0;
+      for (let k = 0; k < rows; k++) dot += q[i][k] * q[j][k];
+      r[i][j] = dot;
+      for (let k = 0; k < rows; k++) q[j][k] -= dot * q[i][k];
+    }
+    let norm = 0;
+    for (let k = 0; k < rows; k++) norm += q[j][k] * q[j][k];
+    norm = Math.sqrt(norm);
+    if (!(norm > 0)) return undefined;
+    r[j][j] = norm;
+    for (let k = 0; k < rows; k++) q[j][k] /= norm;
+  }
+  const x = new Array(m).fill(0);
+  for (let i = m - 1; i >= 0; i--) {
+    let s = 0;
+    for (let k = 0; k < rows; k++) s += q[i][k] * target[k];
+    for (let j = i + 1; j < m; j++) s -= r[i][j] * x[j];
+    x[i] = s / r[i][i];
+  }
+  if (!x.every(Number.isFinite)) return undefined;
+  let residual = 0;
+  for (let k = 0; k < rows; k++) {
+    let v = 0;
+    for (let j = 0; j < m; j++) v += columns[j][k] * x[j];
+    residual = Math.max(residual, Math.abs(v - target[k]));
+  }
+  return {
+    model: {
+      c: x[0],
+      q: x[1],
+      rate: basis === 'rate' ? x[2] : 0,
+      d: basis === 'offset' ? x[2] : 0,
+    },
+    residual,
+  };
+}
+
+/**
+ * The integral of the model `e^(c + q·ln y + rate·y + d/y)` (see `ShellModel`)
+ * over the depths `y` from `depth` to `∞`, or `undefined` when it diverges.
+ *
+ * The substitution `y = depth·e^w` gives `e^(c + rate·depth)·depth^(q+1)`
+ * times `J = ∫₀^∞ e^((q+1)·w + rate·depth·(e^w − 1) + (d/depth)·e^(−w)) dw`.
+ * With `rate < 0`, `J` is the Simpson sum on `[0, W]` for
+ * `W = ln(1 + 50/(−rate·depth))`, where the term `rate·depth·(e^w − 1)` is
+ * `−50`. The term `(q + 1)·w` is positive when `q > −1`, but the exponent at
+ * `W` is still at least `50 − (q + 1)·(1 + ln(50/(q + 1)))` below its
+ * largest value (45 for `q + 1 = 1`), and the integrand decreases faster
+ * than exponentially past `W`. `W` is not finite when `−rate·depth` is
+ * below about `2.8e-307`, and the tail is then `undefined`. With
+ * `rate = 0`, `J` is the Simpson sum on `[0, 40]` plus
+ * `∫₄₀^∞ e^((q+1)·w) dw = e^(40·(q+1))/(−q − 1)` (the factor in `d` is then
+ * `1` within `e^(−40)`). With `rate = d = 0`, `J = 1/(−q − 1)`, so the
+ * integral is `C·K^(1−p)/(p − 1)` for `C = e^c`, `p = −q` and `K = depth`.
+ */
+function modelTail(model: ShellModel, depth: number): number | undefined {
+  const { c, q, rate, d } = model;
+  if (!(rate <= 0) || (rate === 0 && !(q < -1))) return undefined;
+  const scale = Math.exp(c + rate * depth + (q + 1) * Math.log(depth));
+  if (rate === 0 && d === 0) return scale / (-q - 1);
+  const width = rate < 0 ? Math.log1p(50 / (-rate * depth)) : 40;
+  if (!Number.isFinite(width)) return undefined;
+  const intervals = 2 * Math.ceil(25 * width);
+  const h = width / intervals;
+  const g = (w: number) =>
+    Math.exp(
+      (q + 1) * w + rate * depth * Math.expm1(w) + (d / depth) * Math.exp(-w)
+    );
+  let sum = g(0) + g(width);
+  for (let i = 1; i < intervals; i++) sum += (i % 2 === 1 ? 4 : 2) * g(i * h);
+  let j = (sum * h) / 3;
+  if (rate === 0) j += Math.exp((q + 1) * width) / (-q - 1);
+  const tail = scale * j;
+  return Number.isFinite(tail) ? tail : undefined;
+}
+
+/**
+ * The integral over the part of a corner past the last accurate shell, from a
+ * model of the shells, with its error, or `undefined` when no model fits.
+ * This is for the shells that the ε-algorithm and the Levin u-transform do
+ * not extrapolate: shells that decrease as a power `k^(−p)` of their index
+ * with `1 < p < LEVIN_MIN_DECAY`, such as the shells of `1/(t·(−ln t)^1.1)` at
+ * 0. Without it, the quadrature gave `5.19 ± 0.79` for
+ * `∫₀^½ dt/(t·(−ln t)^1.1) = (ln 2)^(−0.1)/0.1 = 10.37`: most of the integral
+ * is in the part of the corner closer to 0 than the doubles allow.
+ *
+ * The derivation. Shell `k` is the integral over the points at a distance
+ * between `2^(−(y+1))` and `2^(−y)` to the endpoint, for the depth
+ * `y = k + beta`. Write it as `∫ g(u) du` over the depths `u` from `y` to
+ * `y + 1`, where `g(u) = f(endpoint ± 2^(−u))·2^(−u)·ln 2` is the integral
+ * per unit of depth. The integral of `g` on a unit range is `g` at the middle
+ * of the range, within a relative error `g''/(24·g)`, which is `O(1/y²)` for
+ * the models below. So the shells are samples of `g` at `y = k + beta + ½`,
+ * and the part of the corner past the last accurate shell `n − 1` is
+ * `∫ g(u) du` from `n + beta` to `∞` (`modelTail`). For `1/(t·(−ln t)^p)`
+ * at 0, `g(u) = (ln 2)^(1−p)·u^(−p)`, a power of the depth.
+ *
+ * The models of `ln|g(y)|`, fitted by least squares to the last half of the
+ * shells (`fitShellModel`):
+ * - `c + q·ln y`, a power of the depth, used when its largest difference to
+ *   the logarithm of a shell is at most `SHELL_TAIL_RESIDUAL`, and `q < −1`.
+ *   The tail is then `C·K^(1−p)/(p − 1)` with `C = e^c`, `p = −q` and
+ *   `K = n + beta`.
+ * - Otherwise, the better fit of `c + q·ln y + rate·y` (a power with a slow
+ *   exponential decrease: `−t^a/(t·ln t)` gives `g(y) = e^(−a·y·ln 2)/y`,
+ *   whose tail is not a power) and `c + q·ln y + d/y` (a power of a depth
+ *   with a different origin: the shells of `1/(t·(ln 1000 − ln t)^1.1)` are
+ *   about `(y + 10)^(−1.1)`), when it is at most `SHELL_TAIL_RESIDUAL`, and
+ *   its tail is finite.
+ * The power is tried first: a rate fitted to the shells of a pure power is
+ * not 0 (about `1e-9`, from the terms in `1/y²` that the models leave out),
+ * and a negative rate cuts the tail of a power off at the depth `1/|rate|`. For
+ * `1/(t·(−ln t)^1.02)`, the tail with a rate of `−5e-10` is a third of the
+ * tail without one.
+ *
+ * The error is `EXTRAPOLATION_SAFETY` times the largest difference between
+ * the tail of the model fitted to the last half of the shells and the tails
+ * of the same model fitted to the last quarter and to the quarter before it.
+ * A model that does not describe the shells gives tails that change with the
+ * part of the shells that it is fitted to. When the power is accepted, the
+ * difference with the tail of the model with a rate is added to the error,
+ * unless that rate is ruled out (see the comment in the function). A tail
+ * whose error is not smaller than the tail is not accepted.
+ *
+ * When no tail is accepted (no model fits, the tail is not smaller than its
+ * error, or there are fewer than `SHELL_TAIL_MIN_SHELLS` shells), the result
+ * has `ok: false` and, when there is one, the tail of a model as an estimate
+ * of the part of the corner that is missing: the tail of the model that was
+ * not accepted, or the largest of the tails of a power fitted to the last
+ * half, the last quarter and the quarter before it.
+ *
+ * The model is an assumption on the part of the corner that no shell
+ * samples: a factor that changes the integrand only past the deepest shell
+ * (`t^(10⁻⁸)`, a decrease that the shells cannot see) changes the integral
+ * and not the result.
+ */
+function shellTail(
+  shells: number[],
+  beta: number
+): { ok: true; tail: number; error: number } | { ok: false; tail?: number } {
+  const n = shells.length;
+  if (n < MIN_EXTRAPOLATION_SHELLS) return { ok: false };
+  const half = Math.floor(n / 2);
+  const quarter = Math.floor(n / 4);
+  const tail = shells.slice(half);
+  if (!(tail.every((v) => v > 0) || tail.every((v) => v < 0)))
+    return { ok: false };
+  const sign = tail[0] > 0 ? 1 : -1;
+  const depth = n + beta;
+  // The fits on the last half of the shells, on the last quarter and on the
+  // quarter before it.
+  const ranges: [number, number][] = [
+    [half, n],
+    [n - quarter, n],
+    [half, n - quarter],
+  ];
+
+  // The tail of the power model when no model is accepted: the largest of
+  // the tails of the power fitted to the three ranges. The exponent fitted
+  // to shells that decrease more slowly than any power is closer to `−1` on
+  // the last quarter, which gives a larger tail.
+  const powerTail = (): number | undefined => {
+    let largest: number | undefined;
+    for (const [from, to] of ranges) {
+      const fit = fitShellModel(shells, from, to, beta, 'power');
+      const value = fit === undefined ? undefined : modelTail(fit.model, depth);
+      if (value !== undefined && !(largest !== undefined && largest >= value))
+        largest = value;
+    }
+    return largest === undefined ? undefined : sign * largest;
+  };
+  if (n < SHELL_TAIL_MIN_SHELLS) return { ok: false, tail: powerTail() };
+
+  const accept = (basis: 'power' | 'rate' | 'offset') => {
+    const fit = fitShellModel(shells, half, n, beta, basis);
+    if (fit === undefined || !(fit.residual <= SHELL_TAIL_RESIDUAL))
+      return undefined;
+    const value = modelTail(fit.model, depth);
+    return value === undefined ? undefined : { ...fit, basis, value };
+  };
+  let best = accept('power');
+  if (best === undefined) {
+    const rate = accept('rate');
+    const offset = accept('offset');
+    best =
+      rate === undefined
+        ? offset
+        : offset === undefined || rate.residual <= offset.residual
+          ? rate
+          : offset;
+  }
+  if (best === undefined) return { ok: false, tail: powerTail() };
+
+  let difference = 0;
+  for (const [from, to] of ranges.slice(1)) {
+    const fit = fitShellModel(shells, from, to, beta, best.basis);
+    const value = fit === undefined ? undefined : modelTail(fit.model, depth);
+    if (value === undefined) return { ok: false, tail: sign * best.value };
+    difference = Math.max(difference, Math.abs(value - best.value));
+  }
+  let error = EXTRAPOLATION_SAFETY * difference;
+
+  // A power that fits the shells does not rule out a slow exponential
+  // decrease: for `t^(10⁻⁸)/(t·(−ln t)^1.1)` at 0 on `[0, ½]`, the factor
+  // `t^(10⁻⁸)` changes the shells by `7e-6` over the accurate shells, and the
+  // power fits them within `2e-7`, but that factor makes the tail past the
+  // last shell `3.49` and not the `5.18` of the power. So the model with a
+  // rate is also fitted. The difference between its tail and the tail of the
+  // power, plus the change of its tail on the three ranges, is part of the
+  // error, unless the rate is ruled out: the fitted rate is not negative (no
+  // finite tail), or it is within its own change on the three ranges of 0
+  // and its tail differs from the tail of the power by less than the error.
+  // The rate fitted to the shells of a pure power is positive (about `1e-9`,
+  // from the terms in `1/y²` that the models leave out), so a rate smaller
+  // than about `1e-9` is not found, and its effect on the tail is not in the
+  // error.
+  if (best.basis === 'power') {
+    const fit = fitShellModel(shells, half, n, beta, 'rate');
+    const value =
+      fit === undefined || !(fit.model.rate < 0)
+        ? undefined
+        : modelTail(fit.model, depth);
+    if (fit !== undefined && value !== undefined) {
+      let rateSpread = 0;
+      let rateTailSpread = 0;
+      for (const [from, to] of ranges.slice(1)) {
+        const other = fitShellModel(shells, from, to, beta, 'rate');
+        if (other === undefined) {
+          rateSpread = Infinity;
+          continue;
+        }
+        rateSpread = Math.max(
+          rateSpread,
+          Math.abs(other.model.rate - fit.model.rate)
+        );
+        const t = modelTail(other.model, depth);
+        if (t !== undefined)
+          rateTailSpread = Math.max(rateTailSpread, Math.abs(t - value));
+      }
+      const alternative = Math.abs(value - best.value);
+      if (!(-fit.model.rate <= rateSpread && alternative < error))
+        error += alternative + EXTRAPOLATION_SAFETY * rateTailSpread;
+    }
+  }
+
+  // A tail whose error is at least its size is not a value: the shells of
+  // `1/(t·(−ln t))` at 0 (a divergent integral) fit a power with an exponent
+  // a little below `−1`, and the tail of that power is finite and large
+  // (`2.96e6 ± 1.54e7`).
+  if (!(error < best.value)) return { ok: false, tail: sign * best.value };
+  return { ok: true, tail: sign * best.value, error };
 }
 
 /**
@@ -809,9 +1172,20 @@ export function resolveSingularEndpoints(
     if (x.ok) {
       estimate += x.value - corner.value;
       error += x.error - corner.error;
+      // When the corrected result is not used, the Gauss–Kronrod result
+      // misses the correction of this corner, so the correction is part of
+      // the uncertainty of that result. The tail of a model of the shells
+      // (`shellTail`) can be most of the integral and have an error above
+      // `EXTRAPOLATED_RELATIVE_ERROR`: for `1/(t·(ln 1000 − ln t)^1.1)` at 0
+      // on `[0, ½]`, the result was `2.99 ± 2.6e-12` without this, and the
+      // integral is `8.16`. The uncertainties of the corners are added: the
+      // Gauss–Kronrod result misses the corrections of all the corners. With
+      // the largest one only, `∫₀¹ (−ln(t/2))^(−1.1)/t +
+      // (−ln((1 − t)/2))^(−2)/(1 − t) dt = 11.816` gave `6.608 ± 5.182`.
+      tailSpread += Math.abs(x.value - corner.value) + x.error;
     } else {
       failed = true;
-      tailSpread = Math.max(tailSpread, x.spread);
+      tailSpread += x.spread;
       if (x.oscillates === true) oscillates = true;
     }
   }

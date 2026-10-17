@@ -3143,6 +3143,250 @@ describe('ERROR-MODEL §1 — the size operators refuse a decided non-collection
   });
 });
 
+describe('ERROR-MODEL §3 — an evaluation-time refusal of a collection operand carries its frame', () => {
+  // When the operand of a collection operator is a symbol declared `unknown`,
+  // the signature check at boxing cannot refuse it: the refusal happens at
+  // evaluation, once the value is known. For `Sort` or `IsEmpty` the
+  // evaluation puts the error in the operand and records the frame
+  // `{Sort, 1}` when it takes the error from the operand. `Count`, `Length`,
+  // `First`, `Second`, `Third`, `Last` and the point accessors mint the error
+  // in their evaluate handler instead, and answered it with no `ErrorTrace`
+  // frame and, for the accessors, with no location. Each answer must be the
+  // same error that the literal operand gets.
+
+  /** The answer of `head(sym)` for a symbol declared `unknown`: either it
+   * holds `value` before the call is boxed, or it is valueless when the call
+   * is boxed and is assigned `value` after. */
+  function heldOperandAnswer(
+    head: string,
+    value: any,
+    when: 'before' | 'after',
+    decl = 'unknown'
+  ): Expression {
+    const ce = new ComputeEngine();
+    ce.declare('n', decl);
+    if (when === 'before') ce.assign('n', value);
+    const expr = ce.box([head, 'n']);
+    if (when === 'after') ce.assign('n', value);
+    return expr.evaluate();
+  }
+
+  const heads: [string, string][] = [
+    ['Count', 'collection'],
+    ['Length', 'collection'],
+    ['First', 'indexed_collection'],
+    ['Second', 'indexed_collection'],
+    ['Third', 'indexed_collection'],
+    ['Last', 'indexed_collection'],
+    ['PointX', 'indexed_collection'],
+    ['PointY', 'indexed_collection'],
+    ['PointZ', 'indexed_collection'],
+    // These two had the frame already; they are the reference.
+    ['Sort', 'indexed_collection'],
+    ['IsEmpty', 'collection'],
+  ];
+
+  for (const [head, expected] of heads) {
+    for (const when of ['before', 'after'] as const) {
+      test(`${head}(n) with n: unknown, assigned 5 ${when} boxing`, () => {
+        const result = heldOperandAnswer(head, 5, when);
+        expect(result.json).toEqual([
+          'Error',
+          ['ErrorCode', "'incompatible-type'", `'${expected}'`, "'5'"],
+          5,
+          ['ErrorTrace', ['ErrorFrame', `'${head}'`, 1]],
+        ]);
+      });
+    }
+  }
+
+  test('the held operand and the literal operand give the same error', () => {
+    // `PointX(5)` is left out: its literal operand is checked against the
+    // declared `collection<any> | tuple`, so the expected type reads
+    // `collection` there.
+    for (const [head] of heads) {
+      if (head.startsWith('Point')) continue;
+      const ce = new ComputeEngine();
+      expect(heldOperandAnswer(head, 5, 'before').json).toEqual(
+        ce.box([head, 5]).evaluate().json
+      );
+    }
+  });
+
+  test('an enclosing operator adds its frame after the refusing one', () => {
+    for (const head of ['Count', 'Length', 'First', 'Last']) {
+      const ce = new ComputeEngine();
+      ce.declare('n', 'unknown');
+      ce.assign('n', 5);
+      expect(errorFrames(ce.box(['Sin', [head, 'n']]).evaluate())).toEqual([
+        head,
+        'Sin',
+      ]);
+    }
+  });
+
+  // A `Set` has no positions. A symbol declared `unknown` or
+  // `collection<integer>` that holds one is admitted at boxing by an
+  // `indexed_collection` parameter, so the handler refuses it at evaluation.
+  // `Sort` answered the error with no frame, `Ordering` failed with an
+  // internal error, and `RandomShuffle` shuffled the set into a list.
+  for (const head of ['Sort', 'Ordering', 'RandomShuffle', 'First', 'Last']) {
+    for (const decl of ['unknown', 'collection<integer>']) {
+      test(`${head}(n) with n: ${decl} holding a set`, () => {
+        const set = ['Set', 3, 1];
+        for (const when of ['before', 'after'] as const) {
+          const result = heldOperandAnswer(head, set, when, decl);
+          expect(result.json).toEqual([
+            'Error',
+            [
+              'ErrorCode',
+              "'incompatible-type'",
+              "'indexed_collection'",
+              "'set<integer>'",
+            ],
+            set,
+            ['ErrorTrace', ['ErrorFrame', `'${head}'`, 1]],
+          ]);
+          // The same error that the literal operand gets.
+          const ce = new ComputeEngine();
+          expect(result.json).toEqual(ce.box([head, set]).evaluate().json);
+        }
+      });
+    }
+  }
+});
+
+describe('ERROR-MODEL §3 — an operand that is already an error is not reported again', () => {
+  // `"a" + 1` is an error at boxing. An operator whose signature has several
+  // arms (`Sort`, `Reverse`, `RandomShuffle`) wrapped it in a second
+  // `incompatible-type` error ("expected `indexed_collection`, got
+  // `error`"), which hid the real diagnostic. The operand is now kept as it
+  // is, so the evaluation answers the error of `"a" + 1`, as it does for
+  // `Sin`, whose signature has one arm.
+  const inner = ['ErrorCode', "'incompatible-type'", "'number'", "'string'"];
+
+  for (const head of ['Sin', 'Sort', 'RandomShuffle']) {
+    test(`${head}("a" + 1) evaluates to the error of "a" + 1`, () => {
+      const ce = new ComputeEngine();
+      const result = ce.box([head, ['Add', "'a'", 1]]).evaluate();
+      expect(result.json).toEqual([
+        'Error',
+        inner,
+        "'a'",
+        [
+          'ErrorTrace',
+          ['ErrorFrame', "'Add'", 1],
+          ['ErrorFrame', `'${head}'`, 1],
+        ],
+      ]);
+    });
+  }
+
+  test('Reverse("a" + 1) keeps the failed operand in place, not wrapped', () => {
+    // `Reverse` is a collection head: by the rule "collections freeze the
+    // failed cell" it keeps an error in its operand in place instead of
+    // bubbling it. The kept operand is the error of `"a" + 1` itself.
+    const ce = new ComputeEngine();
+    const result = ce.box(['Reverse', ['Add', "'a'", 1]]).evaluate();
+    expect(result.json).toEqual([
+      'Reverse',
+      ['Add', ['Error', inner, "'a'"], 1],
+    ]);
+  });
+});
+
+describe('ERROR-MODEL §3 — other errors that a collection handler creates carry its frame', () => {
+  // These errors are about operand 1 and are created by the handler, which
+  // returns them as the value of the whole call. The evaluation does not add
+  // a frame to such a value, so the handler adds `{operator, 1}` itself.
+
+  test('PointZ of a 2-dimensional point: incompatible-dimensions', () => {
+    const expected = [
+      'Error',
+      "'incompatible-dimensions'",
+      "'coordinate 3 vs 2-dimensional point'",
+      ['ErrorTrace', ['ErrorFrame', "'PointZ'", 1]],
+    ];
+    const ce = new ComputeEngine();
+    // The literal point is refused by the canonical handler.
+    expect(ce.box(['PointZ', ['Tuple', 1, 2]]).evaluate().json).toEqual(
+      expected
+    );
+    // A symbol declared `unknown` is refused by the evaluate handler.
+    ce.declare('p', 'unknown');
+    ce.assign('p', ['Tuple', 1, 2]);
+    expect(ce.box(['PointZ', 'p']).evaluate().json).toEqual(expected);
+  });
+
+  test('RandomShuffle of an infinite collection: out-of-range', () => {
+    const ce = new ComputeEngine();
+    const result = ce
+      .box(['RandomShuffle', ['Range', 1, 'PositiveInfinity']])
+      .evaluate();
+    expect(errorCode(result)).toBe('out-of-range');
+    expect(errorFrames(result)).toEqual(['RandomShuffle']);
+  });
+
+  test('RandomShuffle of a collection that is too large: out-of-range', () => {
+    const ce = new ComputeEngine();
+    const result = ce.box(['RandomShuffle', ['Range', 1, 1e9]]).evaluate();
+    expect(errorCode(result)).toBe('out-of-range');
+    expect(errorFrames(result)).toEqual(['RandomShuffle']);
+  });
+});
+
+describe('ERROR-MODEL §1 — which non-collection operands stay unevaluated, and why', () => {
+  // A decided failure must not stay unevaluated (§1). Each row below names
+  // the rule that decides the answer for a non-collection operand.
+
+  test('Append(5, 1) keeps the failed cell: Append is a collection head', () => {
+    const ce = new ComputeEngine();
+    const result = ce.box(['Append', 5, 1]).evaluate();
+    expect(result.json).toEqual([
+      'Append',
+      ['Error', ['ErrorCode', "'incompatible-type'", "'collection'", "'5'"], 5],
+      1,
+    ]);
+  });
+
+  test('names that are not library operators stay unevaluated', () => {
+    // `Total`, `Accumulate`, `Window`, `Group`, `Entries` and `Prepend` have
+    // no definition, so an application of one is the application of an
+    // undeclared function. It has no contract that the operand could
+    // violate, so it stays unevaluated. If one of these names becomes a
+    // library operator, this row must be replaced by its refusal.
+    const ce = new ComputeEngine();
+    const rows: [string, any[]][] = [
+      ['Total', [5]],
+      ['Accumulate', [5, 'Add']],
+      ['Window', [5, 2]],
+      ['Group', [5]],
+      ['Entries', [5]],
+      ['Prepend', [5, 1]],
+    ];
+    for (const [head, ops] of rows) {
+      expect(ce.lookupDefinition(head)).toBeUndefined();
+      expect(isUnreduced(ce.box([head, ...ops]).evaluate(), head)).toBe(true);
+    }
+  });
+
+  test('Differences of a set is a lazy view, not a failure', () => {
+    // The signature of `Differences` is `(collection<any>) ->
+    // indexed_collection`, so a set is admitted. The answer is the lazy
+    // view, which is a value: it reads the set in its iteration order. This
+    // holds for the literal set and for a symbol that holds a set.
+    const ce = new ComputeEngine();
+    ce.declare('c', 'unknown');
+    ce.assign('c', ['Set', 3, 1]);
+    for (const source of [['Set', 3, 1], 'c']) {
+      const view = ce.box(['Differences', source]).evaluate();
+      expect(view.isValid).toBe(true);
+      expect(view.isCollection).toBe(true);
+      expect(view.count).toBe(1);
+    }
+  });
+});
+
 //
 // Euclidean norms — an infinite leg dominates a NaN leg
 //

@@ -101,6 +101,7 @@ import {
 } from './type-guards.js';
 import { narrowStringLiteralToCharacter } from './boxed-character.js';
 import { smallCount } from './collection-count.js';
+import { indexReadTupleExtension } from './index-read-tuple.js';
 
 // Parsed once: the type of an indexed collection whose every element is a
 // number. Used in `checkNumericArgs` to accept collections for broadcasting on
@@ -3022,6 +3023,13 @@ export function validateArguments(
       const blamed = ops.map((op, idx) => {
         const expected = refuted.get(idx);
         if (expected === undefined) return op;
+        // An operand that is already an error is returned as it is. An error
+        // value is a member of no type, so every arm refutes it, but its own
+        // diagnostic is the precise one: wrapping it in a second
+        // `incompatible-type` error ("expected `indexed_collection`, got
+        // `error`") hid that diagnostic. `Sort("a" + 1)` now keeps the error
+        // of `"a" + 1`, as `Sin("a" + 1)` does.
+        if (!op.isValid) return op;
         // When the refuted position is an arrow slot no arm can apply the
         // callback at, say THAT rather than printing two signatures side by
         // side: `expected` is the union of the arms' slots, so the arity
@@ -3278,6 +3286,29 @@ export function validateArguments(
     if (op.valueDefinition?.inferredType && op.type.matches(param)) {
       result.push(op);
       continue;
+    }
+
+    // A bare parameter typed only by its index reads (`p[1] + 1` gives
+    // `tuple<number>`) at a slot that requires a LONGER tuple: index reads
+    // do not prove the length of the argument, so this is not a conflict.
+    // The parameter takes the tuple of the slot, with the components that
+    // the reads gave (`indexReadTupleExtension()`). Without this, the call
+    // was admitted with no write, and the parameter kept the shorter tuple
+    // that the call refuses.
+    if (
+      !paramStillOpen &&
+      op.valueDefinition?.inferredType &&
+      op.valueDefinition.value === undefined
+    ) {
+      const extended = ce._withoutFacts(() =>
+        indexReadTupleExtension(op.type.type, param)
+      );
+      if (extended !== undefined) {
+        if (!internals?.noInference && !internals?.trial)
+          ce._withoutFacts(() => op._infer(() => extended, 'replace'));
+        result.push(op);
+        continue;
+      }
     }
 
     // The symbol's type was inferred (not declared), and the required type is

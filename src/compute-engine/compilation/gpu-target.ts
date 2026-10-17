@@ -15800,7 +15800,24 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
               `construct) cannot be the final statement of a block — a shader ` +
               `block must evaluate to a typed value.`
           );
-        stmts[last] = `return ${stmts[last]}`;
+        // In WGSL an assignment is a STATEMENT, so a last statement that is
+        // an assignment (`Assign(s, x)`, or a `Declare` with an initializer,
+        // which the block emits as `var s: f32` followed by the same
+        // `s = x`) cannot be returned: `return s = x;` is invalid WGSL. The
+        // value of the block is the assigned value, so keep the assignment
+        // as a statement and return the name it wrote: the written name has
+        // the same spelling as every read of that name, so the `return`
+        // reads the value just stored. The pattern cannot match an
+        // expression statement: no WGSL expression starts with a token free
+        // of spaces and brackets followed by a single ` = `. GLSL is left as
+        // it is: an assignment is an expression there, and `return s = x;`
+        // is valid GLSL.
+        const assigned =
+          this.languageId === 'wgsl'
+            ? /^([^\s()[\]{}'"=,:;]+) = /.exec(stmts[last])
+            : null;
+        if (assigned !== null) stmts.push(`return ${assigned[1]}`);
+        else stmts[last] = `return ${stmts[last]}`;
         // A statement a list member hoisted (a loop, a compound block) is
         // already terminated; the joiner adds `;` only where one is missing.
         return BaseCompiler.joinShaderStatements(stmts);

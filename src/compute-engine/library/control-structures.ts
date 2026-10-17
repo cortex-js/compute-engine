@@ -70,7 +70,10 @@ import type {
   CollectionHandlers,
   BoxedValueDefinition,
 } from '../global-types.js';
-import { errorValue } from '../boxed-expression/error-value.js';
+import {
+  errorValue,
+  surplusOperandError,
+} from '../boxed-expression/error-value.js';
 import { describeBoundSymbol } from '../boxed-expression/operand-descriptor.js';
 import {
   isFunction,
@@ -390,21 +393,32 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
           context.engine._typeResolver
         );
       },
-      canonical: (ops, { engine }) =>
-        engine._fn(
-          'If',
-          // The condition (op 0) is an ordinary expression, checked for a
-          // provably non-boolean type (`conditionOperand`); the then/else
-          // branches (ops 1+) are statement positions, so reject a bare
-          // `Break`/`Continue` symbol there.
-          ops.map((op, i) =>
-            i === 0
-              ? conditionOperand(engine, op.canonical)
-              : canonicalStatement(engine, op)
-          )
-        ),
-      evaluate: (ops, options) => evaluateIf(ops, options),
-      evaluateAsync: (ops, options) => evaluateIfAsync(ops, options),
+      canonical: (ops, { engine }) => {
+        // The condition (op 0) is an ordinary expression, checked for a
+        // provably non-boolean type (`conditionOperand`); the then/else
+        // branches (ops 1+) are statement positions, so reject a bare
+        // `Break`/`Continue` symbol there.
+        const xs = ops.map((op, i) =>
+          i === 0
+            ? conditionOperand(engine, op.canonical)
+            : canonicalStatement(engine, op)
+        );
+        // The condition and the then branch are required. A missing one is
+        // an `Error("missing")` operand in its place, as `checkArity()` does
+        // for other operators: the expression is invalid, and its evaluate
+        // handler is never called with an absent operand.
+        while (xs.length < 2) xs.push(engine.error('missing'));
+        return engine._fn('If', xs);
+      },
+      // A surplus operand after the else branch is refused, as for any
+      // built-in operator: the whole call is the `unexpected-argument` error
+      // (`surplusOperandError`), whatever the condition.
+      evaluate: (ops, options) =>
+        surplusOperandError(options.engine, 'If', ops, options.expression, 3) ??
+        evaluateIf(ops, options),
+      evaluateAsync: async (ops, options) =>
+        surplusOperandError(options.engine, 'If', ops, options.expression, 3) ??
+        evaluateIfAsync(ops, options),
     },
 
     Loop: {

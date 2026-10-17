@@ -955,9 +955,11 @@ describe('a collection passed in a self-call types the parameter', () => {
   //
   describe('a function held as a value', () => {
     test('a name that already has a value binding (Epsil route)', () => {
-      // `m` is bound as a value before the program runs, so the definition is
-      // held as a value; the same program named `f` is an operator.
+      // The test binds `m` as a function-typed value before the program
+      // runs, so the program's definition of `m` is held as a value; the
+      // same program on a name with no binding defines an operator.
       const ce = new ComputeEngine();
+      ce.declare('m', 'function');
       const r = executeEpsil(
         ce,
         'm(n, s) = s if n == 0 else m(n - 1, [1, 2])\nm(1, [0])'

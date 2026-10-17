@@ -52,6 +52,7 @@ import type {
 } from '../global-types.js';
 
 import { activeRollbackFrame } from '../inference-rollback.js';
+import { contractTupleOfNarrow } from './index-read-tuple.js';
 
 import { mul, div } from './arithmetic-mul-div.js';
 
@@ -599,7 +600,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
             ? t
             : inferenceMode === 'widen'
               ? widen(def.value.type.type, t)
-              : narrow(def.value.type.type, t)
+              : contractTupleOfNarrow(narrow(def.value.type.type, t), t)
         );
         // Inferring `unknown` adds no information — the argument's type is
         // still open. It is a no-op, so skip the write: assigning `unknown`

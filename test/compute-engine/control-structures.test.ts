@@ -286,5 +286,73 @@ describe('CONTROL STRUCTURES', () => {
       const both = ce.expr(['If', 'ifCond57', 42, 99]);
       expect(both.type.matches('integer')).toBe(true);
     });
+
+    // The condition and the then branch are required. A missing one is an
+    // `Error("missing")` operand in its place. Before, `If()` threw a
+    // TypeError on evaluation, and `If(True)` was valid and evaluated to
+    // Missing.
+    it('replaces a missing required operand with an error', () => {
+      const none = ce.box(['If']);
+      expect(none.json).toEqual([
+        'If',
+        ['Error', "'missing'"],
+        ['Error', "'missing'"],
+      ]);
+      expect(none.isValid).toBe(false);
+      expect(none.evaluate().operator).toBe('Error');
+
+      const conditionOnly = ce.box(['If', 'True']);
+      expect(conditionOnly.json).toEqual([
+        'If',
+        'True',
+        ['Error', "'missing'"],
+      ]);
+      expect(conditionOnly.isValid).toBe(false);
+      expect(conditionOnly.evaluate().operator).toBe('Error');
+      expect(conditionOnly.N().operator).toBe('Error');
+
+      // With a condition and a then branch, the call is valid, as before.
+      const noElse = ce.box(['If', 'False', 1]);
+      expect(noElse.isValid).toBe(true);
+      expect(noElse.evaluate().symbol).toBe('Missing');
+    });
+
+    // An operand after the else branch is refused when the call is
+    // evaluated, as for `Numerator(a/b, x)`: the whole call is the
+    // `unexpected-argument` error that names the surplus operand, with the
+    // frame `(If, 4)`, whatever the condition. Before, it was ignored and
+    // `If(True, 1, 2, 3)` evaluated to 1.
+    it('refuses an operand after the else branch', async () => {
+      for (const cond of ['True', 'False', 'ifCond58']) {
+        const expr = ce.box(['If', cond, 1, 2, 3]);
+        for (const result of [
+          expr.evaluate(),
+          expr.N(),
+          await expr.evaluateAsync(),
+        ]) {
+          // One frame only: `If` is a selecting operator, and its evaluation
+          // must not add a second frame for operand 1.
+          expect(result.json).toEqual([
+            'Error',
+            "'unexpected-argument'",
+            "'3'",
+            ['ErrorTrace', ['ErrorFrame', "'If'", 4]],
+          ]);
+        }
+      }
+      // An error that an inner `If` gives for its condition keeps the frame
+      // of the inner and of the outer `If`.
+      const nested = ce.box(['If', ['If', 'Missing', 1], 'a', 'b']).evaluate();
+      expect(nested.operator).toBe('Error');
+      const nestedJson = nested.json as any[];
+      expect(nestedJson[nestedJson.length - 1]).toEqual([
+        'ErrorTrace',
+        ['ErrorFrame', "'If'", 1],
+        ['ErrorFrame', "'If'", 1],
+      ]);
+      // With an else branch and no more, the call is unchanged.
+      expect(ce.box(['If', 'True', 1, 2]).evaluate().json).toBe(1);
+      expect(ce.box(['If', 'False', 1, 2]).evaluate().json).toBe(2);
+    });
   });
 });

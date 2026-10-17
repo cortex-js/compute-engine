@@ -152,6 +152,22 @@ function containsAsyncOnly(
       e.valueDefinition ?? (isValueDef(binding) ? binding.value : undefined);
     const body = def?._lambdaLiteral ?? def?.lambda?.body;
     if (body !== undefined && visit(body, false)) return true;
+    // A multi-clause user function has no single body: its definition
+    // selects one of the function literals of its clauses at each call, so
+    // each of these literals is examined. The clause records are under the
+    // key that `multi-clause.ts` stores them at. That module imports
+    // `boxed-function.ts`, which imports this one, so the records are read
+    // structurally here, as `appliesLiteral()` (`function-utils.ts`) does.
+    const clauses = (
+      def as
+        | {
+            _multiClauseFunction?: {
+              clauses?: ReadonlyArray<{ literal: Expression }>;
+            };
+          }
+        | undefined
+    )?._multiClauseFunction?.clauses;
+    if (clauses?.some((c) => visit(c.literal, false))) return true;
     if (valueDef?.value !== undefined && visit(valueDef.value, false))
       return true;
     if (!isFunction(e) || e._numericStore !== undefined) return false;

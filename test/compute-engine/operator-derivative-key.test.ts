@@ -434,6 +434,48 @@ describe('derivative key: precedence', () => {
     expect(ce.box(['D', ['M5', 'x'], 'x']).evaluate().toString()).toBe('3x');
   });
 
+  test('an array with the wrong number of entries is not replaced by the literal', () => {
+    const ce = new ComputeEngine();
+    // The body x·y has the partials y and x. The key has one entry for an
+    // operator of two arguments, so it cannot be used: the partials stay
+    // symbolic, and the body of the literal is not differentiated instead.
+    ce.declare('P', {
+      signature: '(number, number) -> number',
+      evaluate: ce.expr(['Function', ['Multiply', 'x', 'y'], 'x', 'y']),
+      derivative: [['Function', 42, 'x']],
+    });
+    expect(
+      ce
+        .box(['D', ['P', 't', 'a'], 't'])
+        .evaluate()
+        .toString()
+    ).toBe('Apply(Derivative(P, 1, 0), t, a)');
+    expect(ce.box(['Derivative', 'P', 1, 0]).evaluate().toString()).toBe(
+      'Derivative(P, 1, 0)'
+    );
+    // The body x³ has the derivative 3x². The key has two entries for an
+    // operator of one argument.
+    ce.declare('Q', {
+      signature: '(number) -> number',
+      evaluate: ce.expr(['Function', ['Power', 'x', 3], 'x']),
+      derivative: [
+        ['Function', 1, 'x'],
+        ['Function', 2, 'x'],
+      ],
+    });
+    expect(
+      ce
+        .box(['D', ['Q', ['Power', 'x', 2]], 'x'])
+        .evaluate()
+        .toString()
+    ).toBe('2x * Apply(Derivative(Q, 1), x^2)');
+    expect(ce.box(['Derivative', 'Q']).evaluate().toString()).toBe(
+      'Derivative(Q)'
+    );
+    // The function itself still evaluates through its literal
+    expect(ce.box(['Q', 2]).evaluate().toString()).toBe('8');
+  });
+
   test('a library operator keeps its own derivative rule', () => {
     const ce = new ComputeEngine();
     declareSq(ce);

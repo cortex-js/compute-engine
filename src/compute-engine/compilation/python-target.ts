@@ -177,6 +177,22 @@ function pythonCheckIdentifier(id: string): string {
 }
 
 /**
+ * Fail closed when `id`, emitted as a name that the generated code BINDS (a
+ * function name, a parameter, a loop or summation index), is a Python keyword.
+ * Returns `id` unchanged otherwise. Unlike `pythonCheckIdentifier()`, this
+ * also rejects the value keywords `True` and `False`: a READ of those names
+ * is emitted as the Python boolean literal of the same name, but a binding
+ * of them (`def True():`, `lambda False: 1`) is a syntax error.
+ */
+function pythonCheckBindingName(id: string): string {
+  if (PYTHON_KEYWORDS.has(id) || id in PYTHON_BOOLEANS)
+    throw new Error(
+      `"${id}" is a reserved word in python and cannot be used as a function, parameter or index name. Rename it before compiling to Python (fail closed, D6).`
+    );
+  return id;
+}
+
+/**
  * Python mathematical constants, keyed by MathJSON symbol.
  *
  * Referenced both by the target's `var` resolver and — so an assigned value is
@@ -817,7 +833,7 @@ function compilePythonSumProduct(
     if (!isSymbol(indexExpr))
       throw new Error(`Could not compile \`${kind}\`: index must be a symbol`);
     // The index is emitted as a bare Python identifier.
-    const index = pythonCheckIdentifier(indexExpr.symbol);
+    const index = pythonCheckBindingName(indexExpr.symbol);
 
     const lowerExpr = ops[1];
     const upperExpr = ops[2];
@@ -1071,7 +1087,7 @@ function pythonElementHeaders(
   for (const b of binders) {
     const source = pythonElementSource(b.clause.ops[1], scope);
     // The clause's names are emitted as bare Python identifiers.
-    for (const name of b.names) pythonCheckIdentifier(name);
+    for (const name of b.names) pythonCheckBindingName(name);
     const prev = scope;
     const bound = new Set(b.names);
     scope = {
@@ -4691,7 +4707,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     const params = args
       .slice(1)
       .map((x) =>
-        pythonCheckIdentifier(functionLiteralParameterName(x) || '_')
+        pythonCheckBindingName(functionLiteralParameterName(x) || '_')
       );
     const bodyCode = BaseCompiler.compile(body.canonical, {
       ...target,
@@ -5549,8 +5565,20 @@ export class PythonTarget implements LanguageTarget<Expression> {
         // A last statement that is a `Return` is already the `return`
         // statement of the block: another `return` in front of it gave
         // `return return x`, which does not parse.
-        else if (!/^return\b/.test(stmts[last]))
-          stmts[last] = `return ${stmts[last]}`;
+        else if (!/^return\b/.test(stmts[last])) {
+          // A last statement that is an assignment (`Assign(s, x)`, or a
+          // `Declare` with an initializer, which this target emits as the
+          // same `s = x`) is a Python STATEMENT, so `return s = x` does not
+          // parse. The value of the block is the assigned value, so keep the
+          // assignment as a statement and return the name it wrote: the
+          // written name has the same spelling as every read of that name,
+          // so the `return` reads the value just stored. The pattern cannot
+          // match an expression statement: no Python expression starts with
+          // a token free of spaces and brackets followed by a single ` = `.
+          const assigned = /^([^\s()[\]{}'"=,:]+) = /.exec(stmts[last]);
+          if (assigned !== null) stmts.push(`return ${assigned[1]}`);
+          else stmts[last] = `return ${stmts[last]}`;
+        }
         return stmts.join('\n');
       },
       // Per-compilation naming state for generated temporaries (see the
@@ -5806,8 +5834,8 @@ export class PythonTarget implements LanguageTarget<Expression> {
     // The function name and the declared parameters are emitted as bare
     // Python identifiers, so a Python keyword fails closed, as it does for a
     // free symbol (`def f(lambda):` is a syntax error).
-    pythonCheckIdentifier(functionName);
-    for (const p of parameters) pythonCheckIdentifier(p);
+    pythonCheckBindingName(functionName);
+    for (const p of parameters) pythonCheckBindingName(p);
     // Shadow the declared parameters so they stay bare identifiers (never
     // folded to an assigned engine value).
     // Root compilation boundary (see `compile`). The declared parameters are
@@ -5903,6 +5931,10 @@ export class PythonTarget implements LanguageTarget<Expression> {
     docstring?: string,
     options?: { cse?: boolean; constantFold?: boolean }
   ): string {
+    // `functionName` is bound below as a bare Python name. The checks of
+    // `compileFunction()` see only the `_<name>_scalar` spelling, which is a
+    // valid identifier even for a keyword, so check the name itself here.
+    pythonCheckBindingName(functionName);
     const baseFunction = this.compileFunction(
       expr,
       `_${functionName}_scalar`,
@@ -5937,7 +5969,7 @@ export class PythonTarget implements LanguageTarget<Expression> {
     pythonAssertExpressionBody('compileLambda()', expr);
     // The declared parameters are emitted as bare Python identifiers, so a
     // Python keyword fails closed, as it does for a free symbol.
-    for (const p of parameters) pythonCheckIdentifier(p);
+    for (const p of parameters) pythonCheckBindingName(p);
     // Root compilation boundary (see `compile` and `compileFunction`).
     const target = this.createTarget({
       var: this.makeVarResolver(undefined, parameters),

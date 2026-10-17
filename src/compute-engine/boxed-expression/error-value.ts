@@ -244,6 +244,77 @@ export function errorWhere(err: Expression): Expression | undefined {
   return errorOpsWithoutTrace(err)[1];
 }
 
+/**
+ * The errors that an `evaluate` handler made for its own node with the frame
+ * of that node already in the breadcrumb, each mapped to that node.
+ *
+ * The evaluation of a SELECTING operator (`If`, `Which`, `And`, …) adds a
+ * frame to an `Error` that its handler returns (`_resultError()` in
+ * `boxed-function.ts`): it looks for the operand that holds the error, and
+ * when no operand holds it, it records operand 1. That is wrong for an error
+ * that the handler made about another operand and that already names it, such
+ * as the `unexpected-argument` error of {@link surplusOperandError}. A handler
+ * records such an error here with its own node, and the evaluation of that
+ * node then adds no frame. The record is for one node only: when the error
+ * goes up through an enclosing node (an `If` in the condition of another
+ * `If`), the enclosing node is a different node and adds its frame as usual.
+ * The map holds its keys weakly, so a record goes away with its error.
+ */
+const errorsFramedByNode = new WeakMap<Expression, Expression>();
+
+/** Record that `err`, an error that the `evaluate` handler of `node` made,
+ * already has the frame of `node` in its breadcrumb. See
+ * {@link errorsFramedByNode}. */
+export function markErrorFramedByNode(err: Expression, node: Expression): void {
+  errorsFramedByNode.set(err, node);
+}
+
+/** True if the `evaluate` handler of `node` made `err` with the frame of
+ * `node` already in its breadcrumb ({@link markErrorFramedByNode}). The
+ * evaluation of `node` must then not add another frame. */
+export function isErrorFramedByNode(
+  err: Expression,
+  node: Expression
+): boolean {
+  return errorsFramedByNode.get(err) === node;
+}
+
+/**
+ * The error for the first surplus operand of a call to a built-in operator
+ * whose `evaluate` handler reads at most `max` operands, or `undefined` for
+ * a call with `max` operands or fewer.
+ *
+ * Some `canonical` handlers build the call with `engine._fn`, which does no
+ * arity check, and keep every operand. `Numerator`, `Denominator` and
+ * `NumeratorDenominator` (one operand) keep them on purpose: a user
+ * definition that extends one of them with options reads the extra operands
+ * in its own handler (issue #442). `If` (at most three operands) does the
+ * same. The built-in `evaluate` handler refuses the call the way a declared
+ * function refuses a surplus argument: the `unexpected-argument` error names
+ * the first surplus operand and carries the frame of the operator at that
+ * operand's 1-based position.
+ *
+ * `node` is the node that is evaluated (the `expression` option of the
+ * handler). The error is recorded with it ({@link markErrorFramedByNode}),
+ * so that the evaluation of a selecting operator such as `If` does not add a
+ * second frame, for operand 1, to an error that already names its operand.
+ */
+export function surplusOperandError(
+  ce: Expression['engine'],
+  operator: string,
+  ops: ReadonlyArray<Expression>,
+  node: Expression | undefined,
+  max = 1
+): Expression | undefined {
+  if (ops.length <= max) return undefined;
+  const err = withErrorFrames(
+    ce.error('unexpected-argument', ops[max].toString()),
+    [{ operator, index: max + 1 }]
+  );
+  if (node !== undefined) markErrorFramedByNode(err, node);
+  return err;
+}
+
 /** `err` with `frames` appended to its breadcrumb (a no-op for an empty
  * chain). The historical operands are preserved untouched. */
 export function withErrorFrames(

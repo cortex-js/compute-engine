@@ -1959,9 +1959,10 @@ export type ApplyOptions = Partial<EvaluateOptions> & {
    * honors the abort signal. Set by the asynchronous route of a named
    * function (`applyFunctionLiteralAsync`) and by nothing else, together
    * with the `_effects`, `_contextStack` and `_precisionWindow` of that
-   * evaluation. Declined
-   * (the application is synchronous) when another application of the same
-   * literal is already suspended, or when an argument has a free symbol.
+   * evaluation. Declined (the application is synchronous) when an argument
+   * has a free symbol. When another application of the same literal with
+   * awaited statements is suspended and this one is not in its call frame,
+   * this one starts when that one ends (`blockingAsyncApplication()`).
    */
   awaitStatements?: boolean;
   /**
@@ -3092,18 +3093,55 @@ class SymbolicRecursion {
  */
 const activeApplications = new Map<number, number>();
 
+/** An application of a literal whose statements are awaited
+ * (`ApplyOptions.awaitStatements`): its call frame, and a promise that is
+ * settled when the application ends. */
+type AsyncApplication = {
+  frame: Scope;
+  done: Promise<void>;
+  finish: () => void;
+};
+
 /**
- * The body scopes with an application suspended at an `await`
- * (`ApplyOptions.awaitStatements`). A suspended application leaves the body
- * scope re-parented to its call frame, and the scope has room for one such
- * frame: a second application of the same literal, from a concurrent
- * evaluation or from a recursive call in the body, runs synchronously, to
- * completion, inside it. The scope object is the key, not the structural
- * hash of the literal: an identical literal on another engine, or a second
- * definition with the same text on this one, has its own body scope and
- * is not held back.
+ * For each body scope, the applications of its literal whose statements are
+ * awaited and have not ended, the most recent last.
+ *
+ * An application re-parents the body scope to its call frame, and restores
+ * the previous parent when it ends. The applications of one body scope must
+ * thus end in the reverse order of their start. The application of a
+ * recursive call in the body starts in the call frame of the most recent
+ * application and ends before it: it can be suspended too. Another
+ * application (from a concurrent evaluation, or from a call that the body
+ * starts without waiting for the result, such as the elements of a
+ * broadcast) waits until the most recent application ends
+ * (`blockingAsyncApplication()`). Before, it ran synchronously, and an
+ * operator with only an `evaluateAsync` handler in the body stayed
+ * unevaluated: with `h(n) = AsyncOnly(n)`, two overlapping
+ * `h(1).evaluateAsync()` and `h(2).evaluateAsync()` gave `10` and
+ * `AsyncOnly(2)`.
+ *
+ * The scope object is the key, not the structural hash of the literal: an
+ * identical literal on another engine, or a second definition with the same
+ * text on this one, has its own body scope and does not wait.
  */
-const asyncInFlight = new WeakSet<object>();
+const asyncInFlight = new WeakMap<object, AsyncApplication[]>();
+
+/**
+ * The most recent application of the literal whose body scope is
+ * `bodyScope` with awaited statements, when an application that starts with
+ * the evaluation contexts `contexts` must wait until it ends: it is not one
+ * of the call frames of `contexts`. `undefined` when the application can
+ * start now.
+ */
+function blockingAsyncApplication(
+  bodyScope: Scope,
+  contexts: ReadonlyArray<{ lexicalScope: Scope }>
+): AsyncApplication | undefined {
+  const inFlight = asyncInFlight.get(bodyScope);
+  const last = inFlight?.[inFlight.length - 1];
+  if (last === undefined) return undefined;
+  return contexts.some((c) => c.lexicalScope === last.frame) ? undefined : last;
+}
 
 /**
  * Does an evaluated argument contain a free symbol — a symbol occurrence,
@@ -3979,6 +4017,40 @@ function makeLambda(
     )
       return invokeWithBoundVariables(args, options);
 
+    // An application with awaited statements waits until the suspended
+    // application of this literal that blocks it ends (see `asyncInFlight`),
+    // and then starts again: it re-parents the body scope only when that
+    // scope is free for it.
+    if (
+      options?.awaitStatements === true &&
+      options._effects !== undefined &&
+      iterationStatements === undefined
+    ) {
+      const {
+        _effects: effects,
+        _contextStack: stack,
+        _precisionWindow: precision,
+      } = options;
+      const contexts = stack ?? ce._evalContextStack;
+      let blocking = blockingAsyncApplication(bodyFn.localScope!, contexts);
+      if (blocking !== undefined)
+        return (async () => {
+          while (blocking !== undefined) {
+            await blocking.done;
+            blocking = blockingAsyncApplication(bodyFn.localScope!, contexts);
+          }
+          return runWithEvaluationEffects(
+            ce,
+            effects,
+            () => lambda(args, options),
+            stack,
+            precision
+          );
+          // The lambda is typed synchronous: a `Promise` comes back only for
+          // the caller that set `awaitStatements`.
+        })() as unknown as Expression;
+    }
+
     // The scope the literal was defined in — the parent of every call frame
     // (step 5), and the chain a held argument's symbols must be resolvable
     // through (`inlineFrameLocals`).
@@ -4512,6 +4584,33 @@ function makeLambda(
     // `enterNestedBodyScopes`.
     const nested = enterNestedBodyScopes(bodyFn);
 
+    // Are the statements awaited (`awaitStatements`)? Not when an argument
+    // has a free symbol: the recursion guard of such an application is the
+    // synchronous one above. An application that another suspended
+    // application of this literal blocks waited at the start of `invoke`
+    // (see `asyncInFlight`), so none blocks this one now; the test is
+    // repeated, and a blocked application runs synchronously.
+    const awaiting =
+      options?.awaitStatements === true &&
+      options._effects !== undefined &&
+      iterationStatements === undefined &&
+      blockingAsyncApplication(
+        bodyScope,
+        options._contextStack ?? ce._evalContextStack
+      ) === undefined &&
+      !evaluatedArgs.some((a) => containsFreeSymbol(a));
+    // An application whose statements are awaited puts its call frame on
+    // its own copy of the evaluation-context stack, as the asynchronous
+    // route of a named function does (`applyAwaiting`). The caller can start
+    // another application on its stack while this one is suspended (the
+    // elements of a broadcast): that one must not find the frame of this one
+    // on its stack, which would read as a recursive call in this frame
+    // (`blockingAsyncApplication()`), and a frame that it pushes must not
+    // cover the frame of this one.
+    const enclosingStack = ce._evalContextStack;
+    const ownStack = awaiting ? [...enclosingStack] : undefined;
+    if (ownStack !== undefined) ce._evalContextStack = ownStack;
+
     // Push fresh scope and evaluate block contents directly.
     // We evaluate bodyFn.ops (the Block's children) rather than calling
     // body.evaluate() — see evaluateStatements JSDoc for why.
@@ -4666,28 +4765,28 @@ function makeLambda(
       return bodyResultValue(result);
     };
 
-    // Await the statements (`awaitStatements`). Everything after the first
-    // `await` runs with this evaluation's registry and context stack in
-    // place of the engine's: other evaluations run in between. A recursive
-    // body is not entered twice (`asyncInFlight`), nor an application with a
-    // free symbol in an argument, whose recursion guard is the synchronous
-    // one above.
-    if (
-      options?.awaitStatements === true &&
-      options._effects !== undefined &&
-      iterationStatements === undefined &&
-      !asyncInFlight.has(bodyScope) &&
-      !evaluatedArgs.some((a) => containsFreeSymbol(a))
-    ) {
-      const {
-        signal,
-        _effects: effects,
-        _contextStack: stack,
-        _precisionWindow: precision,
-      } = options;
+    // Await the statements (`awaiting`). Everything after the first `await`
+    // runs with this evaluation's registry and this application's context
+    // stack in place of the engine's: other evaluations run in between.
+    if (ownStack !== undefined) {
+      const { signal, _effects, _precisionWindow: precision } = options!;
+      const effects = _effects!;
+      const stack = ownStack;
       const inContext = <T>(f: () => T): T =>
         runWithEvaluationEffects(ce, effects, f, stack, precision);
-      asyncInFlight.add(bodyScope);
+      let finish: () => void = () => {};
+      const application: AsyncApplication = {
+        frame: freshScope,
+        done: new Promise<void>((resolve) => (finish = resolve)),
+        finish: () => finish(),
+      };
+      let inFlight = asyncInFlight.get(bodyScope);
+      if (inFlight === undefined) {
+        inFlight = [];
+        asyncInFlight.set(bodyScope, inFlight);
+      }
+      inFlight.push(application);
+      const applications = inFlight;
       // Other evaluations run while the statements are awaited. A result
       // computed before one of them wrote a value the body reads must not
       // enter the memo, whose record is stamped at store time: the
@@ -4697,7 +4796,7 @@ function makeLambda(
         memoKey === undefined ? undefined : snapshotMemoDeps(fnExpr);
       const worldBefore = ce._worldVersion;
       const epochBefore = ce._objectStoreEpoch;
-      return (async () => {
+      const answer = (async () => {
         try {
           try {
             const statements = await evaluateStatementsAsync(
@@ -4714,7 +4813,10 @@ function makeLambda(
             inContext(cleanup);
           }
         } finally {
-          asyncInFlight.delete(bodyScope);
+          const index = applications.lastIndexOf(application);
+          if (index >= 0) applications.splice(index, 1);
+          if (applications.length === 0) asyncInFlight.delete(bodyScope);
+          application.finish();
         }
         return inContext(() =>
           conclude(
@@ -4724,9 +4826,13 @@ function makeLambda(
               memoDepsStillValid(fnExpr, depsBefore)
           )
         );
-        // The lambda is typed synchronous: a `Promise` comes back only for
-        // the caller that set `awaitStatements`.
-      })() as unknown as Expression;
+      })();
+      // The part of the application before its first `await` ran with the
+      // own stack of the application in place of the engine's.
+      ce._evalContextStack = enclosingStack;
+      // The lambda is typed synchronous: a `Promise` comes back only for
+      // the caller that set `awaitStatements`.
+      return answer as unknown as Expression;
     }
 
     try {
@@ -4743,7 +4849,10 @@ function makeLambda(
     return conclude();
   };
 
-  return wrapRecursion(ce, guardSymbolicRecursion(fnExpr, invoke));
+  // `invoke` applies `lambda` again when an application waited for another
+  // one (see `asyncInFlight`), so that the recursion guards count it.
+  const lambda = wrapRecursion(ce, guardSymbolicRecursion(fnExpr, invoke));
+  return lambda;
 }
 
 /**

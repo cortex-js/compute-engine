@@ -58,7 +58,7 @@ import {
   isNearRoundingJumpValue,
 } from '../boxed-expression/numerics.js';
 import { addOrder } from '../boxed-expression/order.js';
-import { withErrorFrames } from '../boxed-expression/error-value.js';
+import { surplusOperandError } from '../boxed-expression/error-value.js';
 import { reduceModulo } from '../boxed-expression/modular-arithmetic.js';
 import {
   hasInfiniteComponent,
@@ -503,30 +503,6 @@ References:
 - APS Physical Review Style and Notation Guide  https://cdn.journals.aps.org/files/styleguide-pr.pdf p21
 - AIP style guide:  http://web.mit.edu/me-ugoffice/communication/aip_style_4thed.pdf p23 (page 26 of the pdf)
 */
-
-/**
- * The error for a surplus operand of `Numerator`, `Denominator` or
- * `NumeratorDenominator`, or `undefined` for a call with one operand.
- *
- * The three operators take one operand. Their `canonical` handlers build the
- * call with `engine._fn`, which does no arity check, and keep every operand
- * on purpose: a user definition that extends one of them with options reads
- * the extra operands in its own handler (issue #442). The built-in `evaluate`
- * handler reads the first operand only, so it refuses the call the way a
- * declared one-parameter function refuses a second argument: the
- * `unexpected-argument` error names the first surplus operand and carries the
- * frame of the operator at that operand's 1-based position.
- */
-function surplusOperandError(
-  ce: ComputeEngine,
-  operator: string,
-  ops: ReadonlyArray<Expression>
-): Expression | undefined {
-  if (ops.length <= 1) return undefined;
-  return withErrorFrames(ce.error('unexpected-argument', ops[1].toString()), [
-    { operator, index: 2 },
-  ]);
-}
 
 /**
  * The operands of a `Numerator`, `Denominator` or `NumeratorDenominator`
@@ -1464,6 +1440,42 @@ function lnSign(x: Expression): Sign | undefined {
 }
 
 /**
+ * Whether the operand is a FLOAT number literal whose type claims the
+ * `rational` tier: an integer-valued float such as `2.0` or `-1.0`. Such a
+ * literal is typed by its value (`2`), which is an `integer`, so the type
+ * alone cannot tell it from the exact `2`. The structural view can: it holds
+ * exact reduced terms only for an exact literal.
+ *
+ * A float result is typed `integer` when its value is an integer and `real`
+ * otherwise (`machineNumberTierType`, `boxed-expression/literal-tier.ts`), so
+ * a float `0.25` is not in the `rational` tier. A handler that claims
+ * `rational` for a quotient of rational operands must claim `real` instead
+ * when one of them is such a float: `2^(−2.0)` evaluates to the float `0.25`.
+ */
+function isInexactRationalLiteral(d: OperandDescriptor): boolean {
+  const structure = d.structureOf?.();
+  return (
+    structure?.kind === 'number' &&
+    structure.rational === undefined &&
+    factsOf(d.type).rational
+  );
+}
+
+/**
+ * The tier of a result that is a rational number when its operands are
+ * exact: `rational`, or `real` when one of the operands is a float literal
+ * with an integer value (see `isInexactRationalLiteral()`). A float operand
+ * makes a float result, and a float that is not an integer is typed `real`:
+ * `6/4.0`, `(1/3)·4.0` and `Mod(5.0, 3/2)` evaluate to the floats `1.5`,
+ * `1.333…` and `0.5`.
+ */
+function rationalTierOf(
+  ops: ReadonlyArray<OperandDescriptor>
+): 'real' | 'rational' {
+  return ops.some(isInexactRationalLiteral) ? 'real' : 'rational';
+}
+
+/**
  * The parity of the numerator of a LITERAL rational exponent `p/q` in
  * lowest terms with an odd denominator `q > 1`, as `{ numeratorEven }`;
  * `undefined` for an integer, a float, a symbol or a compound exponent, and
@@ -1566,8 +1578,17 @@ function negativeBaseIsComplexBranch(exp: OperandDescriptor): boolean {
  * `tuple<integer, integer> / integer` claimed INTEGER
  * components where `[6,2]/4 = [3/2,1/2]` is rational — is exactly what this
  * widening removes.
+ *
+ * `floatNumerator` is true when the numerator holds a float literal with an
+ * integer value as a component (`hasInexactRationalComponent()`): such a
+ * component is typed `integer`, but its quotient is a float, typed `real`
+ * (`(2.0, 4.0) / 3` evaluates to `(0.666…, 1.333…)`).
  */
-function quotientComponentType(el: Type, den: OperandDescriptor): Type {
+function quotientComponentType(
+  el: Type,
+  den: OperandDescriptor,
+  floatNumerator: boolean
+): Type {
   // The handler checks the NaN and zero guards before its shape branches only
   // for the NUMERATOR side; re-check the denominator here so the
   // helper's per-component parity with the scalar path does not depend on
@@ -1580,7 +1601,10 @@ function quotientComponentType(el: Type, den: OperandDescriptor): Type {
     if (factsOf(el).real && isExtendedRealOperand(den)) return 'integer';
     return 'number';
   }
-  if (factsOf(den.type).integer && factsOf(el).integer) return 'rational';
+  // A float literal denominator makes each component a float (`p / 4.0`),
+  // typed `real` rather than `rational`.
+  if (factsOf(den.type).integer && factsOf(el).integer)
+    return floatNumerator ? 'real' : rationalTierOf([den]);
   if (isExtendedRealOperand(den) && factsOf(el).real) return 'real';
   if (factsOf(den.type).complex && factsOf(el).complex) return 'complex';
   return 'number';
@@ -1602,8 +1626,14 @@ function quotientComponentType(el: Type, den: OperandDescriptor): Type {
  * (`tuple<integer, integer> / 4` is a tuple of rationals, which the alias no
  * longer describes). A NOMINAL reference never reaches here: it is refused by
  * the operand gate upstream.
+ *
+ * `floatNumerator` is passed to `quotientComponentType` for each component.
  */
-function quotientShapeType(t: Type, den: OperandDescriptor): Type {
+function quotientShapeType(
+  t: Type,
+  den: OperandDescriptor,
+  floatNumerator: boolean
+): Type {
   t = resolveTypeAlias(t);
   if (typeof t === 'string') {
     if (
@@ -1613,19 +1643,19 @@ function quotientShapeType(t: Type, den: OperandDescriptor): Type {
       t === 'indexed_collection'
     )
       return t;
-    return quotientComponentType(t, den);
+    return quotientComponentType(t, den, floatNumerator);
   }
   if (t.kind === 'union')
     return {
       kind: 'union',
-      types: t.types.map((a) => quotientShapeType(a, den)),
+      types: t.types.map((a) => quotientShapeType(a, den, floatNumerator)),
     };
   if (t.kind === 'tuple')
     return {
       kind: 'tuple',
       elements: t.elements.map((e) => ({
         ...e,
-        type: quotientComponentType(e.type, den),
+        type: quotientComponentType(e.type, den, floatNumerator),
       })),
     };
   if (
@@ -1636,8 +1666,30 @@ function quotientShapeType(t: Type, den: OperandDescriptor): Type {
     // Recurse (not `quotientComponentType`): a matrix is a list of lists, and
     // its inner rows must widen structurally too. Dimensions are preserved by
     // the spread.
-    return { ...t, elements: quotientShapeType(t.elements, den) };
-  return quotientComponentType(t, den);
+    return {
+      ...t,
+      elements: quotientShapeType(t.elements, den, floatNumerator),
+    };
+  return quotientComponentType(t, den, floatNumerator);
+}
+
+/**
+ * Whether `d` is a float literal with an integer value (`2.0`, see
+ * `isInexactRationalLiteral()`), or a tuple or list literal that holds such
+ * a float as a component, at any depth. The type of such a numerator
+ * (`tuple<integer, integer>` for `(2.0, 4.0)`) cannot tell it from an exact
+ * one; its structural view can.
+ *
+ * A numerator that is not a literal (a symbol, a compound) is read by its
+ * type only, as a scalar numerator is by `rationalTierOf()`: `p / 3` claims
+ * `rational` components for `p: tuple<integer, integer>`.
+ */
+function hasInexactRationalComponent(d: OperandDescriptor): boolean {
+  if (isInexactRationalLiteral(d)) return true;
+  const structure = d.structureOf?.();
+  if (structure?.kind === 'tuple' || structure?.kind === 'list-literal')
+    return structure.elements.some(hasInexactRationalComponent);
+  return false;
 }
 
 /**
@@ -1691,6 +1743,74 @@ function divisorKeepsNumeratorShape(den: OperandDescriptor): boolean {
   )
     return false;
   return !factsOf(dt).matrix;
+}
+
+/**
+ * The type of a POINT divided by a divisor that is, or may be, a collection
+ * of numbers: `(1, 2) / [1, 2]` is the list of points `[(1, 2), (1/2, 1)]`,
+ * one point divided by each element, as the product `(1, 2) · [1, 1/2]` is.
+ * A divisor that may be a number or a list (`u: number | list<number>`) is
+ * typed arm by arm, and the result is the union of the arm results: a point
+ * for the number arm, a list of points for the list arm.
+ *
+ * `num` must be a definite tuple type. A point-or-point-list numerator is
+ * left to the broadcast lift, which types the arms of such a union itself
+ * (see the `Multiply` type handler for the same rule). A matrix arm keeps
+ * the old reading (the value path leaves `p / M` inert), and so does a
+ * divisor with no collection arm: the function returns `undefined` for them.
+ */
+function pointOverCollectionQuotientType(
+  num: OperandDescriptor,
+  den: OperandDescriptor
+): Type | undefined {
+  const point = resolveTypeAlias(num.type);
+  if (typeof point !== 'object' || point.kind !== 'tuple') return undefined;
+  const d = resolveTypeAlias(den.type);
+  const arms = typeof d === 'object' && d.kind === 'union' ? d.types : [d];
+  const inUnion = arms.length > 1;
+  const floatNumerator = hasInexactRationalComponent(num);
+  let sawCollection = false;
+  const results: Type[] = [];
+  for (const arm of arms) {
+    if (factsOf(arm).matrix) return undefined;
+    const elt =
+      dimensionlessIndexedElementType(arm, undefined, inUnion) ??
+      numericTensorElementType(arm);
+    if (elt === undefined) {
+      // A scalar arm divides the point component-wise. The arm keeps the
+      // structural view of the divisor, as the arms of a `Multiply` factor
+      // do.
+      results.push(
+        quotientShapeType(
+          point,
+          {
+            ...describeType(arm, den.facts.closed),
+            structureOf: den.structureOf,
+          },
+          floatNumerator
+        )
+      );
+      continue;
+    }
+    sawCollection = true;
+    // An element type that is not known to be a number (a bare `list`)
+    // still divides by SOME number, so it is read as `number`.
+    const cell = quotientShapeType(
+      point,
+      describeType(factsOf(elt).belowNumber ? elt : 'number'),
+      floatNumerator
+    );
+    const r = resolveTypeAlias(arm);
+    const dims =
+      typeof r === 'object' && r.kind === 'list' ? r.dimensions : undefined;
+    results.push(
+      dims !== undefined
+        ? { kind: 'list', elements: cell, dimensions: dims }
+        : broadcastResultType(cell)
+    );
+  }
+  if (!sawCollection) return undefined;
+  return reduceType({ kind: 'union', types: results });
 }
 
 /**
@@ -2300,6 +2420,17 @@ function broadcastableResultTypeOfOperands(
  * expression predicate reads the definition the call was BOUND to: the two
  * differ only for a call bound through a scope the current one no longer
  * sees.
+ *
+ * A descriptor with no structural view at all (`describeType`) counts. It is
+ * an operand that the derivation of an application from argument types
+ * (`deriveApplicationType`) holds only as a type: a parameter typed by the
+ * argument of a call, or the result type of a sub-application such as
+ * `Norm(P)`. That type was computed, not guessed, so there is no inference
+ * to retract. Without this, `P·Norm(P)` with `P: tuple<integer, integer>`
+ * was typed `tuple<integer, integer>` from argument types, while the same
+ * product of declared symbols was typed `tuple<real, real>`, and the value
+ * `(√2, √2)` of `f((1, 1))` for `f := P ↦ P·Norm(P)` contradicted the
+ * first type.
  */
 function isDeclaredScalarNumberOperand(
   d: OperandDescriptor,
@@ -2307,7 +2438,8 @@ function isDeclaredScalarNumberOperand(
 ): boolean {
   if (isNumericTupleType(d.type)) return false;
   if (!factsOf(d.type).belowNumber) return false;
-  const s = d.structureOf?.();
+  if (d.structureOf === undefined) return true;
+  const s = d.structureOf();
   if (s === undefined) return false;
   if (s.kind === 'number') return true;
   if (s.kind === 'symbol') return s.inferred !== true;
@@ -2669,7 +2801,10 @@ function addTypeOnTypes(args: ReadonlyArray<OperandDescriptor>): Type {
   // `Power` and `Divide` already keep the range of such operands.
   const present = args.map((x) => withoutNaN(x.type));
   const hasNaN = present.some((p, i) => p !== args[i].type);
-  const t = widenAll(present.map((p) => stripNumericRanges(p)));
+  // A sum of rationals is a float when one term is a float literal, and a
+  // float that is not an integer is `real` (`−4.0 + 1/3`).
+  const widened = widenAll(present.map((p) => stripNumericRanges(p)));
+  const t = widened === 'rational' ? rationalTierOf(args) : widened;
   // `imaginary + imaginary` is not closed under addition: the imaginary
   // parts can cancel to 0, which is real. `complex` covers both.
   if (t === 'imaginary')
@@ -2680,6 +2815,68 @@ function addTypeOnTypes(args: ReadonlyArray<OperandDescriptor>): Type {
   return hasNaN
     ? reduceType({ kind: 'union', types: [ranged, 'nan'] })
     : ranged;
+}
+
+/** The type handler of `Add`, also used by `Subtract`
+ * (`subtractTypeHandler`). */
+function addTypeHandler(
+  ops: ReadonlyArray<OperandDescriptor>,
+  context: TypeHandlerContext
+): BoxedType | undefined {
+  return BoxedType.forResult(
+    ops.some((x) => isResidueClassOperand(x, context.engine))
+      ? 'value'
+      : signedInfinitySum(
+          ops,
+          addTypeOnTypes(ops.map(withoutNonArithmeticArms))
+        ),
+    context.engine._typeResolver
+  );
+}
+
+/**
+ * The type handler of `Subtract`: `a - b - c` is typed as the sum
+ * `a + (-b) + (-c)`, which is what canonicalization makes of it
+ * (`canonicalAdd`). Each subtrahend is typed as its negation (`Negate`
+ * flips a range and keeps the shape of a point or a list), and the `Add`
+ * handler types the sum, so a point minus a point is a point and a list of
+ * points minus a list of points is a list of points. Without a handler the
+ * declared result `number` was claimed for those, on every route that types
+ * a `Subtract` that is not canonicalized: the derivation from argument types
+ * (`deriveApplicationType`) and a structural `Subtract`.
+ *
+ * A single operand (`Subtract(x)` is `x`) and a subtrahend whose negation
+ * cannot be derived decline, so the declared signature decides.
+ */
+function subtractTypeHandler(
+  ops: ReadonlyArray<OperandDescriptor>,
+  context: TypeHandlerContext
+): BoxedType | undefined {
+  if (ops.length < 2) return undefined;
+  if (ops.some((x) => isResidueClassOperand(x, context.engine)))
+    return BoxedType.forResult('value', context.engine._typeResolver);
+  const terms: OperandDescriptor[] = [ops[0]];
+  for (const x of ops.slice(1)) {
+    const t = context.derive('Negate', [x]);
+    if (t === undefined) return undefined;
+    const negated = describeType(t, x.facts.closed);
+    // The negation of a float literal with an integer value (`2.0`) is a
+    // float too, but its derived type (`-2`) cannot tell it from the exact
+    // `-2`, and a descriptor built from a type has no structural view. The
+    // `Add` handler finds such a float only through that view
+    // (`rationalTierOf()`), so the view of a number with no exact terms is
+    // kept: `1/3 - 2.0` is the float `-1.666…`, typed `real`, not `rational`.
+    const structure = x.structureOf?.();
+    terms.push(
+      structure?.kind === 'number' && isInexactRationalLiteral(x)
+        ? {
+            ...negated,
+            structureOf: () => ({ kind: 'number', tier: structure.tier }),
+          }
+        : negated
+    );
+  }
+  return addTypeHandler(terms, context);
 }
 
 /** A literal-only boolean claim for a number-theory predicate: when the
@@ -4685,16 +4882,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // `propagate` so an absent operand yields `NaN` (every cell `Add`
       // computes on is numeric — §3.A/§5 of the missing-value typing design).
       missingBehavior: 'propagate',
-      type: (ops, context) =>
-        BoxedType.forResult(
-          ops.some((x) => isResidueClassOperand(x, context.engine))
-            ? 'value'
-            : signedInfinitySum(
-                ops,
-                addTypeOnTypes(ops.map(withoutNonArithmeticArms))
-              ),
-          context.engine._typeResolver
-        ),
+      type: addTypeHandler,
 
       sgn: (ops) => {
         if (ops.some((x) => x.isNaN)) return 'unsigned';
@@ -4983,11 +5171,20 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (
           typeCouldBeNumericTuple(num.type) &&
           divisorKeepsNumeratorShape(den)
-        )
+        ) {
+          // A point divided by a collection of numbers is a list of points,
+          // one for each element (`pointOverCollectionQuotientType`).
+          const overCollection = pointOverCollectionQuotientType(num, den);
           return BoxedType.forResult(
-            quotientShapeType(num.type, den),
+            overCollection ??
+              quotientShapeType(
+                num.type,
+                den,
+                hasInexactRationalComponent(num)
+              ),
             context.engine._typeResolver
           );
+        }
         // The ELEMENTWISE counterpart of the branch above (Tycho item 209): a
         // COLLECTION whose elements are numeric tuples — a point LIST, e.g.
         // the `N = P / l(P)` a Desmos document writes to normalize a set of
@@ -5009,7 +5206,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           divisorKeepsNumeratorShape(den)
         )
           return BoxedType.forResult(
-            quotientShapeType(num.type, den),
+            quotientShapeType(num.type, den, hasInexactRationalComponent(num)),
             context.engine._typeResolver
           );
         // The broadcast-lifted counterpart, one wrapper out (Tycho item 188):
@@ -5037,7 +5234,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             return BoxedType.forResult(
               {
                 kind: 'broadcastable',
-                elements: quotientShapeType(nt.elements, den),
+                elements: quotientShapeType(
+                  nt.elements,
+                  den,
+                  hasInexactRationalComponent(num)
+                ),
               },
               context.engine._typeResolver
             );
@@ -5122,7 +5323,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           bothInteger ||
           (isExtendedRealOperand(den) && isExtendedRealOperand(num))
         ) {
-          const tier: Type = bothInteger ? 'rational' : 'real';
+          // A float literal operand makes a float quotient (`6/4.0` is
+          // `1.5`), typed `real` rather than `rational`.
+          const tier: Type = bothInteger ? rationalTierOf([num, den]) : 'real';
           const dIv = intervalOfType(den.type);
           const provablyNonZero = provablyNonZeroSign(den);
           // A numerator whose finiteness is NOT proven (`x: real |
@@ -7160,8 +7363,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const tb = broadcastCellType(b.type);
         if (factsOf(ta).integer && factsOf(tb).integer)
           return BoxedType.forResult('integer', context.engine._typeResolver);
+        // A float literal operand makes a float result (`Mod(5.0, 3/2)` is
+        // `0.5`), typed `real` rather than `rational`.
         if (factsOf(ta).rational && factsOf(tb).rational)
-          return BoxedType.forResult('rational', context.engine._typeResolver);
+          return BoxedType.forResult(
+            rationalTierOf([a, b]),
+            context.engine._typeResolver
+          );
         if (factsOf(ta).real && factsOf(tb).real)
           return BoxedType.forResult('real', context.engine._typeResolver);
         return undefined;
@@ -7449,6 +7657,19 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // point, and the product was typed `number`. A tuple arm beside a
         // factor that is a tuple has no value (the product of two points is
         // an error), and is left out.
+        //
+        // A factor that may be a scalar or a collection (`u: number |
+        // list<number>`) beside a factor that may be a point is typed arm by
+        // arm too. `(cos a, sin a)·u` is a point when `u` is a number and a
+        // list of points when `u` is a list. The collection branch below
+        // reads only the list arm of such a factor, and the product was
+        // typed `list<tuple<…>>` for a value that may be a single point.
+        // This applies only beside a factor that is definitely a tuple: the
+        // broadcast lift stands aside for such a product (the `tuples`
+        // exemption), so this handler is the only place that sees both arms.
+        // Beside a point-or-point-list union (`P·u`), the lift is not
+        // skipped and already types each arm of `u` (a lone scalar-or-list
+        // union), and the union answered here would be wrapped once more.
         {
           const mayBePoint = ops.filter((x) => typeCouldBeNumericTuple(x.type));
           const isTupleType = (t: Type): boolean => {
@@ -7459,12 +7680,16 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           };
           const i = ops.findIndex((x) => {
             const t = resolveTypeAlias(x.type);
+            if (typeof t !== 'object' || t.kind !== 'union') return false;
+            if (mayBePoint.includes(x))
+              return (
+                mayBePoint.length > 1 &&
+                t.types.some((arm) => !typeCouldBeNumericTuple(arm))
+              );
             return (
-              mayBePoint.length > 1 &&
-              mayBePoint.includes(x) &&
-              typeof t === 'object' &&
-              t.kind === 'union' &&
-              t.types.some((arm) => !typeCouldBeNumericTuple(arm))
+              mayBePoint.some((p) => isTupleType(p.type)) &&
+              isBroadcastCollectionTypeOf(t) &&
+              unionHasGenuineScalarBranch(t)
             );
           });
           if (i >= 0) {
@@ -7476,10 +7701,18 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
                 mayBePoint.some((x) => x !== ops[i] && isTupleType(x.type))
               )
                 continue;
+              // The arm keeps the structural view of the factor, so that a
+              // declared factor still counts as declared for each of its
+              // arms (`isDeclaredScalarNumberOperand`).
               const t = derive(
                 'Multiply',
                 ops.map((x, j) =>
-                  j === i ? describeType(arm, x.facts.closed) : x
+                  j === i
+                    ? {
+                        ...describeType(arm, x.facts.closed),
+                        structureOf: x.structureOf,
+                      }
+                    : x
                 )
               );
               if (t === undefined) {
@@ -7893,9 +8126,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // was typed `real`, and a broadcast element typed by this handler
         // (the lazy `Map` of `2k` over a list of rationals) disagreed with
         // the `rational` cells of the eager list.
+        // A float literal factor makes a float product (`(1/3)·4.0`),
+        // typed `real` rather than `rational`.
         if (ops.every((x) => factsOf(x.type).rational))
           return BoxedType.forResult(
-            refineMul('rational'),
+            refineMul(rationalTierOf(ops)),
             engine._typeResolver
           );
         if (ops.every((x) => isExtendedRealOperand(x)))
@@ -8456,6 +8691,14 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               );
             const baseIsInteger = factsOf(base.type).integer;
             const expIsInteger = factsOf(exp.type).integer;
+            // The tier of a power that may not be an integer. A float operand
+            // makes a float result, and a float that is not an integer is
+            // `real`, not `rational`: `2^(−2.0)` and `(1/2)^(3.0)` evaluate
+            // to the floats `0.25` and `0.125`. A float result that is an
+            // integer (`2^(3.0)` is `8.0`) is an `integer`, as the literal
+            // `8.0` is, so the `integer` claims below need no change.
+            const quotientTier = (): 'real' | 'rational' =>
+              rationalTierOf([base, exp]);
             if (baseIsInteger && expIsInteger) {
               if (nonNegativeSign(expSgn) === true) {
                 const even = operandParityIsEven(exp) === true;
@@ -8471,20 +8714,22 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
                 // literal exponent is known (`x: integer<2<..<3>`, `x^-2`) —
                 // unless the base may be zero, a pole.
                 const even = operandParityIsEven(exp) === true;
+                const tier = quotientTier();
                 return BoxedType.forResult(
                   negativePoleTier() ??
-                    refinePow('rational', { clampNonNegative: even }) ??
-                    (even ? nonNegativeRangeType('rational') : 'rational'),
+                    refinePow(tier, { clampNonNegative: even }) ??
+                    (even ? nonNegativeRangeType(tier) : tier),
                   context.engine._typeResolver
                 );
               }
             }
             if (factsOf(base.type).rational && expIsInteger) {
               const even = operandParityIsEven(exp) === true;
+              const tier = quotientTier();
               return BoxedType.forResult(
                 negativePoleTier() ??
-                  refinePow('rational', { clampNonNegative: even }) ??
-                  (even ? nonNegativeRangeType('rational') : 'rational'),
+                  refinePow(tier, { clampNonNegative: even }) ??
+                  (even ? nonNegativeRangeType(tier) : tier),
                 context.engine._typeResolver
               );
             }
@@ -9099,15 +9344,26 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (literalNonZero === false)
           return BoxedType.forResult('nan', context.engine._typeResolver);
         const bSgn = operandSgnOnTypes(b);
+        const ta = broadcastCellType(a.type);
+        const tb = broadcastCellType(b.type);
         if (
           literalNonZero === true ||
           positiveSign(bSgn) === true ||
           negativeSign(bSgn) === true ||
           bSgn === 'not-zero'
-        )
+        ) {
+          // The polytype `T` joins the operand types, which gives `rational`
+          // for `Remainder(5.0, 3/2)`. A float literal operand makes a float
+          // result (`0.5`), and a float that is not an integer is `real`.
+          if (
+            !(factsOf(ta).integer && factsOf(tb).integer) &&
+            factsOf(ta).rational &&
+            factsOf(tb).rational &&
+            rationalTierOf([a, b]) === 'real'
+          )
+            return BoxedType.forResult('real', context.engine._typeResolver);
           return undefined;
-        const ta = broadcastCellType(a.type);
-        const tb = broadcastCellType(b.type);
+        }
         // An operand that is not provably a number (`unknown`) makes the
         // polytype result `unknown`, which already admits `nan`.
         if (!isSubtype(ta, 'number') || !isSubtype(tb, 'number'))
@@ -9116,7 +9372,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           factsOf(ta).integer && factsOf(tb).integer
             ? 'integer'
             : factsOf(ta).rational && factsOf(tb).rational
-              ? 'rational'
+              ? rationalTierOf([a, b])
               : factsOf(ta).real && factsOf(tb).real
                 ? 'real'
                 : 'number';
@@ -9669,6 +9925,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // left-associative: a - b - c -> (a - b) - c
       signature: '(number+) -> number',
       examples: ['5 - 3 - x'],
+      type: subtractTypeHandler,
       canonical: (args, { engine }) => {
         args = checkNumericArgs(engine, args);
         if (args.length === 0) return engine.error('missing');
@@ -10275,10 +10532,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         return engine._fn('Numerator', canonical(engine, ops));
       },
       sgn: ([x]) => x.sgn,
-      evaluate: (ops, { engine, numericApproximation }) => {
+      evaluate: (ops, { engine, numericApproximation, expression }) => {
         const ce = engine;
         if (ops.length === 0) return ce.Nothing;
-        const surplus = surplusOperandError(ce, 'Numerator', ops);
+        const surplus = surplusOperandError(ce, 'Numerator', ops, expression);
         if (surplus !== undefined) return surplus;
         const op = ops[0];
         if (
@@ -10330,10 +10587,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         return engine._fn('Denominator', canonical(engine, ops));
       },
       sgn: () => 'positive',
-      evaluate: (ops, { engine, numericApproximation }) => {
+      evaluate: (ops, { engine, numericApproximation, expression }) => {
         const ce = engine;
         if (ops.length === 0) return ce.Nothing;
-        const surplus = surplusOperandError(ce, 'Denominator', ops);
+        const surplus = surplusOperandError(ce, 'Denominator', ops, expression);
         if (surplus !== undefined) return surplus;
         const op = ops[0];
         if (
@@ -10386,10 +10643,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         return engine._fn('NumeratorDenominator', canonical(engine, ops));
       },
 
-      evaluate: (ops, { engine, numericApproximation }) => {
+      evaluate: (ops, { engine, numericApproximation, expression }) => {
         const ce = engine;
         if (ops.length === 0) return ce.Nothing;
-        const surplus = surplusOperandError(ce, 'NumeratorDenominator', ops);
+        const surplus = surplusOperandError(
+          ce,
+          'NumeratorDenominator',
+          ops,
+          expression
+        );
         if (surplus !== undefined) return surplus;
         const op = ops[0];
         if (

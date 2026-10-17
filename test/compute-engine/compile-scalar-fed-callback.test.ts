@@ -132,3 +132,53 @@ describe('an Apply of a literal to scalar arguments', () => {
     expect(r.run!({ L: [1, 2, 3] })).toEqual([2, 4, 6]);
   });
 });
+
+// The consumer's claim is about the ARGUMENTS. A parameter is a binding of its
+// own, and a body that reassigns it reads the assigned value afterwards, so
+// such a parameter is neither a decided value nor a scalar in the body.
+describe('a parameter the body reassigns', () => {
+  test('a range-fed parameter assigned NaN keeps its NaN test', () => {
+    const r = js([
+      'Map',
+      [
+        'Function',
+        [
+          'Block',
+          ['Assign', 'q', ['Divide', 0, 0]],
+          ['If', ['Less', 'q', 0], 1, 2],
+        ],
+        ['Typed', 'q', "'number'"],
+      ],
+      ['Range', 1, 3],
+    ]);
+    expect(r.code).not.toContain('bcastFn');
+    expect(r.code).toContain('q === q');
+    // `q < 0` is undecided for NaN: the interpreter answers no value, and the
+    // compiled function answers NaN, not the `else` branch `2`.
+    expect(r.run!({})).toEqual([NaN, NaN, NaN]);
+  });
+
+  test('a parameter assigned a list is not read as a scalar', () => {
+    // The interpreter refuses this write, because it types `q` from the range
+    // elements. The compiled body must still not treat `q` as a scalar after
+    // the write: the inner `Apply` keeps its broadcast dispatch.
+    const r = js([
+      'Map',
+      [
+        'Function',
+        [
+          'Block',
+          ['Assign', 'q', ['List', 1, 2]],
+          ['Apply', ['Function', ['Multiply', 2, 'z'], 'z'], 'q'],
+        ],
+        'q',
+      ],
+      ['Range', 1, 2],
+    ]);
+    expect(r.code).toContain('bcastFn');
+    expect(r.run!({})).toEqual([
+      [2, 4],
+      [2, 4],
+    ]);
+  });
+});

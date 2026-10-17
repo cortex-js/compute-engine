@@ -44,6 +44,7 @@ import {
   isNumericTupleCarrier,
   isPointListCarrier,
   isProvablyNumberList,
+  isProvablyNumberOrNumberList,
   isTuple,
   numericTupleArity,
   hasAccessibleComponents,
@@ -186,6 +187,27 @@ export function canonicalAdd(
     ops.some((x) => isProvablyNumberList(x))
   )
     return ce.error(['incompatible-type', 'tuple', 'list<number>']);
+
+  // The two mistakes above at once: a point plus an operand declared as a
+  // number or a list of numbers (`u: number | list<number>`) is a
+  // `tuple + number` error when `u` is a number and a `tuple + list<number>`
+  // error when it is a list, so the sum is rejected the same way. Before
+  // this, `(cos a, sin a) + u` was accepted and typed
+  // `list<number> | number | tuple<real, real>`, and every value of it was
+  // an error. A list of points is rejected for the same reason.
+  {
+    const either = ops.find((x) => isProvablyNumberOrNumberList(x));
+    if (either !== undefined) {
+      if (ops.some((x) => isNumericTupleCarrier(x)))
+        return ce.error(['incompatible-type', 'tuple', either.type.toString()]);
+      if (ops.some((x) => isPointListCarrier(x)))
+        return ce.error([
+          'incompatible-type',
+          'list<tuple>',
+          either.type.toString(),
+        ]);
+    }
+  }
 
   // The same two mistakes with a LIST of points: the sum applies to each
   // point, so `[(0,1),(4,5)] + 1` is a list of `tuple + number` sums, and

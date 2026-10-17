@@ -3547,12 +3547,23 @@ volumes
           keyed ? undefined : literal,
           orders,
           () => {
-            if (!keyed && isFunction(literal, 'Function')) {
-              const params = literal.ops
+            // The literal can be stored in a non-canonical form: an
+            // `evaluate` handler given as MathJSON is boxed raw. Canonicalize
+            // it (in its captured scope, as the `lambda` getter of an
+            // operator definition does) before differentiating its body:
+            // `differentiate()` builds products and sums, which take only
+            // canonical operands. The raw literal stays the key of the memo
+            // above, because it is the object that the definition keeps.
+            const canonical =
+              !keyed && isFunction(literal, 'Function')
+                ? literal.canonical
+                : undefined;
+            if (isFunction(canonical, 'Function')) {
+              const params = canonical.ops
                 .slice(1)
                 .map((p) => functionLiteralParameterName(p));
               if (params.length === orders.length && params.every((p) => !!p)) {
-                let body: Expression | undefined = literal.op1;
+                let body: Expression | undefined = canonical.op1;
                 for (let i = 0; i < orders.length && body; i++)
                   for (let d = 0; d < orders[i] && body; d++)
                     body = differentiate(body, params[i]!);
@@ -3570,7 +3581,7 @@ volumes
                 if (body)
                   return ce.function('Function', [
                     body,
-                    ...literal.ops.slice(1),
+                    ...canonical.ops.slice(1),
                   ]);
               }
             }

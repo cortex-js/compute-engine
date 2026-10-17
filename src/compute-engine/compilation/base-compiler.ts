@@ -11107,6 +11107,12 @@ export class BaseCompiler {
       // `undefined` test either, exactly as for an emitted loop index. A
       // literal with a complex parameter is left as it was, because its
       // parameters hold `{ re, im }` objects in the body.
+      //
+      // The claim is about the ARGUMENTS only. A parameter is a binding of its
+      // own and the body may reassign it (`q = NaN`, `q = [1, 2]`), and after
+      // such a write it holds whatever was assigned. So a parameter the body
+      // assigns anywhere, a nested function included, gets neither fact. The
+      // wrapper is still left out, because the arguments are what it tests.
       const fed =
         target.language === 'javascript' &&
         node !== undefined &&
@@ -11118,7 +11124,10 @@ export class BaseCompiler {
           ? BaseCompiler.scalarFedLiterals.get(node)
           : undefined;
       if (fed !== undefined) {
-        const names = new Set(params.filter((name) => name !== '_'));
+        const written = BaseCompiler.assignedNamesIn(ops[0]);
+        const names = new Set(
+          params.filter((name) => name !== '_' && !written.has(name))
+        );
         recordScalarParams(lambdaTarget, names);
         if (fed === 'finite')
           for (const name of names) recordDecidedLoopIndex(lambdaTarget, name);
@@ -13967,14 +13976,16 @@ export class BaseCompiler {
       BaseCompiler.isArrayOperand(a, target);
     if (!args.some(isArrayOperand)) return null;
 
-    // A numeric tuple SUMMED with, or DIVIDED by/into, a list is not a
+    // A numeric tuple SUMMED with, or DIVIDED into, a list is not a
     // broadcast in the interpreter: `(1,2) + [3,4]` is a per-element
     // `incompatible-type` error (a point does not add to a scalar) and
-    // `(1,2) / [1,2]` stays inert. A flat `_SYS.bcast` would zip the two
-    // arrays into the plausible `[4, 6]` / `[1, 1]` behind `success: true`.
-    // Decline, so the D6 guard fails closed and the interpreter answers.
-    // (`Multiply` is the broadcast case, handled above; `Power` over a tuple
-    // and a list is element-wise in the interpreter too and keeps compiling.)
+    // `[1,2] / (1,2)` is a division by a point. A flat `_SYS.bcast` would zip
+    // the two arrays into the plausible `[4, 6]` / `[1, 1]` behind
+    // `success: true`. Decline, so the D6 guard fails closed and the
+    // interpreter answers. (`Multiply` is the broadcast case, handled above;
+    // a point DIVIDED BY a list of numbers is a list of points, handled in
+    // the point plan below; `Power` over a tuple and a list is element-wise
+    // in the interpreter too and keeps compiling.)
     // A possibly-collection operand (`broadcastable<T>`, a top-typed call)
     // counts as a list here even though it may be a scalar at run time — the
     // shape is unprovable, and declining an unprovable shape is the D6 rule.
@@ -14109,7 +14120,30 @@ export class BaseCompiler {
       const lists = args.filter(
         (a) => !couldBeNumericTuple(a) && isArrayOperand(a)
       );
-      if (tuples.length > 0 && lists.length > 0) {
+      // A point DIVIDED by a list of numbers is a list of points in the
+      // interpreter: `(1, 2) / [1, 2]` is `[(1, 2), (1/2, 1)]`, the point
+      // divided by each element, as `(1, 2) · [1, 1/2]` is the point
+      // scaled by each element. It takes the nested emission of the
+      // `Multiply` point-family shape (`atomicTuple`): the outer broadcast
+      // walks the list and the point is kept whole. The point must be the
+      // dividend, and the divisor a source of SCALARS
+      // (`isScalarElementSource`), or the outer broadcast would descend
+      // into a point. A matrix divisor stays inert in the interpreter and
+      // declines here.
+      if (
+        h === 'Divide' &&
+        args.length === 2 &&
+        tuples.length === 1 &&
+        tuples[0] === args[0] &&
+        lists[0] === args[1] &&
+        !(
+          (isTensorValue(args[1]) && args[1].shape.length >= 2) ||
+          args[1].type.matches('matrix')
+        ) &&
+        BaseCompiler.isScalarElementSource(args[1], target)
+      )
+        atomicTuple = args[0];
+      else if (tuples.length > 0 && lists.length > 0) {
         // The list must PROVABLY hold points: every element is a tuple whose
         // components are numeric, and its arity, when both are known,
         // matches the point's. The tuple is compared by its known component

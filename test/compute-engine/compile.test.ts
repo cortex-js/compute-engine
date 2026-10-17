@@ -5056,6 +5056,11 @@ describe('an Assign to a non-hoisted (outer) name agrees with its reads', () => 
   it('JS: the same Loop at the TOP LEVEL of a block writes `_.s`', () => {
     const e = new ComputeEngine();
     e.declare('t', 'number');
+    // The test declares the outer name `s` itself, in the engine scope that
+    // encloses the block. Without that declaration the block owns `s` as a
+    // local, and the compiler emits a block-local `let s` instead of the
+    // `_.s` member of the variables object.
+    e.declare('s', 'number');
     const r = compile(e.box(BODY));
     expect(r?.success).toBe(true);
     // Both halves of the variable now agree on the vars-object spelling…
@@ -5397,6 +5402,9 @@ describe('the expression-only GPU routes decline statement bodies', () => {
   const engineWithX = (): ComputeEngine => {
     const e = new ComputeEngine();
     e.declare('x', 'number');
+    // `s` is an outer variable that the bodies below assign. It is declared
+    // here so that the compiled body does not treat it as a new local.
+    e.declare('s', 'number');
     return e;
   };
 
@@ -5612,6 +5620,43 @@ describe('the expression-only GPU routes decline statement bodies', () => {
     );
   });
 
+  it('WGSL compile() returns the name a final assignment writes', () => {
+    // In WGSL an assignment is a statement, so the block hook emitted
+    // `return t = s;`, which is invalid WGSL, behind `success: true`. It now
+    // emits the assignment, then `return` of the assigned name. The value is
+    // the same as the interpreter's: a block whose last statement is an
+    // assignment (or a declaration with an initializer) has the assigned
+    // value. A name with no declaration (`t`, and `s` and `u` in the engine
+    // below) is a local of the block, which the block declares first.
+    const wgsl = new WGSLTarget();
+    const glsl = new GLSLTarget();
+    const ASSIGN_ASSIGN: MathJsonExpression = [
+      'Block',
+      ['Assign', 's', 'x'],
+      ['Assign', 't', 's'],
+    ];
+    expect(wgsl.compile(engineWithX().box(ASSIGN_ASSIGN)).code).toBe(
+      'var t: f32;\ns = x;\nt = s;\nreturn t;'
+    );
+    // An engine where `s` has no declaration either.
+    const e = new ComputeEngine();
+    e.declare('x', 'number');
+    expect(wgsl.compile(e.box(ASSIGN_ONLY)).code).toBe(
+      'var s: f32;\ns = x;\nreturn s;'
+    );
+    expect(
+      wgsl.compile(e.box(['Block', ['Declare', 'u', 'number', 'x']])).code
+    ).toBe('var u: f32;\nu = x;\nreturn u;');
+    // GLSL is unchanged: an assignment is an expression there, so
+    // `return s = x;` is valid GLSL.
+    expect(glsl.compile(engineWithX().box(ASSIGN_ASSIGN)).code).toBe(
+      'float t;\ns = x;\nreturn t = s;'
+    );
+    expect(glsl.compile(e.box(ASSIGN_ONLY)).code).toBe(
+      'float s;\nreturn s = x;'
+    );
+  });
+
   // `compileFunction()` — the route every message above points at — had the
   // same defect one level down, in BOTH its branches: the single-line one
   // wraps the body in `return`, the multi-line one relies on the block hook
@@ -5700,6 +5745,9 @@ describe('the expression-only Python route declines statement bodies', () => {
   const engineWithX = (): ComputeEngine => {
     const e = new ComputeEngine();
     e.declare('x', 'number');
+    // `s` is an outer variable that the bodies below assign. It is declared
+    // here so that the compiled body does not treat it as a new local.
+    e.declare('s', 'number');
     return e;
   };
 
@@ -5900,6 +5948,45 @@ describe('the expression-only Python route declines statement bodies', () => {
     const python = new PythonTarget();
     expect(python.compile(engineWithX().box(ASSIGN_ONLY)).code).toBe('s = x');
     expect(python.compile(engineWithX().box(DECLARE_ONLY)).code).toBe('');
+  });
+
+  it('compile() returns the name a final assignment to a block local writes', () => {
+    // Here `s`, `t` and `u` have no declaration, so each one is a local of
+    // its block, and the block is compiled as a statement sequence whose last
+    // statement the block hook returns. A Python assignment is a statement,
+    // so the hook emitted `return s = x`, which does not parse. It now emits
+    // the assignment, then `return` of the assigned name. The value is the
+    // same as the interpreter's: a block whose last statement is an
+    // assignment (or a declaration with an initializer) has the assigned
+    // value.
+    const e = new ComputeEngine();
+    e.declare('x', 'number');
+    const python = new PythonTarget();
+    const cases: [MathJsonExpression, string][] = [
+      [['Block', ['Assign', 's', 'x']], 's = x\nreturn s'],
+      [
+        ['Block', ['Assign', 's', 'x'], ['Assign', 't', ['Add', 's', 1]]],
+        's = x\nt = s + 1\nreturn t',
+      ],
+      [['Block', ['Declare', 'u', 'number', 'x']], 'u = x\nreturn u'],
+    ];
+    for (const [body, expected] of cases) {
+      const code = python.compile(e.box(body)).code;
+      expect(code).toBe(expected);
+      // The emitted statements are the body of a function: check that the
+      // `def` that holds them parses.
+      if (TEST_PYTHON !== undefined)
+        execFileSync(
+          TEST_PYTHON,
+          ['-c', 'import ast, sys; ast.parse(sys.stdin.read())'],
+          {
+            input: `def f(x):\n${code
+              .split('\n')
+              .map((l) => `    ${l}`)
+              .join('\n')}\n`,
+          }
+        );
+    }
   });
 });
 

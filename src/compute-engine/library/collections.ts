@@ -12,7 +12,7 @@ import {
   snapshotMemoDeps,
 } from '../boxed-expression/collection-element-memo.js';
 import type { MemoDeps } from '../boxed-expression/collection-element-memo.js';
-import { noteEagerSourceValue } from '../boxed-expression/eager-source-values.js';
+import { evaluateEagerSource } from '../boxed-expression/eager-source-values.js';
 import {
   checkArity,
   checkType,
@@ -98,7 +98,12 @@ import {
   SIGNED_INFINITY_TYPE,
 } from '../../common/type/primitive.js';
 import { admissionOf } from '../boxed-expression/value-membership.js';
+import { withErrorFrames } from '../boxed-expression/error-value.js';
 import { isWildcard } from '../boxed-expression/pattern-utils.js';
+import {
+  isIndexReadTuple,
+  markIndexReadTuple,
+} from '../boxed-expression/index-read-tuple.js';
 import {
   DictionaryType,
   FunctionSignature,
@@ -795,7 +800,8 @@ const COUNT_OR_INFINITE = parseType('integer | +oo');
  */
 function nonCollectionSizeOperandError(
   ce: ComputeEngine,
-  xs: Expression
+  xs: Expression,
+  operator: string
 ): Expression | undefined {
   if (xs.isCollection) return undefined;
   // An operand that is ALREADY an error is left to the ordinary error
@@ -805,7 +811,35 @@ function nonCollectionSizeOperandError(
   // not a collection.
   if (!xs.isValid) return undefined;
   if (admissionOf(xs, COLLECTION_SHAPE_TYPE) !== 'refute') return undefined;
-  return ce.typeError('collection', xs.type, xs);
+  return refusedOperandError(ce, operator, 1, 'collection', xs);
+}
+
+/**
+ * The `incompatible-type` error that an `evaluate` handler answers when it
+ * refuses operand `index` (1-based) of a call to `operator`, because the
+ * VALUE of that operand is not of the `expected` type.
+ *
+ * The error names the operand as its location and carries the frame
+ * `{operator, index}` in its `ErrorTrace`. This is the same error that the
+ * evaluation of `Sort(n)` or `IsEmpty(n)` gives when `n` holds `5`: there,
+ * the validation of the declared signature puts the error in the operand,
+ * and the evaluation of the call records the frame when it takes the error
+ * from the operand. A handler that mints the refusal itself returns the
+ * error as the value of the whole call, and the evaluation does not add a
+ * frame to that value, so the handler must add it here. Every handler that
+ * refuses an operand at evaluation time must use this function, so that the
+ * error is the same whichever of the two routes finds the problem.
+ */
+function refusedOperandError(
+  ce: ComputeEngine,
+  operator: string,
+  index: number,
+  expected: Type,
+  operand: Expression
+): Expression {
+  return withErrorFrames(ce.typeError(expected, operand.type, operand), [
+    { operator, index },
+  ]);
 }
 
 /**
@@ -1828,10 +1862,10 @@ function mapSource(xs: Expression): Expression {
   // other lazy operator already does with a source it cannot resolve, and it
   // puts `Map` on the same symbolic-residual behavior as `Filter`.
   if (xs.valueDefinition?.isSelfReferential) return xs;
-  const evaluated = xs.evaluate();
-  // A finiteness read during a plain `evaluate()` of a view keeps the value
-  // for the operand step of that evaluation (`eager-source-values.ts`).
-  noteEagerSourceValue(xs, evaluated);
+  // A finiteness read during a plain `evaluate()` or `evaluateAsync()` of a
+  // view keeps the value for the operand step of that evaluation
+  // (`eager-source-values.ts`).
+  const evaluated = evaluateEagerSource(xs);
   return evaluated.isCollection ? evaluated : xs;
 }
 
@@ -2800,6 +2834,9 @@ const MAX_TUPLE_INDEX_READ = 32;
  * - the first read uses an index that is not a literal: the general rule
  *   gives the same element type, and keeps the dictionary option when the
  *   index kind is open;
+ * - a read uses an index that is not a literal, and the current type is a
+ *   tuple that a call or an annotation required (`isIndexReadTuple()` is
+ *   false): the general rule narrows that tuple instead of replacing it;
  * - two reads at the same literal index have requirements with no common
  *   value (`!p[1]` and `p[1] + 1`): nothing is written, and the use is an
  *   error, as for any other conflict;
@@ -2851,10 +2888,16 @@ function parameterIndexReadType(
     }
     return undefined;
   };
+  // A tuple that a call or an annotation required (`g(p)` with
+  // `g: (tuple<number, number>) -> number`) is a contract, and the tuples
+  // that the reads make from it stay contracts. A tuple that only index
+  // reads made is not (`isIndexReadTuple()`).
+  let fromIndexReads = true;
   if (current === 'unknown') components = [];
   else if (typeof current !== 'string' && current.kind === 'tuple') {
     if (current.elements.some((x) => x.name !== undefined)) return undefined;
     components = current.elements.map((x) => x.type);
+    fromIndexReads = isIndexReadTuple(current);
   } else {
     element = elementOf(current);
     if (element === undefined) return undefined;
@@ -2883,12 +2926,19 @@ function parameterIndexReadType(
     const component = previous === 'unknown' ? r : narrow(previous, r);
     if (component === 'never') return undefined;
     result[position - 1] = component;
-    return { kind: 'tuple', elements: result.map((type) => ({ type })) };
+    const tuple: Type = {
+      kind: 'tuple',
+      elements: result.map((type) => ({ type })),
+    };
+    return fromIndexReads ? markIndexReadTuple(tuple) : tuple;
   }
 
   // A read at an index that is not a literal. With no read seen so far, the
-  // general rule applies.
+  // general rule applies. It applies too when a call or an annotation
+  // required the tuple: the general rule narrows the tuple, where the union
+  // below would replace it with a wider type.
   if (components !== undefined && components.length === 0) return undefined;
+  if (!fromIndexReads) return undefined;
   if (typeCouldBeCollection(r) && !isSubtype(indexType, 'number'))
     return undefined;
   const reads =
@@ -4736,6 +4786,7 @@ function componentAt(
   xs: Expression,
   position: number,
   ce: ComputeEngine,
+  operator: string,
   expression?: Expression
 ): Expression | undefined {
   // An absent base propagates position-preservingly, mirroring `At` over a
@@ -4759,11 +4810,7 @@ function componentAt(
     // do, rather than answering the position-preserving absence marker, which
     // would read as "that position is empty".
     if (!xs.isIndexedCollection)
-      return ce.error([
-        'incompatible-type',
-        'indexed_collection',
-        xs.type.toString(),
-      ]);
+      return refusedOperandError(ce, operator, 1, 'indexed_collection', xs);
     const v = xs.at(position);
     if (v !== undefined) return v;
     // A miss is the absence marker only when the position is provably
@@ -4783,11 +4830,7 @@ function componentAt(
     )
   )
     return undefined;
-  return ce.error([
-    'incompatible-type',
-    'indexed_collection',
-    xs.type.toString(),
-  ]);
+  return refusedOperandError(ce, operator, 1, 'indexed_collection', xs);
 }
 
 // A point is a tuple (its coordinates are its elements). The `.x`/`.y`/`.z`
@@ -4949,12 +4992,20 @@ function runtimePointArity(xs: Expression): number | undefined {
 // evaluate-time check, then to the marker on the compiled route).
 function pointArityError(
   ce: ComputeEngine,
+  operator: string,
   position: number,
   arity: number
 ): Expression {
-  return ce.error(
-    'incompatible-dimensions',
-    `coordinate ${position} vs ${arity}-dimensional point`
+  // The error is about operand 1 of the accessor, so it carries the frame
+  // `{operator, 1}`, as a type error of that operand does. The canonical
+  // handler and the evaluate handler both return it as the value of the
+  // whole call, so the evaluation would not add the frame.
+  return withErrorFrames(
+    ce.error(
+      'incompatible-dimensions',
+      `coordinate ${position} vs ${arity}-dimensional point`
+    ),
+    [{ operator, index: 1 }]
   );
 }
 
@@ -5104,13 +5155,14 @@ function pointComponentAt(
   xs: Expression,
   position: number,
   ce: ComputeEngine,
+  operator: string,
   numericApproximation = false,
   raw?: Expression
 ): Expression | undefined {
   // A single point (tuple): the coordinate.
   const t = xs.type.type;
   if (typeof t !== 'string' && t.kind === 'tuple')
-    return componentAt(xs, position, ce);
+    return componentAt(xs, position, ce, operator);
 
   // A finite collection: decide broadcast-vs-index WITHOUT materializing the
   // whole collection. A large lazy `Range` is finite, so enumerating every
@@ -5189,7 +5241,7 @@ function pointComponentAt(
         return ce.function('List', comps);
       }
       // Elements are not points → element indexing, like First/Second/Third.
-      return componentAt(xs, position, ce);
+      return componentAt(xs, position, ce, operator);
     }
     // Empty collection: there is no element to peek, so the declared ELEMENT
     // type picks the reading — see `elementTypeBroadcastsWhenEmpty` for the
@@ -5220,7 +5272,7 @@ function pointComponentAt(
       )
     )
       return ce.function('List', []);
-    return componentAt(xs, position, ce);
+    return componentAt(xs, position, ce, operator);
   }
 
   // An indexed collection whose finiteness is undecidable (a point view over
@@ -5241,7 +5293,7 @@ function pointComponentAt(
     );
 
   // Symbolic / non-finite operand: stay symbolic (or error) like componentAt.
-  return componentAt(xs, position, ce);
+  return componentAt(xs, position, ce, operator);
 }
 
 // @todo: future thoughts. Consider
@@ -6412,7 +6464,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // ABSENT operand never reaches this handler: `missingBehavior:
       // 'propagate'` above makes the evaluation driver's absence gate answer
       // `NaN` for `Length(Missing)` first (user decision 2026-09-25).
-      if (!xs.isCollection) return nonCollectionSizeOperandError(engine, xs);
+      if (!xs.isCollection)
+        return nonCollectionSizeOperandError(engine, xs, 'Length');
       // `count` is asked FIRST and `isEmptyCollection` only as its fallback.
       // Both facets walk a lazy collection — `Filter.count` to the end,
       // `Filter.isEmpty` to the first match — so asking emptiness first ran
@@ -8149,7 +8202,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // the refusal here keeps every form answering one bare `Error`,
       // identical to `Length`'s, instead of an `Error` nested inside an
       // application that never evaluates.
-      const wrongKind = nonCollectionSizeOperandError(engine, xs);
+      const wrongKind = nonCollectionSizeOperandError(engine, xs, 'Count');
       if (wrongKind !== undefined) return wrongKind;
 
       if (xs.isEmptyCollection) return engine.Zero;
@@ -10630,6 +10683,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
             if (typeof raw === 'number' && Number.isFinite(raw)) {
               const i = raw < 0 ? n + raw + 1 : raw;
               if (i >= 1 && i <= n) return tt.elements[i - 1].type; // in-range
+              // A tuple that only the index reads of a bare parameter made
+              // does not prove its length (`isIndexReadTuple()`): a read past
+              // its end is a component that no read used yet, which is
+              // `unknown` (`parameterIndexReadType()`), not a miss. The read
+              // is then recorded as one more component.
+              if (i > n && isIndexReadTuple(tt)) return 'unknown';
               return markerType(slots); // out-of-range literal → marker(⊔S)
             }
           }
@@ -11504,7 +11563,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       ),
     inferOperandTypes: (_ops, r) => elementRequirementOfAccessor(r),
     evaluate: ([xs], { engine: ce, expression }) =>
-      componentAt(xs, 1, ce, expression),
+      componentAt(xs, 1, ce, 'First', expression),
   },
 
   Second: {
@@ -11521,7 +11580,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       ),
     inferOperandTypes: (_ops, r) => elementRequirementOfAccessor(r),
     evaluate: ([xs], { engine: ce, expression }) =>
-      componentAt(xs, 2, ce, expression),
+      componentAt(xs, 2, ce, 'Second', expression),
   },
 
   Third: {
@@ -11538,7 +11597,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       ),
     inferOperandTypes: (_ops, r) => elementRequirementOfAccessor(r),
     evaluate: ([xs], { engine: ce, expression }) =>
-      componentAt(xs, 3, ce, expression),
+      componentAt(xs, 3, ce, 'Third', expression),
   },
 
   // Point-coordinate accessors (`.x`/`.y`/`.z`). On a single point they return
@@ -11586,6 +11645,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         xs,
         1,
         ce,
+        'PointX',
         numericApproximation ?? false,
         rawAccessorOperand(expression)
       ),
@@ -11609,6 +11669,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         xs,
         2,
         ce,
+        'PointY',
         numericApproximation ?? false,
         rawAccessorOperand(expression)
       ),
@@ -11632,7 +11693,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       if (xs?.isValid) {
         const arity = staticPointArity(xs.type.type);
         if (arity !== undefined && arity < 3)
-          return pointArityError(ce, 3, arity);
+          return pointArityError(ce, 'PointZ', 3, arity);
       }
       return ce._fn('PointZ', args);
     },
@@ -11647,11 +11708,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // per-point marker inside a broadcast list is not wanted.
       const arity = runtimePointArity(xs);
       if (arity !== undefined && arity < 3)
-        return pointArityError(ce, 3, arity);
+        return pointArityError(ce, 'PointZ', 3, arity);
       return pointComponentAt(
         xs,
         3,
         ce,
+        'PointZ',
         numericApproximation ?? false,
         rawAccessorOperand(expression)
       );
@@ -11672,7 +11734,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       ),
     inferOperandTypes: (_ops, r) => elementRequirementOfAccessor(r),
     evaluate: ([xs], { engine: ce, expression }) =>
-      componentAt(xs, -1, ce, expression),
+      componentAt(xs, -1, ce, 'Last', expression),
   },
 
   Rest: {
@@ -13157,6 +13219,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // `xs`), where the walk below finds no elements to order. This is a cheap
       // early decline: it answers before the sort walk reads any element.
       if (!isEnumerableSource(xs)) return undefined;
+      // A value with no positions (a `Set` held by a symbol declared
+      // `unknown` or `collection<T>`, which the signature check admits before
+      // the value is known) has no ordering to report. Refuse it with the
+      // type error that the literal operand `Ordering(Set(3, 1))` gets, as
+      // `Sort` does. Without this test, the sort walk read `undefined`
+      // elements and failed with an internal error.
+      if (!isString(xs) && xs.isIndexedCollection !== true)
+        return refusedOperandError(ce, 'Ordering', 1, 'indexed_collection', xs);
       const indices = sortedIndices(xs, fn);
       // `sortedIndices` returns `undefined` when the order cannot be decided —
       // a key that cannot be computed, or a pair of keys that compare neither
@@ -13218,7 +13288,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // an internal error. It is the same type error the literal operand
       // gets from the signature check (`Sort(Set(3, 1))`).
       if (!isString(xs) && xs.isIndexedCollection !== true)
-        return ce.typeError('indexed_collection', xs.type, xs);
+        return refusedOperandError(ce, 'Sort', 1, 'indexed_collection', xs);
       const indices = sortedIndices(xs, fn);
       if (!indices) return undefined;
       const elements = indices.map((i) => xs.at(i)!);
@@ -13458,21 +13528,43 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // Only an INDETERMINATE finiteness stays symbolic — that is a "not yet
       // known", not a "cannot". A finite collection whose elements cannot be
       // walked (`Linspace(a, 1, 3)` with a symbolic `a`) stays symbolic too:
-      // the walk would read it as empty.
+      // the walk would read it as empty. Both `out-of-range` errors below are
+      // about operand 1, so they carry the frame `{RandomShuffle, 1}`, as the
+      // type error of that operand does.
       if (xs.isFiniteCollection === false)
-        return ce.error(['out-of-range', 'a finite collection', xs.toString()]);
+        return withErrorFrames(
+          ce.error(['out-of-range', 'a finite collection', xs.toString()]),
+          [{ operator: 'RandomShuffle', index: 1 }]
+        );
       if (!isWalkableFiniteCollection(xs)) return undefined;
+      // A value with no positions (a `Set` held by a symbol declared
+      // `unknown` or `collection<T>`, which the signature check admits before
+      // the value is known) cannot be shuffled into a list. Refuse it with
+      // the type error that the literal operand `RandomShuffle(Set(3, 1))`
+      // gets, before any draw is consumed. Without this test, the set was
+      // shuffled into a `List`.
+      if (!isString(xs) && xs.isIndexedCollection !== true)
+        return refusedOperandError(
+          ce,
+          'RandomShuffle',
+          1,
+          'indexed_collection',
+          xs
+        );
 
       // A permutation needs every element, so materializing is inherent —
       // but `Shuffle(Range(1, 10^9))` would then try to allocate a billion
       // boxed numbers (an uncatchable heap-OOM, the item-64b class). Refuse
       // past the size cap, loudly, before allocating.
       const tooBig = (n: string): Expression =>
-        ce.error([
-          'out-of-range',
-          `a collection of at most ${MAX_RANDOM_ELEMENT_COUNT} elements`,
-          n,
-        ]);
+        withErrorFrames(
+          ce.error([
+            'out-of-range',
+            `a collection of at most ${MAX_RANDOM_ELEMENT_COUNT} elements`,
+            n,
+          ]),
+          [{ operator: 'RandomShuffle', index: 1 }]
+        );
       const count = xs.count;
       if (count !== undefined && count > MAX_RANDOM_ELEMENT_COUNT)
         return tooBig(count.toString());

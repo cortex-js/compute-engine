@@ -109,35 +109,255 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
+### A memoized element read costs 934 `console.assert` calls and runs five times slower under jest than from source (OPEN, performance — measured 2026-10-16 by the perf suite on the M5)
+
+`interval-endpoint-markers.test.ts`, "a symbol assigned a seeded draw is
+memoized across element reads": 2,000 evaluations of `A[3]` (with `A` a seeded
+100-element draw already memoized) take about 0.9 s under `npx tsx` and 5.0–5.2
+s under jest on an idle 18-core machine, at HEAD `6b4cc505` and with the
+2026-10-16 round applied alike, so the `CE_PERF` budget of 5 s failed on both;
+the budget is now 10 s with the measurements in the test. Two things to find:
+(1) why jest runs the engine five times slower than the source (not the custom
+`console.assert` of `test/jest-config.ts`: a no-op assert measured the same 5.06
+s; `ts-jest` targets `es2022`, so no downleveling; candidates are the `vm`
+module context jest runs each file in and the `useESM` module wrappers); (2) why
+one memoized element read makes about 934 `console.assert` calls and about 0.43
+ms of work from source — the read is `parse('A[3]')` (about 0.02 ms) plus
+`evaluate()` of an `At` on a memoized symbol, which should be a lookup. A CPU
+profile of the loop would answer both; the `console.assert` calls are stripped
+from the production build, so (2) is a cost of the development build and the
+test suite, not of users, unless the work behind the asserts is.
+
+### `addsPointToNumberCollection` refuses by operator name when a user definition replaces `Add` (OPEN, small — found 2026-10-16 by the review of the point-arithmetic refusal)
+
+With `Add` redefined as `(any, any) -> integer` that returns `7`, `Add(T, L)`
+with `T: tuple<integer, integer>` and `L: list<real>` is typed `error` on both
+typing routes (`derive-application-type.ts` and the `type()` method of
+`boxed-function.ts`) but evaluates to `7`. The check
+`addsPointToNumberCollection` (`collection-utils.ts`) reads the operator by name
+and does not ask whether the resolved definition keeps the library semantics.
+The point-arithmetic refusal added on 2026-10-16 is gated by
+`runsLibraryCanonicalForm()` (the test `makeNumericFunction()` in `box.ts`
+uses); the older check needs the same gate on both routes.
+
+### `.N()` of an integral whose shells decay as `k^{-p}` with `1 < p < 1.5` at a nonzero or infinite bound gives a wrong value with a very wide error bar (OPEN, small — found 2026-10-14 by the power-law divergence test; the bound-at-0 case fixed 2026-10-16)
+
+Since 2026-10-16, next to a bound at `0` the part of the integral that cannot be
+sampled is computed from a model fitted to the sampled shells (`shellTail`,
+`numerics/endpoint-quadrature.ts`), so `\int_0^{1/2} \frac{dt}{t(-\ln t)^{1.1}}`
+gives `10.37329 ± 0.00007` (exact `10.3733`). The same integrand at a nonzero or
+infinite bound still gives a wrong value:
+`\int_{1/2}^{1} \frac{dt}{(1-t)(-\ln(1-t))^{1.1}}` gives `3.40 ± 21.6` (it was
+`3.4 ± 1.0` before the error included the missing power tail, which is twice the
+fitted tail where no model is accepted) and
+`\int_2^{\infty} \frac{dx}{x(\ln x)^{1.1}}` is in the same situation, both for
+the exact `10.3733`. There, a corner has fewer than 30 accurate shells, too few
+to accept a model (a model needs 64), so the value stays the plain quadrature
+and only the error bar is honest. One possible fix in `adaptiveQuadrature`: a
+change of variable that moves the singular bound to `0`, where about 1000 shells
+are available (the same change the entry on `1/(x·ln x)` divergence needs). Two
+smaller limits in the same file: `\int_0^1 x^{-0.9999}\,dx` reports
+`10000.00000 ± 3.5e-7` while the true error is `1.06e-6` (the ε-algorithm's
+estimate, `EXTRAPOLATION_SAFETY` times the difference of two orders, is too
+small by a factor of three there); and
+`\int_0^{0.01} dx/(x(-\ln x)\ln^2(-\ln x))` reports `0.5028 ± 0.223` for a true
+error of `0.152` (covered, by the factor of two on the fitted tail). Also a
+sampling limit, not a defect: `\ln(-\ln t)/(t(-\ln t)^{1.1})` converges (about
+`99.9`) but is reported divergent, because its exponent is below `1` at every
+depth a double reaches; the comment at `SHELL_POWER_DIVERGENT` does not list
+this family.
+
+### `Map` with a bare operator name as the function checks the declared signature, not the type handler (OPEN, decision — found 2026-10-16 by the `Subtract` type handler)
+
+`Map(Add, Ps, Ps)` over a list of points works because the signature of `Add` is
+`(value+) -> value`. `Map(Subtract, Ps, Ps)`, `Map(Negate, Ps)`,
+`Map(Multiply, Ps, [1, 2])` and `Map(Divide, Ps, [1, 2])` are refused with
+`incompatible-type … "(number+) -> number"`: the callback check of `Map` (and of
+the other collection operators that take a function) checks a bare operator name
+against the operator's declared signature only, and the point arithmetic that
+these operators accept lives in their type handlers (`subtractTypeHandler`
+shares `addTypeHandler` since 2026-10-16). Two ways to close it: (1) give
+`Subtract` the signature `(value+) -> value` with `missingBehavior: 'propagate'`
+as `Add` has, a small change that leaves the other three refused and changes
+everything that reads the declared signature of `Subtract`; (2) make the
+callback check of a bare operator name with the `tuples` exemption use the
+operator's type handler instead of the declared signature, which covers all four
+and is a larger change in the callback validation code. Recommended: (2). If
+nothing is decided, the four calls stay refused (an error, not a wrong value).
+Related, small: `(1, 2) / [[1, 2], [3, 4]]` (a point divided by a matrix) stays
+unevaluated and is typed `number`, which does not describe the unevaluated form.
+
+### An extension that removes the numeric canonical handler of `Add` or `Multiply` leaves the operator lazy with no `canonical` handler (OPEN, decision — found 2026-10-16 by the fix of the extension mark)
+
+The library `Add` is `lazy: true`. When
+`ce.declare('Add', { associative: false }, { extend: true })`, or the non-extend
+copy `{ ...AddDef, associative: false }`, changes a flag that the numeric
+canonical handler assumes, the definition constructor removes that handler
+(`_keepsNumericCanonical`, `boxed-operator-definition.ts`) and the definition
+stays lazy with no `canonical` handler. Its operands are then held unbound (the
+inert-lazy-operator trap in `CLAUDE.md`): `ce.parse('(a+b)+c')` keeps a
+`Delimiter` in the canonical form,
+`["Add", ["Delimiter", ["Add", "a", "b"]], "c"]`, where an `Add` declared from
+scratch removes it. Since 2026-10-16 the extension shadows the library operator
+(it is no longer marked as a library extension), so it behaves the same as the
+copy. The question to decide: when the constructor removes the numeric canonical
+handler, should it also drop the `lazy` flag that handler needed (option A, the
+operands are then canonicalized like those of a user operator), or canonicalize
+the held operands itself (option B)? Either changes the copy behavior that the
+user decision of 2026-10-01 on copies of library operators covers, so it needs a
+ruling. If nothing is decided, such a copy keeps parse sugar in its operands.
+
+### `DeleteAt`, `ReplaceAt` and `Insert` answer a held set where the literal set is refused (OPEN, decision — found 2026-10-16 by the `ErrorTrace` frame fix)
+
+With `c` declared `collection<integer>` or `unknown` and holding `Set(3, 1)`:
+`DeleteAt(c, 1)` evaluates to `[1]`, `ReplaceAt(c, 1, 2)` to `[2, 1]` and
+`Insert(c, 1, 2)` to `[2, 3, 1]`, while the literal `DeleteAt(Set(3, 1), 1)` is
+refused at boxing as
+`DeleteAt(Error(incompatible-type, indexed_collection, set<integer>), 1)` (and
+the same for the other two). These operators keep a failed cell in place, so a
+handler cannot return a bare error for the held set. The same difference exists
+for the lazy source operators: the literal `Filter(5, f)`, `Dedup(5)`,
+`TakeWhile(5, f)` and `Differences(5)` keep the error in place, while with
+`n := 5` the held operand gives the bare framed error; both behaviors are
+documented (`docs/ERROR-MODEL.md` §3, `docs/COLLECTIONS-MODEL.md`). Related:
+`Differences(Set(3, 1))` is accepted (its signature takes `collection<any>`) and
+reads the set in iteration order, where `Sort` is declared on
+`indexed_collection` only. The question to decide: should the held set be
+refused like the literal (option A, the three operators and the lazy sources
+answer a bare error for a held non-indexed or non-collection value), should the
+literal route also give the bare error (option B), or stay as is (option C, two
+documented behaviors)? And should `Differences` be declared on
+`indexed_collection`? If nothing is decided, a held set is silently read in
+iteration order by these three operators.
+
+### Other handler-created errors lack their `ErrorTrace` frame (OPEN, small — found 2026-10-16 by the `ErrorTrace` frame fix of the collection operators)
+
+Since 2026-10-16, `Count`, `Length`, `First`/`Second`/`Third`/`Last`,
+`PointX`/`PointY`/`PointZ`, `Sort`, `Ordering`, `RandomShuffle` and `PointZ`'s
+dimension error carry the frame of the operator through `refusedOperandError` /
+`withErrorFrames` (`library/collections.ts`). The evaluation adds no frame to an
+error a handler returns as the value of the whole call, so every other handler
+that creates an error itself has the same gap: the `out-of-range` errors of the
+sequence-search operator in `collections.ts` (an index below 1, an empty needle,
+near lines 12879 and 12889) and the many `ce.error('incompatible-type')` returns
+in `library/colors.ts`. Closing it: either each handler goes through
+`withErrorFrames`, or the evaluation adds the frame of the call when a handler
+returns an error whose frames do not start with that call.
+
+### An Epsil `let` with a declared function type and an initializer accepts a clause outside the declared signature (OPEN, decision — found 2026-10-16 by the static-check reassignment fix)
+
+At run time, `let h: (x: integer) -> integer = (x: integer) => x`, then
+`function h(u: string) { u }`, then `h(u: "a")` gives `"a"`: the `function`
+statement adds a second clause `(u: string)` outside the declared signature.
+Without the initializer (`let h: (x: integer) -> integer` then the same
+`function` statement) the run time refuses the clause with
+`invalid-clause-definition`. The static check reports `argument-name-unknown`
+for the call, because it never evaluates the `let`, so the binding has the
+declared signature and no value, and the clause is accumulated onto that
+signature. The question to decide: is the run time right to accept a clause
+outside the declared signature when the binding holds a value (option A, then
+`installAssignedLiteralBeforeClause()` in `src/epsil/static-diagnostics.ts`
+installs the `let` initializer before the clause), or should
+`defineFunctionClause()` refuse it as it does without the initializer (option
+B)? Related, also to decide: the static check does not report the refusal of a
+`function` statement on a `const` binding as a diagnostic of its own
+(`executeEpsil` reports it as `runtime-error` / `invalid-clause-definition`;
+`epsil check` users see nothing). If nothing is decided, the check and the run
+time disagree on this shape.
+
+### The Python and shader `compileFunction()` decline a block whose last statement is an assignment (OPEN, decision — found 2026-10-16 by the Python `return s = x` fix)
+
+Since 2026-10-16 the block hooks of the Python and WGSL targets emit a final
+assignment as a statement followed by `return <name>`, so `compile()` of
+`Block(s ≔ x; t ≔ s)` is valid code. `compileFunction()` on the Python target
+and on both shader targets still declines such a body before compiling it ("Give
+the block a VALUE statement"), and tests pin the decline. For a block of several
+statements the decline could now be lifted; a single statement that unwraps to
+`s = x` still needs it. Lifting it is a behavior change: a call that threw
+returns code. Also: the Python binding-name checks reject keywords only; a name
+that is not an identifier (`compileFunction(expr, 'a b', ['1x'])`) is still
+accepted and gives code that does not parse, and the fix needs a syntax check
+that admits the Unicode identifiers Python allows. If nothing is decided, both
+stay as they are.
+
+### Quotient and product with a float inside a list literal are typed `rational` (OPEN, decision — found 2026-10-16 by the fix of the `rational` claim on scalar arithmetic)
+
+`[1.0, 2] / 3` canonicalizes to `Multiply(1/3, [1.0, 2])` and is typed
+`vector<rational^2>`, while it evaluates to `[0.333…, 2/3]`, typed
+`vector<real^2>`, so the type leaves out the value. The scalar fix of 2026-10-16
+(`rationalTierOf`, `library/arithmetic.ts`) reads the operand descriptors and
+cannot see a float inside a list: the list's element type is synthesized with
+the tier `integer` for `1.0`, by the decision recorded in `docs/TYPE-SYSTEM.md`
+§"Composite types carry tiers" (`numberLiteralTierType`,
+`boxed-expression/literal-tier.ts`). Two ways to close it: (a) the broadcast
+typing of `Multiply` and `Divide` reads the element descriptors of a list
+literal (`structureOf()` → `list-literal`) and applies the same downgrade per
+element, which changes only `arithmetic.ts` and still misses a list that reaches
+the operator through a symbol; (b) a float whose value is an integer gets the
+tier `real` inside a composite type, which changes the documented decision and
+the synthesis of every composite type. If nothing is decided, the type claim
+stays wrong for such a list; the value is not affected.
+
+### `Solve` leaves a power equation with a negative or compound float exponent unsolved (OPEN, small — found 2026-10-16 by the float-root fix)
+
+Since 2026-10-16, `x^{2.0} = 4` gives the float root `2.0` and `x^{2.5} = 4` its
+float root. These still return no solution: `x^{-0.5} = 4` (root `0.0625`),
+`x^{-2.0} = 4`, `x^{-2.5} = 4`, `(x+1)^{2.0} = 4` and `(x+1)^{2.5} = 4`, while
+the exact forms `x^{-2} = 4` and `(x+1)^2 = 4` are solved. The general power
+template (`solve.power`, `boxed-expression/solve.ts`) matches a positive float
+exponent on the bare unknown only. A negative float exponent needs the
+reciprocal form, and a compound base needs the same substitution the exact
+templates use. Related decision: the parity of an integer-valued float exponent
+is not read (`polynomial-coefficients.test.ts`, "The parity of `2.0` is not
+read: no root `-2`"), so `x^{2.0} = 4` gives the one root `2.0` although
+`(-2.0)^{2.0}` evaluates to `4`. The question to decide: should an
+integer-valued float exponent give both roots `±2.0` (option A, the solution set
+is complete; Mathematica gives both), or one root (option B, today, consistent
+with a float exponent not being a degree)? If nothing is decided, the negative
+root is left out.
+
+### A base case assigned inside a closure can record a pending sequence under a discarded scope (OPEN, small — found 2026-10-16 by the per-binding pending sequences)
+
+Pending sequence definitions are keyed by (scope, name) since 2026-10-16
+(`pendingSequences`, `sequence.ts`), and `discardEvalContext()` removes the
+entries of a scope when it is popped. A function closure can still reach a scope
+whose context was already discarded, through its `parent` chain. If that scope
+holds a binding for the name and the closure body assigns `F_0 := …`, the new
+pending entry goes under the discarded scope. Nothing removes it later, so it
+stays in the map and in every checkpoint snapshot. The bindings of such a scope
+are already disposed, so the entry does no harm beyond the memory it holds.
+Closing it: `pendingScopeOf()` skips a scope whose context is discarded, or the
+discard marks the scope so a later write is refused.
+
+### Compiled code does not check the type of a value assigned to a parameter (OPEN, small — found 2026-10-16 by the fix of the callback parameter facts)
+
+The interpreter types an unannotated parameter of a range callback from the
+range elements (`integer`), so `q = 0/0` inside
+`Map(q ↦ { q = 0/0; If(q < 0, 1, 2) }, Range(1, 3))` is an `incompatible-type`
+error there, and an assignment of a list to a parameter typed `number` is
+refused the same way. The JavaScript target emits the assignment without a type
+check, so the compiled call returns `NaN` (or a broadcast over the list) where
+the interpreter returns the error. The fix of 2026-10-16 (`assignedNamesIn`,
+`base-compiler.ts`) stops the compiler from recording scalar and finite facts
+about a parameter the body writes; it does not add the check. Closing it means
+the compiled assignment to a typed parameter fails closed (a compile-time
+refusal when the written value's type contradicts the parameter's type, as the
+declared-result-type rule does), so the two routes agree.
+
 ### A base case assigned to a constant completes a sequence that replaces the constant (OPEN, decision — found 2026-10-17 by the review of `ce.undeclare()`)
 
-With `F` declared as a constant (`ce.declare('F', { value: 3, isConstant:
-true })`), `F_0 := 1` and `F_n := F_{n-1} + 1` are accepted, and completing
-the sequence installs a new value half built from the subscript evaluator
-only (`tryFinalizeSequence`, `updateDef(…, { subscriptEvaluate })`), so `F` is
-no longer a constant and its value `3` is gone, while `ce.assign('F', 5)` is
-refused with "Cannot assign a value to the constant". The question to decide:
-should the base-case assignment to a constant be refused with the same error
-(option A, consistent with `assign` and with the type setter, which refuses a
-constant), or is a constant allowed to become a sequence (option B, then the
-constant flag and value must be carried or the change documented)? If nothing
-is decided, a constant silently becomes a sequence.
-
-### The pending state of a sequence is kept by name, so a child scope's base case joins the enclosing scope's sequence (OPEN, small — found 2026-10-17 by the review of `ce.undeclare()`)
-
-A sequence that is not complete yet (a placeholder declared with
-`declareSequence`, or a name with a base case `F_0 := 10` and no recurrence)
-is recorded in one pending entry per name (`pendingSequences`,
-`sequence.ts`). Each entry now records the binding and the scope that own it,
-so `ce.undeclare('F')` in a child scope removes the child's entry and leaves the
-enclosing scope's base case in place. What the one-entry-per-name map still
-cannot express: the outer scope has `F` with `F_0 := 10` pending, a child scope
-declares its own `F` and assigns `F_1 := 5`, and that base case lands in the
-outer entry, so `tryFinalizeSequence` can complete the child's sequence with
-the outer base cases. Closing it means one pending entry per binding (keyed by
-the binding, or several entries per name), with the checkpoint snapshot and
-restore, `getSequenceStatus` and `listSequences` reading the entry of the
-visible binding.
+With `F` declared as a constant
+(`ce.declare('F', { value: 3, isConstant: true })`), `F_0 := 1` and
+`F_n := F_{n-1} + 1` are accepted, and completing the sequence installs a new
+value half built from the subscript evaluator only (`tryFinalizeSequence`,
+`updateDef(…, { subscriptEvaluate })`), so `F` is no longer a constant and its
+value `3` is gone, while `ce.assign('F', 5)` is refused with "Cannot assign a
+value to the constant". The question to decide: should the base-case assignment
+to a constant be refused with the same error (option A, consistent with `assign`
+and with the type setter, which refuses a constant), or is a constant allowed to
+become a sequence (option B, then the constant flag and value must be carried or
+the change documented)? If nothing is decided, a constant silently becomes a
+sequence.
 
 ### Quantity arithmetic numericizes an exact irrational factor under `evaluate()` (OPEN, decision — found 2026-10-16 by the fix of `Quantity(3, m) · x`)
 
@@ -154,11 +374,11 @@ magnitude follow the exactness contract (option A: route an exact non-literal
 magnitude or factor through the symbolic branch, so `3π m`, `√2 m`, and `.N()`
 numericizes; every quantity result with an exact irrational factor changes
 form), or stay numeric as today (option B: document quantity arithmetic as a
-numeric domain, as measurements are)? The same decision covers an exact
-rational result of an integer power: `Quantity(3, m)^-1` evaluates to the
-float `0.333… m^-1` (`quantityPower` uses `Math.pow` for an integer exponent),
-where `3^-1` alone evaluates to `1/3`. If nothing is decided, `evaluate()` and
-`.N()` keep answering the same float for such quantities.
+numeric domain, as measurements are)? The same decision covers an exact rational
+result of an integer power: `Quantity(3, m)^-1` evaluates to the float
+`0.333… m^-1` (`quantityPower` uses `Math.pow` for an integer exponent), where
+`3^-1` alone evaluates to `1/3`. If nothing is decided, `evaluate()` and `.N()`
+keep answering the same float for such quantities.
 
 ### The compiled body of a user function spells the coordinate of an absent point as `NaN`, where the interpreter keeps `Missing` (OPEN, small — found 2026-10-14 by the review of the Tycho row 374 tuple collapse)
 
@@ -179,82 +399,6 @@ interpreter's body route normalizes to `NaN` as the top level does (tried
 `Missing`, `absent-point-arithmetic.test.ts`). A plot consumer drops a `NaN`
 point and a hole alike, so no consumer reading is known to differ.
 
-### `evaluateAsync()` of `Join` over an eager operand evaluates the operand twice (OPEN, small — found 2026-10-15 by the one-shot store of eager operand values)
-
-A plain `evaluate()` of `Join(src(1), [4])` or `Append(src(1), 4)` calls `src`
-once since 2026-10-15: the finiteness read records the operand value in a
-one-shot store (`boxed-expression/eager-source-values.ts`) that the operand step
-reads. The async route has no such store, so `evaluateAsync()` still calls `src`
-twice. The store needs an async twin, cleared in the `finally` of
-`evaluateAsync()`.
-
-### Two evaluation-time errors of a collection operator lack their `ErrorTrace` frame (OPEN, small — found 2026-10-15 by the admission of a symbol whose value is not a collection)
-
-With `n` declared `unknown` and holding `5`, `Count(n)` and `Length(n)` evaluate
-to the `incompatible-type` error without an `ErrorTrace` frame, while `Sort(n)`
-carries one. The same was true before for a valueless `unknown` symbol assigned
-later. Related question: `Reverse(n)` evaluates to `Reverse(Error(…))`, not to
-the error, by the rule that a collection head keeps a failed cell in place;
-whether the OPERAND of a lazy view counts as a cell is not written down.
-
-### The type of a float power of an exact number claims an exact integer (OPEN, small — found 2026-10-15 by the change that makes a float exponent on a matrix element-wise)
-
-`(-8)^{2.0}` is typed `integer<64..64>` and `2^{3.0}` is typed `integer<8..8>`,
-while their values are the floats `64.0` and `8.0` (the spelling rule: a float
-exponent makes a float result, and `evaluate()` gives `{num: "64.0"}`). The
-`Power` type handler folds two number literals to the exact literal type without
-reading the exactness of the exponent. The type must be `real` (or the float
-literal type) when either literal is a float.
-
-### The Epsil static check and the run time disagree on two reassignment shapes (OPEN, small — found 2026-10-15 by the change that gives a redefined function the names of its latest literal)
-
-Since 2026-10-15 the static check follows the run time on an assignment over an
-assigned pin and on the `function`-statement route in both directions
-(`installAssignedLiteralBeforeClause()`, `assignOverUserFunction()` in
-`src/epsil/static-diagnostics.ts`). Two shapes are left. (1) A `function`
-statement after a `const` function binding: with `const h = (x: integer) => x`,
-then `function h(u: string) { u }`, then `h(x: 3)`, the run time refuses the
-`function` statement and `h(x: 3)` gives `3`, but the static check installs the
-new clause and reports `argument-name-unknown`; marking the binding as a
-constant in the static check prints "error canonicalizing `DefineFunction`: The
-type of the constant "h" cannot be changed" to the console, so the fix must
-leave a `function` statement on a constant binding unchanged without that route.
-(2) A function defined by an EARLIER program on the same engine, then an
-unannotated assignment in a new program (`h := (u) => "s"`, then `h(x: 3)`): the
-static check reports nothing because it never changes a binding from an earlier
-program, while the run time gives `argument-name-unknown`; a missed warning, not
-a false error.
-
-### `Solve` and the general power rule make a float root exact (OPEN, small — found 2026-10-15 by the change that keeps a float exponent out of the polynomial degree)
-
-`ce.function('Divide', [ce.One, 2.0])` gives the exact `1/2`, while
-`ce.box(['Divide', 1, {num: '2.0'}])` gives `0.5`: `canonicalDivide`
-(`boxed-expression/arithmetic-mul-div.ts`) folds a float divisor to a rational
-on the function route. So the general power rule gives `x^{2.0} - 2 = 0` the
-exact roots `±√2`, and `x^{2.0} - 4 = 0` the exact `±2`, where a float exponent
-must give float roots. Until the fold is fixed, `Solve` leaves an equation whose
-float exponent has an integer value unsolved (`x^{2.0} = 4`, `x^{3.0} - 8 = 0`);
-`x^{2.5} = 4` keeps its float root. After the fix, `x^{2.0} = 4` should give the
-float root `2.0`.
-
-### The product of a point and a scalar-or-list value is typed without the single-point arm (OPEN, small — found 2026-10-15 by the point-valued body typing)
-
-`(cos a, sin a)·u` with `u: number | list<number>` is typed `list<tuple<…>>`
-alone: the arm for `u` a number (a single point) is missing. The collection
-branch of the `Multiply` type handler (`library/arithmetic.ts`) reads the list
-arm first; the new arm-by-arm typing covers a union factor with a tuple arm, not
-a union of a scalar and a list.
-
-### A free symbol at any inferred tuple slot learns one element type (OPEN, small — found 2026-10-15 by the per-index narrowing)
-
-A free symbol passed to a bare parameter whose inferred type is a tuple learns
-`indexed_collection<union of the components>` (decision of 2026-10-15 for a
-tuple that came from index reads). The slot type does not record where it came
-from, so the rule also applies to a tuple inferred from a call: with
-`h := p ↦ g(p)` and `g: (tuple<number, number>) -> number`, `h(zs)` types `zs`
-as `indexed_collection<number>`, where it was `tuple<number, number>`. Recording
-the origin of the inferred tuple on the slot would keep the call-derived tuple.
-
 ### `.N()` of a `1/(x·ln x)` divergence at a nonzero bound or at infinity gives a finite value (OPEN, small — found 2026-10-14 by the power-law divergence test)
 
 `\int_2^\infty \frac{dx}{x\ln x}` gives `4.0 ± 1.5` and
@@ -271,47 +415,6 @@ variable that moves the bound to `0`). Also: two integrands that the test
 reports divergent get different verdicts, `(−ln t)^{-1.001}/t` gives `+∞` and
 `−t^{0.00001}/(t ln t)` gives `NaN`; the sign read of a detected divergence is
 not the same on the two.
-
-### `.N()` of an integral whose shells decay as `k^{-p}` with `1 < p < 1.5` gives a wrong value whose error bar does not cover it (OPEN, small — found 2026-10-14 by the power-law divergence test; present before)
-
-`\int_0^{1/2} \frac{dt}{t(-\ln t)^{1.1}}` gives `5.19 ± 0.79`; the exact value
-is `10.37`. With exponent `1.2` it gives `4.04 ± 0.38` (exact `5.38`), with
-`1.05` it gives `6.0 ± 2.0` (exact `20.4`), and
-`\int_0^{1/2} \frac{-t^{0.0001}}{t\ln t}\,dt` gives `6.9 ± 1.3` (exact `9.00`).
-The shells next to the bound are about `k^{-p}`; the Levin extrapolation of the
-tail needs a decay exponent of at least `1.5` (`LEVIN_MIN_DECAY`), so these
-tails are not extrapolated, and the reported error does not include the missing
-tail. A fix in `resolveSingularEndpoints` adds the tail `C·K^{1-p}/(p-1)` from
-the exponent that `shellsDecayAsPower` fits, or at least widens the error to
-cover it.
-
-### `Multiply` typed from argument types alone keeps the component types of a tuple times a real (OPEN, small — found 2026-10-14 by the fix of the tuple-at-scalar-parameter result inference; present before)
-
-`deriveApplicationType(ce, 'Multiply', [tuple<integer, integer>, real])` returns
-`tuple<integer, integer>`, while the expression `T·r` with
-`T: tuple<integer, integer>` and `r: real` is typed `tuple<real, real>`. So with
-`f := P ↦ P·Norm(P)` and `g := a ↦ f((a, a))`, `g(1)` is typed
-`tuple<integer, integer>` but its value is `(√2, √2)`. The descriptor route of
-the `Multiply` type handler (`library/arithmetic.ts`) does not widen the
-components of a tuple by the scalar factor. The comment in `lambdaBroadcastType`
-(`boxed-expression/boxed-function.ts`) that warns of "wrong narrow types for
-`P·Norm(P)`" is this defect.
-
-### Asynchronous materialization walks a lazy view synchronously (OPEN, small — found 2026-10-08 by the listing of lazy elements)
-
-`Map(AsyncOnly, [1, 2]).evaluateAsync({ materialization: true })`, with
-`AsyncOnly` an operator that has only an `evaluateAsync` handler, gives
-`[AsyncOnly(1), AsyncOnly(2)]`: the materialization enumerates the view with the
-synchronous iterator, which cannot run an asynchronous-only application, and the
-unevaluated applications are stored. The inline-lambda spelling
-(`Map(x ↦ AsyncOnly(x), …)`) does the same, inside a list literal or not. The
-listing of a lazy element of a literal or of a spread keeps such a view lazy
-(`holdsAsyncOnlyOperator`, `boxed-expression/listed-element.ts`); the
-materialization option needs an asynchronous walk of the view (`materialize` in
-`boxed-function.ts`, and the `materialization` branch of the `List` handlers in
-`library/collections.ts`). The name check of `holdsAsyncOnlyOperator` looks one
-level into the function literal a symbol holds and does not look into the
-clauses of a multi-clause user function.
 
 ### A declared real result, a ranged index or a ranged argument keeps a compiled user function on the real lane: what remains (OPEN, small — found 2026-10-08 by the review of the Tycho codegen audit of CE 0.149.0)
 
@@ -4163,7 +4266,15 @@ record's pointer to it, so the write lands on an object the binding no longer
 holds. Verified by probe: after `w(x: integer) = x + 1` then
 `w(x: string) = "s"`, the captured pre-assign half is not the installed one.
 
-Not an observable defect today — the installed half derives the same
+It is reachable through the Epsil static check since 2026-10-16: the check
+declares a pass-scope binding that holds the SAME operator object as a function
+an earlier program defined (`assignOverUserFunction()`,
+`src/epsil/static-diagnostics.ts`), so a static check of a later program that
+has only `function h(x: integer) -> integer { x }` after an earlier
+`function h(x: integer) pure -> integer { x }` changes the earlier operator's
+`effectsDeclared` from `true` to `false` while its signature still says `pure`
+(`contractViolation` reads that flag; no user-visible consequence was shown).
+Otherwise not an observable defect — the installed half derives the same
 `effectsDeclared` from the incoming literal, so the live definition ends up with
 the value this write intends — and the same statement's REFUSAL path (the
 `catch`) does need the write, because there the old half is still installed. So
@@ -5550,14 +5661,15 @@ dischargeable) quantifies exactly what it would buy. Let demand justify it.
 The TS 7 side-by-side install landed 2026-07-08 (`@typescript/native` drives the
 build/typecheck; the module name `typescript` is aliased to the TS 6 API because
 TS 7.0 ships no programmatic API and ts-jest/typedoc/madge all require one
-(typescript-eslint left the list when Oxlint replaced ESLint, 2026-10-16); bare `npx tsc` is ambiguous — use the explicit native-binary
-path). The nodenext `.js`-specifier codemod landed the same day; **new-file
-convention: relative imports in `src/` use `.js` specifiers.**
+(typescript-eslint left the list when Oxlint replaced ESLint, 2026-10-16); bare
+`npx tsc` is ambiguous — use the explicit native-binary path). The nodenext
+`.js`-specifier codemod landed the same day; **new-file convention: relative
+imports in `src/` use `.js` specifiers.**
 
 **Remaining:** drop the TS 6 compat alias once TS 7.1 ships its (new, different)
-programmatic API **and** ts-jest/typedoc/madge support it.
-Until then the side-by-side install is the intended end state, not a hack.
-**Effort:** small once the ecosystem is ready.
+programmatic API **and** ts-jest/typedoc/madge support it. Until then the
+side-by-side install is the intended end state, not a hack. **Effort:** small
+once the ecosystem is ready.
 
 ### Correctness & symbolic findings (2026-07) — residue
 

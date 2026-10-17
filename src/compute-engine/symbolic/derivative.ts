@@ -452,6 +452,38 @@ function isUserFunction(sym: Expression): boolean {
 }
 
 /**
+ * The body of the user function `fn` (a symbol for which
+ * {@link isUserFunction} is true) applied to `wildcards`, or `undefined`
+ * when no body is known.
+ *
+ * A LAZY operator holds its operands: they are statements, conditions or
+ * binders, not values. Its `evaluate` handler can run statements, throw on an
+ * operand of an unexpected form, or loop until the deadline, so it is never
+ * run on wildcards. When the handler is a function literal, the wildcards
+ * replace the parameters in the body of the literal, and the body is not
+ * evaluated. A lazy operator with a handler of any other kind has no known
+ * body.
+ *
+ * Any other operator is applied to the wildcards and the call is evaluated.
+ * The result is the body, unless it is the same call again.
+ */
+function userFunctionBody(
+  fn: Expression,
+  wildcards: ReadonlyArray<Expression>
+): Expression | undefined {
+  const ce = fn.engine;
+  const name = sym(fn)!;
+  const opDef = fn.operatorDefinition;
+  if (opDef?.lazy) {
+    const literal = opDef._lambdaLiteral;
+    if (literal === undefined) return undefined;
+    return partialFromFunctionLiteral(ce, literal, wildcards);
+  }
+  const body = ce.function(name, wildcards).evaluate();
+  return body.operator === name ? undefined : body;
+}
+
+/**
  * The per-function cache behind {@link derivative}: for one function literal
  * and one differentiation variable, the chain of RAW iterates
  * (`iterates[k]` is `differentiate` applied `k` times, `iterates[0]` the body
@@ -930,11 +962,21 @@ export function derivative(
   // Whether the chain starts from an APPLICATION of the function to the hole
   // rather than from a body. See the sub-key below.
   let appliedForm = false;
-  if (isSymbol(fn) && fn.operatorDefinition?.derivative !== undefined) {
+  if (
+    isSymbol(fn) &&
+    (fn.operatorDefinition?.derivative !== undefined ||
+      fn.operatorDefinition?.lazy)
+  ) {
     // The `derivative` key of the definition has precedence over the body of
     // a function-literal `evaluate` handler. Differentiate the unevaluated
     // application `f(_)`: `differentiate()` then uses the key. Evaluating
     // `f(_)`, as the branch below does, would give the body of the literal.
+    //
+    // A LAZY operator is never evaluated on the hole either: its `evaluate`
+    // handler can run statements, throw on an operand of an unexpected form,
+    // or loop until the deadline (`Loop(_)`). `differentiate()` expands the
+    // function literal of a lazy user operator without evaluating it, and
+    // declines for any other lazy operator.
     //
     // A univariate derivative is defined only for an operator that takes one
     // argument. For an operator that needs more (`Arctan2`, or a user
@@ -1270,10 +1312,9 @@ function differentiateNode(
     // Resolve user-defined functions: e.g. f where f(x) := 2x
     if (isUserFunction(expr)) {
       const ce = expr.engine;
-      const wildcard = ce.symbol('_');
-      const body = ce.function(expr.symbol, [wildcard]).evaluate();
+      const body = userFunctionBody(expr, [ce.symbol('_')]);
       // If the body resolved (is not just the same function call), differentiate it
-      if (body.operator !== expr.symbol) {
+      if (body !== undefined) {
         const bodyWithV = body.subs({ _: ce.symbol(v) });
         // The node (a bare function symbol) does not contain `v`, so record
         // this bridging step directly rather than through `recordD`.
@@ -1315,8 +1356,13 @@ function differentiateNode(
     return ce._fn('D', [expr.op1, ce.symbol(v)]).neg();
   }
 
-  // Block - just differentiate the content
+  // Block - just differentiate the content. A block of one statement has the
+  // value of that statement. A block of several statements has the value of
+  // the last one, but the statements before it can assign the local
+  // variables it reads (`Block(a := 2, a·x)`), so differentiating the last
+  // statement alone is not correct: decline.
   if (expr.operator === 'Block') {
+    if (expr.nops !== 1) return undefined;
     recordD(trace, expr, v, 'derivative.rewrite', () =>
       dPlaceholder(expr.op1, v)
     );
@@ -2118,8 +2164,8 @@ function differentiateUnknownApplication(
       args.length === 1
         ? [ce.symbol('_')]
         : args.map((_, i) => ce.symbol(`_${i + 1}`));
-    const body = ce.function(expr.operator, wildcards).evaluate();
-    if (body.operator !== expr.operator) {
+    const body = userFunctionBody(opSym, wildcards);
+    if (body !== undefined) {
       const subsMap: Record<string, Expression> = {};
       wildcards.forEach((w, i) => {
         subsMap[sym(w)!] = args[i];
@@ -2167,12 +2213,14 @@ function differentiateUnknownApplication(
  *
  * A partial derivative is requested only for an argument that depends on
  * `v`. A partial derivative that the key does not give (the handler returns
- * `undefined`, or an array entry is not a usable function literal) stays
- * symbolic, as `Apply(Derivative(F, 0, …, 1, …, 0), g₁, …, gₙ)`.
+ * `undefined`, an array entry is not a usable function literal, or the key
+ * is an array with a number of entries other than the number of arguments)
+ * stays symbolic, as `Apply(Derivative(F, 0, …, 1, …, 0), g₁, …, gₙ)`. The
+ * body of a function-literal `evaluate` handler is never used in place of
+ * the key: the key has precedence over it, also when the key cannot be used.
  *
- * Returns `undefined` when the key does not apply: the definition has no
- * `derivative` key, or the key is an array with a number of entries other
- * than the number of arguments. The caller then continues with its other
+ * Returns `undefined` when the definition has no `derivative` key, or the
+ * application has no arguments. The caller then continues with its other
  * rules.
  */
 function differentiateWithDerivativeKey(
@@ -2186,7 +2234,10 @@ function differentiateWithDerivativeKey(
   if (key === undefined) return undefined;
   const args = expr.ops;
   if (args.length === 0) return undefined;
-  if (typeof key !== 'function' && key.length !== args.length) return undefined;
+  // An array is used only for an application with as many arguments as the
+  // array has entries. For any other application, each partial derivative
+  // stays symbolic.
+  const usableArray = typeof key !== 'function' && key.length === args.length;
 
   const ce = expr.engine;
 
@@ -2195,7 +2246,9 @@ function differentiateWithDerivativeKey(
     const value =
       typeof key === 'function'
         ? key(args, { engine: ce, argument: i })
-        : partialFromFunctionLiteral(ce, key[i], args);
+        : usableArray
+          ? partialFromFunctionLiteral(ce, key[i], args)
+          : undefined;
     // A handler may build its result in a non-canonical form, which the
     // product below cannot take.
     if (value !== undefined) return value.canonical;

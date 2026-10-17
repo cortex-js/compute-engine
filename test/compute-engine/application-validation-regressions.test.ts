@@ -127,6 +127,21 @@ describe('SYM P1-15 — user-declared function signatures are enforced', () => {
     expect(ce.box(['f', 'r']).isValid).toBe(true);
   });
 
+  it('a symbol whose tuple type is disjoint from a tuple parameter is rejected', () => {
+    // A tuple value has exactly as many components as its type, so a
+    // `tuple<boolean>` symbol can never satisfy `tuple<number, number>` (a
+    // different length) or `tuple<number>` (a disjoint component), as the
+    // tuple literal `(True)` cannot.
+    const ce = strictEngine();
+    ce.declare('g', '(tuple<number, number>) -> number');
+    ce.declare('g1', '(tuple<number>) -> number');
+    ce.declare('xs', 'tuple<boolean>');
+    ce.declare('ys', 'tuple<real, real>');
+    expect(ce.box(['g', 'xs']).isValid).toBe(false);
+    expect(ce.box(['g1', 'xs']).isValid).toBe(false);
+    expect(ce.box(['g', 'ys']).isValid).toBe(true);
+  });
+
   it('does not enforce in non-strict mode', () => {
     const ce = new ComputeEngine();
     ce.strict = false;

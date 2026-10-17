@@ -22,6 +22,7 @@ import { COLLECTION_SHAPE_TYPE } from '../../common/type/primitive.js';
 import {
   appliesToListCoordinateTuple,
   addsPointToNumberCollection,
+  isPointArithmeticError,
   isTupleShapedType,
   scalarOrListUnionCellType,
   typeCouldBeUnkeyedCollection,
@@ -41,6 +42,8 @@ import {
   isRestParameter,
 } from './function-literal.js';
 import { isFunction } from './type-guards.js';
+import { shadowsLibraryName } from '../library-shadowing.js';
+import { numericCanonicalHandlerName } from './numeric-canonical-registry.js';
 import {
   instantiatedResultTypeOverActuals,
   isThreadableAt,
@@ -238,6 +241,44 @@ function matrixPowerLiteralExponent(
 }
 
 /**
+ * Whether the operand `d` is provably a scalar number, as canonicalization
+ * reads it when it rejects `point + scalar` (`isProvablyScalarNumber`,
+ * `collection-utils.ts`): its type is a number type, and it is known only
+ * by that type (`describeType`: the type was computed by the derivation, so
+ * nothing can retract it), or it is a number literal, or a symbol whose type
+ * was declared rather than inferred. An application is not read here: the
+ * expression route decides it when it canonicalizes the application, and
+ * canonicalization does not count an application of a broadcastable
+ * operator over an operand that may be a point.
+ */
+function isProvablyScalarDescriptor(d: OperandDescriptor): boolean {
+  if (!isSubtype(d.type, 'number')) return false;
+  if (d.structureOf === undefined) return true;
+  const s = d.structureOf();
+  return s?.kind === 'number' || (s?.kind === 'symbol' && s.inferred !== true);
+}
+
+/**
+ * Whether boxing an application of `operator` runs the library `canonical`
+ * handler of `operator` (`canonicalAdd`, `canonicalDivide`, …), with the
+ * same test as the boxing code (`makeNumericFunction()` in `box.ts`):
+ * the definition that the name resolves to is the library definition, or a
+ * copy of it that keeps the library `canonical` handler. A user definition
+ * that replaces the operator (`ce.declare('Divide', …)`, a `function` named
+ * `Divide`) does not run it, and neither does a parameter with the name of
+ * the operator.
+ */
+function runsLibraryCanonicalForm(
+  engine: ComputeEngine,
+  operator: string,
+  def: BoxedOperatorDefinition
+): boolean {
+  if (!shadowsLibraryName(engine, operator)) return true;
+  if (engine._isShadowedParameter(operator)) return false;
+  return numericCanonicalHandlerName(def.canonical) === operator;
+}
+
+/**
  * The type of applying `operator` to operands a handler holds only as
  * DESCRIPTORS — the recursive entry point a `type` handler needs to type an
  * application it does not have in hand: the body of a mapping literal
@@ -375,6 +416,27 @@ export function deriveApplicationType(
     addsPointToNumberCollection(
       operator,
       operands.map((d) => d.type)
+    )
+  )
+    return 'error';
+  // A sum of a point (or a list of points) and a scalar number, and a
+  // quotient by a point, are rejected at canonicalization (`canonicalAdd`,
+  // `canonicalDivide`), so the expression route types them `error`. This
+  // route never canonicalizes, so it gives the same answer here: with
+  // `f := P ↦ P + Norm(P)`, a call `f((1, 1))` derived from argument types
+  // was typed `real | tuple<integer, integer>` for a value that is an
+  // error. A scalar counts as canonicalization counts it: an operand known
+  // only by its type (a computed type, not a guess), a number literal, or a
+  // symbol whose type was not inferred (`isProvablyScalarDescriptor`).
+  // The refusal is part of the library `canonical` handlers, so it does not
+  // apply when a user definition replaces the operator: the expression route
+  // then calls the user definition (`runsLibraryCanonicalForm`).
+  if (
+    runsLibraryCanonicalForm(engine, operator, def) &&
+    isPointArithmeticError(
+      operator,
+      operands.map((d) => d.type),
+      (i) => isProvablyScalarDescriptor(operands[i])
     )
   )
     return 'error';

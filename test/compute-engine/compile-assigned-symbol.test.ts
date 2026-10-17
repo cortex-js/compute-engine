@@ -607,6 +607,36 @@ describe('COMPILE: a declared vars-mapped input compiles as if it had no value (
     expect(compile(expr, { target, fallback: false } as never).code).toBe('3');
   });
 
+  it('a reused direct target does not reuse a fold answer cached under other `vars`', () => {
+    // `f(t) := u + t` reads the inferred `u := 4`, which keeps its value
+    // during the compilation. A first call whose `vars` do not map `u` folds
+    // `f(1)` to `5` and records in the target's reachability memo that `f`
+    // reaches no mapped input. A second call on the same target maps `u`: it
+    // must not read that answer, or it folds `5` and the input is ignored.
+    // The raw JavaScript target has no lowering for a user function, so the
+    // correct result of the second call is a decline.
+    const ce = new ComputeEngine();
+    ce.pushScope();
+    ce.assign('u', 4);
+    ce.parse('f(t) := u + t').evaluate();
+    const expr = ce.parse('f(1)');
+    const target = ce._getCompilationTarget('javascript')!.createTarget();
+    const emit = (vars: Record<string, string>) =>
+      compile(expr, { target, vars, fallback: false } as never).code;
+    expect(emit({ w: 'w' })).toBe('5');
+    expect(() => emit({ u: 'u' })).toThrow(/Could not compile `f`/);
+    // A fresh target gives the same decline.
+    expect(() =>
+      compile(expr, {
+        target: ce._getCompilationTarget('javascript')!.createTarget(),
+        vars: { u: 'u' },
+        fallback: false,
+      } as never)
+    ).toThrow(/Could not compile `f`/);
+    // The memo is restored to the caller's value (here, none) after a call.
+    expect(target.foldReachMemo).toBeUndefined();
+  });
+
   it('a class-instance direct target keeps its prototype methods with `vars`', () => {
     // The `var` hook is a method on the class prototype and writes to `this`.
     // The target is not copied for the call: a copy made with object spread

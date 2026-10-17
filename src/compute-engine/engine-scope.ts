@@ -21,6 +21,7 @@ import {
   tombstoneBinding,
 } from './boxed-expression/binding-tombstone.js';
 import { ambientChainParent } from './boxed-expression/ambient-chain.js';
+import { _discardPendingSequencesOfScope } from './sequence.js';
 
 export function pushScope(
   ce: IComputeEngine,
@@ -219,6 +220,10 @@ function discardEvalContext(
       binding.value.dispose();
     }
   }
+  // The pending sequence definitions of the scope (`F_0 := 10` without a
+  // recurrence) belong to its bindings, so they are removed with them.
+  if (context !== undefined)
+    _discardPendingSequencesOfScope(ce, context.lexicalScope);
 
   // Popping an eval context reverts the active assumptions and local
   // declarations to the enclosing context. Per-expression caches keyed on

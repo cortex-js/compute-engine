@@ -22,21 +22,31 @@ describe('EVALUATION-TIME OPERAND ERRORS bubble through strict operators', () =>
   test('a library operator: Sin(Length(5)) is the error, with the Sin hop', () => {
     const v = ce.box(['Sin', ['Length', 5]]).evaluate();
     expect(isError(v)).toBe(true);
-    expect(errorFrames(v)).toEqual([{ operator: 'Sin', index: 1 }]);
+    // The first frame is the one `Length` records when it refuses its
+    // operand; the `Sin` hop follows it.
+    expect(errorFrames(v)).toEqual([
+      { operator: 'Length', index: 1 },
+      { operator: 'Sin', index: 1 },
+    ]);
   });
 
   test('arithmetic: 1 + Length(5) is the error, with the Add hop', () => {
     const v = ce.box(['Add', 1, ['Length', 5]]).evaluate();
     expect(isError(v)).toBe(true);
-    expect(errorFrames(v)).toEqual([{ operator: 'Add', index: 2 }]);
+    expect(errorFrames(v)).toEqual([
+      { operator: 'Length', index: 1 },
+      { operator: 'Add', index: 2 },
+    ]);
   });
 
   test('operators that evaluate their own operands (Multiply, Power) agree', () => {
     const m = ce.box(['Multiply', 2, ['Length', 5]]).evaluate();
     expect(isError(m)).toBe(true);
-    // The innermost hop is the product's; the handler's own normalization
-    // (a quotient over 1) may add a hop of its own after it.
-    expect(errorFrames(m)[0]).toEqual({ operator: 'Multiply', index: 2 });
+    // The innermost hop after the frame of `Length` is the product's; the
+    // handler's own normalization (a quotient over 1) may add a hop of its
+    // own after it.
+    expect(errorFrames(m)[0]).toEqual({ operator: 'Length', index: 1 });
+    expect(errorFrames(m)[1]).toEqual({ operator: 'Multiply', index: 2 });
     expect(isError(ce.box(['Power', ['Length', 5], 2]).evaluate())).toBe(true);
   });
 
@@ -105,6 +115,7 @@ describe('EVALUATION-TIME OPERAND ERRORS bubble through strict operators', () =>
   test('no double framing through nested strict operators', () => {
     const v = ce.box(['Cos', ['Sin', ['Length', 5]]]).evaluate();
     expect(errorFrames(v)).toEqual([
+      { operator: 'Length', index: 1 },
       { operator: 'Sin', index: 1 },
       { operator: 'Cos', index: 1 },
     ]);
@@ -118,12 +129,18 @@ describe('EVALUATION-TIME OPERAND ERRORS bubble through strict operators', () =>
   test('the async lane agrees', async () => {
     const v = await ce.box(['Sin', ['Length', 5]]).evaluateAsync();
     expect(isError(v)).toBe(true);
-    expect(errorFrames(v)).toEqual([{ operator: 'Sin', index: 1 }]);
+    expect(errorFrames(v)).toEqual([
+      { operator: 'Length', index: 1 },
+      { operator: 'Sin', index: 1 },
+    ]);
     const five = await ce.box(['If', 'True', 5, ['Length', 5]]).evaluateAsync();
     expect(five.toString()).toBe('5');
     // The lazy operator and the failing user function, asynchronously.
     const sum = await ce.box(['Add', 1, ['Length', 5]]).evaluateAsync();
-    expect(errorFrames(sum)).toEqual([{ operator: 'Add', index: 2 }]);
+    expect(errorFrames(sum)).toEqual([
+      { operator: 'Length', index: 1 },
+      { operator: 'Add', index: 2 },
+    ]);
     ce.declare('g', {
       value: ce.box(['Function', ['RuntimeError', "'neg'"], 'x']),
     });

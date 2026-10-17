@@ -233,8 +233,9 @@ describe('ROLLBACK FRAMES — family 7: provenance history at the cap', () => {
 describe('ROLLBACK FRAMES — the fresh-matrix repair inside a frame', () => {
   test('a SUCCESSFUL repair rolls back with the frame', () => {
     const ce = new ComputeEngine();
-    // `A` PRE-EXISTS on a fresh engine (a standard-library unknown-typed
-    // value definition); `B` does not.
+    // The test declares `A` before the frame opens, as an unknown-typed
+    // value definition; `B` has no declaration.
+    ce.declare('A', 'unknown');
     const aDef = ce.lookupDefinition('A')!;
     if (!isValueDef(aDef)) throw new Error('expected a value definition');
     expect(aDef.value.type.toString()).toBe('unknown');

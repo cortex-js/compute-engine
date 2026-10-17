@@ -79,7 +79,10 @@ describe('a literal index read narrows one tuple component', () => {
       'xs',
     ]);
     expect(f.isValid).toBe(true);
-    expect(f.type.toString()).toBe('(xs: tuple<boolean, real>) -> real');
+    // The read at index 2 is past the end of `tuple<boolean>`, which index
+    // reads made, so it is an unread component (`unknown`), and `+ 1`
+    // requires `number` of it, as it does in `p[1] + p[2]`.
+    expect(f.type.toString()).toBe('(xs: tuple<boolean, number>) -> number');
   });
 
   test('two reads at the same index with no common value are still an error', () => {
@@ -128,7 +131,7 @@ describe('a read at an index that is not a literal joins the requirements', () =
     ]);
     expect(f.isValid).toBe(true);
     expect(f.type.toString()).toMatch(
-      /^\(p: indexed_collection<boolean \| real>, /
+      /^\(p: indexed_collection<boolean \| number>, /
     );
   });
 
@@ -146,6 +149,214 @@ describe('a free symbol keeps one element type for every element', () => {
     const ce = new ComputeEngine();
     ce.box(['Add', ['At', 'xs', 1], 1]);
     expect(ce.symbol('xs').type.toString()).toBe('indexed_collection<number>');
+  });
+});
+
+// A free symbol passed to a bare parameter learns one element type only when
+// the parameter's tuple came from index reads. A tuple that a call in the
+// body requires is a contract, and the free symbol learns it.
+describe('a free symbol at an inferred tuple slot', () => {
+  function slotOf(body: MathJsonExpression): string {
+    const ce = new ComputeEngine();
+    ce.declare('g', '(tuple<number, number>) -> number');
+    ce.assign('h', ce.box(['Function', body, 'p']));
+    expect(ce.box(['h', 'zs']).isValid).toBe(true);
+    return ce.symbol('zs').type.toString();
+  }
+
+  test('index reads only: one element type', () => {
+    expect(slotOf(['Add', ['At', 'p', 1], ['At', 'p', 2]])).toBe(
+      'indexed_collection<number>'
+    );
+  });
+
+  test('a call: the tuple of the call', () => {
+    expect(slotOf(['g', 'p'])).toBe('tuple<number, number>');
+  });
+
+  test('a call and index reads: the call decides, in either order', () => {
+    expect(slotOf(['Add', ['g', 'p'], ['At', 'p', 1]])).toBe(
+      'tuple<number, number>'
+    );
+    expect(
+      slotOf(['Block', ['Add', ['At', 'p', 1], ['At', 'p', 2]], ['g', 'p']])
+    ).toBe('tuple<number, number>');
+    expect(
+      slotOf(['Block', ['g', 'p'], ['Add', ['At', 'p', 1], ['At', 'p', 2]]])
+    ).toBe('tuple<number, number>');
+  });
+
+  test('a call and a read at an index that is not a literal: the call decides', () => {
+    expect(slotOf(['Add', ['g', 'p'], ['At', 'p', 'j']])).toBe(
+      'tuple<number, number>'
+    );
+    expect(slotOf(['Block', ['Add', ['At', 'p', 'j'], 1], ['g', 'p']])).toBe(
+      'tuple<number, number>'
+    );
+  });
+
+  test('a parameter that forwards its argument keeps the origin of the slot', () => {
+    const ce = new ComputeEngine();
+    ce.declare('g', '(tuple<number, number>) -> number');
+    ce.assign(
+      'k',
+      ce.box(['Function', ['Add', ['At', 'p', 1], ['At', 'p', 2]], 'p'])
+    );
+    ce.assign('h', ce.box(['Function', ['g', 'p'], 'p']));
+    ce.assign('fk', ce.box(['Function', ['k', 'q'], 'q']));
+    ce.assign('fh', ce.box(['Function', ['h', 'q'], 'q']));
+    ce.box(['fk', 'xs']);
+    ce.box(['fh', 'ys']);
+    expect(ce.symbol('xs').type.toString()).toBe('indexed_collection<number>');
+    expect(ce.symbol('ys').type.toString()).toBe('tuple<number, number>');
+  });
+});
+
+// Index reads do not prove the length of the argument. A read past the end
+// of the tuple that the earlier reads made is a component that no read used
+// yet, and a call that requires a longer tuple gives the parameter that
+// tuple.
+describe('an index-read tuple does not fix the length', () => {
+  function literal(body: MathJsonExpression) {
+    const ce = new ComputeEngine();
+    ce.declare('g', '(tuple<number, number>) -> number');
+    return { ce, fn: ce.box(['Function', body, 'p']) };
+  }
+
+  test('a call that requires a longer tuple, in either statement order', () => {
+    for (const body of [
+      ['Block', ['Add', ['At', 'p', 1], 1], ['g', 'p']],
+      ['Block', ['g', 'p'], ['Add', ['At', 'p', 1], 1]],
+    ] as MathJsonExpression[]) {
+      const { ce, fn } = literal(body);
+      expect(fn.isValid).toBe(true);
+      expect(fn.type.toString()).toBe('(p: tuple<number, number>) -> number');
+      ce.assign('h', fn);
+      ce.box(['h', 'zs']);
+      expect(ce.symbol('zs').type.toString()).toBe('tuple<number, number>');
+    }
+  });
+
+  test('a read past the end of the tuple is not refused', () => {
+    const { fn } = literal([
+      'Add',
+      ['Floor', ['At', 'p', 1]],
+      ['Floor', ['At', 'p', 2]],
+    ]);
+    expect(fn.isValid).toBe(true);
+    expect(fn.type.toString()).toMatch(
+      /^\(p: tuple<real \| signed_infinity, real \| signed_infinity>\) ->/
+    );
+  });
+
+  test('a read past the end, then a call', () => {
+    const { ce, fn } = literal([
+      'Block',
+      ['Add', ['Floor', ['At', 'p', 1]], ['Floor', ['At', 'p', 2]]],
+      ['g', 'p'],
+    ]);
+    expect(fn.isValid).toBe(true);
+    expect(fn.type.toString()).toBe(
+      '(p: tuple<real | signed_infinity, real | signed_infinity>) -> number'
+    );
+    ce.assign('h', fn);
+    ce.box(['h', 'zs']);
+    expect(ce.symbol('zs').type.toString()).toBe(
+      'tuple<real | signed_infinity, real | signed_infinity>'
+    );
+  });
+
+  test('a call whose tuple contradicts a component that the reads gave is an error', () => {
+    // `p[1]` is a boolean, and both slots require a number at position 1.
+    for (const callee of ['g', 'g1']) {
+      const ce = new ComputeEngine();
+      ce.declare('g', '(tuple<number, number>) -> number');
+      ce.declare('g1', '(tuple<number>) -> number');
+      const fn = ce.box([
+        'Function',
+        ['Block', ['Boole', ['Not', ['At', 'p', 1]]], [callee, 'p']],
+        'p',
+      ]);
+      expect(fn.isValid).toBe(false);
+      const call = fn.ops![0].ops![1];
+      expect(call.ops![0].toString()).toMatch(
+        /^Error\(ErrorCode\("incompatible-type", .*\), p\)$/
+      );
+    }
+  });
+
+  test('a call of an overloaded function that requires a longer tuple', () => {
+    // The tuple arm is not removed when the overloads are filtered, although
+    // `tuple<number>` and `tuple<number, number>` have different lengths.
+    // The call then gives the parameter the tuple of that arm, as it does
+    // for a function with one signature.
+    for (const body of [
+      ['Block', ['Add', ['At', 'p', 1], 1], ['g', 'p']],
+      ['Block', ['g', 'p'], ['Add', ['At', 'p', 1], 1]],
+    ] as MathJsonExpression[]) {
+      const ce = new ComputeEngine();
+      ce.declare(
+        'g',
+        '((tuple<number, number>) -> number) & ((string) -> string)'
+      );
+      const fn = ce.box(['Function', body, 'p']);
+      expect(fn.isValid).toBe(true);
+      expect(fn.type.toString()).toBe('(p: tuple<number, number>) -> number');
+      ce.assign('h', fn);
+      ce.box(['h', 'zs']);
+      expect(ce.symbol('zs').type.toString()).toBe('tuple<number, number>');
+    }
+
+    // A component that the reads gave and that no arm admits is still an
+    // error.
+    const ce = new ComputeEngine();
+    ce.declare(
+      'g',
+      '((tuple<number, number>) -> number) & ((string) -> string)'
+    );
+    const fn = ce.box([
+      'Function',
+      ['Block', ['Boole', ['Not', ['At', 'p', 1]]], ['g', 'p']],
+      'p',
+    ]);
+    expect(fn.isValid).toBe(false);
+  });
+
+  test('a read past the end of a tuple that a call required is still an error', () => {
+    const { fn } = literal(['Block', ['g', 'p'], ['Floor', ['At', 'p', 3]]]);
+    expect(fn.isValid).toBe(false);
+  });
+});
+
+describe('the three routes that define a function agree on a free argument', () => {
+  test.each([
+    ['let', 'let k = p => p[1] + p[2]\nlet h = p => g(p)\nk(ws)\nh(zs)'],
+    [
+      'function',
+      'function k(p) { p[1] + p[2] }\nfunction h(p) { g(p) }\nk(ws)\nh(zs)',
+    ],
+  ])('Epsil %s', (_, source) => {
+    const ce = new ComputeEngine();
+    ce.declare('g', '(tuple<number, number>) -> number');
+    const parseLatex = (latex: string): MathJsonExpression =>
+      ce.parse(latex).json;
+    executeEpsil(ce, source, { parseLatex });
+    expect(ce.symbol('ws').type.toString()).toBe('indexed_collection<number>');
+    expect(ce.symbol('zs').type.toString()).toBe('tuple<number, number>');
+  });
+
+  test('ce.assign', () => {
+    const ce = new ComputeEngine();
+    ce.declare('g', '(tuple<number, number>) -> number');
+    ce.assign(
+      'k',
+      ce.box(['Function', ['Add', ['At', 'p', 1], ['At', 'p', 2]], 'p'])
+    );
+    ce.assign('h', ce.box(['Function', ['g', 'p'], 'p']));
+    ce.box(['k', 'ws']);
+    ce.box(['h', 'zs']);
+    expect(ce.symbol('ws').type.toString()).toBe('indexed_collection<number>');
+    expect(ce.symbol('zs').type.toString()).toBe('tuple<number, number>');
   });
 });
 

@@ -296,7 +296,20 @@ first three in `_invalidValue()`,
   cells, reflected in its type) is a possible future type-system
   refinement, not current behavior. Absorption looks at operands, not
   arbitrarily deep through collection values: `Sin([err])` stays an inert
-  application of `Sin` to a list, while `Sin(err)` bubbles.
+  application of `Sin` to a list, while `Sin(err)` bubbles. The operands of
+  a lazy view are cells too: the rule is keyed on the `collection` handler
+  block, so a view such as `Take`, `Reverse` or `Rest` keeps an error in any
+  of its operands in place, its source collection included — with `n := 5`,
+  `Reverse(n)` evaluates to `Reverse(Error(…))`, not to the error. Unlike a
+  collection literal, the view is not opaque to an enclosing operator, which
+  descends into it and bubbles the error: `Sin(Reverse(n))` evaluates to the
+  error with the frames `{Reverse, 1}` and `{Sin, 1}`. The lazy operators
+  that evaluate a held source (`Map`, `Filter`, `Differences` and the other
+  operators listed in `docs/COLLECTIONS-MODEL.md`) are the exception for a
+  source that is not a collection yet: when its value cannot be a collection,
+  the error is the value of the node, so `Filter(n, f)` with `n := 5`
+  evaluates to the error with the frame `{Filter, 1}`, while the literal
+  `Filter(5, f)`, refused at boxing, keeps the error in place.
 - **A non-function callee reports its own problem first** (`a := 5;
   a(err)` reports that `a` is not callable rather than bubbling the
   argument's error).

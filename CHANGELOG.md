@@ -39,39 +39,93 @@
   that takes options could see `x`. The rational-literal shortcut of
   `Denominator` and `NumeratorDenominator` did the same: `Denominator(5, x)`
   canonicalized to `1`. Every shortcut now applies to a one-operand call only;
-  `Numerator(a/b)` is still `a` and `Denominator(5)` is still `1`. The
-  extra operands are for a user definition that replaces the `evaluate`
-  handler. The built-in handler reads the first operand only, and it now
-  refuses a call with more: `Numerator(c, x)` and `Numerator(a/b, x)`
-  evaluate to the `unexpected-argument` error that names `x`, with the
-  `ErrorTrace` frame `(Numerator, 2)`, where `Numerator(c, x)` evaluated to
-  `c` before and `Numerator(a/b, x)` canonicalized to `a`. The refusal is
-  one error for the whole call, before any broadcast: `Denominator(5, [])`
-  is the error, not `[]`, and `Numerator([1/2, 3/4], x)` is the error, not
-  a list of two errors (the new `'surplus-operands'` broadcast exemption,
-  which the three definitions set). An empty `Sequence` or a `Nothing`
-  operand does not count:
+  `Numerator(a/b)` is still `a` and `Denominator(5)` is still `1`. The extra
+  operands are for a user definition that replaces the `evaluate` handler. The
+  built-in handler reads the first operand only, and it now refuses a call with
+  more: `Numerator(c, x)` and `Numerator(a/b, x)` evaluate to the
+  `unexpected-argument` error that names `x`, with the `ErrorTrace` frame
+  `(Numerator, 2)`, where `Numerator(c, x)` evaluated to `c` before and
+  `Numerator(a/b, x)` canonicalized to `a`. The refusal is one error for the
+  whole call, before any broadcast: `Denominator(5, [])` is the error, not `[]`,
+  and `Numerator([1/2, 3/4], x)` is the error, not a list of two errors (the new
+  `'surplus-operands'` broadcast exemption, which the three definitions set). An
+  empty `Sequence` or a `Nothing` operand does not count:
   `Numerator(a/b, Sequence())` is still `a`.
 
 - **A `Fold` whose step wraps the accumulator in a lazy view no longer doubles
   its cost at each step** (issue #444). The accumulator of a `Fold`, a `Reduce`
-  and a `Scan` is a value between two steps: a step result that is a finite
-  lazy view (`Join(acc, Map(k ↦ … acc …, 1..3))`, `Take(acc, k)`) is listed
-  into the literal of its kind, a `List`, a `Set` or a `Dictionary`, with the
-  rules of the list literal with a spread: within the collection size cap, a
-  view over an infinite source kept, an impure view listed only when a
-  callback-free bound on its size fits. A `Range` or `Linspace` result is kept
-  as the compact range. Before, each step substituted the value of the
-  accumulator into the new row, so the accumulator held a copy of every
-  earlier accumulator, and the fold took twice as long for each added step
-  (0.3 s at 8 steps, 5 s at 12). Visible change: such a fold answers the listed
-  value — `Fold((a, k) ↦ Take(a, k), 1..10, [3, 2])` is `[1, 2]` where it was
+  and a `Scan` is a value between two steps: a step result that is a finite lazy
+  view (`Join(acc, Map(k ↦ … acc …, 1..3))`, `Take(acc, k)`) is listed into the
+  literal of its kind, a `List`, a `Set` or a `Dictionary`, with the rules of
+  the list literal with a spread: within the collection size cap, a view over an
+  infinite source kept, an impure view listed only when a callback-free bound on
+  its size fits. A `Range` or `Linspace` result is kept as the compact range.
+  Before, each step substituted the value of the accumulator into the new row,
+  so the accumulator held a copy of every earlier accumulator, and the fold took
+  twice as long for each added step (0.3 s at 8 steps, 5 s at 12). Visible
+  change: such a fold answers the listed value —
+  `Fold((a, k) ↦ Take(a, k), 1..10, [3, 2])` is `[1, 2]` where it was
   `Take(Take(1..10, 3), 2)` — and the callbacks of the row run at the step
   rather than at the first read. A `Join`, `ListJoin` or `Append` now has a
   callback-free bound on its size (the sum of the bounds of its operands, a
   tuple operand counting one), so an impure join inside a list literal,
   `[Join(xs, Map(u ↦ Random(), 1..2))]`, is listed into the literal when that
   bound fits the cap, where it stayed a live view.
+
+- **A quotient with a float operand is not a rational on the function route.**
+  `ce.function('Divide', [ce.One, ce.number('2.0')])` is the float `0.5`; it was
+  the exact `1/2`. `ce.function('Divide', [3, ce.number('2.0')])` and
+  `ce.function('Rational', [1, ce.number('2.0')])` no longer give an exact
+  rational either: they give the same result as
+  `ce.box(['Divide', 1, {num: '2.0'}])` and `ce.parse('1/2.0')`, which were
+  already floats. The shortcut in `boxFunction` read a boxed float `2.0` as the
+  integer `2`. As a result, `Solve` gives a float root for a power equation
+  whose float exponent has an integer value: `x^{2.0} = 4` and `x^{3.0} - 8 = 0`
+  have the root `2.0`, and `x^{2.0} - 2 = 0` has the root `1.4142…`. These
+  equations were left unsolved. As for `x^{2.5} = 4`, the parity of a float
+  exponent is not read, so there is no negative root.
+
+- **A recurrence assigned in a child scope completes the sequence of the
+  enclosing scope.** With `F_0 := 10` in the outer scope and the recurrence
+  `F_n := F_{n-1} + 1` assigned in a child scope, the sequence is now declared
+  on the outer `F` and stays after the child scope is popped. Before, the
+  recurrence declared a new `F` in the child scope that used the outer base
+  case, and both were gone after the pop.
+
+- **`If` checks its number of operands.** `If()` threw a `TypeError` on
+  evaluation and `If(True)` was valid and evaluated to `Missing`. `If` with
+  fewer than two operands is now an invalid expression: each missing required
+  operand (the condition or the then branch) is an `Error("missing")` operand in
+  its place, and the expression evaluates to that error. `If` with more than
+  three operands is refused when it is evaluated, as `Numerator(a/b, x)` is:
+  whatever the condition, the call evaluates to the `unexpected-argument` error
+  that names the first surplus operand, with the single frame `(If, 4)`; before,
+  the surplus operand was ignored and `If(True, 1, 2, 3)` evaluated to `1`.
+  `If(c, a)` and `If(c, a, b)` are unchanged. A handler that makes such an error
+  for its own node records it (`markErrorFramedByNode`,
+  `boxed-expression/error-value.ts`), so the evaluation of a selecting operator
+  does not add a second, wrong frame for operand 1.
+
+- **`D` of a `Block` with several statements stays symbolic.**
+  `D(Block(3x, x^2), x)` differentiated the first statement and gave `3`;
+  earlier statements can assign locals that the last one reads, so the
+  derivative is not the derivative of one statement.
+
+- **A `derivative` key that is an array of the wrong length keeps the partial
+  derivatives symbolic**, as its documentation states. Before, when the array's
+  length was not the number of arguments of the call, `D` and `Derivative`
+  differentiated the body of a function-literal `evaluate` handler, although the
+  key has precedence over the body.
+
+- **`evaluateAsync()` of a user function whose body uses an operator that has
+  only an `evaluateAsync` handler gives the right value when two applications
+  overlap** (two `evaluateAsync()` calls started before either ends, or the
+  elements of a broadcast) **and in a recursive call.** Before, the second
+  application and the recursive call ran the body synchronously and left, for
+  example, `AsyncOnly(2)` unevaluated. An application that overlaps another
+  application of the same function now starts when that one ends (`makeLambda`,
+  `function-utils.ts`); an awaited application puts its call frame on its own
+  copy of the evaluation-context stack.
 
 ### Issues Resolved
 
@@ -128,14 +182,14 @@
 - **`Dot` and `Norm` type an operand declared with a type alias as they type the
   definition of the alias.** After
   `ce.declareType('mpt', 'missing | tuple<number, number>', { alias: true })`
-  and `ce.declare('n', 'mpt')`, `Dot((1, 2), n)` was typed `value` and
-  `Norm(n)` was typed `+oo | nan | real`. Both are now typed `number`, as they
-  are when `n` is declared `missing | tuple<number, number>` directly.
+  and `ce.declare('n', 'mpt')`, `Dot((1, 2), n)` was typed `value` and `Norm(n)`
+  was typed `+oo | nan | real`. Both are now typed `number`, as they are when
+  `n` is declared `missing | tuple<number, number>` directly.
 - **An absent value inside a type alias at a nested position is found and
   removed.** With `L` declared `list<mpt>`, where `mpt` is an alias of
   `missing | tuple<number, number>`, `Dot([(1, 2)], L)` was refused with an
-  `incompatible-type` error and `Norm(L)` was typed `+oo | nan | real`. Both
-  are now accepted and typed `list<number>`, as they are when `L` is declared
+  `incompatible-type` error and `Norm(L)` was typed `+oo | nan | real`. Both are
+  now accepted and typed `list<number>`, as they are when `L` is declared
   `list<missing | tuple<number, number>>`. A nominal type (declared without
   `alias: true`) is still refused.
 - **A compiled `Sum` or `Product` reads its index as an integer when a `Block`
@@ -152,50 +206,358 @@
 - **The unit names of the physical constants are no longer declared in the
   system scope.** The values of constants such as `PlanckConstant` and
   `BoltzmannConstant` declared their unit names (`m`, `s`, `J`, `A`, `C`, `K`,
-  `mol`, `F`, `kg`, `W`) as variables of type `unknown` in the system scope
-  when the engine started. On a fresh engine, `ce.parse('K + 1')` then read `K`
-  from the system scope, and `ce.undeclare('K')` threw
-  `Cannot undeclare "K": it is defined in the system scope`. Now `K` is
-  declared in the current scope, like any other free symbol, and
-  `ce.undeclare('K')` removes it. Also, the unit of a `Quantity` no longer
-  declares its unit names in the current scope: after
-  `ce.parse('3\,\mathrm{km}')`, `km` has no declaration. The values of the
-  constants and of quantity arithmetic do not change.
+  `mol`, `F`, `kg`, `W`) as variables of type `unknown` in the system scope when
+  the engine started. On a fresh engine, `ce.parse('K + 1')` then read `K` from
+  the system scope, and `ce.undeclare('K')` threw
+  `Cannot undeclare "K": it is defined in the system scope`. Now `K` is declared
+  in the current scope, like any other free symbol, and `ce.undeclare('K')`
+  removes it. Also, the unit of a `Quantity` no longer declares its unit names
+  in the current scope: after `ce.parse('3\,\mathrm{km}')`, `km` has no
+  declaration. The values of the constants and of quantity arithmetic do not
+  change. As a consequence, a function body reads the free names of the scope it
+  was defined in: when a host assigns one of these names in a child scope
+  (`ce.pushScope(); ce.assign('s', 0.577)`), a function defined in the parent
+  scope does not see the value unless the parent scope declares the name first
+  (`ce.declare('s', 'number')`). This used to work for `s`, `m`, `A` and the
+  other unit names only because they were declared in the system scope.
 - **A quantity times a symbol keeps the symbol.** With `x` a symbol with no
   value, `["Multiply", ["Quantity", 3, "m"], "x"]` evaluated to `NaN m`; it now
   evaluates to `Quantity(3x, m)`, as `Quantity(3, m) · 2` evaluates to `6 m`.
   The same `NaN` magnitude came from a division by a symbol (`3 m / x` is now
   `Quantity(3/x, m)`), from a symbolic magnitude in a sum, a product or a power
   (`Quantity(x, m) + Quantity(2, m)` is now `Quantity(x + 2, m)`), from a
-  negation (`-Quantity(x, m)` is now `Quantity(-x, m)`), and from
-  `UnitConvert` and `UnitSimplify` (`UnitConvert(Quantity(x, km), m)` is now
+  negation (`-Quantity(x, m)` is now `Quantity(-x, m)`), and from `UnitConvert`
+  and `UnitSimplify` (`UnitConvert(Quantity(x, km), m)` is now
   `Quantity(1000x, m)`). `UnitSimplify` also kept only the nominal value of a
   `Measurement` magnitude; it now keeps the error. A sum of a quantity and a
   symbol stays unevaluated, as a sum of a quantity and a number does.
-- **Equal unit factors in a product of quantities are collected into a
-  power.** `["Multiply", ["Quantity", 3, "m"], ["Quantity", 2, "m"]]` evaluated
-  to `6 m⋅m`; it now evaluates to `Quantity(6, m^2)`. Also,
+- **Equal unit factors in a product of quantities are collected into a power.**
+  `["Multiply", ["Quantity", 3, "m"], ["Quantity", 2, "m"]]` evaluated to
+  `6 m⋅m`; it now evaluates to `Quantity(6, m^2)`. Also,
   `Quantity(3, m^2) · Quantity(2, m)` is `Quantity(6, m^3)` instead of
   `6 m⋅m^2`. A reciprocal unit such as `s^-1` is now read as a unit:
   `Quantity(3, s) · Quantity(2, s^-1)` is `6` instead of `6 s⋅1/s`, and
-  `UnitConvert(Quantity(2, s^-1), Hz)` is `2 Hz` instead of staying
-  unevaluated.
-- **The square root and the `Root` of a quantity are exact under
-  `evaluate()`.** `["Sqrt", ["Quantity", 2, ["Power", "m", 2]]]` evaluated to
-  `1.414… m`; it now evaluates to `Quantity(√2, m)`, and `.N()` gives
-  `1.414… m`. In the same way, `["Root", ["Quantity", 2, ["Power", "m", 3]], 3]`
-  evaluated to `1.2599… m`; it now evaluates to `Quantity(Root(2, 3), m)`, and
-  `.N()` gives `1.2599… m`. A symbolic magnitude no longer gets a float
-  exponent: `Sqrt(Quantity(x, m^2))` is now `Quantity(√x, m)` instead of
-  `Quantity(x^0.5, m)`, and `Root(Quantity(x, m^3), 3)` is now
-  `Quantity(Root(x, 3), m)` instead of `Quantity(x^0.333…, m)`.
+  `UnitConvert(Quantity(2, s^-1), Hz)` is `2 Hz` instead of staying unevaluated.
+- **The square root and the `Root` of a quantity are exact under `evaluate()`.**
+  `["Sqrt", ["Quantity", 2, ["Power", "m", 2]]]` evaluated to `1.414… m`; it now
+  evaluates to `Quantity(√2, m)`, and `.N()` gives `1.414… m`. In the same way,
+  `["Root", ["Quantity", 2, ["Power", "m", 3]], 3]` evaluated to `1.2599… m`; it
+  now evaluates to `Quantity(Root(2, 3), m)`, and `.N()` gives `1.2599… m`. A
+  symbolic magnitude no longer gets a float exponent: `Sqrt(Quantity(x, m^2))`
+  is now `Quantity(√x, m)` instead of `Quantity(x^0.5, m)`, and
+  `Root(Quantity(x, m^3), 3)` is now `Quantity(Root(x, 3), m)` instead of
+  `Quantity(x^0.333…, m)`.
 
 - **The type setter refuses a function signature on a constant.**
-  `ce.symbol('k').type = 'real'` on a constant `k` was refused with "The type
-  of the constant cannot be changed", but `ce.symbol('k').type =
-  '(integer) -> integer'` replaced the constant with a function, after which an
-  assignment to `k` was accepted. Both are now refused with the same error, and
-  the constant keeps its value.
+  `ce.symbol('k').type = 'real'` on a constant `k` was refused with "The type of
+  the constant cannot be changed", but
+  `ce.symbol('k').type = '(integer) -> integer'` replaced the constant with a
+  function, after which an assignment to `k` was accepted. Both are now refused
+  with the same error, and the constant keeps its value.
+
+- **A pending sequence definition belongs to one declaration of the name.** A
+  base case such as `F_0 := 10` assigned before the recurrence was recorded in
+  one pending entry per name. A child scope that declared its own `F` and
+  assigned `F_1 := 5` added that base case to the pending definition of the
+  enclosing scope's `F`: the child's sequence then used the enclosing base
+  cases, and the enclosing `F` lost its pending definition. Each declaration now
+  keeps its own base cases. `ce.getSequenceStatus()` reports the definition of
+  the declaration visible from the current scope, a checkpoint restore puts back
+  the pending definitions of every scope, and popping a scope removes the
+  pending definitions of that scope.
+
+- **`compile()` with a reused target no longer reads a constant-folding answer
+  cached by an earlier call.** With `u := 4` and `f(t) := u + t`, compiling
+  `f(1)` first with other `vars` and then with `vars: { u: 'u' }` on the same
+  target instance folded the call to `5`, so the value of `u` was fixed in the
+  code instead of read at run time. Each call on a direct target now starts with
+  an empty memo of which functions read a mapped input, and restores the
+  caller's memo afterwards.
+
+- **Arithmetic with a float operand whose value is an integer no longer claims
+  the `rational` type for a float result.** Before, `2^{-2.0}`, `2.0^{-2}`,
+  `(1/2)^{3.0}`, `6/4.0`, `4.0/3`, `(1/3)·4.0`, `-4.0 + 1/3`, `Mod(5.0, 3/2)`
+  and `Remainder(5.0, 3/2)` were typed `rational` (or a `rational` range)
+  although they evaluate to the floats `0.25`, `0.125`, `1.5`, `1.333…`,
+  `-3.666…` and `0.5`. They are now typed `real`, with the same range. A
+  symbolic operand gets the same correction: with `k: integer<1..3>`, `k/4.0` is
+  typed `real<0.25..0.75>`, and with `p: tuple<integer, integer>`, `p/4.0` is
+  typed `tuple<real, real>`. Exact operands keep the `rational` type (`6/4` is
+  `rational`), and a float result whose value is an integer keeps the integer
+  type (`2^{3.0}` is typed `integer<8..8>`, which includes its value `8.0`). A
+  tuple or list literal with float components divided by an integer
+  (`(2.0, 4.0)/3`) has `real` components, not `rational`, and `Subtract` with
+  such a float operand (`1/3 - 2.0`) is typed `real` on every route.
+
+- **A compiled function literal no longer treats a parameter that its body
+  reassigns as a finite scalar.** When a function literal receives the elements
+  of a `Range` with a literal start and step (the callback of `Map`, for
+  example) or scalar arguments through `Apply`, the JavaScript target records
+  that each parameter is a scalar and not `NaN`. It recorded those facts for a
+  parameter the body writes, so
+  `Map((q: number) ↦ { q = 0/0; If(q < 0, 1, 2) }, Range(1, 3))` compiled to
+  `[2, 2, 2]` instead of an undecided result, and a parameter reassigned to a
+  list was not broadcast over. A parameter the body assigns or declares now gets
+  neither fact.
+
+- **When a collection operator refuses an operand at evaluation time, the error
+  has the `ErrorTrace` frame of that operator.** The frame was missing for the
+  type errors of `Count`, `Length`, `First`, `Second`, `Third`, `Last`,
+  `PointX`, `PointY` and `PointZ` (for example `Count(n)` with `n` declared
+  `unknown` and holding `5`, and `Length(5)`), for `Sort` of a set held by a
+  symbol, for the `out-of-range` errors of `RandomShuffle`, and for the
+  `incompatible-dimensions` error of `PointZ` on a two-dimensional point. The
+  evaluation adds no frame to an error that a handler returns as the value of
+  the whole call, so these handlers now add it themselves. The accessors' type
+  error also names the operand as its location. An enclosing operator adds its
+  frame after the operator's frame: `sin(Length(5))` has the frames `Length`,
+  then `Sin`. Two more defects with the same cause: `Ordering` of a set held by
+  a symbol declared `unknown` or `collection<T>` returned an internal error and
+  now returns the `incompatible-type` error that `Ordering(Set(3, 1))` returns,
+  and `RandomShuffle` of a held set returned a shuffled list and now returns
+  that error without using a random draw. The rule for a lazy view is now
+  written in `docs/ERROR-MODEL.md`: `Take`, `Reverse` and `Rest` keep an error
+  in any operand in place (`Reverse(n)` with `n := 5` is `Reverse(Error(…))`),
+  while the lazy operators that evaluate a held source (`Map`, `Filter`, …)
+  answer the error when the source cannot be a collection.
+
+- **An operand that is already an error is not reported a second time by an
+  operator with an overloaded signature.** `Sort("a" + 1)` evaluated to
+  "expected `indexed_collection`, got `error`": an invalid operand belongs to no
+  type, so every branch of the signature rejected it and wrapped it again. It
+  now evaluates to the error of `"a" + 1`, with the frames `Add` then `Sort`, as
+  `Sin("a" + 1)` does. The same applies to `RandomShuffle`; `Reverse` keeps the
+  original error in its operand.
+
+- **A lazy view over an eager operand evaluates that operand once.**
+  `evaluateAsync()` of `Join(src(1), [4])`, `Append(src(1), 4)` or
+  `ChunkBy(src(1), f)` called `src` twice, where `evaluate()` called it once
+  since 0.154.0. On both routes it was also called twice when a consumer such as
+  `Sum` or `Product` read the finiteness of the view and then iterated it, and
+  when the operand was nested in another operator (`Join(Sort(src(1)), [4])`).
+  The value that the finiteness read computes is now used by the rest of the
+  evaluation. For a pure operand it is kept until a value is assigned, an
+  assumption or definition changes, the scope changes or the precision changes,
+  and it is discarded when the engine has no evaluation in progress, also when
+  the evaluation throws or is cancelled. An operand that holds an operator with
+  only an `evaluateAsync` handler is still evaluated on the asynchronous route.
+
+- **`evaluateAsync({ materialization: true })` evaluates the elements of a lazy
+  collection asynchronously.** `Map(AsyncOnly, [1, 2])`, where `AsyncOnly` is an
+  operator with only an `evaluateAsync` handler, gave
+  `[AsyncOnly(1), AsyncOnly(2)]` with the applications not evaluated; it now
+  gives their values. This also applies to an inline function
+  (`Map(x ↦ AsyncOnly(x), …)`), to a collection inside a list literal or a
+  tuple, and to a spread. A list literal also keeps a lazy collection as it is
+  when its function is a multi-clause user function whose clauses use such an
+  operator, as it did for a single-clause function.
+
+- **`evaluateAsync()` waits for the body of a multi-clause user function.** With
+  `h(0) = 0` and `h(n: integer) = AsyncOnly(n)`, `h(1).evaluateAsync()` gave
+  `AsyncOnly(1)` and `Sum(h(k), k, 0, 2).evaluateAsync()` gave
+  `AsyncOnly(1) + AsyncOnly(2)`; they now give the values, as a single-clause
+  function did. The clause selector of the asynchronous route now awaits the
+  selected body, also for a hold function and for each step of an associative
+  function with more than two arguments.
+
+- **A free symbol passed to a function whose parameter must be a tuple because
+  of a call in the body gets the tuple type.** With
+  `g: (tuple<number, number>) -> number` and `h := p ↦ g(p)`, `h(zs)` types `zs`
+  as `tuple<number, number>` instead of `indexed_collection<number>`. A
+  parameter that is only read by index (`p ↦ p[1] + p[2]`) still gives the free
+  symbol one element type, `indexed_collection<number>`, by the decision of
+  2026-10-15: index reads prove no length. When the body has both a call and
+  index reads, the call decides, in any order of the uses, also when the call
+  needs a longer tuple than the reads made (`p ↦ {p[1] + 1; g(p)}` types `p` as
+  `tuple<number, number>`), and a read at a non-literal index (`g(p) + p[j]`) no
+  longer turns `p` into `indexed_collection<number>`. The origin of an inferred
+  tuple is recorded on the type object (`boxed-expression/index-read-tuple.ts`).
+
+- **A read past the last index read so far of an unannotated parameter is
+  accepted.** `p ↦ floor(p[1]) + floor(p[2])` was invalid (`incompatible-type`,
+  because `p[2]` was typed `nan` after the first read made `p` a one-tuple). It
+  is now valid, with `p: tuple<real | signed_infinity, real | signed_infinity>`.
+  Because of this, a numeric read at a later index records `number` where it
+  recorded `real` before (`xs ↦ {xs[1] and B; xs[2] + 1}` types `xs` as
+  `tuple<boolean, number>`).
+
+- **A function defined with Epsil `let` types a free argument like the other
+  routes.** `let k = p => p[1] + p[2]` then `k(ws)` gave `ws` the type
+  `dictionary<any> | indexed_collection<any>`, where `function k(p) { … }` and
+  `ce.assign` gave `indexed_collection<number>`. The argument evidence that a
+  call gives to a variable-held function literal now also applies when the
+  variable's function type was inferred.
+
+- **Epsil: the static check agrees with the run time in two more cases where a
+  function is redefined.** A `function` statement for a name bound by `const` no
+  longer changes that binding in the check: after `const h = (x: integer) => x`
+  and `function h(u: string) { u }`, the check no longer reports
+  `argument-name-unknown` for `h(x: 3)`, which gives `3`, nor a second such
+  `function` statement as a redefinition; the run time refuses each of these
+  statements with `invalid-clause-definition`, as before. An unannotated
+  `const h = (x) => x` followed by the same `function` statement no longer gives
+  a false static `incompatible-type` for `h(3)`. And an assignment of a function
+  literal to a function that an earlier program on the same engine defined now
+  changes the signature in the check, as it does at run time: after
+  `function h(x: integer) { x }` in one program, the program `h := (u) => "s"`
+  then `h(x: 3)` gets the `argument-name-unknown` warning before it runs. The
+  check still does not change the earlier program's definition.
+
+- **A named call through a field of a variable whose record type was inferred
+  matches its argument names again after the variable is reassigned.**
+  `r.S(x: 10, y: 1)` with `r` assigned (not declared) a record whose `S` takes
+  `(x, y)` kept the positional order it got the first time, so after `r` was
+  assigned a record whose `S` takes `(y, x)` the call silently swapped the
+  arguments. The written names are now kept and matched again, as for a direct
+  callee with an inferred type.
+
+- **A call `Apply(Field(s, "S"), …)` whose receiver `s` is an already-boxed
+  symbol reads the receiver the same way evaluation does, in both MathJSON
+  spellings.** A symbol bound to a constant uses that binding; any other symbol
+  uses the innermost binding of its name (the shadowing rule of 2026-08-22 in
+  `docs/SCOPING-MODEL.md`). Before, a raw `Field` holding a constant-bound
+  symbol could call a shadowing dictionary's operator, and a pre-boxed `Field`
+  on a variable could match named arguments against an outer record type while
+  the call ran the inner one. A protocol requirement called through a pre-boxed
+  symbol bound to a constant dictionary is no longer read as the protocol.
+
+- **A positional call through a field of a constant dictionary that holds a
+  function literal has the type of the same call of the inline literal.**
+  `lib.D([1, 2])` with `D = (x: real) => 7` was typed `integer` while its value
+  is `[7, 7]`; it is now the mapped list or tuple, or `error` for an argument
+  the literal refuses (`lib.T("abc")` with `T = (u: real) => 2u` was typed
+  `real`).
+
+- **`ce.declare(op, patch, { extend: true })` shadows the library operator when
+  the patch changes a flag that the library canonical form depends on.**
+  `ce.declare('Add', { associative: false }, { extend: true })` removed the
+  library numeric canonical handler but was still marked as a library extension,
+  so nested `Add` applications were still flattened. The extension now behaves
+  as the non-extend copy `{ ...AddDef, associative: false }`.
+
+- **An extension that states the effects of an operator replaces the effects of
+  the old signature.** Extending an operator declared
+  `(number) random -> number` with `{ effects: [], evaluate }` threw "the
+  'effects' field and the effects on the signature disagree", because the
+  inherited signature still said `random`. When the patch states `effects`,
+  `pure` or `drawsRandom` without a new `signature`, the effect specifier is
+  removed from the copied signature, and from each old arm of an overload set
+  under `addSignature`.
+
+- **The Python target no longer emits `return s = x`.** For a block whose last
+  statement is an assignment to a local of the block or a declaration with an
+  initializer (`Block(s ≔ x)` with `s` undeclared, `Block(s ≔ x; t ≔ s + 1)`),
+  `compile()` emitted a `return` of the assignment, which Python cannot parse.
+  It now emits the assignment as a statement followed by `return s`, which is
+  the value the interpreter gives the block. The WGSL target's `compile()` had
+  the same defect (`return t = s;`, an assignment is a statement in WGSL) behind
+  `success: true`, and emits `t = s;\nreturn t;` now. GLSL output is unchanged,
+  since an assignment is an expression there.
+
+- **The Python target refuses `True`, `False` and `None` as a name the generated
+  code binds.** `compileFunction(expr, 'True', [])`,
+  `compileLambda(expr, ['False'])`, a summation or loop index named `True`, and
+  `compileVectorized(expr, 'lambda', ['x'])` (which checked no name at all)
+  returned code that does not parse. Every Python keyword is now refused for a
+  function name, a parameter, an index or a vectorized function name. A symbol
+  that is only read can still be `True` or `False`, which compile to the Python
+  boolean literals.
+
+- **The product of a point and a factor that may be a number or a list is typed
+  with both arms.** `(cos a, sin a)·u` with `u: number | list<number>` was typed
+  as a list of points only; it is now
+  `list<tuple<number, number>> | tuple<number, number>`, because when `u` is a
+  number the value is a single point. A product of a tuple and a scalar that is
+  typed from argument types alone now widens the tuple's components by the
+  scalar, as the expression does: with `f := P ↦ P·Norm(P)` and
+  `g := a ↦ f((a, a))`, `g(1)` was typed `tuple<integer, integer>` although its
+  value is `(√2, √2)`; it is now typed with real components.
+
+- **A point divided by a list of numbers is a list of points.** `(1, 2)/[1, 2]`
+  is `[(1, 2), (1/2, 1)]`, the same as `(1, 2)·[1, 1/2]`; it stayed unevaluated
+  before, and the compiled JavaScript refused it. `(cos a, sin a)/u` with
+  `u: number | list<number>` is typed as a point or a list of points.
+
+- **A point plus or minus an operand declared `number | list<number>` is
+  rejected when the expression is created**, as `(1, 2) + 3` is. Before, it was
+  accepted and typed as a number, a list or a point, although every value of it
+  was an error. `(1, 2) - [1, 2]` is rejected at creation too, as
+  `(1, 2) + [1, 2]` already was (a difference is a sum with a negated operand,
+  and the check did not look through `Negate`). A sum or difference of a point
+  and a number, and a division by a point, are typed `error` when the type is
+  derived from argument types alone, as for the expression itself.
+
+- **A difference keeps its shape when it is typed from argument types alone or
+  created in structural form.** `Subtract` had no type handler; it now uses the
+  `Add` handler on negated operands, so a point minus a point is a point, a list
+  of points minus a list of points is a list of points, and
+  `list<integer> - integer` is `list<integer>` (it was `number` or
+  `list<number>`).
+
+- **A symbol whose tuple type cannot match a tuple parameter is refused at the
+  call**, as a tuple literal of the same type is.
+  `ce.declare('xs', 'tuple<boolean>')` followed by `g(xs)` with
+  `g: (tuple<number, number>) -> number` was valid, and so was
+  `p ↦ {Boole(¬p[1]); g(p)}`. Both are now an `incompatible-type` error on the
+  argument. Two tuple types are known to share no value when their lengths
+  differ or when two components at the same position share no value (not when a
+  component admits `nothing`, which removes a slot). One result: a code-built
+  `Tuple(x, y)` with a list-typed `x`, passed where `tuple<real, real>` is
+  expected, is refused when it is boxed, not when it is compiled.
+
+- **`D` and `Derivative` no longer run the `evaluate` handler of a lazy operator
+  on made-up operands to find its body.** A lazy operator from a constructor
+  library or from `ce.declare()` could throw, run statements, or loop until the
+  time limit; `Derivative(Loop)` threw "Operation canceled". Such a derivative
+  now stays symbolic. A lazy operator whose `evaluate` handler is a function
+  literal is differentiated from the body of the literal, without evaluating it.
+  `Derivative(If)` stays symbolic instead of giving `(x) ↦ If(x)`.
+
+- **A multi-index `Derivative` of an operator whose `evaluate` handler is a
+  function literal given as MathJSON no longer reports failed internal
+  assertions.** The literal is canonicalized in its captured scope before its
+  body is differentiated.
+
+- **Numeric integrals whose integrand decreases slowly near 0 have the correct
+  value.** For integrals such as `\int_0^{1/2} \frac{dt}{t(-\ln t)^{1.1}}`, most
+  of the value comes from points closer to `0` than a floating-point number can
+  be. The result was a wrong value with an error bar that did not cover it:
+  `5.19 ± 0.79` for `10.37`, and `6.9 ± 1.3` for
+  `\int_0^{1/2} \frac{-t^{0.0001}}{t\ln t}\,dt = 9.0`. The part that cannot be
+  sampled is now computed from a model fitted to the sampled part (`shellTail`,
+  `numerics/endpoint-quadrature.ts`): a pure power of the depth, or a power with
+  an exponential or a shifted-scale factor. The results are `10.37329 ± 0.00007`
+  and `8.99971 ± 0.00005`. When no model fits closely enough, the error bar
+  includes an estimate of the missing part instead of leaving it out, and a
+  corner whose extrapolation is rejected adds its correction to the reported
+  error. Where the sampled part cannot decide, the error bar is wide rather than
+  wrong: when a power fits the shells, a model with a slow exponential decrease
+  is fitted too and the difference of the two tails is part of the error unless
+  the rate is ruled out (`\int_0^{1/2} t^{10^{-8}}/(t(-\ln t)^{1.1})\,dt = 8.68`
+  was `10.3730 ± 0.0005`, now `5.2 ± 7.0`); when no model fits, the error
+  includes twice the largest power tail fitted on the last half, the last
+  quarter or the quarter before it
+  (`\int_0^{0.01} dx/(x(-\ln x)\ln^2(-\ln x)) = 0.655` was `0.5028 ± 0.144`, now
+  `0.5028 ± 0.223`); next to a nonzero endpoint, where fewer than 64 accurate
+  shells exist, the error includes the missing power tail
+  (`\int_{1/2}^1 (-\ln(1-t))^{-1.1}/(1-t)\,dt = 10.37` was `3.40 ± 1.02`, now
+  `3.40 ± 21.6`); the uncertainties of two singular corners are added, not
+  maximized; and a model tail whose error is at least the tail itself is not
+  accepted (the shells of the divergent `\int dt/(t(-\ln t))`).
+
+- **A parameter that only index reads typed can be passed to an overloaded
+  function whose arm takes a longer tuple.** With `g` overloaded on
+  `tuple<number, number>` and `string`, `p ↦ { p[1] + 1; g(p) }` removed the
+  tuple arm before validation because `p` was `tuple<number>` at that point; the
+  arm now survives filtering and the parameter takes its tuple, as for a
+  function with one signature.
+
+- **The type that a call gets from its argument types alone does not refuse
+  point arithmetic when a user definition replaces the operator.** With `Divide`
+  redefined as `(any, any) -> integer`, deriving `p ↦ Divide(1, p)` for a tuple
+  argument gave `error` while the call evaluates to the user's value. The
+  refusal now applies only when the resolved operator keeps the library
+  semantics, the test the boxing route uses.
 
 ## 0.154.0 _2026-10-15_
 
@@ -26817,13 +27179,13 @@ corpus went from 85% to ~96%, and the one crash it exposed is fixed. See
 - **3×3 `Eigenvalues`
 
   returned wrong values — fixed.** The analytic solver used
-                                  a sign-flipped term in its depressed cubic, mirroring every eigenvalue about
-                                  $\operatorname{tr}/3$: e.g. $[[5,-3,-7],[-2,1,2],[2,-3,-4]]$ returned
-                                  $\{\tfrac{10}{3}, -\tfrac53, \tfrac13\}$ instead of $\{1, -2, 3\}$. (Spectra
-                                  symmetric about their mean — like $\{1,2,3\}$ — were unaffected, which is how
-                                  it escaped notice.) Additionally, a complex-conjugate eigenvalue pair was
-                                  returned as its real part twice ($\{2, \pm i\}$ came back $\{2, 0, 0\}$);
-                                  complex eigenvalues are now returned as complex numbers.
+                                    a sign-flipped term in its depressed cubic, mirroring every eigenvalue about
+                                    $\operatorname{tr}/3$: e.g. $[[5,-3,-7],[-2,1,2],[2,-3,-4]]$ returned
+                                    $\{\tfrac{10}{3}, -\tfrac53, \tfrac13\}$ instead of $\{1, -2, 3\}$. (Spectra
+                                    symmetric about their mean — like $\{1,2,3\}$ — were unaffected, which is how
+                                    it escaped notice.) Additionally, a complex-conjugate eigenvalue pair was
+                                    returned as its real part twice ($\{2, \pm i\}$ came back $\{2, 0, 0\}$);
+                                    complex eigenvalues are now returned as complex numbers.
 
 ### Rules and Pattern Matching
 

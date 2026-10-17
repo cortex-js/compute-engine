@@ -60,6 +60,7 @@ import {
 } from './named-arguments.js';
 import { qualifiedMemberRequirementShape } from '../engine-protocols.js';
 import { resolveFieldCallee } from './field-callee.js';
+import { constantFieldLiteral } from './constant-field.js';
 import { recordCanonicalFailure } from './canonical-failure.js';
 import { multiClauseState } from '../multi-clause.js';
 
@@ -141,6 +142,7 @@ import { symbolAtSite, replaceAtSite } from './binding-sites.js';
 import { beginDormantPop, endDormantPop } from './binding-tombstone.js';
 import { markBinderVariable, rebindToBindings } from './binders.js';
 import { namedLiteralSignatureType } from './effects-inference.js';
+import { isIndexReadTuple } from './index-read-tuple.js';
 import {
   isProvisionalCaptureOpen,
   noteProvisionalCall,
@@ -534,13 +536,22 @@ function boxFunctionInternal(
     // Rational (as Divide)
     //
     if ((name === 'Divide' || name === 'Rational') && ops.length === 2) {
-      const n = asBigint(ops[0]);
+      // A float operand is not folded to a rational, also when its value is
+      // an integer: `asBigint` reads the float `2.0` as the integer 2, and
+      // `Divide(1, 2.0)` was the exact `1/2`. A float operand makes the
+      // quotient a float, so such a quotient is left to `canonicalDivide()`,
+      // as it is on the boxing route of a MathJSON `{num: "2.0"}`.
+      const n = ops.some(
+        (op) => op instanceof _BoxedExpression && isNumber(op) && !op.isExact
+      )
+        ? null
+        : asBigint(ops[0]);
       if (n !== null) {
         const d = asBigint(ops[1]);
         if (d !== null) {
           // Handle division by zero: a/0 = ~∞ (a pole), and 0/0 is the
-          // indeterminate form: `Indeterminate`, or `NaN` when an operand is
-          // a float (`asBigint` reads the float `0.0` as the integer 0).
+          // indeterminate form `Indeterminate`. A float operand (`0.0`) does
+          // not reach this fold (see above).
           if (d === 0n)
             return n === 0n
               ? indeterminateFormAnswer(ce, [
@@ -2134,6 +2145,10 @@ function annotatedLiteral(x: Expression | undefined): Expression | undefined {
  * An operand that the application maps over (a list, or a tuple at a
  * parameter declared as a scalar) is not refused here. The answer is
  * `undefined` when there is nothing to check or nothing changed.
+ *
+ * A callee that reads a `Function` literal from a field of a constant
+ * dictionary (`lib.T("abc")`) is checked against that literal, as the call
+ * is the literal applied (`constantFieldLiteral`).
  */
 export function validatedLiteralApplicationOperands(
   ce: ComputeEngine,
@@ -2141,7 +2156,7 @@ export function validatedLiteralApplicationOperands(
   ops: ReadonlyArray<Expression>
 ): ReadonlyArray<Expression> | undefined {
   if (!ce.strict) return undefined;
-  const annotated = annotatedLiteral(literal);
+  const annotated = annotatedLiteral(constantFieldLiteral(literal) ?? literal);
   if (annotated === undefined || !annotated.isCanonical) return undefined;
   if (!ops.every((x) => x.isCanonical)) return undefined;
   const checkedType = pinnedValidationSignature(
@@ -2650,6 +2665,10 @@ function makeCanonicalFunctionCore(
   // with the protocol requirement. `resolveFieldCallee` (field-callee.ts)
   // states the rules in full.
   let fieldSignature: Type | undefined = undefined;
+  // The receiver of a `Field` callee whose type was inferred, when its
+  // signature gives the names: the call is matched again after an
+  // assignment to the receiver (see below).
+  let fieldReceiver: BoxedValueDefinition | undefined = undefined;
   if (name === 'Apply') {
     const field = resolveFieldCallee(
       ce,
@@ -2660,11 +2679,15 @@ function makeCanonicalFunctionCore(
     if (field?.kind === 'operator')
       return ce.function(field.name, ops.slice(1), { metadata, scope });
     if (field?.kind === 'literal') ops = [field.literal, ...ops.slice(1)];
-    else if (field?.kind === 'signature') fieldSignature = field.signature;
+    else if (field?.kind === 'signature') {
+      fieldSignature = field.signature;
+      fieldReceiver = field.receiver;
+    }
   }
 
   // The name and the operand of each written argument of a named call
-  // through a variable with an inferred type (see below).
+  // through a variable with an inferred type (see below), or through a
+  // `Field` whose receiver has an inferred type.
   let writtenArguments: WrittenArgumentSlot[] | undefined;
 
   const qualified = !named
@@ -2677,17 +2700,30 @@ function makeCanonicalFunctionCore(
   if (qualified !== undefined) {
     // A protocol requirement first; else, for a `Field` callee whose
     // receiver's record type gives the field a signature, that signature.
+    // A base that is an already-boxed symbol bound to a CONSTANT is read
+    // through that binding, as the `Field` reads it when the call is
+    // evaluated, not through its name in this scope. A symbol bound to a
+    // variable or to a binding with no value (a protocol name has none)
+    // reads the innermost binding of its name when it is evaluated, so the
+    // name is looked up (`receiverDefinition`, field-callee.ts).
+    const boundBase =
+      'receiver' in qualified &&
+      qualified.receiver instanceof _BoxedExpression &&
+      isSymbol(qualified.receiver) &&
+      qualified.receiver.valueDefinition?.isConstant === true
+        ? qualified.receiver.valueDefinition
+        : undefined;
+    const protocolRequirement = qualifiedMemberRequirementShape(
+      ce,
+      qualified.base,
+      qualified.member,
+      // Only the `Field` route has a SYMBOL base a value binding could
+      // shadow; the `ProtocolMember` operands name the protocol as data.
+      name === 'Apply' ? (scope ?? ce.context.lexicalScope) : undefined,
+      boundBase === undefined ? undefined : boundBase.value !== undefined
+    );
     const requirement: Type | null =
-      qualifiedMemberRequirementShape(
-        ce,
-        qualified.base,
-        qualified.member,
-        // Only the `Field` route has a SYMBOL base a value binding could
-        // shadow; the `ProtocolMember` operands name the protocol as data.
-        name === 'Apply' ? (scope ?? ce.context.lexicalScope) : undefined
-      ) ??
-      fieldSignature ??
-      null;
+      protocolRequirement ?? fieldSignature ?? null;
     if (requirement !== null) {
       // The operands before the argument list: the callee for `Apply`, the
       // protocol and member names for `ProtocolMember`.
@@ -2705,8 +2741,26 @@ function makeCanonicalFunctionCore(
           ),
           { metadata, canonical: true }
         );
-      if (normalized.kind === 'ok')
+      if (normalized.kind === 'ok') {
         ops = [...ops.slice(0, prefix), ...normalized.ops];
+        // The names were matched against the INFERRED type of the receiver
+        // of a `Field` callee, which an assignment can change. Keep the
+        // names, as for a named call through a variable with an inferred
+        // type (below), so that the call is matched again against the
+        // record that the receiver holds when the call is evaluated. The
+        // callee is the first operand, kept in place without a name.
+        if (
+          protocolRequirement === null &&
+          fieldReceiver !== undefined &&
+          normalized.permutation !== undefined
+        )
+          writtenArguments = [
+            { name: undefined, slot: 0 },
+            ...writtenArgumentSlots(split, normalized.permutation).map(
+              ({ name, slot }) => ({ name, slot: slot < 0 ? slot : slot + 1 })
+            ),
+          ];
+      }
       // `unavailable` leaves `ops` alone: the carriers decline as before.
     }
   } else if (named && name === 'Apply') {
@@ -2858,7 +2912,18 @@ function makeCanonicalFunctionCore(
     // The literal is read under the name it is held by, so that a collection
     // passed in a self-call is evidence here as on the operator path
     // (`namedLiteralSignatureType`).
-    if (wildcardCallee) {
+    //
+    // A variable whose function type was INFERRED from the literal it holds
+    // (the Epsil `let k = p => p[1] + p[2]`) is read the same way. Its type
+    // is a guess, like the signature of a user function, so the call takes
+    // the same evidence as on the operator path: `k(ws)` types `ws` as it
+    // does for `function k(p) { … }` and for `ce.assign('k', …)`. The
+    // literal's own type is read, not the variable's type, because the
+    // parameter slots of the literal's type carry the origin of an inferred
+    // tuple (`isIndexReadTuple()`).
+    const inferredFunctionValue =
+      def.value.inferredType && def.value.type.matches('function');
+    if (wildcardCallee || inferredFunctionValue) {
       const assigned = def.value.value;
       const assignedType =
         assigned === undefined
@@ -2868,10 +2933,7 @@ function makeCanonicalFunctionCore(
         narrowArgsFromInferredSignature(assignedType, boxedOps);
     }
 
-    if (
-      wildcardCallee ||
-      (def.value.inferredType && def.value.type.matches('function'))
-    ) {
+    if (wildcardCallee || inferredFunctionValue) {
       if (isProvisionalCaptureOpen() && hasNarrowableArg(boxedOps))
         noteProvisionalCall(name);
     }
@@ -3171,6 +3233,22 @@ function makeCanonicalFunctionCore(
       checked.ops?.length === ops.length ? writtenArguments : undefined,
       checked.ops
     );
+  // A named call through a `Field` whose receiver has an inferred type
+  // records the receiver's definition, with the names as written: after an
+  // assignment to the receiver, the call is boxed again, and the names are
+  // matched against the signature of the record that it holds then
+  // (`BoxedFunction._reboxedForCallee()`). `Apply` has a canonical
+  // handler, so the call is boxed again from its own operands: the names
+  // index them, so they are kept only when no operand was removed (an
+  // argument `Nothing` is erased).
+  if (
+    fieldReceiver !== undefined &&
+    writtenArguments !== undefined &&
+    result instanceof BoxedFunction &&
+    result.operator === name &&
+    result.nops === ops.length
+  )
+    result._stampCallee(writtenArguments, undefined, fieldReceiver);
   return result;
 }
 
@@ -3274,9 +3352,20 @@ function narrowArgsFromInferredSignature(
  * element type is the union of the known components: `k(zs, 1)` types `zs`
  * as `indexed_collection<number>`. Another type is returned as it is. A
  * slot that the author annotated is a contract, and is not read here.
+ *
+ * Only a tuple that index reads made is changed (`isIndexReadTuple()`). A
+ * tuple that a call in the body requires is a contract: with
+ * `h := p ↦ g(p)` and `g: (tuple<number, number>) -> number`, `h(zs)` types
+ * `zs` as `tuple<number, number>`. When the body has both a call and index
+ * reads (`p ↦ g(p) + p[1]`), the call decides, whatever the order of the
+ * uses: an argument that is not that tuple is refused by `g` anyway. This
+ * includes a call that requires a longer tuple than the earlier reads made
+ * (`p ↦ {p[1] + 1; g(p)}`): index reads do not prove a length, so the
+ * parameter takes the tuple of the call (`indexReadTupleExtension()`).
  */
 function oneElementTypeOf(t: Type): Type {
-  if (typeof t !== 'object' || t.kind !== 'tuple') return t;
+  if (typeof t !== 'object' || t.kind !== 'tuple' || !isIndexReadTuple(t))
+    return t;
   if (t.elements.some((x) => x.name !== undefined)) return t;
   const known = t.elements.map((x) => x.type).filter((x) => x !== 'unknown');
   return {

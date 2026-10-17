@@ -4,6 +4,7 @@ import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
 import { staticDiagnostics } from '../../src/epsil/static-diagnostics';
 import { checkSource } from '../../src/cli/check';
+import { multiClauseState } from '../../src/compute-engine/multi-clause';
 
 //
 // `executeEpsil` parses a program and
@@ -1858,6 +1859,131 @@ describe('EPSIL EXECUTE — named calls to `:=`-assigned callees (static tier)',
     expect(ce.lookupDefinition('h')!.operator!.signature.toString()).toBe(
       '(x: integer) -> integer'
     );
+  });
+
+  test('an assignment over a function of an earlier program follows the reassignment rules', () => {
+    // The run time changes the definition that the earlier program made, so
+    // the static tier must see the change. It makes it on a binding of its
+    // own: the definition of the earlier program stays as it is.
+    const error = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const check = (earlier: string, source: string) => {
+        const ce = new ComputeEngine();
+        executeEpsil(ce, earlier);
+        const binding = ce.lookupDefinition('h')!;
+        const half = binding.operator;
+        const [ast] = parseEpsil(source);
+        const diagnostics = staticDiagnostics(ce, ast!, source).map((d) => [
+          d.message[0],
+          d.message[3],
+        ]);
+        expect(ce.lookupDefinition('h')).toBe(binding);
+        expect(ce.lookupDefinition('h')!.operator).toBe(half);
+        expect(half!.signature.toString()).toBe('(x: integer) -> integer');
+        return { diagnostics, result: executeEpsil(ce, source) };
+      };
+
+      // An unannotated literal replaces the definition: no parameter names.
+      const bare = check(
+        'function h(x: integer) { x }',
+        'h := (u) => "s"\nh(x: 3)'
+      );
+      expect(bare.diagnostics).toEqual(NAME_UNKNOWN);
+      expect(codes(bare.result)).toEqual(NAME_UNKNOWN);
+      expect(bare.result.value.toString()).toBe(
+        'Error(ErrorCode("argument-name-unknown", "x", "this function declares no parameter names"))'
+      );
+
+      // A compatible annotated literal gives its names.
+      const head = 'h := (u: integer) => u + 1\n';
+      const latest = check('function h(x: integer) { x }', head + 'h(u: 3)');
+      expect(latest.diagnostics).toEqual([]);
+      expect(latest.result.diagnostics).toEqual([]);
+      expect(latest.result.value.re).toBe(4);
+      const old = check('function h(x: integer) { x }', head + 'h(x: 3)');
+      expect(old.diagnostics).toEqual(NAME_UNKNOWN);
+      expect(codes(old.result)).toEqual(NAME_UNKNOWN);
+      expect(old.result.value.errors.length).toBeGreaterThan(0);
+
+      expect(error).not.toHaveBeenCalled();
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      error.mockRestore();
+      warn.mockRestore();
+    }
+  });
+
+  test('a refused assignment over a function of an earlier program leaves its definition', () => {
+    // The run time refuses `h := (u: string) => u`, because the definition
+    // that the earlier program made takes an integer, and the `function`
+    // statement then adds a clause to that definition. The static tier must
+    // not change the definition of the earlier program: not on the refused
+    // assignment, and not on the `function` statement that follows it.
+    const error = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const ce = new ComputeEngine();
+      executeEpsil(ce, 'function h(x: integer) { x }');
+      const binding = ce.lookupDefinition('h')!;
+      const half = binding.operator!;
+      const source =
+        'h := (u: string) => u\nfunction h(a: string) { a }\nh(a: "s")';
+      const [ast] = parseEpsil(source);
+      const diagnostics = staticDiagnostics(ce, ast!, source);
+      expect(diagnostics).toEqual([]);
+      expect(ce.lookupDefinition('h')).toBe(binding);
+      expect(binding.operator).toBe(half);
+      expect(half.signature.toString()).toBe('(x: integer) -> integer');
+      expect(multiClauseState(binding)).toBeUndefined();
+
+      const result = executeEpsil(ce, source);
+      expect(codes(result)).toEqual([['runtime-error', 'incompatible-type']]);
+      expect(result.value.string).toBe('s');
+
+      expect(error).not.toHaveBeenCalled();
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      error.mockRestore();
+      warn.mockRestore();
+    }
+  });
+
+  test('a `function` statement on a `const` binding leaves the binding', () => {
+    // The run time refuses the `function` statement, because the binding is
+    // a constant, and the binding keeps its literal. The static tier leaves
+    // the binding as it is too, and does not report the refusal: it is a
+    // runtime error, as for an assignment to a constant.
+    const error = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const REFUSED = ['runtime-error', 'invalid-clause-definition'];
+      const head = 'const h = (x: integer) => x\nfunction h(u: string) { u }\n';
+      const first = run(head + 'h(x: 3)');
+      expect(codes(first)).toEqual([REFUSED]);
+      expect(first.value.re).toBe(3);
+      const second = run(head + 'h(u: "a")');
+      expect(codes(second)).toEqual([...NAME_UNKNOWN, REFUSED]);
+      expect(second.value.errors.length).toBeGreaterThan(0);
+
+      // The second `function` statement is refused for the same reason. It
+      // is not a redefinition of the first one, which was never installed.
+      const twice = run(head + 'function h(u: string) { u }\nh(x: 3)');
+      expect(codes(twice)).toEqual([REFUSED, REFUSED]);
+      expect(twice.value.re).toBe(3);
+
+      // A literal with no annotation pins no signature. The binding stays
+      // too, so the positional call is valid.
+      const bare = run('const h = (x) => x\nfunction h(u: string) { u }\nh(3)');
+      expect(codes(bare)).toEqual([REFUSED]);
+      expect(bare.value.re).toBe(3);
+
+      expect(error).not.toHaveBeenCalled();
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      error.mockRestore();
+      warn.mockRestore();
+    }
   });
 
   test('reassignment that annotates a bare parameter: the annotation replaces the inferred type', () => {

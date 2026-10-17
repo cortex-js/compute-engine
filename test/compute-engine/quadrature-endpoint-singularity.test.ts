@@ -2,7 +2,10 @@ import { ComputeEngine } from '../../src/compute-engine';
 import type { Expression } from '../../src/compute-engine/global-types';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { adaptiveQuadrature } from '../../src/compute-engine/numerics/gauss-kronrod';
-import { resolveSingularEndpoints } from '../../src/compute-engine/numerics/endpoint-quadrature';
+import {
+  extrapolateCorner,
+  resolveSingularEndpoints,
+} from '../../src/compute-engine/numerics/endpoint-quadrature';
 import { integrateSemiInfiniteOscillatory } from '../../src/compute-engine/numerics/oscillatory-quadrature';
 
 // A slowly integrable singularity at an endpoint. A large part of the
@@ -85,6 +88,63 @@ const cases: Case[] = [
     upper: 0.5,
     exact: 1 / (3 * Math.LN2 ** 3),
     accuracy: 1e-8,
+  },
+  {
+    // The shells decrease as `1/k^1.1`, too slowly for the ε-algorithm and
+    // the Levin u-transform, and more than half of the integral is in the
+    // part of the corner that no shell samples. The tail past the last
+    // shell is from a model of the shells (`shellTail`). The result was
+    // `5.19 ± 0.79`. The interpreted integrand has a smaller budget of
+    // panels, fewer shells, and a less accurate tail.
+    name: '∫₀^½ 1/(x·(−ln x)^1.1) dx = (ln 2)^(−0.1)/0.1',
+    fn: (x) => (-Math.log(x)) ** -1.1 / x,
+    body: ['Divide', 1, ['Multiply', x, ['Power', ['Negate', ['Ln', x]], 1.1]]],
+    lower: 0,
+    upper: 0.5,
+    exact: Math.LN2 ** -0.1 / 0.1,
+    accuracy: 1e-3,
+  },
+  {
+    // The result was `4.04 ± 0.38`.
+    name: '∫₀^½ 1/(x·(−ln x)^1.2) dx = (ln 2)^(−0.2)/0.2',
+    fn: (x) => (-Math.log(x)) ** -1.2 / x,
+    body: ['Divide', 1, ['Multiply', x, ['Power', ['Negate', ['Ln', x]], 1.2]]],
+    lower: 0,
+    upper: 0.5,
+    exact: Math.LN2 ** -0.2 / 0.2,
+    accuracy: 5e-5,
+  },
+  {
+    // The result was `6.0 ± 2.0`.
+    name: '∫₀^½ 1/(x·(−ln x)^1.05) dx = (ln 2)^(−0.05)/0.05',
+    fn: (x) => (-Math.log(x)) ** -1.05 / x,
+    body: [
+      'Divide',
+      1,
+      ['Multiply', x, ['Power', ['Negate', ['Ln', x]], 1.05]],
+    ],
+    lower: 0,
+    upper: 0.5,
+    exact: Math.LN2 ** -0.05 / 0.05,
+    accuracy: 5e-3,
+  },
+  {
+    // With `u = −ln x`, the integral is `∫_(ln 2)^∞ e^(−a·u)/u du =
+    // E₁(a·ln 2)` for `a = 0.0001`, `8.9997069411733` (series of `E₁`, and
+    // an independent quadrature). The shells are about `e^(−a·k·ln 2)/k`:
+    // not a power of `k`, so the model of the shells has a rate. The result
+    // was `6.9 ± 1.3`.
+    name: '∫₀^½ −x^0.0001/(x·ln x) dx = E₁(0.0001·ln 2)',
+    fn: (x) => -(x ** 0.0001) / (x * Math.log(x)),
+    body: [
+      'Divide',
+      ['Negate', ['Power', x, 0.0001]],
+      ['Multiply', x, ['Ln', x]],
+    ],
+    lower: 0,
+    upper: 0.5,
+    exact: 8.999706941173255,
+    accuracy: 1e-3,
   },
   {
     // The shells of the compiled quadrature (1500 panels) read as divergent
@@ -1254,13 +1314,18 @@ describe('a singular corner that is not resolved', () => {
   test('the quadrature result is kept, not replaced by Monte Carlo', () => {
     // ∫₀^0.01 dx/(x·(−ln x)·ln²(−ln x)) = 1/ln(ln 100) = 0.6548…. The shells
     // decrease too slowly for an extrapolation to be accepted. The
-    // quadrature gives 0.5028 ± 0.0176, and Monte Carlo gave
-    // 0.3220 ± 0.0063 (52 standard errors from the integral) in 2.4 s.
+    // quadrature gives 0.5028 ± 0.223 (the error includes the missing
+    // 0.152, from the tail of a power fitted to the shells; it was
+    // 0.5028 ± 0.144), and Monte Carlo gave 0.3220 ± 0.0063 (52 standard
+    // errors from the integral) in 2.4 s.
     const f = (x: number) =>
       1 / (x * -Math.log(x) * Math.log(-Math.log(x)) ** 2);
     const q = adaptiveQuadrature(f, 0, 0.01, { singularEndpoints: true });
     expect(q.converged).toBe(false);
     expect(q.singularCorner).toBe(true);
+    expect(
+      Math.abs(q.estimate - 1 / Math.log(Math.log(100)))
+    ).toBeLessThanOrEqual(q.error);
     const r = ce
       .parse('\\int_0^{0.01} \\frac{1}{x(-\\ln x)(\\ln(-\\ln x))^2} dx')
       .N();
@@ -1316,5 +1381,129 @@ describe('a singular corner that is not resolved', () => {
     );
     expect(p.converged).toBe(true);
     expect(Math.abs(p.estimate - Math.sin(1))).toBeLessThanOrEqual(1e-14);
+  });
+});
+
+describe('shells that decrease as a power of the depth with an exponent below 1.5', () => {
+  // The shells next to 0 are about `k^(−p)` at depth `k`. The Levin
+  // u-transform needs `p ≥ 1.5` (`LEVIN_MIN_DECAY`), so these tails were
+  // not extrapolated, and the reported error did not include them: the
+  // results were `5.19 ± 0.79`, `4.04 ± 0.38`, `6.0 ± 2.0` and `6.9 ± 1.3`.
+  test.each([
+    ['\\int_0^{1/2} \\frac{dt}{t(-\\ln t)^{1.1}}', Math.LN2 ** -0.1 / 0.1],
+    ['\\int_0^{1/2} \\frac{dt}{t(-\\ln t)^{1.2}}', Math.LN2 ** -0.2 / 0.2],
+    ['\\int_0^{1/2} \\frac{dt}{t(-\\ln t)^{1.05}}', Math.LN2 ** -0.05 / 0.05],
+    // `E₁(0.0001·ln 2)`.
+    ['\\int_0^{1/2} \\frac{-t^{0.0001}}{t\\ln t}\\,dt', 8.999706941173255],
+    // A control: the Levin u-transform finds this one.
+    ['\\int_0^{1/2} \\frac{dt}{t(-\\ln t)^{2}}', 1 / Math.LN2],
+  ])('%s', (latex, exact) => {
+    const r = ce.parse(latex).N();
+    expect(r.operator).toBe('Measurement');
+    const [v, e] = r.ops!;
+    expect(Math.abs(v.re - exact)).toBeLessThanOrEqual(e.re);
+    expect(e.re).toBeLessThanOrEqual(1e-3 * exact);
+  });
+
+  test('a model whose tail is not accepted widens the error', () => {
+    // `∫₀^½ dt/(t·(ln 1000 − ln t)^1.1) = (ln 2000)^(−0.1)/0.1`. The tail
+    // of the model of the shells has an error above the error accepted for
+    // an extrapolated result, so the Gauss–Kronrod result is kept, and its
+    // error must include the missing tail. It was `2.99 ± 0.76`.
+    const exact = Math.log(2000) ** -0.1 / 0.1;
+    const r = adaptiveQuadrature(
+      (t) => (Math.log(1000) - Math.log(t)) ** -1.1 / t,
+      0,
+      0.5,
+      { singularEndpoints: true }
+    );
+    expect(r.divergent).toBe(false);
+    expect(Math.abs(r.estimate - exact)).toBeLessThanOrEqual(r.error);
+  });
+
+  test('shells that no model fits widen the error by the tail', () => {
+    // `∫₀^½ ((−ln t)^(−1.1) + (−ln t)^(−1.6))/t dt = (ln 2)^(−0.1)/0.1 +
+    // (ln 2)^(−0.6)/0.6`. No model of `shellTail` fits the shells of a sum
+    // of two powers, and the error did not include the missing tail: the
+    // result was `7.24 ± 0.39`.
+    const exact = Math.LN2 ** -0.1 / 0.1 + Math.LN2 ** -0.6 / 0.6;
+    const r = adaptiveQuadrature(
+      (t) => ((-Math.log(t)) ** -1.1 + (-Math.log(t)) ** -1.6) / t,
+      0,
+      0.5,
+      { singularEndpoints: true }
+    );
+    expect(r.divergent).toBe(false);
+    expect(Math.abs(r.estimate - exact)).toBeLessThanOrEqual(r.error);
+  });
+
+  test('a slow exponential decrease that the power fits is in the error', () => {
+    // `∫₀^½ t^(10⁻⁸)/(t·(−ln t)^1.1) dt`. With `u = −ln t`, it is
+    // `∫_(ln 2)^∞ e^(−a·u)·u^(−1.1) du` for `a = 10⁻⁸`, `8.6796499739674`
+    // (Simpson sum after `u = ln 2·e^w`, checked against
+    // `(ln 2)^(−0.1)/0.1` minus the reduction `a^0.1·∫ (1 − e^(−v))·v^(−1.1)
+    // dv`). The power fits the shells, but the factor `t^(10⁻⁸)` reduces the
+    // tail past the last shell from `5.18` to `3.49`. The result was
+    // `10.3730 ± 0.0005`.
+    const r = adaptiveQuadrature(
+      (t) => (t ** 1e-8 * (-Math.log(t)) ** -1.1) / t,
+      0,
+      0.5,
+      { singularEndpoints: true }
+    );
+    expect(r.divergent).toBe(false);
+    expect(Math.abs(r.estimate - 8.6796499739674)).toBeLessThanOrEqual(r.error);
+  });
+
+  test.each([
+    // The corner at 1 has fewer than 30 accurate shells, too few to accept
+    // the tail of a model, but the tail of a power fitted to them is in the
+    // error. The results were `3.396 ± 1.019` and `7.011 ± 2.966`.
+    [
+      '∫_(1/2)^1 (−ln(1 − t))^(−1.1)/(1 − t) dt',
+      (t: number) => (-Math.log(1 - t)) ** -1.1 / (1 - t),
+      0.5,
+      Math.LN2 ** -0.1 / 0.1,
+    ],
+    [
+      '∫₀¹ g(t) + g(1 − t) dt, g(t) = (−ln(t/2))^(−1.1)/t',
+      (t: number) =>
+        (-Math.log(t / 2)) ** -1.1 / t +
+        (-Math.log((1 - t) / 2)) ** -1.1 / (1 - t),
+      0,
+      (2 * Math.LN2 ** -0.1) / 0.1,
+    ],
+    // Two singular corners: the error includes the corrections of both. It
+    // was `6.608 ± 5.182` (the larger correction only).
+    [
+      '∫₀¹ (−ln(t/2))^(−1.1)/t + (−ln((1 − t)/2))^(−2)/(1 − t) dt',
+      (t: number) =>
+        (-Math.log(t / 2)) ** -1.1 / t +
+        (-Math.log((1 - t) / 2)) ** -2 / (1 - t),
+      0,
+      Math.LN2 ** -0.1 / 0.1 + 1 / Math.LN2,
+    ],
+  ])('%s: the error covers the missing tails', (_name, f, lower, exact) => {
+    const r = adaptiveQuadrature(f, lower, 1, { singularEndpoints: true });
+    expect(r.divergent).toBe(false);
+    expect(Math.abs(r.estimate - exact)).toBeLessThanOrEqual(r.error);
+  });
+
+  test('the shells of a divergent integral have no accepted tail', () => {
+    // The shells of `∫₀^½ dt/(t·(−ln t))` are `ln((k + 2)/(k + 1))`. A power
+    // fits them with an exponent a little below `−1`, and its tail is finite
+    // and large: the corner was `2.96e6 ± 1.54e7`, with `ok: true`.
+    const shells = Array.from({ length: 1000 }, (_, k) =>
+      Math.log((k + 2) / (k + 1))
+    );
+    const x = extrapolateCorner({
+      shells,
+      shellErrors: shells.map((v) => v * 1e-15),
+      value: shells.reduce((a, b) => a + b, 0),
+      error: 0,
+      width: 0.5,
+      endpoint: 0,
+    });
+    expect(x.ok).toBe(false);
   });
 });

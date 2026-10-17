@@ -1,5 +1,8 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { isSubtype } from '../../src/common/type/subtype';
+import { deriveApplicationType } from '../../src/compute-engine/boxed-expression/derive-application-type';
+import { describe as describeOperand } from '../../src/compute-engine/boxed-expression/operand-descriptor';
+import { typeToString } from '../../src/common/type/serialize';
 
 /**
  * Regression tests for the type-system P0 sequence SYM P0-9 … P0-16
@@ -84,6 +87,183 @@ describe('SYM P0-11 — Power/Root do not claim closure over negative exponents'
     const ce = new ComputeEngine();
     expect(ce.expr(['Power', 2, -2]).type.matches('rational')).toBe(true);
     expect(ce.expr(['Power', 2, -2]).type.matches('integer')).toBe(false);
+  });
+});
+
+// A float operand makes a float result. The type of a float is its value
+// (`8.0` is typed `8`, an `integer`; `0.25` is typed `0.25`, which the lattice
+// does not class as `rational`), so the type of a power over a float literal
+// may claim `integer` when the result is an integer, but never `rational`.
+describe('Power over a float literal claims the tier of its float value', () => {
+  const ce = new ComputeEngine();
+  ce.declare('k', 'integer<1..3>');
+
+  // Each row: the input, the type of the power, and the evaluated value.
+  test.each([
+    ['(-8)^{2.0}', 'integer<64..64>', { num: '64.0' }],
+    ['2^{3.0}', 'integer<8..8>', { num: '8.0' }],
+    ['2.0^3', 'integer<8..8>', { num: '8.0' }],
+    ['4^{0.5}', 'real<0<..>', { num: '2.0' }],
+    ['2^{-2.0}', 'real<0.25..0.25>', 0.25],
+    ['2.0^{-2}', 'real<0.25..0.25>', 0.25],
+    ['(\\frac12)^{3.0}', 'real<0.125..0.125>', 0.125],
+    ['(-8)^{1/3}', 'real', -2],
+    ['\\sqrt{4.0}', 'real', { num: '2.0' }],
+  ])('%s', (latex, type, value) => {
+    const e = ce.parse(latex);
+    const v = e.evaluate();
+    expect(e.type.toString()).toBe(type);
+    expect(v.json).toEqual(value);
+    // The claimed type admits the value: the value's own type is a subtype.
+    expect(v.type.matches(e.type)).toBe(true);
+  });
+
+  it('a float exponent does not make the quotient tier rational', () => {
+    // `3^(−1.0)` evaluates to the float `0.333…`, not the exact `1/3`.
+    const e = ce.box(['Power', 3, { num: '-1.0' }]);
+    expect(e.type.toString()).toBe('real<0.3333..0.3334>');
+    expect(e.type.matches('rational')).toBe(false);
+    expect(e.evaluate().type.matches('rational')).toBe(false);
+  });
+
+  it('a ranged integer base with a float exponent', () => {
+    // An integer-valued float exponent keeps the integer interval: every
+    // value of `k^(2.0)` is an integer-valued float, typed `integer`.
+    expect(ce.box(['Power', 'k', { num: '2.0' }]).type.toString()).toBe(
+      'integer<1..9>'
+    );
+    // A negative float exponent gives a float that need not be an integer,
+    // so the tier is `real`; the exact exponent keeps `rational`.
+    expect(ce.box(['Power', 'k', { num: '-1.0' }]).type.toString()).toBe(
+      'real<0.3333..1>'
+    );
+    expect(ce.box(['Power', 'k', -1]).type.toString()).toBe(
+      'rational<0.3333..1>'
+    );
+  });
+});
+
+// The same rule for the other heads that claim `rational` for exact
+// operands: a float literal operand with an integer value (`4.0`) makes a
+// float result, and a float that is not an integer is `real`.
+describe('Arithmetic over a float literal claims the tier of its float value', () => {
+  const ce = new ComputeEngine();
+  ce.declare('k', 'integer<1..3>');
+  ce.declare('z', 'integer');
+  ce.declare('p', 'tuple<integer, integer>');
+  const third = ['Rational', 1, 3];
+  const f = (num: string) => ({ num });
+
+  // Each row: the input and the type of the expression. A literal type
+  // that no double holds is a compact enclosure rounded to two digits
+  // (`real<1.3..1.4>` for the float 1.333…), which is wider than the
+  // handler's own range, so the check reads the value as a double: the
+  // type of that double must be a subtype of the claimed type.
+  test.each([
+    [['Divide', 6, f('4.0')], 'real<1.5..1.5>'],
+    [['Divide', f('4.0'), 3], 'real<1.333..1.334>'],
+    [['Divide', 'k', f('4.0')], 'real<0.25..0.75>'],
+    [['Divide', f('4.0'), 'k'], 'real<1.333..4>'],
+    [['Divide', 'z', f('4.0')], 'real'],
+    [['Divide', 'p', f('4.0')], 'tuple<real, real>'],
+    [['Multiply', third, f('4.0')], 'real<1.32..1.36>'],
+    [['Multiply', third, f('2.0')], 'real<0.66..0.68>'],
+    [['Add', f('-4.0'), third], 'real<-3.671..-3.659>'],
+    [['Mod', f('5.0'), ['Rational', 3, 2]], 'real'],
+    [['Mod', ['Rational', 7, 2], f('2.0')], 'real'],
+    [['Remainder', f('5.0'), ['Rational', 3, 2]], 'real'],
+    [['Remainder', ['Rational', 7, 2], f('2.0')], 'real'],
+    // A step with an integer value makes a multiple of an integer, and a
+    // float `x` over an exact step rounds to an exact value: rounding keeps
+    // its claims.
+    [['Floor', ['Rational', 7, 2], f('2.0')], 'integer'],
+    [['Floor', f('2.5'), third], 'rational'],
+  ] as const)('%j', (json, type) => {
+    const e = ce.box(json as any);
+    expect(e.type.toString()).toBe(type);
+    const v = e.evaluate();
+    // An expression over an unassigned symbol stays symbolic: no value.
+    if (!v.isNumberLiteral) return;
+    const valueType = v.isExact ? v.type : ce.number(v.re).type;
+    expect(valueType.matches(e.type)).toBe(true);
+  });
+
+  it('a symbolic quotient takes a float value once the symbol is assigned', () => {
+    const ce2 = new ComputeEngine();
+    ce2.declare('p', 'tuple<integer, integer>');
+    ce2.assign('p', ce2.box(['Tuple', 1, 2]));
+    const v = ce2.box(['Divide', 'p', f('4.0')]).evaluate();
+    expect(v.json).toEqual(['Tuple', 0.25, 0.5]);
+    expect(v.type.toString()).toBe('tuple<real, real>');
+  });
+
+  // A `Subtract` that is not canonicalized is typed by its own handler, as
+  // the sum of the minuend and the negated subtrahends: on the derivation
+  // from operand descriptors (`deriveApplicationType`) and for a structural
+  // `Subtract`. The negation of the float `2.0` is a float, so
+  // `1/3 − 2.0` is the float `−1.666…`, typed `real`, not `rational`.
+  test.each([
+    [third, f('2.0')],
+    [f('2.0'), third],
+  ] as const)(
+    'Subtract(%j, %j) on the derivation and structural routes',
+    (a, b) => {
+      const ops = [ce.box(a as any), ce.box(b as any)];
+      const derived = deriveApplicationType(
+        ce,
+        'Subtract',
+        ops.map((x) => describeOperand(x))
+      );
+      const structural = ce.function('Subtract', ops, { form: 'structural' });
+      const v = structural.evaluate();
+      expect(v.isExact).toBe(false);
+      const valueType = ce.number(v.re).type;
+      expect(derived).toBeDefined();
+      expect(valueType.matches(ce.type(typeToString(derived!)))).toBe(true);
+      expect(valueType.matches(structural.type)).toBe(true);
+      expect(structural.type.matches('rational')).toBe(false);
+    }
+  );
+
+  // A tuple literal with a float component divided by an integer: each
+  // component of the quotient is a float, typed `real`. The type of the
+  // tuple (`tuple<integer, integer>`) cannot tell `(2.0, 4.0)` from
+  // `(2, 4)`; its structural view can.
+  test('a shaped quotient of a tuple literal of floats has real components', () => {
+    const num = ce.box(['Tuple', f('2.0'), f('4.0')]);
+    const derived = deriveApplicationType(ce, 'Divide', [
+      describeOperand(num),
+      describeOperand(ce.number(3)),
+    ]);
+    expect(derived && typeToString(derived)).toBe('tuple<real, real>');
+    const structural = ce.function('Divide', [num, ce.number(3)], {
+      form: 'structural',
+    });
+    expect(structural.type.toString()).toBe('tuple<real, real>');
+    const v = structural.evaluate();
+    expect(v.operator).toBe('Tuple');
+    expect(v.ops!.map((x) => x.isExact)).toEqual([false, false]);
+    expect(v.type.matches(structural.type)).toBe(true);
+    // Exact components keep the `rational` tier.
+    expect(
+      ce
+        .function('Divide', [ce.box(['Tuple', 2, 4]), ce.number(3)], {
+          form: 'structural',
+        })
+        .type.toString()
+    ).toBe('tuple<rational, rational>');
+  });
+
+  // Exact operands keep the `rational` tier.
+  test.each([
+    [['Divide', 6, 4], 'rational<1.5..1.5>'],
+    [['Divide', 'k', 4], 'rational<0.25..0.75>'],
+    [['Divide', 'p', 4], 'tuple<rational, rational>'],
+    [['Multiply', third, 4], 'rational<1.3..1.4>'],
+    [['Add', -4, third], 'rational<-3.7..-3.6>'],
+    [['Mod', 5, ['Rational', 3, 2]], 'rational'],
+  ] as const)('exact %j', (json, type) => {
+    expect(ce.box(json as any).type.toString()).toBe(type);
   });
 });
 

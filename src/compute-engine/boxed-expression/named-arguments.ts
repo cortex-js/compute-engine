@@ -258,17 +258,19 @@ function rawStringValue(x: ExpressionInput | undefined): string | undefined {
  * same input spellings as {@link isCarrier}, because it runs before any
  * operand is boxed. Whether `base` actually names a protocol is the
  * registry's question (`qualifiedMemberRequirementShape`,
- * engine-protocols.ts), not this one's. */
+ * engine-protocols.ts), not this one's. `receiver` is the first operand of
+ * the `Field` as written: when it is an already-boxed symbol, its binding is
+ * the one the author supplied, even inside an unboxed `Field`. */
 export function qualifiedFieldParts(
   x: ExpressionInput | undefined
-): { base: string; member: string } | undefined {
+): { base: string; member: string; receiver: ExpressionInput } | undefined {
   if (x === undefined) return undefined;
   const ops = rawOperands(x, 'Field');
   if (ops === undefined || ops.length !== 2) return undefined;
   const base = rawSymbolName(ops[0]);
   const member = rawStringValue(ops[1]);
   if (base === undefined || member === undefined) return undefined;
-  return { base, member };
+  return { base, member, receiver: ops[0] };
 }
 
 /** The `(protocol, member)` names of a raw `ProtocolMember(P, m, …)` operand

@@ -1,9 +1,15 @@
 import { isScratchBinding } from '../scratch-scopes.js';
 import {
+  detachEagerSourceValues,
+  keptEagerSourceValue,
   readSharingEagerSourceValues,
   releaseEagerSourceValues,
+  releaseKeptEagerSourceValues,
+  takeDetachedEagerSourceValue,
   takeEagerSourceValue,
+  type EagerSourceValues,
 } from './eager-source-values.js';
+import { hasAsyncOnlyApplication } from './async-only-descendants.js';
 import {
   ambientChainParent,
   registerScopeActivation,
@@ -48,6 +54,7 @@ import {
   type DescriptorMemo,
   guardedTypeHandlerCall,
 } from './operand-descriptor.js';
+import { constantFieldLiteral } from './constant-field.js';
 import {
   deriveApplicationType,
   installBroadcastLiftHooks,
@@ -256,6 +263,7 @@ import {
   errorOpsWithoutTrace,
   errorValue,
   isCollectionHead,
+  isErrorFramedByNode,
   potentialErrorValue,
   withBroadcastFrame,
   withErrorFrames,
@@ -691,6 +699,12 @@ export class BoxedFunction
    * boxed again from `ops`, so that the new definition checks the operands
    * as written, not the operands that the old definition replaced.
    *
+   * `receiver` is set for a named call `Apply(Field(r, "S"), …)` whose
+   * names were matched against the INFERRED type of the receiver `r`: it is
+   * the value definition of `r`, recorded in place of the definition of the
+   * name of the call (`Apply`). An assignment to `r` can give the field
+   * other parameter names, and the call is then boxed again with its names.
+   *
    * `rechecked` keeps the last new call, with the definition and the counter
    * it was boxed against, so that the call is boxed again only once for
    * each change.
@@ -702,6 +716,7 @@ export class BoxedFunction
         written:
           ReadonlyArray<{ name: string | undefined; slot: number }> | undefined;
         ops?: ReadonlyArray<Expression>;
+        receiver?: { _writeVersion: number };
         rechecked?: {
           half: { _writeVersion: number };
           version: number;
@@ -722,16 +737,21 @@ export class BoxedFunction
    * the type of such a call already follows the installed clause (see
    * `type()`). Boxing it again when its type is read changes the effects
    * derived for the function.
+   *
+   * `receiver` is the definition to record in place of the definition of
+   * the name of the call (see `_calleeStamp`).
    * @internal */
   _stampCallee(
     written?: ReadonlyArray<{ name: string | undefined; slot: number }>,
-    ops?: ReadonlyArray<Expression>
+    ops?: ReadonlyArray<Expression>,
+    receiver?: { _writeVersion: number }
   ): void {
     if (this._calleeStamp !== undefined) return;
     if (this.engine._recursionKnots.has(this._operator)) return;
-    const half = calleeHalf(this._def);
+    const half = receiver ?? calleeHalf(this._def);
     if (half === undefined) return;
     this._calleeStamp = { half, version: half._writeVersion, written };
+    if (receiver !== undefined) this._calleeStamp.receiver = receiver;
     const own = this._ops;
     if (
       ops !== undefined &&
@@ -776,7 +796,7 @@ export class BoxedFunction
   _reboxedForCallee(): Expression | undefined {
     const stamp = this._calleeStamp;
     if (stamp === undefined) return undefined;
-    const half = calleeHalf(this._def);
+    const half = stamp.receiver ?? calleeHalf(this._def);
     if (
       half === undefined ||
       (half === stamp.half && half._writeVersion === stamp.version)
@@ -3099,6 +3119,18 @@ export class BoxedFunction
     // must not strand the count, or the engine would refuse every subsequent
     // checkpoint for the rest of its life.
     const engine = this.engine;
+    // A pure eager source that a finiteness read evaluated during the
+    // evaluations in progress has that value (`keptEagerSourceValue()`):
+    // the iteration of a view whose finiteness a consumer read, or the
+    // evaluation of an operand of an operand of a view, does not evaluate it
+    // again.
+    if (
+      !options?.numericApproximation &&
+      (options?.materialization ?? false) === false
+    ) {
+      const kept = keptEagerSourceValue(this);
+      if (kept !== undefined) return kept;
+    }
     // The pure-application memo (`IComputeEngine._applicationMemo`) is NOT
     // emptied here: it outlives a top-level evaluation, because the
     // elements of a lazy collection are pulled by later, separate top-level
@@ -3133,6 +3165,7 @@ export class BoxedFunction
       // evaluated are kept for this evaluation only.
       releaseEagerSourceValues(this);
       engine._evaluationDepth -= 1;
+      releaseKeptEagerSourceValues(engine);
       if (capturesEffects) engine._evaluationEffects = undefined;
     }
   }
@@ -3280,9 +3313,9 @@ export class BoxedFunction
     if (def.collection?.elementMemo === true) {
       // The finiteness of a view over an eager operand (`Join(src(1), [4])`)
       // is known only after the operand is evaluated. Called from
-      // `evaluate()`, the values that this read computes are kept for the
-      // operand step of the same evaluation, which then does not evaluate
-      // the operand again (`eager-source-values.ts`).
+      // `evaluate()` or `evaluateAsync()`, the values that this read
+      // computes are kept for the operand step of the same evaluation, which
+      // then does not evaluate the operand again (`eager-source-values.ts`).
       const finite = sharesSourceValues
         ? readSharingEagerSourceValues(this, () => this.isFiniteCollection)
         : this.isFiniteCollection;
@@ -3620,6 +3653,7 @@ export class BoxedFunction
       );
     } catch (error) {
       this.engine._inFlightAsyncEvaluations -= 1;
+      releaseKeptEagerSourceValues(this.engine);
       throw error;
     }
     return promise
@@ -3628,6 +3662,7 @@ export class BoxedFunction
       )
       .finally(() => {
         this.engine._inFlightAsyncEvaluations -= 1;
+        releaseKeptEagerSourceValues(this.engine);
       });
   }
 
@@ -3640,9 +3675,41 @@ export class BoxedFunction
     // evaluation open", not "how many", and a balanced count is easier to
     // trust than a re-entrancy carve-out.
     if (canonical) return canonical.evaluateAsync(options);
-    if (this._isMemoizableLazyCollection(options))
-      return this._memoizedLazyCollectionValueAsync(options);
-    return this._computeValueAsync(options)();
+    // A kept value of a pure eager source, as in `evaluate()`. The value was
+    // computed by a synchronous evaluation, and `evaluate()` cannot run an
+    // operator that has only an `evaluateAsync` handler: such an expression
+    // is evaluated here.
+    if (
+      !options?.numericApproximation &&
+      (options?.materialization ?? false) === false
+    ) {
+      const kept = keptEagerSourceValue(this);
+      if (kept !== undefined && !hasAsyncOnlyApplication(this, true))
+        return Promise.resolve(kept);
+    }
+    // The finiteness read of a view over an eager operand evaluates the
+    // operand, as in `evaluate()`. Its values are taken out of the shared
+    // store in the `finally` below, before the first `await`, and are given
+    // to the operand step of this evaluation only: while this evaluation
+    // waits, other evaluations run on the same engine and use the shared
+    // store. Taking them out in a `finally` also clears the shared store when
+    // the read throws.
+    let memoizable: boolean;
+    let sourceValues: EagerSourceValues | undefined;
+    try {
+      memoizable = this._isMemoizableLazyCollection(options, true);
+    } finally {
+      sourceValues = detachEagerSourceValues(this);
+    }
+    const result = memoizable
+      ? this._memoizedLazyCollectionValueAsync(options, sourceValues)
+      : this._computeValueAsync(options, sourceValues)();
+    // A value that the operand step did not use (the evaluation was
+    // cancelled, threw, or found its value in the memo) is discarded when
+    // the evaluation ends.
+    return sourceValues === undefined
+      ? result
+      : result.finally(() => sourceValues.clear());
   }
 
   /**
@@ -3672,7 +3739,8 @@ export class BoxedFunction
    * fail-closed (no entry), never a wrong entry.
    */
   private _memoizedLazyCollectionValueAsync(
-    options?: Partial<EvaluateOptions>
+    options?: Partial<EvaluateOptions>,
+    sourceValues?: EagerSourceValues
   ): Promise<Expression> {
     const hit = this._lazyCollectionMemoHit();
     if (hit !== undefined) return Promise.resolve(hit);
@@ -3695,7 +3763,7 @@ export class BoxedFunction
       // different caller must not join a walk that captured someone else's.
       return Promise.resolve().then(() =>
         this.engine.withEvaluationContext(options, () =>
-          this._settledLazyCollectionValueAsync(options)
+          this._settledLazyCollectionValueAsync(options, sourceValues)
         )
       );
     }
@@ -3703,7 +3771,7 @@ export class BoxedFunction
     const pending: Promise<Expression> = Promise.resolve()
       .then(() =>
         this.engine.withEvaluationContext(options, () =>
-          this._settledLazyCollectionValueAsync(options)
+          this._settledLazyCollectionValueAsync(options, sourceValues)
         )
       )
       .finally(() => {
@@ -3726,7 +3794,8 @@ export class BoxedFunction
    * the `_lazyValueInFlight` marker: a re-entrant read of this node arrives on
    * the SYNC path (see `_lazyValuePending`), where that marker lives. */
   private async _settledLazyCollectionValueAsync(
-    options?: Partial<EvaluateOptions>
+    options?: Partial<EvaluateOptions>,
+    sourceValues?: EagerSourceValues
   ): Promise<Expression> {
     // A synchronous `evaluate()` may have filled the memo while this
     // computation waited for its microtask — it ignores the pending slot by
@@ -3746,7 +3815,7 @@ export class BoxedFunction
     // safe, a dependency-free entry derived from a field is not.
     const objectReadsBefore = objectReadCount();
 
-    const result = await this._computeValueAsync(options)();
+    const result = await this._computeValueAsync(options, sourceValues)();
 
     if (
       _lazyValueProvisionalReads !== before ||
@@ -5032,6 +5101,14 @@ export class BoxedFunction
       // hands back the demanded operand's error with no record of which
       // operand that was.
       if (!this._defersErrorAbsorption()) return undefined;
+      // An error that the handler of THIS node made with the frame of this
+      // node already in its breadcrumb (the `unexpected-argument` error of a
+      // surplus operand, `surplusOperandError()`) names its operand: no
+      // operand holds it, so the search below would add a wrong frame for
+      // operand 1. The record is per node, so an enclosing node that returns
+      // the same error still adds its own frame (`markErrorFramedByNode()`,
+      // `error-value.ts`).
+      if (isErrorFramedByNode(result, this)) return undefined;
       return withErrorFrames(result, [this._deferredErrorFrame(result)]);
     }
     return errorValue(result);
@@ -6369,10 +6446,13 @@ export class BoxedFunction
     };
   }
 
+  /** `sourceValues` holds the values of eager operands that the finiteness
+   * read of this evaluation computed (`_evaluateAsyncUncounted()`). */
   _computeValueAsync(
-    options?: Partial<EvaluateOptions>
+    options?: Partial<EvaluateOptions>,
+    sourceValues?: EagerSourceValues
   ): () => Promise<Expression> {
-    const compute = this._computeValueAsyncUnabsorbed(options);
+    const compute = this._computeValueAsyncUnabsorbed(options, sourceValues);
     // Late error absorption, mirroring `_computeValue` — both branches.
     if (this.isValid) {
       const selecting = this._defersErrorAbsorption();
@@ -6394,7 +6474,8 @@ export class BoxedFunction
   }
 
   private _computeValueAsyncUnabsorbed(
-    options?: Partial<EvaluateOptions>
+    options?: Partial<EvaluateOptions>,
+    sourceValues?: EagerSourceValues
   ): () => Promise<Expression> {
     return async () => {
       // Cooperative deadline checkpoint — see `_computeValue`.
@@ -6711,12 +6792,11 @@ export class BoxedFunction
       // path had NO materialization step at all, so every `materialization`
       // form silently returned the lazy view). All four forms — `false`,
       // `true`, an integer, `[head, tail]` — now behave as they do
-      // synchronously. `materialize()` is shared rather than duplicated: it
-      // enumerates lazily and evaluates the few elements it keeps
-      // SYNCHRONOUSLY, so an element whose operator has an `evaluateAsync`
-      // handler but no `evaluate` one would not run it — the same divergence
-      // the `!def.evaluate` gate below already has, and no collection operator
-      // is in that shape today.
+      // synchronously. The walk of `materialize()` is shared rather than
+      // duplicated (`materializationSteps`), and `materializeAsync()` awaits
+      // each element it keeps, so an element that applies an operator with
+      // only an `evaluateAsync` handler (`Map(AsyncOnly, [1, 2])`) holds the
+      // value of that application.
       //
       // A lazy operator over a collection operand that can be absent as a
       // whole: mirrors the sync path's step 2c'. The operand is evaluated on
@@ -6784,7 +6864,7 @@ export class BoxedFunction
           !mayBeAbsentAsWhole(this) &&
           !materializesAfterOperands(this, def, options)
         )
-          return materialize(this, def, options);
+          return await materializeAsync(this, def, options);
       }
 
       //
@@ -6811,11 +6891,21 @@ export class BoxedFunction
       const exactIntegerAt = numericApproximation
         ? integerParameterPositions(def)
         : undefined;
+      // A value that the finiteness read of this evaluation computed for the
+      // operand is used as on the sync route. The read evaluated the operand
+      // synchronously, and `evaluate()` cannot run an operator that has only
+      // an `evaluateAsync` handler: for an operand that holds or names such
+      // an operator, the value of the read is not the value of the operand
+      // on this route, and the operand is evaluated here.
+      const readValue = (x: Expression): Expression | undefined =>
+        sourceValues?.has(x) && !hasAsyncOnlyApplication(x, true)
+          ? takeDetachedEagerSourceValue(sourceValues, x)
+          : undefined;
       const tail = await holdMapAsync(this, async (x, index) =>
         (exactIntegerAt !== undefined && exactIntegerAt(index)) ||
         (exactExponent && index === 1)
           ? await exactIntegerOperandAsync(x, options)
-          : await x.evaluateAsync(operandOptions(options))
+          : (readValue(x) ?? (await x.evaluateAsync(operandOptions(options))))
       );
 
       //
@@ -7513,48 +7603,60 @@ export class BoxedFunction
       // again; the string-preservation check and the pole override evaluate
       // synchronously and must see this evaluation's registry and context
       // stack.
-      return runWithEvaluationEffects(
-        engine,
-        effects,
-        () => {
-          // Handler-less scoped-operator no-operand-change identity: see the
-          // matching comment in the sync path (avoids re-canonicalizing a lazy
-          // scoped collection into a fresh, split-off local scope; every other
-          // operator keeps the load-bearing re-box).
-          const result =
-            value ??
-            (isScoped &&
-            def.evaluate === undefined &&
-            def.evaluateAsync === undefined &&
-            this.isCanonical &&
-            tail.every((x, i) => x === this._ops[i])
-              ? this
-              : this._withParseScope(() =>
-                  engine.function(this._operator, tail)
-                ));
-
-          // 5a/ String preservation, re-checked on the RESULT. The step that
-          // ran before evaluation could only see the node as authored, whose
-          // type may be a union that resolves to `string` only once the
-          // operands are evaluated (see `evaluateStringPreservingResult`).
-          // Declines leave `result` untouched. Twin of step 6a in the sync
-          // path.
-          const preservedResult = evaluateStringPreservingResult(result);
-          if (preservedResult !== result) return preservedResult;
-
-          // 5b/ A lazy collection answered by the handler is materialized as
-          // asked (`materializeLazyResult`); twin of step 6b in the sync path.
-          const materializedResult = materializeLazyResult(result, options);
-          if (materializedResult !== result) return materializedResult;
-
-          // 5c/ Pole-aware numeric evaluation (see the sync path).
-          if (numericApproximation)
-            return applyPoleOverride(engine, this._operator, tail, result);
-          return result;
-        },
-        contextStack,
-        options?._precisionWindow
+      const inContext = <T>(fn: () => T): T =>
+        runWithEvaluationEffects(
+          engine,
+          effects,
+          fn,
+          contextStack,
+          options?._precisionWindow
+        );
+      // Handler-less scoped-operator no-operand-change identity: see the
+      // matching comment in the sync path (avoids re-canonicalizing a lazy
+      // scoped collection into a fresh, split-off local scope; every other
+      // operator keeps the load-bearing re-box).
+      const result = inContext(
+        () =>
+          value ??
+          (isScoped &&
+          def.evaluate === undefined &&
+          def.evaluateAsync === undefined &&
+          this.isCanonical &&
+          tail.every((x, i) => x === this._ops[i])
+            ? this
+            : this._withParseScope(() => engine.function(this._operator, tail)))
       );
+
+      // 5a/ String preservation, re-checked on the RESULT. The step that
+      // ran before evaluation could only see the node as authored, whose
+      // type may be a union that resolves to `string` only once the
+      // operands are evaluated (see `evaluateStringPreservingResult`).
+      // Declines leave `result` untouched. Twin of step 6a in the sync
+      // path.
+      const preservedResult = inContext(() =>
+        evaluateStringPreservingResult(result)
+      );
+      if (preservedResult !== result) return preservedResult;
+
+      // 5b/ A lazy collection answered by the handler is materialized as
+      // asked (`materializeLazyResult`); twin of step 6b in the sync path.
+      // The elements are awaited (`materializeLazyResultAsync`), in the
+      // registry and the context stack of this evaluation.
+      if ((options?.materialization ?? false) !== false) {
+        const materializedResult = await materializeLazyResultAsync(result, {
+          ...options,
+          _effects: effects,
+          _contextStack: contextStack,
+        });
+        if (materializedResult !== result) return materializedResult;
+      }
+
+      // 5c/ Pole-aware numeric evaluation (see the sync path).
+      if (numericApproximation)
+        return inContext(() =>
+          applyPoleOverride(engine, this._operator, tail, result)
+        );
+      return result;
     };
   }
 }
@@ -8917,7 +9019,10 @@ function lambdaBroadcastType(
   // not bound the value, and the body's shape is not statically knowable —
   // return `any`. (Typing the body with the parameter typed as the tuple was
   // tried on 2026-09-26: the descriptor-based derivation gave wrong narrow
-  // types, for a nested user call inside a list or for `P·Norm(P)`.)
+  // types for a nested user call inside a list. It also gave them for
+  // `P·Norm(P)`, but that one is fixed: the `Multiply` type handler now
+  // widens the components of a tuple by a scalar factor known only by its
+  // type, as it does for a declared scalar.)
   // A DECLARED result that is not a number type is kept: a generic
   // `(x: T) -> T where T` instantiates `T` to the tuple, and a declared
   // tuple result describes the tuple argument.
@@ -9547,8 +9652,19 @@ function type(expr: BoxedFunction): Type | BoxedType {
       // Allocated only when two operands could share a node.
       const walk: DescriptorMemo | undefined =
         expr.ops.length > 1 ? new Map() : undefined;
+      // The callee of `Apply` that reads a `Function` literal from a field
+      // of a constant dictionary (`lib.D(…)`) is described as that literal:
+      // the call evaluates as the literal applied, which maps over a
+      // collection or a tuple argument, and the handler types the call as
+      // the same call of the inline literal (`constantFieldLiteral`).
       const descriptors = expr.ops.map((x, i) =>
-        describeOperand(x, strippedFor(i), walk)
+        describeOperand(
+          i === 0 && expr.operator === 'Apply'
+            ? (constantFieldLiteral(x) ?? x)
+            : x,
+          strippedFor(i),
+          walk
+        )
       );
       calculatedType = guardedTypeHandlerCall(expr.engine, expr.operator, () =>
         def.type!(descriptors, typeHandlerContext(expr.engine))
@@ -12868,6 +12984,29 @@ function materializeLazyResult(
   options: Partial<EvaluateOptions> | undefined
 ): Expression {
   if ((options?.materialization ?? false) === false) return result;
+  return runMaterialization(lazyResultSteps(result, options), options);
+}
+
+/** The asynchronous twin of `materializeLazyResult()`: each element is
+ * evaluated with `evaluateAsync()` (see `materializeAsync()`). */
+function materializeLazyResultAsync(
+  result: Expression,
+  options: Partial<EvaluateOptions> | undefined
+): Promise<Expression> {
+  if ((options?.materialization ?? false) === false)
+    return Promise.resolve(result);
+  return runMaterializationAsync(
+    result.engine,
+    lazyResultSteps(result, options),
+    options
+  );
+}
+
+/** The steps of `materializeLazyResult()`: see `MaterializationSteps`. */
+function* lazyResultSteps(
+  result: Expression,
+  options: Partial<EvaluateOptions> | undefined
+): MaterializationSteps {
   if (!(result instanceof BoxedFunction)) return result;
   // A container LITERAL's elements are part of the result, so the option
   // descends into them: `(Take(xs, 3), 1)` is a pair holding the
@@ -12883,10 +13022,9 @@ function materializeLazyResult(
     const descends = (op: Expression) =>
       op.isLazyCollection || CONTAINER_LITERAL_HEADS.has(op.operator);
     if (!result.ops.some(descends)) return result;
-    return result.engine.function(
-      result.operator,
-      result.ops.map((op) => (descends(op) ? op.evaluate(options) : op))
-    );
+    const ops: Expression[] = [];
+    for (const op of result.ops) ops.push(descends(op) ? yield op : op);
+    return result.engine.function(result.operator, ops);
   }
   if (!result.isLazyCollection) return result;
   // A held conditional over a collection (`[5, 10] {0 < t}`, a `When` whose
@@ -12898,7 +13036,7 @@ function materializeLazyResult(
   if (h === 'When' || h === 'Which' || h === 'If') return result;
   const def = result.operatorDefinition;
   if (def === undefined) return result;
-  return materialize(result, def, options);
+  return yield* materializationSteps(result, def, options);
 }
 
 /**  Eagerly evaluate xs by iterating over its elements.
@@ -12925,6 +13063,92 @@ function materialize(
   def: BoxedOperatorDefinition,
   options?: Partial<EvaluateOptions>
 ): Expression {
+  return runMaterialization(materializationSteps(expr, def, options), options);
+}
+
+/**
+ * The asynchronous twin of `materialize()`: each element is evaluated with
+ * `evaluateAsync()`. The synchronous iterator of a view cannot run an
+ * operator that has only an `evaluateAsync` handler: the elements of
+ * `Map(AsyncOnly, [1, 2])` are the applications `AsyncOnly(1)` and
+ * `AsyncOnly(2)`, and `evaluate()` leaves them as they are. With this, they
+ * are awaited, and the list holds their values.
+ */
+function materializeAsync(
+  expr: BoxedFunction,
+  def: BoxedOperatorDefinition,
+  options?: Partial<EvaluateOptions>
+): Promise<Expression> {
+  return runMaterializationAsync(
+    expr.engine,
+    materializationSteps(expr, def, options),
+    options
+  );
+}
+
+/**
+ * The steps of a materialization. The walk is written once for the
+ * synchronous and the asynchronous routes: it yields each element that must
+ * be evaluated, and it receives the value of that element back.
+ * `runMaterialization()` evaluates the elements with `evaluate()`, and
+ * `runMaterializationAsync()` with `evaluateAsync()`. An error that the
+ * evaluation of an element throws is thrown into the walk at the `yield`, so
+ * the walk handles it as it handles an error of its own iterator.
+ */
+type MaterializationSteps = Generator<Expression, Expression, Expression>;
+
+/** Run the steps of a materialization, and evaluate each element that they
+ * yield with `evaluate(options)`. */
+function runMaterialization(
+  steps: MaterializationSteps,
+  options: Partial<EvaluateOptions> | undefined
+): Expression {
+  let step = steps.next();
+  while (!step.done) {
+    let value: Expression;
+    try {
+      value = step.value.evaluate(options);
+    } catch (e) {
+      step = steps.throw(e);
+      continue;
+    }
+    step = steps.next(value);
+  }
+  return step.value;
+}
+
+/** Run the steps of a materialization, and evaluate each element that they
+ * yield with `evaluateAsync(options)`. The walk resumes after an `await`, and
+ * its iterator applies the callbacks of the view synchronously, so each
+ * resumption runs in the evaluation context that `options` carry
+ * (`withEvaluationContext()`): the host capability registry and the scopes
+ * of the enclosing scoped operators. */
+async function runMaterializationAsync(
+  ce: ComputeEngine,
+  steps: MaterializationSteps,
+  options: Partial<EvaluateOptions> | undefined
+): Promise<Expression> {
+  let step = ce.withEvaluationContext(options, () => steps.next());
+  while (!step.done) {
+    let value: Expression;
+    try {
+      value = await step.value.evaluateAsync(options);
+    } catch (e) {
+      step = ce.withEvaluationContext(options, () => steps.throw(e));
+      continue;
+    }
+    const received = value;
+    step = ce.withEvaluationContext(options, () => steps.next(received));
+  }
+  return step.value;
+}
+
+/** The steps of `materialize()`: see `MaterializationSteps`. */
+function* materializationSteps(
+  expr: BoxedFunction,
+  def: BoxedOperatorDefinition,
+  options?: Partial<EvaluateOptions>
+): MaterializationSteps {
   if (!expr.isValid || options?.materialization === false) return expr;
 
   // Emptiness indeterminate (e.g. Range(1, n) with a symbolic bound): the
@@ -13052,7 +13276,7 @@ function materialize(
             xs.push(expr.engine.symbol('ContinuationPlaceholder'));
             break;
           }
-          xs.push(x.evaluate(options));
+          xs.push(yield x);
         }
       } catch (e) {
         // A deduplicating enumeration gives up on an unbroken run of
@@ -13103,7 +13327,7 @@ function materialize(
       let i = 1;
       const iter = expr.each();
       for (const x of iter) {
-        xs.push(x.evaluate(options));
+        xs.push(yield x);
         i += 1;
         if (i > headSize) break;
       }
@@ -13132,7 +13356,7 @@ function materialize(
         while (i <= count) {
           const x = expr.at(i);
           if (!x) break;
-          xs.push(x.evaluate(options));
+          xs.push(yield x);
           i += 1;
         }
       }

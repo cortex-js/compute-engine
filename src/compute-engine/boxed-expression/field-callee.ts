@@ -9,9 +9,10 @@ import type {
 } from '../global-types.js';
 import { lookup, lookupApplicable } from '../function-utils.js';
 import { isOperatorDef, isValueDef } from './utils.js';
-import { isDictionary, isFunction, isSymbol } from './type-guards.js';
+import { isFunction, isSymbol } from './type-guards.js';
 import { _BoxedExpression } from './abstract-boxed-expression.js';
 import { qualifiedFieldParts } from './named-arguments.js';
+import { constantFieldValue } from './constant-field.js';
 
 /**
  * A call through a field of a record or a dictionary: `bob.S(3, factor: 5)`
@@ -46,10 +47,16 @@ import { qualifiedFieldParts } from './named-arguments.js';
  *    `record{S: (x: number, factor: number?) -> number}`, the names are
  *    matched against that signature (`kind: 'signature'`). The call stays
  *    `Apply(Field(bob, "S"), …)` with the arguments in declaration order. The
- *    receiver may hold another value later: the type is a contract that every
- *    value assigned to it satisfies, so the match never depends on the value
- *    held now. A signature TYPE has no `lazy` flag, so on this route the
- *    arguments are always evaluated.
+ *    receiver may hold another value later: a DECLARED type is a contract
+ *    that every value assigned to it satisfies, so the match never depends on
+ *    the value held now. An INFERRED type is not a contract: it describes the
+ *    value held now, and an assignment can replace it with a record whose
+ *    field has other parameter names (`S(y, x)` in place of `S(x, y)`). The
+ *    result then gives the receiver's definition (`receiver`), and the caller
+ *    keeps the names as written, so that the call is matched again after
+ *    such an assignment, as a named call through a variable with an inferred
+ *    type is (`BoxedFunction._reboxedForCallee()`). A signature TYPE has no
+ *    `lazy` flag, so on this route the arguments are always evaluated.
  *
  * Anything else returns `undefined`, and the call is made canonical as
  * before: a named argument then reports `argument-names-unavailable`. This
@@ -63,7 +70,7 @@ import { qualifiedFieldParts } from './named-arguments.js';
 export type FieldCallee =
   | { kind: 'operator'; name: string }
   | { kind: 'literal'; literal: Expression }
-  | { kind: 'signature'; signature: Type };
+  | { kind: 'signature'; signature: Type; receiver?: BoxedValueDefinition };
 
 export function resolveFieldCallee(
   ce: ComputeEngine,
@@ -73,7 +80,7 @@ export function resolveFieldCallee(
 ): FieldCallee | undefined {
   const parts = qualifiedFieldParts(callee);
   if (parts === undefined) return undefined;
-  const receiver = receiverDefinition(ce, callee!, parts.base, scope);
+  const receiver = receiverDefinition(ce, parts.receiver, parts.base, scope);
   if (receiver === undefined) return undefined;
 
   const stored = constantFieldValue(receiver, parts.member);
@@ -107,46 +114,45 @@ export function resolveFieldCallee(
   // canonical as before.
   if (!named) return undefined;
   const signature = recordFieldSignature(receiver.type.type, parts.member);
-  return signature === undefined ? undefined : { kind: 'signature', signature };
+  if (signature === undefined) return undefined;
+  // A constant cannot be given another value, so its inferred type cannot
+  // change either.
+  return receiver.inferredType && !receiver.isConstant
+    ? { kind: 'signature', signature, receiver }
+    : { kind: 'signature', signature };
 }
 
 /** The value definition of the receiver symbol `name` of the `Field` callee.
  *
- * An already-boxed callee whose receiver is a bound symbol gives its own
- * binding: that is the binding the expression denotes. Otherwise the name is
- * looked up in `scope`. A name that is a parameter of the construct being made
- * canonical (`(bob) => bob.S(…)`) may not be declared yet, and the walk up the
- * scope chain would then find an outer `bob` of the same name: its own binding
- * is used when it has one, and else no definition is returned. */
+ * A receiver operand that is an already-boxed symbol bound to a CONSTANT
+ * gives that binding, whether the `Field` itself is boxed or is raw MathJSON
+ * that holds the boxed symbol (`['Field', bob, "'S'"]`): when the call is
+ * evaluated, a symbol bound to a constant reads that binding, even in a scope
+ * that declares the same name again. Otherwise the name is looked up in
+ * `scope`: a symbol bound to a variable, or to a binding with no value, reads
+ * the innermost binding of its name when it is evaluated (the ruling of
+ * 2026-08-22 on shadowing declarations, `docs/SCOPING-MODEL.md`), and the
+ * names of the call must be matched against the function that it reaches. A
+ * name that is a parameter of the construct being made canonical
+ * (`(bob) => bob.S(…)`) may not be declared yet, and the walk up the scope
+ * chain would then find an outer `bob` of the same name: its own binding is
+ * used when it has one, and else no definition is returned. */
 function receiverDefinition(
   ce: ComputeEngine,
-  callee: ExpressionInput,
+  receiver: ExpressionInput,
   name: string,
   scope: Scope
 ): BoxedValueDefinition | undefined {
-  if (callee instanceof _BoxedExpression) {
-    const base = callee.ops?.[0];
-    if (isSymbol(base) && base.valueDefinition !== undefined)
-      return base.valueDefinition;
-  }
+  if (
+    receiver instanceof _BoxedExpression &&
+    isSymbol(receiver) &&
+    receiver.valueDefinition?.isConstant === true
+  )
+    return receiver.valueDefinition;
   const def = ce._isShadowedParameter(name)
     ? ce._shadowedParameterDef(name)
     : lookup(name, scope);
   return def !== undefined && isValueDef(def) ? def.value : undefined;
-}
-
-/** The value stored in the field `member` of a CONSTANT receiver whose value
- * is a dictionary (or a record, which is a dictionary value), or `undefined`.
- * An `object` value is not read: its fields can be changed even when the
- * binding that holds it cannot. */
-function constantFieldValue(
-  def: BoxedValueDefinition,
-  member: string
-): Expression | undefined {
-  if (!def.isConstant) return undefined;
-  const value = def.value;
-  if (!isDictionary(value)) return undefined;
-  return value.get(member);
 }
 
 /** The type of the field `member` that a record type declares, when it is a

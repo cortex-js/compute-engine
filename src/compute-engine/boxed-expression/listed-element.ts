@@ -303,7 +303,8 @@ export function listedLiteralElements(
  * callback given by name: a symbol whose operator definition has only an
  * `evaluateAsync` handler, and a symbol that holds a function literal (a
  * user function, or a value that is a `Function`) whose body holds or names
- * such an operator. Helper application bodies and stored values are followed
+ * such an operator. Each clause of a multi-clause user function is examined
+ * as such a body. Helper application bodies and stored values are followed
  * transitively. Shared nodes and recursive helpers are visited once. An
  * operand that an operator quotes (`Hold`) is data and is not examined.
  */
