@@ -140,9 +140,7 @@ export function quantityAdd(
   // its error by the conversion factor) then combine with error-propagating
   // addition instead of raw numeric summation. A symbolic magnitude uses the
   // same expression arithmetic, with no error.
-  if (
-    quantities.some((q) => isMeasurement(q.op1) || isSymbolicValue(q.op1))
-  ) {
+  if (quantities.some((q) => isMeasurement(q.op1) || isSymbolicValue(q.op1))) {
     const mags: Expression[] = [];
     for (let i = 0; i < quantities.length; i++) {
       const q = quantities[i];
@@ -622,8 +620,7 @@ export function quantityPower(
   if (!isQuantity(base)) return undefined;
   // A symbolic magnitude is raised with the expression arithmetic of the
   // `Measurement` branch, with no error.
-  const magIsMeasurement =
-    isMeasurement(base.op1) || isSymbolicValue(base.op1);
+  const magIsMeasurement = isMeasurement(base.op1) || isSymbolicValue(base.op1);
   const mag = base.op1.re;
   const n = exp.re;
   // A unit exponent must be a number: `Quantity(3, m)^n` stays unevaluated.

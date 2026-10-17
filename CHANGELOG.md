@@ -2,8 +2,8 @@
 
 ### New Features
 
-- **`ce.undeclare(name)` removes the binding of a name from the current scope**
-  . The binding goes whatever it holds: a value, a function given with
+- **`ce.undeclare(name)` removes the binding of a name from the current scope**.
+  The binding goes whatever it holds: a value, a function given with
   `ce.assign()` or `ce.declare()`, or a function defined by one or more clauses.
   A host could not do this for a function defined by two or more clauses:
   `ce.forget("f")` removes assumptions only, `ce.declare("f", "function")`

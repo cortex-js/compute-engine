@@ -1527,10 +1527,7 @@ function visiblePending(
   ce: ComputeEngine,
   name: string
 ): PendingSequence | undefined {
-  return pendingSequences
-    .get(ce)
-    ?.get(pendingScopeOf(ce, name))
-    ?.get(name);
+  return pendingSequences.get(ce)?.get(pendingScopeOf(ce, name))?.get(name);
 }
 
 function getOrCreatePending(ce: ComputeEngine, name: string): PendingSequence {

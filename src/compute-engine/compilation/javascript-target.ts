@@ -11623,9 +11623,7 @@ export function predicateResultCheck(
   kind: string,
   callback: Expression
 ): boolean {
-  const result = functionResult(
-    resolveTypeForCompilation(callback.type.type)
-  );
+  const result = functionResult(resolveTypeForCompilation(callback.type.type));
   if (result === undefined) return true;
   if (!couldMatch(result, 'boolean'))
     throw new Error(

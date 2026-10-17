@@ -3059,7 +3059,11 @@ function pyFnArg(
   // lowerings test the result with the truthiness of Python, so `1` selected
   // an element, and so did `nan`, the spelling of `Missing` on this target.
   const mode = PREDICATE_RESULT_MODES[kind];
-  if (mode !== undefined && op !== undefined && predicateResultCheck(kind, op)) {
+  if (
+    mode !== undefined &&
+    op !== undefined &&
+    predicateResultCheck(kind, op)
+  ) {
     // This target spells `Missing` as a float `nan`, so `_ce_predicate` reads
     // a `nan` result as an absent value, and a selecting predicate skips the
     // element. A numeric `NaN` result is not absent: the interpreter reports
