@@ -2227,7 +2227,16 @@ export class ComputeEngine implements IComputeEngine {
     return this._runtimeState.maxCollectionSize;
   }
   set maxCollectionSize(t: number) {
+    const before = this._runtimeState.maxCollectionSize;
     this._runtimeState.maxCollectionSize = t;
+    // A handler that declines a collection above the cap answers a symbolic
+    // call, and the evaluate memo keeps such a result
+    // (`_isMemoizableInertEvaluation`, `boxed-expression/boxed-function.ts`).
+    // The cap is engine configuration, so a change advances the versions a
+    // configuration change advances, and the declined result is computed
+    // again under the new cap.
+    if (this._runtimeState.maxCollectionSize !== before)
+      this._noteStateEvent({ kind: 'config' });
   }
 
   /**

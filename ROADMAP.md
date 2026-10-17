@@ -167,24 +167,6 @@ work, not a regression of a release. Closing it: resolve the erasure while
 keeping the exact survivors for a jump operator, then approximate each scalar
 result, on both routes.
 
-### Re-evaluating an already-evaluated inert expression repeats all its work (OPEN, decision — found 2026-10-17 by the same audit, Tycho ledger row 380)
-
-The second half of the row-380 chain: a value returned by `evaluate()` that
-stayed symbolic is evaluated again whenever an enclosing expression that
-holds it is evaluated, and the re-evaluation walks the whole tree and builds a
-fresh copy of the result (the `type` getter then types every fresh node; it
-was 6 s of an 8 s evaluate in the Tycho profile). The arguments of a user
-function are evaluated once, by value (`argValue` in `makeLambda`,
-`function-utils.ts`), so the repeat happens at the next level's reads, not at
-the binding. Only the lazy-collection evaluate memo
-(`_memoizedLazyCollectionValue`, `boxed-function.ts`) remembers an evaluate;
-an inert `PointList` head, an inert `Add`, an inert accessor read have no
-memo. Decision for the user: whether a node produced by `evaluate()` at a
-world version should answer `evaluate()` with itself at the same world
-version and the same options (a settled mark keyed like the lazy-collection
-memo), or whether the memo stays confined to lazy collections and the
-accessor fix above is the whole remedy for this shape.
-
 ### Small items from the dual review of the 2026-10-17 re-review round (OPEN, small)
 
 - An expression boxed inside a scope that declares `Pi`, then compiled after

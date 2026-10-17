@@ -100,6 +100,19 @@ export function containsObject(expr: Expression | null | undefined): boolean {
 }
 
 /**
+ * The answer of {@link containsObject} for every FUNCTION node a walk has
+ * visited, kept across walks. A function node's operands never change and an
+ * object node never stops being one, so the answer for such a node is fixed
+ * once computed. Without it, the evaluate memo's commit points — which ask
+ * this about the result of every ordinary node they store, from the leaves
+ * up (`_storeLazyCollectionValue`, `boxed-function.ts`) — walked the subtree
+ * of each node once per node, quadratic in the depth of an inert chain in a
+ * session that holds an object. A dictionary node is not recorded here: only
+ * the per-walk memo covers it.
+ */
+const containmentOfFunctionNode = new WeakMap<Expression, boolean>();
+
+/**
  * {@link containsObject} with an answer memo, keyed by expression identity and
  * valid for as long as the caller keeps the map.
  *
@@ -124,14 +137,15 @@ function containsObjectWith(
   if (!anyObjectExists()) return false;
   if (expr === null || expr === undefined) return false;
 
-  const cached = memo?.get(expr);
+  const cached = memo?.get(expr) ?? containmentOfFunctionNode.get(expr);
   if (cached !== undefined) return cached;
 
   let result: boolean;
   if (isObject(expr)) result = true;
-  else if (isFunction(expr))
+  else if (isFunction(expr)) {
     result = expr.ops.some((op) => containsObjectWith(op, memo));
-  else if (isDictionary(expr))
+    containmentOfFunctionNode.set(expr, result);
+  } else if (isDictionary(expr))
     result = expr.values.some((v) => containsObjectWith(v, memo));
   else result = false;
 

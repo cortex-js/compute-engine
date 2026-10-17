@@ -202,6 +202,21 @@
 
 ### Issues Resolved
 
+- **An already-evaluated symbolic value is not walked again at the same
+  state** (Tycho ledger row 380). A user function applied to its own result,
+  `f^k(P)`, with a body that reads its argument four times, embedded the
+  previous level's value four times, and each read evaluated that value again
+  — a full walk that built a fresh copy — when the value had stayed symbolic
+  (an inert `PointList` whose columns waited for a slider with no value). The
+  cost grew fourfold per level: 1.9 s at depth 7, out of memory at depth 8.
+  The evaluate memo of a lazy collection view now also serves an ordinary
+  canonical function node on the synchronous route under the default options,
+  and keeps a symbolic, non-collection result: each level walks the previous
+  one once (0.45 s at depth 7, and the levels share one tree). A node that
+  evaluates to a number or a list literal stores nothing; a lazy head
+  (`Add`, `Multiply`, `If`, …) and the asynchronous route are unchanged. A
+  change of `ce.maxCollectionSize` now counts as a configuration change, so a
+  call that declined under the old cap is evaluated again under the new one.
 - **A nested user function whose parameter shares its name with the caller's
   parameter evaluates in milliseconds again** (Tycho ledger, `art/mavxszbvzk`).
   With `f_b2full50(x)` applying `f_b2(x)`, whose body ranges over

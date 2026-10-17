@@ -67,7 +67,7 @@ export type StateEvent =
     }
   /** The deferred half of a value-type inference: see `noteStateEvent`. */
   | { kind: 'inference-settled' }
-  | { kind: 'config' } // precision, tolerance, angularUnit, jit, reset, type-statement redefinition
+  | { kind: 'config' } // precision, tolerance, angularUnit, maxCollectionSize, jit, reset, type-statement redefinition
   /** A mutable-object field write, invalidated through per-object versions. */
   | { kind: 'object-store' };
 

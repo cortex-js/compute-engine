@@ -3175,7 +3175,8 @@ export class BoxedFunction
       const canonical = this._canonicalToEvaluate();
       const result = canonical
         ? canonical.evaluate(options)
-        : this._isMemoizableLazyCollection(options, true)
+        : this._isMemoizableLazyCollection(options, true) ||
+            this._isMemoizableInertEvaluation(options)
           ? this._memoizedLazyCollectionValue(options)
           : this._computeValue(options)();
       return options?.numericApproximation
@@ -3274,6 +3275,60 @@ export class BoxedFunction
   }
 
   /**
+   * The INERT rule of the evaluate memo: an ordinary canonical function node
+   * (not a lazy collection view, not a lazy head) evaluated on the
+   * synchronous route under the default options takes the memo path of
+   * `_memoizedLazyCollectionValue`, with the same key (generation, world
+   * epoch, ambient scope, facts side, object dependencies), the same purity
+   * and settled-only gates, and one store gate of its own
+   * (`_storeLazyCollectionValue`): only a SYMBOLIC result that is not a
+   * collection value is kept. A node that evaluates to a number or to a list
+   * literal stores nothing — such a value is cheap to produce again and
+   * would be retained for the node's lifetime.
+   *
+   * Why: a value that stayed symbolic — an inert `PointList` head whose
+   * columns wait for a slider, an accessor read of it — was walked again on
+   * every evaluation of an expression that held it, and the walk built a
+   * fresh copy each time. A user function applied to its own result,
+   * `f^k(P)`, whose body reads its argument four times, re-walked the
+   * previous level four times per level: 1.9 s at depth 7 and out of heap at
+   * depth 8 (Tycho ledger row 380, `neyret/51a4237846`, user ruling
+   * 2026-10-17 that an already-evaluated inert tree at the same state
+   * should cost nothing). With the memo each level walks the previous one
+   * once: 0.45 s at depth 7, and the levels share one tree.
+   *
+   * Synchronous route only (see `evaluateAsync`): a node whose operator has
+   * only an `evaluateAsync` handler stays inert on this route, and the
+   * asynchronous route must run the handler rather than be served that
+   * entry. A lazy head is left out as it is for a lazy collection view (the
+   * `def.lazy` test): `Add` and `Multiply` carry the flag for their folding
+   * canonical handlers, so the arithmetic skeleton around an inert node is
+   * rebuilt while the inert nodes themselves answer from their memo. The
+   * entry is always generation-keyed and the result is never primed as its
+   * own value (`_lazyCollectionMemoKey`, `_storeLazyCollectionValue`): a
+   * call with constant operands can read a free variable of its body, and a
+   * handler's result is not an evaluated value.
+   */
+  private _isMemoizableInertEvaluation(
+    options?: Partial<EvaluateOptions>
+  ): boolean {
+    if ((options?.materialization ?? false) !== false) return false;
+    if ((options?.numericApproximation ?? false) !== false) return false;
+    // A transient precision or angular-unit window
+    // (`_withTransientPrecision`, `_withTransientAngularUnit`) changes what
+    // a node evaluates to and advances no version the memo keys on, so the
+    // memo is neither read nor written inside one, as the other value memos
+    // do (`_atTransientConfiguration`): in a degree-mode engine `Sin(30)` is
+    // `1/2`, and inside a radian window it stays `sin(30)`.
+    if (this.engine._atTransientConfiguration) return false;
+    if (!this.isCanonical) return false;
+    const def = this.operatorDefinition;
+    if (!def || def.lazy === true) return false;
+    if (this.isLazyCollection) return false;
+    return true;
+  }
+
+  /**
    * Is this node in the set Change 1 of
    * `docs/COLLECTIONS-MODEL.md` memoizes — a
    * lazy collection VIEW that reaches `_computeValue`'s generic operand walk
@@ -3301,16 +3356,21 @@ export class BoxedFunction
    * `false` — 2-ary `Repeat` — never reaches here at all.)
    *
    * Being a lazy view with an `evaluate` handler IS the conditional-handler
-   * regime, so no other operator class is swept in; the regime inventory is
-   * pinned in `test/compute-engine/lazy-collection-regimes.test.ts`.
+   * regime, so no other operator class is swept in by THIS rule; the regime
+   * inventory is pinned in `test/compute-engine/lazy-collection-regimes.test.ts`.
+   * The inert rule (`_isMemoizableInertEvaluation`) is the second rule of the
+   * same memo, for ordinary nodes on the synchronous route only.
    *
    * DEFAULT options only: `materialization` selects step 3 and
    * `numericApproximation` step 3b, both of which return something other than
    * the step-4 rebuild. Every non-default combination takes today's path,
    * untouched and unmemoized. The same test gates the ASYNC entry point
    * (`_memoizedLazyCollectionValueAsync`), which shares this memo — the two
-   * paths must agree on eligibility or one could serve the other an entry it
-   * would not have made itself.
+   * paths must agree on the eligibility of a lazy view, or one could serve
+   * the other an entry it would not have made itself. The asynchronous route
+   * never reads an entry stored for an ordinary node: it takes the memo path
+   * only when this rule holds, and the inert rule is for the synchronous
+   * route alone.
    *
    * One further exclusion, for RETENTION (see the retention contract on
    * `_memoizedLazyCollectionValue`): an operator with an `elementMemo`
@@ -3327,6 +3387,9 @@ export class BoxedFunction
   ): boolean {
     if ((options?.materialization ?? false) !== false) return false;
     if ((options?.numericApproximation ?? false) !== false) return false;
+    // Not inside a transient configuration window: see the same test in
+    // `_isMemoizableInertEvaluation`.
+    if (this.engine._atTransientConfiguration) return false;
     if (!this.isCanonical) return false;
     const def = this.operatorDefinition;
     if (!def || def.lazy === true) return false;
@@ -3347,7 +3410,8 @@ export class BoxedFunction
 
   /**
    * The memoized fall-through evaluation of a lazy collection view (Change 1
-   * of `docs/COLLECTIONS-MODEL.md`). The first
+   * of `docs/COLLECTIONS-MODEL.md`), and of an ordinary node under the inert
+   * rule (`_isMemoizableInertEvaluation`). The first
    * `evaluate()` runs today's walk byte-for-byte — it is load-bearing: it is
    * what resolves a symbol operand to its value and what performs an
    * effectful operand's effects. Only the REPEAT walks are eliminated.
@@ -3539,6 +3603,18 @@ export class BoxedFunction
     options?: Partial<EvaluateOptions>,
     objectDeps?: ObjectDeps
   ): void {
+    // The inert rule (`_isMemoizableInertEvaluation`) keeps a SYMBOLIC
+    // result only: a function node that is not a collection value. A number
+    // or a list literal is cheap to produce again and would be retained for
+    // the node's lifetime. Tested first: it is a few field reads, where the
+    // object walk below is a traversal of the result.
+    if (
+      !this.isLazyCollection &&
+      !(result instanceof BoxedFunction && result.isCollection !== true)
+    ) {
+      if (CACHE_STATS) recordCache('lazyValue', 'declineStore');
+      return;
+    }
     // A payload that transitively holds a mutable object is never memoized:
     // the entry would keep that object alive for the node's lifetime (ruling
     // B12), and the object's own contents are not part of what the version
@@ -3576,6 +3652,11 @@ export class BoxedFunction
     // `xs := Append(xs, 1)`, whose `R` is a live view of `xs` and does NOT
     // evaluate to itself.
     if (result !== this && result instanceof BoxedFunction) {
+      // A result of the inert rule is NOT primed: an evaluate handler returns
+      // its expression without evaluating it, so `f(1)` whose handler answers
+      // `g(1)` would freeze `g(1)` as its own value where `g(1)` evaluates
+      // to `2`. Only a result that is itself a constant lazy view is primed,
+      // as before.
       if (
         result._value.value === null &&
         result._isMemoizableLazyCollection(options) &&
@@ -3593,13 +3674,23 @@ export class BoxedFunction
   }
 
   /** The memo key of {@link _memoizedLazyCollectionValue}: `undefined` for a
-   * constant, pure node (no value write can make it stale — the epoch axis
-   * still applies), the generation otherwise, or `false` when the node is
-   * impure and must not be memoized at all. */
+   * constant, pure lazy collection view (no value write can make it stale —
+   * the epoch axis still applies), the generation otherwise (always, for a
+   * node under the inert rule), or `false` when the node is impure and must
+   * not be memoized at all. */
   private _lazyCollectionMemoKey(
     generation: number
   ): number | undefined | false {
     if (!this.isPure) return false;
+    // The inert rule (`_isMemoizableInertEvaluation`) never takes the
+    // constant key: constant OPERANDS do not make the evaluation of an
+    // ordinary node constant. A user function applied to a literal,
+    // `f(1)` with `f(u) = u + x`, reads the free `x` of its body, and a
+    // value write advances the generation, not the world epoch, so a
+    // constant entry answered `x + 1` after `x := 2`. The generation key
+    // follows the write. The constant key is kept for a lazy collection
+    // view, whose accumulator loop depends on it (see the memo's comment).
+    if (!this.isLazyCollection) return generation;
     return this._ops.every((x) => x.isConstant) ? undefined : generation;
   }
 
@@ -3718,6 +3809,10 @@ export class BoxedFunction
     let memoizable: boolean;
     let sourceValues: EagerSourceValues | undefined;
     try {
+      // The inert rule (`_isMemoizableInertEvaluation`) is for the
+      // synchronous route only: a node whose operator has only an
+      // `evaluateAsync` handler stays inert on that route, and the entry it
+      // stores must not be served here in place of running the handler.
       memoizable = this._isMemoizableLazyCollection(options, true);
     } finally {
       sourceValues = detachEagerSourceValues(this);
