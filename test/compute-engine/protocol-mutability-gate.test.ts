@@ -510,6 +510,41 @@ let c = Cell(v: 7)`
     ]);
     expect(result(ce, 'c.size')).toBe('7');
   });
+
+  test('a `pure` member replaced by a `state` member gates, with no event in between', () => {
+    // The parsed requirements are cached per record and per `any` version. A
+    // re-declaration revalidates the conformances before it advances that
+    // version, so the cache must also check the members object: otherwise a
+    // call that cached the `pure` signature at the current version made the
+    // revalidation read it, and the `string` edge stayed fulfilled. A host
+    // implementation (a JavaScript function) is used because applying it does
+    // not advance the version, unlike a function literal.
+    const ce = new ComputeEngine();
+    ok(ce, 'protocol P { function touch(self: Self) pure -> string }');
+    ce.declareProtocolImplementation('string', 'P', {
+      functions: { touch: () => 's' },
+    });
+    expect(ce.box(['touch', "'a'"]).evaluate().toString()).toBe('"s"');
+
+    ce.box([
+      'DeclareProtocol',
+      'P',
+      [
+        'Dictionary',
+        [
+          'KeyValuePair',
+          'touch',
+          ['Pair', "'function'", "'(self: Self) state -> string'"],
+        ],
+      ],
+    ]);
+    expect(edges(ce, 'P')).toEqual([{ key: 'string', pending: true }]);
+    expect(() =>
+      ce.declareProtocolImplementation('integer', 'P', {
+        functions: { touch: () => 'i' },
+      })
+    ).toThrow(/protocol-requires-object/);
+  });
 });
 
 describe('the gate sits ahead of the duplicate guards, which still fire', () => {

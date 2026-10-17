@@ -791,6 +791,10 @@ export const SIMPLIFY_RULES: Rule[] = [
   //
   (x): RuleStep | undefined => {
     if (!isFunction(x, 'Hypot')) return undefined;
+    // `hypot(+∞, NaN)` is `+∞`, but `√((+∞)² + NaN²)` is `NaN`: with a `NaN`
+    // operand, the expression is left to the step for a `NaN` operand
+    // (`handledNanOperand()` in `boxed-expression/simplify.ts`).
+    if (x.ops.some((op) => isNumber(op) && op.isNaN === true)) return undefined;
     const ce = x.engine;
     return {
       value: ce.expr(['Sqrt', ['Add', ['Square', x.op1], ['Square', x.op2]]]),
@@ -861,9 +865,15 @@ export const SIMPLIFY_RULES: Rule[] = [
     const [y, x] = expr.ops;
     const ce = expr.engine;
 
-    // NaN in → NaN out.
-    if (y.isNaN === true || x.isNaN === true)
+    // NaN in → NaN out. Not when the other operand can have an effect or
+    // give an error (it is not pure, or its type is `error` or `never`):
+    // `evaluate()` evaluates it first, and `Arctan2(NaN,
+    // RuntimeError("boom"))` evaluates to the error.
+    if (y.isNaN === true || x.isNaN === true) {
+      if ([y, x].some((op) => op.isPure !== true || op.type.matches('error')))
+        return undefined;
       return { value: ce.NaN, because: 'arctan2' };
+    }
 
     // atan2 is a real-plane function: leave non-real operands symbolic.
     if ((isNumber(y) && y.isComplex) || (isNumber(x) && x.isComplex))

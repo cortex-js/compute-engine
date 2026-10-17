@@ -1609,11 +1609,14 @@ function binomialRaw(
     if (Number.isInteger(nPoint) && nPoint < 0 && !Number.isInteger(kPoint))
       return { kind: 'singular', at: nPoint };
     const v = binomialPointEnclosure(nPoint, kPoint);
-    // An infinite value is an overflow (a finite value above the largest
-    // double) or the limit at an infinite operand; the enclosures below hold
-    // both.
-    if (v.hi === Infinity) return ok({ lo: Number.MAX_VALUE, hi: Infinity });
-    if (v.lo === -Infinity) return ok({ lo: -Infinity, hi: -Number.MAX_VALUE });
+    // An infinite scalar value (a point at infinity) is an overflow (a finite
+    // value above the largest double) or the limit at an infinite operand;
+    // the enclosures below hold both. A finite scalar value whose error bound
+    // overflowed gives an enclosure with one or two infinite bounds that is
+    // already sound (`C(1e308, 1)` widens to the whole real line), and it is
+    // kept as it is: replacing it would exclude the true value.
+    if (v.lo === Infinity) return ok({ lo: Number.MAX_VALUE, hi: Infinity });
+    if (v.hi === -Infinity) return ok({ lo: -Infinity, hi: -Number.MAX_VALUE });
     return ok(v);
   }
 
@@ -1679,6 +1682,10 @@ function binomialRaw(
   let max = 0;
   let firstNonZero: number | undefined;
   if (hi - lo > MAX_INT_ENUM_POINTS) return { kind: 'entire' };
+  // Past the safe-integer range `m++` cannot advance (`−2^53 − 4 + 1` rounds
+  // back to `−2^53 − 4`), so the enumeration below would never end.
+  if (lo <= hi && (!Number.isSafeInteger(lo) || !Number.isSafeInteger(hi)))
+    return { kind: 'entire' };
   for (let m = lo; m <= hi; m++) {
     const v = binomialPointEnclosure(m, kPoint);
     if (v.lo === 0 && v.hi === 0) continue;

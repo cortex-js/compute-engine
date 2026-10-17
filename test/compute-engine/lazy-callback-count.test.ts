@@ -544,6 +544,28 @@ describe('Linspace extrema come from BOTH endpoints', () => {
     expect(ce.box(['Sum', wide]).evaluate().re).toBe(0);
   });
 
+  // The extremum is the element that iterating the collection yields at that
+  // endpoint. The samples are computed from the doubles of the endpoints, so
+  // the first element of `Linspace(1/3, 1, 3)` is the float `0.333…`, and
+  // the extremum was the exact operand `1/3`.
+  test('the extremum is the sample, not the endpoint operand', () => {
+    const sample = (mj: unknown, k: number) => ce.box(mj).at(k)!;
+    for (const [mj, op, k] of [
+      [['Linspace', ['Rational', 1, 3], 1, 3], 'Min', 1],
+      [['Linspace', ['Rational', 1, 3], 1, 1], 'Max', 1],
+      [['Linspace', 0, 'Pi', 3], 'Max', 3],
+      [['Linspace', 1, ['Rational', 1, 3], 3], 'Min', 3],
+    ] as [unknown, string, number][]) {
+      const r = ce.box([op, mj]).evaluate();
+      expect(r.isExact).toBe(false);
+      expect(r.isSame(sample(mj, k))).toBe(true);
+      expect(r.isSame([...ce.box(mj).each()][k - 1])).toBe(true);
+    }
+    // `At` of the one-operand form reads the samples that iteration yields.
+    expect(ce.box(['Linspace', 5]).at(1)?.re).toBe(1);
+    expect(ce.box(['Linspace', 5]).at(50)?.re).toBe(5);
+  });
+
   // A count that is not statically known leaves the sample set unknown, so
   // neither endpoint can be claimed as the extremum.
   test('symbolic-count Linspace stays symbolic', () => {

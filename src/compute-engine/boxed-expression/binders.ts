@@ -384,7 +384,7 @@ export function markShieldDeclaration(scope: Scope, name: string): void {
 }
 
 /** Is `def` a shield (see `markShieldDeclaration`)? */
-function isShield(def: BoxedValueDefinition): boolean {
+export function isShield(def: BoxedValueDefinition): boolean {
   return (def as unknown as Shielded)._isShield === true;
 }
 

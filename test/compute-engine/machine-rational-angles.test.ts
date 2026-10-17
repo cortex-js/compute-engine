@@ -77,6 +77,19 @@ describe('at machine precision a rational is the correctly rounded double', () =
     expect(m.box(['Cot', tiny.neg()]).N().toString()).toBe('-oo');
   });
 
+  test('a rational multiple of π with a subnormal sine keeps its size and sign', () => {
+    // sin(π/10³¹⁰) = 3.1415926535898e−310 (mpmath), a subnormal double.
+    // Both terms of the reduced angle were shifted right to bring the
+    // denominator into range, which made the numerator 0 (the sine 0) or,
+    // for −π/10³¹⁰, −1 (the sine −3.4e−301).
+    expect(m.parse('\\sin(\\frac{\\pi}{10^{310}})').N().re).toBe(
+      3.1415926535898e-310
+    );
+    expect(m.parse('\\sin(-\\frac{\\pi}{10^{310}})').N().re).toBe(
+      -3.1415926535898e-310
+    );
+  });
+
   test('cot at a zero on the exact-angle route is 0, as cos is', () => {
     // `5π/2` is reduced exactly to `π/2` and the big-decimal kernel runs at
     // 20 digits; its rounding dust is chopped for `cot` as it is for `cos`.

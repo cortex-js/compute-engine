@@ -989,6 +989,9 @@ describe('INTERVAL JS - ADDITIONAL FUNCTIONS', () => {
       [50.5, 25],
       [-200.5, 3],
       [171.5, -1.5],
+      // The product Γ(0.5)·Γ(171.6) of the denominator overflows although
+      // each factor is finite; the value is about 0.0432, not 0.
+      [170.1, -0.5],
     ])('Binomial(%p, %p)', (n, k) =>
       contains(run(['Binomial', 'n', 'k'], { n: at(n), k: at(k) }), [
         'Binomial',
@@ -1040,6 +1043,32 @@ describe('INTERVAL JS - ADDITIONAL FUNCTIONS', () => {
         expect(result.kind).toBe('interval');
         contains(result, ['Binomial', n0, k]);
         contains(result, ['Binomial', n1, k]);
+      }
+    });
+
+    // The scalar value 1e308 is finite, but its error bound overflows. The
+    // enclosure must hold 1e308, not be replaced by the overflow enclosure
+    // [largest double, +∞].
+    test('Binomial(1e308, 1) holds the finite value 1e308', () => {
+      const result = run(['Binomial', 'n', 'k'], { n: at(1e308), k: at(1) });
+      expect(result.kind).toBe('interval');
+      expect(result.value.lo).toBeLessThanOrEqual(1e308);
+      expect(result.value.hi).toBeGreaterThanOrEqual(1e308);
+    });
+
+    // Past the safe-integer range, `m + 1` rounds back to `m`: an enumeration
+    // of the negative integers n with k ≤ n ≤ −1 must not loop forever.
+    test('Binomial(n, k) with a negative integer k past the safe-integer range ends', () => {
+      const cases: Array<[[number, number], number]> = [
+        [[-9007199254740996, -9007199254740994], -9007199254740996],
+        [[-1e20 - 16384, -1e20], -1e20],
+      ];
+      for (const [[n0, n1], k] of cases) {
+        const result = run(['Binomial', 'n', 'k'], {
+          n: { lo: n0, hi: n1 },
+          k: at(k),
+        });
+        expect(result.kind).toBe('entire');
       }
     });
 

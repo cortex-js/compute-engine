@@ -290,6 +290,34 @@ describe('Anonymous parameters stop at a nested Function literal', () => {
     expect(ce.box(['Apply', f, 5]).evaluate().toString()).toBe('7');
   });
 
+  test('the outer `_` kept for a nested literal, with another slot', () => {
+    // The outer literal keeps `_` as its first parameter, and its other free
+    // slots follow. Before, only `_` was kept: the literal was unary, and
+    // the second argument was refused.
+    const ce = new ComputeEngine();
+    const f: Expression = [
+      'Function',
+      ['Add', '_2', ['Apply', ['Function', ['Add', '_1', '_'], '_1'], 2]],
+    ];
+    expect(ce.box(f).ops!.slice(1).map(String)).toEqual(['_', '_2']);
+    expect(ce.box(['Apply', f, 5, 7]).evaluate().toString()).toBe('14');
+  });
+
+  test('the nested parameter `_1` prints as `_1` beside the outer `_`', () => {
+    // A single `_1` parameter prints as `_`, unless the body mentions the
+    // `_` of an enclosing literal. Before, the nested literal printed as
+    // `(_) => _ + _`, where the two `_` are different parameters.
+    const ce = new ComputeEngine();
+    const f: Expression = [
+      'Function',
+      ['Apply', ['Function', ['Add', '_1', '_'], '_1'], 2],
+    ];
+    expect(ce.box(f).toString()).toBe('(_) => Apply((_1) => _ + _1, 2)');
+    expect(ce.box(['Function', ['Add', '_1', 1], '_1']).toString()).toBe(
+      '(_) => _ + 1'
+    );
+  });
+
   test('a nested literal that is not applied in place', () => {
     const ce = new ComputeEngine();
     const f: Expression = [

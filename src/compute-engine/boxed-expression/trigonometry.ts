@@ -1033,7 +1033,12 @@ function digitsPastOne(source: Expression): number {
  *   a big decimal at the working precision, and a double, read as ±1.
  *
  * `undefined` for any other argument and head, after a few tests on the
- * doubles of the operand in the usual case.
+ * doubles of the operand in the usual case. `null` when the argument is one
+ * of those above but its value cannot be computed with the digits of a
+ * double (a complex argument whose larger part is next to a branch point
+ * closer than a double can tell, `1 + 10^{-30} + 10^{-400}i`): the caller
+ * keeps the expression unevaluated, since the double kernels would read the
+ * argument as the branch point itself.
  *
  * The operand before its numeric evaluation (`raw`) is read when it is an
  * exact number literal, or, when the numeric operand may have lost a part
@@ -1051,7 +1056,7 @@ export function inverseTrigBigDecimalValue(
   name: string,
   op: Expression,
   raw: Expression | undefined
-): Expression | undefined {
+): Expression | null | undefined {
   const isAngle = INVERSE_TRIG_ANGLE.get(name);
   if (isAngle === undefined || !isNumber(op) || op.isNaN) return undefined;
   const ce = op.engine;
@@ -1137,6 +1142,7 @@ export function inverseTrigBigDecimalValue(
     const value = real
       ? realInverseTrig(head, re)
       : complexInverseTrig(head, re, im);
+    if (value === null) return null;
     if (value === undefined) return undefined;
     // An angle in another unit than radians is converted with the guard
     // digits, before the rounding.

@@ -983,6 +983,33 @@ describeMaybe('PYTHON EXECUTION PARITY — ReplaceAt / DeleteAt / Insert (venv)'
     expect(JSON.parse(out)).toEqual([1, 4, 9, 16]);
   });
 
+  // A string seed that no step updates is the result, as in the interpreter:
+  // the seed is not converted before the first update. Only an update of the
+  // string raises the `TypeError`. Before, the seed was converted before the
+  // first step, so an empty source raised the `TypeError` too.
+  it('a string seed that no step updates is the result', () => {
+    const e = new ComputeEngine();
+    e.declare('t', 'string');
+    e.declare('p', 'list<integer>');
+    const fold = ['Fold', ['Function', ['ReplaceAt', 'acc', 1, { str: 'x' }], 'acc', 'i'], 't', 'p'];
+    const fn = python.compileFunction(e.box(fold), 'fn_str0', ['t', 'p'], undefined, { constantFold: false });
+    expect(fn).toContain('_ce_replaceat_inplace(');
+    const src =
+      'import numpy as np\nimport json\n\n' +
+      `${fn}\n` +
+      'print(json.dumps(fn_str0("abc", [])))\n' +
+      'try:\n    fn_str0("abc", [1])\n    print("no error")\nexcept TypeError:\n    print("TypeError")\n';
+    const file = path.join(os.tmpdir(), `ce-py-liststr0-${process.pid}.py`);
+    fs.writeFileSync(file, src);
+    let out = '';
+    try {
+      out = execFileSync(VENV_PYTHON, [file], { encoding: 'utf8' });
+    } finally {
+      fs.unlinkSync(file);
+    }
+    expect(out.trim().split('\n')).toEqual(['"abc"', 'TypeError']);
+  });
+
   // Python has no standard grapheme segmentation, so a string that reaches
   // these helpers at run time raises a `TypeError` rather than being walked
   // by code points. A list of lists given to a statistic does not compile, and
@@ -1497,5 +1524,127 @@ describeMaybe('PYTHON EXECUTION PARITY — absence marker of element reads (venv
         name,
         [interpreted(json, -1), interpreted(json, 1)],
       ]);
+  });
+});
+
+/**
+ * Every operator that takes a predicate tests its result as the interpreter
+ * does, with the inputs of the JavaScript tests in
+ * `compile-range-predicate-loop.test.ts`. The Python lowerings read the
+ * result with the truthiness of Python, so `1` selected an element:
+ * `Filter(xs, x ↦ If(x > 1, True, 1))` over `[1, 2]` answered `[1, 2]`,
+ * where the interpreter throws. So did `nan`, the spelling of `Missing` on
+ * this target: `Filter(xs, x ↦ If(x > 1, True, Missing))` answered `[1, 2]`
+ * where the interpreter answers `[2]`. A predicate whose result type does not
+ * prove a boolean is now checked at each call (`_ce_predicate`), and a
+ * Python `TypeError` is raised where the JavaScript target throws.
+ */
+describeMaybe('PYTHON — predicates with a result that is not provably a boolean (venv)', () => {
+  const python = new PythonTarget();
+  const T1 = ['Function', ['If', ['Greater', 'x', 1], 'True', 1], 'x'];
+  const F1 = ['Function', ['If', ['Greater', 'x', 1], 'False', 1], 'x'];
+  const MISSING = ['Function', ['If', ['Greater', 'x', 1], 'True', 'Missing'], 'x'];
+  const BOOL = ['Function', ['Greater', 'x', 1], 'x'];
+
+  /** The compiled function and its value at `xs = [1, 2]`, as JSON, or the
+   * string `"TypeError"` when it raises one. */
+  function run(json: unknown): { code: string; value: unknown } {
+    const e = new ComputeEngine();
+    e.declare('xs', 'list<integer>');
+    const code = python.compileFunction(e.box(json as any), 'fn_pred', ['xs']);
+    const src =
+      'import numpy as np\nimport json\nimport math\n\n' +
+      `${code}\n` +
+      'try:\n' +
+      '    r = fn_pred([1, 2])\n' +
+      '    print(json.dumps(r.tolist() if hasattr(r, "tolist") else r))\n' +
+      'except TypeError:\n' +
+      '    print(json.dumps("TypeError"))\n';
+    const file = path.join(os.tmpdir(), `ce-py-pred-${process.pid}.py`);
+    fs.writeFileSync(file, src);
+    try {
+      return {
+        code,
+        value: JSON.parse(execFileSync(VENV_PYTHON, [file], { encoding: 'utf8' })),
+      };
+    } finally {
+      fs.unlinkSync(file);
+    }
+  }
+
+  it.each([
+    ['Filter', T1, 'TypeError'],
+    ['CountIf', T1, 'TypeError'],
+    ['Find', T1, 'TypeError'],
+    ['IndexWhere', T1, 'TypeError'],
+    ['Position', T1, 'TypeError'],
+    // The interpreter leaves `Any`/`All` unevaluated, which compiled code
+    // cannot give.
+    ['Any', F1, 'TypeError'],
+    ['All', T1, 'TypeError'],
+    // Any value that is not `True` ends the prefix, as in the interpreter.
+    ['TakeWhile', T1, []],
+    ['DropWhile', T1, [1, 2]],
+    // `Missing` does not select the element.
+    ['Filter', MISSING, [2]],
+    ['CountIf', MISSING, 1],
+  ])('%s is checked at each call', (op, predicate, expected) => {
+    const { code, value } = run([op, 'xs', predicate]);
+    expect(code).toContain('_ce_predicate(');
+    expect(value).toEqual(expected);
+  });
+
+  it.each([
+    ['Filter', [2]],
+    ['CountIf', 1],
+    ['Find', 2],
+    ['IndexWhere', 2],
+    ['Position', [2]],
+    ['Any', true],
+    ['All', false],
+    ['TakeWhile', []],
+    ['DropWhile', [1, 2]],
+  ])('%s with a boolean predicate is not checked', (op, expected) => {
+    const { code, value } = run([op, 'xs', BOOL]);
+    expect(code).not.toContain('_ce_predicate(');
+    expect(value).toEqual(expected);
+  });
+
+  it('a bare lambda that needs the check declines', () => {
+    const e = new ComputeEngine();
+    e.declare('xs', 'list<integer>');
+    expect(() =>
+      python.compileLambda(e.box(['Filter', 'xs', T1] as any), ['xs'])
+    ).toThrow(/_ce_predicate helper/);
+  });
+
+  // This target spells `Missing` as `nan`, so `_ce_predicate` reads a `nan`
+  // result as absent and skips the element. The interpreter reports a numeric
+  // `NaN` result as an error. Before 2026-10-17 `Filter(xs, x ↦ If(x > 1,
+  // True, NaN))` over `[1, 2]` answered `[2]` here. A selecting predicate
+  // whose result type admits `NaN` is now refused. A prefix predicate ends
+  // the prefix on `NaN` as the interpreter does, and still compiles.
+  const NAN = ['Function', ['If', ['Greater', 'x', 1], 'True', 'NaN'], 'x'];
+  const NUMBER = [
+    'Function',
+    ['If', ['Greater', 'x', 1], 'True', ['Divide', 'x', 0.5]],
+    'x',
+  ];
+  it.each([
+    ['Filter', NAN, 'list<integer>'],
+    ['CountIf', NAN, 'list<integer>'],
+    ['Find', NUMBER, 'list<number>'],
+  ])('%s with a predicate that may return NaN is refused', (op, predicate, type) => {
+    const e = new ComputeEngine();
+    e.declare('xs', type);
+    expect(() =>
+      python.compileFunction(e.box([op, 'xs', predicate] as any), 'fn', ['xs'])
+    ).toThrow(/cannot tell apart from the absent value `Missing`/);
+  });
+
+  it('TakeWhile with a predicate that may return NaN compiles', () => {
+    const { code, value } = run(['TakeWhile', 'xs', NAN]);
+    expect(code).toContain('_ce_predicate(');
+    expect(value).toEqual([]);
   });
 });

@@ -13,6 +13,7 @@
  */
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compile';
+import { CancellationError } from '../../src/common/interruptible';
 import {
   executeEpsil,
   parseEpsil,
@@ -232,5 +233,39 @@ describe('what stays lazy', () => {
     );
     ce.assign('xs', ce.box(['List', 7, 8]));
     expect(ce.box(['ListFrom', 'ys']).evaluate().toString()).toBe('[7,8]');
+  });
+});
+
+describe('a cancellation while the collection is listed', () => {
+  // A cancellation is not an enumeration failure: it propagates, and the
+  // assignment does not happen. Before, the listing caught it, stored the
+  // lazy value, and the program went on.
+  test('an abort propagates and the variable keeps no value', () => {
+    const ce = new ComputeEngine();
+    ce.declare('zap', {
+      signature: '(number) -> number',
+      evaluate: () => {
+        throw new CancellationError({ cause: 'aborted' });
+      },
+    });
+    ce.assign('k', 2);
+    expect(() =>
+      ce
+        .box([
+          'Block',
+          [
+            'Assign',
+            'ys',
+            [
+              'Map',
+              ['Function', ['Multiply', ['zap', 'c'], 'k'], 'c'],
+              ['Range', 1, 3],
+            ],
+          ],
+          { str: 'after' },
+        ])
+        .evaluate()
+    ).toThrow(CancellationError);
+    expect(ce.box('ys').evaluate().operator).not.toBe('Map');
   });
 });

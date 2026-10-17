@@ -765,6 +765,47 @@ describe('an integral with no value is not given a value', () => {
   });
 });
 
+describe('an oscillation that shrinks slowly has a value', () => {
+  // ∫₀¹ cos(ln t)/t^a dt = s/(1 + s²) with s = 1 − a (substitute
+  // t = e^(−u)). The shells next to 0 oscillate, and their envelope shrinks
+  // by the factor 2^(−s) at each shell. The largest shell in the last
+  // quarter was compared with the largest in the first quarter: at more
+  // than 0.9 times, the integral was given no value.
+  test.each([0.999, 0.9999])('∫₀¹ cos(ln t)/t^%s dt', (a) => {
+    const s = 1 - a;
+    const exact = s / (1 + s * s);
+    for (const maxIntervals of [100, 330, 1500]) {
+      const r = adaptiveQuadrature(
+        (t) => Math.cos(Math.log(t)) / t ** a,
+        0,
+        1,
+        { maxIntervals, singularEndpoints: true }
+      );
+      expect(r.divergent).toBe(false);
+      expect(Math.abs(r.estimate - exact)).toBeLessThan(1e-8);
+    }
+  });
+
+  test('.N() of ∫₀¹ cos(ln t)/t^0.999 dt', () => {
+    const r = ce.parse('\\int_0^1 \\frac{\\cos(\\ln t)}{t^{0.999}} dt').N();
+    expect(Math.abs(r.re - 0.001 / (1 + 1e-6))).toBeLessThan(1e-8);
+  });
+
+  test('the panels with no error estimate are replaced with their corner', () => {
+    // With 1500 panels, the panels next to 0 with a finite value and no
+    // finite error estimate were in the Gauss–Kronrod sum, but not in the
+    // value of the corner that its extrapolation replaces. The result was
+    // `0.010051002 ± 1.8e-10`.
+    const r = adaptiveQuadrature(
+      (t) => Math.cos(Math.log(t)) / t ** 0.99,
+      0,
+      1,
+      { maxIntervals: 1500, singularEndpoints: true }
+    );
+    expect(Math.abs(r.estimate - 0.01 / 1.0001)).toBeLessThan(1e-9);
+  });
+});
+
 describe('the correction of a singular endpoint', () => {
   test('a converged result is kept when tanh-sinh does not converge', () => {
     // 100 panels, 4 starting panels: a nested level of an iterated
@@ -776,6 +817,20 @@ describe('the correction of a singular endpoint', () => {
     });
     expect(r.converged).toBe(true);
     expect(Math.abs(r.estimate - 1e4 * Math.atan(1e4))).toBeLessThan(1e-8);
+  });
+
+  test.each([
+    ['(1 − x)^(−1/2)', (x: number) => (1 - x) ** -0.5, 2, 1e-10],
+    ['(1 − x)^(−0.999)', (x: number) => (1 - x) ** -0.999, 1000, 1e-4],
+  ])('one starting panel: ∫₀¹ %s is not counted twice', (_, f, exact, tol) => {
+    // The single starting panel is the corner of both endpoints. All its
+    // panels were counted in the lower corner, and the correction of the
+    // upper corner added the whole integral once more: `4` for `2`.
+    const r = adaptiveQuadrature(f, 0, 1, {
+      initialPanels: 1,
+      singularEndpoints: true,
+    });
+    expect(Math.abs(r.estimate - exact)).toBeLessThan(tol);
   });
 
   test.each([100, 330, 1500])(

@@ -1598,7 +1598,7 @@ describe('COMPILE COMPLEX - a declared `complex` PARAMETER', () => {
     expect(call.evaluate().toString()).toBe('[2,4,6]');
     const r3 = compile(call, { constantFold: false, fallback: false });
     expect(r3.success).toBe(true);
-    expect(r3.preamble).toContain('(z) => 2 * z');
+    expect(r3.preamble).toContain('(z = NaN) => 2 * z');
     expect(r3.run!({})).toEqual([2, 4, 6]);
   });
 });

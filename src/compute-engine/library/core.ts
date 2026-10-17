@@ -100,7 +100,10 @@ import {
   range,
   rangeLast,
 } from './collections.js';
-import { checkDeadline } from '../../common/interruptible.js';
+import {
+  checkDeadline,
+  throwIfCallerCancellation,
+} from '../../common/interruptible.js';
 import { typeToString } from '../../common/type/serialize.js';
 
 import { randomExpression } from './random-expression.js';
@@ -2588,7 +2591,11 @@ function assignedValue(ce: ComputeEngine, value: Expression): Expression {
       .function(isSet ? 'SetFrom' : 'ListFrom', [value])
       .evaluate();
     return isFunction(listed, isSet ? 'Set' : 'List') ? listed : value;
-  } catch {
+  } catch (e) {
+    // A cancellation (an abort, an iteration limit, the deadline of a
+    // caller) is not an enumeration failure: it propagates, and the
+    // assignment does not happen.
+    throwIfCallerCancellation(e, ce._deadlineFrame);
     return value;
   }
 }
@@ -5450,6 +5457,19 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
               ce._recursionKnots.set(knotName, { depth: 1, binding });
           }
         }
+        const releaseKnot = () => {
+          if (knotName !== undefined) {
+            const knot = ce._recursionKnots.get(knotName);
+            if (knot !== undefined && knot.depth > 1) knot.depth -= 1;
+            else ce._recursionKnots.delete(knotName);
+          }
+        };
+        // Set when the body canonicalization below ends without an error.
+        // An error (a cancellation from a deadline, for example) skips the
+        // install and its `finally`, so the knot is released here instead:
+        // a knot left behind made every later self-call of this name type
+        // `unknown`.
+        let canonicalized = false;
         try {
           // The parameter ascription canonicalizes the rebuilt literal itself,
           // so it must run INSIDE the loosened window like the plain
@@ -5464,8 +5484,10 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
                   includeScalar: true,
                 });
           canonFn = ascribed === args[1] ? args[1].canonical : ascribed;
+          canonicalized = true;
         } finally {
           restoreClause?.();
+          if (!canonicalized) releaseKnot();
         }
         // The knot name stays registered until the clause is installed
         // below: the clause's signature is assembled from the literal's type,
@@ -5631,11 +5653,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           }
           return ce._fn('DefineFunction', [symbol, canonFn, ...attrs]);
         } finally {
-          if (knotName !== undefined) {
-            const knot = ce._recursionKnots.get(knotName);
-            if (knot !== undefined && knot.depth > 1) knot.depth -= 1;
-            else ce._recursionKnots.delete(knotName);
-          }
+          releaseKnot();
         }
       },
       evaluate: ([op1, op2, op3], { engine: ce }) => {

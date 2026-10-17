@@ -308,6 +308,31 @@ describe('EXACT NUMERICALLY-KNOWN BOUNDS (item 117)', () => {
     expect([...v.each()]).toEqual([]);
   });
 
+  // The one-operand form `Linspace(n)` is recognized by its structure. A
+  // symbolic or infinite end point is present, so it must not be read as
+  // the one-operand form (that gave `At(Linspace(0, b, 5), 3) = 0.959…`).
+  test('Linspace(n) reads as the one-operand form', () => {
+    const v = engine.expr(['Linspace', 5]);
+    expect(v.at(1)?.re).toEqual(1);
+    expect([...v.each()].length).toEqual(50);
+  });
+
+  test('Linspace with a symbolic end point has no element and no iterator', () => {
+    const v = engine.expr(['Linspace', 0, 'b', 5]);
+    expect(v.at(3)).toBeUndefined();
+    expect(v.at(1)).toBeUndefined();
+    expect([...v.each()]).toEqual([]);
+    expect(
+      exprToString(engine.expr(['At', ['Linspace', 0, 'b', 5], 3]).evaluate())
+    ).toMatchInlineSnapshot(`["At", ["Linspace", 0, "b", 5], 3]`);
+  });
+
+  test('Linspace with an infinite end point has no element and no iterator', () => {
+    const v = engine.expr(['Linspace', 0, 'PositiveInfinity', 5]);
+    expect(v.at(1)).toBeUndefined();
+    expect(v.at(3)).toBeUndefined();
+    expect([...v.each()]).toEqual([]);
+  });
   test('Linspace with exact endpoints counts and enumerates', () => {
     const v = engine.expr(['Linspace', 0, ['Multiply', 2, 'Pi'], 5]).evaluate();
     expect(v.count).toEqual(5);
@@ -2788,6 +2813,24 @@ describe('Collection handler regressions (REVIEW.md B3–B8)', () => {
     );
   });
 
+  // `TupleFrom` and the `Tuple` literal built the tuple with
+  // `ce.tuple(...elements)`, a spread of the whole array into the arguments
+  // of a call, which exceeds the argument limit for a very large collection:
+  // `TupleFrom(Range(1, 300000))` was an `internal-error`.
+  test('TupleFrom and a Tuple literal of a very large collection', () => {
+    const t = engine.box(['TupleFrom', ['Range', 1, 300000]]).evaluate();
+    expect(t.operator).toBe('Tuple');
+    expect(t.nops).toBe(300000);
+    expect(t.ops[299999].re).toBe(300000);
+    const literal = engine.box([
+      'Tuple',
+      ...Array.from({ length: 300000 }, (_, i) => i),
+    ]);
+    expect(literal.operator).toBe('Tuple');
+    expect(literal.nops).toBe(300000);
+    expect(literal.isCanonical).toBe(true);
+  });
+
   // B6: Position threw on every match (missing `else` before the predicate
   // type-check throw).
   test('B6: Position returns indices of matching elements', () => {
@@ -3580,6 +3623,56 @@ describe('INDEX SEARCH OVER A SOURCE THAT CANNOT BE SEARCHED (issue #368)', () =
     );
     expect(plain(['IndexOf', ['Range', 1, 'NegativeInfinity'], 5])).toBe('0');
   });
+  test('a value that only reads as an integer is not answered from the grid', () => {
+    // As a double, the rational 9007199254740993/9007199254740992 is 1 and
+    // the decimal 3.00000000000000000001 is 3, but neither is the same as
+    // an element of the range. The grid answered 1 and 3.
+    const R = engine.box(['Range', 1, 'PositiveInfinity']);
+    const rational = engine.number([9007199254740993n, 9007199254740992n]);
+    // Its walk is capped at the iteration limit, so it stays symbolic.
+    expect(engine.function('IndexOf', [R, rational]).evaluate().operator).toBe(
+      'IndexOf'
+    );
+    const decimal = engine.parse('3.00000000000000000001');
+    expect(engine.function('IndexOf', [R, decimal]).evaluate().operator).toBe(
+      'IndexOf'
+    );
+  });
+  test('a float range contains and finds the elements it produces', () => {
+    // The second element of `Range(10^15, +oo, 0.1)` is the machine sum
+    // 1000000000000000.125, whose grid coordinate is 1.25. The tolerant grid
+    // check refuted it, so `Contains` was `False` and `IndexOf` was 0.
+    const R = engine.box(['Range', 1e15, 'PositiveInfinity', 0.1]);
+    const it = R.each();
+    it.next();
+    const second = it.next().value!;
+    expect(second.re).toBe(1000000000000000.125);
+    expect(R.contains(second)).toBe(true);
+    expect(engine.function('Contains', [R, second]).evaluate().symbol).toBe(
+      'True'
+    );
+    expect(engine.function('IndexOf', [R, second]).evaluate().re).toBe(2);
+    // A value between two elements is still refuted.
+    const R2 = engine.box(['Range', 0, 'PositiveInfinity', 0.1]);
+    expect(
+      engine.function('IndexOf', [R2, engine.number(0.35)]).evaluate().re
+    ).toBe(0);
+  });
+  test('a target past the safe integers does not make the element search loop', () => {
+    // With a tolerance of 0 the grid check does not accept `2^54 + 4`, and
+    // the search over the indexes near it ran on indexes that are not exact
+    // machine integers: `mid + 1` rounded to `mid`, and the loop did not end.
+    // The element at such an index cannot be compared exactly, so the
+    // membership is indeterminate.
+    const ce = new ComputeEngine();
+    ce.tolerance = 0;
+    const R = ce.box(['Range', 0, 'PositiveInfinity', 1]);
+    expect(R.contains(ce.number(2 ** 54 + 4))).toBeUndefined();
+    expect(R.contains(ce.number(2 ** 53 + 2))).toBeUndefined();
+    // A target with safe indexes is still decided.
+    expect(R.contains(ce.number(12345))).toBe(true);
+    expect(R.contains(ce.number(1.5))).toBe(false);
+  });
   test('a finite source larger than the iteration limit is walked to its end', () => {
     expect(plain(['IndexOf', ['Range', 1, 5000], 4000])).toBe('4000');
     expect(plain(['IndexOf', ['Range', 1, 5000], 6000])).toBe('0');
@@ -3661,6 +3754,49 @@ describe('THE MATERIALIZATION OPTION DESCRIBES THE RESULT, NOT THE OPERANDS', ()
       .evaluate({ materialization: true });
     expect(held.operator).toBe('When');
     expect(held.toString()).toBe('[5,10] {0 < t}');
+  });
+  test('a nested list or set is materialized once, not once per level', async () => {
+    // The `List` and `Set` handlers evaluate each element with the option.
+    // Their result was then evaluated again element by element, so the
+    // handler ran 2046 times for ten nested lists, twice as often for each
+    // added level. The calls of the handler are counted: each of the ten
+    // levels runs it once.
+    const ce = new ComputeEngine();
+    for (const head of ['List', 'Set']) {
+      const def = (ce.lookupDefinition(head) as any).operator;
+      const evaluate = def.evaluate;
+      let count = 0;
+      def.evaluate = (...args: unknown[]) => {
+        count += 1;
+        return evaluate(...args);
+      };
+      try {
+        let json: unknown = ['Range', 1, 3];
+        for (let k = 0; k < 10; k++) json = [head, json];
+        ce.box(json as never).evaluate({ materialization: true });
+        expect(count).toBe(10);
+      } finally {
+        def.evaluate = evaluate;
+      }
+    }
+  });
+  test('a dictionary in a tuple is materialized', async () => {
+    // The values of a dictionary nested in a tuple are materialized, as the
+    // values of a dictionary that is the result are.
+    const ce = new ComputeEngine();
+    const dict = ['Dictionary', ['Tuple', "'a'", ['Range', 1, 200]]];
+    const expected = JSON.stringify(
+      ce.box(dict as never).evaluate({ materialization: true }).json
+    );
+    expect(expected).toContain('200]');
+    const pair = ['Tuple', dict, 1];
+    expect(
+      JSON.stringify(
+        ce.box(pair as never).evaluate({ materialization: true }).json
+      )
+    ).toBe(`["Tuple",${expected},1]`);
+    const v = await ce.box(pair as never).evaluateAsync({ materialization: true });
+    expect(JSON.stringify(v.json)).toBe(`["Tuple",${expected},1]`);
   });
 });
 

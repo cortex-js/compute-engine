@@ -1,6 +1,7 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import type { Expression } from '../../src/compute-engine/global-types';
 import { BigDecimal } from '../../src/big-decimal';
+import type { MathJsonExpression } from '../../src/math-json/types';
 
 // Whether a number is exact is decided by the ROUTE it arrives on, not by its
 // value (user decision of 2026-09-27, ROADMAP "Residues of the exact-boxing
@@ -490,6 +491,37 @@ describe('FLOAT OPERANDS OF NUMERIC OPERATORS', () => {
     test('x^{0.5} keeps its float exponent, as x^{1.0} does', () => {
       expect(leaves(pce.parse('x^{0.5}'))).toBe('Power(x, 0.5~)');
       expect(leaves(pce.parse('x^{1/2}'))).toBe('Sqrt(x)');
+    });
+
+    // A float root index makes the root a float, also when its value is an
+    // integer. Before, `Root(2, 2.0)` canonicalized to the exact `Sqrt(2)`,
+    // `Root(2, 1.0)` to the exact `2`, and the `.root()` methods read the
+    // float index as the integer.
+    test('a float root index keeps the root a float', () => {
+      const root = (x: MathJsonExpression, n: string) =>
+        pce.box(['Root', x, { num: n }]);
+      expect(leaves(root(2, '2.0'))).toBe('Root(2, 2~)');
+      expect(leaves(root(2, '1.0'))).toBe('Root(2, 1~)');
+      expect(leaves(root('x', '2.0'))).toBe('Root(x, 2~)');
+      expect(leaves(root(2, '1.0').evaluate())).toBe('2~');
+      expect(leaves(root(8, '3.0').evaluate())).toBe('2~');
+      const r = root(2, '2.0').evaluate();
+      expect(r.isExact).toBe(false);
+      expect(r.re).toBeCloseTo(Math.SQRT2, 14);
+      expect(root(2, '-2.0').evaluate().isExact).toBe(false);
+      // The LaTeX round trip keeps the float index.
+      expect(root(2, '2.0').latex).toBe('\\sqrt[2.0]{2}');
+      expect(pce.parse(root(2, '2.0').latex).evaluate().isExact).toBe(false);
+      expect(pce.parse('2^{1/2.0}').evaluate().isExact).toBe(false);
+      // The methods.
+      const f2 = pce.box({ num: '2.0' });
+      expect(pce.number(2).root(f2).isExact).toBe(false);
+      expect(leaves(pce.number(8).root(pce.box({ num: '3.0' })))).toBe('2~');
+      expect(leaves(pce.number(2).pow(f2))).toBe('4~');
+      expect(leaves(pce.symbol('x').root(f2))).toBe('Root(x, 2~)');
+      // An exact index keeps the exact root.
+      expect(leaves(pce.box(['Root', 2, 2]))).toBe('sqrt(2)');
+      expect(leaves(pce.box(['Root', 8, 3]).evaluate())).toBe('2');
     });
 
     // Kept as they are, as Mathematica does: `Max` returns one of its

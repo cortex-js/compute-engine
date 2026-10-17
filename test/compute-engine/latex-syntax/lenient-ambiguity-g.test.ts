@@ -164,9 +164,15 @@ describe('a factorial next to an exponent or a radical', () => {
     ['√i!', '["Factorial",["Sqrt","i"]]'],
     ['n!²', '["Power",["Factorial","n"],2]'],
     ['x^2!', '["Factorial",["Power","x",2]]'],
+    // `**` is read as `^`, and is reported as `^` is
+    ['x**2!', '["Factorial",["Power","x",2]]'],
+    ['2**-k!', '["Factorial",["Power",2,["Negate","k"]]]'],
+    ['x**{2}!', '["Factorial",["Power","x",2]]'],
+    ['n!**2', '["Power",["Factorial","n"],2]'],
   ]);
   expectNotReported('ambiguous-factorial', [
     'n!',
+    'x*2!',
     'n!!',
     '5! = 120',
     '(M^3)!',
@@ -182,6 +188,9 @@ describe('a factorial next to an exponent or a radical', () => {
     expect(span('√i!', 'ambiguous-factorial')).toBe('√i!');
     expect(span('(n+1)!^2', 'ambiguous-factorial')).toBe('(n+1)!^2');
     expect(span('10!^2', 'ambiguous-factorial')).toBe('10!^2');
+    expect(span('x**2!', 'ambiguous-factorial')).toBe('x**2!');
+    expect(span('(n+1)!**2', 'ambiguous-factorial')).toBe('(n+1)!**2');
+    expect(span('n!**-2', 'ambiguous-factorial')).toBe('n!**-2');
     // `5!=120` keeps its own report
     expect(lenient('5!=120').codes).toEqual(['ambiguous-factorial']);
   });
@@ -236,6 +245,12 @@ describe('the end of a function argument', () => {
     'sin x',
     "sin'(x)",
     'sin\\prime(x)',
+    'sin\\doubleprime(x)',
+    'sin\\tripleprime(x)',
+    "sin '(x)",
+    'sin \\doubleprime(x)',
+    'sin^\\prime(x)',
+    'sin^{\\prime}(x)',
   ]);
 
   // A prime after a function name with no backslash is the derivative of the
@@ -245,8 +260,12 @@ describe('the end of a function argument', () => {
     ["sin'(x)", '["Apply",["Derivative","sin",1],"x"]'],
     ['sin\\prime(x)', '["Apply",["Derivative","sin",1],"x"]'],
     ['sin\\doubleprime(x)', '["Apply",["Derivative","sin",2],"x"]'],
+    ['sin\\tripleprime(x)', '["Apply",["Derivative","sin",3],"x"]'],
+    ["sin '(x)", '["Apply",["Derivative","sin",1],"x"]'],
+    ['sin^{\\prime}(x)', '["Apply",["Derivative","sin",1],"x"]'],
   ])('%s is a derivative', (input, expected) => {
     expect(lenient(input).json).toBe(expected);
+    expect(lenient(input).codes).toEqual([]);
   });
 });
 
@@ -257,6 +276,22 @@ describe('names', () => {
   expectNotReported('ambiguous-missing-base', ['x_1', 'x_{1}', '-x_1', 'x _1']);
   test('the span', () => {
     expect(span('-_1', 'ambiguous-missing-base')).toBe('_1');
+  });
+  test('a subscript after an operand and white space is not reported', () => {
+    // `x _2` is `x_2`, also when a `_` with no base occurs on the same line
+    expect(lenient('-_1 + x _2').codes).toEqual(['ambiguous-missing-base']);
+    expect(lenient('- _1').codes).toEqual(['ambiguous-missing-base']);
+    expect(
+      new ComputeEngine().parse('-_1 + x _2', {
+        strict: false,
+        form: 'raw',
+        onAmbiguity: 'error',
+      }).json
+    ).toEqual([
+      'Add',
+      ['Error', "'ambiguous-missing-base'", ['LatexString', "'_1'"]],
+      ['Subscript', 'x', 2],
+    ]);
   });
 
   expectReported('ambiguous-constant-name', [['ii', '"ImaginaryUnit"']]);

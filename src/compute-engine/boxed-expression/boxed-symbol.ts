@@ -441,11 +441,16 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   }
 
   root(n: number | Expression): Expression {
+    // A float index is not read as a number, also when its value is an
+    // integer: `x.root(2.0)` is `Root(x, 2.0)`, not the exact `Sqrt(x)`, as
+    // `Root(x, 2.0)` canonicalizes.
     const e =
       typeof n === 'number'
         ? n
         : isNumber(n)
-          ? realExponentValue(n)
+          ? n.isExact
+            ? realExponentValue(n)
+            : undefined
           : n.im === 0
             ? n.re
             : undefined;

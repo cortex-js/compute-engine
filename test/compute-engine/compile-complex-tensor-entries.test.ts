@@ -153,6 +153,43 @@ describe('COMPLEX ENTRIES IN COMPILED ARRAYS', () => {
     expect(r.run!({ t: 1 })).toEqual([c(4, 2), 6]);
   });
 
+  test('An absent element of a fold from a function typed unknown is NaN', () => {
+    // The dispatching helpers read an absent element (`undefined`, `null`)
+    // as a complex value and threw, and `Product` dropped an absent scalar
+    // factor: `Product` of `[[2, 3], undefined]` was `[2, 3]`. The
+    // interpreter gives `[NaN, NaN]` for an absent operand of `Add` or
+    // `Multiply`.
+    for (const op of ['Sum', 'Product']) {
+      for (const value of [
+        '[[2, 3], undefined]',
+        '[[2, 3], null]',
+        '[undefined, [2, 3]]',
+        '[[{ re: 1, im: 1 }, 3], undefined]',
+      ]) {
+        const ce = new ComputeEngine();
+        ce.declare('h', '(number) -> unknown');
+        ce.declare('t', 'number');
+        const r = compile(ce.box([op, ['h', 't']]), {
+          fallback: false,
+          functions: { h: new Function(`return ${value}`) },
+        } as any);
+        // A complex entry times `NaN` is a complex value with `NaN` parts.
+        const out = r.run!({ t: 1 }) as unknown[];
+        expect(out).toHaveLength(2);
+        for (const v of out)
+          expect(
+            typeof v === 'number' ? v : (v as C).re + (v as C).im
+          ).toBeNaN();
+      }
+    }
+    expect(
+      new ComputeEngine()
+        .box(['Product', ['List', ['List', 2, 3], 'Missing']])
+        .evaluate()
+        .toString()
+    ).toBe('[NaN,NaN]');
+  });
+
   test('Multiply of complex rows or matrices read with At refuses to compile', () => {
     // This route refuses complex operands, but its test missed an operand
     // typed with an absent arm (`At(P, 1)`): it compiled the real product,
@@ -371,6 +408,18 @@ describe('FOLDS WHOSE SHAPE THE TYPE DID NOT GIVE', () => {
     const ce = new ComputeEngine();
     ce.declare('P', type);
     expect(ce.box(['Sum', 'P']).type.toString()).toBe('broadcastable<real>');
+    // The empty list sums to 0 and multiplies to 1: the type includes them
+    // when the element type does not.
+    ce.declare('Q', 'list<broadcastable<nan>>');
+    expect(ce.box(['Sum', 'Q']).type.toString()).toBe(
+      'broadcastable<nan> | integer'
+    );
+    expect(ce.box(['Product', 'Q']).type.toString()).toBe(
+      'broadcastable<nan> | integer'
+    );
+    ce.assign('Q', ce.box(['List']));
+    expect(ce.box(['Sum', 'Q']).evaluate().toString()).toBe('0');
+    expect(ce.box(['Product', 'Q']).evaluate().toString()).toBe('1');
   });
 
   test('one matrix of unknown size sums and multiplies its rows', () => {

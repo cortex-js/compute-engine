@@ -20,7 +20,11 @@ export {
 };
 
 import { asRational } from './numerics.js';
-import { bignumPreferred, getImaginaryFactor } from './utils.js';
+import {
+  bignumPreferred,
+  getImaginaryFactor,
+  indeterminateAnswerReadsVariable,
+} from './utils.js';
 import {
   exactUnitCircle,
   halfTurnAngle,
@@ -724,7 +728,12 @@ export function canonicalRoot(
     // `realExponentValue` is `undefined` for an exact non-integer index whose
     // double is an integer (`(10^{400}+1)/10^{400}` projects to `1`); the
     // exact rational index is then handled by the `p/q` rewrite below.
-    if (isNumber(b) && !b.isComplex) exp = realExponentValue(b);
+    // A float index is not read, also when its value is an integer: a float
+    // operand makes the root a float, so `Root(2, 2.0)` is not the exact
+    // `Sqrt(2)` and `Root(2, 1.0)` is not the exact `2`. Such a root is kept
+    // as it is, as `x^{0.5}` keeps its float exponent, and evaluates to a
+    // float.
+    if (isNumber(b) && !b.isComplex && b.isExact) exp = realExponentValue(b);
   }
 
   if (exp === 1) return a;
@@ -796,6 +805,7 @@ export function canonicalRoot(
     typeof b !== 'number' &&
     isNumber(b) &&
     !b.isComplex &&
+    b.isExact &&
     (exp === undefined || !Number.isInteger(exp)) &&
     (a.isCanonical || a.isStructural)
   ) {
@@ -1236,13 +1246,19 @@ export function pow(
   // other operand is inexact (`nanOperandAnswer()`), and `NaN` under a
   // numeric approximation. The numeric kernels below would answer the `NaN`
   // literal.
+  // Without a numeric approximation, the power is kept when the answer
+  // depends on the value of a variable that the other operand reads
+  // (`indeterminateAnswerReadsVariable()`).
   if (
     (isNumber(x) && x.isIndeterminate) ||
     (typeof exp !== 'number' && isNumber(exp) && exp.isIndeterminate)
-  )
-    return numericApproximation
-      ? x.engine.NaN
-      : nanOperandAnswer(x.engine, [x, x.engine.expr(exp)]);
+  ) {
+    if (numericApproximation) return x.engine.NaN;
+    const ops = [x, x.engine.expr(exp)];
+    if (indeterminateAnswerReadsVariable(ops))
+      return x.engine._fn('Power', ops);
+    return nanOperandAnswer(x.engine, ops);
+  }
 
   // A residue class in the power: only the residue rules apply
   // (`residueArithmetic()`). It comes after the `Indeterminate` rule above,

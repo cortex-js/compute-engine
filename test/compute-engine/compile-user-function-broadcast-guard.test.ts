@@ -258,7 +258,7 @@ describe('a complex-declared function LITERAL spliced in value position', () => 
     // broadcast-aware wrapper that an element which is a collection needs.
     expect(r?.code).toBe(
       '((_f) => (_lit_1).map((_x) => _f(_x)))(((_tv1) => (_tv2) => ' +
-        'Array.isArray(_tv2) ? _SYS.bcastFn(_tv1, _tv2) : _tv1(_tv2))(((x) => 2 * x)))'
+        'Array.isArray(_tv2) ? _SYS.bcastFn(_tv1, _tv2) : _tv1(_tv2))(((x = NaN) => 2 * x)))'
     );
     expect(r?.code).not.toContain('_SYS.cplx');
     expect(r?.run?.({})).toEqual([2, 4, 6]);
@@ -282,7 +282,9 @@ describe('a complex-declared function LITERAL spliced in value position', () => 
     // The shim temporaries are numbered after the two the complex product in
     // `Q`'s own body takes (`2x` binds each factor to a hygienic temporary).
     expect(r?.preamble).toContain(
-      'const _fn_Q$v = (_tv3) => _fn_Q(_SYS.cplx(_tv3));'
+      // An absent argument is read as `NaN` before the complex coercion, as
+      // the interpreter reads an absent value at a numeric parameter.
+      'const _fn_Q$v = (_tv3) => _fn_Q(_SYS.cplx(_tv3 === undefined ? NaN : _tv3));'
     );
     expect(r?.preamble).toContain(
       'const _fn_Q$b = (_tv4) => Array.isArray(_tv4) ? ' +

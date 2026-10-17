@@ -65,6 +65,7 @@ import {
   isNumericTupleType,
   mayBeNumericTupleType,
   parameterReachesBody,
+  runsLibraryCanonicalForm,
   typeHandlerContext,
   withCodomainForAbsentAnswer,
 } from './derive-application-type.js';
@@ -84,6 +85,7 @@ import {
   topTypeOfTriggers,
 } from './broadcast-lift-type.js';
 import { listedBroadcastCells } from './listed-element.js';
+import { literalMayEraseElement } from './nothing-erasure.js';
 import {
   MAX_SIZE_EAGER_COLLECTION,
   broadcastLengthMismatch,
@@ -140,6 +142,7 @@ import {
   isExpression,
   isNumber,
   isFunction,
+  isDictionary,
   isString,
   isCharacter,
   isSymbol,
@@ -2676,11 +2679,16 @@ export class BoxedFunction
     ]);
     if (residue !== undefined) return residue;
 
+    // A float index is not read as a number, also when its value is an
+    // integer: `f.root(2.0)` is `Root(f, 2.0)`, not the exact `Sqrt(f)`, as
+    // `Root(f, 2.0)` canonicalizes.
     const e =
       typeof exp === 'number'
         ? exp
         : isNumber(exp)
-          ? realExponentValue(exp)
+          ? exp.isExact
+            ? realExponentValue(exp)
+            : undefined
           : exp.im === 0
             ? exp.re
             : undefined;
@@ -2950,8 +2958,17 @@ export class BoxedFunction
     // see it), and a served entry must fold its dependencies into any
     // enclosing collector, since a hit performs no field reads of its own.
     const typeCell = cachedCell(this._type, generation);
+    // `typeCell.generation` is checked as well as `_typeGeneration`: when
+    // `cachedValue` declines a commit (a provisional read happened), it puts
+    // the cell's previous key back and keeps the previous value, while
+    // `_typeGeneration` below is still set to the generation observed on
+    // entry. Without the cell check, the next read at that generation served
+    // the previous value from here — one computed under another key, which
+    // since the value-shield key (`_cacheGeneration()`) can be the
+    // value-blind answer of a shield, or the valued answer outside one.
     if (
       this._typeGeneration === generation &&
+      typeCell.generation === generation &&
       typeCell.value !== null &&
       objectDepsValid(typeCell.objectDeps)
     ) {
@@ -4394,6 +4411,12 @@ export class BoxedFunction
     let count: number | bigint | undefined;
     for (const op of ops) {
       if (!isLambdaBroadcastParticipant(op)) continue;
+      // A symbol typed `string | list<number>` (or `tuple<…> | list<…>`)
+      // participates by its type, but when it holds a string or a tuple,
+      // the call binds that value whole: it supplies no cells, and its
+      // `count` (the number of characters, or of components) is not the
+      // length of the result.
+      if (isTextAtom(op) || isTuple(op)) continue;
       const c = op.count;
       if (c === undefined) return undefined;
       if (count === undefined) count = c;
@@ -5607,10 +5630,14 @@ export class BoxedFunction
       // The display preview of a view does not evaluate its operands (see
       // `heldEagerSources()`), and the preview check of step 3 answers for it.
       if (!isDisplayPreviewOf(this, options)) {
-        const resolved = resolveAbsentableLazyOperands(def, this._ops!, (x) =>
-          x.evaluate(operandOptions(options))
+        const resolved = resolveAbsentableLazyOperands(
+          this.operator,
+          def,
+          this._ops!,
+          (x) => x.evaluate(operandOptions(options))
         );
         if (resolved !== undefined) {
+          if ('error' in resolved) return resolved.error;
           if (resolved.absent) return absentScalarMarker(this.engine, this);
           return this._withParseScope(() =>
             this.engine.function(this._operator, resolved.ops)
@@ -6362,9 +6389,12 @@ export class BoxedFunction
       //
       // 6/ Call the `evaluate` handler
       //
+      // An absent value at a declared numeric parameter of a function
+      // literal is read as `NaN` (`declaredLambdaOperands`).
+      const handlerOperands = declaredLambdaOperands(this.engine, def, tail);
       let evalResult: Expression | undefined;
       try {
-        evalResult = def.evaluate?.(tail, {
+        evalResult = def.evaluate?.(handlerOperands, {
           numericApproximation,
           engine: this.engine,
           materialization: materialization,
@@ -6439,7 +6469,11 @@ export class BoxedFunction
 
       // 6b/ A lazy collection answered by the handler is materialized as
       // asked (`materializeLazyResult`).
-      const materializedResult = materializeLazyResult(result, options);
+      const materializedResult = materializeLazyResult(
+        result,
+        options,
+        handlerMaterializedElements(def, this._operator, result)
+      );
       if (materializedResult !== result) return materializedResult;
 
       // 6c/ Pole-aware numeric evaluation: at a known pole, N() yields
@@ -6809,11 +6843,13 @@ export class BoxedFunction
       // evaluate it.
       if (!isDisplayPreviewOf(this, options)) {
         const resolved = await resolveAbsentableLazyOperandsAsync(
+          this.operator,
           def,
           this._ops!,
           (x) => x.evaluateAsync(operandOptions(options))
         );
         if (resolved !== undefined) {
+          if ('error' in resolved) return resolved.error;
           if (resolved.absent) return absentScalarMarker(this.engine, this);
           // The call is rebuilt after an `await`, so it is canonicalized in
           // the context of this evaluation (the scope of an enclosing `Sum`
@@ -7517,7 +7553,10 @@ export class BoxedFunction
         // long operand yields and honors the abort signal; the handler then
         // evaluates values. Not under `.N()`: a comparison near a tie
         // re-reads the operand as written to decide it exactly.
-        let handlerOps: ReadonlyArray<Expression> = tail;
+        // An absent value at a declared numeric parameter of a function
+        // literal is read as `NaN` (`declaredLambdaOperands`).
+        const declaredOps = declaredLambdaOperands(this.engine, def, tail);
+        let handlerOps: ReadonlyArray<Expression> = declaredOps;
         let operandsEvaluated = false;
         if (
           demandsOperands &&
@@ -7563,7 +7602,7 @@ export class BoxedFunction
           effects,
           () => {
             if (def.evaluateAsync !== undefined)
-              return def.evaluateAsync(tail, opts);
+              return def.evaluateAsync(declaredOps, opts);
             // A user function: the body statements are awaited.
             const applyAwaiting = (
               def.evaluate as
@@ -7647,11 +7686,15 @@ export class BoxedFunction
       // The elements are awaited (`materializeLazyResultAsync`), in the
       // registry and the context stack of this evaluation.
       if ((options?.materialization ?? false) !== false) {
-        const materializedResult = await materializeLazyResultAsync(result, {
-          ...options,
-          _effects: effects,
-          _contextStack: contextStack,
-        });
+        const materializedResult = await materializeLazyResultAsync(
+          result,
+          {
+            ...options,
+            _effects: effects,
+            _contextStack: contextStack,
+          },
+          handlerMaterializedElements(def, this._operator, result)
+        );
         if (materializedResult !== result) return materializedResult;
       }
 
@@ -7934,12 +7977,15 @@ function exactJumpBroadcastOperands(
   };
   const isCellCollection = (x: Expression): boolean =>
     isFunction(x, 'List') || isFunction(x, 'Tuple');
-  if (
-    !tail.some(
-      (x) => isCellCollection(x) && isFunction(x) && x.ops.some(isNearJump)
-    )
-  )
-    return undefined;
+  // The elements of a nested collection are examined too: the cells of
+  // `Floor([[0.999…]])` are built by a second broadcast, over the inner
+  // list, and that broadcast sees only the float when the outer one did
+  // not put back the exact inner list.
+  const hasNearJumpElement = (x: Expression): boolean =>
+    isCellCollection(x) &&
+    isFunction(x) &&
+    x.ops.some((y) => isNearJump(y) || hasNearJumpElement(y));
+  if (!tail.some(hasNearJumpElement)) return undefined;
 
   let changed = false;
   const result = tail.map((x, i) => {
@@ -7955,13 +8001,29 @@ function exactJumpBroadcastOperands(
       changed = true;
       return original;
     }
-    if (hasInexactNumberLiteral(original)) return x;
+    // A float literal in `original` does not make every element a float:
+    // the first element of `Abs([q, 1.5])` stays the exact `q`. So the exact
+    // value is used when it has an element that is not a float.
     const exact = original.evaluate();
     if (!sameShape(exact)) return x;
+    if (hasInexactNumberLiteral(original) && !hasExactElement(exact)) return x;
     changed = true;
     return exact;
   });
   return changed ? withExactScalarOperands(result, ops) : undefined;
+}
+
+/**
+ * True when some element of the `List` or `Tuple` `expr`, or of a `List` or
+ * `Tuple` nested in it, is not a float number literal.
+ */
+function hasExactElement(expr: Expression): boolean {
+  if (!isFunction(expr)) return false;
+  return expr.ops.some((x) =>
+    isFunction(x, 'List') || isFunction(x, 'Tuple')
+      ? hasExactElement(x)
+      : !isNumber(x) || x.isExact
+  );
 }
 
 /**
@@ -8059,8 +8121,11 @@ function exactJumpLazyBroadcastOperands(
     // `isTransitivelyPure()`, not `isPure`: a symbol whose stored value is
     // impure (`L` holds `Range(1, 300) + Random()`) is pure by `isPure`, but
     // its exact evaluation below would evaluate the stored value again.
+    // A float literal in `original` is not a reason to keep `x`: it does not
+    // make every element a float (the first element of
+    // `Abs(Join([q], Range(1, 300), [1.5]))` stays the exact `q`), and the
+    // elements of a lazy source are not examined.
     if (original === x || !isTransitivelyPure(original)) return x;
-    if (hasInexactNumberLiteral(original)) return x;
     const exact = original.evaluate();
     if (!isBroadcastableCollection(exact) || exact.count !== x.count) return x;
     changed = true;
@@ -8404,14 +8469,23 @@ function evaluateBroadcastLiftsOnce(
   ops: ReadonlyArray<Expression>,
   options: Partial<EvaluateOptions> | undefined
 ): ReadonlyArray<Expression> {
-  if (!ops.some((op) => !isBroadcastParticipant(op))) return ops;
+  if (
+    !ops.some((op) => !isBroadcastParticipant(op) || literalMayEraseElement(op))
+  )
+    return ops;
   // A lift is an operand: evaluated without `materialization`
   // (`operandOptions`), or a lift that reveals a lazy collection (a user
   // function returning `Range(1, n)`) would broadcast over its display
   // preview, placeholder included.
+  //
+  // A list literal with an element that may evaluate to `Nothing` is
+  // evaluated too, so that the broadcast walks the elements the list keeps
+  // (`literalMayEraseElement`).
   return ops.map((op) =>
     isBroadcastParticipant(op)
-      ? op
+      ? literalMayEraseElement(op)
+        ? (op.evaluate(operandOptions(options)) ?? op)
+        : op
       : normalizeLiftedAbsence(op, op.evaluate(operandOptions(options)) ?? op)
   );
 }
@@ -8421,13 +8495,18 @@ async function evaluateBroadcastLiftsOnceAsync(
   ops: ReadonlyArray<Expression>,
   options: Partial<EvaluateOptions> | undefined
 ): Promise<ReadonlyArray<Expression>> {
-  if (!ops.some((op) => !isBroadcastParticipant(op))) return ops;
+  if (
+    !ops.some((op) => !isBroadcastParticipant(op) || literalMayEraseElement(op))
+  )
+    return ops;
   // Awaited together, not in sequence: the lifts are independent, and the sync
   // mirror evaluates them without ordering either.
   return await Promise.all(
     ops.map(async (op) =>
       isBroadcastParticipant(op)
-        ? op
+        ? literalMayEraseElement(op)
+          ? ((await op.evaluateAsync(operandOptions(options))) ?? op)
+          : op
         : normalizeLiftedAbsence(
             op,
             (await op.evaluateAsync(operandOptions(options))) ?? op
@@ -9349,8 +9428,12 @@ function type(expr: BoxedFunction): Type | BoxedType {
     // A sum of a point (or a list of points) and a collection of numbers
     // (`L + (1, 1)` with `L := [0, 1, 2, 3]`) evaluates to a collection of
     // `incompatible-type` errors, one for each `number + point` element, so
-    // the static type is `error` (`addsPointToNumberCollection`).
+    // the static type is `error` (`addsPointToNumberCollection`). This is
+    // the behavior of the library `Add` and `Subtract`: a user definition
+    // that replaces the operator gives its own result type, with the same
+    // test as the derivation from operand types (`runsLibraryCanonicalForm`).
     if (
+      runsLibraryCanonicalForm(expr.engine, expr.operator, def) &&
       addsPointToNumberCollection(
         expr.operator,
         expr.ops.map((x) => x.type.type)
@@ -10205,6 +10288,52 @@ function declaredScalarConformance(
 }
 
 /**
+ * The evaluated arguments `ops` of a user function, with an absent value
+ * (`Missing`, `Undefined`) at a parameter whose DECLARED type is numeric
+ * replaced by `NaN`, or `ops` itself when there is none.
+ *
+ * A numeric parameter reads an absent argument as `NaN`
+ * (`docs/ERROR-MODEL.md`, ruling of 2026-09-30 on an absent argument at an
+ * annotated parameter). A function literal reads it so for the parameters
+ * it annotates (`makeLambda`, `function-utils.ts`), but the scalar types of
+ * a signature declared on the name are not written on the literal (see
+ * {@link declaredScalarConformance}), so the body received the absent value:
+ * `g(Missing)` answered `Missing` for `g` declared `(number) -> unknown` and
+ * assigned `x ↦ x`, where an Epsil `function g(x: number) { x }` answers
+ * `NaN`.
+ */
+function absentAsNaNAtDeclaredNumericParams(
+  ce: ComputeEngine,
+  declared: Type,
+  ops: ReadonlyArray<Expression>
+): ReadonlyArray<Expression> {
+  if (typeof declared === 'string' || declared.kind !== 'signature') return ops;
+  const args = declared.args ?? [];
+  const opt = declared.optArgs ?? [];
+  const paramAt = (i: number): Type | undefined =>
+    i < args.length
+      ? args[i].type
+      : i < args.length + opt.length
+        ? opt[i - args.length].type
+        : declared.variadicArg?.type;
+  if (
+    !ops.some((x, i) => {
+      const p = paramAt(i);
+      return (
+        isAbsentScalarSymbol(x) && p !== undefined && isSubtype(p, 'number')
+      );
+    })
+  )
+    return ops;
+  return ops.map((x, i) => {
+    const p = paramAt(i);
+    return isAbsentScalarSymbol(x) && p !== undefined && isSubtype(p, 'number')
+      ? ce.NaN
+      : x;
+  });
+}
+
+/**
  * The asynchronous route of {@link applyFunctionLiteral}: the arguments are
  * awaited with `evaluateAsync`, and the body of the function literal runs
  * its statements with `evaluateStatementsAsync` (`awaitStatements`), so that
@@ -10395,6 +10524,20 @@ function applyFunctionLiteralWith(
           mapsCollections,
           args
         );
+  // The arguments as the literal receives them: an absent value at a
+  // numeric parameter of the DECLARED signature is read as `NaN`
+  // (`absentAsNaNAtDeclaredNumericParams`), under the same conditions as the
+  // conformance check above.
+  const declaredArgs = (
+    args: ReadonlyArray<Expression>
+  ): ReadonlyArray<Expression> =>
+    !expr.engine.strict || def.inferredType || declaredType === undefined
+      ? args
+      : absentAsNaNAtDeclaredNumericParams(
+          expr.engine,
+          def._signatureSkeleton ?? declaredType,
+          args
+        );
   // The arguments are evaluated, so an infinite source (`Range(1, +∞)`,
   // `Cycle`) or one of unknown length maps too (`isUnknownLengthBroadcast`),
   // lazily, as at the operator-definition post-evaluation broadcast (step 4b).
@@ -10508,7 +10651,7 @@ function applyFunctionLiteralWith(
                       ._fn(expr.operator, zipped)
                       .evaluateAsync(options)
                   : (scalarConformance(zipped) ??
-                    apply(value, zipped, {
+                    apply(value, declaredArgs(zipped), {
                       ...options,
                       awaitStatements: true,
                       arityFrame,
@@ -10562,7 +10705,10 @@ function applyFunctionLiteralWith(
               ? expr.engine._fn(expr.operator, zipped).evaluate(options)
               : (scalarConformance(zipped) ??
                   appliedOrRefused(
-                    apply(value, zipped, { ...options, arityFrame }),
+                    apply(value, declaredArgs(zipped), {
+                      ...options,
+                      arityFrame,
+                    }),
                     zipped
                   ))
           );
@@ -10666,7 +10812,7 @@ function applyFunctionLiteralWith(
     if (nonconforming !== undefined) return nonconforming;
     return apply(
       value,
-      ops,
+      declaredArgs(ops),
       awaitBody
         ? { ...options, awaitStatements: true, arityFrame }
         : { ...options, arityFrame },
@@ -12136,6 +12282,30 @@ function unindexedCollectionOperandError(
 }
 
 /**
+ * The evaluated operands `ops` that the `evaluate` handler of the operator
+ * definition `def` receives: for a function literal under a signature
+ * DECLARED on its name (the case {@link genericRuntimeConformance} checks
+ * with `declaredScalarConformance`), an absent value at a numeric parameter
+ * of the declaration is read as `NaN`
+ * ({@link absentAsNaNAtDeclaredNumericParams}). `ops` itself otherwise.
+ */
+function declaredLambdaOperands(
+  ce: ComputeEngine,
+  def: BoxedOperatorDefinition | undefined,
+  ops: ReadonlyArray<Expression>
+): ReadonlyArray<Expression> {
+  if (!ce.strict || !(def instanceof _BoxedOperatorDefinition)) return ops;
+  if (def.lazy === true || def.inferredSignature) return ops;
+  if (!isUserFunctionDef(def) || !def._isLambda || def._derivedSignature)
+    return ops;
+  return absentAsNaNAtDeclaredNumericParams(
+    ce,
+    def._validationSignature ?? def.signature.type,
+    ops
+  );
+}
+
+/**
  * The dispatch-site gate for the generic runtime conformance check
  * (`runtimeConformanceError`, `validate.ts` — R1/R8, §4.4 of
  * `docs/plans/2026-08-22-type-handlers-on-types.md`), shared by the sync
@@ -12411,7 +12581,10 @@ function mayBeAbsentAsWhole(expr: Expression): boolean {
  * Each operand at a position that strips `missing` (`missingStrip`) that
  * `isAbsentableCollectionOperand` (`validate.ts`) admits is evaluated, and
  * replaced by its value when `settledAbsentableValue` says the value settles
- * the question. The operand is evaluated once: the operator is evaluated
+ * the question. When the value of such an operand is an error, that error,
+ * with the frame of this operator, is the result (`error`), even when
+ * another operand is absent: an error is absorbing, and the absence of an
+ * operand does not hide it. The operand is evaluated once: the operator is evaluated
  * again over the value, not over the operand. A second evaluation of an
  * operand whose value does not settle the question (an unassigned symbol
  * declared `list<integer> | missing`, a restriction whose condition is not
@@ -12427,13 +12600,15 @@ function mayBeAbsentAsWhole(expr: Expression): boolean {
  * cells, not one absent value), which its own handler computes.
  */
 function resolveAbsentableLazyOperands(
+  operator: string,
   def: BoxedOperatorDefinition,
   ops: ReadonlyArray<Expression>,
   evaluate: (x: Expression) => Expression
-): { ops: ReadonlyArray<Expression>; absent: boolean } | undefined {
+): AbsentableLazyOperands | undefined {
   const positions = absentableLazyOperandPositions(def, ops);
   if (positions.length === 0) return undefined;
   return settleAbsentableLazyOperands(
+    operator,
     ops,
     positions,
     positions.map((i) => evaluate(ops[i]))
@@ -12443,15 +12618,16 @@ function resolveAbsentableLazyOperands(
 /** `resolveAbsentableLazyOperands` on the asynchronous evaluation route: the
  * operands are evaluated with the asynchronous evaluator. */
 async function resolveAbsentableLazyOperandsAsync(
+  operator: string,
   def: BoxedOperatorDefinition,
   ops: ReadonlyArray<Expression>,
   evaluate: (x: Expression) => Promise<Expression>
-): Promise<{ ops: ReadonlyArray<Expression>; absent: boolean } | undefined> {
+): Promise<AbsentableLazyOperands | undefined> {
   const positions = absentableLazyOperandPositions(def, ops);
   if (positions.length === 0) return undefined;
   const values: Expression[] = [];
   for (const i of positions) values.push(await evaluate(ops[i]));
-  return settleAbsentableLazyOperands(ops, positions, values);
+  return settleAbsentableLazyOperands(operator, ops, positions, values);
 }
 
 /** The positions of the operands `resolveAbsentableLazyOperands` evaluates:
@@ -12474,14 +12650,27 @@ function absentableLazyOperandPositions(
   return positions;
 }
 
+/** The result of `resolveAbsentableLazyOperands`: the operands with the
+ * values that settle the question, or the first error among the values. */
+type AbsentableLazyOperands =
+  { ops: ReadonlyArray<Expression>; absent: boolean } | { error: Expression };
+
 /** The operands with each evaluated operand whose value settles the question
- * (`settledAbsentableValue`) replaced by that value; see
- * `resolveAbsentableLazyOperands`. */
+ * (`settledAbsentableValue`) replaced by that value, or the first error
+ * among the values; see `resolveAbsentableLazyOperands`. */
 function settleAbsentableLazyOperands(
+  operator: string,
   ops: ReadonlyArray<Expression>,
   positions: ReadonlyArray<number>,
   values: ReadonlyArray<Expression>
-): { ops: ReadonlyArray<Expression>; absent: boolean } | undefined {
+): AbsentableLazyOperands | undefined {
+  // The errors are read first: an error is the result even when another
+  // operand is absent. A collection with an error in one element is not an
+  // error (`errorValue()` does not look into a collection), and is kept.
+  for (const [k, i] of positions.entries()) {
+    const error = errorValue(values[k], { operator, index: i + 1 });
+    if (error !== undefined) return { error };
+  }
   let resolved: Expression[] | undefined;
   let absent = false;
   positions.forEach((i, k) => {
@@ -13008,31 +13197,61 @@ const CONTAINER_LITERAL_HEADS: ReadonlySet<string> = new Set([
 
 function materializeLazyResult(
   result: Expression,
-  options: Partial<EvaluateOptions> | undefined
+  options: Partial<EvaluateOptions> | undefined,
+  elementsMaterialized = false
 ): Expression {
   if ((options?.materialization ?? false) === false) return result;
-  return runMaterialization(lazyResultSteps(result, options), options);
+  return runMaterialization(
+    lazyResultSteps(result, options, elementsMaterialized),
+    options
+  );
 }
 
 /** The asynchronous twin of `materializeLazyResult()`: each element is
  * evaluated with `evaluateAsync()` (see `materializeAsync()`). */
 function materializeLazyResultAsync(
   result: Expression,
-  options: Partial<EvaluateOptions> | undefined
+  options: Partial<EvaluateOptions> | undefined,
+  elementsMaterialized = false
 ): Promise<Expression> {
   if ((options?.materialization ?? false) === false)
     return Promise.resolve(result);
   return runMaterializationAsync(
     result.engine,
-    lazyResultSteps(result, options),
+    lazyResultSteps(result, options, elementsMaterialized),
     options
   );
 }
 
-/** The steps of `materializeLazyResult()`: see `MaterializationSteps`. */
+/**
+ * Whether the handler of `operator` (definition `def`) already evaluated
+ * each element of its container literal `result` with the options of the
+ * evaluation, `materialization` included. This is true of the `List` and
+ * `Set` literals: they are `lazy`, and their handlers evaluate each element
+ * with the options. The elements of such a result are not evaluated again
+ * (`lazyResultSteps()`): each level of `[[[…]]]` evaluated its nested list a
+ * second time, so the cost doubled with each level of nesting.
+ */
+function handlerMaterializedElements(
+  def: BoxedOperatorDefinition,
+  operator: string,
+  result: Expression
+): boolean {
+  return (
+    def.lazy === true &&
+    result.operator === operator &&
+    CONTAINER_LITERAL_HEADS.has(operator)
+  );
+}
+
+/** The steps of `materializeLazyResult()`: see `MaterializationSteps`.
+ * `elementsMaterialized` is true when the handler that computed `result`
+ * already evaluated its elements with the options
+ * (`handlerMaterializedElements()`). */
 function* lazyResultSteps(
   result: Expression,
-  options: Partial<EvaluateOptions> | undefined
+  options: Partial<EvaluateOptions> | undefined,
+  elementsMaterialized: boolean
 ): MaterializationSteps {
   if (!(result instanceof BoxedFunction)) return result;
   // A container LITERAL's elements are part of the result, so the option
@@ -13041,13 +13260,19 @@ function* lazyResultSteps(
   // `src/cli/format.ts`). The elements were evaluated as operands, without
   // the option; a lazy element, or a nested container, is evaluated again
   // with it. A `List` literal does this in its own handler, and a lazy `Set`
-  // (a comprehension) is a view, materialized below, not a literal.
+  // (a comprehension) is a view, materialized below, not a literal. A
+  // dictionary element is evaluated again too: its evaluation evaluates
+  // each value with the options, so a lazy value (`Range(1, 200)`) is
+  // materialized.
   if (
     CONTAINER_LITERAL_HEADS.has(result.operator) &&
     !result.isLazyCollection
   ) {
+    if (elementsMaterialized) return result;
     const descends = (op: Expression) =>
-      op.isLazyCollection || CONTAINER_LITERAL_HEADS.has(op.operator);
+      op.isLazyCollection ||
+      CONTAINER_LITERAL_HEADS.has(op.operator) ||
+      isDictionary(op);
     if (!result.ops.some(descends)) return result;
     const ops: Expression[] = [];
     for (const op of result.ops) ops.push(descends(op) ? yield op : op);

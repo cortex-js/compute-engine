@@ -370,6 +370,30 @@ describe('Tycho item 326: count of an un-evaluated broadcast call', () => {
     }
   });
 
+  test('a symbol typed as a union holding a string or a tuple supplies no cells', () => {
+    // `q` and `t` are typed as a list or an atomic value. Holding the atomic
+    // value, the call binds it whole: `f(q)` is the scalar 7, so it has no
+    // count (it was 3, the number of characters of "abc").
+    ce.declare('q', 'string | list<number>');
+    ce.assign('q', ce.string('abc'));
+    ce.declare('t', 'tuple<number, number> | list<number>');
+    ce.assign('t', ce.box(['Tuple', 1, 2]));
+    ce.assign('k7', ce.box(['Function', 7, 'x']));
+    ce.assign('k7b', ce.box(['Function', 7, 'x', 'y']));
+    for (const arg of ['q', 't']) {
+      const call = ce.box(['k7', arg]);
+      expect(call.count).toBeUndefined();
+      expect(call.evaluate().toString()).toBe('7');
+    }
+    // Beside a list, the list supplies the cells.
+    const call = ce.box(['k7b', 'q', ['List', 1, 2]]);
+    expect(call.count).toBe(2);
+    expect(call.evaluate().toString()).toBe('[7,7]');
+    // Holding a list, the symbol supplies the cells.
+    ce.assign('q', ce.box(['List', 1, 2, 3]));
+    expect(ce.box(['k7', 'q']).count).toBe(3);
+  });
+
   test('a call parsed before its function is reassigned follows the new value', () => {
     ce.declare('h', 'function');
     ce.assign('h', ce.parse('x \\mapsto 2x'));

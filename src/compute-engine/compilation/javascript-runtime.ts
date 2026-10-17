@@ -2173,6 +2173,23 @@ function complexMatmul(a: any, b: any): any {
   return out;
 }
 
+/** An operand of `scalarAdd`/`scalarMul` in `{re, im}` form, or `undefined`
+ * when it is neither a number nor a complex value. An entry of a run-time
+ * collection can be absent (`undefined` or `null`); such an operand makes
+ * the result `NaN`, as the raw `+` and `*` of the real-only helpers do, and
+ * as the interpreter does for an absent operand. */
+function scalarValue(v: unknown): ComplexResult | undefined {
+  if (typeof v === 'number') return { re: v, im: 0 };
+  if (
+    typeof v === 'object' &&
+    v !== null &&
+    typeof (v as ComplexResult).re === 'number' &&
+    typeof (v as ComplexResult).im === 'number'
+  )
+    return v as ComplexResult;
+  return undefined;
+}
+
 /**
  * Shape-agnostic SCALAR add and multiply: two numbers combine as numbers, and
  * a complex value `{re, im}` in either position combines as complex (a number
@@ -2183,15 +2200,17 @@ function complexMatmul(a: any, b: any): any {
  */
 function scalarAdd(a: unknown, b: unknown): number | ComplexResult {
   if (typeof a === 'number' && typeof b === 'number') return a + b;
-  const p = typeof a === 'number' ? { re: a, im: 0 } : (a as ComplexResult);
-  const q = typeof b === 'number' ? { re: b, im: 0 } : (b as ComplexResult);
+  const p = scalarValue(a);
+  const q = scalarValue(b);
+  if (p === undefined || q === undefined) return NaN;
   return { re: p.re + q.re, im: p.im + q.im };
 }
 
 function scalarMul(a: unknown, b: unknown): number | ComplexResult {
   if (typeof a === 'number' && typeof b === 'number') return a * b;
-  const p = typeof a === 'number' ? { re: a, im: 0 } : (a as ComplexResult);
-  const q = typeof b === 'number' ? { re: b, im: 0 } : (b as ComplexResult);
+  const p = scalarValue(a);
+  const q = scalarValue(b);
+  if (p === undefined || q === undefined) return NaN;
   return {
     re: p.re * q.re - p.im * q.im,
     im: p.re * q.im + p.im * q.re,
@@ -2367,7 +2386,15 @@ function mulTensorWith(
   let scalar: BcastValue | undefined = undefined;
   for (const x of args) {
     if (Array.isArray(x)) tensors.push(x);
-    else scalar = scalar === undefined ? x : (times(scalar, x) as BcastValue);
+    else {
+      // `scalar === undefined` means "no scalar factor yet", so an absent
+      // factor (`undefined` or `null`, an absent entry of a run-time
+      // collection) is read as `NaN`. Otherwise the absent factor was
+      // dropped: `Product` of `[[2, 3], undefined]` was `[2, 3]`, where the
+      // interpreter gives `[NaN, NaN]`.
+      const v = x === undefined || x === null ? NaN : x;
+      scalar = scalar === undefined ? v : (times(scalar, v) as BcastValue);
+    }
   }
   if (tensors.length === 0) return scalar === undefined ? 1 : scalar;
   let product: BcastValue[] = tensors[0];
@@ -3350,6 +3377,22 @@ function stepMultiple(
   )
     return x;
   return round(q) * k;
+}
+
+/** `_SYS.present`: see the comment at its entry in `SYS_HELPERS`. */
+function presentArgument<T>(x: T, message: string, elements?: boolean): T {
+  if (x === undefined) throw new TypeError(message);
+  if (elements === true && Array.isArray(x))
+    for (const element of x) presentArgument(element, message, true);
+  return x;
+}
+
+/** `_SYS.absentNaN`: see the comment at its entry in `SYS_HELPERS`. */
+function absentArgumentAsNaN(x: unknown, elements?: boolean): unknown {
+  if (x === undefined) return NaN;
+  if (elements === true && Array.isArray(x))
+    return x.map((element) => absentArgumentAsNaN(element, true));
+  return x;
 }
 
 export const SYS_HELPERS = {
@@ -4358,15 +4401,49 @@ export const SYS_HELPERS = {
     if (Array.isArray(x)) return x;
     throw new RangeError(`${kind}: the operand is not a list at run time`);
   },
+  // The predicate `f` of a compiled `Filter`, `Count`, `Any`, `TakeWhile`
+  // or another operator that takes one, checked at each call when its static
+  // result type does not prove a boolean (`PREDICATE_RESULT_MODES` in
+  // `javascript-target.ts`). `true` and `false` pass. For `select`, an absent
+  // value (`Missing`, compiled to `undefined`) does not select the element,
+  // as in the interpreter, and any other value throws. For `quantify`, an
+  // absent value and any other value throw: the interpreter answers
+  // `Missing` or stays unevaluated, which the compiled `some` and `every`
+  // cannot. For `prefix`, any value that is not `true` ends the prefix. The
+  // compiled lowerings test the result with the truthiness of JavaScript, so
+  // without this check `1` selected an element.
+  predicateResult:
+    (
+      f: (x: unknown) => unknown,
+      kind: string,
+      mode: 'select' | 'quantify' | 'prefix'
+    ) =>
+    (x: unknown): boolean => {
+      const v = f(x);
+      if (v === true || v === false) return v;
+      if (mode === 'prefix') return false;
+      if (mode === 'select' && v === undefined) return false;
+      throw new TypeError(
+        v === undefined
+          ? `${kind} predicate returned an absent value, which the interpreter combines by Kleene logic`
+          : `${kind} predicate must return "True" or "False"`
+      );
+    },
   // An argument of a user function at a parameter annotated with a type that
   // is not numeric and has no `missing` member, whose static type admits an
   // absent value (`absentArgumentChecks`, `base-compiler.ts`): the value as
   // it is, or a `TypeError` for an absent value (`undefined`), where the
-  // interpreter answers an `incompatible-type` error.
-  present: <T>(x: T, message: string): T => {
-    if (x === undefined) throw new TypeError(message);
-    return x;
-  },
+  // interpreter answers an `incompatible-type` error. When `elements` is
+  // true, the parameter is a scalar and a list argument is mapped, so each
+  // element of an array, at any depth, is checked too.
+  present: presentArgument,
+  // An argument of a user function at a parameter annotated with a numeric
+  // type, whose static type admits an absent value (`absentArgumentChecks`,
+  // `base-compiler.ts`): the value as it is, or `NaN` for an absent value
+  // (`undefined`), as the interpreter reads it. When `elements` is true, the
+  // parameter is a scalar and a list argument is mapped, so each element of
+  // an array, at any depth, is replaced too (in a copy of the array).
+  absentNaN: absentArgumentAsNaN,
   // The operand of an operator that only visits each element once, in any
   // order (`iterableCollectionCode`): an array as it is, the elements of a
   // JavaScript `Set` as an array, or a `RangeError` for any other value.
@@ -4496,18 +4573,25 @@ export const SYS_HELPERS = {
   // All of them were computed before this call, from the accumulator as it
   // was at the start of the step, so a step that swaps two slots reads both
   // old values, as in the interpreter. The indexes are checked as `replaceAt`
-  // checks them. The array is the copy that `ownedCopy` made of the seed.
-  replaceAtInPlace: (arr: unknown[], ...updates: unknown[]): unknown[] => {
+  // checks them. The array is the copy that `ownedCopy` made of the seed. A
+  // string seed is not copied by `ownedCopy`: the first update converts it to
+  // a new array of its characters, which the fold then owns, as `replaceAt`
+  // would.
+  replaceAtInPlace: (x: unknown, ...updates: unknown[]): unknown[] => {
+    const arr = typeof x === 'string' ? listCopy(x) : (x as unknown[]);
     for (let k = 0; k < updates.length; k += 2)
       arr[listPosition('ReplaceAt', arr.length, updates[k])] = updates[k + 1];
     return arr;
   },
   // The seed of a fold that updates its accumulator in place: a copy, so
   // that the caller's array (a `run()` argument, a variable, a constant
-  // list) is never changed. A string seed becomes the array of its
-  // characters, which is what the first `ReplaceAt` would answer.
+  // list) is never changed. A string seed is returned as it is: a string
+  // cannot be changed, and the fold must answer the string itself when no
+  // step updates it (an empty source, or a step that returns the accumulator
+  // unchanged), as the interpreter does. `replaceAtInPlace` converts it to
+  // an array of its characters on the first update.
   ownedCopy: (x: unknown): unknown =>
-    Array.isArray(x) || typeof x === 'string'
+    Array.isArray(x)
       ? listCopy(x)
       : ArrayBuffer.isView(x)
         ? Array.from(x as unknown as ArrayLike<unknown>)

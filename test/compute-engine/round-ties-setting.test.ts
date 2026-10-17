@@ -256,18 +256,28 @@ describe('a compiled function keeps the rule of its compilation', () => {
   test('an automatically compiled Map is compiled again', () => {
     const ce = engine('away-from-zero');
     ce.precision = 'machine';
+    // The inputs are floats, and the values are not integers. Under `.N()`,
+    // the interpreter computes an element whose input is exact when the
+    // body applies `Round` (the float of the input can be on the other side
+    // of the jump), and an element whose value is an integer and whose
+    // input is a float (only the interpreter can tell an exact integer from
+    // a float one). Such elements do not use the compiled function.
     ce.assign(
-      'halfRound',
-      ce.box(['Function', ['Round', ['Divide', 'x', 2]], 'x'])
+      'shiftedRound',
+      ce.box([
+        'Function',
+        ['Add', ['Round', 'x'], ['Rational', 1, 4]],
+        'x',
+      ])
     );
     // More than 100 elements: a lazy `Map`, whose element function is
     // compiled when it is drained.
-    const m = ce.box(['halfRound', ['Range', 1, 120]]).evaluate();
+    const m = ce.box(['shiftedRound', ['Range', 0.5, 120]]).evaluate();
     const drain = () => [...m.N().each()].slice(0, 6).map(re);
-    expect(drain()).toEqual([1, 1, 2, 2, 3, 3]);
+    expect(drain()).toEqual([1.25, 2.25, 3.25, 4.25, 5.25, 6.25]);
     ce.roundingTies = 'to-even';
     _resetMapAutoCompileStats();
-    expect(drain()).toEqual([0, 1, 2, 2, 2, 3]);
+    expect(drain()).toEqual([0.25, 2.25, 2.25, 4.25, 4.25, 6.25]);
     // The new values come from a new compiled function, not from the
     // interpreter.
     expect(stats.attempts).toBe(1);

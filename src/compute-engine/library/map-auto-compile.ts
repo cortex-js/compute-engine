@@ -19,7 +19,7 @@ import { checkDeadline } from '../../common/interruptible.js';
 import { _mapAutoCompileStats } from '../map-auto-compile-stats.js';
 import { exactTierShape, MIN_EXACT_COMPILE_COUNT } from './map-exact-proof.js';
 import { rangeCount } from '../numerics/range-count.js';
-import type { Interval } from './map-exact-proof.js';
+import type { ExactTierShape, Interval } from './map-exact-proof.js';
 
 /**
  * Auto-compilation of lazy-`Map` element lambdas on numeric drains.
@@ -137,6 +137,11 @@ interface MapCompileCache {
    * integer result of exact operands is exact in the interpreter too (see
    * the runner). */
   exactBody?: boolean;
+  /** Marked tier only: true if the lambda or a user function it calls
+   * applies a function whose result jumps at a point (`hasJumpFunction()`).
+   * Then an element with an exact input is computed by the interpreter (see
+   * the runner). */
+  jumpBody?: boolean;
 }
 
 /**
@@ -451,6 +456,69 @@ function isExactBody(
   return true;
 }
 
+/**
+ * The functions whose result jumps at a point. Under `.N()`, the interpreter
+ * reads an exact operand of such a function exactly, and approximates only
+ * the result (ARCHITECTURE.md, "What `.N()` promises"). The compiled code
+ * reads the float of the operand, which can be on the other side of the
+ * jump: `Floor(x)` at the exact `x = 1 − 10⁻³⁰` is `0`, but the float of `x`
+ * is `1`, and so is its floor. `Floor(√x·√3)` at the exact `3` is `3`, but
+ * the compiled product of the square roots is `2.9999999999999996`.
+ * `Remainder` jumps where `x/m` is half an odd integer, and `Chop` jumps
+ * where `|x|` is the tolerance.
+ */
+const JUMP_FUNCTIONS: ReadonlySet<string> = new Set([
+  'Floor',
+  'Ceil',
+  'Round',
+  'Truncate',
+  'Fract',
+  'Mod',
+  'Remainder',
+  'Chop',
+  'Sign',
+  'Heaviside',
+  'Less',
+  'LessEqual',
+  'Greater',
+  'GreaterEqual',
+  'Equal',
+  'NotEqual',
+]);
+
+/** True if `e` applies a function of `JUMP_FUNCTIONS`. */
+function appliesJumpFunction(e: Expression): boolean {
+  if (!isFunction(e)) return false;
+  return JUMP_FUNCTIONS.has(e.operator) || e.ops.some(appliesJumpFunction);
+}
+
+/**
+ * True if the lambda `fn`, the `Function` literal of a user function it
+ * calls, or the value of a symbol it captures applies a function whose
+ * result jumps at a point (`JUMP_FUNCTIONS`). A user function with no
+ * `Function` literal is read as one that does. A symbol declared `function`
+ * and assigned a literal (`g := x ↦ Floor(x)`) has a value, not an operator
+ * definition, and the compiled code calls that value, so the value is
+ * checked as `isExactBody()` checks it.
+ */
+function hasJumpFunction(
+  ce: ComputeEngine,
+  fn: Expression,
+  deps: MapCompileDep[]
+): boolean {
+  if (appliesJumpFunction(fn)) return true;
+  for (const dep of deps) {
+    if (dep.operatorDef === undefined) {
+      const value = dep.valueDef?.value;
+      if (value !== undefined && appliesJumpFunction(value)) return true;
+      continue;
+    }
+    const literal = userFnLiteral(ce, dep.name);
+    if (literal === undefined || appliesJumpFunction(literal)) return true;
+  }
+  return false;
+}
+
 /** Has `dep`'s resolution changed since it was snapshotted? */
 function depChanged(ce: ComputeEngine, dep: MapCompileDep): boolean {
   const binding = lookup(dep.name, ce.context.lexicalScope);
@@ -621,6 +689,7 @@ function attemptCompile(
     fn: result.run as (...args: unknown[]) => unknown,
     deps: resolvedDeps,
     exactBody: tier === 'marked' && isExactBody(ce, literal, resolvedDeps),
+    jumpBody: tier === 'marked' && hasJumpFunction(ce, literal, resolvedDeps),
     generation: ce._semanticVersion,
     epoch: ce._worldVersion,
     tolerance: ce.tolerance,
@@ -783,6 +852,41 @@ export function mapAutoCompileRunner(
   // loop re-arms interruptibility itself. Inert when no deadline is armed.
   let ticks = 0;
 
+  // The marked tier, for a body that applies a function whose result jumps
+  // at a point (`jumpBody`): an exact input is computed by the compiled
+  // code only when the body is proved integer-closed and overflow-free
+  // over the sources, as for the exact tier (`exactTierShape()` over the
+  // marked levels), and the input is an integer inside the proved bounds.
+  // The compiled code then computes the integers the interpreter computes.
+  // Any other exact input is computed by the interpreter.
+  //
+  // The proof is taken once per drain, when the first exact input needs it,
+  // and again only when the mutation generation or the visibility of the
+  // assumptions changes: the bounds it propagated come from symbol values
+  // and assumptions, which `exactTierShape()` keys its own memo on.
+  let jumpProof: ExactTierShape | undefined;
+  let jumpProofKey: { generation: number; factsHidden: boolean } | undefined;
+  const exactJumpInputAllowed = (item: Expression, i: number): boolean => {
+    const generation = ce._semanticVersion;
+    const factsHidden = ce._factsHidden();
+    if (
+      jumpProofKey?.generation !== generation ||
+      jumpProofKey.factsHidden !== factsHidden
+    ) {
+      jumpProof = exactTierShape(ce, expr, { numericMarker: true });
+      jumpProofKey = { generation, factsHidden };
+    }
+    const b = jumpProof?.sourceBounds[i];
+    return (
+      b !== undefined &&
+      isNumber(item) &&
+      !item.isComplex &&
+      Number.isSafeInteger(item.re) &&
+      item.re >= b.lo &&
+      item.re <= b.hi
+    );
+  };
+
   return (items) => {
     if ((++ticks & 0xff) === 0) checkDeadline(ce._deadlineFrame);
 
@@ -804,6 +908,8 @@ export function mapAutoCompileRunner(
     // captures its source today, so nothing reaches this check — it is what
     // makes the exactness contract independent of that, instead of resting on
     // it. Two comparisons per element, below the boxing noise floor.
+    // The marked tier checks an exact input of a body that applies a
+    // function whose result jumps at a point (`exactJumpInputAllowed`).
     const args: unknown[] = [];
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
@@ -826,15 +932,23 @@ export function mapAutoCompileRunner(
         }
       } else if (
         item.isExact &&
-        (Math.abs(item.re) > Number.MAX_SAFE_INTEGER ||
+        ((cache.jumpBody === true && !exactJumpInputAllowed(item, i)) ||
+          Math.abs(item.re) > Number.MAX_SAFE_INTEGER ||
           Math.abs(item.im) > Number.MAX_SAFE_INTEGER)
       ) {
-        // The marked tier: an exact input that is larger than the safe
-        // integers loses digits when it is converted to a float, but the
-        // interpreter computes with its exact value first. For example, `3x`
-        // at the exact `9007199254740993` is `27021597764222979`, but the
-        // compiled code multiplies the float `9007199254740992`. The
-        // interpreter computes this element.
+        // The marked tier: a body that applies a function whose result
+        // jumps at a point (`jumpBody`) reads an exact input exactly in the
+        // interpreter, and the float of the input can be on the other side
+        // of the jump (`JUMP_FUNCTIONS`). Unless the input is an integer the
+        // proof admits (`exactJumpInputAllowed`), the interpreter computes
+        // this element.
+        //
+        // An exact input that is larger than the safe integers loses digits
+        // when it is converted to a float, but the interpreter computes with
+        // its exact value first. For example, `3x` at the exact
+        // `9007199254740993` is `27021597764222979`, but the compiled code
+        // multiplies the float `9007199254740992`. The interpreter computes
+        // this element.
         _mapAutoCompileStats.elementFallbacks++;
         return undefined;
       }

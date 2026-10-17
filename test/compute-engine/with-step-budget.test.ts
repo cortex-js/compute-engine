@@ -147,6 +147,14 @@ describe('withStepBudget', () => {
     expect(() => ce.withStepBudget({ steps: NaN }, () => 1)).toThrow(
       /non-negative integer/
     );
+    // Past `Number.MAX_SAFE_INTEGER`, subtracting the step of a check leaves
+    // the number unchanged, so the budget was accepted and never spent.
+    expect(() => ce.withStepBudget({ steps: 2 ** 54 }, () => 1)).toThrow(
+      /non-negative integer/
+    );
+    expect(ce.withStepBudget({ steps: Number.MAX_SAFE_INTEGER }, () => 1)).toBe(
+      1
+    );
   });
 
   test('a spent step budget is an expired budget for the internal fallbacks, a cap breach is not', () => {

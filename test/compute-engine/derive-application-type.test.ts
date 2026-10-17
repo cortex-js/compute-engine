@@ -247,6 +247,34 @@ describe('deriveApplicationType', () => {
     }
   });
 
+  test('a point beside a list of numbers under a user definition is not refused', () => {
+    // The library `Add` and `Subtract` give an error for each element of
+    // `L + (1, 1)` with `L` a list of numbers, so such an application is
+    // typed `error`. A user definition that replaces the operator is called
+    // instead, and its declared result type stands, on the expression route
+    // and on this route.
+    const types = ['tuple<integer, integer>', 'list<integer>'];
+    for (const op of ['Add', 'Subtract']) {
+      expect(derive(op, ...types)).toBe('error');
+      const e = new ComputeEngine();
+      e.declare(op, {
+        signature: '(any, any) -> integer',
+        evaluate: () => e.number(7),
+      });
+      e.declare('T', types[0]);
+      e.declare('L', types[1]);
+      const t = deriveApplicationType(
+        e,
+        op,
+        types.map((s) => describeType(e.type(s).type))
+      );
+      expect(t === undefined ? undefined : typeToString(t)).toBe('integer');
+      const expr = e.box([op, 'T', 'L']);
+      expect(expr.type.toString()).toBe('integer');
+      expect(expr.evaluate().re).toBe(7);
+    }
+  });
+
   test('a difference of points is typed like the sum of points', () => {
     expect(
       derive('Subtract', 'tuple<integer, integer>', 'tuple<integer, integer>')

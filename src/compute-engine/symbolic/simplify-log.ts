@@ -83,8 +83,20 @@ function takeOutLogTerms(
     else rest.push(term);
   }
   if (numerator.length + denominator.length === 0) return undefined;
-  let factor = numerator.reduce((acc, x) => acc.mul(x), ce.One);
-  for (const x of denominator) factor = factor.div(x);
+  // The canonical `Multiply` and `Divide` keep an exact product that the
+  // `.mul()` method would fold to a float: the product of the complex
+  // radicals `√1009·(1 + i)` and `√1013·(1 + 2i)` has a radicand too large
+  // to store.
+  const product = (xs: Expression[]): Expression =>
+    xs.length === 0
+      ? ce.One
+      : xs.length === 1
+        ? xs[0]
+        : ce.function('Multiply', xs);
+  const factor =
+    denominator.length === 0
+      ? product(numerator)
+      : ce.function('Divide', [product(numerator), product(denominator)]);
   const sum =
     rest.length === 0
       ? undefined

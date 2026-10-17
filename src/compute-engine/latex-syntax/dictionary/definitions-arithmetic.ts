@@ -34,13 +34,18 @@ import { complexPartShape } from '../serialize-number.js';
 import {
   ALWAYS_DECLARED_CONSTANTS,
   PIPE_TOPIC_MARKER,
+  derivativeOrder,
 } from './definitions-core.js';
 import {
   parseQuotientRingFraction,
   serializeListDomain,
 } from './definitions-sets.js';
 import { endsWithSuperscript, joinLatex, supsub } from '../tokenizer.js';
-import { OPENING_PARENTHESIS } from '../delimiter-tables.js';
+import {
+  DELIMITER_SHORTHAND,
+  OPEN_DELIMITER_PREFIX,
+  OPENING_PARENTHESIS,
+} from '../delimiter-tables.js';
 import {
   getSymbolToUnicode,
   isLetterToken,
@@ -730,8 +735,11 @@ function serializeRoot(
     );
   }
 
+  // A float degree is written out, also when its value is 2: `\\sqrt{2}` is
+  // read back as the exact square root, and `Root(2, 2.0)` is a float.
   const degreeValue = machineValue(degree);
-  if (degreeValue === 2) return '\\sqrt{' + serializer.serialize(base) + '}';
+  if (degreeValue === 2 && !isFloatSpelling(degree))
+    return '\\sqrt{' + serializer.serialize(base) + '}';
 
   // It's the n-th root
   return (
@@ -1462,6 +1470,10 @@ function factorEnd(
     const h = operator(x);
     if (h === 'Multiply' || h === 'InvisibleOperator' || h === 'Negate')
       for (const op of operands(x)) collect(op);
+    // A `Complex` with an imaginary part of 0 is written as its real part
+    // alone (see `Serializer.wrap()`): `Complex(f, 0)` is `f`.
+    else if (h === 'Complex' && complexPartShape(operand(x, 2))?.isZero)
+      collect(operand(x, 1)!);
     else candidates.push(x);
   };
   collect(factor);
@@ -1505,10 +1517,20 @@ function parseFractionArgument(parser: Parser): MathJsonExpression {
 const DERIVATIVE_OPERAND_PRECEDENCE = ADDITION_PRECEDENCE;
 
 /**
+ * The largest order of `\frac{d^n}{dx^n} f` that is written as `n` nested
+ * `D` expressions (`D(D(f, x), x)` for `n = 2`). A larger order is written
+ * with the order pair `D(f, {x, n})`. Measured: a nesting of 400 levels
+ * canonicalizes, 600 overflowed the call stack in canonicalization, and at
+ * 1000 the `.json` of the raw parse threw a `RangeError`.
+ */
+const MAX_NESTED_DERIVATIVE_ORDER = 100;
+
+/**
  * Parse the operand that follows a Leibniz derivative fraction.
  *
  * An operand that starts with a parenthesis, plain or sized
- * (`\frac{d}{dx}(x^2+1)`, `\frac{d}{dx}\left(x\right)`, `\bigl(`…), is
+ * (`\frac{d}{dx}(x^2+1)`, `\frac{d}{dx}\left(x\right)`, `\bigl(`,
+ * `\lparen`, `\mathopen{(}`…), is
  * delimited by that parenthesis: the derivative is `D(x^2+1, x)`, and a sum,
  * product or quotient written after the closing parenthesis applies to the
  * derivative, not to its operand (`\frac{d}{dx}(x)+1` is `D(x, x) + 1`,
@@ -1532,10 +1554,17 @@ const DERIVATIVE_OPERAND_PRECEDENCE = ADDITION_PRECEDENCE;
  * unclosed parenthesis (`\frac{d}{dx}(x`) fails to parse as a primary and
  * reports the same missing-operand and unexpected-delimiter errors as before.
  */
-function parseDerivativeOperand(parser: Parser): MathJsonExpression {
+export function parseDerivativeOperand(parser: Parser): MathJsonExpression {
   parser.skipSpace();
   const start = parser.index;
-  const fenced = OPENING_PARENTHESIS.test(parser.latex(start, start + 2));
+  // The opening parenthesis can be written `(` or `\lparen`, after a sizing
+  // prefix (`\left`, `\big`, `\mleft`, `\mathopen`, …), and in braces
+  // (`\mathopen{(}`): the spellings that the enclosure parser accepts.
+  const token = (k: number) => parser.latex(k, k + 1);
+  let opening = start;
+  if (OPEN_DELIMITER_PREFIX[token(opening)] !== undefined) opening += 1;
+  if (token(opening) === '{') opening += 1;
+  const fenced = DELIMITER_SHORTHAND['('].includes(token(opening));
   return unwrapSingleItemList(
     missingIfEmpty(
       parser.parseExpression({
@@ -1610,8 +1639,10 @@ function parseFraction(parser: Parser): MathJsonExpression | null {
     // A marker with a degree and no variable, `PartialDerivative(Nothing, n)`,
     // comes from a denominator that starts with `\partial^n x`: the `\partial`
     // parser does not capture what follows a `\partial^n`. The factor that
-    // follows such a marker is its variable, repeated `n` times, so
-    // `\frac{\partial^2 f}{\partial^2 x}` reads as `D(f, x, x)`.
+    // follows such a marker is its variable, with the order `n` (see
+    // `derivativeOrder()`), so `\frac{\partial^2 f}{\partial^2 x}` reads as
+    // `D(f, x, x)`. A single term keeps its exponent as written (`∂x^2` is
+    // the marker of `x^2`): the exponent is the order of the variable.
     const denomTerms: ReadonlyArray<MathJsonExpression> =
       operator(denom) === 'PartialDerivative' ? [denom!] : operands(denom);
     const vars: MathJsonExpression[] = [];
@@ -1621,17 +1652,20 @@ function parseFraction(parser: Parser): MathJsonExpression | null {
       const arg = operand(p, 1);
       if (arg === 'Nothing') {
         const next = denomTerms[i + 1];
-        const n = machineValue(operand(p, 2));
+        const order = operand(p, 2);
         if (
           next !== undefined &&
           operator(next) !== 'PartialDerivative' &&
-          n !== null &&
-          Number.isInteger(n) &&
-          n >= 1
+          order !== null &&
+          order !== 'Nothing'
         ) {
-          for (let k = 0; k < n; k++) vars.push(next);
+          vars.push(...derivativeOrder(next, order));
           i += 1;
         }
+        continue;
+      }
+      if (operator(arg) === 'Power') {
+        vars.push(...derivativeOrder(operand(arg, 1)!, operand(arg, 2)!));
         continue;
       }
       const list = operator(arg) === 'List' ? operands(arg) : [arg];
@@ -1644,9 +1678,17 @@ function parseFraction(parser: Parser): MathJsonExpression | null {
     // own (`∂²f/∂x` reads as `∂²f/∂x²`). When the denominator has several
     // variables, a numerator degree that does not match their number
     // (`∂⁵f/∂x∂y`) is ignored, and the result is `D(f, x, y)`.
-    const degree = machineValue(operand(numerMarker, 2)) ?? 1;
-    if (vars.length === 1 && degree > 1)
-      for (let i = 1; i < degree; i++) vars.push(vars[0]);
+    // A variable that is an order pair (`["Set", x, n]`, see
+    // `derivativeOrder()`) has a count of its own. A symbolic numerator
+    // degree is the order of the variable: `∂ⁿf/∂x` is `D(f, {x, n})`.
+    const markerOrder = operand(numerMarker, 2);
+    if (
+      vars.length === 1 &&
+      operator(vars[0]) !== 'Set' &&
+      markerOrder !== null &&
+      markerOrder !== 'Nothing'
+    )
+      vars.splice(0, 1, ...derivativeOrder(vars[0], markerOrder));
 
     if (vars.length > 0) return ['D', fn, ...vars] as MathJsonExpression;
   }
@@ -1662,7 +1704,11 @@ function parseFraction(parser: Parser): MathJsonExpression | null {
   // Extract the differential degree from the numerator, and — for the
   // single-fraction form — the function folded into it. The numerator is one
   // of: `d` (degree 1), `d^n` (degree n), or a product `d^n · f` / `d · f`.
-  let numerDegree: number | null = null;
+  // The degree `n` can be a symbol (`d^n`), but not a number that is 0 or
+  // less.
+  let isDerivative = false;
+  // The degree when it is not 1
+  let numerOrder: MathJsonExpression | null = null;
   let numerFn: MathJsonExpression | null = null;
   {
     const numerHead = operator(numer);
@@ -1674,15 +1720,19 @@ function parseFraction(parser: Parser): MathJsonExpression | null {
         : [numer!];
     const head = factors[0];
     if (isDiffSym(symbol(head))) {
-      numerDegree = 1;
+      isDerivative = true;
     } else if (
       operator(head) === 'Power' &&
       isDiffSym(symbol(operand(head, 1)))
     ) {
-      const deg = machineValue(operand(head, 2));
-      if (deg !== null && deg > 0) numerDegree = deg;
+      const order = operand(head, 2)!;
+      const deg = machineValue(order);
+      if (deg === null || deg > 0) {
+        isDerivative = true;
+        if (deg !== 1) numerOrder = order;
+      }
     }
-    if (numerDegree !== null && factors.length > 1) {
+    if (isDerivative && factors.length > 1) {
       const rest = factors.slice(1);
       numerFn =
         rest.length === 1
@@ -1691,7 +1741,7 @@ function parseFraction(parser: Parser): MathJsonExpression | null {
     }
   }
 
-  if (numerDegree !== null) {
+  if (isDerivative) {
     // Extract variable(s) from the denominator. Typical forms:
     // - 'dx' (single symbol)
     // - ['Sequence', 'd', 'x'] / ['Multiply', 'd', 'x']
@@ -1738,10 +1788,25 @@ function parseFraction(parser: Parser): MathJsonExpression | null {
       }
     }
 
-    // A single variable with a numerator degree (`d²/dx²`) repeats that
-    // variable, matching the nested `D` form (`D(D(f, x), x)`).
-    if (vars.length === 1 && numerDegree > 1)
-      for (let i = 1; i < numerDegree; i++) vars.push(vars[0]);
+    // A single variable with an integer numerator degree from 2 to
+    // `MAX_NESTED_DERIVATIVE_ORDER` (`d²/dx²`) repeats that variable, and
+    // gives the nested form `D(D(f, x), x)`: the form of the Lagrange
+    // (`f''(x)`) parse, which the `D` serializer writes back in this
+    // spelling. Any other degree (`dⁿ/dxⁿ`, a larger order) is the order
+    // pair, `D(f, {x, n})`, as the `\partial` spelling writes a symbolic or
+    // large order (see `derivativeOrder()`). A nesting as deep as the order
+    // overflowed the call stack at an order near 1000.
+    if (vars.length === 1 && numerOrder !== null) {
+      const n = machineValue(numerOrder);
+      if (
+        n !== null &&
+        Number.isInteger(n) &&
+        n >= 2 &&
+        n <= MAX_NESTED_DERIVATIVE_ORDER
+      )
+        for (let i = 1; i < n; i++) vars.push(vars[0]);
+      else vars[0] = ['Set', vars[0], numerOrder];
+    }
 
     if (vars.length > 0) {
       // The function being differentiated is either folded into the numerator
@@ -2180,10 +2245,40 @@ function matchArcMinuteMarker(parser: Parser): boolean {
   return (
     parser.match("'") ||
     parser.match('\\prime') ||
-    parser.matchAll(['^', '<{>', '\\prime', '<}>']) ||
-    parser.matchAll(['^', '\\prime']) ||
+    matchSuperscriptMarker(parser, ['\\prime']) ||
     parser.match('\\arcminute')
   );
+}
+
+/**
+ * Consume `^` and a superscript made of the tokens of `marker`: braced
+ * (`^{\prime\prime}`) or, for a marker of one token, without braces
+ * (`^\prime`). White space after the `^`, inside the braces and between the
+ * tokens is skipped, as TeX does in math mode: `^{ \prime}` and `^ \prime`
+ * are markers. When there is no such superscript, the index does not change.
+ */
+function matchSuperscriptMarker(
+  parser: Parser,
+  marker: readonly string[]
+): boolean {
+  const start = parser.index;
+  if (parser.match('^')) {
+    parser.skipSpace();
+    if (parser.match('<{>')) {
+      let found = true;
+      for (const token of marker) {
+        parser.skipSpace();
+        if (!parser.match(token)) {
+          found = false;
+          break;
+        }
+      }
+      parser.skipSpace();
+      if (found && parser.match('<}>')) return true;
+    } else if (marker.length === 1 && parser.match(marker[0])) return true;
+  }
+  parser.index = start;
+  return false;
 }
 
 /**
@@ -2197,9 +2292,8 @@ function matchArcSecondMarker(parser: Parser): boolean {
     parser.matchAll(["'", "'"]) ||
     parser.matchAll(['\\prime', '\\prime']) ||
     parser.match('\\doubleprime') ||
-    parser.matchAll(['^', '<{>', '\\doubleprime', '<}>']) ||
-    parser.matchAll(['^', '<{>', '\\prime', '\\prime', '<}>']) ||
-    parser.matchAll(['^', '\\doubleprime']) ||
+    matchSuperscriptMarker(parser, ['\\doubleprime']) ||
+    matchSuperscriptMarker(parser, ['\\prime', '\\prime']) ||
     parser.match('\\arcsecond')
   );
 }

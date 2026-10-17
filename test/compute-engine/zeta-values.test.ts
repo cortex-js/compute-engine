@@ -845,6 +845,17 @@ describe('Compiled Zeta / HurwitzZeta match N()', () => {
     expectParity(runH?.({ cp_s: s, cp_a: a }), ['HurwitzZeta', s, a]);
   });
 
+  test('Zeta(s, a) far left of the axis: an even order answers at once, an odd one declines', () => {
+    // The compiled loop added one term per unit of −a: 10¹² of them here.
+    // Σ over the integers of (n + 1/2)^(−2) is π², less about 1e−12.
+    expect(runZ?.({ cp_s: 2, cp_a: -1e12 - 0.5 })).toBeCloseTo(
+      Math.PI ** 2 - 1e-12,
+      13
+    );
+    expect(runZ?.({ cp_s: 3, cp_a: -1e12 - 0.5 })).toBeNaN();
+    expect(runZ?.({ cp_s: 2, cp_a: -1e12 })).toBeNaN();
+  });
+
   test('the three-operand HurwitzZeta does not compile', () => {
     expect(compile(ce.box(['HurwitzZeta', 'cp_s', 'cp_a', 2])).success).toBe(
       false
@@ -1228,6 +1239,24 @@ describe('HurwitzZeta declines rather than returning wrong digits', () => {
     );
   });
 
+  // At a ≤ 0 the terms can cancel after they overflow: the terms at −0.5
+  // and 0.5 of ζ(1025, −0.5) are −2^1025 and 2^1025, and the value is
+  // ζ(1025, 1.5) ≈ 3.2097e−181 (mpmath). An overflowed partial sum is not
+  // the value there: the kernel declines, and the expression stays
+  // symbolic. At a = 0.5 the value 2^1025 + … overflows.
+  test('an overflowed sum whose terms can cancel is declined', () => {
+    const m = new ComputeEngine({ precision: 'machine' });
+    for (const a of [-0.5, -1.5, -0.25]) {
+      expect(
+        hurwitzZetaComplexWithError(new Complex(1025, 0), new Complex(a, 0))
+      ).toBeUndefined();
+      expect(m.box(['HurwitzZeta', 1025, a]).N().operator).toBe('HurwitzZeta');
+    }
+    expect(
+      hurwitzZetaComplex(new Complex(1025, 0), new Complex(0.5, 0)).re
+    ).toBe(Infinity);
+  });
+
   test('the compiled HurwitzZeta reads a decline as NaN', () => {
     ce.declare('hd_s', 'real');
     ce.declare('hd_a', 'real');
@@ -1352,6 +1381,27 @@ describe('HurwitzZeta of an integer order far left of the imaginary axis', () =>
       );
       expect(r?.value.re).toBe(reference.re);
     }
+  });
+
+  test('a real half-integer a with an odd order: an underflow declines', () => {
+    // mpmath: zeta(101, -2000000.5) = zeta(101, 2000001.5) ≈ 7.888e−633 and
+    // zeta(51, -2000000.5) ≈ 1.776e−317, below the normal doubles. The sum
+    // at 2000001.5 underflowed to 0 (and to a subnormal with few digits) and
+    // was returned with an error of 0.
+    for (const order of [101, 51]) {
+      expect(
+        hurwitzZetaComplexWithError(
+          new Complex(order, 0),
+          new Complex(-2e6 - 0.5, 0)
+        )
+      ).toBeUndefined();
+    }
+    // mpmath: zeta(41, -2000000.5) = 2.2736912801245025330e−254.
+    const r = hurwitzZetaComplexWithError(
+      new Complex(41, 0),
+      new Complex(-2e6 - 0.5, 0)
+    );
+    expect(r!.value.re / 2.273691280124502533e-254).toBeCloseTo(1, 13);
   });
 
   test('a non-positive integer order', () => {

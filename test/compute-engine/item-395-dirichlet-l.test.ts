@@ -778,6 +778,22 @@ describe('DirichletL (#395)', () => {
     expect(got.re).toBeCloseTo(0.6543589174072331, 12);
     expect(got.im).toBeCloseTo(-0.3843763502147996, 12);
   });
+
+  test('the principal character keeps its Euler factors exact: L(1/2, χ₁ mod 2)', () => {
+    const exact = ce.box(['DirichletL', 2, 1, ['Rational', 1, 2]]).evaluate();
+    expect(exact.toString()).toBe('(1 - sqrt(2)/2) * Zeta(1/2)');
+    // mpmath: zeta(1/2)·(1 − 1/√2) at 40 digits. An Euler factor folded to a
+    // float during evaluate() limited this to 21 digits.
+    const precision = ce.precision;
+    ce.precision = 40;
+    try {
+      expect(exact.N().toString().slice(0, 38)).toBe(
+        '-0.4277279326939782213211166191396712563537'.slice(0, 38)
+      );
+    } finally {
+      ce.precision = precision;
+    }
+  });
 });
 
 describe('DirichletL of a real character next to s = 1', () => {

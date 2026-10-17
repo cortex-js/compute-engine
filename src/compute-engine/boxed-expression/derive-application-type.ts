@@ -268,7 +268,7 @@ function isProvablyScalarDescriptor(d: OperandDescriptor): boolean {
  * `Divide`) does not run it, and neither does a parameter with the name of
  * the operator.
  */
-function runsLibraryCanonicalForm(
+export function runsLibraryCanonicalForm(
   engine: ComputeEngine,
   operator: string,
   def: BoxedOperatorDefinition
@@ -411,8 +411,11 @@ export function deriveApplicationType(
     return 'error';
   // A sum of a point (or a list of points) and a collection of numbers is
   // typed `error`, as at the call site (`type()` in `boxed-function.ts`,
-  // `addsPointToNumberCollection`).
+  // `addsPointToNumberCollection`). This is the behavior of the library
+  // `Add` and `Subtract`: a user definition that replaces the operator
+  // gives its own result type (`runsLibraryCanonicalForm`).
   if (
+    runsLibraryCanonicalForm(engine, operator, def) &&
     addsPointToNumberCollection(
       operator,
       operands.map((d) => d.type)

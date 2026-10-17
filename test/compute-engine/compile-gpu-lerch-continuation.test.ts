@@ -193,6 +193,12 @@ describe('GPU LerchPhi / PolyLog continuation: emitted text', () => {
       // 3e-5 of the value, as 500 (= 3e-5 / 6e-8) times the value: the two
       // sides of 6e-8 * rerr <= 3e-5 * |res| flush to 0 for a small |res|.
       expect(modes).toContain('rerr <= 500.0 * abs(res)');
+      // For abs(res) > 6.8e35, 500.0 * abs(res) is +inf, so an estimate that
+      // overflowed to +inf must be rejected by its own test.
+      expect(modes).toContain('rerr < 3.4e38 && rerr <= 500.0 * abs(res)');
+      expect(definition(preamble, '_gpu_poly_log_inversion')).toContain(
+        'bound < 3.4e38 && bound <= 500.0 * abs(res)'
+      );
       // The value must be a finite normal f32 (0 and inf passed the test).
       expect(modes).toContain('abs(res) >= 1.18e-38 && abs(res) < 3.4e38');
       const phi = definition(preamble, '_gpu_lerch_phi');
@@ -432,6 +438,16 @@ describe('GPU LerchPhi / PolyLog continuation: f32 model of the GLSL helpers', (
   ])('Li_%p(%p) ≈ %p from the Fourier modes', (s, z, ref) => {
     close(gpuPolyLogModel(s, z), ref);
     expect(lerchModel.lastRoute).toBe('modes');
+  });
+
+  test('an error estimate that overflows to +inf declines', () => {
+    // Phi(-1.5, -22, -50) is 1.2127e37 (the interpreter's value), past
+    // 6.8e35, where 500 * |res| is +inf in f32. The error estimate of the
+    // modes also overflowed to +inf, and the test inf <= inf accepted the
+    // value with no usable estimate.
+    expect(gpuLerchPhiModel(-1.5, -22, -50)).toBeNaN();
+    expect(lerchModel.lastRoute).toBe('modes');
+    expect(lerchModel.lastModesRatio).toBe(Infinity);
   });
 
   describe('far below z = -1: a value that is not a finite normal f32 declines', () => {

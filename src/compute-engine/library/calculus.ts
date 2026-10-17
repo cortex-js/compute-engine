@@ -869,7 +869,8 @@ function powerRuleParameterGuard(
  *
  * `integrand` must be the integrand with the values of the assigned symbols
  * substituted (`withAssignedValues`), so that a float held by a symbol
- * counts as a float operand.
+ * counts as a float operand. The values of the assigned symbols of the
+ * bounds are substituted here.
  */
 function noValueIntegral(
   ce: ComputeEngine,
@@ -877,11 +878,20 @@ function noValueIntegral(
   lower: Expression,
   upper: Expression
 ): Expression {
-  const operands: Expression[] = [lower, upper];
+  const operands: Expression[] = [];
   const collect = (e: Expression): void => {
     if (isNumber(e)) operands.push(e);
     else if (isFunction(e)) for (const op of e.ops) collect(op);
   };
+  // A bound counts with its number literals at any depth (`-sin(1.5)`) and
+  // with the value of an assigned symbol (`b := -1.5`). Its symbols are
+  // kept too: an absent bound (`Missing`) makes the answer `NaN`.
+  const collectBound = (e: Expression): void => {
+    if (isNumber(e) || isSymbol(e)) operands.push(e);
+    else if (isFunction(e)) for (const op of e.ops) collectBound(op);
+  };
+  collectBound(withAssignedValues(ce, lower, []));
+  collectBound(withAssignedValues(ce, upper, []));
   collect(integrand);
   return indeterminateFormAnswer(ce, operands);
 }
@@ -1228,6 +1238,7 @@ function functionLiteralOverHoles(
  *   gives no verdict, its evaluated form is examined: evaluating the call of
  *   a user function `g := x ↦ 1/x²` gives `t⁻²`, whose denominator the check
  *   can read.
+ *   A function that is not pure is not probed (no verdict).
  *
  * In both cases the values of the other assigned symbols are substituted
  * first (see `withAssignedValues`).
@@ -1263,6 +1274,12 @@ function nIntegratePoleVerdict(
     const t = ce._bindingSymbol(variable, ce.context.lexicalScope);
     if (!t) return undefined;
     const call = ce.function(name, [t]);
+    // The check samples the call, and its evaluation below runs the handler
+    // with the symbolic argument `t`. For a function that is not pure (a
+    // handler that reads a random value or has an effect), each such run is
+    // an extra call that the quadrature does not make, and that can change
+    // the values of the later samples. No pole is probed.
+    if (call.isPure !== true) return undefined;
     const verdict = check(
       withAssignedValues(ce, call, [variable]),
       variable,
@@ -1870,8 +1887,10 @@ function nIntegrateMultiple(
   // the integrand has no denominator, since there is then no candidate site
   // to sample.
   //
-  // The result is the number of points with a proven pole, and their sign,
-  // with the orientation of the other dimensions: `mixed` when two points
+  // The result is the number of points with a proven pole that is also at a
+  // second point of their cell (see below), and the sign of all the points
+  // with a proven pole, with the orientation of the other dimensions:
+  // `mixed` when two points
   // disagree, or when the integrand changes sign across the pole at one
   // point (the inner integral then has no value).
   //
@@ -1901,29 +1920,56 @@ function nIntegrateMultiple(
         boundFns[d][0]([]),
         boundFns[d][1]([])
       );
-      for (let k = 0; k < count; k++) {
+      // The values of the other variables at the grid point `k`, moved by
+      // `shifts[j]` (a fraction of a cell) from the center of the cell in
+      // the `j`-th other dimension.
+      const pointValues = (
+        k: number,
+        shifts: readonly number[]
+      ): Record<string, Expression> => {
         const values: Record<string, Expression> = {};
         let rest = k;
-        for (const e of others) {
+        others.forEach((e, j) => {
           const i = rest % perDimension;
           rest = Math.floor(rest / perDimension);
           values[vars[e]] = ce.number(
             scanPoint(
               boundFns[e][0]([]),
               boundFns[e][1]([]),
-              (i + 0.5) / perDimension
+              (i + 0.5 + shifts[j]) / perDimension
             )
           );
-        }
+        });
+        return values;
+      };
+      for (let k = 0; k < count; k++) {
         const v = interiorPoleVerdict(
-          body.subs(values),
+          body.subs(pointValues(k, [0, 0])),
           vars[d],
           lower,
           upper,
           ce
         );
         if (v === undefined) continue;
-        proven += 1;
+        // A pole at the center of a cell may be a pole only on a set of zero
+        // measure that passes through that point:
+        // `((x − 1/64)² + (y − 1/64)²)^(−3/4)` has its only singular point
+        // at the center of the first cell of each dimension, and its double
+        // integral is finite. Such a point is counted only when the pole is
+        // also at a second point of the same cell, which a singular set of
+        // zero measure does not reach. The second point is moved by a
+        // different fraction in each dimension: moved by the same fraction,
+        // it stays on a diagonal singular set such as `y = z`, and
+        // `((x − ½)² + (y − z)²)^(−3/4)`, whose triple integral is finite,
+        // was reported divergent.
+        const moved = interiorPoleVerdict(
+          body.subs(pointValues(k, [0.3183, 0.2071])),
+          vars[d],
+          lower,
+          upper,
+          ce
+        );
+        if (moved !== undefined) proven += 1;
         const oriented =
           v.sign !== 'positive' && v.sign !== 'negative'
             ? 'mixed'
@@ -1939,12 +1985,13 @@ function nIntegrateMultiple(
     return { proven, sign };
   };
   const dependentPoles = dependentPoleScan();
-  // Two or more points with a proven pole are taken as a set of positive
-  // measure of the other variables on which the inner integral diverges, so
-  // the integral diverges with their common sign, or has no value when the
-  // signs differ. A single point may be a coincidence of the grid (a pole
-  // only on a line of zero measure): it is used only when the quadrature does
-  // not converge (see below).
+  // Two or more points with a proven pole (each also at a second point of
+  // its cell) are taken as a set of positive measure of the other variables
+  // on which the inner integral diverges, so the integral diverges with
+  // their common sign, or has no value when the signs differ. A single
+  // point, or poles only at the centers of cells, may be a coincidence of
+  // the grid (a pole only on a set of zero measure): they are used only when
+  // the quadrature does not converge (see below).
   if (dependentPoles !== undefined && dependentPoles.proven >= 2)
     return dependentPoles.sign === 'positive'
       ? ce.PositiveInfinity
@@ -3753,28 +3800,47 @@ volumes
 
         // Mathematica-style higher-order spec: `D(f, {x, n})` → the n-th
         // derivative with respect to `x` (`D(f, x, x, …, x)`, n repetitions).
-        // POSITIONAL — only a raw held `{symbol, positive-integer}` pair in the
-        // variable slot is expanded; any other `Set` shape is left untouched.
+        // POSITIONAL — only a raw held `{symbol, integer}` pair in the
+        // variable slot is read; any other `Set` shape is left untouched.
+        // - An order of 0 is no differentiation in `x`: the pair is removed,
+        //   and when no variable is left the result is `f` itself
+        //   (`D(f, {x, 0})` is `f`, as in Mathematica).
+        // - A negative order is an error.
+        // - A symbolic order, a non-integer order, and an order above the
+        //   maximum leave the pair as it is: the derivative stays inert (see
+        //   below).
+        // The order must be a number LITERAL, and its integer and zero status
+        // is decided exactly on that literal. A symbol is never replaced by
+        // its assigned value here: canonicalization would then remove the
+        // pair for good, and a later assignment to the symbol could not bring
+        // it back. A double approximation of the order is not used either:
+        // it underflows an exact nonzero order such as `1/10^400` to `0`.
         if (ops.length > 1 && ops.slice(1).some((o) => isFunction(o, 'Set'))) {
           const expanded: Expression[] = [ops[0]];
           for (const o of ops.slice(1)) {
             if (isFunction(o, 'Set') && o.nops === 2 && isSymbol(o.op1)) {
-              const n = o.op2.canonical.re;
-              // The expansion, and the differentiation it asks for, scale
-              // with the VALUE of `n`; past the cap the pair is left as it
-              // is, so the derivative stays inert rather than unbounded.
-              if (
-                n !== undefined &&
-                Number.isInteger(n) &&
-                n >= 1 &&
-                n <= MAX_DERIVATIVE_ORDER
-              ) {
-                for (let k = 0; k < n; k++) expanded.push(o.op1);
-                continue;
+              const order = o.op2.canonical;
+              if (isNumber(order) && order.isInteger === true) {
+                if (order.isSame(0)) continue;
+                const n = order.re;
+                if (order.isNegative === true) {
+                  expanded.push(
+                    ce.error('expected-positive-integer', o.op2.toString())
+                  );
+                  continue;
+                }
+                // The expansion, and the differentiation it asks for, scale
+                // with the VALUE of `n`; past the cap the pair is left as it
+                // is, so the derivative stays inert rather than unbounded.
+                if (n <= MAX_DERIVATIVE_ORDER) {
+                  for (let k = 0; k < n; k++) expanded.push(o.op1);
+                  continue;
+                }
               }
             }
             expanded.push(o);
           }
+          if (expanded.length === 1) return ops[0].canonical;
           ops = expanded;
         }
 
@@ -3791,6 +3857,19 @@ volumes
           const v = defaultUnknown(ops[0]);
           if (v !== undefined) ops = [ops[0], ce.symbol(v)];
         }
+
+        // An order pair that is left (a symbolic order, or an order above
+        // the maximum) or an error in place of a variable keeps the
+        // derivative inert, with the operand as it is. The branches below
+        // need a symbol for each variable: a function symbol `f` was made a
+        // function literal with the pair as a parameter, an
+        // `expected-a-symbol` error.
+        if (
+          ops
+            .slice(1)
+            .some((o) => isFunction(o, 'Set') || o.operator === 'Error')
+        )
+          return ce._fn('D', [ops[0].canonical, ...ops.slice(1)], { scope });
 
         // If the first argument is a function symbol (e.g., f where f(x):=2x),
         // apply it to the differentiation variables to produce a function call.
@@ -4376,11 +4455,63 @@ volumes
         // stays unevaluated, under `evaluate()` and `N()` alike.
         if (containsResidueClass(body)) return undefined;
         if (isNumber(body) && body.isNaN === true) {
-          if (numericApproximation) return ce.NaN;
-          const bounds = ops
+          // A list bound gives one integral per element (see the `type`
+          // handler), so the answer is a list of the same length, and two
+          // list bounds of different lengths are an error, as for any other
+          // integrand. The value of each bound is computed once.
+          const hasListBound = ops
             .slice(1)
-            .flatMap((l) => (isFunction(l, 'Limits') ? [l.op2, l.op3] : []));
-          return nanOperandAnswer(ce, [body, ...bounds]);
+            .some(
+              (l) =>
+                isFunction(l, 'Limits') &&
+                (isSubtype(l.op2.type.type, 'list<any>') ||
+                  isSubtype(l.op3.type.type, 'list<any>'))
+            );
+          if (!hasListBound) {
+            if (numericApproximation) return ce.NaN;
+            const bounds = ops
+              .slice(1)
+              .flatMap((l) => (isFunction(l, 'Limits') ? [l.op2, l.op3] : []));
+            return nanOperandAnswer(ce, [body, ...bounds]);
+          }
+          const limitValues = ops
+            .slice(1)
+            .map((l) =>
+              isFunction(l, 'Limits')
+                ? [l.op2, l.op3].map((b) =>
+                    numericApproximation ? b.N() : b.evaluate()
+                  )
+                : []
+            );
+          // The lengths are compared in the order of the numeric route
+          // below (the last limit first, the lower bound before the upper),
+          // so that the error names them in the same order.
+          let count: number | undefined;
+          for (const bounds of [...limitValues].reverse()) {
+            for (const b of bounds) {
+              if (!isFunction(b, 'List')) continue;
+              if (count !== undefined && count !== b.nops)
+                return ce.error(
+                  'incompatible-dimensions',
+                  `${count} vs ${b.nops}`
+                );
+              count = b.nops;
+            }
+          }
+          // A bound typed as a list whose value is not a list: no answer.
+          if (count === undefined) return undefined;
+          const results: Expression[] = [];
+          for (let i = 0; i < count; i++) {
+            if (numericApproximation) {
+              results.push(ce.NaN);
+              continue;
+            }
+            const bounds = limitValues.flatMap((values) =>
+              values.map((b) => (isFunction(b, 'List') ? b.ops[i] : b))
+            );
+            results.push(nanOperandAnswer(ce, [body, ...bounds]));
+          }
+          return ce.function('List', results);
         }
 
         // A list-valued integrand: one integral per element.

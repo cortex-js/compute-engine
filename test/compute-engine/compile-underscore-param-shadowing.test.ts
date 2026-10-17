@@ -95,7 +95,7 @@ describe('COMPILE: a `_` lambda parameter does not shadow the vars object', () =
       ['List', 1, 2, 3],
     ]);
     expect(result).toEqual([11, 12, 13]);
-    expect(code).toContain('(x) =>');
+    expect(code).toContain('(x = NaN) =>');
   });
 
   it('an ENGINE-DEFINED function with a `_` parameter is covered too', () => {
@@ -152,7 +152,7 @@ describe('COMPILE: a `_` lambda parameter does not shadow the vars object', () =
     // literal is handed out under stands between it and the stream.
     expect(r?.code).toBe(
       '(_SYS.takeIter(_SYS.mapIter(_SYS.rangeIter(1, 1), ((_tv1) => (_tv2) => ' +
-        'Array.isArray(_tv2) ? _SYS.bcastFn(_tv1, _tv2) : _tv1(_tv2))(((_) => (_ * _)))), 10))' +
+        'Array.isArray(_tv2) ? _SYS.bcastFn(_tv1, _tv2) : _tv1(_tv2))(((_ = NaN) => (_ * _)))), 10))' +
         '.reduce((_a, _b) => _a + _b, 0)'
     );
     expect(r?.run?.({})).toBe(385);

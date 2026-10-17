@@ -39,7 +39,7 @@ describe('COMPILE lazy infinite collections', () => {
     // element (`_SYS.bcastFn` when the element is itself a collection).
     expect(r?.code).toBe(
       '(_SYS.takeIter(_SYS.mapIter(_SYS.rangeIter(1, 1), ((_tv1) => (_tv2) => ' +
-        'Array.isArray(_tv2) ? _SYS.bcastFn(_tv1, _tv2) : _tv1(_tv2))(((_) => (_ * _)))), 10))' +
+        'Array.isArray(_tv2) ? _SYS.bcastFn(_tv1, _tv2) : _tv1(_tv2))(((_ = NaN) => (_ * _)))), 10))' +
         '.reduce((_a, _b) => _a + _b, 0)'
     );
     expect(r?.run?.({})).toBe(385); // 1+4+9+…+100, the interpreter's result

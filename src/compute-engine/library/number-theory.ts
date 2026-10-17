@@ -2313,7 +2313,9 @@ function evaluateDirichletL(
   if (j === 1) {
     const factors = [...bigPrimeFactors(BigInt(k)).keys()]
       .filter((p) => p > 1n)
-      .map((p) => ce.One.sub(ce.number(p).pow(s.neg())));
+      // `Subtract`, not `.sub()`: `.sub()` folds an exact difference of
+      // unlike radicals to a float (1 − 1/√2 at s = 1/2).
+      .map((p) => ce.function('Subtract', [ce.One, ce.number(p).pow(s.neg())]));
     return finish(
       ce.function('Multiply', [ce.function('Zeta', [s]), ...factors])
     );

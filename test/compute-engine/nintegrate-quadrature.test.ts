@@ -254,6 +254,23 @@ describe('NIntegrate of a function given by its name', () => {
     expect(draws).toBe(0);
   });
 
+  test('a function that is not pure is called with numbers only', () => {
+    // The check for a pole called the handler once with a symbolic argument
+    // before the quadrature: an extra call of a function with effects.
+    const engine = new ComputeEngine();
+    const args: string[] = [];
+    engine.declare('Tick', {
+      signature: '(real) -> real',
+      pure: false,
+      evaluate: ([x]) => {
+        args.push(x.toString());
+        return engine.number(1);
+      },
+    });
+    expect(named('Tick', 0, 1, engine).re).toBeCloseTo(1, 12);
+    expect(args.filter((a) => Number.isNaN(Number(a)))).toEqual([]);
+  });
+
   test('NIntegrate(Sec, 0, 2) is NaN: sec changes sign at π/2', () => {
     expect(named('Sec', 0, 2).isNaN).toBe(true);
   });

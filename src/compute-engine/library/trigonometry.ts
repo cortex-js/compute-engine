@@ -731,6 +731,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
               ? expression.op1
               : undefined
           );
+          if (outside === null) return undefined; // stays unevaluated
           if (outside !== undefined) return outside;
         }
         // `~oo` is outside the carrier: the incompatible-type error that
@@ -2083,6 +2084,7 @@ function trigFunction(
             ? expression.op1
             : undefined
         );
+        if (outside === null) return undefined; // stays unevaluated
         if (outside !== undefined) return outside;
       }
       // The carrier, enforced at the evaluate seam (see the factory

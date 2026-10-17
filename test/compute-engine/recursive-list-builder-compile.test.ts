@@ -15,6 +15,7 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compile';
 import { parseEpsil, resolveLibraryNames } from '../../src/epsil';
+import { CancellationError } from '../../src/common/interruptible';
 
 function box(src: string) {
   const [program, diagnostics] = parseEpsil(src);
@@ -192,5 +193,25 @@ let counts = listFrom(map(d => count(circles, c => c[4] == d), 1..12))
       224,
       [4, 6, 18, 54, 86, 28, 8, 8, 4, 4, 4, 0],
     ]);
+  });
+});
+
+describe('THE RECURSION KNOT AFTER A FAILED CANONICALIZATION', () => {
+  // The knot of a clause is registered before its body canonicalizes and
+  // released after the clause is installed. An error in the body
+  // canonicalization (here a cancellation, as a deadline throws) skipped the
+  // release, and the knot stayed registered for the life of the engine.
+  test('a cancellation in the body releases the knot', () => {
+    const ce = new ComputeEngine();
+    ce.declare('Interrupt', {
+      signature: '(any) -> any',
+      canonical: () => {
+        throw new CancellationError({ cause: 'timeout' });
+      },
+    });
+    expect(() =>
+      ce.box(['DefineFunction', 'f', ['Function', ['Interrupt', 'x'], 'x']])
+    ).toThrow(CancellationError);
+    expect(ce._recursionKnots.size).toBe(0);
   });
 });

@@ -87,6 +87,38 @@ describe('LerchPhi: pole and indeterminate at a non-positive integer base point'
     expect(Number.isFinite(z.re)).toBe(true);
     expect(z.re).toBeCloseTo(1e14, -8);
   });
+
+  test('an exact a next to a non-positive integer is not a pole', () => {
+    // (−10³⁰ + 1)/10³⁰ rounds to −1 at 21 digits, but it is not an integer.
+    // mpmath: lerchphi(0.4, 2, a) = 3.99999999999999999999999999999e59 at
+    // 80 digits; the k = 1 term 0.4/(10⁻³⁰)² is all of it.
+    const a = [
+      'Rational',
+      '-999999999999999999999999999999',
+      '1000000000000000000000000000000',
+    ];
+    const z = phi(0.4, 2, a).evaluate();
+    expect(z.isSame(ce.ComplexInfinity)).toBe(false);
+    expect(z.re / 4e59).toBeCloseTo(1, 12);
+  });
+});
+
+describe('LerchPhi at a negative integer a with s < 0', () => {
+  test('a zero term at k = −a does not end the sum', () => {
+    // Φ(1/2, −3, −1) = Σ (1/2)ᵏ (k − 1)³ = 12 (mpmath nsum at 30 digits;
+    // −28 at a = −3). The k = 1 term is 0, and the series stopped there at
+    // its first term, −1.
+    const precision = ce.precision;
+    try {
+      for (const digits of [21, 50]) {
+        ce.precision = digits;
+        expect(phi(0.5, -3, -1).N().re).toBe(12);
+        expect(phi(0.5, -3, -3).N().re).toBe(-28);
+      }
+    } finally {
+      ce.precision = precision;
+    }
+  });
 });
 
 describe('LerchPhi inside the unit disk: direct summation', () => {

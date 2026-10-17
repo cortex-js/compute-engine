@@ -97,6 +97,22 @@ function reflect(z: Complex): Complex {
   );
 }
 
+/**
+ * A bound of the absolute error of Im lnΓ(z) as `logGammaComplex` computes
+ * it, when Re z ≥ `STIRLING_FROM`, where Stirling's series is used directly.
+ * Each imaginary term of the series is proportional to Im z, so the error is
+ * about ε·|Im z|·(2 + ln|z|), however small Im z is: the bound of the whole
+ * value, ε·(1 + |lnΓ(z)|), is much larger near the real axis. Measured
+ * against mpmath for Re z from 18 to 10⁸ and Im z from 10⁻²⁰ to 10⁵, the
+ * error is at most 0.97 times that estimate; 4 times it is returned.
+ * Undefined for Re z < `STIRLING_FROM`: the Lanczos approximation, the
+ * recurrence and the reflection formula have no such bound.
+ */
+export function logGammaComplexImError(z: Complex): number | undefined {
+  if (!(z.re >= STIRLING_FROM)) return undefined;
+  return 4 * Number.EPSILON * Math.abs(z.im) * (2 + Math.log(z.abs()));
+}
+
 /** lnΓ(z), the continuation described above. NaN at the poles 0, −1, −2, … and for a non-finite z. */
 export function logGammaComplex(z: Complex): Complex {
   if (!Number.isFinite(z.re) || !Number.isFinite(z.im)) return C_NAN;

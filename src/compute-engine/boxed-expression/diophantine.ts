@@ -8,6 +8,7 @@ import {
 } from '../../common/type/utils.js';
 
 import { isFunction, sym } from './type-guards.js';
+import { contextAssumptions, isFactTrue } from './constraint-subject.js';
 import { asRational, asBigint, asSmallInteger } from './numerics.js';
 import { expand } from './expand.js';
 
@@ -275,10 +276,19 @@ export function isIntegerDomain(
 // ─── Fresh parameters ───────────────────────────────────────────────────────
 //
 
+/** Whether an assumption in force names the symbol `name`. */
+function isAssumedAbout(ce: ComputeEngine, name: string): boolean {
+  for (const [fact, records] of contextAssumptions(ce).entries())
+    if (isFactTrue(records) && fact.unknowns.includes(name)) return true;
+  return false;
+}
+
 /**
  * `count` fresh integer-parameter symbols named `t, t_1, t_2, …`, skipping any
  * name that occurs in the equation or is bound to a value in the current
- * context (a bound `t` with a value would evaluate inside the result). Nothing
+ * context (a bound `t` with a value would evaluate inside the result), is
+ * declared with a type narrower than `number`, or is named by an assumption
+ * in force. Nothing
  * is declared in the user's scope — the parameters surface as free symbols.
  */
 export function freshParameters(
@@ -293,7 +303,16 @@ export function freshParameters(
     const name = i === 0 ? 't' : `t_${i}`;
     i++;
     if (used.has(name)) continue;
-    if (ce.symbol(name).value !== undefined) continue; // bound to a value
+    const symbol = ce.symbol(name);
+    if (symbol.value !== undefined) continue; // bound to a value
+    // A parameter ranges over every value of the family it describes. A
+    // name declared with a type narrower than `number` (`t: integer`,
+    // `t: boolean`) or named by an assumption (`assume(t > 0)`) cannot do
+    // that, so it is not used.
+    const type = symbol.type.type;
+    if (typeof type !== 'string' || (type !== 'number' && type !== 'unknown'))
+      continue;
+    if (isAssumedAbout(ce, name)) continue;
     used.add(name);
     out.push(ce.symbol(name));
   }

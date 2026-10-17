@@ -781,6 +781,42 @@ describe('INDETERMINATE — an inexact operand makes a reducer NaN', () => {
     expect(epsil('max(1.5, Indeterminate)').toString()).toBe('NaN');
   });
 
+  test('a float sample of a Linspace counts, though the extremum is an endpoint', () => {
+    // `Linspace(0.5, 2, 3)` is `[0.5, 1.25, 2]`: the maximum is the exact
+    // endpoint 2, but the other samples are floats, as in the explicit list.
+    expect(box(['Max', ['Linspace', 0.5, 2, 3], 'Indeterminate']).toString()).toBe(
+      'NaN'
+    );
+    expect(box(['Max', ['List', 0.5, 1.25, 2], 'Indeterminate']).toString()).toBe(
+      'NaN'
+    );
+    expect(box(['Min', ['Linspace', 0, 1, 4], 'Indeterminate']).toString()).toBe(
+      'NaN'
+    );
+    // Samples that are all integers are exact: `[0, 1, 2]`.
+    expect(box(['Max', ['Linspace', 0, 2, 3], 'Indeterminate']).toString()).toBe(
+      'Indeterminate'
+    );
+    // An empty Linspace has no sample.
+    expect(box(['Max', ['Linspace', 0.5, 2, 0], 'Indeterminate']).toString()).toBe(
+      'Indeterminate'
+    );
+  });
+
+  test('the samples of a large Linspace are not built as an array', () => {
+    // The second sample, 10^-9, is a float: the read stops there.
+    const start = Date.now();
+    expect(
+      box(['Min', 'Indeterminate', ['Linspace', 0, 1, 1e9]]).toString()
+    ).toBe('NaN');
+    // The endpoints and the step are integers: every sample is an integer,
+    // decided without reading the 3·10^7 samples.
+    expect(
+      box(['Min', 'Indeterminate', ['Linspace', 0, 3e7, 3e7 + 1]]).toString()
+    ).toBe('Indeterminate');
+    expect(Date.now() - start).toBeLessThan(500);
+  });
+
   test('the statistics readers and the quantile', () => {
     expect(box(['Mean', ['List', { num: '1.5' }, 'Indeterminate']]).toString()).toBe(
       'NaN'
@@ -922,6 +958,58 @@ describe('INDETERMINATE — the arithmetic methods do not read a symbol value', 
     expect(q.evaluate().toString()).toBe('2');
     expect(p.evaluate().toString()).toBe('8');
     expect(s.evaluate().toString()).toBe('5');
+  });
+
+  test('the Indeterminate literal beside a variable with a value is not folded', () => {
+    // The answer is `NaN` when the variable holds `NaN` or a float, and
+    // `Indeterminate` when it holds an exact number or `Indeterminate`: it
+    // is read when the expression is evaluated, not when it is built.
+    const ce2 = new ComputeEngine();
+    ce2.assign('w', ce2.NaN);
+    const I = ce2.Indeterminate;
+    const w = () => ce2.box('w');
+    const built: Expression[] = [
+      ce2.box(['Divide', 'Indeterminate', 'w']),
+      ce2.box(['Divide', 'w', 'Indeterminate']),
+      I.div(w()),
+      w().div(I),
+      I.add(w()),
+      w().add(I),
+      I.mul(w()),
+      w().mul(I),
+      I.pow(w()),
+      w().pow(I),
+    ];
+    for (const e of built) expect(e.evaluate().toString()).toBe('NaN');
+    ce2.assign('w', 2);
+    for (const e of built)
+      expect(e.evaluate().toString()).toBe('Indeterminate');
+    ce2.assign('w', 2.5);
+    for (const e of built) expect(e.evaluate().toString()).toBe('NaN');
+    ce2.assign('w', ce2.Indeterminate);
+    for (const e of built)
+      expect(e.evaluate().toString()).toBe('Indeterminate');
+  });
+
+  test('simplify() does not fold the Indeterminate literal beside a variable with a value', () => {
+    // `simplify()` does not read the value of a variable, and the answer
+    // depends on it: with `w := 1.5`, `evaluate()` gives `NaN`.
+    const ce2 = new ComputeEngine();
+    ce2.assign('w', 1.5);
+    for (const json of [
+      ['Add', 'Indeterminate', 'w'],
+      ['Sqrt', ['Add', 'Indeterminate', 'w']],
+      ['Max', 'Indeterminate', 'w'],
+    ] as MathJsonExpression[]) {
+      const e = ce2.box(json);
+      expect(e.evaluate().toString()).toBe('NaN');
+      expect(e.simplify().isIndeterminate).not.toBe(true);
+      expect(e.simplify().evaluate().toString()).toBe('NaN');
+    }
+    // A symbol with no value is folded
+    expect(ce2.box(['Add', 'Indeterminate', 'v']).simplify().toString()).toBe(
+      'Indeterminate'
+    );
   });
 });
 
@@ -1512,6 +1600,36 @@ describe('INDETERMINATE — ROADMAP residues of the NaN and Indeterminate rounds
     }
     expect(parse('\\int_0^1 \\frac{0}{0}\\,dx').toString()).toBe('Indeterminate');
     expect(box(['Sum', 'NaN', ['Limits', 'k', 1, 3]]).toString()).toBe('NaN');
+  });
+
+  test('Integrate of a NaN integrand with a list bound is a list', () => {
+    // A list bound is one integral per element. The answer for a NaN
+    // integrand was a single NaN, and bounds of different lengths gave no
+    // error.
+    for (const [json, exact, numeric] of [
+      [
+        ['Integrate', 'NaN', ['Limits', 'x', 0, ['List', 1, 2]]],
+        '[NaN,NaN]',
+        '[NaN,NaN]',
+      ],
+      [
+        ['Integrate', ['Divide', 0, 0], ['Limits', 'x', 0, ['List', 1, 2]]],
+        '[Indeterminate,Indeterminate]',
+        '[NaN,NaN]',
+      ],
+      [
+        [
+          'Integrate',
+          'NaN',
+          ['Limits', 'x', ['List', 0, 1, 3], ['List', 1, 2]],
+        ],
+        'Error("incompatible-dimensions", "3 vs 2")',
+        'Error("incompatible-dimensions", "3 vs 2")',
+      ],
+    ] as [MathJsonExpression, string, string][]) {
+      expect([json, box(json).toString()]).toEqual([json, exact]);
+      expect([json, boxN(json).toString()]).toEqual([json, numeric]);
+    }
   });
 
   test('At with an infinite index answers NaN', () => {

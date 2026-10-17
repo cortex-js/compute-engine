@@ -32,3 +32,42 @@ describe('SIMPLIFY WITH A NaN OPERAND THE HANDLER READS', () => {
     expect(local.box(['Max', 'w', 1]).simplify().toString()).toBe('max(w, 1)');
   });
 });
+
+describe('SIMPLIFY WITH A NaN OPERAND: WHEN THE ANSWER IS NOT NaN', () => {
+  test('a symbol that holds an infinity has precedence in Hypot', () => {
+    // `Hypot(+∞, NaN)` is `+∞`. The handler answered `NaN` for the symbol
+    // `w`, and the rule `hypot(x, y) → √(x² + y²)` gave `√(w² + NaN)`.
+    const local = new ComputeEngine();
+    local.assign('w', local.PositiveInfinity);
+    const e = local.box(['Hypot', 'w', 'NaN']);
+    expect(e.evaluate().toString()).toBe('+oo');
+    expect(e.simplify().isNaN).not.toBe(true);
+    expect(local.box(['Hypot', 2, 'NaN']).simplify().toString()).toBe('NaN');
+  });
+
+  test('an operand with an effect is not run or dropped', () => {
+    const local = new ComputeEngine();
+    let calls = 0;
+    local.declare('g', {
+      signature: '(number) -> number',
+      pure: false,
+      evaluate: ([x]) => {
+        calls += 1;
+        return x;
+      },
+    });
+    // The handler of `Max` evaluated the `Map`, and called `g`.
+    local.box(['Max', ['Map', 'g', ['List', 1]], 'NaN']).simplify();
+    expect(calls).toBe(0);
+    // `NaN` dropped the call that `evaluate()` makes.
+    const e = local.box(['Arctan2', 'NaN', ['g', 1]]);
+    expect(e.simplify().isNaN).not.toBe(true);
+    expect(calls).toBe(0);
+  });
+
+  test('an operand that gives an error is not dropped', () => {
+    const e = ce.box(['Arctan2', 'NaN', ['RuntimeError', "'boom'"]]);
+    expect(e.evaluate().toString()).toBe('Error("boom")');
+    expect(e.simplify().isNaN).not.toBe(true);
+  });
+});

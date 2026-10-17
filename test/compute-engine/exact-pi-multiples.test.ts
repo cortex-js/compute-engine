@@ -329,6 +329,31 @@ describe('compiled: the sign of a zero part, e^{x + iπ}, and sin(πL)', () => {
     expect(result.run!({ L: [1, 2, 0.5] })).toEqual([0, 0, 1]);
   });
 
+  // The half-turn kernel is only right when `Pi` is π. Before 2026-10-16 it
+  // was chosen by the name alone, so a parameter named `Pi`, or a `vars`
+  // mapping of `Pi`, was ignored: both answered `sin(π/2) = 1` below.
+  test('JavaScript: a `Pi` that is not the constant π', () => {
+    const literal = ce.box([
+      'Function',
+      ['Sin', ['Multiply', 'Pi', 'x']],
+      'Pi',
+      'x',
+    ]);
+    const lambda = compile(literal, { fallback: false });
+    expect(lambda.code).not.toContain('sinpi');
+    expect(lambda.run!(1, 0.5)).toBeCloseTo(Math.sin(0.5), 15);
+    expect(ce.box(['Apply', literal, 1, 0.5]).N().re).toBeCloseTo(
+      Math.sin(0.5),
+      15
+    );
+
+    const mapped = compile(ce.box(['Sin', ['Multiply', 'Pi', 'x']]), {
+      fallback: false,
+      vars: { Pi: '_.p' },
+    });
+    expect(mapped.run!({ x: 0.5, p: 1 })).toBeCloseTo(Math.sin(0.5), 15);
+  });
+
   (TEST_PYTHON === undefined ? it.skip : it)(
     'Python: a scalar tan(πx) is a float, and a zero part is +0',
     () => {
@@ -371,5 +396,100 @@ describe('compiled: the sign of a zero part, e^{x + iπ}, and sin(πL)', () => {
     new GLSLTarget().compile(engine.box(['Power', 'x', ['Random']]));
     expect(spy).not.toHaveBeenCalled();
     spy.mockRestore();
+  });
+});
+
+// A user binding of a library constant name (`Pi`, `ExponentialE`) gives the
+// name another value. Before 2026-10-16 every target read the constant from
+// its table by name, so `Pi·x` with `Pi := 1` compiled to `Math.PI * x`
+// (`np.pi * x` in Python, `3.14159265359 * x` in a shader), where the
+// interpreter computes `1·x`.
+describe('compiled: a user binding of a library constant name', () => {
+  let ce: ComputeEngine;
+  beforeEach(() => {
+    ce = new ComputeEngine();
+    ce.pushScope();
+    ce.declare('Pi', { type: 'real', value: 1 } as any);
+    ce.declare('ExponentialE', { type: 'real', value: 2 } as any);
+    ce.declare('x', 'real');
+  });
+
+  test('the interpreter reads the user value', () => {
+    expect(ce.box(['Multiply', 'Pi', 'x']).subs({ x: 0.5 }).N().re).toBe(0.5);
+  });
+
+  test('JavaScript', () => {
+    for (const [expr, expected] of [
+      [['Multiply', 'Pi', 'x'], 0.5],
+      [['Sin', ['Multiply', 'Pi', 'x']], Math.sin(0.5)],
+      [['Add', 'ExponentialE', 'x'], 2.5],
+    ] as const) {
+      const result = compile(ce.box(expr as any), { fallback: false });
+      expect(result.code).not.toContain('Math.PI');
+      expect(result.code).not.toContain('Math.E');
+      expect(result.run!({ x: 0.5 })).toBeCloseTo(expected, 15);
+    }
+  });
+
+  test('interval JavaScript', () => {
+    const result = compile(ce.box(['Multiply', 'Pi', 'x']), {
+      to: 'interval-js',
+      fallback: false,
+    } as any);
+    expect(result.run!({ x: 0.5 })).toEqual({
+      kind: 'interval',
+      value: { lo: 0.5, hi: 0.5 },
+    });
+  });
+
+  test('Python', () => {
+    const code = new PythonTarget().compile(
+      ce.box(['Add', ['Multiply', 'Pi', 'x'], 'ExponentialE'])
+    ).code;
+    expect(code).not.toContain('np.pi');
+    expect(code).not.toContain('np.e');
+  });
+
+  test.each([
+    ['GLSL', () => new GLSLTarget()],
+    ['WGSL', () => new WGSLTarget()],
+  ])('%s', (_label, make) => {
+    const code = (make() as any).compile(ce.box(['Multiply', 'Pi', 'x'])).code;
+    expect(code).not.toContain('3.14159');
+    expect(code).toBe('1.0 * x');
+  });
+
+  test('the library constant is read again once the scope is left', () => {
+    ce.popScope();
+    expect(compile(ce.box(['Multiply', 'Pi', 'x'])).code).toContain('Math.PI');
+  });
+});
+
+// The interpreter reads the definition a symbol is bound to. An expression
+// boxed while `Pi` was the library constant computes with π, also when it is
+// compiled inside a scope that declares `Pi`. Before 2026-10-17 the `var`
+// hook of the JavaScript and interval targets tested the name in the scope
+// chain, and the compiled code read the user value 1.
+describe('compiled: a symbol bound to a library constant, inside a scope that declares the name', () => {
+  test.each([
+    [['Multiply', 'Pi', 'x'], Math.PI / 2],
+    [['Sin', ['Multiply', 'Pi', 'x']], 1],
+    [['Add', 'Pi', 'x'], Math.PI + 0.5],
+  ])('%j', (json, expected) => {
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    const expr = ce.box(json as any);
+    ce.pushScope();
+    ce.declare('Pi', { type: 'real', value: 1 } as any);
+    expect(expr.subs({ x: 0.5 }).N().re).toBeCloseTo(expected, 15);
+    const js = compile(expr, { fallback: false });
+    expect(js.run!({ x: 0.5 })).toBeCloseTo(expected, 15);
+    const interval = compile(expr, {
+      to: 'interval-js',
+      fallback: false,
+    } as any).run!({ x: 0.5 }) as any;
+    expect(interval.kind).toBe('interval');
+    expect(interval.value.lo).toBeLessThanOrEqual(expected);
+    expect(interval.value.hi).toBeGreaterThanOrEqual(expected);
   });
 });

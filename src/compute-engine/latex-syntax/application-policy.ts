@@ -61,6 +61,22 @@ export class ApplicationPolicy {
     if (this.suffixes.has(before)) this.suffixes.add(after);
   }
 
+  /** `after` is a copy of `before` in which some operands were replaced
+   * (`onAmbiguity: 'error'` puts an `Error` node in place of an operand).
+   * The bookkeeping is keyed by identity, so copy it to `after`. The group of
+   * a candidate is its second operand: take it from `after`, which can hold
+   * a replaced group. */
+  copied(before: object, after: MathJsonExpression): void {
+    if (typeof after !== 'object' || after === null) return;
+    const candidate = this.candidates.get(before);
+    if (candidate)
+      this.candidates.set(after, {
+        ...candidate,
+        group: operands(after)[1] ?? candidate.group,
+      });
+    if (this.suffixes.has(before)) this.suffixes.add(after);
+  }
+
   finish(expr: MathJsonExpression): MathJsonExpression {
     if (!this.resolve) return expr;
     return this.visit(expr, []);

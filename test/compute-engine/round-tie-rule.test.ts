@@ -171,6 +171,20 @@ describe('Rounding a float gives an exact result', () => {
     expect(m.isSame(ce.number(10n ** 20n))).toBe(true);
   });
 
+  test('a float with an exponent too large to write out stays a float', () => {
+    // The integer of `1.5e600000000` has 600 million digits: it is not
+    // materialized (that threw "Maximum BigInt size exceeded" after several
+    // seconds). The float is returned, as `ce.number()` does for such a big
+    // decimal.
+    const ce = engineAt(30);
+    const x = ce.number(ce.bignum('1.5e600000000'));
+    for (const op of ['Floor', 'Ceil', 'Round', 'Truncate']) {
+      const r = ce.box([op, x]).evaluate();
+      expect(r.isExact).toBe(false);
+      expect(r.isSame(x)).toBe(true);
+    }
+  });
+
   test('infinities and NaN are unchanged', () => {
     const ce = engineAt('machine');
     expect(ce.box(['Round', 'PositiveInfinity']).evaluate().json).toBe(
@@ -521,6 +535,90 @@ describe.each(['machine', 21] as const)(
       const r = ce.box(['Floor', ['Divide', ['Range', 1, 300], 3]]).N();
       const at = (k: number) => ce.box(['At', r, k]).evaluate().re;
       expect([at(3), at(299), at(300)]).toEqual([1, 99, 100]);
+    });
+
+    // Q = 1 − 10⁻³⁰: its float is 1 at both precisions, and its floor is 0.
+    const Q = [
+      'Rational',
+      '999999999999999999999999999999',
+      '1000000000000000000000000000000',
+    ];
+
+    test('a collection with a float element keeps its exact elements', () => {
+      const ce = engineAt(p);
+      expect(
+        ce
+          .box(['Floor', ['Abs', ['List', Q, 1.5]]])
+          .N()
+          .toString()
+      ).toBe('[0,1]');
+      // A lazy broadcast (more than 100 elements).
+      const lazy = ce
+        .box([
+          'Floor',
+          ['Abs', ['Join', ['List', Q], ['Range', 1, 300], ['List', 1.5]]],
+        ])
+        .N();
+      const at = (k: number) => ce.box(['At', lazy, k]).evaluate().re;
+      expect([at(1), at(2), at(302)]).toEqual([0, 1, 1]);
+    });
+
+    test('a lazy Map computes an element with an exact input exactly', () => {
+      // At machine precision, the elements of a lazy `Map` under `.N()` are
+      // computed by a compiled function on doubles
+      // (`library/map-auto-compile.ts`). It received the float of an exact
+      // input: the floor of Q was 1, and `Floor(√x·√3)` at 3 was 2 (the
+      // product of the doubles is 2.9999999999999996).
+      const ce = engineAt(p);
+      const at = (json: unknown, k: number) =>
+        ce.box(['At', ce.box(json as never).N(), k]).evaluate().re;
+      expect(at(['Floor', ['Join', ['List', Q], ['Range', 1, 300]]], 1)).toBe(
+        0
+      );
+      const body = ['Floor', ['Multiply', ['Sqrt', 'x'], ['Sqrt', 3]]];
+      expect(
+        at(['Map', ['Function', body, 'x'], ['Range', 1, 300]], 3)
+      ).toBe(3);
+    });
+
+    test('a lazy Map that calls a function-valued symbol', () => {
+      // A symbol declared `function` and assigned a literal has a value,
+      // not an operator definition. Before 2026-10-17 the body of the value
+      // was not read for a function that jumps at a point, and the compiled
+      // code computed `Floor(√x·√3)` at the exact 3 with doubles: 2.
+      const ce = engineAt(p);
+      ce.declare('g', 'function');
+      const body = ['Floor', ['Multiply', ['Sqrt', 'x'], ['Sqrt', 3]]];
+      ce.assign('g', ce.box(['Function', body, 'x'] as never));
+      const m = ce
+        .box(['Map', ['Function', ['g', 'x'], 'x'], ['Range', 1, 300]])
+        .N();
+      const values = [...m.each()].map((x) => x.re);
+      expect([values[2], values[11], values[26]]).toEqual([3, 6, 9]);
+    });
+
+    test('an exact rational times a range keeps its value', () => {
+      // The float of Q is the integer 1, and the proof that a `Map` is
+      // computed exactly with integers (`map-exact-proof.ts`) read Q as the
+      // integer 1: the first element of `Q·Range(1, 300)` was 1, not Q.
+      const ce = engineAt(p);
+      const m = ce.box(['Multiply', ['Range', 1, 300], Q]).evaluate();
+      expect(ce.box(['At', m, 1]).evaluate().json).toEqual(
+        ce.box(Q).json
+      );
+      expect(
+        ce.box(['At', ce.box(['Floor', m]).evaluate(), 2]).evaluate().re
+      ).toBe(1);
+    });
+
+    test('the elements of a nested collection', () => {
+      const ce = engineAt(p);
+      expect(
+        ce
+          .box(['Floor', ['Abs', ['List', ['List', Q, 2]]]])
+          .N()
+          .toString()
+      ).toBe('[[0,2]]');
     });
 
     test('the parse route', () => {
@@ -932,6 +1030,43 @@ describe('An exact constant is evaluated before it is enclosed', () => {
     expect(ce.box(R).isEqual(0)).toBe(true);
     expect(ce.box(['Less', 0, R]).evaluate().symbol).toBe('False');
     expect(ce.box(['Less', 0, R]).N().symbol).toBe('False');
+  });
+});
+
+/**
+ * The operand `1/(√(10⁴⁰ + 1) − 10²⁰)` is `√(10⁴⁰ + 1) + 10²⁰`, about
+ * `2·10²⁰ + 5·10⁻²¹`. At the first precision of the enclosures (31 digits)
+ * the denominator rounds to `0` and has no enclosure. That failure depends
+ * on the precision, so the enclosures are computed again at a higher
+ * precision, where the terms no longer cancel.
+ */
+describe('An exact constant whose enclosure needs a higher precision', () => {
+  const X = [
+    'Divide',
+    1,
+    ['Subtract', ['Sqrt', ['Add', ['Power', 10, 40], 1]], ['Power', 10, 20]],
+  ];
+
+  test('a denominator that is 0 at the first precision', () => {
+    const ce = engineAt(21);
+    const floor = ce.box(['Floor', X]).evaluate();
+    expect(floor.isSame(ce.number(200000000000000000000n))).toBe(true);
+    const ceil = ce.box(['Ceil', X]).evaluate();
+    expect(ceil.isSame(ce.number(200000000000000000001n))).toBe(true);
+    expect(ce.box(['Sign', X]).evaluate().re).toBe(1);
+    expect(ce.box(['Less', X, ['Power', 10, 21]]).evaluate().symbol).toBe(
+      'True'
+    );
+  });
+
+  // Above 325 digits the relative error of one rounding, `10^(2 − digits)`,
+  // is not a double: it was `0`, and every enclosure was a point.
+  // `cos(10⁻²¹⁰)` is `1 − 5·10⁻⁴²¹`, and its floor is `0`.
+  test('a precision above 325 digits keeps an error bound', () => {
+    const ce = engineAt(400);
+    const x = ['Floor', ['Cos', ['Power', 10, -210]]];
+    expect(ce.box(x).evaluate().re).toBe(0);
+    expect(ce.box(x).N().re).toBe(0);
   });
 });
 

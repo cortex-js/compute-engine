@@ -282,6 +282,61 @@ describe('issue #369: the consumers of a list-building fold compile', () => {
     expect(r.run!({ p: [3, 1, 2] })).toEqual([3, 4, 6]);
   });
 
+  // The annotations of a block-local callback are checked against the
+  // values it receives, as those of a literal or of an engine function are.
+  // They were read from the engine only, so the local `step` was not
+  // checked: `Fold(step, 0.5, p)` compiled and answered 2.5 for `p = [3, 1]`,
+  // where the interpreter reports that 0.5 is not an integer.
+  it.each([
+    ['Fold', 'const step = (a: integer, x) => a + 1\nFold(step, 0.5, p)'],
+    ['Fold', 'function step(a: integer, x) { a + 1 }\nFold(step, 0.5, p)'],
+    ['Scan', 'function step(a: integer, x) { a + 1 }\nScan(p, step, 0.5)'],
+    ['Map', 'const f = (x: integer) => x + 1\nMap(f, q)'],
+  ])('%s with an annotated block-local callback that the values do not satisfy declines', (_head, source) => {
+    const ce = engine();
+    ce.declare('q', 'list<real>');
+    expect(() =>
+      compile(ce.box(parseEpsil(source)[0]), { fallback: false })
+    ).toThrow(/is annotated 'integer'/);
+    ce.assign('p', ce.box(['List', 3, 1]));
+    ce.assign('q', ce.box(['List', 0.5]));
+    expect(ce.box(parseEpsil(source)[0]).evaluate().toString()).toContain(
+      'incompatible-type'
+    );
+  });
+
+  it('an annotated block-local combiner that the values satisfy compiles', () => {
+    const ce = engine();
+    const program = parseEpsil(
+      'function step(a: integer, x: integer) { a + x }\nFold(step, 0, p)'
+    )[0];
+    const r = compile(ce.box(program), { fallback: false });
+    expect(r.run!({ p: [3, 1, 2] })).toBe(6);
+  });
+
+  // A seed whose collection type was inferred is an array only by its
+  // run-time check. The step checks the accumulator when it reads it, but an
+  // empty source runs no step: with a set in `s` and an empty `p`, `Length`
+  // read `.length` of the set and answered `undefined`, where the
+  // interpreter answers 2. The seed is now checked too, so the run stops
+  // for a set whether or not `p` is empty.
+  it('Length of a fold whose seed is an inferred collection checks the seed', () => {
+    const ce = new ComputeEngine();
+    ce.declare('p', 'list<number>');
+    ce.declare('s', { type: 'collection<number>', inferred: true });
+    ce.assign(
+      'step',
+      ce.box(['Function', ['Join', 'acc', ['List', 'i']], 'acc', 'i'] as any)
+    );
+    const r = js(ce, ['Length', ['Fold', 'step', 's', 'p']]);
+    expect(r.run!({ s: [1, 2], p: [] } as any)).toBe(2);
+    expect(r.run!({ s: [1, 2], p: [5] } as any)).toBe(3);
+    for (const p of [[], [5]])
+      expect(() => r.run!({ s: new Set([1, 2]), p } as any)).toThrow(
+        /not a list at run time/
+      );
+  });
+
   it('a fold with a user-function combiner', () => {
     const ce = engine();
     ce.assign('step', ce.box(['Function', BODY, 'acc', 'i'] as any));

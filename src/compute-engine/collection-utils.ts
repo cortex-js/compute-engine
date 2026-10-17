@@ -28,6 +28,8 @@ import {
   machineNumberOf,
 } from './boxed-expression/machine-number.js';
 import { machineBroadcast } from './boxed-expression/machine-broadcast.js';
+import { literalMayEraseElement } from './boxed-expression/nothing-erasure.js';
+import { isTransitivelyPure } from './boxed-expression/transitive-purity.js';
 import {
   isFiniteCount,
   normalizeCount,
@@ -3687,10 +3689,43 @@ export function collectionSubset(
   return true;
 }
 
+/**
+ * The value of the `List` or `Tuple` literal `expr` when it has an element
+ * that may evaluate to `Nothing` (`literalMayEraseElement()`), and `undefined`
+ * otherwise.
+ *
+ * The literal erases an element that evaluates to `Nothing`, so its operands
+ * are not its elements: with `c` false, `[If(c, 1, Nothing), 2]` holds one
+ * element. A consumer that walks the literal without evaluating it (a lazy
+ * `Map` or `Filter` over it, a count) read two elements, and
+ * `Map(Sin, [If(c, 1, Nothing), 2])` was `[Sin(Nothing), Sin(2)]`. The
+ * collection handlers of such a literal read its value instead, computed when
+ * they are called, as the elements of a lazy view are.
+ *
+ * The literal is evaluated only when it is pure, so that a count or a walk
+ * consumes no random draw. The answer is also `undefined` when the value
+ * still has such an element (a condition with no value yet): the handlers
+ * then read the operands, as before.
+ */
+function erasedLiteralValue(
+  expr: Expression
+): (Expression & FunctionInterface) | undefined {
+  if (!isFunction(expr) || expr._numericStore !== undefined) return undefined;
+  if (expr.operator !== 'List' && expr.operator !== 'Tuple') return undefined;
+  if (!literalMayEraseElement(expr)) return undefined;
+  if (!isTransitivelyPure(expr)) return undefined;
+  const value = expr.evaluate();
+  if (!isFunction(value, expr.operator)) return undefined;
+  if (literalMayEraseElement(value)) return undefined;
+  return value;
+}
+
 function basicCollectionIndexWhere(
   expr: Expression,
   predicate: (element: Expression) => boolean
 ): number | undefined {
+  const erased = erasedLiteralValue(expr);
+  if (erased !== undefined) return basicCollectionIndexWhere(erased, predicate);
   if (!isFunction(expr)) return undefined;
   const store = expr._numericStore;
   if (store !== undefined) {
@@ -3785,13 +3820,24 @@ export function basicIndexedCollectionHandlers(): CollectionHandlers {
   return {
     isLazy: (_expr) => false,
 
-    count: (expr) => (isFunction(expr) ? expr.nops : 0),
+    count: (expr) => {
+      const erased = erasedLiteralValue(expr);
+      if (erased !== undefined) return erased.nops;
+      return isFunction(expr) ? expr.nops : 0;
+    },
 
-    isEmpty: (expr) => !isFunction(expr) || expr.nops === 0,
+    isEmpty: (expr) => {
+      const erased = erasedLiteralValue(expr);
+      if (erased !== undefined) return erased.nops === 0;
+      return !isFunction(expr) || expr.nops === 0;
+    },
 
     isFinite: (_expr) => true,
 
     contains: (expr, target) => {
+      if (!isFunction(expr)) return false;
+      const erased = erasedLiteralValue(expr);
+      if (erased !== undefined) expr = erased;
       if (!isFunction(expr)) return false;
       const store = expr._numericStore;
       if (store !== undefined) {
@@ -3802,6 +3848,8 @@ export function basicIndexedCollectionHandlers(): CollectionHandlers {
     },
 
     iterator: (expr) => {
+      const erased = erasedLiteralValue(expr);
+      if (erased !== undefined) expr = erased;
       if (!isFunction(expr))
         return { next: () => ({ value: undefined, done: true as const }) };
       let index = 1;
@@ -3841,6 +3889,8 @@ export function basicIndexedCollectionHandlers(): CollectionHandlers {
         !isFunction(expr)
       )
         return undefined;
+      const erased = erasedLiteralValue(expr);
+      if (erased !== undefined) return erased.at(index);
       if (index < 0) index = expr.nops + index + 1;
       if (index < 1 || index > expr.nops) return undefined;
       const store = expr._numericStore;

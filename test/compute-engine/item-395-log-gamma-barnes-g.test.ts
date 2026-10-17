@@ -406,6 +406,16 @@ describe('BarnesG at a complex z where G is not a double', () => {
     ).toBe('(1.48501924951e-362 + 2.52832839715e-362i)');
   });
 
+  test('a small imaginary part near the real axis is kept', () => {
+    // mpmath.barnesg(mpc(150, 1e-20)) at 20 digits:
+    // 2.1716394650077426444e+16951 + 1.2975684328773405882e+16934i.
+    // The imaginary part was dropped as noise.
+    const engine = new ComputeEngine();
+    expect(engine.box(['BarnesG', cx(150, 1e-20)]).N().toString()).toBe(
+      '(2.171639465e+16951 + 1.2975684329e+16934i)'
+    );
+  });
+
   // Γ shares the route, from ln Γ: mpmath.gamma(mpc(re, im)) at 40 digits.
   // `Factorial(z)` is Γ(z + 1). The double kernel gave 0 for the first two
   // and `~oo`, which reads as a pole, for the others.
@@ -511,6 +521,44 @@ describe('BarnesG at a complex z where G is not a double', () => {
           continue;
         }
         const digits = got[k].significand.toString().replace('-', '').length;
+        const error = got[k].sub(want[k]).abs().div(want[k].abs()).toNumber();
+        expect(error).toBeLessThan(10 ** (1 - digits));
+      }
+    }
+  );
+
+  // Near the real axis, with Re z ≥ 18, the imaginary part of ln Γ is
+  // computed to about its own precision, so the imaginary part of Γ is not
+  // noise, however small it is relative to the modulus. It was dropped:
+  // Γ(200 + 10⁻²⁰i) was 3.94328933682e+372. mpmath.gamma(mpc(re, im)) at 30
+  // digits.
+  test.each([
+    [
+      1e-20,
+      '3.94328933682395251776181606966e+372',
+      '2.08829319361103975522805167116e+353',
+    ],
+    [
+      1e-10,
+      '3.94328933682395251720875649003e+372',
+      '2.08829319361103975513038674982e+363',
+    ],
+    [
+      -1e-15,
+      '3.94328933682395251776181606961e+372',
+      '-2.08829319361103975522805167115e+358',
+    ],
+  ] as [number, string, string][])(
+    'Gamma(200 + %pi) keeps its small imaginary part',
+    (im, wantRe, wantIm) => {
+      const engine = new ComputeEngine();
+      const v = engine.box(['Gamma', cx(200, im)]).N();
+      const want = [new BigDecimal(wantRe), new BigDecimal(wantIm)];
+      const got = [v.bignumRe!, v.bignumIm!];
+      for (let k = 0; k < 2; k++) {
+        expect(got[k].isZero()).toBe(false);
+        const digits = got[k].significand.toString().replace('-', '').length;
+        expect(digits).toBeGreaterThanOrEqual(10);
         const error = got[k].sub(want[k]).abs().div(want[k].abs()).toNumber();
         expect(error).toBeLessThan(10 ** (1 - digits));
       }

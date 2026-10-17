@@ -25,6 +25,11 @@ import { readSource, type CliIo } from './io.js';
  * `engine` is the engine backing the LaTeX injection; callers that also need
  * one for a later phase (`checkSource()` canonicalizes with it) pass theirs in
  * so a single engine serves the whole check.
+ *
+ * The parse consumes the time budget of `engine` (`withTimeLimit`), as the
+ * parse of `executeEpsil` does: the `--compile` mode of the CLI parses inside
+ * its `--time-limit`. A cancellation (the deadline, a limit) is thrown on to
+ * the caller, not reported as a diagnostic.
  */
 export function parseSource(
   source: string,
@@ -34,9 +39,16 @@ export function parseSource(
   const parseLatex = (latex: string) => engine.parse(latex).json;
 
   try {
-    const [ast, diagnostics] = parseEpsil(source, url, { parseLatex });
+    const [ast, diagnostics] = parseEpsil(source, url, {
+      parseLatex,
+      deadline: engine._deadlineFrame,
+    });
     return { ast, diagnostics };
   } catch (error) {
+    // The class is checked by name, since an `instanceof` fails across
+    // bundle boundaries.
+    if (error instanceof Error && error.name === 'CancellationError')
+      throw error;
     return {
       ast: null,
       diagnostics: [

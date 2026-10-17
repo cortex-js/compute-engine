@@ -1,5 +1,5 @@
 import { describeType } from '../boxed-expression/operand-descriptor.js';
-import { shadowsLibraryName } from '../library-shadowing.js';
+import { isShadowedSymbol, shadowsLibraryName } from '../library-shadowing.js';
 import { deriveApplicationType } from '../boxed-expression/derive-application-type.js';
 import type {
   Expression,
@@ -148,6 +148,7 @@ import {
   functionLiteralReturnType,
   isDestructuringParameter,
   isRestParameter,
+  isScalarType,
 } from '../boxed-expression/function-literal.js';
 import { tuplePatternNames } from '../boxed-expression/tuple-pattern.js';
 import { listRecursionPlan } from '../boxed-expression/recursive-list-builder.js';
@@ -552,6 +553,18 @@ const COLOR_SPACE_HEADS: Readonly<Record<CompiledColorSpace, string>> = {
  * ended the emission.
  */
 type DeclineNote = { reason?: string };
+
+/**
+ * A run-time check that an argument of a user function is present
+ * (`BaseCompiler.absentArgumentChecks`): the message of the `TypeError` the
+ * check throws, or `undefined` when an absent value is replaced by `NaN`
+ * instead (a numeric parameter), and whether the check is also made on each
+ * element of a list argument, at any depth (`elements`).
+ */
+type AbsentArgumentCheck = {
+  message: string | undefined;
+  elements: boolean;
+};
 
 /**
  * How a target spells "the numeric fragment `x` holds a value a comparison can
@@ -4850,15 +4863,72 @@ export class BaseCompiler {
 
   static piMultiple(x: Expression): Expression | undefined {
     const ce = x.engine;
-    if (isSymbol(x, 'Pi')) return ce.One;
+    if (isSymbol(x, 'Pi'))
+      return BaseCompiler.isLibraryPi(x) ? ce.One : undefined;
     if (!isFunction(x, 'Multiply')) return undefined;
     const index = x.ops.findIndex((op) => isSymbol(op, 'Pi'));
-    if (index < 0) return undefined;
+    if (index < 0 || !BaseCompiler.isLibraryPi(x.ops[index])) return undefined;
     const rest = x.ops.filter((_, i) => i !== index);
     if (rest.some((op) => op.symbols.includes('Pi'))) return undefined;
     const u = rest.length === 1 ? rest[0] : ce.function('Multiply', rest);
     if (BaseCompiler.isComplexValued(u)) return undefined;
     return u;
+  }
+
+  /**
+   * Whether the symbol `pi` (named `Pi`) compiles to the library constant π
+   * at the current compile site. It does not when a user binding of the
+   * name gives it another value (`isShadowedSymbol`: a declaration, or a
+   * parameter of the function literal whose body is compiled), when the
+   * compilation binds the name (`isCompileBoundName`: a lambda parameter, a
+   * loop index), or when the caller maps it to a run-time input (the `vars`
+   * option of `compile()`). The half-turn shortcut of `piMultiple` reads
+   * `π·u` as the angle `u` in half-turns, which is only right for π itself.
+   */
+  private static isLibraryPi(pi: Expression): boolean {
+    if (!isSymbol(pi, 'Pi') || isShadowedSymbol(pi)) return false;
+    if (BaseCompiler.isCompileBoundName('Pi')) return false;
+    const target = BaseCompiler._callSiteTarget;
+    if (target === undefined) return true;
+    if (target.varsKeys?.has('Pi') === true) return false;
+    // A target that does not record the `vars` keys still resolves a mapped
+    // name through `var`, ahead of its constants. The question is asked
+    // without emitting anything, so a vars-object reference that the hook
+    // records is rolled back, as the symbol branch of `compile` does. A
+    // symbol bound to the library constant inside a scope that declares
+    // `Pi` is π, although the hook answers otherwise
+    // (`libraryBoundConstantHidden`).
+    const constant = target.constant?.('Pi');
+    if (constant === undefined) return true;
+    const hadVarsRef = target.varsObjectRefs?.has('Pi') === true;
+    const resolved = target.var('Pi');
+    if (!hadVarsRef) target.varsObjectRefs?.delete('Pi');
+    return (
+      resolved === constant ||
+      BaseCompiler.libraryBoundConstantHidden(pi, 'Pi', target)
+    );
+  }
+
+  /**
+   * True when the symbol `expr`, named `s`, is bound to the definition of a
+   * library constant of `target` (`Pi`, `ExponentialE`, …), but a scope at
+   * the compile site declares the name (`shadowsLibraryName()`). The `var`
+   * hook of the JavaScript and interval targets reads only the name, so it
+   * then skips the constant, while the interpreter reads the bound
+   * definition and computes with the constant. A name that the compilation
+   * binds (a lambda parameter, a loop index) or that the caller maps with
+   * `vars` is never the constant.
+   */
+  private static libraryBoundConstantHidden(
+    expr: Expression,
+    s: string,
+    target: CompileTarget<Expression>
+  ): boolean {
+    if (target.constant?.(s) === undefined) return false;
+    if (target.boundVars?.has(s) === true || target.varsKeys?.has(s) === true)
+      return false;
+    if (!isSymbol(expr) || isShadowedSymbol(expr)) return false;
+    return shadowsLibraryName(expr.engine, s, { customLibrary: false });
   }
 
   /** An exact noninteger exponent whose reduced denominator permits a real root. */
@@ -9120,7 +9190,34 @@ export class BaseCompiler {
       // "dangling" `Sin` the artifact does not contain. Only a record THIS
       // resolution introduced is removed.
       const hadVarsRef = target.varsObjectRefs?.has(s) === true;
-      const resolved = target.var?.(s);
+      let resolved = target.var?.(s);
+      // A target reads a library constant (`Pi`, `ExponentialE`,
+      // `ImaginaryUnit`, …) from its constants table by NAME. When a user
+      // binding gives the name another value (`ce.declare('Pi', { value: 1
+      // })` in a nested scope, `isShadowedSymbol`), the symbol is not the
+      // constant: it is read as any other symbol, so its value is folded
+      // below, or it is a free symbol. Before, `Pi·x` compiled to
+      // `Math.PI * x` there, where the interpreter computes `1·x`.
+      if (
+        resolved !== undefined &&
+        resolved === target.constant?.(s) &&
+        isShadowedSymbol(expr)
+      )
+        resolved = undefined;
+      // The other direction. The `var` hook of a target can only see the
+      // NAME, so it tests the scope chain at the compile site: a scope that
+      // declares `Pi` makes it skip the constant. The interpreter reads the
+      // definition the symbol is bound to, and a symbol boxed while `Pi` was
+      // the library constant still denotes π inside such a scope. That
+      // symbol is read from the constants table, and a vars-object reference
+      // the hook recorded is rolled back.
+      else if (
+        resolved !== target.constant?.(s) &&
+        BaseCompiler.libraryBoundConstantHidden(expr, s, target)
+      ) {
+        resolved = target.constant!(s);
+        if (!hadVarsRef) target.varsObjectRefs?.delete(s);
+      }
       // A bare symbol naming a user-defined function, used in value position (a
       // higher-order operand such as `Map(f, list)` / `Filter(list, f)`),
       // resolves to the shared emitted local `_fn_f` — the same definition the
@@ -11282,7 +11379,26 @@ export class BaseCompiler {
               [...(lambdaTarget.boundVars ?? params)],
               emitBody
             );
-      const arrow = `((${binding.emitted.join(', ')}) => ${
+      // An absent argument (`undefined`) at a parameter ANNOTATED with a
+      // numeric type is read as `NaN`, as the interpreter reads it
+      // (`makeLambda`, `function-utils.ts`). An inferred type does not
+      // select the default; only the annotation does. The reading is a
+      // JavaScript default value, which applies exactly when the argument is
+      // `undefined`. The literal is also a function VALUE, and a consumer of
+      // a function value (`Map`, `Filter`, …) hands it the elements as they
+      // are, so the call sites cannot do it (`absentArgumentChecks`). A
+      // complex-lane parameter is left out: its wrapper
+      // (`complexCoercingWrapper`) converts the argument, and reads an absent
+      // one as `NaN`, before the arrow receives it.
+      const emittedParams = binding.emitted.map((name, i) =>
+        target.language === 'javascript' &&
+        !complexParam[i] &&
+        annotated[i] !== undefined &&
+        isSubtype(annotated[i]!, 'number')
+          ? `${name} = NaN`
+          : name
+      );
+      const arrow = `((${emittedParams.join(', ')}) => ${
         framedComplex.size > 0
           ? // Owned by the node being lowered: the frame describes THIS
             // literal's parameters, so a re-entrant emission of the same
@@ -16074,14 +16190,20 @@ export class BaseCompiler {
   static assertCallbackAnnotations(
     kind: string,
     callback: Expression | undefined,
-    argTypes: ReadonlyArray<Type | undefined>
+    argTypes: ReadonlyArray<Type | undefined>,
+    target?: CompileTarget<Expression>
   ): void {
     // A SYMBOL naming a user-defined function is checked on its literal: the
     // emitted definition (`emitFunctionLiteralDefinition`) drops the
     // annotation exactly as an inline arrow does, so `Filter(ds, p)` over
-    // `p = (n: integer) ↦ n > 0` had the same silent divergence.
+    // `p = (n: integer) ↦ n > 0` had the same silent divergence. The literal
+    // is the one the emitted code calls (`callbackLiteral`): with the
+    // `target`, a function local to the enclosing block comes first. Read
+    // from the engine only, the local `const step = (a: integer, x) => a + 1`
+    // in `Fold(step, 0.5, p)` was not checked, and the compiled fold
+    // answered a number where the interpreter reports the annotation error.
     const literal = isSymbol(callback)
-      ? BaseCompiler.userFunctionLiteral(callback.engine, callback.symbol)
+      ? BaseCompiler.callbackLiteral(callback, target)
       : callback;
     if (literal === undefined || !isFunction(literal, 'Function')) return;
     const params = literal.ops.slice(1);
@@ -16094,6 +16216,28 @@ export class BaseCompiler {
       // and admit a callback whose enforcement DOES fire — silently, since the
       // compiled lowering has no enforcement at all.
       if (actual !== undefined && isSubtype(actual, declared)) continue;
+      // An absent value at a NUMERIC parameter is no error: the interpreter
+      // reads it as `NaN` (`makeLambda`, `function-utils.ts`), and so does
+      // the compiled arrow of a function literal, through the default value
+      // of the parameter (the `Function` branch of `compileOp`). So an
+      // argument type `missing | T` is admitted when `T` satisfies the
+      // annotation. The emitted callee carries that default when it is the
+      // arrow of the literal: an inline literal, or a function local to the
+      // enclosing block (`CompileTarget.localFunctions`), whose value is the
+      // literal compiled in place. A function defined on the engine is
+      // emitted as a definition with no such default, so it is not admitted
+      // this way.
+      const arrowCallee =
+        !isSymbol(callback) ||
+        target?.localFunctions?.get(callback.symbol) !== undefined;
+      if (
+        actual !== undefined &&
+        arrowCallee &&
+        isSubtype(declared, 'number') &&
+        typeContainsMissing(actual) &&
+        isSubtype(stripMissingFromType(actual), declared)
+      )
+        continue;
       throw new Error(
         `Could not compile \`${kind}\`: the callback parameter ` +
           `'${functionLiteralParameterName(params[i]) || `#${i + 1}`}' is ` +
@@ -20102,6 +20246,23 @@ export class BaseCompiler {
     // (`foldsCollectionElements`). Reading such a fold with the scalar test
     // put a sum of REAL points in the complex lane, and a parent read each
     // coordinate as `{re, im}`: `Sum(P) + (1, 1)` gave `NaN` coordinates.
+    // An operand typed `broadcastable<T>` is a `T` or a list of `T`, and
+    // its type matches no collection type. The fold (the guarded fold of
+    // `emitCollectionReduce` in `javascript-target.ts`) answers the operand
+    // itself or the sum of its elements, so its value is complex-shaped
+    // when `T` is complex. Read from the node's type `number`, `Sum(c) + 1`
+    // with `c: broadcastable<complex>` holding `[i]` added `1` to a
+    // `{re, im}` object with the real `+` and answered `"[object Object]1"`.
+    if (
+      (expr.operator === 'Sum' || expr.operator === 'Product') &&
+      expr.ops.length === 1
+    ) {
+      const t = compilationType(expr.ops[0]);
+      if (typeof t !== 'string' && t.kind === 'broadcastable')
+        return (
+          isNonRealNumber(t.elements) || BaseCompiler.wideIsComplex(t.elements)
+        );
+    }
     if (
       (expr.operator === 'Sum' || expr.operator === 'Product') &&
       expr.ops.length === 1 &&
@@ -26186,22 +26347,22 @@ export class BaseCompiler {
     }
     if (name === undefined) return undefined;
     // The mapped list is exempt from the absent-argument check (an absent
-    // point is an absent cell); every other argument is checked.
+    // point is an absent cell); every other argument is checked inside the
+    // map, when a point is given to the function. So an empty list, and an
+    // absent list, answer as the interpreter does (the empty list, and an
+    // absent value), without a check.
     const checks = BaseCompiler.absentArgumentChecks(
       h,
       BaseCompiler.userFunctionLiteral(engine, h),
       args,
       target
     );
-    const codes = args.map((a, i) =>
-      BaseCompiler.presentCheckedCode(
-        BaseCompiler.compileValueOperand(a, target),
-        i === at ? undefined : checks[i]
-      )
-    );
+    const codes = args.map((a) => BaseCompiler.compileValueOperand(a, target));
     const temps = args.map(() => BaseCompiler.tempVar(target));
     const point = BaseCompiler.tempVar(target);
-    const callArgs = temps.map((t, i) => (i === at ? point : t));
+    const callArgs = temps.map((t, i) =>
+      i === at ? point : BaseCompiler.presentCheckedCode(t, checks[i])
+    );
     // A list that may be absent (`(A, B)\{0 < t\}`), or whose points may be
     // absent (`[(3, 4)\{0 < t\}, (6, 8)]`): `Missing` lowers to
     // `undefined`, and the interpreter answers `Missing` for an absent list
@@ -26525,22 +26686,23 @@ export class BaseCompiler {
         );
       const callee = target.var(h) ?? h;
       // The mapped list is exempt from the absent-argument check (an absent
-      // point is an absent cell); every other argument is checked.
+      // point is an absent cell); every other argument is checked inside the
+      // map, when a point is given to the function, as in
+      // `tryCompilePointListCall`.
       const checks = BaseCompiler.absentArgumentChecks(
         h,
         literal,
         args,
         target
       );
-      const codes = args.map((a, i) =>
-        BaseCompiler.presentCheckedCode(
-          BaseCompiler.compileValueOperand(a, target),
-          i === at ? undefined : checks[i]
-        )
+      const codes = args.map((a) =>
+        BaseCompiler.compileValueOperand(a, target)
       );
       const temps = args.map(() => BaseCompiler.tempVar(target));
       const point = BaseCompiler.tempVar(target);
-      const callArgs = temps.map((t, i) => (i === at ? point : t));
+      const callArgs = temps.map((t, i) =>
+        i === at ? point : BaseCompiler.presentCheckedCode(t, checks[i])
+      );
       // A list that may be absent, or whose points may be absent: `Missing`
       // lowers to `undefined`, and the interpreter answers `Missing` for an
       // absent list and for the cell of an absent point, so the map does
@@ -26806,15 +26968,30 @@ export class BaseCompiler {
    * branch of `tryCompileLocalFunctionCall`), the mapped argument is exempt:
    * the map answers `undefined` for an absent point without calling the
    * function, as the interpreter answers `Missing` for that cell; the other
-   * arguments are checked. The JavaScript `Apply` of a function literal
-   * (`javascript-target.ts`) uses this too.
+   * arguments are checked inside the map, once per point, so that an empty
+   * list answers the empty list without a check, as the interpreter does.
+   * The JavaScript `Apply` of a function literal (`javascript-target.ts`)
+   * uses this too.
+   *
+   * A list argument at a SCALAR parameter (`isScalarType`) is mapped: the
+   * function is applied to each element, at any depth, and the interpreter
+   * gives the `incompatible-type` error for an absent element. So when the
+   * type of such an argument has an absent member at any depth
+   * (`typeContainsMissing`), the check is made on each element of the list,
+   * nested lists included (`elements: true`).
+   *
+   * At a NUMERIC annotation the interpreter reads an absent argument as
+   * `NaN` (`makeLambda`, `function-utils.ts`), and the call site
+   * does the same (`message: undefined`, `_SYS.absentNaN`). Without it, a
+   * body that does not compute with the parameter (`(x: number) => x`)
+   * answered `undefined` where the interpreter answers `NaN`.
    */
   static absentArgumentChecks(
     calleeName: string,
     literal: Expression | undefined,
     args: ReadonlyArray<Expression>,
     target: CompileTarget<Expression>
-  ): Array<string | undefined> {
+  ): Array<AbsentArgumentCheck | undefined> {
     if (target.language !== 'javascript') return [];
     if (literal === undefined || !isFunction(literal, 'Function')) return [];
     const params = literal.ops.slice(1);
@@ -26823,26 +27000,43 @@ export class BaseCompiler {
       if (param === undefined) return undefined;
       const declared = functionLiteralParameterType(param);
       if (declared === undefined) return undefined;
-      if (isSubtype('missing', declared) || isSubtype(declared, 'number'))
-        return undefined;
-      if (!isSubtype('missing', a.type.type)) return undefined;
+      if (isSubtype('missing', declared)) return undefined;
+      const t = a.type.type;
+      const elements =
+        isScalarType(declared) &&
+        !isTupleShapedType(t) &&
+        typeContainsMissing(t);
+      if (!elements && !isSubtype('missing', t)) return undefined;
+      if (isSubtype(declared, 'number'))
+        return { message: undefined, elements };
       const name = functionLiteralParameterName(param) || `#${i + 1}`;
-      return (
-        `${calleeName}: the argument of the parameter '${name}' is absent, ` +
-        `and the parameter is annotated '${typeToString(declared)}'`
-      );
+      return {
+        message:
+          `${calleeName}: the argument of the parameter '${name}' is absent, ` +
+          `and the parameter is annotated '${typeToString(declared)}'`,
+        elements,
+      };
     });
   }
 
   /**
-   * `code` wrapped in the run-time absent-argument check whose message is
-   * `check` (`_SYS.present`, see `absentArgumentChecks`), or `code` as it is
-   * when `check` is `undefined`.
+   * `code` wrapped in the run-time absent-argument check `check`
+   * (`_SYS.present`, or `_SYS.absentNaN` at a numeric parameter, see
+   * `absentArgumentChecks`), or `code` as it is when `check` is `undefined`.
    */
-  static presentCheckedCode(code: string, check: string | undefined): string {
-    return check === undefined
-      ? code
-      : `_SYS.present(${code}, ${JSON.stringify(check)})`;
+  static presentCheckedCode(
+    code: string,
+    check: AbsentArgumentCheck | undefined
+  ): string {
+    if (check === undefined) return code;
+    if (check.message === undefined)
+      return check.elements
+        ? `_SYS.absentNaN(${code}, true)`
+        : `_SYS.absentNaN(${code})`;
+    const message = JSON.stringify(check.message);
+    return check.elements
+      ? `_SYS.present(${code}, ${message}, true)`
+      : `_SYS.present(${code}, ${message})`;
   }
 
   /**
@@ -26881,10 +27075,10 @@ export class BaseCompiler {
      */
     held: ReadonlyArray<string> = [],
     /**
-     * Per argument, the message of the run-time check that the argument is
-     * present, or `undefined` for no check (`absentArgumentChecks`).
+     * Per argument, the run-time check that the argument is present, or
+     * `undefined` for no check (`absentArgumentChecks`).
      */
-    absentChecks: ReadonlyArray<string | undefined> = []
+    absentChecks: ReadonlyArray<AbsentArgumentCheck | undefined> = []
   ): TargetSource {
     const provablyScalarArg = BaseCompiler.provablyScalarArg;
 
@@ -30680,6 +30874,13 @@ export class BaseCompiler {
    * wrapper under its own `$v` name) and a function LITERAL spliced in value
    * position, which has no name to bind and takes the wrapper inline. Both
    * therefore coerce at the same positions and in the same way.
+   *
+   * An absent argument (`undefined`) is read as `NaN` before the lift, as the
+   * interpreter reads an absent value at a numeric parameter (`makeLambda`,
+   * `function-utils.ts`). A real-lane parameter of a function literal gets
+   * this from its `= NaN` default value; a complex-lane parameter has no
+   * default, and `_SYS.cplx(undefined)` is `undefined`, so without the test
+   * the body read `.re` off `undefined` and threw.
    */
   private static complexCoercingWrapper(
     callee: string,
@@ -30688,7 +30889,7 @@ export class BaseCompiler {
   ): string {
     const params = complexParam.map(() => BaseCompiler.tempVar(target));
     const args = params.map((p, i) =>
-      complexParam[i] ? `_SYS.cplx(${p})` : p
+      complexParam[i] ? `_SYS.cplx(${p} === undefined ? NaN : ${p})` : p
     );
     return `(${params.join(', ')}) => ${callee}(${args.join(', ')})`;
   }
@@ -31283,6 +31484,12 @@ export class BaseCompiler {
    * argument WHOLE — `Length`, `Sum`, `Min` over a list — is not broadcast by
    * the interpreter either, and keeps the bare name so a collection element
    * still reaches its kernel intact.
+   *
+   * An operator that the host declared (`isHostOperatorCallback`,
+   * `ensureHostOperatorCallbackEmitted()`) follows the same rule, with the
+   * `broadcastable` flag and the arity of its own definition: the
+   * interpreter broadcasts it as it broadcasts a built-in, and its `compile`
+   * handler or its lowering is written for scalars too.
    */
   private static builtinCallbackValueRef(
     engine: ComputeEngine,
@@ -31295,9 +31502,13 @@ export class BaseCompiler {
     if (target.language !== 'javascript') return name;
     const registry = target.userFunctions;
     if (!registry) return name;
-    if (builtinOperatorDefinition(engine, s)?.broadcastable !== true)
-      return name;
-    const arity = builtinCallbackArity(engine, s);
+    let opDef = builtinOperatorDefinition(engine, s);
+    if (opDef === undefined && isHostOperatorCallback(engine, s)) {
+      const def = engine.lookupDefinition(s);
+      if (isOperatorDef(def)) opDef = def.operator;
+    }
+    if (opDef?.broadcastable !== true) return name;
+    const arity = operatorCallbackArity(opDef);
     if (arity === undefined) return name;
 
     const bcastName = `${name}$b`;

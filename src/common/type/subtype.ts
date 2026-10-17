@@ -1,4 +1,5 @@
 import { COUNT_STATS } from '../cache-stats.js';
+import { makeNumericRangeType } from './numeric-range.js';
 import {
   BARE_COLLECTION_STRUCTURAL_TYPE,
   BARE_DICTIONARY_STRUCTURAL_TYPE,
@@ -27,6 +28,7 @@ import type {
   FunctionSignature,
   ListType,
   NumericPrimitiveType,
+  NumericType,
   ObjectType,
   PrimitiveType,
   SetType,
@@ -1851,11 +1853,15 @@ export function isSubtype(
     // it), and without this a symbol declared that way was admitted at a
     // `matrix` parameter only provisionally. An outer list with no length
     // reads as the length `-1` (any length), which only an rhs dimension of
-    // `-1` accepts. Rows with no dimensions are not read this way: they can
-    // differ in length, and a matrix cannot. `flattenNestedListType` merges
-    // every dimensioned level at once, so the elements of the flat type are
-    // never a dimensioned list, and the recursive call cannot enter this
-    // bridge again. Only an rhs with two or more dimensions is a target: an
+    // `-1` accepts. Rows with no dimensions are not read this way, and rows
+    // with the length `-1` on an axis (`list<vector<integer>^2>`) are not
+    // either: in both cases the rows can differ in length (`[[1], [2, 3]]`),
+    // and the rows of a matrix cannot. A flat length of `-1` says only that
+    // each row has some length, not that all rows have the same one. The
+    // levels above such rows still merge. `flattenNestedListType` merges
+    // every level it can at once, so flattening its result again merges
+    // nothing and returns `undefined`: the recursive call below cannot
+    // flatten a second time. Only an rhs with two or more dimensions is a target: an
     // rhs with no dimensions (`list<integer>`) admits a flat list of any
     // shape, but code that reads the element type of such a list expects
     // scalars, and a nested type would give it rows.
@@ -2276,6 +2282,67 @@ function isSymbol(type: Type): boolean {
 // for backward compatibility.
 //
 
+/** Coerce a numeric primitive string or numeric range object to a
+ *  `NumericType`; return `null` for any non-numeric type. */
+export function asNumericRange(t: Readonly<Type>): NumericType | null {
+  if (typeof t === 'object') return t.kind === 'numeric' ? t : null;
+  if (NUMERIC_TYPES_SET.has(t as NumericPrimitiveType))
+    return { kind: 'numeric', type: t as NumericPrimitiveType };
+  return null;
+}
+
+/** The meet (intersection) of two bounded numeric types, as the list of its
+ *  ranges: the intersection of their base kinds over the intersection of
+ *  their intervals, one range per base kind. An empty interval or disjoint
+ *  base kinds give no range (the meet is `never`, the EMPTY type, never
+ *  `nothing`, which is the unit type of the symbol `Nothing`). Used by
+ *  `narrow` here and by the intersection reducer (`reduce.ts`), which reduces
+ *  a list of several ranges to a union. */
+export function meetNumericRangeMembers(
+  a: NumericType,
+  b: NumericType
+): Type[] {
+  const bases = meetPrimitiveTypes(a.type, b.type);
+  if (bases.length === 0) return [];
+
+  // The tighter endpoint wins; at EQUAL endpoints, OPEN wins (the meet of
+  // "x ≥ 0" and "x > 0" is "x > 0").
+  const aLo = a.lower ?? -Infinity;
+  const bLo = b.lower ?? -Infinity;
+  const aHi = a.upper ?? Infinity;
+  const bHi = b.upper ?? Infinity;
+  const lower = Math.max(aLo, bLo);
+  const upper = Math.min(aHi, bHi);
+  const lowerOpen =
+    (aLo === lower && a.lowerOpen === true) ||
+    (bLo === lower && b.lowerOpen === true);
+  const upperOpen =
+    (aHi === upper && a.upperOpen === true) ||
+    (bHi === upper && b.upperOpen === true);
+  if (lower > upper) return [];
+  if (lower === upper && (lowerOpen || upperOpen)) return [];
+
+  const finite = lower !== -Infinity || upper !== Infinity;
+  const ranges: Type[] = [];
+  for (const base of bases) {
+    // No value of `infinity` (±∞ and the unsigned `~oo`) or `nan` is
+    // finite, so neither can inhabit a finite interval. Without this, the
+    // meet builds a range such as `infinity<0..10>` that has no members but
+    // presents itself as a bounded real.
+    if (finite && (base === 'infinity' || base === 'nan')) continue;
+    // `bases` are the meet of two numeric primitives, hence numeric.
+    const range = makeNumericRangeType(
+      base as NumericPrimitiveType,
+      lower,
+      upper,
+      lowerOpen,
+      upperOpen
+    );
+    if (range !== 'never') ranges.push(range);
+  }
+  return ranges;
+}
+
 /** Given two types a and b, return the narrowest type common to a and b */
 function narrow2(a: Readonly<Type>, b: Readonly<Type>): Readonly<Type> {
   if (a === b) return a;
@@ -2328,6 +2395,23 @@ function narrow2(a: Readonly<Type>, b: Readonly<Type>): Readonly<Type> {
     if (kept.length === 0) return 'never';
     if (kept.length === 1) return kept[0];
     return kept.reduce((u, t) => unionTypes(u, t));
+  }
+
+  // Two numeric types, at least one of them a bounded range, that are not
+  // subtype-related can still share values: `integer<-5..5>` and
+  // `integer<1..>` share `integer<1..5>`. Their meet is the intersection of
+  // the intervals, as the intersection reducer computes it.
+  if (
+    (typeof a === 'object' && a.kind === 'numeric') ||
+    (typeof b === 'object' && b.kind === 'numeric')
+  ) {
+    const an = asNumericRange(a);
+    const bn = asNumericRange(b);
+    if (an !== null && bn !== null) {
+      const ranges = meetNumericRangeMembers(an, bn);
+      if (ranges.length === 0) return 'never';
+      return ranges.reduce((u, t) => unionTypes(u, t));
+    }
   }
 
   // Disjoint types have no common subtype: the narrowest common type is the

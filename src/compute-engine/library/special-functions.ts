@@ -84,6 +84,7 @@ import {
   bigBarnesG,
   bigLogBarnesG,
   logBarnesGComplex,
+  logBarnesGComplexImError,
   superfactorial,
 } from '../numerics/barnes-g.js';
 import {
@@ -369,7 +370,8 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
           // A value outside the double range is formed from ln G.
           const big = boxExpOfComplexLog(
             engine,
-            logBarnesGComplex(new Complex(z.re, z.im))
+            logBarnesGComplex(new Complex(z.re, z.im)),
+            logBarnesGComplexImError(new Complex(z.re, z.im))
           );
           if (big === null) return undefined;
           if (big !== undefined) return big;
@@ -903,7 +905,12 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
 
         // γₙ(a) has a pole at every nonpositive integer a, as ζ(s, a) does.
         if (a !== undefined && isNumber(a) && !a.isComplex) {
-          const integer = a.bignumRe?.isInteger() ?? Number.isInteger(a.re);
+          // An exact operand is tested exactly: its big-decimal projection is
+          // rounded to the working precision, so (−10³⁰ + 1)/10³⁰ projects
+          // to −1 at 21 digits although it is not an integer.
+          const integer = a.isExact
+            ? a.isInteger === true
+            : (a.bignumRe?.isInteger() ?? Number.isInteger(a.re));
           if (integer && a.re <= 0) return engine.ComplexInfinity;
         }
 

@@ -202,6 +202,31 @@ describe('HOST-DECLARED OPERATOR IN VALUE POSITION — fail closed', () => {
     expect(r?.run?.({ rs: [2, 3] })).toEqual([100, 100]);
   });
 
+  // A `broadcastable` operator is applied to each element of a list element,
+  // as the interpreter applies it. Before, the eta-expanded callback of an
+  // operator that the host declared was not wrapped in the run-time
+  // broadcast, so the row `[1, 4]` reached `Math.sqrt` whole and the answer
+  // was `[NaN]`.
+  it('broadcasts a host operator declared `broadcastable`', () => {
+    ce.declare('MySqrt', {
+      signature: '(real) -> real',
+      broadcastable: true,
+      evaluate: ([x]: any) => x.sqrt(),
+      compile: (args: any[], compileFn: any) =>
+        `Math.sqrt(${compileFn(args[0])})`,
+    } as any);
+    ce.declare('xs', 'list<list<real>>');
+    expect(
+      ce
+        .box(['Map', 'MySqrt', ['List', ['List', 1, 4]]])
+        .evaluate()
+        .toString()
+    ).toBe('[[1,2]]');
+    const r = compile(ce.box(['Map', 'MySqrt', 'xs']), { fallback: false });
+    expect(r?.success).toBe(true);
+    expect(r?.run?.({ xs: [[1, 4]] })).toEqual([[1, 2]]);
+  });
+
   // The `functions` option of `compile()` lowers `MyOp(y)`; the operator in
   // callback position compiles through the same lowering. Before, `Map(MyOp,
   // rs)` was refused with a message about the `evaluate` handler.

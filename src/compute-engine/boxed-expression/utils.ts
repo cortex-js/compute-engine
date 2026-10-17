@@ -21,6 +21,7 @@ import {
   noteScratchBinding,
   scratchRootOf,
   scratchRootOfBinding,
+  withScratchScope,
 } from '../scratch-scopes.js';
 import { tombstoneBinding } from './binding-tombstone.js';
 import {
@@ -34,7 +35,14 @@ import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
 import { _BoxedOperatorDefinition } from './boxed-operator-definition.js';
 import { _BoxedValueDefinition } from './boxed-value-definition.js';
 import { _BoxedExpression } from './abstract-boxed-expression.js';
-import { isNumber, isFunction, isSymbol, numericValue } from './type-guards.js';
+import {
+  isAbsentSymbol,
+  isInexactOperand,
+  isNumber,
+  isFunction,
+  isSymbol,
+  numericValue,
+} from './type-guards.js';
 import { isTransitivelyPure } from './transitive-purity.js';
 import { isShadowedSymbol } from '../library-shadowing.js';
 import { isImaginaryUnitValue, isRealPartZero } from './imaginary-part.js';
@@ -49,6 +57,7 @@ import {
   binderBindingOf,
   boundVariableNames,
   boundVariableNamesInOperand,
+  isShield,
   markShieldDeclaration,
   rewriteWithBinders,
 } from './binders.js';
@@ -1155,6 +1164,47 @@ export function hasAssignedVariable(expr: Expression): boolean {
 }
 
 /**
+ * Whether the answer of an operation on `ops`, one of which is the
+ * `Indeterminate` literal, depends on the value that a variable holds. That
+ * answer is `NaN` when an operand is a float, the `NaN` literal or absent,
+ * and `Indeterminate` otherwise (`nanOperandAnswer()`). An operand that reads
+ * a variable with an assigned value (`hasAssignedVariable()`) can hold a
+ * float or `NaN` when it is evaluated, so a fold that builds an expression
+ * keeps the operation and lets `evaluate()` read the value then. With
+ * `w := NaN`, `Indeterminate / w` was folded to `NaN`, and it stayed `NaN`
+ * after `w := 2`.
+ *
+ * A symbol whose value is hidden by a shield (`markShieldDeclaration()`,
+ * `binders.ts`) counts as one with an assigned value: `simplify()` hides the
+ * value of each assigned variable behind a shield, and without this
+ * `Indeterminate + w` with `w := 1.5` simplified to `Indeterminate` while
+ * it evaluates to `NaN`.
+ *
+ * False when no operand is the `Indeterminate` literal, and when a literal
+ * operand already makes the answer `NaN`.
+ */
+export function indeterminateAnswerReadsVariable(
+  ops: ReadonlyArray<Expression>
+): boolean {
+  if (!ops.some((x) => isNumber(x) && x.isIndeterminate)) return false;
+  if (ops.some((x) => isInexactOperand(x) || isAbsentSymbol(x))) return false;
+  return ops.some(
+    (x) => !isNumber(x) && (hasAssignedVariable(x) || readsShieldedValue(x))
+  );
+}
+
+/** True when a free symbol of `expr` is bound to a shield, a valueless
+ * declaration that hides the value of an enclosing variable
+ * (`markShieldDeclaration()`, `binders.ts`). */
+function readsShieldedValue(expr: Expression): boolean {
+  const ce = expr.engine;
+  return expr.symbols.some((name) => {
+    const def = ce.lookupDefinition(name);
+    return isValueDef(def) && isShield(def.value);
+  });
+}
+
+/**
  * True when each symbol named `name` in `expr` is bound to a constant
  * definition (the library constant `Pi` of `ce.Pi`). A symbol that is not
  * bound, or is bound to a definition that is not constant, makes it false.
@@ -1369,21 +1419,41 @@ export function withValueShield<T>(
   const shieldScope = ce.context.lexicalScope;
   let result: T;
   try {
-    for (const { name, type } of shielded) {
-      // Skip an exotic type that fails to round-trip through `declare` rather
-      // than aborting the whole operation: a rare value leak is better than a
-      // thrown evaluation.
-      try {
-        ce.declare(name, { type });
-        // Mark it as a SHIELD: the dereference defers to the ambient lookup
-        // for a shielded name (`evaluateInOwnBindings`, `binders.ts`), which
-        // is what makes the shadow actually hide the value.
-        markShieldDeclaration(shieldScope, name);
-      } catch {
-        /* leave this symbol unshadowed */
-      }
-    }
-    result = fn();
+    // The shield scope is a SCRATCH scope (`scratch-scopes.ts`) while the
+    // shield declarations are made, so they advance no engine-wide cache
+    // version and the pop is clean — and only while they are made: a scoped
+    // expression evaluated by `fn` re-parents its persistent local scope
+    // under the shield scope for the call, and a declaration made there must
+    // keep its axis advance. And the declarations and `fn` run under a cache
+    // key of their own (`ce._withValueShieldKey`), because the expressions
+    // that existed before the shield read their VALUES by name, so a sign
+    // derived from the hidden value, or a type that depends on it, must not
+    // be served inside the shield, nor a value-blind one after it. Together
+    // they keep a shielded evaluation from retiring the `_type`/`_sgn`
+    // caches of every other expression in the engine. The bindings are
+    // discarded by the pop and the escaping result is re-bound below; see
+    // the same arrangement, and the measurement that motivated it, in
+    // `simplifyValueBlind` (`simplify.ts`).
+    result = ce._withValueShieldKey(() => {
+      withScratchScope(ce, shieldScope, () => {
+        for (const { name, type } of shielded) {
+          // Skip an exotic type that fails to round-trip through `declare`
+          // rather than aborting the whole operation: a rare value leak is
+          // better than a thrown evaluation.
+          try {
+            ce.declare(name, { type });
+            // Mark it as a SHIELD: the dereference defers to the ambient
+            // lookup for a shielded name (`evaluateInOwnBindings`,
+            // `binders.ts`), which is what makes the shadow actually hide
+            // the value.
+            markShieldDeclaration(shieldScope, name);
+          } catch {
+            /* leave this symbol unshadowed */
+          }
+        }
+      });
+      return fn();
+    });
   } finally {
     ce.popScope();
   }

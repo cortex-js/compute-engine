@@ -1,3 +1,4 @@
+import { ComputeEngine } from '../../../src/compute-engine';
 import { engine as ce, exprToString } from '../../utils';
 
 function parse(s: string) {
@@ -423,6 +424,26 @@ describe('LEIBNIZ DERIVATIVE OPERAND EXTENT', () => {
       ]);
     });
 
+    test('each spelling of a parenthesis is a fence', () => {
+      // The spellings of `(` that the enclosure parser accepts: `\lparen`,
+      // and each sizing prefix, also with the delimiter in braces.
+      for (const latex of [
+        '\\frac{d}{dx}\\lparen x^2\\rparen+1',
+        '\\frac{d}{dx}\\left\\lparen x^2\\right\\rparen+1',
+        '\\frac{d}{dx}\\big(x^2\\big)+1',
+        '\\frac{d}{dx}\\mleft(x^2\\mright)+1',
+        '\\frac{d}{dx}\\mathopen{(}x^2\\mathclose{)}+1',
+      ])
+        expect(ce.parse(latex).json).toEqual([
+          'Add',
+          ['D', ['Power', 'x', 2], 'x'],
+          1,
+        ]);
+      expect(
+        ce.parse('\\frac{d}{dx}\\lparen x\\rparen+1').evaluate().json
+      ).toEqual(2);
+    });
+
     test('only a parenthesis is a fence: another enclosure keeps the term extent', () => {
       expect(ce.parse('\\frac{d}{dx}|x|+1', { form: 'raw' }).json).toEqual([
         'D',
@@ -538,6 +559,37 @@ describe('PARTIAL DERIVATIVE NOTATION (∂)', () => {
     ]);
   });
 
+  test('Euler ∂_x takes an operand that is not a name or a braced group', () => {
+    // The operand has the extent of the operand of a Leibniz derivative
+    expect(ce.parse('\\partial_x \\sin(x)').json).toEqual([
+      'D',
+      ['Sin', 'x'],
+      'x',
+    ]);
+    expect(ce.parse('\\partial_x \\sin(x)').evaluate().json).toEqual([
+      'Cos',
+      'x',
+    ]);
+    for (const latex of [
+      '\\partial_x (x^2)',
+      '\\partial_x x^2',
+      '\\partial_x {x^2}',
+    ]) {
+      expect(ce.parse(latex).json).toEqual(['D', ['Power', 'x', 2], 'x']);
+      expect(ce.parse(latex).evaluate().json).toEqual(['Multiply', 2, 'x']);
+    }
+    expect(ce.parse('\\partial_x^2 \\sin(x)').evaluate().json).toEqual([
+      'Negate',
+      ['Sin', 'x'],
+    ]);
+    // The operand stops before a relational operator
+    expect(ce.parse('\\partial_x x^2 = 0', { form: 'raw' }).json).toEqual([
+      'Equal',
+      ['D', ['Power', 'x', 2], 'x'],
+      0,
+    ]);
+  });
+
   test('Leibniz ∂/∂x f(x, y) parses to the D operator', () => {
     const expr = ce.parse('\\frac{\\partial}{\\partial x} f(x, y)');
     expect(expr.json).toEqual(['D', ['f', 'x', 'y'], 'x']);
@@ -570,6 +622,205 @@ describe('PARTIAL DERIVATIVE NOTATION (∂)', () => {
       'x',
       'y',
     ]);
+  });
+
+  test('an order above 1000 is an order pair, not a list of copies', () => {
+    // A short input can ask for a very large order. Above 1000, the parser
+    // writes the order pair `{x, n}`, which the canonical form of `D` keeps
+    // as it is, instead of `n` copies of the variable. An order of 1000 is
+    // still written as copies.
+    const raw = (latex: string) => ce.parse(latex, { form: 'raw' }).json;
+    const pair = (v: string, n: number | object) => ['Set', v, n];
+    expect(raw('\\partial_x^{1000000000} f')).toEqual([
+      'D',
+      'f',
+      pair('x', 1000000000),
+    ]);
+    expect(raw('\\partial_x^{1e400} f')).toEqual([
+      'D',
+      'f',
+      pair('x', { num: '1e+400' }),
+    ]);
+    expect(
+      raw('\\frac{\\partial^2 f}{\\partial^{1000000000}x\\partial y}')
+    ).toEqual(['D', 'f', pair('x', 1000000000), 'y']);
+    expect(
+      raw('\\frac{\\partial^2 f}{\\partial x\\,\\partial^{1001} y}')
+    ).toEqual(['D', 'f', 'x', pair('y', 1001)]);
+    expect(raw('\\frac{\\partial^2 f}{\\partial x\\partial y^{1001}}')).toEqual(
+      ['D', 'f', 'x', pair('y', 1001)]
+    );
+    expect(raw('\\frac{\\partial^{1001} f}{\\partial^{1001} x}')).toEqual([
+      'D',
+      'f',
+      pair('x', 1001),
+    ]);
+    expect(raw('\\frac{\\partial^{1001} f}{\\partial x}')).toEqual([
+      'D',
+      'f',
+      pair('x', 1001),
+    ]);
+    expect(raw('\\frac{d^{1000000000}}{dx^{1000000000}} f')).toEqual([
+      'D',
+      'f',
+      pair('x', 1000000000),
+    ]);
+    expect(
+      (raw('\\partial_x^{1000} f') as unknown[]).filter((v) => v === 'x')
+    ).toHaveLength(1000);
+    // The canonical form keeps the pair: the derivative stays inert.
+    expect(
+      ce.parse('\\frac{d^{2000}}{dx^{2000}} \\sin(x)').evaluate().json
+    ).toEqual(['D', ['Sin', 'x'], ['Set', 'x', 2000]]);
+  });
+
+  test('an order pair that is not expanded keeps the derivative inert', () => {
+    // A function symbol with a large order: the canonical form keeps the
+    // pair, instead of an `expected-a-symbol` error.
+    expect(ce.box(['D', 'f', ['Set', 'x', 2000]]).json).toEqual([
+      'D',
+      'f',
+      ['Set', 'x', 2000],
+    ]);
+    const e = ce.parse('\\partial_x^{2000} f');
+    expect(e.json).toEqual(['D', 'f', ['Set', 'x', 2000]]);
+    expect(e.evaluate().json).toEqual(['D', 'f', ['Set', 'x', 2000]]);
+  });
+
+  test('a symbolic order is an order pair, not dropped', () => {
+    const raw = (latex: string) => ce.parse(latex, { form: 'raw' }).json;
+    expect(raw('\\partial_x^{n} f')).toEqual(['D', 'f', ['Set', 'x', 'n']]);
+    expect(raw('\\frac{\\partial^{n} f}{\\partial x}')).toEqual([
+      'D',
+      'f',
+      ['Set', 'x', 'n'],
+    ]);
+    expect(raw('\\frac{\\partial^{n} f}{\\partial x^{n}}')).toEqual([
+      'D',
+      'f',
+      ['Set', 'x', 'n'],
+    ]);
+    expect(raw('\\frac{\\partial^2 f}{\\partial x\\partial y^{n}}')).toEqual([
+      'D',
+      'f',
+      'x',
+      ['Set', 'y', 'n'],
+    ]);
+    expect(raw('\\frac{\\partial^2 f}{\\partial^{n}x\\partial y}')).toEqual([
+      'D',
+      'f',
+      ['Set', 'x', 'n'],
+      'y',
+    ]);
+    // The operand `f(x)` reads as a call or a product with the state of
+    // the shared engine: only the order pair is checked.
+    expect((raw('\\frac{d^n}{dx^n} f(x)') as unknown[])[2]).toEqual([
+      'Set',
+      'x',
+      'n',
+    ]);
+    // The derivative stays inert
+    const e = ce.parse('\\partial_x^{n} {\\sin(x)}');
+    expect(e.json).toEqual(['D', ['Sin', 'x'], ['Set', 'x', 'n']]);
+    expect(e.evaluate().json).toEqual(['D', ['Sin', 'x'], ['Set', 'x', 'n']]);
+  });
+
+  test('an order of 0 is no differentiation, a negative order is an error', () => {
+    const raw = (latex: string) => ce.parse(latex, { form: 'raw' }).json;
+    // The parser keeps the order as written
+    expect(raw('\\frac{\\partial^2 f}{\\partial x\\partial y^{0}}')).toEqual([
+      'D',
+      'f',
+      'x',
+      ['Set', 'y', 0],
+    ]);
+    expect(raw('\\frac{\\partial^2 f}{\\partial x\\partial y^{-3}}')).toEqual([
+      'D',
+      'f',
+      'x',
+      ['Set', 'y', ['Negate', 3]],
+    ]);
+    // The canonical form removes a pair of order 0
+    expect(
+      ce
+        .parse('\\frac{\\partial^2}{\\partial x\\partial y^{0}} (x^2 y)')
+        .evaluate().json
+    ).toEqual(['Multiply', 2, 'x', 'y']);
+    expect(ce.box(['D', ['Power', 'x', 2], ['Set', 'x', 0]]).json).toEqual([
+      'Power',
+      'x',
+      2,
+    ]);
+    // A negative order is an error
+    expect(
+      ce.parse('\\frac{\\partial^2 f}{\\partial x\\partial y^{-3}}').json
+    ).toEqual([
+      'D',
+      'f',
+      'x',
+      ['Error', "'expected-positive-integer'", "'-3'"],
+    ]);
+  });
+
+  test('only an integer literal order is expanded or removed', () => {
+    // An exact nonzero order is not zero, even when its double
+    // approximation underflows to 0
+    const tiny = ['Divide', 1, ['Power', 10, 400]];
+    const d = ce.box(['D', 'f', ['Set', 'x', tiny]]);
+    expect(d.json).toEqual(['D', 'f', ['Set', 'x', tiny]]);
+    expect(d.operator).toBe('D');
+    expect(d.evaluate().operator).toBe('D');
+    // A symbolic order keeps the pair, even when the symbol has the value
+    // 0: canonicalization does not read the value of a symbol
+    const ce2 = new ComputeEngine();
+    ce2.assign('n', 0);
+    const e = ce2.box(['D', 'f', ['Set', 'x', 'n']]);
+    expect(e.json).toEqual(['D', 'f', ['Set', 'x', 'n']]);
+    // A non-integer literal order keeps the pair too
+    expect(ce.box(['D', 'f', ['Set', 'x', 2.5]]).json).toEqual([
+      'D',
+      'f',
+      ['Set', 'x', 2.5],
+    ]);
+  });
+
+  test('the exponent of a first-order numerator is part of the differentiand', () => {
+    expect(
+      ce.parse('\\frac{\\partial f^{3}}{\\partial x}', { form: 'raw' }).json
+    ).toEqual(['D', ['Power', 'f', 3], 'x']);
+    expect(
+      ce.parse('\\frac{\\partial x^{3}}{\\partial x}').evaluate().json
+    ).toEqual(['Multiply', 3, ['Power', 'x', 2]]);
+    // The exponent of a denominator variable is still its order
+    expect(
+      ce.parse('\\frac{\\partial^2 f}{\\partial x^{2}}', { form: 'raw' }).json
+    ).toEqual(['D', 'f', 'x', 'x']);
+  });
+
+  test('a large order of the d spelling is one D with an order pair', () => {
+    const raw = (latex: string) => ce.parse(latex, { form: 'raw' }).json;
+    // Up to an order of 100, the d spelling is the nested form
+    expect(raw('\\frac{d^2}{dx^2} \\sin(x)')).toEqual([
+      'D',
+      ['D', ['Sin', 'x'], 'x'],
+      'x',
+    ]);
+    // Above it, one D with the order pair: an order of 1000 parses and
+    // evaluates without a stack overflow
+    expect(raw('\\frac{d^{101}}{dx^{101}} \\sin(x)')).toEqual([
+      'D',
+      ['Sin', 'x'],
+      ['Set', 'x', 101],
+    ]);
+    const e = ce.parse('\\frac{d^{1000}}{dx^{1000}} \\sin(x)');
+    expect(e.evaluate().json).toEqual(['Sin', 'x']);
+    expect(
+      ce.parse('\\frac{d^{101}}{dx^{101}} \\sin(x)').evaluate().json
+    ).toEqual(['Cos', 'x']);
+    // The pair with an order of 2 is the second derivative
+    expect(
+      ce.box(['D', ['Power', 'x', 3], ['Set', 'x', 2]]).evaluate().json
+    ).toEqual(['Multiply', 6, 'x']);
   });
 
   test('a first-order partial serializes to Leibniz ∂ notation', () => {

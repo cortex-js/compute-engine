@@ -48,6 +48,18 @@ describe('StieltjesGamma, exact', () => {
     expect(evaluate([S, 0, 0]).toString()).toBe('~oo');
   });
 
+  test('an exact a next to a pole is not a pole', () => {
+    // (−10³⁰ + 1)/10³⁰ rounds to −1 at 21 digits, but it is not an integer.
+    const a = [
+      'Rational',
+      '-999999999999999999999999999999',
+      '1000000000000000000000000000000',
+    ];
+    const v = evaluate([S, 1, a]);
+    expect(v.operator).toBe(S);
+    expect(v.isSame(ce.ComplexInfinity)).toBe(false);
+  });
+
   test('a symbolic or negative order stays unevaluated', () => {
     expect(numeric([S, ['Multiply', 2, 'n']]).toString()).toBe(
       'StieltjesGamma(2n)'

@@ -1648,6 +1648,61 @@ describe('INVERSE TRIG: a part too small next to the other', () => {
     }
   );
 
+  test('a larger part next to a branch point, closer than a double can tell, stays unevaluated', () => {
+    // The double of 1 + 10⁻³⁰ is 1, and the kernels gave the value at the
+    // branch point: arcosh(1 + 10⁻³⁰ + 10⁻⁴⁰⁰i) was 10⁻²⁰⁰(1 + i), where
+    // mpmath gives 1.4142135623730950e−15 + 7.0710678118654752e−386i.
+    const big = new ComputeEngine();
+    big.precision = 50;
+    const near = ['Add', 1, ['Power', 10, -30]];
+    const tiny = ['Power', 10, -400];
+    for (const [name, re, im] of [
+      ['Arcosh', near, tiny],
+      ['Arcsin', ['Negate', near], tiny],
+      ['Artanh', near, tiny],
+      ['Arctan', tiny, near],
+      ['Arsinh', tiny, near],
+    ] as const)
+      expect(box(big, name, re, im).operator).toBe(name);
+    // Farther from the branch point the double holds the distance well
+    // enough. mpmath: arcosh(1.001 + 10⁻⁴⁰⁰i) =
+    // 0.044717633608309310 + 2.2355091700494794e−399i.
+    const v = box(big, 'Arcosh', ['Add', 1, ['Rational', 1, 1000]], tiny);
+    expect(Math.abs(v.re / 0.04471763360830931 - 1)).toBeLessThan(1e-12);
+  });
+
+  test('a larger part next to a branch point that is not a double is corrected to its exact distance', () => {
+    // The double of 100001/100000 is off by about 10⁻¹¹ of its distance
+    // from 1, and that error is in the value too: the value is corrected to
+    // the exact distance. Expected values: mpmath at 600 digits.
+    const big = new ComputeEngine();
+    big.precision = 50;
+    const near = ['Rational', 100001, 100000];
+    const tiny = ['Power', 10, -400];
+    const relative = (x: any, e: string) =>
+      new BigDecimal(x)
+        .sub(new BigDecimal(e))
+        .div(new BigDecimal(e))
+        .abs()
+        .toNumber();
+    for (const [name, re, im, eRe, eIm] of [
+      ['Arcosh', near, tiny, '0.0044721322282280021', '2.236062387350809e-398'],
+      ['Arcsin', near, tiny, '1.5707963267948966', '0.0044721322282280021'],
+      [
+        'Artanh',
+        ['Add', 1, ['Power', 10, -10]],
+        tiny,
+        '11.859499055275201',
+        '1.5707963267948966',
+      ],
+    ] as const) {
+      const v = box(big, name, re, im) as any;
+      expect(v.operator).not.toBe(name);
+      expect(relative(v.bignumRe ?? v.re, eRe)).toBeLessThan(1e-11);
+      expect(relative(v.bignumIm ?? v.im, eIm)).toBeLessThan(1e-11);
+    }
+  });
+
   test.each(NEAR_AXIS)(
     '%s(%j + %j·i) at machine precision',
     (name, re, im, eRe, eIm) => {

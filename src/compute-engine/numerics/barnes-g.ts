@@ -93,6 +93,22 @@ export function logBarnesGComplex(z: Complex): Complex {
   return asymptotic(new Complex(z.re + n - 1, z.im)).sub(shift);
 }
 
+/**
+ * A bound of the absolute error of Im ln G(z) as `logBarnesGComplex`
+ * computes it, when Re z ≥ `ASYMPTOTIC_FROM`, where the asymptotic series is
+ * used without a shift. Each imaginary term of the series is proportional to
+ * Im z, so the error is about ε·|Im z|·|z|·(2 + ln|z|), however small Im z
+ * is: the bound of the whole value, ε·(1 + |ln G(z)|), is much larger near
+ * the real axis. Measured against mpmath for Re z from 11 to 10⁵ and Im z
+ * from 10⁻²⁰ to 10³, the error is at most 1.11 times that estimate; 4 times
+ * it is returned. Undefined for Re z < `ASYMPTOTIC_FROM`.
+ */
+export function logBarnesGComplexImError(z: Complex): number | undefined {
+  if (!(z.re >= ASYMPTOTIC_FROM)) return undefined;
+  const r = z.abs();
+  return 4 * Number.EPSILON * Math.abs(z.im) * r * (2 + Math.log(r));
+}
+
 /** G(z) = exp(ln G(z)); exactly 0 at the non-positive integers, NaN where it overflows a double. */
 export function barnesGComplex(z: Complex): Complex {
   if (z.im === 0 && z.re <= 0 && Number.isInteger(z.re))

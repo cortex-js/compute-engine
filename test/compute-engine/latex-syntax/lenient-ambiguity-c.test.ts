@@ -124,6 +124,50 @@ describe('onAmbiguity', () => {
     ]);
   });
 
+  test('an operand added to a sum or a product of three or more terms is replaced alone', () => {
+    // The parser grows a chain of three or more terms in place. The span of
+    // the chain must include each term that it adds: if not, no recorded
+    // expression holds `3 4`, and the whole equation is replaced.
+    expect(json('y = 1 + 2 + 3 4', { ...asError, form: 'raw' })).toEqual([
+      'Equal',
+      'y',
+      ['Add', 1, 2, error('ambiguous-digit-groups', '3 4')],
+    ]);
+    expect(
+      json('2 \\cdot 3 \\cdot 4 5 = y', { ...asError, form: 'raw' })
+    ).toEqual([
+      'Equal',
+      ['Multiply', 2, 3, error('ambiguous-digit-groups', '4 5')],
+      'y',
+    ]);
+  });
+
+  test('the `resolveApplication` decision applies to a call with an error in its argument', () => {
+    // The `Error` node replaces the argument only, and the call keeps the
+    // reading that the hook chose.
+    const parse = (latex: string, decision: 'apply' | 'multiply') =>
+      ce.parse(latex, {
+        ...asError,
+        form: 'raw',
+        resolveApplication: () => decision,
+      }).json;
+    expect(parse('f(2 3) + 1', 'apply')).toEqual([
+      'Add',
+      ['f', error('ambiguous-digit-groups', '2 3')],
+      1,
+    ]);
+    expect(parse('f(2 3)^2', 'apply')).toEqual([
+      'Power',
+      ['f', error('ambiguous-digit-groups', '2 3')],
+      2,
+    ]);
+    expect(parse('f(2 3)^2', 'multiply')).toEqual([
+      'Multiply',
+      'f',
+      ['Power', ['Delimiter', error('ambiguous-digit-groups', '2 3')], 2],
+    ]);
+  });
+
   test('when a number is not the only operand with its value, the parent is replaced', () => {
     // The two operands `23` cannot be told apart, so the sum is replaced.
     expect(json('y = 2 3 + 23', asError)).toEqual([
@@ -187,6 +231,20 @@ describe('onAmbiguity', () => {
     expect(
       ce.parse(latex, { ...asError, form: 'raw', diagnostics: true }).json
     ).toEqual(expected);
+  });
+
+  test('the line codes are checked inside the braces of a set', () => {
+    // `\{` and `\lbrace` are the fences of a set, not a LaTeX group: their
+    // contents are checked as the contents of parentheses are.
+    for (const latex of ['\\{5!=120\\}', '\\lbrace 5!=120 \\rbrace']) {
+      expect(codes(latex)).toContain('ambiguous-factorial');
+      expect(json(latex, { ...asError, form: 'raw' })).toEqual([
+        'Set',
+        error('ambiguous-factorial', '!='),
+      ]);
+    }
+    // The text of a LaTeX group is not checked.
+    expect(codes('\\frac{5!=120}{2}')).not.toContain('ambiguous-factorial');
   });
 
   test("the default, 'report', keeps the reading", () => {

@@ -206,22 +206,70 @@ const SHELL_RATE_TOLERANCE = 1e-3;
 const SHELL_ENVELOPE_DECAY = 0.5;
 
 /**
- * For shells that change sign: the smallest ratio of the largest magnitude
- * of a shell in the last quarter of the shells to the largest magnitude in
- * the first quarter that reads as "the oscillation does not shrink", when
- * the shells change sign at least `SHELL_OSCILLATION_SIGN_CHANGES` times.
- * The terms of a convergent series tend to 0, so such shells have no limit:
- * the integral has no value (`sin(ln x)/x` at 0: the ratio is about 1;
- * `sin(ln x)/x^1.1`: it grows). The ratio is not exactly 1 for a constant
- * amplitude, because the largest magnitude in a block samples the
- * oscillation. An integral that converges but whose shells shrink more
- * slowly than this (`cos(ln x)/x^0.999` with 84 shells: ratio `0.96`) is
- * also given no value: the quadrature cannot find it.
+ * For shells that change sign: the largest relative residual of the fit of
+ * the recurrence `shell(k + 2) = p·shell(k + 1) + q·shell(k)` that reads as
+ * "the shells are two geometric terms" (see `oscillationRate`). Next to an
+ * endpoint where the integrand is `x^(−a)` times a sine or a cosine of
+ * `c·ln x` (`sin(ln x)/x` at 0), the shells are exactly
+ * `Re(C·z^k)` with `z = 2^(a − 1)·e^(±i·c·ln 2)`, and the residual is the
+ * rounding of the shells: `1e-15` to `2e-14`, and `1.5e-9` for the 27
+ * shells next to the endpoint 1 of `sin(ln(1 − t))/(1 − t)`.
  */
-const SHELL_OSCILLATION_STEADY = 0.9;
+const TWO_TERM_RESIDUAL = 1e-6;
 
-/** See `SHELL_OSCILLATION_STEADY`. */
-const SHELL_OSCILLATION_SIGN_CHANGES = 3;
+/**
+ * For shells that are two geometric terms (`TWO_TERM_RESIDUAL`): the largest
+ * distance of the rate `|z|` of the terms to 1 that reads as "the
+ * oscillation does not shrink". The terms of a convergent series tend to 0,
+ * so such shells have no limit, and the integral has no value. The fitted
+ * rate of `sin(ln x)/x` at 0 is 1 within `4e-15`, and within `7.4e-11` next
+ * to the endpoint 1; the rate of `cos(ln x)/x^0.9999` (a convergent
+ * integral, `1.0e-4`) is `1 − 6.9e-5`. A convergent integral whose rate is
+ * closer to 1 than this is given no value.
+ */
+const STEADY_RATE_TOLERANCE = 1e-8;
+
+/**
+ * The rate `|z|` of shells that change sign and are two geometric terms
+ * `Re(C·z^k)` with a complex `z`: the shells of `x^(−a)` times a sine or a
+ * cosine of `c·ln x` next to 0. The rate is `√(−q)` for the fit by least
+ * squares of the recurrence `shell(k + 2) = p·shell(k + 1) + q·shell(k)`
+ * over `shells`, when its relative residual is at most `TWO_TERM_RESIDUAL`
+ * and the roots of `z² − p·z − q` are not real. `undefined` otherwise: the
+ * oscillation is of another kind (`sin(1/x)` at 0), or the shells are too
+ * few.
+ */
+function oscillationRate(shells: number[]): number | undefined {
+  const n = shells.length;
+  if (n < 6) return undefined;
+  let a11 = 0;
+  let a12 = 0;
+  let a22 = 0;
+  let b1 = 0;
+  let b2 = 0;
+  let norm = 0;
+  for (let k = 0; k + 2 < n; k++) {
+    const [s0, s1, s2] = [shells[k], shells[k + 1], shells[k + 2]];
+    a11 += s1 * s1;
+    a12 += s1 * s0;
+    a22 += s0 * s0;
+    b1 += s2 * s1;
+    b2 += s2 * s0;
+    norm += s2 * s2;
+  }
+  const det = a11 * a22 - a12 * a12;
+  if (!(Math.abs(det) > 0) || !(norm > 0)) return undefined;
+  const p = (b1 * a22 - b2 * a12) / det;
+  const q = (a11 * b2 - a12 * b1) / det;
+  if (!(p * p + 4 * q < 0)) return undefined;
+  let residual = 0;
+  for (let k = 0; k + 2 < n; k++) {
+    const e = shells[k + 2] - p * shells[k + 1] - q * shells[k];
+    residual += e * e;
+  }
+  if (!(Math.sqrt(residual / norm) <= TWO_TERM_RESIDUAL)) return undefined;
+  return Math.sqrt(-q);
+}
 
 /**
  * Whether the shells `shells` (counted from a distance `2^(−β)` to the
@@ -232,9 +280,11 @@ const SHELL_OSCILLATION_SIGN_CHANGES = 3;
  *
  * - When the last half of the shells changes sign (or vanishes): the shells
  *   converge when the largest magnitude in the last quarter is at most
- *   `SHELL_ENVELOPE_DECAY` times the largest magnitude in the first quarter,
- *   and oscillate when it is at least `SHELL_OSCILLATION_STEADY` times
- *   (see there).
+ *   `SHELL_ENVELOPE_DECAY` times the largest magnitude in the first quarter.
+ *   Otherwise, when the last half is two geometric terms
+ *   (`oscillationRate`), they converge when the rate of the terms is less
+ *   than 1, and oscillate when it is 1 or more (`STEADY_RATE_TOLERANCE`).
+ *   Other shells give `'unknown'`.
  * - When the last half of the shells has one sign: the model
  *   `|shell k| = C·(k + β)^q·e^(ρ·k)` is fitted by least squares to the
  *   logarithms of the last half of the shells. The shells converge when the
@@ -268,15 +318,17 @@ function shellTrend(
       last = Math.max(last, Math.abs(shells[n - 1 - k]));
     }
     if (last <= SHELL_ENVELOPE_DECAY * first) return 'converges';
-    let signChanges = 0;
-    for (let k = 1; k < n; k++)
-      if (shells[k] * shells[k - 1] < 0) signChanges++;
-    if (
-      signChanges >= SHELL_OSCILLATION_SIGN_CHANGES &&
-      last >= SHELL_OSCILLATION_STEADY * first
-    )
-      return 'oscillates';
-    return 'unknown';
+    // The envelope shrinks slowly or not at all. Only two geometric terms
+    // show which: their rate is found to the rounding of the shells. The
+    // ε-algorithm finds the limit of the partial sums of two geometric terms
+    // whose rate is less than 1 (`cos(ln x)/x^0.999` at 0). A largest
+    // magnitude in the last quarter close to the one in the first quarter
+    // does not show that the envelope does not shrink: that of
+    // `cos(ln x)/x^0.999` is `0.96` times the first with 84 shells.
+    const rate = oscillationRate(tail);
+    if (rate === undefined) return 'unknown';
+    if (rate >= 1 - STEADY_RATE_TOLERANCE) return 'oscillates';
+    return 'converges';
   }
 
   // The least-squares fit of `ln|shell k| = c + q·ln(k + β) + ρ·k` over the

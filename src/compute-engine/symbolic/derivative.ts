@@ -541,6 +541,13 @@ type DerivativeChainCache = {
    * `undefined` until `derivative()` returns such a result.
    * `memoizedDerivativeResult` reads it. */
   lastFinishedGeneration?: number;
+  /** The `any` invalidation axis at which that same finished result was
+   * recorded or last validated. `memoizedDerivativeResult` orders results in
+   * time by it: the axis only increases, where the composite generation
+   * does not (inside a value shield it is a shield key, minted again — more
+   * negative — at each advance of the axis; see
+   * `IComputeEngine._cacheGeneration()`). */
+  lastFinishedAny?: number;
   /** The `deps` of that same finished result. */
   lastFinishedDeps?: SymbolDependency[];
 };
@@ -559,6 +566,8 @@ type DerivativeChainCache = {
  */
 type FinishedDerivative = {
   generation: number;
+  /** The `any` axis at `generation`: see `DerivativeChainCache.lastFinishedAny`. */
+  any: number;
   value: Expression | undefined;
   deps?: SymbolDependency[];
 };
@@ -696,6 +705,7 @@ function finishedDerivative(
   if (finished.deps === undefined) return undefined;
   if ((finished.generation & 1) !== (generation & 1)) return undefined;
   finished.generation = generation;
+  finished.any = ce._anyVersion;
   return finished;
 }
 
@@ -742,17 +752,22 @@ export function memoizedDerivativeResult(
   const finished = finishedDerivative(ce, cache, subKey, order);
   if (finished !== undefined) return finished.value;
   const before = ce._cacheGeneration();
+  const anyBefore = ce._anyVersion;
   cache.lastFinishedGeneration = undefined;
+  cache.lastFinishedAny = undefined;
   cache.lastFinishedDeps = undefined;
   const value = compute();
   const after = ce._cacheGeneration();
   // See the comment of this function for the rule. `derivativeChains` holds
-  // a new entry when the semantic version moved during `compute`.
-  const differentiated = cache.lastFinishedGeneration;
+  // a new entry when the semantic version moved during `compute`. "Equal to
+  // or newer" is decided on the `any` axis, which only increases; the
+  // composite generation does not order results in time inside a value
+  // shield (`lastFinishedAny`).
+  const differentiated = cache.lastFinishedAny;
   const accounted =
     derivativeChains.get(cacheKey) === cache &&
     differentiated !== undefined &&
-    differentiated >= before;
+    differentiated >= anyBefore;
   if (!accounted && after !== before) return value;
   let byOrder = cache.results.get(subKey);
   if (byOrder === undefined) {
@@ -765,6 +780,7 @@ export function memoizedDerivativeResult(
   // generation match serves the entry.
   byOrder.set(order, {
     generation: after,
+    any: ce._anyVersion,
     value,
     deps: accounted ? restampDisposed(cache.lastFinishedDeps) : undefined,
   });
@@ -863,6 +879,7 @@ export function memoizedPartialDerivative(
   }
   byOrder.set(0, {
     generation: ce._cacheGeneration(),
+    any: ce._anyVersion,
     value,
     deps: restampDisposed(
       symbolDependencies(...freeSymbolNodes(source), ...freeSymbolNodes(value))
@@ -1003,6 +1020,7 @@ export function derivative(
       const early = finishedDerivative(ce, earlyCache, 'apply:_', order);
       if (early !== undefined) {
         earlyCache.lastFinishedGeneration = early.generation;
+        earlyCache.lastFinishedAny = early.any;
         earlyCache.lastFinishedDeps = early.deps;
         return early.value;
       }
@@ -1038,6 +1056,7 @@ export function derivative(
   const finished = finishedDerivative(ce, cache, subKey, originalOrder);
   if (finished !== undefined) {
     cache!.lastFinishedGeneration = finished.generation;
+    cache!.lastFinishedAny = finished.any;
     cache!.lastFinishedDeps = finished.deps;
     return finished.value;
   }
@@ -1080,8 +1099,10 @@ export function derivative(
     // The symbols the simplify read are those of the raw iterate; the ones of
     // the result are included in case the simplify introduced one.
     const deps = symbolDependencies(raw, result);
-    byOrder.set(originalOrder, { generation, value: result, deps });
+    const any = ce._anyVersion;
+    byOrder.set(originalOrder, { generation, any, value: result, deps });
     cache.lastFinishedGeneration = generation;
+    cache.lastFinishedAny = any;
     cache.lastFinishedDeps = deps;
   }
   return result;

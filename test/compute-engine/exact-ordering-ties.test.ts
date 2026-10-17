@@ -235,6 +235,41 @@ describe('STEP 1 DOES NOT RESET THE ENGINE', () => {
     expect(exactOrder(b, a)).toBe(1);
   });
 
+  test('a constant whose value has an operator with no error bound is tried at one precision', () => {
+    // `BesselJ` has no error bound, so an enclosure of the constant `kb` is
+    // not known at any precision. The constant was read as a leaf with an
+    // error bound, and the precision was raised twice for an enclosure that
+    // cannot come. A constant whose value has a bound (`kg`) is unchanged.
+    const e = new ComputeEngine();
+    const precisions: number[] = [];
+    const raise = e._withTransientPrecision.bind(e);
+    e._withTransientPrecision = ((digits: number, f: () => unknown) => {
+      precisions.push(digits);
+      return raise(digits, f);
+    }) as typeof e._withTransientPrecision;
+    e.declare('kb', {
+      isConstant: true,
+      holdUntil: 'N',
+      type: 'real',
+      value: ['BesselJ', 0, 1],
+    });
+    e.declare('kg', {
+      isConstant: true,
+      holdUntil: 'N',
+      type: 'real',
+      value: ['Add', 1, ['Sqrt', 5]],
+    });
+    expect(e.box(['Floor', ['Multiply', 'kb', 'Pi']]).N().toString()).toBe(
+      '2'
+    );
+    expect(new Set(precisions).size).toBe(1);
+    precisions.length = 0;
+    expect(e.box(['Floor', ['Multiply', 'kg', 'Pi']]).N().toString()).toBe(
+      '10'
+    );
+    expect(new Set(precisions).size).toBe(1);
+  });
+
   test('the precision and the tolerance are restored after a throw', () => {
     const e = new ComputeEngine();
     e.tolerance = 1e-8;

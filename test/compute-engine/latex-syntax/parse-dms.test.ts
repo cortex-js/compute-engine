@@ -70,6 +70,18 @@ describe('DMS Parsing', () => {
     ]);
   });
 
+  test('parse DMS superscript arc markers with white space', () => {
+    // TeX skips white space after `^` and inside the braces of a superscript.
+    for (const latex of ['9°30^{ \\prime}', '9°30^ \\prime'])
+      check(latex, ['Degrees', ['Rational', 19, 2]]);
+    for (const latex of [
+      '9°30^{\\prime}15^{ \\prime \\prime }',
+      '9°30^{\\prime}15^ {\\doubleprime}',
+      '9°30^ \\prime 15^ \\doubleprime',
+    ])
+      check(latex, ['Degrees', ['Rational', 2281, 240]]);
+  });
+
   test('parse DMS seconds with two ASCII apostrophes', () => {
     check("9°30'15''", ['Degrees', ['Rational', 2281, 240]]);
   });

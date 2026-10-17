@@ -30,7 +30,11 @@ import { explainExpression } from './explain.js';
 
 import { _BoxedExpression } from './abstract-boxed-expression.js';
 import { inBroadcastCell } from './broadcast-cell-widening.js';
-import { digest128, hashCode } from './utils.js';
+import {
+  digest128,
+  hashCode,
+  indeterminateAnswerReadsVariable,
+} from './utils.js';
 import { match } from './match.js';
 import { same } from './compare.js';
 import { add } from './arithmetic-add.js';
@@ -562,14 +566,22 @@ export class BoxedNumber
     // A sum with an `Indeterminate` operand is `Indeterminate`, unless the
     // other operand is inexact (a float, `NaN`) or absent: the rule of the
     // `Add` fold (`nanOperandAnswer()`).
+    // When the answer depends on the value of a variable that `rhs` reads,
+    // the sum is kept (`add()`, `indeterminateAnswerReadsVariable()`).
     if (
       this._indeterminate ||
       (typeof rhs !== 'number' && isNumber(rhs) && rhs.isIndeterminate)
-    )
+    ) {
+      if (
+        typeof rhs !== 'number' &&
+        indeterminateAnswerReadsVariable([this, rhs])
+      )
+        return add(this, rhs.canonical);
       return nanOperandAnswer(ce, [
         this,
         typeof rhs === 'number' ? ce.number(rhs) : rhs,
       ]);
+    }
     // `∞ + (−∞)` is the indeterminate form, as in the `Add` fold (`Terms`):
     // `Indeterminate`, or `NaN` with a float operand. The numeric-value
     // arithmetic below would answer the `NaN` literal. The broadcast and
@@ -629,13 +641,20 @@ export class BoxedNumber
         !(rhs instanceof NumericValue) &&
         isNumber(rhs) &&
         rhs.isIndeterminate)
-    )
+    ) {
+      if (
+        typeof rhs !== 'number' &&
+        !(rhs instanceof NumericValue) &&
+        indeterminateAnswerReadsVariable([this, rhs])
+      )
+        return mul(this, rhs.canonical);
       return nanOperandAnswer(this.engine, [
         this,
         typeof rhs === 'number' || rhs instanceof NumericValue
           ? this.engine.number(rhs)
           : rhs,
       ]);
+    }
     // `1 · x` is `x` and `-1 · x` is `-x`, but a product with an absent
     // operand is `NaN` (see `add()`). A negation or product of an absent
     // value goes to `mul()`, which reads it as `NaN` too, except when a
@@ -728,11 +747,26 @@ export class BoxedNumber
   }
 
   pow(exp: number | Expression): Expression {
-    return pow(this, exp, { numericApproximation: false });
+    // A float exponent makes the power a float, also when its value is an
+    // integer: `2.pow(2.0)` is the float `4`, not the exact `4`.
+    return pow(this, exp, {
+      numericApproximation:
+        typeof exp !== 'number' && isNumber(exp) && !exp.isExact,
+    });
   }
 
   root(exp: number | Expression): Expression {
-    if (this._indeterminate) return this;
+    // A root of `Indeterminate` is `Indeterminate`, unless the index is
+    // inexact (a float or `NaN`): the rule of `Root` (`nanOperandAnswer()`).
+    // An index that reads a variable with an assigned value keeps the root
+    // (`indeterminateAnswerReadsVariable()`).
+    if (this._indeterminate) {
+      const index =
+        typeof exp === 'number' ? this.engine.number(exp) : exp.canonical;
+      if (indeterminateAnswerReadsVariable([this, index]))
+        return this.engine._fn('Root', [this, index]);
+      return nanOperandAnswer(this.engine, [this, index]);
+    }
     if (typeof exp === 'number') {
       if (exp === 0) return this.engine.NaN;
       if (exp === 1) return this;
@@ -752,6 +786,11 @@ export class BoxedNumber
       }
     } else {
       exp = exp.canonical;
+      // A float index makes the root a float, also when its value is an
+      // integer: `2.root(2.0)` is `1.414…`, not the exact `√2`, and
+      // `8.root(3.0)` is the float `2`.
+      if (isNumber(exp) && !exp.isExact)
+        return root(this, exp, { numericApproximation: true });
       if (exp.isSame(0)) return this.engine.NaN;
       if (exp.isSame(1)) return this;
       if (exp.isSame(-1)) return this.inv();

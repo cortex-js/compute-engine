@@ -6435,11 +6435,16 @@ function computeEigenvaluesQR(
     !inexact && n <= MAX_EXACT_EIGENVALUE_CHECK_SIZE
       ? tensorToRationalMatrix(M, n, n)
       : undefined;
-  const eigenvalues: Expression[] = spectrum.map((r) => {
+  const certified = spectrum.map((r) =>
+    typeof r === 'number' && exactA !== undefined
+      ? verifiedRationalEigenvalue(exactA, r)
+      : undefined
+  );
+  if (exactA !== undefined) dropUnprovedMultiplicities(exactA, certified);
+  const eigenvalues: Expression[] = spectrum.map((r, index) => {
     if (typeof r !== 'number')
       return ce.number(ce._inexactNumericValue({ re: r[0] + 0, im: r[1] + 0 }));
-    const exact =
-      exactA !== undefined ? verifiedRationalEigenvalue(exactA, r) : undefined;
+    const exact = certified[index];
     if (exact !== undefined) return ce.number(exact);
     // A value that the exact check did not confirm is a float
     return matrixRoutineNumber(ce, r, inexact || exactA !== undefined);
@@ -6495,6 +6500,51 @@ function verifiedRationalEigenvalue(
     if (exactRationalRref(shifted).pivotCols.length < n) return lambda;
   }
   return undefined;
+}
+
+/**
+ * Where `k ≥ 2` eigenvalues computed by the QR algorithm were each confirmed
+ * as the same rational `λ` by `verifiedRationalEigenvalue()`, which proves
+ * only that `λ` is an eigenvalue, keep them exact only when the algebraic
+ * multiplicity of `λ` is at least `k`; otherwise set them all to `undefined`
+ * (they stay floats). Two distinct eigenvalues closer than the tolerance of
+ * that check (1 and 1 + 10⁻⁷) were both made 1.
+ *
+ * The algebraic multiplicity of `λ` is at least `k` exactly when the null
+ * space of `(A − λI)^k` has dimension at least `k`: for each Jordan block of
+ * `λ` of size `s`, that power has a null space of dimension `min(k, s)`.
+ */
+function dropUnprovedMultiplicities(
+  A: BigRat[][],
+  certified: ([bigint, bigint] | undefined)[]
+): void {
+  const groups = new Map<string, number[]>();
+  certified.forEach((lambda, index) => {
+    if (lambda === undefined) return;
+    const key = `${lambda[0]}/${lambda[1]}`;
+    groups.set(key, [...(groups.get(key) ?? []), index]);
+  });
+  const n = A.length;
+  for (const indices of groups.values()) {
+    const k = indices.length;
+    if (k < 2) continue;
+    const lambda = certified[indices[0]]!;
+    const shifted = A.map((row, i) =>
+      row.map((v, j) => (i === j ? ratSub(v, lambda) : v))
+    );
+    let power = shifted;
+    for (let step = 1; step < k; step++)
+      power = power.map((row) =>
+        shifted[0].map((_, j) =>
+          row.reduce<BigRat>(
+            (sum, v, l) => ratAdd(sum, ratMul(v, shifted[l][j])),
+            [0n, 1n]
+          )
+        )
+      );
+    if (n - exactRationalRref(power).pivotCols.length < k)
+      for (const index of indices) certified[index] = undefined;
+  }
 }
 
 /**

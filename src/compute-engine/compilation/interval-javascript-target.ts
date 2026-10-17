@@ -31,6 +31,7 @@
  * @module compilation/interval-javascript-target
  */
 
+import { shadowsLibraryName } from '../library-shadowing.js';
 import type {
   Expression,
   IComputeEngine as ComputeEngine,
@@ -5433,8 +5434,14 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
         // `in` finds `Object.prototype` members and a symbol named
         // `toString` would read the inherited FUNCTION as its spliced source.
         if (vars && Object.hasOwn(vars, id)) return vars[id] as string;
+        // A library constant whose name a user binding shadows is read as
+        // any other symbol (see the symbol branch of `BaseCompiler.compile`).
         const constant = INTERVAL_JAVASCRIPT_CONSTANTS[id];
-        if (constant !== undefined) return constant;
+        if (
+          constant !== undefined &&
+          !shadowsLibraryName(expr.engine, id, { customLibrary: false })
+        )
+          return constant;
         // See `varsObjectAccess` in `javascript-target.ts`: a name that
         // collides with an `Object.prototype` member needs an own-property
         // guard, or a missing symbol reads the inherited function.

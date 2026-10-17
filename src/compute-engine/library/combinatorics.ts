@@ -372,10 +372,19 @@ function evaluateBinomial(
     // (from about `n = 10²⁰`); the log form gives the value there
     // (`Binomial(1e300, 0.5)` ≈ 1.128·10¹⁵⁰).
     return apply2(nExpr, kExpr, machineBinomial, (n, k) => {
+      // A negative non-integer `k`: the Γ quotient goes through the
+      // reflection formula of `Γ(k+1)`, whose sine has no correct digits
+      // for a large `|k|`. The log form reduces `k` exactly first.
+      if (k.isNegative() && !k.isInteger()) {
+        const v = bigBinomialLogForm(ce, n, k);
+        if (v !== undefined) return v;
+      }
       const r = bigGamma(ce, n.add(1)).div(
         bigGamma(ce, k.add(1)).mul(bigGamma(ce, n.sub(k).add(1)))
       );
-      if (r.isFinite()) return r;
+      // A `0` that is not on a pole is a quotient whose numerator
+      // underflowed (`Γ(n+1)` for `n` near `−10¹⁵`): the log form decides.
+      if (r.isFinite() && !r.isZero()) return r;
       return bigBinomialLogForm(ce, n, k) ?? r;
     });
   }

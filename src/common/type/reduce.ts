@@ -1,15 +1,16 @@
 import { makeNumericRangeType } from './numeric-range.js';
 import { typeToDedupKey, typeToString } from './serialize.js';
 import {
+  asNumericRange,
   assertGroundType,
   isEmptyType,
   isSubtype,
+  meetNumericRangeMembers,
   meetPrimitiveTypes,
 } from './subtype.js';
 import type {
   Type,
   PrimitiveType,
-  NumericPrimitiveType,
   NumericType,
   AlgebraicType,
   CollectionType,
@@ -25,7 +26,7 @@ import type {
   ObjectType,
   TypeReference,
 } from './types.js';
-import { isValidPrimitiveType, NUMERIC_TYPES_SET } from './primitive.js';
+import { isValidPrimitiveType } from './primitive.js';
 import { normalizeStatedEffectSet } from './effects.js';
 
 /**
@@ -686,60 +687,11 @@ function flattenIntersectionMembers(types: Readonly<Type[]>): Type[] {
   return result;
 }
 
-/** Coerce a numeric primitive string or numeric range object to a
- *  `NumericType`; return `null` for any non-numeric type. */
-function asNumericRange(t: Type): NumericType | null {
-  if (typeof t === 'object') return t.kind === 'numeric' ? t : null;
-  if (NUMERIC_TYPES_SET.has(t as NumericPrimitiveType))
-    return { kind: 'numeric', type: t as NumericPrimitiveType };
-  return null;
-}
-
-/** The meet (intersection) of two bounded numeric types: the intersection of
- *  their base kinds over the intersection of their intervals. An empty
- *  interval or disjoint base kinds correctly yield `never`, the EMPTY type —
- *  never `nothing`, which is the unit type of the symbol `Nothing`. */
+/** The meet (intersection) of two bounded numeric types, as one type: the
+ *  ranges of {@link meetNumericRangeMembers}, reduced to a union when the
+ *  base kinds meet in more than one kind. */
 function meetNumericRanges(a: NumericType, b: NumericType): Type {
-  const bases = meetPrimitiveTypes(a.type, b.type);
-  if (bases.length === 0) return 'never';
-
-  // The tighter endpoint wins; at EQUAL endpoints, OPEN wins (the meet of
-  // "x ≥ 0" and "x > 0" is "x > 0").
-  const aLo = a.lower ?? -Infinity;
-  const bLo = b.lower ?? -Infinity;
-  const aHi = a.upper ?? Infinity;
-  const bHi = b.upper ?? Infinity;
-  const lower = Math.max(aLo, bLo);
-  const upper = Math.min(aHi, bHi);
-  const lowerOpen =
-    (aLo === lower && a.lowerOpen === true) ||
-    (bLo === lower && b.lowerOpen === true);
-  const upperOpen =
-    (aHi === upper && a.upperOpen === true) ||
-    (bHi === upper && b.upperOpen === true);
-  if (lower > upper) return 'never';
-  if (lower === upper && (lowerOpen || upperOpen)) return 'never';
-
-  const finite = lower !== -Infinity || upper !== Infinity;
-  const ranges: Type[] = [];
-  for (const base of bases) {
-    // No value of `infinity` (±∞ and the unsigned `~oo`) or `nan` is
-    // finite, so neither can inhabit a finite interval. Without this, the
-    // meet builds a range such as `infinity<0..10>` that has no members but
-    // presents itself as a bounded real.
-    if (finite && (base === 'infinity' || base === 'nan')) continue;
-    // `bases` are the meet of two numeric primitives, hence numeric.
-    ranges.push(
-      makeNumericRangeType(
-        base as NumericPrimitiveType,
-        lower,
-        upper,
-        lowerOpen,
-        upperOpen
-      )
-    );
-  }
-
+  const ranges = meetNumericRangeMembers(a, b);
   if (ranges.length === 0) return 'never';
   if (ranges.length === 1) return ranges[0];
   return reduceUnionType({ kind: 'union', types: ranges });

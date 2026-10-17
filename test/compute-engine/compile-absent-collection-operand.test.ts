@@ -441,6 +441,49 @@ describe('interpreter: lazy operators over an operand that can be absent', () =>
     ).toBe('NaN');
   });
 
+  test('an error in one operand is not hidden by an absent operand', () => {
+    // `a` holds `Missing` and `g(5)` evaluates to an error (`Reverse(5)`):
+    // the error is the result, with the frame of `Map`, in both orders, on
+    // the synchronous and the asynchronous routes.
+    const ce = new ComputeEngine();
+    ce.declare('a', 'list<integer> | missing');
+    ce.assign('a', ce.symbol('Missing'));
+    ce.declare('g', '(unknown) -> list<integer> | missing');
+    ce.assign('g', ce.box(['Function', ['Sin', ['Reverse', 'k']], 'k']));
+    const frames = (v: { json: unknown }) =>
+      JSON.stringify(v.json).match(/ErrorFrame","'(\w+)'",(\d)/g);
+    const before = ce.box(['Map', 'Add', ['g', 5], 'a'] as never);
+    const after = ce.box(['Map', 'Add', 'a', ['g', 5]] as never);
+    expect(before.evaluate().operator).toBe('Error');
+    expect(frames(before.evaluate())?.at(-1)).toBe(`ErrorFrame","'Map'",2`);
+    expect(after.evaluate().operator).toBe('Error');
+    expect(frames(after.evaluate())?.at(-1)).toBe(`ErrorFrame","'Map'",3`);
+    return after.evaluateAsync().then((v) => {
+      expect(v.operator).toBe('Error');
+    });
+  });
+
+  test('Sum and Product await an operand that has only an asynchronous handler', async () => {
+    // A source typed `list<integer> | missing` with only an `evaluateAsync`
+    // handler does not evaluate on the synchronous route: the asynchronous
+    // handlers of `Sum` and `Product` must await it.
+    const ce = new ComputeEngine();
+    let present = true;
+    ce.declare('Src', {
+      signature: '() -> list<integer> | missing',
+      pure: true,
+      evaluateAsync: async () =>
+        present ? ce.box(['List', 1, 2, 3]) : ce.symbol('Missing'),
+    } as never);
+    for (const op of ['Sum', 'Product']) {
+      const e = ce.box([op, ['Src']] as never);
+      present = true;
+      expect((await e.evaluateAsync()).json).toBe(6);
+      present = false;
+      expect((await e.evaluateAsync()).json).toBe('NaN');
+    }
+  });
+
   test('a lazy view over an eager list read of a tuple evaluates', () => {
     // `t` is a pair of lists: `At(t, 1)` is typed `list<integer>` and has
     // no `missing` arm, but it is an eager operator without collection

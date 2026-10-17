@@ -146,6 +146,7 @@ import { interval, intervalContains } from '../numerics/interval.js';
 import { MAX_RANDOM_ELEMENT_COUNT } from '../numerics/random.js';
 import { MAX_CHUNK_COUNT } from '../numerics/value-scaled-caps.js';
 import { rangeCount } from '../numerics/range-count.js';
+import { mayEvaluateToNothingD } from '../boxed-expression/nothing-erasure.js';
 import {
   exactArithmeticRange,
   rationalRangeCount,
@@ -973,6 +974,11 @@ function unboundedIntegerRangeIndex(
   if (!(upper === Infinity && step > 0) && !(upper === -Infinity && step < 0))
     return undefined;
   if (!isNumber(value) || value.im !== 0) return undefined;
+  // `value.re` is the value read as a double, so it can be an integer when
+  // the literal is not: the rational 9007199254740993/9007199254740992 and
+  // the decimal 3.00000000000000000001 both read as an integer. The literal
+  // itself must be an integer.
+  if (value.isInteger !== true) return undefined;
   const t = value.re;
   if (!Number.isSafeInteger(t)) return undefined;
   const k = (t - lower) / step;
@@ -2623,6 +2629,23 @@ function componentTypeD(xs: OperandDescriptor, position: number): Type {
 }
 
 /**
+ * The canonical `Tuple` of `elements`, built as `ce.tuple()` builds it: each
+ * element canonical, and `Nothing` erased. `ce.tuple(...elements)` spreads
+ * the array into the arguments of a call, which exceeds the argument limit
+ * of the JavaScript engine for a very large array: `TupleFrom(Range(1,
+ * 300000))` was an `internal-error`.
+ */
+function tupleOf(
+  ce: ComputeEngine,
+  elements: ReadonlyArray<Expression>
+): Expression {
+  return ce._fn(
+    'Tuple',
+    elements.map((x) => x.canonical).filter((x) => !isSymbol(x, 'Nothing'))
+  );
+}
+
+/**
  * The number of elements the operand is PROVED to hold, or `undefined` when
  * nothing proves it. Read from pure sources only:
  *
@@ -2648,7 +2671,10 @@ function provenLengthD(d: OperandDescriptor): number | undefined {
   }
   const s = d.structureOf?.();
   if (s === undefined) return undefined;
-  if (s.kind === 'list-literal') return s.elements.length;
+  if (s.kind === 'list-literal')
+    return s.elements.some(mayEvaluateToNothingD)
+      ? undefined
+      : s.elements.length;
   if (s.kind === 'string') return splitGraphemeClusters(s.text).length;
   if (s.kind === 'application' && s.head === 'Range') {
     const bounds = s.children.map((c) => descriptorLiteralValue(c));
@@ -3733,6 +3759,8 @@ function pointComponentTypeD(xs: OperandDescriptor, position: number): Type {
  * - An inference-pending bare SYMBOL (a symbol typed `unknown`) is a cell of
  *   type `number` — the generic-symbol fold; an application typed
  *   `unknown`/`any` blocks, since it could return a collection.
+ * - An element that may evaluate to `Nothing` (`mayEvaluateToNothingD()`)
+ *   blocks: the list erases it, so the literal's length is not proved.
  * - Any other element whose type is atomic (`isAtomicValueType`) is a cell
  *   of that type.
  * - Anything else blocks.
@@ -3740,6 +3768,7 @@ function pointComponentTypeD(xs: OperandDescriptor, position: number): Type {
 function classifyCellD(op: OperandDescriptor): Type | null {
   const s = op.structureOf?.();
   if (s?.kind === 'number') return s.tier;
+  if (mayEvaluateToNothingD(op)) return null;
   if (isUndefinedSymbolD(op)) return 'missing';
   const t = op.type;
 
@@ -6530,6 +6559,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // a value, the absent coordinate is positioned).
     type: (ops, context) => {
       const resolver = context.engine._typeResolver;
+      // A coordinate that may evaluate to `Nothing` is erased, which changes
+      // the arity: `(If(c, 1, Nothing), 2)` is `(2)` when `c` is false. The
+      // arity and the component positions are then not known, and the type
+      // is the bare `tuple`.
+      if (ops.some(mayEvaluateToNothingD))
+        return BoxedType.forResult('tuple', resolver);
       const t = tupleTypeOfD(ops);
       if (ops.length > 0 && ops.every(mayBeAbsentCoordinateD))
         return BoxedType.forResult(
@@ -6549,9 +6584,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // - `Nothing` is ERASED: `(1, Nothing, 3)` is the 2-tuple `(1, 3)`. Use
     //   `Missing` for an absent-but-positioned coordinate.
     //
-    // `engine.tuple` filters `Nothing` on its own but does NOT splice
+    // `tupleOf` filters `Nothing` on its own but does NOT splice
     // `Sequence`, so the flatten call is load-bearing, not decorative.
-    canonical: (ops, { engine }) => engine.tuple(...flatten(ops)),
+    canonical: (ops, { engine }) => tupleOf(engine, flatten(ops)),
     // A `Tuple` is inert data: it evaluates its operands but never transposes a
     // collection component into a list of points. The Desmos point-list idiom
     // (zip a tuple-with-collection into a `List` of point-tuples) lives in the
@@ -6588,7 +6623,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         ops,
         numericApproximation ?? false
       );
-      return listed === undefined ? undefined : engine.tuple(...listed);
+      return listed === undefined ? undefined : tupleOf(engine, listed);
     },
     eq: defaultCollectionEq,
     collection: basicIndexedCollectionHandlers(),
@@ -7399,9 +7434,15 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // non-negative integer k, within engine tolerance.
         const k = (t - lower) / step;
         const kRounded = Math.round(k);
-        return (
-          kRounded >= 0 && kRounded < count && Math.abs(k - kRounded) < tol
-        );
+        if (kRounded >= 0 && kRounded < count && Math.abs(k - kRounded) < tol)
+          return true;
+        // The grid check reads `k` in machine arithmetic, so it can miss an
+        // element the range produces when the rounding of the elements is
+        // large next to the step: the second element of
+        // `Range(10^15, +oo, 0.1)` is 1000000000000000.125, whose grid
+        // coordinate is 1.25. Before a `false`, compare `t` with the elements
+        // the iterator produces near `k`.
+        return rangeProducesMachineElement(expr, lower, step, count, t, k);
       },
 
       iterator: (expr) => {
@@ -7916,9 +7957,22 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (!isFunction(expr)) return undefined;
         // Symbolic count: whether the index is in range is indeterminate
         if (isSymbolicOperand(expr.op3)) return undefined;
-        const lower = operandNumericValue(expr.op1);
-        const upper = operandNumericValue(expr.op2);
+        // A symbolic endpoint gives no numeric sample.
+        if (isSymbolicOperand(expr.op1) || isSymbolicOperand(expr.op2))
+          return undefined;
+        let lower = operandNumericValue(expr.op1);
+        let upper = operandNumericValue(expr.op2);
         let count = operandNumericValue(expr.op3);
+        // The one-operand form `Linspace(n)` runs from 1 to `n` with the
+        // default count, as the iterator below reads it: `at` answered
+        // nothing for it, while iterating gave the samples. The form is
+        // recognized by its structure, never by the value of the end point:
+        // an infinite end point is not an absent one.
+        if (isLinspaceOneOperandForm(expr)) {
+          upper = lower;
+          lower = 1;
+          count = DEFAULT_LINSPACE_COUNT;
+        }
         if (!isFinite(count)) count = DEFAULT_LINSPACE_COUNT;
         count = Math.floor(count);
         if (!isFinite(lower) || !isFinite(upper)) return undefined;
@@ -7940,7 +7994,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         let lower = operandNumericValue(expr.op1);
         let upper = operandNumericValue(expr.op2);
         let totalCount: number;
-        if (!isFinite(upper)) {
+        if (isLinspaceOneOperandForm(expr)) {
           upper = lower;
           lower = 1;
           totalCount = DEFAULT_LINSPACE_COUNT;
@@ -7951,6 +8005,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
             !isFinite(count) ? DEFAULT_LINSPACE_COUNT : count
           );
         }
+        // An infinite end point has no finite samples: no iterator, as `at`
+        // gives no element for it.
+        if (!isFinite(lower) || !isFinite(upper)) return undefined;
         totalCount = Math.floor(totalCount);
 
         // Denominator for endpoint-inclusive spacing. totalCount === 1
@@ -15211,7 +15268,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           for (const x of xs.each()) elements.push(x);
         }
       }
-      return ce.tuple(...elements);
+      return tupleOf(ce, elements);
     },
   },
 
@@ -15437,6 +15494,20 @@ export function hasSymbolicRangeBounds(expr: Expression): boolean {
 function hasInfiniteRangeOrigin(expr: Expression): boolean {
   const lower = range(expr)[0];
   return lower === Infinity || lower === -Infinity;
+}
+
+/**
+ * True for the one-operand form `Linspace(n)`, which runs from 1 to `n` with
+ * the default count. The test reads the structure (the second operand is
+ * absent or `Nothing`). It must not read the numeric value of the second
+ * operand: a symbolic or infinite end point is present, and reading it as
+ * absent would turn `Linspace(0, b, 5)` into `Linspace(0)`.
+ */
+function isLinspaceOneOperandForm(expr: Expression): boolean {
+  if (!isFunction(expr)) return false;
+  if (expr.nops < 2) return true;
+  const op2 = expr.op2;
+  return isSymbol(op2) && op2.symbol === 'Nothing';
 }
 
 /**
@@ -15707,6 +15778,59 @@ export function range(
   if (expr.nops === 2) return [op1, op2, op2 >= op1 ? 1 : -1];
 
   return [op1, op2, operandNumericValue(expr.op3)];
+}
+
+/**
+ * Whether a `Range` with a finite lower bound and a finite step produces the
+ * element `t`, for a target the tolerant grid check of the `contains` handler
+ * has not accepted. `k` is the grid coordinate `(t − lower) / step`, and
+ * `count` is the element count of `rangeElementCount()`. The answer is
+ * `undefined` when too many elements are near `t` to compare them.
+ *
+ * An EXACT range (`exactArithmeticRange()`) computes its elements exactly
+ * (`rangeElement()`), and the grid check decides it: the answer is `false`.
+ * The elements of any other range are the machine sums `lower + step·i`,
+ * which can differ from the exact grid by more than the tolerance when the
+ * magnitude of the elements is large next to the step. These sums are
+ * monotone in `i`, so a binary search over the indexes near `k` finds the
+ * first element at or past `t`, and `t` is an element when that element is
+ * `t`.
+ */
+function rangeProducesMachineElement(
+  expr: Expression,
+  lower: number,
+  step: number,
+  count: number | bigint,
+  t: number,
+  k: number
+): boolean | undefined {
+  if (exactArithmeticRange(expr) !== undefined) return false;
+  // The rounding of an element, of the product `step·i` and of `k` is at most
+  // a few units in the last place of the largest magnitude, so the index of
+  // an element equal to `t` is within `width` of `k`.
+  const magnitude = Math.max(Math.abs(lower), Math.abs(t));
+  const width = Math.ceil((4 * Number.EPSILON * magnitude) / Math.abs(step));
+  if (!(width <= 1e6)) return undefined;
+  const last = typeof count === 'number' ? count - 1 : Number(count) - 1;
+  let lo = Math.max(0, Math.floor(k) - width - 2);
+  let hi = Math.min(last, Math.ceil(k) + width + 2);
+  if (!(lo <= hi)) return false;
+  // Past `Number.MAX_SAFE_INTEGER` an index is not an exact machine integer:
+  // `mid + 1` can round to `mid`, and the midpoint can round to `hi`, so the
+  // search would not shrink and would not end. The element at such an index
+  // cannot be compared exactly, and the answer is indeterminate.
+  if (hi > Number.MAX_SAFE_INTEGER) return undefined;
+  // The same sum as `rangeElement()` for a range that is not exact.
+  const element = (i: number) => (i === 0 ? lower : lower + step * i);
+  const direction = step > 0 ? 1 : -1;
+  // `lo` and `hi` are safe integers with `lo < hi`, so `mid` is in
+  // `[lo, hi − 1]`, and each iteration makes the interval strictly smaller.
+  while (lo < hi) {
+    const mid = lo + Math.floor((hi - lo) / 2);
+    if (direction * element(mid) >= direction * t) hi = mid;
+    else lo = mid + 1;
+  }
+  return element(lo) === t;
 }
 
 /**

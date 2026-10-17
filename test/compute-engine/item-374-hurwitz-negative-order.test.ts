@@ -111,6 +111,21 @@ describe('HurwitzZeta at a non-positive integer order, float a: the polynomial, 
     const r = hurwitzZeta(-1, 0.5).N();
     expect(r.re).toBeCloseTo(1 / 24, 12);
   });
+
+  test('an integer value stays a float: ζ(0,1.5) = −1, ζ(−2,0.5) = 0', () => {
+    // ζ(0,a) = 1/2 − a and ζ(−2,a) = −B₃(a)/3, with B₃(1/2) = 0. The
+    // operand `a` is a float, so the result is a float under evaluate() and
+    // .N(), even when its value is an integer.
+    for (const [s, a, v] of [
+      [0, 1.5, -1],
+      [-2, 0.5, 0],
+    ]) {
+      for (const r of [hurwitzZeta(s, a).evaluate(), hurwitzZeta(s, a).N()]) {
+        expect(r.re).toBe(v);
+        expect(r.isExact).toBe(false);
+      }
+    }
+  });
 });
 
 describe('HurwitzZeta at a non-positive integer order, complex a: the polynomial, correct to rounding', () => {

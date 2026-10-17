@@ -29,12 +29,14 @@ import {
   twoProd,
 } from './double-double.js';
 import {
+  HURWITZ_MAX_PASSED_TERMS,
   hurwitzZetaComplex,
   hypergeometric2F1Complex,
   incompleteGammaUpperComplex,
   polygammaComplex,
   POLYGAMMA_MAX_ORDER,
   POLYLOG_SERIES_MIN_ORDER,
+  zetaGeneralizedComplex,
 } from './numeric-complex.js';
 import {
   bernoulliPolynomialInteger,
@@ -254,13 +256,19 @@ export function binomial(n: number, k: number): number {
   }
 
   if (Number.isInteger(n) && Number.isInteger(k)) {
+    // The two branches below compute `C(m, j)` as `C(m, min(j, m − j))`,
+    // with `j` and `m − j` both formed from `n` and `k`, not from `m`: past
+    // 2⁵³ the sum `m` is rounded, and `C(m, j)` with a rounded `m` and
+    // `j = m` is 1, where `C(−2, 10²⁰) = C(10²⁰ + 1, 10²⁰) = 10²⁰ + 1`.
     if (k < 0) {
       if (n >= 0 || n < k) return 0;
-      const inner = binomial(-k - 1, -n - 1);
-      return Math.abs(n - k) % 2 === 0 ? inner : -inner;
+      const inner = binomial(-k - 1, Math.min(-n - 1, n - k));
+      // The parity of n − k from those of n and k, which `%` gives exactly:
+      // n − k itself can be rounded to an even double (−3 − (−10²⁰)).
+      return Math.abs(n % 2) === Math.abs(k % 2) ? inner : -inner;
     }
     if (n < 0) {
-      const inner = binomial(k - n - 1, k);
+      const inner = binomial(k - n - 1, Math.min(k, -n - 1));
       return k % 2 === 0 ? inner : -inner;
     }
     if (k > n) return 0;
@@ -305,23 +313,92 @@ export function binomial(n: number, k: number): number {
   const gNK = gamma(n - k + 1);
   const usable = (g: number) => Number.isFinite(g) && Math.abs(g) > 1e-280;
   if (usable(gN) && usable(gK) && usable(gNK)) {
-    const r = gN / (gK * gNK);
-    if (Number.isFinite(r)) return r;
+    // The product of the two denominator factors can overflow although each
+    // factor is finite (`Γ(0.5)·Γ(171.6)` for `C(170.1, −0.5)` ≈ 0.0432).
+    // The quotient is then a false `0`, so the log form below is used. A
+    // quotient that underflows to `0` also goes to the log form.
+    const d = gK * gNK;
+    const r = gN / d;
+    if (Number.isFinite(d) && Number.isFinite(r) && r !== 0) return r;
   }
-  // Compute it in log form with the sign of each Γ factor.
+  // A negative non-integer `n + 1`: `Γ(n+1)` and one of the two denominator
+  // factors are reflected (`Γ(x) = π/(sin(πx)·Γ(1−x))`), which gives a
+  // coefficient whose `Γ` arguments are positive, as `bigBinomialLogForm()`
+  // does:
+  // - for `k > n + 1`, `C(n, k) = sin(π(n−k))/sin(πn) · C(k−n−1, k)`;
+  // - for `k < n + 1`, `C(n, k) = sin(πk)/sin(πn) · C(−k−1, n−k)`.
+  // The sum `lnΓ(n+1) − lnΓ(k+1) − lnΓ(n−k+1)` of the three log-Γ values
+  // cancelled: two of them are near `|n|·ln|n|`, so for `|n| ≈ 10¹⁵` the
+  // result lost all but three digits (`C(−10¹⁵ − 0.5, 0.25)` was 2980.96,
+  // for 4386.96…). The positive coefficient pairs its log-Γ values without
+  // cancellation (`lnGammaRatio()`). The sines are computed from exact
+  // remainders (`sinPi()`, `sinPiOfDifference()`).
   if (n + 1 < 0) {
-    const [lnN, signN] = lnGammaSigned(n + 1);
-    const [lnK, signK] = lnGammaSigned(k + 1);
-    const [lnNK, signNK] = lnGammaSigned(n - k + 1);
-    return signN * signK * signNK * Math.exp(lnN - lnK - lnNK);
+    if (k > n + 1)
+      return (sinPiOfDifference(n, k) / sinPi(n)) * binomial(k - n - 1, k);
+    if (k < n + 1) return (sinPi(k) / sinPi(n)) * binomial(-k - 1, n - k);
+    // `k = n + 1`: `Γ(n−k+1) = Γ(0)` is a pole, and `C(n, k)` is `0`.
+    return 0;
   }
-  // `Γ(n+1) > 0`. The numerator is paired with the larger denominator
-  // argument, because their log-Γ values are close and their difference
-  // must be computed without cancellation (`lnGammaRatio()`).
+  // `Γ(n+1) > 0`. A negative `j`, where `j` is `k` or `n − k` (not an
+  // integer; `C(n, k) = C(n, n − k)`), uses the reflection formula
+  // `1/Γ(j+1) = sin(π(j+1))·Γ(−j)/π`, as `bigBinomialLogForm()` does, so
+  // that `C(n, k) = sin(π(j+1))/π · Γ(n+1)·Γ(−j)/Γ(n−j+1)`. The three `Γ`
+  // arguments are positive, and `n − j + 1` is the sum of the other two: it
+  // is paired with the larger of them (`lnGammaRatio()`). The reflection of
+  // `Γ(j+1)` alone took the sine of the rounded product `π·(j+1)`, which
+  // has no correct digits for a large `|j|` (`C(0.5, −10¹⁵ − 0.25)` and
+  // `C(0.5, 10¹⁵ + 0.75)` were 3 times their value), and the pairing with
+  // `Γ(j+1)` rounded `j/(n+1−j)` to `−1`. The sine is computed from exact
+  // remainders (`sinPi()`, `sinPiOfDifference()`).
+  if (k < 0 || n - k < 0) {
+    const j = k < 0 ? k : n - k;
+    const sine = k < 0 ? sinPi(k) : sinPiOfDifference(n, k);
+    // `n − j + 1`, formed without the rounded `n − k`.
+    const sum = k < 0 ? n - k + 1 : k + 1;
+    const small = Math.min(n + 1, -j);
+    return (
+      (-sine / Math.PI) * Math.exp(gammaln(small) - lnGammaRatio(sum, small))
+    );
+  }
+  // The numerator is paired with the larger denominator argument, because
+  // their log-Γ values are close and their difference must be computed
+  // without cancellation (`lnGammaRatio()`).
   const [small, large] = k < n - k ? [k, n - k] : [n - k, k];
   const [lnSmall, signSmall] = lnGammaSigned(small + 1);
   const logValue = lnGammaRatio(n + 1, small) - lnSmall;
   return signSmall * Math.exp(logValue) * gammaSign(large + 1);
+}
+
+/**
+ * `sin(πx)` for a finite double `x`, computed from the remainder
+ * `r = x − m`, where `m` is the integer nearest to `x`:
+ * `sin(πx) = (−1)^m·sin(πr)`, with `|r| ≤ ½`. The subtraction is exact for
+ * every double, so the result has correct digits for any `|x|`, and it is
+ * exactly `0` at an integer. `Math.sin(Math.PI·x)` has an absolute error of
+ * about `10⁻¹⁶·|x|` (the rounding of the product), which is a large relative
+ * error of a small result. The parity of `m` is exact: `%` is exact, and
+ * every double above 2⁵³ is even.
+ */
+function sinPi(x: number): number {
+  const m = Math.round(x);
+  const s = Math.sin(Math.PI * (x - m));
+  return m % 2 === 0 ? s : -s;
+}
+
+/**
+ * `sin(π(a − b))` for finite doubles `a` and `b`, computed from their exact
+ * remainders `ra = a − ma` and `rb = b − mb` (see `sinPi()`):
+ * `sin(π(a − b)) = (−1)^(ma − mb)·sin(π(ra − rb))`. The difference `a − b`
+ * is rounded when `|a|` or `|b|` is large, and its sine then has no correct
+ * digits. The difference `ra − rb` is exact when it is small, which is
+ * where the sine is small.
+ */
+function sinPiOfDifference(a: number, b: number): number {
+  const ma = Math.round(a);
+  const mb = Math.round(b);
+  const s = sinPi(a - ma - (b - mb));
+  return (ma % 2 === 0) === (mb % 2 === 0) ? s : -s;
 }
 
 /** The sign of `Γ(x)` for a real `x` that is not a pole. */
@@ -991,10 +1068,11 @@ export function bigLnGammaRatio(
 /**
  * `C(n, k) = Γ(n+1)/(Γ(k+1)·Γ(n−k+1))` for big numbers in log form, for
  * `n + 1 > 0` and `n − k + 1 > 0`. This is for the arguments where a `Γ`
- * value overflows (from about `n = 10²⁰`) and the plain quotient is `NaN`.
- * The numerator is paired with the larger denominator argument, whose
- * log-Γ value is close to its own (`bigLnGammaRatio()`). Returns `undefined`
- * outside that domain.
+ * value overflows (from about `n = 10²⁰`) and the plain quotient is `NaN`,
+ * and for a negative non-integer `k`, where the quotient has no correct
+ * digits when `|k|` is large (see the reflection below). The numerator is
+ * paired with the larger denominator argument, whose log-Γ value is close
+ * to its own (`bigLnGammaRatio()`). Returns `undefined` outside that domain.
  */
 export function bigBinomialLogForm(
   ce: ComputeEngine,
@@ -1003,12 +1081,73 @@ export function bigBinomialLogForm(
 ): BigNum | undefined {
   const nPlus1 = n.add(BigDecimal.ONE);
   const nk = n.sub(k);
+  // A negative non-integer `n + 1`: `Γ(n+1)` and one of the two denominator
+  // factors are reflected (`Γ(x) = π/(sin(πx)·Γ(1−x))`), which gives a
+  // coefficient whose `Γ` arguments are positive:
+  // - for `k > n + 1`, `Γ(n−k+1)` is reflected too, and
+  //   `C(n, k) = sin(π(n−k+1))/sin(π(n+1)) · C(k−n−1, k)`;
+  // - for `k < n + 1`, `Γ(k+1)` is reflected too, and
+  //   `C(n, k) = sin(π(k+1))/sin(π(n+1)) · C(−k−1, n−k)`.
+  // The quotient of the `Γ` values was `0/0` where both underflow
+  // (`C(−10¹⁵ − 0.5, 0.25)` ≈ 4386.96 was `NaN`). A negative integer `n` is
+  // a pole of `Γ(n+1)`, handled by the caller. The sines are computed from
+  // exact fractional parts (`bigSinPi()`): with an integer `k` their ratio
+  // is exactly `±1`, and with `n − k + 1` a non-positive integer the
+  // numerator sine is exactly `0`.
+  if (nPlus1.isNegative()) {
+    if (n.isInteger()) return undefined;
+    if (k.gt(nPlus1)) {
+      const c = bigBinomialLogForm(ce, k.sub(nPlus1), k);
+      if (c === undefined) return undefined;
+      return withGuardDigits(SPECIAL_FN_GUARD, () =>
+        bigSinPi(nk.add(BigDecimal.ONE)).div(bigSinPi(nPlus1)).mul(c)
+      );
+    }
+    if (k.lt(nPlus1)) {
+      const c = bigBinomialLogForm(ce, k.neg().sub(BigDecimal.ONE), nk);
+      if (c === undefined) return undefined;
+      return withGuardDigits(SPECIAL_FN_GUARD, () =>
+        bigSinPi(k.add(BigDecimal.ONE)).div(bigSinPi(nPlus1)).mul(c)
+      );
+    }
+    // `k = n + 1`: `Γ(n−k+1) = Γ(0)` is a pole, and `C(n, k)` is `0`.
+    return BigDecimal.ZERO;
+  }
   if (!nPlus1.isPositive() || !nk.add(BigDecimal.ONE).isPositive())
     return undefined;
   // The logarithm is computed with guard digits: `exp` turns its absolute
   // error into a relative error of the result, and the logarithm of a large
   // coefficient has many digits before the decimal point.
   return withGuardDigits(SPECIAL_FN_GUARD, () => {
+    // A negative `k` uses the reflection formula
+    // `1/Γ(k+1) = sin(π(k+1))·Γ(−k)/π`, so that
+    // `C(n, k) = sin(π(k+1))/π · Γ(n+1)·Γ(−k)/Γ(n−k+1)`. The three `Γ`
+    // arguments are positive, and `n − k + 1` is the sum of the other two:
+    // `Γ(n−k+1)` is paired with the larger of them, whose log-Γ value is
+    // close to its own (`bigLnGammaRatio()`), and the quotient `d/b` it
+    // forms is at most 1. The pairing below, with `Γ(k+1)` for a large
+    // `|k|`, rounded `k/(n+1−k)` to `−1` and `ln(1 + k/(n+1−k))` to `−∞`.
+    // The sine is computed from the fractional part of `k`, which the
+    // subtraction `k − ⌊k⌋` gives exactly: the sine of the rounded product
+    // `π·(k+1)` has no correct digits for a large `|k|`.
+    if (k.isNegative()) {
+      // A negative integer `k` is a pole of `Γ(k+1)`, and `Γ(n+1)` is finite.
+      if (k.sub(k.floor()).isZero()) return BigDecimal.ZERO;
+      const minusK = k.neg();
+      const [small, large] = nPlus1.lt(minusK)
+        ? [nPlus1, minusK]
+        : [minusK, nPlus1];
+      const sum = nk.add(BigDecimal.ONE);
+      const lnRatio =
+        bigLnGammaRatio(ce, sum, small) ??
+        bigGammaln(ce, sum).sub(bigGammaln(ce, large));
+      const sine = bigSinPi(k.add(BigDecimal.ONE));
+      return bigGammaln(ce, small)
+        .sub(lnRatio)
+        .exp()
+        .mul(sine)
+        .div(BigDecimal.PI);
+    }
     const small = k.lt(nk) ? k : nk;
     const large = k.lt(nk) ? nk : k;
     const lnRatio =
@@ -1025,6 +1164,21 @@ export function bigBinomialLogForm(
     const value = lnRatio.sub(bigGammaln(ce, smallPlus1)).exp();
     return negativeGamma ? value.neg() : value;
   });
+}
+
+/**
+ * `sin(πx)` for a big number `x`, computed from its fractional part:
+ * `sin(πx) = (−1)^m·sin(πf)` with `x = m + f`, `m = ⌊x⌋`. The subtraction
+ * `x − m` is exact, so the result has correct digits for any `|x|`, and it
+ * is exactly `0` at an integer. The parity of `m` is read as a bigint:
+ * `toNumber()` rounds a floor above 2^53 to an even double.
+ */
+function bigSinPi(x: BigNum): BigNum {
+  const m = x.floor();
+  const f = x.sub(m);
+  if (f.isZero()) return BigDecimal.ZERO;
+  const s = BigDecimal.PI.mul(f).sin();
+  return BigInt(m.toFixed(0)) % 2n !== 0n ? s.neg() : s;
 }
 
 /**
@@ -2852,9 +3006,11 @@ function lerchPhiSeries(
     // far below its last digit.
     if (sum.isZero() || termLog >= bigLog10Abs(sum) - 2 * working)
       sum = rnd(sum.add(term));
-    // Past k = 0, a zero term means zᵏ = 0 (z = 0): every later term is
-    // zero too, so the sum is complete.
-    if (term.isZero() && k > 0) return { sum, largest };
+    // Past k = 0, zᵏ = 0 (z = 0) makes every later term zero too, so the
+    // sum is complete. A zero term is not enough: (k + a)^(−s) is 0 at
+    // k = −a for a negative integer a and s < 0, and the terms after it are
+    // not (Φ(1/2, −3, −1) = 12, not the −1 of its first term).
+    if (zPow.isZero() && k > 0) return { sum, largest };
     largest = Math.max(largest, termLog);
 
     // The tail bound is compared on base-10 exponents, never on doubles: a
@@ -3229,6 +3385,29 @@ export function polygamma(n: number, x: number): number {
     z += 1;
   }
 
+  // `n!/z^(n+1)` with a power that overflows to `Infinity` is a false `0`,
+  // and the result can then be `0` although the value is representable
+  // (ψ⁽¹⁵⁰⁾(300) ≈ −1.31·10⁻¹¹¹, where `300^150` overflows and `149!` does
+  // not). The largest power below is `z^(n+2)`, at the `z` reached by the
+  // recurrence, and the largest factorial is `(n+1)!`. When one of them
+  // overflows, the terms below are about `(n−1)!/zⁿ` in size: when that is
+  // less than `e^−40` of the sum of the recurrence, they do not change it
+  // (ψ⁽¹⁵⁰⁾(12.5)). Otherwise `polygammaComplex` gives the value from
+  // scaled forms.
+  if (
+    !Number.isFinite(Math.pow(z, n + 2)) ||
+    !Number.isFinite(factN * (n + 1))
+  ) {
+    const logTail = gammaln(n) - n * Math.log(z);
+    if (
+      result !== 0 &&
+      Number.isFinite(result) &&
+      logTail < Math.log(Math.abs(result)) - 40
+    )
+      return result;
+    return polygammaComplex(n, x).re;
+  }
+
   // Asymptotic expansion (DLMF 5.15.9, extended to general n — obtained by
   // differentiating DLMF 5.11.2 n times):
   //   ψ⁽ⁿ⁾(z) ~ (−1)^{n−1} [ (n−1)!/zⁿ + n!/(2z^{n+1})
@@ -3423,6 +3602,12 @@ export function zetaGeneralized(s: number, a: number): number {
   if (a > 0) return hurwitzZeta(s, a);
   if (a === 0) return zeta(s);
   if (!Number.isFinite(s) || !Number.isFinite(a)) return NaN;
+  // Far left of the axis the loop below would add one term per unit of −a
+  // (10¹² of them at a = −10¹² − 1/2). The complex kernel answers an even
+  // order there by the polygamma reflection and declines (NaN) otherwise,
+  // as the interpreter does.
+  if (-a > HURWITZ_MAX_PASSED_TERMS)
+    return zetaGeneralizedComplex(new Complex(s, 0), new Complex(a, 0)).re;
   let sum = 0;
   let cur = a;
   while (cur < 0) {

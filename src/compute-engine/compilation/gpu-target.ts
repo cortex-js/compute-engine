@@ -10805,7 +10805,11 @@ vec2 _gpu_lerch_modes(float z, float s, float a, float c) {
     res = head + zk * phib;
     rerr = herr + abs(zk) * (eb + abs(phib) * (pre + 2.0));
   }
-  if (!(abs(res) >= 1.18e-38 && abs(res) < 3.4e38) || !(rerr <= 500.0 * abs(res)))
+  // 500.0 * abs(res) is +inf for abs(res) > 6.8e35, and an error estimate
+  // that overflowed to +inf passed the test inf <= inf: an infinite
+  // estimate must decline.
+  if (!(abs(res) >= 1.18e-38 && abs(res) < 3.4e38) ||
+      !(rerr < 3.4e38 && rerr <= 500.0 * abs(res)))
     return vec2(0.0);
   return vec2(res, 1.0);
 }
@@ -10951,7 +10955,10 @@ vec2 _gpu_poly_log_inversion(float s, float z) {
   // In units of EPS; the test is bound <= (3e-5 / EPS) |res|, since
   // EPS bound and 3e-5 |res| fall below 1.18e-38 for a small |res|.
   float bound = ((firstErr + 4.0 * abs(first)) + (lierr + 2.0 * abs(li))) + 4.0 * FLUSH;
-  if (!(abs(res) >= 1.18e-38 && abs(res) < 3.4e38) || !(bound <= 500.0 * abs(res)))
+  // An estimate that overflowed to +inf declines (500.0 * abs(res) is +inf
+  // for abs(res) > 6.8e35, and inf <= inf passes).
+  if (!(abs(res) >= 1.18e-38 && abs(res) < 3.4e38) ||
+      !(bound < 3.4e38 && bound <= 500.0 * abs(res)))
     return vec2(0.0);
   return vec2(res, 1.0);
 }
@@ -11662,7 +11669,9 @@ fn _gpu_lerch_modes(z: f32, s: f32, a: f32, c: f32) -> vec2<f32> {
     res = head + zk * phib;
     rerr = herr + abs(zk) * (eb + abs(phib) * (pre + 2.0));
   }
-  if (!(abs(res) >= 1.18e-38 && abs(res) < 3.4e38) || !(rerr <= 500.0 * abs(res))) {
+  // An estimate that overflowed to +inf declines: see the GLSL form.
+  if (!(abs(res) >= 1.18e-38 && abs(res) < 3.4e38) ||
+      !(rerr < 3.4e38 && rerr <= 500.0 * abs(res))) {
     return vec2<f32>(0.0);
   }
   return vec2<f32>(res, 1.0);
@@ -11781,7 +11790,8 @@ fn _gpu_poly_log_inversion(s: f32, z: f32) -> vec2<f32> {
   }
   let res = first - sgn * cos(PI * d) * li;
   let bound = ((firstErr + 4.0 * abs(first)) + (lierr + 2.0 * abs(li))) + 4.0 * FLUSH;
-  if (!(abs(res) >= 1.18e-38 && abs(res) < 3.4e38) || !(bound <= 500.0 * abs(res))) {
+  if (!(abs(res) >= 1.18e-38 && abs(res) < 3.4e38) ||
+      !(bound < 3.4e38 && bound <= 500.0 * abs(res))) {
     return vec2<f32>(0.0);
   }
   return vec2<f32>(res, 1.0);

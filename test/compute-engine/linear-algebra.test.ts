@@ -2395,6 +2395,45 @@ describe('Eigenvalues and Eigenvectors (LA-5)', () => {
       expected.forEach((e, i) => expect(vals[i]).toBeCloseTo(e, 5));
     });
 
+    it('keeps two close eigenvalues distinct when only one is the rational', () => {
+      // With ε = 1/20000000 the first block has the eigenvalues 1 and
+      // 1 + 2ε, both within the tolerance of the rational candidate 1, and
+      // A − I is singular: both were made the exact 1. The algebraic
+      // multiplicity of 1 is 1, so they stay floats.
+      const e = ['Rational', 1, 20000000];
+      const m = [
+        'List',
+        ['List', ['Add', 1, e], e, 0, 0],
+        ['List', e, ['Add', 1, e], 0, 0],
+        ['List', 0, 0, 3, 1],
+        ['List', 0, 0, 1, 3],
+      ];
+      const result = ce.expr(['Eigenvalues', m as Expression]).evaluate();
+      const ones = (result.ops ?? []).filter((o) => o.isSame(1));
+      expect(ones).toHaveLength(0);
+      const vals = (result.ops ?? []).map((o) => o.re).sort((a, b) => a - b);
+      expect(vals[0]).toBeCloseTo(1, 12);
+      expect(vals[1]).toBeCloseTo(1 + 1e-7, 12);
+      // A Jordan block of size 2: the eigenvalue 2 is confirmed twice, and
+      // its algebraic multiplicity is 2 (its geometric one is 1), so both
+      // stay exact.
+      expect(
+        ce
+          .expr([
+            'Eigenvalues',
+            [
+              'List',
+              ['List', 2, 1, 0, 0],
+              ['List', 0, 2, 0, 0],
+              ['List', 0, 0, 3, 0],
+              ['List', 0, 0, 0, 5],
+            ],
+          ])
+          .evaluate()
+          .toString()
+      ).toBe('[2,2,3,5]');
+    });
+
     it('should return error for non-square matrix', () => {
       const result = ce.expr(['Eigenvalues', m23_n]).evaluate();
       expect(result.toString()).toContain('expected-square-matrix');

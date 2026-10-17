@@ -132,6 +132,53 @@ describe('ITERATION-ONLY OPERATORS OVER AN ABSTRACT COLLECTION (issue #385)', ()
     expect(prod([{ re: 0, im: 1 }, 2])).toEqual({ re: 0, im: 2 });
   });
 
+  test('Re and Im of the Sum and Product of a collection<complex>', () => {
+    // A parent reads the fold of a `collection<complex>` as a complex value.
+    // The fold answered the plain number of its identity for an empty
+    // collection, so `Re(Sum(w))` read `.re` of `0` and gave `undefined`
+    // where the interpreter gives 0.
+    for (const [op, identity] of [
+      ['Sum', 0],
+      ['Product', 1],
+    ] as const) {
+      const re = compiled(new ComputeEngine(), ['Real', [op, 'w']], 'collection<complex>');
+      const im = compiled(new ComputeEngine(), ['Imaginary', [op, 'w']], 'collection<complex>');
+      for (const empty of [[], new Set()]) {
+        expect(re(empty)).toBe(identity);
+        expect(im(empty)).toBe(0);
+      }
+      expect(re([2, 3])).toBe(op === 'Sum' ? 5 : 6);
+      expect(im([{ re: 0, im: 1 }, 2])).toBe(op === 'Sum' ? 1 : 2);
+      const ce = new ComputeEngine();
+      ce.declare('c', 'collection<complex>');
+      ce.assign('c', ce.box(['List']));
+      expect(ce.box(['Real', [op, 'c']]).evaluate().re).toBe(identity);
+    }
+  });
+
+  test('Sum and Product of a broadcastable<complex> are complex values', () => {
+    // An operand typed `broadcastable<complex>` is a complex number or a list
+    // of them. The fold was read as a real number, so `Sum(c) + 1` over
+    // `[i, 2]` added `1` to a `{re, im}` object with the real `+` and gave
+    // the string `"[object Object]1"`.
+    for (const [op, list, empty] of [
+      ['Sum', { re: 3, im: 1 }, 1],
+      ['Product', { re: 1, im: 2 }, 2],
+    ] as const) {
+      const ce = new ComputeEngine();
+      ce.declare('c', 'broadcastable<complex>');
+      const expr = ce.box(['Add', [op, 'c'], 1]);
+      const r = compile(expr, { fallback: false });
+      expect(r.run!({ c: [{ re: 0, im: 1 }, 2] } as never)).toEqual(list);
+      expect(r.run!({ c: [] } as never)).toBe(empty);
+      expect(r.run!({ c: [1, 2] } as never)).toBe(op === 'Sum' ? 4 : 3);
+      ce.assign('c', ce.box(['List', 'ImaginaryUnit', 2]));
+      expect(expr.evaluate().toString()).toBe(
+        op === 'Sum' ? '(3 + i)' : '(1 + 2i)'
+      );
+    }
+  });
+
   test('Max and Min stop on an element that is not a real number', () => {
     // A complex value has no order: the interpreter keeps `Max` symbolic.
     // `Math.max` would read the object as `NaN`.

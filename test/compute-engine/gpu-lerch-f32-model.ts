@@ -1151,7 +1151,7 @@ function _gpu_lerch_modes(z: number, s: number, a: number, c: number): Result {
   lastModesRatio = (EPS * rerr) / Math.abs(res);
   if (
     !lerchModesOptions.noDecline &&
-    (!normal(res) || !(rerr <= mul(500, abs(res))))
+    (!normal(res) || !(rerr < FLT_BIG && rerr <= mul(500, abs(res))))
   )
     return DECLINE;
   return [res, true];
@@ -1294,7 +1294,8 @@ function _gpu_poly_log_inversion(s: number, z: number): Result {
     add(add(firstErr, mul(4, abs(first))), add(lierr, mul(2, abs(li)))),
     mul(4, FLUSH)
   );
-  if (!normal(res) || !(bound <= mul(500, abs(res)))) return DECLINE;
+  if (!normal(res) || !(bound < FLT_BIG && bound <= mul(500, abs(res))))
+    return DECLINE;
   return [res, true];
 }
 

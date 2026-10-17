@@ -564,6 +564,58 @@ export const LENGTH_BOUND: Type = Object.freeze({
 }) as Type;
 
 /**
+ * The values a length variable whose clause declares `bound` can take: the
+ * members of `bound` that are positive integers. An explicit bound restricts
+ * {@link LENGTH_BOUND}, it does not replace it, so `where N: integer` admits
+ * `1, 2, …` and never `0`: its effective bound is `integer<1..>`, and
+ * `integer<-5..5>` is `integer<1..5>`. A bound with no positive member is
+ * `never`. `undefined` (no declared bound) is `LENGTH_BOUND` itself.
+ */
+export function lengthBoundOf(bound: Type | undefined): Type {
+  if (bound === undefined) return LENGTH_BOUND;
+  return algebra().narrow(unfoldBoundAliases(bound, []), LENGTH_BOUND);
+}
+
+/**
+ * `t` with each transparent alias at the top and in the arms of a union
+ * replaced by its definition. The meet of two numeric ranges that are not
+ * subtypes of each other is computed from their intervals, and a reference
+ * node has no interval: with `Small` an alias of `integer<-5..5>`, the
+ * effective bound of `where N: Small` was `never`, where the same range
+ * written inline gives `integer<1..5>`.
+ *
+ * `active` holds the declarations being unfolded on the current path. A
+ * self-referential alias (`type alias cyc = cyc | 0`) meets its own
+ * declaration again, and that occurrence is kept as a reference.
+ */
+function unfoldBoundAliases(
+  t: Type,
+  active: ReadonlyArray<TypeReference>
+): Type {
+  if (typeof t !== 'object') return t;
+  if (t.kind === 'reference' && t.alias === true && t.def !== undefined) {
+    const decl = declarationOf(t);
+    if (active.includes(decl)) return t;
+    const params = decl.typeParams;
+    let body: Type = t.def;
+    if (t.args !== undefined && params !== undefined) {
+      const bindings: Record<string, Type> = Object.create(null);
+      for (let i = 0; i < params.length; i++)
+        if (t.args[i] !== undefined) bindings[params[i].name] = t.args[i];
+      body = substituteTypeVariables(body, bindings);
+    }
+    return unfoldBoundAliases(body, [...active, decl]);
+  }
+  if (t.kind === 'union') {
+    const types = t.types.map((arm) => unfoldBoundAliases(arm, active));
+    return types.every((arm, i) => arm === t.types[i])
+      ? t
+      : { kind: 'union', types };
+  }
+  return t;
+}
+
+/**
  * The VALUE a type pins, when it pins exactly one: a value-literal type
  * (`3`, the type of the literal `3` and of `Length([1,2,3])`; a string or
  * boolean value type once those literals carry one), or a singleton numeric
@@ -1040,7 +1092,11 @@ let _algebra: TypeAlgebra | undefined;
  * level whose elements are a list with DIMENSIONS is merged into its parent:
  * the parent's dimensions (the length `-1`, any length, when it states
  * none) followed by the element's. A level whose elements are a list with
- * no dimensions stops the merge: its rows can differ in length. Used by
+ * no dimensions stops the merge: its rows can differ in length. A level whose
+ * elements state the length `-1` on any axis (`vector<integer>`, the rows of
+ * `list<vector<integer>^2>`) also stops the merge: `-1` says only that each
+ * row has SOME length, not that all rows have the same one, so `[[1], [2, 3]]`
+ * is a value of `list<vector<integer>^2>` and is not a matrix. Used by
  * `isSubtype` (`subtype.ts`) and by the dimension pinning of `walkPattern`.
  */
 export function flattenNestedListType(t: Type): Type | undefined {
@@ -1051,7 +1107,8 @@ export function flattenNestedListType(t: Type): Type | undefined {
   while (
     typeof elements === 'object' &&
     elements.kind === 'list' &&
-    elements.dimensions !== undefined
+    elements.dimensions !== undefined &&
+    !elements.dimensions.includes(-1)
   ) {
     dimensions = [...dimensions, ...elements.dimensions];
     elements = elements.elements;
@@ -1399,7 +1456,7 @@ export function solveTypeArguments(
       const pinned = s.values.get(p.name);
       bindings[p.name] =
         pinned === undefined
-          ? (p.bound ?? LENGTH_BOUND)
+          ? lengthBoundOf(p.bound)
           : valueLiteralType(pinned.value as number | string | boolean);
       continue;
     }
@@ -1428,7 +1485,7 @@ export function solveTypeArguments(
     if (s.valueParams.has(p.name)) {
       const pinned = s.values.get(p.name);
       if (pinned === undefined) continue;
-      const bound = p.bound ?? LENGTH_BOUND;
+      const bound = lengthBoundOf(p.bound);
       const solution = bindings[p.name];
       if (algebra().isSubtype(solution, bound)) continue;
       failures.push({
@@ -1695,7 +1752,7 @@ export function readTypeVariablesAsBounds(t: Type): Type {
   // ruling 2026-08-17, and `list<any> ⊄ collection`).
   for (const p of t.typeParams ?? [])
     bindings[p.name] =
-      p.bound ?? (p.kind === 'value' ? LENGTH_BOUND : 'unknown');
+      p.kind === 'value' ? lengthBoundOf(p.bound) : (p.bound ?? 'unknown');
   return substituteTypeVariables(t, bindings);
 }
 
@@ -1815,11 +1872,17 @@ function joinBounds(
     // `tuple<unknown>` and a `tuple<string>` must still refuse the string,
     // as the ground signature does, and applied to a `tuple<unknown>` and a
     // `tuple<integer>` it solves `T = integer`. Only when every bound is a
-    // nested `unknown` is the variable waived.
+    // nested `unknown` is the variable waived. A `never` bound (the element
+    // of an empty list) says nothing either: the join drops it below, so
+    // `(list<T>, list<T>) -> list<T>` applied to a `list<unknown>` and `[]`
+    // keeps `T = unknown` rather than solving `T = never`, which would claim
+    // the result is empty.
     const isNestedUnknown = (b: Bound) =>
       b.type === 'unknown' && b.top !== true;
     if (bounds.some(isNestedUnknown)) {
-      const rest = bounds.filter((b) => !isNestedUnknown(b));
+      const rest = bounds.filter(
+        (b) => !isNestedUnknown(b) && b.type !== 'never'
+      );
       if (rest.length === 0) return { type: 'unknown', absorbed: true };
       return joinBounds(rest, true);
     }
@@ -2245,7 +2308,17 @@ function walkPattern(
     // `T = range` would claim a span for a descending or rotated result.
     // Since `range <: list` (2026-09-29) such an arm accepts a span, and this
     // is what keeps its result honest.
-    if (actual === 'range') actual = RANGE_STRUCTURAL_TYPE;
+    // A variable whose declared bound `list<integer>` does not satisfy
+    // (`(T) -> T where T: range`) keeps the `range`: the declaration states
+    // that the operand IS a span, and widening it would fail that bound.
+    if (actual === 'range') {
+      const bound = s.declared.get(pattern.name);
+      if (
+        bound === undefined ||
+        algebra().isSubtype(RANGE_STRUCTURAL_TYPE, bound)
+      )
+        actual = RANGE_STRUCTURAL_TYPE;
+    }
     if (phase === 'lower' && covariant)
       addBound(s.lower, pattern.name, actual, index, topLevel);
     else if (phase === 'upper' && !covariant)

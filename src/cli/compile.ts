@@ -2,6 +2,7 @@ import { performance } from 'node:perf_hooks';
 
 import type { BoxedExpression, ComputeEngine } from '../compute-engine.js';
 import type { Type } from '../common/type/types.js';
+import { typeToString } from '../common/type/serialize.js';
 import {
   budgetCauseOf,
   isTimeoutCancellation,
@@ -192,17 +193,16 @@ function boxCompiledValue(
   if (typeof value === 'function') return unprintable(engine, 'a function');
 
   if (Array.isArray(value)) {
-    // A `Type` is a primitive name (a string) or a structured type object.
-    const shape = typeof type === 'object' ? type : undefined;
-    const tuple = shape?.kind === 'tuple' ? shape : undefined;
-    const elementType = (i: number): Type | undefined => {
-      if (tuple !== undefined) return tuple.elements[i]?.type;
-      if (shape?.kind === 'list') return shape.elements;
-      return undefined;
-    };
+    const shape = arrayShape(type, value.length);
+    if (shape === 'ambiguous')
+      return unprintable(
+        engine,
+        'an array, and its static type does not say whether it is a tuple ' +
+          `or a list (\`${typeToString(type!)}\`)`
+      );
     return engine.function(
-      tuple !== undefined ? 'Tuple' : 'List',
-      value.map((x, i) => boxCompiledValue(engine, x, elementType(i)))
+      shape.tuple ? 'Tuple' : 'List',
+      value.map((x, i) => boxCompiledValue(engine, x, shape.elementType(i)))
     );
   }
 
@@ -233,6 +233,62 @@ function boxCompiledValue(
   }
 
   return unprintable(engine, `a value of type ${typeof value}`);
+}
+
+/**
+ * Whether an array of `length` elements that the compiled program answered
+ * for a value of static type `type` is a tuple or a list, and the static
+ * type of each element (`undefined` when it is not known).
+ *
+ * A union type (`If(c, (1, 2), (3, 4, 5))` is typed
+ * `tuple<integer, integer> | tuple<integer, integer, integer>`) is read
+ * through its arms: a tuple arm applies when it has `length` elements, and a
+ * list arm applies to any array. The element type at a position is the union
+ * of the element types of the arms that apply. When a tuple arm and a list
+ * arm both apply, the array can be either, and the answer is `'ambiguous'`.
+ * A type with no tuple arm and no list arm (`unknown`, a primitive type)
+ * reads the array as a list whose element types are not known.
+ */
+function arrayShape(
+  type: Type | undefined,
+  length: number
+):
+  | { tuple: boolean; elementType: (i: number) => Type | undefined }
+  | 'ambiguous' {
+  const arms =
+    typeof type === 'object' && type.kind === 'union' ? type.types : [type];
+  const tuples: Array<Type[] | undefined> = [];
+  const lists: Array<Type | undefined> = [];
+  for (const arm of arms) {
+    if (arm === 'tuple') tuples.push(undefined);
+    else if (arm === 'list' || arm === 'indexed_collection')
+      lists.push(undefined);
+    else if (typeof arm === 'object' && arm.kind === 'tuple') {
+      if (arm.elements.length === length)
+        tuples.push(arm.elements.map((x) => x.type));
+    } else if (
+      typeof arm === 'object' &&
+      (arm.kind === 'list' || arm.kind === 'indexed_collection')
+    )
+      lists.push(arm.elements);
+  }
+  if (tuples.length > 0 && lists.length > 0) return 'ambiguous';
+  // The union of the types in `types`, or `undefined` when one of them is
+  // not known.
+  const union = (types: Array<Type | undefined>): Type | undefined => {
+    if (types.length === 0 || types.some((x) => x === undefined))
+      return undefined;
+    return types.length === 1
+      ? types[0]
+      : { kind: 'union', types: types as Type[] };
+  };
+  if (tuples.length > 0)
+    return {
+      tuple: true,
+      elementType: (i) => union(tuples.map((elements) => elements?.[i])),
+    };
+  const elements = union(lists);
+  return { tuple: false, elementType: () => elements };
 }
 
 function unprintable(engine: ComputeEngine, what: string): BoxedExpression {

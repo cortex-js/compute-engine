@@ -143,6 +143,23 @@ describe('DIMENSION VARIABLES — declaration diagnostics', () => {
       declare(ce, 'f', '(x: vector<number^N>) -> N where N: integer<2..>')
     ).not.toThrow();
   });
+
+  test('each arm of an overload set decides the kind of its own variables', () => {
+    // The `N` of the second arm is a type variable bounded by `string`; the
+    // length `N` of the first arm is another variable. The order of the arms
+    // does not change the decision.
+    for (const signature of [
+      '((vector<real^N>) -> real where N) & ((N) -> N where N: string)',
+      '((N) -> N where N: string) & ((vector<real^N>) -> real where N)',
+    ]) {
+      const t = parseType(signature) as any;
+      const kinds = t.types.map((arm: any) => arm.typeParams[0].kind);
+      expect(kinds.sort()).toEqual(['value', undefined]);
+      const typeArm = t.types.find((arm: any) => arm.typeParams[0].kind !== 'value');
+      expect(typeArm.result).toEqual({ kind: 'variable', name: 'N' });
+      expect(() => declare(fresh(), 'f', signature)).not.toThrow();
+    }
+  });
 });
 
 describe('DIMENSION VARIABLES — solving across positions', () => {
@@ -496,6 +513,50 @@ describe('DIMENSION VARIABLES — review follow-ups (2026-09-29)', () => {
     ).not.toThrow();
   });
 
+  test('an explicit length bound restricts the positive-length bound, it does not replace it', () => {
+    const ce = fresh();
+    ce.declareType('perm', 'list<integer^N>', { typeParams: ['N: integer'] });
+    ce.declareType('mid', 'list<integer^N>', {
+      typeParams: ['N: integer<-5..5>'],
+    });
+    for (const t of ['perm<0>', 'perm<-2>', 'perm<integer>', 'mid<0>', 'mid<6>'])
+      expect(() => ce.type(t)).toThrow('type-argument-kind');
+    expect(ce.type('perm<3>').toString()).toBe('perm<3>');
+    expect(ce.type('mid<integer<1..5>>').toString()).toBe('mid<integer<1..5>>');
+    // An unsolved application reads as the positive part of the bound, and
+    // that printed form is itself admitted.
+    ce.declare('w', 'list<integer>');
+    expect(ce.box(['perm', 'w']).type.toString()).toBe('perm<integer<1..>>');
+    // A clause variable is compared by the positive part of both bounds.
+    expect(() => declare(ce, 'mk', '(n: N) -> mid<N> where N')).toThrow(
+      'generic-alias-bound'
+    );
+    expect(() =>
+      declare(ce, 'mk2', '(n: N) -> mid<N> where N: integer<-3..5>')
+    ).not.toThrow();
+    // A signature whose length bound is `integer` reads an unsolved length
+    // as `integer<1..>`.
+    declare(ce, 'len', '(x: list<T^N>) -> N where T, N: integer');
+    expect(ce.box(['len', 'w']).type.toString()).toBe('integer<1..>');
+  });
+
+  test('a length bound spelled by a transparent alias is the bound it names', () => {
+    // The positive part of a bound that only partly overlaps `integer<1..>`
+    // is computed from the interval of the bound. A reference to an alias
+    // has no interval, so the bound `Small` was `never` and refused every
+    // length, where `integer<-5..5>` written inline admits 1 to 5.
+    const ce = fresh();
+    ce.declareType('Small', 'integer<-5..5>', { alias: true });
+    declare(ce, 'zs', '(n: N, x: vector<T^N>) -> T where T, N: Small');
+    expect(ce.box(['zs', 3, ce.parse('[1,2,3]')]).isValid).toBe(true);
+    expect(ce.box(['zs', 5, ce.parse('[1,2,3,4,5]')]).isValid).toBe(true);
+    expect(ce.box(['zs', 6, ce.parse('[1,2,3,4,5,6]')]).isValid).toBe(false);
+    ce.declareType('mid', 'list<integer^N>', { typeParams: ['N: Small'] });
+    expect(ce.type('mid<3>').toString()).toBe('mid<3>');
+    for (const t of ['mid<0>', 'mid<6>'])
+      expect(() => ce.type(t)).toThrow('type-argument-kind');
+  });
+
   test('a nominal length parameter with a non-integer bound is rejected at declaration', () => {
     const ce = fresh();
     expect(() =>
@@ -589,10 +650,23 @@ describe('DIMENSION VARIABLES — a nested list spelling reads as its flat shape
     ['list<matrix<integer^(2x2)>^3>', 'list<integer^(3x2x2)>', true],
     // Rows with no length can differ in length: not a matrix.
     ['list<list<integer>^2>', 'matrix<integer>', false],
+    // Rows of length `-1` (any length) can differ in length too: `[[1],
+    // [2, 3]]` is a `list<vector<integer>^2>`. Only the levels above such
+    // rows merge.
+    ['list<vector<integer>^2>', 'matrix<integer>', false],
+    ['list<vector<integer>>', 'matrix<integer>', false],
+    ['list<vector<vector<integer>^3>^2>', 'matrix<vector<integer>^(2x3)>', true],
+    ['list<vector<vector<integer>^3>^2>', 'list<integer^(2x3x-1)>', false],
     ['list<vector<string^3>^2>', 'matrix<integer>', false],
     // The bridge in the other direction, unchanged.
     ['matrix<integer^(2x3)>', 'list<vector<integer^3>^2>', true],
   ])('%s <: %s is %s', (a, b, expected) => {
     expect(ce.type(a).matches(ce.type(b))).toBe(expected);
+  });
+
+  test('rows of any length are not a matrix: an integer power stays a Power', () => {
+    ce.declare('nr', 'list<vector<integer>^2>');
+    expect(ce.box(['Power', 'nr', 2]).operator).toBe('Power');
+    expect(ce.box(['Power', 'nq', 2]).operator).toBe('MatrixPower');
   });
 });

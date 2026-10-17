@@ -1208,8 +1208,35 @@ export interface IComputeEngine {
    * cannot be carried by an axis bump instead: a bump inside a scope makes
    * the pop of that scope permanently dirty. Mixing the state into the memo
    * key leaves every axis where it is.
+   *
+   * A VALUE SHIELD (`simplifyValueBlind` in `boxed-expression/simplify.ts`,
+   * `withValueShield` in `boxed-expression/utils.ts`) is the other state
+   * that changes the answer of a node: while it is on the stack, a symbol
+   * that has an assigned value reads no value, and EXISTING expressions are
+   * affected too, because a symbol reads its VALUE by name through the
+   * current scope chain (`valueDefinitionInContext`, `binders.ts`), so a
+   * sign, and a type that depends on a value or a sign, differ inside the
+   * shield. So inside a shield the high bits are a key of that shield
+   * extent (`_withValueShieldKey()`), a negative integer that no value of
+   * the `any` axis can equal, minted again whenever the axis moves inside
+   * the shield: an answer derived outside the shield, from the value, is
+   * not served inside it, an answer derived inside, blind to the value, is
+   * not served outside, a write inside the shield still retires what was
+   * cached earlier in it, and the pop restores the outer key, so the caches
+   * computed outside stay valid across the shield. A node read on both sides
+   * is computed once on each side (the shield key selects the same cell as
+   * the outer key, so the entry is overwritten); that is the cost of a
+   * shield, and it is bounded by the nodes the shield reads, where an axis
+   * advance retired every node in the engine.
    * @internal */
   _cacheGeneration(): number;
+
+  /** Run `f` as a value shield for the cache: `_cacheGeneration()` answers a
+   * key of this shield extent while `f` runs, and the outer key again after
+   * (see `_cacheGeneration()`). Called by the two value shields around their
+   * shadow declarations and the shielded work; nested shields stack.
+   * @internal */
+  _withValueShieldKey<T>(f: () => T): T;
 
   /** The functions whose clause body is being canonicalized under the
    * recursion knot of `DefineFunction` (`library/core.ts`), by name: the

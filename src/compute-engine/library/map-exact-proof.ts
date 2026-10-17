@@ -101,11 +101,13 @@ const MAX_SPINE_DEPTH = 32;
  * exactly? Inexact (machine-float) literals are excluded: their arithmetic is
  * exact here too, but the interpreter's result would be an inexact literal
  * while the compiled path re-boxes an exact one — an `isSame` mismatch.
+ * A rational that is not an integer is excluded although its float can be
+ * one: the float of `1 − 10⁻³⁰` is `1`.
  */
 function literalInteger(x: Expression | undefined): number | undefined {
   if (x === undefined || !isNumber(x)) return undefined;
   if (x.isComplex) return undefined;
-  if (!x.isExact) return undefined;
+  if (!x.isExact || x.isInteger !== true) return undefined;
   const v = x.re;
   return Number.isSafeInteger(v) ? v : undefined;
 }
@@ -295,6 +297,10 @@ interface ProofContext {
    * {@link ExactProofMemo}). */
   typeExprs: Expression[];
   depth: number;
+  /** True when a level whose mapping function carries the numeric marker
+   * (`NumericApproximation`) is proved too (`exactTierShape()`,
+   * `numericMarker`). */
+  numericMarker: boolean;
 }
 
 function proveSource(
@@ -423,9 +429,10 @@ function proveLevel(
    * needs for the runtime element check. */
   sourcesOut?: SourceBounds[]
 ): SourceBounds | undefined {
-  // The numeric marker belongs to the float tier; an identity level is
+  // The numeric marker belongs to the float tier, unless the caller asks
+  // for a proof over marked levels (`numericMarker`); an identity level is
   // a pass-through the compiler cannot improve on.
-  if (level.napprox || level.identity) return undefined;
+  if ((level.napprox && !ctx.numericMarker) || level.identity) return undefined;
   const op = level.op;
   const slots: Slot[] | undefined = level.slots;
   if (op === undefined || slots === undefined) return undefined;
@@ -506,6 +513,10 @@ function typeKeyOf(typeExprs: ReadonlyArray<Expression>): string {
  * annotation was discharged against (`typeExprs`/`typeKey`) is revalidated. */
 const exactProofMemo = new WeakMap<Expression, ExactProofMemo>();
 
+/** The memo of the proofs over marked levels (`numericMarker`), kept apart
+ * from `exactProofMemo` because the same instance has a different answer. */
+const markedProofMemo = new WeakMap<Expression, ExactProofMemo>();
+
 /**
  * The exact tier's eligibility gate: `expr` is an unmarked broadcast-shaped
  * `Map` whose element function is provably integer-closed and overflow-free,
@@ -514,13 +525,23 @@ const exactProofMemo = new WeakMap<Expression, ExactProofMemo>();
  * Called once per drain (an iterator creation, or each `at()` micro-drain),
  * BEFORE any compile attempt is recorded — a declining instance costs one
  * memoized structural walk and never shows up as a compile attempt.
+ *
+ * With `numericMarker`, a level whose mapping function carries the numeric
+ * marker of `.N()` is proved as if it had none. The float tier asks this for
+ * a body that applies a function whose result jumps at a point (`Mod`,
+ * `Floor`, …): over exact integer inputs inside the proved bounds, the
+ * compiled code then computes the same integers as the interpreter, which
+ * reads exact operands exactly (`mapAutoCompileRunner()`).
  */
 export function exactTierShape(
   ce: ComputeEngine,
-  expr: Expression
+  expr: Expression,
+  options?: { numericMarker?: boolean }
 ): ExactTierShape | undefined {
+  const numericMarker = options?.numericMarker === true;
+  const memos = numericMarker ? markedProofMemo : exactProofMemo;
   const factsHidden = ce._factsHidden();
-  const recorded = exactProofMemo.get(expr);
+  const recorded = memos.get(expr);
   const memo = recorded?.factsHidden === factsHidden ? recorded : undefined;
   if (memo !== undefined) {
     if (!memo.dynamic && memo.typeExprs.length === 0) return memo.shape;
@@ -547,6 +568,7 @@ export function exactTierShape(
     dynamic: false,
     typeExprs: hasAnnotatedParams(expr) ? [expr] : [],
     depth: 0,
+    numericMarker,
   };
   const level = isFunction(expr, 'Map') ? lowerLevel(expr) : undefined;
   const sources: SourceBounds[] = [];
@@ -561,7 +583,7 @@ export function exactTierShape(
           sourceBounds: sources.map((s) => s.interval),
           count: proof.count,
         };
-  exactProofMemo.set(expr, {
+  memos.set(expr, {
     shape,
     dynamic: ctx.dynamic,
     typeExprs: ctx.typeExprs,

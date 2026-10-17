@@ -989,14 +989,7 @@ export function reduceHalfTurns(
  */
 export function cosSinPiRational(p: bigint, q: bigint): [number, number] {
   const { n, t } = reduceHalfTurns(p, q);
-  let [tn, td] = t;
-  // A denominator above the double range is scaled down: t is at most 1/4,
-  // and both terms lose the same power of 2.
-  const excess = td.toString(2).length - 1000;
-  if (excess > 0) {
-    tn >>= BigInt(excess);
-    td >>= BigInt(excess);
-  }
+  const [tn, td] = t;
   // `t` exactly ±1/4 or ±1/6 is recognized before it is rounded.
   const at = tn < 0n ? -tn : tn;
   const tValue =
@@ -1008,8 +1001,27 @@ export function cosSinPiRational(p: bigint, q: bigint): [number, number] {
         ? tn < 0n
           ? -1 / 6
           : 1 / 6
-        : Number(tn) / Number(td);
+        : bigintRatioToNumber(tn, td);
   return quarterTurns(n, tValue);
+}
+
+/**
+ * The double nearest `n/d`, with `d > 0`, to within an ulp, also when `n` or
+ * `d` is past the range of a double and when the ratio is subnormal. The
+ * quotient is formed with 64 bits and scaled by the power of 2 shifted in.
+ * Shifting both terms right by the same amount (to bring `d` into range) made
+ * a small numerator 0 or −1: 1/10³¹⁰ became 0, and −1/10³¹⁰ became
+ * −3.4·10⁻³⁰¹.
+ */
+function bigintRatioToNumber(n: bigint, d: bigint): number {
+  if (n === 0n) return 0;
+  const negative = n < 0n;
+  const a = negative ? -n : n;
+  const shift = d.toString(2).length - a.toString(2).length + 64;
+  const quotient =
+    shift >= 0 ? (a << BigInt(shift)) / d : a / (d << BigInt(-shift));
+  const value = scaleByPowerOfTwo(Number(quotient), -shift);
+  return negative ? -value : value;
 }
 
 /** sin(πz) for complex z, with the real part of the argument reduced by
@@ -2248,8 +2260,14 @@ function hurwitzEMComplex(
     // in size. Once that is below 1e−17 of the sum, the sum is the value.
     if (s.re > 16) {
       // A sum past the range of a double stays there (at s = 1e9, a = 0.5,
-      // the first term is already +∞).
-      if (!sum.isFinite()) return sum;
+      // the first term is already +∞) when the terms cannot cancel: for a
+      // real a > 0, every a + k after the first is above 1, so every later
+      // term is below 1 in size. With a ≤ 0 or a complex a, they can cancel
+      // (ζ(1025, −0.5): the terms at −0.5 and 0.5 are −2^1025 and 2^1025,
+      // and the value is ζ(1025, 1.5) ≈ 3.2e−181), and the loop cannot
+      // recover a value from a sum that overflowed: the result is NaN, and
+      // `hurwitzZetaComplexWithError` declines.
+      if (!sum.isFinite()) return a.im === 0 && a.re > 0 ? sum : C_NAN;
       const x = b.re + 1;
       if (x > 0) {
         const logRest =
@@ -2487,7 +2505,7 @@ const HURWITZ_NOMINAL_ERROR = 48;
  * The most terms passed over between a and the base point: past this the
  * kernel declines (at a = −1e12 + i it would add 1e12 terms).
  */
-const HURWITZ_MAX_PASSED_TERMS = 2 ** 20;
+export const HURWITZ_MAX_PASSED_TERMS = 2 ** 20;
 /**
  * Whether the Taylor series in h = a − m − 1 (m the integer nearest to
  * a − 1/2) is more accurate than Hermite's integral, for Re(s) < 0. Hermite's
@@ -2889,6 +2907,8 @@ export function hurwitzZetaComplexWithError(
     -a.re <= HURWITZ_MAX_PASSED_TERMS
   ) {
     const value = hurwitzEMComplex(s, a, sMinusOne ?? s.sub(1));
+    // `NaN`: the terms overflowed and can cancel (see `hurwitzEMComplex`).
+    if (value.isNaN()) return undefined;
     return { value, error: HURWITZ_NOMINAL_ERROR * EPSILON * value.abs() };
   }
   // A complex order with a large imaginary part: the route is chosen by the
@@ -3893,8 +3913,22 @@ function hurwitzZetaFarLeft(
     return accept(new Complex(re, im), 1);
   }
   if (order === 1 || order - 1 > POLYGAMMA_MAX_ORDER) return undefined;
-  if (a.im === 0 && order % 2 === 1 && a.re - Math.floor(a.re) === 0.5)
-    return hurwitzZetaComplexWithError(s, new Complex(1 - a.re, 0), sMinusOne);
+  if (a.im === 0 && order % 2 === 1 && a.re - Math.floor(a.re) === 0.5) {
+    const r = hurwitzZetaComplexWithError(
+      s,
+      new Complex(1 - a.re, 0),
+      sMinusOne
+    );
+    // Every term of ζ(s, 1 − a) is positive, so 0 or a subnormal value is an
+    // underflow (ζ(101, 2000001.5) ≈ 7.9e−633), declined as
+    // `scaledToComplex` declines the reflected route's.
+    if (
+      r === undefined ||
+      !(Math.hypot(r.value.re, r.value.im) >= MIN_NORMAL_DOUBLE)
+    )
+      return undefined;
+    return r;
+  }
   const r = hurwitzZetaIntegerOrderReflected(order, a);
   if (r === undefined) return undefined;
   return accept(r.value, (HURWITZ_NOMINAL_ERROR + order) * r.cancellation);

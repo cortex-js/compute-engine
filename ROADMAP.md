@@ -1,6 +1,6 @@
 # Compute Engine — Roadmap
 
-**Last updated:** 2026-10-15.
+**Last updated:** 2026-10-17.
 
 This document tracks **remaining** work; an item leaves this file once it lands.
 Detail on completed work lives in git history, `CHANGELOG.md`, the linked source
@@ -109,6 +109,239 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
+### A coordinate accessor over an inert `PointList` head keeps the whole head, so a chain of user-function applications grows fourfold per level (OPEN, small — found 2026-10-17 by the Tycho three-bar audit of `neyret/51a4237846`, Tycho ledger row 380)
+
+`PointX`/`PointY`/`PointZ` project a column only out of the lazy `Map`
+transpose form (`projectLazyPointList`, `library/collections.ts`). When the
+`PointList` evaluate handler fails closed and stays an inert head — a column
+is a collection-typed expression with no collection value, such as
+`a - PointY(v)·(…)` with `a := Map(i ↦ 5i/N, Range(0, N))` and `N` valueless
+— the accessor falls through to `componentAt` and keeps `PointX(PointList(c1,
+c2, c3))` whole. A user function `f(v) = PointList(a − PointY(v)·(b·PointX(v)
++ (1−b)·PointY(v)), PointX(v) + PointY(v)²/100, a)` reads `v` four times, so
+`f^k(P)` embeds the previous level's inert head four times per level: the
+serialized result is 9 KB, 46 KB, 230 KB, 1.1 MB and 5.7 MB at depths 1–5,
+and the evaluate takes 103, 80, 82, 100, 197, 503 and 1877 ms at depths 1–7
+and runs out of heap at depth 8 (plain engine, main at f3b87a29). With `N :=
+100` the chain is linear and gives a `Map` at every depth. The document
+manager side was fixed in Tycho on 2026-10-17 (the 3-D materializer now binds
+slider values for its span). Engine ask: an accessor over an inert
+`PointList` head should answer the projected column when the projection is
+sound — the chosen column is collection-typed and no other column can be
+shorter — and otherwise at least a lazy projection view that does not embed
+the head per read. Reproduction: Tycho `scripts/repros/2026-10-17-inert-
+pointlist-chain.mts` (`BOUND=1` is the control).
+
+### `scratchRootOf` accepts a persistent scope re-parented under a scratch root as created under it (OPEN, small — found 2026-10-17 by the dual review of the value-shield cache fix)
+
+`scratchRootOf` (`scratch-scopes.ts`) walks `scope.parent` to decide whether
+a declaration's target scope was created under a registered scratch scope.
+`pushEvalContext` (`engine-scope.ts`) re-points the `parent` of a persistent
+scope — the local scope of a function literal, pushed for a call — at the
+current scope for the duration of the push and restores it at the pop. While
+such a scope sits under a registered root, a declaration made in it is
+classified scratch (`declare` with `scratch: true`, no `any` advance) although
+the scope and the binding outlive the registration. Today no registrar keeps
+a scope registered while it evaluates user code: the two value shields
+(`simplifyValueBlind`, `withValueShield`) register their scope only while
+their shadow declarations are made, for this reason, and
+`resultUnderDeclaredParameters` boxes a literal without evaluating it. The
+cost of the narrow registration: a name that the shielded work declares
+directly into the shield scope advances `any` twice again (the declaration and
+the dirty pop). Closing it: make the walk stop at a link that
+`pushEvalContext` re-pointed (a frame with `_restoreParentOnPop`), then the
+shields can register their scope for the whole shielded work.
+
+### `.N()` of a jump function over a list with an erased element rounds the exact survivors first (OPEN, small — found 2026-10-17 by the Codex review of the value-shield fix, in the UNCOMMITTED erasing-literal work of the 2026-10-16 catch-up round in `boxed-function.ts`)
+
+With `c := False` and the exact `q = (25! − 1)/24!`, `Floor([If(c, 1, Nothing),
+q]).N()` is `[25]` where `Floor([q]).N()` and `Floor(q).N()` are `[24]` and
+`24`: the early broadcast over an erasing list literal (`evaluateBroadcastLiftsOnce`,
+`boxed-expression/boxed-function.ts`, the hunks near lines 8472–8510 of the
+working tree) rounds every surviving element under `numericApproximation`
+before it builds the scalar calls, so the exact-jump recovery of the later
+broadcast path (`exactJumpBroadcastOperands`) never sees the exact operand.
+The asynchronous mirror has the same shape. On 0.154.0 the erasing list was
+refused (`incompatible-type` for `Nothing`), so this is a defect of the new
+work, not a regression of a release. Closing it: resolve the erasure while
+keeping the exact survivors for a jump operator, then approximate each scalar
+result, on both routes.
+
+### Re-evaluating an already-evaluated inert expression repeats all its work (OPEN, decision — found 2026-10-17 by the same audit, Tycho ledger row 380)
+
+The second half of the row-380 chain: a value returned by `evaluate()` that
+stayed symbolic is evaluated again whenever an enclosing expression that
+holds it is evaluated, and the re-evaluation walks the whole tree and builds a
+fresh copy of the result (the `type` getter then types every fresh node; it
+was 6 s of an 8 s evaluate in the Tycho profile). The arguments of a user
+function are evaluated once, by value (`argValue` in `makeLambda`,
+`function-utils.ts`), so the repeat happens at the next level's reads, not at
+the binding. Only the lazy-collection evaluate memo
+(`_memoizedLazyCollectionValue`, `boxed-function.ts`) remembers an evaluate;
+an inert `PointList` head, an inert `Add`, an inert accessor read have no
+memo. Decision for the user: whether a node produced by `evaluate()` at a
+world version should answer `evaluate()` with itself at the same world
+version and the same options (a settled mark keyed like the lazy-collection
+memo), or whether the memo stays confined to lazy collections and the
+accessor fix above is the whole remedy for this shape.
+
+### Small items from the dual review of the 2026-10-17 re-review round (OPEN, small)
+
+- An expression boxed inside a scope that declares `Pi`, then compiled after
+  that scope is popped, folds `Pi` by name in the current scope (the reverse of
+  the case fixed on 2026-10-17, where a library-bound `Pi` compiled inside a
+  declaring scope now keeps the constant).
+- `g := Floor` (a bare operator symbol as a value) is not seen by
+  `hasJumpFunction` in `library/map-auto-compile.ts`; whether such a body
+  auto-compiles at all is not checked.
+- At `precision = 'machine'`, the larger part of a complex inverse trigonometric
+  argument is rounded to a double before the branch-point check runs, so
+  `Arcoth(1 + 10⁻³⁰ + 10⁻⁴⁰⁰i).N()` gives the value at the branch point
+  (`460.86`, mpmath `34.89`); at the default precision the case declines.
+- `Element(2^54 + 4, Range(0, +oo, 1))` with tolerance 0 evaluates to `True`
+  through a route other than `Range.contains`, which is undecided there since
+  2026-10-17.
+- `Max`/`Min` with an `Indeterminate` operand and a `Linspace` whose
+  integer-valued samples exceed the safe integers (`Linspace(0, 10⁹−1, 10⁹)`)
+  still reads the samples one by one (1.6 s; memory flat).
+
+### `indexReadTupleAtCollectionSlot` drops viable constructor arms and returns an unreduced union (OPEN, small — found 2026-10-17 by the dual review of the re-review round, on the code of commit f3b87a29)
+
+In `boxed-expression/index-read-tuple.ts`, `indexReadTupleAtCollectionSlot`
+keeps only the filled tuples when any arm yields one
+(`const results = filledTuples.length > 0 ? filledTuples : constructorArms`), so
+an index-read `tuple<unknown, number>` at
+`indexed_collection<integer> | list<real>` becomes `tuple<integer, integer>` and
+the valid `list<real>` alternative is lost; later reads are then narrowed to
+`integer` and a real-valued argument can be refused. The result is also built as
+a raw `{kind: 'union', types}` that does not go through the union reducer
+(duplicates and subsumed arms stay, the object is not interned), and a union is
+not a tuple, so the index-read mark the doc comment promises does not survive
+when more than one arm applies. Closing it: check each filled tuple against its
+own arm, keep both the filled tuples and the constructor alternatives, build the
+union with the reducer, and either keep the mark on each tuple member or say in
+the comment that the per-index mark ends when several arms apply.
+
+### `HurwitzZeta(s, a)` at a negative real `a` with an odd order loses all its digits with no warning (OPEN, numerics — found 2026-10-17 by the Codex re-review of the LerchPhi/Zeta ranges)
+
+`HurwitzZeta(101, −20.5).N()` gives `−9007199254740992` at any precision; the
+value is `1.8656e−124`. `HurwitzZeta(21, −20.5).N()` gives `1.73e−10` at machine
+precision (true `1.7281379892e−28`) and is wrong from the eighth digit at 21
+digits; `HurwitzZeta(11, −20.5).N()` gives `3.58e−14` for `5.93e−15`;
+`HurwitzZeta(101, −2000000.5 + i).N()` gives `2.44e−5·i` for
+`7.89e−633 + 3.94e−637i`. The Euler–Maclaurin route of
+`hurwitzZetaComplexWithError` (`numerics/numeric-complex.ts`) uses a fixed error
+estimate that assumes the terms do not cancel; for a negative `a` and an odd
+order the finite part `Σ_{k+a<0} (k+a)^{−s}` cancels against `ζ(s, a + m)`. For
+an exact half-integer `a` and an odd `s`, `ζ(s, a) = ζ(s, 1 − a)` holds and
+should be used on every route (today only the far-left route reflects). Near a
+half-integer the routes need a real error estimate so the value declines instead
+of being wrong. Related: `.N()` rounds an exact operand to the working precision
+before the pole test and the branch-point test on the complex routes
+(`StieltjesGamma(1, (−10³⁰+1)/10³⁰).N()` is still `~oo` at 21 digits where
+`evaluate()` now stays symbolic; `Zeta(2, (−10³⁰+1)/10³⁰).N()` gives `2.6449`
+for about `1e60`; `Arcosh(1 + 10⁻³⁰ + 10⁻⁴⁰⁰i)` at 30 digits still gives
+`1e−200(1+i)`); the real inverse-trig route re-reads the exact value with extra
+digits, the complex route does not. Also: `bigGamma` returns `0` instead of
+`NaN` once the result is past the exponent range (from about `z = −10^15`);
+`.N()` stays symbolic, but an internal caller can take the `0` as a value, as
+`Binomial` did before 2026-10-17.
+
+### A multi-clause user function refuses `NaN` at a numeric parameter where the error model says it is accepted (OPEN, decision — found 2026-10-17 by the Codex re-review of the NaN-at-parameters range)
+
+With `f` defined by the clauses `(n: integer) -> n + 1` and `(s: string) -> …`,
+`ce.box(['f', 'NaN'])` is `f(Error(incompatible-type, "integer | string", NaN))`
+at boxing, and with `x: number := NaN`, `f(x)` evaluates to
+`Error("no-matching-clause", f(NaN))`; the tests of
+`multi-clause-compile.test.ts` ("NaN inhabits only the value type `nan` (amended
+D1)") lock that in. `docs/ERROR-MODEL.md` (ruling 2026-09-30) says a definition
+with several clauses accepts `NaN` at numeric parameters at boxing and when it
+is applied. Options: (a) keep today's behavior and amend the document; (b) admit
+`NaN` at boxing only (valid, typed `integer`, then the run-time
+`no-matching-clause`: worse); (c) admit it in the clause selector too, which
+needs a rule for which clause wins (`fib(NaN)` with clauses `0`, `1`, `integer`
+would hit `0` first) and recursion on `NaN − 1` would run to the limit. If
+nothing is decided, (a) stands without the amendment.
+
+### Compiled code gives a value where the interpreter gives an error for three documented shapes (OPEN, decision — found 2026-10-17 by the Codex re-review of the compilation ranges)
+
+Three shapes where the compiled target answers and the interpreter refuses, each
+documented or pinned by a test, each a decision: (1)
+`Sum`/`Product`/`Reduce`/`Scan` over rows of unequal length
+(`v: list<list<real>>` holding `[[1, 2], [3]]`) give `NaN` in compiled code
+(`docs/BROADCAST-MODEL.md`, the test "rows of unequal length…") where the
+interpreter gives `incompatible-dimensions` and `docs/ERROR-MODEL.md` §6 forbids
+`NaN` for a decided failure; option B refuses to compile over rows whose length
+the type does not fix, which removes working compiled forms such as
+`[[1, 2], [3, 4]] → [4, 6]`. (2) `compileLambda(x^y, ['x', 'y'])` keeps `x ** y`
+(a complex value, or `nan` with NumPy, for a negative base in Python) where the
+interpreter gives the real root; a shipped CHANGELOG entry documents it and
+`compile-negative-base-float-power.test.ts` pins it; option B refuses with the
+existing guard message. (3) Under `constantFold: false` (or `symbolDeps`
+capture) the compiled `Fract`, `Floor` and the other jump functions of a closed
+exact operand compute on doubles: `Fract(π·10^30)` gives `0` (interpreter
+`0.50288…`) and `Floor((25!−1)/24!)` compiles to `25` (interpreter `24`); option
+A evaluates such an operand with the interpreter even under
+`constantFold: false`, option B throws `RangeError` above `2^53` as the compiled
+`Mod` does (which does nothing for `Floor`). Also compiled, fails closed: a
+scalar complex value passed for a `broadcastable<complex>` binding is refused by
+the entry check ("c was compiled as a real number but received a complex {re,
+im} value") because `isComplexValued(c)` is false for `broadcastable<complex>`;
+making it true would send `c + 1` over a list into scalar complex arithmetic.
+And compiled `Csch(iπx)` at `x = 1` gives `{re: NaN, im: ∞}` where the
+interpreter gives `~oo` (compiled as `{∞, ∞}`): option A adds the exact
+half-turn lowering of `Sinh`/`Cosh`/`Tanh`/`Csch`/`Sech`/`Coth` of `i·π·u` in
+each target via `cosSinPi(u)`, option B refuses to compile these forms.
+
+### Four typing and listing questions from the 2026-10-17 re-review (OPEN, decision)
+
+(1) A ragged list literal `[[1], [2, 3]]` is typed
+`list<vector<integer^1> | vector<integer^2>>` with no outer length, so
+`ce.assign` of it to a symbol declared `list<list<integer>^2>` or
+`list<vector<integer>^2>` throws `TypeCompatibilityError`. Adding the length
+makes the literal a tensor (`isTensor` shares the predicate), which breaks
+`Flatten` on ragged lists (`Flatten([[1, x], [2]])` stays unevaluated) and types
+`[h(x)]` as `list<unknown^1>`. Options: (a) separate the tensor test from "has a
+length" (every reader of `staticCollectionDims` then sees `[2]` where it sees
+`null` today: an audit), (b) accept at the assignment check only, (c) keep.
+Default (c). (2) `permutation([])` with
+`declareType('permutation', 'list<integer^N>', { typeParams: ['N'] })` is valid
+and typed `permutation<integer<1..>>`, a positive length for a value of length 0
+(length 0 pins nothing). (3) A lazy `map(scale, 1..3)` with a NAMED user
+function `scale` that reads a mutable variable `n` sees the later value of `n`
+(`[10, 20, 30]` after `n = 10`), while the inline callback
+`map(k => k * n, 1..3)` is listed at its own time (`[1, 2, 3]`): `readsVariable`
+excludes user functions on purpose (`lazy-callback-count.test.ts`). Options: A
+keep and document in `src/epsil/docs/evaluation.md`; B count a named function
+that reads a mutable variable (changes `(v, n)` from `(3, 1)` to `(3, 3)` in
+four tests); a narrower B counts only effect-free functions (needs body analysis
+with cycle protection). Default A. (4) `Mean([1+i, +oo])` is `NaN` while
+`Sum([1+i, +oo])` is `Infinity + i` and `Mean([1, +oo])` is `+oo`: the engine
+has no settled answer for a complex value with an infinite real part.
+
+### Small items from the 2026-10-17 re-review (OPEN, small)
+
+- `.N()` of `Floor`, `Ceil` or `Sign` whose operand's float is `~oo`
+  (`Floor(1/(√(10^40+1)−10^20)).N()`, `Floor(Tan(Pi/2)).N()`) returns
+  `Error(incompatible-type, "real | signed_infinity", ~oo)`: the approximate
+  operand is checked against the signature before the handler can use the exact
+  operand (the refinement of 2026-10-17 fixes `evaluate()` and the comparisons
+  for this input). What should `Floor(~oo)` give?
+- `\{x | x \ne 0\}` gives `unexpected-command` / `unexpected-delimiter` errors
+  in both grammars; only `\mid` works as the set-builder separator.
+- `Filter([If(c, Random(), Nothing), 2], True)` (an impure literal under a lazy
+  `Filter`) still gives an error element: the collection handlers do not
+  evaluate an impure literal, and a lazy `Filter` does not go through the
+  broadcast code that now lists a may-`Nothing` literal first.
+- The ASCII `toString()` still prints `Root(2, 2.0)` and `Power(2, 0.5)` as
+  `sqrt(2)` (`ascii-math.ts` maps an exponent of `0.5` to `sqrt` for `Power`);
+  the JSON, the LaTeX (`\sqrt[2.0]{2}` since 2026-10-17) and the values are
+  right.
+- A real radical product whose radicand is too large folds to a float in
+  canonical `Multiply` (`√1009·√1013` gives `1010.998…`); the comment in
+  `foldIntoCoefficient()` (`arithmetic-mul-div.ts`) records it as deliberate,
+  against the exactness contract.
+
 ### A memoized element read costs 934 `console.assert` calls and runs five times slower under jest than from source (OPEN, performance — measured 2026-10-16 by the perf suite on the M5)
 
 `interval-endpoint-markers.test.ts`, "a symbol assigned a seeded draw is
@@ -128,18 +361,6 @@ profile of the loop would answer both; the `console.assert` calls are stripped
 from the production build, so (2) is a cost of the development build and the
 test suite, not of users, unless the work behind the asserts is.
 
-### `addsPointToNumberCollection` refuses by operator name when a user definition replaces `Add` (OPEN, small — found 2026-10-16 by the review of the point-arithmetic refusal)
-
-With `Add` redefined as `(any, any) -> integer` that returns `7`, `Add(T, L)`
-with `T: tuple<integer, integer>` and `L: list<real>` is typed `error` on both
-typing routes (`derive-application-type.ts` and the `type()` method of
-`boxed-function.ts`) but evaluates to `7`. The check
-`addsPointToNumberCollection` (`collection-utils.ts`) reads the operator by name
-and does not ask whether the resolved definition keeps the library semantics.
-The point-arithmetic refusal added on 2026-10-16 is gated by
-`runsLibraryCanonicalForm()` (the test `makeNumericFunction()` in `box.ts`
-uses); the older check needs the same gate on both routes.
-
 ### An integer coefficient times `√(−c)` stays a product, and `√(−c)` with `c ≥ 10⁶` keeps its square factors (OPEN, small — found 2026-10-16 by the review of PR #447)
 
 Since PR #447, a negative integer radical is an exact pure-imaginary value in
@@ -148,16 +369,17 @@ the one place that builds exact values (`_numericValue`, `index.ts`):
 `Sqrt(-5200)/3` to `Complex(0, (20/3)√13)`. Two neighbouring forms do not reach
 that place. `Sqrt(-13)·Sqrt(4000000)` evaluates to `Multiply(2000, Sqrt(-13))`
 (an integer coefficient on a negative radical is not folded, where the rational
-coefficient `1/3` is), and `Sqrt(-52000000)/3` stays `Multiply(1/3,
-Sqrt(-52000000))`: the canonical `Sqrt` extracts the square factor of a
-POSITIVE radicand above `SMALL_INTEGER` (`Sqrt(52000000)/3` is `(2000/3)√13`)
-but not of a negative one, so the quotient never becomes a numeric value (the
-value itself reduces: `ce._numericValue({rational: [1, 3], radical: -52000000})`
-is `Complex(0, (2000/3)√13)`, pinned in `sqrt-negative-integer-quotient.test.ts`).
+coefficient `1/3` is), and `Sqrt(-52000000)/3` stays
+`Multiply(1/3, Sqrt(-52000000))`: the canonical `Sqrt` extracts the square
+factor of a POSITIVE radicand above `SMALL_INTEGER` (`Sqrt(52000000)/3` is
+`(2000/3)√13`) but not of a negative one, so the quotient never becomes a
+numeric value (the value itself reduces:
+`ce._numericValue({rational: [1, 3], radical: -52000000})` is
+`Complex(0, (2000/3)√13)`, pinned in `sqrt-negative-integer-quotient.test.ts`).
 Both results are correct and exact; they are unreduced. The fix is in the
-`Multiply` fold and in the canonical `Sqrt` of a negative radicand, which
-should route a negative integer radicand through the same square-factor
-extraction as a positive one.
+`Multiply` fold and in the canonical `Sqrt` of a negative radicand, which should
+route a negative integer radicand through the same square-factor extraction as a
+positive one.
 
 ### `.N()` of an integral whose shells decay as `k^{-p}` with `1 < p < 1.5` at a nonzero or infinite bound gives a wrong value with a very wide error bar (OPEN, small — found 2026-10-14 by the power-law divergence test; the bound-at-0 case fixed 2026-10-16)
 
@@ -1240,13 +1462,10 @@ of an iterated integral (`nIntegrateMultiple`) do the same. These cases remain
   convergent integrands measured fit to `3.2e-4`), and `.N()` gives
   `-19.99999999 ± 0.00000020`. With `0.1·ln` the fit is `8.7e-3`, and `.N()`
   gives `-18.7 ± 8.5`.
-- A convergent integral whose oscillation shrinks slowly is reported as having
-  no value when the shells are few: ∫₀¹ cos(ln t)/t^0.999 dt (`0.000999999`)
-  gives `NaN` on a level of an iterated integral (100 panels: the largest shell
-  in the last quarter is 0.96 times the largest in the first quarter, above
-  `SHELL_OSCILLATION_STEADY`). With 330 or 1500 panels it is not reported, but
-  the Gauss–Kronrod value is wrong (`1.15` or `-0.105`) and the error does not
-  converge.
+- ~~A convergent integral whose oscillation shrinks slowly was reported as
+  having no value when the shells are few~~ (fixed 2026-10-17: `shellTrend` fits
+  the oscillation rate by least squares, so ∫₀¹ cos(ln t)/t^0.999 dt gives
+  `0.000999999` and `t^0.9999` gives `1.0e-4`).
 - Next to a bound of large magnitude, the corner panel reaches the spacing of
   the doubles after few bisections, and fewer than 12 shells are accurate, so no
   extrapolation is possible: ∫ (t − 10⁶)^(−0.99) dt = 100 on `[10⁶, 10⁶ + 1]`

@@ -131,14 +131,24 @@ const OBJECT_STORE_BUMPS_ANY: boolean = (() => {
  * Scratch events. A `declare`, `binding-repair` or `inference` event can carry
  * `scratch: true`: the binding it writes lives in a scope that a running
  * computation registered as scratch, or in a scope created under one
- * (`scratch-scopes.ts`). Today the only registrar is `withScratchScope`, which
- * `resultUnderDeclaredParameters` calls to box a copy of a function literal
- * under the declared parameter types. The computation discards that scope
- * when it returns, and only the expressions it builds there resolve a name
- * to a binding in it. So no cache that outlives the computation can depend on
- * the binding, and the three scratch events leave the `semantic` and `world`
- * axes and the definition version alone: those are what such caches key on
- * (the memo of a derived signature reads all three, `declaredResultMemoKey`).
+ * (`scratch-scopes.ts`). The registrars are the `withScratchScope` calls of
+ * `resultUnderDeclaredParameters`, which boxes a copy of a function literal
+ * under the declared parameter types, and of the two value shields
+ * (`simplifyValueBlind` in `boxed-expression/simplify.ts`, `withValueShield`
+ * in `boxed-expression/utils.ts`), which register it only while their
+ * shadow declarations are made. The computation discards that scope when it
+ * returns. For the signature derivation, only the expressions it builds
+ * there resolve a name to a binding in it. A value shield is different: it
+ * shadows a name whose VALUE existing expressions read by name, through the
+ * current scope chain, and that is its purpose. Those expressions would
+ * cache value-blind answers under the outer cache key, and serve answers
+ * derived from the value inside the shield, so a shield also runs under a
+ * cache key of its own (`IComputeEngine._withValueShieldKey`), which
+ * separates the two sides without advancing any axis. So no cache that
+ * outlives the computation can depend on the binding, and the three scratch
+ * events leave the `semantic` and `world` axes and the definition version
+ * alone: those are what such caches key on (the memo of a derived signature
+ * reads all three, `declaredResultMemoKey`).
  *
  * The three kinds differ only in the axes that the computation's OWN caches
  * key on. A scratch `binding-repair` or `inference` changes a binding that
@@ -167,9 +177,11 @@ export function axisMaskOf(e: StateEvent): AxisMask {
       // the advances turned each level into a fresh recursive descent
       // (measured 998K handler invocations and 2.0M axis advances in ONE
       // `PointList` evaluation, about 17 s, against 5 ms before). That
-      // handler no longer registers a scope; `withScratchScope`, called from
-      // `resultUnderDeclaredParameters`, is now the only registrar. Same
-      // remedy as the `clean` scope-pop flag below.
+      // handler no longer registers a scope; the registrars are
+      // `withScratchScope` calls in `resultUnderDeclaredParameters` and in
+      // the two value shields (`simplifyValueBlind` in `simplify.ts`,
+      // `withValueShield` in `utils.ts`). Same remedy as the `clean`
+      // scope-pop flag below.
       //
       // The soundness condition is ONE property, and it is established
       // mechanically rather than by a caller's promise: the declaration's

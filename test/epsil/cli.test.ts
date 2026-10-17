@@ -1059,6 +1059,46 @@ describe('Epsil CLI --compile', () => {
     ]);
   });
 
+  // The static type of a conditional is the union of its branches. Before
+  // 2026-10-16 only a tuple type was read as a tuple, so a union of tuple
+  // types printed the value as a list.
+  test('keeps the tuple shape when the type is a union of tuples', async () => {
+    const cases: [source: string, expected: unknown][] = [
+      [
+        'If(True, (1, 2), (3, 4, 5))',
+        ['Pair', { num: '1.0' }, { num: '2.0' }],
+      ],
+      [
+        'let b = True\n[(1, 2), if b { (3, 4) } else { (5, 6, 7) }]',
+        [
+          'List',
+          ['Pair', { num: '1.0' }, { num: '2.0' }],
+          ['Pair', { num: '3.0' }, { num: '4.0' }],
+        ],
+      ],
+    ];
+    for (const [source, expected] of cases) {
+      const { io, stdout } = makeIo();
+      expect(await main(['--compile', '--json', '-e', source], io)).toBe(0);
+      expect(JSON.parse(stdout())).toEqual(expected);
+    }
+  });
+
+  // A tuple and a list are both arrays in the compiled code, so when the
+  // static type admits both, the value cannot be printed faithfully.
+  test('an array that may be a tuple or a list is an error value', async () => {
+    const { io, stderr } = makeIo();
+    expect(
+      await main(
+        ['--compile', '-e', 'let b = True\nif b { (1, 2) } else { [3, 4] }'],
+        io
+      )
+    ).toBe(1);
+    expect(stderr()).toContain(
+      'does not say whether it is a tuple or a list'
+    );
+  });
+
   test('boxes strings, booleans, complex numbers and colors', async () => {
     const cases: [source: string, expected: unknown][] = [
       ['"hello"', "'hello'"],
@@ -1217,6 +1257,18 @@ describe('Epsil CLI --compile', () => {
       )
     ).toBe(1);
     // The cause operand is not rendered as a site ("… at `timeout`").
+    expect(stderr()).toContain('Runtime error: Timeout exceeded\n');
+  });
+
+  // Before 2026-10-16 the parse of an Epsil program had no deadline checks:
+  // a long program was parsed whatever the limit, and a parse error at its
+  // end was reported instead of the timeout.
+  test('the deadline covers the parse of an Epsil program', async () => {
+    const { io, stderr } = makeIo();
+    const source = 'let a = 1 + 2 * 3\n'.repeat(40000) + '1 +';
+    expect(
+      await main(['--compile', '--time-limit', '1', '-e', source], io)
+    ).toBe(1);
     expect(stderr()).toContain('Runtime error: Timeout exceeded\n');
   });
 });

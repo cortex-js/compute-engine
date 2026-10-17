@@ -3,13 +3,12 @@
 ### New Features
 
 - **`ce.undeclare(name)` removes the binding of a name from the current scope**
-  (Tycho ledger row 378). The binding goes whatever it holds: a value, a
-  function given with `ce.assign()` or `ce.declare()`, or a function defined by
-  one or more clauses. A host could not do this for a function defined by two or
-  more clauses: `ce.forget("f")` removes assumptions only,
-  `ce.declare("f", "function")` throws because `f` is already declared in the
-  scope, and `ce.declare(…, { extend: true })` refuses a function defined by
-  clauses.
+  . The binding goes whatever it holds: a value, a function given with
+  `ce.assign()` or `ce.declare()`, or a function defined by one or more clauses.
+  A host could not do this for a function defined by two or more clauses:
+  `ce.forget("f")` removes assumptions only, `ce.declare("f", "function")`
+  throws because `f` is already declared in the scope, and
+  `ce.declare(…, { extend: true })` refuses a function defined by clauses.
 
   ```ts
   ce.undeclare('f');
@@ -31,18 +30,17 @@
 ### Behavior Changes
 
 - **A symbol declared `any` or `value` under a numeric element-wise operator
-  gives the application that type** (Tycho ledger row 379; user decision
-  2026-10-17). With `a` declared `any`, `2a`, `2/a`, `a^2`, `\sin a` and `|a|`
-  were typed `number`, while `a + 1` and `-a` were typed `any`. A symbol
-  declared `any` may hold a point or a list, and `2·(1, 2, 3)` evaluates to
-  `(2, 4, 6)`, `(1, 2)^2` to `(1, 4)`, `\sin (1, 2)` to `(\sin 1, \sin 2)`, so
-  the `number` type contradicted the value: a sum of such a product and a point
-  was accepted by `Add` only through the second operand, and a user function
-  whose body multiplies such a symbol was given a `number` result although its
-  value was a colour. `broadcastable<number>` was not an answer either: that
-  type excludes a tuple. The types that changed, with `a: any`, `v: value`,
-  `L: list<number>`, `g: (number) -> any`, `P: collection<any>` and
-  `Q: collection`:
+  gives the application that type**. With `a` declared `any`, `2a`, `2/a`,
+  `a^2`, `\sin a` and `|a|` were typed `number`, while `a + 1` and `-a` were
+  typed `any`. A symbol declared `any` may hold a point or a list, and
+  `2·(1, 2, 3)` evaluates to `(2, 4, 6)`, `(1, 2)^2` to `(1, 4)`, `\sin (1, 2)`
+  to `(\sin 1, \sin 2)`, so the `number` type contradicted the value: a sum of
+  such a product and a point was accepted by `Add` only through the second
+  operand, and a user function whose body multiplies such a symbol was given a
+  `number` result although its value was a colour. `broadcastable<number>` was
+  not an answer either: that type excludes a tuple. The types that changed, with
+  `a: any`, `v: value`, `L: list<number>`, `g: (number) -> any`,
+  `P: collection<any>` and `Q: collection`:
 
   | Input                                       | Before                  | After       |
   | ------------------------------------------- | ----------------------- | ----------- |
@@ -178,8 +176,53 @@
   `function-utils.ts`); an awaited application puts its call frame on its own
   copy of the evaluation-context stack.
 
+- **The `.pow()` method with a float exponent gives a float.**
+  `ce.number(4).pow(ce.box({num: "0.5"}))` stayed the symbolic `Power(4, 0.5)`;
+  it is now the float `2.0`, as the `.add()` and `.mul()` methods already fold
+  number literals to floats.
+
+- **`Hypot(x, NaN).simplify()` for a free `x` stays `Hypot(x, NaN)`** (it was
+  `NaN`), because `x` could be `+∞`; a handler's `NaN` answer is kept by
+  `simplify()` only when the handler also answers `NaN` for `+∞`, `−∞`, `0` and
+  `1` in place of each non-literal operand. An isolated singular point of a
+  double integral now gives `NaN` (no verdict) instead of `+∞`, also for the
+  `p = −1` case whose true value is `+∞`.
+
+- **A compiled predicate must return a boolean, on the JavaScript and Python
+  targets** (see the compiled-predicate item under Issues Resolved):
+  `Count(xs, x ↦ 1)` no longer compiles, and
+  `Filter(xs, x ↦ If(x > 1, True, 1))` throws at run time instead of giving
+  `[1, 2]`.
+
+- **A compiled function literal gives each annotated numeric parameter a `NaN`
+  default**, so an absent argument is read as `NaN` inside the body as the
+  interpreter does (`(n = NaN) => 1 < n`). In JavaScript a parameter with a
+  default is not counted by `Function.length`, so the `length` of a function
+  returned by `run()` for `(x: real) ↦ x` is now `0` where it was `1`.
+
 ### Issues Resolved
 
+- **A nested user function whose parameter shares its name with the caller's
+  parameter evaluates in milliseconds again** (Tycho ledger, `art/mavxszbvzk`).
+  With `f_b2full50(x)` applying `f_b2(x)`, whose body ranges over
+  `Floor(Log(Max(x, 1), 2))`, one application of `f_b2full50(5)` made more than
+  six thousand sign reads and did not finish in a minute; a document with twelve
+  such definitions hit its budget on eleven of them. The `Range` type handler
+  asks the sign of its lower bound, the sign check of `Floor` orders its operand
+  with `exactOrder()`, and an undecided order is tried as an equality proof by
+  `simplify()`. That simplification shields the assigned variable `x` (the
+  caller's parameter, bound in its call frame) by declaring it valueless in a
+  temporary scope, and the declaration and the pop each advanced the engine-wide
+  cache generation, which retired the type and sign caches of every expression,
+  including the ones the enclosing type derivation was reading: the derivation
+  re-typed its operands once per read, and the cost grew exponentially with the
+  depth of the body. The two value shields (`simplify()` and the binder shield
+  of `D`, `Integrate`, `Solve`, …) now register their scope as a scratch scope
+  and run under a cache key of their own, so a shielded simplification advances
+  no cache generation, and a sign or type derived from the hidden value is still
+  never used inside the shield (nor a value-blind one after it). `f_b2full50(5)`
+  takes 15 ms, and `simplify()` of an expression that mentions an assigned
+  variable no longer invalidates the caches of unrelated expressions.
 - **A bare function parameter read at literal indices accepts a list argument
   again** ([#448](https://github.com/cortex-js/compute-engine/issues/448)).
   Since 0.154.0, `p ↦ p[1] + p[2]` types `p` as `tuple<number, number>`, and
@@ -226,28 +269,28 @@
   1e-10 ≤ `x` < 1. The compiled JavaScript lane dropped the second operand:
   `Gamma(x, y)` compiled to `Γ(x)`, so `Gamma(-1.5, 0.001)` ran as `2.3633`. It
   now calls the upper incomplete gamma, with the complex kernel for a complex
-  operand, and the interval target declines the two-operand form
-  (#446, contributed by [enumeratio](https://github.com/enumeratio))
+  operand, and the interval target declines the two-operand form (#446,
+  contributed by [enumeratio](https://github.com/enumeratio))
 
 - **`Sqrt(-13)/3` is `(√13/3)i`, not `NaN`.** A negative integer radical was
   sent to the float lane, which took `Math.sqrt(−13)`: `Sqrt(-13)/3`,
   `Sqrt(-2)/3`, `Sqrt(-13)/2`, `Sqrt(-13)/3.0` and `Sqrt(-13)·(1/3)` (under
-  `evaluate()`) were `NaN`, and so was `Arcosh(Sqrt(-13)/3)`. An exact value with
-  a negative radical `−c` is now the pure-imaginary `√c·i`, in the one place that
-  builds exact values, so canonicalization, `evaluate()` and `.N()` agree:
-  `Sqrt(-13)/3` is `(√13/3)i ≈ 1.2018504251546631i` and `Arcosh(Sqrt(-13)/3)` is
-  `1.0171572086841316 + 1.5707963267948966i`. `Sqrt(-13)/Sqrt(-3)` was
-  `−√39/3` and is `√39/3`
-  (#446, contributed by [enumeratio](https://github.com/enumeratio))
+  `evaluate()`) were `NaN`, and so was `Arcosh(Sqrt(-13)/3)`. An exact value
+  with a negative radical `−c` is now the pure-imaginary `√c·i`, in the one
+  place that builds exact values, so canonicalization, `evaluate()` and `.N()`
+  agree: `Sqrt(-13)/3` is `(√13/3)i ≈ 1.2018504251546631i` and
+  `Arcosh(Sqrt(-13)/3)` is `1.0171572086841316 + 1.5707963267948966i`.
+  `Sqrt(-13)/Sqrt(-3)` was `−√39/3` and is `√39/3` (#446, contributed by
+  [enumeratio](https://github.com/enumeratio))
 
-- **A definite integral across the zero of an exponential divisor no longer
-  gets a finite value.** The interior-pole detection of `Integrate` knew
-  polynomial, circular, hyperbolic and logarithmic divisors but not an
-  exponential one, so the antiderivative `ln(eˣ − 1)` was differenced across
-  its pole: `∫₋₁¹ eˣ/(eˣ − 1) dx` evaluated to `1` where the integral has no
-  value. A divisor `k·bᵘ + c` with `u` linear in the variable (`eˣ − 1`,
-  `2eᵗ − 3`, `2ᵗ − 8`) now contributes its zero `u = ln(−c/k)/ln b` as a pole
-  site, confirmed by sampling like the other families: the integral above is
+- **A definite integral across the zero of an exponential divisor no longer gets
+  a finite value.** The interior-pole detection of `Integrate` knew polynomial,
+  circular, hyperbolic and logarithmic divisors but not an exponential one, so
+  the antiderivative `ln(eˣ − 1)` was differenced across its pole:
+  `∫₋₁¹ eˣ/(eˣ − 1) dx` evaluated to `1` where the integral has no value. A
+  divisor `k·bᵘ + c` with `u` linear in the variable (`eˣ − 1`, `2eᵗ − 3`,
+  `2ᵗ − 8`) now contributes its zero `u = ln(−c/k)/ln b` as a pole site,
+  confirmed by sampling like the other families: the integral above is
   `Indeterminate`, `∫₀² eˣ/(eˣ − 1) dx` (pole at the bound) is `+∞`, and
   `∫₁² eˣ/(eˣ − 1) dx` keeps its closed form. Found while reviewing PR #445,
   whose wider antiderivative search reached this hole more often
@@ -681,6 +724,197 @@
   argument gave `error` while the call evaluates to the user's value. The
   refusal now applies only when the resolved operator keeps the library
   semantics, the test the boxing route uses.
+
+- **Smaller fixes by area**:
+  - _Compiled JavaScript._ A fold that updates its accumulator in place keeps a
+    string seed (`Fold((acc, k) ↦ ReplaceAt(acc, 1, "x"), "abc", [])` gave
+    `["a","b","c"]`); a built-in `Add`/`Multiply` fold over real rows with a
+    complex seed uses complex arithmetic (`Reduce(M, Add, i)` gave
+    `["[object Object]13", …]`, now `[4+i, 6+i]`); the `Sum`/`Product` of an
+    empty `collection<complex>` and of a `broadcastable<complex>` operand are
+    complex values (`Sum(c) + 1` gave `undefined` or `"[object Object]1"`); the
+    annotations of a function local to a block are checked when it is a
+    callback; a fold whose seed has an inferred collection type checks the seed
+    at run time; `Product` of `-> unknown` values no longer drops an absent
+    element and `Sum`/`Product` no longer throw on one (`[NaN, NaN]`); a `Map`
+    element function no longer computes a jump function on the double of an
+    exact input (`Floor(Join([1 − 10⁻³⁰], Range(1, 300))).N()` started with `1`,
+    now `0`; `Floor(√x·√3)` at `3` gave `2` (a lazy `Map` whose body has a jump
+    function and a division, `Round(x/2)` over exact integers, now runs in the
+    interpreter under `.N()`: same values, slower)); `Range(1, 300)·q` with
+    `q = 1 − 10⁻³⁰` kept the integer `1` as its first element; a list with
+    absent elements at a scalar parameter is checked element by element; a call
+    mapped over a list of points checks its other arguments per point; a host
+    operator declared `broadcastable` used as a callback is broadcast; an absent
+    argument at a numeric parameter reaches the body as `NaN`, not `undefined`;
+    `sin(π·x)` and the other half-turn shortcuts no longer treat a parameter or
+    a `vars` input named `Pi` as π, and a library constant name that a user
+    binding gives another value (`Pi := 1` in a nested scope) compiles with the
+    user value on every target instead of the constant; `compile()` with a
+    reused target no longer reuses a constant-folding answer; a parameter the
+    body reassigns loses its scalar facts; a compiled function literal gives
+    each real numeric parameter a `NaN` default (`(n = NaN) => 1 < n`), so a
+    callback reads an absent element as `NaN` (`map(f, [1, undefined])` gave
+    `[1, undefined]`), and `map((x: number) => x, xs)` with
+    `xs: list<number | missing>` compiles instead of being refused.
+  - _Compiled predicates (JavaScript and Python)._ `Filter`, `Count`, `CountIf`,
+    `Find`, `IndexWhere`, `Position`, `Partition`, `Any`, `All`, `TakeWhile` and
+    `DropWhile` treated every truthy value as `True`. A predicate whose result
+    type cannot be a boolean no longer compiles; one that is not provably
+    boolean is checked at each call (`True` selects, `False` or `Missing` does
+    not, any other value throws; `Any`/`All` throw; `TakeWhile`/`DropWhile` end
+    the prefix); a boolean predicate compiles as before. In Python a `Missing`
+    result was also counted (`Filter(xs, x ↦ If(x > 1, True, Missing))` gave
+    `[1, 2]`, now `[2]`); a Python `compileLambda` that needs the check
+    declines. Python refuses `True`, `False` and `None` as a bound name.
+  - _GPU targets._ The GLSL and WGSL `LerchPhi` and `PolyLog` helpers decline
+    when the error estimate overflowed to infinity.
+  - _Epsil CLI._ `epsil --compile` prints a union of tuple types as a tuple, not
+    a list, and a value that may be a tuple or a list is an error value;
+    `--time-limit` covers the parse of the program.
+  - _Arithmetic and exactness._ `Multiply(0, 2, w)` with `w` assigned is `0w`,
+    not a frozen `0`; a float factor beside held factors is kept (`0·2.5·w` with
+    `w := ∞` is `NaN`, not `Indeterminate`; `0.0·w` holds one zero, not two;
+    `Remainder` reads exact operands exactly (`Remainder(1/2 − 10⁻³⁰, 1)`
+    evaluates to `1/2 − 10⁻³⁰`, was `−0.5`; `Remainder(10²⁵ + 1, 7)` is `−3`;
+    `Remainder(√2, 1)` is `√2 − 1`; `Remainder(π, 1)` is `π − 3` where it stayed
+    unevaluated; `Remainder(π·10³⁰, 1).N()` is `−0.4971…`, was `2643000000`;
+    `Remainder(2^(3^20), 7).N()` is `1`, was an internal error; float operands
+    and compiled code keep the float route)); `Indeterminate` beside an operand
+    that reads an assigned variable is no longer folded at boxing, in `Divide`,
+    `Add`, `Multiply`, `Power` and the number methods; `Indeterminate.root(NaN)`
+    is `NaN`; `Max(Linspace(0.5, 2, 3), Indeterminate)` is `NaN` (without
+    listing every sample: `Min(Indeterminate, Linspace(0, 1, 10^9))` returns at
+    once); `Min`/`Max` of a `Linspace` return the element (the float), not the
+    exact endpoint; `At(Linspace(5), 1)` reads the one-operand form (by its
+    structure: `At(Linspace(a, b, n), k)` with a symbolic end point stays
+    unevaluated and `Linspace(0, +oo, n)` has no elements, where both were read
+    as `Linspace(a)`); `Root(2, 2.0)` and `Root(x, 2.0)` keep the float index
+    (they were the exact `√2` and `Sqrt(x)`; LaTeX `\sqrt[2.0]{2}`); the
+    `.root()` and `.pow()` methods read a float index as a float;
+    `HurwitzZeta(0, 1.5)` is the float `−1.0`; `Floor`, `Ceil`, `Round` and
+    `Truncate` of `1.5e600000000` return the float at once; at machine precision
+    `10^309 / 10.0i` and `10^-400 / 10^-300 i` no longer give `~oo` and `0`;
+    `Gamma(200 + 10⁻²⁰i).N()` and `BarnesG(150 + 10⁻²⁰i).N()` keep their
+    imaginary part; `Variance` and its three siblings with an infinite datum
+    next to an exact complex datum are `Indeterminate`.
+  - _Special functions and numerics._ The interval `Binomial` no longer loops
+    forever for a negative integer `k` below `−2^53`, and `Binomial(10^308, 1)`
+    is inside its enclosure; `Binomial(170.1, −0.5)` is `0.0431…`, not `0`;
+    `Binomial(100, k).N()` for a negative non-integer `k` with many digits and
+    `Binomial(−1000000000000000.5, 0.25).N()` (was `NaN`, now `4386.962…`) use a
+    log form with exact reflection; compiled `Binomial(169, −0.999999999999)`,
+    `Binomial(−2, 10²⁰)` and `Binomial(−3, −10²⁰)` are right, and the machine
+    kernel keeps its digits for a large negative non-integer `n`, `k` or `n − k`
+    (`C(−10¹⁵ − 0.5, 0.25)` was `2980.96` for `4386.96…`, on compiled code and
+    at `precision = 'machine'`); above 325 digits the exact-constant enclosures
+    had an error bound of `0` (`Floor(Cos(10^-210))` at precision 400 gave `1`);
+    `Floor`, `Ceil`, `Sign` and the comparisons of `1/(√(10^40 + 1) − 10^20)`
+    evaluate (they stayed unevaluated); `HurwitzZeta(1025, −0.5)` stays symbolic
+    instead of a false `+∞`, and `HurwitzZeta(101, −2000000.5).N()` stays
+    symbolic instead of `0`; a compiled `Zeta(2, −10¹² − 0.5)` returns at once
+    instead of running `10¹²` steps; `PolyGamma(150, 300)` is `−1.3083e−111`,
+    not `0`; `StieltjesGamma(1, (−10³⁰+1)/10³⁰)` and `LerchPhi(0.4, 2, …)` no
+    longer see a pole in an exact number near a non-positive integer;
+    `LerchPhi(0.5, −3, −1).N()` is `12`, not `−1` (the series stopped at a zero
+    term); `DirichletL(2, 1, 1/2)` stays exact;
+    `MultiplicativeOrder(3, 4398046512059, [3, 1])` stays unevaluated instead of
+    a wrong value; inverse trigonometric functions within `10⁻¹²` of a branch
+    point stay unevaluated instead of a wrong value while a larger part within
+    about `10⁻⁴` of the branch point that is not a double is evaluated from its
+    exact distance (`Arcosh(100001/100000 + 10⁻⁴⁰⁰i)`); `sin(π/10³¹⁰)` is
+    `3.14e−310`, not `0`; `Eigenvalues` of close eigenvalues `1` and `1 + 10⁻⁷`
+    stay floats instead of two exact `1`s.
+  - _Integration and solving._ `Solve(x = x = 0, x)` is `[0]` and
+    `Solve(x² = 4 = 2x, x)` is `[2]` (a chain holds when each adjacent pair
+    does); the solver's free parameter avoids a declared or assumed name; the
+    solver no longer combines `ln(u) ± ln(v)` when another term holds the
+    unknown; the log-term extraction keeps radicals exact;
+    `∫₀¹∫₀¹ ((x−1/64)² + (y−1/64)²)^(−1/2)` gives `NaN` instead of a false `+∞`
+    (the pole scan samples a second point of each cell with a different shift
+    per dimension, so a singular set on a diagonal such as
+    `((x−½)² + (y−z)²)^(−3/4)` in three variables is not reported divergent
+    either); `NIntegrate` no longer calls an impure named integrand with a
+    symbolic argument; one starting panel no longer double-counts a singular
+    endpoint (`∫₀¹ (1−x)^(−1/2) dx` was `4`); `∫₀¹ cos(ln t)/t^0.9999 dt` and
+    `t^0.999` give their values instead of `NaN` and `−1.8 ± 1.3`; a panel with
+    a finite value but a non-finite error is no longer counted twice in the
+    endpoint correction; `∫ dt/t` with a float bound in an expression or a
+    symbol gives `NaN`, not `Indeterminate`;
+    `Integrate(NaN, Limits(x, 0, [1, 2]))` gives `[NaN, NaN]`; `simplify()` no
+    longer folds a handler's `NaN` over an impure operand or one typed `error`,
+    nor `Indeterminate` beside a variable with an assigned value
+    (`Indeterminate + w` with `w := 1.5` is left to `evaluate()`, which gives
+    `NaN`) (`Max(Map(g, [1]), NaN)` called `g`).
+  - _Collections and evaluation._ A list literal with an element that evaluates
+    to `Nothing` removes it when mapped, broadcast, counted or filtered
+    (`Sin([If(c, 1, Nothing), 2])` was `[sin(Nothing), sin(2)]`);
+    `[If(c, "a", Nothing)]` is typed `list<string>` without a length and
+    `(If(c, 1, Nothing), 2)` is typed `tuple`; `Join`/`Append`-style views and
+    `Map(Add, a, g(5))` report an operand error before an absence; a float in
+    one element no longer blocks the exact rounding of the others
+    (`Floor(Abs([q, 1.5])).N()`); `evaluate({ materialization: true })` runs the
+    `List` handler once per level, not 2046 times for ten levels, and descends
+    into a dictionary; `Max(L)` with `L` holding `Range(1, +oo)` is typed
+    `number`; `Map` over several sources is finite when one is; `Sum(P)` of
+    `list<broadcastable<nan>>` includes the empty identities; `f(q)` with `q`
+    holding `"abc"` reports no count;
+    `IndexOf(Range(1, +oo), 9007199254740993/9007199254740992)` no longer
+    answers `1`, and a float range contains the elements it produces (and that
+    search no longer hangs when the index of the element is past `2^53`: the
+    membership is then undecided); `TupleFrom(Range(1, 300000))` builds the
+    tuple; a cancellation while listing a lazy collection for an assignment
+    propagates; `ce.withStepBudget` refuses a budget above `2^53`; a protocol
+    requirement cache is invalidated when the members change; a cancellation
+    during the canonicalization of a `DefineFunction` body releases the
+    recursion marker; `["Integrate", xy, "x", ["Limits", "y", 0, 1]]` has two
+    integration variables; `Sum` and `Product` await an asynchronous-only
+    operand.
+  - _Types._ `list<vector<integer>^2>` no longer matches `matrix<integer>`
+    (`m^2` stays `Power`); an overload set's length variables are read per arm;
+    `(T) -> T where T: range` accepts a range; a length parameter with an
+    explicit bound admits positive lengths only (`perm<0>` refused; `perm(w)` is
+    `perm<integer<1..>>`), also when the bound is a transparent alias of a
+    partly overlapping range (`where N: Small` with `Small = integer<-5..5>`
+    refused every length); recursive transparent tuple aliases no longer
+    overflow the stack; `(list<T>, list<T>) -> list<T>` on `list<unknown>` and
+    `[]` is `list<unknown>`, not `list<never>`; `narrow` of two overlapping
+    numeric ranges is their intersection (`integer<1..5>`, not `never`); a user
+    function with a numeric parameter accepts an argument typed `nan`, and an
+    absent argument at a numeric parameter is `NaN` on the MathJSON routes as in
+    Epsil (`Apply((x: number) => x, Missing)` and `g(Missing)` with
+    `g: (number) -> unknown` were refused); `toString()` prints a nested
+    literal's `_1` as `_1` when the body also uses an outer `_`; a point plus a
+    scalar-or-list operand and a user replacement of `Add`/`Subtract` are typed
+    consistently on both routes; a parameter that only index reads typed passes
+    an overloaded arm that needs a longer tuple.
+  - _LaTeX._ With `onAmbiguity: 'error'`, only the ambiguous term of a sum or
+    product of three or more terms is replaced, a call keeps its
+    `resolveApplication` decision, only the range next to an operation is
+    reported, ambiguities inside `\{…\}` are reported, `x**2!` reports
+    `ambiguous-factorial`, a prime after a bare function name and a subscript
+    after white space are not reported; every spelling of a parenthesis ends the
+    operand of a Leibniz derivative; arc-minute and arc-second marks may hold
+    white space; a real `Complex` factor keeps its multiplication sign when
+    serialized; a derivative order above 1000 is kept as the pair `D(f, {x, n})`
+    instead of a huge array; a symbolic order is kept as the same pair
+    (`\partial_x^{n} f` was read as a first derivative, and
+    `\frac{d^n}{dx^n} f(x)` as a division); an order of `0` is removed by the
+    canonical form (`D(f, {x, 0})` is `f`) and a negative order is an
+    `expected-positive-integer` error, where both were dropped; the exponent
+    after `\partial` in a numerator is part of the function
+    (`\frac{\partial f^{3}}{\partial x}` is `D(f^3, x)`, not `D([f, f, f], x)`);
+    and `\frac{d^{N}}{dx^{N}}` above order 100 is one `D` with the pair instead
+    of `N` nested `D`s, so order 1000 no longer overflows the call stack; the
+    pair is removed or expanded only for an integer literal order (an exact
+    `1/10^400` was read as `0`, and a symbol assigned `0` was removed for good);
+    and `\partial_x` with a subscript takes the expression that follows it as
+    `\frac{\partial}{\partial x}` does (`\partial_x \sin(x)` was
+    `D(Nothing, x)·sin(x)`, now `D(sin(x), x)`; `\partial_x x^2` gave a
+    `missing` error, now `2x`; a following sum is part of the operand, so
+    `\partial_x f + g` is `D(f + g, x)`).
+  - _Epsil._ The static check leaves an earlier program's function definition
+    untouched when an assignment over it is refused.
 
 ## 0.154.0 _2026-10-15_
 

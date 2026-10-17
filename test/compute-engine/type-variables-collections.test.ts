@@ -357,6 +357,19 @@ describe('TYPE VARIABLES / Reverse — `((T) -> T where T: list) & ((indexed_col
     expect(
       ce.function('Reverse', [ce.box(['Range', 1, 10])]).type.toString()
     ).toBe('list<integer>');
+    // A variable whose declared bound REQUIRES a span keeps the `range`:
+    // the widening to `list<integer>` would fail that bound.
+    ce.declare('idSpan', {
+      signature: '(T) -> T where T: range',
+      evaluate: (ops) => ops[0],
+    });
+    ce.declare('rvR', 'range');
+    for (const arg of [['Range', 1, 5], 'rvR'] as const) {
+      const e = ce.box(['idSpan', arg as any]);
+      expect(e.isValid).toBe(true);
+      expect(e.type.toString()).toBe('range');
+    }
+    expect(ce.box(['idSpan', ['List', 1, 2]]).isValid).toBe(false);
     // An opaque indexed collection: element type kept, kind is `list`.
     ce.declare('rvI', 'indexed_collection<boolean>');
     expect(ce.function('Reverse', [ce.box('rvI')]).type.toString()).toBe(

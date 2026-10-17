@@ -10,6 +10,7 @@
 
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
+import { polygamma } from '../../src/compute-engine/numerics/special-functions';
 
 const ce = new ComputeEngine();
 
@@ -220,6 +221,22 @@ describe('PolyGamma at a complex z: values near the ends of the double range', (
       );
     });
   }
+});
+
+// The real kernel computes n!/z^(n+1) in doubles. When the power overflows
+// to Infinity and the factorial does not, the terms are a false 0, and the
+// result was 0 (ψ⁽¹⁵⁰⁾(300)). The references are mpmath.polygamma at 50
+// digits.
+describe('PolyGamma at a real z: a power above the double range', () => {
+  test.each([
+    [150, 300, -1.3083361237650298e-111],
+    [200, 300, -2.0343035127674901e-123],
+    // The power overflows, but the terms of the recurrence decide the value.
+    [150, 12.5, -1.328878712254179e97],
+    [150, -12.5, -1.4693095234403324e236],
+  ])('ψ⁽%p⁾(%p)', (n, x, expected) => {
+    expect(Math.abs(polygamma(n, x) / expected - 1)).toBeLessThan(1e-12);
+  });
 });
 
 describe('Digamma and Trigamma at a complex z', () => {

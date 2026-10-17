@@ -109,9 +109,10 @@ type BabyStepTables = Map<bigint, BabySteps>;
 
 /**
  * The `x` in [0, q) with `γˣ ≡ h (mod m)` for `γ` of prime order `q`, by
- * baby-step giant-step; `undefined` when `h` is not a power of `γ` or `q` is
- * beyond `BSGS_LIMIT`. The table of `γ` is taken from `tables`, or built and
- * added to it.
+ * baby-step giant-step; `undefined` when `h` is not a power of `γ`, and
+ * `null` when `q` is beyond `BSGS_LIMIT` and the log was not attempted (so
+ * `h` may or may not be a power of `γ`). The table of `γ` is taken from
+ * `tables`, or built and added to it.
  */
 function discreteLogPrimeOrder(
   gamma: bigint,
@@ -120,9 +121,9 @@ function discreteLogPrimeOrder(
   m: bigint,
   tables: BabyStepTables,
   deadline: Deadline
-): bigint | undefined {
+): bigint | null | undefined {
   if (h === 1n % m) return 0n;
-  if (q > BSGS_LIMIT) return undefined;
+  if (q > BSGS_LIMIT) return null;
   let table = tables.get(gamma);
   if (table === undefined) {
     const step = isqrt(q - 1n) + 1n;
@@ -150,7 +151,8 @@ function discreteLogPrimeOrder(
 
 /**
  * The `x` with `aˣ ≡ h (mod m)` for `a` of order `qˢ`, one base-`q` digit at a
- * time (Pohlig–Hellman); `undefined` when `h` is not a power of `a`. Every
+ * time (Pohlig–Hellman); `undefined` when `h` is not a power of `a`, and
+ * `null` when `q` is beyond `BSGS_LIMIT` and that is not known. Every
  * digit is a log to the same base, so its baby-step table is built once, and
  * a caller that passes the same `tables` for several `h` builds it once for
  * all of them.
@@ -163,7 +165,7 @@ function discreteLogPrimePower(
   m: bigint,
   deadline: Deadline,
   tables: BabyStepTables = new Map()
-): bigint | undefined {
+): bigint | null | undefined {
   const gamma = modPow(a, q ** BigInt(s - 1), m);
   const aInverse = modularInverse(a, m)!;
   let x = 0n;
@@ -177,7 +179,7 @@ function discreteLogPrimePower(
       tables,
       deadline
     );
-    if (digit === undefined) return undefined;
+    if (digit === undefined || digit === null) return digit;
     x += digit * q ** BigInt(i);
   }
   return modPow(a, x, m) === h ? x : undefined;
@@ -266,6 +268,8 @@ function rootsModPrimeUnit(
       p,
       deadline
     );
+    // Not reached: q divides d ≤ `MAX_LISTED`, far below `BSGS_LIMIT`.
+    if (log === null) return undefined;
     if (log === undefined) return []; // excluded by the b^(n/d) = 1 test
     // r·X ≡ log (mod q^s), with r = q^v·r₁
     const [v, r1] = valuation(r, q);
@@ -501,8 +505,9 @@ function orderWithFactors(
 /**
  * The least `m ≥ 1` with `kᵐ ≡ rᵢ (mod n)` for some `i`: Mathematica's
  * `MultiplicativeOrder[k, n, {r₁, r₂, …}]`, a discrete logarithm. `undefined`
- * when `k` is not a unit mod `n`, no `rᵢ` is a power of `k`, or a prime of the
- * order of `k` is beyond `BSGS_LIMIT`.
+ * when `k` is not a unit mod `n`, no `rᵢ` is a power of `k`, or the log of
+ * an `rᵢ` needs a prime of the order of `k` beyond `BSGS_LIMIT` and the
+ * answer is not already 1.
  *
  * Pohlig–Hellman over the prime-power factors of the order of `k`, each
  * discrete log by baby-step giant-step, so the cost is set by the largest
@@ -522,6 +527,10 @@ export function generalizedMultiplicativeOrder(
   // `k` and the prime factors of its order.
   const tables: BabyStepTables = new Map();
   let best: bigint | undefined;
+  // A target whose log was not attempted (a prime of the order beyond
+  // `BSGS_LIMIT`) may have a smaller exponent than `best`: with targets
+  // [k, 1] the target 1 gives the full order, but k gives 1.
+  let unresolved = false;
   for (const target of targets) {
     const h = mod(target, n);
     if (n !== 1n && gcd(h, n) !== 1n) continue;
@@ -540,7 +549,8 @@ export function generalizedMultiplicativeOrder(
         deadline,
         tables
       );
-      if (x === undefined) {
+      if (x === null) unresolved = true;
+      if (x === undefined || x === null) {
         ok = false;
         break;
       }
@@ -553,6 +563,8 @@ export function generalizedMultiplicativeOrder(
     const m = log === 0n ? order : log;
     if (best === undefined || m < best) best = m;
   }
+  // 1 is the least possible answer, so no unresolved target can improve it.
+  if (unresolved && best !== 1n) return undefined;
   return best;
 }
 

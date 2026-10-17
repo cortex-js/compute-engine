@@ -376,18 +376,27 @@ export function emptyRootsAnswer(
   stats: { candidates: boolean; undecided: boolean; userRule?: boolean },
   conditioned: boolean
 ): Expression | undefined {
-  const sides = isFunction(equation, 'Equal')
-    ? [equation.op1, equation.op2]
-    : [equation];
+  // A chain `a = b = c` holds when each pair of adjacent sides is equal: it
+  // is an identity when every pair is one, and a contradiction when one
+  // pair is a contradiction.
+  const sides = isFunction(equation, 'Equal') ? [...equation.ops] : [equation];
   if (sides.every((side) => polynomialDegree(side, x) >= 0)) {
-    const residual = sides.length === 2 ? sides[0].sub(sides[1]) : sides[0];
-    const constant = expand(residual);
-    if (!constant.has(x)) {
-      if (constant.isSame(0)) {
+    const residuals =
+      sides.length === 1
+        ? [sides[0]]
+        : sides.slice(1).map((side, i) => sides[i].sub(side));
+    const constants = residuals.map((residual) => expand(residual));
+    if (
+      constants.some(
+        (constant) => !constant.has(x) && constant.isEqual(0) === false
+      )
+    )
+      return ce.function('List', []);
+    if (constants.every((constant) => !constant.has(x))) {
+      if (constants.every((constant) => constant.isSame(0))) {
         if (conditioned || isRestrictedUnknown(ce, x)) return undefined;
         return ce.function('List', freshParameters(ce, equation, 1));
       }
-      if (constant.isEqual(0) === false) return ce.function('List', []);
       return undefined;
     }
   }
@@ -824,12 +833,22 @@ export function evaluateSolve(
         specs[0].condition !== undefined || sideConditions.length > 0;
       let roots: ReadonlyArray<Expression> | null;
       // Several equations in one unknown: the roots common to all of them.
+      // A chain of equalities `a = b = c` is the list of the equalities of
+      // its adjacent operands, `[a = b, b = c]`.
       const common =
         isFunction(ceq, 'List') &&
         ceq.nops >= 2 &&
         ceq.ops.every((item) => isFunction(item, 'Equal'))
           ? commonRoots(ce, ceq.ops, names[0])
-          : undefined;
+          : isFunction(ceq, 'Equal') && ceq.nops > 2
+            ? commonRoots(
+                ce,
+                ceq.ops
+                  .slice(1)
+                  .map((rhs, i) => ce.function('Equal', [ceq.ops[i], rhs])),
+                names[0]
+              )
+            : undefined;
       if (common === 'undecided') return undefined;
       if (common !== undefined) {
         roots = common;

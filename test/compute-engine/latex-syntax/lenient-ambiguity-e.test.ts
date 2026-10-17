@@ -73,4 +73,25 @@ describe('ambiguous-range next to an operation', () => {
     '%s is not reported',
     (text) => expect(codes(text)).not.toContain('ambiguous-range')
   );
+
+  test('each range of a list is checked alone', () => {
+    // Only the second range has a bound that is an operation: the first
+    // range is not reported, and `onAmbiguity: 'error'` keeps it.
+    for (const text of ['[1..3, 1..5/2]', '[1..5/2, 1..3]'])
+      expect(codes(text).filter((c) => c === 'ambiguous-range')).toHaveLength(
+        1
+      );
+    const ce = new ComputeEngine();
+    expect(
+      ce.parse('[1..3, 1..5/2]', {
+        strict: false,
+        form: 'raw',
+        onAmbiguity: 'error',
+      }).json
+    ).toEqual([
+      'List',
+      ['Range', 1, 3],
+      ['Error', "'ambiguous-range'", ['LatexString', "'..'"]],
+    ]);
+  });
 });

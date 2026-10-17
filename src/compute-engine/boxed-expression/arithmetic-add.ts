@@ -1,5 +1,8 @@
 import type { BigDecimal } from '../../big-decimal/index.js';
-import { getImaginaryFactor } from './utils.js';
+import {
+  getImaginaryFactor,
+  indeterminateAnswerReadsVariable,
+} from './utils.js';
 
 import { flatten } from './flatten.js';
 import { order, sortAddTerms } from './order.js';
@@ -546,6 +549,13 @@ export function add(...xs: ReadonlyArray<Expression>): Expression {
       'Add',
       xs.map((x) => x.canonical)
     );
+
+  // An `Indeterminate` term beside a term that reads a variable with an
+  // assigned value: the answer is `NaN` or `Indeterminate` depending on the
+  // value the variable holds when the sum is evaluated, so the sum is kept
+  // (`indeterminateAnswerReadsVariable()`).
+  if (indeterminateAnswerReadsVariable(xs))
+    return xs[0].engine.function('Add', [...xs]);
 
   // A term that is collection-TYPED but has no collection value yet (a
   // declared-but-unassigned `list<number>` symbol) is not a broadcast

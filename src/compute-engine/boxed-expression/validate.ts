@@ -2694,6 +2694,13 @@ function admitsProvisionalCollectionOperands(
  * declared through `ce.declare` answered `NaN`. A user function accepts it
  * at every numeric parameter; its body then computes with `NaN`. A number
  * that is not `NaN` is checked as before (`1.5` at `integer` is refused).
+ *
+ * The argument is `NaN` when its value is (`op.isNaN`, a literal) or when
+ * its static type is `nan`: a function application reports `isNaN` only
+ * once it is evaluated, so `f(g())` with `g: () -> nan` was refused at
+ * boxing where `f(NaN)` was accepted. The argument is not evaluated here.
+ * An argument typed `missing` (the literal `Missing`) is accepted too: a
+ * numeric parameter reads an absent value as `NaN`.
  */
 function acceptsNaNArgument(
   op: Expression,
@@ -2701,7 +2708,16 @@ function acceptsNaNArgument(
   internals: ValidateArgumentsInternals | undefined
 ): boolean {
   if (internals?.userFunction !== true) return false;
-  return op.isNaN === true && isSubtype(param, 'number');
+  if (!isSubtype(param, 'number')) return false;
+  // An absent argument (the literal `Missing`, typed `missing`) is read as
+  // `NaN` at a numeric parameter of a user function (`docs/ERROR-MODEL.md`,
+  // ruling of 2026-09-30 on an absent argument at an annotated parameter),
+  // so it is accepted there as `NaN` is.
+  return (
+    op.isNaN === true ||
+    op.type.matches('nan') ||
+    resolveTypeAlias(op.type.type) === 'missing'
+  );
 }
 
 /**

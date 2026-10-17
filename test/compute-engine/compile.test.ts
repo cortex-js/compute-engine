@@ -1017,6 +1017,41 @@ describe('COMPILE Binomial matches evaluate() off 0 ≤ k ≤ n', () => {
     expect(fn.run!({ a: 50, b: 25 })).toBe(126410606437752);
     expect(fn.run!({ a: 56, b: 28 })).toBe(7648690600760440);
   });
+
+  // Reference values from mpmath's binomial at 40 digits, at the double
+  // operands.
+  it('keeps its precision past 2^53 and when the Γ denominator overflows', () => {
+    // C(−2, 10²⁰) = C(10²⁰ + 1, 10²⁰) = 10²⁰ + 1; the rounded 10²⁰ + 1 made
+    // it C(10²⁰, 10²⁰) = 1.
+    expect(fn.run!({ a: -2, b: 1e20 })).toBe(1e20);
+    // −3 − (−10²⁰) rounds to the even 10²⁰, which gave the wrong sign.
+    const c = fn.run!({ a: -3, b: -1e20 }) as number;
+    expect(Math.abs(c / -4.99999999999999999985e39 - 1)).toBeLessThan(1e-14);
+    // Γ(1 + k) ≈ 1e12 and Γ(171 − k) ≈ 7e306 are finite, their product is
+    // not, and the quotient was a false 0.
+    const d = fn.run!({ a: 169, b: -0.999999999999 }) as number;
+    expect(Math.abs(d / 5.882222813444671738e-15 - 1)).toBeLessThan(1e-12);
+  });
+
+  // Reference values from mpmath's binomial at 60 digits, at the double
+  // operands.
+  it('keeps its precision for a large |n| or |k| that is not an integer', () => {
+    // A negative n + 1: the sum of the three log-Γ values cancelled, and
+    // C(−10¹⁵ − 0.5, 0.25) was 2980.96.
+    for (const [a, b, want] of [
+      [-1e15 - 0.5, 0.25, 4386.9624636869539],
+      [-1e12 - 0.5, 3.25, -8.5346954084970511e37],
+      [-1e15 - 0.5, -1e15 + 1.75, 3.2066475508732884e-35],
+      // A large negative k, or a large negative n − k: the sine of the
+      // rounded product π·(k + 1) had no correct digits.
+      [0.5, -1e15 - 0.25, 6.3078313050503954e-24],
+      [0.5, 1e15 + 0.75, 6.3078313050503954e-24],
+      [5.25, 1e12 + 0.4, -2.6718216812491084e-74],
+    ]) {
+      const v = fn.run!({ a, b }) as number;
+      expect(Math.abs(v / want - 1)).toBeLessThan(1e-13);
+    }
+  });
 });
 
 // Tier-2 special-function kernels that `.N()` produces as real floats — the
@@ -2556,6 +2591,42 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
       );
   });
 
+  // The seed is the first accumulator, so a complex seed over real rows
+  // puts the element-wise fold in the complex lane. The lane was read from
+  // the rows only, and `Reduce(M, Add, z)` with `z = i` answered
+  // `["[object Object]13", "[object Object]24"]`.
+  it.each([
+    ['Reduce', 'Add', [{ re: 4, im: 1 }, { re: 6, im: 1 }], '[(4 + i),(6 + i)]'],
+    ['Reduce', 'Multiply', [{ re: 0, im: 3 }, { re: 0, im: 8 }], '[3i,8i]'],
+    [
+      'Scan',
+      'Add',
+      [
+        [{ re: 1, im: 1 }, { re: 2, im: 1 }],
+        [{ re: 4, im: 1 }, { re: 6, im: 1 }],
+      ],
+      '[[(1 + i),(2 + i)],[(4 + i),(6 + i)]]',
+    ],
+  ])('%s(M, %s, z) over real rows with a complex seed', (h, f, want, interp) => {
+    const e = new ComputeEngine();
+    e.declare('M', 'list<list<real>>');
+    e.declare('z', 'complex');
+    const expr = e.box([h, 'M', f, 'z'] as any);
+    const r = compile(expr, { fallback: false })!;
+    expect(
+      r.run!({
+        M: [
+          [1, 2],
+          [3, 4],
+        ],
+        z: { re: 0, im: 1 },
+      })
+    ).toEqual(want);
+    e.assign('M', e.box(['List', ['List', 1, 2], ['List', 3, 4]]));
+    e.assign('z', e.box('ImaginaryUnit'));
+    expect(expr.evaluate().toString()).toBe(interp);
+  });
+
   // A step parameter named `i` is the parameter, not the imaginary unit,
   // when the fold decides its lanes.
   it('a fold step with a parameter named i over a list of rows', () => {
@@ -2689,6 +2760,31 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
       const got = r.run!({ t: 'abc' });
       e.assign('t', e.string('abc'));
       expect(got).toEqual(fold.evaluate().ops!.map((x) => x.string));
+    });
+
+    // A string seed that no step updates is the result, as a string: on an
+    // empty source, and when every step returns the accumulator unchanged.
+    // The seed was converted to an array of characters before the first
+    // step, so the compiled fold answered `["a","b","c"]` where the
+    // interpreter answers `"abc"`.
+    it.each([
+      ['an empty source', F(RA('acc', 1, { str: 'x' })), []],
+      [
+        'no step that updates',
+        F(['If', ['Greater', 'i', 100], RA('acc', 1, { str: 'x' }), 'acc']),
+        [1, 2],
+      ],
+    ])('a string seed with %s stays a string', (_name, step, p) => {
+      const e = new ComputeEngine();
+      e.declare('t', 'string');
+      e.declare('p', 'list<integer>');
+      const fold = e.box(['Fold', step, 't', 'p'] as any);
+      const r = compile(fold, { fallback: false })!;
+      expect(r.code).toContain('replaceAtInPlace');
+      expect(r.run!({ t: 'abc', p })).toBe('abc');
+      e.assign('t', e.string('abc'));
+      e.assign('p', e.box(['List', ...p]));
+      expect(fold.evaluate().string).toBe('abc');
     });
 
     // A user function whose parameter is also named `acc` is compiled while

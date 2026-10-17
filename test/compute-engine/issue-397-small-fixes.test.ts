@@ -89,6 +89,36 @@ describe('Solve of an identity, a contradiction, an unsolved equation', () => {
     expect(solve(['Equal', 't', 't'], 't')).toEqual(['List', 't_1']);
   });
 
+  test('the free parameter is not a symbol with a type or an assumption', () => {
+    // A `t` declared as an integer, or assumed positive, cannot take every
+    // value of `x`.
+    const typed = new ComputeEngine();
+    typed.declare('t', 'integer');
+    expect(
+      typed.box(['Solve', ['Equal', 'x', 'x'], 'x']).evaluate().json
+    ).toEqual(['List', 't_1']);
+    const assumed = new ComputeEngine();
+    assumed.assume(assumed.parse('t > 0'));
+    expect(
+      assumed.box(['Solve', ['Equal', 'x', 'x'], 'x']).evaluate().json
+    ).toEqual(['List', 't_1']);
+  });
+
+  test('a chain of equalities holds when each adjacent pair is equal', () => {
+    // `x = x = 0` is not an identity: the second equality gives x = 0.
+    expect(solve(['Equal', 'x', 'x', 0])).toEqual(['List', 0]);
+    expect(ce.box(['Equal', 'x', 'x', 0]).solve('x')?.map((r) => r.json)).toEqual(
+      [0]
+    );
+    // -2 is a root of x² = 4 but not of 4 = 2x.
+    expect(
+      solve(['Equal', ['Power', 'x', 2], 4, ['Multiply', 2, 'x']])
+    ).toEqual(['List', 2]);
+    expect(solve(['Equal', 'x', 0, ['Add', 'x', 1]])).toEqual(['List']);
+    expect(solve(['Equal', 'x', 'x', ['Add', 'x', 1]])).toEqual(['List']);
+    expect(solve(['Equal', 'x', 'x', 'x'])).toEqual(['List', 't']);
+  });
+
   test('a contradiction has no solution', () => {
     expect(solve(['Equal', 1, 0])).toEqual(['List']);
     expect(solve(['Equal', ['Add', 'x', 1], ['Add', 'x', 2]])).toEqual([
@@ -263,6 +293,22 @@ describe('logarithm rules that hold for every argument', () => {
   ])('%s → %s', (src, expected) => {
     expect(ce.parse(src).simplify().toString()).toBe(expected);
   });
+
+  test('e^(ln a + ln b + t) keeps an exact product of complex radicals', () => {
+    // The product √1009·(1 + i) · √1013·(1 + 2i) has a radicand too large
+    // to store as one exact number. It was folded to a float.
+    const a = ['Multiply', ['Sqrt', 1009], ['Complex', 1, 1]];
+    const b = ['Multiply', ['Sqrt', 1013], ['Complex', 1, 2]];
+    const result = ce
+      .box(['Exp', ['Add', ['Ln', a], ['Ln', b], 't']] as any)
+      .simplify();
+    expect(result.json).toEqual([
+      'Multiply',
+      ['Complex', ['Sqrt', 1009], ['Sqrt', 1009]],
+      ['Complex', ['Sqrt', 1013], ['Multiply', 2, ['Sqrt', 1013]]],
+      ['Exp', 't'],
+    ]);
+  });
 });
 
 describe('Solve: logarithm and linear equations', () => {
@@ -284,6 +330,19 @@ describe('Solve: logarithm and linear equations', () => {
       .solve('x') as Expression[];
     expect(roots).toHaveLength(1);
     expect(roots[0].N().re).toBeCloseTo(Math.E / (Math.E - 1), 12);
+  });
+
+  test('logarithms are not combined when another term has the unknown', () => {
+    // ln(x) - ln(-x) + iπx = 0 has the roots 1 and -1. Combined, it is
+    // ln(-1) + iπx = 0, which has only the root -1. The solver does not
+    // combine these logarithms, and gives no list that misses a root.
+    const engine = new ComputeEngine();
+    const roots = engine.parse('\\ln(x)-\\ln(-x)+i\\pi x=0').solve('x');
+    const values =
+      roots === null
+        ? null
+        : (roots as Expression[]).map((r) => r.N().re).sort((a, b) => a - b);
+    expect(values === null || values.join(',') === '-1,1').toBe(true);
   });
 
   test('a linear equation whose coefficient is a sum', () => {

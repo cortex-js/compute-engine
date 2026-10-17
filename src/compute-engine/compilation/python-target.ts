@@ -67,12 +67,14 @@ import { isPointListValue, isTuple } from '../collection-utils.js';
 import { couldMatch, isSubtype } from '../../common/type/subtype.js';
 import {
   collectionElementType,
+  functionResult,
   isPointElementType,
   resolveTypeForCompilation,
   stripMissingFromType,
   typeContainsMissing,
 } from '../../common/type/utils.js';
 import type { Type, TypeReference } from '../../common/type/types.js';
+import { typeToString } from '../../common/type/serialize.js';
 import { declarationOf } from '../../common/type/reference.js';
 import { throwIfCallerCancellation } from '../../common/interruptible.js';
 import {
@@ -84,6 +86,8 @@ import {
   requirePrimitiveElements,
   refuseKleeneQuantifier,
   collectionMayHoldAbsentCell,
+  PREDICATE_RESULT_MODES,
+  predicateResultCheck,
 } from './javascript-target.js';
 
 /**
@@ -2364,7 +2368,10 @@ const PYTHON_ORD_HELPER = `def _ce_ord(_f, _a, _b):
  * given: every index and value was computed before the call, from the list as
  * it was at the start of the step. The second copies the seed once into a new
  * list (a tuple, a range or a NumPy array becomes a list, as the first
- * `ReplaceAt` would make it), so the caller's value is never changed.
+ * `ReplaceAt` would make it), so the caller's value is never changed. A string
+ * seed is returned as it is, so that a fold with no update answers the string,
+ * as the interpreter does; the first update of a string raises the
+ * `TypeError` of `_ce_listcopy`.
  */
 const PYTHON_LIST_UPDATE_HELPER = `def _ce_listpos(_op, _n, _i):
     if isinstance(_i, (bool, np.bool_)) or not isinstance(_i, (int, float, np.integer, np.floating)) or not float(_i).is_integer():
@@ -2390,11 +2397,13 @@ def _ce_insert(_l, _i, _v):
     _o.insert(_ce_listpos('Insert', len(_o) + 1, _i), _v)
     return _o
 def _ce_replaceat_inplace(_l, *_u):
+    if isinstance(_l, str):
+        _l = _ce_listcopy('ReplaceAt', _l)
     for _k in range(0, len(_u), 2):
         _l[_ce_listpos('ReplaceAt', len(_l), _u[_k])] = _u[_k + 1]
     return _l
 def _ce_owned_copy(_x):
-    return _ce_listcopy('Fold', _x)
+    return _x if isinstance(_x, str) else _ce_listcopy('Fold', _x)
 `;
 
 /**
@@ -2406,6 +2415,39 @@ def _ce_owned_copy(_x):
  * (`IN_PLACE_UPDATE_OPS`).
  */
 const PY_IN_PLACE_UPDATE_OPS = new WeakSet<ReadonlyArray<Expression>>();
+
+/**
+ * `_ce_predicate(f, kind, mode)`: the predicate `f` of `kind`, checked at each
+ * call (`pyFnArg`), with the modes of `PREDICATE_RESULT_MODES`
+ * (`javascript-target.ts`, where `_SYS.predicateResult` does the same). A
+ * `bool` or a `np.bool_` passes. An absent value is `None` (a `When` whose
+ * condition fails) or a float `nan` (this target spells `Missing` as
+ * `math.nan`, and a guarded branch answers `nan` for a `NaN` element). A
+ * `nan` can also be a numeric `NaN`, which the interpreter does not read as
+ * absent, so `pyFnArg` refuses a selecting predicate whose result type
+ * admits `NaN`. For
+ * `select`, an absent value does not select the element, as `Missing` does
+ * not in the interpreter, and any other value raises a `TypeError`. For
+ * `quantify`, an absent value and any other value raise a `TypeError`: the
+ * interpreter answers `Missing` or leaves `Any`/`All` unevaluated, which
+ * `any`/`all` cannot give. For `prefix`, any value that is not a boolean
+ * ends the prefix.
+ */
+const PYTHON_PREDICATE_HELPER = `def _ce_predicate(_f, _kind, _mode):
+    def _p(_x):
+        _v = _f(_x)
+        if isinstance(_v, (bool, np.bool_)):
+            return bool(_v)
+        if _mode == 'prefix':
+            return False
+        _absent = _v is None or (isinstance(_v, (float, np.floating)) and _v != _v)
+        if _mode == 'select' and _absent:
+            return False
+        if _absent:
+            raise TypeError(_kind + ' predicate returned an absent value, which the interpreter combines by Kleene logic')
+        raise TypeError(_kind + ' predicate must return "True" or "False"')
+    return _p
+`;
 
 /** Prepend any referenced runtime helper definitions to the compiled `code`.
  * Idempotent per emission unit; a redefinition (if two units are concatenated)
@@ -2432,6 +2474,8 @@ function withPythonHelpers(code: string): string {
     /_ce_(replaceat|replaceat_inplace|owned_copy|deleteat|insert)\(/.test(out)
   )
     out = `${PYTHON_LIST_UPDATE_HELPER}\n${out}`;
+  if (out.includes('_ce_predicate('))
+    out = `${PYTHON_PREDICATE_HELPER}\n${out}`;
   return out;
 }
 
@@ -3008,6 +3052,48 @@ function pyFnArg(
   // of the value each parameter position receives; an empty list means
   // nothing is provable, so any annotation declines.
   BaseCompiler.assertCallbackAnnotations(kind, op, argTypes);
+  // The predicate of `Filter`, `Any`, `TakeWhile` and the other operators
+  // of `PREDICATE_RESULT_MODES` is checked at each call when its result type
+  // does not prove a boolean, and refused when it cannot be one
+  // (`predicateResultCheck`, shared with the JavaScript target). The
+  // lowerings test the result with the truthiness of Python, so `1` selected
+  // an element, and so did `nan`, the spelling of `Missing` on this target.
+  const mode = PREDICATE_RESULT_MODES[kind];
+  if (mode !== undefined && op !== undefined && predicateResultCheck(kind, op)) {
+    // This target spells `Missing` as a float `nan`, so `_ce_predicate` reads
+    // a `nan` result as an absent value, and a selecting predicate skips the
+    // element. A numeric `NaN` result is not absent: the interpreter reports
+    // it as a predicate result that is not a boolean. A Python `nan` cannot
+    // tell the two apart, so a selecting predicate whose result type admits
+    // `NaN` is refused here, and a `nan` at run time is then always the
+    // spelling of `Missing`. A prefix predicate ends the prefix on both
+    // values, and a quantifier raises on both, so these need no refusal.
+    if (mode === 'select') {
+      const result = functionResult(resolveTypeForCompilation(op.type.type));
+      if (result === undefined || couldMatch(result, 'nan'))
+        throw new Error(
+          `Could not compile \`${kind}\` to Python: the predicate may return ` +
+            `\`NaN\`` +
+            (result === undefined
+              ? ''
+              : ` (its result type is \`${typeToString(result)}\`)`) +
+            `, which this target cannot tell apart from the absent value ` +
+            `\`Missing\`. The interpreter reports \`NaN\` as a predicate ` +
+            `result that is not a boolean, and skips \`Missing\`. The ` +
+            `interpreter evaluates it instead.`
+        );
+    }
+    return `_ce_predicate(${pyCallbackArg(kind, op, compile)}, '${kind}', '${mode}')`;
+  }
+  return pyCallbackArg(kind, op, compile);
+}
+
+/** `pyFnArg` without the check of a predicate's result. */
+function pyCallbackArg(
+  kind: string,
+  op: Expression | undefined,
+  compile: (expr: Expression) => string
+): string {
   if (op && isFunction(op, 'Function')) return compile(op);
   if (op && isSymbol(op)) {
     const glyph = { Add: '+', Subtract: '-', Multiply: '*', Divide: '/' }[
@@ -5887,6 +5973,7 @@ export class PythonTarget implements LanguageTarget<Expression> {
       )
     )
       code += `${PYTHON_LIST_UPDATE_HELPER}\n`;
+    if (body.includes('_ce_predicate(')) code += `${PYTHON_PREDICATE_HELPER}\n`;
 
     code += `def ${functionName}(${params}):\n`;
 
@@ -6006,7 +6093,8 @@ export class PythonTarget implements LanguageTarget<Expression> {
     // `_ce_pow` is the power with the real root of a negative base, which the
     // `Power` lowering does not use in a lambda body: listed as a guard;
     // `_ce_round` is the rounding of `Round`, which
-    // `pythonRoundToInteger()` writes inline in a lambda body: also a guard.)
+    // `pythonRoundToInteger()` writes inline in a lambda body: also a guard;
+    // `_ce_predicate` is the check of a predicate's result, `pyFnArg`.)
     for (const [helper, what] of [
       ['_ce_bcast(', 'ElementMax/ElementMin/Clamp over a collection operand'],
       ['_ce_rref(', 'RowReduce'],
@@ -6015,6 +6103,7 @@ export class PythonTarget implements LanguageTarget<Expression> {
       ['_ce_ord(', 'an ordering over a collection operand'],
       ['_ce_pow(', 'a power whose base may be negative'],
       ['_ce_round(', 'Round'],
+      ['_ce_predicate(', 'a predicate whose result is not provably a boolean'],
       ['_ce_cplx(', 'the complex lift of the complex modes'],
       ['_ce_cisreal(', 'the realness test of the complex modes'],
       ['_ce_creal(', 'the real projection of the complex modes'],

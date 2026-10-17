@@ -18,10 +18,12 @@ import {
   absentScalarMarker,
   checkArity,
   hasAbsentScalarOperand,
+  isAbsentableCollectionOperand,
   isAbsentScalarSymbol,
   listCoordinateTupleOperandError,
   markAbsentPointCells,
   nonNumericOperandError,
+  settledAbsentableValue,
 } from '../boxed-expression/validate.js';
 import {
   admissionOf,
@@ -95,7 +97,10 @@ import {
   complexDivide,
 } from '../numerics/numeric-complex.js';
 import { lerchPhiComplex, DIRICHLET_NEAR_POLE } from '../numerics/lerch-phi.js';
-import { logGammaComplex } from '../numerics/log-gamma.js';
+import {
+  logGammaComplex,
+  logGammaComplexImError,
+} from '../numerics/log-gamma.js';
 import { EULERIAN_MAX_ORDER } from '../numerics/polylog.js';
 import {
   factorial2 as bigFactorial2,
@@ -970,6 +975,148 @@ function exactConstantModulo(
 }
 
 /**
+ * `Remainder(a, m)` as the exact expression `a − m·k`, where `k` is `a/m`
+ * rounded to the nearest integer with a tie rounded toward `+∞` (the rule of
+ * `Math.round`, which the float lanes of `Remainder` use), when `a` and `m`
+ * are exact: exact real literals, or exact constant expressions (see
+ * `isExactConstantExpression()`). `undefined` when `k` is not decided, or
+ * when the operands are not of that kind.
+ *
+ * `k = ⌊q + ½⌋ = ⌊2q⌋ − ⌊q⌋` for `q = a/m`, so `k` is decided with two
+ * exact floors (`roundExactReal()`, or `roundExactConstant()` for a
+ * constant expression). The float lanes round `a/m` to the working
+ * precision first: `Remainder(1/2 − 10⁻³⁰, 1)` was `−0.5`, where the exact
+ * value is `1/2 − 10⁻³⁰`.
+ *
+ * With `atJumpAtLimit` (under `.N()`), `k` is decided at the precision
+ * limit too: see `roundExactConstant()`.
+ *
+ * The result is canonical, not evaluated: the caller evaluates it, or
+ * computes its value.
+ */
+function exactRemainder(
+  a: Expression,
+  m: Expression,
+  atJumpAtLimit = false
+): Expression | undefined {
+  const isExact = (x: Expression) =>
+    isExactRealLiteral(x) || isExactConstantExpression(x);
+  if (!isExact(a) || !isExact(m)) return undefined;
+  if (m.isSame(0)) return undefined;
+  const ce = a.engine;
+  const floorOf = (x: Expression): bigint | undefined => {
+    if (isExactRealLiteral(x)) return roundExactReal(x, 'floor');
+    const value = x.evaluate();
+    if (isExactRealLiteral(value)) return roundExactReal(value, 'floor');
+    return roundExactConstant(x, 'floor', atJumpAtLimit);
+  };
+  const q = ce.function('Divide', [a, m]);
+  const floorQ = floorOf(q);
+  if (floorQ === undefined) return undefined;
+  const floorTwiceQ = floorOf(ce.function('Multiply', [ce.number(2), q]));
+  if (floorTwiceQ === undefined) return undefined;
+  const k = floorTwiceQ - floorQ;
+  return ce.function('Subtract', [
+    a,
+    ce.function('Multiply', [ce.number(k), m]),
+  ]);
+}
+
+/**
+ * `Remainder(a, m)` for an exact integer expression `a` and an exact integer
+ * literal `m` that is not zero, reduced in ℤ/|m|ℤ without forming the value
+ * of `a` (`reduceModulo()`), or `undefined`. The exact value of `2^(3^20)`
+ * has about 10⁹ digits: the float lane failed with an internal error
+ * (`Maximum BigInt size exceeded`).
+ *
+ * With `a = |m|·t + r`, `0 ≤ r < |m|`, the quotient `a/m` rounded with a tie
+ * toward `+∞` gives `r − |m|` when `r > |m|/2`, or when `r = |m|/2` and
+ * `m > 0`, and `r` otherwise.
+ */
+function integerRemainder(a: Expression, m: Expression): bigint | undefined {
+  if (a.isInteger !== true || (isNumber(a) && !a.isExact)) return undefined;
+  if (!isNumber(m) || !m.isExact || m.isInteger !== true) return undefined;
+  const bm = toBigint(m);
+  if (bm === null || bm === 0n) return undefined;
+  const modulus = bm < 0n ? -bm : bm;
+  const r = reduceModulo(a, modulus);
+  if (r === null) return undefined;
+  return 2n * r > modulus || (2n * r === modulus && bm > 0n) ? r - modulus : r;
+}
+
+/**
+ * Under `.N()`, the value of `Remainder(a, m)` computed from the EXACT
+ * values of its operands and then approximated, or `undefined` when the
+ * floats `a` and `m` decide the result.
+ *
+ * `Remainder` jumps where `a/m` is a half-integer, and the float of an
+ * exact operand near such a point can be on its other side, as for `Mod`
+ * (`exactModUnderN()`): the float of `1/2 − 10⁻³⁰` is `0.5`. An exact
+ * literal is always used. An expression is evaluated again, exactly, only
+ * when `a/m` is near a half-integer and the expression is pure
+ * (`exactRealValueOf()`). Operands that are exact constant expressions
+ * (`π·10³⁰`) are used as written, and the result is computed at a raised
+ * precision (`exactConstantValue()`), because at the working precision `a`
+ * and `m·k` cancel. A float operand as written is never replaced: the
+ * floats decide.
+ */
+function exactRemainderUnderN(
+  a: Expression,
+  m: Expression,
+  expression: Expression | undefined
+): Expression | undefined {
+  const ce = a.engine;
+  const valueOf = (r: Expression): Expression | undefined => {
+    const exact = r.evaluate();
+    if (isExactRealLiteral(exact)) return exact.N();
+    if (!isExactConstantExpression(exact)) return undefined;
+    const value = exactConstantValue(exact);
+    return value === undefined ? undefined : ce.number(ce._numericValue(value));
+  };
+  const oa = originalOperand(expression, 0);
+  const om = originalOperand(expression, 1);
+  // An integer dividend as written, by an exact integer divisor: reduced
+  // without forming its value (`integerRemainder()`), as `Mod` does.
+  const reduced =
+    oa !== undefined && om !== undefined ? integerRemainder(oa, om) : undefined;
+  if (reduced !== undefined) return ce.number(reduced).N();
+  if (
+    oa !== undefined &&
+    om !== undefined &&
+    (isExactConstantExpression(oa) || isExactConstantExpression(om))
+  ) {
+    const r = exactRemainder(oa, om, true);
+    if (r !== undefined) {
+      const value = valueOf(r);
+      if (value !== undefined) return value;
+    }
+  }
+  const near =
+    isNumber(a) &&
+    isNumber(m) &&
+    !a.isComplex &&
+    !m.isComplex &&
+    a.isFinite === true &&
+    m.isFinite === true &&
+    m.re !== 0 &&
+    (!Number.isFinite(a.re / m.re) ||
+      isNearRoundingJumpValue(ce, a.re / m.re, true));
+  const exactOf = (x: Expression, index: number): Expression | undefined => {
+    if (isExactRealLiteral(x)) return x;
+    const original = originalOperand(expression, index);
+    if (original === undefined) return undefined;
+    if (isNumber(original) || near) return exactRealValueOf(original);
+    return undefined;
+  };
+  const ea = exactOf(a, 0);
+  if (ea === undefined) return undefined;
+  const em = exactOf(m, 1);
+  if (em === undefined) return undefined;
+  const r = exactRemainder(ea, em);
+  return r === undefined ? undefined : valueOf(r);
+}
+
+/**
  * `Mod(a, m)` as an exact expression, when `a` and `m` are exact real
  * literals, `m` is not zero, and at least one of them has a radical
  * (`√2·10³⁰`, `√2`); `undefined` otherwise. The quotient of two such
@@ -1167,6 +1314,10 @@ function applyRounding(
   const big = result.bignumRe;
   if (big !== undefined) {
     if (!big.isInteger()) return result;
+    // An exponent too large to write out as digits keeps the float, as
+    // `ce.number()` does for a big decimal: the integer of `1e600000000`
+    // has 600 million digits, more than a bigint can hold.
+    if (big.exponent > 1_000_000) return result;
     return ce.number(big.toBigInt());
   }
   const re = result.re;
@@ -3648,10 +3799,18 @@ const LN_MIN_NORMAL_DOUBLE = -1022 * Math.LN2;
  * the same decimal position: a part 10⁻ᵏ times the modulus keeps k fewer
  * significant digits, and a part below 10^−digits of the modulus is
  * rounding noise and is dropped.
+ *
+ * `imError` is a smaller bound of the absolute error of Im w, when the
+ * kernel has one (`logGammaComplexImError()`). Near the real axis, Im w is
+ * small and computed to about its own precision, so the imaginary part
+ * sin(Im w)·exp(Re w) has a relative error of about ε·(1 + |w|) +
+ * |cot(Im w)|·`imError`, and it is not noise: Γ(200 + 10⁻²⁰i) is about
+ * 3.94·10³⁷² + 2.09·10³⁵³i, and its imaginary part was dropped.
  */
 export function boxExpOfComplexLog(
   engine: ComputeEngine,
-  w: Complex
+  w: Complex,
+  imError?: number
 ): Expression | null | undefined {
   if (!bignumPreferred(engine)) return undefined;
   const { re: a, im: b } = w;
@@ -3676,10 +3835,26 @@ export function boxExpOfComplexLog(
     const partDigits = digits + leadingExponent(value) - modulusExponent;
     return partDigits < 1 ? 0 : value.toPrecision(partDigits);
   };
+  // The imaginary part with the bound `imError` of the error of `b`: its
+  // error relative to the modulus is |sin b|·`error` (from the modulus) plus
+  // |cos b|·`imError` (from `b`), and it keeps the digits above that error.
+  const imPart = (): BigDecimal | number => {
+    const sin = Math.sin(b);
+    if (imError === undefined || sin === 0) return part(sin);
+    const relative =
+      Math.abs(sin) * error + Math.abs(Math.cos(b)) * Math.min(error, imError);
+    const partDigits = Math.min(
+      15,
+      Math.floor(Math.log10(Math.abs(sin) / relative))
+    );
+    return partDigits < 1
+      ? 0
+      : modulus.mul(new BigDecimal(sin)).toPrecision(partDigits);
+  };
   return engine.number(
     engine._inexactNumericValue({
       re: part(Math.cos(b)),
-      im: part(Math.sin(b)),
+      im: imPart(),
     })
   );
 }
@@ -3761,7 +3936,11 @@ function gammaOfComplex(
   engine: ComputeEngine,
   z: Complex
 ): Expression | undefined {
-  const big = boxExpOfComplexLog(engine, logGammaComplex(z));
+  const big = boxExpOfComplexLog(
+    engine,
+    logGammaComplex(z),
+    logGammaComplexImError(z)
+  );
   if (big === null) return undefined;
   if (big !== undefined) return big;
   // The double from `gammaComplex` is a float, even when both its parts are
@@ -4034,8 +4213,10 @@ function evaluateHurwitzZeta(
           -sInt,
           gaussian
         );
+        // `boxBignumApprox`, not `boxBignumResult`: an integer value such as
+        // `HurwitzZeta(0, 1.5) = -1` must stay a float, since `a` is a float.
         if (im === 0n)
-          return boxBignumResult(engine, engineQuotient(engine, re, den));
+          return boxBignumApprox(engine, engineQuotient(engine, re, den));
         return engine.number(
           engine._numericValue({
             re: engineQuotient(engine, re, den),
@@ -4076,11 +4257,15 @@ function evaluateHurwitzZeta(
 
   const finite = isFiniteNumberLiteral;
   // The integer test reads the big decimal when there is one: the double
-  // `a.re` of 1e−2000 is 0, which would make it a pole.
+  // `a.re` of 1e−2000 is 0, which would make it a pole. An exact operand is
+  // tested exactly: its big-decimal projection is rounded to the working
+  // precision, so (−10³⁰ + 1)/10³⁰ projects to −1 at 21 digits.
   const aNonposInt =
     isNumber(a) &&
     !a.isComplex &&
-    (a.bignumRe?.isInteger() ?? Number.isInteger(a.re)) &&
+    (a.isExact
+      ? a.isInteger === true
+      : (a.bignumRe?.isInteger() ?? Number.isInteger(a.re))) &&
     a.re <= 0;
 
   // a a non-positive integer: the (k+a) = 0 term diverges when Re(s) > 0,
@@ -4468,11 +4653,15 @@ function evaluateLerchPhi(
   // diverges — the same pole `evaluateHurwitzZeta` gives `HurwitzZeta` at a
   // non-positive integer base point, since a nonzero zᵏ never cancels it.
   // The integer test reads the big decimal when there is one: the double
-  // `a.re` of 1e−2000 is 0, which would make it a pole.
+  // `a.re` of 1e−2000 is 0, which would make it a pole. An exact operand is
+  // tested exactly: its big-decimal projection is rounded to the working
+  // precision, so (−10³⁰ + 1)/10³⁰ projects to −1 at 21 digits.
   const aNonposInt =
     isNumber(a) &&
     !a.isComplex &&
-    (a.bignumRe?.isInteger() ?? Number.isInteger(a.re)) &&
+    (a.isExact
+      ? a.isInteger === true
+      : (a.bignumRe?.isInteger() ?? Number.isInteger(a.re))) &&
     a.re <= 0;
   if (aNonposInt && finite(s) && s.re > 0 && zNonZero)
     return engine.ComplexInfinity;
@@ -4765,6 +4954,36 @@ function withAbsentableOperandResolved(
 }
 
 /**
+ * `withAbsentableOperandResolved` for the asynchronous handlers of `Sum` and
+ * `Product`: the operand is evaluated with `evaluate`, which awaits it. An
+ * operand that has only an asynchronous handler (a source declared
+ * `() -> list<integer> | missing` with `evaluateAsync`) does not evaluate
+ * on the synchronous route, so the reduction stayed unevaluated.
+ *
+ * The result is `undefined` when the rule does not apply (the operands stay
+ * as they are), and otherwise a promise of the result of
+ * `withAbsentableOperandResolved`. The caller awaits only that promise. The
+ * rest of a handler reads the evaluation context of the engine before its
+ * first `await`, and an `await` returns after that context has changed: the
+ * bounds of `Sum(1/k^2, Limits(k, 1, n))` in the body of a function read
+ * the parameter `n` of the call frame, and after an `await` they read a
+ * symbol with no value, so the sum stayed unevaluated.
+ */
+function withAbsentableOperandResolvedAsync(
+  ops: ReadonlyArray<Expression>,
+  evaluate: (x: Expression) => Promise<Expression>
+): Promise<ReadonlyArray<Expression> | undefined> | undefined {
+  if (ops.length !== 1 || ops[0] === undefined) return undefined;
+  if (!isAbsentableCollectionOperand(ops[0])) return undefined;
+  return evaluate(ops[0]).then((x) => {
+    const value = settledAbsentableValue(x);
+    if (value === undefined) return ops;
+    if (isAbsentScalarSymbol(value)) return undefined;
+    return [value];
+  });
+}
+
+/**
  * Whether `Gamma(x)` on the exact route is Γ(n) = (n − 1)! for an exact
  * positive integer n: the value is an integer, so `evaluate()` answers it
  * (`Gamma(4)` is `6`, as `Factorial(3)` is). Only an EXACT integer takes this
@@ -4849,9 +5068,11 @@ function evaluateGamma(
   if (infinite !== undefined) return infinite;
   // A complex value outside the double range is formed from ln Γ.
   if (isNumber(x) && x.isComplex && shouldNumericize(numericApproximation, x)) {
+    const z = engine.complex(x.re, x.im);
     const big = boxExpOfComplexLog(
       engine,
-      logGammaComplex(engine.complex(x.re, x.im))
+      logGammaComplex(z),
+      logGammaComplexImError(z)
     );
     if (big === null) return undefined;
     if (big !== undefined) return big;
@@ -9483,9 +9704,22 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           context.engine._typeResolver
         );
       },
-      evaluate: ([a, b], { engine }) => {
+      evaluate: ([a, b], { engine, numericApproximation, expression }) => {
         if (isNumber(b) && b.isSame(0))
           return indeterminateFormAnswer(engine, [a, b]);
+        // `Remainder` jumps where `a/b` is a half-integer, so exact operands
+        // are read exactly, as for `Mod`: `exactRemainderUnderN()` under
+        // `.N()`, and the exact remainder otherwise. A float operand takes
+        // the float lanes of `apply2()` below.
+        if (numericApproximation) {
+          const exact = exactRemainderUnderN(a, b, expression);
+          if (exact !== undefined) return exact;
+        } else if (!hasFloatOperand([a, b])) {
+          const reduced = integerRemainder(a, b);
+          if (reduced !== undefined) return engine.number(reduced);
+          const exact = exactRemainder(a, b);
+          if (exact !== undefined) return exact.evaluate();
+        }
         return apply2(
           a,
           b,
@@ -11275,10 +11509,21 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       evaluateAsync: async (ops, options) => {
         const ce = options.engine;
         // As in the synchronous handler: a one-operand form over an operand
-        // that can be absent as a whole.
-        const resolved = withAbsentableOperandResolved(ops);
-        if (resolved === undefined) return ce.NaN;
-        ops = resolved;
+        // that can be absent as a whole. The operand is awaited, and it is
+        // evaluated exactly, as in the synchronous handler.
+        const pending = withAbsentableOperandResolvedAsync(ops, (x) =>
+          x.evaluateAsync({
+            signal: options.signal,
+            _effects: options.effects,
+            _contextStack: options._contextStack,
+            _precisionWindow: options._precisionWindow,
+          })
+        );
+        if (pending !== undefined) {
+          const resolved = await pending;
+          if (resolved === undefined) return ce.NaN;
+          ops = resolved;
+        }
         const numeric = options.numericApproximation;
         const bounds = ops.slice(1);
         // A body holding an asynchronous-only application is evaluated per
@@ -11652,10 +11897,23 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         }
       ) => {
         // Arity-1 form over an operand that can be absent as a whole: as in
-        // the synchronous handler.
-        const resolved = withAbsentableOperandResolved([first, ...rest]);
-        if (resolved === undefined) return engine.NaN;
-        first = resolved[0];
+        // the synchronous handler. The operand is awaited, and it is
+        // evaluated exactly, as in the synchronous handler.
+        const pending = withAbsentableOperandResolvedAsync(
+          [first, ...rest],
+          (x) =>
+            x.evaluateAsync({
+              signal,
+              _effects: effects,
+              _contextStack,
+              _precisionWindow,
+            })
+        );
+        if (pending !== undefined) {
+          const resolved = await pending;
+          if (resolved === undefined) return engine.NaN;
+          first = resolved[0];
+        }
         // Arity-1 collection-reducer form: Sum(L). A literal collection
         // whose elements hold an asynchronous-only application is evaluated
         // first, which awaits them (`List` evaluates its elements); the
@@ -12832,7 +13090,11 @@ function evaluateAbs(
  * as an operand or an element. A list folded on its doubles
  * (`isMachineDoubleList`) is recorded in `machineLists` instead: its doubles
  * do not say which elements are floats (an exact `1/2` is the double `0.5`),
- * so its elements are read only when an `Indeterminate` was seen.
+ * so its elements are read only when an `Indeterminate` was seen. A
+ * `Linspace` is recorded there too: its extremum is read off its endpoints,
+ * but its other samples can be floats (`Linspace(0.5, 2, 3)` is
+ * `[0.5, 1.25, 2]`), so its samples are read when an `Indeterminate` was
+ * seen.
  */
 type ExtremumWalk = { inexact: boolean; machineLists: Expression[] };
 
@@ -12917,14 +13179,25 @@ function processMinMaxItem(
     // collection: it contributes no value and nothing symbolic, so that
     // `evaluateMinMax` answers `NaN` when no other operand supplies data.
     if (count === 0) return [undefined, []];
-    if (count === 1) return [start, []];
+    walk.machineLists.push(item);
+    // The value returned is the sample that iterating the collection yields
+    // at that endpoint (`at`), not the endpoint operand: the samples are
+    // computed from the doubles of the endpoints, so `Min(Linspace(1/3, 1,
+    // 3))` is the float `0.333…`, the first element, not the exact `1/3`.
+    if (count === 1) return [item.at(1) ?? start, []];
     // Two or more samples span both endpoints inclusive, so the extremum is
     // the larger/smaller OF THE TWO — endpoints that cannot be ordered (a
     // symbolic one, as in `Linspace(a, 1, 3)`) leave it unknown, and the
     // operand stays symbolic rather than guess an endpoint.
     const endpoint = scalarExtremum(start, end, upper, false);
     if (endpoint === undefined) return [undefined, [item]];
-    return [endpoint, []];
+    const sample =
+      endpoint === start
+        ? item.at(1)
+        : endpoint === end && typeof count === 'number'
+          ? item.at(count)
+          : undefined;
+    return [sample ?? endpoint, []];
   }
 
   // TEXT is ATOMIC in an extremum. A string is an indexed collection of its
@@ -13333,6 +13606,46 @@ function foldExtremum(
   return numericApproximation ? acc.N() : acc;
 }
 
+/**
+ * True when a sample of the finite `Linspace` `list` is inexact (a float).
+ * The `Linspace` handlers box each sample from its double, so a sample is
+ * exact exactly when its double is an integer.
+ *
+ * The samples are not built as an array: a `Linspace` of 10^9 samples would
+ * exhaust the memory. When the first and the last samples are integers, the
+ * step between two samples is an integer, and every value involved (the
+ * endpoints, and the span times the count) is a safe integer, the computation
+ * of each sample is exact and gives an integer, so no sample is inexact.
+ * Otherwise the samples are read one at a time, and the read stops at the
+ * first inexact one: when the step is not an integer, that is the first or
+ * the second sample.
+ */
+function linspaceHasInexactSample(list: Expression): boolean {
+  const count = list.count;
+  if (count === 0) return false;
+  const first = list.at(1);
+  if (first !== undefined && isInexactOperand(first)) return true;
+  const last = typeof count === 'number' ? list.at(count) : undefined;
+  if (last !== undefined && isInexactOperand(last)) return true;
+  if (typeof count === 'number' && first !== undefined && last !== undefined) {
+    if (count <= 2) return false;
+    const lower = first.re;
+    const upper = last.re;
+    const span = upper - lower;
+    if (
+      Number.isInteger(lower) &&
+      Number.isInteger(upper) &&
+      Number.isInteger(span / (count - 1)) &&
+      Math.abs(lower) <= Number.MAX_SAFE_INTEGER &&
+      Math.abs(upper) <= Number.MAX_SAFE_INTEGER &&
+      Math.abs(span) * count <= Number.MAX_SAFE_INTEGER
+    )
+      return false;
+  }
+  for (const sample of list.each()) if (isInexactOperand(sample)) return true;
+  return false;
+}
+
 function evaluateMinMax(
   ce: ComputeEngine,
   ops: ReadonlyArray<Expression>,
@@ -13386,8 +13699,10 @@ function evaluateMinMax(
   if (sawNaN) return ce.NaN;
   if (sawIndeterminate)
     return walk.inexact ||
-      walk.machineLists.some(
-        (list) => isFunction(list) && list.ops.some(isInexactOperand)
+      walk.machineLists.some((list) =>
+        isFunction(list, 'Linspace')
+          ? linspaceHasInexactSample(list)
+          : isFunction(list) && list.ops.some(isInexactOperand)
       )
       ? ce.NaN
       : ce.Indeterminate;

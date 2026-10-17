@@ -21,7 +21,12 @@ import {
   MathJsonSymbol,
 } from '../../../math-json/types.js';
 import { joinLatex } from '../tokenizer.js';
-import { PIPE_TOPIC_MARKER, parseTextRun } from './definitions-core.js';
+import { parseDerivativeOperand } from './definitions-arithmetic.js';
+import {
+  PIPE_TOPIC_MARKER,
+  derivativeOrder,
+  parseTextRun,
+} from './definitions-core.js';
 
 // TeX dimension units (each letter is a separate token from the tokenizer)
 const TEX_UNITS = [
@@ -274,17 +279,24 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
         const seq = getSequence(sub);
         const vars = seq ?? [sub];
         parser.skipSpace();
-        let rhs: MathJsonExpression =
-          parser.parseGroup() ?? parser.parseSymbol() ?? 'Nothing';
-        if (!isEmptySequence(rhs)) {
-          const args = parser.parseArguments();
-          if (args) rhs = [rhs as MathJsonSymbol, ...args];
-        }
-        // A superscript degree repeats a single variable: ∂_x^2 f → D(f, x, x).
-        const degree = machineValue(sup) ?? 1;
+        // A braced operand is the operand (`∂_x {x^2}`, `∂_x {f}(x)`). Any
+        // other operand has the extent of the operand of a Leibniz
+        // derivative (see `parseDerivativeOperand()`): `∂_x \sin(x)` is
+        // `D(sin(x), x)` and `∂_x x^2` is `D(x^2, x)`. Before, only a name
+        // was read, so `∂_x \sin(x)` was `D(Nothing, x)·sin(x)`.
+        let rhs: MathJsonExpression | null = parser.parseGroup();
+        if (rhs !== null) {
+          if (!isEmptySequence(rhs)) {
+            const args = parser.parseArguments();
+            if (args) rhs = [rhs as MathJsonSymbol, ...args];
+          }
+        } else if (parser.atTerminator({ minPrec: 0 })) rhs = 'Nothing';
+        else rhs = parseDerivativeOperand(parser);
+        // A superscript is the order of a single variable: ∂_x^2 f is
+        // D(f, x, x), and ∂_x^n f is D(f, {x, n}) (see `derivativeOrder()`).
         const expanded: MathJsonExpression[] =
-          vars.length === 1 && degree > 1
-            ? Array.from({ length: degree }, () => vars[0])
+          vars.length === 1 && sup !== 'Nothing'
+            ? derivativeOrder(vars[0], sup)
             : [...vars];
         return ['D', rhs, ...expanded] as MathJsonExpression;
       }
@@ -293,34 +305,48 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
       // chain of ∂-terms in the same group, so a denominator like `∂x ∂y` or
       // `∂x²` is captured by this single marker rather than tripping the group
       // parser on the following prefix `∂`. Each term contributes a variable
-      // (a `∂xⁿ` exponent repeats it). The numerator forms `∂f` and bare `∂`
-      // yield a single item, left for `parseFraction` to interpret.
+      // (a `∂xⁿ` exponent is its order, see `derivativeOrder()`). The
+      // numerator forms `∂f` and bare `∂` yield a single item, left for
+      // `parseFraction` to interpret.
+      //
+      // A single term keeps its exponent as written (`∂f^3` is the marker of
+      // `f^3`): in a numerator, the exponent is part of the differentiand,
+      // and `parseFraction` reads the exponent of a single denominator term
+      // as its order (`∂x^2` is `x, x`).
       const items: MathJsonExpression[] = [];
+      const terms: {
+        v: MathJsonExpression;
+        order: MathJsonExpression | null;
+        written: MathJsonExpression;
+      }[] = [];
       const grabItem = () => {
         parser.skipSpace();
-        // A term of a chain can put its repeat count on the `\partial`
+        // A term of a chain can put its order on the `\partial`
         // (`\partial x\,\partial^2 y`) instead of on the variable
-        // (`\partial y^2`). Both spellings repeat the variable.
-        let reps = 1;
-        let preReps: number | null = null;
+        // (`\partial y^2`). Both spellings are the order of the variable.
+        let order: MathJsonExpression | null = null;
         if (parser.match('^')) {
-          const e = parser.parseGroup() ?? parser.parseToken();
-          preReps = machineValue(e) ?? 1;
+          order = parser.parseGroup() ?? parser.parseToken();
           parser.skipSpace();
         }
         let v: MathJsonExpression =
           parser.parseGroup() ?? parser.parseSymbol() ?? 'Nothing';
-        if (preReps !== null) {
-          reps = preReps;
-        } else if (operator(v) === 'Power') {
-          reps = machineValue(operand(v, 2)) ?? 1;
-          v = operand(v, 1) ?? v;
-        } else if (parser.match('^')) {
-          const e = parser.parseGroup() ?? parser.parseToken();
-          reps = machineValue(e) ?? 1;
+        let written = v;
+        if (order === null) {
+          if (operator(v) === 'Power') {
+            order = operand(v, 2);
+            v = operand(v, 1) ?? v;
+          } else if (parser.match('^')) {
+            order = parser.parseGroup() ?? parser.parseToken();
+            if (order !== null) written = ['Power', v, order];
+          }
         }
-        for (let i = 0; i < reps; i++) items.push(v);
+        terms.push({ v, order, written });
       };
+      const termVariables = () =>
+        terms.flatMap(({ v, order }) =>
+          order === null ? [v] : derivativeOrder(v, order)
+        );
       // Skip the space between two terms of a chain and consume the
       // `\partial` of the next term. When no `\partial` follows, the index is
       // restored, so a space after the last term stays in the input.
@@ -341,8 +367,9 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
       // (`\frac{\partial^3 f}{\partial^2 x\,\partial y}`).
       //
       // When another `\partial` follows the first term, this is a
-      // denominator chain: the degree repeats the first variable, and the
-      // rest of the chain is absorbed below.
+      // denominator chain: the degree is the order of the first variable
+      // (see `derivativeOrder()`), and the rest of the chain is absorbed
+      // below.
       //
       // Otherwise the term after `∂^n` is NOT captured here: the group
       // parser reads it as an ordinary expression after the marker. In a
@@ -354,26 +381,22 @@ export const DEFINITIONS_OTHERS: LatexDictionary = [
       // would lose the exponent `3`.
       if (sup !== 'Nothing') {
         const start = parser.index;
-        const n = machineValue(sup);
         parser.skipSpace();
         const first = parser.parseGroup() ?? parser.parseSymbol();
-        if (
-          first === null ||
-          n === null ||
-          !Number.isInteger(n) ||
-          n < 1 ||
-          !matchNextTerm()
-        ) {
+        if (first === null || !matchNextTerm()) {
           parser.index = start;
           return ['PartialDerivative', 'Nothing', sup] as MathJsonExpression;
         }
-        for (let i = 0; i < n; i++) items.push(first);
+        items.push(...derivativeOrder(first, sup));
         // `matchNextTerm()` has consumed the `\partial` of the second term.
         do grabItem();
         while (matchNextTerm());
+        items.push(...termVariables());
       } else {
         grabItem();
         while (matchNextTerm()) grabItem();
+        if (terms.length === 1) items.push(terms[0].written);
+        else items.push(...termVariables());
       }
       if (items.length === 1)
         return ['PartialDerivative', items[0], sup] as MathJsonExpression;

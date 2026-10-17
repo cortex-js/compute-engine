@@ -370,6 +370,33 @@ function isPrimeMarkSpan(tokens: readonly LatexToken[]): boolean {
   return true;
 }
 
+/**
+ * Whether a prime mark starts at token `k`, after optional white space: `'`,
+ * `\prime`, `\doubleprime`, `\tripleprime`, or a `^` followed by one of
+ * these commands, braced or not (`^\prime`, `^{\prime}`). A function name
+ * followed by a prime mark is the operand of a derivative (`sin'(x)`).
+ */
+function startsWithPrimeMark(
+  tokens: readonly LatexToken[],
+  k: number
+): boolean {
+  const isPrimeCommand = (t: LatexToken | undefined) =>
+    t === '\\prime' || t === '\\doubleprime' || t === '\\tripleprime';
+  const skipSpace = () => {
+    while (tokens[k] === '<space>') k++;
+  };
+  skipSpace();
+  if (tokens[k] === "'" || isPrimeCommand(tokens[k])) return true;
+  if (tokens[k] !== '^') return false;
+  k++;
+  skipSpace();
+  if (tokens[k] === '<{>') {
+    k++;
+    skipSpace();
+  }
+  return isPrimeCommand(tokens[k]);
+}
+
 /** Map of common bare function names (e.g. `sin(x)` without a backslash,
  * accepted in non-strict mode) to their MathJSON operator.
  * See `tryParseBareFunction()`. */
@@ -660,6 +687,11 @@ export class _Parser implements Parser {
 
   _isApplicationCandidate(expr: MathJsonExpression): boolean {
     return this._applicationPolicy?.has(expr) ?? false;
+  }
+
+  /** See `ApplicationPolicy.copied()`. */
+  _applicationCopied(before: object, after: MathJsonExpression): void {
+    this._applicationPolicy?.copied(before, after);
   }
 
   _index = 0;
@@ -1220,6 +1252,11 @@ export class _Parser implements Parser {
       const chain = lhs as unknown as MathJsonExpression[];
       if (operator(rhs) === op) chain.push(...operands(rhs));
       else chain.push(rhs);
+      // The chain now holds more operands than the source span recorded for
+      // it. Forget that span: the infix loop records the span of the larger
+      // chain on its next step, and `onAmbiguity: 'error'` can then select
+      // the chain, or one of its new operands, instead of the whole result.
+      this._exprSpans?.delete(lhs);
       return lhs;
     }
     const result = foldAssociativeOperator(op, lhs, rhs);
@@ -3235,12 +3272,17 @@ export class _Parser implements Parser {
           : 'apply'
         : 'juxtapose';
     this.skipVisualSpace();
+    const groupStart = this.index;
     let opening = this.index;
     if (OPEN_DELIMITER_PREFIX[this._tokens[opening]]) opening++;
     if (this._tokens[opening] === '<{>') opening++;
     if (!DELIMITER_SHORTHAND['('].includes(this._tokens[opening])) return null;
     const group = this.parseEnclosure();
     if (group === null) return null;
+    // Record the span of the group: with `onAmbiguity: 'error'`, an `Error`
+    // node can then replace the group, or an expression inside it, instead
+    // of the whole candidate.
+    if (this._exprSpans !== null) this.recordSpan(group, groupStart);
     this._applicationPolicy ??= new ApplicationPolicy(
       this.options.resolveApplication
     );
@@ -3674,11 +3716,7 @@ export class _Parser implements Parser {
     // parselets, which read it as a symbol, and the prime is then read as a
     // postfix `Derivative`. Without this check, `\prime` was read as the
     // first token of the argument and gave an `unexpected-command` error.
-    if (
-      this.peek === "'" ||
-      this.peek === '\\prime' ||
-      this.peek === '\\doubleprime'
-    ) {
+    if (startsWithPrimeMark(this._tokens, this.index)) {
       this.index = start;
       return null;
     }
@@ -4291,7 +4329,7 @@ export class _Parser implements Parser {
       // and a person can mean a call with an argument that is missing. A
       // name followed by a prime (`sin'(x)`) is the derivative of the
       // function, so the argument is not missing: it is not reported.
-      if (this.peek !== "'" && this.peek !== '\\prime')
+      if (!startsWithPrimeMark(this._tokens, this.index))
         this._emitAmbiguity('ambiguous-function-argument', start, this.index, {
           function: name,
         });
@@ -6912,8 +6950,14 @@ function ambiguityErrors(
     if (path.length === 0) return by;
     const elements = [...functionElements(node)!];
     elements[path[0]] = replace(elements[path[0]], path.slice(1), by);
-    if (Array.isArray(node)) return elements as unknown as MathJsonExpression;
-    return { ...(node as object), fn: elements } as MathJsonExpression;
+    const copy = (
+      Array.isArray(node) ? elements : { ...(node as object), fn: elements }
+    ) as MathJsonExpression;
+    // An application candidate (`f(x)` with a `resolveApplication` hook) is
+    // recorded by identity: record the copy too, or the hook is not called
+    // for it.
+    parser._applicationCopied(node as object, copy);
+    return copy;
   };
 
   const replaced: number[][] = [];

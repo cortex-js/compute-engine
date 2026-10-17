@@ -315,7 +315,7 @@ describe('follow-up (4): the single-collection predicate/mapping operators', () 
     // dispatched per element (`_SYS.bcastFn` when the element is a collection).
     expect(r.code).toBe(
       '((_f) => (_val_cs).filter((_x) => _f(_x)).length)(((_tv1) => (_tv2) => ' +
-        'Array.isArray(_tv2) ? _SYS.bcastFn(_tv1, _tv2) : _tv1(_tv2))(((n) => 1 < n)))'
+        'Array.isArray(_tv2) ? _SYS.bcastFn(_tv1, _tv2) : _tv1(_tv2))(((n = NaN) => 1 < n)))'
     );
     expect(r.preamble).toContain('const _val_cs = [1, 2, 3];');
     expect((r.run as () => unknown)()).toBe(2);

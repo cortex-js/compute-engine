@@ -903,6 +903,12 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
             numericApproximation,
             () => measurementVariance(engine, xs, false)
           );
+        // Infinite data is tested before complex data, so that an infinite
+        // datum next to an exact complex datum is `Indeterminate`, as next to
+        // an exact real datum (`NaN` with a float datum): the complex branch
+        // below answers `NaN` for every datum that is not finite.
+        const infinite = infiniteDataAnswer(engine, xs, numericApproximation);
+        if (infinite) return infinite;
         // Complex data: the variance is E[|X − μ|²] — a real, non-negative
         // number (see `complexVariance`).
         if (nonRealDatum(xs)) {
@@ -910,8 +916,6 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           const v = complexVariance(engine, xs, false);
           return numericApproximation ? v.N() : v;
         }
-        const infinite = infiniteDataAnswer(engine, xs, numericApproximation);
-        if (infinite) return infinite;
         if (!numericApproximation) {
           const vals = exactData(xs);
           if (vals) return exactVariance(engine, vals, false);
@@ -993,6 +997,12 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
             numericApproximation,
             () => measurementVariance(engine, xs, true)
           );
+        // Infinite data is tested before complex data, so that an infinite
+        // datum next to an exact complex datum is `Indeterminate`, as next to
+        // an exact real datum (`NaN` with a float datum): the complex branch
+        // below answers `NaN` for every datum that is not finite.
+        const infinite = infiniteDataAnswer(engine, xs, numericApproximation);
+        if (infinite) return infinite;
         // Complex data: the variance is E[|X − μ|²] — a real, non-negative
         // number (see `complexVariance`).
         if (nonRealDatum(xs)) {
@@ -1000,8 +1010,6 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           const v = complexVariance(engine, xs, true);
           return numericApproximation ? v.N() : v;
         }
-        const infinite = infiniteDataAnswer(engine, xs, numericApproximation);
-        if (infinite) return infinite;
         if (!numericApproximation) {
           const vals = exactData(xs);
           if (vals) return exactVariance(engine, vals, true);
@@ -1086,6 +1094,12 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
                 .function('Sqrt', [measurementVariance(engine, xs, false)])
                 .evaluate()
           );
+        // Infinite data is tested before complex data, so that an infinite
+        // datum next to an exact complex datum is `Indeterminate`, as next to
+        // an exact real datum (`NaN` with a float datum): the complex branch
+        // below answers `NaN` for every datum that is not finite.
+        const infinite = infiniteDataAnswer(engine, xs, numericApproximation);
+        if (infinite) return infinite;
         // Complex data: the standard deviation is the square root of
         // E[|X − μ|²], which is real and non-negative (see `complexVariance`).
         if (nonRealDatum(xs)) {
@@ -1095,8 +1109,6 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
             .evaluate();
           return numericApproximation ? s.N() : s;
         }
-        const infinite = infiniteDataAnswer(engine, xs, numericApproximation);
-        if (infinite) return infinite;
         if (!numericApproximation) {
           const vals = exactData(xs);
           if (vals)
@@ -1175,6 +1187,12 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
                 .function('Sqrt', [measurementVariance(engine, xs, true)])
                 .evaluate()
           );
+        // Infinite data is tested before complex data, so that an infinite
+        // datum next to an exact complex datum is `Indeterminate`, as next to
+        // an exact real datum (`NaN` with a float datum): the complex branch
+        // below answers `NaN` for every datum that is not finite.
+        const infinite = infiniteDataAnswer(engine, xs, numericApproximation);
+        if (infinite) return infinite;
         // Complex data: the standard deviation is the square root of
         // E[|X − μ|²], which is real and non-negative (see `complexVariance`).
         if (nonRealDatum(xs)) {
@@ -1184,8 +1202,6 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
             .evaluate();
           return numericApproximation ? s.N() : s;
         }
-        const infinite = infiniteDataAnswer(engine, xs, numericApproximation);
-        if (infinite) return infinite;
         if (!numericApproximation) {
           const vals = exactData(xs);
           if (vals)

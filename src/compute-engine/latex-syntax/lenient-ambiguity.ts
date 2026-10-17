@@ -208,7 +208,10 @@ export function layoutOf(tokens: readonly string[]): Layout {
       segment[i] = current;
       depth[i] = stack.length;
       inBraces[i] = braces > 0;
-      const brace = t === '<{>' || t === '\\{' || t === '\\lbrace';
+      // Only a LaTeX group `{…}` holds an argument whose text is not checked.
+      // `\{` and `\lbrace` are the fences of a set: they are brackets, and
+      // their contents are checked as the contents of parentheses are.
+      const brace = t === '<{>';
       stack.push({ segment: current, brace });
       if (brace) braces += 1;
       current = nextSegment++;
@@ -348,6 +351,33 @@ function reportFactorial(
 }
 
 /**
+ * The index of the superscript marker that ends directly before token `k`:
+ * `k - 1` for a `^`, and `k - 2` for a `**`, which the lenient grammar reads
+ * as `^` (`x**2` is `x^2`). Return -1 when there is no marker there.
+ */
+function scriptMarkerBefore(tokens: readonly string[], k: number): number {
+  if (tokens[k - 1] === '^') return k - 1;
+  if (tokens[k - 1] === '*' && tokens[k - 2] === '*') return k - 2;
+  return -1;
+}
+
+/**
+ * The index of the superscript marker that ends directly before token `k`,
+ * with a sign or not between the marker and `k` (`2^-k`, `2**-k`), or -1
+ * (see `scriptMarkerBefore()`).
+ */
+function signedScriptMarkerBefore(
+  tokens: readonly string[],
+  k: number
+): number {
+  const marker = scriptMarkerBefore(tokens, k);
+  if (marker >= 0) return marker;
+  if (tokens[k - 1] === '-' || tokens[k - 1] === '+')
+    return scriptMarkerBefore(tokens, k - 1);
+  return -1;
+}
+
+/**
  * Whether the token `k` is a letter or a digit that is a whole base of a
  * script: not a subscript or a superscript itself. In `x_1^2!`, the `1` is
  * the subscript of `x`, not the base of `^2`, so a span that starts at the
@@ -431,8 +461,14 @@ function reportFactorialOperand(
     )
       continue;
 
-    // A superscript directly after the `!`: `n!²`
-    if (scripted && tokens[i + 1] === '^') {
+    // A superscript directly after the `!`: `n!²`, `n!^2` or `n!**2`
+    const markerLength =
+      tokens[i + 1] === '^'
+        ? 1
+        : tokens[i + 1] === '*' && tokens[i + 2] === '*'
+          ? 2
+          : 0;
+    if (scripted && markerLength > 0) {
       // The span starts at the operand of the `!`: the opening bracket that
       // matches a closing bracket (`(n+1)!²`), or the start of a run of
       // letters (`n!²`) or of digits (`10!²`).
@@ -453,13 +489,7 @@ function reportFactorialOperand(
       // `((x^2)!)^3`), the span starts at the base of that exponent: the
       // base is one letter or digit, or a group in brackets. Else the span
       // starts at the `^`.
-      let caret = -1;
-      if (tokens[start - 1] === '^') caret = start - 1;
-      else if (
-        (tokens[start - 1] === '-' || tokens[start - 1] === '+') &&
-        tokens[start - 2] === '^'
-      )
-        caret = start - 2;
+      const caret = signedScriptMarkerBefore(tokens, start);
       if (caret >= 0) {
         start = caret;
         const base = tokens[caret - 1];
@@ -470,7 +500,11 @@ function reportFactorialOperand(
         }
       }
       if (spaced && afterFunctionName(start)) continue;
-      emit('ambiguous-factorial', start, operandEnd(at, i + 1));
+      // The end of the exponent after the marker, with a sign or not
+      let end = i + 1 + markerLength;
+      if (at(end) === '-' || at(end) === '+') end += 1;
+      if (at(end) !== undefined) end = operandEnd(at, end);
+      emit('ambiguous-factorial', start, end);
       // The `!` of an exponent is also reported as the `!` of `x^2!` is
       // (see below): `x^2!^3` can also mean `x^{2!}`.
       if (caret < 0) continue;
@@ -483,8 +517,8 @@ function reportFactorialOperand(
     if (tokens[k] === '<}>') {
       const open = matchingBracket(at, k);
       const content = tokens.slice(open + 1, k).join('');
-      if (open > 0 && tokens[open - 1] === '^' && /^-?[0-9]+$/.test(content))
-        script = open - 1;
+      if (open > 0 && /^-?[0-9]+$/.test(content))
+        script = scriptMarkerBefore(tokens, open);
     } else if (isLetter(tokens[k]) || isDigit(tokens[k])) {
       const sameKind = isDigit(tokens[k]) ? isDigit : isLetter;
       while (k > 0 && sameKind(tokens[k - 1])) k -= 1;
@@ -492,17 +526,12 @@ function reportFactorialOperand(
       // subscript: `√i_1!` is `(√i_1)!`, as `√i!` is `(√i)!`.
       if (tokens[k - 1] === '_' && isLetter(tokens[k - 2])) k -= 2;
       if (tokens[k - 1] === '√') script = k - 1;
-      else if (tokens[k - 1] === '^') script = k - 1;
-      else if (
-        (tokens[k - 1] === '-' || tokens[k - 1] === '+') &&
-        tokens[k - 2] === '^'
-      )
-        script = k - 2;
+      else script = signedScriptMarkerBefore(tokens, k);
     }
     if (script < 0) continue;
     // The span starts at the base of the `^` when it is one letter or digit
     const start =
-      tokens[script] === '^' && isOneTokenBase(tokens, script - 1)
+      tokens[script] !== '√' && isOneTokenBase(tokens, script - 1)
         ? script - 1
         : script;
     if (spaced && afterFunctionName(start)) continue;
@@ -514,7 +543,9 @@ function reportFactorialOperand(
  * `ambiguous-missing-base`: a `_` with no base before it is read as the
  * symbol `_`: `-_1` is `(-_)·1`. A person can mean a subscript of a base
  * that is missing, or the text has a typing error. The `_` follows the
- * start of the line, white space, an operator or an opening bracket. The
+ * start of the line, an operator or an opening bracket, with white space
+ * between them or not. After an operand and white space, the `_` is a
+ * subscript of the operand (`x _2` is `x_2`), and is not reported. The
  * span is the `_` and the script after it.
  */
 function reportMissingBase(
@@ -527,7 +558,9 @@ function reportMissingBase(
   const at = (k: number) => tokens[k];
   for (let i = 0; i < tokens.length; i++) {
     if (tokens[i] !== '_' || !outside(i)) continue;
-    if (isOperandEnd(tokens[i - 1])) continue;
+    let before = i - 1;
+    while (tokens[before] === SPACE) before -= 1;
+    if (isOperandEnd(tokens[before])) continue;
     const next = tokens[i + 1];
     const scripted = next === '<{>' || isDigit(next) || isLetter(next);
     emit('ambiguous-missing-base', i, scripted ? operandEnd(at, i) : i + 1);
@@ -724,23 +757,41 @@ function reportRange(
   // bound that is not a number or a name, or is itself an operand of an
   // arithmetic operation (the raw result seen here can group the operation
   // either way).
-  const compoundBound = someNode(
-    expr,
-    (x) =>
-      (operator(x) === 'Range' &&
-        operands(x).some((op) => Array.isArray(op) && !isNumberLiteral(op))) ||
-      (RANGE_ARITHMETIC.has(operator(x) ?? '') &&
-        operands(x).some((op) => operator(op) === 'Range'))
-  );
-  for (const group of bySegment(pairs, layout).values()) {
+  //
+  // Each segment is checked with its own `Range`. The `Range` nodes of the
+  // raw result, in the order of a walk from the root, are in source order,
+  // as are the segments: when there are as many of each, the k-th segment
+  // is the k-th `Range`. In `[1..3, 1..5/2]`, only the second range is
+  // reported. When the counts differ (a `Range` that has no `..`), the
+  // check is for the whole result, and each segment is reported when one
+  // `Range` has a compound bound.
+  const compound: boolean[] = [];
+  const collectRanges = (
+    x: MathJsonExpression | null | undefined,
+    parent: string | undefined
+  ): void => {
+    if (x === null || x === undefined) return;
+    if (operator(x) === 'Range')
+      compound.push(
+        RANGE_ARITHMETIC.has(parent ?? '') ||
+          operands(x).some((op) => Array.isArray(op) && !isNumberLiteral(op))
+      );
+    for (const op of operands(x)) collectRanges(op, operator(x));
+  };
+  collectRanges(expr, undefined);
+  const groups = [...bySegment(pairs, layout).values()];
+  const anyCompound = compound.some((c) => c);
+  groups.forEach((group, k) => {
     if (group.length < 2) {
+      const compoundBound =
+        compound.length === groups.length ? compound[k] : anyCompound;
       if (compoundBound && group[0] !== n - 1)
         emit('ambiguous-range', group[0], Math.min(n, group[0] + 2));
-      continue;
+      return;
     }
     const last = group[group.length - 1];
     emit('ambiguous-range', group[0], Math.min(n, last + 2));
-  }
+  });
 }
 
 /** The arithmetic operations that can apply to a whole range. `Negate` is

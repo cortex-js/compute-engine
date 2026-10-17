@@ -717,8 +717,15 @@ const FUNCTIONS: Record<
     if (isFunction(expr.op1, 'Block')) {
       if (expr.op1.nops === 0) return `(${serializedArgs()}) => {}`;
       if (expr.op1.nops === 1) {
-        if (args.length === 1 && isSymbol(args[0], '_1')) {
-          // If there is a single argument and it's _1, we can use _ instead
+        // If there is a single argument and it's _1, we can use _ instead,
+        // unless the body already mentions `_`: an enclosing literal's
+        // parameter, which the rename would make indistinguishable from this
+        // one (`(_) => Apply((_) => _ + _, 2)` for an inner `_1 + _`).
+        if (
+          args.length === 1 &&
+          isSymbol(args[0], '_1') &&
+          !expr.op1.symbols.includes('_')
+        ) {
           return `(_) => ${serialize(unwrap(expr.op1.op1).subs({ _1: '_' }))}`;
         }
         return `(${serializedArgs()}) => ${serialize(unwrap(expr.op1.op1))}`;

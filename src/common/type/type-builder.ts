@@ -42,7 +42,7 @@ import {
 import {
   TypeVariableError,
   freeTypeVariables,
-  LENGTH_BOUND,
+  lengthBoundOf,
   markValueVariables,
   valueVariableNamesOf,
   satisfiesTypeBound,
@@ -154,6 +154,15 @@ export class TypeBuilder implements ASTVisitor<Type> {
       return param;
     });
 
+    // `_valueNames` is keyed by NAME, so the clause's own variables start
+    // unmarked: a variable of the same name that an earlier clause (another
+    // arm of an intersection: `((vector<real^N>) -> real where N) & ((N) ->
+    // N where N: string)`) or an enclosing clause marked as a value is a
+    // different variable. The outer marks are restored once this clause is
+    // built.
+    const shadowedValueNames = typeParams
+      .map((p) => p.name)
+      .filter((name) => this._valueNames.delete(name));
     this._typeVarScopes.push(typeParams);
     let body: Type;
     try {
@@ -169,6 +178,8 @@ export class TypeBuilder implements ASTVisitor<Type> {
     for (const p of typeParams)
       if (this._valueNames.has(p.name)) p.kind = 'value';
     body = markValueVariables(body, valueVariableNames(typeParams));
+    for (const p of typeParams) this._valueNames.delete(p.name);
+    for (const name of shadowedValueNames) this._valueNames.add(name);
 
     // The clause LIVES on the signature it quantifies. A clause on anything
     // else (a bare intersection, a union, a primitive) has no arm to scope
@@ -597,8 +608,8 @@ export class TypeBuilder implements ASTVisitor<Type> {
           // call could instantiate an application the builder itself refuses
           // (`(n: N) -> big<N> where N` with `big<N: integer<2..>>`, called
           // with `1`).
-          const argBound = this.typeParameter(arg.name)?.bound ?? LENGTH_BOUND;
-          const bound = param.bound ?? LENGTH_BOUND;
+          const argBound = lengthBoundOf(this.typeParameter(arg.name)?.bound);
+          const bound = lengthBoundOf(param.bound);
           if (!satisfiesTypeBound(argBound, bound))
             fail(
               'generic-alias-bound',
@@ -610,8 +621,10 @@ export class TypeBuilder implements ASTVisitor<Type> {
           // A value (`permutation<3>`), or a FAMILY of values written as a
           // type within the bound (`permutation<integer<1..>>`, which is how
           // an application whose length was never solved prints): anything
-          // else is a type where a value belongs.
-          const bound = param.bound ?? LENGTH_BOUND;
+          // else is a type where a value belongs. An explicit bound
+          // restricts the positive-length bound, it does not replace it:
+          // `perm<0>` is refused under `N: integer` too.
+          const bound = lengthBoundOf(param.bound);
           if (!satisfiesTypeBound(arg, bound))
             fail(
               'type-argument-kind',

@@ -752,12 +752,12 @@ function adaptiveFinite(
   // panel wider than 1), plus a margin.
   const depthOf = (p: Panel) =>
     Math.max(0, Math.log2(1 / (p.b - p.a))) + SHELL_DEPTH_MARGIN;
-  const depthLo = depthOf(cornerLo);
-  const depthHi = depthOf(cornerHi);
-  const widthLo = cornerLo.b - cornerLo.a;
-  const widthHi = cornerHi.b - cornerHi.a;
-  const regionLo = cornerLo.b;
-  const regionHi = cornerHi.a;
+  let depthLo = depthOf(cornerLo);
+  let depthHi = depthOf(cornerHi);
+  let widthLo = cornerLo.b - cornerLo.a;
+  let widthHi = cornerHi.b - cornerHi.a;
+  let regionLo = cornerLo.b;
+  let regionHi = cornerHi.a;
 
   // The absolute tolerance `atol` is scaled down for an integrand whose
   // values are small: `rtol` times the sum of the magnitudes of the panel
@@ -846,15 +846,32 @@ function adaptiveFinite(
     panels[worst] = left;
     panels.push(right);
 
-    if (iv === cornerLo) {
+    if (iv === cornerLo && iv === cornerHi) {
+      // A single starting panel is the corner of both endpoints. Its
+      // children are the two corners: each is not a shell of the other
+      // corner. The corners then start from the two halves, so that the
+      // extrapolation of one corner does not replace the panels of the
+      // other (with one starting panel, the integral of `(1 − x)^(−1/2)` on
+      // `[0, 1]` was `4`, twice its value `2`).
       cornerLo = left;
-      shellsLo.push(right.value);
-      shellErrorsLo.push(right.error);
-    }
-    if (iv === cornerHi) {
       cornerHi = right;
-      shellsHi.push(left.value);
-      shellErrorsHi.push(left.error);
+      depthLo = depthOf(left);
+      depthHi = depthOf(right);
+      widthLo = mid - iv.a;
+      widthHi = iv.b - mid;
+      regionLo = mid;
+      regionHi = mid;
+    } else {
+      if (iv === cornerLo) {
+        cornerLo = left;
+        shellsLo.push(right.value);
+        shellErrorsLo.push(right.error);
+      }
+      if (iv === cornerHi) {
+        cornerHi = right;
+        shellsHi.push(left.value);
+        shellErrorsHi.push(left.error);
+      }
     }
     // Stop as soon as the corner series is diagnosed: continuing only spends
     // the rest of the panel budget bisecting toward a singularity, which is
@@ -883,20 +900,26 @@ function adaptiveFinite(
     (tailUnresolved(shellsLo, tolerance(), widthLo, a) ||
       tailUnresolved(shellsHi, tolerance(), widthHi, b));
   // The value and the error of the panels inside each starting corner
-  // panel, which the extrapolation of its shells replaces. Non-finite panels
-  // are left out, as in the totals.
+  // panel, which the extrapolation of its shells replaces. A non-finite
+  // value or error is left out, as in the totals (`addPanel`): a panel with a
+  // finite value and a non-finite error is bad, but its value is in
+  // `totalValue`, and it must be replaced with the other panels of the
+  // corner. When it was left out here, its value stayed in the corrected
+  // result: with 1500 panels, `∫₀¹ cos(ln t)/t^0.99 dt` was
+  // `0.010051002 ± 1.8e-10`, and the integral is `0.0099990001`.
   let insideValueLo = 0;
   let insideErrorLo = 0;
   let insideValueHi = 0;
   let insideErrorHi = 0;
   for (const p of panels) {
-    if (panelIsBad(p)) continue;
+    const value = Number.isFinite(p.value) ? p.value : 0;
+    const error = Number.isFinite(p.error) ? p.error : 0;
     if (p.b <= regionLo) {
-      insideValueLo += p.value;
-      insideErrorLo += p.error;
+      insideValueLo += value;
+      insideErrorLo += error;
     } else if (p.a >= regionHi) {
-      insideValueHi += p.value;
-      insideErrorHi += p.error;
+      insideValueHi += value;
+      insideErrorHi += error;
     }
   }
   const corners = {

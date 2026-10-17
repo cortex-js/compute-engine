@@ -134,6 +134,29 @@ describe('the deferral authority covers tuple parameters', () => {
     expect(ce.box(['PointX', 'w']).isValid).toBe(true);
   });
 
+  // Two transparent aliases that reach themselves through a list slot were
+  // compared again and again, one alias unfold per call, until the stack
+  // overflowed. A pair met again on its own path is taken to overlap (an
+  // empty list ends the cycle: `([], 5, 3)` is a value of both); a slot that
+  // refutes the pair still refutes it.
+  test('recursive transparent aliases are compared without overflowing', () => {
+    const ce = new ComputeEngine();
+    ce.declareType('RA', 'tuple<list<RA>, unknown, integer>', { alias: true });
+    ce.declareType('RB', 'tuple<list<RB>, number, number>', { alias: true });
+    ce.declareType('RC', 'tuple<list<RC>, string, integer>', { alias: true });
+    const t = (s: string) => ce.type(s).type;
+    expect(overlapsForDeferredValidation(t('RA'), t('RB'))).toBe(true);
+    expect(overlapsForDeferredValidation(t('list<RA>'), t('list<RB>'))).toBe(
+      true
+    );
+    expect(overlapsForDeferredValidation(t('RC'), t('RB'))).toBe(false);
+    ce.declare('ra', 'RA');
+    ce.declare('rc', 'RC');
+    ce.declare('takesRB', '(RB) -> integer');
+    expect(ce.box(['takesRB', 'ra']).isValid).toBe(true);
+    expect(ce.box(['takesRB', 'rc']).isValid).toBe(false);
+  });
+
   test('a non-collection operand is still refuted at a tuple parameter', () => {
     expect(defer('number', 'tuple')).toBe(false);
     expect(defer('string', 'tuple')).toBe(false);

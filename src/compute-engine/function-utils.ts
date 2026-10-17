@@ -537,13 +537,14 @@ function anonymousParameters(
   // the inner `_` is the outer parameter. Renaming it to `_1` would make it
   // the inner parameter instead (the literal applied to 5 gave 4, not 7). In
   // that case the outer parameter keeps the name `_`, which is a valid
-  // parameter name.
-  if (slots.has('_') && !slots.has('_1') && renameIsCaptured(expr))
-    return [expr, [expr.engine.symbol('_', { canonical: false })]];
-  const body = slots.has('_') ? renameBareSlot(expr) : expr;
-  if (slots.has('_')) slots.add('_1');
-
+  // parameter name, in the first position. The other slots (`_2`, …) follow
+  // it in index order, as they do after a rename.
+  const captured = slots.has('_') && !slots.has('_1') && renameIsCaptured(expr);
+  const body = slots.has('_') && !captured ? renameBareSlot(expr) : expr;
   const params: Expression[] = [];
+  if (captured) params.push(expr.engine.symbol('_', { canonical: false }));
+  else if (slots.has('_')) slots.add('_1');
+
   for (let i = 1; i < 10; i++)
     if (slots.has(`_${i}`))
       params.push(body.engine.symbol(`_${i}`, { canonical: false }));

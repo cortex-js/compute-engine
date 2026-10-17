@@ -291,6 +291,76 @@ describe('A SYMBOL WITH NO DECLARED TYPE IS REAL, WHATEVER THE ENGINE DID BEFORE
   });
 });
 
+describe('AN ISOLATED SINGULAR POINT IN A DOUBLE INTEGRAL', () => {
+  // `((x − 1/64)² + (y − 1/64)²)^(−1/2)` is singular only at the point
+  // `(1/64, 1/64)`, the center of the first cell of the grid of the scan for
+  // moving poles in each dimension. The inner integral diverges on the two
+  // lines through that point only, a set of zero measure, and the double
+  // integral is finite: about 1.9451 (in polar coordinates around the
+  // point, the integrand is 1/r and the area element is r dr dθ). The scan
+  // counted one pole in each dimension and gave `+∞`.
+  test('the integral is not infinite', () => {
+    const ce = new ComputeEngine();
+    const a = ['Rational', 1, 64];
+    const body = [
+      'Power',
+      [
+        'Add',
+        ['Power', ['Subtract', 'x', a], 2],
+        ['Power', ['Subtract', 'y', a], 2],
+      ],
+      ['Rational', -1, 2],
+    ];
+    const value = integral(ce, body, [
+      ['x', 0, 1],
+      ['y', 0, 1],
+    ]).N();
+    expect(value.isInfinity).not.toBe(true);
+    expect(
+      value.isNaN === true || Math.abs(value.re - 1.9451316) < 1e-2
+    ).toBe(true);
+  });
+});
+
+describe('A DIAGONAL SINGULAR SET IN A TRIPLE INTEGRAL', () => {
+  // `((x − ½)² + (y − z)²)^(−3/4)` is singular on the line `x = ½, y = z`,
+  // a set of zero measure, and its triple integral over the unit cube is
+  // finite: about 8.6859 (mpmath). The scan for moving poles checked each
+  // cell center on the diagonal `y = z` again at a point moved by the same
+  // fraction in `y` and `z`, which stays on the diagonal, and gave `+∞` at
+  // once. The quadrature of this integrand is slow, so the evaluation runs
+  // with a time limit: a time-out is accepted, an infinite value is not.
+  test('the integral is not infinite', () => {
+    const ce = new ComputeEngine();
+    const body = [
+      'Power',
+      [
+        'Add',
+        ['Power', ['Subtract', 'x', ['Rational', 1, 2]], 2],
+        ['Power', ['Subtract', 'y', 'z'], 2],
+      ],
+      ['Rational', -3, 4],
+    ];
+    const e = integral(ce, body, [
+      ['x', 0, 1],
+      ['y', 0, 1],
+      ['z', 0, 1],
+    ]);
+    let value: ReturnType<typeof e.N> | undefined;
+    try {
+      value = ce.withTimeLimit(1500, () => e.N());
+    } catch (err) {
+      expect((err as Error).name).toBe('CancellationError');
+    }
+    if (value !== undefined) {
+      expect(value.isInfinity).not.toBe(true);
+      expect(
+        value.isNaN === true || Math.abs(value.re - 8.6858556) < 1e-2
+      ).toBe(true);
+    }
+  });
+});
+
 describe('A MOVING POLE WITH AN INFINITE BOUND', () => {
   // `∫₃⁴ ∫₀^∞ (y − x)⁻² dy dx`: for each x the inner integral has a pole at
   // `y = x`, inside `[0, +∞)`. The scan for such poles placed its grid on

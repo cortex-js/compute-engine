@@ -1816,12 +1816,53 @@ export function overlapsForDeferredValidation(
   t: Readonly<Type>,
   param: Readonly<Type>
 ): boolean {
+  return overlapsDeferred(t, param, undefined);
+}
+
+/**
+ * The nested comparison of two composite types (two tuple slots, or two tuple
+ * leaves of collections) by {@link overlapsDeferred}, with a guard against
+ * transparent recursive aliases.
+ *
+ * `tupleSlots` unfolds an alias with a fresh descent on every call, so two
+ * aliases that reach themselves through their own slots (`type alias A =
+ * tuple<list<A>, unknown, integer>` against `type alias B = tuple<list<B>,
+ * number, number>`) would be compared again and again until the stack
+ * overflows. `visiting` holds the pairs being compared on the current path,
+ * keyed by their printed form, which names an alias instead of expanding it
+ * and is therefore finite. A pair met again on its own path is taken to
+ * overlap: the cycle by itself refutes nothing (an empty list ends it, so
+ * `([], 5, 3)` is a value of both aliases above), and every slot that could
+ * refute the pair is still checked on the first pass. Overlap only defers
+ * the decision to the runtime check, so this answer is the safe one.
+ */
+function overlapsNested(
+  t: Readonly<Type>,
+  param: Readonly<Type>,
+  visiting: Set<string> | undefined
+): boolean {
+  const key = `${typeToDedupKey(t as Type)}\u0000${typeToDedupKey(param as Type)}`;
+  if (visiting?.has(key)) return true;
+  const path = visiting ?? new Set<string>();
+  path.add(key);
+  try {
+    return overlapsDeferred(t, param, path);
+  } finally {
+    path.delete(key);
+  }
+}
+
+function overlapsDeferred(
+  t: Readonly<Type>,
+  param: Readonly<Type>,
+  visiting: Set<string> | undefined
+): boolean {
   // Union parameter (`matrix|vector` — the MatrixMultiply/Dot/LinearSolve
   // family): defer if any arm would. Union operand: any arm not refuted.
   if (typeof param !== 'string' && param.kind === 'union')
-    return param.types.some((arm) => overlapsForDeferredValidation(t, arm));
+    return param.types.some((arm) => overlapsDeferred(t, arm, visiting));
   if (typeof t !== 'string' && t.kind === 'union')
-    return t.types.some((arm) => overlapsForDeferredValidation(arm, param));
+    return t.types.some((arm) => overlapsDeferred(arm, param, visiting));
 
   // TUPLE parameters participate too, and only against a tuple operand.
   //
@@ -1917,7 +1958,7 @@ export function overlapsForDeferredValidation(
         !(
           isCompositeSlotType(opSlot) &&
           isCompositeSlotType(paramSlot) &&
-          overlapsForDeferredValidation(opSlot, paramSlot)
+          overlapsNested(opSlot, paramSlot, visiting)
         )
       )
         return false;
@@ -1996,7 +2037,7 @@ export function overlapsForDeferredValidation(
       !(
         tupleSlots(opLeaf) !== 'not-a-tuple' &&
         tupleSlots(paramLeaf) !== 'not-a-tuple' &&
-        overlapsForDeferredValidation(opLeaf, paramLeaf)
+        overlapsNested(opLeaf, paramLeaf, visiting)
       )
     )
       return false;

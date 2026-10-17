@@ -2454,6 +2454,22 @@ describe('INTEGRATE: a divergent integral is reported as such by evaluate() and 
     expect(ce.parse('\\int_0^2 \\sec t\\,dt').N().isNaN).toBe(true);
   });
 
+  test('a float in a bound makes the answer NaN, not Indeterminate', () => {
+    // A float nested in a bound, or held by a bound symbol, was not seen.
+    const engine = new ComputeEngine();
+    const at = (lower: unknown) =>
+      engine
+        .box(['Integrate', ['Divide', 1, 't'], ['Limits', 't', lower, 1]] as any)
+        .evaluate();
+    expect(at(-1).isIndeterminate).toBe(true);
+    for (const lower of [-1.5, ['Negate', ['Sin', 1.5]], 'b']) {
+      if (lower === 'b') engine.assign('b', -1.5);
+      const value = at(lower);
+      expect(value.isNaN).toBe(true);
+      expect(value.isIndeterminate).toBe(false);
+    }
+  });
+
   test('a clean integral still integrates numerically', () => {
     expect(ce.parse('\\int_1^2 \\frac{1}{t} dt').N().re).toBeCloseTo(
       Math.LN2,

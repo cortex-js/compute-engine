@@ -1030,6 +1030,26 @@ describe('END TO END — a user-declared generic operator', () => {
     );
   });
 
+  test('`never` neutrality beside a nested `unknown`: the result is not empty', () => {
+    // The nested `unknown` is waived only when no other bound says
+    // something, and the `never` of `[]` says nothing: `T` stays `unknown`,
+    // in either operand order.
+    const ce = fresh();
+    ce.declare('cat', {
+      signature: '(list<T>, list<T>) -> list<T> where T',
+    });
+    ce.declare('lu', 'list<unknown>');
+    expect(ce.box(['cat', 'lu', ['List']]).type.toString()).toBe(
+      'list<unknown>'
+    );
+    expect(ce.box(['cat', ['List'], 'lu']).type.toString()).toBe(
+      'list<unknown>'
+    );
+    expect(ce.box(['cat', ['List'], ['List']]).type.toString()).toBe(
+      'list<never>'
+    );
+  });
+
   test('compose — the SAME answer with the operands in either order', () => {
     const ce = fresh();
     ce.declare('f1', '(real) -> string');

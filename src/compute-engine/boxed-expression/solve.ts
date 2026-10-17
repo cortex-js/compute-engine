@@ -11,7 +11,13 @@ import type {
   Rule,
   RuleSteps,
 } from '../global-types.js';
-import { isNumber, isFunction, isSymbol, numericValue } from './type-guards.js';
+import {
+  isNumber,
+  isFunction,
+  isSymbol,
+  numericValue,
+  sym,
+} from './type-guards.js';
 import { conditionalValue } from './conditional-value.js';
 import {
   polynomialDegree,
@@ -3310,13 +3316,19 @@ function solveScaledAbsoluteValue(
  *
  * `simplify()` combines logarithms only when every argument is provably
  * non-negative, because elsewhere the two forms can differ by a multiple of
- * 2πi. The solver combines them for any argument. For a real root of a real
- * equation, the combination can only add roots (a point where `u·v/w` is
- * valid but `u` or `v` is not), and `findUnivariateRoots()` checks every
- * root against the original equation, which rejects such a root. So
+ * 2πi: `ln(u) + ln(v) - ln(w) = ln(u·v/w) + 2πik`. The solver combines
+ * them for any argument, but only when the terms outside the group (the
+ * other terms of the sum and the logarithms of another base) do not
+ * contain `x`. Then the equation is `ln(u·v/w) + 2πik = c` with `c` free
+ * of `x`, and its roots are roots of `u·v/w = e^c` for each `k`: the
+ * combination can only add roots (a point where `u·v/w` is valid but `u`
+ * or `v` is not), and `findUnivariateRoots()` checks every root against the
+ * original equation, which rejects such a root. So
  * `ln(x + 1) + ln(x - 1) = 0` is solved as `ln(x² - 1) = 0`, and the root
- * `-√2` is rejected. (A complex root can be lost: there `ln(u) + ln(v)` and
- * `ln(uv)` can differ by 2πi.)
+ * `-√2` is rejected. When a term outside the group contains `x`, the term
+ * 2πik is not absorbed and roots can be lost: `ln(x) - ln(-x) + iπx = 0`
+ * has the roots `1` and `-1`, but `ln(x/(-x)) + iπx = iπ + iπx = 0` has
+ * only `-1`. Such a group is not combined.
  */
 function combineLogarithmsOfUnknown(expr: Expression, x: string): Expression {
   if (!isFunction(expr, 'Add')) return expr;
@@ -3372,7 +3384,16 @@ function combineLogarithmsOfUnknown(expr: Expression, x: string): Expression {
       group.base === undefined
         ? ce.function('Ln', [arg])
         : ce.function('Log', [arg, group.base]);
-    if (args.length < 2 || !args.some((arg) => arg.has(x))) {
+    // The terms outside this group: the other terms of the sum, and the
+    // logarithms of the other groups.
+    const outsideHasX =
+      rest.some((term) => term.has(x)) ||
+      [...groups.values()].some(
+        (other) =>
+          other !== group &&
+          [...other.numerator, ...other.denominator].some((arg) => arg.has(x))
+      );
+    if (args.length < 2 || !args.some((arg) => arg.has(x)) || outsideHasX) {
       for (const arg of group.numerator) terms.push(makeLog(arg));
       for (const arg of group.denominator)
         terms.push(ce.function('Negate', [makeLog(arg)]));
@@ -3503,6 +3524,99 @@ function solveLinearTrigArgument(
 }
 
 /**
+ * The roots of a chain of equalities `Equal(a, b, c, …)` in the unknown `x`:
+ * the values of `x` for which each pair of adjacent operands is equal.
+ *
+ * The candidates are the roots of the first pair whose roots are a complete
+ * list: both sides are polynomials in `x`, the root finder gave at least one
+ * root, and it did not mark the list as partial or a check as undecided. A
+ * candidate is kept when every other pair, with `x` replaced by the
+ * candidate, evaluates to `True`. It is removed when a pair evaluates to
+ * `False`. When a pair evaluates to neither, the candidate is removed and
+ * `stats.undecided` is set.
+ *
+ * When no polynomial pair gives such a list, the roots of the first pair
+ * that gives roots are used, filtered in the same way, and `stats.partial`
+ * is set: the principal roots of a periodic pair (`sin(x) = 0` gives
+ * `0` and `π`) are not all its roots, and a common root can be outside
+ * them. When no pair gives a root, the answer is an empty list; it states
+ * nothing when a pair is not a polynomial (`stats.partial` is set), and
+ * the caller tests a chain of polynomials for an identity or a
+ * contradiction (`emptyRootsAnswer()` in `solve-domain.ts`).
+ */
+function chainedEqualityRoots(
+  expr: Expression,
+  x: string,
+  depth: number,
+  stats:
+    | {
+        candidates: boolean;
+        undecided: boolean;
+        partial?: boolean;
+        userRule?: boolean;
+      }
+    | undefined
+): ReadonlyArray<Expression> {
+  const ce = expr.engine;
+  const ops = isFunction(expr) ? expr.ops : [];
+  const pairs: Expression[] = [];
+  for (let i = 0; i + 1 < ops.length; i++)
+    pairs.push(ce.function('Equal', [ops[i], ops[i + 1]]));
+  const isPolynomialPair = (pair: Expression) =>
+    isFunction(pair, 'Equal') &&
+    polynomialDegree(pair.op1, x) >= 0 &&
+    polynomialDegree(pair.op2, x) >= 0;
+
+  let source: Expression | undefined;
+  let candidates: ReadonlyArray<Expression> = [];
+  let sourceStats: typeof stats = undefined;
+  let complete = false;
+  for (const pair of pairs) {
+    const child: NonNullable<typeof stats> = {
+      candidates: false,
+      undecided: false,
+    };
+    // The steps of the pairs are not recorded: the roots of a pair that is
+    // not the source are not candidates of the chain.
+    const roots = findUnivariateRoots(pair, x, depth + 1, undefined, child);
+    if (roots.length === 0) continue;
+    const isComplete =
+      isPolynomialPair(pair) && !child.partial && !child.undecided;
+    if (source === undefined || (isComplete && !complete)) {
+      source = pair;
+      candidates = roots;
+      sourceStats = child;
+      complete = isComplete;
+    }
+    if (complete) break;
+  }
+
+  if (stats && !pairs.every(isPolynomialPair) && !complete)
+    stats.partial = true;
+  if (source === undefined) return [];
+  if (stats) {
+    stats.candidates = true;
+    if (sourceStats?.userRule) stats.userRule = true;
+    if (sourceStats?.undecided) stats.undecided = true;
+  }
+
+  const kept: Expression[] = [];
+  for (const root of candidates) {
+    let keep = true;
+    for (const pair of pairs) {
+      if (pair === source) continue;
+      const value = sym(pair.subs({ [x]: root }).evaluate());
+      if (value === 'True') continue;
+      if (value !== 'False' && stats) stats.undecided = true;
+      keep = false;
+      break;
+    }
+    if (keep) kept.push(root);
+  }
+  return kept;
+}
+
+/**
  * MathJsonExpression is a function of a single variable (`x`) or an Equality
  *
  * Return the roots of that variable
@@ -3576,6 +3690,11 @@ export function findUnivariateRoots(
   // using quadratic substitution (u = √x → au² + bu + c = 0 → x = u²) may
   // produce extraneous roots.
   let originalExpr: Expression;
+
+  // A chain of equalities `a = b = c` holds when each pair of adjacent
+  // operands is equal. The steps below read only the first two operands.
+  if (isFunction(expr, 'Equal') && expr.nops > 2)
+    return chainedEqualityRoots(expr, x, depth, stats);
 
   if (isFunction(expr, 'Equal')) {
     const lhs0 = expr.op1;

@@ -17,10 +17,12 @@ import {
   rebindEscaping,
   hasAssignedVariable,
   assignedVariableNames,
+  indeterminateAnswerReadsVariable,
   isOperatorDef,
   isValueDef,
 } from './utils.js';
 import { markShieldDeclaration } from './binders.js';
+import { withScratchScope } from '../scratch-scopes.js';
 import {
   libraryNamesShadowedIn,
   shadowedLibraryNames,
@@ -388,19 +390,59 @@ export function simplifyValueBlind(
   const shadowScope = ce.context.lexicalScope;
   let steps: RuleSteps;
   try {
-    shadow.forEach((n, i) => {
-      // If an exotic type fails to round-trip through `declare`, skip shadowing
-      // THAT symbol rather than aborting the whole simplify: a rare value leak
-      // is better than a thrown simplify.
-      try {
-        ce.declare(n, { type: types[i] });
-        // Mark it as a SHIELD — see `withValueShield`, the other site.
-        markShieldDeclaration(shadowScope, n);
-      } catch {
-        /* leave this symbol unshadowed */
-      }
+    // Two arrangements keep the shield from retiring the caches of the whole
+    // engine. (1) The shield scope is registered as a SCRATCH scope
+    // (`scratch-scopes.ts`) while the shield declarations below are made, so
+    // they advance no engine-wide cache version and the pop that discards
+    // them is clean. The registration ends before the simplification runs:
+    // evaluating an existing scoped expression inside it re-parents that
+    // expression's persistent local scope under the shield scope for the
+    // call, and a declaration made in that scope then must keep its axis
+    // advance, since the scope and the binding outlive the shield. (2) The
+    // shield declarations and the simplification run under a cache key of
+    // their own (`ce._withValueShieldKey`): a symbol reads its VALUE by name
+    // through the current scope chain, so an expression that existed before
+    // the shield — `expr` itself, which is passed to `simplify()` as it is —
+    // reads no value for the shielded symbol inside the shield. A `_sgn`
+    // answer derived outside the shield from the assigned value, or a
+    // `_type` answer that depends on such a sign, must therefore not be
+    // served inside it (`|x+1|` with `x := 5` and a cached positive sign of
+    // `x+1` simplified to `x+1`, a value-dependent rewrite that is wrong once
+    // `x := -5`), and an answer derived inside, blind to the value, must not
+    // be served after the pop (the sign of that same `x+1` stayed
+    // `undefined`). The shield key separates the two sides, and the pop
+    // restores the outer key, so what was cached outside stays valid.
+    //
+    // Before both, every `simplify()` of an expression that mentions an
+    // assigned variable advanced the `any` axis twice (one declaration, one
+    // dirty pop), which retired the `_type` and `_sgn` cache of every
+    // expression in the engine. A sign check inside a type derivation
+    // reaches `simplify()` through `exactOrder()` (`isProvedEqual`,
+    // `compare.ts`), and the retired caches made the derivation re-type its
+    // operands once per read, exponentially in the depth of the body: with
+    // `f_b2full50(x)` calling `f_b2(x)`, whose body ranges over
+    // `Floor(Log(Max(x, 1), 2))`, one application made more than six
+    // thousand sign reads and did not finish in a minute (Tycho ledger row
+    // 381, `art/mavxszbvzk`, 2026-10-17); it takes about 15 ms now. The
+    // escaping result is re-bound to the caller's symbols below
+    // (`rebindEscaping`).
+    steps = ce._withValueShieldKey(() => {
+      withScratchScope(ce, shadowScope, () => {
+        shadow.forEach((n, i) => {
+          // If an exotic type fails to round-trip through `declare`, skip
+          // shadowing THAT symbol rather than aborting the whole simplify: a
+          // rare value leak is better than a thrown simplify.
+          try {
+            ce.declare(n, { type: types[i] });
+            // Mark it as a SHIELD — see `withValueShield`, the other site.
+            markShieldDeclaration(shadowScope, n);
+          } catch {
+            /* leave this symbol unshadowed */
+          }
+        });
+      });
+      return simplify(expr, options);
     });
-    steps = simplify(expr, options);
   } finally {
     ce.popScope();
   }
@@ -1295,6 +1337,19 @@ function simplifyExpression(
 }
 
 /**
+ * Whether evaluating the operand `x` can have an effect, or give an error:
+ * it is not pure (`g(1)` for a function `g` that is not pure), or its type
+ * is `error` or `never` (`RuntimeError("boom")`). `evaluate()` evaluates
+ * the operands of an operator that is not lazy before it applies the NaN
+ * policy: such an operand then runs its effect, or its error is the value
+ * (`Arctan2(NaN, RuntimeError("boom"))` evaluates to the error). A value
+ * of `NaN` from `simplify()` would drop the effect or the error.
+ */
+function operandMayActOrFail(x: Expression): boolean {
+  return x.isPure !== true || x.type.matches('error');
+}
+
+/**
  * The value of a function expression that has a `NaN` or `Indeterminate`
  * number-literal operand at a position whose NaN policy is `propagate`, or
  * `undefined` when no such operand decides the value.
@@ -1306,7 +1361,9 @@ function simplifyExpression(
  * the policy to each element. Only number literals are read, not the value
  * of a symbol, because `simplify()` does not substitute assigned values. A
  * position whose policy is `reject` leaves the expression to `evaluate()`,
- * which reports the error. The answer is `nanOperandAnswer()`:
+ * which reports the error. An operand that can have an effect or give an
+ * error (`operandMayActOrFail()`) leaves the expression to `evaluate()`
+ * too. The answer is `nanOperandAnswer()`:
  * `Indeterminate` when an operand is `Indeterminate` and no operand is
  * inexact, `NaN` otherwise.
  */
@@ -1314,6 +1371,12 @@ function propagatedNanOperand(expr: Expression): Expression | undefined {
   if (!isFunction(expr)) return undefined;
   const ops = expr.ops;
   if (!ops.some((x) => isNumber(x) && x.isNaN === true)) return undefined;
+  if (ops.some((x) => operandMayActOrFail(x))) return undefined;
+  // `Indeterminate` with an operand that reads an assigned variable: the
+  // answer depends on the value (a float makes it `NaN`), which `simplify()`
+  // does not read. The expression is left to `evaluate()`, as the `Add` and
+  // `Multiply` folds do.
+  if (indeterminateAnswerReadsVariable(ops)) return undefined;
   const def = expr.operatorDefinition;
   if (!def || def.lazy === true || def.isUserFunctionDefinition)
     return undefined;
@@ -1348,14 +1411,17 @@ function propagatedNanOperand(expr: Expression): Expression | undefined {
  * The handler is called on the operands as they are (canonical, not
  * evaluated), without substituting the value of a symbol, because
  * `simplify()` does not substitute assigned values. Only a `NaN` answer is
- * kept, and any other answer is left to `evaluate()`. This assumes that a
- * handler which answers `NaN` while an operand is still a symbol does so
- * because of the `NaN` operand, not because it read the symbol as a number:
- * the library handlers that own a `NaN` operand (`Max`, `Min`, the
- * statistics aggregates) answer `NaN` for any absent datum, whatever the
- * other operands are. The exclusions are those of
- * `propagatedNanOperand()`, including a `NaN` at a `reject` position (left
- * to `evaluate()`, which reports the error), plus an operator that is not
+ * kept, and any other answer is left to `evaluate()`. A handler that answers
+ * `NaN` while an operand is still a symbol may do so because it did not
+ * read the symbol as a number: `Hypot(w, NaN)` is `NaN` for a symbol `w`,
+ * but `+∞` when `w` holds `+∞`. So the answer is kept only when the handler
+ * also answers `NaN` with each operand that is not a number literal
+ * replaced by `+∞`, `−∞`, `0` and `1`. The library handlers that own a
+ * `NaN` operand as an absent datum (`Max`, `Min`, the statistics
+ * aggregates) answer `NaN` whatever the other operands are. The exclusions
+ * are those of `propagatedNanOperand()`, including a `NaN` at a `reject`
+ * position (left to `evaluate()`, which reports the error) and an operand
+ * that can have an effect or give an error, plus an operator that is not
  * pure, whose handler must not run outside an evaluation. A cancellation
  * (a deadline, an abort) is passed on; any other failure of the handler,
  * including the recursion limit or the iteration limit
@@ -1374,6 +1440,13 @@ function handledNanOperand(expr: Expression): Expression | undefined {
     typeof def.evaluate !== 'function'
   )
     return undefined;
+  // The handler can evaluate an operand (`Max` reads the elements of a
+  // `Map`), so an operand that can have an effect or give an error must not
+  // reach it here.
+  if (ops.some((x) => operandMayActOrFail(x))) return undefined;
+  // As in `propagatedNanOperand()`: an answer that depends on the value of
+  // an assigned variable is left to `evaluate()`.
+  if (indeterminateAnswerReadsVariable(ops)) return undefined;
   if (
     def.broadcastable === true &&
     ops.some((x) => x.isCollection || x.type.matches('collection<any>'))
@@ -1389,21 +1462,37 @@ function handledNanOperand(expr: Expression): Expression | undefined {
   }
   if (!handledAt) return undefined;
   const ce = expr.engine;
-  let result: Expression | undefined;
-  try {
-    result = def.evaluate(ops, {
-      numericApproximation: false,
-      engine: ce,
-      materialization: false,
-      expression: expr,
-      effects: ce.effects,
-    });
-  } catch (e) {
-    if (e instanceof CancellationError && !isEvaluationLimit(e)) throw e;
-    return undefined;
+  const answer = (operands: ReadonlyArray<Expression>) => {
+    try {
+      const value = def.evaluate!(operands, {
+        numericApproximation: false,
+        engine: ce,
+        materialization: false,
+        expression: expr,
+        effects: ce.effects,
+      });
+      return value !== undefined && isNumber(value) && value.isNaN === true
+        ? value
+        : undefined;
+    } catch (e) {
+      if (e instanceof CancellationError && !isEvaluationLimit(e)) throw e;
+      return undefined;
+    }
+  };
+  const result = answer(ops);
+  if (result === undefined) return undefined;
+  // The answer must not depend on the value of an operand that is not a
+  // number literal. A handler can give an infinity precedence over `NaN`:
+  // `Hypot(+∞, NaN)` is `+∞`, but `Hypot(w, NaN)` answers `NaN` while `w`
+  // is a symbol, whatever value `w` holds. So the handler is also asked with
+  // each such operand replaced by `+∞`, `−∞`, `0` and `1`, and the answer
+  // is kept only when each of these is `NaN` too.
+  if (ops.some((x) => !isNumber(x))) {
+    const probes = [ce.PositiveInfinity, ce.NegativeInfinity, ce.Zero, ce.One];
+    for (const value of probes)
+      if (answer(ops.map((x) => (isNumber(x) ? x : value))) === undefined)
+        return undefined;
   }
-  if (result === undefined || !isNumber(result) || result.isNaN !== true)
-    return undefined;
   return result;
 }
 

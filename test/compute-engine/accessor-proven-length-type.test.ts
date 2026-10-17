@@ -8,6 +8,8 @@
  * a list literal, a string literal, a `Range` with literal bounds.
  */
 import { ComputeEngine } from '../../src/compute-engine';
+import { compile } from '../../src/compile';
+import { BoxedSymbol } from '../../src/compute-engine/boxed-expression/boxed-symbol';
 
 const POINTS = ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]];
 
@@ -126,5 +128,155 @@ describe('an access that can find nothing keeps its absent member', () => {
     const rows = ['List', ['List', 1, 2], ['List', 3, 4]];
     const t = typeOf(ce, ['First', ['At', rows, 'n']]);
     expect(t).toContain('nan');
+  });
+
+  test('a literal element that may evaluate to Nothing does not prove a length', () => {
+    // The list erases an element that evaluates to `Nothing`, so
+    // `[If(c, "a", Nothing)]` is `[]` when `c` is false, and `First` of it
+    // is `Missing`. Before, the literal was typed `list<string^1>` and the
+    // `First` of it `string`.
+    const ce = engine();
+    ce.declare('c', 'boolean');
+    const list = ['List', ['If', 'c', "'a'", 'Nothing']];
+    expect(typeOf(ce, list)).toBe('list<string>');
+    expect(typeOf(ce, ['First', list])).toBe('missing | string');
+    expect(
+      typeOf(ce, ['First', ['List', ['Which', 'c', "'a'", 'True', 'Nothing']]])
+    ).toBe('missing | string');
+    ce.assign('c', false);
+    expect(ce.box(['First', list]).evaluate().symbol).toBe('Missing');
+    // A conditional with no `Nothing` branch still proves the length.
+    expect(typeOf(ce, ['First', ['List', ['If', 'c', "'a'", "'b'"]]])).toBe(
+      'string'
+    );
+  });
+
+  test('no length or shape is derived from such a literal', () => {
+    // The consumers that read a list literal's structure (a matrix row, a
+    // sum of lists, a broadcast, a vector operator) read its type, which has
+    // no length, so none of them claims a length or a shape.
+    const ce = engine();
+    ce.declare('c', 'boolean');
+    const v = ['List', ['If', 'c', 1, 'Nothing'], 2];
+    const rows = ['List', v, ['List', 3, 4]];
+    expect(typeOf(ce, rows)).toBe('list<list<integer>>');
+    expect(typeOf(ce, ['Add', v, ['List', 10, 20]])).toBe('list<integer>');
+    expect(typeOf(ce, ['Multiply', v, 3])).toBe('list<integer>');
+    expect(typeOf(ce, ['Sin', v])).toBe('list<number>');
+    expect(typeOf(ce, ['Transpose', rows])).toBe('list<list<integer>>');
+  });
+
+  test('a tuple coordinate that may evaluate to Nothing drops the arity', () => {
+    // The tuple erases a coordinate that evaluates to `Nothing`, so
+    // `(If(c, 1, Nothing), 2)` is `(2)` when `c` is false. It was typed
+    // `tuple<integer, integer>`.
+    const ce = engine();
+    ce.declare('c', 'boolean');
+    const t = ['Tuple', ['If', 'c', 1, 'Nothing'], 2];
+    expect(typeOf(ce, t)).toBe('tuple');
+    ce.assign('c', false);
+    expect(ce.box(t as any).evaluate().nops).toBe(1);
+  });
+});
+
+describe('a broadcast over a list literal with an element that may evaluate to Nothing', () => {
+  // The broadcast, a lazy `Map` and the collection handlers of the literal
+  // walked its operands, and evaluated each one in its own cell, so the list
+  // never erased the element: with `c` false, `Sin([If(c, 1, Nothing), 2])`
+  // was `[Sin(Nothing), Sin(2)]`. They now walk the elements of its value.
+  const v = ['List', ['If', 'c', 1, 'Nothing'], 2];
+  const value = (ce: ComputeEngine, json: unknown) =>
+    ce
+      .box(json as any)
+      .evaluate()
+      .toString();
+
+  test.each([
+    [false, ['Sin', v], '[sin(2)]'],
+    [false, ['Power', v, 2], '[4]'],
+    [false, ['Abs', v], '[2]'],
+    [false, ['Sqrt', v], '[sqrt(2)]'],
+    [false, ['Add', v, 1], '[3]'],
+    [false, ['Map', 'Sin', v], '[sin(2)]'],
+    [false, ['Map', ['Function', ['Sin', 'x'], 'x'], v], '[sin(2)]'],
+    [false, ['Filter', v, ['Function', 'True', 'x']], '[2]'],
+    [false, ['Sin', ['List', v, ['List', 3, 4]]], '[[sin(2)],[sin(3),sin(4)]]'],
+    [true, ['Sin', v], '[sin(1),sin(2)]'],
+    [true, ['Power', v, 2], '[1,4]'],
+    [true, ['Map', 'Sin', v], '[sin(1),sin(2)]'],
+  ])('with c = %s, %j is %s', (c, json, expected) => {
+    const ce = new ComputeEngine();
+    ce.declare('c', 'boolean');
+    ce.assign('c', c);
+    expect(value(ce, json)).toBe(expected);
+  });
+
+  test('the literal counts and indexes the elements of its value', () => {
+    const ce = new ComputeEngine();
+    ce.declare('c', 'boolean');
+    ce.assign('c', false);
+    const literal = ce.box(v as any);
+    expect(literal.count).toBe(1);
+    expect(literal.at(1)?.toString()).toBe('2');
+  });
+
+  test('the literal is scanned once for an element that may be erased, not on every access', () => {
+    // Each collection handler of a literal (`at`, the iterator, `contains`)
+    // asks whether an element may evaluate to `Nothing`, and the scan reads
+    // the type of every element. A loop of `at(1)` … `at(n)` read n² types.
+    // The answer is kept per literal while the engine is not changed. Count
+    // the type reads of the elements, which are symbols.
+    const ce = new ComputeEngine();
+    const n = 200;
+    const literal = ce.function(
+      'List',
+      Array.from({ length: n }, (_, i) => ce.symbol(`s${i}`))
+    );
+    const proto = BoxedSymbol.prototype;
+    const descriptor = Object.getOwnPropertyDescriptor(proto, 'type')!;
+    let reads = 0;
+    Object.defineProperty(proto, 'type', {
+      ...descriptor,
+      get() {
+        reads += 1;
+        return descriptor.get!.call(this);
+      },
+    });
+    try {
+      for (let i = 1; i <= n; i += 1)
+        expect(literal.at(i)?.symbol).toBe(`s${i - 1}`);
+    } finally {
+      Object.defineProperty(proto, 'type', descriptor);
+    }
+    // One scan of n elements. Without the memo it was n · n = 40000.
+    expect(reads).toBeLessThanOrEqual(n);
+  });
+
+  test('an assignment after a first access is seen by the next access', () => {
+    const ce = new ComputeEngine();
+    ce.declare('c', 'boolean');
+    ce.assign('c', false);
+    const literal = ce.box(v as any);
+    expect(literal.count).toBe(1);
+    ce.assign('c', true);
+    expect(literal.count).toBe(2);
+    expect(literal.at(1)?.toString()).toBe('1');
+  });
+
+  test('the compiled code agrees', () => {
+    for (const c of [false, true]) {
+      const ce = new ComputeEngine();
+      ce.declare('c', 'boolean');
+      ce.assign('c', c);
+      const expected = c ? [Math.sin(1), Math.sin(2)] : [Math.sin(2)];
+      for (const json of [
+        ['Sin', v],
+        ['Map', 'Sin', v],
+      ]) {
+        const f = compile(ce.box(json as any));
+        expect(f.success).toBe(true);
+        expect(f.run!({ c })).toEqual(expected);
+      }
+    }
   });
 });

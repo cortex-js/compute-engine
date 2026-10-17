@@ -1,4 +1,5 @@
 import { derivativeClosedForm } from './derivative-closed-form.js';
+import { shadowsLibraryName } from '../library-shadowing.js';
 import {
   makeSysHelpers,
   normalizeRunResult,
@@ -4556,7 +4557,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       if (mapped !== undefined) return mapped;
     }
     let combiner =
-      nestedElementCombiner('Reduce', coll, op) ??
+      nestedElementCombiner('Reduce', coll, op, init) ??
       builtinCombiner(op, BaseCompiler.foldLaneIsComplex(coll, init));
     // The seed's code when the accumulator lane is complex and the seed is
     // real (`combinerPlan.coerceSeed`); `undefined` = compile `init` as-is.
@@ -4592,12 +4593,17 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       // (`BaseCompiler.foldAccumulatorArgType`), which is what an annotated
       // accumulator provably receives on every step.
       const plan = BaseCompiler.combinerPlan(coll, op, init, target);
-      BaseCompiler.assertCallbackAnnotations('Reduce', op, [
-        plan?.accComplex
-          ? 'complex'
-          : BaseCompiler.foldAccumulatorArgType(coll, op, init, target),
-        BaseCompiler.collectionElementTypeOf(coll),
-      ]);
+      BaseCompiler.assertCallbackAnnotations(
+        'Reduce',
+        op,
+        [
+          plan?.accComplex
+            ? 'complex'
+            : BaseCompiler.foldAccumulatorArgType(coll, op, init, target),
+          BaseCompiler.collectionElementTypeOf(coll),
+        ],
+        target
+      );
       assertAccumulatorFitsStep('Reduce', op, init);
       // ACCUMULATOR and ELEMENT lanes (`combinerPlan`): the combiner is
       // compiled with its two parameters bound to the lanes the fold actually
@@ -4619,11 +4625,28 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       } finally {
         for (const ops of chains ?? []) IN_PLACE_UPDATE_OPS.delete(ops);
       }
+      // A seed that is an array only by its run-time check (a symbol whose
+      // collection type was inferred, `admitsRuntimeCheckedArray`) is
+      // checked here when a consumer reads the fold as an array
+      // (`compilesToCheckedArray`). The step checks the accumulator when it
+      // reads it, but an empty source runs no step: `Length(Fold(step, s,
+      // p))` with a set in `s` and an empty `p` read `.length` of the set
+      // and answered `undefined`, where the interpreter counts the set. Now
+      // the run stops, as it does when `p` is not empty.
+      const initCode =
+        admitsRuntimeCheckedArray(init) &&
+        compilesToCheckedArray(
+          coll.engine._fn('Reduce', [coll, op, init]),
+          new Set(),
+          target
+        )
+          ? `_SYS.arr(${compile(init)}, "Reduce")`
+          : compile(init);
       seed = plan?.coerceSeed
-        ? `_SYS.cplx(${compile(init)})`
+        ? `_SYS.cplx(${initCode})`
         : chains !== undefined
-          ? `_SYS.ownedCopy(${compile(init)})`
-          : undefined;
+          ? `_SYS.ownedCopy(${initCode})`
+          : initCode;
     }
     if (combiner === undefined)
       throw new Error(
@@ -5494,10 +5517,12 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     }
     // The emitted lowering passes 1-based integer indexes, so an annotated
     // index parameter is admitted exactly when `integer` satisfies it.
-    BaseCompiler.assertCallbackAnnotations('Tabulate', args[0], [
-      'integer',
-      'integer',
-    ]);
+    BaseCompiler.assertCallbackAnnotations(
+      'Tabulate',
+      args[0],
+      ['integer', 'integer'],
+      target
+    );
     const f = hoistedCallbackLambda(args[0], compile, target);
     const n = compile(args[1]);
     if (args.length === 2)
@@ -5516,10 +5541,12 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       throw new Error(
         `Could not compile \`Fill\`: only the (function, (rows, cols)) form compiles.`
       );
-    BaseCompiler.assertCallbackAnnotations('Fill', args[0], [
-      'integer',
-      'integer',
-    ]);
+    BaseCompiler.assertCallbackAnnotations(
+      'Fill',
+      args[0],
+      ['integer', 'integer'],
+      target
+    );
     const f = hoistedCallbackLambda(args[0], compile, target);
     const rows = compile(dims.ops[0]);
     const cols = compile(dims.ops[1]);
@@ -5703,6 +5730,9 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       args[1].type.matches('function') &&
       (elt === undefined || !functionValued(elt))
     ) {
+      // The result of the predicate is checked at each call when its type
+      // does not prove a boolean: `fnArg` asks `predicateResultCheck()` and
+      // wraps the callee in `_SYS.predicateResult`.
       if (isWalkableRange(args[0], target))
         return emitPredicateRangeWalk(
           'Count',
@@ -6006,7 +6036,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
           `(list/vector/range).`
       );
     const builtin =
-      nestedElementCombiner('Scan', coll, op) ??
+      nestedElementCombiner('Scan', coll, op, init) ??
       builtinCombiner(op, BaseCompiler.foldLaneIsComplex(coll, init));
     // As `Reduce`: the accumulator's annotation is judged against the lane
     // `combinerPlan` chose, or else against the join of the seed's type (the
@@ -6016,12 +6046,17 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         ? BaseCompiler.combinerPlan(coll, op, init, target)
         : undefined;
     if (builtin === undefined)
-      BaseCompiler.assertCallbackAnnotations('Scan', op, [
-        plan?.accComplex
-          ? 'complex'
-          : BaseCompiler.foldAccumulatorArgType(coll, op, init, target),
-        BaseCompiler.collectionElementTypeOf(coll),
-      ]);
+      BaseCompiler.assertCallbackAnnotations(
+        'Scan',
+        op,
+        [
+          plan?.accComplex
+            ? 'complex'
+            : BaseCompiler.foldAccumulatorArgType(coll, op, init, target),
+          BaseCompiler.collectionElementTypeOf(coll),
+        ],
+        target
+      );
     assertAccumulatorFitsStep('Scan', op, init);
     // Accumulator and element lanes as for `Reduce` above (`combinerPlan`).
     // `Scan` was wrong the same way from the SECOND element on — over
@@ -9731,8 +9766,14 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
           throw new Error(
             'Could not compile `Nothing`: the erasure marker is not a value, so it cannot be read as a variable.'
           );
+        // A library constant whose name a user binding shadows is read as
+        // any other symbol (see the symbol branch of `BaseCompiler.compile`).
         const result = JAVASCRIPT_CONSTANTS[id];
-        if (result !== undefined) return result;
+        if (
+          result !== undefined &&
+          !shadowsLibraryName(expr.engine, id, { customLibrary: false })
+        )
+          return result;
         if (unknowns.includes(id)) {
           varsObjectRefs.add(id);
           return varsObjectAccess(id);
@@ -10497,7 +10538,18 @@ function compileSumProduct(
     );
     if (elements !== undefined) {
       requireShapedFold(kind, args[0]);
-      return `(${elements}).reduce(${elementwiseFoldCombiner(kind, foldLane(args[0]))}, ${kind === 'Sum' ? '0' : '1'})`;
+      const reduce = `(${elements}).reduce(${elementwiseFoldCombiner(kind, foldLane(args[0]))}, ${kind === 'Sum' ? '0' : '1'})`;
+      // A parent reads the fold as a complex value `{re, im}` when
+      // `isComplexValued` says so (`collection<complex>`), but the fold
+      // answers the plain number of its identity for an empty collection, and
+      // a plain number when every element is real: `Re(Sum(c))` read `.re` of
+      // `0` and answered `undefined`. The lift `_SYS.cplx` makes a number a
+      // complex value and leaves a complex value or an array unchanged.
+      return BaseCompiler.isComplexValued(
+        args[0].engine.function(kind, [args[0]])
+      )
+        ? `_SYS.cplx(${reduce})`
+        : reduce;
     }
     throw new Error(`Could not compile \`${kind}\`: no indexing set`);
   }
@@ -11504,10 +11556,104 @@ function fnArg(
   extraArgTypes: ReadonlyArray<Type | undefined> = [],
   target?: CompileTarget<Expression>
 ): string {
-  BaseCompiler.assertCallbackAnnotations(kind, callback, [
-    ...extraArgTypes,
-    BaseCompiler.collectionElementTypeOf(source),
-  ]);
+  const mode = PREDICATE_RESULT_MODES[kind];
+  if (mode === undefined || callback === undefined)
+    return callbackArg(kind, callback, source, compile, extraArgTypes, target);
+  // A predicate whose result type cannot be a boolean (`x ↦ 1`) is refused
+  // before its body is compiled.
+  const check = predicateResultCheck(kind, callback);
+  const code = callbackArg(
+    kind,
+    callback,
+    source,
+    compile,
+    extraArgTypes,
+    target
+  );
+  return check
+    ? `_SYS.predicateResult(${code}, ${JSON.stringify(kind)}, "${mode}")`
+    : code;
+}
+
+/**
+ * How the interpreter reads the result of the predicate of each operator
+ * that takes one, for `_SYS.predicateResult`:
+ *
+ * - `select` (`Filter`, `Count`, `CountIf`, `Find`, `IndexWhere`,
+ *   `Position`, `Partition`): `True` selects the element, `False` or an
+ *   absent value (`Missing`) does not (`selectionVerdict` in
+ *   `library/collections.ts`), and any other value is an error that throws.
+ * - `quantify` (`Any`, `All`): `True` and `False` decide. An absent value
+ *   makes the result `Missing` by Kleene logic, and any other value leaves
+ *   the quantifier unevaluated (`quantifierWalk`). The compiled `some` and
+ *   `every` can give neither, so both throw.
+ * - `prefix` (`TakeWhile`, `DropWhile`): only `True` continues the prefix,
+ *   and any other value ends it, with no error.
+ *
+ * The Python target uses the same table and the same rule
+ * (`predicateResultCheck`) for its helper `_ce_predicate`.
+ */
+export const PREDICATE_RESULT_MODES: Readonly<
+  Record<string, 'select' | 'quantify' | 'prefix'>
+> = Object.assign(Object.create(null), {
+  Filter: 'select',
+  Count: 'select',
+  CountIf: 'select',
+  Find: 'select',
+  IndexWhere: 'select',
+  Position: 'select',
+  Partition: 'select',
+  Any: 'quantify',
+  All: 'quantify',
+  TakeWhile: 'prefix',
+  DropWhile: 'prefix',
+});
+
+/**
+ * Whether the compiled predicate `callback` of `kind` must be checked at each
+ * call (`_SYS.predicateResult`): `false` when its result type proves a
+ * boolean, `true` when the type does not prove one (`unknown`, the result of
+ * a `function`-typed symbol, `boolean | integer`). A result type that cannot
+ * be a boolean (`integer`) is refused here. The compiled lowerings test the
+ * predicate's value with the truthiness of JavaScript, so before this check
+ * `Count(xs, x ↦ 1)` over `[1, 2]` answered 2 and `Filter(xs, x ↦ If(x > 1,
+ * True, 1))` answered `[1, 2]`, where the interpreter throws.
+ */
+export function predicateResultCheck(
+  kind: string,
+  callback: Expression
+): boolean {
+  const result = functionResult(
+    resolveTypeForCompilation(callback.type.type)
+  );
+  if (result === undefined) return true;
+  if (!couldMatch(result, 'boolean'))
+    throw new Error(
+      `Could not compile \`${kind}\`: the predicate returns a value of type ` +
+        `\`${typeToString(result)}\`, which is not a boolean. The interpreter ` +
+        `reports an error instead.`
+    );
+  return !isSubtype(result, 'boolean');
+}
+
+/**
+ * `fnArg` without the check of a predicate's result: compile the callback
+ * operand.
+ */
+function callbackArg(
+  kind: string,
+  callback: Expression | undefined,
+  source: Expression | undefined,
+  compile: (expr: Expression) => string,
+  extraArgTypes: ReadonlyArray<Type | undefined> = [],
+  target?: CompileTarget<Expression>
+): string {
+  BaseCompiler.assertCallbackAnnotations(
+    kind,
+    callback,
+    [...extraArgTypes, BaseCompiler.collectionElementTypeOf(source)],
+    target
+  );
   // STRICT shapes: a bare user-function symbol with a WIDE parameter over
   // complex ELEMENTS is a lane mismatch (the one emission of the function is
   // real-shaped) — a decline under `strict`, an escalation to complex mode
@@ -11608,7 +11754,8 @@ function zipFnArg(
   BaseCompiler.assertCallbackAnnotations(
     kind,
     callback,
-    BaseCompiler.zipCallbackArgTypes(kind, sources, 2)
+    BaseCompiler.zipCallbackArgTypes(kind, sources, 2),
+    target
   );
   BaseCompiler.assertBuiltinCallbackUsable(kind, callback);
   return hoistedCallbackLambda(callback!, compile, target);
@@ -11748,11 +11895,18 @@ function randomDomain(
  * every built-in fold over points, strings, sets or dictionaries, fail
  * closed, as `Max` of a list of lists does (`refuseNestedData`). `undefined`
  * for every other combiner and element type, so `builtinCombiner` decides.
+ *
+ * The lane of the element-wise helper is the lane of the rows joined with
+ * the lane of the seed `init`, because the seed is the first accumulator: a
+ * complex seed over real rows needs the complex helper. With the lane of the
+ * rows only, `Reduce(M, Add, z)` with `M: list<list<real>>` and `z = i`
+ * added `{re, im}` objects with the real `+` and answered strings.
  */
 function nestedElementCombiner(
   operator: string,
   coll: Expression,
-  op: Expression
+  op: Expression,
+  init?: Expression | null
 ): string | undefined {
   if (!isSymbol(op)) return undefined;
   const elt = BaseCompiler.collectionElementTypeOf(coll);
@@ -11764,10 +11918,14 @@ function nestedElementCombiner(
   // `incompatible-type` error. A string, a set or a dictionary has no
   // element-wise sum either; the interpreter answers an error.
   if (isSubtype(resolveTypeForCompilation(elt), 'list<any>')) {
-    if (op.symbol === 'Add')
-      return elementwiseFoldCombiner('Sum', foldLane(coll));
+    let lane = foldLane(coll);
+    if (init !== undefined && init !== null && lane !== 'complex') {
+      const seedLane = BaseCompiler.linearAlgebraOperandLane(init);
+      if (seedLane !== 'real') lane = seedLane;
+    }
+    if (op.symbol === 'Add') return elementwiseFoldCombiner('Sum', lane);
     if (op.symbol === 'Multiply')
-      return elementwiseFoldCombiner('Product', foldLane(coll));
+      return elementwiseFoldCombiner('Product', lane);
   }
   throw new Error(
     `Could not compile \`${operator}\`: a \`${op.symbol}\` fold over elements of type ` +
@@ -12959,7 +13117,15 @@ function emitCollectionReduce(
   // `+`. Guard the scalar case so a runtime scalar returns itself (interpreter's
   // `Sum(scalar) = scalar`).
   const identity = kind === 'Sum' ? '0' : '1';
-  return `((_c) => Array.isArray(_c) ? _c.reduce(${elementwiseFoldCombiner(kind, foldLane(coll))}, ${identity}) : _c)(${code})`;
+  const fold = `((_c) => Array.isArray(_c) ? _c.reduce(${elementwiseFoldCombiner(kind, foldLane(coll))}, ${identity}) : _c)(${code})`;
+  // When a parent reads the fold as a complex value (`isComplexValued`: an
+  // operand typed `broadcastable<complex>`), the fold must give one: a sum
+  // of real elements, or the identity of an empty list, is a plain number.
+  // `_SYS.cplx` lifts a number and leaves a complex value or an array as it
+  // is.
+  return BaseCompiler.isComplexValued(coll.engine.function(kind, [coll]))
+    ? `_SYS.cplx(${fold})`
+    : fold;
 }
 
 /**

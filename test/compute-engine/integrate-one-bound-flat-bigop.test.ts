@@ -219,3 +219,65 @@ describe('THE FLAT FORM OF SUM AND PRODUCT', () => {
     expect(product.run!()).toBe(120);
   });
 });
+
+describe('A CLAUSE AFTER A BARE INDEX IS NOT A BOUND', () => {
+  // An indexing-set clause (`Limits`, `Element`, …) after a bare index ends
+  // the flat clause of that index. Before, it was read as the upper bound of
+  // the index, and the index of the clause was not bound.
+  test('Integrate(x·y, x, Limits(y, 0, 1)) keeps two integration variables', () => {
+    const expr = ce.box([
+      'Integrate',
+      ['Multiply', 'x', 'y'],
+      'x',
+      ['Limits', 'y', 0, 1],
+    ]);
+    expect(expr.json).toEqual([
+      'Integrate',
+      ['Function', ['Block', ['Multiply', 'x', 'y']], 'x', 'y'],
+      ['Limits', 'x', 'Nothing', 'Nothing'],
+      ['Limits', 'y', 0, 1],
+    ]);
+    expect(expr.unknowns).toEqual([]);
+  });
+
+  test('a clause in the upper-bound position is not the upper bound', () => {
+    expect(
+      ce.box([
+        'Integrate',
+        ['Multiply', 'x', 'y'],
+        'x',
+        0,
+        ['Limits', 'y', 0, 1],
+      ]).json
+    ).toEqual([
+      'Integrate',
+      ['Function', ['Block', ['Multiply', 'x', 'y']], 'x', 'y'],
+      ['Limits', 'x', 'Nothing', 0],
+      ['Limits', 'y', 0, 1],
+    ]);
+  });
+
+  test('Sum(n·k, n, Limits(k, 1, 3)) and Sum(n·k, n, Element(k, …))', () => {
+    expect(
+      ce.box(['Sum', ['Multiply', 'n', 'k'], 'n', ['Limits', 'k', 1, 3]]).json
+    ).toEqual([
+      'Sum',
+      ['Multiply', 'k', 'n'],
+      ['Limits', 'n', 'Nothing', 'Nothing'],
+      ['Limits', 'k', 1, 3],
+    ]);
+    expect(
+      ce.box([
+        'Sum',
+        ['Multiply', 'n', 'k'],
+        'n',
+        ['Element', 'k', ['List', 1, 2]],
+      ]).json
+    ).toEqual([
+      'Sum',
+      ['Multiply', 'k', 'n'],
+      ['Limits', 'n', 'Nothing', 'Nothing'],
+      ['Element', 'k', ['List', 1, 2]],
+    ]);
+  });
+});

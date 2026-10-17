@@ -165,6 +165,43 @@ describe('an aggregate reads finiteness off the structure, not off the list type
     }
   });
 
+  test('a symbol that holds a producer with no last element is left to the top type', () => {
+    // The symbol has no application structure: the finiteness of its value
+    // decides. `Max(M)` evaluates to `+oo`, which `integer | nan` excludes.
+    const ce = new ComputeEngine();
+    ce.declare('M', 'list<integer>');
+    ce.assign('M', ce.box(['Range', 1, 'PositiveInfinity']));
+    for (const op of ['Sum', 'Max', 'Min', 'Mean'])
+      expect(ce.box([op, 'M']).type.toString()).toBe('number');
+    expect(ce.box(['Max', 'M']).evaluate().toString()).toBe('+oo');
+  });
+
+  test('a Map stops at its shortest source', () => {
+    // `Map` over an unbounded source and a list of two elements has two
+    // elements: its sum is the integer 33.
+    const add = ['Function', ['Add', 'x', 'y'], 'x', 'y'];
+    for (const sources of [
+      [['Range', 1, 'PositiveInfinity'], ['List', 10, 20]],
+      [['List', 10, 20], ['Range', 1, 'PositiveInfinity']],
+    ]) {
+      const sum = ce.box(['Sum', ['Map', add, ...sources]]);
+      expect(sum.type.toString()).toBe('integer');
+      expect(sum.evaluate().toString()).toBe('33');
+    }
+    // Over two unbounded sources, it has no last element.
+    expect(
+      typeOf([
+        'Sum',
+        [
+          'Map',
+          add,
+          ['Range', 1, 'PositiveInfinity'],
+          ['Cycle', ['List', 1, 2]],
+        ],
+      ])
+    ).toBe('number');
+  });
+
   test('a bound whose type admits an infinity is not proven finite', () => {
     ce.declare('m', 'number');
     ce.declare('k', 'integer');

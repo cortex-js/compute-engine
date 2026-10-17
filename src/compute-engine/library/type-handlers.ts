@@ -1252,19 +1252,29 @@ export function extremumType(
  * The `list<T>` type carries no length claim (a lazy `Range`, `Map`,
  * `Repeat` and `Cycle` are all lists), so an aggregate that folds every
  * element — `Sum`, `Product`, `Mean`, `Max`, `Min` — cannot read finiteness
- * off the type. It reads it off the structure instead, for the producers
- * that state it: the sum of `Range(1, +oo)` is not an integer and its
- * maximum is not one of its (finite) elements. A view that keeps every
- * element of such a producer (`Map`, `Filter`, `Scan`, `Join`, `Append`,
- * `Rest`, `Drop`, `Reverse`, a rotation) has no last element either, and a
- * `Zip` has none when every source has none. A producer this does not
- * recognize is read as finite, which is what the type alone says; a symbol
- * that HOLDS an unbounded producer is such a case, since a symbol has no
- * application structure.
+ * off the type. For an operand with no application structure, it reads the
+ * finiteness of the operand value (`finiteCollection`): a symbol
+ * `L: list<integer>` that holds `Range(1, +oo)` has no application
+ * structure, but its value is known to be infinite, so `Max(L)`, which is
+ * `+oo`, is not typed `integer | nan`. That fact is not read for an
+ * application: the finiteness of a view over an eager source
+ * (`Join(src(k), [4])`) evaluates the source, and a type is computed when
+ * the expression is boxed, outside of an evaluation, so a user function
+ * `src` was called once more than the evaluation calls it. For an
+ * application, it reads the structure, for the producers that
+ * state it: the sum of `Range(1, +oo)` is not an integer and its maximum is
+ * not one of its (finite) elements. A view that keeps every element of such
+ * a producer (`Filter`, `Scan`, `Join`, `Append`, `Rest`, `Drop`,
+ * `Reverse`, a rotation) has no last element either. A `Map` and a `Zip`
+ * stop at their shortest source, so they have none only when every source
+ * has none: `Map((x, y) ↦ x + y, Range(1, +oo), [10, 20])` has two
+ * elements. A producer this does not recognize is read as finite, which is
+ * what the type alone says.
  */
 function isUnboundedProducer(d: OperandDescriptor): boolean {
   const s = d.structureOf?.();
-  if (s === undefined || s.kind !== 'application') return false;
+  if (s === undefined || s.kind !== 'application')
+    return d.facts.finiteCollection === false;
   // A bound is an infinite extent when it is a signed infinity, and it may
   // be one when its type admits an infinity (`number`, `extended_real`, a
   // symbol declared so) and no fact proves it finite. The bare numeric
@@ -1287,6 +1297,10 @@ function isUnboundedProducer(d: OperandDescriptor): boolean {
     case 'Iterate':
       return s.children.length < 3;
     case 'Map':
+      // The function is the first operand, and the sources follow it.
+      return (
+        s.children.length > 1 && s.children.slice(1).every(isUnboundedProducer)
+      );
     case 'Filter':
     case 'Scan':
     case 'Join':
@@ -1298,8 +1312,7 @@ function isUnboundedProducer(d: OperandDescriptor): boolean {
     case 'Reverse':
     case 'RotateLeft':
     case 'RotateRight':
-      // `Map(f, xs)` takes the function first; the others take the
-      // collection first. Any unbounded child decides.
+      // Any unbounded child decides.
       return s.children.some(isUnboundedProducer);
     case 'Zip':
       // A zip stops at its shortest source.
@@ -1785,12 +1798,16 @@ function shapedSumType(d: OperandDescriptor): Type | undefined {
   let el = resolveTypeAlias(t.elements);
   if (typeof el !== 'object') return undefined;
   // An element that is a number or a list at run time (`broadcastable<T>`):
-  // the sum is a number or a list too.
+  // the sum is a number or a list too. A collection that may be empty sums
+  // to the integer 0, which the sum of elements typed `nan` or `+oo` does
+  // not include.
   if (el.kind === 'broadcastable') {
     const elements = componentSum(el.elements);
-    return elements === undefined
-      ? undefined
-      : { kind: 'broadcastable', elements };
+    if (elements === undefined) return undefined;
+    const sum: Type = { kind: 'broadcastable', elements };
+    return dims === undefined || dims[0] <= 0
+      ? reduceType({ kind: 'union', types: [sum, 'integer'] })
+      : sum;
   }
   // A list literal of points whose components differ in type has a union
   // of tuple types as its element type (`[(1, NaN), (2, 3)]` has the
@@ -1959,12 +1976,16 @@ function shapedProductType(d: OperandDescriptor): Type | undefined {
   const el = resolveTypeAlias(t.elements);
   if (typeof el !== 'object') return undefined;
   // An element that is a number or a list at run time (`broadcastable<T>`):
-  // the product is a number or a list too.
+  // the product is a number or a list too. A collection that may be empty
+  // multiplies to the integer 1, which the product of elements typed `nan`
+  // or `+oo` does not include.
   if (el.kind === 'broadcastable') {
     const elements = entryProduct(el.elements);
-    return elements === undefined
-      ? undefined
-      : { kind: 'broadcastable', elements };
+    if (elements === undefined) return undefined;
+    const product: Type = { kind: 'broadcastable', elements };
+    return dims === undefined || dims[0] <= 0
+      ? reduceType({ kind: 'union', types: [product, 'integer'] })
+      : product;
   }
   if (el.kind !== 'list') return undefined;
   const elDims = el.dimensions;

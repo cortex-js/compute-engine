@@ -434,10 +434,33 @@ export function flatLimitsSpan(
 ): 1 | 2 | 3 {
   const next = ops[i + 1];
   const after = ops[i + 2];
-  if (next === undefined || isNextIndex(ops, i + 1)) return 1;
-  if (after !== undefined && !(isNextIndex(ops, i + 2) && i + 3 < ops.length))
+  if (next === undefined || isClause(next) || isNextIndex(ops, i + 1)) return 1;
+  if (
+    after !== undefined &&
+    !isClause(after) &&
+    !(isNextIndex(ops, i + 2) && i + 3 < ops.length)
+  )
     return 3;
   return 2;
+}
+
+/**
+ * Whether `op` is an indexing-set clause of its own (`Limits(y, 0, 1)`,
+ * `Element(k, S)`, a `Tuple`, `Range(0, 1)`, or a held index such as
+ * `Hold(y)`), not a bound. Such an operand always ends the flat clause before
+ * it: in `"x", Limits("y", 0, 1)` the index `x` has no bounds and the
+ * `Limits` clause binds `y`. Without this check, the `Limits` clause was read
+ * as the upper bound of `x`, and `y` was not bound.
+ */
+function isClause(op: Expression): boolean {
+  if (isFunction(op, 'Hold') && op.nops === 1)
+    return isSymbol(op.op1) || isClause(op.op1);
+  return (
+    isFunction(op) &&
+    (INDEXING_SET_OPERATORS.has(op.operator) ||
+      op.operator === 'Element' ||
+      op.operator === 'Range')
+  );
 }
 
 /**

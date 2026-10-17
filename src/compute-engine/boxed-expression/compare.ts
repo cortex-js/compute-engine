@@ -1650,7 +1650,11 @@ export type NarrowAtLimit = (
  * exact value of its rounded operands, at the precision that is in force.
  * An operator for which no error bound is known gives no enclosure, and
  * then the result is `undefined` at once (a higher precision does not give
- * a bound).
+ * a bound). When every operator has an error bound, an operand with no
+ * enclosure is tried again at the next precision: the enclosure of a
+ * denominator can contain 0 only because its terms cancel at this
+ * precision (`1/(√(10⁸⁰ + 1) − 10⁴⁰)`, whose floor is `2·10⁴⁰`, has no
+ * enclosure below about 81 digits).
  *
  * The precision is raised with `_withTransientPrecision` (see
  * `orderAtRaisedPrecision`): the value of a constant is computed again at
@@ -1682,13 +1686,19 @@ export function refineExactConstants<T>(
       const step = ce._withTransientPrecision(digits, () => {
         atTransientPrecision.add(ce);
         try {
-          const unit = roundingUnit(ce);
+          const logUnit = logRoundingUnit(ce);
           const enclosures: [BigDecimal, BigDecimal][] = [];
           for (const x of xs) {
-            const a = approximate(x, unit);
-            if (a === undefined) return { bounded: false, result: undefined };
+            const a = approximate(x, logUnit);
+            if (a === undefined)
+              return {
+                bounded: hasErrorModel(x),
+                measured: false,
+                result: undefined,
+              };
             const v = bigDecimalOf(a.value);
-            if (!v.isFinite()) return { bounded: false, result: undefined };
+            if (!v.isFinite())
+              return { bounded: false, measured: false, result: undefined };
             const e = errorBound(a.logError);
             enclosures.push([v.sub(e), v.add(e)]);
           }
@@ -1702,7 +1712,7 @@ export function refineExactConstants<T>(
                   Math.ceil(logAbs(end) / Math.LN10)
                 );
             if (magnitude > MAX_MAGNITUDE_DIGITS)
-              return { bounded: false, result: undefined };
+              return { bounded: false, measured: true, result: undefined };
             limit += magnitude;
           }
           const atLimit = digits >= limit;
@@ -1711,12 +1721,18 @@ export function refineExactConstants<T>(
             hi
               .sub(lo)
               .lte(scale === undefined ? narrowWidth : narrowWidth.mul(scale));
-          return { bounded: true, result: decide(enclosures, narrowAtLimit) };
+          return {
+            bounded: true,
+            measured: true,
+            result: decide(enclosures, narrowAtLimit),
+          };
         } finally {
           atTransientPrecision.delete(ce);
         }
       });
-      first = false;
+      // The magnitude is measured on the first enclosures that are computed,
+      // which are not at the first precision when an operand had none there.
+      if (step.measured) first = false;
       if (step.result !== undefined) return step.result;
       if (!step.bounded || digits >= limit) return undefined;
       digits = Math.min(2 * digits, limit);
@@ -1724,6 +1740,71 @@ export function refineExactConstants<T>(
   } finally {
     refiningConstants.delete(ce);
   }
+}
+
+/**
+ * The operators that have an error bound in `propagatedError`: the labels
+ * of its `switch`. Keep the two lists the same.
+ */
+const OPERATORS_WITH_ERROR_BOUND = new Set([
+  'Add',
+  'Subtract',
+  'Negate',
+  'Abs',
+  'Multiply',
+  'Divide',
+  'Square',
+  'Sqrt',
+  'Root',
+  'Power',
+  'Exp',
+  'Ln',
+  'Lb',
+  'Lg',
+  'Log',
+  'Sin',
+  'Cos',
+  'Tan',
+  'Cot',
+  'Sec',
+  'Csc',
+  'Arctan',
+  'Arcsin',
+  'Arccos',
+  'Sinh',
+  'Cosh',
+  'Tanh',
+  'Arsinh',
+  'Gamma',
+  'Erf',
+  'Erfc',
+  'Erfi',
+  'Zeta',
+  'Arcosh',
+  'Artanh',
+]);
+
+/**
+ * True when every operator in `x` has an error bound
+ * (`OPERATORS_WITH_ERROR_BOUND`). Then an approximation of `x` that has no
+ * bound at one precision can have one at a higher precision (see
+ * `refineExactConstants`). A symbol whose value is a function expression
+ * (a constant such as the golden ratio, or a symbol with an assigned
+ * expression) is approximated from that expression (`computeApproximation`),
+ * so the value is followed: the symbol has an error model when its value
+ * has one. Any other symbol is a leaf, which has an error model.
+ */
+function hasErrorModel(x: Expression): boolean {
+  if (isNumber(x)) return true;
+  if (isSymbol(x)) {
+    const value = x.value;
+    return value !== undefined && isFunction(value)
+      ? hasErrorModel(value)
+      : true;
+  }
+  if (!isFunction(x) || !OPERATORS_WITH_ERROR_BOUND.has(x.operator))
+    return false;
+  return x.ops.every((op) => hasErrorModel(op));
 }
 
 /** The engines for which `refineExactConstants` is running. See
@@ -2201,7 +2282,7 @@ function orderFromDifference(
  * zero is not an exact zero.
  */
 function signOfApproximation(diff: Expression): '<' | '>' | undefined {
-  const approximation = approximate(diff, roundingUnit(diff.engine));
+  const approximation = approximate(diff, logRoundingUnit(diff.engine));
   if (approximation === undefined || approximation.sign === 0) return undefined;
   if (!(approximation.logMagnitude > approximation.logError + LOG_SLACK))
     return undefined;
@@ -2226,31 +2307,36 @@ function orderOfApproximations(
   a: Expression,
   b: Expression
 ): '<' | '>' | undefined {
-  const unit = roundingUnit(a.engine);
-  const x = approximate(a, unit);
+  const logUnit = logRoundingUnit(a.engine);
+  const x = approximate(a, logUnit);
   if (x === undefined) return undefined;
-  const y = approximate(b, unit);
+  const y = approximate(b, logUnit);
   if (y === undefined) return undefined;
   const d = bigDecimalOf(x.value).sub(bigDecimalOf(y.value));
   if (!d.isFinite() || d.isZero()) return undefined;
   const logError = logAdd(
     logAdd(x.logError, y.logError),
-    Math.log(unit) + logAdd(x.logMagnitude, y.logMagnitude)
+    logUnit + logAdd(x.logMagnitude, y.logMagnitude)
   );
   if (!(logAbs(d) > logError + LOG_SLACK)) return undefined;
   return d.isNegative() ? '<' : '>';
 }
 
 /**
- * The relative error allowed for one rounding at the working precision:
- * `10^(2 − digits)`, that is 100 units in the last digit. The number of
- * digits is the lower of the engine precision and the precision of the
- * big decimals: the second one is global to the module, and another
- * engine can change it (see `BigDecimal.precision`).
+ * The natural logarithm of the relative error allowed for one rounding at
+ * the working precision: `ln 10^(2 − digits)`, that is 100 units in the
+ * last digit. The number of digits is the lower of the engine precision
+ * and the precision of the big decimals: the second one is global to the
+ * module, and another engine can change it (see `BigDecimal.precision`).
+ *
+ * It is a logarithm because the unit itself is not a double above 325
+ * digits: `10^(2 − 326)` underflows to `0`, which made every leaf exact
+ * and every enclosure a point (at precision 400, `Floor(Cos(10^-210))` was
+ * `1`).
  */
-function roundingUnit(engine: Expression['engine']): number {
+function logRoundingUnit(engine: Expression['engine']): number {
   const digits = Math.min(engine.precision, BigDecimal.precision);
-  return 10 ** (2 - Math.max(digits, MACHINE_PRECISION));
+  return (2 - Math.max(digits, MACHINE_PRECISION)) * Math.LN10;
 }
 
 /**
@@ -2373,6 +2459,9 @@ const approximations = new WeakMap<
  * bound on its absolute error. `undefined` when `x` is not a real
  * constant, or when no bound is known.
  *
+ * `logUnit` is `ln unit`, where `unit` is the relative error of one
+ * rounding (`logRoundingUnit`).
+ *
  * The error model. The value is computed bottom-up, one node at a time:
  * each node is computed from the values of its operands, so every node is
  * computed once. The error of a node is the sum of:
@@ -2409,8 +2498,11 @@ const approximations = new WeakMap<
  * `Cosh`, `Tanh`, `Arsinh`, `Arcosh`, `Artanh`, and, only above machine
  * precision, `Gamma`, `Erf`, `Erfc`, `Erfi`, `Zeta` (see `propagatedError`).
  */
-function approximate(x: Expression, unit: number): Approximation | undefined {
-  return approximateNode(x, unit).approximation;
+function approximate(
+  x: Expression,
+  logUnit: number
+): Approximation | undefined {
+  return approximateNode(x, logUnit).approximation;
 }
 
 /** The approximation of `x` (see `approximate`), and whether it depends
@@ -2418,7 +2510,7 @@ function approximate(x: Expression, unit: number): Approximation | undefined {
  *  pure approximations are kept in `approximations`. */
 function approximateNode(
   x: Expression,
-  unit: number
+  logUnit: number
 ): { approximation: Approximation | undefined; pure: boolean } {
   const ce = x.engine;
   const key = `${ce.precision}:${BigDecimal.precision}:${ce.angularUnit}:${ce.roundingTies}`;
@@ -2426,7 +2518,7 @@ function approximateNode(
   const entry = known?.find((k) => k.key === key);
   if (entry !== undefined)
     return { approximation: entry.approximation, pure: true };
-  const result = computeApproximation(x, unit);
+  const result = computeApproximation(x, logUnit);
   if (result.pure) {
     const kept = { key, approximation: result.approximation };
     // The newest entry is last: the oldest one is dropped.
@@ -2440,10 +2532,9 @@ function approximateNode(
 
 function computeApproximation(
   x: Expression,
-  unit: number
+  logUnit: number
 ): { approximation: Approximation | undefined; pure: boolean } {
   const ce = x.engine;
-  const logUnit = Math.log(unit);
 
   const leaf = (y: Expression, exact: boolean): Approximation | undefined => {
     const v = y.N();
@@ -2458,7 +2549,9 @@ function computeApproximation(
 
   if (isNumber(x)) {
     // An integer literal smaller than 10^(digits − 4) is converted exactly.
-    const exact = x.isInteger === true && Math.abs(x.re) < 0.01 / unit;
+    const exact =
+      x.isInteger === true &&
+      Math.log(Math.abs(x.re)) < Math.log(0.01) - logUnit;
     return { approximation: leaf(x, exact), pure: true };
   }
 
@@ -2467,18 +2560,18 @@ function computeApproximation(
     if (x.isConstant)
       return {
         approximation: transient
-          ? constantApproximation(x, unit, leaf)
+          ? constantApproximation(x, logUnit, leaf)
           : leaf(x, false),
         pure: true,
       };
     const value = x.value;
     if (value !== undefined && isFunction(value))
-      return { approximation: approximate(value, unit), pure: false };
+      return { approximation: approximate(value, logUnit), pure: false };
     // A value that is a constant symbol is approximated like the constant:
     // the value of a constant that is an expression (the golden ratio)
     // gets the error bound of its expression, not the bound of a leaf.
     if (transient && value !== undefined && isSymbol(value) && value.isConstant)
-      return { approximation: approximate(value, unit), pure: false };
+      return { approximation: approximate(value, logUnit), pure: false };
     return { approximation: leaf(x, false), pure: false };
   }
 
@@ -2489,7 +2582,7 @@ function computeApproximation(
   let pure = true;
   const args: Approximation[] = [];
   for (const operand of x.ops) {
-    const a = approximateNode(operand, unit);
+    const a = approximateNode(operand, logUnit);
     pure &&= a.pure;
     if (a.approximation === undefined)
       return { approximation: undefined, pure };
@@ -2539,7 +2632,7 @@ function computeApproximation(
  */
 function constantApproximation(
   x: Expression,
-  unit: number,
+  logUnit: number,
   leaf: (y: Expression, exact: boolean) => Approximation | undefined
 ): Approximation | undefined {
   if (!isSymbol(x)) return undefined;
@@ -2551,7 +2644,7 @@ function constantApproximation(
   if (isNumber(value)) return leaf(value, false);
   // A constant whose value is itself has no approximation.
   if (isSymbol(value) && value.symbol === x.symbol) return undefined;
-  return approximate(value, unit);
+  return approximate(value, logUnit);
 }
 
 /**

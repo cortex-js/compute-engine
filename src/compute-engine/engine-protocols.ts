@@ -3782,10 +3782,20 @@ function requirementAt(
  * advances: what the text resolves to depends on the types in scope, and on
  * nothing else. Not on `_cacheGeneration()`, whose low bit flips while the
  * assumptions are hidden and would empty the entry on every toggle.
+ *
+ * The entry also records the record's MEMBERS object. A re-declaration
+ * replaces `record.members` in place and revalidates the conformances (which
+ * reads the requirements) BEFORE it advances the version. Without the members
+ * check, that revalidation read the signatures of the OLD members, and the
+ * mutability gate memoized that wrong verdict for the new members.
  */
 const REQUIREMENT_CACHE = new WeakMap<
   ProtocolRecord,
-  { version: number; parsed: Map<string, FunctionSignature | null> }
+  {
+    version: number;
+    members: ProtocolRecord['members'];
+    parsed: Map<string, FunctionSignature | null>;
+  }
 >();
 
 /**
@@ -3811,9 +3821,10 @@ function cachedRequirement(
   if (
     entry === undefined ||
     entry.version !== version ||
+    entry.members !== record.members ||
     entry.parsed.size >= REQUIREMENT_CACHE_LIMIT
   ) {
-    entry = { version, parsed: new Map() };
+    entry = { version, members: record.members, parsed: new Map() };
     REQUIREMENT_CACHE.set(record, entry);
   }
   const key = `${member}\u0000${self}`;

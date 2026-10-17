@@ -179,6 +179,24 @@ describe('LATEX SERIALIZING', () => {
     expect(raw(['Power', ['Complex', 1.5, 0], 'x'])).toBe('1.5^{x}');
   });
 
+  // A `Complex` with an imaginary part of 0 is written as its real part. A
+  // name or a decimal written that way is followed by an explicit
+  // multiplication, as it is without the `Complex`: `f(x+1)` reads as a
+  // function call, and `1.5(2+1)` as a repeating decimal.
+  test('a real Complex factor before a parenthesis', () => {
+    const raw = (json: MathJsonExpression) =>
+      ce.box(json, { form: 'raw' }).latex;
+    expect(raw(['Multiply', ['Complex', 'f', 0], ['Add', 'x', 1]])).toBe(
+      'f\\times(x+1)'
+    );
+    expect(raw(['Multiply', ['Complex', 1.5, 0], ['Add', 2, 1]])).toBe(
+      '1.5\\times(2+1)'
+    );
+    expect(raw(['Multiply', ['Complex', 2, 0], ['Add', 'x', 1]])).toBe(
+      '2(x+1)'
+    );
+  });
+
   test.each([
     '\\sqrt2(1-i)',
     '-\\sqrt2(1+i)',

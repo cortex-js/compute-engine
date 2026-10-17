@@ -2,7 +2,7 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { parseType } from '../../src/common/type/parse';
 import { reduceType } from '../../src/common/type/reduce';
 import { typeToString } from '../../src/common/type/serialize';
-import { isSubtype } from '../../src/common/type/subtype';
+import { isSubtype, narrow } from '../../src/common/type/subtype';
 import { engine as ce } from '../utils';
 
 describe('NUMERIC TYPES', () => {
@@ -314,5 +314,43 @@ describe('ZERO-LENGTH AXES IN LIST TYPES', () => {
     ce.declare('w', 'matrix<integer^(2x0)>');
     ce.assign('w', rows);
     expect(ce.symbol('w').evaluate().toString()).toBe('[[],[]]');
+  });
+});
+
+// `narrow` is the meet of two types. Two numeric ranges that are not
+// subtype-related can still share values, and their meet is the
+// intersection of the intervals, as the intersection reducer (`reduceType`)
+// computes it. Before this, `narrow` returned `never` for every partly
+// overlapping pair.
+describe('NARROW OF NUMERIC RANGES', () => {
+  const meet = (a: string, b: string) =>
+    typeToString(narrow(parseType(a), parseType(b)));
+
+  test.each([
+    // Overlapping, in either order.
+    ['integer<-5..5>', 'integer<1..>', 'integer<1..5>'],
+    ['integer<1..>', 'integer<-5..5>', 'integer<1..5>'],
+    ['real<0..>', 'real<..1>', 'real<0..1>'],
+    // Nested: the inner range.
+    ['integer<2..4>', 'integer<1..10>', 'integer<2..4>'],
+    // Disjoint: no common value.
+    ['integer<-5..0>', 'integer<1..>', 'never'],
+    ['real<0<..>', 'real<..0>', 'never'],
+    // Open-ended against a bare tier, and across tiers.
+    ['real<0..>', 'integer', 'integer<0..>'],
+    ['integer<0..>', 'real<-1..0.5>', 'integer<0..0>'],
+    // Unchanged for pairs that are not numeric ranges.
+    ['integer', 'string', 'never'],
+  ])('narrow(%s, %s) is %s', (a, b, expected) => {
+    expect(meet(a, b)).toBe(expected);
+    // The meet agrees with the intersection reducer.
+    expect(
+      typeToString(
+        reduceType({
+          kind: 'intersection',
+          types: [parseType(a), parseType(b)],
+        })
+      )
+    ).toBe(expected);
   });
 });

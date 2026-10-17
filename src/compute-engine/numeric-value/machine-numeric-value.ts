@@ -9,7 +9,13 @@ import {
   numberToExpression,
 } from '../numerics/expression.js';
 import { NumericPrimitiveType } from '../../common/type/types.js';
-import { ExactNumericValue, withDoubleDigits } from './exact-numeric-value.js';
+import {
+  ExactNumericValue,
+  bigComplexProduct,
+  bigComplexQuotient,
+  hasExactPartOutsideDoubleRange,
+  withDoubleDigits,
+} from './exact-numeric-value.js';
 import {
   isOutsideNormalDoubleRange,
   machineNthRoot,
@@ -403,6 +409,22 @@ export class MachineNumericValue extends NumericValue {
       return this.clone(this.decimal * x);
     }
 
+    // The same with a complex value: `10^{309} · 10^{-10}i` is `1e299i`, not
+    // the `~oo` of `∞ · 10^{-10}i`.
+    if (
+      Number.isFinite(this.decimal) &&
+      Number.isFinite(this.im) &&
+      hasExactPartOutsideDoubleRange(other)
+    )
+      return this.clone(
+        bigComplexProduct(
+          new BigDecimal(this.decimal),
+          new BigDecimal(this.im),
+          other.bignumRe!,
+          other.isComplex ? other.bignumIm! : new BigDecimal(0)
+        )
+      );
+
     return this.clone({
       re: this.decimal * other.re - this.im * other.im,
       im: this.re * other.im + this.im * other.re,
@@ -439,6 +461,23 @@ export class MachineNumericValue extends NumericValue {
     }
 
     const [a, b] = [this.decimal, this.im];
+    // An exact divisor out of the double range, as in the real case above:
+    // `10^{-10}i / 10^{-400}` is `1e390i` at machine precision only through
+    // the big-decimal parts (here `∞`, but `10^{-10}i / 10^{-310}` is
+    // `1e300i`, not the `∞` of a division by the double `0`).
+    if (
+      Number.isFinite(a) &&
+      Number.isFinite(b) &&
+      hasExactPartOutsideDoubleRange(other)
+    )
+      return this.clone(
+        bigComplexQuotient(
+          new BigDecimal(a),
+          new BigDecimal(b),
+          other.bignumRe!,
+          other.isComplex ? other.bignumIm! : new BigDecimal(0)
+        )
+      );
     const [c, d] = [other.re, other.im];
     // For finite parts, `complexQuotient()` scales the parts when an
     // intermediate value of the formula below overflows or underflows

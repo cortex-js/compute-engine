@@ -1,4 +1,6 @@
 import { engine as ce } from '../utils';
+import { ComputeEngine } from '../../src/compute-engine';
+import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 /**
  * Verified (independent bigint) reference values used below:
@@ -326,5 +328,114 @@ describe('Mod — exact radical literal operands', () => {
     expect(ce.box(['Mod', ['Rational', 1, 2], ['Rational', 1, 3]]).evaluate().json).toEqual(['Rational', 1, 6]);
     expect(ce.box(['Mod', 7.5, 2]).evaluate().json).toBe(1.5);
     expect(ce.box(['Mod', -7, 3]).evaluate().json).toBe(2);
+  });
+});
+
+// `Remainder(a, m) = a − m·k`, with `k` the quotient `a/m` rounded to the
+// nearest integer, a tie toward +∞. It jumps where `a/m` is a half-integer,
+// so exact operands are read exactly, as `Mod` reads them: the float lanes
+// rounded `a/m` to the working precision first, and `Remainder(1/2 − 10⁻³⁰,
+// 1)` was `−0.5`. The references are exact fractions (Python `fractions`)
+// and mpmath at 60 digits.
+describe('Remainder — exact operands are read exactly', () => {
+  const nearHalf = ['Subtract', ['Rational', 1, 2], ['Power', 10, -30]];
+  const engines = (): [string, ComputeEngine][] => {
+    const machine = new ComputeEngine();
+    machine.precision = 'machine';
+    const digits21 = new ComputeEngine();
+    digits21.precision = 21;
+    return [
+      ['machine', machine],
+      ['21 digits', digits21],
+    ];
+  };
+
+  test.each(engines())('evaluate() gives the exact remainder (%s)', (_, ce) => {
+    const evaluate = (json: unknown) => ce.box(json as any).evaluate();
+    expect(
+      evaluate(['Remainder', nearHalf, 1]).isSame(evaluate(nearHalf))
+    ).toBe(true);
+    expect(evaluate(['Remainder', ['Rational', 1, 2], 1]).json).toEqual([
+      'Rational',
+      -1,
+      2,
+    ]);
+    expect(evaluate(['Remainder', ['Rational', -1, 2], 1]).json).toEqual([
+      'Rational',
+      -1,
+      2,
+    ]);
+    expect(
+      evaluate(['Remainder', ['Rational', 7, 2], ['Rational', 3, 2]]).json
+    ).toEqual(['Rational', 1, 2]);
+    // 10²⁵ + 1 is beyond a double and beyond 21 digits.
+    expect(evaluate(['Remainder', ['Add', ['Power', 10, 25], 1], 7]).json).toBe(
+      -3
+    );
+    // An integer dividend too large to form is reduced in ℤ/7ℤ.
+    expect(
+      evaluate(['Remainder', ['Power', 2, ['Power', 3, 20]], 7]).json
+    ).toBe(1);
+    expect(evaluate(['Remainder', ['Sqrt', 2], 1]).toString()).toBe(
+      '-1 + sqrt(2)'
+    );
+  });
+
+  test('.N() approximates the exact remainder', () => {
+    const [[, machine], [, digits21]] = engines();
+    // The double and the 21-digit value of 1/2 − 10⁻³⁰ are both 0.5.
+    expect(machine.box(['Remainder', nearHalf, 1]).N().re).toBe(0.5);
+    expect(digits21.box(['Remainder', nearHalf, 1]).N().toString()).toBe('0.5');
+    // mpmath: π·10³⁰ − 3141592653589793238462643383280.
+    expect(
+      digits21
+        .box(['Remainder', ['Multiply', 'Pi', ['Power', 10, 30]], 1])
+        .N()
+        .toString()
+    ).toBe('-0.497115802830600624894');
+    expect(
+      digits21.box(['Remainder', ['Power', 2, ['Power', 3, 20]], 7]).N().re
+    ).toBe(1);
+    // Built last: constructing an engine sets the precision of the big
+    // decimals for the engines built before it.
+    const digits50 = new ComputeEngine();
+    digits50.precision = 50;
+    expect(digits50.box(['Remainder', nearHalf, 1]).N().toString()).toBe(
+      '0.499999999999999999999999999999'
+    );
+  });
+
+  test.each(engines())(
+    'a float operand keeps the float route (%s)',
+    (_, ce) => {
+      for (const [a, b, want] of [
+        [5.5, 2, -0.5],
+        [0.5, 1, -0.5],
+        [-5.5, 2, 0.5],
+      ]) {
+        const e = ce.box(['Remainder', a, b]);
+        expect(e.evaluate().re).toBe(want);
+        expect(e.N().re).toBe(want);
+        expect(e.evaluate().isExact).toBe(false);
+      }
+    }
+  );
+
+  test('the compiled kernel works on doubles', () => {
+    const fn = compile(ce.box(['Remainder', 'a', 'b']))!;
+    const run = (a: number, b: number) => fn.run!({ a, b }) as number;
+    // Operands that are doubles: the compiled kernel matches `.N()`.
+    for (const [a, b] of [
+      [5.5, 2],
+      [-5, 2],
+      [3.5, 1.5],
+      [-0.5, 1],
+    ]) {
+      expect(run(a, b)).toBe(ce.box(['Remainder', a, b]).N().re);
+    }
+    // It cannot match the exact remainder of 1/2 − 10⁻³⁰, as the compiled
+    // `Floor` cannot match an exact operand near an integer: the argument
+    // reaches it as the double 0.5, a tie, whose remainder is −0.5.
+    expect(run(0.5 - 1e-30, 1)).toBe(-0.5);
   });
 });

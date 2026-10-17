@@ -13,7 +13,11 @@ import {
 } from './tensor-view.js';
 import { machineNumberOf, isExactNonInteger } from './machine-number.js';
 import { isStoredAsDouble } from './machine-broadcast.js';
-import { bignumPreferred, hasAssignedVariable } from './utils.js';
+import {
+  bignumPreferred,
+  hasAssignedVariable,
+  indeterminateAnswerReadsVariable,
+} from './utils.js';
 import {
   isNumber,
   isFunction,
@@ -1221,9 +1225,15 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
   // Only a NUMBER LITERAL folds here: `isNaN` of a symbol reads its current
   // value, and a canonical form must not depend on it (with `w := NaN`, a
   // folded `w / 2` stayed `NaN` after `w := 4`). A symbol is left to
-  // `evaluate()`, which substitutes its value first.
-  if ((isNumber(op1) && op1.isNaN) || (isNumber(op2) && op2.isNaN))
+  // `evaluate()`, which substitutes its value first. For the same reason,
+  // `Indeterminate / w` is not folded when `w` has an assigned value: the
+  // answer is `NaN` or `Indeterminate` depending on that value
+  // (`indeterminateAnswerReadsVariable()`).
+  if ((isNumber(op1) && op1.isNaN) || (isNumber(op2) && op2.isNaN)) {
+    if (indeterminateAnswerReadsVariable([op1, op2]))
+      return ce._fn('Divide', [op1, op2]);
     return nanOperandAnswer(ce, [op1, op2]);
+  }
 
   // Tuples (points/vectors in ℝⁿ): `tuple / scalar` scales component-wise;
   // `scalar / tuple` and `tuple / tuple` are undefined.
@@ -1644,12 +1654,14 @@ export function div(num: Expression, denom: number | Expression): Expression {
 
   // If the numerator is NaN, return NaN (or `Indeterminate`, forwarded by the
   // rule of `canonicalDivide`). A number literal only, for the reason given
-  // in `canonicalDivide`.
-  if (isNumber(num) && num.isNaN)
-    return nanOperandAnswer(ce, [
-      num,
-      typeof denom === 'number' ? ce.number(denom) : denom,
-    ]);
+  // in `canonicalDivide`, and not when the answer depends on the value of a
+  // variable that the divisor reads.
+  if (isNumber(num) && num.isNaN) {
+    const d = typeof denom === 'number' ? ce.number(denom) : denom;
+    if (indeterminateAnswerReadsVariable([num, d]))
+      return ce._fn('Divide', [num, d]);
+    return nanOperandAnswer(ce, [num, d]);
+  }
 
   // Tuple (point/vector in ℝⁿ) numerator: `tuple / scalar` scales
   // component-wise — the value-level twin of the tuple branch in
@@ -1784,8 +1796,12 @@ export function div(num: Expression, denom: number | Expression): Expression {
       }
     }
   } else {
-    if (isNumber(denom) && denom.isNaN)
+    if (isNumber(denom) && denom.isNaN) {
+      // As for a `NaN` numerator above.
+      if (indeterminateAnswerReadsVariable([num, denom]))
+        return ce._fn('Divide', [num, denom]);
       return nanOperandAnswer(ce, [num, denom]);
+    }
     if (isLiteral(num, 0)) {
       // 0/0 is the indeterminate form. 0/∞ and 0/~oo are 0, as
       // `canonicalDivide` answers (not an indeterminate form; this answered
@@ -2064,6 +2080,23 @@ export function canonicalMultiply(
         // `Indeterminate`, and 0 times an absent factor is NaN (arithmetic
         // with an absent operand is `NaN`)
         if (hasAbsentFactor) return ce.NaN;
+        // A factor that reads a variable with an assigned value keeps the
+        // product: its value is the one the variable holds when the product
+        // is evaluated, and the fold must not read the value it holds now.
+        // With `w := 4`, `Multiply(0, 2, w)` is `0w`, which evaluates to
+        // `NaN` after `w := NaN`. This is the rule of `Multiply(0, w)`, where
+        // there is only one exact factor and nothing to fold, and of `mul()`.
+        // A NaN or infinite literal factor is the indeterminate form below.
+        if (
+          !nonNumeric.some(
+            (x) => isNumber(x) && (x.isInfinity === true || x.isNaN === true)
+          ) &&
+          nonNumeric.some((x) => hasAssignedVariable(x))
+        )
+          return ce._fn(
+            'Multiply',
+            sortProductOperands([ce.Zero, ...nonNumeric])
+          );
         if (nonNumeric.some((x) => x.isInfinity || x.isNaN))
           return indeterminateFormAnswer(ce, nonNumeric);
         // A factor typed `error` always evaluates to an error (such as
@@ -2401,6 +2434,13 @@ function mulImpl(xs: ReadonlyArray<Expression>, expand: boolean): Expression {
       xs.map((x) => x.canonical)
     );
 
+  // An `Indeterminate` factor beside a factor that reads a variable with an
+  // assigned value: the answer is `NaN` or `Indeterminate` depending on the
+  // value the variable holds when the product is evaluated, so the product
+  // is kept (`indeterminateAnswerReadsVariable()`).
+  if (indeterminateAnswerReadsVariable(xs))
+    return ce.function('Multiply', [...xs]);
+
   // A factor that is collection-TYPED but has no collection value yet (a
   // declared-but-unassigned `list<number>` symbol) is not a broadcast
   // participant, so each branch below would splice it whole into every cell as
@@ -2512,7 +2552,17 @@ function mulImpl(xs: ReadonlyArray<Expression>, expand: boolean): Expression {
     )
   ) {
     const held = xs.filter((x) => !isNumber(x) && hasAssignedVariable(x));
-    if (held.length > 0) return ce.function('Multiply', [zero, ...held]);
+    // A float factor is kept beside the held factors: it is what makes the
+    // product `NaN` instead of `Indeterminate` when a held factor evaluates
+    // to an infinity (`0 · 2.5 · w` with `w := ∞`), as the canonical
+    // `Multiply(0, 2.5, w)` does. The zero itself is excluded from them: a
+    // float zero is inexact too, and `0.0.mul(w)` was `0 · 0 · w`.
+    if (held.length > 0)
+      return ce.function('Multiply', [
+        zero,
+        ...xs.filter((x) => x !== zero && isNumber(x) && !x.isExact),
+        ...held,
+      ]);
   }
 
   // `expandProducts` does two things: it distributes over sums, and — as a

@@ -6602,6 +6602,40 @@ function parseAt(
 const MAX_SERIALIZED_DERIVATIVE_ORDER = 1000;
 
 /**
+ * The variable operands of `D` for a derivative of order `order` in the
+ * variable `v`.
+ *
+ * An integer order `n` from 1 to `MAX_SERIALIZED_DERIVATIVE_ORDER` gives `n`
+ * copies of `v`: `\partial_x^3 f` is `["D", "f", "x", "x", "x"]`. Any other
+ * order gives the order pair `["Set", v, order]`, which the canonical form
+ * of `D` reads:
+ * - a symbolic order (`\partial_x^n f` is `D(f, {x, n})`) and an integer
+ *   order above the maximum stay inert;
+ * - an order of 0 is no differentiation in `v`: the canonical form removes
+ *   the pair;
+ * - a negative order is an error.
+ *
+ * The order is never dropped, and no copies are made for a large order: a
+ * short input can ask for a large number of them (`\partial_x^{1000000000}
+ * f` asks for a billion, `\partial_x^{1e400} f` for an array of infinite
+ * length).
+ */
+export function derivativeOrder(
+  v: MathJsonExpression,
+  order: MathJsonExpression
+): MathJsonExpression[] {
+  const n = machineValue(order);
+  if (
+    n !== null &&
+    Number.isInteger(n) &&
+    n >= 1 &&
+    n <= MAX_SERIALIZED_DERIVATIVE_ORDER
+  )
+    return Array.from({ length: n }, () => v);
+  return [['Set', v, order]];
+}
+
+/**
  * The variable operands of a `D`, as a list of symbols, or `null` when one of
  * them cannot be written in the `\partial` or `\mathrm{d}` spelling.
  *

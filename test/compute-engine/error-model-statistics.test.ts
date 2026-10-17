@@ -212,6 +212,30 @@ describe('the variance family', () => {
     }
   });
 
+  test('infinite data next to complex data has no variance either', () => {
+    // The complex-data branch answered `NaN` for every datum that is not
+    // finite, before the infinite-data rule could see it: an infinite datum
+    // next to an EXACT complex datum was `NaN`, not `Indeterminate`.
+    const ce = new ComputeEngine();
+    for (const h of HEADS) {
+      expect(
+        `${h}: ${evaluated(ce, [
+          h,
+          ['List', ['Complex', 1, 1], 'PositiveInfinity'],
+        ])}`
+      ).toBe(`${h}: Indeterminate`);
+      expect(
+        `${h}: ${evaluated(ce, [
+          h,
+          ['List', ['Complex', 1.5, 1], 'PositiveInfinity'],
+        ])}`
+      ).toBe(`${h}: NaN`);
+      expect(
+        `${h}: ${evaluated(ce, [h, ['List', ['Complex', 1, 1], 'NaN']])}`
+      ).toBe(`${h}: NaN`);
+    }
+  });
+
   test('absent data, empty input and a non-numeric datum', () => {
     const ce = new ComputeEngine();
     for (const h of HEADS) {

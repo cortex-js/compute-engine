@@ -335,3 +335,64 @@ describe('Binomial of a huge n and a non-integer k', () => {
     expect(Math.abs(v / 1.1283791670955126e150 - 1)).toBeLessThan(1e-12);
   });
 });
+
+// A negative non-integer k goes through the reflection formula of Γ(k + 1).
+// With the sine of the rounded product π·(k + 1), a large |k| had no correct
+// digits (C(100, −(10⁴⁰ − 0.75)) was −1.2e−3839), and with the pairing of
+// Γ(n + 1) and Γ(k + 1), k/(n + 1 − k) rounded to −1 and the result to 0.
+// The literals keep all their digits. The references are mpmath `binomial`
+// at 400 digits.
+describe('Binomial of a negative non-integer k', () => {
+  test.each([
+    ['100', `-${'9'.repeat(40)}.75`, '-2.10057786223440547367e-3883'],
+    ['100', `-${'9'.repeat(100)}.75`, '-2.10057786223440547367e-9943'],
+    ['100', '-12345678901234567890123.25', '-1.20040027351161820826e-2074'],
+    ['2.5', '-10000000000.5', '1.05785546850410656344e-35'],
+    ['3.7', '-2.2', '0.00532408004331743698201'],
+    ['0.5', '-0.5', '0.5'],
+  ])('Binomial(%s, %s).N()', (n, k, expected) => {
+    const ce = new ComputeEngine();
+    expect(ce.parse(`\\binom{${n}}{${k}}`).N().toString()).toBe(expected);
+  });
+});
+
+// With n + 1 < 0, Γ(n + 1) and one denominator factor are reflected. Near
+// n = −10¹⁵ both Γ values of the quotient underflow, and the result was
+// NaN (0/0). The references are mpmath `binomial` at 80 digits.
+describe('Binomial of a large negative non-integer n', () => {
+  test.each([
+    ['-1000000000000000.5', '0.25', '4386.96246368695392635'],
+    // An integer k: C(n, k) = (−1)^k·C(k − n − 1, k).
+    ['-1000000000000000.5', '3', '-1.66666666666667416667e+44'],
+    // n − k + 1 = −2 is a pole of Γ(n − k + 1): the value is 0.
+    ['-1000000000000000.5', '-999999999999997.5', '0'],
+  ])('Binomial(%s, %s).N()', (n, k, expected) => {
+    const ce = new ComputeEngine();
+    expect(ce.parse(`\\binom{${n}}{${k}}`).N().toString()).toBe(expected);
+  });
+
+  test('a k below n + 1 reflects Γ(k + 1)', () => {
+    // mpmath: 4.383818261451580254370…e+602059991327954
+    const ce = new ComputeEngine();
+    const v = ce
+      .parse('\\binom{-1000000000000000.25}{-2000000000000000.5}')
+      .N()
+      .toString();
+    expect(v.startsWith('4.38381826145158025')).toBe(true);
+    expect(v.endsWith('e+602059991327954')).toBe(true);
+  });
+
+  test('at machine precision, the double kernel keeps its digits', () => {
+    // The double kernel summed three log-Γ values that cancel: the value
+    // was 2980.96 and −8.5019e37. mpmath at 60 digits.
+    const ce = new ComputeEngine();
+    ce.precision = 'machine';
+    for (const [n, k, want] of [
+      [-1e15 - 0.5, 0.25, 4386.9624636869539],
+      [-1e12 - 0.5, 3.25, -8.5346954084970511e37],
+    ]) {
+      const v = ce.box(['Binomial', n, k]).N().re;
+      expect(Math.abs(v / want - 1)).toBeLessThan(1e-13);
+    }
+  });
+});

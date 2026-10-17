@@ -1218,7 +1218,58 @@ export class ComputeEngine implements IComputeEngine {
   /** See `IComputeEngine._cacheGeneration()`.
    * @internal */
   _cacheGeneration(): number {
-    return this._anyVersion * 2 + (this._factsHidden() ? 1 : 0);
+    const facts = this._factsHidden() ? 1 : 0;
+    const shields = this._valueShieldKeys;
+    if (shields.length === 0) return this._anyVersion * 2 + facts;
+    const top = shields[shields.length - 1];
+    // A write inside the shield (a value write, a retype, a configuration
+    // change, the index write of each step of a `Sum` under `Integrate`)
+    // advances the `any` axis; the shield key must move with it, or an
+    // answer cached earlier in the same shield would be served after the
+    // write. The key is minted again whenever the axis has moved since it
+    // was last read. This also covers an outer shield after an inner one
+    // popped: its recorded axis is then outdated too.
+    if (top.any !== this._anyVersion) {
+      top.key = this._nextValueShieldKey();
+      top.any = this._anyVersion;
+    }
+    return top.key * 2 + facts;
+  }
+
+  /** The value shields on the stack, innermost last: the key in force inside
+   * each one and the `any` axis that key was minted for. See
+   * `_withValueShieldKey()`. */
+  private readonly _valueShieldKeys: { key: number; any: number }[] = [];
+
+  /** The number of shield keys minted so far. Monotone for the lifetime of
+   * the engine, so no two shield extents share a key. */
+  private _valueShieldCount = 0;
+
+  /** A shield key that no earlier read can have stamped. The keys are the
+   * NEGATIVE integers from −2 down, so a shield key can never equal a value
+   * of the `any` axis (a non-negative integer), whatever the length of the
+   * session. The doubled key with the facts bit (`_cacheGeneration()`) is
+   * then −4 or −3, −6 or −5, …: `& 1` gives the facts bit and `>> 1` the
+   * same axis half for both cells of a key, as for a non-negative key, and
+   * no key is −1, the "no generation" sentinel of the per-node caches
+   * (`_type.generation`, `_typeGeneration`, `boxed-function.ts`). */
+  private _nextValueShieldKey(): number {
+    this._valueShieldCount += 1;
+    return -(this._valueShieldCount + 1);
+  }
+
+  /** See `IComputeEngine._withValueShieldKey()`.
+   * @internal */
+  _withValueShieldKey<T>(f: () => T): T {
+    this._valueShieldKeys.push({
+      key: this._nextValueShieldKey(),
+      any: this._anyVersion,
+    });
+    try {
+      return f();
+    } finally {
+      this._valueShieldKeys.pop();
+    }
   }
 
   /** The source of the `id` of an assumption record. Monotone for the
@@ -1860,8 +1911,10 @@ export class ComputeEngine implements IComputeEngine {
    * `attribution`, and the active span labels in `spans`. Spans nest: a step
    * counts against every active budget, and the deadline of an enclosing
    * `withTimeLimit` span still applies inside. `steps` must be a
-   * non-negative integer (`Infinity` and `NaN` are contract errors, not
-   * budgets); `steps: 0` lets `fn` start and throws at its first check.
+   * non-negative integer no larger than `Number.MAX_SAFE_INTEGER` (2^53 − 1):
+   * a larger number does not change when 1 is subtracted from it, so the
+   * budget would never be spent. `Infinity` and `NaN` are contract errors,
+   * not budgets. `steps: 0` lets `fn` start and throws at its first check.
    *
    * ```ts
    * try {
@@ -1883,9 +1936,9 @@ export class ComputeEngine implements IComputeEngine {
     fn: () => T extends Promise<unknown> ? never : T
   ): T {
     const { steps, label } = limit;
-    if (!Number.isInteger(steps) || steps < 0)
+    if (!Number.isSafeInteger(steps) || steps < 0)
       throw new Error(
-        `withStepBudget: \`steps\` must be a non-negative integer, got ${String(steps)}`
+        `withStepBudget: \`steps\` must be a non-negative integer no larger than Number.MAX_SAFE_INTEGER, got ${String(steps)}`
       );
     return this._withBudget({ steps, label }, fn);
   }

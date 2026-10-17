@@ -362,6 +362,28 @@ describe('MACHINE PRODUCTS AND QUOTIENTS WITH A FACTOR OUTSIDE THE FLOAT64 RANGE
     expect(m.parse('\\frac{1.5}{10^{400}+1}').N().re).toBe(0);
   });
 
+  test('a complex float factor or divisor', () => {
+    // The exact value was converted to a double first: `10^309 / 10.0i`
+    // was `~oo` and `10^-400 / 10^-300 i` was 0. The expected doubles are
+    // the correctly rounded mpmath values.
+    const f = (re: number, im: number) =>
+      m.number(m._inexactNumericValue({ re, im }));
+    const big = m.number(10n ** 309n);
+    const tiny = m.number([1n, 10n ** 400n] as never);
+    const t310 = m.number([1n, 10n ** 310n] as never);
+    const parts = (x: { re: number; im: number }) => [x.re, x.im];
+    expect(parts(big.div(f(0, 10)))).toEqual([0, -1e308]);
+    expect(parts(big.div(f(1, 10)))).toEqual([
+      9.900990099009901e306, -9.900990099009902e307,
+    ]);
+    expect(parts(tiny.div(f(0, 1e-300)))).toEqual([0, -1e-100]);
+    expect(parts(big.mul(f(0, 1e-10)))).toEqual([0, 1e299]);
+    expect(parts(f(0, 1e-10).div(t310))).toEqual([0, 1e300]);
+    expect(parts(m.parse('10^{309}/(10.0i)').evaluate())).toEqual([0, -1e308]);
+    // A value that is truly out of range is still `~oo`.
+    expect(f(1, 1).div(t310).toString()).toBe('~oo');
+  });
+
   // Last in the block: it constructs a default engine, which sets the global
   // precision back to the default.
   test('the default precision gives the same values', () => {

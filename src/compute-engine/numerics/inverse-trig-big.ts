@@ -171,6 +171,37 @@ const SMALLEST_PART_RATIO = 1e-280;
  * of its square root 10⁻¹⁴⁰ at a branch point), not as an O(1) part. */
 const DEPENDENT_PART = 1e-100;
 
+/** The heads with branch points at ±1 on the real axis. */
+const BRANCH_POINTS_AT_ONE = new Set<InverseTrigHead>([
+  'Arcsin',
+  'Arccos',
+  'Arcsec',
+  'Arccsc',
+  'Arcosh',
+  'Artanh',
+  'Arcoth',
+  'Arsech',
+]);
+
+/** The heads with branch points at ±i on the imaginary axis. */
+const BRANCH_POINTS_AT_I = new Set<InverseTrigHead>([
+  'Arsinh',
+  'Arcsch',
+  'Arctan',
+  'Arccot',
+]);
+
+/**
+ * The largest relative error of the distance from a branch point that the
+ * double of the larger part can have. The value depends on that distance as
+ * its square root or its logarithm, so the error of a value computed at the
+ * double is of the same order. Below this bound the value is corrected to
+ * the exact distance with a second-order Taylor step (`complexInverseTrig`),
+ * whose remaining error is of the order of the cube of this bound. Above it
+ * the double is too far from the larger part, and the value is not computed.
+ */
+const BRANCH_POINT_MAX_ERROR = 1e-5;
+
 /** `d` within 10⁻⁶ of 1, −1, i or −i, as `[re, im]`, or `undefined`. */
 function unit(d: Complex): [number, number] | undefined {
   for (const [re, im] of [
@@ -263,12 +294,17 @@ function scalePart(
  *   |w| = 10⁻⁴ and 2·10⁻⁴, and A, a multiple of π/2 in each part, from one
  *   of them. The value of C·w is exact, so a part of the result that is
  *   outside the range of a double (arcsin(10⁻⁴⁰⁰·(1 + i))) is kept.
+ *
+ * `null` when the larger part is so close to a branch point that a double
+ * does not hold its distance from it (see `BRANCH_POINT_MAX_ERROR`): the
+ * double kernels would compute the value at the branch point itself, so the
+ * caller keeps the expression unevaluated.
  */
 export function complexInverseTrig(
   head: InverseTrigHead,
   re: BigDecimal,
   im: BigDecimal
-): BigComplexValue | undefined {
+): BigComplexValue | null | undefined {
   const ar = re.abs();
   const ai = im.abs();
   const realLarger = ar.gte(ai);
@@ -287,10 +323,73 @@ export function complexInverseTrig(
   if (m.lte(new BigDecimal('1e20')) && m.gte(new BigDecimal('1e-20'))) {
     if (small === undefined) return undefined;
     const big = (realLarger ? re : im).toNumber();
-    const at = (k: number) =>
+    // Next to a branch point (±1 for some heads, ±i for others) the value
+    // depends on the distance of the larger part from 1, and the double
+    // `big` keeps that distance only to about 10⁻¹⁶: the larger part
+    // 1 + 10⁻³⁰ is the double 1, and Arcosh(1 + 10⁻³⁰ + 10⁻⁴⁰⁰i) came out
+    // as 10⁻²⁰⁰(1 + i), not √2·10⁻¹⁵. `null` when the distance is not held
+    // to `BRANCH_POINT_MAX_ERROR`. Near 1, |big| − 1 is exact.
+    //
+    // When the double is off by a relative error of the distance above
+    // 10⁻¹⁵, the value at the double is moved to the true larger part by
+    // `shift` with a second-order Taylor step, f(x + e) ≈ f(x) + e·f′(x) +
+    // e²/2·f″(x), whose derivatives are central differences of the kernel
+    // at x ± step. The step is a small fraction of the distance (the error
+    // of a central difference grows as the square of the step over the
+    // distance), but at least a few units in the last place of x, so that
+    // the kernel values at x and x ± step differ by more than their
+    // rounding. Without this, `Arcosh(1.00001 + 10⁻⁴⁰⁰i)` kept only 11
+    // digits, and every larger part within 10⁻⁴ of 1 that is not a double
+    // was declined.
+    let shift = 0;
+    let step = 0;
+    if ((realLarger ? BRANCH_POINTS_AT_ONE : BRANCH_POINTS_AT_I).has(head)) {
+      const distance = m.sub(BigDecimal.ONE);
+      const exact = distance.toNumber();
+      const given = Math.abs(big) - 1;
+      const error = exact - given;
+      if (
+        (exact === 0 && !distance.isZero()) ||
+        Math.abs(error) > BRANCH_POINT_MAX_ERROR * Math.abs(exact)
+      )
+        return null;
+      if (Math.abs(error) > 1e-15 * Math.abs(exact)) {
+        shift = Math.sign(big) * error;
+        step = Math.max(
+          6e-6 * Math.abs(exact),
+          4 * Number.EPSILON * Math.abs(big)
+        );
+      }
+    }
+    const kernelAt = (x: number, k: number) =>
       realLarger
-        ? kernelValue(head, big, k * small * Math.abs(big))
-        : kernelValue(head, k * small * Math.abs(big), big);
+        ? kernelValue(head, x, k * small * Math.abs(big))
+        : kernelValue(head, k * small * Math.abs(big), x);
+    const at = (k: number): Complex | undefined => {
+      const f0 = kernelAt(big, k);
+      if (shift === 0 || f0 === undefined) return f0;
+      const above = big + step;
+      const below = big - step;
+      const fp = kernelAt(above, k);
+      const fm = kernelAt(below, k);
+      if (fp === undefined || fm === undefined) return undefined;
+      // `above − big` and `big − below` are exact, and may differ from
+      // `step` by its rounding: the differences use them.
+      const hp = above - big;
+      const hm = big - below;
+      const slope = fp
+        .sub(f0)
+        .div(hp)
+        .mul(hm)
+        .add(f0.sub(fm).div(hm).mul(hp))
+        .div(hp + hm);
+      const curvature = fp
+        .sub(f0)
+        .div(hp)
+        .sub(f0.sub(fm).div(hm))
+        .mul(2 / (hp + hm));
+      return f0.add(slope.mul(shift)).add(curvature.mul((shift * shift) / 2));
+    };
     const v1 = at(1);
     const v4 = at(4);
     if (v1 === undefined || v4 === undefined) return undefined;

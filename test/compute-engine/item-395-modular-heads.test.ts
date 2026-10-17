@@ -249,6 +249,15 @@ const multiplicativeOrder: [MathJsonExpression, MathJsonExpression][] = [
   ],
   [['MultiplicativeOrder', 10, 21], 6],
   [['MultiplicativeOrder', 21, 10], 1],
+  // 4398046512059 = 2q + 1 with q = 2199023256029 prime (checked by gmpy2),
+  // and 3 has order q, a prime too large for a discrete log. The target 3 is
+  // 3¹, so the answer is 1, not the order q that the target 1 gives: the
+  // expression stays unevaluated instead.
+  [
+    ['MultiplicativeOrder', 3, 4398046512059, ['List', 3, 1]],
+    ['MultiplicativeOrder', 3, 4398046512059, ['List', 3, 1]],
+  ],
+  [['MultiplicativeOrder', 3, 4398046512059, ['List', 1]], 2199023256029],
 ];
 
 const rationalReconstruction: [MathJsonExpression, MathJsonExpression][] = [

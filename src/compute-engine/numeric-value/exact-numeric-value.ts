@@ -960,6 +960,23 @@ export class ExactNumericValue extends NumericValue {
         const divisor = other.re;
         return this.factory(withDoubleDigits(() => this.bignumRe.div(divisor)));
       }
+      // The same with a complex value: `10^{309} / 10.0i` is `-1e308i`, not
+      // the `~oo` of `∞ / 10i`.
+      if (
+        approx.bignumRe === undefined &&
+        (this.isComplex || other.isComplex) &&
+        Number.isFinite(other.re) &&
+        Number.isFinite(other.im) &&
+        hasExactPartOutsideDoubleRange(this)
+      )
+        return this.factory(
+          bigComplexQuotient(
+            this.bignumRe,
+            this.isComplex ? this.bignumIm : new BigDecimal(0),
+            new BigDecimal(other.re),
+            new BigDecimal(other.im)
+          )
+        );
       return approx.div(other);
     }
 
@@ -2253,6 +2270,71 @@ function integerNthRoot(v: number | bigint, n: number): number | bigint | null {
     if (BigInt(candidate) ** bn === bv) return candidate;
   }
   return null;
+}
+
+/**
+ * Whether `v` is a finite exact value with a part that is not zero and whose
+ * double is 0, ±∞ or subnormal (`isOutsideNormalDoubleRange()`). In the
+ * machine lane, such a part loses its value or its digits when it is
+ * converted to a double before a product or a quotient with a complex
+ * float, although the result can be in the double range: `10^{309} / 10.0i`
+ * is `-1e308i`, not `~oo`.
+ */
+export function hasExactPartOutsideDoubleRange(v: NumericValue): boolean {
+  if (!(v instanceof ExactNumericValue)) return false;
+  if (
+    v.isNaN ||
+    v.isPositiveInfinity ||
+    v.isNegativeInfinity ||
+    v.isComplexInfinity
+  )
+    return false;
+  const outside = (big: BigDecimal) =>
+    !big.isZero() && isOutsideNormalDoubleRange(big.toNumber());
+  return outside(v.bignumRe) || (v.isComplex && outside(v.bignumIm));
+}
+
+/**
+ * The product (p + q·i)·(c + d·i) of two complex values given by their parts
+ * as big decimals, at the digits of a double (`withDoubleDigits()`).
+ */
+export function bigComplexProduct(
+  p: BigDecimal,
+  q: BigDecimal,
+  c: BigDecimal,
+  d: BigDecimal
+): { re: BigDecimal; im: BigDecimal } {
+  return {
+    re: withDoubleDigits(() => p.mul(c).sub(q.mul(d))),
+    im: withDoubleDigits(() => p.mul(d).add(q.mul(c))),
+  };
+}
+
+/**
+ * The quotient (p + q·i)/(c + d·i) of two complex values given by their
+ * parts as big decimals, at the digits of a double (`withDoubleDigits()`).
+ * The divisor is not zero.
+ */
+export function bigComplexQuotient(
+  p: BigDecimal,
+  q: BigDecimal,
+  c: BigDecimal,
+  d: BigDecimal
+): { re: BigDecimal; im: BigDecimal } {
+  return {
+    re: withDoubleDigits(() =>
+      p
+        .mul(c)
+        .add(q.mul(d))
+        .div(c.mul(c).add(d.mul(d)))
+    ),
+    im: withDoubleDigits(() =>
+      q
+        .mul(c)
+        .sub(p.mul(d))
+        .div(c.mul(c).add(d.mul(d)))
+    ),
+  };
 }
 
 /**
