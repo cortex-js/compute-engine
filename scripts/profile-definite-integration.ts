@@ -1,4 +1,5 @@
-/** Focused diagnostic, not a cold-start CAS performance ranking.
+/** Measure exact answers and warm solve times for definite-integration families.
+ * Timings are machine-local diagnostics, not a cold-start CAS performance ranking.
  * Build this script with esbuild, then pass independently built CE bundles:
  * node build/profile-definite.mjs --engine build/ce.mjs [--rules build/rules.mjs]
  */
@@ -15,7 +16,10 @@ import {
   polynomialCases as polynomials,
   reciprocalCases as reciprocal,
 } from '../test/compute-engine/fixtures/integration-families';
-import type { Expression } from '../src/compute-engine/global-types';
+import type {
+  Expression,
+  ExpressionInput,
+} from '../src/compute-engine/global-types';
 import {
   isFunction,
   isNumber,
@@ -43,6 +47,7 @@ if (
     'polynomials',
     'reciprocal',
     'composed',
+    'ordinary',
   ].includes(values.suite)
 )
   throw new Error('Unknown suite');
@@ -87,6 +92,38 @@ const fixtures = {
   polynomials,
   reciprocal,
   composed,
+  ordinary: [
+    ['coth-interior-pole', ['Coth', 'x'], -1, 1, 'Indeterminate'],
+    [
+      'reciprocal-sinh-pole',
+      ['Divide', 1, ['Sinh', 'x']],
+      -1,
+      1,
+      'Unevaluated',
+    ],
+    ['tan-symmetric', ['Tan', 'x'], -1, 1, 0],
+    ['tan-positive', ['Tan', 'x'], 0, 1, ['Ln', ['Sec', 1]]],
+    [
+      'linear-log',
+      ['Multiply', 'x', ['Ln', 'x']],
+      1,
+      'ExponentialE',
+      ['Divide', ['Add', ['Power', 'ExponentialE', 2], 1], 4],
+    ],
+    [
+      'exponential-interior-pole',
+      ['Divide', ['Exp', 'x'], ['Subtract', ['Exp', ['Multiply', 2, 'x']], 1]],
+      -1,
+      1,
+      'Indeterminate',
+    ],
+  ] as [
+    string,
+    ExpressionInput,
+    ExpressionInput,
+    ExpressionInput,
+    ExpressionInput,
+  ][],
 };
 for (const [name, body, a, b, expected] of fixtures[
   values.suite as keyof typeof fixtures
@@ -117,14 +154,17 @@ for (const [name, body, a, b, expected] of fixtures[
     try {
       exactMatch =
         exactMatch &&
-        exactLeaves(value) &&
-        !value.has('Integrate') &&
-        ce.withTimeLimit(timeout, () =>
-          ce
-            .function('Subtract', [value, ce.box(expected)])
-            .simplify()
-            .isSame(0)
-        );
+        ((expected === 'Indeterminate' && value.json === 'Indeterminate') ||
+          (expected === 'Unevaluated' && value.has('Integrate')) ||
+          (exactLeaves(value) &&
+            !value.has('Integrate') &&
+            (value.isSame(ce.box(expected).evaluate()) ||
+              ce.withTimeLimit(timeout, () =>
+                ce
+                  .function('Subtract', [value, ce.box(expected)])
+                  .simplify()
+                  .isSame(0)
+              ))));
     } catch (e) {
       error = `Reference comparison failed: ${String(e)}`;
       exactMatch = false;

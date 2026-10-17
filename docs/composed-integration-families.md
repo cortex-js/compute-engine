@@ -5,6 +5,93 @@ five families. They use the existing `Integrate` interface and do not recognize
 competition IDs or use benchmark reference answers. Unsupported inputs remain
 with the existing integrator; rejection of a method is not a divergence claim.
 
+## Review: solver priority and original-domain checks
+
+The established provider/native primitive path runs before the new general
+definite reductions. A closed, usable exact result retains its existing form.
+The native logarithmic recurrence and compositional search likewise follow
+the established antiderivative strategies. Bare affine trig/hyperbolic heads
+and reciprocal syntax decline speculative rationalization; integer powers also
+retain their established indefinite route. Thus elementary tangent and
+`x*Ln(x)` keep their existing representations.
+
+Candidate loops cancel only structurally identical multiplicative bases; they
+do not call `simplify()`. Expensive rational reduction is considered only after
+the old variable has disappeared, with bounded rational degrees. The affine
+normalization in the definite substitution engine retains its existing degree
+guard. The search is bounded, not a general algebraic-equivalence oracle.
+
+Three exceptions to primitive-first ordering are explicit:
+
+- Existing discontinuity/kink and symbolic-exponent splitting must precede
+  endpoint subtraction. If finite piecewise splitting declines (for example,
+  `x^2-Floor(x)*Ceil(x)` on `[0,2022]`), a certified compact reduction may
+  still solve it without enumerating every cell.
+- Sparse reciprocal denominators with powers above 64 try their direct
+  reciprocal-pair reduction before polynomial expansion. The reducer proves
+  positivity of the original denominator on the positive reciprocal interval.
+  The degree-2022 rational fixture is an example.
+- Powers above 64 try the direct generalized-Beta terminal, not substitution
+  search. For example, `(1-x^(1/2024))^2024` on `[0,1]` has a factored Beta
+  value; expanding its primitive first is prohibitively expensive. The
+  terminal proves its positive-domain and endpoint convergence conditions.
+
+Every successful general fallback is checked against the original integrand
+with `interiorPoleVerdict` and the constant-factor pole check before its answer
+is accepted. Main's exponential-divisor support is included, so finding a new
+primitive for `exp(x)/(exp(2*x)-1)` cannot justify subtraction across zero.
+An unsuccessful reduction does not change an unsupported integral into a
+divergence classification. In particular, reciprocal elementary functions
+without a closed native primitive retain main's inert behavior.
+
+The reductions carry their own parameter and interval conditions. The generic
+speculative symbolic-pole scan cannot replace those certificates: it treats
+the bound positive integer in a telescoping product as an unconstrained free
+parameter. Concrete original-domain pole checks still apply.
+
+The optional Rubi polynomial/exponential/trig recurrence permits symbolic
+polynomial coefficients because it performs finitely many coefficient
+operations and divides only by a nonzero rational determinant. Logarithmic
+substitution instead launches recursive integration, so free symbolic
+coefficients remain excluded to avoid speculative symbolic rational searches.
+
+The earlier frozen competition counts below describe their recorded builds,
+not a newly measured score for these review changes.
+
+### Review diagnostics
+
+The portable profiler includes `--suite ordinary` for the reported elementary
+cases and the exponential-pole regression. On Node 22.14.0, one warmup and three
+timed solves of the corrected bundle give these local medians:
+
+| Case | Median |
+| --- | ---: |
+| coth on [-1,1] | 21 ms |
+| 1/sinh on [-1,1], left inert | 7 ms |
+| tan on [-1,1] | 16 ms |
+| tan on [0,1] | 14 ms |
+| x*Ln(x) on [1,e] | 13 ms |
+| exponential pole on [-1,1], Indeterminate | 19 ms |
+
+The preceding PR bundle reaches the eight-second diagnostic budget on coth
+and some reciprocal-sinh repeats, and its symmetric tangent median is 3.24 s.
+Machine load changes during these sequential runs, so these are not precise
+speedup ratios. A separate alternating-build check (five warmups and ten timed
+solves per build) gives main/fixed wall medians of 31/33 ms for coth, 15/14 ms
+for reciprocal sinh, 253/242 ms for tangent, and 155/162 ms for x*Ln(x).
+The changing absolute times illustrate why these are machine-local diagnostics,
+not a portable performance ranking.
+
+The new routing tests exercise all twelve elementary trig/hyperbolic heads,
+reciprocals and integer powers; ensure established primitives do not call the
+composition search; vary exponential-pole slopes, positions and orientations;
+preserve root syntax during structural cancellation; and test symbolic
+coefficients in the finite Rubi recurrence. The 20 routing tests and 63 Rubi
+helper tests pass together on Node 26. A 52-test Node 22 review recheck and a
+23-test final structural/substitution recheck also pass. The latter includes
+mixed radicals and nested substitutions. These are overlapping targeted
+checks, not a full repository pass or a replacement competition score.
+
 ## Rubi substitution helper follow-up
 
 The Rubi rule trace for `Cos(Ln(x))` stops without a recursive sub-integral:

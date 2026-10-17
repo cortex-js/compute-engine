@@ -90,6 +90,10 @@ export function polynomialExponentialTrig(
   if (polyDegreeX(polynomial, x) > 8) return null;
   const p = polyCoeffsX(polynomial, x);
   if (!p || p.length > 9) return null;
+  // Symbolic coefficients are safe here: this finite recurrence divides only
+  // by the nonzero rational determinant, with no recursive integration search.
+  // logarithmicSubstitution instead delegates a new problem to the rule engine,
+  // where symbolic coefficients can trigger expensive rational simplification.
   const sine = trig.operator.toLowerCase() === 'sin';
   const U: Expression[] = Array(p.length + 1).fill(ce.Zero);
   const V: Expression[] = Array(p.length + 1).fill(ce.Zero);

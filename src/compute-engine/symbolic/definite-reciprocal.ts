@@ -9,6 +9,24 @@ import {
 } from './definite-integrate.js';
 import { boundedInteger, exactExpression } from './definite-transform.js';
 
+/** Sparse high-degree denominators must not enter primitive-first polynomial
+ * expansion. This only selects an attempt: the reducer still proves positivity
+ * of the original denominator on positive reciprocal bounds before returning. */
+export function hasHighDegreeReciprocalDenominator(
+  f: Expression,
+  x: string
+): boolean {
+  if (!isFunction(f, 'Divide')) return false;
+  let nodes = 128;
+  const large = (e: Expression): boolean => {
+    if (--nodes < 0 || !e.has(x) || !isFunction(e)) return false;
+    if (e.operator === 'Power' && sym(e.op1) === x)
+      return boundedInteger(e.op2, 65, 8192) !== undefined;
+    return e.ops.some(large);
+  };
+  return large(f.op2);
+}
+
 /** Pair f(x) with f(1/x)/x² on positive reciprocal bounds. Sparse Laurent
  * arithmetic proves that their sum is a Laurent polynomial without finding
  * the roots of a potentially high-degree denominator. */

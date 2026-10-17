@@ -6,7 +6,10 @@ import {
 } from '../boxed-expression/polynomials.js';
 import { reduceIntegrationRational } from './integration-rational.js';
 import { checkDeadline } from '../../common/interruptible.js';
-import { normalizeIntegrationFunctions } from './integration-normalize.js';
+import {
+  isElementaryIntegrationFunction,
+  normalizeIntegrationFunctions,
+} from './integration-normalize.js';
 import { exactSign } from './contour.js';
 import {
   continuousRange,
@@ -30,6 +33,7 @@ export function integrateRationalTrig(
   lower: Expression,
   upper: Expression
 ): DefiniteReduction | undefined {
+  if (isElementaryIntegrationFunction(f, x)) return undefined;
   f = normalizeIntegrationFunctions(f) ?? f;
   const ce = f.engine,
     op = definiteArithmetic(ce);

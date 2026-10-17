@@ -5,6 +5,41 @@ import {
   definiteUnshadowed,
 } from './definite-integrate.js';
 import { boundedInteger } from './definite-transform.js';
+import { polynomialDegree } from '../boxed-expression/polynomials.js';
+
+/** Elementary affine functions and their integer powers keep the established
+ * primitive forms. Reciprocal syntax is included before normalization rewrites
+ * the function into a larger rational expression. */
+export function isElementaryIntegrationFunction(
+  f: Expression,
+  x: string,
+  includePowers = true
+): boolean {
+  let base = f;
+  if (isFunction(base, 'Divide') && !base.op1.has(x)) base = base.op2;
+  if (isFunction(base, 'Power') && base.op2.isInteger) {
+    if (!includePowers) return false;
+    base = base.op1;
+  }
+  return (
+    isFunction(base) &&
+    [
+      'Sin',
+      'Cos',
+      'Tan',
+      'Cot',
+      'Sec',
+      'Csc',
+      'Sinh',
+      'Cosh',
+      'Tanh',
+      'Coth',
+      'Sech',
+      'Csch',
+    ].includes(base.operator) &&
+    polynomialDegree(base.op1, x) === 1
+  );
+}
 
 /** Normalize reciprocal trig and hyperbolic functions to the existing rational
  * transformation languages. Rewriting preserves denominators; no cancellation

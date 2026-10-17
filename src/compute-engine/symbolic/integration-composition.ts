@@ -8,8 +8,15 @@ import {
   definiteUnshadowed,
   finiteConstant,
 } from './definite-integrate.js';
-import { boundedInteger, exactExpression } from './definite-transform.js';
-import { normalizeIntegrationFunctions } from './integration-normalize.js';
+import {
+  boundedInteger,
+  exactExpression,
+  structuralQuotient,
+} from './definite-transform.js';
+import {
+  isElementaryIntegrationFunction,
+  normalizeIntegrationFunctions,
+} from './integration-normalize.js';
 import { reduceIntegrationRational } from './integration-rational.js';
 
 const active = new WeakMap<IComputeEngine, number>();
@@ -31,7 +38,11 @@ export function integrateComposition(
   // Degree bounds do not bound polynomial GCD work over free symbolic
   // coefficients. Keep parameter-dependent inputs on the established solver
   // paths instead of expanding a new rational coordinate speculatively.
-  if (f.unknowns.some((name) => name !== x)) return undefined;
+  if (
+    f.unknowns.some((name) => name !== x) ||
+    isElementaryIntegrationFunction(f, x)
+  )
+    return undefined;
   f = normalizeIntegrationFunctions(f) ?? f;
   const ce = f.engine,
     op = definiteArithmetic(ce);
@@ -184,7 +195,7 @@ export function integrateComposition(
         const arg = exponentialArgument(e),
           phase = exponentialArgument(g);
         if (arg && phase) {
-          const n = op('Divide', arg, phase).simplify();
+          const n = structuralQuotient(arg, phase);
           if (boundedInteger(n, -8, 8) !== undefined) return op('Power', u, n);
         }
         const k = p && monomialExponent(e);
@@ -195,7 +206,7 @@ export function integrateComposition(
         }
         return isFunction(e) ? ce.function(e.operator, e.ops.map(replace)) : e;
       };
-      let transformed = replace(op('Divide', f, derivative).simplify());
+      let transformed = replace(structuralQuotient(f, derivative));
       if (transformed.has(x)) continue;
       transformed = reduceIntegrationRational(transformed, name) ?? transformed;
       const value = solve(transformed, name, transformedBounds);

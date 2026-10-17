@@ -94,11 +94,16 @@ import {
   integrateTrigPolynomial,
 } from '../symbolic/definite-integrate.js';
 import { integrateDiscreteMoments } from '../symbolic/definite-discrete.js';
-import { integrateReciprocalRational } from '../symbolic/definite-reciprocal.js';
+import {
+  hasHighDegreeReciprocalDenominator,
+  integrateReciprocalRational,
+} from '../symbolic/definite-reciprocal.js';
 import { integrateComposition } from '../symbolic/integration-composition.js';
+import { isElementaryIntegrationFunction } from '../symbolic/integration-normalize.js';
 import { logarithmicParameterDifference } from '../symbolic/integration-logarithmic.js';
 import {
   integrateBySubstitution,
+  hasLargeIntegrationPower,
   generalizedBeta,
   exactExpression,
 } from '../symbolic/definite-transform.js';
@@ -4931,10 +4936,8 @@ volumes
               variable = argNames[i];
             if (!variable) variable = 'x';
 
-            // When no definite reduction applies, consult the opt-in integration
-            // provider (e.g. Rubi loaded via `loadIntegrationRules`) before the
-            // built-in antiderivative. A null or inert provider result falls
-            // back to that built-in path.
+            // Consult the opt-in provider before the built-in antiderivative.
+            // Bounded definite reductions follow unusable primitive results.
             let antideriv: Expression | null = null;
             let providerEndpoint: Expression | undefined;
             let pole: ReturnType<typeof interiorPoleVerdict>;
@@ -5010,15 +5013,12 @@ volumes
                       ]);
               continue;
             }
-            if (isDefinite) {
-              // Bounded definite reductions can avoid large primitives and
-              // branch-sensitive endpoint subtraction. Each establishes its
-              // domain or convergence conditions before returning a value.
-              // A power with a symbolic exponent whose base is zero strictly
-              // inside the bounds (`∫₋₁¹ t^(−n) dt`) is split at the zero,
-              // where the pieces resolve the convergence condition (see
-              // `integrateAtSymbolicExponentZeros`).
-              const split =
+            // Expensive exact reductions are fallbacks, not a new default path.
+            // Check the original integrand before accepting a transformed answer.
+            const definiteFallback = (): Expression | undefined => {
+              if (isElementaryIntegrationFunction(integrand, variable, false))
+                return undefined;
+              const candidate =
                 logarithmicParameterDifference(
                   integrand,
                   variable,
@@ -5074,7 +5074,40 @@ volumes
                 integrateDefiniteSeries(integrand, variable, lower, upper) ??
                 integratePolynomialSeries(integrand, variable, lower, upper) ??
                 integrateProductDerivative(integrand, variable, lower, upper) ??
-                integrateBoseMoment(integrand, variable, lower, upper) ??
+                integrateBoseMoment(integrand, variable, lower, upper);
+              if (candidate === undefined) return undefined;
+              const original = withAssignedValues(ce, integrand, [variable]);
+              const verdict =
+                interiorPoleVerdict(original, variable, lower, upper, ce) ??
+                constantFactorPoleVerdict(ce, original, variable, lower, upper);
+              if (verdict) {
+                if (verdict.sign === 'mixed')
+                  return noValueIntegral(ce, original, lower, upper);
+                if (verdict.sign === 'positive') return ce.PositiveInfinity;
+                if (verdict.sign === 'negative') return ce.NegativeInfinity;
+                return undefined;
+              }
+              // Each reduction proves its parameter and interval conditions.
+              // The speculative symbolic-pole scan used for generic primitives
+              // cannot override those proofs: it treats a bound product index
+              // as a free parameter, e.g. k>=1 in (1+x/(k+1))/(1+x/k).
+              return candidate;
+            };
+            if (isDefinite) {
+              // Splitting discontinuities precedes endpoint subtraction: a local
+              // primitive can jump at a kink or a symbolic-exponent zero.
+              const split =
+                (hasLargeIntegrationPower(integrand, variable)
+                  ? generalizedBeta(integrand, variable, lower, upper)?.value
+                  : undefined) ??
+                (hasHighDegreeReciprocalDenominator(integrand, variable)
+                  ? integrateReciprocalRational(
+                      integrand,
+                      variable,
+                      lower,
+                      upper
+                    )
+                  : undefined) ??
                 integratePiecewise(ce, integrand, variable, lower, upper) ??
                 (!polygammaDomainKnown(integrand, variable, lower, upper)
                   ? 'inert'
@@ -5099,14 +5132,15 @@ volumes
                 isIndefinite = false;
                 expr =
                   split === 'inert'
-                    ? ce.function('Integrate', [
+                    ? (definiteFallback() ??
+                      ce.function('Integrate', [
                         expr,
                         ce.function('Limits', [
                           ce.symbol(variable),
                           lower,
                           upper,
                         ]),
-                      ])
+                      ]))
                     : split;
                 continue;
               }
@@ -5214,10 +5248,12 @@ volumes
               // changes sign, and if that point is between the bounds,
               // `F(b) − F(a)` includes the jump and is wrong.
               isIndefinite = false;
-              expr = ce.function('Integrate', [
-                expr,
-                ce.function('Limits', [ce.symbol(variable), lower, upper]),
-              ]);
+              expr =
+                definiteFallback() ??
+                ce.function('Integrate', [
+                  expr,
+                  ce.function('Limits', [ce.symbol(variable), lower, upper]),
+                ]);
             } else if (
               (pole =
                 interiorPoleVerdict(
@@ -5383,7 +5419,21 @@ volumes
               // value — fail closed (inert) rather than leak the NaN.
               const resolved =
                 raw.isNaN === true ? null : resolveEndpointLeaks(raw, ce);
+              const lostExactness =
+                !numericApproximation &&
+                exactExpression(integrand) &&
+                exactExpression(lower) &&
+                exactExpression(upper) &&
+                !exactExpression(raw);
+              const fallback =
+                noValue === undefined &&
+                (resolved === null ||
+                  raw.has(['Integrate', 'Limit', 'EvaluateAt']) ||
+                  lostExactness)
+                  ? definiteFallback()
+                  : undefined;
               if (noValue !== undefined) expr = noValue;
+              else if (fallback !== undefined) expr = fallback;
               else if (resolved !== null && isSymbol(resolved.guard, 'True')) {
                 // Leak-free: keep the original evaluation path's RESULT. `raw`
                 // IS `at.evaluate({numericApproximation})`, so returning it is

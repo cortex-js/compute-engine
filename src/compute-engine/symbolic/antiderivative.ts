@@ -3220,6 +3220,23 @@ function antiderivativeInUnit(fn: Expression, index: string): Expression {
 }
 
 function antiderivativeInRadians(fn: Expression, index: string): Expression {
+  // Preserve established primitive forms and avoid speculative work on ordinary
+  // inputs. Only a still-unresolved expression enters the bounded new searches.
+  const established = establishedAntiderivativeInRadians(fn, index);
+  if (!established.has('Integrate')) return established;
+  const logarithmic = logarithmicPrimitive(fn, index);
+  if (logarithmic) return logarithmic;
+  const composed = integrateComposition(fn, index, (body, variable) =>
+    antiderivative(body, variable)
+  );
+  if (composed) return composed;
+  return established;
+}
+
+function establishedAntiderivativeInRadians(
+  fn: Expression,
+  index: string
+): Expression {
   // Bound the symbolic-integration recursion by the engine deadline: some
   // rational/parametric integrands (e.g. a linear numerator over a fully
   // symbolic quadratic) explore an unbounded search here, and without a
@@ -3258,35 +3275,6 @@ function antiderivativeInRadians(fn: Expression, index: string): Expression {
 
   const special = specialAntiderivative(fn, index);
   if (special) return special;
-  const logarithmic = logarithmicPrimitive(fn, index);
-  if (logarithmic) return logarithmic;
-  // Keep elementary affine trig/hyperbolic primitives on their established
-  // path. Rationalizing them can introduce real-log Abs conventions and less
-  // useful branch structure into an already simple complex primitive.
-  const elementary = isFunction(fn, 'Power') && fn.op2.isInteger ? fn.op1 : fn;
-  const elementaryPhase =
-    isFunction(elementary) &&
-    [
-      'Sin',
-      'Cos',
-      'Tan',
-      'Cot',
-      'Sec',
-      'Csc',
-      'Sinh',
-      'Cosh',
-      'Tanh',
-      'Coth',
-      'Sech',
-      'Csch',
-    ].includes(elementary.operator) &&
-    getLinearCoefficients(elementary.op1, index);
-  if (!elementaryPhase) {
-    const composed = integrateComposition(fn, index, (body, variable) =>
-      antiderivative(body, variable)
-    );
-    if (composed) return composed;
-  }
 
   // An exponential of a sum hides the product needed by reverse-chain
   // matching, e.g. exp(x + exp(x)). Splitting e^(a+b) is branch-safe, unlike

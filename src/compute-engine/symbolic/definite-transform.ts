@@ -35,10 +35,25 @@ export function boundedInteger(e: Expression, min: number, max: number) {
     : undefined;
 }
 
+/** Detect powers whose expansion would overwhelm primitive-first integration.
+ * This selects only direct, domain-certified terminals, never a substitution
+ * search or polynomial conversion. */
+export function hasLargeIntegrationPower(f: Expression, x: string): boolean {
+  let nodes = 128;
+  const visit = (e: Expression): boolean => {
+    if (--nodes < 0 || !isFunction(e) || !e.has(x)) return false;
+    if (e.operator === 'Power' && boundedInteger(e.op2, 65, 8192) !== undefined)
+      return true;
+    return e.ops.some(visit);
+  };
+  return visit(f);
+}
+
 /** Flatten only products, quotients and integer outer powers. Fractional
  * powers stay intact: distributing them would silently choose root branches. */
 export function multiplicativeFactors(
-  f: Expression
+  f: Expression,
+  preserveFractionalBases = false
 ): [Expression, Expression][] | undefined {
   const ce = f.engine,
     op = definiteArithmetic(ce);
@@ -53,14 +68,20 @@ export function multiplicativeFactors(
       return walk(ce.NegativeOne, p) && walk(e.op1, p);
     if (
       isFunction(e, 'Power') &&
+      (!preserveFractionalBases || e.op2.isInteger) &&
       !e.op2.has([...e.op1.unknowns]) &&
       p.isInteger
     ) {
       result.push([e.op1, op('Multiply', p, e.op2)]);
-    } else if (isFunction(e, 'Sqrt') && p.isInteger) {
+    } else if (
+      !preserveFractionalBases &&
+      isFunction(e, 'Sqrt') &&
+      p.isInteger
+    ) {
       result.push([e.op1, op('Divide', p, 2)]);
     } else if (
       isFunction(e, 'Root') &&
+      !preserveFractionalBases &&
       p.isInteger &&
       boundedInteger(e.op2, 1, 8192) !== undefined
     ) {
@@ -69,6 +90,35 @@ export function multiplicativeFactors(
     return true;
   };
   return walk(f, ce.One) ? result : undefined;
+}
+
+/** Cancel identical multiplicative bases without expanding sums or running a
+ * polynomial GCD. Candidate discovery must stay cheap even when no substitution
+ * removes the old variable. Fractional bases retain their branch convention. */
+export function structuralQuotient(
+  numerator: Expression,
+  denominator: Expression
+): Expression {
+  const ce = numerator.engine,
+    op = definiteArithmetic(ce);
+  const top = multiplicativeFactors(numerator, true);
+  const bottom = multiplicativeFactors(denominator, true);
+  if (!top || !bottom) return ce.function('Divide', [numerator, denominator]);
+  const combined: [Expression, Expression][] = [];
+  for (const [base, exponent] of [
+    ...top,
+    ...bottom.map(([b, p]): [Expression, Expression] => [b, p.neg()]),
+  ]) {
+    const found = combined.find(([b]) => b.isSame(base));
+    if (found) found[1] = op('Add', found[1], exponent);
+    else combined.push([base, exponent]);
+  }
+  return op(
+    'Multiply',
+    ...combined
+      .filter(([, p]) => !p.isSame(0))
+      .map(([b, p]) => (p.isSame(1) ? b : op('Power', b, p)))
+  );
 }
 
 export function exactBeta(a: Expression, b: Expression): Expression {
@@ -393,7 +443,7 @@ export function integrateBySubstitution(
           : isFunction(e)
             ? ce.function(e.operator, e.ops.map(replace))
             : e;
-      const quotient = op('Divide', body, derivative).simplify();
+      const quotient = structuralQuotient(body, derivative);
       const transformed = replace(quotient);
       if (transformed.has(variable)) continue;
       const result = solve(transformed, name, start, end, depth + 1);
