@@ -31,6 +31,12 @@ the user on 2026-08-17. Claude sessions still NEVER commit.
 
 ```
 git worktree add /tmp/wt-<session-name> HEAD     # private tree, detached
+ln -s /Users/arno/dev/compute-engine/node_modules /tmp/wt-<session-name>/node_modules
+                                                 # a fresh worktree has no node_modules:
+                                                 # jest and tsx fail there with
+                                                 # "Cannot find module" until this link
+                                                 # exists; it is untracked, so the diff
+                                                 # below never carries it
 cd /tmp/wt-<session-name>                        # edit and test here, freely
 ...work, run suites (respect §2 CPU rules)...
 git -C /tmp/wt-<session-name> diff HEAD > /tmp/<session-name>.patch
@@ -271,3 +277,31 @@ written for the version under test — one grep for the fix's own symbol. A
 "clean" 26 → 1 regression once measured "the new version without our fix for
 the new version"; the confound made the result look cleaner, not noisier,
 which is why nobody doubted it.
+
+---
+
+## 8. Write a handoff before a long wait
+
+A full suite, a dual review and an adoption gate each run for ten minutes or
+more, and a session can end during that time: a usage limit, a context reset,
+a closed terminal. Several sessions have ended that way with the result of the
+run never written down, and the next session re-ran the whole gate to learn
+what the log already said.
+
+So, before launching any run that takes more than a few minutes, write a
+handoff file and keep it current. For the Compute Engine the file is
+`docs/scratch/<date>-<topic>-handoff.md`. Leave it unstaged: it is a note for
+the next session, not a record for the repo, and the next session removes it
+when the work lands. It carries:
+
+1. What changed, as a file list, and which of those files are staged.
+2. What is running: the exact command, its log path, and the line that marks
+   completion (`JEST_EXIT=`, `ce-adopt: EXIT=`, a task notification).
+3. How to read the result: the command that prints the pass/fail summary from
+   the log.
+4. What to do after a pass, and after a failure.
+5. A continuation prompt that a fresh session can paste as its first message.
+
+Update the file when the run finishes, with the result, before writing the
+report to the user. A handoff that says "running" an hour after the log says
+`EXIT=0` is the failure this section exists to prevent.
