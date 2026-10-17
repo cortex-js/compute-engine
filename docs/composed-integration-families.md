@@ -5,6 +5,137 @@ five families. They use the existing `Integrate` interface and do not recognize
 competition IDs or use benchmark reference answers. Unsupported inputs remain
 with the existing integrator; rejection of a method is not a divergence claim.
 
+## Rubi substitution helper follow-up
+
+The Rubi rule trace for `Cos(Ln(x))` stops without a recursive sub-integral:
+the existing `FunctionOfLog` consumer handles `F(Ln(x))/x`, not the Jacobian
+needed here. Independently tracing `exp(x)*Cos(x)` through the Rubi driver
+also returns no primitive (the public integrator can still use its native
+fallback). A new logarithmic substitution connects these steps, and a finite
+coefficient recurrence closes `P(x)*exp(a+b*x)*Sin/Cos(c+d*x)` for polynomial
+degree at most eight and rational slopes. It therefore also handles polynomial
+factors in the logarithm, shifted affine log arguments, and weighted variants
+when the transformed expression closes. It is not an example-specific formula.
+
+Three Rubi utility placeholders now have bounded implementations:
+
+- `SubstForFractionalPowerOfLinear` returns the original four-element Rubi
+  tuple, with the Jacobian split between the tuple and its rule consumer. It
+  combines fractional powers of one affine base using their least common
+  denominator, at most twelve.
+- `InverseFunctionOfLinear` finds a supported inverse function of an affine
+  argument. `SubstForInverseFunction` replaces the chosen inverse first, then
+  replaces the original coordinate using its forward function. It does not
+  cancel other inverse/forward compositions or assume their branches agree.
+- The inverse-rule consumers also require Wolfram-compatible inverse head
+  names, `Part` on function arguments, and the specific constant-base
+  exponential `MatchQ` predicate. Tests require each of the four bundled
+  arctangent/arccotangent/artanh/arccoth substitution rules to fire.
+
+These helpers require literal nonzero rational slopes. Their tree traversal
+is limited to 128 nodes and powers of magnitude at most 32, and rejects
+calculus and binding constructs. They neither introduce assumptions about
+free parameters nor rewrite bound variables. A logarithmic substitution is
+retried only when it removes all dependent logarithms, preventing a cycle.
+Existing rule priority and successful existing answers take precedence.
+The speculative logarithmic driver path also declines free parameters, to
+avoid spending the rule budget on symbolic-coefficient rational subproblems.
+
+The `FunctionOfLinear` and `PowerVariableExpn` guard placeholders are not
+changed: their alternative substitution consumers are not bundled, so turning
+the recognizers on alone would disable usable integration-by-parts rules.
+Likewise, this follow-up does not claim complete upstream Rubi utility
+semantics or implement definite symmetry, nested floor integration, or a new
+convergence algorithm.
+
+`rubi-substitution-helpers.test.ts` checks tuple Jacobians, isolated corpus-rule
+consumers, derivative identities and finite differences, complex logarithms,
+alternative variables, endpoint behavior, and rejection cases.
+`scripts/profile-rubi-substitutions.ts` accepts independently frozen engine
+and rule bundles and records one warmup plus three timed repetitions. This is
+a local diagnostic, not a cross-machine performance ranking.
+
+The frozen diagnostic compares the preceding PR build (`1bb5784e`) with the
+helper implementation, with Rubi enabled on both. Seven previously unevaluated
+fixtures return primitives: six logarithmic compositions and a degree-four
+polynomial times an exponential and sine. The other five fixtures retain
+answers. For example, `Cos(Ln(x))` now returns the equivalent of
+`Exp(Ln(x))*(Cos(Ln(x))+Sin(Ln(x)))/2`, retaining the logarithm's domain.
+
+| Warm diagnostic | Before | After | After median (ms) |
+| --- | --- | --- | ---: |
+| `Cos(Ln(x))` | Unevaluated | Primitive | 231 |
+| `Ln(x)^2*Sin(Ln(x))` | Unevaluated | Primitive | 512 |
+| `x^2*Cos(Ln(x))` | Unevaluated | Primitive | 255 |
+| `x^4*Exp(-2*x)*Sin(3*x)` | Unevaluated | Primitive | 786 |
+
+These Node 22.14.0 measurements use one warmup, three repetitions, a
+4-second cooperative deadline, and 300,000 rule steps. Other background work
+was active, so the times are evidence of bounded completion, not speedup
+claims. All twelve final primitives were separately checked against direct
+55-digit quadrature of the original integrands on `[0.4, 1.3]`; three
+logarithmic fixtures were also checked on `[-2, -0.4]` with principal complex
+values. All fifteen primitive-difference comparisons meet a `1e-45` relative
+tolerance. These checks do not certify behavior across singularities or cuts.
+
+Validation: all 63 new helper/composition tests pass on Node 22.14.0 and
+26.10.0; all 334 existing tests in the five Rubi utility, matcher,
+normal-form, driver, and substitution suites pass on Node 22.14.0. Five
+wall-time-sensitive existing tests initially returned unevaluated results
+under competing solver load; the complete isolated rerun passes with their
+original budgets. No test deadline was increased. Changed-source lint, source
+and test type checking, formatting, and the dependency-cycle check pass.
+This is targeted validation, not a full repository/CI pass.
+
+The frozen optional rule bundle has SHA-256
+`4ed13d1295c3671e3f2006659bbc29b25c7b6ca410386459d90e04161f997985`;
+rebuilding the current implementation reproduces it. The core-engine bundle
+is byte-identical to the preceding build, so this follow-up does not change
+native integration when the optional rule package is not loaded.
+
+### Complete competition comparison with Rubi enabled
+
+Both frozen builds completed all 976 competition cases, with matching unique
+case IDs, case hashes, corpus/harness fingerprints, Node 22.14.0, three workers,
+and unchanged hard budgets: 30 seconds solving, 10 seconds verifying, and
+120 seconds loading the engine/rules. The rule budget is 300,000 steps.
+This compares against the preceding PR build, not a new main-branch baseline.
+Counts refer to benchmark records; equivalent integrals can occur in different
+sources. This is not every printed competition problem.
+
+| Original run outcome | Before | After |
+| --- | ---: | ---: |
+| Returned answers | 624 | 644 |
+| Unevaluated | 333 | 313 |
+| Solver timeouts | 15 | 15 |
+| Exact reference matches, unreviewed | 154 | 156 |
+| Local derivative identities | 370 | 382 |
+| Restricted-domain identities | 20 | 23 |
+| Verifier timeouts | 24 | 22 |
+
+All twenty new answers contain no inexact numeric literals: eighteen are
+indefinite and two are definite. Twelve pass local derivative checks, three
+pass restricted-domain checks, and two exactly match unreviewed imported
+references. Three trig/hyperbolic answers remain `unverified` in the original
+journal; independently differentiating the stored answers and rewriting to
+exponentials proves zero residual for all three, without using references or
+introducing branch assumptions. Those supplementary proofs do not relabel the
+original benchmark records.
+
+No previously returned answer is lost or changed. One unchanged answer's
+identity check timed out in the new run; a separate fresh verification of the
+stored answer passes within the same ten-second budget. Other verifier-only
+label changes are retained, not counted as solver improvements. Across the
+full final run, 54 answers remain labeled unverified, 22 hit the verifier
+budget, five have numerical support only, and two are approximation-only.
+Three adapter translation failures and one divergent result are unchanged;
+seven source translation failures remain outside the 976-case population.
+No mismatches were detected, but this is not a global-domain correctness proof.
+
+The full Rubi corpus baseline remains paused. These results are for the
+competition corpus with the optional Rubi package enabled; the earlier native
+competition comparison below is a separate measurement.
+
 ## 1. Compositional substitution and rationalization
 
 `integration-composition.ts` forms `f/g'`, replaces an inner expression `g` by
