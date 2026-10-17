@@ -709,8 +709,10 @@ export function gammaQ(a: number, x: number): number {
 }
 
 /** Continued fraction for the regularized incomplete beta (NR betacf),
- *  evaluated with Lentz's algorithm. Converges rapidly for x < (a+1)/(a+b+2);
- *  the caller applies the reflection symmetry otherwise. */
+ *  evaluated with Lentz's algorithm (DLMF 8.17.22). Converges rapidly for
+ *  x < (a+1)/(a+b+2) and still converges beyond it, more slowly. Ends as the
+ *  gamma fraction does (`GAMMA_CF_CONSECUTIVE` factors within
+ *  `GAMMA_CF_EPSILON` of 1) and is NaN at the iteration cap. */
 function betaContinuedFraction(a: number, b: number, x: number): number {
   const qab = a + b;
   const qap = a + 1;
@@ -720,7 +722,8 @@ function betaContinuedFraction(a: number, b: number, x: number): number {
   if (Math.abs(d) < GAMMA_FPMIN) d = GAMMA_FPMIN;
   d = 1 / d;
   let h = d;
-  for (let m = 1; m < 1000; m++) {
+  let settled = 0;
+  for (let m = 1; m <= GAMMA_CF_MAX_ITERATIONS; m++) {
     const m2 = 2 * m;
     let aa = (m * (b - m) * x) / ((qam + m2) * (a + m2));
     d = 1 + aa * d;
@@ -737,10 +740,19 @@ function betaContinuedFraction(a: number, b: number, x: number): number {
     d = 1 / d;
     const del = d * c;
     h *= del;
-    if (Math.abs(del - 1) < 1e-16) break;
+    settled = Math.abs(del - 1) < GAMMA_CF_EPSILON ? settled + 1 : 0;
+    if (settled >= GAMMA_CF_CONSECUTIVE) return h;
   }
-  return h;
+  return NaN;
 }
+
+/** Past x = (a+1)/(a+b+2) I_x(a, b) is 1 − I_{1−x}(b, a); below this value
+ *  that difference has lost at least one digit, so I_x comes from its own
+ *  fraction instead. */
+const BETA_SYMMETRIC_MIN = 0.5;
+
+/** The value of 1 − I_{1−x}(b, a) kept when the direct fraction declines. */
+const BETA_SYMMETRIC_FALLBACK_MIN = 1e-3;
 
 /**
  * Regularized incomplete beta I_x(a,b) (Mathematica's BetaRegularized[x,a,b]),
@@ -761,7 +773,15 @@ export function betaRegularized(x: number, a: number, b: number): number {
   );
   if (x < (a + 1) / (a + b + 2))
     return (bt * betaContinuedFraction(a, b, x)) / a;
-  return 1 - (bt * betaContinuedFraction(b, a, 1 - x)) / b;
+  const r = 1 - (bt * betaContinuedFraction(b, a, 1 - x)) / b;
+  if (r >= BETA_SYMMETRIC_MIN) return r;
+  // A small I_x past the boundary is 1 minus a number near 1 here and keeps no
+  // digits (I_0.9003(3, 1e-100) = 1e-100 came out as 1.4e-14); the direct
+  // fraction is slower there but exact in relative terms. If it declines, a
+  // value that lost fewer than three digits is still returned.
+  const direct = (bt * betaContinuedFraction(a, b, x)) / a;
+  if (!Number.isNaN(direct)) return direct;
+  return r >= BETA_SYMMETRIC_FALLBACK_MIN ? r : NaN;
 }
 
 /**
@@ -1785,7 +1805,8 @@ export function bigGammaQ(ce: ComputeEngine, a: BigNum, x: BigNum): BigNum {
 
 /** Continued fraction for the regularized incomplete beta (NR betacf, Lentz),
  *  in BigDecimal. Must be called inside the guard-digit context with a,b > 0
- *  and x in the fast-converging half x < (a+1)/(a+b+2). */
+ *  and 0 < x < 1; fast for x < (a+1)/(a+b+2), slower beyond it. NaN at the
+ *  iteration cap. */
 function bigBetaContinuedFraction(
   ce: ComputeEngine,
   a: BigNum,
@@ -1803,6 +1824,7 @@ function bigBetaContinuedFraction(
   if (d.abs().lt(tiny)) d = tiny;
   d = BigDecimal.ONE.div(d);
   let h = d;
+  let settled = 0;
   const maxTerms = 1000 + 10 * p;
   for (let m = 1; m < maxTerms; m++) {
     if ((m & 0xff) === 0) checkDeadline(ce._deadlineFrame);
@@ -1833,9 +1855,10 @@ function bigBetaContinuedFraction(
     d = BigDecimal.ONE.div(d);
     const del = d.mul(c);
     h = h.mul(del);
-    if (del.sub(BigDecimal.ONE).abs().lt(tol)) break;
+    settled = del.sub(BigDecimal.ONE).abs().lt(tol) ? settled + 1 : 0;
+    if (settled >= GAMMA_CF_CONSECUTIVE) return h;
   }
-  return h;
+  return BigDecimal.NAN;
 }
 
 /**
@@ -1866,9 +1889,14 @@ export function bigBetaRegularized(
     const boundary = a.add(BigDecimal.ONE).div(a.add(b).add(BigDecimal.TWO));
     if (x.lt(boundary))
       return bt.mul(bigBetaContinuedFraction(ce, a, b, x)).div(a);
-    return BigDecimal.ONE.sub(
+    const r = BigDecimal.ONE.sub(
       bt.mul(bigBetaContinuedFraction(ce, b, a, BigDecimal.ONE.sub(x))).div(b)
     );
+    if (r.gte(BETA_SYMMETRIC_MIN)) return r;
+    // See betaRegularized: a small I_x is taken from its own fraction.
+    const direct = bt.mul(bigBetaContinuedFraction(ce, a, b, x)).div(a);
+    if (!direct.isNaN()) return direct;
+    return r.gte(BETA_SYMMETRIC_FALLBACK_MIN) ? r : BigDecimal.NAN;
   });
 }
 

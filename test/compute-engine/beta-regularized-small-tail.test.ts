@@ -1,0 +1,104 @@
+import { ComputeEngine } from '../../src/compute-engine';
+import { compile } from '../../src/compute-engine/compilation/compile-expression';
+import { betaRegularized } from '../../src/compute-engine/numerics/special-functions';
+
+// BetaRegularized(x, a, b) = I_x(a, b) against mpmath
+// `betainc(a, b, 0, x, regularized=True)` (60 digits). Past
+// x = (a+1)/(a+b+2) the kernels returned 1 − I_(1−x)(b, a), which keeps no
+// digits when I_x is small: I_0.9003(3, 1e-100) = 1e-100 was 1.4e-14 at machine
+// precision and 3.3e-43 at the default one. A small I_x now comes from its own
+// continued fraction. Worst relative error over the tables below:
+//   machine kernel and `precision = 'machine'`: WORST_MACHINE
+//   bignum kernel at precision 21, read as a double: WORST_BIG
+// The bounds leave room for platform `Math.exp`/`Math.log` differences.
+const MACHINE_TOLERANCE = 1e-11;
+const BIGNUM_TOLERANCE = 1e-15;
+
+// `exact` is I at the doubles (what the machine kernels receive); `decimal` is
+// I at the decimal literals, which is what the bignum kernels receive.
+type Case = [x: number, a: number, b: number, exact: number, decimal: number];
+
+// [x, a, b, exact, decimal]; `reported` is the reported value, `tails` the
+// small I_x past the boundary, `bulk` values that stay as they were
+const reported: Case[] = [
+  [0.9003, 3, 1e-100, 1.0000195570143443377e-100, 1.0000195570143444058e-100],
+];
+
+const tails: Case[] = [
+  [0.99, 3, 1e-5, 0.00003125077406631223436, 0.000031250774066312240508],
+  [0.9, 50, 0.001, 8.9398101894814054834e-7, 8.939810189481392554e-7],
+  [0.6, 500, 0.001, 5.9683310018810735838e-117, 5.9683310018811842244e-117],
+  [0.95, 2, 1e-8, 2.045732257141387539e-8, 2.0457322571413883399e-8],
+  [0.97, 0.5, 1e-20, 4.8776806393446820852e-20, 4.8776806393446832545e-20],
+  [0.8, 3, 0.01, 0.0049128817686840429166, 0.0049128817686840413945],
+  [0.85, 20, 0.05, 0.00057539237520832968054, 0.00057539237520833001161],
+];
+
+const bulk: Case[] = [
+  [0.3, 2, 5, 0.57982499999999997601, 0.579825],
+  [0.5, 5, 5, 0.5, 0.5],
+  [0.9, 2, 5, 0.99994500000000000006, 0.999945],
+  [0.7, 10, 3, 0.25281534785499989355, 0.252815347855],
+  [0.95, 3, 0.5, 0.59450304770527234421, 0.59450304770527251224],
+  [0.2, 0.5, 0.5, 0.29516723530086655719, 0.29516723530086654835],
+  [0.5, 100, 100, 0.5, 0.5],
+  [0.99, 1, 1, 0.98999999999999999112, 0.99],
+  [0.1, 30, 2, 2.8000000000000046463e-29, 2.8e-29],
+];
+
+const tables: [string, Case[]][] = [
+  ['reported', reported],
+  ['tails', tails],
+  ['bulk', bulk],
+];
+
+const relErr = (got: number, expected: number) =>
+  Math.abs(got - expected) / expected;
+
+const machine = new ComputeEngine();
+machine.precision = 'machine';
+const big = new ComputeEngine(); // the default precision, bignum kernels
+
+describe('BetaRegularized small values past the boundary', () => {
+  for (const [name, cases] of tables) {
+    for (const [x, a, b, exact, decimal] of cases) {
+      const label = `${name}: I_${x}(${a}, ${b}) = ${exact}`;
+
+      test(`${label} (machine kernel)`, () => {
+        expect(relErr(betaRegularized(x, a, b), exact)).toBeLessThan(
+          MACHINE_TOLERANCE
+        );
+      });
+
+      test(`${label} (N, machine precision)`, () => {
+        const v = machine.box(['BetaRegularized', x, a, b]).N().re;
+        expect(relErr(v, exact)).toBeLessThan(MACHINE_TOLERANCE);
+      });
+
+      test(`${label} (N, default precision)`, () => {
+        const v = big.box(['BetaRegularized', x, a, b]).N().re;
+        expect(relErr(v, decimal)).toBeLessThan(BIGNUM_TOLERANCE);
+      });
+
+      test(`${label} (compiled JavaScript)`, () => {
+        const f = compile(machine.box(['BetaRegularized', 'x', 'a', 'b']));
+        const v = f.run!({ x, a, b }) as number;
+        expect(relErr(v, exact)).toBeLessThan(MACHINE_TOLERANCE);
+      });
+    }
+  }
+
+  test('evaluate() of a float operand agrees with N()', () => {
+    for (const [x, a, b] of [...reported, ...tails]) {
+      const e = big.box(['BetaRegularized', x, a, b]);
+      expect(e.evaluate().re).toBe(e.N().re);
+    }
+  });
+
+  test('a small value is positive', () => {
+    for (const [x, a, b] of [...reported, ...tails]) {
+      expect(betaRegularized(x, a, b)).toBeGreaterThan(0);
+      expect(big.box(['BetaRegularized', x, a, b]).N().re).toBeGreaterThan(0);
+    }
+  });
+});

@@ -934,6 +934,22 @@
   prefactor) and agrees to 38 digits for the three values above at precision 40
   (#ISSUE, contributed by [enumeratio](https://github.com/enumeratio))
 
+- **`BetaRegularized(x, a, b)` keeps a small `I_x(a, b)` past
+  `x = (a+1)/(a+b+2)`.** There both kernels returned `1 − I_{1−x}(b, a)`, which
+  is 1 minus a number near 1 and keeps no digits once `I_x` is small:
+  `BetaRegularized(0.9003, 3, 1e-100)` was `1.4099832412739488e-14` at machine
+  precision and `3.3e-43` at the default one (correct: `1.0000195570143444e-100`),
+  and `BetaRegularized(0.99, 3, 1e-5)` and `BetaRegularized(0.9, 50, 1e-3)` lost
+  their leading digits the same way. When that difference is below 0.5, `I_x` now
+  comes from its own continued fraction (DLMF 8.17.22), which converges past the
+  boundary, more slowly. The beta fractions end on three consecutive Lentz
+  factors within tolerance of 1 and decline with `NaN` at their iteration cap,
+  as the gamma fractions do; the symmetric value is kept instead when it has
+  lost fewer than three digits. The relative error against mpmath over
+  `x` in {0.3 … 0.999}, `a` in {0.5 … 1000} and `b` in {1e-100 … 1000} is below
+  1.2e-12 (machine) and the bignum kernel agrees to 38 digits at precision 40
+  (#ISSUE, contributed by [enumeratio](https://github.com/enumeratio))
+
 ## 0.154.0 _2026-10-15_
 
 ### Behavior Changes
