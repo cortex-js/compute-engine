@@ -273,26 +273,33 @@ export function telescopingProduct(
     !coefficients ||
     coefficients.length !== 2 ||
     coefficients[1].has(x) ||
-    exactSign(coefficients[1]) === undefined
+    ![1, -1].includes(exactSign(coefficients[1]) ?? 0)
   )
     return undefined;
   const numerator = getPolynomialCoefficients(f.op1.op1, index);
   if (
     !numerator ||
     numerator.length !== 2 ||
-    !numerator[1].isSame(coefficients[1]) ||
-    !op('Subtract', numerator[0], op('Add', coefficients[0], coefficients[1]))
-      .simplify()
-      .isSame(0)
+    !numerator[1].isSame(coefficients[1])
   )
     return undefined;
+  const shift = boundedInteger(
+    op(
+      'Divide',
+      op('Subtract', numerator[0], coefficients[0]),
+      coefficients[1]
+    ).simplify(),
+    1,
+    8
+  );
+  if (shift === undefined) return undefined;
   const direction = exactSign(op('Subtract', upper, lower));
   if (direction !== 1 && direction !== -1) return undefined;
   const lo = direction > 0 ? lower : upper,
     hi = direction > 0 ? upper : lower;
   const left = continuousRange(g.subs({ [index]: ce.number(a) }), x, lo, hi);
   const right = continuousRange(
-    g.subs({ [index]: ce.number(b + 1) }),
+    g.subs({ [index]: ce.number(b + shift) }),
     x,
     lo,
     hi
@@ -308,8 +315,18 @@ export function telescopingProduct(
     return undefined;
   const reduced = op(
     'Divide',
-    g.subs({ [index]: ce.number(b + 1) }),
-    g.subs({ [index]: ce.number(a) })
+    op(
+      'Multiply',
+      ...Array.from({ length: shift }, (_, j) =>
+        g.subs({ [index]: ce.number(b + 1 + j) })
+      )
+    ),
+    op(
+      'Multiply',
+      ...Array.from({ length: shift }, (_, j) =>
+        g.subs({ [index]: ce.number(a + j) })
+      )
+    )
   );
   const value = ce
     .function('Integrate', [

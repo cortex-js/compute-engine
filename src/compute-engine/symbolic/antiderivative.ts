@@ -14,6 +14,8 @@ import { expandAll } from '../boxed-expression/expand.js';
 import { differentiate } from './derivative.js';
 import { withRadianConvention } from './angular-unit.js';
 import { specialAntiderivative } from './special-integrate.js';
+import { integrateComposition } from './integration-composition.js';
+import { logarithmicPrimitive } from './integration-logarithmic.js';
 import { findUnivariateRoots } from '../boxed-expression/solve.js';
 import {
   cancelCommonFactors,
@@ -3256,6 +3258,35 @@ function antiderivativeInRadians(fn: Expression, index: string): Expression {
 
   const special = specialAntiderivative(fn, index);
   if (special) return special;
+  const logarithmic = logarithmicPrimitive(fn, index);
+  if (logarithmic) return logarithmic;
+  // Keep elementary affine trig/hyperbolic primitives on their established
+  // path. Rationalizing them can introduce real-log Abs conventions and less
+  // useful branch structure into an already simple complex primitive.
+  const elementary = isFunction(fn, 'Power') && fn.op2.isInteger ? fn.op1 : fn;
+  const elementaryPhase =
+    isFunction(elementary) &&
+    [
+      'Sin',
+      'Cos',
+      'Tan',
+      'Cot',
+      'Sec',
+      'Csc',
+      'Sinh',
+      'Cosh',
+      'Tanh',
+      'Coth',
+      'Sech',
+      'Csch',
+    ].includes(elementary.operator) &&
+    getLinearCoefficients(elementary.op1, index);
+  if (!elementaryPhase) {
+    const composed = integrateComposition(fn, index, (body, variable) =>
+      antiderivative(body, variable)
+    );
+    if (composed) return composed;
+  }
 
   // An exponential of a sum hides the product needed by reverse-chain
   // matching, e.g. exp(x + exp(x)). Splitting e^(a+b) is branch-safe, unlike

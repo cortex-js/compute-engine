@@ -2,10 +2,11 @@ import type { Expression } from '../global-types.js';
 import { isFunction } from '../boxed-expression/type-guards.js';
 import {
   getPolynomialCoefficients,
-  cancelCommonFactors,
+  polynomialDegree,
 } from '../boxed-expression/polynomials.js';
-import { rationalPartsAsWritten } from '../boxed-expression/rational-body.js';
+import { reduceIntegrationRational } from './integration-rational.js';
 import { checkDeadline } from '../../common/interruptible.js';
+import { normalizeIntegrationFunctions } from './integration-normalize.js';
 import { exactSign } from './contour.js';
 import {
   continuousRange,
@@ -17,6 +18,7 @@ import {
   boundedInteger,
   exactExpression,
   type DefiniteReduction,
+  multiplicativeFactors,
 } from './definite-transform.js';
 
 /** Rational functions of one affine sine/cosine phase become rational in
@@ -28,12 +30,13 @@ export function integrateRationalTrig(
   lower: Expression,
   upper: Expression
 ): DefiniteReduction | undefined {
+  f = normalizeIntegrationFunctions(f) ?? f;
   const ce = f.engine,
     op = definiteArithmetic(ce);
   if (
     ce.angularUnit !== 'rad' ||
-    !f.has(['Sin', 'Cos']) ||
     !f.has('Divide') ||
+    !f.has(['Sin', 'Cos']) ||
     !f.isPure ||
     !lower.isPure ||
     !upper.isPure ||
@@ -62,6 +65,7 @@ export function integrateRationalTrig(
     );
   };
   if (!rational(f) || !phase) return undefined;
+  if (polynomialDegree(phase, x) !== 1) return undefined;
   const coefficients = getPolynomialCoefficients(phase, x);
   if (
     !coefficients ||
@@ -78,6 +82,81 @@ export function integrateRationalTrig(
     return undefined;
   const start = phase.subs({ [x]: lower }).evaluate(),
     end = phase.subs({ [x]: upper }).evaluate();
+  // When the total sine/cosine degree is even, t=tan(phase) is smaller
+  // than the half-angle quotient. Certify a single tangent chart first.
+  const factors = multiplicativeFactors(f),
+    cosineRange = continuousRange(
+      ce.function('Cos', [phase]),
+      x,
+      order > 0 ? lower : upper,
+      order > 0 ? upper : lower
+    );
+  if (
+    factors &&
+    cosineRange &&
+    (exactSign(cosineRange[0]) === 1 || exactSign(cosineRange[1]) === -1)
+  ) {
+    let sine = 0,
+      cosine = 0,
+      valid = true;
+    const constants: Expression[] = [];
+    for (const [base, exponent] of factors) {
+      const n = boundedInteger(exponent, -8, 8);
+      if (!base.has(x)) constants.push(op('Power', base, exponent));
+      else if (
+        n !== undefined &&
+        isFunction(base) &&
+        base.op1.isSame(phase) &&
+        ['Sin', 'Cos'].includes(base.operator)
+      ) {
+        if (base.operator === 'Sin') sine += n;
+        else cosine += n;
+      } else valid = false;
+    }
+    if (
+      valid &&
+      (sine + cosine) % 2 === 0 &&
+      Math.abs(sine) + Math.abs(cosine) <= 12
+    ) {
+      let name = '_tangent_monomial';
+      while (f.has(name) || ce.lookupDefinition(name)) name += '_';
+      const t = ce.symbol(name),
+        exponent = -(sine + cosine) / 2 - 1;
+      const body = op(
+        'Multiply',
+        ...constants,
+        sine === 0 ? ce.One : op('Power', t, sine),
+        exponent === 0
+          ? ce.One
+          : op('Power', op('Add', 1, op('Power', t, 2)), exponent)
+      );
+      const result = ce
+        .function('Integrate', [
+          body,
+          ce.function('Limits', [t, op('Tan', start), op('Tan', end)]),
+        ])
+        .evaluate();
+      if (
+        !result.has(['Integrate', 'Limit', 'EvaluateAt']) &&
+        !result.isNaN &&
+        result.isFinite !== false &&
+        exactExpression(result)
+      )
+        return {
+          value: op('Divide', result, coefficients[1]),
+          steps: [
+            {
+              method: 'tangent-monomial',
+              conditions: [
+                'even total integer degree',
+                'continuous original integrand',
+                'single tangent chart',
+              ],
+            },
+          ],
+        };
+    }
+  }
   const direction = exactSign(op('Subtract', end, start));
   if (direction !== 1 && direction !== -1) return undefined;
   const lo = direction > 0 ? start : end,
@@ -120,14 +199,11 @@ export function integrateRationalTrig(
       return op('Divide', op('Subtract', 1, square), den);
     return ce.function(e.operator, e.ops.map(replace));
   };
-  const parts = rationalPartsAsWritten(
-    op('Multiply', replace(f), op('Divide', 2, den))
-  );
-  if (!parts) return undefined;
-  const transformed = cancelCommonFactors(
-    ce.function('Divide', parts),
+  const transformed = reduceIntegrationRational(
+    op('Multiply', replace(f), op('Divide', 2, den)),
     name
-  ).simplify();
+  );
+  if (!transformed) return undefined;
   const endpoint = (v: Expression, right: boolean): Expression => {
     const n = chart(v);
     if (n !== undefined && v.isSame(op('Multiply', 2 * n + 1, ce.Pi)))

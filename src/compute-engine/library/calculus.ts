@@ -95,9 +95,12 @@ import {
 } from '../symbolic/definite-integrate.js';
 import { integrateDiscreteMoments } from '../symbolic/definite-discrete.js';
 import { integrateReciprocalRational } from '../symbolic/definite-reciprocal.js';
+import { integrateComposition } from '../symbolic/integration-composition.js';
+import { logarithmicParameterDifference } from '../symbolic/integration-logarithmic.js';
 import {
   integrateBySubstitution,
   generalizedBeta,
+  exactExpression,
 } from '../symbolic/definite-transform.js';
 import {
   betaLogMoment,
@@ -106,6 +109,10 @@ import {
 import { integrateRationalTrig } from '../symbolic/definite-trig-transform.js';
 import { integrateWeightedDiscrete } from '../symbolic/definite-periodic.js';
 import {
+  integrateDiscreteAlgebra,
+  integrateDiscreteReciprocal,
+} from '../symbolic/definite-discrete-algebra.js';
+import {
   logarithmicSeriesMoment,
   integratedPowerSeries,
   telescopingProduct,
@@ -113,6 +120,7 @@ import {
 } from '../symbolic/definite-summation.js';
 import {
   integrateDefiniteSeries,
+  integratePolynomialSeries,
   integrateProductDerivative,
 } from '../symbolic/definite-series.js';
 import {
@@ -5011,11 +5019,29 @@ volumes
               // where the pieces resolve the convergence condition (see
               // `integrateAtSymbolicExponentZeros`).
               const split =
+                logarithmicParameterDifference(
+                  integrand,
+                  variable,
+                  lower,
+                  upper
+                ) ??
                 integrateReciprocalRational(
                   integrand,
                   variable,
                   lower,
                   upper
+                ) ??
+                integrateComposition(
+                  integrand,
+                  variable,
+                  (body, name, bounds) =>
+                    ce
+                      .function('Integrate', [
+                        body,
+                        ce.function('Limits', [ce.symbol(name), ...bounds!]),
+                      ])
+                      .evaluate(),
+                  [lower, upper]
                 ) ??
                 integrateBySubstitution(integrand, variable, lower, upper, [
                   generalizedBeta,
@@ -5037,8 +5063,16 @@ volumes
                 integrateRationalTrig(integrand, variable, lower, upper)
                   ?.value ??
                 integrateDiscreteMoments(integrand, variable, lower, upper) ??
+                integrateDiscreteAlgebra(integrand, variable, lower, upper) ??
+                integrateDiscreteReciprocal(
+                  integrand,
+                  variable,
+                  lower,
+                  upper
+                ) ??
                 integrateWeightedDiscrete(integrand, variable, lower, upper) ??
                 integrateDefiniteSeries(integrand, variable, lower, upper) ??
+                integratePolynomialSeries(integrand, variable, lower, upper) ??
                 integrateProductDerivative(integrand, variable, lower, upper) ??
                 integrateBoseMoment(integrand, variable, lower, upper) ??
                 integratePiecewise(ce, integrand, variable, lower, upper) ??
@@ -5122,7 +5156,14 @@ volumes
                 ])
                 .evaluate({ numericApproximation });
               providerEndpoint = candidate;
+              const lostExactness =
+                !numericApproximation &&
+                exactExpression(integrand) &&
+                exactExpression(lower) &&
+                exactExpression(upper) &&
+                !exactExpression(candidate);
               if (
+                lostExactness ||
                 hasVariableSign(antideriv, variable) ||
                 !candidate.isValid ||
                 candidate.isNaN === true ||
@@ -5134,7 +5175,8 @@ volumes
                   alternative.isValid &&
                   alternative.isNaN !== true &&
                   !alternative.has('Integrate') &&
-                  !hasVariableSign(alternative, variable)
+                  !hasVariableSign(alternative, variable) &&
+                  (!lostExactness || exactExpression(alternative))
                 ) {
                   antideriv = alternative;
                   providerEndpoint = undefined;

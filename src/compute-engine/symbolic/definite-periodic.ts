@@ -41,7 +41,11 @@ export function integrateWeightedDiscrete(
   // CE's general-purpose 0^0 is deliberately indeterminate.
   const monomial = (v: Expression, n: number) =>
     n === 0 ? ce.One : op('Power', v, n);
-  const factors = isFunction(f, 'Multiply') ? f.ops : [f];
+  const factors = isFunction(f, 'Multiply')
+    ? f.ops
+    : isFunction(f, 'Negate')
+      ? [ce.NegativeOne, f.op1]
+      : [f];
   const selectors = factors.filter((t) => t.has(['Floor', 'Ceil', 'Fract']));
   if (selectors.length !== 1) return undefined;
   const selector = selectors[0],
@@ -120,8 +124,6 @@ export function integrateWeightedDiscrete(
     exactSign(affine[1]) === 0
   )
     return undefined;
-  // Preserve the existing affine-weight first-moment route and its budgets.
-  if (power === 1 && polynomial.length <= 2) return undefined;
   const [offset, slope] = affine;
   const coefficients: Expression[] = [];
   for (let k = 0; k < polynomial.length; k++) {

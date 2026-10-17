@@ -8,6 +8,125 @@ import {
   definiteUnshadowed,
   finiteConstant,
 } from './definite-integrate.js';
+import { boundedInteger, exactExpression } from './definite-transform.js';
+
+/** Euler's operator r*d/dr generates sum n^k*r^n. Polynomial weights are
+ * linear combinations of these rational functions. The strict enclosure of
+ * r inside (-1,1) proves uniform absolute convergence, even after weighting. */
+export function integratePolynomialSeries(
+  f: Expression,
+  x: string,
+  lower: Expression,
+  upper: Expression
+): Expression | undefined {
+  if (
+    !isFunction(f, 'Sum') ||
+    f.nops !== 2 ||
+    !isFunction(f.op2, 'Limits') ||
+    !f.op2.op3.isSame(f.engine.PositiveInfinity) ||
+    !f.isPure ||
+    !definiteUnshadowed(f) ||
+    !exactExpression(f) ||
+    !finiteConstant(lower) ||
+    !finiteConstant(upper)
+  )
+    return undefined;
+  const ce = f.engine,
+    op = definiteArithmetic(ce),
+    index = sym(f.op2.op1),
+    start = boundedInteger(f.op2.op2, 0, 32);
+  if (
+    !index ||
+    index === x ||
+    start === undefined ||
+    !isFunction(f.op1, 'Multiply')
+  )
+    return undefined;
+  const powers = f.op1.ops.filter(
+    (t) => isFunction(t, 'Power') && sym(t.op2) === index && !t.op1.has(index)
+  );
+  if (powers.length !== 1 || !isFunction(powers[0], 'Power')) return undefined;
+  const ratio = powers[0].op1,
+    weight = op('Multiply', ...f.op1.ops.filter((t) => t !== powers[0]));
+  if (weight.has(x)) return undefined;
+  let nodes = 64;
+  const degree = (e: Expression): number => {
+    if (--nodes < 0) return Infinity;
+    if (!e.has(index)) return finiteConstant(e) ? 0 : Infinity;
+    if (sym(e) === index) return 1;
+    if (!isFunction(e)) return Infinity;
+    if (e.operator === 'Power')
+      return degree(e.op1) * (boundedInteger(e.op2, 0, 6) ?? Infinity);
+    if (e.operator === 'Negate') return degree(e.op1);
+    if (e.operator === 'Add') return Math.max(...e.ops.map(degree));
+    if (e.operator === 'Multiply')
+      return e.ops.reduce((d, t) => d + degree(t), 0);
+    return Infinity;
+  };
+  if (degree(weight) > 6) return undefined;
+  const coefficients = getPolynomialCoefficients(weight, index);
+  if (!coefficients || !coefficients.every(finiteConstant)) return undefined;
+  const direction = exactSign(op('Subtract', upper, lower));
+  if (direction !== 1 && direction !== -1) return undefined;
+  const range = continuousRange(
+    ratio,
+    x,
+    direction === 1 ? lower : upper,
+    direction === 1 ? upper : lower
+  );
+  if (
+    !range ||
+    exactSign(op('Add', range[0], 1)) !== 1 ||
+    exactSign(op('Subtract', 1, range[1])) !== 1
+  )
+    return undefined;
+  let numerator = [1];
+  const terms: Expression[] = [];
+  for (let k = 0; k < coefficients.length; k++) {
+    if (k > 0) {
+      const old = numerator;
+      numerator = Array.from(
+        { length: old.length + 1 },
+        (_, j) => j * (old[j] ?? 0) + (k - j + 1) * (old[j - 1] ?? 0)
+      );
+    }
+    const poly = op(
+      'Add',
+      ...numerator.map((c, j) =>
+        op('Multiply', c, j === 0 ? ce.One : op('Power', ratio, j))
+      )
+    );
+    terms.push(
+      op(
+        'Divide',
+        op('Multiply', coefficients[k], poly),
+        op('Power', op('Subtract', 1, ratio), k + 1)
+      )
+    );
+  }
+  for (let n = 0; n < start; n++)
+    terms.push(
+      op(
+        'Negate',
+        op(
+          'Multiply',
+          weight.subs({ [index]: ce.number(n) }).evaluate(),
+          n === 0 ? ce.One : op('Power', ratio, n)
+        )
+      )
+    );
+  const result = ce
+    .function('Integrate', [
+      op('Add', ...terms),
+      ce.function('Limits', [ce.symbol(x), lower, upper]),
+    ])
+    .evaluate();
+  return result.has(['Integrate', 'Limit', 'EvaluateAt']) ||
+    result.isNaN ||
+    !exactExpression(result)
+    ? undefined
+    : result;
+}
 
 function smallInteger(
   e: Expression,

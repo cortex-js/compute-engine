@@ -162,8 +162,30 @@ export function continuousRange(
       op('Divide', b, d),
     ]);
   }
-  if (f.operator === 'Sin' || f.operator === 'Cos')
-    return [ce.NegativeOne, ce.One];
+  if (f.operator === 'Sin' || f.operator === 'Cos') {
+    const full: Range = [ce.NegativeOne, ce.One];
+    if (ce.angularUnit !== 'rad') return full;
+    const unit = op('Divide', ce.Pi, 2);
+    const left = op('Divide', a, unit),
+      right = op('Divide', b, unit);
+    const i = integer(op('Floor', left), -4096, 4096),
+      j = integer(op('Floor', right), -4096, 4096);
+    if (
+      i === undefined ||
+      j === undefined ||
+      j - i > 4 ||
+      j < i ||
+      ![0, 1].includes(exactSign(op('Subtract', left, i)) ?? -1) ||
+      exactSign(op('Subtract', i + 1, left)) !== 1 ||
+      ![0, 1].includes(exactSign(op('Subtract', right, j)) ?? -1) ||
+      exactSign(op('Subtract', j + 1, right)) !== 1
+    )
+      return full;
+    const values = [op(f.operator, a), op(f.operator, b)];
+    for (let k = i + 1; k <= j; k++)
+      values.push(op(f.operator, op('Multiply', k, unit)));
+    return extremes(values) ?? full;
+  }
   if (f.operator === 'Exp') return [op('Exp', a), op('Exp', b)];
   if (f.operator === 'Ln' && exactSign(a) === 1)
     return [op('Ln', a), op('Ln', b)];

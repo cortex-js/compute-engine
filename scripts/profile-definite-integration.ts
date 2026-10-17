@@ -9,6 +9,7 @@ import { pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { cases } from '../test/compute-engine/fixtures/competition-exact';
+import { composedCases as composed } from '../test/compute-engine/fixtures/integration-composed';
 import {
   cases as families,
   polynomialCases as polynomials,
@@ -36,9 +37,13 @@ const { values } = parseArgs({
 });
 if (!values.engine) throw new Error('--engine is required');
 if (
-  !['competition', 'families', 'polynomials', 'reciprocal'].includes(
-    values.suite
-  )
+  ![
+    'competition',
+    'families',
+    'polynomials',
+    'reciprocal',
+    'composed',
+  ].includes(values.suite)
 )
   throw new Error('Unknown suite');
 const repeats = Number(values.repeats),
@@ -57,7 +62,6 @@ const rules = values.rules
   ? await import(pathToFileURL(resolve(values.rules)).href)
   : undefined;
 const ce = new ComputeEngine();
-ce.timeLimit = timeout;
 if (rules)
   rules.loadIntegrationRules(ce, { timeLimitMs: timeout, stepBudget: 300000 });
 const sha = (path: string) =>
@@ -70,18 +74,26 @@ console.log(
     rulesSha256: values.rules ? sha(values.rules) : null,
     repeats,
     timeoutMs: timeout,
+    timeoutSemantics:
+      'explicit cooperative withTimeLimit spans for solve and comparison; not a hard process watchdog',
     suite: values.suite,
     method:
       'one untimed warmup per case; warm evaluation medians; no cross-machine ranking',
   })
 );
-const fixtures = { competition: cases, families, polynomials, reciprocal };
+const fixtures = {
+  competition: cases,
+  families,
+  polynomials,
+  reciprocal,
+  composed,
+};
 for (const [name, body, a, b, expected] of fixtures[
   values.suite as keyof typeof fixtures
 ]) {
   const request = ['Integrate', body, ['Limits', 'x', a, b]];
   try {
-    ce.box(request).evaluate();
+    ce.withTimeLimit(timeout, () => ce.box(request).evaluate());
   } catch {
     /* Timed iterations record failures. */
   }
@@ -93,7 +105,7 @@ for (const [name, body, a, b, expected] of fixtures[
     const start = performance.now();
     let value: Expression;
     try {
-      value = ce.box(request).evaluate();
+      value = ce.withTimeLimit(timeout, () => ce.box(request).evaluate());
     } catch (e) {
       times.push(performance.now() - start);
       error = String(e);
@@ -107,10 +119,12 @@ for (const [name, body, a, b, expected] of fixtures[
         exactMatch &&
         exactLeaves(value) &&
         !value.has('Integrate') &&
-        ce
-          .function('Subtract', [value, ce.box(expected)])
-          .simplify()
-          .isSame(0);
+        ce.withTimeLimit(timeout, () =>
+          ce
+            .function('Subtract', [value, ce.box(expected)])
+            .simplify()
+            .isSame(0)
+        );
     } catch (e) {
       error = `Reference comparison failed: ${String(e)}`;
       exactMatch = false;

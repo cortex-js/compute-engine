@@ -9,6 +9,10 @@ Parameters and bounds must satisfy the methods' exact sign and domain checks.
 Unspecified symbolic parameter signs are not inferred, and these methods do
 not introduce conditional answers for assumptions the resolver cannot prove.
 
+The follow-on [composed integration families](composed-integration-families.md)
+describe reuse of the full integrator after substitution, logarithmic
+recurrences, interacting selectors, and polynomial generating functions.
+
 ## Substitution and composition
 
 `definite-transform.ts` supplies a bounded transformation search and an internal
@@ -98,8 +102,8 @@ normal fallback; this change does not duplicate the contour engine.
 
 `definite-periodic.ts` integrates polynomial weights of degree at most eight
 against powers one through eight of `Floor(a*x+b)`, `Ceil(a*x+b)`, and
-`Fract(a*x+b)`. The first-moment affine-weight cases retain their existing
-route. Negative slopes, negative cells, partial periods, and reversed bounds
+`Fract(a*x+b)`. This includes negated weights and first moments needed by
+selector-polynomial decomposition. Negative slopes, negative cells, partial periods, and reversed bounds
 use one continuous piecewise primitive.
 
 After affine substitution, put `u=n+t`, where `n=Floor(u)` and `0<=t<1`.
@@ -264,10 +268,14 @@ after roughly 19.8 seconds to the 30-second timeout. The sparse reciprocal
 reduction and rational search guard below address that regression; this table
 is the preserved pre-rational-fix comparison.
 
-The preceding-build warm profiler exceeded its four-second soft budget on a
-late large-power case and was stopped. Its partial output is retained only for
-individual diagnostic observations, not an aggregate before score. The full
-competition comparison uses separate process-enforced timeouts.
+The preceding-build warm profiler ran beyond its requested four-second limit
+on a late large-power case and was stopped. Subsequent review found that its
+assignment to the retired `ce.timeLimit` property did not arm a deadline.
+The profiler now uses explicit `withTimeLimit()` spans for warmup, evaluation,
+and reference comparison, and records that cooperative budget semantics in
+its output. The historical partial output is retained only for individual
+diagnostic observations, not an aggregate before score. The full competition
+comparison always used separate process-enforced timeouts and is unaffected.
 
 ## Sparse reciprocal rational integrals
 
