@@ -609,9 +609,43 @@ export function declareSymbolValue(
     // running": a declaration made during one but aimed at a longer-lived
     // scope outlives it and must keep its axis advance. See `axisMaskOf`.
     ...(scratchRootOf(ce, scope) !== undefined ? { scratch: true } : {}),
+    ...(isShadowedParameterDeclaration(ce, name, scope)
+      ? { parameter: true }
+      : {}),
   });
 
   return boxedDef;
+}
+
+/**
+ * Whether this declaration binds a name that a function literal or a block
+ * under canonicalization shadows (`_pushShadowedParameters`: a parameter of
+ * the literal, a `let` local the block hoists), into a scope strictly inside
+ * the boundary that was pushed for the name: the literal's own body scope,
+ * or a block nested in it. This is the auto-declaration of such a name at
+ * its first reference (`createSymbolExpression`,
+ * `engine-expression-entrypoints.ts`), which the shadowed-name frame routes
+ * every reference of the name to, so that none resolves to an outer
+ * binding. It is the one declaration that cannot change what any cached
+ * value answers: see the `parameter` case of `axisMaskOf`
+ * (`engine-configuration-lifecycle.ts`).
+ *
+ * A declaration of the same name made after the frame is popped (the
+ * literal declares a parameter its body never mentions, possibly into a
+ * body scope that already existed) and one aimed at or above the boundary
+ * (the auto-declare target was moved up past `noAutoDeclare` scopes) are
+ * not of this kind, and keep their axis advance.
+ */
+function isShadowedParameterDeclaration(
+  ce: IComputeEngine,
+  name: string,
+  scope: Scope
+): boolean {
+  const boundary = ce._shadowedParameterBoundary(name);
+  if (boundary === undefined || scope === boundary) return false;
+  for (let s: Scope | null = scope.parent; s !== null; s = s.parent)
+    if (s === boundary) return true;
+  return false;
 }
 
 export function declareSymbolOperator(

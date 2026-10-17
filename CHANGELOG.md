@@ -2,8 +2,8 @@
 
 ### Issues Resolved
 
-- **A call's result that mentions a node several times keeps that node
-  shared** (Tycho ledger row 380). The closure capture of a call's result
+- **A call's result that mentions a node several times keeps that node shared**
+  (Tycho ledger row 380). The closure capture of a call's result
   (`captureClosures`, `function-utils.ts`) rebuilds every node above a function
   literal so that the literal closes over the call frame, and memoizes the
   rebuild of each node per frame so that a node the result mentions twice is
@@ -11,13 +11,50 @@
   mention was rebuilt separately. A user function applied to its own result,
   `f^k(P)`, with a body that reads its argument four times and a value that
   holds a lazy `Map` (a function literal: a column such as `5[0…N]/N` with `N`
-  valueless), doubled its number of distinct nodes at every level (864, 954,
-  1 236, 1 938, 3 515, 6 875 at depths 1 to 6) although each level was walked
+  valueless), doubled its number of distinct nodes at every level (864, 954, 1
+  236, 1 938, 3 515, 6 875 at depths 1 to 6) although each level was walked
   once, and the chain cost 2 s at depth 8 and 27 s at depth 9. The levels now
   share one tree, and depth 9 costs 0.2 s. The serialized form of the result
-  (`json`, `toString()`) still unfolds the sharing, so it keeps growing with
-  the depth; the accessor-side change that would stop that stays open in
-  `ROADMAP.md`.
+  (`json`, `toString()`) still unfolds the sharing, so it keeps growing with the
+  depth.
+
+- **A coordinate accessor over an inert `PointList` head answers the column when
+  no other column can shorten the zip** (Tycho ledger row 380, ask (a)). A
+  `PointList` whose column is collection-typed but has no value yet (a valueless
+  `s: list<number>`) stays an inert head, and `PointY(PointList(1, s))` stayed
+  whole. It is now `s`: the chosen column is the list the points are zipped
+  from, and every other column is a scalar slot (a number, a boolean, a string,
+  a tuple, or an operand typed as one), which repeats in every point. Once
+  `s := [10, 20]`, the projected form and the kept form evaluate to the same
+  `[10, 20]`. The projection stays unevaluated when another column is
+  collection-typed with no value, or typed `unknown`: that column may resolve to
+  a shorter list. The chain of row 380 mixes two such columns, so its serialized
+  result keeps growing with the depth.
+
+### Performance
+
+- **Building a lazy broadcast map no longer retires every cached type in the
+  engine**. The mapping literal of a lazy map
+  (`Map((_1) ↦ _1 + 1, Range(1, N))`) declared its parameter `unknown` and its
+  use then narrowed it, and each parameter declaration and each settled
+  narrowing advanced the `any` axis, which retires the cached type and sign of
+  every expression and the memo of every inert evaluation. The parameter is now
+  pre-declared at the element type of its source (as an inferred type: the
+  printed literal is unchanged, nothing is enforced at apply time), and the
+  declaration of a parameter at its first reference, into the body scope of the
+  literal under canonicalization, advances nothing: no read of the name was
+  resolved before it. One level of the chain of Tycho ledger row 380 (ten lazy
+  maps) advanced the axis 21 times and recomputed 1 600 to 4 000 cached types;
+  it now advances it once (the call's own parameter activation) and recomputes
+  130 to 2 200.
+
+- **The closure capture at the end of a call keeps a function literal that the
+  re-rooting would not change**. Every literal in a call's result was re-rooted
+  onto the call frame, which rebuilt the literal and every node above it. A
+  literal whose own scope chain and the frame's chain resolve all the names it
+  reads to the same bindings — a lazy map built during the call, or one that an
+  argument's value brings into the result — is kept as it is (`rerootingIsNoop`,
+  `function-utils.ts`), and so are the nodes above it.
 
 ## 0.155.0 _2026-10-17_
 
@@ -223,21 +260,21 @@
 
 ### Issues Resolved
 
-- **An already-evaluated symbolic value is not walked again at the same
-  state** (Tycho ledger row 380). A user function applied to its own result,
-  `f^k(P)`, with a body that reads its argument four times, embedded the
-  previous level's value four times, and each read evaluated that value again
-  — a full walk that built a fresh copy — when the value had stayed symbolic
-  (an inert `PointList` whose columns waited for a slider with no value). The
-  cost grew fourfold per level: 1.9 s at depth 7, out of memory at depth 8.
-  The evaluate memo of a lazy collection view now also serves an ordinary
-  canonical function node on the synchronous route under the default options,
-  and keeps a symbolic, non-collection result: each level walks the previous
-  one once (0.45 s at depth 7, and the levels share one tree). A node that
-  evaluates to a number or a list literal stores nothing; a lazy head
-  (`Add`, `Multiply`, `If`, …) and the asynchronous route are unchanged. A
-  change of `ce.maxCollectionSize` now counts as a configuration change, so a
-  call that declined under the old cap is evaluated again under the new one.
+- **An already-evaluated symbolic value is not walked again at the same state**
+  (Tycho ledger row 380). A user function applied to its own result, `f^k(P)`,
+  with a body that reads its argument four times, embedded the previous level's
+  value four times, and each read evaluated that value again — a full walk that
+  built a fresh copy — when the value had stayed symbolic (an inert `PointList`
+  whose columns waited for a slider with no value). The cost grew fourfold per
+  level: 1.9 s at depth 7, out of memory at depth 8. The evaluate memo of a lazy
+  collection view now also serves an ordinary canonical function node on the
+  synchronous route under the default options, and keeps a symbolic,
+  non-collection result: each level walks the previous one once (0.45 s at depth
+  7, and the levels share one tree). A node that evaluates to a number or a list
+  literal stores nothing; a lazy head (`Add`, `Multiply`, `If`, …) and the
+  asynchronous route are unchanged. A change of `ce.maxCollectionSize` now
+  counts as a configuration change, so a call that declined under the old cap is
+  evaluated again under the new one.
 - **A nested user function whose parameter shares its name with the caller's
   parameter evaluates in milliseconds again** (Tycho ledger, `art/mavxszbvzk`).
   With `f_b2full50(x)` applying `f_b2(x)`, whose body ranges over

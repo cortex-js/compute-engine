@@ -207,6 +207,7 @@ import {
   assignFn as assignFnImpl,
   undeclare as undeclareImpl,
 } from './engine-declarations.js';
+import { canonicalFunctionLiteralOperands } from './function-utils.js';
 import {
   declareProtocolImpl,
   declareProtocolImplementationImpl,
@@ -3187,6 +3188,14 @@ export class ComputeEngine implements IComputeEngine {
   /** @internal */
   _popShadowedParameters(): void {
     this._shadowedParameterStack.pop();
+  }
+
+  /** See `IComputeEngine._canonicalFunctionLiteralOperands`. @internal */
+  _canonicalFunctionLiteralOperands(
+    ops: ReadonlyArray<Expression>,
+    options?: { inferredParamTypes?: ReadonlyMap<string, Type> }
+  ): Expression | undefined {
+    return canonicalFunctionLiteralOperands(this, ops, options);
   }
 
   /** @internal */

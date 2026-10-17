@@ -109,87 +109,99 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
-### A coordinate accessor over an inert `PointList` head keeps the whole head, so the serialized result of a chain of user-function applications grows fivefold per level (OPEN, small — found 2026-10-17 by the Tycho three-bar audit of `neyret/51a4237846`, Tycho ledger row 380; the in-memory growth fixed 2026-10-17)
+### Each call of a user function retires the inert evaluation memo of every node, so a chain of applications copies its previous level once per level (OPEN, performance, design — found 2026-10-17 by the chain of Tycho ledger row 380, after the closure-capture and lazy-map fixes of the same day)
 
-`PointX`/`PointY`/`PointZ` project a column only out of the lazy `Map`
-transpose form (`projectLazyPointList`, `library/collections.ts`), and only
-when every source has a known, equal count. When the `PointList` evaluate
-handler fails closed and stays an inert head — a column is a collection-typed
-expression with no collection value, such as `a - PointY(v)·(…)` with
-`a := Map(i ↦ 5i/N, Range(0, N))` and `N` valueless — the accessor falls
-through to `componentAt` and keeps `PointY(PointList(c1, c2, c3))` whole. A
-user function `f(v) = PointList(a − PointY(v)·(b·PointX(v) + (1−b)·PointY(v)),
-PointX(v) + PointY(v)²/100, a)` reads `v` four times, so `f^k(P)` mentions
-the previous level's head four times per level. In memory the levels now
-share one tree (the closure-capture memo fix of 2026-10-17; the time is 0.25 s
-at depth 9), but every output that unfolds the sharing — `json`,
-`toString()`, LaTeX — still embeds the head once per mention: 15 KB, 75 KB,
-377 KB, 1.9 MB, 9.4 MB and 47 MB at depths 1–6 (measured after the fix with
-the Tycho reproduction `scripts/repros/2026-10-17-inert-pointlist-chain.mts`).
-Engine ask, unchanged: an accessor over an inert `PointList` head should
-answer the projected column when the projection is sound — the chosen column
-is collection-typed and no other column can be shorter — and otherwise a lazy
-projection view that serializes without the other columns.
+The memo of an inert evaluation (`_memoizedLazyCollectionValue`,
+`boxed-expression/boxed-function.ts`) is keyed on the `any` axis, and a call of
+a user function advances that axis once: the activation of each parameter is a
+declaration with a value into the call frame (`declareParameterActivation`,
+`function-utils.ts`). An evaluated result is never its own value (the memo
+stores the result under the node that was evaluated, and the result is a new
+node with no entry), so the next level of a chain `f^k(P)` that reads its
+argument re-evaluates the previous level's result: with the memo retired by the
+activation, it walks that level again and copies every node it rebuilds. The
+distinct nodes of the chain of `inert-evaluate-memo.test.ts` ("a user function
+applied to its own result") are 39, 60, 95, 144, 207, 284 at depths 1 to 6: 14
+more nodes per level at each level, quadratic in the depth. The time is linear
+per level (6 ms at depth 1, 58 ms at depth 8 of that chain; 0.25 s at depth 9 of
+the Tycho reproduction `scripts/repros/2026-10-17-inert-pointlist-chain.mts`
+with 101 points), so no document is blocked by it; the measurement is recorded
+so that the next change to the memo starts from it.
 
-Also remaining: each application re-roots the closure of every function
-literal inside its result onto the new call frame (`captureClosures`,
-`function-utils.ts`), which rebuilds the nodes above the literal once more
-per level, so the distinct nodes of the chain grow quadratically with the
-depth (39, 62, 101, 156, 227, 314 at depths 1–6 of the test chain in
-`inert-evaluate-memo.test.ts`, 16 more nodes per level at each level). A
-literal that reads no binding of the frame does not need the re-rooting.
+What was ruled out: a fixpoint test that returns the node itself when its
+rebuilt result is structurally the same (tried 2026-10-17; the structural
+comparison cost more than the copies it saved: 692 ms against 230 ms at depth 9
+of the Tycho reproduction). What could close it: the activation of a parameter
+is a declaration into a scope that the call creates, and no cached read has gone
+through that scope before the declaration, so the activation could advance
+nothing — as the auto-declaration of a parameter at its first reference now does
+(`parameter` in `axisMaskOf`, `engine-configuration-lifecycle.ts`) — but the
+body's own symbol nodes cache their type under the `any` axis and read the
+activation's type through the chain, so the call's advance is what makes a body
+typed for one argument re-typed for the next; the memo would need a key that the
+activation does not move (the cached type of a parameter read keyed on the
+activation it resolved to, for example). This is a design change of the type
+cache, so it is recorded for a decision rather than made here.
 
-### Each lazy broadcast map built during an evaluation advances the `any` axis three times (OPEN, performance — found 2026-10-17 by the profile of the Tycho row 380 chain)
+### The serialized result of a chain of user-function applications over an inert `PointList` head with two unresolved columns grows fivefold per level (OPEN, design — the remaining half of Tycho ledger row 380, found 2026-10-17 by the Tycho three-bar audit of `neyret/51a4237846`)
 
-`lazyBroadcastMap` (`collection-utils.ts`) builds its function literal with
-parameters named `_1`, `_2`, … created by `ce.symbol(name, { canonical:
-false })` and typed only when the caller passes `paramTypes`. Canonicalizing
-the literal declares each parameter in the literal's scope (a `declare`
-event, `callable: true`), the body's use then narrows it from `unknown` (an
-`inference` event) and the deferred `inference-settled` event follows: three
-advances of the `any` axis per lazy map, twenty per level of the row 380
-chain (`f(P)` with `a = 5[0…N]/N`, `N` valueless, 101 points, measured with
-a trap on `noteStateEvent`). Every advance invalidates the cached type and
-the generation-keyed memos of every node in the engine, so an evaluation
-that builds lazy maps re-types the trees it holds once per map. Closing it:
-declare the parameters as scratch bindings (`scratch-scopes.ts`), or pass
-the element types so that no inference is needed, and measure the type
-recomputations of the chain before and after.
+With `a := Map(i ↦ 5i/N, Range(0, N))` and `N` valueless, the user function
+`f(v) = PointList(a − PointY(v)·(b·PointX(v) + (1−b)·PointY(v)), PointX(v) + PointY(v)²/100, a)`
+applied to a list of 101 points stays an inert `PointList` head from the second
+level on: two of its columns are collection-typed with no value, so the head
+cannot be zipped, and an accessor over it cannot answer a column either
+(`projectInertPointList`, `library/collections.ts`, answers a column only when
+every other column is a scalar slot; here the other columns may resolve to a
+shorter list, and a projection that dropped them would answer a list of the
+wrong length once they resolve). In memory the levels share one tree (the
+closure-capture fixes of 2026-10-17), but every output that unfolds the sharing
+— `json`, `toString()`, LaTeX — embeds the previous level's head once per
+mention of `v`: 15 KB, 75 KB, 377 KB, 1.9 MB, 9.4 MB and 47 MB at depths 1 to 6
+(measured with the Tycho reproduction
+`scripts/repros/2026-10-17-inert-pointlist-chain.mts`). The ledger asked for "a
+lazy projection view that serializes without the other columns"; such a view
+does not exist, because the length of the zip depends on every column, so a view
+that dropped a column would not be the accessor's value. What could close it: a
+serialized form that keeps shared sub-expressions (a `Let`-like binding of the
+previous level, written once and referenced by each mention), which is a change
+of the MathJSON output contract and needs a decision; or, on the consumer's
+side, binding the sliders before the rows are evaluated, which Tycho does since
+2026-10-17 (the chain is then a `Map` at every depth and linear in size).
 
 ### `scratchRootOf` accepts a persistent scope re-parented under a scratch root as created under it (OPEN, small — found 2026-10-17 by the dual review of the value-shield cache fix)
 
-`scratchRootOf` (`scratch-scopes.ts`) walks `scope.parent` to decide whether
-a declaration's target scope was created under a registered scratch scope.
+`scratchRootOf` (`scratch-scopes.ts`) walks `scope.parent` to decide whether a
+declaration's target scope was created under a registered scratch scope.
 `pushEvalContext` (`engine-scope.ts`) re-points the `parent` of a persistent
 scope — the local scope of a function literal, pushed for a call — at the
 current scope for the duration of the push and restores it at the pop. While
 such a scope sits under a registered root, a declaration made in it is
 classified scratch (`declare` with `scratch: true`, no `any` advance) although
-the scope and the binding outlive the registration. Today no registrar keeps
-a scope registered while it evaluates user code: the two value shields
-(`simplifyValueBlind`, `withValueShield`) register their scope only while
-their shadow declarations are made, for this reason, and
-`resultUnderDeclaredParameters` boxes a literal without evaluating it. The
-cost of the narrow registration: a name that the shielded work declares
-directly into the shield scope advances `any` twice again (the declaration and
-the dirty pop). Closing it: make the walk stop at a link that
-`pushEvalContext` re-pointed (a frame with `_restoreParentOnPop`), then the
-shields can register their scope for the whole shielded work.
+the scope and the binding outlive the registration. Today no registrar keeps a
+scope registered while it evaluates user code: the two value shields
+(`simplifyValueBlind`, `withValueShield`) register their scope only while their
+shadow declarations are made, for this reason, and
+`resultUnderDeclaredParameters` boxes a literal without evaluating it. The cost
+of the narrow registration: a name that the shielded work declares directly into
+the shield scope advances `any` twice again (the declaration and the dirty pop).
+Closing it: make the walk stop at a link that `pushEvalContext` re-pointed (a
+frame with `_restoreParentOnPop`), then the shields can register their scope for
+the whole shielded work.
 
 ### `.N()` of a jump function over a list with an erased element rounds the exact survivors first (OPEN, small — found 2026-10-17 by the Codex review of the value-shield fix, in the UNCOMMITTED erasing-literal work of the 2026-10-16 catch-up round in `boxed-function.ts`)
 
-With `c := False` and the exact `q = (25! − 1)/24!`, `Floor([If(c, 1, Nothing),
-q]).N()` is `[25]` where `Floor([q]).N()` and `Floor(q).N()` are `[24]` and
-`24`: the early broadcast over an erasing list literal (`evaluateBroadcastLiftsOnce`,
-`boxed-expression/boxed-function.ts`, the hunks near lines 8472–8510 of the
-working tree) rounds every surviving element under `numericApproximation`
-before it builds the scalar calls, so the exact-jump recovery of the later
-broadcast path (`exactJumpBroadcastOperands`) never sees the exact operand.
-The asynchronous mirror has the same shape. On 0.154.0 the erasing list was
-refused (`incompatible-type` for `Nothing`), so this is a defect of the new
-work, not a regression of a release. Closing it: resolve the erasure while
-keeping the exact survivors for a jump operator, then approximate each scalar
-result, on both routes.
+With `c := False` and the exact `q = (25! − 1)/24!`,
+`Floor([If(c, 1, Nothing), q]).N()` is `[25]` where `Floor([q]).N()` and
+`Floor(q).N()` are `[24]` and `24`: the early broadcast over an erasing list
+literal (`evaluateBroadcastLiftsOnce`, `boxed-expression/boxed-function.ts`, the
+hunks near lines 8472–8510 of the working tree) rounds every surviving element
+under `numericApproximation` before it builds the scalar calls, so the
+exact-jump recovery of the later broadcast path (`exactJumpBroadcastOperands`)
+never sees the exact operand. The asynchronous mirror has the same shape. On
+0.154.0 the erasing list was refused (`incompatible-type` for `Nothing`), so
+this is a defect of the new work, not a regression of a release. Closing it:
+resolve the erasure while keeping the exact survivors for a jump operator, then
+approximate each scalar result, on both routes.
 
 ### Small items from the dual review of the 2026-10-17 re-review round (OPEN, small)
 

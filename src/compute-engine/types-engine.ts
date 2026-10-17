@@ -2130,6 +2130,20 @@ export interface IComputeEngine {
   _shadowedParameterInferredType(name: string): Type | undefined;
   /** @internal */
   _popShadowedParameters(): void;
+  /** Canonicalize the operands of a `Function` literal, `[body, ...params]`,
+   * as the `Function` operator's `canonical` handler does, with each BARE
+   * parameter named in `inferredParamTypes` pre-declared at that type as an
+   * INFERRED type: a use may widen it, nothing is enforced at apply time, and
+   * the printed literal is unchanged. A parameter not in the map starts
+   * `unknown` and is narrowed by its use. `undefined` when the operands do
+   * not form a literal. This is `canonicalFunctionLiteralOperands`
+   * (`function-utils.ts`), reachable from a module that cannot import it
+   * without a dependency cycle (`collection-utils.ts`, for the mapping
+   * literal of a lazy broadcast). @internal */
+  _canonicalFunctionLiteralOperands(
+    ops: ReadonlyArray<Expression>,
+    options?: { inferredParamTypes?: ReadonlyMap<string, Type> }
+  ): Expression | undefined;
   /** True while `_pushShadowedParameters` has registered `name`. @internal */
   _isShadowedParameter(name: string): boolean;
   /**

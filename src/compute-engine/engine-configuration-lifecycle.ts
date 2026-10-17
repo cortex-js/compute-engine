@@ -26,6 +26,12 @@ export type StateEvent =
        * outlive the computation that registered it. See "Scratch events" in
        * the documentation of {@link axisMaskOf}. */
       scratch?: boolean;
+      /** The declaration binds a parameter of a function literal, or a local
+       * of a block, at its first reference while the body is canonicalized,
+       * into the body's own scope (`isShadowedParameterDeclaration`,
+       * `engine-declarations.ts`). See the `declare` case of
+       * {@link axisMaskOf}. */
+      parameter?: boolean;
     }
   // variance settle, callable-swap repair, minted-ctor removal
   | {
@@ -203,6 +209,34 @@ export function axisMaskOf(e: StateEvent): AxisMask {
       // bug this axis exists to prevent. A colliding name is harmless for the
       // same structural reason: it shadows inside a scope that is discarded.
       if (e.scratch) return { any: false, semantic: false, world: false };
+      // The auto-declaration of a PARAMETER (or a hoisted block local) at
+      // its first reference, while the literal's body is canonicalized,
+      // into the body's own scope, advances nothing either. The `any` axis
+      // retires the `_type`/`_sgn` cache of every expression because a
+      // declaration can change what a name resolves to. A name is resolved
+      // by walking UP the scope chain from the scope it is read in, so a
+      // binding that appears in a scope can only change the resolution of a
+      // read made in that scope or below it. The body scope was created by
+      // the canonicalization that is running, so the only reads below it are
+      // the body's own, and the shadowed-name frame routes every reference
+      // of the name in the body to one binding: the first reference makes
+      // it (this declaration), and every later one reuses it
+      // (`_shadowedParameterDef`), including a reference in a sibling or
+      // nested block. No read of the name was resolved before this
+      // declaration, so no cached answer depends on its absence. The
+      // declaration of a parameter the body never mentions, made after the
+      // frame is popped, is not exempt: the body scope may be one that
+      // already existed (`canonicalFunctionLiteralArguments` keeps a canonical
+      // `Block` as it is), with reads resolved through it before.
+      //
+      // Measured on the chain of Tycho ledger row 380 (a user function
+      // applied to its own result, each level building ten lazy broadcast
+      // maps with parameters `_1`, `_2`, …): these declarations advanced
+      // the axis ten times per level, each advance retired the inert
+      // evaluation memo of every node, and the next read of a held tree
+      // walked and copied it again, so the result's distinct nodes grew
+      // quadratically with the depth.
+      if (e.parameter) return { any: false, semantic: false, world: false };
       return { any: true, semantic: false, world: false };
     case 'binding-repair':
       // A SCRATCH repair (the auto-declared head `b` of `b(x)` in the scope

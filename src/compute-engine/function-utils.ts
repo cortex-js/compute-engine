@@ -2800,6 +2800,205 @@ function declaredLocalNames(body: Expression): ReadonlySet<string> {
 }
 
 /**
+ * The scopes that `rerootingIsNoop` may compare by content: the call frames
+ * of `invoke` and `makeLambda`, and the body scopes that `captureClosures`
+ * makes for a literal it re-roots (their bindings are the literal's own
+ * parameters, copied once). Membership is necessary, not sufficient: a frame
+ * receives its parameters and the `let` locals of its body while its call
+ * runs (`ACTIVE_FRAMES` says which frames are still running), and a body
+ * scope is re-parented and has its parameters hidden while its literal is
+ * applied (`appliedBodyScopes`); `rerootingIsNoop` rejects both states. A
+ * scope made by `captureNestedLocals` (it shares its bindings map with a
+ * live nested scope), a nested scope of a body (`liveNestedScopes`) and a
+ * scope that an evaluation activates (`liveScopeOf`) are never in this set.
+ */
+const FROZEN_CHAIN_SCOPES = new WeakSet<Scope>();
+
+/**
+ * The call frames of the applications that are running: a frame is added
+ * when its call pushes it and removed when the call pops it. A frame still
+ * receives the `let` locals of its body while it is here, so
+ * `rerootingIsNoop` compares a frame by content only when it is not running,
+ * or is the frame of the call that is doing the capture (its body has
+ * finished when the capture runs).
+ */
+const ACTIVE_FRAMES = new WeakSet<Scope>();
+
+/** What `rerootingIsNoop` reads of a function literal's body: see
+ * `literalShape`. */
+type LiteralShape = {
+  /** The names an evaluation of the literal may look up through the chain
+   * above the literal's own scope. */
+  names: ReadonlySet<string>;
+  /** The body holds a scoped node other than a nested literal (a `Block`, a
+   * `Sum`, a loop). `captureClosures` always rebuilds such a node, so the
+   * literal is always rebuilt too. */
+  scopedNode: boolean;
+};
+
+/** The result of `literalShape`, for each function literal. */
+const LITERAL_SHAPES = new WeakMap<Expression, LiteralShape>();
+
+/**
+ * The names that an evaluation of the function literal `literal` may look up
+ * through the chain ABOVE the literal's own scope: every symbol and every
+ * operator head in its body, except the literal's own parameters and the
+ * parameters of a nested literal, below that literal. Conservative: a
+ * nested literal that was spliced into the body as a value resolves its
+ * names through its own chain, not this one, and its names are counted here
+ * all the same; a name that a nested scoped node binds (the index of a
+ * `Sum`, a local of a nested block) is counted, since a scope may also hold
+ * a valueless placeholder for a name that is resolved outside it at run time
+ * (`hideBodyScopeParams`); and a parameter name is counted when it also
+ * occurs outside its literal. Operator heads are included because a user
+ * function is applied by name (`g(x)` looks `g` up). The walk also reports
+ * whether the body holds a scoped node other than the body of a literal.
+ *
+ * Kept per literal: the literals that a value embeds are shared between the
+ * calls that return that value, and each is walked once.
+ */
+function literalShape(literal: Expression): LiteralShape {
+  const cached = LITERAL_SHAPES.get(literal);
+  if (cached !== undefined) return cached;
+  const names = new Set<string>();
+  let scopedNode = false;
+  // A subtree reached twice under the same set of bound names contributes
+  // the same names each time, so it is walked once per bound set (a value
+  // that shares its operands is otherwise walked once per path).
+  const visited = new Map<ReadonlySet<string>, Set<Expression>>();
+  const visit = (
+    e: Expression,
+    bound: ReadonlySet<string>,
+    literalBody: boolean
+  ): void => {
+    if (isSymbol(e)) {
+      if (!bound.has(e.symbol)) names.add(e.symbol);
+      return;
+    }
+    if (isDictionary(e)) {
+      for (const key of e.keys) visit(e.get(key)!, bound, false);
+      return;
+    }
+    if (!isFunction(e)) return;
+    if (e._numericStore !== undefined) return;
+    let seen = visited.get(bound);
+    if (seen === undefined) {
+      seen = new Set();
+      visited.set(bound, seen);
+    }
+    if (seen.has(e)) return;
+    seen.add(e);
+    if (!bound.has(e.operator)) names.add(e.operator);
+    if (e.operator === 'Function') {
+      const inner = new Set(bound);
+      for (const name of functionLiteralBoundNames(e.ops.slice(1)))
+        inner.add(name);
+      e.ops.forEach((op, i) => visit(op, inner, i === 0));
+      return;
+    }
+    // The body `Block` of a literal is the scoped node that holds the
+    // literal's parameters; any other scoped node is a `Block`, a binder or
+    // a loop of a body.
+    if (e.localScope && !literalBody) scopedNode = true;
+    for (const op of e.ops) visit(op, bound, false);
+  };
+  visit(literal, new Set(), false);
+  const shape = { names, scopedNode };
+  LITERAL_SHAPES.set(literal, shape);
+  return shape;
+}
+
+/**
+ * Whether re-rooting the function literal `expr`, whose body scope is `own`,
+ * onto `closureParent` would give a literal that reads exactly what `expr`
+ * reads: the literal can then be kept as it is, and so can every node above
+ * it. The test is on the two scope chains: the one the literal has, and the
+ * one `captureClosures` would give it.
+ *
+ * The chains must have a common scope (the merge point); the scopes of
+ * either chain below that point, which are the only scopes the two chains
+ * do not share, must be comparable by content (`FROZEN_CHAIN_SCOPES`, not
+ * applied, not in use, not a running frame other than `closureParent`), so
+ * that what they bind now is what they bind when the literal's body runs;
+ * and none of them may bind a name the literal looks up (`literalShape`).
+ * Every lookup then reaches the same binding through either chain. The
+ * literal's own scope must bind nothing but its parameters (`captureClosures`
+ * copies the parameters only, and another binding would be dropped by the
+ * copy and kept here), and must not be applied: while it is, its parent is
+ * a frame of that application and its parameters are hidden, so a chain
+ * through it is not the chain the literal keeps once that application ends
+ * (a nested literal of a returned closure then lost the `let` locals of the
+ * closure's own call). A body that holds a scoped node other than a nested
+ * literal's body is never kept: `captureClosures` rebuilds such a node, so
+ * the literal is rebuilt in any case, and testing it would only build that
+ * copy twice.
+ *
+ * Two shapes meet this: a literal created during the call, at the level of
+ * the call frame (the lazy `Map` views an evaluation builds: its chain
+ * already starts at the frame), and a literal that an earlier call returned,
+ * re-rooted then on that call's frame, which the value of a parameter
+ * brings into this call's result (the frames differ, neither is running,
+ * and the literal reads neither frame's parameters). The chain of a user
+ * function applied to its own previous result brought every literal of
+ * every earlier level into each level's result, and re-rooting each of
+ * them rebuilt the nodes above it once more per level (the second half of
+ * Tycho ledger row 380; `closure-capture-noop.test.ts` pins both shapes and
+ * the applied case).
+ */
+function rerootingIsNoop(
+  expr: Expression,
+  own: Scope,
+  closureParent: Scope
+): boolean {
+  if (appliedBodyScopes.has(own) || liveNestedScopes.has(own)) return false;
+  const params = new Set(
+    functionLiteralBoundNames(isFunction(expr) ? expr.ops.slice(1) : [])
+  );
+  for (const name of own.bindings.keys()) if (!params.has(name)) return false;
+  const before = own.parent;
+  // A chain through a scope of `captureNestedLocals` is re-rooted by copying
+  // that scope, which is never comparable by content: decline before the
+  // copies are made.
+  if (before != null && CLOSURE_LOCALS_SCOPES.has(before)) return false;
+  const after = rerootCapturedLocals(before, closureParent);
+  if (after === before) return !literalShape(expr).scopedNode;
+  const afterChain = new Set<Scope>();
+  // A root scope's parent link may be `undefined` rather than `null` (see
+  // `chainContains`, `ambient-chain.ts`).
+  for (let s: Scope | null | undefined = after; s != null; s = s.parent)
+    afterChain.add(s);
+  let merge: Scope | null = null;
+  const prefix: Scope[] = [];
+  for (let s: Scope | null | undefined = before; s != null; s = s.parent) {
+    if (afterChain.has(s)) {
+      merge = s;
+      break;
+    }
+    prefix.push(s);
+  }
+  if (merge === null) return false;
+  for (
+    let s: Scope | null | undefined = after;
+    s != null && s !== merge;
+    s = s.parent
+  )
+    prefix.push(s);
+  for (const s of prefix)
+    if (
+      !FROZEN_CHAIN_SCOPES.has(s) ||
+      appliedBodyScopes.has(s) ||
+      liveNestedScopes.has(s) ||
+      (ACTIVE_FRAMES.has(s) && s !== closureParent)
+    )
+      return false;
+  const { names, scopedNode } = literalShape(expr);
+  if (scopedNode) return false;
+  for (const s of prefix)
+    for (const name of s.bindings.keys()) if (names.has(name)) return false;
+  return true;
+}
+
+/**
  * Recursively walk `expr` and rebind any Function literals so their body
  * scopes close over `closureParent`. This handles Functions nested inside
  * List, Tuple, Pair, or any other compound expression.
@@ -2866,6 +3065,19 @@ function captureClosuresUncached(
   if (expr.operator === 'Function' && isFunction(expr)) {
     const innerBlock = expr.op1;
     if (innerBlock && isFunction(innerBlock) && innerBlock.localScope) {
+      // A literal that the re-rooting would leave reading exactly what it
+      // reads now is kept as it is, when its body is too (a nested literal
+      // may still need its own re-rooting, and then the body changes and
+      // the literal is rebuilt below). See `rerootingIsNoop`.
+      if (rerootingIsNoop(expr, innerBlock.localScope, closureParent)) {
+        const own = innerBlock.localScope;
+        if (
+          innerBlock.ops.every(
+            (op) => captureClosures(ce, op, own, memo) === op
+          )
+        )
+          return expr;
+      }
       // Only copy bindings for the inner function's own parameters.
       // Other entries (auto-declared free variables, local declarations)
       // must NOT be copied — they would shadow the closureParent chain
@@ -2891,6 +3103,7 @@ function captureClosuresUncached(
         ),
         bindings: closureBindings,
       };
+      FROZEN_CHAIN_SCOPES.add(closureScope);
       // Rebuild the body's own ops against the NEW scope: a scoped `Block`
       // nested inside the body (an `If` branch, a loop body) keeps its
       // canonicalization-time parent chain otherwise, which reaches the stale
@@ -3775,6 +3988,7 @@ function makeLambda(
       const capturedScope =
         definingScopeOf(ce, bodyScope) ?? ce.context.lexicalScope;
       const freshScope: Scope = { parent: capturedScope, bindings: new Map() };
+      FROZEN_CHAIN_SCOPES.add(freshScope);
       const savedParent = bodyScope.parent;
       bodyScope.parent = freshScope;
       enterAppliedBodyScope(bodyScope, savedParent);
@@ -3794,6 +4008,7 @@ function makeLambda(
       // statement hook uses this to delimit stack frames (one per
       // activation — nested unnamed Block/loop contexts group into it).
       ce.pushScope(freshScope, 'call');
+      ACTIVE_FRAMES.add(freshScope);
       let result: Expression;
       try {
         // A body that is one statement takes the numeric request itself
@@ -3813,6 +4028,7 @@ function makeLambda(
           result = result.evaluate({ numericApproximation: true });
       } finally {
         ce.popScope();
+        ACTIVE_FRAMES.delete(freshScope);
         bodyScope.parent = savedParent;
         exitAppliedBodyScope(bodyScope);
         restoreBodyScopeParams(bodyScope, hiddenBindings);
@@ -4347,6 +4563,7 @@ function makeLambda(
         parent: capturedScope,
         bindings: new Map(),
       };
+      FROZEN_CHAIN_SCOPES.add(freshScope);
       // The applied prefix binds exactly as a saturated call's parameters do,
       // destructuring included (step 5); a pattern in the prefix whose argument
       // has the wrong shape is the same error value here.
@@ -4383,11 +4600,13 @@ function makeLambda(
       // statement hook uses this to delimit stack frames (one per
       // activation — nested unnamed Block/loop contexts group into it).
       ce.pushScope(freshScope, 'call');
+      ACTIVE_FRAMES.add(freshScope);
       let newBody: Expression;
       try {
         newBody = unwrapReturn(ce, evaluateStatements(ce, bodyFn.ops));
       } finally {
         ce.popScope();
+        ACTIVE_FRAMES.delete(freshScope);
         bodyScope.parent = savedParent;
         exitAppliedBodyScope(bodyScope);
         restoreBodyScopeParams(bodyScope, hiddenBindings);
@@ -4556,6 +4775,7 @@ function makeLambda(
       parent: capturedScope,
       bindings: new Map(),
     };
+    FROZEN_CHAIN_SCOPES.add(freshScope);
 
     // Declare parameters in the fresh scope. Annotated parameters are declared
     // with their declared type, non-inferred (§6.4); bare parameters stay
@@ -4628,6 +4848,7 @@ function makeLambda(
     // statement hook uses this to delimit stack frames (one per
     // activation — nested unnamed Block/loop contexts group into it).
     ce.pushScope(freshScope, 'call');
+    ACTIVE_FRAMES.add(freshScope);
     let result: Expression;
     // The numeric request, when the body is one statement and takes it
     // itself (see `singleStatementRequest`). A list-producing recursion
@@ -4746,6 +4967,7 @@ function makeLambda(
     };
     const cleanup = (): void => {
       ce.popScope();
+      ACTIVE_FRAMES.delete(freshScope);
       bodyScope.parent = savedParent;
       exitAppliedBodyScope(bodyScope);
       restoreBodyScopeParams(bodyScope, hiddenBindings);

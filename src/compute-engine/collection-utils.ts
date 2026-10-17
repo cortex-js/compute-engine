@@ -2794,7 +2794,43 @@ export function lazyBroadcastMap(
   // re-evaluation of the returned `Map`.
   if (numericApproximation)
     body = ce._fn('NumericApproximation', [body], { canonical: false });
-  const fn = ce.function('Function', [body, ...params]);
+  // A bare parameter (no `paramTypes` annotation) is pre-declared at the
+  // element type of its source, as an INFERRED type. Canonicalizing the body
+  // otherwise declares the parameter `unknown` and its use narrows it (a
+  // value-type inference), and the deferred settling of that inference
+  // advances the `any` axis once per lazy map, which retires the cached
+  // type of every expression in the engine: the lazy maps that one
+  // evaluation builds re-typed the trees it held once per map (about twenty
+  // advances per level of the chain of Tycho ledger row 380). The element
+  // type of the source is what the use would have inferred, so the literal
+  // and its printed form are unchanged; an inferred type is not an
+  // annotation, nothing is enforced at apply time. A source whose element
+  // type says nothing (`unknown`, `any`), or is the bottom `never`, keeps the
+  // inference.
+  const inferredParamTypes = new Map<string, Type>();
+  for (const [j, p] of params.entries()) {
+    if (!isSymbol(p)) continue;
+    const t = collectionElementType(cols[j].type.type);
+    if (t === undefined || t === 'unknown' || t === 'any' || t === 'never')
+      continue;
+    inferredParamTypes.set(p.symbol, t);
+  }
+  // The canonicalizer is called directly to pass the hint. On the box route
+  // (`ce.function`) a `canonical` handler that throws is caught, logged, and
+  // the literal boxed non-canonical; the direct call has no such catch, so a
+  // throw falls back to the box route, and both routes then give the same
+  // literal for the same body.
+  let fn: Expression | undefined;
+  if (inferredParamTypes.size > 0) {
+    try {
+      fn = ce._canonicalFunctionLiteralOperands([body, ...params], {
+        inferredParamTypes,
+      });
+    } catch {
+      fn = undefined;
+    }
+  }
+  fn ??= ce.function('Function', [body, ...params]);
   return ce.function('Map', [fn, ...cols]);
 }
 

@@ -1,307 +1,88 @@
-# Shared-box protocol
+# Shared-box protocol: Compute Engine specifics
 
-Several Claude sessions work on this machine at once, across two repos
-(`compute-engine` and the `tycho` consumer), on 18 cores (Apple M5 Max,
-since 2026-09-22; 8 cores before). This document is the coordination
-protocol. Every rule in it was learned from experience; none of
-it is expensive.
+The protocol itself is shared by every repo on this machine and lives at
+`~/.claude/SHARED-BOX-PROTOCOL.md` (a link into the dotfiles repo, so both
+machines read one copy). Read it first. This file holds only what is specific
+to the Compute Engine: its commands, worker counts, process names, hot files
+and review exemptions. A rule that applies to more than one repo belongs in
+the shared file, not here. Section numbers below refer to the shared file.
 
-**Revised 2026-08-17 (user-ratified).** The first version of this protocol
-coordinated a single shared working tree through locks, tree fingerprints and
-peer messaging. The messaging half did not work in practice — lost pings,
-owner hunts, relayed claims — so this revision replaces it with two
-principles:
+## §1 Where to work
 
-1. **Isolate work in worktrees; deliver diffs.** Editing and testing happen
-   in a private git worktree; the deliverable is applied onto the shared tree
-   as ordinary uncommitted changes. Most of the old writer-lock and
-   certification machinery exists only for sessions that skip this and edit
-   the shared tree directly (§4).
-2. **State is observable, never communicated.** No fact about the box should
-   travel by message when it can be read from an artifact — the lock file,
-   the tree, a process listing. Message a peer only when their work blocks
-   yours (§6).
+- **A worktree is the default for any multi-file task** in this repo, not
+  only when a peer's work or a torn run forces it.
+- **Worktree setup** is the `node_modules` link alone:
 
----
+  ```
+  ln -s /Users/arno/dev/compute-engine/node_modules /tmp/wt-<session-name>/node_modules
+  ```
 
-## 1. The worktree flow (default for any multi-file task)
+  Measured 2026-10-13: without it `npx tsx` and jest fail in the worktree
+  with `Cannot find module`. No other gitignored file is needed.
+- **Hot files**, which deserve the earliest applies: the snapshot files under
+  `test/` and anything under `src/compute-engine/boxed-expression/`.
+- **After the apply, run the targeted tests once in the main tree** before
+  the review. They take seconds here (§2 table), and the apply landed on a
+  tree that may differ from the one you tested in.
 
-Git worktrees, `git apply`, and the worktree/apply flow below were enabled by
-the user on 2026-08-17. Claude sessions still NEVER commit.
-
-```
-git worktree add /tmp/wt-<session-name> HEAD     # private tree, detached
-ln -s /Users/arno/dev/compute-engine/node_modules /tmp/wt-<session-name>/node_modules
-                                                 # a fresh worktree has no node_modules:
-                                                 # jest and tsx fail there with
-                                                 # "Cannot find module" until this link
-                                                 # exists; it is untracked, so the diff
-                                                 # below never carries it
-cd /tmp/wt-<session-name>                        # edit and test here, freely
-...work, run suites (respect §2 CPU rules)...
-git -C /tmp/wt-<session-name> diff HEAD > /tmp/<session-name>.patch
-git -C <main repo> apply --check /tmp/<session-name>.patch   # dry run first
-git -C <main repo> apply /tmp/<session-name>.patch
-git worktree remove --force /tmp/wt-<session-name>
-```
-
-Two command details that are load-bearing (both found by review, not in use):
-
-- **`diff HEAD`, not bare `diff`.** Bare `git diff` shows only UNSTAGED
-  changes; anything staged inside the worktree would silently vanish from
-  the patch and the apply would land an incomplete change with no error.
-  `diff HEAD` captures both. Belt and suspenders: never `git add` inside a
-  worktree — staging is a main-tree act.
-- **`remove --force` is required, and safe HERE.** A plain
-  `git worktree remove` refuses to delete a worktree with modified or
-  untracked files — which is exactly the state this flow leaves after
-  exporting the diff, so the unforced command fails in the common case.
-  `--force` is safe at this step and only this step: the diff has already
-  been applied to the main tree, so the worktree is a disposable copy. Do
-  not reach for blocked commands (`checkout .`, `clean`) to "clean" the
-  worktree first, and never `--force` a worktree whose diff you have not
-  yet exported and applied.
-
-- **The deliverable is an uncommitted diff in the main tree**, reviewed and
-  committed by the user exactly as before. Never commit in the worktree,
-  never merge a branch, never leave work stranded in the worktree when the
-  task ends.
-- **Test runs in a worktree need no lock for correctness** — nobody else
-  writes there, so a run cannot be torn. The CPU rules (§2) still apply in
-  full: a worktree suite burns the same twelve workers.
-- **Apply early, apply often.** Checkpoints are measured in hours, not days:
-  a long-lived worktree drifts from the tree everyone else is advancing, and
-  the reconciliation debt compounds. Hot files (snapshot files,
-  `boxed-expression/`) deserve the earliest applies.
-- **`--check` first, always.** If the dry run fails, a peer (or the user)
-  changed the same lines since the worktree was cut. Reconcile it YOURSELF,
-  in the main tree, with your context: read the current file, re-land your
-  change with the Edit tool. Never force an apply, never ask the user to
-  merge for you, and never re-cut the worktree hoping the conflict goes
-  away.
-- After a successful apply, run the targeted tests once in the MAIN tree
-  before staging — the apply landed on a tree that may differ from the one
-  you tested in.
-- **Dual-review before staging** (user rule, 2026-08-17): once the changes
-  are in the main tree and tests pass, run the dual review before staging —
-  `/review-files` on the changed set (it reviews working tree vs HEAD and
-  never touches the index, so it is safe while the index is busy), or stage
-  and run `/review-staged` when the index is free (it fixes findings and
-  re-stages). Work is not "done and staged" until it has passed a dual
-  review.
-
-Small, localized fixes (one or two files, minutes of work) may still be
-edited directly in the shared tree — then §4 applies in full.
-
-## 2. CPU: cap the workers, take the lock
+## §2 CPU
 
 `config/jest.config.cjs` sets **`maxWorkers: 12`** outside continuous
-integration. There is no "light" jest invocation: a targeted three-file run
-fans out exactly like a full suite. Selecting fewer test files does not reduce
-load. The targeted-run budgets below (2 workers for one file, 4 for several)
-were raised from 1 and 2 by the user on 2026-09-22, after the move to 18
-cores.
+integration. There is no light jest invocation: a targeted three-file run
+fans out like a full suite, so cap the workers. The budgets below were raised
+from 1 and 2 by the user on 2026-09-22, after the move to 18 cores.
 
 | Situation | Command |
 | --- | --- |
-| Single file | `npx jest --config ./config/jest.config.cjs -w 2 -- <path>` |
+| One test file | `npx jest --config ./config/jest.config.cjs -w 2 -- <path>` |
 | Several files | `npx jest --config ./config/jest.config.cjs -w 4 -- <paths>` |
 | Full suite | take the lock, then run normally |
+| Timing suites (`npm run test:perf`) | take the lock; they run serially |
 
-`npm run typecheck` is single-shot and fine at any time. The whole-`src/`
-native tsc run is heavy: treat it like a full suite. Tycho side, same axis:
-`PW_WORKERS=2` for a multi-spec playwright run, `PW_WORKERS=1` for one spec.
+Measured 2026-10-17 on an idle box: the typecheck takes 4 s, one test file
+4 s, 61 test suites at `-w 4` 10 s.
 
-**The lock** (canonical path since 2026-08-17 —
-`~/.claude/scripts/box-lock.mjs`; the old `tycho/scripts/box-lock.mjs` is a
-forwarder):
+Never run `npx jest <file>` without the config: it fails with ESM import
+errors. A jest path that matches no file is dropped silently: check that the
+number of suites run equals the number of files given. In zsh, a variable
+holding several paths needs `${=FILES}` to split into words.
 
-```
-node ~/.claude/scripts/box-lock.mjs check <owner> && <your command>
-node ~/.claude/scripts/box-lock.mjs acquire <owner> <minutes> "<what>"
-node ~/.claude/scripts/box-lock.mjs release <owner>
-node ~/.claude/scripts/box-lock.mjs wait <owner> [maxMinutes]
-node ~/.claude/scripts/box-lock.mjs status
-```
+`npm run typecheck` covers the entry points and is fine at any time. The
+whole-`src/` check (`./node_modules/@typescript/native/bin/tsc -p
+tsconfig.json --noEmit`) is heavy: treat it like a full suite.
 
-- **`<owner>` must be the name your session answers to** — one identifier
-  for your session name, your lock owner, and the name you sign messages
-  with.
-- **Put the check in the command, not in your notes.** A rule that lives in
-  a briefing does not reach an agent dispatched before the briefing was
-  read; that is how a full battery landed thirty seconds after seven
-  sessions agreed to hold one.
-- **`release` requires your owner name** (changed 2026-08-17): a bare
-  `release` after a failed `acquire` used to drop the PEER's lock silently.
-  Chain `acquire … && (cmd; release <owner>)`.
-- **Waiting for the box is `wait`, not a peer's ping.** The lock file is the
-  signal; nobody has to remember to send one. (A promised ping that lived
-  only in the sender's head once idled a session for 1 h 50 m.)
-- The lock is **advisory** — it never kills anything. It voids itself when
-  its pid dies or it overruns its window by ten minutes. It prints the load
-  average at acquire and release; keep those numbers with any timing you
-  report.
-- The lock is a **CPU governor only**. Under the worktree flow it no longer
-  certifies anything about tree state; the old writer-hold rule applies only
-  to direct shared-tree editing (§4).
-
-## 3. Verifying that the box is actually clear
+## §3 Verifying that the box is clear
 
 ```
-pgrep -f "bin/[j]est"       # the jest RUNNER
-pgrep -f "[j]est-worker"    # the WORKERS — check this too
+pgrep -f "bin/[j]est"       # the jest runner
+pgrep -f "[j]est-worker"    # the workers: check these too
 ```
 
-- **The bracket matters.** `pgrep -f "jest --config"` matches the checking
-  shell's own command line: a false "busy" one-shot, an infinite loop inside
-  an `until` — two agents once hung 35+ minutes on that, and their zombies
-  made every later check report "busy" with no jest running.
-- **`bin/[j]est` cannot see orphans.** A killed runner can leave workers
-  re-parented to launchd (`ppid 1`), burning a core while the runner check
-  reports empty. Treat any `ppid 1` worker as needing a direct kill.
-- **"I killed it" is not "the box is clear."** Verify with `ps`, not with
-  the runner's exit.
-
-## 4. Editing the shared tree directly (the exception path)
-
-Only for small, short-lived fixes. Everything in this section exists because
-a concurrent write invalidates a peer's run as thoroughly as CPU load does —
-jest loads test files **lazily**, so a save at minute three tears a run that
-started at minute zero.
-
-- **A writer holds the lock too**, in short bursts, and yields: declare a
-  realistic window, release as soon as the tree is consistent, hand over if
-  a peer is waiting on a run.
-- **A run against the shared tree is certified by a fingerprint PAIR**,
-  taken immediately before starting and immediately after jest exits:
-
-  ```
-  find src test -name '*.ts' -exec stat -f "%m %N" {} + | sort | shasum
-  ```
-
-  Identical values: nothing was written during the suite; certifiable.
-  Different: the run is torn — report it as torn. One reading proves
-  nothing (mtime falsifies, never confirms), and holding the lock is not
-  grounds to certify: no lock reaches the user editing their own tree.
-  Runs inside a worktree need none of this.
-- **Prefer measuring the thing you care about over identifying who caused
-  it.** Attribution is slow and wrong by default — two sessions once each
-  concluded the other had made an edit, from matching mtimes. If an
-  unattributed edit appears, **the writer is at least as likely to be the
-  user as a session**: check that first, and ask the user before opening an
-  owner hunt (one hunt cost six sessions a round and blocked a seventh for
-  twenty minutes).
-
-## 5. Staging and file ownership
-
-The project rule (`CLAUDE.md`, Source Control Protocol): stage your work only
-when nothing else is already staged; if the index is busy, say so and wait.
-Never `git add -A` or `git add .`. And changes are dual-reviewed BEFORE they
-count as staged-and-done (`/review-files` on the changed set while unstaged
-or when the index is busy; `/review-staged` once staged) — see §1.
-
-**Every report that mentions staging ends with the staging-status block**
-(user rule, 2026-08-17). The user should never have to ask whether staged
-work is commit-ready; the answer travels with the staging:
+## §4 Fingerprint for a run against the shared tree
 
 ```
-Staged: <files, or "nothing">
-Tests: <exact commands run and result, or "not run — <why>">
-Dual review: passed (<N> findings applied) | pending (<leg status>) | not run — <why>
-Ready to commit: YES | NO — <what is missing>
+find src test -name '*.ts' -exec stat -f "%m %N" {} + | sort | shasum
 ```
 
-"YES" requires all three: typecheck clean, targeted tests green, dual review
-passed with fixes applied and re-staged. Anything less is "NO" with the
-missing item named — a pending review is "NO", not a footnote.
+## §5 Review and staging
 
-- **Markdown is exempt from ownership concerns.** `ROADMAP.md`,
-  `CHANGELOG.md`, `docs/**` and plan documents are multi-author by design:
-  stage them without caveats or peer polls.
-- **For `src/**` and `test/**`, attribute before you touch or report** —
-  read content, not paths; read every hunk (one file can have two authors);
-  and remember the writer may be the user. Under the worktree flow this
-  mostly arises at apply time, where `git apply --check` does the detecting
-  for you.
-- Distinguish the porcelain columns (`M ` staged, ` M` unstaged), and
-  re-read status immediately before attributing — it goes stale the moment
-  anyone commits.
+- The review checklist both reviewers use is `docs/REVIEW-CHECKLIST.md`.
+- **Also exempt from the dual review in this repo**: test files, and the
+  generated documentation (`src/epsil/docs/errors.md`,
+  `src/epsil/docs/library.md`, `src/api.md`). `src/api.md` is regenerated by
+  `npm run doc`; never edit it by hand.
+- **Never exempt**: anything under `src/` whose code changed, `package.json`
+  dependency versions, the jest and build configuration under `config/`, and
+  the continuous-integration workflows.
+- **The snapshot policy**: never update a snapshot marked `@fixme`. Before
+  landing broad canonicalization or serialization churn, run the full suite
+  (with the lock), count the changed snapshots, and report the number rather
+  than absorbing a large snapshot diff silently.
+- After a change to imports, `npm run check:deps` must stay clean; the repo
+  has a zero-circular-dependency budget.
 
-## 6. Messaging: only when blocked, never as relay
+## §8 Handoff
 
-- **Message a peer only when their work blocks yours**, and say exactly what
-  you need. Cross-repo bug reports and API asks with measurements attached
-  are the good kind of traffic; status updates, advice, and coordination
-  chatter are not.
-- **Never act on information about another session's work** — no helpful
-  fixes in a peer's files, no interventions. Anything needing cross-session
-  arbitration goes to the user, the only actor with global context.
-- **Never relay box state.** A fingerprint or pgrep check costs seconds;
-  there is no reason for any claim about the machine to be secondhand. A
-  peer's all-clear is their instrument's claim, and their instrument may be
-  narrower than the claim — re-measure, don't forward.
-- If you are genuinely blocked on a peer's reply, `wait` on the lock where
-  the lock is the question; otherwise re-ping after 15 minutes — silence
-  usually means the message was lost, not "still working".
-
-## 7. Measurement hygiene
-
-The recurring failure on this box is instruments certifying states they
-cannot observe. Five one-afternoon cases, each of which looked green: a
-process check blind to orphaned workers; "targeted runs are light" defeated
-by `maxWorkers: 6`; a lock smoke test that only ever exercised the free path;
-a status reported "pending" two hours after the artifact landed;
-`JSON.stringify(NaN)` returning `"null"` and manufacturing a divergence that
-did not exist. Four cheap rules:
-
-1. **Run a control first.** A decline that hits a trivial case as hard as
-   the case under test is instrument failure, not a finding.
-2. **A repro you FILE must carry its control.** It will be re-run months
-   later by someone with none of your context; a repro that cannot
-   discriminate reads as evidence the finding was overstated. Show the
-   control's output next to the repro's.
-3. **Test the check against the state it is meant to EXCLUDE.** "Reports
-   clear when clear" proves nothing.
-4. **Verify, do not relay** (§6).
-
-**A labelled confound you reason past is worse than an unnoticed one.** "X
-was live during this run" admits only two continuations: "so I excluded it"
-or "so I re-ran without it". A contended measurement is unusable in both
-directions — load manufactures false signal and masks real signal, and one
-filed 3.4× regression was pure load while the same noise hid a genuine
-finding on the consumer's side.
-
-**Prefer `HEAD@old` vs `HEAD@new` to an archived-tree A/B**, and before
-trusting any version comparison, confirm the older tree carries the fixes
-written for the version under test — one grep for the fix's own symbol. A
-"clean" 26 → 1 regression once measured "the new version without our fix for
-the new version"; the confound made the result look cleaner, not noisier,
-which is why nobody doubted it.
-
----
-
-## 8. Write a handoff before a long wait
-
-A full suite, a dual review and an adoption gate each run for ten minutes or
-more, and a session can end during that time: a usage limit, a context reset,
-a closed terminal. Several sessions have ended that way with the result of the
-run never written down, and the next session re-ran the whole gate to learn
-what the log already said.
-
-So, before launching any run that takes more than a few minutes, write a
-handoff file and keep it current. For the Compute Engine the file is
-`docs/scratch/<date>-<topic>-handoff.md`. Leave it unstaged: it is a note for
-the next session, not a record for the repo, and the next session removes it
-when the work lands. It carries:
-
-1. What changed, as a file list, and which of those files are staged.
-2. What is running: the exact command, its log path, and the line that marks
-   completion (`JEST_EXIT=`, `ce-adopt: EXIT=`, a task notification).
-3. How to read the result: the command that prints the pass/fail summary from
-   the log.
-4. What to do after a pass, and after a failure.
-5. A continuation prompt that a fresh session can paste as its first message.
-
-Update the file when the run finishes, with the result, before writing the
-report to the user. A handoff that says "running" an hour after the log says
-`EXIT=0` is the failure this section exists to prevent.
+The handoff file is `docs/scratch/<date>-<topic>-handoff.md`. The completion
+line of a redirected jest run is the `JEST_EXIT=` line that the command in
+`CLAUDE.md` ("Fast Verification Loop") appends to the log.

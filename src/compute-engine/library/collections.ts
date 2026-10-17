@@ -46,6 +46,7 @@ import {
   isEnumerableSource,
   isFiniteBroadcastParticipant,
   isUnresolvedCollectionOperand,
+  isProvablyScalarNumber,
   isTextAtom,
   isRecordShapedType,
   isTuple,
@@ -5336,8 +5337,94 @@ function pointComponentAt(
       numericApproximation
     );
 
+  // An inert `PointList` head: the column itself, when the projection is
+  // sound (see `projectInertPointList`).
+  const column = projectInertPointList(xs, position, numericApproximation);
+  if (column !== undefined) return column;
+
   // Symbolic / non-finite operand: stay symbolic (or error) like componentAt.
   return componentAt(xs, position, ce, operator);
+}
+
+// Project a coordinate straight out of an INERT `PointList` head: a
+// `PointList` whose evaluate handler failed closed and returned the node
+// itself, with no collection capability, because a column is collection-typed
+// but holds no collection value yet — a valueless `s: list<number>`, or
+// `a − PointY(v)·(…)` over such a symbol (the fail-closed case of Tycho item
+// 221; see the handler's `isUnresolvedCollectionOperand` test). The head has
+// no elements to peek at, so every branch above falls through to
+// `componentAt`, which keeps `PointY(PointList(1, s))` whole. The coordinate
+// IS determined without the elements when the chosen column is the list the
+// points are zipped from and no other column can shorten the zip: `PointList`
+// pairs its collection columns positionally and stops at the shortest, and a
+// scalar column repeats in every point. So the chosen column must be a column
+// SOURCE — an indexed collection, or an operand typed as one with no value yet
+// (`isUnresolvedCollectionOperand`), and in neither case a tuple or a string,
+// which occupy a scalar slot — and every other column must be a provable
+// scalar slot: a tuple, a string, or an operand whose type is a subtype of
+// `number`, `boolean` or `string`. An `unknown`-typed column, or another
+// collection column with no value, may resolve to a shorter list, and the
+// projection then stays unevaluated as before.
+//
+// `PointY(PointList(1, s))` is then `s`, and once `s := [10, 20]` the
+// projected form and the kept form evaluate to the same `[10, 20]`. The
+// soundness condition is on the columns' TYPES and capabilities, not on the
+// values, so the answer is the same at every later resolution of the
+// valueless column. Tycho ledger row 380 asked for this projection: a user
+// function that reads a point list parameter four times per level embedded
+// the previous level's inert head four times per level, and the serialized
+// result grew fivefold per level. Its own chain mixes two unresolved
+// collection columns, so the projection does not apply to it: the length of
+// the zip depends on both, and a projection that dropped one would answer a
+// list of the wrong length once the columns resolve to different lengths.
+//
+// Under `numericApproximation` the column is answered as its `.N()` form, as
+// `projectLazyPointList` does for a lazy source, so that
+// `PointY(pts).N() ≡ PointY(pts).evaluate().N()` holds for a resolved column.
+function projectInertPointList(
+  xs: Expression,
+  position: number,
+  numericApproximation: boolean
+): Expression | undefined {
+  if (!isFunction(xs, 'PointList') || xs.isCollection) return undefined;
+  const chosen = xs.ops[position - 1];
+  if (chosen === undefined) return undefined;
+  if (!isColumnSource(chosen)) return undefined;
+  if (xs.ops.some((op, i) => i !== position - 1 && !isScalarSlot(op)))
+    return undefined;
+  return numericApproximation ? chosen.N() : chosen;
+}
+
+// A `PointList` column that contributes one coordinate per point: a finite
+// indexed collection, or a collection-typed operand with no value yet. A
+// tuple or a string is atomic under broadcast and occupies a scalar slot
+// instead. A provably infinite collection (`Cycle`, `Range(1, ∞)`) is not a
+// column source: the `PointList` evaluate handler keeps failing closed on
+// it, in step with the compile route, which declines a statically infinite
+// source, so an accessor over such a head stays unevaluated as well.
+function isColumnSource(op: Expression): boolean {
+  if (isTuple(op) || isTextAtom(op)) return false;
+  if (op.isFiniteCollection === false) return false;
+  if (op.isIndexedCollection === true) return true;
+  return isUnresolvedCollectionOperand(op);
+}
+
+// A `PointList` column that occupies the same scalar slot in every point, so
+// it cannot shorten the zip: a tuple, a string, a provable scalar number
+// (`isProvablyScalarNumber`: a number literal, a symbol whose number type
+// was DECLARED, a call whose operator declares a numeric result), or a
+// symbol whose boolean type was declared. An inferred type is not proof: a
+// valueless symbol that a use inferred `number` may still receive a list,
+// and the projection made before that would then disagree with the
+// accessor evaluated afresh. An `unknown`-typed operand proves nothing.
+function isScalarSlot(op: Expression): boolean {
+  if (isTuple(op) || isTextAtom(op)) return true;
+  if (isProvablyScalarNumber(op)) return true;
+  return (
+    isSymbol(op) &&
+    op.valueDefinition?.inferredType !== true &&
+    isSubtype(op.type.type, 'boolean')
+  );
 }
 
 // @todo: future thoughts. Consider

@@ -131,7 +131,10 @@ describe('an inert result is not walked again at the same state', () => {
   test('a redefinition of the head is seen by a call with constant operands', () => {
     const ce = new ComputeEngine();
     const q = countingDecline(ce, 'q');
-    ce.assign('g', ce.box(['Function', ['Block', ['Add', ['q', 'u'], 1]], 'u']));
+    ce.assign(
+      'g',
+      ce.box(['Function', ['Block', ['Add', ['q', 'u'], 1]], 'u'])
+    );
     const e = ce.box(['g', 2]);
     expect(e.evaluate().isSame(ce.box(['Add', ['q', 2], 1]))).toBe(true);
     expect(q.calls).toBe(1);
@@ -207,7 +210,11 @@ describe('an inert result is not walked again at the same state', () => {
           'Block',
           [
             'PointList',
-            ['Subtract', ['q', 'a'], ['Multiply', ['PointY', 'v'], ['PointX', 'v']]],
+            [
+              'Subtract',
+              ['q', 'a'],
+              ['Multiply', ['PointY', 'v'], ['PointX', 'v']],
+            ],
             ['Add', ['PointX', 'v'], ['PointY', 'v']],
             ['q', 'a'],
           ],
@@ -329,7 +336,11 @@ describe('the closure capture of a call result keeps its sharing', () => {
               ],
             ],
           ],
-          ['Add', ['PointX', 'v'], ['Divide', ['Power', ['PointY', 'v'], 2], 100]],
+          [
+            'Add',
+            ['PointX', 'v'],
+            ['Divide', ['Power', ['PointY', 'v'], 2], 100],
+          ],
           'a',
         ],
         'v',
@@ -342,12 +353,16 @@ describe('the closure capture of a call result keeps its sharing', () => {
       expect(e.operator).toBe('PointList');
       nodes.push(distinctNodes(e));
     }
-    // Measured 2026-10-17 on this chain at depths 1 to 6: 39, 62, 101, 156,
-    // 227, 314 nodes once the capture memo keeps its entries (the previous
-    // level is shared; each level still rebuilds the nodes above the
-    // function literal once more, 16 more nodes per level, the quadratic
-    // residue recorded in `ROADMAP.md`), against 54, 168, 483, 1229, 2870,
-    // 6334 before (a doubling per level, each mention of `v` its own copy).
+    // Measured 2026-10-17 on this chain at depths 1 to 6: 39, 60, 95, 144,
+    // 207, 284 nodes once the capture memo keeps its entries and the
+    // capture keeps a literal that the re-rooting would not change
+    // (`rerootingIsNoop`), against 54, 168, 483, 1229, 2870, 6334 before (a
+    // doubling per level, each mention of `v` its own copy). The previous
+    // level is shared; the growth that remains (14 more nodes per level at
+    // each level) is the inert evaluation memo retired by the `any` advance
+    // of each call's parameter activation, so that each level walks the
+    // previous level once and copies the nodes it rebuilds — see the
+    // `ROADMAP.md` entry on the per-call advance.
     for (let k = 1; k < nodes.length; k++)
       expect(nodes[k] - nodes[k - 1]).toBeLessThan(40 + 20 * k);
     expect(nodes[5]).toBeLessThan(500);
