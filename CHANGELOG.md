@@ -916,6 +916,24 @@
   - _Epsil._ The static check leaves an earlier program's function definition
     untouched when an assignment over it is refused.
 
+- **`GammaRegularized(a, z)` keeps its upper tail at the default precision.**
+  Below `z = 2a + 2` the bignum kernel took `Q(a, z)` as `1 − P(a, z)`, which
+  leaves nothing once `Q` is smaller than the guard digits: `Q(500, 911.575…)`
+  was `−6.85e-43` (correct: `1.0000000000000327e-50`), `Q(1000, 1830.846…)` was
+  `−7.09e-43` (correct: `1.0000000000002538e-100`) and `Q(1000, 1548.889…)` was
+  `4.0e-42` (correct: `1.0000000000003079e-50`), a negative probability in the
+  first two. `Q` now comes from the Legendre continued fraction (DLMF 8.9.2)
+  whenever the series would give less than `1e-6`. The machine `Γ(s, z)` and `Q` share one
+  fraction, as the bignum `Q` and its negative-order variant do, and it ends on
+  three consecutive Lentz factors within tolerance of 1; past its iteration cap
+  it declines with `NaN` where it used to return a value that had not
+  converged. The machine kernel and the compiled
+  JavaScript lane already used the fraction and are unchanged in value. The
+  relative error against mpmath for `a` in {10, 100, 500, 1000} and `z/a` from
+  0.9 to 5 is below 6e-13 (machine, from the `exp(a ln z − z − ln Γ(a))`
+  prefactor) and agrees to 38 digits for the three values above at precision 40
+  (#ISSUE, contributed by [enumeratio](https://github.com/enumeratio))
+
 ## 0.154.0 _2026-10-15_
 
 ### Behavior Changes

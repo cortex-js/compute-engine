@@ -504,28 +504,52 @@ function lowerGammaSeriesReal(s: number, z: number): number {
   return Math.exp(s * Math.log(z) - z) * sum;
 }
 
-/** Upper incomplete gamma Γ(s, z), real, via the Legendre continued
- *  fraction (NR §6.2 gcf); valid for z ≳ s and any real s. */
-function upperGammaCFReal(s: number, z: number): number {
-  const tiny = 1e-300;
-  // Γ(s,z) = z^s e^{−z} / (z+1−s − 1·(1−s)/(z+3−s − 2·(2−s)/(…)))
+/** Consecutive Lentz factors within `GAMMA_CF_EPSILON` of 1 that end the
+ *  Legendre continued fraction. One factor near 1 can be a lull before the
+ *  fraction moves again; three in a row cannot. */
+const GAMMA_CF_CONSECUTIVE = 3;
+
+/** A Lentz factor this close to 1 adds nothing the double carries (4 ulp). */
+const GAMMA_CF_EPSILON = 4 * Number.EPSILON;
+
+/** Iteration cap of the Legendre continued fraction. It needs on the order of
+ *  √s iterations near z = s + 1 (about 300 at s = 10⁵), so the cap covers
+ *  s ≲ 10⁶; past it the fraction declines (NaN) instead of answering with a
+ *  value that has not converged. */
+const GAMMA_CF_MAX_ITERATIONS = 5000;
+
+/** The Legendre continued fraction of the upper incomplete gamma (DLMF 8.9.2,
+ *  modified Lentz): Γ(s, z) = z^s e^{−z} · (this value), with
+ *    1 / (z+1−s − 1·(1−s) / (z+3−s − 2·(2−s) / (z+5−s − …))).
+ *  Converges for every real s and z > 0, and it keeps the tail's relative
+ *  precision where Γ(s) − γ(s, z) and 1 − P(s, z) cancel: Q(500, 911.6) =
+ *  1e-50 is 1 − P to no digit at all. NaN when the cap is reached. */
+function upperGammaCFValue(s: number, z: number): number {
   let b = z + 1 - s;
-  let c = 1 / tiny;
+  let c = 1 / GAMMA_FPMIN;
   let d = 1 / b;
   let h = d;
-  for (let i = 1; i < 1000; i++) {
+  let settled = 0;
+  for (let i = 1; i <= GAMMA_CF_MAX_ITERATIONS; i++) {
     const an = -i * (i - s);
     b += 2;
     d = an * d + b;
-    if (Math.abs(d) < tiny) d = tiny;
+    if (Math.abs(d) < GAMMA_FPMIN) d = GAMMA_FPMIN;
     c = b + an / c;
-    if (Math.abs(c) < tiny) c = tiny;
+    if (Math.abs(c) < GAMMA_FPMIN) c = GAMMA_FPMIN;
     d = 1 / d;
     const del = d * c;
     h *= del;
-    if (Math.abs(del - 1) < 1e-16) break;
+    settled = Math.abs(del - 1) < GAMMA_CF_EPSILON ? settled + 1 : 0;
+    if (settled >= GAMMA_CF_CONSECUTIVE) return h;
   }
-  return Math.exp(s * Math.log(z) - z) * h;
+  return NaN;
+}
+
+/** Upper incomplete gamma Γ(s, z), real, via the Legendre continued
+ *  fraction (NR §6.2 gcf); valid for z ≳ s and any real s. */
+function upperGammaCFReal(s: number, z: number): number {
+  return Math.exp(s * Math.log(z) - z) * upperGammaCFValue(s, z);
 }
 
 /** Upper incomplete gamma Γ(s, z) for s a non-positive integer, real z > 0,
@@ -652,26 +676,10 @@ function gammaPSeries(a: number, x: number): number {
   return sum * Math.exp(a * Math.log(x) - x - gammaln(a));
 }
 
-/** Upper regularized gamma Q(a,x) via the Legendre continued fraction (NR
- *  gcf), evaluated with Lentz's algorithm; valid for x ≥ a+1. a > 0, x > 0. */
+/** Upper regularized gamma Q(a,x) via the Legendre continued fraction
+ *  (`upperGammaCFValue`); valid for x ≥ a+1. a > 0, x > 0. */
 function gammaQContinuedFraction(a: number, x: number): number {
-  let b = x + 1 - a;
-  let c = 1 / GAMMA_FPMIN;
-  let d = 1 / b;
-  let h = d;
-  for (let i = 1; i < 1000; i++) {
-    const an = -i * (i - a);
-    b += 2;
-    d = an * d + b;
-    if (Math.abs(d) < GAMMA_FPMIN) d = GAMMA_FPMIN;
-    c = b + an / c;
-    if (Math.abs(c) < GAMMA_FPMIN) c = GAMMA_FPMIN;
-    d = 1 / d;
-    const del = d * c;
-    h *= del;
-    if (Math.abs(del - 1) < 1e-16) break;
-  }
-  return Math.exp(a * Math.log(x) - x - gammaln(a)) * h;
+  return Math.exp(a * Math.log(x) - x - gammaln(a)) * upperGammaCFValue(a, x);
 }
 
 /**
@@ -1663,7 +1671,8 @@ function bigGammaQContinuedFraction(
 
 /** The Legendre continued fraction of the upper incomplete gamma (Lentz),
  *  without its prefactor: Γ(a, x) = xᵃ e⁻ˣ · (this value). Converges for
- *  every real `a` and every x > 0. */
+ *  every real `a` and every x > 0; ends on `GAMMA_CF_CONSECUTIVE` factors in a
+ *  row within 10⁻ᵖ of 1, and is NaN when the iteration cap is reached. */
 function bigGammaQContinuedFractionValue(
   ce: ComputeEngine,
   a: BigNum,
@@ -1676,6 +1685,7 @@ function bigGammaQContinuedFractionValue(
   let c = BigDecimal.ONE.div(tiny);
   let d = BigDecimal.ONE.div(b);
   let h = d;
+  let settled = 0;
   const maxTerms = 2000 + 20 * p;
   for (let i = 1; i < maxTerms; i++) {
     if ((i & 0xff) === 0) checkDeadline(ce._deadlineFrame);
@@ -1688,9 +1698,10 @@ function bigGammaQContinuedFractionValue(
     d = BigDecimal.ONE.div(d);
     const del = d.mul(c);
     h = h.mul(del);
-    if (del.sub(BigDecimal.ONE).abs().lt(tol)) break;
+    settled = del.sub(BigDecimal.ONE).abs().lt(tol) ? settled + 1 : 0;
+    if (settled >= GAMMA_CF_CONSECUTIVE) return h;
   }
-  return h;
+  return BigDecimal.NAN;
 }
 
 /**
@@ -1744,10 +1755,17 @@ export function bigGammaP(ce: ComputeEngine, a: BigNum, x: BigNum): BigNum {
   );
 }
 
+/** Below this, 1 − P(a, x) is too small to take from the series: it would lose
+ *  `-log10` of it digits of the `SPECIAL_FN_GUARD` guard digits (Q(500, 911.6)
+ *  = 1e-50 came out as −7e-43 at 21 digits). Six digits leave eighteen. */
+const BIG_GAMMA_Q_SERIES_MIN = new BigDecimal('1e-6');
+
 /**
  * Bignum upper regularized incomplete gamma Q(a,x) = Γ(a,x)/Γ(a) = 1 − P(a,x),
- * for a > 0 and x ≥ 0. Precision scales with `BigDecimal.precision`. The
- * continued fraction is used directly for x ≥ a+1 so the tail keeps full
+ * for a > 0 and x ≥ 0. Precision scales with `BigDecimal.precision`. Below
+ * x = 2a+2 the series is cheaper (see bigGammaP), and Q = 1 − P is taken from
+ * it while Q is at least `BIG_GAMMA_Q_SERIES_MIN`; a smaller Q, and every
+ * x ≥ 2a+2, comes from the continued fraction directly so the tail keeps its
  * relative precision. Returns a NaN BigNum outside the validated domain.
  */
 export function bigGammaQ(ce: ComputeEngine, a: BigNum, x: BigNum): BigNum {
@@ -1756,12 +1774,13 @@ export function bigGammaQ(ce: ComputeEngine, a: BigNum, x: BigNum): BigNum {
   if (!a.isPositive()) return BigDecimal.NAN;
   if (x.isNegative()) return BigDecimal.NAN;
   if (x.isZero()) return BigDecimal.ONE;
-  // See bigGammaP for the x < 2a+2 series/continued-fraction boundary rationale.
-  return withGuardDigits(SPECIAL_FN_GUARD, () =>
-    x.lt(a.mul(2).add(BigDecimal.TWO))
-      ? BigDecimal.ONE.sub(bigGammaPSeries(ce, a, x))
-      : bigGammaQContinuedFraction(ce, a, x)
-  );
+  return withGuardDigits(SPECIAL_FN_GUARD, () => {
+    if (x.lt(a.mul(2).add(BigDecimal.TWO))) {
+      const q = BigDecimal.ONE.sub(bigGammaPSeries(ce, a, x));
+      if (q.gte(BIG_GAMMA_Q_SERIES_MIN)) return q;
+    }
+    return bigGammaQContinuedFraction(ce, a, x);
+  });
 }
 
 /** Continued fraction for the regularized incomplete beta (NR betacf, Lentz),
