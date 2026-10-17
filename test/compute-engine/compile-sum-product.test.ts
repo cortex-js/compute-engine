@@ -490,3 +490,55 @@ describe('COMPILE Integrate - symbolic bounds', () => {
     expect(val).toBeCloseTo(0.5, 1);
   });
 });
+
+describe('COMPILE SUM/PRODUCT: THE INDEX IS A REAL COUNTER', () => {
+  // A `Block` declares a complex local `n`, and a `Sum`/`Product` inside it
+  // binds its own index `n`. Each term must read the index as the integer
+  // counter, not as the outer complex local: reading it as complex emitted
+  // `n²` as `{re, im}` arithmetic on an integer, and the sum concatenated the
+  // terms as strings.
+  const inBlock = (body: unknown): unknown => [
+    'Block',
+    ['Declare', 'n'],
+    ['Assign', 'n', ['Add', 'x', 'ImaginaryUnit']],
+    ['Add', ['Abs', 'n'], body],
+  ];
+  const cases: [string, unknown][] = [
+    [
+      'loop form: Sum(n^2, n = 1..m)',
+      inBlock(['Sum', ['Power', 'n', 2], ['Limits', 'n', 1, 'm']]),
+    ],
+    [
+      'unrolled form: Sum(n^2, n = 1..3)',
+      inBlock(['Sum', ['Power', 'n', 2], ['Limits', 'n', 1, 3]]),
+    ],
+    [
+      'complex body: |Product(x + i·n, n = 1..m)|',
+      inBlock([
+        'Abs',
+        [
+          'Product',
+          ['Add', 'x', ['Multiply', 'ImaginaryUnit', 'n']],
+          ['Limits', 'n', 1, 'm'],
+        ],
+      ]),
+    ],
+  ];
+  for (const [name, json] of cases)
+    test(`JS: ${name} runs to the interpreter's value`, () => {
+      const engine = new ComputeEngine();
+      engine.declare('x', 'real');
+      engine.declare('m', 'integer');
+      const result = compile(engine.box(json as any));
+      expect(result.success).toBe(true);
+      const value = result.run!({ x: 0.5, m: 3 });
+      expect(typeof value).toBe('number');
+
+      const interpreter = new ComputeEngine();
+      interpreter.assign('x', 0.5);
+      interpreter.assign('m', 3);
+      const expected = interpreter.box(json as any).N();
+      expect(expected.im).toBe(0);
+      expect(value).toBeCloseTo(expected.re, 12);
+    });
+});

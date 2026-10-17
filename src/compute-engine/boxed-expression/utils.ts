@@ -1654,6 +1654,25 @@ export function updateDef(
     }
   }
 
+  // A constant listens to configuration changes, because its value can
+  // depend on the precision, and the configuration tracker of the engine
+  // holds each listener strongly. The superseded value half stops listening,
+  // so that it is not kept in memory and notified for the engine's lifetime.
+  // A checkpoint restore and the rollback of an inference trial put the
+  // superseded half back in the record, so each of them also makes it listen
+  // again: the undo is recorded after the undo of the swap below, and the
+  // undo entries run newest first.
+  const releasedValue =
+    supersededValue instanceof _BoxedValueDefinition &&
+    supersededValue !== mutableDef.value &&
+    supersededValue._releaseConfigurationChange()
+      ? supersededValue
+      : undefined;
+  const resubscribe =
+    releasedValue === undefined
+      ? undefined
+      : () => releasedValue._resubscribeConfigurationChange();
+
   // Rollback journal (family 3, binding-half swaps): re-install the
   // previous half objects on the SAME record, by identity, via the same
   // delete/assign mechanism the swap above used — `sameBindingDef` is
@@ -1687,6 +1706,7 @@ export function updateDef(
         }
       },
     });
+    if (resubscribe !== undefined) rollbackFrame.record({ undo: resubscribe });
   }
 
   // Checkpoint journal (funnel 3, binding-half swaps): the same undo, on the
@@ -1719,6 +1739,7 @@ export function updateDef(
     // registry's own journal entries.
     if (constructedValueHalf !== undefined)
       window.noteCreated(constructedValueHalf);
+    if (resubscribe !== undefined) window.recordDelta(resubscribe);
   }
 
   if (supersededValue !== undefined && supersededValue !== mutableDef.value)

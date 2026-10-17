@@ -109,6 +109,57 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
+### A base case assigned to a constant completes a sequence that replaces the constant (OPEN, decision — found 2026-10-17 by the review of `ce.undeclare()`)
+
+With `F` declared as a constant (`ce.declare('F', { value: 3, isConstant:
+true })`), `F_0 := 1` and `F_n := F_{n-1} + 1` are accepted, and completing
+the sequence installs a new value half built from the subscript evaluator
+only (`tryFinalizeSequence`, `updateDef(…, { subscriptEvaluate })`), so `F` is
+no longer a constant and its value `3` is gone, while `ce.assign('F', 5)` is
+refused with "Cannot assign a value to the constant". The question to decide:
+should the base-case assignment to a constant be refused with the same error
+(option A, consistent with `assign` and with the type setter, which refuses a
+constant), or is a constant allowed to become a sequence (option B, then the
+constant flag and value must be carried or the change documented)? If nothing
+is decided, a constant silently becomes a sequence.
+
+### The pending state of a sequence is kept by name, so a child scope's base case joins the enclosing scope's sequence (OPEN, small — found 2026-10-17 by the review of `ce.undeclare()`)
+
+A sequence that is not complete yet (a placeholder declared with
+`declareSequence`, or a name with a base case `F_0 := 10` and no recurrence)
+is recorded in one pending entry per name (`pendingSequences`,
+`sequence.ts`). Each entry now records the binding and the scope that own it,
+so `ce.undeclare('F')` in a child scope removes the child's entry and leaves the
+enclosing scope's base case in place. What the one-entry-per-name map still
+cannot express: the outer scope has `F` with `F_0 := 10` pending, a child scope
+declares its own `F` and assigns `F_1 := 5`, and that base case lands in the
+outer entry, so `tryFinalizeSequence` can complete the child's sequence with
+the outer base cases. Closing it means one pending entry per binding (keyed by
+the binding, or several entries per name), with the checkpoint snapshot and
+restore, `getSequenceStatus` and `listSequences` reading the entry of the
+visible binding.
+
+### Quantity arithmetic numericizes an exact irrational factor under `evaluate()` (OPEN, decision — found 2026-10-16 by the fix of `Quantity(3, m) · x`)
+
+`Quantity(3, m) · π` evaluates to `9.42… m`, where the exactness contract of
+`evaluate()` (a transcendental constant stays symbolic; `3 · π` evaluates to
+`3π`) calls for `3π m`, with `.N()` giving the float. The numeric branch of
+`quantityMultiply`, `quantityAdd`, `quantityDivide` and `quantityPower`
+(`library/quantity-arithmetic.ts`) reads `.re` from every operand that has a
+numeric value, so an exact irrational magnitude or factor becomes a machine
+float. A free symbol now takes the symbolic branch (`isSymbolicValue`,
+`library/units.ts`), so `Quantity(3, m) · x` is `3x m`; an exact constant does
+not, because `π.re` is a number. The question to decide: should a quantity's
+magnitude follow the exactness contract (option A: route an exact non-literal
+magnitude or factor through the symbolic branch, so `3π m`, `√2 m`, and `.N()`
+numericizes; every quantity result with an exact irrational factor changes
+form), or stay numeric as today (option B: document quantity arithmetic as a
+numeric domain, as measurements are)? The same decision covers an exact
+rational result of an integer power: `Quantity(3, m)^-1` evaluates to the
+float `0.333… m^-1` (`quantityPower` uses `Math.pow` for an integer exponent),
+where `3^-1` alone evaluates to `1/3`. If nothing is decided, `evaluate()` and
+`.N()` keep answering the same float for such quantities.
+
 ### The compiled body of a user function spells the coordinate of an absent point as `NaN`, where the interpreter keeps `Missing` (OPEN, small — found 2026-10-14 by the review of the Tycho row 374 tuple collapse)
 
 With `W = (p, s) ↦ (s·PointX(p), s·PointY(p), s·PointZ(p))` and `L` a list of

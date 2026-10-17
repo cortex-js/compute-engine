@@ -1,3 +1,4 @@
+import { ComputeEngine } from '../../src/compute-engine';
 import { engine } from '../utils';
 import {
   getUnitDimension,
@@ -1481,5 +1482,269 @@ describe('N() of a sum of quantities', () => {
     expect(typeof result.op1.json).toBe('number');
     expect(result.op1.json as number).toBeCloseTo(2 / 3, 15);
     expect(result.op2.json).toBe('m');
+  });
+});
+
+describe('QUANTITY TIMES A SYMBOL', () => {
+  // A free symbol has no numeric value. The product keeps it in the
+  // magnitude, as a number factor is kept: `3 m · 2` is `6 m`.
+  const ce = new ComputeEngine();
+  ce.declare('y', 'real');
+  const evalJson = (x: any) => ce.box(x).evaluate().json;
+
+  test('quantity times an undeclared symbol', () => {
+    const expr = ce.box(['Multiply', ['Quantity', 3, 'm'], 'x']);
+    expect(expr.evaluate().json).toEqual(['Quantity', ['Multiply', 3, 'x'], 'm']);
+    expect(expr.N().json).toEqual(['Quantity', ['Multiply', 3, 'x'], 'm']);
+  });
+
+  test('quantity times a declared symbol with no value', () => {
+    expect(evalJson(['Multiply', ['Quantity', 3, 'm'], 'y'])).toEqual([
+      'Quantity',
+      ['Multiply', 3, 'y'],
+      'm',
+    ]);
+  });
+
+  test('quantity divided by a symbol, and a symbol divided by a quantity', () => {
+    expect(evalJson(['Divide', ['Quantity', 3, 'm'], 'x'])).toEqual([
+      'Quantity',
+      ['Divide', 3, 'x'],
+      'm',
+    ]);
+    expect(evalJson(['Divide', 'x', ['Quantity', 3, 'm']])).toEqual([
+      'Quantity',
+      ['Multiply', ['Rational', 1, 3], 'x'],
+      ['Power', 'm', -1],
+    ]);
+  });
+
+  test('a sum of a quantity and a symbol stays unevaluated, as with a number', () => {
+    expect(evalJson(['Add', ['Quantity', 3, 'm'], 'x'])).toEqual([
+      'Add',
+      'x',
+      ['Quantity', 3, 'm'],
+    ]);
+    expect(evalJson(['Add', ['Quantity', 3, 'm'], 2])).toEqual([
+      'Add',
+      ['Quantity', 3, 'm'],
+      2,
+    ]);
+  });
+
+  test('symbolic magnitudes in a product, a sum and a power', () => {
+    expect(
+      evalJson(['Multiply', ['Quantity', 'x', 'm'], ['Quantity', 2, 'm']])
+    ).toEqual(['Quantity', ['Multiply', 2, 'x'], ['Power', 'm', 2]]);
+    expect(
+      evalJson(['Add', ['Quantity', 'x', 'm'], ['Quantity', 2, 'm']])
+    ).toEqual(['Quantity', ['Add', 'x', 2], 'm']);
+    expect(evalJson(['Power', ['Quantity', 'x', 'm'], 2])).toEqual([
+      'Quantity',
+      ['Power', 'x', 2],
+      ['Power', 'm', 2],
+    ]);
+  });
+
+  test('negation and square root of a symbolic magnitude', () => {
+    expect(evalJson(['Negate', ['Quantity', 'x', 'm']])).toEqual([
+      'Quantity',
+      ['Negate', 'x'],
+      'm',
+    ]);
+    expect(evalJson(['Sqrt', ['Quantity', 'x', ['Power', 'm', 2]]])).toEqual(
+      ['Quantity', ['Sqrt', 'x'], 'm']
+    );
+  });
+
+  test('a symbolic exponent leaves the power unevaluated', () => {
+    expect(evalJson(['Power', ['Quantity', 3, 'm'], 'n'])).toEqual([
+      'Power',
+      ['Quantity', 3, 'm'],
+      'n',
+    ]);
+  });
+
+  test('UnitConvert and UnitSimplify keep a symbolic magnitude', () => {
+    expect(evalJson(['UnitConvert', ['Quantity', 'x', 'km'], 'm'])).toEqual([
+      'Quantity',
+      ['Multiply', 1000, 'x'],
+      'm',
+    ]);
+    expect(
+      evalJson(['UnitSimplify', ['Quantity', 'x', ['Multiply', 'N', 'm']]])
+    ).toEqual(['Quantity', 'x', 'J']);
+  });
+
+  test('UnitSimplify keeps the error of a measured magnitude', () => {
+    expect(
+      evalJson([
+        'UnitSimplify',
+        ['Quantity', ['Measurement', 3, 0.1], ['Multiply', 'N', 'm']],
+      ])
+    ).toEqual(['Quantity', ['Measurement', 3, 0.1], 'J']);
+  });
+});
+
+describe('REPEATED UNIT FACTORS IN A PRODUCT', () => {
+  // Equal unit factors are collected into a power: `m · m` is `m^2`.
+  const ce = new ComputeEngine();
+  const evalJson = (x: any) => ce.box(x).evaluate().json;
+
+  test('3 m · 2 m', () => {
+    expect(
+      evalJson(['Multiply', ['Quantity', 3, 'm'], ['Quantity', 2, 'm']])
+    ).toEqual(['Quantity', 6, ['Power', 'm', 2]]);
+  });
+
+  test('3 m · 2 m · 4 s', () => {
+    expect(
+      evalJson([
+        'Multiply',
+        ['Quantity', 3, 'm'],
+        ['Quantity', 2, 'm'],
+        ['Quantity', 4, 's'],
+      ])
+    ).toEqual(['Quantity', 24, ['Multiply', 's', ['Power', 'm', 2]]]);
+  });
+
+  test('3 m^2 · 2 m', () => {
+    expect(
+      evalJson([
+        'Multiply',
+        ['Quantity', 3, ['Power', 'm', 2]],
+        ['Quantity', 2, 'm'],
+      ])
+    ).toEqual(['Quantity', 6, ['Power', 'm', 3]]);
+  });
+
+  test('(3 m)^2', () => {
+    expect(evalJson(['Power', ['Quantity', 3, 'm'], 2])).toEqual([
+      'Quantity',
+      9,
+      ['Power', 'm', 2],
+    ]);
+  });
+
+  test('3 m / 2 m is dimensionless', () => {
+    expect(
+      evalJson(['Divide', ['Quantity', 3, 'm'], ['Quantity', 2, 'm']])
+    ).toEqual(1.5);
+  });
+
+  test('a measured magnitude keeps its error', () => {
+    expect(
+      evalJson([
+        'Multiply',
+        ['Measurement', 3, 0.1],
+        ['Quantity', 1, 'm'],
+        ['Quantity', 2, 'm'],
+      ])
+    ).toEqual(['Quantity', ['Measurement', 6, 0.2], ['Power', 'm', 2]]);
+  });
+
+  test('the square root of an exact magnitude is exact', () => {
+    expect(evalJson(['Sqrt', ['Quantity', 9, ['Power', 'm', 2]]])).toEqual([
+      'Quantity',
+      3,
+      'm',
+    ]);
+    const expr = ce.box(['Sqrt', ['Quantity', 2, ['Power', 'm', 2]]]);
+    expect(expr.evaluate().json).toEqual(['Quantity', ['Sqrt', 2], 'm']);
+    // `.N()` gives a float magnitude.
+    const n = expr.N();
+    expect(n.operator).toBe('Quantity');
+    expect(n.op1.isExact).toBe(false);
+    expect(n.op1.re).toBeCloseTo(Math.SQRT2, 15);
+    expect(n.op2.json).toBe('m');
+  });
+
+  test('the cube root of an exact magnitude is exact', () => {
+    expect(
+      evalJson(['Root', ['Quantity', 8, ['Power', 'm', 3]], 3])
+    ).toEqual(['Quantity', 2, 'm']);
+    const expr = ce.box(['Root', ['Quantity', 2, ['Power', 'm', 3]], 3]);
+    expect(expr.evaluate().json).toEqual(['Quantity', ['Root', 2, 3], 'm']);
+    // `.N()` gives a float magnitude.
+    const n = expr.N();
+    expect(n.operator).toBe('Quantity');
+    expect(n.op1.isExact).toBe(false);
+    expect(n.op1.re).toBeCloseTo(Math.cbrt(2), 15);
+    expect(n.op2.json).toBe('m');
+  });
+
+  test('the cube root of a symbolic magnitude', () => {
+    // `Root(x, 3)` alone evaluates to `["Root", "x", 3]`.
+    expect(
+      evalJson(['Root', ['Quantity', 'x', ['Power', 'm', 3]], 3])
+    ).toEqual(['Quantity', ['Root', 'x', 3], 'm']);
+  });
+
+  test('a unit with no repeated factor keeps its spelling', () => {
+    // Nothing cancels or collects, so the unit is kept as written. It is
+    // not rewritten as a quotient of positive powers. A product with a
+    // number keeps the unit directly; a product or quotient of two
+    // quantities goes through the unit cancellation.
+    expect(
+      evalJson([
+        'Multiply',
+        ['Quantity', 3, ['Power', ['Divide', 'm', 's'], 2]],
+        ['Quantity', 2, 'mol'],
+      ])
+    ).toEqual([
+      'Quantity',
+      6,
+      ['Multiply', 'mol', ['Power', ['Divide', 'm', 's'], 2]],
+    ]);
+    expect(
+      evalJson([
+        'Multiply',
+        ['Quantity', 2, ['Multiply', 'kg', 'm', ['Power', 's', -2]]],
+        ['Quantity', 3, 'mol'],
+      ])
+    ).toEqual([
+      'Quantity',
+      6,
+      ['Multiply', 'mol', 'kg', 'm', ['Power', 's', -2]],
+    ]);
+    expect(
+      evalJson([
+        'Divide',
+        ['Quantity', 3, ['Power', ['Divide', 'm', 's'], 2]],
+        ['Quantity', 2, 'mol'],
+      ])
+    ).toEqual([
+      'Quantity',
+      1.5,
+      ['Divide', ['Power', ['Divide', 'm', 's'], 2], 'mol'],
+    ]);
+    expect(
+      evalJson([
+        'Multiply',
+        ['Quantity', 3, ['Power', ['Divide', 'm', 's'], 2]],
+        2,
+      ])
+    ).toEqual(['Quantity', 6, ['Power', ['Divide', 'm', 's'], 2]]);
+    expect(
+      evalJson([
+        'Multiply',
+        ['Quantity', 2, ['Multiply', 'kg', 'm', ['Power', 's', -2]]],
+        3,
+      ])
+    ).toEqual(['Quantity', 6, ['Multiply', 'kg', 'm', ['Power', 's', -2]]]);
+  });
+
+  test('a reciprocal unit cancels and converts', () => {
+    // `s^-1` is boxed as `Divide(1, s)`.
+    expect(
+      evalJson([
+        'Multiply',
+        ['Quantity', 3, 's'],
+        ['Quantity', 2, ['Power', 's', -1]],
+      ])
+    ).toEqual(6);
+    expect(
+      evalJson(['UnitConvert', ['Quantity', 2, ['Power', 's', -1]], 'Hz'])
+    ).toEqual(['Quantity', 2, 'Hz']);
   });
 });

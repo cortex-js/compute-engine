@@ -19817,6 +19817,31 @@ export class BaseCompiler {
     );
   }
 
+  /**
+   * Run `fn`, which EMITS the body of a `Sum`/`Product`, with each of
+   * `indices` read as a real scalar: an integer loop counter.
+   *
+   * The emitter chooses its accumulator with
+   * {@link isComplexValuedUnderIndices}, but the emission of each term asks
+   * `isComplexValued` again, and that analysis reads a `Block` local before
+   * the compile target's bound names. Without this frame, an index `n` inside
+   * a `Block` with a complex local `n` is complex while the term is emitted:
+   * the term `n²` is then emitted as complex arithmetic on an integer, and
+   * its value does not match the accumulator (the JavaScript target computes
+   * `undefined` parts, a shader calls a complex helper on a `float`).
+   */
+  static withRealLoopIndices<T>(
+    indices: ReadonlyArray<string>,
+    fn: () => T
+  ): T {
+    if (indices.length === 0) return fn();
+    return BaseCompiler.withLocalShapeFrame(
+      new Map(indices.map((n) => [n, false])),
+      new Map(indices.map((n) => [n, BaseCompiler.LOCAL_SCALAR])),
+      fn
+    );
+  }
+
   static isComplexValued(expr: Expression): boolean {
     // An operand the D2/D6 runtime rule has projected onto the real lane
     // (`realOperandGuard`): while its override is active, the code emitted
@@ -20284,13 +20309,16 @@ export class BaseCompiler {
     // The infinite and NaN branches are dropped first: a head whose value can
     // blow up at a pole claims a union such as `complex | +oo | -oo`
     // (`Artanh`, `Arcoth`, `Arsech`, `Ln`, `Log`), and only its FINITE part
-    // decides the lane. THREE SITES MUST STAY IN AGREEMENT, because they
+    // decides the lane. FOUR SITES MUST STAY IN AGREEMENT, because they
     // answer the same question for the same node and a disagreement is a
     // silent value-shape mismatch (a `{re, im}`/`vec2` consumer reading a
     // scalar, or the reverse): this predicate, which a PARENT expression
     // consults; `resultIsComplexValued` in `javascript-target.ts`, the
-    // JavaScript emitters' copy; and `gpuResultIsComplexValued` in
-    // `gpu-target.ts`, the GPU emitters' copy. Change one, change all three.
+    // JavaScript emitters' copy; `gpuResultIsComplexValued` in
+    // `gpu-target.ts`, the GPU emitters' copy; and
+    // `resultIsWideUnderComplexDiscipline` in `javascript-target.ts`, the
+    // copy of the wide-type rule at the end of this function, which the
+    // `Power` emitter reads. Change one, change all four.
     const t = expr.type;
     if (isNonRealNumber(finitePartOfType(t.type))) {
       // Sqrt/Ln/Log carve-out (2026-07-31): their type handlers now widen
@@ -20356,6 +20384,11 @@ export class BaseCompiler {
     // still be a complex value at run time (a user function returning its
     // parameter, an element read of a `list<number>`), and the value it
     // yields is lifted at the parent's use (`complexDiscipline`).
+    //
+    // `resultIsWideUnderComplexDiscipline` in `javascript-target.ts` copies
+    // this rule for the `Power` emitter, so that the emitter produces a
+    // `{re, im}` object exactly when this predicate reports complex. A
+    // change to this rule must be made there too.
     return BaseCompiler.wideIsComplex(t.type);
   }
 

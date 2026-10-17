@@ -443,11 +443,19 @@ export function canonicalInvisibleOperator(
         const u = unwrap(x);
         return isNumber(u) || isFunction(u, 'Measurement');
       };
+      // The unit is boxed resolve-only: a unit name is not a variable, so a
+      // name with no definition is not declared in the current scope.
       if (isMagnitude(a) && isFunction(b, '__unit__')) {
-        return ce._fn('Quantity', [unwrap(a).canonical, b.op1.canonical]);
+        return ce._fn('Quantity', [
+          unwrap(a).canonical,
+          ce._resolveOnly(() => b.op1.canonical),
+        ]);
       }
       if (isMagnitude(b) && isFunction(a, '__unit__')) {
-        return ce._fn('Quantity', [unwrap(b).canonical, a.op1.canonical]);
+        return ce._fn('Quantity', [
+          unwrap(b).canonical,
+          ce._resolveOnly(() => a.op1.canonical),
+        ]);
       }
     }
   }

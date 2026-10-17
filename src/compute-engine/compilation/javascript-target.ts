@@ -6939,9 +6939,17 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // with a provably non-integer exponent takes the complex kernel too,
     // agreeing with `isComplexValued`'s report to the parent
     // (`promotesRadicalToComplex`).
+    //
+    // …or WIDE under the complex discipline (`mode: 'complex'`): a power of
+    // real operands whose result type admits a complex value (`number`, as
+    // for `(-1)^{k/2}` or `x^y`) is complex-shaped for the parent, which
+    // reads `.re`/`.im` off it (`resultIsWideUnderComplexDiscipline`). The
+    // real `_SYS.pow` would hand that parent a plain number, whose `.re` is
+    // `undefined`, and the value would be `NaN` at every point.
     if (
       resultIsComplexValued('Power', args) ||
-      promotesToComplexLane('Power', args)
+      promotesToComplexLane('Power', args) ||
+      resultIsWideUnderComplexDiscipline('Power', args)
     )
       return spliceJSValues(
         target,
@@ -8638,16 +8646,22 @@ function complexPowLiteral(base: number, exp: number): string {
  * The node is rebuilt STRUCTURALLY (bound, not canonicalized) so its head and
  * operands are the ones being lowered, and its type is therefore the type the
  * parent read. Mirrors the function branch of `isComplexValued`: a wide result
- * type (`number`, as `Power`/`Root`/`Arcsin` have) is NOT complex — those fold
- * to `NaN`, which is what their real lowering yields anyway.
+ * type (`number`, as `Power`/`Root`/`Arcsin` have) is NOT complex here — those
+ * fold to `NaN`, which is what their real lowering yields anyway. This
+ * function does not apply the complex discipline (`mode: 'complex'`), under
+ * which `isComplexValued` reads a wide result type as complex. The `Power`
+ * emitter covers that case with `resultIsWideUnderComplexDiscipline`, and
+ * emits the complex kernel when either function answers `true`.
  *
- * THREE SITES MUST STAY IN AGREEMENT, because they answer the same question
+ * FOUR SITES MUST STAY IN AGREEMENT, because they answer the same question
  * for the same node and a disagreement is a silent value-shape mismatch (a
  * `{re, im}`/`vec2` consumer reading a scalar, or the reverse):
  * `BaseCompiler.isComplexValued` (base-compiler.ts) is what a PARENT consults,
- * this function is the JavaScript emitters' copy, and
- * `gpuResultIsComplexValued` (gpu-target.ts) is the GPU emitters' copy. Change
- * one, change all three.
+ * this function is the JavaScript emitters' copy,
+ * `gpuResultIsComplexValued` (gpu-target.ts) is the GPU emitters' copy, and
+ * `resultIsWideUnderComplexDiscipline` (this file) is the JavaScript copy of
+ * the wide-type rule (`BaseCompiler.wideIsComplex`). Change one, change all
+ * four.
  */
 function resultIsComplexValued(
   head: MathJsonSymbol,
@@ -8662,6 +8676,46 @@ function resultIsComplexValued(
     // claims a union such as `complex | +oo | -oo`, and only its
     // finite part decides the lane.
     return isNonRealNumber(finitePartOfType(t.type));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Whether the value of `head(...args)`, with REAL operands, is complex-shaped
+ * only because the complex discipline (`mode: 'complex'`) reads a WIDE result
+ * type as complex.
+ *
+ * This mirrors the last rule of the function branch of
+ * `BaseCompiler.isComplexValued`: a node whose finite result type is neither
+ * non-real nor a subtype of `real` (the wide `number` of `(-1)^{k/2}` or
+ * `x^y`) is complex when `BaseCompiler.wideIsComplex` says so, which is only
+ * under the complex discipline. The parent then reads `.re`/`.im` off the
+ * node, so the emitter of the head must produce a `{re, im}` object in the
+ * same case. Outside the complex discipline it answers `false`.
+ *
+ * The wide-type rule alone is not the parent's verdict: `isComplexValued`
+ * then answers `false` for a node that folds to a real constant, also under
+ * the index values of an unrolled `Sum`/`Product` term (`(n-1)^{n/2}` at
+ * `n = 0, 1, 2` is 1, 0, 1). So the last test asks `isComplexValued` itself
+ * about the same structural node. Without it, the emitter writes `_SYS.cpow`
+ * where the parent adds the term as a plain number, and the sum is a string
+ * or `NaN`.
+ */
+function resultIsWideUnderComplexDiscipline(
+  head: MathJsonSymbol,
+  args: ReadonlyArray<Expression>
+): boolean {
+  if (!BaseCompiler.complexDiscipline) return false;
+  const engine = args[0]?.engine;
+  if (engine === undefined) return false;
+  try {
+    const node = engine.function(head, [...args], { form: 'structural' });
+    const t = node.type;
+    if (isSubtype(finitePartOfType(t.type), 'real')) return false;
+    return (
+      BaseCompiler.wideIsComplex(t.type) && BaseCompiler.isComplexValued(node)
+    );
   } catch {
     return false;
   }
@@ -13192,11 +13246,18 @@ function emitSumProduct(
   // iteration 1's temporary for every later iteration (§6.1, silent wrong
   // values). The node the region hangs off is the `Sum`/`Product` being
   // lowered — this handler is handed only the operand list.
+  //
+  // The term is emitted with this clause's index read as a real scalar, the
+  // reading `bodyIsComplex` used. Without it, the index `n` inside a `Block`
+  // with a complex local `n` is complex while the term is emitted, and `n²`
+  // reads `.re`/`.im` off an integer.
   const sumNode = BaseCompiler.cseParentNode();
   const compileTerm = (innerTarget: CompileTarget<Expression>): string =>
-    rest.length > 0
-      ? emitSumProduct(kind, body, rest, innerTarget, false)
-      : BaseCompiler.compileOp(sumNode, 0, innerTarget, 0, body);
+    BaseCompiler.withRealLoopIndices([index], () =>
+      rest.length > 0
+        ? emitSumProduct(kind, body, rest, innerTarget, false)
+        : BaseCompiler.compileOp(sumNode, 0, innerTarget, 0, body)
+    );
 
   const bothConstant = lowerNum !== undefined && upperNum !== undefined;
   const budget = target.iterationBudget;

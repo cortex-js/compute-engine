@@ -9,6 +9,7 @@ import {
   isSymbol,
   isString,
   isFunction,
+  isNumber,
 } from '../boxed-expression/type-guards.js';
 import {
   convertUnit,
@@ -47,6 +48,12 @@ export function boxedToUnitExpression(expr: Expression): UnitExpression | null {
   }
 
   if (op === 'Divide') {
+    // A reciprocal unit such as `s^-1` is boxed as `Divide(1, s)`. The `1`
+    // is not a unit, so read it as the unit with exponent -1.
+    if (expr.op1.isSame(1)) {
+      const b = boxedToUnitExpression(expr.op2);
+      return b ? ['Power', b, -1] : null;
+    }
     const a = boxedToUnitExpression(expr.op1);
     const b = boxedToUnitExpression(expr.op2);
     if (!a || !b) return null;
@@ -56,11 +63,26 @@ export function boxedToUnitExpression(expr: Expression): UnitExpression | null {
   if (op === 'Power') {
     const base = boxedToUnitExpression(expr.op1);
     const exp = expr.op2?.re;
-    if (!base || exp === undefined) return null;
+    // A symbolic exponent (`m^n`) has no numeric value: `.re` is `NaN`.
+    if (!base || exp === undefined || Number.isNaN(exp)) return null;
     return ['Power', base, exp];
   }
 
   return null;
+}
+
+/**
+ * True when an operand or a magnitude of quantity arithmetic has no numeric
+ * value, for example a free symbol `x` or a product `3x` that contains one.
+ * Its `.re` is `NaN`, so numeric arithmetic cannot use it. Such a value goes
+ * through the expression arithmetic of the `Measurement` branches instead,
+ * which keeps it symbolic: `Quantity(3, m) · x` is `Quantity(3x, m)`. A
+ * number literal `NaN` is a numeric value and stays on the numeric branch.
+ */
+export function isSymbolicValue(x: Expression): boolean {
+  if (isMeasurement(x) || isFunction(x, 'Quantity') || isNumber(x))
+    return false;
+  return Number.isNaN(x.re);
 }
 
 /**
@@ -78,9 +100,10 @@ function convertQuantity(
 
   // A Measurement magnitude scales (nominal and error) by the conversion
   // factor; unit conversion is affine, so the linear factor is
-  // `convert(1) − convert(0)` and the offset shifts the nominal only.
+  // `convert(1) − convert(0)` and the offset shifts the nominal only. A
+  // symbolic magnitude is converted with the same expression arithmetic.
   const magExpr = quantity.op1;
-  const magIsMeasurement = isMeasurement(magExpr);
+  const magIsMeasurement = isMeasurement(magExpr) || isSymbolicValue(magExpr);
   const mag = magExpr.re;
   if (!magIsMeasurement && mag === undefined) return undefined;
 
@@ -95,12 +118,20 @@ function convertQuantity(
       const c1 = convertUnit(1, fromSymbol, toSymbol);
       if (c0 === null || c1 === null) return ce.error('incompatible-type');
       const convertedMag = measurementAffine(ce, magExpr, c1 - c0, c0);
-      const r = ce._fn('Quantity', [convertedMag, ce.symbol(toSymbol)]);
+      // A unit name is not a variable: it must not be declared in the
+      // current scope.
+      const r = ce._fn('Quantity', [
+        convertedMag,
+        ce.symbol(toSymbol, { autoDeclare: false }),
+      ]);
       return numericApproximation ? r.N() : r;
     }
     const converted = convertUnit(mag!, fromSymbol, toSymbol);
     if (converted !== null)
-      return ce._fn('Quantity', [ce.number(converted), ce.symbol(toSymbol)]);
+      return ce._fn('Quantity', [
+        ce.number(converted),
+        ce.symbol(toSymbol, { autoDeclare: false }),
+      ]);
     // If conversion returned null, units are incompatible
     return ce.error('incompatible-type');
   }
@@ -152,6 +183,11 @@ export const UNITS_LIBRARY: SymbolDefinitions = {
       // Canonicalize the magnitude (first arg) but leave the unit as-is
       const mag = args[0].canonical;
 
+      // A unit name (`m`, `km`, `K`) is not a variable. The unit is boxed
+      // resolve-only: a name binds to an existing definition, but a name
+      // with no definition stays unbound and is not declared in the current
+      // scope.
+      //
       // A string second argument (e.g. "km/h", "km") is parsed into a
       // structured unit expression with the same DSL parser the LaTeX/text
       // path uses. A simple unit becomes a symbol; a compound unit becomes a
@@ -165,14 +201,18 @@ export const UNITS_LIBRARY: SymbolDefinitions = {
             mag,
             ce.error(['unexpected-argument', unitArg.string]),
           ]);
-        const boxed =
+        const boxed = ce._resolveOnly(() =>
           typeof parsed === 'string'
             ? ce.symbol(parsed)
-            : ce.expr(parsed as any);
+            : ce.expr(parsed as any)
+        );
         return ce._fn('Quantity', [mag, boxed]);
       }
 
-      return ce._fn('Quantity', [mag, unitArg.canonical]);
+      return ce._fn('Quantity', [
+        mag,
+        ce._resolveOnly(() => unitArg.canonical),
+      ]);
     },
     evaluate: (ops, { numericApproximation, engine: ce }) => {
       const mag = numericApproximation ? ops[0].N() : ops[0].evaluate();
@@ -226,8 +266,13 @@ export const UNITS_LIBRARY: SymbolDefinitions = {
     signature: '(value, value) -> value',
     canonical: (args, { engine: ce }) => {
       if (args.length !== 2) return ce.error('incompatible-type');
-      // Canonicalize the quantity (first arg) but leave the target unit as-is
-      return ce._fn('UnitConvert', [args[0].canonical, args[1].canonical]);
+      // Canonicalize the quantity (first arg) but leave the target unit as-is.
+      // The target unit is boxed resolve-only, as the unit of a `Quantity`:
+      // a unit name is not declared in the current scope.
+      return ce._fn('UnitConvert', [
+        args[0].canonical,
+        ce._resolveOnly(() => args[1].canonical),
+      ]);
     },
     evaluate: (ops, { numericApproximation, engine: ce }) => {
       if (!ce) return undefined;
@@ -283,7 +328,18 @@ export const UNITS_LIBRARY: SymbolDefinitions = {
       const scale = getExpressionScale(ue);
       if (scale === null) return arg;
 
-      return ce._fn('Quantity', [ce.number(mag * scale), ce.symbol(match)]);
+      // A Measurement or symbolic magnitude is scaled with expression
+      // arithmetic: a numeric read of its value loses the error or gives
+      // `NaN`.
+      const magExpr = arg.op1;
+      const scaled =
+        isMeasurement(magExpr) || isSymbolicValue(magExpr)
+          ? measurementAffine(ce, magExpr, scale, 0)
+          : ce.number(mag * scale);
+      return ce._fn('Quantity', [
+        scaled,
+        ce.symbol(match, { autoDeclare: false }),
+      ]);
     },
   },
 

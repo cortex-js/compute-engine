@@ -723,3 +723,91 @@ describe('complex mode — D2/D6 runtime rules', () => {
     expect(draws).toBe(1);
   });
 });
+
+describe('complex mode — a power of real operands with a wide result type', () => {
+  // `(-1)^{k/2}` and `x^y` over real operands type `number`, so the complex
+  // discipline reads the node as complex and the parent reads `.re`/`.im`
+  // off it. The emitter took the real `_SYS.pow` and handed that parent a
+  // plain number, so `x + (-1)^{k/2}` was `{re: NaN}` at every point. The
+  // emitter now takes the complex kernel `_SYS.cpow` in the same case.
+  function engine(): ComputeEngine {
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    ce.declare('y', 'real');
+    ce.declare('k', 'integer');
+    return ce;
+  }
+
+  const POINTS = [
+    { x: 0.5, y: 0.3, k: 1 },
+    { x: -0.7, y: 1.3, k: 3 },
+    { x: 2, y: -0.5, k: 4 },
+  ];
+
+  const LATEX = [
+    'x + (-1)^{k/2}',
+    '(-1)^{k/2}',
+    'x + (-2)^{x}',
+    'x^y + 1',
+    '\\sum_{n=0}^{2} (x + (-1)^{n/2})',
+  ];
+
+  for (const latex of LATEX)
+    it(`${latex} agrees with the interpreter`, () => {
+      const ce = engine();
+      const expr = ce.parse(latex);
+      const r = compile(expr, CX);
+      expect(r.success).toBe(true);
+      expect(r.code).not.toContain('_SYS.pow(');
+      for (const vars of POINTS) {
+        const expected = expr.subs(vars).N();
+        const value = r.run!(vars) as number | { re: number; im: number };
+        const re = typeof value === 'number' ? value : value.re;
+        const im = typeof value === 'number' ? 0 : value.im;
+        expect(re).toBeCloseTo(expected.re, 12);
+        expect(im).toBeCloseTo(expected.im, 12);
+      }
+    });
+
+  // The term of an unrolled `Sum` folds to a real constant under its index
+  // values (`(n-1)^{n/2}` is 1, 0, 1 at n = 0, 1, 2), so the parent reads the
+  // `Power` as a plain number. The emitter must then not take `_SYS.cpow`:
+  // with it, `x + (n-1)^{n/2}` concatenated strings and `x(n-1)^{n/2}` was
+  // `null`. The first two expressions fold whole at compile time; the others
+  // keep `x` free, so the term is emitted.
+  const UNROLLED = [
+    '\\sum_{n=0}^{2}(n-1)^{n/2}',
+    'x + \\sum_{n=0}^{2}(n-1)^{n/2}',
+    '\\sum_{n=0}^{2}(x + (n-1)^{n/2})',
+    '\\sum_{n=0}^{2}x(n-1)^{n/2}',
+    '\\sum_{n=0}^{2}((n-1)^{n/2} + x^n)',
+  ];
+
+  for (const latex of UNROLLED)
+    it(`${latex}: an unrolled term that folds to a real agrees with the interpreter`, () => {
+      const ce = engine();
+      const expr = ce.parse(latex);
+      const r = compile(expr, CX);
+      expect(r.success).toBe(true);
+      for (const vars of POINTS) {
+        const expected = expr.subs(vars).N();
+        expect(r.run!(vars)).toBeCloseTo(expected.re, 12);
+        expect(expected.im).toBe(0);
+      }
+    });
+
+  it('x + (-1)^{k/2} is 0.5 + i at x = 0.5, k = 1', () => {
+    const r = compile(engine().parse('x + (-1)^{k/2}'), CX);
+    expect(r.run!({ x: 0.5, k: 1 })).toEqual({ re: 0.5, im: 1 });
+  });
+
+  it('a power with a real result type keeps the real kernel', () => {
+    const ce = engine();
+    expect(compile(ce.parse('2^x + x'), CX).code).toBe(
+      '_.x + _SYS.pow(2, _.x)'
+    );
+    expect(compile(ce.parse('(-1)^k + x'), CX).code).toBe(
+      '_.x + _SYS.pow(-1, _.k)'
+    );
+  });
+});

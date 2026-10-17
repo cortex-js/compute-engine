@@ -211,42 +211,58 @@ describe('A SUM INDEX DOES NOT SHADOW A GLOBAL READ BY A USER FUNCTION', () => {
     build: (ce: ComputeEngine) => any;
     vars: Record<string, number>;
     expected: { re: number; im: number };
+    // The `glsl` code, or the diagnostic when the shader target fails closed.
+    glsl: string | RegExp;
   }> = [
     {
       name: 'parse route: \\sum_{k=1}^{3} h(x)',
       build: (ce) => ce.parse('\\sum_{k=1}^{3} h(x)'),
       vars: { x: 2 },
       expected: { re: 6, im: 3 },
+      glsl: '((_fn_h(x)) + (_fn_h(x)) + (_fn_h(x)))',
     },
     {
       name: 'parse route: \\sum_{k=1}^{3} (h(x) + k)',
       build: (ce) => ce.parse('\\sum_{k=1}^{3} (h(x) + k)'),
       vars: { x: 2 },
       expected: { re: 12, im: 3 },
+      glsl:
+        '((vec2(1.0, 0.0) + _fn_h(x)) + (vec2(2.0, 0.0) + _fn_h(x)) + ' +
+        '(vec2(3.0, 0.0) + _fn_h(x)))',
     },
     {
       name: 'parse route: \\sum_{k=1}^{3} g(x), nested user call',
       build: (ce) => ce.parse('\\sum_{k=1}^{3} g(x)'),
       vars: { x: 2 },
       expected: { re: 6, im: 3 },
+      glsl: '((_fn_g(x)) + (_fn_g(x)) + (_fn_g(x)))',
     },
     {
       name: 'parse route: \\prod_{k=1}^{2} h(x)',
       build: (ce) => ce.parse('\\prod_{k=1}^{2} h(x)'),
       vars: { x: 2 },
       expected: { re: 3, im: 4 },
+      glsl: '(_gpu_cmul((_fn_h(x)), (_fn_h(x))))',
     },
     {
       name: 'parse route: \\sum_{k=1}^{n} h(x), run-time loop',
       build: (ce) => ce.parse('\\sum_{k=1}^{n} h(x)'),
       vars: { x: 2, n: 3 },
       expected: { re: 6, im: 3 },
+      glsl: [
+        'vec2 _tv1 = vec2(0.0, 0.0);',
+        'for (int k = 1; k <= int(floor(n)); k++) {',
+        '  _tv1 += _fn_h(x);',
+        '}',
+        'return _tv1;',
+      ].join('\n'),
     },
     {
       name: 'box route: Sum(h(x), k from 1 to 3)',
       build: (ce) => ce.box(['Sum', ['h', 'x'], ['Limits', 'k', 1, 3]]),
       vars: { x: 2 },
       expected: { re: 6, im: 3 },
+      glsl: '((_fn_h(x)) + (_fn_h(x)) + (_fn_h(x)))',
     },
     {
       name: 'box route: Sum(1 + v(x)[2], k from 1 to 3), list element',
@@ -258,10 +274,13 @@ describe('A SUM INDEX DOES NOT SHADOW A GLOBAL READ BY A USER FUNCTION', () => {
         ]),
       vars: { x: 2 },
       expected: { re: 3, im: 3 },
+      // The list `[x, k]` has a complex element, and a shader vector takes
+      // only scalar components.
+      glsl: /element 2 \(`k`\) is itself vector-valued/,
     },
   ];
 
-  for (const { name, build, vars, expected } of CASES) {
+  for (const { name, build, vars, expected, glsl } of CASES) {
     for (const mode of ['strict', 'auto'] as const)
       it(`javascript ${mode}, ${name}`, () => {
         const ce = shadowEngine();
@@ -272,12 +291,14 @@ describe('A SUM INDEX DOES NOT SHADOW A GLOBAL READ BY A USER FUNCTION', () => {
         expect(result.run(vars)).toEqual(expected);
       });
 
-    // A shader `Sum`/`Product` has no complex accumulator: it fails closed.
-    it(`glsl fails closed, ${name}`, () => {
+    // A shader `Sum`/`Product` accumulates a complex body in a `vec2`, and
+    // the emitted `_fn_h` returns the complex value of the global `k`.
+    it(`glsl, ${name}`, () => {
       const ce = shadowEngine();
-      expect(() =>
-        compile(build(ce), { to: 'glsl', fallback: false } as any)
-      ).toThrow(/complex-valued body not supported in GPU targets/);
+      const run = () =>
+        compile(build(ce), { to: 'glsl', fallback: false } as any) as any;
+      if (glsl instanceof RegExp) expect(run).toThrow(glsl);
+      else expect(run().code).toBe(glsl);
     });
   }
 });
@@ -461,25 +482,36 @@ describe('A POINT ARGUMENT DOES NOT HIDE A GLOBAL READ BY A USER FUNCTION', () =
       });
   }
 
-  // A shader `Sum` has no complex accumulator: it fails closed.
-  it('glsl fails closed: \\sum_{k=1}^{3} p((x, 1))', () => {
+  // A shader `Sum` accumulates the complex calls in a `vec2`. The point
+  // argument mentions no index, so it is computed once, ahead of the terms.
+  const SUM_OF_POINT_CALLS = [
+    'vec2 _tv1 = vec2(x, 1.0);',
+    'return ((_fn_p_tuple_number_number(_tv1)) + ' +
+      '(_fn_p_tuple_number_number(_tv1)) + (_fn_p_tuple_number_number(_tv1)));',
+  ].join('\n');
+
+  it('glsl: \\sum_{k=1}^{3} p((x, 1))', () => {
     const ce = pointEngine();
-    expect(() =>
-      compile(ce.parse('\\sum_{k=1}^{3} p((x, 1))'), {
-        to: 'glsl',
-        fallback: false,
-      } as any)
-    ).toThrow(/complex-valued body not supported in GPU targets/);
+    expect(
+      (
+        compile(ce.parse('\\sum_{k=1}^{3} p((x, 1))'), {
+          to: 'glsl',
+          fallback: false,
+        } as any) as any
+      ).code
+    ).toBe(SUM_OF_POINT_CALLS);
   });
 
-  it('glsl fails closed: box route Sum(p((x, 1)), k from 1 to 3)', () => {
+  it('glsl: box route Sum(p((x, 1)), k from 1 to 3)', () => {
     const ce = pointEngine();
-    expect(() =>
-      compile(
-        ce.box(['Sum', ['p', ['Tuple', 'x', 1]], ['Limits', 'k', 1, 3]]),
-        { to: 'glsl', fallback: false } as any
-      )
-    ).toThrow(/complex-valued body not supported in GPU targets/);
+    expect(
+      (
+        compile(
+          ce.box(['Sum', ['p', ['Tuple', 'x', 1]], ['Limits', 'k', 1, 3]]),
+          { to: 'glsl', fallback: false } as any
+        ) as any
+      ).code
+    ).toBe(SUM_OF_POINT_CALLS);
   });
 
   // Outside a `Sum`, the call is a complex `vec2`, and the addition is

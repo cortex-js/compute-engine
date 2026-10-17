@@ -108,6 +108,8 @@ import {
   type InferenceRollbackFrame,
 } from './inference-rollback.js';
 import { tombstoneBinding } from './boxed-expression/binding-tombstone.js';
+import { binderBindingOf } from './boxed-expression/binders.js';
+import { _removePendingSequence } from './sequence.js';
 import { latestDeclaredEffectsSite } from './boxed-expression/effects-provenance.js';
 import { isReplaceableOperatorShell } from './boxed-expression/definition-guards.js';
 import {
@@ -2526,6 +2528,122 @@ export function declareFn(
   }
 
   return ce;
+}
+
+/**
+ * Remove the binding of each name in `names` from the current scope. See
+ * `IComputeEngine.undeclare()` for the contract.
+ *
+ * Every name is checked before any binding is removed, so a refused name
+ * leaves the scope unchanged.
+ */
+export function undeclare(
+  ce: IComputeEngine,
+  names: MathJsonSymbol | ReadonlyArray<MathJsonSymbol>
+): void {
+  const scope = ce.context.lexicalScope;
+  const list = typeof names === 'string' ? [names] : [...new Set(names)];
+  for (const name of list) assertUndeclarable(ce, scope, name);
+  for (const name of list) removeBinding(ce, scope, name);
+}
+
+/** Throw when `undeclare()` must not remove the binding of `name` from
+ * `scope`. */
+function assertUndeclarable(
+  ce: IComputeEngine,
+  scope: Scope,
+  name: unknown
+): void {
+  if (typeof name !== 'string' || name.length === 0)
+    throw new Error(
+      `Cannot undeclare ${JSON.stringify(name)}: a name must be a non-empty string`
+    );
+  // A library installs its definitions in the system scope (the standard
+  // libraries and the libraries given to the constructor) or in the global
+  // scope (`loadLibrary()`), and records each binding it installs. The
+  // library is checked first, so that the message for `Sin` names the
+  // library and not the scope.
+  const binding = scope.bindings.get(name);
+  const visible = binding ?? lookup(name, scope);
+  const provenance = ce._libraryProvenance.get(name);
+  if (provenance !== undefined && provenance.binding === visible)
+    throw new Error(
+      `Cannot undeclare "${name}": it is defined by the library "${provenance.library}"`
+    );
+  const systemScope = ce.contextStack[0]?.lexicalScope;
+  if (visible !== undefined && systemScope?.bindings.get(name) === visible)
+    throw new Error(
+      `Cannot undeclare "${name}": it is defined in the system scope, which holds the standard library`
+    );
+  if (binding === undefined) {
+    throw new Error(
+      visible === undefined
+        ? `Cannot undeclare "${name}": it is not declared in the current scope`
+        : `Cannot undeclare "${name}": it is not declared in the current scope. Its declaration is in an enclosing scope, which \`undeclare()\` does not change`
+    );
+  }
+  // The variable of a binder operator (a `Sum` index, a comprehension
+  // index, a `D` variable) and a parameter of a function that is being
+  // evaluated belong to the expression that declared them. The scope of
+  // such an expression is the current scope only while it is evaluated.
+  if (
+    scope.binderNames?.has(name) === true ||
+    binderBindingOf(ce, name, scope) !== undefined
+  )
+    throw new Error(
+      `Cannot undeclare "${name}": it is a variable of an operator such as \`Sum\`, or a parameter of a function, and it is bound only while that expression is evaluated`
+    );
+}
+
+/** Remove the binding of `name` from `scope`, and retire the removed
+ * binding record. */
+function removeBinding(ce: IComputeEngine, scope: Scope, name: string): void {
+  const binding = scope.bindings.get(name)!;
+  const callableBefore = defIsCallableShaped(binding);
+
+  // Checkpoint journal (scope-map writes): a restore puts the record back in
+  // the scope. The rollback frame of an inference trial does the same.
+  journalCheckpointMapEntry(ce, scope.bindings, name, name, 'declare');
+  activeRollbackFrame(ce)?.record({
+    undo: () => scope.bindings.set(name, binding),
+  });
+  scope.bindings.delete(name);
+
+  // The base cases and the recurrence assigned to the name before its
+  // sequence definition is complete (`F_0 := 10` without `F_n := …`) are
+  // removed with the binding. Otherwise a later declaration of the name
+  // completes a sequence with the base cases of the removed declaration.
+  const restorePending = _removePendingSequence(ce, name, binding, scope);
+  if (restorePending !== undefined)
+    activeRollbackFrame(ce)?.record({ undo: restorePending });
+
+  // An expression boxed before this call holds the record by identity. The
+  // record gets an empty value definition of type `unknown` in place of its
+  // definition, so that such an expression no longer reads the removed
+  // definition: a call `f(2)` stays unevaluated, and reads the definition
+  // of `f` that the scope chain holds at the time it is evaluated, as a call
+  // boxed after this one does. `updateDef` journals the exchange of the
+  // definition for checkpoints and rollback frames. When the removed
+  // definition is a constant, `updateDef` also makes it stop listening to
+  // configuration changes.
+  updateDef(ce, name, binding, { type: 'unknown', inferred: true }, scope);
+
+  // The name resolves to another binding, or to none, from this scope and
+  // the scopes under it. The memo of a derived signature counts the
+  // declarations made in each scope of its chain.
+  noteScopeDeclaration(scope);
+
+  // Advance the same versions as an assignment of a new function to the
+  // name (`redefine`), and the versions that the type and effect caches of
+  // existing expressions key on (`binding-repair`). The record is no longer
+  // in a scope, but a value of type `unknown` can still be applied, so the
+  // record stays callable.
+  const scratch = scratchRootOf(ce, scope) !== undefined;
+  ce._noteStateEvent({
+    kind: 'binding-repair',
+    ...(scratch ? { scratch: true } : {}),
+  });
+  ce._noteStateEvent({ kind: 'redefine', callableBefore, callableAfter: true });
 }
 
 export function assignFn(

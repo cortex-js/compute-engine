@@ -912,13 +912,15 @@ function refuseGPUAlpha(head: string): never {
  * parent read. A wide result type (`number`, as `Power`/`Root`/`Arcsin` have)
  * is NOT complex — those project to NaN, matching their real lowering.
  *
- * THREE SITES MUST STAY IN AGREEMENT, because they answer the same question
+ * FOUR SITES MUST STAY IN AGREEMENT, because they answer the same question
  * for the same node and a disagreement is a silent value-shape mismatch (a
  * `vec2`/`{re, im}` consumer reading a scalar, or the reverse):
  * `BaseCompiler.isComplexValued` (base-compiler.ts) is what a PARENT consults,
  * `resultIsComplexValued` (javascript-target.ts) is the JavaScript emitters'
- * copy, and this function is the GPU emitters' copy. Change one, change all
- * three.
+ * copy, this function is the GPU emitters' copy, and
+ * `resultIsWideUnderComplexDiscipline` (javascript-target.ts) is the
+ * JavaScript copy of the wide-type rule (`BaseCompiler.wideIsComplex`).
+ * Change one, change all four.
  */
 function gpuResultIsComplexValued(
   head: string,
@@ -5657,8 +5659,12 @@ function gpuInvariantDeclaration(
  * - **For-loop** (large or symbolic bounds): multi-line statement block
  *   ending with `return <acc>`, suitable for `compileFunction`.
  *
- * Complex-valued bodies are not supported (would require vec2 accumulation
- * with complex preamble helpers) and throw at compile time.
+ * A complex-valued body accumulates in a `vec2(re, im)` on both strategies.
+ * A complex sum adds the terms component-wise (`+` on two `vec2`). A complex
+ * product multiplies them with the `_gpu_cmul` helper of the complex
+ * preamble, because `*` on two `vec2` is the component-wise product, not the
+ * complex one. The empty range answers the complex identity, `vec2(0.0, 0.0)`
+ * or `vec2(1.0, 0.0)`.
  */
 function compileGPUSumProduct(
   kind: 'Sum' | 'Product',
@@ -5678,11 +5684,6 @@ function compileGPUSumProduct(
   // (the `!args[1]` guard above returns for the reduce form).
   BaseCompiler.assertScalarBigOpBody(kind, args[0]);
 
-  if (BaseCompiler.isComplexValued(args[0]))
-    throw new Error(
-      `Could not compile \`${kind}\`: complex-valued body not supported in GPU targets`
-    );
-
   // Multi-index Sum/Product (more than one indexing set) would drop the
   // trailing clauses. Fail closed rather than emit code with a dangling
   // index.
@@ -5699,6 +5700,18 @@ function compileGPUSumProduct(
 
   const limitsOps = limitsExpr.ops;
   const index = isSymbol(limitsOps[0]) ? limitsOps[0].symbol : '_';
+  // The index is an integer loop counter, so the body is analyzed with the
+  // index read as a real scalar. The plain `isComplexValued` reads the index
+  // through the enclosing scope instead: in a `Block` with a complex local
+  // `n`, the body `n` of `Product(n, Limits(n, 1, m))` would then be complex,
+  // the accumulator a `vec2`, and the loop would pass the scalar `float(n)`
+  // to `_gpu_cmul`, which the shader compiler rejects.
+  const complex = BaseCompiler.isComplexValuedUnderIndices(args[0], [index]);
+  // The body is emitted under the same reading of the index, so each term
+  // has the type of the accumulator: without this frame the emission of `n²`
+  // reads the outer complex `n` and calls `_gpu_cpow` on a `float`.
+  const underRealIndex = <T>(fn: () => T): T =>
+    BaseCompiler.withRealLoopIndices([index], fn);
   assertFiniteGPUBound(kind, limitsOps[1], 'lower');
   assertFiniteGPUBound(kind, limitsOps[2], 'upper');
   // A bound mentioning a compile-bound name (a user function's parameter, an
@@ -5710,8 +5723,19 @@ function compileGPUSumProduct(
 
   const isSum = kind === 'Sum';
   const op = isSum ? '+' : '*';
-  const identity = isSum ? '0.0' : '1.0';
   const isWGSL = target.language === 'wgsl';
+  const v2 = gpuVec2(target);
+  const identity = complex
+    ? `${v2}(${isSum ? '0.0' : '1.0'}, 0.0)`
+    : isSum
+      ? '0.0'
+      : '1.0';
+  // The shader type of the accumulator and of a term bound to a temporary.
+  const valueType = complex ? gpuVecType(2, isWGSL) : isWGSL ? 'f32' : 'float';
+  // Combine two values of the body's type: the complex product is not the
+  // component-wise `*` of two `vec2`.
+  const combine = (a: string, b: string): string =>
+    complex && !isSum ? `_gpu_cmul(${a}, ${b})` : `${a} ${op} ${b}`;
   const bothConstant = lowerNum !== undefined && upperNum !== undefined;
 
   if (bothConstant && lowerNum > upperNum) return identity;
@@ -5766,7 +5790,9 @@ function compileGPUSumProduct(
         let code: string;
         try {
           // Each term must leave a value after any nested loops are hoisted.
-          code = BaseCompiler.compileValueOperand(args[0], innerTarget);
+          code = underRealIndex(() =>
+            BaseCompiler.compileValueOperand(args[0], innerTarget)
+          );
         } finally {
           clearGPUCounters(innerTarget);
         }
@@ -5785,8 +5811,7 @@ function compileGPUSumProduct(
           continue;
         }
         const tv = BaseCompiler.tempVar(target);
-        const scalar = isWGSL ? 'f32' : 'float';
-        const decl = isWGSL ? `var ${tv}: ${scalar}` : `${scalar} ${tv}`;
+        const decl = isWGSL ? `var ${tv}: ${valueType}` : `${valueType} ${tv}`;
         BaseCompiler.hoistStatement(
           target,
           ...termSink.stmts,
@@ -5794,7 +5819,7 @@ function compileGPUSumProduct(
         );
         terms.push(`(${tv})`);
       }
-      return `(${terms.join(` ${op} `)})`;
+      return `(${terms.reduce((a, b) => combine(a, b))})`;
     };
     // The bindings are STATEMENTS, so they can only be emitted where the
     // enclosing position accepts hoisted statements. Without a sink the
@@ -5816,7 +5841,6 @@ function compileGPUSumProduct(
   // ordinary expression — so `1 + \sum…` and `0.03\sum…` compose. Otherwise the
   // legacy bare block is returned, valid only as a top-level function body.
   const acc = BaseCompiler.tempVar(target);
-  const floatType = isWGSL ? 'f32' : 'float';
   const intType = isWGSL ? 'i32' : 'int';
 
   // The body binds `index`, so it gets its OWN sink: a statement it hoists
@@ -5857,23 +5881,24 @@ function compileGPUSumProduct(
       args[0],
       [index],
       target,
-      () => {
-        try {
-          if (target.cse?.enabled) {
-            BaseCompiler.openCseSession(
-              args[0],
-              bodyTarget,
-              target.cse.harvestOptions
-            );
-            return BaseCompiler.compileCseRoot(args[0], bodyTarget, 0, () =>
-              BaseCompiler.compileValueOperand(args[0], bodyTarget)
-            );
+      () =>
+        underRealIndex(() => {
+          try {
+            if (target.cse?.enabled) {
+              BaseCompiler.openCseSession(
+                args[0],
+                bodyTarget,
+                target.cse.harvestOptions
+              );
+              return BaseCompiler.compileCseRoot(args[0], bodyTarget, 0, () =>
+                BaseCompiler.compileValueOperand(args[0], bodyTarget)
+              );
+            }
+            return BaseCompiler.compileValueOperand(args[0], bodyTarget);
+          } finally {
+            clearGPUCounters(bodyTarget);
           }
-          return BaseCompiler.compileValueOperand(args[0], bodyTarget);
-        } finally {
-          clearGPUCounters(bodyTarget);
-        }
-      },
+        }),
       (node) => gpuTypeOfValue(node, isWGSL) !== undefined
     );
 
@@ -5933,7 +5958,7 @@ function compileGPUSumProduct(
   // The loop index is declared and referenced bare — reject a reserved name
   // (fail closed, D6) rather than emit a shader that fails to compile.
   gpuCheckIdentifier(index, target.language);
-  const accDecl = isWGSL ? `var ${acc}: ${floatType}` : `${floatType} ${acc}`;
+  const accDecl = isWGSL ? `var ${acc}: ${valueType}` : `${valueType} ${acc}`;
   const indexDecl = isWGSL ? `var ${index}: ${intType}` : `${intType} ${index}`;
 
   // A COMPUTED upper bound is bound to a local first. Both languages evaluate
@@ -5970,7 +5995,9 @@ function compileGPUSumProduct(
         .map((l) => `  ${l}`)
         .join('\n')
     ),
-    `  ${acc} ${op}= ${body};`,
+    complex && !isSum
+      ? `  ${acc} = ${combine(acc, body)};`
+      : `  ${acc} ${op}= ${body};`,
     `}`,
   ];
 

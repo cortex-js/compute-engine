@@ -2066,3 +2066,110 @@ describe('SEQUENCE MEMO: a value that changes between calls', () => {
     expect(ce.parse('A_3').evaluate().json).toBe(13);
   });
 });
+
+describe('SEQUENCE SCOPE: a sequence is a binding of the scope that declares it', () => {
+  // The registry of sequences is engine-wide, but `isSequence()` and the
+  // other introspection methods answer for the definition that the name has
+  // in the current scope.
+  const fibonacci = {
+    base: { 0: 0, 1: 1 },
+    recurrence: 'F_{n-1} + F_{n-2}',
+  };
+
+  test('a sequence declared in an enclosing scope is one in a child scope', () => {
+    const ce = new ComputeEngine();
+    ce.declareSequence('F', fibonacci);
+    ce.pushScope();
+    expect(ce.isSequence('F')).toBe(true);
+    expect(ce.listSequences()).toContain('F');
+    expect(ce.getSequence('F')?.baseIndices).toEqual([0, 1]);
+    expect(ce.parse('F_{10}').evaluate().json).toBe(55);
+    ce.popScope();
+  });
+
+  test('a sequence is no longer one after its scope is popped', () => {
+    const ce = new ComputeEngine();
+    ce.pushScope();
+    ce.declareSequence('F', fibonacci);
+    expect(ce.isSequence('F')).toBe(true);
+    expect(ce.parse('F_{10}').evaluate().json).toBe(55);
+
+    ce.popScope();
+
+    expect(ce.isSequence('F')).toBe(false);
+    expect(ce.listSequences()).not.toContain('F');
+    expect(ce.getSequence('F')).toBeUndefined();
+    expect(ce.getSequenceCache('F')).toBeUndefined();
+    expect(ce.getSequenceStatus('F').status).toBe('not-a-sequence');
+    expect(ce.getSequenceTerms('F', 0, 3)).toBeUndefined();
+  });
+
+  test('a shadowing declaration in a child scope is not a sequence', () => {
+    const ce = new ComputeEngine();
+    ce.declareSequence('F', fibonacci);
+    ce.pushScope();
+    ce.declare('F', 'integer');
+    expect(ce.isSequence('F')).toBe(false);
+    ce.popScope();
+    expect(ce.isSequence('F')).toBe(true);
+  });
+
+  test('a checkpoint restore removes a sequence declared after the checkpoint', () => {
+    const ce = new ComputeEngine();
+    ce.pushScope();
+    const cp = ce.checkpoint();
+    ce.declareSequence('F', fibonacci);
+    expect(ce.isSequence('F')).toBe(true);
+
+    ce.restore(cp);
+
+    expect(ce.isSequence('F')).toBe(false);
+    expect(ce.listSequences()).not.toContain('F');
+  });
+
+  // The registry keeps both sequences `F`. The inner `F` is no longer
+  // visible after its scope is popped, but the outer `F` is registered on
+  // its own, so `clearSequenceCache()` without a name still reaches it.
+  test('clearSequenceCache() without a name clears a sequence that was shadowed', () => {
+    const ce = new ComputeEngine();
+    ce.declareSequence('F', fibonacci);
+    expect(ce.parse('F_{10}').evaluate().json).toBe(55);
+    const outerSize = ce.getSequenceCache('F')?.size ?? 0;
+    expect(outerSize).toBeGreaterThan(0);
+
+    ce.pushScope();
+    ce.declareSequence('F', { base: { 0: 1 }, recurrence: 'F_{n-1} + 1' });
+    expect(ce.parse('F_{3}').evaluate().json).toBe(4);
+    ce.popScope();
+
+    expect(ce.getSequenceCache('F')?.size).toBe(outerSize);
+    ce.clearSequenceCache();
+    expect(ce.getSequenceCache('F')?.size).toBe(0);
+    expect(ce.listSequences()).toEqual(['F']);
+  });
+
+  // A restore clears the memo of every sequence that the checkpoint
+  // captured. The checkpoint is taken while the inner `F` hides the outer
+  // `F`, and it captures both.
+  test('a checkpoint restore reaches a sequence that is shadowed', () => {
+    const ce = new ComputeEngine();
+    ce.declareSequence('F', fibonacci);
+    expect(ce.parse('F_{10}').evaluate().json).toBe(55);
+    expect(ce.getSequenceCache('F')?.size).toBeGreaterThan(0);
+
+    ce.pushScope();
+    ce.declareSequence('F', { base: { 0: 1 }, recurrence: 'F_{n-1} + 1' });
+    const cp = ce.checkpoint();
+    expect(ce.parse('F_{3}').evaluate().json).toBe(4);
+
+    ce.restore(cp);
+
+    expect(ce.getSequence('F')?.baseIndices).toEqual([0]);
+    expect(ce.getSequenceCache('F')?.size).toBe(0);
+    ce.popScope();
+
+    expect(ce.getSequence('F')?.baseIndices).toEqual([0, 1]);
+    expect(ce.getSequenceCache('F')?.size).toBe(0);
+    expect(ce.parse('F_{10}').evaluate().json).toBe(55);
+  });
+});

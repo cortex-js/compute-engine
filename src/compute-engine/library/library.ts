@@ -38,6 +38,23 @@ import type {
 import { _BoxedOperatorDefinition } from '../boxed-expression/boxed-operator-definition.js';
 
 /**
+ * A unit symbol (`m`, `J`, `K`, …) for the `Quantity` value of a physical
+ * constant.
+ *
+ * A unit name is not a variable, so it must not get a declaration. A plain
+ * `ce.symbol(name)` declares a name that does not resolve as a new `unknown`
+ * symbol in the current scope. While the libraries load, the current scope is
+ * the system scope. Thus every unit name of a constant became a system-scope
+ * variable: `K + 1` then read `K` from the system scope, and
+ * `ce.undeclare('K')` refused it. The unit symbol is resolve-only: it binds to
+ * an existing definition (for example, `N` is the `N` operator), and otherwise
+ * it stays unbound.
+ */
+function unit(ce: ComputeEngine, name: string) {
+  return ce.symbol(name, { autoDeclare: false });
+}
+
+/**
  * The standard libraries bundled with the Compute Engine.
  *
  * Each entry bundles symbol/operator definitions and declares dependencies
@@ -145,7 +162,7 @@ export const STANDARD_LIBRARIES: LibraryDefinition[] = [
         value: (ce) =>
           ce._fn('Quantity', [
             ce.number(299792458),
-            ce._fn('Divide', [ce.symbol('m'), ce.symbol('s')]),
+            ce._fn('Divide', [unit(ce, 'm'), unit(ce, 's')]),
           ]),
       },
       PlanckConstant: {
@@ -156,7 +173,7 @@ export const STANDARD_LIBRARIES: LibraryDefinition[] = [
         value: (ce) =>
           ce._fn('Quantity', [
             ce.number(6.62607015e-34),
-            ce._fn('Multiply', [ce.symbol('J'), ce.symbol('s')]),
+            ce._fn('Multiply', [unit(ce, 'J'), unit(ce, 's')]),
           ]),
       },
       Mu0: {
@@ -168,8 +185,8 @@ export const STANDARD_LIBRARIES: LibraryDefinition[] = [
           ce._fn('Quantity', [
             ce.number(1.25663706212e-6),
             ce._fn('Divide', [
-              ce.symbol('N'),
-              ce._fn('Power', [ce.symbol('A'), ce.number(2)]),
+              unit(ce, 'N'),
+              ce._fn('Power', [unit(ce, 'A'), ce.number(2)]),
             ]),
           ]),
       },
@@ -182,8 +199,8 @@ export const STANDARD_LIBRARIES: LibraryDefinition[] = [
           ce._fn('Quantity', [
             ce.number(9.80665),
             ce._fn('Divide', [
-              ce.symbol('m'),
-              ce._fn('Power', [ce.symbol('s'), ce.number(2)]),
+              unit(ce, 'm'),
+              ce._fn('Power', [unit(ce, 's'), ce.number(2)]),
             ]),
           ]),
       },
@@ -193,7 +210,7 @@ export const STANDARD_LIBRARIES: LibraryDefinition[] = [
         wikidata: 'Q2101',
         type: 'value',
         value: (ce) =>
-          ce._fn('Quantity', [ce.number(1.602176634e-19), ce.symbol('C')]),
+          ce._fn('Quantity', [ce.number(1.602176634e-19), unit(ce, 'C')]),
       },
       BoltzmannConstant: {
         description: 'Boltzmann constant',
@@ -203,7 +220,7 @@ export const STANDARD_LIBRARIES: LibraryDefinition[] = [
         value: (ce) =>
           ce._fn('Quantity', [
             ce.number(1.380649e-23),
-            ce._fn('Divide', [ce.symbol('J'), ce.symbol('K')]),
+            ce._fn('Divide', [unit(ce, 'J'), unit(ce, 'K')]),
           ]),
       },
       AvogadroConstant: {
@@ -214,7 +231,7 @@ export const STANDARD_LIBRARIES: LibraryDefinition[] = [
         value: (ce) =>
           ce._fn('Quantity', [
             ce.number(6.02214076e23),
-            ce._fn('Power', [ce.symbol('mol'), ce.number(-1)]),
+            ce._fn('Power', [unit(ce, 'mol'), ce.number(-1)]),
           ]),
       },
       VacuumPermittivity: {
@@ -225,7 +242,7 @@ export const STANDARD_LIBRARIES: LibraryDefinition[] = [
         value: (ce) =>
           ce._fn('Quantity', [
             ce.number(8.8541878128e-12),
-            ce._fn('Divide', [ce.symbol('F'), ce.symbol('m')]),
+            ce._fn('Divide', [unit(ce, 'F'), unit(ce, 'm')]),
           ]),
       },
       GravitationalConstant: {
@@ -237,10 +254,10 @@ export const STANDARD_LIBRARIES: LibraryDefinition[] = [
           ce._fn('Quantity', [
             ce.number(6.6743e-11),
             ce._fn('Divide', [
-              ce._fn('Power', [ce.symbol('m'), ce.number(3)]),
+              ce._fn('Power', [unit(ce, 'm'), ce.number(3)]),
               ce._fn('Multiply', [
-                ce.symbol('kg'),
-                ce._fn('Power', [ce.symbol('s'), ce.number(2)]),
+                unit(ce, 'kg'),
+                ce._fn('Power', [unit(ce, 's'), ce.number(2)]),
               ]),
             ]),
           ]),
@@ -254,10 +271,10 @@ export const STANDARD_LIBRARIES: LibraryDefinition[] = [
           ce._fn('Quantity', [
             ce.number(5.670374419e-8),
             ce._fn('Divide', [
-              ce.symbol('W'),
+              unit(ce, 'W'),
               ce._fn('Multiply', [
-                ce._fn('Power', [ce.symbol('m'), ce.number(2)]),
-                ce._fn('Power', [ce.symbol('K'), ce.number(4)]),
+                ce._fn('Power', [unit(ce, 'm'), ce.number(2)]),
+                ce._fn('Power', [unit(ce, 'K'), ce.number(4)]),
               ]),
             ]),
           ]),
@@ -271,8 +288,8 @@ export const STANDARD_LIBRARIES: LibraryDefinition[] = [
           ce._fn('Quantity', [
             ce.number(8.314462618),
             ce._fn('Divide', [
-              ce.symbol('J'),
-              ce._fn('Multiply', [ce.symbol('mol'), ce.symbol('K')]),
+              unit(ce, 'J'),
+              ce._fn('Multiply', [unit(ce, 'mol'), unit(ce, 'K')]),
             ]),
           ]),
       },

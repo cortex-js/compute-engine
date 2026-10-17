@@ -1091,8 +1091,17 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         // skeleton kept from an earlier declaration must not refine it.
         symbolDef.operator._signatureSkeleton = undefined;
       } else {
-        // We are changing a symbol to a function.
-        // `type-write`, not `redefine`: this caller bumps NOTHING today (the
+        // We are changing a symbol to a function. A constant keeps its type:
+        // the symbol-type branch below refuses it through the value
+        // definition's own type writer, and this branch goes through
+        // `updateDef`, which does not read the constant flag, so the refusal
+        // is written here. Without it, `ce.symbol('k').type = '(integer) ->
+        // integer'` replaced the constant `k` with a function, and a later
+        // `Assign` to `k` was accepted.
+        if (symbolDef.value.isConstant)
+          throw new Error(
+            `The type of the constant "${this._id}" cannot be changed`
+          );
         // only legacy advance is `updateDef`'s internal G, emitted there as
         // `binding-repair`), so the event must carry a zero parity mask —
         // the callable axis selects `type-write{either side}` identically.

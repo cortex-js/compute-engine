@@ -1,5 +1,10 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compile';
+import {
+  stripMissingFromType,
+  typeContainsMissing,
+} from '../../src/common/type/utils';
+import { typeToString } from '../../src/common/type/serialize';
 
 /**
  * Assignment admits `missing` into a DECLARED type (ruled 2026-09-09).
@@ -355,5 +360,107 @@ describe('a `Typed` parameter is governed by its own missing policy', () => {
       ce.box(['Function', ['Add', 'x', 1], ['Typed', 'x', { str: 'number' }]])
     );
     expect(ce.box(['f', ce.symbol('Missing')]).evaluate().isNaN).toBe(true);
+  });
+});
+
+describe('the strip reads through a structural alias', () => {
+  // A structural alias (`declareType(…, { alias: true })`) IS its definition,
+  // so `typeContainsMissing` and `stripMissingFromType` must read through a
+  // reference to it, at the top and at a nested position. Before this, both
+  // stopped at the reference node: `list<mpt>` kept its `missing` arm after
+  // the strip, and the type handler of `Dot` and `Norm` then saw the arm and
+  // answered the wide `value`.
+  function engine() {
+    const ce = new ComputeEngine();
+    ce.declareType('mpt', 'missing | tuple<number, number>', { alias: true });
+    ce.declareType('npt', 'missing | tuple<number, number>');
+    ce.declareType('pt', 'tuple<number, number>', { alias: true });
+    return ce;
+  }
+
+  test('the helpers see the `missing` arm of an alias', () => {
+    const ce = engine();
+    const top = ce.type('mpt').type;
+    const nested = ce.type('list<mpt>').type;
+    expect(typeContainsMissing(top)).toBe(true);
+    expect(typeContainsMissing(nested)).toBe(true);
+    expect(typeToString(stripMissingFromType(top))).toBe(
+      'tuple<number, number>'
+    );
+    expect(typeToString(stripMissingFromType(nested))).toBe(
+      'list<tuple<number, number>>'
+    );
+  });
+
+  test('an alias without a `missing` arm keeps its name', () => {
+    const ce = engine();
+    const t = ce.type('list<pt>').type;
+    expect(typeContainsMissing(t)).toBe(false);
+    expect(typeToString(stripMissingFromType(t))).toBe('list<pt>');
+  });
+
+  test('a nominal type is opaque to the strip', () => {
+    const ce = engine();
+    const t = ce.type('list<npt>').type;
+    expect(typeContainsMissing(t)).toBe(false);
+    expect(typeToString(stripMissingFromType(t))).toBe('list<npt>');
+  });
+
+  test('a self-referential alias stops at its repeat', () => {
+    const ce = new ComputeEngine();
+    ce.declareType('nest', 'list<nest> | missing', { alias: true });
+    ce.declareType('json', 'list<json> | integer', { alias: true });
+    const nest = ce.type('nest').type;
+    const json = ce.type('json').type;
+    expect(typeContainsMissing(nest)).toBe(true);
+    expect(typeContainsMissing(json)).toBe(false);
+    // The descent unfolds `nest` a bounded number of times, so the strip
+    // ends. The top-level `missing` arm is gone; the arm of the innermost
+    // `nest` that the descent did not unfold stays.
+    const stripped = stripMissingFromType(nest);
+    expect(typeof stripped === 'object' && stripped.kind).toBe('list');
+    expect(stripMissingFromType(json)).toBe(json);
+  });
+
+  test('`Dot` and `Norm` type an alias operand as the definition', () => {
+    const ce = engine();
+    ce.declare('m', 'missing | tuple<number, number>');
+    ce.declare('n', 'mpt');
+    ce.declare('K', 'list<missing | tuple<number, number>>');
+    ce.declare('L', 'list<mpt>');
+    for (const [direct, alias] of [
+      ['m', 'n'],
+      ['K', 'L'],
+    ]) {
+      const dotDirect = ce.expr(['Dot', ['Tuple', 1, 2], direct]);
+      const dotAlias = ce.expr(['Dot', ['Tuple', 1, 2], alias]);
+      expect(dotAlias.isValid).toBe(true);
+      expect(dotAlias.type.toString()).toBe(dotDirect.type.toString());
+      const normDirect = ce.expr(['Norm', direct]);
+      const normAlias = ce.expr(['Norm', alias]);
+      expect(normAlias.isValid).toBe(true);
+      expect(normAlias.type.toString()).toBe(normDirect.type.toString());
+    }
+    expect(ce.expr(['Dot', ['Tuple', 1, 2], 'n']).type.toString()).toBe(
+      'number'
+    );
+    expect(ce.expr(['Norm', 'n']).type.toString()).toBe('number');
+  });
+
+  test('`Dot` of a list of points with a list of an alias is valid', () => {
+    const ce = engine();
+    ce.declare('K', 'list<missing | tuple<number, number>>');
+    ce.declare('L', 'list<mpt>');
+    const direct = ce.expr(['Dot', ['List', ['Tuple', 1, 2]], 'K']);
+    const alias = ce.expr(['Dot', ['List', ['Tuple', 1, 2]], 'L']);
+    expect(alias.isValid).toBe(true);
+    expect(alias.type.toString()).toBe(direct.type.toString());
+    expect(alias.type.toString()).toBe('list<number>');
+  });
+
+  test('a nominal operand of `Dot` is still refused', () => {
+    const ce = engine();
+    ce.declare('q', 'npt');
+    expect(ce.expr(['Dot', ['Tuple', 1, 2], 'q']).isValid).toBe(false);
   });
 });

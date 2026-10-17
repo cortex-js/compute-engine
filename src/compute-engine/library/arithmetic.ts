@@ -351,6 +351,7 @@ import {
   quantityDivide,
   quantityPower,
 } from './quantity-arithmetic.js';
+import { isSymbolicValue } from './units.js';
 import {
   containsResidueClass,
   isResidueClass,
@@ -8150,7 +8151,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           return r;
         }
         if (isQuantity(evalX)) {
-          if (isMeasurement(evalX.op1)) {
+          // A symbolic magnitude has no numeric value (its `.re` is `NaN`):
+          // negate it with the expression arithmetic of the `Measurement`
+          // branch, with no error.
+          if (isMeasurement(evalX.op1) || isSymbolicValue(evalX.op1)) {
             const negM = measurementNegate(engine, evalX.op1);
             if (negM !== undefined) {
               const r = engine._fn('Quantity', [negM, evalX.op2]);
@@ -9021,14 +9025,17 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (evalX.operator === 'Quantity') {
           const nVal = n.re;
           if (nVal !== undefined && nVal !== 0) {
-            const r = quantityPower(engine, evalX, engine.number(1 / nVal));
-            if (
-              numericApproximation &&
-              r &&
-              isQuantity(r) &&
-              isMeasurement(r.op1)
-            )
-              return r.N();
+            // For an integer index, the exact `1/n`, not a float: the root of
+            // an exact magnitude stays exact under `evaluate()`.
+            const r = quantityPower(
+              engine,
+              evalX,
+              Number.isInteger(nVal)
+                ? engine.number([1, nVal])
+                : engine.number(1 / nVal)
+            );
+            // Under `.N()` the magnitude is a float.
+            if (numericApproximation && r && isQuantity(r)) return r.N();
             return r;
           }
         }
@@ -9553,14 +9560,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (nonNumeric !== undefined) return nonNumeric;
         const evalX = x;
         if (evalX.operator === 'Quantity') {
-          const r = quantityPower(engine, evalX, engine.number(0.5));
-          if (
-            numericApproximation &&
-            r &&
-            isQuantity(r) &&
-            isMeasurement(r.op1)
-          )
-            return r.N();
+          // The exact one half, not the float 0.5: the root of an exact
+          // magnitude stays exact under `evaluate()`.
+          const r = quantityPower(engine, evalX, engine.Half);
+          // Under `.N()` the magnitude is a float: `√2 m` is `1.414… m`.
+          if (numericApproximation && r && isQuantity(r)) return r.N();
           return r;
         }
 

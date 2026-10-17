@@ -6,6 +6,7 @@
  */
 
 import type {
+  BoxedDefinition,
   Expression,
   IComputeEngine as ComputeEngine,
   SequenceDefinition,
@@ -95,16 +96,54 @@ interface SequenceMetadata {
 
 /**
  * Registry of complete sequences for introspection.
- * Maps ComputeEngine → Map<name, SequenceMetadata>
+ * Maps ComputeEngine → the metadata of each sequence that was registered
+ *
+ * The registry is engine-wide, but a sequence is a binding of a scope. A
+ * registered sequence is visible only while the definition that its name
+ * resolves to from the current scope holds the handler of that sequence
+ * (`visibleSequence()`). So a sequence stops being one when the scope that
+ * declared it is popped, when `ce.undeclare()` removes it, or when a
+ * checkpoint restore removes its declaration, and a sequence declared in an
+ * enclosing scope is one in the scopes under it.
+ *
+ * The registry can hold more than one sequence with the same name: a
+ * sequence `F` in the global scope and a sequence `F` in a child scope that
+ * shadows it. Both stay registered, so `clearSequenceCache()` without a
+ * name and a checkpoint reach the outer `F` while the inner `F` hides it,
+ * and after the child scope is popped.
+ *
+ * Each entry is a weak reference. The handler of a sequence keeps its
+ * metadata in memory (`sequenceOfHandler`), so the metadata of a sequence
+ * that no definition, checkpoint or expression can reach any more, such as
+ * one that a redefinition replaced, is reclaimed with its memos.
  */
 const sequenceRegistry = new WeakMap<
   ComputeEngine,
-  Map<string, SequenceMetadata>
+  Set<WeakRef<SequenceMetadata>>
 >();
 
-function getOrCreateRegistry(ce: ComputeEngine): Map<string, SequenceMetadata> {
+/** The metadata of the sequence that each `subscriptEvaluate` handler made
+ * by `createSequenceHandler()` evaluates. */
+const sequenceOfHandler = new WeakMap<object, SequenceMetadata>();
+
+/** The metadata of the sequence that `name` resolves to from the current
+ * scope, or `undefined` when the definition of `name` there is not a
+ * sequence. */
+function visibleSequence(
+  ce: ComputeEngine,
+  name: string
+): SequenceMetadata | undefined {
+  const def = ce.lookupDefinition(name);
+  if (def === undefined || !isValueDef(def)) return undefined;
+  const handler = def.value.subscriptEvaluate;
+  return handler === undefined ? undefined : sequenceOfHandler.get(handler);
+}
+
+function getOrCreateRegistry(
+  ce: ComputeEngine
+): Set<WeakRef<SequenceMetadata>> {
   if (!sequenceRegistry.has(ce)) {
-    sequenceRegistry.set(ce, new Map());
+    sequenceRegistry.set(ce, new Set());
   }
   return sequenceRegistry.get(ce)!;
 }
@@ -114,7 +153,22 @@ function getOrCreateRegistry(ce: ComputeEngine): Map<string, SequenceMetadata> {
  */
 function registerSequence(ce: ComputeEngine, metadata: SequenceMetadata): void {
   const registry = getOrCreateRegistry(ce);
-  registry.set(metadata.name, metadata);
+  registry.add(new WeakRef(metadata));
+}
+
+/** The metadata of the sequences in `registry` that are still in memory, in
+ * the order of their registration. The entries whose metadata was reclaimed
+ * are removed from `registry`. */
+function registeredSequences(
+  registry: Set<WeakRef<SequenceMetadata>>
+): SequenceMetadata[] {
+  const result: SequenceMetadata[] = [];
+  for (const ref of registry) {
+    const metadata = ref.deref();
+    if (metadata === undefined) registry.delete(ref);
+    else result.push(metadata);
+  }
+  return result;
 }
 
 // ============================================================================
@@ -1069,6 +1123,7 @@ export function createSequenceHandler(
     return termAt(indices, engine, numericApproximation);
   };
   setSubscriptEvaluateReads(handler, () => sources(ce));
+  sequenceOfHandler.set(handler, metadata);
   return handler;
 }
 
@@ -1408,6 +1463,18 @@ interface PendingSequence {
   };
   /** Whether this appears to be a multi-index sequence */
   isMultiIndex: boolean;
+  /**
+   * The binding that the name resolved to from the current scope when the
+   * first base case or the recurrence was assigned, or `undefined` when the
+   * name had no binding then. `ce.undeclare()` removes the pending
+   * definition only with the binding that owns it, so a declaration in a
+   * child scope that shadows the name and is then undeclared does not remove
+   * the pending definition of the enclosing scope.
+   */
+  owner: BoxedDefinition | undefined;
+  /** The current lexical scope when the pending definition was created. It
+   * identifies the owner when `owner` is `undefined`. */
+  scope: object;
 }
 
 const pendingSequences = new WeakMap<
@@ -1421,9 +1488,54 @@ function getOrCreatePending(ce: ComputeEngine, name: string): PendingSequence {
   }
   const map = pendingSequences.get(ce)!;
   if (!map.has(name)) {
-    map.set(name, { base: new Map(), isMultiIndex: false });
+    map.set(name, {
+      base: new Map(),
+      isMultiIndex: false,
+      owner: ce.lookupDefinition(name),
+      scope: ce.context.lexicalScope,
+    });
   }
   return map.get(name)!;
+}
+
+/**
+ * Remove the pending definition of the sequence `name`: the base cases and
+ * the recurrence assigned before the definition is complete. `ce.undeclare()`
+ * calls it, so that a later declaration of `name` does not complete a
+ * sequence with the base cases of the removed declaration.
+ *
+ * The pending definitions are kept by name, but each one belongs to the
+ * binding `binding` that the name resolved to when it was created. Only a
+ * pending definition that belongs to `binding` is removed. When the name had
+ * no binding at creation, the pending definition belongs to the binding
+ * that is later declared in the scope where it was created, `scope`. So
+ * undeclaring a declaration that shadows the name in a child scope leaves
+ * the pending definition of the enclosing scope unchanged.
+ *
+ * Return a function that puts the pending definition back, for the rollback
+ * frame of an inference trial, or `undefined` when `name` has no pending
+ * definition. A checkpoint restore puts it back without this function: the
+ * pending definitions are captured whole when a checkpoint is taken
+ * (`_sequenceRegistrySnapshot()`).
+ * @internal
+ */
+export function _removePendingSequence(
+  ce: ComputeEngine,
+  name: string,
+  binding: BoxedDefinition,
+  scope: object
+): (() => void) | undefined {
+  const pending = pendingSequences.get(ce);
+  const entry = pending?.get(name);
+  if (pending === undefined || entry === undefined) return undefined;
+  if (
+    entry.owner === undefined ? entry.scope !== scope : entry.owner !== binding
+  )
+    return undefined;
+  pending.delete(name);
+  return () => {
+    pending.set(name, entry);
+  };
 }
 
 /**
@@ -1651,8 +1763,7 @@ export function getSequenceStatus(
   const def = ce.lookupDefinition(name);
   if (def && isValueDef(def) && def.value.subscriptEvaluate) {
     // It's a complete sequence - get details from registry
-    const registry = sequenceRegistry.get(ce);
-    const metadata = registry?.get(name);
+    const metadata = sequenceOfHandler.get(def.value.subscriptEvaluate);
 
     if (metadata) {
       const baseIndices = Array.from(metadata.base.keys());
@@ -1700,8 +1811,7 @@ export function getSequenceInfo(
   ce: ComputeEngine,
   name: string
 ): SequenceInfo | undefined {
-  const registry = sequenceRegistry.get(ce);
-  const metadata = registry?.get(name);
+  const metadata = visibleSequence(ce, name);
 
   if (!metadata) return undefined;
 
@@ -1753,8 +1863,7 @@ export function _sequenceRegistrySnapshot(ce: ComputeEngine): unknown {
     registry:
       registry === undefined
         ? undefined
-        : [...registry.entries()].map(([name, meta]) => ({
-            name,
+        : registeredSequences(registry).map((meta) => ({
             meta,
             // The record is mutated in place (base cases and recurrences are
             // added to an existing entry), so its fields ride along with it.
@@ -1783,7 +1892,6 @@ export function _restoreSequenceRegistrySnapshot(
 ): void {
   const s = snapshot as {
     registry?: {
-      name: string;
       meta: SequenceMetadata;
       fields: SequenceMetadata;
     }[];
@@ -1796,10 +1904,8 @@ export function _restoreSequenceRegistrySnapshot(
 
   const registry = sequenceRegistry.get(ce);
   if (registry !== undefined) {
-    const kept = new Map((s.registry ?? []).map((e) => [e.name, e]));
-    for (const name of [...registry.keys()])
-      if (!kept.has(name)) registry.delete(name);
-    for (const { name, meta, fields } of s.registry ?? []) {
+    registry.clear();
+    for (const { meta, fields } of s.registry ?? []) {
       // In place, so anything holding the metadata record keeps answering
       // from it — the same identity rule the definition records follow.
       Object.assign(meta, fields);
@@ -1826,7 +1932,7 @@ export function _restoreSequenceRegistrySnapshot(
       meta.memo?.clear();
       meta.numericMemo?.clear();
       meta.declined?.clear();
-      registry.set(name, meta);
+      registry.add(new WeakRef(meta));
     }
   }
 
@@ -1855,15 +1961,18 @@ export function _restoreSequenceRegistrySnapshot(
 export function listSequences(ce: ComputeEngine): string[] {
   const registry = sequenceRegistry.get(ce);
   if (!registry) return [];
-  return Array.from(registry.keys());
+  const names = new Set<string>();
+  for (const { name } of registeredSequences(registry))
+    if (!names.has(name) && visibleSequence(ce, name) !== undefined)
+      names.add(name);
+  return [...names];
 }
 
 /**
  * Check if a symbol is a defined sequence.
  */
 export function isSequence(ce: ComputeEngine, name: string): boolean {
-  const registry = sequenceRegistry.get(ce);
-  return registry?.has(name) ?? false;
+  return visibleSequence(ce, name) !== undefined;
 }
 
 /**
@@ -1875,13 +1984,14 @@ export function clearSequenceCache(ce: ComputeEngine, name?: string): void {
 
   if (name !== undefined) {
     // Clear cache for specific sequence
-    const metadata = registry.get(name);
+    const metadata = visibleSequence(ce, name);
     metadata?.memo?.clear();
     metadata?.numericMemo?.clear();
     metadata?.declined?.clear();
   } else {
-    // Clear caches for all sequences
-    for (const metadata of registry.values()) {
+    // Clear the caches of every registered sequence, including one that a
+    // declaration in the current scope hides
+    for (const metadata of registeredSequences(registry)) {
       metadata.memo?.clear();
       metadata.numericMemo?.clear();
       metadata.declined?.clear();
@@ -1900,8 +2010,7 @@ export function getSequenceCache(
   ce: ComputeEngine,
   name: string
 ): Map<number | string, Expression> | undefined {
-  const registry = sequenceRegistry.get(ce);
-  const metadata = registry?.get(name);
+  const metadata = visibleSequence(ce, name);
 
   if (!metadata?.memo) return undefined;
 

@@ -1298,6 +1298,40 @@ export class _BoxedValueDefinition
     this._unsubscribeFromConfigurationChange?.();
     this._unsubscribeFromConfigurationChange = undefined;
   }
+
+  /** Stop listening to configuration changes, and do nothing else: unlike
+   * `dispose()`, the definition is not marked as disposed. `updateDef()`
+   * calls it on the value definition that a binding no longer holds (a
+   * redefinition, or `ce.undeclare()`), because the engine's configuration
+   * tracker holds each listener strongly and would otherwise keep the
+   * replaced definition in memory for the engine's lifetime.
+   *
+   * Return `true` when a subscription was released. The caller then records
+   * an undo that calls {@link _resubscribeConfigurationChange}, because a
+   * checkpoint restore or an inference rollback can put this definition back
+   * in its binding.
+   * @internal */
+  _releaseConfigurationChange(): boolean {
+    const unsubscribe = this._unsubscribeFromConfigurationChange;
+    if (unsubscribe === undefined) return false;
+    unsubscribe();
+    this._unsubscribeFromConfigurationChange = undefined;
+    return true;
+  }
+
+  /** Listen to configuration changes again after
+   * {@link _releaseConfigurationChange}, with the same listener (this
+   * definition). The value is cleared, as for a configuration change, because
+   * a change made while the definition was not listening was not seen. Does
+   * nothing when the definition already listens or is disposed.
+   * @internal */
+  _resubscribeConfigurationChange(): void {
+    if (this._unsubscribeFromConfigurationChange !== undefined) return;
+    if (this.disposed || !this.isConstant) return;
+    this._unsubscribeFromConfigurationChange =
+      this._engine._listenToConfigurationChange(this);
+    this.onConfigurationChange();
+  }
 }
 
 function dynamicValue(

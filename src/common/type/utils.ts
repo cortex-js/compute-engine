@@ -947,27 +947,43 @@ export function resolveTypeAlias(t: Readonly<Type>): Type {
  * {@link stripMissingFromType} rebuilds: a kind detected here but not stripped
  * there arms the strip and then leaves the arm in place, so the caller both
  * pays for the transform and still sees the absence arm.
+ *
+ * A transparent alias is read through its definition, at the top and at any
+ * nested position: an alias of `missing | tuple<number, number>`, and
+ * `list<…>` of that alias, carry a `missing` arm exactly as the spelled-out
+ * definition does. A nominal reference is opaque and answers false. The
+ * unfold runs under the descent guard (`seen`), so a self-referential alias
+ * stops at its repeat instead of recursing forever.
  */
-export function typeContainsMissing(t: Readonly<Type>): boolean {
+export function typeContainsMissing(
+  t: Readonly<Type>,
+  seen?: AliasDescent
+): boolean {
   if (t === 'missing') return true;
   if (typeof t === 'string') return false;
+  const contains = (x: Readonly<Type>) => typeContainsMissing(x, seen);
   switch (t.kind) {
     case 'union':
     case 'intersection':
-      return t.types.some(typeContainsMissing);
+      return t.types.some(contains);
     case 'list':
     case 'set':
     case 'collection':
     case 'indexed_collection':
     case 'broadcastable':
-      return typeContainsMissing(t.elements);
+      return contains(t.elements);
     case 'tuple':
-      return t.elements.some((e) => typeContainsMissing(e.type));
+      return t.elements.some((e) => contains(e.type));
     case 'dictionary':
-      return typeContainsMissing(t.values);
+      return contains(t.values);
     case 'record':
     case 'object':
-      return Object.values(t.elements).some((x) => typeContainsMissing(x));
+      return Object.values(t.elements).some(contains);
+    case 'reference': {
+      const unfolded = unfoldAliasOnDescent(t, seen);
+      if (unfolded === undefined || unfolded.type === t) return false;
+      return typeContainsMissing(unfolded.type, unfolded.seen);
+    }
     default:
       return false;
   }
@@ -1252,15 +1268,42 @@ export function absorbNumericAbsence(t: Readonly<Type>): Type {
  * `tupleComponents` selects what happens to a `missing` arm inside a tuple
  * component (an absent coordinate); see the `tuple` case below. The default,
  * `'strip'`, treats it like any other cell.
+ *
+ * A transparent alias whose definition carries a `missing` arm is replaced by
+ * its stripped definition, at the top and at any nested position: `list<mpt>`,
+ * with `mpt` an alias of `missing | tuple<number, number>`, strips to
+ * `list<tuple<number, number>>`. An alias with no `missing` arm keeps its
+ * name, and a nominal reference is opaque and is returned unchanged. The
+ * unfold runs under the descent guard (`seen`), so a self-referential alias
+ * is returned unchanged at its repeat.
  */
 export function stripMissingFromType(
   t: Readonly<Type>,
-  tupleComponents: 'strip' | 'keep' | 'nan' = 'strip'
+  tupleComponents: 'strip' | 'keep' | 'nan' = 'strip',
+  seen?: AliasDescent
 ): Type {
   if (t === 'missing') return 'never';
   if (typeof t === 'string') return t;
-  const strip = (x: Readonly<Type>) => stripMissingFromType(x, tupleComponents);
+  const strip = (x: Readonly<Type>) =>
+    stripMissingFromType(x, tupleComponents, seen);
   switch (t.kind) {
+    case 'reference': {
+      const unfolded = unfoldAliasOnDescent(t, seen);
+      if (
+        unfolded === undefined ||
+        unfolded.type === t ||
+        !typeContainsMissing(unfolded.type, unfolded.seen)
+      )
+        return t as Type;
+      const stripped = stripMissingFromType(
+        unfolded.type,
+        tupleComponents,
+        unfolded.seen
+      );
+      // With `tupleComponents: 'keep'`, a tuple is not rebuilt, so the
+      // definition can come back unchanged: the alias then keeps its name.
+      return stripped === unfolded.type ? (t as Type) : stripped;
+    }
     case 'union': {
       const arms = t.types.map((x) => strip(x)).filter((x) => x !== 'never');
       if (arms.length === 0) return 'never';

@@ -73,6 +73,130 @@
   `[Join(xs, Map(u ↦ Random(), 1..2))]`, is listed into the literal when that
   bound fits the cap, where it stayed a live view.
 
+### Issues Resolved
+
+- **A point whose coordinates are typed `any` is accepted by `Dot`, `Cross`,
+  `Norm` and `Distance`.** With `x` and `y` declared `any`,
+  `Dot((1, 2), (x, y))` was an `incompatible-type` error at boxing, while the
+  same call with `x` and `y` declared `unknown`, `number` or `real` was valid. A
+  coordinate typed `any` can hold an absent value, and these operators answer an
+  absent coordinate when they evaluate (`NaN` for `Dot`), so the coordinate is
+  now checked as a coordinate typed `unknown`. The call has the type it has with
+  `unknown` coordinates (`value` for `Dot`), stays unevaluated while `x` and `y`
+  have no value, and evaluates to `11` when `x` is 3 and `y` is 4. A list of
+  such points is accepted in the same way. A coordinate typed `any` at a
+  parameter that requires a specific coordinate type, such as
+  `tuple<number, number>`, is still refused. This came from Tycho ledger row
+  376: the Tycho importer declares the parameters of a definition `any`, and
+  builds a `Dot` from `q(x, y) = \sin((16.234, 35.4235) \cdot (x, y))`, which
+  was refused.
+- **A shader `Sum` or `Product` with a complex-valued body compiles (Tycho
+  ledger row 377).** The GLSL and WGSL targets refused such a body with
+  "complex-valued body not supported in GPU targets", while the same terms
+  written out by hand compiled. A domain colouring of the arctangent Taylor
+  polynomial, `\left|\sum_{n=0}^{10}\frac{(-1)^n}{2n+1}(x+iy)^{2n+1}\right|`,
+  now compiles to the modulus of eleven complex powers. The value accumulates in
+  a `vec2(re, im)` (`vec2f` on WGSL): a sum adds the terms component by
+  component, and a product multiplies them with the complex-multiply helper
+  `_gpu_cmul`, because `*` on two `vec2` values multiplies their components and
+  is not the complex product. This applies to constant bounds, where the terms
+  are unrolled, and to symbolic or large bounds, where the shader runs a loop.
+  An empty range gives `vec2(0.0, 0.0)` for a sum and `vec2(1.0, 0.0)` for a
+  product.
+
+- **Under `mode: 'complex'`, a power of real numbers whose value can be complex
+  compiles to the right value on the JavaScript target.** With `x` real and `k`
+  an integer, `x + (-1)^{k/2}` compiled to code that returned `NaN` at every
+  point; at `x = 0.5, k = 1` it now returns `0.5 + i`, as the interpreter does.
+  `x^y + 1` with `x` and `y` real gave `NaN` even for a positive `x`. The
+  complex mode reads such a power as complex, because its type `number` admits a
+  complex value, so the enclosing sum read a real and an imaginary part from it,
+  but the power itself was computed with the real power function. It now uses
+  the complex power function in that case. A power whose type is real (`2^x`,
+  `(-1)^k`) keeps the real power function. The `strict` and `auto` modes are
+  unchanged: there a power with a variable exponent stays real, and a negative
+  base gives `NaN`.
+- **A sequence is no longer reported after the scope that declared it is gone.**
+  After `ce.popScope()` of the scope where `ce.declareSequence('F', …)` ran, or
+  after `ce.undeclare('F')`, `ce.isSequence('F')` answered `true` and
+  `ce.listSequences()` listed `F`, while `F_{10}` evaluated to `F_10`.
+  `isSequence()`, `listSequences()`, `getSequence()`, `getSequenceCache()`,
+  `clearSequenceCache(name)` and `getSequenceTerms()` now answer for the
+  definition that the name has in the current scope: a sequence declared in an
+  enclosing scope is still a sequence in a child scope, and a declaration of the
+  same name in a child scope that is not a sequence hides it there.
+- **`Dot` and `Norm` type an operand declared with a type alias as they type the
+  definition of the alias.** After
+  `ce.declareType('mpt', 'missing | tuple<number, number>', { alias: true })`
+  and `ce.declare('n', 'mpt')`, `Dot((1, 2), n)` was typed `value` and
+  `Norm(n)` was typed `+oo | nan | real`. Both are now typed `number`, as they
+  are when `n` is declared `missing | tuple<number, number>` directly.
+- **An absent value inside a type alias at a nested position is found and
+  removed.** With `L` declared `list<mpt>`, where `mpt` is an alias of
+  `missing | tuple<number, number>`, `Dot([(1, 2)], L)` was refused with an
+  `incompatible-type` error and `Norm(L)` was typed `+oo | nan | real`. Both
+  are now accepted and typed `list<number>`, as they are when `L` is declared
+  `list<missing | tuple<number, number>>`. A nominal type (declared without
+  `alias: true`) is still refused.
+- **A compiled `Sum` or `Product` reads its index as an integer when a `Block`
+  local has the same name.** In a `Block` that declares a complex local `n`
+  (`n := x + i`), the index `n` of `\sum_{n=1}^{m} n^2` was read as the complex
+  local while the terms were compiled. On the JavaScript target, at
+  `x = 0.5, m = 3`, the `Block` that adds `|n|` to this sum returned the string
+  `"0[object Object][object Object][object Object]1.118…"`; it now returns
+  `15.118…`, as the interpreter does. The same happened with constant bounds
+  (`\sum_{n=1}^{3} n^2`), and `|\prod_{n=1}^{m} (x + in)| + |n|` returned `NaN`
+  instead of `8.128…`. On the GLSL and WGSL targets, `\prod_{n=1}^{m} n` in such
+  a `Block` used a complex accumulator and passed the real `float(n)` to
+  `_gpu_cmul`, so the shader did not compile; it now multiplies real numbers.
+- **The unit names of the physical constants are no longer declared in the
+  system scope.** The values of constants such as `PlanckConstant` and
+  `BoltzmannConstant` declared their unit names (`m`, `s`, `J`, `A`, `C`, `K`,
+  `mol`, `F`, `kg`, `W`) as variables of type `unknown` in the system scope
+  when the engine started. On a fresh engine, `ce.parse('K + 1')` then read `K`
+  from the system scope, and `ce.undeclare('K')` threw
+  `Cannot undeclare "K": it is defined in the system scope`. Now `K` is
+  declared in the current scope, like any other free symbol, and
+  `ce.undeclare('K')` removes it. Also, the unit of a `Quantity` no longer
+  declares its unit names in the current scope: after
+  `ce.parse('3\,\mathrm{km}')`, `km` has no declaration. The values of the
+  constants and of quantity arithmetic do not change.
+- **A quantity times a symbol keeps the symbol.** With `x` a symbol with no
+  value, `["Multiply", ["Quantity", 3, "m"], "x"]` evaluated to `NaN m`; it now
+  evaluates to `Quantity(3x, m)`, as `Quantity(3, m) · 2` evaluates to `6 m`.
+  The same `NaN` magnitude came from a division by a symbol (`3 m / x` is now
+  `Quantity(3/x, m)`), from a symbolic magnitude in a sum, a product or a power
+  (`Quantity(x, m) + Quantity(2, m)` is now `Quantity(x + 2, m)`), from a
+  negation (`-Quantity(x, m)` is now `Quantity(-x, m)`), and from
+  `UnitConvert` and `UnitSimplify` (`UnitConvert(Quantity(x, km), m)` is now
+  `Quantity(1000x, m)`). `UnitSimplify` also kept only the nominal value of a
+  `Measurement` magnitude; it now keeps the error. A sum of a quantity and a
+  symbol stays unevaluated, as a sum of a quantity and a number does.
+- **Equal unit factors in a product of quantities are collected into a
+  power.** `["Multiply", ["Quantity", 3, "m"], ["Quantity", 2, "m"]]` evaluated
+  to `6 m⋅m`; it now evaluates to `Quantity(6, m^2)`. Also,
+  `Quantity(3, m^2) · Quantity(2, m)` is `Quantity(6, m^3)` instead of
+  `6 m⋅m^2`. A reciprocal unit such as `s^-1` is now read as a unit:
+  `Quantity(3, s) · Quantity(2, s^-1)` is `6` instead of `6 s⋅1/s`, and
+  `UnitConvert(Quantity(2, s^-1), Hz)` is `2 Hz` instead of staying
+  unevaluated.
+- **The square root and the `Root` of a quantity are exact under
+  `evaluate()`.** `["Sqrt", ["Quantity", 2, ["Power", "m", 2]]]` evaluated to
+  `1.414… m`; it now evaluates to `Quantity(√2, m)`, and `.N()` gives
+  `1.414… m`. In the same way, `["Root", ["Quantity", 2, ["Power", "m", 3]], 3]`
+  evaluated to `1.2599… m`; it now evaluates to `Quantity(Root(2, 3), m)`, and
+  `.N()` gives `1.2599… m`. A symbolic magnitude no longer gets a float
+  exponent: `Sqrt(Quantity(x, m^2))` is now `Quantity(√x, m)` instead of
+  `Quantity(x^0.5, m)`, and `Root(Quantity(x, m^3), 3)` is now
+  `Quantity(Root(x, 3), m)` instead of `Quantity(x^0.333…, m)`.
+
+- **The type setter refuses a function signature on a constant.**
+  `ce.symbol('k').type = 'real'` on a constant `k` was refused with "The type
+  of the constant cannot be changed", but `ce.symbol('k').type =
+  '(integer) -> integer'` replaced the constant with a function, after which an
+  assignment to `k` was accepted. Both are now refused with the same error, and
+  the constant keeps its value.
+
 ## 0.154.0 _2026-10-15_
 
 ### Behavior Changes

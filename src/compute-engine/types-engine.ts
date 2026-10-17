@@ -2255,11 +2255,20 @@ export interface IComputeEngine {
   /**
    * List all defined sequences.
    * Returns an array of sequence names.
+   *
+   * A name is listed when the definition it has in the current scope is a
+   * sequence, as for `isSequence()`.
    */
   listSequences(): string[];
 
   /**
    * Check if a symbol is a defined sequence.
+   *
+   * The answer is for the definition that the name has in the current
+   * scope. A sequence declared in an enclosing scope is a sequence. A
+   * sequence is no longer one after the scope that declared it is popped,
+   * after `undeclare()`, or after a checkpoint restore that removes its
+   * declaration.
    */
   isSequence(name: string): boolean;
 
@@ -2366,6 +2375,61 @@ export interface IComputeEngine {
   interpret(expr: Expression, options?: OEISOptions): Promise<InterpretResult>;
 
   forget(symbol?: MathJsonSymbol | MathJsonSymbol[]): void;
+
+  /**
+   * Remove the binding of one or more names from the current scope.
+   *
+   * The binding goes whatever it holds: a value, a function given with
+   * `ce.assign()` or `ce.declare()`, or a function defined by one or more
+   * clauses (`f(x) := …`, `DefineFunction`). This is different from
+   * `forget()`, which removes assumptions and keeps the declaration.
+   *
+   * After the call, the name is not declared in the current scope:
+   *
+   * - When an enclosing scope declares the name, that declaration applies
+   *   again. `undeclare()` does not change an enclosing scope.
+   * - Otherwise, the name is a free symbol: `f(2)` stays unevaluated as
+   *   `["f", 2]`, and `x + 1` stays symbolic.
+   * - A later `ce.declare()`, `ce.assign()`, `f(x) := …` or `DefineFunction`
+   *   of the name is a new declaration, and is accepted.
+   *
+   * An expression boxed before the call does not use the removed binding
+   * either. A symbol reads the value that the scope chain holds when the
+   * expression is evaluated. A call such as `f(2)` boxed before the call
+   * evaluates to `["f", 2]`, and after a new definition of `f` in the same
+   * scope it uses the new definition, as for a function given again with
+   * `ce.assign()`.
+   *
+   * Assumptions about the name are not removed: an assumption applies to
+   * the name, and so to a new declaration of it. Use `forget()` to remove
+   * them.
+   *
+   * A checkpoint taken before the call (`ce.checkpoint()`) undoes it.
+   *
+   * @throws if a name is not declared in the current scope. A name declared
+   * only in an enclosing scope is not declared in the current scope. To
+   * remove a name only when it is declared, test
+   * `ce.context.lexicalScope.bindings.has(name)` first.
+   *
+   * @throws if a name is defined by a library: a standard library, a library
+   * given to the constructor, or a library loaded with `ce.loadLibrary()`.
+   * Also throws for any name of the system scope, which holds the standard
+   * library.
+   *
+   * @throws if a name is the variable of an operator such as `Sum`, or a
+   * parameter of a function, while that expression is evaluated.
+   *
+   * When one name of a list is refused, no binding is removed.
+   *
+   * ```ts
+   * ce.pushScope();
+   * ce.parse('f(n) := n + 1').evaluate();
+   * ce.parse('f(2)').evaluate();   // 3
+   * ce.undeclare('f');
+   * ce.parse('f(2)').evaluate();   // f(2)
+   * ```
+   */
+  undeclare(names: MathJsonSymbol | ReadonlyArray<MathJsonSymbol>): void;
 
   ask(pattern: Expression): BoxedSubstitution[];
 

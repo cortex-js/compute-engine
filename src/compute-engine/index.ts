@@ -205,6 +205,7 @@ import {
   declareType as declareTypeImpl,
   declareFn as declareFnImpl,
   assignFn as assignFnImpl,
+  undeclare as undeclareImpl,
 } from './engine-declarations.js';
 import {
   declareProtocolImpl,
@@ -4547,6 +4548,20 @@ export class ComputeEngine implements IComputeEngine {
    * */
   forget(symbol: undefined | MathJsonSymbol | MathJsonSymbol[]): void {
     forgetImpl(this, symbol);
+  }
+
+  /**
+   * Remove the binding of one or more names from the current scope: a value,
+   * or a function defined by assignment or by clauses. An enclosing scope
+   * is not changed, and a declaration of the name there applies again.
+   *
+   * Throws if a name is not declared in the current scope, is defined by a
+   * library, or is the variable of an operator such as `Sum`.
+   *
+   * See `IComputeEngine.undeclare()` for the full contract.
+   */
+  undeclare(names: MathJsonSymbol | ReadonlyArray<MathJsonSymbol>): void {
+    undeclareImpl(this, names);
   }
 }
 

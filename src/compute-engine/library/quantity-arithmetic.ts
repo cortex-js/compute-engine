@@ -11,8 +11,12 @@ import type {
   Expression,
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
-import { isFunction, isSymbol } from '../boxed-expression/type-guards.js';
-import { boxedToUnitExpression } from './units.js';
+import {
+  isFunction,
+  isNumber,
+  isSymbol,
+} from '../boxed-expression/type-guards.js';
+import { boxedToUnitExpression, isSymbolicValue } from './units.js';
 import {
   convertUnit,
   convertCompoundUnit,
@@ -134,8 +138,11 @@ export function quantityAdd(
 
   // Measurement-carrying magnitudes: convert each to the target unit (scaling
   // its error by the conversion factor) then combine with error-propagating
-  // addition instead of raw numeric summation.
-  if (quantities.some((q) => isMeasurement(q.op1))) {
+  // addition instead of raw numeric summation. A symbolic magnitude uses the
+  // same expression arithmetic, with no error.
+  if (
+    quantities.some((q) => isMeasurement(q.op1) || isSymbolicValue(q.op1))
+  ) {
     const mags: Expression[] = [];
     for (let i = 0; i < quantities.length; i++) {
       const q = quantities[i];
@@ -206,10 +213,12 @@ export function quantityMultiply(
   if (quantities.length === 0) return undefined;
 
   // Measurement-carrying magnitudes (or scalars): multiply magnitudes with
-  // error-propagating multiplication instead of raw numeric products.
+  // error-propagating multiplication instead of raw numeric products. A
+  // symbolic scalar or magnitude uses the same expression arithmetic, with no
+  // error, so that the product stays symbolic.
   if (
-    ops.some((x) => isMeasurement(x)) ||
-    quantities.some((q) => isMeasurement(q.op1))
+    ops.some((x) => isMeasurement(x) || isSymbolicValue(x)) ||
+    quantities.some((q) => isMeasurement(q.op1) || isSymbolicValue(q.op1))
   ) {
     const factors: Expression[] = [...scalars, ...quantities.map((q) => q.op1)];
     const combinedMag = measurementMultiply(ce, factors);
@@ -306,10 +315,14 @@ export function quantityDivide(
   const denQ = isQuantity(den) ? den : null;
 
   // Measurement-carrying magnitudes: propagate the error through the division.
+  // A symbolic operand or magnitude uses the same expression arithmetic, with
+  // no error.
+  const isExpressionMag = (x: Expression) =>
+    isMeasurement(x) || isSymbolicValue(x);
   const numMagIsM =
-    isMeasurement(num) || (numQ ? isMeasurement(numQ.op1) : false);
+    isExpressionMag(num) || (numQ ? isExpressionMag(numQ.op1) : false);
   const denMagIsM =
-    isMeasurement(den) || (denQ ? isMeasurement(denQ.op1) : false);
+    isExpressionMag(den) || (denQ ? isExpressionMag(denQ.op1) : false);
   if (numMagIsM || denMagIsM) {
     const result = quantityDivideMeasurement(ce, num, den, numQ, denQ);
     if (result !== undefined) return result;
@@ -434,14 +447,40 @@ function factorMapsEqual(
 }
 
 /**
+ * Whether a unit symbol occurs more than once in a unit expression
+ * (`m·m`, `m^2·m`, `m/m`).  The operator name at index 0 and the numeric
+ * exponents of `Power` are skipped.
+ */
+function hasRepeatedUnitSymbol(ue: UnitExpression): boolean {
+  const seen = new Set<string>();
+  const walk = (e: UnitExpression): boolean => {
+    if (typeof e === 'string') {
+      if (seen.has(e)) return true;
+      seen.add(e);
+      return false;
+    }
+    return e.slice(1).some((x) => typeof x !== 'number' && walk(x));
+  };
+  return walk(ue);
+}
+
+/**
  * Structurally cancel repeated unit factors in a compound unit expression
- * (e.g. `in/in` → dimensionless, `m·s/in` → `s` after converting `in` to `m`).
+ * (e.g. `in/in` → dimensionless, `m·s/in` → `s` after converting `in` to `m`),
+ * and collect equal factors into a power (`m·m` → `m^2`, `m^2·m` → `m^3`).
  *
  * Returns `null` when the unit cannot be flattened/cancelled, or when nothing
- * changed (same factors and unit magnitude scale of 1) — in which case the
- * caller should keep the original boxed unit to avoid churn.  Otherwise
- * returns the magnitude scale to apply and the rebuilt `UnitExpression`
- * (`null` rebuilt = fully cancelled → dimensionless).
+ * changed — in which case the caller should keep the original boxed unit, as
+ * the user wrote it, to avoid churn.  Nothing changed when the unit magnitude
+ * scale is 1, the factor map is the same as before, and no unit symbol occurs
+ * more than once in the original unit.  The last test is necessary because
+ * `m·m` and `m^2` have the same factor map, but only `m^2` has each unit once.
+ * The factor maps are compared, not the rebuilt unit: the rebuilt unit is
+ * always a quotient of positive powers, so `(m/s)^2` or `kg·m·s^-2` would
+ * otherwise be rewritten although nothing cancelled or collected.
+ *
+ * Otherwise returns the magnitude scale to apply and the rebuilt
+ * `UnitExpression` (`null` rebuilt = fully cancelled → dimensionless).
  */
 function cancelCompoundUnit(
   ue: UnitExpression
@@ -450,15 +489,14 @@ function cancelCompoundUnit(
   if (!flat) return null;
   const cancelled = cancelUnitFactors(flat);
   if (!cancelled) return null;
+  const rebuilt = unitExpressionFromFactors(cancelled.factors);
   if (
     cancelled.magnitudeScale === 1 &&
-    factorMapsEqual(cancelled.factors, flat)
+    factorMapsEqual(cancelled.factors, flat) &&
+    !hasRepeatedUnitSymbol(ue)
   )
     return null;
-  return {
-    magnitudeScale: cancelled.magnitudeScale,
-    rebuilt: unitExpressionFromFactors(cancelled.factors),
-  };
+  return { magnitudeScale: cancelled.magnitudeScale, rebuilt };
 }
 
 /**
@@ -482,7 +520,10 @@ function simplifyQuantityUnit(
     if (cancelled) {
       mag = mag * cancelled.magnitudeScale;
       if (cancelled.rebuilt === null) return ce.number(mag);
-      unit = ce.expr(cancelled.rebuilt as any);
+      // A unit name is not a variable: box the rebuilt unit resolve-only, so
+      // that a unit name with no definition is not declared in the current
+      // scope. The named unit below is boxed the same way.
+      unit = ce._resolveOnly(() => ce.expr(cancelled.rebuilt as any));
       ue = boxedToUnitExpression(unit);
     }
   }
@@ -501,7 +542,10 @@ function simplifyQuantityUnit(
         // the compound unit's scale to get the magnitude in the named unit.
         const scale = getExpressionScale(ue);
         if (scale !== null)
-          return ce._fn('Quantity', [ce.number(mag * scale), ce.symbol(match)]);
+          return ce._fn('Quantity', [
+            ce.number(mag * scale),
+            ce.symbol(match, { autoDeclare: false }),
+          ]);
       }
     }
   }
@@ -528,7 +572,9 @@ function simplifyQuantityUnitMeasurement(
     if (cancelled) {
       mag = scaleMagnitude(ce, mag, cancelled.magnitudeScale);
       if (cancelled.rebuilt === null) return mag;
-      unit = ce.expr(cancelled.rebuilt as any);
+      // Resolve-only, as in `simplifyQuantityUnit`: a unit name is not a
+      // variable.
+      unit = ce._resolveOnly(() => ce.expr(cancelled.rebuilt as any));
       ue = boxedToUnitExpression(unit);
     }
   }
@@ -547,7 +593,7 @@ function simplifyQuantityUnitMeasurement(
         if (scale !== null)
           return ce._fn('Quantity', [
             scaleMagnitude(ce, mag, scale),
-            ce.symbol(match),
+            ce.symbol(match, { autoDeclare: false }),
           ]);
       }
     }
@@ -574,10 +620,14 @@ export function quantityPower(
   exp: Expression
 ): Expression | undefined {
   if (!isQuantity(base)) return undefined;
-  const magIsMeasurement = isMeasurement(base.op1);
+  // A symbolic magnitude is raised with the expression arithmetic of the
+  // `Measurement` branch, with no error.
+  const magIsMeasurement =
+    isMeasurement(base.op1) || isSymbolicValue(base.op1);
   const mag = base.op1.re;
   const n = exp.re;
-  if (n === undefined) return undefined;
+  // A unit exponent must be a number: `Quantity(3, m)^n` stays unevaluated.
+  if (n === undefined || isSymbolicValue(exp)) return undefined;
   if (!magIsMeasurement && mag === undefined) return undefined;
 
   // Simplify unit exponents: Power(Power(u, a), b) → Power(u, a*b)
@@ -603,6 +653,16 @@ export function quantityPower(
     if (poweredMag === undefined) return undefined;
     return ce._fn('Quantity', [poweredMag, resultUnit]);
   }
+
+  // An exact fractional exponent (the `1/2` of a square root) is evaluated
+  // exactly: `Math.pow` gives a float, but the square root of an exact `2`
+  // must stay `√2` under `evaluate()`. The square root of `9` is still `3`.
+  // A float exponent keeps the `Math.pow` arithmetic below.
+  if (!Number.isInteger(n) && isNumber(exp) && exp.isExact)
+    return ce._fn('Quantity', [
+      ce.function('Power', [base.op1, exp]).evaluate(),
+      resultUnit,
+    ]);
 
   return ce._fn('Quantity', [ce.number(Math.pow(mag!, n)), resultUnit]);
 }

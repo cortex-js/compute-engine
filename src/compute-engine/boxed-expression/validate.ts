@@ -36,6 +36,8 @@ import {
   resolveTypeAlias,
   stripMissingFromType,
   stripMissingFromElements,
+  unfoldAliasOnDescent,
+  type AliasDescent,
   signatureSlotType,
   staticCollectionDims,
   functionResult,
@@ -2323,10 +2325,15 @@ export function checkPure(
  *
  */
 /**
- * Strip-before-validate decision (§3.B): at a stripped position, an operand
- * carrying a `missing` arm is admitted iff its stripped type still matches the
- * parameter. A Missing-free operand (`typeContainsMissing` false) is never
- * touched, so the lift is invisible to Missing-free programs.
+ * Strip-before-validate decision (§3.B): at a stripped position, the operand
+ * type is examined when it has a `missing` arm or an `any` cell (a tuple
+ * component, a list element, a dictionary value or a record field typed
+ * `any`), after a structural type alias is replaced by its definition. The
+ * `missing` arms are removed and each `any` cell is read as `unknown`; the
+ * operand is admitted when the result matches the parameter. An operand with
+ * neither a `missing` arm nor an `any` cell is not examined here. So, at a
+ * stripped position, a program with no `Missing` can see this change: a
+ * `tuple<any, any>` operand is admitted where `tuple` is expected.
  *
  * At any other position, only the ELEMENTS of a collection operand are
  * stripped, and only at a collection-kind parameter — see
@@ -2338,9 +2345,37 @@ function strippedMatchesParam(
   idx: number,
   stripMissing?: (index: number) => boolean
 ): boolean {
-  if (!op.type.facts.containsMissing) return false;
-  if (!stripMissing?.(idx)) return absentElementsMatchParam(op, param);
-  const stripped = stripMissingFromType(op.type.type);
+  if (!stripMissing?.(idx)) {
+    if (!op.type.facts.containsMissing) return false;
+    return absentElementsMatchParam(op, param);
+  }
+  // An `any` cell inside the operand (a tuple component, a list element)
+  // can hold an absent value, as a `T | missing` cell can. At a stripped
+  // position the runtime gate answers that absence, so the cell is read as
+  // `unknown`, the type of every value. The operand is then admitted only
+  // when it is a SUBTYPE of the parameter, the same test as for a `missing`
+  // arm, or when the list-length test below admits it. So
+  // `Dot((1, 2), (x, y))` with `x` and `y` declared `any` is admitted at the
+  // bare `tuple` parameter, as it is when `x` and `y` are declared `unknown`;
+  // the Tycho importer declares every parameter of a definition `any` (Tycho
+  // ledger row 376). The deferral that admits an `unknown` cell at a typed
+  // slot (`overlapsForDeferredValidation`) is not applied: an `any` cell at a
+  // typed slot, `tuple<any>` at `tuple<number>`, stays refused
+  // (`tycho-item-257-tuple-param-deferral.test.ts`).
+  //
+  // A structural alias is replaced by its definition first, so that `p`
+  // declared with an alias of `tuple<any, any>` is tested on the tuple, as
+  // `p` declared `tuple<any, any>` is. The `containsMissing` fact and
+  // `stripMissingFromType` read through a structural alias at every depth
+  // themselves (`common/type/utils.ts`), so an alias of
+  // `missing | tuple<number, number>` needs no resolution here; the explicit
+  // resolution is for the `any`-cell test below. A nominal type is not
+  // replaced, so it stays refused.
+  const t = resolveTypeAlias(op.type.type);
+  const hasMissing = op.type.facts.containsMissing;
+  const anyAsValue = anyCellsAsUnknown(t);
+  if (!hasMissing && anyAsValue === t) return false;
+  const stripped = stripMissingFromType(anyAsValue);
   if (stripped === 'never' || isSubtype(stripped, param)) return true;
   // A rank-free list of scalars whose length the VALUE knows is the vector
   // of that length. A list holding a restricted cell, `[1{c}, 2{c}]`, and a
@@ -2359,6 +2394,75 @@ function strippedMatchesParam(
   const r = resolveTypeAlias(stripped);
   if (typeof r === 'string' || r.kind !== 'list') return false;
   return isSubtype({ ...r, dimensions: [count] }, param);
+}
+
+/**
+ * `t` with each `any` cell replaced by `unknown`. A cell is an element type, a
+ * tuple component, a dictionary value or a record field, at any depth. A
+ * top-level `any` (an operand typed `any`, or an arm of a union) is not a
+ * cell and is kept. A structural type alias at any depth is replaced by its
+ * definition before it is examined. Returns `t` itself when it has no `any`
+ * cell.
+ *
+ * A self-referential alias (`type alias json = list<json> | integer`, or
+ * `type alias cyc = cyc | 0`) meets itself again inside its definition.
+ * {@link resolveTypeAlias} guards only one chain of references, so the walk
+ * counts the unfolds of each alias on the current path in `seen`
+ * ({@link unfoldAliasOnDescent}). When an alias has used all of its unfolds
+ * on this path, its occurrence is kept unchanged.
+ */
+function anyCellsAsUnknown(t0: Readonly<Type>, seen?: AliasDescent): Type {
+  const unfolded = unfoldAliasOnDescent(t0, seen);
+  if (unfolded === undefined) return t0 as Type;
+  const t = unfolded.type;
+  const next = unfolded.seen;
+  if (typeof t === 'string') return t0 as Type;
+  const cell = (x: Readonly<Type>): Type =>
+    resolveTypeAlias(x) === 'any' ? 'unknown' : anyCellsAsUnknown(x, next);
+  switch (t.kind) {
+    case 'union':
+    case 'intersection': {
+      const types = t.types.map((x) => anyCellsAsUnknown(x, next));
+      return types.every((x, i) => x === t.types[i])
+        ? (t0 as Type)
+        : { ...t, types };
+    }
+    case 'list':
+    case 'set':
+    case 'collection':
+    case 'indexed_collection':
+    case 'broadcastable': {
+      const elements = cell(t.elements);
+      return elements === t.elements ? (t0 as Type) : { ...t, elements };
+    }
+    case 'tuple': {
+      const types = t.elements.map((e) => cell(e.type));
+      return types.every((x, i) => x === t.elements[i].type)
+        ? (t0 as Type)
+        : {
+            ...t,
+            elements: t.elements.map((e, i) => ({ ...e, type: types[i] })),
+          };
+    }
+    case 'dictionary': {
+      const values = cell(t.values);
+      return values === t.values ? (t0 as Type) : { ...t, values };
+    }
+    case 'record':
+    case 'object': {
+      // A prototype-free map, as in `stripMissingFromType`: a field can be
+      // named `__proto__` or `toString`.
+      let changed = false;
+      const elements: Record<string, Type> = Object.create(null);
+      for (const key of Object.keys(t.elements)) {
+        elements[key] = cell(t.elements[key]);
+        if (elements[key] !== t.elements[key]) changed = true;
+      }
+      return changed ? { ...t, elements } : (t0 as Type);
+    }
+    default:
+      return t0 as Type;
+  }
 }
 
 /**
