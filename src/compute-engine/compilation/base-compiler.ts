@@ -1883,6 +1883,21 @@ export function exactRationalDivisor(
 }
 
 /**
+ * `isPossiblyCollectionTyped` for the compiled lanes: a symbol the user
+ * declared `any` or `value` is read as a SCALAR here, and so is a library
+ * element-wise application over scalars (`2a + 1`), where the typing route
+ * reads them as a possible collection (user decision 2026-10-17, Tycho
+ * ledger row 379). Compiled code binds such a symbol as the value the host
+ * passes, and a run-time kernel such as `_SYS.absAny` checks that value
+ * itself; wrapping every use in a broadcast would cost a closure per site
+ * for a consumer that declares every parameter `any`. A call of a user
+ * function typed `any` and a `broadcastable<T>` type keep their reading.
+ */
+function possiblyCollectionTypedForCompile(e: Expression): boolean {
+  return isPossiblyCollectionTyped(e, { declaredSymbols: false });
+}
+
+/**
  * `target` is optional, and passing it can only make the answer NARROWER: a
  * value the JavaScript emission proves scalar by CONSTRUCTION — a literal, an
  * explicitly declared scalar input, scalar arithmetic over those, or a call of
@@ -1910,7 +1925,7 @@ function isBoundPossiblyCollectionTyped(
   // `compilationType` would already have resolved a sum alias to its body.
   if (unionAdmitsIndexedCollection(a.type.type)) return true;
   const t = compilationType(a);
-  if (!isPossiblyCollectionTyped(a)) return false;
+  if (!possiblyCollectionTypedForCompile(a)) return false;
   if (typeof t !== 'string' && t.kind === 'broadcastable') return true;
   return a.isCanonical || a.isStructural;
 }
@@ -5314,7 +5329,9 @@ export class BaseCompiler {
 
   /** Whether the value of `e` may be a collection, by its type. */
   private static mayBeCollectionValued(e: Expression): boolean {
-    return e.type.matches('collection<any>') || isPossiblyCollectionTyped(e);
+    return (
+      e.type.matches('collection<any>') || possiblyCollectionTypedForCompile(e)
+    );
   }
 
   /** The lane records of the compilation that owns `registry`. */
@@ -6001,7 +6018,7 @@ export class BaseCompiler {
     return (
       index.type.matches('collection<any>') ||
       index.isCollection === true ||
-      isPossiblyCollectionTyped(index)
+      possiblyCollectionTypedForCompile(index)
     );
   }
 
@@ -15781,7 +15798,8 @@ export class BaseCompiler {
     // for those the operands' realness says nothing about the result's.
     if (BaseCompiler.NON_PROMOTING_ELEMENTWISE_HEADS.has(h))
       return coll.ops.every((op) =>
-        op.type.matches('collection<any>') || isPossiblyCollectionTyped(op)
+        op.type.matches('collection<any>') ||
+        possiblyCollectionTypedForCompile(op)
           ? BaseCompiler.elementsRealByConstruction(op)
           : !BaseCompiler.isComplexValued(op)
       );

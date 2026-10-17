@@ -1958,13 +1958,20 @@ describe('POINT/TUPLE ARITHMETIC — point LIST scaled or divided elementwise', 
     'list<number>',
     'indexed_collection<number>',
     'broadcastable<number>',
-    'any',
     'unknown',
   ])('list<tuple<number, number>> / %s keeps tuple elements', (den) => {
     const ce = pointListEngine(den);
     expect(ce.box(['Divide', 'p', 'q']).type.toString()).toBe(
       'list<tuple<number, number>>'
     );
+  });
+
+  test('list<tuple<number, number>> / any has `any` cells: the divisor may be a list', () => {
+    // A symbol declared `any` is read as a possible collection (user
+    // decision 2026-10-17, Tycho ledger row 379): each point over a list
+    // value of `q` is a list of points, so the cell is `any`.
+    const ce = pointListEngine('any');
+    expect(ce.box(['Divide', 'p', 'q']).type.toString()).toBe('list<any>');
   });
 
   test('a 3-component point list keeps its arity through Divide', () => {

@@ -9,7 +9,10 @@ import {
   takeEagerSourceValue,
   type EagerSourceValues,
 } from './eager-source-values.js';
-import { hasAsyncOnlyApplication } from './async-only-descendants.js';
+import {
+  awaitAsyncOnlyDescendants,
+  hasAsyncOnlyApplication,
+} from './async-only-descendants.js';
 import {
   ambientChainParent,
   registerScopeActivation,
@@ -77,6 +80,8 @@ import {
   isKindOpenOperandType,
   skipBroadcastForVectorOpsOnViews,
   type BroadcastOperandView,
+  broadcastableOf,
+  topTypeOfTriggers,
 } from './broadcast-lift-type.js';
 import { listedBroadcastCells } from './listed-element.js';
 import {
@@ -272,7 +277,6 @@ import type { ErrorFrame } from './error-value.js';
 import { match } from './match.js';
 import { factor } from './factor.js';
 import { holdMap, holdMapAsync } from './hold.js';
-import { awaitAsyncOnlyDescendants } from './async-only-descendants.js';
 import {
   positiveSign,
   nonNegativeSign,
@@ -8507,6 +8511,13 @@ class ExpressionOperandView implements BroadcastOperandView {
   get isApplication(): boolean {
     return isFunction(this.x);
   }
+  get declaredTopSymbol(): boolean {
+    if (!isSymbol(this.x)) return false;
+    const def = this.x.valueDefinition;
+    if (def === undefined || def.inferredType === true) return false;
+    const t = resolveTypeAlias(this.x.type.type);
+    return t === 'any' || t === 'value';
+  }
   get isCollection(): boolean {
     return this.x.isCollection;
   }
@@ -9143,8 +9154,24 @@ function lambdaBroadcastType(
           (abstractCollectionCell(x.type.type) !== undefined &&
             !holdsUnindexedCollection(x)))
     )
-  )
-    return { kind: 'broadcastable', elements: perElementResult };
+  ) {
+    // A top-typed trigger gives a numeric application the top type (see
+    // `topTypeOfTriggers` in `broadcast-lift-type.ts`); the cell of an
+    // abstract collection is such a trigger too, as in `broadcastLiftType`.
+    const top = topTypeOfTriggers(
+      ops.flatMap((x, i) => {
+        if (!mappable(i)) return [];
+        if (isPossiblyCollectionTyped(x)) return [{ type: x.type.type }];
+        const cell = abstractCollectionCell(x.type.type);
+        return cell !== undefined && !holdsUnindexedCollection(x)
+          ? [{ type: cell.cell }]
+          : [];
+      }),
+      perElementResult
+    );
+    if (top !== undefined) return top;
+    return broadcastableOf(perElementResult);
+  }
   return undefined;
 }
 

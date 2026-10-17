@@ -122,8 +122,10 @@ const EPSIL_CASES: [string, string, string, string[]][] = [
     'mixed use',
     'mean(xs) + xs',
     // The sum of a scalar and the parameter is element-wise over a
-    // parameter that may hold a list: `broadcastable<…>` since 2026-09-29.
-    '(collection<any> | value) -> broadcastable<any>',
+    // parameter that may hold a list (since 2026-09-29); the parameter may
+    // also hold a point, so the result is the bare `any` (`broadcastable<any>`
+    // is `any`; user decision 2026-10-17, Tycho ledger row 379).
+    '(collection<any> | value) -> any',
     [LIST, NESTED, SCALAR],
   ],
 ];

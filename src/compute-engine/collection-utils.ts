@@ -7,7 +7,6 @@ import {
   resolveTypeAlias,
   stripMissingFromType,
   isPointElementType,
-  stripNumericRanges,
   unfoldAliasOnDescent,
   recordUnfoldOnDescent,
   type AliasDescent,
@@ -1773,6 +1772,17 @@ export function scalarOrListUnionCellType(t: Readonly<Type>): Type | undefined {
   return reduceType({ kind: 'union', types: cells });
 }
 
+/** The options of {@link isPossiblyCollectionTyped}. */
+export type PossiblyCollectionTypedOptions = {
+  /** `false` reads a symbol declared `any` or `value` as a scalar, and a
+   * library element-wise application over scalars with it (the compiled
+   * lanes; see the function's comment). */
+  declaredSymbols?: boolean;
+  /** The memo of one call's walk through library applications, keyed by
+   * expression (a DAG is walked once per node). Set by the function. */
+  seen?: Map<Expression, boolean>;
+};
+
 /**
  * True when `expr`'s collection-ness is **not statically visible**, so an
  * element-wise numeric operator (`Add`/`Multiply`) over it must produce a
@@ -1793,19 +1803,34 @@ export function scalarOrListUnionCellType(t: Readonly<Type>): Type | undefined {
  *   (`scalarOrCollectionUnionBranches`) already types it per branch, more
  *   precisely than a `broadcastable` wrapper could.
  *
- * Deliberately EXCLUDES a bare **symbol** with a top type: an undeclared
- * symbol types `unknown` only until the surrounding arithmetic's
+ * A bare **symbol** with a top type is admitted only when the user DECLARED
+ * it `any` or `value` (user decision 2026-10-17, Tycho ledger row 379): such
+ * a symbol is never refined by inference, and its value may be a list, a
+ * point or a matrix (`2·(1, 2, 3)` evaluates to `(2, 4, 6)`), so an
+ * element-wise operator over it answers the symbol's own type (the lift
+ * reduces `broadcastable<any>` to `any`). An undeclared symbol is EXCLUDED:
+ * it types `unknown` only until the surrounding arithmetic's
  * `checkNumericArgs` infers it scalar-numeric, so treating it as
- * possibly-a-collection is order-dependent (`2x` on a cold engine would type
- * `broadcastable<number>` while a warm one gives `number`) and
- * mis-routes the invisible-operator multiply-vs-Tuple gate (`6n`,
+ * possibly-a-collection would be order-dependent (`2x` on a cold engine would
+ * type `broadcastable<number>` while a warm one gives `number`) and would
+ * mis-route the invisible-operator multiply-vs-Tuple gate (`6n`,
  * `(abc)(xyz)`). An application's top-typed result is never refined by
- * inference, so it genuinely may resolve to a collection at runtime. It also
- * excludes an inferred-`number` symbol: `Add(2, x)` stays `number` and
- * `Multiply(2, x)` stays `number` (see the "non-interference with
- * scalars" pins in `list-broadcast-typing.test.ts`). Statically-visible
+ * inference, so it genuinely may resolve to a collection at runtime. The
+ * predicate also excludes an inferred-`number` symbol: `Add(2, x)` stays
+ * `number` and `Multiply(2, x)` stays `number` (see the "non-interference
+ * with scalars" pins in `list-broadcast-typing.test.ts`). Statically-visible
  * collection/tuple/tensor operands are handled by the dedicated branches that
  * fire before this predicate is consulted.
+ *
+ * `options.declaredSymbols: false` restores the scalar reading of a declared
+ * `any`/`value` symbol, and reads a top-typed application of a LIBRARY
+ * element-wise operator through its operands (`2a + 1` with `a: any` is
+ * typed `any` because `a` is, and is read as a scalar here). The compiled
+ * lanes pass it: compiled code reads such a symbol as a scalar (`Abs(z)`
+ * with `z: any` compiles to `_SYS.absAny(z)`, not to a broadcast of it), and
+ * a consumer that declares every parameter `any` would otherwise pay a
+ * broadcast wrapper at every arithmetic site. A call of a user function
+ * typed `any` keeps its reading: its body may build a list.
  *
  * A top-typed SELECTION (`If`, `Which`) is as collection-shaped as its arms:
  * its value is the value of one arm, and its type is `unknown` as soon as
@@ -1814,14 +1839,49 @@ export function scalarOrListUnionCellType(t: Readonly<Type>): Type | undefined {
  * `a` is read through its arms, `a` and `5`, as the bare `a` would be, and
  * `If(d < 0, a, 5) + z` still compiles.
  */
-export function isPossiblyCollectionTyped(expr: Expression): boolean {
+export function isPossiblyCollectionTyped(
+  expr: Expression,
+  options?: PossiblyCollectionTypedOptions
+): boolean {
   // Resolve a transparent alias BEFORE the top-type test, so an alias whose
   // body is a top type takes the application check like the bare spelling.
   const t = resolveTypeAlias(expr.type.type);
+  if ((t === 'any' || t === 'value') && isSymbol(expr))
+    return (
+      options?.declaredSymbols !== false &&
+      expr.valueDefinition !== undefined &&
+      expr.valueDefinition.inferredType !== true
+    );
+  if (
+    (t === 'any' || t === 'value') &&
+    options?.declaredSymbols === false &&
+    isLibraryBroadcastableApplication(expr)
+  ) {
+    // The walk is memoized per call: the operands form a DAG (a shared
+    // subexpression is one node reached from several parents), and without
+    // the memo a chain `t₀ = a, tₙ = Beta(tₙ₋₁, tₙ₋₁)` was walked once per
+    // path, which is exponential in its depth.
+    const seen = options.seen ?? new Map<Expression, boolean>();
+    const memo = seen.get(expr);
+    if (memo !== undefined) return memo;
+    const withSeen =
+      options.seen === undefined ? { ...options, seen } : options;
+    const result = expr.ops.some(
+      (op) =>
+        op.type.matches(COLLECTION_SHAPE_TYPE) ||
+        unionMayHoldACollection(op.type.type) ||
+        isPossiblyCollectionTyped(op, withSeen)
+    );
+    seen.set(expr, result);
+    return result;
+  }
   if (t === 'unknown' || t === 'any' || t === 'value') {
     if (!isFunction(expr)) return false;
     const arms = selectionArms(expr);
-    return arms === undefined || arms.some(selectionArmMayBeCollection);
+    return (
+      arms === undefined ||
+      arms.some((arm) => selectionArmMayBeCollection(arm, options))
+    );
   }
   if (typeof t === 'string') return false;
   if (t.kind === 'broadcastable') return true;
@@ -1840,16 +1900,40 @@ export function isPossiblyCollectionTyped(expr: Expression): boolean {
   });
 }
 
+/** An application of a `broadcastable` operator bound in the engine's
+ * system scope (a library operator such as `Add`, `Sin` or `Abs`, not a
+ * user function or a replaced library operator): its value over scalar
+ * operands is a scalar, whatever its static type says. */
+function isLibraryBroadcastableApplication(
+  expr: Expression
+): expr is Expression & FunctionInterface {
+  if (!isFunction(expr)) return false;
+  const def = expr.operatorDefinition;
+  if (def === undefined || !def.broadcastable) return false;
+  const engine = expr.engine;
+  if (engine._customLibraryOperators.has(expr.operator)) return false;
+  const binding = engine.contextStack[0]?.lexicalScope.bindings.get(
+    expr.operator
+  );
+  return (
+    binding !== undefined && 'operator' in binding && binding.operator === def
+  );
+}
+
 /** True when an arm of a top-typed selection may be a collection: an arm
  * that IS one (a list literal, a symbol declared `list<number>`), an arm
  * whose type is a union with a collection member (`number | list<number>`),
  * or an arm that is possibly a collection by the rule of
- * `isPossiblyCollectionTyped` (a top-typed application, a `broadcastable`
- * type). A bare top-typed symbol is excluded, as that rule excludes it. */
-function selectionArmMayBeCollection(arm: Expression): boolean {
+ * `isPossiblyCollectionTyped` (a top-typed application, a symbol declared
+ * `any` or `value`, a `broadcastable` type). An undeclared top-typed symbol
+ * is excluded, as that rule excludes it. */
+function selectionArmMayBeCollection(
+  arm: Expression,
+  options?: PossiblyCollectionTypedOptions
+): boolean {
   if (arm.isCollection || arm.type.matches(COLLECTION_SHAPE_TYPE)) return true;
   if (unionMayHoldACollection(arm.type.type)) return true;
-  return isPossiblyCollectionTyped(arm);
+  return isPossiblyCollectionTyped(arm, options);
 }
 
 /** The arms of a selection, or `undefined` when `expr` is not one: the two
@@ -1892,41 +1976,6 @@ function selectionArms(
  */
 export function isValuelessCollectionTyped(expr: Expression): boolean {
   return !expr.isCollection && expr.type.matches('collection<any>');
-}
-
-/**
- * The `broadcastable<T>` result type of an element-wise numeric operator
- * (`Add`/`Multiply`) when at least one operand `isPossiblyCollectionTyped`.
- *
- * Each operand contributes a scalar element type: a `broadcastable<S>`
- * contributes `S`; a top `unknown`/`any`/`value` contributes `number`
- * (`Add`/`Multiply` are numeric, so the element-wise result over any valid
- * runtime operand is a number); a collection type contributes its
- * unwrapped scalar element (`broadcastElementType` — unions and collections
- * contribute their element, scalars themselves). The
- * widened element becomes the `broadcastable` element, with one adjustment: a
- * widened `imaginary` element becomes `complex`, because sums and
- * products of imaginaries can cancel to a real (`i + i` … `i·i = −1`).
- */
-export function broadcastableResultTypeOf(
-  ops: ReadonlyArray<Expression>
-): Type {
-  const contributions = ops.map((op): Type => {
-    const t = op.type.type;
-    if (typeof t !== 'string' && t.kind === 'broadcastable') return t.elements;
-    if (t === 'unknown' || t === 'any' || t === 'value') return 'number';
-    // `broadcastElementType`, not `collectionElementType`: a union-typed
-    // operand (e.g. a declared `number | list<number>` return) must
-    // contribute its unwrapped scalar element, not the raw union — otherwise
-    // the collection branch leaks into the broadcastable element
-    // (`broadcastable<number | list<number>>`).
-    return broadcastElementType(t);
-  });
-  // Strip range/sign decorations before the join: an arithmetic result
-  // does not lie in the union of its operands' ranges (`stripNumericRanges`).
-  let element = widenAll(contributions.map((t) => stripNumericRanges(t)));
-  if (element === 'imaginary') element = 'complex';
-  return { kind: 'broadcastable', elements: element };
 }
 
 /**

@@ -2375,15 +2375,17 @@ function isNumericTupleType(t0: Type): boolean {
  * Twin of `isPossiblyCollectionTyped`: an operand whose collection-ness is
  * not statically visible, so an element-wise result must stay lifted.
  *
- * The expression predicate admits a top-typed operand only when it is a
- * function APPLICATION — a bare top-typed symbol is refined to a scalar by
- * the surrounding arithmetic's own inference, so treating it as
- * possibly-a-collection would be order-dependent. The descriptor's
+ * The expression predicate admits a top-typed operand when it is a function
+ * APPLICATION, or a symbol the user DECLARED `any` or `value`; an
+ * auto-declared symbol (typed `unknown`, refined to a scalar by the
+ * surrounding arithmetic's own inference) is read as a scalar, as treating it
+ * as possibly-a-collection would be order-dependent. The descriptor's
  * structural view answers the same question: an operand with children is a
- * function expression, and a symbol has none.
+ * function expression, and a symbol node carries the inferred flag.
  */
 function isPossiblyCollectionTypedOperand(d: OperandDescriptor): boolean {
   const t = resolveTypeAlias(d.type);
+  if (unrefinedTopTypeOfOperand(d) !== undefined) return true;
   if (t === 'unknown' || t === 'any' || t === 'value')
     return operandChildren(d) !== undefined;
   if (typeof t === 'string') return false;
@@ -2395,18 +2397,90 @@ function isPossiblyCollectionTypedOperand(d: OperandDescriptor): boolean {
   });
 }
 
-/** Twin of `broadcastableResultTypeOf`. */
+/**
+ * The top type (`any` or `value`) of an operand that the surrounding
+ * arithmetic never refines, or `undefined` for every other operand. Two
+ * operand shapes qualify: a SYMBOL the user declared with that type
+ * (`a: any`), and an APPLICATION typed with it (a call of a function
+ * declared `-> any`, the power `a^2` of such a symbol).
+ *
+ * The value of such an operand may be a number, a tuple, a list or a matrix,
+ * and a product, a quotient or a power over it is then a number, a tuple
+ * (`2·(1, 2, 3)` evaluates to `(2, 4, 6)`, `(1, 2)^2` to `(1, 4)`), a list or
+ * a matrix. `broadcastable<number>` does not admit a tuple or a matrix, so no
+ * type narrower than the operand's own covers the result, and the handlers
+ * of `Multiply`, `Divide` and `Power` answer the operand's type when it
+ * stands beside scalars, as `Add` and `Negate` already did for the same
+ * operand (`a + 1` and `−a` are `any`). The broadcast lift admits such an
+ * operand too (`isPossiblyCollectionTyped`, `collection-utils.ts`) and
+ * answers the bare top type for the whole application (`broadcastableOf`,
+ * `broadcast-lift-type.ts`), so `\sin a` and `2g(x)` with `g: -> any` are
+ * `any` as well (user decision 2026-10-17). Before, the product was typed
+ * `number`: a declared-`any` factor contradicted its value, and a function
+ * whose body multiplies such a symbol was given a `number` result although
+ * its value was a point (Tycho ledger row 379).
+ *
+ * An auto-declared symbol does not qualify: it is typed `unknown`, not
+ * `any`, and the arithmetic's own inference refines it to a scalar. A call
+ * of an undeclared function is typed `unknown` too, and keeps the
+ * `broadcastable<number>` reading. The cell of an abstract collection
+ * (`P: collection<any>`) keeps the structural view of the symbol `P` with
+ * the cell type `any` (`describeOperand(x, cell)` in `boxed-function.ts`,
+ * and the `structureOf` carried over in `derive-application-type.ts`), so
+ * it qualifies, and `2P` is `any` as `P + 1` is. Beside a point or a list
+ * the answer is the top type as well (`a·(1, 2)` may be a list of points,
+ * `a·L` a list of points or an element-wise list), so the check runs before
+ * the tuple and collection branches of the three handlers.
+ */
+function unrefinedTopTypeOfOperand(
+  d: OperandDescriptor
+): 'any' | 'value' | undefined {
+  const t = resolveTypeAlias(d.type);
+  if (t !== 'any' && t !== 'value') return undefined;
+  const s = d.structureOf?.();
+  if (s === undefined) return undefined;
+  if (s.kind === 'application') return t;
+  return s.kind === 'symbol' && s.inferred !== true ? t : undefined;
+}
+
+/**
+ * The widest top type among the operands that `unrefinedTopTypeOfOperand`
+ * admits, or `undefined` when there is none: `any` when one operand is
+ * `any`, else `value`.
+ */
+function unrefinedTopTypeOfOperands(
+  ops: ReadonlyArray<OperandDescriptor>
+): 'any' | 'value' | undefined {
+  let result: 'any' | 'value' | undefined = undefined;
+  for (const op of ops) {
+    const t = unrefinedTopTypeOfOperand(op);
+    if (t === 'any') return 'any';
+    if (t === 'value') result = 'value';
+  }
+  return result;
+}
+
+/** The `broadcastable<T>` result of an element-wise operator over operand
+ * descriptors of which one may be a collection
+ * (`isPossiblyCollectionTypedOperand`); a top-typed operand makes it the bare
+ * top type. */
 function broadcastableResultTypeOfOperands(
   ops: ReadonlyArray<OperandDescriptor>
 ): Type {
   const contributions = ops.map((op): Type => {
     const t = op.type;
     if (typeof t !== 'string' && t.kind === 'broadcastable') return t.elements;
-    if (t === 'unknown' || t === 'any' || t === 'value') return 'number';
+    // An `unknown`-typed operand (a call of an undeclared function) is read
+    // as a number; an operand typed `any` or `value` may be a point or a
+    // matrix, and contributes its own type (`unrefinedTopTypeOfOperand`).
+    if (t === 'unknown') return 'number';
+    if (t === 'any' || t === 'value') return t;
     return broadcastElementType(t);
   });
   let element = widenAll(contributions.map((t) => stripNumericRanges(t)));
   if (element === 'imaginary') element = 'complex';
+  // `broadcastable<any>` is `any` (see `broadcastableOf`).
+  if (element === 'any' || element === 'value') return element;
   return { kind: 'broadcastable', elements: element };
 }
 
@@ -5141,6 +5215,14 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           return BoxedType.forResult('value', context.engine._typeResolver);
         if (operandLiteralValueOnTypes(den) === 1)
           return BoxedType.forResult(num.type, context.engine._typeResolver);
+        // A numerator or a denominator typed `any` or `value` (a declared
+        // symbol, a call typed so): it may be a number, a tuple or a list,
+        // and so may the quotient, which takes that type (see
+        // `unrefinedTopTypeOfOperand`). Before the tuple branch: a point over
+        // such a denominator may be a list of points.
+        const topOperand = unrefinedTopTypeOfOperands(ops);
+        if (topOperand !== undefined)
+          return BoxedType.forResult(topOperand, context.engine._typeResolver);
         // A numeric tuple (point/vector) divided by a scalar keeps the tuple
         // type, mirroring the `Multiply` handler. `canonicalDivide` scales
         // component-wise only when the numerator's components are ACCESSIBLE
@@ -7550,6 +7632,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           return BoxedType.forResult('value', engine._typeResolver);
         if (ops.length === 1)
           return BoxedType.forResult(ops[0].type, engine._typeResolver);
+        // A factor typed `any` or `value` (a declared symbol, a call typed
+        // so): it may be a number, a tuple, a list or a matrix, and so may
+        // the product, which takes that type (see
+        // `unrefinedTopTypeOfOperand`). Before the tuple and collection
+        // branches: beside a point such a factor may be a list, which gives
+        // a list of points, and beside a list a point, which gives the same.
+        const topFactor = unrefinedTopTypeOfOperands(ops);
+        if (topFactor !== undefined)
+          return BoxedType.forResult(topFactor, engine._typeResolver);
         // A factor that is NaN or a number (`nan | real`, the type of an
         // element read `l[i]` whose index may fall outside the list): the
         // product is NaN when that factor is NaN, and otherwise the product
@@ -8015,8 +8106,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           );
         }
         // An operand whose collection-ness is not statically visible (a top
-        // `unknown`/`any`/`value` leaf such as an undeclared `h(x)`, or an
-        // already-`broadcastable<…>` inner node) makes the product
+        // `unknown` leaf such as an undeclared `h(x)`, or an
+        // already-`broadcastable<…>` inner node; an `any`/`value` operand is
+        // answered above) makes the product
         // `broadcastable<T>`. Hoisted above the NaN/finiteness early-returns
         // for the same reason as `addType`'s branch: a broadcastable inner node
         // has no meaningful finiteness, and an `unknown`-typed leaf decides
@@ -8559,6 +8651,16 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             // `Sqrt`/`Erf` precedent).
             if (provablyNaNOperand(base) || provablyNaNOperand(exp))
               return undefined;
+            // A base or an exponent typed `any` or `value` (a declared
+            // symbol, a call typed so) may be a tuple or a list, and so may
+            // the power (`(1, 2)^2` is `(1, 4)`, `2^{(1, 2)}` is `(2, 4)`):
+            // it takes that type (see `unrefinedTopTypeOfOperand`).
+            const topOperand = unrefinedTopTypeOfOperands(ops);
+            if (topOperand !== undefined)
+              return BoxedType.forResult(
+                topOperand,
+                context.engine._typeResolver
+              );
             // A non-finite base or exponent can produce ±∞ *or* NaN — `0^∞`,
             // `∞^0`, `1^∞`, `i^∞`, `∞^i` are all indeterminate. Only a
             // *non-negative real* base raised to a *positive finite real* exponent

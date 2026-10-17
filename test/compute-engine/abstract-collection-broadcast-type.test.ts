@@ -66,29 +66,37 @@ const VALUELESS: Record<Decl, Record<string, string>> = {
     Power: 'broadcastable<number>',
     g: 'broadcastable<number>',
   },
+  // A cell typed `any` may be a point or a matrix as well as a number, and
+  // so may a numeric application over it (`2·(1, 2)` is `(2, 4)`, `\sin (1,
+  // 2)` is `(\sin 1, \sin 2)`), which no `broadcastable<T>` admits: the
+  // application is typed `any` (`broadcastable<any>` is `any`), a user
+  // function call included. A comparison or a predicate is never a point
+  // and keeps `broadcastable<boolean>` (user decision 2026-10-17, Tycho
+  // ledger row 379).
   'collection<any>': {
-    Sin: 'broadcastable<number>',
-    Add: 'broadcastable<any>',
-    Multiply: 'broadcastable<number>',
+    Sin: 'any',
+    Add: 'any',
+    Multiply: 'any',
     Greater: 'broadcastable<boolean>',
     Not: 'broadcastable<boolean>',
     And: 'broadcastable<boolean>',
-    Abs: 'broadcastable<real<0..> | signed_infinity>',
-    Power: 'broadcastable<number>',
-    g: 'broadcastable<number>',
+    Abs: 'any',
+    Power: 'any',
+    g: 'any',
   },
-  // The elements of a bare `collection` are values of an unknown type. The
-  // cell of `P + 1` is typed as `value`, not from the literal `1` alone.
+  // The elements of a bare `collection` are values of an unknown type: a
+  // numeric application over a cell is typed `value`, not from the literal
+  // alone.
   'collection': {
-    Sin: 'broadcastable<number>',
-    Add: 'broadcastable<value>',
-    Multiply: 'broadcastable<number>',
+    Sin: 'value',
+    Add: 'value',
+    Multiply: 'value',
     Greater: 'broadcastable<boolean>',
     Not: 'broadcastable<boolean>',
     And: 'broadcastable<boolean>',
-    Abs: 'broadcastable<real<0..> | signed_infinity>',
-    Power: 'broadcastable<number>',
-    g: 'broadcastable<number>',
+    Abs: 'value',
+    Power: 'value',
+    g: 'value',
   },
 };
 

@@ -206,10 +206,9 @@ describe('PARSE ROUTE', () => {
     ['\\operatorname{Dot}((1,2),(x,y))', 'value'],
     ['\\operatorname{Cross}((1,2,3),(x,y,z))', 'tuple<number, number, number>'],
     ['\\Vert(x,y)\\Vert', '+oo | nan | real'],
-    [
-      '\\sin(\\operatorname{Dot}((16.234,35.4235),(x,y)))',
-      'broadcastable<number>',
-    ],
+    // The sine of a `value`-typed call is `value` since 2026-10-17 (the
+    // call may be a point, which `broadcastable<number>` does not admit).
+    ['\\sin(\\operatorname{Dot}((16.234,35.4235),(x,y)))', 'value'],
   ])('%s', (latex, type) => {
     const withAny = engine('any').parse(latex);
     expect(summary(withAny)).toEqual([true, type]);

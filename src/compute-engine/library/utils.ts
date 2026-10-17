@@ -3812,10 +3812,12 @@ export function* reduceBigOp<T>(
     // or a symbol declared `broadcastable<number>`) and an application whose
     // head is undeclared (top-typed) both fold to a scalar term today, yet
     // `Sum(2 + h(x))` evaluated to `h(x) + 2` re-evaluates to `[5, 8]` once
-    // `h := x ↦ [x, 2x]` and `x := 3`, where the sum is `13`. A bare symbol
-    // with a top type is deliberately NOT declined — `isPossiblyCollectionTyped`
-    // admits only an application there — so `Sum(x)` for an undeclared `x`
-    // keeps folding to `x`.
+    // `h := x ↦ [x, 2x]` and `x := 3`, where the sum is `13`. An UNDECLARED
+    // symbol is deliberately NOT declined — `isPossiblyCollectionTyped` reads
+    // it as a scalar, since its `unknown` type is refined by use — so `Sum(x)`
+    // for an undeclared `x` keeps folding to `x`. A symbol DECLARED `any` or
+    // `value` is declined: it may hold a list, so `Sum(a)` stays unevaluated
+    // until `a` has a value (user decision 2026-10-17, Tycho ledger row 379).
     if (
       isValuelessCollectionTyped(value) ||
       isPossiblyCollectionTyped(value) ||

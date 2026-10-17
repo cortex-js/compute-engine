@@ -274,13 +274,11 @@ describe('ResidueClass: classes of different moduli stay unevaluated (#399)', ()
 describe('ResidueClass: type (#399)', () => {
   const cases: [string, unknown, string][] = [
     ['a class', RC(2, 5), 'value'],
-    ['a sum with a class', ['Add', RC(2, 5), 'x'], 'broadcastable<value>'],
-    [
-      'a product with a class',
-      ['Multiply', RC(2, 5), 'x'],
-      'broadcastable<value>',
-    ],
-    ['a power of a class', ['Power', RC(2, 5), 'x'], 'broadcastable<value>'],
+    // `broadcastable<value>` is `value | indexed_collection<value>`, which
+    // is `value`: the lift answers the bare top type (2026-10-17).
+    ['a sum with a class', ['Add', RC(2, 5), 'x'], 'value'],
+    ['a product with a class', ['Multiply', RC(2, 5), 'x'], 'value'],
+    ['a power of a class', ['Power', RC(2, 5), 'x'], 'value'],
     ['ℤ/5ℤ has classes of type value', Z(5), 'set<value>'],
     ['ℤ/nℤ, n symbolic', Z('n'), 'set<value>'],
     [

@@ -1574,7 +1574,15 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
 function possiblyCollectionTypedOperand(d: OperandDescriptor): boolean {
   const t = resolveTypeAlias(d.type);
   if (t === 'unknown' || t === 'any' || t === 'value') {
-    const kind = d.structureOf?.()?.kind;
+    const s = d.structureOf?.();
+    // A symbol declared `any` or `value` may hold a collection, as the
+    // expression predicate reads it (user decision 2026-10-17, Tycho ledger
+    // row 379): `a = [1, 2]` with `a: any` is `broadcastable<boolean>`, and
+    // evaluates to `[True, False]` when `a` is 1. An auto-declared symbol
+    // is typed `unknown` and stays a scalar.
+    if ((t === 'any' || t === 'value') && s?.kind === 'symbol')
+      return s.inferred !== true;
+    const kind = s?.kind;
     return (
       kind === 'application' ||
       kind === 'tuple' ||

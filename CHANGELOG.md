@@ -30,6 +30,43 @@
 
 ### Behavior Changes
 
+- **A symbol declared `any` or `value` under a numeric element-wise operator
+  gives the application that type** (Tycho ledger row 379; user decision
+  2026-10-17). With `a` declared `any`, `2a`, `2/a`, `a^2`, `\sin a` and `|a|`
+  were typed `number`, while `a + 1` and `-a` were typed `any`. A symbol
+  declared `any` may hold a point or a list, and `2·(1, 2, 3)` evaluates to
+  `(2, 4, 6)`, `(1, 2)^2` to `(1, 4)`, `\sin (1, 2)` to `(\sin 1, \sin 2)`, so
+  the `number` type contradicted the value: a sum of such a product and a point
+  was accepted by `Add` only through the second operand, and a user function
+  whose body multiplies such a symbol was given a `number` result although its
+  value was a colour. `broadcastable<number>` was not an answer either: that
+  type excludes a tuple. The types that changed, with `a: any`, `v: value`,
+  `L: list<number>`, `g: (number) -> any`, `P: collection<any>` and
+  `Q: collection`:
+
+  | Input                                       | Before                  | After       |
+  | ------------------------------------------- | ----------------------- | ----------- |
+  | `2a`, `2/a`, `a^2`, `\sin a`, `\|a\|`, `a!` | `number`, `real<0..>…`  | `any`       |
+  | `2v`, `\sin v`                              | `number`                | `value`     |
+  | `a·(1, 2)`, `(1, 2)/a`                      | `tuple<number, number>` | `any`       |
+  | `a·L`, `L/a`, `L^a`                         | `list<number>`          | `list<any>` |
+  | `2g(x)`, `\sin(g(x))`, `2a^2`, `g(a)`       | `broadcastable<number>` | `any`       |
+  | `2P`, `\sin P`, `P + 1`                     | `broadcastable<number>` | `any`       |
+  | `2Q`, `Q + 1`                               | `broadcastable<number>` | `value`     |
+  | a residue class times a free symbol         | `broadcastable<value>`  | `value`     |
+
+  A comparison over such a symbol keeps `broadcastable<boolean>` (its value is
+  never a point), and `a = [1, 2]` is now typed so too, where it was `boolean`
+  while it evaluates to `[True, False]` for `a = 1`. Two evaluations change with
+  the type: `Sum(a)` stays unevaluated until `a` has a value (it folded to `a`),
+  and `a = [1, 2]` stays undecided until `a` has a value (it broadcast to
+  `[a = 1, a = 2]`). Unchanged: a symbol declared `unknown` and an auto-declared
+  symbol are read as scalars (`2u` is `number`), and so is a call of an
+  undeclared function (`2h(x)` is `broadcastable<number>`). Compiled code is
+  unchanged: it reads a symbol declared `any`, and library arithmetic over it,
+  as a scalar (`Abs(z)` with `z: any` compiles to `_SYS.absAny(z)`, `2a + 1` to
+  `2 * _.a + 1`, with no broadcast wrapper).
+
 - **`ce.tolerance = "auto"` makes the tolerance follow the precision, and a
   tolerance set to a number survives a precision change**
   ([#449](https://github.com/cortex-js/compute-engine/issues/449)). `"auto"`
@@ -215,23 +252,6 @@
   `∫₁² eˣ/(eˣ − 1) dx` keeps its closed form. Found while reviewing PR #445,
   whose wider antiderivative search reached this hole more often
 
-- **The product, the quotient and the power of a symbol declared `any` take
-  that type (Tycho ledger row 379).** With `a` declared `any`, `2a`, `2/a` and
-  `a^2` were typed `number`, while `a + 1` and `-a` were typed `any`. A symbol
-  declared `any` may hold a point or a list, and `2·(1, 2, 3)` evaluates to
-  `(2, 4, 6)`, `(1, 2)^2` to `(1, 4)`, so the `number` type contradicted the
-  value: a sum of such a product and a point was accepted by `Add` only through
-  the second operand, and a user function whose body multiplies such a symbol
-  was given a `number` result although its value was a colour. The three
-  operators now answer the symbol's type (`any`, or `value` for a symbol
-  declared `value`) when the symbol stands beside scalars. The product of a
-  number and a cell of a collection declared `collection<any>` or `collection`
-  is typed `broadcastable<any>` or `broadcastable<value>` for the same reason,
-  as the sum already was. Unchanged: a symbol declared `unknown` and an
-  auto-declared symbol are read as scalars (`2u` is `number`); an `any`-typed
-  call keeps the `broadcastable<number>` reading of the broadcast lift (`2g(x)`
-  with `g` declared `-> any`); beside a point or a collection the symbol keeps
-  its scalar reading (`a·(1, 2)` is a tuple).
 - **A point whose coordinates are typed `any` is accepted by `Dot`, `Cross`,
   `Norm` and `Distance`.** With `x` and `y` declared `any`,
   `Dot((1, 2), (x, y))` was an `incompatible-type` error at boxing, while the
@@ -27279,16 +27299,7 @@ corpus went from 85% to ~96%, and the one crash it exposed is fixed. See
 
 ### Linear Algebra
 
-- **3×3 `Eigenvalues`
-
-  returned wrong values — fixed.** The analytic solver used
-                                    a sign-flipped term in its depressed cubic, mirroring every eigenvalue about
-                                    $\operatorname{tr}/3$: e.g. $[[5,-3,-7],[-2,1,2],[2,-3,-4]]$ returned
-                                    $\{\tfrac{10}{3}, -\tfrac53, \tfrac13\}$ instead of $\{1, -2, 3\}$. (Spectra
-                                    symmetric about their mean — like $\{1,2,3\}$ — were unaffected, which is how
-                                    it escaped notice.) Additionally, a complex-conjugate eigenvalue pair was
-                                    returned as its real part twice ($\{2, \pm i\}$ came back $\{2, 0, 0\}$);
-                                    complex eigenvalues are now returned as complex numbers.
+- **3×3 Eigenvalues returned wrong values — fixed.** The analytic solver used a sign-flipped term in its depressed cubic, mirroring every eigenvalue about $\operatorname{tr}/3$: e.g. $[[5,-3,-7],[-2,1,2],[2,-3,-4]]$ returned $\{\tfrac{10}{3}, -\tfrac53, \tfrac13\}$ instead of $\{1, -2, 3\}$. (Spectra symmetric about their mean — like $\{1,2,3\}$ — were unaffected, which is how it escaped notice.) Additionally, a complex-conjugate eigenvalue pair was returned as its real part twice ($\{2, \pm i\}$ came back $\{2, 0, 0\}$); complex eigenvalues are now returned as complex numbers.
 
 ### Rules and Pattern Matching
 

@@ -74,8 +74,12 @@ export interface BroadcastOperandView {
    * tuple-arity arm). */
   readonly isSymbol: boolean;
   /** An application (a top-typed application MAY be a collection; a
-   * top-typed symbol or literal is not). */
+   * top-typed literal is not). */
   readonly isApplication: boolean;
+  /** A symbol the user declared `any` or `value` (not an inferred one): it
+   * MAY be a collection, as a top-typed application may
+   * (`isPossiblyCollectionTyped`, `collection-utils.ts`). */
+  readonly declaredTopSymbol: boolean;
   /** The value-level capability: the operand IS a collection. */
   readonly isCollection: boolean;
   /** A materialized finite indexed collection that is neither a tuple nor a
@@ -121,6 +125,10 @@ export function viewOfDescriptor(d: OperandDescriptor): BroadcastOperandView {
     type: t,
     isSymbol: structure?.kind === 'symbol',
     isApplication: structure?.kind === 'application',
+    declaredTopSymbol:
+      structure?.kind === 'symbol' &&
+      structure.inferred !== true &&
+      (resolved === 'any' || resolved === 'value'),
     isCollection: d.facts.collection === true,
     finiteBroadcastParticipant: finiteIndexed && !tuple && !textAtom,
     tuple,
@@ -169,11 +177,13 @@ export function isLinearAlgebraCollectionTypeOf(t: Type): boolean {
 }
 
 /** `isPossiblyCollectionTyped` on a view: a `broadcastable<T>`-typed operand
- * (or a union with such a branch), or a top-typed APPLICATION. */
+ * (or a union with such a branch), a top-typed APPLICATION, or a symbol
+ * declared `any` or `value`. */
 export function isPossiblyCollectionTypedView(
   v: BroadcastOperandView
 ): boolean {
   const t = resolveTypeAlias(v.type);
+  if ((t === 'any' || t === 'value') && v.declaredTopSymbol) return true;
   if (t === 'unknown' || t === 'any' || t === 'value') return v.isApplication;
   if (typeof t === 'string') return false;
   if (t.kind === 'broadcastable') return true;
@@ -395,6 +405,9 @@ function presentView(v: BroadcastOperandView): BroadcastOperandView {
     },
     get isApplication() {
       return v.isApplication;
+    },
+    get declaredTopSymbol() {
+      return v.declaredTopSymbol;
     },
     get isCollection() {
       return v.isCollection;
@@ -1283,6 +1296,27 @@ export function broadcastLiftType(input: BroadcastLiftInput): Type | undefined {
     abstractTrigger ||
     views.some((v, i) => mappable(i) && isPossiblyCollectionTypedView(v))
   ) {
+    // A top-typed trigger (a symbol declared `any`, a call typed `any`) may
+    // hold a point or a matrix as well as a list, and a NUMERIC application
+    // over it is then a point or a matrix too (`\sin (1, 2)` is `(\sin 1,
+    // \sin 2)`), which no `broadcastable<T>` admits: the application takes
+    // the top type (user decision 2026-10-17, Tycho ledger row 379). A
+    // result that is not numeric (a comparison, a predicate) is never a
+    // point, and keeps the `broadcastable<T>` reading. The cell of an
+    // abstract collection declared `collection<any>` is such a trigger too:
+    // it may be a point, and `P + 1` already answers `any` for it.
+    const top = topTypeOfTriggers(
+      [
+        ...views.filter(
+          (v, i) => mappable(i) && isPossiblyCollectionTypedView(v)
+        ),
+        ...abstractCells.flatMap((c) =>
+          c === undefined ? [] : [{ type: c.cell }]
+        ),
+      ],
+      cellResult
+    );
+    if (top !== undefined) return top;
     const abstractCell = abstractTrigger
       ? input.abstractCellResult?.(abstractCells.map((c) => c?.cell))
       : undefined;
@@ -1300,8 +1334,44 @@ export function broadcastLiftType(input: BroadcastLiftInput): Type | undefined {
     );
     if (nested.length > 0)
       elements = nestedBroadcastResultType(nested, elements);
-    return { kind: 'broadcastable', elements };
+    return broadcastableOf(elements);
   }
 
   return undefined;
+}
+
+/**
+ * The widest top type (`any`, else `value`) among the operands whose type is
+ * one, when the per-element result of the application is numeric or a top
+ * type; `undefined` otherwise. It is the type of an element-wise numeric
+ * application over such an operand (see the use in `broadcastLiftType`).
+ */
+export function topTypeOfTriggers(
+  triggers: ReadonlyArray<{ readonly type: Type }>,
+  cellResult: Type
+): 'any' | 'value' | undefined {
+  const r = resolveTypeAlias(cellResult);
+  if (r !== 'any' && r !== 'value' && !isSubtype(r, 'number')) return undefined;
+  let result: 'any' | 'value' | undefined = undefined;
+  for (const v of triggers) {
+    const t = resolveTypeAlias(v.type);
+    if (t === 'any') return 'any';
+    if (t === 'value') result = 'value';
+  }
+  return result;
+}
+
+/**
+ * `broadcastable<T>` for a per-element result `T`, or `T` itself when it is
+ * a top type: `broadcastable<any>` is `any | indexed_collection<any>`, which
+ * is `any`, and `broadcastable<value>` is `value`. A top-typed element comes
+ * from a top-typed operand (a symbol declared `any`, a call typed `any`),
+ * whose value may be a point or a matrix as well as a list, and the bare top
+ * type is the one that admits them all (user decision 2026-10-17, Tycho
+ * ledger row 379).
+ */
+export function broadcastableOf(elements: Type): Type {
+  const r = resolveTypeAlias(elements);
+  if (r === 'any' || r === 'value') return r;
+  return { kind: 'broadcastable', elements };
 }
