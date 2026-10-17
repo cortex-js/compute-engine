@@ -1,3 +1,24 @@
+## [Unreleased]
+
+### Issues Resolved
+
+- **A call's result that mentions a node several times keeps that node
+  shared** (Tycho ledger row 380). The closure capture of a call's result
+  (`captureClosures`, `function-utils.ts`) rebuilds every node above a function
+  literal so that the literal closes over the call frame, and memoizes the
+  rebuild of each node per frame so that a node the result mentions twice is
+  rebuilt once. The memo lost its entries as the recursion unwound, so each
+  mention was rebuilt separately. A user function applied to its own result,
+  `f^k(P)`, with a body that reads its argument four times and a value that
+  holds a lazy `Map` (a function literal: a column such as `5[0…N]/N` with `N`
+  valueless), doubled its number of distinct nodes at every level (864, 954,
+  1 236, 1 938, 3 515, 6 875 at depths 1 to 6) although each level was walked
+  once, and the chain cost 2 s at depth 8 and 27 s at depth 9. The levels now
+  share one tree, and depth 9 costs 0.2 s. The serialized form of the result
+  (`json`, `toString()`) still unfolds the sharing, so it keeps growing with
+  the depth; the accessor-side change that would stop that stays open in
+  `ROADMAP.md`.
+
 ## 0.155.0 _2026-10-17_
 
 ### New Features

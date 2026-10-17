@@ -109,28 +109,52 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
-### A coordinate accessor over an inert `PointList` head keeps the whole head, so a chain of user-function applications grows fourfold per level (OPEN, small — found 2026-10-17 by the Tycho three-bar audit of `neyret/51a4237846`, Tycho ledger row 380)
+### A coordinate accessor over an inert `PointList` head keeps the whole head, so the serialized result of a chain of user-function applications grows fivefold per level (OPEN, small — found 2026-10-17 by the Tycho three-bar audit of `neyret/51a4237846`, Tycho ledger row 380; the in-memory growth fixed 2026-10-17)
 
 `PointX`/`PointY`/`PointZ` project a column only out of the lazy `Map`
-transpose form (`projectLazyPointList`, `library/collections.ts`). When the
-`PointList` evaluate handler fails closed and stays an inert head — a column
-is a collection-typed expression with no collection value, such as
-`a - PointY(v)·(…)` with `a := Map(i ↦ 5i/N, Range(0, N))` and `N` valueless
-— the accessor falls through to `componentAt` and keeps `PointX(PointList(c1,
-c2, c3))` whole. A user function `f(v) = PointList(a − PointY(v)·(b·PointX(v)
-+ (1−b)·PointY(v)), PointX(v) + PointY(v)²/100, a)` reads `v` four times, so
-`f^k(P)` embeds the previous level's inert head four times per level: the
-serialized result is 9 KB, 46 KB, 230 KB, 1.1 MB and 5.7 MB at depths 1–5,
-and the evaluate takes 103, 80, 82, 100, 197, 503 and 1877 ms at depths 1–7
-and runs out of heap at depth 8 (plain engine, main at f3b87a29). With `N :=
-100` the chain is linear and gives a `Map` at every depth. The document
-manager side was fixed in Tycho on 2026-10-17 (the 3-D materializer now binds
-slider values for its span). Engine ask: an accessor over an inert
-`PointList` head should answer the projected column when the projection is
-sound — the chosen column is collection-typed and no other column can be
-shorter — and otherwise at least a lazy projection view that does not embed
-the head per read. Reproduction: Tycho `scripts/repros/2026-10-17-inert-
-pointlist-chain.mts` (`BOUND=1` is the control).
+transpose form (`projectLazyPointList`, `library/collections.ts`), and only
+when every source has a known, equal count. When the `PointList` evaluate
+handler fails closed and stays an inert head — a column is a collection-typed
+expression with no collection value, such as `a - PointY(v)·(…)` with
+`a := Map(i ↦ 5i/N, Range(0, N))` and `N` valueless — the accessor falls
+through to `componentAt` and keeps `PointY(PointList(c1, c2, c3))` whole. A
+user function `f(v) = PointList(a − PointY(v)·(b·PointX(v) + (1−b)·PointY(v)),
+PointX(v) + PointY(v)²/100, a)` reads `v` four times, so `f^k(P)` mentions
+the previous level's head four times per level. In memory the levels now
+share one tree (the closure-capture memo fix of 2026-10-17; the time is 0.25 s
+at depth 9), but every output that unfolds the sharing — `json`,
+`toString()`, LaTeX — still embeds the head once per mention: 15 KB, 75 KB,
+377 KB, 1.9 MB, 9.4 MB and 47 MB at depths 1–6 (measured after the fix with
+the Tycho reproduction `scripts/repros/2026-10-17-inert-pointlist-chain.mts`).
+Engine ask, unchanged: an accessor over an inert `PointList` head should
+answer the projected column when the projection is sound — the chosen column
+is collection-typed and no other column can be shorter — and otherwise a lazy
+projection view that serializes without the other columns.
+
+Also remaining: each application re-roots the closure of every function
+literal inside its result onto the new call frame (`captureClosures`,
+`function-utils.ts`), which rebuilds the nodes above the literal once more
+per level, so the distinct nodes of the chain grow quadratically with the
+depth (39, 62, 101, 156, 227, 314 at depths 1–6 of the test chain in
+`inert-evaluate-memo.test.ts`, 16 more nodes per level at each level). A
+literal that reads no binding of the frame does not need the re-rooting.
+
+### Each lazy broadcast map built during an evaluation advances the `any` axis three times (OPEN, performance — found 2026-10-17 by the profile of the Tycho row 380 chain)
+
+`lazyBroadcastMap` (`collection-utils.ts`) builds its function literal with
+parameters named `_1`, `_2`, … created by `ce.symbol(name, { canonical:
+false })` and typed only when the caller passes `paramTypes`. Canonicalizing
+the literal declares each parameter in the literal's scope (a `declare`
+event, `callable: true`), the body's use then narrows it from `unknown` (an
+`inference` event) and the deferred `inference-settled` event follows: three
+advances of the `any` axis per lazy map, twenty per level of the row 380
+chain (`f(P)` with `a = 5[0…N]/N`, `N` valueless, 101 points, measured with
+a trap on `noteStateEvent`). Every advance invalidates the cached type and
+the generation-keyed memos of every node in the engine, so an evaluation
+that builds lazy maps re-types the trees it holds once per map. Closing it:
+declare the parameters as scratch bindings (`scratch-scopes.ts`), or pass
+the element types so that no inference is needed, and measure the type
+recomputations of the chain before and after.
 
 ### `scratchRootOf` accepts a persistent scope re-parented under a scratch root as created under it (OPEN, small — found 2026-10-17 by the dual review of the value-shield cache fix)
 

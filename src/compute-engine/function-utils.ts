@@ -2826,10 +2826,19 @@ function captureClosures(
   memo: Map<Scope, Map<Expression, Expression>> = new Map()
 ): Expression {
   if (!isFunction(expr) && !isDictionary(expr)) return expr;
-  let byNode = memo.get(closureParent);
-  const hit = byNode?.get(expr);
+  const hit = memo.get(closureParent)?.get(expr);
   if (hit !== undefined) return hit;
   const captured = captureClosuresUncached(ce, expr, closureParent, memo);
+  // The per-scope map is read again AFTER the recursion: the children were
+  // captured under this same parent and may have created it. Keeping the
+  // map read before the recursion, and replacing it with a fresh one when
+  // that read found none, discarded every child entry as each level
+  // returned, so only the outermost node under a scope was ever memoized.
+  // A value that embeds one node once per mention of a parameter was then
+  // captured once per path after all, and the sharing this memo exists to
+  // keep was lost (the chain of Tycho ledger row 380 copied its previous
+  // level once per read).
+  let byNode = memo.get(closureParent);
   if (byNode === undefined) {
     byNode = new Map();
     memo.set(closureParent, byNode);

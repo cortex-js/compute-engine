@@ -1,4 +1,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
+import type { Expression } from '../../src/compute-engine/global-types';
+import { isFunction } from '../../src/compute-engine/boxed-expression/type-guards';
 
 // An already-evaluated INERT tree — a value that stayed symbolic — answers a
 // second `evaluate()` at the same state without walking the tree again: the
@@ -227,5 +229,127 @@ describe('an inert result is not walked again at the same state', () => {
     // close to two per level (2, 14, 31, 58, 100, 182).
     expect(counts[5]).toBeLessThan(80);
     expect(counts[5] / counts[4]).toBeLessThan(1.6);
+  });
+});
+
+/** The number of distinct nodes of an expression that may share its
+ * operands: each node is counted once however many paths reach it. */
+function distinctNodes(e: Expression): number {
+  const seen = new Set<Expression>();
+  const walk = (x: Expression): void => {
+    if (seen.has(x)) return;
+    seen.add(x);
+    if (isFunction(x)) for (const op of x.ops) walk(op);
+  };
+  walk(e);
+  return seen.size;
+}
+
+/** Does the expression hold a node with this operator, at any depth? */
+function holdsOperator(e: Expression, operator: string): boolean {
+  if (!isFunction(e)) return false;
+  if (e.operator === operator) return true;
+  return e.ops.some((op) => holdsOperator(op, operator));
+}
+
+describe('the closure capture of a call result keeps its sharing', () => {
+  // A call's result is walked by the closure capture (`captureClosures`,
+  // `function-utils.ts`) so that a function literal inside it closes over the
+  // call frame. The walk rebuilds every node above such a literal, and it
+  // memoizes the rebuild of each node per frame so that a node the result
+  // mentions twice is rebuilt once. The memo lost its entries as the
+  // recursion unwound (the per-frame map read before the recursion was
+  // replaced by a fresh one after it, found 2026-10-17 by the chain of
+  // Tycho ledger row 380): a node reached through two mentions of a
+  // parameter was rebuilt once per mention, and a chain `f^k(P)` whose
+  // value holds a lazy `Map` (a function literal) doubled its distinct nodes
+  // at every level although the inert memo above walked each level once:
+  // 864, 954, 1236, 1938, 3515, 6875 at depths 1 to 6 of the Tycho
+  // reproduction (101 points), and 54, 168, 483, 1229, 2870, 6334 for the
+  // smaller chain of the second test below.
+  const lazyPointList = (ce: ComputeEngine): Expression => {
+    // `a` is a lazy `Map` over a `Range` whose length is not known, so it is
+    // a function literal inside the value, and `s` is collection-typed
+    // without a value, so `PointList` stays inert.
+    ce.declare('N', 'real');
+    ce.declare('a', { type: 'list<number>' });
+    ce.assign(
+      'a',
+      ce.box([
+        'Map',
+        ['Function', ['Divide', ['Multiply', 5, 'i'], 'N'], 'i'],
+        ['Range', 0, 'N'],
+      ])
+    );
+    ce.declare('s', { type: 'list<number>' });
+    return ce.box(['PointList', 's', 'a']).evaluate();
+  };
+
+  test('a node reached through two mentions of a parameter is rebuilt once', () => {
+    const ce = new ComputeEngine();
+    const head = lazyPointList(ce);
+    ce.assign(
+      'g',
+      ce.box(['Function', ['Tuple', ['PointY', 'w'], ['PointY', 'w']], 'w'])
+    );
+    // The precondition of the test: the head holds a function literal, so
+    // the capture rebuilds it (a head with none is returned as it is, and
+    // the identity below would hold without the memo).
+    expect(holdsOperator(head, 'Function')).toBe(true);
+    const t = ce.box(['g', head]).evaluate();
+    expect(t.operator).toBe('Tuple');
+    if (!isFunction(t) || !isFunction(t.op1) || !isFunction(t.op2))
+      throw new Error('expected a tuple of two accessor reads');
+    expect(t.op1.op1.operator).toBe('PointList');
+    expect(t.op1.op1).not.toBe(head);
+    expect(t.op1.op1).toBe(t.op2.op1);
+  });
+
+  test('a user function applied to its own result that holds a function literal adds a bounded number of nodes per level', () => {
+    const ce = new ComputeEngine();
+    const head = lazyPointList(ce);
+    ce.declare('b', 'real');
+    // The row-380 body: `f` reads `v` four times.
+    ce.assign(
+      'f',
+      ce.box([
+        'Function',
+        [
+          'PointList',
+          [
+            'Subtract',
+            'a',
+            [
+              'Multiply',
+              ['PointY', 'v'],
+              [
+                'Add',
+                ['Multiply', 'b', ['PointX', 'v']],
+                ['Multiply', ['Subtract', 1, 'b'], ['PointY', 'v']],
+              ],
+            ],
+          ],
+          ['Add', ['PointX', 'v'], ['Divide', ['Power', ['PointY', 'v'], 2], 100]],
+          'a',
+        ],
+        'v',
+      ])
+    );
+    const nodes: number[] = [];
+    let e: Expression = head;
+    for (let depth = 1; depth <= 6; depth++) {
+      e = ce.box(['f', e]).evaluate();
+      expect(e.operator).toBe('PointList');
+      nodes.push(distinctNodes(e));
+    }
+    // Measured 2026-10-17 on this chain at depths 1 to 6: 39, 62, 101, 156,
+    // 227, 314 nodes once the capture memo keeps its entries (the previous
+    // level is shared; each level still rebuilds the nodes above the
+    // function literal once more, 16 more nodes per level, the quadratic
+    // residue recorded in `ROADMAP.md`), against 54, 168, 483, 1229, 2870,
+    // 6334 before (a doubling per level, each mention of `v` its own copy).
+    for (let k = 1; k < nodes.length; k++)
+      expect(nodes[k] - nodes[k - 1]).toBeLessThan(40 + 20 * k);
+    expect(nodes[5]).toBeLessThan(500);
   });
 });
