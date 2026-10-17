@@ -88,6 +88,7 @@ import {
   hypergeometric2F1,
   hypergeometric1F1,
   gammaQ,
+  incompleteGammaUpper,
   betaRegularized,
 } from '../numerics/special-functions.js';
 import {
@@ -144,6 +145,7 @@ import {
   ellipticKComplex,
   ellipticEComplex,
   hypergeometric2F1Complex,
+  incompleteGammaUpperComplex,
 } from '../numerics/numeric-complex.js';
 import {
   adaptiveQuadrature,
@@ -4839,6 +4841,7 @@ export const SYS_HELPERS = {
   erfInv,
   beta,
   gammaQ,
+  gammaUpper: incompleteGammaUpper,
   betaRegularized,
   digamma,
   trigamma,
@@ -4959,6 +4962,11 @@ export const SYS_HELPERS = {
   // the value is real, the interpreter's complex kernel elsewhere
   // (`continuedKernel`), so `LerchPhi(3, 2, 1)` compiled answers what it
   // evaluates to, `0.773 − 1.150i`, where the real kernel gave `NaN`.
+  // The two-operand `Gamma(s, z)`, the upper incomplete gamma: complex for
+  // `z < 0` unless `s` is a positive integer (`Γ(0, −1)` is `−1.895 − πi`),
+  // as in the interpreter.
+  cgammaUpper: (s: ComplexResult, z: ComplexResult) =>
+    continuedKernel([s, z], incompleteGammaUpper, incompleteGammaUpperComplex),
   // At `s = 1` the Hurwitz zeta function has a pole for every `a`, and the
   // interpreter answers `ComplexInfinity`. For a real `a`, the real kernel
   // answers `Infinity`. For a non-real `a`, the complex kernel runs, and it

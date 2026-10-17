@@ -129,6 +129,62 @@
 
 ### Issues Resolved
 
+- **`Gamma(s, x)` is accurate for a non-integer `s < −1` and `x < 1`.** The
+  Legendre continued fraction does not converge there and the error grew as `x`
+  shrank: `Gamma(-1.5, 0.001)` was `21020.691761…` (correct: `21020.937167…`, a
+  relative error of 1.2e-5), `Gamma(-1.5, 1e-6)` was `666636761.42` (correct:
+  `666664669.03`, 4.2e-5) and `Gamma(-3.5, 0.001)` was off by 2.0e-10. The
+  kernel now starts from `Γ(s+n, x)` with `−1 < s+n < 0` and applies
+  `Γ(a−1, x) = (Γ(a, x) − x^{a−1}e^{−x})/(a−1)` (DLMF 8.8.2) `n` times; within
+  0.05 of a pole of `Γ(s+n)` it defers to the complex kernel. The relative error
+  against mpmath is below 3e-15 for `s` in {−0.5, −1.5, −2.5, −3.5} and `x` from
+  1e-6 to 1, and below 5e-14 for `s = −(k+f)`, `k` ≤ 12, 0.001 ≤ `f` ≤ 0.999,
+  1e-10 ≤ `x` < 1. The compiled JavaScript lane dropped the second operand:
+  `Gamma(x, y)` compiled to `Γ(x)`, so `Gamma(-1.5, 0.001)` ran as `2.3633`. It
+  now calls the upper incomplete gamma, with the complex kernel for a complex
+  operand, and the interval target declines the two-operand form
+  (#446, contributed by [enumeratio](https://github.com/enumeratio))
+
+- **`Sqrt(-13)/3` is `(√13/3)i`, not `NaN`.** A negative integer radical was
+  sent to the float lane, which took `Math.sqrt(−13)`: `Sqrt(-13)/3`,
+  `Sqrt(-2)/3`, `Sqrt(-13)/2`, `Sqrt(-13)/3.0` and `Sqrt(-13)·(1/3)` (under
+  `evaluate()`) were `NaN`, and so was `Arcosh(Sqrt(-13)/3)`. An exact value with
+  a negative radical `−c` is now the pure-imaginary `√c·i`, in the one place that
+  builds exact values, so canonicalization, `evaluate()` and `.N()` agree:
+  `Sqrt(-13)/3` is `(√13/3)i ≈ 1.2018504251546631i` and `Arcosh(Sqrt(-13)/3)` is
+  `1.0171572086841316 + 1.5707963267948966i`. `Sqrt(-13)/Sqrt(-3)` was
+  `−√39/3` and is `√39/3`
+  (#446, contributed by [enumeratio](https://github.com/enumeratio))
+
+- **A definite integral across the zero of an exponential divisor no longer
+  gets a finite value.** The interior-pole detection of `Integrate` knew
+  polynomial, circular, hyperbolic and logarithmic divisors but not an
+  exponential one, so the antiderivative `ln(eˣ − 1)` was differenced across
+  its pole: `∫₋₁¹ eˣ/(eˣ − 1) dx` evaluated to `1` where the integral has no
+  value. A divisor `k·bᵘ + c` with `u` linear in the variable (`eˣ − 1`,
+  `2eᵗ − 3`, `2ᵗ − 8`) now contributes its zero `u = ln(−c/k)/ln b` as a pole
+  site, confirmed by sampling like the other families: the integral above is
+  `Indeterminate`, `∫₀² eˣ/(eˣ − 1) dx` (pole at the bound) is `+∞`, and
+  `∫₁² eˣ/(eˣ − 1) dx` keeps its closed form. Found while reviewing PR #445,
+  whose wider antiderivative search reached this hole more often
+
+- **The product, the quotient and the power of a symbol declared `any` take
+  that type (Tycho ledger row 379).** With `a` declared `any`, `2a`, `2/a` and
+  `a^2` were typed `number`, while `a + 1` and `-a` were typed `any`. A symbol
+  declared `any` may hold a point or a list, and `2·(1, 2, 3)` evaluates to
+  `(2, 4, 6)`, `(1, 2)^2` to `(1, 4)`, so the `number` type contradicted the
+  value: a sum of such a product and a point was accepted by `Add` only through
+  the second operand, and a user function whose body multiplies such a symbol
+  was given a `number` result although its value was a colour. The three
+  operators now answer the symbol's type (`any`, or `value` for a symbol
+  declared `value`) when the symbol stands beside scalars. The product of a
+  number and a cell of a collection declared `collection<any>` or `collection`
+  is typed `broadcastable<any>` or `broadcastable<value>` for the same reason,
+  as the sum already was. Unchanged: a symbol declared `unknown` and an
+  auto-declared symbol are read as scalars (`2u` is `number`); an `any`-typed
+  call keeps the `broadcastable<number>` reading of the broadcast lift (`2g(x)`
+  with `g` declared `-> any`); beside a point or a collection the symbol keeps
+  its scalar reading (`a·(1, 2)` is a tuple).
 - **A point whose coordinates are typed `any` is accepted by `Dot`, `Cross`,
   `Norm` and `Distance`.** With `x` and `y` declared `any`,
   `Dot((1, 2), (x, y))` was an `incompatible-type` error at boxing, while the

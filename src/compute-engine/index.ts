@@ -2586,6 +2586,20 @@ export class ComputeEngine implements IComputeEngine {
       // remaining square-free radicand is still too large — or the radical is
       // not a positive integer at all — fall back to the (inexact) float lane.
       if (data.radical !== undefined && data.radical !== 1) {
+        // √(−c) = i·√c: a negative integer radical is a pure-imaginary
+        // exact value. `(1/3)·√(−13)` is `(√13/3)·i`; the float lane below
+        // would take `Math.sqrt(−13)` and give `NaN`.
+        if (
+          Number.isInteger(data.radical) &&
+          data.radical < 0 &&
+          data.imRational === undefined &&
+          data.imRadical === undefined
+        )
+          return this._numericValue({
+            rational: [0, 1],
+            imRational: data.rational ?? [1, 1],
+            imRadical: -data.radical,
+          });
         if (!Number.isInteger(data.radical) || data.radical < 1) {
           return makeNumericValue({
             re:
@@ -2607,6 +2621,24 @@ export class ComputeEngine implements IComputeEngine {
             rational: mul(data.rational ?? [1, 1], [factor, 1]),
           };
         }
+      }
+
+      // The imaginary radical gets the same treatment as the real one: take
+      // out the square factors, and go to the float lane past SMALL_INTEGER.
+      if (data.imRadical !== undefined && data.imRadical >= SMALL_INTEGER) {
+        const [factor, root] = canonicalInteger(data.imRadical, 2);
+        if (root >= SMALL_INTEGER)
+          return makeNumericValue({
+            re: 0,
+            im:
+              rationalAsFloat(data.imRational ?? [1, 1]) *
+              Math.sqrt(data.imRadical),
+          });
+        data = {
+          ...data,
+          imRadical: root,
+          imRational: mul(data.imRational ?? [1, 1], [factor, 1]),
+        };
       }
 
       // Validate rational part

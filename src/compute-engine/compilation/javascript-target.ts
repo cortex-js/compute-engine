@@ -4098,6 +4098,21 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // `NaN` for every `t` under the real-operand guard, where the interpreter
   // answers a complex number.
   Gamma: (args, compile, target) => {
+    // The two-operand form is the upper incomplete gamma Γ(s, z), a different
+    // function from Γ(s): `Gamma(x, y)` compiled as `Γ(x)` and ignored `y`
+    // (`Γ(−1.5, 10⁻³)` is 21020.937…, `Γ(−1.5)` is 2.363…). A complex operand
+    // takes the complex kernel. A real `z < 0` promotes to the complex kernel
+    // through `continuesToComplex` (`complexContinuation`, `Gamma` case); the
+    // real lane is kept when `z ≥ 0` or `s` is a positive integer.
+    if (args.length === 2)
+      return continuationCall(
+        'Gamma',
+        '_SYS.cgammaUpper',
+        args,
+        compile,
+        target,
+        () => `_SYS.gammaUpper(${compile(args[0])}, ${compile(args[1])})`
+      );
     if (BaseCompiler.isComplexValued(args[0]))
       return complexUnary(target, '_SYS.cgamma', compile(args[0]));
     return `_SYS.gamma(${compile(args[0])})`;

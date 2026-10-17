@@ -1478,7 +1478,14 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
     const a = asSmallInteger(op1.op1);
     const b = asSmallInteger(op2.op1);
     if (a !== null && b !== null)
-      return ce.number(ce._numericValue({ radical: a * b, rational: [1, b] }));
+      // √a/√b = √(ab)/b, except √a/√b = √(ab)/|b| when both are negative:
+      // (i√|a|)/(i√|b|) is positive.
+      return ce.number(
+        ce._numericValue({
+          radical: a * b,
+          rational: [1, a < 0 && b < 0 ? -b : b],
+        })
+      );
   } else if (isFunction(op1, 'Sqrt')) {
     // √a/b = (1/b)√a as a numeric value
     const a = asSmallInteger(op1.op1);

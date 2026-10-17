@@ -140,6 +140,25 @@ The point-arithmetic refusal added on 2026-10-16 is gated by
 `runsLibraryCanonicalForm()` (the test `makeNumericFunction()` in `box.ts`
 uses); the older check needs the same gate on both routes.
 
+### An integer coefficient times `√(−c)` stays a product, and `√(−c)` with `c ≥ 10⁶` keeps its square factors (OPEN, small — found 2026-10-16 by the review of PR #447)
+
+Since PR #447, a negative integer radical is an exact pure-imaginary value in
+the one place that builds exact values (`_numericValue`, `index.ts`):
+`Sqrt(-13)/3` and `Sqrt(-13)·(1/3)` evaluate to `Complex(0, √13/3)`, and
+`Sqrt(-5200)/3` to `Complex(0, (20/3)√13)`. Two neighbouring forms do not reach
+that place. `Sqrt(-13)·Sqrt(4000000)` evaluates to `Multiply(2000, Sqrt(-13))`
+(an integer coefficient on a negative radical is not folded, where the rational
+coefficient `1/3` is), and `Sqrt(-52000000)/3` stays `Multiply(1/3,
+Sqrt(-52000000))`: the canonical `Sqrt` extracts the square factor of a
+POSITIVE radicand above `SMALL_INTEGER` (`Sqrt(52000000)/3` is `(2000/3)√13`)
+but not of a negative one, so the quotient never becomes a numeric value (the
+value itself reduces: `ce._numericValue({rational: [1, 3], radical: -52000000})`
+is `Complex(0, (2000/3)√13)`, pinned in `sqrt-negative-integer-quotient.test.ts`).
+Both results are correct and exact; they are unreduced. The fix is in the
+`Multiply` fold and in the canonical `Sqrt` of a negative radicand, which
+should route a negative integer radicand through the same square-factor
+extraction as a positive one.
+
 ### `.N()` of an integral whose shells decay as `k^{-p}` with `1 < p < 1.5` at a nonzero or infinite bound gives a wrong value with a very wide error bar (OPEN, small — found 2026-10-14 by the power-law divergence test; the bound-at-0 case fixed 2026-10-16)
 
 Since 2026-10-16, next to a bound at `0` the part of the integral that cannot be

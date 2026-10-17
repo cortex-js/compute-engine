@@ -13,8 +13,10 @@
 // (`1/t`, `1/(t² − 1)`, `t⁻³`), a pole of a circular function of a linear
 // argument (`tan`, `cot`, `sec`, `csc`, and a `sin`/`cos`/`tan`/`cot`
 // divisor), a pole of a hyperbolic function of a linear argument (`csch`,
-// `coth`, and a `sinh`/`tanh` divisor), and the zero of a logarithmic divisor
-// of a linear argument (`1/ln t` at `t = 1`). A divisor that is a product is
+// `coth`, and a `sinh`/`tanh` divisor), the zero of a logarithmic divisor
+// of a linear argument (`1/ln t` at `t = 1`), and the zero of an exponential
+// divisor of a linear argument shifted by a constant (`1/(eᵗ − 1)` at
+// `t = 0`, `1/(2ᵗ − 8)` at `t = 3`). A divisor that is a product is
 // examined factor by factor (`1/(t·ln²t)`).
 // Every located point is then CONFIRMED by sampling the integrand on both
 // sides of it, so a denominator that cancels (`(t² − 1)/(t − 1)`) and an
@@ -261,6 +263,74 @@ function linearArgument(
 }
 
 /**
+ * The zero of a divisor `k·bᵘ + c`, where `u = c₁·t + c₀` is linear in the
+ * variable with numeric coefficients and `k`, `b`, `c` are numeric constants
+ * (`b` positive and not 1): `bᵘ = −c/k`, so `u = ln(−c/k) / ln b` and
+ * `t = (u − c₀)/c₁`. The divisor is written as a two-operand `Add` whose
+ * constant operand is `c` and whose other operand is `Exp(u)`, `bᵘ`, or
+ * such a power times a numeric coefficient `k` (`2·eᵗ − 3`). The power, or
+ * the power in the product, can also be negated: `1 − eᵗ` canonicalizes to
+ * `Add(Negate(eᵗ), 1)` (`k = −1`), and `3 − 2eᵗ` has `k = −2`. Returns
+ * `null` for any other shape, and when `−c/k` is not positive (`eᵗ + 1` has
+ * no real zero).
+ */
+function exponentialDivisorZero(
+  d: Expression,
+  variable: string
+): number | null {
+  if (!isFunction(d, 'Add') || d.nops !== 2) return null;
+  const constant = d.ops.find((op) => !op.has(variable));
+  const term = d.ops.find((op) => op.has(variable));
+  if (constant === undefined || term === undefined) return null;
+  const c = constantRealValue(constant);
+  if (c === null) return null;
+
+  // Split a numeric coefficient off the exponential: `k·bᵘ`. A negated
+  // term (`−eᵗ` in `1 − eᵗ`) has `k = −1`.
+  let k = 1;
+  let exponential = term;
+  if (isFunction(exponential, 'Negate')) {
+    k = -1;
+    exponential = exponential.op1;
+  }
+  if (isFunction(exponential, 'Multiply') && exponential.nops === 2) {
+    const coefficient = exponential.ops.find((op) => !op.has(variable));
+    let rest = exponential.ops.find((op) => op.has(variable));
+    if (coefficient === undefined || rest === undefined) return null;
+    const value = constantRealValue(coefficient);
+    if (value === null || value === 0) return null;
+    k *= value;
+    if (isFunction(rest, 'Negate')) {
+      k = -k;
+      rest = rest.op1;
+    }
+    exponential = rest;
+  }
+
+  let base: number;
+  let exponent: Expression;
+  if (isFunction(exponential, 'Exp')) {
+    base = Math.E;
+    exponent = exponential.op1;
+  } else if (
+    isFunction(exponential, 'Power') &&
+    !exponential.op1.has(variable)
+  ) {
+    const b = constantRealValue(exponential.op1);
+    if (b === null || !(b > 0) || b === 1) return null;
+    base = b;
+    exponent = exponential.op2;
+  } else return null;
+
+  const linear = linearArgument(exponent, variable);
+  if (linear === null) return null;
+  const ratio = -c / k;
+  if (!(ratio > 0)) return null;
+  const [c0, c1] = linear;
+  return (Math.log(ratio) / Math.log(base) - c0) / c1;
+}
+
+/**
  * Add to `sites` every point of `(lo, hi)` where `c₁·t + c₀` lands on the
  * lattice `phase + kπ` — the poles of `tan`/`sec` (phase π/2) or `cot`/`csc`
  * (phase 0), and the ZEROS of `sin`/`tan` (phase 0) or `cos`/`cot` (phase
@@ -357,6 +427,8 @@ const POLE_LATTICE_PHASE: Record<string, number> = {
  * argument (`1/sin t`, `1/tan t`, `1/sinh t` — a reciprocal is NOT
  * canonicalized to `csc`/`cot`/`csch`, so these spellings do reach here); the
  * zero of a logarithmic divisor of a linear argument (`1/ln t` at `t = 1`);
+ * the zero of an exponential divisor `k·bᵘ + c` of a linear argument `u`
+ * (`1/(eᵗ − 1)` at `t = 0`, see {@link exponentialDivisorZero});
  * the zeros of each factor of a divisor that is a product, or a positive
  * power, and not a polynomial (`1/(t·ln²t)` at `t = 0` and `t = 1`); and the
  * poles of `tan`/`cot`/`sec`/`csc`/`coth`/`csch` of a linear argument
@@ -432,6 +504,15 @@ function poleSites(
         const [c0, c1] = linear;
         sites.push(exactSite((1 - c0) / c1));
       }
+      return;
+    }
+    // An exponential of a linear argument shifted by a constant, `eᵗ − 1`,
+    // is zero at one point. Without this family the antiderivative
+    // `ln(eᵗ − 1)` was differenced across that zero, and `∫₋₁¹ eᵗ/(eᵗ − 1) dt`
+    // came out as `1` where the integral diverges.
+    if (d.operator === 'Add') {
+      const t = exponentialDivisorZero(d, variable);
+      if (t !== null) sites.push(exactSite(t));
       return;
     }
     const phase = ZERO_LATTICE_PHASE[d.operator];
@@ -1405,8 +1486,15 @@ export function symbolicPoleMayBeInside(
   // The zeros of a divisor `g(t) − c` with `g` monotone on the interval:
   // the zero is inside when `c` is between `low = min(g)` and
   // `high = max(g)` on the interval.
-  const monotoneZeros: { c: Expression; low: Expression; high: Expression }[] =
-    [];
+  // `divisor` is `d` itself: the numeric scan of the sampled integrand below
+  // locates the zero of an exponential divisor too, and that position must
+  // be told apart from a site the assumptions decide (see `exponentialMoving`).
+  const monotoneZeros: {
+    c: Expression;
+    low: Expression;
+    high: Expression;
+    divisor: Expression;
+  }[] = [];
   let budget = SCAN_NODE_BUDGET;
   // A site with a free position that could not be located.
   let unlocated = false;
@@ -1488,8 +1576,8 @@ export function symbolicPoleMayBeInside(
     ]);
     monotoneZeros.push(
       atLower <= atUpper
-        ? { c, low: gLower, high: gUpper }
-        : { c, low: gUpper, high: gLower }
+        ? { c, low: gLower, high: gUpper, divisor: d }
+        : { c, low: gUpper, high: gLower, divisor: d }
     );
     return true;
   };
@@ -1639,10 +1727,19 @@ export function symbolicPoleMayBeInside(
       const scan = poleSites(g, variable, wLo, wHi, ce);
       if (scan === null) continue;
       // The positions of the sites with a free position, for these values:
-      // those sites are examined below, not here.
+      // those sites are examined below, not here. The zero of a monotone
+      // exponential divisor (`eᵗ − a`) is among them: `poleSites` locates it
+      // on the sampled integrand (`eᵗ − 2` at `t = ln 2`), while its position
+      // is decided below from the assumptions on `a`, not from the samples.
+      const exponentialMoving = monotoneZeros
+        .map(({ divisor }) =>
+          exponentialDivisorZero(divisor.subs(values), variable)
+        )
+        .filter((t): t is number => t !== null);
       const moving = sites
         .map((site) => finiteRealValue(site.subs(values)))
-        .filter((t): t is number => t !== null);
+        .filter((t): t is number => t !== null)
+        .concat(exponentialMoving);
       const positions = scan.sites.map((site) => site.t);
       for (const site of scan.sites) {
         const t = site.t;

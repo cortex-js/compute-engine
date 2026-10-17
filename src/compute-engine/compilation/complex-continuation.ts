@@ -7,6 +7,9 @@ import { isNumber } from '../boxed-expression/type-guards.js';
  * (`LerchPhi(3, 2, 1)` is `0.773 − 1.150i`). The JavaScript target lowers
  * them to the complex kernel in `auto` and `complex` mode; a shader target
  * has no complex lane for them and declines a provably complex value.
+ * `Gamma` is here for its two-operand form, the upper incomplete gamma
+ * Γ(s, z), which is complex for `z < 0` (`Gamma(1, −1)` is `e`, but
+ * `Gamma(−1.5, −0.5)` is `2.363 + 3.964i`).
  */
 export const COMPLEX_CONTINUATION_HEADS: ReadonlySet<string> = new Set([
   'HurwitzZeta',
@@ -16,6 +19,7 @@ export const COMPLEX_CONTINUATION_HEADS: ReadonlySet<string> = new Set([
   'EllipticE',
   'Hypergeometric2F1',
   'LambertW',
+  'Gamma',
 ]);
 
 /** The branch point −1/e of `LambertW`. */
@@ -33,7 +37,8 @@ const LAMBERT_W_BRANCH_POINT = -Math.exp(-1);
  * `a ≥ 0` or an integer `s`; `LerchPhi` and `PolyLog` for `z ≤ 1` (or an
  * integer `s ≤ 0`, where they are rational in `z`); `EllipticK` and
  * `EllipticE` for `m ≤ 1`; `Hypergeometric2F1` for `z ≤ 1` (or a terminating
- * series); `LambertW` for `x ≥ −1/e` on branch 0.
+ * series); `LambertW` for `x ≥ −1/e` on branch 0; the two-operand `Gamma`
+ * (the upper incomplete gamma Γ(s, z)) for `z ≥ 0` or a positive integer `s`.
  *
  * Operands are read as real: a complex operand takes the complex kernel
  * whatever this returns. An arity the lowering does not compile answers
@@ -117,6 +122,23 @@ export function complexContinuation(
       if (branch === -1)
         return aboveBranchPoint && x.isNegative === true ? 'real' : 'unknown';
       return 'unknown';
+    }
+    case 'Gamma': {
+      // The one-operand Γ of a real operand is real or a real pole
+      if (!arity(2)) return 'real';
+      const [s, z] = args;
+      // Γ(n, z) for a positive integer n is a polynomial in z times e^{−z}
+      if (
+        z.isNonNegative === true ||
+        (s.isInteger === true && s.isPositive === true)
+      )
+        return 'real';
+      // The branch cut of Γ(s, z) is the negative real axis in z, and
+      // Γ(0, −x) = −Ei(x) − iπ for x > 0
+      return z.isNegative === true &&
+        (s.isInteger === false || s.isNonPositive === true)
+        ? 'complex'
+        : 'unknown';
     }
   }
   return 'real';
