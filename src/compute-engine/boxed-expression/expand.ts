@@ -37,11 +37,17 @@ export function choose(n: number, k: number): number {
   return binomials[n][k];
 }
 
-function multinomialCoefficient(k: number[]): number {
+function multinomialCoefficient(k: number[]): bigint {
   let n = k.reduce((acc, v) => acc + v, 0);
-  let prod = 1;
+  let prod = BigInt(1);
   for (let i = 0; i < k.length; i += 1) {
-    prod *= choose(n, k[i]);
+    // Every division in this binomial recurrence is exact. A machine-number
+    // Pascal table rounds large coefficients before symbolic cancellation.
+    const m = Math.min(k[i], n - k[i]);
+    let binomial = BigInt(1);
+    for (let j = 1; j <= m; j++)
+      binomial = (binomial * BigInt(n - m + j)) / BigInt(j);
+    prod *= binomial;
     n -= k[i];
   }
   return prod;

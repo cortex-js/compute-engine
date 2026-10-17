@@ -1,5 +1,5 @@
 // Loader for the opt-in Rubi integration rule driver. `loadIntegrationRules`
-// compiles the bundled Chapter-1 corpus and registers a rule-driven
+// compiles the bundled corpus and registers a rule-driven
 // integration provider on the engine; thereafter `ce.parse('\\int…').evaluate()`
 // consults the Rubi rules before the built-in antiderivative (which still
 // covers what the rules don't, e.g. Gaussian/Fresnel integrals).

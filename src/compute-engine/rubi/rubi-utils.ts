@@ -855,10 +855,39 @@ const PRED_FNS: Record<string, PredFn> = {
     );
   },
 
-  // MatchQ — single 1.1.1 use: Not[MatchQ[Fx, b_*Gx_ /; FreeQ[b,x]]],
-  // i.e. "Fx is not a constant-times-product". Specialized accordingly.
+  // The inverse substitutions test r_.*f_^w_ with an x-independent base f.
+  // This is distinct from the algebraic constant-times-product predicate.
   MatchQ: (args, ctx) => {
     const u = build(args[0], ctx);
+    const pattern = args[1];
+    if (Array.isArray(pattern) && pattern[0] === 'Condition') {
+      const body = pattern[1];
+      const guard = pattern[2];
+      if (
+        Array.isArray(body) &&
+        body[0] === 'Multiply' &&
+        body.length === 3 &&
+        Array.isArray(body[1]) &&
+        body[1][0] === 'BlankOptional' &&
+        Array.isArray(body[2]) &&
+        body[2][0] === 'Power' &&
+        Array.isArray(body[2][1]) &&
+        body[2][1][0] === 'Blank' &&
+        Array.isArray(body[2][2]) &&
+        body[2][2][0] === 'Blank' &&
+        Array.isArray(guard) &&
+        guard[0] === 'FreeQ' &&
+        guard[1] === body[2][1][1]
+      ) {
+        const factors = u.operator === 'Multiply' ? u.ops! : [u];
+        return factors.some(
+          (factor) =>
+            factor.operator === 'Power' &&
+            factor.op1 !== undefined &&
+            !factor.op1.has(ctx.x)
+        );
+      }
+    }
     if (u.operator !== 'Multiply' || !u.ops) return false;
     return u.ops.some((op) => !op.has(ctx.x));
   },
@@ -1962,6 +1991,167 @@ export function rationalNormalFormX(
         ])
       : R;
   return n.div(denExpr);
+}
+
+/** Keep substitution searches finite and never rewrite across a bound variable. */
+function substitutionTreeQ(u: Expression): boolean {
+  let left = 128;
+  const walk = (e: Expression): boolean => {
+    if (
+      --left < 0 ||
+      CALCULUS_FNS.has(e.operator) ||
+      e.localScope?.bindings.size ||
+      ['Function', 'Block', 'Lambda', 'Hold', 'Int', 'Subst'].includes(
+        e.operator
+      )
+    )
+      return false;
+    if (
+      e.operator === 'Power' &&
+      e.op2 &&
+      isNumber(e.op2) &&
+      Math.abs(e.op2.re) > 32
+    )
+      return false;
+    return (e.ops ?? []).every(walk);
+  };
+  // Rubi's lowercase trig heads are intentionally undefined/inert in CE.
+  // Check effects on their active counterparts only after bounding the tree.
+  return walk(u) && activateTrig(u.engine, u).isPure;
+}
+
+function substitutionLinearParts(
+  u: Expression,
+  x: string
+): Expression[] | null {
+  if (polyDegreeX(u, x) !== 1) return null;
+  const c = polyCoeffsX(u, x);
+  // Unknown slopes require a conditional result, which these tuple helpers do
+  // not represent. Literal nonzero rational slopes are sufficient here.
+  return c?.length === 2 &&
+    isNumber(c[1]) &&
+    c[1].isRational === true &&
+    !c[1].isSame(0)
+    ? c
+    : null;
+}
+
+const INVERSE_SUBSTITUTION_HEADS: Record<string, string> = {
+  Ln: 'Exp',
+  Arcsin: 'Sin',
+  Arccos: 'Cos',
+  Arctan: 'Tan',
+  Arccot: 'Cot',
+  Arsinh: 'Sinh',
+  Arcosh: 'Cosh',
+  Artanh: 'Tanh',
+  Arcoth: 'Coth',
+};
+
+/** Find an inverse function of an affine argument without crossing a binder. */
+export function inverseFunctionOfLinear(
+  u: Expression,
+  x: string
+): Expression | null {
+  if (!substitutionTreeQ(u)) return null;
+  const walk = (e: Expression): Expression | null => {
+    if (!e.has(x)) return null;
+    if (
+      INVERSE_SUBSTITUTION_HEADS[e.operator] &&
+      e.ops?.length === 1 &&
+      substitutionLinearParts(e.ops[0], x)
+    )
+      return e;
+    for (const op of e.ops ?? []) {
+      const found = walk(op);
+      if (found) return found;
+    }
+    return null;
+  };
+  return walk(u);
+}
+
+/** Replace the selected inverse before replacing bare x; no inverse-of-forward
+ * cancellation is used, since that would erase principal-branch information. */
+export function substituteInverseFunction(
+  u: Expression,
+  v: Expression,
+  x: string
+): Expression | null {
+  if (!substitutionTreeQ(u) || !substitutionTreeQ(v)) return null;
+  const forward = INVERSE_SUBSTITUTION_HEADS[v.operator];
+  if (!forward || v.ops?.length !== 1) return null;
+  const coeffs = substitutionLinearParts(v.ops[0], x);
+  if (!coeffs) return null;
+  const ce = u.engine;
+  const X = ce.symbol(x);
+  const replacement = ce.function('Divide', [
+    ce.function('Subtract', [ce.function(forward, [X]), coeffs[0]]),
+    coeffs[1],
+  ]);
+  const walk = (e: Expression): Expression => {
+    if (e.isSame(v)) return X;
+    if (e.symbol === x) return replacement;
+    if (!e.ops || !e.has(x)) return e;
+    return ce.function(e.operator, e.ops.map(walk));
+  };
+  return walk(u);
+}
+
+/** Rubi's {transformed integrand, root degree, affine base, scale} contract.
+ * The caller supplies the degree and scale outside the transformed integral. */
+function fractionalLinearTuple(u: Expression, x: string): Expression | null {
+  if (!substitutionTreeQ(u)) return null;
+  const ce = u.engine;
+  const norm = toTimesPower(ce, recanonicalize(ce, u));
+  let base: Expression | null = null;
+  let degree = 1;
+  let valid = true;
+  const gcd = (a: number, b: number): number => (b === 0 ? a : gcd(b, a % b));
+  const scan = (e: Expression): void => {
+    if (!e.has(x)) return;
+    if (e.operator === 'Power' && e.op1 && e.op2) {
+      const q = ratParts(e.op2);
+      if (q && q[1] > 1 && substitutionLinearParts(e.op1, x)) {
+        if (base && !base.isSame(e.op1)) {
+          valid = false;
+          return;
+        }
+        base = e.op1;
+        degree = (degree / gcd(degree, q[1])) * q[1];
+        if (!Number.isSafeInteger(degree) || degree > 12) valid = false;
+      }
+    }
+    (e.ops ?? []).forEach(scan);
+  };
+  scan(norm);
+  if (!valid || base === null || degree === 1) return null;
+  const L: Expression = base;
+  const [a, b] = substitutionLinearParts(L, x)!;
+  const X = ce.symbol(x);
+  const replacement = ce.function('Divide', [X.pow(degree).sub(a), b]);
+  const walk = (e: Expression): Expression => {
+    if (e.operator === 'Power' && e.op1?.isSame(L) && e.op2) {
+      const q = ratParts(e.op2);
+      if (!q || !Number.isInteger((degree * q[0]) / q[1])) {
+        valid = false;
+        return e;
+      }
+      return X.pow((degree * q[0]) / q[1]);
+    }
+    if (e.isSame(L)) return X.pow(degree);
+    if (e.symbol === x) return replacement;
+    if (!e.ops || !e.has(x)) return e;
+    return ce.function(e.operator, e.ops.map(walk));
+  };
+  const transformed = walk(norm);
+  if (!valid) return null;
+  return ce.function('List', [
+    ce.function('Multiply', [X.pow(degree - 1), transformed]),
+    ce.number(degree),
+    L,
+    ce.function('Divide', [ce.One, b]),
+  ]);
 }
 
 function functionOfLog(
@@ -4740,12 +4930,7 @@ const VALUE_FNS: Record<string, ValueFn> = {
   Part: (args, ctx) => {
     const list = build(args[0], ctx);
     const n = realNum(build(args[1], ctx));
-    if (
-      list.operator !== 'List' ||
-      !list.ops ||
-      n === null ||
-      !Number.isInteger(n)
-    )
+    if (!list.ops || n === null || !Number.isInteger(n))
       return fail('Part: not a list / bad index');
     const idx = n < 0 ? list.ops.length + n : n - 1;
     if (idx < 0 || idx >= list.ops.length)
@@ -4767,17 +4952,15 @@ const VALUE_FNS: Record<string, ValueFn> = {
     return ctx.ce.function('List', [ctx.ce.number(dn), ctx.ce.number(dd)]);
   },
 
-  // FunctionOfLog[u, x] — detects u = F(Log[a·x^n]) and returns the
-  // substitution tuple {F(x), a·x^n, n} (faithful port; see functionOfLog).
-  // Drives the 3.5 `∫F(Log[a·x^n])/x` rules. SubstForFractionalPowerOfLinear
-  // stays a fail-closed stub (its single 3.5 rule is a disproportionate port).
+  // FunctionOfLog supplies the substitution used by the F(Log[a·x^n])/x rules.
   FunctionOfLog: (args, ctx) => {
     const r = functionOfLog(build(args[0], ctx), ctx.x);
     return r === null
       ? ctx.ce.symbol('False')
       : ctx.ce.function('List', [r.f, r.v, r.n]);
   },
-  SubstForFractionalPowerOfLinear: (_args, ctx) => ctx.ce.symbol('False'),
+  SubstForFractionalPowerOfLinear: (args, ctx) =>
+    fractionalLinearTuple(build(args[0], ctx), ctx.x) ?? ctx.ce.symbol('False'),
 
   // ── Chapter-5 (inverse trig) utilities ──────────────────────────────────
   // Discriminant[v, x] — the discriminant b²−4ac of a quadratic
@@ -4792,13 +4975,17 @@ const VALUE_FNS: Record<string, ValueFn> = {
     return c1.pow(2).sub(c0.mul(c2).mul(4));
   },
 
-  // Head[u] — WL's operator head, as a symbol. Only reached by 5.3.7 #27/#28
-  // (`EqQ[Head[tmp],ArcTan]`); those rules decline earlier because
-  // InverseFunctionOfLinear (below) is a fail-closed stub, so this never
-  // actually gates a firing. Returns CE's operator name (e.g. 'Arctan',
-  // 'Multiply'), which differs from WL's ('ArcTan', 'Times') — irrelevant
-  // while the call site is unreachable.
-  Head: (args, ctx) => ctx.ce.symbol(build(args[0], ctx).operator),
+  // The corpus compares these heads to Wolfram symbols, not CE operator names.
+  Head: (args, ctx) => {
+    const head = build(args[0], ctx).operator;
+    const names: Record<string, string> = {
+      Arctan: 'ArcTan',
+      Arccot: 'ArcCot',
+      Artanh: 'ArcTanh',
+      Arcoth: 'ArcCoth',
+    };
+    return ctx.ce.symbol(names[head] ?? head);
+  },
 
   // FunctionOfLinear[u, x] — Rubi detects u ≡ F(a+b·x) and, on success,
   // returns {subst, a, b} so a linear substitution rule can fire; on failure
@@ -4822,19 +5009,20 @@ const VALUE_FNS: Record<string, ValueFn> = {
   // rather than stranding the integrand. Return False (fail-open guard).
   PowerVariableExpn: (_args, ctx) => ctx.ce.symbol('False'),
 
-  // InverseFunctionOfLinear[u, x] — detects an inverse-function subexpression
-  // of a linear argument, F(a+b·x), inside u. Only the 5.3.7 #27/#28
-  // ∫r·f^ArcTan(a+b·x)/quadratic rules bind it (tmp=…), then substitute via
-  // SubstForInverseFunction. That substitution machinery is a disproportionate
-  // port and the "exponential of inverse tangent" integrands it targets are
-  // largely covered by the dedicated 5.3.6 rules (higher priority). Fail-closed
-  // stub → `Not[FalseQ[tmp]]` is False → #27/#28 decline cleanly. See RUBI.md §5 R20.
-  InverseFunctionOfLinear: (_args, ctx) => ctx.ce.symbol('False'),
-  // SubstForInverseFunction[u, v, x] — the inverse-function back-substitution
-  // used in the #27/#28 RHS. Unreachable while InverseFunctionOfLinear is
-  // stubbed (the innerCondition short-circuits first); kept as a fail-closed
-  // stub for safety.
-  SubstForInverseFunction: (_args, ctx) => ctx.ce.symbol('False'),
+  InverseFunctionOfLinear: (args, ctx) =>
+    inverseFunctionOfLinear(build(args[0], ctx), ctx.x) ??
+    ctx.ce.symbol('False'),
+  SubstForInverseFunction: (args, ctx) => {
+    if (args.length !== 3)
+      return fail('SubstForInverseFunction: expected three arguments');
+    return (
+      substituteInverseFunction(
+        build(args[0], ctx),
+        build(args[1], ctx),
+        ctx.x
+      ) ?? fail('SubstForInverseFunction: unsupported inverse or argument')
+    );
+  },
 
   // SplitProduct[func, u] — {first factor v of u with func[v], u/v}, else the
   // atom `False` (IntegrationUtilityFunctions.m). In the bundled corpus it

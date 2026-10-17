@@ -14,6 +14,8 @@ import { expandAll } from '../boxed-expression/expand.js';
 import { differentiate } from './derivative.js';
 import { withRadianConvention } from './angular-unit.js';
 import { specialAntiderivative } from './special-integrate.js';
+import { integrateComposition } from './integration-composition.js';
+import { logarithmicPrimitive } from './integration-logarithmic.js';
 import { findUnivariateRoots } from '../boxed-expression/solve.js';
 import {
   cancelCommonFactors,
@@ -3218,6 +3220,23 @@ function antiderivativeInUnit(fn: Expression, index: string): Expression {
 }
 
 function antiderivativeInRadians(fn: Expression, index: string): Expression {
+  // Preserve established primitive forms and avoid speculative work on ordinary
+  // inputs. Only a still-unresolved expression enters the bounded new searches.
+  const established = establishedAntiderivativeInRadians(fn, index);
+  if (!established.has('Integrate')) return established;
+  const logarithmic = logarithmicPrimitive(fn, index);
+  if (logarithmic) return logarithmic;
+  const composed = integrateComposition(fn, index, (body, variable) =>
+    antiderivative(body, variable)
+  );
+  if (composed) return composed;
+  return established;
+}
+
+function establishedAntiderivativeInRadians(
+  fn: Expression,
+  index: string
+): Expression {
   // Bound the symbolic-integration recursion by the engine deadline: some
   // rational/parametric integrands (e.g. a linear numerator over a fully
   // symbolic quadratic) explore an unbounded search here, and without a
