@@ -21,6 +21,10 @@ export class EngineNumericConfiguration {
   private _angularUnit: AngularUnit;
   private _roundingTies: RoundingTies = 'away-from-zero';
   private _tolerance: number;
+  /** How the tolerance was set. In `'auto'` mode the tolerance follows the
+   * precision: it is `10^(-precision + 2)`, recomputed by `setPrecision`.
+   * An explicit number stays as set across a precision change. */
+  private _toleranceMode: 'auto' | 'explicit' = 'explicit';
   private _bignumTolerance: BigDecimal;
   private _negBignumTolerance: BigDecimal;
   /** The number of `withTransientPrecision` calls in progress. */
@@ -45,7 +49,10 @@ export class EngineNumericConfiguration {
     this._bignumTolerance = new BigDecimal(DEFAULT_TOLERANCE);
     this._negBignumTolerance = new BigDecimal(-DEFAULT_TOLERANCE);
 
-    this.setTolerance(options?.tolerance ?? 'auto');
+    // The default is the fixed `DEFAULT_TOLERANCE`, not `'auto'`: the
+    // precision-following mode is an opt-in (user decision 2026-10-16, issue
+    // #449).
+    this.setTolerance(options?.tolerance ?? DEFAULT_TOLERANCE);
   }
 
   get precision(): number {
@@ -65,8 +72,10 @@ export class EngineNumericConfiguration {
     this._precision = Math.max(precision, MACHINE_PRECISION);
     BigDecimal.precision = this._precision;
 
-    // Keep historical behavior: changing precision resets tolerance.
-    this.setTolerance('auto');
+    // In `'auto'` mode the tolerance follows the precision. An explicit
+    // tolerance survives a precision change: `ce.tolerance = 1e-30` followed
+    // by `ce.precision = 40` used to fall back to the 1e-10 default.
+    if (this._toleranceMode === 'auto') this.setTolerance('auto');
     return true;
   }
 
@@ -74,7 +83,8 @@ export class EngineNumericConfiguration {
    * Run `fn` with the precision of the engine and the precision of the big
    * decimals set to `digits`, then restore both, also when `fn` throws.
    *
-   * Unlike `setPrecision`, this does not reset the tolerance, and the
+   * Unlike `setPrecision`, this does not recompute an `'auto'` tolerance:
+   * inside `fn` the tolerance is the one of the outer precision. The
    * caller does not reset the engine: no cached value is discarded and no
    * cache axis advances. So a value cached before the call (the value of a
    * constant such as `Pi`) is still at the previous precision inside `fn`:
@@ -173,19 +183,45 @@ export class EngineNumericConfiguration {
     return this._tolerance;
   }
 
-  /** Returns `true` when the (normalized) tolerance actually changed. */
+  /** `'auto'` when the tolerance follows the precision, `'explicit'` when
+   * it was set to a number. */
+  get toleranceMode(): 'auto' | 'explicit' {
+    return this._toleranceMode;
+  }
+
+  /** Returns `true` when the (normalized) tolerance actually changed.
+   *
+   * `'auto'` sets the tolerance to `10^(-precision + 2)`, two digits short
+   * of the working precision, and makes it follow later precision changes:
+   * at 21 digits it is 1e-19, at 40 digits 1e-38. Two 40-digit values that
+   * differ by 1e-12 then compare as different, where the fixed default
+   * (`DEFAULT_TOLERANCE`, 1e-10) compares them as equal (issue #449). A
+   * number that is not finite or is negative is read as `'auto'` as well.
+   * Any other number is kept as set, also across a precision change. */
   setTolerance(value: number | 'auto'): boolean {
-    let tolerance = value;
-    if (tolerance === 'auto') tolerance = DEFAULT_TOLERANCE;
+    const auto =
+      value === 'auto' || !Number.isFinite(value) || (value as number) < 0;
+    // The big-decimal tolerance of the auto mode is built from a string, so
+    // it does not underflow: `Math.pow(10, -398)` is 0, `BigDecimal('1e-398')`
+    // is not. The float `tolerance` (the public `ce.tolerance`) cannot hold a
+    // value below about 5e-324, so above 325 digits it is clamped to the
+    // smallest positive float; the big-decimal comparisons and `chop()` read
+    // the exact big-decimal value (`bignumTolerance`).
+    const big = auto
+      ? new BigDecimal(`1e-${Math.max(this._precision - 2, 1)}`)
+      : new BigDecimal(value as number);
+    const tolerance = auto
+      ? Math.max(big.toNumber(), Number.MIN_VALUE)
+      : (value as number);
+    const modeChanged = this._toleranceMode !== (auto ? 'auto' : 'explicit');
+    this._toleranceMode = auto ? 'auto' : 'explicit';
 
-    if (!Number.isFinite(tolerance) || tolerance < 0)
-      tolerance = Math.pow(10, -this._precision + 2);
-
-    if (tolerance === this._tolerance) return false;
+    if (tolerance === this._tolerance && big.eq(this._bignumTolerance))
+      return modeChanged;
 
     this._tolerance = tolerance;
-    this._bignumTolerance = new BigDecimal(tolerance);
-    this._negBignumTolerance = new BigDecimal(-tolerance);
+    this._bignumTolerance = big;
+    this._negBignumTolerance = big.neg();
     return true;
   }
 

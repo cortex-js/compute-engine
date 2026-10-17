@@ -447,10 +447,20 @@ Limits of the rule:
 - `First`/`Second`/`Third`/`Last` keep rule R1-A.
 - An inferred tuple type is not a contract: it is not enforced at
   application, so `(v => v[1] + 1)([1, 2, 3])` is `2` and a list argument is
-  still read whole. The JavaScript target checks the run-time value of a
-  numeric read of an INFERRED tuple base as it does for an inferred indexed
-  collection (`_SYS.atNumeric`), so a matrix given to a kernel compiled for
-  `v: tuple<number>` fails loudly instead of returning a concatenated string.
+  still read whole. Two mechanisms carry this (issue #448, fixed
+  2026-10-16): the `Apply` route binds a list argument whole to such a
+  parameter instead of mapping over its elements, where a tuple that a
+  destructuring pattern made does map (`literalParamsMap`,
+  `library/core.ts`); and a collection operator (`Drop(p, 2)`) admits the
+  parameter although a component that no read used is `unknown`: the unread
+  components take the required element type and the tuple keeps its
+  index-read mark, or the parameter takes the required collection
+  constructor when a tuple is not one (`indexReadTupleAtCollectionSlot`,
+  `boxed-expression/index-read-tuple.ts`). The JavaScript target checks the
+  run-time value of a numeric read of an INFERRED tuple base as it does for
+  an inferred indexed collection (`_SYS.atNumeric`), so a matrix given to a
+  kernel compiled for `v: tuple<number>` fails loudly instead of returning a
+  concatenated string.
 
 **Facts measured during the design round (2026-09-05).** The scalar reading
 a bare symbol gets from `x + 1` is `number` on today's tree (the guide's

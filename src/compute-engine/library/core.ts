@@ -6,6 +6,7 @@ import {
   callbackArity,
   declaresPhrase,
 } from '../boxed-expression/callback-arity.js';
+import { isIndexReadTuple } from '../boxed-expression/index-read-tuple.js';
 import {
   effectsContractStateOf,
   recordEffectsTransition,
@@ -721,6 +722,15 @@ export function pipeStageAsCall(
  * of points maps point by point, and binding the list whole to a tuple
  * parameter would be a type error. A generic signature binds whole.
  *
+ * A tuple that only the index reads of a bare parameter made
+ * (`p ↦ p[1] + p[2]` types `p` as `tuple<number, number>`,
+ * `isIndexReadTuple()`) is not a contract on the argument: the design says
+ * the inferred tuple is not enforced at application
+ * (`docs/INFERENCE_ROADMAP.md`), and the named route binds a list argument
+ * whole. So such a parameter binds whole here too. It used to map:
+ * `Apply(p ↦ p[1] + p[2], [5, 7])` read `5[1]` and `7[1]` and was two
+ * `incompatible-type` errors instead of `12` (issue #448).
+ *
  * The shader targets use the same test for an `Apply` they compile
  * (`gpuAppliedBody` in `compilation/gpu-target.ts`), so that the compiled
  * code and the interpreter give a result of the same shape.
@@ -735,7 +745,7 @@ export function literalParamsMap(sig: Type): boolean {
   ];
   return params.every(
     (p) =>
-      isTupleShapedType(p.type) ||
+      (isTupleShapedType(p.type) && !isIndexReadTuple(p.type)) ||
       signatureParamsAreScalar({
         kind: 'signature',
         args: [p],

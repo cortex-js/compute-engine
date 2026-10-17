@@ -683,6 +683,15 @@ describe('DivisorSigma', () => {
     expect(evalStr(['DivisorSigma', 2, 10])).toEqual('130'); // 1+4+25+100
     expect(evalStr(['DivisorSigma', 0, 1])).toEqual('1');
   });
+  test('the sign of n is ignored, as for Divisors and PrimeOmega (issue #449)', () => {
+    expect(evalStr(['DivisorSigma', 1, -12])).toEqual('28');
+    expect(evalStr(['DivisorSigma', 0, -6])).toEqual('4');
+    expect(evalStr(['DivisorSigma', 1, -1])).toEqual('1');
+    expect(evalStr(['DivisorSigma', 2, -10])).toEqual('130');
+  });
+  test('zero stays unevaluated', () => {
+    expect(evalStr(['DivisorSigma', 1, 0])).toEqual('DivisorSigma(1, 0)');
+  });
 });
 
 describe('JacobiSymbol', () => {

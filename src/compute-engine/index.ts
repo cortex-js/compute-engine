@@ -1528,7 +1528,9 @@ export class ComputeEngine implements IComputeEngine {
    *
    * @param options.tolerance If the absolute value of the difference of two
    * numbers is less than `tolerance`, they are considered equal. Used by
-   * `chop()` as well.
+   * `chop()` as well. The default is `1e-10`, whatever the precision.
+   * `'auto'` makes the tolerance follow the precision: `10^(-precision + 2)`,
+   * recomputed when the precision changes.
    *
    * @param options.libraries Optional standard/custom library list.
    * Custom library entries are validated during startup (name, dependencies
@@ -1551,7 +1553,7 @@ export class ComputeEngine implements IComputeEngine {
 
     this._numericConfiguration = new EngineNumericConfiguration({
       precision: options?.precision,
-      tolerance: options?.tolerance ?? 'auto',
+      tolerance: options?.tolerance,
       angularUnit: 'rad',
     });
 
@@ -2218,10 +2220,31 @@ export class ComputeEngine implements IComputeEngine {
   get tolerance(): number {
     return this._numericConfiguration.tolerance;
   }
+
+  /** @internal */
+  get _toleranceMode(): 'auto' | 'explicit' {
+    return this._numericConfiguration.toleranceMode;
+  }
+
+  /** @internal */
+  get _bignumTolerance(): BigDecimal {
+    return this._numericConfiguration.bignumTolerance;
+  }
   /**
    * Values smaller than the tolerance are considered to be zero for the
    * purpose of comparison, i.e. if `|b - a| <= tolerance`, `b` is considered
-   * equal to `a`.
+   * equal to `a`. The tolerance applies only when a float is involved; two
+   * exact numbers are compared exactly.
+   *
+   * A number is kept as set, also when the precision changes later. The
+   * default is `1e-10` at every precision. `'auto'` makes the tolerance
+   * follow the precision: `10^(-precision + 2)`, so 1e-19 at the default
+   * 21 digits and 1e-38 at 40 digits, recomputed at each precision change.
+   * It is meant for big-decimal work: a value computed in machine floats
+   * (about 16 digits) then compares as different from its exact value.
+   * Above 325 digits the float returned by the getter is clamped to the
+   * smallest positive float; the big-decimal comparisons and `chop()` use
+   * the exact value.
    */
   set tolerance(val: number | 'auto') {
     if (this._numericConfiguration.setTolerance(val)) {

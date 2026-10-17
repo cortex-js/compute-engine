@@ -150,7 +150,7 @@ divides(3, 12)
 
 MathJSON `DivisorSigma` · `(integer, integer) -> integer`
 
-The divisor function σ_k(n) = Σ_&#123;d | n&#125; dᵏ over the positive divisors of `n`. σ₀ counts divisors, σ₁ sums them. Defined for `n ≥ 1`.
+The divisor function σ_k(n) = Σ_&#123;d | n&#125; dᵏ over the positive divisors of `n`. σ₀ counts divisors, σ₁ sums them. The sign of `n` is ignored, as for `Divisors` and `PrimeOmega`; `DivisorSigma(k, 0)` is undefined.
 
 ```epsil
 divisorSigma(2, 6)

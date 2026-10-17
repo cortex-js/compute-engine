@@ -389,3 +389,133 @@ describe('the compiled route checks an inferred tuple base', () => {
     expect(runIt({ q: [true, 3] })).toBe(true);
   });
 });
+
+//
+// Issue #448: the inferred tuple is not a contract on the argument. The
+// `Apply` route mapped a list argument over the elements of a tuple-typed
+// parameter (`literalParamsMap`, `library/core.ts`), and a collection
+// operator refused a parameter whose tuple had an `unknown` component
+// (`indexReadTupleAtCollectionSlot`, `boxed-expression/index-read-tuple.ts`).
+//
+describe('issue #448: a bare parameter read at literal indices', () => {
+  const ADD_READS: MathJsonExpression = [
+    'Function',
+    ['Add', ['At', 'p', 1], ['At', 'p', 2]],
+    'p',
+  ];
+  const JOIN_DROP: MathJsonExpression = [
+    'Function',
+    ['Join', ['List', ['Add', ['At', 'p', 2], 1]], ['Drop', 'p', 2]],
+    'p',
+  ];
+
+  test('Apply binds a list argument whole (not mapped over the elements)', () => {
+    const ce = new ComputeEngine();
+    expect(ce.box(['Apply', ADD_READS, ['List', 5, 7]]).evaluate().json).toBe(
+      12
+    );
+    // A longer list and a tuple are read the same way: the length is not
+    // enforced.
+    expect(
+      ce.box(['Apply', ADD_READS, ['List', 5, 7, 9]]).evaluate().json
+    ).toBe(12);
+    expect(ce.box(['Apply', ADD_READS, ['Tuple', 5, 7]]).evaluate().json).toBe(
+      12
+    );
+    expect(ce.box(['Apply', ADD_READS, ['List', 5, 7]]).type.toString()).toBe(
+      'number'
+    );
+  });
+
+  test('a destructuring tuple parameter still maps over a list of points', () => {
+    const ce = new ComputeEngine();
+    expect(
+      ce
+        .box([
+          'Apply',
+          ['Function', ['Add', 'a', 'b'], ['Tuple', 'a', 'b']],
+          ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]],
+        ])
+        .evaluate().json
+    ).toEqual(['List', 3, 7]);
+  });
+
+  test('the parameter is accepted by a collection operator (Drop)', () => {
+    const ce = new ComputeEngine();
+    const fn = ce.box(JOIN_DROP);
+    expect(fn.type.toString()).toBe(
+      '(p: tuple<number, number>) -> list<number>'
+    );
+    expect(
+      ce.box(['Apply', JOIN_DROP, ['List', 0, 0, 7]]).evaluate().json
+    ).toEqual(['Join', ['List', 1], ['Drop', ['List', 0, 0, 7], 2]]);
+  });
+
+  test('a read passed to a typed parameter of an inner literal', () => {
+    const ce = new ComputeEngine();
+    const e = ce.box([
+      'Apply',
+      [
+        'Function',
+        [
+          'Apply',
+          [
+            'Function',
+            ['Subtract', ['At', 'p', 1], 'n'],
+            ['Typed', 'n', "'integer'"],
+          ],
+          ['At', 'p', 2],
+        ],
+        'p',
+      ],
+      ['List', 5, 7],
+    ]);
+    expect(e.evaluate().json).toBe(-2);
+  });
+
+  test('a Fold accumulator read at literal indices and passed to Drop', () => {
+    const ce = new ComputeEngine();
+    const e = ce.box([
+      'Fold',
+      [
+        'Function',
+        ['Join', ['List', ['Add', ['At', 's', 2], 1]], ['Drop', 's', 2]],
+        's',
+        'i',
+      ],
+      ['List', 0, 0, 7],
+      ['Range', 1, 2],
+    ]);
+    expect(e.evaluate().json).toEqual(['List', 8]);
+  });
+
+  test('a Fold that threads a state tuple read at literal indices', () => {
+    const ce = new ComputeEngine();
+    const e = ce.box([
+      'Fold',
+      [
+        'Function',
+        [
+          'Tuple',
+          ['Add', ['At', 'st', 1], 'i'],
+          ['Multiply', ['At', 'st', 2], 'i'],
+        ],
+        'st',
+        'i',
+      ],
+      ['Tuple', 0, 1],
+      ['Range', 1, 4],
+    ]);
+    expect(e.evaluate().json).toEqual(['Tuple', 10, 24]);
+  });
+
+  test('the same expressions compile', () => {
+    const ce = new ComputeEngine();
+    const r1 = compile(ce.box(ADD_READS), { fallback: false });
+    expect(r1.success).toBe(true);
+    expect(r1.run!([5, 7])).toBe(12);
+    const r2 = compile(ce.box(JOIN_DROP), { fallback: false });
+    expect(r2.success).toBe(true);
+    expect(r2.run!([0, 0, 7])).toEqual([1, 7]);
+  });
+});

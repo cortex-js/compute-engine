@@ -128,7 +128,9 @@ type ContextAssumptions = {
  * OPTIONS are captured. */
 type ConfigSnapshot = {
   readonly precision: number;
-  readonly tolerance: number;
+  /** `'auto'` when the tolerance follows the precision, so that the restore
+   * puts the mode back and not only the number it had at the snapshot. */
+  readonly tolerance: number | 'auto';
   readonly angularUnit: IComputeEngine['angularUnit'];
   readonly roundingTies: IComputeEngine['roundingTies'];
   readonly strict: boolean;
@@ -369,7 +371,7 @@ function snapshotConfig(ce: IComputeEngine): ConfigSnapshot {
   };
   return {
     precision: ce.precision,
-    tolerance: ce.tolerance,
+    tolerance: ce._toleranceMode === 'auto' ? 'auto' : ce.tolerance,
     angularUnit: ce.angularUnit,
     roundingTies: ce.roundingTies,
     strict: ce.strict,
@@ -403,9 +405,9 @@ function restoreConfig(ce: IComputeEngine, snapshot: ConfigSnapshot): void {
     _integrationProvider?: unknown;
     _latexOptions: object;
   };
-  // ORDERED: setting precision RESETS tolerance
-  // (`engine-numeric-configuration.ts`), so tolerance must be written after
-  // it or the restore would silently install the precision-derived default.
+  // ORDERED: in `'auto'` mode the tolerance follows the precision
+  // (`engine-numeric-configuration.ts`), so the tolerance is written after
+  // the precision and the auto value is derived from the restored precision.
   ce.precision = snapshot.precision;
   ce.tolerance = snapshot.tolerance;
   ce.angularUnit = snapshot.angularUnit;

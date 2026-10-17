@@ -4568,13 +4568,20 @@ function isProvablyNonIntegerIndex(index: Expression): boolean {
  * - the index is 0: positions are 1-based, so position 0 exists in no
  *   collection;
  * - the collection is known to be empty;
- * - the collection's length is a known number, finite or infinite: the
- *   handler then knows its own extent, so its miss is authoritative (the last
- *   element of an infinite collection, the first element of a `Range` with an
- *   infinite lower bound). A finite collection whose elements cannot be
- *   computed (`Linspace(a, 1, 3)` with a symbolic `a`) is the exception: its
- *   handler misses inside its range too, so only an index outside the length
- *   decides the miss;
+ * - the collection's length is a known finite number: the handler then knows
+ *   its own extent, so its miss is authoritative. A finite collection whose
+ *   elements cannot be computed (`Linspace(a, 1, 3)` with a symbolic `a`) is
+ *   the exception: its handler misses inside its range too, so only an index
+ *   outside the length decides the miss;
+ * - the length is infinite and the index is negative: an infinite collection
+ *   has no last element, so no position counted from the end exists
+ *   (`Last(Range(1, ∞))`); or the length is infinite and the collection
+ *   produces no elements at all (`Range(-∞, -1)`, whose infinite lower bound
+ *   is an extent marker, not a first element: its `iterator` declines, so it
+ *   is not enumerable). A positive index into an ENUMERABLE collection of
+ *   infinite length is not decided by a miss: its `at` handler can decline a
+ *   position it cannot compute (a handler that gives up past some index)
+ *   while the position exists (issue #449);
  * - the length is not known but the collection is both FINITE and
  *   enumerable: the handler walked all the elements and ran out, so the
  *   position does not exist.
@@ -4620,7 +4627,15 @@ function isProvablyOutOfRange(xs: Expression, index: number): boolean {
     !isWalkableFiniteCollection(xs)
   )
     return index > count || index < -count;
-  if (count !== undefined && !Number.isNaN(count)) return true;
+  // An infinite count decides a negative index (no last element) and a
+  // positive index into a collection that produces no elements. A positive
+  // index into an enumerable collection of infinite count is not decided:
+  // the `at` handler can decline a position it cannot compute while the
+  // position exists, so the read stays unevaluated (issue #449).
+  if (count === Infinity)
+    return index < 0 || xs.isEnumerableCollection === false;
+  // A finite count with a miss from `at()` is a proof.
+  if (count !== undefined && Number.isFinite(count)) return true;
   return xs.isFiniteCollection === true && xs.isEnumerableCollection === true;
 }
 

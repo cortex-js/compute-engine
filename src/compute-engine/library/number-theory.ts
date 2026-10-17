@@ -1307,13 +1307,19 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
 
     DivisorSigma: {
       description:
-        'The divisor function σ_k(n) = Σ_{d | n} dᵏ over the positive divisors of `n`. σ₀ counts divisors, σ₁ sums them. Defined for `n ≥ 1`.',
+        'The divisor function σ_k(n) = Σ_{d | n} dᵏ over the positive divisors of `n`. σ₀ counts divisors, σ₁ sums them. The sign of `n` is ignored, as for `Divisors` and `PrimeOmega`; `DivisorSigma(k, 0)` is undefined.',
       signature: '(integer, integer) -> integer',
       examples: ['DivisorSigma(2, 6)  // 50'],
       evaluate: ([kOp, nOp], { engine: ce }) => {
         const k = toBigint(kOp);
-        const n = toBigint(nOp);
-        if (k === null || n === null || k < 0n || n < 1n) return undefined;
+        const signed = toBigint(nOp);
+        if (k === null || signed === null || k < 0n) return undefined;
+        // The positive divisors of `-n` are those of `n`, so the sign is
+        // ignored, as `Divisors`, `EulerPhi`, `PrimeOmega` and `MoebiusMu` do
+        // (Mathematica's `DivisorSigma[1, -12]` is 28). Zero has no finite
+        // divisor sum (issue #449).
+        const n = signed < 0n ? -signed : signed;
+        if (n === 0n) return undefined;
         if (n === 1n) return ce.number(1);
         let result = 1n;
         for (const [p, e] of bigPrimeFactors(n, ce._deadlineFrame)) {

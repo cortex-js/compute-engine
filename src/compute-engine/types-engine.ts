@@ -1,3 +1,4 @@
+import type { BigDecimal } from '../big-decimal/index.js';
 import type { Complex } from 'complex.js';
 import type { OneOf } from '../common/one-of.js';
 import type { MathJsonSymbol, MathJsonNumberObject } from '../math-json.js';
@@ -1255,7 +1256,8 @@ export interface IComputeEngine {
 
   /** Run `fn` with the precision of the engine and of the big decimals set
    * to `digits`, and restore both afterwards, also when `fn` throws. There
-   * is no reset: the tolerance, the cached values (the value of `Pi`) and
+   * is no reset: the tolerance (an `'auto'` tolerance is not recomputed
+   * for the transient precision), the cached values (the value of `Pi`) and
    * the cache axes do not change, so a value cached before the call keeps
    * its previous precision. Used by the exact ordering to compare two
    * constants at a higher precision (`exactOrder` in `compare.ts`).
@@ -1533,7 +1535,20 @@ export interface IComputeEngine {
   set precision(p: number | 'machine' | 'auto');
   get precision(): number;
 
-  tolerance: number;
+  /** The absolute tolerance of the comparisons that involve a float, and of
+   * `chop()`. A number is kept as set; `'auto'` is `10^(-precision + 2)`,
+   * recomputed at each precision change. */
+  set tolerance(v: number | 'auto');
+  get tolerance(): number;
+
+  /** @internal `'auto'` when the tolerance follows the precision,
+   * `'explicit'` when it was set to a number. */
+  readonly _toleranceMode: 'auto' | 'explicit';
+
+  /** @internal The tolerance as an exact big decimal. In `'auto'` mode above
+   * 325 digits it holds the value that the float `tolerance` cannot
+   * (`1e-398` at 400 digits). */
+  readonly _bignumTolerance: BigDecimal;
 
   /** @internal Draw the next uniform in [0, 1) — from the innermost
    *  `WithRandomSeed` frame when one is active, otherwise from the `entropy`

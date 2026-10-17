@@ -1,6 +1,12 @@
 import type { NamedElement, Type } from '../../common/type/types.js';
 import { isInternedType } from '../../common/type/intern.js';
-import { narrow, resolveTypeAlias } from '../../common/type/utils.js';
+import { INDEXED_COLLECTION_SHAPE_TYPE } from '../../common/type/primitive.js';
+import { isSubtype } from '../../common/type/subtype.js';
+import {
+  collectionElementType,
+  narrow,
+  resolveTypeAlias,
+} from '../../common/type/utils.js';
 
 /**
  * The tuple types that only the index reads of a bare function parameter
@@ -114,4 +120,74 @@ export function indexReadTupleExtension(
     elements.push({ ...e, type });
   }
   return { kind: 'tuple', elements };
+}
+
+/**
+ * The type that a parameter whose current type `current` is an index-read
+ * tuple takes at a slot that requires a collection that is not a tuple
+ * (`Drop(p, 2)` requires `indexed_collection<number> | string`), or
+ * `undefined` when the rule does not apply.
+ *
+ * `p[2] + 1` types `p` as `tuple<unknown, number>`, and a tuple with an
+ * `unknown` component is not a subtype of `indexed_collection<number>`, so
+ * every collection operator refused the parameter (issue #448). Index reads
+ * prove neither the length of the argument nor the type of the components
+ * they did not read, so a collection requirement is not a conflict with
+ * them. The parameter takes the tuple whose unread components are the
+ * required element type and whose read components are narrowed by it, when
+ * that tuple satisfies the slot; it keeps the index-read mark, so later
+ * reads are still recorded per index. When the slot requires a collection
+ * constructor that a tuple is not (`list<number>`), the parameter takes the
+ * required arm itself, as a parameter typed `indexed_collection<number>`
+ * narrows to it; the per-index types are then lost, as after a read at an
+ * index that is not a literal.
+ *
+ * When more than one arm of a union requirement admits the parameter
+ * (`indexed_collection<integer> | indexed_collection<string>` after
+ * `p[2] + 1`), the result is the union of the types each arm gives, so the
+ * choice does not depend on the order of the arms and a later use that
+ * requires one of them is still admitted.
+ *
+ * The rule does not apply when `current` is not an index-read tuple, when
+ * no arm of the requirement is an indexed collection other than a tuple or a
+ * string with a known element type, or when a read component has no common
+ * value with the required element type (the use is then an error, as for any
+ * other conflict).
+ */
+export function indexReadTupleAtCollectionSlot(
+  current: Type,
+  param: Type
+): Type | undefined {
+  if (typeof current !== 'object' || current.kind !== 'tuple') return undefined;
+  if (!isIndexReadTuple(current)) return undefined;
+  const p = resolveTypeAlias(param);
+  const arms = typeof p === 'object' && p.kind === 'union' ? p.types : [p];
+  const filledTuples: Type[] = [];
+  const constructorArms: Type[] = [];
+  for (const arm of arms) {
+    const a = resolveTypeAlias(arm);
+    if (typeof a === 'object' && a.kind === 'tuple') continue;
+    if (!isSubtype(a, INDEXED_COLLECTION_SHAPE_TYPE)) continue;
+    if (isSubtype(a, 'string')) continue;
+    const elt = collectionElementType(a);
+    if (elt === undefined) continue;
+    const elements: NamedElement[] = [];
+    let conflict = false;
+    for (const e of current.elements) {
+      const type = e.type === 'unknown' ? elt : narrow(e.type, elt);
+      if (type === 'never') {
+        conflict = true;
+        break;
+      }
+      elements.push({ ...e, type });
+    }
+    if (conflict) continue;
+    const filled = markIndexReadTuple({ kind: 'tuple', elements });
+    if (isSubtype(filled, param)) filledTuples.push(filled);
+    else constructorArms.push(a);
+  }
+  const results = filledTuples.length > 0 ? filledTuples : constructorArms;
+  if (results.length === 0) return undefined;
+  if (results.length === 1) return results[0];
+  return { kind: 'union', types: results };
 }

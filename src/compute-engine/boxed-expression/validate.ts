@@ -101,7 +101,10 @@ import {
 } from './type-guards.js';
 import { narrowStringLiteralToCharacter } from './boxed-character.js';
 import { smallCount } from './collection-count.js';
-import { indexReadTupleExtension } from './index-read-tuple.js';
+import {
+  indexReadTupleAtCollectionSlot,
+  indexReadTupleExtension,
+} from './index-read-tuple.js';
 
 // Parsed once: the type of an indexed collection whose every element is a
 // number. Used in `checkNumericArgs` to accept collections for broadcasting on
@@ -3295,13 +3298,22 @@ export function validateArguments(
     // the reads gave (`indexReadTupleExtension()`). Without this, the call
     // was admitted with no write, and the parameter kept the shorter tuple
     // that the call refuses.
+    //
+    // The same parameter at a slot that requires a collection that is not a
+    // tuple (`Drop(p, 2)`): the components that no read used take the
+    // required element type (`indexReadTupleAtCollectionSlot()`). Without
+    // this, `p[2] + 1` typed `p` as `tuple<unknown, number>`, which no
+    // collection slot admitted, and the function literal was an error
+    // (issue #448).
     if (
       !paramStillOpen &&
       op.valueDefinition?.inferredType &&
       op.valueDefinition.value === undefined
     ) {
-      const extended = ce._withoutFacts(() =>
-        indexReadTupleExtension(op.type.type, param)
+      const extended = ce._withoutFacts(
+        () =>
+          indexReadTupleExtension(op.type.type, param) ??
+          indexReadTupleAtCollectionSlot(op.type.type, param)
       );
       if (extended !== undefined) {
         if (!internals?.noInference && !internals?.trial)

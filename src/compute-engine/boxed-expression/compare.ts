@@ -879,8 +879,14 @@ function cmpWithTolerance(
 ): '<' | '=' | '>' | '>=' | '<=' | undefined {
   // A machine value's `isZeroWithTolerance(t)` tests `|x| < t`, which is
   // false for every `x` when `t` is 0. With no tolerance, only a zero is zero.
+  // The engine's own tolerance is read as an exact big decimal: in the
+  // `'auto'` mode above 325 digits the float `ce.tolerance` is clamped to the
+  // smallest positive float, and the big decimal holds the value (`1e-398`
+  // at 400 digits).
+  const exactTolerance =
+    tolerance === a.engine.tolerance ? a.engine._bignumTolerance : tolerance;
   const isZeroWithin = (x: NumericValue): boolean =>
-    tolerance === 0 ? x.isZero : x.isZeroWithTolerance(tolerance);
+    tolerance === 0 ? x.isZero : x.isZeroWithTolerance(exactTolerance);
   // Objects are UNORDERED — there is no `<` on references — so an object
   // operand answers `undefined` up front. This is a guard, not an
   // optimization: without it an object compared against a function expression
@@ -2924,5 +2930,6 @@ function isZeroWithTolerance(expr: Expression): boolean {
   const n = expr.numericValue;
   const ce = expr.engine;
   if (typeof n === 'number') return ce.chop(n) === 0;
-  return n.isZeroWithTolerance(ce.tolerance);
+  // The exact big-decimal tolerance: see `cmpWithTolerance`.
+  return n.isZeroWithTolerance(ce._bignumTolerance);
 }

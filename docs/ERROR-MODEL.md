@@ -117,7 +117,16 @@ reference for the fine print. This model is settled; do not re-litigate
 `At([1,2], 99)` returning `NaN`. (The original design plan,
 "missing-value typing" revision 6, landed 2026-07-24 and was retired from
 `docs/plans/` in the 2026-08-19 doc cleanup; this section and the
-behavioral rules in §3 are now the durable record.)
+behavioral rules in §3 are now the durable record.) The marker needs a
+PROOF that the position is outside the collection: a miss from the `at`
+handler of a collection whose count is finite, a position past a finite
+count, a position counted from the end of a collection of infinite count
+(`Last(Range(1, ∞))` — there is no last element), or any position of a
+collection that produces no elements (`Range(-∞, -1)`). A positive
+position into an enumerable collection of infinite count has no such
+proof — its handler can decline a position it cannot compute while the
+position exists — so `At(xs, 5000)` over it stays unevaluated
+(`isProvablyOutOfRange`, issue #449).
 
 **Inert — "not yet", never "no".** An application that stays unevaluated is
 a claim that evidence might still arrive: a symbol may get a value, a type

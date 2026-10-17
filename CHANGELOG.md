@@ -30,6 +30,20 @@
 
 ### Behavior Changes
 
+- **`ce.tolerance = "auto"` makes the tolerance follow the precision, and a
+  tolerance set to a number survives a precision change**
+  ([#449](https://github.com/cortex-js/compute-engine/issues/449)). `"auto"`
+  sets the tolerance to `10^(-precision + 2)`, two digits short of the working
+  precision, and recomputes it at each precision change: 1e-19 at the default 21
+  digits, 1e-38 at 40 digits. It used to be the same as the default. The default
+  is unchanged: an absolute 1e-10 at every precision, so at 40 digits
+  `N(Pi) == Pi·(1 − 2.7e-12)` is still `True` unless the tolerance is set; with
+  `"auto"` it is `False` and `N(Pi) <= Pi·(1 − 2.7e-12)` is `False` as well.
+  `"auto"` is meant for big-decimal work: a value computed in machine floats
+  (about 16 digits) then compares as different from its exact value. Setting the
+  precision used to reset the tolerance to the default: after
+  `ce.tolerance = 1e-30; ce.precision = 40` the tolerance was 1e-10 again. It is
+  now kept. A checkpoint restore puts the mode back (`"auto"` or the number).
 - **`Numerator`, `Denominator` and `NumeratorDenominator` keep extra operands
   when they canonicalize**
   ([#442](https://github.com/cortex-js/compute-engine/issues/442), contributed
@@ -129,6 +143,39 @@
 
 ### Issues Resolved
 
+- **A bare function parameter read at literal indices accepts a list argument
+  again** ([#448](https://github.com/cortex-js/compute-engine/issues/448)).
+  Since 0.154.0, `p ↦ p[1] + p[2]` types `p` as `tuple<number, number>`, and
+  this inferred tuple is not meant to be enforced at application. Two routes
+  enforced it anyway. `Apply(p ↦ p[1] + p[2], [5, 7])` mapped the function over
+  the elements of the list, as it does for a destructuring pattern
+  `((a, b)) ↦ …`, so it read `5[1]` and `7[1]` and was two `incompatible-type`
+  errors instead of `12`; the same for a read passed to a typed parameter of an
+  inner literal. And `p ↦ [p[2] + 1] ++ Drop(p, 2)` was an `incompatible-type`
+  error at boxing, because `p[2] + 1` types `p` as `tuple<unknown, number>`,
+  which `Drop` refused, so a `Fold` whose accumulator is read at literal indices
+  and passed to a collection operator failed as well; these also failed to
+  compile. The `Apply` route now binds a list argument whole to such a
+  parameter, and a collection operator fills the components that no read used
+  with the element type it requires (`tuple<number, number>`), or gives the
+  parameter the collection constructor it requires when a tuple is not one. The
+  named call `g([5, 7])` was not affected.
+- **`At(xs, i)` over a collection of infinite count whose `at` handler declines
+  the position stays unevaluated**
+  ([#449](https://github.com/cortex-js/compute-engine/issues/449)). It was
+  `NaN`: any count that was not `NaN` counted as a proof that the position does
+  not exist, and an infinite count passed that test. A handler of a collection
+  of infinite count can decline a position it cannot compute while the position
+  exists, so a positive position into it is not decided by the miss.
+  `At([1, 2], 99)` is still `NaN`, and so are `Last(Range(1, ∞))` (an infinite
+  collection has no last element) and `First(Range(-∞, -1))` (a `Range` with an
+  infinite lower bound produces no elements).
+- **`DivisorSigma(k, n)` ignores the sign of `n`**
+  ([#449](https://github.com/cortex-js/compute-engine/issues/449)).
+  `DivisorSigma(1, -12)` was unevaluated and is `28`, as `Divisors(-12)`,
+  `EulerPhi(-12)`, `PrimeOmega(-12)` and `MoebiusMu(-12)` already ignore the
+  sign, and as Mathematica's `DivisorSigma[1, -12]`. `DivisorSigma(k, 0)` stays
+  unevaluated.
 - **`Gamma(s, x)` is accurate for a non-integer `s < −1` and `x < 1`.** The
   Legendre continued fraction does not converge there and the error grew as `x`
   shrank: `Gamma(-1.5, 0.001)` was `21020.691761…` (correct: `21020.937167…`, a
