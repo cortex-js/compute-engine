@@ -39,17 +39,24 @@ from 1 and 2 by the user on 2026-09-22, after the move to 18 cores.
 | Full suite | take the lock, then run normally |
 | Timing suites (`npm run test:perf`) | take the lock; they run serially |
 
-Measured 2026-10-17 on an idle box: the typecheck takes 4 s, one test file
-4 s, 61 test suites at `-w 4` 10 s.
+Measured 2026-10-17 on an idle box: `npm run typecheck` takes 4 s, the
+whole-`src/` check with the native compiler 4 s cold and under a second
+incremental (`tsconfig.json` sets `incremental: true`), one test file 4 s,
+61 test suites at `-w 4` 10 s.
 
 Never run `npx jest <file>` without the config: it fails with ESM import
 errors. A jest path that matches no file is dropped silently: check that the
 number of suites run equals the number of files given. In zsh, a variable
 holding several paths needs `${=FILES}` to split into words.
 
-`npm run typecheck` covers the entry points and is fine at any time. The
+Neither typecheck needs the lock. `npm run typecheck` covers the entry
+points plus the Epsil CLI, the type-level test pins, the circular-dependency
+budget and the explicit-`any` check, and is the gate before a review. The
 whole-`src/` check (`./node_modules/@typescript/native/bin/tsc -p
-tsconfig.json --noEmit`) is heavy: treat it like a full suite.
+tsconfig.json --noEmit`) was a lock-taking job under the TypeScript 6
+compiler; under the native TypeScript 7 compiler it is light, and a
+user-level PostToolUse hook runs it after every Edit or Write of a `.ts`
+file, so there is no reason to run it by hand after an edit.
 
 ## §3 Verifying that the box is clear
 

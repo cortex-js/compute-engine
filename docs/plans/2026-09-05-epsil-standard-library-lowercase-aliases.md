@@ -379,7 +379,7 @@ vector zeta zip
 
 ## 5. Implementation steps (option B)
 
-Work happens in a private worktree (`docs/SHARED-BOX-PROTOCOL.md`); the
+Work happens in a private worktree (`docs/COMPUTE-ENGINE-BOX-SPECIFICS.md`); the
 deliverable is a diff applied onto the shared tree.
 
 1. **Spelling table.** New file `src/epsil/library-names.ts`:

@@ -32,7 +32,7 @@ COUNTED AND REPORTED, never silently absorbed.
 Ground rules for every phase:
 
 - Multi-file work happens in a private worktree; the deliverable is a
-  `git apply`-ed diff (`docs/SHARED-BOX-PROTOCOL.md` §1). Full-suite
+  `git apply`-ed diff (`docs/COMPUTE-ENGINE-BOX-SPECIFICS.md` §1). Full-suite
   runs take the box lock.
 - Never update a snapshot marked `@fixme`.
 - Dual review (`/review-files`) before any phase's source diff counts

@@ -74,7 +74,7 @@ that a reader of the diff could have seen.
 
 These rules apply to fix subagents and to the check after the fixes. Several
 sessions share this machine: read `~/.claude/SHARED-BOX-PROTOCOL.md` (the
-shared protocol) and `docs/SHARED-BOX-PROTOCOL.md` (this repo's commands).
+shared protocol) and `docs/COMPUTE-ENGINE-BOX-SPECIFICS.md` (this repo's commands).
 
 - Typecheck: `npm run typecheck`. For all of `src/`:
   `./node_modules/@typescript/native/bin/tsc -p tsconfig.json --noEmit`.
