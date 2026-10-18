@@ -284,8 +284,14 @@ export const DEFAULT_LINSPACE_COUNT = 50;
  * `upper − lower` overflows to an infinity when the endpoints are far apart
  * with opposite signs (`-1e308` and `1e308`), and the samples then came out
  * as `NaN, +oo, +oo`. In that case the sample is computed as the weighted
- * mean of the endpoints, which does not form the span. The usual form is kept
- * for every other input, so that its samples are unchanged to the last digit.
+ * mean of the endpoints, which does not form the span. When the step
+ * `span / denom` is an integer and so is `lower`, the sample is
+ * `lower + k·step`, exact when the span is a safe integer (then so are the
+ * step and every product `k·step`): the product `span·k` of the usual form
+ * passes 2⁵³ for a long integer grid (`Linspace(0, 10⁹ − 1, 10⁹)`), and its
+ * rounding can make a sample past that point inexact. The usual form is
+ * kept for every other input (a float grid, a span past the safe
+ * integers), so that its samples are unchanged to the last digit.
  */
 function linspaceSample(
   lower: number,
@@ -294,7 +300,16 @@ function linspaceSample(
   denom: number
 ): number {
   const span = upper - lower;
-  if (Number.isFinite(span)) return lower + (span * k) / denom;
+  if (Number.isFinite(span)) {
+    const step = span / denom;
+    if (
+      Number.isInteger(step) &&
+      Number.isInteger(lower) &&
+      Math.abs(span) <= Number.MAX_SAFE_INTEGER
+    )
+      return lower + k * step;
+    return lower + (span * k) / denom;
+  }
   const t = k / denom;
   return lower * (1 - t) + upper * t;
 }

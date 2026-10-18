@@ -2,6 +2,30 @@
 
 ### Issues Resolved
 
+- **An inverse trigonometric function at an exact complex argument whose real
+  part is next to a branch point declines at machine precision.** At
+  `precision = 'machine'`, `Arcoth(1 + 10⁻³⁰ + 10⁻⁴⁰⁰i).N()` gave 460.86, the
+  value at the branch point, where the value is 34.89: the big-decimal route
+  read the real part as the double 1. The real part of an exact complex argument
+  is now read from the exact literal with the added digits, as a real argument
+  is, and the kernel declines when a double does not hold the distance to the
+  branch point, so the expression stays unevaluated at every precision, as it
+  did at the default precision. The distance is read only when it can change the
+  value, within about 17 digits of the imaginary part:
+  `Arcoth(1 + 10⁻⁵⁰⁰ + 10⁻⁴⁰⁰i)` is still answered (460.86, the value at
+  `1 + 10⁻⁴⁰⁰i`). A real argument whose distance passes the 2000 added digits
+  stays unevaluated too, where it gave the pole.
+
+- **A `Linspace` on an integer grid computes its samples exactly, and an
+  extremum over it with an `Indeterminate` operand no longer walks it.** The
+  samples were `lower + span·k/denom`, whose product rounds past 2⁵³, so the
+  test for an inexact sample walked the grid when `span·count` passed the safe
+  integers: `Max(Indeterminate, Linspace(0, 10⁹ − 1, 10⁹))` read a billion
+  samples (1.3 s). A grid whose step, lower bound and span are safe integers now
+  samples `lower + k·step`, exact, in the interpreter and in the compiled
+  JavaScript alike (the Python target's `np.linspace` already did), and the test
+  answers from the bounds (2 ms, `Indeterminate`).
+
 - **A lazy `Filter` or `Map` over an impure list literal walks the literal's
   value.** The collection handlers of a `List` or `Tuple` literal serve the
   operands as written when the literal is impure, so that a count draws no

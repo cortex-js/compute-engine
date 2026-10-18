@@ -13690,10 +13690,10 @@ function foldExtremum(
  * exact exactly when its double is an integer.
  *
  * The samples are not built as an array: a `Linspace` of 10^9 samples would
- * exhaust the memory. When the first and the last samples are integers, the
- * step between two samples is an integer, and every value involved (the
- * endpoints, and the span times the count) is a safe integer, the computation
- * of each sample is exact and gives an integer, so no sample is inexact.
+ * exhaust the memory. When the first and the last samples are safe
+ * integers and the step between two samples is an integer, every sample is
+ * `lower + k·step`, an exact integer (`linspaceSample` in `collections.ts`),
+ * so no sample is inexact.
  * Otherwise the samples are read one at a time, and the read stops at the
  * first inexact one: when the step is not an integer, that is the first or
  * the second sample.
@@ -13710,13 +13710,15 @@ function linspaceHasInexactSample(list: Expression): boolean {
     const lower = first.re;
     const upper = last.re;
     const span = upper - lower;
+    // An integer grid between safe integers: every sample is
+    // `lower + k·step`, an exact integer (`linspaceSample` in
+    // `collections.ts`), so no sample is read.
     if (
       Number.isInteger(lower) &&
       Number.isInteger(upper) &&
       Number.isInteger(span / (count - 1)) &&
       Math.abs(lower) <= Number.MAX_SAFE_INTEGER &&
-      Math.abs(upper) <= Number.MAX_SAFE_INTEGER &&
-      Math.abs(span) * count <= Number.MAX_SAFE_INTEGER
+      Math.abs(upper) <= Number.MAX_SAFE_INTEGER
     )
       return false;
   }

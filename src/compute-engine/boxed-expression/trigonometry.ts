@@ -1,4 +1,5 @@
 import { Complex } from 'complex.js';
+import type { Rational } from '../numerics/types.js';
 import { BigDecimal } from '../../big-decimal/index.js';
 
 import type { MathJsonExpression } from '../../math-json/types.js';
@@ -1002,14 +1003,7 @@ function digitsPastOne(source: Expression): number {
   if (!isNumber(source)) return 0;
   if (source.isExact) {
     const r = asRational(source);
-    if (r === undefined) return 0;
-    const p = BigInt(r[0]);
-    const q = BigInt(r[1]);
-    const absP = p < 0n ? -p : p;
-    const absQ = q < 0n ? -q : q;
-    const d = absP > absQ ? absP - absQ : absQ - absP;
-    if (d === 0n) return 0;
-    return Math.max(0, absQ.toString().length - d.toString().length);
+    return r === undefined ? 0 : digitsPastRational(r);
   }
   const x = source.bignumRe;
   if (x === undefined || !x.isFinite()) return 0;
@@ -1018,6 +1012,41 @@ function digitsPastOne(source: Expression): number {
   const s = d.significand < 0n ? -d.significand : d.significand;
   // |d| = s·10^exponent, so log₁₀|d| is about exponent + digits(s) − 1.
   return Math.max(0, -(d.exponent + s.toString().length - 1));
+}
+
+/**
+ * The real part of an exact complex number as an exact rational (the
+ * rational `1 + 10⁻³⁰` of `1 + 10⁻³⁰ + 10⁻⁴⁰⁰i`), or `undefined` when the
+ * number is not exact or its real part has a radical. `source.re` is a
+ * double and `source.bignumRe` a big decimal at the working precision, and
+ * both read such a part as 1.
+ */
+function exactComplexRealRational(source: Expression): Rational | undefined {
+  if (!isNumber(source)) return undefined;
+  const nv = source.numericValue;
+  if (!(nv instanceof ExactNumericValue) || nv.radical !== 1) return undefined;
+  return nv.rational;
+}
+
+/** The digits that a big decimal needs to tell the exact rational `r` from
+ * ±1 (see `digitsPastOne`): about −log₁₀(||r| − 1|), `0` when `r` is not
+ * next to ±1. */
+function digitsPastRational(r: Rational): number {
+  const p = BigInt(r[0]);
+  const q = BigInt(r[1]);
+  const absP = p < 0n ? -p : p;
+  const absQ = q < 0n ? -q : q;
+  const d = absP > absQ ? absP - absQ : absQ - absP;
+  if (d === 0n) return 0;
+  return Math.max(0, absQ.toString().length - d.toString().length);
+}
+
+/** About −log₁₀|x| for a big decimal `x` that is not zero: the digits below
+ * one of its magnitude. Negative for |x| ≥ 10. */
+function digitsBelowOne(x: BigDecimal): number {
+  const s = x.significand < 0n ? -x.significand : x.significand;
+  // |x| = s·10^exponent, so log₁₀|x| is about exponent + digits(s) − 1.
+  return -(x.exponent + s.toString().length - 1);
 }
 
 /**
@@ -1030,15 +1059,25 @@ function digitsPastOne(source: Expression): number {
  * - above machine precision, a real number at which the value is not real
  *   (`arcosh(1/2)`, `arcsin(2)`). The complex kernels compute in doubles.
  * - an exact real number next to ±1, a branch point (`1 + 10^{-400}`), which
- *   a big decimal at the working precision, and a double, read as ±1.
+ *   a big decimal at the working precision, and a double, read as ±1; and
+ *   an exact complex number whose real part is such a number
+ *   (`1 + 10^{-30} + 10^{-400}i`), read the same way, so that the kernel
+ *   sees the distance to the branch point and declines when a double does
+ *   not hold it (at machine precision the kernel was given the real part 1
+ *   and answered the value at the branch point, 460.86, for 34.89). The
+ *   distance is read only when it can change the value, within about 17
+ *   digits of the imaginary part: below that the value is the value at
+ *   `1 + i·Im`, which the real part read at the working precision gives
+ *   (`1 + 10^{-500} + 10^{-400}i` is answered, 460.86).
  *
  * `undefined` for any other argument and head, after a few tests on the
  * doubles of the operand in the usual case. `null` when the argument is one
  * of those above but its value cannot be computed with the digits of a
  * double (a complex argument whose larger part is next to a branch point
- * closer than a double can tell, `1 + 10^{-30} + 10^{-400}i`): the caller
- * keeps the expression unevaluated, since the double kernels would read the
- * argument as the branch point itself.
+ * closer than a double can tell, `1 + 10^{-30} + 10^{-400}i`), or when the
+ * digits to add pass `BRANCH_POINT_DIGITS_LIMIT`: the caller keeps the
+ * expression unevaluated, since the double kernels would read the argument
+ * as the branch point itself (a pole for `Arcoth`).
  *
  * The operand before its numeric evaluation (`raw`) is read when it is an
  * exact number literal, or, when the numeric operand may have lost a part
@@ -1106,17 +1145,34 @@ export function inverseTrigBigDecimalValue(
     return undefined;
 
   const digits = machine ? 17 : ce.precision;
-  const pastOne =
-    real && BRANCH_POINT_AT_ONE.has(name) ? digitsPastOne(source) : 0;
-  if (pastOne > BRANCH_POINT_DIGITS_LIMIT) return undefined;
+  // The digits added to read the exact real number next to ±1, and its
+  // rational: the source itself, or the real part of an exact complex
+  // source when its distance to ±1 can change the value next to the
+  // imaginary part (see the doc comment).
+  let pastOne = 0;
+  let nearRational: Rational | undefined;
+  if (BRANCH_POINT_AT_ONE.has(name)) {
+    if (real) {
+      pastOne = digitsPastOne(source);
+      nearRational = source.isExact ? asRational(source) : undefined;
+    } else if (source.isExact) {
+      const r = exactComplexRealRational(source);
+      const im = source.bignumIm;
+      if (r !== undefined && im !== undefined && !im.isZero()) {
+        pastOne = digitsPastRational(r);
+        if (pastOne > digitsBelowOne(im) + 17) pastOne = 0;
+        else nearRational = r;
+      }
+    }
+  }
+  if (pastOne > BRANCH_POINT_DIGITS_LIMIT) return null;
   const saved = BigDecimal.precision;
   BigDecimal.precision = digits + pastOne + OUTSIDE_RANGE_GUARD_DIGITS;
   let result: { re: number | BigDecimal; im: number | BigDecimal };
   try {
     // Next to ±1 the exact rational is read again with the added digits
     // (a big decimal read earlier at the working precision is ±1).
-    const rational =
-      pastOne > 0 && source.isExact ? asRational(source) : undefined;
+    const rational = pastOne > 0 ? nearRational : undefined;
     const re = rational
       ? new BigDecimal(String(rational[0])).div(
           new BigDecimal(String(rational[1]))
@@ -1128,14 +1184,15 @@ export function inverseTrigBigDecimalValue(
     // An inexact part only when a double cannot hold it at all: a subnormal
     // float is the double the kernels were given (`ce.number(1e-320)`), and
     // stays on them. Inside the range, a real argument at which the value is
-    // complex is computed here above machine precision, and a real argument
-    // next to ±1 at every precision.
+    // complex is computed here above machine precision, and an argument
+    // next to ±1 (a real one, or a complex one by its real part) at every
+    // precision.
     const outside = source.isExact ? isOutsideDoubleRange : beyondDouble;
     if (
       !outside(re) &&
       !outside(im) &&
       !(real && !machine && complexOnRealAxis(name, re)) &&
-      !(real && pastOne > 0)
+      !(pastOne > 0)
     )
       return undefined;
     const head = name as InverseTrigHead;

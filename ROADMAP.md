@@ -188,24 +188,20 @@ options today.
 
 ### Small items from the dual review of the 2026-10-17 re-review round (OPEN, small)
 
-- At `precision = 'machine'`, the larger part of a complex inverse trigonometric
-  argument is rounded to a double before the branch-point check runs, so
-  `Arcoth(1 + 10⁻³⁰ + 10⁻⁴⁰⁰i).N()` gives the value at the branch point
-  (`460.86`, mpmath `34.89`); at the default precision the case declines.
-- `Max`/`Min` with an `Indeterminate` operand and a `Linspace` whose
-  integer-valued samples exceed the safe integers (`Linspace(0, 10⁹−1, 10⁹)`)
-  still reads the samples one by one (1.6 s; memory flat).
-
 ### `.N()` rounds an exact operand to the working precision before the pole and branch-point tests of the complex special-function routes (OPEN, numerics — found 2026-10-17 by the Codex re-review of the LerchPhi/Zeta ranges)
 
 `StieltjesGamma(1, (−10³⁰+1)/10³⁰).N()` is still `~oo` at 21 digits where
 `evaluate()` now stays symbolic; `Zeta(2, (−10³⁰+1)/10³⁰).N()` gives `2.6449`
 for about `1e60`; `Arcosh(1 + 10⁻³⁰ + 10⁻⁴⁰⁰i)` at 30 digits still gives
 `1e−200(1+i)`. The real inverse-trig route re-reads the exact value with extra
-digits, the complex route does not. Also: `bigGamma` returns `0` instead of
-`NaN` once the result is past the exponent range (from about `z = −10^15`);
-`.N()` stays symbolic, but an internal caller can take the `0` as a value, as
-`Binomial` did before 2026-10-17.
+digits, the complex route does not. At machine precision neither route does when
+the double of the real part is not exactly ±1: `Arcoth(1 + 10⁻¹⁰ + 10⁻⁴⁰⁰i)` and
+`Arcoth(1 + 10⁻¹⁰)` (built as a sum) give 11.8594990139, the value at the
+double, for 11.8594990553 (the `lost` test of `inverseTrigBigDecimalValue` reads
+the exact operand only when the double is ±1). Also: `bigGamma` returns `0`
+instead of `NaN` once the result is past the exponent range (from about
+`z = −10^15`); `.N()` stays symbolic, but an internal caller can take the `0` as
+a value, as `Binomial` did before 2026-10-17.
 
 ### A multi-clause user function refuses `NaN` at a numeric parameter where the error model says it is accepted (OPEN, decision — found 2026-10-17 by the Codex re-review of the NaN-at-parameters range)
 
