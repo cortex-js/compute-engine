@@ -932,7 +932,7 @@
   relative error against mpmath for `a` in {10, 100, 500, 1000} and `z/a` from
   0.9 to 5 is below 6e-13 (machine, from the `exp(a ln z − z − ln Γ(a))`
   prefactor) and agrees to 38 digits for the three values above at precision 40
-  (#ISSUE, contributed by [enumeratio](https://github.com/enumeratio))
+  (#450, contributed by [enumeratio](https://github.com/enumeratio))
 
 - **`BetaRegularized(x, a, b)` keeps a small `I_x(a, b)` past
   `x = (a+1)/(a+b+2)`.** There both kernels returned `1 − I_{1−x}(b, a)`, which
@@ -948,7 +948,7 @@
   lost fewer than three digits. The relative error against mpmath over
   `x` in {0.3 … 0.999}, `a` in {0.5 … 1000} and `b` in {1e-100 … 1000} is below
   1.2e-12 (machine) and the bignum kernel agrees to 38 digits at precision 40
-  (#ISSUE, contributed by [enumeratio](https://github.com/enumeratio))
+  (#450, contributed by [enumeratio](https://github.com/enumeratio))
 
 ## 0.154.0 _2026-10-15_
 
