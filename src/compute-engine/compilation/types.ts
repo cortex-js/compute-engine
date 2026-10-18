@@ -112,7 +112,8 @@ export type CompileDiagnosticKind = 'capability' | 'correctness';
 /**
  * A structured compile decline, carried on `CompilationResult.diagnostic`
  * beside the human-readable `error` string (which stays a string: it is
- * interpolated into warning messages).
+ * interpolated into warning messages), or a warning about a successful
+ * compilation, carried on `CompilationResult.warnings`.
  *
  * - `code` — a stable machine-readable identifier: `'lane-mismatch'`,
  *   `'unsupported-mode'`, `'compile-error'` (the generic fail-closed
@@ -124,7 +125,8 @@ export type CompileDiagnosticKind = 'capability' | 'correctness';
  * - `binding` — a USER-LEGIBLE name for the binding: an authored identifier
  *   (the parameter `x` of `b`, the local `k`) or an honest description ("the
  *   accumulator of the `Reduce`") — never a compiler-internal temporary.
- * - `value` — the LaTeX of the complex-shaped expression that reached it.
+ * - `value` — the LaTeX of the complex-shaped expression that reached it;
+ *   for a warning, the expression it is about, as `toString()` writes it.
  */
 export type CompileDiagnostic = {
   code: string;
@@ -2704,6 +2706,69 @@ export type CompilationResult<
    * compiles (where it is `[]`).
    */
   unsupported?: string[];
+
+  /**
+   * GLSL only. The operands of an exact sine hash in the code, each with the
+   * range in which the compiled value is exact.
+   *
+   * The shader targets check every operand of `Mod` and `Fract`. An operand
+   * is flagged when a constant of magnitude 1000 or more multiplies a
+   * trigonometric call (`sin`, `cos`, `tan`, `cot`, `sec`, `csc`), on the way
+   * from the operand to the call or inside the call's argument (a divisor of
+   * magnitude 10⁻³ or less counts as such a factor): its float32 value can
+   * have no relation to the exact value. A flagged `Mod(u, 1)` or `Fract(u)`
+   * with `u = O·sin(Σ K·x + c)` (or `cos`; the sum may be a `Dot` of a vector
+   * with a list of numbers) compiles on GLSL to exact arithmetic built from
+   * float32, which matches the float64 value within 10⁻³, when `|O| ≤ 5·10^4`
+   * and each `x` is a run-time input (a free symbol with no value, or a
+   * component of one) or an integer-valued expression (`Floor`, integer
+   * symbols, `+`, `−`, `×` of these, and halves). Every other flagged operand,
+   * with any divisor, and every flagged operand on WGSL, compiles to the
+   * usual float32 code and is reported in `warnings`. An operand that
+   * mentions a function mapped by the `functions` option is left alone.
+   *
+   * Each entry gives one operand `x`, as `toString()` writes it (`x`,
+   * `At(p, 2)` for a component of `p`, `Floor(5x) + 0.5`), and the largest
+   * `|x|` for which the value is exact, for example
+   * `{ operand: 'x', maxAbs: 2600 }` for `10^4·x`. Beyond it the shader
+   * returns NaN. A caller that knows the domain of each operand (a plot
+   * window, the length of a list) can compute the expression on the CPU when
+   * the domain is larger. The `compileFunction` and `compileShader` routes
+   * emit the same code and the same NaN, but return no bounds.
+   *
+   * The preamble of an exact sine hash declares `uniform highp uint
+   * _gpu_zero_u;`, which the host does not set (GLSL initializes a uniform
+   * to 0).
+   *
+   * Absent when the code has no exact sine hash.
+   */
+  float32Bounds?: { operand: string; maxAbs: number }[];
+
+  /**
+   * Shader targets only. Facts about a SUCCESSFUL compilation that the caller
+   * may need to decide whether to use the code, with the same shape as
+   * `diagnostic` (which is set on a decline only). Nothing was withdrawn: the
+   * code is complete. `kind: 'correctness'` here means that a value the code
+   * computes can differ from the exact value.
+   *
+   * Today one code: `'float32-unsafe-argument'`. The code has a `Mod` or
+   * `Fract` operand in which a constant of magnitude 1000 or more multiplies
+   * a trigonometric call, with no exact form (see `float32Bounds`), so its
+   * float32 value can have no relation to the exact value: a sine hash such
+   * as `fract(43758.5453·sin(12.9898·x))` draws noise of a different pattern
+   * from the `javascript` target. `value` is the operand, as `toString()`
+   * writes it. A caller that needs the value (a curve the hash positions)
+   * computes the expression on the CPU; one that only needs a texture can
+   * keep the shader. One entry per flagged operand; an operand in code that
+   * the compilation emitted and then removed (a folded call, an unused
+   * definition) is not reported.
+   *
+   * The `compileFunction` and `compileShader` routes return a string, so
+   * they emit the same code with no warning and no `float32Bounds`.
+   *
+   * Absent when there is nothing to report.
+   */
+  warnings?: CompileDiagnostic[];
 
   /**
    * When `success` is `false`, a human-readable reason the expression could not

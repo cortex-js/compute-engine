@@ -21,6 +21,14 @@ import {
 } from '../boxed-expression/type-guards.js';
 import { rgbToOklch } from '@arnog/colors';
 import { BigDecimal } from '../../big-decimal/index.js';
+import {
+  GPU_EXACT_TRIG_PREAMBLE_GLSL,
+  gpuAmplifiedTrigMod,
+  gpuBigValue,
+  gpuExactConstant,
+  gpuExactTrigReport,
+  gpuWithExactConstant,
+} from './gpu-exact-trig.js';
 import { parseColorString } from '../library/colors.js';
 import {
   tryGetConstant,
@@ -2454,46 +2462,6 @@ function gpuReduceTrigOffset(
   return gpuReduceSumOffset(x, period, inRadians, undefined);
 }
 
-/**
- * The heads an exact constant term may use (`gpuReduceTrigOffset`). Each one
- * evaluates exactly and has no side effect.
- */
-const GPU_EXACT_ARITHMETIC_HEADS = new Set([
-  'Add',
-  'Subtract',
-  'Negate',
-  'Multiply',
-  'Divide',
-  'Rational',
-  'Power',
-  'Sqrt',
-  'Root',
-]);
-
-/**
- * Whether `op` is a real number literal or an exact-arithmetic expression over
- * real number literals. An exponent above 4096 is refused, so that the exact
- * evaluation stays cheap (`2^{10^6}` has 300 000 digits).
- */
-function gpuIsExactArithmetic(op: Expression): boolean {
-  if (isNumber(op)) return !op.isComplex && op.isFinite === true;
-  if (!isFunction(op) || !GPU_EXACT_ARITHMETIC_HEADS.has(op.operator))
-    return false;
-  if (op.operator === 'Power') {
-    const e = op.ops[1];
-    if (e === undefined || !isNumber(e) || !(Math.abs(e.re) <= 4096))
-      return false;
-  }
-  return op.ops.every(gpuIsExactArithmetic);
-}
-
-/** The exact real value of a constant term, as a number literal. */
-function gpuExactConstant(op: Expression): Expression | undefined {
-  if (!gpuIsExactArithmetic(op)) return undefined;
-  const v = isNumber(op) ? op : op.evaluate();
-  return isNumber(v) && !v.isComplex && v.isFinite === true ? v : undefined;
-}
-
 /** `gpuReduceTrigOffset` for a sum, whose units are scaled by `scale`. */
 function gpuReduceSumOffset(
   x: Expression,
@@ -2523,61 +2491,19 @@ function gpuReduceSumOffset(
   }
   if (literals.length + piTerms.length === 0) return x;
 
-  // `BigDecimal.precision` is global, so it is restored afterwards. The
-  // constant is first added at 50 digits to read its magnitude; the integer
-  // part of `c/P` then needs that many digits, and the remainder keeps 30
-  // more.
-  const bigValue = (op: Expression): BigDecimal | undefined => {
-    if (!isNumber(op)) return undefined;
-    const v = op.numericValue;
-    const b = typeof v === 'number' ? new BigDecimal(v) : v.bignumRe;
-    return b !== undefined && b.isFinite() ? b : undefined;
-  };
-  const constant = (): BigDecimal | undefined => {
-    let c = BigDecimal.ZERO;
-    for (const op of literals) {
-      const v = bigValue(op);
-      if (v === undefined) return undefined;
-      c = c.add(v);
-    }
-    if (piTerms.length > 0) {
-      let k = BigDecimal.ZERO;
-      for (const op of piTerms) {
-        const v = bigValue(op);
-        if (v === undefined) return undefined;
-        k = k.add(v);
-      }
-      c = c.add(k.mul(BigDecimal.PI));
-    }
-    return c;
-  };
-  const savedPrecision = BigDecimal.precision;
-  let remainder: number;
-  try {
-    BigDecimal.precision = 50;
-    const rough = constant();
-    if (rough === undefined || rough.isZero()) return x;
-    const digits =
-      rough.exponent +
-      (rough.significand < 0n
-        ? -rough.significand
-        : rough.significand
-      ).toString().length;
-    if (digits > 10000) return x;
-    BigDecimal.precision = Math.max(50, digits + 30);
-    const c = constant();
-    if (c === undefined) return x;
+  // The constant `c`, exact (`gpuWithExactConstant`), and its remainder
+  // `c − P·round(c/P)` when `|c| > P/2`.
+  const remainder = gpuWithExactConstant(literals, piTerms, (c) => {
     let p = inRadians ? BigDecimal.PI.mul(period) : new BigDecimal(period);
     if (scale !== undefined) {
-      const k = bigValue(scale);
-      if (k === undefined || k.isZero()) return x;
+      const k = gpuBigValue(scale);
+      if (k === undefined || k.isZero()) return undefined;
       p = p.div(k.abs());
     }
-    if (c.abs().cmp(p.div(2)) <= 0) return x;
-    remainder = c.sub(c.div(p).round().mul(p)).toNumber();
-  } finally {
-    BigDecimal.precision = savedPrecision;
-  }
+    if (c.abs().cmp(p.div(2)) <= 0) return undefined;
+    return c.sub(c.div(p).round().mul(p)).toNumber();
+  });
+  if (remainder === undefined) return x;
   const ce = x.engine;
   if (remainder === 0) {
     if (rest.length === 0) return ce.Zero;
@@ -6497,7 +6423,27 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       return gpuIdentityPassthrough(args[0], compile, target);
     return `floor(${compile(args[0])})`;
   },
-  Fract: 'fract',
+  // A sine hash written with `Fract` has the exact form, or the built-in
+  // with a warning on the result, as with `Mod(u, 1)`
+  // (`gpuAmplifiedTrigMod`). Every other operand keeps the built-in, a
+  // scalar, a `vecN` or a list alike.
+  Fract: (args, compile, target) => {
+    const a = args[0];
+    if (a === null || a === undefined)
+      throw new Error('Could not compile `Fract`: missing argument');
+    const plain = (): string => `fract(${compile(a)})`;
+    return (
+      gpuAmplifiedTrigMod(
+        'Fract',
+        a,
+        true,
+        compile,
+        target,
+        gpuOperandShape,
+        plain
+      ) ?? plain()
+    );
+  },
   Ln: (args, compile, target) => {
     if (BaseCompiler.isComplexValued(args[0]))
       return `_gpu_cln(${compile(args[0])})`;
@@ -14514,13 +14460,14 @@ const GPU_LIBRARY_DEFINITIONS = new Map<string, GpuLibraryDefinition[]>();
 
 /**
  * The head of a top-level function definition, anchored at column 0 — `fn
- * _gpu_x(` in WGSL, `vec3 _gpu_x(` or `float _gpu_x(` in GLSL. Every
- * definition in these library strings starts in column 0 and everything
- * inside a body is indented, so the anchor is what tells a declaration apart
- * from a local variable of the same shape.
+ * _gpu_x(` in WGSL, `vec3 _gpu_x(` or `float _gpu_x(` in GLSL, with an
+ * optional precision qualifier (`highp float _gpu_x(`). Every definition in
+ * these library strings starts in column 0 and everything inside a body is
+ * indented, so the anchor is what tells a declaration apart from a local
+ * variable of the same shape.
  */
 const GPU_LIBRARY_DEFINITION_HEAD =
-  /^(?:fn[^\S\n]+([A-Za-z_]\w*)|[A-Za-z_]\w*(?:\[\d+\])?[^\S\n]+([A-Za-z_]\w*))[^\S\n]*\(/;
+  /^(?:fn[^\S\n]+([A-Za-z_]\w*)|(?:(?:highp|mediump|lowp)[^\S\n]+)?[A-Za-z_]\w*(?:\[\d+\])?[^\S\n]+([A-Za-z_]\w*))[^\S\n]*\(/;
 
 /** Cut a multi-function library string into its individual definitions. */
 function gpuLibraryDefinitions(library: string): GpuLibraryDefinition[] {
@@ -16857,6 +16804,14 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     };
     const preamble = this.preambleFor(code);
     if (preamble) result.preamble = preamble;
+    // The operands of an exact sine hash and the range in which its value is
+    // exact (`gpuAmplifiedTrigMod`).
+    // A sine hash with no exact form compiles to the usual float32 code and
+    // is reported in `warnings` (`gpuAmplifiedTrigMod`). Only what the final
+    // code and preamble still hold is reported.
+    const report = gpuExactTrigReport(target, `${code}\n${preamble ?? ''}`);
+    if (report.bounds.length > 0) result.float32Bounds = report.bounds;
+    if (report.warnings.length > 0) result.warnings = report.warnings;
 
     return BaseCompiler.withReferences(
       result,
@@ -16975,6 +16930,9 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       code,
       isWGSL ? GPU_PI_TRIG_PREAMBLE_WGSL : GPU_PI_TRIG_PREAMBLE_GLSL
     );
+    // The exact sine hash (`gpu-exact-trig.ts`), GLSL only.
+    if (!isWGSL)
+      preamble += gpuLibrarySubset(code, GPU_EXACT_TRIG_PREAMBLE_GLSL);
     // `_gpu_zeta` calls `_gpu_gamma` from its own body for the s < 0
     // functional-equation branch, and every other zeta entry point
     // (`_gpu_hurwitz_zeta`, `_gpu_zeta_generalized`) can reach `_gpu_zeta`

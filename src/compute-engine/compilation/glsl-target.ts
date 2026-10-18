@@ -11,6 +11,7 @@ import {
   gpuOperandShape,
   type GPUShapeRules,
 } from './gpu-target.js';
+import { gpuAmplifiedTrigMod } from './gpu-exact-trig.js';
 
 /**
  * GLSL-specific function overrides.
@@ -56,24 +57,40 @@ function compileGLSLList(
 const GLSL_FUNCTIONS: CompiledFunctions<Expression> = {
   __proto__: null as never,
   Inversesqrt: 'inversesqrt',
-  Mod: ([a, b], compile) => {
+  Mod: ([a, b], compile, target) => {
     if (a === null || b === null)
       throw new Error('Could not compile `Mod`: missing argument');
-    // A divisor of exactly one is the fractional part. GLSL ES 3.00 §8.3
-    // defines `mod(x, y)` as `x - y * floor(x / y)` and `fract(x)` as
-    // `x - floor(x)`, so the two agree for every dividend, negative ones
-    // included (`mod(-0.25, 1.0)` and `fract(-0.25)` both answer 0.75 — the
-    // floored convention the interpreter's `Mod` uses as well). `fract` is a
-    // single hardware instruction and needs no second operand.
-    //
-    // A SCALAR dividend only: `fract` takes one argument, and the operand-
-    // shape gate reads the emitted call against the head's operands, so a
-    // `vecN` dividend beside the scalar divisor would be judged a genType
-    // mismatch on the one-argument call and decline. The vector form keeps
-    // `mod(v, 1.0)`, which the gate knows takes its scalar last.
-    if (tryGetConstant(b) === 1 && gpuOperandShape(a) === 'scalar')
-      return `fract(${compile(a)})`;
-    return `mod(${compile(a)}, ${compile(b)})`;
+    const plain = (): string => {
+      // A divisor of exactly one is the fractional part. GLSL ES 3.00 §8.3
+      // defines `mod(x, y)` as `x - y * floor(x / y)` and `fract(x)` as
+      // `x - floor(x)`, so the two agree for every dividend, negative ones
+      // included (`mod(-0.25, 1.0)` and `fract(-0.25)` both answer 0.75 — the
+      // floored convention the interpreter's `Mod` uses as well). `fract` is a
+      // single hardware instruction and needs no second operand.
+      //
+      // A SCALAR dividend only: `fract` takes one argument, and the operand-
+      // shape gate reads the emitted call against the head's operands, so a
+      // `vecN` dividend beside the scalar divisor would be judged a genType
+      // mismatch on the one-argument call and decline. The vector form keeps
+      // `mod(v, 1.0)`, which the gate knows takes its scalar last.
+      if (tryGetConstant(b) === 1 && gpuOperandShape(a) === 'scalar')
+        return `fract(${compile(a)})`;
+      return `mod(${compile(a)}, ${compile(b)})`;
+    };
+    // A trigonometric value amplified by a large constant (the "sine hash")
+    // has the exact form, or the code above with a warning on the result
+    // (`gpuAmplifiedTrigMod`).
+    return (
+      gpuAmplifiedTrigMod(
+        'Mod',
+        a,
+        tryGetConstant(b) === 1,
+        compile,
+        target,
+        gpuOperandShape,
+        plain
+      ) ?? plain()
+    );
   },
 
   List: (args, compile) => compileGLSLList(args, compile, 'List'),
