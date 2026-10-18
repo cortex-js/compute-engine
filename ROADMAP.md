@@ -188,20 +188,23 @@ Closing it: make the walk stop at a link that `pushEvalContext` re-pointed (a
 frame with `_restoreParentOnPop`), then the shields can register their scope for
 the whole shielded work.
 
-### `.N()` of a jump function over a list with an erased element rounds the exact survivors first (OPEN, small — found 2026-10-17 by the Codex review of the value-shield fix, in the UNCOMMITTED erasing-literal work of the 2026-10-16 catch-up round in `boxed-function.ts`)
+### A broadcast over a list literal with an element that may erase evaluates every element exactly, so `.N()` over it can cost a hundred times more than over the same list without the erasing element (OPEN, performance — found 2026-10-17 by the Claude review of the jump-operator erasure fix)
 
-With `c := False` and the exact `q = (25! − 1)/24!`,
-`Floor([If(c, 1, Nothing), q]).N()` is `[25]` where `Floor([q]).N()` and
-`Floor(q).N()` are `[24]` and `24`: the early broadcast over an erasing list
-literal (`evaluateBroadcastLiftsOnce`, `boxed-expression/boxed-function.ts`, the
-hunks near lines 8472–8510 of the working tree) rounds every surviving element
-under `numericApproximation` before it builds the scalar calls, so the
-exact-jump recovery of the later broadcast path (`exactJumpBroadcastOperands`)
-never sees the exact operand. The asynchronous mirror has the same shape. On
-0.154.0 the erasing list was refused (`incompatible-type` for `Nothing`), so
-this is a defect of the new work, not a regression of a release. Closing it:
-resolve the erasure while keeping the exact survivors for a jump operator, then
-approximate each scalar result, on both routes.
+The collection handlers of a `List` or `Tuple` literal with an element that may
+evaluate to `Nothing` read the literal's value instead of its operands
+(`erasedLiteralValue`, `collection-utils.ts`), so that a count or a walk sees
+the elements the literal keeps. That value is `expr.evaluate()`: an EXACT
+evaluation of every element, whatever the caller asked. With
+`H = Sum(1/k, k, 1, 6000)` (a rational with about 2 600 digits) and
+`c := False`, `Sin([If(c, 1, Nothing), H]).N()` takes 4 800 ms and
+`Floor([If(c, 1, Nothing), H]).N()` 4 900 ms, where `Sin([H]).N()` takes 45 ms
+and `Floor([H]).N()` 40 ms. Closing it: resolve only the elements that may
+erase, and leave the others as written. That changes what the handlers answer
+for the other elements (an element `2 + 3` would be read as written, not as
+`5`), so every consumer of these handlers that compares elements to values
+(`IndexOf`, `Contains`, an equality) must evaluate the element it reads; or
+carry the caller's numeric request into the handlers, which have no evaluation
+options today.
 
 ### Small items from the dual review of the 2026-10-17 re-review round (OPEN, small)
 

@@ -31,6 +31,22 @@
   a shorter list. The chain of row 380 mixes two such columns, so its serialized
   result keeps growing with the depth.
 
+- **`.N()` of a jump function over a list literal with an erased element uses
+  the exact survivors**. A list literal with an element that may evaluate to
+  `Nothing` (`[If(c, 1, Nothing), q]`) is evaluated before the broadcast so that
+  the broadcast walks the elements it keeps, and under `.N()` that evaluation
+  also approximated the survivors, so the cells of `Floor`, `Ceil`, `Round`,
+  `Truncate`, `Fract`, `Sign`, `Heaviside` and `Mod` had no exact operand to
+  apply their jump rule to: with `c := False` and the exact `q = (25! − 1)/24!`,
+  `Floor([If(c, 1, Nothing), q]).N()` was `[25]` where `Floor([q]).N()` is
+  `[24]`, and `Mod([If(c, 1, Nothing), q], 1).N()` was `[0]` where
+  `Mod([q], 1).N()` is `[1]`. For these operators the literal is now resolved
+  exactly, on the synchronous and the asynchronous routes. The same broadcast
+  approximated an exact scalar step or modulus before the cells were built:
+  `Floor([1], 1/3).N()` was `[0.999…]` where `Floor(1, 1/3).N()` is `1`, and
+  `Mod([1], 1/3).N()` was `[1e-21]` where `Mod(1, 1/3).N()` is `0`. The exact
+  scalar is now put back for these operators.
+
 ### Performance
 
 - **Building a lazy broadcast map no longer retires every cached type in the

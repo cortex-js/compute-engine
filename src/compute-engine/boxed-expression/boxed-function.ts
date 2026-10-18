@@ -5484,13 +5484,17 @@ export class BoxedFunction
         // threshold and silently truncating above it.
         const bops = this._evaluatesExponentExactly(options)
           ? [
-              ...evaluateBroadcastLiftsOnce([this._ops![0]], options),
+              ...evaluateBroadcastLiftsOnce(
+                [this._ops![0]],
+                options,
+                this.operator
+              ),
               normalizeLiftedAbsence(
                 this._ops![1],
                 exactIntegerOperand(this._ops![1], options)
               ),
             ]
-          : evaluateBroadcastLiftsOnce(this._ops!, options);
+          : evaluateBroadcastLiftsOnce(this._ops!, options, this.operator);
         const liftError = this._liftedOperandError(bops);
         if (liftError !== undefined) return liftError;
         // An integer power of a square matrix is the matrix power, not the
@@ -5617,7 +5621,11 @@ export class BoxedFunction
         // broadcast (step 4b/3b) once their count resolves.
         // Broadcast rulings (2026-07-24) — see step 2 above (both run before
         // the lazy form, so size does not decide the semantics).
-        const bops = evaluateBroadcastLiftsOnce(this._ops!, options);
+        const bops = evaluateBroadcastLiftsOnce(
+          this._ops!,
+          options,
+          this.operator
+        );
         const liftError = this._liftedOperandError(bops);
         if (liftError !== undefined) return liftError;
         const mismatch = broadcastLengthMismatch(this.engine, bops);
@@ -5699,7 +5707,11 @@ export class BoxedFunction
         // Broadcast rulings (2026-07-24), as in steps 2/2b: lifted operands are
         // evaluated ONCE, and the length check runs before the lazy form so the
         // SIZE of a source never decides the semantics.
-        const declaredOps = evaluateBroadcastLiftsOnce(this._ops!, options);
+        const declaredOps = evaluateBroadcastLiftsOnce(
+          this._ops!,
+          options,
+          this.operator
+        );
         const liftError = this._liftedOperandError(declaredOps);
         if (liftError !== undefined) return liftError;
         const mapped = declaredBroadcast(
@@ -6695,14 +6707,19 @@ export class BoxedFunction
           ? [
               ...(await evaluateBroadcastLiftsOnceAsync(
                 [this._ops![0]],
-                options
+                options,
+                this.operator
               )),
               normalizeLiftedAbsence(
                 this._ops![1],
                 await exactIntegerOperandAsync(this._ops![1], options)
               ),
             ]
-          : await evaluateBroadcastLiftsOnceAsync(this._ops!, options);
+          : await evaluateBroadcastLiftsOnceAsync(
+              this._ops!,
+              options,
+              this.operator
+            );
         const liftError = this._liftedOperandError(bops);
         if (liftError !== undefined) return liftError;
         // The matrix power of a square matrix (mirrors the sync path).
@@ -6818,7 +6835,11 @@ export class BoxedFunction
         // broadcast (step 4b/3b) once their count resolves.
         // Broadcast rulings (2026-07-24) — mirrors the sync path in step 2b,
         // including running before the lazy form.
-        const bops = await evaluateBroadcastLiftsOnceAsync(this._ops!, options);
+        const bops = await evaluateBroadcastLiftsOnceAsync(
+          this._ops!,
+          options,
+          this.operator
+        );
         const liftError = this._liftedOperandError(bops);
         if (liftError !== undefined) return liftError;
         const mismatch = broadcastLengthMismatch(this.engine, bops);
@@ -6902,7 +6923,8 @@ export class BoxedFunction
       ) {
         const declaredOps = await evaluateBroadcastLiftsOnceAsync(
           this._ops!,
-          options
+          options,
+          this.operator
         );
         const liftError = this._liftedOperandError(declaredOps);
         if (liftError !== undefined) return liftError;
@@ -8562,12 +8584,14 @@ export function isSquareMatrixPower(
  */
 function evaluateBroadcastLiftsOnce(
   ops: ReadonlyArray<Expression>,
-  options: Partial<EvaluateOptions> | undefined
+  options: Partial<EvaluateOptions> | undefined,
+  operator: string
 ): ReadonlyArray<Expression> {
   if (
     !ops.some((op) => !isBroadcastParticipant(op) || literalMayEraseElement(op))
   )
     return ops;
+  const erasing = erasingLiteralOptions(options, operator);
   // A lift is an operand: evaluated without `materialization`
   // (`operandOptions`), or a lift that reveals a lazy collection (a user
   // function returning `Range(1, n)`) would broadcast over its display
@@ -8575,32 +8599,44 @@ function evaluateBroadcastLiftsOnce(
   //
   // A list literal with an element that may evaluate to `Nothing` is
   // evaluated too, so that the broadcast walks the elements the list keeps
-  // (`literalMayEraseElement`).
-  return ops.map((op) =>
+  // (`literalMayEraseElement`); for a jump operator under `.N()` it is
+  // evaluated exactly (`erasingLiteralOptions`).
+  const lifted = ops.map((op) =>
     isBroadcastParticipant(op)
       ? literalMayEraseElement(op)
-        ? (op.evaluate(operandOptions(options)) ?? op)
+        ? (op.evaluate(erasing) ?? op)
         : op
       : normalizeLiftedAbsence(op, op.evaluate(operandOptions(options)) ?? op)
   );
+  // For a jump operator under `.N()`, a scalar lift that is an exact number
+  // is put back exact as well (`withExactScalarOperands`): the cells are
+  // built from these operands as they are, and a step or a modulus that
+  // reached each cell as a float put the cell on the wrong side of a jump:
+  // `Floor([1], 1/3).N()` was `[0.999…]` where `Floor(1, 1/3).N()` is `1`,
+  // and `Mod([1], 1/3).N()` was `[1e-21]` where `Mod(1, 1/3).N()` is `0`.
+  return erasing === operandOptions(options)
+    ? lifted
+    : withExactScalarOperands(lifted, ops);
 }
 
 /** Async mirror of `evaluateBroadcastLiftsOnce`. */
 async function evaluateBroadcastLiftsOnceAsync(
   ops: ReadonlyArray<Expression>,
-  options: Partial<EvaluateOptions> | undefined
+  options: Partial<EvaluateOptions> | undefined,
+  operator: string
 ): Promise<ReadonlyArray<Expression>> {
   if (
     !ops.some((op) => !isBroadcastParticipant(op) || literalMayEraseElement(op))
   )
     return ops;
+  const erasing = erasingLiteralOptions(options, operator);
   // Awaited together, not in sequence: the lifts are independent, and the sync
   // mirror evaluates them without ordering either.
-  return await Promise.all(
+  const lifted = await Promise.all(
     ops.map(async (op) =>
       isBroadcastParticipant(op)
         ? literalMayEraseElement(op)
-          ? ((await op.evaluateAsync(operandOptions(options))) ?? op)
+          ? ((await op.evaluateAsync(erasing)) ?? op)
           : op
         : normalizeLiftedAbsence(
             op,
@@ -8608,6 +8644,45 @@ async function evaluateBroadcastLiftsOnceAsync(
           )
     )
   );
+  // The exact scalar lifts of a jump operator, as in the sync mirror.
+  return erasing === operandOptions(options)
+    ? lifted
+    : withExactScalarOperands(lifted, ops);
+}
+
+/**
+ * The options that `evaluateBroadcastLiftsOnce` evaluates a list literal
+ * with an element that may erase (`literalMayEraseElement`) with: the
+ * operand options (`operandOptions`), except that for a broadcast of a jump
+ * operator (`JUMP_BROADCAST_OPERATORS`) under `.N()` the literal is
+ * evaluated EXACTLY. The literal is evaluated here only so that the
+ * broadcast walks the elements it keeps; under `.N()` that evaluation also
+ * approximated every surviving element, so the cells were built from floats
+ * and the handler of each cell had no exact operand to apply its jump rule
+ * to: `Floor([If(c, 1, Nothing), q]).N()` with `c := False` and the exact
+ * `q = (25! − 1)/24!` was `[25]` where `Floor([q]).N()` and `Floor(q).N()`
+ * are `[24]` and `24`, and `Mod([…, q], 1).N()` was `[0]` where `Mod([q],
+ * 1).N()` is `[1]`. Evaluated exactly, the literal resolves its erasure the
+ * same way (the condition of an `If` is evaluated as it is), its survivors
+ * stay exact, and the broadcast that follows builds its cells from the
+ * literal as it is, so each cell's handler applies its jump rule to an exact
+ * operand before it approximates the result. (The post-evaluation broadcast
+ * of steps 4b and 4t has its own recovery, `exactJumpBroadcastOperands`;
+ * the operands returned here never reach it.) For every other operator the
+ * approximation of the survivors is kept: the cells need floats, and an
+ * exact evaluation can cost much more.
+ */
+function erasingLiteralOptions(
+  options: Partial<EvaluateOptions> | undefined,
+  operator: string
+): Partial<EvaluateOptions> | undefined {
+  const base = operandOptions(options);
+  if (
+    options?.numericApproximation !== true ||
+    !JUMP_BROADCAST_OPERATORS.has(operator)
+  )
+    return base;
+  return { ...base, numericApproximation: false };
 }
 
 /**
