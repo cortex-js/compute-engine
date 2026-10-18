@@ -398,8 +398,10 @@ export interface CseHarvestOptions {
    */
   readonly skippabilityQuery?: boolean;
 
-  /** Is this symbol backed by a *string*-valued `vars` entry? (Non-string
-   * `vars` are baked constants and are safe.) */
+  /** Is this symbol backed by a *string*-valued `vars` entry whose source may
+   * have an effect (`isOpaqueVarsSource`)? Non-string `vars` are baked
+   * constants, and a string that is exactly the target's own spelling of the
+   * symbol (`_.a`) changes nothing; both are safe. */
   readonly isStringVar?: (name: string) => boolean;
   /** Is this symbol a `vars` key of any value kind? A `vars` entry
    * is the caller's external-input contract and takes precedence over both
@@ -528,6 +530,47 @@ export function isCallerMapped(
 ): boolean {
   if (!isFunction(node)) return false;
   return new Harvester(node, options).isCallerMapped(node);
+}
+
+/**
+ * Is a `vars` entry's value caller source whose evaluation may have an
+ * effect — count its own calls, draw a random number, read a value that
+ * changes between two reads? Such a symbol is the `isStringVar` class of
+ * `CseHarvestOptions`: no pass may share, skip or repeat its reads, and the
+ * JavaScript runner never computes a value that reads it once for all calls.
+ *
+ * A number (or any other non-string value) is a baked constant, not source,
+ * so it is never opaque. A string is opaque unless it is exactly
+ * `defaultSpelling`: the code the target emits for the same symbol when it
+ * has no `vars` entry (`_.a` for `a` on the JavaScript targets, a host's
+ * `vars: { a: '_.a' }` that keeps a slider value live). Such an entry
+ * changes nothing in the emitted code, so it must not change what the
+ * compiler may do with it. The test is equality, not the shape of the text:
+ * a deeper path (`_.state.a`) can be a getter, a path naming another symbol
+ * (`_.b` for `a`) is written by an assignment to that symbol, which the
+ * passes would not see, and the bare vars object `_` is not a read the
+ * runner recognizes as per call. `defaultSpelling` is `undefined` where no
+ * spelling is safe (a compiled `Function` literal, whose runner has no vars
+ * object), and every string is then opaque.
+ */
+export function isOpaqueVarsSource(
+  source: unknown,
+  defaultSpelling: string | undefined
+): boolean {
+  if (typeof source !== 'string') return false;
+  return defaultSpelling === undefined || source.trim() !== defaultSpelling;
+}
+
+/**
+ * The spelling the JavaScript and interval-JavaScript targets emit for a free
+ * symbol on the expression route, `_.<name>`, or `undefined` for a name that
+ * is not a plain identifier or that `Object.prototype` defines (those are
+ * spelled with a guarded lookup). See {@link isOpaqueVarsSource}.
+ */
+export function varsObjectSpelling(name: string): string | undefined {
+  if (!/^[A-Za-z_$][\w$]*$/.test(name)) return undefined;
+  if (Object.hasOwn(Object.prototype, name)) return undefined;
+  return `_.${name}`;
 }
 
 /**
@@ -1077,6 +1120,25 @@ class Harvester {
       isFunction(node.ops[0].ops[1], 'Range')
     )
       return true;
+    // A power whose exponent is not a small integer literal lowers to a
+    // library call (`Math.exp` for `e^x`, which the canonical form spells as
+    // `Power(ExponentialE, x)`; `Math.pow`; `_SYS.pow`), and a root to
+    // `Math.cbrt` or `Math.pow`. Both are as costly as the transcendentals
+    // below, while their syntax is only three nodes: `exp(0.1t)` twice in one
+    // tuple was emitted twice (measured by the Tycho code-generation audit of
+    // 2026-10-17). A small integer exponent lowers to multiplications and stays
+    // with the ordinary thresholds. A target that declines the symbol-square
+    // exemption (Python, where a temporary costs more than one `**`
+    // operation) keeps only the two shapes that are a library call there:
+    // `e^x` (`math.exp`) and a root.
+    if (isFunction(node, 'Root')) return true;
+    if (isFunction(node, 'Power') && node.nops === 2) {
+      if (!this.shareSymbolSquares)
+        return isSymbol(node.ops[0], 'ExponentialE');
+      const exp = node.ops[1];
+      const n = isNumber(exp) && !exp.isComplex ? exp.re : NaN;
+      return !(Number.isInteger(n) && Math.abs(n) <= 5);
+    }
     return (
       isFunction(node) &&
       [

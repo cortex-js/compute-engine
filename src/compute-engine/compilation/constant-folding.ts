@@ -1141,6 +1141,8 @@ const JAVASCRIPT_EMITTED_FOLD: EmittedFoldDialect = {
       const s = x * x;
       return s * s * x;
     }),
+    '_SYS.pow3h': unaryFold((x) => x * Math.sqrt(x)),
+    '_SYS.pow5h': unaryFold((x) => x * x * Math.sqrt(x)),
     // `_SYS.pow` is `Math.pow` with the interpreter's `0^0 = NaN` convention.
     // It is the lowering of every power whose EXPONENT is not a literal in the
     // tree, which is exactly what a `Sum` or `Product` index is: the unroll

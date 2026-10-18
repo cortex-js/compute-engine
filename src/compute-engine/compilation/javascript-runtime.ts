@@ -3678,6 +3678,14 @@ export const SYS_HELPERS = {
     const s = x * x;
     return s * s * x;
   },
+  // `x^(3/2)` and `x^(5/2)` of a base the compiler proved non-negative,
+  // through the square root instead of the general power kernel: a square
+  // root is exact to half an ulp and about eight times faster than
+  // `Math.pow` (see `realRadicalPower` in `javascript-target.ts`, which
+  // emits these for a base that is not a symbol or a number literal, so the
+  // base is evaluated once).
+  pow3h: (x: number) => x * Math.sqrt(x),
+  pow5h: (x: number) => x * x * Math.sqrt(x),
 
   // Power with the interpreter's 0^0 = NaN convention. `Math.pow(0, 0)` is 1,
   // but the interpreter treats a genuine 0^0 as indeterminate (NaN). Used only

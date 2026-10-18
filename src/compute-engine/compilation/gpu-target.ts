@@ -1,6 +1,6 @@
 import type { Expression, RoundingTies } from '../global-types.js';
 import { entrySource } from './function-purity.js';
-import { isCallerMapped } from './cse.js';
+import { isCallerMapped, isOpaqueVarsSource } from './cse.js';
 import { withVarsValuesHidden } from './vars-inputs.js';
 import {
   clearGPUCounters,
@@ -16504,10 +16504,18 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       undefined,
       options.functions
     );
+    // A string `vars` entry is caller source unless it is the spelling this
+    // target emits for the symbol anyway, its bare name
+    // (`isOpaqueVarsSource`).
+    const opaqueVar = (name: string): boolean =>
+      isOpaqueVarsSource(
+        options.vars?.[name],
+        /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) ? name : undefined
+      );
     expr = unrollFixedWidthCollections(expr, {
       skipHeads: unrollSkipHeads,
       iterationBudget: options.iterationBudget,
-      readsLiveSource: (name) => typeof options.vars?.[name] === 'string',
+      readsLiveSource: opaqueVar,
       // A shader has no loop lowering for a comprehension; a small one over
       // literal domains is written out as a fixed-size array literal
       // (`CompileTarget.unrollComprehensions`).
@@ -16612,7 +16620,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       {
         skipHeads: unrollSkipHeads,
         iterationBudget: options.iterationBudget,
-        readsLiveSource: (name) => typeof options.vars?.[name] === 'string',
+        readsLiveSource: opaqueVar,
         unrollComprehensions: true,
         explicitPointNorm: (point) => {
           const explicit = explicitBroadcastPointNorm(point, target);
@@ -16630,8 +16638,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       enabled: options.cse,
       isOverriddenOperator: (name) =>
         userFunctions !== undefined && Object.hasOwn(userFunctions, name),
-      isStringVar: (name) =>
-        vars !== undefined && typeof vars[name] === 'string',
+      isStringVar: opaqueVar,
       isVarsKey: (name) => vars !== undefined && Object.hasOwn(vars, name),
     });
     const code = BaseCompiler.compileCseRoot(expr, target, 0, () =>

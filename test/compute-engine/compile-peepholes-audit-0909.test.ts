@@ -388,12 +388,10 @@ describe('a power with a root in its exponent takes the root', () => {
     expect(sqrt.run!({ a: 9 })).toBeCloseTo(64, 12);
   });
 
-  test('a base the emitted form would name twice keeps `Math.pow`', () => {
-    // The radicand is a compound expression, so repeating it would duplicate
-    // the code that computes it.
-    expect(codeOf(ce, '\\sqrt{x^2+1}^3')).toBe(
-      '_SYS.pow3(Math.sqrt((_.x * _.x) + 1))'
-    );
+  test('a base the emitted form would name twice goes through a helper', () => {
+    // The radicand is a compound expression, so repeating it inline would
+    // duplicate the code that computes it: `_SYS.pow3h` names it once.
+    expect(codeOf(ce, '\\sqrt{x^2+1}^3')).toBe('_SYS.pow3h((_.x * _.x) + 1)');
   });
 
   test('the values match the interpreter', () => {

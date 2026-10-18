@@ -24,7 +24,11 @@ import { typeToString } from '../../common/type/serialize.js';
 import type { MathJsonSymbol } from '../../math-json/types.js';
 import { normalizeDeprecatedCompileOptions } from './deprecation-warnings.js';
 import { entryIsPure, entrySource } from './function-purity.js';
-import { isCallerMapped } from './cse.js';
+import {
+  isCallerMapped,
+  isOpaqueVarsSource,
+  varsObjectSpelling,
+} from './cse.js';
 import { javascriptStatements } from './javascript-statements.js';
 import { compileNumericSelection } from './javascript-selection-fusion.js';
 import {
@@ -8599,10 +8603,12 @@ const NO_REAL_VALUE_FOLD = 'NaN';
  * radicand is the value to take the integer power of.
  *
  * Two conditions restrict the square-root routes. The base must be provably
- * non-negative, because `Math.sqrt` of a negative value is `NaN`. And where
- * the emitted form names the base twice it must be a symbol or a number
- * literal, so that repeating it costs nothing and cannot duplicate arbitrary
- * target source — the same guard the `Power(x, 2)` expansion uses. The cube
+ * non-negative, because `Math.sqrt` of a negative value is `NaN`. And the
+ * inline form names the base twice, so it is used only for a symbol or a
+ * number literal, where repeating it costs nothing and cannot duplicate
+ * arbitrary target source — the same guard the `Power(x, 2)` expansion uses.
+ * Any other base (`(x² + 1)^(3/2)`) goes through `_SYS.pow3h`/`_SYS.pow5h`,
+ * which evaluate it once. The cube
  * root needs neither: it names the base once and is defined for a negative
  * base, where it gives the real root the engine's own branch convention picks.
  *
@@ -8652,7 +8658,9 @@ function realRadicalPower(
   const spliceable =
     isNumber(radicand) ||
     (isSymbol(radicand) && !target.varsKeys?.has(radicand.symbol));
-  if (!spliceable) return undefined;
+  // Any other base goes through a runtime helper, which names it once.
+  if (!spliceable)
+    return `_SYS.${e === 1.5 ? 'pow3h' : 'pow5h'}(${compile(radicand)})`;
   const code = compile(radicand);
   return e === 1.5
     ? `(${code} * Math.sqrt(${code}))`
@@ -9624,10 +9632,19 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       options.operators,
       options.functions
     );
+    // A string `vars` entry is caller source unless it is the spelling this
+    // target emits for the symbol anyway (`isOpaqueVarsSource`). A compiled
+    // `Function` literal has no vars object, so there every string is.
+    const lambdaRoute = isFunction(expr, 'Function');
+    const opaqueVar = (name: string): boolean =>
+      isOpaqueVarsSource(
+        options.vars?.[name],
+        lambdaRoute ? undefined : varsObjectSpelling(name)
+      );
     expr = unrollFixedWidthCollections(expr, {
       skipHeads: unrollSkipHeads,
       iterationBudget: options.iterationBudget,
-      readsLiveSource: (name) => typeof options.vars?.[name] === 'string',
+      readsLiveSource: opaqueVar,
     });
     const {
       operators,
@@ -9835,8 +9852,7 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       // not inherit the function entry's purity.
       isPureOverriddenOperator: (name) =>
         pureFunctions.has(name) && customOperator(name) === undefined,
-      isStringVar: (name) =>
-        vars !== undefined && typeof vars[name] === 'string',
+      isStringVar: opaqueVar,
       isVarsKey: (name) =>
         vars !== undefined && Object.prototype.hasOwnProperty.call(vars, name),
     });

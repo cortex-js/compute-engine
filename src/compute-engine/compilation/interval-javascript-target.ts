@@ -66,6 +66,7 @@ import {
 import { isOperatorDef } from '../boxed-expression/utils.js';
 import { isRelationalOperator } from '../latex-syntax/utils.js';
 import type { LoopInvariantBinding } from './base-compiler.js';
+import { isOpaqueVarsSource, varsObjectSpelling } from './cse.js';
 import {
   couldBeIndexedCollectionOperand,
   couldBeStringOperand,
@@ -5316,11 +5317,19 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
       undefined,
       options.functions
     );
+    // A string `vars` entry is caller source unless it is the spelling this
+    // target emits for the symbol anyway (`isOpaqueVarsSource`); a `Function`
+    // literal has no vars object, so there every string is.
+    const lambdaRoute = isFunction(expr, 'Function');
+    const opaqueVar = (name: string): boolean =>
+      isOpaqueVarsSource(
+        options.vars?.[name],
+        lambdaRoute ? undefined : varsObjectSpelling(name)
+      );
     const unrollOptions = {
       skipHeads: unrollSkipHeads,
       iterationBudget: options.iterationBudget,
-      readsLiveSource: (name: string) =>
-        typeof options.vars?.[name] === 'string',
+      readsLiveSource: opaqueVar,
       // This target has no list lowering at all, so a list of ANY width is
       // written out (`CompileTarget.unrollMinWidth`).
       minWidth: 1,
@@ -5508,8 +5517,7 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
       enabled: options.cse,
       isOverriddenOperator: (name) =>
         Object.prototype.hasOwnProperty.call(namedFunctions, name),
-      isStringVar: (name) =>
-        vars !== undefined && typeof vars[name] === 'string',
+      isStringVar: opaqueVar,
       isVarsKey: (name) =>
         vars !== undefined && Object.prototype.hasOwnProperty.call(vars, name),
     });
