@@ -394,11 +394,15 @@ export function simplifyValueBlind(
     // engine. (1) The shield scope is registered as a SCRATCH scope
     // (`scratch-scopes.ts`) while the shield declarations below are made, so
     // they advance no engine-wide cache version and the pop that discards
-    // them is clean. The registration ends before the simplification runs:
-    // evaluating an existing scoped expression inside it re-parents that
-    // expression's persistent local scope under the shield scope for the
-    // call, and a declaration made in that scope then must keep its axis
-    // advance, since the scope and the binding outlive the shield. (2) The
+    // them is clean. The registration ends before the simplification runs,
+    // for the reasons given in `withValueShield` (`utils.ts`): a name the
+    // simplification declares with a value after a cache was filled inside
+    // the shield must retire that cache, and a scope created inside the
+    // shield can escape with the result. (A scoped expression evaluated
+    // inside the shield chains its persistent local scope onto the shield
+    // scope for the call; a declaration made in that scope is not scratch
+    // even during the registration, because `scratchRootOf` follows the
+    // link the scope had before it was chained.) (2) The
     // shield declarations and the simplification run under a cache key of
     // their own (`ce._withValueShieldKey`): a symbol reads its VALUE by name
     // through the current scope chain, so an expression that existed before

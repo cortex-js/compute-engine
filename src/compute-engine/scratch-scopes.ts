@@ -12,9 +12,11 @@
  * such caches key on. See `axisMaskOf` in `engine-configuration-lifecycle.ts`
  * for which versions still advance.
  *
- * This module imports nothing, so every module that declares or infers can
- * import it without creating a dependency cycle.
+ * This module imports only `scope-chaining.ts`, which imports nothing, so
+ * every module that declares or infers can import it without creating a
+ * dependency cycle.
  */
+import { chainedScopeOf } from './scope-chaining.js';
 
 /** The part of the engine this module reads. */
 type ScratchEngine = { readonly _scratchDeclarationScopes: object[] };
@@ -23,15 +25,29 @@ type ScratchEngine = { readonly _scratchDeclarationScopes: object[] };
 type ScopeLike = { parent: unknown };
 
 /** The registered scratch scope that `scope` is, or that `scope` was created
- * under, or `undefined`. */
+ * under, or `undefined`.
+ *
+ * The walk follows the CREATION links. A persistent scope pushed for an
+ * evaluation (the local scope of a block, a sum or a comprehension) has its
+ * parent link re-pointed at the ambient scope for the life of the frame
+ * (`pushEvalContext`, `engine-scope.ts`). Through that link, a scope that
+ * was created outside a scratch scope sits under it while a scratch
+ * computation evaluates the node, and the scope and a binding declared in
+ * it (a `Declare` statement run by a block, a local assigned in it) outlive
+ * the computation. So at a chained scope the walk takes the link the scope
+ * had before it was chained (`chainedScopeOf`, `scope-chaining.ts`). */
 export function scratchRootOf(
   ce: ScratchEngine,
   scope: ScopeLike | null | undefined
 ): object | undefined {
   const roots = ce._scratchDeclarationScopes;
   if (roots.length === 0) return undefined;
-  for (let s = scope; s; s = s.parent as ScopeLike | null | undefined)
+  for (let s = scope; s;) {
     if (roots.includes(s)) return s;
+    const chained = chainedScopeOf(s);
+    s = (chained !== undefined ? chained.parent : s.parent) as
+      ScopeLike | null | undefined;
+  }
   return undefined;
 }
 

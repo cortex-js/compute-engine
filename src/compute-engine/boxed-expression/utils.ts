@@ -1421,11 +1421,20 @@ export function withValueShield<T>(
   try {
     // The shield scope is a SCRATCH scope (`scratch-scopes.ts`) while the
     // shield declarations are made, so they advance no engine-wide cache
-    // version and the pop is clean — and only while they are made: a scoped
-    // expression evaluated by `fn` re-parents its persistent local scope
-    // under the shield scope for the call, and a declaration made there must
-    // keep its axis advance. And the declarations and `fn` run under a cache
-    // key of their own (`ce._withValueShieldKey`), because the expressions
+    // version and the pop is clean — and only while they are made, for two
+    // reasons. A name that `fn` declares with a value after a cache was
+    // filled inside the shield must retire that cache: with `y := 1`, a
+    // sign of `y + 1` read inside the shield, then `y` declared `-3` into
+    // the shield scope, the sign read again must not be the cached positive
+    // one, and a scratch declaration retires nothing. And a scope created
+    // inside the shield (the local scope of a function literal boxed by
+    // `fn`) can escape with the result, so a declaration into it must keep
+    // its axis advance too. (A scoped expression evaluated by `fn` chains
+    // its persistent local scope onto the shield scope for the call; a
+    // declaration made there is not scratch even during the registration,
+    // because `scratchRootOf` follows the link the scope had before it was
+    // chained.) And the declarations and `fn` run under a cache key of
+    // their own (`ce._withValueShieldKey`), because the expressions
     // that existed before the shield read their VALUES by name, so a sign
     // derived from the hidden value, or a type that depends on it, must not
     // be served inside the shield, nor a value-blind one after it. Together

@@ -2,6 +2,42 @@
 
 ### Issues Resolved
 
+- **A `Declare` run by a block inside a value shield keeps its cache
+  invalidation.** A computation that registers a scratch scope
+  (`scratch-scopes.ts`) exempts the declarations made into that scope, or into a
+  scope created under it, from the engine-wide cache invalidation, because the
+  pop that ends the computation discards them. The test walked the parent links
+  of the target scope. A block, a sum or a comprehension evaluated inside such a
+  computation chains its persistent local scope onto the current scope for the
+  life of the frame, so a block boxed outside the computation sat under the
+  scratch scope through that link, and a `Declare` it ran was exempted although
+  the block's scope and the binding outlive the computation. The walk now
+  follows the link the scope had before it was chained (`scope-chaining.ts`, a
+  registry that `pushEvalContext` keeps). The two value shields
+  (`simplifyValueBlind`, `withValueShield`), which hide an assigned value while
+  a simplification or a calculus operation runs, keep registering their scope
+  only while their shadow declarations are made: a name the shielded work
+  declares with a value after a cache was filled inside the shield must retire
+  that cache, and a scope created inside the shield can escape with the result.
+
+- **A bare parameter typed by its index reads keeps every arm of a union
+  collection slot.** `p[2] + 1` types a parameter `p` as
+  `tuple<unknown, number>` and records that the tuple came from index reads
+  only. At a slot that requires `indexed_collection<integer> | list<real>`, the
+  rule that fills the unread components (`indexReadTupleAtCollectionSlot`,
+  `boxed-expression/index-read-tuple.ts`) kept only the filled tuple of the
+  first arm, `tuple<integer, integer>`, and lost the `list<real>` alternative,
+  so a later real-valued argument was refused; a filled tuple was checked
+  against the whole requirement instead of its own arm; and the union it built
+  was not reduced (`list<integer> | list<integer>` stayed). The parameter now
+  takes the reduced union of what each arm gives,
+  `list<real> | tuple<integer, integer>`, with the index-read mark put back on
+  each tuple member. Both index-read rules accept such a union afterwards: a
+  later slot that requires a longer tuple (`h(p)` with
+  `h: (tuple<integer, integer, integer>) -> number`) extends the tuple member
+  and drops the members the slot does not admit, and a later collection slot
+  fills the tuple member and keeps the members it admits.
+
 - **A symbol declared as a number, a point or a list of numbers keeps one list
   level through arithmetic.** With `b` and `c` declared
   `number | list<number> | tuple<number, number> | tuple<number, number, number>`

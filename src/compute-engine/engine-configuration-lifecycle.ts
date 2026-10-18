@@ -143,7 +143,12 @@ const OBJECT_STORE_BUMPS_ANY: boolean = (() => {
  * (`simplifyValueBlind` in `boxed-expression/simplify.ts`, `withValueShield`
  * in `boxed-expression/utils.ts`), which register it only while their
  * shadow declarations are made. The computation discards that scope when it
- * returns. For the signature derivation, only the expressions it builds
+ * returns. A persistent scope that an evaluation inside the computation
+ * chains onto the scratch scope (the local scope of a block or a sum,
+ * `pushEvalContext` in `engine-scope.ts`) is not under it for this test:
+ * the walk follows the link the scope had before it was chained
+ * (`scratchRootOf`), so a `Declare` run by such a block keeps its axis
+ * advance. For the signature derivation, only the expressions it builds
  * there resolve a name to a binding in it. A value shield is different: it
  * shadows a name whose VALUE existing expressions read by name, through the
  * current scope chain, and that is its purpose. Those expressions would

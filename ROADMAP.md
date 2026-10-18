@@ -168,26 +168,6 @@ of the MathJSON output contract and needs a decision; or, on the consumer's
 side, binding the sliders before the rows are evaluated, which Tycho does since
 2026-10-17 (the chain is then a `Map` at every depth and linear in size).
 
-### `scratchRootOf` accepts a persistent scope re-parented under a scratch root as created under it (OPEN, small — found 2026-10-17 by the dual review of the value-shield cache fix)
-
-`scratchRootOf` (`scratch-scopes.ts`) walks `scope.parent` to decide whether a
-declaration's target scope was created under a registered scratch scope.
-`pushEvalContext` (`engine-scope.ts`) re-points the `parent` of a persistent
-scope — the local scope of a function literal, pushed for a call — at the
-current scope for the duration of the push and restores it at the pop. While
-such a scope sits under a registered root, a declaration made in it is
-classified scratch (`declare` with `scratch: true`, no `any` advance) although
-the scope and the binding outlive the registration. Today no registrar keeps a
-scope registered while it evaluates user code: the two value shields
-(`simplifyValueBlind`, `withValueShield`) register their scope only while their
-shadow declarations are made, for this reason, and
-`resultUnderDeclaredParameters` boxes a literal without evaluating it. The cost
-of the narrow registration: a name that the shielded work declares directly into
-the shield scope advances `any` twice again (the declaration and the dirty pop).
-Closing it: make the walk stop at a link that `pushEvalContext` re-pointed (a
-frame with `_restoreParentOnPop`), then the shields can register their scope for
-the whole shielded work.
-
 ### A broadcast over a list literal with an element that may erase evaluates every element exactly, so `.N()` over it can cost a hundred times more than over the same list without the erasing element (OPEN, performance — found 2026-10-17 by the Claude review of the jump-operator erasure fix)
 
 The collection handlers of a `List` or `Tuple` literal with an element that may
@@ -225,23 +205,6 @@ options today.
 - `Max`/`Min` with an `Indeterminate` operand and a `Linspace` whose
   integer-valued samples exceed the safe integers (`Linspace(0, 10⁹−1, 10⁹)`)
   still reads the samples one by one (1.6 s; memory flat).
-
-### `indexReadTupleAtCollectionSlot` drops viable constructor arms and returns an unreduced union (OPEN, small — found 2026-10-17 by the dual review of the re-review round, on the code of commit f3b87a29)
-
-In `boxed-expression/index-read-tuple.ts`, `indexReadTupleAtCollectionSlot`
-keeps only the filled tuples when any arm yields one
-(`const results = filledTuples.length > 0 ? filledTuples : constructorArms`), so
-an index-read `tuple<unknown, number>` at
-`indexed_collection<integer> | list<real>` becomes `tuple<integer, integer>` and
-the valid `list<real>` alternative is lost; later reads are then narrowed to
-`integer` and a real-valued argument can be refused. The result is also built as
-a raw `{kind: 'union', types}` that does not go through the union reducer
-(duplicates and subsumed arms stay, the object is not interned), and a union is
-not a tuple, so the index-read mark the doc comment promises does not survive
-when more than one arm applies. Closing it: check each filled tuple against its
-own arm, keep both the filled tuples and the constructor alternatives, build the
-union with the reducer, and either keep the mark on each tuple member or say in
-the comment that the per-index mark ends when several arms apply.
 
 ### `HurwitzZeta(s, a)` at a negative real `a` with an odd order loses all its digits with no warning (OPEN, numerics — found 2026-10-17 by the Codex re-review of the LerchPhi/Zeta ranges)
 

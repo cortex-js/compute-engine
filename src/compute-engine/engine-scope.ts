@@ -22,6 +22,11 @@ import {
 } from './boxed-expression/binding-tombstone.js';
 import { ambientChainParent } from './boxed-expression/ambient-chain.js';
 import { _discardPendingSequencesOfScope } from './sequence.js';
+import {
+  addChainingFrame,
+  chainedScopeOf,
+  removeChainingFrame,
+} from './scope-chaining.js';
 
 export function pushScope(
   ce: IComputeEngine,
@@ -41,27 +46,6 @@ export function pushScope(
 export function popScope(ce: IComputeEngine): void {
   popEvalContext(ce);
 }
-
-/**
- * For each scope that a live frame chains onto an ambient scope (`ambient`
- * option of `pushEvalContext`), the set of those live frames.
- *
- * The same scope object can be live in more than one frame at once: two
- * evaluations of one node interleaved on the asynchronous path. Each
- * asynchronous evaluation keeps its frames on its own copy of the
- * evaluation-context stack (`EvaluateOptions._contextStack`), so the frames
- * of two interleaved evaluations are not on one array, and a search of the
- * current stack does not find all of them. This registry finds them.
- *
- * A frame leaves the registry when it is dropped from its stack:
- * `popEvalContext` and `removeEvalContext` (through `discardEvalContext`),
- * and the public `ce.contextStack` setter for each frame that the new stack
- * does not keep (`releaseChainingFrame`). A frame of an asynchronous
- * evaluation that never settles stays in the registry, and its scope stays
- * chained onto the ambient scope, until that evaluation settles: the
- * evaluation can still resume and use the frame.
- */
-const chainingFrames = new WeakMap<Scope, Set<EvalContext>>();
 
 export function pushEvalContext(
   ce: IComputeEngine,
@@ -94,9 +78,13 @@ export function pushEvalContext(
       // parent link to restore is then the ORIGINAL one that frame saved,
       // not the link this frame found (already re-pointed); and only the
       // last such frame to be discarded restores it (`discardEvalContext`).
-      const other = chainingFrames.get(scope)?.values().next().value;
+      // The registry of chained scopes (`scope-chaining.ts`) holds that
+      // original link.
+      const chained = chainedScopeOf(scope);
       restoreParentOnPop =
-        other !== undefined ? other._restoreParentOnPop : scope.parent;
+        chained !== undefined
+          ? (chained.parent as Scope | null | undefined)
+          : scope.parent;
       scope.parent = parent;
     }
   }
@@ -126,9 +114,7 @@ export function pushEvalContext(
   });
   if (restoreParentOnPop !== undefined) {
     const frame = ce._evalContextStack[ce._evalContextStack.length - 1];
-    const frames = chainingFrames.get(scope);
-    if (frames === undefined) chainingFrames.set(scope, new Set([frame]));
-    else frames.add(frame);
+    addChainingFrame(scope, frame, restoreParentOnPop);
   }
 }
 
@@ -165,7 +151,7 @@ export function removeEvalContext(
 
 /**
  * Take a frame that chains its scope onto an ambient scope out of the
- * registry of live chaining frames (`chainingFrames`). When it was the last
+ * registry of chained scopes (`scope-chaining.ts`). When it was the last
  * live frame for its scope, give the scope its original parent link back.
  * A no-op for a frame that does not chain its scope.
  *
@@ -177,12 +163,8 @@ export function removeEvalContext(
  */
 export function releaseChainingFrame(context: EvalContext): void {
   if (context._restoreParentOnPop === undefined) return;
-  const frames = chainingFrames.get(context.lexicalScope);
-  frames?.delete(context);
-  if (frames === undefined || frames.size === 0) {
-    chainingFrames.delete(context.lexicalScope);
+  if (removeChainingFrame(context.lexicalScope, context))
     context.lexicalScope.parent = context._restoreParentOnPop;
-  }
 }
 
 function discardEvalContext(
