@@ -7918,6 +7918,30 @@ export function broadcastsOverTuples(
 }
 
 /**
+ * Whether the tuple arm of a scalar-or-collection union operand is typed as
+ * a cell of its own by the arm-by-arm typing of such a union
+ * (`armwiseUnionBroadcastResultType`, `collection-utils.ts`): every head
+ * that `broadcastsOverTuples` admits, and also a head whose own type handler
+ * types a tuple operand (the `'tuples'` exemption: `Add`, `Multiply`,
+ * `Divide`, which sum or scale points themselves). A norm head reads a point
+ * as one value whose norm is a number, a relational operator compares it
+ * whole, and a lambda or user function is typed by its own broadcast arm:
+ * none of them is typed arm by arm.
+ */
+export function typesTupleArmsAsCells(
+  operator: string,
+  def: BoxedOperatorDefinition
+): boolean {
+  return (
+    def.broadcastable === true &&
+    !TUPLE_NORM_HEADS.has(operator) &&
+    !isRelationalOperator(operator) &&
+    !isLambdaDef(def) &&
+    !isUserFunctionDef(def)
+  );
+}
+
+/**
  * The per-cell operand lists of a component-wise broadcast of `operator` over
  * the TUPLE operands in `tail`.
  *
@@ -10051,15 +10075,25 @@ function type(expr: BoxedFunction): Type | BoxedType {
       // for a `propagate` operator), and an answer that strips to `never`
       // takes the declared codomain (`withCodomainForAbsentAnswer`), as the
       // main answer does. `undefined` when no operand has a cell or the
-      // handler declines.
+      // handler declines. With `byTypeOnly`, a retyped operand is described
+      // by its cell type alone, without the operand's structure: the cell is
+      // one ARM of a declared union (`armwiseUnionBroadcastResultType`), so
+      // it states what the value is, where the structure (an application
+      // of `Negate` over the union-typed symbol) would say the value is
+      // unproven and keep a handler from rejecting an arm it rejects at
+      // boxing.
       const cellHandlerResult = (
-        cells: ReadonlyArray<Type | undefined>
+        cells: ReadonlyArray<Type | undefined>,
+        byTypeOnly = false
       ): Type | undefined => {
         if (typeof def.type !== 'function') return undefined;
         if (cells.every((c) => c === undefined)) return undefined;
-        const descriptors = expr.ops.map((x, i) =>
-          describeOperand(x, cells[i] ?? handlerOperandType(i))
-        );
+        const descriptors = expr.ops.map((x, i) => {
+          const cell = cells[i];
+          if (cell === undefined)
+            return describeOperand(x, handlerOperandType(i));
+          return byTypeOnly ? describeType(cell) : describeOperand(x, cell);
+        });
         const t = guardedTypeHandlerCall(expr.engine, expr.operator, () =>
           def.type!(descriptors, typeHandlerContext(expr.engine))
         );
@@ -10082,6 +10116,7 @@ function type(expr: BoxedFunction): Type | BoxedType {
             ? undefined
             : (i: number) => declaredSlots.at(i).mappable,
         broadcastsOverTuples: broadcastsOverTuples(expr.operator, def),
+        armwiseTupleArms: typesTupleArmsAsCells(expr.operator, def),
         // O(rank) candidate check — see the §D4.2 note at the sibling sites.
         hasTensors: expr.ops.some((x) => candidateShape(x) !== null),
         unionCellResult: () =>
@@ -10092,6 +10127,9 @@ function type(expr: BoxedFunction): Type | BoxedType {
         // collection lift typed as its cell (`abstractCollectionCell`): the
         // per-element result of a broadcast that may or may not happen.
         abstractCellResult: (cells) => cellHandlerResult(cells),
+        // The handler typed with each union trigger typed as one of its
+        // arms, by type alone (`armwiseUnionBroadcastResultType`).
+        armCellResult: (cells) => cellHandlerResult(cells, true),
       });
       if (lifted !== undefined) return maybeAbsorb(lifted);
     }
@@ -13866,6 +13904,7 @@ installBroadcastLiftHooks({
     return slots === undefined ? 'no-plan' : (i) => slots.at(i).mappable;
   },
   broadcastsOverTuples,
+  typesTupleArmsAsCells,
   // The same gate as the expression route's: only a lambda-literal
   // definition is kept out of the shared arms (it has its own broadcast arm
   // there); a user-defined operator goes through them.

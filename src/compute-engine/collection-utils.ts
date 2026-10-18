@@ -1774,6 +1774,185 @@ export function scalarOrListUnionCellType(t: Readonly<Type>): Type | undefined {
   return reduceType({ kind: 'union', types: cells });
 }
 
+/** One arm of a scalar-or-collection union operand, for an arm-by-arm
+ * typing (`armwiseUnionBroadcastResultType`): the type the operator sees in
+ * one cell when the value holds this arm, and how the per-cell result is
+ * shaped back when the arm is a collection (`undefined` for a scalar arm). */
+type UnionArm = {
+  cell: Type;
+  rewrap: ((element: Type) => Type) | undefined;
+};
+
+/** The arms of a scalar-or-collection union, classified as
+ * `scalarOrCollectionUnionBranches` classifies them, or `undefined` when `t`
+ * is not such a union. A `broadcastable<T>` arm is two arms, the scalar `T`
+ * and an indexed collection of `T`. */
+function unionArms(t: Readonly<Type>): UnionArm[] | undefined {
+  if (scalarOrCollectionUnionBranches(t) === undefined) return undefined;
+  const resolved = resolveTypeAlias(t);
+  if (typeof resolved === 'string' || resolved.kind !== 'union')
+    return undefined;
+  const scalarSibling = unionHasGenuineScalarBranch(resolved);
+  const arms: UnionArm[] = [];
+  for (const branch of resolved.types) {
+    const b = resolveTypeAlias(branch);
+    const element = dimensionlessIndexedElement(b, undefined, scalarSibling);
+    if (element !== undefined) {
+      arms.push({ cell: element, rewrap: (e) => rewrapCollectionBranch(b, e) });
+    } else if (typeof b !== 'string' && b.kind === 'broadcastable') {
+      arms.push({ cell: b.elements, rewrap: undefined });
+      arms.push({
+        cell: b.elements,
+        rewrap: (e) => ({ kind: 'indexed_collection', elements: e }),
+      });
+    } else arms.push({ cell: b, rewrap: undefined });
+  }
+  return arms;
+}
+
+/** The component-wise shape of one arm combination's answer `r` when some
+ * of the `cells` (the trigger cells of the combination; `undefined` for an
+ * operand that is not a trigger) is a tuple: see
+ * `armwiseUnionBroadcastResultType`. `r` itself when no cell is a tuple, or
+ * when the handler already answered a tuple or a collection. */
+function tupleOfCells(cells: ReadonlyArray<Type | undefined>, r: Type): Type {
+  let arity: number | undefined = undefined;
+  let bare = false;
+  for (const c of cells) {
+    if (c === undefined) continue;
+    const t = resolveTypeAlias(c);
+    if (t === 'tuple') bare = true;
+    else if (typeof t !== 'string' && t.kind === 'tuple') {
+      if (arity !== undefined && arity !== t.elements.length) return 'error';
+      arity = t.elements.length;
+    }
+  }
+  if (arity === undefined && !bare) return r;
+  const answered = resolveTypeAlias(r);
+  if (
+    typeof answered !== 'string' &&
+    (answered.kind === 'tuple' ||
+      (answered.kind === 'union' &&
+        answered.types.some((m) => isTupleShapedType(m))))
+  )
+    return r;
+  if (isSubtype(answered, COLLECTION_SHAPE_TYPE)) return r;
+  if (bare || arity === undefined) return 'tuple';
+  return {
+    kind: 'tuple',
+    elements: Array.from({ length: arity }, () => ({ type: r })),
+  };
+}
+
+/** The most arm combinations `armwiseUnionBroadcastResultType` types: each
+ * combination is one call of the type handler. Beyond it the caller keeps
+ * its one-cell typing. Two operands of the Desmos parameter shape (a
+ * number, a list of numbers, a 2-D point or a 3-D point: four arms each)
+ * are sixteen combinations. */
+const MAX_UNION_ARM_COMBINATIONS = 64;
+
+/**
+ * The result type of a broadcastable operator whose ONLY broadcast triggers
+ * are scalar-or-collection unions, typed ARM BY ARM: the type handler is
+ * called once per combination of arms, with each trigger typed as the cell
+ * of its arm (the arm itself for a scalar arm, the element type for a list
+ * arm), and the answer is wrapped back in the list arm's collection kind
+ * when a list arm was taken. The result is the union of these answers.
+ *
+ * `loneUnionBroadcastResultType` types such an operand set from ONE cell,
+ * the union of every arm's cell, and wraps that one answer in each list
+ * arm. That is exact when every arm's cell is a number
+ * (`scalarOrListUnionCellType`): the handler's answer is then one number
+ * type. It is not when a scalar arm is a tuple: the arithmetic handlers
+ * type a tuple-bearing cell arm by arm and answer a union, so the wrap put a
+ * list around an answer that was already the lifted union, and a symbol
+ * declared `tuple<number, number> | list<number>` typed `2V` as
+ * `list<list<number> | tuple<…>> | list<number> | tuple<…>`; each further
+ * operator added a list level (`b - c` over two symbols declared
+ * `number | list<number> | tuple<number, number> | tuple<number, number,
+ * number>`, the shape of a Desmos parameter that may hold a number, a point
+ * or a list of either, nested three deep). Typed arm by arm, `2V` is
+ * `list<number> | tuple<number, number>` and `b - c` keeps one list level.
+ *
+ * `operandTypes[i]` is the type of trigger `i`, or `undefined` for an
+ * operand that is not a trigger (a number literal, a declared scalar): that
+ * operand is described to the handler as for the main call. `cellResult`
+ * calls the handler with the cells (`abstractCellResult` of
+ * `broadcastLiftType`). `undefined` when some trigger is not a
+ * scalar-or-collection union, when the combinations exceed
+ * `MAX_UNION_ARM_COMBINATIONS`, or when the handler declines a combination:
+ * the caller then keeps its one-cell typing. A combination the handler
+ * answers `error` or `never` for (a point beside a number under `Add`,
+ * which boxing rejects) contributes no arm: the value never holds it. When
+ * every combination is such an answer, the application is `error`.
+ *
+ * A tuple arm is a cell of its own. Under an operator that broadcasts over
+ * tuples component-wise (`options.componentwise`: `broadcastsOverTuples`,
+ * `boxed-function.ts`; `Sin`, `Power`, `Sqrt`), the handler answers for one
+ * component, and the combination's type is a tuple of that arity holding
+ * the answer (`sin b` over the tuple arm `tuple<number, number>` is
+ * `tuple<number, number>`), as arm 0 of `broadcastLiftType` shapes a tuple
+ * operand; a handler that already answers a tuple or a collection for the
+ * tuple cells is not reshaped. Tuple cells of two different arities have no
+ * component-wise result (the value is an `incompatible-dimensions` error)
+ * and contribute no arm; a bare `tuple` cell names no arity, and the
+ * combination is the bare `tuple`. Under an operator whose own handler
+ * types a tuple operand (`Add`, `Multiply`, `Divide`: the `'tuples'`
+ * broadcast exemption), the handler's answer stands as it is.
+ */
+export function armwiseUnionBroadcastResultType(
+  operandTypes: ReadonlyArray<Type | undefined>,
+  cellResult: (cells: ReadonlyArray<Type | undefined>) => Type | undefined,
+  options: { componentwise: boolean }
+): Type | undefined {
+  const armsPerOperand: (UnionArm[] | undefined)[] = [];
+  let combinations = 1;
+  for (const t of operandTypes) {
+    if (t === undefined) {
+      armsPerOperand.push(undefined);
+      continue;
+    }
+    const arms = unionArms(t);
+    if (arms === undefined) return undefined;
+    combinations *= arms.length;
+    if (combinations > MAX_UNION_ARM_COMBINATIONS) return undefined;
+    armsPerOperand.push(arms);
+  }
+  if (armsPerOperand.every((a) => a === undefined)) return undefined;
+  const results: Type[] = [];
+  let rejected = 0;
+  const cells: (Type | undefined)[] = operandTypes.map(() => undefined);
+  const visit = (i: number, rewrap: UnionArm['rewrap']): boolean => {
+    if (i === operandTypes.length) {
+      const r0 = cellResult(cells);
+      if (r0 === undefined) return false;
+      const r =
+        r0 === 'never' || r0 === 'error' || !options.componentwise
+          ? r0
+          : tupleOfCells(cells, r0);
+      if (r === 'never' || r === 'error') {
+        rejected += 1;
+        return true;
+      }
+      results.push(rewrap === undefined ? r : rewrap(r));
+      return true;
+    }
+    const arms = armsPerOperand[i];
+    if (arms === undefined) return visit(i + 1, rewrap);
+    for (const arm of arms) {
+      cells[i] = arm.cell;
+      // The first list arm taken gives the result its collection kind: two
+      // list arms zip into one collection.
+      if (!visit(i + 1, rewrap ?? arm.rewrap)) return false;
+    }
+    cells[i] = undefined;
+    return true;
+  };
+  if (!visit(0, undefined)) return undefined;
+  if (results.length === 0) return rejected > 0 ? 'error' : undefined;
+  return reduceType({ kind: 'union', types: results });
+}
+
 /** The options of {@link isPossiblyCollectionTyped}. */
 export type PossiblyCollectionTypedOptions = {
   /** `false` reads a symbol declared `any` or `value` as a scalar, and a

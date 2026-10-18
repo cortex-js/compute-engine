@@ -2,34 +2,56 @@
 
 ### Issues Resolved
 
+- **A symbol declared as a number, a point or a list of numbers keeps one list
+  level through arithmetic.** With `b` and `c` declared
+  `number | list<number> | tuple<number, number> | tuple<number, number, number>`
+  and left valueless, `b - c` typed a list nested three deep, and `2V` for
+  `V: tuple<number, number> | list<number>` typed
+  `list<list<number> | tuple<…>> | list<number> | tuple<…>`: the broadcast type
+  wrapper wrapped the arithmetic handler's union answer, which already carried
+  the list arm, around the list arm once more, and every further operator added
+  a level. Such a union is now typed arm by arm
+  (`armwiseUnionBroadcastResultType`, `collection-utils.ts`): each combination
+  of arms is typed as its own cell and a list arm wraps its answer once, so
+  `b - c` types the declared union itself and `2V` types
+  `list<number> | tuple<number, number>`. An arm combination the sum rejects at
+  boxing (a point plus a number) contributes nothing: `V + 1` types
+  `list<number>`. A power or a transcendental over the union keeps its point
+  arms as points (`b^2` with `b` holding `(1, 2)` is `(1, 4)`); a norm (`|b|`)
+  and a comparison are not typed arm by arm. The `Add` type handler, asked about
+  a numeric tuple beside a scalar number or a list of numbers that the user
+  stated (a literal, a declared symbol, a declared result) without boxing, now
+  answers `error`, as boxing does, where it widened the pair to
+  `number | tuple<…>`; a number type that was only inferred from a use, or
+  computed by a broadcasting operator over such an operand (`-q`), is still
+  admitted, since it may hold a tuple.
+
 - **A call's result that mentions a node several times keeps that node shared**
-  (Tycho ledger row 380). The closure capture of a call's result
-  (`captureClosures`, `function-utils.ts`) rebuilds every node above a function
-  literal so that the literal closes over the call frame, and memoizes the
-  rebuild of each node per frame so that a node the result mentions twice is
-  rebuilt once. The memo lost its entries as the recursion unwound, so each
-  mention was rebuilt separately. A user function applied to its own result,
-  `f^k(P)`, with a body that reads its argument four times and a value that
-  holds a lazy `Map` (a function literal: a column such as `5[0…N]/N` with `N`
-  valueless), doubled its number of distinct nodes at every level (864, 954, 1
-  236, 1 938, 3 515, 6 875 at depths 1 to 6) although each level was walked
-  once, and the chain cost 2 s at depth 8 and 27 s at depth 9. The levels now
-  share one tree, and depth 9 costs 0.2 s. The serialized form of the result
-  (`json`, `toString()`) still unfolds the sharing, so it keeps growing with the
-  depth.
+  . The closure capture of a call's result (`captureClosures`,
+  `function-utils.ts`) rebuilds every node above a function literal so that the
+  literal closes over the call frame, and memoizes the rebuild of each node per
+  frame so that a node the result mentions twice is rebuilt once. The memo lost
+  its entries as the recursion unwound, so each mention was rebuilt separately.
+  A user function applied to its own result, `f^k(P)`, with a body that reads
+  its argument four times and a value that holds a lazy `Map` (a function
+  literal: a column such as `5[0…N]/N` with `N` valueless), doubled its number
+  of distinct nodes at every level (864, 954, 1 236, 1 938, 3 515, 6 875 at
+  depths 1 to 6) although each level was walked once, and the chain cost 2 s at
+  depth 8 and 27 s at depth 9. The levels now share one tree, and depth 9 costs
+  0.2 s. The serialized form of the result (`json`, `toString()`) still unfolds
+  the sharing, so it keeps growing with the depth.
 
 - **A coordinate accessor over an inert `PointList` head answers the column when
-  no other column can shorten the zip** (Tycho ledger row 380, ask (a)). A
-  `PointList` whose column is collection-typed but has no value yet (a valueless
-  `s: list<number>`) stays an inert head, and `PointY(PointList(1, s))` stayed
-  whole. It is now `s`: the chosen column is the list the points are zipped
-  from, and every other column is a scalar slot (a number, a boolean, a string,
-  a tuple, or an operand typed as one), which repeats in every point. Once
-  `s := [10, 20]`, the projected form and the kept form evaluate to the same
-  `[10, 20]`. The projection stays unevaluated when another column is
-  collection-typed with no value, or typed `unknown`: that column may resolve to
-  a shorter list. The chain of row 380 mixes two such columns, so its serialized
-  result keeps growing with the depth.
+  no other column can shorten the zip**. A `PointList` whose column is
+  collection-typed but has no value yet (a valueless `s: list<number>`) stays an
+  inert head, and `PointY(PointList(1, s))` stayed whole. It is now `s`: the
+  chosen column is the list the points are zipped from, and every other column
+  is a scalar slot (a number, a boolean, a string, a tuple, or an operand typed
+  as one), which repeats in every point. Once `s := [10, 20]`, the projected
+  form and the kept form evaluate to the same `[10, 20]`. The projection stays
+  unevaluated when another column is collection-typed with no value, or typed
+  `unknown`: that column may resolve to a shorter list. The chain of row 380
+  mixes two such columns, so its serialized result keeps growing with the depth.
 
 - **`.N()` of a jump function over a list literal with an erased element uses
   the exact survivors**. A list literal with an element that may evaluate to
@@ -59,10 +81,7 @@
   printed literal is unchanged, nothing is enforced at apply time), and the
   declaration of a parameter at its first reference, into the body scope of the
   literal under canonicalization, advances nothing: no read of the name was
-  resolved before it. One level of the chain of Tycho ledger row 380 (ten lazy
-  maps) advanced the axis 21 times and recomputed 1 600 to 4 000 cached types;
-  it now advances it once (the call's own parameter activation) and recomputes
-  130 to 2 200.
+  resolved before it.
 
 - **The closure capture at the end of a call keeps a function literal that the
   re-rooting would not change**. Every literal in a call's result was re-rooted
@@ -277,41 +296,41 @@
 ### Issues Resolved
 
 - **An already-evaluated symbolic value is not walked again at the same state**
-  (Tycho ledger row 380). A user function applied to its own result, `f^k(P)`,
-  with a body that reads its argument four times, embedded the previous level's
-  value four times, and each read evaluated that value again — a full walk that
-  built a fresh copy — when the value had stayed symbolic (an inert `PointList`
-  whose columns waited for a slider with no value). The cost grew fourfold per
-  level: 1.9 s at depth 7, out of memory at depth 8. The evaluate memo of a lazy
-  collection view now also serves an ordinary canonical function node on the
-  synchronous route under the default options, and keeps a symbolic,
-  non-collection result: each level walks the previous one once (0.45 s at depth
-  7, and the levels share one tree). A node that evaluates to a number or a list
-  literal stores nothing; a lazy head (`Add`, `Multiply`, `If`, …) and the
-  asynchronous route are unchanged. A change of `ce.maxCollectionSize` now
-  counts as a configuration change, so a call that declined under the old cap is
-  evaluated again under the new one.
+  . A user function applied to its own result, `f^k(P)`, with a body that reads
+  its argument four times, embedded the previous level's value four times, and
+  each read evaluated that value again — a full walk that built a fresh copy —
+  when the value had stayed symbolic (an inert `PointList` whose columns waited
+  for a slider with no value). The cost grew fourfold per level: 1.9 s at depth
+  7, out of memory at depth 8. The evaluate memo of a lazy collection view now
+  also serves an ordinary canonical function node on the synchronous route under
+  the default options, and keeps a symbolic, non-collection result: each level
+  walks the previous one once (0.45 s at depth 7, and the levels share one
+  tree). A node that evaluates to a number or a list literal stores nothing; a
+  lazy head (`Add`, `Multiply`, `If`, …) and the asynchronous route are
+  unchanged. A change of `ce.maxCollectionSize` now counts as a configuration
+  change, so a call that declined under the old cap is evaluated again under the
+  new one.
 - **A nested user function whose parameter shares its name with the caller's
-  parameter evaluates in milliseconds again** (Tycho ledger, `art/mavxszbvzk`).
-  With `f_b2full50(x)` applying `f_b2(x)`, whose body ranges over
-  `Floor(Log(Max(x, 1), 2))`, one application of `f_b2full50(5)` made more than
-  six thousand sign reads and did not finish in a minute; a document with twelve
-  such definitions hit its budget on eleven of them. The `Range` type handler
-  asks the sign of its lower bound, the sign check of `Floor` orders its operand
-  with `exactOrder()`, and an undecided order is tried as an equality proof by
-  `simplify()`. That simplification shields the assigned variable `x` (the
-  caller's parameter, bound in its call frame) by declaring it valueless in a
-  temporary scope, and the declaration and the pop each advanced the engine-wide
-  cache generation, which retired the type and sign caches of every expression,
-  including the ones the enclosing type derivation was reading: the derivation
-  re-typed its operands once per read, and the cost grew exponentially with the
-  depth of the body. The two value shields (`simplify()` and the binder shield
-  of `D`, `Integrate`, `Solve`, …) now register their scope as a scratch scope
-  and run under a cache key of their own, so a shielded simplification advances
-  no cache generation, and a sign or type derived from the hidden value is still
-  never used inside the shield (nor a value-blind one after it). `f_b2full50(5)`
-  takes 15 ms, and `simplify()` of an expression that mentions an assigned
-  variable no longer invalidates the caches of unrelated expressions.
+  parameter evaluates in milliseconds again**. With `f_b2full50(x)` applying
+  `f_b2(x)`, whose body ranges over `Floor(Log(Max(x, 1), 2))`, one application
+  of `f_b2full50(5)` made more than six thousand sign reads and did not finish
+  in a minute; a document with twelve such definitions hit its budget on eleven
+  of them. The `Range` type handler asks the sign of its lower bound, the sign
+  check of `Floor` orders its operand with `exactOrder()`, and an undecided
+  order is tried as an equality proof by `simplify()`. That simplification
+  shields the assigned variable `x` (the caller's parameter, bound in its call
+  frame) by declaring it valueless in a temporary scope, and the declaration and
+  the pop each advanced the engine-wide cache generation, which retired the type
+  and sign caches of every expression, including the ones the enclosing type
+  derivation was reading: the derivation re-typed its operands once per read,
+  and the cost grew exponentially with the depth of the body. The two value
+  shields (`simplify()` and the binder shield of `D`, `Integrate`, `Solve`, …)
+  now register their scope as a scratch scope and run under a cache key of their
+  own, so a shielded simplification advances no cache generation, and a sign or
+  type derived from the hidden value is still never used inside the shield (nor
+  a value-blind one after it). `f_b2full50(5)` takes 15 ms, and `simplify()` of
+  an expression that mentions an assigned variable no longer invalidates the
+  caches of unrelated expressions.
 - **A bare function parameter read at literal indices accepts a list argument
   again** ([#448](https://github.com/cortex-js/compute-engine/issues/448)).
   Since 0.154.0, `p ↦ p[1] + p[2]` types `p` as `tuple<number, number>`, and
@@ -395,22 +414,19 @@
   have no value, and evaluates to `11` when `x` is 3 and `y` is 4. A list of
   such points is accepted in the same way. A coordinate typed `any` at a
   parameter that requires a specific coordinate type, such as
-  `tuple<number, number>`, is still refused. This came from Tycho ledger row
-  376: the Tycho importer declares the parameters of a definition `any`, and
-  builds a `Dot` from `q(x, y) = \sin((16.234, 35.4235) \cdot (x, y))`, which
-  was refused.
-- **A shader `Sum` or `Product` with a complex-valued body compiles (Tycho
-  ledger row 377).** The GLSL and WGSL targets refused such a body with
-  "complex-valued body not supported in GPU targets", while the same terms
-  written out by hand compiled. A domain colouring of the arctangent Taylor
-  polynomial, `\left|\sum_{n=0}^{10}\frac{(-1)^n}{2n+1}(x+iy)^{2n+1}\right|`,
-  now compiles to the modulus of eleven complex powers. The value accumulates in
-  a `vec2(re, im)` (`vec2f` on WGSL): a sum adds the terms component by
-  component, and a product multiplies them with the complex-multiply helper
-  `_gpu_cmul`, because `*` on two `vec2` values multiplies their components and
-  is not the complex product. This applies to constant bounds, where the terms
-  are unrolled, and to symbolic or large bounds, where the shader runs a loop.
-  An empty range gives `vec2(0.0, 0.0)` for a sum and `vec2(1.0, 0.0)` for a
+  `tuple<number, number>`, is still refused.
+- **A shader `Sum` or `Product` with a complex-valued body compiles.** The GLSL
+  and WGSL targets refused such a body with "complex-valued body not supported
+  in GPU targets", while the same terms written out by hand compiled. A domain
+  colouring of the arctangent Taylor polynomial,
+  `\left|\sum_{n=0}^{10}\frac{(-1)^n}{2n+1}(x+iy)^{2n+1}\right|`, now compiles
+  to the modulus of eleven complex powers. The value accumulates in a
+  `vec2(re, im)` (`vec2f` on WGSL): a sum adds the terms component by component,
+  and a product multiplies them with the complex-multiply helper `_gpu_cmul`,
+  because `*` on two `vec2` values multiplies their components and is not the
+  complex product. This applies to constant bounds, where the terms are
+  unrolled, and to symbolic or large bounds, where the shader runs a loop. An
+  empty range gives `vec2(0.0, 0.0)` for a sum and `vec2(1.0, 0.0)` for a
   product.
 
 - **Under `mode: 'complex'`, a power of real numbers whose value can be complex
@@ -1223,8 +1239,7 @@
   `Max(Measurement(1, 0.1), Measurement(1, 0.5))` stays unevaluated in both
   operand orders rather than answer whichever came first; and a measurement with
   a float nominal counts as a float operand
-  (`Max(Measurement(1.5, 0.1), Indeterminate)` is `NaN`). Found by the Tycho
-  consumer (its ledger row 375).
+  (`Max(Measurement(1.5, 0.1), Indeterminate)` is `NaN`).
 
 - **A compiled special function answers its complex value from real operands in
   `auto` and `complex` mode,** as `Sqrt` and `Ln` do

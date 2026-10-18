@@ -233,6 +233,7 @@ import {
   nonNegativeRangeType,
   positiveRangeType,
   resolveTypeAlias,
+  stripMissingFromType,
   stripNumericRanges,
   widen,
   widenAll,
@@ -2522,6 +2523,57 @@ function isNumericTupleType(t0: Type): boolean {
   return t.elements.every((el) => factsOf(el.type).belowNumber);
 }
 
+/** Twin of `isNumericTupleCarrier` (`collection-utils.ts`) on a type: every
+ * value of the type that is not absent is a numeric tuple. A tuple whose
+ * components are numbers, or a union of such tuples (two point arities,
+ * `tuple<number, number> | tuple<number, number, number>`), with or without
+ * an absence arm. */
+function isNumericTupleCarrierType(t0: Type): boolean {
+  const t = resolveTypeAlias(stripMissingFromType(resolveTypeAlias(t0)));
+  if (isNumericTupleType(t)) return true;
+  if (typeof t === 'string' || t.kind !== 'union') return false;
+  return t.types.every((arm) => isNumericTupleType(arm));
+}
+
+/** Twin of `isProvablyScalarNumber` (`collection-utils.ts`) on a
+ * descriptor: a scalar number the user stated
+ * (`isDeclaredScalarNumberOperand`), and when it is an application of a
+ * broadcasting operator, one whose every operand is such a number too. A
+ * broadcasting head declares a number result but maps over a tuple
+ * component-wise, so `-q` and `2q` over an operand of unproven shape may
+ * still hold a tuple (Tycho item 241). An application whose structure
+ * names no operands is not proven. */
+function isProvenScalarNumberOperand(
+  d: OperandDescriptor,
+  engine: PureEngineView
+): boolean {
+  if (!isDeclaredScalarNumberOperand(d, engine)) return false;
+  const s = d.structureOf?.();
+  if (s === undefined || s.kind !== 'application') return true;
+  if (engine.lookupDefinition(s.head)?.operator?.broadcastable !== true)
+    return true;
+  return (
+    s.children !== undefined &&
+    s.children.every((c) => isProvenScalarNumberOperand(c, engine))
+  );
+}
+
+/** Twin of `isProvablyNumberList` (`collection-utils.ts`) on a descriptor:
+ * a `list` whose every element is a scalar number, stated by the user (a
+ * declared symbol, a list literal, a declared result), not inferred. An
+ * inferred list type is retractable evidence, as for
+ * `isDeclaredScalarNumberOperand`. */
+function isDeclaredNumberListOperand(d: OperandDescriptor): boolean {
+  const t = resolveTypeAlias(d.type);
+  if (typeof t === 'string' || t.kind !== 'list') return false;
+  const el = stripNumericRanges(resolveTypeAlias(t.elements));
+  if (el === 'never' || !factsOf(el).belowNumber) return false;
+  if (d.structureOf === undefined) return true;
+  const s = d.structureOf();
+  if (s === undefined) return false;
+  return s.kind === 'symbol' ? s.inferred !== true : true;
+}
+
 /**
  * Twin of `isPossiblyCollectionTyped`: an operand whose collection-ness is
  * not statically visible, so an element-wise result must stay lifted.
@@ -2894,13 +2946,39 @@ function signedInfinitySum(
   return reshape(resolveTypeAlias(result));
 }
 
-function addTypeOnTypes(args: ReadonlyArray<OperandDescriptor>): Type {
+function addTypeOnTypes(
+  args: ReadonlyArray<OperandDescriptor>,
+  engine: PureEngineView
+): Type {
   if (args.length === 0) return 'integer'; // = 0
   if (args.length === 1) return args[0].type;
   // Numeric tuples (points/vectors) add component-wise, preserving the tuple
   // type. Handled before the NaN/finiteness early-returns: a tuple is not a
   // finite number, which would otherwise collapse the result to `number`.
   if (args.some((x) => typeCouldBeNumericTuple(x.type))) {
+    // A numeric tuple beside a scalar number, or beside a list of numbers,
+    // has no sum: `canonicalAdd` (`arithmetic-add.ts`) rejects `(1, 2) + 3`
+    // and `(0, 1) + [10, 20]` at boxing with `incompatible-type`. A route
+    // that asks this handler about the pair without boxing it (a declared
+    // signature typed from argument types; a scalar-or-collection union
+    // typed arm by arm, `armwiseUnionBroadcastResultType`) gets the same
+    // answer. Before this the pair widened to `number | tuple<…>`, and the
+    // tuple arm of `V + 1` for `V: tuple<number, number> | list<number>`
+    // claimed an `integer` value no sum has. As at boxing, the scalar or the
+    // list must be one the user STATED (a literal, a declared symbol, a
+    // declared result): a number type that was only inferred from a use
+    // (`q` in `q ↦ q + (1, 2)`), or computed by a broadcasting operator over
+    // such an operand (`-q`, `2q`), may still hold a tuple and is not
+    // rejected (Tycho item 241).
+    if (
+      args.some((x) => isNumericTupleCarrierType(x.type)) &&
+      args.some(
+        (x) =>
+          isProvenScalarNumberOperand(x, engine) ||
+          isDeclaredNumberListOperand(x)
+      )
+    )
+      return 'error';
     // A point BROADCAST over a list of points: the sum is a list of points,
     // not the union `list<tuple<…>> | tuple<…>` the widen below reports.
     const pointLists = args.filter(
@@ -3053,7 +3131,7 @@ function addTypeHandler(
       ? 'value'
       : signedInfinitySum(
           ops,
-          addTypeOnTypes(ops.map(withoutNonArithmeticArms))
+          addTypeOnTypes(ops.map(withoutNonArithmeticArms), context.engine)
         ),
     context.engine._typeResolver
   );

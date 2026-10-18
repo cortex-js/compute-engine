@@ -292,7 +292,10 @@ describe('a numeric function of a value that can be a list or absent', () => {
   // of numbers is typed `list<number> | missing | number | tuple<…>`. When
   // it is `Missing`, `PointX(V)^2` answers `Missing`, because the
   // application's type is not provably numeric — so the type must say
-  // `missing`. It said `list<number> | number` before.
+  // `missing`. It said `list<number> | number` before. The tuple arm of the
+  // operand's type is carried through as a point squared component-wise
+  // (the arm-by-arm typing of a union with a tuple arm beside a list of
+  // numbers, `armwiseUnionBroadcastResultType`); it was dropped before.
   const PT =
     'indexed_collection<number | tuple<number, number>> | list<tuple<number, number>> | tuple<number, number>';
 
@@ -300,7 +303,9 @@ describe('a numeric function of a value that can be a list or absent', () => {
     const c = new ComputeEngine();
     c.declare('V', PT);
     const p = c.box(['Power', ['PointX', 'V'], 2]);
-    expect(p.type.toString()).toBe('list<number> | missing | number');
+    expect(p.type.toString()).toBe(
+      'list<number> | missing | number | tuple<number, number>'
+    );
     c.assign('V', c.box('Missing'));
     expect(p.evaluate().toString()).toBe('"Missing"');
     c.assign('V', c.box(['Tuple', 3, 4]));

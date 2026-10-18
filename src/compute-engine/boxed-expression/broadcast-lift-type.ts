@@ -55,6 +55,7 @@ import type {
   OperandDescriptor,
 } from '../global-types.js';
 import {
+  armwiseUnionBroadcastResultType,
   dimensionlessIndexedElement,
   isRecordShapedType,
   isTupleShapedType,
@@ -1055,6 +1056,12 @@ export interface BroadcastLiftInput {
   /** `broadcastsOverTuples(operator, def)`: the head broadcasts
    * component-wise over numeric tuples. */
   readonly broadcastsOverTuples: boolean;
+  /** `typesTupleArmsAsCells(operator, def)`: a scalar-or-collection union
+   * operand with a tuple arm beside a list of numbers is typed arm by arm,
+   * the tuple arm as a cell of its own (`armwiseUnionBroadcastResultType`).
+   * `false` or absent under a norm head, a relational operator, a lambda or
+   * a user function. */
+  readonly armwiseTupleArms?: boolean;
   /** Some operand is a `List` literal with a readable shape. */
   readonly hasTensors: boolean;
   /** The per-element result of the handler called again with each
@@ -1071,6 +1078,14 @@ export interface BroadcastLiftInput {
    * handler declines. Read only by arm 2, when an abstract collection
    * operand is what makes the result possibly a collection. */
   readonly abstractCellResult?: (
+    cells: ReadonlyArray<Type | undefined>
+  ) => Type | undefined;
+  /** As `abstractCellResult`, but a retyped operand is described by its
+   * cell type alone, without the operand's structure: `cells[i]` is one ARM
+   * of a declared union (`armwiseUnionBroadcastResultType`), and states
+   * what the value is in that arm. Read only by the arm-by-arm typing of a
+   * scalar-or-collection union with a tuple arm. */
+  readonly armCellResult?: (
     cells: ReadonlyArray<Type | undefined>
   ) => Type | undefined;
 }
@@ -1194,6 +1209,38 @@ export function broadcastLiftType(input: BroadcastLiftInput): Type | undefined {
       types.every((t) => isPointOrPointListUnion(t))
     )
       return resolveTypeAlias(sigResult);
+    // Every trigger a lone scalar-or-collection union, and some trigger has
+    // a TUPLE scalar arm beside a collection arm that does not hold points
+    // (`tuple<number, number> | list<number>`; the Desmos parameter shape
+    // `number | list<number> | tuple<…> | tuple<…>`): the one-cell typing
+    // below cannot describe such an operand (`scalarOrListUnionCellType`
+    // declines a tuple arm), and wrapping the handler's answer for the
+    // whole union nested a list level per operator. Each combination of
+    // arms is typed as its own cell instead
+    // (`armwiseUnionBroadcastResultType`): `2V` is
+    // `list<number> | tuple<number, number>`, not the operand's union
+    // wrapped once more. Only under a head whose handler types a tuple
+    // operand, or that broadcasts over tuples component-wise
+    // (`armwiseTupleArms`): under a norm head (`|b|`) or a relational
+    // operator the tuple is one value, and the one-cell typing below
+    // stands. A union with no tuple arm (a recursive alias
+    // `list<json> | integer`) keeps the one-cell typing too.
+    if (
+      input.armwiseTupleArms === true &&
+      input.armCellResult !== undefined &&
+      types.some((t) => hasTupleBranch(t)) &&
+      types.every((t) => scalarOrCollectionUnionBranches(t) !== undefined)
+    ) {
+      const armwise = armwiseUnionBroadcastResultType(
+        views.map((v) => {
+          const k = broadcasting.indexOf(v);
+          return k === -1 ? undefined : types[k];
+        }),
+        input.armCellResult,
+        { componentwise: input.broadcastsOverTuples }
+      );
+      if (armwise !== undefined) return armwise;
+    }
     // Every trigger a LONE scalar-or-collection union (a valueless
     // `u: number | list<number>`): the result carries the union through
     // instead of claiming the definite `list<E>` that `u := 5` contradicts.

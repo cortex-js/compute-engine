@@ -2742,23 +2742,6 @@ point-or-point-list operand (`P / 2` typed a nested list of the union) was a
 separate defect and is fixed (`point-union-arithmetic-type.test.ts`); the
 replica still declines after that fix.
 
-### A tuple-or-number-list union nests through the broadcast type wrapper (OPEN — found 2026-09-15)
-
-A symbol declared `tuple<number, number> | list<number>` and left valueless
-types `2V` as `list<list<number> | tuple<…>> | list<number> | tuple<…>`, a
-nested union no value has: the broadcast type wrapper re-wraps the handler's
-union answer around the operand's list arm. The same defect for a
-POINT-or-point-list union (`tuple<…> | list<tuple<…>>`) is fixed
-(`point-union-arithmetic-type.test.ts`), by returning the handler's answer when
-every collection arm on both sides holds points. That scoping is deliberate: a
-union with a list of numbers beside a tuple cannot be told apart, at the
-wrapper, from a declared per-element result that merely mentions a number list
-(`tuple<…> | list<number>` as the cell of a lifted operator), which must be
-wrapped. Fixing this case needs the wrapper to know that the handler already
-computed the lift (an explicit exemption label on `Divide`, which does not carry
-`collection-result` today, or a per-handler signal). No document in the audited
-corpus declares such a union.
-
 ### A product of two point-or-point-list operands claims a number (OPEN — found 2026-09-15)
 
 With `P` and `Q` declared `tuple<number, number> | list<tuple<number, number>>`

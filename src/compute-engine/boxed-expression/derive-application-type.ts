@@ -82,6 +82,12 @@ export interface BroadcastLiftHooks {
     operator: string,
     def: BoxedOperatorDefinition
   ) => boolean;
+  /** `typesTupleArmsAsCells(operator, def)`: the tuple arm of a
+   * scalar-or-collection union operand is typed as a cell of its own. */
+  readonly typesTupleArmsAsCells: (
+    operator: string,
+    def: BoxedOperatorDefinition
+  ) => boolean;
   /** A lambda-literal definition, typed by its own broadcast arm. */
   readonly isLambda: (def: BoxedOperatorDefinition) => boolean;
 }
@@ -632,18 +638,27 @@ export function deriveApplicationType(
     // (`describeType`): the operand's own facts describe the whole
     // collection or union, and would contradict the narrower type (a
     // possible collection beside a scalar type).
+    // With `byTypeOnly`, a retyped operand is described by its cell type
+    // alone, without the operand's structure: the cell is one ARM of a
+    // declared union (`armwiseUnionBroadcastResultType`), so it states what
+    // the value is, where the structure (an application of `Negate` over
+    // the union-typed symbol) would say the value is unproven and keep a
+    // handler from rejecting an arm it rejects at boxing.
     const cellHandlerResult = (
-      cells: ReadonlyArray<Type | undefined>
+      cells: ReadonlyArray<Type | undefined>,
+      byTypeOnly = false
     ): Type | undefined => {
       if (typeof def.type !== 'function') return undefined;
       if (cells.every((c) => c === undefined)) return undefined;
       const cellOperands = handlerOperandsSeen.map((d, i) =>
         cells[i] === undefined
           ? d
-          : {
-              ...describeType(cells[i]!, d.facts.closed),
-              structureOf: d.structureOf,
-            }
+          : byTypeOnly
+            ? describeType(cells[i]!, d.facts.closed)
+            : {
+                ...describeType(cells[i]!, d.facts.closed),
+                structureOf: d.structureOf,
+              }
       );
       const raw = guardedTypeHandlerCall(engine, operator, () =>
         def.type!(cellOperands, typeHandlerContext(engine))
@@ -663,6 +678,7 @@ export function deriveApplicationType(
         sigResult: perElement,
         mappable: mappable === 'no-plan' ? undefined : mappable,
         broadcastsOverTuples: hooks.broadcastsOverTuples(operator, def),
+        armwiseTupleArms: hooks.typesTupleArmsAsCells(operator, def),
         hasTensors: views.some((v) => v.tensorShape),
         // The handler typed again with each scalar-or-list union operand
         // typed as its cell, as on the expression route
@@ -675,6 +691,9 @@ export function deriveApplicationType(
         // collection lift typed as its cell (`abstractCollectionCell`), as
         // on the expression route.
         abstractCellResult: (cells) => cellHandlerResult(cells),
+        // The handler typed with each union trigger typed as one of its
+        // arms, by type alone (`armwiseUnionBroadcastResultType`).
+        armCellResult: (cells) => cellHandlerResult(cells, true),
       }) ?? perElement
     );
   }
