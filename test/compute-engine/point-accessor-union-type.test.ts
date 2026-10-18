@@ -257,3 +257,100 @@ describe('juxtaposition with a union-typed operand', () => {
     expect(ce.parse('2S').json).toEqual(['Tuple', 2, 'S']);
   });
 });
+
+describe('coordinate accessor over a bare tuple, a broadcastable point, and two point arities', () => {
+  test('a bare tuple is one point: its coordinate is a number, not a list', () => {
+    const ce = new ComputeEngine();
+    ce.declare('T', 'tuple');
+    expect(ce.box(['PointX', 'T']).type.toString()).toBe('number');
+    expect(ce.box(['PointZ', 'T']).type.toString()).toBe('number');
+    ce.assign('T', ce.box(['Tuple', 1, 2]));
+    expect(ce.box(['PointX', 'T']).evaluate().toString()).toBe('1');
+  });
+
+  test('a broadcastable point gives a broadcastable coordinate', () => {
+    const ce = new ComputeEngine();
+    ce.declare('P', 'broadcastable<tuple<number, number>>');
+    ce.declare('B', 'broadcastable<tuple>');
+    ce.declare(
+      'D',
+      'broadcastable<tuple<number, number> | tuple<number, number, number>>'
+    );
+    // A point or a list of points: a number or a list of numbers. Read as a
+    // collection, this typed `collection<number>`, which the number of a
+    // single point is not.
+    expect(ce.box(['PointX', 'P']).type.toString()).toBe(
+      'broadcastable<number>'
+    );
+    expect(ce.box(['PointY', 'P']).type.toString()).toBe(
+      'broadcastable<number>'
+    );
+    expect(ce.box(['PointX', 'B']).type.toString()).toBe(
+      'broadcastable<number>'
+    );
+    expect(ce.box(['PointX', 'D']).type.toString()).toBe(
+      'broadcastable<number>'
+    );
+    // No arm has a third coordinate: the dimension error a 2-D point gives.
+    expect(ce.box(['PointZ', 'P']).type.toString()).toBe('error');
+    // The 3-D arm has one; the 2-D arm's error contributes nothing.
+    expect(ce.box(['PointZ', 'D']).type.toString()).toBe(
+      'broadcastable<number>'
+    );
+    const x = ce.box(['PointX', 'P']);
+    ce.assign('P', ce.box(['Tuple', 3, 4]));
+    expect(x.evaluate().toString()).toBe('3');
+    expect(x.evaluate().type.matches(x.type)).toBe(true);
+    const ce2 = new ComputeEngine();
+    ce2.declare('P', 'broadcastable<tuple<number, number>>');
+    const xs = ce2.box(['PointX', 'P']);
+    ce2.assign('P', ce2.box(['List', ['Tuple', 3, 4], ['Tuple', 5, 6]]));
+    expect(xs.evaluate().toString()).toBe('[3,5]');
+    expect(xs.evaluate().type.matches(xs.type)).toBe(true);
+  });
+
+  test('a number-or-point element states nothing definite', () => {
+    const ce = new ComputeEngine();
+    ce.declare('Q', 'broadcastable<number | tuple<number, number>>');
+    ce.declare('R', 'broadcastable<number | tuple>');
+    // The coordinate is defined for the point and not for the number, and a
+    // list of them reads element-wise or as a flat point by content. This
+    // typed `missing | number | tuple<number, number>`: a point is never the
+    // coordinate, and the list of coordinates was not admitted.
+    expect(ce.box(['PointX', 'Q']).type.toString()).toBe('unknown');
+    expect(ce.box(['PointX', 'R']).type.toString()).toBe('unknown');
+    // A numeric element keeps the flat-point reading: `PointX([3, 4])` is 3.
+    ce.declare('N', 'broadcastable<number>');
+    expect(ce.box(['PointX', 'N']).type.toString()).toBe('number');
+  });
+
+  test('a 2-D-or-3-D point: the third coordinate is the 3-D arm’s', () => {
+    const ce = new ComputeEngine();
+    ce.declare('W', 'tuple<number, number> | tuple<number, number, number>');
+    expect(ce.box(['PointX', 'W']).type.toString()).toBe('number');
+    // Typed `collection<number>` before, which the number is not.
+    expect(ce.box(['PointZ', 'W']).type.toString()).toBe('number');
+    ce.assign('W', ce.box(['Tuple', 1, 2, 3]));
+    expect(ce.box(['PointZ', 'W']).evaluate().toString()).toBe('3');
+  });
+
+  test('a short arm under PointX/PointY answers its absence marker, as a structural tuple does', () => {
+    // `PointY` of a 1-tuple is the slot's absence marker, not a dimension
+    // error (only the third coordinate errors): each arm answers as the
+    // structural tuple of its arity does, and the answers are joined (dual
+    // review).
+    const ce = new ComputeEngine();
+    ce.declare('A', 'tuple<integer>');
+    ce.declare('S', 'tuple<integer> | tuple<string>');
+    expect(ce.box(['PointY', 'A']).type.toString()).toBe('integer | nan');
+    expect(ce.box(['PointY', 'S']).type.toString()).toBe(
+      'integer | missing | nan | string'
+    );
+    expect(
+      ce
+        .box(['PointY', ['Tuple', 1]])
+        .evaluate()
+        .toString()
+    ).toBe('NaN');
+  });
+});

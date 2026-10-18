@@ -2,6 +2,31 @@
 
 ### Issues Resolved
 
+- **A point arm of a number-or-point type keeps its shape through a
+  component-wise operator, and a coordinate accessor over a broadcastable point
+  or a bare tuple is typed as the point.** A valueless symbol declared
+  `number | tuple<number, number>` (a number or a point), or
+  `broadcastable<number | tuple>` (such a value or a list of them: the shape of
+  a function parameter that may take a number, a point or a list), squares to a
+  number or a point: `(1, 2)^2` is `(1, 4)`. `u^2`, `sin u`, `sqrt u` and
+  `floor u` typed `number` for the first and `broadcastable<number>` for the
+  second, a type the point value does not have (a tuple is not an indexed
+  collection). Both are now typed arm by arm, as a union with a list arm already
+  was: `number | tuple<number, number>` and `broadcastable<number | tuple>`. A
+  norm (`|u|`) and a comparison read a point as one value and are unchanged; a
+  numeric point beside a number is refused at boxing, so that arm contributes
+  nothing to a sum (`p + 1` for
+  `p: broadcastable<number | tuple<number, number>>` is `broadcastable<number>`;
+  every arm refused is `error`). The coordinate accessors (`PointX`, `PointY`,
+  `PointZ`) typed a bare `tuple` operand as a collection (`list<number>`, where
+  one point gives one number), a `broadcastable<tuple<…>>` operand as
+  `collection<number>` (the single-point case, a number, was not admitted), a
+  `broadcastable<number | tuple>` operand as `missing | number | tuple` (a point
+  is never a coordinate), and the third coordinate of a
+  `tuple<number, number> | tuple<number, number, number>` point as
+  `collection<number>`. They now type `number`, `broadcastable<number>`,
+  `unknown` and `number` respectively.
+
 - **A `Declare` run by a block inside a value shield keeps its cache
   invalidation.** A computation that registers a scratch scope
   (`scratch-scopes.ts`) exempts the declarations made into that scope, or into a

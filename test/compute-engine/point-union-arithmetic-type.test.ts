@@ -464,3 +464,243 @@ describe('a point plus a number-or-list operand is rejected at boxing', () => {
     expect(typeOf(ce, 'u + 1')).toBe('list<number> | number');
   });
 });
+
+describe('a tuple arm of a scalar union or of a broadcastable element keeps its point shape', () => {
+  // A valueless symbol declared as a number or a point (`number | tuple<…>`),
+  // or as such a value or a list of them (`broadcastable<number | tuple<…>>`),
+  // squares to a number or a POINT: `(1, 2)^2` is `(1, 4)`. The handler's one
+  // answer for the whole union lost the tuple arm (`u^2` typed `number`,
+  // `p^2` typed `broadcastable<number>`, which the value `(1, 4)` does not
+  // have: a tuple is not an indexed collection). Both are typed arm by arm.
+  const declare = (ce: ComputeEngine, types: Record<string, string>) => {
+    for (const [name, type] of Object.entries(types))
+      ce.declare(name, { type });
+  };
+  const TYPES = {
+    u: 'number | tuple<number, number>',
+    w: 'number | tuple',
+    p: 'broadcastable<number | tuple<number, number>>',
+    q: 'broadcastable<number | tuple>',
+    r: 'broadcastable<tuple<number, number>>',
+    s: 'broadcastable<tuple>',
+    d: 'broadcastable<tuple<number, number> | tuple<number, number, number>>',
+    n: 'broadcastable<number>',
+  };
+
+  test('a component-wise head over a number-or-point union keeps the point arm', () => {
+    const ce = new ComputeEngine();
+    declare(ce, TYPES);
+    expect(ce.box(['Power', 'u', 2]).type.toString()).toBe(
+      'number | tuple<number, number>'
+    );
+    expect(ce.box(['Sqrt', 'u']).type.toString()).toBe(
+      'number | tuple<number, number>'
+    );
+    expect(ce.box(['Power', 'w', 2]).type.toString()).toBe('number | tuple');
+    expect(ce.box(['Floor', 'w']).type.toString()).toBe(
+      'integer | nan | signed_infinity | tuple'
+    );
+    // A difference of two such values is a number or a point too.
+    expect(ce.box(['Subtract', 'u', 'u']).type.toString()).toBe(
+      'number | tuple<number, number>'
+    );
+  });
+
+  test('a component-wise head over a broadcastable with a point arm keeps it', () => {
+    const ce = new ComputeEngine();
+    declare(ce, TYPES);
+    expect(ce.box(['Power', 'p', 2]).type.toString()).toBe(
+      'broadcastable<number | tuple<number, number>>'
+    );
+    expect(ce.box(['Sin', 'p']).type.toString()).toBe(
+      'broadcastable<number | tuple<number, number>>'
+    );
+    expect(ce.box(['Power', 'q', 2]).type.toString()).toBe(
+      'broadcastable<number | tuple>'
+    );
+    expect(ce.box(['Sqrt', 'q']).type.toString()).toBe(
+      'broadcastable<number | tuple>'
+    );
+    expect(ce.box(['Floor', 'q']).type.toString()).toBe(
+      'broadcastable<integer | nan | signed_infinity | tuple>'
+    );
+    expect(ce.box(['Power', 'r', 2]).type.toString()).toBe(
+      'broadcastable<tuple<number, number>>'
+    );
+    expect(ce.box(['Power', 's', 2]).type.toString()).toBe(
+      'broadcastable<tuple>'
+    );
+    expect(ce.box(['Power', 'd', 2]).type.toString()).toBe(
+      'broadcastable<tuple<number, number, number> | tuple<number, number>>'
+    );
+    // A second broadcastable operand with no point arm takes part as one
+    // arm: a number or a point, raised to a number.
+    expect(ce.box(['Power', 'q', 'n']).type.toString()).toBe(
+      'broadcastable<number | tuple>'
+    );
+    // Unchanged: no point arm, no change.
+    expect(ce.box(['Power', 'n', 2]).type.toString()).toBe(
+      'broadcastable<number>'
+    );
+  });
+
+  test('the sum rule applies to each arm', () => {
+    const ce = new ComputeEngine();
+    declare(ce, TYPES);
+    // A numeric point plus a number is refused at boxing, so that arm
+    // contributes nothing: the sum is a number (or a list of numbers).
+    expect(ce.box(['Add', 'u', 1]).type.toString()).toBe('number');
+    expect(ce.box(['Add', 'p', 1]).type.toString()).toBe(
+      'broadcastable<number>'
+    );
+    expect(ce.box(['Subtract', 'p', 'n']).type.toString()).toBe(
+      'broadcastable<number>'
+    );
+    // Every arm refused: an error whatever the value.
+    expect(ce.box(['Add', 'd', 1]).type.toString()).toBe('error');
+    // Two such values add arm by arm: number plus number, point plus point.
+    expect(ce.box(['Add', 'p', 'p']).type.toString()).toBe(
+      'broadcastable<number | tuple<number, number>>'
+    );
+    // A scale keeps both arms.
+    expect(ce.box(['Multiply', 2, 'p']).type.toString()).toBe(
+      'broadcastable<number | tuple<number, number>>'
+    );
+    expect(ce.box(['Negate', 'p']).type.toString()).toBe(
+      'broadcastable<number | tuple<number, number>>'
+    );
+    // A bare `tuple` arm is not a proven numeric tuple, so boxing does not
+    // refuse it beside a number, and neither does the sum rule.
+    expect(ce.box(['Add', 'w', 1]).type.toString()).toBe('number | tuple');
+  });
+
+  test('a norm and a comparison read the point as one value, unchanged', () => {
+    const ce = new ComputeEngine();
+    declare(ce, TYPES);
+    expect(ce.box(['Abs', 'p']).type.toString()).toBe(
+      'broadcastable<real<0..> | signed_infinity>'
+    );
+    expect(ce.box(['Less', 'p', 3]).type.toString()).toBe(
+      'broadcastable<boolean>'
+    );
+  });
+
+  test('the values the types describe', () => {
+    const ce = new ComputeEngine();
+    declare(ce, TYPES);
+    const square = ce.box(['Power', 'q', 2]);
+    const sine = ce.box(['Sin', 'q']);
+    ce.assign('q', ce.box(['Tuple', 1, 2]));
+    expect(square.evaluate().toString()).toBe('(1, 4)');
+    expect(square.evaluate().type.matches(square.type)).toBe(true);
+    expect(sine.evaluate().type.matches(sine.type)).toBe(true);
+    const ce2 = new ComputeEngine();
+    declare(ce2, TYPES);
+    const sq = ce2.box(['Power', 'q', 2]);
+    ce2.assign('q', ce2.box(['List', ['Tuple', 1, 2], ['Tuple', 3, 4]]));
+    expect(sq.evaluate().toString()).toBe('[(1, 4),(9, 16)]');
+    expect(sq.evaluate().type.matches(sq.type)).toBe(true);
+  });
+
+  test('a list cell with a point arm is typed arm by arm too', () => {
+    // A symbol declared `broadcastable<tuple<…>>` that holds a list of
+    // points is a list now, and its cell is the point: its squares are
+    // points. The handler's one answer typed `list<number>`.
+    const ce = new ComputeEngine();
+    declare(ce, TYPES);
+    ce.assign('r', ce.box(['List', ['Tuple', 1, 2], ['Tuple', 3, 4]]));
+    ce.assign('p', ce.box(['List', ['Tuple', 1, 2], ['Tuple', 3, 4]]));
+    expect(ce.box(['Power', 'r', 2]).type.toString()).toBe(
+      'list<tuple<number, number>>'
+    );
+    expect(ce.box(['Multiply', 2, 'r']).type.toString()).toBe(
+      'list<tuple<number, number>>'
+    );
+    // The elements of one list pick their arm on their own (`[1, (1, 2)]`),
+    // so the arms' answers are joined inside ONE list type, not wrapped
+    // apart (`list<number> | list<tuple<…>>` admits no mixed list; dual
+    // review).
+    expect(ce.box(['Power', 'p', 2]).type.toString()).toBe(
+      'list<number | tuple<number, number>>'
+    );
+    // A declared list of numbers or points: each element squares to a
+    // number or a point.
+    ce.declare('M', { type: 'list<number | tuple<number, number>>' });
+    expect(ce.box(['Power', 'M', 2]).type.toString()).toBe(
+      'list<number | tuple<number, number>>'
+    );
+    // A number or such a list: the list branch's element is split the same
+    // way (dual review).
+    ce.declare('V', { type: 'number | list<number | tuple<number, number>>' });
+    expect(ce.box(['Power', 'V', 2]).type.toString()).toBe(
+      'list<number | tuple<number, number>> | number'
+    );
+    expect(ce.box(['Add', 'V', 1]).type.toString()).toBe(
+      'list<number> | number'
+    );
+    // The point arm plus a number is refused, so the sum is a list of
+    // numbers; the point arm plus a list of numbers is refused as well.
+    expect(ce.box(['Add', 'M', 1]).type.toString()).toBe('list<number>');
+    ce.declare('N', { type: 'list<number>' });
+    expect(ce.box(['Add', 'M', 'N']).type.toString()).toBe('list<number>');
+    // A definite list of points is unchanged.
+    ce.declare('L', { type: 'list<tuple<number, number>>' });
+    expect(ce.box(['Power', 'L', 2]).type.toString()).toBe(
+      'list<tuple<number, number>>'
+    );
+    expect(ce.box(['Add', 'L', 'L']).type.toString()).toBe(
+      'list<tuple<number, number>>'
+    );
+    // A list element that may be absent (a masked point) keeps its
+    // `missing` arm through the join; the absent cell is not an arm.
+    ce.declare('R', { type: 'list<missing | tuple<number, number>>' });
+    expect(ce.box(['Sin', 'R']).type.toString()).toBe(
+      'list<missing | tuple<number, number>>'
+    );
+    // A tuple whose component could be a collection is not shaped: the
+    // one-cell typing stands (`point-list-lift-and-binder-authority`).
+    ce.declare('X', { type: 'list<tuple<number, number | list<number>>>' });
+    expect(ce.box(['Sqrt', 'X']).type.toString()).toBe('list<number>');
+  });
+
+  test('two list branches of one operand are shaped apart, and a list of absent cells survives', () => {
+    // Each collection branch of a union is its own group: the answers of
+    // one branch's element arms are joined under that branch's wrap, never
+    // under another branch's (Codex second pass).
+    const ce = new ComputeEngine();
+    ce.declare('K', {
+      type: 'number | list<tuple<number, number>> | list<number>',
+    });
+    expect(ce.box(['Power', 'K', 2]).type.toString()).toBe(
+      'list<number> | list<tuple<number, number>> | number'
+    );
+    // A list whose cells are all absent (`list<missing>`) has no present
+    // cell to split and is one arm as it stands, so its branch survives.
+    ce.declare('u', { type: 'tuple<number, number> | list<missing>' });
+    expect(ce.box(['Sin', 'u']).type.toString()).toBe(
+      'list<number> | tuple<number, number>'
+    );
+    // An absent NUMBER cell evaluates to `NaN`, a number, so only a point
+    // cell keeps a `missing` arm (`withAbsentPointCells`,
+    // `broadcast-lift-type.ts`): `[Missing, 3]` squared is `[NaN, 9]`.
+    ce.declare('G', {
+      type: 'number | list<tuple<number, number>> | list<missing | number>',
+    });
+    const sq = ce.box(['Power', 'G', 2]);
+    expect(sq.type.toString()).toBe(
+      'list<missing | tuple<number, number>> | list<number> | number'
+    );
+    ce.assign('G', ce.box(['List', 'Missing', 3]));
+    expect(sq.evaluate().toString()).toBe('[NaN,9]');
+    expect(sq.evaluate().type.matches(sq.type)).toBe(true);
+  });
+
+  test('a mixed list of numbers and points is admitted by the joined type', () => {
+    const ce = new ComputeEngine();
+    declare(ce, TYPES);
+    const sq = ce.box(['Power', 'p', 2]);
+    ce.assign('p', ce.box(['List', 1, ['Tuple', 3, 4]]));
+    expect(sq.evaluate().toString()).toBe('[1,(9, 16)]');
+    expect(sq.evaluate().type.matches(sq.type)).toBe(true);
+  });
+});

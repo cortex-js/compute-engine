@@ -6,6 +6,7 @@ import {
   resolveTypeForCompilation as resolveType,
   resolveTypeAlias,
   stripMissingFromType,
+  typeContainsMissing,
   isPointElementType,
   unfoldAliasOnDescent,
   recordUnfoldOnDescent,
@@ -1781,16 +1782,99 @@ export function scalarOrListUnionCellType(t: Readonly<Type>): Type | undefined {
 type UnionArm = {
   cell: Type;
   rewrap: ((element: Type) => Type) | undefined;
+  /** Set on the arms split from ONE collection branch's element union: the
+   * elements of one list each pick their arm on their own (`[1, (1, 2)]`
+   * is one `list<number | tuple<…>>`), so the answers of these arms are
+   * joined BEFORE the branch is wrapped back, where the arms of a union
+   * OPERAND (one value, one arm) are wrapped apart. Shared by identity. */
+  group?: object;
 };
 
-/** The arms of a scalar-or-collection union, classified as
- * `scalarOrCollectionUnionBranches` classifies them, or `undefined` when `t`
- * is not such a union. A `broadcastable<T>` arm is two arms, the scalar `T`
- * and an indexed collection of `T`. */
-function unionArms(t: Readonly<Type>): UnionArm[] | undefined {
-  if (scalarOrCollectionUnionBranches(t) === undefined) return undefined;
+/** The arms of a collection branch `b` whose element type is `element`: one
+ * arm per arm of the element (a `missing` arm, an absent cell of the list,
+ * is not an arm; it is put back by the wrap), all in one group, all wrapped
+ * back as the branch. */
+function collectionBranchArms(b: Type, element: Type): UnionArm[] {
+  // Only a `missing` ARM of the element is an absent cell. A `missing` arm
+  // inside a tuple component (`tuple<number | missing, number>`, a point
+  // with an absent coordinate) is a present point, and stays in its cell.
+  const e = resolveTypeAlias(element);
+  const members =
+    typeof e !== 'string' && e.kind === 'union'
+      ? e.types.map((m) => resolveTypeAlias(m))
+      : [e];
+  const cells = members.filter((m) => m !== 'missing');
+  const group = {};
+  // An element that is `missing` and nothing else (`list<missing>`, a list
+  // of absent cells) is one arm as it stands, so the branch survives: with
+  // no present cell there is nothing to split, and the handler answers for
+  // the absent cell as it did before the split.
+  if (cells.length === 0)
+    return [{ cell: e, rewrap: (r) => rewrapCollectionBranch(b, r), group }];
+  const absent = cells.length < members.length;
+  const rewrap = (r: Type): Type =>
+    rewrapCollectionBranch(
+      b,
+      absent ? reduceType({ kind: 'union', types: [r, 'missing'] }) : r
+    );
+  return cells.map((cell) => ({ cell, rewrap, group }));
+}
+
+/**
+ * A union of broadcast-SCALAR arms, one of them a tuple, with no collection
+ * arm: the type of a symbol declared `number | tuple<number, number>` (a
+ * number or a 2-D point) and left valueless, or the element of a
+ * `broadcastable<number | tuple>` operand. Such an operand is typed arm by
+ * arm (`armwiseUnionBroadcastResultType`): a component-wise head applied to
+ * its tuple arm answers a tuple, which the handler's one answer for the whole
+ * union lost (`u^2` typed `number` for a `u` that may hold `(1, 2)`, whose
+ * square is `(1, 4)`). A union with a collection arm is classified by
+ * `scalarOrCollectionUnionBranches` instead; a union with a `broadcastable`
+ * arm is neither.
+ */
+export function isScalarUnionWithTupleArm(t: Readonly<Type>): boolean {
   const resolved = resolveTypeAlias(t);
-  if (typeof resolved === 'string' || resolved.kind !== 'union')
+  if (typeof resolved === 'string' || resolved.kind !== 'union') return false;
+  let tupleArm = false;
+  for (const branch of resolved.types) {
+    const b = resolveTypeAlias(branch);
+    if (isTupleShapedType(b)) tupleArm = true;
+    else if (typeof b !== 'string' && b.kind === 'broadcastable') return false;
+    else if (isSubtype(b, COLLECTION_SHAPE_TYPE)) return false;
+  }
+  return tupleArm;
+}
+
+/** The arms of a union operand, or of a one-arm operand, for
+ * `armwiseUnionBroadcastResultType`; `undefined` when the type is not armed.
+ * A scalar-or-collection union is classified as
+ * `scalarOrCollectionUnionBranches` classifies it, and a `broadcastable<T>`
+ * arm of it is two arms, the scalar `T` and an indexed collection of `T`. A
+ * union of scalar arms with a tuple arm (`isScalarUnionWithTupleArm`) is one
+ * arm per branch. A type that is not a union is one arm: a tuple (the
+ * element of `broadcastable<tuple<number, number>>`) or a scalar (`number`,
+ * the element of a `broadcastable<number>` operand beside a union trigger).
+ * A collection type is not an arm: a collection operand is typed by the
+ * visible-collection lift, never arm by arm. */
+function unionArms(t: Readonly<Type>): UnionArm[] | undefined {
+  const resolved = resolveTypeAlias(t);
+  if (typeof resolved === 'string' || resolved.kind !== 'union') {
+    // A dimensionless list or indexed collection (`list<number | tuple<…>>`;
+    // a `broadcastable<E>` operand that holds a list now, read as `list<E>`)
+    // is one arm per arm of its element, each shaped back as the list.
+    const element = dimensionlessIndexedElement(resolved);
+    if (element !== undefined) return collectionBranchArms(resolved, element);
+    if (
+      !isTupleShapedType(resolved) &&
+      isSubtype(resolved, COLLECTION_SHAPE_TYPE)
+    )
+      return undefined;
+    return [{ cell: resolved, rewrap: undefined }];
+  }
+  if (
+    scalarOrCollectionUnionBranches(resolved) === undefined &&
+    !isScalarUnionWithTupleArm(resolved)
+  )
     return undefined;
   const scalarSibling = unionHasGenuineScalarBranch(resolved);
   const arms: UnionArm[] = [];
@@ -1798,7 +1882,7 @@ function unionArms(t: Readonly<Type>): UnionArm[] | undefined {
     const b = resolveTypeAlias(branch);
     const element = dimensionlessIndexedElement(b, undefined, scalarSibling);
     if (element !== undefined) {
-      arms.push({ cell: element, rewrap: (e) => rewrapCollectionBranch(b, e) });
+      arms.push(...collectionBranchArms(b, element));
     } else if (typeof b !== 'string' && b.kind === 'broadcastable') {
       arms.push({ cell: b.elements, rewrap: undefined });
       arms.push({
@@ -1808,6 +1892,12 @@ function unionArms(t: Readonly<Type>): UnionArm[] | undefined {
     } else arms.push({ cell: b, rewrap: undefined });
   }
   return arms;
+}
+
+/** Whether `armwiseUnionBroadcastResultType` can type an operand of type
+ * `t` arm by arm: see `unionArms`. */
+export function isArmedOperandType(t: Readonly<Type>): boolean {
+  return unionArms(t) !== undefined;
 }
 
 /** The component-wise shape of one arm combination's answer `r` when some
@@ -1920,8 +2010,17 @@ export function armwiseUnionBroadcastResultType(
   }
   if (armsPerOperand.every((a) => a === undefined)) return undefined;
   const results: Type[] = [];
+  // The answers of the combinations that differ only in GROUPED arms (the
+  // arms of one collection branch's element), keyed by the other arms
+  // chosen: the elements of one list pick their arms on their own, so these
+  // answers are one element type, joined before the wrap.
+  const grouped = new Map<
+    string,
+    { rewrap: (e: Type) => Type; types: Type[] }
+  >();
   let rejected = 0;
   const cells: (Type | undefined)[] = operandTypes.map(() => undefined);
+  const chosen: string[] = [];
   const visit = (i: number, rewrap: UnionArm['rewrap']): boolean => {
     if (i === operandTypes.length) {
       const r0 = cellResult(cells);
@@ -1934,21 +2033,39 @@ export function armwiseUnionBroadcastResultType(
         rejected += 1;
         return true;
       }
-      results.push(rewrap === undefined ? r : rewrap(r));
+      if (rewrap === undefined) results.push(r);
+      else {
+        const key = chosen.join('|');
+        const entry = grouped.get(key);
+        if (entry === undefined) grouped.set(key, { rewrap, types: [r] });
+        else entry.types.push(r);
+      }
       return true;
     }
     const arms = armsPerOperand[i];
     if (arms === undefined) return visit(i + 1, rewrap);
-    for (const arm of arms) {
+    for (let j = 0; j < arms.length; j += 1) {
+      const arm = arms[j];
       cells[i] = arm.cell;
+      // A grouped arm is keyed by its group (one key for all the arms of
+      // that element, and a different key for each collection branch of the
+      // operand, so two list branches are not merged under the first one's
+      // wrap); any other arm by its index.
+      chosen[i] =
+        arm.group === undefined
+          ? `${i}:${j}`
+          : `${i}:g${arms.findIndex((a) => a.group === arm.group)}`;
       // The first list arm taken gives the result its collection kind: two
       // list arms zip into one collection.
       if (!visit(i + 1, rewrap ?? arm.rewrap)) return false;
     }
     cells[i] = undefined;
+    chosen[i] = '';
     return true;
   };
   if (!visit(0, undefined)) return undefined;
+  for (const { rewrap, types } of grouped.values())
+    results.push(rewrap(reduceType({ kind: 'union', types })));
   if (results.length === 0) return rejected > 0 ? 'error' : undefined;
   return reduceType({ kind: 'union', types: results });
 }

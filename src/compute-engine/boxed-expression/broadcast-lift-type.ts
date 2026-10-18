@@ -56,6 +56,8 @@ import type {
 } from '../global-types.js';
 import {
   armwiseUnionBroadcastResultType,
+  isArmedOperandType,
+  isScalarUnionWithTupleArm,
   dimensionlessIndexedElement,
   isRecordShapedType,
   isTupleShapedType,
@@ -1241,6 +1243,44 @@ export function broadcastLiftType(input: BroadcastLiftInput): Type | undefined {
       );
       if (armwise !== undefined) return armwise;
     }
+    // A trigger whose CELL has a tuple arm: a list of numbers or points
+    // (`list<number | tuple<number, number>>`, alone or as the list branch
+    // of a `number | list<…>` union), or a symbol declared
+    // `broadcastable<E>` that holds a list now, whose cell is `E`
+    // (`broadcastable<tuple<number, number>>` holding `[(1, 2), (3, 4)]`).
+    // The handler's one answer over the whole operand type lost the tuple
+    // arm (`q^2` typed `list<number>` for a list of points, whose squares
+    // are points), so each arm of the cell is typed as its own cell, the
+    // answers of one element's arms are joined, and the list is shaped back
+    // once (`[1, (1, 2)]` squared is one `list<number | tuple<…>>`), under
+    // the same heads as above. Every trigger must be typed arm by arm for
+    // the combination to be typed at all; a trigger of a fixed shape
+    // (`vector<2>`) is not, and keeps the typing below. When every arm is
+    // rejected (`L + 1` for a list of points) the application is `error`,
+    // as the one-cell typing already answered for such a list: the empty
+    // list, whose sum is `[]`, is left out on purpose, as it was.
+    if (input.armwiseTupleArms === true && input.armCellResult !== undefined) {
+      const armedTypes = types.map((t) => {
+        const elements = broadcastableElementsOf(t);
+        return elements === undefined
+          ? t
+          : ({ kind: 'list', elements } as Type);
+      });
+      if (
+        armedTypes.some((t) => hasTupleCell(t)) &&
+        armedTypes.every((t) => isArmedOperandType(t))
+      ) {
+        const armwise = armwiseUnionBroadcastResultType(
+          views.map((v) => {
+            const k = broadcasting.indexOf(v);
+            return k === -1 ? undefined : armedTypes[k];
+          }),
+          input.armCellResult,
+          { componentwise: input.broadcastsOverTuples }
+        );
+        if (armwise !== undefined) return armwise;
+      }
+    }
     // Every trigger a LONE scalar-or-collection union (a valueless
     // `u: number | list<number>`): the result carries the union through
     // instead of claiming the definite `list<E>` that `u := 5` contradicts.
@@ -1364,6 +1404,53 @@ export function broadcastLiftType(input: BroadcastLiftInput): Type | undefined {
       cellResult
     );
     if (top !== undefined) return top;
+    // Every trigger typed `broadcastable<E>` (a declared parameter, a symbol
+    // declared `broadcastable<number | tuple>`), and some `E` — or a plain
+    // tuple-arm union operand beside them (`isScalarUnionWithTupleArm`) —
+    // has a TUPLE arm: the per-element result is typed arm by arm over the
+    // elements, as the visible-collection lift types a union with a tuple
+    // arm, and wrapped once. The handler's one answer for the whole element
+    // union lost the tuple arm: `p^2` for `p: broadcastable<number | tuple>`
+    // typed `broadcastable<number>`, a type the value `(1, 4)` (the square
+    // of a point `p`) does not have, since a tuple is not an indexed
+    // collection. Arm by arm it types `broadcastable<number | tuple>`. Only
+    // under a head whose tuple arm is a cell of its own (`armwiseTupleArms`):
+    // a norm (`|p|`) or a comparison reads a point as one value, and keeps
+    // the one answer. An arm combination the handler rejects contributes
+    // nothing (`p + 1` is `broadcastable<number>`: a point plus a number is
+    // refused at boxing), and when every combination is rejected the
+    // application is an error whatever the value, not a broadcast of one.
+    // An abstract collection trigger (`collection<E>`) keeps the typing
+    // below, which shapes its nested element.
+    if (
+      input.armwiseTupleArms === true &&
+      input.armCellResult !== undefined &&
+      !abstractTrigger
+    ) {
+      const armed = views.map((v, i) =>
+        mappable(i) ? armedOperandType(v) : undefined
+      );
+      if (
+        armed.some((t) => t !== undefined && hasTupleArm(t)) &&
+        views.every(
+          (v, i) =>
+            !mappable(i) ||
+            !isPossiblyCollectionTypedView(v) ||
+            broadcastableElementsOf(v.type) !== undefined
+        )
+      ) {
+        const armwise = armwiseUnionBroadcastResultType(
+          armed,
+          input.armCellResult,
+          { componentwise: input.broadcastsOverTuples }
+        );
+        // Every arm rejected (`d + 1` for `d: broadcastable<tuple<…> |
+        // tuple<…>>`): `error`, as a list of points plus a number is typed
+        // (arm 1); the empty collection is left out on purpose there too.
+        if (armwise === 'error' || armwise === 'never') return armwise;
+        if (armwise !== undefined) return broadcastableOf(armwise);
+      }
+    }
     const abstractCell = abstractTrigger
       ? input.abstractCellResult?.(abstractCells.map((c) => c?.cell))
       : undefined;
@@ -1384,7 +1471,81 @@ export function broadcastLiftType(input: BroadcastLiftInput): Type | undefined {
     return broadcastableOf(elements);
   }
 
+  // No collection trigger, visible or possible, and some operand a union of
+  // scalar arms with a TUPLE arm (a symbol declared
+  // `number | tuple<number, number>` and left valueless): typed arm by arm,
+  // for the same reason as a `broadcastable<E>` trigger above. The handler's
+  // one answer for the whole union lost the tuple arm: `u^2` typed `number`,
+  // which the value `(1, 4)` (the square of a point `u`) does not have. Arm
+  // by arm it types `number | tuple<number, number>`.
+  if (
+    input.armwiseTupleArms === true &&
+    input.armCellResult !== undefined &&
+    views.some((v, i) => mappable(i) && isScalarUnionWithTupleArm(v.type))
+  ) {
+    const armwise = armwiseUnionBroadcastResultType(
+      views.map((v, i) =>
+        mappable(i) && isScalarUnionWithTupleArm(v.type) ? v.type : undefined
+      ),
+      input.armCellResult,
+      { componentwise: input.broadcastsOverTuples }
+    );
+    if (armwise !== undefined) return armwise;
+  }
+
   return undefined;
+}
+
+/** Whether a type has a tuple arm the arm-by-arm typing can shape: a
+ * structural tuple (`tuple<number, number>`) whose components are scalars,
+ * the bare `tuple` (a point of unknown arity), or a union with such an arm.
+ * `hasTupleBranch` reads structural tuples only, which is what the cell
+ * result and the point-or-point-list bypass need; the arm-by-arm typing
+ * treats a bare `tuple` arm as a cell too. A tuple with a component that
+ * could be a collection (`tuple<number, number | list<number>>`) is not
+ * such an arm: the component-wise broadcast would then hold a collection
+ * in a component the shaped tuple type does not admit, so the one-cell
+ * typing stands for it (as the point-list lift declines it,
+ * `pointLeafArity`). */
+function hasTupleArm(t: Type): boolean {
+  const r = resolveTypeAlias(t);
+  if (r === 'tuple') return true;
+  if (typeof r === 'string') return false;
+  if (r.kind === 'tuple')
+    return !r.elements.some((c) => typeCouldBeCollection(c.type));
+  return r.kind === 'union' && r.types.some((m) => hasTupleArm(m));
+}
+
+/** Whether a trigger of the visible-collection lift has a tuple arm in its
+ * CELL: a dimensionless list whose element has one, a union with a tuple
+ * arm or with such a list branch, or a tuple itself. */
+function hasTupleCell(t: Type): boolean {
+  const element = dimensionlessIndexedElement(t);
+  if (element !== undefined) return hasTupleArm(element);
+  const r = resolveTypeAlias(t);
+  if (typeof r !== 'string' && r.kind === 'union')
+    return r.types.some((m) => hasTupleCell(m));
+  return hasTupleArm(r);
+}
+
+/** The element type of a `broadcastable<E>` type, `undefined` for any other
+ * type. */
+function broadcastableElementsOf(t: Type): Type | undefined {
+  const r = resolveTypeAlias(t);
+  return typeof r !== 'string' && r.kind === 'broadcastable'
+    ? r.elements
+    : undefined;
+}
+
+/** The type an operand of the possibly-a-collection lift is typed arm by arm
+ * from: the element of a `broadcastable<E>` operand (the arms of `E`, or `E`
+ * itself as one arm), or a union of scalar arms with a tuple arm as it
+ * stands. `undefined` for an operand typed neither way, which the handler
+ * sees as it is. */
+function armedOperandType(v: BroadcastOperandView): Type | undefined {
+  const elements = broadcastableElementsOf(v.type);
+  if (elements !== undefined) return elements;
+  return isScalarUnionWithTupleArm(v.type) ? v.type : undefined;
 }
 
 /**

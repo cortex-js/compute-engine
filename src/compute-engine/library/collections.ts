@@ -65,6 +65,7 @@ import {
   smallCount,
 } from '../boxed-expression/collection-count.js';
 import {
+  broadcastableOf,
   isAbstractCollectionTypeOf,
   isKindOpenOperandType,
 } from '../boxed-expression/broadcast-lift-type.js';
@@ -3561,6 +3562,44 @@ function pointComponentTypeD(xs: OperandDescriptor, position: number): Type {
   // typed from its point: the `missing` arm is stripped before this handler
   // runs.)
   if (t === 'missing') return 'number';
+  // The bare `tuple` (a point of unknown arity: what a callback declared
+  // `-> tuple` answers) is ONE point, so its coordinate is one value, whose
+  // component type the bare spelling does not state: `number`, which is how
+  // the accessors already read an unstated component everywhere else (the
+  // structural tuple arm below answers `number` for a `tuple<unknown,
+  // unknown>` declaration, and the list reading below answers `list<number>`
+  // for a `list<tuple>`). Read as a collection, the bare `tuple` typed the
+  // coordinate `list<number>`, a list no single point answers.
+  if (t === 'tuple') return 'number';
+  // A `broadcastable<E>` operand is the point `E` or an indexed collection of
+  // such points, so its coordinate is the coordinate of `E` or the list of
+  // it: the coordinate of `E` under the same contract. A top or an error
+  // answer for the point is the answer whole: `broadcastable<unknown>` says
+  // less than `unknown`, and an error is not broadcast. When `E` is a number
+  // OR a point (`broadcastable<number | tuple>`) the coordinate is defined for
+  // the point and not for the number, and the list of them reads element-wise
+  // or as a flat point by content: nothing definite, `unknown`. An `E` with
+  // no point arm (`broadcastable<number>`) keeps the collection reading below,
+  // a flat point whose coordinate is an element.
+  if (typeof t !== 'string' && t.kind === 'broadcastable') {
+    const e = resolveTypeAlias(t.elements);
+    if (isPointElementType(e)) {
+      const ofPoint = pointComponentTypeD(
+        { type: e, facts: xs.facts, structureOf: undefined },
+        position
+      );
+      const r = resolveTypeAlias(ofPoint);
+      if (r === 'unknown' || r === 'any' || r === 'error' || r === 'never')
+        return ofPoint;
+      return broadcastableOf(ofPoint);
+    }
+    if (
+      typeof e !== 'string' &&
+      e.kind === 'union' &&
+      e.types.some((b) => isPointElementType(b))
+    )
+      return 'unknown';
+  }
   if (typeof t !== 'string' && t.kind === 'tuple') {
     const ct = componentTypeD(xs, position);
     if (ct === 'unknown') {
@@ -3577,23 +3616,38 @@ function pointComponentTypeD(xs: OperandDescriptor, position: number): Type {
     return withMarker(ct);
   }
   // A SINGLE point whose type is a union of tuple spellings — `w: tuple<
-  // integer, number> | tuple<number, integer>`. Every arm is a point, so the
-  // coordinate is defined in every case, and its type is the widening of the
-  // component each arm gives at this position. An arm that is the bare `tuple`
-  // (no components stated) or that has no component at this position states
-  // nothing about the coordinate, so the whole union falls through to the
-  // collection arms below rather than guessing one.
+  // integer, number> | tuple<number, integer>`, or a 2-D-or-3-D point
+  // `tuple<number, number> | tuple<number, number, number>`. Every arm is a
+  // point, so the value is one coordinate: what the accessor answers for
+  // each arm (the structural tuple arm above), joined. An arm with no
+  // component at this position answers as a structural tuple of that arity
+  // does: `PointX`/`PointY` the absence marker of the slot, `PointZ` the
+  // dimension error. An error is a value no type admits, so that arm
+  // contributes nothing (as an arm the sum rejects contributes nothing to
+  // an arm-by-arm sum type), and the coordinate is `error` only when every
+  // arm answers it. Read as a collection, such a union typed the coordinate
+  // `collection<number>`, which the number is not. An arm that is the bare
+  // `tuple` states no components, so the whole union falls through rather
+  // than guessing.
   if (typeof t !== 'string' && t.kind === 'union' && isPointElementType(t)) {
-    const componentTypes: Type[] = [];
+    const answers: Type[] = [];
+    let stated = true;
     for (const branch of t.types) {
       const arm = resolveTypeAlias(branch);
-      if (typeof arm === 'string' || arm.kind !== 'tuple') break;
-      const ct = arm.elements[position - 1]?.type;
-      if (ct === undefined) break;
-      componentTypes.push(ct);
+      if (typeof arm === 'string' || arm.kind !== 'tuple') {
+        stated = false;
+        break;
+      }
+      const answer = pointComponentTypeD(
+        { type: arm, facts: xs.facts, structureOf: undefined },
+        position
+      );
+      if (resolveTypeAlias(answer) !== 'error') answers.push(answer);
     }
-    if (componentTypes.length === t.types.length && componentTypes.length > 0)
-      return withMarker(widen(...componentTypes));
+    if (stated)
+      return answers.length === 0
+        ? 'error'
+        : reduceType({ kind: 'union', types: answers });
   }
   // A union of point AND point-list arms — the "point or a list of points"
   // type a document helper returns (`list<tuple<…>> | tuple<…>`). The accessor
