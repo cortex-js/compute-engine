@@ -380,16 +380,6 @@ complex: (a, b?) => Complex;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~tolerance~~ {#tolerance-2}
-
-```ts
-tolerance: number;
-```
-
-</MemberCard>
-
-<MemberCard>
-
 ##### ExpressionComputeEngine.~~angularUnit~~ {#angularunit-2}
 
 ```ts
@@ -549,6 +539,21 @@ For a change that must last for one block of code only, use
 get precision(): number
 set precision(p: number | "auto" | "machine"): void
 ```
+
+</MemberCard>
+
+<MemberCard>
+
+##### ExpressionComputeEngine.~~tolerance~~ {#tolerance-2}
+
+```ts
+get tolerance(): number
+set tolerance(v: number | "auto"): void
+```
+
+The absolute tolerance of the comparisons that involve a float, and of
+`chop()`. A number is kept as set; `'auto'` is `10^(-precision + 2)`,
+recomputed at each precision change.
 
 </MemberCard>
 
@@ -11444,16 +11449,6 @@ complex: (a, b?) => Complex;
 
 <MemberCard>
 
-##### IComputeEngine.tolerance {#tolerance-1}
-
-```ts
-tolerance: number;
-```
-
-</MemberCard>
-
-<MemberCard>
-
 ##### IComputeEngine.angularUnit {#angularunit-1}
 
 ```ts
@@ -11613,6 +11608,21 @@ For a change that must last for one block of code only, use
 get precision(): number
 set precision(p: number | "auto" | "machine"): void
 ```
+
+</MemberCard>
+
+<MemberCard>
+
+##### IComputeEngine.tolerance {#tolerance-1}
+
+```ts
+get tolerance(): number
+set tolerance(v: number | "auto"): void
+```
+
+The absolute tolerance of the comparisons that involve a float, and of
+`chop()`. A number is kept as set; `'auto'` is `10^(-precision + 2)`,
+recomputed at each precision change.
 
 </MemberCard>
 
