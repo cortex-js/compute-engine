@@ -5,6 +5,7 @@ import type {
 } from '../global-types.js';
 import { runWithEvaluationEffects } from '../effects-registry.js';
 import { awaitedOperandOptions } from '../boxed-expression/utils.js';
+import { asFloat, hasFloatOperand } from '../boxed-expression/float-result.js';
 import {
   isSymbol,
   isString,
@@ -86,6 +87,71 @@ export function isSymbolicValue(x: Expression): boolean {
 }
 
 /**
+ * True when quantity arithmetic over `values` (the scalar operands and the
+ * magnitudes of the quantity operands) combines them as expressions, with the
+ * helpers of `measurement-arithmetic.ts`, and not as machine numbers read
+ * with `.re`. This is the case when:
+ * - a value is a `Measurement`: its error must propagate;
+ * - a value has no numeric value (see `isSymbolicValue()`):
+ *   `Quantity(3, m) · x` is `Quantity(3x, m)`;
+ * - no value is a float: all the values are exact (an integer, a rational,
+ *   a radical, an exact constant such as `π`), and `evaluate()` keeps an
+ *   exact result exact. `Quantity(3, m) · π` is `Quantity(3π, m)`, not
+ *   `Quantity(9.42…, m)`, and `Quantity(3, m)^-1` is `Quantity(1/3, m^-1)`.
+ *   Under `.N()` the caller makes the result numeric;
+ * - a value is not real: its `.re` drops the imaginary part.
+ *
+ * Otherwise at least one value is a float and all the values are real: the
+ * machine-number arithmetic gives the float result.
+ */
+export function usesExpressionArithmetic(
+  values: ReadonlyArray<Expression>
+): boolean {
+  if (values.some((x) => isMeasurement(x) || isSymbolicValue(x))) return true;
+  if (!hasFloatOperand(values)) return true;
+  return values.some((x) => x.im !== 0);
+}
+
+/**
+ * True when the unit conversion `x → c1·x + c0` (with `c0 = convert(0)` and
+ * `c1 = convert(1)`) keeps an exact magnitude exact: the conversion has no
+ * offset and its factor is an integer (`m → cm` is `x → 100x`). The
+ * conversion data are machine numbers, so another factor (`cm → m` is
+ * `x → 0.01x`, `m/s → km/h` is `x → 3.5999999999999996x`) gives a float
+ * result whatever the magnitude, and an offset (a temperature) also gives a
+ * float. Then the conversion is numeric, as for a float magnitude.
+ */
+export function isExactConversion(
+  c0: number | null,
+  c1: number | null
+): boolean {
+  return c0 === 0 && c1 !== null && Number.isInteger(c1);
+}
+
+/**
+ * The magnitude `mag` under the affine map `x → f·x + c` of a unit
+ * conversion. A `Measurement` magnitude is mapped with `measurementAffine()`,
+ * which scales its error by `|f|`. Another magnitude has no error, and it is
+ * mapped with plain expression arithmetic: the error term of
+ * `measurementAffine()` multiplies the square of the magnitude by the square
+ * of a zero error, and for an infinite magnitude that product is
+ * `Indeterminate` (`Quantity(+∞, m)` converted to `cm` gave
+ * `(+∞ ± Indeterminate) cm`).
+ */
+export function affineMagnitude(
+  ce: ComputeEngine,
+  mag: Expression,
+  f: number,
+  c: number
+): Expression {
+  if (isMeasurement(mag)) return measurementAffine(ce, mag, f, c);
+  let r = mag;
+  if (f !== 1) r = ce.function('Multiply', [r, ce.number(f)]).evaluate();
+  if (c !== 0) r = ce.function('Add', [r, ce.number(c)]).evaluate();
+  return r;
+}
+
+/**
  * The conversion of the evaluated `quantity` to the unit `targetUnitExpr`,
  * shared by the synchronous and the asynchronous `UnitConvert` handlers.
  */
@@ -102,10 +168,21 @@ function convertQuantity(
   // factor; unit conversion is affine, so the linear factor is
   // `convert(1) − convert(0)` and the offset shifts the nominal only. A
   // symbolic magnitude is converted with the same expression arithmetic.
+  // An exact magnitude is converted with it too when the conversion is a
+  // multiplication by an integer, so that `evaluate()` keeps `π m` as
+  // `100π cm` (see `isExactConversion()`). Otherwise the result is a float
+  // (the conversion factor is a float), and an exact magnitude is converted
+  // numerically, as a float magnitude is.
   const magExpr = quantity.op1;
   const magIsMeasurement = isMeasurement(magExpr) || isSymbolicValue(magExpr);
+  const magIsExact = !magIsMeasurement && usesExpressionArithmetic([magExpr]);
   const mag = magExpr.re;
   if (!magIsMeasurement && mag === undefined) return undefined;
+  // The numeric conversion is used for a float magnitude, or for a
+  // conversion by a float factor or with an offset. Its result is a float,
+  // also when its value is an integer: `100 cm` converted to `m` is the
+  // float `1`, as `150 cm` is the float `1.5`.
+  const numericMagnitude = (x: number) => asFloat(ce.number(x));
 
   // Try simple symbol-based conversion first
   const fromUnit = quantity.op2;
@@ -113,11 +190,11 @@ function convertQuantity(
   const toSymbol = isSymbol(targetUnitExpr) ? targetUnitExpr.symbol : null;
 
   if (fromSymbol && toSymbol) {
-    if (magIsMeasurement) {
-      const c0 = convertUnit(0, fromSymbol, toSymbol);
-      const c1 = convertUnit(1, fromSymbol, toSymbol);
+    const c0 = convertUnit(0, fromSymbol, toSymbol);
+    const c1 = convertUnit(1, fromSymbol, toSymbol);
+    if (magIsMeasurement || (magIsExact && isExactConversion(c0, c1))) {
       if (c0 === null || c1 === null) return ce.error('incompatible-type');
-      const convertedMag = measurementAffine(ce, magExpr, c1 - c0, c0);
+      const convertedMag = affineMagnitude(ce, magExpr, c1 - c0, c0);
       // A unit name is not a variable: it must not be declared in the
       // current scope.
       const r = ce._fn('Quantity', [
@@ -129,7 +206,7 @@ function convertQuantity(
     const converted = convertUnit(mag!, fromSymbol, toSymbol);
     if (converted !== null)
       return ce._fn('Quantity', [
-        ce.number(converted),
+        numericMagnitude(converted),
         ce.symbol(toSymbol, { autoDeclare: false }),
       ]);
     // If conversion returned null, units are incompatible
@@ -141,11 +218,11 @@ function convertQuantity(
   const toUE = boxedToUnitExpression(targetUnitExpr);
   if (!fromUE || !toUE) return undefined;
 
-  if (magIsMeasurement) {
-    const c0 = convertCompoundUnit(0, fromUE, toUE);
-    const c1 = convertCompoundUnit(1, fromUE, toUE);
+  const c0 = convertCompoundUnit(0, fromUE, toUE);
+  const c1 = convertCompoundUnit(1, fromUE, toUE);
+  if (magIsMeasurement || (magIsExact && isExactConversion(c0, c1))) {
     if (c0 === null || c1 === null) return ce.error('incompatible-type');
-    const convertedMag = measurementAffine(ce, magExpr, c1 - c0, c0);
+    const convertedMag = affineMagnitude(ce, magExpr, c1 - c0, c0);
     const r = ce._fn('Quantity', [convertedMag, targetUnitExpr]);
     return numericApproximation ? r.N() : r;
   }
@@ -153,7 +230,7 @@ function convertQuantity(
   const converted = convertCompoundUnit(mag!, fromUE, toUE);
   if (converted === null) return ce.error('incompatible-type');
 
-  return ce._fn('Quantity', [ce.number(converted), targetUnitExpr]);
+  return ce._fn('Quantity', [numericMagnitude(converted), targetUnitExpr]);
 }
 
 export const UNITS_LIBRARY: SymbolDefinitions = {
@@ -328,14 +405,19 @@ export const UNITS_LIBRARY: SymbolDefinitions = {
       const scale = getExpressionScale(ue);
       if (scale === null) return arg;
 
-      // A Measurement or symbolic magnitude is scaled with expression
-      // arithmetic: a numeric read of its value loses the error or gives
-      // `NaN`.
+      // A Measurement, symbolic or exact magnitude is scaled with
+      // expression arithmetic: a numeric read of its value loses the error,
+      // gives `NaN`, or makes an exact `π` a float. For an exact magnitude
+      // that is the case only for an integer scale (see
+      // `isExactConversion()`). Otherwise the magnitude or the scale is a
+      // float, and the result is a float, also when its value is an integer.
       const magExpr = arg.op1;
       const scaled =
-        isMeasurement(magExpr) || isSymbolicValue(magExpr)
-          ? measurementAffine(ce, magExpr, scale, 0)
-          : ce.number(mag * scale);
+        isMeasurement(magExpr) ||
+        isSymbolicValue(magExpr) ||
+        (usesExpressionArithmetic([magExpr]) && isExactConversion(0, scale))
+          ? affineMagnitude(ce, magExpr, scale, 0)
+          : asFloat(ce.number(mag * scale));
       return ce._fn('Quantity', [
         scaled,
         ce.symbol(match, { autoDeclare: false }),

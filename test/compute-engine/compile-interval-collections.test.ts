@@ -131,13 +131,14 @@ describe('Interval target — element-wise broadcast over a provable numeric lis
     ]);
   });
 
-  test('a length mismatch answers the absence marker, an empty list the empty list', () => {
+  test('a length mismatch answers empty, an empty list the empty list', () => {
     const ce = engine();
     const r = compile(ce.parse('V \\cdot W'), { to: 'interval-js' });
     expect(r.success).toBe(true);
-    // The interpreter reports `incompatible-dimensions` at every point.
-    const mismatch: any = r.run!({ V: [1, 2, 3], W: [1, 2] });
-    expect(Number.isNaN(mismatch.lo)).toBe(true);
+    // The interpreter reports `incompatible-dimensions` at every point. The
+    // compiled code answers the absence marker, which the runner gives as
+    // `empty`.
+    expect(r.run!({ V: [1, 2, 3], W: [1, 2] })).toEqual({ kind: 'empty' });
     // A broadcast over a lone empty operand answers the EMPTY LIST, as it
     // does in the interpreter (`[] · []` evaluates to `[]`).
     expect(r.run!({ V: [], W: [] })).toEqual([]);
@@ -441,9 +442,9 @@ describe('Interval target — reductions over collection values', () => {
     expectEncloses(run(ce, '\\max([x, 2x, 1])', { x: pt(3) }).out, 6);
     expectEncloses(run(ce, '\\max(V)', { V: [1, 5, 2] }).out, 5);
     expectEncloses(run(ce, '\\min(V)', { V: [1, 5, 2] }).out, 1);
-    // The interpreter's Max([]) is NaN: the absence marker here.
-    const empty = run(ce, '\\max(V)', { V: [] }).out;
-    expect(Number.isNaN(empty[0])).toBe(true);
+    // The interpreter's Max([]) is NaN: the absence marker here, which the
+    // runner gives as `empty`.
+    expect(run(ce, '\\max(V)', { V: [] }).out).toBe('empty');
     // A collection beside a scalar is the same reduction, as in the
     // interpreter: the collection is flattened into the operand list. This
     // shape was gated until the scalar operands were folded with the
@@ -773,9 +774,9 @@ describe('Interval target — a coordinate accessor over a list of points', () =
     ]);
     expect(bands(r.run!({ c: [1, 2] }))).toEqual([2, 2]);
     expect(r.run!({ c: [] })).toEqual([]);
-    // A value that is not a point at all answers the absence marker.
-    const absent = r.run!({ c: pt(1) }) as { lo: number };
-    expect(Number.isNaN(absent.lo)).toBe(true);
+    // A value that is not a point at all answers the absence marker, which
+    // the runner gives as `empty`.
+    expect(r.run!({ c: pt(1) })).toEqual({ kind: 'empty' });
   });
 
   test('a third coordinate over two-component points is absent as a whole', () => {
@@ -789,9 +790,7 @@ describe('Interval target — a coordinate accessor over a list of points', () =
       fallback: false,
     });
     expect(r.success).toBe(true);
-    const absent = r.run!({ c: POINTS }) as { lo: number };
-    expect(Array.isArray(absent)).toBe(false);
-    expect(Number.isNaN(absent.lo)).toBe(true);
+    expect(r.run!({ c: POINTS })).toEqual({ kind: 'empty' });
     expect(
       bands(
         r.run!({
@@ -1489,8 +1488,8 @@ describe('Interval target — point arithmetic', () => {
     const absent = compile(ce.box(['Multiply', 'V', 'LP']), {
       to: 'interval-js',
       fallback: false,
-    }).run!(INPUTS) as { lo: number };
-    expect(Number.isNaN(absent.lo)).toBe(true);
+    }).run!(INPUTS);
+    expect(absent).toEqual({ kind: 'empty' });
     // The coordinates of the result are read back as a list.
     expect(value(ce, ['PointX', ['Add', 'LP', 'P']], INPUTS).out).toEqual([
       [2, 2],
@@ -1694,8 +1693,8 @@ describe('Interval target — a selection among list values', () => {
     const straddle = compile(ce.box(['S', 'x']), {
       to: 'interval-js',
       fallback: false,
-    }).run!({ x: { lo: -1, hi: 1 } }) as { lo: number };
-    expect(Number.isNaN(straddle.lo)).toBe(true);
+    }).run!({ x: { lo: -1, hi: 1 } });
+    expect(straddle).toEqual({ kind: 'empty' });
     // The dot product over the list arm is the interpreter's value; over the
     // number arm the interpreter answers an error (`0[1]` is not a value),
     // and this target answers the absence marker for the indexing of a
@@ -1709,8 +1708,8 @@ describe('Interval target — a selection among list values', () => {
     const scalarArm = compile(ce.box(['d', ['S', 'x'], ['List', 1, 1]]), {
       to: 'interval-js',
       fallback: false,
-    }).run!({ x: pt(3) }) as { value: { lo: number } };
-    expect(Number.isNaN(scalarArm.value.lo)).toBe(true);
+    }).run!({ x: pt(3) });
+    expect(scalarArm).toEqual({ kind: 'empty' });
   });
 
   test('the selection at the root, and under a kernel', () => {

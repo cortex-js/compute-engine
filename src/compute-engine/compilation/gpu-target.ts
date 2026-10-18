@@ -15334,6 +15334,31 @@ function gpuDeclaredTypeOf(expr: Expression): GPUDeclaredType | undefined {
 }
 
 /**
+ * The first name of `names` that an `Assign` anywhere in `expr` writes. Each
+ * node is visited once, so a subtree shared by several operands is not
+ * walked once per path.
+ */
+function gpuAssignedName(
+  expr: Expression,
+  names: ReadonlySet<string>,
+  seen: Set<Expression> = new Set()
+): string | undefined {
+  if (!isFunction(expr) || seen.has(expr)) return undefined;
+  seen.add(expr);
+  if (
+    expr.operator === 'Assign' &&
+    isSymbol(expr.ops[0]) &&
+    names.has(expr.ops[0].symbol)
+  )
+    return expr.ops[0].symbol;
+  for (const op of expr.ops) {
+    const found = gpuAssignedName(op, names, seen);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
+
+/**
  * `target`, with the caller-declared names BOUND: each resolves to the
  * identifier the emitted source references it by — its own name, or a WGSL
  * input's field of the entry point's `input` struct — and joins `boundVars`.
@@ -17189,6 +17214,24 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
             assignment.expression,
             this.languageId
           );
+          // A declared input or uniform is read-only in both languages (a
+          // GLSL `uniform` or `in` variable, a WGSL `var<uniform>` or a field
+          // of the input struct), so `x = x + 1.0;` is not valid source. The
+          // test is on the expression and is conservative: an assignment to a
+          // block local that has the same name as a declaration also
+          // declines.
+          const written = gpuAssignedName(
+            assignment.expression,
+            new Set(declarations.map((d) => d.name))
+          );
+          if (written !== undefined)
+            throw new Error(
+              `Could not compile the body statement "${assignment.variable}" of ` +
+                `\`compileShader()\`: it assigns "${written}", a declared ` +
+                `input or uniform of the shader, which is read-only in ` +
+                `${this.languageId.toUpperCase()}. Assign a local copy of it ` +
+                `instead (\`Block(y ≔ ${written}; y ≔ y + 1; y)\`).`
+            );
           const { stmts, code } = BaseCompiler.compileStatementBody(
             assignment.expression,
             target

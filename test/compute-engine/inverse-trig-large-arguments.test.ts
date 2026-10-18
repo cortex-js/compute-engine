@@ -1837,13 +1837,22 @@ describe('INVERSE TRIG: a real argument with a complex value, above machine prec
 
 describe('A complex kernel value with a NaN part', () => {
   test('is NaN, and no assertion fails', () => {
-    // At machine precision `sin(10⁴⁰⁰ + i)` reaches the complex kernel with
-    // an infinite real part, which gives a NaN part.
+    // At machine precision `10⁴⁰⁰ + i` is the double `Infinity + i`. Until
+    // 2026-10-18 it reached the complex kernel of `sin`, which gave a NaN
+    // part. Since then a value with an infinite real part and a finite
+    // imaginary part is boxed as `+∞`, so `sin(10⁴⁰⁰ + i)` gives the
+    // answer of `sin(10⁴⁰⁰)`: `+∞` is not in the carrier of `Sin`. A NaN
+    // part from the host is still NaN.
     const machine = new ComputeEngine();
     machine.precision = 'machine';
     const spy = jest.spyOn(console, 'assert');
     try {
-      expect(machine.parse('\\sin(10^{400}+i)').N().isNaN).toBe(true);
+      expect(machine.parse('\\sin(10^{400}+i)').N().toString()).toBe(
+        machine.parse('\\sin(10^{400})').N().toString()
+      );
+      expect(machine.parse('\\sin(10^{400}+i)').N().operator).toBe('Error');
+      expect(machine.number({ re: Infinity, im: NaN }).isNaN).toBe(true);
+      expect(machine.number({ re: NaN, im: 1 }).isNaN).toBe(true);
       expect(spy.mock.calls.filter(([condition]) => !condition)).toEqual([]);
     } finally {
       spy.mockRestore();

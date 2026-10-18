@@ -436,12 +436,15 @@ export function canonicalInvisibleOperator(
       const [a, b] = significant;
       // A magnitude is a bare number or a measurement `a ± b`.  A parenthesised
       // measurement — `(5.1\pm0.2)\,\mathrm{cm}` — arrives wrapped in a
-      // single-argument `Delimiter`, so look through it.
+      // single-argument `Delimiter`, so look through it.  A parenthesised sum
+      // — `(1+\pi)\,\mathrm{m}`, the serialization of a quantity with a sum
+      // magnitude — is a magnitude too.
       const unwrap = (x: typeof a) =>
         isFunction(x, 'Delimiter') && x.nops === 1 ? x.op1 : x;
       const isMagnitude = (x: typeof a) => {
         const u = unwrap(x);
-        return isNumber(u) || isFunction(u, 'Measurement');
+        if (isNumber(u) || isFunction(u, 'Measurement')) return true;
+        return u !== x && (isFunction(u, 'Add') || isFunction(u, 'Subtract'));
       };
       // The unit is boxed resolve-only: a unit name is not a variable, so a
       // name with no definition is not declared in the current scope.

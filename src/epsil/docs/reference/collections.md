@@ -383,7 +383,7 @@ An index that is provably not an integer (`2.5`, `3/2`, `5 + √17`), as a scala
 
 ### chunk
 
-MathJSON `Chunk` · `((S, integer) -> list<string> where S: string) & ((collection, integer) -> list<list>)`
+MathJSON `Chunk` · `((S, integer) -> list<string> where S: string) & ((indexed_collection, integer) -> list<list>)`
 
 Split the collection into `k` nearly equal-sized groups. See `Partition` for splitting into fixed-size chunks.
 
@@ -394,7 +394,7 @@ chunk([1, 2, 3, 4, 5, 6], 3)
 
 ### chunkBy
 
-MathJSON `ChunkBy` · `((S, key: (character) any -> unknown) -> list<string> where S: string) & ((collection<T>, key: (T) any -> unknown) -> list<list<T>> where T)`
+MathJSON `ChunkBy` · `((S, key: (character) any -> unknown) -> list<string> where S: string) & ((indexed_collection<T>, key: (T) any -> unknown) -> list<list<T>> where T)`
 
 Split the collection into maximal runs of consecutive elements over which the key function yields the same value.
 
@@ -584,7 +584,7 @@ drop([1, 2, 3, 4, 5], -2)
 
 ### dropWhile
 
-MathJSON `DropWhile` · `(collection<T>, predicate: (T) any -> boolean) -> collection where T`
+MathJSON `DropWhile` · `(indexed_collection<T>, predicate: (T) any -> boolean) -> indexed_collection where T`
 
 Return the collection with its leading elements for which the predicate returns True removed; the remaining elements are returned unfiltered.
 
@@ -724,7 +724,7 @@ filter([1, 2, 3, 4, 5, 6], x => x % 2 == 0)
 
 ### find
 
-MathJSON `Find` · `(collection<T>, predicate: (T) any -> boolean) -> any where T`
+MathJSON `Find` · `(indexed_collection<T>, predicate: (T) any -> boolean) -> any where T`
 
 Return the first element of the collection satisfying the predicate, or Nothing if none found.
 
@@ -1223,7 +1223,7 @@ Pair(1, 2)
 
 ### partition
 
-MathJSON `Partition` · `(collection<T>, ((T) any -> boolean) | integer, integer?) -> list<list<T>> where T`
+MathJSON `Partition` · `(indexed_collection<T>, ((T) any -> boolean) | integer, integer?) -> list<list<T>> where T`
 
 Partition a collection into consecutive chunks each of size `n`; the trailing chunk may be shorter when `n` does not divide the length.
 
@@ -1296,7 +1296,7 @@ pointZ((3, 4, 5))
 
 ### position
 
-MathJSON `Position` · `(collection<T>, predicate: (T) any -> boolean) -> list<integer> where T`
+MathJSON `Position` · `(indexed_collection<T>, predicate: (T) any -> boolean) -> list<integer> where T`
 
 Return a list of indexes of elements in the collection satisfying the predicate.
 
@@ -1530,7 +1530,7 @@ rotateRight([1, 2, 3, 4])
 
 ### scan
 
-MathJSON `Scan` · `(collection<T>, reducer: (unknown, T) any -> unknown, initial: value?) -> indexed_collection where T`
+MathJSON `Scan` · `(indexed_collection<T>, reducer: (unknown, T) any -> unknown, initial: value?) -> indexed_collection where T`
 
 Return the cumulative fold of a collection: a same-length collection whose k-th element is the running result of applying a binary function left to right (optionally seeded by an initial value).
 
@@ -1743,7 +1743,7 @@ take([1, 2, 3, 4, 5], -2)
 
 ### takeWhile
 
-MathJSON `TakeWhile` · `(collection<T>, predicate: (T) any -> boolean) -> collection where T`
+MathJSON `TakeWhile` · `(indexed_collection<T>, predicate: (T) any -> boolean) -> indexed_collection where T`
 
 Return the leading elements of the collection for which the predicate returns True, stopping at the first element that does not.
 

@@ -678,7 +678,7 @@ MathJSON `SVD` · `(matrix) -> tuple`
 Singular value decomposition of a matrix.
 
 ```epsil
-svd([[3, 0], [0, 4]])
+N(svd([[3, 0], [0, 4]]))
 // ➔ ([[0,1],[1,0]], [[4,0],[0,3]], [[0,1],[1,0]])
 ```
 

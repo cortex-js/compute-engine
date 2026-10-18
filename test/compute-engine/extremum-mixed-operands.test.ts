@@ -38,8 +38,8 @@ describe('Max/Min of a scalar and a collection on the interval target', () => {
     const out = r.run!(
       Object.fromEntries(Object.entries(vars).map(([k, v]) => [k, lift(v)]))
     ) as unknown as { value?: Interval } & Interval;
-    // An ordinary answer wraps its interval; the absence marker is a bare
-    // interval of NaN bounds.
+    // An ordinary answer wraps its interval; an absent value is
+    // `{ kind: 'empty' }`, which carries no interval and is returned as it is.
     return out.value ?? out;
   }
 
@@ -77,11 +77,11 @@ describe('Max/Min of a scalar and a collection on the interval target', () => {
     expect(run(['Max', 0, 'L'], { L: [] })).toEqual(point(0));
     expect(interpreted(['Min', 1, 'L'], { L: ['List'] })).toBe(1);
     // A lone empty list is still the absence marker.
-    expect(run(['Min', 'L'], { L: [] }).lo).toBeNaN();
+    expect(run(['Min', 'L'], { L: [] })).toEqual({ kind: 'empty' });
   });
 
   test('a NaN element absorbs', () => {
-    expect(run(['Min', 1, 'L'], { L: [NaN, 2] }).lo).toBeNaN();
+    expect(run(['Min', 1, 'L'], { L: [NaN, 2] })).toEqual({ kind: 'empty' });
     expect(interpreted(['Min', 1, 'L'], { L: ['List', 'NaN', 2] })).toBeNaN();
   });
 
@@ -120,7 +120,7 @@ describe('Max/Min of a scalar and a collection on the interval target', () => {
     expect(run(json, { L: [4, 3], M: [5, -1] })).toEqual(point(-1));
     expect(run(json, { L: [], M: [5, -1] })).toEqual(point(-1));
     expect(run(json, { L: [4, 3], M: [] })).toEqual(point(3));
-    expect(run(json, { L: [], M: [] }).lo).toBeNaN();
+    expect(run(json, { L: [], M: [] })).toEqual({ kind: 'empty' });
     expect(interpreted(json, { L: ['List'], M: ['List', 5, -1] })).toBe(-1);
     expect(interpreted(json, { L: ['List'], M: ['List'] })).toBeNaN();
   });

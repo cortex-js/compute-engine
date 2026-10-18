@@ -346,7 +346,7 @@ describe('R3 — length policy (strict, lifted regime)', () => {
 // R4 / R4′ — the no-match cell and the absent-condition cell
 //
 
-describe('R4 — the no-match cell is NaN, uniformly', () => {
+describe('R4 — the no-match cell follows the type of its position', () => {
   test('no default clause: unmatched positions are NaN', () => {
     const ce = engine();
     const r = ce
@@ -363,12 +363,72 @@ describe('R4 — the no-match cell is NaN, uniformly', () => {
     expect(cells(r)).toEqual(['NaN', 'NaN', 'NaN']);
   });
 
-  test('the marker is uniform, never type-directed (string arms too)', () => {
+  // User decision 2026-10-17: a position that no clause selects holds the
+  // absence marker of the type of the position, as `When` masks a cell:
+  // `NaN` for a number, `Missing` for anything else (a string, a point).
+  // Before, the marker was `NaN` whatever the arms were.
+  test('a string arm masks to Missing', () => {
     const ce = engine();
     const r = ce
       .box(['Which', ['List', 'True', 'False'], { str: 'hot' }])
       .evaluate();
-    expect(cells(r)).toEqual(['"hot"', 'NaN']);
+    expect(cells(r)).toEqual(['"hot"', '"Missing"']);
+  });
+
+  test('a point arm masks to Missing, as When and the scalar forms do', () => {
+    const ce = engine();
+    const cond = ['Less', ['List', 1, 5], 3];
+    const which = ce.box(['Which', cond, ['Tuple', 1, 2]]).evaluate();
+    const when = ce.box(['When', ['Tuple', 1, 2], cond]).evaluate();
+    expect(cells(which)).toEqual(['(1, 2)', '"Missing"']);
+    expect(cells(when)).toEqual(['(1, 2)', '"Missing"']);
+    expect(
+      ce
+        .box(['Which', ['Less', 5, 3], ['Tuple', 1, 2]])
+        .evaluate()
+        .toString()
+    ).toBe('"Missing"');
+    expect(
+      ce
+        .box(['When', ['Tuple', 1, 2], ['Less', 5, 3]])
+        .evaluate()
+        .toString()
+    ).toBe('"Missing"');
+    // The else-less `If` is the same selection.
+    const ifForm = ce.box(['If', cond, ['Tuple', 1, 2]]).evaluate();
+    expect(cells(ifForm)).toEqual(['(1, 2)', '"Missing"']);
+  });
+
+  test('a number arm masks to NaN in both operators', () => {
+    const ce = engine();
+    const cond = ['Less', ['List', 1, 5], 3];
+    expect(cells(ce.box(['Which', cond, 7]).evaluate())).toEqual(['7', 'NaN']);
+    expect(cells(ce.box(['When', 7, cond]).evaluate())).toEqual(['7', 'NaN']);
+  });
+
+  test('a number arm beside a point arm masks to Missing', () => {
+    const ce = engine();
+    const r = ce
+      .box([
+        'Which',
+        ['Less', ['List', 1, 5, 9], 3],
+        7,
+        ['Greater', ['List', 1, 5, 9], 8],
+        ['Tuple', 1, 2],
+      ])
+      .evaluate();
+    expect(cells(r)).toEqual(['7', '"Missing"', '(1, 2)']);
+    expect(
+      r.type.matches(
+        ce.box([
+          'Which',
+          ['Less', ['List', 1, 5, 9], 3],
+          7,
+          ['Greater', ['List', 1, 5, 9], 8],
+          ['Tuple', 1, 2],
+        ]).type
+      )
+    ).toBe(true);
   });
 
   test('If without an else branch yields NaN, not Nothing (positions preserved)', () => {
@@ -765,17 +825,15 @@ describe('type handler', () => {
     // (tensor-unification design §D3 rule 2) never claims a shape for a
     // heterogeneous cell population — so the declared type must not either,
     // or it promises a shape the evaluated value can never carry.
+    // The no-match cell of a string arm is `Missing` (user decision
+    // 2026-10-17), so the element type is `missing | string`.
     const e = ce.box(['Which', ['List', 'True', 'False'], { str: 'hot' }]);
-    expect(e.type.toString()).toBe('list<number | string>');
-    expect(e.type.matches(parseType('list<number | string^2>'))).toBe(false);
+    expect(e.type.toString()).toBe('list<missing | string>');
+    expect(e.type.matches(parseType('list<missing | string^2>'))).toBe(false);
 
     const v = e.evaluate();
-    expect(cells(v)).toEqual(['"hot"', 'NaN']);
-    // The evaluated cell is narrower than the declared claim: the
-    // finite-by-default numeric flip gave the NaN marker its own tier, so the
-    // NaN CELL contributes `nan` where the `Which` handler's default arm still
-    // claims the top type `number`.
-    expect(v.type.toString()).toBe('list<nan | string>');
+    expect(cells(v)).toEqual(['"hot"', '"Missing"']);
+    expect(v.type.toString()).toBe('list<missing | string>');
     // The invariant this case used to break.
     expect(v.type.matches(e.type)).toBe(true);
   });

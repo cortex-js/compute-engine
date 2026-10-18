@@ -1906,10 +1906,13 @@ export interface LanguageTarget<
 }
 
 /**
- * What a compiled `interval-js` runner returns: an `IntervalResult` — or a
- * bare `Interval`, which is what a constant-valued expression produces — for
- * a scalar expression, and for a collection-valued one (a comprehension, a
- * list of points) an ARRAY of these, nested as the collection is. The
+ * What a compiled `interval-js` runner returns: an `IntervalResult` for a
+ * scalar expression, and for a collection-valued one (a comprehension, a
+ * list of points) an ARRAY of these, nested as the collection is. The runner
+ * never returns a bare `Interval`: it wraps the bare enclosure of a constant
+ * or of a bare variable as `{ kind: 'interval', value }`. The `Interval`
+ * member stays in this union so that the code of a caller that also accepts
+ * it still type-checks. The
  * interval domain is "one interval per quantity"; a collection is that many
  * quantities, so it is an array of them rather than one interval (user
  * ruling 2026-08-22, confirming what comprehension roots already produced).
@@ -2457,10 +2460,9 @@ export type CompiledValue =
  *
  * Target-dependent, because `interval-js` does not produce ordinary values at
  * all: its runner answers with an {@link IntervalResult} — a tagged union
- * (`{kind: 'interval', value: {lo, hi}}`, `{kind: 'empty'}`, …) — or with a
- * BARE {@link Interval} (`{lo, hi}`), which is what a constant-valued
- * expression comes back as, since it is built directly as a point interval.
- * Neither is a number, a boolean or an array of them. Folding them into
+ * (`{kind: 'interval', value: {lo, hi}}`, `{kind: 'empty'}`, …), a constant
+ * included — or with an array of them for a collection. Neither is a number,
+ * a boolean or an array of them. Folding them into
  * {@link CompiledValue} would force every ordinary caller to narrow past
  * interval shapes that a `javascript` runner can never return, so the default
  * selects on the target name instead. This mirrors the concrete typing

@@ -306,8 +306,8 @@ describe('Tycho item 269: CSE and loop-invariant hoisting in an interval Sum', (
     // Empty range: the identity, whatever `x` is (the radical of a negative
     // `x + 1` is never evaluated).
     expect(r.run({ x: { lo: -10, hi: -9 }, m: { lo: 0, hi: 0 } })).toEqual({
-      lo: 0,
-      hi: 0,
+      kind: 'interval',
+      value: { lo: 0, hi: 0 },
     });
     const structural = compileStructural(latex);
     const args = { x: { lo: 3, hi: 3.5 }, m: { lo: 5, hi: 5 } };

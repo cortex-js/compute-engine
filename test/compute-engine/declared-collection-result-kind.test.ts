@@ -42,7 +42,7 @@ const ADD = ['Function', ['Add', 'a', 'b'], 'a', 'b'];
 const OPERATORS: [string, (s: MathJson) => MathJson, boolean][] = [
   ['Map', (s) => ['Map', DOUBLE, s], true],
   ['Filter', (s) => ['Filter', s, GREATER_THAN_ONE], true],
-  ['Scan', (s) => ['Scan', s, ADD], true],
+  ['Scan', (s) => ['Scan', s, ADD], false],
   ['Take', (s) => ['Take', s, 2], false],
   ['Drop', (s) => ['Drop', s, 1], false],
   ['Reverse', (s) => ['Reverse', s], false],
@@ -85,9 +85,16 @@ describe('Collection operators over a symbol declared with an abstract collectio
           const name = declared(declaration, value);
           if (valueName === 'set' && !acceptsSet) {
             // The operator requires an indexed source: both routes answer
-            // the same type error about the set.
-            expect(ce.box(make(name)).evaluate().toString()).toEqual(
-              ce.box(make(value)).evaluate().toString()
+            // the same type error about the set. A lazy operator (`Scan`)
+            // over the literal set keeps the refused operand in place,
+            // `Scan(Error(…), f)`, and its evaluation over the symbol is
+            // the error itself: compare the errors.
+            const refusal = (x: ReturnType<typeof ce.box>) =>
+              x.operator === 'Error'
+                ? x
+                : (x.ops?.find((op) => op.operator === 'Error') ?? x);
+            expect(refusal(ce.box(make(name)).evaluate()).toString()).toEqual(
+              refusal(ce.box(make(value)).evaluate()).toString()
             );
             return;
           }

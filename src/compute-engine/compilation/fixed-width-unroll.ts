@@ -514,8 +514,8 @@ export function readsCallerSource(
  * `List` of provably scalar elements, or a literal `Range` when `ranges` is
  * set, through every head that applies element-wise over such a list and
  * keeps its width — the arithmetic and function heads, the relations, a
- * `Which`/`If` in its element-wise mode, a `PointList` zipped from columns
- * ({@link indexedOperands} lists them and the operand mix each admits).
+ * `Which`/`If` in its element-wise mode, a `When` over a list of booleans,
+ * a `PointList` zipped from columns ({@link indexedOperands} lists them and the operand mix each admits).
  * `undefined` for any other operand: a declared width is not read, because
  * a value handed to the compiled code through `vars` is never checked
  * against its declared type. Read by the column projection
@@ -1172,6 +1172,7 @@ const REWRITTEN_HEADS: ReadonlySet<string> = new Set([
   'Comprehension',
   'Which',
   'If',
+  'When',
   'Abs',
   'Norm',
 ]);
@@ -1367,7 +1368,7 @@ function indexInto(
   // caller-supplied code (`readsCallerSource`) could then run a different
   // number of times, so such a selection is left alone.
   if (
-    SELECTION_HEADS.has(e.operator) &&
+    (SELECTION_HEADS.has(e.operator) || e.operator === 'When') &&
     e.ops.some((op) => readsCallerSource(op, options))
   )
     return undefined;
@@ -1443,10 +1444,17 @@ function isSelectionScalar(op: Expression): boolean {
  *   `Which([a, b, c] < 2, 1, True, 0)[2]` is `0` (the cell `NaN < 2` is
  *   `False`) where the scalar `Which(b < 2, 1, True, 0)` is `Missing`, the
  *   undecided-condition answer every scalar branch gives. The rewrite gives
- *   the scalar answer. A selection with NO default clause and a point arm
- *   is not walked: a position no clause selects is `NaN` in the element-wise
- *   mode, while a scalar selection with no default answers `Missing`, which
- *   is the same value only where the selection is numeric.
+ *   the scalar answer. A selection with NO default clause is walked too: a
+ *   position no clause selects is `NaN` in the element-wise mode when every
+ *   arm is numeric and `Missing` otherwise (`noMatchCell`,
+ *   `library/control-structures.ts`), and the scalar selection answers
+ *   `Missing`, which every target spells `NaN` for a number;
+ * - `When(value, cond)` whose condition is a list of booleans: the
+ *   interpreter masks each position by its cell, and a scalar or point value
+ *   ({@link isSelectionScalar}) is repeated at every position while a list
+ *   value is read at each. A masked position is `NaN` for a number and
+ *   `Missing` for a point, as the scalar `When` answers. Both operands must
+ *   be pure, as for `Which`.
  */
 function indexedOperands(
   e: Expression & FunctionInterface
@@ -1466,15 +1474,12 @@ function indexedOperands(
   if (SELECTION_HEADS.has(head)) {
     if (e.nops < 2 || isSelectionScalar(e.op1)) return undefined;
     if (!e.ops.every((op) => op.isPure === true)) return undefined;
-    const hasDefault =
-      head === 'If'
-        ? e.nops === 3
-        : e.nops % 2 === 0 && isSymbol(e.ops[e.nops - 2], 'True');
-    if (
-      !hasDefault &&
-      e.ops.some((op, i) => i % 2 === 1 && isPointElementType(op.type.type))
-    )
+    return new Set(e.ops.filter((op) => !isSelectionScalar(op)));
+  }
+  if (head === 'When') {
+    if (e.nops !== 2 || !e.op2.type.matches('indexed_collection<boolean>'))
       return undefined;
+    if (!e.ops.every((op) => op.isPure === true)) return undefined;
     return new Set(e.ops.filter((op) => !isSelectionScalar(op)));
   }
   return undefined;

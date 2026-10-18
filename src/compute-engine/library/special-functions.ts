@@ -116,6 +116,7 @@ import {
   expIntegralEiComplex,
 } from '../numerics/numeric-complex.js';
 import { isShadowedSymbol, shadowsLibraryName } from '../library-shadowing.js';
+import { guardDigitsN } from './exact-operands-under-n.js';
 
 /**
  * Tier-2 numeric kernels for special functions (ROADMAP item 4).
@@ -279,7 +280,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       nanBehavior: 'propagate',
       type: (_ops, context) =>
         BoxedType.forResult('number', context.engine._typeResolver),
-      evaluate: ([z], { numericApproximation, engine }) => {
+      evaluate: guardDigitsN(([z], { numericApproximation, engine }) => {
         // A `Measurement` argument: lnΓ(a ± σ) is lnΓ(a) ± |ψ(a)|·σ
         // (`measurementUnaryByHead`).
         const m = measurementUnaryByHead(engine, 'LogGamma', z);
@@ -327,7 +328,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
               logGammaComplex
             )
           : undefined;
-      },
+      }),
     },
 
     BarnesG: {
@@ -347,7 +348,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       nanBehavior: 'propagate',
       type: (_ops, context) =>
         BoxedType.forResult('number', context.engine._typeResolver),
-      evaluate: ([z], { numericApproximation, engine }) => {
+      evaluate: guardDigitsN(([z], { numericApproximation, engine }) => {
         if (isNumber(z) && !z.isComplex && z.isInteger && z.isNonPositive)
           return floatIfFloatOperand([z], engine.Zero);
         const infinite = infiniteGammaFamilyValue(z, engine);
@@ -382,7 +383,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
           undefined,
           barnesGComplex
         );
-      },
+      }),
     },
 
     LogBarnesG: {
@@ -398,7 +399,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       nanBehavior: 'propagate',
       type: (_ops, context) =>
         BoxedType.forResult('number', context.engine._typeResolver),
-      evaluate: ([z], { numericApproximation, engine }) => {
+      evaluate: guardDigitsN(([z], { numericApproximation, engine }) => {
         if (isNumber(z) && !z.isComplex && z.isInteger && z.isNonPositive)
           return engine.NegativeInfinity;
         const infinite = infiniteGammaFamilyValue(z, engine);
@@ -435,7 +436,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
           undefined,
           logBarnesGComplex
         );
-      },
+      }),
     },
 
     EllipticK: {
@@ -465,7 +466,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
           boundedInverseTrigTypeOnTypes(ops, ELLIPTIC_K_DOMAIN),
           context.engine._typeResolver
         ),
-      evaluate: ([m], { numericApproximation, engine }) => {
+      evaluate: guardDigitsN(([m], { numericApproximation, engine }) => {
         // K(1) = +∞ exactly (Fungrim 45b157)
         if (isNumber(m) && !m.isComplex && m.isSame(1))
           return engine.PositiveInfinity;
@@ -490,7 +491,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
               ellipticKComplex
             )
           : undefined;
-      },
+      }),
     },
 
     EllipticE: {
@@ -529,7 +530,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
             : 'number',
           context.engine._typeResolver
         ),
-      evaluate: (ops, { numericApproximation, engine }) => {
+      evaluate: guardDigitsN((ops, { numericApproximation, engine }) => {
         if (ops.length === 2) {
           // Incomplete E(φ|m): E(0|m) = 0 exactly
           const [phi, m] = ops;
@@ -571,7 +572,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
               ellipticEComplex
             )
           : undefined;
-      },
+      }),
     },
 
     EllipticF: {
@@ -691,13 +692,13 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
           return BoxedType.forResult('real', context.engine._typeResolver);
         return BoxedType.forResult('number', context.engine._typeResolver);
       },
-      evaluate: (ops, { numericApproximation, engine }) => {
+      evaluate: guardDigitsN((ops, { numericApproximation, engine }) => {
         const args = ops.length === 1 ? [engine.One, ops[0]] : [...ops];
         const infinite = agmValueAtInfinity(args[0], args[1], engine);
         if (infinite !== undefined) return infinite;
         if (!shouldNumericize(numericApproximation, ...ops)) return undefined;
         return applyN(args, agm, bigAgm, agmComplex);
-      },
+      }),
     },
 
     Hypergeometric2F1: {
@@ -718,7 +719,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
           numericTypeHandlerOnTypes(ops),
           context.engine._typeResolver
         ),
-      evaluate: (ops, { numericApproximation, engine }) => {
+      evaluate: guardDigitsN((ops, { numericApproximation, engine }) => {
         // ₂F₁(a, b; c; 0) = 1 exactly
         const z = ops[3];
         if (isNumber(z) && !z.isComplex && z.isSame(0))
@@ -733,7 +734,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
               (a, b, c, z) => hypergeometric2F1Complex(a, b, c, z)
             )
           : undefined;
-      },
+      }),
     },
 
     AppellF1: {
@@ -825,7 +826,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         }
         return BoxedType.forResult(t, context.engine._typeResolver);
       },
-      evaluate: (ops, { numericApproximation, engine }) => {
+      evaluate: guardDigitsN((ops, { numericApproximation, engine }) => {
         const [s, z] = ops;
         // `Liₛ(0) = 0` for EVERY order, an infinite one included, so it is
         // decided before the infinity hold below.
@@ -883,7 +884,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
         return shouldNumericize(numericApproximation, s, z)
           ? applyN([s, z], polylogOrderReal, undefined, polylogOrderComplex)
           : undefined;
-      },
+      }),
     },
 
     StieltjesGamma: {
@@ -1092,7 +1093,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
           numericTypeHandlerOnTypes(ops),
           context.engine._typeResolver
         ),
-      evaluate: (ops, { numericApproximation, engine }) => {
+      evaluate: guardDigitsN((ops, { numericApproximation, engine }) => {
         // ₁F₁(a; b; 0) = 1 exactly
         const z = ops[2];
         if (isNumber(z) && !z.isComplex && z.isSame(0))
@@ -1107,7 +1108,7 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
               hypergeometric1F1Complex
             )
           : undefined;
-      },
+      }),
     },
 
     JacobiTheta: {

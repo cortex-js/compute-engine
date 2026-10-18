@@ -2969,6 +2969,18 @@ export function serializeEpsil(
   // must keep the generic `Block(a, b)` function spelling (Phase 4 owns the
   // nested statement form). A 0- or 1-element `Block` has no statement-list
   // spelling, so it too falls through to normal serialization.
+  //
+  // One exception: a 1-element `Block` whose only operand is a `Block` is the
+  // program wrapper of a program whose only statement is a block
+  // (`do { … }`). The parser adds that wrapper so that the block is a nested
+  // scope, so the program is written as the inner block alone, which parses
+  // back to the same wrapped shape.
+  if (
+    operator(expr) === 'Block' &&
+    nops(expr) === 1 &&
+    operator(operand(expr, 1)) === 'Block'
+  )
+    return serializeExpression(operand(expr, 1)).serialize(0);
   if (operator(expr) === 'Block' && nops(expr) >= 2)
     return fmt
       .stack(...mapArgs<FormattingBlock>(expr, serializeExpression))

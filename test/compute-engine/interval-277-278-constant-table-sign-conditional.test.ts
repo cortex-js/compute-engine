@@ -112,13 +112,15 @@ describe('interval-js: the constant table is built once per artifact', () => {
       '',
       'const _k1 = [{ lo: 1, hi: 2 }, { lo: 3, hi: 4 }];'
     ) as unknown as (v?: unknown) => any;
+    // Each element comes back as an `interval` result, the shape the runner
+    // gives every scalar at every depth.
     const table = [
-      { lo: 1, hi: 2 },
-      { lo: 3, hi: 4 },
+      { kind: 'interval', value: { lo: 1, hi: 2 } },
+      { kind: 'interval', value: { lo: 3, hi: 4 } },
     ];
     const first = run({});
     expect(first.value).toEqual(table);
-    first.value[0].lo = 999;
+    first.value[0].value.lo = 999;
     first.value.push({ lo: 0, hi: 0 });
     expect(run({}).value).toEqual(table);
   });

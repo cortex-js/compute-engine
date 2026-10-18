@@ -820,17 +820,25 @@ export class Parser {
    * Returns `null` when there is no expression at all (an empty program, or an
    * empty string interpolation); the caller maps that to `Nothing` (top level)
    * or drops it (interpolation).
+   *
+   * With `options.program` (the whole source of a program, not an
+   * interpolation or a script run), a program whose only statement is a
+   * `Block` (`do { … }`) is wrapped in a second `Block`. The outer `Block` is
+   * the program and the inner one is a nested scope, as it is when the block
+   * comes after another statement. Without the wrapper, the program and the
+   * block would be the same `Block` node, and the block's declarations would
+   * be top-level declarations.
    */
-  parseProgram(): MathJsonExpression | null {
+  parseProgram(options?: { program?: boolean }): MathJsonExpression | null {
     try {
-      return this.parseProgramUnchecked();
+      return this.parseProgramUnchecked(options?.program === true);
     } catch (error) {
       if (error === EXPRESSION_NESTING_ABORT) return null;
       throw error;
     }
   }
 
-  private parseProgramUnchecked(): MathJsonExpression | null {
+  private parseProgramUnchecked(program: boolean): MathJsonExpression | null {
     // An optional shebang at the very start.
     if (this.current.type === 'SHEBANG') this.advance();
 
@@ -866,7 +874,8 @@ export class Parser {
     }
 
     if (exprs.length === 0) return null;
-    if (exprs.length === 1) return exprs[0];
+    if (exprs.length === 1 && !(program && operator(exprs[0]) === 'Block'))
+      return exprs[0];
 
     const first = exprs[0] as { sourceOffsets?: [number, number] };
     const last = exprs[exprs.length - 1] as {

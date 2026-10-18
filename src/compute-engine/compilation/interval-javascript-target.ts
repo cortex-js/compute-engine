@@ -397,9 +397,14 @@ function intervalArrayCode(codes: readonly string[]): string {
  * (the free plot variable in `[x + 1, x − 1]`, which every scalar position on
  * this target already reads as an interval)? An expression PROVABLY of
  * another sort — a boolean, a string, a point — has none.
+ *
+ * A written `Missing` has one: it compiles to the absent value `{ kind:
+ * 'empty' }`, as `Undefined` does. Its type is `missing`, not `number`, so
+ * without this test `[1, Missing]` declined where `[1, Undefined]` compiled.
  */
 function hasIntervalReading(x: Expression): boolean {
   if (x.type.matches('number') || isProvablyNumericListOperand(x)) return true;
+  if (isSymbol(x, 'Missing')) return true;
   const t = compilationType(x);
   return t === 'unknown' || t === 'any';
 }
@@ -941,9 +946,10 @@ function literalPointOps(
  * holds exactly what that lowering produces: a bare `Interval` for a constant
  * or an input, an `IntervalResult` wrapper (`{ kind, value }`) for a kernel
  * result. The wrapper is kept, not unwrapped, because that is what the elements
- * of a comprehension root hold as well, both spellings are members of
- * `IntervalValue`, and unwrapping would discard the `partial`/`jump` report a
- * coordinate carries.
+ * of a comprehension root hold as well, and unwrapping would discard the
+ * `partial`/`jump` report a coordinate carries. The runner wraps a bare
+ * element on the way out (`freshIntervalValue`), so the caller sees an
+ * `IntervalResult` for every coordinate.
  *
  * A point declines in two cases, and then compiles the ordinary way — which
  * refuses it, exactly as before this lowering existed. A coordinate that is not
@@ -4871,10 +4877,39 @@ function isPlainInterval(value: unknown): value is Interval {
  * collection-valued root answers, whether it is the result itself or the
  * value a kinded wrapper carries. A number, a string and a nested plain value
  * copy through as they are.
+ *
+ * The copy also gives every scalar of the result the one shape of the `run`
+ * contract, at every depth of an array: a kinded `IntervalResult`, never a
+ * bare `{ lo, hi }`, and `{ kind: 'empty' }` for an absent value.
  */
 function freshIntervalValue(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(freshIntervalValue);
   if (!isRecord(value)) return value;
+  // A bare enclosure `{ lo, hi }` — what the compiled code gives for a
+  // constant, a bare variable or a block that returns a local — is wrapped
+  // as the `{ kind: 'interval', value }` result that a computed value has. A
+  // bare enclosure whose lower bound is NaN is this target's absent marker
+  // (see `isAbsent` in `interval/comparison.ts`) and becomes
+  // `{ kind: 'empty' }`, the value the compiled code and the interpreter
+  // fallback give where there is no value.
+  if (
+    !('kind' in value) &&
+    typeof value.lo === 'number' &&
+    typeof value.hi === 'number'
+  ) {
+    if (Number.isNaN(value.lo)) return { kind: 'empty' };
+    return { kind: 'interval', value: { lo: value.lo, hi: value.hi } };
+  }
+  // The absent marker can also arrive inside a kinded wrapper — an operation
+  // over an absent operand answers `{ kind: 'interval', value }` whose
+  // enclosure is NaN, a restriction of it a `partial` one. `isAbsent` reads
+  // both as absent, and the runner gives them as `empty` too.
+  if (
+    (value.kind === 'interval' || value.kind === 'partial') &&
+    isPlainInterval(value.value) &&
+    Number.isNaN(value.value.lo)
+  )
+    return { kind: 'empty' };
   const copy: Record<string, unknown> = { ...value };
   if (isPlainInterval(copy.value)) copy.value = { ...copy.value };
   else if (Array.isArray(copy.value))
@@ -4920,8 +4955,13 @@ export class ComputeEngineIntervalFunction extends Function {
         try {
           // Process input arguments - convert to interval format
           const processedArgs = argumentsList.map(processInput);
+          // Without a constant table no result shares an object with a
+          // later call, but `freshIntervalValue` also wraps a bare
+          // enclosure, so it runs on both routes.
           if (inner === undefined)
-            return super.apply(thisArg, [this.IA, ...processedArgs]);
+            return freshIntervalValue(
+              super.apply(thisArg, [this.IA, ...processedArgs])
+            );
           return freshIntervalValue(inner(...processedArgs));
         } catch {
           // Runtime error (e.g., missing _IA method) — return "entire"

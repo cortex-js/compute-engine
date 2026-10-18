@@ -915,11 +915,11 @@ describe('CANONICAL FORMS', () => {
         expr = ['Complex', '22975850700614579948873711', 4]; // bigIntRe
         expComplexNum(expr, 'complex');
 
-        // A complex value with an infinite component has infinite magnitude,
-        // so the finite-by-default numeric flip moved it out of `complex` and
-        // into `infinity` (ruling L2(a)).
-        expr = ['Complex', Infinity, 4]; // bigIntRe
-        expComplexNum(expr, 'infinity');
+        // A complex value with an infinite real part and a finite imaginary
+        // part is the real infinity of the sign of its real part (since
+        // 2026-10-18; before, a `Complex` literal typed `infinity`).
+        expr = ['Complex', Infinity, 4];
+        expect(canonNumber(expr).isSame(ce.PositiveInfinity)).toBe(true);
       });
 
       test(`Convert to 'Add', when imaginary arg. is non-numeric`, () => {

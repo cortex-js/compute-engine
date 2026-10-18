@@ -124,6 +124,7 @@ import {
   rangeMeanClosedForm,
   rangeVarianceClosedForm,
 } from './range-closed-form.js';
+import { guardDigitsN } from './exact-operands-under-n.js';
 
 // Geometric mean:
 // Harmonic mean:
@@ -418,7 +419,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           return BoxedType.forResult('real', context.engine._typeResolver);
         return BoxedType.forResult('number', context.engine._typeResolver);
       },
-      evaluate: ([x], { numericApproximation, engine: ce }) => {
+      evaluate: guardDigitsN(([x], { numericApproximation, engine: ce }) => {
         // A `Measurement` argument: erf(a ± σ) is erf(a) ± (2/√π)e^(−a²)·σ
         // (`measurementUnaryByHead`).
         const m = measurementUnaryByHead(ce, 'Erf', x);
@@ -446,7 +447,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           (x) => bigErf(ce, x),
           erfComplex
         );
-      },
+      }),
     },
 
     Erfc: {
@@ -478,7 +479,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           return BoxedType.forResult('real', context.engine._typeResolver);
         return BoxedType.forResult('number', context.engine._typeResolver);
       },
-      evaluate: ([x], { numericApproximation, engine: ce }) => {
+      evaluate: guardDigitsN(([x], { numericApproximation, engine: ce }) => {
         // A `Measurement` argument: erfc(a ± σ) is erfc(a) ± (2/√π)e^(−a²)·σ
         // (`measurementUnaryByHead`).
         const m = measurementUnaryByHead(ce, 'Erfc', x);
@@ -507,7 +508,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           (x) => bigErfc(ce, x),
           (z) => erfComplex(z).neg().add(1)
         );
-      },
+      }),
     },
 
     ErfInv: {
@@ -567,7 +568,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           );
         return BoxedType.forResult('number', context.engine._typeResolver);
       },
-      evaluate: ([x], { numericApproximation, engine: ce }) => {
+      evaluate: guardDigitsN(([x], { numericApproximation, engine: ce }) => {
         if (!isNumber(x)) return undefined;
         if (x.isNaN === true) return ce.NaN;
         // No limit at any infinity: the indeterminate form on both routes
@@ -590,7 +591,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           (x) => erfInv(x),
           (x) => bigErfInv(ce, x)
         );
-      },
+      }),
     },
 
     Erfi: {
@@ -629,7 +630,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           );
         return BoxedType.forResult('number', context.engine._typeResolver);
       },
-      evaluate: ([x], { numericApproximation, engine: ce }) => {
+      evaluate: guardDigitsN(([x], { numericApproximation, engine: ce }) => {
         if (!isNumber(x)) return undefined;
         if (!x.isComplex) {
           // Exact special values, regardless of numericApproximation
@@ -654,7 +655,7 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
           (x) => bigErfi(ce, x),
           erfiComplex
         );
-      },
+      }),
     },
   },
   {

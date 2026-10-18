@@ -112,6 +112,7 @@ import {
   sincComplex,
   sincImaginaryAxis,
 } from '../numerics/sinc-fresnel-complex.js';
+import { guardDigitsN } from './exact-operands-under-n.js';
 
 /**
  * Whether a `Hypot` leg has an infinite magnitude, which makes the hypotenuse
@@ -950,10 +951,11 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
     // functions: Arsinh, Arcosh, Artanh, etc. (not Arcsinh, Arccosh, Arctanh)
     // The "ar" prefix stands for "area", which is mathematically correct
     // since these functions relate to areas on a hyperbola, not arc lengths.
-    // `Arcosh(+∞) = +∞`; `Arcosh(−∞) = ∞ + iπ` follows the `Ln(−∞)`
-    // treatment (symbolic under `evaluate()`, machine complex under
-    // `.N()`); no value at `~oo` (the `Ln(~oo)` ruling — the modulus
-    // diverges in every direction but the limit point does not exist).
+    // `Arcosh(+∞) = +∞`; `Arcosh(−∞) = +∞` as well, as `Ln(−∞)` (the
+    // limit `∞ + iπ` has an infinite real part and a finite imaginary
+    // part, and such a value is the real infinity `+∞`); no value at `~oo`
+    // (the `Ln(~oo)` ruling — the modulus diverges in every direction but
+    // the limit point does not exist).
     Arcosh: {
       ...trigFunction(
         'Arcosh',
@@ -1368,7 +1370,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
           boundedEntireRealType(x),
           context.engine._typeResolver
         ),
-      evaluate: ([x], { numericApproximation, engine: ce }) => {
+      evaluate: guardDigitsN(([x], { numericApproximation, engine: ce }) => {
         if (!isNumber(x)) return undefined;
         if (!x.isComplex) {
           // Exact special values, regardless of numericApproximation
@@ -1392,7 +1394,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
             fresnelSComplex
           )
         );
-      },
+      }),
     },
 
     /** FresnelC(x) = ∫₀ˣ cos(πt²/2) dt — odd function, C(∞) = 1/2 */
@@ -1412,7 +1414,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
           boundedEntireRealType(x),
           context.engine._typeResolver
         ),
-      evaluate: ([x], { numericApproximation, engine: ce }) => {
+      evaluate: guardDigitsN(([x], { numericApproximation, engine: ce }) => {
         if (!isNumber(x)) return undefined;
         if (!x.isComplex) {
           // Exact special values, regardless of numericApproximation
@@ -1436,7 +1438,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
             fresnelCComplex
           )
         );
-      },
+      }),
     },
 
     /**
@@ -1668,10 +1670,9 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       broadcastable: true,
       // Carrier, NaN policy, result and seam: see `SinIntegral` above.
       // The infinite points: `Chi(+∞) = +∞` (Chi(100) = 1.4·10⁴¹) and
-      // `Chi(−∞) = ∞ + iπ` under the principal convention — an infinite
-      // real part with a finite imaginary offset, which no exact number
-      // spells, so `evaluate()` stays symbolic and `.N()` answers the
-      // machine complex (the `Ln(−∞)` treatment).
+      // `Chi(−∞) = +∞`: the principal value tends to `∞ + iπ`, an infinite
+      // real part with a finite imaginary offset, and such a value is the
+      // real infinity `+∞` (as `Ln(−∞)`).
       signature: '(complex | infinity) -> number',
       nanBehavior: 'propagate',
       // On the NON-NEGATIVE extended real line the value is on the extended
@@ -1706,11 +1707,8 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         if (!isNumber(x)) return undefined;
         // Exact special values, regardless of numericApproximation.
         const point = infinitePoint(x);
-        if (point === '+oo') return ce.PositiveInfinity;
-        if (point === '-oo')
-          return numericApproximation
-            ? ce.number(ce.complex(Infinity, Math.PI))
-            : undefined;
+        // `Chi(−∞)` tends to `∞ + iπ`, which is the real infinity `+∞`.
+        if (point === '+oo' || point === '-oo') return ce.PositiveInfinity;
         // No limit at `~oo`: the indeterminate form (`NaN` for an anonymous
         // infinity such as `∞ + i`, a float literal).
         if (point !== undefined) return indeterminateFormAnswer(ce, [x]);
@@ -1890,7 +1888,7 @@ function holdsShadowedPi(ce: IComputeEngine, v: Expression): boolean {
 
 /**
  * The genuine value of a trig-factory head at an in-carrier infinity, or
- * `undefined` when the point has no closed form under the current route.
+ * `undefined` when the point has no closed form.
  * Consulted only from the factory's evaluate seam, AFTER the carrier
  * admission check — so a `~oo` operand (`isPositive`/`isNegative` both
  * undefined) reaches here only for the `complex | infinity` heads, whose
@@ -1905,8 +1903,7 @@ function holdsShadowedPi(ce: IComputeEngine, v: Expression): boolean {
 function nonFiniteTrigValue(
   operator: string,
   x: Expression,
-  ce: IComputeEngine,
-  numericApproximation: boolean | undefined
+  ce: IComputeEngine
 ): Expression | undefined {
   const pos = x.isPositive === true;
   switch (operator) {
@@ -1922,15 +1919,11 @@ function nonFiniteTrigValue(
     case 'Csch':
       return ce.Zero;
     case 'Arcosh':
-      if (pos) return ce.PositiveInfinity;
-      // Arcosh(−∞) = ∞ + iπ — an infinite real part with a finite
-      // imaginary offset, which no exact number spells. `evaluate()`
-      // stays symbolic and only `.N()` numericizes, as a machine complex
-      // (the `Ln(−∞)` treatment; `Arcosh(−2)` already answers
-      // `1.317… + iπ`, so this is the continuation of the same branch).
-      return numericApproximation
-        ? ce.number(ce.complex(Infinity, Math.PI))
-        : undefined;
+      // Arcosh(−∞): the principal branch (`Arcosh(−2)` is `1.317… + iπ`)
+      // tends to `∞ + iπ`, an infinite real part with a finite imaginary
+      // offset. Such a value is the real infinity `+∞` (as `Ln(−∞)`), on
+      // both routes.
+      return ce.PositiveInfinity;
     case 'Artanh':
       // The imaginary asymptotes of the principal branch: the real part
       // of `artanh(x)` tends to 0 as `x → ±∞` and the imaginary part is
@@ -2093,17 +2086,14 @@ function trigFunction(
       // validation would have produced) or an in-carrier infinity, which
       // folds to the head's genuine value at that point on BOTH routes —
       // the values are exact, so folding them under `evaluate()` honors
-      // the exactness contract (the `Erf(±∞) = ±1` precedent). The one
-      // in-carrier point with no exact spelling, `Arcosh(−∞) = ∞ + iπ`,
-      // stays symbolic under `evaluate()` and numericizes under `.N()`
-      // (the `Ln(−∞)` precedent).
+      // the exactness contract (the `Erf(±∞) = ±1` precedent).
       if (isNumber(x) && x.isFinite === false && x.isNaN !== true) {
         const signed = x.isPositive === true || x.isNegative === true;
         const admitted =
           carrier === 'complex | infinity' ||
           (carrier === 'complex | signed_infinity' && signed);
         if (!admitted) return engine.typeError(carrierType, x.type, x);
-        const v = nonFiniteTrigValue(operator, x, engine, numericApproximation);
+        const v = nonFiniteTrigValue(operator, x, engine);
         if (v !== undefined && numericApproximation) return v.N();
         // With a user value of `Pi`, a value that holds π is not returned
         // (`holdsShadowedPi()`).

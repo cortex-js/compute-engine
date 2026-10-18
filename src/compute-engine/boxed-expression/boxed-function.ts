@@ -85,7 +85,11 @@ import {
   topTypeOfTriggers,
 } from './broadcast-lift-type.js';
 import { listedBroadcastCells } from './listed-element.js';
-import { literalMayEraseElement } from './nothing-erasure.js';
+import {
+  literalMayEraseElement,
+  literalWithErasureResolved,
+  literalWithErasureResolvedAsync,
+} from './nothing-erasure.js';
 import {
   MAX_SIZE_EAGER_COLLECTION,
   broadcastLengthMismatch,
@@ -3188,6 +3192,11 @@ export class BoxedFunction
     const capturesEffects = engine._evaluationEffects === undefined;
     if (capturesEffects) engine._evaluationEffects = engine.effects;
     engine._evaluationDepth += 1;
+    // The numeric request of this evaluation, for the collection handlers
+    // it calls, which receive no evaluation options
+    // (`IComputeEngine._numericRequest`).
+    const enclosingNumericRequest = engine._numericRequest;
+    engine._numericRequest = options?.numericApproximation === true;
     try {
       // A deadline is armed only by an enclosing `withTimeLimit` span; work
       // outside a span runs unbounded. Evaluation checkpoints the ambient
@@ -3207,6 +3216,7 @@ export class BoxedFunction
       // evaluated are kept for this evaluation only.
       releaseEagerSourceValues(this);
       engine._evaluationDepth -= 1;
+      engine._numericRequest = enclosingNumericRequest;
       releaseKeptEagerSourceValues(engine);
       if (capturesEffects) engine._evaluationEffects = undefined;
     }
@@ -7733,28 +7743,39 @@ export class BoxedFunction
         // does — gives them this registry and not the one another,
         // concurrent evaluation installed. The context stack of this
         // evaluation is put in place for the same part, for the same reason.
-        // Both are restored before the `await`.
+        // Both are restored before the `await`. The numeric request of this
+        // evaluation is put in its engine slot for the same part
+        // (`IComputeEngine._numericRequest`), and restored before the
+        // `await` too: a collection handler reads it there.
         value = await runWithEvaluationEffects(
           engine,
           effects,
           () => {
-            if (def.evaluateAsync !== undefined)
-              return def.evaluateAsync(declaredOps, opts);
-            // A user function: the body statements are awaited.
-            const applyAwaiting = (
-              def.evaluate as
-                | {
-                    applyAwaiting?: (
-                      xs: ReadonlyArray<Expression>,
-                      o: typeof opts
-                    ) =>
-                      Promise<Expression | undefined> | Expression | undefined;
-                  }
-                | undefined
-            )?.applyAwaiting;
-            return applyAwaiting !== undefined
-              ? applyAwaiting(handlerOps, opts)
-              : def.evaluate?.(handlerOps, opts);
+            const enclosingNumericRequest = engine._numericRequest;
+            engine._numericRequest = numericApproximation;
+            try {
+              if (def.evaluateAsync !== undefined)
+                return def.evaluateAsync(declaredOps, opts);
+              // A user function: the body statements are awaited.
+              const applyAwaiting = (
+                def.evaluate as
+                  | {
+                      applyAwaiting?: (
+                        xs: ReadonlyArray<Expression>,
+                        o: typeof opts
+                      ) =>
+                        | Promise<Expression | undefined>
+                        | Expression
+                        | undefined;
+                    }
+                  | undefined
+              )?.applyAwaiting;
+              return applyAwaiting !== undefined
+                ? applyAwaiting(handlerOps, opts)
+                : def.evaluate?.(handlerOps, opts);
+            } finally {
+              engine._numericRequest = enclosingNumericRequest;
+            }
           },
           contextStack,
           options?._precisionWindow
@@ -8643,12 +8664,12 @@ function evaluateBroadcastLiftsOnce(
   //
   // A list literal with an element that may evaluate to `Nothing` is
   // evaluated too, so that the broadcast walks the elements the list keeps
-  // (`literalMayEraseElement`); for a jump operator under `.N()` it is
-  // evaluated exactly (`erasingLiteralOptions`).
+  // (`literalMayEraseElement`); for a jump operator under `.N()` only its
+  // erasure is resolved (`erasingLiteralOptions`).
   const lifted = ops.map((op) =>
     isBroadcastParticipant(op)
       ? literalMayEraseElement(op)
-        ? (op.evaluate(erasing) ?? op)
+        ? erasingLiteralValue(op, erasing, options)
         : op
       : normalizeLiftedAbsence(op, op.evaluate(operandOptions(options)) ?? op)
   );
@@ -8658,9 +8679,9 @@ function evaluateBroadcastLiftsOnce(
   // reached each cell as a float put the cell on the wrong side of a jump:
   // `Floor([1], 1/3).N()` was `[0.999…]` where `Floor(1, 1/3).N()` is `1`,
   // and `Mod([1], 1/3).N()` was `[1e-21]` where `Mod(1, 1/3).N()` is `0`.
-  return erasing === operandOptions(options)
-    ? lifted
-    : withExactScalarOperands(lifted, ops);
+  return isExactJumpLift(erasing, options)
+    ? withExactScalarOperands(lifted, ops)
+    : lifted;
 }
 
 /** Async mirror of `evaluateBroadcastLiftsOnce`. */
@@ -8680,7 +8701,7 @@ async function evaluateBroadcastLiftsOnceAsync(
     ops.map(async (op) =>
       isBroadcastParticipant(op)
         ? literalMayEraseElement(op)
-          ? ((await op.evaluateAsync(erasing)) ?? op)
+          ? await erasingLiteralValueAsync(op, erasing, options)
           : op
         : normalizeLiftedAbsence(
             op,
@@ -8689,9 +8710,9 @@ async function evaluateBroadcastLiftsOnceAsync(
     )
   );
   // The exact scalar lifts of a jump operator, as in the sync mirror.
-  return erasing === operandOptions(options)
-    ? lifted
-    : withExactScalarOperands(lifted, ops);
+  return isExactJumpLift(erasing, options)
+    ? withExactScalarOperands(lifted, ops)
+    : lifted;
 }
 
 /**
@@ -8710,7 +8731,10 @@ async function evaluateBroadcastLiftsOnceAsync(
  * same way (the condition of an `If` is evaluated as it is), its survivors
  * stay exact, and the broadcast that follows builds its cells from the
  * literal as it is, so each cell's handler applies its jump rule to an exact
- * operand before it approximates the result. (The post-evaluation broadcast
+ * operand before it approximates the result. Only the erasure is resolved,
+ * in fact (`erasingLiteralValue`): an exact evaluation of every survivor
+ * could cost much more than the cells' own approximation, which reads the
+ * exact value only near a jump. (The post-evaluation broadcast
  * of steps 4b and 4t has its own recovery, `exactJumpBroadcastOperands`;
  * the operands returned here never reach it.) For every other operator the
  * approximation of the survivors is kept: the cells need floats, and an
@@ -8727,6 +8751,76 @@ function erasingLiteralOptions(
   )
     return base;
   return { ...base, numericApproximation: false };
+}
+
+/**
+ * The value that `evaluateBroadcastLiftsOnce` lifts for the list literal
+ * `op`, which has an element that may erase, given the options
+ * `erasingLiteralOptions` chose. For a jump operator under `.N()` (the
+ * chosen options are exact), only the erasure of the literal is
+ * resolved (`literalWithErasureResolved`): the elements that may erase are
+ * evaluated, and the others are kept as written, so that the cells are those
+ * of the same literal without the erased elements. An exact evaluation of
+ * the whole literal evaluated every survivor exactly:
+ * `Floor([If(c, 1, Nothing), H]).N()` with `H = Sum(1/k, k, 1, 6000)` took
+ * 7 s, where `Floor([H]).N()` takes 0.1 s. When the erasure cannot be
+ * resolved (a condition with no value yet), the literal is evaluated with
+ * the chosen options.
+ *
+ * The selective resolution applies only to a literal that is transitively
+ * pure (`isTransitivelyPure`). It evaluates the elements that may erase
+ * before the elements that come before them, and an undecided erasure
+ * evaluates the literal a second time. With an impure function `Tick()`
+ * that sets `c` to `False` and returns 1, and `c` set to `True`,
+ * `Floor([Tick(), If(c, 2, Nothing)]).N()` was `[1, 2]` where the literal
+ * has the value `[1]`. Any other literal is evaluated once, in order, with
+ * the chosen options.
+ */
+function erasingLiteralValue(
+  op: Expression,
+  erasing: Partial<EvaluateOptions> | undefined,
+  options: Partial<EvaluateOptions> | undefined
+): Expression {
+  if (isExactJumpLift(erasing, options) && isTransitivelyPure(op)) {
+    const resolved = literalWithErasureResolved(op, erasing);
+    if (resolved !== undefined) return resolved;
+  }
+  return op.evaluate(erasing) ?? op;
+}
+
+/** Async mirror of `erasingLiteralValue`: the elements are evaluated with
+ * `evaluateAsync` (`literalWithErasureResolvedAsync`), so that an element
+ * whose condition needs an operator with only an `evaluateAsync` handler
+ * gets its value. */
+async function erasingLiteralValueAsync(
+  op: Expression,
+  erasing: Partial<EvaluateOptions> | undefined,
+  options: Partial<EvaluateOptions> | undefined
+): Promise<Expression> {
+  if (isExactJumpLift(erasing, options) && isTransitivelyPure(op)) {
+    const resolved = await literalWithErasureResolvedAsync(op, erasing);
+    if (resolved !== undefined) return resolved;
+  }
+  return (await op.evaluateAsync(erasing)) ?? op;
+}
+
+/**
+ * Whether `erasingLiteralOptions` chose the exact options of a jump
+ * operator under `.N()`: the caller asked for a numeric approximation and
+ * the chosen options do not. The test reads the options, not their
+ * identity: with `materialization` set, `operandOptions` returns a new
+ * object at each call, so an identity test with it was always false, and
+ * the exact scalar operands of a jump operator (`withExactScalarOperands`)
+ * were put back for every operator.
+ */
+function isExactJumpLift(
+  erasing: Partial<EvaluateOptions> | undefined,
+  options: Partial<EvaluateOptions> | undefined
+): boolean {
+  return (
+    options?.numericApproximation === true &&
+    erasing?.numericApproximation === false
+  );
 }
 
 /**

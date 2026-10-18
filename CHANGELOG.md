@@ -2,6 +2,106 @@
 
 ### Behavior Changes
 
+- **Compiled code of an assignment whose value is not a plain expression
+  agrees with the interpreter.** `t ≔ (u ≔ s)` compiles as two statements, with
+  `u` a local of the block, on every target; WGSL emitted `t = u = s;` with `u`
+  undeclared. Python declines an assignment whose value is a block
+  (`t ≔ Block(u ≔ s; 2u)`), where it returned the inner block's value (6 where
+  the interpreter gives 7 at `x = 3`). A block whose last statement is a
+  declaration with no initial value (value `Nothing`) declines on every target;
+  JavaScript returns the value of a last declaration that has an initial value
+  (it was a syntax error). On the GPU targets, a nested block that ends with an
+  assignment stores its value in a temporary (it emitted `return float t;`). A
+  block that reads one of its locals before any statement gives it a value
+  (`Block(x ≔ x + 1; 2x)` with `x` undeclared) declines on every target; the
+  targets gave four different wrong values. `compileShader()` declines an
+  assignment to a declared input. Python `compile()` declines a selection whose
+  branch is a block with a value (it returned `None`), and a free-symbol name
+  that is not a Python identifier. On interval-js, `[1, Missing]` compiles as
+  `[1, Undefined]` does.
+
+- **interval-js: one result shape, and `partial` when an arm has no value**
+  (user decision 2026-10-18). The compiled runner gives every scalar as a kinded
+  result: a constant, a bare variable and a block that returns a local give
+  `{ kind: 'interval', value: { lo, hi } }`, as a computed value does, at every
+  depth of a list or point. An absent value is `{ kind: 'empty' }`. A
+  conditional whose condition is undecided and one of whose arms has no value
+  (the missing default of a `Which`, an `At` out of range) gives `partial`, as
+  `When` does: `Which(x < 0, 1)` over `x = [−1, 1]` claimed a value over the
+  whole cell.
+
+- **An operator whose answer depends on the order of a collection refuses a
+  set** (user decision 2026-10-18). `TakeWhile`, `DropWhile`, `Find`,
+  `Position`, `Partition`, `Chunk`, `ChunkBy` and `Scan` give
+  `Error(incompatible-type, indexed_collection, set<…>)` for a set, written or
+  held by a symbol: `TakeWhile(Set(3, 1), x > 2)` gave `Set(3)`. The result of
+  `TakeWhile` and `DropWhile` is a list (or a string), never a set. A `PointList`
+  coordinate that is a set or a list of points is an `incompatible-type` error.
+  Before a call over a held set is evaluated, its count and elements are
+  unknown: `1 + Reverse(c)` with `c := Set(3, 1, 5)` gave `[]`.
+
+- **A complex value with an infinite real part and a finite imaginary part is
+  the real infinity** (user decision 2026-10-18). `["Complex", "PositiveInfinity",
+  1]` and `ce.number({ re: -Infinity, im: 2 })` are `+oo` and `-oo`; such a value
+  reported `isFinite === true`, `0·(∞ + i)` was `0` and `2·(∞ + i)` was `NaN`
+  (now `Indeterminate` and `+oo`). A value with an infinite imaginary part is
+  still `~oo`. The limits that tend to `∞ + iθ` are `+oo` on every route:
+  `Arcosh(−∞)`, `Ln(−∞)`, `Log(−∞, 10)` (`-oo` for a base between 0 and 1),
+  `CoshIntegral(−∞)` and `LambertW(±∞, k)`.
+
+- **Quantity arithmetic keeps an exact magnitude exact** (user decision
+  2026-10-17). `evaluate()` of `Quantity(3, m)·π` is `3π m`, and of
+  `Quantity(3, m)^-1` is `1/3 m^-1`; they were the floats `9.42… m` and
+  `0.333… m^-1`. `.N()` gives the floats. The same applies to division
+  (`3 m / 2 m` is `3/2`), addition, negation, and to a unit conversion by an
+  integer factor (`π m` in `cm` is `100π cm`); a conversion by any other factor gives a float (`100 cm` in `m` is the float `1`). A float operand gives a float
+  (`Quantity(1.5, m)·2` is the float `3`). `Quantity(3, m)·i` is `3i m`; it was
+  `0 m`. A quantity with a sum magnitude prints as `(1 + π) m`.
+
+- **`SVD` and `SingularValues` of an exact matrix stay unevaluated under
+  `evaluate()`** (user decision 2026-10-17); `.N()` gives the floats. A matrix
+  with a float entry is still decomposed, and the exact `SingularValues` of a
+  matrix whose Gram matrix is at most 2×2 is unchanged.
+
+- **Special functions of an exact operand are correctly rounded under `.N()`**
+  (user decision 2026-10-17). An exact operand (`1/3`, `√2`, `π`) of `Gamma`,
+  `GammaLn`, `LogGamma`, `Digamma`, `Trigamma`, `PolyGamma`, `Beta`, `Zeta`,
+  `HurwitzZeta`, `DirichletEta`, `DirichletBeta`, `LerchPhi`, `LambertW`,
+  `PolyLog`, `BarnesG`, `LogBarnesG`, `EllipticK`, `EllipticE`,
+  `Hypergeometric2F1`, `Hypergeometric1F1`, `AGM`, `Erf`, `Erfc`, `Erfi`,
+  `ErfInv`, `FresnelS` and `FresnelC` is read with 10 guard digits: at 50
+  digits, `HurwitzZeta(3, 1/3).N()` and `Digamma(1/3).N()` had a wrong last
+  digit.
+
+- **An Epsil program whose only statement is a `do { … }` block runs the block
+  in its own scope** (user decision 2026-10-18), as when the block follows
+  another statement: `do { let Pi = 3; Pi }` gives `3` instead of refusing a
+  global declaration of `Pi`. The parser wraps such a program in a second
+  `Block`, and the serializer writes it back as the block alone.
+
+- **Removing `commutative` from `Add` or `Multiply` keeps the operand order**
+  (user decision 2026-10-18). `ce.declare('Add', { commutative: false },
+  { extend: true })` no longer throws; the extension removes the inherited
+  ordering handler, and `b + a` stays `b + a` in the canonical form. The library
+  `evaluate` handler still collects like terms, so `evaluate()` of a symbolic
+  sum may still reorder it.
+
+- **The operand of a kept `Delimiter` is canonical** (user decision
+  2026-10-17). `["Delimiter", ["Add", 1, 2, "x"], "'[]'"]` is `[x + 3]`, not
+  `[1 + 2 + x]` marked canonical.
+
+- **An element-wise selection gives `Missing` at a position for a point**
+  (user decision 2026-10-17). A position that no clause of an element-wise
+  `Which` or else-less `If` selects holds the absent value of its type, as
+  `When` already did: `Which([1, 5] < 3, (1, 2))` is `[(1, 2), Missing]` (it
+  was `[(1, 2), NaN]`); a number arm still gives `NaN`. The compile pre-pass
+  pushes a literal index through such a selection and through `When`.
+
+- **A `Set` literal lists its finite lazy elements** (user decision
+  2026-10-17). `{Map(f, [1, 2])}` evaluates to `{[f(1), f(2)]}`; the callback
+  runs at evaluation, not at boxing. Equal elements are then merged. Infinite or
+  very large elements stay lazy.
+
 - **An operator that reads a collection by position refuses a set** (user
   decision 2026-10-17). With `c: collection<integer>` assigned `Set(3, 1)`,
   `DeleteAt(c, 1)`, `ReplaceAt(c, 1, 2)`, `Insert(c, 1, 2)`, `ArgMax(c)`,
@@ -355,6 +455,13 @@
 
 ### Performance
 
+- **`.N()` over a list with an element that may evaluate to `Nothing` no longer
+  evaluates the other elements exactly** (user decision 2026-10-17). With
+  `H = Sum(1/k, k, 1, 6000)`, `Floor([If(c, 1, Nothing), H]).N()` takes 66 ms
+  (it took 7 s) and `Count(Map(Sin, [If(c, 1, Nothing), H])).N()` takes 1 ms (it
+  took 11 s). The results do not change: the kept elements are read as written,
+  so a function with a jump still gets the exact value of an exact element.
+
 - **Compiling an expression that holds the same subexpression object at many
   positions is linear.** A boxed expression can be a graph: `e = Add(e, e)`
   repeated 20 times has 21 distinct nodes but about a million paths. The
@@ -412,6 +519,27 @@
   statement form.
 
 ### Issues Resolved
+
+- **Four LaTeX round trips that changed the meaning of an expression** (Tycho
+  ledger rows 387, 388 and 389).
+  - With `f` a function, `f''(x)(f(x)-y)` parsed as the value `f''(x)`
+    applied to `f(x)-y`. It is now a product, as `f(x)(f(x)-y)` is; so is
+    `\sin'(x)(y)`.
+  - A one-argument `Apply` with a compound head, nested in another
+    expression, is written in parentheses: `-2(f''(x)\lhd y)`. Written
+    `-2f''(x)\lhd y`, it re-parsed with the `-2` inside the applied function.
+  - A `\sum`, `\prod` or `\lim` followed by another factor is written in
+    parentheses: `(\prod_{i=1}^{10}P_1(i))P_0(r)`. Written without them,
+    `P_0(r)` re-parsed inside the product.
+  - The body of `\sum`, `\prod`, `\lim` and of an `\int` without a
+    differential now ends at the `&` or `\\` that ends a `cases` or matrix
+    cell. A clause such as `0<\prod_{i=1}^{10}T(i)` at the end of a `cases`
+    row read the next row into the product, and the whole `Which` was lost.
+  - A `Block` nested in another expression is written in parentheses:
+    `\left(z\coloneq Z+1; d\right)<1`. Written as a bare `;` list, the
+    comparison re-parsed inside the block. This holds in every position; it
+    used to be done only for a function argument and a loop or
+    comprehension body.
 
 - **`const g = (x) => 2 * x` after an earlier statement that referenced `g`
   works.** It failed with "Cannot set properties of undefined (setting

@@ -217,8 +217,11 @@ const CORPUS: [label: string, expr: MathJsonExpression][] = [
   // Block / If
   ['Block', ['Block', 'a', 2]],
   ['Block (3 statements)', ['Block', 'a', 'b', 'c']],
-  ['Block empty', ['Block']],
-  ['Block single statement', ['Block', 'a']],
+  // A program whose only statement is a `do { … }` block is the block inside
+  // the program `Block`: the parser adds the outer `Block` so that the block
+  // is a nested scope.
+  ['Block empty', ['Block', ['Block']]],
+  ['Block single statement', ['Block', ['Block', 'a']]],
   ['Block nested in expression', ['Add', ['Block', 'a', 'b'], 1]],
   ['Function with do-block body', ['Function', ['Block', 'a', 'b'], 'x']],
 

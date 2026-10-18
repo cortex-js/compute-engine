@@ -12056,6 +12056,27 @@ export class BaseCompiler {
       // or the two halves of the variable disagree (`assignLValue`).
       const name = BaseCompiler.assignLValue(engine, args[0].symbol, target);
       const code = BaseCompiler.compileOp(node, 1, target, 0, args[1]);
+      // On a target that writes a block as a bare statement sequence (Python,
+      // the shader targets), a value that compiles to several statements, or
+      // to a `return`, cannot be the right side of an assignment: splicing
+      // `u = s\nreturn 2 * u` after `t = ` gave `t = u = s` and a `return`
+      // that left the enclosing function with the value of the inner block.
+      // The shader targets move such a block into the enclosing statement
+      // list when they can (`valueBlock`), and its value then compiles to a
+      // single temporary; where no statement list is available, and on
+      // Python, which has no such lowering, the assignment declines.
+      if (
+        target.bareStatementBlocks &&
+        typeof code === 'string' &&
+        (code.includes('\n') || /^\s*(?:return|break|continue)\b/.test(code))
+      )
+        throw new Error(
+          `Could not compile \`Assign\`: the value assigned to ` +
+            `"${args[0].symbol}" lowers to a statement sequence on target ` +
+            `'${target.language ?? 'unknown'}' (a block, or a loop), which ` +
+            `has no expression form there. Assign the value of the last ` +
+            `statement instead (\`Block(u ≔ s; t ≔ 2u)\`).`
+        );
       const stored = target.assignmentValue?.(args[1], code, target) ?? code;
       return `${name} = ${stored}`;
     }
@@ -16992,7 +17013,52 @@ export class BaseCompiler {
   ): TargetSource {
     if (isFunction(expr, 'Block'))
       return BaseCompiler.compileBlock(expr.ops, target, expr, false);
-    const stmts = BaseCompiler.desugarPatternAssign(expr, target);
+    // A lone assignment whose value is another assignment is two statements
+    // (`splitChainedAssignments`): `t = u = s;` is not valid WGSL.
+    const split = BaseCompiler.splitChainedAssignments([expr]);
+    const chained = split.args;
+    // The interpreter declares the inner target in the scope of the loop
+    // when no enclosing scope has the name. This route has no `Block` node
+    // whose scope `withImplicitLocalDeclares` can read, so the test is on the
+    // compilation instead: a name is bound outside when it is a parameter or
+    // a loop index (`boundVars`), or a local of an enclosing compiled block
+    // or function (`localShapeFrameOf`). Each other inner target gets a
+    // declaration, and the statements then compile as a block, which
+    // declares it in the loop body. Without the declaration, the shader
+    // wrote an undeclared name.
+    if (chained.length > 1) {
+      const declared = new Set<string>();
+      const declares = chained.flatMap((s) => {
+        if (!isFunction(s, 'Assign') || !isSymbol(s.ops[0])) return [];
+        const lhs = s.ops[0];
+        const name = lhs.symbol;
+        if (
+          !split.chained.has(name) ||
+          declared.has(name) ||
+          target.boundVars?.has(name) ||
+          BaseCompiler.localShapeFrameOf(name) !== undefined
+        )
+          return [];
+        declared.add(name);
+        // Raw, as in `withImplicitLocalDeclares`: a canonical `Declare`
+        // would register the name in the scope the compilation runs under.
+        return [
+          lhs.engine._fn('Declare', [lhs, lhs.engine.string('unknown')], {
+            canonical: false,
+          }),
+        ];
+      });
+      if (declares.length > 0)
+        return BaseCompiler.compileBlock(
+          [...declares, ...chained],
+          target,
+          undefined,
+          false
+        );
+    }
+    const stmts =
+      BaseCompiler.desugarPatternAssign(expr, target) ??
+      (chained.length > 1 ? [...chained] : null);
     // On a shader target the lone statement gets a statement sink of its own
     // (see `compileListStatement`): a loop-form `Sum` on the right of the
     // assignment has nowhere else to put its loop.
@@ -17141,7 +17207,10 @@ export class BaseCompiler {
   private static withImplicitLocalDeclares(
     args: ReadonlyArray<Expression>,
     target: CompileTarget<Expression>,
-    node: Expression | undefined
+    node: Expression | undefined,
+    /** The targets of the assignments `splitChainedAssignments` moved out of
+     * the value of another assignment. */
+    chained: ReadonlySet<string> = new Set()
   ): ReadonlyArray<Expression> {
     const scope = node?.localScope;
     if (!scope) return args;
@@ -17155,7 +17224,18 @@ export class BaseCompiler {
       const name = lhs.symbol;
       if (seen.has(name)) continue;
       if (target.boundVars?.has(name)) continue;
-      if (!scope.bindings.has(name)) continue;
+      // The canonicalizer hoists only a TOP-LEVEL assignment into the block's
+      // scope. An assignment that was the value of another one (`t ≔ (u ≔
+      // s)`) is declared by the interpreter when it runs, in the scope of the
+      // block, unless an enclosing scope already has the name. So such a
+      // name is a block-local when no enclosing scope binds it.
+      if (
+        !scope.bindings.has(name) &&
+        !(
+          chained.has(name) && !BaseCompiler.scopeChainBinds(scope.parent, name)
+        )
+      )
+        continue;
       if (
         args.some(
           (a) =>
@@ -17179,6 +17259,163 @@ export class BaseCompiler {
     }
 
     return implicit.length === 0 ? args : [...implicit, ...args];
+  }
+
+  /** Whether `scope` or one of its parents binds `name`. */
+  private static scopeChainBinds(
+    scope: NonNullable<Expression['localScope']> | null | undefined,
+    name: string
+  ): boolean {
+    for (let s = scope; s; s = s.parent) if (s.bindings.has(name)) return true;
+    return false;
+  }
+
+  /**
+   * Split each statement `Assign(t, Assign(u, v))` of a statement list into
+   * `Assign(u, v)` followed by `Assign(t, u)`, which is the same program: the
+   * value of an assignment is the value it stores. Several levels split the
+   * same way, innermost first.
+   *
+   * Without the split, the nested assignment was spliced into the outer one
+   * (`t = u = s`). That is not valid where an assignment is a statement
+   * (WGSL), and `u` was never declared: its write went to an undeclared
+   * name on the shader targets and to the caller's `vars` object on
+   * JavaScript (`_.u`), where the interpreter declares `u` in the scope of
+   * the block.
+   *
+   * Returns the statements, and the names the split moved to statement
+   * position (`withImplicitLocalDeclares` decides whether they are locals).
+   */
+  private static splitChainedAssignments(args: ReadonlyArray<Expression>): {
+    args: ReadonlyArray<Expression>;
+    chained: Set<string>;
+  } {
+    const chained = new Set<string>();
+    const isChained = (a: Expression): boolean =>
+      isFunction(a, 'Assign') &&
+      isSymbol(a.ops[0]) &&
+      isFunction(a.ops[1], 'Assign') &&
+      isSymbol(a.ops[1].ops[0]);
+    if (!args.some(isChained)) return { args, chained };
+    const split = (a: Expression): Expression[] => {
+      if (!isChained(a) || !isFunction(a)) return [a];
+      const inner = a.ops[1];
+      if (!isFunction(inner) || !isSymbol(inner.ops[0])) return [a];
+      const innerTarget = inner.ops[0];
+      chained.add(innerTarget.symbol);
+      return [...split(inner), a.engine._fn('Assign', [a.ops[0], innerTarget])];
+    };
+    return { args: args.flatMap(split), chained };
+  }
+
+  /**
+   * Fail closed when a statement of a block reads one of the block's locals
+   * before any statement gives it a value.
+   *
+   * The interpreter leaves such a read symbolic (`Block(x ≔ x + 1; 2x)`,
+   * where `x` is a local of the block, evaluates to `2(x + 1)`), and the
+   * compiled code has no value to give it: JavaScript read `undefined` and
+   * answered `NaN`, WGSL read the zero a `var` starts with, GLSL read an
+   * uninitialized variable, and Python read a parameter of the same name.
+   *
+   * The test is on the statements in order. A local has a value after a
+   * statement that assigns it anywhere (in a branch or a loop too, so the
+   * test declines only a read that comes before every write), or after a
+   * `Declare` with an initial value. A read inside a function literal is not
+   * counted, since it happens when the function is called, nor is a read in
+   * a nested scope that declares the same name again.
+   */
+  private static assertLocalsAssignedBeforeRead(
+    stmts: ReadonlyArray<Expression>,
+    locals: ReadonlyArray<string>
+  ): void {
+    if (locals.length === 0) return;
+    const pending = new Set(locals);
+    // Each walk visits a node once: a subtree shared by several operands
+    // (a DAG) gives the same answer at every visit, and walking it once per
+    // path took exponential time.
+    const reads = (root: Expression, name: string): boolean => {
+      const seen = new Set<Expression>();
+      const walk = (e: Expression): boolean => {
+        if (isSymbol(e)) return e.symbol === name;
+        if (!isFunction(e) || seen.has(e)) return false;
+        seen.add(e);
+        if (e.operator === 'Function') return false;
+        if (e.localScope?.bindings.has(name) && e.operator !== 'Block')
+          return false;
+        if (
+          e.operator === 'Block' &&
+          e.ops.some(
+            (s) =>
+              isFunction(s, 'Declare') &&
+              isSymbol(s.ops[0]) &&
+              s.ops[0].symbol === name
+          )
+        )
+          return false;
+        if (e.operator === 'Assign' || e.operator === 'Declare')
+          return e.ops.slice(1).some(walk);
+        return e.ops.some(walk);
+      };
+      return walk(root);
+    };
+    const writes = (root: Expression, name: string): boolean => {
+      const seen = new Set<Expression>();
+      const walk = (e: Expression): boolean => {
+        if (!isFunction(e) || seen.has(e)) return false;
+        seen.add(e);
+        if (
+          e.operator === 'Assign' &&
+          isSymbol(e.ops[0]) &&
+          e.ops[0].symbol === name
+        )
+          return true;
+        return e.ops.some(walk);
+      };
+      return walk(root);
+    };
+    for (const stmt of stmts) {
+      for (const name of [...pending]) {
+        if (
+          isFunction(stmt, 'Declare') &&
+          isSymbol(stmt.ops[0]) &&
+          stmt.ops[0].symbol === name
+        ) {
+          // The initial value is read before the local has it.
+          const value = BaseCompiler.declareValueOperand(stmt.ops);
+          if (value !== undefined) {
+            if (reads(value, name)) BaseCompiler.unassignedLocalRead(name);
+            pending.delete(name);
+          }
+          continue;
+        }
+        const assignsHere =
+          isFunction(stmt, 'Assign') &&
+          isSymbol(stmt.ops[0]) &&
+          stmt.ops[0].symbol === name;
+        // `x ≔ x + 1` reads `x` before it writes it; any other statement
+        // that writes the local is taken to give it a value first.
+        if (
+          assignsHere
+            ? reads(stmt, name)
+            : !writes(stmt, name) && reads(stmt, name)
+        )
+          BaseCompiler.unassignedLocalRead(name);
+        if (assignsHere || writes(stmt, name)) pending.delete(name);
+      }
+      if (pending.size === 0) return;
+    }
+  }
+
+  private static unassignedLocalRead(name: string): never {
+    throw new Error(
+      `Could not compile \`Block\`: a statement reads the block local ` +
+        `"${name}" before any statement gives it a value. The interpreter ` +
+        `leaves that read symbolic, and the compiled code would read an ` +
+        `uninitialized variable. Give "${name}" a value first, or give the ` +
+        `local another name (\`Block(y ≔ ${name} + 1; 2y)\`), so that ` +
+        `"${name}" is the input.`
+    );
   }
 
   /**
@@ -17321,7 +17558,15 @@ export class BaseCompiler {
     // …then the block-locals introduced by bare ASSIGNMENT, which carry no
     // `Declare` statement of their own. Synthesize the missing declaration so
     // everything below treats them exactly like a declared local.
-    args = BaseCompiler.withImplicitLocalDeclares(args, target, node);
+    // An assignment whose value is another assignment is split into two
+    // statements first, so the inner target can get its declaration too.
+    const split = BaseCompiler.splitChainedAssignments(args);
+    args = BaseCompiler.withImplicitLocalDeclares(
+      split.args,
+      target,
+      node,
+      split.chained
+    );
 
     // Get all the Declare statements
     const locals: string[] = [];
@@ -17331,6 +17576,27 @@ export class BaseCompiler {
         if (isSymbol(firstOp)) locals.push(firstOp.symbol);
       }
     }
+
+    // The value of a block whose last statement is a declaration with no
+    // initial value is `Nothing` (the interpreter's value of
+    // `Block(s ≔ x; Declare(t))`), the erasure marker, which has no compiled
+    // representation. Without this check the declaration was dropped from the
+    // value position (Python returned the value of the statement before it)
+    // or spliced into it (`return var t: f32;`, `return let t`).
+    const lastArg = args[args.length - 1];
+    if (
+      valueUsed &&
+      isFunction(lastArg, 'Declare') &&
+      BaseCompiler.declareValueOperand(lastArg.ops) === undefined
+    )
+      throw new Error(
+        'Could not compile `Block`: the last statement of the block is a ' +
+          'declaration with no initial value, so the value of the block is ' +
+          '`Nothing`, the erasure marker, which has no compiled ' +
+          'representation. End the block with the value it should have.'
+      );
+
+    BaseCompiler.assertLocalsAssignedBeforeRead(args, locals);
 
     // A lone EMPTY block in a statement list evaluated for effect (a shader
     // loop body reaching `compileStatementList`) is an empty statement.
@@ -17841,16 +18107,36 @@ export class BaseCompiler {
           /^\s*(?:for|while|if|return|break|continue)\b/.test(
             result[result.length - 1]
           );
+        // A last statement that is an assignment to a name (or a `Declare`
+        // with an initial value) gives the block the value it stores, so the
+        // statement is kept and the name it wrote is the value stored in the
+        // temporary. Without this, the statements of the block reached the
+        // `block` hook, and the enclosing block put its `return` in front of
+        // the first of them (`return float t;`).
+        const assignedValue = isFunction(last, 'Assign')
+          ? last.ops[1]
+          : isFunction(last, 'Declare')
+            ? BaseCompiler.declareValueOperand(last.ops)
+            : undefined;
+        const assignedName =
+          assignedValue !== undefined &&
+          (isFunction(last, 'Assign') || isFunction(last, 'Declare')) &&
+          isSymbol(last.ops[0])
+            ? /^([^\s()[\]{}'"=,:;]+) = /.exec(result[result.length - 1])?.[1]
+            : undefined;
         if (
-          !lastIsStatement &&
+          (!lastIsStatement || assignedName !== undefined) &&
           !args.some((a) => BaseCompiler.containsEarlyReturn(a))
         ) {
-          const hoisted = target.valueBlock(
-            last,
-            result.slice(0, -1),
-            result[result.length - 1],
-            target
-          );
+          const hoisted =
+            assignedName !== undefined
+              ? target.valueBlock(assignedValue!, result, assignedName, target)
+              : target.valueBlock(
+                  last,
+                  result.slice(0, -1),
+                  result[result.length - 1],
+                  target
+                );
           if (hoisted !== undefined) return hoisted;
         }
       }
@@ -17859,6 +18145,15 @@ export class BaseCompiler {
 
       // Default: JavaScript IIFE. A `Return` in the last statement was
       // compiled as its value (`tailValue`), so it is returned here once.
+      // A last `Declare` with an initial value emits `let t = …`, a
+      // statement (`return let t = …` does not parse), and the value of the
+      // block is the initial value: keep the declaration and return the
+      // name it binds.
+      const declared =
+        isFunction(lastArg, 'Declare') && isSymbol(lastArg.ops[0])
+          ? /^let ([^\s=]+) = /.exec(result[result.length - 1])
+          : null;
+      if (declared !== null) result.push(declared[1]);
       result[result.length - 1] = `return ${result[result.length - 1]}`;
       return `(() => {${target.ws('\n')}${result.join(
         `;${target.ws('\n')}`

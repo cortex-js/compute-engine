@@ -92,6 +92,23 @@ compiled and `[(~oo, ~oo), (~oo, ~oo)]` interpreted. On a real target, this
 is the spelling of the complex infinity, as for the scalar `1/0`. Code that
 must not see a sign at a pole tests `Number.isFinite`, as above.
 
+### A complex result with an infinite real part (user decision 2026-10-18)
+
+The interpreter boxes a complex value with an infinite real part and a
+finite imaginary part as the real infinity of the sign of its real part:
+`∞ + i` is `+oo` and `-∞ + 2i` is `-oo`. Compiled code does not apply this
+rule. The JavaScript complex lane adds and multiplies the two parts
+separately, and returns them as they are:
+
+| Expression | Input | Compiled (JavaScript) | Interpreter |
+|---|---|---|---|
+| `(1 + i) + x` | `x = Infinity` | `{re: Infinity, im: 1}` | `+oo` |
+
+This difference is accepted; it is not a defect. The two answers have the
+same real part, and the imaginary part of the compiled answer is finite, so
+`Number.isFinite(result.re)` is `false` for both. Code that must treat such
+a result as `+∞` tests the real part, not the imaginary part.
+
 ### Folds over rows of unequal length give `NaN` (user decision 2026-10-17)
 
 This is a named exception to the rule of `docs/ERROR-MODEL.md` §6 that a
@@ -313,6 +330,45 @@ plain one on the witness that asked for it, so the container would add
 per-helper result-kind rules for no gain. The measurements and the decision
 are in
 `docs/plans/2026-09-07-numeric-list-store-and-typed-array-boundary.md`.
+
+### Interval results
+
+The `run` of an `interval-js` compilation gives one shape for each kind of
+value (decided by the user, 2026-10-18):
+
+- A scalar value is always a kinded `IntervalResult`:
+  `{ kind: 'interval', value: { lo, hi } }`, `{ kind: 'empty' }` (no value
+  over the cell), `{ kind: 'entire' }` (no bound is known), a `singular`
+  result (a pole, or a jump with its enclosure), or a `partial` result (a
+  value over part of the cell only). The runner never gives a bare
+  `{ lo, hi }`. A constant (`5`, `π`), a bare variable (`x`) and a block that
+  returns a local gave one before 2026-10-18, while a computed value
+  (`x + 1`) gave the kinded form; the runner now wraps such a value. An
+  enclosure whose lower bound is `NaN` is the absent marker of the compiled
+  code, bare or carried by an `interval` or `partial` result (an operation
+  over an absent operand), and the runner gives `{ kind: 'empty' }` for it:
+  `Min(L)` with `L = []`, a broadcast over lists of different lengths, and a
+  conditional whose undecided arms are a number and a list all give `empty`.
+- A collection value (a list, a range, a tuple, a point) is an array of these
+  values, nested as the collection is. Each element is wrapped in the same
+  way: `[x, 3]` over `x = [−1, 1]` gives
+  `[{ kind: 'interval', value: { lo: −1, hi: 1 } }, { kind: 'interval', value: { lo: 3, hi: 3 } }]`.
+- A relation is a tri-state verdict: the string `'true'`, `'false'` or
+  `'maybe'`.
+
+The interpreter fallback (`success: false`, with `fallback` not `false`)
+gives the same shapes: a number is the `interval` result of a point, and an
+absent value is `empty`.
+
+A conditional whose condition is undecided over the cell gives the hull of
+its arms. When one arm is `empty` — the missing default of a `Which`, or an
+arm with no value, such as an `At` out of range — the other arm is present
+over part of the cell only, and the hull is that arm clipped as an undecided
+`When` clips it: an `interval` becomes `partial`, and a list is clipped
+element by element. `Which(x < 0, 1)` over `x = [−1, 1]` gives
+`{ kind: 'partial', value: { lo: 1, hi: 1 }, domainClipped: 'both' }`; before
+2026-10-18 it gave an `interval` result, a value claimed over the whole cell
+(`hullValues`, `interval/comparison.ts`).
 
 ### Statement order on the shader targets
 

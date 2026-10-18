@@ -296,7 +296,7 @@ describe('Interval fallback: the spelling of an absent value', () => {
     } as never);
     expect(r.success).toBe(true);
     expect(r.run!({} as never)).toStrictEqual([
-      { lo: 1, hi: 1 },
+      { kind: 'interval', value: { lo: 1, hi: 1 } },
       { kind: 'empty' },
     ]);
   });

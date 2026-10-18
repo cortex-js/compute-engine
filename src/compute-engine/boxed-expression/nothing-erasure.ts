@@ -1,5 +1,9 @@
-import type { Expression, OperandDescriptor } from '../global-types.js';
-import { isFunction } from './type-guards.js';
+import type {
+  EvaluateOptions,
+  Expression,
+  OperandDescriptor,
+} from '../global-types.js';
+import { isFunction, isSymbol } from './type-guards.js';
 
 /**
  * Whether the expression `expr`, an element of a `List` or `Tuple` literal,
@@ -57,6 +61,85 @@ export function literalMayEraseElement(xs: Expression): boolean {
   const value = xs.ops.some(mayEvaluateToNothing);
   erasureMemo.set(xs, { generation, value });
   return value;
+}
+
+/**
+ * The `List` or `Tuple` literal `xs` with its erasure resolved: each element
+ * that may evaluate to `Nothing` ({@link mayEvaluateToNothing}) is evaluated
+ * exactly and dropped when its value is `Nothing`, and every other element
+ * is kept as it is written. The answer is `undefined` when an element still
+ * may evaluate to `Nothing` after its evaluation (a condition with no value
+ * yet).
+ *
+ * This is the literal that a consumer which approximates what it reads can
+ * walk: the elements it keeps are the elements of the value of `xs`, and each
+ * one is evaluated by the consumer, as the elements of a literal with no
+ * such element are. An exact evaluation of the whole literal evaluated every
+ * element exactly first, which can cost much more than the approximation:
+ * the 2 600-digit rational of `Sum(1/k, k, 1, 6000)` takes seconds. An
+ * element kept as written also keeps its exact value for the functions that
+ * jump at a point (`Floor`, `Mod`), which read the exact value of their
+ * operand under `.N()`.
+ *
+ * The elements that may erase are evaluated before the elements that come
+ * before them, and an undecided answer makes the caller evaluate the whole
+ * literal again. So the caller must use this function only for a literal
+ * that is transitively pure (`isTransitivelyPure`): an element with a side
+ * effect would otherwise run out of order, or twice.
+ *
+ * `options` are the options of the evaluation of each element that may
+ * erase (exact: `numericApproximation` is not read from them).
+ */
+export function literalWithErasureResolved(
+  xs: Expression,
+  options?: Partial<EvaluateOptions>
+): Expression | undefined {
+  if (!isFunction(xs, 'List') && !isFunction(xs, 'Tuple')) return undefined;
+  const kept: Expression[] = [];
+  for (const x of xs.ops) {
+    if (!mayEvaluateToNothing(x)) {
+      kept.push(x);
+      continue;
+    }
+    const value = x.evaluate({ ...options, numericApproximation: false });
+    if (isSymbol(value, 'Nothing')) continue;
+    if (mayEvaluateToNothing(value)) return undefined;
+    kept.push(value);
+  }
+  return xs.engine._fn(xs.operator, kept);
+}
+
+/**
+ * Async mirror of {@link literalWithErasureResolved}: each element that may
+ * erase is evaluated with `evaluateAsync`, so that a condition which needs
+ * an operator with only an `evaluateAsync` handler gets its value. The same
+ * purity requirement applies.
+ */
+export async function literalWithErasureResolvedAsync(
+  xs: Expression,
+  options?: Partial<EvaluateOptions>
+): Promise<Expression | undefined> {
+  if (!isFunction(xs, 'List') && !isFunction(xs, 'Tuple')) return undefined;
+  const kept: Expression[] = [];
+  for (const x of xs.ops) {
+    if (!mayEvaluateToNothing(x)) {
+      kept.push(x);
+      continue;
+    }
+    // The spread already copies the captured registry (`_effects`) and the
+    // context stack; `_effects` is named again only so that the source-text
+    // audit in `effects-registry.test.ts`, which reads the object literal,
+    // finds it.
+    const value = await x.evaluateAsync({
+      ...options,
+      numericApproximation: false,
+      _effects: options?._effects,
+    });
+    if (isSymbol(value, 'Nothing')) continue;
+    if (mayEvaluateToNothing(value)) return undefined;
+    kept.push(value);
+  }
+  return xs.engine._fn(xs.operator, kept);
 }
 
 /** The answers of {@link literalMayEraseElement}, with the engine's

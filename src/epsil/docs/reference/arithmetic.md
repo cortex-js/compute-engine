@@ -469,7 +469,7 @@ N(catalanConstant)
 
 ### ceil
 
-MathJSON `Ceil` · `(x: real | signed_infinity, step: real?) -> real | signed_infinity`
+MathJSON `Ceil` · `(x: real | signed_infinity | ~oo, step: real?) -> real | signed_infinity | ~oo`
 
 Rounds a number up to the next largest integer, or with a step to the least multiple of the step that is at least the number.
 
@@ -716,7 +716,7 @@ Double Factorial Function
 
 ### floor
 
-MathJSON `Floor` · `(x: real | signed_infinity, step: real?) -> real | signed_infinity`
+MathJSON `Floor` · `(x: real | signed_infinity | ~oo, step: real?) -> real | signed_infinity | ~oo`
 
 Rounds a number down to the nearest integer, or with a step to the greatest multiple of the step that is at most the number.
 
@@ -727,7 +727,7 @@ Rounds a number down to the nearest integer, or with a step to the greatest mult
 
 ### fract
 
-MathJSON `Fract` · `(real | signed_infinity) -> real<0..1>`
+MathJSON `Fract` · `(real | signed_infinity | ~oo) -> real<0..1>`
 
 Fractional part of a number: x - floor(x)
 
@@ -1313,7 +1313,7 @@ n-th root of a value.
 
 ### round
 
-MathJSON `Round` · `(x: real | signed_infinity, step: real?) -> real | signed_infinity`
+MathJSON `Round` · `(x: real | signed_infinity | ~oo, step: real?) -> real | signed_infinity | ~oo`
 
 Rounds a number to the nearest integer, or with a step to the nearest multiple of the step.
 
@@ -1324,7 +1324,7 @@ Rounds a number to the nearest integer, or with a step to the nearest multiple o
 
 ### sign
 
-MathJSON `Sign` · `(complex | signed_infinity) -> complex`
+MathJSON `Sign` · `(complex | signed_infinity | ~oo) -> complex`
 
 Sign of a number: -1, 0, or 1 for a real; `z/|z|`, the point of the unit circle in its direction, for a complex `z`.
 
@@ -1406,7 +1406,7 @@ N(trigamma(1))
 
 ### truncate
 
-MathJSON `Truncate` · `(x: real | signed_infinity, step: real?) -> real | signed_infinity`
+MathJSON `Truncate` · `(x: real | signed_infinity | ~oo, step: real?) -> real | signed_infinity | ~oo`
 
 Rounds a number towards zero (removes the fractional part), or with a step to the multiple of the step nearest to the number in the direction of zero.
 

@@ -227,8 +227,20 @@ describe('BOUNDARY CASES OF A COMPLEX VALUE FROM THE HOST', () => {
     expect(ce.number({ re: NaN, im: 3 }).isNaN).toBe(true);
   });
 
-  test('an infinite part is not exact', () => {
-    expect(isExact(ce.number(new Complex(Infinity, 1)))).toBe(false);
+  test('an infinite real part with a finite imaginary part is the real infinity', () => {
+    // `∞ + i` has the direction of the real axis, so it is `+∞` (and
+    // `−∞ + 2i` is `−∞`), not a float complex.
+    expect(ce.number(new Complex(Infinity, 1)).json).toEqual(
+      'PositiveInfinity'
+    );
+    expect(ce.number(new Complex(-Infinity, 2)).json).toEqual(
+      'NegativeInfinity'
+    );
+    // An infinite imaginary part is complex infinity, whatever the real part.
+    expect(ce.number(new Complex(Infinity, Infinity)).json).toEqual(
+      'ComplexInfinity'
+    );
+    expect(ce.number(new Complex(1, Infinity)).json).toEqual('ComplexInfinity');
   });
 
   test('a big-decimal part with an exponent too large to write out is a float', () => {

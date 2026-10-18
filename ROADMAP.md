@@ -109,83 +109,8 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
-### Decisions of 2026-10-18 that wait for implementation (OPEN, decided 2026-10-18)
-
-Each item is a user decision; the work is to carry it out with tests.
-
-- **Order-dependent operators refuse a set.** `TakeWhile`, `DropWhile`,
-  `Partition`, `Chunk` and `Find` give
-  `Error(incompatible-type, indexed_collection, set<…>)` for a set, written or
-  held by a symbol, as `Sort` and `DeleteAt` do: `TakeWhile(Set(3, 1), x > 2)`
-  gave `Set(3)`, an answer that depends on the iteration order. A list, a
-  string and a range still work.
-- **`PointList` refuses a set or a list of points as a coordinate.**
-  `PointList([1, 2], Set(3, 4))` (typed with a set coordinate, stays
-  unevaluated) and `PointList([(1,2),(3,4)], [5,6])` (points whose coordinate is
-  a point) are `incompatible-type` errors, as a single point component is since
-  2026-10-18. A coordinate is a number or a list of numbers.
-- **An Epsil program whose only statement is a block gets its own block.**
-  `do { let Pi = 3; Pi }` alone ran in the program scope (the program and the
-  block are the same MathJSON `Block`), so the declaration of `Pi` was refused
-  as a global one, but it worked after another statement. The parser wraps such
-  a program, so the block is a nested scope in both cases; the serialization
-  round trip of such a program changes.
-- **Removing `commutative` from `Add` or `Multiply` drops the inherited
-  ordering handler.** `ce.declare('Add', { commutative: false }, { extend: true })`
-  threw "the 'commutativeOrder' handler requires the 'commutative' flag"; the
-  extension now removes the library `commutativeOrder` handler, as removing a
-  flag already removes the numeric canonical handler, and operand order is
-  kept.
-- **A complex value with an infinite real part and a finite imaginary part is
-  boxed as the real infinity.** `Complex(+oo, 1)`, `ce.number(complex(Infinity,
-  1))` and results such as `Arcosh(−∞)` (today `∞ + πi`) become `+oo` (or
-  `-oo`), as `Add` already gives and as Mathematica gives for `Arcosh(−∞)`.
-  Today such a value reports `isFinite === true`, gives `0` when multiplied by
-  `0` and `NaN` when multiplied by `2`. The tests that pin `∞ + i` change
-  (`non-finite-typing.test.ts`, `lattice-phase0.test.ts` ruling L2(a),
-  `error-model.test.ts`, `indeterminate.test.ts`).
-- **`Mean` keeps `NaN` for complex-infinity data.** `Mean([∞·i, 1])` stays
-  `NaN`, while `Sum` gives `~oo`: a mean of a value with no direction has no
-  meaning. No work beyond a sentence in the statistics reference.
-- **Compiled complex addition at an infinite input is documented, not
-  checked.** Compiled `(1+i) + x` at `x = ∞` gives `{re: ∞, im: 1}`, where the
-  interpreter gives `+oo`; state it in `docs/COMPILATION-MODEL.md` with the
-  other `~oo` differences.
-- **interval-js: a `Which` with no default answers `partial`.** With an
-  undecided condition and an arm that is empty, it answered `interval` (a value
-  claimed over the whole cell); it answers `partial`, as `When` does. The test
-  "piecewise without a default…" of `compile-interval-js.test.ts` changes.
-- **interval-js compiled results have one shape.** A constant or a bare
-  variable returned `{lo, hi}`, a computed value `{kind: 'interval', value}`;
-  the compiled runner wraps every result as `{kind: 'interval', value}` (or
-  `{kind: 'empty'}`), as the fallback does since 2026-10-18.
-
-### Compiled code of an assignment whose value is a block or another assignment (OPEN, wrong value — found 2026-10-18 by the compileFunction tail-assignment work)
-
-(1) Python `compile()` of `Block(s ≔ x; t ≔ Block(u ≔ s; 2u)); t + 1` emits
-`s = x`, `t = u = s`, `return 2 * u`, `return t + 1` with `success: true`: at
-`x = 3` it returns 6, where the interpreter gives 7 (a block in value position of
-an assignment is flattened into the enclosing body). `compileFunction()` refuses
-it since 2026-10-18. (2) WGSL (both routes) emits `t = u = s;` for an `Assign`
-whose value is another `Assign`, with `u` never declared: not valid WGSL. (3)
-`compile()` of a block whose last statement is a `Declare` with no initializer
-gives a wrong value or invalid code on every target: Python returns the
-previous assignment, the GPU targets emit `return var t: f32;`, JavaScript
-fails with a syntax error. (4) A nested block whose last statement is an
-assignment emits `return float t;` on the GPU targets (`compile()` and GLSL
-`compileFunction()`). (5) WGSL `compile()` of an assignment to a free input
-(`Block(x ≔ x+1; 2x)`) declares a new uninitialized local `var x`.
-
 ### Smaller defects found on 2026-10-18 (OPEN, small)
 
-- interval-js declines a list with a written `Missing` cell (`[1, Missing]`)
-  while `[1, Undefined]` compiles.
-- The Python check of a free-symbol name (`pythonCheckIdentifier`) checks for
-  keywords only; the function and parameter names are checked as identifiers
-  since 2026-10-18.
-- The lazy `count` and `at` handlers of an UNEVALUATED `DeleteAt`, `ReplaceAt`
-  or `Insert` can still read a held set (evaluation refuses it since
-  2026-10-18).
 - `cantorEnumerateComplexNumbers()` (`numerics/numeric.ts`, exported from
   `src/numerics.ts`) yields `0` several times and gives doubles, not fractions,
   for rational parts, so `ComplexNumbers` enumerates `0, 0, 0, 0, 0, 1+i, …`
@@ -209,6 +134,167 @@ assignment emits `return float t;` on the GPU targets (`compile()` and GLSL
   and changes value when it is boxed again inside that scope. A result that
   leaves the scope is boxed with the library constant again, so the gap is
   limited to a JSON round trip inside the scope.
+
+### A block local keeps its value from one evaluation of the block to the next (OPEN, wrong value — found 2026-10-18)
+
+With `x` not declared, `Block(x ≔ x + 1; 2x)` gives `2(x + 1)` on the first
+`evaluate()` and `2(x + 2)` on the second. Each evaluation must give
+`2(x + 1)`: the block must start from the same state each time. The cause is
+probably in the `Block` evaluate handler (`evaluateBlock`,
+`library/control-structures.ts`). At the start of an evaluation,
+`sweepCanonicalizationBindings` removes only the block bindings that have no
+value, and `createBlockLocals` replaces only the locals made by a `Declare`
+statement. The binding that the first `Assign` made for `x` has the value
+`x + 1`, so it stays, and the second evaluation reads it.
+
+### A lazy `Filter` gives the elements of its source as they are written (OPEN, wrong value — found 2026-10-18)
+
+With `x := 5`, `Element(5, Filter([x], y ↦ y > 0))` is `False`, and
+`First(Filter([x], y ↦ y > 0))` is `x`. The correct results are `True` and
+`5`: the filter keeps the value of the element, which is `5`. When the source
+has an element that can erase (evaluate to `Nothing`), the same `Element` test
+gives `True`, so the result depends on an unrelated element. The cause is in
+the lazy `Filter` handlers in `library/collections.ts`: they give the element
+as it is written in the source, not its value.
+
+### Python `compile()` drops the `else` value of an `If` with a `Break` branch (OPEN, decided 2026-10-18 — found 2026-10-18)
+
+The Python target compiles `If(x > 0, Break, 1)` without the value `1` of the
+`else` branch. The same occurs when the branch is a `Continue` or a `Loop`.
+The test "a single-statement Block around a control-flow arm is read through"
+in `test/compute-engine/compile-python.test.ts` pins this output today.
+
+The question: what must the Python target do with this shape?
+
+- Option A: decline the shape (the compilation fails and the caller uses the
+  interpreter). The test changes to expect the refusal.
+- Option B: keep today's output, which drops the `else` value.
+
+If nothing is decided, option B stays in effect.
+
+**User decision 2026-10-18:** decline the shape: Python `compile()` refuses a selection that mixes a control-flow branch (`Break`, `Continue`, a loop) with a value branch, and the expression runs through the interpreter; the pinned test in `compile-python.test.ts` changes.
+
+### `Count`, `Length` and `IsEmpty` of a `Sort` of a set give a count where `Sort` gives an error (OPEN, decided 2026-10-18 — found 2026-10-18)
+
+At boxing, `Count`, `Length` and `IsEmpty` look through `Sort`, `Reverse` and
+`RandomShuffle` to the collection inside (`peekWrappers`,
+`library/collections.ts`). With `c := Set(3, 1, 5)`, `Count(Sort(c))` is `3`,
+but `Sort(c)` alone is an `incompatible-type` error, because a set has no
+order.
+
+The question: must the look-through stop for a source that is not an indexed
+collection?
+
+- Option A: look through only when the type of the source is known to be an
+  indexed collection. Then `Count(Sort(c))` is the same error as `Sort(c)`.
+  Cost: `Count(Sort(x))` with `x` of type `unknown` that holds a long list then
+  sorts the list to count it.
+- Option B: keep today's behavior and document that the count of a sort of a
+  set is the count of the set.
+
+If nothing is decided, option B stays in effect.
+
+**User decision 2026-10-18:** look through `Sort`, `Reverse` and `RandomShuffle` only when the source type is known to be indexed, so `Count(Sort(c))` for a set `c` is the same error as `Sort(c)`; the cost (sorting an untyped list before counting it) is accepted.
+
+### Elementary functions round an exact operand under `.N()` (OPEN, decided 2026-10-18 — found 2026-10-18)
+
+At `ce.precision = 50`, `Ln(1/3).N()` ends `…228`; the correct value ends
+`…227`. `.N()` evaluates each operand numerically first, so `1/3` reaches the
+function as a 50-digit decimal, and the rounding error of the operand reaches
+the last digit of the result. `Exp`, `Arctan`, `Sin`, `Sinc` and
+`Power(x, 1/3)` have the same defect. Since 2026-10-18 the 28 special functions
+read their exact operand with guard digits (`guardDigitsN`,
+`library/exact-operands-under-n.ts`), so their last digit is correct.
+
+The question: must the elementary functions use `guardDigitsN` too?
+
+- Option A: yes. The last digit becomes correct. Cost: these functions are
+  frequent, and each `.N()` of an exact operand then evaluates the operand at
+  a higher precision.
+- Option B: no. Document that the last digit of an elementary function of an
+  exact operand under `.N()` can be wrong by one unit.
+
+If nothing is decided, option B stays in effect.
+
+**User decision 2026-10-18:** use `guardDigitsN` for an exact non-integer operand of the elementary functions too (`Ln`, `Exp`, `Log`, the trigonometric and hyperbolic functions and their inverses, `Sinc`, `Power` with an exact non-integer exponent), so `Ln(1/3).N()` at 50 digits ends `…227`; a float or integer operand is not affected.
+
+### `Map(Sin, [H]).N()` of a large exact rational takes 5.7 seconds (OPEN, decided 2026-10-18 — found 2026-10-18)
+
+With `H = Sum(1/k, k, 1, 6000)` (an exact rational with about 2 600 digits),
+`Map(Sin, [H]).N()` takes 5.7 s, where `Sin([H]).N()` takes about 45 ms. The
+cause is `makeSpineRunner` (`library/map-lowering.ts`): it evaluates each
+argument exactly, so that a callback that is a jump function (such as `Floor`)
+gets the exact element and gives the correct integer.
+
+The question: must `Map` read the arguments numerically when the callback is
+not a jump function?
+
+- Option A: yes. `Map(Sin, [H]).N()` costs about as much as `Sin([H]).N()`;
+  `Map(Floor, [H]).N()` still reads the exact element.
+- Option B: no. Keep the exact evaluation for every callback.
+
+If nothing is decided, option B stays in effect.
+
+**User decision 2026-10-18:** under `.N()`, a lazy `Map` reads its arguments numerically when the callback is not, and does not contain, a jump function (`Floor`, `Mod`, a comparison, …); a jump callback still reads them exactly.
+
+### Compiled JavaScript writes `NaN` in a list cell for a missing point (OPEN, decided 2026-10-18 — found 2026-10-18)
+
+When a `When` or `Which` over a list selects no clause at a position where the
+value is a point, the interpreter gives `Missing` in that cell. The compiled
+JavaScript function writes `NaN` in the cell. A compiled read at one index of
+the same selection gives `undefined`.
+
+The question: must the compiled list write `undefined` in such a cell?
+
+- Option A: yes. The list cell and the read at one index agree, and both
+  correspond to the `Missing` of the interpreter.
+- Option B: no. Keep `NaN` and document the difference.
+
+If nothing is decided, option B stays in effect.
+
+**User decision 2026-10-18:** a missing point in a compiled list cell is `undefined`, as a single missing point and the interpreter's `Missing` are; a number cell stays `NaN`.
+
+### Smaller defects found on 2026-10-18 (batch 5) (OPEN, small)
+
+- Adding two temperatures that have an offset is not defined: `Quantity(0, degC) + Quantity(0, degF)` gives `-17.777777777777743 degC` (the result unit is the one with the largest scale, and the offset of each operand is applied). A decision is needed on what such a sum means (an error, or a difference of temperatures).
+- On the shader targets, the block route can write an input: when an enclosing engine scope binds `u` (a global `ce.declare('u', 'real')`, or a `u` read after a loop, which the canonical form binds in the outer block), `withImplicitLocalDeclares` → `scopeChainBinds` (`compilation/base-compiler.ts`) writes `u = …;` without a declaration, possibly to a read-only uniform; the interpreter's loop does not change the outer `u`. Since 2026-10-18 the lone-statement loop route declares `u`, so the two routes differ there.
+
+- Lazy operators over a list with a condition (`[1,3,5]{0<t}`, which boxes to
+  a `When`) do not thread the condition. `TakeWhile`, `DropWhile`, `Scan`,
+  `ArgMax` and `Differences` give
+  `Error(incompatible-type, indexed_collection, missing | vector<…>)`, where
+  the correct result is the operation on `[1,3,5]` under the condition `0<t`.
+  The cause: step 2c'' of the evaluation in `boxed-function.ts`
+  (`heldEagerSources`, `settleHeldEagerSources`) refuses the `When` before step
+  4c threads the condition. `DeleteAt([1,3,5]{0<t}, 1)` is refused at boxing,
+  because its definition has no `threadsConditionals` or `missingStrip` flag
+  (`Insert` has them). `IndexWhere` over such a list stays unevaluated.
+  `Take([1,3,5]{0<t}, 1)` gives an unevaluated `Take(…) {0<t}`.
+- WGSL `compileFunction()` declines `Block(s ≔ x; Block(t ≔ s + 1))`. GLSL
+  `compileFunction()` compiles it. The WGSL target must compile it too.
+- In a JavaScript loop body, a chained assignment to an undeclared `u` writes
+  into the `vars` object of the caller (`t = _.u = …`). The value is correct,
+  but the compiled function must not change the caller's object. The cause:
+  the loop-body compilation does not go through `compileBlock`, which declares
+  the block locals.
+- The Python target normalizes identifiers with NFKC, so `ﬁ` (one ligature
+  character) and `fi` become the same name in compiled Python. Two different
+  symbols must stay two different names.
+- Since 2026-10-18, `∞ + i` boxes to `+oo`, so no value is an infinity with an
+  "anonymous" direction of this kind. The branches for `'anonymous'` are now
+  code that no input reaches: `ErfInv` in `library/statistics.ts`, and branches
+  in `library/combinatorics.ts`, `library/distributions.ts`,
+  `library/special-functions.ts`, `library/trigonometry.ts`,
+  `library/linear-algebra.ts`, `boxed-expression/arithmetic-mul-div.ts` and
+  the `LambertW` handler. Remove them.
+- At `ce.precision = 50`, the incomplete gamma function `Gamma(a, z)` gives a
+  machine float (about 15 correct digits). It must give 50 digits.
+- `Power(Quantity(2, m), 1/2)` serializes its unit as `\mathrm{}` (empty), and
+  `\mathrm{m^{0.5}}` parses back as `m^0`. The correct unit is `m^{1/2}` (or
+  `m^{0.5}`) in both directions.
+- `UnitConvert(Quantity(20, degC), degF)` gives `67.99999999999994`; the
+  correct value is `68`. The cause: the conversion data in `unit-data.ts` are
+  floats.
 
 ### The shader targets compute a large trigonometric argument in float32 with no warning (OPEN, design — Tycho ledger rows 382 and 384, filed 2026-10-17)
 
@@ -563,27 +649,6 @@ activation does not move (the cached type of a parameter read keyed on the
 activation it resolved to, for example). This is a design change of the type
 cache, so it is recorded for a decision rather than made here.
 
-### A broadcast over a list literal with an element that may erase evaluates every element exactly, so `.N()` over it can cost a hundred times more than over the same list without the erasing element (OPEN, performance, decided 2026-10-17 — found 2026-10-17 by the Claude review of the jump-operator erasure fix)
-
-The collection handlers of a `List` or `Tuple` literal with an element that may
-evaluate to `Nothing` read the literal's value instead of its operands
-(`erasedLiteralValue`, `collection-utils.ts`), so that a count or a walk sees
-the elements the literal keeps. That value is `expr.evaluate()`: an EXACT
-evaluation of every element, whatever the caller asked. With
-`H = Sum(1/k, k, 1, 6000)` (a rational with about 2 600 digits) and
-`c := False`, `Sin([If(c, 1, Nothing), H]).N()` takes 4 800 ms and
-`Floor([If(c, 1, Nothing), H]).N()` 4 900 ms, where `Sin([H]).N()` takes 45 ms
-and `Floor([H]).N()` 40 ms. Closing it: resolve only the elements that may
-erase, and leave the others as written. That changes what the handlers answer
-for the other elements (an element `2 + 3` would be read as written, not as
-`5`), so every consumer of these handlers that compares elements to values
-(`IndexOf`, `Contains`, an equality) must evaluate the element it reads; or
-carry the caller's numeric request into the handlers, which have no evaluation
-options today. **User decision 2026-10-17: carry the caller's numeric request
-into the handlers** — the collection handlers receive the evaluation options of
-the caller, so `Floor([If(c, 1, Nothing), H]).N()` evaluates each element
-numerically and costs about as much as `Floor([H]).N()`.
-
 ### `.N()` rounds an exact operand to the working precision before the pole and branch-point tests of the complex special-function routes (OPEN, numerics — found 2026-10-17 by the Codex re-review of the LerchPhi/Zeta ranges)
 
 `StieltjesGamma(1, (−10³⁰+1)/10³⁰).N()` is still `~oo` at 21 digits where
@@ -716,28 +781,6 @@ about a parameter the body writes; it does not add the check. Closing it means
 the compiled assignment to a typed parameter fails closed (a compile-time
 refusal when the written value's type contradicts the parameter's type, as the
 declared-result-type rule does), so the two routes agree.
-
-### Quantity arithmetic numericizes an exact irrational factor under `evaluate()` (OPEN, decision — found 2026-10-16 by the fix of `Quantity(3, m) · x`)
-
-`Quantity(3, m) · π` evaluates to `9.42… m`, where the exactness contract of
-`evaluate()` (a transcendental constant stays symbolic; `3 · π` evaluates to
-`3π`) calls for `3π m`, with `.N()` giving the float. The numeric branch of
-`quantityMultiply`, `quantityAdd`, `quantityDivide` and `quantityPower`
-(`library/quantity-arithmetic.ts`) reads `.re` from every operand that has a
-numeric value, so an exact irrational magnitude or factor becomes a machine
-float. A free symbol now takes the symbolic branch (`isSymbolicValue`,
-`library/units.ts`), so `Quantity(3, m) · x` is `3x m`; an exact constant does
-not, because `π.re` is a number. The question to decide: should a quantity's
-magnitude follow the exactness contract (option A: route an exact non-literal
-magnitude or factor through the symbolic branch, so `3π m`, `√2 m`, and `.N()`
-numericizes; every quantity result with an exact irrational factor changes
-form), or stay numeric as today (option B: document quantity arithmetic as a
-numeric domain, as measurements are)? The same decision covers an exact rational
-result of an integer power: `Quantity(3, m)^-1` evaluates to the float
-`0.333… m^-1` (`quantityPower` uses `Math.pow` for an integer exponent), where
-`3^-1` alone evaluates to `1/3`. **User decision 2026-10-17: option A** —
-`evaluate()` keeps an exact magnitude exact (`3π m`, `1/3 m^-1`); `.N()` gives
-the float.
 
 ### The compiled body of a user function spells the coordinate of an absent point as `NaN`, where the interpreter keeps `Missing` (OPEN, small — found 2026-10-14 by the review of the Tycho row 374 tuple collapse)
 
@@ -890,30 +933,6 @@ parameter whose type a string does not inhabit, and for
 `indexed_collection<character>` and `collection<character>`, which a string does
 inhabit, the collection lowerings fail closed at compile time and the
 interpreter evaluates them.
-
-### Snapshot finite lazy members of Set literals (OPEN, feature proposal, decided 2026-10-17 — identified 2026-10-12)
-
-Evaluating a `List` or `Tuple` literal snapshots small, finite lazy collection
-members. A literal `Set` evaluates its members but can retain a lazy `Map`
-inside the set. For example, with `Tick(x)` returning `x + 10` and counting
-calls, evaluating `{Map(Tick, [1, 2])}` currently keeps the map and makes no
-calls. The proposed behavior is `{[11, 12]}`, with two calls during literal
-evaluation. The outer set still has one member; the inner collection is not
-flattened. Boxing or parsing the literal must not invoke the callback.
-
-**User decision 2026-10-17: extend the List/Tuple snapshot contract to Set
-literals** — evaluating `{Map(Tick, [1, 2])}` gives `{[11, 12]}` with two calls,
-and `{Map(Tick, [1, 2]), [11, 12]}` then has one member, because the two equal
-members are merged. This is a behavior change: it can affect equality, duplicate
-removal, and when callbacks or errors occur. Reuse the bounded snapshot helpers
-in `boxed-expression/listed-element.ts`, preserve the inner collection kind, and
-retain lazy views when they cannot be safely materialized within
-`ce.maxCollectionSize`. Do not consume and discard impure callback results while
-attempting a snapshot. Keep set comprehensions under their existing contract.
-
-Cover synchronous and asynchronous evaluation, equality and duplicate removal,
-callback counts and error timing, nested collections, and oversized or infinite
-inputs. The proposal remains separate from the collection snapshot bug fixes.
 
 ### A `WithRandomSeed` body that returns an eager operator holding a drawing view is reported pure (OPEN, small — found 2026-10-07 by the review of the seed-frame escape check)
 
@@ -2071,25 +2090,6 @@ Defects:
    operator's `Join`/`Append` operand when it may be absent, then thread the
    result.
 
-### `.N()` rounds an exact operand before a special function sees it (OPEN, decided 2026-10-17 — found 2026-09-28 by the review of PR #360)
-
-At `ce.precision = 50`, `HurwitzZeta(3, 1/3).N()` is
-`27.561061199700803776227877977407509284542095313016`; the correct value ends
-`…313015` (it is `…3130148811…`). `Digamma(1/3).N()` ends `…67205` where the
-correct value ends `…67204` (it is `…672041806…`). The cause is not the kernels:
-a `.N()` evaluates each operand numerically first, so `1/3` reaches the evaluate
-handler as a 50-digit decimal, and the rounding error of that operand reaches
-the last digit of the result. The same call on the `.evaluate()` route with an
-inexact `s` keeps `a` exact, and `HurwitzZeta(3.0, 1/3).evaluate()` is correct
-to the last digit (the bignum Hurwitz kernel converts an exact rational at its
-own working precision). A fix is either an engine-wide one (evaluate the
-operands of a numeric evaluation with guard digits, or pass exact operands
-through) or a per-operator one (hold the operands of `Zeta`, `HurwitzZeta`,
-`Digamma` and similar functions and evaluate them in the handler). **User
-decision 2026-10-17: the per-operator fix** — `Zeta`, `HurwitzZeta`, `Digamma`,
-`PolyGamma` and similar functions read the exact operand in their handler, so
-`HurwitzZeta(3, 1/3).N()` at precision 50 ends `…313015`.
-
 ### A calculus operator over a function parameter is folded before the argument arrives (OPEN — found 2026-09-27 while writing the core reference examples)
 
 `g(f) = D(f, x); g(x^2)` evaluates to `0`, and so do `(f => D(f, x))(x^2)` and
@@ -2538,14 +2538,8 @@ under `.N()` (before `168de97d` they answered wrong real values).
 2026-09-24, and `SVD(...).N()` since 2026-09-27, both through the kernel
 `singularValueDecomposition(re, im)` in `numerics/linear-algebra.ts` (QR with
 column pivoting, then a one-sided Jacobi pass), which returns the complex `U`
-and `V`. Left open by the `SVD` change: a complex matrix of exact entries is
-decomposed only under `.N()`, while a real matrix of exact entries still
-decomposes to floats under `evaluate()` (`linear-algebra.test.ts` pins it).
-**User decision 2026-10-17: align real `SVD` with the exactness contract** —
-`SVD` and `SingularValues` of a real matrix of exact entries stay unevaluated
-under `evaluate()` (`SVD([[1,2],[3,4]]).evaluate()` stays `SVD([[1,2],[3,4]])`),
-and `.N()` gives the floats. The same embedding gives the eigenvalues of a
-HERMITIAN matrix (run Jacobi on the embedding itself, take each eigenvalue once;
+and `V`. The real embedding of the complex matrix that this kernel uses also
+gives the eigenvalues of a HERMITIAN matrix (run Jacobi on the embedding itself, take each eigenvalue once;
 an eigenvector `[x; y]` gives `x + iy`); a general complex matrix needs a
 complex QR iteration.
 
@@ -3696,15 +3690,7 @@ reason:
   (`5qn5kcrszu`, 6 `javascript` records);
 - the Voronoi witness above, whose condition is built from a list of POINTS
   (`|P − (x, y)|` over a `PointList` literal) — the width walk reads lists of
-  scalars only;
-- `When` over a list condition, whose interpreter semantics for a point value
-  are undecided: `When((1,2), [1,5] < 3)` gives `[(1, 2), Missing]` but
-  `Which([1,5] < 3, (1,2))` gives `[(1, 2), NaN]`. **User decision 2026-10-17:
-  the absent cell follows the type of its position** — in `When` and in `Which`,
-  a position that no clause selects is `NaN` for a number and `Missing` for a
-  point, as the scalar forms are, so `Which([1,5] < 3, (1,2))` will give
-  `[(1, 2), Missing]`. This also settles the selection with no default clause
-  and a point arm (first item of this list).
+  scalars only.
 
 **Demand measured at zero (2026-08-20).** Tycho retracted the escalation after
 measuring against 0.116.1: the blocker was on their side, one layer upstream of
@@ -4096,15 +4082,6 @@ that looks for objects owned by another engine (`containsForeignEngineObject`,
   more levels deep still overflow (the canonical route no longer produces such a
   chain; a raw-boxed chain that is serialized before canonicalization reaches
   it).
-
-Also found 2026-09-25, a decision: a `Delimiter` whose delimiter is not a
-parenthesis (`'[]'`) is canonical while its operand is the RAW operand, not the
-canonical body the handler computed
-(`ce.box(['Delimiter', ['Add', 1, 2, 'x'], "'[]'"]).op1.isCanonical` is
-`false`). The handler's comment says delimiters are left uninterpreted so other
-operators can read them. **User decision 2026-10-17: canonicalize the operand
-and keep the `Delimiter`** — `ce.box(['Delimiter', ['Add', 1, 2, 'x'], "'[]'"])`
-will hold the canonical operand `x + 3`. Count the changed snapshots first.
 
 ### The LaTeX parser cannot honor a deadline at all (OPEN but DEPRIORITIZED — ruled 2026-08-19 unlikely to ever be scheduled; found while fixing canonicalization deadline granularity, shipped 2026-08-15)
 

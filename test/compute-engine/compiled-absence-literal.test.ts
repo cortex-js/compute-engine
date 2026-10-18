@@ -261,6 +261,9 @@ describe('the targets with no object absence axis', () => {
       fallback: false,
     } as any);
     expect(coalesced.success).toBe(true);
-    expect(coalesced.run!({})).toEqual({ lo: 7, hi: 7 });
+    expect(coalesced.run!({})).toEqual({
+      kind: 'interval',
+      value: { lo: 7, hi: 7 },
+    });
   });
 });

@@ -438,12 +438,13 @@ describe('NON-FINITE TYPING CONVENTION', () => {
     // `isComplexInfinity` in the numeric-value type getters, which asks
     // whether the IMAGINARY part is infinite — and that is exactly the set of
     // values the engine prints as `~oo` (`1 + ∞i` and `0 + ∞i` both render
-    // `~oo`, while `∞ + i` renders `(Infinity + i)`). So an infinite imaginary
-    // part carries the `~oo` singleton, and an infinite REAL part paired with
-    // a finite imaginary part carries the tier `infinity`: it has a direction,
-    // so it is not `~oo`, and it has no singleton spelling of its own (ruling
-    // L2(a)). `imaginary` is reserved for a finite non-zero imaginary part
-    // paired with a zero real part.
+    // `~oo`). So an infinite imaginary part carries the `~oo` singleton. An
+    // infinite REAL part paired with a finite imaginary part (`∞ + i`) has
+    // the direction of the real axis: since 2026-10-18 it is boxed as the
+    // real infinity of the sign of its real part and types `+oo` or `-oo`
+    // (it used to keep its `Complex` spelling and type the tier `infinity`,
+    // ruling L2(a)). `imaginary` is reserved for a finite non-zero imaginary
+    // part paired with a zero real part.
     //
     // Both numeric-value lanes are exercised: the default engine (precision
     // 21) uses BigNumericValue; a machine-precision engine uses
@@ -465,16 +466,18 @@ describe('NON-FINITE TYPING CONVENTION', () => {
     const hiPrec = { num: '1.00000000000000000000000001' };
 
     test('bignum lane (default engine, precision 21)', () => {
-      expect(typeOf(['Complex', inf, 1])).toBe('infinity'); // ∞ + i
+      expect(typeOf(['Complex', inf, 1])).toBe('+oo'); // ∞ + i is +∞
+      expect(typeOf(['Complex', { num: '-Infinity' }, 1])).toBe('-oo');
       expect(typeOf(['Complex', 1, inf])).toBe('~oo'); // 1 + ∞i, prints ~oo
       expect(typeOf(['Complex', 0, inf])).toBe('~oo'); // 0 + ∞i, prints ~oo
       // ∞ real part with a high-precision (bignum) imaginary part
-      expect(typeOf(['Complex', inf, hiPrec])).toBe('infinity');
+      expect(typeOf(['Complex', inf, hiPrec])).toBe('+oo');
     });
 
     test('machine lane (precision = machine)', () => {
       const t = (expr: any) => ceMachine.box(expr).type.toString();
-      expect(t(['Complex', inf, 1])).toBe('infinity'); // ∞ + i
+      expect(t(['Complex', inf, 1])).toBe('+oo'); // ∞ + i is +∞
+      expect(t(['Complex', { num: '-Infinity' }, 1])).toBe('-oo');
       expect(t(['Complex', 1, inf])).toBe('~oo'); // 1 + ∞i, prints ~oo
       expect(t(['Complex', 0, inf])).toBe('~oo'); // 0 + ∞i, prints ~oo
     });
@@ -518,14 +521,15 @@ describe('NON-FINITE TYPING CONVENTION', () => {
         expect(product.evaluate().json).toBe('ComplexInfinity');
         expect(product.N().json).toBe('ComplexInfinity');
       }
-      // An infinite REAL part with a finite imaginary part is not `~oo`, and
-      // keeps its `Complex` spelling on both lanes.
-      for (const engine of [ce, ceMachine])
-        expect(engine.box(['Complex', inf, 1]).json).toEqual([
-          'Complex',
-          'PositiveInfinity',
-          { num: '1.0' },
-        ]);
+      // An infinite REAL part with a finite imaginary part is not `~oo`: it
+      // is the real infinity on both lanes (it kept its `Complex` spelling
+      // until 2026-10-18).
+      for (const engine of [ce, ceMachine]) {
+        expect(engine.box(['Complex', inf, 1]).json).toBe('PositiveInfinity');
+        expect(engine.box(['Complex', inf, hiPrec]).json).toBe(
+          'PositiveInfinity'
+        );
+      }
     });
 
     test('finite complex values keep their finite types', () => {

@@ -159,11 +159,13 @@ export function signFromAssumedPart(
 //   but no direction, so it has no real part, no imaginary part and no
 //   phase angle. All three answer NaN, the numeric codomain marker for a
 //   decided "no value" (`docs/ERROR-MODEL.md` §2 rule 4).
-// - An anonymous infinity is a complex literal whose REAL component is
-//   infinite and whose imaginary component is finite (`∞ + i`; a literal
-//   with an infinite imaginary component boxes as `~oo`). Its parts are
-//   its components: `Re(∞ + i) = +∞`, `Im(∞ + i) = 1`, and its phase angle
-//   is the direction of that vector, `Arg(∞ + i) = 0`, `Arg(−∞ + i) = π`.
+// - A complex literal whose REAL component is infinite and whose imaginary
+//   component is finite (`∞ + i`) is boxed as the real infinity of the sign
+//   of its real part, so `Re(∞ + i) = +∞`, `Im(∞ + i) = 0`,
+//   `Arg(∞ + i) = 0` and `Arg(−∞ + i) = π`. A literal with an infinite
+//   imaginary component boxes as `~oo`. (Until 2026-10-18 `∞ + i` was an
+//   "anonymous" infinity whose parts were its components, `Im(∞ + i) = 1`;
+//   the arms for it below are kept as a defensive answer.)
 //
 // Ruled as such 2026-09-02 (Arno); the batch record is in
 // `docs/plans/2026-08-30-error-model-implementation.md`, batch 9.

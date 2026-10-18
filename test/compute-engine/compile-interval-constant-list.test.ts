@@ -113,19 +113,20 @@ describe('a literal list of numbers on interval-js', () => {
     const fn = compile(ce.box(['List', 1, 2.5, 3]), { to: 'interval-js' });
     expect(fn.success).toBe(true);
     expect(fn.code).toBe('_k1');
-    const a = fn.run!({}) as { lo: number; hi: number }[];
-    const b = fn.run!({}) as { lo: number; hi: number }[];
+    type Point = { kind: 'interval'; value: { lo: number; hi: number } };
+    const a = fn.run!({}) as Point[];
+    const b = fn.run!({}) as Point[];
     expect(a).toEqual([
-      { lo: 1, hi: 1 },
-      { lo: 2.5, hi: 2.5 },
-      { lo: 3, hi: 3 },
+      { kind: 'interval', value: { lo: 1, hi: 1 } },
+      { kind: 'interval', value: { lo: 2.5, hi: 2.5 } },
+      { kind: 'interval', value: { lo: 3, hi: 3 } },
     ]);
     // The constant is shared across calls, so the answer is a copy: a caller
     // who writes to it cannot change what the next call answers.
     expect(a).not.toBe(b);
     expect(a[0]).not.toBe(b[0]);
-    a[0].lo = -100;
-    expect((fn.run!({}) as { lo: number }[])[0].lo).toBe(1);
+    a[0].value.lo = -100;
+    expect((fn.run!({}) as Point[])[0].value.lo).toBe(1);
   });
 
   test('the written-out elements of a literal Range are compact too', () => {

@@ -601,9 +601,16 @@ export const DEFINITIONS_UNITS: LatexDictionary = [
 
       // Fall through to default Quantity serialization.  A Measurement
       // magnitude (`5.1 ± 0.2`) is wrapped in parentheses so the unit applies
-      // to the whole measurement: `(5.1 \pm 0.2)\,\mathrm{cm}`.
+      // to the whole measurement: `(5.1 \pm 0.2)\,\mathrm{cm}`.  A sum
+      // magnitude is wrapped for the same reason: `(1+\pi)\,\mathrm{m}`,
+      // not `1+\pi\,\mathrm{m}`, which parses as `1 + π m`.
       let magLatex = serializer.serialize(magnitude);
-      if (operator(magnitude) === 'Measurement')
+      const magOperator = operator(magnitude);
+      if (
+        magOperator === 'Measurement' ||
+        magOperator === 'Add' ||
+        magOperator === 'Subtract'
+      )
         magLatex = `\\left(${magLatex}\\right)`;
       const unitStr = unitToMathrm(unit);
 

@@ -16,7 +16,14 @@ import {
   isNumber,
   isSymbol,
 } from '../boxed-expression/type-guards.js';
-import { boxedToUnitExpression, isSymbolicValue } from './units.js';
+import { asFloat } from '../boxed-expression/float-result.js';
+import {
+  affineMagnitude,
+  boxedToUnitExpression,
+  isExactConversion,
+  isSymbolicValue,
+  usesExpressionArithmetic,
+} from './units.js';
 import {
   convertUnit,
   convertCompoundUnit,
@@ -36,7 +43,6 @@ import {
   measurementMultiply,
   measurementDivide,
   measurementPower,
-  measurementAffine,
 } from './measurement-arithmetic.js';
 
 // ---------------------------------------------------------------------------
@@ -70,6 +76,13 @@ function unitSymbol(q: QuantityExpr): string | null {
  * is affine (`x → f·x + c`); the linear factor `f = convert(1) − convert(0)`
  * removes any additive offset (so the error scales by `|f|` while the offset
  * shifts the nominal only).  Returns `undefined` if the units are incompatible.
+ *
+ * A magnitude that has a numeric value (not a `Measurement`, not symbolic)
+ * is converted with expression arithmetic only when the conversion keeps an
+ * exact value exact (see `isExactConversion()`). Otherwise the result is a
+ * float, and the conversion is numeric: with an offset (a temperature), `f`
+ * is the difference of two floats and loses digits (`degC → degF` gives
+ * `1.7999999999999972`).
  */
 function convertMagnitude(
   ce: ComputeEngine,
@@ -79,18 +92,60 @@ function convertMagnitude(
   targetSymbol: string | null,
   targetUE: ReturnType<typeof boxedToUnitExpression>
 ): Expression | undefined {
+  const numeric = !isMeasurement(mag) && !isSymbolicValue(mag);
+  // The conversion is numeric only when it is not exact, so the result is a
+  // float, also when its value is an integer: `100 cm` converted to `m` is
+  // the float `1`.
+  const numericResult = (x: number | null) =>
+    x === null ? undefined : asFloat(ce.number(x));
   if (targetSymbol && opSymbol) {
     if (opSymbol === targetSymbol) return mag;
     const c0 = convertUnit(0, opSymbol, targetSymbol);
     const c1 = convertUnit(1, opSymbol, targetSymbol);
     if (c0 === null || c1 === null) return undefined;
-    return measurementAffine(ce, mag, c1 - c0, c0);
+    if (numeric && !isExactConversion(c0, c1))
+      return numericResult(convertUnit(mag.re, opSymbol, targetSymbol));
+    return affineMagnitude(ce, mag, c1 - c0, c0);
   }
   if (!opUE || !targetUE) return undefined;
   const c0 = convertCompoundUnit(0, opUE, targetUE);
   const c1 = convertCompoundUnit(1, opUE, targetUE);
   if (c0 === null || c1 === null) return undefined;
-  return measurementAffine(ce, mag, c1 - c0, c0);
+  if (numeric && !isExactConversion(c0, c1))
+    return numericResult(convertCompoundUnit(mag.re, opUE, targetUE));
+  return affineMagnitude(ce, mag, c1 - c0, c0);
+}
+
+// The error terms of the `Measurement` combinators multiply a value by the
+// square of a zero error, and for an infinite value that product is
+// `Indeterminate`: `2 · Quantity(+∞, m)` gave `(+∞ ± Indeterminate) m`. The
+// helpers below use the combinators only when an operand is a `Measurement`,
+// and plain expression arithmetic otherwise.
+
+function addMagnitudes(
+  ce: ComputeEngine,
+  ops: ReadonlyArray<Expression>
+): Expression | undefined {
+  if (ops.some((x) => isMeasurement(x))) return measurementAdd(ce, ops);
+  return ce.function('Add', ops).evaluate();
+}
+
+function multiplyMagnitudes(
+  ce: ComputeEngine,
+  ops: ReadonlyArray<Expression>
+): Expression | undefined {
+  if (ops.some((x) => isMeasurement(x))) return measurementMultiply(ce, ops);
+  return ce.function('Multiply', ops).evaluate();
+}
+
+function divideMagnitudes(
+  ce: ComputeEngine,
+  num: Expression,
+  den: Expression
+): Expression | undefined {
+  if (isMeasurement(num) || isMeasurement(den))
+    return measurementDivide(ce, num, den);
+  return num.div(den);
 }
 
 // ---------------------------------------------------------------------------
@@ -138,9 +193,10 @@ export function quantityAdd(
 
   // Measurement-carrying magnitudes: convert each to the target unit (scaling
   // its error by the conversion factor) then combine with error-propagating
-  // addition instead of raw numeric summation. A symbolic magnitude uses the
-  // same expression arithmetic, with no error.
-  if (quantities.some((q) => isMeasurement(q.op1) || isSymbolicValue(q.op1))) {
+  // addition instead of raw numeric summation. A symbolic or exact magnitude
+  // uses the same expression arithmetic, with no error (see
+  // `usesExpressionArithmetic()`).
+  if (usesExpressionArithmetic(quantities.map((q) => q.op1))) {
     const mags: Expression[] = [];
     for (let i = 0; i < quantities.length; i++) {
       const q = quantities[i];
@@ -155,7 +211,7 @@ export function quantityAdd(
       if (converted === undefined) return undefined;
       mags.push(converted);
     }
-    const combined = measurementAdd(ce, mags);
+    const combined = addMagnitudes(ce, mags);
     if (combined === undefined) return undefined;
     return ce._fn('Quantity', [combined, bestQ.op2]);
   }
@@ -188,7 +244,9 @@ export function quantityAdd(
     total += converted;
   }
 
-  return ce._fn('Quantity', [ce.number(total), bestQ.op2]);
+  // A float magnitude makes the sum a float, also when its value is an
+  // integer.
+  return ce._fn('Quantity', [asFloat(ce.number(total)), bestQ.op2]);
 }
 
 /**
@@ -212,14 +270,12 @@ export function quantityMultiply(
 
   // Measurement-carrying magnitudes (or scalars): multiply magnitudes with
   // error-propagating multiplication instead of raw numeric products. A
-  // symbolic scalar or magnitude uses the same expression arithmetic, with no
-  // error, so that the product stays symbolic.
-  if (
-    ops.some((x) => isMeasurement(x) || isSymbolicValue(x)) ||
-    quantities.some((q) => isMeasurement(q.op1) || isSymbolicValue(q.op1))
-  ) {
-    const factors: Expression[] = [...scalars, ...quantities.map((q) => q.op1)];
-    const combinedMag = measurementMultiply(ce, factors);
+  // symbolic or exact scalar or magnitude uses the same expression
+  // arithmetic, with no error, so that the product stays symbolic or exact
+  // (see `usesExpressionArithmetic()`).
+  const factors: Expression[] = [...scalars, ...quantities.map((q) => q.op1)];
+  if (usesExpressionArithmetic(factors)) {
+    const combinedMag = multiplyMagnitudes(ce, factors);
     if (combinedMag === undefined) return undefined;
 
     if (quantities.length === 1)
@@ -243,7 +299,7 @@ export function quantityMultiply(
     const q = quantities[0];
     const mag = q.op1.re;
     if (mag === undefined) return undefined;
-    return ce._fn('Quantity', [ce.number(scalarValue * mag), q.op2]);
+    return ce._fn('Quantity', [asFloat(ce.number(scalarValue * mag)), q.op2]);
   }
 
   // Multiple quantities: multiply magnitudes, combine units
@@ -276,9 +332,10 @@ export function quantityMultiply(
  * Checked BEFORE the Measurement fold at the call sites, mirroring the
  * handlers' precedence for mixed operands (`quantityAdd`/`quantityMultiply`
  * route Measurement-carrying magnitudes through the measurement combinators
- * themselves).  The result shape mirrors the handlers' numeric-approximation
- * branch: a Quantity wrapping a Measurement magnitude is `.N()`-ed, a plain
- * Quantity is already numeric and returned as-is.
+ * themselves).  The result is made numeric, as in the handlers'
+ * numeric-approximation branch: a Measurement magnitude, and an exact
+ * magnitude that the exact arithmetic of `quantityMultiply` kept exact, are
+ * `.N()`-ed.
  *
  * Keyed off the RESULT's operator, not the caller's: `addN` may return a
  * `Multiply` (`q + q` → `2·q`).  Returns `undefined` when there is nothing to
@@ -297,8 +354,7 @@ export function foldQuantityOperands(
   const r =
     operator === 'Add' ? quantityAdd(ce, ops) : quantityMultiply(ce, ops);
   if (r === undefined) return undefined;
-  if (isQuantity(r) && isMeasurement(r.op1)) return r.N();
-  return r;
+  return r.N();
 }
 
 /**
@@ -313,15 +369,14 @@ export function quantityDivide(
   const denQ = isQuantity(den) ? den : null;
 
   // Measurement-carrying magnitudes: propagate the error through the division.
-  // A symbolic operand or magnitude uses the same expression arithmetic, with
-  // no error.
-  const isExpressionMag = (x: Expression) =>
-    isMeasurement(x) || isSymbolicValue(x);
-  const numMagIsM =
-    isExpressionMag(num) || (numQ ? isExpressionMag(numQ.op1) : false);
-  const denMagIsM =
-    isExpressionMag(den) || (denQ ? isExpressionMag(denQ.op1) : false);
-  if (numMagIsM || denMagIsM) {
+  // A symbolic or exact operand or magnitude uses the same expression
+  // arithmetic, with no error (see `usesExpressionArithmetic()`). A division
+  // by an exact zero is left to the generic `Divide` handler, as on the
+  // numeric route below.
+  const numValue = numQ ? numQ.op1 : num;
+  const denValue = denQ ? denQ.op1 : den;
+  if (usesExpressionArithmetic([numValue, denValue])) {
+    if (isNumber(denValue) && denValue.isSame(0)) return undefined;
     const result = quantityDivideMeasurement(ce, num, den, numQ, denQ);
     if (result !== undefined) return result;
   }
@@ -345,7 +400,7 @@ export function quantityDivide(
         const numScale = getExpressionScale(numUE);
         const denScale = getExpressionScale(denUE);
         if (numScale !== null && denScale !== null)
-          return ce.number((numMag * numScale) / (denMag * denScale));
+          return asFloat(ce.number((numMag * numScale) / (denMag * denScale)));
       }
     }
 
@@ -360,7 +415,7 @@ export function quantityDivide(
     const scalar = den.re;
     if (mag === undefined || scalar === undefined || scalar === 0)
       return undefined;
-    return ce._fn('Quantity', [ce.number(mag / scalar), numQ.op2]);
+    return ce._fn('Quantity', [asFloat(ce.number(mag / scalar)), numQ.op2]);
   }
 
   if (!numQ && denQ) {
@@ -370,7 +425,7 @@ export function quantityDivide(
     if (scalar === undefined || mag === undefined || mag === 0)
       return undefined;
     const invertedUnit = ce._fn('Power', [denQ.op2, ce.number(-1)]);
-    return ce._fn('Quantity', [ce.number(scalar / mag), invertedUnit]);
+    return ce._fn('Quantity', [asFloat(ce.number(scalar / mag)), invertedUnit]);
   }
 
   return undefined;
@@ -403,14 +458,14 @@ function quantityDivideMeasurement(
         const numScale = getExpressionScale(numUE);
         const denScale = getExpressionScale(denUE);
         if (numScale !== null && denScale !== null && denScale !== 0) {
-          const ratio = measurementDivide(ce, numMag, denMag);
+          const ratio = divideMagnitudes(ce, numMag, denMag);
           if (ratio === undefined) return undefined;
           return scaleMagnitude(ce, ratio, numScale / denScale);
         }
       }
     }
 
-    const resultMag = measurementDivide(ce, numMag, denMag);
+    const resultMag = divideMagnitudes(ce, numMag, denMag);
     if (resultMag === undefined) return undefined;
     const resultUnit = ce._fn('Divide', [numQ.op2, denQ.op2]);
     return simplifyQuantityUnitMeasurement(ce, resultMag, resultUnit);
@@ -418,14 +473,14 @@ function quantityDivideMeasurement(
 
   if (numQ && !denQ) {
     // Quantity / scalar
-    const resultMag = measurementDivide(ce, numQ.op1, den);
+    const resultMag = divideMagnitudes(ce, numQ.op1, den);
     if (resultMag === undefined) return undefined;
     return ce._fn('Quantity', [resultMag, numQ.op2]);
   }
 
   if (!numQ && denQ) {
     // scalar / Quantity => Quantity with inverted unit
-    const resultMag = measurementDivide(ce, num, denQ.op1);
+    const resultMag = divideMagnitudes(ce, num, denQ.op1);
     if (resultMag === undefined) return undefined;
     const invertedUnit = ce._fn('Power', [denQ.op2, ce.number(-1)]);
     return ce._fn('Quantity', [resultMag, invertedUnit]);
@@ -501,12 +556,16 @@ function cancelCompoundUnit(
  * Try to simplify a compound unit to a named derived unit.
  * E.g. Multiply(N, m) → J, Divide(kg, Multiply(m, Power(s, 2))) → Pa.
  * If no simplification is found, returns the Quantity as-is.
+ *
+ * `mag` is the result of machine-number arithmetic with a float operand, so
+ * the magnitude is boxed as a float, also when its value is an integer.
  */
 function simplifyQuantityUnit(
   ce: ComputeEngine,
   mag: number,
   unit: Expression
 ): Expression {
+  const float = (x: number) => asFloat(ce.number(x));
   let ue = boxedToUnitExpression(unit);
 
   // First, structurally cancel any repeated unit factors that share a
@@ -517,7 +576,7 @@ function simplifyQuantityUnit(
     const cancelled = cancelCompoundUnit(ue);
     if (cancelled) {
       mag = mag * cancelled.magnitudeScale;
-      if (cancelled.rebuilt === null) return ce.number(mag);
+      if (cancelled.rebuilt === null) return float(mag);
       // A unit name is not a variable: box the rebuilt unit resolve-only, so
       // that a unit name with no definition is not declared in the current
       // scope. The named unit below is boxed the same way.
@@ -532,7 +591,7 @@ function simplifyQuantityUnit(
       // Dimensionless result (all exponents zero) → plain scalar
       if (isDimensionless(dim)) {
         const scale = getExpressionScale(ue);
-        if (scale !== null) return ce.number(mag * scale);
+        if (scale !== null) return float(mag * scale);
       }
       const match = findNamedUnit(dim);
       if (match) {
@@ -541,13 +600,13 @@ function simplifyQuantityUnit(
         const scale = getExpressionScale(ue);
         if (scale !== null)
           return ce._fn('Quantity', [
-            ce.number(mag * scale),
+            float(mag * scale),
             ce.symbol(match, { autoDeclare: false }),
           ]);
       }
     }
   }
-  return ce._fn('Quantity', [ce.number(mag), unit]);
+  return ce._fn('Quantity', [float(mag), unit]);
 }
 
 /**
@@ -606,7 +665,7 @@ function scaleMagnitude(
   scale: number
 ): Expression {
   if (scale === 1) return mag;
-  return measurementAffine(ce, mag, scale, 0);
+  return affineMagnitude(ce, mag, scale, 0);
 }
 
 /**
@@ -618,9 +677,12 @@ export function quantityPower(
   exp: Expression
 ): Expression | undefined {
   if (!isQuantity(base)) return undefined;
-  // A symbolic magnitude is raised with the expression arithmetic of the
-  // `Measurement` branch, with no error.
-  const magIsMeasurement = isMeasurement(base.op1) || isSymbolicValue(base.op1);
+  // A symbolic or exact magnitude is raised with the expression arithmetic of
+  // the `Measurement` branch, with no error: `Quantity(3, m)^-1` is
+  // `Quantity(1/3, m^-1)` and `Quantity(2, m)^(1/2)` is `Quantity(√2, m^(1/2))`
+  // (see `usesExpressionArithmetic()`). The exponent is read with it: a
+  // float exponent makes the power a float.
+  const magIsMeasurement = usesExpressionArithmetic([base.op1, exp]);
   const mag = base.op1.re;
   const n = exp.re;
   // A unit exponent must be a number: `Quantity(3, m)^n` stays unevaluated.
@@ -651,15 +713,8 @@ export function quantityPower(
     return ce._fn('Quantity', [poweredMag, resultUnit]);
   }
 
-  // An exact fractional exponent (the `1/2` of a square root) is evaluated
-  // exactly: `Math.pow` gives a float, but the square root of an exact `2`
-  // must stay `√2` under `evaluate()`. The square root of `9` is still `3`.
-  // A float exponent keeps the `Math.pow` arithmetic below.
-  if (!Number.isInteger(n) && isNumber(exp) && exp.isExact)
-    return ce._fn('Quantity', [
-      ce.function('Power', [base.op1, exp]).evaluate(),
-      resultUnit,
-    ]);
-
-  return ce._fn('Quantity', [ce.number(Math.pow(mag!, n)), resultUnit]);
+  return ce._fn('Quantity', [
+    asFloat(ce.number(Math.pow(mag!, n))),
+    resultUnit,
+  ]);
 }

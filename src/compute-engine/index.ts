@@ -1330,6 +1330,10 @@ export class ComputeEngine implements IComputeEngine {
    * @internal */
   _requestedPrecision: number | undefined = undefined;
 
+  /** See `IComputeEngine._numericRequest`.
+   * @internal */
+  _numericRequest = false;
+
   /** The registry assigned to `ce.effects`, before any `withEffects` change.
    * @internal */
   private _baseEffects: EffectHandlers = DEFAULT_EFFECT_HANDLERS;

@@ -211,7 +211,8 @@ function executeEpsilBatch(
   // an empty program is `Nothing`. A top-level `Block` node is unambiguously the
   // program wrapper: top-level `{…}` source is the collection grammar
   // (Set/Dictionary), statement blocks parse only in keyword position, and a
-  // single-statement program is returned unwrapped.
+  // program whose only statement is a `do { … }` block is wrapped too, so
+  // that block stays a nested scope (`Block(Block(…))`).
   const statements = operator(ast) === 'Block' ? [...operands(ast)] : [ast];
 
   // Where this program binds each of its names, for the "defined here" note a

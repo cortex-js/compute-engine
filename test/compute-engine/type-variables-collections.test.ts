@@ -144,12 +144,12 @@ describe('TYPE VARIABLES / collections — declared signatures', () => {
     // Design E E3: the predicate arm is an honest arrow (reduce order puts
     // the arrow arm first).
     expect(sig(ce, 'Partition')).toBe(
-      '(collection<T>, ((T) any -> boolean) | integer, integer?) -> list<list<T>> where T'
+      '(indexed_collection<T>, ((T) any -> boolean) | integer, integer?) -> list<list<T>> where T'
     );
     // …and the DISPLAYED type is the same honest polytype (the R-D5
     // grounding projection retired with the constructor).
     expect(ce.box('Partition').type.toString()).toBe(
-      '(collection<T>, ((T) any -> boolean) | integer, integer?) -> list<list<T>> where T'
+      '(indexed_collection<T>, ((T) any -> boolean) | integer, integer?) -> list<list<T>> where T'
     );
     // `ChunkBy`'s `key` slot is the PRIMITIVE `function`, not a contextual
     // callback, so it takes the leading string arm: a maximal run of a
@@ -160,7 +160,7 @@ describe('TYPE VARIABLES / collections — declared signatures', () => {
     // Design E E3: both arms carry honest key arrows (the string arm's
     // element type is `character`, a ground type).
     expect(sig(ce, 'ChunkBy')).toBe(
-      '((S, key: (character) any -> unknown) -> list<string> where S: string) & ((collection<T>, key: (T) any -> unknown) -> list<list<T>> where T)'
+      '((S, key: (character) any -> unknown) -> list<string> where S: string) & ((indexed_collection<T>, key: (T) any -> unknown) -> list<list<T>> where T)'
     );
   });
 });

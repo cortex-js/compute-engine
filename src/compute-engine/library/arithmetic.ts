@@ -358,7 +358,7 @@ import {
   quantityDivide,
   quantityPower,
 } from './quantity-arithmetic.js';
-import { isSymbolicValue } from './units.js';
+import { usesExpressionArithmetic } from './units.js';
 import {
   containsResidueClass,
   isResidueClass,
@@ -455,6 +455,7 @@ import {
 } from '../collection-utils.js';
 import { signFromAssumedPart } from './complex.js';
 import { complexParts } from './complex-parts.js';
+import { guardDigitsN } from './exact-operands-under-n.js';
 
 // When processing an arithmetic expression, the following are the core
 // canonical arithmetic operations to account for:
@@ -6026,14 +6027,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           evalDen.operator === 'Quantity'
         ) {
           const r = quantityDivide(engine!, evalNum, evalDen);
-          if (
-            numericApproximation &&
-            r &&
-            isQuantity(r) &&
-            isMeasurement(r.op1)
-          )
-            return r.N();
-          return r;
+          // An exact or Measurement magnitude is made numeric under `.N()`.
+          return numericApproximation ? r?.N() : r;
         }
         if (
           evalNum.operator === 'Measurement' ||
@@ -6717,7 +6712,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               ? 'unsigned'
               : undefined
           : undefined,
-      evaluate: evaluateGamma,
+      evaluate: guardDigitsN(evaluateGamma),
       // The exact positive-integer branch of `evaluateGamma` runs the
       // big-integer product of `Factorial`, which can take seconds below the
       // exact-digit cap (`Gamma(100001)`). The synchronous product reads the
@@ -6748,7 +6743,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // keeps its own head — as the synchronous handler answers.
           return isNumber(shifted) ? shifted : undefined;
         }
-        return evaluateGamma(ops, options);
+        return guardDigitsN(evaluateGamma)(ops, options);
       },
     },
 
@@ -6768,7 +6763,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           context.engine._typeResolver
         ),
 
-      evaluate: (ops, { numericApproximation, engine }) => {
+      evaluate: guardDigitsN((ops, { numericApproximation, engine }) => {
         const x = ops[0];
         // At the poles of Γ (the non-positive integers) |Γ| → ∞, so
         // ln Γ → +∞ (as in Mathematica's LogGamma and SymPy's loggamma).
@@ -6788,7 +6783,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               (x) => lngammaComplex(x)
             )
           : undefined;
-      },
+      }),
     },
 
     // Digamma function ψ(x) = d/dx ln(Γ(x)) = Γ'(x)/Γ(x)
@@ -6813,7 +6808,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           gammaPoleTypeOnTypes(ops[0]),
           context.engine._typeResolver
         ),
-      evaluate: ([x], { numericApproximation, engine }) => {
+      evaluate: guardDigitsN(([x], { numericApproximation, engine }) => {
         const special = polygammaValueAtExceptionalPoint(0, x, engine);
         if (special !== undefined) return special;
         if (!shouldNumericize(numericApproximation, x)) return undefined;
@@ -6828,7 +6823,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (result?.isNaN === true && isNumber(x) && x.isComplex && !x.isNaN)
           return undefined;
         return result;
-      },
+      }),
     },
 
     // Trigamma function ψ₁(x) = d/dx ψ(x) = d²/dx² ln(Γ(x))
@@ -6848,7 +6843,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           gammaPoleTypeOnTypes(ops[0]),
           context.engine._typeResolver
         ),
-      evaluate: ([x], { numericApproximation, engine }) => {
+      evaluate: guardDigitsN(([x], { numericApproximation, engine }) => {
         const special = polygammaValueAtExceptionalPoint(1, x, engine);
         if (special !== undefined) return special;
         if (!shouldNumericize(numericApproximation, x)) return undefined;
@@ -6863,7 +6858,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (result?.isNaN === true && isNumber(x) && x.isComplex && !x.isNaN)
           return undefined;
         return result;
-      },
+      }),
     },
 
     // PolyGamma function ψₙ(x) = dⁿ/dxⁿ ψ(x)
@@ -6907,7 +6902,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           context.engine._typeResolver
         );
       },
-      evaluate: ([n, x], { numericApproximation, engine }) => {
+      evaluate: guardDigitsN(([n, x], { numericApproximation, engine }) => {
         const order = asSmallInteger(n);
         const special = polygammaValueAtExceptionalPoint(order, x, engine, n);
         if (special !== undefined) return special;
@@ -6941,7 +6936,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (result?.isNaN === true && order !== null && isNumber(x) && !x.isNaN)
           return undefined;
         return result;
-      },
+      }),
     },
 
     // Riemann zeta function ζ(s) = Σ_{n=1}^∞ 1/n^s, and its two-argument
@@ -7001,7 +6996,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           context.engine._typeResolver
         );
       },
-      evaluate: (ops, { numericApproximation, engine }) => {
+      evaluate: guardDigitsN((ops, { numericApproximation, engine }) => {
         // Hurwitz zeta ζ(s,a) — Wolfram's `Zeta[s,a]`, the same function
         // `HurwitzZeta` below declares under its own name.
         if (ops.length === 2)
@@ -7049,7 +7044,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             .number(zetaEvenCoefficient(n / 2))
             .mul(engine.Pi.pow(n));
         return undefined;
-      },
+      }),
     },
 
     // Hurwitz zeta function ζ(s,a) = Σ_{n=0}^∞ (n+a)^{-s}, under Wolfram's
@@ -7091,7 +7086,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // A float operand gives a float result, also for the exact special
       // values (`HurwitzZeta(0.0, 2)` is the float `-1.5`, not `-3/2`).
       evaluate: floatResultIfFloatOperand(
-        (ops, { numericApproximation, engine }) => {
+        guardDigitsN((ops, { numericApproximation, engine }) => {
           if (ops.length !== 2) return undefined;
           return evaluateHurwitzZeta(
             engine,
@@ -7099,7 +7094,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             ops[1],
             numericApproximation
           );
-        }
+        })
       ),
     },
 
@@ -7113,10 +7108,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       signature: '(complex | infinity) -> number',
       examples: ['[DirichletEta(2), DirichletEta(1), N(DirichletEta(1/2))]'],
       nanBehavior: 'propagate',
-      evaluate: (ops, { numericApproximation, engine }) =>
+      evaluate: guardDigitsN((ops, { numericApproximation, engine }) =>
         ops.length === 1
           ? evaluateDirichletEta(engine, ops[0], numericApproximation)
-          : undefined,
+          : undefined
+      ),
     },
 
     // Dirichlet beta β(s) = Σ_{n≥0} (−1)^n (2n+1)^(−s), entire. Wolfram's
@@ -7129,10 +7125,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       signature: '(complex | infinity) -> number',
       examples: ['[DirichletBeta(1), DirichletBeta(3), N(DirichletBeta(1/2))]'],
       nanBehavior: 'propagate',
-      evaluate: (ops, { numericApproximation, engine }) =>
+      evaluate: guardDigitsN((ops, { numericApproximation, engine }) =>
         ops.length === 1
           ? evaluateDirichletBeta(engine, ops[0], numericApproximation)
-          : undefined,
+          : undefined
+      ),
     },
 
     // Lerch transcendent Φ(z,s,a) = Σ_{k=0}^∞ zᵏ(k+a)^{-s} (Wolfram's
@@ -7176,7 +7173,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // A float operand gives a float result, also for the exact special
       // values (`LerchPhi(0.0, 1, 1)` is the float `1`).
       evaluate: floatResultIfFloatOperand(
-        (ops, { numericApproximation, engine, expression }) => {
+        guardDigitsN((ops, { numericApproximation, engine, expression }) => {
           if (ops.length !== 3) return undefined;
           return evaluateLerchPhi(
             engine,
@@ -7186,7 +7183,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             numericApproximation,
             expression
           );
-        }
+        })
       ),
     },
 
@@ -7222,7 +7219,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           context.engine._typeResolver
         );
       },
-      evaluate: ([a, b], { numericApproximation, engine }) => {
+      evaluate: guardDigitsN(([a, b], { numericApproximation, engine }) => {
         // The infinite points are exact, so they are answered on both
         // routes (the exact rational form below already answered 0 for a
         // SIGNED infinity against a positive-integer partner; `~oo` and the
@@ -7258,7 +7255,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         return shouldNumericize(numericApproximation, a, b)
           ? apply2(a, b, beta, (a, b) => bigBeta(engine, a, b))
           : undefined;
-      },
+      }),
     },
 
     // Lambert W function: W(x)·e^(W(x)) = x
@@ -7287,21 +7284,19 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // decided here (ruling recorded in
       // `docs/plans/2026-08-30-error-model-implementation.md`, Phase F
       // batch 8; each limit verified numerically):
-      // `W₀(+∞) = +∞` (W₀(10⁶) = 11.4, growing like ln x); `W₀(−∞)`
-      // follows the `Ln(−∞)` treatment — `W₀(−x) ≈ ln x + iπ` (W₀(−10¹²) =
-      // 24.4 + 3.02i, the imaginary part tending to π), an infinite real
-      // part with a finite imaginary offset that no exact number spells,
-      // so `evaluate()` stays symbolic and `.N()` answers the machine
-      // complex `∞ + iπ`; `W(~oo) = ~oo` by the modulus rule
+      // `W₀(+∞) = +∞` (W₀(10⁶) = 11.4, growing like ln x); `W₀(−∞) = +∞`,
+      // as `Ln(−∞)` — `W₀(−x) ≈ ln x + iπ` (W₀(−10¹²) = 24.4 + 3.02i, the
+      // imaginary part tending to π), an infinite real part with a finite
+      // imaginary offset, and such a value is the real infinity `+∞`;
+      // `W(~oo) = ~oo` by the modulus rule
       // (|W(z)| grows without bound in every direction); an anonymous
       // infinity is `NaN`. The `~oo` and anonymous-infinity answers hold
       // for every branch (`W_k(z) ≈ ln z + 2πik` has an infinite modulus
       // in every direction on every branch). On a branch k ≠ 0 the real
       // infinities follow the `W₀(−∞)` treatment: `W_k(x) ≈ ln x + 2πik`
       // for x → +∞ and `W_k(−x) ≈ ln x + (2k + 1)πi` for x → +∞
-      // (W₁(10³⁰⁰) = 684.3 + 6.27i, W₋₁(−10¹²⁶) = 285.0 − 3.13i), so
-      // `.N()` answers `∞ + 2πki` and `∞ + (2k + 1)πi`, the values of
-      // mpmath's `lambertw`, and `evaluate()` stays symbolic. `NaN`
+      // (W₁(10³⁰⁰) = 684.3 + 6.27i, W₋₁(−10¹²⁶) = 285.0 − 3.13i): the
+      // imaginary part stays finite, so the value is `+∞` too. `NaN`
       // propagates (explicit: the carrier is not a subtype of `complex`).
       //
       // A finite argument outside a branch's real domain (`W₀(−1)`,
@@ -7323,61 +7318,62 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       nanBehavior: 'propagate',
       type: (ops, context) =>
         BoxedType.forResult(lambertWType(ops), context.engine._typeResolver),
-      evaluate: (ops, { numericApproximation, engine, expression }) => {
-        const x = ops[0];
-        // Branch index: default 0 (principal W₀). A symbolic branch, or an
-        // integer branch too large for a machine integer, keeps the
-        // expression inert. The signature rejects a non-integer branch
-        // literal at boxing, so it does not get here.
-        let branch = 0;
-        if (ops[1] !== undefined) {
-          const k = asSmallInteger(ops[1]);
-          if (k === null) return undefined;
-          branch = k;
+      evaluate: guardDigitsN(
+        (ops, { numericApproximation, engine, expression }) => {
+          const x = ops[0];
+          // Branch index: default 0 (principal W₀). A symbolic branch, or an
+          // integer branch too large for a machine integer, keeps the
+          // expression inert. The signature rejects a non-integer branch
+          // literal at boxing, so it does not get here.
+          let branch = 0;
+          if (ops[1] !== undefined) {
+            const k = asSmallInteger(ops[1]);
+            if (k === null) return undefined;
+            branch = k;
+          }
+          const point = infinitePoint(x);
+          if (point !== undefined) {
+            if (point === 'anonymous') return engine.NaN;
+            if (point === '~oo') return engine.ComplexInfinity;
+            // `+∞` and `−∞` on every branch: the real part of `W_k(±x)` grows
+            // like `ln x` and the imaginary part tends to a finite multiple of
+            // π, and such a value is the real infinity `+∞`.
+            return engine.PositiveInfinity;
+          }
+          // W_k(0) = −∞ on a branch k ≠ 0 (W₀(0) = 0 comes from the kernels).
+          if (branch !== 0 && isNumber(x) && x.isSame(0))
+            return engine.NegativeInfinity;
+          // The branch point: W₀(−1/e) = W₋₁(−1/e) = −1, exactly. It is read
+          // on the operand BEFORE its numeric evaluation (under `.N()` the
+          // handler receives a float): −1/e rounded to a double is just below
+          // −1/e, outside the real domain, and the kernels would give
+          // −1 ± 8.2·10⁻⁹i for it. The test is on x·e, which canonicalizes to
+          // −1 for each spelling of −1/e (`-e^(-1)`, `-1/e`, `-exp(-1)`).
+          const raw =
+            isFunction(expression) && expression.nops >= 1 ? expression.op1 : x;
+          if (
+            (branch === 0 || branch === -1) &&
+            !isNumber(raw) &&
+            raw.mul(engine.E).isSame(-1)
+          )
+            return engine.NegativeOne;
+          if (!shouldNumericize(numericApproximation, x)) return undefined;
+          // The real kernels give `NaN` outside the real domain of the branch,
+          // and `apply()` then uses the complex kernel.
+          const result = apply(
+            x,
+            (v) => lambertW(v, branch),
+            (v) => bigLambertW(engine, v, branch),
+            (z) => lambertWComplex(z, branch)
+          );
+          // A `NaN` from the complex kernel means that its iteration did not
+          // converge (the argument itself is never NaN here: the dispatch
+          // gate propagated it before the handler ran) — stay symbolic rather
+          // than report `NaN`.
+          if (result !== undefined && result.isNaN === true) return undefined;
+          return result;
         }
-        const point = infinitePoint(x);
-        if (point !== undefined) {
-          if (point === 'anonymous') return engine.NaN;
-          if (point === '~oo') return engine.ComplexInfinity;
-          if (point === '+oo' && branch === 0) return engine.PositiveInfinity;
-          if (!numericApproximation) return undefined;
-          const im =
-            point === '+oo' ? 2 * Math.PI * branch : (2 * branch + 1) * Math.PI;
-          return engine.number(engine.complex(Infinity, im));
-        }
-        // W_k(0) = −∞ on a branch k ≠ 0 (W₀(0) = 0 comes from the kernels).
-        if (branch !== 0 && isNumber(x) && x.isSame(0))
-          return engine.NegativeInfinity;
-        // The branch point: W₀(−1/e) = W₋₁(−1/e) = −1, exactly. It is read
-        // on the operand BEFORE its numeric evaluation (under `.N()` the
-        // handler receives a float): −1/e rounded to a double is just below
-        // −1/e, outside the real domain, and the kernels would give
-        // −1 ± 8.2·10⁻⁹i for it. The test is on x·e, which canonicalizes to
-        // −1 for each spelling of −1/e (`-e^(-1)`, `-1/e`, `-exp(-1)`).
-        const raw =
-          isFunction(expression) && expression.nops >= 1 ? expression.op1 : x;
-        if (
-          (branch === 0 || branch === -1) &&
-          !isNumber(raw) &&
-          raw.mul(engine.E).isSame(-1)
-        )
-          return engine.NegativeOne;
-        if (!shouldNumericize(numericApproximation, x)) return undefined;
-        // The real kernels give `NaN` outside the real domain of the branch,
-        // and `apply()` then uses the complex kernel.
-        const result = apply(
-          x,
-          (v) => lambertW(v, branch),
-          (v) => bigLambertW(engine, v, branch),
-          (z) => lambertWComplex(z, branch)
-        );
-        // A `NaN` from the complex kernel means that its iteration did not
-        // converge (the argument itself is never NaN here: the dispatch
-        // gate propagated it before the handler ran) — stay symbolic rather
-        // than report `NaN`.
-        if (result !== undefined && result.isNaN === true) return undefined;
-        return result;
-      },
+      ),
     },
 
     // Bessel function of the first kind J_n(x)
@@ -7623,9 +7619,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         }
 
         // The exceptional points answer the same exact values on the
-        // numeric route (`Ln(+∞) = +∞`, `Ln(~oo) = ~oo`), and `Ln(−∞)` its
-        // machine complex `∞ + iπ`.
-        const special = logarithmAtExceptionalPoint(engine, z, undefined, true);
+        // numeric route (`Ln(+∞) = +∞`, `Ln(−∞) = +∞`, `Ln(~oo) = ~oo`).
+        const special = logarithmAtExceptionalPoint(engine, z, undefined);
         if (special !== undefined) return special;
 
         // A negative real above machine precision: `ln(−x) = ln(x) + iπ`
@@ -7761,14 +7756,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         }
         // The exceptional points answer their exact quotient values on the
         // numeric route too (the machine kernels below would give the
-        // wrong sign at `Log(0, 1/2)` and NaN at `Log(8, −∞)`), and
-        // `Log(−∞, b)` its machine complex.
+        // wrong sign at `Log(0, 1/2)` and NaN at `Log(8, −∞)`).
         {
           const special = logarithmAtExceptionalPoint(
             ce,
             ops[0],
-            ops[1] ?? ce.number(10),
-            true
+            ops[1] ?? ce.number(10)
           );
           if (special !== undefined) return special;
         }
@@ -9055,10 +9048,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           return r;
         }
         if (isQuantity(evalX)) {
-          // A symbolic magnitude has no numeric value (its `.re` is `NaN`):
-          // negate it with the expression arithmetic of the `Measurement`
-          // branch, with no error.
-          if (isMeasurement(evalX.op1) || isSymbolicValue(evalX.op1)) {
+          // A symbolic magnitude has no numeric value (its `.re` is `NaN`),
+          // and an exact magnitude (`π`) must stay exact: negate it with the
+          // expression arithmetic of the `Measurement` branch, with no error.
+          if (usesExpressionArithmetic([evalX.op1])) {
             const negM = measurementNegate(engine, evalX.op1);
             if (negM !== undefined) {
               const r = engine._fn('Quantity', [negM, evalX.op2]);
@@ -9067,7 +9060,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           }
           const mag = evalX.op1.re;
           if (mag !== undefined)
-            return engine._fn('Quantity', [engine.number(-mag), evalX.op2]);
+            return engine._fn('Quantity', [
+              asFloat(engine.number(-mag)),
+              evalX.op2,
+            ]);
         }
         if (isMeasurement(evalX)) {
           const r = measurementNegate(engine, evalX);
@@ -9657,14 +9653,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         }
         if (evalBase.operator === 'Quantity') {
           const r = quantityPower(engine!, evalBase, n);
-          if (
-            numericApproximation &&
-            r &&
-            isQuantity(r) &&
-            isMeasurement(r.op1)
-          )
-            return r.N();
-          return r;
+          // An exact or Measurement magnitude is made numeric under `.N()`.
+          return numericApproximation ? r?.N() : r;
         }
         const evalExp = n;
         if (
@@ -14599,9 +14589,8 @@ function addEvaluatedOperands(
   }
   if (evaluated.some((x) => x.operator === 'Quantity')) {
     const r = quantityAdd(engine!, evaluated);
-    if (numericApproximation && r && isQuantity(r) && isMeasurement(r.op1))
-      return r.N();
-    return r;
+    // An exact or Measurement magnitude is made numeric under `.N()`.
+    return numericApproximation ? r?.N() : r;
   }
   if (evaluated.some((x) => x.operator === 'Measurement')) {
     const r = measurementAdd(engine!, evaluated);
@@ -14775,9 +14764,8 @@ function mulEvaluatedOperands(
   }
   if (evaluated.some((x) => x.operator === 'Quantity')) {
     const r = quantityMultiply(engine!, evaluated);
-    if (numericApproximation && r && isQuantity(r) && isMeasurement(r.op1))
-      return r.N();
-    return r;
+    // An exact or Measurement magnitude is made numeric under `.N()`.
+    return numericApproximation ? r?.N() : r;
   }
   if (evaluated.some((x) => x.operator === 'Measurement')) {
     const r = measurementMultiply(engine!, evaluated);

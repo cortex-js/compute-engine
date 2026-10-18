@@ -389,17 +389,22 @@ describe('LAMBERTW OF A COMPLEX ARGUMENT, EVERY BRANCH', () => {
   });
 
   test('the real infinities on a branch k ≠ 0', () => {
-    // W_k(x) ≈ ln x + 2πik for x → +∞ and W_k(−x) ≈ ln x + (2k + 1)πi:
-    // mpmath's lambertw(+inf, k) and lambertw(-inf, k).
-    expect(
-      ce.box(['LambertW', 'PositiveInfinity', 1]).evaluate().operator
-    ).toBe('LambertW');
-    const a = ce.box(['LambertW', 'PositiveInfinity', 1]).N();
-    expect(isNumber(a) && a.re).toBe(Infinity);
-    expect(isNumber(a) && a.im).toBeCloseTo(2 * Math.PI, 15);
-    const b = ce.box(['LambertW', 'NegativeInfinity', -1]).N();
-    expect(isNumber(b) && b.re).toBe(Infinity);
-    expect(isNumber(b) && b.im).toBeCloseTo(-Math.PI, 15);
+    // W_k(x) ≈ ln x + 2πik for x → +∞ and W_k(−x) ≈ ln x + (2k + 1)πi
+    // (mpmath's lambertw(+inf, k) and lambertw(-inf, k) are `∞ + 2πki` and
+    // `∞ + (2k + 1)πi`). An infinite real part with a finite imaginary part
+    // is the real infinity `+∞`, on both routes (W₁(10¹⁰⁰) is
+    // 224.8 + 6.26i, W₋₁(−10¹⁰⁰) is 224.8 − 3.13i).
+    for (const [x, k] of [
+      ['PositiveInfinity', 1],
+      ['NegativeInfinity', -1],
+      ['NegativeInfinity', 2],
+    ] as const) {
+      expect(ce.box(['LambertW', x, k]).evaluate().toString()).toBe('+oo');
+      expect(ce.box(['LambertW', x, k]).N().toString()).toBe('+oo');
+    }
+    const a = ce.box(['LambertW', 1e100, 1]).N();
+    expect(isNumber(a) && a.re).toBeGreaterThan(200);
+    expect(isNumber(a) && a.im).toBeCloseTo(2 * Math.PI, 1);
   });
 });
 

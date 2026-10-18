@@ -9,12 +9,14 @@ import { hasInfiniteComponent } from './logarithm.js';
  * - `'+oo'` and `'-oo'`: the two signed real infinities.
  * - `'~oo'`: the unsigned complex infinity (the point at infinity of the
  *   Riemann sphere, which has no direction).
- * - `'anonymous'`: a complex literal with an infinite component that is not
- *   one of the three named infinities, such as `∞ + i`. These are members
- *   of the `infinity` TYPE that neither `isInfinity` nor `isFinite`
- *   reports; the test is asked of the numeric value, never of the machine
- *   projections, because a finite bignum beyond the double range (`10^1000`)
- *   projects `re` to `Infinity` (`hasInfiniteComponent`).
+ * - `'anonymous'`: a number literal with an infinite component that is not
+ *   one of the three named infinities. `ce.number()` does not make one: a
+ *   value with an infinite imaginary part is `~oo`, and a value with an
+ *   infinite real part and a finite imaginary part (`∞ + i`) is `±∞`
+ *   (`canonicalNumber()`). The case is kept as a defensive answer. The test
+ *   is asked of the numeric value, never of the machine projections,
+ *   because a finite bignum beyond the double range (`10^1000`) projects
+ *   `re` to `Infinity` (`hasInfiniteComponent`).
  *
  * The special-function heads (the Γ family, the polygammas, `Zeta`, the
  * Bessel and Airy functions, the trigonometric integrals, the elliptic

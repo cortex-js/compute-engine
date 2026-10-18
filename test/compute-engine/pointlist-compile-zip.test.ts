@@ -755,13 +755,14 @@ describe('PointList — the source predicate agrees across the two compile route
   // two COMPILE copies must agree exactly; the type handler's copy deliberately
   // diverges on the last two rows (narrowing it is interpreter-visible), which
   // is why this table is read through compile outcomes only.
-  // A `refused` row is a component that the boxing refuses (a point is not a
-  // coordinate), so the compiler sees an invalid expression on both routes.
+  // A `refused` row is a component that the boxing refuses (a point or a set
+  // is not a coordinate), so the compiler sees an invalid expression on both
+  // routes.
   const table: { type: string; source: boolean; refused?: boolean }[] = [
     { type: 'tuple', source: false, refused: true }, // a point, bare spelling
     { type: 'tuple<number, number>', source: false, refused: true }, // node
     { type: 'list<number>', source: true },
-    { type: 'set<number>', source: false }, // not INDEXED
+    { type: 'set<number>', source: false, refused: true }, // not INDEXED
     { type: 'number | list<number>', source: false }, // union: ambiguous
     { type: 'list<number> | tuple<number, number>', source: false }, // ditto
     { type: 'vector<3>', source: true },
@@ -835,14 +836,19 @@ describe('PointList — the scalar/non-scalar split agrees across the two compil
   //   `compileJSPointList` classifies the component (throw vs per-point slot);
   // - with NO source, the definition handler classifies it itself, on a
   //   language it lowers (`glsl`): decline vs a `Tuple`-identical emission.
+  //
+  // A `refused` row is a component that the boxing refuses (a collection
+  // without positions is not a coordinate), so the compiler sees an invalid
+  // expression on both routes.
   const table: {
     type: string;
     scalar: boolean;
     slot: unknown;
     glslRejects?: RegExp;
+    refused?: boolean;
   }[] = [
-    { type: 'set<number>', scalar: false, slot: undefined }, // a collection
-    { type: 'dictionary', scalar: false, slot: undefined }, // …so is a map
+    { type: 'set<number>', scalar: false, slot: undefined, refused: true },
+    { type: 'dictionary', scalar: false, slot: undefined, refused: true },
     { type: 'unknown', scalar: true, slot: 7 }, // the load-bearing plot case
     // On the JS route a string component is a SLOT (strings are broadcast-
     // atomic, so it is never a source). The GLSL route rejects it instead:
@@ -862,10 +868,14 @@ describe('PointList — the scalar/non-scalar split agrees across the two compil
 
   it.each(table)(
     'JS zip (a source is present): a `$type` component is scalar=$scalar',
-    ({ type, scalar, slot }) => {
+    ({ type, scalar, slot, refused }) => {
       const ce = splitEngine(type);
       const build = () =>
         new JavaScriptTarget().compile(ce.box(['PointList', 'n', 'c']));
+      if (refused) {
+        expect(build).toThrow(/Could not compile invalid expression/);
+        return;
+      }
       if (!scalar) {
         expect(build).toThrow(/is neither a scalar slot nor a list source/);
         return;
@@ -885,10 +895,14 @@ describe('PointList — the scalar/non-scalar split agrees across the two compil
 
   it.each(table)(
     'library route (no source): a `$type` component is scalar=$scalar',
-    ({ type, scalar, glslRejects }) => {
+    ({ type, scalar, glslRejects, refused }) => {
       const ce = splitEngine(type);
       const glsl = new GLSLTarget();
       const build = () => glsl.compile(ce.box(['PointList', 'x', 'c']));
+      if (refused) {
+        expect(build).toThrow(/Could not compile invalid expression/);
+        return;
+      }
       if (!scalar) {
         expect(build).toThrow(/is collection-valued/);
         return;

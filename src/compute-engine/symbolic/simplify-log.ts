@@ -234,14 +234,14 @@ function simplifyLogCore(x: Expression): RuleStep | undefined {
     const arg = x.op1;
     if (!arg) return undefined;
 
-    // ln(0) = −∞, ln(+∞) = +∞, ln(~oo) = ~oo, ln(NaN) = NaN: the same values
+    // ln(0) = −∞, ln(±∞) = +∞, ln(~oo) = ~oo, ln(NaN) = NaN: the same values
     // as the evaluate route (`logarithmAtExceptionalPoint`). This branch is
     // currently shadowed by the unconditional "Ln, Log (basic evaluation)"
     // rule in simplify-rules.ts, which calls `.ln()` and reduces these
     // before this one runs — but keep it in sync with `evaluate()` in case
-    // that ordering changes. `ln(−∞)` has no exact spelling and declines.
+    // that ordering changes.
     {
-      const special = logarithmAtExceptionalPoint(ce, arg, undefined, false);
+      const special = logarithmAtExceptionalPoint(ce, arg, undefined);
       if (special !== undefined)
         return { value: special, because: 'ln at an exceptional point' };
     }
@@ -391,10 +391,9 @@ function simplifyLogCore(x: Expression): RuleStep | undefined {
     // the quotient rule of `logarithmAtExceptionalPoint`, the single source
     // of truth (`Log(8, 1) = ~oo`, `Log(8, 0) = 0`, `Log(0, 1/2) = +∞`,
     // `Log(+∞, +∞) = NaN`, …). This rule used to keep its own table, which
-    // had drifted (base 0 or 1 rewrote to NaN). `Log(−∞, b)` has no exact
-    // spelling and declines here, as it stays symbolic under `evaluate()`.
+    // had drifted (base 0 or 1 rewrote to NaN).
     {
-      const special = logarithmAtExceptionalPoint(ce, arg, logBase, false);
+      const special = logarithmAtExceptionalPoint(ce, arg, logBase);
       if (special !== undefined)
         return { value: special, because: 'log at an exceptional point' };
     }

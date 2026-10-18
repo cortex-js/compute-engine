@@ -29,7 +29,10 @@ import {
   machineNumberOf,
 } from './boxed-expression/machine-number.js';
 import { machineBroadcast } from './boxed-expression/machine-broadcast.js';
-import { literalMayEraseElement } from './boxed-expression/nothing-erasure.js';
+import {
+  literalMayEraseElement,
+  literalWithErasureResolved,
+} from './boxed-expression/nothing-erasure.js';
 import { isTransitivelyPure } from './boxed-expression/transitive-purity.js';
 import {
   isFiniteCount,
@@ -4094,6 +4097,18 @@ export function collectionSubset(
  * consumes no random draw. The answer is also `undefined` when the value
  * still has such an element (a condition with no value yet): the handlers
  * then read the operands, as before.
+ *
+ * The evaluation follows the numeric request of the evaluation that calls
+ * the handler (`IComputeEngine._numericRequest`). Without one, the value is
+ * the exact value of the literal, so that a handler that compares elements
+ * (`contains`, `indexWhere`) reads values. Under `.N()`, only the elements
+ * that may erase are evaluated, and the other elements are kept as written
+ * (`literalWithErasureResolved`): the caller approximates what it reads, as
+ * it does for a literal with no such element, and an exact evaluation of
+ * every element could cost much more. With `H = Sum(1/k, k, 1, 6000)`, an
+ * exact rational of about 2 600 digits, `Count(Map(Sin, [If(c, 1, Nothing),
+ * H])).N()` took 11 s, for two exact evaluations of `H`, where it takes
+ * less than 0.1 s without the element that may erase.
  */
 function erasedLiteralValue(
   expr: Expression
@@ -4102,8 +4117,11 @@ function erasedLiteralValue(
   if (expr.operator !== 'List' && expr.operator !== 'Tuple') return undefined;
   if (!literalMayEraseElement(expr)) return undefined;
   if (!isTransitivelyPure(expr)) return undefined;
-  const value = expr.evaluate();
-  if (!isFunction(value, expr.operator)) return undefined;
+  const value = expr.engine._numericRequest
+    ? literalWithErasureResolved(expr)
+    : expr.evaluate();
+  if (value === undefined || !isFunction(value, expr.operator))
+    return undefined;
   if (literalMayEraseElement(value)) return undefined;
   return value;
 }

@@ -106,13 +106,14 @@ function evaluated(json: unknown, subs: Record<string, number> = {}): number[] {
   return value.ops!.map((x) => x.re);
 }
 
-/** The lower bounds of an array of intervals, after checking that each is a
- *  point. */
+/** The lower bounds of an array of interval results, after checking that
+ *  each is the `interval` result of a point. */
 function points(value: any): number[] {
   expect(Array.isArray(value)).toBe(true);
-  return value.map((iv: any) => {
-    expect(iv.lo).toBe(iv.hi);
-    return iv.lo;
+  return value.map((r: any) => {
+    expect(r.kind).toBe('interval');
+    expect(r.value.lo).toBe(r.value.hi);
+    return r.value.lo;
   });
 }
 

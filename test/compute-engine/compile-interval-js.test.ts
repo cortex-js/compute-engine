@@ -166,9 +166,9 @@ describe('INTERVAL JS EXECUTION', () => {
     const fn = compile(expr, { to: 'interval-js' });
     const result = fn.run!({});
 
-    // Constants compile to point intervals (plain Interval, not IntervalResult)
-    expect(result.lo).toBe(5);
-    expect(result.hi).toBe(5);
+    // A constant compiles to a point interval, which the runner answers as
+    // the `interval` result, the shape of every scalar value.
+    expect(result).toEqual({ kind: 'interval', value: { lo: 5, hi: 5 } });
   });
 
   test('evaluates point interval input', () => {
@@ -369,7 +369,7 @@ describe('INTERVAL JS EXECUTION', () => {
     expect(result.value.hi).toBeCloseTo(3, 6);
   });
 
-  test('piecewise without a default returns empty when no branch matches', () => {
+  test('piecewise without a default returns empty when no branch matches, partial when undecided', () => {
     for (const expr of [
       ce.expr(['Which', ['Less', 'x', 0], 1]),
       ce.expr(['Which', ['Less', 'x', 0], 1, ['Less', 'x', 1], 2]),
@@ -384,13 +384,40 @@ describe('INTERVAL JS EXECUTION', () => {
       });
     }
 
+    // An undecided condition with no default: the arm is a value over part
+    // of the cell only, so the answer is `partial`, as an undecided `When`
+    // answers — not an `interval`, which would claim the value over the
+    // whole cell. The same holds for an arm that is itself empty (an `At`
+    // out of range) beside the default arm.
     const fn = compile(ce.expr(['Which', ['Less', 'x', 0], 1]), {
       to: 'interval-js',
     });
     expect(fn.run!({ x: { lo: -1, hi: 1 } })).toEqual({
-      kind: 'interval',
+      kind: 'partial',
       value: { lo: 1, hi: 1 },
+      domainClipped: 'both',
     });
+    const emptyArm = compile(
+      ce.expr([
+        'Which',
+        ['Less', 'x', 1],
+        ['At', ['List', 10, 20, 30], 7],
+        'True',
+        ['At', ['List', 10, 20, 30], 2],
+      ]),
+      { to: 'interval-js' }
+    );
+    expect(emptyArm.success).toBe(true);
+    expect(emptyArm.run!({ x: { lo: -1, hi: 3 } })).toEqual({
+      kind: 'partial',
+      value: { lo: 20, hi: 20 },
+      domainClipped: 'both',
+    });
+    expect(emptyArm.run!({ x: { lo: 2, hi: 3 } })).toEqual({
+      kind: 'interval',
+      value: { lo: 20, hi: 20 },
+    });
+    expect(emptyArm.run!({ x: { lo: -1, hi: 0 } })).toEqual({ kind: 'empty' });
   });
 
   test('piecewise union on indeterminate condition', () => {
@@ -1486,7 +1513,7 @@ describe('INTERVAL JS - collection access', () => {
     expect(fn.success).toBe(true);
     expect(emitted(fn)).toContain('_IA.point(20)');
     expect(fn.code).toBe('_k1');
-    expect(fn.run!({})).toEqual({ lo: 20, hi: 20 });
+    expect(fn.run!({})).toEqual({ kind: 'interval', value: { lo: 20, hi: 20 } });
   });
 
   test('a literal-list index out of range folds to empty', () => {
@@ -1594,9 +1621,9 @@ describe('INTERVAL JS - collections decline where the value model has no room', 
     const fn = compile(ceNo.box(['List', 1, 2, 3]), { to: 'interval-js' });
     expect(fn.success).toBe(true);
     expect(fn.run!({})).toEqual([
-      { lo: 1, hi: 1 },
-      { lo: 2, hi: 2 },
-      { lo: 3, hi: 3 },
+      { kind: 'interval', value: { lo: 1, hi: 1 } },
+      { kind: 'interval', value: { lo: 2, hi: 2 } },
+      { kind: 'interval', value: { lo: 3, hi: 3 } },
     ]);
     for (const root of [
       ceNo.box(['List', ['Less', 'x', 1], ['Less', 'x', 2]]),
@@ -1657,8 +1684,8 @@ describe('INTERVAL JS - a single point at the ROOT', () => {
     expect(fn.success).toBe(true);
     expect(fn.code).toBe('[_.a, _.b]');
     expect(fn.run!({ a: { lo: 1, hi: 2 }, b: 3 })).toEqual([
-      { lo: 1, hi: 2 },
-      { lo: 3, hi: 3 },
+      { kind: 'interval', value: { lo: 1, hi: 2 } },
+      { kind: 'interval', value: { lo: 3, hi: 3 } },
     ]);
   });
 
@@ -1669,8 +1696,8 @@ describe('INTERVAL JS - a single point at the ROOT', () => {
     expect(fn.success).toBe(true);
     expect(fn.code).toBe('[_.a, _.b]');
     expect(fn.run!({ a: { lo: 1, hi: 2 }, b: 3 })).toEqual([
-      { lo: 1, hi: 2 },
-      { lo: 3, hi: 3 },
+      { kind: 'interval', value: { lo: 1, hi: 2 } },
+      { kind: 'interval', value: { lo: 3, hi: 3 } },
     ]);
   });
 
@@ -1715,22 +1742,22 @@ describe('INTERVAL JS - a single point at the ROOT', () => {
     expect(fn.error).toContain('is a collection');
     // A `Which` whose arm is a point is a SELECTION among values at the root:
     // the point where its condition holds, the number where it fails, and no
-    // one value (the absence marker) where the condition is undecided.
+    // one value (the absence marker, which the runner answers as `empty`)
+    // where the condition is undecided.
     const fw = compile(
       cePt.box(['Which', ['Less', 'a', 1], ['Tuple', 'a', 'b'], 'True', 0]),
       { to: 'interval-js' }
     );
     expect(fw.success).toBe(true);
     expect(fw.run!({ a: { lo: 0, hi: 0 }, b: 2 })).toEqual([
-      { lo: 0, hi: 0 },
-      { lo: 2, hi: 2 },
+      { kind: 'interval', value: { lo: 0, hi: 0 } },
+      { kind: 'interval', value: { lo: 2, hi: 2 } },
     ]);
     expect(fw.run!({ a: { lo: 5, hi: 5 }, b: 2 })).toEqual({
       kind: 'interval',
       value: { lo: 0, hi: 0 },
     });
-    const straddle = fw.run!({ a: { lo: 0, hi: 5 }, b: 2 }) as { lo: number };
-    expect(Number.isNaN(straddle.lo)).toBe(true);
+    expect(fw.run!({ a: { lo: 0, hi: 5 }, b: 2 })).toEqual({ kind: 'empty' });
   });
 
   test('a point with a broadcasting component is a list of points', () => {
@@ -1744,12 +1771,12 @@ describe('INTERVAL JS - a single point at the ROOT', () => {
     expect(list.success).toBe(true);
     expect(list.run!({ b: { lo: 3, hi: 3 } })).toEqual([
       [
-        { lo: 1, hi: 1 },
-        { lo: 3, hi: 3 },
+        { kind: 'interval', value: { lo: 1, hi: 1 } },
+        { kind: 'interval', value: { lo: 3, hi: 3 } },
       ],
       [
-        { lo: 2, hi: 2 },
-        { lo: 3, hi: 3 },
+        { kind: 'interval', value: { lo: 2, hi: 2 } },
+        { kind: 'interval', value: { lo: 3, hi: 3 } },
       ],
     ]);
     const tuple = compile(cePt.box(['Tuple', ['List', 1, 2], 'b']), {
@@ -1774,7 +1801,10 @@ describe('INTERVAL JS - a single point at the ROOT', () => {
     });
     expect(fn.success).toBe(true);
     expect(fn.code).toBe('_.a');
-    expect(fn.run!({ a: { lo: 1, hi: 2 }, b: 3 })).toEqual({ lo: 1, hi: 2 });
+    expect(fn.run!({ a: { lo: 1, hi: 2 }, b: 3 })).toEqual({
+      kind: 'interval',
+      value: { lo: 1, hi: 2 },
+    });
   });
 });
 
@@ -1792,7 +1822,7 @@ describe('INTERVAL JS - ACCESSORS OVER AN ASSIGNED LITERAL', () => {
     expect(fn.success).toBe(true);
     expect(emitted(fn)).toContain('_IA.point(20)');
     expect(fn.code).toBe('_k1');
-    expect(fn.run!({})).toEqual({ lo: 20, hi: 20 });
+    expect(fn.run!({})).toEqual({ kind: 'interval', value: { lo: 20, hi: 20 } });
   });
 
   test('At over an assigned list with a run-time index reads the array from the constant table', () => {
@@ -2041,12 +2071,12 @@ describe('INTERVAL JS - CONSTANT ARRAYS ARE BOUND ONCE PER ARTIFACT', () => {
     const b = fn.run!({}) as unknown[][];
     expect(a).toEqual([
       [
-        { lo: 1, hi: 1 },
-        { lo: 2, hi: 2 },
+        { kind: 'interval', value: { lo: 1, hi: 1 } },
+        { kind: 'interval', value: { lo: 2, hi: 2 } },
       ],
       [
-        { lo: 3, hi: 3 },
-        { lo: 4, hi: 4 },
+        { kind: 'interval', value: { lo: 3, hi: 3 } },
+        { kind: 'interval', value: { lo: 4, hi: 4 } },
       ],
     ]);
     expect(a).not.toBe(b);

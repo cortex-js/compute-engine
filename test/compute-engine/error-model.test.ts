@@ -1117,12 +1117,16 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     expect(
       ce2.box(['Arsech', NEG]).evaluate().isSame(ce2.I.mul(ce2.Pi).div(2))
     ).toBe(true);
-    // `Arcosh(−∞) = ∞ + iπ` follows the `Ln(−∞)` treatment: symbolic
-    // under evaluate(), machine complex under .N().
-    expect(ce2.box(['Arcosh', NEG]).evaluate().operator).toBe('Arcosh');
-    const acosh = ce2.box(['Arcosh', NEG]).N();
-    expect(acosh.re).toBe(Infinity);
-    expect(acosh.im).toBeCloseTo(Math.PI, 12);
+    // `Arcosh(−∞)` tends to `∞ + iπ`, an infinite real part with a finite
+    // imaginary part, which is the real infinity `+∞` since 2026-10-18 (it
+    // was symbolic under evaluate() and the machine complex `∞ + iπ` under
+    // .N()).
+    expect(ce2.box(['Arcosh', NEG]).evaluate().isSame(ce2.PositiveInfinity)).toBe(
+      true
+    );
+    expect(ce2.box(['Arcosh', NEG]).N().isSame(ce2.PositiveInfinity)).toBe(
+      true
+    );
     for (const op of [
       'Sinh',
       'Tanh',
@@ -1173,9 +1177,14 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     expect(ce2.box(['Arccos', 'NegativeInfinity']).simplify().operator).toBe(
       'Arccos'
     );
-    expect(ce2.box(['Arcosh', 'NegativeInfinity']).simplify().operator).toBe(
-      'Arcosh'
-    );
+    // `Arcosh(−∞)` is `+∞` on every route since 2026-10-18 (it was a
+    // decline).
+    expect(
+      ce2
+        .box(['Arcosh', 'NegativeInfinity'])
+        .simplify()
+        .isSame(ce2.PositiveInfinity)
+    ).toBe(true);
     expect(ce2.box(['Arccot', 'ComplexInfinity']).simplify().operator).toBe(
       'Arccot'
     );
@@ -1443,12 +1452,13 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     const negBase = ce2.box(['Log', 8, -2]).N();
     expect(negBase.re).toBeCloseTo(0.13926097, 6);
     expect(negBase.im).toBeCloseTo(-0.63118087, 6);
-    // `Log(−∞, b)` follows `Ln(−∞)`: symbolic under evaluate(), the machine
-    // complex `∞ + i·π/ln b` under N() (it used to answer `~oo`).
-    expect(ce2.box(['Log', NEG, 10]).evaluate().operator).toBe('Log');
-    const negArg = ce2.box(['Log', NEG, 10]).N();
-    expect(negArg.re).toBe(Infinity);
-    expect(negArg.im).toBeCloseTo(Math.PI / Math.LN10, 10);
+    // `Log(−∞, b)` follows `Ln(−∞) = +∞`: the limit `∞ + i·π/ln b` has a
+    // finite imaginary part, so it is `+∞` for a base `b > 1` and `−∞` for
+    // `0 < b < 1`, on both routes, since 2026-10-18 (it was symbolic under
+    // evaluate() and that machine complex under N(); before, `~oo`).
+    both(['Log', NEG, 10], is(ce2.PositiveInfinity));
+    both(['Log', NEG, ['Rational', 1, 2]], is(ce2.NegativeInfinity));
+    both(['Ln', NEG], is(ce2.PositiveInfinity));
     // The Log aliases canonicalize to Log and inherit the values.
     both(['Log2', COO], isCoo);
     both(['Lg', POS], is(ce2.PositiveInfinity));
@@ -1507,21 +1517,19 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
       true
     );
 
-    // An "anonymous" infinity — a complex literal with an infinite
-    // component (`∞ + i`), a member of the `infinity` type that neither
-    // `isInfinity` nor `isFinite` reports — takes the same rules: its
-    // modulus is infinite. A finite bignum beyond the double range
-    // (`10^1000`) is NOT one, although its machine projection is
-    // `Infinity` (dual-review catch, 2026-09-01).
+    // A complex literal with an infinite real part and a finite imaginary
+    // part (`∞ + i`) is boxed as the real infinity of the sign of its real
+    // part since 2026-10-18 (it used to be an "anonymous" member of the
+    // `infinity` type, which took the same rules as its modulus). A finite
+    // bignum beyond the double range (`10^1000`) is NOT infinite, although
+    // its machine projection is `Infinity` (dual-review catch, 2026-09-01):
+    // `Log(−∞, 10^1000)` is `+∞` (a finite base), not the `∞/∞` form.
     const anon = ['Complex', POS, 1];
     both(['Sqrt', anon], is(ce2.PositiveInfinity));
-    both(['Sqrt', ['Complex', NEG, 1]], isCoo);
-    both(['Log', anon, POS], isNaNv); // ∞/∞
+    both(['Sqrt', ['Complex', NEG, 1]], isCoo); // Sqrt(−∞)
+    both(['Log', anon, POS], isIndet); // ∞/∞
     const huge = ['Power', 10, 1000];
-    expect(ce2.box(['Log', NEG, huge]).N().im).toBeCloseTo(
-      Math.PI / (1000 * Math.LN10),
-      12
-    );
+    both(['Log', NEG, huge], is(ce2.PositiveInfinity));
     expect(
       ce2
         .box(['Sqrt', huge])
@@ -1546,7 +1554,8 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     // incomplete Γ); (3) LambertW outside a real branch stays symbolic;
     // (4) the Bessel ORDER slot is finite-only; (5) a limit that is an
     // infinite value in a non-real direction is spelled `~oo`; (6) an
-    // anonymous infinity (`∞ + i`) answers NaN; (7) the parameter-heavy
+    // anonymous infinity (`∞ + i`) answers NaN (since 2026-10-18 `∞ + i` is
+    // boxed as `+∞`, see `ANON` below); (7) the parameter-heavy
     // heads stay symbolic at an infinite operand, except the two cusp
     // values; (8) Ci/Chi take the principal value on the negative axis.
     // Every pin below holds on evaluate() AND N().
@@ -1554,6 +1563,10 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     const POS = 'PositiveInfinity';
     const NEG = 'NegativeInfinity';
     const COO = 'ComplexInfinity';
+    // A complex literal with an infinite real part and a finite imaginary
+    // part (`∞ + i`) is boxed as `+∞` since 2026-10-18 (it used to be an
+    // "anonymous" infinity that answered NaN on every head here). So each
+    // row at `ANON` must give the answer of the same expression at `+∞`.
     const ANON = ['Complex', POS, 1];
     // `isIndet` is the check of a form with no value: `Indeterminate` under
     // evaluate(), `NaN` under N().
@@ -1563,6 +1576,19 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
         true
       );
     };
+    const asPos = (expr: any): any =>
+      Array.isArray(expr) && expr[0] === 'Complex' && expr[1] === POS
+        ? POS
+        : Array.isArray(expr)
+          ? expr.map(asPos)
+          : expr;
+    const bothAsPos = (expr: any) => {
+      expect(ce2.box(expr).isSame(ce2.box(asPos(expr)))).toBe(true);
+      expect(
+        ce2.box(expr).evaluate().isSame(ce2.box(asPos(expr)).evaluate())
+      ).toBe(true);
+      expect(ce2.box(expr).N().isSame(ce2.box(asPos(expr)).N())).toBe(true);
+    };
     const isIndet = (v: any) => isIndeterminateValue(ce2, v);
     const isCoo = (v: any) => v.isSame(ce2.ComplexInfinity);
     const isNaNv = (v: any) => isNaNValue(ce2, v);
@@ -1571,13 +1597,13 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     const isNeg = is(ce2.NegativeInfinity);
     const symbolic = (head: string) => (v: any) => v.operator === head;
 
-    // The Γ family keeps its 2026-08-31 values; an anonymous infinity is
-    // NaN on every head now (Factorial2 used to stay inert there).
+    // The Γ family keeps its 2026-08-31 values (Factorial2 used to stay
+    // inert at an anonymous infinity).
     for (const h of ['Gamma', 'GammaLn', 'Factorial', 'Factorial2']) {
       both([h, POS], isPos);
       both([h, NEG], isIndet);
       both([h, COO], isIndet);
-      both([h, ANON], isNaNv);
+      bothAsPos([h, ANON]);
       both([h, 'NaN'], isNaNv);
     }
     // The incomplete Γ(s, z): `Γ(s, +∞) = 0` (a symbolic s included),
@@ -1622,7 +1648,7 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     for (const h of [['Digamma'], ['Trigamma'], ['PolyGamma', 2]]) {
       both([...h, NEG], isIndet);
       both([...h, COO], isIndet);
-      both([...h, ANON], isNaNv);
+      bothAsPos([...h, ANON]);
     }
     // A symbolic order at +∞ depends on the order: stays symbolic.
     both(['PolyGamma', 'm', POS], symbolic('PolyGamma'));
@@ -1644,7 +1670,7 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     both(['Zeta', POS], is(1));
     both(['Zeta', NEG], isIndet);
     both(['Zeta', COO], isIndet);
-    both(['Zeta', ANON], isNaNv);
+    bothAsPos(['Zeta', ANON]);
 
     // Beta: 0 at every infinity against a positive-integer partner (the
     // exact rational form; `Beta(~oo, 2)` answered NaN), 0 at +∞ against a
@@ -1660,37 +1686,32 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     both(['Beta', POS, ['Rational', -3, 2]], isPos);
     both(['Beta', POS, -1], isNaNv);
     both(['Beta', NEG, ['Rational', 1, 2]], isIndet);
-    both(['Beta', ANON, 2], isNaNv);
+    bothAsPos(['Beta', ANON, 2]);
     both(['Beta', ['Complex', 1, 2], 2], symbolic('Beta'));
 
     // LambertW: `W₀(+∞) = +∞` folds under evaluate() (it folded only under
-    // N()); `W₀(−∞)` follows Ln(−∞) — symbolic under evaluate(), `∞ + iπ`
-    // under N() (N() used to answer −∞); `W(~oo) = ~oo`. Outside a real
+    // N()); `W₀(−∞)` follows Ln(−∞): it tends to `∞ + iπ`, which is `+∞`
+    // since 2026-10-18 (it was symbolic under evaluate() and `∞ + iπ`
+    // under N(); before, N() answered −∞); `W(~oo) = ~oo`. Outside a real
     // branch an exact argument stays symbolic under evaluate(), and N()
     // gives the complex value (mpmath `lambertw`); at −∞ the −1 branch
-    // gives `∞ − iπ` under N().
+    // tends to `∞ − iπ`, which is `+∞` as well.
     both(['LambertW', POS], isPos);
-    expect(ce2.box(['LambertW', NEG]).evaluate().operator).toBe('LambertW');
-    const wNeg = ce2.box(['LambertW', NEG]).N();
-    expect(wNeg.re).toBe(Infinity);
-    expect(wNeg.im).toBeCloseTo(Math.PI, 12);
+    both(['LambertW', NEG], isPos);
     both(['LambertW', COO], isCoo);
-    both(['LambertW', ANON], isNaNv);
+    bothAsPos(['LambertW', ANON]);
     for (const expr of [
       ['LambertW', -1],
       ['LambertW', ['Rational', 1, 2], -1],
-      ['LambertW', NEG, -1],
     ])
       expect(ce2.box(expr).evaluate().operator).toBe('LambertW');
+    both(['LambertW', NEG, -1], isPos);
     const wm1 = ce2.box(['LambertW', -1]).N();
     expect(wm1.re).toBeCloseTo(-0.31813150520476413, 14);
     expect(wm1.im).toBeCloseTo(1.3372357014306895, 14);
     const wHalf = ce2.box(['LambertW', ['Rational', 1, 2], -1]).N();
     expect(wHalf.re).toBeCloseTo(-2.2591588985336064, 14);
     expect(wHalf.im).toBeCloseTo(-4.220960969266197, 14);
-    const wNegM1 = ce2.box(['LambertW', NEG, -1]).N();
-    expect(wNegM1.re).toBe(Infinity);
-    expect(wNegM1.im).toBeCloseTo(-Math.PI, 12);
 
     // Bessel: the ORDER slot is finite-only (a boxing error at ±∞ and ~oo);
     // the argument slot has the verified limits, `~oo` for K at −∞ (the
@@ -1716,7 +1737,7 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     both(['BesselK', 2, 0], isCoo);
     for (const h of ['BesselJ', 'BesselY', 'BesselI', 'BesselK']) {
       both([h, 0, COO], isIndet);
-      both([h, 0, ANON], isNaNv);
+      bothAsPos([h, 0, ANON]);
       both([h, 0, 'NaN'], isNaNv);
       expect(symbolic(h)(ce2.box([h, 0, ['Complex', 1, 2]]).evaluate())).toBe(
         true
@@ -1742,14 +1763,16 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     both(['AiryBiPrime', NEG], isIndet);
     for (const h of ['AiryAi', 'AiryBi', 'AiryAiPrime', 'AiryBiPrime']) {
       both([h, COO], isIndet);
-      both([h, ANON], isNaNv);
+      bothAsPos([h, ANON]);
     }
 
     // The trigonometric integrals: Si keeps ±π/2; Ci/Chi take the
     // PRINCIPAL value on the negative axis (`Ci(−x) = Ci(x) + iπ`; the
     // kernels returned the real part alone), so `Ci(−∞) = iπ` (N()
-    // answered 0) and `Chi(−∞)` follows Ln(−∞) (it answered +∞); NaN at
-    // ~oo and at an anonymous infinity (Shi/Chi answered ~oo there).
+    // answered 0) and `Chi(−∞)` follows Ln(−∞): it tends to `∞ + iπ`,
+    // which is `+∞` since 2026-10-18 (before, it was symbolic under
+    // evaluate() and the machine complex `∞ + iπ` under N(); earlier it
+    // answered +∞); NaN at ~oo (Shi/Chi answered ~oo there).
     // (The exact values numericize under N(), per the exactness contract.)
     expect(ce2.box(['SinIntegral', POS]).evaluate().isSame(ce2.Pi.div(2))).toBe(
       true
@@ -1764,12 +1787,7 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     const ciNeg = ce2.box(['CosIntegral', -2]).N();
     expect(ciNeg.re).toBeCloseTo(0.4229808287748649, 12);
     expect(ciNeg.im).toBeCloseTo(Math.PI, 12);
-    expect(ce2.box(['CoshIntegral', NEG]).evaluate().operator).toBe(
-      'CoshIntegral'
-    );
-    const chiNeg = ce2.box(['CoshIntegral', NEG]).N();
-    expect(chiNeg.re).toBe(Infinity);
-    expect(chiNeg.im).toBeCloseTo(Math.PI, 12);
+    both(['CoshIntegral', NEG], isPos);
     for (const h of [
       'SinIntegral',
       'CosIntegral',
@@ -1777,7 +1795,7 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
       'CoshIntegral',
     ]) {
       both([h, COO], isIndet);
-      both([h, ANON], isNaNv);
+      bothAsPos([h, ANON]);
     }
     // A real operand of unknown sign no longer claims a real value for
     // Ci/Chi; a proven non-negative one keeps the extended real line.
@@ -1795,7 +1813,7 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     both(['ExpIntegralEi', POS], isPos);
     both(['ExpIntegralEi', NEG], is(0));
     both(['ExpIntegralEi', COO], isIndet);
-    both(['ExpIntegralEi', ANON], isNaNv);
+    bothAsPos(['ExpIntegralEi', ANON]);
     both(['LogIntegral', POS], isPos);
     both(['LogIntegral', NEG], isCoo);
     both(['LogIntegral', COO], isIndet);
@@ -1808,7 +1826,7 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     both(['EllipticK', POS], is(0));
     both(['EllipticK', NEG], is(0));
     both(['EllipticK', COO], is(0));
-    both(['EllipticK', ANON], isNaNv);
+    bothAsPos(['EllipticK', ANON]);
     both(['EllipticE', NEG], isPos);
     both(['EllipticE', POS], isCoo);
     both(['EllipticE', COO], isCoo);
@@ -1841,11 +1859,11 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     both(['PolyLog', 2, COO], symbolic('PolyLog'));
     both(['PolyLog', 0, POS], symbolic('PolyLog')); // the reduction would answer ∞/(1−∞)
     both(['JacobiTheta', 3, POS, 'ImaginaryUnit'], symbolic('JacobiTheta'));
-    both(['Hypergeometric2F1', 1, 1, 2, ANON], isNaNv);
+    bothAsPos(['Hypergeometric2F1', 1, 1, 2, ANON]);
     both(['DedekindEta', ['Multiply', 'ImaginaryUnit', POS]], is(0));
     both(['EisensteinE', 4, ['Multiply', 'ImaginaryUnit', POS]], is(1));
     both(['DedekindEta', POS], symbolic('DedekindEta'));
-    both(['EisensteinE', 4, ANON], isNaNv);
+    bothAsPos(['EisensteinE', 4, ANON]);
 
     // Seams: no head of the batch has a `canonical` handler except
     // `Factorial`, so a proven off-carrier operand is rejected at BOXING
@@ -1875,6 +1893,10 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     const POS = 'PositiveInfinity';
     const NEG = 'NegativeInfinity';
     const COO = 'ComplexInfinity';
+    // A complex literal with an infinite real part and a finite imaginary
+    // part is boxed as the real infinity of the sign of its real part since
+    // 2026-10-18: `ANON` is `+∞` and `ANON_NEG` is `-∞`. Their imaginary
+    // part is `0` (it used to be the finite imaginary part, `1` and `2`).
     const ANON = ['Complex', POS, 1];
     const ANON_NEG = ['Complex', NEG, 2];
     // `isIndet` is the check of a form with no value: `Indeterminate` under
@@ -1903,8 +1925,8 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
 
     // `~oo` has no direction, so no real part, no imaginary part and no
     // phase angle: NaN on all three (Real and Imaginary used to answer +∞).
-    // The signed infinities keep their axis; an anonymous infinity reads
-    // its components (ruling 1). NaN propagates (Imaginary(NaN) used to
+    // The signed infinities keep their axis; an anonymous infinity read
+    // its components (ruling 1) until it was boxed as a signed infinity. NaN propagates (Imaginary(NaN) used to
     // answer 0).
     for (const h of ['Real', 'Imaginary', 'Argument']) {
       both([h, COO], isIndet);
@@ -1916,15 +1938,15 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     both(['Real', ANON], isPos);
     both(['Real', ANON_NEG], isNeg);
     both(['Imaginary', POS], is(0));
-    both(['Imaginary', ANON], is(1));
-    both(['Imaginary', ANON_NEG], is(2));
+    both(['Imaginary', ANON], is(0));
+    both(['Imaginary', ANON_NEG], is(0));
     both(['Argument', POS], is(0));
     both(['Argument', NEG], isPi);
     both(['Argument', ANON], is(0));
     both(['Argument', ANON_NEG], isPi);
     // The aliases follow their targets on every route.
     both(['Re', COO], isIndet);
-    both(['Im', ANON], is(1));
+    both(['Im', ANON], is(0));
     both(['Arg', ANON_NEG], isPi);
 
     // Conjugate: a polytype head (`(T) -> T where T: number`), the first to
@@ -1937,9 +1959,7 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     both(['Conjugate', POS], isPos);
     both(['Conjugate', NEG], isNeg);
     both(['Conjugate', COO], isCoo);
-    const conjAnon = ce2.box(['Conjugate', ANON]).evaluate();
-    expect(conjAnon.re).toBe(Infinity);
-    expect(conjAnon.im).toBe(-1);
+    both(['Conjugate', ANON], isPos);
     expect(ce2.box(['Conjugate', ['Sinc', 'z9']]).isValid).toBe(true);
     // The NaN admission reaches the POLYTYPE boxing route too: a NaN
     // literal at a bound the generic solver refuses (`nan` is not below
@@ -2028,23 +2048,24 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     expect(ce2.box(['ComplexRoots', 8, 3]).evaluate().nops).toBe(3);
 
     // Erfi: bounded on the imaginary axis (`erfi(iy) = i·erf(y)`), so no
-    // limit at complex infinity — `~oo` and an anonymous infinity are
-    // off-carrier (the `Erf` arrangement; `Erfi(~oo)` used to answer
-    // `~oo`); the signed infinities keep their values; NaN propagates.
+    // limit at complex infinity — `~oo` is off-carrier (the `Erf`
+    // arrangement; `Erfi(~oo)` used to answer `~oo`); the signed infinities
+    // keep their values, also `∞ + i`, which is boxed as `+∞`; NaN
+    // propagates.
     both(['Erfi', POS], isPos);
     both(['Erfi', NEG], isNeg);
     both(['Erfi', 'NaN'], isNaNv);
     expect(ce2.box(['Erfi', 'NaN']).type.toString()).toBe('nan');
     boxError(['Erfi', COO]);
-    boxError(['Erfi', ANON]);
+    both(['Erfi', ANON], isPos);
 
     // ErfInv (ruling 3): no value at any infinity — `Indeterminate` at an
-    // exact one, NaN at an anonymous infinity (a float literal); `~oo`, an
+    // exact one, also at `∞ + i`, which is boxed as `+∞`; `~oo`, an
     // anonymous infinity and a non-real finite argument used to stay inert;
     // the real arguments outside [−1, 1] used to answer NaN and stay
     // symbolic now.
     for (const x of [POS, NEG, COO]) both(['ErfInv', x], isIndet);
-    both(['ErfInv', ANON], isNaNv);
+    both(['ErfInv', ANON], isIndet);
     both(['ErfInv', 'NaN'], isNaNv);
     both(['ErfInv', 2], symbolic('ErfInv'));
     both(['ErfInv', -2], symbolic('ErfInv'));
@@ -2120,7 +2141,10 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     expect(typeOf(['Fract', 'NaN'])).toBe('nan');
     expect(typeOf(['Fract', POS])).toBe('nan');
     both(['Fract', COO], isIndet);
-    for (const x of [ANON, NONREAL]) boxError(['Fract', x]);
+    // `∞ + i` is boxed as `+∞` (since 2026-10-18), so it has no fractional
+    // part either; it used to be a boxing error, as a non-real value is.
+    both(['Fract', ANON], isIndet);
+    boxError(['Fract', NONREAL]);
     both(['Fract', ['Rational', -7, 2]], (v) => v.re === 0.5);
     expect(ce2.box(['Fract', POS]).sgn).toBe('unsigned');
     expect(ce2.box(['Fract', 'NaN']).sgn).toBe('unsigned');
@@ -3951,7 +3975,7 @@ describe('the arithmetic core declares its domains', () => {
         .box(['Divide', ['Quantity', 5, { str: 'Meter' }], 2])
         .evaluate()
         .toString()
-    ).toBe('2.5 Meter');
+    ).toBe('5/2 Meter');
 
     // A fresh symbol is still inferred `number`, not the declared carrier:
     // the inference comes from `checkNumericArgs`, which the canonical

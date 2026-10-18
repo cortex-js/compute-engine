@@ -170,13 +170,19 @@ const PYTHON_KEYWORDS: ReadonlySet<string> = new Set([
 
 /**
  * Fail closed when `id`, emitted as a bare Python identifier, is a Python
- * keyword. Returns `id` unchanged otherwise. Applied to a free symbol's name
+ * keyword, or is not a Python identifier at all (`a b`, `1x`), which would
+ * not parse. Returns `id` unchanged otherwise. Applied to a free symbol's name
  * (`mangleId`) and to a `vars` mapping whose source is a bare identifier.
+ * The syntax test is the one `pythonCheckBindingName()` uses.
  */
 function pythonCheckIdentifier(id: string): string {
   if (PYTHON_KEYWORDS.has(id))
     throw new Error(
       `"${id}" is a reserved word in python and cannot be used as a variable name. Rename it, or map it to another name with \`vars\`, before compiling to Python (fail closed, D6).`
+    );
+  if (!PYTHON_IDENTIFIER.test(id))
+    throw new Error(
+      `"${id}" is not a Python identifier and cannot be used as a variable name. Rename it, or map it to another name with \`vars\`, before compiling to Python (fail closed, D6).`
     );
   return id;
 }
@@ -2621,6 +2627,31 @@ function pythonAssertExpressionBody(subject: string, expr: Expression): void {
  * unwrapped to the single line `s = x`, which stays declined.
  */
 function pythonAssertReturnableBody(subject: string, expr: Expression): void {
+  pythonAssertReturnableSelection(subject, expr);
+  if (isTailAssignmentBlock(expr)) return;
+  const head = statementBodyHead(expr);
+  if (head === undefined) return;
+  throw pythonStatementBodyError(subject, head);
+}
+
+/**
+ * Fail closed when the value statement of a body is a selection whose arms
+ * are statements. Used by `compileFunction()` (`pythonAssertReturnableBody`)
+ * and by `compile()`, where the emitted `if:`/`else:` block has no `return`
+ * either: `If(x > 0, Block(s ≔ x; s + 1), 0)` gave a body that ran to `None`
+ * where the interpreter gives `4` at `x = 3`.
+ *
+ * With `valueArmsOnly` (the `compile()` route), only a statement arm that
+ * has a value — a block that ends with a value, or an assignment — declines.
+ * An arm that is a `Break`, a `Continue` or a `Loop` keeps the statement
+ * form on that route.
+ */
+function pythonAssertReturnableSelection(
+  subject: string,
+  expr: Expression,
+  valueArmsOnly = false
+): void {
+  const declines = valueArmsOnly ? pythonArmCarriesValue : pythonArmIsStatement;
   // The third shape, which `statementBodyHead` does not report: a selection
   // whose arms are statements (`If(c, r ≔ 1, r ≔ 2)`) lowers to an
   // `if:`/`else:` BLOCK (`compilePythonIfStatement`), and a block cannot be
@@ -2637,7 +2668,7 @@ function pythonAssertReturnableBody(subject: string, expr: Expression): void {
   value = BaseCompiler.tailValue(value, true);
   if (
     isFunction(value, 'If') &&
-    (pythonArmIsStatement(value.ops[1]) || pythonArmIsStatement(value.ops[2]))
+    (declines(value.ops[1]) || declines(value.ops[2]))
   )
     throw new Error(
       `Could not compile ${compileSubject(subject)}: the body's value statement is a selection whose branches ` +
@@ -2647,10 +2678,6 @@ function pythonAssertReturnableBody(subject: string, expr: Expression): void {
         `(\`Block(If(c, r ≔ 1, r ≔ 2); r)\`), which compiles to the \`if\` ` +
         `block followed by \`return r\`.`
     );
-  if (isTailAssignmentBlock(expr)) return;
-  const head = statementBodyHead(expr);
-  if (head === undefined) return;
-  throw pythonStatementBodyError(subject, head);
 }
 
 /**
@@ -3430,6 +3457,26 @@ function pythonArmIsStatement(arm: Expression | undefined): boolean {
   if (h === 'If')
     return pythonArmIsStatement(arm.ops[1]) || pythonArmIsStatement(arm.ops[2]);
   return false;
+}
+
+/**
+ * Whether `arm` of a selection is a statement (`pythonArmIsStatement`) that
+ * has a value: its last statement, read through nested blocks and
+ * selections, is not a `Break`, a `Continue`, a `Return` or a `Loop`.
+ */
+function pythonArmCarriesValue(arm: Expression | undefined): boolean {
+  if (!pythonArmIsStatement(arm)) return false;
+  let tail = arm!;
+  while (isFunction(tail, 'Block') && tail.ops.length > 0)
+    tail = tail.ops[tail.ops.length - 1];
+  if (isFunction(tail, 'If'))
+    return (
+      pythonArmCarriesValue(tail.ops[1]) || pythonArmCarriesValue(tail.ops[2])
+    );
+  return !(
+    isFunction(tail) &&
+    ['Break', 'Continue', 'Return', 'Loop'].includes(tail.operator)
+  );
 }
 
 /**
@@ -5727,7 +5774,13 @@ export class PythonTarget implements LanguageTarget<Expression> {
         // A last statement that is a `Return` is already the `return`
         // statement of the block: another `return` in front of it gave
         // `return return x`, which does not parse.
-        else if (!/^return\b/.test(stmts[last])) {
+        // A last statement of several lines whose last line is a `return`
+        // (a nested block, which this hook already gave its `return`) is
+        // kept as it is.
+        else if (
+          !/^return\b/.test(stmts[last]) &&
+          !/\nreturn\b[^\n]*$/.test(stmts[last])
+        ) {
           // A last statement that is an assignment (`Assign(s, x)`, or a
           // `Declare` with an initializer, which this target emits as the
           // same `s = x`) is a Python STATEMENT, so `return s = x` does not
@@ -5893,6 +5946,7 @@ export class PythonTarget implements LanguageTarget<Expression> {
       isVarsKey: (name) =>
         vars !== undefined && Object.prototype.hasOwnProperty.call(vars, name),
     });
+    pythonAssertReturnableSelection('compile()', expr, true);
     let code = withPythonHelpers(BaseCompiler.compileCseRoot(expr, target));
     if (this.includeImports) code = this.withImports(code);
 

@@ -521,10 +521,14 @@ const FUNCTIONS: Record<
   Quantity: (expr_, serialize) => {
     const expr = expr_ as FnExpr;
     // A Measurement magnitude is parenthesised so the unit applies to the whole
-    // measurement: `(5.1 ± 0.2) cm`.
-    const mag = isFunction(expr.op1, 'Measurement')
-      ? `(${serialize(expr.op1)})`
-      : serialize(expr.op1);
+    // measurement: `(5.1 ± 0.2) cm`. A sum is parenthesised for the same
+    // reason: `(1 + pi) m`, not `1 + pi m`.
+    const mag =
+      isFunction(expr.op1, 'Measurement') ||
+      isFunction(expr.op1, 'Add') ||
+      isFunction(expr.op1, 'Subtract')
+        ? `(${serialize(expr.op1)})`
+        : serialize(expr.op1);
     return `${mag} ${unitToString(expr.op2)}`;
   },
 

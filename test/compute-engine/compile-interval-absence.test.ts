@@ -22,6 +22,9 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 
 const iv = (lo: number, hi: number) => ({ lo, hi });
 const ABSENT = { lo: NaN, hi: NaN };
+/** What the runner answers for an input enclosure: every scalar of a result
+ *  is a kinded result, never a bare `{ lo, hi }`. */
+const res = (x: { lo: number; hi: number }) => ({ kind: 'interval', value: x });
 
 describe('IsMissing and Coalesce on the interval target', () => {
   const ce = new ComputeEngine();
@@ -58,8 +61,8 @@ describe('IsMissing and Coalesce on the interval target', () => {
       kind: 'interval',
       value: iv(1, 2),
     });
-    expect(coalesced.run!({ x: iv(-2, -1) })).toEqual(iv(7, 7));
-    expect(coalesced.run!({ x: ABSENT })).toEqual(iv(7, 7));
+    expect(coalesced.run!({ x: iv(-2, -1) })).toEqual(res(iv(7, 7)));
+    expect(coalesced.run!({ x: ABSENT })).toEqual(res(iv(7, 7)));
     expect(coalesced.run!({ x: iv(-1, 1) })).toEqual({
       kind: 'interval',
       value: iv(-1, 7),
@@ -118,7 +121,7 @@ describe('the discharge primitives across the value model (review findings)', ()
     );
     expect(coalesced.success).toBe(true);
     const W = [iv(5, 5), iv(6, 6)];
-    expect(coalesced.run!({ U, W, x: iv(-2, -1) })).toEqual(W);
+    expect(coalesced.run!({ U, W, x: iv(-2, -1) })).toEqual(W.map(res));
     expect(coalesced.run!({ U, W, x: iv(-1, 1) })).toEqual([
       { kind: 'interval', value: iv(1, 5) },
       { kind: 'interval', value: iv(2, 6) },
@@ -132,7 +135,7 @@ describe('the discharge primitives across the value model (review findings)', ()
     });
     expect(fn.success).toBe(true);
     const A = [iv(1, 1), iv(2, 2)];
-    expect(fn.run!({ x: iv(1, 2), A })).toEqual(A);
+    expect(fn.run!({ x: iv(1, 2), A })).toEqual(A.map(res));
     expect(fn.run!({ x: iv(-2, -1), A })).toEqual({ kind: 'empty' });
     // Hulled with the `empty` of no selection: the list, each element
     // clipped, not the marker.
@@ -169,7 +172,7 @@ describe('a restriction over a list value', () => {
 
   test('the list passes where the condition holds, is empty where it fails, and is clipped element by element in between', () => {
     const U = [iv(1, 1), iv(2, 2)];
-    expect(fn.run!({ U, y: iv(1, 2) })).toEqual(U);
+    expect(fn.run!({ U, y: iv(1, 2) })).toEqual(U.map(res));
     expect(fn.run!({ U, y: iv(-2, -1) })).toEqual({ kind: 'empty' });
     expect(fn.run!({ U, y: iv(-1, 1) })).toEqual([
       { kind: 'partial', value: iv(1, 1), domainClipped: 'both' },
@@ -224,13 +227,16 @@ describe('a conditional with list-valued arms', () => {
     expect(fn.success).toBe(true);
     const A = [iv(1, 1), iv(2, 2)];
     const B = [iv(3, 3), iv(5, 5)];
-    expect(fn.run!({ x: iv(1, 2), A, B })).toEqual(A);
-    expect(fn.run!({ x: iv(-2, -1), A, B })).toEqual(B);
+    expect(fn.run!({ x: iv(1, 2), A, B })).toEqual(A.map(res));
+    expect(fn.run!({ x: iv(-2, -1), A, B })).toEqual(B.map(res));
     expect(fn.run!({ x: iv(-1, 1), A, B })).toEqual([
       { kind: 'interval', value: iv(1, 3) },
       { kind: 'interval', value: iv(2, 5) },
     ]);
-    // Lengths that differ have no elementwise hull: the marker.
-    expect(fn.run!({ x: iv(-1, 1), A, B: [iv(3, 3)] })).toEqual(ABSENT);
+    // Lengths that differ have no elementwise hull: the marker, which the
+    // runner answers as `empty`.
+    expect(fn.run!({ x: iv(-1, 1), A, B: [iv(3, 3)] })).toEqual({
+      kind: 'empty',
+    });
   });
 });

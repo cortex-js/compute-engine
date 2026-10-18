@@ -711,6 +711,24 @@ export interface IComputeEngine {
    * @internal */
   _requestedPrecision: number | undefined;
 
+  /** `true` while the innermost evaluation of a function expression that
+   * is running now was asked for a numeric approximation (`.N()`), `false`
+   * otherwise. `BoxedFunction.evaluate()` sets it from its
+   * `numericApproximation` option for the duration of the evaluation and
+   * restores the previous value after, so a nested exact evaluation reads
+   * `false`. The asynchronous driver (`BoxedFunction.evaluateAsync()`) sets
+   * it the same way around the synchronous part of each handler call, and
+   * restores it before the `await`: an asynchronous evaluation that is
+   * suspended does not hold the slot, so another evaluation that runs in
+   * the meantime does not read its request. The collection handlers have
+   * no evaluation options, and read the numeric request of the evaluation
+   * that calls them here: the handlers of a list literal with an element
+   * that may evaluate to `Nothing` then resolve only that element, and
+   * leave the other elements for the caller to approximate
+   * (`erasedLiteralValue`, `collection-utils.ts`).
+   * @internal */
+  _numericRequest: boolean;
+
   /**
    * Incremented on every mutable-object field store — the one engine write
    * that advances no engine-wide cache axis (`object-store` in

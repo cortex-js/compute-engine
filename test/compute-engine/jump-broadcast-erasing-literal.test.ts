@@ -3,8 +3,9 @@ import { ComputeEngine } from '../../src/compute-engine';
 // A list literal with an element that may evaluate to `Nothing` is evaluated
 // before the broadcast, so that the broadcast walks the elements the list
 // keeps. For a jump operator under `.N()` (`Floor`, `Round`, `Mod`, …) that
-// evaluation is exact (`erasingLiteralOptions`,
-// `boxed-expression/boxed-function.ts`): the handler of each cell then uses
+// evaluation resolves only the erasure and keeps the other elements as
+// written (`erasingLiteralValue`, `boxed-expression/boxed-function.ts`):
+// the handler of each cell then uses
 // the exact value of its operand near a jump, as it does for a list without
 // an erasing element (`.N()` promises a correct result, see
 // `ARCHITECTURE.md`, "What `.N()` promises").

@@ -2672,10 +2672,38 @@ describe('Matrix Decompositions (LA-7)', () => {
   });
 
   describe('SVD (Singular Value Decomposition)', () => {
+    // The decomposition is computed in machine precision, so a matrix of
+    // exact entries is decomposed only under `.N()`; `evaluate()` keeps it
+    // unevaluated. A float entry makes `evaluate()` decompose it too.
+    it('keeps a matrix of exact entries unevaluated under evaluate()', () => {
+      const svd = ce.expr(['SVD', ['List', ['List', 1, 2], ['List', 3, 4]]]);
+      expect(svd.evaluate().json).toEqual([
+        'SVD',
+        ['List', ['List', 1, 2], ['List', 3, 4]],
+      ]);
+      expect(
+        ce.parse('\\operatorname{SVD}([[1,2],[3,4]])').evaluate().operator
+      ).toBe('SVD');
+      const n = svd.N();
+      expect(n.operator).toBe('Tuple');
+      expect(n.ops![1].ops![0].ops![0].re).toBeCloseTo(5.464985704219043, 12);
+    });
+
+    it('decomposes a matrix with a float entry under evaluate()', () => {
+      const result = ce
+        .expr(['SVD', ['List', ['List', { num: '1.0' }, 2], ['List', 3, 4]]])
+        .evaluate();
+      expect(result.operator).toBe('Tuple');
+      expect(result.ops![1].ops![0].ops![0].re).toBeCloseTo(
+        5.464985704219043,
+        12
+      );
+    });
+
     it('should decompose a 2x2 matrix', () => {
       const result = ce
         .expr(['SVD', ['List', ['List', 4, 0], ['List', 3, -5]]])
-        .evaluate();
+        .N();
       expect(result.operator).toBe('Tuple');
       expect(result.ops?.length).toBe(3);
 
@@ -2699,7 +2727,7 @@ describe('Matrix Decompositions (LA-7)', () => {
     it('should decompose identity matrix', () => {
       const result = ce
         .expr(['SVD', ['List', ['List', 1, 0], ['List', 0, 1]]])
-        .evaluate();
+        .N();
       expect(result.operator).toBe('Tuple');
 
       const S = result.ops?.[1];
@@ -2711,7 +2739,7 @@ describe('Matrix Decompositions (LA-7)', () => {
     it('should handle rectangular matrix', () => {
       const result = ce
         .expr(['SVD', ['List', ['List', 1, 2, 3], ['List', 4, 5, 6]]])
-        .evaluate();
+        .N();
       expect(result.operator).toBe('Tuple');
       expect(result.ops?.length).toBe(3);
 
@@ -2731,7 +2759,7 @@ describe('Matrix Decompositions (LA-7)', () => {
           'SVD',
           ['List', ['List', 1, 0, 0], ['List', 0, 2, 0], ['List', 0, 0, 3]],
         ])
-        .evaluate();
+        .N();
       expect(result.operator).toBe('Tuple');
 
       const S = result.ops?.[1];
@@ -2777,6 +2805,19 @@ describe('Matrix Decompositions (LA-7)', () => {
           .expr(['SingularValues', ['List', ['List', 1, 2], ['List', 2, 4]]])
           .evaluate().json
       ).toEqual(['List', 5, 0]);
+    });
+
+    it('keeps a matrix of exact entries with no closed form unevaluated', () => {
+      // A 3×3 Gram matrix has no closed form here: the singular values are
+      // computed in machine precision, so only under `.N()`.
+      const sv = ce.expr([
+        'SingularValues',
+        ['List', ['List', 1, 2, 3], ['List', 4, 5, 6], ['List', 7, 8, 10]],
+      ]);
+      expect(sv.evaluate().operator).toBe('SingularValues');
+      const n = sv.N();
+      expect(n.operator).toBe('List');
+      expect(n.ops![0].re).toBeCloseTo(17.412505166808597, 12);
     });
 
     it('falls back to a numeric result for inexact (float) input', () => {

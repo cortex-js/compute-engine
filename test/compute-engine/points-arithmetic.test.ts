@@ -1472,10 +1472,13 @@ describe('POINT/TUPLE ARITHMETIC — PointList zips', () => {
     expect(r.op1.json).toEqual(1);
   });
 
-  test('a non-indexed collection component (Set) also stays inert', () => {
+  test('a non-indexed collection component (Set) is a type error', () => {
+    // A coordinate is a number or a list of numbers. A set has no i-th
+    // element to pair with the other components: the boxing refuses it.
     const ce = new ComputeEngine();
     const r = ce.box(['PointList', 1, ['Set', 1, 2]]).evaluate();
-    expect(r.operator).toBe('PointList');
+    expect(r.isValid).toBe(false);
+    expect(JSON.stringify(r.json)).toContain("'incompatible-type'");
   });
 
   test('PointList(1,2) compares equal to the Tuple it evaluates to', () => {

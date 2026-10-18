@@ -98,7 +98,9 @@ export function parseEpsil(
     deadline: options?.deadline,
   });
 
-  const value: MathJsonExpression | null = parser.parseProgram();
+  const value: MathJsonExpression | null = parser.parseProgram({
+    program: true,
+  });
 
   lintFloorDivisionComments(source, parser.diagnostics);
 

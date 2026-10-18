@@ -6099,10 +6099,10 @@ describe('the expression-only Python route declines statement bodies', () => {
         ['x']
       )
     ).toBe('def f(x):\n    s = x\n    return s\n');
-    // A last assignment whose value is a block: the emission ends with
-    // `return t`, but the line before it is the `return` of the inner block
-    // (`t = u = s`, `return 2 * u`, `return t`), so it is not the assignment
-    // `t = …` that the `return t` must follow. Declined.
+    // A last assignment whose value is a block: Python has no expression
+    // form for a block, so the value of the assignment lowers to statements
+    // (it was spliced as `t = u = s`, `return 2 * u`, `return t`). The
+    // assignment itself declines.
     expect(() =>
       python.compileFunction(
         engineWithX().box([
@@ -6114,7 +6114,7 @@ describe('the expression-only Python route declines statement bodies', () => {
         ['x']
       )
     ).toThrow(
-      /Could not compile with `compileFunction\(\)`: the body's value statement is an assignment/
+      /Could not compile `Assign`: the value assigned to "t" lowers to a statement sequence on target 'python'/
     );
     // The message names the caller-side fix, and that fix is what works.
     expect(() =>

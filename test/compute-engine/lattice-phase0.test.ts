@@ -256,12 +256,15 @@ describe('LATTICE PHASE 1: the flipped world', () => {
     expect(cinf.matches('complex')).toBe(false);
   });
 
-  it('types a mixed infinite complex value `infinity`', () => {
-    // `∞ + i` has infinite magnitude but a direction, so it is neither
-    // `~oo` nor a finite complex number: ruling L2(a) puts it in `infinity`
-    // as an anonymous member. It used to type bare `complex`.
+  it('types a mixed infinite complex value `+oo`', () => {
+    // `∞ + i` has infinite magnitude and the direction of the positive real
+    // axis, so it is neither `~oo` nor a finite complex number. Ruling
+    // L2(a) put it in `infinity` as an anonymous member (it used to type
+    // bare `complex`); since 2026-10-18 it is boxed as the real infinity
+    // `+∞`, so it types `+oo`.
     const mixed = ce.box(['Complex', { num: '+Infinity' }, 1]).type;
-    expect(mixed.toString()).toBe('infinity');
+    expect(mixed.toString()).toBe('+oo');
+    expect(mixed.matches('infinity')).toBe(true);
     expect(mixed.matches('complex')).toBe(false);
   });
 

@@ -505,6 +505,75 @@ describe('declare extend: a standard-library operator stays a library operator',
       'c',
     ]);
   });
+
+  test.each([
+    ['Add', '+', 7, 'b + a'],
+    ['Multiply', '\\times', 10, 'b * a'],
+  ] as const)(
+    '%s extended with commutative: false keeps the operand order',
+    (op, latex, value, text) => {
+      // The library `commutativeOrder` handler of `Add` requires the
+      // `commutative` flag: the extension removes it instead of throwing.
+      // Without the flag, neither `Add` nor `Multiply` sorts its operands.
+      const ce = new ComputeEngine();
+      expect(() =>
+        ce.declare(op, { commutative: false }, { extend: true })
+      ).not.toThrow();
+      const def = ce.lookupDefinition(op)!.operator!;
+      expect(def.commutative).toBe(false);
+      expect(def.commutativeOrder).toBeUndefined();
+
+      const boxed = ce.box([op, 'b', 'a']);
+      expect(boxed.isCanonical).toBe(true);
+      expect(boxed.json).toEqual([op, 'b', 'a']);
+      expect(boxed.toString()).toBe(text);
+
+      const parsed = ce.parse(`b ${latex} a`);
+      expect(parsed.json).toEqual([op, 'b', 'a']);
+
+      // Evaluation still works.
+      ce.assign('a', 2);
+      ce.assign('b', 5);
+      expect(ce.box([op, 'b', 'a']).evaluate().toString()).toBe(`${value}`);
+      expect(ce.parse(`b ${latex} a`).evaluate().toString()).toBe(`${value}`);
+    }
+  );
+
+  test('the operand order follows the visible definition of Add and Multiply', () => {
+    // `sortOperands()` looks up the definition only in an engine where a
+    // non-commutative `Add` or `Multiply` was declared. The lookup must
+    // still find the visible definition after a scope is popped and after
+    // a checkpoint restore.
+    const ce = new ComputeEngine();
+    const other = new ComputeEngine();
+
+    ce.pushScope();
+    ce.declare('Add', { commutative: false }, { extend: true });
+    expect(ce.box(['Add', 'b', 'a']).json).toEqual(['Add', 'b', 'a']);
+    ce.popScope();
+    expect(ce.box(['Add', 'b', 'a']).json).toEqual(['Add', 'a', 'b']);
+    expect(ce.box(['Multiply', 'b', 'a']).json).toEqual(['Multiply', 'a', 'b']);
+
+    const cp = ce.checkpoint();
+    ce.declare('Multiply', { commutative: false }, { extend: true });
+    expect(ce.box(['Multiply', 'b', 'a']).json).toEqual(['Multiply', 'b', 'a']);
+    ce.restore(cp);
+    expect(ce.box(['Multiply', 'b', 'a']).json).toEqual(['Multiply', 'a', 'b']);
+
+    // Another engine is not changed.
+    expect(other.box(['Add', 'b', 'a']).json).toEqual(['Add', 'a', 'b']);
+  });
+
+  test('a commutativeOrder handler with commutative: false is still an error', () => {
+    const ce = new ComputeEngine();
+    expect(() =>
+      ce.declare(
+        'Add',
+        { commutative: false, commutativeOrder: () => 0 },
+        { extend: true }
+      )
+    ).toThrow(/'commutativeOrder' handler requires the 'commutative' flag/);
+  });
 });
 
 describe('declare extend: derived effects and signatures stay derived', () => {

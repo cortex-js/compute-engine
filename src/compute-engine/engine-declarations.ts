@@ -2194,6 +2194,18 @@ function extendedOperatorDefinition(
   if (!('commutativeMatch' in fields) && explicitMatch !== undefined)
     def.commutativeMatch = explicitMatch;
 
+  // An ordering handler (`commutativeOrder`) requires the `commutative` flag.
+  // When the patch removes the flag and gives no handler of its own, the
+  // handler of the old definition is not copied: for example, after
+  // `ce.declare('Add', { commutative: false }, { extend: true })`, the
+  // library ordering of `Add` is removed and the operands keep their order.
+  // This is the same as for the library `canonical` handler, which the
+  // definition constructor removes when a flag that it assumes changes. A
+  // patch that gives a handler together with `commutative: false` is still
+  // an error.
+  if (fields.commutative === false && !('commutativeOrder' in fields))
+    def.commutativeOrder = undefined;
+
   // A user function: pass its literal as the `evaluate` handler, so that the
   // new definition is built from the literal as the old one was.
   if (!('evaluate' in fields) && old._lambdaLiteral !== undefined)

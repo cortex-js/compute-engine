@@ -17,6 +17,7 @@ import {
   type HomeScope,
 } from './declared-parameter-result.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
+import { noteArithmeticDefinition } from './arithmetic-order-override.js';
 import {
   hasDeclaredEffectLabel,
   isEffectSubset,
@@ -1886,6 +1887,9 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       );
     this.associative = def.associative ?? this.associative;
     this.commutative = def.commutative ?? this.commutative;
+    // A non-commutative `Add` or `Multiply` makes `sortOperands()` look up
+    // the visible definition before it sorts the operands.
+    noteArithmeticDefinition(this.engine, this.name, this.commutative);
     // Permutation matching WITHOUT canonical sorting. The default (follow
     // `commutative`) lives in the getter, so it tracks later `commutative`
     // updates; only an explicit value is stored here — a partial update

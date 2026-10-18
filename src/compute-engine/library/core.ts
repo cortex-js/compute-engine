@@ -4159,7 +4159,11 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           ]);
         }
 
-        return ce._fn('Delimiter', [args[0], checkType(ce, args[1], 'string')]);
+        // Other delimiters (`[x]`, `|x|` written as a `Delimiter`) are kept,
+        // so that other operators can read them. The kept body is the
+        // canonical one: a canonical expression must not hold a
+        // non-canonical operand, which the arithmetic methods refuse.
+        return ce._fn('Delimiter', [body, checkType(ce, args[1], 'string')]);
       },
       evaluate: (ops, options) => {
         const ce = options.engine;

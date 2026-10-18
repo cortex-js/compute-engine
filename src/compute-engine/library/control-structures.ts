@@ -355,7 +355,7 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
               armList,
               shape.length,
               // The else branch IS the default clause: without one, unselected
-              // positions are the `NaN` no-match cell.
+              // positions are the no-match cell (`noMatchCell`).
               ifFalse !== undefined
             ),
             context.engine._typeResolver
@@ -1846,7 +1846,8 @@ function conditionCells(c: Expression): Expression[] | undefined {
  * scalar arm lifts. All list-valued participants — conditions and selected
  * arms — must share one length, checked with the same
  * `broadcastLengthMismatch` as `Add` (R3). A position no clause matches is
- * `NaN` (R4); a position whose condition cell is `Missing` is the same
+ * `NaN` when every arm is numeric and `Missing` otherwise (R4,
+ * `noMatchCell`); a position whose condition cell is `Missing` is the same
  * catchable "condition is absent" error the scalar form produces (R4′).
  *
  * The zip is EAGER — conditions are materialized once into plain arrays and
@@ -1983,11 +1984,18 @@ function evaluateElementwiseSelection(
     values[k] = cells;
   }
 
-  // 4/ Assemble the result, position by position.
+  // 4/ Assemble the result, position by position. A position that no clause
+  // selects holds the absence marker of the type of that position
+  // (`noMatchCell`): `NaN` when every arm puts a number there, `Missing`
+  // otherwise, as `When` masks a cell by the type of its value.
+  const noMatch = noMatchCell(
+    ce,
+    clauses.map(({ arm }) => arm.type.type)
+  );
   const result: Expression[] = [];
   for (let j = 0; j < n; j++) {
     if (absent[j] === 1) result.push(absentConditionError(ce));
-    else if (selection[j] < 0) result.push(ce.NaN);
+    else if (selection[j] < 0) result.push(noMatch);
     else {
       const value = values[selection[j]];
       result.push(Array.isArray(value) ? value[j] : value);
@@ -2063,9 +2071,10 @@ function armElementType(t: Readonly<Type>): Type {
  *
  * `hasDefault` — a clause whose condition is literally `True` (for `If`, an
  * else branch) — decides whether the no-match cell can occur. Without one, a
- * position no clause matches is `NaN` (R4), and `finite_*` types EXCLUDE NaN
- * under the non-finite typing convention: the element type must therefore
- * join in `number`, the narrowest type that admits NaN, or a consumer
+ * position no clause matches is `NaN` when every arm is numeric (R4,
+ * `noMatchCell`), and `finite_*` types EXCLUDE NaN under the non-finite
+ * typing convention: the element type must therefore join in `number`, the
+ * narrowest type that admits NaN, or a consumer
  * dispatching on `.type.matches()` would be promised a `integer` cell
  * and handed a `NaN`. WITH a default clause the no-match cell is unreachable
  * and the exact join is kept — widening unconditionally would hand every
@@ -2077,7 +2086,34 @@ function elementwiseCellType(
   hasDefault: boolean
 ): Type {
   const armTypes = arms.map((t) => armElementType(t));
-  return hasDefault ? widen(...armTypes) : widen(...armTypes, 'number');
+  if (hasDefault) return widen(...armTypes);
+  // The no-match cell is the absence marker of the type of the position
+  // (`noMatchCell`): `NaN` when every arm is numeric, so the cell joins in
+  // `number`, the narrowest type that admits `NaN`; `Missing` otherwise, so
+  // the cell keeps a `missing` arm. The union is built explicitly: `widen`
+  // joins toward a common supertype and would dissolve the absence marker.
+  const joined = widen(...armTypes);
+  if (isNumericValueType(joined)) return widen(joined, 'number');
+  return reduceType({ kind: 'union', types: [joined, 'missing'] });
+}
+
+/**
+ * The value of a position that no clause of an element-wise selection
+ * selects, given the types of all the arms of the selection: the absence
+ * marker of the type of the position, `NaN` when every arm puts a number
+ * there and `Missing` otherwise (a point, a list, a string, a value that is
+ * not provably numeric). A list arm puts its element there, a scalar or a
+ * point arm puts itself (`armElementType`). This is the rule `When` applies
+ * to a cell it masks (`maskedValue`), so `Which([1, 5] < 3, (1, 2))` and
+ * `When((1, 2), [1, 5] < 3)` are both `[(1, 2), Missing]`, and
+ * `Which([1, 5] < 3, 7)` and `When(7, [1, 5] < 3)` are both `[7, NaN]`
+ * (user decision 2026-10-17). The rule reads the types of the arms and not
+ * their values: an arm that no position reaches is not evaluated.
+ */
+function noMatchCell(ce: ComputeEngine, arms: ReadonlyArray<Type>): Expression {
+  return isNumericValueType(widen(...arms.map((t) => armElementType(t))))
+    ? ce.NaN
+    : ce.Missing;
 }
 
 /**
@@ -2194,7 +2230,8 @@ function evaluateIf(
   // A LIST-VALUED condition selects element-wise: `If(c, a, b)` is the
   // two-clause `Which(c, a, True, b)` (see
   // `evaluateElementwiseSelection`). Without an else branch the
-  // unselected positions are the no-match cell (`NaN`), not `Nothing`:
+  // unselected positions are the no-match cell (`NaN` for a numeric arm,
+  // `Missing` otherwise: `noMatchCell`), not `Nothing`:
   // an element-wise result preserves positions (R4).
   const cells = conditionCells(evaluated);
   if (cells !== undefined && ifTrue !== undefined) {

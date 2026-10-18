@@ -65,18 +65,20 @@ function clipElements(list: unknown[]): IntervalModelValue[] {
  */
 export function hullValues(a: unknown, b: unknown): unknown {
   // `empty` contributes no value to a hull, whatever the other side is: a
-  // default-less `Which` whose one arm is a list hulls that list with the
-  // `empty` of no selection when its condition is undecided, and must keep
-  // the list — element by element, each clipped, since the list is present
-  // over part of the cell only.
+  // default-less `Which` hulls its arm with the `empty` of no selection when
+  // its condition is undecided, and an arm can itself be `empty` (an
+  // out-of-range `At`). The other side is then present over part of the
+  // cell only, so it is clipped as an undecided restriction clips it
+  // (`restrict` with `'maybe'`, what `When` answers): an `interval` becomes
+  // `partial`, a list is clipped element by element. Answering the other
+  // side unchanged would claim a value over the whole cell.
   const isEmpty = (x: unknown): boolean =>
     x !== null &&
     typeof x === 'object' &&
     !Array.isArray(x) &&
     (x as IntervalResult).kind === 'empty';
-  // A scalar keeps its kinded spelling, as the union always answered one.
-  if (isEmpty(a)) return Array.isArray(b) ? clipElements(b) : asValueResult(b);
-  if (isEmpty(b)) return Array.isArray(a) ? clipElements(a) : asValueResult(a);
+  if (isEmpty(a)) return restrict('maybe', () => b);
+  if (isEmpty(b)) return restrict('maybe', () => a);
   if (Array.isArray(a) || Array.isArray(b)) {
     if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length)
       return { lo: NaN, hi: NaN };

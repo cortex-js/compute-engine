@@ -231,7 +231,7 @@ export function listedElement(
 }
 
 /**
- * The elements of a `List` or `Tuple` literal after they were evaluated,
+ * The elements of a `List`, `Tuple` or `Set` literal after they were evaluated,
  * with each finite lazy element replaced by the list (or the set) of its
  * elements, or `undefined` when no element was replaced.
  *

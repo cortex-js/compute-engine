@@ -5186,7 +5186,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     // Singular Value Decomposition: A = UΣV^T
     // Returns [U, Σ, V] where U and V are orthogonal, Σ is diagonal
     SVD: {
-      examples: ['SVD([[3, 0], [0, 4]])'],
+      examples: ['N(SVD([[3, 0], [0, 4]]))'],
       description: 'Singular value decomposition of a matrix.',
       complexity: 8700,
       signature: '(matrix) -> tuple',
@@ -5212,8 +5212,16 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         // `computeSVD` declines a matrix with a complex entry. Such a matrix
         // is decomposed by `computeComplexSVD`, which reads the entries as
         // `SingularValues` does for a complex matrix.
+        //
+        // Both kernels compute in machine precision, and there is no exact
+        // decomposition. So a matrix of exact entries is decomposed only
+        // under `.N()`: `evaluate()` keeps an exact input exact, and
+        // `SVD([[1, 2], [3, 4]])` stays unevaluated. A matrix with a float
+        // entry is decomposed by `evaluate()` too. `computeComplexSVD`
+        // applies the same rule itself.
+        const numeric = numericApproximation || hasFloatEntry(M);
         const result =
-          computeSVD(M, m, n, ce) ??
+          (numeric ? computeSVD(M, m, n, ce) : undefined) ??
           computeComplexSVD(M, m, n, ce, numericApproximation);
         if (!result) return undefined;
 
@@ -5288,7 +5296,14 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
 
         // Numeric fallback: extract the singular values from the float SVD,
         // sorted descending, keeping min(m, n) of them (zeros included).
-        const result = computeSVD(M, m, n, ce);
+        // The kernel computes in machine precision, so a real matrix of exact
+        // entries with no exact closed form above stays unevaluated under
+        // `evaluate()`, and `.N()` computes its singular values. A matrix
+        // with a float entry is computed by `evaluate()` too. A complex
+        // matrix is `numericSingularValues`'s job, which applies the same
+        // rule.
+        const numeric = numericApproximation || hasFloatEntry(M);
+        const result = numeric ? computeSVD(M, m, n, ce) : undefined;
         if (!result)
           return numericSingularValues(M, m, n, ce, numericApproximation);
         const vals = result.singularValues

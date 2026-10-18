@@ -160,15 +160,33 @@ describe('A literal index pushed through an element-wise selection', () => {
     ]);
   });
 
-  test('a point arm with no default clause is not walked', () => {
-    // Element-wise, a position no clause selects is NaN; a scalar selection
-    // with no default answers Missing, which lowers differently for a point.
+  test('a point arm with no default clause is walked', () => {
+    // Element-wise, a position no clause selects is `Missing` for a point
+    // (`NaN` for a number), as a scalar selection with no default answers
+    // (user decision 2026-10-17), so the index is pushed through. Before,
+    // the element-wise position was `NaN` and the selection was not walked.
     const expr = ce.box([
       'At',
       ['Which', ['Less', ['List', 'a', 'b', 'c'], 2], ['Tuple', 'u', 'v']],
       2,
     ]);
-    expect(unrollFixedWidthCollections(expr)).toBe(expr);
+    expect(unrollFixedWidthCollections(expr).json).toEqual([
+      'Which',
+      ['Less', 'b', 2],
+      ['Tuple', 'u', 'v'],
+    ]);
+    const point = ce.box([
+      'Which',
+      ['Less', ['List', 1, 3, 1], 2],
+      ['Tuple', 1, 2],
+    ]);
+    expect(point.evaluate().toString()).toBe('[(1, 2),"Missing",(1, 2)]');
+    expect(
+      ce
+        .box(['Which', ['Less', 3, 2], ['Tuple', 1, 2]])
+        .evaluate()
+        .toString()
+    ).toBe('"Missing"');
     // With a default clause the point lifts whole and the index is pushed.
     const withDefault = ce.box([
       'At',
@@ -188,6 +206,60 @@ describe('A literal index pushed through an element-wise selection', () => {
       'True',
       ['Tuple', 0, 0],
     ]);
+  });
+
+  test('the index is pushed through a When over a list of conditions', () => {
+    // `When(value, cond)` over a list of conditions masks each position:
+    // `NaN` for a number and `Missing` for a point, as the scalar `When`
+    // answers. A scalar or point value is repeated at every position, a list
+    // value is read at the index.
+    const cond = ['Less', ['List', 'a', 'b', 'c'], 2];
+    const scalar = ce.box(['At', ['When', 'x', cond], 2]);
+    expect(unrollFixedWidthCollections(scalar).json).toEqual([
+      'When',
+      'x',
+      ['Less', 'b', 2],
+    ]);
+    const point = ce.box(['At', ['When', ['Tuple', 'u', 'v'], cond], 3]);
+    expect(unrollFixedWidthCollections(point).json).toEqual([
+      'When',
+      ['Tuple', 'u', 'v'],
+      ['Less', 'c', 2],
+    ]);
+    const list = ce.box(['At', ['When', ['List', 'u', 'v', 'x'], cond], 2]);
+    expect(unrollFixedWidthCollections(list).json).toEqual([
+      'When',
+      'v',
+      ['Less', 'b', 2],
+    ]);
+    // A list value of another width is truncated by the interpreter: not
+    // walked.
+    const short = ce.box(['At', ['When', ['List', 'u', 'v'], cond], 2]);
+    expect(unrollFixedWidthCollections(short)).toBe(short);
+    // The scalar form and the element-wise form agree at each position.
+    for (const [value, masked] of [
+      [7, 'NaN'],
+      [['Tuple', 1, 2], '"Missing"'],
+    ] as const) {
+      const whole = ce
+        .box(['When', value, ['Less', ['List', 1, 3], 2]])
+        .evaluate();
+      const one = ce.box(['When', value, ['Less', 3, 2]]).evaluate();
+      expect(whole.ops![1].toString()).toBe(masked);
+      expect(one.toString()).toBe(masked);
+    }
+  });
+
+  test('a When over a list of conditions compiles at one index on every target', () => {
+    expectAllTargetsAgree(
+      String.raw`\operatorname{When}(7, \vert x+\bigl\lbrack3, 2, 1\bigr\rbrack/3\vert\lt1)[2]`,
+      [-0.5, 0.2, -1.5]
+    );
+    // At `x = 0.9` the condition fails: the masked number is `NaN` in the
+    // interpreter and in the compiled code.
+    const latex = String.raw`\operatorname{When}(7, \vert x+\bigl\lbrack3, 2, 1\bigr\rbrack/3\vert\lt1)[2]`;
+    expect(interpreted(latex, 0.9)).toBeNaN();
+    expect(compile(ce.parse(latex), { fallback: false }).run!({ x: 0.9 })).toBeNaN();
   });
 
   test('an impure clause stops the walk', () => {
@@ -216,14 +288,16 @@ describe('A selection over a wide list-shaped condition is written out', () => {
   const VARS = { x: 1, a: 1, b: 2, c: 3, d: 4, e: 5, u: 7, v: 8 };
   const interpretedList = (json: unknown) =>
     [
-      ...(ce
-        .box(json)
-        .subs(
-          Object.fromEntries(
-            Object.entries(VARS).map(([k, n]) => [k, ce.number(n)])
+      ...(
+        ce
+          .box(json)
+          .subs(
+            Object.fromEntries(
+              Object.entries(VARS).map(([k, n]) => [k, ce.number(n)])
+            )
           )
-        )
-        .evaluate() as any).each(),
+          .evaluate() as any
+      ).each(),
     ].map((e: any) => e.re as number);
 
   test('five scalar selections, no run-time selection', () => {
@@ -342,7 +416,10 @@ describe('A point arm of the run-time selection is lifted whole', () => {
       ['Less', ['List', 1, 2, 3], 2],
       ['Tuple', 1, 2],
     ]);
-    expect(expr.evaluate().toString()).toBe('[(1, 2),NaN,NaN]');
+    // The interpreter masks a point position with `Missing` (user decision
+    // 2026-10-17); a compiled array spells a missing point with the numeric
+    // absence `NaN`, as the compiled `When` over a list of conditions does.
+    expect(expr.evaluate().toString()).toBe('[(1, 2),"Missing","Missing"]');
     const r = compile(expr, { fallback: false });
     expect(r.success).toBe(true);
     expect(r.code).toContain('_SYS.wholeArm(');

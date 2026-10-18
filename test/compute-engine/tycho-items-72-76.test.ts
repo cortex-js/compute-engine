@@ -290,11 +290,15 @@ describe('Item 74 — Abs of a fixed-arity point is the Euclidean norm', () => {
       ._getCompilationTarget('interval-js')
       .compile(expr, { constantFold: false });
     expect(iv.success).toBe(true);
-    const enclosures = iv.run!({}) as { lo: number; hi: number }[];
+    const enclosures = iv.run!({}) as {
+      kind: string;
+      value: { lo: number; hi: number };
+    }[];
     expect(enclosures).toHaveLength(2);
     [Math.sqrt(10), Math.sqrt(13)].forEach((v, i) => {
-      expect(enclosures[i].lo).toBeLessThanOrEqual(v);
-      expect(enclosures[i].hi).toBeGreaterThanOrEqual(v);
+      expect(enclosures[i].kind).toBe('interval');
+      expect(enclosures[i].value.lo).toBeLessThanOrEqual(v);
+      expect(enclosures[i].value.hi).toBeGreaterThanOrEqual(v);
     });
     const glsl = ce
       ._getCompilationTarget('glsl')

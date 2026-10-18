@@ -421,8 +421,14 @@ describe('the admission is plain-JavaScript only', () => {
     expect(r.success).toBe(true);
     expect(r.code).toMatch(/=== 'true' \?/);
     expect(r.code).toContain('_IA.hull(');
-    expect((r.run as any)({ x: 3 })).toEqual({ lo: -1, hi: -1 });
-    expect((r.run as any)({ x: -3 })).toEqual({ lo: 7, hi: 7 });
+    expect((r.run as any)({ x: 3 })).toEqual({
+      kind: 'interval',
+      value: { lo: -1, hi: -1 },
+    });
+    expect((r.run as any)({ x: -3 })).toEqual({
+      kind: 'interval',
+      value: { lo: 7, hi: 7 },
+    });
   });
 
   test('the GPU targets stay fail-closed', () => {

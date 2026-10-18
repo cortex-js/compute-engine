@@ -47,7 +47,7 @@ const EPSIL_CASES: [string, string, string, string[]][] = [
   [
     'Scan',
     'scan(xs, (a, x) => a + x)',
-    '(collection<unknown>) -> collection<unknown>',
+    '(indexed_collection<unknown>) -> indexed_collection<unknown>',
     [LIST],
   ],
   [
@@ -71,13 +71,13 @@ const EPSIL_CASES: [string, string, string, string[]][] = [
   [
     'TakeWhile',
     'takeWhile(xs, x => x < 3)',
-    '(collection<unknown>) -> collection<unknown>',
+    '(indexed_collection<unknown>) -> indexed_collection<unknown>',
     [LIST],
   ],
   [
     'DropWhile',
     'dropWhile(xs, x => x < 2)',
-    '(collection<unknown>) -> collection<unknown>',
+    '(indexed_collection<unknown>) -> indexed_collection<unknown>',
     [LIST],
   ],
   [
@@ -121,7 +121,7 @@ const EPSIL_CASES: [string, string, string, string[]][] = [
   [
     'Find',
     'find(xs, x => x > 1)',
-    '(collection<unknown>) -> nothing | unknown',
+    '(indexed_collection<unknown>) -> nothing | unknown',
     [LIST],
   ],
   [
@@ -160,13 +160,13 @@ const EPSIL_CASES: [string, string, string, string[]][] = [
   [
     'Partition',
     'partition(xs, x => x > 1)',
-    '(collection<unknown>) -> list<list<unknown>>',
+    '(indexed_collection<unknown>) -> list<list<unknown>>',
     [LIST],
   ],
   [
     'Position',
     'position(xs, x => x > 1)',
-    '(collection<unknown>) -> list<integer>',
+    '(indexed_collection<unknown>) -> list<integer>',
     [LIST],
   ],
   [
@@ -238,19 +238,19 @@ const BOX_CASES: [string, MathJsonExpression, string][] = [
   ],
   ['Filter', ['Filter', 'xs', GT1], 'collection<unknown>'],
   ['Reduce', ['Reduce', 'xs', ADD, 0], 'collection<unknown>'],
-  ['Scan', ['Scan', 'xs', ADD], 'collection<unknown>'],
+  ['Scan', ['Scan', 'xs', ADD], 'indexed_collection<unknown>'],
   ['Fold', ['Fold', ADD, 0, 'xs'], 'collection<unknown>'],
   ['Any', ['Any', 'xs', GT1], 'collection<unknown>'],
   ['All', ['All', 'xs', GT1], 'collection<unknown>'],
   [
     'TakeWhile',
     ['TakeWhile', 'xs', ['Function', ['Less', 'x', 3], 'x']],
-    'collection<unknown>',
+    'indexed_collection<unknown>',
   ],
   [
     'DropWhile',
     ['DropWhile', 'xs', ['Function', ['Less', 'x', 2], 'x']],
-    'collection<unknown>',
+    'indexed_collection<unknown>',
   ],
   [
     'FlatMap',
@@ -263,7 +263,7 @@ const BOX_CASES: [string, MathJsonExpression, string][] = [
   ['ArgMin', ['ArgMin', 'xs', NEG], 'indexed_collection<unknown>'],
   ['Dedup', ['Dedup', 'xs'], 'collection<any>'],
   ['Differences', ['Differences', 'xs'], 'indexed_collection<any>'],
-  ['Find', ['Find', 'xs', GT1], 'collection<unknown>'],
+  ['Find', ['Find', 'xs', GT1], 'indexed_collection<unknown>'],
   ['CountIf', ['CountIf', 'xs', GT1], 'collection<unknown>'],
   ['Count', ['Count', 'xs'], 'collection<any>'],
   ['Sort', ['Sort', 'xs'], 'indexed_collection<unknown>'],
@@ -321,7 +321,7 @@ describe('Collection operator on a symbol: what is not rewritten', () => {
   test('a free symbol is narrowed from its use, as by a non-lazy operator', () => {
     const ce = new ComputeEngine();
     ce.box(['Filter', 'zs', GT1]);
-    ce.box(['Find', 'ws', GT1]);
+    ce.box(['CountIf', 'ws', GT1]);
     expect(ce.symbol('zs').type.toString()).toBe(
       ce.symbol('ws').type.toString()
     );

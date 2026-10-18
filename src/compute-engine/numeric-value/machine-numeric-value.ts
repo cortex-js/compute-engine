@@ -54,6 +54,10 @@ export class MachineNumericValue extends NumericValue {
         value.im instanceof BigDecimal ? value.im.toNumber() : (value.im ?? 0);
       // Complex infinity or NaN?
       if (!isFinite(this.im)) this.decimal = this.im;
+      // A NaN imaginary part (`ce.number({ re: Infinity, im: NaN })`) makes
+      // the value NaN: the real part is NaN (above), and the imaginary part
+      // is `0`, as for every other NaN.
+      if (isNaN(this.im)) this.im = 0;
     }
 
     // Don't expect im to ever be NaN. If it is, it would need to be handled

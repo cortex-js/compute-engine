@@ -83,8 +83,8 @@ describe('root compile() export typing', () => {
 
   test('the interval target has its own result type, not the ordinary one', () => {
     // `interval-js` does not produce ordinary values: its runner answers with
-    // an `IntervalResult` tagged union, or with a bare `{lo, hi}` interval for
-    // a constant. The default `R` therefore selects on the TARGET, so an
+    // an `IntervalResult` tagged union, a constant included. The default `R`
+    // therefore selects on the TARGET, so an
     // interval caller is not handed a numeric contract it can never satisfy.
     const r = compile(ce.parse('x + 1'), { to: 'interval-js' });
     const v = r.run({ x: 2 });
@@ -92,10 +92,10 @@ describe('root compile() export typing', () => {
     const doubled = () => v * 2;
     void doubled;
     expect(v).toEqual({ kind: 'interval', value: { lo: 3, hi: 3 } });
-    // A constant comes back as the bare interval, which the type admits too.
+    // A constant comes back in the same `interval` result shape.
     expect(compile(ce.box(5), { to: 'interval-js' }).run({})).toEqual({
-      lo: 5,
-      hi: 5,
+      kind: 'interval',
+      value: { lo: 5, hi: 5 },
     });
   });
 

@@ -418,14 +418,17 @@ describe('phase 0b: `Filter` converts, on the LAZY path', () => {
 describe('phase 1: the single-clause single-collection family converts', () => {
   /** op, declared signature — which under Design E is also what it DISPLAYS. */
   const CONVERTED: ReadonlyArray<[string, string]> = [
-    ['Find', '(collection<T>, predicate: (T) any -> boolean) -> any where T'],
+    [
+      'Find',
+      '(indexed_collection<T>, predicate: (T) any -> boolean) -> any where T',
+    ],
     [
       'IndexWhere',
       '(indexed_collection<T>, predicate: (T) any -> boolean) -> integer where T',
     ],
     [
       'Position',
-      '(collection<T>, predicate: (T) any -> boolean) -> list<integer> where T',
+      '(indexed_collection<T>, predicate: (T) any -> boolean) -> list<integer> where T',
     ],
     [
       'Any',
@@ -437,11 +440,11 @@ describe('phase 1: the single-clause single-collection family converts', () => {
     ],
     [
       'TakeWhile',
-      '(collection<T>, predicate: (T) any -> boolean) -> collection where T',
+      '(indexed_collection<T>, predicate: (T) any -> boolean) -> indexed_collection where T',
     ],
     [
       'DropWhile',
-      '(collection<T>, predicate: (T) any -> boolean) -> collection where T',
+      '(indexed_collection<T>, predicate: (T) any -> boolean) -> indexed_collection where T',
     ],
     ['FlatMap', '(collection<T>, mapping: (T) any -> U) -> list where T, U'],
   ];
@@ -832,7 +835,7 @@ describe('phase 2: the folds convert — `Reduce` / `Scan` / `Fold`', () => {
     ],
     [
       'Scan',
-      '(collection<T>, reducer: (unknown, T) any -> unknown, initial: value?) -> indexed_collection where T',
+      '(indexed_collection<T>, reducer: (unknown, T) any -> unknown, initial: value?) -> indexed_collection where T',
     ],
     [
       'Fold',
@@ -1049,7 +1052,7 @@ describe('phase 2: `Partition` — R-D4 resolve-then-stamp at SLOT granularity',
   // arrow's result would swallow the `| integer` and the slot would parse as
   // `(T) any -> (boolean | integer)`.
   const DECLARED =
-    '(collection<T>, ((T) any -> boolean) | integer, integer?) -> list<list<T>> where T';
+    '(indexed_collection<T>, ((T) any -> boolean) | integer, integer?) -> list<list<T>> where T';
 
   it('declares the union slot, displays it honestly, and drops the metadata', () => {
     const ce = new ComputeEngine();

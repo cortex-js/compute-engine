@@ -1276,10 +1276,20 @@ describe('INDETERMINATE — the producers: special functions at an infinite poin
     ).toBe('~oo');
   });
 
-  test('an anonymous infinity (a float literal) gives NaN', () => {
+  test('`∞ + i` is the real infinity `+∞`, not an anonymous infinity', () => {
+    // A complex literal with an infinite real part and a finite imaginary
+    // part is boxed as `+∞` since 2026-10-18. Each head then gives its value
+    // at `+∞` (until then, this "anonymous" infinity gave `NaN` on each).
     const anon: MathJsonExpression = ['Complex', 'PositiveInfinity', 1];
     for (const head of ['Gamma', 'Zeta', 'AiryAi', 'ErfInv'])
-      expect([head, box([head, anon]).toString()]).toEqual([head, 'NaN']);
+      expect([head, box([head, anon]).toString()]).toEqual([
+        head,
+        box([head, 'PositiveInfinity']).toString(),
+      ]);
+    expect(box(['Gamma', anon]).toString()).toBe('+oo');
+    expect(box(['Zeta', anon]).toString()).toBe('1');
+    expect(box(['AiryAi', anon]).toString()).toBe('0');
+    expect(box(['ErfInv', anon]).toString()).toBe('Indeterminate');
   });
 });
 

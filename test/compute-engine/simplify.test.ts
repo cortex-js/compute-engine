@@ -371,11 +371,10 @@ describe('Canonicalization: Inverse Hyperbolic Trig and Infinity', () => {
     checkSimplify('\\arsinh(\\infty)', '\\infty'));
   test('arcosh(infinity) = infinity', () =>
     checkSimplify('\\arcosh(\\infty)', '\\infty'));
-  // `arcosh(−∞) = ∞ + iπ` has no exact spelling (infinite real part,
-  // finite imaginary offset), so simplify and evaluate() both leave it
-  // symbolic and only `.N()` numericizes — the `Ln(−∞)` treatment.
-  test('arcosh(-infinity) stays symbolic', () =>
-    checkSimplify('\\arcosh(-\\infty)', '\\arcosh(-\\infty)'));
+  // `arcosh(−∞)` tends to `∞ + iπ` (infinite real part, finite imaginary
+  // offset), and such a value is the real infinity `+∞`, as `Ln(−∞)`.
+  test('arcosh(-infinity) = infinity', () =>
+    checkSimplify('\\arcosh(-\\infty)', '\\infty'));
 });
 
 // ============================================================

@@ -3,6 +3,7 @@ import type { Expression } from '../global-types.js';
 import { maxDegree, revlex, totalDegree } from './polynomial-degree.js';
 import { asRadical } from './arithmetic-power.js';
 import { isOperatorDef } from './utils.js';
+import { mayHaveOrderedArithmetic } from './arithmetic-order-override.js';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
 import {
   isNumber,
@@ -587,10 +588,24 @@ export function sortOperands(
   const ce = xs[0].engine;
 
   // @fastpath
-  if (operator === 'Add') return sortAddTerms(xs);
-  // Products with ≥2 matrix/vector operands are non-commutative: preserve
-  // the tensors' written order (CORRECTNESS_FINDINGS P0-26).
-  if (operator === 'Multiply') return sortProductOperands(xs);
+  // `Add` and `Multiply` have their own orderings. They are not applied when
+  // a host has removed the `commutative` flag of the operator
+  // (`ce.declare('Add', { commutative: false }, { extend: true })`): then the
+  // operand order is kept. Without a definition (a clean scope, as when rule
+  // patterns are boxed), the orderings apply. The scope lookup is done only
+  // in an engine where a non-commutative definition of `Add` or `Multiply`
+  // was made (`mayHaveOrderedArithmetic()`), because this function runs on
+  // every canonical sum and product.
+  if (operator === 'Add' || operator === 'Multiply') {
+    if (mayHaveOrderedArithmetic(ce)) {
+      const def = ce.lookupDefinition(operator);
+      if (def && isOperatorDef(def) && !def.operator.commutative) return xs;
+    }
+    if (operator === 'Add') return sortAddTerms(xs);
+    // Products with ≥2 matrix/vector operands are non-commutative: preserve
+    // the tensors' written order (CORRECTNESS_FINDINGS P0-26).
+    return sortProductOperands(xs);
+  }
 
   const def = ce.lookupDefinition(operator);
   if (!def || !isOperatorDef(def)) return xs;

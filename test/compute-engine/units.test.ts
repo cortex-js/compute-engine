@@ -1627,9 +1627,10 @@ describe('REPEATED UNIT FACTORS IN A PRODUCT', () => {
   });
 
   test('3 m / 2 m is dimensionless', () => {
+    // The quotient of two exact magnitudes stays exact under `evaluate()`.
     expect(
       evalJson(['Divide', ['Quantity', 3, 'm'], ['Quantity', 2, 'm']])
-    ).toEqual(1.5);
+    ).toEqual(['Rational', 3, 2]);
   });
 
   test('a measured magnitude keeps its error', () => {
@@ -1715,7 +1716,7 @@ describe('REPEATED UNIT FACTORS IN A PRODUCT', () => {
       ])
     ).toEqual([
       'Quantity',
-      1.5,
+      ['Rational', 3, 2],
       ['Divide', ['Power', ['Divide', 'm', 's'], 2], 'mol'],
     ]);
     expect(

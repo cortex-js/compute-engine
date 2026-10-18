@@ -27,8 +27,28 @@ import type { Expression } from '../../src/compute-engine/global-types';
 const POS = 'PositiveInfinity';
 const NEG = 'NegativeInfinity';
 const COO = 'ComplexInfinity';
-/** An "anonymous" infinity: a complex literal with an infinite component. */
+/** A complex literal with an infinite real part and a finite imaginary part.
+ * It used to be an "anonymous" infinity, which gave `NaN` on every head here.
+ * Since 2026-10-18 it is boxed as the real infinity `+∞`, so each row at
+ * `ANON` gives the answer of the same expression at `+∞` (`bothAsPos()`). */
 const ANON = ['Complex', POS, 1];
+
+/** `expr` with every `ANON` replaced by `+∞`. */
+function asPos(expr: any): any {
+  if (!Array.isArray(expr)) return expr;
+  if (expr[0] === 'Complex' && expr[1] === POS) return POS;
+  return expr.map(asPos);
+}
+
+/** Assert that `expr`, which holds `ANON`, gives the answer of `asPos(expr)`
+ * on `evaluate()` and on `.N()`. */
+function bothAsPos(ce: ComputeEngine, expr: any): void {
+  expect(ce.box(expr).isSame(ce.box(asPos(expr)))).toBe(true);
+  expect(ce.box(expr).evaluate().isSame(ce.box(asPos(expr)).evaluate())).toBe(
+    true
+  );
+  expect(ce.box(expr).N().isSame(ce.box(asPos(expr)).N())).toBe(true);
+}
 
 /** Assert that `expr` gives the same answer on `evaluate()` and on `.N()`.
  * The check `'indeterminate'` is a point with no limit and exact operands:
@@ -129,15 +149,15 @@ describe('Binomial / Choose at the infinite points', () => {
     }
   });
 
-  test('C(n, ~oo) and two infinite operands are Indeterminate, an anonymous infinity NaN', () => {
+  test('C(n, ~oo) and two infinite operands are Indeterminate, ∞ + i is +∞', () => {
     for (const h of heads) {
       // The modulus wanders with the direction (C(5, 10⁶·e^i) = 10¹¹⁴⁸⁰⁴⁸
       // against C(5, −10⁶) = 1.5·10⁻⁴⁴).
       bothRoutes(ce, [h, 5, COO], 'indeterminate');
       bothRoutes(ce, [h, POS, POS], 'indeterminate');
       bothRoutes(ce, [h, POS, NEG], 'indeterminate');
-      bothRoutes(ce, [h, ANON, 2], isNaNv);
-      bothRoutes(ce, [h, 2, ANON], isNaNv);
+      bothAsPos(ce, [h, ANON, 2]);
+      bothAsPos(ce, [h, 2, ANON]);
     }
   });
 
@@ -170,8 +190,8 @@ describe('the simplify twins of the Binomial value rules', () => {
       for (const n of [POS, NEG, COO, 'NaN', ANON]) {
         // evaluate() answers Indeterminate on the diagonal at every exact
         // infinite point (C(10⁶, 10⁶+d) is 0 or unbounded depending on d,
-        // so there is no limit), NaN at an anonymous infinity (a float
-        // literal), and propagates a NaN operand. simplify() used to
+        // so there is no limit), `∞ + i` included (it is boxed as `+∞`),
+        // and propagates a NaN operand. simplify() used to
         // answer 1; now it folds the constant application to the value
         // evaluate() gives (the fold of `simplify()`, `boxed-expression/
         // simplify.ts`), so the two routes agree at every point.
@@ -180,7 +200,7 @@ describe('the simplify twins of the Binomial value rules', () => {
         expect(simplified.isNaN).toBe(true);
         expect(ce.box([h, n, n] as any).evaluate().isNaN).toBe(true);
         expect(ce.box([h, n, n] as any).evaluate().isIndeterminate).toBe(
-          n === POS || n === NEG || n === COO
+          n !== 'NaN'
         );
       }
   });
@@ -195,18 +215,18 @@ describe('the simplify twins of the Binomial value rules', () => {
   test('C(n, 0) → 1 keeps the infinities and drops only the NaN points', () => {
     // C(±∞, 0) and C(~oo, 0) ARE 1 — evaluate() says so — so the rewrite
     // stays; only the points evaluate() answers NaN for are excluded.
-    for (const n of [POS, NEG, COO])
+    // `∞ + i` is boxed as `+∞`, so it is one of these points.
+    for (const n of [POS, NEG, COO, ANON])
       expect(ce.box(['Binomial', n, 0] as any).simplify().isSame(1)).toBe(true);
-    for (const n of ['NaN', ANON]) {
-      // A NaN operand propagates on simplify(), as on evaluate(); at an
-      // anonymous infinity the constant application folds to the NaN that
-      // evaluate() gives. Neither point answers 1.
-      const simplified = ce.box(['Binomial', n, 0] as any).simplify();
+    {
+      // A NaN operand propagates on simplify(), as on evaluate(), and does
+      // not answer 1.
+      const simplified = ce.box(['Binomial', 'NaN', 0] as any).simplify();
       expect(simplified.isSame(1)).toBe(false);
       expect(simplified.toString()).toBe('NaN');
-      expect(ce.box(['Binomial', n, 0] as any).evaluate().isSame(ce.NaN)).toBe(
-        true
-      );
+      expect(
+        ce.box(['Binomial', 'NaN', 0] as any).evaluate().isSame(ce.NaN)
+      ).toBe(true);
     }
     expect(ce.box(['Binomial', 'nfree', 0]).simplify().isSame(1)).toBe(true);
   });
@@ -344,10 +364,10 @@ describe('Pochhammer', () => {
     bothRoutes(ce, ['Pochhammer', 3, COO], 'indeterminate');
   });
 
-  test('two infinite operands, an anonymous infinity and NaN', () => {
+  test('two infinite operands, ∞ + i and NaN', () => {
     bothRoutes(ce, ['Pochhammer', POS, POS], 'indeterminate');
-    bothRoutes(ce, ['Pochhammer', ANON, 2], isNaNv);
-    bothRoutes(ce, ['Pochhammer', 3, ANON], isNaNv);
+    bothAsPos(ce, ['Pochhammer', ANON, 2]);
+    bothAsPos(ce, ['Pochhammer', 3, ANON]);
     // `nanBehavior: 'propagate'` — this used to stay inert.
     bothRoutes(ce, ['Pochhammer', 3, 'NaN'], isNaNv);
     bothRoutes(ce, ['Pochhammer', 'NaN', 3], isNaNv);
@@ -442,8 +462,8 @@ describe('GammaRegularized', () => {
     bothRoutes(ce, ['GammaRegularized', COO, 2], 'indeterminate');
     bothRoutes(ce, ['GammaRegularized', 2, COO], 'indeterminate');
     bothRoutes(ce, ['GammaRegularized', POS, POS], 'indeterminate');
-    bothRoutes(ce, ['GammaRegularized', ANON, 2], isNaNv);
-    bothRoutes(ce, ['GammaRegularized', 2, ANON], isNaNv);
+    bothAsPos(ce, ['GammaRegularized', ANON, 2]);
+    bothAsPos(ce, ['GammaRegularized', 2, ANON]);
     bothRoutes(ce, ['GammaRegularized', 'NaN', 2], isNaNv);
     bothRoutes(ce, ['GammaRegularized', 2, 'NaN'], isNaNv);
   });
@@ -745,9 +765,9 @@ describe('BetaRegularized', () => {
       ['BetaRegularized', 0.3, NEG, 3],
       ['BetaRegularized', 0.3, 2, NEG],
       ['BetaRegularized', 0.3, COO, 3],
-      ['BetaRegularized', 0.3, ANON, 3],
     ])
       bothRoutes(ce, expr, isSymbolic('BetaRegularized'));
+    bothAsPos(ce, ['BetaRegularized', 0.3, ANON, 3]);
   });
 
   test('I_0 = 0 and I_1 = 1 need provably positive a and b', () => {

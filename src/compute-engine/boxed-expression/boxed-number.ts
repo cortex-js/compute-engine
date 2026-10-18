@@ -937,10 +937,9 @@ export class BoxedNumber
     // The exceptional points — 0, 1, the infinities and NaN, in the
     // argument or the base — follow the quotient `Ln(x) / Ln(base)` under
     // extended arithmetic (`logarithmAtExceptionalPoint`): `ln 0 = −∞`,
-    // `ln 1 = 0`, `Log(8, 1) = ~oo`, `Log(0, 1/2) = +∞`, and so on. The one
-    // value with no exact spelling, `Ln(−∞) = ∞ + iπ`, is left to the
-    // symbolic form below (`.N()` numericizes it).
-    const special = logarithmAtExceptionalPoint(ce, this, base, false);
+    // `ln 1 = 0`, `ln(−∞) = +∞`, `Log(8, 1) = ~oo`, `Log(0, 1/2) = +∞`, and
+    // so on.
+    const special = logarithmAtExceptionalPoint(ce, this, base);
     if (special !== undefined) return special;
 
     // A float argument or base makes the result a float, even when its value
@@ -1905,6 +1904,36 @@ function imaginaryPartsWithin(
   return x.sub(y).abs().lte(tol);
 }
 
+/**
+ * A complex value whose real part is infinite and whose imaginary part is
+ * finite (`∞ + i`, or the machine value `∞ + πi` of `Arcosh(−∞)`) is the
+ * real infinity of the sign of its real part: return `+Infinity` or
+ * `-Infinity` for it, and `undefined` for every other value.
+ *
+ * Such a value has no finite magnitude, but it has a direction: its argument
+ * goes to `0` (or `π`) as the real part grows. A literal that kept the
+ * finite imaginary part reported `isFinite === true`, and gave `0` for
+ * `0·(∞ + i)` and `NaN` for `2·(∞ + i)`. `Add` gives `+∞` for `∞ + i`, and
+ * Mathematica gives `∞` for `ArcCosh[-∞]`.
+ *
+ * A complex with an infinite imaginary part is complex infinity (`~oo`),
+ * whatever its real part: this function does not change it.
+ */
+function infiniteRealPart(value: NumericValue): number | undefined {
+  if (!value.isComplex || value.isComplexInfinity) return undefined;
+  if (Number.isNaN(value.im)) return undefined;
+  // Read the real part from its big decimal when it has one: the double is
+  // `Infinity` for the finite `10^{800}`.
+  const bignumRe = value.bignumRe;
+  if (bignumRe !== undefined) {
+    if (bignumRe.isFinite() || bignumRe.isNaN()) return undefined;
+    return bignumRe.isPositive() ? +Infinity : -Infinity;
+  }
+  const re = value.re;
+  if (Number.isFinite(re) || Number.isNaN(re)) return undefined;
+  return re;
+}
+
 export function canonicalNumber(
   ce: ComputeEngine,
   value:
@@ -1919,8 +1948,10 @@ export function canonicalNumber(
 ): number | NumericValue {
   if (value === undefined || value === null) return NaN;
 
-  // If the value is already a NumericValue, we're done
-  if (value instanceof NumericValue) return value;
+  // If the value is already a NumericValue, we're done, except for a complex
+  // value with an infinite real part and a finite imaginary part (see
+  // `infiniteRealPart()`)
+  if (value instanceof NumericValue) return infiniteRealPart(value) ?? value;
 
   // If the value is a machine number, check if it's a small integer
   // or a non-finite value
@@ -1964,7 +1995,10 @@ export function canonicalNumber(
   if (value instanceof Complex) {
     if (value.isNaN()) return NaN;
     // A signed infinity is a value of the extended real line, not a float.
-    if (value.im === 0 && !Number.isFinite(value.re)) return value.re;
+    // This is also the value of a complex with an infinite real part and a
+    // finite imaginary part (see `infiniteRealPart()`).
+    if (Number.isFinite(value.im) && !Number.isFinite(value.re))
+      return value.re;
 
     // A float, also when both parts are integers: a `Complex` holds two
     // doubles (see `_numericValue()`).

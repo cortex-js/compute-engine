@@ -888,6 +888,146 @@ function unindexedCollectionOperandError(
 }
 
 /**
+ * Whether the operand `x` of a call is a collection without positions: a set
+ * or a dictionary, written or held by a symbol of a wider declared type
+ * (`collection<integer>`, `unknown`).
+ *
+ * The test reads the type of the VALUE: a restricted list (`When(L, c)`, an
+ * `isCollection` without positions of its own, typed `missing | list<…>`)
+ * is not such an operand. Its value is a list when it is present.
+ */
+function isUnindexedCollectionValue(x: Expression): boolean {
+  if (!x.isCollection || x.isIndexedCollection) return false;
+  const value = isSymbol(x) ? (x.value ?? x) : x;
+  return provablyDisjoint(value.type.type, INDEXED_COLLECTION_SHAPE_TYPE);
+}
+
+/**
+ * Whether the source of the unevaluated call `expr` (its first operand) is a
+ * collection without positions (`isUnindexedCollectionValue`).
+ */
+function hasUnindexedSource(expr: Expression): boolean {
+  return isFunction(expr) && isUnindexedCollectionValue(expr.op1);
+}
+
+/**
+ * The `elementCount` handler of an eager operator that reads its source by
+ * position and keeps its length (`Sort`, `Ordering`, `RandomShuffle`): the
+ * length of a finite source (`elementCountOfFiniteSource`), or `undefined`
+ * for a source without positions (`hasUnindexedSource`), which the
+ * evaluation refuses. Before, `Count(Sort(c))` with `c := Set(3, 1, 5)` was
+ * `3`, where `Sort(c)` is an error.
+ */
+function elementCountOfIndexedSource(expr: Expression): number | undefined {
+  return hasUnindexedSource(expr)
+    ? undefined
+    : elementCountOfFiniteSource(expr);
+}
+
+/**
+ * Whether one of the operands of the unevaluated call `expr` is a collection
+ * without positions (`isUnindexedCollectionValue`). For `Zip`, whose every
+ * operand is a source read by position.
+ */
+function hasUnindexedOperand(expr: Expression): boolean {
+  return isFunction(expr) && expr.ops.some(isUnindexedCollectionValue);
+}
+
+/**
+ * The `collection` handlers `handlers` of an operator that reads its source
+ * by position or in order (`DeleteAt`, `Reverse`, `TakeWhile`, ...), each
+ * guarded by `hasSource` (by default, `hasUnindexedSource`).
+ *
+ * The evaluation of such an operator refuses a source without positions
+ * with an `incompatible-type` error. The handlers of the same call can be
+ * read before the call is evaluated (`expr.count`, a broadcast that walks
+ * the call), and they read the source directly. For such a source they now
+ * answer "unknown" (`undefined`, and `false` for `isEnumerable`), and do not
+ * read the set in its iteration order. Before, with `c := Set(3, 1, 5)`,
+ * `DeleteAt(c, 1)` reported a count of 2, `Count(Reverse(c))` was `3`,
+ * `1 + Reverse(c)` was `[]` and `1 + Differences(c)` was `[-1, 5]`.
+ */
+function refusingUnindexedSource(
+  handlers: CollectionHandlers,
+  hasSource: (expr: Expression) => boolean = hasUnindexedSource
+): CollectionHandlers {
+  const { iterator, count, isEmpty, isFinite, isEnumerable, at, indexWhere } =
+    handlers;
+  const { contains, subsetOf } = handlers;
+  return {
+    ...handlers,
+    iterator: (expr) => (hasSource(expr) ? undefined : iterator(expr)),
+    count: (expr) => (hasSource(expr) ? undefined : count(expr)),
+    ...(isEmpty && {
+      isEmpty: (expr) => (hasSource(expr) ? undefined : isEmpty(expr)),
+    }),
+    ...(isFinite && {
+      isFinite: (expr) => (hasSource(expr) ? undefined : isFinite(expr)),
+    }),
+    ...(isEnumerable && {
+      isEnumerable: (expr) => (hasSource(expr) ? false : isEnumerable(expr)),
+    }),
+    ...(at && {
+      at: (expr, index) => (hasSource(expr) ? undefined : at(expr, index)),
+    }),
+    ...(indexWhere && {
+      indexWhere: (expr, predicate) =>
+        hasSource(expr) ? undefined : indexWhere(expr, predicate),
+    }),
+    ...(contains && {
+      contains: (expr, target) =>
+        hasSource(expr) ? undefined : contains(expr, target),
+    }),
+    ...(subsetOf && {
+      subsetOf: (expr, other, strict) =>
+        hasSource(expr) ? undefined : subsetOf(expr, other, strict),
+    }),
+  };
+}
+
+/**
+ * The result type of `TakeWhile` and `DropWhile` over a source of type
+ * `source`. Each keeps a run of the source's elements in their order, and
+ * refuses a source without positions (a set), so the result is never a set:
+ * - a string source gives a string (the string preservation rule,
+ *   `docs/STRING_ROADMAP.md`);
+ * - a source that can be a string (`collection<any>`) gives an indexed
+ *   collection of its element type;
+ * - another collection source gives a list of its element type. The list has
+ *   no dimensions, since the run can be shorter than the source;
+ * - a source that is not known to be a collection (`unknown`) keeps its type.
+ */
+function orderedRunResultType(source: Type): Type {
+  if (isSubtype(source, 'string')) return source;
+  if (!isSubtype(source, COLLECTION_SHAPE_TYPE)) return source;
+  const elements = collectionElementType(source) ?? 'any';
+  if (!provablyDisjoint(source, 'string'))
+    return { kind: 'indexed_collection', elements };
+  return { kind: 'list', elements };
+}
+
+/**
+ * The result type of `Scan` over a source of type `source`, whose elements
+ * are of type `elements` (the type of the fold), or of the source's own
+ * element type when `elements` is `undefined`. It is the type `Map` gives
+ * (`mapResultType`), except that a source type without positions
+ * (`collection<T>`, which can also hold a list) gives an indexed collection:
+ * `Scan` refuses a set source, so its result is never a set.
+ */
+function orderedScanType(source: Type, elements: Type | undefined): Type {
+  const t = elements === undefined ? source : mapResultType(source, elements);
+  if (
+    !isSubtype(t, COLLECTION_SHAPE_TYPE) ||
+    isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE)
+  )
+    return t;
+  return {
+    kind: 'indexed_collection',
+    elements: elements ?? collectionElementType(source) ?? 'any',
+  };
+}
+
+/**
  * Validate the operands of a call to `name` in its custom `canonical`
  * handler, against the signature of the definition `name` resolves to now.
  *
@@ -3311,9 +3451,10 @@ function isAbsentablePointListSourceType(t: Type): boolean {
 /**
  * The type that a `PointList` component must have: a coordinate is a number
  * or a list of numbers. This is the expected type of the `incompatible-type`
- * error for a component that is a point (`isPointListTupleComponentType`).
- * The check refuses only a point: a string, a boolean or a matrix component
- * is admitted, as before.
+ * error for a component that cannot be a coordinate
+ * (`isRefusedPointListComponentType`). The check refuses a point, a
+ * collection without positions and a list of points: a string, a boolean or
+ * a matrix component is admitted, as before.
  */
 const POINT_LIST_COMPONENT_TYPE: Type = parseType('number | list<number>');
 
@@ -3327,6 +3468,35 @@ const POINT_LIST_COMPONENT_TYPE: Type = parseType('number | list<number>');
 function isPointListTupleComponentType(t: Type): boolean {
   if (t === 'missing') return false;
   return isPointElementType(stripMissingFromType(t));
+}
+
+/**
+ * Whether `t` is the type of a `PointList` component that cannot be a
+ * coordinate, possibly absent (`missing | …`, the type of a restricted
+ * value):
+ * - a point (`isPointListTupleComponentType`): before, the whole point was
+ *   put in each coordinate, `PointList([1, 2], (5, 6))` was
+ *   `[(1, (5, 6)), (2, (5, 6))]`;
+ * - a collection without positions (a set, a dictionary): there is no i-th
+ *   element to pair with the i-th element of the other components, and
+ *   `PointList([1, 2], Set(3, 4))` stayed unevaluated, typed as a list of
+ *   points with a set coordinate;
+ * - a list of points: each point became one coordinate,
+ *   `PointList([(1, 2), (3, 4)], [5, 6])` was `[((1, 2), 5), ((3, 4), 6)]`.
+ *
+ * A type that is only possibly one of these (`unknown`, `collection<…>`,
+ * `list<unknown>`) is not: the value decides.
+ */
+function isRefusedPointListComponentType(t: Type): boolean {
+  if (isPointListTupleComponentType(t)) return true;
+  if (t === 'missing') return false;
+  const present = stripMissingFromType(t);
+  if (present === 'nothing' || present === 'never') return false;
+  if (!isSubtype(present, COLLECTION_SHAPE_TYPE)) return false;
+  if (provablyDisjoint(present, INDEXED_COLLECTION_SHAPE_TYPE)) return true;
+  if (isPointElementType(present) || isSubtype(present, 'string')) return false;
+  const elements = collectionElementType(present);
+  return elements !== undefined && isPointElementType(elements);
 }
 
 /** Descriptor twin of {@link isIndexSpan}.
@@ -6602,10 +6772,18 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         return ce.function('Set', elements);
       }
       // Literal set: evaluate each element (matches the default, non-lazy
-      // evaluation behavior this operator had before it was marked lazy)
+      // evaluation behavior this operator had before it was marked lazy).
+      // A set literal is a value, as a list literal is: each finite lazy
+      // element is listed (`listedLiteralElements`), so `{Map(f, [1, 2])}`
+      // holds the list of the results, and the canonical `Set` merges the
+      // elements that are then equal.
+      const elements = ops.map((op) =>
+        op.evaluate({ numericApproximation, materialization })
+      );
       return ce.function(
         'Set',
-        ops.map((op) => op.evaluate({ numericApproximation, materialization }))
+        listedLiteralElements(ce, elements, numericApproximation ?? false) ??
+          elements
       );
     },
     // The async twin: see `List`'s `evaluateAsync` for why a lazy literal
@@ -6647,7 +6825,16 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       }
       const elements: Expression[] = [];
       for (const op of ops) elements.push(await op.evaluateAsync(options));
-      return ce.function('Set', elements);
+      // As on the sync route, each finite lazy element is listed, with the
+      // capability registry and the context stack of this evaluation put in
+      // place again after the `await` (see `List`'s `evaluateAsync`).
+      return ce.withEvaluationContext(options, () =>
+        ce.function(
+          'Set',
+          listedLiteralElements(ce, elements, numericApproximation ?? false) ??
+            elements
+        )
+      );
     },
     eq: (a: Expression, b: Expression) => {
       // `b` may be an unevaluated set-valued expression (`Intersection(…)`,
@@ -7038,25 +7225,28 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'A list of points: zips collection components into a List of point-tuples (Desmos point-list idiom); a plain point when no component is a collection.',
     complexity: 8200,
     signature: '(any+) -> any',
-    // A component that is a point (a tuple) is refused when the call is
-    // boxed: a coordinate is a number or a list of numbers, and a whole point
-    // in the place of one coordinate is almost certainly an error of the
-    // author. Before, `PointList([1, 2], (5, 6))` put the whole point in each
-    // second coordinate, `[(1, (5, 6)), (2, (5, 6))]`. The signature cannot
-    // say "not a tuple", so the refusal is here. The operands arrive
+    // A component that is a point (a tuple), a collection without positions
+    // (a set) or a list of points is refused when the call is boxed
+    // (`isRefusedPointListComponentType`): a coordinate is a number or a
+    // list of numbers, and such a component in the place of one coordinate
+    // is almost certainly an error of the author. Before,
+    // `PointList([1, 2], (5, 6))` put the whole point in each second
+    // coordinate, `[(1, (5, 6)), (2, (5, 6))]`. The signature cannot say "not
+    // a tuple", so the refusal is here. The operands arrive
     // canonical; `flatten` splices a `Sequence` and erases `Nothing`, as the
     // boxing does for an operator without a `canonical` handler. A component
-    // whose type is not provably a tuple (`unknown`, a union with a list) is
-    // admitted, and its value is checked by `evaluate`. So is a symbol whose
-    // type was inferred from its value (a symbol declared `unknown` and
-    // assigned `(5, 6)`): a canonical form must not depend on the value
-    // assigned to a symbol, which can change before the call is evaluated.
+    // whose type is not provably one of these (`unknown`, a union with a
+    // list) is admitted, and its value is checked by `evaluate`. So is a
+    // symbol whose type was inferred from its value (a symbol declared
+    // `unknown` and assigned `(5, 6)`): a canonical form must not depend on
+    // the value assigned to a symbol, which can change before the call is
+    // evaluated.
     canonical: (ops, { engine }) =>
       engine._fn(
         'PointList',
         flatten(ops).map((op) =>
           !(isSymbol(op) && op.valueDefinition?.inferredType) &&
-          isPointListTupleComponentType(op.type.type)
+          isRefusedPointListComponentType(op.type.type)
             ? engine.typeError(POINT_LIST_COMPONENT_TYPE, op.type, op)
             : op
         )
@@ -7150,11 +7340,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         )
       )
         return ce.Missing;
-      // A component whose VALUE is a point (a symbol declared `unknown` that
-      // holds `(5, 6)`) is refused, as the boxing refuses a component whose
-      // type is a tuple (see the `canonical` handler). The answer is the
-      // error, with the frame of the operator and the operand.
-      const pointIndex = ops.findIndex((op) => isTuple(op));
+      // A component whose VALUE is a point, a set or a list of points (a
+      // symbol declared `unknown` that holds `(5, 6)` or `Set(3, 4)`) is
+      // refused, as the boxing refuses a component of such a type (see the
+      // `canonical` handler). The answer is the error, with the frame of the
+      // operator and the operand.
+      const pointIndex = ops.findIndex(
+        (op) => isTuple(op) || isRefusedPointListComponentType(op.type.type)
+      );
       if (pointIndex >= 0)
         return refusedOperandError(
           ce,
@@ -7181,9 +7374,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const isLazyComponent = (op: Expression): boolean =>
         isUnknownLengthBroadcast(op) && op.isFiniteCollection !== false;
       // Fail closed on a collection component that can be zipped NEITHER
-      // eagerly nor lazily — a non-indexed collection (a Set has no positional
-      // order, so there is no i-th element to pair the other components with)
-      // or a provably infinite one: stay inert rather than silently degrading
+      // eagerly nor lazily — a collection without positions of its own (a
+      // set is refused above, but an undecided restriction of a list,
+      // `When(L, c)`, reaches here) or a provably infinite one: stay inert
+      // rather than silently degrading
       // to a plain point, and never hang. A STRING is not such a component:
       // it is broadcast-atomic (see `isTextAtom`) and occupies a scalar slot,
       // exactly as the type handler and the compile handler classify it.
@@ -9702,21 +9896,37 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // does not read as a collection: without it `Scan(Missing, f)` and the
     // scan of an absent row (`Scan(At(x, 7), f)`) stayed unevaluated.
     missingBehavior: 'propagate',
+    // The source must have positions: the k-th element of the result folds
+    // the first k elements of the source, and a set has no order.
+    // `Scan(Set(3, 1), Add)` gave `Set(3, 4)`, where the other order gives
+    // `[1, 4]`. A literal set is refused when the call is boxed, as
+    // `Sort(Set(3, 1))` is, and a set held by a symbol of a wider declared
+    // type is refused when the call is evaluated (`settleHeldEagerSources()`
+    // in `boxed-expression/boxed-function.ts`).
     signature:
-      '(collection<T>, reducer: (unknown, T) any -> unknown, initial: value?) -> indexed_collection where T',
-    // Same shape/indexed-ness as the source, but elements are the fold's
-    // result type (mirrors Map).
+      '(indexed_collection<T>, reducer: (unknown, T) any -> unknown, initial: value?) -> indexed_collection where T',
+    // Same shape as the source, but elements are the fold's result type
+    // (mirrors Map). A source type without positions (`collection<T>`,
+    // which can also hold a list) gives an indexed collection: a set source
+    // is refused.
     type: (ops, { engine }) => {
       const resultType = foldResultTypeD(ops[0], ops[1], ops[2], engine);
       if (!resultType || resultType === 'unknown' || resultType === 'any')
-        return BoxedType.forResult(ops[0].type, engine._typeResolver);
+        return BoxedType.forResult(
+          orderedScanType(ops[0].type, undefined),
+          engine._typeResolver
+        );
       return BoxedType.forResult(
-        mapResultType(ops[0].type, resultType),
+        orderedScanType(ops[0].type, resultType),
         engine._typeResolver
       );
     },
     canonical: (ops, { engine }) => {
-      const collection = checkCollectionOperand(engine, ops[0]);
+      const collection = checkCollectionOperand(
+        engine,
+        ops[0],
+        'indexed_collection'
+      );
       const arity = {
         operator: 'Scan',
         supply: ACCUMULATOR_SUPPLY,
@@ -9741,7 +9951,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         return engine._fn('Scan', [collection, fn, initial]);
       return engine._fn('Scan', [collection, fn]);
     },
-    collection: {
+    collection: refusingUnindexedSource({
       isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,
       elementMemo: true,
@@ -9819,7 +10029,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         }
         return undefined;
       },
-    },
+    }),
   },
 
   // Julia/R `diff`, Wolfram `Differences`: the successive differences of a
@@ -9886,7 +10096,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         ]);
       return engine._fn('Differences', [collection]);
     },
-    collection: {
+    collection: refusingUnindexedSource({
       isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,
       count: (expr) => {
@@ -9928,7 +10138,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (a === undefined || b === undefined) return undefined;
         return expr.engine.function('Subtract', [b, a]).evaluate();
       },
-    },
+    }),
   },
 
   // Haskell `takeWhile`: the leading run of elements for which the predicate is
@@ -9941,16 +10151,30 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
     lazy: true,
     // Design D phase 1: the element-of link lives in the SIGNATURE (mirrors
-    // `Filter`). The RESULT stays with the `type:` handler — the source's own
-    // collection kind and indexedness, which the type language cannot express
-    // (§7 rule 1).
+    // `Filter`). The RESULT stays with the `type:` handler: a string for a
+    // string source, a list otherwise (`orderedRunResultType`), which the
+    // type language cannot express in one signature (§7 rule 1).
+    //
+    // The source must have positions: the prefix is read in the order of
+    // the source, and a set has no order. `TakeWhile(Set(3, 1), x > 2)` gave
+    // `Set(3)`, an answer that depends on the iteration order of the set.
+    // A literal set is refused when the call is boxed, as `Sort(Set(3, 1))`
+    // is, and a set held by a symbol of a wider declared type is refused when
+    // the call is evaluated (`settleHeldEagerSources()` in
+    // `boxed-expression/boxed-function.ts`).
     signature:
-      '(collection<T>, predicate: (T) any -> boolean) -> collection where T',
-    // Preserve the source's element type / indexed-ness (mirrors Filter).
+      '(indexed_collection<T>, predicate: (T) any -> boolean) -> indexed_collection where T',
     type: (ops, context) =>
-      BoxedType.forResult(ops[0].type, context.engine._typeResolver),
+      BoxedType.forResult(
+        orderedRunResultType(ops[0].type),
+        context.engine._typeResolver
+      ),
     canonical: (ops, { engine }) => {
-      const collection = checkCollectionOperand(engine, ops[0]);
+      const collection = checkCollectionOperand(
+        engine,
+        ops[0],
+        'indexed_collection'
+      );
       const fn = canonicalCallbackOperand(ops[1], {
         operator: 'TakeWhile',
         supply: PER_ELEMENT_SUPPLY,
@@ -9959,7 +10183,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       if (!collection.isValid || !fn) return null;
       return engine._fn('TakeWhile', [collection, fn]);
     },
-    collection: {
+    collection: refusingUnindexedSource({
       isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,
       elementMemo: true,
@@ -10080,7 +10304,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         }
         return undefined;
       },
-    },
+    }),
   },
 
   // Haskell `dropWhile`: discard the leading run of elements for which the
@@ -10094,13 +10318,21 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     complexity: 8200,
     lazy: true,
     // Design D phase 1: as `TakeWhile` — the result stays with the `type:`
-    // handler (§7 rule 1).
+    // handler (§7 rule 1), and the source must have positions: the dropped
+    // prefix is read in the order of the source, and a set has no order.
     signature:
-      '(collection<T>, predicate: (T) any -> boolean) -> collection where T',
+      '(indexed_collection<T>, predicate: (T) any -> boolean) -> indexed_collection where T',
     type: (ops, context) =>
-      BoxedType.forResult(ops[0].type, context.engine._typeResolver),
+      BoxedType.forResult(
+        orderedRunResultType(ops[0].type),
+        context.engine._typeResolver
+      ),
     canonical: (ops, { engine }) => {
-      const collection = checkCollectionOperand(engine, ops[0]);
+      const collection = checkCollectionOperand(
+        engine,
+        ops[0],
+        'indexed_collection'
+      );
       const fn = canonicalCallbackOperand(ops[1], {
         operator: 'DropWhile',
         supply: PER_ELEMENT_SUPPLY,
@@ -10109,7 +10341,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       if (!collection.isValid || !fn) return null;
       return engine._fn('DropWhile', [collection, fn]);
     },
-    collection: {
+    collection: refusingUnindexedSource({
       isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,
       elementMemo: true,
@@ -10178,7 +10410,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         }
         return undefined;
       },
-    },
+    }),
   },
 
   // Map then flatten one level: apply `f` to each element and splice the
@@ -11831,7 +12063,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // `boxed-expression/boxed-function.ts`). Re-segmentation caveat: rejoining
     // the taken characters can merge or split grapheme clusters, so the result
     // may hold a different number of characters than were taken.
-    collection: {
+    collection: refusingUnindexedSource({
       // A zero bound yields the empty collection whatever the source is, so
       // the walk is faithful even over an unwalkable one — without this
       // short-circuit `Any(Take(xs, 0), p)` would go inert for a valueless
@@ -11945,7 +12177,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // Negative index counts from the end: at(-1) is the count-th element.
         return expr.op1.at(count + index + 1);
       },
-    },
+    }),
   },
 
   // Miranda: `drop` (also Haskell)
@@ -11978,7 +12210,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     threadsConditionals: true,
     signature:
       '((xs: T, count: number) -> T where T: string) & ((xs: indexed_collection<T>, count: number) -> list<T> where T)',
-    collection: {
+    collection: refusingUnindexedSource({
       // A symbolic count walks nothing, and that empty walk does not mean an
       // empty result, so the answer is `false`: answering the source's
       // enumerability let `All(Drop([1, 2, 3], n), p)` answer `True`.
@@ -12105,7 +12337,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (index < 1) return undefined;
         return xs.at(index + n);
       },
-    },
+    }),
   },
 
   // First/Second/Third/Last admit an absent base (§3.B strip-before-validate):
@@ -12341,7 +12573,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     threadsConditionals: true,
     signature:
       '((T) -> T where T: string) & ((indexed_collection<T>) -> list<T> where T)',
-    collection: {
+    collection: refusingUnindexedSource({
       isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,
       count: (expr) => {
@@ -12396,7 +12628,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
         return expr.op1.at(index > 0 ? index + 1 : index);
       },
-    },
+    }),
   },
 
   Most: {
@@ -12425,7 +12657,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     threadsConditionals: true,
     signature:
       '((T) -> T where T: string) & ((indexed_collection<T>) -> list<T> where T)',
-    collection: {
+    collection: refusingUnindexedSource({
       isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,
       count: (expr) => {
@@ -12504,7 +12736,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (index < 1 || index > l - 1) return undefined;
         return expr.op1.at(index);
       },
-    },
+    }),
   },
 
   Slice: {
@@ -12622,7 +12854,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           resolutionOut.resolution;
       return fn;
     },
-    collection: {
+    collection: refusingUnindexedSource({
       // Collection-ness is decided PER INSTANCE, because the `range | nothing`
       // arms let the result be `Nothing`: a `Slice` over an absent span is not
       // a collection at all. Declaring this is also what tells the definition
@@ -12692,7 +12924,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           },
         };
       },
-    },
+    }),
   },
 
   // APL: rotate ⌽
@@ -12738,7 +12970,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     threadsConditionals: true,
     signature:
       '((T) -> T where T: string) & ((T) -> T where T: list) & ((indexed_collection<T>) -> list<T> where T)',
-    collection: {
+    collection: refusingUnindexedSource({
       isEnumerable: enumerableFromSmallSource,
       isLazy: (_expr) => true,
       count: (expr) => {
@@ -12790,7 +13022,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (!isFunction(expr)) return undefined;
         return expr.op1.at(-index);
       },
-    },
+    }),
   },
 
   // Elixir `List.insert_at/3`: return a copy with `value` inserted before the
@@ -12863,7 +13095,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         ...all.slice(gap),
       ]);
     },
-    collection: {
+    collection: refusingUnindexedSource({
       // The walk inserts or skips at the position the index names. When
       // there is no position (an index outside the source, a negative index
       // over a source whose length is not known, infinite or not a safe
@@ -12936,7 +13168,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           },
         };
       },
-    },
+    }),
   },
 
   // Elixir `List.delete_at/2`: return a copy with the element at the 1-based
@@ -12996,7 +13228,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       } else return undefined;
       return ce.function('List', [...all.slice(0, i0), ...all.slice(i0 + 1)]);
     },
-    collection: {
+    collection: refusingUnindexedSource({
       // The walk inserts or skips at the position the index names. When
       // there is no position (an index outside the source, a negative index
       // over a source whose length is not known, infinite or not a safe
@@ -13060,7 +13292,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           },
         };
       },
-    },
+    }),
   },
 
   // Elixir `List.replace_at/3`: return a copy with the element at the 1-based
@@ -13123,7 +13355,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       out[i0] = value;
       return ce.function('List', out);
     },
-    collection: {
+    collection: refusingUnindexedSource({
       // The walk inserts or skips at the position the index names. When
       // there is no position (an index outside the source, a negative index
       // over a source whose length is not known, infinite or not a safe
@@ -13182,7 +13414,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           },
         };
       },
-    },
+    }),
   },
 
   RotateLeft: {
@@ -13217,7 +13449,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // returns a list. A bounded variable with no call-site binding does not.
     signature:
       '((T, integer?) -> T where T: string) & ((T, integer?) -> T where T: list) & ((indexed_collection<T>, integer?) -> list<T> where T)',
-    collection: {
+    collection: refusingUnindexedSource({
       isEnumerable: enumerableFromSmallSource,
       isLazy: (_expr) => true,
       // A rotation is a permutation, so length/emptiness/finiteness are
@@ -13299,7 +13531,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
 
         return expr.op1.at(((index - 1 + n) % l) + 1);
       },
-    },
+    }),
   },
 
   RotateRight: {
@@ -13318,7 +13550,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // returns a list. A bounded variable with no call-site binding does not.
     signature:
       '((T, integer?) -> T where T: string) & ((T, integer?) -> T where T: list) & ((indexed_collection<T>, integer?) -> list<T> where T)',
-    collection: {
+    collection: refusingUnindexedSource({
       isEnumerable: enumerableFromSmallSource,
       isLazy: (_expr) => true,
       // See `RotateLeft`: knowable, but suppressed while `at`/`iterator`
@@ -13382,7 +13614,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         const i = ((index - 1 + (l - n)) % l) + 1;
         return expr.op1.at(i);
       },
-    },
+    }),
   },
   // Return a list of the elements of each collection.
   // If all collections are Set, return a Set
@@ -13644,7 +13876,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // was not an indexed collection, and a list result materialized as a
     // `Set` of restricted cells.
     threadsConditionals: true,
-    signature: '(collection<T>, predicate: (T) any -> boolean) -> any where T',
+    // The source must have positions: the FIRST element that satisfies the
+    // predicate depends on the order of the source, and a set has no order
+    // (`Find(Set(3, 4), x > 2)` gave whichever of 3 and 4 the set iterated
+    // first). A literal set is refused when the call is boxed, a set held by
+    // a symbol of a wider declared type by `evaluate`.
+    signature:
+      '(indexed_collection<T>, predicate: (T) any -> boolean) -> any where T',
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'Find', ops, 1, PER_ELEMENT_SUPPLY),
     // Returns a single element, or `Nothing` when no element matches: the
@@ -13658,6 +13896,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         context.engine._typeResolver
       ),
     evaluate: ([xs, fn], { engine: ce }) => {
+      const refused = unindexedCollectionOperandError(ce, 'Find', xs);
+      if (refused) return refused;
       const f = applicable(fn);
       if (!f) return ce.Nothing;
       // A source that cannot be enumerated has no first match to report AND no
@@ -13732,11 +13972,24 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // Design D phase 1: the element-of link lives in the SIGNATURE (see
     // `CountIf`). The result is INDEXES, not elements — independent of `T`, and
     // unchanged.
+    // An index is a position, so the source must have positions, as for
+    // `IndexWhere`: `Position(Set(3, 1), x > 2)` gave `[1]`, the position of
+    // `3` in the iteration order of the set. A literal set is refused when
+    // the call is boxed, a set held by a symbol of a wider declared type by
+    // `evaluate`.
+    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // and is threaded whole (user decision 2026-09-25): the result is
+    // computed on the present collection and re-wrapped. Without the flag,
+    // the predicate received the restricted cells of the list and the
+    // evaluation threw.
+    threadsConditionals: true,
     signature:
-      '(collection<T>, predicate: (T) any -> boolean) -> list<integer> where T',
+      '(indexed_collection<T>, predicate: (T) any -> boolean) -> list<integer> where T',
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'Position', ops, 1, PER_ELEMENT_SUPPLY),
     evaluate: ([xs, fn], { engine: ce }) => {
+      const refused = unindexedCollectionOperandError(ce, 'Position', xs);
+      if (refused) return refused;
       const f = applicable(fn);
       if (!f) return ce.function('List', []);
       // Stay inert on non-finite or unknown-length input: reporting positions
@@ -13786,7 +14039,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // not cheaply decidable, so never `true` — see `canEnumerateFiniteSource`.
     canEnumerate: canEnumerateFiniteSource,
     // One index per element: length-preserving over the source.
-    elementCount: elementCountOfFiniteSource,
+    elementCount: elementCountOfIndexedSource,
     evaluate: ([xs, fn], { engine: ce }) => {
       // Stay inert on non-finite or unknown-length input, aligning with Sort:
       // an empty List would falsely claim a complete ordering.
@@ -13851,7 +14104,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // not cheaply decidable, so never `true` — see `canEnumerateFiniteSource`.
     canEnumerate: canEnumerateFiniteSource,
     // A permutation of the source: length-preserving.
-    elementCount: elementCountOfFiniteSource,
+    elementCount: elementCountOfIndexedSource,
     evaluate: ([xs, fn], { engine: ce }) => {
       // Eager collection results rebuild as `List`, never the source's head
       // (a `Range`/`Linspace` head would reinterpret the sorted elements as
@@ -14097,7 +14350,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     canEnumerate: canEnumerateFiniteSource,
     // A permutation of the source: length-preserving, and reading it consumes
     // ZERO draws (`elementCountOfFiniteSource` never evaluates).
-    elementCount: elementCountOfFiniteSource,
+    elementCount: elementCountOfIndexedSource,
     evaluate: ([xs], { engine: ce }) => {
       // An INFINITE collection can never be shuffled: error loudly, matching
       // `Random`/`RandomSample` (`out-of-range`, "a finite collection").
@@ -14601,8 +14854,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // was not an indexed collection, and a list result materialized as a
     // `Set` of restricted cells.
     threadsConditionals: true,
+    // The source must have positions: a chunk or a window is a run of
+    // consecutive elements, and the two predicate groups keep the order of
+    // the source. A set has no order: `Partition(Set(3, 1, 5), 2)` gave
+    // `[[3, 1], [5]]`. A literal set is refused when the call is boxed, a set
+    // held by a symbol of a wider declared type by `evaluate`.
     signature:
-      '(collection<T>, integer | ((T) any -> boolean), integer?) -> list<list<T>> where T',
+      '(indexed_collection<T>, integer | ((T) any -> boolean), integer?) -> list<list<T>> where T',
     // The string rule, and it covers BOTH forms: a chunk, a window and a
     // predicate group are each made of the source's own characters, so each is
     // itself a string and `Partition("abcd", 2)` is `["ab","cd"]` (ruling
@@ -14639,6 +14897,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'Partition', ops, 1, PER_ELEMENT_SUPPLY),
     evaluate: ([xs, arg, stepArg], { engine: ce }) => {
+      const refused = unindexedCollectionOperandError(ce, 'Partition', xs);
+      if (refused) return refused;
       if (!isWalkableFiniteCollection(xs)) return undefined;
 
       // A settled size that is a number but not an integer (`Partition(xs,
@@ -14763,19 +15023,21 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // predicate form has no lazy view (it needs totality over the source), so
     // `partitionWindowParams` returns `undefined` for it and every facet stays
     // inert — `Count(Partition(<inf>, <pred>))` remains symbolic.
-    collection: stringAwareWindowedCollectionOps((expr) => {
-      if (!isFunction(expr)) return undefined;
-      const n = toIntegerOperand(expr.op2);
-      if (n === null || n <= 0) return undefined; // predicate form or invalid
-      if (expr.nops >= 3) {
-        // Sliding-window form: complete windows only.
-        const step = toIntegerOperand(expr.op3);
-        if (step === null || step <= 0) return undefined;
-        return { src: expr.op1, size: n, step, keepPartial: false };
-      }
-      // Chunk form: consecutive size-`n` chunks; trailing partial kept.
-      return { src: expr.op1, size: n, step: n, keepPartial: true };
-    }),
+    collection: refusingUnindexedSource(
+      stringAwareWindowedCollectionOps((expr) => {
+        if (!isFunction(expr)) return undefined;
+        const n = toIntegerOperand(expr.op2);
+        if (n === null || n <= 0) return undefined; // predicate form or invalid
+        if (expr.nops >= 3) {
+          // Sliding-window form: complete windows only.
+          const step = toIntegerOperand(expr.op3);
+          if (step === null || step <= 0) return undefined;
+          return { src: expr.op1, size: n, step, keepPartial: false };
+        }
+        // Chunk form: consecutive size-`n` chunks; trailing partial kept.
+        return { src: expr.op1, size: n, step: n, keepPartial: true };
+      })
+    ),
   },
 
   Chunk: {
@@ -14801,8 +15063,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // was not an indexed collection, and a list result materialized as a
     // `Set` of restricted cells.
     threadsConditionals: true,
+    // The source must have positions: each group is a run of consecutive
+    // elements, and a set has no order (`Chunk(Set(3, 1, 5), 2)` gave
+    // `[[3, 1], [5]]`). A literal set is refused when the call is boxed, a
+    // set held by a symbol of a wider declared type by `evaluate`.
     signature:
-      '((S, integer) -> list<string> where S: string) & ((collection, integer) -> list<list>)',
+      '((S, integer) -> list<string> where S: string) & ((indexed_collection, integer) -> list<list>)',
     // Provable declines only (a finite, walkable source and a positive
     // integer `k` are required); success is not cheaply decidable, so never
     // `true` — see `canEnumerateFiniteSource`.
@@ -14826,6 +15092,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     elementCount: (expr) => {
       if (!isFunction(expr)) return undefined;
       if (expr.op1.isFiniteCollection !== true) return undefined;
+      // A source without positions (a set held by a symbol) is refused by the
+      // evaluation, so the number of groups is not known
+      // (`hasUnindexedSource`).
+      if (hasUnindexedSource(expr)) return undefined;
       const k = toInteger(expr.op2);
       // Mirrors the evaluate guard on `k`, cap included: a count evaluation
       // declines must not be promised here. The evaluate guard also requires
@@ -14835,6 +15105,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       return k;
     },
     evaluate: ([xs, n], { engine: ce }) => {
+      const refused = unindexedCollectionOperandError(ce, 'Chunk', xs);
+      if (refused) return refused;
       const k = toInteger(n);
       if (!isWalkableFiniteCollection(xs) || k === null || k <= 0)
         return undefined;
@@ -14883,11 +15155,24 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // never the ground type `string`: an `unknown`- or `any`-typed operand
     // refutes no arm, so a ground `string` parameter would win
     // most-specific-wins on every untyped operand.
+    //
+    // The source must have positions: a run is a stretch of CONSECUTIVE
+    // elements, and a set has no order (`ChunkBy(Set(3, 1, 4), x => x % 2)`
+    // gave `[[3, 1], [4]]`). A literal set is refused when the call is boxed,
+    // a set held by a symbol of a wider declared type by `evaluate`.
+    //
+    // A restricted collection, `[1,2]{c}`, is ONE held `When` over the list
+    // and is threaded whole (user decision 2026-09-25): the result is
+    // computed on the present collection and re-wrapped. Without the flag,
+    // the runs held the restricted cells of the list.
+    threadsConditionals: true,
     signature:
-      '((S, key: (character) any -> unknown) -> list<string> where S: string) & ((collection<T>, key: (T) any -> unknown) -> list<list<T>> where T)',
+      '((S, key: (character) any -> unknown) -> list<string> where S: string) & ((indexed_collection<T>, key: (T) any -> unknown) -> list<list<T>> where T)',
     canonical: (ops, { engine }) =>
       canonicalFunctionSlot(engine, 'ChunkBy', ops, 1, PER_ELEMENT_SUPPLY),
     evaluate: ([xs, fn], { engine: ce }) => {
+      const refused = unindexedCollectionOperandError(ce, 'ChunkBy', xs);
+      if (refused) return refused;
       if (!isWalkableFiniteCollection(xs)) return undefined;
       // Small finite sources materialize eagerly (all existing semantics);
       // larger — or unknown-length — sources stay symbolic and are served
@@ -14935,7 +15220,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // Lazy view (Dedup-shape streaming). Runs of an infinite source are
     // unknowable, so `count`/`isFinite` mirror `Dedup`: known only for a finite
     // source.
-    collection: {
+    collection: refusingUnindexedSource({
       isEnumerable: enumerableFromSource,
       isLazy: (_expr) => true,
       elementMemo: true,
@@ -15038,7 +15323,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         }
         return undefined;
       },
-    },
+    }),
   },
 
   GroupBy: {
@@ -15164,68 +15449,71 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         context.engine._typeResolver
       );
     },
-    collection: {
-      isEnumerable: enumerableFromAllSources,
-      isLazy: (_expr) => true,
-      count: zipCount,
-      isFinite: (expr) => {
-        if (!isFunction(expr)) return undefined;
-        if (expr.nops === 0) return true;
-        // Zip has the length of its *shortest* input, so it is finite as soon
-        // as *any* input is finite (was `every`, which wrongly called
-        // `Zip([1,2,3], <infinite>)` infinite).
-        let anyUnknown = false;
-        for (const x of expr.ops) {
-          const f = finitenessOfSource(x);
-          if (f === true) return true;
-          if (f === undefined) anyUnknown = true;
-        }
-        return anyUnknown ? undefined : false;
+    collection: refusingUnindexedSource(
+      {
+        isEnumerable: enumerableFromAllSources,
+        isLazy: (_expr) => true,
+        count: zipCount,
+        isFinite: (expr) => {
+          if (!isFunction(expr)) return undefined;
+          if (expr.nops === 0) return true;
+          // Zip has the length of its *shortest* input, so it is finite as soon
+          // as *any* input is finite (was `every`, which wrongly called
+          // `Zip([1,2,3], <infinite>)` infinite).
+          let anyUnknown = false;
+          for (const x of expr.ops) {
+            const f = finitenessOfSource(x);
+            if (f === true) return true;
+            if (f === undefined) anyUnknown = true;
+          }
+          return anyUnknown ? undefined : false;
+        },
+        isEmpty: (expr) => {
+          if (!isFunction(expr)) return undefined;
+          if (expr.nops === 0) return true;
+          // Zip is empty as soon as *any* input is empty (the shortest input
+          // bounds the result), not only when *every* input is empty.
+          let anyUnknown = false;
+          for (const x of expr.ops) {
+            const e = isEmptySource(x);
+            if (e === true) return true;
+            if (e === undefined) anyUnknown = true;
+          }
+          return anyUnknown ? undefined : false;
+        },
+        // Driven by each source's iterator — not by up-front counts — so a
+        // source with an unknown count (or an infinite one zipped with a
+        // finite one) still iterates; the zip ends as soon as any source ends.
+        iterator: (expr) => {
+          if (!isFunction(expr) || expr.nops === 0)
+            return { next: () => ({ value: undefined, done: true }) };
+          const sources = expr.ops.map((op) => op.each());
+          return {
+            next: () => {
+              const items: Expression[] = [];
+              for (const source of sources) {
+                const { value, done } = source.next();
+                if (done || value === undefined)
+                  return { value: undefined, done: true };
+                items.push(value);
+              }
+              return { value: expr.engine.tuple(...items), done: false };
+            },
+          };
+        },
+        at: (expr, index) => {
+          if (typeof index !== 'number' || index < 1) return undefined;
+          if (!isFunction(expr) || expr.nops === 0) return undefined;
+          // No up-front count needed — a source with an unknown count still
+          // answers `at`, and any source without an element there bounds the
+          // zip.
+          const items = expr.ops.map((op) => op.at(index));
+          if (items.some((x) => x === undefined)) return undefined;
+          return expr.engine.tuple(...(items as Expression[]));
+        },
       },
-      isEmpty: (expr) => {
-        if (!isFunction(expr)) return undefined;
-        if (expr.nops === 0) return true;
-        // Zip is empty as soon as *any* input is empty (the shortest input
-        // bounds the result), not only when *every* input is empty.
-        let anyUnknown = false;
-        for (const x of expr.ops) {
-          const e = isEmptySource(x);
-          if (e === true) return true;
-          if (e === undefined) anyUnknown = true;
-        }
-        return anyUnknown ? undefined : false;
-      },
-      // Driven by each source's iterator — not by up-front counts — so a
-      // source with an unknown count (or an infinite one zipped with a
-      // finite one) still iterates; the zip ends as soon as any source ends.
-      iterator: (expr) => {
-        if (!isFunction(expr) || expr.nops === 0)
-          return { next: () => ({ value: undefined, done: true }) };
-        const sources = expr.ops.map((op) => op.each());
-        return {
-          next: () => {
-            const items: Expression[] = [];
-            for (const source of sources) {
-              const { value, done } = source.next();
-              if (done || value === undefined)
-                return { value: undefined, done: true };
-              items.push(value);
-            }
-            return { value: expr.engine.tuple(...items), done: false };
-          },
-        };
-      },
-      at: (expr, index) => {
-        if (typeof index !== 'number' || index < 1) return undefined;
-        if (!isFunction(expr) || expr.nops === 0) return undefined;
-        // No up-front count needed — a source with an unknown count still
-        // answers `at`, and any source without an element there bounds the
-        // zip.
-        const items = expr.ops.map((op) => op.at(index));
-        if (items.some((x) => x === undefined)) return undefined;
-        return expr.engine.tuple(...(items as Expression[]));
-      },
-    },
+      hasUnindexedOperand
+    ),
   },
 
   // Iterate(fn, init) -> [fn(1, init), fn(2, fn(1, init)), ...]

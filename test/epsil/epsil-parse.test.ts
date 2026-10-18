@@ -2149,11 +2149,16 @@ describe('EPSIL PARSING `do { … }` BLOCK EXPRESSIONS', () => {
   test('a do-block in expression position is a Block', () => {
     // The `do` keyword turns the brace-delimited statement block (otherwise the
     // `{…}` collection grammar) into a `Block` usable anywhere an expression
-    // can. Its value is its final statement.
+    // can. Its value is its final statement. A program whose only statement
+    // is the block is wrapped in a second `Block` (the program), so the block
+    // is a nested scope, as it is after another statement.
     expect(validEpsil('do { let t = 3; t + 1 }')).toStrictEqual([
       'Block',
-      ['Declare', 't', ['Dictionary', ['KeyValuePair', 'value', 3]]],
-      ['Add', 't', 1],
+      [
+        'Block',
+        ['Declare', 't', ['Dictionary', ['KeyValuePair', 'value', 3]]],
+        ['Add', 't', 1],
+      ],
     ]);
   });
 
@@ -2193,11 +2198,29 @@ describe('EPSIL PARSING `do { … }` BLOCK EXPRESSIONS', () => {
   });
 
   test('an empty do-block is `["Block"]`', () => {
-    expect(validEpsil('do {}')).toStrictEqual(['Block']);
+    // The outer `Block` is the program (see above).
+    expect(validEpsil('do {}')).toStrictEqual(['Block', ['Block']]);
+    expect(validEpsil('y = do {}')).toStrictEqual(['Assign', 'y', ['Block']]);
   });
 
   test('a single-statement do-block', () => {
-    expect(validEpsil('do { 42 }')).toStrictEqual(['Block', 42]);
+    expect(validEpsil('do { 42 }')).toStrictEqual(['Block', ['Block', 42]]);
+  });
+
+  test('a program whose only statement is a do-block is wrapped once', () => {
+    // Several statements: the program `Block` holds them, and a do-block
+    // among them is not wrapped again.
+    expect(validEpsil('1; do { 2 }')).toStrictEqual([
+      'Block',
+      1,
+      ['Block', 2],
+    ]);
+    // A do-block inside a string interpolation is not a program.
+    expect(validEpsil('"\\(do { 1; 2 })"')).toStrictEqual([
+      'String',
+      { str: '' },
+      ['Block', 1, 2],
+    ]);
   });
 
   test('a bare `{…}` lambda body stays a Set (no regression)', () => {

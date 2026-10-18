@@ -351,11 +351,12 @@ describe('Tycho item 222 — PointList over UNKNOWN-length views', () => {
 
   test('a NON-INDEXED component (a Set) still fails closed', () => {
     // A Set has no positional order, so there is no i-th element to pair the
-    // other components with: staying inert is better than a silently wrong
+    // other components with: it is a type error, not a silently wrong
     // pairing or a degraded plain point.
     const ce = viewEngine();
     const r = ce.box(['PointList', ['Set', 1, 2, 3], 'A']).evaluate();
-    expect(r.operator).toBe('PointList');
+    expect(r.isValid).toBe(false);
+    expect(JSON.stringify(r.json)).toContain("'incompatible-type'");
     expect(r.isCollection).toBe(false);
   });
 
