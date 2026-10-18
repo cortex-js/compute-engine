@@ -109,6 +109,70 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
+### The shader targets compute a large trigonometric argument in float32 with no warning (OPEN, design — Tycho ledger rows 382 and 384, filed 2026-10-17)
+
+A shader computes in float32, about 7 significant digits. A periodic function
+turns an absolute error of its argument into a full-scale error of its value.
+The constant term of a trigonometric argument is now reduced by whole periods
+at compile time (`gpuReduceTrigOffset`, `compilation/gpu-target.ts`), so
+`\sin(x+10^6)` compiles to `sin(x + -0.35756418)` (user decision 2026-10-18).
+What remains is an argument that float32 rounds through a large FACTOR or a
+non-constant term: the sine hash `\operatorname{mod}(10^4\sin(10^4x),1)`
+still compiles to `fract(10000.0 * sin(10000.0 * x))`, with `success: true`
+and no diagnostic, and its float32 value has no relation to the `javascript`
+value.
+
+- **Row 382 (the sine hash, a silent wrong value).** Tycho asks for (a) a
+  diagnostic with `kind: "correctness"` when an operand of `fract`/`mod` is a
+  trig call scaled by a constant of magnitude ≥ 1000, or (b) a range-reduced
+  sine for such an argument, so that the shader value follows the
+  `javascript` value. Tycho prefers (b). If CE declines (b), the Tycho owner
+  must be told before CE delivers (a) alone. Until one of them ships, Tycho
+  scans the emitted shader text itself.
+- **Row 384 (a high-precision mode, the Tycho owner's request).** A compile
+  option, for example `precision: "high"`, under which the shader targets
+  emit double-float arithmetic (two float32 words per value) so that the
+  result matches the `javascript` target. User direction 2026-10-18: the
+  compile-time reduction of constant offsets applies in every mode (done);
+  double-float arithmetic is for the high-precision mode only. Later phases:
+  cancelling arithmetic (`(x + 10^6)^2 − 10^12`), `exp` and `pow` of large
+  arguments, and a report of which subexpressions the mode rewrote.
+
+**Measured 2026-10-18 on an Apple M5 Max (WebGL2, ANGLE on Metal):**
+
+- The native `sin` of a float32 argument up to 10^6 is accurate (maximum
+  error 1.2·10⁻⁷). A run-time reduction of an argument that is already a
+  float32 value gives no accuracy gain on this GPU. In a loop of dependent
+  `sin` calls it costs about 60% more per call (8.5 ms → 13.8 ms for 4.3·10⁹
+  calls). In a plot-like shader there was no measurable difference.
+- The shader compiler reorders float arithmetic. A Cody–Waite reduction
+  (2π split into several float32 parts) gave the same error as one float32
+  2π; a multiplication by a uniform `1.0` between the steps was necessary.
+  The error term of a Dekker product came out as 0 even with these barriers.
+  GLSL ES 3.00 has no `fma` and no `precise`, so double-float code on the
+  `glsl` target is not reliable. WGSL has `fma`, which gives an exact
+  product; this has not been measured yet.
+- For the hash, a correctly rounded float32 sine followed by a float32
+  product by 10^4 meets Tycho's 10⁻³ target at every input tested; a sine
+  with an error of 1.65·10⁻⁷ misses it at 135 of 4,096 inputs.
+
+Two shapes are not reduced by the compile-time fold:
+
+- A constant term that calls a library function (`\sin(x+\Gamma(20))`): the
+  fold accepts only exact arithmetic over number literals, so that a
+  `Random()` draw or a function mapped by the `functions` option of
+  `compile()` is never evaluated at compile time. The compiler's own constant
+  fold then emits the large value unreduced.
+- A complex argument (`\sin(x+10^6+10^6i)` through `_gpu_csin`): its real
+  part is periodic in the same way, but the constant is one complex literal.
+
+Next steps: measure a WGSL double-float product with `fma` under WebGPU; for
+`glsl`, decide between the diagnostic (a) and leaving the decline to Tycho.
+
+Tycho's probes: `scripts/repros/2026-10-17-ce382-glsl-amplified-trig-probe.mts`
+in the Tycho repo; the full text of both rows is in Tycho's
+`docs/COMPUTE_ENGINE.md`.
+
 ### Under `.N()`, a user function whose body has several statements reads the rounded argument (OPEN, decision — found 2026-10-17 by the fix that makes lazy operators forward the numeric request)
 
 Under `.N()`, a parameter of a user function holds the float of the argument,

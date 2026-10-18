@@ -183,6 +183,19 @@
 
 ### Issues Resolved
 
+- **The `glsl` and `wgsl` targets reduce a large constant term of a
+  trigonometric argument by whole periods.** A shader computes in float32, so
+  in `\sin(x+10^6)` the sum was rounded before `sin` read it, and the value was
+  off by up to 0.03 for every `x` (a plot of it crossed zero in the wrong
+  place). The constant is now reduced at compile time, with exact arithmetic:
+  `\sin(x+10^6)` compiles to `sin(x + -0.35756418)`, and its float32 value is
+  within 10⁻⁶ of the exact value. This applies to `\sin`, `\cos`, `\tan`,
+  `\cot`, `\sec` and `\csc`, to an argument of the form `\pi(x + c)`, and to a
+  constant that a double does not hold exactly (`10^{20} + 1`). An offset
+  smaller than half a period (`\sin(x+1)`) compiles as before. The `javascript`
+  target is unchanged: it computes in float64. A large factor
+  (`\sin(10^4x)`) is not changed by this.
+
 - **`NotGreater` evaluates.** `1 \ngtr 3` stayed `Not(3 < 1)`; it now evaluates
   to `True`, as `NotLess` already did.
 

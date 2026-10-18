@@ -20,6 +20,7 @@ import {
   isSymbol,
 } from '../boxed-expression/type-guards.js';
 import { rgbToOklch } from '@arnog/colors';
+import { BigDecimal } from '../../big-decimal/index.js';
 import { parseColorString } from '../library/colors.js';
 import {
   tryGetConstant,
@@ -2383,11 +2384,206 @@ function gpuIsComponentwise(code: string, vector?: string): string | undefined {
  * (`BaseCompiler.piMultiple`): the shader lowers `sin(πu)`, `cos(πu)`,
  * `tan(πu)` and `e^{iπu}` with the angle in half-turns (`_gpu_cossinpi`).
  * A vector `u` keeps the componentwise built-in.
+ *
+ * `period` is the period of the function in half-turns (2 for `sin` and
+ * `cos`, 1 for `tan`): a constant term of `u` is reduced by whole periods
+ * (`gpuReduceTrigOffset`).
  */
-function gpuPiMultiple(x: Expression | null): Expression | undefined {
+function gpuPiMultiple(
+  x: Expression | null,
+  period: number
+): Expression | undefined {
   if (x === null) return undefined;
   const u = BaseCompiler.piMultiple(x);
-  return u !== undefined && gpuOperandShape(u) === 'scalar' ? u : undefined;
+  return u !== undefined && gpuOperandShape(u) === 'scalar'
+    ? gpuReduceTrigOffset(u, period, false)
+    : undefined;
+}
+
+/**
+ * The argument `x` of a periodic function, with its constant terms reduced
+ * by whole periods at compile time.
+ *
+ * A shader computes in float32, about 7 significant digits. In `x + c` with a
+ * large constant `c`, the sum is rounded before the function reads it, so the
+ * low digits of `x` are lost: `sin(x + 10^6)` is off by up to 0.03 for every
+ * `x`, and the curve crosses zero in the wrong place. The function is
+ * periodic, so `c` can be replaced by `c − P·round(c/P)`, which lies in
+ * [−P/2, P/2], and `x` then keeps its own precision. No run-time reduction is
+ * emitted: the argument of `sin` itself is not changed, and the native `sin`
+ * reduces a float32 argument accurately on the GPUs measured.
+ *
+ * The period is `period·π` when `inRadians` is true (`sin`, `cos`, `tan` and
+ * their reciprocals), and `period` itself when it is false (the half-turn
+ * helpers `_gpu_sinpi`, `_gpu_cospi`, `_gpu_tanpi` and `_gpu_cossinpi`, whose
+ * argument is the angle divided by π).
+ *
+ * `x` is a sum `u + c`, or a sum times a number literal `k·(u + c)`, the form
+ * the degree-mode rewrite gives (`sin(0.0174…·(x + 10^6))`): then `c` is
+ * reduced by `P/k`, the period of the product in the units of the sum. A
+ * constant term is a real number literal, or an exact-arithmetic expression
+ * over number literals (`10^{20}`, `10^7/3`, `10^6·√2`), or, in radians,
+ * such a term times the library constant π (`10^6·π`). A term that calls any
+ * other function is not a constant term, even with no symbols: `Random()`
+ * must be drawn at run time, and a caller may map a function to its own code
+ * (the `functions` option of `compile()`).
+ *
+ * The constant terms are added and reduced with `BigDecimal`, at a precision
+ * that keeps every digit of the remainder, so an exact constant that a double
+ * does not hold (`10^{20} + 1`, `10^{400}`) reduces correctly. The remainder
+ * is written as one float literal. When the constant is already in
+ * [−P/2, P/2], `x` is returned unchanged, so a small offset (`sin(x + 1)`)
+ * emits the same code as before. Only a real scalar argument is rewritten.
+ */
+function gpuReduceTrigOffset(
+  x: Expression,
+  period: number,
+  inRadians: boolean
+): Expression {
+  if (BaseCompiler.isComplexValued(x) || gpuOperandShape(x) !== 'scalar')
+    return x;
+  if (isFunction(x, 'Multiply') && x.nops === 2) {
+    const [k, sum] = isNumber(x.ops[0])
+      ? [x.ops[0], x.ops[1]]
+      : [x.ops[1], x.ops[0]];
+    if (!isNumber(k) || !isFunction(sum, 'Add')) return x;
+    const reduced = gpuReduceSumOffset(sum, period, inRadians, k);
+    return reduced === sum ? x : x.engine.function('Multiply', [k, reduced]);
+  }
+  if (!isFunction(x, 'Add')) return x;
+  return gpuReduceSumOffset(x, period, inRadians, undefined);
+}
+
+/**
+ * The heads an exact constant term may use (`gpuReduceTrigOffset`). Each one
+ * evaluates exactly and has no side effect.
+ */
+const GPU_EXACT_ARITHMETIC_HEADS = new Set([
+  'Add',
+  'Subtract',
+  'Negate',
+  'Multiply',
+  'Divide',
+  'Rational',
+  'Power',
+  'Sqrt',
+  'Root',
+]);
+
+/**
+ * Whether `op` is a real number literal or an exact-arithmetic expression over
+ * real number literals. An exponent above 4096 is refused, so that the exact
+ * evaluation stays cheap (`2^{10^6}` has 300 000 digits).
+ */
+function gpuIsExactArithmetic(op: Expression): boolean {
+  if (isNumber(op)) return !op.isComplex && op.isFinite === true;
+  if (!isFunction(op) || !GPU_EXACT_ARITHMETIC_HEADS.has(op.operator))
+    return false;
+  if (op.operator === 'Power') {
+    const e = op.ops[1];
+    if (e === undefined || !isNumber(e) || !(Math.abs(e.re) <= 4096))
+      return false;
+  }
+  return op.ops.every(gpuIsExactArithmetic);
+}
+
+/** The exact real value of a constant term, as a number literal. */
+function gpuExactConstant(op: Expression): Expression | undefined {
+  if (!gpuIsExactArithmetic(op)) return undefined;
+  const v = isNumber(op) ? op : op.evaluate();
+  return isNumber(v) && !v.isComplex && v.isFinite === true ? v : undefined;
+}
+
+/** `gpuReduceTrigOffset` for a sum, whose units are scaled by `scale`. */
+function gpuReduceSumOffset(
+  x: Expression,
+  period: number,
+  inRadians: boolean,
+  scale: Expression | undefined
+): Expression {
+  if (!isFunction(x, 'Add')) return x;
+  const literals: Expression[] = [];
+  const piTerms: Expression[] = [];
+  const rest: Expression[] = [];
+  for (const op of x.ops) {
+    const v = gpuExactConstant(op);
+    if (v !== undefined) {
+      literals.push(v);
+      continue;
+    }
+    if (inRadians) {
+      const u = BaseCompiler.piMultiple(op);
+      const k = u === undefined ? undefined : gpuExactConstant(u);
+      if (k !== undefined) {
+        piTerms.push(k);
+        continue;
+      }
+    }
+    rest.push(op);
+  }
+  if (literals.length + piTerms.length === 0) return x;
+
+  // `BigDecimal.precision` is global, so it is restored afterwards. The
+  // constant is first added at 50 digits to read its magnitude; the integer
+  // part of `c/P` then needs that many digits, and the remainder keeps 30
+  // more.
+  const bigValue = (op: Expression): BigDecimal | undefined => {
+    if (!isNumber(op)) return undefined;
+    const v = op.numericValue;
+    const b = typeof v === 'number' ? new BigDecimal(v) : v.bignumRe;
+    return b !== undefined && b.isFinite() ? b : undefined;
+  };
+  const constant = (): BigDecimal | undefined => {
+    let c = BigDecimal.ZERO;
+    for (const op of literals) {
+      const v = bigValue(op);
+      if (v === undefined) return undefined;
+      c = c.add(v);
+    }
+    if (piTerms.length > 0) {
+      let k = BigDecimal.ZERO;
+      for (const op of piTerms) {
+        const v = bigValue(op);
+        if (v === undefined) return undefined;
+        k = k.add(v);
+      }
+      c = c.add(k.mul(BigDecimal.PI));
+    }
+    return c;
+  };
+  const savedPrecision = BigDecimal.precision;
+  let remainder: number;
+  try {
+    BigDecimal.precision = 50;
+    const rough = constant();
+    if (rough === undefined || rough.isZero()) return x;
+    const digits =
+      rough.exponent +
+      (rough.significand < 0n
+        ? -rough.significand
+        : rough.significand
+      ).toString().length;
+    if (digits > 10000) return x;
+    BigDecimal.precision = Math.max(50, digits + 30);
+    const c = constant();
+    if (c === undefined) return x;
+    let p = inRadians ? BigDecimal.PI.mul(period) : new BigDecimal(period);
+    if (scale !== undefined) {
+      const k = bigValue(scale);
+      if (k === undefined || k.isZero()) return x;
+      p = p.div(k.abs());
+    }
+    if (c.abs().cmp(p.div(2)) <= 0) return x;
+    remainder = c.sub(c.div(p).round().mul(p)).toNumber();
+  } finally {
+    BigDecimal.precision = savedPrecision;
+  }
+  const ce = x.engine;
+  if (remainder === 0) {
+    if (rest.length === 0) return ce.Zero;
+    return rest.length === 1 ? rest[0] : ce.function('Add', rest);
+  }
+  return ce.function('Add', [...rest, ce.number(remainder)]);
 }
 
 export function gpuOperandShape(
@@ -6259,9 +6455,9 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   Cos: (args, compile) => {
     if (BaseCompiler.isComplexValued(args[0]))
       return `_gpu_ccos(${compile(args[0])})`;
-    const u = gpuPiMultiple(args[0]);
+    const u = gpuPiMultiple(args[0], 2);
     if (u !== undefined) return `_gpu_cospi(${compile(u)})`;
-    return `cos(${compile(args[0])})`;
+    return `cos(${compile(gpuReduceTrigOffset(args[0], 2, true))})`;
   },
   // In radian mode CE's `Degrees` converts degrees→radians (Degrees(180) =
   // π), which is GLSL's `radians()`. GLSL's `degrees()` is the inverse
@@ -6565,10 +6761,14 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
           split !== undefined &&
           gpuOperandShape(split.u) === 'scalar' &&
           (split.a === undefined || gpuOperandShape(split.a) === 'scalar')
-        )
+        ) {
+          // The angle in half-turns has the period 2: a large constant term
+          // is reduced (`gpuReduceTrigOffset`).
+          const u = gpuReduceTrigOffset(split.u, 2, false);
           return split.a === undefined
-            ? `_gpu_cossinpi(${compile(split.u)})`
-            : `(exp(${compile(split.a)}) * _gpu_cossinpi(${compile(split.u)}))`;
+            ? `_gpu_cossinpi(${compile(u)})`
+            : `(exp(${compile(split.a)}) * _gpu_cossinpi(${compile(u)}))`;
+        }
         return `_gpu_cexp(${compile(exp)})`;
       }
       const v2 = gpuVec2(target);
@@ -6790,9 +6990,9 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   Sin: (args, compile) => {
     if (BaseCompiler.isComplexValued(args[0]))
       return `_gpu_csin(${compile(args[0])})`;
-    const u = gpuPiMultiple(args[0]);
+    const u = gpuPiMultiple(args[0], 2);
     if (u !== undefined) return `_gpu_sinpi(${compile(u)})`;
-    return `sin(${compile(args[0])})`;
+    return `sin(${compile(gpuReduceTrigOffset(args[0], 2, true))})`;
   },
   Smoothstep: 'smoothstep',
   Sqrt: (args, compile, target) => {
@@ -6828,9 +7028,9 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   Tan: (args, compile) => {
     if (BaseCompiler.isComplexValued(args[0]))
       return `_gpu_ctan(${compile(args[0])})`;
-    const u = gpuPiMultiple(args[0]);
+    const u = gpuPiMultiple(args[0], 1);
     if (u !== undefined) return `_gpu_tanpi(${compile(u)})`;
-    return `tan(${compile(args[0])})`;
+    return `tan(${compile(gpuReduceTrigOffset(args[0], 1, true))})`;
   },
   Truncate: (args, compile, target) => {
     if (args.length > 1 && args[1] !== null)
@@ -6985,10 +7185,13 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
         );
       const t = BaseCompiler.tempVar(target);
       const decl = target.language === 'wgsl' ? `var ${t}: f32` : `float ${t}`;
-      BaseCompiler.hoistStatement(target, `${decl} = ${compile(x)};`);
+      BaseCompiler.hoistStatement(
+        target,
+        `${decl} = ${compile(gpuReduceTrigOffset(x, 1, true))};`
+      );
       return `(cos(${t}) / sin(${t}))`;
     }
-    const arg = compile(x);
+    const arg = compile(gpuReduceTrigOffset(x, 1, true));
     return `(cos(${arg}) / sin(${arg}))`;
   },
   Csc: ([x], compile, target) => {
@@ -6997,7 +7200,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       const v2 = gpuVec2(target);
       return `_gpu_cdiv(${v2}(1.0, 0.0), _gpu_csin(${compile(x)}))`;
     }
-    return `(1.0 / sin(${compile(x)}))`;
+    return `(1.0 / sin(${compile(gpuReduceTrigOffset(x, 2, true))}))`;
   },
   Sec: ([x], compile, target) => {
     if (x === null) throw new Error('Could not compile `Sec`: no argument');
@@ -7005,7 +7208,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       const v2 = gpuVec2(target);
       return `_gpu_cdiv(${v2}(1.0, 0.0), _gpu_ccos(${compile(x)}))`;
     }
-    return `(1.0 / cos(${compile(x)}))`;
+    return `(1.0 / cos(${compile(gpuReduceTrigOffset(x, 2, true))}))`;
   },
 
   // Inverse trigonometric (reciprocal)
