@@ -287,14 +287,17 @@ describe('a set in an element-wise broadcast', () => {
     expect(result.toString()).toBe(SET_ERROR);
   });
 
-  // The parameters of `Less` are `any`, so the set is used whole in every
-  // cell, as a symbol is (`[1, 2, 3] < x` is `[1 < x, 2 < x, 3 < x]`). Each
-  // cell stays inert, as `1 < Set(1, 2)` does. `Less` also re-enters evaluate
-  // to broadcast (`broadcastComparison`), and the two arms must not call each
+  // An ordering comparison does not use the set whole in every cell,
+  // although the parameters of `Less` are `any`: a set has no order with a
+  // number, so the comparison is the `incompatible-type` error (see
+  // `compare-set-and-scalar-or-collection.test.ts`). Until 2026-10-17 the
+  // answer was `[1 < Set(1, 2), 2 < Set(1, 2), 3 < Set(1, 2)]`. Beside a
+  // scalar the comparison stays inert. `Less` also re-enters evaluate to
+  // broadcast (`broadcastComparison`), and the two arms must not call each
   // other until the stack is exhausted.
-  test('Less([1, 2, 3], Set(1, 2)) uses the set whole in every cell', () => {
+  test('Less([1, 2, 3], Set(1, 2)) is an incompatible-type error', () => {
     expect(evalString(['Less', ['List', 1, 2, 3], ['Set', 1, 2]])).toBe(
-      '[1 < Set(1, 2),2 < Set(1, 2),3 < Set(1, 2)]'
+      SET_ERROR
     );
     expect(evalString(['Less', 1, ['Set', 1, 2]])).toBe('1 < Set(1, 2)');
   });

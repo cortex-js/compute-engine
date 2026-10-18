@@ -24,36 +24,72 @@
   keeps the unevaluated `Join`, and a list literal with a spread (`[...d, 2]`)
   is still a list of the entries and the element.
 
+- **An ordering comparison of a set and a list is an error.**
+  `Less(Set(5, 6), [1, 2])` evaluated to `[Set(5, 6) < 1, Set(5, 6) < 2]`: the
+  element-wise broadcast used the set whole in each cell, because the parameters
+  of `Less` are declared `any`. A set has no positions to pair with the cells of
+  a list, and no order with a number, so the comparison is now
+  `Error(incompatible-type, number, set<integer>)`, the error that `Sin` and
+  `Add` give for a set. The same holds for `LessEqual`, `Greater`,
+  `GreaterEqual`, an interval and a dictionary beside a list, and a symbol that
+  holds a set. Beside a number or another set, the comparison stays unevaluated,
+  as before, and `Set(5, 6) = [1, 2]` is still `False`.
+
+- **A comparison with a list over an operand with no value whose type only
+  admits a collection stays unevaluated.** With `P` declared
+  `number | collection<number>` (or `real | collection`), `P < [1, 2]` evaluated
+  to `[P < 1, P < 2]`, as if `P` were a number, and `P = [1, 2]` to
+  `[P == 1, P == 2]`; with `P` declared `number | list<number>`, `P = [1, 2]`
+  was `False`. The result then depended on when `P` got its value: after
+  `P := [5, 6]`, the expanded forms gave lists of lists. All of these now stay
+  unevaluated until `P` has a value, as they do for `P` declared
+  `collection<number>`, and the element-wise operators (`P + [1, 2]`) follow the
+  same rule. A declared union with a set or a dictionary arm
+  (`number | set<number>`) is held too, so that after `P := Set(5, 6)` the held
+  comparison gives the same `incompatible-type` error as a fresh one. A type
+  that was inferred from a use, not declared (`Mean(q)` infers
+  `q: collection<any> | distribution | number`), does not hold: `q + [1, 2]` is
+  still `[q + 1, q + 2]`, and a tuple arm is still used whole.
+
 ### Performance
 
-- **A `vars` entry that spells the symbol as the compiler does no longer
-  stops it from sharing repeated work.** `compile()` treated every string-valued `vars` entry
-  as caller code that may have an effect (`_.draw()`), so no subexpression that
-  read it was computed once and reused. A host that passes
-  `vars: { a: '_.a' }` to keep a slider value live — the same code the
-  compiler emits for a free symbol — therefore got `cos(a)` and every
-  user-function call over `a` emitted at each occurrence: on the interval
-  target each one allocates, so the exoplanet-transit row of the Tycho codegen
-  audit computed `X(c(x − x₁))` and `y_p²` twice per sample. An entry whose
-  text is exactly what the target emits for that symbol without an entry
-  (`_.a` for `a` on the JavaScript and interval targets, `a` itself on the
-  shader targets) is now a plain read, since it changes nothing in the
-  emitted code. Every other string is treated as before, including a deeper
-  path (`_.state.a`, which can be a getter), a path that names another symbol
-  (`_.b` for `a`, which an assignment to `b` writes), and any entry of a
-  compiled `Function` literal, whose runner has no vars object.
-- **`(x² + 1)^{3/2}` compiles through the square root instead of
-  `Math.pow`.** A power
-  `3/2` or `5/2` of a base proven non-negative used the square root only when
-  the base was a symbol or a number; a compound base used `Math.pow`, which is
-  about eight times slower. It now goes through `_SYS.pow3h`/`_SYS.pow5h`,
+- **A `vars` entry that spells the symbol as the compiler does no longer stops
+  it from sharing repeated work.** `compile()` treated every string-valued
+  `vars` entry as caller code that may have an effect (`_.draw()`), so no
+  subexpression that read it was computed once and reused. A host that passes
+  `vars: { a: '_.a' }` to keep a slider value live — the same code the compiler
+  emits for a free symbol — therefore got `cos(a)` and every user-function call
+  over `a` emitted at each occurrence: on the interval target each one
+  allocates, so the exoplanet-transit row of the Tycho codegen audit computed
+  `X(c(x − x₁))` and `y_p²` twice per sample. An entry whose text is exactly
+  what the target emits for that symbol without an entry (`_.a` for `a` on the
+  JavaScript and interval targets, `a` itself on the shader targets) is now a
+  plain read, since it changes nothing in the emitted code. Every other string
+  is treated as before, including a deeper path (`_.state.a`, which can be a
+  getter), a path that names another symbol (`_.b` for `a`, which an assignment
+  to `b` writes), and any entry of a compiled `Function` literal, whose runner
+  has no vars object.
+- **`(x² + 1)^{3/2}` compiles through the square root instead of `Math.pow`.** A
+  power `3/2` or `5/2` of a base proven non-negative used the square root only
+  when the base was a symbol or a number; a compound base used `Math.pow`, which
+  is about eight times slower. It now goes through `_SYS.pow3h`/`_SYS.pow5h`,
   which evaluate the base once (within 1 ulp of `Math.pow`).
-- **A repeated `e^x` or `m^q` is computed once.** A power whose exponent is
-  not a small integer lowers to `Math.exp`, `Math.pow` or `_SYS.pow`, but its
-  expression is only three nodes, below the size at which the compiler shares
-  a repeated subexpression: `(e^{0.1t} cos t, e^{0.1t} sin t)` called
-  `Math.exp` twice. Such a power, and a `Root`, are now shared as the
-  trigonometric functions are.
+- **A repeated `e^x` or `m^q` is computed once.** A power whose exponent is not
+  a small integer lowers to `Math.exp`, `Math.pow` or `_SYS.pow`, but its
+  expression is only three nodes, below the size at which the compiler shares a
+  repeated subexpression: `(e^{0.1t} cos t, e^{0.1t} sin t)` called `Math.exp`
+  twice. Such a power, and a `Root`, are now shared as the trigonometric
+  functions are. On the Python target a power stays inline: it is one `**`
+  operation there (`np.e ** x`), cheaper than the temporary.
+- **In a function body, the `If` that gives the body's value shares work between
+  its condition and its branches.**
+  `T₄(c) := If(cos(T₃(c)) > −0.82, T₃(c), NaN)` called `T₃(c)` twice, once in
+  the condition and once in the branch, where the same `If` at the root of an
+  expression, or written as a `Which`, called it once. The compiler had treated
+  the last statement of the body as an if-statement, whose condition and
+  branches can share nothing; it is an expression on every target. An `If` in a
+  loop body, or one with a statement in a branch (`Return`, an assignment),
+  keeps the statement form.
 
 ## 0.156.0 _2026-10-17_
 

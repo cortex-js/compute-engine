@@ -20,7 +20,9 @@ import {
   broadcastLengthMismatch,
   isTextAtom,
   isUnindexedCollectionOperand,
+  isUnresolvedCollectionOperand,
 } from '../collection-utils.js';
+import { nonNumericOperandError } from '../boxed-expression/validate.js';
 import { flatten } from '../boxed-expression/flatten.js';
 import {
   eq,
@@ -1983,9 +1985,11 @@ function absentCollectionComparison(ops: ReadonlyArray<Expression>): boolean {
 function undecidedCollectionComparison(
   ops: ReadonlyArray<Expression>
 ): boolean {
+  // `isUnresolvedCollectionOperand` sees an operand with no value that is
+  // typed as a collection, and one whose type only admits a collection
+  // (`P: number | collection<number>`): `P = [1, 2]` may still be `True`.
   const unresolved = (op: Expression): boolean =>
-    isPossiblyCollectionTyped(op) ||
-    (!op.isCollection && op.type.matches('collection<any>'));
+    isPossiblyCollectionTyped(op) || isUnresolvedCollectionOperand(op);
   return ops.some(unresolved) && ops.some((op) => op.isCollection);
 }
 
@@ -2012,13 +2016,21 @@ function broadcastComparison(
   // the exclusion, a tuple-only comparison re-enters evaluate — whose step 2
   // now skips tuples — and ping-pongs back here forever (stack overflow).
   if (!ops.some((op) => isFiniteBroadcastParticipant(op))) return undefined;
-  // A collection that is not indexed (a set, an interval) is excluded too.
-  // It has no positions, and step 2 DECLINES a broadcast when such an
-  // operand is at a number parameter (`unindexedOperandBroadcast` in
-  // boxed-function). For such an operator, re-entering evaluate here would
-  // come straight back and recurse until the stack is exhausted. Declining
-  // leaves the comparison inert, as `1 < Set(1, 2)` is.
-  if (ops.some(isUnindexedCollectionOperand)) return undefined;
+  // A collection that is not indexed (a set, an interval, a dictionary) is
+  // excluded too. It has no positions, and step 2 DECLINES a broadcast when
+  // such an operand is at a number parameter, or is an operand of an
+  // ordering comparison (`unindexedOperandBroadcast` in boxed-function). For
+  // such an operator, re-entering evaluate here would come straight back and
+  // recurse until the stack is exhausted. An ordering comparison cannot pair
+  // such a collection with the cells of a list, and a set has no order with
+  // a number, so the comparison is the `incompatible-type` error that `Sin`
+  // and `Add` give for a set: `Less(Set(5, 6), [1, 2])` is
+  // `Error(incompatible-type, number, set<integer>)`. Beside no list, the
+  // comparison stays inert, as `1 < Set(1, 2)` is.
+  if (ops.some(isUnindexedCollectionOperand)) {
+    if (operator !== 'Less' && operator !== 'LessEqual') return undefined;
+    return nonNumericOperandError(ce, ops.filter(isUnindexedCollectionOperand));
+  }
   // A collection-TYPED but valueless operand is excluded for the same reason,
   // and it is the same ping-pong: step 2 DECLINES such a comparison (it would
   // splice the valueless operand into every cell as a scalar — see

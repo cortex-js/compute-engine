@@ -12426,12 +12426,26 @@ function declaredParameterType(
  *   for example the `any` parameters of `String`. The operator is broadcast
  *   over the other collections, and the operand is used whole in every cell,
  *   as a scalar is: `String([1, 2], Set(3, 4))` is a list of two strings.
+ *
+ * The ordering comparisons (`ORDERING_RELATIONS`) answer `'veto'`, although
+ * their parameters are declared `any`: they declare `any` for the chain form
+ * (`a < b < c`), quantities and `Missing`, but they order numbers, and a set
+ * has no order with a number. Their handler then gets the whole set beside
+ * the list, and answers the `incompatible-type` error
+ * (`broadcastComparison`, `library/relational-operator.ts`):
+ * `Less(Set(5, 6), [1, 2])` is that error, not
+ * `[Set(5, 6) < 1, Set(5, 6) < 2]`.
  */
 function unindexedOperandBroadcast(
   def: BoxedOperatorDefinition,
   ops: ReadonlyArray<Expression>
 ): 'veto' | 'lift' | undefined {
   if (!ops.some(isUnindexedCollectionOperand)) return undefined;
+  if (
+    def instanceof _BoxedOperatorDefinition &&
+    ORDERING_RELATIONS.has(def.name)
+  )
+    return 'veto';
   for (let i = 0; i < ops.length; i++) {
     if (!isUnindexedCollectionOperand(ops[i])) continue;
     const param = declaredParameterType(def, i);
@@ -12439,6 +12453,17 @@ function unindexedOperandBroadcast(
   }
   return 'lift';
 }
+
+/** The broadcastable comparisons that order their operands. `Greater` and
+ * `GreaterEqual` are boxed as `Less` and `LessEqual` with the operands
+ * swapped, and are listed for a definition that keeps its own head. See
+ * `unindexedOperandBroadcast`. */
+const ORDERING_RELATIONS: ReadonlySet<string> = new Set([
+  'Less',
+  'LessEqual',
+  'Greater',
+  'GreaterEqual',
+]);
 
 /**
  * The rows of the element-wise broadcast of a built-in operator over `ops`

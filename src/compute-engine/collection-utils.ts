@@ -640,7 +640,63 @@ function isUnresolvedCollectionShape(x: Expression): boolean {
   const resolved = resolveTypeReference(t) ?? t;
   if (isTupleShapedType(resolved)) return false;
   if (isValuelessCollectionTyped(x)) return true;
-  return !x.isCollection && mayHoldAnIndexedCollection(resolved);
+  if (x.isCollection) return false;
+  return (
+    mayHoldAnIndexedCollection(resolved) ||
+    (!hasInferredType(x) && declaredUnionMayHoldACollection(resolved))
+  );
+}
+
+/**
+ * Whether the type of `x` was inferred from its uses rather than declared: a
+ * symbol whose value definition says so, or an application whose operator
+ * signature was inferred. `Mean(q)` infers `q` as
+ * `collection<any> | distribution | number`, from the parameter of `Mean`,
+ * and such a type does not say that `q` will hold a collection.
+ */
+function hasInferredType(x: Expression): boolean {
+  if (isSymbol(x)) return x.valueDefinition?.inferredType === true;
+  if (isFunction(x)) return x.operatorDefinition?.inferredSignature === true;
+  return false;
+}
+
+/**
+ * Whether the DECLARED type `t` is a union with an arm that is a collection
+ * of any kind other than a tuple or a string: an indexed collection, an
+ * abstract `collection<T>`, a set or a dictionary. A tuple and a string are
+ * used whole by a broadcast, so they are excluded, as in
+ * {@link mayHoldAnIndexedCollection}.
+ *
+ * {@link mayHoldAnIndexedCollection} counts only the indexed arms, which a
+ * broadcast would map over. But an abstract arm can hold a list, and a set
+ * or a dictionary arm makes a broadcast an error, so a per-element
+ * expansion made while the operand has no value is wrong for these arms too.
+ * With `P` declared `number | collection<number>`, `P < [1, 2]` expanded to
+ * `[P < 1, P < 2]`; after `P := [5, 6]` that gave lists of lists. With `T`
+ * declared `number | set<number>`, `T < [1, 2]` expanded the same way, and
+ * after `T := Set(5, 6)` a fresh evaluation is an `incompatible-type` error.
+ * Only a declaration counts (see `hasInferredType`): the statistics
+ * operators infer such a union for a free symbol that they read, and a later
+ * `q + [1, 2]` must still broadcast as it does for any free symbol.
+ */
+function declaredUnionMayHoldACollection(
+  t: Type,
+  seen?: AliasDescent
+): boolean {
+  if (typeof t === 'string' || t.kind !== 'union') return false;
+  return t.types.some((branch) => {
+    let next = seen;
+    if (typeof branch === 'object' && branch.kind === 'reference') {
+      next = recordUnfoldOnDescent(declarationOf(branch), seen);
+      if (next === undefined) return false;
+    }
+    const b = resolveTypeReference(branch) ?? branch;
+    if (isTupleShapedType(b) || isSubtype(b, 'string')) return false;
+    return (
+      isSubtype(b, COLLECTION_SHAPE_TYPE) ||
+      declaredUnionMayHoldACollection(b, next)
+    );
+  });
 }
 
 /**
