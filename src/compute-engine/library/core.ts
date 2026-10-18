@@ -482,8 +482,7 @@ function writeBeforeDeclarationError(
 ): Expression | undefined {
   if (name === undefined) return undefined;
   const binding = ce.lookupDefinition(name) as
-    | { _uninitialized?: boolean }
-    | undefined;
+    { _uninitialized?: boolean } | undefined;
   return binding?._uninitialized === true
     ? ce.error(['read-before-declaration', name])
     : undefined;
@@ -6903,7 +6902,11 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           // the literal, as for a first declaration of the name.
           const upgradesInPlace =
             isAutoDeclareHere &&
-            !(isConstant && boundHasValue && isFunction(boundValue, 'Function'));
+            !(
+              isConstant &&
+              boundHasValue &&
+              isFunction(boundValue, 'Function')
+            );
           if (isAutoDeclareHere && !upgradesInPlace) {
             journalCheckpointMapEntry(
               ce,

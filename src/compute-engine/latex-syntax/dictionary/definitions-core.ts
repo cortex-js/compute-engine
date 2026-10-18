@@ -2978,7 +2978,9 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       // `Delimiter`, which canonicalizes away. The `cases` and function-call
       // spellings close themselves and need no parentheses.
       const fenced = (latex: string): string =>
-        serializer.depth > 0 ? joinLatex(['\\left(', latex, '\\right)']) : latex;
+        serializer.depth > 0
+          ? joinLatex(['\\left(', latex, '\\right)'])
+          : latex;
       // A single EMITTED statement (a `Declare` emits nothing, so
       // `Block(Declare s, Assign s 2)` is one) needs the trailing `;` marker
       // to survive the round trip: without it, `s≔2` re-parses as a bare

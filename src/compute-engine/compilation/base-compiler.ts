@@ -8278,8 +8278,7 @@ export class BaseCompiler {
     const callerSupplied = (node: Expression): boolean => {
       if (callerSeen.has(node)) return false;
       callerSeen.add(node);
-      if (isSymbol(node))
-        return provenance.isStringVar?.(node.symbol) === true;
+      if (isSymbol(node)) return provenance.isStringVar?.(node.symbol) === true;
       if (isFunction(node))
         return overridden(node.operator) || node.ops.some(callerSupplied);
       return false;

@@ -3023,7 +3023,7 @@ export function hurwitzZetaComplexWithError(
   // integer order has a route whose cost does not depend on Re(a)
   // (`hurwitzZetaFarLeft`); another order declines.
   if (-a.re > HURWITZ_MAX_PASSED_TERMS)
-    return hurwitzZetaFarLeft(s, a, sMinusOne);
+    return hurwitzZetaFarLeft(s, a);
   const emTerms = Math.max(8, Math.ceil(emEdge(s) - a.re));
   const em = () =>
     tallied((tally) => hurwitzEMComplex(s, a, sMinusOne ?? s.sub(1), tally));
@@ -4037,8 +4037,7 @@ const FAR_LEFT_MAX_BERNOULLI_ORDER = 60;
  */
 function hurwitzZetaFarLeft(
   s: Complex,
-  a: Complex,
-  sMinusOne?: Complex
+  a: Complex
 ): { value: Complex; error: number } | undefined {
   if (!Number.isFinite(a.re) || !Number.isFinite(a.im)) return undefined;
   if (s.im !== 0 || !Number.isInteger(s.re)) return undefined;

@@ -1982,12 +1982,7 @@ export class BoxedFunction
           // factor then, as `canonicalMultiply` does, so the coefficient
           // stays exact.
           const product = coef.mul(c);
-          if (
-            coef.isExact &&
-            c.isExact &&
-            !product.isExact &&
-            !product.isNaN
-          ) {
+          if (coef.isExact && c.isExact && !product.isExact && !product.isNaN) {
             rest.push(arg);
             continue;
           }

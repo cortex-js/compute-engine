@@ -6,7 +6,6 @@ import {
   resolveTypeForCompilation as resolveType,
   resolveTypeAlias,
   stripMissingFromType,
-  typeContainsMissing,
   isPointElementType,
   unfoldAliasOnDescent,
   recordUnfoldOnDescent,

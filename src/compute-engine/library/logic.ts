@@ -426,14 +426,7 @@ function connectiveType(
 type Kleene = 'T' | 'F' | 'M';
 
 type AbsenceAwareConnective =
-  | 'And'
-  | 'Or'
-  | 'Not'
-  | 'Xor'
-  | 'Equivalent'
-  | 'Implies'
-  | 'Nand'
-  | 'Nor';
+  'And' | 'Or' | 'Not' | 'Xor' | 'Equivalent' | 'Implies' | 'Nand' | 'Nor';
 
 const kleeneNot = (a: Kleene): Kleene =>
   a === 'M' ? 'M' : a === 'T' ? 'F' : 'T';
@@ -509,8 +502,7 @@ function connectiveAbsenceType(
   const sets = values as ReadonlyArray<ReadonlySet<Kleene>>;
   const fold = (f: (a: Kleene, b: Kleene) => Kleene) =>
     sets.slice(1).reduce((acc, v) => kleeneCombine(acc, v, f), sets[0]);
-  const negate = (xs: ReadonlySet<Kleene>) =>
-    new Set([...xs].map(kleeneNot));
+  const negate = (xs: ReadonlySet<Kleene>) => new Set([...xs].map(kleeneNot));
   let result: ReadonlySet<Kleene>;
   switch (head) {
     case 'And':

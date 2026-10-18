@@ -22,7 +22,6 @@ import {
   isUnindexedCollectionOperand,
   isUnresolvedCollectionOperand,
 } from '../collection-utils.js';
-import { nonNumericOperandError } from '../boxed-expression/validate.js';
 import { flatten } from '../boxed-expression/flatten.js';
 import {
   eq,
@@ -67,7 +66,10 @@ import {
   getExpressionDimension,
   getExpressionScale,
 } from './unit-data.js';
-import { isAbsentScalarSymbol } from '../boxed-expression/validate.js';
+import {
+  nonNumericOperandError,
+  isAbsentScalarSymbol,
+} from '../boxed-expression/validate.js';
 
 /**
  * Compare two Quantity expressions.
