@@ -40,7 +40,12 @@ import {
   parseQuotientRingFraction,
   serializeListDomain,
 } from './definitions-sets.js';
-import { endsWithSuperscript, joinLatex, supsub } from '../tokenizer.js';
+import {
+  endsTabularCell,
+  endsWithSuperscript,
+  joinLatex,
+  supsub,
+} from '../tokenizer.js';
 import {
   DELIMITER_SHORTHAND,
   OPEN_DELIMITER_PREFIX,
@@ -1177,6 +1182,13 @@ function foldMultiplyChain(
   return parser._appendAssociativeOperand('Multiply', lhs, rhs);
 }
 
+/**
+ * The operators whose body runs to the end of the product they stand in:
+ * their parser reads the body at multiplication precedence (`parseBigOp`, the
+ * `\lim` entry). An `Integrate` is not one: its differential closes it.
+ */
+const BODY_ABSORBING_OPERATORS = new Set(['Sum', 'Product', 'Limit']);
+
 function serializeMultiply(
   serializer: Serializer,
   expr: MathJsonExpression | null
@@ -1330,8 +1342,23 @@ function serializeMultiply(
     // A nested fold-barrier product must keep its parentheses (see
     // `isFoldBarrierFactor`): wrap above multiplication precedence to force
     // them, so the nesting survives the round-trip.
-    term =
-      operator(arg) === 'Mod' && nops(arg) === 2
+    // A big operator (`\sum`, `\prod`, `\lim`) parses its body at
+    // multiplication precedence, so a factor written after it is read into
+    // the body: `Product(P_1(i), i=1..10)·P_0(r)` written
+    // `\prod_{i=1}^{10}P_1(i)P_0(r)` re-parses with `P_0(r)` inside the
+    // product (Tycho ledger row 388). Unless it is the last factor, it is
+    // written in parentheses.
+    const absorbsNextFactor =
+      i < count - 1 && BODY_ABSORBING_OPERATORS.has(operator(arg) ?? '');
+    // The wrap is forced: `wrap()` compares dictionary precedences, and the
+    // `\lim` entry has none (it defaults to the highest), so a precedence
+    // test would never fence a `Limit`.
+    term = absorbsNextFactor
+      ? serializer.wrapString(
+          serializer.serialize(arg),
+          serializer.options.applyFunctionStyle(expr, serializer.level)
+        )
+      : operator(arg) === 'Mod' && nops(arg) === 2
         ? serializer.wrap(arg, DIVISION_PRECEDENCE + 1)
         : isFoldBarrierFactor(arg)
           ? serializer.wrap(arg, MULTIPLICATION_PRECEDENCE + 1)
@@ -3517,8 +3544,11 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
       // Use parseExpression instead of parseArguments('implicit') so that
       // postfix operators like ^x are included in the limit body.
       // e.g. \lim_{x\to 0}\left(x\right)^x  →  Limit(x^x) not Limit(x)^x
+      // The body stops at the end of a `cases` or matrix cell, as for a big
+      // operator (`endsTabularCell`).
       const expr = parser.parseExpression({
         minPrec: MULTIPLICATION_PRECEDENCE,
+        condition: (p) => endsTabularCell(p.peek),
       });
       if (!expr) return null;
       const limitVar = symbol(operand(base, 1));
@@ -4439,6 +4469,16 @@ function boundVariableNames(
 
 function parseBigOp(name: string, minPrec: number) {
   return (parser: Parser): MathJsonExpression | null => {
+    // The body stops at the `&` or `\\` that ends a `cases` or matrix cell
+    // (`endsTabularCell`): `0<\prod_{i=1}^{10}T(i)\\100&\top` read the row
+    // separator and the next row into the product. Only those tokens: a
+    // caller's own condition (the next trig command, for the argument of
+    // `\sin`) must not end the body, or `\sin\sum_{k=1}^{n}\cos k` loses
+    // its `\cos k`.
+    const body: Terminator = {
+      minPrec,
+      condition: (p) => endsTabularCell(p.peek),
+    };
     parser.skipSpace();
 
     // Diagnostics: checkpoint before the sub/superscripts so that references to
@@ -4480,7 +4520,7 @@ function parseBigOp(name: string, minPrec: number) {
     // `\sum ⟨body⟩`, so parsing back to `Reduce(body, op)` made the
     // round-trip lossy.
     if (!sup && !sub) {
-      const collection = parser.parseExpression({ minPrec: minPrec });
+      const collection = parser.parseExpression(body);
       parser.popSymbolTable();
       if (collection) return [name, collection];
       return null;
@@ -4494,7 +4534,7 @@ function parseBigOp(name: string, minPrec: number) {
     //
 
     const bodyStartToken = parser.index;
-    const fn = parser.parseExpression({ minPrec: minPrec });
+    const fn = parser.parseExpression(body);
 
     parser.popSymbolTable();
 

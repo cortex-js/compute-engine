@@ -108,7 +108,12 @@ describe('Block → one-column `cases` (serializer)', () => {
       ['Block', ['Assign', 't', 2], ['Add', 't', 1]],
       ['Add', 'u', 1],
     ]);
-    expect(r.latex).toBe('\\begin{cases}t\\coloneq2; t+1\\\\u+1\\end{cases}');
+    // A nested `;`-spelled Block fences itself (Tycho ledger row 389); the
+    // row separator would have closed it here, so the fence is not needed in
+    // this position, but it re-parses to the same block.
+    expect(r.latex).toBe(
+      '\\begin{cases}\\left(t\\coloneq2; t+1\\right)\\\\u+1\\end{cases}'
+    );
     // The inner block re-parses with the `Declare` the `Assign` implies —
     // pre-existing, value-faithful behavior of the `Assign` → `Block` rule.
     expect(r.after).toBe(

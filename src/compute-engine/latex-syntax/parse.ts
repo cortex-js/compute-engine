@@ -3228,6 +3228,14 @@ export class _Parser implements Parser {
       fn = pf;
     } while (true);
 
+    // A postfix that has read the arguments already returns an application:
+    // the prime reads `f''(x)` as `Apply(Derivative(f, 2), x)`. Its value is
+    // a number, not a function, so a parenthesized group after it is a
+    // factor, as after `f(x)`: `f''(x)(f(x)-y)` is a product (Tycho ledger
+    // row 387). Read as a second argument list, it applied the value
+    // `f''(x)` to `f(x)-y`.
+    if (operator(fn) === 'Apply') return fn;
+
     // If fn is a function symbol, it may be followed by an argument list
 
     const parenthesizedBracket =

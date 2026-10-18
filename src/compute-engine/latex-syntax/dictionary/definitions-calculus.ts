@@ -8,6 +8,7 @@ import {
   symbol,
 } from '../../../math-json/utils.js';
 import { LatexDictionary, Parser, Serializer } from '../types.js';
+import { endsTabularCell } from '../tokenizer.js';
 
 // See https://de.wikipedia.org/wiki/Formelsatz
 // for a discussion of typographical notation in Germany, Russia and France
@@ -217,13 +218,15 @@ function parseIntegralBody(
 ): [body: MathJsonExpression | null, indexes: string[]] {
   let found = false;
 
+  // The body also stops at the end of a `cases` or matrix cell
+  // (`endsTabularCell`), for an integral with no differential.
   const fn = parser.parseExpression({
     minPrec: 266,
     condition: () => {
       const start = parser.index;
       found = matchDifferentialOperator(parser);
       parser.index = start;
-      return found;
+      return found || endsTabularCell(parser.peek);
     },
   });
 

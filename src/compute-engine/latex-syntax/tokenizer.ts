@@ -706,3 +706,14 @@ export function tokensToString(
   );
   return result;
 }
+
+/**
+ * Whether `token` ends a cell of a tabular environment (`cases`, `pmatrix`,
+ * …): the column separator `&` or a row separator `\\` or `\cr`
+ * (`parseTabular`). Neither continues an expression, so an operator whose
+ * body runs to the end of the expression (`\sum`, `\prod`, `\lim`, `\int`)
+ * stops there too.
+ */
+export function endsTabularCell(token: string): boolean {
+  return token === '&' || token === '\\\\' || token === '\\cr';
+}

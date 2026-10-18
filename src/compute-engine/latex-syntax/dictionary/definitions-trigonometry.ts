@@ -88,6 +88,12 @@ function parseTrig(op: string): ExpressionParseHandler {
       fn = pf;
     } while (true);
 
+    // A postfix that has read the arguments returns an application: the
+    // prime reads `\sin'(x)` as `Apply(Derivative(Sin, 1), x)`. A
+    // parenthesized group after it is a factor, as after `\sin(x)` (Tycho
+    // ledger row 387; `parseFunction()` does the same for other names).
+    if (Array.isArray(fn) && fn[0] === 'Apply') return fn;
+
     parser.skipSpace();
 
     // Check for \sin^2 x

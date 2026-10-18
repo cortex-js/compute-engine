@@ -1365,95 +1365,6 @@ function parsePipelinePrefix(
  */
 const BLOCK_CALL_PREFIX = '\\operatorname{Block}(';
 
-/**
- * True when a serialized `Block` is ENTIRELY a `cases` environment (the
- * no-`Assign` multi-statement spelling) or ENTIRELY a
- * `\operatorname{Block}(…)` call (the all-relation spelling), and therefore
- * self-delimiting: neither `\begin{…}…\end{…}` nor a closed argument list can
- * leak into what follows, so it needs no fence.
- *
- * The test must match the WHOLE string, not just its start: a `Block` whose
- * only emitted statement is itself a `cases`-spelled `Block` emits
- * `\begin{cases}…\end{cases};` (the single-statement trailing-`;` marker),
- * and `Block(Block(a, b), q≔2)` emits `\begin{cases}…\end{cases}; q≔2`.
- * Both START with `\begin{cases}` yet trail unfenced syntax that a `for`
- * clause or an argument-separating comma would swallow. For the call
- * spelling the same hazard is spelled with parentheses — `Block(Block(x=1,
- * y=2), q≔f(2))` emits `\operatorname{Block}(x=1, y=2); q≔f(2)`, which both
- * starts with the prefix and ends with `)` — so the paren opened by the
- * prefix must be the one closed by the LAST character.
- */
-export function isSelfDelimitingBlockLatex(s: string): boolean {
-  // The `cases` test must verify the string is ONE environment, not merely
-  // that it starts and ends like one: a `; `-statement list whose FIRST
-  // statement is a cases-spelled block and whose LAST statement's value is
-  // another (`\begin{cases}…\end{cases}; q\coloneq\begin{cases}…\end{cases}`)
-  // passes a prefix/suffix test while its `;` can swallow what follows —
-  // the exact value-changing round trip this predicate exists to prevent.
-  // Walk the environment nesting: self-delimiting iff the `\end{cases}`
-  // that closes the OPENING `\begin{cases}` sits at the end of the string.
-  //
-  // The walk counts raw substrings, so a STRING literal whose text contains
-  // `\begin{cases}`/`\end{cases}` (serialized unescaped inside `\text{…}`)
-  // can desync the counter — but only ever toward a DEEPER depth or an
-  // earlier non-final close, both of which answer false. A false here means
-  // an unnecessary fence, which is lossless (`\left(…\right)` re-parses as
-  // `Delimiter(Block)` and canonicalizes away); the walk can never SKIP a
-  // needed fence, because the genuine closing token of a lone environment
-  // is always the literal tail of the constructed string.
-  const CASES_OPEN = '\\begin{cases}';
-  const CASES_CLOSE = '\\end{cases}';
-  if (s.startsWith(CASES_OPEN)) {
-    let depth = 1;
-    let i = CASES_OPEN.length;
-    while (i < s.length) {
-      if (s.startsWith(CASES_OPEN, i)) {
-        depth += 1;
-        i += CASES_OPEN.length;
-      } else if (s.startsWith(CASES_CLOSE, i)) {
-        depth -= 1;
-        i += CASES_CLOSE.length;
-        if (depth === 0) return i === s.length;
-      } else i += 1;
-    }
-    return false;
-  }
-  if (!s.startsWith(BLOCK_CALL_PREFIX)) return false;
-  let depth = 0;
-  for (let i = BLOCK_CALL_PREFIX.length - 1; i < s.length; i++) {
-    if (s[i] === '(') depth += 1;
-    else if (s[i] === ')') {
-      depth -= 1;
-      if (depth === 0) return i === s.length - 1;
-    }
-  }
-  return false;
-}
-
-/**
- * Serialize an operand, fencing it with `\left(…\right)` when it is a
- * `Block` whose spelling needs it: a bare `; `-statement list binds looser
- * than any surrounding syntax (a `do` clause, a `for` clause, an
- * argument-separating comma), so an unfenced block swallows what follows —
- * a value-changing round trip (Tycho item 172). A block that serialized as
- * a `cases` environment is SELF-delimiting and takes no fence (see
- * {@link isSelfDelimitingBlockLatex}). The test is on the emitted string,
- * so it cannot drift from the `Block` serializer's choice of spelling.
- * (`Serializer.wrapArguments()` applies the same rule to a `Block`
- * argument.)
- */
-function fenceBlockBody(
-  serializer: Serializer,
-  body: MathJsonExpression | null
-): string {
-  if (body === null) return '';
-  const s = serializer.serialize(body);
-  if (operator(body) !== 'Block') return s;
-  return isSelfDelimitingBlockLatex(s)
-    ? s
-    : joinLatex(['\\left(', s, '\\right)']);
-}
-
 /** The precedence of the `Colon` operator: below comparisons (245) and
  * arrows (270), see the `Colon` entry. */
 const COLON_PRECEDENCE = 240;
@@ -1903,7 +1814,12 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     name: 'ApplyWhole',
     kind: 'function',
     serialize: (serializer: Serializer, expr: MathJsonExpression): string =>
-      serializer.serialize(['Apply', ...operands(expr)] as MathJsonExpression),
+      // The same expression in another form: at the same depth, so that the
+      // `Apply` it becomes knows whether it is nested.
+      serializer.serializeAtDepth(
+        ['Apply', ...operands(expr)] as MathJsonExpression,
+        serializer.depth
+      ),
   },
 
   {
@@ -1964,17 +1880,28 @@ export const DEFINITIONS_CORE: LatexDictionary = [
         // e.g. "Apply(f, x)" -> "f(x)": the operands of `Apply` — head
         // followed by its arguments — are exactly the application expression
         const fn = operands(expr) as unknown as MathJsonExpression;
-        return serializer.serialize(fn);
+        return serializer.serializeAtDepth(fn, serializer.depth);
       }
 
       if (nops(expr) === 2) {
         // If there's a single argument, we can use the pipeline operator
-        // (i.e. `\rhd` `|>`)
-        return joinLatex([
+        // (i.e. `\rhd` `|>`). `\lhd` has precedence 20, below every other
+        // operator, so an `Apply` nested in another expression is written in
+        // parentheses: `Multiply(-2, Apply(Apply(Derivative(f, 2), x),
+        // f(x)-y))` written `-2f''(x)\lhd f(x)-y` re-parses as
+        // `Apply(Multiply(-2, f''(x)), f(x)-y)` (Tycho ledger row 387). (A
+        // symbol head is written as a call above and never reaches here.)
+        const latex = joinLatex([
           serializer.wrap(lhs, 20),
           '\\lhd',
           serializer.wrap(rhs, 20),
         ]);
+        return serializer.depth > 0
+          ? serializer.wrapString(
+              latex,
+              serializer.options.groupStyle(expr, serializer.level + 1)
+            )
+          : latex;
       }
 
       const style = serializer.options.applyFunctionStyle(
@@ -2281,6 +2208,16 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       // (`(x, y)`) is its meaning, not a loss.
       if (nops(expr) === 1) {
         const argOp = operator(arg1);
+        // A `Block` or an `Apply` writes its own parentheses when it is
+        // nested (see their serializers); here the group writes them, so the
+        // operand is written as at the root. Otherwise each raw round trip
+        // added one more pair: `((\left(z\coloneq1; z\right)))`.
+        if (argOp === 'Block' || argOp === 'Apply')
+          return serializer.wrapString(
+            serializer.serializeAtDepth(arg1, 0),
+            style,
+            '()'
+          );
         if (
           argOp === 'List' ||
           argOp === 'Set' ||
@@ -3030,11 +2967,23 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       // Skip Declare statements (implicit in LaTeX — the := implies declaration)
       const stmts = args.filter((a) => operator(a) !== 'Declare');
       const parts = stmts.map((a) => serializer.serialize(a));
+      // The `;`-separated spellings below bind more loosely than every
+      // operator and than the `,` between arguments, so a block nested in
+      // another expression is written in parentheses: `Less(Block(z ≔ Z+1,
+      // d), 1)` is `\left(z≔Z+1; d\right)<1`, where the bare `z≔Z+1; d<1`
+      // re-parses with the comparison inside the block (Tycho ledger row
+      // 389), and `Repeat(Block(s ≔ 2, s+1), 3)` keeps its `, 3` out of the
+      // block (Tycho item 172). `depth` is 0 for the expression being
+      // serialized, and higher for an operand. The parentheses re-parse as a
+      // `Delimiter`, which canonicalizes away. The `cases` and function-call
+      // spellings close themselves and need no parentheses.
+      const fenced = (latex: string): string =>
+        serializer.depth > 0 ? joinLatex(['\\left(', latex, '\\right)']) : latex;
       // A single EMITTED statement (a `Declare` emits nothing, so
       // `Block(Declare s, Assign s 2)` is one) needs the trailing `;` marker
       // to survive the round trip: without it, `s≔2` re-parses as a bare
       // `Assign`, and the block — with its local scope — is gone.
-      if (parts.length === 1) return `${parts[0]};`;
+      if (parts.length === 1) return fenced(`${parts[0]};`);
       // Several statements, none of them an `Assign`: the `;`-separated list
       // is NOT faithful — the `;` parser builds a `Block` only when one of
       // the elements is an `Assign`, so `s+1; s+2` re-parses as
@@ -3070,8 +3019,8 @@ export const DEFINITIONS_CORE: LatexDictionary = [
         ]);
       }
       // With an `Assign`, the `;`-separated list already re-parses as a
-      // `Block`: left byte-identical.
-      return parts.join('; ');
+      // `Block`.
+      return fenced(parts.join('; '));
     },
   },
   // Serializer for If expressions (separate from the parser entry
@@ -3120,14 +3069,13 @@ export const DEFINITIONS_CORE: LatexDictionary = [
             // list, which binds LOOSER than the `do` clause: unfenced,
             // `for i from 1 to 3 do s≔2i; s+1` re-parses with only the FIRST
             // statement as the loop body and the rest hoisted out of the loop
-            // (and out of the block's scope). Fence it so `do` binds to the
-            // whole block: `(…)` re-parses as `Delimiter(Block(…))`, which
-            // canonicalizes back to the same `Block` — the same mechanism as
-            // the comprehension body fence (Tycho item 172). A block that
-            // serialized as a `cases` environment is self-delimiting and
-            // takes no fence (test on the emitted string, so it cannot
-            // drift from the Block serializer's spelling choice).
-            fenceBlockBody(serializer, body),
+            // (and out of the block's scope). The nested block writes itself
+            // in parentheses (see the `Block` serializer), so `do` binds to
+            // the whole block: `\left(…\right)` re-parses as
+            // `Delimiter(Block(…))`, which canonicalizes back to the same
+            // `Block` (Tycho item 172). A `cases`-spelled block closes itself
+            // and takes none.
+            serializer.serialize(body),
           ]);
         }
       }
@@ -3139,7 +3087,7 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       // swallows the following operands into its last statement.
       return joinLatex([
         '\\operatorname{Loop}(',
-        args.map((a) => fenceBlockBody(serializer, a)).join(', '),
+        args.map((a) => serializer.serialize(a)).join(', '),
         ')',
       ]);
     },
@@ -3160,22 +3108,23 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       // which re-parses to the same node. The guarded clause itself is
       // written in function form too: its infix spelling would chain the
       // `\in` (`x\in L\in cond`), which re-parses as a nested membership.
-      // A `Block` argument is fenced (`fenceBlockBody`): its bare
-      // `;`-separated statement list binds looser than the argument commas
-      // and would absorb the following arguments on re-parse.
+      // A `Block` argument writes itself in parentheses (see the `Block`
+      // serializer): its bare `;`-separated statement list binds looser than
+      // the argument commas and would absorb the following arguments on
+      // re-parse.
       const isGuarded = (elem: MathJsonExpression): boolean =>
         nops(elem) >= 3 && symbol(operand(elem, 3)) !== 'Nothing';
       if (elements.some(isGuarded))
         return joinLatex([
           '\\operatorname{Comprehension}\\left(',
           [
-            fenceBlockBody(serializer, body),
+            serializer.serialize(body),
             ...elements.map((elem) =>
               isGuarded(elem)
                 ? joinLatex([
                     '\\operatorname{Element}\\left(',
                     operands(elem)
-                      .map((x) => fenceBlockBody(serializer, x))
+                      .map((x) => serializer.serialize(x))
                       .join(', '),
                     '\\right)',
                   ])
@@ -3204,10 +3153,11 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       // looser than the `for` clause, so `[d≔[n,2]; \sum d for n=1..3]`
       // re-parses as a one-statement-list `[Block(d≔[n,2], Comprehension(\sum
       // d, …))]` — the local no longer scopes over the body and the VALUE
-      // changes. Fence the block so the `for` binds to the whole body:
-      // `(…)` re-parses as `Delimiter(Block(…))`, which canonicalizes back to
-      // the same `Block` (Tycho item 172).
-      const bodyLatex = fenceBlockBody(serializer, body);
+      // changes. The nested block writes itself in parentheses (see the
+      // `Block` serializer), so the `for` binds to the whole body:
+      // `\left(…\right)` re-parses as `Delimiter(Block(…))`, which
+      // canonicalizes back to the same `Block` (Tycho item 172).
+      const bodyLatex = serializer.serialize(body);
       const comprehension = joinLatex([
         bodyLatex,
         ' \\operatorname{for} ',

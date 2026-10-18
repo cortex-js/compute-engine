@@ -1911,6 +1911,24 @@ export interface Serializer {
    */
   level: number;
 
+  /**
+   * How deeply the expression being written is nested: 0 for the expression
+   * `serialize()` was called on, 1 for one of its operands, and so on. Unlike
+   * `level`, no serializer adjusts it, so it tells whether the expression is
+   * an operand of another one.
+   */
+  readonly depth: number;
+
+  /**
+   * Serialize `expr` as if it stood at nesting `depth` (0 for the root), for
+   * a serializer that writes the same expression again in another form, or
+   * for an operand whose parent already writes the parentheses it would add.
+   */
+  serializeAtDepth(
+    expr: MathJsonExpression | null | undefined,
+    depth: number
+  ): LatexString;
+
   /** Output a LaTeX string representing the expression */
   serialize: (expr: MathJsonExpression | null | undefined) => string;
 

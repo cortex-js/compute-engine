@@ -46,7 +46,6 @@ import { SYMBOLS } from './dictionary/definitions-symbols.js';
 import {
   DELIMITERS_SHORTHAND,
   isKeywordText,
-  isSelfDelimitingBlockLatex,
 } from './dictionary/definitions-core.js';
 import { resolveUnitText } from './dictionary/definitions-units.js';
 import { EMOJIS } from '../../math-json/symbols.js';
@@ -181,6 +180,15 @@ export class Serializer {
   options: Readonly<Required<ResolvedSerializeLatexOptions>>;
   readonly dictionary: IndexedLatexDictionary;
   level = -1;
+  /**
+   * How deeply the expression being written is nested: 0 for the expression
+   * `serialize()` was called on, 1 for one of its operands, and so on. Unlike
+   * `level`, which drives the size of delimiters and which some serializers
+   * adjust (a `Multiply` does not count as a level), it counts every nested
+   * `serialize()` call, so a serializer can tell whether its expression is an
+   * operand of another one.
+   */
+  depth = -1;
   constructor(
     dictionary: IndexedLatexDictionary,
     options: SerializeLatexOptions
@@ -452,28 +460,10 @@ export class Serializer {
   wrapArguments(expr: MathJsonExpression): string {
     return this.wrapString(
       operands(expr)
-        .map((x) =>
-          // A `Block` operand serializes as a bare `;`-separated statement
-          // list, and `;` (precedence 19) binds LOOSER than the `,` that
-          // separates arguments: unfenced, `\mathrm{Repeat}(s≔2; s+1, 3)`
-          // re-parses with the block swallowing the `, 3` into its last
-          // statement — a VALUE-CHANGING round trip. Fence it so the block
-          // stays one argument: `(…)` re-parses as `Delimiter(Block(…))`,
-          // which canonicalizes back to the same `Block` (braces would give
-          // `Set(Block(…))`, which does not). Same mechanism, same fence as
-          // the `Comprehension` body and the two `Loop` spellings in
-          // `definitions-core.ts` (Tycho item 172). A Block that serialized
-          // ENTIRELY as a `cases` environment is SELF-delimiting —
-          // `\begin{…}\end{…}` cannot leak into the argument list — so it
-          // takes no fence (see `isSelfDelimitingBlockLatex`): the test is
-          // on the emitted string, so this can never drift from the Block
-          // serializer's choice of spelling.
-          {
-            if (operator(x) !== 'Block') return this.serialize(x);
-            const s = this.serialize(x);
-            return isSelfDelimitingBlockLatex(s) ? s : `\\left(${s}\\right)`;
-          }
-        )
+        // A `Block` operand fences itself (see the `Block` serializer): a
+        // bare `;`-separated statement list would swallow the `, 3` of
+        // `\mathrm{Repeat}(s≔2; s+1, 3)` (Tycho item 172).
+        .map((x) => this.serialize(x))
         .join(', '),
       this.options.applyFunctionStyle(expr, this.level)
     );
@@ -563,10 +553,30 @@ export class Serializer {
     return this.spellSymbol(h) + this.wrapArguments(expr);
   }
 
+  /**
+   * Serialize `expr` as if it stood at nesting `depth` (0 for the root): for
+   * a serializer that writes the same expression again in another form
+   * (`ApplyWhole` as `Apply`), or for an operand whose parent already writes
+   * the parentheses it would add (a `Delimiter`).
+   */
+  serializeAtDepth(
+    expr: MathJsonExpression | null | undefined,
+    depth: number
+  ): LatexString {
+    const saved = this.depth;
+    this.depth = depth - 1;
+    try {
+      return this.serialize(expr);
+    } finally {
+      this.depth = saved;
+    }
+  }
+
   serialize(expr: MathJsonExpression | null | undefined): LatexString {
     if (expr === null || expr === undefined) return '';
 
     this.level += 1;
+    this.depth += 1;
     try {
       const result = (() => {
         //
@@ -633,10 +643,12 @@ export class Serializer {
         );
       })();
       this.level -= 1;
+      this.depth -= 1;
       return result ?? '';
     } catch {}
 
     this.level -= 1;
+    this.depth -= 1;
     return '';
   }
   applyFunctionStyle(expr: MathJsonExpression, level: number): DelimiterScale {
