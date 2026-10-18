@@ -2051,6 +2051,11 @@ function hurwitzOperandIsNegative(x: HurwitzOperand): boolean {
   return isRationalOperand(x) ? x[0] < 0n : x.isNegative();
 }
 
+/** True when x = 1/2 exactly. */
+function hurwitzOperandIsHalf(x: HurwitzOperand): boolean {
+  return isRationalOperand(x) ? 2n * x[0] === x[1] : x.eq(BigDecimal.HALF);
+}
+
 /** x + k, exact. */
 function hurwitzOperandAddInt(x: HurwitzOperand, k: bigint): HurwitzOperand {
   return isRationalOperand(x)
@@ -2510,7 +2515,19 @@ export function bigDecimalQuotient(
  * large m, F is taken as ζ(s, f) − ζ(s, f + m) and the cost does not grow
  * with |a|. The parts can cancel (odd `sign` terms against the tail, or
  * the two Hurwitz values near s = 1), so they are computed with guard
- * digits and the guard is raised once by the digits the sum lost.
+ * digits and the guard is raised once by the digits the sum lost. One
+ * raise is enough wherever the parts cancel to a value the operands
+ * determine: the digits lost are about the digits of the operand's
+ * distance to the point of cancellation, which the operand's own digits
+ * bound.
+ *
+ * At an odd s with a + m = 1/2 (a half-integer a), the front terms are
+ * the negatives of the first m terms of ζ(s, 1/2), so the value is
+ * ζ(s, f + m) = ζ(s, 1 − a), a sum of positive terms with nothing to
+ * cancel; it is answered directly. At s = 101, a = −20.5 the two parts
+ * are about 2¹⁰¹ and the value 2.7e−135: the sum lost 165 digits, a raise
+ * of the guard by the digits lost at 45 working digits (all of them) did
+ * not reach it, and the kernel declined.
  */
 function bigZetaFront(
   ce: ComputeEngine,
@@ -2524,6 +2541,8 @@ function bigZetaFront(
     : a.neg().ceil().toBigInt();
   const rest = hurwitzOperandAddInt(a, m); // in [0, 1)
   const f = hurwitzOperandOneMinus(rest); // in (0, 1]
+  if (sign < 0 && hurwitzOperandIsHalf(rest))
+    return bigHurwitzZetaEM(ce, s, hurwitzOperandAddInt(f, m));
   const requested = BigDecimal.precision;
   let guard = SPECIAL_FN_GUARD;
   for (let attempt = 0; attempt < 2; attempt++) {

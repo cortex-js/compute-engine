@@ -206,26 +206,12 @@ options today.
   integer-valued samples exceed the safe integers (`Linspace(0, 10⁹−1, 10⁹)`)
   still reads the samples one by one (1.6 s; memory flat).
 
-### `HurwitzZeta(s, a)` at a negative real `a` with an odd order loses all its digits with no warning (OPEN, numerics — found 2026-10-17 by the Codex re-review of the LerchPhi/Zeta ranges)
+### `.N()` rounds an exact operand to the working precision before the pole and branch-point tests of the complex special-function routes (OPEN, numerics — found 2026-10-17 by the Codex re-review of the LerchPhi/Zeta ranges)
 
-`HurwitzZeta(101, −20.5).N()` gives `−9007199254740992` at any precision; the
-value is `1.8656e−124`. `HurwitzZeta(21, −20.5).N()` gives `1.73e−10` at machine
-precision (true `1.7281379892e−28`) and is wrong from the eighth digit at 21
-digits; `HurwitzZeta(11, −20.5).N()` gives `3.58e−14` for `5.93e−15`;
-`HurwitzZeta(101, −2000000.5 + i).N()` gives `2.44e−5·i` for
-`7.89e−633 + 3.94e−637i`. The Euler–Maclaurin route of
-`hurwitzZetaComplexWithError` (`numerics/numeric-complex.ts`) uses a fixed error
-estimate that assumes the terms do not cancel; for a negative `a` and an odd
-order the finite part `Σ_{k+a<0} (k+a)^{−s}` cancels against `ζ(s, a + m)`. For
-an exact half-integer `a` and an odd `s`, `ζ(s, a) = ζ(s, 1 − a)` holds and
-should be used on every route (today only the far-left route reflects). Near a
-half-integer the routes need a real error estimate so the value declines instead
-of being wrong. Related: `.N()` rounds an exact operand to the working precision
-before the pole test and the branch-point test on the complex routes
-(`StieltjesGamma(1, (−10³⁰+1)/10³⁰).N()` is still `~oo` at 21 digits where
+`StieltjesGamma(1, (−10³⁰+1)/10³⁰).N()` is still `~oo` at 21 digits where
 `evaluate()` now stays symbolic; `Zeta(2, (−10³⁰+1)/10³⁰).N()` gives `2.6449`
 for about `1e60`; `Arcosh(1 + 10⁻³⁰ + 10⁻⁴⁰⁰i)` at 30 digits still gives
-`1e−200(1+i)`); the real inverse-trig route re-reads the exact value with extra
+`1e−200(1+i)`. The real inverse-trig route re-reads the exact value with extra
 digits, the complex route does not. Also: `bigGamma` returns `0` instead of
 `NaN` once the result is past the exponent range (from about `z = −10^15`);
 `.N()` stays symbolic, but an internal caller can take the `0` as a value, as

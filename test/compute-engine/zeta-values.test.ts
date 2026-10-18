@@ -1242,11 +1242,28 @@ describe('HurwitzZeta declines rather than returning wrong digits', () => {
   // At a ≤ 0 the terms can cancel after they overflow: the terms at −0.5
   // and 0.5 of ζ(1025, −0.5) are −2^1025 and 2^1025, and the value is
   // ζ(1025, 1.5) ≈ 3.2097e−181 (mpmath). An overflowed partial sum is not
-  // the value there: the kernel declines, and the expression stays
-  // symbolic. At a = 0.5 the value 2^1025 + … overflows.
+  // the value there. At an odd order and a half-integer a the terms pair
+  // up and the kernel answers ζ(s, 1 − a) (`hurwitzZetaComplexWithError`):
+  // ζ(1025, −0.5) is answered, and ζ(1025, −1.5) = ζ(1025, 2.5) ≈ 1.3e−408
+  // underflows, so it is declined. Elsewhere the overflowed sum is
+  // declined, and the expression stays symbolic. At a = 0.5 the value
+  // 2^1025 + … overflows.
   test('an overflowed sum whose terms can cancel is declined', () => {
     const m = new ComputeEngine({ precision: 'machine' });
-    for (const a of [-0.5, -1.5, -0.25]) {
+    const paired = hurwitzZetaComplexWithError(
+      new Complex(1025, 0),
+      new Complex(-0.5, 0)
+    );
+    expect(
+      Math.abs(paired!.value.re / 3.2096632370232834155e-181 - 1)
+    ).toBeLessThan(1e-13);
+    expect(
+      Math.abs(
+        m.box(['HurwitzZeta', 1025, -0.5]).N().re / 3.2096632370232834155e-181 -
+          1
+      )
+    ).toBeLessThan(1e-13);
+    for (const a of [-1.5, -0.25]) {
       expect(
         hurwitzZetaComplexWithError(new Complex(1025, 0), new Complex(a, 0))
       ).toBeUndefined();

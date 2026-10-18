@@ -2898,14 +2898,53 @@ export function hurwitzZetaComplexWithError(
   // The pole; the caller special-cases s = 1.
   if (sMinusOne ? sMinusOne.isZero() : s.re === 1 && s.im === 0)
     return { value: C_NAN, error: 0 };
+  // An odd integer order at a real half-integer a < 0: the terms left of
+  // the origin, (a + k)^(−s) = −|a + k|^(−s), are the negatives of the
+  // first terms of ζ(s, a + m) (m = −a + 1/2), so ζ(s, a) = ζ(s, 1 − a), a
+  // sum of positive terms in the right half-plane. Every route that adds
+  // the terms cancels them instead: at s = 101, a = −20.5 the terms at
+  // −1/2 and 1/2 are ∓2¹⁰¹ and the value is ζ(101, 21.5) ≈ 2.7e−135, which
+  // no double arithmetic recovers from the sum (its rounding noise, −2⁵³,
+  // was answered as the value). The pairing holds for any a, so a far-left
+  // a (`hurwitzZetaFarLeft`) takes it too. The half-integer test reads 2a,
+  // which is exact: a − ⌊a⌋ rounds to 1/2 at a = −0.49999999999999994.
+  if (
+    s.im === 0 &&
+    a.im === 0 &&
+    a.re < 0 &&
+    Number.isInteger(s.re) &&
+    s.re > 1 &&
+    s.re % 2 === 1 &&
+    Number.isInteger(2 * a.re) &&
+    !Number.isInteger(a.re)
+  ) {
+    const r = hurwitzZetaComplexWithError(
+      s,
+      new Complex(1 - a.re, 0),
+      sMinusOne,
+      conditionAllowance
+    );
+    // Every term of ζ(s, 1 − a) is positive, so 0 or a subnormal value is an
+    // underflow (ζ(101, 2000001.5) ≈ 7.9e−633), declined.
+    if (
+      r === undefined ||
+      !(Math.hypot(r.value.re, r.value.im) >= MIN_NORMAL_DOUBLE)
+    )
+      return undefined;
+    return r;
+  }
   // A real s ≥ 1/2 (`Zeta`, the complex `PolyGamma`): the Euler-Maclaurin
   // sum with a nominal estimate (see `trackable` below), without the setup
-  // of the other routes.
+  // of the other routes. A real a < 0 has terms left of the origin that can
+  // cancel the rest, and takes a route with an estimate that sees the
+  // cancellation (`hurwitzZetaRealNegativeBase`).
   if (
     s.im === 0 &&
     s.re >= HERMITE_MAX_RE_S &&
     -a.re <= HURWITZ_MAX_PASSED_TERMS
   ) {
+    if (a.im === 0 && a.re < 0)
+      return hurwitzZetaRealNegativeBase(s, a, sMinusOne);
     const value = hurwitzEMComplex(s, a, sMinusOne ?? s.sub(1));
     // `NaN`: the terms overflowed and can cancel (see `hurwitzEMComplex`).
     if (value.isNaN()) return undefined;
@@ -3857,6 +3896,111 @@ function scaledToComplex(x: { value: ScaledComplex } | undefined): Complex {
 }
 
 /**
+ * ζ(s, a) for a real order s ≥ 1/2 and a real a < 0, with an estimate of
+ * the rounding error that sees the cancellation of the terms, or
+ * `undefined` when the estimate is above `HURWITZ_MAX_ERROR` of the value
+ * or a sum is not finite.
+ *
+ * The m = ⌈−a⌉ terms left of the origin, (a + k)^(−s) for k < m, are
+ * formed from |a + k|^(−s) by `Math.pow` (about one ulp each) and rotated
+ * by e^(−iπs) = cos(πs) − i·sin(πs) (`cosSinPi`, with exact zeros and ±1
+ * at a multiple of 1/2: (−x)^(−s) = x^(−s)·e^(−iπs) on the principal
+ * branch, (−1)^s·x^(−s) for an integer s). The rest is ζ(s, a + m), with
+ * a + m in [0, 1) (its (a + m) = 0 term is dropped, Wolfram's `HurwitzZeta`
+ * convention), a sum of positive terms by Euler-Maclaurin
+ * (`hurwitzEMComplex`).
+ *
+ * The front terms and ζ(s, a + m) can both be much larger than the value:
+ * at an odd s next to a half-integer a (at a half-integer itself the
+ * pairing in `hurwitzZetaComplexWithError` answers exactly), the terms at
+ * −1/2 − δ and 1/2 − δ are about ∓2^s and cancel to about s·δ·2^(s+1).
+ * The estimate is ε·(8·Σ|front terms| + (`HURWITZ_NOMINAL_ERROR` +
+ * |s|·ln(|s| + 8))·|ζ(s, a + m)|): a few ulps per front term from
+ * `Math.pow` at a non-integer exponent and from the rotation, and for the
+ * rest the powers that `hurwitzEMComplex` forms as exp(−s·ln w)
+ * (`complex.js`), which round to about |s·ln w| ulps at a base point w of
+ * about |s| + 8, past the nominal estimate from an order of about 10.
+ * Each coefficient is scaled by ε before the product, so the estimate does
+ * not overflow where the value does not (ζ(1018, −1/2) ≈ 2¹⁰¹⁹). A value
+ * below the estimate by `HURWITZ_MAX_ERROR` is declined: at the double
+ * −20.5000001 and s = 21 the sum in doubles is 17.616077007714 for a value
+ * of 17.616077006484 at that double, 7.0e−11 relative, and the bignum
+ * kernel (`bigHurwitzZeta`, `special-functions.ts`) answers the exact
+ * decimal at the engine's precision.
+ *
+ * At a half-integer a and an order that is not an odd integer, |a + k| =
+ * j + 1/2 for j < m, so the front sum F = Σ (j + 1/2)^(−s) is
+ * ζ(s, 1/2) − ζ(s, 1 − a), and ζ(s, a) = e^(−iπs)·F + ζ(s, 1/2) =
+ * (1 + e^(−iπs))·F + ζ(s, 1 − a). The real part is formed in that shape,
+ * with 1 + cos(πs) = 2·cos²(πs/2): next to an odd order the plain sum
+ * cos(πs)·F + ζ(s, 1/2) cancels (s = 3.001, a = −20.5: F ≈ 8, the real
+ * part 0.00117), and the estimate declined it, while nothing else answers
+ * a non-integer order at a negative a (the bignum kernel declines a complex
+ * value).
+ *
+ * Before this route, the terms were formed as complex powers (a rounding
+ * of |s|·π ulps in the imaginary part of each) and the estimate was
+ * nominal: at machine precision ζ(21, −20.5) was 1.7e−10 for 1.7e−28 and
+ * ζ(11, −20.5) was 3.6e−14 for 5.9e−15, and ζ(101, −20.5) was −2⁵³ at
+ * every precision (the bignum kernel had declined and the double sum was
+ * taken as finite). Measured against mpmath at 300 digits (at 60 digits
+ * its own values lose the cancellation) over 2400 points with a from −40
+ * to 0 and s from 1/2 to 60 (integers, half-integers and other orders, 600
+ * of the points within 10⁻³ to 10⁻¹⁵ of a half-integer, 400 at a
+ * half-integer with an order next to an odd integer): 2331 values are
+ * answered, every one within 1.1e−14 relative, and the error of an answered
+ * value is at most 0.38 times its estimate; the 69 declined points
+ * are all within 10⁻⁵ of a half-integer at an odd integer order.
+ */
+function hurwitzZetaRealNegativeBase(
+  s: Complex,
+  a: Complex,
+  sMinusOne?: Complex
+): { value: Complex; error: number } | undefined {
+  const m = Math.ceil(-a.re);
+  const order = s.re;
+  const [cosPiS, sinPiS] = cosSinPi(order);
+  let frontAbs = 0;
+  for (let k = 0; k < m; k++) frontAbs += Math.pow(-(a.re + k), -order);
+  if (!Number.isFinite(frontAbs)) return undefined;
+  const tailUnits =
+    HURWITZ_NOMINAL_ERROR + Math.abs(order) * Math.log(Math.abs(order) + 8);
+  const accept = (value: Complex, error: number) =>
+    !value.isFinite() || error > HURWITZ_MAX_ERROR * value.abs()
+      ? undefined
+      : { value, error };
+  // A half-integer a (2a is exact; a + m rounds to 1/2 at
+  // a = −0.49999999999999994): the paired form, see the doc comment.
+  if (Number.isInteger(2 * a.re) && !Number.isInteger(a.re)) {
+    const [cosHalf] = cosSinPi(order / 2);
+    const onePlusCos = 2 * cosHalf * cosHalf;
+    const tail = hurwitzEMComplex(
+      s,
+      new Complex(1 - a.re, 0),
+      sMinusOne ?? s.sub(1)
+    );
+    if (!tail.isFinite()) return undefined;
+    const value = new Complex(
+      onePlusCos * frontAbs + tail.re,
+      -sinPiS * frontAbs + tail.im
+    );
+    const error =
+      8 * EPSILON * (onePlusCos + Math.abs(sinPiS)) * frontAbs +
+      tailUnits * EPSILON * tail.abs();
+    return accept(value, error);
+  }
+  const rest = a.re + m;
+  const tail = hurwitzEMComplex(s, new Complex(rest, 0), sMinusOne ?? s.sub(1));
+  if (!tail.isFinite()) return undefined;
+  const value = new Complex(
+    cosPiS * frontAbs + tail.re,
+    -sinPiS * frontAbs + tail.im
+  );
+  const error = 8 * EPSILON * frontAbs + tailUnits * EPSILON * tail.abs();
+  return accept(value, error);
+}
+
+/**
  * The highest n for which ζ(−n, a) is formed as −Bₙ₊₁(a)/(n + 1) past
  * `HURWITZ_MAX_PASSED_TERMS`. At |a| > 2²⁰ the value passes the range of a
  * double from about n = 50 on, and such a value is declined, so a higher n
@@ -3879,17 +4023,17 @@ const FAR_LEFT_MAX_BERNOULLI_ORDER = 60;
  *   s = 1001, 9e−14 at s = 3001, 1e−12 at s = 10 001) and with the
  *   cancellation of the reflection, so the estimate is
  *   ε·|ζ|·(`HURWITZ_NOMINAL_ERROR` + s)·cancellation.
- * - A real a at a half-integer and an odd s: there the derivative of
- *   cot(πa) of even order is 0, the reflection is only its small second
- *   part and the cancellation check declines it, but the terms pair up:
- *   ζ(s, a) = ζ(s, 1 − a), a sum in the right half-plane.
  * - A non-positive integer order −n: ζ(−n, a) = −Bₙ₊₁(a)/(n + 1), a
  *   polynomial (DLMF 25.11.14), evaluated exactly at the double value of a
  *   (`hurwitzZetaNegativeIntegerAtComplex`), so each part is rounded once.
  *
  * A real a that is a non-positive integer is declined at every order:
  * `HurwitzZeta` drops the (a + k) = 0 term there, which the reflection (a
- * pole of ψ) and the polynomial do not.
+ * pole of ψ) and the polynomial do not. A real a at a half-integer with an
+ * odd order does not reach this route: there the derivative of cot(πa) of
+ * even order is 0, the reflection is only its small second part and the
+ * cancellation check would decline it, but the terms pair up, and
+ * `hurwitzZetaComplexWithError` answers ζ(s, 1 − a) before the dispatch.
  */
 function hurwitzZetaFarLeft(
   s: Complex,
@@ -3913,22 +4057,6 @@ function hurwitzZetaFarLeft(
     return accept(new Complex(re, im), 1);
   }
   if (order === 1 || order - 1 > POLYGAMMA_MAX_ORDER) return undefined;
-  if (a.im === 0 && order % 2 === 1 && a.re - Math.floor(a.re) === 0.5) {
-    const r = hurwitzZetaComplexWithError(
-      s,
-      new Complex(1 - a.re, 0),
-      sMinusOne
-    );
-    // Every term of ζ(s, 1 − a) is positive, so 0 or a subnormal value is an
-    // underflow (ζ(101, 2000001.5) ≈ 7.9e−633), declined as
-    // `scaledToComplex` declines the reflected route's.
-    if (
-      r === undefined ||
-      !(Math.hypot(r.value.re, r.value.im) >= MIN_NORMAL_DOUBLE)
-    )
-      return undefined;
-    return r;
-  }
   const r = hurwitzZetaIntegerOrderReflected(order, a);
   if (r === undefined) return undefined;
   return accept(r.value, (HURWITZ_NOMINAL_ERROR + order) * r.cancellation);

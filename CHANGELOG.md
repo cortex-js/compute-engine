@@ -2,6 +2,35 @@
 
 ### Issues Resolved
 
+- **`HurwitzZeta(s, a)` at a negative real `a` and an odd order answers the
+  value, or declines, where it answered rounding noise.** The terms of ζ(s, a)
+  left of the origin are large next to the value and cancel against the rest: at
+  `s = 101`, `a = −20.5` the terms at −1/2 and 1/2 are ∓2¹⁰¹ and the value is
+  2.7e−135. The bignum kernel raised its guard digits once, from the digits a
+  sum that had lost every working digit reported, gave up, and the double
+  kernel's sum, with no estimate of the cancellation, was taken as the value:
+  `HurwitzZeta(101, −20.5).N()` was −2⁵³ at every precision, and at machine
+  precision `HurwitzZeta(21, −20.5)` was 1.7e−10 for 1.7e−28 and
+  `HurwitzZeta(11, −20.5)` 3.6e−14 for 5.9e−15. Now, at an odd integer order and
+  a half-integer `a`, both kernels answer ζ(s, 1 − a), a sum of positive terms
+  that the pairing of the terms makes exactly equal (so
+  `HurwitzZeta(101, −2000000.5).N()` is answered at the engine's precision,
+  7.9e−633, and declines at machine precision, where it underflows); and the
+  double kernel's real route forms the terms left of the origin by `Math.pow`
+  and estimates the cancellation, so a value it cannot reach to 1e−12 is
+  declined and the expression stays symbolic (`HurwitzZeta(21, −20.5000001)` at
+  machine precision; at 21 digits the bignum kernel answers it). At a
+  half-integer `a` and an order that is not an odd integer, the real part is
+  formed as 2cos²(πs/2)·F + ζ(s, 1 − a), which does not cancel. Measured against
+  mpmath at 300 digits over 2400 points with `a` from −40 to 0 and orders from
+  1/2 to 60: every answered double value is within 1.1e−14 relative, and a
+  decline happens only within 10⁻⁵ of a half-integer at an odd integer order.
+  Mind the reference: mpmath itself answers wrong digits at these points when
+  its working precision is below the cancellation (`zeta(101, -20.5)` at 30
+  digits), and at a large argument with a large order (`zeta(21, 2001.5)` at 50
+  digits differs from the direct sum at the tenth digit); the values the engine
+  gives there agree with the pairing identity and with direct summation.
+
 - **A point arm of a number-or-point type keeps its shape through a
   component-wise operator, and a coordinate accessor over a broadcastable point
   or a bare tuple is typed as the point.** A valueless symbol declared
