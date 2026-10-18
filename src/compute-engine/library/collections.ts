@@ -148,7 +148,10 @@ import { interval, intervalContains } from '../numerics/interval.js';
 import { MAX_RANDOM_ELEMENT_COUNT } from '../numerics/random.js';
 import { MAX_CHUNK_COUNT } from '../numerics/value-scaled-caps.js';
 import { rangeCount } from '../numerics/range-count.js';
-import { mayEvaluateToNothingD } from '../boxed-expression/nothing-erasure.js';
+import {
+  literalMayEraseElement,
+  mayEvaluateToNothingD,
+} from '../boxed-expression/nothing-erasure.js';
 import {
   exactArithmeticRange,
   rationalRangeCount,
@@ -1854,6 +1857,28 @@ function iterateArgs(
  * reclassifies broadcast results for `Sum`/`Product` body typing and for the
  * compile targets' collection-valued-body fail-closed gates.
  */
+/**
+ * The collection a lazy view walks for the source `xs`: the VALUE of a
+ * `List` or `Tuple` literal that is impure or has an element that may
+ * evaluate to `Nothing`, evaluated once per walk, and `xs` itself otherwise.
+ *
+ * The literal's own handlers serve its value when it is pure and may erase
+ * an element (`erasedLiteralValue`, `collection-utils.ts`) and the operands
+ * as written otherwise, so that a count draws no random number. A view that
+ * applies a function to each element (`Filter`, `Map`) evaluates the
+ * element in that application anyway, and over the operands it emitted the
+ * operand itself (`Random()`, drawn again by every consumer, and a filter's
+ * predicate had judged another draw), and an element that evaluates to
+ * `Nothing` as `Nothing` (an error element in the result, where the literal
+ * erases it). A store-backed list holds numbers only.
+ */
+function walkedSource(xs: Expression): Expression {
+  if (!isFunction(xs, 'List') && !isFunction(xs, 'Tuple')) return xs;
+  if (xs._numericStore !== undefined) return xs;
+  if (!literalMayEraseElement(xs) && isTransitivelyPure(xs)) return xs;
+  return xs.evaluate();
+}
+
 function mapSource(xs: Expression): Expression {
   if (xs.isCollection) return xs;
   if (!xs.type.matches('collection<any>')) return xs;
@@ -9142,7 +9167,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // An UNDECIDED source membership must propagate as `undefined`: `??
         // false` here asserted a definite "not a member" about a source that
         // could not answer at all. A definite `false` still refutes.
-        const inSource = expr.op1.contains(target);
+        // The source the iterator walks (`walkedSource`), so that a query
+        // and a walk of the same `Filter` read the same elements.
+        const inSource = walkedSource(expr.op1).contains(target);
         if (inSource !== true) return inSource === false ? false : undefined;
         const f = applicable(expr.op2);
         const applied = f([target]);
@@ -9170,7 +9197,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         const f = applicable(expr.op2);
         if (!f) return { next: () => ({ value: undefined, done: true }) };
 
-        const source = expr.op1.each();
+        // An impure literal, or one with an element that may evaluate to
+        // `Nothing`, is walked by its value (`walkedSource`).
+        const source = walkedSource(expr.op1).each();
         // Pulls since the last element was EMITTED, not pulls in total. The
         // cap exists to turn a walk that can never finish into an error
         // instead of a hang — a predicate that never matches over an infinite
@@ -17559,7 +17588,7 @@ function mapIteratorImpl(expr: Expression): Iterator<Expression> {
     if (spine.bases.length > 1) {
       // Variadic bottom level: advance every base lockstep, ending as
       // soon as any source ends (mirrors the zipWith form below).
-      const sources = spine.bases.map((c) => c.each());
+      const sources = spine.bases.map((c) => walkedSource(c).each());
       return {
         next: () => {
           const items: Expression[] = [];
@@ -17577,7 +17606,7 @@ function mapIteratorImpl(expr: Expression): Iterator<Expression> {
         },
       };
     }
-    const source = spine.bases[0].each();
+    const source = walkedSource(spine.bases[0]).each();
     return {
       next: () => {
         const { value, done } = source.next();
@@ -17606,7 +17635,7 @@ function mapIteratorImpl(expr: Expression): Iterator<Expression> {
     // as any source ends.
     const f = applicable(expr.op1);
     if (!f) return { next: () => ({ value: undefined, done: true }) };
-    const sources = expr.ops.slice(1).map((c) => c.each());
+    const sources = expr.ops.slice(1).map((c) => walkedSource(c).each());
     return {
       next: () => {
         const items: Expression[] = [];
@@ -17630,7 +17659,7 @@ function mapIteratorImpl(expr: Expression): Iterator<Expression> {
   const f = applicable(expr.op1);
   if (!f) return { next: () => ({ value: undefined, done: true }) };
 
-  const source = expr.op2.each();
+  const source = walkedSource(expr.op2).each();
 
   return {
     next: () => {

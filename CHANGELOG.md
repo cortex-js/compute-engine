@@ -2,6 +2,19 @@
 
 ### Issues Resolved
 
+- **A lazy `Filter` or `Map` over an impure list literal walks the literal's
+  value.** The collection handlers of a `List` or `Tuple` literal serve the
+  operands as written when the literal is impure, so that a count draws no
+  random number. A `Filter` over `[If(c, Random(), Nothing), 2]` tested its
+  predicate on the operand (drawing a number) and then emitted the operand
+  itself, drawn again by every consumer, so a filter on `x > 1/2` emitted values
+  below one half; with `c` false it emitted the erased element as `Nothing`, an
+  error element in the result, and so did a lazy `Map` (`Map(x ↦ x + 1, …)` gave
+  `[1, 3]`). Both now walk the value of an impure literal, or of one with an
+  element that may erase, evaluated once per walk (`walkedSource`), and the
+  membership query of a `Filter` reads the same elements as its walk:
+  `Filter([If(c, Random(), Nothing), 2], x ↦ True)` with `c` false is `[2]`.
+
 - **A jump in the body of a user function reads the exact argument under
   `.N()`.** `.N()` promises a correct result: `Floor((25! − 1)/24!).N()` is 24,
   where the float of the operand is 25. A user function received its arguments

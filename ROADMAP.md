@@ -188,10 +188,6 @@ options today.
 
 ### Small items from the dual review of the 2026-10-17 re-review round (OPEN, small)
 
-- An expression boxed inside a scope that declares `Pi`, then compiled after
-  that scope is popped, folds `Pi` by name in the current scope (the reverse of
-  the case fixed on 2026-10-17, where a library-bound `Pi` compiled inside a
-  declaring scope now keeps the constant).
 - At `precision = 'machine'`, the larger part of a complex inverse trigonometric
   argument is rounded to a double before the branch-point check runs, so
   `Arcoth(1 + 10⁻³⁰ + 10⁻⁴⁰⁰i).N()` gives the value at the branch point
@@ -315,10 +311,6 @@ the float, and 27 s with the exact sum).
   in both grammars; only `\mid` (and `:`) works as the set-builder separator.
   `|` is also the absolute-value delimiter (`\{2|x|, 3\}`), so a separator role
   for it needs a decision on the ambiguity before it is parsed.
-- `Filter([If(c, Random(), Nothing), 2], True)` (an impure literal under a lazy
-  `Filter`) still gives an error element: the collection handlers do not
-  evaluate an impure literal, and a lazy `Filter` does not go through the
-  broadcast code that now lists a may-`Nothing` literal first.
 - A real radical product whose radicand is too large folds to a float in
   canonical `Multiply` (`√1009·√1013` gives `1010.998…`); the comment in
   `foldIntoCoefficient()` (`arithmetic-mul-div.ts`) records it as deliberate,
