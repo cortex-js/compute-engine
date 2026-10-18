@@ -3844,6 +3844,41 @@ volumes
           ops = expanded;
         }
 
+        // A function literal of the differentiation variable, `D(x ↦ body, x)`,
+        // is the derivative of its body: `evaluate` differentiates the body
+        // and ignores the parameter, so `D(Function(Block(a+b), x), x)` and
+        // `D(a+b, x)` have the same value. Both are written
+        // `\frac{\mathrm{d}(a+b)}{\mathrm{d}x}`, which parses back as the
+        // second, so the first is rewritten to it here, and the round trip
+        // keeps the tree (Tycho ledger row 391). A body of one statement is
+        // that statement; a block with locals stays a `Block`. A body that is
+        // a single symbol keeps the function literal: that is the canonical
+        // form of `\frac{\mathrm{d}f}{\mathrm{d}x}` itself (see
+        // `canonicalFunctionLiteralArguments` below).
+        if (
+          ops.length >= 2 &&
+          isFunction(ops[0], 'Function') &&
+          ops[0].nops === 2 &&
+          isSymbol(ops[0].op2) &&
+          isSymbol(ops[1]) &&
+          ops[0].op2.symbol === ops[1].symbol
+        ) {
+          let body = ops[0].op1;
+          if (
+            isFunction(body, 'Block') &&
+            body.nops === 1 &&
+            body.op1.operator !== 'Declare' &&
+            body.op1.operator !== 'Assign'
+          )
+            body = body.op1;
+          // A body that is itself a function literal (a curried function)
+          // is a function value: unwrapping the outer literal would let the
+          // inner parameter out of its binder when `evaluate` unwraps the
+          // inner one.
+          if (!isSymbol(body) && !isFunction(body, 'Function'))
+            ops = [body, ...ops.slice(1)];
+        }
+
         // The differentiation variable may be omitted (`D(expr)`, e.g. from
         // `expr |> D`): default to the expression's single free variable, or
         // to `x` when there are several and one of them is `x`. A function

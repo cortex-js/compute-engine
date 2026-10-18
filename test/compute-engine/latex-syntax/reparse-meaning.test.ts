@@ -192,3 +192,58 @@ describe('row 389: a nested Block', () => {
     expect(roundTrip(json).same).toBe(true);
   });
 });
+
+describe('row 391: the derivative of a function literal', () => {
+  // `D(x ↦ body, x)` is the derivative of the body, and is written the same
+  // way as `D(body, x)`. Its canonical form is `D(body, x)`, so the round
+  // trip keeps the tree.
+  test.each([
+    [['D', ['Function', ['Block', ['Add', 'a', 'b']], 'x'], 'x']],
+    [['D', ['Function', ['Block', ['Sin', 'x']], 'x'], 'x']],
+    [
+      [
+        'D',
+        [
+          'Function',
+          [
+            'Block',
+            ['Declare', 'k'],
+            ['Assign', 'k', 2],
+            ['Multiply', 'k', 'x'],
+          ],
+          'x',
+        ],
+        'x',
+      ],
+    ],
+    // A symbol body keeps the function literal: it is the canonical form of
+    // `\frac{\mathrm{d}f}{\mathrm{d}x}`.
+    [['D', ['Function', ['Block', 'f'], 'x'], 'x']],
+  ])('%j round-trips', (json) => {
+    const e = ce.box(json as any);
+    expect(ce.parse(e.latex).json).toEqual(e.json);
+  });
+
+  test('the canonical form is the derivative of the body, with the same value', () => {
+    const e = ce.box([
+      'D',
+      ['Function', ['Block', ['Power', 'x', 3]], 'x'],
+      'x',
+    ]);
+    expect(e.json).toEqual(['D', ['Power', 'x', 3], 'x']);
+    expect(e.evaluate().json).toEqual(['Multiply', 3, ['Power', 'x', 2]]);
+  });
+
+  test('a curried function literal is not unwrapped', () => {
+    const e = ce.box([
+      'D',
+      ['Function', ['Function', ['Multiply', 'x', 't'], 't'], 'x'],
+      'x',
+    ]);
+    expect(e.json[1]).toEqual([
+      'Function',
+      ['Block', ['Function', ['Block', ['Multiply', 't', 'x']], 't']],
+      'x',
+    ]);
+  });
+});

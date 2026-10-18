@@ -841,6 +841,8 @@ function compileIntervalSelectionValue(
   let any = false;
   for (let i = 1; i < reach; i += 2) if (spelled(i)) any = true;
   if (!any) return undefined;
+  // Each scalar arm over the inputs narrowed to where it can be selected, as
+  // in the `Which` handler (`compileNarrowedIntervalArm`).
   const compileArm = (i: number): string =>
     BaseCompiler.compileOpValue(which, i, target, 0, args[i]);
   const spellArm = (i: number): string =>
@@ -852,20 +854,29 @@ function compileIntervalSelectionValue(
         compileIntervalCollectionValue(args[i], target) ??
         BaseCompiler.compileValueOperand(args[i], target)
     );
-  const build = (i: number): string => {
+  const build = (i: number, bounds: IntervalArmBounds): string => {
     if (i >= reach) return `({ kind: 'empty' })`;
     const cond = args[i];
-    const arm = spelled(i + 1) ? spellArm(i + 1) : compileArm(i + 1);
+    const region = isSymbol(cond, 'True')
+      ? undefined
+      : intervalConditionRegion(cond);
+    const arm = spelled(i + 1)
+      ? spellArm(i + 1)
+      : (compileNarrowedIntervalArm(
+          args[i + 1],
+          withIntervalBound(bounds, region, true),
+          target
+        ) ?? compileArm(i + 1));
     if (isSymbol(cond, 'True')) return arm;
     BaseCompiler.assertScalarCondition(cond);
     return compileIntervalConditional(
       i === 0 ? BaseCompiler.compileValueOperand(cond, target) : compileArm(i),
       arm,
-      build(i + 2),
+      build(i + 2, withIntervalBound(bounds, region, false)),
       target
     );
   };
-  return build(0);
+  return build(0, new Map());
 }
 
 /**
@@ -2169,6 +2180,179 @@ function compileIntervalConditional(
 }
 
 /**
+ * Bounds on the symbols of the conditions that hold where an arm of a
+ * conditional can be selected: name ↦ the symbol (as it appears in the
+ * condition, with its own binding) and its optional ends.
+ */
+type IntervalArmBounds = ReadonlyMap<
+  string,
+  { symbol: Expression; lo?: number; hi?: number }
+>;
+
+/**
+ * Where a condition of the form `x ≤ a`, `x < a`, `x ≥ a` or `x > a` (or the
+ * same with the constant on the left) holds, for a symbol `x` and a number
+ * `a`: the symbol with `lo: a` or `hi: a`. A strict comparison gives the same
+ * closed bound, since an interval end is a closed bound.
+ *
+ * The constant must be exactly the double the comparison uses: a machine
+ * number, or an exact integer a double holds. An exact `1/3` is not: its
+ * double is below it, and a bound there would cut off part of the arm.
+ * `undefined` for any other condition.
+ */
+function intervalConditionRegion(
+  cond: Expression
+): { symbol: Expression; lo?: number; hi?: number } | undefined {
+  if (!isFunction(cond) || cond.nops !== 2) return undefined;
+  const op = cond.operator;
+  const below = op === 'Less' || op === 'LessEqual';
+  if (!below && op !== 'Greater' && op !== 'GreaterEqual') return undefined;
+  const [a, b] = cond.ops;
+  const constant = (e: Expression): number | undefined => {
+    if (!isNumber(e) || e.isComplex || !Number.isFinite(e.re)) return undefined;
+    if (typeof e.numericValue === 'number') return e.re;
+    return e.isInteger === true && Number.isSafeInteger(e.re)
+      ? e.re
+      : undefined;
+  };
+  // `x < a`: x has the upper bound a; `a < x`: x has the lower bound a.
+  if (isSymbol(a) && constant(b) !== undefined)
+    return below
+      ? { symbol: a, hi: constant(b) }
+      : { symbol: a, lo: constant(b) };
+  if (isSymbol(b) && constant(a) !== undefined)
+    return below
+      ? { symbol: b, lo: constant(a) }
+      : { symbol: b, hi: constant(a) };
+  return undefined;
+}
+
+/**
+ * `bounds` with the region of a condition added: the region itself when the
+ * condition holds (`holds`), its complement when it fails.
+ */
+function withIntervalBound(
+  bounds: IntervalArmBounds,
+  region: { symbol: Expression; lo?: number; hi?: number } | undefined,
+  holds: boolean
+): IntervalArmBounds {
+  if (region === undefined || !isSymbol(region.symbol)) return bounds;
+  const name = region.symbol.symbol;
+  const lo = holds ? region.lo : region.hi;
+  const hi = holds ? region.hi : region.lo;
+  const old = bounds.get(name);
+  const next = new Map(bounds);
+  next.set(name, {
+    symbol: region.symbol,
+    lo: lo === undefined ? old?.lo : Math.max(lo, old?.lo ?? -Infinity),
+    hi: hi === undefined ? old?.hi : Math.min(hi, old?.hi ?? Infinity),
+  });
+  return next;
+}
+
+/**
+ * Heads defined for every real input: an arm built from these only (and from
+ * a power with a non-negative integer exponent) has no domain to clip, so it
+ * is not narrowed.
+ */
+const INTERVAL_TOTAL_HEADS = new Set([
+  'Add',
+  'Subtract',
+  'Negate',
+  'Multiply',
+  'Square',
+  'Abs',
+  'Min',
+  'Max',
+  'Sin',
+  'Cos',
+  'Exp',
+  'Sinh',
+  'Cosh',
+  'Tanh',
+  'Arctan',
+  'Floor',
+  'Ceil',
+  'Round',
+  'Truncate',
+  'List',
+  'Tuple',
+]);
+
+/** Whether `e` can be undefined for some real input (see `INTERVAL_TOTAL_HEADS`). */
+function intervalCanClip(e: Expression): boolean {
+  if (!isFunction(e)) return false;
+  if (e.operator === 'Power') {
+    const n = e.ops[1];
+    const integerExponent =
+      n !== undefined && isNumber(n) && Number.isInteger(n.re) && n.re >= 0;
+    return !integerExponent || e.ops.some(intervalCanClip);
+  }
+  if (!INTERVAL_TOTAL_HEADS.has(e.operator)) return true;
+  return e.ops.some(intervalCanClip);
+}
+
+/**
+ * Compile the arm `val` of a conditional over its inputs narrowed to `bounds`:
+ * each symbol of `bounds` that the arm reads is bound once, for the arm, to
+ * itself clamped to its bounds (`_IA.max(_IA.min(x, hi), lo)`), and the arm
+ * is compiled with the symbol resolved to that value:
+ * `((_tv1) => arm)(_IA.max(_IA.min(_.x, 1), …))`. Returns `undefined` when
+ * there is nothing to narrow, and the caller compiles the arm as before.
+ *
+ * Where the arm can be selected the symbol is inside its bounds, so the
+ * clamp does not change the arm's value there. Over an interval that
+ * straddles a switching point, the arm is evaluated over the part where it
+ * can be selected only: `Which(1 ≤ x, 0, True, Arccos(x))` over [0.99, 1.01]
+ * evaluates `Arccos` over [0.99, 1], and answers an `interval`. Without the
+ * clamp it was evaluated over (1, 1.01] too, outside its domain, and the
+ * result was `partial` (domain clipped) for a function defined everywhere
+ * (Tycho ledger row 392).
+ *
+ * The symbol's value is its own compiled code (`target.var`), so a symbol
+ * bound by an enclosing construct (a `Sum` index, a parameter) is clamped as
+ * that construct resolves it, and a name the arm binds again (a `Sum` inside
+ * the arm) is resolved by that binder first. The arm compiles without the CSE
+ * pass, whose temporaries would hold the unclamped values.
+ *
+ * An arm defined for every input (`intervalCanClip`) is not narrowed: there
+ * is no domain to clip, and the clamp would only cost. Neither is an arm whose
+ * bounds are empty (an arm that no input can reach).
+ */
+function compileNarrowedIntervalArm(
+  val: Expression,
+  bounds: IntervalArmBounds,
+  target: CompileTarget<Expression>
+): string | undefined {
+  if (bounds.size === 0 || !intervalCanClip(val)) return undefined;
+  const ce = val.engine;
+  const params: string[] = [];
+  const clamps: string[] = [];
+  let inner: CompileTarget<Expression> = { ...target, cse: undefined };
+  for (const [name, { symbol, lo, hi }] of bounds) {
+    if (!val.symbols.includes(name)) continue;
+    if (lo !== undefined && hi !== undefined && lo > hi) return undefined;
+    let code = BaseCompiler.compileValueOperand(symbol, target);
+    if (hi !== undefined)
+      code = `_IA.min(${code}, ${BaseCompiler.compileValueOperand(ce.number(hi), target)})`;
+    if (lo !== undefined)
+      code = `_IA.max(${code}, ${BaseCompiler.compileValueOperand(ce.number(lo), target)})`;
+    const t = BaseCompiler.tempVar(target);
+    params.push(t);
+    clamps.push(code);
+    const outerVar = inner.var;
+    inner = {
+      ...inner,
+      var: (id) => (id === name ? t : outerVar(id)),
+      boundVars: BaseCompiler.withBoundNames(inner, [t]),
+    };
+  }
+  if (params.length === 0) return undefined;
+  const arm = BaseCompiler.compileValueOperand(val, inner);
+  return `((${params.join(', ')}) => ${arm})(${clamps.join(', ')})`;
+}
+
+/**
  * Interval arithmetic function implementations.
  */
 // Null-prototype: this table is indexed by an OPERATOR or SYMBOL NAME, and a
@@ -2833,10 +3017,21 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // Both arms are conditionally evaluated, so their operand indices are
     // passed to the compile callback (`OperandCompiler`), which opens the
     // matching CSE region.
+    // Each arm over the inputs narrowed to where it can be selected, as for
+    // `Which` (`compileNarrowedIntervalArm`).
+    const region = intervalConditionRegion(args[0]);
     return compileIntervalConditional(
       compile(args[0]),
-      compile(args[1], 1),
-      compile(args[2], 2),
+      compileNarrowedIntervalArm(
+        args[1],
+        withIntervalBound(new Map(), region, true),
+        target
+      ) ?? compile(args[1], 1),
+      compileNarrowedIntervalArm(
+        args[2],
+        withIntervalBound(new Map(), region, false),
+        target
+      ) ?? compile(args[2], 2),
       target
     );
   },
@@ -2879,25 +3074,36 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // Build nested conditionals for each condition/value pair. Every value
     // arm, and every condition after the first, is conditionally evaluated —
     // pass its operand index so the CSE pass opens the matching region.
-    const buildPiecewise = (i: number): string => {
+    //
+    // `bounds` holds what the earlier conditions imply where this arm is
+    // reached: each arm is compiled over the inputs narrowed to the part of
+    // the interval where it can be selected (`compileNarrowedIntervalArm`).
+    const buildPiecewise = (i: number, bounds: IntervalArmBounds): string => {
       if (i >= args.length) return `({ kind: 'empty' })`;
       const cond = args[i];
       const val = args[i + 1];
       // If condition is the symbol True, it's the default branch
       if (isSymbol(cond, 'True')) {
-        return compile(val, i + 1);
+        return (
+          compileNarrowedIntervalArm(val, bounds, target) ?? compile(val, i + 1)
+        );
       }
       // The arms may be collection values; the conditions may not (the
       // head is exempt from the scalar-operand gate for its arms' sake).
       BaseCompiler.assertScalarCondition(cond);
+      const region = intervalConditionRegion(cond);
       return compileIntervalConditional(
         i === 0 ? compile(cond) : compile(cond, i),
-        compile(val, i + 1),
-        buildPiecewise(i + 2),
+        compileNarrowedIntervalArm(
+          val,
+          withIntervalBound(bounds, region, true),
+          target
+        ) ?? compile(val, i + 1),
+        buildPiecewise(i + 2, withIntervalBound(bounds, region, false)),
         target
       );
     };
-    return buildPiecewise(0);
+    return buildPiecewise(0, new Map());
   },
   // Epsil `Match`: structural pattern matching. An interval subject spanning
   // two cases' constants has the same discontinuity hazard as compiled `Which`,
