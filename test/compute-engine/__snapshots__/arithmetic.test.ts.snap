@@ -211,7 +211,7 @@ box       = ["Cos", ["Divide", 5, 7]]
 canonical = ["Cos", ["Rational", 5, 7]]
 eval-auto = cos(5/7)
 eval-mach = cos(5/7)
-N-auto    = 0.755561346700696598469
+N-auto    = 0.755561346700696598468
 N-mach    = 0.7555613467006966
 `;
 

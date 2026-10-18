@@ -1037,11 +1037,10 @@ describe('SOLVE OVER A DOMAIN — a root list is given only when it is complete'
     expect(
       solutions(solveIn(sinPiX, ['Set', 0, ['Rational', 1, 2], 1]))
     ).toEqual([0, 1]);
-    // The principal roots over the real numbers
-    expect(solutions(solveIn(['Sin', 'x'], 'RealNumbers'))).toEqual([
-      0,
-      Math.PI,
-    ]);
+    // Over the real numbers: the family of roots `πt`, with an integer `t`
+    expect(solveIn(['Sin', 'x'], 'RealNumbers').evaluate().toString()).toBe(
+      '[pi * t]'
+    );
   });
 
   // A root where f is flat: near the root π of sin(x)^10, |f| < 10^-16 on
@@ -1067,9 +1066,9 @@ describe('SOLVE OVER A DOMAIN — a root list is given only when it is complete'
     expect(solutions(solveIn(f, ['Interval', 0.5, 4]))).toEqual([1, Math.PI]);
   });
 
-  // The principal roots represent the periodic families of a trig function.
+  // A trig function gives its families of roots with an integer parameter.
   // A function that the root finder cannot invert and that is not periodic
-  // has no such convention: the list `[1]` was only a part of the roots.
+  // has no such families: the list `[1]` was only a part of the roots.
   test('a function that is not periodic, over ℝ and without a domain', () => {
     const f: Expression = [
       'Multiply',
@@ -1078,11 +1077,10 @@ describe('SOLVE OVER A DOMAIN — a root list is given only when it is complete'
     ];
     expect(isUnevaluated(ce.box(['Solve', f, 'x']))).toBe(true);
     expect(isUnevaluated(solveIn(f, 'RealNumbers'))).toBe(true);
-    // A trig function keeps its principal roots
-    expect(solutions(ce.box(['Solve', ['Sin', 'x'], 'x']))).toEqual([
-      0,
-      Math.PI,
-    ]);
+    // A trig function gives its family of roots `πt`
+    expect(ce.box(['Solve', ['Sin', 'x'], 'x']).evaluate().toString()).toBe(
+      '[pi * t]'
+    );
   });
 
   // `x + e^x = 0` has the root -W(1) ≈ -0.567143, which the root finder does
@@ -1174,17 +1172,20 @@ describe('SOLVE OVER A DOMAIN — a root list is given only when it is complete'
       0,
     ];
     expect(isUnevaluated(ce.box(['Solve', ['List', f, g], 'x']))).toBe(true);
-    // `sin(πx) = 0` gives its principal roots: the only common root is 2
-    // (`sin(-0.567π)` is not 0).
+    // The roots of `sin(πx) = 0` are all the integers (the family `t`), and
+    // the root list of `f` is only a part of its roots: there is no answer,
+    // although the only common root is 2. The answer was `[2]`, from the
+    // principal roots `0` and `1` of `sin(πx) = 0`, which do not hold all the
+    // common roots.
     expect(
-      solutions(
+      isUnevaluated(
         ce.box([
           'Solve',
           ['List', f, ['Equal', ['Sin', ['Multiply', 'Pi', 'x']], 0]],
           'x',
         ])
       )
-    ).toEqual([2]);
+    ).toBe(true);
   });
 
   // The alternatives of an `Or` have the union of their roots as solutions.

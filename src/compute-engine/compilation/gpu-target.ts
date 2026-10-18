@@ -2409,6 +2409,25 @@ function gpuPiMultiple(
 }
 
 /**
+ * `u` when the complex expression `x` is `i·π·u` with a real scalar `u`
+ * (`BaseCompiler.imaginaryPiMultiple`): the shader lowers `sinh`, `cosh`,
+ * `tanh`, `csch`, `sech` and `coth` of `iπu` with the angle in half-turns
+ * (`_gpu_ipi_sinh` and the others), so a pole is the unsigned pole and a
+ * zero is exact. A vector `u` keeps the complex helper. `period` is the
+ * period of the function in half-turns, as for `gpuPiMultiple`.
+ */
+function gpuImaginaryPiMultiple(
+  x: Expression | null,
+  period: number
+): Expression | undefined {
+  if (x === null) return undefined;
+  const u = BaseCompiler.imaginaryPiMultiple(x);
+  return u !== undefined && gpuOperandShape(u) === 'scalar'
+    ? gpuReduceTrigOffset(u, period, false)
+    : undefined;
+}
+
+/**
  * The argument `x` of a periodic function, with its constant terms reduced
  * by whole periods at compile time.
  *
@@ -4107,9 +4126,10 @@ function gpuSwizzle(code: string, sw: string): string {
 // elements are provably scalar numeric: a shader value has a shape, and a
 // runtime-length list has none. Every other shape returns a specific reason.
 //
-// Point-list bases are handled by coordinate projection instead. `At(PL, k)`
-// has type `missing | tuple`, so the object-domain absence gate intercepts it
-// before this target function can run.
+// A list of points of 2 to 4 real coordinates with a static count is
+// admissible too: the result is a point, a `vecM`, and an absent point (an
+// index of `0`, out of range or not an integer) is a vector of `NaN`
+// components (`gpuPointListAtBase`, `compileGPUPointListAt`).
 // ---------------------------------------------------------------------------
 
 /** The static element count of an `At` base, or why it has no shader shape. */
@@ -4661,6 +4681,269 @@ function gpuAtEntryKind(e: Expression): GPUAtEntry {
 }
 
 /**
+ * The shader shape of an `At` base that is a list of points: `m` (2 to 4) is
+ * the arity of a point, which lowers to a `vecM`, `n` the static number of
+ * points, `source()` the emission of the base as a shader ARRAY of `n`
+ * `vecM` values (`vec2[3](…)`, `array<vec2f, 3>(…)`), and `point(j)` the
+ * emission of the point at the 0-based position `j`. `undefined` when the
+ * base is not a list of points, and the decline reason when it is one with
+ * no such shape.
+ *
+ * Three spellings are read:
+ *  - a `PointList` application whose components are sources (lists of
+ *    numbers with a static length) or scalar numbers, each repeated at every
+ *    point. The points are zipped to the shortest source, as the interpreter
+ *    does. The array is built point by point, so each source is referenced
+ *    once per point and must be pure;
+ *  - a literal `List` of points, which compiles to an array as it is;
+ *  - any other base whose type is a list of a static length whose element
+ *    type is a tuple of 2 to 4 real numbers (an engine-declared symbol).
+ */
+function gpuPointListAtBase(
+  base: Expression,
+  compile: (e: Expression) => string,
+  target: CompileTarget<Expression>
+):
+  | GPUPointListAtBase
+  | { decline: string }
+  | undefined {
+  const isWGSL = target.language === 'wgsl';
+  const vec = (m: number): string => (isWGSL ? `vec${m}f` : `vec${m}`);
+  const array = (m: number, n: number, items: string[]): string =>
+    isWGSL
+      ? `array<vec${m}f, ${n}>(${items.join(', ')})`
+      : `vec${m}[${n}](${items.join(', ')})`;
+
+  if (isFunction(base, 'PointList')) {
+    const ops = base.ops;
+    if (ops.length < 2 || ops.length > 4)
+      return {
+        decline:
+          `the points of the base have ${ops.length} coordinates, and a ` +
+          `shader vector holds 2 to 4`,
+      };
+    let n: number | undefined = undefined;
+    const counts: (number | undefined)[] = [];
+    for (let i = 0; i < ops.length; i++) {
+      const op = ops[i];
+      if (isPointListSource(op)) {
+        const c = BaseCompiler.aggregateComponentCount(op);
+        if (c === undefined || c < 1)
+          return {
+            decline:
+              `source component ${i + 1} of the point list (type ` +
+              `\`${op.type.toString()}\`) has no statically known length, ` +
+              `and a shader array must have one`,
+          };
+        const bad = gpuAtNonScalarElement(op);
+        if (bad !== undefined)
+          return { decline: `in source component ${i + 1}, ${bad}` };
+        if (!op.isPure)
+          return {
+            decline:
+              `source component ${i + 1} of the point list is impure, and ` +
+              `the array of points references it once per point`,
+          };
+        counts.push(c);
+        n = n === undefined ? c : Math.min(n, c);
+      } else {
+        if (
+          !isSubtype(gpuType(op), 'number') ||
+          BaseCompiler.isComplexValued(op)
+        )
+          return {
+            decline:
+              `component ${i + 1} of the point list (type ` +
+              `\`${op.type.toString()}\`) is neither a list source nor a ` +
+              `provably real scalar`,
+          };
+        if (!op.isPure)
+          return {
+            decline:
+              `component ${i + 1} of the point list is impure, and the ` +
+              `array of points references it once per point`,
+          };
+        counts.push(undefined);
+      }
+    }
+    if (n === undefined)
+      return {
+        decline: 'no component is a list source, so this is not a point LIST',
+      };
+    const count = n;
+    const point = (j: number): string =>
+      `${vec(ops.length)}(${ops
+        .map((op, i) =>
+          counts[i] === undefined
+            ? compile(op)
+            : gpuAtElement(op, j, counts[i]!, compile)
+        )
+        .join(', ')})`;
+    return {
+      m: ops.length,
+      n: count,
+      point,
+      source: () =>
+        array(
+          ops.length,
+          count,
+          Array.from({ length: count }, (_, j) => point(j))
+        ),
+    };
+  }
+
+  const t = gpuType(base);
+  if (typeof t === 'string' || t.kind !== 'list') return undefined;
+  const element = resolveTypeForCompilation(t.elements);
+  if (typeof element === 'string' || element.kind !== 'tuple') return undefined;
+  const m = element.elements.length;
+  if (m < 2 || m > 4)
+    return {
+      decline:
+        `the points of the base have ${m} coordinates, and a shader vector ` +
+        `holds 2 to 4`,
+    };
+  for (let i = 0; i < m; i++)
+    if (!gpuIsVectorComponentType(element.elements[i].type))
+      return {
+        decline:
+          `coordinate ${i + 1} of the points of the base (type ` +
+          `\`${typeToString(element.elements[i].type)}\`) is not a REAL ` +
+          `scalar — a shader vector's components are single floats`,
+      };
+  const n = isFunction(base, 'List')
+    ? base.nops
+    : BaseCompiler.aggregateComponentCount(base);
+  if (n === undefined || n < 1)
+    return {
+      decline:
+        `the base (type \`${base.type.toString()}\`) has no statically ` +
+        `known number of points, and a shader array must have one`,
+    };
+  return {
+    m,
+    n,
+    point: (j) => {
+      if (isFunction(base, 'List')) return compile(base.ops[j]);
+      const code = compile(base);
+      return gpuIsAtomicEmission(code) ? `${code}[${j}]` : `(${code})[${j}]`;
+    },
+    source: () => compile(base),
+  };
+}
+
+/** See `gpuPointListAtBase`. */
+interface GPUPointListAtBase {
+  m: number;
+  n: number;
+  point: (j: number) => string;
+  source: () => string;
+}
+
+/**
+ * `At` over a list of points with a scalar index: the point, a `vecM`. An
+ * absent point — an index of `0`, out of range, not an integer, or the
+ * absence marker — is a vector of `NaN` components, which is how the shader
+ * targets write an absent number: nothing is drawn there. A literal index
+ * folds at compile time; any other index is one call of the guarded helper
+ * `_gpu_atpM_N` (`gpuAtPointPreamble`), so the base and the index are each
+ * evaluated once.
+ */
+function compileGPUPointListAt(
+  shape: GPUPointListAtBase,
+  base: Expression,
+  index: Expression,
+  compile: (e: Expression) => string,
+  target: CompileTarget<Expression>,
+  decline: (reason: string) => never
+): string {
+  const { m, n } = shape;
+  const isWGSL = target.language === 'wgsl';
+  const absent = `${isWGSL ? `vec${m}f` : `vec${m}`}(${gpuNaN(target)})`;
+  if (isFunction(index, 'List') || isSubtype(gpuType(index), COLLECTION_SHAPE_TYPE))
+    decline(
+      'the index is a collection, so the result is a list of points, which ' +
+        'has no shader value shape here'
+    );
+  if (
+    isSymbol(index, 'Missing') ||
+    isSymbol(index, 'Undefined') ||
+    isSubtype(gpuType(index), 'missing')
+  ) {
+    if (!base.isPure)
+      decline(
+        'the access folds to a vector of NaN components, which would ' +
+          'DISCARD the impure base unevaluated'
+      );
+    return absent;
+  }
+  if (BaseCompiler.isComplexValued(index) || !couldMatch(gpuType(index), 'number'))
+    decline(
+      `the index (type \`${index.type.toString()}\`) is not a real number, ` +
+        `so it selects no point`
+    );
+  // A literal index folds when the base is pure: the other points are not
+  // emitted. An impure base takes the helper, which evaluates it once.
+  if (isNumber(index) && base.isPure) {
+    const j = gpuAtSlot(index.re, n);
+    return j === null ? absent : shape.point(j);
+  }
+  // A caller-declared index is read as `compileGPUAt` reads it: an integer
+  // one is converted to a float at the call site.
+  const framed = gpuAtFramedIndex(index);
+  if (framed !== undefined && 'decline' in framed) decline(framed.decline);
+  const idx = compile(index);
+  const floatIdx =
+    framed === undefined ? idx : `${isWGSL ? 'f32' : 'float'}(${idx})`;
+  return `_gpu_atp${m}_${n}(${shape.source()}, ${floatIdx})`;
+}
+
+/**
+ * The `_gpu_atpM_N` helper: the point at a 1-based index of an array of `N`
+ * points of arity `M`, a negative index counting from the end, and a vector
+ * of `NaN` components for any other index. The index guard is the one of
+ * `_gpu_atN` (`gpuAtIndexGuard`). On WGSL the array parameter is copied to a
+ * local `var` first, because a value-typed array parameter is not reliably
+ * indexable by a run-time expression.
+ */
+function gpuAtPointPreamble(m: number, n: number, isWGSL: boolean): string {
+  const lang = isWGSL ? 'wgsl' : 'glsl';
+  const nan = gpuNonFiniteLiteral(NaN, lang);
+  const { guard, doc } = gpuAtIndexGuard(n, lang);
+  if (isWGSL)
+    return `
+fn _gpu_atp${m}_${n}(v: array<vec${m}f, ${n}>, i: f32) -> vec${m}f {
+${doc}
+  if (${guard}) {
+    return vec${m}f(${nan});
+  }
+  let k = i32(i);
+  var a = v;
+  return a[select(${n} + k, k - 1, k > 0)];
+}
+`;
+  return `
+vec${m} _gpu_atp${m}_${n}(vec${m} v[${n}], float i) {
+${doc}
+  if (${guard})
+    return vec${m}(${nan});
+  int k = int(i);
+  return v[(k > 0) ? k - 1 : ${n} + k];
+}
+`;
+}
+
+/** The `[M, N]` pairs of the `_gpu_atpM_N` helpers `code` calls, each once. */
+function gpuAtPointHelperShapes(code: string): [number, number][] {
+  const shapes = new Map<string, [number, number]>();
+  const re = /(?<![\w$])_gpu_atp([234])_(\d+)\s*\(/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(code)) !== null)
+    shapes.set(`${m[1]}_${m[2]}`, [Number(m[1]), Number(m[2])]);
+  return [...shapes.values()];
+}
+
+/**
  * `At` on a shader target. Returns the emitted source or throws the
  * fail-closed decline, which names the shape that has no lowering.
  */
@@ -4684,6 +4967,23 @@ function compileGPUAt(
 
   const base = args[0];
   const index = args[1];
+
+  // A list of points: the result is a point, a `vecM`, and an absent point is
+  // a vector of NaN components (`compileGPUPointListAt`).
+  const points =
+    isSymbol(base) && target.storage?.get(base.symbol) !== undefined
+      ? undefined
+      : gpuPointListAtBase(base, compile, target);
+  if (points !== undefined) {
+    if ('decline' in points) decline(points.decline);
+    if (!base.isPure && !index.isPure)
+      decline(
+        'both the base and the index are impure, and neither shader ' +
+          'language specifies the order in which a call evaluates its ' +
+          'arguments'
+      );
+    return compileGPUPointListAt(points, base, index, compile, target, decline);
+  }
 
   const shape = gpuAtBaseShape(base, target);
   if ('decline' in shape) decline(shape.decline);
@@ -7185,18 +7485,27 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
 
   // Hyperbolic functions with complex dispatch
   Sinh: (args, compile) => {
-    if (BaseCompiler.isComplexValued(args[0]))
+    if (BaseCompiler.isComplexValued(args[0])) {
+      const u = gpuImaginaryPiMultiple(args[0], 2);
+      if (u !== undefined) return `_gpu_ipi_sinh(${compile(u)})`;
       return `_gpu_csinh(${compile(args[0])})`;
+    }
     return `sinh(${compile(args[0])})`;
   },
   Cosh: (args, compile) => {
-    if (BaseCompiler.isComplexValued(args[0]))
+    if (BaseCompiler.isComplexValued(args[0])) {
+      const u = gpuImaginaryPiMultiple(args[0], 2);
+      if (u !== undefined) return `_gpu_ipi_cosh(${compile(u)})`;
       return `_gpu_ccosh(${compile(args[0])})`;
+    }
     return `cosh(${compile(args[0])})`;
   },
   Tanh: (args, compile) => {
-    if (BaseCompiler.isComplexValued(args[0]))
+    if (BaseCompiler.isComplexValued(args[0])) {
+      const u = gpuImaginaryPiMultiple(args[0], 1);
+      if (u !== undefined) return `_gpu_ipi_tanh(${compile(u)})`;
       return `_gpu_ctanh(${compile(args[0])})`;
+    }
     return `tanh(${compile(args[0])})`;
   },
 
@@ -7206,6 +7515,8 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // Both branches splice the operand twice — an impure one is bound to a
     // hoisted temporary (see `gpuOperandOnce` and the `Cot` handler).
     if (BaseCompiler.isComplexValued(x)) {
+      const u = gpuImaginaryPiMultiple(x, 1);
+      if (u !== undefined) return `_gpu_ipi_coth(${compile(u)})`;
       const z = gpuOperandOnce('Coth', x, compile, target, true);
       return `_gpu_cdiv(_gpu_ccosh(${z}), _gpu_csinh(${z}))`;
     }
@@ -7215,6 +7526,8 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   Csch: ([x], compile, target) => {
     if (x === null) throw new Error('Could not compile `Csch`: no argument');
     if (BaseCompiler.isComplexValued(x)) {
+      const u = gpuImaginaryPiMultiple(x, 2);
+      if (u !== undefined) return `_gpu_ipi_csch(${compile(u)})`;
       const v2 = gpuVec2(target);
       return `_gpu_cdiv(${v2}(1.0, 0.0), _gpu_csinh(${compile(x)}))`;
     }
@@ -7223,6 +7536,8 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   Sech: ([x], compile, target) => {
     if (x === null) throw new Error('Could not compile `Sech`: no argument');
     if (BaseCompiler.isComplexValued(x)) {
+      const u = gpuImaginaryPiMultiple(x, 2);
+      if (u !== undefined) return `_gpu_ipi_sech(${compile(u)})`;
       const v2 = gpuVec2(target);
       return `_gpu_cdiv(${v2}(1.0, 0.0), _gpu_ccosh(${compile(x)}))`;
     }
@@ -14658,6 +14973,14 @@ fn _gpu_powi(x: f32, n: f32) -> f32 {
  * is `0`, where `sin(3.14159274 * 2.0)` is not. A zero part is `+0.0`
  * (`1/sin(πx)` at `x = 1` is `+∞`). `_gpu_cossinpi(u)` is also `e^{iπu}` as
  * a `vec2`. See `BaseCompiler.piMultiple`.
+ *
+ * `_gpu_ipi_sinh(u)` … `_gpu_ipi_coth(u)` are `sinh`, `cosh`, `tanh`,
+ * `csch`, `sech` and `coth` of `iπu` as a `vec2`: `sinh(iθ) = i·sin θ`,
+ * `cosh(iθ) = cos θ`, `tanh(iθ) = i·tan θ`, `csch(iθ) = −i/sin θ`,
+ * `sech(iθ) = 1/cos θ` and `coth(iθ) = −i·cot θ`. A zero is exact, and a
+ * pole is `vec2(+∞, +∞)`, the compiled spelling of the interpreter's `~oo`.
+ * They call `_gpu_inf()`, so a compilation that names one of them forces
+ * the GLSL Infinity helper in. See `BaseCompiler.imaginaryPiMultiple`.
  */
 const GPU_PI_TRIG_PREAMBLE_GLSL = `
 vec2 _gpu_cossinpi(float u) {
@@ -14682,6 +15005,32 @@ float _gpu_cospi(float u) {
 float _gpu_tanpi(float u) {
   vec2 cs = _gpu_cossinpi(u);
   return cs.y == 0.0 ? 0.0 : cs.y / cs.x;
+}
+vec2 _gpu_ipi_sinh(float u) {
+  return vec2(0.0, _gpu_cossinpi(u).y);
+}
+vec2 _gpu_ipi_cosh(float u) {
+  return vec2(_gpu_cossinpi(u).x, 0.0);
+}
+vec2 _gpu_ipi_tanh(float u) {
+  vec2 cs = _gpu_cossinpi(u);
+  if (cs.x == 0.0) return vec2(_gpu_inf(), _gpu_inf());
+  return vec2(0.0, cs.y == 0.0 ? 0.0 : cs.y / cs.x);
+}
+vec2 _gpu_ipi_csch(float u) {
+  vec2 cs = _gpu_cossinpi(u);
+  if (cs.y == 0.0) return vec2(_gpu_inf(), _gpu_inf());
+  return vec2(0.0, -1.0 / cs.y);
+}
+vec2 _gpu_ipi_sech(float u) {
+  vec2 cs = _gpu_cossinpi(u);
+  if (cs.x == 0.0) return vec2(_gpu_inf(), _gpu_inf());
+  return vec2(1.0 / cs.x, 0.0);
+}
+vec2 _gpu_ipi_coth(float u) {
+  vec2 cs = _gpu_cossinpi(u);
+  if (cs.y == 0.0) return vec2(_gpu_inf(), _gpu_inf());
+  return vec2(0.0, cs.x == 0.0 ? 0.0 : -cs.x / cs.y);
 }
 `;
 
@@ -14709,6 +15058,32 @@ fn _gpu_cospi(u: f32) -> f32 {
 fn _gpu_tanpi(u: f32) -> f32 {
   let cs = _gpu_cossinpi(u);
   return select(cs.y / cs.x, 0.0, cs.y == 0.0);
+}
+fn _gpu_ipi_sinh(u: f32) -> vec2f {
+  return vec2f(0.0, _gpu_cossinpi(u).y);
+}
+fn _gpu_ipi_cosh(u: f32) -> vec2f {
+  return vec2f(_gpu_cossinpi(u).x, 0.0);
+}
+fn _gpu_ipi_tanh(u: f32) -> vec2f {
+  let cs = _gpu_cossinpi(u);
+  if (cs.x == 0.0) { return vec2f(_gpu_inf(), _gpu_inf()); }
+  return vec2f(0.0, select(cs.y / cs.x, 0.0, cs.y == 0.0));
+}
+fn _gpu_ipi_csch(u: f32) -> vec2f {
+  let cs = _gpu_cossinpi(u);
+  if (cs.y == 0.0) { return vec2f(_gpu_inf(), _gpu_inf()); }
+  return vec2f(0.0, -1.0 / cs.y);
+}
+fn _gpu_ipi_sech(u: f32) -> vec2f {
+  let cs = _gpu_cossinpi(u);
+  if (cs.x == 0.0) { return vec2f(_gpu_inf(), _gpu_inf()); }
+  return vec2f(1.0 / cs.x, 0.0);
+}
+fn _gpu_ipi_coth(u: f32) -> vec2f {
+  let cs = _gpu_cossinpi(u);
+  if (cs.y == 0.0) { return vec2f(_gpu_inf(), _gpu_inf()); }
+  return vec2f(0.0, select(-cs.x / cs.y, 0.0, cs.x == 0.0));
 }
 `;
 
@@ -16886,6 +17261,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     // WGSL declarations are order-independent, so the WGSL helpers are added
     // at the end instead, from a scan of the finished preamble (see there).
     const atWidths = gpuAtHelperWidths(code);
+    const atPointShapes = gpuAtPointHelperShapes(code);
     const texAtWidths = gpuTexAtHelperWidths(code);
     // The zeta helpers call `_gpu_nan()` from their bodies too (a complex
     // value, or an f32 overflow), so they force the GLSL NaN helper as well.
@@ -16901,6 +17277,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       !isWGSL &&
       (code.includes('_gpu_nan') ||
         atWidths.length > 0 ||
+        atPointShapes.length > 0 ||
         texAtWidths.length > 0 ||
         usesZeta ||
         usesLerch)
@@ -16912,12 +17289,14 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     // reason `_gpu_at*` forces the NaN helper: these scans read the EMITTED
     // code and never a helper body. The zeta helpers call `_gpu_inf()` at
     // their own pole the same way, and `_gpu_lerch_phi` at its own pole (a
-    // non-positive integer a with s > 0).
+    // non-positive integer a with s > 0). So do the hyperbolic functions of
+    // `iπu` (`_gpu_ipi_csch` and the others) at a pole.
     if (
       !isWGSL &&
       !complexUsesInf &&
       (code.includes('_gpu_inf') ||
         code.includes('_gpu_gamma') ||
+        /_gpu_ipi_\w+\(/.test(code) ||
         usesZeta ||
         usesLerch)
     )
@@ -16926,6 +17305,8 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     // declaration before its use, and these bodies call `_gpu_nan()`. The
     // order test in `at-gpu-compile.test.ts` is the tripwire.
     for (const w of atWidths) preamble += gpuAtPreamble(w, isWGSL);
+    for (const [m, n] of atPointShapes)
+      preamble += gpuAtPointPreamble(m, n, isWGSL);
     // The texture helpers call `_gpu_nan()` too, so the same order rule
     // applies. GLSL declares one per length; WGSL one per binding.
     for (const w of texAtWidths) preamble += gpuTexAtPreamble(w);

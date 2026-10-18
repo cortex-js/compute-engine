@@ -1999,6 +1999,15 @@ function pythonPiTrig(u: string, head: 'sin' | 'cos' | 'tan' | 'exp'): string {
         : head === 'tan'
           ? '(np.where(_pc == 0, np.inf, _ps / np.where(_pc == 0, 1.0, _pc)) + 0.0)[()]'
           : '(_pc + 1j * _ps)';
+  return pythonHalfTurns(u, value);
+}
+
+/**
+ * The Python code `value`, which reads `_pc = cos(πu)` and `_ps = sin(πu)`
+ * of the Python code `u`, with the angle reduced exactly as `pythonPiTrig`
+ * describes.
+ */
+function pythonHalfTurns(u: string, value: string): string {
   return (
     `(lambda _pu: (lambda _pr: (lambda _pq: (lambda _pt, _pk: ` +
     `(lambda _c0, _s0: (lambda _pc, _ps: ${value})(` +
@@ -2008,6 +2017,37 @@ function pythonPiTrig(u: string, head: 'sin' | 'cos' | 'tan' | 'exp'): string {
     `_pr - _pq / 2, (_pq + 4) % 4))(np.floor(2 * _pr + 0.5)))(` +
     `_pu - 2 * np.floor(_pu / 2 + 0.5)))(${u})`
   );
+}
+
+/**
+ * `sinh`, `cosh`, `tanh`, `csch`, `sech` or `coth` of `iπu`, for the Python
+ * code `u` of a real value, with the angle `u` in half-turns reduced exactly
+ * (`pythonHalfTurns`): `sinh(iθ) = i·sin θ`, `cosh(iθ) = cos θ`,
+ * `tanh(iθ) = i·tan θ`, `csch(iθ) = −i/sin θ`, `sech(iθ) = 1/cos θ` and
+ * `coth(iθ) = −i·cot θ`. A zero is exact, and a pole is the unsigned pole
+ * `complex(inf, inf)`, the compiled spelling of the interpreter's `~oo`:
+ * `csch(iπx)` at `x = 1` is the pole, where `1 / np.sinh(1j * np.pi)` is a
+ * large finite value. The value is complex, for a scalar or an array `u`.
+ * Adding `0.0` turns a `-0.0` part into `0.0`. See
+ * `BaseCompiler.imaginaryPiMultiple`.
+ */
+function pythonPiHyperbolic(
+  u: string,
+  head: 'Sinh' | 'Cosh' | 'Tanh' | 'Csch' | 'Sech' | 'Coth'
+): string {
+  const pole = 'complex(np.inf, np.inf)';
+  /** `1j * num / den`, or the pole where `den` is zero. */
+  const ratio = (num: string, den: string): string =>
+    `(np.where(${den} == 0, ${pole}, 1j * ${num} / np.where(${den} == 0, 1.0, ${den})) + 0.0)[()]`;
+  const value = {
+    Sinh: '(1j * _ps + 0.0)',
+    Cosh: '(_pc + 0j)',
+    Tanh: ratio('_ps', '_pc'),
+    Csch: ratio('-1.0', '_ps'),
+    Sech: `(np.where(_pc == 0, ${pole}, 1.0 / np.where(_pc == 0, 1.0, _pc) + 0j))[()]`,
+    Coth: ratio('-_pc', '_ps'),
+  }[head];
+  return pythonHalfTurns(u, value);
 }
 
 /** A Python float literal, with `float('inf')`, `-float('inf')` and
@@ -2678,6 +2718,24 @@ function pythonAssertReturnableSelection(
         `(\`Block(If(c, r ≔ 1, r ≔ 2); r)\`), which compiles to the \`if\` ` +
         `block followed by \`return r\`.`
     );
+  // On the `compile()` route, a selection with a `Break`, a `Continue` or a
+  // `Loop` branch keeps the statement form. A statement has no value, so the
+  // value of the other branch is lost: `If(x > 0, Break, 1)` emitted
+  // `if 0 < x: break else: 1`, where the value `1` is computed and dropped.
+  // A selection that mixes the two kinds of branch is refused, and the
+  // expression runs through the interpreter. A `Return` in a branch is a
+  // value here (`tailValue` above replaced it with its value).
+  if (valueArmsOnly && isFunction(value, 'If')) {
+    const kinds = pythonArmResultKinds(value);
+    if (kinds.has('control') && kinds.has('value'))
+      throw new Error(
+        `Could not compile ${compileSubject(subject)}: the body's value statement is a selection that ` +
+          `mixes a control-flow branch (\`Break\`, \`Continue\` or a loop) ` +
+          `with a value branch. Python writes such a selection as an ` +
+          `\`if:\`/\`else:\` block, which has no value, so the value of the ` +
+          `other branch would be lost.`
+      );
+  }
 }
 
 /**
@@ -3447,10 +3505,6 @@ function pythonArmIsStatement(arm: Expression | undefined): boolean {
   // `Assign` unwrap above answers only for an assignment tail, and
   // `Block(break)` must reach the statement form the same way a bare `break`
   // does. Any other `Block` (empty, or a sequence) has no expression form.
-  // A `Block` of one statement IS that statement, so read it through: the
-  // `Assign` unwrap above answers only for an assignment tail, and
-  // `Block(break)` must reach the statement form the same way a bare `break`
-  // does. Any other `Block` (empty, or a sequence) has no expression form.
   if (h === 'Block')
     return arm.ops.length !== 1 || pythonArmIsStatement(arm.ops[0]);
   // A nested selection is a statement exactly when one of ITS arms is.
@@ -3477,6 +3531,37 @@ function pythonArmCarriesValue(arm: Expression | undefined): boolean {
     isFunction(tail) &&
     ['Break', 'Continue', 'Return', 'Loop'].includes(tail.operator)
   );
+}
+
+/**
+ * The kinds of result the arms of a selection give, read through nested
+ * blocks (the last statement of a block gives its result) and nested
+ * selections: `'control'` for an arm that ends with a `Break`, a `Continue`
+ * or a `Loop`, and `'value'` for any other arm that gives a value. An absent
+ * arm and `Nothing` give neither kind.
+ */
+function pythonArmResultKinds(
+  arm: Expression | undefined,
+  kinds: Set<'control' | 'value'> = new Set()
+): Set<'control' | 'value'> {
+  if (arm === undefined || isSymbol(arm, 'Nothing')) return kinds;
+  if (isFunction(arm, 'Block')) {
+    if (arm.ops.length > 0)
+      pythonArmResultKinds(arm.ops[arm.ops.length - 1], kinds);
+    return kinds;
+  }
+  if (isFunction(arm, 'If')) {
+    pythonArmResultKinds(arm.ops[1], kinds);
+    pythonArmResultKinds(arm.ops[2], kinds);
+    return kinds;
+  }
+  if (
+    isFunction(arm) &&
+    ['Break', 'Continue', 'Loop'].includes(arm.operator)
+  )
+    kinds.add('control');
+  else kinds.add('value');
+  return kinds;
 }
 
 /**
@@ -3864,18 +3949,27 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   Arctan: pyInverseTrig('Arctan', 'np.arctan'),
   Arctan2: 'np.arctan2',
   Sinh: (args, compile) => {
-    if (BaseCompiler.isComplexValued(args[0]))
+    if (BaseCompiler.isComplexValued(args[0])) {
+      const u = BaseCompiler.imaginaryPiMultiple(args[0]);
+      if (u !== undefined) return pythonPiHyperbolic(compile(u), 'Sinh');
       return `cmath.sinh(${compile(args[0])})`;
+    }
     return `np.sinh(${compile(args[0])})`;
   },
   Cosh: (args, compile) => {
-    if (BaseCompiler.isComplexValued(args[0]))
+    if (BaseCompiler.isComplexValued(args[0])) {
+      const u = BaseCompiler.imaginaryPiMultiple(args[0]);
+      if (u !== undefined) return pythonPiHyperbolic(compile(u), 'Cosh');
       return `cmath.cosh(${compile(args[0])})`;
+    }
     return `np.cosh(${compile(args[0])})`;
   },
   Tanh: (args, compile) => {
-    if (BaseCompiler.isComplexValued(args[0]))
+    if (BaseCompiler.isComplexValued(args[0])) {
+      const u = BaseCompiler.imaginaryPiMultiple(args[0]);
+      if (u !== undefined) return pythonPiHyperbolic(compile(u), 'Tanh');
       return `cmath.tanh(${compile(args[0])})`;
+    }
     return `np.tanh(${compile(args[0])})`;
   },
   // NumPy's `np.arcsinh`, `np.arccosh` and `np.arctanh` take a complex
@@ -3932,14 +4026,26 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   // Reciprocal hyperbolic functions
   Coth: ([x], compile) => {
     if (x === null) throw new Error('Could not compile `Coth`: no argument');
+    const u = BaseCompiler.isComplexValued(x)
+      ? BaseCompiler.imaginaryPiMultiple(x)
+      : undefined;
+    if (u !== undefined) return pythonPiHyperbolic(compile(u), 'Coth');
     return `(np.cosh(${compile(x)}) / np.sinh(${compile(x)}))`;
   },
   Csch: ([x], compile) => {
     if (x === null) throw new Error('Could not compile `Csch`: no argument');
+    const u = BaseCompiler.isComplexValued(x)
+      ? BaseCompiler.imaginaryPiMultiple(x)
+      : undefined;
+    if (u !== undefined) return pythonPiHyperbolic(compile(u), 'Csch');
     return `(1 / np.sinh(${compile(x)}))`;
   },
   Sech: ([x], compile) => {
     if (x === null) throw new Error('Could not compile `Sech`: no argument');
+    const u = BaseCompiler.isComplexValued(x)
+      ? BaseCompiler.imaginaryPiMultiple(x)
+      : undefined;
+    if (u !== undefined) return pythonPiHyperbolic(compile(u), 'Sech');
     return `(1 / np.cosh(${compile(x)}))`;
   },
 

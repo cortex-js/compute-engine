@@ -69,6 +69,7 @@ import type {
   Scope,
   CollectionHandlers,
   BoxedValueDefinition,
+  BoxedDefinition,
 } from '../global-types.js';
 import {
   errorValue,
@@ -98,6 +99,9 @@ import {
   substituteBinderValues,
 } from './utils.js';
 import { journalCheckpointMapEntry } from '../checkpoint-journal.js';
+import { scopeActivationTemplate } from '../boxed-expression/ambient-chain.js';
+import { noteScopeDeclaration } from '../scope-declaration-count.js';
+import { topLevelEvaluationEpoch } from '../boxed-expression/evaluation-epoch.js';
 import { smallCount } from '../boxed-expression/collection-count.js';
 import {
   coarsenEvidenceType,
@@ -2468,25 +2472,152 @@ function evaluateWhich(
 }
 
 /**
- * Remove the canonicalization-time bookkeeping from the block scope that is
- * the current lexical scope — see the comment in `evaluateBlock`, which is
- * the reason this sweep exists. Shared by the synchronous and asynchronous
- * block evaluators.
+ * The block scopes whose bindings at the start of their first run are
+ * recorded: each binding that the sweep kept at that time carries the
+ * `_blockTemplate` mark. On the asynchronous route the key is the block
+ * scope itself (the template), not the activation that the run uses.
+ */
+const recordedBlockScopes = new WeakSet<Scope>();
+
+/**
+ * What the sweep knows of the bindings that the runs of a block made (the
+ * bindings of the block scope that have no `_blockTemplate` mark and no
+ * `_declaredByStatement` mark: the implicit locals of its assignments).
+ *
+ * - `epoch`: the top-level evaluation of the last run
+ *   (`topLevelEvaluationEpoch`, `boxed-expression/evaluation-epoch.ts`).
+ * - `key`: the function call of the last run (`callActivationKey`).
+ * - `saved`: for each other function call of this top-level evaluation, the
+ *   bindings that the runs of the block made in that call, kept while a run
+ *   in another call (a recursive call) uses the block scope. The map is weak:
+ *   the entry of a call goes away with the scope of the call, so a sum of
+ *   many calls (`Sum(g(k), k, 1, 10^5)`) does not keep an entry for each
+ *   call. A call whose runs made no binding has no entry.
+ */
+type BlockRunState = {
+  epoch: number;
+  key: object;
+  saved: WeakMap<object, Map<string, BoxedDefinition>>;
+};
+
+/** Keyed by the block scope (the template on the asynchronous route). */
+const blockRunStates = new WeakMap<Scope, BlockRunState>();
+
+/** The key of a run that is not inside a function call. */
+const TOP_LEVEL_RUN = {};
+
+/**
+ * The function call that the current run of a block is part of: the scope
+ * of the innermost call frame on the evaluation-context stack (the
+ * `freshScope` that `makeLambda` in `function-utils.ts` makes for each call
+ * and pushes as a `'call'` frame), or `TOP_LEVEL_RUN` outside any call.
+ */
+function callActivationKey(ce: ComputeEngine): object {
+  const stack = ce._evalContextStack;
+  for (let i = stack.length - 1; i >= 0; i--)
+    if (stack[i].name === 'call') return stack[i].lexicalScope;
+  return TOP_LEVEL_RUN;
+}
+
+/**
+ * Prepare the block scope that is the current lexical scope for a new run of
+ * the block. Shared by the synchronous and asynchronous block evaluators.
+ *
+ * - The canonicalization-time bookkeeping is removed: see the comment in
+ *   `evaluateBlock`, which is the reason for this part of the sweep.
+ * - An assignment to a name that has no binding in the scope chain
+ *   (`x ≔ x + 1` with `x` not declared) makes a binding in the block scope
+ *   with the assigned value: an implicit local of the block. As a variable of
+ *   a JavaScript or Python function, this local keeps its value from one run
+ *   of the block to the next inside one evaluation (the iterations of a loop
+ *   whose body is the block: `Loop(Block(t ≔ t + 1; …), 1..3)` ends with
+ *   `t + 3`), and starts with no value in a new top-level evaluation and in
+ *   a new function call. Before, it also kept its value from one top-level
+ *   evaluation to the next: `Block(x ≔ x + 1; 2x)` gave `2(x + 1)`, then
+ *   `2(x + 2)`.
+ *
+ *   So, at the start of a run in a new top-level evaluation, the bindings
+ *   that the runs of the block made are removed. At the start of a run in
+ *   another function call of the same evaluation, they are set aside for
+ *   the call that made them, and the bindings of the new call (if a run of
+ *   the block in that call made some) are put back. A recursive call that
+ *   runs the block again then does not reset the locals of the calls around
+ *   it for their next runs. The block scope is one object for all the
+ *   calls, so while the recursive call runs, the enclosing run reads the
+ *   locals of the recursive call.
+ *
+ *   A binding that the block scope held before its first run (a function
+ *   clause installed at canonicalization) is kept, and so is a local of a
+ *   `Declare` statement (`_declaredByStatement`), which `createBlockLocals`
+ *   (`function-utils.ts`) replaces at each run. An assignment to a name
+ *   declared outside the block writes that outer binding and makes nothing
+ *   here.
+ *
+ * On the asynchronous route the current scope is an activation: a copy of
+ * the block scope made for this run (`asyncScopeActivation`,
+ * `boxed-expression/boxed-function.ts`). The copy holds what the block scope
+ * held when the run started, so a binding of the activation is kept only
+ * when the binding of the same name in the block scope carries the mark, or
+ * when the run is in the same evaluation and call as the last run. A local
+ * that an asynchronous run makes stays in its activation. (The body of a
+ * loop runs on the synchronous route on both routes.)
  */
 function sweepCanonicalizationBindings(ce: ComputeEngine): void {
   const scope = ce.context.lexicalScope;
+  const template = scopeActivationTemplate(scope) ?? scope;
+  type Marks = { _declaredByStatement?: boolean; _blockTemplate?: boolean };
+  const isValueless = (def: BoxedDefinition): boolean =>
+    'value' in def && def.value.value === undefined;
+  if (!recordedBlockScopes.has(template)) {
+    recordedBlockScopes.add(template);
+    for (const def of template.bindings.values())
+      if (!isValueless(def)) (def as Marks)._blockTemplate = true;
+  }
+  const remove = (name: string, def: BoxedDefinition): void => {
+    // Checkpoint journal (funnel 4): the sweep removes bindings by direct
+    // map surgery.
+    journalCheckpointMapEntry(ce, scope.bindings, name, name, 'declare');
+    scope.bindings.delete(name);
+    // A binding with a value changed what the name resolves to in this
+    // scope, so its removal is counted as a declaration of the scope
+    // (`noteScopeDeclaration`).
+    if (!isValueless(def)) noteScopeDeclaration(scope);
+  };
+  // The bindings that the runs of the block made
+  const madeByRuns = new Map<string, BoxedDefinition>();
   for (const [name, def] of [...scope.bindings]) {
-    if (
-      'value' in def &&
-      def.value.value === undefined &&
-      (def as { _declaredByStatement?: boolean })._declaredByStatement !== true
-    ) {
-      // Checkpoint journal (funnel 4): the block-exit sweep removes bindings
-      // by direct map surgery.
+    if ((def as Marks)._declaredByStatement === true) continue;
+    if (isValueless(def)) remove(name, def);
+    else if (
+      (template.bindings.get(name) as Marks | undefined)?._blockTemplate !==
+      true
+    )
+      madeByRuns.set(name, def);
+  }
+
+  const epoch = topLevelEvaluationEpoch(ce);
+  const key = callActivationKey(ce);
+  const state = blockRunStates.get(template);
+  if (state === undefined || state.epoch !== epoch) {
+    for (const [name, def] of madeByRuns) remove(name, def);
+    blockRunStates.set(template, { epoch, key, saved: new WeakMap() });
+    return;
+  }
+  if (state.key === key) return;
+  // A run in another function call of the same evaluation
+  if (madeByRuns.size > 0) state.saved.set(state.key, madeByRuns);
+  for (const [name, def] of madeByRuns) remove(name, def);
+  const restored = state.saved.get(key);
+  if (restored !== undefined) {
+    state.saved.delete(key);
+    for (const [name, def] of restored) {
+      if (scope.bindings.has(name)) continue;
       journalCheckpointMapEntry(ce, scope.bindings, name, name, 'declare');
-      scope.bindings.delete(name);
+      scope.bindings.set(name, def);
+      noteScopeDeclaration(scope);
     }
   }
+  state.key = key;
 }
 
 /** Evaluate a Block expression. */

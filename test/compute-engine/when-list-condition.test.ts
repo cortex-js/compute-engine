@@ -40,10 +40,13 @@ describe('a restriction with a list of conditions', () => {
     expect(interp(['When', ['Tuple', 'u', 'v'], COND])).toBe(
       '[(5, 1),"Missing","Missing"]'
     );
+    // A masked point cell is `undefined` in compiled code, as a single
+    // missing point is (user decision 2026-10-18); a masked number cell
+    // stays `NaN` (test above).
     expect(run(['When', ['Tuple', 'u', 'v'], COND])).toEqual([
       [5, 1],
-      NaN,
-      NaN,
+      undefined,
+      undefined,
     ]);
     expect(
       ce

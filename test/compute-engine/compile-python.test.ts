@@ -1774,19 +1774,46 @@ describe('PYTHON TARGET', () => {
         ],
         [loop, ['Block', loop]],
       ] as any) {
-        const expected = python.compile(arms(bare, 1)).code;
-        expect(python.compile(arms(wrapped, 1)).code).toBe(expected);
-        // A statement block, not a conditional expression — except for a
-        // `Return`: the root is a tail position, where a `Return` in a branch
-        // gives the value of the branch (`BaseCompiler.tailValue`), so the
-        // `If` is the conditional of the two values. The statement block
-        // dropped the value of the `else` branch.
-        if (bare[0] === 'Return')
+        // A `Return`: the root is a tail position, where a `Return` in a
+        // branch gives the value of the branch (`BaseCompiler.tailValue`), so
+        // the `If` is the conditional of the two values.
+        if (bare[0] === 'Return') {
+          const expected = python.compile(arms(bare, 1)).code;
+          expect(python.compile(arms(wrapped, 1)).code).toBe(expected);
           expect(expected).toBe(
             "(((x) if (0 < x) else (1)) if (x == x) else float('nan'))"
           );
-        else expect(expected).toMatch(/^if x == x:\n/);
+          continue;
+        }
+        // A control-flow arm against a value arm: the statement block has no
+        // value, so the value `1` of the `else` branch would be lost. The
+        // selection is refused, wrapped or not, and the fallback runs the
+        // interpreter.
+        for (const arm of [bare, wrapped]) {
+          expect(() => python.compile(arms(arm, 1))).toThrow(
+            /mixes a control-flow branch/
+          );
+          expect(() => python.compile(arms(1, arm))).toThrow(
+            /mixes a control-flow branch/
+          );
+          expect(
+            python.compile(arms(arm, 1), { fallback: true }).success
+          ).toBe(false);
+        }
+        // Against another control-flow arm, a statement block, not a
+        // conditional expression, and the same for both spellings.
+        const expected = python.compile(arms(bare, ['Continue'])).code;
+        expect(python.compile(arms(wrapped, ['Continue'])).code).toBe(
+          expected
+        );
+        expect(expected).toMatch(/^if x == x:\n/);
       }
+      // A nested selection that mixes the two kinds is refused too.
+      expect(() =>
+        python.compile(
+          arms(['If', ['Greater', 'y', 0], ['Break'], 1], ['Continue'])
+        )
+      ).toThrow(/mixes a control-flow branch/);
       // Both arms wrapped, and the emission spelled out.
       expect(
         python.compile(arms(['Block', ['Break']], ['Block', ['Continue']])).code

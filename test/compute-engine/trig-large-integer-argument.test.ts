@@ -33,9 +33,9 @@ describe('TRIG OF A LARGE EXACT ANGLE, AT THE WORKING PRECISION', () => {
   });
 
   test('a large exact rational', () => {
-    // decimal.js: −0.7689641720505087261184865
+    // mpmath: −0.76896417205050872611842848
     expect(N('\\sin(\\frac{123456789012345678901}{7})')).toBe(
-      '-0.768964172050508726119'
+      '-0.768964172050508726118'
     );
   });
 
@@ -49,7 +49,8 @@ describe('TRIG OF A LARGE EXACT ANGLE, AT THE WORKING PRECISION', () => {
 
   test('a large rational multiple of π', () => {
     // 10³⁰ ≡ 4 (mod 6), so 10³⁰·π/3 ≡ 4π/3; sin(4π/3) = −√3/2
-    expect(N('\\sin(\\frac{10^{30}\\pi}{3})')).toBe('-0.866025403784438646765');
+    // = −0.86602540378443864676372
+    expect(N('\\sin(\\frac{10^{30}\\pi}{3})')).toBe('-0.866025403784438646764');
     // decimal.js: 0.6234898018587335305250049
     expect(N('\\cos(\\frac{3\\cdot 10^{25}\\pi}{7})')).toBe(
       '0.623489801858733530525'
@@ -66,7 +67,7 @@ describe('TRIG OF A LARGE EXACT ANGLE, AT THE WORKING PRECISION', () => {
     const deg = new ComputeEngine();
     deg.angularUnit = 'deg';
     // 10³⁰ ≡ 280 (mod 360); decimal.js: −0.984807753012208059366743
-    expect(N('\\sin(10^{30})', deg)).toBe('-0.984807753012208059366');
+    expect(N('\\sin(10^{30})', deg)).toBe('-0.984807753012208059367');
   });
 
   test('smaller angles are unchanged', () => {

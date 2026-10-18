@@ -2510,8 +2510,12 @@ export interface Expression {
    * Otherwise, solve the equation `this = 0` for the variables in vars.
    *
    * For univariate equations, returns an array of solutions (roots). For a
-   * trigonometric equation, the array holds the principal roots, which
-   * represent the periodic families of roots. Returns `null` when the solver
+   * trigonometric equation, the array holds the principal roots: one root of
+   * each family of roots in one period, with no free parameter
+   * (`sin(x) = 1/2` gives `[π/6, 5π/6]`). This is different from the `Solve`
+   * operator, which gives the families themselves with a fresh integer
+   * parameter `t` (`[π/6 + 2πt, 5π/6 + 2πt]`), so that its list holds every
+   * root. Returns `null` when the solver
    * cannot solve the equation, and also when it can find only a part of the
    * roots: when the unknown is in a function that the solver cannot invert
    * and that is not periodic (`(x - 1)·BesselJ(0, x) = 0`), or in a factor of

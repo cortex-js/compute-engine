@@ -10,6 +10,10 @@ import {
   type EagerSourceValues,
 } from './eager-source-values.js';
 import {
+  beginTopLevelEvaluation,
+  endTopLevelEvaluation,
+} from './evaluation-epoch.js';
+import {
   awaitAsyncOnlyDescendants,
   hasAsyncOnlyApplication,
 } from './async-only-descendants.js';
@@ -3186,6 +3190,17 @@ export class BoxedFunction
     // around a handler call; then it is inherited, and it is not cleared here.
     const capturesEffects = engine._evaluationEffects === undefined;
     if (capturesEffects) engine._evaluationEffects = engine.effects;
+    // An evaluation that is not nested in a synchronous evaluation, and that
+    // is not called from a synchronous part of the asynchronous driver (which
+    // sets the registry slot around these parts), is a new top-level
+    // evaluation (`beginTopLevelEvaluation`, `evaluation-epoch.ts`). When an
+    // asynchronous evaluation is pending, its number is given back at the
+    // end, so its next parts read the same number as its first part.
+    let outerEpoch: number | undefined;
+    if (capturesEffects && engine._evaluationDepth === 0) {
+      const outer = beginTopLevelEvaluation(engine);
+      if (engine._inFlightAsyncEvaluations > 0) outerEpoch = outer;
+    }
     engine._evaluationDepth += 1;
     // The numeric request of this evaluation, for the collection handlers
     // it calls, which receive no evaluation options
@@ -3214,6 +3229,7 @@ export class BoxedFunction
       engine._numericRequest = enclosingNumericRequest;
       releaseKeptEagerSourceValues(engine);
       if (capturesEffects) engine._evaluationEffects = undefined;
+      if (outerEpoch !== undefined) endTopLevelEvaluation(engine, outerEpoch);
     }
   }
 
@@ -3771,6 +3787,14 @@ export class BoxedFunction
         _precisionWindow:
           options?._precisionWindow ?? capturedPrecisionWindow(this.engine),
       };
+    // As in `evaluate()`: an evaluation that is not nested in another one is
+    // a new top-level evaluation. One that starts while another asynchronous
+    // evaluation is pending shares the number of that evaluation.
+    if (
+      this.engine._evaluationDepth === 0 &&
+      this.engine._inFlightAsyncEvaluations === 0
+    )
+      beginTopLevelEvaluation(this.engine);
     this.engine._inFlightAsyncEvaluations += 1;
     let promise: Promise<Expression>;
     try {
@@ -13775,6 +13799,107 @@ async function runMaterializationAsync(
   return step.value;
 }
 
+/**
+ * A walk of a collection that can be started again: a new walk gives first
+ * the elements that the earlier walks pulled from the iterator, then pulls
+ * the next ones from the same iterator. So the callbacks of the collection
+ * (the function of a `Map` or of a `FlatMap`) are applied once for each
+ * element, even when the materialization walks the collection more than
+ * once. An error of the iterator is given again to each later walk at the
+ * same place.
+ *
+ * Ending a walk before the end (a `break`) closes the iterator, so a walk
+ * that is ended this way must be the last one.
+ */
+class RepeatableWalk {
+  private readonly pulled: Expression[] = [];
+  private ended = false;
+  private failed = false;
+  private error: unknown;
+
+  constructor(private readonly iter: Iterator<Expression>) {}
+
+  walk(): IterableIterator<Expression> {
+    let i = 0;
+    const next = (): IteratorResult<Expression> => {
+      if (i < this.pulled.length)
+        return { done: false, value: this.pulled[i++] };
+      if (this.failed) throw this.error;
+      if (this.ended) return { done: true, value: undefined };
+      let step: IteratorResult<Expression>;
+      try {
+        step = this.iter.next();
+      } catch (e) {
+        this.ended = this.failed = true;
+        this.error = e;
+        throw e;
+      }
+      if (step.done) {
+        this.ended = true;
+        return { done: true, value: undefined };
+      }
+      this.pulled.push(step.value);
+      i += 1;
+      return step;
+    };
+    const walk: IterableIterator<Expression> = {
+      next,
+      return: () => {
+        this.close();
+        return { done: true, value: undefined };
+      },
+      [Symbol.iterator]: () => walk,
+    };
+    return walk;
+  }
+
+  /** Close the iterator, when it has not ended. */
+  close(): void {
+    if (this.ended) return;
+    this.ended = true;
+    this.iter.return?.(undefined);
+  }
+}
+
+/**
+ * When the materialization of a collection whose `isEmpty` facet gives no
+ * answer can go on, because a walk of the collection decides the emptiness:
+ * the walk, which has pulled the first element. Otherwise, `undefined`.
+ *
+ * Some facets give no answer because the answer needs a callback, and a
+ * facet does not apply one: the emptiness of `FlatMap([1, 2, 3], x ↦ [x, x])`
+ * depends on the results of its callback, so the emptiness of
+ * `Take(FlatMap([1, 2, 3], x ↦ [x, x]), 3)` is not known either, and the
+ * `Take` stayed unevaluated. Materialization applies the callbacks anyway, so
+ * it can pull the first element itself. It then continues the same walk
+ * (`RepeatableWalk`), so a callback that is not pure is not applied again to
+ * the first element.
+ *
+ * This is done only for a collection that is known to be finite and
+ * enumerable, and only a first element decides: the collection is then not
+ * empty. An iterator that ends at once does not decide, because some views
+ * claim to be enumerable but yield nothing when a count they need is not
+ * known. A walk that gives up with `iteration-limit-exceeded` (a `Filter`
+ * with a long run of rejected elements) does not decide either. In both
+ * cases the lazy form stays, as before.
+ */
+function walkDecidesEmptiness(expr: Expression): RepeatableWalk | undefined {
+  if (expr.isFiniteCollection !== true) return undefined;
+  if (expr.isEnumerableCollection !== true) return undefined;
+  const walk = new RepeatableWalk(expr.each());
+  try {
+    if (walk.walk().next().done === true) return undefined;
+    return walk;
+  } catch (e) {
+    if (
+      e instanceof CancellationError &&
+      e.cause === 'iteration-limit-exceeded'
+    )
+      return undefined;
+    throw e;
+  }
+}
+
 /** The steps of `materialize()`: see `MaterializationSteps`. */
 function* materializationSteps(
   expr: BoxedFunction,
@@ -13785,8 +13910,14 @@ function* materializationSteps(
 
   // Emptiness indeterminate (e.g. Range(1, n) with a symbolic bound): the
   // collection cannot be enumerated, so fabricating a literal would collapse
-  // it (previously to the 1-element list [1]). Keep the lazy form.
-  if (expr.isEmptyCollection === undefined) return expr;
+  // it (previously to the 1-element list [1]). Keep the lazy form, unless a
+  // walk can decide the emptiness (`walkDecidesEmptiness`). The walks below
+  // then continue that walk.
+  let walk: RepeatableWalk | undefined;
+  if (expr.isEmptyCollection === undefined) {
+    walk = walkDecidesEmptiness(expr);
+    if (walk === undefined) return expr;
+  }
 
   // A source that provably cannot be walked yet — a collection-typed symbol
   // with no value (`Join([1], v)` for a declared, unassigned `v`) — yields
@@ -13842,24 +13973,27 @@ function* materializationSteps(
   // can detect the size via `.count` without risking OOM.
   if (isIndexed && isFinite) {
     const count = expr.count;
-    if (count !== undefined && count > expr.engine.maxCollectionSize)
+    if (count !== undefined && count > expr.engine.maxCollectionSize) {
+      walk?.close();
       return expr;
+    }
   }
 
   // A full materialization of a collection with no known count must not
   // evaluate up to `maxCollectionSize` elements and then discard them when
   // the collection turns out to be larger. Count the elements first, without
-  // evaluating them, and stop at the cap. This walks the collection twice,
-  // but a walk that only counts is cheaper than one that evaluates each
-  // element. A walk that gives up with `iteration-limit-exceeded` (an
+  // evaluating them, and stop at the cap. The walk below gives the same
+  // elements again, without pulling them from the iterator again
+  // (`RepeatableWalk`), and evaluates them. A walk that gives up with `iteration-limit-exceeded` (an
   // unbroken run of duplicates, or a keyed merge over an element that is not
   // an entry) is not a size result: the walk below meets the same
   // cancellation and handles it.
   if (full && !expr.isEmptyCollection && expr.count === undefined) {
     const cap = expr.engine.maxCollectionSize;
     let n = 0;
+    walk ??= new RepeatableWalk(expr.each());
     try {
-      for (const _ of expr.each()) {
+      for (const _ of walk.walk()) {
         n += 1;
         if (n > cap) return expr;
       }
@@ -13891,7 +14025,7 @@ function* materializationSteps(
         typeof materialization === 'number'
           ? materialization
           : materialization[0];
-      const iter = expr.each();
+      const iter = walk?.walk() ?? expr.each();
       try {
         for (const x of iter) {
           if (xs.length === last) {
@@ -13957,7 +14091,7 @@ function* materializationSteps(
 
       // Materialize the head
       let i = 1;
-      const iter = expr.each();
+      const iter = walk?.walk() ?? expr.each();
       for (const x of iter) {
         xs.push(yield x);
         i += 1;

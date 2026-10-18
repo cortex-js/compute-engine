@@ -401,15 +401,14 @@ describe('N(x, [p, a]): a precision goal and an accuracy goal', () => {
   });
 
   test('a precision goal for a value that is 0: the call stays unevaluated', () => {
-    // A precision goal for a value that is 0, sin²(1) + cos²(1) − 1: its
+    // A precision goal for a value that is 0, ln 6 − ln 2 − ln 3: its
     // approximations are rounding errors, which do not agree to 30 digits
     // relative to their magnitude at any precision. They are found to be
-    // the noise of 0 after three working precisions.
-    const zero = [
-      'Subtract',
-      ['Add', ['Power', ['Sin', 1], 2], ['Power', ['Cos', 1], 2]],
-      1,
-    ];
+    // the noise of 0 after three working precisions. (Not sin²(1) + cos²(1)
+    // − 1: the two squares are correctly rounded to the same last place, so
+    // their sum is exactly 1 and the approximation is a float that is
+    // exactly 0, which does not meet an accuracy goal.)
+    const zero = ['Subtract', ['Ln', 6], ['Add', ['Ln', 2], ['Ln', 3]]];
     const precision = ce.precision;
     const r = ce.box(['N', zero, ['List', 30, 'PositiveInfinity']]).evaluate();
     expect(r.operator).toBe('N');

@@ -274,6 +274,20 @@ const complexPole = (): { re: number; im: number } => ({
   im: Infinity,
 });
 
+/**
+ * `f(cos πu, sin πu)` with the angle `u` in half-turns, reduced exactly
+ * (`cosSinPi()`), for a finite `u`. A `u` that is `NaN` or infinite has no
+ * angle, and the value is `NaN` in both parts.
+ */
+function halfTurnValue(
+  u: number,
+  f: (c: number, s: number) => ComplexResult
+): ComplexResult {
+  if (!Number.isFinite(u)) return { re: NaN, im: NaN };
+  const [c, s] = cosSinPi(u);
+  return f(c, s);
+}
+
 /** Is `z` exactly zero — the one argument at which a kernel's pole is hit
  *  exactly in floating point? */
 const isComplexZero = (z: { re: number; im: number }): boolean =>
@@ -1923,15 +1937,29 @@ class WholeArm {
  *   share one length; a mismatch is the interpreter's `incompatible-dimensions`
  *   projected to NaN, as everywhere in `bcastWith` (R3). A scalar arm lifts to
  *   its positions, an array arm is indexed at each;
- * - a position no clause matched is NaN (R4). So is a position whose condition
- *   cell is absent (NaN — how a real target renders `Missing`): the position is
- *   CONSUMED, never offered to a later clause, matching the interpreter's
- *   positioned "condition is absent" error cell (R4′);
+ * - a position no clause matched is `absent` (R4): the absence value of the
+ *   cell type, which the compiler passes. It is `NaN` for a number cell, and
+ *   `undefined` for a cell that is a point or another value that is not a
+ *   number (`selectAbsent`), as a single missing point is `undefined`. When
+ *   every condition is scalar and none is true, the whole value is `absent`.
+ *   A position whose condition cell is absent (NaN — how a real target renders
+ *   `Missing`) is NaN: the position is CONSUMED, never offered to a later
+ *   clause, matching the interpreter's positioned "condition is absent" error
+ *   cell (R4′);
  * - a scalar condition that is neither boolean nor an array fails closed with
  *   the same message as `_SYS.cond`, so a conditional that is scalar at run
  *   time behaves exactly like the ternary chain it replaced.
  */
 function select(...clauses: Array<() => unknown>): unknown {
+  return selectWith(NaN, clauses);
+}
+
+/** `select` with `absent` as the value of a position that no clause
+ * matched. */
+function selectWith(
+  absent: unknown,
+  clauses: ReadonlyArray<() => unknown>
+): unknown {
   // 1/ The conditions, in clause order.
   const selectors: Array<true | 'absent' | unknown[]> = [];
   const armThunks: Array<() => unknown> = [];
@@ -1968,7 +1996,9 @@ function select(...clauses: Array<() => unknown>): unknown {
   }
   if (n < 0) {
     const last = selectors[selectors.length - 1];
-    if (last !== true) return NaN;
+    // No condition is true: the value is absent. An absent condition is NaN.
+    if (last === 'absent') return NaN;
+    if (last !== true) return absent;
     const v = armThunks[armThunks.length - 1]();
     return v instanceof WholeArm ? v.value : v;
   }
@@ -1978,7 +2008,7 @@ function select(...clauses: Array<() => unknown>): unknown {
   // scalar selector decides every undecided position the same way, so it is
   // applied without reading a cell.
   const selection = new Int32Array(n).fill(-1);
-  const absent = new Uint8Array(n);
+  const absentCondition = new Uint8Array(n);
   const reached = new Uint8Array(selectors.length);
   let undecided = n;
   for (let k = 0; k < selectors.length && undecided > 0; k++) {
@@ -1986,16 +2016,16 @@ function select(...clauses: Array<() => unknown>): unknown {
     if (cells === true || cells === 'absent') {
       const lifted = cells === true;
       for (let j = 0; j < n; j++) {
-        if (selection[j] >= 0 || absent[j] === 1) continue;
+        if (selection[j] >= 0 || absentCondition[j] === 1) continue;
         if (lifted) selection[j] = k;
-        else absent[j] = 1;
+        else absentCondition[j] = 1;
       }
       if (lifted) reached[k] = 1;
       undecided = 0;
       break;
     }
     for (let j = 0; j < n; j++) {
-      if (selection[j] >= 0 || absent[j] === 1) continue;
+      if (selection[j] >= 0 || absentCondition[j] === 1) continue;
       const v = cells[j];
       if (v === true) {
         selection[j] = k;
@@ -2007,7 +2037,7 @@ function select(...clauses: Array<() => unknown>): unknown {
         // An ABSENT cell (NaN — how a real target renders `Missing`, and how a
         // `Missing` symbol lowers through the vars object). Undecidable, and
         // the position is CONSUMED so no later clause decides it (R4′).
-        absent[j] = 1;
+        absentCondition[j] = 1;
         undecided -= 1;
       } else {
         // Any other cell is not a condition value at all: the interpreter
@@ -2042,8 +2072,12 @@ function select(...clauses: Array<() => unknown>): unknown {
   const out: unknown[] = new Array(n);
   for (let j = 0; j < n; j++) {
     const k = selection[j];
-    if (absent[j] === 1 || k < 0) {
+    if (absentCondition[j] === 1) {
       out[j] = NaN;
+      continue;
+    }
+    if (k < 0) {
+      out[j] = absent;
       continue;
     }
     out[j] = indexed[k] ? (values[k] as unknown[])[j] : values[k];
@@ -3642,6 +3676,30 @@ export const SYS_HELPERS = {
     const m = a === undefined ? 1 : Math.exp(a);
     return { re: c === 0 ? 0 : m * c, im: s === 0 ? 0 : m * s };
   },
+  // `sinh`, `cosh`, `tanh`, `csch`, `sech` and `coth` of `iπu` with the angle
+  // `u` in half-turns, reduced exactly (`cosSinPi()`): `sinh(iθ) = i·sin θ`,
+  // `cosh(iθ) = cos θ`, `tanh(iθ) = i·tan θ`, `csch(iθ) = −i/sin θ`,
+  // `sech(iθ) = 1/cos θ` and `coth(iθ) = −i·cot θ`. A zero is exact, and a
+  // pole is the unsigned pole `{ re: ∞, im: ∞ }` (`complexPole`), as the
+  // interpreter's `~oo`. See `BaseCompiler.imaginaryPiMultiple`.
+  csinhipi: (u: number): ComplexResult =>
+    halfTurnValue(u, (_c, s) => ({ re: 0, im: s })),
+  ccoshipi: (u: number): ComplexResult =>
+    halfTurnValue(u, (c) => ({ re: c, im: 0 })),
+  ctanhipi: (u: number): ComplexResult =>
+    halfTurnValue(u, (c, s) =>
+      c === 0 ? complexPole() : { re: 0, im: s === 0 ? 0 : s / c }
+    ),
+  ccschipi: (u: number): ComplexResult =>
+    halfTurnValue(u, (_c, s) =>
+      s === 0 ? complexPole() : { re: 0, im: -1 / s }
+    ),
+  csechipi: (u: number): ComplexResult =>
+    halfTurnValue(u, (c) => (c === 0 ? complexPole() : { re: 1 / c, im: 0 })),
+  ccothipi: (u: number): ComplexResult =>
+    halfTurnValue(u, (c, s) =>
+      s === 0 ? complexPole() : { re: 0, im: c === 0 ? 0 : -c / s }
+    ),
   cot: cotWithPole,
   sec: secWithPole,
   csc: cscWithPole,
@@ -3716,11 +3774,16 @@ export const SYS_HELPERS = {
   // Element-wise `Which`/`If` selection over a condition that may be a
   // collection at run time — see `select` and `compileJSSelection`.
   select,
+  // `select` where a position that no clause matched is `absent`, not `NaN`:
+  // the compiler uses it when the cell type is a point (`undefined`).
+  selectAbsent: (absent: unknown, ...clauses: Array<() => unknown>): unknown =>
+    selectWith(absent, clauses),
   // A point arm of such a selection, lifted whole rather than indexed.
   wholeArm: (value: unknown): WholeArm => new WholeArm(value),
   // The restriction `value\{conditions\}` (`When`) over a LIST of conditions:
-  // one masked value per condition, `absent` (the target's absence value,
-  // `NaN` or its complex form) where the condition is not true. A list
+  // one masked value per condition, `absent` (the absence value of one
+  // position: `NaN` or its complex form for a number, `undefined` for a
+  // point or a string) where the condition is not true. A list
   // value (`zip`) is aligned with the conditions element by element and
   // truncated to the shorter of the two, exactly as the interpreter aligns
   // them; any other value — a number, a point — is one value, repeated at

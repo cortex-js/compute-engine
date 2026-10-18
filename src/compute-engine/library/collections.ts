@@ -741,6 +741,8 @@ function isInertOpaqueHead(expr: Expression): boolean {
 // consumed by evaluation and only by evaluation, exactly as an untaken `If`
 // branch consumes none.
 const COUNT_PRESERVING_WRAPPERS = ['Sort', 'RandomShuffle', 'Reverse'];
+// The wrappers that require an indexed source (see `peekWrappers`).
+const ORDER_WRAPPERS = ['Sort', 'RandomShuffle', 'Reverse'];
 const MEMBERSHIP_PRESERVING_WRAPPERS = [
   'Sort',
   'RandomShuffle',
@@ -762,7 +764,18 @@ function peekWrappers(
     // (e.g. a non-function `Sort` comparator) shows up as an error
     // subexpression. Stripping it would silently erase that static type error;
     // instead, stop peeking and let the validation path surface it.
-    result.isValid
+    result.isValid &&
+    // `Sort`, `Reverse` and `RandomShuffle` accept only an indexed collection:
+    // a set has no order, so `Sort(c)` with `c := Set(3, 1, 5)` is an
+    // `incompatible-type` error. The static gate admits an operand whose type
+    // only overlaps `indexed_collection` (`c` is checked when it is
+    // evaluated), so stripping the wrapper from such an operand made
+    // `Count(Sort(c))` answer `3` where `Sort(c)` is the error. Strip one of
+    // these wrappers only when the type of its source is known to be an
+    // indexed collection; otherwise the consumer evaluates the wrapper, which
+    // sorts an untyped list to count it but reports the error for a set.
+    (!ORDER_WRAPPERS.includes(result.operator) ||
+      result.op1.type.matches('indexed_collection<any>'))
   ) {
     result = result.op1;
   }
@@ -861,6 +874,63 @@ function refusedOperandError(
 ): Expression {
   return withErrorFrames(ce.typeError(expected, operand.type, operand), [
     { operator, index },
+  ]);
+}
+
+/**
+ * The `incompatible-type` error that `Sort` and `Ordering` answer at
+ * evaluation when their callback is a COMPARATOR (two parameters) with a
+ * declared parameter type that is disjoint from the element type of the
+ * evaluated source, or `undefined` when the comparator is admissible or its
+ * types are not known.
+ *
+ * The comparator option of the declared signature is `(any, any) any ->
+ * number | boolean`, because the type language allows a type variable in only
+ * one option of a union, and the sort-key option `(T) any -> unknown` holds
+ * it. So the static check does not see the element type for a comparator,
+ * and `Sort([3, 1, 2], (a: string, b: string) ↦ Length(a) − Length(b))`
+ * was admitted: each application failed on its arguments, the failed result
+ * read as "greater", and the sort answered an arbitrary order. This check refuses that case when the source is known. The error has
+ * the shape the static check gives for a sort key with the wrong parameter
+ * type: the expected arrow with the element type, the actual type of the
+ * callback, and the frame of the operator at operand 2.
+ *
+ * An unannotated parameter of a function literal is not judged: its type is
+ * inferred from the body, and an inferred type is a guess
+ * (`widenUnannotatedLiteralParams`). An absent element (`Missing`) is not
+ * passed to the comparator (it sorts last), so the `missing` part of the
+ * element type is ignored.
+ */
+function comparatorParameterError(
+  ce: ComputeEngine,
+  operator: string,
+  xs: Expression,
+  fn: Expression | undefined
+): Expression | undefined {
+  if (fn === undefined) return undefined;
+  const fnType = isFunction(fn, 'Function')
+    ? widenUnannotatedLiteralParams(fn, fn.type.type)
+    : fn.type.type;
+  if (typeof fnType !== 'object' || fnType.kind !== 'signature')
+    return undefined;
+  if (functionArity(fnType) !== 2) return undefined;
+  if (freeTypeVariables(fnType).size > 0) return undefined;
+  const elt = collectionElementType(xs.type.type);
+  if (elt === undefined) return undefined;
+  const element = stripMissingFromType(elt);
+  if (element === 'never' || freeTypeVariables(element).size > 0)
+    return undefined;
+  const params = fnType.args ?? [];
+  if (!params.some((p) => provablyDisjoint(p.type, element))) return undefined;
+  const expected: Type = {
+    kind: 'signature',
+    args: [{ type: element }, { type: element }],
+    result: { kind: 'union', types: ['number', 'boolean'] },
+    // The declared comparator option admits any effect.
+    effects: 'any',
+  };
+  return withErrorFrames(ce.typeError(expected, ce.type(fnType), fn), [
+    { operator, index: 2 },
   ]);
 }
 
@@ -2115,6 +2185,90 @@ function walkedSource(xs: Expression): Expression {
   return xs.evaluate();
 }
 
+/**
+ * The element that a selecting view (`Filter`, `TakeWhile`, `DropWhile`,
+ * `Dedup`) judges (with its predicate, or by comparison with the previous
+ * element) and then emits: the VALUE of the source element.
+ *
+ * A pure `List` or `Tuple` literal is walked by its operands as written
+ * (`walkedSource`), so with `x := 5` the walk of `[x]` gives the symbol `x`.
+ * The predicate evaluates its argument, so it judges `5`, and the view must
+ * emit that same value: emitting `x` made `First(Filter([x], y ↦ y > 0))`
+ * answer `x` and `Element(5, Filter([x], y ↦ y > 0))` answer `False`, while
+ * the materialized result is `[5]`. The element is evaluated once and that
+ * value is both passed to the predicate and emitted. For an element that is
+ * already a value (a number literal, a string) `evaluate()` returns it.
+ */
+function selectedElementValue(x: Expression): Expression {
+  return isNumber(x) ? x : x.evaluate();
+}
+
+/**
+ * Whether the selecting-view source `src` (the result of `walkedSource`)
+ * holds an element whose value is `target`.
+ *
+ * A `List` or `Tuple` literal compares its operands AS WRITTEN, so its own
+ * `contains` gives `false` for `5` in `[x]` with `x := 5`; a walk of a
+ * selecting view emits element values (`selectedElementValue`), so a
+ * membership query reads the values too. A `Set` literal gives `undefined`
+ * for the same query, because a symbol element may be equal to the target.
+ *
+ * A view over such a literal (`Reverse([x])`, `Take([x, x], 1)`) also yields
+ * the operands as written, and its `contains` reads them as written. For a
+ * source with a literal collection inside it, the elements are walked by value
+ * when the source does not confirm the membership, up to `ce.iterationLimit`
+ * elements. The walk can only change the answer to `true`: an element value
+ * that is the target is a member. When the walk finds nothing, the answer of
+ * the source stands.
+ */
+function selectedSourceContains(
+  src: Expression,
+  target: Expression
+): boolean | undefined {
+  const inSource = src.contains(target);
+  if (inSource === true) return true;
+  if (
+    (isFunction(src, 'List') ||
+      isFunction(src, 'Tuple') ||
+      isFunction(src, 'Set')) &&
+    src._numericStore === undefined
+  )
+    return src.ops.some((x) => selectedElementValue(x).isSame(target))
+      ? true
+      : inSource;
+  if (!hasCollectionLiteralOperand(src)) return inSource;
+  const limit = src.engine.iterationLimit;
+  try {
+    let n = 0;
+    for (const x of src.each()) {
+      if (selectedElementValue(x).isSame(target)) return true;
+      if (++n >= limit) break;
+    }
+  } catch (e) {
+    if (
+      e instanceof CancellationError &&
+      e.cause === 'iteration-limit-exceeded'
+    )
+      return inSource;
+    throw e;
+  }
+  return inSource;
+}
+
+/** Whether a `List`, `Tuple` or `Set` literal is an operand of `expr`, at
+ * any depth. */
+function hasCollectionLiteralOperand(expr: Expression): boolean {
+  if (!isFunction(expr)) return false;
+  return expr.ops.some(
+    (x) =>
+      ((isFunction(x, 'List') ||
+        isFunction(x, 'Tuple') ||
+        isFunction(x, 'Set')) &&
+        x._numericStore === undefined) ||
+      hasCollectionLiteralOperand(x)
+  );
+}
+
 function mapSource(xs: Expression): Expression {
   if (xs.isCollection) return xs;
   if (!xs.type.matches('collection<any>')) return xs;
@@ -2210,11 +2364,29 @@ function finitenessOfSource(xs: Expression): boolean | undefined {
  * empty walk as an empty collection (`Any(Reverse(Permutations(Range(1,
  * 20))), p)` answered `False`). Otherwise the view can produce its elements
  * exactly when its source can (see `enumerableFromSource()`).
+ *
+ * The walk yields nothing too when the source is finite but its count is not
+ * known (`FlatMap([1, 2, 3], x ↦ [x, x])`, whose count needs the results of
+ * its callback): `at()` turns a negative index into a positive one only with
+ * a known count. So such a view is not enumerable either; answering the
+ * source's enumerability made `Sum(Reverse(FlatMap([1, 2, 3], x ↦ [x, x])))`
+ * answer `0`.
  */
 function enumerableFromSmallSource(expr: Expression): boolean | undefined {
   if (!isFunction(expr)) return undefined;
-  if (typeof expr.op1.count === 'bigint') return false;
+  if (!sourceCountIsKnownIfFinite(expr.op1)) return false;
   return expr.op1.isEnumerableCollection;
+}
+
+/**
+ * False when `xs` has a count that a walk by position cannot use: a `bigint`
+ * count, or no count for a collection that is known to be finite. See
+ * `enumerableFromSmallSource()`.
+ */
+function sourceCountIsKnownIfFinite(xs: Expression): boolean {
+  const count = xs.count;
+  if (typeof count === 'bigint') return false;
+  return count !== undefined || xs.isFiniteCollection !== true;
 }
 
 /**
@@ -5104,6 +5276,10 @@ function isProvablyOutOfRange(xs: Expression, index: number): boolean {
     return index < 0 || xs.isEnumerableCollection === false;
   // A finite count with a miss from `at()` is a proof.
   if (count !== undefined && Number.isFinite(count)) return true;
+  // Without a count, `at()` does not read a negative index at all (it needs
+  // the count to turn the index into a position), so its miss is not a
+  // proof: `Last(FlatMap([1, 2, 3], x ↦ [x, x]))` answered `NaN`.
+  if (index < 0) return false;
   return xs.isFiniteCollection === true && xs.isEnumerableCollection === true;
 }
 
@@ -9592,9 +9768,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // An UNDECIDED source membership must propagate as `undefined`: `??
         // false` here asserted a definite "not a member" about a source that
         // could not answer at all. A definite `false` still refutes.
-        // The source the iterator walks (`walkedSource`), so that a query
-        // and a walk of the same `Filter` read the same elements.
-        const inSource = walkedSource(expr.op1).contains(target);
+        // The source the iterator walks (`walkedSource`), read by element
+        // VALUE as the iterator emits them, so that a query and a walk of the
+        // same `Filter` read the same elements.
+        const inSource = selectedSourceContains(
+          walkedSource(expr.op1),
+          target
+        );
         if (inSource !== true) return inSource === false ? false : undefined;
         const f = applicable(expr.op2);
         const applied = f([target]);
@@ -9642,8 +9822,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         return {
           next: () => {
             while (true) {
-              const { value, done } = source.next();
-              if (done) return { value: undefined, done: true };
+              const next = source.next();
+              if (next.done) return { value: undefined, done: true };
+              // The value the predicate judges is the value emitted.
+              const value = selectedElementValue(next.value);
               const pred = f([value]);
               if (!pred) {
                 throw invalidPredicateError(expr.op2);
@@ -10219,11 +10401,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // See `Filter.isEmpty`: an unenumerable source leaves this unknown
         // rather than reporting the empty walk as an empty prefix.
         if (!isEnumerableSource(expr.op1)) return undefined;
-        const first = expr.op1.each().next();
+        // The element the iterator judges first: the first element of the
+        // walked source, by value (`walkedSource`, `selectedElementValue`).
+        const first = walkedSource(expr.op1).each().next();
         if (first.done) return true;
         const f = applicable(expr.op2);
         if (!f) return undefined;
-        const applied = f([first.value]);
+        const applied = f([selectedElementValue(first.value)]);
         if (sym(applied) === 'True') return false;
         // An element-valued predicate failure is EMITTED by the iterator (see
         // `predicateErrorValue`), so the prefix holds that one `Error` element
@@ -10235,18 +10419,23 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           return { next: () => ({ value: undefined, done: true }) };
         const f = applicable(expr.op2);
         if (!f) return { next: () => ({ value: undefined, done: true }) };
-        const source = expr.op1.each();
+        // As `Filter`: an impure literal, or one with an element that may
+        // evaluate to `Nothing`, is walked by its value (`walkedSource`), and
+        // each element is judged and emitted by its value
+        // (`selectedElementValue`).
+        const source = walkedSource(expr.op1).each();
         let stopped = false;
         let count = 0;
         const limit = expr.engine.iterationLimit;
         return {
           next: () => {
             if (stopped) return { value: undefined, done: true };
-            const { value, done } = source.next();
-            if (done) {
+            const next = source.next();
+            if (next.done) {
               stopped = true;
               return { value: undefined, done: true };
             }
+            const value = selectedElementValue(next.value);
             count += 1;
             if (count > limit) {
               throw new CancellationError({
@@ -10373,13 +10562,19 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           return { next: () => ({ value: undefined, done: true }) };
         const f = applicable(expr.op2);
         if (!f) return { next: () => ({ value: undefined, done: true }) };
-        const source = expr.op1.each();
+        // As `Filter`: an impure literal, or one with an element that may
+        // evaluate to `Nothing`, is walked by its value (`walkedSource`), and
+        // each element is emitted by its value (`selectedElementValue`) — the
+        // elements of the dropped run are judged by that value, and the
+        // elements after it are values too, as the materialized result has.
+        const source = walkedSource(expr.op1).each();
         let dropping = true;
         return {
           next: () => {
             while (true) {
-              const { value, done } = source.next();
-              if (done) return { value: undefined, done: true };
+              const next = source.next();
+              if (next.done) return { value: undefined, done: true };
+              const value = selectedElementValue(next.value);
               if (dropping) {
                 const pred = f([value]);
                 if (sym(pred) === 'True') continue;
@@ -12658,7 +12853,15 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     signature:
       '((T) -> T where T: string) & ((indexed_collection<T>) -> list<T> where T)',
     collection: refusingUnindexedSource({
-      isEnumerable: enumerableFromSource,
+      // The walk below reads the source by position up to its count, so it
+      // yields nothing for a finite source with no count (see
+      // `enumerableFromSmallSource()`); a `bigint` count is walked.
+      isEnumerable: (expr) =>
+        isFunction(expr) &&
+        expr.op1.count === undefined &&
+        expr.op1.isFiniteCollection === true
+          ? false
+          : enumerableFromSource(expr),
       isLazy: (_expr) => true,
       count: (expr) => {
         if (!isFunction(expr)) return undefined;
@@ -14056,6 +14259,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // elements and failed with an internal error.
       if (!isString(xs) && xs.isIndexedCollection !== true)
         return refusedOperandError(ce, 'Ordering', 1, 'indexed_collection', xs);
+      // A comparator whose declared parameter type is disjoint from the
+      // element type (see `comparatorParameterError`).
+      const cmpError = comparatorParameterError(ce, 'Ordering', xs, fn);
+      if (cmpError) return cmpError;
       const indices = sortedIndices(xs, fn);
       // `sortedIndices` returns `undefined` when the order cannot be decided —
       // a key that cannot be computed, or a pair of keys that compare neither
@@ -14118,6 +14325,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // gets from the signature check (`Sort(Set(3, 1))`).
       if (!isString(xs) && xs.isIndexedCollection !== true)
         return refusedOperandError(ce, 'Sort', 1, 'indexed_collection', xs);
+      // A comparator whose declared parameter type is disjoint from the
+      // element type (see `comparatorParameterError`).
+      const cmpError = comparatorParameterError(ce, 'Sort', xs, fn);
+      if (cmpError) return cmpError;
       const indices = sortedIndices(xs, fn);
       if (!indices) return undefined;
       const elements = indices.map((i) => xs.at(i)!);
@@ -14523,9 +14734,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     examples: ['Table(i^2, (i, 1, 5))'],
     description: [
       'An alias for `Tabulate` (the preferred name) that additionally accepts',
-      'Mathematica-style iterator specs, e.g. `Table(i^2, {i, 1, n})` or',
-      '`Table(i, {i, lo, hi, step})`, and the equivalent tuple spelling',
-      '`Table(i^2, (i, 1, n))`.',
+      'Mathematica-style iterator specs, e.g. `Table(i^2, {i, n})` (`i` from',
+      '1 to `n`), `Table(i^2, {i, 1, n})` or `Table(i, {i, lo, hi, step})`,',
+      'and the equivalent tuple spelling `Table(i^2, (i, 1, n))`.',
     ],
     complexity: 8200,
 
@@ -14541,16 +14752,16 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // to `Tabulate`, which — also being lazy — canonicalizes the raw held
       // ops through its own canonical handler. A bare integer (or pair of
       // integers) is NOT an iterator spec.
-      if (!specs.some((op) => isIteratorSpecShape(op)))
+      if (!specs.some((op) => iteratorSpecOperands(op) !== undefined))
         return ce.function('Tabulate', ops);
 
       // Iterator form: EVERY operand after the body must be a valid iterator
-      // triple `{sym, lo, hi}` / `(sym, lo, hi)` or `{sym, lo, hi, step}` /
-      // `(sym, lo, hi, step)` — the same shape validation as the `Set` and
-      // `Tuple` branches of `canonicalIndexingSet`. A malformed spec
-      // (non-symbol first element, wrong arity, or a mix of spec and non-spec
-      // operands) keeps the strict posture: return `null` so the expression
-      // stays inert rather than guessing a bound.
+      // spec: `{sym, n}` / `(sym, n)` (Mathematica's `{i, n}`, `sym` from 1 to
+      // `n`), `{sym, lo, hi}` / `(sym, lo, hi)` or `{sym, lo, hi, step}` /
+      // `(sym, lo, hi, step)`. A malformed spec (non-symbol first element,
+      // wrong arity, or a mix of spec and non-spec operands) keeps the strict
+      // posture: return `null` so the expression stays inert rather than
+      // guessing a bound.
       type Spec = {
         index: Expression;
         lo: Expression;
@@ -14559,11 +14770,16 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       };
       const parsed: Spec[] = [];
       for (const op of specs) {
-        if (!isIteratorSpecShape(op)) return null;
-        const setOps = op.ops ?? [];
+        const setOps = iteratorSpecOperands(op);
+        if (setOps === undefined) return null;
         const idx = setOps[0];
-        if (!idx || !isSymbol(idx) || setOps.length < 3 || setOps.length > 4)
+        if (!idx || !isSymbol(idx) || setOps.length < 2 || setOps.length > 4)
           return null;
+        // `{i, n}` is `{i, 1, n}`.
+        if (setOps.length === 2) {
+          parsed.push({ index: idx, lo: ce.One, hi: setOps[1] });
+          continue;
+        }
         parsed.push({
           index: idx,
           lo: setOps[1],
@@ -14749,7 +14965,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       iterator: (expr) => {
         if (!isFunction(expr))
           return { next: () => ({ value: undefined, done: true }) };
-        const source = expr.op1.each();
+        // As `Filter`: an impure literal, or one with an element that may
+        // evaluate to `Nothing`, is walked by its value (`walkedSource`), and
+        // each element is compared and emitted by its value
+        // (`selectedElementValue`). Compared as written, `Dedup([x, 5])` with
+        // `x := 5` kept both elements and materialized as `[5, 5]`.
+        const source = walkedSource(expr.op1).each();
         // `.isSame()`: exact structural/symbolic equality (see ChunkBy note).
         let prev: Expression | undefined = undefined;
         let hasPrev = false;
@@ -14770,9 +14991,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         return {
           next: () => {
             while (true) {
-              const { value, done } = source.next();
-              if (done) return { value: undefined, done: true };
-              if (hasPrev && prev!.isSame(value as Expression)) {
+              const next = source.next();
+              if (next.done) return { value: undefined, done: true };
+              const value = selectedElementValue(next.value);
+              if (hasPrev && prev!.isSame(value)) {
                 // A DUPLICATE — the only pull that counts toward the cap.
                 if (++sinceEmit > limit)
                   throw new CancellationError({
@@ -14781,7 +15003,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
                   });
                 continue;
               }
-              prev = value as Expression;
+              prev = value;
               hasPrev = true;
               sinceEmit = 0;
               return { value, done: false };
@@ -19433,24 +19655,42 @@ function fillDims(shape: Expression): number[] | null {
  * `{i, lo, hi}` parses as a `Set`, the paren spelling `(i, lo, hi)` as a
  * `Tuple` (or one of its arity-named aliases).
  *
- * Deliberately NARROWER than `canonicalIndexingSet`'s head set: that one also
- * accepts `Pair` and `Single`, for which it has degenerate `Limits` meanings.
- * `Table` has none — its iterator spec needs 3 or 4 operands, which a `Pair`
- * (always 2) or a `Single` (always 1) can never have. Listing them here would
- * only turn a `Pair`-shaped second operand from a clear `Tabulate` type error
- * into a silently inert `Table`.
+ * An iterator spec has 2, 3 or 4 operands: `{i, n}` (`i` from 1 to `n`),
+ * `{i, lo, hi}` and `{i, lo, hi, step}`. So the 2-tuple alias `Pair` is a
+ * head of a spec, but `Single` is not: a 1-tuple can never be a spec, and
+ * listing it here would only turn a `Single` operand from a clear `Tabulate`
+ * type error into a silently inert `Table`.
  *
  * This is a *positional* reinterpretation: it applies only in `Table`'s
  * iterator slot. The operand is held (raw), so its index symbol has not been
  * canonicalized (`i` has not folded to the imaginary unit) and a `Set`'s
  * operands have not been sorted or de-duplicated.
  */
-const TABLE_ITERATOR_SPEC_OPERATORS = new Set(['Set', 'Tuple', 'Triple']);
+const TABLE_ITERATOR_SPEC_OPERATORS = new Set([
+  'Set',
+  'Tuple',
+  'Pair',
+  'Triple',
+]);
 
-function isIteratorSpecShape(
+/**
+ * The operands of a `Table` iterator spec, or `undefined` when `expr` does
+ * not have the shape of a spec. The operand is held (raw), so the paren
+ * spelling `(i, lo, hi)` parsed from LaTeX is still a
+ * `Delimiter(Sequence(i, lo, hi), "(,)")`: it has not been canonicalized to a
+ * `Tuple` yet, and it is read as one here.
+ */
+function iteratorSpecOperands(
   expr: Expression | undefined
-): expr is Expression & FunctionInterface {
-  return isFunction(expr) && TABLE_ITERATOR_SPEC_OPERATORS.has(expr.operator);
+): ReadonlyArray<Expression> | undefined {
+  if (!isFunction(expr)) return undefined;
+  if (TABLE_ITERATOR_SPEC_OPERATORS.has(expr.operator)) return expr.ops;
+  if (expr.operator === 'Delimiter' && isFunction(expr.op1, 'Sequence')) {
+    if (expr.nops === 1) return expr.op1.ops;
+    if (expr.nops === 2 && isString(expr.op2) && expr.op2.string === '(,)')
+      return expr.op1.ops;
+  }
+  return undefined;
 }
 
 /** The integer dimensions of a `Tabulate`, or `null` if any is missing,

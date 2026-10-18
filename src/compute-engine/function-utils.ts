@@ -90,6 +90,8 @@ import {
   recordEffectsTransition,
 } from './boxed-expression/effects-provenance.js';
 import { effectsOf } from './boxed-expression/effects-of.js';
+import { isOperatorDef } from './boxed-expression/definition-guards.js';
+import { releaseKeptEagerSourceValues } from './boxed-expression/eager-source-values.js';
 import { markInferredTypeOperand } from './boxed-expression/inferred-annotations.js';
 import {
   memoDepsStillValid,
@@ -4139,7 +4141,9 @@ function makeLambda(
   // If the expression is a symbol, interpret it as an operator
   if (isSymbol(expr)) {
     const sym = expr.symbol;
-    return (args, options) => ce.function(sym, args).evaluate(options);
+    return (args, options) =>
+      applyNamedLiteral(ce, sym, args, options) ??
+      ce.function(sym, args).evaluate(options);
   }
 
   const canonicalExpr = canonicalFunctionLiteral(expr);
@@ -4443,6 +4447,82 @@ function makeLambda(
       ...options,
       bindParameters: undefined,
     });
+  };
+
+  // The element function of a lazy `Map` under `.N()` is a literal whose
+  // body is the numeric marker, `NumericApproximation(e)`
+  // (`lazyMapNumericApproximation` and `lazyBroadcastMap` in
+  // `collection-utils.ts`). An application of this literal gives the `.N()`
+  // of `e` with the arguments AS WRITTEN in place of the parameters, so that
+  // `Map(f, [v]).N()` is `[f(v).N()]`. The arguments are not evaluated
+  // before they are put in `e`:
+  // - an exact evaluation can be slow: with `H = Sum(1/k, k, 1, 6000)`, the
+  //   exact value of `H` is a rational with thousands of digits, and
+  //   `Sin(H).N()` reads `H` numerically;
+  // - a numeric evaluation loses the exact structure that a function reads
+  //   under `.N()`: `Sin(Pi).N()` is `0` (the float of π gives `1.2e-16` at
+  //   machine precision), `Floor((25! − 1)/24!).N()` is `24` (the float of
+  //   the argument is `25`), and `Numerator(v).N()` is the numerator of the
+  //   exact `v`.
+  // `markerBody` is `e`, or `undefined` when the body is not the marker.
+  const markerOp = bodyFn.ops.length === 1 ? bodyFn.ops[0] : undefined;
+  const markerBody =
+    markerOp !== undefined &&
+    isFunction(markerOp, 'NumericApproximation') &&
+    markerOp.nops === 1
+      ? markerOp.op1
+      : undefined;
+
+  /**
+   * The value of an application of the literal with the numeric marker
+   * (`markerBody` above): the `.N()` of the marker's operand, with each
+   * argument as written in place of its parameter. `undefined` when the
+   * application must take the ordinary route, which evaluates the
+   * arguments exactly and binds them in a call frame:
+   * - a parameter that is not a plain symbol (an annotated, destructuring
+   *   or rest parameter), or a count of arguments that is not the count of
+   *   parameters: the ordinary route validates, destructures and collects;
+   * - a body or an argument that is not pure: an argument put in two places
+   *   is evaluated two times, and an effect of the body belongs in a call
+   *   frame;
+   * - an argument that has a symbol of the body: the substitution could put
+   *   it under a binder of the body that has the same name (the index of a
+   *   `Sum`);
+   * - an application with held or awaited arguments, the statements of a
+   *   loop, or an active debugger, which need the call frame.
+   */
+  const applyMarkerBody = (
+    args: ReadonlyArray<Expression>,
+    options: ApplyOptions | undefined,
+    iterationStatements: ReadonlyArray<Expression> | undefined
+  ): Expression | undefined => {
+    if (
+      markerBody === undefined ||
+      iterationStatements !== undefined ||
+      options?.holdArguments ||
+      options?.awaitStatements ||
+      restIndex >= 0 ||
+      validateApplication ||
+      args.length !== params.length ||
+      debugStatementHook !== undefined ||
+      debugStatementResultHook !== undefined ||
+      !isPureComputedEffects(effectsOf(body))
+    )
+      return undefined;
+    const bodySymbols = new Set(markerBody.symbols);
+    const written = new Map<string, Expression>();
+    for (let i = 0; i < params.length; i++) {
+      const param = params[i];
+      const arg = args[i];
+      if (!isSymbol(param) || !arg.isPure) return undefined;
+      if (arg.symbols.some((s) => bodySymbols.has(s))) return undefined;
+      written.set(param.symbol, arg);
+    }
+    const applied = rewriteWithBinders(markerBody, (sym, shadowed) =>
+      shadowed?.has(sym.symbol) ? sym : (written.get(sym.symbol) ?? sym)
+    );
+    // As the evaluate handler of `NumericApproximation` does.
+    return bodyResultValue(applied.canonical.N());
   };
 
   const invoke = (
@@ -4845,6 +4925,11 @@ function makeLambda(
           : curriedBody;
       return ce.function('Function', [finalBody, ...extras]);
     }
+
+    // The element function of a lazy `Map` under `.N()` puts the arguments
+    // as written in its body (`applyMarkerBody`).
+    const markerValue = applyMarkerBody(args, options, iterationStatements);
+    if (markerValue !== undefined) return markerValue;
 
     //
     // 4/ Evaluate arguments in the calling scope before switching context
@@ -5518,6 +5603,105 @@ function applicationMemoForStore(
 function bodyResultValue(result: Expression): Expression {
   if (result.isValid) return result;
   return errorValue(result) ?? result;
+}
+
+/**
+ * The value of the application of the user function `name` to `args`,
+ * computed without boxing the application, or `undefined` when the caller
+ * must box it (`ce.function(name, args).evaluate(options)`).
+ *
+ * A named callback (`filter(1..5000, isEven)`) is applied once per element.
+ * Boxing `isEven(n)` canonicalizes and validates a new node at each element,
+ * and the evaluation of that node then walks the steps of the direct call
+ * (broadcasts, absent operands, conformance) before it calls the operator
+ * handler, which applies the function literal. For the applications below,
+ * each of those steps does nothing, so the handler is called directly, in
+ * the same evaluation bracket that `BoxedFunction.evaluate()` puts around
+ * it (the effect registry, the evaluation depth, the numeric request):
+ *
+ * - the definition is an operator definition made from one function
+ *   literal (`_lambdaLiteral`; not a definition by clauses, not a `hold`
+ *   function), and its signature is the one inferred or derived from the
+ *   literal: a signature declared on the name has checks of its own;
+ * - the body of the literal is pure, so that an application can be done a
+ *   second time by the boxed route with the same result;
+ * - the literal has one parameter per argument and no rest parameter, and
+ *   each argument is a number that is not `NaN`, or a string: such an
+ *   argument cannot be broadcast, threaded, absent or an error;
+ * - the request is an exact evaluation (no `numericApproximation`, no
+ *   `materialization`, no other option).
+ *
+ * The literal still decides what it decides itself: the validation of its
+ * annotated parameters, the recursion limit, the application memo. A result
+ * that is not an ordinary value (no result, an invalid result such as the
+ * refusal of an argument by an annotated parameter or an error that the
+ * body gave, a lazy collection) is not used: the boxed route then makes the
+ * application again and gives its own answer, with its own error frames.
+ * The body is pure, so its second run has no visible effect.
+ */
+function applyNamedLiteral(
+  ce: ComputeEngine,
+  name: string,
+  args: ReadonlyArray<Expression>,
+  options: ApplyOptions | undefined
+): Expression | undefined {
+  if (
+    options !== undefined &&
+    !Object.entries(options).every(
+      ([key, value]) =>
+        (key === 'numericApproximation' || key === 'materialization') && !value
+    )
+  )
+    return undefined;
+  const binding = ce.lookupDefinition(name);
+  if (binding === undefined || !isOperatorDef(binding)) return undefined;
+  const def = binding.operator as BoxedOperatorDefinition & {
+    _isLambda?: boolean;
+    _signatureSkeleton?: unknown;
+  };
+  const literal = def._lambdaLiteral;
+  if (
+    literal === undefined ||
+    def._isLambda !== true ||
+    !def.isUserFunctionDefinition ||
+    def.lazy === true ||
+    def.evaluate === undefined ||
+    def._signatureSkeleton !== undefined ||
+    !(def.inferredSignature || def._derivedSignature) ||
+    !isFunction(literal, 'Function') ||
+    literal.nops !== args.length + 1
+  )
+    return undefined;
+  for (let i = 1; i < literal.nops; i++)
+    if (isRestParameter(literal.ops[i])) return undefined;
+  for (const arg of args) {
+    if (isString(arg)) continue;
+    if (!isNumber(arg) || arg.isNaN !== false) return undefined;
+  }
+  if (!isPureComputedEffects(effectsOf(literal.op1))) return undefined;
+
+  const capturesEffects = ce._evaluationEffects === undefined;
+  if (capturesEffects) ce._evaluationEffects = ce.effects;
+  ce._evaluationDepth += 1;
+  const enclosingNumericRequest = ce._numericRequest;
+  ce._numericRequest = false;
+  let result: Expression | undefined;
+  try {
+    result = def.evaluate(args, {
+      engine: ce,
+      numericApproximation: false,
+      materialization: false,
+      effects: ce._evaluationEffects ?? ce.effects,
+    });
+  } finally {
+    ce._evaluationDepth -= 1;
+    ce._numericRequest = enclosingNumericRequest;
+    releaseKeptEagerSourceValues(ce);
+    if (capturesEffects) ce._evaluationEffects = undefined;
+  }
+  if (result === undefined || !result.isValid || result.isLazyCollection)
+    return undefined;
+  return result;
 }
 
 /**

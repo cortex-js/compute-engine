@@ -3217,6 +3217,7 @@ const BINDING_OPERANDS: ReadonlySet<string> = new Set([
   'Residue',
   'Limit',
   'Solve',
+  'NSolve',
   'Sum',
   'Product',
   'JacobianMatrix',

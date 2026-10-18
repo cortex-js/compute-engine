@@ -4,6 +4,7 @@ import {
   isBooleanOrBroadcastableBooleanType,
 } from '../../common/type/utils.js';
 import { checkDeadline } from '../../common/interruptible.js';
+import { isSubtype } from '../../common/type/subtype.js';
 import {
   implicitCompile,
   implicitCompileNumeric,
@@ -13,7 +14,7 @@ import type {
   IComputeEngine as ComputeEngine,
   Expression,
 } from '../global-types.js';
-import { isFunction, sym } from './type-guards.js';
+import { isFunction, isNumber, sym } from './type-guards.js';
 import {
   defaultUnknown,
   reduceTransformerHead,
@@ -25,6 +26,7 @@ import { findUnivariateRoots, withExactIntegerExponents } from './solve.js';
 import { getPolynomialCoefficients, polynomialDegree } from './polynomials.js';
 import { expand } from './expand.js';
 import { together } from './factor.js';
+import { asRational } from './numerics.js';
 import { interval } from '../numerics/interval.js';
 import {
   tryDiophantineSolve,
@@ -439,11 +441,17 @@ export function emptyRootsAnswer(
  * uses the system solver. Returns `'undecided'` when an equation evaluates
  * to neither `True` nor `False` for a candidate: the caller stays inert,
  * because a list without that candidate could be wrong.
+ *
+ * `conditioned` is `true` when the caller filters the roots with a side
+ * condition (`x > 0`). The filter cannot remove the members of a family of
+ * roots that the condition excludes (`2πt` holds 0 and the negative roots),
+ * thus a list of families is then `'undecided'`.
  */
 function commonRoots(
   ce: ComputeEngine,
   equations: ReadonlyArray<Expression>,
-  x: string
+  x: string,
+  conditioned: boolean
 ): Expression[] | 'undecided' | undefined {
   const symbols = new Set(equations.flatMap((eq) => eq.unknowns));
   const isPolynomial = (eq: Expression) =>
@@ -491,6 +499,21 @@ function commonRoots(
   for (const source of equations.filter((eq) => isPolynomial(eq))) {
     const kept = keptRoots(source);
     if (kept !== undefined) return kept;
+  }
+
+  // Equations with a trig function of the unknown: the common roots are
+  // families of roots (`periodicCommonRoots()`). A non-empty list holds only
+  // families, which a side condition cannot filter.
+  if (
+    equations.some((eq) => {
+      const terms = trigTerms(classifyPredicate(eq).predBody, x);
+      return terms === undefined || terms.length > 0;
+    })
+  ) {
+    const families = periodicCommonRoots(ce, equations, x);
+    if (conditioned && Array.isArray(families) && families.length > 0)
+      return 'undecided';
+    return families;
   }
 
   // A common root is a root of each equation, thus the candidates of one
@@ -839,14 +862,15 @@ export function evaluateSolve(
         isFunction(ceq, 'List') &&
         ceq.nops >= 2 &&
         ceq.ops.every((item) => isFunction(item, 'Equal'))
-          ? commonRoots(ce, ceq.ops, names[0])
+          ? commonRoots(ce, ceq.ops, names[0], conditioned)
           : isFunction(ceq, 'Equal') && ceq.nops > 2
             ? commonRoots(
                 ce,
                 ceq.ops
                   .slice(1)
                   .map((rhs, i) => ce.function('Equal', [ceq.ops[i], rhs])),
-                names[0]
+                names[0],
+                conditioned
               )
             : undefined;
       if (common === 'undecided') return undefined;
@@ -857,19 +881,50 @@ export function evaluateSolve(
         // steps as `ceq.solve()`, with the candidate statistics kept. An
         // empty root list is a decision only in some cases, see
         // `emptyRootsAnswer()`.
-        const stats = { candidates: false, undecided: false };
+        const stats = {
+          candidates: false,
+          undecided: false,
+          userRule: false,
+        };
         const found = findUnivariateRoots(ceq, names[0], 0, undefined, stats);
         roots = filterRootsByAssumptions(ce, found, names[0]);
         // A list that is only a part of the roots is not an answer
         // (`partialRootListReason()`): the unknown is in a function that
         // the root finder cannot invert and that is not periodic
         // (`(x - 1)·BesselJ(0, x) = 0` gives only `1`), or a factor of a
-        // product gave no root. The principal roots of a trig function are
-        // the answer, as they represent its periodic families of roots.
+        // product gave no root.
         if (partialRootListReason(ceq, names[0], found, stats) !== undefined)
           return undefined;
         if (roots.length === 0)
           return emptyRootsAnswer(ce, ceq, names[0], stats, conditioned);
+        // The principal roots of a periodic equation become its families of
+        // roots, with a fresh integer parameter (`periodicRootFamilies()`).
+        // A side condition cannot remove the members of a family that it
+        // excludes (`x > 0` for `πt`): there is then no answer.
+        const families = periodicRootFamilies(
+          ce,
+          ceq,
+          names[0],
+          roots,
+          stats.userRule
+        );
+        if (families === undefined) return undefined;
+        if (families.periodic && conditioned) return undefined;
+        roots = families.roots;
+      } else if (
+        isFunction(ceq, 'Or') &&
+        ceq.ops.some((alt) => {
+          const terms = trigTerms(classifyPredicate(alt).predBody, names[0]);
+          return terms === undefined || terms.length > 0;
+        })
+      ) {
+        // Alternatives with a trig function of the unknown: the union of
+        // the families of roots of each alternative. A side condition
+        // cannot remove the members of a family.
+        if (conditioned) return undefined;
+        const union = alternativeRootFamilies(ce, ceq, names[0]);
+        if (union === undefined) return undefined;
+        roots = union;
       } else {
         // For a `List` of equations, `ceq.solve()` uses the system solver,
         // which can return a record (`{x: 1}` for `[x = 1, 2x = 2]`) or an
@@ -1115,7 +1170,8 @@ export function solveOverDomain(
     // family (and recover the scaled-argument roots the rules miss entirely).
     // `expandPeriodicRoots` returns `undefined` when the equation has no trig
     // function of the unknown, or the domain is unbounded — then the principal
-    // roots are used as-is. It returns `null` when it cannot show that a list
+    // roots are used as-is, or (over ℝ or ℂ) they give the families of roots
+    // below. It returns `null` when it cannot show that a list
     // holds all the roots in the domain: then the symbolic roots are not
     // used. A list it returns holds all the roots in the domain, thus an
     // empty list is a decision (no solutions).
@@ -1143,7 +1199,34 @@ export function solveOverDomain(
       partial
     );
     const expanded = partial && checked === undefined ? null : checked;
-    const finalRoots = expanded === null ? [] : (expanded ?? roots);
+    let finalRoots = expanded === null ? [] : (expanded ?? roots);
+
+    // Over the real or the complex numbers, the principal roots of a
+    // periodic equation become its families of roots, with a fresh integer
+    // parameter (`periodicRootFamilies()`). A condition cannot remove the
+    // members of a family that it excludes: there is then no answer.
+    if (
+      expanded === undefined &&
+      finalRoots.length > 0 &&
+      isPrincipalValueDomain(domain)
+    ) {
+      const families = periodicRootFamilies(
+        ce,
+        ceq,
+        unknown,
+        finalRoots,
+        stats.userRule,
+        (factor, factorStats) =>
+          symbolicRoots(ce, factor, unknown, refinedType, factorStats)
+      );
+      if (families === undefined) return undefined;
+      if (
+        families.periodic &&
+        (condition !== undefined || sideConditions.length > 0)
+      )
+        return undefined;
+      finalRoots = families.roots;
+    }
 
     if (finalRoots.length > 0 || Array.isArray(expanded)) {
       // At least one root, or a list that is known to hold all the roots:
@@ -1598,8 +1681,9 @@ export function partialRootListReason(
 /**
  * Return `true` when `domain` is the whole real line (`RealNumbers`, or an
  * interval from -∞ to +∞) or the complex numbers. For a periodic equation
- * over these domains, the answer is the list of the principal roots: this
- * is the documented convention of `Solve`. Over another domain that is not
+ * over these domains, the answer is the list of its families of roots with
+ * an integer parameter, made from the principal roots
+ * (`periodicRootFamilies()`). Over another domain that is not
  * bounded (`Integers`, a half-line, a union), the principal roots are not
  * all the roots in the domain, and there is no answer.
  */
@@ -1737,7 +1821,7 @@ function analyzePeriodic(
  * The combined period of the collected trig terms, as an exact expression plus
  * its numeric value. A single distinct per-term period is used directly (valid
  * for any real `a`); several distinct periods are combined by the least common
- * multiple of their π-rational multiples, which requires integer `a` — if any
+ * multiple of their π-rational multiples, which requires rational `a` — if any
  * coefficient is irrational the periods may be incommensurable and we decline.
  *
  * The period is a multiple of a half turn in the angular unit of the engine
@@ -1763,15 +1847,33 @@ function combinedPeriod(
     aExpr: t.aExpr,
   }));
 
-  // Distinct per-term periods (by numeric value).
+  // Distinct per-term periods. Two periods with exact coefficients are the
+  // same only when `baseMult/|a|` is exactly the same: the periods `2π` and
+  // `2π/a` with `a = 2000000001/2000000000` are nearer than any tolerance,
+  // but they are not the same. A float coefficient is compared numerically.
+  const samePeriod = (
+    d: (typeof periods)[number],
+    p: (typeof periods)[number]
+  ) => {
+    if (hasInexactLiteral(d.aExpr) || hasInexactLiteral(p.aExpr))
+      return Math.abs(d.value - p.value) <= tol * Math.max(1, p.value);
+    const ratio = ce
+      .function('Divide', [
+        ce.function('Multiply', [
+          ce.number(d.baseMult),
+          ce.function('Abs', [p.aExpr]),
+        ]),
+        ce.function('Multiply', [
+          ce.number(p.baseMult),
+          ce.function('Abs', [d.aExpr]),
+        ]),
+      ])
+      .evaluate();
+    return ratio.isSame(1);
+  };
   const distinct: typeof periods = [];
   for (const p of periods)
-    if (
-      !distinct.some(
-        (d) => Math.abs(d.value - p.value) <= tol * Math.max(1, p.value)
-      )
-    )
-      distinct.push(p);
+    if (!distinct.some((d) => samePeriod(d, p))) distinct.push(p);
 
   if (distinct.length === 1) {
     const p = distinct[0];
@@ -1788,13 +1890,28 @@ function combinedPeriod(
 
   // Several distinct periods: T = lcm of the π-rational multiples. Each term's
   // period is (baseMult/|a|)·π; the lcm of rationals is lcm(numerators) /
-  // gcd(denominators). Requires integer `a`.
+  // gcd(denominators). Requires a rational `a`: for `a = p/q`, the period is
+  // (baseMult·q/|p|)·π.
   const fracs: Array<[num: number, den: number]> = [];
   for (const p of distinct) {
-    const aInt = Math.round(p.aNum);
-    if (Math.abs(p.aNum - aInt) > tol || aInt === 0) return undefined;
-    let n = p.baseMult;
-    let d = Math.abs(aInt);
+    const rational = asRational(p.aExpr);
+    let aNum: number;
+    let aDen = 1;
+    if (rational !== undefined) {
+      aNum = Math.abs(Number(rational[0]));
+      aDen = Math.abs(Number(rational[1]));
+    } else {
+      // An exact coefficient that is not rational (`√2`) can be near an
+      // integer without being one: only a float is rounded.
+      if (!hasInexactLiteral(p.aExpr)) return undefined;
+      aNum = Math.round(p.aNum);
+      if (Math.abs(p.aNum - aNum) > tol) return undefined;
+      aNum = Math.abs(aNum);
+    }
+    if (aNum === 0 || !Number.isSafeInteger(aNum * p.baseMult * aDen))
+      return undefined;
+    let n = p.baseMult * aDen;
+    let d = aNum;
     const g = gcdInt(n, d);
     n /= g;
     d /= g;
@@ -1896,8 +2013,8 @@ function substitutionRoots(
  *
  * Returns `undefined` when the equation has no trig function of the unknown,
  * or the domain is the whole real line or the complex numbers
- * (`isPrincipalValueDomain()`) — the caller then uses the principal roots
- * as-is. Otherwise returns the exact family members, sorted ascending and
+ * (`isPrincipalValueDomain()`) — the caller then makes the families of roots
+ * from the principal roots (`periodicRootFamilies()`). Otherwise returns the exact family members, sorted ascending and
  * de-duplicated (membership + condition filtering is applied by the caller).
  * The list holds all the roots in the domain: an empty list is a decision
  * (the equation has no root in the domain).
@@ -1955,8 +2072,9 @@ function expandPeriodicRoots(
   userRule = false,
   strict = false
 ): Expression[] | null | undefined {
-  // The principal roots are the answer over the whole real line or the
-  // complex numbers, but not over another domain that has no bounds.
+  // The principal roots give the answer (the families of roots) over the
+  // whole real line or the complex numbers, but not over another domain
+  // that has no bounds.
   const principalOrNone = (): undefined | null =>
     isPrincipalValueDomain(domain) && !rootsHoldShadowedPi(ce, symbolicRootList)
       ? undefined
@@ -2304,6 +2422,818 @@ function withFactorFamilies(
   }
   if (added) out.sort((p, q) => p.N().re - q.N().re);
   return out;
+}
+
+//
+// ─── Root families over an unbounded domain ─────────────────────────────────
+//
+// With no domain, or over the real or the complex numbers, a periodic
+// equation has infinitely many roots. The answer of `Solve` is then a list of
+// families `x₀ + T·t`, one for each class of roots, where `t` is a fresh
+// integer parameter (the same names as the diophantine solver: `t`, `t_1`,
+// …): `sin(x) = 1/2` gives `[π/6 + 2πt, 5π/6 + 2πt]`. Each family holds only
+// roots, and together the families hold every root.
+//
+// A product of factors gives the families of each factor, with the period of
+// that factor: `sin(2x)·cos(3x) = 0` gives `πt/2` (the roots of `sin(2x)`)
+// and `π/6 + πt/3` (the roots of `cos(3x)`). A polynomial factor gives its
+// roots as they are: `(x - 1)·sin(x) = 0` gives `[1, πt]`.
+//
+
+/** The roots `root + k·spacing` of an equation, for each integer `k`. */
+interface RootFamily {
+  /** One root of the family. */
+  root: Expression;
+  /** The numeric value of `root`, or `NaN` when it is not a real number. */
+  value: number;
+  /** The distance between two adjacent roots of the family (exact). */
+  spacing: Expression;
+  /** The numeric value of `spacing` (finite and positive). */
+  spacingValue: number;
+}
+
+/**
+ * The heads that make an entire function of entire operands: a function
+ * that has a finite value at each real value of the unknown. `Power` and
+ * `Divide` are examined separately.
+ */
+const ENTIRE_HEADS = new Set([
+  'Add',
+  'Subtract',
+  'Negate',
+  'Multiply',
+  'Square',
+  'Exp',
+  'Sin',
+  'Cos',
+  'Haversine',
+  'Sinh',
+  'Cosh',
+]);
+
+/**
+ * Return `true` when `node` has a finite value at each real value of
+ * `unknown`: it is made of sums, products, powers with a constant
+ * non-negative integer exponent, exponentials, `sin` and `cos` (and the
+ * other heads of `ENTIRE_HEADS`) of such expressions. `tan(x)` and `1/x` are
+ * not. The node `leaf` (when given) counts as an entire function, whatever
+ * its head.
+ */
+function isEntireIn(
+  node: Expression,
+  unknown: string,
+  leaf?: Expression
+): boolean {
+  if (!node.has(unknown)) return true;
+  if (leaf !== undefined && node === leaf) return true;
+  if (!isFunction(node)) return true; // the unknown itself
+  const op = node.operator;
+  if (op === 'Power') {
+    if (!node.op2.has(unknown))
+      return (
+        node.op2.isInteger === true &&
+        node.op2.isNonNegative === true &&
+        isEntireIn(node.op1, unknown, leaf)
+      );
+    return (
+      !node.op1.has(unknown) &&
+      node.op1.isPositive === true &&
+      isEntireIn(node.op2, unknown, leaf)
+    );
+  }
+  if (op === 'Divide')
+    return !node.op2.has(unknown) && isEntireIn(node.op1, unknown, leaf);
+  if (!ENTIRE_HEADS.has(op)) return false;
+  return node.ops.every((child) => isEntireIn(child, unknown, leaf));
+}
+
+/**
+ * The only trig function of `unknown` in `node` (a function of `TRIG_2PI`
+ * or `TRIG_PI` whose operand holds the unknown), or `undefined` when there
+ * is none, or more than one.
+ */
+function singleTrigNode(
+  node: Expression,
+  unknown: string
+): Expression | undefined {
+  const found: Expression[] = [];
+  const visit = (n: Expression): void => {
+    if (found.length > 1 || !isFunction(n) || !n.has(unknown)) return;
+    if (TRIG_2PI.has(n.operator) || TRIG_PI.has(n.operator)) {
+      found.push(n);
+      return;
+    }
+    n.ops.forEach(visit);
+  };
+  visit(node);
+  return found.length === 1 ? found[0] : undefined;
+}
+
+/** Return `true` when `expr` holds a number literal that is not exact. */
+function hasInexactLiteral(expr: Expression): boolean {
+  if (isNumber(expr)) return !expr.isExact;
+  return isFunction(expr) && expr.ops.some((op) => hasInexactLiteral(op));
+}
+
+/**
+ * Return `true` when the roots of `a` and of `b` are the same roots: `b`
+ * is `a` plus an integer multiple of `spacing`. Returns `undefined` when
+ * this cannot be decided.
+ *
+ * Exact roots are compared exactly (`sameRootFamily()`). A root that holds
+ * a float is compared numerically, because the exact difference of a float
+ * and a multiple of π is a small float, not 0. A root that is not a real
+ * number (a root with a free parameter, such as `arcsin(a)`) is the same as
+ * another root only when the two expressions are the same.
+ */
+function sameFamilyRoot(
+  ce: ComputeEngine,
+  a: { root: Expression; value: number },
+  b: { root: Expression; value: number },
+  spacing: Expression,
+  spacingValue: number
+): boolean | undefined {
+  if (!Number.isFinite(a.value) || !Number.isFinite(b.value))
+    return a.root.isSame(b.root);
+  const same = sameRootFamily(
+    ce,
+    a.root,
+    a.value,
+    b.root,
+    b.value,
+    spacing,
+    spacingValue
+  );
+  if (same !== undefined) return same;
+  if (!hasInexactLiteral(a.root) && !hasInexactLiteral(b.root))
+    return undefined;
+  const q = (b.value - a.value) / spacingValue;
+  return Math.abs(q - Math.round(q)) <= 1e-9;
+}
+
+/**
+ * The numeric value of a root, or `NaN` when the root is not a real number:
+ * it has a free parameter, or an imaginary part.
+ */
+function realRootValue(root: Expression): number {
+  const v = root.N();
+  if (v.im !== 0) return NaN;
+  return v.re;
+}
+
+/**
+ * The exact ratio `a / b` of two spacings, or `undefined` when it is not an
+ * exact rational number (a spacing holds a float, or the ratio is
+ * irrational). Spacings that are only numerically near each other must not
+ * be treated as the same: `π` and `π/a` with `a = 2000000001/2000000000`
+ * are nearer than any tolerance, but the families `πt` and `πt/a` are
+ * different sets of roots.
+ */
+function exactSpacingRatio(
+  ce: ComputeEngine,
+  a: Expression,
+  b: Expression
+): ReturnType<typeof asRational> {
+  if (hasInexactLiteral(a) || hasInexactLiteral(b)) return undefined;
+  const ratio = ce.function('Divide', [a, b]).evaluate();
+  if (!isNumber(ratio) || !ratio.isExact) return undefined;
+  return asRational(ratio);
+}
+
+/** Return `true` when the spacings `a` and `b` are the same exact value. */
+function sameSpacing(ce: ComputeEngine, a: Expression, b: Expression): boolean {
+  if (a.isSame(b)) return true;
+  const r = exactSpacingRatio(ce, a, b);
+  return r !== undefined && r[0] === r[1];
+}
+
+/**
+ * Remove from `families` a family that has the same roots as a family
+ * before it (the two have the same spacing). Returns `undefined` when this
+ * cannot be decided.
+ */
+function distinctFamilies(
+  ce: ComputeEngine,
+  families: ReadonlyArray<RootFamily>
+): RootFamily[] | undefined {
+  const out: RootFamily[] = [];
+  for (const f of families) {
+    let found = false;
+    for (const g of out) {
+      const same = sameFamilyRoot(ce, g, f, g.spacing, g.spacingValue);
+      if (same === undefined) return undefined;
+      if (same) {
+        found = true;
+        break;
+      }
+    }
+    if (!found) out.push(f);
+  }
+  return out;
+}
+
+/**
+ * Write `families` with the fewest families, and give each family its root
+ * nearest to 0. Returns `undefined` when two families cannot be compared.
+ *
+ * - Two families that have the same roots become one.
+ * - When the `m` families of a spacing `S` are `n` groups of `n` families
+ *   `r, r + S/n, …, r + (n − 1)·S/n`, each group is one family with the
+ *   spacing `S/n`: `sin(x) = 0` gives `0 + 2πt` and `π + 2πt`, that is
+ *   `πt`. This is exact: each group is the same set of roots as the new
+ *   family.
+ * - A family whose roots are all in another family is removed: `πt` is in
+ *   `πt/2`.
+ * - The root of each family is moved into `(−S/2, S/2]`, where `S` is its
+ *   spacing: `7π/6 + 2πt` becomes `−5π/6 + 2πt`.
+ *
+ * The families are sorted by the value of their root. A family whose root
+ * is not a real number (it has a free parameter) is not reduced or moved.
+ */
+function reduceRootFamilies(
+  ce: ComputeEngine,
+  families: ReadonlyArray<RootFamily>
+): RootFamily[] | undefined {
+  // Group the families by spacing. Two spacings are in one group only when
+  // they are exactly the same (`sameSpacing()`).
+  const groups: RootFamily[][] = [];
+  for (const f of families) {
+    const group = groups.find((g) => sameSpacing(ce, g[0].spacing, f.spacing));
+    if (group) group.push({ ...f, spacing: group[0].spacing });
+    else groups.push([f]);
+  }
+
+  let out: RootFamily[] = [];
+  for (const group of groups) {
+    let classes = distinctFamilies(ce, group);
+    if (classes === undefined) return undefined;
+    if (classes.every((f) => Number.isFinite(f.value))) {
+      const { spacing, spacingValue } = classes[0];
+      for (
+        let n = Math.min(classes.length, MAX_ROOT_SET_DIVISOR);
+        n >= 2;
+        n--
+      ) {
+        if (classes.length % n !== 0) continue;
+        const shorter = ce
+          .function('Divide', [spacing, ce.number(n)])
+          .evaluate();
+        const reduced = distinctFamilies(
+          ce,
+          classes.map((f) => ({
+            ...f,
+            spacing: shorter,
+            spacingValue: spacingValue / n,
+          }))
+        );
+        if (reduced === undefined) return undefined;
+        if (reduced.length * n === classes.length) {
+          classes = reduced;
+          break;
+        }
+      }
+    }
+    out.push(...classes);
+  }
+
+  // Remove a family whose roots are all in another family: its spacing is
+  // an integer multiple of the spacing of the other family, and its root is
+  // in the other family.
+  out = out.filter(
+    (f) =>
+      !out.some((g) => {
+        if (g === f || !Number.isFinite(f.value) || !Number.isFinite(g.value))
+          return false;
+        // The ratio of the spacings must be an exact integer: a ratio that is
+        // only numerically near an integer does not show that `f` is in `g`.
+        const ratio = exactSpacingRatio(ce, f.spacing, g.spacing);
+        if (
+          ratio === undefined ||
+          Number(ratio[1]) !== 1 ||
+          Number(ratio[0]) < 2
+        )
+          return false;
+        return sameFamilyRoot(ce, g, f, g.spacing, g.spacingValue) === true;
+      })
+  );
+
+  // Move each root into `(−S/2, S/2]`.
+  out = out.map((f) => {
+    if (!Number.isFinite(f.value)) return f;
+    const k = Math.floor(0.5 - f.value / f.spacingValue + 1e-9);
+    if (k === 0) return f;
+    const root = ce
+      .function('Add', [
+        f.root,
+        ce.function('Multiply', [ce.number(k), f.spacing]),
+      ])
+      .evaluate();
+    return { ...f, root, value: f.value + k * f.spacingValue };
+  });
+
+  const key = (f: RootFamily) => (Number.isFinite(f.value) ? f.value : Infinity);
+  return out.sort((p, q) => key(p) - key(q));
+}
+
+/**
+ * The families of roots of the periodic equation `body = 0`, given its
+ * principal roots `roots` (the roots that `findUnivariateRoots()` gave).
+ * `terms` are the trig terms of `body` (`analyzePeriodic()`). Returns
+ * `undefined` when the families cannot be shown to hold every root.
+ *
+ * The principal roots are not always one root for each family with the
+ * period `T` of the equation: for `sin(2x)/cos(x) = 0` (period 2π) the
+ * root finder gives `0` from the roots `0` and `π/2` of `sin(2x)` (period
+ * π), and the root `π` is in no family `0 + 2πt`. Thus the roots in one
+ * period are found and checked first:
+ *
+ * - When the unknown is in one trig function only, and `body` is an entire
+ *   function of that trig function (`isEntireIn()`), such as
+ *   `sin(x) - a` or `cos(2x)^2 - 1/4`, the root finder inverts the trig
+ *   function for a full period, and no root is rejected: the principal
+ *   roots are one root of each family. This also applies when `body` has a
+ *   free parameter (`sin(x) = a`).
+ * - Otherwise `body` must have no free parameter. The principal roots are
+ *   expanded into all the roots in a window of length `T`, and a numeric
+ *   scan with an interval proof shows that the window has no other root
+ *   (`expandPeriodicRoots()`). Each root of the window gives a family with
+ *   the spacing `T`.
+ */
+function periodicEquationFamilies(
+  ce: ComputeEngine,
+  equation: Expression,
+  body: Expression,
+  unknown: string,
+  terms: TrigTerm[],
+  roots: ReadonlyArray<Expression>,
+  userRule: boolean
+): RootFamily[] | undefined {
+  const period = combinedPeriod(ce, terms);
+  if (
+    period === undefined ||
+    !Number.isFinite(period.value) ||
+    period.value <= 0
+  )
+    return undefined;
+  const family = (root: Expression): RootFamily => ({
+    root,
+    value: realRootValue(root),
+    spacing: period.expr,
+    spacingValue: period.value,
+  });
+
+  const trig = singleTrigNode(body, unknown);
+  if (trig !== undefined && isEntireIn(body, unknown, trig))
+    return roots.map((r) => family(r));
+
+  if (!body.unknowns.every((u) => u === unknown)) return undefined;
+  // The window starts at an irrational fraction of the period, so that a
+  // root is not likely to be at an end of the window.
+  const lo = -0.4142 * period.value;
+  const window = ce.function('Interval', [
+    ce.number(lo),
+    ce.number(lo + period.value),
+  ]);
+  const members = expandPeriodicRoots(
+    ce,
+    equation,
+    body,
+    unknown,
+    window,
+    roots,
+    userRule
+  );
+  if (!Array.isArray(members) || members.length === 0) return undefined;
+  return members.map((r) => family(r));
+}
+
+/**
+ * The families of roots of a periodic equation with no domain, or over the
+ * real or the complex numbers (see the comment at the start of this
+ * section).
+ *
+ * `roots` are the roots that `findUnivariateRoots()` gave for `equation`
+ * (an `Equal`, or an expression read as `= 0`), with no restriction of the
+ * unknown. `solveFactor` gives the roots of a factor of the equation, with
+ * the statistics of the root finder.
+ *
+ * Returns:
+ * - `{ periodic: false, roots }` when the equation has no trig function of
+ *   the unknown: `roots` is the answer;
+ * - `{ periodic: true, roots }` with the families, and the roots of the
+ *   polynomial factors that are in no family;
+ * - `undefined` when the families cannot be shown to hold every root, and
+ *   the `Solve` stays unevaluated. This is the case when the unknown is
+ *   also outside a trig function in a factor that is not a polynomial
+ *   (`x·sin(x) - x`, `sin(x)/x`), when the unknown has a type narrower than
+ *   `real` or an assumption (a family cannot express a restriction), when
+ *   a user binding shadows `Pi` (the period would hold the library π), and
+ *   when the periods of the trig functions of one factor have no common
+ *   multiple.
+ *
+ * Each factor of a product gives its own families when every periodic
+ * factor is an entire function (`isEntireIn()`), or when there is only one
+ * periodic factor. Otherwise a factor can be undefined at a root of
+ * another factor (`cos(x)·tan(x)` at `π/2`), and the families are those of
+ * the whole product, with its period.
+ */
+function rootFamilies(
+  ce: ComputeEngine,
+  equation: Expression,
+  unknown: string,
+  roots: ReadonlyArray<Expression>,
+  userRule: boolean,
+  solveFactor: (
+    factor: Expression,
+    stats: {
+      candidates: boolean;
+      undecided: boolean;
+      partial: boolean;
+      userRule: boolean;
+    }
+  ) => ReadonlyArray<Expression>
+):
+  | { periodic: false }
+  | { periodic: true; families: RootFamily[]; isolated: Expression[] }
+  | undefined {
+  const { predBody, isEquation } = classifyPredicate(equation);
+  if (!isEquation) return { periodic: false };
+  const allTerms = trigTerms(predBody, unknown);
+  if (allTerms === undefined) return undefined;
+  if (allTerms.length === 0) return { periodic: false };
+
+  // A family ranges over the real line: it cannot express a type narrower
+  // than `real` or an assumption about the unknown.
+  if (!isSubtype('real', ce.symbol(unknown).type.type)) return undefined;
+  for (const [fact, records] of contextAssumptions(ce).entries())
+    if (isFactTrue(records) && fact.unknowns.includes(unknown))
+      return undefined;
+  // In radians, the period is a multiple of the library π, which a user
+  // binding of `Pi` would replace after a JSON round trip.
+  if (halfTurnAngle(ce).has('Pi') && shadowsLibraryName(ce, 'Pi'))
+    return undefined;
+
+  // Classify the factors of the residual.
+  type PeriodicFactor = {
+    base: Expression;
+    terms: TrigTerm[];
+    hasRoots: boolean;
+    entire: boolean;
+  };
+  const periodic: PeriodicFactor[] = [];
+  let hasPolynomial = false;
+  const factors = isFunction(predBody, 'Multiply') ? predBody.ops : [predBody];
+  for (const factor of factors) {
+    if (!factor.has(unknown)) continue;
+    let base = factor;
+    let hasRoots = true;
+    if (isFunction(factor, 'Power') && !factor.op2.has(unknown)) {
+      // `fⁿ` has the roots of `f` when `n` is a positive integer, and no
+      // root (only the poles of `f`) when `n ≤ 0`.
+      const n = factor.op2;
+      if (n.isInteger === true && n.isPositive === true) base = factor.op1;
+      else if (n.isNonPositive === true) {
+        base = factor.op1;
+        hasRoots = false;
+      } else return undefined;
+    }
+    const factorTrig = trigTerms(base, unknown);
+    if (factorTrig === undefined) return undefined;
+    if (factorTrig.length === 0) {
+      // A factor with no trig function: its roots are a finite list, and it
+      // must have a value everywhere.
+      if (!hasRoots || getPolynomialCoefficients(base, unknown) === null)
+        return undefined;
+      hasPolynomial = true;
+      continue;
+    }
+    const terms = analyzePeriodic(base, unknown);
+    if (terms === undefined) return undefined;
+    periodic.push({
+      base,
+      terms,
+      hasRoots,
+      entire: hasRoots && isEntireIn(base, unknown),
+    });
+  }
+
+  const families: RootFamily[] = [];
+  if (periodic.length === 1 || periodic.every((p) => p.entire)) {
+    for (const p of periodic) {
+      if (!p.hasRoots) continue;
+      let factorRoots = roots;
+      if (p.base !== predBody) {
+        const stats = {
+          candidates: false,
+          undecided: false,
+          partial: false,
+          userRule: false,
+        };
+        factorRoots = solveFactor(p.base, stats);
+        if (partialRootListReason(p.base, unknown, factorRoots, stats))
+          return undefined;
+        // A factor with no root: the empty list must be a decision.
+        if (factorRoots.length === 0) {
+          if (stats.candidates && !stats.undecided && !stats.userRule)
+            continue;
+          return undefined;
+        }
+      }
+      const found = periodicEquationFamilies(
+        ce,
+        p.base === predBody ? equation : p.base,
+        p.base,
+        unknown,
+        p.terms,
+        factorRoots,
+        userRule
+      );
+      if (found === undefined) return undefined;
+      families.push(...found);
+    }
+  } else {
+    // The whole product, with the common period of its factors.
+    if (hasPolynomial) return undefined;
+    const found = periodicEquationFamilies(
+      ce,
+      equation,
+      predBody,
+      unknown,
+      periodic.flatMap((p) => p.terms),
+      roots,
+      userRule
+    );
+    if (found === undefined) return undefined;
+    families.push(...found);
+  }
+
+  const reduced = reduceRootFamilies(ce, families);
+  if (reduced === undefined) return undefined;
+
+  // The roots of the polynomial factors that are in no family.
+  const isolated: Expression[] = [];
+  for (const root of roots) {
+    const r = { root, value: realRootValue(root) };
+    let inFamily = false;
+    for (const f of reduced) {
+      const same = sameFamilyRoot(ce, f, r, f.spacing, f.spacingValue);
+      if (same === undefined) return undefined;
+      if (same) {
+        inFamily = true;
+        break;
+      }
+    }
+    if (!inFamily && !isolated.some((o) => o.isSame(root))) isolated.push(root);
+  }
+  return { periodic: true, families: reduced, isolated };
+}
+
+/**
+ * The roots that the equations `equations` in `x` have in common, when one
+ * of them has a trig function of `x` and none is a polynomial equation (see
+ * `commonRoots()`): a list of families of roots with a fresh integer
+ * parameter. `[sin(2x) = 0, cos(x) = -1]` gives `[π + 2πt]`.
+ *
+ * Each equation must be periodic (`analyzePeriodic()`), and the periods of
+ * all the trig terms must have a common multiple `T`. The families of the
+ * first equation whose roots are all known (`rootFamilies()`) hold all the
+ * common roots. Each family `r + S·t` of that equation has `T/S` roots in a
+ * period `T`. A root that every equation accepts gives a family with the
+ * spacing `T`, as every equation repeats with the period `T`.
+ *
+ * Returns `'undecided'` when there is no such answer, or when an equation
+ * evaluates to neither `True` nor `False` at a root.
+ */
+function periodicCommonRoots(
+  ce: ComputeEngine,
+  equations: ReadonlyArray<Expression>,
+  x: string
+): Expression[] | 'undecided' {
+  const allTerms: TrigTerm[] = [];
+  for (const eq of equations) {
+    const terms = analyzePeriodic(classifyPredicate(eq).predBody, x);
+    if (terms === undefined) return 'undecided';
+    allTerms.push(...terms);
+  }
+  const period = combinedPeriod(ce, allTerms);
+  if (
+    period === undefined ||
+    !Number.isFinite(period.value) ||
+    period.value <= 0
+  )
+    return 'undecided';
+
+  for (const source of equations) {
+    const stats = {
+      candidates: false,
+      undecided: false,
+      partial: false,
+      userRule: false,
+    };
+    const found = findUnivariateRoots(source, x, 0, undefined, stats);
+    if (partialRootListReason(source, x, found, stats) !== undefined) continue;
+    if (found.length === 0) {
+      return stats.candidates && !stats.undecided && !stats.userRule
+        ? []
+        : 'undecided';
+    }
+    const result = rootFamilies(
+      ce,
+      source,
+      x,
+      found,
+      stats.userRule,
+      (factor, factorStats) =>
+        findUnivariateRoots(factor, x, 0, undefined, factorStats)
+    );
+    if (result === undefined || !result.periodic) return 'undecided';
+    if (result.isolated.length > 0) return 'undecided';
+
+    const families: RootFamily[] = [];
+    for (const f of result.families) {
+      if (!Number.isFinite(f.value)) return 'undecided';
+      // The period `T` must be an exact integer multiple `n·S` of the
+      // spacing `S` of the family: then `n` members of the family hold all
+      // its roots, modulo `T`.
+      const ratio = exactSpacingRatio(ce, period.expr, f.spacing);
+      if (ratio === undefined || Number(ratio[1]) !== 1) return 'undecided';
+      const n = Number(ratio[0]);
+      if (n < 1 || n > 64) return 'undecided';
+      for (let k = 0; k < n; k++) {
+        const member =
+          k === 0
+            ? f.root
+            : ce
+                .function('Add', [
+                  f.root,
+                  ce.function('Multiply', [ce.number(k), f.spacing]),
+                ])
+                .evaluate();
+        let keep = true;
+        for (const eq of equations) {
+          if (eq === source) continue;
+          const value = sym(eq.subs({ [x]: member }).evaluate());
+          if (value === 'False') {
+            keep = false;
+            break;
+          }
+          if (value !== 'True') return 'undecided';
+        }
+        if (keep)
+          families.push({
+            root: member,
+            value: realRootValue(member),
+            spacing: period.expr,
+            spacingValue: period.value,
+          });
+      }
+    }
+    const reduced = reduceRootFamilies(ce, families);
+    if (reduced === undefined) return 'undecided';
+    const t = freshParameters(ce, ce.function('List', [...equations]), 1)[0];
+    return reduced.map((f) => familyExpression(ce, f, t));
+  }
+  return 'undecided';
+}
+
+/**
+ * The roots of `Or(a, b, …)` in `x` when an alternative has a trig function
+ * of `x`: the union of the families of roots (`rootFamilies()`) and of the
+ * other roots of each alternative, with one fresh integer parameter.
+ * `sin(x) = 0 ∨ x = 2` gives `[2, πt]`.
+ *
+ * Each alternative must be an equation whose roots are all known, as in
+ * `solveOr()`. Returns `undefined` when there is no such answer.
+ */
+function alternativeRootFamilies(
+  ce: ComputeEngine,
+  alternatives: Expression,
+  x: string
+): Expression[] | undefined {
+  const families: RootFamily[] = [];
+  const others: Expression[] = [];
+  if (!isFunction(alternatives)) return undefined;
+  for (const alt of alternatives.ops) {
+    if (!isFunction(alt, 'Equal') && !alt.type.matches('number'))
+      return undefined;
+    const stats = {
+      candidates: false,
+      undecided: false,
+      partial: false,
+      userRule: false,
+    };
+    const found = findUnivariateRoots(alt, x, 0, undefined, stats);
+    if (partialRootListReason(alt, x, found, stats) !== undefined)
+      return undefined;
+    if (found.length === 0) {
+      // Only a decided empty list (not the `[t]` of an identity).
+      const answer = emptyRootsAnswer(ce, alt, x, stats, false);
+      if (isFunction(answer, 'List') && answer.nops === 0) continue;
+      return undefined;
+    }
+    const result = rootFamilies(
+      ce,
+      alt,
+      x,
+      found,
+      stats.userRule,
+      (factor, factorStats) =>
+        findUnivariateRoots(factor, x, 0, undefined, factorStats)
+    );
+    if (result === undefined) return undefined;
+    if (!result.periodic) {
+      others.push(...filterRootsByAssumptions(ce, found, x));
+      continue;
+    }
+    families.push(...result.families);
+    others.push(...result.isolated);
+  }
+  const reduced = reduceRootFamilies(ce, families);
+  if (reduced === undefined) return undefined;
+  const isolated: Expression[] = [];
+  for (const root of others) {
+    if (isolated.some((r) => r.isSame(root))) continue;
+    const r = { root, value: realRootValue(root) };
+    let inFamily = false;
+    for (const f of reduced) {
+      const same = sameFamilyRoot(ce, f, r, f.spacing, f.spacingValue);
+      if (same === undefined) return undefined;
+      if (same) {
+        inFamily = true;
+        break;
+      }
+    }
+    if (!inFamily) isolated.push(root);
+  }
+  const t = freshParameters(ce, alternatives, 1)[0];
+  return [...isolated, ...reduced.map((f) => familyExpression(ce, f, t))];
+}
+
+/**
+ * The expression of the roots of `family` with the integer parameter `t`:
+ * `root + spacing·t`. A root `When(r, guard)` gives
+ * `When(r + spacing·t, guard)`.
+ */
+function familyExpression(
+  ce: ComputeEngine,
+  family: RootFamily,
+  t: Expression
+): Expression {
+  const step = ce.function('Multiply', [family.spacing, t]);
+  const withStep = (root: Expression): Expression =>
+    root.isSame(0) ? step : ce.function('Add', [root, step]);
+  const { root } = family;
+  return isFunction(root, 'When')
+    ? ce.function('When', [withStep(root.op1), root.op2])
+    : withStep(root);
+}
+
+/**
+ * The answer of `Solve` for the equation `equation` in `unknown`, with no
+ * domain or over the real or the complex numbers, given the roots `roots`
+ * of the root finder: for a periodic equation, the list of its families of
+ * roots with a fresh integer parameter (`rootFamilies()`), else `roots`.
+ * `periodic` tells which. Returns `undefined` when there is no answer.
+ *
+ * `solveFactor` gives the roots of a factor of a product (by default,
+ * `findUnivariateRoots()`).
+ */
+function periodicRootFamilies(
+  ce: ComputeEngine,
+  equation: Expression,
+  unknown: string,
+  roots: ReadonlyArray<Expression>,
+  userRule = false,
+  solveFactor?: (
+    factor: Expression,
+    stats: {
+      candidates: boolean;
+      undecided: boolean;
+      partial: boolean;
+      userRule: boolean;
+    }
+  ) => ReadonlyArray<Expression>
+): { periodic: boolean; roots: Expression[] } | undefined {
+  const result = rootFamilies(
+    ce,
+    equation,
+    unknown,
+    roots,
+    userRule,
+    solveFactor ??
+      ((factor, stats) =>
+        findUnivariateRoots(factor, unknown, 0, undefined, stats))
+  );
+  if (result === undefined) return undefined;
+  if (!result.periodic) return { periodic: false, roots: [...roots] };
+  const t = freshParameters(ce, equation, 1)[0];
+  return {
+    periodic: true,
+    roots: [
+      ...result.isolated,
+      ...result.families.map((f) => familyExpression(ce, f, t)),
+    ],
+  };
 }
 
 /**

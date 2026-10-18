@@ -2729,8 +2729,9 @@ describe('Solve shields a value-bound unknown from a nested transformer', () => 
 // A `Solve` result list holds all the solutions; `[]` states that there is
 // none. When the solver cannot show that a list is complete, `Solve` stays
 // unevaluated and `expr.solve()` returns `null`. Over ℝ, ℂ or no domain, a
-// periodic trig equation gives its principal roots: a finite list whose
-// translates by the period give every root.
+// periodic trig equation gives its families of roots with `Solve`, and its
+// principal roots with `expr.solve()`: a finite list whose translates by the
+// period give every root.
 describe('SOLVE: COMPLETE ROOT LISTS', () => {
   // The shared engine: constructing an engine here, when the tests are
   // collected, would change the global precision of the other tests.
@@ -2744,8 +2745,27 @@ describe('SOLVE: COMPLETE ROOT LISTS', () => {
     expect(roots).not.toBeNull();
     const values = (roots as any[]).map((r) => r.N().re).sort((a, b) => a - b);
     for (const v of values) expect(Math.abs(f(v))).toBeLessThan(1e-9);
-    // `Solve` and `explain('solve')` give the same list
-    expect(solveOp(latex).nops).toBe(values.length);
+    // `Solve` gives the same list, except for a periodic equation: `Solve`
+    // then gives the families of roots `x₀ + T·t`, and `solve()` gives the
+    // principal roots, one root of each family in one period. Each principal
+    // root is a member of a family, and each family has a principal root.
+    const solved = solveOp(latex);
+    const families = solved.ops!.filter((op) => op.unknowns.length > 0);
+    if (families.length === 0) expect(solved.nops).toBe(values.length);
+    else {
+      const isMember = (family: any, v: number) => {
+        const t = family.unknowns[0];
+        const a = family.subs({ [t]: 0 }).N().re;
+        const step = family.subs({ [t]: 1 }).N().re - a;
+        const k = Math.round((v - a) / step);
+        return Math.abs(a + k * step - v) < 1e-9;
+      };
+      for (const v of values)
+        expect(solved.ops!.some((fam) => isMember(fam, v))).toBe(true);
+      for (const fam of families)
+        expect(values.some((v) => isMember(fam, v))).toBe(true);
+    }
+    // `explain('solve')` gives the list of `solve()`
     expect(
       ce.parse(latex).explain('solve', { variable: 'x' }).result.nops
     ).toBe(values.length);

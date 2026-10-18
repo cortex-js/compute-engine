@@ -8331,6 +8331,48 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       evaluate: (ops, { engine: ce }) => findRoot(ce, ops),
     },
 
+    NSolve: {
+      description: [
+        'NSolve(equation, unknown): the solutions of an equation as floats.',
+        'It is Mathematica `NSolve`: it takes the same operands as `Solve`,',
+        'including domain specs and systems of equations, and gives the `N` of',
+        'each solution of `Solve`:',
+        '`NSolve(x^2 == 2, x)` → `[1.414…, -1.414…]`. When `Solve` finds no',
+        'solution set, `NSolve` stays unevaluated: for a polynomial `Solve`',
+        'already gives numeric roots when there is no closed form, and',
+        '`FindRoot` gives one local root from a start value.',
+      ],
+      keywords: ['roots', 'zeros', 'numeric'],
+      // Hold the arguments for the same reason as `Solve`: an `Equal` must not
+      // collapse to a boolean before solving.
+      lazy: true,
+      signature: '(any, any*) -> list',
+      examples: ['NSolve(x^2 == 2, x)'],
+      // The operands are those of `Solve`, so they are canonicalized by the
+      // same function. `canonicalSolve()` builds a `Solve` expression, and only
+      // its head is changed here.
+      canonical: (ops, { engine: ce }) => {
+        const solve = canonicalSolve(ce, ops);
+        if (!isFunction(solve, 'Solve')) return solve;
+        return ce._fn('NSolve', solve.ops);
+      },
+      // The numeric value of each solution is the `N` of the exact solution:
+      // there is no numeric root finder that gives ALL the solutions of an
+      // equation that `Solve` cannot solve. `FindRoot` gives only the one
+      // root near its start value, and a list of one root would read as the
+      // complete solution set. So `NSolve` stays unevaluated when `Solve`
+      // does.
+      evaluate: (ops, { engine: ce }) => {
+        const solutions = evaluateSolve(ce, ops);
+        if (solutions === undefined) return undefined;
+        // An inert or invalid `Solve` (an error operand, an unsupported
+        // equation) keeps its operands under the `NSolve` head.
+        if (isFunction(solutions, 'Solve'))
+          return ce._fn('NSolve', solutions.ops);
+        return solutions.N();
+      },
+    },
+
     ReplaceAll: {
       description: [
         'ReplaceAll(expr, rules): apply one or more replacement rules to `expr`,',

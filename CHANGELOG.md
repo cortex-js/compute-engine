@@ -31,11 +31,12 @@
   nested call no longer adds guard digits at each level (`Erf` nested 12 deep
   took 0.4 s and now takes 7 ms).
 
-- **A lazy `Map` under `.N()` reads its elements numerically** (user decision
-  2026-10-18) when the callback is not, and does not contain, a function whose
-  result jumps at a point: `At(Map(Sin, [H]), 1).N()` with
-  `H = Sum(1/k, k, 1, 6000)` took 5.6 s and now costs about as much as
-  `Sin([H]).N()`. A jump callback still reads the exact element:
+- **A lazy `Map` under `.N()` gives the same values as the direct call**
+  (user decision 2026-10-18). Each element is passed to the callback as
+  written, and the application is evaluated under the numeric request, so
+  `Map(f, [v]).N()` is `[f(v).N()]`: the element is no longer evaluated exactly
+  first. `At(Map(Sin, [H]), 1).N()` with `H = Sum(1/k, k, 1, 6000)` took 5.6 s and
+  now takes about 60 ms; `Map(Sin, [Pi]).N()` is `[0]`;
   `Map(Floor, [(25! − 1)/24!]).N()` is `[24]`. A user function used by name as a
   callback is applied without boxing an application for each element (user
   decision 2026-10-17).
@@ -592,6 +593,22 @@
   statement form.
 
 ### Issues Resolved
+
+- **`Gamma(s, z)` with real arguments and `z > 0` is computed at the working
+  precision.** Above machine precision it returned a machine float with about
+  15 correct digits. `GammaRegularized` no longer gives `NaN` (or a 15-digit
+  machine value) where its continued fraction does not converge, for example
+  `GammaRegularized(-1.5, 0.1)` at 50 digits and `GammaRegularized(0.5, 3)` at
+  300 digits; and `GammaRegularized` and `BetaRegularized` are much faster at a
+  high precision (`Gamma(10⁴, 10001)` at 524 digits took 4 s and takes 36 ms).
+
+- **A `Block` starts each evaluation from the same state.** An assignment to an
+  undeclared name inside a block makes an implicit local. This local now starts
+  with no value at each top-level evaluation and in each function call, and
+  keeps its value across the iterations of a loop inside one evaluation, as in
+  JavaScript and Python. Before, it also kept its value from one evaluation to
+  the next: `Block(x ≔ x + 1; 2x)` gave `2(x + 1)`, then `2(x + 2)`, then
+  `2(x + 3)`.
 
 - **Four LaTeX round trips that changed the meaning of an expression** (Tycho
   ledger rows 387, 388 and 389).

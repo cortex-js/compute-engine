@@ -275,6 +275,20 @@ const WGSL_SHAPE_RULES: GPUShapeRules = {
 };
 
 /**
+ * Whether `expr` is a `Block` whose last statement is a `Block` that ends,
+ * at any depth of nested blocks, with an assignment to a name or a `Declare`
+ * with an initializer (`isTailAssignmentBlock`): `Block(s ≔ x;
+ * Block(t ≔ s + 1))`. The value of such a block is the value of that last
+ * assignment.
+ */
+function isNestedTailAssignmentBlock(expr: Expression): boolean {
+  if (!isFunction(expr, 'Block') || expr.nops === 0) return false;
+  const last = expr.ops[expr.nops - 1];
+  if (!isFunction(last, 'Block')) return false;
+  return isTailAssignmentBlock(last) || isNestedTailAssignmentBlock(last);
+}
+
+/**
  * WGSL (WebGPU Shading Language) compilation target.
  *
  * Extends the shared GPU base class with WGSL-specific function names,
@@ -313,8 +327,17 @@ export class WGSLTarget extends GPUShaderTarget {
     // `compile()` does for the same body. The emitted body is checked
     // instead: a single-statement block with no local is unwrapped to its
     // statement and emits the single line `s = x`, which stays declined.
+    //
+    // A block whose last statement is a nested block that ends with such an
+    // assignment (`Block(s ≔ x; Block(t ≔ s + 1))`) is not declined before it
+    // is compiled either. The block compilation gives the nested block a
+    // temporary, which the nested block assigns last, and the outer block
+    // returns it (`var _tv1: f32;`, `{ … _tv1 = t; }`, `return _tv1;`), as on
+    // GLSL. The emitted body is checked for that final `return <name>;`.
     const tailAssignment = isTailAssignmentBlock(expr);
-    if (!tailAssignment)
+    const nestedTailAssignment =
+      !tailAssignment && isNestedTailAssignmentBlock(expr);
+    if (!tailAssignment && !nestedTailAssignment)
       gpuAssertExpressionBody('compileFunction()', expr, this.languageId);
     // A WGSL function parameter is an immutable value, so an assignment to it
     // (`x = x + 1.0;` in `fn f(x: f32)`) is not valid source. GLSL passes a
@@ -346,6 +369,14 @@ export class WGSLTarget extends GPUShaderTarget {
         lines.length < 2 ||
         returned === null ||
         !lines[lines.length - 2].startsWith(`${returned[1]} = `)
+      )
+        gpuAssertExpressionBody('compileFunction()', expr, this.languageId);
+    }
+    if (nestedTailAssignment) {
+      const lines = body.split('\n');
+      if (
+        lines.length < 2 ||
+        !/^return\s+[A-Za-z_]\w*;?$/.test(lines[lines.length - 1])
       )
         gpuAssertExpressionBody('compileFunction()', expr, this.languageId);
     }

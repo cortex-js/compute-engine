@@ -194,10 +194,20 @@ describe('Table (alias for Tabulate) with iterator specs', () => {
     expect(ev.at(-1)?.toString()).toBe('1000000000000');
   });
 
+  test('the `{i, n}` two-element spec is `{i, 1, n}`', () => {
+    // Mathematica's `Table[expr, {i, n}]` runs `i` from 1 to `n` (user
+    // decision 2026-10-17; the shorthand used to stay an inert `Table`).
+    expect(
+      ce
+        .box(['Table', 'i', ['Set', 'i', 5]])
+        .evaluate()
+        .toString()
+    ).toBe('[1,2,3,4,5]');
+  });
+
   test('malformed iterator spec stays inert', () => {
-    // The `{i, n}` two-element shorthand is deliberately out of scope: it must
-    // not be guessed as `{i, 1, n}`. The expression stays an inert `Table`.
-    const expr = ce.box(['Table', 'i', ['Set', 'i', 5]]);
+    // A spec whose first element is not a symbol is not guessed.
+    const expr = ce.box(['Table', 'i', ['Set', 5, 1, 3]]);
     expect(expr.operator).toBe('Table');
     expect(expr.evaluate().operator).toBe('Table');
   });
@@ -267,23 +277,28 @@ describe('Table also accepts the TUPLE spelling of an iterator spec', () => {
       expect(bad.operator).toBe('Table');
       expect(bad.evaluate().operator).toBe('Table');
     }
-    // Wrong arity (the two-element shorthand is not guessed).
+    // Wrong arity: one operand, or more than four.
     for (const head of ['Set', 'Tuple']) {
-      const bad = ce.box(['Table', ['Power', 'k', 2], [head, 'k', 1]] as any);
-      expect(bad.operator).toBe('Table');
-      expect(bad.evaluate().operator).toBe('Table');
+      for (const spec of [
+        [head, 'k'],
+        [head, 'k', 1, 10, 2, 7],
+      ]) {
+        const bad = ce.box(['Table', ['Power', 'k', 2], spec] as any);
+        expect(bad.operator).toBe('Table');
+        expect(bad.evaluate().operator).toBe('Table');
+      }
     }
   });
 
-  test('`Pair`/`Single` are NOT iterator-spec heads — the type error is kept', () => {
-    // An iterator spec needs 3 or 4 operands, which a `Pair` (always 2) or a
-    // `Single` (always 1) can never have. Recognizing those heads would only
-    // downgrade a clear `Tabulate` type error to a silently inert `Table`.
-    for (const spec of [['Pair', 'k', 1], ['Single', 'k']] as any[]) {
-      const bad = ce.box(['Table', ['Power', 'k', 2], spec] as any);
-      expect(bad.operator).toBe('Tabulate');
-      expect(bad.isValid).toBe(false);
-    }
+  test('`Pair` is an iterator-spec head (`{k, n}`), `Single` is not', () => {
+    // An iterator spec has 2, 3 or 4 operands, so the 2-tuple alias `Pair` is
+    // the `(k, n)` spelling. A `Single` (always 1 operand) can never be a
+    // spec: recognizing it would only downgrade a clear `Tabulate` type error
+    // to a silently inert `Table`.
+    expect(table(['Power', 'k', 2], ['Pair', 'k', 3])).toBe('[1,4,9]');
+    const bad = ce.box(['Table', ['Power', 'k', 2], ['Single', 'k']] as any);
+    expect(bad.operator).toBe('Tabulate');
+    expect(bad.isValid).toBe(false);
   });
 
   test('the plain alias form is untouched: an integer is NOT an iterator spec', () => {

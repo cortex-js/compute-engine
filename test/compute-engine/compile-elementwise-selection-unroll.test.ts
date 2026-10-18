@@ -407,9 +407,6 @@ describe('A selection over a wide list-shaped condition is written out', () => {
 });
 
 describe('A point arm of the run-time selection is lifted whole', () => {
-  const NAN_AWARE = (_k: string, v: unknown) =>
-    typeof v === 'number' && Number.isNaN(v) ? 'NaN' : v;
-
   test('a literal point, no default clause', () => {
     const expr = ce.box([
       'Which',
@@ -417,13 +414,14 @@ describe('A point arm of the run-time selection is lifted whole', () => {
       ['Tuple', 1, 2],
     ]);
     // The interpreter masks a point position with `Missing` (user decision
-    // 2026-10-17); a compiled array spells a missing point with the numeric
-    // absence `NaN`, as the compiled `When` over a list of conditions does.
+    // 2026-10-17); a compiled array spells a missing point with `undefined`,
+    // as a single missing point and the compiled `When` over a list of
+    // conditions do (user decision 2026-10-18).
     expect(expr.evaluate().toString()).toBe('[(1, 2),"Missing","Missing"]');
     const r = compile(expr, { fallback: false });
     expect(r.success).toBe(true);
     expect(r.code).toContain('_SYS.wholeArm(');
-    expect(JSON.stringify(r.run!({}), NAN_AWARE)).toBe('[[1,2],"NaN","NaN"]');
+    expect(r.run!({})).toEqual([[1, 2], undefined, undefined]);
   });
 
   test('a point default beside a list arm', () => {

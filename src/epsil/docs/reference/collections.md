@@ -1699,11 +1699,11 @@ MathJSON `Table` · `(function, integer, integer?) -> collection`
 
 An alias for `Tabulate` (the preferred name) that additionally accepts
 
-Mathematica-style iterator specs, e.g. `Table(i^2, {i, 1, n})` or
+Mathematica-style iterator specs, e.g. `Table(i^2, {i, n})` (`i` from
 
-`Table(i, {i, lo, hi, step})`, and the equivalent tuple spelling
+1 to `n`), `Table(i^2, {i, 1, n})` or `Table(i, {i, lo, hi, step})`,
 
-`Table(i^2, (i, 1, n))`.
+and the equivalent tuple spelling `Table(i^2, (i, 1, n))`.
 
 ```epsil
 table(i^2, (i, 1, 5))

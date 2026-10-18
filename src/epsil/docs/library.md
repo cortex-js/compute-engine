@@ -11,7 +11,7 @@ date: Last Modified
 ---
 # Epsil Standard Library
 
-The 705 functions and constants of the standard library, by category.
+The 706 functions and constants of the standard library, by category.
 Each row gives a name, its signature (for a function) or its kind and type
 (for a constant or variable), and the first sentence of its description —
 the same description `epsil doc <name>` prints in full and the editor
@@ -22,7 +22,7 @@ To search the library by concept rather than by name, use
 `epsil doc <keywords>` (see the [CLI](/epsil/cli/)); the
 [guide for agents](/epsil/for-agents/) lists the names most often needed.
 
-- [Core](#core) — 113 definitions · [full reference](/epsil/reference/core/)
+- [Core](#core) — 114 definitions · [full reference](/epsil/reference/core/)
 - [Control structures](#control-structures) — 13 definitions · [full reference](/epsil/reference/control-structures/)
 - [Logic](#logic) — 27 definitions · [full reference](/epsil/reference/logic/)
 - [Collections](#collections) — 126 definitions · [full reference](/epsil/reference/collections/)
@@ -98,6 +98,7 @@ The [Core reference](/epsil/reference/core/) has the full description and the ex
 | — | `MatchesType` | `(subject: any, type: string \| type) -> boolean` | True iff the first operand, EVALUATED, is a value of the given type — the engine form of the Epsil `x is T` test and of `match` type patterns, which both lower here. |
 | `missing` | `Missing` | variable `missing` | A value that is absent but whose position is preserved (Julia `missing`, R `NA`); the sole member of the `missing` type. |
 | — | `N` | `(any, (integer \| list<number>)?) -> unknown` | N(expr): numerically evaluate an expression |
+| `nSolve` | `NSolve` | `(any, any*) -> list` | NSolve(equation, unknown): the solutions of an equation as floats. |
 | — | `NamedArgument` | `(string, any) -> nothing` | NamedArgument(name, value): one named argument of a call (Epsil |
 | `nothing` | `Nothing` | variable `nothing` | The absence of a value; the sole member of the unit type. |
 | `numberFrom` | `NumberFrom` | `(character \| string, base: (character \| integer \| string)?) -> number` | NumberFrom(s): the number the string `s` denotes — optional surrounding whitespace, an optional sign, then ASCII digits with an optional "." fraction and an optional e/E exponent, or one of "oo", "+oo", "-oo", "NaN", "Indeterminate". |

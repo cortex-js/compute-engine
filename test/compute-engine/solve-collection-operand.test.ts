@@ -334,34 +334,37 @@ describe('SOLVE: SEVERAL EQUATIONS IN ONE UNKNOWN', () => {
   test('periodic equations: the answer does not depend on the order', () => {
     // `π` solves both equations, but it is not a principal root of
     // `sin(2x) = 0`. Before, this order gave `[]` and the other order gave
-    // `[pi, -pi]`.
+    // `[pi, -pi]`. The common roots are the family `π + 2πt`.
     const sin2x = ['Equal', ['Sin', ['Multiply', 2, 'x']], 0];
     const cosx = ['Equal', ['Cos', 'x'], -1];
     const a = solveBox(['Solve', ['List', sin2x, cosx], 'x']);
     const b = solveBox(['Solve', ['List', cosx, sin2x], 'x']);
     expect(a.operator).toBe('List');
-    expect(a.ops!.map((op) => op.toString()).sort()).toEqual(['-pi', 'pi']);
-    expect(b.ops!.map((op) => op.toString()).sort()).toEqual(['-pi', 'pi']);
+    expect(a.toString()).toBe('[2pi * t + pi]');
+    expect(b.toString()).toBe('[2pi * t + pi]');
   });
 
   test('periodic equations: a common root of a scaled argument', () => {
     // `2π` and `-2π` solve `sin(x) = 0` and `cos(x/4) = 0`, but they are not
     // principal roots of `sin(x) = 0`. They are the principal roots of
     // `cos(x/4) = 0` (period 8π), and the common roots are `2π + 4kπ`.
-    // Before, the answer was `[]`, then `[2pi]`.
+    // Before, the answer was `[]`, then `[2pi]`, then `[2pi,-2pi]` (which
+    // missed `6π`).
     const sinx = ['Equal', ['Sin', 'x'], 0];
     const cosx4 = ['Equal', ['Cos', ['Divide', 'x', 4]], 0];
     expect(solveBox(['Solve', ['List', sinx, cosx4], 'x']).toString()).toBe(
-      '[2pi,-2pi]'
+      '[4pi * t + 2pi]'
     );
     expect(solveBox(['Solve', ['List', cosx4, sinx], 'x']).toString()).toBe(
-      '[2pi,-2pi]'
+      '[4pi * t + 2pi]'
     );
   });
 
-  test('periodic equations with no common principal root stay unevaluated', () => {
-    // The principal roots do not give a complete root set, so an empty
-    // result is not a decision.
+  test('periodic equations with no common root give the empty list', () => {
+    // The roots of `sin(x) = 0` are `πt`, and `cos(3πt)` is `±1`: there is
+    // no common root. The families of roots of `sin(x) = 0` are complete,
+    // thus the empty list is a decision. Before, the principal roots did not
+    // give a complete root set, and the `Solve` stayed unevaluated.
     const r = solveBox([
       'Solve',
       [
@@ -371,7 +374,7 @@ describe('SOLVE: SEVERAL EQUATIONS IN ONE UNKNOWN', () => {
       ],
       'x',
     ]);
-    expect(r.operator).toBe('Solve');
+    expect(r.toString()).toBe('[]');
   });
 
   test('an undecided check leaves Solve unevaluated', () => {

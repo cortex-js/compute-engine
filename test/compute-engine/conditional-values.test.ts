@@ -312,23 +312,26 @@ describe('CONDITIONAL VALUES — Solve emission (Phase 2)', () => {
   it('symbolic a·sin(x) + b = 0 → both branches guarded by |−b/a| ≤ 1', () => {
     const eq = ['Equal', ['Add', ['Multiply', 'a', ['Sin', 'x']], 'b'], 0];
     expect(solveStrings(ce, eq, 'x')).toEqual([
-      'arcsin(-b / a) {|-b / a| <= 1}',
-      '-arcsin(-b / a) + pi {|-b / a| <= 1}',
+      '2pi * t + arcsin(-b / a) {|-b / a| <= 1}',
+      '2pi * t - arcsin(-b / a) + pi {|-b / a| <= 1}',
     ]);
   });
 
   it('symbolic a·cos(x) + b = 0 → both branches guarded by |−b/a| ≤ 1', () => {
     const eq = ['Equal', ['Add', ['Multiply', 'a', ['Cos', 'x']], 'b'], 0];
     expect(solveStrings(ce, eq, 'x')).toEqual([
-      'arccos(-b / a) {|-b / a| <= 1}',
-      '-arccos(-b / a) {|-b / a| <= 1}',
+      '2pi * t + arccos(-b / a) {|-b / a| <= 1}',
+      '2pi * t - arccos(-b / a) {|-b / a| <= 1}',
     ]);
   });
 
   it('numeric decidable-True (2·sin(x) − 1 = 0) → bare roots, unchanged', () => {
     const eq = ['Equal', ['Add', ['Multiply', 2, ['Sin', 'x']], -1], 0];
-    // Byte-identical to the pre-Phase-2 output.
-    expect(solveStrings(ce, eq, 'x')).toEqual(['1/6 * pi', '5/6 * pi']);
+    // No guard. Each root is a family with the integer parameter `t`.
+    expect(solveStrings(ce, eq, 'x')).toEqual([
+      '2pi * t + 1/6 * pi',
+      '2pi * t + 5/6 * pi',
+    ]);
   });
 
   it('numeric decidable-False (sin(x) + 2 = 0) → no roots, unchanged', () => {
@@ -348,14 +351,15 @@ describe('CONDITIONAL VALUES — Solve emission (Phase 2)', () => {
 
   it('a decidable-True guard collapses the guarded root to a bare root', () => {
     // In-range coefficients (|−b/a| = 1/2 ≤ 1): the guard resolves True and
-    // both branches unwrap to bare roots (no `When`).
+    // both branches unwrap to bare roots (no `When`). Each root of a family
+    // is in (-π, π]: `7π/6 + 2πt` is `-5π/6 + 2πt`.
     const engine = new ComputeEngine();
     engine.assume(engine.parse('a = 2'));
     engine.assume(engine.parse('b = 1'));
     const eq = ['Equal', ['Add', ['Multiply', 'a', ['Sin', 'x']], 'b'], 0];
     const roots = solveStrings(engine, eq, 'x');
     expect(roots?.every((r) => !r.includes('When'))).toBe(true);
-    expect(roots).toEqual(['-1/6 * pi', '7/6 * pi']);
+    expect(roots).toEqual(['2pi * t - 5/6 * pi', '2pi * t - 1/6 * pi']);
   });
 });
 

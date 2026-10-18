@@ -127,6 +127,7 @@ import {
   gammaln,
   estimatedFactorialDigits,
   incompleteGammaUpper,
+  bigIncompleteGammaUpper,
   bigGamma,
   bigGammaln,
   digamma,
@@ -456,6 +457,7 @@ import {
 import { signFromAssumedPart } from './complex.js';
 import { complexParts } from './complex-parts.js';
 import { guardDigitsN } from './exact-operands-under-n.js';
+import { isShadowedSymbol } from '../library-shadowing.js';
 
 // When processing an arithmetic expression, the following are the core
 // canonical arithmetic operations to account for:
@@ -5313,7 +5315,7 @@ function evaluateGamma(
       ? applyN(
           [s, z],
           (s, z) => incompleteGammaUpper(s, z),
-          undefined,
+          (s, z) => bigIncompleteGammaUpper(engine, s, z),
           (s, z) => incompleteGammaUpperComplex(s, z)
         )
       : undefined;
@@ -7590,73 +7592,75 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           context.engine._typeResolver
         ),
       sgn: ([x]) => lnSign(x),
-      evaluate: ([z], { numericApproximation, engine, expression }) => {
-        // Ln(a, b) = Log(a, b), so no need to check second argument
-        // Non-lazy: `z` is already evaluated by the driver.
-        const nonNumeric = nonNumericOperandError(engine, [z]);
-        if (nonNumeric !== undefined) return nonNumeric;
-        const evalZ = z;
-        if (isMeasurement(evalZ)) {
-          const r = measurementLn(engine, evalZ);
-          return numericApproximation ? r?.N() : r;
-        }
-        if (!numericApproximation) return z.ln();
-
-        // An exact argument outside the double range (`10^{400}`) has a
-        // logarithm in the double range.
-        {
-          const big = bigRealOf(
-            exactValueOutOfDoubleRange(engine, operandOf(expression, 0), z)
-          );
-          if (big !== undefined) {
-            const ln = boxBignumResult(
-              engine,
-              withDoubleDigits(() => big.abs().ln())
-            );
-            if (!big.isNegative()) return ln;
-            return engine.number(engine.complex(ln.re, Math.PI));
+      evaluate: guardDigitsN(
+        ([z], { numericApproximation, engine, expression }) => {
+          // Ln(a, b) = Log(a, b), so no need to check second argument
+          // Non-lazy: `z` is already evaluated by the driver.
+          const nonNumeric = nonNumericOperandError(engine, [z]);
+          if (nonNumeric !== undefined) return nonNumeric;
+          const evalZ = z;
+          if (isMeasurement(evalZ)) {
+            const r = measurementLn(engine, evalZ);
+            return numericApproximation ? r?.N() : r;
           }
+          if (!numericApproximation) return z.ln();
+
+          // An exact argument outside the double range (`10^{400}`) has a
+          // logarithm in the double range.
+          {
+            const big = bigRealOf(
+              exactValueOutOfDoubleRange(engine, operandOf(expression, 0), z)
+            );
+            if (big !== undefined) {
+              const ln = boxBignumResult(
+                engine,
+                withDoubleDigits(() => big.abs().ln())
+              );
+              if (!big.isNegative()) return ln;
+              return engine.number(engine.complex(ln.re, Math.PI));
+            }
+          }
+
+          // The exceptional points answer the same exact values on the
+          // numeric route (`Ln(+∞) = +∞`, `Ln(−∞) = +∞`, `Ln(~oo) = ~oo`).
+          const special = logarithmAtExceptionalPoint(engine, z, undefined);
+          if (special !== undefined) return special;
+
+          // A negative real above machine precision: `ln(−x) = ln(x) + iπ`
+          // with both parts at the working precision. The machine route below
+          // (`engine.complex(x).log()`) gives a 16-digit imaginary part, and a
+          // big-decimal kernel downstream then reads its rounding error as a
+          // value (`Exp(Ln(−2)).N()` gave `−1.99…98 + 4.8e-16i`).
+          if (
+            isNumber(z) &&
+            !z.isComplex &&
+            z.isNegative === true &&
+            bignumPreferred(engine)
+          ) {
+            const bigRe = z.bignumRe ?? engine.bignum(z.re);
+            if (bigRe.isFinite())
+              return engine.number(engine._numericValue(bigRe).ln());
+          }
+
+          return apply(
+            z,
+            (x) =>
+              x === 0
+                ? -Infinity
+                : x >= 0
+                  ? Math.log(x)
+                  : engine.complex(x).log(),
+            (x) =>
+              x.isZero()
+                ? -Infinity
+                : !x.isNegative()
+                  ? x.ln()
+                  : engine.complex(x.toNumber()).log(),
+            (z) => (z.isZero() ? NaN : z.log()),
+            (z) => z.ln()
+          );
         }
-
-        // The exceptional points answer the same exact values on the
-        // numeric route (`Ln(+∞) = +∞`, `Ln(−∞) = +∞`, `Ln(~oo) = ~oo`).
-        const special = logarithmAtExceptionalPoint(engine, z, undefined);
-        if (special !== undefined) return special;
-
-        // A negative real above machine precision: `ln(−x) = ln(x) + iπ`
-        // with both parts at the working precision. The machine route below
-        // (`engine.complex(x).log()`) gives a 16-digit imaginary part, and a
-        // big-decimal kernel downstream then reads its rounding error as a
-        // value (`Exp(Ln(−2)).N()` gave `−1.99…98 + 4.8e-16i`).
-        if (
-          isNumber(z) &&
-          !z.isComplex &&
-          z.isNegative === true &&
-          bignumPreferred(engine)
-        ) {
-          const bigRe = z.bignumRe ?? engine.bignum(z.re);
-          if (bigRe.isFinite())
-            return engine.number(engine._numericValue(bigRe).ln());
-        }
-
-        return apply(
-          z,
-          (x) =>
-            x === 0
-              ? -Infinity
-              : x >= 0
-                ? Math.log(x)
-                : engine.complex(x).log(),
-          (x) =>
-            x.isZero()
-              ? -Infinity
-              : !x.isNegative()
-                ? x.ln()
-                : engine.complex(x.toNumber()).log(),
-          (z) => (z.isZero() ? NaN : z.log()),
-          (z) => z.ln()
-        );
-      },
+      ),
     },
 
     Log: {
@@ -7706,117 +7710,121 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       //   if (!x) return ce._fn('Log', [ce.error('missing'), base]);
       //   return x.ln(base ?? 10);
       // },
-      evaluate: (ops, { numericApproximation, engine, expression }) => {
-        // Non-lazy: operands are already evaluated by the driver.
-        // Covers the whole log family: Lb/Lg/Log2/Log10 canonicalize to Log.
-        const nonNumeric = nonNumericOperandError(engine, ops);
-        if (nonNumeric !== undefined) return nonNumeric;
-        const evalArg = ops[0];
-        if (evalArg && isMeasurement(evalArg)) {
-          const base = ops[1] ?? engine.number(10);
-          const r = measurementLog(engine, evalArg, base);
-          return numericApproximation ? r?.N() : r;
-        }
-        if (!numericApproximation) return ops[0]?.ln(ops[1] ?? 10) ?? undefined;
-        const ce = engine;
-        // An exact argument or base outside the double range (`10^{400}`)
-        // has a logarithm in the double range. The quotient of the two
-        // natural logarithms is computed with big decimals.
-        {
-          const zBig = bigRealOf(
-            exactValueOutOfDoubleRange(ce, operandOf(expression, 0), ops[0])
-          );
-          const bBig =
-            ops[1] === undefined
-              ? undefined
-              : bigRealOf(
-                  exactValueOutOfDoubleRange(
-                    ce,
-                    operandOf(expression, 1),
-                    ops[1]
-                  )
-                );
-          if (zBig !== undefined || bBig !== undefined) {
-            const z = zBig ?? bigRealOf(ops[0]);
-            const b =
-              bBig ??
-              (ops[1] === undefined ? new BigDecimal(10) : bigRealOf(ops[1]));
-            if (
-              z !== undefined &&
-              b !== undefined &&
-              z.isPositive() &&
-              b.isPositive() &&
-              !b.eq(1)
-            )
-              return boxBignumResult(
-                ce,
-                withDoubleDigits(() => z.ln().div(b.ln()))
-              );
+      evaluate: guardDigitsN(
+        (ops, { numericApproximation, engine, expression }) => {
+          // Non-lazy: operands are already evaluated by the driver.
+          // Covers the whole log family: Lb/Lg/Log2/Log10 canonicalize to Log.
+          const nonNumeric = nonNumericOperandError(engine, ops);
+          if (nonNumeric !== undefined) return nonNumeric;
+          const evalArg = ops[0];
+          if (evalArg && isMeasurement(evalArg)) {
+            const base = ops[1] ?? engine.number(10);
+            const r = measurementLog(engine, evalArg, base);
+            return numericApproximation ? r?.N() : r;
           }
-        }
-        // The exceptional points answer their exact quotient values on the
-        // numeric route too (the machine kernels below would give the
-        // wrong sign at `Log(0, 1/2)` and NaN at `Log(8, −∞)`).
-        {
-          const special = logarithmAtExceptionalPoint(
-            ce,
+          if (!numericApproximation)
+            return ops[0]?.ln(ops[1] ?? 10) ?? undefined;
+          const ce = engine;
+          // An exact argument or base outside the double range (`10^{400}`)
+          // has a logarithm in the double range. The quotient of the two
+          // natural logarithms is computed with big decimals.
+          {
+            const zBig = bigRealOf(
+              exactValueOutOfDoubleRange(ce, operandOf(expression, 0), ops[0])
+            );
+            const bBig =
+              ops[1] === undefined
+                ? undefined
+                : bigRealOf(
+                    exactValueOutOfDoubleRange(
+                      ce,
+                      operandOf(expression, 1),
+                      ops[1]
+                    )
+                  );
+            if (zBig !== undefined || bBig !== undefined) {
+              const z = zBig ?? bigRealOf(ops[0]);
+              const b =
+                bBig ??
+                (ops[1] === undefined ? new BigDecimal(10) : bigRealOf(ops[1]));
+              if (
+                z !== undefined &&
+                b !== undefined &&
+                z.isPositive() &&
+                b.isPositive() &&
+                !b.eq(1)
+              )
+                return boxBignumResult(
+                  ce,
+                  withDoubleDigits(() => z.ln().div(b.ln()))
+                );
+            }
+          }
+          // The exceptional points answer their exact quotient values on the
+          // numeric route too (the machine kernels below would give the
+          // wrong sign at `Log(0, 1/2)` and NaN at `Log(8, −∞)`).
+          {
+            const special = logarithmAtExceptionalPoint(
+              ce,
+              ops[0],
+              ops[1] ?? ce.number(10)
+            );
+            if (special !== undefined) return special;
+          }
+          if (ops[1] === undefined)
+            return apply(
+              ops[0],
+              (x) =>
+                x === 0
+                  ? -Infinity
+                  : x >= 0
+                    ? Math.log10(x)
+                    : ce.complex(x).log().div(Math.LN10),
+              (x) =>
+                x.isZero()
+                  ? -Infinity
+                  : !x.isNegative()
+                    ? BigDecimal.log10(x)
+                    : ce.complex(x.toNumber()).log().div(Math.LN10),
+              (z) => (z.isZero() ? NaN : z.log().div(Math.LN10))
+            );
+          // A negative real argument OR base has a complex logarithm
+          // (`ln(−2) = ln 2 + iπ`); every lane routes it through the complex
+          // logarithm, so `Log(−2, 10).N()` and `Log(8, −2).N()` are the
+          // finite complex quotients and not NaN (a machine `Math.log` of a
+          // negative number is NaN). The bignum lane falls back to machine
+          // precision for a negative base: the quotient is then complex, and
+          // the complex lane is machine-only.
+          const lnOf = (v: number) =>
+            v < 0 ? ce.complex(v).log() : Math.log(v);
+          return apply2(
             ops[0],
-            ops[1] ?? ce.number(10)
+            ops[1],
+            (z, b) => {
+              // One kernel per base, shared with the compile targets
+              // (`BaseCompiler.fixedLogBase`): a base of 10 or 2 with a
+              // non-negative argument goes through `Math.log10` / `Math.log2`,
+              // so a folded `Log(x, 2)` and a compiled runtime one agree to the
+              // last bit. `ln(x) / ln(b)` differs from those kernels on about
+              // one argument in ten, and is one ulp off at the powers of the
+              // base (Tycho item 240). A zero argument answers `-oo` on both
+              // spellings.
+              if (z >= 0 && b === 10) return Math.log10(z);
+              if (z >= 0 && b === 2) return Math.log2(z);
+              const lz = lnOf(z);
+              const lb = lnOf(b);
+              if (typeof lz === 'number' && typeof lb === 'number')
+                return lz / lb;
+              return ce.complex(lz).div(lb);
+            },
+            (z, b) =>
+              z.isNegative() || b.isNegative()
+                ? ce.complex(lnOf(z.toNumber())).div(lnOf(b.toNumber()))
+                : z.log(b),
+            (z, b) => z.log().div(typeof b === 'number' ? lnOf(b) : b.log())
           );
-          if (special !== undefined) return special;
         }
-        if (ops[1] === undefined)
-          return apply(
-            ops[0],
-            (x) =>
-              x === 0
-                ? -Infinity
-                : x >= 0
-                  ? Math.log10(x)
-                  : ce.complex(x).log().div(Math.LN10),
-            (x) =>
-              x.isZero()
-                ? -Infinity
-                : !x.isNegative()
-                  ? BigDecimal.log10(x)
-                  : ce.complex(x.toNumber()).log().div(Math.LN10),
-            (z) => (z.isZero() ? NaN : z.log().div(Math.LN10))
-          );
-        // A negative real argument OR base has a complex logarithm
-        // (`ln(−2) = ln 2 + iπ`); every lane routes it through the complex
-        // logarithm, so `Log(−2, 10).N()` and `Log(8, −2).N()` are the
-        // finite complex quotients and not NaN (a machine `Math.log` of a
-        // negative number is NaN). The bignum lane falls back to machine
-        // precision for a negative base: the quotient is then complex, and
-        // the complex lane is machine-only.
-        const lnOf = (v: number) => (v < 0 ? ce.complex(v).log() : Math.log(v));
-        return apply2(
-          ops[0],
-          ops[1],
-          (z, b) => {
-            // One kernel per base, shared with the compile targets
-            // (`BaseCompiler.fixedLogBase`): a base of 10 or 2 with a
-            // non-negative argument goes through `Math.log10` / `Math.log2`,
-            // so a folded `Log(x, 2)` and a compiled runtime one agree to the
-            // last bit. `ln(x) / ln(b)` differs from those kernels on about
-            // one argument in ten, and is one ulp off at the powers of the
-            // base (Tycho item 240). A zero argument answers `-oo` on both
-            // spellings.
-            if (z >= 0 && b === 10) return Math.log10(z);
-            if (z >= 0 && b === 2) return Math.log2(z);
-            const lz = lnOf(z);
-            const lb = lnOf(b);
-            if (typeof lz === 'number' && typeof lb === 'number')
-              return lz / lb;
-            return ce.complex(lz).div(lb);
-          },
-          (z, b) =>
-            z.isNegative() || b.isNegative()
-              ? ce.complex(lnOf(z.toNumber())).div(lnOf(b.toNumber()))
-              : z.log(b),
-          (z, b) => z.log().div(typeof b === 'number' ? lnOf(b) : b.log())
-        );
-      },
+      ),
     },
 
     Lb: {
@@ -9598,102 +9606,131 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       },
       // x^n
       // evaluate: (ops) => ops[0].pow(ops[1]),
-      evaluate: ([x, n], { numericApproximation, engine, expression }) => {
-        // Non-lazy operator: operands arrive already evaluated by the driver
-        // (`_computeValue` step 4/`holdMap`) — do not re-evaluate them.
-        // Handler-side re-evaluation re-descends the whole (unmemoized)
-        // operand subtree; under nesting that compounded to 2^depth (the
-        // 2026-07-19 symbolic-recursion re-walk). Only LAZY operators
-        // (`Add`, `Multiply`, `Sum`, …) receive raw operands and own their
-        // evaluation.
-        const nonNumeric = nonNumericOperandError(engine!, [x, n]);
-        if (nonNumeric !== undefined) return nonNumeric;
-        // A tuple with a list coordinate is data, not a point: arithmetic
-        // over it is an error (see `listCoordinateTupleOperandError`).
-        const listTuple = listCoordinateTupleOperandError(engine!, [x, n]);
-        if (listTuple !== undefined) return listTuple;
-        // The exponent carrier, enforced at the evaluate seam (see the
-        // comment on the signature above): a `~oo` exponent — infinite
-        // with no signed direction — is off-carrier, and gets the same
-        // incompatible-type error value that boxing validation would have
-        // produced. `NaN` is not an error (it propagates), and the signed
-        // infinities are admitted values. The BASE slot needs no twin
-        // check: its carrier admits every non-finite number. When BOTH
-        // conditions hold — `Power(NaN, ~oo)` — the NaN wins: the
-        // dispatch-time NaN-propagation gate runs before this handler, so
-        // a NaN operand short-circuits the whole application (matching
-        // IEEE `pow(NaN, x) = NaN`); this check only ever sees NaN-free
-        // operands.
-        if (
-          isNumber(n) &&
-          n.isFinite === false &&
-          n.isNaN !== true &&
-          n.isPositive !== true &&
-          n.isNegative !== true
-        )
-          return engine!.typeError(POWER_EXPONENT_CARRIER_TYPE, n.type, n);
-        const evalBase = x;
-        // A power of a residue class is a class, or it stays unevaluated (a
-        // negative power of a class with no inverse, a call that is not a
-        // class yet, a base with a class inside it): the generic power reads
-        // `c^0` as 1 and `(1/c)^{-1}` as `c`.
-        if (containsResidueClass(evalBase)) {
-          // A class is exact: under `.N()`, a pure exponent is read from its
-          // exact value, not its approximation (`10^{20}` is not an exact
-          // integer as a float). See the same rule in `Divide`.
-          const original =
-            numericApproximation && expression && isFunction(expression)
-              ? expression.ops[1]
-              : undefined;
-          const exponent =
-            original !== undefined
-              ? exactOperands([original], [n], true)[0]
-              : n;
-          return residuePower(engine!, evalBase, exponent);
-        }
-        if (evalBase.operator === 'Quantity') {
-          const r = quantityPower(engine!, evalBase, n);
-          // An exact or Measurement magnitude is made numeric under `.N()`.
-          return numericApproximation ? r?.N() : r;
-        }
-        const evalExp = n;
-        if (
-          evalBase.operator === 'Measurement' ||
-          evalExp.operator === 'Measurement'
-        ) {
-          const r = measurementPower(engine!, evalBase, evalExp);
-          return numericApproximation ? r?.N() : r;
-        }
-        // Under `.N()`, an exact base raised to a large exact integer `k`: the
-        // relative error of the base is multiplied by `|k|`, so the float of
-        // `π` at 21 digits gives only 17 correct digits of `π^1000000`. The
-        // base is approximated again with `log10(|k|) + 2` more digits
-        // (`exactBaseIntegerPower()`).
-        if (numericApproximation) {
-          const r = exactBaseIntegerPower(expression);
-          if (r !== undefined) return r;
-        }
-        // D2: an inexact (float) base or exponent numericizes even under
-        // plain evaluate() — `Power(2, 5.1)` → 34.29…, matching `Cos(5.1)`.
-        // `isExactNumber` (not plain `isExact`) additionally protects the
-        // exact power path for a Gaussian-integer base still carried by the
-        // inexact lane (e.g. built from the machine `i` constant), so
-        // `(1+i)^2 = 2i` — WP-2.16. Exact complex literals (since D12-A)
-        // are already covered by `isExact`.
-        return pow(x, n, {
-          numericApproximation: shouldNumericize(numericApproximation, x, n),
-          // The node's own exponent, BEFORE numericization: `n` above may be a
-          // double by now, which loses the exact rational terms that decide the
-          // branch of a negative base. `expression.ops` are the raw operands
-          // this call's `[x, n]` were evaluated from, so `op2` is `n`'s
-          // provenance. (Absent when the handler is invoked outside the
-          // evaluation driver — `pow` then falls back to reconstruction.)
-          rawExponent:
-            expression !== undefined && isFunction(expression)
-              ? expression.op2
-              : undefined,
-        });
-      },
+      evaluate: guardDigitsN(
+        ([x, n], { numericApproximation, engine, expression }) => {
+          // Non-lazy operator: operands arrive already evaluated by the driver
+          // (`_computeValue` step 4/`holdMap`) — do not re-evaluate them.
+          // Handler-side re-evaluation re-descends the whole (unmemoized)
+          // operand subtree; under nesting that compounded to 2^depth (the
+          // 2026-07-19 symbolic-recursion re-walk). Only LAZY operators
+          // (`Add`, `Multiply`, `Sum`, …) receive raw operands and own their
+          // evaluation.
+          const nonNumeric = nonNumericOperandError(engine!, [x, n]);
+          if (nonNumeric !== undefined) return nonNumeric;
+          // A tuple with a list coordinate is data, not a point: arithmetic
+          // over it is an error (see `listCoordinateTupleOperandError`).
+          const listTuple = listCoordinateTupleOperandError(engine!, [x, n]);
+          if (listTuple !== undefined) return listTuple;
+          // The exponent carrier, enforced at the evaluate seam (see the
+          // comment on the signature above): a `~oo` exponent — infinite
+          // with no signed direction — is off-carrier, and gets the same
+          // incompatible-type error value that boxing validation would have
+          // produced. `NaN` is not an error (it propagates), and the signed
+          // infinities are admitted values. The BASE slot needs no twin
+          // check: its carrier admits every non-finite number. When BOTH
+          // conditions hold — `Power(NaN, ~oo)` — the NaN wins: the
+          // dispatch-time NaN-propagation gate runs before this handler, so
+          // a NaN operand short-circuits the whole application (matching
+          // IEEE `pow(NaN, x) = NaN`); this check only ever sees NaN-free
+          // operands.
+          if (
+            isNumber(n) &&
+            n.isFinite === false &&
+            n.isNaN !== true &&
+            n.isPositive !== true &&
+            n.isNegative !== true
+          )
+            return engine!.typeError(POWER_EXPONENT_CARRIER_TYPE, n.type, n);
+          const evalBase = x;
+          // A power of a residue class is a class, or it stays unevaluated (a
+          // negative power of a class with no inverse, a call that is not a
+          // class yet, a base with a class inside it): the generic power reads
+          // `c^0` as 1 and `(1/c)^{-1}` as `c`.
+          if (containsResidueClass(evalBase)) {
+            // A class is exact: under `.N()`, a pure exponent is read from its
+            // exact value, not its approximation (`10^{20}` is not an exact
+            // integer as a float). See the same rule in `Divide`.
+            const original =
+              numericApproximation && expression && isFunction(expression)
+                ? expression.ops[1]
+                : undefined;
+            const exponent =
+              original !== undefined
+                ? exactOperands([original], [n], true)[0]
+                : n;
+            return residuePower(engine!, evalBase, exponent);
+          }
+          if (evalBase.operator === 'Quantity') {
+            const r = quantityPower(engine!, evalBase, n);
+            // An exact or Measurement magnitude is made numeric under `.N()`.
+            return numericApproximation ? r?.N() : r;
+          }
+          const evalExp = n;
+          if (
+            evalBase.operator === 'Measurement' ||
+            evalExp.operator === 'Measurement'
+          ) {
+            const r = measurementPower(engine!, evalBase, evalExp);
+            return numericApproximation ? r?.N() : r;
+          }
+          // Under `.N()`, an exact base raised to a large exact integer `k`: the
+          // relative error of the base is multiplied by `|k|`, so the float of
+          // `π` at 21 digits gives only 17 correct digits of `π^1000000`. The
+          // base is approximated again with `log10(|k|) + 2` more digits
+          // (`exactBaseIntegerPower()`).
+          if (numericApproximation) {
+            const r = exactBaseIntegerPower(expression);
+            if (r !== undefined) return r;
+          }
+          // D2: an inexact (float) base or exponent numericizes even under
+          // plain evaluate() — `Power(2, 5.1)` → 34.29…, matching `Cos(5.1)`.
+          // `isExactNumber` (not plain `isExact`) additionally protects the
+          // exact power path for a Gaussian-integer base still carried by the
+          // inexact lane (e.g. built from the machine `i` constant), so
+          // `(1+i)^2 = 2i` — WP-2.16. Exact complex literals (since D12-A)
+          // are already covered by `isExact`.
+          //
+          // Under `.N()`, `e^y` for a finite real `y` is `exp(y)`, as in
+          // `pow()`. Here the base is recognized from the operand as written
+          // (`ExponentialE`): `pow()` recognizes the float of `e` by its
+          // identity with `ce.E.N()`, and that float is another object while
+          // the handler runs with guard digits, at a raised precision. A user
+          // declaration of the name `ExponentialE` with another value is not
+          // `e` (`isShadowedSymbol()`), so its power is computed by `pow()`.
+          if (
+            numericApproximation &&
+            isFunction(expression) &&
+            isSymbol(expression.op1, 'ExponentialE') &&
+            !isShadowedSymbol(expression.op1) &&
+            isNumber(x) &&
+            x.re > 2.718 &&
+            x.re < 2.719 &&
+            isNumber(n) &&
+            !n.isComplex &&
+            n.isFinite === true
+          )
+            return engine.number(engine._numericValue(n.numericValue).exp());
+          return pow(x, n, {
+            numericApproximation: shouldNumericize(numericApproximation, x, n),
+            // The node's own exponent, BEFORE numericization: `n` above may be a
+            // double by now, which loses the exact rational terms that decide the
+            // branch of a negative base. `expression.ops` are the raw operands
+            // this call's `[x, n]` were evaluated from, so `op2` is `n`'s
+            // provenance. (Absent when the handler is invoked outside the
+            // evaluation driver — `pow` then falls back to reconstruction.)
+            rawExponent:
+              expression !== undefined && isFunction(expression)
+                ? expression.op2
+                : undefined,
+          });
+        },
+        // The base `e` is not approximated again: `exp()` of the exponent
+        // does not read it, and `pow()` reads the exact multiples of π in an
+        // imaginary exponent (`e^{i·10^{20}·π}`) only when the base is the
+        // float of `e` at the working precision.
+        (original, index) =>
+          !(index === 0 && isSymbol(original, 'ExponentialE'))
+      ),
       // Defined as RealNumbers for all power in RealNumbers when base > 0;
       // when x < 0, only defined if n is an integer
       // if x is a non-zero complex, defined as ComplexNumbers
@@ -9931,58 +9968,60 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // The canonical form is the one `makeNumericFunction` (`box.ts`) also
       // computes by name. See `numericCanonicalHandler`.
       canonical: numericCanonicalHandler('Root'),
-      evaluate: ([x, n], { numericApproximation, engine, expression }) => {
-        // Non-lazy: operands are already evaluated by the driver.
-        const nonNumeric = nonNumericOperandError(engine, [x, n]);
-        if (nonNumeric !== undefined) return nonNumeric;
-        const evalX = x;
-        if (evalX.operator === 'Quantity') {
-          const nVal = n.re;
-          if (nVal !== undefined && nVal !== 0) {
-            // For an integer index, the exact `1/n`, not a float: the root of
-            // an exact magnitude stays exact under `evaluate()`.
-            const r = quantityPower(
-              engine,
-              evalX,
-              Number.isInteger(nVal)
-                ? engine.number([1, nVal])
-                : engine.number(1 / nVal)
+      evaluate: guardDigitsN(
+        ([x, n], { numericApproximation, engine, expression }) => {
+          // Non-lazy: operands are already evaluated by the driver.
+          const nonNumeric = nonNumericOperandError(engine, [x, n]);
+          if (nonNumeric !== undefined) return nonNumeric;
+          const evalX = x;
+          if (evalX.operator === 'Quantity') {
+            const nVal = n.re;
+            if (nVal !== undefined && nVal !== 0) {
+              // For an integer index, the exact `1/n`, not a float: the root of
+              // an exact magnitude stays exact under `evaluate()`.
+              const r = quantityPower(
+                engine,
+                evalX,
+                Number.isInteger(nVal)
+                  ? engine.number([1, nVal])
+                  : engine.number(1 / nVal)
+              );
+              // Under `.N()` the magnitude is a float.
+              if (numericApproximation && r && isQuantity(r)) return r.N();
+              return r;
+            }
+          }
+          if (isMeasurement(evalX)) {
+            const r = measurementRoot(engine, evalX, n);
+            return numericApproximation ? r?.N() : r;
+          }
+          // An exact radicand outside the double range (`10^{-900}`) can have
+          // a root in the double range (`Root(10^{-900}, 3)` is `1e-300`). The
+          // root is computed with big decimals, as `exp(ln(x) / n)`. A negative
+          // radicand has a real root only for an odd integer index.
+          if (numericApproximation && isNumber(n) && !n.isComplex) {
+            const big = bigRealOf(
+              exactValueOutOfDoubleRange(engine, operandOf(expression, 0), x)
             );
-            // Under `.N()` the magnitude is a float.
-            if (numericApproximation && r && isQuantity(r)) return r.N();
-            return r;
+            const k = n.re;
+            if (
+              big !== undefined &&
+              Number.isFinite(k) &&
+              k !== 0 &&
+              (!big.isNegative() || (Number.isInteger(k) && k % 2 !== 0))
+            ) {
+              const r = withDoubleDigits(() => big.abs().ln().div(k).exp());
+              return boxBignumResult(engine, big.isNegative() ? r.neg() : r);
+            }
           }
+          // D2: an inexact (float) radicand or index numericizes even under
+          // plain evaluate() — `Root(5.1, 3)` → 1.721…; `isExactNumber`
+          // protects an exact Gaussian-integer radicand (see `Power`).
+          return root(x, n, {
+            numericApproximation: shouldNumericize(numericApproximation, x, n),
+          });
         }
-        if (isMeasurement(evalX)) {
-          const r = measurementRoot(engine, evalX, n);
-          return numericApproximation ? r?.N() : r;
-        }
-        // An exact radicand outside the double range (`10^{-900}`) can have
-        // a root in the double range (`Root(10^{-900}, 3)` is `1e-300`). The
-        // root is computed with big decimals, as `exp(ln(x) / n)`. A negative
-        // radicand has a real root only for an odd integer index.
-        if (numericApproximation && isNumber(n) && !n.isComplex) {
-          const big = bigRealOf(
-            exactValueOutOfDoubleRange(engine, operandOf(expression, 0), x)
-          );
-          const k = n.re;
-          if (
-            big !== undefined &&
-            Number.isFinite(k) &&
-            k !== 0 &&
-            (!big.isNegative() || (Number.isInteger(k) && k % 2 !== 0))
-          ) {
-            const r = withDoubleDigits(() => big.abs().ln().div(k).exp());
-            return boxBignumResult(engine, big.isNegative() ? r.neg() : r);
-          }
-        }
-        // D2: an inexact (float) radicand or index numericizes even under
-        // plain evaluate() — `Root(5.1, 3)` → 1.721…; `isExactNumber`
-        // protects an exact Gaussian-integer radicand (see `Power`).
-        return root(x, n, {
-          numericApproximation: shouldNumericize(numericApproximation, x, n),
-        });
-      },
+      ),
     },
 
     Remainder: {
@@ -10512,61 +10551,63 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (x.sgn === 'not-zero') return 'not-zero';
         return undefined;
       },
-      evaluate: ([x], { numericApproximation, engine, expression }) => {
-        // Non-lazy: `x` is already evaluated by the driver.
-        const nonNumeric = nonNumericOperandError(engine, [x]);
-        if (nonNumeric !== undefined) return nonNumeric;
-        const evalX = x;
-        if (evalX.operator === 'Quantity') {
-          // The exact one half, not the float 0.5: the root of an exact
-          // magnitude stays exact under `evaluate()`.
-          const r = quantityPower(engine, evalX, engine.Half);
-          // Under `.N()` the magnitude is a float: `√2 m` is `1.414… m`.
-          if (numericApproximation && r && isQuantity(r)) return r.N();
-          return r;
-        }
-
-        if (isMeasurement(evalX)) {
-          const r = measurementSqrt(engine, evalX);
-          return numericApproximation ? r?.N() : r;
-        }
-
-        if (!numericApproximation) return sqrtOfSquareFactors(x) ?? x.sqrt();
-
-        // An exact radicand outside the double range (`10^{-401}`) can have
-        // a square root in the double range (`3.16e-201`).
-        {
-          const big = bigRealOf(
-            exactValueOutOfDoubleRange(engine, operandOf(expression, 0), x)
-          );
-          if (big !== undefined) {
-            const r = withDoubleDigits(() => big.abs().sqrt());
-            if (!big.isNegative()) return boxBignumResult(engine, r);
-            // The root is a float, even when it is an integer
-            return engine.number(
-              engine._inexactNumericValue({ re: 0, im: r.toNumber() })
-            );
+      evaluate: guardDigitsN(
+        ([x], { numericApproximation, engine, expression }) => {
+          // Non-lazy: `x` is already evaluated by the driver.
+          const nonNumeric = nonNumericOperandError(engine, [x]);
+          if (nonNumeric !== undefined) return nonNumeric;
+          const evalX = x;
+          if (evalX.operator === 'Quantity') {
+            // The exact one half, not the float 0.5: the root of an exact
+            // magnitude stays exact under `evaluate()`.
+            const r = quantityPower(engine, evalX, engine.Half);
+            // Under `.N()` the magnitude is a float: `√2 m` is `1.414… m`.
+            if (numericApproximation && r && isQuantity(r)) return r.N();
+            return r;
           }
+
+          if (isMeasurement(evalX)) {
+            const r = measurementSqrt(engine, evalX);
+            return numericApproximation ? r?.N() : r;
+          }
+
+          if (!numericApproximation) return sqrtOfSquareFactors(x) ?? x.sqrt();
+
+          // An exact radicand outside the double range (`10^{-401}`) can have
+          // a square root in the double range (`3.16e-201`).
+          {
+            const big = bigRealOf(
+              exactValueOutOfDoubleRange(engine, operandOf(expression, 0), x)
+            );
+            if (big !== undefined) {
+              const r = withDoubleDigits(() => big.abs().sqrt());
+              if (!big.isNegative()) return boxBignumResult(engine, r);
+              // The root is a float, even when it is an integer
+              return engine.number(
+                engine._inexactNumericValue({ re: 0, im: r.toNumber() })
+              );
+            }
+          }
+
+          // An infinite radicand — a named infinity, or an "anonymous" one
+          // with an infinite component (`∞ + i`) — has an exact value on the
+          // numeric route too (`BoxedNumber.sqrt()`); the numeric-value
+          // kernel below answers NaN for `~oo` and `∞ − ∞` for `∞ + i`.
+          if (
+            isNumber(x) &&
+            (x.isInfinity === true || hasInfiniteComponent(x.numericValue))
+          )
+            return x.sqrt();
+
+          const [c, rest] = x.toNumericValue();
+          const cSqrt = engine.number(c.sqrt().N());
+          if (rest.isSame(1)) return cSqrt;
+          // √(c·rest) = √c · √rest. The square root must be applied to the
+          // symbolic part too — returning `rest` un-rooted dropped the radical
+          // (e.g. √(4y) → 2y instead of 2√y, and Sqrt(y).N() → y instead of √y).
+          return cSqrt.mul(rest.sqrt());
         }
-
-        // An infinite radicand — a named infinity, or an "anonymous" one
-        // with an infinite component (`∞ + i`) — has an exact value on the
-        // numeric route too (`BoxedNumber.sqrt()`); the numeric-value
-        // kernel below answers NaN for `~oo` and `∞ − ∞` for `∞ + i`.
-        if (
-          isNumber(x) &&
-          (x.isInfinity === true || hasInfiniteComponent(x.numericValue))
-        )
-          return x.sqrt();
-
-        const [c, rest] = x.toNumericValue();
-        const cSqrt = engine.number(c.sqrt().N());
-        if (rest.isSame(1)) return cSqrt;
-        // √(c·rest) = √c · √rest. The square root must be applied to the
-        // symbolic part too — returning `rest` un-rooted dropped the radical
-        // (e.g. √(4y) → 2y instead of 2√y, and Sqrt(y).N() → y instead of √y).
-        return cSqrt.mul(rest.sqrt());
-      },
+      ),
       // evalDomain: Square root of a prime is irrational
       // https://proofwiki.org/wiki/Square_Root_of_Prime_is_Irrational
     },

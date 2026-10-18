@@ -75,7 +75,8 @@ function occursAsHead(node: MathJsonExpression | null, name: string): boolean {
  * - `Limit(expr, x, point)` is typed `(function, point)` — the
  *   three-operand form is canonicalized into it — so the variable is
  *   operand 1 of a three-operand call only;
- * - `Solve(eq, x)` and `Solve(eqs, [x, y])` are `(any, any*)`;
+ * - `Solve(eq, x)` and `Solve(eqs, [x, y])` are `(any, any*)`, and so are
+ *   the operands of `NSolve`;
  * - `JacobianMatrix(fs, [x, y])` and `CharacteristicPolynomial(A, x)` take
  *   the variable(s) as `any` (an undeclared symbol is inferred numeric,
  *   which a `symbol` signature would reject — the handlers say so);
@@ -102,6 +103,7 @@ const VARIABLE_OPERAND_POSITIONS: ReadonlyMap<
 > = new Map<string, (ops: readonly MathJsonExpression[]) => readonly number[]>([
   ['Limit', (ops) => (ops.length >= 3 ? [1] : [])],
   ['Solve', (ops) => range(1, ops.length)],
+  ['NSolve', (ops) => range(1, ops.length)],
   ['JacobianMatrix', () => [1]],
   ['CharacteristicPolynomial', () => [1]],
   ['FindRoot', () => [1]],

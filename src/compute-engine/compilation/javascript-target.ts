@@ -1681,6 +1681,14 @@ function compileJSCollectionBoolean(
  * list arm of the wrong length and answered `NaN`. An arm whose TYPE may be
  * a point (`mayBePointArm`) is therefore wrapped (`_SYS.wholeArm`), and the
  * helper lifts the wrapped value whole.
+ *
+ * A position that no clause matched gets the absence value of the CELL type
+ * (`BaseCompiler.absenceKind`): `NaN` for a number cell, and the object null
+ * `undefined` when every arm gives a cell that is not a number — a point
+ * lifted whole, a list of points, a string. A single missing point is
+ * `undefined` too, and so is a missing cell of the list form of `When`, so
+ * the forms agree. `absent` carries that value to the generic branch behind
+ * the fused loop's guard, which is compiled without the target.
  */
 function compileJSSelection(
   args: ReadonlyArray<Expression>,
@@ -1688,7 +1696,8 @@ function compileJSSelection(
   target?: CompileTarget<Expression>,
   compileUnder?: (
     derived: CompileTarget<Expression>
-  ) => OperandCompiler<Expression>
+  ) => OperandCompiler<Expression>,
+  absent?: string
 ): string | null {
   const conds = args.filter((_x, i) => i % 2 === 0);
   const collectionish = (a: Expression): boolean =>
@@ -1696,6 +1705,25 @@ function compileJSSelection(
     a.type.matches('collection<any>') ||
     isPossiblyCollectionTypedJS(a);
   if (!conds.some(collectionish)) return null;
+  if (target && absent === undefined) {
+    // The cell of an arm: a point arm is lifted whole, a list arm is indexed
+    // (its element), and a scalar arm is lifted.
+    const cellTypes = args
+      .filter((_x, i) => i % 2 === 1)
+      .map((x) => {
+        const t = x.type.type;
+        if (mayBePointArm(t)) return t;
+        if (isSubtype(t, 'indexed_collection<any>'))
+          return collectionElementType(t) ?? 'unknown';
+        return t;
+      });
+    const nullLiteral = target.absence?.object?.nullLiteral;
+    absent =
+      nullLiteral !== undefined &&
+      BaseCompiler.absenceKind(cellTypes, target) === 'object'
+        ? nullLiteral
+        : 'NaN';
+  }
   if (target) {
     // The generic branch behind the fused loop's guard keeps the operand
     // indices (`compileUnder`), so its lazy positions get their CSE region
@@ -1706,7 +1734,10 @@ function compileJSSelection(
       compileJSSelection(
         args,
         compileUnder?.(fallbackTarget) ??
-          ((expr) => BaseCompiler.compileValueOperand(expr, fallbackTarget))
+          ((expr) => BaseCompiler.compileValueOperand(expr, fallbackTarget)),
+        undefined,
+        undefined,
+        absent
       )!
     );
     if (fused !== undefined) return fused;
@@ -1718,7 +1749,11 @@ function compileJSSelection(
   // An arm the type proves to be one POINT is an array at this ABI, exactly
   // like a list arm, so the helper could not tell which to index and which
   // to lift whole; the wrapper says so (`WholeArm`).
-  return `_SYS.select(${args
+  const head =
+    absent === undefined || absent === 'NaN'
+      ? '_SYS.select('
+      : `_SYS.selectAbsent(${absent}, `;
+  return `${head}${args
     .map((x, i) =>
       i % 2 === 1 && mayBePointArm(x.type.type)
         ? `() => _SYS.wholeArm(${compile(x, i)})`
@@ -4039,8 +4074,11 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     return `Math.cos(${compile(args[0])})`;
   },
   Cosh: (args, compile, target) => {
-    if (BaseCompiler.isComplexValued(args[0]))
+    if (BaseCompiler.isComplexValued(args[0])) {
+      const u = BaseCompiler.imaginaryPiMultiple(args[0]);
+      if (u !== undefined) return `_SYS.ccoshipi(${compile(u)})`;
       return complexUnary(target, '_SYS.ccosh', compile(args[0]));
+    }
     return `Math.cosh(${compile(args[0])})`;
   },
   Cot: ([x], compile, target) => {
@@ -4051,8 +4089,11 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   Coth: ([x], compile, target) => {
     if (x === null) throw new Error('Could not compile `Coth`: no argument');
-    if (BaseCompiler.isComplexValued(x))
+    if (BaseCompiler.isComplexValued(x)) {
+      const u = BaseCompiler.imaginaryPiMultiple(x);
+      if (u !== undefined) return `_SYS.ccothipi(${compile(u)})`;
       return complexUnary(target, '_SYS.ccoth', compile(x));
+    }
     return BaseCompiler.inlineExpression(
       target,
       '(Math.cosh(${x}) / Math.sinh(${x}))',
@@ -4067,8 +4108,11 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   Csch: ([x], compile, target) => {
     if (x === null) throw new Error('Could not compile `Csch`: no argument');
-    if (BaseCompiler.isComplexValued(x))
+    if (BaseCompiler.isComplexValued(x)) {
+      const u = BaseCompiler.imaginaryPiMultiple(x);
+      if (u !== undefined) return `_SYS.ccschipi(${compile(u)})`;
       return complexUnary(target, '_SYS.ccsch', compile(x));
+    }
     return `1 / Math.sinh(${compile(x)})`;
   },
   Exp: (args, compile, target) => {
@@ -7402,8 +7446,11 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Sech: (args, compile, target) => {
     const arg = args[0];
     if (arg === null) throw new Error('Could not compile `Sech`: no argument');
-    if (BaseCompiler.isComplexValued(arg))
+    if (BaseCompiler.isComplexValued(arg)) {
+      const u = BaseCompiler.imaginaryPiMultiple(arg);
+      if (u !== undefined) return `_SYS.csechipi(${compile(u)})`;
       return complexUnary(target, '_SYS.csech', compile(arg));
+    }
     return `1 / Math.cosh(${compile(arg)})`;
   },
   /** A string source is segmented first — see `First`. */
@@ -7427,8 +7474,11 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     return `Math.sin(${compile(args[0])})`;
   },
   Sinh: (args, compile, target) => {
-    if (BaseCompiler.isComplexValued(args[0]))
+    if (BaseCompiler.isComplexValued(args[0])) {
+      const u = BaseCompiler.imaginaryPiMultiple(args[0]);
+      if (u !== undefined) return `_SYS.csinhipi(${compile(u)})`;
       return complexUnary(target, '_SYS.csinh', compile(args[0]));
+    }
     return `Math.sinh(${compile(args[0])})`;
   },
   Sqrt: (args, compile, target) => {
@@ -7473,8 +7523,11 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     return `_SYS.tan(${compile(args[0])})`;
   },
   Tanh: (args, compile, target) => {
-    if (BaseCompiler.isComplexValued(args[0]))
+    if (BaseCompiler.isComplexValued(args[0])) {
+      const u = BaseCompiler.imaginaryPiMultiple(args[0]);
+      if (u !== undefined) return `_SYS.ctanhipi(${compile(u)})`;
       return complexUnary(target, '_SYS.ctanh', compile(args[0]));
+    }
     return `Math.tanh(${compile(args[0])})`;
   },
   /** A string source is segmented first — see `First`. */

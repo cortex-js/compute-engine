@@ -922,6 +922,31 @@ N(exp(100), [positiveInfinity, 20])
 // ➔ 2.688117141816135448412625551580013587361111877374192241519160862e+43
 ```
 
+### nSolve
+
+MathJSON `NSolve` · `(any, any*) -> list`
+
+NSolve(equation, unknown): the solutions of an equation as floats.
+
+It is Mathematica `NSolve`: it takes the same operands as `Solve`,
+
+including domain specs and systems of equations, and gives the `N` of
+
+each solution of `Solve`:
+
+`NSolve(x^2 == 2, x)` → `[1.414…, -1.414…]`. When `Solve` finds no
+
+solution set, `NSolve` stays unevaluated: for a polynomial `Solve`
+
+already gives numeric roots when there is no closed form, and
+
+`FindRoot` gives one local root from a start value.
+
+```epsil
+nSolve(x^2 == 2, x)
+// ➔ [1.4142135623730950488,-1.4142135623730950488]
+```
+
 ### NamedArgument
 
 `(string, any) -> nothing`

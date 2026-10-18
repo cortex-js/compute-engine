@@ -711,6 +711,7 @@ describe('every lazy operator with a synchronous handler is accounted for', () =
     'NDSolve',
     'NIntegrate',
     'NLimit',
+    'NSolve',
     'Numerator',
     'NumeratorDenominator',
     'NumericApproximation',

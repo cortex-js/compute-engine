@@ -135,137 +135,6 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
   is boxed with the library constant again, so the gap is limited to a JSON
   round trip inside the scope.
 
-### A block local keeps its value from one evaluation of the block to the next (OPEN, wrong value — found 2026-10-18)
-
-With `x` not declared, `Block(x ≔ x + 1; 2x)` gives `2(x + 1)` on the first
-`evaluate()` and `2(x + 2)` on the second. Each evaluation must give `2(x + 1)`:
-the block must start from the same state each time. The cause is probably in the
-`Block` evaluate handler (`evaluateBlock`, `library/control-structures.ts`). At
-the start of an evaluation, `sweepCanonicalizationBindings` removes only the
-block bindings that have no value, and `createBlockLocals` replaces only the
-locals made by a `Declare` statement. The binding that the first `Assign` made
-for `x` has the value `x + 1`, so it stays, and the second evaluation reads it.
-
-### A lazy `Filter` gives the elements of its source as they are written (OPEN, wrong value — found 2026-10-18)
-
-With `x := 5`, `Element(5, Filter([x], y ↦ y > 0))` is `False`, and
-`First(Filter([x], y ↦ y > 0))` is `x`. The correct results are `True` and `5`:
-the filter keeps the value of the element, which is `5`. When the source has an
-element that can erase (evaluate to `Nothing`), the same `Element` test gives
-`True`, so the result depends on an unrelated element. The cause is in the lazy
-`Filter` handlers in `library/collections.ts`: they give the element as it is
-written in the source, not its value.
-
-### Python `compile()` drops the `else` value of an `If` with a `Break` branch (OPEN, decided 2026-10-18 — found 2026-10-18)
-
-The Python target compiles `If(x > 0, Break, 1)` without the value `1` of the
-`else` branch. The same occurs when the branch is a `Continue` or a `Loop`. The
-test "a single-statement Block around a control-flow arm is read through" in
-`test/compute-engine/compile-python.test.ts` pins this output today.
-
-The question: what must the Python target do with this shape?
-
-- Option A: decline the shape (the compilation fails and the caller uses the
-  interpreter). The test changes to expect the refusal.
-- Option B: keep today's output, which drops the `else` value.
-
-If nothing is decided, option B stays in effect.
-
-**User decision 2026-10-18:** decline the shape: Python `compile()` refuses a
-selection that mixes a control-flow branch (`Break`, `Continue`, a loop) with a
-value branch, and the expression runs through the interpreter; the pinned test
-in `compile-python.test.ts` changes.
-
-### `Count`, `Length` and `IsEmpty` of a `Sort` of a set give a count where `Sort` gives an error (OPEN, decided 2026-10-18 — found 2026-10-18)
-
-At boxing, `Count`, `Length` and `IsEmpty` look through `Sort`, `Reverse` and
-`RandomShuffle` to the collection inside (`peekWrappers`,
-`library/collections.ts`). With `c := Set(3, 1, 5)`, `Count(Sort(c))` is `3`,
-but `Sort(c)` alone is an `incompatible-type` error, because a set has no order.
-
-The question: must the look-through stop for a source that is not an indexed
-collection?
-
-- Option A: look through only when the type of the source is known to be an
-  indexed collection. Then `Count(Sort(c))` is the same error as `Sort(c)`.
-  Cost: `Count(Sort(x))` with `x` of type `unknown` that holds a long list then
-  sorts the list to count it.
-- Option B: keep today's behavior and document that the count of a sort of a set
-  is the count of the set.
-
-If nothing is decided, option B stays in effect.
-
-**User decision 2026-10-18:** look through `Sort`, `Reverse` and `RandomShuffle`
-only when the source type is known to be indexed, so `Count(Sort(c))` for a set
-`c` is the same error as `Sort(c)`; the cost (sorting an untyped list before
-counting it) is accepted.
-
-### Elementary functions round an exact operand under `.N()` (OPEN, decided 2026-10-18 — found 2026-10-18)
-
-At `ce.precision = 50`, `Ln(1/3).N()` ends `…228`; the correct value ends
-`…227`. `.N()` evaluates each operand numerically first, so `1/3` reaches the
-function as a 50-digit decimal, and the rounding error of the operand reaches
-the last digit of the result. `Exp`, `Arctan`, `Sin`, `Sinc` and `Power(x, 1/3)`
-have the same defect. Since 2026-10-18 the 28 special functions read their exact
-operand with guard digits (`guardDigitsN`, `library/exact-operands-under-n.ts`),
-so their last digit is correct.
-
-The question: must the elementary functions use `guardDigitsN` too?
-
-- Option A: yes. The last digit becomes correct. Cost: these functions are
-  frequent, and each `.N()` of an exact operand then evaluates the operand at a
-  higher precision.
-- Option B: no. Document that the last digit of an elementary function of an
-  exact operand under `.N()` can be wrong by one unit.
-
-If nothing is decided, option B stays in effect.
-
-**User decision 2026-10-18:** use `guardDigitsN` for an exact non-integer
-operand of the elementary functions too (`Ln`, `Exp`, `Log`, the trigonometric
-and hyperbolic functions and their inverses, `Sinc`, `Power` with an exact
-non-integer exponent), so `Ln(1/3).N()` at 50 digits ends `…227`; a float or
-integer operand is not affected.
-
-### `Map(Sin, [H]).N()` of a large exact rational takes 5.7 seconds (OPEN, decided 2026-10-18 — found 2026-10-18)
-
-With `H = Sum(1/k, k, 1, 6000)` (an exact rational with about 2 600 digits),
-`Map(Sin, [H]).N()` takes 5.7 s, where `Sin([H]).N()` takes about 45 ms. The
-cause is `makeSpineRunner` (`library/map-lowering.ts`): it evaluates each
-argument exactly, so that a callback that is a jump function (such as `Floor`)
-gets the exact element and gives the correct integer.
-
-The question: must `Map` read the arguments numerically when the callback is not
-a jump function?
-
-- Option A: yes. `Map(Sin, [H]).N()` costs about as much as `Sin([H]).N()`;
-  `Map(Floor, [H]).N()` still reads the exact element.
-- Option B: no. Keep the exact evaluation for every callback.
-
-If nothing is decided, option B stays in effect.
-
-**User decision 2026-10-18:** under `.N()`, a lazy `Map` reads its arguments
-numerically when the callback is not, and does not contain, a jump function
-(`Floor`, `Mod`, a comparison, …); a jump callback still reads them exactly.
-
-### Compiled JavaScript writes `NaN` in a list cell for a missing point (OPEN, decided 2026-10-18 — found 2026-10-18)
-
-When a `When` or `Which` over a list selects no clause at a position where the
-value is a point, the interpreter gives `Missing` in that cell. The compiled
-JavaScript function writes `NaN` in the cell. A compiled read at one index of
-the same selection gives `undefined`.
-
-The question: must the compiled list write `undefined` in such a cell?
-
-- Option A: yes. The list cell and the read at one index agree, and both
-  correspond to the `Missing` of the interpreter.
-- Option B: no. Keep `NaN` and document the difference.
-
-If nothing is decided, option B stays in effect.
-
-**User decision 2026-10-18:** a missing point in a compiled list cell is
-`undefined`, as a single missing point and the interpreter's `Missing` are; a
-number cell stays `NaN`.
-
 ### Smaller defects found on 2026-10-18 (batch 5) (OPEN, small)
 
 - The machine kernel of `GammaRegularized(a, z)` (`gammaQ` in
@@ -286,15 +155,6 @@ number cell stays `NaN`.
   result unit is the one with the largest scale, and the offset of each operand
   is applied). A decision is needed on what such a sum means (an error, or a
   difference of temperatures).
-- On the shader targets, the block route can write an input: when an enclosing
-  engine scope binds `u` (a global `ce.declare('u', 'real')`, or a `u` read
-  after a loop, which the canonical form binds in the outer block),
-  `withImplicitLocalDeclares` → `scopeChainBinds`
-  (`compilation/base-compiler.ts`) writes `u = …;` without a declaration,
-  possibly to a read-only uniform; the interpreter's loop does not change the
-  outer `u`. Since 2026-10-18 the lone-statement loop route declares `u`, so the
-  two routes differ there.
-
 - Lazy operators over a list with a condition (`[1,3,5]{0<t}`, which boxes to a
   `When`) do not thread the condition. `TakeWhile`, `DropWhile`, `Scan`,
   `ArgMax` and `Differences` give
@@ -306,13 +166,6 @@ number cell stays `NaN`.
   definition has no `threadsConditionals` or `missingStrip` flag (`Insert` has
   them). `IndexWhere` over such a list stays unevaluated.
   `Take([1,3,5]{0<t}, 1)` gives an unevaluated `Take(…) {0<t}`.
-- WGSL `compileFunction()` declines `Block(s ≔ x; Block(t ≔ s + 1))`. GLSL
-  `compileFunction()` compiles it. The WGSL target must compile it too.
-- In a JavaScript loop body, a chained assignment to an undeclared `u` writes
-  into the `vars` object of the caller (`t = _.u = …`). The value is correct,
-  but the compiled function must not change the caller's object. The cause: the
-  loop-body compilation does not go through `compileBlock`, which declares the
-  block locals.
 - The Python target normalizes identifiers with NFKC, so `ﬁ` (one ligature
   character) and `fi` become the same name in compiled Python. Two different
   symbols must stay two different names.
@@ -330,6 +183,129 @@ number cell stays `NaN`.
   `m^{0.5}`) in both directions.
 - `UnitConvert(Quantity(20, degC), degF)` gives `67.99999999999994`; the correct
   value is `68`. The cause: the conversion data in `unit-data.ts` are floats.
+
+### Decisions of 2026-10-18 (second set) that wait for implementation (OPEN, decided 2026-10-18)
+
+- **A finite collection with no count may be walked to answer a read that needs
+  the count.** `FlatMap([1, 2, 3], x ↦ [x, x])` is finite, but it has no `count`
+  facet, because its count is known only after the callback is applied to each
+  element, and a facet must not apply the callback. Today
+  `Last(FlatMap([1, 2, 3], x ↦ [x, x]))` stays unevaluated. Decision: `Count`,
+  `Length`, `IsEmpty`, `Last`, a negative index, `Reverse`, `Most`, `RotateLeft`
+  and `RotateRight` may walk such a collection outside the facets, so
+  `Last(FlatMap([1, 2, 3], x ↦ [x, x]))` gives `3`. Each of these reads walks
+  the whole collection. `Reverse` must list the collection once, and must not
+  read it from the end one index at a time.
+- **The big operators accept the iterator `{i, n}`.** `Table` accepts the
+  Mathematica iterator `{i, n}` (`i` goes from 1 to `n`). `Sum(f, {i, n})`,
+  `Product` and the other big operators must accept it too. Also, the LaTeX
+  parenthesized specification `(i, 1, 10)` must be read as a tuple: today
+  `\mathrm{Sum}(i, (i,1,10))` gives `Sum(Complex(0,1), Error("missing"))`, and
+  the correct result is `55`. The cause: `binding-sites.ts` and
+  `canonicalIndexingSet()` in `library/utils.ts` do not read
+  `Delimiter(Sequence(…), "(,)")`.
+- **Compiled JavaScript copies an input into a local before it writes it.** When
+  an engine scope binds `u` (for example `ce.declare('u', 'real')`) and the
+  expression assigns `u`, the compiled code writes `_.u = …` into the `vars`
+  object that the caller gives. Decision: the compiled code writes a local copy
+  of `u`, so the object of the caller never changes. The cause is probably
+  `scopeChainBinds` (`compilation/base-compiler.ts`): it sees the outer binding
+  of `u` and does not declare a local.
+
+### Smaller defects and questions found on 2026-10-18 (batch 6) (OPEN, small)
+
+- `BigDecimal.sub` throws "Maximum BigInt size exceeded" when the exponents of
+  the two operands are far apart (for example `1 − 10^-155504635359666`); the
+  special-function kernels avoid it with a local `subBounded` helper
+  (`numerics/special-functions.ts`), but every other caller can still throw.
+  The subtraction should return the larger operand, rounded to the working
+  precision, when the smaller one is below its last digit.
+- `GammaRegularized(0.5, 1e-1000000000)` gives `NaN` (the bignum kernels return
+  `NaN` below `x = 10^-100000` and the machine kernel cannot represent `x`),
+  where the value is close to `1`.
+- `ce.box(['Gamma', 2, {num: '1e100000'}]).evaluate()` takes about 0.8 s before
+  any kernel runs, in the evaluate route.
+
+- The top-level application of a function literal evaluates its argument
+  numerically before it binds it: at machine precision
+  `Apply(x ↦ Sin(x), Pi).N()` is `1.2246467991473532e-16` (correct: `0`), and
+  with `v = (25! − 1)/24!`, `Apply(x ↦ Numerator(x), v).N()` is `25` (correct:
+  the exact numerator). Since 2026-10-18 a lazy `Map` passes the element as
+  written and gives `[0]` and the true numerator; the direct application should
+  do the same (`makeLambda` step 4 in `function-utils.ts`; `applyMarkerBody` is
+  the `Map` route's helper).
+- `Solve(sin x · sin(a·x) = 0, x ∈ [0, 10])` with `a = 2000000001/2000000000`
+  stays unevaluated (since the exact-spacing fix of 2026-10-18; before, it gave
+  the incomplete `[0, π/a, π, 2π, 3π]`). The complete answer has seven roots
+  (`0, π/a, π, 2π/a, 2π, 3π/a, 3π`): a bounded product could list the roots of
+  each factor separately and merge them exactly.
+
+- **Over ℂ, a periodic family can miss complex roots.**
+  `Solve(e^{sin x} = 1, x ∈ ℂ)` gives `[πt]`. The roots where `sin z = 2πik`
+  with an integer `k ≠ 0` are missing. The cause: the ℂ route of `Solve` inverts
+  `exp` on the principal branch only (`exp(w) = 1` gives `w = 0`, not
+  `w = 2πik`).
+- **Question (OPEN, decision): must `Sort` refuse a comparator whose parameter
+  type only overlaps the element type?** `Sort` refuses at run time a typed
+  comparator whose parameter type is disjoint from the element type. But
+  `Sort([3, 1.5, 2], (a: integer, b: integer) ↦ b − a)` is accepted, because
+  `integer` overlaps `number`, and the order of the result is arbitrary (`1.5`
+  is not an integer). Option A: refuse when the element type is not a subtype of
+  the parameter type; then this example gives an error. Option B: keep today's
+  behavior. If nothing is decided, option B stays in effect.
+- **Question (OPEN, decision): which shape does a positional view of a set
+  give?** With `c` a set, `Reverse(c)`, `Take(c, 1)`, `Drop(c, 1)`, `Rest(c)`
+  and `Most(c)` give the operator with the error inside (`Reverse(Error(…))`),
+  but `Sort(c)` and `TakeWhile(c, p)` give the bare `Error`. Option A: all give
+  the bare `Error`. Option B: keep the two shapes. If nothing is decided, option
+  B stays in effect.
+- **`Element` over a lazy `Filter` with an unknown element throws.** With `z`
+  not assigned, `z ∈ Filter([z], y ↦ y > 0)` throws "Filter predicate must
+  return True or False". The correct result is an unevaluated `Element` (the
+  sign of `z` is not known). The message also has a wrong hint:
+  `Unknown symbol "y". Did you mean "x"?`.
+- **`e^{−7iπ/6}.N()` is wrong in the last digit.** At 21 digits, the real part
+  ends `…646765`; the correct value ends `…764`. The cause: `exactEulerN()` and
+  `unitCircleOfHalfTurns()` in `boxed-expression/arithmetic-power.ts` round
+  `√3/2` one unit high.
+- **The interpreter does not reduce a float half-integer in `iπ·u`.**
+  `Tanh(iπ·0.5).N()` gives `NaN` and `Sech(iπ·0.5).N()` gives `1.6e16`, where
+  the exact argument `iπ/2` gives `~oo` for both. The compiled code now gives
+  `~oo`. The interpreter must reduce the float `0.5` as it reduces the exact
+  `1/2`.
+- **`e^{iπx}` with `x` not declared does not get the exact compiled lowering.**
+  `eulerPiSplit` uses `getImaginaryFactor`, which requires `x: real`. The
+  hyperbolic lowering of `iπx` accepts an `x` that is not declared, so the two
+  lowerings disagree.
+- **`Sin(Map(Sin, [H])).N()` still evaluates `H` exactly once.** With
+  `H = Sum(1/k, k, 1, 6000)`, a broadcast over a lazy `Map` operand under `.N()`
+  goes through the exact callback (step 2 of `_computeValue` in
+  `boxed-function.ts`, and the zip in `collection-utils.ts`). The fix: rewrite
+  the source with `lazyMapNumericApproximation`, as `Map(Sin, [H]).N()` does.
+- **Question (OPEN, decision): what does a `Table` with an empty range give?**
+  Today `Table(k², {k, 1, 0})` stays unevaluated (the fast route gives
+  `Tabulate(fn, 0)`, and a compile test treats a zero dimension as invalid),
+  `Table(k², {k, 2, 0})` counts down and gives `[4, 1, 0]`, and
+  `Sum(k, {k, 1, 0})` is `0`. Mathematica gives `{}` for both `Table` forms.
+  Option A: give `[]` for both, as Mathematica does. Option B: keep today's
+  behavior. If nothing is decided, option B stays in effect.
+- **`\lim_{x\to a+1^+}` reads `1^+` as `PseudoInverse(1)`.** The limit parser
+  must apply a direction marker to the whole point, as `(a+1)^+` does today.
+- **`lim_{x→a} |x|/x` with `a: real` gives `|a|/a`.** This is wrong only at
+  `a = 0`, where the limit does not exist. The result must carry the condition
+  `a ≠ 0`, or stay unevaluated.
+- **Limits of the per-run block locals (since 2026-10-18).** An implicit local
+  of a block starts fresh at each top-level evaluation and at each function
+  call. Two cases remain: (1) a recursive call that runs the same nested block
+  reads the implicit locals of the recursive call until its own next run of the
+  block (`let` locals have the same limit, `createBlockLocals` in
+  `library/control-structures.ts`); (2) an implicit local made in an
+  asynchronous run stays in the scope copy of that run.
+- **A function assigned in a block is visible before its `Assign` statement.**
+  In `Block(r ≔ fn(3); fn ≔ (z ↦ 2z); (r, fn(3)))`, `r` is `6` on the first run.
+  The correct value of `r` is `fn(3)` (unevaluated), because `fn` has no value
+  when `r` is assigned. The cause: `Assign` installs a function literal when the
+  block is canonicalized, not when the statement runs.
 
 ### The shader targets compute a large trigonometric argument in float32 with no warning (OPEN, design — Tycho ledger rows 382 and 384, filed 2026-10-17)
 
@@ -635,15 +611,6 @@ chain of lazy arms, so the number of regions grows as `2^k`. This is a property
 of the region model, not of the walk. Also, a `Sin`/`Cos` chain of depth 200
 overflows the compiler's own recursion.
 
-### `Take` over a `FlatMap` with a finite source stays unevaluated (OPEN, small — found 2026-10-17 by the `FlatMap` infinite-inner-collection fix)
-
-`Take(FlatMap([1, 2, 3], x ↦ [x, x]), 3)` stays unevaluated even under
-materialization, while the same `Take` over an infinite source gives
-`[1, 1, 2, 2, 3]`. The `isEmpty` facet of `FlatMap` answers `undefined` for a
-non-empty finite source, because answering would mean applying the callback, and
-the facets must not do that; the generic materializer keeps the lazy form when
-emptiness is not known. Related: `FlatMap` has no `count` facet.
-
 ### Each call of a user function retires the inert evaluation memo of every node, so a chain of applications copies its previous level once per level (OPEN, performance, design — found 2026-10-17 by the chain of Tycho ledger row 380, after the closure-capture and lazy-map fixes of the same day)
 
 The memo of an inert evaluation (`_memoizedLazyCollectionValue`,
@@ -692,16 +659,6 @@ the exact operand only when the double is ±1). Also: `bigGamma` returns `0`
 instead of `NaN` once the result is past the exponent range (from about
 `z = −10^15`); `.N()` stays symbolic, but an internal caller can take the `0` as
 a value, as `Binomial` did before 2026-10-17.
-
-### Compiled `Csch(iπx)` at a pole gives a value where the interpreter gives `~oo` (OPEN, decided 2026-10-17 — found 2026-10-17 by the Codex re-review of the compilation ranges)
-
-Compiled `Csch(iπx)` at `x = 1` gives `{re: NaN, im: ∞}` where the interpreter
-gives `~oo` (compiled as `{∞, ∞}`): option A adds the exact half-turn lowering
-of `Sinh`/`Cosh`/`Tanh`/`Csch`/`Sech`/`Coth` of `i·π·u` in each target via
-`cosSinPi(u)`, option B refuses to compile these forms. **User decision
-2026-10-17: option A** — each target lowers these six functions of `i·π·u` with
-`cosSinPi(u)`, so the compiled `Csch(iπx)` at `x = 1` gives `{∞, ∞}`, as the
-interpreter's `~oo`.
 
 ### A memoized element read costs 934 `console.assert` calls and runs five times slower under jest than from source (OPEN, performance — measured 2026-10-16 by the perf suite on the M5)
 
@@ -1088,7 +1045,7 @@ compile and 0.02 ms to run, so the compile step evaluated the whole sum
 (constant folding of a closed program). The report should show that fold as what
 it is, or the target should bound it. Compiled run times are all under 12 ms.
 
-### A user function applied per element of a lazy collection costs about 100 µs per application (OPEN, performance, decided 2026-10-17 — found 2026-10-06 by the Epsil program corpus, profiled 2026-10-07)
+### A user function applied per element of a lazy collection costs about 100 µs per application (OPEN, performance — found 2026-10-06 by the Epsil program corpus, profiled 2026-10-07)
 
 With the iteration limit removed for Epsil programs, the full-size Project Euler
 programs give the right answers but are slow: `sum(filter(2..9999, isAmicable))`
@@ -1138,16 +1095,16 @@ Where the time of a trivial body goes:
   (`declareSymbolValue`, about an eighth), and the application memo key
   serializes each argument to JSON.
 
-Candidates: key the type cache of a function body on the call frame instead of
-the engine generation (a redesign of cache invalidation); apply the literal of a
-symbol callee directly instead of boxing an application per call (the
-direct-call route's error and validation decisions would have to be kept);
-extend the compiled element function of `Map` (`library/map-auto-compile.ts`,
-lambdas only today) to a named user function whose body it can compile. **User
-decision 2026-10-17: apply the function literal of a named user function
-directly** — a call such as `isEven(n)` inside `filter(1..20000, isEven)`
-applies the literal without boxing an application per call, and keeps the error
-and validation decisions of the direct-call route.
+Candidates: (A) key the type cache of a function body on the call frame instead
+of the engine generation (a redesign of cache invalidation); (B) apply the
+literal of a symbol callee directly instead of boxing an application per call;
+(C) extend the compiled element function of `Map`
+(`library/map-auto-compile.ts`, lambdas only today) to a named user function
+whose body it can compile. Option B is done (user decision 2026-10-17): a call
+such as `isEven(n)` inside `filter(1..20000, isEven)` now applies the function
+literal directly and keeps the error and validation decisions of the direct-call
+route. The gain is about 10 to 25 %; the rest of the time is the application of
+the literal itself. Options A and C are still open.
 
 ### A determinant with float entries keeps unfolded constants (OPEN, small — found 2026-10-06 by the review of the exact determinant fix; present before)
 
@@ -1270,27 +1227,6 @@ the imaginary part of `(2t + i)/(t − 3i)`. A decay that is regular (each sampl
 smaller than the one before by a near-constant ratio) is not a cancellation and
 could be told apart from one. A related point: a function that decays to 0 gives
 a residue such as `−9e-46`, not `0` (`NLimit(t ↦ |Gamma(i·t)|, ∞)`).
-
-### `Solve` of a periodic equation could return the exact family instead of the principal set (OPEN, design, decided 2026-10-17 — found 2026-10-04 by the review of the `Solve` completeness rule)
-
-Since 2026-10-04, a `Solve` list holds all the solutions in the domain, with one
-exception: with no domain, or over ℝ or ℂ, a trigonometric equation gives its
-principal set (`Solve(sin x = 1/2, x)` is `[π/6, 5π/6]`), and the documentation
-says that every solution is one of these plus a multiple of the period. A
-cleaner result is the family itself, with an integer parameter, as the integer
-(diophantine) solver already returns (`n = 4t − 7` for all integers `t`):
-`sin x = 1/2` → `[π/6 + 2πt, 5π/6 + 2πt]`. This removes the only case where a
-`Solve` list is not every solution. It changes the result shape for every
-trigonometric equation without a domain. **User decision 2026-10-17: return the
-full family** — a trigonometric `Solve` with no domain, or over ℝ or ℂ, returns
-each family with an integer parameter, with the same parameter names as the
-diophantine solver (`t`, `t_1`, …), so `Solve(sin x = 1/2, x)` gives
-`[π/6 + 2πt, 5π/6 + 2πt]`. Measure the number of changed snapshots first, and
-report it before the change lands. A product of periodic factors keeps its roots
-per factor (user decision 2026-10-17, already written in
-`doc/85-reference-core.md`), so each root of a product gives one family with the
-period of its own factor: `sin(2x)·cos(3x) = 0` gives `πt`, `π/2 + πt`,
-`π/6 + 2πt/3` and `−π/6 + 2πt/3`.
 
 ### `Solve` over a bounded domain stays unevaluated in some cases that have a complete answer (OPEN, small — found 2026-10-04 by the completeness scan)
 
@@ -4430,13 +4366,6 @@ the rest are recorded here so they are not rediscovered from the outside.
   in-engine route is enforced. RULED-DEFERRED 2026-08-09 with the direction
   fixed (per-primitive check-emission table + "unenforceable → decline"); see
   the "Known limit" section of `docs/TYPE-SYSTEM.md`.
-- **Phase 4: comparator slots** (`Sort`, `ChunkBy`, …) — whether they convert to
-  `callback<(T, T) -> …>` at all (spec §9 item 6). **User decision 2026-10-17:
-  do not convert, and add a run-time refusal** — the comparator slots keep the
-  type `(any, any)`, and a typed comparator whose parameter type is disjoint
-  from the element type is refused at run time, so
-  `Sort([3,1,2], (a: string, b: string) ↦ StringLength(a) − StringLength(b))`
-  gives an error, not `[3, 1, 2]`.
 - **Seeded-fold accumulator stamping** — deliberately never stamped (spec §12.1:
   stamping it breaks type-changing accumulators, probed); re-opening needs a
   bound (`forall T, U: value.`) and a re-ruling.
@@ -4459,9 +4388,6 @@ unenforced (other positions behave as `function`); a union of two DIFFERENT
   DRAWS consumed does not, so a seeded program is not reproducible across these
   shapes. Needs the evaluated form to be computed once and threaded through the
   facets.
-- **`FlatMap` has no `count` facet**, so `Length(FlatMap(…))` is inert even when
-  the result is provably finite (a count requires applying the callback per
-  element — needs a design, not a one-liner).
 - **Nested `Map`/`Filter` canonicalization is superlinear in depth** (measured
   2026-08-09: 10→20 levels ≈ 2.65× on both the current and the pre-conversion
   path — pre-existing, cause unidentified).
@@ -4575,15 +4501,6 @@ rounds of 2026-07-30 to 2026-08-30 that this ledger used to narrate are in
   literal-gather tiers over statically-sized numeric bases shipped; design and
   rulings in `docs/COMPILATION-MODEL.md`, whose D4 disposition table is not to
   be re-derived):
-  - **Point-list bases: blocked on §3.F** (the node types `missing | tuple` and
-    the object-domain-absence gate intercepts before any GPU table entry).
-    Unblocking needs its own ruling: a per-operator absence projection (Missing
-    point → NaN-component vector), or in-range type narrowing. Filed with the
-    consumer item. **User decision 2026-10-17: the per-operator absence
-    projection** — on the GPU targets, an absent point from `At` over a list of
-    points is a vector of `NaN` components, so
-    `At(PointList([x,2,3],[4,5,6]), k)` compiles to GLSL and an out-of-range `k`
-    draws nothing.
   - Demand-gated: static-count dynamic gather (near-zero cost to flip — the same
     helpers in a constructor; witness count requested from the consumer), gather
     K > 4 (width ceiling), gather K 0/1 (the pinned 1-element-list contract has
@@ -4946,18 +4863,6 @@ uncertainty/covariance output (`JᵀJ⁻¹` is a byproduct), general `FindMinimu
 and multi-start/global search (revisit only on corpus evidence of basin
 sensitivity). Known naming quirk to document for consumers: a parameter named
 `e` canonicalizes to `ExponentialE` and cannot be fit.
-
-**Mathematica surface forms — deferred tail (decided 2026-10-17; landed record
-in the 2026-07-14 commits):** **User decision 2026-10-17: add all four** —
-`NSolve`, `Reduce`, the `{i, n}` iterator form of `Table`, and one-sided limits
-at a symbolic point, so `NSolve(x^2 == 2, x)` gives the two float roots instead
-of staying unevaluated. Tier 3 heads (`NSolve` — cheap as Solve+N — and
-`Reduce`; `FindRoot` landed 2026-07-21 via the item-77 nonlinear least-squares
-core, with `(x, x0)` start tuples and box constraints); the `{i, n}` 2-element
-iterator shorthand (rejected as malformed; the bare-count `Table(expr, n)` form
-is accepted today, `Table(k^2, 3)` is `[1, 4, 9]`); symbolic directional limits
-(`lim_{x→a⁺}` at a symbolic point stays inert — representation correct,
-evaluation gap).
 
 ### Review findings (2026-07-04) — residue
 

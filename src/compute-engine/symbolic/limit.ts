@@ -22,7 +22,11 @@ import {
   checkDeadline,
   CancellationError,
 } from '../../common/interruptible.js';
-import { isNumber, isSymbol } from '../boxed-expression/type-guards.js';
+import {
+  isFunction,
+  isNumber,
+  isSymbol,
+} from '../boxed-expression/type-guards.js';
 import { journalCheckpointMemoEntry } from '../checkpoint-journal.js';
 
 // The base `Expression` type exposes operands only after a type-guard narrows it
@@ -126,7 +130,7 @@ export function symbolicLimit(
     }
 
     const r = limitDispatch(b, x, point, dir ?? 0, ce, 0);
-    if (r === undefined) return undefined;
+    if (r === undefined) return limitAtSymbolicPoint(b, x, point, dir, ce);
     if (r.isNaN === true) return undefined;
     return r;
   } catch (e) {
@@ -136,6 +140,64 @@ export function symbolicLimit(
     // genuine internal errors are absorbed into an `undefined` (defer) result.
     if (e instanceof CancellationError) throw e;
     return undefined;
+  }
+}
+
+/**
+ * The limit of `body` as `x → point` when the point is not a number literal
+ * (a symbol `a`, or an expression such as `a + 1` or `π`), from the limit at
+ * the number literal 0: `lim_{x→a} f(x) = lim_{t→0} f(a + t)`, with the same
+ * direction. The strategies that resolve a pole, a logarithm or a jump read
+ * the Laurent expansion of the body about the point, and that expansion
+ * needs a point that is known to be finite: a symbol `a` is not, so
+ * `lim_{x→a⁺} 1/(x − a)` stayed unevaluated while `lim_{x→0⁺} 1/x` is `+∞`.
+ * After the shift, the point is 0 and `1/(x − a)` is `1/t`.
+ *
+ * The shift is exact, so a limit that depends on the sign of a parameter
+ * still declines: `1/(x² − a²)` at `a⁺` is `1/(2at + t²)`, whose leading
+ * coefficient `2a` has no known sign. The point is read as generic, as
+ * direct substitution already reads it (`lim_{x→a} x² = a²`).
+ *
+ * Canonicalization does not collect like terms, so the substitution gives
+ * `1/(a − a + t)`: each sum that contains `t` is evaluated again, which
+ * collects the terms (`1/t`). Only the sums are evaluated, so the structure
+ * that the strategies read (a quotient, a product) is kept.
+ *
+ * The fresh variable `t` is declared `real` in a temporary scope, so it has
+ * no binding outside this function. A result that still contains it is
+ * discarded. Returns `undefined` when the point is a number literal, an
+ * infinity, contains `x`, or when the limit at 0 is not found.
+ */
+function limitAtSymbolicPoint(
+  body: Expression,
+  x: string,
+  point: Expression,
+  dir: number | undefined,
+  ce: ComputeEngine
+): Expression | undefined {
+  if (isNumber(point) || !point.isValid) return undefined;
+  if (point.isInfinity === true || point.isFinite === false) return undefined;
+  if (point.has(x)) return undefined;
+  const t = ['t', 's', 'u', 'w', 'q', 'tau', 'xi', 'eta'].find(
+    (name) => name !== x && !body.has(name) && !point.has(name)
+  );
+  if (t === undefined) return undefined;
+  ce.pushScope();
+  try {
+    ce.declare(t, 'real');
+    const collect = (e: Expression): Expression => {
+      if (!isFunction(e) || !e.has(t)) return e;
+      const rebuilt = ce.function(e.operator, e.ops.map(collect));
+      return rebuilt.operator === 'Add' ? rebuilt.evaluate() : rebuilt;
+    };
+    const shifted = collect(
+      body.subs({ [x]: ce.function('Add', [point, ce.symbol(t)]) })
+    );
+    const r = symbolicLimit(shifted, t, ce.Zero, dir, ce);
+    if (r === undefined || r.has(t)) return undefined;
+    return r;
+  } finally {
+    ce.popScope();
   }
 }
 
@@ -680,6 +742,18 @@ function combineLimitsOfParts(
 
   // Power
   const [u, k] = limits;
+  // A constant real base `b > 0`, `b ≠ 1`, and an exponent that tends to a
+  // signed infinity: `b^k` tends to `+∞` or to 0, from the side of 1 the base
+  // is on (`e^{−1/t}` at 0⁺ is 0, at 0⁻ it is `+∞`). A base whose position
+  // relative to 1 is not known gives no limit here.
+  const base = o1(e);
+  if (!base.has(x) && k.isInfinity === true) {
+    if (base.isGreater(1) === true)
+      return k.isPositive === true ? ce.PositiveInfinity : ce.Zero;
+    if (base.isPositive === true && base.isLess(1) === true)
+      return k.isPositive === true ? ce.Zero : ce.PositiveInfinity;
+    return undefined;
+  }
   const exponent = o2(e);
   if (
     !isNumber(exponent) ||
@@ -727,7 +801,59 @@ function limitOfQuotientAtFinite(
   // Determinate quotient: n0 / d0 when d0 ≠ 0 and both finite.
   if (n0 && d0 && !d0.is(0) && isDefiniteValue(n0, x) && isDefiniteValue(d0, x))
     return n0.div(d0).evaluate();
+  // A nonzero numerator over a denominator that tends to 0 with a known sign
+  // near the point: a signed infinity (`1/√t` at 0⁺ is `+∞`). The step 3b
+  // pole resolution reads the sign of a Laurent expansion, and a root such as
+  // `√t` has none (it is a Puiseux series), so it is decided here.
+  if (n0 && d0 && d0.is(0) && isDefiniteValue(n0, x)) {
+    const sn = n0.isPositive === true ? 1 : n0.isNegative === true ? -1 : 0;
+    const sd = rootSignNear(den, x, a, dir, ce);
+    if (sn !== 0 && sd !== undefined)
+      return sn * sd > 0 ? ce.PositiveInfinity : ce.NegativeInfinity;
+  }
   return undefined;
+}
+
+/**
+ * The sign, near the point `a` from `dir`, of a root or a positive power of
+ * an argument `u` that tends to 0 from above: `√u`, `Root(u, n)` or `u^r`
+ * with a real number `r > 0`. Each is a positive real number when `u` is, so
+ * the sign is `1` when the Laurent expansion of `u` shows that `u` is
+ * positive near the point. A product of such factors and of constants of
+ * known sign (`(3/2)·√t`, which L'Hôpital gives for `t^{3/2}`) has the sign
+ * of the product. `undefined` for any other expression, and when `u` can be
+ * negative near the point (where the root is not real).
+ */
+function rootSignNear(
+  e: Expression,
+  x: string,
+  a: Expression,
+  dir: number,
+  ce: ComputeEngine
+): 1 | -1 | undefined {
+  const op = e.operator;
+  if (op === 'Multiply') {
+    let sign: 1 | -1 = 1;
+    let roots = 0;
+    for (const f of oo(e)) {
+      if (!f.has(x)) {
+        if (f.isNegative === true) sign = sign === 1 ? -1 : 1;
+        else if (f.isPositive !== true) return undefined;
+        continue;
+      }
+      if (rootSignNear(f, x, a, dir, ce) !== 1 || f.operator === 'Multiply')
+        return undefined;
+      roots += 1;
+    }
+    return roots > 0 ? sign : undefined;
+  }
+  if (op === 'Power') {
+    const r = o2(e);
+    if (!isNumber(r) || r.isComplex || !(r.re > 0)) return undefined;
+  } else if (op !== 'Sqrt' && op !== 'Root') return undefined;
+  const L = laurentData(o1(e), x, a, ce, 3);
+  if (L === null || L.v <= 0) return undefined;
+  return laurentSignNear(L, dir) === 1 ? 1 : undefined;
 }
 
 // ──────────────────────────────────────────────────────────────────────────

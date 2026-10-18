@@ -4859,17 +4859,6 @@ export class BaseCompiler {
   }
 
   /**
-   * `u` when the real-valued expression `x` is `π·u`: the symbol `Pi` as one
-   * factor of a product whose other factors have no `Pi` and are real
-   * (`Pi` itself is `π·1`). The targets lower `sin(π·u)`, `cos(π·u)`,
-   * `tan(π·u)` and `e^{iπ·u}` with the angle in half-turns, `u`, reduced
-   * exactly (`cosSinPi()`, `numerics/numeric-complex.ts`), so that the value
-   * at an integer or a half-integer `u` has an exact zero part: `sin(πx)` at
-   * `x = 2` is `0`, where `Math.sin(Math.PI * 2)` is `−2.4·10⁻¹⁶`, and
-   * `e^{iπx}` at `x = 1` is `−1`, as in the interpreter for the exact `x`.
-   * Returns `undefined` for any other expression.
-   */
-  /**
    * The exponent of `e` split as `a + iπu`, with `u` real (`piMultiple`)
    * and `a` the sum of the other terms, real, or `undefined` when there is
    * none. The targets lower `e^{a + iπu}` as `e^a·(cos πu + i·sin πu)` with
@@ -4901,6 +4890,17 @@ export class BaseCompiler {
     return { a, u };
   }
 
+  /**
+   * `u` when the real-valued expression `x` is `π·u`: the symbol `Pi` as one
+   * factor of a product whose other factors have no `Pi` and are real
+   * (`Pi` itself is `π·1`). The targets lower `sin(π·u)`, `cos(π·u)`,
+   * `tan(π·u)` and `e^{iπ·u}` with the angle in half-turns, `u`, reduced
+   * exactly (`cosSinPi()`, `numerics/numeric-complex.ts`), so that the value
+   * at an integer or a half-integer `u` has an exact zero part: `sin(πx)` at
+   * `x = 2` is `0`, where `Math.sin(Math.PI * 2)` is `−2.4·10⁻¹⁶`, and
+   * `e^{iπx}` at `x = 1` is `−1`, as in the interpreter for the exact `x`.
+   * Returns `undefined` for any other expression.
+   */
   static piMultiple(x: Expression): Expression | undefined {
     const ce = x.engine;
     if (isSymbol(x, 'Pi'))
@@ -4913,6 +4913,43 @@ export class BaseCompiler {
     const u = rest.length === 1 ? rest[0] : ce.function('Multiply', rest);
     if (BaseCompiler.isComplexValued(u)) return undefined;
     return u;
+  }
+
+  /**
+   * `u` when `x` is `i·π·u` with a real `u`: a product of the imaginary unit
+   * (the symbol `ImaginaryUnit`, or an imaginary literal `b·i`), the library
+   * constant π, and factors that compile to real values (`piMultiple` of the
+   * product of the other factors). The targets lower `sinh`, `cosh`, `tanh`,
+   * `csch`, `sech` and `coth` of `i·π·u` with the angle `u` in half-turns,
+   * reduced exactly (`cosSinPi()`), since `sinh(iθ) = i·sin θ` and
+   * `cosh(iθ) = cos θ`. So `csch(iπx)` at `x = 1` is the pole `~oo`, as in
+   * the interpreter, where the complex kernel computes `1/(i·sin(π))` with
+   * `sin(π)` as the double `1.2·10⁻¹⁶`, and a zero, such as `sinh(iπx)` at
+   * `x = 1`, is exact. Returns `undefined` for any other expression.
+   */
+  static imaginaryPiMultiple(x: Expression): Expression | undefined {
+    if (!isFunction(x, 'Multiply')) return undefined;
+    const ce = x.engine;
+    let scale: Expression | undefined = undefined;
+    const rest: Expression[] = [];
+    for (const op of x.ops) {
+      const im = isSymbol(op, 'ImaginaryUnit')
+        ? ce.One
+        : isNumber(op) && op.isComplex && op.re === 0 && op.im !== 0
+          ? ce.number(op.im)
+          : undefined;
+      if (im !== undefined) {
+        if (scale !== undefined) return undefined;
+        scale = im;
+      } else if (BaseCompiler.isComplexValued(op)) return undefined;
+      else rest.push(op);
+    }
+    if (scale === undefined) return undefined;
+    if (!scale.isSame(1)) rest.push(scale);
+    if (rest.length === 0) return undefined;
+    return BaseCompiler.piMultiple(
+      rest.length === 1 ? rest[0] : ce.function('Multiply', rest)
+    );
   }
 
   /**
@@ -12443,15 +12480,15 @@ export class BaseCompiler {
         const conds = BaseCompiler.compile(args[1], target);
         // The absence at each position is decided from what one position
         // holds — a list element, or the whole value — not from the node's
-        // own type, the list of results. A missing POINT is the numeric
-        // absence, as the element-wise `Which` answers it (its selection
-        // helper masks a point position with `NaN`), so the two forms of
-        // the same selection agree; a missing string is the object null.
+        // own type, the list of results. A missing number is the numeric
+        // absence (`NaN`); a missing POINT and a missing string are the
+        // object null (`undefined` on JavaScript), as a single missing point
+        // is. The element-wise `Which` gives the same cells (its selection
+        // helper takes the absence of the cell type, `_SYS.selectAbsent`), so
+        // the two forms of the same selection agree.
         const held: Type = list
           ? (collectionElementType(valueType.type) ?? 'unknown')
-          : isTupleShapedType(valueType.type)
-            ? 'number'
-            : valueType.type;
+          : valueType.type;
         const nullLiteral = target.absence?.object?.nullLiteral;
         const absent =
           coerce !== undefined
@@ -17026,27 +17063,11 @@ export class BaseCompiler {
     // declares it in the loop body. Without the declaration, the shader
     // wrote an undeclared name.
     if (chained.length > 1) {
-      const declared = new Set<string>();
-      const declares = chained.flatMap((s) => {
-        if (!isFunction(s, 'Assign') || !isSymbol(s.ops[0])) return [];
-        const lhs = s.ops[0];
-        const name = lhs.symbol;
-        if (
-          !split.chained.has(name) ||
-          declared.has(name) ||
-          target.boundVars?.has(name) ||
-          BaseCompiler.localShapeFrameOf(name) !== undefined
-        )
-          return [];
-        declared.add(name);
-        // Raw, as in `withImplicitLocalDeclares`: a canonical `Declare`
-        // would register the name in the scope the compilation runs under.
-        return [
-          lhs.engine._fn('Declare', [lhs, lhs.engine.string('unknown')], {
-            canonical: false,
-          }),
-        ];
-      });
+      const declares = BaseCompiler.chainedLocalDeclares(
+        chained,
+        split.chained,
+        target
+      );
       if (declares.length > 0)
         return BaseCompiler.compileBlock(
           [...declares, ...chained],
@@ -17175,6 +17196,50 @@ export class BaseCompiler {
   }
 
   /**
+   * The `Declare` statements for the inner targets of a chained assignment
+   * that `splitChainedAssignments` moved to statement position, in a
+   * statement list that has no `Block` node whose scope
+   * `withImplicitLocalDeclares` can read (a loop body that is one
+   * statement). The interpreter declares such a target in the scope of the
+   * loop when no enclosing scope has the name. The test is on the
+   * compilation: a name is bound outside when it is a parameter or a loop
+   * index (`boundVars`), or a local of an enclosing compiled block or
+   * function (`boundVars`, or `localShapeFrameOf` on the shader targets).
+   * A name that an engine scope outside the expression binds is not
+   * declared either: it is written as an input, or the compilation fails on
+   * a shader target (`chainedAmbientWrite`). Each other name gets one
+   * declaration, as in the block route (`withImplicitLocalDeclares`).
+   */
+  private static chainedLocalDeclares(
+    stmts: ReadonlyArray<Expression>,
+    chained: ReadonlySet<string>,
+    target: CompileTarget<Expression>
+  ): Expression[] {
+    const declared = new Set<string>();
+    return stmts.flatMap((s) => {
+      if (!isFunction(s, 'Assign') || !isSymbol(s.ops[0])) return [];
+      const lhs = s.ops[0];
+      const name = lhs.symbol;
+      if (
+        !chained.has(name) ||
+        declared.has(name) ||
+        target.boundVars?.has(name) ||
+        BaseCompiler.localShapeFrameOf(name) !== undefined ||
+        BaseCompiler.chainedAmbientWrite(lhs, target)
+      )
+        return [];
+      declared.add(name);
+      // Raw, as in `withImplicitLocalDeclares`: a canonical `Declare`
+      // would register the name in the scope the compilation runs under.
+      return [
+        lhs.engine._fn('Declare', [lhs, lhs.engine.string('unknown')], {
+          canonical: false,
+        }),
+      ];
+    });
+  }
+
+  /**
    * Prepend the `Declare` statements a statement list is MISSING: one per
    * block-local that the block introduces by bare ASSIGNMENT.
    *
@@ -17228,13 +17293,22 @@ export class BaseCompiler {
       // s)`) is declared by the interpreter when it runs, in the scope of the
       // block, unless an enclosing scope already has the name. So such a
       // name is a block-local when no enclosing scope binds it.
-      if (
-        !scope.bindings.has(name) &&
-        !(
-          chained.has(name) && !BaseCompiler.scopeChainBinds(scope.parent, name)
-        )
-      )
-        continue;
+      //
+      // Two kinds of enclosing binding are not a compiled local (which
+      // `boundVars` above, or a shader shape frame, would name). A binding
+      // of an engine scope outside the expression (`ce.declare('u', …)`)
+      // is changed by the interpreter, and is an input of the compiled code
+      // (`chainedAmbientWrite`). A binding that the canonical form gives a
+      // read of the name in an enclosing block of the expression (a `u` read
+      // after a loop) is not changed by the interpreter, whose loop body
+      // declares its own `u`: the name is a block-local here too.
+      if (!scope.bindings.has(name)) {
+        if (!chained.has(name)) continue;
+        if (BaseCompiler.scopeChainBinds(scope.parent, name)) {
+          if (BaseCompiler.chainedAmbientWrite(lhs, target)) continue;
+          if (BaseCompiler.localShapeFrameOf(name) !== undefined) continue;
+        }
+      }
       if (
         args.some(
           (a) =>
@@ -17258,6 +17332,36 @@ export class BaseCompiler {
     }
 
     return implicit.length === 0 ? args : [...implicit, ...args];
+  }
+
+  /**
+   * Whether the inner target `lhs` of a chained assignment is bound by an
+   * engine scope outside the compiled expression (a scope of the engine's
+   * current evaluation context, such as the global scope after
+   * `ce.declare('u', 'real')` or `ce.assign('u', 2)`). The interpreter then
+   * changes that binding, and the name is an input of the compiled code.
+   * The JavaScript and Python targets write it as a free name, as before. A
+   * shader target cannot write an input (a uniform is read-only, and a
+   * shader does not give a value back to the engine), and a local of the same
+   * name would give a later read of the name a different value from the
+   * interpreter's, so the compilation fails.
+   */
+  private static chainedAmbientWrite(
+    lhs: Expression & { symbol: string },
+    target: CompileTarget<Expression>
+  ): boolean {
+    const name = lhs.symbol;
+    if (!BaseCompiler.scopeChainBinds(lhs.engine.context.lexicalScope, name))
+      return false;
+    if (target.language === 'glsl' || target.language === 'wgsl')
+      throw new Error(
+        `Could not compile \`Assign\`: the chained assignment writes ` +
+          `"${name}", which an engine scope outside the expression binds ` +
+          `(a declaration or an assigned value). The interpreter changes ` +
+          `that binding, and on the ${target.language} target "${name}" is an ` +
+          `input, which the shader cannot write.`
+      );
+    return true;
   }
 
   /** Whether `scope` or one of its parents binds `name`. */
@@ -19308,9 +19412,17 @@ export class BaseCompiler {
       // Every statement of a loop body is in statement position, the last one
       // included, so each of them lowers. Without this step such a declare
       // reached the value-position `Declare` handler, which fails closed.
-      const stmts = expr.ops
-        .flatMap((s) => BaseCompiler.desugarPatternDeclare(s, target) ?? [s])
-        .flatMap((s) => BaseCompiler.desugarPatternAssign(s, target) ?? [s]);
+      // An assignment whose value is another assignment
+      // (`t ≔ (u ≔ t + i)`) is split into two statements, as in
+      // `compileBlock`, so the inner target is declared in the loop body
+      // when no enclosing scope binds it. Without the split the write went to
+      // the caller's `vars` object (`t = _.u = …`).
+      const split = BaseCompiler.splitChainedAssignments(
+        expr.ops
+          .flatMap((s) => BaseCompiler.desugarPatternDeclare(s, target) ?? [s])
+          .flatMap((s) => BaseCompiler.desugarPatternAssign(s, target) ?? [s])
+      );
+      const stmts = split.args;
       // …and so does the `function`-definition rewrite, so a definition made
       // INSIDE a loop body lowers and is callable there, exactly as one made
       // in an ordinary block is. A loop body carries no value, hence
@@ -19319,7 +19431,8 @@ export class BaseCompiler {
       const withDecls = BaseCompiler.withImplicitLocalDeclares(
         BaseCompiler.withDefineFunctionDeclares(stmts, target, false),
         target,
-        expr
+        expr,
+        split.chained
       );
       // A body-scoped `localFunctions`, filled in statement order below. Held
       // as its own binding because the field on `CompileTarget` is a
@@ -19386,6 +19499,27 @@ export class BaseCompiler {
           ? BaseCompiler.desugarPatternDeclare(expr, target)
           : BaseCompiler.desugarPatternAssign(expr, target);
       if (stmts !== null) {
+        const bodyTarget = BaseCompiler.loopBodyTempTarget(stmts, target);
+        return stmts
+          .map((s) => BaseCompiler.compileLoopBody(s, bodyTarget))
+          .join('; ');
+      }
+    }
+
+    // A loop body that is one chained assignment (`t ≔ (u ≔ t + i)`) is
+    // two statements, and the inner target is declared in the loop body
+    // when nothing outside binds it (`chainedLocalDeclares`).
+    if (h === 'Assign') {
+      const split = BaseCompiler.splitChainedAssignments([expr]);
+      if (split.args.length > 1) {
+        const stmts = [
+          ...BaseCompiler.chainedLocalDeclares(
+            split.args,
+            split.chained,
+            target
+          ),
+          ...split.args,
+        ];
         const bodyTarget = BaseCompiler.loopBodyTempTarget(stmts, target);
         return stmts
           .map((s) => BaseCompiler.compileLoopBody(s, bodyTarget))

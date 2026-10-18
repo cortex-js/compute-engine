@@ -760,7 +760,7 @@ Gamma function Γ(z); with two arguments, the upper incomplete gamma Γ(s, z) = 
 
 ```epsil
 N(gamma(2, 1))
-// ➔ 0.7357588823428847
+// ➔ 0.735758882342884643191
 ```
 
 ### gammaLn

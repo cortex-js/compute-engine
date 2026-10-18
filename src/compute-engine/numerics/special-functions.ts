@@ -915,8 +915,11 @@ function gammalnCore(ce: ComputeEngine, z: BigNum): BigNum {
 
   // Reflection: ln(Gamma(z)) = ln(pi) - ln(|sin(pi*z)|) - ln(Gamma(1-z))
   if (z.lt(BigDecimal.HALF)) {
+    // `sin(π·z)` from the distance of z to the nearest integer
+    // (`bigSinPi`): the sine of the product π·z loses digits near a
+    // negative integer.
     const pi = BigDecimal.PI;
-    const sinPiZ = pi.mul(z).sin().abs();
+    const sinPiZ = bigSinPi(z).abs();
     if (sinPiZ.isZero()) return BigDecimal.NAN;
     return pi
       .ln()
@@ -1204,14 +1207,17 @@ export function bigBinomialLogForm(
 }
 
 /**
- * `sin(πx)` for a big number `x`, computed from its fractional part:
- * `sin(πx) = (−1)^m·sin(πf)` with `x = m + f`, `m = ⌊x⌋`. The subtraction
- * `x − m` is exact, so the result has correct digits for any `|x|`, and it
- * is exactly `0` at an integer. The parity of `m` is read as a bigint:
- * `toNumber()` rounds a floor above 2^53 to an even double.
+ * `sin(πx)` for a big number `x`, computed from its distance to the nearest
+ * integer: `sin(πx) = (−1)^m·sin(πf)` with `x = m + f`, `m` the integer
+ * nearest to `x` and |f| ≤ 1/2. The subtraction `x − m` is exact, so the
+ * result has correct digits for any `|x|`, also near an integer, and it is
+ * exactly `0` at an integer. (With `m = ⌊x⌋`, `f` is near 1 just below an
+ * integer, and `sin(πf)` then subtracts nearly equal numbers.) The parity of
+ * `m` is read as a bigint: `toNumber()` rounds an integer above 2^53 to an
+ * even double.
  */
 function bigSinPi(x: BigNum): BigNum {
-  const m = x.floor();
+  const m = x.round();
   const f = x.sub(m);
   if (f.isZero()) return BigDecimal.ZERO;
   const s = BigDecimal.PI.mul(f).sin();
@@ -1246,8 +1252,12 @@ export function bigGamma(ce: ComputeEngine, z: BigNum): BigNum {
 function gammaCore(ce: ComputeEngine, z: BigNum): BigNum {
   // Reflection for z < 0.5: Gamma(z) = pi / (sin(pi*z) * Gamma(1-z))
   if (z.lt(BigDecimal.HALF)) {
+    // `sin(π·z)` from the distance of z to the nearest integer
+    // (`bigSinPi`). Computed as the sine of the product π·z, it lost about
+    // −log10|z − round(z)| digits near a negative integer:
+    // Γ(−1.(45 nines)) at 50 digits had 33 correct digits.
     const pi = BigDecimal.PI;
-    const sinPiZ = pi.mul(z).sin();
+    const sinPiZ = bigSinPi(z);
     if (sinPiZ.isZero()) return BigDecimal.NAN;
     return pi.div(sinPiZ.mul(gammaCore(ce, BigDecimal.ONE.sub(z))));
   }
@@ -1424,9 +1434,13 @@ function digammaCore(ce: ComputeEngine, z: BigNum): BigNum {
   // Reflection formula for negative values: ψ(1-z) = ψ(z) + π·cot(πz)
   if (z.isNegative()) {
     if (z.isInteger()) return BigDecimal.NAN; // poles at non-positive integers
+    // cot(π·z) = cot(π·f), with f = z − round(z): the period of cot is π.
+    // The sine of the product π·z lost about −log10|f| digits near a
+    // negative integer (ψ(−1.(45 nines)) at 50 digits had 33 correct
+    // digits).
     const pi = BigDecimal.PI;
-    const piZ = pi.mul(z);
-    const cotPiZ = piZ.cos().div(piZ.sin());
+    const piF = pi.mul(z.sub(z.round()));
+    const cotPiZ = piF.cos().div(piF.sin());
     return digammaCore(ce, BigDecimal.ONE.sub(z)).sub(pi.mul(cotPiZ));
   }
 
@@ -1486,8 +1500,11 @@ function trigammaCore(ce: ComputeEngine, z: BigNum): BigNum {
   // Reflection formula: ψ₁(1-z) + ψ₁(z) = π²/sin²(πz)
   if (z.isNegative()) {
     if (z.isInteger()) return BigDecimal.NAN;
+    // `sin(π·z)` from the distance of z to the nearest integer
+    // (`bigSinPi`): the sine of the product π·z loses digits near a
+    // negative integer.
     const pi = BigDecimal.PI;
-    const s = pi.mul(z).sin();
+    const s = bigSinPi(z);
     return pi
       .mul(pi)
       .div(s.mul(s))
@@ -1686,18 +1703,29 @@ function bigGammaPSeries(ce: ComputeEngine, a: BigNum, x: BigNum): BigNum {
   return bigGammaPSeriesSum(ce, a, x).mul(prefactor);
 }
 
-/** Upper regularized gamma Q(a,x) via the Legendre continued fraction (Lentz),
- *  in BigDecimal. Must be called inside the guard-digit context with a > 0 and
- *  x > 0. Fast for x ≥ a+1; below that it converges slowly (the error falls
- *  about like exp(−4·√(n·x)) after n terms) and can reach its cap, where the
- *  result is NaN. */
-function bigGammaQContinuedFraction(
-  ce: ComputeEngine,
-  a: BigNum,
-  x: BigNum
-): BigNum {
-  const prefactor = a.mul(x.ln()).sub(x).sub(gammalnCore(ce, a)).exp();
-  return prefactor.mul(bigGammaQContinuedFractionValue(ce, a, x));
+/** Upper regularized gamma Q(a,x) = Γ(a, x)/Γ(a) for x > 0 and an order
+ *  that is not a pole of Γ, in BigDecimal, with Γ(a, x) from
+ *  `bigIncompleteGammaUpper`. That kernel uses the Legendre continued
+ *  fraction only where it converges in a reasonable number of terms, and
+ *  the series elsewhere. At a small x the fraction converges slowly (the
+ *  error falls about like exp(−4·√(n·x)) after n terms) and reaches its
+ *  iteration cap: Q(0.5, 3) at 300 digits and Q(−1.5, 0.1) at 50 digits
+ *  were NaN. Called inside the guard-digit context.
+ *
+ *  Where the fraction is used, Q is its value times the prefactor
+ *  xᵃ e⁻ˣ / Γ(a), computed as one exponential, exp(a·ln x − x − ln Γ(a)),
+ *  for a > 0: Γ(a, x) and Γ(a) can each be out of the BigDecimal exponent
+ *  range when Q is not (Q(10¹⁵, 2.1·10¹⁵) ≈ 2.08·10⁻¹⁵⁵⁵⁰⁴⁶³⁵³⁵⁹⁶⁶⁶, while
+ *  Γ(10¹⁵) is about 10^(1.4·10¹⁶)). */
+function bigGammaQUpperTail(ce: ComputeEngine, a: BigNum, x: BigNum): BigNum {
+  const fraction = bigUpperGammaFraction(ce, a, x);
+  if (fraction !== undefined) {
+    const prefactor = a.isPositive()
+      ? a.mul(x.ln()).sub(x).sub(gammalnCore(ce, a)).exp()
+      : a.mul(x.ln()).sub(x).exp().div(bigGamma(ce, a));
+    return prefactor.mul(fraction);
+  }
+  return bigUpperGammaBySubtraction(ce, a, x).div(bigGamma(ce, a));
 }
 
 /** The Legendre continued fraction of the upper incomplete gamma (Lentz),
@@ -1728,22 +1756,29 @@ function bigGammaQContinuedFractionValue(
     if (c.abs().lt(tiny)) c = tiny;
     d = BigDecimal.ONE.div(d);
     const del = d.mul(c);
-    h = h.mul(del);
+    // A product of BigDecimal values is exact, so without the rounding the
+    // digits of `h` grew by about 2p at each term: 1.9 million digits after
+    // the 1963 terms of Γ(10⁴, 10001) at 524 digits, which took 4 s.
+    h = h.mul(del).toPrecision(p);
     settled = del.sub(BigDecimal.ONE).abs().lt(tol) ? settled + 1 : 0;
     if (settled >= GAMMA_CF_CONSECUTIVE) return h;
   }
   return BigDecimal.NAN;
 }
 
+/** The incomplete gamma kernels in BigDecimal decline (they are NaN, and
+ *  the caller uses the machine kernel) for an argument x below 10^(this
+ *  value). Their sums then add numbers whose exponents differ by about
+ *  −log10 x digits or more, which the exact BigDecimal addition aligns with
+ *  a bigint of that many digits: at x = 10⁻¹⁰⁰⁰⁰⁰⁰⁰⁰⁰, `Gamma(5.5, x)` and
+ *  `GammaRegularized(0.5, x)` ran 8 s, then threw "Maximum BigInt size
+ *  exceeded". At x = 10⁻¹⁰⁰⁰⁰⁰ they take a few milliseconds. */
+const INCOMPLETE_GAMMA_MIN_MAGNITUDE = -100_000;
+
 /**
  * Bignum upper regularized incomplete gamma Q(a, x) = Γ(a, x)/Γ(a) for a
  * NEGATIVE NON-INTEGER order `a` and x > 0, where Γ(a) is finite and of
- * either sign, so the prefactor is `xᵃ e⁻ˣ / Γ(a)` with Γ(a) itself rather
- * than `exp(−ln Γ(a))`. The series and the continued fraction are the same
- * loops as for a positive order: the series converges for every order that
- * is not a pole, the continued fraction for every x > 0. Below x = 2a + 2
- * (a band that exists only for a > −1) Q is 1 − P through the series;
- * elsewhere it is the continued fraction. Precision scales with
+ * either sign (`bigGammaQUpperTail`). Precision scales with
  * `BigDecimal.precision`. Returns NaN outside that domain.
  */
 export function bigGammaQNegativeOrder(
@@ -1755,12 +1790,9 @@ export function bigGammaQNegativeOrder(
   if (!a.isFinite() || !x.isFinite()) return BigDecimal.NAN;
   if (!a.isNegative() || a.isInteger()) return BigDecimal.NAN;
   if (!x.isPositive()) return BigDecimal.NAN;
-  return withGuardDigits(SPECIAL_FN_GUARD, () => {
-    const prefactor = a.mul(x.ln()).sub(x).exp().div(bigGamma(ce, a));
-    return x.lt(a.mul(2).add(BigDecimal.TWO))
-      ? BigDecimal.ONE.sub(bigGammaPSeriesSum(ce, a, x).mul(prefactor))
-      : bigGammaQContinuedFractionValue(ce, a, x).mul(prefactor);
-  });
+  if (decimalMagnitude(x) < INCOMPLETE_GAMMA_MIN_MAGNITUDE)
+    return BigDecimal.NAN;
+  return withGuardDigits(SPECIAL_FN_GUARD, () => bigGammaQUpperTail(ce, a, x));
 }
 
 /**
@@ -1774,7 +1806,10 @@ export function bigGammaP(ce: ComputeEngine, a: BigNum, x: BigNum): BigNum {
   if (!a.isPositive()) return BigDecimal.NAN;
   if (x.isNegative()) return BigDecimal.NAN;
   if (x.isZero()) return BigDecimal.ZERO;
-  // Series when x < 2a+2, continued fraction otherwise. The band just above
+  if (decimalMagnitude(x) < INCOMPLETE_GAMMA_MIN_MAGNITUDE)
+    return BigDecimal.NAN;
+  // Series when x < 2a+2, 1 − Q otherwise (Q is then small, so the
+  // subtraction loses nothing; `bigGammaQUpperTail`). The band just above
   // the machine boundary x = a+1 is where the continued fraction converges
   // slowest (linearly, ~x/digit near x = a+1) — at high precision the power
   // series, which needs only ≈(x−a)+O(p) terms there, is far cheaper, so this
@@ -1782,7 +1817,7 @@ export function bigGammaP(ce: ComputeEngine, a: BigNum, x: BigNum): BigNum {
   return withGuardDigits(SPECIAL_FN_GUARD, () =>
     x.lt(a.mul(2).add(BigDecimal.TWO))
       ? bigGammaPSeries(ce, a, x)
-      : BigDecimal.ONE.sub(bigGammaQContinuedFraction(ce, a, x))
+      : BigDecimal.ONE.subBounded(bigGammaQUpperTail(ce, a, x))
   );
 }
 
@@ -1807,11 +1842,11 @@ const BIG_CANCELLED_MIN = new BigDecimal(`1e-${SPECIAL_FN_GUARD - 4}`);
  * for a > 0 and x ≥ 0. Precision scales with `BigDecimal.precision`. Below
  * x = 2a+2 the series is cheaper (see bigGammaP), and Q = 1 − P is taken from
  * it while Q is at least `BIG_GAMMA_Q_SERIES_MIN`; a smaller Q, and every
- * x ≥ 2a+2, comes from the continued fraction directly so the tail keeps its
- * relative precision. When that fraction declines (a tiny order at a small x
- * makes Q small where the fraction is slow), the series value is kept while it
- * is at least `BIG_CANCELLED_MIN`. Returns a NaN BigNum outside the validated
- * domain.
+ * x ≥ 2a+2, comes from Γ(a, x)/Γ(a) directly (`bigGammaQUpperTail`) so the
+ * tail keeps its relative precision. When that declines (it is NaN when its
+ * computation would need more guard digits than its limit), the series value
+ * is kept while it is at least `BIG_CANCELLED_MIN`. Returns a NaN BigNum
+ * outside the validated domain.
  */
 export function bigGammaQ(ce: ComputeEngine, a: BigNum, x: BigNum): BigNum {
   if (a.isNaN() || x.isNaN()) return BigDecimal.NAN;
@@ -1819,16 +1854,364 @@ export function bigGammaQ(ce: ComputeEngine, a: BigNum, x: BigNum): BigNum {
   if (!a.isPositive()) return BigDecimal.NAN;
   if (x.isNegative()) return BigDecimal.NAN;
   if (x.isZero()) return BigDecimal.ONE;
+  if (decimalMagnitude(x) < INCOMPLETE_GAMMA_MIN_MAGNITUDE)
+    return BigDecimal.NAN;
   return withGuardDigits(SPECIAL_FN_GUARD, () => {
     let q: BigNum | undefined;
     if (x.lt(a.mul(2).add(BigDecimal.TWO))) {
       q = BigDecimal.ONE.sub(bigGammaPSeries(ce, a, x));
       if (q.gte(BIG_GAMMA_Q_SERIES_MIN)) return q;
     }
-    const cf = bigGammaQContinuedFraction(ce, a, x);
-    if (!cf.isNaN() || q === undefined) return cf;
+    const tail = bigGammaQUpperTail(ce, a, x);
+    if (!tail.isNaN() || q === undefined) return tail;
     return q.gte(BIG_CANCELLED_MIN) ? q : BigDecimal.NAN;
   });
+}
+
+/** The decimal order of magnitude of `x` (floor(log10 |x|) + 1), and
+ *  −Infinity for 0. */
+function decimalMagnitude(x: BigNum): number {
+  return x.isZero() ? -Infinity : x.exponent + x._digitCount();
+}
+
+/** The value of the upper incomplete gamma that `bigUpperGammaBySeries` or
+ *  `bigUpperGammaNonPositiveInteger` computes, and the number of decimal
+ *  digits that the subtractions in the computation lost. The value is NaN
+ *  and `lost` is Infinity when the kernel declines: its estimated cost is
+ *  above `UPPER_GAMMA_MAX_WORK`, or its loop did not converge. */
+type UpperGammaResult = { value: BigNum; lost: number };
+
+const UPPER_GAMMA_DECLINED: UpperGammaResult = {
+  value: BigDecimal.NAN,
+  lost: Infinity,
+};
+
+/** The series and the recurrence of the upper incomplete gamma decline
+ *  (their result is NaN, and the caller uses the machine kernel) when the
+ *  number of their terms times the number of digits is estimated above this
+ *  value. A term costs about 1 µs at 74 digits (measured: the 18 000 terms
+ *  of Γ(10⁶, 999 999) at precision 50 took 20 ms), so the limit is about
+ *  0.3 s at that precision. Without it, Γ(10¹², 10¹² + 1) at precision 50
+ *  ran its series for about 1.8·10⁷ terms (14 s). */
+const UPPER_GAMMA_MAX_WORK = 2e7;
+
+/**
+ * An upper estimate of the number of terms of the series of
+ * `bigUpperGammaBySeries` at `digits` digits, or Infinity when it is above
+ * `maxTerms`.
+ *
+ * For s < z the terms first grow, while s + n < z: at most z − s terms.
+ * After that, from m₀ = max(s, z), each term is the previous one times
+ * z/(m₀ + j), and the terms fall by `digits` (plus 4) decimal digits after
+ * N terms when N·ln(m₀/z) + N²/(2(m₀ + N)) ≥ (digits + 4)·ln 10, a lower
+ * bound of Σ_{j≤N} ln((m₀ + j)/z) (from ln(1 + u) ≥ u/(1 + u)). N is found
+ * by doubling. Near s ≈ z, N is about √(2·z·digits·ln 10).
+ */
+function upperGammaSeriesTerms(
+  s: number,
+  z: number,
+  digits: number,
+  maxTerms: number
+): number {
+  const rising = s < z ? Math.ceil(z - s) : 0;
+  if (!(rising <= maxTerms)) return Infinity;
+  const m0 = Math.max(s, z);
+  const target = (digits + 4) * Math.LN10;
+  const fall = (n: number) => n * Math.log(m0 / z) + (n * n) / (2 * (m0 + n));
+  let n = 1;
+  while (fall(n) < target) {
+    n *= 2;
+    if (rising + n / 2 > maxTerms) return Infinity;
+  }
+  return rising + n;
+}
+
+/**
+ * An upper bound, in decimal digits, of the growth of the terms of
+ * `bigUpperGammaBySeries` while s + n crosses (−z, z), for s < −z (the
+ * crossing is then still to come). The factors larger than 1 are z/|x| for
+ * the points x = k + f in (−z, z), with k an integer and f = s − ⌊s⌋ in
+ * (0, 1). The points with |x| ≥ 1 add at most 2z (natural logarithm): on
+ * each side, Σ ln(z/|x|) ≤ ∫₀^z ln(z/x) dx = z, since ln(z/x) decreases.
+ * The two points with |x| < 1, f and f − 1, are added one by one, with
+ * log10 from the BigDecimal exponents: f can be smaller than the smallest
+ * double (s = −2 + 10⁻⁴⁰⁰) or round to 0 in a double (s = −10²⁰ − 0.5, where
+ * a loop over s + n in doubles found a factor z/0).
+ */
+function upperGammaCrossingGain(s: BigNum, z: BigNum): number {
+  const f = s.sub(s.floor());
+  let gain = (2 * z.toNumber()) / Math.LN10;
+  for (const x of [f, BigDecimal.ONE.sub(f)])
+    if (x.lt(z)) gain += decimalMagnitude(z) + 1 - decimalMagnitude(x);
+  return gain;
+}
+
+/**
+ * Γ(s, z) = Γ(s) − γ(s, z) for real s that is not a non-positive integer
+ * and real z > 0, with the lower function from its Tricomi series
+ * γ(s, z) = zˢ e⁻ᶻ Σ_{n≥0} zⁿ / (s)_{n+1}. Called inside the guard-digit
+ * context of `bigUpperGammaBySubtraction`.
+ *
+ * The series converges for every such s. Each term is the previous one
+ * times z/(s + n), a factor larger than 1 only where |s + n| < z. So for a
+ * negative s the terms can decrease, then grow while s + n crosses
+ * (−z, z), then decrease again. The loop stops at a term below the
+ * tolerance when s + n > z, or when s + n < −z and the term times the
+ * growth of the crossing (`upperGammaCrossingGain`) is below the
+ * tolerance. The digits lost are those of the largest of Γ(s) and the
+ * terms, relative to the result.
+ *
+ * The series declines when it would be slow (`upperGammaSeriesTerms`,
+ * `UPPER_GAMMA_MAX_WORK`): near s ≈ z it needs about √(2·z·D) terms for D
+ * digits, and it is used for a large z only when the continued fraction
+ * has reached its cap or s > z − 1.
+ */
+function bigUpperGammaBySeries(
+  ce: ComputeEngine,
+  s: BigNum,
+  z: BigNum
+): UpperGammaResult {
+  const p = BigDecimal.precision;
+  const zNum = z.toNumber();
+  const estimate = upperGammaSeriesTerms(
+    s.toNumber(),
+    zNum,
+    p,
+    UPPER_GAMMA_MAX_WORK / p
+  );
+  if (!Number.isFinite(estimate)) return UPPER_GAMMA_DECLINED;
+  const tol = new BigDecimal(10).pow(-p);
+  let ap = s;
+  let term = BigDecimal.ONE.div(s);
+  let sum = term;
+  let largest = decimalMagnitude(term);
+  const minusZ = z.neg();
+  // The decimal digits that the factors z/(s + n) larger than 1 add, for
+  // the n with |s + n| < z that are still to come (used only for s < −z)
+  const crossingGain = s.lt(minusZ) ? upperGammaCrossingGain(s, z) : 0;
+  // The estimate does not count the digits that the sum loses to the
+  // alternating signs of the terms for s < 0 (they are found after the
+  // loop, and the computation is then made again with more digits).
+  const maxTerms =
+    2000 + 20 * p + 2 * estimate + 20 * Math.ceil(Math.min(zNum, estimate));
+  let converged = false;
+  for (let n = 0; n < maxTerms; n++) {
+    if ((n & 0xff) === 0) checkDeadline(ce._deadlineFrame);
+    ap = ap.add(BigDecimal.ONE);
+    term = term.mul(z).div(ap);
+    sum = sum.add(term);
+    largest = Math.max(largest, decimalMagnitude(term));
+    if (ap.gt(z) && term.abs().lt(sum.abs().mul(tol))) {
+      converged = true;
+      break;
+    }
+    if (
+      ap.lt(minusZ) &&
+      decimalMagnitude(term) + crossingGain < decimalMagnitude(sum) - p - 1
+    ) {
+      converged = true;
+      break;
+    }
+  }
+  if (!converged) return UPPER_GAMMA_DECLINED;
+  const prefactor = s.mul(z.ln()).sub(z).exp();
+  const gammaS = bigGamma(ce, s);
+  const value = gammaS.subBounded(prefactor.mul(sum));
+  if (value.isZero()) return { value, lost: Infinity };
+  const top = Math.max(
+    decimalMagnitude(gammaS),
+    decimalMagnitude(prefactor) + Math.max(largest, decimalMagnitude(sum))
+  );
+  return { value, lost: Math.max(0, top - decimalMagnitude(value)) };
+}
+
+/** `bigUpperGammaNonPositiveInteger` declines above this order |s|: its
+ *  recurrence takes |s| steps (Γ(−10⁶, 1) at precision 50 took 870 ms). For
+ *  −s at least the number of digits, the continued fraction is used first
+ *  (`bigUpperGammaFraction`), and it converges in few terms there, so the
+ *  recurrence runs for a larger |s| only when that fraction reached its
+ *  cap. */
+const UPPER_GAMMA_MAX_RECURRENCE = 10_000;
+
+/**
+ * Γ(−n, z) for an integer n ≥ 0 and real z > 0, from
+ * Γ(0, z) = E₁(z) = −γ − ln z + Σ_{k≥1} (−1)^{k+1} zᵏ / (k·k!) and the
+ * downward recurrence Γ(a − 1, z) = (Γ(a, z) − z^{a−1} e⁻ᶻ)/(a − 1)
+ * (DLMF 8.8.2), applied n times. Called inside the guard-digit context of
+ * `bigUpperGammaBySubtraction`. The split Γ(s) − γ(s, z) is not available
+ * here: Γ(s) is a pole. The digits lost in the alternating sum and in each
+ * subtraction of the recurrence are added up. Declines for
+ * n > `UPPER_GAMMA_MAX_RECURRENCE`, and when the series of E₁, which needs
+ * more than e·z terms, is estimated above `UPPER_GAMMA_MAX_WORK`.
+ */
+function bigUpperGammaNonPositiveInteger(
+  ce: ComputeEngine,
+  n: number,
+  z: BigNum
+): UpperGammaResult {
+  const p = BigDecimal.precision;
+  const zNum = z.toNumber();
+  if (n > UPPER_GAMMA_MAX_RECURRENCE) return UPPER_GAMMA_DECLINED;
+  if (!((3 * zNum + 2 * p) * p <= UPPER_GAMMA_MAX_WORK))
+    return UPPER_GAMMA_DECLINED;
+  const tol = new BigDecimal(10).pow(-p);
+  const eulerGamma = BigDecimal.EULER_GAMMA;
+  const lnZ = z.ln();
+  // zᵏ/k!, then the term zᵏ/(k·k!) with its sign
+  let power = BigDecimal.ONE;
+  let sum = BigDecimal.ZERO;
+  let largest = Math.max(decimalMagnitude(eulerGamma), decimalMagnitude(lnZ));
+  const maxTerms = 2000 + 20 * Math.ceil(zNum) + 20 * p;
+  let converged = false;
+  for (let k = 1; k < maxTerms; k++) {
+    if ((k & 0xff) === 0) checkDeadline(ce._deadlineFrame);
+    power = power.mul(z).div(k);
+    const term = power.div(k);
+    sum = k % 2 === 1 ? sum.add(term) : sum.sub(term);
+    largest = Math.max(largest, decimalMagnitude(term));
+    if (k > zNum && term.lt(sum.abs().mul(tol))) {
+      converged = true;
+      break;
+    }
+  }
+  if (!converged) return UPPER_GAMMA_DECLINED;
+  let g = sum.sub(eulerGamma).sub(lnZ);
+  if (g.isZero()) return { value: g, lost: Infinity };
+  let lost = Math.max(0, largest - decimalMagnitude(g));
+  // z^{a−1} e⁻ᶻ, divided by z at each step
+  let t = z.neg().exp().div(z);
+  for (let a = 0; a > -n; a--) {
+    if ((a & 0xff) === 0) checkDeadline(ce._deadlineFrame);
+    if (a < 0) t = t.div(z);
+    const difference = g.subBounded(t);
+    if (difference.isZero()) return { value: difference, lost: Infinity };
+    lost += Math.max(
+      0,
+      Math.max(decimalMagnitude(g), decimalMagnitude(t)) -
+        decimalMagnitude(difference)
+    );
+    g = difference.div(a - 1);
+  }
+  return { value: g, lost };
+}
+
+/** The guard digits of `bigUpperGammaBySubtraction` stay below this multiple
+ *  of the working precision (plus `SPECIAL_FN_GUARD`). A computation that
+ *  would need more answers NaN, and the caller uses the machine kernel. */
+const UPPER_GAMMA_MAX_GUARD_FACTOR = 8;
+
+/**
+ * The Legendre continued fraction of Γ(s, z) without its prefactor zˢ e⁻ᶻ
+ * (`bigGammaQContinuedFractionValue`) at the current precision D, where it
+ * is used first, and undefined elsewhere or when it reaches its iteration
+ * cap. Called inside a guard-digit context, with z > 0. The fraction
+ * converges for every real s and z > 0; it is used:
+ *
+ * - for s ≤ −D, at any z > 0. There it converges in at most about 3.3·D
+ *   terms, and in fewer for a larger −s (measured against mpmath, at
+ *   D = 74, 144 and 524, for −s from D to 3D and z from 10⁻³⁰⁰ to D/4: all
+ *   correct to D − 1 digits; 17 terms for Γ(−10⁶, 1) at D = 74). The
+ *   recurrence of `bigUpperGammaNonPositiveInteger` takes −s steps, and the
+ *   series of `bigUpperGammaBySeries` loses digits to Γ(s), which is tiny.
+ * - for z ≥ D/4, and also z ≥ s + 1 for a positive s. For a small s it
+ *   converges in about 0.33·D²/z terms (measured), so it is not used for a
+ *   small z. In the band s + 1 ≤ z < 2s + 2 it needs more terms than for a
+ *   larger z (about 2000 terms at s = 10⁴, z = s + 1, D = 524), but the
+ *   series there subtracts nearly equal numbers: Γ(s, z) is a small part of
+ *   Γ(s) (at s = 10⁴, z = 1.5·10⁴ about 800 digits are lost).
+ */
+function bigUpperGammaFraction(
+  ce: ComputeEngine,
+  s: BigNum,
+  z: BigNum
+): BigNum | undefined {
+  const digits = BigDecimal.precision;
+  const applies =
+    s.lte(-digits) ||
+    (z.gte(digits / 4) && (!s.isPositive() || z.gte(s.add(BigDecimal.ONE))));
+  if (!applies) return undefined;
+  const fraction = bigGammaQContinuedFractionValue(ce, s, z);
+  return fraction.isNaN() ? undefined : fraction;
+}
+
+/**
+ * Γ(s, z) for real s and z > 0, by a computation that subtracts: E₁ and the
+ * downward recurrence for a non-positive integer s
+ * (`bigUpperGammaNonPositiveInteger`), Γ(s) − γ(s, z) otherwise
+ * (`bigUpperGammaBySeries`). They subtract nearly equal numbers when the
+ * result is small compared to the terms. The kernels return the number of
+ * digits lost, and when it is more than the guard digits, the computation
+ * is made again with that many more guard digits. NaN when a kernel
+ * declines.
+ */
+function bigUpperGammaBySubtraction(
+  ce: ComputeEngine,
+  s: BigNum,
+  z: BigNum
+): BigNum {
+  const p = BigDecimal.precision;
+  const nonPositiveInteger = s.isInteger() && !s.isPositive();
+  if (nonPositiveInteger && !Number.isSafeInteger(s.toNumber()))
+    return BigDecimal.NAN;
+  let guard = SPECIAL_FN_GUARD;
+  const maxGuard = UPPER_GAMMA_MAX_GUARD_FACTOR * p + SPECIAL_FN_GUARD;
+  while (guard <= maxGuard) {
+    let lost = 0;
+    const value = withGuardDigits(guard, () => {
+      const result = nonPositiveInteger
+        ? bigUpperGammaNonPositiveInteger(ce, -s.toNumber(), z)
+        : bigUpperGammaBySeries(ce, s, z);
+      lost = result.lost;
+      return result.value;
+    });
+    // Keep at least 8 of the guard digits after the loss.
+    if (lost <= guard - 8) return value;
+    if (!Number.isFinite(lost)) return BigDecimal.NAN;
+    guard = Math.ceil(lost) + SPECIAL_FN_GUARD;
+  }
+  return BigDecimal.NAN;
+}
+
+/** `bigIncompleteGammaUpper` declines (it is NaN, and the caller uses the
+ *  machine kernel) above this z. The continued fraction then works on
+ *  numbers with as many digits as z has before its decimal point (it adds
+ *  2 to z + 1 − s at each term): Γ(2, 10¹⁰⁰⁰⁰⁰) took 1.7 s, and gave 0, as
+ *  e⁻ᶻ is out of the BigDecimal exponent range there. Above 10¹⁸, the
+ *  value is in that range only in a narrow band of s near
+ *  z / (ln z) (0.434·z is the base-10 exponent of eᶻ, above 4·10¹⁷). */
+const UPPER_GAMMA_MAX_Z = new BigDecimal('1e18');
+
+/**
+ * Bignum upper incomplete gamma Γ(s, z) = ∫_z^∞ t^{s−1} e^{−t} dt, for real s
+ * and real z > 0, at the working precision (`BigDecimal.precision`). Returns
+ * NaN for z ≤ 0 (the value is then complex in general, and the caller uses
+ * the complex kernel), for a non-finite operand, and where no kernel is
+ * fast and correct (the caller then uses the machine kernel).
+ *
+ * The Legendre continued fraction, Γ(s, z) = zˢ e⁻ᶻ · (the fraction), is
+ * used where it converges in few terms (`bigUpperGammaFraction`). Elsewhere,
+ * and where it reaches its iteration cap, the value is from a computation
+ * that subtracts (`bigUpperGammaBySubtraction`).
+ */
+export function bigIncompleteGammaUpper(
+  ce: ComputeEngine,
+  s: BigNum,
+  z: BigNum
+): BigNum {
+  if (s.isNaN() || z.isNaN()) return BigDecimal.NAN;
+  if (!s.isFinite() || !z.isFinite()) return BigDecimal.NAN;
+  if (!z.isPositive()) return BigDecimal.NAN;
+  if (decimalMagnitude(z) < INCOMPLETE_GAMMA_MIN_MAGNITUDE)
+    return BigDecimal.NAN;
+  if (z.gt(UPPER_GAMMA_MAX_Z)) return BigDecimal.NAN;
+  let usedFraction = false;
+  const value = withGuardDigits(SPECIAL_FN_GUARD, () => {
+    const fraction = bigUpperGammaFraction(ce, s, z);
+    if (fraction === undefined) return BigDecimal.NAN;
+    usedFraction = true;
+    return s.mul(z.ln()).sub(z).exp().mul(fraction);
+  });
+  return usedFraction ? value : bigUpperGammaBySubtraction(ce, s, z);
 }
 
 /** Continued fraction for the regularized incomplete beta (NR betacf, Lentz),
@@ -1868,7 +2251,9 @@ function bigBetaContinuedFraction(
     c = BigDecimal.ONE.add(aa.div(c));
     if (c.abs().lt(tiny)) c = tiny;
     d = BigDecimal.ONE.div(d);
-    h = h.mul(d).mul(c);
+    // Rounded: a product of BigDecimal values is exact, and the digits of
+    // `h` would otherwise grow at each term.
+    h = h.mul(d).mul(c).toPrecision(p);
     // −(a+m)·(a+b+m)·x / ((a+2m)·(a+1+2m))
     aa = a
       .add(m)
@@ -1882,7 +2267,7 @@ function bigBetaContinuedFraction(
     if (c.abs().lt(tiny)) c = tiny;
     d = BigDecimal.ONE.div(d);
     const del = d.mul(c);
-    h = h.mul(del);
+    h = h.mul(del).toPrecision(p);
     settled = del.sub(BigDecimal.ONE).abs().lt(tol) ? settled + 1 : 0;
     if (settled >= GAMMA_CF_CONSECUTIVE) return h;
   }

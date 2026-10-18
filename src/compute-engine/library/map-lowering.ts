@@ -224,6 +224,26 @@ export function makeSpineRunner(
   const runners = levels.map((l) =>
     mapAutoCompileRunner(l.expr, { drainStart: true })
   );
+  // Under `.N()` (the numeric marker on the first level), the first level is
+  // applied to the base row AS WRITTEN, not to its evaluated elements, and
+  // the application is evaluated with `{ numericApproximation: true }`: the
+  // element of `Map(f, [v]).N()` is then `f(v).N()`, the value of the direct
+  // application. An exact evaluation of the element first can be slow: with
+  // `H = Sum(1/k, k, 1, 6000)`, the exact element is a rational with
+  // thousands of digits, and `Sin(H).N()` reads `H` numerically. A numeric
+  // evaluation of the element first loses the exact structure that the
+  // operator reads under `.N()`: `Sin(Pi).N()` is `0` (the float of π gives
+  // `1.2e-16` at machine precision), `Floor((25! − 1)/24!).N()` is `24` (the
+  // float of the element is `25`), and `Numerator(v).N()` is the numerator
+  // of the exact `v`. A user-written `N(…)` body is not the marker, and a
+  // level that reads a variable of an enclosing frame (`closureScope`) is
+  // evaluated in another scope than its elements: both keep the exact
+  // evaluation of the row.
+  const writtenBase =
+    levels.length > 0 &&
+    levels[0].napprox &&
+    levels[0].inexact !== true &&
+    levels[0].closureScope === undefined;
 
   return (baseRow) => {
     let row: ReadonlyArray<Expression> = baseRow;
@@ -247,7 +267,10 @@ export function makeSpineRunner(
       if (err === undefined) v = runners[i]?.(row);
       if (err === undefined && v === undefined) {
         let invalidInput = false;
-        if (!rowEvaluated) {
+        // Under `.N()`, the row as written is the operand row of the first
+        // level (`writtenBase` above): the evaluation of the application
+        // evaluates each operand.
+        if (!rowEvaluated && !writtenBase) {
           // `makeLambda` step 4 evaluates every argument in the calling scope
           // before the body runs: a row of symbols carrying assigned values
           // would otherwise pass through raw. `.evaluate()` is cheap on an

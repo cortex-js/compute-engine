@@ -713,63 +713,65 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       // `trigSign` is quadrant-based — meaningless for an inverse function —
       // and returned undefined for every input.)
       sgn: ([x]) => x.sgn,
-      evaluate: ([x], { numericApproximation, engine, expression }) => {
-        const nonNumeric = nonNumericOperandError(engine, [x]);
-        if (nonNumeric !== undefined) return nonNumeric;
-        // A `Measurement` argument: arctan(a ± σ) is arctan(a) ± σ/(1 + a²)
-        // (`measurementUnaryByHead`; this head is not built by
-        // `trigFunction`, which carries the hook for the others).
-        const m = measurementUnaryByHead(engine, 'Arctan', x);
-        if (m !== undefined) return numericApproximation ? m.N() : m;
-        // An argument outside the range of a double, read from the operand
-        // before its numeric evaluation (`.N()` at machine precision makes
-        // `10^{400}·(1 + i)` the double `~oo`).
-        if (numericApproximation || (isNumber(x) && x.isExact === false)) {
-          const outside = inverseTrigBigDecimalValue(
-            'Arctan',
-            x,
-            isFunction(expression) && expression.nops === 1
-              ? expression.op1
-              : undefined
-          );
-          if (outside === null) return undefined; // stays unevaluated
-          if (outside !== undefined) return outside;
+      evaluate: guardDigitsN(
+        ([x], { numericApproximation, engine, expression }) => {
+          const nonNumeric = nonNumericOperandError(engine, [x]);
+          if (nonNumeric !== undefined) return nonNumeric;
+          // A `Measurement` argument: arctan(a ± σ) is arctan(a) ± σ/(1 + a²)
+          // (`measurementUnaryByHead`; this head is not built by
+          // `trigFunction`, which carries the hook for the others).
+          const m = measurementUnaryByHead(engine, 'Arctan', x);
+          if (m !== undefined) return numericApproximation ? m.N() : m;
+          // An argument outside the range of a double, read from the operand
+          // before its numeric evaluation (`.N()` at machine precision makes
+          // `10^{400}·(1 + i)` the double `~oo`).
+          if (numericApproximation || (isNumber(x) && x.isExact === false)) {
+            const outside = inverseTrigBigDecimalValue(
+              'Arctan',
+              x,
+              isFunction(expression) && expression.nops === 1
+                ? expression.op1
+                : undefined
+            );
+            if (outside === null) return undefined; // stays unevaluated
+            if (outside !== undefined) return outside;
+          }
+          // `~oo` is outside the carrier: the incompatible-type error that
+          // boxing validation gives a literal `~oo`.
+          if (isNumber(x) && x.isInfinity && !x.isPositive && !x.isNegative)
+            return engine.typeError(ARCTAN_CARRIER, x.type, x);
+          // arctan(±i) = ~oo: the logarithmic singularities of
+          // `(i/2)·ln((i+z)/(i−z))`, where the modulus grows without bound.
+          // Exact on both routes (`.N()` already answered `~oo`; `evaluate()`
+          // used to stay symbolic). `isSame` compares the exact value — an
+          // exact literal a hair off `i`, such as `(1 − 2⁻⁵⁴)i`, projects to
+          // the machine double `im === 1` but is a finite point.
+          if (isNumber(x) && (x.isSame(engine.I) || x.isSame(engine.I.neg())))
+            return engine.ComplexInfinity;
+          // arctan(±∞) = ±π/2 (the horizontal asymptotes). Needed for improper
+          // integrals: ∫₀^∞ 1/(1+x²) = arctan(∞) − arctan(0) = π/2. Built
+          // from `halfTurnAngle` because the result is an angle in the
+          // engine's current `angularUnit`, at an infinite argument exactly
+          // as at a finite one (in degree mode `arctan(1)` answers 45, so
+          // `arctan(∞)` answers 90, not π/2).
+          if (x.isInfinity && (x.isPositive || x.isNegative)) {
+            const half = halfTurnAngle(engine);
+            const v = x.isPositive ? half.div(2) : half.div(-2);
+            if (numericApproximation) return v.N();
+            // With a user value of `Pi`, the call stays symbolic
+            // (`holdsShadowedPi()`).
+            return holdsShadowedPi(engine, v) ? undefined : v;
+          }
+          if (numericApproximation) return evalTrig('Arctan', x);
+          const a = constructibleValues('Arctan', x);
+          if (a) return a;
+          // Keep arctan of an EXACT numeric argument symbolic (only .N()
+          // numericizes); an inexact float falls through to evalTrig and
+          // numericizes; evalTrig also handles symbolic arguments.
+          if (isNumber(x) && x.isExact) return engine._fn('Arctan', [x]);
+          return evalTrig('Arctan', x);
         }
-        // `~oo` is outside the carrier: the incompatible-type error that
-        // boxing validation gives a literal `~oo`.
-        if (isNumber(x) && x.isInfinity && !x.isPositive && !x.isNegative)
-          return engine.typeError(ARCTAN_CARRIER, x.type, x);
-        // arctan(±i) = ~oo: the logarithmic singularities of
-        // `(i/2)·ln((i+z)/(i−z))`, where the modulus grows without bound.
-        // Exact on both routes (`.N()` already answered `~oo`; `evaluate()`
-        // used to stay symbolic). `isSame` compares the exact value — an
-        // exact literal a hair off `i`, such as `(1 − 2⁻⁵⁴)i`, projects to
-        // the machine double `im === 1` but is a finite point.
-        if (isNumber(x) && (x.isSame(engine.I) || x.isSame(engine.I.neg())))
-          return engine.ComplexInfinity;
-        // arctan(±∞) = ±π/2 (the horizontal asymptotes). Needed for improper
-        // integrals: ∫₀^∞ 1/(1+x²) = arctan(∞) − arctan(0) = π/2. Built
-        // from `halfTurnAngle` because the result is an angle in the
-        // engine's current `angularUnit`, at an infinite argument exactly
-        // as at a finite one (in degree mode `arctan(1)` answers 45, so
-        // `arctan(∞)` answers 90, not π/2).
-        if (x.isInfinity && (x.isPositive || x.isNegative)) {
-          const half = halfTurnAngle(engine);
-          const v = x.isPositive ? half.div(2) : half.div(-2);
-          if (numericApproximation) return v.N();
-          // With a user value of `Pi`, the call stays symbolic
-          // (`holdsShadowedPi()`).
-          return holdsShadowedPi(engine, v) ? undefined : v;
-        }
-        if (numericApproximation) return evalTrig('Arctan', x);
-        const a = constructibleValues('Arctan', x);
-        if (a) return a;
-        // Keep arctan of an EXACT numeric argument symbolic (only .N()
-        // numericizes); an inexact float falls through to evalTrig and
-        // numericizes; evalTrig also handles symbolic arguments.
-        if (isNumber(x) && x.isExact) return engine._fn('Arctan', [x]);
-        return evalTrig('Arctan', x);
-      },
+      ),
     },
 
     Arctan2: {
@@ -830,7 +832,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         if (ce.angularUnit === 'rad') return partial;
         return ce.function('Divide', [partial, angularChainFactor(ce)]);
       },
-      evaluate: ([y, x], { engine: ce, numericApproximation }) => {
+      evaluate: guardDigitsN(([y, x], { engine: ce, numericApproximation }) => {
         // A `Measurement` operand: the angle of the nominals, with the
         // uncertainty propagated through both partial derivatives
         // (`measurementArctan2`).
@@ -916,7 +918,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         }
         // Sign of x (or of y, when x < 0) is indeterminate: leave unevaluated.
         return undefined;
-      },
+      }),
     },
 
     Cos: {
@@ -1091,10 +1093,11 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       // Evaluate the constructed ½(1−cos z) so `.N()` returns a number, not the
       // unevaluated expression; exact arguments still stay symbolic under
       // `evaluate()` (e.g. `Haversine(2) → ½(1−cos 2)`).
-      evaluate: ([z], { engine, numericApproximation }) =>
+      evaluate: guardDigitsN(([z], { engine, numericApproximation }) =>
         engine
           .expr(['Divide', ['Subtract', 1, ['Cos', z]], 2])
-          .evaluate({ numericApproximation }),
+          .evaluate({ numericApproximation })
+      ),
     },
 
     /** = 2 * Arcsin(Sqrt(z)) */
@@ -1117,10 +1120,11 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       // Evaluate the constructed 2·arcsin(√z): under `.N()` it numericizes,
       // and under `evaluate()` the exact fold applies (`InverseHaversine(1/2) →
       // 2·arcsin(√2/2) → 2·(π/4) → π/2`).
-      evaluate: ([x], { engine, numericApproximation }) =>
+      evaluate: guardDigitsN(([x], { engine, numericApproximation }) =>
         engine
           .expr(['Multiply', 2, ['Arcsin', ['Sqrt', x]]])
-          .evaluate({ numericApproximation }),
+          .evaluate({ numericApproximation })
+      ),
     },
   },
   {
@@ -1293,64 +1297,68 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
           boundedEntireRealType(x),
           context.engine._typeResolver
         ),
-      evaluate: ([x], { numericApproximation, engine: ce, expression }) => {
-        // An exact constant argument (`Pi`, `Pi / 2`): sin(x)/x when sin(x)
-        // has an exact value, so `sinc(π)` is exactly 0 and `sinc(π/2)` is
-        // 2/π. Read on the operand BEFORE its numeric evaluation (under
-        // `.N()` the handler receives the float `3.14…`, whose sinc is
-        // `1.2e-25`), as the trigonometric factory reads its raw operand.
-        const raw =
-          isFunction(expression) && expression.nops === 1 ? expression.op1 : x;
-        // Not at 0 (the evaluated operand): `sinc(0) = 1` below, where
-        // sin(x)/x would be 0/0 — as when a bound index `n` is 0 in a sum.
-        // `Sinc` does not depend on the angular unit: its operand is always
-        // in radians. But `Sin` reads its operand in `ce.angularUnit`, so
-        // convert `raw` radians to that unit first (divide by the radians per
-        // unit, `π/180` in degrees). Without this conversion, in degrees
-        // `Sinc(10·Floor(π))` would use `Sin(30) = 1/2` and give 1/60 instead
-        // of sin(30)/30 = −0.0329.
-        if (
-          !isNumber(raw) &&
-          !(isNumber(x) && x.isSame(0)) &&
-          raw.unknowns.length === 0 &&
-          raw.type.matches('real')
-        ) {
-          const s = ce
-            .function('Sin', [
-              ce.function('Divide', [raw, angularChainFactor(ce)]),
-            ])
-            .evaluate();
-          if (isNumber(s) && s.isExact) {
-            const exact = ce.function('Divide', [s, raw]).evaluate();
-            return numericApproximation ? exact.N() : exact;
+      evaluate: guardDigitsN(
+        ([x], { numericApproximation, engine: ce, expression }) => {
+          // An exact constant argument (`Pi`, `Pi / 2`): sin(x)/x when sin(x)
+          // has an exact value, so `sinc(π)` is exactly 0 and `sinc(π/2)` is
+          // 2/π. Read on the operand BEFORE its numeric evaluation (under
+          // `.N()` the handler receives the float `3.14…`, whose sinc is
+          // `1.2e-25`), as the trigonometric factory reads its raw operand.
+          const raw =
+            isFunction(expression) && expression.nops === 1
+              ? expression.op1
+              : x;
+          // Not at 0 (the evaluated operand): `sinc(0) = 1` below, where
+          // sin(x)/x would be 0/0 — as when a bound index `n` is 0 in a sum.
+          // `Sinc` does not depend on the angular unit: its operand is always
+          // in radians. But `Sin` reads its operand in `ce.angularUnit`, so
+          // convert `raw` radians to that unit first (divide by the radians per
+          // unit, `π/180` in degrees). Without this conversion, in degrees
+          // `Sinc(10·Floor(π))` would use `Sin(30) = 1/2` and give 1/60 instead
+          // of sin(30)/30 = −0.0329.
+          if (
+            !isNumber(raw) &&
+            !(isNumber(x) && x.isSame(0)) &&
+            raw.unknowns.length === 0 &&
+            raw.type.matches('real')
+          ) {
+            const s = ce
+              .function('Sin', [
+                ce.function('Divide', [raw, angularChainFactor(ce)]),
+              ])
+              .evaluate();
+            if (isNumber(s) && s.isExact) {
+              const exact = ce.function('Divide', [s, raw]).evaluate();
+              return numericApproximation ? exact.N() : exact;
+            }
           }
-        }
-        if (!isNumber(x)) return undefined;
-        if (!x.isComplex) {
-          // Exact special values, regardless of numericApproximation
-          if (x.isSame(0)) return floatIfFloatOperand([x], ce.One);
-          if (x.isInfinity) return ce.Zero;
-        }
-        if (!shouldNumericize(numericApproximation, x)) return undefined;
-        // On the imaginary axis sinc(iy) = sinh(y)/y, a real value: the
-        // imaginary part is exactly 0. The value is positive, so a value past
-        // the range of doubles (`sinc(800i)`) is +∞.
-        const onAxis = applyOnImaginaryAxis(
-          x,
-          (y) => [sincImaginaryAxis(y), 0],
-          (y) => [y.sinh().div(y), 0]
-        );
-        if (onAxis === null) return ce.PositiveInfinity;
-        if (onAxis !== undefined) return onAxis;
-        return complexKernelValue(
-          apply(
+          if (!isNumber(x)) return undefined;
+          if (!x.isComplex) {
+            // Exact special values, regardless of numericApproximation
+            if (x.isSame(0)) return floatIfFloatOperand([x], ce.One);
+            if (x.isInfinity) return ce.Zero;
+          }
+          if (!shouldNumericize(numericApproximation, x)) return undefined;
+          // On the imaginary axis sinc(iy) = sinh(y)/y, a real value: the
+          // imaginary part is exactly 0. The value is positive, so a value past
+          // the range of doubles (`sinc(800i)`) is +∞.
+          const onAxis = applyOnImaginaryAxis(
             x,
-            (x) => sinc(x),
-            (x) => bigSinc(x),
-            sincComplex
-          )
-        );
-      },
+            (y) => [sincImaginaryAxis(y), 0],
+            (y) => [y.sinh().div(y), 0]
+          );
+          if (onAxis === null) return ce.PositiveInfinity;
+          if (onAxis !== undefined) return onAxis;
+          return complexKernelValue(
+            apply(
+              x,
+              (x) => sinc(x),
+              (x) => bigSinc(x),
+              sincComplex
+            )
+          );
+        }
+      ),
     },
 
     /** FresnelS(x) = ∫₀ˣ sin(πt²/2) dt — odd function, S(∞) = 1/2 */
@@ -2056,109 +2064,111 @@ function trigFunction(
       ops = ce.strict ? flatten(ops) : checkArity(ce, ops, 1);
       return ce._fn(operator, ops);
     },
-    evaluate: ([x], { numericApproximation, engine, expression }) => {
-      // The boxing seam reports a statically provable carrier violation.
-      // This complements it for an operand whose static type is a UNION that
-      // could still be numeric — the element type of a heterogeneous list,
-      // `Sin(At(["a", 2], 1))` — which no boxing-time check can settle.
-      const nonNumeric = nonNumericOperandError(engine, [x]);
-      if (nonNumeric !== undefined) return nonNumeric;
-      // An inverse function at an argument outside the range of a double:
-      // at machine precision `.N()` made `10^{400}` the double `+∞`, which
-      // the branch below would read as an infinite argument. The operand
-      // before its numeric evaluation keeps the exact value. A float operand
-      // (`1.5·10^{400}` above machine precision) numericizes under
-      // `evaluate()` too.
-      if (numericApproximation || (isNumber(x) && x.isExact === false)) {
-        const outside = inverseTrigBigDecimalValue(
-          operator,
-          x,
-          isFunction(expression) && expression.nops === 1
-            ? expression.op1
-            : undefined
-        );
-        if (outside === null) return undefined; // stays unevaluated
-        if (outside !== undefined) return outside;
-      }
-      // The carrier, enforced at the evaluate seam (see the factory
-      // parameter's comment). A non-finite non-NaN number operand is
-      // either off-carrier (an incompatible-type error, the value boxing
-      // validation would have produced) or an in-carrier infinity, which
-      // folds to the head's genuine value at that point on BOTH routes —
-      // the values are exact, so folding them under `evaluate()` honors
-      // the exactness contract (the `Erf(±∞) = ±1` precedent).
-      if (isNumber(x) && x.isFinite === false && x.isNaN !== true) {
-        const signed = x.isPositive === true || x.isNegative === true;
-        const admitted =
-          carrier === 'complex | infinity' ||
-          (carrier === 'complex | signed_infinity' && signed);
-        if (!admitted) return engine.typeError(carrierType, x.type, x);
-        const v = nonFiniteTrigValue(operator, x, engine);
-        if (v !== undefined && numericApproximation) return v.N();
-        // With a user value of `Pi`, a value that holds π is not returned
-        // (`holdsShadowedPi()`).
-        if (v !== undefined && !holdsShadowedPi(engine, v)) return v;
+    evaluate: guardDigitsN(
+      ([x], { numericApproximation, engine, expression }) => {
+        // The boxing seam reports a statically provable carrier violation.
+        // This complements it for an operand whose static type is a UNION that
+        // could still be numeric — the element type of a heterogeneous list,
+        // `Sin(At(["a", 2], 1))` — which no boxing-time check can settle.
+        const nonNumeric = nonNumericOperandError(engine, [x]);
+        if (nonNumeric !== undefined) return nonNumeric;
+        // An inverse function at an argument outside the range of a double:
+        // at machine precision `.N()` made `10^{400}` the double `+∞`, which
+        // the branch below would read as an infinite argument. The operand
+        // before its numeric evaluation keeps the exact value. A float operand
+        // (`1.5·10^{400}` above machine precision) numericizes under
+        // `evaluate()` too.
+        if (numericApproximation || (isNumber(x) && x.isExact === false)) {
+          const outside = inverseTrigBigDecimalValue(
+            operator,
+            x,
+            isFunction(expression) && expression.nops === 1
+              ? expression.op1
+              : undefined
+          );
+          if (outside === null) return undefined; // stays unevaluated
+          if (outside !== undefined) return outside;
+        }
+        // The carrier, enforced at the evaluate seam (see the factory
+        // parameter's comment). A non-finite non-NaN number operand is
+        // either off-carrier (an incompatible-type error, the value boxing
+        // validation would have produced) or an in-carrier infinity, which
+        // folds to the head's genuine value at that point on BOTH routes —
+        // the values are exact, so folding them under `evaluate()` honors
+        // the exactness contract (the `Erf(±∞) = ±1` precedent).
+        if (isNumber(x) && x.isFinite === false && x.isNaN !== true) {
+          const signed = x.isPositive === true || x.isNegative === true;
+          const admitted =
+            carrier === 'complex | infinity' ||
+            (carrier === 'complex | signed_infinity' && signed);
+          if (!admitted) return engine.typeError(carrierType, x.type, x);
+          const v = nonFiniteTrigValue(operator, x, engine);
+          if (v !== undefined && numericApproximation) return v.N();
+          // With a user value of `Pi`, a value that holds π is not returned
+          // (`holdsShadowedPi()`).
+          if (v !== undefined && !holdsShadowedPi(engine, v)) return v;
+          return engine._fn(operator, [x]);
+        }
+        // Measurement error propagation for every head built here (circular,
+        // hyperbolic and inverse functions), from the derivative table. Guard
+        // on the evaluated argument being a Measurement. Without this a
+        // measurement fell through to the numeric kernel, which read it as `0`
+        // (`Sec(Measurement(0.7468, 0.001))` was `1`).
+        const evalX = x.evaluate();
+        if (isMeasurement(evalX)) {
+          const r = measurementUnaryByHead(engine, operator, evalX);
+          if (r !== undefined) return numericApproximation ? r.N() : r;
+        }
+        // Exact hyperbolic values (`sinh(0) = 0`, `coth(0) = ~oo`,
+        // `artanh(1) = +oo`, ...), ahead of the numeric branch so `.N()` agrees
+        // with `evaluate()` (the float kernel gives `Arcsch(0)` a signed
+        // infinity). The same helper serves the `constructible value` simplify
+        // rule, so `simplify()` agrees too.
+        // A float argument gives a float value (`sinh(0.0)` is the float `0`);
+        // a non-finite value (`coth(0.0) = ~oo`) has no float form and stays.
+        const exact = hyperbolicExactValue(operator, x);
+        if (exact) {
+          if (hasFloatOperand([x])) return asFloat(exact.N());
+          return numericApproximation ? exact.N() : exact;
+        }
+        // The operand before its numeric evaluation lets the kernel read an
+        // exact large angle without rounding it first (`12345678901234567890123`
+        // or `10³⁰·π`). It is the operand of `x` only when the node has one
+        // operand.
+        if (numericApproximation)
+          return evalTrig(
+            operator,
+            x,
+            isFunction(expression) && expression.nops === 1
+              ? expression.op1
+              : undefined
+          );
+        // The evaluated operand of `0.25·π` is the float `0.785…`, which is
+        // not a special angle. The operand before its evaluation keeps the
+        // float coefficient of π, which `constructibleValues` reads as the
+        // special angle `π/4` when it is within one unit in its last place of
+        // `1/4` (user decision, 2026-09-27). That operand is evaluated again
+        // (`constructibleValues` reads its numeric value), so it is read only
+        // when it is pure: `Arcsin(1 + Random())` drew twice.
+        const a =
+          constructibleValues(operator, x) ??
+          (isFunction(expression) &&
+          expression.nops === 1 &&
+          expression.op1.isPure
+            ? constructibleValues(operator, expression.op1)
+            : undefined);
+        if (a) return a;
+        // No constructible value: numericize ONLY an inexact (float) numeric
+        // argument — `sin(2.5) → 0.598…` — since a float has no exactness to
+        // preserve. Everything else stays symbolic so `evaluate()` honors the
+        // exactness contract and only `.N()` numericizes: an exact number
+        // (`sin(2)`), an exact *constant expression* (`sin(π²)`, `sin(√2)` — these
+        // have `isNumber` true but are not number literals), and a symbolic
+        // argument (`sin(x)`) all return the unevaluated function.
+        if (isNumber(x) && x.isExact === false) return evalTrig(operator, x);
         return engine._fn(operator, [x]);
       }
-      // Measurement error propagation for every head built here (circular,
-      // hyperbolic and inverse functions), from the derivative table. Guard
-      // on the evaluated argument being a Measurement. Without this a
-      // measurement fell through to the numeric kernel, which read it as `0`
-      // (`Sec(Measurement(0.7468, 0.001))` was `1`).
-      const evalX = x.evaluate();
-      if (isMeasurement(evalX)) {
-        const r = measurementUnaryByHead(engine, operator, evalX);
-        if (r !== undefined) return numericApproximation ? r.N() : r;
-      }
-      // Exact hyperbolic values (`sinh(0) = 0`, `coth(0) = ~oo`,
-      // `artanh(1) = +oo`, ...), ahead of the numeric branch so `.N()` agrees
-      // with `evaluate()` (the float kernel gives `Arcsch(0)` a signed
-      // infinity). The same helper serves the `constructible value` simplify
-      // rule, so `simplify()` agrees too.
-      // A float argument gives a float value (`sinh(0.0)` is the float `0`);
-      // a non-finite value (`coth(0.0) = ~oo`) has no float form and stays.
-      const exact = hyperbolicExactValue(operator, x);
-      if (exact) {
-        if (hasFloatOperand([x])) return asFloat(exact.N());
-        return numericApproximation ? exact.N() : exact;
-      }
-      // The operand before its numeric evaluation lets the kernel read an
-      // exact large angle without rounding it first (`12345678901234567890123`
-      // or `10³⁰·π`). It is the operand of `x` only when the node has one
-      // operand.
-      if (numericApproximation)
-        return evalTrig(
-          operator,
-          x,
-          isFunction(expression) && expression.nops === 1
-            ? expression.op1
-            : undefined
-        );
-      // The evaluated operand of `0.25·π` is the float `0.785…`, which is
-      // not a special angle. The operand before its evaluation keeps the
-      // float coefficient of π, which `constructibleValues` reads as the
-      // special angle `π/4` when it is within one unit in its last place of
-      // `1/4` (user decision, 2026-09-27). That operand is evaluated again
-      // (`constructibleValues` reads its numeric value), so it is read only
-      // when it is pure: `Arcsin(1 + Random())` drew twice.
-      const a =
-        constructibleValues(operator, x) ??
-        (isFunction(expression) &&
-        expression.nops === 1 &&
-        expression.op1.isPure
-          ? constructibleValues(operator, expression.op1)
-          : undefined);
-      if (a) return a;
-      // No constructible value: numericize ONLY an inexact (float) numeric
-      // argument — `sin(2.5) → 0.598…` — since a float has no exactness to
-      // preserve. Everything else stays symbolic so `evaluate()` honors the
-      // exactness contract and only `.N()` numericizes: an exact number
-      // (`sin(2)`), an exact *constant expression* (`sin(π²)`, `sin(√2)` — these
-      // have `isNumber` true but are not number literals), and a symbolic
-      // argument (`sin(x)`) all return the unevaluated function.
-      if (isNumber(x) && x.isExact === false) return evalTrig(operator, x);
-      return engine._fn(operator, [x]);
-    },
+    ),
   };
 
   return {

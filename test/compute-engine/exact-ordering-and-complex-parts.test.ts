@@ -802,8 +802,10 @@ describe('A SIGN IS NEVER READ FROM ROUNDING NOISE', () => {
       expect(exactOrder(x, y)).toBe(1);
       expect(exactOrder(y, x)).toBe(-1);
     }
-    // `L` computes as −3.1·10⁻²² at 21 digits. It is positive.
-    expect(ce.box(L).N().re).toBeLessThan(0);
+    // At 21 digits `L` computes as rounding noise (3·10⁻³¹, with the guard
+    // digits that `Ln` reads its exact operand with), far from its value
+    // 6.7·10⁻⁴⁰. The order above does not read this noise.
+    expect(ce.box(L).N().re).toBeGreaterThan(1e-35);
     expect(evaluate(['Max', L, 0]).isSame(evaluate(L))).toBe(true);
     expect(evaluate(['Min', 0, L]).isSame(0)).toBe(true);
     expect(evaluate(`\\max(${L_LATEX}, 0)`).isSame(evaluate(L_LATEX))).toBe(
