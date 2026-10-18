@@ -2192,6 +2192,11 @@ export class ComputeEngine implements IComputeEngine {
   /** Signal `recursion-depth-exceeded` when the recursion depth for this
    * scope is exceeded.
    *
+   * The same error is thrown when the JavaScript stack is nearly full
+   * before the depth reaches the limit: a level of a recursion can use
+   * several kilobytes of stack, and the size of the stack depends on the
+   * host.
+   *
    * @experimental
    */
   get recursionLimit(): number {
@@ -2202,15 +2207,16 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   /** @internal Enter a user-function application; throws a `CancellationError`
-   *  (`cause: 'recursion-depth-exceeded'`) when `recursionLimit` is exceeded.
-   *  Balanced with `_exitRecursion`. */
-  _enterRecursion(): void {
-    this._runtimeState.enterRecursion();
+   *  (`cause: 'recursion-depth-exceeded'`) when `recursionLimit` is exceeded
+   *  or the JavaScript stack is nearly full. Returns the depth before the
+   *  entry. Balanced with `_exitRecursion`. */
+  _enterRecursion(): number {
+    return this._runtimeState.enterRecursion();
   }
-  /** @internal Leave a user-function application. Balanced with
-   *  `_enterRecursion`. */
-  _exitRecursion(): void {
-    this._runtimeState.exitRecursion();
+  /** @internal Leave a user-function application: `depth` is the value that
+   *  the balancing `_enterRecursion()` returned. */
+  _exitRecursion(depth: number): void {
+    this._runtimeState.exitRecursion(depth);
   }
 
   /** Maximum number of elements a collection may have when materialized

@@ -349,6 +349,23 @@ outside any term. The whole mechanism is inert wherever the compilation does
 not fold constants (`constantFold: false`, a `symbolDeps` capture, a
 non-JavaScript target).
 
+A function whose result jumps at a point (`JUMP_FUNCTIONS` in
+`jump-functions.ts`: `Floor`, `Fract`, `Mod`, `Sign`, the comparisons, …)
+applied to closed exact operands is folded on every target except
+`interval-js`, also under `constantFold: false` and under a `symbolDeps`
+capture. The structural code computes the operands as doubles, and a double
+can be on the other side of the jump from the exact value:
+`Floor((25! − 1)/24!)` is `24`, but the double of the operand is `25.0`. The
+fold reads the exact value, as the interpreter does. A comparison folded this
+way is emitted as the target's boolean constant (`True` on Python). Under a
+`symbolDeps` capture the fold records every symbol whose value it reads, and
+declines when the operand calls a user function. Operands with a free
+variable, operands with a float literal, and operands that are all integer
+literals in the safe integer range keep their structural code. The interval
+target is excluded because its code computes an enclosure, and the enclosure
+of such a node contains the exact value (`closedExactJump` in
+`base-compiler.ts`).
+
 A real-only head (an ordering comparison, `Floor`, `Mod`, `Min`, `Erf`, …)
 over an operand that may be complex at run time takes the runtime rule in the
 `auto` and `complex` modes: the operand is bound once, the head's real

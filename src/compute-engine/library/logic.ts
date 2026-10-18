@@ -813,6 +813,23 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
 };
 
 /**
+ * The options a quantifier evaluates its body with: the numeric request of
+ * the quantifier, or nothing (an exact evaluation).
+ *
+ * The body is held, and a quantifier under `.N()` evaluates it with the
+ * request, so that a comparison or a `Floor` in the body reads an exact
+ * operand exactly, as it does at the top level. In the body of a user
+ * function under `.N()`, a parameter is bound to the float of the argument,
+ * and only such a function evaluated with the numeric request reads the
+ * exact argument again (`exactRealValueOf`, `constraint-subject.ts`).
+ */
+function numericRequest(
+  numericApproximation: boolean | undefined
+): { numericApproximation: true } | undefined {
+  return numericApproximation ? { numericApproximation: true } : undefined;
+}
+
+/**
  * Evaluate ForAll over a finite domain.
  * ∀x∈S. P(x) is true iff P(x) is true for all x in S.
  *
@@ -826,9 +843,13 @@ export const LOGIC_LIBRARY: SymbolDefinitions = {
  */
 function evaluateForAll(
   args: ReadonlyArray<Expression>,
-  { engine: ce }: { engine: ComputeEngine }
+  {
+    engine: ce,
+    numericApproximation,
+  }: { engine: ComputeEngine; numericApproximation?: boolean }
 ): Expression | undefined {
   if (args.length < 2) return undefined;
+  const evalOptions = numericRequest(numericApproximation);
 
   const condition = args[0];
   const body = args[1];
@@ -843,7 +864,7 @@ function evaluateForAll(
   const variable = sym(condition) ?? (condOp1 ? sym(condOp1) : undefined);
   if (variable && !bodyContainsVariable(canonicalBody, variable)) {
     // Body doesn't depend on x, so ∀x. P ≡ P
-    return canonicalBody.evaluate();
+    return canonicalBody.evaluate(evalOptions);
   }
 
   // Try to extract a finite domain from the condition
@@ -860,7 +881,8 @@ function evaluateForAll(
           ...nestedDomains,
         ],
         getInnermostBody(body),
-        ce
+        ce,
+        evalOptions
       );
     }
 
@@ -869,7 +891,7 @@ function evaluateForAll(
       const substituted = body.subs({
         [domainResult.variable]: value,
       }).canonical;
-      const result = substituted.evaluate();
+      const result = substituted.evaluate(evalOptions);
 
       if (sym(result) === 'False') {
         return ce.False; // Found a counterexample
@@ -883,7 +905,7 @@ function evaluateForAll(
   }
 
   // No finite domain - try evaluating the body
-  const bodyEval = canonicalBody.evaluate();
+  const bodyEval = canonicalBody.evaluate(evalOptions);
   if (sym(bodyEval) === 'True') return ce.True;
   if (sym(bodyEval) === 'False') return ce.False;
 
@@ -904,9 +926,13 @@ function evaluateForAll(
  */
 function evaluateExists(
   args: ReadonlyArray<Expression>,
-  { engine: ce }: { engine: ComputeEngine }
+  {
+    engine: ce,
+    numericApproximation,
+  }: { engine: ComputeEngine; numericApproximation?: boolean }
 ): Expression | undefined {
   if (args.length < 2) return undefined;
+  const evalOptions = numericRequest(numericApproximation);
 
   const condition = args[0];
   const body = args[1];
@@ -921,7 +947,7 @@ function evaluateExists(
   const variable = sym(condition) ?? (condOp1 ? sym(condOp1) : undefined);
   if (variable && !bodyContainsVariable(canonicalBody, variable)) {
     // Body doesn't depend on x, so ∃x. P ≡ P
-    return canonicalBody.evaluate();
+    return canonicalBody.evaluate(evalOptions);
   }
 
   // Try to extract a finite domain from the condition
@@ -938,7 +964,8 @@ function evaluateExists(
           ...nestedDomains,
         ],
         getInnermostBody(body),
-        ce
+        ce,
+        evalOptions
       );
     }
 
@@ -947,7 +974,7 @@ function evaluateExists(
       const substituted = body.subs({
         [domainResult.variable]: value,
       }).canonical;
-      const result = substituted.evaluate();
+      const result = substituted.evaluate(evalOptions);
 
       if (sym(result) === 'True') {
         return ce.True; // Found a witness
@@ -957,7 +984,7 @@ function evaluateExists(
   }
 
   // No finite domain - try evaluating the body
-  const bodyEval = canonicalBody.evaluate();
+  const bodyEval = canonicalBody.evaluate(evalOptions);
   if (sym(bodyEval) === 'True') return ce.True;
   if (sym(bodyEval) === 'False') return ce.False;
 
@@ -970,9 +997,13 @@ function evaluateExists(
  */
 function evaluateExistsUnique(
   args: ReadonlyArray<Expression>,
-  { engine: ce }: { engine: ComputeEngine }
+  {
+    engine: ce,
+    numericApproximation,
+  }: { engine: ComputeEngine; numericApproximation?: boolean }
 ): Expression | undefined {
   if (args.length < 2) return undefined;
+  const evalOptions = numericRequest(numericApproximation);
 
   const condition = args[0];
   const body = args[1];
@@ -990,7 +1021,7 @@ function evaluateExistsUnique(
       const substituted = body.subs({
         [domainResult.variable]: value,
       }).canonical;
-      const result = substituted.evaluate();
+      const result = substituted.evaluate(evalOptions);
 
       if (sym(result) === 'True') {
         count++;

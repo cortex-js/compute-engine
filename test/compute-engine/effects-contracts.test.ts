@@ -1612,15 +1612,14 @@ describe('10 — forward reference: `{any}` honestly, or a trusted annotation', 
 
   it('a REJECTED redefinition leaves the installed contract untouched', () => {
     // The provenance is rebuilt from the incoming statement, but only once the
-    // install SUCCEEDS. A redefinition that `ce.assign` refuses — every bare
-    // one below, and the widening case that is the common rejection — must
-    // leave the surviving definition exactly as it was, or the contract check
-    // reads a `pure` definition that claims to declare nothing.
-    for (const rejected of [
-      'function h(x: integer) -> string { x }',
-      'function h(x: integer) -> integer { Random() }',
-      'function h(x: integer) random -> integer { x }',
-    ]) {
+    // install SUCCEEDS. A redefinition that `ce.assign` refuses (a different
+    // result type) must leave the surviving definition exactly as it was, or
+    // the contract check reads a `pure` definition that claims to declare
+    // nothing. A redefinition that states `random`, or states no effects and
+    // draws a random number, is accepted: the incoming statement is the whole
+    // truth about its own effects (replacement semantics, test above), so it
+    // is not refused by the contract it replaces.
+    for (const rejected of ['function h(x: integer) -> string { x }']) {
       const ce = new ComputeEngine();
       executeEpsil(ce, 'function h(x: integer) pure -> integer { x }');
       expect(String(executeEpsil(ce, rejected).value)).toMatch(/^Error\(/);

@@ -377,14 +377,7 @@ function exactPairAtNearTie(
     const v = constantB ?? exactOperandOf(rawB, b);
     if (u !== undefined && v !== undefined) return [u, v];
   }
-  if (!isNumber(a) || !isNumber(b)) return undefined;
-  if (isExactRealLiteral(a) && isExactRealLiteral(b)) return undefined;
-  if (a.isComplex || b.isComplex) return undefined;
-  if (a.isFinite !== true || b.isFinite !== true) return undefined;
-  const x = a.re;
-  const y = b.re;
-  const scale = Math.max(1, Math.abs(x), Math.abs(y));
-  if (Math.abs(x - y) > nearJumpTolerance(a.engine) * scale) return undefined;
+  if (!isNearTiePair(a, b)) return undefined;
   // An operand that is already an exact real number is its own exact value:
   // in a chain `a < b < c`, the middle operand is replaced by its exact
   // value for the first pair, and it is not evaluated again for the second.
@@ -393,6 +386,30 @@ function exactPairAtNearTie(
   const exactB = isExactRealLiteral(b) ? b : exactValueOrConstant(rawB);
   if (exactB === undefined) return undefined;
   return [exactA, exactB];
+}
+
+/**
+ * True when `a` and `b` are finite real numbers, not both exact, whose
+ * values are within `nearJumpTolerance()` of each other, relative to
+ * `max(1, |a|, |b|)`. At such a near tie, the floats cannot decide a
+ * comparison of `a` and `b`, and under `.N()` the comparison evaluates its
+ * operands again exactly (`exactPairAtNearTie()`). Far from a tie, the
+ * floats decide it.
+ */
+export function isNearTiePair(a: Expression, b: Expression): boolean {
+  if (!isNumber(a) || !isNumber(b)) return false;
+  if (isExactRealLiteral(a) && isExactRealLiteral(b)) return false;
+  if (a.isComplex || b.isComplex) return false;
+  if (a.isFinite !== true || b.isFinite !== true) return false;
+  const x = a.re;
+  const y = b.re;
+  // A finite operand too large for a double projects to `±Infinity`, and
+  // the difference of two equal projections is `NaN`: the doubles cannot
+  // decide the comparison, so the pair counts as a near tie. The double of
+  // the rational `(3·10⁴⁰⁰ + 1)/3` and of `(3·10⁴⁰⁰ + 2)/3` is `Infinity`.
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return true;
+  const scale = Math.max(1, Math.abs(x), Math.abs(y));
+  return Math.abs(x - y) <= nearJumpTolerance(a.engine) * scale;
 }
 
 /** `raw`, canonical, when it is an exact constant expression that is not
@@ -1316,7 +1333,7 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     complexity: 11000,
     signature: '(any, any*) -> boolean',
     canonical: (args, { engine: ce }) =>
-      ce._fn('Not', [ce._fn('Greater', args)]),
+      ce._fn('Not', [canonicalRelational(ce, 'Greater', args)]),
   },
 
   LessEqual: {
@@ -1625,10 +1642,24 @@ function relationalAbsenceType(ops: ReadonlyArray<OperandDescriptor>) {
     // `number | missing` operands compile guard-free on float-only targets
     // (GPU): its result type has no `missing` arm to fail closed on.
     else if (typeContainsMissing(t) && !numericMissingSlot(t)) possible = true;
+    // The library `Undefined` symbol is typed `unknown`, which has no
+    // `missing` arm, but the evaluate handlers read it as an absent operand
+    // (`readComparisonAbsence`): `Less(Undefined, 3)` evaluates to `Missing`.
+    // Its type is read from the symbol itself, so that the result type admits
+    // that value.
+    else if (isUndefinedSymbolOperand(op)) possible = true;
   }
   if (definite) return 'missing';
   if (possible) return parseType('boolean | missing');
   return 'boolean';
+}
+
+/** Is the operand the `Undefined` symbol? The test is on the name only, as
+ * the value-level test `isAbsentSymbol` is: the symbol has no value
+ * definition, so the structure node never carries the `system` flag. */
+function isUndefinedSymbolOperand(op: OperandDescriptor): boolean {
+  const s = op.structureOf?.();
+  return s?.kind === 'symbol' && s.name === 'Undefined';
 }
 
 type ComparisonHead =

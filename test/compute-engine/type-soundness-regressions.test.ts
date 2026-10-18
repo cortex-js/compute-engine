@@ -370,23 +370,29 @@ describe('Tycho item 89 — rounding a symbolic number stays integer-valued', ()
   // operand (a complex value) is a boxing error, an undeclared symbol is
   // inferred extended-real from the carrier and claims
   // `integer | signed_infinity`, and a maybe-NaN operand carries the
+  // propagated `nan` arm. Since 2026-10-17 the carrier also admits `~oo`
+  // (`Round(~oo)` is `~oo`), so an undeclared symbol is inferred
+  // `real | signed_infinity | ~oo` and its claims have the `~oo` arm. A
+  // maybe-NaN operand still carries the
   // propagated `nan` arm. The original item-89 concern — a MORE
   // informative operand must never produce a WEAKER claim — still holds
   // on the flipped claims and stays pinned below.
   it('Round of a literal, a bare symbol and an arithmetic term all agree', () => {
     expect(typeOf('\\mathrm{Round}(4.7)')).toBe('integer');
-    // `Q` is inferred `real | signed_infinity` from the carrier, so the
-    // claim is the mixed-finiteness union. `4Q` may be infinite too (it is
-    // `real | signed_infinity`; it was typed `real`, a finiteness claim the
-    // value contradicts at `Q = ∞`), so its rounding claims the same union:
-    // an operand with more information never gets a weaker type.
-    expect(typeOf('\\mathrm{Round}(Q)')).toBe('integer | signed_infinity');
-    expect(typeOf('\\mathrm{Round}(4Q)')).toBe('integer | signed_infinity');
+    // `Q` is inferred `real | signed_infinity | ~oo` from the carrier (the
+    // carrier admits `~oo` since 2026-10-17, and `Round(~oo)` is `~oo`), so
+    // the claim is `integer | +oo | -oo | ~oo`, which reduces to
+    // `infinity | integer`. `4Q` is typed `number` (the `Multiply` type
+    // handler claims `number` for an operand that may be `~oo`), which
+    // admits `NaN`, so its rounding adds the `nan` arm: the operand with
+    // less information gets the weaker type.
+    expect(typeOf('\\mathrm{Round}(Q)')).toBe('infinity | integer');
+    expect(typeOf('\\mathrm{Round}(4Q)')).toBe('infinity | integer | nan');
   });
 
   it('Floor/Ceil follow', () => {
-    expect(typeOf('\\lfloor 4Q \\rfloor')).toBe('integer | signed_infinity');
-    expect(typeOf('\\lceil 4Q \\rceil')).toBe('integer | signed_infinity');
+    expect(typeOf('\\lfloor 4Q \\rfloor')).toBe('infinity | integer | nan');
+    expect(typeOf('\\lceil 4Q \\rceil')).toBe('infinity | integer | nan');
   });
 
   it('a PROVABLY non-real argument is a boxing error now', () => {
@@ -404,16 +410,14 @@ describe('Tycho item 89 — rounding a symbolic number stays integer-valued', ()
     // operand, which now honestly carries the propagated `nan` arm.)
     ce.declare('xr', 'real');
     ce.declare('xf', 'real');
-    expect(typeOf('\\mathrm{Round}(xr, 0.01)')).toBe(
-      'nan | real | signed_infinity'
-    );
+    // The operands below may be `~oo`, so each claim has the `~oo` arm,
+    // and `signed_infinity | ~oo` reduces to `infinity`.
+    expect(typeOf('\\mathrm{Round}(xr, 0.01)')).toBe('infinity | nan | real');
     expect(typeOf('\\mathrm{Round}(xf, \\frac{1}{100})')).toBe(
-      'nan | rational | signed_infinity'
+      'infinity | nan | rational'
     );
-    expect(typeOf('\\mathrm{Round}(xr, 2)')).toBe(
-      'integer | nan | signed_infinity'
-    );
-    expect(typeOf('\\mathrm{Round}(Q, 0.01)')).toBe('real | signed_infinity');
+    expect(typeOf('\\mathrm{Round}(xr, 2)')).toBe('infinity | integer | nan');
+    expect(typeOf('\\mathrm{Round}(Q, 0.01)')).toBe('infinity | real');
     expect(typeOf('\\mathrm{Round}(3.14159, 0.01)')).toBe('real');
     expect(ce.parse('\\mathrm{Round}(1.2+3.4i, 0.01)').isValid).toBe(false);
     expect(typeOf('\\mathrm{Round}(\\infty, 0.01)')).toBe('signed_infinity');

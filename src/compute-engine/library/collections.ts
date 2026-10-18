@@ -10012,7 +10012,53 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // Only materialize when the source is finite; an infinite source stays
       // lazy (consumers can still bound it with Take).
       if (!isWalkableFiniteCollection(ops[0])) return undefined;
-      return engine._fn('List', Array.from(expr.each()) as Expression[]);
+      // A finite source is not enough: the callback can return an infinite
+      // collection (`FlatMap([1, 2], n => Range(1, Infinity))`), and splicing
+      // it never ends. So each inner result is checked before it is walked.
+      // The splice rule is the one of the `iterator` handler below: a
+      // collection result other than a string is spliced, anything else is
+      // one element.
+      // - An inner result that is provably infinite cannot be materialized.
+      //   A full materialization (`materialization: true`) stops with the
+      //   `out-of-range` error "a finite collection" that `RandomShuffle`
+      //   and `RandomSample` give for an infinite collection. A bounded
+      //   request (a number or a pair, which includes the display preview of
+      //   `toString()` and `latex`) leaves the view lazy, so that the
+      //   expression prints as written instead of as an error.
+      // - An inner result whose finiteness is not known (a nested `FlatMap`,
+      //   a `Filter` over an infinite source) is walked, but the whole result
+      //   is bounded by `maxCollectionSize`: past it, the view stays lazy, as
+      //   a finite collection larger than that size does in the generic
+      //   materialization.
+      // The view itself is unchanged: a read of a prefix (`At(…, 3)`,
+      // `First`) walks the first inner collection lazily and stays valid.
+      const f = applicable(ops[1]);
+      const cap = engine.maxCollectionSize;
+      const xs: Expression[] = [];
+      for (const value of ops[0].each()) {
+        const mapped = f([value]) ?? absenceMarker(engine, expr);
+        if (!mapped.isCollection || isString(mapped)) {
+          xs.push(mapped);
+        } else {
+          if (mapped.isFiniteCollection === false) {
+            if (materialization !== true) return undefined;
+            return withErrorFrames(
+              engine.error([
+                'out-of-range',
+                'a finite collection',
+                mapped.toString(),
+              ]),
+              [{ operator: 'FlatMap', index: 2 }]
+            );
+          }
+          for (const x of mapped.each()) {
+            if (xs.length >= cap) return undefined;
+            xs.push(x);
+          }
+        }
+        if (xs.length > cap) return undefined;
+      }
+      return engine._fn('List', xs);
     },
     collection: {
       isEnumerable: enumerableFromSource,

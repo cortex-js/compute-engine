@@ -1972,7 +1972,23 @@ export class BoxedFunction
       for (const arg of expr.ops) {
         const [c, r] = arg.toNumericValue();
         // A float 1 is multiplied in, so the coefficient becomes a float
-        if (!c.isOne || !c.isExact) coef = coef.mul(c);
+        if (!c.isOne || !c.isExact) {
+          // The product of two exact values is not exact when its radicand
+          // is above 10⁶ (`√1009·√1013`). Keep the operand as a separate
+          // factor then, as `canonicalMultiply` does, so the coefficient
+          // stays exact.
+          const product = coef.mul(c);
+          if (
+            coef.isExact &&
+            c.isExact &&
+            !product.isExact &&
+            !product.isNaN
+          ) {
+            rest.push(arg);
+            continue;
+          }
+          coef = product;
+        }
         if (!r.isSame(1)) rest.push(r);
       }
       if (rest.length === 0) return [coef, ce.One];

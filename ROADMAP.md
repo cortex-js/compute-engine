@@ -109,6 +109,151 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 ## Remaining work
 
+### Under `.N()`, a user function whose body has several statements reads the rounded argument (OPEN, decision — found 2026-10-17 by the fix that makes lazy operators forward the numeric request)
+
+Under `.N()`, a parameter of a user function holds the float of the argument,
+and a jump function (`Floor`, a comparison) in the body reads the exact argument
+again only when the numeric request reaches it. A body of one statement gets the
+request. A body of several statements (a `Block`) or a `Loop` body runs exactly
+on purpose (`singleStatementRequest`, `function-utils.ts`), so that the values
+in the middle are not rounded (`a := √2; a^2` stays `2`). But its parameter is
+still bound to the float: with `f := x ↦ Block(z := 1, Floor(x))`,
+`f((25! − 1)/24!).N()` gives 25, where the correct value is 24. Options: (a)
+pass the numeric request to the last statement only; (b) bind the parameter to
+the exact argument in such a body, which brings back the cost the 2026-10-17
+decision avoided (`f(Sum(1/k, k, 1, 10000)).N()` goes from 90 ms to 27 s); (c)
+keep it and document it. **User decision 2026-10-18: option (a)** — the last
+statement of such a body gets the numeric request, the statements before it
+stay exact, so `f((25! − 1)/24!).N()` gives 24.
+
+### Under `.N()`, a jump function of an expression of a parameter reads the rounded argument (OPEN, design — found 2026-10-17 by the same fix)
+
+With `f := x ↦ Floor(2x)`, `f((25! − 1)/48).N()` gives 25, where the correct
+value is 24. The exact re-read of a recorded argument
+(`exact-argument-source.ts`) handles a parameter written alone as the operand.
+For `2x`, the recorded argument must replace the parameter before the exact
+re-read, and `subs` replaces by name without respecting binders, so this needs
+a substitution that respects them. Since 2026-10-17, `exactRealValueOf`
+(`constraint-subject.ts`) refuses an exact value that reads such a parameter, so
+the result falls back to the float instead of a wrong exact value. The same
+cause in a comparison: with `g := x ↦ Equal(x − 10^30, 1)`,
+`g(10^30 + 1).N()` gives `False`, because the float of `x − 10^30` is `0`, far
+from `1`, so the comparison never asks for exact values; written without the
+function, the comparison gives `True` (its operand is an exact constant
+expression).
+
+### Under `.N()`, a callback of `Map`, `Filter` or a comprehension in a user-function body reads the rounded argument (OPEN, design — found 2026-10-17 by the same fix)
+
+With `h := x ↦ Filter([1], k ↦ x < 25k)`, `h((25! − 1)/24!).N()` gives `[]`,
+where the correct value is `[1]`; `Map` and `Comprehension` read 25 for 24 in
+the same way. The elements are computed by the collection handlers, which
+receive no evaluation options, and a lazy `Map` view is computed after the
+activation has ended, so the recorded argument is gone. A fix needs a design for
+how a collection view keeps the numeric request (the one existing case is
+`lazyMapNumericApproximation`). `Reduce` has its own `.N()` rule for folds
+(`withExactFoldFallback`).
+
+### A compiled jump function whose operand mixes a loop index with an exact constant computes the constant as a double (OPEN, decision — found 2026-10-17 by the fix of compiled jump functions under `constantFold: false`)
+
+`Sum(x·Floor(k + (25! − 1)/24!), k, 1, 3)` at `x = 1` compiles to 81, where the
+interpreter gives 78: the hoisted constant becomes `_tv1 = 25` and each term is
+`Math.floor(k + 25)`. With bounds 1 to 300 the code is a run-time loop, and the
+values are 52650 against 52350. This happens in the default compile. Folding
+each unrolled term would fix the short sum but not the loop, so the two compiled
+forms of one `Sum` would then differ. Options: (a) refuse to compile a jump
+function whose operand adds a variable to a closed exact constant that a double
+does not hold exactly; (b) split an integer-typed index out of the operand of a
+jump that commutes with integer shifts (`Floor(k + c) = k + Floor(c)` for
+integer `k`, and the same for `Ceil`, `Round`, `Truncate`, `Fract`), and refuse
+the other shapes. **User decision 2026-10-18: option (b)** — take an integer
+index out of the operand of `Floor`, `Ceil`, `Round`, `Truncate` and `Fract`
+so the constant is computed exactly (`Sum(x·Floor(k + (25! − 1)/24!), k, 1, 3)`
+at `x = 1` gives 78), and refuse to compile the other shapes.
+
+### `And`, `Or`, `Not` and `Xor` with an absent operand are typed `boolean` but evaluate to `Missing` (OPEN, decided 2026-10-18 — found 2026-10-17 by the type of a comparison with `Undefined`)
+
+`And(True, Missing)` and `Not(Missing)` evaluate to `Missing`, but their type is
+`boolean`; so are `NotLess`, `NotGreater`, `NotLessNotEqual` and
+`NotGreaterNotEqual` with an `Undefined` or `Missing` operand (they are built
+from `Not`). A test in `logic-absent-operand.test.ts` pins `boolean` ("the boxed
+expression is typed boolean, as for And"). **User decision 2026-10-18:** type
+these operators `boolean | missing` when an operand may be absent, as the
+comparisons are since 2026-10-17, and update that test.
+
+### `Solve` does not read an integer-valued float exponent as a degree in a polynomial (OPEN, decided 2026-10-18 — found 2026-10-17 by the float-exponent `Solve` fix)
+
+`Solve(x^{2.0} + 3x + 2 = 0, x)` gives no solution: the quadratic templates are
+left out when an exponent is a float (`DEGREE_TEMPLATE_IDS`,
+`boxed-expression/solve.ts`), and the test "Solve does not read it as a
+quadratic" pins that. **User decision 2026-10-18:** an integer-valued float
+exponent is a degree in the polynomial templates too, with float roots
+(`−1.0` and `−2.0` here), as `x^{2.0} = 4` gives `±2.0`. Related, also open:
+`(y+1)^{2.0} = −4` with `y` declared `real` and `x^{-0.5} = −4` give no answer
+(`undefined`) where the complete answer is "no solution" (`[]`).
+
+### A user function that calls itself inside a `Map` callback gives an `expected-a-symbol` error (OPEN, small — found 2026-10-17 by the recursion-limit fix)
+
+With `m(n) := Map(x ↦ If(x < 1, 0, m(x − 1)), [n])`, `m(0)` gives `[0]` but
+`m(1)` gives `[Error("expected-a-symbol", "Typed(1, \"number\")")]`, where the
+correct value is `[[0]]`. Repro:
+`ce.box(['Assign', 'm', ['Function', ['Map', ['Function', ['If', ['Less', 'x', 1], 0, ['m', ['Subtract', 'x', 1]]], 'x'], ['List', 'n']], 'n']])`,
+then `ce.box(['m', 1]).evaluate()`. The error comes from the parameter check in
+`canonicalFunctionLiteralArguments()` (`function-utils.ts`): the value of the
+caller's `x` appears to be substituted into the parameter list of the inner
+function literal when the body is re-entered.
+
+### An Epsil function redefined in a later program cannot change its result type (OPEN, question — found 2026-10-17 by the `effectsDeclared` fix)
+
+A redefinition across programs has replacement semantics for its effects (a
+later `function g(x: integer) random -> integer { 7 }` replaces an earlier
+`pure` contract). But after `function g(x: integer) -> integer { x }`, a later
+program with `function g(x: integer) -> string { … }` is refused with
+`incompatible-type`. Is that intended (the result type of a name is fixed once
+declared), or should the result type be replaced as the effects are?
+
+### A host function redefined by an Epsil `function` statement gets an intersection signature (OPEN, small — found 2026-10-17 by the `effectsDeclared` fix)
+
+After `ce.declare('h', { signature: '(integer) pure -> integer', evaluate: <a Function literal> })`,
+the Epsil statement `function h(x: integer) -> integer { x }` ends with the
+signature `((unknown) -> unknown) & ((x: integer) -> integer)`, where a
+replacement or a clause added to the declared signature is expected. This
+redefinition does not reach `defineFunctionClause()`'s redefinition branch
+(`multi-clause.ts`).
+
+### Compiling an expression with shared subtrees takes exponential time in the CSE pass (OPEN, performance — found 2026-10-17 by the review of the compiled jump-function fix)
+
+Boxed expressions can share subtrees: `e = Add(e, e)` repeated 20 times has 21
+distinct nodes but about 10⁶ paths. The common-subexpression analysis of
+`compilation/cse.ts` (`selectCandidates`, `operandPlans`, `walk`,
+`walkOperands`) walks every path, not every distinct node:
+`compile(Floor(e), { constantFold: false })` takes 397 ms at depth 18 and
+1080 ms at depth 20. With `cse: false`, the generated code itself is exponential
+in size (51 MB and 68 s at depth 20), because the emitter writes each path. Each
+walk needs a memo keyed by node, and the emitter needs to bind a shared subtree
+once (which is what the CSE pass is for, so the pass must see sharing by node
+identity). Related: `foldCostEstimate` (`base-compiler.ts`) counts paths, so a
+constant shared tree with fewer than 20 000 distinct nodes but more than 20 000
+paths does not fold.
+
+### `Take` over a `FlatMap` with a finite source stays unevaluated (OPEN, small — found 2026-10-17 by the `FlatMap` infinite-inner-collection fix)
+
+`Take(FlatMap([1, 2, 3], x ↦ [x, x]), 3)` stays unevaluated even under
+materialization, while the same `Take` over an infinite source gives
+`[1, 1, 2, 2, 3]`. The `isEmpty` facet of `FlatMap` answers `undefined` for a
+non-empty finite source, because answering would mean applying the callback, and
+the facets must not do that; the generic materializer keeps the lazy form when
+emptiness is not known. Related: `FlatMap` has no `count` facet.
+
+### Three exact radical forms are not reduced (OPEN, small — found 2026-10-17 by the fix that keeps large radical products exact)
+
+All three values are correct and exact; they are not in their simplest form.
+`Power(Sqrt(-13), 3)` stays unevaluated (it should be `−13√13·i`).
+`Power(Sqrt(1022117), 3)` evaluates to `Sqrt(1067829303856075613)` instead of
+`1022117√1022117`. The canonical form of `(√1009·√1013)^{-2}` stays a `Power`;
+only `evaluate()` gives `1/1022117`. Also, `2√1009·√1013` serializes as
+`\sqrt{1013}\times2\sqrt{1009}`, because `sortProductOperands()` orders number
+literals by value: it round-trips, but it does not read well.
+
 ### Each call of a user function retires the inert evaluation memo of every node, so a chain of applications copies its previous level once per level (OPEN, performance, design — found 2026-10-17 by the chain of Tycho ledger row 380, after the closure-capture and lazy-map fixes of the same day)
 
 The memo of an inert evaluation (`_memoizedLazyCollectionValue`,
@@ -195,10 +340,10 @@ must say that only a one-clause function accepts `NaN` at a numeric parameter,
 because clause selection by value has no correct clause for `NaN` (`fib(NaN)`
 with the clauses `0`, `1`, `integer` would take `0`).
 
-### Compiled code gives a value where the interpreter gives an error for two documented shapes and one complex pole (OPEN, decided 2026-10-17 — found 2026-10-17 by the Codex re-review of the compilation ranges)
+### Compiled code gives a value where the interpreter gives an error for one documented shape and one complex pole (OPEN, decided 2026-10-17 — found 2026-10-17 by the Codex re-review of the compilation ranges)
 
-Two shapes where the compiled target answers and the interpreter refuses, each
-documented or pinned by a test: (1) `Sum`/`Product`/`Reduce`/`Scan` over rows of
+One shape where the compiled target answers and the interpreter refuses,
+documented and pinned by a test: `Sum`/`Product`/`Reduce`/`Scan` over rows of
 unequal length (`v: list<list<real>>` holding `[[1, 2], [3]]`) give `NaN` in
 compiled code (`docs/BROADCAST-MODEL.md`, the test "rows of unequal length…")
 where the interpreter gives `incompatible-dimensions` and `docs/ERROR-MODEL.md`
@@ -207,15 +352,7 @@ whose length the type does not fix, which removes working compiled forms such as
 `[[1, 2], [3, 4]] → [4, 6]`. **User decision 2026-10-17: keep `NaN` and document
 it** — the compiled fold over rows of unequal length keeps giving `NaN`
 (`[[1, 2], [3]]` → `NaN`), and `docs/COMPILATION-MODEL.md` must name this as an
-exception to the rule of `docs/ERROR-MODEL.md` §6. (2) Under
-`constantFold: false` (or `symbolDeps` capture) the compiled `Fract`, `Floor`
-and the other jump functions of a closed exact operand compute on doubles:
-`Fract(π·10^30)` gives `0` (interpreter `0.50288…`) and `Floor((25!−1)/24!)`
-compiles to `25` (interpreter `24`); option A evaluates such an operand with the
-interpreter even under `constantFold: false`, option B throws `RangeError` above
-`2^53` as the compiled `Mod` does (which does nothing for `Floor`). **User
-decision 2026-10-17 for shape (2): option A** — evaluate a closed exact operand
-of a jump function with the interpreter, also under `constantFold: false`. And
+exception to the rule of `docs/ERROR-MODEL.md` §6. And
 compiled `Csch(iπx)` at `x = 1` gives `{re: NaN, im: ∞}` where the interpreter
 gives `~oo` (compiled as `{∞, ∞}`): option A adds the exact half-turn lowering
 of `Sinh`/`Cosh`/`Tanh`/`Csch`/`Sech`/`Coth` of `i·π·u` in each target via
@@ -224,13 +361,9 @@ of `Sinh`/`Cosh`/`Tanh`/`Csch`/`Sech`/`Coth` of `i·π·u` in each target via
 `cosSinPi(u)`, so the compiled `Csch(iπx)` at `x = 1` gives `{∞, ∞}`, as the
 interpreter's `~oo`.
 
-### Three typing and listing questions from the 2026-10-17 re-review (OPEN, decided 2026-10-17)
+### Two typing and listing questions from the 2026-10-17 re-review (OPEN, decided 2026-10-17)
 
-(1) `permutation([])` with
-`declareType('permutation', 'list<integer^N>', { typeParams: ['N'] })` is valid
-and typed `permutation<integer<1..>>`, a positive length for a value of length 0
-(length 0 pins nothing). **User decision 2026-10-17: an empty list fixes
-`N = 0`** — `permutation([])` will be typed `permutation<0>`. (2) A lazy
+(1) A lazy
 `map(scale, 1..3)` with a NAMED user function `scale` that reads a mutable
 variable `n` sees the later value of `n` (`[10, 20, 30]` after `n = 10`), while
 the inline callback `map(k => k * n, 1..3)` is listed at its own time
@@ -239,49 +372,15 @@ the inline callback `map(k => k * n, 1..3)` is listed at its own time
 behavior and document it** — `src/epsil/docs/evaluation.md` must say that a lazy
 `map` with a named function computes its elements when they are read
 (`[10, 20, 30]` after `n = 10`), while an inline function that reads a mutable
-variable is listed when the `map` is written (`[1, 2, 3]`). (3)
+variable is listed when the `map` is written (`[1, 2, 3]`). (2)
 `Mean([1+i, +oo])` is `NaN` while `Sum([1+i, +oo])` is `Infinity + i` and
 `Mean([1, +oo])` is `+oo`: the engine has no settled answer for a complex value
 with an infinite real part. **User decision 2026-10-17: a finite imaginary part
 beside an infinite real part gives the real infinity, as `Add` does** —
 `Sum([1+i, +oo])` and `Mean([1+i, +oo])` will both give `+oo`.
 
-### A lazy operator in the body of a user function under `.N()` reads the approximated parameter in the operands it evaluates exactly (OPEN, design — found 2026-10-17 while making a jump in a body read the exact argument)
-
-A parameter of a user function is bound to the approximation the caller computed
-under `.N()`, and its activation records the written argument for the exact
-re-read of a jump (`exact-argument-source.ts`): `f((25! − 1)/24!).N()` for
-`f := x ↦ Floor(x)` is 24. The re-read happens in the handler of the jump under
-the numeric request. A lazy operator in the body that evaluates a held operand
-EXACTLY reads the parameter's approximation instead: with
-`c := x ↦ If(x < 25, 0, 1)`, `c((25! − 1)/24!).N()` is 1 (the condition `x < 25`
-is evaluated exactly, with `x` the float 25), where
-`If((25! − 1)/24! < 25, 0, 1).N()` is 0; with `g := x ↦ If(True, Floor(x), 0)`,
-`g((25! − 1)/24!).N()` is 25 (the branch is evaluated exactly), where
-`g := x ↦ Floor(x)` gives 24. Closing it: either the lazy operators forward the
-numeric request to the operands they evaluate (then the handler of the jump
-re-reads the argument), or an exact evaluation of a parameter inside such a body
-reads the recorded argument (then the cost of an exact evaluation of the
-argument is paid wherever the body reads the parameter exactly, which the
-recording was designed to avoid: `f(Sum(1/k, k, 1, 10000)).N()` takes 90 ms with
-the float, and 27 s with the exact sum). **User decision 2026-10-17: the first
-option** — a lazy operator forwards the numeric request to the operands it
-evaluates, so the jump function re-reads the recorded argument as it does at the
-top level.
-
 ### Small items from the 2026-10-17 re-review (OPEN, small, decided 2026-10-17)
 
-- `.N()` of `Floor`, `Ceil` or `Sign` whose operand's float is `~oo`
-  (`Floor(1/(√(10^40+1)−10^20)).N()`, `Floor(Tan(Pi/2)).N()`) returns
-  `Error(incompatible-type, "real | signed_infinity", ~oo)`: the approximate
-  operand is checked against the signature before the handler can use the exact
-  operand (the refinement of 2026-10-17 fixes `evaluate()` and the comparisons
-  for this input). What should `Floor(~oo)` give? **User decision 2026-10-17:
-  `Floor(~oo)` is `~oo`** — `Floor`, `Ceil`, `Round` and `Truncate` of `~oo`
-  give `~oo`, and `Fract(~oo)` and `Sign(~oo)` give `NaN`, so `Floor(5/0)` gives
-  `~oo`, not a type error. The `.N()` case above, whose exact operand is finite,
-  must also use the exact operand: `Floor(1/(√(10^40+1)−10^20)).N()` gives
-  `2e+20`, as `evaluate()` does.
 - `\{x | x \ne 0\}` gives `unexpected-command` / `unexpected-delimiter` errors
   in both grammars; only `\mid` (and `:`) works as the set-builder separator.
   `|` is also the absolute-value delimiter (`\{2|x|, 3\}`), so a separator role
@@ -289,13 +388,6 @@ top level.
   2026-10-17: keep `\mid` only and give a clear error** — `\{x | x \ne 0\}`
   gives one error that tells the user to write `\mid`. Read `|` as the separator
   later only if users ask for it.
-- A real radical product whose radicand is too large folds to a float in
-  canonical `Multiply` (`√1009·√1013` gives `1010.998…`); the comment in
-  `foldIntoCoefficient()` (`arithmetic-mul-div.ts`) records it as deliberate,
-  against the exactness contract. **User decision 2026-10-17: keep the product
-  exact** — `foldIntoCoefficient()` keeps the two radicals as separate factors
-  when their product would lose exactness, as it does for complex operands, so
-  `√1009·√1013` stays exact. Count the changed snapshots first.
 
 ### A memoized element read costs 934 `console.assert` calls and runs five times slower under jest than from source (OPEN, performance — measured 2026-10-16 by the perf suite on the M5)
 
@@ -315,26 +407,6 @@ ms of work from source — the read is `parse('A[3]')` (about 0.02 ms) plus
 profile of the loop would answer both; the `console.assert` calls are stripped
 from the production build, so (2) is a cost of the development build and the
 test suite, not of users, unless the work behind the asserts is.
-
-### An integer coefficient times `√(−c)` stays a product, and `√(−c)` with `c ≥ 10⁶` keeps its square factors (OPEN, small — found 2026-10-16 by the review of PR #447)
-
-Since PR #447, a negative integer radical is an exact pure-imaginary value in
-the one place that builds exact values (`_numericValue`, `index.ts`):
-`Sqrt(-13)/3` and `Sqrt(-13)·(1/3)` evaluate to `Complex(0, √13/3)`, and
-`Sqrt(-5200)/3` to `Complex(0, (20/3)√13)`. Two neighbouring forms do not reach
-that place. `Sqrt(-13)·Sqrt(4000000)` evaluates to `Multiply(2000, Sqrt(-13))`
-(an integer coefficient on a negative radical is not folded, where the rational
-coefficient `1/3` is), and `Sqrt(-52000000)/3` stays
-`Multiply(1/3, Sqrt(-52000000))`: the canonical `Sqrt` extracts the square
-factor of a POSITIVE radicand above `SMALL_INTEGER` (`Sqrt(52000000)/3` is
-`(2000/3)√13`) but not of a negative one, so the quotient never becomes a
-numeric value (the value itself reduces:
-`ce._numericValue({rational: [1, 3], radical: -52000000})` is
-`Complex(0, (2000/3)√13)`, pinned in `sqrt-negative-integer-quotient.test.ts`).
-Both results are correct and exact; they are unreduced. The fix is in the
-`Multiply` fold and in the canonical `Sqrt` of a negative radicand, which should
-route a negative integer radicand through the same square-factor extraction as a
-positive one.
 
 ### `.N()` of an integral whose shells decay as `k^{-p}` with `1 < p < 1.5` at a nonzero or infinite bound gives a wrong value with a very wide error bar (OPEN, small — found 2026-10-14 by the power-law divergence test; the bound-at-0 case fixed 2026-10-16)
 
@@ -499,25 +571,6 @@ the synthesis of every composite type. **User decision 2026-10-17: option (a)**
 element of a list literal, so `[1.0, 2] / 3` is typed `vector<real^2>` before
 and after evaluation.
 
-### `Solve` leaves a power equation with a negative or compound float exponent unsolved (OPEN, small — found 2026-10-16 by the float-root fix)
-
-Since 2026-10-16, `x^{2.0} = 4` gives the float root `2.0` and `x^{2.5} = 4` its
-float root. These still return no solution: `x^{-0.5} = 4` (root `0.0625`),
-`x^{-2.0} = 4`, `x^{-2.5} = 4`, `(x+1)^{2.0} = 4` and `(x+1)^{2.5} = 4`, while
-the exact forms `x^{-2} = 4` and `(x+1)^2 = 4` are solved. The general power
-template (`solve.power`, `boxed-expression/solve.ts`) matches a positive float
-exponent on the bare unknown only. A negative float exponent needs the
-reciprocal form, and a compound base needs the same substitution the exact
-templates use. Related decision: the parity of an integer-valued float exponent
-is not read (`polynomial-coefficients.test.ts`, "The parity of `2.0` is not
-read: no root `-2`"), so `x^{2.0} = 4` gives the one root `2.0` although
-`(-2.0)^{2.0}` evaluates to `4`. The question to decide: should an
-integer-valued float exponent give both roots `±2.0` (option A, the solution set
-is complete; Mathematica gives both), or one root (option B, today, consistent
-with a float exponent not being a degree)? **User decision 2026-10-17: option
-A** — an integer-valued float exponent gives both roots (`x^{2.0} = 4` gives
-`±2.0`).
-
 ### A base case assigned inside a closure can record a pending sequence under a discarded scope (OPEN, small — found 2026-10-16 by the per-binding pending sequences)
 
 Pending sequence definitions are keyed by (scope, name) since 2026-10-16
@@ -545,18 +598,6 @@ about a parameter the body writes; it does not add the check. Closing it means
 the compiled assignment to a typed parameter fails closed (a compile-time
 refusal when the written value's type contradicts the parameter's type, as the
 declared-result-type rule does), so the two routes agree.
-
-### A base case assigned to a constant completes a sequence that replaces the constant (OPEN, decided 2026-10-17 — found 2026-10-17 by the review of `ce.undeclare()`)
-
-With `F` declared as a constant
-(`ce.declare('F', { value: 3, isConstant: true })`), `F_0 := 1` and
-`F_n := F_{n-1} + 1` are accepted, and completing the sequence installs a new
-value half built from the subscript evaluator only (`tryFinalizeSequence`,
-`updateDef(…, { subscriptEvaluate })`), so `F` is no longer a constant and its
-value `3` is gone, while `ce.assign('F', 5)` is refused with "Cannot assign a
-value to the constant". **User decision 2026-10-17: refuse a base case on a
-constant** — `F_0 := 1` on the constant `F` gives the same error as
-`ce.assign('F', 5)`, and `F` keeps its value `3`.
 
 ### Quantity arithmetic numericizes an exact irrational factor under `evaluate()` (OPEN, decision — found 2026-10-16 by the fix of `Quantity(3, m) · x`)
 
@@ -1942,24 +1983,6 @@ the census compiles every row on every target.
   value is not the NaN colour (OPEN, route parity — found 2026-09-23). The fix
   is a check in those two lowerings; it changes many emitted-code pins.
 
-### What the rulings of 2026-09-21 left open (OPEN, decided 2026-10-17 — recorded 2026-09-22 when the six rulings landed)
-
-The eight decisions of 2026-09-21 (the `Round` tie rule, the empty-list
-broadcast, `Undefined` in a numeric slot, a stored value keeps its binding on
-the compiled route, no by-name interception by a caller's binder,
-whole-collection equality with an absent cell, no one-argument `Clamp`, the
-shader statement order documented) are in `CHANGELOG.md`. Each left a residue
-that no ruling covers yet.
-
-- **Absence parity residues.** A comparison on `Undefined` TYPES `boolean` while
-  its value is `Missing` (the type handlers read a `missing`-typed operand, not
-  the symbol). **User decision 2026-10-17: type a comparison with `Undefined` as
-  `boolean | missing`** — the type handlers treat `Undefined` as an absent
-  operand, so `Less(Undefined, 3)` evaluates to `Missing` and is typed
-  `boolean | missing`. `Xor` and `Equivalent` accept an absent operand since
-  2026-09-27 (user decision: they answer `Missing`, as `And`, `Or` and `Not`
-  do).
-
 ### What the second review of the 2026-09-23 to 2026-09-26 commits left open (OPEN — found 2026-09-26)
 
 A Codex review of the commits made while it was unavailable found 41 defects;
@@ -3059,7 +3082,12 @@ here.
   stays `Infinity` in compiled code, so compiled `Heaviside(x)` gives `1` and
   `x > 0` gives `true` at `x = ~oo`, where the interpreter gives an
   `incompatible-type` error for `Heaviside(~oo)` and leaves `0 < ~oo` undecided;
-  `docs/COMPILATION-MODEL.md` must state both differences.
+  `docs/COMPILATION-MODEL.md` must state both differences. A third difference
+  of the same cause, found 2026-10-17 when `Sign(~oo)` became `Indeterminate`:
+  compiled `Sign(1/x)` at `x = 0` gives `1` (the pole is the double
+  `Infinity`), where `Sign(1/x).subs({x: 0}).N()` gives `NaN`; the same
+  documentation must state it. (By the same rule, compiled `Floor(1/x)` at
+  `x = 0` gives `Infinity`, where the interpreter gives `~oo`.)
 - **`.value =` does not infer a symbol's type, while `ce.assign()` does.**
   `doc/04-guide-symbols.md:19-27` promises inference and uses `n.value = 5` as
   its live example. Measured: after `ce.expr('n')` then `n.value = 5`, the type
@@ -3195,24 +3223,6 @@ literal whose body is an evaluated value: parsed bodies are trees, and the
 shared-operand values arise as RESULTS (a document function applied to its own
 previous result), which Tycho's document pass never re-assigns as a function
 body. Probe: the `assign` line above at depths 16/18/19.
-
-### The recursion limit can lose to the JS stack when each level nests deeply (OPEN, evaluation, decided 2026-10-17 — found 2026-08-22)
-
-`ce.recursionLimit` (default 256, `engine-runtime-state.ts`) counts
-user-function applications, and a runaway numeric recursion must end in a clean
-`CancellationError: Recursion limit exceeded` (`f(n) := n f(n-1)` applied to
-`f(2)` does with a limit of 120 or less). But when each level pushes many JS
-frames before the next application, the JS stack runs out first and the caller
-gets a bare `RangeError: Maximum call stack size exceeded` instead:
-`h(n) := \text{T}(n \le 1, 1, n h(n-1))` (a body whose `\text{…}` made a
-`Text(…, Tuple(…))` node — the author meant `If`) throws the `RangeError` on
-`h(2)`. Checked 2026-10-17: at the default limit, `f(n) := n f(n-1)` applied to
-`f(2)` also throws the `RangeError` (from source and from the built bundle).
-**User decision 2026-10-17: make the guard stack-aware** — the user-function
-call path catches the JavaScript `RangeError` of a stack overflow and reports
-the engine's `CancellationError: Recursion limit exceeded`, so `f(2)` and `h(2)`
-both end with the documented error; a `RangeError` of another origin must not be
-caught. Repro: the two parses above, then `ce.box(['h', 2]).evaluate()`.
 
 ### Built-in collections as `Iterable`/`Indexable` protocol conformers — audit and sizing (OPEN, design — audited 2026-08-21; ruling P8 / §7 item 6(h) of `docs/TYPE_SYSTEM_ROADMAP.md`)
 
@@ -4396,42 +4406,6 @@ signature; `CHANGELOG.md`). Two cases stay unchecked until they evaluate:
   `src/epsil/static-diagnostics.ts`) and an alias's static type is an upper
   bound, not the signature the binding will hold.
 
-### Dead post-install `effectsDeclared` write in `defineFunctionClause` (decided 2026-10-17)
-
-Found 2026-08-19 while journaling the checkpoint hooks (dual review of stage
-C1). In `multi-clause.ts`'s `defineFunctionClause`, `retarget` is the operator
-half in force before the clause is installed, and after a SUCCESSFUL install the
-code writes `retarget.effectsDeclared = incomingExplicit !== undefined`. By then
-`retarget` is an orphan: `ce.assign` routes to `updateDef`, which constructs a
-fresh `_BoxedOperatorDefinition` for a plain-object definition and swaps the
-record's pointer to it, so the write lands on an object the binding no longer
-holds. Verified by probe: after `w(x: integer) = x + 1` then
-`w(x: string) = "s"`, the captured pre-assign half is not the installed one.
-
-It is reachable through the Epsil static check since 2026-10-16: the check
-declares a pass-scope binding that holds the SAME operator object as a function
-an earlier program defined (`assignOverUserFunction()`,
-`src/epsil/static-diagnostics.ts`), so a static check of a later program that
-has only `function h(x: integer) -> integer { x }` after an earlier
-`function h(x: integer) pure -> integer { x }` changes the earlier operator's
-`effectsDeclared` from `true` to `false` while its signature still says `pure`
-(`contractViolation` reads that flag; no user-visible consequence was shown).
-Otherwise not an observable defect — the installed half derives the same
-`effectsDeclared` from the incoming literal, so the live definition ends up with
-the value this write intends — and the same statement's REFUSAL path (the
-`catch`) does need the write, because there the old half is still installed. So
-the write is dead on one path and load-bearing on the other, and its comment
-describes only the second. Left as-is rather than "fixed" because re-deriving
-the target after the install would change which definition the
-effects-annotation contract is recorded on, and `contractViolation` reads that
-flag; that is a decision about the effects-provenance contract, not a mechanical
-repair. **User decision 2026-10-17: drop the write on the success branch** — the
-installed definition derives `effectsDeclared` itself, the old definition object
-is not changed, and the comment must say so; the refusal branch keeps its write.
-So a static check of the later program leaves the earlier `pure` operator's
-`effectsDeclared` at `true`. Pin it with a test that tells this from a write to
-the re-fetched live definition.
-
 ### The strict linear posture initiative — the remaining Epsil-route flip (RATIFIED 2026-08-18; stages R1/C1/C2/C3/v2 shipped 2026-08-18/19)
 
 Arno ratified (2026-08-18, with Tycho's code-verified concurrence):
@@ -4504,15 +4478,6 @@ the rest are recorded here so they are not rediscovered from the outside.
   in-engine route is enforced. RULED-DEFERRED 2026-08-09 with the direction
   fixed (per-primitive check-emission table + "unenforceable → decline"); see
   the "Known limit" section of `docs/TYPE-SYSTEM.md`.
-- **`FlatMap`'s `evaluate` materializes on the SOURCE's finiteness alone** — it
-  retains the optimistic assumption its `isFinite` facet dropped (2026-08-09);
-  re-gating on `expr.isFiniteCollection` would make every unprovable-callback
-  `FlatMap` stay symbolic. So `FlatMap([1, 2], n ↦ Range(1, ∞))` does not
-  return. **User decision 2026-10-17: stop at the first infinite inner
-  collection** — the handler checks each inner result while it builds the list
-  and stops with an error when the callback returns an infinite collection, so
-  `FlatMap([1, 2], n ↦ Range(1, ∞))` gives an error at once, and
-  `FlatMap([1, 2], x ↦ [x, x])` still gives `[1, 1, 2, 2]`.
 - **Phase 4: comparator slots** (`Sort`, `ChunkBy`, …) — whether they convert to
   `callback<(T, T) -> …>` at all (spec §9 item 6). **User decision 2026-10-17:
   do not convert, and add a run-time refusal** — the comparator slots keep the
@@ -5898,14 +5863,6 @@ Significant in-code `@todo`/`@fixme` not already covered by a section above:
 The June 2026 codebase review (REVIEW.md) is fully dispositioned; its full text
 is in git history. The only items deliberately left open:
 
-- **A14 (LOW)** — `boxed-expression/order.ts` tie-breaks: operator and string
-  branches sort descending while the symbol branch and doc comment say
-  ascending. Deferred because forcing ascending changes established canonical
-  orderings in a debatably _worse_ direction (e.g. `-(sech x · tanh x)` instead
-  of the textbook `-(tanh x · sech x)`) and churns calculus snapshots. **User
-  decision 2026-10-17: keep the descending order and correct the comment** — no
-  output changes (`d/dx sech x` stays `-(tanh x · sech x)`); the comment in
-  `order.ts` must say that the operator and string branches sort descending.
 - **G5 (LOW)** — `["Subscript", "a", "k"]` canonicalizes to the fused symbol
   `a_k`, severing the binding when `k` is a binder-bound index. A correct fix
   needs binder-aware canonicalization (the canonicalizer has no enclosing-binder

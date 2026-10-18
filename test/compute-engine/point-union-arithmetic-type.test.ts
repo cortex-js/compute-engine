@@ -497,8 +497,11 @@ describe('a tuple arm of a scalar union or of a broadcastable element keeps its 
       'number | tuple<number, number>'
     );
     expect(ce.box(['Power', 'w', 2]).type.toString()).toBe('number | tuple');
+    // `number` admits `~oo`, and `Floor(~oo)` is `~oo`, so the scalar arm
+    // is `integer | nan | +oo | -oo | ~oo`, which reduces to
+    // `infinity | integer | nan`.
     expect(ce.box(['Floor', 'w']).type.toString()).toBe(
-      'integer | nan | signed_infinity | tuple'
+      'infinity | integer | nan | tuple'
     );
     // A difference of two such values is a number or a point too.
     expect(ce.box(['Subtract', 'u', 'u']).type.toString()).toBe(
@@ -522,7 +525,7 @@ describe('a tuple arm of a scalar union or of a broadcastable element keeps its 
       'broadcastable<number | tuple>'
     );
     expect(ce.box(['Floor', 'q']).type.toString()).toBe(
-      'broadcastable<integer | nan | signed_infinity | tuple>'
+      'broadcastable<infinity | integer | nan | tuple>'
     );
     expect(ce.box(['Power', 'r', 2]).type.toString()).toBe(
       'broadcastable<tuple<number, number>>'

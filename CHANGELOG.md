@@ -2,6 +2,95 @@
 
 ### Behavior Changes
 
+- **`Solve` gives both roots for an integer-valued float exponent** (user
+  decision 2026-10-17). `x^{2.0} = 4` gave only `2`; it now gives `2.0` and
+  `-2.0`, as `x^2 = 4` gives `2` and `-2`, and `x^{3.0} = -8` gives the real
+  root `-2.0`. `Solve` also solves a power with a negative float exponent or a
+  base that is not the unknown itself, which had no solution:
+  `x^{-0.5} = 4` gives `0.0625`, `x^{-2.0} = 4` gives `±0.5`, and
+  `(x+1)^{2.0} = 4` gives `1.0` and `-3.0`.
+
+- **`Floor`, `Ceil`, `Round` and `Truncate` of a pole give `~oo`** (user
+  decision 2026-10-17). `Floor(~oo)`, `Floor(5/0)` and `Floor(Tan(π/2))` were
+  `Error(incompatible-type, "real | signed_infinity", ~oo)`. Now they are `~oo`,
+  as `Floor(+∞)` is `+∞`, and the step form gives `~oo` too (`Floor(~oo, 2)`).
+  `Fract(~oo)` and `Sign(~oo)` have no value: they are `Indeterminate`, and
+  `NaN` under `.N()`. Under `.N()`, these six functions now use the exact value
+  of an operand whose float is `~oo` only because its terms cancel:
+  `Floor(1/(√(10⁴⁰+1) − 10²⁰)).N()` is `200000000000000000000`, as `evaluate()`
+  gives, not a type error. Because these functions accept `~oo`, an undeclared
+  symbol used in one of them is inferred `real | signed_infinity | ~oo`
+  (`complex | signed_infinity | ~oo` for `Sign`), and a result type that can be
+  `~oo` includes it: `Floor(w)` with `w: number` is typed
+  `infinity | integer | nan`.
+
+- **A sequence definition on a constant is refused** (user decision
+  2026-10-17). With `F` declared as a constant, `F_0 := 1` and
+  `F_n := F_{n-1} + 1` now throw the error that `ce.assign('F', 5)` gives, and
+  `F` keeps its value. Before, the complete sequence replaced the constant and
+  its value was lost.
+
+- **A length type parameter accepts the length 0** (user decision 2026-10-17).
+  With `type permutation<N> = list<integer^N>`, `permutation([])` is typed
+  `permutation<0>`; it was `permutation<integer<1..>>`, a positive length for a
+  value of length 0. An unsolved length now reads `integer<0..>`,
+  `where N: integer` admits 0, and the empty list is a value of every one-axis
+  list type of any length, such as `vector<integer>`.
+
+- **A comparison with an `Undefined` operand is typed `boolean | missing`**
+  (user decision 2026-10-17). `Less(Undefined, 3)` evaluates to `Missing`, as
+  `Less(Missing, 3)` does, but its type was `boolean`. This applies to `Less`,
+  `LessEqual`, `Greater`, `GreaterEqual`, `Equal` and `NotEqual`.
+
+- **A runaway recursion always ends with the engine's recursion error.** A user
+  function that calls itself without end (`f(n) := n f(n-1)`, then `f(2)`) now
+  always throws `CancellationError: Recursion limit exceeded` (cause
+  `recursion-depth-exceeded`). Before, at the default `recursionLimit` of 256,
+  the JavaScript stack could fill first: the caller got a bare
+  `RangeError: Maximum call stack size exceeded`, and the evaluation contexts of
+  the levels nearest the overflow stayed on the engine's stack. The engine now
+  also throws the recursion error when less than 64 KB of the JavaScript stack
+  is free, so a correct recursion that used almost all of the stack stops a few
+  levels earlier than before. On `evaluateAsync()`, a runaway recursion had no
+  bound and ran until the process ran out of memory; it now stops at
+  `recursionLimit` too.
+
+- **`FlatMap` whose callback returns an infinite collection no longer runs
+  without end.** `FlatMap([1, 2], n ↦ Range(1, ∞))` under
+  `evaluate({ materialization: true })` now gives
+  `Error(out-of-range, "a finite collection", …)`, as `RandomShuffle` does for an
+  infinite collection. Its `toString()` and `latex`, which also never returned,
+  now show the expression as written. A read of a prefix (`At(…, 3)`, `First`)
+  is still answered. An inner result whose finiteness is not known is walked
+  only up to `maxCollectionSize` elements; past that, the result stays lazy.
+  `FlatMap([1, 2], x ↦ [x, x])` still gives `[1, 1, 2, 2]`.
+
+- **A product of square roots whose radicand is above 10⁶ stays exact** (user
+  decision 2026-10-17). `\sqrt{1009}\sqrt{1013}` parsed to the float
+  `1010.998…`, because an exact number holds one radical with a radicand of at
+  most 10⁶, and 1009·1013 = 1022117 has no square factor. The two radicals are
+  now kept as separate factors, `√1009·√1013`, on parse, `evaluate()` and
+  `simplify()`; `.N()` gives `1010.998021758697607`. A separate factor still
+  combines with a later one: `√1009·√1013·√1013` is `1013√1009`. A quotient
+  stays exact too: `√1009/√1013` evaluated to `0.998…`. An integer power of a
+  radical is always exact: `(√1009)^2` is `1009`, not `1009.0`, and
+  `(√1009·√1013)^2` evaluates to `1022117`. An integer coefficient on the square
+  root of a negative integer is now folded, as a rational one is:
+  `2000·√(−13)` and `√(−13)·√4000000` evaluate to `2000√13·i`, and
+  `√(−52000000)/3` evaluates to `(2000/3)√13·i`.
+
+- **Compiled jump functions of an exact constant give the interpreter's value
+  also with `constantFold: false`** (user decision 2026-10-17). Compiled code of
+  `Floor`, `Ceil`, `Round`, `Truncate`, `Fract`, `Mod`, `Remainder`, `Chop`,
+  `Sign`, `Heaviside` and the comparisons, applied to a closed exact operand,
+  computed the operand as a double under `constantFold: false` and in the
+  compiled body of a `Map`, and a double can be on the other side of the jump:
+  `Floor((25! − 1)/24!)` compiled to `25` (now `24`), and `Fract(π·10^30)` to `0`
+  (now `0.50288…`). Such an operand is now computed exactly, so the compiled
+  code holds the result. On Python, a comparison of closed exact numbers now
+  compiles to `True` or `False`: `(25! − 1)/24! < 25` compiled to `25 < 25`,
+  which is `False`.
+
 - **`Join` or `Append` of a dictionary and an element that can never be a
   key-value entry is an error at once** (user decision 2026-10-17).
   `Join(Dictionary(x: 1), [2, 3])` evaluated to the unevaluated `Join`, typed
@@ -91,6 +180,58 @@
   and shader targets. An `If` in a loop body, one with a statement in a branch
   (`Return`, an assignment), and every such `If` on the Python target keep the
   statement form.
+
+### Issues Resolved
+
+- **`NotGreater` evaluates.** `1 \ngtr 3` stayed `Not(3 < 1)`; it now evaluates
+  to `True`, as `NotLess` already did.
+
+- **A static check of an Epsil program no longer changes a function of an
+  earlier program.** Checking `function h(x: integer) -> integer { x }` after
+  `function h(x: integer) pure -> integer { x }` set the earlier definition's
+  `effectsDeclared` flag to `false` while its signature still said `pure`.
+
+- **Under `.N()`, `If` and the other lazy operators in a user-function body
+  read the exact argument** (user decision 2026-10-17). `If`, `Which`, `When`,
+  `Pipe`, `ForAll` and `Exists` evaluated the operands they hold exactly, so a
+  comparison or a `Floor` inside read the float bound to the parameter:
+  `c((25! − 1)/24!).N()` with `c := x ↦ If(x < 25, 0, 1)` gave 1, and
+  `g((25! − 1)/24!).N()` with `g := x ↦ If(True, Floor(x), 0)` gave 25. They now
+  pass the numeric request to these operands, so the comparison and `Floor` read
+  the exact argument again, as at the top level: the results are 0 and 24.
+  `Floor(x) = 24` in such a body is now `True`. At the top level,
+  `If(True, √2).N()` is now `1.414…`, as `Which(True, √2).N()` already was, and
+  `If(Σ_{k=1}^{10000} 1/k < 10, 0, 1).N()` no longer evaluates its condition
+  exactly (28 s before, 0.1 s now).
+
+- **A list of points that may hold an absent point keeps its `missing` cells
+  beside a bare `tuple`.** With `B` declared `list<tuple<number, number>> | tuple`
+  and `D` declared
+  `list<missing | tuple<number, number>> | tuple<number, number>`, `B + D` was
+  typed `list<number | tuple> | tuple`. That type does not admit the value
+  `[(4, 6), Missing]` that `B + D` has when `B` is `(1, 2)` and `D` is
+  `[(3, 4), Missing]`. An absent point is `Missing`, not `NaN`, but the bare
+  `tuple`, a point of no stated arity, was not counted as a point, so its
+  absent cell was read as an absent number. `B + D` is now
+  `list<missing | tuple> | tuple`.
+
+- **A product of two points and a quotient by a point are typed `error`
+  when the operands are unions.** With `U` declared
+  `list<tuple<number, number>> | tuple<number, number>`, `U · U` and `U / U`
+  were typed `list<number> | number`, but every value of `U` makes them an
+  error: the product of two points is the `no-product-between-points` error,
+  and a division by a point is the `no-division-by-point` error. Both are now
+  typed `error`. A list of points counts as a point here, as it does at
+  boxing: with `P` declared `tuple<number, number>`, `U · P` and `P / U` are
+  typed `error` too. With `V` declared `list<number> | tuple<number, number>`,
+  `V · V` is `list<number> | list<tuple<number, number>>`: a list of numbers
+  times a point is a list of points.
+
+- **A point divided by itself is an error, not `1`.** `U / U`, boxed while `U`
+  had no value, evaluated to `1` once `U` held the point `(1, 2)`, and to
+  `[1, 1]` once it held a list of two points, as did `(1, 2).div((1, 2))`. The
+  quotient reduced `a / a` to `1` before it checked the divisor. It now gives
+  the `no-division-by-point` error, as the boxed `(1, 2) / (1, 2)` already did.
 
 ## 0.156.0 _2026-10-17_
 

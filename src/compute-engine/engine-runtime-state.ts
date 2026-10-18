@@ -6,6 +6,75 @@ import {
 } from '../common/interruptible.js';
 import type { RandomSeedFrame } from './numerics/random.js';
 
+/**
+ * The error that ends a runaway user-function recursion: a
+ * `CancellationError` with the cause `recursion-depth-exceeded`. It is thrown
+ * when the depth reaches `recursionLimit`, and also when the JavaScript call
+ * stack is full before the depth reaches the limit (see
+ * {@linkcode isStackOverflow}), so the host gets the same error in both cases.
+ */
+export function recursionLimitError(): CancellationError {
+  return new CancellationError({
+    cause: 'recursion-depth-exceeded',
+    message: 'Recursion limit exceeded',
+  });
+}
+
+/**
+ * Is `e` the error that a JavaScript engine throws when its call stack is
+ * full? V8 (Chrome, Node) and JavaScriptCore (Safari) throw a `RangeError`
+ * whose message starts with "Maximum call stack size exceeded";
+ * SpiderMonkey (Firefox) throws an `InternalError` with the message "too much
+ * recursion". Any other `RangeError` (an invalid array length, an invalid
+ * index) is not a stack overflow and gives `false`.
+ *
+ * The test reads the name and the message, not the class: `InternalError` is
+ * not a global outside SpiderMonkey. It runs when the stack is nearly full,
+ * so it uses no regular expression: compiling one needs stack, and failed
+ * there with a `SyntaxError` that hid the overflow. When the test itself
+ * overflows, it throws a new stack-overflow `RangeError`, which the caller
+ * one level up tests again with more room.
+ */
+export function isStackOverflow(e: unknown): boolean {
+  if (!(e instanceof Error)) return false;
+  if (e instanceof RangeError)
+    return e.message.startsWith('Maximum call stack size exceeded');
+  return e.name === 'InternalError' && e.message === 'too much recursion';
+}
+
+/** The user-function depth from which `enterRecursion()` measures the free
+ * stack (see {@linkcode hasStackRoom}). */
+const STACK_ROOM_MIN_DEPTH = 32;
+
+/** The number of arguments of the call that measures the free stack: 8192
+ * arguments of 8 bytes each, that is 64 KB. */
+const STACK_ROOM_ARGUMENTS = 8192;
+
+let stackRoomArguments: unknown[] | undefined;
+
+function noop(): void {}
+
+/**
+ * Is there at least 64 KB of free JavaScript stack? The test calls a
+ * function with `STACK_ROOM_ARGUMENTS` arguments: the engine puts the
+ * arguments on the stack, and throws a stack-overflow error when they do not
+ * fit. The size of an argument does not depend on how the engine compiled
+ * the code, which a test that recursed through small frames would. The call
+ * takes about 2 µs. A host where the call does not throw at the stack limit
+ * gets `true`, and the catch in `wrapRecursion()` (`function-utils.ts`)
+ * still converts the overflow.
+ */
+function hasStackRoom(): boolean {
+  stackRoomArguments ??= new Array<unknown>(STACK_ROOM_ARGUMENTS).fill(0);
+  try {
+    Reflect.apply(noop, undefined, stackRoomArguments);
+    return true;
+  } catch (e) {
+    if (isStackOverflow(e)) return false;
+    throw e;
+  }
+}
+
 export class EngineRuntimeState {
   private _iterationLimit = DEFAULT_ITERATION_LIMIT;
   private _recursionLimit = 256;
@@ -58,20 +127,41 @@ export class EngineRuntimeState {
    * This bounds user-function recursion (`f(x) := … f(x-1) …`) with a clean,
    * catchable error instead of letting it overflow the native JS call stack
    * with a `RangeError`. Balanced with {@linkcode exitRecursion}.
+   *
+   * The same error is thrown when the JavaScript stack has less than
+   * `STACK_ROOM_ARGUMENTS` × 8 bytes (64 KB) free, which can happen before
+   * the depth reaches the limit: a level of a recursion uses several
+   * kilobytes of stack, and the size of the stack depends on the host. The
+   * error must be thrown while there is room left. After a stack overflow,
+   * V8 refuses calls until about 40 KB of the stack is free again, so the
+   * `finally` blocks of the levels near the overflow cannot run: their
+   * evaluation contexts, counters and scope bookkeeping stay as they were in
+   * the recursion. Thrown here, at the entry of a level, the error lets
+   * every `finally` block run. The room is measured only from a depth of
+   * `STACK_ROOM_MIN_DEPTH`, so a shallow application does not pay for the
+   * measurement.
+   *
+   * Returns the depth before the entry, for {@linkcode exitRecursion}.
    */
-  enterRecursion(): void {
-    if (this._recursionDepth >= this._recursionLimit)
-      throw new CancellationError({
-        cause: 'recursion-depth-exceeded',
-        message: 'Recursion limit exceeded',
-      });
-    this._recursionDepth += 1;
+  enterRecursion(): number {
+    const depth = this._recursionDepth;
+    if (
+      depth >= this._recursionLimit ||
+      (depth >= STACK_ROOM_MIN_DEPTH && !hasStackRoom())
+    )
+      throw recursionLimitError();
+    this._recursionDepth = depth + 1;
+    return depth;
   }
 
   /** Leave a user-function application. Balanced with
-   * {@linkcode enterRecursion}. */
-  exitRecursion(): void {
-    if (this._recursionDepth > 0) this._recursionDepth -= 1;
+   * {@linkcode enterRecursion}: `depth` is the value that `enterRecursion()`
+   * returned. The depth is set to that value rather than decremented, so a
+   * level whose own exit was skipped (a stack overflow can make a `finally`
+   * block fail) does not leave the depth too high once an enclosing level
+   * exits. */
+  exitRecursion(depth: number): void {
+    this._recursionDepth = depth;
   }
 
   get maxCollectionSize(): number {

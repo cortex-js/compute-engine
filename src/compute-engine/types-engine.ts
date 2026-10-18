@@ -2182,12 +2182,13 @@ export interface IComputeEngine {
   _currentShadowedParameterDefs(): ReadonlyMap<string, BoxedDefinition>;
 
   /** Enter a user-function application, throwing a `CancellationError`
-   * (`cause: 'recursion-depth-exceeded'`) when `recursionLimit` is exceeded.
-   * Balanced with `_exitRecursion`. @internal */
-  _enterRecursion(): void;
-  /** Leave a user-function application. Balanced with `_enterRecursion`.
-   * @internal */
-  _exitRecursion(): void;
+   * (`cause: 'recursion-depth-exceeded'`) when `recursionLimit` is exceeded
+   * or the JavaScript stack is nearly full. Returns the depth before the
+   * entry. Balanced with `_exitRecursion`. @internal */
+  _enterRecursion(): number;
+  /** Leave a user-function application: `depth` is the value that the
+   * balancing `_enterRecursion()` returned. @internal */
+  _exitRecursion(depth: number): void;
 
   /**
    * Use `ce.expr(id)` instead

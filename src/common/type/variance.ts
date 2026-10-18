@@ -250,7 +250,7 @@ export function analyzeVariance(
         // solved applications relate only when equal (`permutation<3>` and
         // `permutation<4>` are unrelated), while an UNSOLVED one reads as its
         // bound and is the family of every length (`permutation<3> <:
-        // permutation<integer<1..>>`).
+        // permutation<integer<0..>>`).
         occurrences.push(
           deferredVia === undefined
             ? { param: t.name, polarity, path }

@@ -5297,7 +5297,25 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // argument (like `flattenOps` on the direct route and `Apply`'s
         // canonical handler): a topic that merely *evaluates* to `Nothing` is
         // bound, as it is by `f(g())`.
-        const result = apply(callee, isSymbol(x, 'Nothing') ? [] : [x]);
+        //
+        // Under `.N()` the application gets the numeric request, as `f(x)`
+        // does under `.N()`, and the written topic is recorded behind the
+        // activation of a function literal (`exactArgumentSources`), as
+        // `Apply` does: a function that jumps (`Floor`, a comparison) then
+        // reads an exact topic exactly. Applied exactly, `x |> Floor` in the
+        // body of a user function read the float bound to the parameter `x`,
+        // and the numeric pass over the result below could not undo that.
+        const args = isSymbol(x, 'Nothing') ? [] : [x];
+        const result = apply(
+          callee,
+          args,
+          numericApproximation
+            ? {
+                numericApproximation: true,
+                exactSources: exactArgumentSources(ce, args),
+              }
+            : undefined
+        );
 
         if (!numericApproximation) return result;
         // Mirror `Apply`: under N(), numericize the applied result unless it

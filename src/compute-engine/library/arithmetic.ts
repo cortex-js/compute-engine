@@ -1306,6 +1306,11 @@ function applyRounding(
       return ce.number(ce._numericValue(new BigDecimal(exact.toString())));
     }
   }
+  // `~oo` (a pole, `5/0`) rounds to itself, as `±∞` does. This test comes
+  // after the two exact tries above: under `.N()`, the float of an operand
+  // whose exact value is finite can be `~oo` when its terms cancel
+  // (`1/(√(10⁴⁰ + 1) − 10²⁰)`), and the exact value decides then.
+  if (infinitePoint(x) === '~oo') return x.engine.ComplexInfinity;
   const result = apply(x, fn, bigFn);
   if (numericApproximation) return result;
   if (result === undefined || !isNumber(result) || result.isExact)
@@ -1334,7 +1339,10 @@ function applyRounding(
  * `x` to a multiple of `step` (`Floor(226, 10)` is `220`, as
  * `Floor[226, 10]` in Mathematica).
  *
- * The carrier of `x` is the extended real line (`Floor(±∞) = ±∞`). The step
+ * The carrier of `x` is the extended real line (`Floor(±∞) = ±∞`) and the
+ * unsigned infinity `~oo`. A pole is reported as `~oo` (`5/0`, `Tan(π/2)`),
+ * and the rounding of a value that grows without bound also grows without
+ * bound, so `Floor(~oo)` is `~oo`, as `Floor(+∞)` is `+∞`. The step
  * is a finite real; a zero step has no multiple to round to, and it is the
  * domain condition of the step form (`roundingStepDefined()`). The declared
  * result is `real`, because the step form is not integer-valued; the `type`
@@ -1346,11 +1354,17 @@ function applyRounding(
  * not apply to its arms.
  */
 const ROUNDING_STEP_SIGNATURE =
-  '(x: real | signed_infinity, step: real?) -> real | signed_infinity';
+  '(x: real | signed_infinity | ~oo, step: real?) -> real | signed_infinity | ~oo';
 
 const INTEGER_NAN_OR_SIGNED_INFINITY = parseType(
   'integer | nan | signed_infinity'
 );
+
+const INTEGER_NAN_OR_INFINITY = parseType(
+  'integer | nan | signed_infinity | ~oo'
+);
+
+const COMPLEX_INFINITY_TYPE = parseType('~oo');
 
 /**
  * The type of `Floor`, `Ceil`, `Truncate` or `Round`, with or without a step.
@@ -1368,9 +1382,12 @@ const INTEGER_NAN_OR_SIGNED_INFINITY = parseType(
  * `NaN` and a step that is not proven real add the `nan` arm. A collection
  * step always adds it: its elements are not proven non-zero from its type
  * (`Floor(5, [1/3, 2])` is typed `list<nan | rational>`), which is sound
- * but not sharp. The handler
- * gives the whole claim, because the framework does not widen the answer of
- * a handler.
+ * but not sharp.
+ *
+ * An `x` that may be `~oo` (a symbol typed `number`) adds the `~oo` arm,
+ * because the rounding of `~oo` is `~oo`; an `x` that is `~oo` gives `~oo`.
+ * The handler gives the whole claim, because the framework does not widen
+ * the answer of a handler.
  */
 function roundingType(
   x: OperandDescriptor | undefined,
@@ -1387,12 +1404,24 @@ function roundingType(
       nonZeroLiteral(step) === false)
   )
     return BoxedType.forResult('nan', resolver);
-  const t = roundingFunctionTypeOnTypes(x);
+  let t = roundingFunctionTypeOnTypes(x);
   const kindOf = (): Type => {
     if (step === undefined) return 'integer';
     const f = factsOf(broadcastCellType(step.type));
     return f.integer ? 'integer' : f.rational ? 'rational' : 'real';
   };
+  const mayBeComplexInfinity = couldMatch(xType, COMPLEX_INFINITY_TYPE);
+  // An `x` that may be `~oo` (`real | signed_infinity | ~oo`, the type a
+  // symbol is inferred to have from its use in `Floor`) is typed from its
+  // other values here, and the `~oo` arm is added below.
+  if (t === undefined && mayBeComplexInfinity) {
+    const rest = withoutComplexInfinity(xType);
+    const f = factsOf(rest);
+    if (f.real) t = 'integer';
+    else if (isSubtype(rest, SIGNED_INFINITY_TYPE)) t = SIGNED_INFINITY_TYPE;
+    else if (f.extendedReal)
+      t = { kind: 'union', types: ['integer', SIGNED_INFINITY_TYPE] };
+  }
   let mayBeNaN = false;
   let result: Type;
   if (t === 'integer') result = kindOf();
@@ -1400,12 +1429,21 @@ function roundingType(
   else if (t !== undefined)
     result = { kind: 'union', types: [kindOf(), SIGNED_INFINITY_TYPE] };
   else if (isSubtype(xType, 'nan')) return BoxedType.forResult('nan', resolver);
+  else if (isSubtype(xType, COMPLEX_INFINITY_TYPE))
+    result = COMPLEX_INFINITY_TYPE;
   else {
     if (step === undefined)
-      return BoxedType.forResult(INTEGER_NAN_OR_SIGNED_INFINITY, resolver);
+      return BoxedType.forResult(
+        mayBeComplexInfinity
+          ? INTEGER_NAN_OR_INFINITY
+          : INTEGER_NAN_OR_SIGNED_INFINITY,
+        resolver
+      );
     result = { kind: 'union', types: [kindOf(), SIGNED_INFINITY_TYPE] };
     mayBeNaN = true;
   }
+  if (mayBeComplexInfinity && result !== COMPLEX_INFINITY_TYPE)
+    result = { kind: 'union', types: [result, COMPLEX_INFINITY_TYPE] };
   if (step !== undefined) {
     const stepSgn = operandSgnOnTypes(step);
     const nonZero =
@@ -3812,6 +3850,32 @@ const SIGN_RANGE_TYPE = parseType('integer<-1..1>');
 const SIGN_RANGE_NAN_TYPE = parseType('integer<-1..1> | nan');
 const COMPLEX_NAN_TYPE = parseType('complex | nan');
 
+/**
+ * `t` without its `~oo` values. The members of a union that are `~oo` are
+ * removed, and the type `infinity` (`signed_infinity | ~oo`), alone or as a
+ * member of a union, is replaced with `signed_infinity`. The members of
+ * another type are not separated. The callers test separately whether `t`
+ * can be `~oo` (`couldMatch(t, COMPLEX_INFINITY_TYPE)`).
+ */
+function withoutComplexInfinity(t: Type): Type {
+  if (t === 'infinity') return SIGNED_INFINITY_TYPE;
+  if (typeof t === 'string' || t.kind !== 'union') return t;
+  const rest: Type[] = [];
+  let changed = false;
+  for (const m of t.types) {
+    if (m === 'infinity') {
+      // The members of `SIGNED_INFINITY_TYPE` (`+∞` and `-∞`), so that the
+      // union stays flat.
+      rest.push(...(SIGNED_INFINITY_TYPE as { types: Type[] }).types);
+      changed = true;
+    } else if (isSubtype(m, COMPLEX_INFINITY_TYPE)) changed = true;
+    else rest.push(m);
+  }
+  if (!changed) return t;
+  if (rest.length === 1) return rest[0];
+  return { kind: 'union', types: rest };
+}
+
 /** `t` without its `nan` member: the type of the values an operand has when
  * it is not NaN, so a claim about them can be tested on a union such as
  * `real | nan`. A type that is not a union is returned unchanged. */
@@ -5397,10 +5461,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       keywords: ['round up', 'ceiling'],
       complexity: 1250,
       broadcastable: true,
-      // The carrier is the extended real line: rounding depends on the
-      // order of the real line, which the complex numbers lack, and
-      // `Ceil(±∞) = ±∞` puts the signed infinities on both sides. A
-      // proven off-carrier operand — a complex value, `~oo` — is a boxing
+      // The carrier is the extended real line and `~oo`: rounding depends
+      // on the order of the real line, which the complex numbers lack, and
+      // `Ceil(±∞) = ±∞` puts the signed infinities on both sides. A pole is
+      // reported as `~oo` (`5/0`), and `Ceil(~oo)` is `~oo`. A proven
+      // off-carrier operand — a complex value — is a boxing
       // error; there is no component-wise ceiling of a complex number
       // (the compiled lanes agree — they are real-only for this
       // operator). The `type` handler (`roundingType()`) gives the whole
@@ -6388,13 +6453,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // either end (it sweeps `[0, 1)` forever), so `definedWhen` names the
       // finiteness condition and the gate answers the codomain marker,
       // `Indeterminate` (the form `∞ − ∞`, as `x − Floor(x)` composes).
-      // `NaN` propagates. The
+      // `~oo` is in the carrier too, as for `Floor`, and it has no
+      // fractional part either: the handler answers `Indeterminate` for it
+      // (`NaN` under `.N()`). `NaN` propagates. The
       // successes lie in `[0, 1)`; `real<0..1>` is the closest declared
       // spelling, and it is sharp enough that no type handler is needed —
       // the framework adds `| nan` while the operand is not proven finite.
       // Ruling recorded in `docs/plans/2026-08-30-error-model-implementation.md`,
       // Phase F batch 10.
-      signature: '(real | signed_infinity) -> real<0..1>',
+      signature: '(real | signed_infinity | ~oo) -> real<0..1>',
       examples: ['[Fract(3.75), Fract(-3.25)]'],
       nanBehavior: 'propagate',
       definedWhen: ([x]) => {
@@ -6405,12 +6472,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // literal only.
         if (x.type.matches('real')) return true;
         if (!isNumber(x)) return undefined;
-        // Only the two SIGNED infinities are inside the carrier and decided
-        // here; `~oo` and an anonymous infinity are outside it, and the
-        // carrier — not this predicate — refuses them (a `false` would put
-        // the marker where the carrier error belongs for a value a symbol
-        // holds, because the partiality gate runs before the dispatch
-        // conformance re-test).
+        // Only the two SIGNED infinities are decided here. An anonymous
+        // infinity is outside the carrier, and the carrier — not this
+        // predicate — refuses it (a `false` would put the marker where the
+        // carrier error belongs for a value a symbol holds, because the
+        // partiality gate runs before the dispatch conformance re-test).
+        // `~oo` is not decided here because under `.N()` it can be the
+        // float of an operand whose exact value is finite
+        // (`1/(√(10⁴⁰ + 1) − 10²⁰)`): the handler reads the exact operand
+        // first.
         const point = infinitePoint(x);
         if (point === '+oo' || point === '-oo') return false;
         if (point !== undefined) return undefined;
@@ -6487,6 +6557,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               .evaluate()
               .N();
         }
+        // `~oo` has no fractional part: `~oo − Floor(~oo)` is `~oo − ~oo`.
+        if (infinitePoint(x) === '~oo')
+          return numericApproximation
+            ? ce.NaN
+            : indeterminateFormAnswer(ce, [x]);
         return apply(
           x,
           (x) => x - Math.floor(x),
@@ -9885,9 +9960,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // of `ce.roundingTies`. To round to `n` decimal places, the step is
       // `10^-n`: `Round(3.14159, 1/100)` is the exact rational `157/50`.
       //
-      // The carrier is the extended real line — rounding depends on the
-      // order of the real line, and `Round(±∞) = ±∞` — so a proven
-      // off-carrier operand (a complex value, `~oo`) is a boxing error, and
+      // The carrier is the extended real line and `~oo` — rounding depends
+      // on the order of the real line, `Round(±∞) = ±∞` and
+      // `Round(~oo) = ~oo` — so a proven off-carrier operand (a complex
+      // value) is a boxing error, and
       // a `NaN` argument propagates through the generic gate (an
       // extended-real carrier derives `reject`, hence the explicit
       // declaration). The signature, the domain condition (a zero step is
@@ -9902,7 +9978,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       definedWhen: roundingStepDefined,
       type: ([x, step], context) => roundingType(x, step, context),
       sgn: ([x, step]) => {
-        if (x.isNaN) return 'unsigned';
+        // `Round(~oo)` is `~oo`, which has no sign: the real part of `~oo`
+        // read below would give `positive`.
+        if (x.isNaN || infinitePoint(x) === '~oo') return 'unsigned';
         // The evaluate handler rounds a value halfway between two multiples
         // with the rule of `ce.roundingTies` at every precision, so this sign
         // uses the same rule.
@@ -10057,13 +10135,14 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // the bounds without consulting the sgn handler; off the real line
       // it is the usual convention `z/|z|` — `Sign(i)` is `i`,
       // `Sign(3 + 4i)` is `3/5 + 4i/5` — the reading Fungrim (entry
-      // 09c107), SymPy and Mathematica share. `~oo` has no direction and
-      // stays off the carrier, so `Sign(~oo)` is a boxing error. The type
+      // 09c107), SymPy and Mathematica share. `~oo` (a pole, `5/0`) is in
+      // the carrier, as it is for `Floor`, but it has no direction, so
+      // `Sign(~oo)` is `Indeterminate` (`NaN` under `.N()`). The type
       // handler keeps the sharp ranged tier for a proven extended-real
-      // argument and answers `complex` otherwise; the generic policy gate
-      // adds the `nan` arm exactly where the argument can carry one.
+      // argument and answers `complex` otherwise, with a `nan` arm where
+      // the argument can be `NaN` or `~oo`.
       // (Domain-signature doctrine: `docs/ERROR-MODEL.md` §4.)
-      signature: '(complex | signed_infinity) -> complex',
+      signature: '(complex | signed_infinity | ~oo) -> complex',
       examples: ['[Sign(-3), Sign(0), Sign(3 + 4i)]'],
       type: ([x], context) => {
         if (x === undefined)
@@ -10079,8 +10158,14 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // NaN-free part: the NaN member alone must not turn a real operand
         // into a complex one.
         if (t !== 'never' && factsOf(t).nan) return undefined;
-        const maybeNaN = couldMatch(t, 'nan');
-        const real = factsOf(maybeNaN ? withoutNaN(t) : t).extendedReal;
+        // `Sign(~oo)` is `Indeterminate`, typed `nan`.
+        if (t !== 'never' && isSubtype(t, COMPLEX_INFINITY_TYPE))
+          return BoxedType.forResult('nan', context.engine._typeResolver);
+        const maybeComplexInfinity = couldMatch(t, COMPLEX_INFINITY_TYPE);
+        const maybeNaN = couldMatch(t, 'nan') || maybeComplexInfinity;
+        const real = factsOf(
+          withoutComplexInfinity(couldMatch(t, 'nan') ? withoutNaN(t) : t)
+        ).extendedReal;
         if (!maybeNaN)
           return BoxedType.forResult(
             real ? SIGN_RANGE_TYPE : 'complex',
@@ -10096,11 +10181,16 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // and `Sign(NaN)` must be `NaN` — the conformed §4 behavior. Stated
       // so the declaration reads without deriving it.
       nanBehavior: 'propagate',
-      // The sign is defined at EVERY point of the carrier and its three
-      // values are exactly machine-representable, so the numeric route
-      // cannot fail either: the strong claim is what discharges the marker
-      // arm and keeps the derived type sharp for an in-carrier argument.
-      partiality: 'total',
+      // The sign is defined at every point of the carrier except `~oo`, and
+      // its three real values are exactly machine-representable. An operand
+      // that cannot be `~oo` is decided here; `~oo` is not, because under
+      // `.N()` it can be the float of an operand whose exact value is finite
+      // (`1/(√(10⁴⁰ + 1) − 10²⁰)`): the handler reads the exact operand
+      // first and answers `Indeterminate` for a true `~oo`.
+      definedWhen: ([x]) =>
+        x === undefined || couldMatch(x.type.type, COMPLEX_INFINITY_TYPE)
+          ? undefined
+          : true,
       // Forwarding the operand's own sign is sound on the carrier and for
       // a propagated NaN alike: `Sign(x)` and `x` have the same sign
       // wherever `Sign` has a value, and `Sign(NaN)` is `NaN`, whose sign
@@ -10124,6 +10214,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (x.isSame(0)) return engine.Zero;
         if (x.isPositive) return engine.One;
         if (x.isNegative) return engine.NegativeOne;
+        // `~oo` has no direction.
+        if (infinitePoint(x) === '~oo')
+          return numericApproximation
+            ? engine.NaN
+            : indeterminateFormAnswer(engine, [x]);
         // A complex number literal off the real line: `z/|z|`, exact when
         // the modulus is (`Sign(3 + 4i)` is `3/5 + 4i/5`). A symbolic
         // operand stays symbolic.

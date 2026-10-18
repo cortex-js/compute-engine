@@ -69,6 +69,7 @@ import { isMintedConstructor } from './type-constructors.js';
 import { isProtocolDispatcher } from './engine-protocols.js';
 import {
   ascribeDeclaredParameterTypes,
+  assignFn,
   assignValueAsOperatorDef,
   reconcileFunctionLiteralReturn,
 } from './engine-declarations.js';
@@ -906,48 +907,29 @@ export function defineFunctionClause(
     // `let f: (integer) pure -> integer` the declaration is the contract and a
     // later clause is checked against it (§4.3a), which is the case `declared`
     // marks.
-    // Written only once the install SUCCEEDS, per this file's rule that the
-    // installed state is never mutated before the checks: `ce.assign` refuses a
-    // redefinition that widens the effect annotation (it validates the incoming
-    // literal against the binding's existing signature — the open widening
-    // defect recorded in `ROADMAP.md`), and a refused statement that had
-    // already flipped this flag would leave the surviving `pure` definition
-    // claiming it declares nothing, which `contractViolation` reads.
-    const retarget =
+    //
+    // To do this, the install is given the contract of the incoming literal
+    // (`effectContract`): `assignFn()` checks the literal against it and
+    // installs a new operator definition that carries it, instead of reading
+    // the contract of the previous operator definition. The previous
+    // operator definition is not changed, whether the install succeeds or is
+    // refused. This is necessary because a binding other than this one can
+    // hold it: the Epsil static check declares, in its own scope, a binding
+    // that holds the operator definition of a function an earlier program
+    // defined (`assignOverUserFunction()`, `src/epsil/static-diagnostics.ts`),
+    // and `contractViolation` reads the `effectsDeclared` flag of that
+    // definition.
+    const effectContract =
       declared === undefined &&
       existing !== undefined &&
       isOperatorDef(existing)
-        ? existing.operator
+        ? {
+            declared: incomingExplicit !== undefined,
+            effects: incomingExplicit,
+          }
         : undefined;
-    const priorDeclared = retarget?.effectsDeclared;
-    // Checkpoint journal (funnel 5): `retarget` is the operator half in force
-    // BEFORE the install below, and the refusal path in the `catch` writes
-    // `effectsDeclared` back onto it — a write to a pre-existing record that
-    // reaches no other hook, since the install that would have journaled it
-    // is the one that just threw. Recorded here rather than in the `catch` so
-    // the snapshot predates the install's own writes.
-    //
-    // The write after a SUCCESSFUL install lands on an orphan: `ce.assign`
-    // routes to `updateDef`, which constructs a fresh
-    // `_BoxedOperatorDefinition` for a plain-object definition and swaps the
-    // record's pointer to it, so `retarget` is no longer what the binding
-    // holds. That write is dead rather than wrong — the installed half
-    // derives the same `effectsDeclared` from the incoming literal — but it
-    // is dead only for as long as that derivation agrees; see the ROADMAP
-    // entry "Dead post-install `effectsDeclared` write in
-    // `defineFunctionClause`".
-    if (retarget !== undefined)
-      journalDefinitionRecord(ce, retarget, 'redefine');
-    try {
-      if (shadowsDispatcher) declareShadowingFunction(ce, id, literal);
-      else ce.assign(id, literal);
-    } catch (e) {
-      if (retarget !== undefined && priorDeclared !== undefined)
-        retarget.effectsDeclared = priorDeclared;
-      throw e;
-    }
-    if (retarget !== undefined)
-      retarget.effectsDeclared = incomingExplicit !== undefined;
+    if (shadowsDispatcher) declareShadowingFunction(ce, id, literal);
+    else assignFn(ce, id, literal, { effectContract });
     // The doc-comment description rides on the plain representation as a
     // field: written directly rather than through `_update()`, which would
     // rebuild the definition's evaluate handler for a one-string change.

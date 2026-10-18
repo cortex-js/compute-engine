@@ -135,18 +135,24 @@ describe('SQRT OF A NEGATIVE INTEGER OVER AN INTEGER', () => {
 // The numeric value takes the square factors out of the imaginary radical,
 // as it does for a real radical, and goes to the float lane when the
 // square-free part is still at least 10⁶. `evaluate()` of the expression
-// keeps the radical symbolic (`Multiply(1/3, Sqrt(-52000000))`), so the
-// exact reduction is checked on the numeric value itself.
+// takes the same square factors out, as it does for `Sqrt(52000000)/3`.
 describe('SQRT OF A LARGE NEGATIVE INTEGER OVER AN INTEGER', () => {
   test('Sqrt(-52000000)/3 = (2000√13/3)·i: the square factor 2000² comes out', () => {
-    const v = ce.number(
-      ce._numericValue({ rational: [1, 3], radical: -52000000 })
-    );
-    expect(v.json).toEqual([
+    const json = [
       'Complex',
       0,
       ['Multiply', ['Rational', 2000, 3], ['Sqrt', 13]],
-    ]);
+    ];
+    const v = ce.number(
+      ce._numericValue({ rational: [1, 3], radical: -52000000 })
+    );
+    expect(v.json).toEqual(json);
+    expect(ce.expr(['Divide', ['Sqrt', -52000000], 3]).evaluate().json).toEqual(
+      json
+    );
+    expect(ce.parse('\\frac{\\sqrt{-52000000}}{3}').evaluate().json).toEqual(
+      json
+    );
     const n = ce.expr(['Divide', ['Sqrt', -52000000], 3]).N() as any;
     expect(n.re).toBe(0);
     expect(n.im).toBeCloseTo((2000 * Math.sqrt(13)) / 3, 9);
@@ -162,5 +168,61 @@ describe('SQRT OF A LARGE NEGATIVE INTEGER OVER AN INTEGER', () => {
     const n = e.N() as any;
     expect(n.re).toBe(0);
     expect(n.im).toBeCloseTo(Math.sqrt(1000003) / 3, 9);
+  });
+
+  test('2·Sqrt(-1000003) stays a product: the radical has no exact numeric value', () => {
+    const e = ce.expr(['Multiply', 2, ['Sqrt', -1000003]]);
+    expect(e.evaluate().json).toEqual(['Multiply', 2, ['Sqrt', -1000003]]);
+    const n = e.N() as any;
+    expect(n.re).toBe(0);
+    expect(n.im).toBeCloseTo(2 * Math.sqrt(1000003), 9);
+  });
+
+  test('Sqrt(-52000000)·x = 2000√13·i·x', () => {
+    expect(
+      ce.expr(['Multiply', ['Sqrt', -52000000], 'x']).evaluate().json
+    ).toEqual([
+      'Multiply',
+      ['Complex', 0, ['Multiply', 2000, ['Sqrt', 13]]],
+      'x',
+    ]);
+  });
+});
+
+// An integer coefficient on a negative radical folds into one exact imaginary
+// value, as the rational coefficient of `Sqrt(-13)/3` does. Reference values
+// are Python `decimal`: 2000·√13 = 7211.10255092797858623844253494 and
+// √26 = 5.09901951359278483002822410902.
+describe('AN INTEGER TIMES THE SQRT OF A NEGATIVE INTEGER', () => {
+  const twoThousandRoot13 = ['Complex', 0, ['Multiply', 2000, ['Sqrt', 13]]];
+
+  test('Sqrt(-13)·Sqrt(4000000) = 2000√13·i', () => {
+    const e = ce.expr(['Multiply', ['Sqrt', -13], ['Sqrt', 4000000]]);
+    expect(e.evaluate().json).toEqual(twoThousandRoot13);
+    expect(e.simplify().json).toEqual(twoThousandRoot13);
+    const n = e.N() as any;
+    expect(n.re).toBe(0);
+    expect(n.im).toBeCloseTo(7211.102550927978586, 10);
+  });
+
+  test('2000·Sqrt(-13) = 2000√13·i (box and parse routes)', () => {
+    expect(ce.expr(['Multiply', 2000, ['Sqrt', -13]]).evaluate().json).toEqual(
+      twoThousandRoot13
+    );
+    expect(ce.parse('2000\\sqrt{-13}').evaluate().json).toEqual(
+      twoThousandRoot13
+    );
+  });
+
+  test('Sqrt(-13)·Sqrt(2) = √26·i', () => {
+    const e = ce.expr(['Multiply', ['Sqrt', -13], ['Sqrt', 2]]);
+    expect(e.evaluate().json).toEqual(['Complex', 0, ['Sqrt', 26]]);
+    expect((e.N() as any).im).toBeCloseTo(5.09901951359278483, 13);
+  });
+
+  test('Sqrt(-13)·Sqrt(-13) = -13', () => {
+    expect(
+      ce.expr(['Multiply', ['Sqrt', -13], ['Sqrt', -13]]).evaluate().json
+    ).toEqual(-13);
   });
 });

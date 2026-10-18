@@ -1891,11 +1891,13 @@ export function isSubtype(
       // and its only value `[]` has length 0. So it is a subtype of a list
       // type whose first axis has length 0: `[]` is a value of
       // `list<integer^0>`, and of `list<integer^(0x2)>` (a matrix with no
-      // rows).
+      // rows). A one-axis list of any length (`list<integer^?>`, the `-1`
+      // wildcard) admits the length 0 as well.
       if (
         !lhs.dimensions &&
         lhs.elements === 'never' &&
-        rhs.dimensions[0] === 0
+        (rhs.dimensions[0] === 0 ||
+          (rhs.dimensions[0] === -1 && rhs.dimensions.length === 1))
       )
         return true;
       // If rhs has some dimensions, lhs must have dimensions as well

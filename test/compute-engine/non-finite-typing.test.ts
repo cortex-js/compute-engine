@@ -282,8 +282,12 @@ describe('NON-FINITE TYPING CONVENTION', () => {
     test('√(−∞) = i·∞ = ~oo claims number, not complex', () =>
       expect(typeOf(['Sqrt', 'NegativeInfinity'])).toBe('number'));
 
-    test('Round of ~oo is a boxing error (Phase F extended-real carrier)', () =>
-      expect(ce.box(['Round', 'ComplexInfinity'] as any).isValid).toBe(false));
+    // `~oo` is in the carrier of the rounding family since 2026-10-17:
+    // `Round(~oo)` is `~oo`, as `Round(±∞)` is `±∞`.
+    test('Round of ~oo is ~oo, typed infinity', () => {
+      expect(ce.box(['Round', 'ComplexInfinity'] as any).isValid).toBe(true);
+      expect(typeOf(['Round', 'ComplexInfinity'])).toBe('infinity');
+    });
 
     test('∞/∞ folds to the Indeterminate value, which widens to nan', () => {
       // The canonical route folds this to the `Indeterminate` VALUE, so the

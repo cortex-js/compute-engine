@@ -1612,6 +1612,27 @@ export function _discardPendingSequencesOfScope(
 }
 
 /**
+ * Refuse a base case or a recurrence for `name` when the binding of `name`
+ * that the sequence would replace is a constant. A complete sequence
+ * definition replaces the value of that binding with the subscript
+ * evaluator (`tryFinalizeSequence()`), so without this check `F_0 := 1` and
+ * `F_n := F_{n-1} + 1` remove the value and the constant flag of a constant
+ * `F`, while `ce.assign('F', 5)` is refused. The error is the one
+ * `ce.assign()` throws for a constant. The check runs before the pending
+ * definition is created, so a refused base case leaves nothing behind.
+ *
+ * The binding is looked up in the scope where the sequence is declared
+ * (`pendingScopeOf()`). That scope is never the system scope: a sequence
+ * definition for a library name declares a new binding that shadows the
+ * library definition, so a library constant does not block it.
+ */
+function assertNotConstant(ce: ComputeEngine, name: string): void {
+  const def = pendingScopeOf(ce, name).bindings.get(name);
+  if (def !== undefined && isValueDef(def) && def.value.isConstant)
+    throw Error(`Cannot assign a value to the constant "${name}"`);
+}
+
+/**
  * Add a base case for a single-index sequence definition.
  * e.g., from `L_0 := 1`
  */
@@ -1621,6 +1642,7 @@ export function addSequenceBaseCase(
   index: number,
   value: Expression
 ): void {
+  assertNotConstant(ce, name);
   const pending = getOrCreatePending(ce, name);
   pending.base.set(index, value);
   tryFinalizeSequence(ce, name);
@@ -1638,6 +1660,7 @@ export function addMultiIndexBaseCase(
   key: string,
   value: Expression
 ): void {
+  assertNotConstant(ce, name);
   const pending = getOrCreatePending(ce, name);
   pending.base.set(key, value);
   pending.isMultiIndex = true;
@@ -1659,6 +1682,7 @@ export function addSequenceRecurrence(
   variable: string,
   expr: Expression
 ): void {
+  assertNotConstant(ce, name);
   const pending = getOrCreatePending(ce, name);
   // Convert to LaTeX for deferred parsing
   pending.recurrence = { variable, latex: serializeLatex(expr.json) };
@@ -1677,6 +1701,7 @@ export function addMultiIndexRecurrence(
   variables: string[],
   expr: Expression
 ): void {
+  assertNotConstant(ce, name);
   const pending = getOrCreatePending(ce, name);
   pending.recurrence = { variables, latex: serializeLatex(expr.json) };
   pending.isMultiIndex = true;

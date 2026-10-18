@@ -261,7 +261,8 @@ describe('DIMENSION VARIABLES — shapes and substitution into the result', () =
   });
 
   test('an unsolved dimension in the result reads as its bound', () => {
-    expect(ce.box(['len', 'w']).type.toString()).toBe('integer<1..>');
+    // A length is a non-negative integer (the empty list has length 0).
+    expect(ce.box(['len', 'w']).type.toString()).toBe('integer<0..>');
   });
 
   test('a rank-1 pattern binds the element from a rank-1 actual', () => {
@@ -328,12 +329,19 @@ describe('DIMENSION VARIABLES — a value parameter (`n: N`)', () => {
   });
 
   test('a value outside the bound is rejected at its own position', () => {
-    for (const bad of [-1, 2.5, 0]) {
+    for (const bad of [-1, 2.5]) {
       const e = ce.box(['foo', bad, L('[1,2,3]')]);
       expect(e.isValid).toBe(false);
       expect(e.op1.isValid).toBe(false);
       expect(e.op2.isValid).toBe(true);
     }
+  });
+
+  test('the length 0 is a length: a disagreeing list is the operand rejected', () => {
+    const e = ce.box(['foo', 0, L('[1,2,3]')]);
+    expect(e.isValid).toBe(false);
+    expect(e.op1.isValid).toBe(true);
+    expect(e.op2.isValid).toBe(false);
   });
 
   test('a declared bound is checked against the solved length', () => {
@@ -363,9 +371,9 @@ describe('DIMENSION VARIABLES — a nominal type with a length parameter', () =>
 
   test('an unknown length reads as the family of all lengths, and re-parses', () => {
     const p = ce.box(['permutation', 'w']);
-    expect(p.type.toString()).toBe('permutation<integer<1..>>');
-    expect(ce.type('permutation<integer<1..>>').toString()).toBe(
-      'permutation<integer<1..>>'
+    expect(p.type.toString()).toBe('permutation<integer<0..>>');
+    expect(ce.type('permutation<integer<0..>>').toString()).toBe(
+      'permutation<integer<0..>>'
     );
   });
 
@@ -513,20 +521,28 @@ describe('DIMENSION VARIABLES — review follow-ups (2026-09-29)', () => {
     ).not.toThrow();
   });
 
-  test('an explicit length bound restricts the positive-length bound, it does not replace it', () => {
+  test('an explicit length bound restricts the non-negative length bound, it does not replace it', () => {
     const ce = fresh();
     ce.declareType('perm', 'list<integer^N>', { typeParams: ['N: integer'] });
     ce.declareType('mid', 'list<integer^N>', {
       typeParams: ['N: integer<-5..5>'],
     });
-    for (const t of ['perm<0>', 'perm<-2>', 'perm<integer>', 'mid<0>', 'mid<6>'])
+    for (const t of [
+      'perm<-1>',
+      'perm<-2>',
+      'perm<integer>',
+      'mid<-1>',
+      'mid<6>',
+    ])
       expect(() => ce.type(t)).toThrow('type-argument-kind');
+    expect(ce.type('perm<0>').toString()).toBe('perm<0>');
     expect(ce.type('perm<3>').toString()).toBe('perm<3>');
-    expect(ce.type('mid<integer<1..5>>').toString()).toBe('mid<integer<1..5>>');
-    // An unsolved application reads as the positive part of the bound, and
-    // that printed form is itself admitted.
+    expect(ce.type('mid<0>').toString()).toBe('mid<0>');
+    expect(ce.type('mid<integer<0..5>>').toString()).toBe('mid<integer<0..5>>');
+    // An unsolved application reads as the non-negative part of the bound,
+    // and that printed form is itself admitted.
     ce.declare('w', 'list<integer>');
-    expect(ce.box(['perm', 'w']).type.toString()).toBe('perm<integer<1..>>');
+    expect(ce.box(['perm', 'w']).type.toString()).toBe('perm<integer<0..>>');
     // A clause variable is compared by the positive part of both bounds.
     expect(() => declare(ce, 'mk', '(n: N) -> mid<N> where N')).toThrow(
       'generic-alias-bound'
@@ -535,16 +551,17 @@ describe('DIMENSION VARIABLES — review follow-ups (2026-09-29)', () => {
       declare(ce, 'mk2', '(n: N) -> mid<N> where N: integer<-3..5>')
     ).not.toThrow();
     // A signature whose length bound is `integer` reads an unsolved length
-    // as `integer<1..>`.
+    // as `integer<0..>`.
     declare(ce, 'len', '(x: list<T^N>) -> N where T, N: integer');
-    expect(ce.box(['len', 'w']).type.toString()).toBe('integer<1..>');
+    expect(ce.box(['len', 'w']).type.toString()).toBe('integer<0..>');
   });
 
   test('a length bound spelled by a transparent alias is the bound it names', () => {
-    // The positive part of a bound that only partly overlaps `integer<1..>`
-    // is computed from the interval of the bound. A reference to an alias
-    // has no interval, so the bound `Small` was `never` and refused every
-    // length, where `integer<-5..5>` written inline admits 1 to 5.
+    // The non-negative part of a bound that only partly overlaps
+    // `integer<0..>` is computed from the interval of the bound. A reference
+    // to an alias has no interval, so the bound `Small` was `never` and
+    // refused every length, where `integer<-5..5>` written inline admits 0
+    // to 5.
     const ce = fresh();
     ce.declareType('Small', 'integer<-5..5>', { alias: true });
     declare(ce, 'zs', '(n: N, x: vector<T^N>) -> T where T, N: Small');
@@ -553,7 +570,8 @@ describe('DIMENSION VARIABLES — review follow-ups (2026-09-29)', () => {
     expect(ce.box(['zs', 6, ce.parse('[1,2,3,4,5,6]')]).isValid).toBe(false);
     ce.declareType('mid', 'list<integer^N>', { typeParams: ['N: Small'] });
     expect(ce.type('mid<3>').toString()).toBe('mid<3>');
-    for (const t of ['mid<0>', 'mid<6>'])
+    expect(ce.type('mid<0>').toString()).toBe('mid<0>');
+    for (const t of ['mid<-1>', 'mid<6>'])
       expect(() => ce.type(t)).toThrow('type-argument-kind');
   });
 
@@ -574,13 +592,14 @@ describe('DIMENSION VARIABLES — review follow-ups (2026-09-29)', () => {
     expect(errorOf(e)).toContain("'vector<integer^3>'");
   });
 
-  test('`where N: integer` still admits no zero length', () => {
+  test('`where N: integer` admits the length 0 but no negative length', () => {
     const ce = fresh();
     declare(ce, 'zi', '(n: N, x: vector<T^N>) -> T where T, N: integer');
-    const e = ce.box(['zi', 0, ce.parse('[1,2,3]')]);
+    const e = ce.box(['zi', -1, ce.parse('[1,2,3]')]);
     expect(e.isValid).toBe(false);
     expect(e.op1.isValid).toBe(false);
     expect(e.op2.isValid).toBe(true);
+    expect(ce.box(['zi', 0, ce.parse('[]')]).isValid).toBe(true);
   });
 
   test("a sum type decides a shared parameter's kind before any variant is declared", () => {
@@ -626,7 +645,7 @@ describe('DIMENSION VARIABLES — a nested list spelling reads as its flat shape
     expect(ce.box(['rows', 'nl']).type.toString()).toBe('2');
     expect(ce.box(['cols', 'nl']).type.toString()).toBe('3');
     // An outer list with no length pins only the row length.
-    expect(ce.box(['rows', 'nu']).type.toString()).toBe('integer<1..>');
+    expect(ce.box(['rows', 'nu']).type.toString()).toBe('integer<0..>');
     expect(ce.box(['cols', 'nu']).type.toString()).toBe('3');
   });
 

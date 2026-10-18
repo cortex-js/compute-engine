@@ -2311,3 +2311,95 @@ describe('SEQUENCE SCOPE: a pending definition belongs to one binding', () => {
     expect(ce.getSequenceStatus('N').status).toBe('not-a-sequence');
   });
 });
+
+describe('SEQUENCE DEFINITION: a constant is not replaced by a sequence', () => {
+  // A complete sequence definition replaces the value of the binding with
+  // the subscript evaluator. On a constant this is refused, with the error
+  // that `ce.assign()` gives, and the constant keeps its value.
+
+  function constantF(): ComputeEngine {
+    const ce = new ComputeEngine();
+    ce.declare('F', { value: 3, isConstant: true });
+    return ce;
+  }
+
+  function expectConstantKept(ce: ComputeEngine): void {
+    expect(ce.parse('F').evaluate().json).toBe(3);
+    expect(ce.box('F').isConstant).toBe(true);
+    expect(ce.isSequence('F')).toBe(false);
+    expect(ce.getSequenceStatus('F').status).toBe('not-a-sequence');
+  }
+
+  test('ce.assign() refuses a constant', () => {
+    const ce = constantF();
+    expect(() => ce.assign('F', 5)).toThrow(
+      'Cannot assign a value to the constant "F"'
+    );
+  });
+
+  test('a base case is refused on the parse route', () => {
+    const ce = constantF();
+    expect(() => ce.parse('F_0 := 1').evaluate()).toThrow(
+      'Cannot assign a value to the constant "F"'
+    );
+    expectConstantKept(ce);
+  });
+
+  test('a recurrence is refused on the parse route', () => {
+    const ce = constantF();
+    expect(() => ce.parse('F_n := F_{n-1} + 1').evaluate()).toThrow(
+      'Cannot assign a value to the constant "F"'
+    );
+    expect(() => ce.parse('F_0 := 1').evaluate()).toThrow(
+      'Cannot assign a value to the constant "F"'
+    );
+    expectConstantKept(ce);
+  });
+
+  test('a base case and a recurrence are refused on the box route', () => {
+    const ce = constantF();
+    expect(() =>
+      ce.box(['Assign', ['Subscript', 'F', 0], 1]).evaluate()
+    ).toThrow('Cannot assign a value to the constant "F"');
+    expect(() =>
+      ce
+        .box([
+          'Assign',
+          ['Subscript', 'F', 'n'],
+          ['Add', ['Subscript', 'F', ['Subtract', 'n', 1]], 1],
+        ])
+        .evaluate()
+    ).toThrow('Cannot assign a value to the constant "F"');
+    expectConstantKept(ce);
+  });
+
+  test('a multi-index base case and recurrence are refused', () => {
+    const ce = constantF();
+    expect(() => ce.parse('F_{0,0} := 1').evaluate()).toThrow(
+      'Cannot assign a value to the constant "F"'
+    );
+    expect(() =>
+      ce.parse('F_{n,k} := F_{n-1,k-1} + F_{n-1,k}').evaluate()
+    ).toThrow('Cannot assign a value to the constant "F"');
+    expectConstantKept(ce);
+  });
+
+  test('a base case in a child scope is refused on a constant of the enclosing scope', () => {
+    const ce = constantF();
+    ce.pushScope();
+    expect(() => ce.parse('F_0 := 1').evaluate()).toThrow(
+      'Cannot assign a value to the constant "F"'
+    );
+    ce.popScope();
+    expectConstantKept(ce);
+  });
+
+  test('a variable with a value still becomes a sequence', () => {
+    const ce = new ComputeEngine();
+    ce.declare('F', { value: 3 });
+    ce.parse('F_0 := 1').evaluate();
+    ce.parse('F_n := F_{n-1} + 1').evaluate();
+    expect(ce.isSequence('F')).toBe(true);
+    expect(ce.parse('F_3').evaluate().json).toBe(4);
+  });
+});

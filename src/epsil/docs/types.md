@@ -798,7 +798,8 @@ expected `vector<real^3>`, got `vector<integer^2>`.
 An argument whose type states no length — a symbol declared `list<real>` —
 is accepted and checked when the value is known, as it is at a literal length
 such as `vector<real^3>`. A length variable may carry an integer bound (`where
-N: integer<2..>`); its default is `integer<1..>`. A named type may take a
+N: integer<2..>`); its default is `integer<0..>`, since the empty list has
+length 0. A named type may take a
 length parameter too: `type perm<N> = list<integer^N>` makes `perm([2, 1,
 3])` a `perm<3>`, and `perm<3>` and `perm<4>` are different types. Arithmetic
 between lengths (`^(M+N)`) is not supported.

@@ -67,8 +67,9 @@ export type TypeVariableErrorCode =
    * clause declares — or the `out` a missing marker declares (§4.4). */
   | 'variance-violation'
   /** A dimension variable (one that occurs in a length slot, `list<T^N>`)
-   * declared with a bound that is not an integer type: a length is a positive
-   * integer, so `where N: string` or `where N: real` can never be met. */
+   * declared with a bound that is not an integer type: a length is a
+   * non-negative integer, so `where N: string` or `where N: real` can never be
+   * met. */
   | 'dimension-bound-not-integer'
   /** A value variable (a length, `list<T^N>`) with an `is` protocol slot: a
    * value is not a type that could conform to a protocol. */
@@ -511,10 +512,10 @@ export function substituteTypeVariables(
  * The length slots of a list pattern after substitution, or `undefined` when
  * no dimension variable of `t` is bound.
  *
- * A dimension variable bound to a value-literal type holding a positive
+ * A dimension variable bound to a value-literal type holding a non-negative
  * integer becomes that length; one bound to another variable (a renaming, as
  * `markDimensionVariables` does) keeps the slot open under the new name; any
- * other binding — the S3 fallback `integer<1..>`, the display `unknown` — is
+ * other binding — the S3 fallback `integer<0..>`, the display `unknown` — is
  * "length not known", so the slot stays `-1` and the name is dropped.
  */
 function substituteDimensions(
@@ -554,22 +555,25 @@ function substituteDimensions(
 /**
  * The bound a value variable carries when its clause declares none. Today
  * every value variable is a LENGTH (it occurs in a length slot or fills a
- * nominal type's length parameter), and a length is a positive integer; a
- * future boolean or string parameter will declare its own bound.
+ * nominal type's length parameter), and a length is a non-negative integer:
+ * the empty list has length 0, so `permutation([])` at
+ * `type permutation<N> = list<integer^N>` is a `permutation<0>`. A future
+ * boolean or string parameter will declare its own bound.
  */
 export const LENGTH_BOUND: Type = Object.freeze({
   kind: 'numeric',
   type: 'integer',
-  lower: 1,
+  lower: 0,
 }) as Type;
 
 /**
  * The values a length variable whose clause declares `bound` can take: the
- * members of `bound` that are positive integers. An explicit bound restricts
- * {@link LENGTH_BOUND}, it does not replace it, so `where N: integer` admits
- * `1, 2, …` and never `0`: its effective bound is `integer<1..>`, and
- * `integer<-5..5>` is `integer<1..5>`. A bound with no positive member is
- * `never`. `undefined` (no declared bound) is `LENGTH_BOUND` itself.
+ * members of `bound` that are non-negative integers. An explicit bound
+ * restricts {@link LENGTH_BOUND}, it does not replace it, so `where N:
+ * integer` admits `0, 1, 2, …` and never a negative integer: its effective
+ * bound is `integer<0..>`, and `integer<-5..5>` is `integer<0..5>`. A bound
+ * with no non-negative member is `never`. `undefined` (no declared bound) is
+ * `LENGTH_BOUND` itself.
  */
 export function lengthBoundOf(bound: Type | undefined): Type {
   if (bound === undefined) return LENGTH_BOUND;
@@ -647,11 +651,11 @@ export function pinnedValueOf(t: Type): unknown {
 
 /**
  * The LENGTH a type pins, when it pins one: {@link pinnedValueOf} restricted
- * to a positive integer, which is what a length slot can hold.
+ * to a non-negative integer, which is what a length slot can hold.
  */
 export function dimensionOf(t: Type): number | undefined {
   const v = pinnedValueOf(t);
-  return typeof v === 'number' && Number.isInteger(v) && v > 0 ? v : undefined;
+  return typeof v === 'number' && Number.isInteger(v) && v >= 0 ? v : undefined;
 }
 
 /** The value-literal type that pins the value `v` (a length `n` is `{ kind:
@@ -830,8 +834,8 @@ function validatePolytypeArm(
  * A value variable stands for a value, not a type: it cannot conform to a
  * protocol. Every value variable today is a LENGTH, so its bound, when
  * written, must be an integer type (`where N: integer<2..>`); the solver
- * further requires every pin to be a positive integer, so `where N: integer`
- * is accepted and admits `1, 2, …` but never `0`.
+ * further requires every pin to be a non-negative integer, so `where N:
+ * integer` is accepted and admits `0, 1, 2, …` but never a negative integer.
  */
 export function validateValueParameters(
   typeParams: readonly TypeParameter[],
@@ -851,7 +855,7 @@ export function validateValueParameters(
     )
       fail(
         'dimension-bound-not-integer',
-        `The bound of the dimension variable \`${p.name}\` must be an integer type, but is \`${typeToString(p.bound)}\`: a length is a positive integer`
+        `The bound of the dimension variable \`${p.name}\` must be an integer type, but is \`${typeToString(p.bound)}\`: a length is a non-negative integer`
       );
   }
 }
@@ -1294,17 +1298,17 @@ interface SolverState {
 /**
  * Pin the value variable `name` to `value` at `index`, or refuse.
  *
- * A pin must be a positive integer — every value variable today is a length,
- * and `where N: integer` must not let `0` into a length slot; a value that is
- * not one pins nothing, and the post-solve gate reports it against the
- * pinned-elsewhere value or the bound (`foo(0, [1,2,3])` is rejected on `0`).
- * A positive integer OUTSIDE the variable's declared bound pins nothing
- * either, so a mismatch never propagates from an inadmissible pin and never
- * blames the operand that was right; but it is a bound violation of its own
- * position, recorded as a `'bound'` failure there — otherwise a lone
+ * A pin must be a non-negative integer — every value variable today is a
+ * length, and `where N: integer` must not let `-1` into a length slot; a value
+ * that is not one pins nothing, and the post-solve gate reports it against the
+ * pinned-elsewhere value or the bound (`foo(-1, [1,2,3])` is rejected on
+ * `-1`). A non-negative integer OUTSIDE the variable's declared bound pins
+ * nothing either, so a mismatch never propagates from an inadmissible pin and
+ * never blames the operand that was right; but it is a bound violation of its
+ * own position, recorded as a `'bound'` failure there — otherwise a lone
  * out-of-bound operand (`big([1])` at `vector<number^N> where N:
  * integer<2..>`) would leave `N` unsolved and be admitted at the open
- * pattern. The positive-integer requirement is the one to relax when a
+ * pattern. The non-negative-integer requirement is the one to relax when a
  * boolean or string value parameter arrives.
  */
 function pinValue(
@@ -1451,7 +1455,7 @@ export function solveTypeArguments(
   const unbound = new Set<string>();
   for (const p of params) {
     // A VALUE variable is pinned by equality: the literal it was read from, or
-    // its bound (`integer<1..>` for a length) when no position pinned it.
+    // its bound (`integer<0..>` for a length) when no position pinned it.
     if (s.valueParams.has(p.name)) {
       const pinned = s.values.get(p.name);
       bindings[p.name] =
@@ -1480,7 +1484,7 @@ export function solveTypeArguments(
   const failures: TypeInferenceFailure[] = [...s.valueFailures];
   for (const p of params) {
     // A pinned VALUE variable must satisfy its bound (`where N: integer<2..>`,
-    // or the length default `integer<1..>`); the blamed position is the one
+    // or the length default `integer<0..>`); the blamed position is the one
     // that pinned it.
     if (s.valueParams.has(p.name)) {
       const pinned = s.values.get(p.name);
@@ -1963,7 +1967,7 @@ function skeleton(t: Type, covariant: boolean, membership: boolean): Type {
   switch (t.kind) {
     case 'variable':
       // A VALUE variable at a type position admits the values of its bound
-      // (a length: `integer<1..>`), not every type.
+      // (a length: `integer<0..>`), not every type.
       if (t.value === true) return covariant ? LENGTH_BOUND : 'never';
       return covariant ? 'any' : 'never';
     case 'signature': {
@@ -2548,7 +2552,9 @@ function walkPattern(
       // `matrix<integer^(2x3)>`) is read as the flat shape when the pattern
       // states more axes than the actual (`flattenNestedListType`), so that
       // `cols(nl)` with `nl: list<vector<integer^3>^2>` pins `N` to 3, as
-      // the flat spelling does.
+      // the flat spelling does. A list whose element type is `never` (the
+      // type of the empty list `[]`, which states no dimensions) can hold no
+      // element, so its outer length is 0.
       if (
         pattern.kind === 'list' &&
         pattern.dimensions !== undefined &&
@@ -2572,9 +2578,19 @@ function walkPattern(
           const name = names[i];
           if (name === undefined) continue;
           const d = dims[i];
-          if (Number.isInteger(d) && d > 0) pinValue(s, name, d, index);
+          if (Number.isInteger(d) && d >= 0) pinValue(s, name, d, index);
         }
-      }
+      } else if (
+        phase === 'lower' &&
+        covariant &&
+        pattern.kind === 'list' &&
+        pattern.dimensionVariables?.[0] !== undefined &&
+        typeof actual === 'object' &&
+        actual.kind === 'list' &&
+        actual.dimensions === undefined &&
+        actual.elements === 'never'
+      )
+        pinValue(s, pattern.dimensionVariables[0], 0, index);
       // The element position of a DIMENSIONED pattern is what remains after
       // peeling as many axes as the pattern states: `matrix<T^(MxN)>` — and
       // the ground `matrix<T>`, whose axes are `[-1, -1]` — binds `T` to the

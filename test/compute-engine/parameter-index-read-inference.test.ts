@@ -244,8 +244,9 @@ describe('an index-read tuple does not fix the length', () => {
       ['Floor', ['At', 'p', 2]],
     ]);
     expect(fn.isValid).toBe(true);
+    // The carrier of `Floor` is `real | signed_infinity | ~oo`.
     expect(fn.type.toString()).toMatch(
-      /^\(p: tuple<real \| signed_infinity, real \| signed_infinity>\) ->/
+      /^\(p: tuple<real \| signed_infinity \| ~oo, real \| signed_infinity \| ~oo>\) ->/
     );
   });
 
@@ -257,12 +258,12 @@ describe('an index-read tuple does not fix the length', () => {
     ]);
     expect(fn.isValid).toBe(true);
     expect(fn.type.toString()).toBe(
-      '(p: tuple<real | signed_infinity, real | signed_infinity>) -> number'
+      '(p: tuple<real | signed_infinity | ~oo, real | signed_infinity | ~oo>) -> number'
     );
     ce.assign('h', fn);
     ce.box(['h', 'zs']);
     expect(ce.symbol('zs').type.toString()).toBe(
-      'tuple<real | signed_infinity, real | signed_infinity>'
+      'tuple<real | signed_infinity | ~oo, real | signed_infinity | ~oo>'
     );
   });
 

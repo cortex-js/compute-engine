@@ -242,7 +242,7 @@ function widenNode(
         // A VALUE parameter's argument is the value itself (`permutation<3>`
         // is a permutation of length exactly 3, and `3` is its only
         // spelling): widening it to its tier would turn the application into
-        // a family (`permutation<integer<1..>>`) — a different, wider type.
+        // a family (`permutation<integer<0..>>`) — a different, wider type.
         if (params?.[i]?.kind === 'value') return x;
         const variance = subtypingVarianceOf(t, i);
         if (variance === 'inout') return x;

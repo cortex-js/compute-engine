@@ -603,7 +603,7 @@ export class TypeBuilder implements ASTVisitor<Type> {
         // this use makes a value variable of ITS clause (`(p: permutation<N>)
         // -> … where N`).
         if (typeof arg === 'object' && arg.kind === 'variable') {
-          // A7 for a value parameter: the variable's own bound (`integer<1..>`
+          // A7 for a value parameter: the variable's own bound (`integer<0..>`
           // when its clause declares none) must satisfy the parameter's, or a
           // call could instantiate an application the builder itself refuses
           // (`(n: N) -> big<N> where N` with `big<N: integer<2..>>`, called
@@ -619,11 +619,11 @@ export class TypeBuilder implements ASTVisitor<Type> {
           arg = { kind: 'variable', name: arg.name, value: true };
         } else {
           // A value (`permutation<3>`), or a FAMILY of values written as a
-          // type within the bound (`permutation<integer<1..>>`, which is how
+          // type within the bound (`permutation<integer<0..>>`, which is how
           // an application whose length was never solved prints): anything
           // else is a type where a value belongs. An explicit bound
-          // restricts the positive-length bound, it does not replace it:
-          // `perm<0>` is refused under `N: integer` too.
+          // restricts the non-negative length bound, it does not replace it:
+          // `perm<-1>` is refused under `N: integer` too.
           const bound = lengthBoundOf(param.bound);
           if (!satisfiesTypeBound(arg, bound))
             fail(

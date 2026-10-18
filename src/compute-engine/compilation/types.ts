@@ -977,6 +977,11 @@ export interface CompileTarget<Expr = unknown> {
    * Defaults to enabled. Turn it off to inspect the structural lowering of a
    * constant expression (codegen tests do this) or to keep compile time
    * strictly proportional to expression size.
+   *
+   * A function whose result jumps at a point (`Floor`, `Fract`, `Mod`, the
+   * comparisons, …) applied to closed exact operands is folded also when
+   * this is `false`: its structural code computes the operands as doubles,
+   * and a double can be on the other side of the jump from the exact value.
    */
   constantFold?: boolean;
 
@@ -2167,6 +2172,14 @@ export interface CompilationOptions<Expr = unknown> {
    *
    * `false` disables folding — use it to inspect the structural lowering of a
    * constant expression (codegen tests do this).
+   *
+   * One exception: a function whose result jumps at a point (`Floor`, `Ceil`,
+   * `Round`, `Truncate`, `Fract`, `Mod`, `Remainder`, `Chop`, `Sign`,
+   * `Heaviside`, the comparisons) applied to closed exact operands is folded
+   * also when this is `false`. Its structural code would compute the operands
+   * as doubles, and a double can be on the other side of the jump:
+   * `Floor((25! − 1)/24!)` compiles to `24`, the interpreter's value, where
+   * the structural code gives `25`.
    */
   constantFold?: boolean;
 

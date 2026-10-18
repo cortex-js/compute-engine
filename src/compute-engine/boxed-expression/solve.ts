@@ -297,7 +297,8 @@ export const UNIVARIATE_ROOTS: Rule[] = [
     // `x^n` takes the same value at `x` and `-x` when `n` is an even integer,
     // or a fraction `p/q` with `p` even and `q` odd: the engine gives the
     // real value `(-8)^(2/3) = 4`. Thus `x^(2/3) = 4` has the roots `8` and
-    // `-8`.
+    // `-8`. A float exponent with an even integer value, such as `2.0`, is
+    // even too (`isEven`): `x^{2.0} = 4` has the roots `2.0` and `-2.0`.
     condition: (sub: BoxedSubstitution) =>
       filter(sub) &&
       !sub._n.isSame(0) &&
@@ -1127,17 +1128,20 @@ function hostSolveRules(rules: SolveRuleSet): {
 /**
  * The ids of the built-in root templates that read the exponent of a power
  * of the unknown as an integer degree: the quadratic templates match the
- * literal `Power(_x, 2)`, and `solve.power-negative-root` reads the parity of
- * the exponent (an even `n` gives the root `-x` beside `x`). A float exponent
- * is not an integer degree, so these templates are left out when the
- * equation has one (`hasFloatPowerOfUnknown`).
+ * literal `Power(_x, 2)`. A float exponent is not an integer degree, so these
+ * templates are left out when the equation has one
+ * (`hasFloatPowerOfUnknown`).
+ *
+ * `solve.power-negative-root` is not in this list. It reads only the parity
+ * of the exponent, and an integer-valued float exponent has a parity:
+ * `(-2.0)^{2.0}` evaluates to `4`, thus `x^{2.0} = 4` has the roots `2.0`
+ * and `-2.0`, as `x^2 = 4` has the roots `2` and `-2`.
  */
 const DEGREE_TEMPLATE_IDS: ReadonlySet<string> = new Set([
   'solve.quadratic-no-constant-zero',
   'solve.quadratic-no-constant',
   'solve.quadratic-formula-positive',
   'solve.quadratic-formula-negative',
-  'solve.power-negative-root',
 ]);
 
 /** The rule set `rules` without the templates whose ids are in `ids`. */
@@ -1177,7 +1181,8 @@ function withoutTemplates(
  * `x^{2.0} + 3x + 2 = 0` was solved as the quadratic `x^2 + 3x + 2 = 0`.
  * The general power template `solve.power` does not read a degree and is
  * kept: its root `(-b/a)^(1/n)` is a float for a float `n`, so `x^{2.0} = 4`
- * has the float root `2.0`.
+ * has the float root `2.0`. The template `solve.power-negative-root` is kept
+ * too: it reads only the parity of `n`, and gives the second root `-2.0`.
  */
 function hasFloatPowerOfUnknown(expr: Expression): boolean {
   if (!isFunction(expr)) return false;
@@ -3223,6 +3228,131 @@ function solveSingleExponential(
 
 /**
  * The candidate roots of `expr = 0` when exactly one term of `expr` contains
+ * the unknown `x` and that term is a power with a float exponent times a
+ * constant `k`: `k·B(x)^n + c = 0`, where `n` is a float such as `2.0`,
+ * `2.5` or `-0.5`. The root templates match only a power of `x` itself with
+ * a positive exponent, and the polynomial steps do not read a float exponent
+ * as a degree: before, `x^{-0.5} = 4` and `(x + 1)^{2.0} = 4` gave no root.
+ *
+ * - A negative exponent `n` is changed to the positive exponent `m = -n`:
+ *   `B^n = -c/k` is the same as `B^m = -k/c`, because `B^n = 1/B^m` and
+ *   `B^n` is never `0`. Thus `x^{-0.5} = 4` gives `x^{0.5} = 1/4`. When
+ *   `c` is `0`, the strategy does not apply.
+ * - When `B` is `x`, `x^m = r` is solved by the root templates.
+ * - When `B` is not `x`, the base is replaced by a new unknown `u`:
+ *   `u^m = r` is solved by the root templates, then each root `u₀` gives
+ *   the equation `B(x) = u₀`. `(x + 1)^{2.0} = 4` gives `u = ±2.0`, then
+ *   `x = 1.0` and `x = -3.0`.
+ *
+ * The candidate roots are checked against the original equation by the
+ * caller. Returns `null` when `expr` does not have this form, or when no
+ * candidate root is found. `stats.partial`, `stats.undecided` and
+ * `stats.userRule` are set from the solution of the equations in `u` and in
+ * `x`; `stats.partial` is also set when an equation `B(x) = u₀` gives no root
+ * and it is not shown to have none (`factorHasNoRoot()`).
+ */
+function solveScaledFloatPower(
+  expr: Expression,
+  x: string,
+  depth: number,
+  stats?: RootStats
+): ReadonlyArray<Expression> | null {
+  if (depth > 2) return null;
+  const ce = expr.engine;
+  const split = splitScaledTerm(expr, x);
+  if (split === null) return null;
+  const { k, f, c } = split;
+  if (!isFunction(f, 'Power')) return null;
+  const base = f.op1;
+  const n = f.op2;
+  if (!base.has(x) || !isNumber(n) || n.isExact || n.isSame(0)) return null;
+  const negative = n.isNegative === true;
+  // A power of `x` itself with a positive exponent is solved by the root
+  // templates.
+  if (isSymbol(base, x) && !negative) return null;
+  // The test that `c` is 0 is exact: `.is(0)` compares an exact number with
+  // 0 within the engine tolerance, and refused `x^{-0.5} = 10^{-30}`, whose
+  // root is `10^{60}`. A number literal is compared with `isSame()`. Another
+  // constant is not 0 when its sign is known (`π/10^{40}` is positive);
+  // otherwise `.is(0)` is the test.
+  if (negative) {
+    const s = c.sgn;
+    const mayBeZero = isNumber(c)
+      ? c.isSame(0)
+      : s !== 'positive' &&
+        s !== 'negative' &&
+        s !== 'not-zero' &&
+        c.is(0) !== false;
+    if (mayBeZero) return null;
+  }
+  const m = negative ? n.neg() : n;
+  const value = negative
+    ? ce.function('Divide', [ce.function('Negate', [k]), c])
+    : ce.function('Divide', [ce.function('Negate', [c]), k]);
+
+  const combined = childStats();
+  let roots: Expression[] = [];
+  if (isSymbol(base, x)) {
+    const child = childStats();
+    roots = [
+      ...findUnivariateRoots(
+        ce.function('Equal', [ce.function('Power', [base, m]), value]),
+        x,
+        depth + 1,
+        undefined,
+        child
+      ),
+    ];
+    adoptChildStats(combined, child);
+  } else {
+    // `u` is declared in a new scope (see `temporaryUnknownName()`). It is
+    // declared `number`, not `real`: a root `u₀` that is not real can give
+    // a real root of `B(x) = u₀`, and the roots of the equations in `x` are
+    // filtered by the type of `x`.
+    const uName = temporaryUnknownName(expr, x);
+    if (uName === undefined) return null;
+    let uRoots: ReadonlyArray<Expression>;
+    ce.pushScope();
+    try {
+      ce.declare(uName, 'number');
+      const child = childStats();
+      uRoots = findUnivariateRoots(
+        ce.function('Equal', [
+          ce.function('Power', [ce.symbol(uName), m]),
+          value,
+        ]),
+        uName,
+        depth + 1,
+        undefined,
+        child
+      );
+      adoptChildStats(combined, child);
+    } finally {
+      ce.popScope();
+    }
+    for (const u0 of uRoots) {
+      const inverse = base.sub(u0);
+      const child = childStats();
+      const xRoots = findUnivariateRoots(
+        inverse,
+        x,
+        depth + 1,
+        undefined,
+        child
+      );
+      adoptChildStats(combined, child);
+      if (xRoots.length === 0 && !factorHasNoRoot(inverse, x, child))
+        combined.partial = true;
+      roots.push(...xRoots);
+    }
+  }
+  if (roots.length === 0) return null;
+  adoptChildStats(stats, combined);
+  return roots;
+}
+
+/**
+ * The candidate roots of `expr = 0` when exactly one term of `expr` contains
  * the unknown `x` and that term is an absolute value times a constant `k`:
  * `k·|u(x)| + c = 0`. As `|u(x)| ≥ 0`, the equation has a real root only
  * when `-c/k ≥ 0`. Then it is the same as `u(x) = -c/k` or `u(x) = c/k`,
@@ -4210,6 +4340,16 @@ export function findUnivariateRoots(
         if (roots.length === 0) noRoot = true;
         result = [...roots];
       }
+    }
+
+    // A single power of the unknown with a float exponent, times a constant:
+    // `k·B(x)^n + c = 0` with a negative `n` or a base `B` that is not `x`
+    // (`x^{-0.5} = 4`, `(x + 1)^{2.0} = 4`). The equation as it was given is
+    // used: clearing the denominator of `x^{-0.5}` gives `-4x^{0.5} + x^{0.0}`,
+    // where the float power `x^{0.0}` is not changed to `1`.
+    if (result.length === 0 && !noRoot) {
+      const roots = solveScaledFloatPower(originalExpr, x, depth, stats);
+      if (roots !== null) result = [...roots];
     }
 
     // Generator substitution: an equation that is a polynomial in a single

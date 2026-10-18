@@ -121,7 +121,10 @@ describe('the type of the step form', () => {
 
   test('the one-argument form is still integer-valued', () => {
     expect(type(['Floor', 'r'])).toBe('integer');
-    expect(type(['Ceil', 'n'])).toBe('integer | nan | signed_infinity');
+    // `n: number` may be `~oo`, and `Ceil(~oo)` is `~oo`: the claim
+    // `integer | nan | signed_infinity | ~oo` reduces to
+    // `infinity | integer | nan`.
+    expect(type(['Ceil', 'n'])).toBe('infinity | integer | nan');
     expect(type(['Truncate', 'NaN'])).toBe('nan');
   });
 

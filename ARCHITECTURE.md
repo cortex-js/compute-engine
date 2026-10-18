@@ -574,8 +574,9 @@ public API groups into:
   [`docs/CHECKPOINT-MODEL.md`](./docs/CHECKPOINT-MODEL.md).
 - **Configuration**: `precision` (default 21 significant digits; `'machine'`
   selects 64-bit float), `tolerance` (default `1e-10`), `angularUnit`
-  (default `'rad'`), `strict` (validation depth), `iterationLimit` /
-  `recursionLimit` (default 1024). Time budgets are set with `withTimeLimit`
+  (default `'rad'`), `strict` (validation depth), `iterationLimit` (default 1024),
+  `recursionLimit` (default 256; a full JavaScript stack gives the same
+  `recursion-depth-exceeded` error). Time budgets are set with `withTimeLimit`
   spans; the former global `timeLimit` property was removed (see
   `docs/TIMEOUT-MODEL.md` §5) — an evaluation with no enclosing span has no
   time budget.

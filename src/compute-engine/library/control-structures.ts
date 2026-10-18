@@ -89,6 +89,9 @@ import {
   ELEMENT_MEMO_CAP,
 } from '../boxed-expression/collection-element-memo.js';
 import { evaluateMatch } from '../boxed-expression/match-dispatch.js';
+import { isTransitivelyPure } from '../boxed-expression/transitive-purity.js';
+import { isNearTiePair } from './relational-operator.js';
+import { isExactConstantExpression } from '../boxed-expression/compare.js';
 import {
   assignLoopIndex,
   bindIndexAuthoritatively,
@@ -770,7 +773,14 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
       },
       evaluate: ([expr, cond], options) => {
         const ce = options.engine;
-        const c = cond.evaluate();
+        // The numeric request is forwarded to the guard, as the value is
+        // given it below: a comparison in the guard then reads an exact
+        // operand exactly, as at the top level (see `evaluateIf`).
+        const c = cond.evaluate(
+          options.numericApproximation
+            ? { numericApproximation: true }
+            : undefined
+        );
 
         // Desmos-style broadcast: a finite indexed collection of booleans
         // masks element-by-element (one masked branch per element). This
@@ -1488,23 +1498,77 @@ type EvaluatedCondition = { value: Expression; undecided: boolean };
  * - Anything else evaluates as before, unflagged. `Xor` and the remaining
  *   heads are not three-valued here: a NaN evidence under them is lost as
  *   it was before the ruling.
+ *
+ * `numericApproximation` is the numeric request of the `If`/`Which` that
+ * holds the condition. It is forwarded to every evaluation of the walk, so
+ * that the condition is decided as the same condition is decided at the top
+ * level under `.N()`. This matters in the body of a user function under
+ * `.N()`: a parameter is bound to the float of the argument, and only a
+ * function that jumps (a comparison, `Floor`) evaluated with the numeric
+ * request reads the exact argument again (`exactRealValueOf`,
+ * `constraint-subject.ts`). Evaluated exactly, `x < 25` for
+ * `x := (25! − 1)/24!` read the float `25` and was `False`.
  */
-function evaluateCondition(cond: Expression): EvaluatedCondition {
+function evaluateCondition(
+  cond: Expression,
+  numericApproximation?: boolean
+): EvaluatedCondition {
   const c = cond.canonical;
   const ce = c.engine;
-  if (!isFunction(c)) return { value: c.evaluate(), undecided: false };
+  const options = numericApproximation
+    ? { numericApproximation: true }
+    : undefined;
+  if (!isFunction(c)) return { value: c.evaluate(options), undecided: false };
   const op = c.operator;
 
   if (BRANCH_RELATIONS.has(op)) {
     const ops: Expression[] = [];
     for (const x of c.ops) {
-      const v = x.evaluate();
+      const v = x.evaluate(options);
       ops.push(v);
       // An error operand decides the relation (it propagates); the
       // remaining operands are not demanded.
       if (errorValue(v) !== undefined) break;
     }
-    const value = ce.function(op, ops).evaluate();
+    // Under the numeric request, the relation decides a near tie from its
+    // operands AS WRITTEN: it evaluates them again exactly (a pure
+    // expression, the recorded argument of a parameter) or compares an
+    // exact constant such as `π` by its exact form
+    // (`exactPairAtNearTie`, `relational-operator.ts`). The float of an
+    // operand has lost that information: the float of `(25! − 1)/24!` is
+    // `25`, and `25 < 25` is `False`. So an operand whose value is a float
+    // is given to the relation as written when it can change the result:
+    // its float is at a near tie with the value of an adjacent operand
+    // (`isNearTiePair`), or it is an exact constant expression, whose float
+    // can be wrong by much more than the tolerance when its terms cancel
+    // (`√(10⁶⁰ + 10⁴⁰) − 10³⁰`). The relation then evaluates it again. Two
+    // conditions keep this safe:
+    // - Every operand of the relation must be pure (`isTransitivelyPure`).
+    //   An operand with an effect is not run twice, and it can change what
+    //   another operand as written reads: with `x := 0.5` and `r()` that
+    //   assigns `x = 10` and returns 1, `x < r()` must compare `0.5 < 1`,
+    //   not `10 < 1`.
+    // - Far from a tie, the values already computed are compared. An
+    //   operand is then evaluated once only: in a recursive function such
+    //   as `g(n) := If(n < 1, 0, If(g(n − 1) > 5, 1, 2))`, a second
+    //   evaluation of `g(n − 1)` at each level can make the cost
+    //   exponential.
+    let relationOps = ops;
+    if (
+      numericApproximation &&
+      ops.length === c.nops &&
+      c.ops.every((x) => isTransitivelyPure(x))
+    ) {
+      relationOps = ops.map((v, i) =>
+        isInexactRealNumber(v) &&
+        (isExactConstantExpression(c.ops[i]) ||
+          (i > 0 && isNearTiePair(ops[i - 1], v)) ||
+          (i + 1 < ops.length && isNearTiePair(v, ops[i + 1])))
+          ? c.ops[i]
+          : v
+      );
+    }
+    const value = ce.function(op, relationOps).evaluate(options);
     const s = sym(value);
     const decided = s === 'True' || s === 'False';
     // A whole-collection comparison (two or more collection operands) answers
@@ -1524,17 +1588,33 @@ function evaluateCondition(cond: Expression): EvaluatedCondition {
     };
   }
 
-  if (op === 'And' || op === 'Or') return evaluateConnective(c, op, c.ops);
+  if (op === 'And' || op === 'Or')
+    return evaluateConnective(c, op, c.ops, numericApproximation);
   if (op === 'Nand' && c.nops >= 1)
-    return negateCondition(evaluateConnective(c, 'And', c.ops));
+    return negateCondition(
+      evaluateConnective(c, 'And', c.ops, numericApproximation)
+    );
   if (op === 'Nor' && c.nops >= 1)
-    return negateCondition(evaluateConnective(c, 'Or', c.ops));
+    return negateCondition(
+      evaluateConnective(c, 'Or', c.ops, numericApproximation)
+    );
   if (op === 'Implies' && c.nops === 2)
-    return evaluateConnective(c, 'Or', [ce.function('Not', [c.op1]), c.op2]);
+    return evaluateConnective(
+      c,
+      'Or',
+      [ce.function('Not', [c.op1]), c.op2],
+      numericApproximation
+    );
   if (op === 'Not' && c.nops === 1)
-    return negateCondition(evaluateCondition(c.op1));
+    return negateCondition(evaluateCondition(c.op1, numericApproximation));
 
-  return { value: c.evaluate(), undecided: false };
+  return { value: c.evaluate(options), undecided: false };
+}
+
+/** True when `x` is a finite real number literal that is not exact (a
+ *  float). */
+function isInexactRealNumber(x: Expression): boolean {
+  return isNumber(x) && !x.isExact && !x.isComplex && x.isFinite === true;
 }
 
 /**
@@ -1562,18 +1642,20 @@ function negateCondition(inner: EvaluatedCondition): EvaluatedCondition {
  * — see `evaluateCondition`. `node` is the connective as written (its
  * original operands are kept for the inert spelling); `ops` are the
  * operands to walk, which differ from `node.ops` only for the `Implies`
- * spelling.
+ * spelling. `numericApproximation` is the numeric request of the walk (see
+ * `evaluateCondition`).
  */
 function evaluateConnective(
   node: Expression,
   op: 'And' | 'Or',
-  ops: ReadonlyArray<Expression>
+  ops: ReadonlyArray<Expression>,
+  numericApproximation?: boolean
 ): EvaluatedCondition {
   const ce = node.engine;
   const decider = op === 'And' ? 'False' : 'True';
   const survivors: { original: Expression; result: EvaluatedCondition }[] = [];
   for (const x of ops) {
-    const r = evaluateCondition(x);
+    const r = evaluateCondition(x, numericApproximation);
     if (errorValue(r.value) !== undefined) return r;
     if (sym(r.value) === decider && !r.undecided)
       return { value: ce.symbol(decider), undecided: false };
@@ -1588,7 +1670,9 @@ function evaluateConnective(
           op,
           survivors.map((s) => s.result.value)
         )
-        .evaluate(),
+        .evaluate(
+          numericApproximation ? { numericApproximation: true } : undefined
+        ),
       undecided: false,
     };
   // A symbolic survivor keeps the connective inert, spelled with the
@@ -1777,8 +1861,17 @@ function evaluateElementwiseSelection(
     const { cond, arm } = clauses[k];
     if (arm === undefined) return undefined;
     // The first clause's condition was evaluated and materialized by the
-    // caller (it is what activated the gate): never drain it twice.
-    const c = k === 0 ? first.cond : cond.canonical.evaluate();
+    // caller (it is what activated the gate): never drain it twice. The
+    // numeric request of the selection is forwarded, as `evaluateCondition`
+    // forwards it.
+    const c =
+      k === 0
+        ? first.cond
+        : cond.canonical.evaluate(
+            options.numericApproximation
+              ? { numericApproximation: true }
+              : undefined
+          );
     const s = sym(c);
     // `Undefined` is treated as not-True (decision 9), like `False`.
     if (s === 'False' || s === 'Undefined') continue;
@@ -2040,7 +2133,20 @@ function evaluateIf(
 ): Expression | undefined {
   const [cond, ifTrue, ifFalse] = ops;
   const engine = options.engine;
-  const { value: evaluated, undecided } = evaluateCondition(cond);
+  // The numeric request of the `If` is forwarded to the condition and to the
+  // selected branch, so that a function that jumps in them (`Floor`, a
+  // comparison) reads an exact operand exactly, as it does at the top level.
+  // In the body of a user function under `.N()`, a parameter is bound to the
+  // float of the argument, and only such a function evaluated with the
+  // numeric request reads the exact argument again (`exactRealValueOf`,
+  // `constraint-subject.ts`).
+  const armOptions = options.numericApproximation
+    ? { numericApproximation: true }
+    : undefined;
+  const { value: evaluated, undecided } = evaluateCondition(
+    cond,
+    options.numericApproximation
+  );
   // The condition is the one operand `If` ALWAYS demands, so an error
   // in it propagates — the dual obligation of the demanded-operands
   // rule (`docs/ERROR-MODEL.md` §3), which this handler owns because a
@@ -2061,8 +2167,10 @@ function evaluateIf(
   // program defect, so it is not an error.
   if (undecided) return engine.Missing;
   const evaluatedCond = sym(evaluated);
-  if (evaluatedCond === 'True') return ifTrue?.evaluate() ?? engine.Missing;
-  if (evaluatedCond === 'False') return ifFalse?.evaluate() ?? engine.Missing;
+  if (evaluatedCond === 'True')
+    return ifTrue?.evaluate(armOptions) ?? engine.Missing;
+  if (evaluatedCond === 'False')
+    return ifFalse?.evaluate(armOptions) ?? engine.Missing;
   // An ABSENT condition (the `Missing` symbol) is a legitimate runtime
   // data state, not a program defect: it is Kleene-undecidable, so
   // branching is an error — but a catchable error EXPRESSION (R's
@@ -2222,7 +2330,12 @@ function evaluateWhich(
 ): Expression | undefined {
   let i = 0;
   while (i < args.length - 1) {
-    const { value: evaluated, undecided } = evaluateCondition(args[i]);
+    // The guard is evaluated with the numeric request of the `Which`, as the
+    // selected arm is (see `evaluateIf`).
+    const { value: evaluated, undecided } = evaluateCondition(
+      args[i],
+      options.numericApproximation
+    );
     // A guard `Which` reaches is DEMANDED, so an error in it propagates —
     // the same obligation `If` discharges for its condition (see the comment
     // there): a lazy operator owns propagation for what it demands, and an

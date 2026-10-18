@@ -296,3 +296,156 @@ describe('EFFECTS PROVENANCE — rollback and the cap', () => {
     expect(history[1].cause?.toString()).toBe('2');
   });
 });
+
+describe('EFFECTS PROVENANCE — a redefinition does not change the previous operator definition', () => {
+  // A `function` statement that replaces a lone clause installs a new
+  // operator definition with the effect contract of the new literal. The
+  // previous operator definition ends unchanged, whether the install
+  // succeeds or is refused: another binding can still hold it (the Epsil
+  // static check declares one that holds the definition of an earlier
+  // program).
+
+  function operatorOf(ce: ComputeEngine, name: string) {
+    const def = ce.lookupDefinition(name) as
+      | { operator?: { effectsDeclared: boolean; signature: unknown } }
+      | undefined;
+    if (def?.operator === undefined) throw new Error('expected an operator');
+    return def.operator;
+  }
+
+  test('a static check of a redefinition leaves the earlier `pure` function as it was', () => {
+    const ce = new ComputeEngine();
+    executeEpsil(ce, 'function h(x: integer) pure -> integer { x }');
+    const op = operatorOf(ce, 'h');
+    expect(op.effectsDeclared).toBe(true);
+    expect(String(op.signature)).toBe('(x: integer) pure -> integer');
+
+    // The static check declares, in its own scope, a binding that holds the
+    // operator definition of the earlier program, then installs the
+    // redefinition over it.
+    const program = 'function h(x: integer) -> integer { x }';
+    const { ast } = parseSource(program, undefined, ce);
+    expect(staticDiagnostics(ce, ast!, program)).toEqual([]);
+
+    expect(operatorOf(ce, 'h')).toBe(op);
+    expect(op.effectsDeclared).toBe(true);
+    expect(String(op.signature)).toBe('(x: integer) pure -> integer');
+  });
+
+  test('a redefinition that states no effects installs a definition with no declared effects', () => {
+    const ce = new ComputeEngine();
+    executeEpsil(ce, 'function h(x: integer) pure -> integer { x }');
+    const before = operatorOf(ce, 'h');
+
+    executeEpsil(ce, 'function h(x: integer) -> integer { x }');
+    const after = operatorOf(ce, 'h');
+    expect(after).not.toBe(before);
+    expect(after.effectsDeclared).toBe(false);
+    expect(String(after.signature)).not.toContain('pure');
+    // The previous definition keeps its own contract.
+    expect(before.effectsDeclared).toBe(true);
+  });
+
+  test('a refused redefinition leaves the definition in force as it was', () => {
+    const ce = new ComputeEngine();
+    executeEpsil(ce, 'function g(x: integer) -> integer { x }');
+    const op = operatorOf(ce, 'g');
+    expect(op.effectsDeclared).toBe(false);
+
+    // The redefinition states `pure`, but its body draws a random number,
+    // so the run time refuses it (`incompatible-type`, `pure effects`
+    // against `random effects`) and `g` keeps its definition. The static
+    // check that runs before the program shares the operator definition of
+    // `g` and must not change it either.
+    const r = executeEpsil(
+      ce,
+      'function g(x: integer) pure -> integer { Random(Range(1, x)) }'
+    );
+    expect(r.value.toString()).toContain('incompatible-type');
+    expect(operatorOf(ce, 'g')).toBe(op);
+    expect(op.effectsDeclared).toBe(false);
+    expect(String(op.signature)).toBe('(x: integer) -> integer');
+  });
+
+  test('a refused redefinition leaves an earlier `pure` definition as it was', () => {
+    const ce = new ComputeEngine();
+    executeEpsil(ce, 'function g(x: integer) pure -> integer { x }');
+    const op = operatorOf(ce, 'g');
+    const history = effectsEntries(ce, 'g');
+
+    const r = executeEpsil(
+      ce,
+      'function g(x: integer) pure -> integer { Random(Range(1, x)) }'
+    );
+    expect(r.value.toString()).toContain('incompatible-type');
+    expect(operatorOf(ce, 'g')).toBe(op);
+    expect(op.effectsDeclared).toBe(true);
+    expect(String(op.signature)).toBe('(x: integer) pure -> integer');
+    expect(effectsEntries(ce, 'g')).toEqual(history);
+  });
+
+  test('a redefinition that adds `pure` installs a `pure` contract', () => {
+    const ce = new ComputeEngine();
+    executeEpsil(ce, 'function g(x: integer) -> integer { x }');
+    const before = operatorOf(ce, 'g');
+    expect(effectsEntries(ce, 'g')).toEqual([]);
+
+    const r = executeEpsil(ce, 'function g(x: integer) pure -> integer { x }');
+    expect(r.value.toString()).not.toContain('Error');
+    const after = operatorOf(ce, 'g');
+    expect(after).not.toBe(before);
+    expect(after.effectsDeclared).toBe(true);
+    expect(String(after.signature)).toBe('(x: integer) pure -> integer');
+    expect(before.effectsDeclared).toBe(false);
+    expect(String(before.signature)).toBe('(x: integer) -> integer');
+    // One entry: the contract starts with this redefinition. The previous
+    // definition declared nothing.
+    expect(effectsEntries(ce, 'g')).toEqual([
+      ['effects', 'declared', expect.any(String)],
+    ]);
+  });
+
+  test('a redefinition that removes `pure` records the end of the contract', () => {
+    const ce = new ComputeEngine();
+    executeEpsil(ce, 'function g(x: integer) pure -> integer { x }');
+    expect(effectsEntries(ce, 'g').map(([, kind]) => kind)).toEqual([
+      'declared',
+    ]);
+
+    executeEpsil(ce, 'function g(x: integer) -> integer { x }');
+    // The second entry is `declared`: the previous definition declared
+    // `pure`, and the end of a contract is recorded as `declared`.
+    expect(effectsEntries(ce, 'g').map(([, kind]) => kind)).toEqual([
+      'declared',
+      'declared',
+    ]);
+    expect(operatorOf(ce, 'g').effectsDeclared).toBe(false);
+  });
+
+  test.each([
+    ['no effects', 'function g(x: integer) -> integer { x }'],
+    ['`pure`', 'function g(x: integer) pure -> integer { x }'],
+  ])(
+    'a redefinition can add `random` to a function with %s',
+    (_, first) => {
+      const ce = new ComputeEngine();
+      executeEpsil(ce, first);
+      const before = operatorOf(ce, 'g');
+      const beforeState = [before.effectsDeclared, String(before.signature)];
+
+      const r = executeEpsil(
+        ce,
+        'function g(x: integer) random -> integer { 7 }'
+      );
+      expect(r.value.toString()).not.toContain('Error');
+      const after = operatorOf(ce, 'g');
+      expect(after).not.toBe(before);
+      expect(after.effectsDeclared).toBe(true);
+      expect(String(after.signature)).toBe('(x: integer) random -> integer');
+      expect(executeEpsil(ce, 'g(3)').value.toString()).toBe('7');
+      expect([before.effectsDeclared, String(before.signature)]).toEqual(
+        beforeState
+      );
+    }
+  );
+});

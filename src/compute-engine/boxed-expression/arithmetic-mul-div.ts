@@ -447,6 +447,40 @@ export class Product {
         return;
       }
 
+      // √(−c), with `c` a positive integer, is the exact imaginary value
+      // `i·√c`. It is folded into the coefficient as the square root of a
+      // positive integer is above. The numeric value takes the square
+      // factors out of `c` (`√(−52000000) = 2000·√13·i`), so an integer
+      // coefficient is folded as a rational one is:
+      // `2000·√(−13) = 2000·√13·i`. A radicand whose square-free part is
+      // above 10⁶ has no exact value: the factor stays a symbolic term. Only
+      // an integer exponent is folded: `(−13)^(1/4)` is not `(i·√13)^(1/2)`
+      // in general.
+      if (
+        isFunction(term, 'Sqrt') &&
+        isNumber(term.op1) &&
+        term.op1.isExact &&
+        isIntegerRational(exp)
+      ) {
+        const radicand = asRational(term.op1);
+        if (
+          radicand !== undefined &&
+          radicand[1] == 1 &&
+          radicand[0] < 0 &&
+          radicand[0] >= -Number.MAX_SAFE_INTEGER
+        ) {
+          const root = this.engine._numericValue({
+            radical: Number(radicand[0]),
+          });
+          if (root.isExact) {
+            const factor = root.pow(this.engine._numericValue(exp));
+            if (factor.isExact && this.foldIntoCoefficient(factor)) return;
+          }
+          this.tally(term, exp);
+          return;
+        }
+      }
+
       if (!isSymbol(term)) {
         // Skip numeric coefficient extraction for symbolic radicals like √2, ∛2, 2^{1/3}
         // These should stay symbolic rather than evaluating to floats
@@ -651,14 +685,17 @@ export class Product {
    * would lose exactness.
    *
    * An `ExactNumericValue` holds one radical times a Gaussian rational
-   * (`√2·(1 + i)`), a set closed under multiplication. The product of two
-   * exact values is then exact, except when the radicand of the product is
-   * too large to store: `ExactNumericValue.mul` then returns a float. For a
-   * complex operand, this method gives the caller the option to keep the
-   * factor as a separate term instead, so the product stays exact.
+   * (`√2·(1 + i)`). The radicand is at most 10⁶ (`SMALL_INTEGER`). The
+   * product of two exact values is not exact when it leaves this set: the
+   * radicand of `√1009·√1013` is 1022117, which has no square factor, and
+   * `√2·(1 + i)·√3·i` has two different radicals. `ExactNumericValue.mul`
+   * then returns a float. This method returns `false` instead, so that the
+   * caller keeps the factor as a separate term and the product stays exact.
    *
-   * The check applies only when an operand is complex. A real radical
-   * product whose radicand is too large still folds to a float, as before.
+   * Before it returns `false`, it looks for a number term that was kept
+   * separate in this way and whose product with `factor` is exact
+   * (`√1013·√1013 = 1013`). It removes that term and folds the product of
+   * the two in its place.
    */
   private foldIntoCoefficient(factor: number | NumericValue): boolean {
     const product = this.coefficient.mul(factor);
@@ -667,12 +704,31 @@ export class Product {
       !product.isExact &&
       !product.isNaN &&
       this.coefficient.isExact &&
-      factor.isExact &&
-      (this.coefficient.isComplex || factor.isComplex)
-    )
-      return false;
+      factor.isExact
+    ) {
+      const i = this.terms.findIndex(
+        (t) =>
+          isNumber(t.term) &&
+          t.term.isExact &&
+          t.term.isFinite === true &&
+          (isOne(t.exponent) || isOne(neg(t.exponent))) &&
+          this.termValue(t).mul(factor).isExact
+      );
+      if (i < 0) return false;
+      const paired = this.termValue(this.terms[i]).mul(factor);
+      this.terms.splice(i, 1);
+      if (!this.foldIntoCoefficient(paired))
+        this.tally(this.engine.number(paired), [1, 1]);
+      return true;
+    }
     this.coefficient = product;
     return true;
+  }
+
+  /** The value of a number term with the exponent `1` or `-1`. */
+  private termValue(t: { term: Expression; exponent: Rational }): NumericValue {
+    const v = this.engine._numericValue(numericValue(t.term)!);
+    return isOne(t.exponent) ? v : v.inv();
   }
 
   /**
@@ -1587,6 +1643,36 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
       if (nv1.isExact && nv2.isExact && !nv2.isZero) {
         const q = nv1.div(nv2);
         if (q.isExact) return ce.number(q);
+        // The quotient is not exact when its radicand is too large to store
+        // (`(√1009/1009)/√1013`). Write it as one fraction with the integer
+        // parts of the two denominators moved to the other side:
+        // `√1009/(1009√1013)`, not `(√1009/1009)/√1013`.
+        if (!nv1.isComplex && !nv2.isComplex) {
+          const a = nv1.asExact!;
+          const b = nv2.asExact!;
+          let n = a.numerator.mul(b.denominator);
+          let d = a.denominator.mul(b.numerator);
+          // Divide out the common factor of the two sides:
+          // `(2√1009)/(4√1013)` is `√1009/(2√1013)`
+          if (n.isExact && d.isExact) {
+            const g = n.gcd(d);
+            if (g.isExact && !g.isOne && !g.isZero) {
+              const n1 = n.div(g);
+              const d1 = d.div(g);
+              if (n1.isExact && d1.isExact) {
+                n = n1;
+                d = d1;
+              }
+            }
+          }
+          if (n.isExact && d.isExact) {
+            if (d.sgn() === -1) {
+              n = n.neg();
+              d = d.neg();
+            }
+            return ce._fn('Divide', [ce.number(n), ce.number(d)]);
+          }
+        }
       }
     }
 
@@ -1890,8 +1976,12 @@ export function div(num: Expression, denom: number | Expression): Expression {
           return ce.number(numV.asExact!.div(denomV));
         }
       } else if (typeof numV !== 'number' && typeof denomV !== 'number') {
+        // The quotient of two exact values is not exact when its radicand
+        // is too large to store (`√1009/√1013 = √1022117/1013`). The
+        // `Product` below then keeps the two factors, as in a product.
         if (numV.isExact && denomV.isExact) {
-          return ce.number(numV.asExact!.div(denomV.asExact!));
+          const q = numV.asExact!.div(denomV.asExact!);
+          if (q.isExact) return ce.number(q);
         }
       }
       // A finite float divisor: one division of the two values. The
@@ -2067,24 +2157,54 @@ export function canonicalMultiply(
       nonNumeric.push(x);
     }
     if (exactNumerics.length >= 2) {
+      // The factors are folded in the order of their radicands, smallest
+      // first (a rational has the radicand 1). The result does not depend on
+      // the order of the operands then, also when a factor is kept separate
+      // (see below): `2·√1009·√1013` and `√1013·2·√1009` both give the
+      // factors `2√1009` and `√1013`.
+      const radicand = (v: NumericValue): number =>
+        v instanceof ExactNumericValue
+          ? v.radical !== 1
+            ? v.radical
+            : v.imRadical
+          : 1;
+      exactNumerics.sort((a, b) => radicand(a) - radicand(b));
       let product = exactNumerics[0];
+      // The exact factors that are kept separate because their product with
+      // `product` is not exact (see below)
+      const separate: NumericValue[] = [];
       for (let i = 1; i < exactNumerics.length; i++) {
-        const next = exactNumerics[i];
-        const candidate = product.mul(next);
-        // Exactness guard for the complex extension: when a product with a
-        // complex operand leaves the representable set (e.g. √2·(1+i)), do
-        // NOT fold it into an inexact float at canonicalization — keep the
-        // operand as a separate term. (Real-only products keep the historical
-        // behavior: a radical-magnitude overflow still folds to a float.)
-        if (
-          !candidate.isExact &&
-          !candidate.isNaN &&
-          (product.isComplex || next.isComplex)
-        ) {
-          nonNumeric.push(ce.number(next));
+        let next = exactNumerics[i];
+        // Exactness guard: an exact value holds one radical with a radicand
+        // of at most 10⁶ (`SMALL_INTEGER`) times a Gaussian rational. When
+        // the product leaves that set (`√1009·√1013 = √1022117`, whose
+        // radicand has no square factor, or `√2·(1+i)`), the product is
+        // computed as a float. Do NOT fold it at canonicalization: keep the
+        // factor as a separate term, so the product stays exact. A factor
+        // that was kept separate can still combine with a later one
+        // (`√1013·√1013 = 1013`): that product is then folded in its place.
+        let candidate = product.mul(next);
+        while (!candidate.isExact && !candidate.isNaN) {
+          const j = separate.findIndex((s) => s.mul(next).isExact);
+          if (j < 0) break;
+          next = separate[j].mul(next);
+          separate.splice(j, 1);
+          candidate = product.mul(next);
+        }
+        if (!candidate.isExact && !candidate.isNaN) {
+          separate.push(next);
           continue;
         }
         product = candidate;
+      }
+      // A separate factor made from two complex factors can be a negative
+      // real (`i·i`): its sign goes to the sign channel, as for `product`
+      // below.
+      for (const s of separate) {
+        if (!s.isComplex && s.sgn() === -1) {
+          sign = -sign;
+          nonNumeric.push(ce.number(s.neg()));
+        } else nonNumeric.push(ce.number(s));
       }
       if (product.isZero) {
         // 0 * ±∞ is the indeterminate form (`Indeterminate`, or `NaN` when

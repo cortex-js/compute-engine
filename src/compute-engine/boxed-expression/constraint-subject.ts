@@ -175,8 +175,58 @@ export function exactRealValueOf(
     }
   }
   if (!isTransitivelyPure(original)) return undefined;
+  if (readsRecordedParameter(original)) return undefined;
   const value = original.evaluate();
   return isExactRealLiteral(value) ? value : undefined;
+}
+
+/**
+ * True when `expr` reads a parameter whose activation records the written
+ * argument (`exact-argument-source.ts`).
+ *
+ * Such a parameter is bound to the float of the argument, so an exact
+ * evaluation of an expression that reads it is not the exact value of the
+ * expression, and it can still be an exact number: `Floor(x)` with `x`
+ * bound to the float `25` of `(25! − 1)/24!` evaluates to the integer `25`,
+ * where the exact value is `24`. `Floor(x) = 24` under `.N()` then compared
+ * that false exact value and was `False`. With no exact value, the caller
+ * uses the float of the operand, which is `24` here.
+ *
+ * A parameter whose bound value is exactly its recorded argument does not
+ * count: an integer argument `3` bound as the float `3` is read correctly by
+ * an exact evaluation, and `Floor(√x·√3)` at that `x` must still be `3`, not
+ * the `2` of the floats `√3·√3 = 2.999…`.
+ */
+function readsRecordedParameter(expr: Expression): boolean {
+  const ce = expr.engine;
+  return expr.symbols.some((name) => {
+    const def = ce.lookupDefinition(name);
+    if (def === undefined || !('value' in def)) return false;
+    const source = exactArgumentSourceOf(def.value);
+    if (source === undefined) return false;
+    return !boundValueIsExactSource(def.value.value, source);
+  });
+}
+
+/**
+ * True when the value bound to a parameter is exactly the argument it was
+ * computed from: the bound value is itself exact, or the argument is an
+ * integer literal that a double holds exactly (|n| < 2^53).
+ *
+ * The integrality is read from the exact value of the literal
+ * (`isInteger`), not from its double: the double of the exact
+ * `1 − 10⁻³⁰` is the integer `1`. For an exact integer `n`, the double
+ * `re` is `n` rounded, and rounding is monotone, so `|re| < 2^53`
+ * (`Number.isSafeInteger`) holds only when `|n| < 2^53`, where `re` is `n`.
+ */
+function boundValueIsExactSource(
+  bound: Expression | undefined,
+  source: Expression
+): boolean {
+  if (bound !== undefined && isNumber(bound) && bound.isExact) return true;
+  if (!isNumber(source) || !source.isExact || source.isInteger !== true)
+    return false;
+  return Number.isSafeInteger(source.re);
 }
 
 /**

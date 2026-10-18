@@ -30,6 +30,10 @@ import type {
 import type { EffectHandlers } from './types-effects.js';
 import { runWithEvaluationEffects } from './effects-registry.js';
 import {
+  isStackOverflow,
+  recursionLimitError,
+} from './engine-runtime-state.js';
+import {
   isSymbol,
   isFunction,
   isDictionary,
@@ -3324,10 +3328,6 @@ function bindingKeyedSubs(
   });
 }
 
-/** Wrap a lambda so each invocation is counted against `recursionLimit`: a
- * runaway user-function recursion (`f(x) := … f(x-1) …` with no reachable base
- * case) throws a `CancellationError` (`cause: 'recursion-depth-exceeded'`)
- * instead of overflowing the native JS call stack with a `RangeError`. */
 /**
  * Thrown by an application of a user-function literal that is re-entered —
  * an application of the same literal is already on the evaluation stack —
@@ -3546,6 +3546,28 @@ function guardSymbolicRecursion(
   };
 }
 
+/**
+ * Wrap a lambda so each invocation is counted against `recursionLimit`: a
+ * runaway user-function recursion (`f(x) := … f(x-1) …` with no reachable base
+ * case) throws a `CancellationError` (`cause: 'recursion-depth-exceeded'`)
+ * instead of overflowing the native JS call stack with a `RangeError`.
+ *
+ * Each level of a recursion uses several kilobytes of the JavaScript stack
+ * (about 4 KB for `f(n) := n f(n-1)`), and the size of the stack depends on
+ * the host. The JavaScript stack can thus be full before the depth reaches
+ * the limit: with a stack of about 1 MB (the Node default), `f(2)` used to
+ * overflow at a depth of about 230, below the default limit of 256. Two
+ * mechanisms give the same `CancellationError` in that case:
+ * - `ce._enterRecursion()` throws it when less than 64 KB of the stack is
+ *   free (`enterRecursion()`, `engine-runtime-state.ts`), so the `finally`
+ *   blocks of every level have room to run;
+ * - when the stack overflows anyway (a single level used more than 64 KB),
+ *   the first application that the overflow reaches converts it, so the
+ *   frames above see a cancellation, which every handler lets through, and
+ *   not a native fault, which a built-in handler would turn into an
+ *   `internal-error` value. A `RangeError` that is not a stack overflow is
+ *   not converted.
+ */
 function wrapRecursion(
   ce: ComputeEngine,
   fn: (
@@ -3557,17 +3579,42 @@ function wrapRecursion(
   options?: ApplyOptions
 ) => Expression | undefined {
   return (params, options) => {
-    ce._enterRecursion();
+    // An application that answers a `Promise` (`awaitStatements`) holds
+    // its level of the counter for its synchronous part only, so the
+    // counter does not see the depth of a recursion whose levels run in
+    // later time slices. Each such level runs on a copy of the context
+    // stack of its caller with a `call` frame for each enclosing
+    // application, so the depth is the number of those frames.
+    if (
+      options?.awaitStatements === true &&
+      callFrameCount(options._contextStack ?? ce._evalContextStack) >=
+        ce.recursionLimit
+    )
+      throw recursionLimitError();
+    const depth = ce._enterRecursion();
     try {
       // An application that answers a `Promise` (`awaitStatements`) holds
       // its level for its synchronous part only: the recursion limit guards
       // the synchronous call stack, and the applications its body makes in
       // later time slices enter and leave the recursion themselves.
       return fn(params, options);
+    } catch (e) {
+      if (isStackOverflow(e)) throw recursionLimitError();
+      throw e;
     } finally {
-      ce._exitRecursion();
+      ce._exitRecursion(depth);
     }
   };
+}
+
+/** The number of user-function call frames (the contexts named `call`) on
+ * an evaluation-context stack. */
+function callFrameCount(
+  stack: ReadonlyArray<{ name: undefined | string }>
+): number {
+  let count = 0;
+  for (const context of stack) if (context.name === 'call') count += 1;
+  return count;
 }
 
 /**

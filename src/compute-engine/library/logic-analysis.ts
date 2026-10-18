@@ -375,12 +375,15 @@ export function getInnermostBody(body: Expression): Expression {
 
 /**
  * Evaluate ForAll over a Cartesian product of domains.
- * Returns True if the predicate holds for all combinations.
+ * Returns True if the predicate holds for all combinations. `evalOptions`
+ * is the numeric request of the quantifier, forwarded to each evaluation of
+ * the body (see `evaluateForAll`, `logic.ts`).
  */
 export function evaluateForAllCartesian(
   domains: { variable: string; values: Expression[] }[],
   body: Expression,
-  ce: ComputeEngine
+  ce: ComputeEngine,
+  evalOptions?: { numericApproximation: true }
 ): Expression | undefined {
   // Generate Cartesian product indices
   const indices = domains.map(() => 0);
@@ -398,7 +401,7 @@ export function evaluateForAllCartesian(
 
     // Evaluate body with this combination
     const substituted = body.subs(subs).canonical;
-    const result = substituted.evaluate();
+    const result = substituted.evaluate(evalOptions);
 
     if (sym(result) === 'False') {
       return ce.False; // Found a counterexample
@@ -424,11 +427,14 @@ export function evaluateForAllCartesian(
 /**
  * Evaluate Exists over a Cartesian product of domains.
  * Returns True if the predicate holds for at least one combination.
+ * `evalOptions` is the numeric request of the quantifier, forwarded to each
+ * evaluation of the body (see `evaluateForAll`, `logic.ts`).
  */
 export function evaluateExistsCartesian(
   domains: { variable: string; values: Expression[] }[],
   body: Expression,
-  ce: ComputeEngine
+  ce: ComputeEngine,
+  evalOptions?: { numericApproximation: true }
 ): Expression | undefined {
   // Generate Cartesian product indices
   const indices = domains.map(() => 0);
@@ -446,7 +452,7 @@ export function evaluateExistsCartesian(
 
     // Evaluate body with this combination
     const substituted = body.subs(subs).canonical;
-    const result = substituted.evaluate();
+    const result = substituted.evaluate(evalOptions);
 
     if (sym(result) === 'True') {
       return ce.True; // Found a witness

@@ -488,12 +488,13 @@ describe('undeclare: a constant', () => {
     expect(ce.parse('k').evaluate().json).toBe(precision + 10);
   });
 
-  // `updateDef()` releases the subscription of every value definition that
-  // a binding stops holding, not only for `undeclare()`. Completing a
-  // sequence definition for the name of a constant (`F_0 := …` then
-  // `F_n := …`) gives the binding a new value definition.
-  test('a constant redefined as a sequence stops listening', () => {
+  // A sequence definition for the name of a constant (`F_0 := …` then
+  // `F_n := …`) is refused, with the error that `ce.assign()` gives. The
+  // binding keeps its value definition, so the constant keeps listening and
+  // its value still follows the precision.
+  test('a refused sequence definition leaves the constant listening', () => {
     const ce = new ComputeEngine();
+    const precision = ce.precision;
     ce.pushScope();
     const before = configurationListenerCount(ce);
     ce.declare('F', {
@@ -502,14 +503,19 @@ describe('undeclare: a constant', () => {
     });
     expect(configurationListenerCount(ce)).toBe(before + 1);
 
-    ce.parse('F_0 := 1').evaluate();
-    ce.parse('F_n := F_{n-1} + 1').evaluate();
+    expect(() => ce.parse('F_0 := 1').evaluate()).toThrow(
+      'Cannot assign a value to the constant "F"'
+    );
+    expect(() => ce.parse('F_n := F_{n-1} + 1').evaluate()).toThrow(
+      'Cannot assign a value to the constant "F"'
+    );
 
-    expect(ce.parse('F_3').evaluate().json).toBe(4);
-    expect(configurationListenerCount(ce)).toBe(before);
+    expect(configurationListenerCount(ce)).toBe(before + 1);
+    ce.precision = precision + 10;
+    expect(ce.parse('F').evaluate().json).toBe(precision + 10);
   });
 
-  test('after a checkpoint restore, the redefined constant listens again', () => {
+  test('after a checkpoint restore, the constant still listens', () => {
     const ce = new ComputeEngine();
     const precision = ce.precision;
     ce.pushScope();
@@ -521,9 +527,10 @@ describe('undeclare: a constant', () => {
     const count = configurationListenerCount(ce);
     const cp = ce.checkpoint();
 
-    ce.parse('F_0 := 1').evaluate();
-    ce.parse('F_n := F_{n-1} + 1').evaluate();
-    expect(configurationListenerCount(ce)).toBe(count - 1);
+    expect(() => ce.parse('F_0 := 1').evaluate()).toThrow(
+      'Cannot assign a value to the constant "F"'
+    );
+    expect(configurationListenerCount(ce)).toBe(count);
 
     ce.restore(cp);
     expect(configurationListenerCount(ce)).toBe(count);

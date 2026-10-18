@@ -965,7 +965,8 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     // `(real | signed_infinity)` with `nanBehavior: 'propagate'`, so a
     // `NaN` argument is admitted and propagated by the generic gate,
     // `±∞` maps to itself, and a proven off-carrier operand (a complex
-    // value, `~oo`) is a boxing error.
+    // value) is a boxing error. `~oo` (a pole) is in the carrier since
+    // 2026-10-17 and maps to itself, as `±∞` does.
     const ce2 = new ComputeEngine();
     for (const op of ['Floor', 'Ceil', 'Round', 'Truncate']) {
       expect(isNaNValue(ce2, ce2.box([op, 'NaN']).evaluate())).toBe(true);
@@ -974,7 +975,10 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
         true
       );
       expect(ce2.box([op, ['Complex', 1, 2]]).isValid).toBe(false);
-      expect(ce2.box([op, 'ComplexInfinity']).isValid).toBe(false);
+      expect(ce2.box([op, 'ComplexInfinity']).isValid).toBe(true);
+      expect(
+        ce2.box([op, 'ComplexInfinity']).evaluate().isSame(ce2.ComplexInfinity)
+      ).toBe(true);
     }
     // The IEEE arm of the comparisons is a declared `handle` now — the
     // handler answers `False` for an unordered `NaN`, a success value.
@@ -2105,8 +2109,9 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     const typeOf = (expr: any) => ce2.box(expr).type.toString();
 
     // Fract (ruling 1): NaN at the signed infinities, typed exactly `nan`;
-    // a non-real operand or `~oo` is off-carrier (`Fract(2 + 3i)` used to
-    // answer `0`); the sign handler follows the values (`Fract(+oo)` used
+    // a non-real operand is off-carrier (`Fract(2 + 3i)` used to answer
+    // `0`); `~oo` is in the carrier since 2026-10-17, as for `Floor`, and
+    // has no fractional part; the sign handler follows the values (`Fract(+oo)` used
     // to report `non-negative`), and every finite real has its fractional
     // part in [0, 1), the negative ones included.
     both(['Fract', POS], isIndet);
@@ -2114,7 +2119,8 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     both(['Fract', 'NaN'], isNaNv);
     expect(typeOf(['Fract', 'NaN'])).toBe('nan');
     expect(typeOf(['Fract', POS])).toBe('nan');
-    for (const x of [COO, ANON, NONREAL]) boxError(['Fract', x]);
+    both(['Fract', COO], isIndet);
+    for (const x of [ANON, NONREAL]) boxError(['Fract', x]);
     both(['Fract', ['Rational', -7, 2]], (v) => v.re === 0.5);
     expect(ce2.box(['Fract', POS]).sgn).toBe('unsigned');
     expect(ce2.box(['Fract', 'NaN']).sgn).toBe('unsigned');
@@ -2243,10 +2249,11 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     // Review catches. A value that arrives through a SYMBOL reaches the
     // partiality gate before the dispatch conformance re-test, so a
     // `definedWhen` or `requires` predicate must not decide an operand
-    // OUTSIDE the carrier: `Fract` of a symbol holding `~oo`, `Mod(h, 0)`
-    // for a symbol holding `+∞`, and a non-integer term count for
-    // `ContinuedFraction` are the carrier's `incompatible-type` errors,
-    // never the marker or the precondition error. The lazy accessors are
+    // OUTSIDE the carrier: `Mod(h, 0)` for a symbol holding `+∞`, and a
+    // non-integer term count for `ContinuedFraction` are the carrier's
+    // `incompatible-type` errors, never the marker or the precondition
+    // error. `Fract` of a symbol holding `~oo` is `Indeterminate`: `~oo` is
+    // in the carrier of `Fract` since 2026-10-17. The lazy accessors are
     // outside that re-test altogether and refuse a non-number themselves.
     // A symbol declared non-integer answers `False` to the parity
     // predicates; a `never`-typed operand makes `Fract` `never`.
@@ -2256,8 +2263,8 @@ describe('ERROR-MODEL §4 — a NaN argument PROPAGATES through a numeric operat
     };
     const errorCodeOf = (v: any) => errorCode(v);
     expect(
-      errorCodeOf(ce2.function('Fract', [held('hc10', COO)]).evaluate())
-    ).toBe('incompatible-type');
+      isIndet(ce2.function('Fract', [held('hc10', COO)]).evaluate())
+    ).toBe(true);
     expect(
       errorCodeOf(
         ce2.function('Mod', [held('hp10', POS), ce2.box(0)]).evaluate()

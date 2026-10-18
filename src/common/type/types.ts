@@ -306,7 +306,7 @@ export type TypeVariable = {
    * A VALUE variable at a TYPE position (`(n: N, x: vector<T^N>) -> N where
    * T, N`): the singleton type of the value the call site binds `N` to.
    * Substituting the binding writes the value-literal type (`3`); unsolved,
-   * it reads as the variable's bound (`integer<1..>` for a length). Set by the
+   * it reads as the variable's bound (`integer<0..>` for a length). Set by the
    * type builder once the clause's kind is known — from an occurrence in a
    * length slot, or from a nominal type's value parameter.
    */
@@ -343,7 +343,7 @@ export type TypeParameter = {
    * type such as `3`, or a singleton range `integer<3..3>`), and it admits no
    * `is` protocol slot. Its bound says which values it admits; one that
    * occurs in a length slot must have an integer bound and defaults to
-   * `integer<1..>`. The same kind will carry boolean and string parameters
+   * `integer<0..>`. The same kind will carry boolean and string parameters
    * once those literals have singleton types; only the declaration spelling
    * and the literal types are missing, not the representation.
    */

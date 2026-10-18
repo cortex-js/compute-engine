@@ -325,12 +325,18 @@ function rank(expr: Expression): Rank {
  * 4/ Addition, ordered as a polynom, with higher degree terms first
  *
  * 5/ Other functions, ordered by their `complexity` property. In case
- * of a tie, ordered by the operator of the expression as a string. In case of a
- * tie, by the leaf count of each expression. In case of a tie, by the order
- * of each argument, left to right.
+ * of a tie, ordered by the operator of the expression as a string, in
+ * DESCENDING order (unlike the ascending order of symbols in 3/): `Tanh`
+ * before `Sech`, `Sin` before `Cos`. This gives the textbook form of
+ * products, for example `d/dx sech x` is `-(tanh x · sech x)` and not
+ * `-(sech x · tanh x)`, and the canonical form of existing expressions and
+ * snapshots depends on it. In case of a tie, by the leaf count of each
+ * expression. In case of a tie, by the order of each argument, left to right.
  *
- * 6/ Strings, ordered by comparing their Unicode code point values. While this
- * sort order is quick to calculate, it can produce unexpected results, for
+ * 6/ Strings, ordered by comparing their Unicode code point values, in
+ * DESCENDING order, like the operators in 5/: `"b"` before `"a"`. The
+ * canonical form of existing expressions depends on this order. While this
+ * comparison is quick to calculate, it can produce unexpected results, for
  * example "E" < "e" < "È" and "11" < "2". This ordering is not suitable to
  * collate natural language strings.
  *

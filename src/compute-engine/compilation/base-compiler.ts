@@ -163,6 +163,7 @@ import { planProtocolDispatch } from './protocol-dispatch.js';
 import type { ReceiverGuard } from './protocol-dispatch.js';
 import { isMoreSpecific } from '../boxed-expression/overload.js';
 import { containsDerivativeHead, rewriteAngularUnit } from './angular-unit.js';
+import { JUMP_FUNCTIONS } from '../jump-functions.js';
 import {
   compileJetDerivative,
   jetDerivativeTarget,
@@ -6963,7 +6964,16 @@ export class BaseCompiler {
     // only this emission entry — `constantFoldValue` stays available to the
     // shape analyses (`isProvablyRealValued`), whose answers describe the
     // runtime value and must not change with the emission style.
-    if (target.constantFold === false) return undefined;
+    //
+    // A function whose result jumps at a point, applied to closed exact
+    // operands, folds even under the opt-out. Its structural code computes
+    // the operands as doubles, and a double can be on the other side of the
+    // jump from the exact value: `Floor((25! − 1)/24!)` is 24, but the double
+    // of the operand is 25.0, so the code gives 25. The fold reads the exact
+    // value, as the interpreter does, so the compiled value is the
+    // interpreter's value (see `closedExactJump`).
+    const jump = BaseCompiler.closedExactJump(expr, target);
+    if (target.constantFold === false && !jump) return undefined;
     // The fold evaluates the subtree with `.N()`, and the evaluation can
     // compile a lazy `Map` callback inside this compilation. The code
     // generation of that callback can record a promotion in `_promoted`,
@@ -7049,8 +7059,16 @@ export class BaseCompiler {
     // A boolean folds only when the target spells the boolean constants (the
     // JS target's `True`/`False` mappings). A target without a spelling
     // (Python, the shader targets) keeps its structural lowering.
+    //
+    // A comparison of closed exact numbers also folds through the target's
+    // inlined constants (`True`/`False` on Python). Its structural code
+    // compares doubles, which can give the wrong answer: on Python,
+    // `(25! − 1)/24! < 25` compiled to `25 < 25`, which is `False`.
     if (isSymbol(value, 'True') || isSymbol(value, 'False'))
-      return target.var?.(value.symbol);
+      return (
+        target.var?.(value.symbol) ??
+        (jump ? target.constant?.(value.symbol) : undefined)
+      );
 
     // A complex-ish expression whose value comes back with NO imaginary part
     // does not fold at all. The structural lowering may return either shape
@@ -8033,6 +8051,117 @@ export class BaseCompiler {
     return reaches;
   }
 
+  /**
+   * True when `expr` applies a function whose result jumps at a point
+   * (`JUMP_FUNCTIONS`: `Floor`, `Fract`, `Mod`, the comparisons, …) to
+   * operands that are closed exact numbers.
+   *
+   * The structural code of such a node computes its operands as doubles. The
+   * double of an exact operand can be on the other side of the jump from the
+   * exact value: `Floor((25! − 1)/24!)` is 24, but the operand's double is
+   * 25.0; `Fract(π·10³⁰)` is 0.50288…, but the double of `π·10³⁰` is an
+   * integer, so its fractional part is 0. `.N()` reads the exact value of an
+   * exact operand for these functions (`exactRoundingOperand` in
+   * `library/arithmetic.ts`), so the constant fold, which evaluates with
+   * `.N()`, gives the interpreter's value. This predicate admits such a node
+   * to the fold also under `constantFold: false` and under a `symbolDeps`
+   * capture, where other constant subtrees keep their structural code.
+   *
+   * Each condition:
+   * - no free variable: an operand with one is computed at run time, and its
+   *   code is not changed;
+   * - every operand is a number (a comparison of collections or strings
+   *   is not a jump at a point);
+   * - no inexact (float) number literal in the node: an operand with a float
+   *   is approximate in the interpreter too, so the structural code is kept;
+   * - not every operand is an integer literal in the safe integer range: the
+   *   double of such a literal is exact, so the structural code gives the
+   *   exact value and is kept (`Floor(3)` stays `Math.floor(3)`);
+   * - not the interval target, which never bakes a `.N()` point: its code
+   *   computes an enclosure, and the enclosure of a jump at a point is
+   *   reported as `singular`, which contains the exact value.
+   */
+  private static closedExactJump(
+    expr: Expression,
+    target: CompileTarget<Expression>
+  ): boolean {
+    if (!isFunction(expr) || !JUMP_FUNCTIONS.has(expr.operator)) return false;
+    if (target.language === 'interval-javascript') return false;
+    if (expr.unknowns.length > 0) return false;
+    if (!expr.ops.every((op) => isSubtype(compilationType(op), 'number')))
+      return false;
+    if (
+      expr.ops.every(
+        (op) =>
+          isNumber(op) &&
+          typeof op.numericValue === 'number' &&
+          Number.isSafeInteger(op.numericValue)
+      )
+    )
+      return false;
+    // The walk visits each node once. An expression can share a subtree
+    // between operands: `Add(e, e)` applied n times to its own result has
+    // n + 1 distinct nodes but 2ⁿ paths from the root, and this check runs
+    // before the fold's cost estimate and also under `constantFold: false`.
+    // A node seen again answers `false`: had it held a float, the walk would
+    // have stopped at the first visit.
+    const seen = new Set<Expression>();
+    const hasFloat = (node: Expression): boolean => {
+      if (seen.has(node)) return false;
+      seen.add(node);
+      if (isNumber(node)) return !node.isExact;
+      if (isFunction(node)) return node.ops.some(hasFloat);
+      return false;
+    };
+    return !hasFloat(expr);
+  }
+
+  /**
+   * Record in `deps` the engine state that the evaluation of `expr` reads,
+   * for a closed exact jump node folded under a `symbolDeps` capture (see
+   * `closedExactJump`). The capture set is the cache key of an implicit
+   * compilation: a symbol in it causes a recompilation when the symbol is
+   * assigned again. An evaluation has no hook that reports each read, so
+   * the reads are found by a walk: every symbol of `expr` is recorded, and
+   * the value of each one is walked in turn.
+   *
+   * Returns `false` (and records nothing) when a read cannot be found by the
+   * walk: a function head that is not the library's own operator (a user
+   * function reads its body, which the walk does not enter), or a node that
+   * is not a symbol, a function, a number or a string.
+   */
+  private static recordJumpFoldReads(
+    expr: Expression,
+    deps: Set<MathJsonSymbol>
+  ): boolean {
+    const engine = expr.engine;
+    const read = new Set<MathJsonSymbol>();
+    // The walk visits each node once, since an expression can share a
+    // subtree between operands (n + 1 distinct nodes can have 2ⁿ paths from
+    // the root). A node seen again answers `true`: had it answered `false`,
+    // the walk would have stopped at the first visit.
+    const seen = new Set<Expression>();
+    const visit = (node: Expression): boolean => {
+      if (seen.has(node)) return true;
+      seen.add(node);
+      if (isSymbol(node)) {
+        if (read.has(node.symbol)) return true;
+        read.add(node.symbol);
+        const value = engine._getSymbolValue(node.symbol);
+        return value === undefined || visit(value);
+      }
+      if (isFunction(node)) {
+        if (builtinOperatorDefinition(engine, node.operator) === undefined)
+          return false;
+        return node.ops.every(visit);
+      }
+      return isNumber(node) || isString(node);
+    };
+    if (!visit(expr)) return false;
+    for (const id of read) deps.add(id);
+    return true;
+  }
+
   private static constantFoldValue(
     expr: Expression,
     target: CompileTarget<Expression>
@@ -8051,7 +8180,16 @@ export class BaseCompiler {
     // cache would serve the baked constant after a dependency changed.
     // Declining keeps the capture contract exact; the implicit-compile
     // kernels are dominated by non-constant subtrees anyway.
-    if (target.symbolDeps !== undefined) return undefined;
+    //
+    // A closed exact operand of a function whose result jumps at a point is
+    // the exception (`closedExactJump`): its structural code can give the
+    // wrong value, so it folds when every read can be recorded
+    // (`recordJumpFoldReads`, after the other gates below).
+    if (
+      target.symbolDeps !== undefined &&
+      !BaseCompiler.closedExactJump(expr, target)
+    )
+      return undefined;
 
     if (expr.unknowns.length > 0) return undefined;
     if (!expr.isPure) return undefined;
@@ -8188,6 +8326,11 @@ export class BaseCompiler {
     // ADMITTED an estimate that arithmetic had turned into `NaN` instead of
     // declining it. Only a finite estimate at or under the ceiling folds.
     if (!(BaseCompiler.foldCostEstimate(expr) <= CONSTANT_FOLD_MAX_COST))
+      return undefined;
+    if (
+      target.symbolDeps !== undefined &&
+      !BaseCompiler.recordJumpFoldReads(expr, target.symbolDeps)
+    )
       return undefined;
     // Every gate above re-ran for THIS call site's context; only the
     // evaluation below is shared (see `_foldValueMemo`).

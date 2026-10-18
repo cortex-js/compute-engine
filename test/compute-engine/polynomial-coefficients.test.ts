@@ -228,18 +228,24 @@ describe('a float exponent is not a polynomial degree', () => {
         .parse(s)
         .solve('x')
         ?.map((r) => JSON.stringify(r.json)) ?? null;
-    // The parity of `2.0` is not read: no root `-2`. The general power
-    // template gives the root `4^(1/2.0)`, a float: `1/2.0` is the float
-    // `0.5`. Before, it was the exact `1/2`, and the root was the exact `2`.
-    expect(roots('x^{2.0} = 4')).toEqual(['{"num":"2.0"}']);
+    // The general power template gives the root `4^(1/2.0)`, a float:
+    // `1/2.0` is the float `0.5`. The parity of `2.0` is read: `(-2.0)^{2.0}`
+    // is `4`, thus `-2.0` is a root too (user decision 2026-10-17). Before,
+    // only the root `2.0` was given.
+    expect(roots('x^{2.0} = 4')).toEqual(['{"num":"2.0"}', '{"num":"-2.0"}']);
     expect(roots('x^{3.0} - 8 = 0')).toEqual(['{"num":"2.0"}']);
     expect(roots('x^{2.0} - 2 = 0')).toEqual([
       '{"num":"1.4142135623730950488"}',
+      '{"num":"-1.4142135623730950488"}',
     ]);
     // A float exponent whose value is not an integer has a float root too.
     expect(roots('x^{2.5} = 4')).toEqual(['{"num":"1.74110112659224827827"}']);
-    // A float power of a base that contains the unknown.
-    expect(roots('(x+1)^{2.0} = 4')).toBeNull();
+    // A float power of a base that contains the unknown: the base is
+    // solved for each root of `u^{2.0} = 4`.
+    expect(roots('(x+1)^{2.0} = 4')).toEqual([
+      '{"num":"1.0"}',
+      '{"num":"-3.0"}',
+    ]);
     // `x^{2.0}` is not a polynomial in `sqrt(x)`.
     expect(roots('x^{2.0} + \\sqrt{x} - 2 = 0')).toBeNull();
     // The exact exponents are unchanged.

@@ -1157,30 +1157,30 @@ export class ExactNumericValue extends NumericValue {
       if (Number.isInteger(exponent)) {
         const sign = exponent % 2 === 0 ? 1 : -1;
         const bigExp = BigInt(exponent);
-        const radical = BigInt(this.radical) ** bigExp;
-        if (radical > BigInt(SMALL_INTEGER))
-          return this.factory(this.bignumRe).pow(exponent);
+        // (q·√r)^n = q^n·r^⌊n/2⌋·√r^(n mod 2). The radicand of the result
+        // is `r` or `1`, so the result is always exact, also when `r^n` is
+        // above 10⁶: `(√1009)^2` is `1009`, not a float.
+        const factor = BigInt(this.radical) ** BigInt(Math.floor(exponent / 2));
         return this.clone({
           rational: [
-            BigInt(sign) * (-BigInt(this.rational[0])) ** bigExp,
+            BigInt(sign) * (-BigInt(this.rational[0])) ** bigExp * factor,
             BigInt(this.rational[1]) ** bigExp,
           ],
-          radical: Number(radical),
+          radical: exponent % 2 === 0 ? 1 : this.radical,
         });
       }
       return this.factory({ im: (-this.re) ** exponent });
     } else {
       if (Number.isInteger(exponent)) {
         const bigExp = BigInt(exponent);
-        const radical = BigInt(this.radical) ** bigExp;
-        if (radical > BigInt(SMALL_INTEGER))
-          return this.factory(this.bignumRe).pow(exponent);
+        // (q·√r)^n = q^n·r^⌊n/2⌋·√r^(n mod 2), as above
+        const factor = BigInt(this.radical) ** BigInt(Math.floor(exponent / 2));
         return this.clone({
           rational: [
-            BigInt(this.rational[0]) ** bigExp,
+            BigInt(this.rational[0]) ** bigExp * factor,
             BigInt(this.rational[1]) ** bigExp,
           ],
-          radical: Number(radical),
+          radical: exponent % 2 === 0 ? 1 : this.radical,
         });
       }
     }

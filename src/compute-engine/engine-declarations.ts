@@ -2,6 +2,7 @@ import { noteScopeDeclaration } from './scope-declaration-count.js';
 import { noteScratchBinding, scratchRootOf } from './scratch-scopes.js';
 import type {
   DeclarationOrigin,
+  EffectSet,
   FunctionSignature,
   Type,
   TypeParameter,
@@ -2714,10 +2715,31 @@ function removeBinding(ce: IComputeEngine, scope: Scope, name: string): void {
   ce._noteStateEvent({ kind: 'redefine', callableBefore, callableAfter: true });
 }
 
+/**
+ * Options of {@link assignFn} that the public `ce.assign()` does not take.
+ */
+export type AssignFnOptions = {
+  /**
+   * The effect contract of the assigned function literal, given by a caller
+   * that replaces a whole function definition (an Epsil `function` statement
+   * that replaces a lone clause, `defineFunctionClause()`). `declared` is
+   * true when the literal states its effects, and `effects` is the stated
+   * set (`[]` for `pure`).
+   *
+   * When it is given, the operator route uses this contract in place of the
+   * contract of the definition in force: the incoming literal is checked
+   * against it, and the installed definition carries it. Without it, the
+   * route keeps the effect contract of the definition in force, which is
+   * correct for a plain re-assignment to a declared name.
+   */
+  effectContract?: { declared: boolean; effects: EffectSet | undefined };
+};
+
 export function assignFn(
   ce: IComputeEngine,
   arg1: string | { [id: string]: AssignValue },
-  arg2?: AssignValue
+  arg2?: AssignValue,
+  options?: AssignFnOptions
 ): IComputeEngine {
   //
   // If the first argument is an object literal, call `assign()` for each key
@@ -3112,7 +3134,7 @@ export function assignFn(
         // when the new literal annotates the parameter, the annotation
         // replaces it (`bareSlotsAsPlaceholders`).
         const opSkeleton = def.operator._signatureSkeleton;
-        const declaredType0 =
+        const priorType0 =
           opSkeleton !== undefined
             ? ce.type(opSkeleton)
             : def.operator._derivedSignature
@@ -3124,6 +3146,29 @@ export function assignFn(
                   )
                 )
               : def.operator.signature;
+        // A caller that replaces the whole definition gives the effect
+        // contract of the incoming literal (`options.effectContract`). The
+        // effect specifier of the previous signature is then replaced by the
+        // incoming one, or removed when the literal states no effects, so the
+        // checks below and the installed signature use the incoming contract.
+        // The previous definition object is not changed. Only a DERIVED
+        // signature (a record of the previous literal) gives way: a signature
+        // declared on the name is a contract, and the incoming literal is
+        // checked against its effects as before.
+        const contract = def.operator._derivedSignature
+          ? options?.effectContract
+          : undefined;
+        const declaredType0 =
+          contract === undefined
+            ? priorType0
+            : ce.type(
+                contract.declared && contract.effects !== undefined
+                  ? withArrowEffects(
+                      stripArrowEffects(priorType0.type),
+                      contract.effects
+                    )
+                  : stripArrowEffects(priorType0.type)
+              );
         // The body's result under the declared parameter types, as on the
         // value-slot route above.
         const typedResult = resultUnderDeclaredParameters(
@@ -3229,13 +3274,19 @@ export function assignFn(
         // definition carries the bit (`effectsDeclared`), and it has to travel
         // with the value definition this route installs: the declared type
         // alone cannot record an author-written `pure`.
-        const effectsDeclared = def.operator.effectsDeclared;
+        // With an incoming contract, the site where the previous contract was
+        // stated is not where the contract in force is stated, so it is not
+        // named.
+        const effectsDeclared =
+          contract?.declared ?? def.operator.effectsDeclared;
         assertDeclaredEffects(
           id,
           reconciled,
           declaredType.type,
           effectsDeclared,
-          latestDeclaredEffectsSite(def.operator),
+          contract === undefined
+            ? latestDeclaredEffectsSite(def.operator)
+            : undefined,
           { ce }
         );
         if (

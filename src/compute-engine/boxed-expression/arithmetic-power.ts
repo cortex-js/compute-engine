@@ -1734,6 +1734,11 @@ export function pow(
       typeof exp === 'number' ? Number.isInteger(exp) : exp.isInteger === true;
     if (expIsInteger) {
       const ops = x.ops.map((x) => pow(x, exp, { numericApproximation }));
+      // A canonical product can hold two number literals whose product is
+      // not exact (`√1009·√1013`). Their powers can be exact again
+      // (`1009` and `1013`): they are folded by the canonical `Multiply`.
+      if (ops.filter((op) => isNumber(op)).length > 1)
+        return ce.function('Multiply', ops);
       // return mul(...ops);  // don't call: infinite recursion
       return ce._fn('Multiply', ops);
     }
