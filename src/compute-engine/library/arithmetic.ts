@@ -2535,6 +2535,44 @@ function isNumericTupleCarrierType(t0: Type): boolean {
   return t.types.every((arm) => isNumericTupleType(arm));
 }
 
+/** Whether every value of the type `t0` that is not absent is a point or a
+ * list of points. A point is a tuple of any components or the bare `tuple`
+ * (a point of no stated arity). A list of points is a `list` whose every
+ * element that is not absent is a point. The type can be one of these or a
+ * union of them, with or without a `missing` arm.
+ *
+ * Arithmetic with a list of points applies to each point, so for both
+ * kinds of operand the product of two of them and a quotient by one of
+ * them have no value. At boxing, `canonicalMultiply` answers the
+ * `no-product-between-points` error and `canonicalDivide` the
+ * `no-division-by-point` error (they test `isTupleCarrier` and
+ * `isPointListCarrier`, `collection-utils.ts`, which read the same type
+ * shapes). */
+function isPointCarrierType(t0: Type): boolean {
+  const isPoint = (x: Type): boolean => {
+    const r = resolveTypeAlias(x);
+    return r === 'tuple' || (typeof r !== 'string' && r.kind === 'tuple');
+  };
+  // A type whose every arm that is not `missing` passes `test`. A type that
+  // is `missing` alone has no such arm and does not pass.
+  const everyPresentArm = (x: Type, test: (arm: Type) => boolean): boolean => {
+    const r = resolveTypeAlias(stripMissingFromType(resolveTypeAlias(x)));
+    if (r === 'never') return false;
+    if (typeof r !== 'string' && r.kind === 'union')
+      return r.types.length > 0 && r.types.every(test);
+    return test(r);
+  };
+  const isPointList = (x: Type): boolean => {
+    const r = resolveTypeAlias(x);
+    return (
+      typeof r !== 'string' &&
+      r.kind === 'list' &&
+      everyPresentArm(r.elements, isPoint)
+    );
+  };
+  return everyPresentArm(t0, (arm) => isPoint(arm) || isPointList(arm));
+}
+
 /** Twin of `isProvablyScalarNumber` (`collection-utils.ts`) on a
  * descriptor: a scalar number the user stated
  * (`isDeclaredScalarNumberOperand`), and when it is an application of a
@@ -5522,6 +5560,17 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const topOperand = unrefinedTopTypeOfOperands(ops);
         if (topOperand !== undefined)
           return BoxedType.forResult(topOperand, context.engine._typeResolver);
+        // A divisor that is a point or a list of points at every value it
+        // can take has no quotient: `canonicalDivide` rejects it at boxing
+        // with the `no-division-by-point` error. A route that asks this
+        // handler without boxing the operands gets the same answer: a union
+        // typed arm by arm (`armwiseUnionBroadcastResultType`) asks for the
+        // tuple arm of `U / U`, with `U` declared
+        // `list<tuple<number, number>> | tuple<number, number>`, and the
+        // answer `number` typed the quotient `list<number> | number` where
+        // every value of `U` makes it an error.
+        if (ops.slice(1).some((x) => isPointCarrierType(x.type)))
+          return BoxedType.forResult('error', context.engine._typeResolver);
         // A numeric tuple (point/vector) divided by a scalar keeps the tuple
         // type, mirroring the `Multiply` handler. `canonicalDivide` scales
         // component-wise only when the numerator's components are ACCESSIBLE
@@ -8035,6 +8084,18 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           if (product !== undefined)
             return BoxedType.forResult(product, engine._typeResolver);
         }
+        // Two factors that are each a point or a list of points at every
+        // value they can take have no product: `canonicalMultiply` rejects
+        // them at boxing with the `no-product-between-points` error. A route
+        // that asks this handler without boxing the operands gets the same
+        // answer: a union typed arm by arm
+        // (`armwiseUnionBroadcastResultType`) asks for the tuple-by-tuple
+        // arm of `U · U`, with `U` declared
+        // `list<tuple<number, number>> | tuple<number, number>`, and the
+        // answer `number` typed the product `list<number> | number` where
+        // every value of `U` makes it an error.
+        if (ops.filter((x) => isPointCarrierType(x.type)).length > 1)
+          return BoxedType.forResult('error', engine._typeResolver);
         // A factor that may be a point or something else (a union with a
         // tuple arm and other arms) beside another factor that may be a
         // point: the product is typed for each arm of that factor, and the

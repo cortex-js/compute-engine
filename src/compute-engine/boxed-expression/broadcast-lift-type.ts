@@ -815,6 +815,8 @@ function withAbsentPointCells(t: Type, anyCell = false): Type {
 /** Whether every arm of `t`, less its `missing` arm, is a tuple. */
 function isPointCellType(t: Type): boolean {
   const r = resolveTypeAlias(t);
+  // The bare `tuple` is a point of no stated arity.
+  if (r === 'tuple') return true;
   if (typeof r === 'string') return false;
   if (r.kind === 'tuple') return true;
   if (r.kind !== 'union') return false;
@@ -822,6 +824,10 @@ function isPointCellType(t: Type): boolean {
   for (const arm of r.types) {
     const a = resolveTypeAlias(arm);
     if (a === 'missing') continue;
+    if (a === 'tuple') {
+      tuple = true;
+      continue;
+    }
     if (typeof a === 'string' || a.kind !== 'tuple') return false;
     tuple = true;
   }

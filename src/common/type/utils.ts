@@ -1202,14 +1202,19 @@ export function absorbNumericAbsence(t: Readonly<Type>): Type {
       // absence is not absorbed into a `NaN` coordinate: the cell answers
       // `Missing` (`docs/ERROR-MODEL.md`, the section on `Missing` in a
       // numeric slot), and the arm stays. `list<missing | tuple<…>>` stays
-      // as it is; `list<missing | integer>` becomes `list<number>`.
+      // as it is; `list<missing | integer>` becomes `list<number>`. The
+      // bare `tuple`, a point of no stated arity, is a tuple arm too.
+      // Without it, the sum of a `list<tuple<number, number>> | tuple` and
+      // a `list<missing | tuple<number, number>> | tuple<number, number>`,
+      // which is `list<missing | tuple> | tuple`, had its `missing` cell
+      // absorbed into `number`.
       const present = t.types.filter((x) => resolveTypeAlias(x) !== 'missing');
       const keepMissing =
         present.length > 0 &&
         present.length < t.types.length &&
         present.every((x) => {
           const r = resolveTypeAlias(x);
-          return typeof r !== 'string' && r.kind === 'tuple';
+          return r === 'tuple' || (typeof r !== 'string' && r.kind === 'tuple');
         });
       const arms = (keepMissing ? present : t.types)
         .map((x) => absorbNumericAbsence(x))

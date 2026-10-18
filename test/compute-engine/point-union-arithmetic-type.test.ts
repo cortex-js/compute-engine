@@ -704,3 +704,153 @@ describe('a tuple arm of a scalar union or of a broadcastable element keeps its 
     expect(sq.evaluate().type.matches(sq.type)).toBe(true);
   });
 });
+
+describe('a sum of two point-or-point-list unions admits the type of every pair of arms', () => {
+  // `B` is a zipped tuple `P=(L,Y)` as a graphing consumer declares it, and
+  // `D` is the point-or-point-list result of a point function whose list
+  // may hold absent points. The sum is typed arm by arm. The cell of
+  // `B`'s bare `tuple` arm beside `D`'s list arm is `missing | tuple`: an
+  // absent cell of `D` makes its point absent. The numeric absorption of
+  // `missing` read that cell as numeric, because the bare `tuple` was not
+  // counted as a point, and the sum typed `list<number | tuple> | tuple`,
+  // which does not admit a list with an absent point.
+  const B_ARMS = ['list<tuple<number, number>>', 'tuple'];
+  const D_ARMS = ['list<missing | tuple<number, number>>', 'tuple<number, number>'];
+  const ce = new ComputeEngine();
+  ce.declare('B', B_ARMS.join(' | '));
+  ce.declare('D', D_ARMS.join(' | '));
+  B_ARMS.forEach((t, i) => ce.declare(`B${i}`, t));
+  D_ARMS.forEach((t, j) => ce.declare(`D${j}`, t));
+
+  test.each([
+    ['Add', 'list<missing | tuple> | tuple'],
+    ['Subtract', 'list<missing | tuple> | tuple'],
+  ])('%s(B, D) admits every pair', (op, expected) => {
+    const whole = ce.box([op, 'B', 'D']).type;
+    expect(whole.toString()).toBe(expected);
+    expect(ce.box([op, 'D', 'B']).type.toString()).toBe(expected);
+    for (let i = 0; i < B_ARMS.length; i++)
+      for (let j = 0; j < D_ARMS.length; j++) {
+        const pair = ce.box([op, `B${i}`, `D${j}`]).type;
+        expect([pair.toString(), pair.matches(whole)]).toEqual([
+          pair.toString(),
+          true,
+        ]);
+      }
+  });
+
+  test('a bare tuple beside a list with absent points keeps the absent cell', () => {
+    expect(ce.box(['Add', 'B1', 'D0']).type.toString()).toBe(
+      'list<missing | tuple>'
+    );
+  });
+
+  test('the value of the sum is admitted by its type', () => {
+    const t = ce.box(['Add', 'B', 'D']).type;
+    const ce2 = new ComputeEngine();
+    ce2.declare('B', B_ARMS.join(' | '));
+    ce2.declare('D', D_ARMS.join(' | '));
+    ce2.assign('B', ce2.box(['Tuple', 1, 2]));
+    ce2.assign('D', ce2.box(['List', ['Tuple', 3, 4], 'Missing']));
+    const v = ce2.box(['Add', 'B', 'D']).evaluate();
+    expect(v.toString()).toBe('[(4, 6),"Missing"]');
+    expect(v.type.matches(t)).toBe(true);
+  });
+});
+
+describe('a product of two points and a quotient by a point are errors on types alone', () => {
+  // Boxing rejects `P·Q` for two points (`no-product-between-points`) and
+  // `x / P` for a point divisor (`no-division-by-point`). A union typed arm
+  // by arm asks the type handlers about the tuple arms without boxing them,
+  // and the handlers answered `number`, so `U·U` typed `list<number> |
+  // number` where every value of `U` makes the product an error.
+  const ce = new ComputeEngine();
+  ce.declare('U', 'list<tuple<number, number>> | tuple<number, number>');
+  ce.declare('V', 'list<number> | tuple<number, number>');
+
+  test.each([
+    ['Multiply', 'U', 'U', 'error'],
+    ['Divide', 'U', 'U', 'error'],
+    ['Divide', 'V', 'U', 'error'],
+    // A list of numbers times a point is a list of points; two points have
+    // no product.
+    ['Multiply', 'V', 'V', 'list<number> | list<tuple<number, number>>'],
+    ['Divide', 'V', 'V', 'list<number> | list<tuple<number, number>>'],
+    ['Multiply', 'U', 2, 'list<tuple<number, number>> | tuple<number, number>'],
+    ['Divide', 'U', 2, 'list<tuple<number, number>> | tuple<number, number>'],
+  ])('%s(%s, %s) types %s', (op, a, b, expected) => {
+    expect(ce.box([op, a, b]).type.toString()).toBe(expected);
+  });
+
+  test('the handlers answer what boxing answers', () => {
+    const ce2 = new ComputeEngine();
+    ce2.declare('t2', 'tuple<number, number>');
+    ce2.declare('T', 'tuple');
+    ce2.declare('k', 'number');
+    const structural = (op: string, ...names: string[]) =>
+      ce2
+        .function(
+          op,
+          names.map((n) => ce2.symbol(n)),
+          { form: 'structural' }
+        )
+        .type.toString();
+    expect(structural('Multiply', 't2', 'T')).toBe('error');
+    expect(structural('Divide', 'k', 't2')).toBe('error');
+    expect(structural('Divide', 't2', 'k')).toBe('tuple<number, number>');
+    expect(ce2.box(['Multiply', 't2', 'T']).type.toString()).toBe('error');
+    expect(ce2.box(['Divide', 'k', 'T']).type.toString()).toBe('error');
+  });
+});
+
+describe('a list of points counts as a point for the product and quotient checks', () => {
+  // Arithmetic with a list of points applies to each point, so a list of
+  // points beside a point in a product, or as a divisor, is the same error
+  // as for one point (`isPointListCarrier`, `collection-utils.ts`).
+  const ce = new ComputeEngine();
+  ce.declare('U', 'list<tuple<number, number>> | tuple<number, number>');
+  ce.declare('P', 'tuple<number, number>');
+  ce.declare('k', 'number');
+
+  test.each([
+    [['Multiply', 'U', 'P'], 'error'],
+    [['Multiply', 'k', 'U', 'P'], 'error'],
+    [['Divide', 'P', 'U'], 'error'],
+    [['Divide', ['Tuple', 1, 2], 'U'], 'error'],
+    [['Divide', 'U', 'k'], 'list<tuple<number, number>> | tuple<number, number>'],
+  ])('%j types %s', (expr, expected) => {
+    expect(ce.box(expr as any).type.toString()).toBe(expected);
+  });
+});
+
+describe('a quotient by a point is an error before any cancellation', () => {
+  // `div()` reduced `a / a` to `1` before it looked at the divisor, so a
+  // `U / U` boxed while `U` had no value evaluated to `1` once `U` held a
+  // point, where its type, and the boxed `(1, 2) / (1, 2)`, say error.
+  test('U / U boxed before U has a value', () => {
+    const ce = new ComputeEngine();
+    ce.declare('U', 'list<tuple<number, number>> | tuple<number, number>');
+    const q = ce.box(['Divide', 'U', 'U']);
+    expect(q.type.toString()).toBe('error');
+    ce.assign('U', ce.box(['Tuple', 1, 2]));
+    expect(q.evaluate().toString()).toBe(
+      'Error(ErrorCode("no-division-by-point"))'
+    );
+    ce.assign('U', ce.box(['List', ['Tuple', 1, 2], ['Tuple', 3, 4]]));
+    expect(q.evaluate().toString()).toBe(
+      '[Error(ErrorCode("no-division-by-point")),Error(ErrorCode("no-division-by-point"))]'
+    );
+  });
+
+  test('the div() method', () => {
+    const ce = new ComputeEngine();
+    const p = ce.box(['Tuple', 1, 2]);
+    expect(p.div(p).toString()).toBe(
+      'Error(ErrorCode("no-division-by-point"))'
+    );
+    // A list divided by itself is still cancelled cell by cell.
+    expect(
+      ce.box(['Divide', ['List', 1, 2], ['List', 1, 2]]).evaluate().toString()
+    ).toBe('[1,1]');
+  });
+});

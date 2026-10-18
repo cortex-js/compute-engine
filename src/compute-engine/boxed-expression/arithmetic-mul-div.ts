@@ -1663,6 +1663,18 @@ export function div(num: Expression, denom: number | Expression): Expression {
     return nanOperandAnswer(ce, [num, d]);
   }
 
+  // A divisor that is a point or a list of points has no quotient, as in
+  // `canonicalDivide`, which answers the same error at boxing. The test
+  // runs before any cancellation: the `Product` at the end of this function
+  // reduces `a / a` to `1`, so a `Divide(U, U)` boxed while `U` had no value
+  // evaluated to `1` once `U` held the point `(1, 2)`, and to `[1, 1]` once
+  // it held a list of two points.
+  if (
+    typeof denom !== 'number' &&
+    (isTupleCarrier(denom) || isPointListCarrier(denom))
+  )
+    return ce.error(['no-division-by-point']);
+
   // Tuple (point/vector in ℝⁿ) numerator: `tuple / scalar` scales
   // component-wise — the value-level twin of the tuple branch in
   // `canonicalDivide`, and the counterpart of the `mulTuples` dispatch in
