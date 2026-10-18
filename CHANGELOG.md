@@ -1,3 +1,29 @@
+## [Unreleased]
+
+### Behavior Changes
+
+- **`Join` or `Append` of a dictionary and an element that can never be a
+  key-value entry is an error at once** (user decision 2026-10-17).
+  `Join(Dictionary(x: 1), [2, 3])` evaluated to the unevaluated `Join`, typed
+  `record`, and the error appeared only when its elements were read (to print
+  it, or to build a `Dictionary` from it). Now the expression is
+  `Error(incompatible-type, tuple<string, any>, 2)` when it is boxed, as are
+  `Join([2, 3], Dictionary(x: 1))`, `Append(Dictionary(x: 1), 2)`, a tuple of
+  literals that is not a pair with a string key (`(1, 2)`), and a string or a
+  `Range` that is not empty, joined to a dictionary
+  (`Error(incompatible-type, collection<tuple<string, any>>, range)`). An empty
+  operand contributes nothing: `Join(Dictionary(x: 1), "")` is `{x: 1}`. A
+  symbol operand is checked when the expression is evaluated, with the value it
+  holds then. With `d` assigned `Dictionary(x: 1)`, `Join(d, [2])` evaluates to
+  the error, and to `[1, 2]` after `d` is assigned `[1]`. With `C` declared
+  `collection` and assigned `[2, 3]`, `Join(Dictionary(x: 1), C)` evaluates to
+  the error, and to the merged dictionary after `C` is assigned `[("y", 2)]`. A
+  join of dictionaries, or of a dictionary and key-value tuples, still merges
+  the entries (the last value for a key wins). An element that may still be an
+  entry (a symbol with no value, a tuple with an operand that is not a literal)
+  keeps the unevaluated `Join`, and a list literal with a spread (`[...d, 2]`)
+  is still a list of the entries and the element.
+
 ## 0.156.0 _2026-10-17_
 
 ### Issues Resolved

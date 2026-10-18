@@ -186,8 +186,6 @@ for the other elements (an element `2 + 3` would be read as written, not as
 carry the caller's numeric request into the handlers, which have no evaluation
 options today.
 
-### Small items from the dual review of the 2026-10-17 re-review round (OPEN, small)
-
 ### `.N()` rounds an exact operand to the working precision before the pole and branch-point tests of the complex special-function routes (OPEN, numerics — found 2026-10-17 by the Codex re-review of the LerchPhi/Zeta ranges)
 
 `StieltjesGamma(1, (−10³⁰+1)/10³⁰).N()` is still `~oo` at 21 digits where
@@ -1718,14 +1716,17 @@ purpose.
 
 ### An ordering comparison pairs a set with a list (OPEN — found 2026-09-29 while pinning the relational types over abstract collections)
 
-`Less(Set(5, 6), [1, 2])` evaluates to `[False, False]`, and
+`Less(Set(5, 6), [1, 2])` evaluated to `[False, False]`, and
 `Less(Set(0), [1, 2])` to `[True]` (typed `list<boolean^1>` where the static
-type is `list<boolean^2>`): an unordered set is paired position by position with
-a list. The comment of `broadcastLiftType`
-(`boxed-expression/broadcast-lift-type.ts`) says a set beside a list gives an
-error value, and `Sin` of a set is already an `incompatible-type` error. It
-reaches a symbol declared `collection<number>` that holds a set (`P < [1, 2]`).
-Where the pairing happens is not traced yet.
+type is `list<boolean^2>`): an unordered set was paired position by position
+with a list. Checked again on 2026-10-17 (0.156.0): the result changed but is
+still wrong. `Less(Set(5, 6), [1, 2])` now evaluates to
+`[Set(5, 6) < 1, Set(5, 6) < 2]`: the list is expanded and the set is kept whole
+beside each element, where an `incompatible-type` error is expected. The comment
+of `broadcastLiftType` (`boxed-expression/broadcast-lift-type.ts`) says a set
+beside a list gives an error value, and `Sin` of a set is already an
+`incompatible-type` error. It reaches a symbol declared `collection<number>`
+that holds a set (`P < [1, 2]`). Where the pairing happens is not traced yet.
 
 ### A comparison with a list expands early over a valueless operand declared `number | collection<number>` (OPEN — found 2026-09-29, same probe)
 

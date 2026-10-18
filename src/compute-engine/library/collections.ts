@@ -10280,6 +10280,22 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           ? [...source.ops, ...args.slice(1)]
           : args;
 
+      // A dictionary literal source makes the result keyed, and each
+      // appended value is one element of it, so a value that can never be a
+      // key-value entry makes the call an error at once, as for `Join`
+      // (`keyedJoinNonEntryError`): `Append(Dictionary(x: 1), 2)` is
+      // `Error(incompatible-type, tuple<string, any>, 2)`. A source that is a
+      // symbol is checked at evaluation (`isKeyedLiteral`).
+      if (isKeyedLiteral(appended[0])) {
+        const refused = appended.slice(1).find(cannotBeKeyValueEntry);
+        if (refused !== undefined)
+          return ce.typeError(
+            parseType('tuple<string, any>'),
+            refused.type,
+            refused
+          );
+      }
+
       // Literal-list fold, the `Append` twin of the one in `Join`'s
       // handler: appending values to a `List` literal IS the literal list
       // with those values as its last elements, so build that list now.
@@ -17087,6 +17103,147 @@ function isProvablyScalarJoinOperand(op: Expression): boolean {
 }
 
 /**
+ * Whether `e` is a literal whose value is never a tuple, whatever values the
+ * symbols of the engine take later: a number, a string, `True`, `False`, a
+ * dictionary, a `List` literal or a `Set` literal (a set-builder is not a
+ * literal). The test reads the form of `e`, never its type: the type of a
+ * symbol can come from the value it holds now, and a canonical form that
+ * depended on that value would not change when the symbol is assigned again.
+ */
+function isNonTupleLiteral(e: Expression): boolean {
+  if (isNumber(e) || isString(e) || isDictionary(e)) return true;
+  if (isSymbol(e)) return e.symbol === 'True' || e.symbol === 'False';
+  return (
+    isFunction(e, 'List') ||
+    (isFunction(e, 'Set') && parseSetComprehension(e.ops) === null)
+  );
+}
+
+/**
+ * Whether `e` is a literal whose number of operands, and the value of each
+ * one, no longer change at evaluation: a literal of `isNonTupleLiteral`, or a
+ * `Tuple` whose operands are all such literals. A `Tuple` with any other
+ * operand can change its arity at evaluation: a spread operand expands
+ * into several components, and an operand such as `If(c, 3, Nothing)` can
+ * become `Nothing`, which is dropped.
+ */
+function isSettledLiteral(e: Expression): boolean {
+  if (isFunction(e, 'Tuple')) return e.ops.every(isSettledLiteral);
+  return isNonTupleLiteral(e);
+}
+
+/**
+ * Whether `op` is a dictionary literal, the form of an operand that makes a
+ * `Join` or an `Append` keyed for the check of `keyedJoinNonEntryError`. The
+ * test reads the form, not the type: an operand typed as a dictionary or a
+ * record because of the value a symbol holds now (`d` after
+ * `d := Dictionary(x: 1)`) is not keyed here, so `Join(d, [2])` keeps its
+ * lazy form and becomes `[1, 2]` after `d := [1]`. Such an operand is
+ * checked at evaluation, where the node is built again from the evaluated
+ * operands and `d` is then a dictionary literal.
+ */
+function isKeyedLiteral(op: Expression): boolean {
+  return isDictionary(op);
+}
+
+/**
+ * Whether the element `e` can never be a key-value entry. A key-value entry
+ * is a `Tuple` with two operands whose first operand is a string
+ * (`entryKeyOf`). So `e` is refused when it is a literal that is never a
+ * tuple (`2`, `"a"`, `[1, 2]`), or a `Tuple` of literals
+ * (`isSettledLiteral`) that has a number of operands other than two, or
+ * whose first operand is not a string (`(1, 2)`). Any other element (a
+ * symbol, a call, a tuple with an operand that is not a literal) may still
+ * be an entry at evaluation, and is not refused here: the walk of the merged
+ * entries reports it when the elements are read (`keyedMergeIterator`).
+ */
+function cannotBeKeyValueEntry(e: Expression): boolean {
+  if (isFunction(e, 'Tuple'))
+    return isSettledLiteral(e) && (e.nops !== 2 || !isString(e.op1));
+  return isNonTupleLiteral(e);
+}
+
+/**
+ * The `incompatible-type` error of a `Join` whose result is keyed and whose
+ * other operands contribute an element that can never be a key-value entry,
+ * or `undefined` when there is no such element.
+ *
+ * A `Join` with an operand typed as a dictionary or a record adopts the
+ * keyed kind (`joinResultTypeD`): its elements are the merged key-value
+ * entries of its operands. An element that is not an entry cannot be
+ * merged, so the result cannot be formed (user decision 2026-10-17):
+ * `Join(Dictionary(x: 1), [2, 3])` is
+ * `Error(incompatible-type, tuple<string, any>, 2)`. Before, the
+ * expression stayed an unevaluated `Join` typed `record`, and the error
+ * appeared only when its elements were read.
+ *
+ * The operands are read without evaluating anything, and without reading
+ * the value or the inferred type of a symbol:
+ * - the check applies only when an operand is a dictionary literal
+ *   (`isKeyedLiteral`), which contributes entries;
+ * - a tuple operand is one element (`Join` does not splice a tuple), and a
+ *   scalar operand was already wrapped as a one-element list
+ *   (`wrapScalarJoinOperand`);
+ * - a `List` literal or a `Set` literal contributes its operands, each one
+ *   tested with `cannotBeKeyValueEntry`, and the error names the first
+ *   element that is refused;
+ * - a string that is not empty, and a `Range` or a `Linspace` whose
+ *   operands are number literals and which has at least one element,
+ *   contribute characters or numbers, which are never entries, and are
+ *   refused as a whole: `Join(d, Range(1, 3))` is
+ *   `Error(incompatible-type, collection<tuple<string, any>>, range)`. An
+ *   empty one contributes nothing, as an empty list does;
+ * - any other operand (a symbol, a call, a range with a symbolic bound) is
+ *   not decided here.
+ * An operand that is absent, or that may be, is left to the absence rule
+ * (`Join(d, Missing)` is `Missing`).
+ *
+ * The evaluation of a `Join` with no `evaluate` handler builds the node
+ * again from its evaluated operands, so this check also runs when a symbol
+ * operand evaluates to a list: with `C` declared `collection` and holding
+ * `[2, 3]`, `Join(d, C)` evaluates to the error that names `2`.
+ */
+function keyedJoinNonEntryError(
+  ce: ComputeEngine,
+  ops: ReadonlyArray<Expression>
+): Expression | undefined {
+  if (!ops.some(isKeyedLiteral)) return undefined;
+  for (const op of ops) {
+    if (
+      isKeyedLiteral(op) ||
+      isAbsentSymbol(op) ||
+      mayBeAbsentCollectionOperand(op)
+    )
+      continue;
+    const nonEntries =
+      (isString(op) && op.string.length > 0) ||
+      ((isFunction(op, 'Range') || isFunction(op, 'Linspace')) &&
+        op.ops.every(isNumber) &&
+        (op.count ?? 0) >= 1);
+    if (nonEntries)
+      return ce.typeError(
+        parseType('collection<tuple<string, any>>'),
+        op.type,
+        op
+      );
+    const elements = isAtomicJoinOperand(op)
+      ? [op]
+      : isFunction(op, 'List') ||
+          (isFunction(op, 'Set') && parseSetComprehension(op.ops) === null)
+        ? op.ops
+        : [];
+    const refused = elements.find(cannotBeKeyValueEntry);
+    if (refused !== undefined)
+      return ce.typeError(
+        parseType('tuple<string, any>'),
+        refused.type,
+        refused
+      );
+  }
+  return undefined;
+}
+
+/**
  * The canonical form of a `Join` or of a `ListJoin` (the list literal with a
  * spread). Both heads take the same operands and canonicalize them the same
  * way: the scalar operands are wrapped, the operands are validated against
@@ -17134,6 +17291,13 @@ function canonicalJoin(
     !isAtomicJoinOperand(source)
       ? [...source.ops, ...args.slice(1)]
       : args;
+
+  // A `Join` with a dictionary or a record operand is keyed, and an element
+  // that can never be a key-value entry makes it an error at once.
+  if (head === 'Join') {
+    const refused = keyedJoinNonEntryError(ce, joined);
+    if (refused !== undefined) return refused;
+  }
 
   // Literal-list fold: when every operand is a `List` literal, the join
   // IS the literal list of their elements, so build that list now instead
