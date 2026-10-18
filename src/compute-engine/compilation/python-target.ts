@@ -5552,6 +5552,10 @@ export class PythonTarget implements LanguageTarget<Expression> {
       // runs a loop to bind it — more than it saves. Larger repeats are
       // still bound under the ordinary size and benefit thresholds.
       shareSymbolSquares: false,
+      // The `If` that ends a function body keeps the statement-form harvest
+      // (`CompileTarget.valueTailSelections`): this target may write it, or
+      // the block around it, as an if-statement.
+      valueTailSelections: false,
       // A `broadcastable` head over its single collection operand
       // (`Sin([1,2,3])`, `1 + L`) fans out as a LIST COMPREHENSION — always
       // valid Python, and it preserves the element-wise semantics exactly,

@@ -296,6 +296,9 @@ export type CseSession = {
     /** The target's `shareSymbolSquares` setting, carried so a nested
      * harvest of a user-defined function's body applies it too. */
     shareSymbolSquares?: boolean;
+    /** The target's `valueTailSelections` setting, carried for the same
+     * reason. */
+    valueTailSelections?: boolean;
     /** The target's `cseMinSize` / `cseMinScore` thresholds, carried for the
      * same reason. */
     minSize?: number;
@@ -1024,6 +1027,19 @@ export interface CompileTarget<Expr = unknown> {
    * ordinary thresholds on every target.
    */
   shareSymbolSquares?: boolean;
+
+  /**
+   * When `false`, the common-subexpression harvest treats the `If` that ends
+   * a block in value position (a function body) as an if-statement, whose
+   * condition and branches share nothing, instead of as an expression. Every
+   * target compiles such an `If` as an expression by default, so the default
+   * is `true`. The Python target sets `false`: it writes an `If` with a
+   * statement in a branch as an if-statement even in value position, which
+   * would compile the nested block's last `If` as an if-statement too, and
+   * its conditional expression compiles the branches before the condition,
+   * so the condition's temporary would not reach them.
+   */
+  valueTailSelections?: boolean;
 
   /**
    * The common-subexpression harvest's admission thresholds for this target,

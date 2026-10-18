@@ -188,3 +188,112 @@ describe('a repeated power that lowers to a library call is shared', () => {
     expect(result.code).not.toContain('_cse');
   });
 });
+
+describe('the value `If` that ends a function body', () => {
+  function engine() {
+    const ce = new ComputeEngine();
+    ce.declare('t', 'real');
+    ce.parse('T(c) := 0.2\\lfloor c/5\\rfloor + 1.5').evaluate();
+    ce.assign(
+      'B',
+      ce.box([
+        'Function',
+        ['If', ['Less', 0, ['Cos', ['T', 'c']]], ['Add', 1, ['T', 'c']], 'NaN'],
+        'c',
+      ])
+    );
+    return ce;
+  }
+
+  test.each(['javascript', 'glsl', 'interval-js'])(
+    'shares a call between its condition and its branch on %s',
+    (to) => {
+      const ce = engine();
+      const result = compile(ce.parse('B(t)'), { to } as any);
+      expect(result.success).toBe(true);
+      // The definition of `T` itself is spelled `_fn_T = (c) =>` or
+      // `_fn_T(float c)`, so every `_fn_T(c)` is a call in the body of `B`.
+      expect(result.preamble!.match(/_fn_T\(c\)/g)).toHaveLength(1);
+    }
+  );
+
+  test('the value is the interpreter value', () => {
+    const ce = engine();
+    const result = compile(ce.parse('B(t)'), { to: 'javascript' });
+    // `T(t)` is 1.5 below t = 5 (cos > 0, value 2.5) and 1.7 from there to
+    // 10 (cos < 0, no value).
+    for (const t of [0, 4.5, 7, 12.5]) {
+      const expected = ce.parse('B(t)').subs({ t }).N().re;
+      const actual = result.run!({ t }) as number;
+      if (Number.isNaN(expected)) expect(actual).toBeNaN();
+      else expect(actual).toBeCloseTo(expected, 14);
+    }
+    expect(result.run!({ t: 0 })).toBeCloseTo(2.5, 14);
+    expect(result.run!({ t: 7 })).toBeNaN();
+  });
+
+  test('a value `If` in a loop body keeps the statement form', () => {
+    // A block in a loop body is evaluated for effect, and Python writes an
+    // `If` there as an if-statement: its branches are statement lists.
+    const ce = new ComputeEngine();
+    const e = ['Exp', ['Multiply', 3, 'k']];
+    const expr = ce.box([
+      'Block',
+      ['Declare', 's', "'real'"],
+      ['Assign', 's', 0],
+      [
+        'Loop',
+        [
+          'Block',
+          ['If', ['Less', 2, e], ['Add', 1, e], 0],
+          ['Assign', 's', ['Add', 's', e]],
+        ],
+        ['Element', 'k', ['Range', 1, 3]],
+      ],
+      's',
+    ]);
+    for (const to of ['javascript', 'python', 'interval-js'])
+      expect(compile(expr, { to } as any).success).toBe(true);
+    expect(compile(expr, { to: 'javascript' }).run!({})).toBeCloseTo(
+      Math.exp(3) + Math.exp(6) + Math.exp(9),
+      8
+    );
+  });
+});
+
+describe('Python keeps the statement-form harvest of a body `If`', () => {
+  test('an `If` that ends a block in a statement branch still compiles', () => {
+    // Python writes `If(c, Block(…), 0)` as an if-statement, and the inner
+    // block's last `If` as an if-statement too: its branches must not be
+    // harvested as regions that bind a temporary.
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    const big = ['Multiply', ['Sin', ['Add', 'x', 1]], ['Cos', ['Add', 'x', 2]]];
+    const expr = ce.box([
+      'If',
+      ['Less', 0, 'x'],
+      [
+        'Block',
+        ['Declare', 'a', "'real'"],
+        ['Assign', 'a', 1],
+        ['If', ['Less', 'a', 'x'], ['Add', big, ['Multiply', 2, big]], 0],
+      ],
+      0,
+    ]);
+    const result = compile(expr, { to: 'python' });
+    expect(result.success).toBe(true);
+    expect(result.code).toContain('if a < x:');
+  });
+});
+
+describe('Python keeps a repeated power inline', () => {
+  test('`np.e ** x` is one operation, cheaper than a temporary', () => {
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    ce.declare('y', 'real');
+    const result = compile(ce.parse('e^{x}\\sin(y)+e^{x}\\cos(y)'), {
+      to: 'python',
+    });
+    expect(result.code).not.toContain('_cse');
+  });
+});

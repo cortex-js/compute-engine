@@ -458,6 +458,14 @@ export interface CseHarvestOptions {
    */
   readonly shareSymbolSquares?: boolean;
 
+  /**
+   * Harvest the value `If` that ends a block in value position as an
+   * expression (`isValueSelection`). On by default; a target that may write
+   * that `If` as an if-statement (`CompileTarget.valueTailSelections`, the
+   * Python target) turns it off.
+   */
+  readonly valueTailSelections?: boolean;
+
   // Thresholds — defaulted from the exported constants; overridable so tests
   // and tuning runs need not restate the pipeline.
   readonly minSize?: number;
@@ -571,6 +579,34 @@ export function varsObjectSpelling(name: string): string | undefined {
   if (!/^[A-Za-z_$][\w$]*$/.test(name)) return undefined;
   if (Object.hasOwn(Object.prototype, name)) return undefined;
   return `_.${name}`;
+}
+
+/**
+ * Is `node` an `If` whose every branch is a value — no statement anywhere in
+ * a branch (an assignment, a declaration, a loop, a block, a `Return`,
+ * `Break` or `Continue`)? Such an `If` in the last position of a block in
+ * value position compiles as an expression on the JavaScript, interval and
+ * shader targets (see the `Block` case of `Harvester.walkOperands` and
+ * `CompileTarget.valueTailSelections`). A branch with a statement in it may be
+ * written as statements (a `Return` in a branch, `BaseCompiler.tailValue`)
+ * and keeps the statement-form harvest.
+ */
+function isValueSelection(node: Expression): boolean {
+  if (!isFunction(node, 'If') || (node.nops !== 2 && node.nops !== 3))
+    return false;
+  const STATEMENT_HEADS = [
+    'Assign',
+    'Declare',
+    'Loop',
+    'Block',
+    'Return',
+    'Break',
+    'Continue',
+  ];
+  const hasStatement = (e: Expression): boolean =>
+    isFunction(e) &&
+    (STATEMENT_HEADS.includes(e.operator) || e.ops.some(hasStatement));
+  return !node.ops.slice(1).some(hasStatement);
 }
 
 /**
@@ -752,6 +788,7 @@ class Harvester {
    */
   private readonly negatedInnerHashes = new Set<number>();
   private readonly shareSymbolSquares: boolean;
+  private readonly valueTailSelections: boolean;
   private readonly minSize: number;
   private readonly minScore: number;
   private readonly maxBindingsPerRegion: number;
@@ -809,6 +846,7 @@ class Harvester {
     this.admitPureUserFunctions = options.admitPureUserFunctions === true;
     this.shadowedNames = new Set(options.shadowedNames ?? []);
     this.shareSymbolSquares = options.shareSymbolSquares !== false;
+    this.valueTailSelections = options.valueTailSelections !== false;
     this.minSize = options.minSize ?? CSE_MIN_SIZE;
     this.minScore = options.minScore ?? CSE_MIN_SCORE;
     this.maxBindingsPerRegion =
@@ -1002,7 +1040,7 @@ class Harvester {
       if (asStatement && this.walkStatement(node, region, nextUnderMapped)) {
         // handled as a statement
       } else {
-        this.walkOperands(node, region, nextUnderMapped);
+        this.walkOperands(node, region, nextUnderMapped, asStatement);
       }
     }
 
@@ -1127,14 +1165,16 @@ class Harvester {
     // below, while their syntax is only three nodes: `exp(0.1t)` twice in one
     // tuple was emitted twice (measured by the Tycho code-generation audit of
     // 2026-10-17). A small integer exponent lowers to multiplications and stays
-    // with the ordinary thresholds. A target that declines the symbol-square
-    // exemption (Python, where a temporary costs more than one `**`
-    // operation) keeps only the two shapes that are a library call there:
-    // `e^x` (`math.exp`) and a root.
+    // with the ordinary thresholds. On a target that declines the
+    // symbol-square exemption (Python, where a temporary is a one-element list
+    // comprehension), a power keeps the ordinary thresholds too: `e^x` is the
+    // single operation `np.e ** x` there, and a general power is the helper
+    // call `_ce_pow(x, y)`, which this exemption never covered on that target.
+    // A root is several library calls on every target
+    // (`np.sign(x) * np.power(np.abs(x), 1.0 / 3)` on Python).
     if (isFunction(node, 'Root')) return true;
     if (isFunction(node, 'Power') && node.nops === 2) {
-      if (!this.shareSymbolSquares)
-        return isSymbol(node.ops[0], 'ExponentialE');
+      if (!this.shareSymbolSquares) return false;
       const exp = node.ops[1];
       const n = isNumber(exp) && !exp.isComplex ? exp.re : NaN;
       return !(Number.isInteger(n) && Math.abs(n) <= 5);
@@ -1314,7 +1354,9 @@ class Harvester {
   private walkOperands(
     node: Expression & FunctionInterface,
     region: MutableRegion,
-    underMapped: boolean
+    underMapped: boolean,
+    /** `node` sits in a statement position (see `walk`). */
+    asStatement = false
   ): void {
     const op = node.operator;
 
@@ -1322,8 +1364,39 @@ class Harvester {
     // value expressions are bindable child regions.
     if (op === 'Block') {
       const list = this.openRegion(region, node, -1, 'statement-list', true);
-      for (let i = 0; i < node.nops; i++)
-        this.descend(node.ops[i], list, underMapped, true);
+      for (let i = 0; i < node.nops; i++) {
+        const stmt = node.ops[i];
+        // The last statement of a block in VALUE position (a function body,
+        // an operand) is the block's value. When it is an `If` whose branches
+        // are values, the JavaScript, interval and shader targets compile it
+        // as an expression, through the bare-statement edge `(If, -1)` (the
+        // last-statement case of the block loop of `BaseCompiler.compile`),
+        // not as an if-statement. So it is harvested as one: a bindable region
+        // whose branches are its lazy child regions, as at the root of an
+        // expression. The statement-form decomposition in `walkStatement`
+        // would put the condition and each branch in separate regions, and a
+        // call shared by the condition and a branch (`T(c)` in
+        // `If(cos(T(c)) > 0, T(c), NaN)`) would be emitted twice. A target
+        // that may write this `If` as an if-statement turns the rule off
+        // (`valueTailSelections`, the Python target). A block in statement
+        // position (a loop body, a branch of an if-statement) is evaluated for
+        // effect, and a target may write an `If` there as an if-statement, so
+        // it keeps the statement form.
+        if (
+          this.valueTailSelections &&
+          !asStatement &&
+          i === node.nops - 1 &&
+          isValueSelection(stmt)
+        ) {
+          this.descend(
+            stmt,
+            this.openRegion(list, stmt, -1, 'statement-value', false),
+            underMapped
+          );
+          continue;
+        }
+        this.descend(stmt, list, underMapped, true);
+      }
       return;
     }
 

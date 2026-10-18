@@ -34592,6 +34592,9 @@ export class BaseCompiler {
       // does — see `CompileTarget.shareSymbolSquares`). Carried on the
       // session so nested harvests of user-function bodies apply it too.
       shareSymbolSquares: target.shareSymbolSquares,
+      // Likewise the expression reading of a block's last `If`
+      // (`CompileTarget.valueTailSelections`).
+      valueTailSelections: target.valueTailSelections,
       // A target's own admission thresholds (`CompileTarget.cseMinSize`,
       // `cseMinScore`), carried on the session for the same reason.
       minSize: target.cseMinSize,

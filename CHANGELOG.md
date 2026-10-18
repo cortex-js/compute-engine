@@ -87,9 +87,10 @@
   the condition and once in the branch, where the same `If` at the root of an
   expression, or written as a `Which`, called it once. The compiler had treated
   the last statement of the body as an if-statement, whose condition and
-  branches can share nothing; it is an expression on every target. An `If` in a
-  loop body, or one with a statement in a branch (`Return`, an assignment),
-  keeps the statement form.
+  branches can share nothing; it is an expression on the JavaScript, interval
+  and shader targets. An `If` in a loop body, one with a statement in a branch
+  (`Return`, an assignment), and every such `If` on the Python target keep the
+  statement form.
 
 ## 0.156.0 _2026-10-17_
 
