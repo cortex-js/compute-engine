@@ -113,8 +113,8 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
 
 - `cantorEnumerateComplexNumbers()` (`numerics/numeric.ts`, exported from
   `src/numerics.ts`) yields `0` several times and gives doubles, not fractions,
-  for rational parts, so `ComplexNumbers` enumerates `0, 0, 0, 0, 0, 1+i, …`
-  and `1/2 + i` as a float.
+  for rational parts, so `ComplexNumbers` enumerates `0, 0, 0, 0, 0, 1+i, …` and
+  `1/2 + i` as a float.
 - The internal float lane of `NumericValue`: `x.div(0)` with a JavaScript `0`
   gives `NaN`, while `x.div(<numeric value 0>)` gives `~oo` (no boxed route
   reaches it: `(2.0+3.0i)/0` is `~oo`).
@@ -127,42 +127,41 @@ below for current scores and next rungs (per-rung history in `docs/rubi/RUBI.md`
   defined first, and a thrown "Invalid function" when `g` is defined first.
 - `ce.parse('\\pi := 3').evaluate()` throws to the host, where a comment in
   `engine-declarations.ts` says the `Assign` operator gives an `Error` value.
-- A declaration of `Pi` is refused in the global scope only (since
-  2026-10-18), so that a function parameter, a `Sum` index or a block local can
-  still be named `Pi`. In such a nested scope, a result that the engine builds
-  with the library π (`Sum(1/n², n, 1, ∞)` → `π²/6`) still serializes as `Pi`
-  and changes value when it is boxed again inside that scope. A result that
-  leaves the scope is boxed with the library constant again, so the gap is
-  limited to a JSON round trip inside the scope.
+- A declaration of `Pi` is refused in the global scope only (since 2026-10-18),
+  so that a function parameter, a `Sum` index or a block local can still be
+  named `Pi`. In such a nested scope, a result that the engine builds with the
+  library π (`Sum(1/n², n, 1, ∞)` → `π²/6`) still serializes as `Pi` and changes
+  value when it is boxed again inside that scope. A result that leaves the scope
+  is boxed with the library constant again, so the gap is limited to a JSON
+  round trip inside the scope.
 
 ### A block local keeps its value from one evaluation of the block to the next (OPEN, wrong value — found 2026-10-18)
 
 With `x` not declared, `Block(x ≔ x + 1; 2x)` gives `2(x + 1)` on the first
-`evaluate()` and `2(x + 2)` on the second. Each evaluation must give
-`2(x + 1)`: the block must start from the same state each time. The cause is
-probably in the `Block` evaluate handler (`evaluateBlock`,
-`library/control-structures.ts`). At the start of an evaluation,
-`sweepCanonicalizationBindings` removes only the block bindings that have no
-value, and `createBlockLocals` replaces only the locals made by a `Declare`
-statement. The binding that the first `Assign` made for `x` has the value
-`x + 1`, so it stays, and the second evaluation reads it.
+`evaluate()` and `2(x + 2)` on the second. Each evaluation must give `2(x + 1)`:
+the block must start from the same state each time. The cause is probably in the
+`Block` evaluate handler (`evaluateBlock`, `library/control-structures.ts`). At
+the start of an evaluation, `sweepCanonicalizationBindings` removes only the
+block bindings that have no value, and `createBlockLocals` replaces only the
+locals made by a `Declare` statement. The binding that the first `Assign` made
+for `x` has the value `x + 1`, so it stays, and the second evaluation reads it.
 
 ### A lazy `Filter` gives the elements of its source as they are written (OPEN, wrong value — found 2026-10-18)
 
 With `x := 5`, `Element(5, Filter([x], y ↦ y > 0))` is `False`, and
-`First(Filter([x], y ↦ y > 0))` is `x`. The correct results are `True` and
-`5`: the filter keeps the value of the element, which is `5`. When the source
-has an element that can erase (evaluate to `Nothing`), the same `Element` test
-gives `True`, so the result depends on an unrelated element. The cause is in
-the lazy `Filter` handlers in `library/collections.ts`: they give the element
-as it is written in the source, not its value.
+`First(Filter([x], y ↦ y > 0))` is `x`. The correct results are `True` and `5`:
+the filter keeps the value of the element, which is `5`. When the source has an
+element that can erase (evaluate to `Nothing`), the same `Element` test gives
+`True`, so the result depends on an unrelated element. The cause is in the lazy
+`Filter` handlers in `library/collections.ts`: they give the element as it is
+written in the source, not its value.
 
 ### Python `compile()` drops the `else` value of an `If` with a `Break` branch (OPEN, decided 2026-10-18 — found 2026-10-18)
 
 The Python target compiles `If(x > 0, Break, 1)` without the value `1` of the
-`else` branch. The same occurs when the branch is a `Continue` or a `Loop`.
-The test "a single-statement Block around a control-flow arm is read through"
-in `test/compute-engine/compile-python.test.ts` pins this output today.
+`else` branch. The same occurs when the branch is a `Continue` or a `Loop`. The
+test "a single-statement Block around a control-flow arm is read through" in
+`test/compute-engine/compile-python.test.ts` pins this output today.
 
 The question: what must the Python target do with this shape?
 
@@ -172,15 +171,17 @@ The question: what must the Python target do with this shape?
 
 If nothing is decided, option B stays in effect.
 
-**User decision 2026-10-18:** decline the shape: Python `compile()` refuses a selection that mixes a control-flow branch (`Break`, `Continue`, a loop) with a value branch, and the expression runs through the interpreter; the pinned test in `compile-python.test.ts` changes.
+**User decision 2026-10-18:** decline the shape: Python `compile()` refuses a
+selection that mixes a control-flow branch (`Break`, `Continue`, a loop) with a
+value branch, and the expression runs through the interpreter; the pinned test
+in `compile-python.test.ts` changes.
 
 ### `Count`, `Length` and `IsEmpty` of a `Sort` of a set give a count where `Sort` gives an error (OPEN, decided 2026-10-18 — found 2026-10-18)
 
 At boxing, `Count`, `Length` and `IsEmpty` look through `Sort`, `Reverse` and
 `RandomShuffle` to the collection inside (`peekWrappers`,
 `library/collections.ts`). With `c := Set(3, 1, 5)`, `Count(Sort(c))` is `3`,
-but `Sort(c)` alone is an `incompatible-type` error, because a set has no
-order.
+but `Sort(c)` alone is an `incompatible-type` error, because a set has no order.
 
 The question: must the look-through stop for a source that is not an indexed
 collection?
@@ -189,34 +190,41 @@ collection?
   indexed collection. Then `Count(Sort(c))` is the same error as `Sort(c)`.
   Cost: `Count(Sort(x))` with `x` of type `unknown` that holds a long list then
   sorts the list to count it.
-- Option B: keep today's behavior and document that the count of a sort of a
-  set is the count of the set.
+- Option B: keep today's behavior and document that the count of a sort of a set
+  is the count of the set.
 
 If nothing is decided, option B stays in effect.
 
-**User decision 2026-10-18:** look through `Sort`, `Reverse` and `RandomShuffle` only when the source type is known to be indexed, so `Count(Sort(c))` for a set `c` is the same error as `Sort(c)`; the cost (sorting an untyped list before counting it) is accepted.
+**User decision 2026-10-18:** look through `Sort`, `Reverse` and `RandomShuffle`
+only when the source type is known to be indexed, so `Count(Sort(c))` for a set
+`c` is the same error as `Sort(c)`; the cost (sorting an untyped list before
+counting it) is accepted.
 
 ### Elementary functions round an exact operand under `.N()` (OPEN, decided 2026-10-18 — found 2026-10-18)
 
 At `ce.precision = 50`, `Ln(1/3).N()` ends `…228`; the correct value ends
 `…227`. `.N()` evaluates each operand numerically first, so `1/3` reaches the
 function as a 50-digit decimal, and the rounding error of the operand reaches
-the last digit of the result. `Exp`, `Arctan`, `Sin`, `Sinc` and
-`Power(x, 1/3)` have the same defect. Since 2026-10-18 the 28 special functions
-read their exact operand with guard digits (`guardDigitsN`,
-`library/exact-operands-under-n.ts`), so their last digit is correct.
+the last digit of the result. `Exp`, `Arctan`, `Sin`, `Sinc` and `Power(x, 1/3)`
+have the same defect. Since 2026-10-18 the 28 special functions read their exact
+operand with guard digits (`guardDigitsN`, `library/exact-operands-under-n.ts`),
+so their last digit is correct.
 
 The question: must the elementary functions use `guardDigitsN` too?
 
 - Option A: yes. The last digit becomes correct. Cost: these functions are
-  frequent, and each `.N()` of an exact operand then evaluates the operand at
-  a higher precision.
+  frequent, and each `.N()` of an exact operand then evaluates the operand at a
+  higher precision.
 - Option B: no. Document that the last digit of an elementary function of an
   exact operand under `.N()` can be wrong by one unit.
 
 If nothing is decided, option B stays in effect.
 
-**User decision 2026-10-18:** use `guardDigitsN` for an exact non-integer operand of the elementary functions too (`Ln`, `Exp`, `Log`, the trigonometric and hyperbolic functions and their inverses, `Sinc`, `Power` with an exact non-integer exponent), so `Ln(1/3).N()` at 50 digits ends `…227`; a float or integer operand is not affected.
+**User decision 2026-10-18:** use `guardDigitsN` for an exact non-integer
+operand of the elementary functions too (`Ln`, `Exp`, `Log`, the trigonometric
+and hyperbolic functions and their inverses, `Sinc`, `Power` with an exact
+non-integer exponent), so `Ln(1/3).N()` at 50 digits ends `…227`; a float or
+integer operand is not affected.
 
 ### `Map(Sin, [H]).N()` of a large exact rational takes 5.7 seconds (OPEN, decided 2026-10-18 — found 2026-10-18)
 
@@ -226,8 +234,8 @@ cause is `makeSpineRunner` (`library/map-lowering.ts`): it evaluates each
 argument exactly, so that a callback that is a jump function (such as `Floor`)
 gets the exact element and gives the correct integer.
 
-The question: must `Map` read the arguments numerically when the callback is
-not a jump function?
+The question: must `Map` read the arguments numerically when the callback is not
+a jump function?
 
 - Option A: yes. `Map(Sin, [H]).N()` costs about as much as `Sin([H]).N()`;
   `Map(Floor, [H]).N()` still reads the exact element.
@@ -235,7 +243,9 @@ not a jump function?
 
 If nothing is decided, option B stays in effect.
 
-**User decision 2026-10-18:** under `.N()`, a lazy `Map` reads its arguments numerically when the callback is not, and does not contain, a jump function (`Floor`, `Mod`, a comparison, …); a jump callback still reads them exactly.
+**User decision 2026-10-18:** under `.N()`, a lazy `Map` reads its arguments
+numerically when the callback is not, and does not contain, a jump function
+(`Floor`, `Mod`, a comparison, …); a jump callback still reads them exactly.
 
 ### Compiled JavaScript writes `NaN` in a list cell for a missing point (OPEN, decided 2026-10-18 — found 2026-10-18)
 
@@ -252,31 +262,57 @@ The question: must the compiled list write `undefined` in such a cell?
 
 If nothing is decided, option B stays in effect.
 
-**User decision 2026-10-18:** a missing point in a compiled list cell is `undefined`, as a single missing point and the interpreter's `Missing` are; a number cell stays `NaN`.
+**User decision 2026-10-18:** a missing point in a compiled list cell is
+`undefined`, as a single missing point and the interpreter's `Missing` are; a
+number cell stays `NaN`.
 
 ### Smaller defects found on 2026-10-18 (batch 5) (OPEN, small)
 
-- Adding two temperatures that have an offset is not defined: `Quantity(0, degC) + Quantity(0, degF)` gives `-17.777777777777743 degC` (the result unit is the one with the largest scale, and the offset of each operand is applied). A decision is needed on what such a sum means (an error, or a difference of temperatures).
-- On the shader targets, the block route can write an input: when an enclosing engine scope binds `u` (a global `ce.declare('u', 'real')`, or a `u` read after a loop, which the canonical form binds in the outer block), `withImplicitLocalDeclares` → `scopeChainBinds` (`compilation/base-compiler.ts`) writes `u = …;` without a declaration, possibly to a read-only uniform; the interpreter's loop does not change the outer `u`. Since 2026-10-18 the lone-statement loop route declares `u`, so the two routes differ there.
+- The machine kernel of `GammaRegularized(a, z)` (`gammaQ` in
+  `numerics/special-functions.ts`) takes `Q = 1 − P` from the series for
+  `z < a + 1` with no floor, so a small `Q` at a tiny order keeps few digits:
+  `GammaRegularized(1e-10, 1e-10)` at `precision = 'machine'` is `2.244866e-9`
+  against mpmath's `2.2448635240e-9` (relative error `1.1e-6`), and
+  `GammaRegularized(1e-7, 0.05)` has a relative error of `7.6e-9`. The Legendre
+  continued fraction cannot replace the series there (at a small `z` it needs
+  about `(4/z)·(digits)²` terms). The bignum kernel is right (its 24 guard
+  digits absorb the loss; found 2026-10-18 by the review of the
+  `GammaRegularized`/`BetaRegularized` tail fix, issue #450). Two options:
+  decline with `NaN` below a floor, as the machine `BetaRegularized` does below
+  `1e-6`, or add a small-order series for `Q` (DLMF 8.7.3 with `Γ(a + 1) − z^a`
+  summed as one expression in `a`). A decision is needed on which.
+- Adding two temperatures that have an offset is not defined:
+  `Quantity(0, degC) + Quantity(0, degF)` gives `-17.777777777777743 degC` (the
+  result unit is the one with the largest scale, and the offset of each operand
+  is applied). A decision is needed on what such a sum means (an error, or a
+  difference of temperatures).
+- On the shader targets, the block route can write an input: when an enclosing
+  engine scope binds `u` (a global `ce.declare('u', 'real')`, or a `u` read
+  after a loop, which the canonical form binds in the outer block),
+  `withImplicitLocalDeclares` → `scopeChainBinds`
+  (`compilation/base-compiler.ts`) writes `u = …;` without a declaration,
+  possibly to a read-only uniform; the interpreter's loop does not change the
+  outer `u`. Since 2026-10-18 the lone-statement loop route declares `u`, so the
+  two routes differ there.
 
-- Lazy operators over a list with a condition (`[1,3,5]{0<t}`, which boxes to
-  a `When`) do not thread the condition. `TakeWhile`, `DropWhile`, `Scan`,
+- Lazy operators over a list with a condition (`[1,3,5]{0<t}`, which boxes to a
+  `When`) do not thread the condition. `TakeWhile`, `DropWhile`, `Scan`,
   `ArgMax` and `Differences` give
-  `Error(incompatible-type, indexed_collection, missing | vector<…>)`, where
-  the correct result is the operation on `[1,3,5]` under the condition `0<t`.
-  The cause: step 2c'' of the evaluation in `boxed-function.ts`
-  (`heldEagerSources`, `settleHeldEagerSources`) refuses the `When` before step
-  4c threads the condition. `DeleteAt([1,3,5]{0<t}, 1)` is refused at boxing,
-  because its definition has no `threadsConditionals` or `missingStrip` flag
-  (`Insert` has them). `IndexWhere` over such a list stays unevaluated.
+  `Error(incompatible-type, indexed_collection, missing | vector<…>)`, where the
+  correct result is the operation on `[1,3,5]` under the condition `0<t`. The
+  cause: step 2c'' of the evaluation in `boxed-function.ts` (`heldEagerSources`,
+  `settleHeldEagerSources`) refuses the `When` before step 4c threads the
+  condition. `DeleteAt([1,3,5]{0<t}, 1)` is refused at boxing, because its
+  definition has no `threadsConditionals` or `missingStrip` flag (`Insert` has
+  them). `IndexWhere` over such a list stays unevaluated.
   `Take([1,3,5]{0<t}, 1)` gives an unevaluated `Take(…) {0<t}`.
 - WGSL `compileFunction()` declines `Block(s ≔ x; Block(t ≔ s + 1))`. GLSL
   `compileFunction()` compiles it. The WGSL target must compile it too.
 - In a JavaScript loop body, a chained assignment to an undeclared `u` writes
   into the `vars` object of the caller (`t = _.u = …`). The value is correct,
-  but the compiled function must not change the caller's object. The cause:
-  the loop-body compilation does not go through `compileBlock`, which declares
-  the block locals.
+  but the compiled function must not change the caller's object. The cause: the
+  loop-body compilation does not go through `compileBlock`, which declares the
+  block locals.
 - The Python target normalizes identifiers with NFKC, so `ﬁ` (one ligature
   character) and `fi` become the same name in compiled Python. Two different
   symbols must stay two different names.
@@ -285,192 +321,187 @@ If nothing is decided, option B stays in effect.
   code that no input reaches: `ErfInv` in `library/statistics.ts`, and branches
   in `library/combinatorics.ts`, `library/distributions.ts`,
   `library/special-functions.ts`, `library/trigonometry.ts`,
-  `library/linear-algebra.ts`, `boxed-expression/arithmetic-mul-div.ts` and
-  the `LambertW` handler. Remove them.
+  `library/linear-algebra.ts`, `boxed-expression/arithmetic-mul-div.ts` and the
+  `LambertW` handler. Remove them.
 - At `ce.precision = 50`, the incomplete gamma function `Gamma(a, z)` gives a
   machine float (about 15 correct digits). It must give 50 digits.
 - `Power(Quantity(2, m), 1/2)` serializes its unit as `\mathrm{}` (empty), and
   `\mathrm{m^{0.5}}` parses back as `m^0`. The correct unit is `m^{1/2}` (or
   `m^{0.5}`) in both directions.
-- `UnitConvert(Quantity(20, degC), degF)` gives `67.99999999999994`; the
-  correct value is `68`. The cause: the conversion data in `unit-data.ts` are
-  floats.
+- `UnitConvert(Quantity(20, degC), degF)` gives `67.99999999999994`; the correct
+  value is `68`. The cause: the conversion data in `unit-data.ts` are floats.
 
 ### The shader targets compute a large trigonometric argument in float32 with no warning (OPEN, design — Tycho ledger rows 382 and 384, filed 2026-10-17)
 
 A shader computes in float32, about 7 significant digits. A periodic function
 turns an absolute error of its argument into a full-scale error of its value.
-The constant term of a trigonometric argument is now reduced by whole periods
-at compile time (`gpuReduceTrigOffset`, `compilation/gpu-target.ts`), so
+The constant term of a trigonometric argument is now reduced by whole periods at
+compile time (`gpuReduceTrigOffset`, `compilation/gpu-target.ts`), so
 `\sin(x+10^6)` compiles to `sin(x + -0.35756418)` (user decision 2026-10-18).
 What remains is an argument that float32 rounds through a large FACTOR or a
-non-constant term: the sine hash `\operatorname{mod}(10^4\sin(10^4x),1)`
-still compiles to `fract(10000.0 * sin(10000.0 * x))`, with `success: true`
-and no diagnostic, and its float32 value has no relation to the `javascript`
-value.
+non-constant term: the sine hash `\operatorname{mod}(10^4\sin(10^4x),1)` still
+compiles to `fract(10000.0 * sin(10000.0 * x))`, with `success: true` and no
+diagnostic, and its float32 value has no relation to the `javascript` value.
 
 - **Row 382 (the sine hash, a silent wrong value).** Tycho asks for (a) a
   diagnostic with `kind: "correctness"` when an operand of `fract`/`mod` is a
   trig call scaled by a constant of magnitude ≥ 1000, or (b) a range-reduced
-  sine for such an argument, so that the shader value follows the
-  `javascript` value. Tycho prefers (b). If CE declines (b), the Tycho owner
-  must be told before CE delivers (a) alone. Until one of them ships, Tycho
-  scans the emitted shader text itself.
+  sine for such an argument, so that the shader value follows the `javascript`
+  value. Tycho prefers (b). If CE declines (b), the Tycho owner must be told
+  before CE delivers (a) alone. Until one of them ships, Tycho scans the emitted
+  shader text itself.
 - **Row 384 (a high-precision mode, the Tycho owner's request).** A compile
-  option, for example `precision: "high"`, under which the shader targets
-  emit double-float arithmetic (two float32 words per value) so that the
-  result matches the `javascript` target. User direction 2026-10-18: the
-  compile-time reduction of constant offsets applies in every mode (done);
-  double-float arithmetic is for the high-precision mode only. Later phases:
-  cancelling arithmetic (`(x + 10^6)^2 − 10^12`), `exp` and `pow` of large
-  arguments, and a report of which subexpressions the mode rewrote.
+  option, for example `precision: "high"`, under which the shader targets emit
+  double-float arithmetic (two float32 words per value) so that the result
+  matches the `javascript` target. User direction 2026-10-18: the compile-time
+  reduction of constant offsets applies in every mode (done); double-float
+  arithmetic is for the high-precision mode only. Later phases: cancelling
+  arithmetic (`(x + 10^6)^2 − 10^12`), `exp` and `pow` of large arguments, and a
+  report of which subexpressions the mode rewrote.
 
 **Measured 2026-10-18 on an Apple M5 Max (WebGL2, ANGLE on Metal):**
 
-- The native `sin` of a float32 argument up to 10^6 is accurate (maximum
-  error 1.2·10⁻⁷). A run-time reduction of an argument that is already a
-  float32 value gives no accuracy gain on this GPU. In a loop of dependent
-  `sin` calls it costs about 60% more per call (8.5 ms → 13.8 ms for 4.3·10⁹
-  calls). In a plot-like shader there was no measurable difference.
-- The shader compiler reorders float arithmetic. A Cody–Waite reduction
-  (2π split into several float32 parts) gave the same error as one float32
-  2π; a multiplication by a uniform `1.0` between the steps was necessary.
-  The error term of a Dekker product came out as 0 even with these barriers.
-  GLSL ES 3.00 has no `fma` and no `precise`, so double-float code on the
-  `glsl` target is not reliable.
-- WGSL under WebGPU (same GPU, Metal 3, measured 2026-10-18): `fma` is
-  exact. `e = fma(K, x, −p)` is the exact error of `p = K·x` at all 4,096
-  inputs, and `sin(10^4x)` with that product and an `fma` reduction by 2π has
-  a maximum error of 2.2·10⁻⁷ (plain: 3.8·10⁻³). The GPU's own `sin` of the
-  reduced argument (3–4 ulp) still leaves the hash off by more than 10⁻³ at
-  154 of 4,096 inputs. A reduction by π/2 to the quadrant and Taylor
-  polynomials for `sin` and `cos` on [−π/4, π/4], evaluated with `fma`, give
-  5.9·10⁻⁸ (under 1 ulp), and the hash with an exact outer product
-  (`fma(10^4, s, −p)`) is then within 10⁻³ at all 4,096 inputs. Cost per
-  call in a loop of dependent calls, under load: plain 3.4 ms, exact product
-  and 2π reduction 4.3 ms (+26%), the polynomial version 5.5 ms (+62%), for
-  10⁹ calls. Harness: a Playwright page from a fake `https://` origin
-  (`navigator.gpu` needs a secure context), with `--enable-unsafe-webgpu
-  --ignore-gpu-blocklist --use-angle=metal`; without these flags Chromium
-  falls back to SwiftShader, where `fma` was not fused.
-- For the hash, a correctly rounded float32 sine followed by a float32
-  product by 10^4 meets Tycho's 10⁻³ target at every input tested; a sine
-  with an error of 1.65·10⁻⁷ misses it at 135 of 4,096 inputs.
+- The native `sin` of a float32 argument up to 10^6 is accurate (maximum error
+  1.2·10⁻⁷). A run-time reduction of an argument that is already a float32 value
+  gives no accuracy gain on this GPU. In a loop of dependent `sin` calls it
+  costs about 60% more per call (8.5 ms → 13.8 ms for 4.3·10⁹ calls). In a
+  plot-like shader there was no measurable difference.
+- The shader compiler reorders float arithmetic. A Cody–Waite reduction (2π
+  split into several float32 parts) gave the same error as one float32 2π; a
+  multiplication by a uniform `1.0` between the steps was necessary. The error
+  term of a Dekker product came out as 0 even with these barriers. GLSL ES 3.00
+  has no `fma` and no `precise`, so double-float code on the `glsl` target is
+  not reliable.
+- WGSL under WebGPU (same GPU, Metal 3, measured 2026-10-18): `fma` is exact.
+  `e = fma(K, x, −p)` is the exact error of `p = K·x` at all 4,096 inputs, and
+  `sin(10^4x)` with that product and an `fma` reduction by 2π has a maximum
+  error of 2.2·10⁻⁷ (plain: 3.8·10⁻³). The GPU's own `sin` of the reduced
+  argument (3–4 ulp) still leaves the hash off by more than 10⁻³ at 154 of 4,096
+  inputs. A reduction by π/2 to the quadrant and Taylor polynomials for `sin`
+  and `cos` on [−π/4, π/4], evaluated with `fma`, give 5.9·10⁻⁸ (under 1 ulp),
+  and the hash with an exact outer product (`fma(10^4, s, −p)`) is then within
+  10⁻³ at all 4,096 inputs. Cost per call in a loop of dependent calls, under
+  load: plain 3.4 ms, exact product and 2π reduction 4.3 ms (+26%), the
+  polynomial version 5.5 ms (+62%), for 10⁹ calls. Harness: a Playwright page
+  from a fake `https://` origin (`navigator.gpu` needs a secure context), with
+  `--enable-unsafe-webgpu --ignore-gpu-blocklist --use-angle=metal`; without
+  these flags Chromium falls back to SwiftShader, where `fma` was not fused.
+- For the hash, a correctly rounded float32 sine followed by a float32 product
+  by 10^4 meets Tycho's 10⁻³ target at every input tested; a sine with an error
+  of 1.65·10⁻⁷ misses it at 135 of 4,096 inputs.
 
 Two shapes are not reduced by the compile-time fold:
 
-- A constant term that calls a library function (`\sin(x+\Gamma(20))`): the
-  fold accepts only exact arithmetic over number literals, so that a
-  `Random()` draw or a function mapped by the `functions` option of
-  `compile()` is never evaluated at compile time. The compiler's own constant
-  fold then emits the large value unreduced.
-- A complex argument (`\sin(x+10^6+10^6i)` through `_gpu_csin`): its real
-  part is periodic in the same way, but the constant is one complex literal.
+- A constant term that calls a library function (`\sin(x+\Gamma(20))`): the fold
+  accepts only exact arithmetic over number literals, so that a `Random()` draw
+  or a function mapped by the `functions` option of `compile()` is never
+  evaluated at compile time. The compiler's own constant fold then emits the
+  large value unreduced.
+- A complex argument (`\sin(x+10^6+10^6i)` through `_gpu_csin`): its real part
+  is periodic in the same way, but the constant is one complex literal.
 
-Tycho's answers (2026-10-18): every Tycho GPU lane compiles to `glsl`
-(WebGL2) only, so a `wgsl`-only lowering helps no Tycho lane today. In the
-stored all-corpus codegen audit (4,844 `glsl` rows), Tycho's scan flags 116
-rows in 23 documents: a factor ≥ 1000 inside the trig argument
-(`fract(K·sin(10^4·x))`, 106 rows, 19 documents), a factor ≥ 1000 outside the
-trig only (`fract(K·sin(small·x))`, 9 rows, 3 documents), and the dot
-one-liner (1 row). A diagnostic (a) that replaces Tycho's scan must flag a
-`fract`/`mod` operand that contains a trig call and a multiplicative literal
-≥ 1000 anywhere in it, inner or outer factor. The decisions on a `wgsl`
-default and on shipping (a) for `glsl` are with the Tycho owner.
+Tycho's answers (2026-10-18): every Tycho GPU lane compiles to `glsl` (WebGL2)
+only, so a `wgsl`-only lowering helps no Tycho lane today. In the stored
+all-corpus codegen audit (4,844 `glsl` rows), Tycho's scan flags 116 rows in 23
+documents: a factor ≥ 1000 inside the trig argument (`fract(K·sin(10^4·x))`, 106
+rows, 19 documents), a factor ≥ 1000 outside the trig only
+(`fract(K·sin(small·x))`, 9 rows, 3 documents), and the dot one-liner (1 row). A
+diagnostic (a) that replaces Tycho's scan must flag a `fract`/`mod` operand that
+contains a trig call and a multiplicative literal ≥ 1000 anywhere in it, inner
+or outer factor. The decisions on a `wgsl` default and on shipping (a) for
+`glsl` are with the Tycho owner.
 
-**Done (2026-10-18, user decisions the same day):** plan (i) is implemented
-in `compilation/gpu-exact-trig.ts` — the exact sine hash on `glsl`, NaN and
-`CompilationResult.float32Bounds` beyond the range. Every other flagged `Mod`
-or `Fract` operand on `glsl`, and every flagged one on `wgsl`, keeps the
-float32 code with a `CompilationResult.warnings` entry
-(`float32-unsafe-argument`, kind `correctness`); a decline was implemented
-first and replaced after Tycho's measurement below. `Fract(u)` has the same
-check as `Mod(u, 1)`. Not covered yet, each the float32 code with a warning
-today: a hash whose operand is a parameter of a user function (its value
-comes from the call; the corpus noise kernel `art/hyvhlz4chj` is one —
-checking the arguments at each call, or inlining the function, would cover
-it), an operand rounded before the product (`x + 10^4`, `x·y`), an outer
-factor above 5·10^4 (the corpus has factors up to 1.9·10^9, which need a
-more precise sine), a `wgsl` exact form (`fma`, measured above), and a range
-beyond 2.6·10^7.
+**Done (2026-10-18, user decisions the same day):** plan (i) is implemented in
+`compilation/gpu-exact-trig.ts` — the exact sine hash on `glsl`, NaN and
+`CompilationResult.float32Bounds` beyond the range. Every other flagged `Mod` or
+`Fract` operand on `glsl`, and every flagged one on `wgsl`, keeps the float32
+code with a `CompilationResult.warnings` entry (`float32-unsafe-argument`, kind
+`correctness`); a decline was implemented first and replaced after Tycho's
+measurement below. `Fract(u)` has the same check as `Mod(u, 1)`. Not covered
+yet, each the float32 code with a warning today: a hash whose operand is a
+parameter of a user function (its value comes from the call; the corpus noise
+kernel `art/hyvhlz4chj` is one — checking the arguments at each call, or
+inlining the function, would cover it), an operand rounded before the product
+(`x + 10^4`, `x·y`), an outer factor above 5·10^4 (the corpus has factors up to
+1.9·10^9, which need a more precise sine), a `wgsl` exact form (`fma`, measured
+above), and a range beyond 2.6·10^7.
 
-**Coverage in the Tycho corpus (Tycho's count, 2026-10-18, from its stored
-audit of 116 flagged `glsl` rows in 23 documents; upper bounds):** an outer
-factor above 5·10^4 in 88 rows (8 documents; up to 1,944,810,000), a hash
-inside a document function (reads a parameter) in 47 rows (15 documents), so
-at most 14 rows in 7 documents can take the exact form today. The two trees
-that started row 382 (`neyret/w9f36vvizr`, `nsgmgxnou6`) decline on both
-counts. Extending coverage means: (1) for an outer factor up to 2·10^9, a
-sine accurate to about 5·10^-13, so a polynomial evaluated entirely in
-two-part arithmetic and more parts of π/2; (2) for the operands those rows
-use (`10^4·(51.1·floor(t) − 3.9)`), two-part arithmetic for the operand
-itself, which is the general high-precision mode of row 384; (3) for a
-function parameter, a check of the arguments at each call, or inlining.
+**Coverage in the Tycho corpus (Tycho's count, 2026-10-18, from its stored audit
+of 116 flagged `glsl` rows in 23 documents; upper bounds):** an outer factor
+above 5·10^4 in 88 rows (8 documents; up to 1,944,810,000), a hash inside a
+document function (reads a parameter) in 47 rows (15 documents), so at most 14
+rows in 7 documents can take the exact form today. The two trees that started
+row 382 (`neyret/w9f36vvizr`, `nsgmgxnou6`) decline on both counts. Extending
+coverage means: (1) for an outer factor up to 2·10^9, a sine accurate to about
+5·10^-13, so a polynomial evaluated entirely in two-part arithmetic and more
+parts of π/2; (2) for the operands those rows use
+(`10^4·(51.1·floor(t) − 3.9)`), two-part arithmetic for the operand itself,
+which is the general high-precision mode of row 384; (3) for a function
+parameter, a check of the arguments at each call, or inlining.
 
-**Tycho owner's decision (2026-10-18, later the same day), accepted by the
-CE user and implemented:** the three extensions are withdrawn (deferred, no plan to
+**Tycho owner's decision (2026-10-18, later the same day), accepted by the CE
+user and implemented:** the three extensions are withdrawn (deferred, no plan to
 resume). Instead, a hash with no exact form should NOT decline: `glsl` (and
 `wgsl`) should emit the plain float32 code with `success: true` and mark the
 result as float32-unsafe, so that Tycho's curve lanes send the row to the CPU
 and its field lanes keep the shader. Tycho measured the decline on 12 corpus
-documents with hash rows on field lanes: one wheel zoom went from about 1 ms
-to 2,671 ms of render work (`neyret/62urmx2dcm`), from 28 to 1,016 ms
-(`74cc5c82a3`) and from 1 to 620 ms (`0et6fx01id`), while the float32
-picture there is a noise texture of a different pattern. The exact form,
-where it applies, stays.
+documents with hash rows on field lanes: one wheel zoom went from about 1 ms to
+2,671 ms of render work (`neyret/62urmx2dcm`), from 28 to 1,016 ms
+(`74cc5c82a3`) and from 1 to 620 ms (`0et6fx01id`), while the float32 picture
+there is a noise texture of a different pattern. The exact form, where it
+applies, stays.
 
-**Tycho owner's decision (2026-10-18):**
-plan (i). The `glsl` target emits the exact form by default (no compile
-option) for the three hash shapes, in the wide version only (exact up to
-`|K·x| ≈ 2.6·10^7`). Beyond the limit the shader gives NaN, and the compile
-result reports the bound on each variable (for example "accurate for
-`|x| ≤ 2,635`"); a compile-time decision for a variable with a declared
-bounded range is welcome but not required. Other flagged shapes get the
-diagnostic (a), with the inner-or-outer criterion. No `wgsl` work is needed
-for Tycho, and a range beyond 2.6·10^7 is not needed for the first step.
-Tycho removes its text scan at the adoption that ships this.
+**Tycho owner's decision (2026-10-18):** plan (i). The `glsl` target emits the
+exact form by default (no compile option) for the three hash shapes, in the wide
+version only (exact up to `|K·x| ≈ 2.6·10^7`). Beyond the limit the shader gives
+NaN, and the compile result reports the bound on each variable (for example
+"accurate for `|x| ≤ 2,635`"); a compile-time decision for a variable with a
+declared bounded range is welcome but not required. Other flagged shapes get the
+diagnostic (a), with the inner-or-outer criterion. No `wgsl` work is needed for
+Tycho, and a range beyond 2.6·10^7 is not needed for the first step. Tycho
+removes its text scan at the adoption that ships this.
 
 Next steps, after those decisions: the diagnostic (a) on `glsl` with the
 criterion above; a `wgsl` lowering of `sin`/`cos` of a product with a large
-constant factor (exact product, `fma` reduction, polynomial). An exact product on `glsl`
-through integer arithmetic on the float bits was measured on 2026-10-18 (see
-below): it works, so the `glsl` target can also be made accurate.
+constant factor (exact product, `fma` reduction, polynomial). An exact product
+on `glsl` through integer arithmetic on the float bits was measured on
+2026-10-18 (see below): it works, so the `glsl` target can also be made
+accurate.
 
 **`glsl` with integer arithmetic (WebGL2, measured 2026-10-18 on ANGLE/Metal,
-Apple M5 Max, and on SwiftShader):** the product `a·b = p + e` is exact when
-`e` is formed from the 48-bit product of the two significands (12-bit pieces
-in `uint`, from `floatBitsToUint`). The rest of the hash also needs exact
-float steps, and the compiler breaks each one unless its operands pass
-through `opaque(v) = uintBitsToFloat(floatBitsToUint(v) ^ ZERO_U)` with a
-uniform `ZERO_U = 0` (a multiplication by a uniform `1.0` was not enough):
-both operands and each intermediate value of the two-sum, the operands and the
-rounded result of the product (otherwise the product is fused into the next
-subtraction), each step of the reduction by π/2, and `fract(p)` before small
-terms are added to it (otherwise `p − floor(p) + e` is reordered into
-`(p + e) − floor(p)`). With a reduction by π/2 that keeps its rounding in a
-low part, a two-part Taylor `sin`/`cos`, an exact outer product, and every
-double constant carried as two float32 parts (`12.9898 = hi + lo`), all three
-corpus shapes match float64 within 10⁻³ at 4,096 of 4,096 inputs, on both
-backends: `fract(10^4·sin(10^4·x))`, `fract(43758.5453·sin(12.9898·x))`, and
+Apple M5 Max, and on SwiftShader):** the product `a·b = p + e` is exact when `e`
+is formed from the 48-bit product of the two significands (12-bit pieces in
+`uint`, from `floatBitsToUint`). The rest of the hash also needs exact float
+steps, and the compiler breaks each one unless its operands pass through
+`opaque(v) = uintBitsToFloat(floatBitsToUint(v) ^ ZERO_U)` with a uniform
+`ZERO_U = 0` (a multiplication by a uniform `1.0` was not enough): both operands
+and each intermediate value of the two-sum, the operands and the rounded result
+of the product (otherwise the product is fused into the next subtraction), each
+step of the reduction by π/2, and `fract(p)` before small terms are added to it
+(otherwise `p − floor(p) + e` is reordered into `(p + e) − floor(p)`). With a
+reduction by π/2 that keeps its rounding in a low part, a two-part Taylor
+`sin`/`cos`, an exact outer product, and every double constant carried as two
+float32 parts (`12.9898 = hi + lo`), all three corpus shapes match float64
+within 10⁻³ at 4,096 of 4,096 inputs, on both backends:
+`fract(10^4·sin(10^4·x))`, `fract(43758.5453·sin(12.9898·x))`, and
 `fract(43758.5453·sin(dot(p, (12.9898, 78.233, 45.164))))`. Cost on the GPU
 (268M dependent calls): plain 1.1 ms; the first two shapes 6.0–6.3 ms (about
-5.5×); the `dot` shape 12.3 ms (about 10×). Harness:
-`glsl-int-bench.mjs` in the session scratchpad (not kept).
+5.5×); the `dot` shape 12.3 ms (about 10×). Harness: `glsl-int-bench.mjs` in the
+session scratchpad (not kept).
 
-**Range of the reduction (measured 2026-10-18):** with `k = round(p·2/π)`
-and π/2 split into 8-bit parts, `k·Ci` is exact only for `k < 2^16`, so the
-value is silently wrong for `|K·x|` above about 10^5 (2,872 of 4,096 inputs
-off for `|10^4·x|` up to 10^6). Splitting `k` into two 12-bit halves and π/2
-into 12-bit parts (from 60 digits of π/2), with a second pass that corrects
-`k` by ±1, is accurate up to `2^24·π/2 ≈ 2.6·10^7` (0 of 4,096 off at
-2.5·10^7, on ANGLE/Metal and SwiftShader) and costs about 7× plain against
-5.5× (6.5 ms against 4.9 ms and 0.9 ms plain). Above 2.6·10^7, `k` is no
-longer an exact float and the value is again silently wrong (3,826 of 4,096
-off at 10^9). A shader must therefore check `|p|` against the limit and give
-NaN beyond it, and the compile result should report the limit (as a bound on
-each variable when the factor is known), since the range of `x` is not known
-at compile time. A larger range needs `k` as two floats or a Payne–Hanek
-reduction in integer arithmetic (not measured).
+**Range of the reduction (measured 2026-10-18):** with `k = round(p·2/π)` and
+π/2 split into 8-bit parts, `k·Ci` is exact only for `k < 2^16`, so the value is
+silently wrong for `|K·x|` above about 10^5 (2,872 of 4,096 inputs off for
+`|10^4·x|` up to 10^6). Splitting `k` into two 12-bit halves and π/2 into 12-bit
+parts (from 60 digits of π/2), with a second pass that corrects `k` by ±1, is
+accurate up to `2^24·π/2 ≈ 2.6·10^7` (0 of 4,096 off at 2.5·10^7, on ANGLE/Metal
+and SwiftShader) and costs about 7× plain against 5.5× (6.5 ms against 4.9 ms
+and 0.9 ms plain). Above 2.6·10^7, `k` is no longer an exact float and the value
+is again silently wrong (3,826 of 4,096 off at 10^9). A shader must therefore
+check `|p|` against the limit and give NaN beyond it, and the compile result
+should report the limit (as a bound on each variable when the factor is known),
+since the range of `x` is not known at compile time. A larger range needs `k` as
+two floats or a Payne–Hanek reduction in integer arithmetic (not measured).
 
 Tycho's probes: `scripts/repros/2026-10-17-ce382-glsl-amplified-trig-probe.mts`
 in the Tycho repo; the full text of both rows is in Tycho's
@@ -482,15 +513,14 @@ With `f := x ↦ Floor(2x)`, `f((25! − 1)/48).N()` gives 25, where the correct
 value is 24. The exact re-read of a recorded argument
 (`exact-argument-source.ts`) handles a parameter written alone as the operand.
 For `2x`, the recorded argument must replace the parameter before the exact
-re-read, and `subs` replaces by name without respecting binders, so this needs
-a substitution that respects them. Since 2026-10-17, `exactRealValueOf`
+re-read, and `subs` replaces by name without respecting binders, so this needs a
+substitution that respects them. Since 2026-10-17, `exactRealValueOf`
 (`constraint-subject.ts`) refuses an exact value that reads such a parameter, so
 the result falls back to the float instead of a wrong exact value. The same
-cause in a comparison: with `g := x ↦ Equal(x − 10^30, 1)`,
-`g(10^30 + 1).N()` gives `False`, because the float of `x − 10^30` is `0`, far
-from `1`, so the comparison never asks for exact values; written without the
-function, the comparison gives `True` (its operand is an exact constant
-expression).
+cause in a comparison: with `g := x ↦ Equal(x − 10^30, 1)`, `g(10^30 + 1).N()`
+gives `False`, because the float of `x − 10^30` is `0`, far from `1`, so the
+comparison never asks for exact values; written without the function, the
+comparison gives `True` (its operand is an exact constant expression).
 
 ### Under `.N()`, a callback of `Map`, `Filter` or a comprehension in a user-function body reads the rounded argument (OPEN, design — found 2026-10-17 by the same fix)
 
@@ -527,32 +557,31 @@ application, so that values in the middle stay exact.
 
 ### Three `Solve` gaps found with the fractional-power fix (OPEN, small — found 2026-10-18)
 
-(1) `\sqrt{x} = i` gives `When(-1, 0 ≤ i)`, a root with a meaningless
-condition, where the answer is `-1`; the guard comes from
-`sqrtEquationRhsGuard` (`boxed-expression/solve.ts`). (2) `validateRoots()`
-compares the residual of a candidate with an ABSOLUTE tolerance, so a residual
-of `1e-30` counts as zero whatever the size of the equation's terms: with
-`x^{-0.5} = 10^{-30}`, the candidate `-10^{60}` would pass. A relative test
-(against the size of the right side or of the terms) changes many `Solve`
-results, so measure the effect first. (3) `Solve(x^{2.5} = -4, x, RealNumbers)`
-stays unevaluated, while an unknown declared `real` gives `[]`:
-`solve-domain.ts` treats an empty list for an equation that is not a polynomial
-as undecided.
+(1) `\sqrt{x} = i` gives `When(-1, 0 ≤ i)`, a root with a meaningless condition,
+where the answer is `-1`; the guard comes from `sqrtEquationRhsGuard`
+(`boxed-expression/solve.ts`). (2) `validateRoots()` compares the residual of a
+candidate with an ABSOLUTE tolerance, so a residual of `1e-30` counts as zero
+whatever the size of the equation's terms: with `x^{-0.5} = 10^{-30}`, the
+candidate `-10^{60}` would pass. A relative test (against the size of the right
+side or of the terms) changes many `Solve` results, so measure the effect first.
+(3) `Solve(x^{2.5} = -4, x, RealNumbers)` stays unevaluated, while an unknown
+declared `real` gives `[]`: `solve-domain.ts` treats an empty list for an
+equation that is not a polynomial as undecided.
 
 ### `Solve` of `x^n = c` with a large `n` is very slow (OPEN, performance — found 2026-10-18 by the float-degree `Solve` work)
 
 `x^{256} = 2` takes about 15 s and `x^{1000} = 2` does not finish in 60 s,
 although the `n` roots of `x^n = c` have a direct formula
-(`c^{1/n}·e^{2πik/n}`). Because of this, an integer-valued float exponent is read
-as a degree only up to 64 (`withExactIntegerExponents`, `solve.ts`), so
+(`c^{1/n}·e^{2πik/n}`). Because of this, an integer-valued float exponent is
+read as a degree only up to 64 (`withExactIntegerExponents`, `solve.ts`), so
 `x^{65.0} = 2` still gives only the real roots.
 
 ### `explain('solve')` at the default verbosity shows exact roots for a float-exponent equation (OPEN, small — found 2026-10-18 by the float-degree `Solve` work)
 
 For `x^{2.0} + 3x + 2 = 0` the result holds the floats `−1.0` and `−2.0`, but
-the curated explanation shows `x = −1` from the quadratic formula: `isSame(2.0,
-2)` is true, so the curation drops the step that changes the exponents to
-integers and the step that changes the roots to floats. With
+the curated explanation shows `x = −1` from the quadratic formula:
+`isSame(2.0, 2)` is true, so the curation drops the step that changes the
+exponents to integers and the step that changes the roots to floats. With
 `verbosity: 'all'` every step shows.
 
 ### The structural hash of a function expression repeats every 32 or 64 levels of nesting (OPEN, small — found 2026-10-18 by the CSE shared-subtree fix)
@@ -564,26 +593,26 @@ the doubling shape `e = Add(e, e)` repeats every 64 levels and a `Sin`/`Cos`
 chain every 32. Since 2026-10-18 the CSE pass no longer pays for these
 collisions (a class whose node count differs is skipped without `isSame`), but
 every other user of the hash (pattern bucketing, expression maps) still gets
-them. A rotate (`(h << 5) | (h >>> 27)`) or a multiply-xorshift mix would
-avoid it; the hash must stay equal for `isSame`-equal expressions (including
-the `character`/one-cluster `string` case).
+them. A rotate (`(h << 5) | (h >>> 27)`) or a multiply-xorshift mix would avoid
+it; the hash must stay equal for `isSame`-equal expressions (including the
+`character`/one-cluster `string` case).
 
 ### Other walks that are exponential on shared subtrees, and slow products with many factors (OPEN, performance — found 2026-10-18 by the fixes of `isConstructedScalar` and of `add(...operands)`)
 
 (1) The constant-folding walks of `compilation/base-compiler.ts`
 (`mentionsCompileBoundName`, `containsUnboundedBigOp`, `foldValueBlocked`,
 `tryConstantFold`) walk every path of a tree with shared nodes: with constant
-folding on (the default), compiling `e = Add(e, e)` over `2 + √3` takes 92 ms
-at depth 18 and 3012 ms at depth 24 (with `constantFold: false` it is linear
-since 2026-10-18). Each walk needs a memo keyed by node. (2) Building a `Sum`
-whose body has a shared subtree is exponential:
+folding on (the default), compiling `e = Add(e, e)` over `2 + √3` takes 92 ms at
+depth 18 and 3012 ms at depth 24 (with `constantFold: false` it is linear since
+2026-10-18). Each walk needs a memo keyed by node. (2) Building a `Sum` whose
+body has a shared subtree is exponential:
 `ce.function('Sum', [At(L, idx), Limits(k, 1, 1)])` with `idx` doubled 20 times
 takes more than 3 s in `rebindToBindings` (`binders.ts`), before any compile.
 (3) A product of distinct symbols is cubic on `evaluate()` and `.N()` (1000
 factors 1.3 s, 2000 factors 10 s, 4000 factors 74 s): the right fold in
 `expandProducts` builds a new `Product` at each step, and each scans its factors
-linearly with `isSame`. A product of 130 000 copies of `2 + √3` takes about
-3.6 s from source (13 s under jest). (4) `.N()` of a product of many factors is
+linearly with `isSame`. A product of 130 000 copies of `2 + √3` takes about 3.6
+s from source (13 s under jest). (4) `.N()` of a product of many factors is
 quadratic (16 000 factors 1.5 s, 200 000 factors 225 s): `BigDecimal.mul` and
 `normalize` keep every digit during the fold instead of rounding to the working
 precision.
@@ -595,16 +624,16 @@ precision.
 real constant. Code that tests `isFinite === true` before it uses a value then
 gives up for every compound constant (the fractional-power `Solve` route reads
 the numeric value instead since 2026-10-18). `Negate`, `Add` and `Multiply` of
-operands that are all finite should report `true` (and `Divide` when the
-divisor is also nonzero).
+operands that are all finite should report `true` (and `Divide` when the divisor
+is also nonzero).
 
 ### Compiling shared nodes under lazy operands in nested regions is still exponential (OPEN, performance — found 2026-10-18 by the CSE shared-subtree fix)
 
 Since 2026-10-18 the CSE analysis (`compilation/cse.ts`) walks each distinct
-node once per region. But `e_k = If(c, e_(k-1), e_(k-1))` creates one region
-per chain of lazy arms, so the number of regions grows as `2^k`. This is a
-property of the region model, not of the walk. Also, a `Sin`/`Cos` chain of
-depth 200 overflows the compiler's own recursion.
+node once per region. But `e_k = If(c, e_(k-1), e_(k-1))` creates one region per
+chain of lazy arms, so the number of regions grows as `2^k`. This is a property
+of the region model, not of the walk. Also, a `Sin`/`Cos` chain of depth 200
+overflows the compiler's own recursion.
 
 ### `Take` over a `FlatMap` with a finite source stays unevaluated (OPEN, small — found 2026-10-17 by the `FlatMap` infinite-inner-collection fix)
 
@@ -744,8 +773,7 @@ returns an error whose frames do not start with that call.
 
 The static check does not report the refusal of a `function` statement on a
 `const` binding as a diagnostic of its own (`executeEpsil` reports it as
-`runtime-error` / `invalid-clause-definition`; `epsil check` users see
-nothing).
+`runtime-error` / `invalid-clause-definition`; `epsil check` users see nothing).
 
 ### The Python `compileFunction()` accepts a binding name that is not an identifier (OPEN, small — found 2026-10-16 by the Python `return s = x` fix)
 
@@ -1258,10 +1286,10 @@ full family** — a trigonometric `Solve` with no domain, or over ℝ or ℂ, re
 each family with an integer parameter, with the same parameter names as the
 diophantine solver (`t`, `t_1`, …), so `Solve(sin x = 1/2, x)` gives
 `[π/6 + 2πt, 5π/6 + 2πt]`. Measure the number of changed snapshots first, and
-report it before the change lands. A product of periodic factors keeps its
-roots per factor (user decision 2026-10-17, already written in
-`doc/85-reference-core.md`), so each root of a product gives one family with
-the period of its own factor: `sin(2x)·cos(3x) = 0` gives `πt`, `π/2 + πt`,
+report it before the change lands. A product of periodic factors keeps its roots
+per factor (user decision 2026-10-17, already written in
+`doc/85-reference-core.md`), so each root of a product gives one family with the
+period of its own factor: `sin(2x)·cos(3x) = 0` gives `πt`, `π/2 + πt`,
 `π/6 + 2πt/3` and `−π/6 + 2πt/3`.
 
 ### `Solve` over a bounded domain stays unevaluated in some cases that have a complete answer (OPEN, small — found 2026-10-04 by the completeness scan)
@@ -2371,20 +2399,20 @@ broadcast, and that case must keep working.
 The round of that date made arithmetic with an absent operand `NaN`, an
 out-of-range read `NaN`, `Trace(Missing)` `NaN`, and put an absent cell last in
 `Sort`. What it left, found 2026-09-27: interpreter defects against
-`docs/ERROR-MODEL.md` §3:
-`Less(First([Missing, 1]), 0)` is `False` but `If` over it is an "absent
-condition" error, and `If(Less(Missing, t), …)` is that error where §3 says a
-branch on an undecided comparison takes no arm; compiled code answers `NaN` in
-both. `python-target.ts` calls `conditionDecidability` without a target at two
-sites (lines near 2409 and 2564); the absent-relation rule is handled inside
-`conditionNode` instead. Not a defect (checked 2026-09-27): the `.neg()`,
-`.inv()`, `.pow()` and `.sqrt()` methods keep an absent operand (`-"Missing"`,
-`1/"Missing"`; both evaluate to `NaN`) on purpose, because canonicalization
-builds a difference as `a + (-b)` and the kept `Negate(Missing)` is the marker
-that makes `(1, 2) - Missing` absent rather than a type error
-(`absent-point-arithmetic.test.ts` pins six such cases). Not a defect, recorded
-rule: compiled arithmetic with an absent POINT gives `NaN` where the interpreter
-gives `Missing` (`compile-restricted-point.test.ts`, as for `A\{0<t\} + 1`).
+`docs/ERROR-MODEL.md` §3: `Less(First([Missing, 1]), 0)` is `False` but `If`
+over it is an "absent condition" error, and `If(Less(Missing, t), …)` is that
+error where §3 says a branch on an undecided comparison takes no arm; compiled
+code answers `NaN` in both. `python-target.ts` calls `conditionDecidability`
+without a target at two sites (lines near 2409 and 2564); the absent-relation
+rule is handled inside `conditionNode` instead. Not a defect (checked
+2026-09-27): the `.neg()`, `.inv()`, `.pow()` and `.sqrt()` methods keep an
+absent operand (`-"Missing"`, `1/"Missing"`; both evaluate to `NaN`) on purpose,
+because canonicalization builds a difference as `a + (-b)` and the kept
+`Negate(Missing)` is the marker that makes `(1, 2) - Missing` absent rather than
+a type error (`absent-point-arithmetic.test.ts` pins six such cases). Not a
+defect, recorded rule: compiled arithmetic with an absent POINT gives `NaN`
+where the interpreter gives `Missing` (`compile-restricted-point.test.ts`, as
+for `A\{0<t\} + 1`).
 
 ### An absent list carries no shape: `Missing + 2\{b>0\}` is a scalar (OPEN, small — found 2026-09-25)
 
@@ -2539,9 +2567,9 @@ under `.N()` (before `168de97d` they answered wrong real values).
 `singularValueDecomposition(re, im)` in `numerics/linear-algebra.ts` (QR with
 column pivoting, then a one-sided Jacobi pass), which returns the complex `U`
 and `V`. The real embedding of the complex matrix that this kernel uses also
-gives the eigenvalues of a HERMITIAN matrix (run Jacobi on the embedding itself, take each eigenvalue once;
-an eigenvector `[x; y]` gives `x + iy`); a general complex matrix needs a
-complex QR iteration.
+gives the eigenvalues of a HERMITIAN matrix (run Jacobi on the embedding itself,
+take each eigenvalue once; an eigenvector `[x; y]` gives `x + iy`); a general
+complex matrix needs a complex QR iteration.
 
 ### Compiled colour values: keep the colour space; non-rounding conversions in `@arnog/colors` (OPEN, design — found 2026-09-23 by the review of `168de97d`)
 
@@ -4576,9 +4604,9 @@ rounds of 2026-07-30 to 2026-08-30 that this ledger used to narrate are in
     on JS — lowering is deliberately narrower than typing (no per-point
     representation for such a slot).
   - Holes of the same family as the tuple component of `PointList` (refused
-    since 2026-10-18): `hasPointElementType` (`collections.ts` ~684) accepts only
-    `{kind:'tuple'}` nodes, not the bare `'tuple'` string; and projecting an
-    **empty** point list diverges (compiled `[]`, interpreter absence — the
+    since 2026-10-18): `hasPointElementType` (`collections.ts` ~684) accepts
+    only `{kind:'tuple'}` nodes, not the bare `'tuple'` string; and projecting
+    an **empty** point list diverges (compiled `[]`, interpreter absence — the
     evaluated empty transpose types `list<never>`, so the point-ness is
     unrecoverable; pinned as a known parity edge in
     `pointlist-compile-zip.test.ts`).
@@ -5711,11 +5739,11 @@ ledger, B13). Each entry's acceptance test already exists:
   `mpmath-kernels.test.ts`); `ζ(−0.5)` ~4 ulp (tolerance-relaxed); one
   `Multiply` inexact case where the big-precision path is worse than machine
   evaluate (`arithmetic.test.ts` `@fixme`).
-- **Misc:** range/interval membership assumptions not wired (`assumptions.test.ts` `@fixme` setup lines);
-  malformed positional-parameter name `_1_0` in a `Function` snapshot
-  (`functions.test.ts`); the `grudnitski.test.ts` equivalence benchmark keeps 9
-  `describe.skip` groups (equation-scaling / identity-based `isEquivalent`
-  capabilities).
+- **Misc:** range/interval membership assumptions not wired
+  (`assumptions.test.ts` `@fixme` setup lines); malformed positional-parameter
+  name `_1_0` in a `Function` snapshot (`functions.test.ts`); the
+  `grudnitski.test.ts` equivalence benchmark keeps 9 `describe.skip` groups
+  (equation-scaling / identity-based `isEquivalent` capabilities).
 
 `test/playground.ts` remains the tracker for its own residue (notation
 decisions, Iverson/Boole and inequality→`Range` wishlist, matcher internals).
