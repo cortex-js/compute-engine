@@ -3330,6 +3330,18 @@ export class BaseCompiler {
           emitted = true;
           return folded;
         }
+        // A rounding function whose operand adds an integer to an exact
+        // constant that no double holds is compiled from an equivalent form
+        // that rounds the constant alone, so the constant fold computes the
+        // rounded constant exactly (`jumpShiftRewrite`). The other shapes
+        // that mix only integer variables with such a constant decline
+        // there.
+        const shifted = BaseCompiler.jumpShiftRewrite(expr, target);
+        if (shifted !== undefined) {
+          const code = BaseCompiler.compile(shifted, target, prec);
+          emitted = true;
+          return code;
+        }
         // A `MatchesType` the gate above admitted (a ground one that did not
         // fold reaches here too). Emitted INSIDE the frame so its subject
         // compiles as an operand: at depth 0 a tagged-sum subject would trip
@@ -8114,6 +8126,310 @@ export class BaseCompiler {
       return false;
     };
     return !hasFloat(expr);
+  }
+
+  /** The rounding functions that `jumpShiftRewrite` applies to. */
+  private static readonly SHIFT_JUMP_HEADS: ReadonlySet<string> = new Set([
+    'Floor',
+    'Ceil',
+    'Round',
+    'Truncate',
+    'Fract',
+  ]);
+
+  /**
+   * An equivalent form of a rounding function (`Floor`, `Ceil`, `Round`,
+   * `Truncate`, `Fract`) whose operand mixes a variable with an exact
+   * constant that no double holds exactly, or `undefined` when `expr` is not
+   * such a node. Throws a `CompileDeclineError` when such a node has no
+   * equivalent form.
+   *
+   * The structural code computes the constant as a double, and the rounding
+   * can then go to the other side of the jump: the double of
+   * `c = (25! − 1)/24!` is 25.0, so `Floor(k + c)` at the integer `k = 1`
+   * gives 26, where the exact value is 25. When the operand is `v + c`, with
+   * `v` integer-typed (a loop index, an integer-typed variable, a sum of
+   * them with integer coefficients) and `c` the closed terms, the rounding
+   * commutes with the integer shift `v`:
+   * - `Floor(v + c) = v + Floor(c)` and `Ceil(v + c) = v + Ceil(c)`;
+   * - `Fract(v + c) = Fract(c)`, since `Fract(x)` is `x − Floor(x)`;
+   * - `Round(v + c) = v + Round(c)` when `c` is not halfway between two
+   *   integers: away from a tie, `Round(x)` is `Floor(x + 1/2)`. At a tie the
+   *   result depends on the tie rule (`ce.roundingTies`), and most rules are
+   *   not shift-invariant (to even, away from zero, toward zero), so a `c`
+   *   at or near a tie declines;
+   * - `Truncate` is not shift-invariant across 0 (`Truncate(−3 + 1/2)` is
+   *   −2, but `−3 + Truncate(1/2)` is −3). `Truncate(x)` is `Floor(x)` for
+   *   `x ≥ 0` and `Ceil(x)` for `x < 0`, and for an integer `v`,
+   *   `v + c ≥ 0` exactly when `v ≥ −Floor(c)`. So `Truncate(v + c)` is
+   *   `If(v ≥ −Floor(c), v + Floor(c), v + Ceil(c))`.
+   * Each rounded constant is a closed exact jump node, which the constant
+   * fold computes with the exact value (`closedExactJump`).
+   *
+   * Every other shape whose variables are all integer-typed declines: a sum
+   * whose variable part is not integer-typed (`Floor(k/3 + c)`), a product
+   * (`Floor(k·π)`), a constant inside a variable term (`Floor(k·√2 + 1)`),
+   * a step form (`Floor(k + c, 2)`), a `Round` whose constant may be a tie.
+   *
+   * A shape with a variable that is not integer-typed (a real `x`) keeps its
+   * structural code: `Floor(x + 1/3)`, `Floor(π·x)`, `Floor(x/√2)`, and also
+   * `Floor(k + x + c)` with an integer `k`. The double of the constant can
+   * move the jump by about one unit in the last place of the operand, as in
+   * any float code, and the jump of such an operand is not at a point that
+   * an integer input hits exactly. So `Floor(x + (25! − 1)/24!)` at `x = 1`
+   * gives 26, where the interpreter gives 25. The walk that looks for such a
+   * variable stops at an integer-typed subtree (`k`, `2k + m`). `Floor(x)`
+   * for a real `x` is typed `integer | infinity`, not `integer`, so the walk
+   * goes into it, and `Floor(Floor(x) + c)` keeps its structural code.
+   *
+   * The constants that do not trigger this: a literal that a double holds
+   * exactly (an integer within the reach of the significand, a rational
+   * with a power-of-two denominator: `Floor(k + 1/2)` keeps its structural
+   * code), and a rational factor of a product whose numerator and
+   * denominator are such integers, because the targets emit it as a
+   * division and a multiplication by those integers (`Floor(2k/3)` is
+   * `Math.floor(k / 3 * 2)`), which round the exact integer quotient
+   * correctly. A symbol is judged by its assigned value. A rounding node
+   * inside the operand is judged on its own, not as a part of this one.
+   *
+   * Nothing changes for an operand with a float literal (the interpreter
+   * computes such an operand approximately too), for a closed operand (the
+   * constant fold handles it), and on an interval target, whose code
+   * computes an enclosure that contains the exact value. Nothing changes
+   * either for a node with an effect (`Floor(k + Random())`), or when the
+   * caller replaced the lowering of an operator the identities use or of a
+   * name in the operand: the structural code is kept.
+   */
+  private static jumpShiftRewrite(
+    expr: Expression,
+    target: CompileTarget<Expression>
+  ): Expression | undefined {
+    if (!isFunction(expr)) return undefined;
+    const head = expr.operator;
+    if (!BaseCompiler.SHIFT_JUMP_HEADS.has(head)) return undefined;
+    if (target.language?.startsWith('interval')) return undefined;
+    if (expr.unknowns.length === 0) return undefined;
+    if (!expr.ops.every((op) => isSubtype(compilationType(op), 'number')))
+      return undefined;
+    // A node with an effect anywhere (`Random()`, `10·Random()`) is left
+    // alone. The rewrite would compute the closed terms more than once (the
+    // `Truncate` form uses the constant three times), evaluate them at
+    // compile time to choose a form (the tie test of `Round`), or drop the
+    // integer terms (`Fract(v + c)` is `Fract(c)`). Each of these changes the
+    // number of effects or the value.
+    if (!expr.isPure) return undefined;
+    // The identities hold for the semantics of the engine's operators. A
+    // caller can replace the lowering of an operator (the `functions` and
+    // `operators` compile options) or of a symbol (a string `vars` entry),
+    // and the rewritten form would then route the constant through that
+    // lowering in a different shape: with a custom `Floor` lowering that
+    // gives 42, `Floor(k + 1/3)` must give 42, not `k + 42`. So the rewrite
+    // is skipped when the caller replaced the rounding functions, the
+    // arithmetic operators, the operators of the `Truncate` form, or any
+    // operator or symbol of the operand. The compilation records which
+    // names the caller replaced on the CSE session (`openCseSession`), also
+    // when CSE is disabled. When it recorded nothing (a direct custom target,
+    // whose lowerings are all the caller's), the rewrite is skipped too.
+    const provenance = target.cse?.harvestOptions;
+    if (provenance === undefined) return undefined;
+    const overridden = (name: string): boolean =>
+      provenance.isOverriddenOperator?.(name) === true;
+    if (
+      [
+        ...BaseCompiler.SHIFT_JUMP_HEADS,
+        'Add',
+        'Multiply',
+        'Negate',
+        'Subtract',
+        'Divide',
+        'If',
+        'GreaterEqual',
+      ].some(overridden)
+    )
+      return undefined;
+    const callerSeen = new Set<Expression>();
+    const callerSupplied = (node: Expression): boolean => {
+      if (callerSeen.has(node)) return false;
+      callerSeen.add(node);
+      if (isSymbol(node))
+        return provenance.isStringVar?.(node.symbol) === true;
+      if (isFunction(node))
+        return overridden(node.operator) || node.ops.some(callerSupplied);
+      return false;
+    };
+    if (expr.ops.some(callerSupplied)) return undefined;
+    const engine = expr.engine;
+
+    // A node with a variable that is not integer-typed is left alone. An
+    // open subtree that is integer-typed (`k`, `2k + m`, `Floor(k/3)`) counts
+    // as an integer, so the walk does not go into it. Each node is visited
+    // once, since an expression can share a subtree between operands.
+    const realSeen = new Set<Expression>();
+    const hasRealVariable = (node: Expression): boolean => {
+      if (realSeen.has(node)) return false;
+      realSeen.add(node);
+      if (node.unknowns.length === 0) return false;
+      if (isSubtype(compilationType(node), 'integer')) return false;
+      if (isSymbol(node)) return true;
+      if (isFunction(node)) return node.ops.some(hasRealVariable);
+      return false;
+    };
+    if (expr.ops.some(hasRealVariable)) return undefined;
+
+    // A node with a float literal anywhere is left alone. The walk visits
+    // each node once, since an expression can share a subtree between
+    // operands.
+    const floatSeen = new Set<Expression>();
+    const hasFloat = (node: Expression): boolean => {
+      if (floatSeen.has(node)) return false;
+      floatSeen.add(node);
+      if (isNumber(node)) return !node.isExact;
+      if (isFunction(node)) return node.ops.some(hasFloat);
+      return false;
+    };
+    if (hasFloat(expr)) return undefined;
+
+    // Whether the value of the closed node `node` is held exactly by a
+    // double. A node that is not a number literal (a symbol with a value,
+    // `Factorial(10)`) is judged by its exact value, when its evaluation is
+    // pure and within the work budget of the constant fold; otherwise it
+    // counts as a constant that no double holds.
+    const doubleExact = (node: Expression): boolean => {
+      const literal = (n: Expression): boolean => {
+        if (!isNumber(n) || !n.isExact) return false;
+        const nv = n.numericValue;
+        return typeof nv === 'number' || exactDoubleValue(nv) !== undefined;
+      };
+      if (isNumber(node)) return literal(node);
+      if (
+        !node.isPure ||
+        !(BaseCompiler.foldCostEstimate(node) <= CONSTANT_FOLD_MAX_COST)
+      )
+        return false;
+      return literal(node.evaluate());
+    };
+    // A rational literal `p/q` whose `p` and `q` are integers that a double
+    // holds: as a factor of a product, it is emitted as a division by `q`
+    // and a multiplication by `p`.
+    const divisionFactor = (node: Expression): boolean => {
+      if (!isNumber(node)) return false;
+      const nv = node.numericValue;
+      if (typeof nv === 'number' || !nv.isExact || nv.im !== 0) return false;
+      return [nv.numerator, nv.denominator].every((part) =>
+        Number.isSafeInteger(exactDoubleValue(part) ?? Number.NaN)
+      );
+    };
+
+    // The maximal closed subtrees of the operands that no double holds.
+    // A closed node is judged at each of its positions, since the answer
+    // depends on the parent (a rational is excused as a factor of a
+    // product only): an expression can share one `1/3` object between a
+    // product factor and a term of the sum. The open nodes, whose answer
+    // does not depend on the parent, are visited once each.
+    const risky: Expression[] = [];
+    const seen = new Set<Expression>();
+    const exactMemo = new Map<Expression, boolean>();
+    const visit = (node: Expression, parent: Expression): void => {
+      if (node.unknowns.length === 0) {
+        // A constant that is not real (`i`, `1 + i`) is not compared with
+        // the jumps of the real line here: the real-only gate of the head
+        // judges an operand that may be complex.
+        if (!isSubtype(compilationType(node), 'real')) return;
+        let exact = exactMemo.get(node);
+        if (exact === undefined) {
+          exact = doubleExact(node);
+          exactMemo.set(node, exact);
+        }
+        if (exact) return;
+        if (isFunction(parent, 'Multiply') && divisionFactor(node)) return;
+        if (!risky.includes(node)) risky.push(node);
+        return;
+      }
+      if (seen.has(node)) return;
+      seen.add(node);
+      if (!isFunction(node)) return;
+      if (BaseCompiler.SHIFT_JUMP_HEADS.has(node.operator)) return;
+      for (const op of node.ops) visit(op, node);
+    };
+    for (const op of expr.ops) visit(op, expr);
+    if (risky.length === 0) return undefined;
+
+    const decline = (reason: string): never => {
+      throw new CompileDeclineError({
+        code: 'inexact-jump-operand',
+        kind: 'correctness',
+        message:
+          `Could not compile \`${expr.toString()}\`: its operand combines a ` +
+          `variable with the exact constant \`${risky[0].toString()}\`, ` +
+          `which no double holds exactly, and ${reason}. The compiled code ` +
+          `would compute the constant as a double, and the rounding could ` +
+          `go to the other side of the jump of \`${head}\`.`,
+      });
+    };
+
+    const x = expr.op1;
+    if (expr.nops !== 1 || !isFunction(x, 'Add'))
+      return decline('the operand is not a sum of the constant and an integer');
+    const closed = x.ops.filter((t) => t.unknowns.length === 0);
+    const open = x.ops.filter((t) => t.unknowns.length > 0);
+    if (!risky.every((r) => closed.includes(r)))
+      return decline('the constant is inside a variable term of the operand');
+    if (!open.every((t) => isSubtype(compilationType(t), 'integer')))
+      return decline('the variable part of the operand is not an integer');
+
+    const S = { form: 'structural' } as const;
+    const sum = (terms: ReadonlyArray<Expression>): Expression =>
+      terms.length === 1 ? terms[0] : engine.function('Add', [...terms], S);
+    const v = sum(open);
+    const c = sum(closed);
+    const round = (h: string): Expression => engine.function(h, [c], S);
+    // Whether `c` is halfway between two integers, or may be: `true` unless
+    // that is excluded. `.N()` reads the exact value of an exact operand of
+    // `Fract`, so a fractional part that is not near 1/2 excludes a tie. Near
+    // 1/2, the exact value decides: an exact rational is a tie exactly when
+    // its reduced denominator is 2, and an exact number that is not rational
+    // (a radical) is never a tie. A constant with no exact value (a
+    // transcendental) near a tie counts as a tie.
+    const isTie = (): boolean => {
+      const f = round('Fract').N().re;
+      if (!Number.isFinite(f)) return true;
+      if (Math.abs(f - 0.5) >= 1e-9) return false;
+      const value = c.evaluate();
+      if (!isNumber(value) || !value.isExact) return true;
+      const nv = value.numericValue;
+      if (typeof nv === 'number') return false;
+      if (!isSubtype(compilationType(value), 'rational')) return false;
+      return exactDoubleValue(nv.denominator) === 2;
+    };
+    switch (head) {
+      case 'Floor':
+      case 'Ceil':
+        return engine.function('Add', [v, round(head)], S);
+      case 'Fract':
+        return round('Fract');
+      case 'Round': {
+        if (isTie())
+          return decline('the constant may be halfway between two integers');
+        return engine.function('Add', [v, round('Round')], S);
+      }
+      case 'Truncate': {
+        const floor = round('Floor');
+        return engine.function(
+          'If',
+          [
+            engine.function(
+              'GreaterEqual',
+              [v, engine.function('Negate', [floor], S)],
+              S
+            ),
+            engine.function('Add', [v, floor], S),
+            engine.function('Add', [v, round('Ceil')], S),
+          ],
+          S
+        );
+      }
+    }
+    return undefined;
   }
 
   /**

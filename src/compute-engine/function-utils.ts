@@ -2084,13 +2084,17 @@ export function apply(
 /**
  * Evaluate a sequence of statements, handling Return/Break/Continue.
  *
- * Each statement is evaluated with `statementOptions`, which is either
- * nothing (an exact evaluation) or a numeric-approximation request. The
- * request is forwarded only by the application of a user function whose body
- * is ONE statement, where the value of that statement is the value of the
- * function (see `makeLambda`). A body with several statements always runs
+ * `lastStatementOptions` is either nothing (an exact evaluation) or a
+ * numeric-approximation request, and it applies to the LAST statement only.
+ * The value of the last statement is the value of the sequence, so it can be
+ * computed numerically: a jump in it (`Floor(x)`, `x < 25`) then reads the
+ * exact argument behind a parameter bound to a float, as at the top level
+ * (`exact-argument-source.ts`). The statements before it always run
  * exactly: an intermediate value that a later statement reads (`a := √2;
- * a^2`) must not be rounded on the way.
+ * a^2`) must not be rounded on the way. The request is forwarded by the
+ * application of a user function (`resultStatementRequest`, `makeLambda`)
+ * and by a `Block` evaluated with a numeric request (`evaluateBlock`,
+ * `library/control-structures.ts`).
  *
  * Used by both:
  * - `evaluateBlock` in control-structures.ts (Block evaluation handler)
@@ -2103,11 +2107,13 @@ export function apply(
  */
 export function evaluateStatements(
   ce: ComputeEngine,
-  ops: Iterable<Expression>,
-  statementOptions?: { numericApproximation: true }
+  ops: ReadonlyArray<Expression>,
+  lastStatementOptions?: { numericApproximation: true }
 ): Expression {
   let result: Expression = ce.Nothing;
-  for (const op of ops) {
+  const last = ops.length - 1;
+  for (let i = 0; i <= last; i++) {
+    const op = ops[i];
     // Debugger pause point (see `common/debug-hook.ts`): only statements
     // that originated from source (carrying `sourceOffsets`) fire — the
     // hook may BLOCK. One comparison per statement when no debugger is
@@ -2117,7 +2123,7 @@ export function evaluateStatements(
     // Evaluate the statement. `Break`/`Continue` are inert registered
     // operators and `Return` is unregistered, so a literal control-flow
     // statement evaluates to itself with its operand evaluated.
-    result = op.evaluate(statementOptions);
+    result = op.evaluate(i === last ? lastStatementOptions : undefined);
     // Post-statement debugger hook (break-on-error-value); same guard shape
     // as the pre-statement hook above.
     if (
@@ -2156,13 +2162,12 @@ export function evaluateStatements(
  * evaluated instead of staying inert. Same debugger hooks, same
  * short-circuit on a control-flow or `Error` value. A numeric-approximation
  * request reaches a statement on this route exactly when it reaches it on
- * the synchronous route: `numericApproximation` is set by the application of
- * a user function whose body is one statement, and by nothing else (see
- * `evaluateStatements`).
+ * the synchronous route: `numericApproximation` applies to the last
+ * statement only (see `evaluateStatements`).
  */
 export async function evaluateStatementsAsync(
   ce: ComputeEngine,
-  ops: Iterable<Expression>,
+  ops: ReadonlyArray<Expression>,
   signal?: AbortSignal,
   effects?: EffectHandlers,
   contextStack?: EvaluateOptions['_contextStack'],
@@ -2170,7 +2175,9 @@ export async function evaluateStatementsAsync(
   precisionWindow?: EvaluateOptions['_precisionWindow']
 ): Promise<Expression> {
   let result: Expression = ce.Nothing;
-  for (const op of ops) {
+  const last = ops.length - 1;
+  for (let i = 0; i <= last; i++) {
+    const op = ops[i];
     if (debugStatementHook !== undefined && op.sourceOffsets !== undefined)
       debugStatementHook(op);
     // `effects` is the host capability registry the enclosing asynchronous
@@ -2179,7 +2186,7 @@ export async function evaluateStatementsAsync(
     // ones.
     result = await op.evaluateAsync({
       signal,
-      numericApproximation,
+      numericApproximation: i === last ? numericApproximation : undefined,
       _effects: effects,
       _contextStack: contextStack,
       _precisionWindow: precisionWindow,
@@ -3284,15 +3291,21 @@ type ParameterSub = readonly [
  * from the argument, so it stays substitutable even when ambiguous
  * (`Apply(w ↦ If(c, w, 0), w + 1)` = `If(c, w + 1, 0)`).
  *
- * The binding-keyed half needs no shadowing exclusion — a nested `Function`
- * literal that re-binds the name declares a DIFFERENT binding (not an
- * activation of this one), so its occurrences simply do not match, and
- * `(x ↦ (x ↦ x))(1)` keeps its inner binder for free. The RAW-name fallback
- * half is name-based, so it does need one: any binder between the root and the
- * occurrence that binds the name — a nested literal's parameter list, but also
- * a scoped operator's `localScope` (the parser leaves a `Sum`'s binding-site
- * symbol raw) — owns its occurrences, and the walker's `shadowed` set carries
- * exactly that.
+ * Both halves skip an occurrence below a binder that binds the parameter's
+ * name — a nested literal's parameter list, but also a scoped operator's
+ * `localScope` (the parser leaves a `Sum`'s binding-site symbol raw). That
+ * binder owns its occurrences, and the walker's `shadowed` set carries exactly
+ * that. The RAW-name half needs the exclusion because it matches by name. The
+ * binding-keyed half needs it too: usually a nested literal that re-binds the
+ * name declares a DIFFERENT binding, so its occurrences do not match
+ * (`(x ↦ (x ↦ x))(1)` keeps its inner binder), but the nested literal can be
+ * THIS literal itself. A user function that calls itself from a lazy
+ * operator's callback — `m(n) := Map(x ↦ If(x < 1, 0, m(x − 1)), [n])` —
+ * evaluates the inner call to a held `Map` that holds the same callback
+ * literal, whose parameter and body occurrences carry the same binding as the
+ * frame being settled. Substituting into them rewrote the inner literal's
+ * parameter list to `Typed(1, "number")` and gave an `expected-a-symbol`
+ * error.
  */
 function bindingKeyedSubs(
   expr: Expression,
@@ -3308,7 +3321,8 @@ function bindingKeyedSubs(
         def !== undefined &&
         binding !== undefined &&
         sameBindingDef(def, binding) &&
-        (!ambiguous || def === binding)
+        (!ambiguous || def === binding) &&
+        shadowed?.has(name) !== true
       )
         return value;
       // Raw: a lazy operator holds its operands unevaluated, so the body
@@ -4123,15 +4137,15 @@ function makeLambda(
       ACTIVE_FRAMES.add(freshScope);
       let result: Expression;
       try {
-        // A body that is one statement takes the numeric request itself
-        // (see `singleStatementRequest`); a longer body runs exactly and
-        // only its value is numericized.
+        // The last statement of the body takes the numeric request itself
+        // (see `resultStatementRequest`); the statements before it run
+        // exactly.
         result = unwrapReturn(
           ce,
           evaluateStatements(
             ce,
             nullaryBody.ops,
-            singleStatementRequest(fnExpr, nullaryBody.ops, options)
+            resultStatementRequest(fnExpr, nullaryBody.ops, options)
           )
         );
         result = resolveEscapingLambda(ce, result);
@@ -4977,16 +4991,16 @@ function makeLambda(
     ce.pushScope(freshScope, 'call');
     ACTIVE_FRAMES.add(freshScope);
     let result: Expression;
-    // The numeric request, when the body is one statement and takes it
-    // itself (see `singleStatementRequest`). A list-producing recursion
+    // The numeric request, when the last statement of the body takes it
+    // itself (see `resultStatementRequest`). A list-producing recursion
     // runs its private step statements exactly, whatever the request.
     const statementRequest =
       iterationStatements === undefined
-        ? singleStatementRequest(fnExpr, bodyFn.ops, options)
+        ? resultStatementRequest(fnExpr, bodyFn.ops, options)
         : undefined;
     // The exact answer of a numerically requested application, kept for
-    // the memo (see the numeric pass below). There is none when the body
-    // took the numeric request itself.
+    // the memo (see the numeric pass below). There is none when the last
+    // statement of the body took the numeric request itself.
     let exactResult: Expression | undefined = undefined;
     // What follows the statements runs the same on both routes: `settle` in
     // the frame, `cleanup` when the frame leaves, `conclude` after.
@@ -5072,20 +5086,19 @@ function makeLambda(
       // replaced by its value (`bindingKeyedSubs`, above), so what remains
       // means its own binding and is resolved as such.
       if (numeric) {
-        // When the body has several statements it ran EXACTLY (its
-        // statements evaluate with no options), so the exact answer of this
-        // application is in hand before the numeric pass below and is
-        // memoized under the exact key as well. A recursive body with
-        // several statements applies itself through the exact route
-        // whatever the outer request was: `P(k)` requested numerically
-        // evaluates `P(k-1)` exactly. Without this entry a run of numeric
-        // requests `P(0)`, `P(1)`, … `P(n)` — the elements of a lazy
-        // comprehension pulled one at a time — never found the previous
-        // element's exact result and re-ran the recursion from the bottom
-        // at every element. A body of one statement took the request
-        // itself, so its value is already numeric and no exact answer
-        // exists; its recursive applications are numeric too, and find
-        // each other under the numeric key.
+        // When the body applies itself it ran EXACTLY (its statements
+        // evaluate with no options, see `resultStatementRequest`), so the
+        // exact answer of this application is in hand before the numeric
+        // pass below and is memoized under the exact key as well. A
+        // recursive body applies itself through the exact route whatever
+        // the outer request was: `P(k)` requested numerically evaluates
+        // `P(k-1)` exactly. Without this entry a run of numeric requests
+        // `P(0)`, `P(1)`, … `P(n)` — the elements of a lazy comprehension
+        // pulled one at a time — never found the previous element's exact
+        // result and re-ran the recursion from the bottom at every element.
+        // A body that does not apply itself gave the request to its last
+        // statement, so its value is already numeric and no exact answer
+        // exists.
         if (statementRequest === undefined) exactResult = result;
         result = evaluateInOwnBindings(ce, result, {
           numericApproximation: true,
@@ -5215,22 +5228,32 @@ function makeLambda(
 }
 
 /**
- * The options the statements of a function body are evaluated with under a
- * numeric-approximation request: the request itself when the body is ONE
- * statement that does not apply the function again, nothing otherwise.
+ * The options the LAST statement of a function body is evaluated with under
+ * a numeric-approximation request: the request itself when no statement of
+ * the body applies the function again, nothing otherwise. The statements
+ * before the last one always run exactly (`evaluateStatements`).
  *
- * The value of a one-statement body is the value of that statement, so
+ * The value of the body is the value of its last statement, so
  * `f(2000).N()` with `f(n) = Σ_{k=1}^{n} 1/k²` can sum floats the way
  * `Sum(1/k², k, 1, 2000).N()` does; summing two thousand exact rationals
  * and numericizing the result cost twenty times more, and the same body at
  * n = 400000 did not finish.
  *
- * A body with several statements runs exactly: an intermediate value that a
- * later statement reads (`a := √2; a^2`) must not be rounded on the way, and
- * `f(x).N()` must agree with `N(f(x))` on both evaluation routes
- * (`evaluateStatements`, `evaluateStatementsAsync`).
+ * The request is also what makes a jump in the last statement correct.
+ * Under `.N()` a parameter is bound to the float of its argument, and a
+ * jump (`Floor(x)`, `x < 25`) reads the exact argument again only when it is
+ * evaluated with the request (`exact-argument-source.ts`). So with
+ * `f := x ↦ Block(z := 1, Floor(x))`, `f((25! − 1)/24!).N()` is `24`: an
+ * exact run of the last statement would floor the float `25`.
  *
- * A self-recursive body runs exactly too, and only its value is numericized.
+ * The statements before the last one run exactly: an intermediate value
+ * that a later statement reads (`a := √2; a^2`) must not be rounded on the
+ * way, and `f(x).N()` must agree with `N(f(x))` on both evaluation routes
+ * (`evaluateStatements`, `evaluateStatementsAsync`). An early `Return` in
+ * one of them gives an exactly computed value, which the application then
+ * numericizes.
+ *
+ * A self-recursive body runs exactly, and only its value is numericized.
  * The exact run gives the application memo an exact entry beside the
  * numeric one, which a later exact request, or a recursive application from
  * another request, is answered from
@@ -5242,14 +5265,14 @@ function makeLambda(
  * reassigned name can make a body recursive, or not, after the literal was
  * stored.
  */
-function singleStatementRequest(
+function resultStatementRequest(
   literal: Expression,
   ops: ReadonlyArray<Expression>,
   options: ApplyOptions | undefined
 ): { numericApproximation: true } | undefined {
-  if (options?.numericApproximation !== true || ops.length !== 1)
+  if (options?.numericApproximation !== true || ops.length === 0)
     return undefined;
-  if (appliesLiteral(ops[0], literal)) return undefined;
+  if (ops.some((op) => appliesLiteral(op, literal))) return undefined;
   return { numericApproximation: true };
 }
 

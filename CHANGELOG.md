@@ -2,6 +2,73 @@
 
 ### Behavior Changes
 
+- **Under `.N()`, the last statement of a user-function body gets the numeric
+  request** (user decision 2026-10-18). With `f := x ↦ (z := 1; ⌊x⌋)`,
+  `f((25! − 1)/24!).N()` is `24`, not `25`: a jump in the last statement reads
+  the exact argument. The statements before the last one still run exactly
+  (`a := √2; a^2` gives `2`). A `Block` evaluated with a numeric request passes
+  it to its last statement in the same way. An early `Return` in an earlier
+  statement, and a jump in an earlier statement, still read the float.
+
+- **A logical connective with an absent operand is typed `missing` or
+  `boolean | missing`** (user decision 2026-10-18). `And(True, Missing)` and
+  `Not(Missing)` evaluate to `Missing`, but were typed `boolean`. The type of
+  `And`, `Or`, `Not`, `Xor`, `Equivalent`, `Implies`, `Nand` and `Nor` now
+  holds every value the connective can give: `missing` when the result is
+  always `Missing` (`And(True, Missing)`), `boolean | missing` when it may be
+  (an operand typed `boolean | missing`, an `Undefined` operand), and `boolean`
+  when an operand decides (`And(False, Missing)` is `False`). The negated
+  comparisons (`NotLess`, …) and a broadcast follow: `And([True, False],
+  Missing)` is typed `list<boolean | missing>`.
+
+- **`Solve` reads an integer-valued float exponent as a degree, and lists every
+  root of a non-integer power** (user decision 2026-10-18).
+  `x^{2.0} + 3x + 2 = 0` gives `-1.0` and `-2.0`, and
+  `x^{4.0} - 5x^{2.0} + 4 = 0` gives four roots; they were not solved. As for an
+  integer exponent, the complex roots are listed: `x^{3.0} = -8` gives `-2.0`
+  and `1.0 ± 1.732i`. `Degree`, `Factor` and the other polynomial operations
+  still refuse a float exponent. A power with a non-integer exponent equal to a
+  constant now gives all the roots of the principal value: `x^{5/2} = -4`,
+  `x^{3/2} = -8` and `x^{2.5} = -4` gave `[]` (no solution), although
+  `4^{2/5}·e^{±2πi/5}` are roots of the first, and `x^{2.5} = 4` gave only
+  `4^{0.4}`, without `4^{0.4}·e^{±0.8πi}`. For an unknown declared `real`, only
+  real roots are kept (`y^{5/2} = -4` gives `[]`), and `x^{-0.5} = -4` gives
+  `[]`. When the list cannot be given (an exponent above 64 in absolute value),
+  there is no answer, where before there was an incomplete list.
+
+- **A compiled rounding function of a loop index plus an exact constant gives
+  the interpreter's value** (user decision 2026-10-18).
+  `Sum(x·Floor(k + (25! − 1)/24!), k, 1, 3)` at `x = 1` compiled to 81 (52650
+  with bounds 1 to 300), because the constant was the double `25.0`; it now
+  gives 78 (52350), as the interpreter does. `Floor(k + c)` compiles as
+  `k + Floor(c)` with `Floor(c)` computed exactly; `Ceil`, `Round`, `Truncate`
+  and `Fract` work the same way (`Truncate` becomes a selection on the sign, and
+  a `Round` whose constant may be a tie declines). An operand with only integer
+  variables that cannot be rewritten (`Floor(k·π)`) now declines. An operand
+  with a real variable keeps its float code on every target (`⌊πx⌋`,
+  `⌊x + 1/3⌋`), so `⌊x + (25! − 1)/24!⌋` at `x = 1` still compiles to 26.
+
+- **A signature declared with `ce.declare()` is a contract for an Epsil
+  `function` statement** (user decision 2026-10-18). After
+  `ce.declare('h', { signature: '(integer) pure -> integer', evaluate: … })`,
+  `function h(x: integer) -> integer { x }` replaces the body and keeps the
+  declared signature; it added a clause and gave
+  `((unknown) -> number) & ((x: integer) -> integer)`. A statement whose
+  parameters are outside the declaration (`function h(x: string) …`) is refused
+  with `invalid-clause-definition`, as after an Epsil
+  `let h: (integer) -> integer`; the same holds after `ce.declare('f', type)`
+  and `ce.assign`. A host function assigned an untyped literal still accepts an
+  added clause.
+
+- **Exact radical forms are reduced further.** `(√−13)^3` evaluates to
+  `−13√13·i` (it stayed unevaluated), and `(√1022117)^3` to `1022117√1022117`
+  (not `√1067829303856075613`). An exact integer power of a product of exact
+  number literals is folded at canonicalization, as the power of one literal is:
+  `(√1009·√1013)^{-2}` is `1/1022117`. When two radicals cannot combine, their
+  rational parts go into one coefficient: `2√1009·3√1013` is `6√1009√1013`. The
+  coefficient is written first and the radicals in order of radicand:
+  `2\sqrt{1009}\sqrt{1013}`, not `\sqrt{1013}\times2\sqrt{1009}`.
+
 - **`Solve` gives both roots for an integer-valued float exponent** (user
   decision 2026-10-17). `x^{2.0} = 4` gave only `2`; it now gives `2.0` and
   `-2.0`, as `x^2 = 4` gives `2` and `-2`, and `x^{3.0} = -8` gives the real
@@ -142,6 +209,23 @@
 
 ### Performance
 
+- **Compiling an expression that holds the same subexpression object at many
+  positions is linear.** A boxed expression can be a graph: `e = Add(e, e)`
+  repeated 20 times has 21 distinct nodes but about a million paths. The
+  common-subexpression analysis of `compile()` walked every path: 0.35 s at
+  depth 20, out of memory at depth 30. It now walks each distinct node once per
+  region and counts the other paths by weight; depth 40 compiles in about 15 ms
+  to code with one temporary per level, depth 100 in about 30 ms. The scalar and
+  integer-range tests of the JavaScript target are memoized by node too (depth
+  30 with `constantFold: false`: 5 ms). The output for an expression with no
+  shared node objects is unchanged.
+
+- **A sum or product with more than about 120 000 operands evaluates.** The
+  `Add` and `Multiply` handlers passed the operands as separate arguments of a
+  call, and JavaScript throws `RangeError: Maximum call stack size exceeded`
+  past its argument limit; the `.N()` route of a product recursed once per
+  factor and threw at about 8 000 factors. They now pass one array and loop.
+
 - **A `vars` entry that spells the symbol as the compiler does no longer stops
   it from sharing repeated work.** `compile()` treated every string-valued
   `vars` entry as caller code that may have an effect (`_.draw()`), so no
@@ -182,6 +266,23 @@
   statement form.
 
 ### Issues Resolved
+
+- **A user function that calls itself inside a `Map` callback works.** With
+  `m(n) := Map(x ↦ If(x < 1, 0, m(x − 1)), [n])`, `m(1)` gave
+  `[Error("expected-a-symbol", …)]`: the value of `x` was substituted into the
+  parameter list of the same callback held in the inner result. It now gives
+  `[[0]]`.
+
+- **`If` and `Which` report an absent condition built with `And`, `Or` or
+  `Implies`.** `If(And(True, Missing), 1, 2)` stayed unevaluated, where
+  `If(Not(Missing), 1, 2)` gave the error "The condition is absent". Both now
+  give that error. A deciding operand still decides (`If(And(False, Missing),
+  1, 2)` is `2`).
+
+- **The synchronous `.N()` of a symbol holding an expression reads the value's
+  own bindings.** With `a := x + 1` and `x := 100`, `N(a)` inside a block that
+  declares its own `x := 7` gave `8`; it now gives `101`, as the asynchronous
+  route did.
 
 - **The `glsl` and `wgsl` targets reduce a large constant term of a
   trigonometric argument by whole periods.** A shader computes in float32, so

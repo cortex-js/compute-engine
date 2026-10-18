@@ -87,7 +87,7 @@ import { flatten, flattenHoldingBarriers } from './flatten.js';
 import { asRational, asSmallInteger } from './numerics.js';
 import { heldNonNumericScalar } from './value-membership.js';
 import { negateProduct } from './negate.js';
-import { add } from './arithmetic-add.js';
+import { addArray } from './arithmetic-add.js';
 import { containsResidueClass, residueArithmetic } from './residue-class.js';
 
 // Maximum number of decimal digits allowed in a *materialized* exact power
@@ -123,6 +123,29 @@ function exactPowExceedsBudget(base: NumericValue, exp: Rational): boolean {
     integerDigitCount(exact.radical)
   );
   return baseDigits * exponent > MAX_EXACT_POW_DIGITS;
+}
+
+/**
+ * Split a real exact value `q·√r`, with `r > 1` and `q ≠ 1`, into its
+ * rational part `q` and its radical part `√r`. Return `undefined` for any
+ * other value: a value that is not exact, a complex value, a rational, or a
+ * radical with no rational part (`√r`).
+ *
+ * A product folds a radical factor into its coefficient only when the
+ * result is an exact value, and an exact value holds one radical. When two
+ * radicals cannot combine (`√1009·√1013`), the products use this split to
+ * keep only the radical as a separate factor and to fold the rational part
+ * into the coefficient: `2√1009·3√1013` is `6√1009·√1013`.
+ */
+function splitRationalRadical(
+  v: NumericValue
+): [NumericValue, NumericValue] | undefined {
+  if (!(v instanceof ExactNumericValue) || v.isComplex) return undefined;
+  if (v.radical === 1 || isOne(v.rational)) return undefined;
+  return [
+    v.clone({ rational: v.rational, radical: 1 }),
+    v.clone({ rational: [1, 1], radical: v.radical }),
+  ];
 }
 
 /**
@@ -396,7 +419,7 @@ export class Product {
         }
 
         if (isOne(exp)) {
-          if (!this.foldIntoCoefficient(num)) this.tally(term, exp);
+          if (!this.foldIntoCoefficient(num, true)) this.tally(term, exp);
         } else if (exactPowExceedsBudget(this.engine._numericValue(num), exp)) {
           // Materializing this exact power would exceed the digit budget:
           // keep it symbolic (an inert Power term) rather than folding it
@@ -412,7 +435,8 @@ export class Product {
           const power = base.pow(this.engine._numericValue(exp));
           if (base.isExact && !power.isExact && !isIntegerRational(exp))
             this.tallyNumericPower(term, exp);
-          else if (!this.foldIntoCoefficient(power)) this.tally(term, exp);
+          else if (!this.foldIntoCoefficient(power, !isNeg(exp)))
+            this.tally(term, exp);
         }
         return;
       }
@@ -443,7 +467,8 @@ export class Product {
           return;
         }
         const factor = root.pow(this.engine._numericValue(exp));
-        if (!this.foldIntoCoefficient(factor)) this.tally(term, exp);
+        if (!this.foldIntoCoefficient(factor, !isNeg(exp)))
+          this.tally(term, exp);
         return;
       }
 
@@ -696,8 +721,15 @@ export class Product {
    * separate in this way and whose product with `factor` is exact
    * (`√1013·√1013 = 1013`). It removes that term and folds the product of
    * the two in its place.
+   *
+   * When `splitRadical` is `true` and no such term is found, a real factor
+   * `q·√r` is split instead: `q` is folded into the coefficient, `√r` is
+   * added as a separate number term, and the method returns `true`.
    */
-  private foldIntoCoefficient(factor: number | NumericValue): boolean {
+  private foldIntoCoefficient(
+    factor: number | NumericValue,
+    splitRadical = false
+  ): boolean {
     const product = this.coefficient.mul(factor);
     if (
       typeof factor !== 'number' &&
@@ -714,7 +746,23 @@ export class Product {
           (isOne(t.exponent) || isOne(neg(t.exponent))) &&
           this.termValue(t).mul(factor).isExact
       );
-      if (i < 0) return false;
+      if (i < 0) {
+        // With `splitRadical`, only the radical of a real factor is kept
+        // separate, and its rational part is folded into the coefficient:
+        // `1009√1009·1013√1013` is `1022117·√1009·√1013`. The callers pass
+        // it only for a factor of the numerator. The value of a factor of
+        // the denominator is rationalized (`1/√1013` is `√1013/1013`), and
+        // a split of it would rewrite the quotient `√1009/√1013`, which the
+        // canonical `Divide` keeps, as `√1009·√1013/1013`.
+        const split = splitRadical ? splitRationalRadical(factor) : undefined;
+        if (split === undefined) return false;
+        const scaled = this.coefficient.mul(split[0]);
+        if (!scaled.isExact) return false;
+        this.coefficient = scaled;
+        if (!this.foldIntoCoefficient(split[1]))
+          this.tally(this.engine.number(split[1]), [1, 1]);
+        return true;
+      }
       const paired = this.termValue(this.terms[i]).mul(factor);
       this.terms.splice(i, 1);
       if (!this.foldIntoCoefficient(paired))
@@ -2192,6 +2240,17 @@ export function canonicalMultiply(
           candidate = product.mul(next);
         }
         if (!candidate.isExact && !candidate.isNaN) {
+          // Only the radical of a real factor is kept separate. Its
+          // rational part is folded into `product`, which stays exact:
+          // `2√1009·3√1013` is `6√1009·√1013`, not `2√1009·3√1013`.
+          const split = splitRationalRadical(next);
+          if (split !== undefined) {
+            const scaled = product.mul(split[0]);
+            if (scaled.isExact) {
+              product = scaled;
+              next = split[1];
+            }
+          }
           separate.push(next);
           continue;
         }
@@ -2462,11 +2521,11 @@ function expandProduct(
 
   if (isFunction(lhs, 'Add')) {
     const terms: Expression[] = lhs.ops.map((x) => expandProduct(x, rhs));
-    return add(...terms);
+    return addArray(terms);
   }
   if (isFunction(rhs, 'Add')) {
     const terms: Expression[] = rhs.ops.map((x) => expandProduct(lhs, x));
-    return add(...terms);
+    return addArray(terms);
   }
 
   return new Product(ce, [lhs, rhs]).asExpression();
@@ -2494,10 +2553,13 @@ export function expandProducts(
 ): Expression | null {
   if (ops.length === 0) return null;
   if (ops.length === 1) return ops[0];
-  if (ops.length === 2) return expandProduct(ops[0], ops[1]);
-
-  const rhs = expandProducts(ce, ops.slice(1));
-  return rhs === null ? null : expandProduct(ops[0], rhs);
+  // The product is folded from the right, `ops[0]·(ops[1]·(… · ops[n-1]))`,
+  // in a loop: a recursion on `ops.slice(1)` used one stack frame and one
+  // copy of the remaining operands per factor, so a product of about 8 000
+  // factors threw `RangeError: Maximum call stack size exceeded`.
+  let rhs = expandProduct(ops[ops.length - 2], ops[ops.length - 1]);
+  for (let i = ops.length - 3; i >= 0; i--) rhs = expandProduct(ops[i], rhs);
+  return rhs;
 }
 
 /**
@@ -2549,6 +2611,18 @@ export function mul(...xs: ReadonlyArray<Expression>): Expression {
  * non-terminating.
  */
 export function mulFactored(...xs: ReadonlyArray<Expression>): Expression {
+  return mulImpl(xs, false);
+}
+
+/**
+ * `mulFactored()` with the factors given as one array. A caller that holds the
+ * factors of a product of arbitrary length (the operands of a `Multiply`
+ * expression) uses this form: the call `mulFactored(...xs)` passes each factor
+ * as a separate argument, and JavaScript throws `RangeError: Maximum call
+ * stack size exceeded` when the number of arguments is too large (about
+ * 100 000 factors or more).
+ */
+export function mulFactoredArray(xs: ReadonlyArray<Expression>): Expression {
   return mulImpl(xs, false);
 }
 

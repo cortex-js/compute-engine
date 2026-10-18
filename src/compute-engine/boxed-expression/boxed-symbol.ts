@@ -186,8 +186,8 @@ interface StoredValueMemo {
 }
 /** The three computations a stored value is read by, each with its own
  *  entry: `evaluate()`, `evaluate({ numericApproximation: true })` — both the
- *  own-binding dereference — and the `N()` read of `_N`, which resolves
- *  through the ambient chain and so may answer differently under a shadow. */
+ *  own-binding dereference — and the `N()` read of `_N`, which also reads the
+ *  value's own bindings but has no cycle bookkeeping of `_dereference`. */
 type StoredValueRoute = 0 | 1 | 2;
 const STORED_VALUE_MEMOS = new WeakMap<
   Expression,
@@ -1630,9 +1630,9 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
    *
    * Only the two option sets the evaluator uses are cached (a plain
    * `evaluate()`, which `{ numericApproximation: false }` also selects, and
-   * `evaluate({ numericApproximation: true })`), as separate entries — and the `N()` read of `_N` as a third, since it resolves the
-   * value's names through the ambient chain where this route reads the
-   * value's own bindings; any other option set goes uncached.
+   * `evaluate({ numericApproximation: true })`), as separate entries — and the `N()` read of `_N` as a third, since it computes the
+   * value without the cycle bookkeeping of `_dereference`; any other option
+   * set goes uncached.
    */
   private _dereferenceMemoized(
     value: Expression,
@@ -1663,8 +1663,8 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
 
   /** The memo of {@link _dereferenceMemoized}, over any computation of the
    *  stored value `value` — the `evaluate` dereference, or the `N()` read of
-   *  `_N`, which computes the value the same way but without the own-binding
-   *  re-pointing of `_dereference`. */
+   *  `_N`, which computes the value in its own bindings too but without the
+   *  cycle bookkeeping of `_dereference`. */
   private _memoizedStoredValue(
     value: Expression,
     route: StoredValueRoute,
@@ -1939,7 +1939,18 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       // bound, so the guard would never fire.
       if (isNumber(contextValue)) return contextValue.N();
       if (contextValue.symbols.includes(this._id)) return contextValue;
-      return this._memoizedStoredValue(contextValue, 2, () => contextValue.N());
+      // The names in a stored expression value mean the bindings they had
+      // where the value was written, not a binding of the same name that
+      // shadows it where the symbol is read: with `a := x + 1`, `x := 100`,
+      // `a.N()` inside a block that declares its own `x := 7` is `101`, not
+      // `8`. This is what `evaluate({ numericApproximation: true })` and the
+      // asynchronous numeric read (`_NAsync`) compute, so the three agree
+      // and `a + 5` under a numeric request reads `a` as `a` alone does.
+      return this._memoizedStoredValue(contextValue, 2, () =>
+        evaluateInOwnBindings(this.engine, contextValue, {
+          numericApproximation: true,
+        })
+      );
     }
     return def?.value?.N() ?? this;
   }

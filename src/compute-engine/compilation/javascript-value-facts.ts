@@ -226,11 +226,52 @@ function builtin(expr: Expression, target: CompileTarget<Expression>): boolean {
   );
 }
 
+/**
+ * The answers of one top-level question about an expression, for each node
+ * object at each recursion depth. An expression can hold the same node object
+ * at several positions (`Add(e, e)`), so a walk that follows every position
+ * can visit a node once per path to it, and the number of paths grows
+ * exponentially with the depth. With this memo, each node object is examined
+ * at most once for each depth. The depth is part of the key because a walk
+ * stops at a depth limit, so the answer for a node can depend on the depth at
+ * which the walk reaches it.
+ */
+type DepthMemo<T> = WeakMap<Expression, Map<number, T>>;
+
+/** The answer `compute` gives for the node `expr` at `depth`, computed once
+ * per node object and depth. */
+function memoizedByDepth<T>(
+  memo: DepthMemo<T>,
+  expr: Expression,
+  depth: number,
+  compute: () => T
+): T {
+  let answers = memo.get(expr);
+  if (answers === undefined) memo.set(expr, (answers = new Map()));
+  if (answers.has(depth)) return answers.get(depth) as T;
+  const answer = compute();
+  answers.set(depth, answer);
+  return answer;
+}
+
 /** Bounds on the actual safe integers produced by a small arithmetic expression. */
 function integerRange(
   expr: Expression,
   target: CompileTarget<Expression>,
-  depth = 0
+  depth = 0,
+  memo: DepthMemo<IntegerRange | undefined> = new WeakMap()
+): IntegerRange | undefined {
+  if (!isFunction(expr)) return integerRangeUncached(expr, target, depth, memo);
+  return memoizedByDepth(memo, expr, depth, () =>
+    integerRangeUncached(expr, target, depth, memo)
+  );
+}
+
+function integerRangeUncached(
+  expr: Expression,
+  target: CompileTarget<Expression>,
+  depth: number,
+  memo: DepthMemo<IntegerRange | undefined>
 ): IntegerRange | undefined {
   if (depth > 32) return undefined;
   if (isNumber(expr))
@@ -244,7 +285,7 @@ function integerRange(
   if (!isFunction(expr) || !builtin(expr, target)) return undefined;
   if (!['Add', 'Subtract', 'Negate', 'Multiply'].includes(expr.operator))
     return undefined;
-  const args = expr.ops.map((x) => integerRange(x, target, depth + 1));
+  const args = expr.ops.map((x) => integerRange(x, target, depth + 1, memo));
   if (args.some((x) => x === undefined)) return undefined;
   const ranges = args as IntegerRange[];
   let result: IntegerRange;
@@ -350,11 +391,29 @@ export function numericArrayCells(
  * from a parameter of the emitted body this expression belongs to whose
  * function binds no argument whole. An INPUT whose scalar type is merely
  * inferred remains eligible for runtime broadcasting; a body PARAMETER does
- * not, because its every call site is broadcast-aware. */
+ * not, because its every call site is broadcast-aware.
+ *
+ * `memo` holds the answers of the current top-level call for each node object
+ * and depth (`DepthMemo`), so an expression that holds the same node object at
+ * many positions is examined in time linear in its distinct nodes. */
 export function isConstructedScalar(
   expr: Expression,
   target: CompileTarget<Expression>,
-  depth = 0
+  depth = 0,
+  memo: DepthMemo<boolean> = new WeakMap()
+): boolean {
+  if (!isFunction(expr))
+    return isConstructedScalarUncached(expr, target, depth, memo);
+  return memoizedByDepth(memo, expr, depth, () =>
+    isConstructedScalarUncached(expr, target, depth, memo)
+  );
+}
+
+function isConstructedScalarUncached(
+  expr: Expression,
+  target: CompileTarget<Expression>,
+  depth: number,
+  memo: DepthMemo<boolean>
 ): boolean {
   if (depth > 32) return false;
   if (isNumber(expr)) return true;
@@ -413,10 +472,12 @@ export function isConstructedScalar(
   if (
     scalarOverPoints(expr, target, freshWalk(), depth) ||
     (SCALAR_ARITHMETIC_HEADS.includes(expr.operator) &&
-      expr.ops.every((arg) => isConstructedScalar(arg, target, depth + 1)))
+      expr.ops.every((arg) =>
+        isConstructedScalar(arg, target, depth + 1, memo)
+      ))
   )
     return true;
-  return isScalarUserFunctionCall(expr, target, depth);
+  return isScalarUserFunctionCall(expr, target, depth, memo);
 }
 
 /** Whether a value is scalar under the bindings established for its emitted
@@ -1166,7 +1227,26 @@ function blockValueKind(
   // Nested blocks may write their own locals, but may not mutate a fact
   // carried by this block. Function literals and control transfers need a
   // separate flow analysis and deliberately keep the generic emission.
-  const safe = (value: Expression, locals = new Set<string>()): boolean => {
+  //
+  // The answer of `safe` depends only on the node and on the set of locals
+  // the enclosing nested blocks declare: the names in `walk.locals` are all
+  // added before the first statement is read. So `safeAnswers` records the
+  // answer for each set of locals and node object, and a node object held at
+  // many positions is examined once for each set, not once for each path.
+  const noLocals = new Set<string>();
+  const safeAnswers = new Map<Set<string>, WeakMap<Expression, boolean>>();
+  const safe = (value: Expression, locals = noLocals): boolean => {
+    if (!isFunction(value)) return safeUncached(value, locals);
+    let answers = safeAnswers.get(locals);
+    if (answers === undefined)
+      safeAnswers.set(locals, (answers = new WeakMap()));
+    const cached = answers.get(value);
+    if (cached !== undefined) return cached;
+    const answer = safeUncached(value, locals);
+    answers.set(value, answer);
+    return answer;
+  };
+  const safeUncached = (value: Expression, locals: Set<string>): boolean => {
     if (isSymbol(value))
       return (
         !target.varsKeys?.has(value.symbol) &&
@@ -1586,12 +1666,13 @@ function parameterName(p: Expression): string | undefined {
 function isScalarUserFunctionCall(
   expr: Expression & FunctionInterface,
   target: CompileTarget<Expression>,
-  depth: number
+  depth: number,
+  memo: DepthMemo<boolean>
 ): boolean {
   return scalarShapedCall(
     expr,
     target,
-    (a) => isConstructedScalar(a, target, depth + 1),
+    (a) => isConstructedScalar(a, target, depth + 1, memo),
     freshWalk(),
     depth
   );

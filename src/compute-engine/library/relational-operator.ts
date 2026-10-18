@@ -1632,26 +1632,43 @@ function relationalAbsenceType(ops: ReadonlyArray<OperandDescriptor>) {
   let definite = false;
   let possible = false;
   for (const op of ops) {
-    const t = op.type;
-    if (t === 'missing') definite = true;
-    // A NUMERIC-domain `missing` arm (`number | missing`) does NOT widen the
-    // result: that slot's absence representation is `NaN` (I6), and an IEEE
-    // comparison of `NaN` is a plain boolean. Only an OBJECT-domain arm — a
-    // slot that can hold the `Missing` symbol itself — makes the Kleene
-    // `Missing` result reachable. This is also what lets a comparison over
-    // `number | missing` operands compile guard-free on float-only targets
-    // (GPU): its result type has no `missing` arm to fail closed on.
-    else if (typeContainsMissing(t) && !numericMissingSlot(t)) possible = true;
-    // The library `Undefined` symbol is typed `unknown`, which has no
-    // `missing` arm, but the evaluate handlers read it as an absent operand
-    // (`readComparisonAbsence`): `Less(Undefined, 3)` evaluates to `Missing`.
-    // Its type is read from the symbol itself, so that the result type admits
-    // that value.
-    else if (isUndefinedSymbolOperand(op)) possible = true;
+    const absence = operandAbsence(op);
+    if (absence === 'definite') definite = true;
+    else if (absence === 'possible') possible = true;
   }
   if (definite) return 'missing';
   if (possible) return parseType('boolean | missing');
   return 'boolean';
+}
+
+/**
+ * Can this operand be absent when it is evaluated? `'definite'` when its type
+ * is exactly `missing`, `'possible'` when it may be absent, `undefined` when
+ * it cannot be. The comparisons (`relationalAbsenceType`) and the logical
+ * connectives (`connectiveType` in `library/logic.ts`) read an operand with
+ * the same test, so that they agree on which operands make a `Missing`
+ * result reachable.
+ */
+export function operandAbsence(
+  op: OperandDescriptor
+): 'definite' | 'possible' | undefined {
+  const t = op.type;
+  if (t === 'missing') return 'definite';
+  // A NUMERIC-domain `missing` arm (`number | missing`) does NOT widen the
+  // result: that slot's absence representation is `NaN` (I6), and an IEEE
+  // comparison of `NaN` is a plain boolean. Only an OBJECT-domain arm — a
+  // slot that can hold the `Missing` symbol itself — makes the Kleene
+  // `Missing` result reachable. This is also what lets a comparison over
+  // `number | missing` operands compile guard-free on float-only targets
+  // (GPU): its result type has no `missing` arm to fail closed on.
+  if (typeContainsMissing(t) && !numericMissingSlot(t)) return 'possible';
+  // The library `Undefined` symbol is typed `unknown`, which has no
+  // `missing` arm, but the evaluate handlers read it as an absent operand
+  // (`readComparisonAbsence`): `Less(Undefined, 3)` evaluates to `Missing`.
+  // Its type is read from the symbol itself, so that the result type admits
+  // that value.
+  if (isUndefinedSymbolOperand(op)) return 'possible';
+  return undefined;
 }
 
 /** Is the operand the `Undefined` symbol? The test is on the name only, as

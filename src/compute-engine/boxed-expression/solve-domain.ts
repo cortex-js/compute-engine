@@ -21,7 +21,7 @@ import {
   reduceStructuralIndex,
   withValueShield,
 } from './utils.js';
-import { findUnivariateRoots } from './solve.js';
+import { findUnivariateRoots, withExactIntegerExponents } from './solve.js';
 import { getPolynomialCoefficients, polynomialDegree } from './polynomials.js';
 import { expand } from './expand.js';
 import { together } from './factor.js';
@@ -1167,10 +1167,19 @@ export function solveOverDomain(
     // (transcendental equations) never over-claims "no solutions".
     // A count that is not a safe integer (a `bigint`) is too large to
     // enumerate: `smallCount()` reads it as unknown, so it is unbounded here.
+    // An integer-valued float exponent is a degree here, as it is for the
+    // root finder (`withExactIntegerExponents()`): `x^{2.0} = -4` is a
+    // polynomial equation.
     const domainCount = smallCount(domain);
     const unbounded =
       domainCount === undefined || !Number.isFinite(domainCount);
-    if (unbounded && getPolynomialCoefficients(predBody, unknown)) {
+    if (
+      unbounded &&
+      getPolynomialCoefficients(
+        withExactIntegerExponents(predBody, unknown) ?? predBody,
+        unknown
+      )
+    ) {
       const realRoots = symbolicRoots(ce, ceq, unknown, 'number');
       if (realRoots.length > 0) {
         const inDomain = realRoots.filter((r) =>

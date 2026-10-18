@@ -56,7 +56,10 @@ export const CSE_MIN_SCORE = 8;
  * audit of 2026-09-08) produced 208 surviving candidates in one region and
  * discarded 167 at the old cap, so `floor(n * x)` was recomputed nine times.
  * The cap still bounds the register pressure of a shader region; reducing
- * the inlining of such bodies is a separate effort. */
+ * the inlining of such bodies is a separate effort. A candidate below a
+ * shared subtree of a DAG (a record of it stands for several paths) is kept
+ * beyond the cap, because emitting it inline emits it once per path, and a
+ * chain of such levels would emit an exponential number of copies. */
 export const CSE_MAX_BINDINGS_PER_REGION = 64;
 
 /** Deterministic verification budget, in compared nodes, for one structural
@@ -64,6 +67,13 @@ export const CSE_MAX_BINDINGS_PER_REGION = 64;
  * occurrences emit inline unchanged — a lost optimization, never a
  * correctness change. */
 export const CSE_MAX_VERIFY_NODES_PER_BUCKET = 10_000;
+
+/** Upper bound on the number of paths one occurrence record counts for
+ * ({@link CseOccurrence.weight}). A DAG of depth `d` can have `2^d` paths to
+ * one node; the bound keeps every sum of weights an exact integer
+ * (`2^32` times a record count below `2^20` is below `2^53`). A weight at the
+ * bound is still far above every threshold, so no decision changes. */
+export const CSE_MAX_OCCURRENCE_WEIGHT = 2 ** 32;
 
 // ---------------------------------------------------------------------------
 // Lazy-operand inventory
@@ -258,17 +268,32 @@ export interface CseRegion {
   readonly candidateByNode: ReadonlyMap<Expression, CseCandidate>;
 }
 
-/** One *edge-occurrence* of a subtree: a path, never a bare node object. */
+/**
+ * One *edge-occurrence* of a subtree: a path, never a bare node object.
+ *
+ * A record can stand for several paths. When the walk reaches a node object
+ * a second time in the same region (the tree is a DAG), it does not walk the
+ * subtree again: the second walk would give the same regions and the same
+ * records, only at other positions. It records the node itself and adds one
+ * to the `weight` of every record of the first walk below it. The `weight`
+ * is the number of paths a record stands for; it is `1` everywhere in a tree
+ * where no node object is reached twice.
+ */
 export interface CseOccurrence {
   readonly node: Expression;
   /** The innermost enclosing region. */
   readonly region: CseRegion;
   /** DFS enter/exit stamps — `a` is strictly inside `b` iff
-   * `b.enter < a.enter && a.exit < b.exit` (O(1) containment). */
+   * `b.enter < a.enter && a.exit < b.exit` (O(1) containment). A record
+   * that stands for several paths has the stamps of the first one: the
+   * other paths come later in DFS order. */
   readonly enter: number;
   readonly exit: number;
   /** Node count of the subtree. */
   readonly size: number;
+  /** The number of paths this record stands for (see above). At most
+   * {@link CSE_MAX_OCCURRENCE_WEIGHT}. */
+  readonly weight: number;
 }
 
 /** A surviving common subexpression, bound at exactly one region. */
@@ -297,7 +322,9 @@ export interface CseCandidate {
    * only.
    */
   readonly served: ReadonlyArray<CseOccurrence>;
-  /** `(occurrences.length + served.length − 1) × size`. */
+  /** `(count − 1) × size`, where `count` is the sum of the `weight` of the
+   * records in `occurrences` and `served` (their length when no node object
+   * is reached twice). */
   readonly score: number;
   /** The distinct node objects those occurrences reach (a DAG collapses
    * several occurrences onto one object). */
@@ -306,9 +333,12 @@ export interface CseCandidate {
 
 /** Counters a caller (or a test) can assert on. Purely informational. */
 export interface CseHarvestDiagnostics {
-  /** Nodes visited, counting each edge separately. */
+  /** Nodes visited, counting each edge separately (each path, also the
+   * paths below a node object reached again, which the walk does not walk
+   * again). */
   readonly edges: number;
-  /** Compound occurrences that passed G1 + G1b and the size prefilter. */
+  /** Compound occurrences that passed G1 + G1b and the size prefilter,
+   * counted by weight (paths). */
   readonly eligibleOccurrences: number;
   /** Structural hash buckets examined. */
   readonly buckets: number;
@@ -736,6 +766,39 @@ type MutableOccurrence = {
   -readonly [K in keyof CseOccurrence]: CseOccurrence[K];
 };
 
+/**
+ * A walk that was not done again: the node object `node` was reached a second
+ * time in the same region with the same flags. Every entry of the walk trace
+ * in `[start, end)` (the records and replays below the first walk of `node`)
+ * stands for one more path per path of this entry.
+ */
+type Replay = {
+  readonly replayOf: Expression;
+  readonly start: number;
+  readonly end: number;
+  /** Whether the first walk recorded `replayOf` itself, at trace index
+   * `end`. */
+  readonly recorded: boolean;
+};
+
+/** What the first walk of a node object in one walk context left behind,
+ * so that a second walk in the same context can be replaced by a
+ * {@link Replay}. */
+type VisitRecord = {
+  /** Index of the first walk in `Harvester.firstWalks`. */
+  readonly id: number;
+  /** The walk-trace range of the entries below the node (see `Replay`). */
+  readonly start: number;
+  readonly end: number;
+  /** The paths the walk visited, the node included (`edges` diagnostic). */
+  readonly edges: number;
+  /** The region-opening edges it merged (`mergedRegionSites` diagnostic):
+   * every one of them is a merge when the same walk is done again. */
+  readonly openedSites: number;
+  /** Whether the node itself got an occurrence record. */
+  readonly recorded: boolean;
+};
+
 /** A structural equivalence class within one hash bucket. */
 type StructuralClass = {
   readonly representative: Expression;
@@ -753,11 +816,16 @@ type HashBucket = {
 /**
  * Harvest the CSE regions, occurrences, and candidates of `root`.
  *
- * One edge-DFS: a node object reached through two parent positions is visited
- * twice and yields two occurrences, which is what makes DAG-shaped trees safe.
- * Sizes and eligibility are memoized per node object; occurrences carry DFS
- * enter/exit stamps so containment is O(1); every symbol name lands in
- * {@link CseHarvest.usedNames}.
+ * One edge-DFS: a node object reached through two parent positions counts as
+ * two occurrences, which is what makes DAG-shaped trees safe. The subtree
+ * below it is walked once per region, not once per path: a node object
+ * reached again in the same region, with the same flags, gets its own record
+ * and adds to the `weight` of the records below its first walk (see
+ * {@link CseOccurrence}). So the walk is linear in the number of distinct
+ * node objects, and a DAG with `2^d` paths and `d` distinct nodes takes `d`
+ * steps. Sizes and eligibility are memoized per node object; occurrences
+ * carry DFS enter/exit stamps so containment is O(1); every symbol name lands
+ * in {@link CseHarvest.usedNames}.
  *
  * Pure analysis: nothing in `root` is mutated and no expression is evaluated.
  */
@@ -797,6 +865,40 @@ class Harvester {
   private readonly usedNames = new Set<string>();
   private readonly regions: MutableRegion[] = [];
   private readonly occurrences: MutableOccurrence[] = [];
+  /** Every occurrence record and every replay, in DFS order. The weights of
+   * the records are computed from it after the walk (`computeWeights`). */
+  private readonly trace: (MutableOccurrence | Replay)[] = [];
+  /** Per trace entry: the innermost first walk (an index in `firstWalks`)
+   * that holds it, or `-1`. */
+  private readonly traceWalk: number[] = [];
+  /** Per trace entry: its DFS stamps. A replay has the stamps of the record
+   * of the node it replays (`replay`). */
+  private readonly traceEnter: number[] = [];
+  private readonly traceExit: number[] = [];
+  /** Per trace entry: the number of paths it stands for (`computeWeights`). */
+  private readonly traceWeight: number[] = [];
+  private readonly traceIndex = new Map<MutableOccurrence, number>();
+  /** Every first walk of a function node: the first walk that holds it
+   * (`-1` at the top) and the trace indices of its replays. The replays that
+   * stand for more paths of an entry are the replays of the first walks
+   * that hold it (`forEachCoveringReplay`). */
+  private readonly firstWalks: { parent: number; replays: number[] }[] = [];
+  private readonly walkStack: number[] = [];
+  /**
+   * The first walk of each node object, per walk context. A context is a
+   * region and the two flags of `walk`: the walk of a subtree depends on
+   * nothing else (the region stack is the chain of the region's ancestors,
+   * and a child region is found again by its `(node, operand)` key), so a
+   * second walk in the same context gives the same regions and the same
+   * records. Indexed by `underMapped | asStatement << 1`.
+   */
+  private readonly visits = new Map<
+    MutableRegion,
+    Map<Expression, VisitRecord>[]
+  >();
+  /** Count of region-opening edges taken, merged or not — see
+   * `VisitRecord.openedSites`. */
+  private openedSites = 0;
   private readonly regionStack: MutableRegion[] = [];
 
   private readonly sizeMemo = new Map<Expression, number>();
@@ -892,6 +994,7 @@ class Harvester {
     this.walk(this.root, rootRegion, false, false);
     this.regionStack.pop();
 
+    this.computeWeights();
     const candidates = this.selectCandidates();
 
     return {
@@ -901,7 +1004,7 @@ class Harvester {
       usedNames: this.usedNames,
       diagnostics: {
         edges: this.edges,
-        eligibleOccurrences: this.occurrences.length,
+        eligibleOccurrences: weightOf(this.occurrences),
         buckets: this.buckets,
         exhaustedBuckets: this.exhaustedBuckets,
         droppedByMutation: this.droppedByMutation,
@@ -999,6 +1102,7 @@ class Harvester {
     inert: boolean,
     boundNames: string[] = []
   ): MutableRegion {
+    this.openedSites += 1;
     const key = regionKey(node, opIndex);
     const existing = parent._childByKey.get(key);
     if (existing !== undefined) {
@@ -1027,12 +1131,34 @@ class Harvester {
     underMapped: boolean,
     asStatement: boolean
   ): void {
+    // A node object reached again in the same context is not walked again
+    // (see `visits`): without this, a DAG whose node `e_k` is
+    // `Add(e_(k-1), e_(k-1))` takes `2^k` steps for `k` distinct nodes.
+    let contextVisits: Map<Expression, VisitRecord> | undefined;
+    if (isFunction(node)) {
+      contextVisits = this.contextVisits(region, underMapped, asStatement);
+      const first = contextVisits.get(node);
+      if (first !== undefined) {
+        this.replay(node, region, first);
+        return;
+      }
+    }
+
     this.edges += 1;
+    const edgesBefore = this.edges - 1;
+    const openedBefore = this.openedSites;
+    const traceStart = this.trace.length;
     const enter = this.clock++;
 
     if (isSymbol(node)) this.usedNames.add(node.symbol);
 
+    const walkId = this.firstWalks.length;
     if (isFunction(node)) {
+      this.firstWalks.push({
+        parent: this.walkStack.at(-1) ?? -1,
+        replays: [],
+      });
+      this.walkStack.push(walkId);
       this.recordAssignment(node);
 
       const nextUnderMapped = underMapped || this.isCallerMapped(node);
@@ -1042,20 +1168,120 @@ class Harvester {
       } else {
         this.walkOperands(node, region, nextUnderMapped, asStatement);
       }
+      this.walkStack.pop();
     }
 
+    const traceEnd = this.trace.length;
     const exit = this.clock++;
 
-    // G1 (purity) and G1b (emission purity) are applied at record time:
-    // an occurrence that fails them never enters the bucket machinery, and an
-    // occurrence BELOW a caller-mapped operator never counts at all.
-    //
-    // The `size` prefilter is G4's first clause hoisted forward. Doing it here
-    // is outcome-equivalent (size is fixed per node and no later gate can
-    // resurrect a too-small candidate, nor can a dropped candidate change
-    // another's fate — subsumption only ever drops the SUBSUMED one) and it
-    // keeps the verification buckets from filling with trivia.
-    if (
+    const recorded = this.isRecorded(node, underMapped);
+    if (recorded) this.record(node, region, enter, exit);
+
+    contextVisits?.set(node, {
+      id: walkId,
+      start: traceStart,
+      end: traceEnd,
+      edges: this.edges - edgesBefore,
+      openedSites: this.openedSites - openedBefore,
+      recorded,
+    });
+  }
+
+  /** The first walks of the walk context `(region, underMapped,
+   * asStatement)`. */
+  private contextVisits(
+    region: MutableRegion,
+    underMapped: boolean,
+    asStatement: boolean
+  ): Map<Expression, VisitRecord> {
+    let byFlags = this.visits.get(region);
+    if (byFlags === undefined) {
+      byFlags = [];
+      this.visits.set(region, byFlags);
+    }
+    const index = (underMapped ? 1 : 0) | (asStatement ? 2 : 0);
+    let map = byFlags[index];
+    if (map === undefined) {
+      map = new Map();
+      byFlags[index] = map;
+    }
+    return map;
+  }
+
+  /**
+   * Stand in for a second walk of `node` in the context of its first walk
+   * `first`. The second walk would open the same regions (each a merge),
+   * record the same names and give the same records below `node`, so it is
+   * replaced by a {@link Replay} of the first walk's trace range, which
+   * `computeWeights` turns into weights. The node's own record is made at
+   * this position, because it is the record emission and the dominance rule
+   * look up. The diagnostics count what the walk would have counted.
+   */
+  private replay(
+    node: Expression,
+    region: MutableRegion,
+    first: VisitRecord
+  ): void {
+    this.edges += first.edges;
+    this.openedSites += first.openedSites;
+    this.mergedRegionSites += first.openedSites;
+    const enter = this.clock++;
+    const exit = this.clock++;
+    if (first.end > first.start) {
+      this.firstWalks[first.id].replays.push(this.trace.length);
+      this.pushTrace(
+        {
+          replayOf: node,
+          start: first.start,
+          end: first.end,
+          recorded: first.recorded,
+        },
+        enter,
+        exit
+      );
+    }
+    if (first.recorded) this.record(node, region, enter, exit);
+  }
+
+  private pushTrace(
+    entry: MutableOccurrence | Replay,
+    enter: number,
+    exit: number
+  ): void {
+    this.traceWalk.push(this.walkStack.at(-1) ?? -1);
+    this.traceEnter.push(enter);
+    this.traceExit.push(exit);
+    this.trace.push(entry);
+  }
+
+  /** Call `fn` with the trace index of every replay that stands for more
+   * paths of trace entry `index`: the replays of each first walk that holds
+   * the entry. */
+  private forEachCoveringReplay(
+    index: number,
+    fn: (replay: number) => boolean
+  ): boolean {
+    for (let w = this.traceWalk[index]; w >= 0; w = this.firstWalks[w].parent)
+      for (const replay of this.firstWalks[w].replays)
+        if (!fn(replay)) return false;
+    return true;
+  }
+
+  /**
+   * Whether the walk records an occurrence of `node`.
+   *
+   * G1 (purity) and G1b (emission purity) are applied at record time:
+   * an occurrence that fails them never enters the bucket machinery, and an
+   * occurrence BELOW a caller-mapped operator never counts at all.
+   *
+   * The `size` prefilter is G4's first clause hoisted forward. Doing it here
+   * is outcome-equivalent (size is fixed per node and no later gate can
+   * resurrect a too-small candidate, nor can a dropped candidate change
+   * another's fate — subsumption only ever drops the SUBSUMED one) and it
+   * keeps the verification buckets from filling with trivia.
+   */
+  private isRecorded(node: Expression, underMapped: boolean): boolean {
+    return (
       isFunction(node) &&
       !underMapped &&
       node.isPure &&
@@ -1065,15 +1291,134 @@ class Harvester {
         this.isExpensiveBuiltin(node) ||
         this.isSymbolSquare(node)) &&
       this.isEligible(node)
-    ) {
-      this.occurrences.push({
-        node,
-        region,
-        enter,
-        exit,
-        size: this.sizeOf(node),
-      });
+    );
+  }
+
+  private record(
+    node: Expression,
+    region: MutableRegion,
+    enter: number,
+    exit: number
+  ): void {
+    const occurrence: MutableOccurrence = {
+      node,
+      region,
+      enter,
+      exit,
+      size: this.sizeOf(node),
+      weight: 1,
+    };
+    this.occurrences.push(occurrence);
+    this.traceIndex.set(occurrence, this.trace.length);
+    this.pushTrace(occurrence, enter, exit);
+  }
+
+  /**
+   * Set the `weight` of every occurrence record: the number of paths it
+   * stands for. An entry of the trace is walked once for each path of each
+   * replay whose range holds it, plus once for itself:
+   * `weight(i) = 1 + Σ weight(r)` over the replays `r` whose range holds `i`.
+   * A replay comes after its whole range in the trace, so one pass from the
+   * end, with a difference array for the range sums, computes every weight in
+   * linear time. Weights are capped at {@link CSE_MAX_OCCURRENCE_WEIGHT} so
+   * that every sum stays an exact integer.
+   */
+  private computeWeights(): void {
+    const n = this.trace.length;
+    const diff: number[] = new Array(n).fill(0);
+    let running = 0;
+    for (let i = n - 1; i >= 0; i--) {
+      running += diff[i];
+      const weight = Math.min(1 + running, CSE_MAX_OCCURRENCE_WEIGHT);
+      this.traceWeight[i] = weight;
+      const entry = this.trace[i];
+      if ('replayOf' in entry) {
+        diff[entry.end - 1] += weight;
+        if (entry.start > 0) diff[entry.start - 1] -= weight;
+      } else entry.weight = weight;
     }
+  }
+
+  /**
+   * The paths of trace entry `index` whose DFS position is at or after
+   * `stamp`. Every path other than the entry's own comes from a replay that
+   * stands for more of its paths, and comes at that replay's position, which
+   * is after the entry: so the count is the entry's weight when the entry
+   * itself is at or after `stamp`, and otherwise the sum of the same count
+   * over those replays. `memo` is per `stamp`.
+   */
+  private pathsAfter(
+    index: number,
+    stamp: number,
+    memo: Map<number, number>
+  ): number {
+    if (this.traceEnter[index] >= stamp) return this.traceWeight[index];
+    const cached = memo.get(index);
+    if (cached !== undefined) return cached;
+    let total = 0;
+    this.forEachCoveringReplay(index, (replay) => {
+      total += this.pathsAfter(replay, stamp, memo);
+      return true;
+    });
+    total = Math.min(total, CSE_MAX_OCCURRENCE_WEIGHT);
+    memo.set(index, total);
+    return total;
+  }
+
+  /**
+   * Whether every path of every record of `inner` lies strictly inside a path
+   * of a record of `outer` — the containment half of the subsumption test.
+   *
+   * Two occurrences of one structural class have the same size, so neither
+   * can strictly contain the other: `outer`, sorted by `enter`, is a set of
+   * pairwise disjoint intervals, and the one record that can contain an
+   * entry is the last one that starts before it (binary search).
+   *
+   * A record that stands for several paths needs more than that. Its own
+   * position must be inside a record `c` of `outer`, and so must every other
+   * path, each of which comes from a replay `r` that stands for more of its
+   * paths: those paths are inside copies of `c` when `c` belongs to the walk
+   * that `r` replays (its trace index is in the range of `r`, or is the
+   * record of the replayed node itself), and otherwise they are inside an
+   * occurrence of `outer` exactly when the paths of `r` are — the same
+   * question, asked of `r`. In a tree where no node object is reached twice
+   * there is no replay, and the test is the containment of each record.
+   */
+  private everyPathInside(
+    inner: MutableOccurrence[],
+    outer: MutableOccurrence[]
+  ): boolean {
+    const container = (index: number): number => {
+      const enter = this.traceEnter[index];
+      let lo = 0;
+      let hi = outer.length - 1;
+      let last = -1;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (outer[mid].enter < enter) {
+          last = mid;
+          lo = mid + 1;
+        } else hi = mid - 1;
+      }
+      if (last < 0 || this.traceExit[index] >= outer[last].exit) return -1;
+      return this.traceIndex.get(outer[last])!;
+    };
+    const memo = new Map<number, boolean>();
+    const inside = (index: number): boolean => {
+      const cached = memo.get(index);
+      if (cached !== undefined) return cached;
+      const c = container(index);
+      const result =
+        c >= 0 &&
+        this.forEachCoveringReplay(index, (r) => {
+          const replay = this.trace[r] as Replay;
+          const last = replay.recorded ? replay.end : replay.end - 1;
+          return (c >= replay.start && c <= last) || inside(r);
+        });
+      memo.set(index, result);
+      return result;
+    };
+    return inner.every((occ) => inside(this.traceIndex.get(occ)!));
   }
 
   /** Repeated symbol squares save two reads and an operation per reuse.
@@ -2126,6 +2471,22 @@ class Harvester {
           found = cls;
           break;
         }
+        // Two structures that are the same have the same node count, so a
+        // class of another size is passed over without the comparison. It is
+        // charged one unit, which still bounds the loop over the classes of a
+        // bucket. The structural hash does not tell nesting levels apart well
+        // (in `e_k = Add(e_(k-1), e_(k-1))`, `e_k` and `e_(k+64)` have the same
+        // hash), and charging the comparison by node count instead made the
+        // first such collision exhaust the bucket: the levels in it then
+        // emitted inline, once per path.
+        if (cls.size !== occ.size) {
+          bucket.spent += 1;
+          if (bucket.spent > this.maxVerifyNodesPerBucket) {
+            bucket.exhausted = true;
+            break;
+          }
+          continue;
+        }
         if (cls.representative.isSame(occ.node)) {
           found = cls;
           break;
@@ -2197,7 +2558,12 @@ class Harvester {
       region: MutableRegion;
       occurrences: MutableOccurrence[];
       served: MutableOccurrence[];
+      /** The paths of `served` that come after the region's first own
+       * occurrence: all of them when no node object is reached twice. */
+      servedPaths: number;
     };
+    const countOf = (c: Provisional): number =>
+      weightOf(c.occurrences) + c.servedPaths;
     const provisional: Provisional[] = [];
     for (const bucket of buckets.values()) {
       for (const cls of bucket.classes) {
@@ -2217,9 +2583,20 @@ class Harvester {
         for (const region of regions) {
           const occurrences = byRegion.get(region)!;
           const served: MutableOccurrence[] = [];
+          let servedPaths = 0;
           const first = occurrences[0].enter;
+          const after = new Map<number, number>();
           for (const occ of cls.occurrences) {
-            if (occ.region === region || occ.enter < first) continue;
+            if (occ.region === region) continue;
+            // A record before the first own occurrence can still stand for
+            // later paths, when a replay after it stands for more of its
+            // paths (see `pathsAfter`).
+            const paths = this.pathsAfter(
+              this.traceIndex.get(occ)!,
+              first,
+              after
+            );
+            if (paths === 0) continue;
             if (claimed.has(occ)) continue;
             if (
               reachesBindingWithoutRebinding(
@@ -2229,16 +2606,18 @@ class Harvester {
               )
             ) {
               served.push(occ);
+              servedPaths += paths;
               claimed.add(occ);
             }
           }
-          if (occurrences.length + served.length < 2) continue;
+          if (weightOf(occurrences) + servedPaths < 2) continue;
           provisional.push({
             representative: cls.representative,
             size: cls.size,
             region,
             occurrences,
             served,
+            servedPaths,
           });
         }
       }
@@ -2276,7 +2655,7 @@ class Harvester {
     // twice, because `sin(u) + 1` (score 4, under `CSE_MIN_SCORE`) subsumed
     // the `sin(u)` the transcendental-call exemption admits.
     const surviving = afterMutation.filter((c) => {
-      const count = c.occurrences.length + c.served.length;
+      const count = countOf(c);
       if (count < 2) return false;
       if (
         this.isAdmittedUserFnApp(c.representative) ||
@@ -2329,26 +2708,6 @@ class Harvester {
       }
       return all;
     };
-    // Two occurrences of one structural class have the same size, so neither
-    // can strictly contain the other: the list is a set of pairwise disjoint
-    // intervals, sorted by `enter`. The one interval that can contain `oa` is
-    // therefore the last one that starts before it, found by binary search.
-    const strictlyInsideOne = (
-      oa: MutableOccurrence,
-      sorted: MutableOccurrence[]
-    ): boolean => {
-      let lo = 0;
-      let hi = sorted.length - 1;
-      let last = -1;
-      while (lo <= hi) {
-        const mid = (lo + hi) >> 1;
-        if (sorted[mid].enter < oa.enter) {
-          last = mid;
-          lo = mid + 1;
-        } else hi = mid - 1;
-      }
-      return last >= 0 && oa.exit < sorted[last].exit;
-    };
     const subsumed = new Set<Provisional>();
     for (const group of byRegionForSubsumption.values()) {
       for (const a of group) {
@@ -2366,12 +2725,12 @@ class Harvester {
             !this.isAdmittedUserFnApp(b.representative)
           )
             continue;
-          const bOccurrences = occurrencesOf(b);
-          if (bOccurrences.length !== aOccurrences.length) continue;
-          const allInside = aOccurrences.every((oa) =>
-            strictlyInsideOne(oa, bOccurrences)
-          );
-          if (allInside) {
+          // A count that reached the weight cap is not known exactly, so it
+          // is not compared: both candidates are kept.
+          const count = countOf(a);
+          if (count >= CSE_MAX_OCCURRENCE_WEIGHT || countOf(b) !== count)
+            continue;
+          if (this.everyPathInside(aOccurrences, occurrencesOf(b))) {
             subsumed.add(a);
             this.droppedBySubsumption += 1;
             break;
@@ -2391,7 +2750,7 @@ class Harvester {
         region: c.region,
         occurrences: c.occurrences,
         served: c.served,
-        score: (c.occurrences.length + c.served.length - 1) * c.size,
+        score: (countOf(c) - 1) * c.size,
         nodes: new Set(c.occurrences.map((o) => o.node)),
       };
       const list = byRegion.get(c.region);
@@ -2412,7 +2771,14 @@ class Harvester {
           b.score - a.score ||
           a.occurrences[0].enter - b.occurrences[0].enter
       );
-      const kept = list.slice(0, this.maxBindingsPerRegion);
+      // A candidate with a record that stands for more paths than itself is
+      // kept beyond the cap: dropped, it would be emitted once per PATH, and
+      // in a DAG with shared levels (`e_k = Add(e_(k-1), e_(k-1))`) a run of
+      // dropped levels emits `2^run` copies of the level below it. A node
+      // object that is only repeated (`Add(e, e)`) stays under the cap.
+      const kept = list.filter(
+        (c, i) => i < this.maxBindingsPerRegion || standsForMorePaths(c)
+      );
       this.droppedByRegionCap += list.length - kept.length;
       region.candidates = kept;
       for (const candidate of kept)
@@ -2502,4 +2868,24 @@ function nodeId(node: Expression): number {
 
 function regionKey(node: Expression, opIndex: number): string {
   return `${nodeId(node)}:${opIndex}`;
+}
+
+/** Whether a record of `candidate` stands for more paths than itself (its
+ * `weight` is above 1), so that emitting the candidate inline would emit it
+ * more times than it has records. This is true only for a node below a
+ * subtree that the walk replayed, for example a level `e_(k-2)` below the
+ * shared `e_(k-1)` in `e_k = Add(e_(k-1), e_(k-1))`. It is false for a node
+ * object that is only repeated, as `e` in a top-level `Add(e, e)`: each of
+ * its records has weight 1, and inline emission emits it once per record, as
+ * for a tree. Never true in a tree where no node object is reached twice. */
+function standsForMorePaths(candidate: CseCandidate): boolean {
+  return candidate.occurrences.some((occurrence) => occurrence.weight > 1);
+}
+
+/** The number of paths a list of occurrence records stands for: the sum of
+ * their weights (the list's length when no node object is reached twice). */
+function weightOf(occurrences: ReadonlyArray<CseOccurrence>): number {
+  let total = 0;
+  for (const occurrence of occurrences) total += occurrence.weight;
+  return total;
 }

@@ -57,6 +57,7 @@ import {
 import {
   functionLiteralDeclaredEffects,
   functionLiteralParameters,
+  functionLiteralReturnType,
 } from './boxed-expression/function-literal.js';
 import {
   EffectContractError,
@@ -283,14 +284,13 @@ function inferredEffectsOf(literal: Expression): EffectSet | undefined {
  * The author-declared signature governing `id`, or `undefined` when the
  * binding carries none.
  *
- * "Declared" means the AUTHOR wrote the signature for the SYMBOL and nothing
- * has been defined under it yet — the string form
- * `ce.declare(f, "(…) -> …")` (value slot, no value) or the object form
- * `ce.declare(f, { signature: … })` (operator slot, no handler). A signature
+ * "Declared" means the AUTHOR wrote the signature for the SYMBOL — the string
+ * form `ce.declare(f, "(…) -> …")` (value slot) or the object form
+ * `ce.declare(f, { signature: … })` (operator slot), with nothing defined
+ * under it yet or with a function literal installed under it. A signature
  * DERIVED from an installed definition is NOT a declaration: an annotated
- * literal flips `inferredSignature` off (`assignValueAsOperatorDef`) and the
- * §6.3 reconciliation stores a literal under a non-inferred value type, so
- * without the "holds nothing yet" tests a clause-1 install would look declared
+ * literal flips `inferredSignature` off (`assignValueAsOperatorDef`), and
+ * without the `_derivedSignature` test a clause-1 install would look declared
  * and its own domain would refuse every later clause. Once a clause SET exists
  * the declaration travels on its state instead.
  *
@@ -314,15 +314,43 @@ export function declaredSignatureOf(
   // the redefinition. Same problem, and the same fix, as SINGLE_CLAUSE_ORIGIN.
   const remembered = singleClauseDeclared(def);
   if (remembered !== undefined) return remembered;
+  // A function literal installed under a signature declared on the NAME
+  // (`ce.declare(f, { signature, evaluate: literal })`, or
+  // `ce.declare(f, "(…) -> …")` then `ce.assign(f, literal)`) is still
+  // governed by that declaration: the host stated a contract, and a clause
+  // outside it is refused exactly as after an Epsil `let f: (…) -> …`
+  // (user decision 2026-10-18). Before, a definition that held a body never
+  // counted as declared, so `function h(x: string) -> string { x }` after
+  // `ce.declare('h', { signature: '(integer) -> integer', evaluate: … })`
+  // added a second clause instead of being refused.
+  //
+  // Not a declaration: a signature DERIVED from an annotated literal at
+  // assign time (`_derivedSignature`), which is a record of that literal, and
+  // an opaque host operator with a native handler (no function literal).
+  // When the declaration has `unknown` placeholder slots, the contract is the
+  // declaration as written (`_signatureSkeleton`), not the signature refined
+  // from the installed literal.
   let t: Type | undefined;
   if (isValueDef(def)) {
-    if (def.value.inferredType || def.value.value !== undefined)
-      return undefined;
-    t = def.value.type.type;
+    if (def.value.inferredType) return undefined;
+    const v = def.value.value;
+    if (v === undefined) t = def.value.type.type;
+    // The type of a constant is fixed from its value, not declared; a
+    // constant is refused as such by `defineFunctionClause()`.
+    else if (def.value.isConstant) return undefined;
+    else if (isFunction(v, 'Function'))
+      t = def.value._signatureSkeleton ?? def.value.type.type;
+    else return undefined;
   } else if (isOperatorDef(def)) {
-    if (def.operator.inferredSignature || def.operator.evaluate !== undefined)
-      return undefined;
-    t = def.operator.signature.type;
+    if (def.operator.inferredSignature) return undefined;
+    if (def.operator.evaluate === undefined) t = def.operator.signature.type;
+    else if (
+      !def.operator._derivedSignature &&
+      (def.operator as { _lambdaLiteral?: Expression })._lambdaLiteral !==
+        undefined
+    )
+      t = def.operator._signatureSkeleton ?? def.operator.signature.type;
+    else return undefined;
   }
   if (typeof t !== 'object' || t.kind !== 'signature') return undefined;
   // G2 (generic-function-literals design §2.6, rule 4): a `typeParams`-carrying
@@ -1053,18 +1081,118 @@ function convertToClauseState(
     isOperatorDef(def) && typeof def.operator.description === 'string'
       ? def.operator.description
       : undefined;
+  const stated = statedSignatureOf(def);
   return {
     clauses: [
       {
-        signature: clauseSignatureOf(canonical),
+        signature: withStatedTypes(
+          canonical,
+          clauseSignatureOf(canonical),
+          stated
+        ),
         literal: canonical,
         ...(origin !== undefined ? { origin } : {}),
         ...(description !== undefined ? { attributes: { description } } : {}),
       },
     ],
-    effectRow: { explicit: functionLiteralDeclaredEffects(canonical) },
+    effectRow: {
+      explicit:
+        functionLiteralDeclaredEffects(canonical) ??
+        (stated !== undefined && effectsDeclaredOn(def)
+          ? (stated.effects ?? [])
+          : undefined),
+    },
     declared: declaredSignatureOf(def),
   };
+}
+
+/** The signature the HOST stated for a definition that holds a function
+ * literal: the signature of an operator definition whose signature is not
+ * inferred (`ce.declare(id, { signature, evaluate: literal })`), or the type
+ * of a value definition whose type is not inferred
+ * (`ce.declare(id, '(…) -> …')` then `ce.assign(id, literal)`). `undefined`
+ * when the signature was inferred, or is not a monomorphic signature. Also
+ * `undefined` for a signature DERIVED from an annotated literal at assign time
+ * (`_derivedSignature`): that signature types each slot the literal left bare
+ * from the uses of the parameter, which is a record of the body, not a
+ * contract on the name. */
+function statedSignatureOf(
+  def: BoxedDefinition
+): FunctionSignature | undefined {
+  let t: Type | undefined;
+  if (isOperatorDef(def)) {
+    if (def.operator.inferredSignature || def.operator._derivedSignature)
+      return undefined;
+    t = def.operator.signature.type;
+  } else if (isValueDef(def)) {
+    if (def.value.inferredType) return undefined;
+    t = def.value.type.type;
+  }
+  if (typeof t !== 'object' || t.kind !== 'signature') return undefined;
+  if (isPolymorphicType(t)) return undefined;
+  return t;
+}
+
+/** True when the definition's author stated the effects of its signature (a
+ * specifier or the `pure` keyword), so that the effects are a contract. */
+function effectsDeclaredOn(def: BoxedDefinition): boolean {
+  if (isOperatorDef(def)) return def.operator.effectsDeclared === true;
+  if (isValueDef(def)) return def.value.effectsDeclared === true;
+  return false;
+}
+
+/**
+ * The clause signature of a lone literal installed under a signature the host
+ * stated. The literal's own type is not the contract of such a definition:
+ * `ce.declare('h', { signature: '(integer) -> integer', evaluate: x ↦ 2x })`
+ * admits only integer arguments, but the literal `x ↦ 2x` types as
+ * `(unknown) -> number`. When this signature was used as the clause's
+ * parameter domain, a later `function h(x: integer) -> integer { x }` did not
+ * match it, so the statement added a second clause and `h` got the signature
+ * `((unknown) -> number) & ((x: integer) -> integer)`, where the statement
+ * has the same domain as the existing definition and replaces it.
+ *
+ * Each BARE parameter takes the stated type, and the result takes the stated
+ * result when the literal has no return ascription. An annotated parameter
+ * and an ascribed result keep the author's type of the literal. The stated
+ * `unknown`/`any` states nothing and is not used. When the arity of the stated
+ * signature and of the literal differ, the literal's own signature is kept.
+ */
+function withStatedTypes(
+  literal: Expression,
+  own: FunctionSignature,
+  stated: FunctionSignature | undefined
+): FunctionSignature {
+  if (stated === undefined || !isFunction(literal, 'Function')) return own;
+  const params = literal.ops.slice(1);
+  const ownArgs = own.args ?? [];
+  const statedArgs = stated.args ?? [];
+  if (
+    ownArgs.length !== params.length ||
+    statedArgs.length !== params.length ||
+    own.optArgs !== undefined ||
+    stated.optArgs !== undefined ||
+    own.variadicArg !== undefined ||
+    stated.variadicArg !== undefined
+  )
+    return own;
+  const informative = (t: Type) => t !== 'unknown' && t !== 'any';
+  let changed = false;
+  const args = ownArgs.map((a, i) => {
+    const t = statedArgs[i].type;
+    if (!isSymbol(params[i]) || !informative(t)) return a;
+    changed = true;
+    return { ...a, type: t };
+  });
+  let result = own.result;
+  if (
+    functionLiteralReturnType(literal) === undefined &&
+    informative(stated.result)
+  ) {
+    result = stated.result;
+    changed = true;
+  }
+  return changed ? { ...own, args, result } : own;
 }
 
 /** Look up `id` along the scope chain (read-only). */

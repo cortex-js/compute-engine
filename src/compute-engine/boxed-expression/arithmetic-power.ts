@@ -706,6 +706,29 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
     }
   }
 
+  // A canonical product whose factors are all exact number literals is an
+  // exact number that has no single literal: the canonical `Multiply` keeps
+  // two factors separate when their product is not an exact value
+  // (`√1009·√1013`, whose radicand 1022117 has no square factor and is
+  // above 10⁶). Its exact integer power is folded as the power of a literal
+  // is (above): each factor is raised to the power, and the canonical
+  // `Multiply` folds the results. `(√1009·√1013)^(−2)` is `1/1022117`, as
+  // `(√2·√3)^(−2)` is `1/6`.
+  if (
+    isFunction(a, 'Multiply') &&
+    a.isCanonical &&
+    a.ops.every((op) => isNumber(op) && op.isExact && op.isFinite === true) &&
+    isNumber(b) &&
+    b.isExact &&
+    !b.isComplex
+  ) {
+    const e = realExponentValue(b);
+    if (typeof e === 'number' && Number.isInteger(e) && Math.abs(e) <= 64) {
+      const ops = a.ops.map((op) => canonicalPower(op, b));
+      if (ops.every((op) => isNumber(op))) return ce.function('Multiply', ops);
+    }
+  }
+
   return unchanged();
 }
 
@@ -1718,6 +1741,31 @@ export function pow(
     if (e === 2) return x.op1;
     // (√a)^{2k} -> a^k (even integer outer exponent, always safe)
     if (e !== undefined && e % 2 === 0) return x.op1.pow(e / 2);
+    // (√a)^(2k+1) -> a^k·√a for an exact number `a`. This is true for every
+    // `a`, also a negative one, because (√a)^2 = a. A `Sqrt` of an exact
+    // number is not a number literal when its radicand is negative and not
+    // a square (`√(−13)`), or when its square-free part is above 10⁶
+    // (`√1022117`). The integer part is taken out of the root:
+    // `(√(−13))^3 = −13·√(−13) = −13√13·i` (the canonical `Multiply` folds
+    // `√(−13)`), and `(√1022117)^3 = 1022117·√1022117`, not
+    // `√1067829303856075613`. A negative `k` gives a rational coefficient:
+    // `(√1022117)^(−3) = √1022117/1022117²`. The product is made with
+    // `mul()`, not with the canonical `Multiply`: only `mul()` folds
+    // `√(−13)` into the coefficient as `√13·i`.
+    if (
+      e !== undefined &&
+      Number.isSafeInteger(e) &&
+      isNumber(x.op1) &&
+      x.op1.isExact &&
+      x.op1.isFinite === true
+    ) {
+      const k = Math.floor(e / 2);
+      const factor = pow(x.op1, k, { numericApproximation: false });
+      if (isNumber(factor)) {
+        const result = factor.mul(x);
+        return numericApproximation ? result.N() : result;
+      }
+    }
     // (√a)^b -> √(a^b) — rearranges (a^{1/2})^b to (a^b)^{1/2},
     // only valid when a >= 0 (negative a changes sign under rearrangement)
     if (x.op1.isNonNegative === true)

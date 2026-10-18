@@ -183,12 +183,12 @@ import { isComposite, isPrime } from '../boxed-expression/predicates.js';
 
 import {
   canonicalAdd,
-  add,
+  addArray,
   addNEvaluated,
   absorbScalarsIntoCells,
 } from '../boxed-expression/arithmetic-add.js';
 import {
-  mulFactored,
+  mulFactoredArray,
   mulNEvaluated,
   isOutOfDoubleRangeLiteral,
 } from '../boxed-expression/arithmetic-mul-div.js';
@@ -14444,7 +14444,7 @@ function addEvaluatedOperands(
     // The broadcast is the exact `add()`, also under `.N()`: the
     // numeric route does not evaluate the elements it builds.
     if (evaluated.some((x) => x.isCollection)) {
-      const r = add(...exactOperands(ops, evaluated, numericApproximation));
+      const r = addArray(exactOperands(ops, evaluated, numericApproximation));
       return numericApproximation ? r.N() : r;
     }
     return residueOperands(
@@ -14525,7 +14525,7 @@ function addEvaluatedOperands(
       markAbsentPointCells(engine!, expression, r)
     );
   }
-  const result = add(...evaluated);
+  const result = addArray(evaluated);
   // D2: an inexact (float) operand has no exactness to preserve, so it
   // numericizes the whole sum even when mixed with an exact symbolic
   // constant that the numeric-literal fold above can't reach (`Pi`,
@@ -14618,8 +14618,8 @@ function mulEvaluatedOperands(
   // A product with a residue class: see the matching comment in `Add`.
   if (evaluated.some(containsResidueClass)) {
     if (evaluated.some((x) => x.isCollection)) {
-      const r = mulFactored(
-        ...exactOperands(ops, evaluated, numericApproximation)
+      const r = mulFactoredArray(
+        exactOperands(ops, evaluated, numericApproximation)
       );
       return numericApproximation ? r.N() : r;
     }
@@ -14690,7 +14690,7 @@ function mulEvaluatedOperands(
   // reproduces the expanded form verbatim (user ruling, 2026-08-20).
   // Internal callers keep `mul()`, whose distribution several
   // normalization paths need to reach a fixpoint — see `mulFactored`.
-  const result = mulFactored(...evaluated);
+  const result = mulFactoredArray(evaluated);
   // D2: see the matching comment in `Add` — an inexact (float) operand
   // numericizes the whole product even when mixed with an exact
   // symbolic constant (`Multiply(0.5, Pi)` → 1.57…). Only when the

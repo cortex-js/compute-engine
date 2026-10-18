@@ -539,6 +539,17 @@ export function absorbScalarsIntoCells(
 }
 
 export function add(...xs: ReadonlyArray<Expression>): Expression {
+  return addArray(xs);
+}
+
+/**
+ * `add()` with the terms given as one array. A caller that holds the terms of
+ * a sum of arbitrary length (the operands of an `Add` expression) uses this
+ * form: the call `add(...xs)` passes each term as a separate argument, and
+ * JavaScript throws `RangeError: Maximum call stack size exceeded` when the
+ * number of arguments is too large (about 100 000 terms or more).
+ */
+export function addArray(xs: ReadonlyArray<Expression>): Expression {
   console.assert(xs.length > 0);
   if (!xs.every((x) => x.isValid)) return xs[0].engine._fn('Add', xs);
 
@@ -866,7 +877,9 @@ function addTuples(
       components.push(ce.NaN);
       continue;
     }
-    components.push(numericApproximation ? addN(...parts) : add(...parts));
+    components.push(
+      numericApproximation ? addNEvaluated(parts) : addArray(parts)
+    );
   }
   return ce.tuple(...components);
 }
@@ -980,7 +993,7 @@ function addTensors(
       )
         return sum;
     }
-    return add(...terms).evaluate();
+    return addArray(terms).evaluate();
   };
 
   // For vectors (rank 1)

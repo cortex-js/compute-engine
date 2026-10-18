@@ -150,8 +150,22 @@ value.
   2π; a multiplication by a uniform `1.0` between the steps was necessary.
   The error term of a Dekker product came out as 0 even with these barriers.
   GLSL ES 3.00 has no `fma` and no `precise`, so double-float code on the
-  `glsl` target is not reliable. WGSL has `fma`, which gives an exact
-  product; this has not been measured yet.
+  `glsl` target is not reliable.
+- WGSL under WebGPU (same GPU, Metal 3, measured 2026-10-18): `fma` is
+  exact. `e = fma(K, x, −p)` is the exact error of `p = K·x` at all 4,096
+  inputs, and `sin(10^4x)` with that product and an `fma` reduction by 2π has
+  a maximum error of 2.2·10⁻⁷ (plain: 3.8·10⁻³). The GPU's own `sin` of the
+  reduced argument (3–4 ulp) still leaves the hash off by more than 10⁻³ at
+  154 of 4,096 inputs. A reduction by π/2 to the quadrant and Taylor
+  polynomials for `sin` and `cos` on [−π/4, π/4], evaluated with `fma`, give
+  5.9·10⁻⁸ (under 1 ulp), and the hash with an exact outer product
+  (`fma(10^4, s, −p)`) is then within 10⁻³ at all 4,096 inputs. Cost per
+  call in a loop of dependent calls, under load: plain 3.4 ms, exact product
+  and 2π reduction 4.3 ms (+26%), the polynomial version 5.5 ms (+62%), for
+  10⁹ calls. Harness: a Playwright page from a fake `https://` origin
+  (`navigator.gpu` needs a secure context), with `--enable-unsafe-webgpu
+  --ignore-gpu-blocklist --use-angle=metal`; without these flags Chromium
+  falls back to SwiftShader, where `fma` was not fused.
 - For the hash, a correctly rounded float32 sine followed by a float32
   product by 10^4 meets Tycho's 10⁻³ target at every input tested; a sine
   with an error of 1.65·10⁻⁷ misses it at 135 of 4,096 inputs.
@@ -166,29 +180,73 @@ Two shapes are not reduced by the compile-time fold:
 - A complex argument (`\sin(x+10^6+10^6i)` through `_gpu_csin`): its real
   part is periodic in the same way, but the constant is one complex literal.
 
-Next steps: measure a WGSL double-float product with `fma` under WebGPU; for
-`glsl`, decide between the diagnostic (a) and leaving the decline to Tycho.
+Tycho's answers (2026-10-18): every Tycho GPU lane compiles to `glsl`
+(WebGL2) only, so a `wgsl`-only lowering helps no Tycho lane today. In the
+stored all-corpus codegen audit (4,844 `glsl` rows), Tycho's scan flags 116
+rows in 23 documents: a factor ≥ 1000 inside the trig argument
+(`fract(K·sin(10^4·x))`, 106 rows, 19 documents), a factor ≥ 1000 outside the
+trig only (`fract(K·sin(small·x))`, 9 rows, 3 documents), and the dot
+one-liner (1 row). A diagnostic (a) that replaces Tycho's scan must flag a
+`fract`/`mod` operand that contains a trig call and a multiplicative literal
+≥ 1000 anywhere in it, inner or outer factor. The decisions on a `wgsl`
+default and on shipping (a) for `glsl` are with the Tycho owner.
+
+**Tycho owner's decision (2026-10-18), pending the CE user's agreement:**
+plan (i). The `glsl` target emits the exact form by default (no compile
+option) for the three hash shapes, in the wide version only (exact up to
+`|K·x| ≈ 2.6·10^7`). Beyond the limit the shader gives NaN, and the compile
+result reports the bound on each variable (for example "accurate for
+`|x| ≤ 2,635`"); a compile-time decision for a variable with a declared
+bounded range is welcome but not required. Other flagged shapes get the
+diagnostic (a), with the inner-or-outer criterion. No `wgsl` work is needed
+for Tycho, and a range beyond 2.6·10^7 is not needed for the first step.
+Tycho removes its text scan at the adoption that ships this.
+
+Next steps, after those decisions: the diagnostic (a) on `glsl` with the
+criterion above; a `wgsl` lowering of `sin`/`cos` of a product with a large
+constant factor (exact product, `fma` reduction, polynomial). An exact product on `glsl`
+through integer arithmetic on the float bits was measured on 2026-10-18 (see
+below): it works, so the `glsl` target can also be made accurate.
+
+**`glsl` with integer arithmetic (WebGL2, measured 2026-10-18 on ANGLE/Metal,
+Apple M5 Max, and on SwiftShader):** the product `a·b = p + e` is exact when
+`e` is formed from the 48-bit product of the two significands (12-bit pieces
+in `uint`, from `floatBitsToUint`). The rest of the hash also needs exact
+float steps, and the compiler breaks each one unless its operands pass
+through `opaque(v) = uintBitsToFloat(floatBitsToUint(v) ^ ZERO_U)` with a
+uniform `ZERO_U = 0` (a multiplication by a uniform `1.0` was not enough):
+both operands and each intermediate value of the two-sum, the operands and the
+rounded result of the product (otherwise the product is fused into the next
+subtraction), each step of the reduction by π/2, and `fract(p)` before small
+terms are added to it (otherwise `p − floor(p) + e` is reordered into
+`(p + e) − floor(p)`). With a reduction by π/2 that keeps its rounding in a
+low part, a two-part Taylor `sin`/`cos`, an exact outer product, and every
+double constant carried as two float32 parts (`12.9898 = hi + lo`), all three
+corpus shapes match float64 within 10⁻³ at 4,096 of 4,096 inputs, on both
+backends: `fract(10^4·sin(10^4·x))`, `fract(43758.5453·sin(12.9898·x))`, and
+`fract(43758.5453·sin(dot(p, (12.9898, 78.233, 45.164))))`. Cost on the GPU
+(268M dependent calls): plain 1.1 ms; the first two shapes 6.0–6.3 ms (about
+5.5×); the `dot` shape 12.3 ms (about 10×). Harness:
+`glsl-int-bench.mjs` in the session scratchpad (not kept).
+
+**Range of the reduction (measured 2026-10-18):** with `k = round(p·2/π)`
+and π/2 split into 8-bit parts, `k·Ci` is exact only for `k < 2^16`, so the
+value is silently wrong for `|K·x|` above about 10^5 (2,872 of 4,096 inputs
+off for `|10^4·x|` up to 10^6). Splitting `k` into two 12-bit halves and π/2
+into 12-bit parts (from 60 digits of π/2), with a second pass that corrects
+`k` by ±1, is accurate up to `2^24·π/2 ≈ 2.6·10^7` (0 of 4,096 off at
+2.5·10^7, on ANGLE/Metal and SwiftShader) and costs about 7× plain against
+5.5× (6.5 ms against 4.9 ms and 0.9 ms plain). Above 2.6·10^7, `k` is no
+longer an exact float and the value is again silently wrong (3,826 of 4,096
+off at 10^9). A shader must therefore check `|p|` against the limit and give
+NaN beyond it, and the compile result should report the limit (as a bound on
+each variable when the factor is known), since the range of `x` is not known
+at compile time. A larger range needs `k` as two floats or a Payne–Hanek
+reduction in integer arithmetic (not measured).
 
 Tycho's probes: `scripts/repros/2026-10-17-ce382-glsl-amplified-trig-probe.mts`
 in the Tycho repo; the full text of both rows is in Tycho's
 `docs/COMPUTE_ENGINE.md`.
-
-### Under `.N()`, a user function whose body has several statements reads the rounded argument (OPEN, decision — found 2026-10-17 by the fix that makes lazy operators forward the numeric request)
-
-Under `.N()`, a parameter of a user function holds the float of the argument,
-and a jump function (`Floor`, a comparison) in the body reads the exact argument
-again only when the numeric request reaches it. A body of one statement gets the
-request. A body of several statements (a `Block`) or a `Loop` body runs exactly
-on purpose (`singleStatementRequest`, `function-utils.ts`), so that the values
-in the middle are not rounded (`a := √2; a^2` stays `2`). But its parameter is
-still bound to the float: with `f := x ↦ Block(z := 1, Floor(x))`,
-`f((25! − 1)/24!).N()` gives 25, where the correct value is 24. Options: (a)
-pass the numeric request to the last statement only; (b) bind the parameter to
-the exact argument in such a body, which brings back the cost the 2026-10-17
-decision avoided (`f(Sum(1/k, k, 1, 10000)).N()` goes from 90 ms to 27 s); (c)
-keep it and document it. **User decision 2026-10-18: option (a)** — the last
-statement of such a body gets the numeric request, the statements before it
-stay exact, so `f((25! − 1)/24!).N()` gives 24.
 
 ### Under `.N()`, a jump function of an expression of a parameter reads the rounded argument (OPEN, design — found 2026-10-17 by the same fix)
 
@@ -217,55 +275,6 @@ how a collection view keeps the numeric request (the one existing case is
 `lazyMapNumericApproximation`). `Reduce` has its own `.N()` rule for folds
 (`withExactFoldFallback`).
 
-### A compiled jump function whose operand mixes a loop index with an exact constant computes the constant as a double (OPEN, decision — found 2026-10-17 by the fix of compiled jump functions under `constantFold: false`)
-
-`Sum(x·Floor(k + (25! − 1)/24!), k, 1, 3)` at `x = 1` compiles to 81, where the
-interpreter gives 78: the hoisted constant becomes `_tv1 = 25` and each term is
-`Math.floor(k + 25)`. With bounds 1 to 300 the code is a run-time loop, and the
-values are 52650 against 52350. This happens in the default compile. Folding
-each unrolled term would fix the short sum but not the loop, so the two compiled
-forms of one `Sum` would then differ. Options: (a) refuse to compile a jump
-function whose operand adds a variable to a closed exact constant that a double
-does not hold exactly; (b) split an integer-typed index out of the operand of a
-jump that commutes with integer shifts (`Floor(k + c) = k + Floor(c)` for
-integer `k`, and the same for `Ceil`, `Round`, `Truncate`, `Fract`), and refuse
-the other shapes. **User decision 2026-10-18: option (b)** — take an integer
-index out of the operand of `Floor`, `Ceil`, `Round`, `Truncate` and `Fract`
-so the constant is computed exactly (`Sum(x·Floor(k + (25! − 1)/24!), k, 1, 3)`
-at `x = 1` gives 78), and refuse to compile the other shapes.
-
-### `And`, `Or`, `Not` and `Xor` with an absent operand are typed `boolean` but evaluate to `Missing` (OPEN, decided 2026-10-18 — found 2026-10-17 by the type of a comparison with `Undefined`)
-
-`And(True, Missing)` and `Not(Missing)` evaluate to `Missing`, but their type is
-`boolean`; so are `NotLess`, `NotGreater`, `NotLessNotEqual` and
-`NotGreaterNotEqual` with an `Undefined` or `Missing` operand (they are built
-from `Not`). A test in `logic-absent-operand.test.ts` pins `boolean` ("the boxed
-expression is typed boolean, as for And"). **User decision 2026-10-18:** type
-these operators `boolean | missing` when an operand may be absent, as the
-comparisons are since 2026-10-17, and update that test.
-
-### `Solve` does not read an integer-valued float exponent as a degree in a polynomial (OPEN, decided 2026-10-18 — found 2026-10-17 by the float-exponent `Solve` fix)
-
-`Solve(x^{2.0} + 3x + 2 = 0, x)` gives no solution: the quadratic templates are
-left out when an exponent is a float (`DEGREE_TEMPLATE_IDS`,
-`boxed-expression/solve.ts`), and the test "Solve does not read it as a
-quadratic" pins that. **User decision 2026-10-18:** an integer-valued float
-exponent is a degree in the polynomial templates too, with float roots
-(`−1.0` and `−2.0` here), as `x^{2.0} = 4` gives `±2.0`. Related, also open:
-`(y+1)^{2.0} = −4` with `y` declared `real` and `x^{-0.5} = −4` give no answer
-(`undefined`) where the complete answer is "no solution" (`[]`).
-
-### A user function that calls itself inside a `Map` callback gives an `expected-a-symbol` error (OPEN, small — found 2026-10-17 by the recursion-limit fix)
-
-With `m(n) := Map(x ↦ If(x < 1, 0, m(x − 1)), [n])`, `m(0)` gives `[0]` but
-`m(1)` gives `[Error("expected-a-symbol", "Typed(1, \"number\")")]`, where the
-correct value is `[[0]]`. Repro:
-`ce.box(['Assign', 'm', ['Function', ['Map', ['Function', ['If', ['Less', 'x', 1], 0, ['m', ['Subtract', 'x', 1]]], 'x'], ['List', 'n']], 'n']])`,
-then `ce.box(['m', 1]).evaluate()`. The error comes from the parameter check in
-`canonicalFunctionLiteralArguments()` (`function-utils.ts`): the value of the
-caller's `x` appears to be substituted into the parameter list of the inner
-function literal when the body is re-entered.
-
 ### An Epsil function redefined in a later program cannot change its result type (OPEN, question — found 2026-10-17 by the `effectsDeclared` fix)
 
 A redefinition across programs has replacement semantics for its effects (a
@@ -275,29 +284,99 @@ program with `function g(x: integer) -> string { … }` is refused with
 `incompatible-type`. Is that intended (the result type of a name is fixed once
 declared), or should the result type be replaced as the effects are?
 
-### A host function redefined by an Epsil `function` statement gets an intersection signature (OPEN, small — found 2026-10-17 by the `effectsDeclared` fix)
+### Under `.N()`, an early `Return` or a jump in an earlier statement of a user-function body reads the rounded argument (OPEN, design — found 2026-10-18 by the fix that gives the last statement the numeric request)
 
-After `ce.declare('h', { signature: '(integer) pure -> integer', evaluate: <a Function literal> })`,
-the Epsil statement `function h(x: integer) -> integer { x }` ends with the
-signature `((unknown) -> unknown) & ((x: integer) -> integer)`, where a
-replacement or a clause added to the declared signature is expected. This
-redefinition does not reach `defineFunctionClause()`'s redefinition branch
-(`multi-clause.ts`).
+Since 2026-10-18 the LAST statement of a body with several statements gets the
+numeric request, so `f := x ↦ Block(z := 1, Floor(x))` gives
+`f((25! − 1)/24!).N()` = 24. Two shapes still read the float bound to the
+parameter: an early `Return` in a statement that is not the last
+(`Block(If(x > 1, Return(Floor(x))), 0)` gives 25, exact 24), and a jump in an
+earlier statement (`y := Floor(x); y` gives 25), which the decision of
+2026-10-18 (option (a): only the last statement gets the request) accepts. A fix
+for the `Return` shape needs an evaluation option that only `Return` honors,
+carried by `If`, `Which`, `Block` and `Loop` and removed by every inner function
+application, so that values in the middle stay exact.
 
-### Compiling an expression with shared subtrees takes exponential time in the CSE pass (OPEN, performance — found 2026-10-17 by the review of the compiled jump-function fix)
+### Three `Solve` gaps found with the fractional-power fix (OPEN, small — found 2026-10-18)
 
-Boxed expressions can share subtrees: `e = Add(e, e)` repeated 20 times has 21
-distinct nodes but about 10⁶ paths. The common-subexpression analysis of
-`compilation/cse.ts` (`selectCandidates`, `operandPlans`, `walk`,
-`walkOperands`) walks every path, not every distinct node:
-`compile(Floor(e), { constantFold: false })` takes 397 ms at depth 18 and
-1080 ms at depth 20. With `cse: false`, the generated code itself is exponential
-in size (51 MB and 68 s at depth 20), because the emitter writes each path. Each
-walk needs a memo keyed by node, and the emitter needs to bind a shared subtree
-once (which is what the CSE pass is for, so the pass must see sharing by node
-identity). Related: `foldCostEstimate` (`base-compiler.ts`) counts paths, so a
-constant shared tree with fewer than 20 000 distinct nodes but more than 20 000
-paths does not fold.
+(1) `\sqrt{x} = i` gives `When(-1, 0 ≤ i)`, a root with a meaningless
+condition, where the answer is `-1`; the guard comes from
+`sqrtEquationRhsGuard` (`boxed-expression/solve.ts`). (2) `validateRoots()`
+compares the residual of a candidate with an ABSOLUTE tolerance, so a residual
+of `1e-30` counts as zero whatever the size of the equation's terms: with
+`x^{-0.5} = 10^{-30}`, the candidate `-10^{60}` would pass. A relative test
+(against the size of the right side or of the terms) changes many `Solve`
+results, so measure the effect first. (3) `Solve(x^{2.5} = -4, x, RealNumbers)`
+stays unevaluated, while an unknown declared `real` gives `[]`:
+`solve-domain.ts` treats an empty list for an equation that is not a polynomial
+as undecided.
+
+### `Solve` of `x^n = c` with a large `n` is very slow (OPEN, performance — found 2026-10-18 by the float-degree `Solve` work)
+
+`x^{256} = 2` takes about 15 s and `x^{1000} = 2` does not finish in 60 s,
+although the `n` roots of `x^n = c` have a direct formula
+(`c^{1/n}·e^{2πik/n}`). Because of this, an integer-valued float exponent is read
+as a degree only up to 64 (`withExactIntegerExponents`, `solve.ts`), so
+`x^{65.0} = 2` still gives only the real roots.
+
+### `explain('solve')` at the default verbosity shows exact roots for a float-exponent equation (OPEN, small — found 2026-10-18 by the float-degree `Solve` work)
+
+For `x^{2.0} + 3x + 2 = 0` the result holds the floats `−1.0` and `−2.0`, but
+the curated explanation shows `x = −1` from the quadratic formula: `isSame(2.0,
+2)` is true, so the curation drops the step that changes the exponents to
+integers and the step that changes the roots to floats. With
+`verbosity: 'all'` every step shows.
+
+### The structural hash of a function expression repeats every 32 or 64 levels of nesting (OPEN, small — found 2026-10-18 by the CSE shared-subtree fix)
+
+`BoxedFunction.hash` combines operands as `((h << 1) ^ op.hash) ^ hashCode(op)`
+(`boxed-expression/boxed-function.ts`). The shift moves an operand's
+contribution out of the 32-bit word after 32 levels, so nested shapes collide:
+the doubling shape `e = Add(e, e)` repeats every 64 levels and a `Sin`/`Cos`
+chain every 32. Since 2026-10-18 the CSE pass no longer pays for these
+collisions (a class whose node count differs is skipped without `isSame`), but
+every other user of the hash (pattern bucketing, expression maps) still gets
+them. A rotate (`(h << 5) | (h >>> 27)`) or a multiply-xorshift mix would
+avoid it; the hash must stay equal for `isSame`-equal expressions (including
+the `character`/one-cluster `string` case).
+
+### Other walks that are exponential on shared subtrees, and slow products with many factors (OPEN, performance — found 2026-10-18 by the fixes of `isConstructedScalar` and of `add(...operands)`)
+
+(1) The constant-folding walks of `compilation/base-compiler.ts`
+(`mentionsCompileBoundName`, `containsUnboundedBigOp`, `foldValueBlocked`,
+`tryConstantFold`) walk every path of a tree with shared nodes: with constant
+folding on (the default), compiling `e = Add(e, e)` over `2 + √3` takes 92 ms
+at depth 18 and 3012 ms at depth 24 (with `constantFold: false` it is linear
+since 2026-10-18). Each walk needs a memo keyed by node. (2) Building a `Sum`
+whose body has a shared subtree is exponential:
+`ce.function('Sum', [At(L, idx), Limits(k, 1, 1)])` with `idx` doubled 20 times
+takes more than 3 s in `rebindToBindings` (`binders.ts`), before any compile.
+(3) A product of distinct symbols is cubic on `evaluate()` and `.N()` (1000
+factors 1.3 s, 2000 factors 10 s, 4000 factors 74 s): the right fold in
+`expandProducts` builds a new `Product` at each step, and each scans its factors
+linearly with `isSame`. A product of 130 000 copies of `2 + √3` takes about
+3.6 s from source (13 s under jest). (4) `.N()` of a product of many factors is
+quadratic (16 000 factors 1.5 s, 200 000 factors 225 s): `BigDecimal.mul` and
+`normalize` keep every digit during the fold instead of rounding to the working
+precision.
+
+### `isFinite` is `undefined` for a sum or negation of finite constants (OPEN, small — found 2026-10-18 by the review of the fractional-power `Solve` fix)
+
+`ce.box(['Negate', 'Pi']).isFinite`, and the same for `Pi - 4`,
+`Multiply(-1, Pi)` and `Sqrt(2) - 3`, is `undefined`, although each is a finite
+real constant. Code that tests `isFinite === true` before it uses a value then
+gives up for every compound constant (the fractional-power `Solve` route reads
+the numeric value instead since 2026-10-18). `Negate`, `Add` and `Multiply` of
+operands that are all finite should report `true` (and `Divide` when the
+divisor is also nonzero).
+
+### Compiling shared nodes under lazy operands in nested regions is still exponential (OPEN, performance — found 2026-10-18 by the CSE shared-subtree fix)
+
+Since 2026-10-18 the CSE analysis (`compilation/cse.ts`) walks each distinct
+node once per region. But `e_k = If(c, e_(k-1), e_(k-1))` creates one region
+per chain of lazy arms, so the number of regions grows as `2^k`. This is a
+property of the region model, not of the walk. Also, a `Sin`/`Cos` chain of
+depth 200 overflows the compiler's own recursion.
 
 ### `Take` over a `FlatMap` with a finite source stays unevaluated (OPEN, small — found 2026-10-17 by the `FlatMap` infinite-inner-collection fix)
 
@@ -307,16 +386,6 @@ materialization, while the same `Take` over an infinite source gives
 non-empty finite source, because answering would mean applying the callback, and
 the facets must not do that; the generic materializer keeps the lazy form when
 emptiness is not known. Related: `FlatMap` has no `count` facet.
-
-### Three exact radical forms are not reduced (OPEN, small — found 2026-10-17 by the fix that keeps large radical products exact)
-
-All three values are correct and exact; they are not in their simplest form.
-`Power(Sqrt(-13), 3)` stays unevaluated (it should be `−13√13·i`).
-`Power(Sqrt(1022117), 3)` evaluates to `Sqrt(1067829303856075613)` instead of
-`1022117√1022117`. The canonical form of `(√1009·√1013)^{-2}` stays a `Power`;
-only `evaluate()` gives `1/1022117`. Also, `2√1009·√1013` serializes as
-`\sqrt{1013}\times2\sqrt{1009}`, because `sortProductOperands()` orders number
-literals by value: it round-trips, but it does not read well.
 
 ### Each call of a user function retires the inert evaluation memo of every node, so a chain of applications copies its previous level once per level (OPEN, performance, design — found 2026-10-17 by the chain of Tycho ledger row 380, after the closure-capture and lazy-map fixes of the same day)
 

@@ -366,6 +366,34 @@ target is excluded because its code computes an enclosure, and the enclosure
 of such a node contains the exact value (`closedExactJump` in
 `base-compiler.ts`).
 
+A rounding function (`Floor`, `Ceil`, `Round`, `Truncate`, `Fract`) whose
+operand adds an integer-typed variable `v` (a loop index, an integer-typed
+symbol, a sum of them with integer coefficients) to closed exact terms `c`
+that no double holds exactly is compiled from a form that rounds `c` alone:
+`Floor(v + c) = v + Floor(c)`, `Ceil(v + c) = v + Ceil(c)`,
+`Fract(v + c) = Fract(c)`, `Round(v + c) = v + Round(c)` when `c` is not
+halfway between two integers, and `Truncate(v + c) = If(v ≥ −Floor(c),
+v + Floor(c), v + Ceil(c))`, since truncation is not shift-invariant across 0.
+The rounded constant is then a closed exact jump node, folded as above. So
+`Sum(x·Floor(k + (25! − 1)/24!), k, 1, 300)` gives the interpreter's value in
+the unrolled form and in the loop form. Every other shape whose variables are
+all integer-typed declines with the `correctness` diagnostic
+`inexact-jump-operand`: a variable part that is not an integer
+(`Floor(k/3 + 1/7)`), a product (`Floor(k·π)`), a constant inside a variable
+term (`Floor(k·√2 + 1)`), a step form, and a `Round` whose constant may be a
+tie. A shape with a variable that is not integer-typed keeps its structural
+code on every target, GLSL and WGSL included: `Floor(π·x)`, `Floor(x + 1/3)`,
+`Floor(x/√2)`, `Floor(y/3 + 1/7)` for a real `x` or `y`, and also
+`Floor(k + x + c)` with an integer `k` and a real `x`. There, the double of the
+constant moves the jump by about one unit in the last place, as in any float
+code. So `Floor(x + (25! − 1)/24!)` at `x = 1` gives 26 in the compiled code,
+where the interpreter gives 25: the double of `(25! − 1)/24!` is 25.0. A
+literal that a double holds exactly (`Floor(k + 1/2)`) and a rational factor
+whose numerator and denominator a double holds (`Floor(2k/3)`, emitted as a
+division and a multiplication by integers) keep their structural code, as do
+an operand with a float literal and the interval target (`jumpShiftRewrite`
+in `base-compiler.ts`).
+
 A real-only head (an ordering comparison, `Floor`, `Mod`, `Min`, `Erf`, …)
 over an operand that may be complex at run time takes the runtime rule in the
 `auto` and `complex` modes: the operand is bound once, the head's real

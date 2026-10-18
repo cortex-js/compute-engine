@@ -1683,9 +1683,16 @@ function evaluateConnective(
   // which the connective folds by the ordinary Kleene table (`And(Missing,
   // True)` is `Missing`). Treating it as symbolic left the whole `Which`
   // inert where the compiled lane took no arm.
+  // A survivor that evaluated to the absent marker `Missing` is not symbolic
+  // either: it is a value. With no deciding survivor and no symbolic one,
+  // the Kleene table gives `Missing` (`And(True, Missing)`,
+  // `Or(False, Missing)`), so the condition is absent, as `Not(Missing)` and
+  // a comparison with an absent operand already are.
   const symbolic = survivors.some((s) => {
     const v = sym(s.result.value);
-    return v !== 'True' && v !== 'False' && !s.result.undecided;
+    return (
+      v !== 'True' && v !== 'False' && v !== 'Missing' && !s.result.undecided
+    );
   });
   if (symbolic)
     return {
@@ -1697,6 +1704,12 @@ function evaluateConnective(
       ),
       undecided: false,
     };
+  if (
+    survivors.some(
+      (s) => sym(s.result.value) === 'Missing' && !s.result.undecided
+    )
+  )
+    return { value: ce.symbol('Missing'), undecided: false };
   // Every survivor is the non-deciding value (`True` for `And`, `False`
   // for `Or`), or a NaN-decided value: the connective folds to the
   // non-deciding value, flagged if any survivor rested on NaN.
@@ -2442,7 +2455,10 @@ function sweepCanonicalizationBindings(ce: ComputeEngine): void {
 /** Evaluate a Block expression. */
 function evaluateBlock(
   ops: ReadonlyArray<Expression>,
-  { engine: ce }: Partial<EvaluateOptions> & { engine: ComputeEngine }
+  {
+    engine: ce,
+    numericApproximation,
+  }: Partial<EvaluateOptions> & { engine: ComputeEngine }
 ): Expression {
   if (ops.length === 0) return ce.Nothing;
 
@@ -2476,7 +2492,25 @@ function evaluateBlock(
   // return the underlying `Function` literal so the function escapes the
   // block as a first-class value. Resolved here, while the block scope (which
   // holds the operator definition) is still the current lexical scope.
-  return resolveEscapingLambda(ce, evaluateStatements(ce, ops));
+  //
+  // The numeric request of the block is forwarded to its LAST statement,
+  // whose value is the value of the block; the statements before it run
+  // exactly, so that a value a later statement reads (`a := √2; a^2`) is
+  // not rounded on the way. A jump in the last statement (`Floor(x)`) then
+  // reads an exact operand exactly, as at the top level. This is also the
+  // route of a user function under `.N()` whose body was parsed as one
+  // inner block of several statements: in such a body a parameter is bound
+  // to the float of the argument, and only a jump evaluated with the
+  // request reads the exact argument again (`exactRealValueOf`,
+  // `constraint-subject.ts`).
+  return resolveEscapingLambda(
+    ce,
+    evaluateStatements(
+      ce,
+      ops,
+      numericApproximation ? { numericApproximation: true } : undefined
+    )
+  );
 }
 
 /**
@@ -2498,7 +2532,9 @@ async function evaluateBlockAsync(
     options.signal,
     options._effects,
     options._contextStack,
-    undefined,
+    // The numeric request reaches the last statement only, as in
+    // `evaluateBlock`.
+    options.numericApproximation ? true : undefined,
     options._precisionWindow
   );
   // `resolveEscapingLambda` reads the block scope as the current lexical

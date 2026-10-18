@@ -3,6 +3,7 @@ import type { Expression } from '../global-types.js';
 import { maxDegree, revlex, totalDegree } from './polynomial-degree.js';
 import { asRadical } from './arithmetic-power.js';
 import { isOperatorDef } from './utils.js';
+import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
 import {
   isNumber,
   isFunction,
@@ -47,9 +48,64 @@ export function sortProductOperands(
   if (isTensor.filter(Boolean).length >= 2) {
     const scalars = xs.filter((_, i) => !isTensor[i]).sort(order);
     const tensors = xs.filter((_, i) => isTensor[i]);
-    return [...scalars, ...tensors];
+    return [...orderExactRadicalLiterals(scalars), ...tensors];
   }
-  return [...xs].sort(order);
+  return orderExactRadicalLiterals([...xs].sort(order));
+}
+
+/**
+ * The radicand `r` of an exact real number literal `q·√r` (`1` for a
+ * rational) or of the square root `Sqrt(r)` of a positive integer literal
+ * that has no exact value (`√1022117`, whose square-free part is above
+ * 10⁶). Return `undefined` for any other operand.
+ */
+function exactRealRadicand(x: Expression): number | undefined {
+  if (isFunction(x, 'Sqrt')) {
+    const r = x.op1;
+    if (isNumber(r) && r.isExact && r.isInteger && r.isPositive === true)
+      return r.re;
+    return undefined;
+  }
+  if (!isNumber(x) || !x.isExact || x.isFinite !== true) return undefined;
+  const v = x.numericValue;
+  if (typeof v === 'number') return 1;
+  if (!(v instanceof ExactNumericValue) || v.isComplex) return undefined;
+  return v.radical;
+}
+
+/**
+ * A canonical product has more than one exact number literal when the
+ * product of the literals is not an exact value: `2√1009·√1013`, because the
+ * radicand 1022117 of `√1009·√1013` is above 10⁶ and has no square factor.
+ * `order()` sorts number literals by value, which puts `√1013` (about 31.8)
+ * before `2√1009` (about 63.5), and the product serializes as
+ * `\sqrt{1013}\times2\sqrt{1009}`. This function sorts these literals by
+ * their radicand, smallest first, and by `order()` for the same radicand.
+ * The coefficient, which the canonical `Multiply` gives to the factor with
+ * the smallest radicand, then comes first: `2\sqrt{1009}\sqrt{1013}`. A
+ * square root with no exact value is sorted with them: `order()` puts
+ * `√1022117` before the literal `2√2`, and this function puts it after.
+ *
+ * The literals keep the positions that `order()` gave to the group, so the
+ * order of the other operands does not change. A product with fewer than
+ * two exact literals, or with rational literals only, does not change.
+ */
+function orderExactRadicalLiterals(xs: Expression[]): Expression[] {
+  const slots: number[] = [];
+  const radicands: number[] = [];
+  for (let i = 0; i < xs.length; i++) {
+    const r = exactRealRadicand(xs[i]);
+    if (r === undefined) continue;
+    slots.push(i);
+    radicands.push(r);
+  }
+  if (slots.length < 2 || radicands.every((r) => r === 1)) return xs;
+  const literals = slots
+    .map((slot, i) => ({ x: xs[slot], r: radicands[i] }))
+    .sort((a, b) => (a.r !== b.r ? a.r - b.r : order(a.x, b.x)));
+  const result = [...xs];
+  slots.forEach((slot, i) => (result[slot] = literals[i].x));
+  return result;
 }
 
 const TRIGONOMETRIC_OPERATORS: { [key: string]: boolean } = {

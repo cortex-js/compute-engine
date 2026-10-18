@@ -1128,14 +1128,13 @@ function hostSolveRules(rules: SolveRuleSet): {
 /**
  * The ids of the built-in root templates that read the exponent of a power
  * of the unknown as an integer degree: the quadratic templates match the
- * literal `Power(_x, 2)`. A float exponent is not an integer degree, so these
- * templates are left out when the equation has one
- * (`hasFloatPowerOfUnknown`).
+ * literal `Power(_x, 2)`. These templates are left out when the equation has
+ * a float power of the unknown (`hasFloatPowerOfUnknown`).
  *
  * `solve.power-negative-root` is not in this list. It reads only the parity
  * of the exponent, and an integer-valued float exponent has a parity:
- * `(-2.0)^{2.0}` evaluates to `4`, thus `x^{2.0} = 4` has the roots `2.0`
- * and `-2.0`, as `x^2 = 4` has the roots `2` and `-2`.
+ * `(-2.0)^{100.0}` evaluates to `2^{100}`, thus `x^{100.0} = 2^{100}` has
+ * the roots `2.0` and `-2.0`, as `x^2 = 4` has the roots `2` and `-2`.
  */
 const DEGREE_TEMPLATE_IDS: ReadonlySet<string> = new Set([
   'solve.quadratic-no-constant-zero',
@@ -1174,14 +1173,18 @@ function withoutTemplates(
  * Whether `expr` has a power whose base contains the unknown `_x` and whose
  * exponent is a float, such as `x^{2.0}`, `x^{2.5}` or `(x + 1)^{2.0}`.
  *
- * A float exponent is not a polynomial degree, even when its value is an
- * integer, so the templates that read a degree must not match it. The
+ * An integer-valued float exponent of the equation as it was given is
+ * changed to an integer before the templates are matched
+ * (`withExactIntegerExponents()`): `x^{2.0} + 3x + 2 = 0` is solved as
+ * `x^2 + 3x + 2 = 0`, and its roots are changed to floats. Such an exponent
+ * can still come from a step of the solver (clearing the denominator of
+ * `x^{-0.5}` gives `x^{0.0}`), or be larger than `MAX_FLOAT_DEGREE`. The
  * pattern matcher compares number literals by value: without this test, the
- * literal `2` of the quadratic templates matches the float `2.0`, and
- * `x^{2.0} + 3x + 2 = 0` was solved as the quadratic `x^2 + 3x + 2 = 0`.
+ * literal `2` of the quadratic templates matches the float `2.0`, and the
+ * templates give exact roots for an equation that has a float.
  * The general power template `solve.power` does not read a degree and is
- * kept: its root `(-b/a)^(1/n)` is a float for a float `n`, so `x^{2.0} = 4`
- * has the float root `2.0`. The template `solve.power-negative-root` is kept
+ * kept: its root `(-b/a)^(1/n)` is a float for a float `n`, so
+ * `x^{100.0} = 2^{100}` has the float root `2.0`. The template `solve.power-negative-root` is kept
  * too: it reads only the parity of `n`, and gives the second root `-2.0`.
  */
 function hasFloatPowerOfUnknown(expr: Expression): boolean {
@@ -1194,6 +1197,83 @@ function hasFloatPowerOfUnknown(expr: Expression): boolean {
   )
     return true;
   return expr.ops.some((op) => hasFloatPowerOfUnknown(op));
+}
+
+/**
+ * The largest absolute value of an integer-valued float exponent that
+ * `withExactIntegerExponents()` changes to an integer. The time of the
+ * polynomial root finder grows fast with the degree: `x^{256} = 2` takes
+ * about 15 s. A larger float exponent is left to the float-exponent
+ * strategies, which give at most two roots (`x^{100.0} = 2` gives `±2^{0.01}`).
+ */
+const MAX_FLOAT_DEGREE = 64;
+
+/**
+ * `expr` with each power whose base contains the unknown `x` and whose
+ * exponent is an integer-valued float (`x^{2.0}`, `(x + 1)^{-3.0}`) written
+ * with the exact integer exponent (`x^2`, `(x + 1)^{-3}`). Returns `null`
+ * when `expr` has no such power.
+ *
+ * The two equations have the same roots: for an integer `n`, the principal
+ * value of `z^{n.0}` is `z^n` for each complex `z`. Thus the polynomial
+ * steps and the root templates read `2.0` as the degree `2`:
+ * `x^{2.0} + 3x + 2 = 0` is the quadratic `x^2 + 3x + 2 = 0`. A float
+ * exponent that is not an integer (`x^{2.5}`) is not changed, and an
+ * exponent larger than `MAX_FLOAT_DEGREE` is not changed. The exponent
+ * `0.0` is not changed: `x^0` is `1`, but `0^{0.0}` has no value.
+ * @internal exported for the polynomial test of `Solve` over a domain
+ * (`solve-domain.ts`).
+ */
+export function withExactIntegerExponents(
+  expr: Expression,
+  x: string
+): Expression | null {
+  if (!isFunction(expr) || !expr.has(x)) return null;
+  const ce = expr.engine;
+  let changed = false;
+  const ops = expr.ops.map((op) => {
+    const result = withExactIntegerExponents(op, x);
+    if (result === null) return op;
+    changed = true;
+    return result;
+  });
+  if (expr.operator === 'Power' && ops[0].has(x)) {
+    const n = ops[1];
+    if (
+      isNumber(n) &&
+      !n.isExact &&
+      n.im === 0 &&
+      Number.isInteger(n.re) &&
+      n.re !== 0 &&
+      Math.abs(n.re) <= MAX_FLOAT_DEGREE &&
+      n.isInteger === true
+    ) {
+      ops[1] = ce.number(n.re);
+      changed = true;
+    }
+  }
+  return changed ? ce.function(expr.operator, ops) : null;
+}
+
+/**
+ * The root `root` as a float. The roots of an equation that has a float
+ * exponent are floats (`x^{2.0} + 3x + 2 = 0` gives `-1.0` and `-2.0`), as
+ * the float operands of an operation give a float result. `.N()` keeps an
+ * exact integer exact (`2` stays `2`), thus such a value is changed to the
+ * float with the same value. A root that has a parameter keeps it, with
+ * float coefficients.
+ */
+function floatRoot(root: Expression): Expression {
+  const ce = root.engine;
+  if (isFunction(root, 'When'))
+    return ce.function('When', [floatRoot(root.op1), root.op2]);
+  const value = root.N();
+  if (!isNumber(value) || !value.isExact) return value;
+  const re = value.bignumRe ?? value.re;
+  if (value.im === 0) return ce.number(ce._inexactNumericValue(re));
+  return ce.number(
+    ce._inexactNumericValue({ re, im: value.bignumIm ?? value.im })
+  );
 }
 
 /**
@@ -3227,12 +3307,271 @@ function solveSingleExponential(
 }
 
 /**
+ * The largest absolute value of a non-integer exponent `n` for which
+ * `rootsOfRealPower()` gives the roots of `w^n = r`. The equation has about
+ * `|n|` roots, and each one is computed and checked.
+ */
+const MAX_REAL_POWER_ROOTS = 64;
+
+/**
+ * The roots `w` of `w^n = r`, where `n` is a real number literal that is not
+ * an integer (`5/2`, `2.5`, `-0.5`) and `r` is a constant without unknowns.
+ * The engine reads `w^n` as the principal value
+ * `|w|^n·e^{i·n·Arg(w)}`, with `Arg(w)` in `(-π, π]`, except for a negative
+ * real `w` and an exponent that is a rational `p/q` with an odd `q`: then it
+ * takes the real root, `(-8)^{2/3} = 4`.
+ *
+ * Write `m = |n|`, `R = r` when `n > 0` and `R = 1/r` when `n < 0`, and
+ * `R = |R|·e^{iπa}` with `a = 0` for `R > 0` and `a = 1` for `R < 0`. As
+ * `w^{-m} = 1/w^m`, the roots of `w^n = r` are the roots of `w^m = R`. A
+ * root `w = ρ·e^{iθ}` with `θ` in `(-π, π)` is not a negative real number,
+ * thus `w^m = ρ^m·e^{imθ}`: it is a root when `ρ = |R|^{1/m}` and
+ * `mθ = π·s` for an integer `s` with the parity of `a`. The condition
+ * `-π < θ < π` is `|s| < m`. Thus these roots are
+ * `|R|^{1/m}·e^{iπs/m}` for each such `s`: about `m` roots, the same list
+ * that the `p` candidates `|R|^{q/p}·e^{iπ(a + 2k)q/p}` give after the check
+ * of the principal value. The one other candidate is the negative real
+ * number `-|R|^{1/m}`. The value of `w^n` there depends on the branch rule
+ * of the engine, thus `w^n` is evaluated with `.N()` and compared with `r`.
+ *
+ * When `R` is not real, `R = |R|·e^{iα}` with `α = Arg(R)`, and the same
+ * reasoning gives the roots `|R|^{1/m}·e^{i(α + 2πj)/m}` for each integer
+ * `j` with `|α + 2πj| < π·m`, and the negative real candidate.
+ *
+ * For `w^{5/2} = -4`: `m = 5/2`, `a = 1`, `s = ±1`, and the roots are
+ * `4^{2/5}·e^{±2πi/5}`; at `-4^{2/5}`, `w^{5/2}` is `4i`, which is not a
+ * root. For `w^{2/3} = 4`: `s = 0` gives `8`, and `(-8)^{2/3}` is `4`, thus
+ * `-8` is a root too.
+ *
+ * The roots are exact for an exact `n` (they are evaluated), and floats for
+ * a float `n`. An empty list states that there is no root, also for a
+ * complex unknown (`w^{-0.5} = -4`). Returns `undefined` when the list
+ * cannot be given: the numeric value of `r` is not finite, `r` is real but
+ * its sign is not known, `r` is not known to be real and its numeric value
+ * is real,
+ * `m > MAX_REAL_POWER_ROOTS`, or `m` is so close to an integer that the
+ * numeric check of `-|R|^{1/m}` cannot decide. Returns `null` when `n` is
+ * negative and `r` can be `0`: the caller then uses another strategy.
+ */
+function rootsOfRealPower(
+  n: Expression,
+  r: Expression
+): Expression[] | null | undefined {
+  const ce = n.engine;
+  if (!isNumber(n) || n.im !== 0 || !Number.isFinite(n.re)) return undefined;
+  const negative = n.re < 0;
+  const mValue = Math.abs(n.re);
+  if (
+    Number.isInteger(mValue) ||
+    mValue > MAX_REAL_POWER_ROOTS ||
+    Math.abs(Math.sin(Math.PI * mValue)) < 1e-6
+  )
+    return undefined;
+  // The exact exponent `±p/q` in lowest terms, or `null` for a float.
+  const exact = rationalExponent(n);
+  if (n.isExact && exact === null) return undefined;
+
+  if (isNumber(r) && r.isSame(0)) {
+    // `w^n = 0` has the root `0` for `n > 0`, and no root for `n < 0`. The
+    // caller handles a negative exponent with a right side that is `0`.
+    return negative ? null : [ce.Zero];
+  }
+  // `r` has no unknowns, but `isFinite` is not known for a constant that is
+  // not a number literal, such as `-π` or `π − 4`: then the numeric value of
+  // `r` decides.
+  if (r.isFinite !== true) {
+    const value = r.N();
+    if (
+      !isNumber(value) ||
+      !Number.isFinite(value.re) ||
+      !Number.isFinite(value.im)
+    )
+      return undefined;
+  }
+  const m = negative ? n.neg() : n;
+  const R = negative ? ce.function('Divide', [ce.One, r]) : r;
+
+  // The angles `θ` of the roots that are not negative real numbers, in the
+  // order `0`, `θ₁`, `-θ₁`, `θ₂`, `-θ₂`…, and the modulus `|R|`.
+  const angles: Expression[] = [];
+  let absR: Expression;
+  if (r.isExtendedReal === true) {
+    // A real `R = |R|·e^{iπa}`: `θ = π·s/m` for each integer `s` with the
+    // parity of `a` and `|s| < m`. For an exact `m = p/q`, `|s| < m` is the
+    // exact test `|s|·q < p`, and `s/m` is the exact rational `s·q/p`.
+    const a = r.isPositive === true ? 0 : r.isNegative === true ? 1 : undefined;
+    if (a === undefined) return undefined;
+    absR = a === 0 ? R : ce.function('Negate', [R]);
+    const below = (s: number): boolean =>
+      exact !== null ? s * exact[1] < Math.abs(exact[0]) : s < mValue;
+    for (let s = a; below(s); s += 2) {
+      if (s === 0) {
+        angles.push(ce.Zero);
+        continue;
+      }
+      for (const sign of [1, -1]) {
+        const t =
+          exact !== null
+            ? ce.number([sign * s * exact[1], Math.abs(exact[0])])
+            : ce.function('Divide', [ce.number(sign * s), m]);
+        angles.push(ce.function('Multiply', [t, ce.Pi]));
+      }
+    }
+  } else {
+    // A complex `R = |R|·e^{iα}`, with `α = Arg(R)` in `(-π, π]`:
+    // `θ = (α + 2πj)/m` for each integer `j` with `|α + 2πj| < π·m`. The
+    // test reads the numeric value of `α`. An angle within `1e-9` of `±π`
+    // is left out: that root is the negative real candidate below.
+    const value = R.N();
+    if (!isNumber(value)) return undefined;
+    if (!(Math.abs(value.im) > 1e-12 * Math.abs(value.re))) return undefined;
+    const alpha = Math.atan2(value.im, value.re);
+    absR = ce.function('Abs', [R]);
+    // `Arg` gives an angle in the angular unit of the engine (`90` for
+    // `Arg(i)` in degrees), and `e^{iθ}` reads `θ` in radians: the angle is
+    // changed to radians.
+    const arg =
+      ce.angularUnit === 'rad'
+        ? ce.function('Arg', [R])
+        : ce.function('Divide', [
+            ce.function('Multiply', [ce.function('Arg', [R]), ce.Pi]),
+            halfTurnAngle(ce),
+          ]);
+    const limit = Math.PI * mValue - 1e-9;
+    const js: number[] = [];
+    for (let j = 0; Math.abs(alpha + 2 * Math.PI * j) < limit; j++) js.push(j);
+    for (let j = -1; Math.abs(alpha + 2 * Math.PI * j) < limit; j--) js.push(j);
+    js.sort((u, v) => Math.abs(u) - Math.abs(v) || v - u);
+    for (const j of js)
+      angles.push(
+        ce.function('Divide', [
+          j === 0
+            ? arg
+            : ce.function('Add', [
+                arg,
+                ce.function('Multiply', [ce.number(2 * j), ce.Pi]),
+              ]),
+          m,
+        ])
+      );
+  }
+
+  const rho = ce.function('Power', [absR, ce.function('Divide', [ce.One, m])]);
+  // An exact root is evaluated to its exact value, and simplified as the
+  // root finder simplifies the roots of the root templates. A root of a
+  // float exponent is a float.
+  const value = (w: Expression): Expression =>
+    n.isExact ? w.evaluate().simplify() : w.N();
+  const roots = angles.map((theta) =>
+    value(
+      theta.isSame(0)
+        ? rho
+        : ce.function('Multiply', [
+            rho,
+            ce.function('Power', [
+              ce.E,
+              ce.function('Multiply', [theta, ce.I]),
+            ]),
+          ])
+    )
+  );
+
+  // The negative real candidate `-|R|^{1/m}`: compare `w^n` with `r`. It
+  // is listed after the positive real root, before the roots that are not
+  // real.
+  const w = value(ce.function('Negate', [rho]));
+  const lhs = ce.function('Power', [w, n]).N();
+  const rhs = r.N();
+  if (!isNumber(lhs) || !isNumber(rhs)) return undefined;
+  // The test is relative to `|r|`, which is not `0` here: with an absolute
+  // tolerance, `w^{-0.5} = 10^{-30}` took `-10^{60}` as a root, where
+  // `w^{-0.5}` is `-10^{-30}·i`.
+  const scale = Math.hypot(rhs.re, rhs.im);
+  if (Math.hypot(lhs.re - rhs.re, lhs.im - rhs.im) <= 1e-9 * scale) {
+    const positive = roots.length > 0 && angles[0].isSame(0) ? 1 : 0;
+    roots.splice(positive, 0, w);
+  }
+  return roots;
+}
+
+/**
+ * The roots of `expr = 0` when exactly one term of `expr` contains the
+ * unknown `x` and that term is a power with a real exponent that is not an
+ * integer, times a constant `k`: `k·B(x)^n + c = 0`, where `n` is an exact
+ * rational such as `5/2` or a float such as `2.5` or `-0.5`, and `-c/k` is
+ * a constant. The roots of `u^n = -c/k` are given by
+ * `rootsOfRealPower()`: all of them, not only the root that the root
+ * template `solve.power` gives. Before, `x^{5/2} = -4` gave an empty list,
+ * although `4^{2/5}·e^{±2πi/5}` are roots, and `x^{2.5} = 4` gave only the
+ * real root `4^{0.4}`, although `4^{0.4}·e^{±0.8πi}` are roots too.
+ *
+ * - When `B` is `x`, the roots of `u^n = -c/k` are the roots.
+ * - When `B` is not `x`, each root `u₀` gives the equation `B(x) = u₀`,
+ *   which `findUnivariateRoots()` solves: `(x + 1)^{5/2} = -4` gives
+ *   `x = 4^{2/5}·e^{±2πi/5} - 1`. `stats.partial`, `stats.undecided` and
+ *   `stats.userRule` are set from these equations; `stats.partial` is also
+ *   set when one of them gives no root and it is not shown to have none
+ *   (`factorHasNoRoot()`).
+ *
+ * The caller checks the roots against the original equation, and removes
+ * the roots that the type of `x` does not allow (the roots that are not
+ * real, for a real `x`). An empty list states that there is no root.
+ * Returns `undefined` when the equation has this form but the list of its
+ * roots cannot be given (see `rootsOfRealPower()`): the caller then does
+ * not count an empty list as a proof. Returns `null` when `expr` does not
+ * have this form, or when `-c/k` has an unknown (`x^{5/2} = a`): the other
+ * strategies then apply.
+ */
+function solveScaledRealPower(
+  expr: Expression,
+  x: string,
+  depth: number,
+  stats?: RootStats
+): ReadonlyArray<Expression> | null | undefined {
+  if (depth > 2) return null;
+  const ce = expr.engine;
+  const split = splitScaledTerm(expr, x);
+  if (split === null) return null;
+  const { k, f, c } = split;
+  if (!isFunction(f, 'Power')) return null;
+  const base = f.op1;
+  const n = f.op2;
+  if (!base.has(x) || !isNumber(n) || n.im !== 0 || Number.isInteger(n.re))
+    return null;
+  const r = ce.function('Divide', [ce.function('Negate', [c]), k]);
+  if (r.unknowns.length > 0) return null;
+  const uRoots = rootsOfRealPower(n, r);
+  if (uRoots === null || uRoots === undefined) return uRoots;
+  if (isSymbol(base, x)) return uRoots;
+
+  const combined = childStats();
+  const roots: Expression[] = [];
+  for (const u0 of uRoots) {
+    const inverse = base.sub(u0);
+    const child = childStats();
+    const xRoots = findUnivariateRoots(inverse, x, depth + 1, undefined, child);
+    adoptChildStats(combined, child);
+    if (xRoots.length === 0 && !factorHasNoRoot(inverse, x, child))
+      combined.partial = true;
+    roots.push(...xRoots);
+  }
+  adoptChildStats(stats, combined);
+  return roots;
+}
+
+/**
  * The candidate roots of `expr = 0` when exactly one term of `expr` contains
  * the unknown `x` and that term is a power with a float exponent times a
- * constant `k`: `k·B(x)^n + c = 0`, where `n` is a float such as `2.0`,
- * `2.5` or `-0.5`. The root templates match only a power of `x` itself with
+ * constant `k`: `k·B(x)^n + c = 0`, where `n` is a float such as `2.5`,
+ * `-0.5` or `-2.5`. The root templates match only a power of `x` itself with
  * a positive exponent, and the polynomial steps do not read a float exponent
- * as a degree: before, `x^{-0.5} = 4` and `(x + 1)^{2.0} = 4` gave no root.
+ * as a degree: before, `x^{-0.5} = 4` and `(x + 1)^{2.5} = 4` gave no root.
+ * An integer-valued float exponent such as `2.0` is changed to an integer
+ * before this strategy (`withExactIntegerExponents()`), except when it is
+ * larger than `MAX_FLOAT_DEGREE`. A float exponent that is not an integer,
+ * with a constant `-c/k`, is solved before this strategy by
+ * `solveScaledRealPower()`, which gives all the roots. Thus this strategy
+ * applies to such an exponent only when `-c/k` has an unknown.
  *
  * - A negative exponent `n` is changed to the positive exponent `m = -n`:
  *   `B^n = -c/k` is the same as `B^m = -k/c`, because `B^n = 1/B^m` and
@@ -3241,12 +3580,15 @@ function solveSingleExponential(
  * - When `B` is `x`, `x^m = r` is solved by the root templates.
  * - When `B` is not `x`, the base is replaced by a new unknown `u`:
  *   `u^m = r` is solved by the root templates, then each root `u₀` gives
- *   the equation `B(x) = u₀`. `(x + 1)^{2.0} = 4` gives `u = ±2.0`, then
- *   `x = 1.0` and `x = -3.0`.
+ *   the equation `B(x) = u₀`. `(x + 1)^{2.5} = 4` gives `u = 4^{0.4}`,
+ *   then `x = 4^{0.4} - 1`, about `0.741`.
  *
  * The candidate roots are checked against the original equation by the
- * caller. Returns `null` when `expr` does not have this form, or when no
- * candidate root is found. `stats.partial`, `stats.undecided` and
+ * caller. Returns an empty list when `n` is `0.5` or `-0.5` and `r` is a
+ * negative real number: the principal square root is never a negative real
+ * number, thus the equation has no root (`x^{-0.5} = -4`), also for a
+ * complex unknown. Returns `null` when `expr` does not have this form, or
+ * when no candidate root is found. `stats.partial`, `stats.undecided` and
  * `stats.userRule` are set from the solution of the equations in `u` and in
  * `x`; `stats.partial` is also set when an equation `B(x) = u₀` gives no root
  * and it is not shown to have none (`factorHasNoRoot()`).
@@ -3289,6 +3631,13 @@ function solveScaledFloatPower(
   const value = negative
     ? ce.function('Divide', [ce.function('Negate', [k]), c])
     : ce.function('Divide', [ce.function('Negate', [c]), k]);
+  // The principal square root `B^{0.5}` has a real part that is not
+  // negative, for each complex `B`: it is never a negative real number.
+  // Thus `B^{0.5} = r` and `B^{-0.5} = 1/r` have no root when `r` is a
+  // negative real number, also for a complex unknown: `x^{-0.5} = -4` has no
+  // root.
+  if (n.im === 0 && Math.abs(n.re) === 0.5 && value.isNegative === true)
+    return [];
 
   const combined = childStats();
   let roots: Expression[] = [];
@@ -3826,6 +4175,27 @@ export function findUnivariateRoots(
   if (isFunction(expr, 'Equal') && expr.nops > 2)
     return chainedEqualityRoots(expr, x, depth, stats);
 
+  // An integer-valued float exponent is a degree: `x^{2.0} + 3x + 2 = 0` is
+  // solved as `x^2 + 3x + 2 = 0`, which has the same roots (see
+  // `withExactIntegerExponents()`). The roots are floats, because the
+  // equation has a float: `-1.0` and `-2.0`. The recursive call checks the
+  // roots against the equation with the integer exponents, and sets `stats`.
+  // The canonical form of the new equation must not have such an exponent
+  // again, else the recursive call does not end.
+  {
+    const exact = withExactIntegerExponents(expr, x);
+    if (exact !== null && withExactIntegerExponents(exact, x) === null) {
+      traceStep(
+        trace,
+        'solve.harmonize',
+        isFunction(exact, 'Equal') ? exact : asEquation(exact, x)
+      );
+      return findUnivariateRoots(exact, x, depth, trace, stats).map((root) =>
+        floatRoot(root)
+      );
+    }
+  }
+
   if (isFunction(expr, 'Equal')) {
     const lhs0 = expr.op1;
     const rhs0 = expr.op2;
@@ -4056,6 +4426,36 @@ export function findUnivariateRoots(
     }
   }
 
+  // A single power of the unknown with a real exponent that is not an
+  // integer, times a constant: `k·B(x)^n + c = 0` (`x^{5/2} = -4`,
+  // `(x + 1)^{2.5} = 4`). All the roots of `u^n = -c/k` are given (see
+  // `solveScaledRealPower()`). This runs before the root templates:
+  // `solve.power` gives only one root, and when that root is not a root of
+  // the equation, the empty list was read as a proof that there is no root.
+  // When the list of the roots cannot be given, an empty list from the other
+  // strategies is not a proof (`stats.undecided`).
+  {
+    const powerStats = childStats();
+    const powerRoots = solveScaledRealPower(originalExpr, x, depth, powerStats);
+    if (powerRoots === undefined) {
+      if (stats) stats.undecided = true;
+    } else if (powerRoots !== null) {
+      traceStep(trace, 'solve.power', rootsAsEquations(ce, x, powerRoots));
+      if (stats) {
+        stats.candidates = true;
+        adoptChildStats(stats, powerStats);
+      }
+      const validated = validateRoots(
+        originalExpr,
+        x,
+        powerRoots,
+        trace,
+        stats
+      );
+      return filterRootsByType(ce, x, validated, trace, stats);
+    }
+  }
+
   const rules = ce.getRuleSet('solve-univariate')!;
 
   // Make the unknown '_x' so that we can match against it
@@ -4066,7 +4466,8 @@ export function findUnivariateRoots(
 
   let result: Expression[] = [];
   // A strategy showed that the equation has no real root (an empty list from
-  // `solveSingleExponential()` or `solveScaledAbsoluteValue()`).
+  // `solveSingleExponential()` or `solveScaledAbsoluteValue()`), or no root
+  // (an empty list from `solveScaledFloatPower()`).
   let noRoot = false;
   try {
     // Use the declared type of the variable, if any, otherwise assume 'number'
@@ -4349,7 +4750,10 @@ export function findUnivariateRoots(
     // where the float power `x^{0.0}` is not changed to `1`.
     if (result.length === 0 && !noRoot) {
       const roots = solveScaledFloatPower(originalExpr, x, depth, stats);
-      if (roots !== null) result = [...roots];
+      if (roots !== null) {
+        if (roots.length === 0) noRoot = true;
+        result = [...roots];
+      }
     }
 
     // Generator substitution: an equation that is a polynomial in a single

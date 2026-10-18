@@ -222,43 +222,56 @@ describe('a float exponent is not a polynomial degree', () => {
     ).toBe('(x - 1) * (x + 1)');
   });
 
-  test('Solve does not read it as an integer degree', () => {
+  // `Solve` reads an integer-valued float exponent as a degree, with float
+  // roots (user decision 2026-10-18): for an integer `n`, `z^{n.0}` is
+  // `z^n` for each complex `z`. The polynomial operations above still
+  // decline it.
+  test('Solve reads an integer-valued float exponent as a degree', () => {
     const roots = (s: string) =>
       ce
         .parse(s)
         .solve('x')
         ?.map((r) => JSON.stringify(r.json)) ?? null;
-    // The general power template gives the root `4^(1/2.0)`, a float:
-    // `1/2.0` is the float `0.5`. The parity of `2.0` is read: `(-2.0)^{2.0}`
-    // is `4`, thus `-2.0` is a root too (user decision 2026-10-17). Before,
-    // only the root `2.0` was given.
     expect(roots('x^{2.0} = 4')).toEqual(['{"num":"2.0"}', '{"num":"-2.0"}']);
-    expect(roots('x^{3.0} - 8 = 0')).toEqual(['{"num":"2.0"}']);
-    expect(roots('x^{2.0} - 2 = 0')).toEqual([
-      '{"num":"1.4142135623730950488"}',
-      '{"num":"-1.4142135623730950488"}',
+    // The two complex cube roots are listed too, as for `x^3 - 8 = 0`.
+    // Before, only the root `2.0` was given.
+    expect(roots('x^{3.0} - 8 = 0')).toEqual([
+      '{"num":"2.0"}',
+      '["Complex",-1,{"num":"1.732050807568877293527446"}]',
+      '["Complex",-1,{"num":"-1.732050807568877293527446"}]',
     ]);
-    // A float exponent whose value is not an integer has a float root too.
-    expect(roots('x^{2.5} = 4')).toEqual(['{"num":"1.74110112659224827827"}']);
-    // A float power of a base that contains the unknown: the base is
-    // solved for each root of `u^{2.0} = 4`.
+    expect(roots('x^{2.0} - 2 = 0')).toEqual([
+      '{"num":"1.414213562373095048801689"}',
+      '{"num":"-1.414213562373095048801689"}',
+    ]);
+    // A float exponent whose value is not an integer is not a degree. Its
+    // roots are floats: the real root `4^{0.4}` and the two roots
+    // `4^{0.4}·e^{±0.8πi}`.
+    expect(roots('x^{2.5} = 4')?.[0]).toBe('{"num":"1.74110112659224827827"}');
+    expect(roots('x^{2.5} = 4')?.length).toBe(3);
     expect(roots('(x+1)^{2.0} = 4')).toEqual([
       '{"num":"1.0"}',
       '{"num":"-3.0"}',
     ]);
-    // `x^{2.0}` is not a polynomial in `sqrt(x)`.
-    expect(roots('x^{2.0} + \\sqrt{x} - 2 = 0')).toBeNull();
+    // `x^{2.0}` is `x^2`: the equation is solved as
+    // `x^2 + sqrt(x) - 2 = 0`. Before, it was not solved.
+    expect(roots('x^{2.0} + \\sqrt{x} - 2 = 0')).toEqual(['{"num":"1.0"}']);
     // The exact exponents are unchanged.
     expect(roots('x^{2} = 4')).toEqual(['2', '-2']);
-    // The two complex cube roots are listed too.
     expect(roots('x^{3} - 8 = 0')).toContain('2');
     expect(roots('(x+1)^{2} = 4')).toEqual(['1', '-3']);
     expect(roots('x^{2} + \\sqrt{x} - 2 = 0')).toEqual(['1']);
   });
 
-  test('Solve does not read it as a quadratic', () => {
-    // As `x^{2.5} + 3x + 2 = 0`, the equation is not solved.
-    expect(ce.parse('x^{2.0} + 3x + 2').solve('x')).toBeNull();
+  test('Solve reads it as a quadratic', () => {
+    // Before, `x^{2.0} + 3x + 2 = 0` was not solved.
+    expect(
+      ce
+        .parse('x^{2.0} + 3x + 2')
+        .solve('x')
+        ?.map((r) => JSON.stringify(r.json))
+    ).toEqual(['{"num":"-1.0"}', '{"num":"-2.0"}']);
+    // A float exponent that is not an integer is not a degree.
     expect(ce.parse('x^{2.5} + 3x + 2').solve('x')).toBeNull();
     expect(
       ce
