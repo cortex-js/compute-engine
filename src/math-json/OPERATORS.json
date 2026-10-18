@@ -2175,7 +2175,7 @@
       "name": "Differences",
       "category": "Collections",
       "arity": "1",
-      "signature": "(collection<any>) -> indexed_collection",
+      "signature": "(indexed_collection<any>) -> indexed_collection",
       "associative": false,
       "commutative": false,
       "idempotent": false,

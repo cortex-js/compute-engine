@@ -127,8 +127,26 @@ decimal integer.
 
 - `1.25e2` means $$1.25 \times 10^2$$, or $$125.0$$.
 - `1.25e-2` means $$1.25 \times 10^{-2}$$, or $$0.0125$$.
-- `0xFp2` means $$15 \times 2^2$$, or $$60.0$$.
+- `0xFp2` means $$15 \times 2^2$$, or $$60$$.
 - `0xFp-2` means $$15 \times 2^{-2}$$, or $$3.75$$.
+
+A number literal is **exact** or a **float** by the way it is written, not by
+its value:
+
+- A literal with no fraction part and no negative exponent is an exact
+  integer. This includes an exponent form: `1e3` is the exact integer `1000`,
+  as `1*^3` is in Mathematica, and `0xFp2` is the exact integer `60`.
+- A literal with a fraction part is a float, even when the fraction is zero:
+  `1.0`, `125.0` and `1.5e3` (the float `1500.0`) are floats.
+- A literal with a negative exponent is a float: `1e-3` is the float `0.001`,
+  and `0xFp-2` is the float `3.75`. For the exact value, write a fraction:
+  `1/1000`.
+
+A float operand makes the result of an arithmetic operation a float, and an
+exact one keeps it exact (see [Evaluation](/epsil/evaluation/)). The MathJSON
+of a large exact integer uses the same exponent form (`{"num": "1e+30"}` for
+$$10^{30}$$), and reading that form as exact keeps the integer exact through
+a MathJSON round trip.
 
 :::info
 

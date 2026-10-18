@@ -110,8 +110,8 @@ import { sameBinding } from './compare.js';
 import {
   evaluateInOwnBindings,
   evaluateInOwnBindingsAsync,
+  bindingInContext,
   ownBindingRewriteCount,
-  valueDefinitionInContext,
 } from './binders.js';
 import { containsObject } from './object-walk.js';
 import { isTransitivelyPure } from './transitive-purity.js';
@@ -197,6 +197,17 @@ const STORED_VALUE_MEMOS = new WeakMap<
     StoredValueMemo | undefined,
   ]
 >();
+
+/** The value that the value half of `binding` holds, or `undefined` when
+ *  there is no binding, the binding is an operator definition, or the value
+ *  half holds no value. */
+function valueOfBinding(
+  binding: BoxedDefinition | undefined
+): Expression | undefined {
+  return binding !== undefined && 'value' in binding
+    ? binding.value.value
+    : undefined;
+}
 
 export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   override readonly _kind = 'symbol';
@@ -831,13 +842,23 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     if (this._def.value.isSelfReferential) return undefined;
 
     // Lookup the value by walking the scope chain
-    const result = this._contextValue();
+    return this._guardedValueOf(this._contextBinding());
+  }
 
-    // Guard (dynamic): the resolved value IS this symbol (degenerate `a := a`,
-    // or a function parameter bound in the call scope to an argument of the
-    // same name — e.g. evaluating `f(x)` for `f(x) := 2x`). Such bindings are
-    // created directly on the scope, bypassing the value setter, so the static
-    // flag above does not see them; this O(1) check catches them.
+  /**
+   * The value that `binding` holds (see `_contextBinding`), or `undefined`
+   * when it holds none or holds this symbol itself.
+   *
+   * Guard (dynamic): the resolved value IS this symbol (degenerate `a := a`,
+   * or a function parameter bound in the call scope to an argument of the
+   * same name — e.g. evaluating `f(x)` for `f(x) := 2x`). Such bindings are
+   * created directly on the scope, bypassing the value setter, so the static
+   * flag `isSelfReferential` does not see them; this O(1) check catches them.
+   */
+  private _guardedValueOf(
+    binding: BoxedDefinition | undefined
+  ): Expression | undefined {
+    const result = valueOfBinding(binding);
     if (
       result !== undefined &&
       'symbol' in result &&
@@ -853,15 +874,52 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
    * innermost binding of its name in the scope chain, except that a call
    * frame's parameter activation of some OTHER binding is skipped — inside a
    * function body whose parameter shares this symbol's name, that parameter
-   * is not the symbol this node denotes. See `valueDefinitionInContext`.
+   * is not the symbol this node denotes. See `valueDefinitionInContext`
+   * (`binders.ts`).
    */
   private _contextValue(): Expression | undefined {
+    return valueOfBinding(this._contextBinding());
+  }
+
+  /**
+   * The binding this occurrence reads in the current runtime context, which
+   * `_contextValue` reads the value of. A caller that needs both the value
+   * and the binding (for `_readBeforeDeclaration`) calls this once, so the
+   * scope chain is walked once.
+   */
+  private _contextBinding(): BoxedDefinition | undefined {
     const def = this._def;
-    return valueDefinitionInContext(
+    return bindingInContext(
       this.engine,
       this._id,
       def !== undefined && 'value' in def ? def.value : undefined
-    )?.value;
+    );
+  }
+
+  /**
+   * When this occurrence has no value in the current runtime context
+   * because the binding it reads is a block local whose `let` or `const`
+   * has not run yet in this run of the block, the error value of that read.
+   * Otherwise `undefined`.
+   *
+   * A block creates the bindings of its locals when its run starts
+   * (`createBlockLocals`, `function-utils.ts`) and marks them
+   * `_uninitialized` until their `Declare` statement runs. A closure created
+   * in the block before the `Declare` holds such a binding: called before
+   * the `Declare` runs, it reads it. In JavaScript this read is an error
+   * (the temporal dead zone), and it is an error here too, not the bare
+   * symbol: in `{ let a = k; let k = 2 }` the symbol `k` of `a` would
+   * otherwise read the local later, when it has a value.
+   *
+   * `binding` is the binding that the read found (`_contextBinding`), so the
+   * check costs no second walk of the scope chain.
+   */
+  private _readBeforeDeclaration(
+    binding: BoxedDefinition | undefined
+  ): Expression | undefined {
+    if ((binding as { _uninitialized?: boolean } | undefined)?._uninitialized)
+      return this.engine.error(['read-before-declaration', this._id]);
+    return undefined;
   }
 
   get value(): Expression | undefined {
@@ -1518,8 +1576,10 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         hold === 'evaluate' ||
         (hold === 'N' && options?.numericApproximation)
       ) {
-        const expr = this._contextValue();
-        if (expr === undefined) return this;
+        const binding = this._contextBinding();
+        const expr = valueOfBinding(binding);
+        if (expr === undefined)
+          return this._readBeforeDeclaration(binding) ?? this;
         if (expr.operator === 'Unevaluated')
           return expr.evaluate(options) ?? this;
         return this._dereferenceMemoized(expr, options);
@@ -1560,12 +1620,20 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       !(numeric && def.holdUntil === 'N')
     )
       return this;
+    // The binding the read finds, kept for the read-before-declaration
+    // check. A numeric read follows `_value`, which reads no binding for a
+    // self-referential value.
+    const binding =
+      def.isConstant || (numericRead && def.isSelfReferential)
+        ? undefined
+        : this._contextBinding();
     const value = def.isConstant
       ? def.value
       : numericRead
-        ? this._value
-        : this._contextValue();
-    if (value === undefined) return this;
+        ? this._guardedValueOf(binding)
+        : valueOfBinding(binding);
+    if (value === undefined)
+      return this._readBeforeDeclaration(binding) ?? this;
     if (isNumber(value)) return numeric ? value.N() : value.evaluate(options);
     if (numericRead && !def.isConstant && value.symbols.includes(this._id))
       return value;
@@ -1914,8 +1982,14 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     // an unbound or self-referential symbol stays symbolic rather than
     // recursing forever.
     if (def && !def.isConstant) {
-      const contextValue = this._value;
-      if (!contextValue) return this;
+      // What `_value` reads, with the binding it found kept for the
+      // read-before-declaration check: `N(k)` before `let k = 2` in a block
+      // is an error, as `k` is.
+      const binding = def.isSelfReferential
+        ? undefined
+        : this._contextBinding();
+      const contextValue = this._guardedValueOf(binding);
+      if (!contextValue) return this._readBeforeDeclaration(binding) ?? this;
       // Self-referential CONTEXT binding: a call-frame parameter bound to an
       // argument mentioning the parameter's own name (`a(t + 1)` for
       // `a(t) := …` with `t` unbound in the caller). When symbol values were

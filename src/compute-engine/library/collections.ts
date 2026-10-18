@@ -24,6 +24,7 @@ import {
   checkCollectionOperand,
 } from '../boxed-expression/validate.js';
 import type { OverloadResolution } from '../boxed-expression/overload.js';
+import { arityBounds } from '../boxed-expression/overload.js';
 import {
   asBigint,
   toInteger,
@@ -864,6 +865,29 @@ function refusedOperandError(
 }
 
 /**
+ * The `incompatible-type` error that the `evaluate` handler of a positional
+ * operator (`DeleteAt`, `ReplaceAt`, `Insert`) answers when the VALUE of its
+ * first operand is a collection without positions, or `undefined` when the
+ * operand has positions or is not a collection value.
+ *
+ * A set, a dictionary or `Integers` has no i-th element. The declared
+ * `indexed_collection` parameter refuses such a literal operand when the
+ * call is boxed (`DeleteAt(Set(3, 1), 1)`), but a symbol of a wider declared
+ * type (`collection<integer>`, `unknown`) can hold one. Without this check,
+ * the handler read the set in its iteration order, an order the user did not
+ * choose: `DeleteAt(c, 1)` with `c := Set(3, 1)` gave `[1]`. The answer is
+ * the error itself, with the frame of the operator, as `Sort(c)` gives.
+ */
+function unindexedCollectionOperandError(
+  ce: ComputeEngine,
+  operator: string,
+  xs: Expression
+): Expression | undefined {
+  if (!xs.isCollection || xs.isIndexedCollection) return undefined;
+  return refusedOperandError(ce, operator, 1, 'indexed_collection', xs);
+}
+
+/**
  * Validate the operands of a call to `name` in its custom `canonical`
  * handler, against the signature of the definition `name` resolves to now.
  *
@@ -1405,10 +1429,67 @@ function callbackCompatibilityError(
   if (!narrowingPreservesEffects(opType, declared as Type)) return mint();
   // Rules 1/3/4.
   if (callbackIncompatibility(supplyArrow, opType) !== undefined) {
-    if (!broadcastAdmitsCollectionElement(supplyArrow, opType, elementDerived))
+    if (
+      !broadcastAdmitsCollectionElement(supplyArrow, opType, elementDerived) &&
+      !pointArithmeticAdmits(fn, supplyArrow, opType)
+    )
       return mint();
   }
   return undefined;
+}
+
+/**
+ * Whether a bare OPERATOR name that combines points itself is admitted as a
+ * callback for the supplied arguments, although its declared signature
+ * refuses them.
+ *
+ * An operator with the `'tuples'` broadcast exemption (`Add`, `Subtract`,
+ * `Negate`, `Multiply`, `Divide`) declares a scalar signature
+ * (`Subtract` is `(number+) -> number`), and the point arithmetic it accepts
+ * is typed by its type handler. So `Map(Subtract, Ps, Ps)` over two lists of
+ * points was an `incompatible-type` error, while
+ * `Map((a, b) ↦ a − b, Ps, Ps)` subtracts the points component-wise. Here
+ * the type handler is asked for the application to one supplied argument of
+ * each position, and the callback is admitted when two conditions hold:
+ *
+ * - the handler answers a type that is not `error` or `never`: a point
+ *   beside a number under `Subtract`, or two points under `Multiply`, have
+ *   no value and stay refused;
+ * - the declared signature admits the arguments with each tuple argument
+ *   read as its components (the join of the component types): a tuple of
+ *   strings, or a string, stays refused, because the handler alone does not
+ *   check the component types.
+ */
+function pointArithmeticAdmits(
+  fn: Expression,
+  supplyArrow: FunctionSignature,
+  opType: Type
+): boolean {
+  if (!isSymbol(fn)) return false;
+  const ce = fn.engine;
+  const def = ce.lookupDefinition(fn.symbol);
+  if (def === undefined || !('operator' in def)) return false;
+  if (!def.operator.broadcastExemptions.includes('tuples')) return false;
+  const args = supplyArrow.args ?? [];
+  const componentsOf = (t: Type): Type | undefined => {
+    const r = resolveTypeAlias(t);
+    if (typeof r !== 'object' || r.kind !== 'tuple' || r.elements.length === 0)
+      return undefined;
+    return widenAll(r.elements.map((e) => e.type));
+  };
+  if (args.every((a) => componentsOf(a.type) === undefined)) return false;
+  const componentArrow: FunctionSignature = {
+    ...supplyArrow,
+    args: args.map((a) => ({ ...a, type: componentsOf(a.type) ?? a.type })),
+  };
+  if (callbackIncompatibility(componentArrow, opType) !== undefined)
+    return false;
+  const result = deriveApplicationType(
+    ce,
+    fn.symbol,
+    args.map((a, k) => describeBoundElement(a.type, k))
+  );
+  return result !== undefined && result !== 'error' && result !== 'never';
 }
 
 /**
@@ -2409,42 +2490,114 @@ function bareMappingElementTypeD(
   const body = applicationOfStructure(bodyStructure);
   if (body === undefined) return undefined;
 
-  // A binder declares variables when canonicalized; only an operator that
-  // merely computes a value from its operands is derived. (`lazy` is not a
-  // reason to decline — `Add` and `Multiply`, the operators every arithmetic
-  // broadcast maps, are lazy.)
-  const def = engine.lookupDefinition(body.head)?.operator;
-  if (def === undefined || def.scoped) return undefined;
-
   const elementTypes = sources.map((x) => mappingSourceElementTypeD(x));
 
-  // Every operand is a parameter reference or mentions no parameter at all:
-  // a parameter buried inside an operand would keep its `unknown` binding
-  // and the derived application would not be the body's. And every parameter
+  // Every operand is a parameter reference, an application that is derived
+  // the same way, or mentions no parameter at all: a parameter buried inside
+  // an operand that cannot be derived would keep its `unknown` binding and
+  // the derived application would not be the body's. And every parameter
   // the body DOES reference must have a source element type: a referenced
   // parameter left `unknown` would not merely weaken the answer — an
   // arithmetic operator types an `unknown` co-operand as a scalar, so an
   // integer source zipped with an unknown-element source would derive as a
   // number while the unknown source may be supplying tuples.
+  //
+  // A nested application is derived because canonicalization makes one of
+  // most bodies: `(a, b) ↦ a − b` is `a + Negate(b)`, so over two lists of
+  // points the body was typed with `b` unknown, as a number, and the `Map`
+  // typed `vector<2>` for a list of points. The derived operand stands for
+  // its derived type.
   let referenced = false;
-  const args: OperandDescriptor[] = [];
-  for (const arg of body.children) {
-    const s = arg.structureOf?.();
-    if (s?.kind === 'symbol' && parameters.has(s.name)) {
-      const k = parameters.get(s.name)!;
-      const elementType = elementTypes[k];
-      if (elementType === undefined) return undefined;
-      referenced = true;
-      args.push(describeBoundElement(elementType, k));
-      continue;
+  const deriveApplication = (app: {
+    head: string;
+    children: ReadonlyArray<OperandDescriptor>;
+  }): Type | undefined => {
+    // A binder declares variables when canonicalized; only an operator that
+    // merely computes a value from its operands is derived. (`lazy` is not a
+    // reason to decline — `Add` and `Multiply`, the operators every
+    // arithmetic broadcast maps, are lazy.)
+    const def = engine.lookupDefinition(app.head)?.operator;
+    if (def === undefined || def.scoped) return undefined;
+    const args: OperandDescriptor[] = [];
+    for (const [i, arg] of app.children.entries()) {
+      const s = arg.structureOf?.();
+      if (s?.kind === 'symbol' && parameters.has(s.name)) {
+        const k = parameters.get(s.name)!;
+        const elementType = elementTypes[k];
+        if (elementType === undefined) return undefined;
+        referenced = true;
+        args.push(describeBoundElement(elementType, k));
+        continue;
+      }
+      if (!mentionsParameter(arg, parameters)) {
+        args.push(arg);
+        continue;
+      }
+      const inner = applicationOfStructure(s);
+      if (inner === undefined) return undefined;
+      const t = deriveApplication(inner);
+      if (t === undefined) return undefined;
+      // A name no operand can have: a derived operand is not a parameter.
+      args.push(describeBoundSymbol(t, `__derivedOperand${i}`));
     }
-    if (mentionsParameter(arg, parameters)) return undefined;
-    args.push(arg);
-  }
+    const t = derive(app.head, args);
+    if (t === undefined || t === 'unknown' || t === 'any' || t === 'error')
+      return undefined;
+    return t;
+  };
+  const t = deriveApplication(body);
   if (!referenced) return undefined;
+  return t;
+}
 
-  const t = derive(body.head, args);
-  if (t === undefined || t === 'unknown' || t === 'any' || t === 'error')
+/**
+ * The element type of a `Map` whose mapping is a bare OPERATOR name that
+ * combines points itself (the `'tuples'` broadcast exemption: `Add`,
+ * `Subtract`, `Negate`, `Multiply`, `Divide`), when a source supplies
+ * points — or `undefined` when this does not apply and the caller keeps the
+ * declared result of the operator.
+ *
+ * The callback check admits such an operator over points by its type handler
+ * (`pointArithmeticAdmits()`), and the value is then a list of points:
+ * `Map(Subtract, Ps, Ps)` is `[(0, 0), (0, 0)]`. The declared result of
+ * `Subtract` is `number`, so the type of the `Map` must come from the same
+ * handler: one descriptor per source, of its element type. The operator must
+ * accept as many operands as there are sources, because the handlers do not
+ * check their arity.
+ */
+function bareOperatorElementTypeD(
+  fn: OperandDescriptor,
+  sources: ReadonlyArray<OperandDescriptor>,
+  engine: PureEngineView,
+  derive: TypeHandlerContext['derive']
+): Type | undefined {
+  const s = fn.structureOf?.();
+  if (s?.kind !== 'symbol') return undefined;
+  const def = engine.lookupDefinition(s.name)?.operator;
+  if (def === undefined || !def.broadcastExemptions.includes('tuples'))
+    return undefined;
+  const sig = def.signature.type;
+  if (typeof sig !== 'object' || sig.kind !== 'signature') return undefined;
+  const { min, max } = arityBounds(sig);
+  if (sources.length < min || sources.length > max) return undefined;
+  const elementTypes: Type[] = [];
+  for (const source of sources) {
+    const t = mappingSourceElementTypeD(source);
+    if (t === undefined) return undefined;
+    elementTypes.push(t);
+  }
+  if (!elementTypes.some((t) => isTupleShapedType(t))) return undefined;
+  const t = derive(
+    s.name,
+    elementTypes.map((t, k) => describeBoundElement(t, k))
+  );
+  if (
+    t === undefined ||
+    t === 'unknown' ||
+    t === 'any' ||
+    t === 'error' ||
+    t === 'never'
+  )
     return undefined;
   return t;
 }
@@ -3151,8 +3304,29 @@ function isAbsentablePointListSourceType(t: Type): boolean {
   if (!typeContainsMissing(t)) return false;
   const present = stripMissingFromType(t);
   if (present === 'never' || present === 'string') return false;
-  if (typeof present !== 'string' && present.kind === 'tuple') return false;
+  if (isPointElementType(present)) return false;
   return isSubtype(present, INDEXED_COLLECTION_SHAPE_TYPE);
+}
+
+/**
+ * The type that a `PointList` component must have: a coordinate is a number
+ * or a list of numbers. This is the expected type of the `incompatible-type`
+ * error for a component that is a point (`isPointListTupleComponentType`).
+ * The check refuses only a point: a string, a boolean or a matrix component
+ * is admitted, as before.
+ */
+const POINT_LIST_COMPONENT_TYPE: Type = parseType('number | list<number>');
+
+/**
+ * Whether `t` is the type of a `PointList` component that is a point: every
+ * spelling of a tuple (the bare `tuple`, `tuple<…>`, a union of tuples),
+ * possibly absent (`missing | tuple<…>`, the type of a restricted point).
+ * A type that is only possibly a tuple (`unknown`, `tuple<…> | list<…>`) is
+ * not: the value decides.
+ */
+function isPointListTupleComponentType(t: Type): boolean {
+  if (t === 'missing') return false;
+  return isPointElementType(stripMissingFromType(t));
 }
 
 /** Descriptor twin of {@link isIndexSpan}.
@@ -6864,6 +7038,29 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       'A list of points: zips collection components into a List of point-tuples (Desmos point-list idiom); a plain point when no component is a collection.',
     complexity: 8200,
     signature: '(any+) -> any',
+    // A component that is a point (a tuple) is refused when the call is
+    // boxed: a coordinate is a number or a list of numbers, and a whole point
+    // in the place of one coordinate is almost certainly an error of the
+    // author. Before, `PointList([1, 2], (5, 6))` put the whole point in each
+    // second coordinate, `[(1, (5, 6)), (2, (5, 6))]`. The signature cannot
+    // say "not a tuple", so the refusal is here. The operands arrive
+    // canonical; `flatten` splices a `Sequence` and erases `Nothing`, as the
+    // boxing does for an operator without a `canonical` handler. A component
+    // whose type is not provably a tuple (`unknown`, a union with a list) is
+    // admitted, and its value is checked by `evaluate`. So is a symbol whose
+    // type was inferred from its value (a symbol declared `unknown` and
+    // assigned `(5, 6)`): a canonical form must not depend on the value
+    // assigned to a symbol, which can change before the call is evaluated.
+    canonical: (ops, { engine }) =>
+      engine._fn(
+        'PointList',
+        flatten(ops).map((op) =>
+          !(isSymbol(op) && op.valueDefinition?.inferredType) &&
+          isPointListTupleComponentType(op.type.type)
+            ? engine.typeError(POINT_LIST_COMPONENT_TYPE, op.type, op)
+            : op
+        )
+      ),
     type: (operands, context) => {
       // A source that may be absent (`A\{0 < t\}`, typed `list<real> |
       // missing`) is typed as its present part, and the point list as a
@@ -6878,7 +7075,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // itself a tuple. Mirrors the `evaluate` predicate, but type-based.
       const isListType = (op: OperandDescriptor): boolean => {
         const t = op.type;
-        const isTupleKind = typeof t !== 'string' && t.kind === 'tuple';
+        // Every spelling of a point is a tuple, not a list: the bare `tuple`
+        // as well as `tuple<…>` and a union of tuples. The bare `tuple` is a
+        // subtype of `indexed_collection`, so without this test `PointList(k,
+        // P)` with `P: tuple` was typed as a list of points.
+        const isTupleKind = isPointElementType(t);
         // A string is an indexed collection of characters, but it is ATOMIC
         // here for the same reason a tuple is: `PointList("ab", …)` must treat
         // the string as one component, not zip over its grapheme clusters.
@@ -6949,6 +7150,19 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         )
       )
         return ce.Missing;
+      // A component whose VALUE is a point (a symbol declared `unknown` that
+      // holds `(5, 6)`) is refused, as the boxing refuses a component whose
+      // type is a tuple (see the `canonical` handler). The answer is the
+      // error, with the frame of the operator and the operand.
+      const pointIndex = ops.findIndex((op) => isTuple(op));
+      if (pointIndex >= 0)
+        return refusedOperandError(
+          ce,
+          'PointList',
+          pointIndex + 1,
+          POINT_LIST_COMPONENT_TYPE,
+          ops[pointIndex]
+        );
       const isListComponent = (op: Expression): boolean =>
         isFiniteBroadcastParticipant(op);
       // A component whose length is NOT YET KNOWN — a view over `Range(0, n)`
@@ -8737,6 +8951,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // the copied source type below (user decision 2026-09-27).
         const resultType =
           bareMappingElementTypeD(ops[0], [ops[1]], engine, derive) ??
+          bareOperatorElementTypeD(ops[0], [ops[1]], engine, derive) ??
           callbackResultTypeD(ops[0], engine);
         if (!resultType || resultType === 'unknown' || resultType === 'any') {
           // Unknown element type: still preserve value-aware indexed-ness
@@ -8799,6 +9014,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       }
       const resultType =
         bareMappingElementTypeD(ops[0], ops.slice(1), engine, derive) ??
+        bareOperatorElementTypeD(ops[0], ops.slice(1), engine, derive) ??
         callbackResultTypeD(ops[0], engine);
       return BoxedType.forResult(
         zipMapResultType(
@@ -9622,7 +9838,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // was not an indexed collection, and a list result materialized as a
     // `Set` of restricted cells.
     threadsConditionals: true,
-    signature: '(collection<any>) -> indexed_collection',
+    // The source must have positions: `x(k+1) − xk` reads its elements in
+    // order, and a set has no order. `Differences(Set(3, 1))` is refused when
+    // it is boxed, as `Sort(Set(3, 1))` is, and a set held by a symbol of a
+    // wider type is refused when the call is evaluated
+    // (`settleHeldEagerSources()` in `boxed-expression/boxed-function.ts`).
+    signature: '(indexed_collection<any>) -> indexed_collection',
     type: (ops, context) => {
       const elt = collectionElementType(ops[0].type) ?? 'number';
       // Each element is a SUBTRACTION of two source elements, so echoing the
@@ -9641,7 +9862,11 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       );
     },
     canonical: (ops, { engine }) => {
-      const collection = checkCollectionOperand(engine, ops[0]);
+      const collection = checkCollectionOperand(
+        engine,
+        ops[0],
+        'indexed_collection'
+      );
       if (!collection.isValid) return null;
       // A source whose elements are PROVABLY not numbers (a string's
       // characters, a list of booleans) cannot be differenced: every element
@@ -12609,6 +12834,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     missingStrip: [0],
     signature: '(indexed_collection<T>, integer, T) -> list<T> where T',
     evaluate: ([xs, idx, value], { engine: ce }) => {
+      const refused = unindexedCollectionOperandError(ce, 'Insert', xs);
+      if (refused) return refused;
       if (!isWalkableFiniteCollection(xs)) return undefined;
       // Small finite sources materialize eagerly (all existing semantics);
       // larger — or unknown-length — sources stay symbolic and are served
@@ -12744,6 +12971,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     signature:
       '((T, integer) -> T where T: string) & ((indexed_collection<T>, integer) -> list<T> where T)',
     evaluate: ([xs, idx], { engine: ce }) => {
+      const refused = unindexedCollectionOperandError(ce, 'DeleteAt', xs);
+      if (refused) return refused;
       if (!isWalkableFiniteCollection(xs)) return undefined;
       // Small finite sources materialize eagerly; larger — or unknown-length —
       // sources stay symbolic and are served lazily by the `collection`
@@ -12869,6 +13098,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     missingStrip: [0],
     signature: '(indexed_collection<T>, integer, T) -> list<T> where T',
     evaluate: ([xs, idx, value], { engine: ce }) => {
+      const refused = unindexedCollectionOperandError(ce, 'ReplaceAt', xs);
+      if (refused) return refused;
       if (!isWalkableFiniteCollection(xs)) return undefined;
       // Small finite sources materialize eagerly; larger — or unknown-length —
       // sources stay symbolic and are served lazily by the `collection`

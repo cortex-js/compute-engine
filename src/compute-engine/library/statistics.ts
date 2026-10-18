@@ -723,8 +723,15 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         // complex mean — `Mean([1, 1+2i])` is `1 + i`. The boxed accumulation
         // serves both paths: it is exact on exact data, and `.N()`
         // numericizes what it returns.
+        //
+        // A complex datum beside a REAL infinity gives the mean that `Add`
+        // gives for their sum: a finite imaginary part beside an infinite
+        // real part is the real infinity (`Mean([1+i, +∞])` is `+∞`, as
+        // `(1+i) + ∞` is), and `+∞` beside `−∞` is the indeterminate form.
+        // Any other datum that is not finite (`~∞`, `NaN`) makes the mean
+        // `NaN`, as it does for real data (`hasNonRealInfiniteDatum()`).
         if (nonRealDatum(xs)) {
-          if (hasNonFiniteDatum(xs)) return engine.NaN;
+          if (hasNonRealInfiniteDatum(xs)) return engine.NaN;
           const m = boxedMean(engine, xs);
           return numericApproximation ? m.N() : m;
         }
@@ -2230,21 +2237,33 @@ function boxedMean(ce: ComputeEngine, vals: Expression[]): Expression {
 /**
  * True when some datum is not a finite number — `±∞`, `~oo`, or `NaN`.
  *
- * The complex branches of `Mean` and the variance family use this to answer
- * `NaN` before doing any arithmetic. They are only reached when some datum is
- * genuinely complex, and a complex sample point together with a point at
- * infinity has no reading: `+∞` is a limit along the real axis, and no
- * direction in the plane makes it a value a complex number can be averaged
- * with or subtracted from. Boxed arithmetic nevertheless folded
- * `Mean([1 + 2i, +∞])` and `Variance([1 + 2i, +∞])` to `+∞` — a definite real
- * answer for data that has none, and, for the variance, a contradiction of the
- * real-only path, which answers `NaN` for `Variance([1, +∞])`.
- *
- * The real-only paths do NOT go through this: `Mean([1, +∞])` is `+∞` there,
- * which is the limit of the sample mean and a reading the data supports.
+ * The complex branches of the variance family use this to answer `NaN`
+ * before doing any arithmetic. They are only reached when some datum is
+ * genuinely complex and no datum is infinite (`infiniteDataAnswer()` answers
+ * that case first), so what this finds is a `NaN` datum. `Mean` reads a
+ * complex datum beside a real infinity as `Add` does, and uses
+ * `hasNonRealInfiniteDatum()` instead.
  */
 function hasNonFiniteDatum(vals: ReadonlyArray<Expression>): boolean {
   return vals.some((v) => v.isFinite !== true);
+}
+
+/**
+ * True when some datum is not a finite number and not a real infinity: the
+ * complex infinity `~oo` (under either spelling) or `NaN`.
+ *
+ * `Mean` uses this in place of `hasNonFiniteDatum()` for complex data: a
+ * complex datum beside `+∞` or `−∞` has the mean `Add` gives for their sum
+ * (`Mean([1 + 2i, +∞])` is `+∞`, as `(1 + 2i) + ∞` is: the direction of
+ * `x + 2i` as `x → ∞` is the positive real axis), while `~oo` has no real
+ * value, and reads as `NaN` in every univariate head.
+ */
+function hasNonRealInfiniteDatum(vals: ReadonlyArray<Expression>): boolean {
+  return vals.some(
+    (v) =>
+      v.isFinite !== true &&
+      !(isNumber(v) && v.isInfinity === true && v.isComplex !== true)
+  );
 }
 
 /**

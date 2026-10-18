@@ -146,6 +146,30 @@ const LATEX_FAITHFUL_LAZY_HEADS = new Set([
   'Linspace',
 ]);
 
+/**
+ * The `repeatingDecimal` option of the MathJSON that the `latex` getter and
+ * `toLatex()` give to the LaTeX serializer.
+ *
+ * In MathJSON, a number string with a repetend in parentheses (`"0.(3)"`) is
+ * an exact rational, and the LaTeX serializer writes it with an overline
+ * (`0.\overline{3}`), which parses back as an exact rational. A boxed exact
+ * rational serializes as `["Rational", 1, 3]`, never as such a string: the
+ * string comes only from the digits of a float, when the MathJSON serializer
+ * finds a repeating pattern in them. So the pattern search of the MathJSON
+ * serializer is on only when the LaTeX `repeatingDecimal` style asks for a
+ * repetend mark on a float (`'vinculum'`, `'dots'`, `'parentheses'`,
+ * `'arc'`). With `'auto'` (the default) or `'none'`, a float keeps its
+ * digits, and a LaTeX round trip keeps it a float.
+ */
+function jsonRepeatingDecimal(
+  ce: ComputeEngine,
+  options?: Record<string, any>
+): boolean {
+  const style =
+    options?.repeatingDecimal ?? ce.latexOptions.repeatingDecimal ?? 'auto';
+  return style !== 'auto' && style !== 'none';
+}
+
 /** Return true if at least one side contains an operator where expansion could
  *  produce a structurally different result.  Uses `.has()` which recursively
  *  walks the expression tree, so nested cases like `Add(Multiply(a, Add(b,c)), 1)`
@@ -417,7 +441,11 @@ export abstract class _BoxedExpression implements Expression {
       }
     }
     const syntax = this.engine._requireLatexSyntax();
-    const jsonOptions = { prettify: true, fractionalDigits: 'auto' } as const;
+    const jsonOptions = {
+      prettify: true,
+      fractionalDigits: 'auto',
+      repeatingDecimal: jsonRepeatingDecimal(this.engine),
+    } as const;
     const json = this.toMathJson(jsonOptions);
     return syntax.serialize(
       json,
@@ -486,8 +514,16 @@ export abstract class _BoxedExpression implements Expression {
     // `'auto'` (round to engine precision), matching prior behavior.
     const jsonOptions: Partial<JsonSerializationOptions> =
       options?.digits !== undefined
-        ? { prettify: options?.prettify ?? true, digits: options.digits }
-        : { prettify: options?.prettify ?? true, fractionalDigits: 'auto' };
+        ? {
+            prettify: options?.prettify ?? true,
+            digits: options.digits,
+            repeatingDecimal: jsonRepeatingDecimal(this.engine, options),
+          }
+        : {
+            prettify: options?.prettify ?? true,
+            fractionalDigits: 'auto',
+            repeatingDecimal: jsonRepeatingDecimal(this.engine, options),
+          };
     const json = this.toMathJson(jsonOptions);
 
     const syntax = this.engine._requireLatexSyntax();
@@ -521,6 +557,10 @@ export abstract class _BoxedExpression implements Expression {
    *
    * Internally, `'auto'` is converted to `-ce.precision` to signal
    * total significant digits (negative value) to the serializer.
+   *
+   * A float keeps its digits by default. With `repeatingDecimal: true`, the
+   * repeating digits of a float are written as a repetend (`"0.(3)"`), which
+   * `ce.box()` reads back as an exact rational.
    */
   toMathJson(
     options?: Readonly<Partial<JsonSerializationOptions>>
@@ -530,7 +570,7 @@ export abstract class _BoxedExpression implements Expression {
       shorthands: ['function', 'symbol', 'string', 'number', 'dictionary'],
       metadata: [],
       fractionalDigits: 'max',
-      repeatingDecimal: true,
+      repeatingDecimal: false,
       prettify: true,
     };
 

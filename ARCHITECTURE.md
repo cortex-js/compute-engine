@@ -1056,6 +1056,31 @@ mechanism that lets `new ComputeEngine()` support LaTeX when imported from the
 full package while keeping LaTeX out of core bundles. `src/epsil.ts` is the
 experimental `@cortex-js/compute-engine/epsil` published entry.
 
+### Diagnostic flags and `_`-prefixed engine members (user decision 2026-10-17)
+
+Some diagnostics are turned on by an environment variable that the source
+reads from `process.env` when a module loads: `CE_DEBUG_DEPS`,
+`CE_MEMO_PARANOID`, `CE_TYPE_PURITY_GUARD`, `CE_CACHE_STATS` and others. These
+flags are for the debugging of the engine itself, in the repository's own Node
+runs (tests, benchmarks, `tsx` probes). A host cannot use them:
+
+- a browser has no `process` object, so the flag is always off there;
+- the functions that report what a flag records are module exports of files
+  such as `src/common/cache-stats.ts`, which the package does not export and
+  which minification renames.
+
+A diagnostic that a host needs is an `_`-prefixed member of the engine,
+declared on `IComputeEngine` in `src/compute-engine/types-engine.ts` (an
+undeclared member is not visible to a host that uses the types). Such a member
+survives bundling and minification, needs no subpath export, and works in a
+browser. Examples: `ce._mapAutoCompileStats` (the counters of the
+auto-compilation of `Map` callbacks) and `ce._cacheStats` (the hit and miss
+counts of the memoization caches; set `ce._cacheStats.enabled = true` to start
+recording, then read `snapshot()` or `report()`). `CE_CACHE_STATS` still turns
+the cache statistics on at module load in a Node run. Add a new `process.env`
+flag only for the engine's own debugging; when a host asks for a diagnostic,
+convert it to an engine member.
+
 ## Build, test, and docs tooling
 
 - **Build**: `npm run build` (dev → `/build`), `npm run build production`

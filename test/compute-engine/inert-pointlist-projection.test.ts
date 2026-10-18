@@ -32,7 +32,9 @@ describe('a coordinate accessor over an inert PointList head', () => {
     const cases: [string, unknown[]][] = [
       ['a number literal', ['PointList', 1, 's']],
       ['a symbol declared real', ['PointList', 'x0', 's']],
-      ['a tuple', ['PointList', ['Tuple', 1, 2], 's']],
+      // A tuple column is not a case: a point is not a coordinate, and the
+      // boxing refuses `PointList((1, 2), s)` (see
+      // `pointlist-tuple-component.test.ts`).
       ['a string', ['PointList', 'str', 's']],
       ['two scalar slots', ['PointList', 1, 's', 2]],
     ];

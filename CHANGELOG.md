@@ -2,6 +2,152 @@
 
 ### Behavior Changes
 
+- **An operator that reads a collection by position refuses a set** (user
+  decision 2026-10-17). With `c: collection<integer>` assigned `Set(3, 1)`,
+  `DeleteAt(c, 1)`, `ReplaceAt(c, 1, 2)`, `Insert(c, 1, 2)`, `ArgMax(c)`,
+  `ArgMin(c)` and `Differences(c)` now give
+  `Error(incompatible-type, indexed_collection, set<integer>)`, as `Sort(c)`
+  does; they read the set in its iteration order (`[1]`, `[2, 1]`, …).
+  `Differences` is declared on `indexed_collection`, so `Differences(Set(3, 1))`
+  is refused when it is boxed. A `PointList` component that is a point is
+  refused: `PointList([1, 2], (5, 6))` gave `[(1, (5, 6)), (2, (5, 6))]`.
+
+- **A function defined only on integers gives a float for a float argument**
+  (user decision 2026-10-17). `Fibonacci(5.0)` is `5.0`, `Totient(10.0)` is
+  `4.0` and `BernoulliB(4.0)` is `-0.0333…`; they gave the exact `5`, `4` and
+  `-1/30`. This applies to the number-theory and combinatorics integer functions
+  (`NthPrime`, `PrimePi`, `Lucas`, `CatalanNumber`, `BellNumber`, `PowerMod`, …),
+  to the exact special values of `HurwitzZeta(0.0, 2)` and `LerchPhi(0.0, 1,
+  1)`, and to every number of a list or tuple result (user decision 2026-10-18):
+  `Divisors(12.0)` is `[1.0, 2.0, 3.0, 4.0, 6.0, 12.0]`, and so are
+  `PrimeFactors`, `FactorInteger`, `IntegerDigits`, `ExtendedGCD`,
+  `ContinuedFraction`, `PowerModList` and `PrimitiveRootList`. A non-integer
+  float (`Fibonacci(5.5)`) is still an error. `.N()` of `BernoulliB(4)`,
+  `FromContinuedFraction([2, 3])` and `RationalReconstruction(6, 11)` is now a
+  float; it was the exact rational.
+
+- **A `complex.js` value is a float** (user decision 2026-10-17). A `Complex`
+  object holds two doubles, so `ce.number(new Complex(2, 3))` is the float
+  `2.0 + 3.0i` (`isExact` is `false`), and `new Complex(2, 0)` the float `2.0`.
+  For an exact Gaussian integer, use `ce.number({ re: 2, im: 3 })` or
+  `ce.box(["Complex", 2, 3])`.
+
+- **A float in a list literal makes the cells of a product or sum `real`**
+  (user decision 2026-10-17). `[1.0, 2] / 3` evaluates to `[0.333…, 2/3]` but
+  was typed `vector<rational^2>`; it is now typed `vector<real^2>`, and so are
+  `2.0·[1/3, 1]` and `2.0·L` with `L: list<rational>`. A product of two
+  collections includes its scalar factors in the type:
+  `[1, 2]·[3, 4]·(1/3)` was typed `vector<integer^2>`.
+
+- **A complex value beside a real infinity gives the infinity in `Sum` and
+  `Mean`, as in `Add`** (user decision 2026-10-17). `Sum([1+i, +oo])` gave the
+  complex number `Infinity + i`, and `Mean([1+i, +oo])` gave `NaN`; both give
+  `+oo`. Data with both `+oo` and `-oo` gives `Indeterminate`.
+
+- **`Map` accepts `Subtract`, `Negate`, `Multiply` and `Divide` as bare names
+  over points** (user decision 2026-10-17). `Map(Subtract, Ps, Ps)` with
+  `Ps = [(1, 2), (3, 4)]` was an `incompatible-type` error; it gives
+  `[(0, 0), (0, 0)]`, typed as a list of points.
+
+- **A compiled call of a user function with the wrong number of arguments
+  declines** (user decision 2026-10-17). With `a := (x, y, z) ↦ x + y + z`,
+  compiled JavaScript gave `6` for `a(1, 2, 3, 4)`, where the interpreter gives
+  an `unexpected-argument` error; the call now declines on every target and the
+  interpreter answers it. The Python and WGSL `compileFunction()` accept a block
+  whose last statement is an assignment (`Block(s ≔ x; t ≔ s)` returns `t`, as
+  `compile()` does). WGSL refuses an assignment to a function parameter, which
+  WGSL does not allow, and Python refuses a function or parameter name that is
+  not a Python identifier.
+
+- **The interpreter fallback of a compiled function spells an absent value as
+  the compiled code does** (user decision 2026-10-17). A bare `Undefined` gives
+  `undefined` on JavaScript, a written `Missing` gives `NaN` on Python, and a
+  present number on interval-js is `{ kind: 'interval', value: { lo, hi } }`. On
+  interval-js, a written `Missing` or `Undefined` and an `At` whose index selects
+  nothing give `{ kind: 'empty' }` instead of `{ lo: NaN, hi: NaN }`.
+
+- **A global declaration of a library constant is refused** (user decision
+  2026-10-17). `ce.declare('Pi', …)` in the global scope, a `Declare` there, and
+  a top-level Epsil `let Pi = 3` now throw `Cannot declare "Pi" in the global
+  scope: it is a library constant`, so a result built with the library π keeps
+  its value after a MathJSON round trip. The rule applies to every library
+  constant that results carry by name (`ExponentialE`, `GoldenRatio`, `True`,
+  …). A function parameter, a `Sum` index, a block local or a `ce.pushScope()`
+  scope can still use the name, and so can `e` and `i`.
+
+- **No repetend mark on a float, in LaTeX and in MathJSON** (user decisions
+  2026-10-17 and 2026-10-18). The float `1.0/3` serialized to LaTeX as
+  `0.\overline{3}` and to MathJSON as `"0.(3)"`, and both read back as the
+  exact `1/3`. It now keeps its digits (`0.333\,333\,…`), so a round trip keeps
+  it a float. The default of the LaTeX option `repeatingDecimal` is `'auto'`
+  (an exact repeating decimal keeps its overline), and the default of the
+  `toMathJson()` option `repeatingDecimal` is `false`; an explicit style still
+  marks a float.
+
+- **A juxtaposition with a function-typed factor is checked like the explicit
+  product** (user decision 2026-10-17). After `f(x)` is parsed, `fy` and `2f`
+  give the same `incompatible-type` error as `f\times y` and `2\times f`; they
+  were products. An application (`f(x)`, `2f(x)`, `\sin x`) does not change. A
+  bar used as the set-builder separator (`\{x | x \ne 0\}`) gives one
+  `expected-set-builder-separator` error that names `\mid`, instead of two
+  unrelated errors.
+
+- **In Epsil, each run of a block gets its `let` and `const` bindings when it
+  starts, as in JavaScript** (user decision 2026-10-17). A closure created
+  before the `let` of a local reads the binding of its own run:
+  `let fs = []; for i in [1, 2] { fs = [...fs, () => k]; let k = i }; [fs[1](), fs[2]()]`
+  gives `[1, 2]`, not `[k, 1]`. Using a local before its `let` or `const` has
+  run in the block, by a read or a write, is the error
+  `read-before-declaration`; before, it read the outer name or gave the bare
+  symbol. Top-level statements are not affected.
+
+- **Extending `Add` or `Multiply` so that the library canonical handler is
+  removed also removes the `lazy` flag** (user decision 2026-10-17).
+  `ce.declare('Add', { associative: false }, { extend: true })` then
+  `(a+b)+c` gave `["Add", ["Delimiter", ["Add", "a", "b"]], "c"]`; the operands
+  are now canonicalized, as for an `Add` declared from scratch.
+
+- **The statistics of the memoization caches are an engine member.**
+  `ce._cacheStats` (`enabled`, `snapshot()`, `reset()`, `report()`) works in the
+  published package and in a browser; the `CE_CACHE_STATS` environment flag
+  still turns it on in a Node run. The SymPy conversion code, which no entry
+  point exported, is removed.
+
+- **The `glsl` target computes a sine hash exactly, and the shader targets
+  report the other float32-unsafe `Mod` and `Fract` operands** (user
+  decision 2026-10-18, Tycho ledger rows 382 and 384). In a "sine hash" such
+  as `\operatorname{mod}(43758.5453\sin(12.9898x),1)` or
+  `\operatorname{mod}(10^4\sin(10^4x),1)`, a constant of magnitude 1000 or
+  more amplifies the float32 rounding until the shader value has no relation
+  to the exact one: on a GPU it was off by more than 10⁻³ at nearly every
+  input. On `glsl`, `Mod(O·sin(Σ K·x + c), 1)` and `Fract(…)` of the same,
+  with `cos` in place of `sin` or a `Dot` of a vector with a list of numbers
+  as the sum, now compile to float64-equivalent arithmetic built from float32
+  (exact products from integer operations on the float bits, an exact
+  reduction by π/2, a two-part polynomial sine) when `|O| ≤ 5·10^4` and each
+  `x` is a run-time input or an integer-valued expression (`Floor(x) + 0.5`,
+  a loop index; not `Floor(5x)`, where `5x` is rounded first). Measured on an Apple M5 Max and on SwiftShader, it matches
+  the `javascript` value within 10⁻³ at every input, at about 7× the cost of
+  the plain code. Each operand has a bound (`|10^4·x|` up to 2.6·10^7, so
+  `|x| ≤ 2600`); beyond it the shader gives NaN, and the new `float32Bounds`
+  field of the compile result lists each operand with its bound
+  (`{ operand: 'x', maxAbs: 2600 }`), so a caller that knows the domain of
+  the operand can choose the CPU. Any other `Mod` or `Fract` operand in which
+  a constant of magnitude 1000 or more multiplies a trigonometric call (on
+  the way to the call or inside its argument), and every such operand on
+  `wgsl`, compiles to the same float32 code as before, and the result now
+  has a `warnings` entry with code `'float32-unsafe-argument'`, kind
+  `'correctness'` and the operand as `value`: a caller that needs the value (a curve the hash
+  positions) can compute it on the CPU, and one that only draws a noise
+  texture can keep the shader. This includes a hash that reads a parameter
+  of a user function, an operand rounded before the product (`x + 10^4`),
+  and an outer factor above 5·10^4. An operand that mentions a function
+  mapped by the `functions` option is left as before, with no warning. The
+  `compileFunction` and `compileShader` routes return a string, so they emit
+  the same code with neither bounds nor warnings. The
+  preamble of an exact hash declares `uniform highp uint _gpu_zero_u;`, which
+  the host does not set (GLSL initializes a uniform to 0).
+
 - **Under `.N()`, the last statement of a user-function body gets the numeric
   request** (user decision 2026-10-18). With `f := x ↦ (z := 1; ⌊x⌋)`,
   `f((25! − 1)/24!).N()` is `24`, not `25`: a jump in the last statement reads
@@ -266,6 +412,10 @@
   statement form.
 
 ### Issues Resolved
+
+- **`const g = (x) => 2 * x` after an earlier statement that referenced `g`
+  works.** It failed with "Cannot set properties of undefined (setting
+  '_isConstant')".
 
 - **A user function that calls itself inside a `Map` callback works.** With
   `m(n) := Map(x ↦ If(x < 1, 0, m(x − 1)), [n])`, `m(1)` gave

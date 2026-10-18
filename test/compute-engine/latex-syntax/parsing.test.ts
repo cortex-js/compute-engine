@@ -301,10 +301,12 @@ describe('NON-STRICT MODE (Math-ASCII/Typst-like syntax)', () => {
         diagnostics: true,
       });
       expect(withDiagnostics.diagnostics ?? []).toEqual([]);
-      // Away from a parenthesis the run is still split into letters.
-      expect(ce.parse('foo', { strict: false })).toMatchInlineSnapshot(
-        `["Multiply", "f", "o", "o"]`
-      );
+      // Away from a parenthesis the run is still split into letters. A fresh
+      // engine: in the shared one, an earlier test made `f` a function, and a
+      // product with a function-typed factor is an `incompatible-type` error.
+      expect(
+        new ComputeEngine().parse('foo', { strict: false })
+      ).toMatchInlineSnapshot(`["Multiply", "f", "o", "o"]`);
     });
   });
 
@@ -857,9 +859,12 @@ describe('NON-STRICT MODE (Math-ASCII/Typst-like syntax)', () => {
     // Word-bounded ASCII shorthands are NOT matched inside a run: `foo` keeps
     // its letters and does not pick up `oo` → ∞.
     test('foo stays letters (oo not matched mid-run)', () => {
-      expect(ce.parse('foo', { strict: false })).toMatchInlineSnapshot(
-        `["Multiply", "f", "o", "o"]`
-      );
+      // A fresh engine: in the shared one, an earlier test made `f` a
+      // function, and a product with a function-typed factor is an
+      // `incompatible-type` error.
+      expect(
+        new ComputeEngine().parse('foo', { strict: false })
+      ).toMatchInlineSnapshot(`["Multiply", "f", "o", "o"]`);
       // A run holding a Greek constant keeps its segmentation before a
       // parenthesis too: `pix(3)` is `π·x·3`, not a call of `pix`.
       expect(ce.parse('pix(3)', { strict: false })).toMatchInlineSnapshot(

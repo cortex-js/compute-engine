@@ -533,3 +533,85 @@ describe('JUXTAPOSITION ON A HEAD WITH NO TYPE INFORMATION', () => {
     });
   });
 });
+
+/**
+ * A function-typed symbol is not a number, so it is not a factor of a valid
+ * product. The juxtaposition (`f y`, `2f`) and the explicit operator
+ * (`f\times y`, `2\times f`) are two spellings of the same product, and both
+ * check the operands against the `(number*) -> number` signature of
+ * `Multiply`: the function-typed operand becomes an `incompatible-type` error.
+ * A juxtaposition that is an APPLICATION (`f(x)`, `\sin x`) is not a product
+ * and is not affected.
+ */
+describe('JUXTAPOSITION WITH A FUNCTION-TYPED OPERAND', () => {
+  const fError = (type = 'function', name = 'f') => [
+    'Error',
+    ['ErrorCode', "'incompatible-type'", "'number'", `'${type}'`],
+    name,
+  ];
+
+  test('parse route: the juxtaposition gives the error of the explicit operator', () => {
+    const ce = new ComputeEngine();
+    ce.parse('f(x)'); // Infers `f` as a function.
+    for (const [juxtaposed, explicit] of [
+      ['fy', 'f\\times y'],
+      ['f y', 'f\\cdot y'],
+      ['f\\,y', 'f\\times y'],
+      ['2f', '2\\times f'],
+      ['yf', 'y\\times f'],
+    ]) {
+      const a = ce.parse(juxtaposed);
+      const b = ce.parse(explicit);
+      expect([juxtaposed, a.json]).toEqual([juxtaposed, b.json]);
+      expect(a.isValid).toBe(false);
+    }
+    expect(ce.parse('fy').json).toEqual(['Multiply', fError(), 'y']);
+    expect(ce.parse('2f').json).toEqual(['Multiply', 2, fError()]);
+  });
+
+  test('a declared function type', () => {
+    const ce = new ComputeEngine();
+    ce.declare('g', 'function');
+    ce.declare('h', '(real) -> real');
+    expect(ce.parse('gy').json).toEqual([
+      'Multiply',
+      fError('function', 'g'),
+      'y',
+    ]);
+    expect(ce.parse('hy').json).toEqual([
+      'Multiply',
+      fError('(real) -> real', 'h'),
+      'y',
+    ]);
+    expect(ce.parse('hy').json).toEqual(ce.parse('h\\times y').json);
+  });
+
+  test('box route: an `InvisibleOperator` gives the error of `Multiply`', () => {
+    const ce = new ComputeEngine();
+    ce.declare('f', 'function');
+    expect(ce.box(['InvisibleOperator', 'f', 'y']).json).toEqual(
+      ce.box(['Multiply', 'f', 'y']).json
+    );
+    expect(
+      ce.function('InvisibleOperator', [ce.symbol('f'), ce.symbol('y')]).json
+    ).toEqual(['Multiply', fError(), 'y']);
+  });
+
+  test('an application is not affected', () => {
+    const ce = new ComputeEngine();
+    ce.parse('f(x)');
+    expect(ce.parse('f(x)').json).toEqual(['f', 'x']);
+    expect(ce.parse('f\\left(x\\right)').json).toEqual(['f', 'x']);
+    expect(ce.parse('f(2, 1)').json).toEqual(['f', 2, 1]);
+    expect(ce.parse('2f(x)').json).toEqual(['Multiply', 2, ['f', 'x']]);
+    expect(ce.parse('2f \\left(x\\right)').json).toEqual([
+      'Multiply',
+      2,
+      ['f', 'x'],
+    ]);
+    expect(ce.parse('f(x)y').json).toEqual(['Multiply', 'y', ['f', 'x']]);
+    expect(ce.parse('\\sin x').json).toEqual(['Sin', 'x']);
+    expect(ce.parse('2\\sin x').json).toEqual(['Multiply', 2, ['Sin', 'x']]);
+    expect(ce.parse('f(x)').isValid).toBe(true);
+  });
+});

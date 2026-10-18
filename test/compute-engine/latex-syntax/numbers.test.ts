@@ -145,20 +145,28 @@ describe('PARSING OF NUMBER', () => {
     );
   });
 
-  // RT-P0-5: short repetends (length 1-2) must serialize with a `\overline{…}`
-  // marker rather than a fixed 6-copy expansion (`0.333\,333`), which reads as
-  // a terminating decimal and changes the value by ~3e-7 on re-parse.
-  test('Serializing short repeating decimals uses \\overline', () => {
-    expect(ce.parse('1/3').N().latex).toMatchInlineSnapshot(`0.\\overline{3}`);
-    expect(ce.parse('2/3').N().latex).toMatchInlineSnapshot(`0.\\overline{6}`);
-    expect(ce.parse('1/6').N().latex).toMatchInlineSnapshot(`0.1\\overline{6}`);
-    expect(ce.parse('1/11').N().latex).toMatchInlineSnapshot(
-      `0.\\overline{09}`
-    );
+  // A float with repeating digits is written with its digits by default: a
+  // repetend mark (`\overline{…}`) parses as an exact rational, so a LaTeX
+  // round trip would change the float into an exact number.
+  test('Serializing a float with short repeating digits writes the digits', () => {
+    for (const src of ['1/3', '2/3', '1/6', '1/11', '1/7'])
+      expect(ce.parse(src).N().latex).not.toContain('\\overline');
+    expect(ce.parse('1/3').N().latex).toMatch(/^0\.333(\\,333)+/);
+  });
+
+  // RT-P0-5: when the `vinculum` notation is asked for, short repetends
+  // (length 1-2) must serialize with a `\overline{…}` marker rather than a
+  // fixed 6-copy expansion (`0.333\,333`), which reads as a terminating
+  // decimal and changes the value by ~3e-7 on re-parse.
+  test('Serializing short repeating decimals with the vinculum notation uses \\overline', () => {
+    const vinculum = (src: string) =>
+      ce.parse(src).N().toLatex({ repeatingDecimal: 'vinculum' });
+    expect(vinculum('1/3')).toMatchInlineSnapshot(`0.\\overline{3}`);
+    expect(vinculum('2/3')).toMatchInlineSnapshot(`0.\\overline{6}`);
+    expect(vinculum('1/6')).toMatchInlineSnapshot(`0.1\\overline{6}`);
+    expect(vinculum('1/11')).toMatchInlineSnapshot(`0.\\overline{09}`);
     // Longer repetends keep working
-    expect(ce.parse('1/7').N().latex).toMatchInlineSnapshot(
-      `0.\\overline{142857}`
-    );
+    expect(vinculum('1/7')).toMatchInlineSnapshot(`0.\\overline{142857}`);
   });
 
   test('Short repeating decimals round-trip through LaTeX', () => {

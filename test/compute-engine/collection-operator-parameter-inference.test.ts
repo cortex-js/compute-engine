@@ -111,7 +111,12 @@ const EPSIL_CASES: [string, string, string, string[]][] = [
     [LIST],
   ],
   ['Dedup', 'dedup(xs)', '(collection<any>) -> collection<any>', [LIST]],
-  ['Differences', 'differences(xs)', '(collection<any>) -> list', [LIST]],
+  [
+    'Differences',
+    'differences(xs)',
+    '(indexed_collection<any>) -> list',
+    [LIST],
+  ],
   // Operators that were typed correctly before the fix: they must not change.
   [
     'Find',
@@ -257,7 +262,7 @@ const BOX_CASES: [string, MathJsonExpression, string][] = [
   ['ArgMax', ['ArgMax', 'xs', NEG], 'indexed_collection<unknown>'],
   ['ArgMin', ['ArgMin', 'xs', NEG], 'indexed_collection<unknown>'],
   ['Dedup', ['Dedup', 'xs'], 'collection<any>'],
-  ['Differences', ['Differences', 'xs'], 'collection<any>'],
+  ['Differences', ['Differences', 'xs'], 'indexed_collection<any>'],
   ['Find', ['Find', 'xs', GT1], 'collection<unknown>'],
   ['CountIf', ['CountIf', 'xs', GT1], 'collection<unknown>'],
   ['Count', ['Count', 'xs'], 'collection<any>'],

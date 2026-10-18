@@ -763,11 +763,13 @@ class McpServer {
         : requireTimeLimit(args.timeLimit);
 
     const ce = new ComputeEngine();
-    // A declaration of a name the library already defines (`Pi`, `e`, `Sin`)
+    // A declaration of a name the library already defines (`e`, `Sin`)
     // replaces the library definition for this call. That is allowed, since
     // a host can do the same, but the result says so: a caller that declares
-    // every symbol it sees would otherwise get a compile that reads `Pi` as
-    // an input, with nothing to show why.
+    // every symbol it sees would otherwise get a compile that reads `e` as
+    // an input, with nothing to show why. A library constant whose name
+    // results carry in MathJSON (`Pi`, `GoldenRatio`) cannot be declared:
+    // `ce.declare()` refuses it, and the call reports that error.
     const warnings: string[] = [];
     for (const [name, type] of Object.entries(declarations)) {
       if (ce.lookupDefinition(name) !== undefined)

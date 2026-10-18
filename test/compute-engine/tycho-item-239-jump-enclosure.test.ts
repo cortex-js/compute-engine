@@ -223,11 +223,10 @@ describe('Interval jump enclosure — propagation through operations', () => {
   });
 
   test('an absent element selected through a jump index stays absent', () => {
-    // `at` answers a bare NaN interval for "no such element"; the compiled
-    // target reads `.lo` off it, so it must not be re-tagged.
+    // `at` answers `empty` for "no such element"; the jump of the index does
+    // not re-tag it as a discontinuity.
     const r = IA.at([], IA.floor(iv(0.5, 1.5)));
-    expect('kind' in r).toBe(false);
-    expect(Number.isNaN((r as Interval).lo)).toBe(true);
+    expect(r).toStrictEqual({ kind: 'empty' });
   });
 
   test('a pole operand stays a pole; empty and entire still dominate', () => {

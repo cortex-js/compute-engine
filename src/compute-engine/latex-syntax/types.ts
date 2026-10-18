@@ -725,6 +725,21 @@ export type NumberFormat = {
 
   truncationMarker: LatexString;
 
+  /**
+   * The notation of a repeating decimal.
+   *
+   * When parsing, `"auto"` accepts all the notations.
+   *
+   * When serializing, `"auto"` writes an exact repeating decimal (the
+   * MathJSON number string `"0.(3)"`) as `0.\overline{3}`, and writes a float
+   * with its digits and no repetend mark (`0.333\,333\,333`). A repetend mark
+   * parses as an exact rational: with a mark, a LaTeX round trip would change
+   * a float into an exact number. The other values select a notation and
+   * also apply it to a repeating pattern in the digits of a float. `"none"`
+   * never writes a repetend mark.
+   *
+   * **Default**: `"auto"`
+   */
   repeatingDecimal:
     'auto' | 'vinculum' | 'dots' | 'parentheses' | 'arc' | 'none';
 };

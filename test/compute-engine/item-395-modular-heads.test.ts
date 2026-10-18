@@ -295,7 +295,9 @@ const all: [string, [MathJsonExpression, MathJsonExpression][]][] = [
   ['RationalReconstruction', rationalReconstruction],
 ];
 
-// Each case reaches the same value through `evaluate()` and `.N()`.
+// Each case reaches the same value through `evaluate()` and `.N()`: the exact
+// value under `evaluate()`, and under `.N()` the `.N()` of that value (a
+// float for a rational value such as `RationalReconstruction(6, 11)`).
 describe('Modular heads (#395): reference values', () => {
   for (const [head, cases] of all) {
     for (const [input, expected] of cases) {
@@ -304,7 +306,7 @@ describe('Modular heads (#395): reference values', () => {
       test(`${label} (evaluate)`, () =>
         expect(ce.expr(input).evaluate().json).toEqual(want.json));
       test(`${label} (N)`, () =>
-        expect(ce.expr(input).N().json).toEqual(want.json));
+        expect(ce.expr(input).N().json).toEqual(want.N().json));
     }
   }
 });
@@ -605,7 +607,8 @@ describe('Number theory: an infinite collection operand stays unevaluated', () =
 
 describe('Number theory: a non-integer element stays unevaluated', () => {
   // A float or a rational element is not rounded. A float literal with an
-  // integer value (2.0) is an integer, as for `FromContinuedFraction`.
+  // integer value (2.0) is an integer, as for `FromContinuedFraction`, and
+  // makes the result a float.
   for (const input of [
     ['FromDigits', ['List', 1.5, 2]],
     ['FromDigits', ['List', ['Rational', 3, 2], 2]],
@@ -617,16 +620,16 @@ describe('Number theory: a non-integer element stays unevaluated', () => {
       expect(ce.expr(input).evaluate().operator).toBe(
         (input as [string, ...MathJsonExpression[]])[0]
       ));
-  test('FromDigits([2.0, 3]) = 23', () =>
+  test('FromDigits([2.0, 3]) = 23.0', () =>
     expect(
       ce.expr(['FromDigits', ['List', { num: '2.0' }, 3]]).evaluate().json
-    ).toEqual(23));
-  test('ChineseRemainder([2.0, 3], [3, 5]) = 8', () =>
+    ).toEqual({ num: '23.0' }));
+  test('ChineseRemainder([2.0, 3], [3, 5]) = 8.0', () =>
     expect(
       ce
         .expr(['ChineseRemainder', ['List', { num: '2.0' }, 3], ['List', 3, 5]])
         .evaluate().json
-    ).toEqual(8));
+    ).toEqual({ num: '8.0' }));
 });
 
 describe('Modular heads (#395): PowerMod with too many roots to list', () => {

@@ -36,7 +36,11 @@ import {
 } from '../numerics/dirichlet-character.js';
 import { bernoulliPolynomialRational } from '../numerics/bernoulli.js';
 import { shouldNumericize } from '../boxed-expression/apply.js';
-import { floatIfFloatOperand } from '../boxed-expression/float-result.js';
+import {
+  floatIfFloatOperand,
+  floatNumbersIfFloatOperand,
+  floatResultIfFloatOperand,
+} from '../boxed-expression/float-result.js';
 import { bignumPreferred } from '../boxed-expression/utils.js';
 import { Complex } from 'complex.js';
 import { BigDecimal } from '../../big-decimal/index.js';
@@ -339,7 +343,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         isFunction(expr)
           ? canEnumerateOperand(expr.op1, (g) => toBigint(g) !== null)
           : undefined,
-      evaluate: ([n], { engine: ce }) => {
+      evaluate: floatResultIfFloatOperand(([n], { engine: ce }) => {
         const k = toBigint(n);
         if (k === null) return undefined;
 
@@ -373,7 +377,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         }
 
         return ce.function('List', result);
-      },
+      }),
     },
 
     Divides: {
@@ -441,7 +445,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         isFunction(expr)
           ? canEnumerateOperand(expr.op1, divisorScanGround)
           : undefined,
-      evaluate: ([n], { engine: ce }) => {
+      evaluate: floatResultIfFloatOperand(([n], { engine: ce }) => {
         const k = toBigint(n);
         if (k === null) return undefined;
         // 0 has infinitely many divisors; leave it unevaluated.
@@ -478,7 +482,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
             return undefined;
           throw e;
         }
-      },
+      }),
     },
 
     NthPrime: {
@@ -486,7 +490,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         'Return the nth prime number (1-based): `NthPrime(1)` is 2, `NthPrime(2)` is 3, …',
       signature: '(integer) -> integer',
       examples: ['NthPrime(10)  // 29'],
-      evaluate: ([n], { engine: ce }) => {
+      evaluate: floatResultIfFloatOperand(([n], { engine: ce }) => {
         const k = toBigint(n);
         if (k === null || k < 1n) return undefined;
         if (k === 1n) return ce.number(2);
@@ -512,7 +516,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
           if (isPrimeBigint(candidate)) count += 1n;
         }
         return ce.number(candidate);
-      },
+      }),
     },
 
     NextPrime: {
@@ -520,7 +524,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         'Return the smallest prime greater than `n`. With a second argument `k`, return the kth prime after `n` (`k < 0` returns the |k|th prime before `n`).',
       signature: '(integer, integer?) -> integer',
       examples: ['NextPrime(10)  // 11', 'NextPrime(10, -1)  // 7'],
-      evaluate: ([n, kArg], { engine: ce }) => {
+      evaluate: floatResultIfFloatOperand(([n, kArg], { engine: ce }) => {
         const start = toBigint(n);
         if (start === null) return undefined;
         const k = kArg === undefined ? 1n : toBigint(kArg);
@@ -558,7 +562,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
           }
         }
         return ce.number(p);
-      },
+      }),
     },
 
     PrimeFactors: {
@@ -571,7 +575,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         isFunction(expr)
           ? canEnumerateOperand(expr.op1, nonzeroIntegerGround)
           : undefined,
-      evaluate: ([n], { engine: ce }) => {
+      evaluate: floatResultIfFloatOperand(([n], { engine: ce }) => {
         const k = toBigint(n);
         if (k === null) return undefined;
         const m = k < 0n ? -k : k;
@@ -583,7 +587,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
           'List',
           primes.map((p) => ce.number(p))
         );
-      },
+      }),
     },
 
     PrimeNu: {
@@ -591,14 +595,14 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         'Return ω(n), the number of distinct prime factors of `n`. The sign of `n` is ignored; `PrimeNu(1)` is 0.',
       signature: '(integer) -> integer',
       examples: ['PrimeNu(360)  // 3'],
-      evaluate: ([n], { engine: ce }) => {
+      evaluate: floatResultIfFloatOperand(([n], { engine: ce }) => {
         const k = toBigint(n);
         if (k === null) return undefined;
         const m = k < 0n ? -k : k;
         if (m === 0n) return undefined;
         if (m === 1n) return ce.number(0);
         return ce.number(bigPrimeFactors(m, ce._deadlineFrame).size);
-      },
+      }),
     },
 
     PrimeOmega: {
@@ -606,7 +610,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         'Return Ω(n), the number of prime factors of `n` counted with multiplicity. The sign of `n` is ignored; `PrimeOmega(1)` is 0.',
       signature: '(integer) -> integer',
       examples: ['PrimeOmega(360)  // 6'],
-      evaluate: ([n], { engine: ce }) => {
+      evaluate: floatResultIfFloatOperand(([n], { engine: ce }) => {
         const k = toBigint(n);
         if (k === null) return undefined;
         const m = k < 0n ? -k : k;
@@ -616,7 +620,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         for (const e of bigPrimeFactors(m, ce._deadlineFrame).values())
           total += e;
         return ce.number(total);
-      },
+      }),
     },
 
     MoebiusMu: {
@@ -624,7 +628,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         'Return the Möbius function μ(n): 0 if `n` is divisible by a perfect square > 1, otherwise (-1) raised to the number of distinct prime factors. The sign of `n` is ignored.',
       signature: '(integer) -> integer',
       examples: ['MoebiusMu(30)  // -1'],
-      evaluate: ([n], { engine: ce }) => {
+      evaluate: floatResultIfFloatOperand(([n], { engine: ce }) => {
         const k = toBigint(n);
         if (k === null) return undefined;
         const m = k < 0n ? -k : k;
@@ -633,7 +637,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         const factors = bigPrimeFactors(m, ce._deadlineFrame);
         for (const e of factors.values()) if (e > 1) return ce.number(0);
         return ce.number(factors.size % 2 === 0 ? 1 : -1);
-      },
+      }),
     },
 
     IsSquareFree: {
@@ -658,7 +662,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         'Return the radical of `n` (its square-free kernel): the product of its distinct prime factors. The sign of `n` is ignored; `Radical(1)` is 1.',
       signature: '(integer) -> integer',
       examples: ['Radical(360)  // 30'],
-      evaluate: ([n], { engine: ce }) => {
+      evaluate: floatResultIfFloatOperand(([n], { engine: ce }) => {
         const k = toBigint(n);
         if (k === null) return undefined;
         const m = k < 0n ? -k : k;
@@ -668,7 +672,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         for (const p of bigPrimeFactors(m, ce._deadlineFrame).keys())
           product *= p;
         return ce.number(product);
-      },
+      }),
     },
 
     PowerMod: {
@@ -693,7 +697,13 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       // All three operands are evaluated, and nothing else is read of them.
       evaluatesOperands: true,
       evaluate: (ops, { engine: ce }) => {
-        const [aOp, bOp, mOp] = ops.map((x) => x.evaluate());
+        const evaluated = ops.map((x) => x.evaluate());
+        const [aOp, bOp, mOp] = evaluated;
+        // The result is a float when an evaluated operand is a float. The
+        // held operands are not used for that test: a symbol whose value is
+        // `2.0` is a float only once it is evaluated.
+        const result = (x: bigint | number) =>
+          floatNumbersIfFloatOperand(evaluated, ce.number(x));
         if (bOp.isInteger !== true) {
           // The signature admits a rational exponent; `toBigint` would round it.
           const exponent = asRational(bOp);
@@ -708,7 +718,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
             m,
             ce._deadlineFrame
           );
-          return root === undefined ? undefined : ce.number(root);
+          return root === undefined ? undefined : result(root);
         }
         // `toBigint` rounds a non-integer, so integrality is checked first.
         if (aOp.isInteger === false || mOp.isInteger === false)
@@ -718,14 +728,14 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         const m = toBigint(mOp);
         if (a === null || b === null || m === null) return undefined;
         if (m <= 0n) return undefined; // modulus must be positive
-        if (m === 1n) return ce.number(0);
-        if (b >= 0n) return ce.number(modPow(a, b, m));
+        if (m === 1n) return result(0);
+        if (b >= 0n) return result(modPow(a, b, m));
         // Negative exponent: invert `a` modulo `m`, then raise to `-b`.
         const base = ((a % m) + m) % m;
         const [g, s] = extGcd(base, m);
         if (g !== 1n) return undefined; // inverse does not exist
         const inv = ((s % m) + m) % m;
-        return ce.number(modPow(inv, -b, m));
+        return result(modPow(inv, -b, m));
       },
     },
 
@@ -751,7 +761,8 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       // All three operands are evaluated, and nothing else is read of them.
       evaluatesOperands: true,
       evaluate: (ops, { engine: ce }) => {
-        const [aOp, sOp, mOp] = ops.map((x) => x.evaluate());
+        const evaluated = ops.map((x) => x.evaluate());
+        const [aOp, sOp, mOp] = evaluated;
         const exponent = asRational(sOp);
         const a = aOp.isInteger === true ? toBigint(aOp) : null;
         const m = mOp.isInteger === true ? toBigint(mOp) : null;
@@ -765,9 +776,14 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
           ce._deadlineFrame
         );
         if (roots === undefined) return undefined;
-        return ce.function(
-          'List',
-          roots.map((x) => ce.number(x))
+        // A float among the evaluated operands makes every root a float
+        // (see `PowerMod`).
+        return floatNumbersIfFloatOperand(
+          evaluated,
+          ce.function(
+            'List',
+            roots.map((x) => ce.number(x))
+          )
         );
       },
     },
@@ -777,7 +793,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         'Return the modular multiplicative inverse of `a` modulo `m`: the integer `x` with `a·x ≡ 1 (mod m)`. The sign of `x` follows the sign of `m` (the same floored-division convention as `Mod`). Undefined when `a` and `m` are not coprime.',
       signature: '(integer, integer) -> integer',
       examples: ['ModularInverse(3, 7)  // 5', 'ModularInverse(3, -7)  // -2'],
-      evaluate: ([aOp, mOp], { engine: ce }) => {
+      evaluate: floatResultIfFloatOperand(([aOp, mOp], { engine: ce }) => {
         const a = toBigint(aOp);
         const m = toBigint(mOp);
         if (a === null || m === null || m === 0n) return undefined; // modulus must be nonzero
@@ -785,7 +801,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         const inv = modularInverse(a, m);
         if (inv === null) return undefined; // inverse does not exist
         return ce.number(inv);
-      },
+      }),
     },
 
     ExtendedGCD: {
@@ -801,7 +817,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         if (a !== true) return a;
         return canEnumerateOperand(expr.ops[1], (g) => toBigint(g) !== null);
       },
-      evaluate: ([aOp, bOp], { engine: ce }) => {
+      evaluate: floatResultIfFloatOperand(([aOp, bOp], { engine: ce }) => {
         const a = toBigint(aOp);
         const b = toBigint(bOp);
         if (a === null || b === null) return undefined;
@@ -812,7 +828,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
           y = -y;
         }
         return ce._fn('Tuple', [ce.number(g), ce.number(x), ce.number(y)]);
-      },
+      }),
     },
 
     IntegerSqrt: {
@@ -820,11 +836,11 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         'Return the integer square root of `n`, i.e. the largest integer `m` such that `m² ≤ n`. Undefined for negative `n`.',
       signature: '(integer) -> integer',
       examples: ['IntegerSqrt(17)  // 4'],
-      evaluate: ([n], { engine: ce }) => {
+      evaluate: floatResultIfFloatOperand(([n], { engine: ce }) => {
         const k = toBigint(n);
         if (k === null || k < 0n) return undefined;
         return ce.number(bigintSqrt(k));
-      },
+      }),
     },
 
     ChineseRemainder: {
@@ -848,7 +864,8 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         if (residues.includes(null) || moduli.includes(null)) return undefined;
         const x = chineseRemainder(residues as bigint[], moduli as bigint[]);
         if (x === null) return undefined;
-        return ce.number(x);
+        // A float element (`2.0`) makes the result a float.
+        return floatIfFloatOperand([...residueOps, ...moduliOps], ce.number(x));
       },
     },
 
@@ -857,11 +874,11 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         'Return the Carmichael function λ(n) (the reduced totient): the smallest positive integer `m` such that `a^m ≡ 1 (mod n)` for every `a` coprime to `n`. Defined for `n ≥ 1`.',
       signature: '(integer) -> integer',
       examples: ['CarmichaelLambda(15)  // 4'],
-      evaluate: ([n], { engine: ce }) => {
+      evaluate: floatResultIfFloatOperand(([n], { engine: ce }) => {
         const k = toBigint(n);
         if (k === null || k < 1n) return undefined;
         return ce.number(carmichaelLambda(k, ce._deadlineFrame));
-      },
+      }),
     },
 
     LucasL: {
@@ -869,7 +886,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         'Return the nth Lucas number: `LucasL(0)` is 2, `LucasL(1)` is 1, and `LucasL(n) = LucasL(n-1) + LucasL(n-2)`. Negative indices follow `LucasL(-n) = (-1)^n · LucasL(n)`.',
       signature: '(integer) -> integer',
       examples: ['LucasL(10)  // 123'],
-      evaluate: ([n], { engine: ce }) => {
+      evaluate: floatResultIfFloatOperand(([n], { engine: ce }) => {
         const k = toBigint(n);
         if (k === null) return undefined;
         const neg = k < 0n;
@@ -889,7 +906,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
           [a, b] = [b, a + b];
         }
         return ce.number(neg && kk % 2n === 1n ? -a : a);
-      },
+      }),
     },
 
     Lucas: {
@@ -907,7 +924,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         'Return the nth Catalan number `C(n) = (2n)! / ((n+1)! · n!)`: 1, 1, 2, 5, 14, 42, … Defined for `n ≥ 0`.',
       signature: '(integer) -> integer',
       examples: ['CatalanNumber(5)  // 42'],
-      evaluate: ([n], { engine: ce }) => {
+      evaluate: floatResultIfFloatOperand(([n], { engine: ce }) => {
         const k = toBigint(n);
         if (k === null || k < 0n) return undefined;
         // C(n) ~ 4^n / n^{3/2}, so the result has ~n·log10(4) digits: for
@@ -923,7 +940,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
           c = (c * 2n * (2n * i + 1n)) / (i + 2n);
         }
         return ce.number(c);
-      },
+      }),
     },
 
     IsPerfectPower: {
@@ -990,7 +1007,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         }
         return undefined;
       },
-      evaluate: ([xOp, nOp], { engine: ce }) => {
+      evaluate: floatResultIfFloatOperand(([xOp, nOp], { engine: ce }) => {
         if (xOp === undefined) return undefined;
         const maxTerms =
           nOp === undefined ? undefined : Number(toBigint(nOp) ?? 0n);
@@ -1046,7 +1063,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
           'List',
           terms.map((t) => ce.number(t))
         );
-      },
+      }),
     },
 
     FromContinuedFraction: {
@@ -1054,7 +1071,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         'Reconstruct the (rational) value of a continued fraction given its list of integer terms `[a0, a1, …]`.',
       signature: '(collection<any>) -> number',
       examples: ['FromContinuedFraction([2, 3, 1, 4])  // 43/19'],
-      evaluate: ([listOp], { engine: ce }) => {
+      evaluate: ([listOp], { engine: ce, numericApproximation }) => {
         // `toBigint` ROUNDS a non-integer (2.5 → 3), so gate each term on
         // exact integrality: a non-integer term declines instead of silently
         // reconstructing from the rounded value.
@@ -1069,7 +1086,10 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         for (let i = terms.length - 1; i >= 0; i--)
           [p, q] = [terms[i]! * p + q, p];
         if (q === 0n) return undefined;
-        return ce.number(p).div(ce.number(q));
+        // An exact rational under `evaluate`, a float under `.N()` or when
+        // a term is a float (`2.0`).
+        const r = ce.number([p, q]);
+        return floatIfFloatOperand(termOps, numericApproximation ? r.N() : r);
       },
     },
 
@@ -1109,31 +1129,33 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         }
         return true;
       },
-      evaluate: ([nOp, baseOp, lenOp], { engine: ce }) => {
-        const k = toBigint(nOp);
-        if (k === null) return undefined;
-        const base = baseOp === undefined ? 10n : toBigint(baseOp);
-        if (base === null || base < 2n) return undefined;
+      evaluate: floatResultIfFloatOperand(
+        ([nOp, baseOp, lenOp], { engine: ce }) => {
+          const k = toBigint(nOp);
+          if (k === null) return undefined;
+          const base = baseOp === undefined ? 10n : toBigint(baseOp);
+          if (base === null || base < 2n) return undefined;
 
-        const m = k < 0n ? -k : k;
-        // Pre-check: stay symbolic rather than materialize a pathologically
-        // large digit list (see MAX_DIGIT_ITERATION_DIGITS).
-        if (approximateDigitCount(m, base) > MAX_DIGIT_ITERATION_DIGITS)
-          return undefined;
-        const digits = bigintDigitsLSB(m, base, ce._deadline).reverse();
+          const m = k < 0n ? -k : k;
+          // Pre-check: stay symbolic rather than materialize a pathologically
+          // large digit list (see MAX_DIGIT_ITERATION_DIGITS).
+          if (approximateDigitCount(m, base) > MAX_DIGIT_ITERATION_DIGITS)
+            return undefined;
+          const digits = bigintDigitsLSB(m, base, ce._deadline).reverse();
 
-        if (lenOp !== undefined) {
-          const len = toBigint(lenOp);
-          if (len === null || len < 0n) return undefined;
-          const L = Number(len);
-          while (digits.length < L) digits.unshift(0n);
-          if (digits.length > L) digits.splice(0, digits.length - L);
+          if (lenOp !== undefined) {
+            const len = toBigint(lenOp);
+            if (len === null || len < 0n) return undefined;
+            const L = Number(len);
+            while (digits.length < L) digits.unshift(0n);
+            if (digits.length > L) digits.splice(0, digits.length - L);
+          }
+          return ce.function(
+            'List',
+            digits.map((d) => ce.number(d))
+          );
         }
-        return ce.function(
-          'List',
-          digits.map((d) => ce.number(d))
-        );
-      },
+      ),
     },
 
     DigitCount: {
@@ -1146,33 +1168,35 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
           context.engine._typeResolver
         ),
       examples: ['DigitCount(122, 10, 2)  // 2'],
-      evaluate: ([nOp, baseOp, digitOp], { engine: ce }) => {
-        const k = toBigint(nOp);
-        if (k === null) return undefined;
-        const base = baseOp === undefined ? 10n : toBigint(baseOp);
-        if (base === null || base < 2n) return undefined;
+      evaluate: floatResultIfFloatOperand(
+        ([nOp, baseOp, digitOp], { engine: ce }) => {
+          const k = toBigint(nOp);
+          if (k === null) return undefined;
+          const base = baseOp === undefined ? 10n : toBigint(baseOp);
+          if (base === null || base < 2n) return undefined;
 
-        const m = k < 0n ? -k : k;
-        // Pre-check: stay symbolic rather than iterate a pathologically
-        // large number of digits (see MAX_DIGIT_ITERATION_DIGITS).
-        if (approximateDigitCount(m, base) > MAX_DIGIT_ITERATION_DIGITS)
-          return undefined;
-        const counts = new Map<bigint, number>();
-        for (const d of bigintDigitsLSB(m, base, ce._deadline))
-          counts.set(d, (counts.get(d) ?? 0) + 1);
+          const m = k < 0n ? -k : k;
+          // Pre-check: stay symbolic rather than iterate a pathologically
+          // large number of digits (see MAX_DIGIT_ITERATION_DIGITS).
+          if (approximateDigitCount(m, base) > MAX_DIGIT_ITERATION_DIGITS)
+            return undefined;
+          const counts = new Map<bigint, number>();
+          for (const d of bigintDigitsLSB(m, base, ce._deadline))
+            counts.set(d, (counts.get(d) ?? 0) + 1);
 
-        if (digitOp !== undefined) {
-          const d = toBigint(digitOp);
-          if (d === null || d < 0n || d >= base) return undefined;
-          return ce.number(counts.get(d) ?? 0);
+          if (digitOp !== undefined) {
+            const d = toBigint(digitOp);
+            if (d === null || d < 0n || d >= base) return undefined;
+            return ce.number(counts.get(d) ?? 0);
+          }
+          // List form: counts of 1..base-1, then the count of 0 last.
+          const list: ReturnType<typeof ce.number>[] = [];
+          for (let d = 1n; d < base; d++)
+            list.push(ce.number(counts.get(d) ?? 0));
+          list.push(ce.number(counts.get(0n) ?? 0));
+          return ce.function('List', list);
         }
-        // List form: counts of 1..base-1, then the count of 0 last.
-        const list: ReturnType<typeof ce.number>[] = [];
-        for (let d = 1n; d < base; d++)
-          list.push(ce.number(counts.get(d) ?? 0));
-        list.push(ce.number(counts.get(0n) ?? 0));
-        return ce.function('List', list);
-      },
+      ),
     },
 
     RandomPrime: {
@@ -1181,7 +1205,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       // Draws from the ambient seeded stream: the `random` label.
       signature: '(integer, integer?) random -> integer',
       examples: ['RandomPrime(100)  // e.g. 47'],
-      evaluate: ([aOp, bOp], { engine: ce }) => {
+      evaluate: floatResultIfFloatOperand(([aOp, bOp], { engine: ce }) => {
         let lo: bigint | null;
         let hi: bigint | null;
         if (bOp === undefined) {
@@ -1208,7 +1232,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
           if (isPrimeBigint(p)) return ce.number(p);
         }
         return undefined;
-      },
+      }),
     },
 
     PrimePi: {
@@ -1216,7 +1240,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         'Return π(n), the prime-counting function: the number of primes less than or equal to `n`.',
       signature: '(real) -> integer',
       examples: ['PrimePi(10)  // 4'],
-      evaluate: ([n], { engine: ce }) => {
+      evaluate: floatResultIfFloatOperand(([n], { engine: ce }) => {
         const x = n?.re;
         if (x === undefined || !Number.isFinite(x)) return undefined;
         const bound = BigInt(Math.floor(x));
@@ -1238,7 +1262,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
           if (isPrimeBigint(k)) count++;
         }
         return ce.number(count);
-      },
+      }),
     },
 
     BernoulliB: {
@@ -1246,20 +1270,26 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         'Return the nth Bernoulli number Bₙ as an exact rational, using the convention B₁ = -1/2. Odd `n > 1` give 0.',
       signature: '(integer) -> rational',
       examples: ['BernoulliB(2)  // 1/6'],
-      evaluate: ([n], { engine: ce }) => {
-        const k = toBigint(n);
-        if (k === null || k < 0n) return undefined;
-        if (k === 0n) return ce.number(1);
-        if (k === 1n) return ce.number(-1).div(ce.number(2));
-        if (k % 2n === 1n) return ce.number(0);
-        // The recurrence is O(n²) rational steps on integers of about
-        // log₁₀(n!) digits: past the work estimate the value stays symbolic.
-        const N = Number(k);
-        if (exactRecurrenceTooLarge((N * N) / 2, log10Factorial(N)))
-          return undefined;
-        const [num, den] = bernoulliNumber(N, ce._deadline);
-        return den === 1n ? ce.number(num) : ce.number(num).div(ce.number(den));
-      },
+      evaluate: floatResultIfFloatOperand(
+        ([n], { engine: ce, numericApproximation }) => {
+          const k = toBigint(n);
+          if (k === null || k < 0n) return undefined;
+          if (k === 0n) return ce.number(1);
+          // An exact rational under `evaluate`, a float under `.N()`.
+          if (k === 1n)
+            return numericApproximation ? ce.number(-0.5) : ce.number([-1, 2]);
+          if (k % 2n === 1n) return ce.number(0);
+          // The recurrence is O(n²) rational steps on integers of about
+          // log₁₀(n!) digits: past the work estimate the value stays
+          // symbolic.
+          const N = Number(k);
+          if (exactRecurrenceTooLarge((N * N) / 2, log10Factorial(N)))
+            return undefined;
+          const [num, den] = bernoulliNumber(N, ce._deadline);
+          const r = ce.number([num, den]);
+          return numericApproximation ? r.N() : r;
+        }
+      ),
     },
 
     FromDigits: {
@@ -1280,7 +1310,8 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         if (base === null || base < 2n) return undefined;
         let result = 0n;
         for (const d of digits) result = result * base + d!;
-        return ce.number(result);
+        // A float digit or base (`2.0`) makes the result a float.
+        return floatIfFloatOperand([...digitOps, baseOp], ce.number(result));
       },
     },
 
@@ -1289,7 +1320,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         'Return the sum of the digits of `n` in the given `base` (default 10). The sign of `n` is ignored.',
       signature: '(integer, integer?) -> integer',
       examples: ['DigitSum(1234)  // 10'],
-      evaluate: ([nOp, baseOp], { engine: ce }) => {
+      evaluate: floatResultIfFloatOperand(([nOp, baseOp], { engine: ce }) => {
         const k = toBigint(nOp);
         if (k === null) return undefined;
         const base = baseOp === undefined ? 10n : toBigint(baseOp);
@@ -1302,7 +1333,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         if (approximateDigitCount(m, base) > MAX_DIGIT_ITERATION_DIGITS)
           return undefined;
         return ce.number(bigintDigitSum(m, base, ce._deadline));
-      },
+      }),
     },
 
     DivisorSigma: {
@@ -1310,7 +1341,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         'The divisor function σ_k(n) = Σ_{d | n} dᵏ over the positive divisors of `n`. σ₀ counts divisors, σ₁ sums them. The sign of `n` is ignored, as for `Divisors` and `PrimeOmega`; `DivisorSigma(k, 0)` is undefined.',
       signature: '(integer, integer) -> integer',
       examples: ['DivisorSigma(2, 6)  // 50'],
-      evaluate: ([kOp, nOp], { engine: ce }) => {
+      evaluate: floatResultIfFloatOperand(([kOp, nOp], { engine: ce }) => {
         const k = toBigint(kOp);
         const signed = toBigint(nOp);
         if (k === null || signed === null || k < 0n) return undefined;
@@ -1330,7 +1361,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
           }
         }
         return ce.number(result);
-      },
+      }),
     },
 
     JacobiSymbol: {
@@ -1338,13 +1369,13 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         'The Jacobi symbol (a/n) for an odd `n > 0`. Returns -1, 0, or 1. Undefined when `n` is even or non-positive.',
       signature: '(integer, integer) -> integer',
       examples: ['JacobiSymbol(5, 21)  // 1'],
-      evaluate: ([aOp, nOp], { engine: ce }) => {
+      evaluate: floatResultIfFloatOperand(([aOp, nOp], { engine: ce }) => {
         const a = toBigint(aOp);
         const n = toBigint(nOp);
         if (a === null || n === null) return undefined;
         if (n <= 0n || n % 2n === 0n) return undefined;
         return ce.number(jacobiSymbol(a, n));
-      },
+      }),
     },
 
     LegendreSymbol: {
@@ -1352,13 +1383,13 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         'The Legendre symbol (a/p) for an odd prime `p`. Returns -1, 0, or 1. Undefined when `p` is not an odd prime.',
       signature: '(integer, integer) -> integer',
       examples: ['LegendreSymbol(3, 7)  // -1'],
-      evaluate: ([aOp, pOp], { engine: ce }) => {
+      evaluate: floatResultIfFloatOperand(([aOp, pOp], { engine: ce }) => {
         const a = toBigint(aOp);
         const p = toBigint(pOp);
         if (a === null || p === null) return undefined;
         if (p <= 2n || p % 2n === 0n || !isPrimeBigint(p)) return undefined;
         return ce.number(jacobiSymbol(a, p));
-      },
+      }),
     },
 
     MultiplicativeOrder: {
@@ -1369,7 +1400,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         'MultiplicativeOrder(2, 7)  // 3',
         'MultiplicativeOrder(5, 7, [3, 11])  // 2',
       ],
-      evaluate: ([aOp, nOp, rOp], { engine: ce }) => {
+      evaluate: floatResultIfFloatOperand(([aOp, nOp, rOp], { engine: ce }) => {
         const a0 = toBigint(aOp);
         const n0 = toBigint(nOp);
         if (a0 === null || n0 === null || n0 === 0n) return undefined;
@@ -1410,7 +1441,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
           }
         }
         return ce.number(order);
-      },
+      }),
     },
 
     PrimitiveRoot: {
@@ -1418,7 +1449,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         'The smallest primitive root modulo `n` (a generator of the multiplicative group of integers mod `n`), or undefined if none exists (which happens unless `n` is 1, 2, 4, pᵏ, or 2pᵏ for an odd prime p). The sign of `n` is ignored, and `PrimitiveRoot(1)` is 0. Undefined for `n = 0`.',
       signature: '(integer) -> integer',
       examples: ['PrimitiveRoot(7)  // 3'],
-      evaluate: ([nOp], { engine: ce }) => {
+      evaluate: floatResultIfFloatOperand(([nOp], { engine: ce }) => {
         const n0 = toBigint(nOp);
         if (n0 === null || n0 === 0n) return undefined;
         // The unit group mod −n is the unit group mod n.
@@ -1448,7 +1479,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
             return ce.number(a);
         }
         return undefined;
-      },
+      }),
     },
 
     PrimitiveRootList: {
@@ -1459,7 +1490,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         'PrimitiveRootList(7)  // [3, 5]',
         'PrimitiveRootList(8)  // []',
       ],
-      evaluate: ([nOp], { engine: ce }) => {
+      evaluate: floatResultIfFloatOperand(([nOp], { engine: ce }) => {
         const n = nOp.isInteger === true ? toBigint(nOp) : null;
         if (n === null) return undefined;
         const roots = primitiveRootList(n, ce._deadlineFrame);
@@ -1468,7 +1499,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
           'List',
           roots.map((x) => ce.number(x))
         );
-      },
+      }),
     },
 
     RationalReconstruction: {
@@ -1476,14 +1507,18 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         "The rational `p/q` with `p ≡ a·q (mod m)` and `|p|, q ≤ ⌊√((m − 1)/2)⌋`, the unique such fraction in lowest terms when it exists (Wang's algorithm). Undefined for `m < 1` or when there is none.",
       signature: '(integer, integer) -> rational',
       examples: ['RationalReconstruction(6, 11)  // 1/2'],
-      evaluate: ([aOp, mOp], { engine: ce }) => {
-        const a = aOp.isInteger === true ? toBigint(aOp) : null;
-        const m = mOp.isInteger === true ? toBigint(mOp) : null;
-        if (a === null || m === null) return undefined;
-        const fraction = rationalReconstruction(a, m);
-        if (fraction === undefined) return undefined;
-        return ce.number([fraction[0], fraction[1]]);
-      },
+      evaluate: floatResultIfFloatOperand(
+        ([aOp, mOp], { engine: ce, numericApproximation }) => {
+          const a = aOp.isInteger === true ? toBigint(aOp) : null;
+          const m = mOp.isInteger === true ? toBigint(mOp) : null;
+          if (a === null || m === null) return undefined;
+          const fraction = rationalReconstruction(a, m);
+          if (fraction === undefined) return undefined;
+          // An exact rational under `evaluate`, a float under `.N()`.
+          const r = ce.number([fraction[0], fraction[1]]);
+          return numericApproximation ? r.N() : r;
+        }
+      ),
     },
 
     DirichletCharacter: {
@@ -1495,22 +1530,24 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         'DirichletCharacter(5, 2, 2)  // i',
         'DirichletCharacter(7, 3, 3)  // e^(2πi/3)',
       ],
-      evaluate: ([kOp, jOp, nOp], { engine: ce, numericApproximation }) => {
-        const index = dirichletCharacterIndex(kOp, jOp);
-        const n = toBigint(nOp);
-        if (index === undefined || n === null || nOp.isInteger !== true)
-          return undefined;
-        const [k, j] = index;
-        const value = dirichletCharacterValue(
-          ce,
-          dirichletCharacterExponent(
-            k,
-            j,
-            Number(((n % BigInt(k)) + BigInt(k)) % BigInt(k))
-          )
-        );
-        return numericApproximation ? value.N() : value;
-      },
+      evaluate: floatResultIfFloatOperand(
+        ([kOp, jOp, nOp], { engine: ce, numericApproximation }) => {
+          const index = dirichletCharacterIndex(kOp, jOp);
+          const n = toBigint(nOp);
+          if (index === undefined || n === null || nOp.isInteger !== true)
+            return undefined;
+          const [k, j] = index;
+          const value = dirichletCharacterValue(
+            ce,
+            dirichletCharacterExponent(
+              k,
+              j,
+              Number(((n % BigInt(k)) + BigInt(k)) % BigInt(k))
+            )
+          );
+          return numericApproximation ? value.N() : value;
+        }
+      ),
     },
 
     DirichletL: {
@@ -1560,7 +1597,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       // at runtime, because a symbolic operand reaches it undecided
       // (`toBigint` COERCES via rounding, so the gate must come first).
       signature: '(integer) -> integer',
-      evaluate: ([n], { engine: ce }) => {
+      evaluate: floatResultIfFloatOperand(([n], { engine: ce }) => {
         // Runtime integrality guard. The `integer` signature refuses a
         // provably non-integer argument, but a SYMBOLIC one is admitted and
         // arrives here undecided, and `toBigint` COERCES via rounding — so
@@ -1573,7 +1610,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         // `Totient(2n) = 2·Totient(n)` for even n ≥ 0 requires φ(0) = 0).
         if (k === 0n) return ce.number(0);
         return ce.number(eulerPhi(k < 0n ? -k : k, ce._deadlineFrame));
-      },
+      }),
     },
 
     // `EulerPhi` is the Wolfram Language name of `Totient`. It has the same
@@ -1592,35 +1629,37 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
     Sigma0: {
       description: 'Number of positive divisors of n.',
       signature: '(integer) -> integer',
-      evaluate: ([n], { engine: ce }) => {
+      evaluate: floatResultIfFloatOperand(([n], { engine: ce }) => {
         const k = toBigint(n);
         if (k === null || k < 1) return undefined;
         return ce.number(sigma0(k, ce._deadlineFrame));
-      },
+      }),
     },
 
     Sigma1: {
       description: 'Sum of positive divisors of n.',
       signature: '(integer) -> integer',
-      evaluate: ([n], { engine: ce }) => {
+      evaluate: floatResultIfFloatOperand(([n], { engine: ce }) => {
         const k = toBigint(n);
         if (k === null || k < 1) return undefined;
         return ce.number(sigma1(k, ce._deadlineFrame));
-      },
+      }),
     },
 
     SigmaMinus1: {
       description: 'Sum of reciprocals of positive divisors of n.',
       signature: '(integer) -> rational',
-      evaluate: ([n], { engine: ce, numericApproximation }) => {
-        const k = toBigint(n);
-        if (k === null || k < 1) return undefined;
-        // Σ 1/d over d | n is σ₁(n)/n: the divisors pair up as d ↔ n/d.
-        // Exactness contract: an exact rational under `evaluate`, a float
-        // only under `.N()`.
-        const r = ce.number([sigma1(k, ce._deadlineFrame), k]);
-        return numericApproximation ? r.N() : r;
-      },
+      evaluate: floatResultIfFloatOperand(
+        ([n], { engine: ce, numericApproximation }) => {
+          const k = toBigint(n);
+          if (k === null || k < 1) return undefined;
+          // Σ 1/d over d | n is σ₁(n)/n: the divisors pair up as d ↔ n/d.
+          // Exactness contract: an exact rational under `evaluate`, a float
+          // only under `.N()`.
+          const r = ce.number([sigma1(k, ce._deadlineFrame), k]);
+          return numericApproximation ? r.N() : r;
+        }
+      ),
     },
 
     IsPerfect: {
@@ -1642,7 +1681,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
       description:
         'Eulerian number A(n, m): number of permutations of {1..n} with exactly m ascents.',
       signature: '(integer, integer) -> integer',
-      evaluate: ([n, m], { engine: ce }) => {
+      evaluate: floatResultIfFloatOperand(([n, m], { engine: ce }) => {
         const nn = toBigint(n);
         const mm = toBigint(m);
         if (nn === null || mm === null || nn < 0n || mm < 0n) return undefined;
@@ -1685,14 +1724,14 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
           prev = cur;
         }
         return ce.number(prev[M] ?? 0n);
-      },
+      }),
     },
 
     Stirling: {
       description:
         'Stirling number of the second kind S(n, m): ways to partition n elements into m non-empty subsets.',
       signature: '(integer, integer) -> integer',
-      evaluate: ([n, m], { engine: ce }) => {
+      evaluate: floatResultIfFloatOperand(([n, m], { engine: ce }) => {
         const nn = toBigint(n);
         const mm = toBigint(m);
         if (nn === null || mm === null || nn < 0n || mm < 0n) return undefined;
@@ -1736,7 +1775,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
           prev = cur;
         }
         return ce.number(prev[M] ?? 0n);
-      },
+      }),
     },
 
     // Wolfram's name for `Stirling`. The canonical form rewrites it to
@@ -1757,7 +1796,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
         'Signed Stirling number of the first kind s(n, m): the coefficient of x^m in the falling factorial x(x−1)…(x−n+1). Its absolute value counts the permutations of n elements with exactly m disjoint cycles.',
       signature: '(integer, integer) -> integer',
       examples: ['StirlingS1(5, 2)  // -50'],
-      evaluate: ([n, m], { engine: ce }) => {
+      evaluate: floatResultIfFloatOperand(([n, m], { engine: ce }) => {
         const nn = toBigint(n);
         const mm = toBigint(m);
         if (nn === null || mm === null || nn < 0n || mm < 0n) return undefined;
@@ -1797,14 +1836,14 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
           prev = cur;
         }
         return ce.number(prev[M] ?? 0n);
-      },
+      }),
     },
 
     NPartition: {
       description:
         'Number of integer partitions of n, for n ≥ 0; it is 0 for n < 0.',
       signature: '(integer) -> integer',
-      evaluate: ([n], { engine: ce }) => {
+      evaluate: floatResultIfFloatOperand(([n], { engine: ce }) => {
         // `toBigint` rounds a non-integer, so the integrality test comes
         // first: without it a non-integer that reaches the handler would get
         // the value of the nearest integer (−0.5 would give p(0) = 1).
@@ -1843,7 +1882,7 @@ export const NUMBER_THEORY_LIBRARY: SymbolDefinitions[] = [
           P[m] = total;
         }
         return ce.number(P[N]);
-      },
+      }),
     },
 
     // `PartitionsP` is the Wolfram Language name of `NPartition`. It has the

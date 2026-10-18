@@ -16,6 +16,7 @@ import type { ConfigurationChangeListener } from '../common/configuration-change
 import type { StateEvent } from './engine-configuration-lifecycle.js';
 import type { DeadlineFrame } from '../common/interruptible.js';
 import type { MapAutoCompileStats } from './map-auto-compile-stats.js';
+import type { CacheStatsControl } from '../common/cache-stats.js';
 export type { MapAutoCompileStats } from './map-auto-compile-stats.js';
 import type {
   LatexDictionaryEntry,
@@ -1101,6 +1102,33 @@ export interface IComputeEngine {
    */
   readonly _mapAutoCompileStats: MapAutoCompileStats;
 
+  /** The statistics of the engine's memoization caches: for each cache
+   * class (the type, sign and effects caches of a function expression, the
+   * lazy-collection value cache, the stored value of a symbol, the element
+   * memo of a collection, the type-parse cache), how many reads were hits,
+   * and why each miss happened.
+   *
+   * Recording is off by default and costs one branch per cache read. Set
+   * `enabled` to `true` to start it:
+   *
+   * ```ts
+   * ce._cacheStats.reset();
+   * ce._cacheStats.enabled = true;
+   * ce.parse('\\sum_{n=1}^{10} n^2').evaluate();
+   * ce._cacheStats.enabled = false;
+   * console.log(ce._cacheStats.report());
+   * ```
+   *
+   * The counters are process-global, not per-engine: every engine returns
+   * the same object. Take the difference of two `snapshot()` results, or call
+   * `reset()` before the region to measure.
+   *
+   * Reachable at runtime with no stability promise, like the other
+   * `_`-prefixed members: the shape and the counter set may change.
+   * @internal
+   */
+  readonly _cacheStats: CacheStatsControl;
+
   /** Names defined by a library that was NOT one of the engine's standard
    * libraries, i.e. a `LibraryDefinition` object supplied by the caller to the
    * constructor's `libraries` option. Caller-supplied libraries are installed
@@ -1872,9 +1900,9 @@ export interface IComputeEngine {
    * exponent is at most `10^6` (also at machine precision, and also outside
    * the double range). When a part has a fraction, is a `number` past the
    * safe integers, or is a `BigDecimal` with a larger exponent (`1e2000000`),
-   * the result is a float. The same rule applies to a `Complex` given to
-   * `ce.number()` or `ce.box()`: `ce.number(new Complex(2, 3))` is the exact
-   * `2+3i`, `ce.number(new Complex(2.5, 3))` is a float.
+   * the result is a float. A `Complex` given to `ce.number()` or `ce.box()`
+   * does not follow this rule: it holds two doubles, so it is always a
+   * float (`ce.number(new Complex(2, 3))` is the float `2.0 + 3.0i`).
    *
    * ```js
    * ce.precision = 30;

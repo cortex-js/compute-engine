@@ -41,10 +41,13 @@ describe('LATEX SERIALIZING', () => {
     expect(latex({ num: 'NaN' })).toMatchInlineSnapshot(`\\operatorname{NaN}`);
     expect(latex({ num: 'Infinity' })).toMatchInlineSnapshot(`\\infty`);
 
-    // Repeating pattern
+    // A float with a repeating pattern is written with its digits: a
+    // repetend mark would parse as an exact rational
     expect(
       latex({ num: '3.123456785678567856785678567856785678' })
-    ).toMatchInlineSnapshot(`3.123\\,4\\overline{5678}`);
+    ).toMatchInlineSnapshot(
+      `3.123\\,456\\,785\\,678\\,567\\,856\\,785\\,678\\,567\\,856\\,785\\,678`
+    );
 
     expect(
       latex({ num: '0.1234567872368237462387623876' })

@@ -901,11 +901,21 @@ list of numbers, `0/0` with a float. In the lattice `nan` is a member of
 argument that `f(n: number)` accepts, an Epsil `function` answered an
 `incompatible-type` error where the same body declared through
 `ce.declare` answered `NaN`, and the literal `NaN` was refused at boxing on
-both routes. A user function (a function literal, a multi-clause
-definition, a function held as a value) now accepts a `NaN` argument at
-every parameter typed with a numeric type, at boxing
-(`acceptsNaNArgument`, `boxed-expression/validate.ts`) and when it is
-applied (`acceptNaNAtNumericParams`, `function-utils.ts`). The function is
+both routes. A user function with one clause (a function literal, a
+function held as a value, an Epsil `function` with one parameter list) now
+accepts a `NaN` argument at every parameter typed with a numeric type, at
+boxing (`acceptsNaNArgument`, `boxed-expression/validate.ts`) and when it is
+applied (`acceptNaNAtNumericParams`, `function-utils.ts`). A function with
+several clauses does NOT accept `NaN` at a numeric parameter (user decision
+2026-10-17, which amends this ruling): the clauses are selected by the value
+of the argument, and no clause is the correct one for `NaN` (`fib(NaN)` with
+the clauses `fib(0)`, `fib(1)` and `fib(n: integer)` would select `fib(0)`, or
+recurse on `NaN − 1` until the recursion limit). With the clauses
+`f(n: integer)` and `f(s: string)`, `f(NaN)` is
+`Error(incompatible-type, "integer | string", NaN)`, and `f(x)` with
+`x: number := NaN` is the same error with the type `number`; the one-clause
+`g(n: integer) = n + 1` gives `g(NaN) = NaN`. A clause whose parameter is
+the literal `NaN` (`f(NaN) = 0`) still matches `NaN`. The function is
 applied and its body computes with `NaN`: this is not a `propagate`
 policy, and the conservative floor of §4 (a user callable has unknown NaN
 behavior) is unchanged. `Indeterminate` is accepted in the same way. A
@@ -1251,7 +1261,11 @@ these channels is a bug against `COMPILATION-MODEL.md`, not a documented
 divergence — the review reported `compile(Heaviside)(NaN) → 1` (not yet
 reproduced here); if confirmed, that is exactly the "plausible but
 different" class the rule prohibits, and the compiled-lane conformance
-probes belong in the §7 sweep.
+probes belong in the §7 sweep. The exceptions that the user accepted are
+named in `docs/COMPILATION-MODEL.md`: the `Infinity` spelling of `~oo` on a
+real target, with the sign tests it changes (`Heaviside`, `Sign`, `Floor`,
+comparisons, a point divided by zero), and the `NaN` of a compiled fold over
+rows of unequal length.
 
 ## 7. Conformance snapshot and open questions
 

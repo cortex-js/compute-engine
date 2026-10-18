@@ -561,18 +561,28 @@ describe('MCP server compile tool', () => {
   });
 
   test('warns when a declaration replaces a library definition', async () => {
-    const [plain, constant] = await runServer([
+    const [plain, replaced, constant] = await runServer([
       callTool(1, 'compile', { source: 'x + 1', declarations: { x: 'real' } }),
       callTool(2, 'compile', {
+        source: 'e + x',
+        declarations: { e: 'real', x: 'real' },
+      }),
+      callTool(3, 'compile', {
         source: '\\pi+x',
         format: 'latex',
         declarations: { Pi: 'real' },
       }),
     ]);
     expect(payload(plain).warnings).toBeUndefined();
-    expect(payload(constant).warnings).toEqual([
-      '"Pi" is defined by the library; the declaration replaces that definition.',
+    expect(payload(replaced).warnings).toEqual([
+      '"e" is defined by the library; the declaration replaces that definition.',
     ]);
+    // A library constant whose name results carry in MathJSON (`Pi`) cannot
+    // be declared in the global scope, as on the host route.
+    expect(constant.result.isError).toBe(true);
+    expect(constant.result.content[0].text).toBe(
+      'Cannot declare "Pi" as "real": Cannot declare "Pi" in the global scope: it is a library constant (declare it in a nested scope)'
+    );
   });
 
   // A compile runs under a deadline, like `evaluate`: an antiderivative

@@ -2187,9 +2187,15 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
       expect(r!.error!.length).toBeGreaterThan(0);
       expect(typeof r!.run).toBe('function');
 
-      const out = r!.run!() as { lo: number; hi: number };
-      expect(out.lo).toBeCloseTo(expected, 10);
-      expect(out.hi).toBeCloseTo(expected, 10);
+      // A present number is the interval result of a point, as a computed
+      // number of the compiled code is.
+      const out = r!.run!() as {
+        kind: string;
+        value: { lo: number; hi: number };
+      };
+      expect(out.kind).toBe('interval');
+      expect(out.value.lo).toBeCloseTo(expected, 10);
+      expect(out.value.hi).toBeCloseTo(expected, 10);
     });
 
     it('the fallback run honors interval-shaped inputs (collapses to midpoint)', () => {
@@ -2199,14 +2205,12 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
       });
       expect(r.success).toBe(false);
       // A point interval and a bare number produce the same degenerate result.
-      const viaInterval = r.run!({ x: { lo: 0.5, hi: 0.5 } }) as {
-        lo: number;
-        hi: number;
-      };
-      const viaNumber = r.run!({ x: 0.5 }) as { lo: number; hi: number };
-      expect(viaInterval.lo).toBeCloseTo(expected, 10);
-      expect(viaInterval.hi).toBeCloseTo(expected, 10);
-      expect(viaNumber.lo).toBeCloseTo(expected, 10);
+      type Result = { value: { lo: number; hi: number } };
+      const viaInterval = r.run!({ x: { lo: 0.5, hi: 0.5 } }) as Result;
+      const viaNumber = r.run!({ x: 0.5 }) as Result;
+      expect(viaInterval.value.lo).toBeCloseTo(expected, 10);
+      expect(viaInterval.value.hi).toBeCloseTo(expected, 10);
+      expect(viaNumber.value.lo).toBeCloseTo(expected, 10);
     });
   });
 
@@ -5785,9 +5789,12 @@ describe('the expression-only GPU routes decline statement bodies', () => {
     ).toThrow(
       /Could not compile with `compileFunction\(\)`: this route emits a single WGSL EXPRESSION, but the body is an assignment/
     );
-    // Assignment: declined on WGSL, multi-line branch — the same hole at its
-    // own last line (`Block(s ≔ x; t ≔ s)` emitted `… return t = s;\n}`).
-    expect(() =>
+    // Assignment: ACCEPTED on WGSL in the multi-line branch. The block hook
+    // emits a last assignment as the statement followed by `return <name>;`,
+    // so `Block(s ≔ x; t ≔ s)` gives a function that returns `t`, as
+    // `compile()` does for the same body. (It was declined before, when the
+    // hook emitted `… return t = s;\n}`.)
+    expect(
       wgsl.compileFunction(
         engineWithX().box([
           'Block',
@@ -5798,8 +5805,48 @@ describe('the expression-only GPU routes decline statement bodies', () => {
         'float',
         [['x', 'float']]
       )
-    ).toThrow(
-      /Could not compile with `compileFunction\(\)`: this route emits a single WGSL EXPRESSION, but the body is an assignment/
+    ).toBe(
+      'fn f(x: f32) -> f32 {\n  var t: f32;\n  s = x;\n  t = s;\n  return t;\n}'
+    );
+  });
+
+  it('WGSL compileFunction() declines an assignment to a parameter', () => {
+    // A WGSL function parameter is an immutable value, so `x = x + 1.0;` in
+    // `fn f(x: f32)` is not valid source.
+    for (const body of [
+      ['Block', ['Assign', 'x', ['Add', 'x', 1]], ['Multiply', 2, 'x']],
+      ['Block', ['Assign', 'x', ['Add', 'x', 1]], ['Assign', 't', 'x']],
+    ] as MathJsonExpression[])
+      expect(() =>
+        new WGSLTarget().compileFunction(
+          engineWithX().box(body),
+          'f',
+          'float',
+          [['x', 'float']]
+        )
+      ).toThrow(/the body assigns the parameter "x"/);
+  });
+
+  it('WGSL compile() declines a user function that assigns its parameter', () => {
+    // The shader `userFunctions` route emits `h` as its own declaration,
+    // `fn _fn_h(x: f32)`, whose body assigned the immutable parameter
+    // (`x = x + 1.0;`). GLSL passes a parameter as a writable copy, so it
+    // keeps the definition.
+    const engine = new ComputeEngine();
+    engine.declare('h', '(real) -> real');
+    engine.assign(
+      'h',
+      engine.box([
+        'Function',
+        ['Block', ['Assign', 'x', ['Add', 'x', 1]], 'x'],
+        'x',
+      ])
+    );
+    expect(() => new WGSLTarget().compile(engine.parse('h(u)'))).toThrow(
+      /Could not compile `_fn_h`: the body assigns the parameter "x"/
+    );
+    expect(new GLSLTarget().compile(engine.parse('h(u)')).preamble).toContain(
+      'x = x + 1.0;'
     );
   });
 
@@ -6006,9 +6053,12 @@ describe('the expression-only Python route declines statement bodies', () => {
       ).toThrow(
         /Could not compile with `compileFunction\(\)`: the body's value statement is an assignment, and a Python statement cannot be returned/
       );
-    // Multi-line branch, same hole at its own last line: `Block(s ≔ x; t ≔ s)`
-    // emitted `def f(x):\n    s = x\n    return t = s\n`.
-    expect(() =>
+    // Multi-line branch: ACCEPTED. The block hook emits a last assignment as
+    // the statement followed by `return <name>`, so `Block(s ≔ x; t ≔ s)`
+    // gives a function that returns `t`, as `compile()` does for the same
+    // body. (It was declined before, when the hook emitted
+    // `def f(x):\n    s = x\n    return t = s\n`.)
+    expect(
       python.compileFunction(
         engineWithX().box([
           'Block',
@@ -6018,20 +6068,54 @@ describe('the expression-only Python route declines statement bodies', () => {
         'f',
         ['x']
       )
-    ).toThrow(
-      /Could not compile with `compileFunction\(\)`: the body's value statement is an assignment/
-    );
-    // A declaration value statement: emitted `def f(x):\n    return \n` (root,
-    // initializer dropped) and `def f(x):\n    return return s = x\n` (wrapped).
+    ).toBe('def f(x):\n    s = x\n    t = s\n    return t\n');
+    // A last statement the hook cannot return stays declined: a nested
+    // block, and a declaration without an initializer (whose value is
+    // `Nothing`).
     for (const body of [
-      DECLARE_ONLY,
-      ['Block', DECLARE_ONLY] as MathJsonExpression,
-    ])
+      ['Block', ['Assign', 's', 'x'], ['Block', ['Assign', 't', 's']]],
+      ['Block', ['Assign', 's', 'x'], ['Declare', 't', 'number']],
+    ] as MathJsonExpression[])
       expect(() =>
         python.compileFunction(engineWithX().box(body), 'f', ['x'])
       ).toThrow(
-        /Could not compile with `compileFunction\(\)`: the body's value statement is a declaration \(which this target emits as nothing at all\)/
+        /Could not compile with `compileFunction\(\)`: the body's value statement is/
       );
+    // A ROOT declaration: emitted `def f(x):\n    return \n` (initializer
+    // dropped). Still declined.
+    expect(() =>
+      python.compileFunction(engineWithX().box(DECLARE_ONLY), 'f', ['x'])
+    ).toThrow(
+      /Could not compile with `compileFunction\(\)`: the body's value statement is a declaration \(which this target emits as nothing at all\)/
+    );
+    // A declaration with an initializer as the last statement of a block: the
+    // declaration makes `s` a local of the block, so the block is not
+    // unwrapped, and the block hook emits the assignment followed by
+    // `return s` (it emitted `return return s = x` before). Accepted.
+    expect(
+      python.compileFunction(
+        engineWithX().box(['Block', DECLARE_ONLY] as MathJsonExpression),
+        'f',
+        ['x']
+      )
+    ).toBe('def f(x):\n    s = x\n    return s\n');
+    // A last assignment whose value is a block: the emission ends with
+    // `return t`, but the line before it is the `return` of the inner block
+    // (`t = u = s`, `return 2 * u`, `return t`), so it is not the assignment
+    // `t = …` that the `return t` must follow. Declined.
+    expect(() =>
+      python.compileFunction(
+        engineWithX().box([
+          'Block',
+          ['Assign', 's', 'x'],
+          ['Assign', 't', ['Block', ['Assign', 'u', 's'], ['Multiply', 'u', 2]]],
+        ]),
+        'f',
+        ['x']
+      )
+    ).toThrow(
+      /Could not compile with `compileFunction\(\)`: the body's value statement is an assignment/
+    );
     // The message names the caller-side fix, and that fix is what works.
     expect(() =>
       python.compileFunction(engineWithX().box(ASSIGN_ONLY), 'f', ['x'])

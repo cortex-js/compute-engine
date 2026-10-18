@@ -530,9 +530,14 @@ export function canonicalInvisibleOperator(
       // multiplication in the scalar case and scaling in the collection
       // case, never a silent `Tuple`.
       (typeof t.type !== 'string' && t.type.kind === 'broadcastable') ||
-      // Matrix-typed symbols (`M P` → matrix product) and function-typed
-      // symbols (`2f`, `f x` → scaled/product) are value-like operands:
-      // juxtaposition is multiplication, not a silent `Tuple`.
+      // Matrix-typed symbols (`M P` → matrix product) are value-like
+      // operands: juxtaposition is multiplication, not a silent `Tuple`.
+      // A function-typed operand (`f` in `2f` or `f y`, when `f` is a
+      // function) also takes the product route, but it is not a factor of
+      // a valid product: the product branch below builds it with the
+      // signature check of `Multiply`, which reports the `incompatible-type`
+      // error that `2\times f` and `f\times y` report. A juxtaposition that
+      // is an application (`f(x)`, `\sin x`) never gets here.
       t.matches(MATRIX_TYPE) ||
       t.matches(FUNCTION_TYPE) ||
       // List/vector-typed operands (e.g. `2v` with `v: vector<3>`, or a
@@ -589,6 +594,23 @@ export function canonicalInvisibleOperator(
     // readable and keeps this function free of arithmetic folding; the
     // product IS still fully canonicalized — `1(2+3)` reduces to `5`.
     //
+    // Exception: a product with a function-typed operand (`2f`, `f y`, when
+    // `f` is a function) is built with `ce.function()`, which checks the
+    // operands against the `(number*) -> number` signature of `Multiply`.
+    // The function-typed operand then becomes an `incompatible-type` error,
+    // the same result as for the explicit operator (`f\times y`). The
+    // juxtaposition and the explicit operator are two spellings of the same
+    // product, so they must give the same result. On the partial-form route
+    // (`bindsOperand`), the product stays raw and its caller checks it when
+    // it canonicalizes it.
+    if (
+      !bindsOperand &&
+      ops.some((x) => {
+        const t = typeIgnoringAbsence(x);
+        return t.type !== 'never' && t.matches(FUNCTION_TYPE);
+      })
+    )
+      return ce.function('Multiply', ops);
     return ce._fn('Multiply', ops, opForm);
   }
 

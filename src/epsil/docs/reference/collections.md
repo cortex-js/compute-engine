@@ -553,7 +553,7 @@ dictionaryFrom([("a", 1), ("b", 2)])
 
 ### differences
 
-MathJSON `Differences` · `(collection<any>) -> indexed_collection`
+MathJSON `Differences` · `(indexed_collection<any>) -> indexed_collection`
 
 Return the successive differences of a collection: a collection whose k-th element is `x(k+1) − xk`, of length one less than the input.
 

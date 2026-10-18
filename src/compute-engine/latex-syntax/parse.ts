@@ -3009,6 +3009,9 @@ export class _Parser implements Parser {
           continue;
         }
 
+        const barError = this.parseSetBuilderBar(def, start);
+        if (barError !== null) return barError;
+
         if (
           !this.canSkipMatchfixReparsing(lookupToken, boundary, sameTrigger)
         ) {
@@ -3042,6 +3045,41 @@ export class _Parser implements Parser {
     // No def matched: the `this.index = start` rewind auto-prunes any
     // diagnostics the speculative bodies emitted (see `set index`).
     this.index = start;
+    return null;
+  }
+
+  /**
+   * Called when the body of the set braces `\{…\}` (the `Set` matchfix
+   * `def`, opened at token `start`) stops before the closing brace. If the
+   * body stops at a bar (`|` or `\vert`) and the expression after the bar
+   * reaches the closing brace, as in `\{x | x \ne 0\}`, the bar is used as
+   * the set-builder separator. The bar is not read as a separator, because
+   * it is also the absolute-value delimiter (`\{2|x|, 3\}`). Instead, return
+   * one `expected-set-builder-separator` error over the whole set, with the
+   * detail `\mid`: the separator to write is `\mid` (or `:`). Otherwise,
+   * return `null` with the parser at the same position, and the caller
+   * continues as if this function was not called.
+   *
+   * The body does not stop at a bar that opens or closes an absolute value
+   * (`\{2|x|, 3\}`): the enclosure parse reads that bar. A body stops at a
+   * bar when no closing bar follows it.
+   */
+  private parseSetBuilderBar(
+    def: IndexedMatchfixEntry,
+    start: number
+  ): MathJsonExpression | null {
+    if (def.name !== 'Set') return null;
+    if (this.peek !== '|' && this.peek !== '\\vert') return null;
+    const barIndex = this.index;
+    this.nextToken();
+    this.parseExpression();
+    this.skipSpace();
+    if (this.matchBoundary())
+      return this.error(
+        ['expected-set-builder-separator', { str: '\\mid' }],
+        start
+      );
+    this.index = barIndex;
     return null;
   }
 

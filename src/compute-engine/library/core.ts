@@ -142,6 +142,7 @@ import { BLOCK_DEFINITION } from './control-structures.js';
 // BoxedDictionary will be dynamically imported to avoid circular dependency
 import type {
   IComputeEngine as ComputeEngine,
+  BoxedDefinition,
   BoxedOperatorDefinition,
   BoxedValueDefinition,
   Expression,
@@ -296,6 +297,7 @@ import {
   journalCheckpointMapEntry,
   journalCheckpointField,
 } from '../checkpoint-journal.js';
+import { noteScratchBinding, scratchRootOfBinding } from '../scratch-scopes.js';
 import {
   journalDefinitionRecord,
   widenAssignedType,
@@ -390,6 +392,100 @@ function absenceMarkerBindingError(
 ): Expression | undefined {
   return name !== undefined && ABSENCE_MARKERS.has(name)
     ? ce.error(['absence-marker-binding', name])
+    : undefined;
+}
+
+/**
+ * Make `local`, the binding that a block created for one of its locals when
+ * its run started (`createBlockLocals`, `function-utils.ts`), the binding of
+ * `name` in the block scope (`bindings`), with the definition that the
+ * `Declare` statement of that local has just made (`declared`).
+ *
+ * The `Declare` statement declares the name as for a binding of a previous
+ * run, so the new definition is the same as without `local`: a value
+ * definition or an operator definition, with the declared type and constant
+ * flag. But a closure created in the block before the statement ran
+ * captured `local` (`captureNestedLocals`, `function-utils.ts`). So `local`
+ * takes the definition half of `declared` and replaces `declared` in the
+ * scope: there is one binding record, and a read or a write through the
+ * closure reaches the same binding as a read or a write in the block. This
+ * includes an assignment that replaces the half (`k = (x) => 2 * x` after
+ * `let k = 1` makes the value binding an operator binding): it changes the
+ * one record, which the closure holds. Then `local` is no longer
+ * uninitialized, and a read of it is no longer a `read-before-declaration`
+ * error.
+ *
+ * When `declared` was declared under a scratch scope, `local` is recorded as
+ * a scratch binding too (`noteScratchBinding`), as the declaration recorded
+ * `declared`. Every write is journaled for `checkpoint()`/`restore()`.
+ */
+function initializeBlockLocal(
+  ce: ComputeEngine,
+  bindings: Map<string, BoxedDefinition>,
+  name: string,
+  local: BoxedDefinition,
+  declared: BoxedDefinition
+): void {
+  const target = local as {
+    value?: BoxedValueDefinition;
+    operator?: BoxedOperatorDefinition;
+    _uninitialized?: boolean;
+  };
+  const before = { value: target.value, operator: target.operator };
+  ce._checkpointWindow?.record(
+    target,
+    'value',
+    () => {
+      delete target.value;
+      delete target.operator;
+      if (before.value !== undefined) target.value = before.value;
+      if (before.operator !== undefined) target.operator = before.operator;
+    },
+    'declare'
+  );
+  delete target.value;
+  delete target.operator;
+  if (isValueDef(declared)) target.value = declared.value;
+  else target.operator = declared.operator;
+  journalCheckpointField(
+    ce,
+    target,
+    '_uninitialized',
+    target._uninitialized,
+    'declare'
+  );
+  target._uninitialized = false;
+  journalCheckpointMapEntry(ce, bindings, name, name, 'declare');
+  bindings.set(name, local);
+  const scratchRoot = scratchRootOfBinding(ce, declared);
+  if (scratchRoot !== undefined) noteScratchBinding(scratchRoot, [local]);
+}
+
+/**
+ * When the binding that an assignment to `name` writes (the binding that
+ * `name` resolves to in the current scope chain) is a block local whose
+ * `let` or `const` has not run yet in this run of the block, the
+ * `read-before-declaration` error value of that write. Otherwise
+ * `undefined`.
+ *
+ * A block creates the bindings of its locals when its run starts
+ * (`createBlockLocals`, `function-utils.ts`), so in
+ * `do { k = 5; let k = 2 }` the name `k` of the assignment resolves to the
+ * local of the block, not to a `k` of an enclosing scope. Storing 5 in the
+ * local would be lost when the `let` runs. In JavaScript this write is an
+ * error (the temporal dead zone), as a read is, and it is the same error
+ * here.
+ */
+function writeBeforeDeclarationError(
+  ce: ComputeEngine,
+  name: string | undefined
+): Expression | undefined {
+  if (name === undefined) return undefined;
+  const binding = ce.lookupDefinition(name) as
+    | { _uninitialized?: boolean }
+    | undefined;
+  return binding?._uninitialized === true
+    ? ce.error(['read-before-declaration', name])
     : undefined;
 }
 
@@ -3889,7 +3985,12 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // `canonical` handler of its own (see `canonicalMultiply`).
         const y = canonicalInvisibleOperator(x, { engine });
         if (!y) return engine.Nothing;
-        if (isFunction(y, 'Multiply')) return canonicalMultiply(engine, y.ops);
+        // An invalid product (`2f` with `f` a function: its signature check
+        // made `f` an `incompatible-type` error) is returned as it is, as the
+        // explicit operator (`2\times f`) returns it: an invalid product is
+        // not folded or sorted.
+        if (isFunction(y, 'Multiply') && y.isValid)
+          return canonicalMultiply(engine, y.ops);
         return y;
       },
     },
@@ -5988,6 +6089,15 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           const refused = absenceMarkerBindingError(ce, name);
           if (refused !== undefined) return refused;
         }
+        // A write to a block local before its `let` or `const` has run in
+        // this run of the block is refused before the value is evaluated
+        // (`writeBeforeDeclarationError`). A sequence definition
+        // (`a_0 := 1`) writes no binding of the base name.
+        if (!isFunction(op1, 'Subscript'))
+          for (const name of boundNames) {
+            const refused = writeBeforeDeclarationError(ce, name);
+            if (refused !== undefined) return refused;
+          }
         //
         // Check for Subscript LHS (sequence definition)
         // e.g., Subscript(L, 0) := 1  OR  Subscript(a, n) := a_{n-1} + 1
@@ -6723,6 +6833,17 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           const boundHasValue = boundValue !== undefined;
           const currentScope = ce.context.lexicalScope;
           let existing = currentScope.bindings.get(symbolName);
+          // The binding that the block created for this local when its run
+          // started (`createBlockLocals`, `function-utils.ts`). It is
+          // replaced below like the binding of a previous run, and once the
+          // declaration succeeds it takes the new definition and is put
+          // back in the scope (`initializeBlockLocal`), because a closure
+          // created earlier in the run may hold it.
+          const uninitialized =
+            existing !== undefined &&
+            (existing as { _uninitialized?: boolean })._uninitialized === true
+              ? existing
+              : undefined;
           if (
             existing &&
             (existing as { _declaredByStatement?: boolean })
@@ -6768,8 +6889,29 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             !!existingValueDef &&
             existingValueDef.value.inferredType &&
             existingValueDef.value.value === undefined;
+          // A constant whose value is a function literal is not upgraded in
+          // place. The upgrade assigns the value, and assigning a function
+          // literal turns the binding into an operator definition, which has
+          // no value half to make constant: `g(1)` then
+          // `const g = (x) => 2 * x` threw "Cannot set properties of
+          // undefined". The auto-declared binding is removed and the fresh
+          // declaration below makes a constant value definition that holds
+          // the literal, as for a first declaration of the name.
+          const upgradesInPlace =
+            isAutoDeclareHere &&
+            !(isConstant && boundHasValue && isFunction(boundValue, 'Function'));
+          if (isAutoDeclareHere && !upgradesInPlace) {
+            journalCheckpointMapEntry(
+              ce,
+              currentScope.bindings,
+              symbolName,
+              symbolName,
+              'declare'
+            );
+            currentScope.bindings.delete(symbolName);
+          }
 
-          if (isAutoDeclareHere && existingValueDef) {
+          if (upgradesInPlace && existingValueDef) {
             // Checkpoint journal (funnel 5): this branch rewrites the record
             // in place — `holdUntil`, `_isConstant` and, when the declaration
             // is untyped, nothing that goes through a journaled setter. One
@@ -6863,6 +7005,15 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
                 created as { _declaredByStatement?: boolean }
               )._declaredByStatement = true;
           }
+          const declared = currentScope.bindings.get(symbolName);
+          if (uninitialized !== undefined && declared !== undefined)
+            initializeBlockLocal(
+              ce,
+              currentScope.bindings,
+              symbolName,
+              uninitialized,
+              declared
+            );
         };
 
         // Would declaring `symbolName` with `boundValue` be rejected by the

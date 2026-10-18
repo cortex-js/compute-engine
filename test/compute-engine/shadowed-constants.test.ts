@@ -1,11 +1,95 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { Expression } from '../../src/math-json/types.ts';
 
-// A user declaration can give the name of a library constant another value
-// (`ce.declare('Pi', { value: 3 })`). The code that recognizes π by its name
-// (the special values of the trigonometric functions, the angle of
-// `e^{iθ}`) must then read the value of the user binding, as `.N()` does.
-// Each case uses its own engine: the declaration stays in the scope.
+// A declaration in the global scope cannot shadow a library constant: it is
+// refused, as `ce.assign('Pi', 3)` is. Engine code builds results with the
+// library π, and the MathJSON of such a result is the name `"Pi"`. A global
+// user binding of `Pi` would read that name again with the user value.
+describe('A GLOBAL DECLARATION OF A LIBRARY CONSTANT', () => {
+  for (const name of [
+    'Pi',
+    'ExponentialE',
+    'GoldenRatio',
+    'EulerGamma',
+    'CatalanConstant',
+    'True',
+  ]) {
+    test(`declare ${name} is refused`, () => {
+      const ce = new ComputeEngine();
+      expect(() => ce.declare(name, { value: 3 })).toThrow(
+        `Cannot declare "${name}" in the global scope: it is a library constant`
+      );
+      expect(() => ce.declare(name, 'real')).toThrow(
+        `Cannot declare "${name}" in the global scope: it is a library constant`
+      );
+      expect(() => ce.assign(name, 3)).toThrow(
+        `Cannot assign a value to the constant "${name}"`
+      );
+    });
+  }
+
+  test('the Declare operator is refused', () => {
+    const ce = new ComputeEngine();
+    expect(() => ce.box(['Declare', 'Pi', "'real'"]).evaluate()).toThrow(
+      'Cannot declare "Pi" in the global scope: it is a library constant'
+    );
+  });
+
+  test('a closed form built with π keeps its value through MathJSON', () => {
+    const ce = new ComputeEngine();
+    expect(() => ce.declare('Pi', { value: 3 })).toThrow();
+    const sum = ce.parse('\\sum_{n=1}^\\infty \\frac{1}{n^2}').evaluate();
+    expect(sum.toString()).toBe('pi^2 / 6');
+    expect(ce.box(sum.json).N().re).toBeCloseTo(Math.PI ** 2 / 6, 12);
+  });
+
+  // `e` and `i` box to `ExponentialE` and to the complex literal `0 + 1i`, so
+  // no result writes them in MathJSON, and a program can use them as
+  // variables.
+  test('the input spellings e and i can be declared', () => {
+    const ce = new ComputeEngine();
+    ce.declare('e', { value: 2 });
+    ce.declare('i', { value: 5 });
+    expect(ce.box(['Add', 'e', 'i']).evaluate().toString()).toBe('7');
+  });
+
+  // A nested scope binds the name only while it is on the stack: a function
+  // parameter, a `Sum` index and a `Block` local named `Pi` are not refused.
+  test('a nested binding of Pi is not refused', () => {
+    const ce = new ComputeEngine();
+    expect(
+      ce
+        .box([['Function', ['Add', 'Pi', 1], 'Pi'], 5])
+        .evaluate()
+        .toString()
+    ).toBe('6');
+    expect(
+      ce
+        .box(['Sum', 'Pi', ['Limits', 'Pi', 1, 3]])
+        .evaluate()
+        .toString()
+    ).toBe('6');
+    expect(
+      ce
+        .box([
+          'Block',
+          ['Declare', 'Pi', "'real'"],
+          ['Assign', 'Pi', 3],
+          ['Add', 'Pi', 1],
+        ])
+        .evaluate()
+        .toString()
+    ).toBe('4');
+    expect(ce.box('Pi').N().re).toBeCloseTo(Math.PI, 12);
+  });
+});
+
+// A declaration in a nested scope can give the name of a library constant
+// another value (`ce.pushScope(); ce.declare('Pi', { value: 3 })`). The code
+// that recognizes π by its name (the special values of the trigonometric
+// functions, the angle of `e^{iθ}`) must then read the value of the user
+// binding, as `.N()` does. Each case uses its own engine: the declaration
+// stays in the scope.
 describe('A USER BINDING OF Pi', () => {
   const cases: [Expression, string][] = [
     [['Sin', 'Pi'], 'sin(3)'],
@@ -18,6 +102,7 @@ describe('A USER BINDING OF Pi', () => {
   for (const [input, expected] of cases) {
     test(`evaluate ${JSON.stringify(input)}`, () => {
       const ce = new ComputeEngine();
+      ce.pushScope();
       ce.declare('Pi', { value: 3 });
       const expr = ce.expr(input);
       expect(expr.evaluate().toString()).toBe(expected);
@@ -27,6 +112,7 @@ describe('A USER BINDING OF Pi', () => {
 
   test('e^{iπ} is e^{3i}', () => {
     const ce = new ComputeEngine();
+    ce.pushScope();
     ce.declare('Pi', { value: 3 });
     const expr = ce.parse('e^{i\\pi}');
     expect(expr.evaluate().toString()).toBe('i * sin(3) + cos(3)');
@@ -36,6 +122,7 @@ describe('A USER BINDING OF Pi', () => {
 
   test('e^{0.5iπ} is not i', () => {
     const ce = new ComputeEngine();
+    ce.pushScope();
     ce.declare('Pi', { value: 3 });
     const value = ce
       .expr(['Power', 'ExponentialE', ['Multiply', 'ImaginaryUnit', 0.5, 'Pi']])
@@ -46,6 +133,7 @@ describe('A USER BINDING OF Pi', () => {
 
   test('the parse route reads the user binding', () => {
     const ce = new ComputeEngine();
+    ce.pushScope();
     ce.declare('Pi', { value: 3 });
     expect(ce.parse('\\sin(\\pi)').evaluate().toString()).toBe('sin(3)');
     expect(ce.parse('\\sin(\\pi)').simplify().toString()).toBe('sin(pi)');
@@ -77,6 +165,7 @@ describe('A USER BINDING OF Pi', () => {
   for (const input of inverses) {
     test(`evaluate ${JSON.stringify(input)} holds no π`, () => {
       const ce = new ComputeEngine();
+      ce.pushScope();
       ce.declare('Pi', { value: 3 });
       const expr = ce.expr(input);
       const value = expr.evaluate();
@@ -91,6 +180,7 @@ describe('A USER BINDING OF Pi', () => {
 
   test('a special value with no π is kept', () => {
     const ce = new ComputeEngine();
+    ce.pushScope();
     ce.declare('Pi', { value: 3 });
     expect(ce.expr(['Arcsin', 0]).evaluate().json).toBe(0);
     expect(ce.expr(['Arctan', 0]).evaluate().json).toBe(0);
@@ -138,6 +228,7 @@ describe('A USER BINDING OF Pi', () => {
   for (const [input, re, im] of builtWithPi) {
     test(`evaluate ${JSON.stringify(input)} keeps its value through MathJSON`, () => {
       const ce = new ComputeEngine();
+      ce.pushScope();
       ce.declare('Pi', { value: 3 });
       const value = ce.expr(input).evaluate();
       expect(value.has('Pi')).toBe(false);
@@ -151,6 +242,7 @@ describe('A USER BINDING OF Pi', () => {
 
   test('the exact complex roots keep their value through MathJSON', () => {
     const ce = new ComputeEngine();
+    ce.pushScope();
     ce.declare('Pi', { value: 3 });
     // The 7th roots of unity are not closed forms: the call stays symbolic
     const roots = ce.expr(['ComplexRoots', 1, 7]).evaluate();
@@ -168,6 +260,7 @@ describe('A USER BINDING OF Pi', () => {
   // that stays symbolic is not an enumerable collection.
   test('the exact complex roots that stay symbolic are not enumerable', () => {
     const ce = new ComputeEngine();
+    ce.pushScope();
     ce.declare('Pi', { value: 3 });
     expect(ce.expr(['ComplexRoots', 1, 7]).isEnumerableCollection).toBe(false);
     expect(ce.expr(['ComplexRoots', -1, 7]).isEnumerableCollection).toBe(false);
@@ -191,6 +284,7 @@ describe('A USER BINDING OF Pi', () => {
     // In degrees the angles hold no π (`cos(360/7)`): enumerable
     const deg = new ComputeEngine();
     deg.angularUnit = 'deg';
+    deg.pushScope();
     deg.declare('Pi', { value: 3 });
     expect(deg.expr(['ComplexRoots', 1, 7]).isEnumerableCollection).toBe(true);
     expect(deg.expr(['ComplexRoots', 1, 7]).evaluate().operator).toBe('List');
@@ -199,6 +293,7 @@ describe('A USER BINDING OF Pi', () => {
   test('e^{iθ} in degrees keeps its value through MathJSON', () => {
     const ce = new ComputeEngine();
     ce.angularUnit = 'deg';
+    ce.pushScope();
     ce.declare('Pi', { value: 3 });
     for (const input of ['e^{i\\pi}', 'e^{2i}']) {
       const expr = ce.parse(input);
@@ -214,6 +309,7 @@ describe('A USER BINDING OF Pi', () => {
 
   test('ce.Pi times an exact 0 is 0', () => {
     const ce = new ComputeEngine();
+    ce.pushScope();
     ce.declare('Pi', { value: 3 });
     expect(ce.Pi.mul(ce.Zero).json).toBe(0);
     expect(ce.Pi.mul(0).json).toBe(0);
@@ -259,6 +355,7 @@ describe('A USER BINDING OF Pi', () => {
 describe('A USER BINDING OF Pi IN SPECIAL VALUES AND SOLVE', () => {
   test('LogGamma(1/2) stays symbolic', () => {
     const ce = new ComputeEngine();
+    ce.pushScope();
     ce.declare('Pi', { value: 3 });
     const expr = ce.expr(['LogGamma', ['Rational', 1, 2]]);
     const value = expr.evaluate();
@@ -270,6 +367,7 @@ describe('A USER BINDING OF Pi IN SPECIAL VALUES AND SOLVE', () => {
 
   test('ClausenCl of the user Pi is not a value at π', () => {
     const ce = new ComputeEngine();
+    ce.pushScope();
     ce.declare('Pi', { value: 3 });
     // Cl₂(3) = Σ sin(3k)/k² ≈ 0.0980262, not Cl₂(π) = 0
     const atPi = ce.expr(['ClausenCl', 2, 'Pi']);
@@ -299,6 +397,7 @@ describe('A USER BINDING OF Pi IN SPECIAL VALUES AND SOLVE', () => {
   for (const eq of periodic) {
     test(`Solve ${JSON.stringify(eq)} over an interval stays unevaluated`, () => {
       const ce = new ComputeEngine();
+      ce.pushScope();
       ce.declare('Pi', { value: 3 });
       const value = ce
         .expr(['Solve', eq, ['Element', 'x', ['Interval', 0, 10]]])
@@ -309,6 +408,7 @@ describe('A USER BINDING OF Pi IN SPECIAL VALUES AND SOLVE', () => {
 
   test('Solve over an integer range enumerates the domain', () => {
     const ce = new ComputeEngine();
+    ce.pushScope();
     ce.declare('Pi', { value: 3 });
     const value = ce
       .expr([

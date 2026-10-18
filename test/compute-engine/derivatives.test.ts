@@ -152,6 +152,7 @@ describe('Symbolic output for exponential derivatives', () => {
   // factor ln(ExponentialE) stays.
   it('keeps ln(base) when ExponentialE is declared with another value', () => {
     const ce = new ComputeEngine();
+    ce.pushScope();
     ce.declare('ExponentialE', { value: 3 });
     const expr = ce.expr(['D', ['Power', 'ExponentialE', 'x'], 'x']);
     expect(expr.evaluate().toString()).toBe('ln(3) * 3^x');

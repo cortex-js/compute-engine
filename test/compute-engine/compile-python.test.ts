@@ -720,6 +720,23 @@ describe('PYTHON TARGET', () => {
         /"lambda" is a reserved word in python/
       );
     });
+    it('rejects a function or parameter name that is not a Python identifier', () => {
+      // `def a b(1x):` does not parse. Python identifiers admit Unicode
+      // letters, so `αβ` and `名前` are accepted.
+      const body = ce.box(['Add', 'x', 1]);
+      expect(() => python.compileFunction(body, 'a b', ['x'])).toThrow(
+        /"a b" is not a Python identifier/
+      );
+      expect(() => python.compileFunction(body, 'f', ['1x'])).toThrow(
+        /"1x" is not a Python identifier/
+      );
+      expect(() => python.compileVectorized(body, 'f-g', ['x'])).toThrow(
+        /"f-g" is not a Python identifier/
+      );
+      expect(python.compileFunction(ce.box(1), 'αβ', ['名前'])).toBe(
+        'def αβ(名前):\n    return 1\n'
+      );
+    });
     it('rejects a symbol named None', () => {
       // A bare `None` would read the Python null value, not an input.
       expect(() => python.compile(ce.box(['Add', 'x', 'None']))).toThrow(

@@ -222,20 +222,27 @@ describe('PointList zip — retained declines and their diagnostics (D1, D2)', (
     );
   });
 
-  it('a tuple component declines too (a point, not a per-point value)', () => {
+  it('a tuple component is refused when the call is boxed (a point, not a per-point value)', () => {
+    // A coordinate is a number or a list of numbers: the `canonical` handler
+    // of `PointList` refuses a tuple-typed component, so the compiler sees
+    // an invalid expression and its own decline is not reached.
     const ce = zipEngine();
-    expect(() => js.compile(ce.box(['PointList', 'p', 'n']))).toThrow(
-      /component 1 .* is neither a scalar slot nor a list source/
+    const expr = ce.box(['PointList', 'p', 'n']);
+    expect(expr.isValid).toBe(false);
+    expect(() => js.compile(expr)).toThrow(
+      /Could not compile invalid expression/
     );
   });
 
-  it('a BARE `tuple` component declines — both tuple spellings are a point', () => {
-    // `'tuple'` is a plain string, not a `{ kind: 'tuple' }` node, so the
-    // node-only test read it as an `indexed_collection` SOURCE and would have
-    // zipped a single point across the list.
+  it('a BARE `tuple` component is refused too — both tuple spellings are a point', () => {
+    // `'tuple'` is a plain string, not a `{ kind: 'tuple' }` node. A test on
+    // the node alone read it as an `indexed_collection` SOURCE and zipped a
+    // single point across the list.
     const ce = zipEngine();
-    expect(() => js.compile(ce.box(['PointList', 'k', 'bt']))).toThrow(
-      /component 2 \(type `tuple`\) is neither a scalar slot nor a list source/
+    const expr = ce.box(['PointList', 'k', 'bt']);
+    expect(expr.isValid).toBe(false);
+    expect(() => js.compile(expr)).toThrow(
+      /Could not compile invalid expression/
     );
   });
 
@@ -669,16 +676,24 @@ describe('PointList — GPU projection (D3)', () => {
     ).toThrow(/incompatible-dimensions/);
   });
 
-  it('a bare `tuple` and an all-collection union component decline as SLOTS, not sources', () => {
+  it('an all-collection union component declines as a SLOT, not a source', () => {
+    const ce = gpuEngine();
+    ce.declare('lt', 'list<number> | tuple<number, number>');
+    expect(() =>
+      glsl.compile(ce.box(['PointY', ['PointList', -6, 'lt']]))
+    ).toThrow(
+      /component 2 .* is neither a list source nor a provably scalar numeric slot/
+    );
+  });
+
+  it('a bare `tuple` component is refused when the call is boxed', () => {
     const ce = gpuEngine();
     ce.declare('bt', 'tuple');
-    ce.declare('lt', 'list<number> | tuple<number, number>');
-    for (const s of ['bt', 'lt'])
-      expect(() =>
-        glsl.compile(ce.box(['PointY', ['PointList', -6, s]]))
-      ).toThrow(
-        /component 2 .* is neither a list source nor a provably scalar numeric slot/
-      );
+    const expr = ce.box(['PointY', ['PointList', -6, 'bt']]);
+    expect(expr.isValid).toBe(false);
+    expect(() => glsl.compile(expr)).toThrow(
+      /Could not compile invalid expression/
+    );
   });
 
   it('a COMPOSED use compiles: the projection carries its dimension', () => {
@@ -740,9 +755,11 @@ describe('PointList — the source predicate agrees across the two compile route
   // two COMPILE copies must agree exactly; the type handler's copy deliberately
   // diverges on the last two rows (narrowing it is interpreter-visible), which
   // is why this table is read through compile outcomes only.
-  const table: { type: string; source: boolean }[] = [
-    { type: 'tuple', source: false }, // a single point, bare spelling
-    { type: 'tuple<number, number>', source: false }, // …and node spelling
+  // A `refused` row is a component that the boxing refuses (a point is not a
+  // coordinate), so the compiler sees an invalid expression on both routes.
+  const table: { type: string; source: boolean; refused?: boolean }[] = [
+    { type: 'tuple', source: false, refused: true }, // a point, bare spelling
+    { type: 'tuple<number, number>', source: false, refused: true }, // node
     { type: 'list<number>', source: true },
     { type: 'set<number>', source: false }, // not INDEXED
     { type: 'number | list<number>', source: false }, // union: ambiguous
@@ -763,10 +780,14 @@ describe('PointList — the source predicate agrees across the two compile route
 
   it.each(table)(
     'JS: a `$type` component is source=$source',
-    ({ type, source }) => {
+    ({ type, source, refused }) => {
       const ce = tableEngine(type);
       const build = () =>
         new JavaScriptTarget().compile(ce.box(['PointList', 'v3', 'c']));
+      if (refused) {
+        expect(build).toThrow(/Could not compile invalid expression/);
+        return;
+      }
       // A source zips; a non-source has no per-point value and throws D1.
       if (source) expect(build().success).toBe(true);
       else expect(build).toThrow(/is neither a scalar slot nor a list source/);
@@ -775,10 +796,14 @@ describe('PointList — the source predicate agrees across the two compile route
 
   it.each(table)(
     'GPU: a `$type` component is source=$source',
-    ({ type, source }) => {
+    ({ type, source, refused }) => {
       const ce = tableEngine(type);
       const build = () =>
         new GLSLTarget().compile(ce.box(['PointY', ['PointList', 'v3', 'c']]));
+      if (refused) {
+        expect(build).toThrow(/Could not compile invalid expression/);
+        return;
+      }
       if (!source) {
         // Judged as a SLOT — the same classification the JS route reaches.
         expect(build).toThrow(

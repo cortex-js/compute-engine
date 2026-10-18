@@ -2,6 +2,7 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
 import { serializeEpsil } from '../../src/epsil/serialize-epsil';
+import { checkSource } from '../../src/cli/check';
 
 //
 // Phase 2 of the function-polymorphism design
@@ -352,6 +353,37 @@ fact(5)`);
       'let k: (integer) -> integer\nk(n) = 1\nk(s: string) = 2\nk(1)'
     );
     expect(JSON.stringify(diagnostics)).toContain('invalid clause definition');
+  });
+
+  test('a declared function type is a contract with and without an initial value', () => {
+    // User decision 2026-10-17: a `function` statement adds no clause outside
+    // the declared signature, also when the `let` gave the binding a value.
+    // Before, with the initial value, `function h(u: string)` added a second
+    // clause and `h(u: "a")` gave "a".
+    for (const head of [
+      'let h: (x: integer) -> integer = (x: integer) => x\n',
+      'let h: (x: integer) -> integer\n',
+    ]) {
+      const source = head + 'function h(u: string) { u }\nh(u: "a")';
+      const { value, diagnostics } = executeEpsil(new ComputeEngine(), source);
+      const runtime = diagnostics.filter((d) => d.message[0] === 'runtime-error');
+      expect([source, runtime.map((d) => d.message.at(-1))]).toEqual([
+        source,
+        ['invalid-clause-definition'],
+      ]);
+      expect(JSON.stringify(value.json)).toContain('argument-name-unknown');
+      // The static check reports the call that the refused clause would
+      // have accepted.
+      expect(
+        checkSource(source).diagnostics.map((d) => d.message.at(-1))
+      ).toEqual(['argument-name-unknown']);
+    }
+    // The clause inside the declared signature is still accepted.
+    const accepted = run(
+      'let h: (x: integer) -> integer = (x: integer) => x\nfunction h(x: integer) { x + 1 }\nh(x: 3)'
+    );
+    expect(accepted.diagnostics).toEqual([]);
+    expect(accepted.text).toBe('4');
   });
 
   test('a plain assignment full-replaces the whole clause set (D6)', () => {

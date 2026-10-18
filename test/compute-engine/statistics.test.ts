@@ -961,10 +961,10 @@ describe('One-sample statistics on complex data', () => {
 
   test('a non-finite datum makes the COMPLEX branches NaN too', () => {
     // The complex branches of `Mean` and the variance family are reached only
-    // when some datum is genuinely complex. A complex sample point plus a
-    // point at infinity has no reading — `+∞` is a limit along the real axis —
-    // yet boxed arithmetic folded both to `+oo`, which for the variance also
-    // contradicted the real-only path (`Variance([1, +∞])` is `NaN`).
+    // when some datum is genuinely complex. For the variance family, a
+    // complex sample point plus a point at infinity has no value: the
+    // deviation from the infinite mean is `∞ − ∞`, as on the real-only path
+    // (`Variance([1, +∞])` is `NaN`). `~oo` reads as `NaN` in every head.
     const inf = { num: '+Infinity' } as any;
     const z = ['Complex', 1, 2];
     for (const op of [
@@ -974,11 +974,18 @@ describe('One-sample statistics on complex data', () => {
       'StandardDeviation',
       'PopulationStandardDeviation',
     ]) {
-      expect(ce.box([op, L([z as any, inf])]).evaluate().isNaN).toBe(true);
+      if (op !== 'Mean')
+        expect(ce.box([op, L([z as any, inf])]).evaluate().isNaN).toBe(true);
       expect(
         ce.box([op, L([z as any, 'ComplexInfinity'])]).evaluate().isNaN
       ).toBe(true);
     }
+    // The mean of a complex datum and `+∞` is the mean `Add` gives for their
+    // sum: `(1 + 2i) + ∞` is `+∞`, because a finite imaginary part beside an
+    // infinite real part gives the real infinity (user decision 2026-10-17).
+    expect(ce.box(['Mean', L([z as any, inf])]).evaluate().toString()).toBe(
+      '+oo'
+    );
     // The real-only path is untouched: the mean of `[1, +∞]` is still `+oo`.
     expect(ce.box(['Mean', L([1, inf])]).evaluate().toString()).toBe('+oo');
     expect(ce.box(['Variance', L([1, inf])]).evaluate().isNaN).toBe(true);

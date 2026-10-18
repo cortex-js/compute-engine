@@ -122,6 +122,25 @@ export function serializeNumber(
     num = expr.num;
   } else return '';
 
+  // With `repeatingDecimal: 'auto'` (the default), only an EXACT repeating
+  // decimal gets a repetend mark. In MathJSON, a number string with a
+  // repetend in parentheses (`"0.(3)"`) is the exact rational 1/3: it is
+  // written `0.\overline{3}`, and the parser reads that back as the same
+  // exact rational. Any other number with a fraction part is a float. If the
+  // digits of a float repeat and are written with an overline, the parser
+  // reads the result as an exact rational, and a LaTeX round trip changes a
+  // float into an exact number. So a float is written with its digits
+  // (`0.333\,333\,333`). An explicit style (`'vinculum'`, `'dots'`,
+  // `'parentheses'`, `'arc'`) also looks for a repeating pattern in the
+  // digits of a float.
+  if (options.repeatingDecimal === 'auto') {
+    options = {
+      ...options,
+      repeatingDecimal:
+        typeof num === 'string' && /\([0-9]+\)/.test(num) ? 'vinculum' : 'none',
+    };
+  }
+
   if (typeof num === 'number') {
     if (num === Infinity) return options.positiveInfinity;
     else if (num === -Infinity) return options.negativeInfinity;

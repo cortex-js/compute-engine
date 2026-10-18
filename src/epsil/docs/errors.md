@@ -205,7 +205,7 @@ Rename one side so the two agree — the quick fix renames the annotation's para
 
 ## `absence-marker-binding`
 
-A binding names one of the absence markers `Nothing`, `Missing` or `Undefined`: a `let`, a `const`, an assignment, a function, a parameter, a loop variable or a `match` pattern. The engine recognizes these markers by their name wherever they appear — `Nothing` is dropped from an argument list, and an arithmetic operand named `Missing` or `Undefined` is read as absent — so a binding of one of them could never behave like the value it holds. They are the only library names that cannot be rebound; every other one, including `Pi` and `Square`, is shadowed by a user binding.
+A binding names one of the absence markers `Nothing`, `Missing` or `Undefined`: a `let`, a `const`, an assignment, a function, a parameter, a loop variable or a `match` pattern. The engine recognizes these markers by their name wherever they appear — `Nothing` is dropped from an argument list, and an arithmetic operand named `Missing` or `Undefined` is read as absent — so a binding of one of them could never behave like the value it holds. They are the only library names that cannot be rebound in any scope. Every other one, including `Pi` and `Square`, is shadowed by a user binding, with one exception: at the top level of a program, a `let` or `const` of a library constant that results carry by name (`Pi`, `ExponentialE`, `GoldenRatio`) is refused with a run-time error, because a result built with the library constant would read the user value when its MathJSON is boxed again.
 
 Choose another name. In a `match`, a bare name is a new variable, not a comparison: to test for the marker, write `== Missing`.
 
@@ -216,6 +216,14 @@ A `let` or `const` declares a name that the same scope already declares: an earl
 A second declaration in one scope is a mistake in practice — a `let` where an assignment was meant, or a copied line — and the language cannot tell it from a legitimate second run of the same statement (a loop body on its next turn), so it used to overwrite the binding without a word. To update a binding, assign to it: `x = x + 1`. To hold a second value, choose another name.
 
 A `let` in a NESTED block is not a re-declaration: `for k in xs { if c { let k = 1 … } }` and a closure body that declares a name its enclosing scope also has are ordinary shadowing, and stay legal. The initializer of such a shadowing `let` reads the OUTER name. Across programs — a re-run notebook cell, a later REPL line — a top-level `let` re-declares legally; only a repeat within one program is reported.
+
+## `read-before-declaration`
+
+A local of a block was read or assigned before its `let` or `const` statement ran. In `do { let a = k; let k = 2; a }` the first statement reads `k`, which the block declares only in the next statement. In `do { k = 5; let k = 2 }` the first statement assigns it: the assignment does not write a `k` of an enclosing scope, because the name `k` in the block is the local.
+
+Each run of a block — a function call, an iteration of a loop body, a run of an `if` or `do` block — gets its own bindings for the locals of the block when it starts, as in JavaScript. A closure created in the block before a `let` therefore reads the binding of its own run: in `for i in [1, 2] { fs = [...fs, () => k]; let k = i }` the two closures give `1` and `2`. Until the `let` runs, the binding has no value, and reading it or assigning it (directly, or by calling such a closure too early) is this error.
+
+Move the `let` before the first read or assignment, or give the local another name. The initializer of the `let` itself is not such a read: `let t = t * 2` in a nested block reads the OUTER `t`. Top-level statements of a program are not a block, so there a name declared later is an ordinary symbol until its `let` runs.
 
 ## `function-redefinition`
 

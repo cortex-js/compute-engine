@@ -674,8 +674,13 @@ describe('a spelled-out name after an argument of one letter', () => {
     ['\\sqrt beta', '["Multiply","ExponentialE","a","t",["Sqrt","b"]]'],
     // `oo` is not a Greek name: `foo` is not `f·∞`
     ['x^foo', '["Multiply","o","o",["Power","x","f"]]'],
-    // A run after the argument that holds no Greek name is not split
-    ['x^foo(t)', '["Multiply","o",["o","t"],["Power","x","f"]]'],
+    // A run after the argument that holds no Greek name is not split. The
+    // application `o(t)` makes `o` a function, so the factor `o` before it
+    // is an `incompatible-type` error, as in `x^f\cdot o\cdot o(t)`.
+    [
+      'x^foo(t)',
+      '["Multiply",["Power","x","f"],["Error",["ErrorCode","\'incompatible-type\'","\'number\'","\'function\'"],"o"],["o","t"]]',
+    ],
   ])('%s is not split', (input, json) => {
     expect(parse(input, false).json).toBe(json);
   });

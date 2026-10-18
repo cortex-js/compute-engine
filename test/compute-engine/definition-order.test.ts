@@ -380,17 +380,27 @@ describe('definition order does not change semantics', () => {
     const declareArity2 = (ce: ComputeEngine) =>
       ce.declare('a', { signature: '(number, number) -> number' });
 
-    test('an incompatible arity reads the same in either order', () => {
-      const calleeFirst = evaluateInOrder(
-        ['a(x,y)\\coloneq x+y', 'g(t)\\coloneq 2a(t)'],
-        'g(3)'
+    test('an incompatible arity is rejected in either order', () => {
+      // `a(t)` applies the two-parameter `a` to one argument, which gives a
+      // function (a partial application, typed `(unknown) -> number`). So the
+      // body `2a(t)` is a product with a function factor: the signature check
+      // of `Multiply` makes the factor an `incompatible-type` error, as it
+      // does for `2\times a(t)`. Either order reports that error. When the
+      // callee comes first, the assignment of `g` evaluates to the error.
+      // When the caller comes first, the rebuild of the body of `g` is
+      // rejected, and the error surfaces from the definition of `a` (see the
+      // next test).
+      const calleeFirst = new ComputeEngine();
+      calleeFirst.parse('a(x,y)\\coloneq x+y').evaluate();
+      const assigned = calleeFirst.parse('g(t)\\coloneq 2a(t)').evaluate();
+      expect(assigned.isValid).toBe(false);
+      expect(JSON.stringify(assigned.json)).toContain('incompatible-type');
+
+      const callerFirst = new ComputeEngine();
+      callerFirst.parse('g(t)\\coloneq 2a(t)').evaluate();
+      expect(() => callerFirst.parse('a(x,y)\\coloneq x+y').evaluate()).toThrow(
+        /incompatible-type/
       );
-      const callerFirst = evaluateInOrder(
-        ['g(t)\\coloneq 2a(t)', 'a(x,y)\\coloneq x+y'],
-        'g(3)'
-      );
-      expect(callerFirst.interpreted).toEqual(calleeFirst.interpreted);
-      expect(callerFirst.compiled).toEqual(calleeFirst.compiled);
     });
 
     test('the error surfaces and no dependent is dropped', () => {

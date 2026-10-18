@@ -14,11 +14,12 @@
  * collection OPERAND back down to a single interval, which is the only value
  * the scalar kernels take.
  *
- * The target's numeric ABSENCE marker is the whole-NaN bare interval
- * `{ lo: NaN, hi: NaN }` — see the `absence` capability in
- * `compilation/interval-javascript-target.ts`, whose `isAbsent` test reads
- * `.lo` directly. Absence must therefore be a bare `Interval`, never an
- * `IntervalResult` wrapper.
+ * The target's numeric marker is the whole-NaN bare interval
+ * `{ lo: NaN, hi: NaN }`, which an accessor answers for an operand that is not
+ * a collection or a coordinate past the end of a point. An `At` whose index
+ * selects nothing answers the `empty` result, the spelling of an absent value
+ * everywhere else on this target. `isAbsent` (`interval/comparison.ts`) reads
+ * both as absent.
  *
  * @module interval/collections
  */
@@ -64,6 +65,17 @@ function absent(): Interval {
 }
 
 /**
+ * The value of an `At` whose index selects no element: the `empty` result,
+ * the spelling of an absent value that compiled code of this target gives
+ * everywhere else (a restriction whose condition fails, a written `Missing`).
+ * The interpreter answers no value there either. Fresh for the reason
+ * `absent()` is.
+ */
+function nothingSelected(): IntervalResult {
+  return { kind: 'empty' };
+}
+
+/**
  * Normalize one collection ELEMENT to an `IntervalResult`.
  *
  * Returns `undefined` when the element has no interval reading at all — a
@@ -88,7 +100,7 @@ function normalizeElement(element: unknown): IntervalResult | undefined {
  * The index convention is the interpreter's `At`: 1-based, a negative index
  * counts from the end (`-1` is the last element), and an index of 0, an index
  * out of range, or a non-integer index selects nothing — which this target
- * reports as the numeric absence marker.
+ * reports as the `empty` result (`nothingSelected`).
  *
  * The index is an interval, so it stands for a SET of indices: the integers in
  * `[index.lo, index.hi]`. Only integers in `[-n, n]` (n = the collection's
@@ -98,7 +110,7 @@ function normalizeElement(element: unknown): IntervalResult | undefined {
  * candidate indices select:
  *
  * - no candidate selects an element (a non-integer point index such as 2.5, an
- *   index of 0, or a range lying entirely outside `[-n, n]`) → absence;
+ *   index of 0, or a range lying entirely outside `[-n, n]`) → `empty`;
  * - every candidate selects an element → their hull;
  * - some candidates select and some do not → a `partial` result carrying the
  *   hull, marked `domainClipped: 'both'`: the value exists over only part of
@@ -135,7 +147,7 @@ function atRaw(
   // straddles no integer at all (e.g. the point index 2.5).
   const intLo = Math.ceil(iv.lo);
   const intHi = Math.floor(iv.hi);
-  if (intLo > intHi) return absent();
+  if (intLo > intHi) return nothingSelected();
 
   // Clip to the selectable window [-n, n]. A non-finite endpoint simply means
   // the index range extends past the array, which clips to the window edge.
@@ -144,7 +156,7 @@ function atRaw(
 
   // Candidates outside the window select nothing.
   let anyAbsent = intLo < clipLo || intHi > clipHi;
-  if (clipLo > clipHi) return absent();
+  if (clipLo > clipHi) return nothingSelected();
 
   let hull: IntervalResult | undefined = undefined;
   for (let k = clipLo; k <= clipHi; k++) {
@@ -161,7 +173,7 @@ function atRaw(
     hull = hull === undefined ? element : unionResults(hull, element);
   }
 
-  if (hull === undefined) return absent();
+  if (hull === undefined) return nothingSelected();
   if (!anyAbsent) return hull;
 
   // The value exists for part of the index interval only. A hull with no

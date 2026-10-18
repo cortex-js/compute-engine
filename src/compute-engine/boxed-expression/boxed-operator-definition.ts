@@ -1923,6 +1923,19 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       def.canonical ?? this.canonical,
       def
     );
+    // The library `Add` and `Multiply` are `lazy` only because their
+    // numeric `canonical` handler canonicalizes the held operands itself. A
+    // lazy definition with no `canonical` handler holds its operands unbound,
+    // and parse grouping such as `Delimiter` then stays in the canonical
+    // form. So when the handler is removed, the `lazy` flag that the library
+    // definition had for it is removed too (below), and the operands are
+    // canonicalized as those of a user operator. Example: after
+    // `ce.declare('Add', { associative: false }, { extend: true })`,
+    // `(a+b)+c` boxes to `["Add", ["Add", "a", "b"], "c"]`, the same as an
+    // `Add` declared from scratch.
+    const dropsLibraryLazy =
+      dropsNumericCanonical &&
+      numericCanonicalProfile(def.canonical ?? this.canonical)?.lazy === true;
 
     // A `canonical` handler replaces the flattening, sorting and
     // idempotent/involution steps that boxing applies for these flags, so a
@@ -2066,7 +2079,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       def.scoped,
       (def as Partial<BoxedOperatorDefinition>).bindingSites
     );
-    this.lazy = def.lazy ?? this.lazy;
+    this.lazy = dropsLibraryLazy ? false : (def.lazy ?? this.lazy);
 
     if (def.collection)
       this.collection = defaultCollectionHandlers(def.collection);

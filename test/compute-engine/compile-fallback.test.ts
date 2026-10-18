@@ -312,7 +312,7 @@ describe('Compilation fallback — interval-js declines still provide `run`', ()
     const r = compile(e, { to: 'interval-js' });
     expect(r.success).toBe(false);
     expect(typeof r.run).toBe('function');
-    expect(r.run!({})).toEqual({ lo: 1, hi: 1 });
+    expect(r.run!({})).toEqual({ kind: 'interval', value: { lo: 1, hi: 1 } });
   });
 
   test('fallback: false surfaces the raw decline (no interpreter run)', () => {

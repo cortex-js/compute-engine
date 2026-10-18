@@ -324,9 +324,8 @@ describe('interval-js: a conditional lowers without closures', () => {
   });
 
   test('an absent element inside a conditional stays absent', () => {
-    // Numeric absence on this target is a whole-NaN interval. An arm that
-    // reads past the end of a list answers one, and the conditional must hand
-    // it back rather than smoothing it into a bound.
+    // An arm that reads past the end of a list answers `empty`, and the
+    // conditional must hand it back rather than smoothing it into a bound.
     const ce = new ComputeEngine();
     ce.declare('x', 'real');
     const list = ['List', 10, 20, 30];
@@ -341,9 +340,7 @@ describe('interval-js: a conditional lowers without closures', () => {
       { to: 'interval-js', fallback: false }
     ) as unknown as IntervalRun;
     expect(r.success).toBe(true);
-    const absent = boundOf(r.run({ x: { lo: 0, hi: 0 } }));
-    expect(Number.isNaN(absent.lo)).toBe(true);
-    expect(Number.isNaN(absent.hi)).toBe(true);
+    expect(r.run({ x: { lo: 0, hi: 0 } })).toStrictEqual({ kind: 'empty' });
     expect(boundOf(r.run({ x: { lo: 5, hi: 5 } }))).toEqual({ lo: 20, hi: 20 });
   });
 

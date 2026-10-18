@@ -938,3 +938,84 @@ describe('CHAINED SET RELATIONS', () => {
     ).toMatchInlineSnapshot(`True`);
   });
 });
+
+// A bar `|` is not a set-builder separator, because it is also the
+// absolute-value delimiter. `\{x | x \ne 0\}` gives one error that names the
+// separator to write (`\mid`), in the strict and in the lenient grammar. A bar
+// that delimits an absolute value inside a set is not affected.
+describe('A BAR AS THE SET-BUILDER SEPARATOR', () => {
+  const barError = (latex: string) => [
+    'Error',
+    ['ErrorCode', "'expected-set-builder-separator'", "'\\mid'"],
+    ['LatexString', `'${latex}'`],
+  ];
+
+  for (const strict of [true, false]) {
+    describe(strict ? 'strict grammar' : 'lenient grammar', () => {
+      test('\\{x | x \\ne 0\\} is one error that names \\mid', () => {
+        const expr = ce.parse('\\{x | x \\ne 0\\}', { strict });
+        expect(expr.json).toEqual(barError('\\{x | x \\ne0\\}'));
+        expect(expr.isValid).toBe(false);
+      });
+
+      test('other spellings of the braces and of the bar', () => {
+        for (const [input, span] of [
+          ['\\{x|x>0\\}', '\\{x|x>0\\}'],
+          ['\\{x \\vert x>0\\}', '\\{x \\vert x>0\\}'],
+          ['\\lbrace x | x>0 \\rbrace', '\\lbrace x | x>0 \\rbrace'],
+          ['\\left\\{x | x>0\\right\\}', '\\left\\{x | x>0\\right\\}'],
+          ['\\{|x| | x > 0\\}', '\\{|x| | x > 0\\}'],
+          ['\\{x | x > 0, x < 5\\}', '\\{x | x > 0, x < 5\\}'],
+        ])
+          expect([input, ce.parse(input, { strict }).json]).toEqual([
+            input,
+            barError(span),
+          ]);
+      });
+
+      test('the error is a subexpression like any other', () => {
+        expect(ce.parse('1+\\{x|x>0\\}', { strict }).json).toEqual([
+          'Add',
+          1,
+          barError('\\{x|x>0\\}'),
+        ]);
+      });
+
+      test('\\mid and : are still separators', () => {
+        const expected = ['Set', 'x', ['Condition', ['NotEqual', 'x', 0]]];
+        expect(ce.parse('\\{x \\mid x \\ne 0\\}', { strict }).json).toEqual(
+          expected
+        );
+        expect(ce.parse('\\{x : x \\ne 0\\}', { strict }).json).toEqual(
+          expected
+        );
+        expect(ce.parse('\\{x \\mid |x| < 1\\}', { strict }).json).toEqual([
+          'Set',
+          'x',
+          ['Condition', ['Less', ['Abs', 'x'], 1]],
+        ]);
+      });
+
+      test('an absolute value inside a set is not affected', () => {
+        expect(ce.parse('\\{2|x|, 3\\}', { strict }).json).toEqual([
+          'Set',
+          ['Multiply', 2, ['Abs', 'x']],
+          3,
+        ]);
+        expect(ce.parse('\\{|x|, 3\\}', { strict }).json).toEqual([
+          'Set',
+          ['Abs', 'x'],
+          3,
+        ]);
+        expect(ce.parse('\\{|x|\\}', { strict }).json).toEqual([
+          'Set',
+          ['Abs', 'x'],
+        ]);
+        expect(ce.parse('|\\{x\\}|', { strict }).json).toEqual([
+          'Count',
+          ['Set', 'x'],
+        ]);
+      });
+    });
+  }
+});

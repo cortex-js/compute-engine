@@ -1424,10 +1424,10 @@ describe('INTERVAL JS - collection access', () => {
   ceColl.declare('L', 'list<number>');
   ceColl.declare('P', 'tuple<number, number>');
 
-  /** The interval-js absence marker: a whole-NaN BARE interval (no `kind`). */
+  /** An `At` that selects nothing answers the `empty` result, the spelling
+   * of an absent value on the interval-js target. */
   function expectAbsent(result) {
-    expect('kind' in result).toBe(false);
-    expect(Number.isNaN(result.lo)).toBe(true);
+    expect(result).toStrictEqual({ kind: 'empty' });
   }
 
   test('At with a point index selects the element (1-based)', () => {
@@ -1464,7 +1464,7 @@ describe('INTERVAL JS - collection access', () => {
     });
   });
 
-  test('At out of range yields the absence marker', () => {
+  test('At out of range yields empty', () => {
     const fn = compile(ceColl.box(['At', 'L', 9]), { to: 'interval-js' });
     expect(fn.success).toBe(true);
     expectAbsent(fn.run!({ L: [10, 20, 30] }));
@@ -1489,7 +1489,7 @@ describe('INTERVAL JS - collection access', () => {
     expect(fn.run!({})).toEqual({ lo: 20, hi: 20 });
   });
 
-  test('a literal-list index out of range folds to the absence marker', () => {
+  test('a literal-list index out of range folds to empty', () => {
     const fn = compile(ceColl.box(['At', ['List', 10, 20, 30], 7]), {
       to: 'interval-js',
     });
@@ -1561,7 +1561,7 @@ describe('INTERVAL JS - collection access', () => {
     expect(fn.code).toBe('_k1');
   });
 
-  test('an absence marker composes through interval arithmetic', () => {
+  test('an absent value composes through interval arithmetic', () => {
     const fn = compile(ceColl.box(['Add', ['At', 'L', 'k'], 1]), {
       to: 'interval-js',
     });
@@ -1571,12 +1571,9 @@ describe('INTERVAL JS - collection access', () => {
       kind: 'interval',
       value: { lo: 21, hi: 21 },
     });
-    // Out of range: the absence marker propagates as NaN bounds rather than
-    // inventing a value.
-    const absent = fn.run!({ L: [10, 20, 30], k: 9 }) as {
-      value: { lo: number };
-    };
-    expect(Number.isNaN(absent.value.lo)).toBe(true);
+    // Out of range: the `empty` of the read propagates rather than inventing
+    // a value.
+    expect(fn.run!({ L: [10, 20, 30], k: 9 })).toStrictEqual({ kind: 'empty' });
   });
 });
 
@@ -1934,10 +1931,11 @@ describe('INTERVAL JS - COLLECTIONS: kernels fail closed, roots and fallbacks ar
       fallback: true,
     });
     expect(fn.success).toBe(false);
+    // Each present number is the interval result of a point.
     expect(fn.run!({})).toEqual([
-      { lo: 3, hi: 3 },
-      { lo: 2, hi: 2 },
-      { lo: 1, hi: 1 },
+      { kind: 'interval', value: { lo: 3, hi: 3 } },
+      { kind: 'interval', value: { lo: 2, hi: 2 } },
+      { kind: 'interval', value: { lo: 1, hi: 1 } },
     ]);
   });
 });

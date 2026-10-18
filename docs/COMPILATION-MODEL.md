@@ -59,10 +59,65 @@ literal or their unions (`oo`, `-oo`, `NaN`, the signed pair
 and `nan` guards under the boundary projection made each diverge from
 the interpreter through the degradation route. Restoring compilability
 here requires a tagged pole representation (a full pole lane), not a
-cheaper encoding. Two divergences from the projection itself are
-accepted and pinned: compiled `Heaviside(~oo)` answers `1` and compiled
-`~oo > 0` answers `true`, where the interpreter leaves both symbolic
-(both formerly threw at the boundary).
+cheaper encoding. The divergences that the projection itself causes are
+accepted; the next section lists them.
+
+### Divergences of the `Infinity` projection (user decision 2026-10-17)
+
+Compiled code on a real target has no value for `~oo`, so it uses the IEEE
+`Infinity` (above). A function of the SIGN of its operand then answers as if
+the operand were `+∞`, where the interpreter has no sign to use. These
+differences are accepted; they are not defects:
+
+| Expression | Input | Compiled (JavaScript) | Interpreter |
+|---|---|---|---|
+| `Heaviside(x)` | `x = ~oo` | `1` | `Error(incompatible-type, "real \| signed_infinity", "~oo")` |
+| `x > 0` | `x = ~oo` | `true` | `0 < ~oo`, not decided |
+| `Sign(1/x)` | `x = 0` | `1` | `Indeterminate` (`evaluate()`), `NaN` (`.N()`) |
+| `Floor(1/x)` | `x = 0` | `Infinity` | `~oo` |
+
+In the first two rows, the argument `~oo` (`{re: Infinity, im: Infinity}`)
+becomes `Infinity` at the entry of the compiled function. In the last two
+rows, the pole is computed inside the compiled code: `1/0` is the double
+`Infinity`, and `Sign` and `Floor` read it as `+∞`.
+
+A point (a tuple of numbers) divided by zero is the same case, coordinate by
+coordinate. The interpreter gives `~oo` for each nonzero coordinate, and the
+compiled code gives the IEEE infinity of each coordinate, with the sign of the
+coordinate: with `t = 0`, `(3, 4)/t` is `[Infinity, Infinity]` compiled and
+`(~oo, ~oo)` interpreted, and `(-3, 4)/t` is `[-Infinity, Infinity]`
+compiled. A list of points is divided point by point:
+`[(1, 2), (3, 4)]/t` is `[[Infinity, Infinity], [Infinity, Infinity]]`
+compiled and `[(~oo, ~oo), (~oo, ~oo)]` interpreted. On a real target, this
+is the spelling of the complex infinity, as for the scalar `1/0`. Code that
+must not see a sign at a pole tests `Number.isFinite`, as above.
+
+### Folds over rows of unequal length give `NaN` (user decision 2026-10-17)
+
+This is a named exception to the rule of `docs/ERROR-MODEL.md` §6 that a
+compiled expression does not answer `NaN` where the interpreter answers an
+error. With `v: list<list<real>>`, compiled `Sum(v)`, `Product(v)`,
+`Reduce(v, Add)` and `Scan(v, Add)` combine the rows element by element. Two
+rows of unequal length have no element-wise sum, and the compiled
+element-wise combiner (`_SYS.add`) answers `NaN` for them, as the compiled
+`Add` of two lists of unequal length does:
+
+| `v` | Compiled | Interpreter |
+|---|---|---|
+| `[[1, 2], [3]]`, `Sum(v)` | `NaN` | `Error("incompatible-dimensions", "1 vs 2")` |
+| `[[1, 2], [3]]`, `Product(v)` | `NaN` | `Error("incompatible-dimensions", "2 vs 1")` |
+| `[[1, 2], [3]]`, `Reduce(v, Add)` | `NaN` | `Error("incompatible-dimensions", "1 vs 2")` |
+| `[[1, 2], [3]]`, `Scan(v, Add)` | `[[1, 2], NaN]` | `[[1, 2], Error("incompatible-dimensions", "1 vs 2")]` |
+| `[[1, 2], [3, 4]]`, `Sum(v)` | `[4, 6]` | `[4, 6]` |
+
+The type `list<list<real>>` does not fix the length of a row, so a compiler
+that obeys §6 would have to refuse every fold over such a list, including
+the correct ones (the last row). A list of rows is the usual input of a plot,
+and an input with rows of unequal length already shows the failure as
+`NaN`, so the compiled fold is kept. A caller that needs the error evaluates
+through the interpreter. The test "rows of unequal length…" in
+`test/compute-engine/compile-absent-collection-operand.test.ts` pins this
+behavior.
 
 A second value carve-out is ruled (compiled-equality ruling, 2026-09-09):
 compiled `Equal` and `NotEqual` on numeric operands are EXACT, the IEEE 754

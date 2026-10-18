@@ -186,8 +186,8 @@ describe('HOST-DECLARED OPERATOR IN VALUE POSITION — fail closed', () => {
     const v = r?.run?.({ rs: [2, 3] });
     if (to === 'interval-js')
       expect(v).toEqual([
-        { lo: 100, hi: 100 },
-        { lo: 100, hi: 100 },
+        { kind: 'interval', value: { lo: 100, hi: 100 } },
+        { kind: 'interval', value: { lo: 100, hi: 100 } },
       ]);
     else expect(v).toEqual([100, 100]);
   });

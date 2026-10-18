@@ -1130,6 +1130,11 @@ describe('INTERVAL COLLECTIONS', () => {
     expect(Number.isNaN(result.lo)).toBe(true);
     expect(Number.isNaN(result.hi)).toBe(true);
   }
+  // An `at` whose index selects no element answers the `empty` result, the
+  // spelling of an absent value everywhere else on the interval-js target.
+  function expectNothingSelected(result) {
+    expect(result).toStrictEqual({ kind: 'empty' });
+  }
 
   const L = [point(10), point(20), point(30)];
 
@@ -1146,18 +1151,18 @@ describe('INTERVAL COLLECTIONS', () => {
     });
 
     test('index 0 selects nothing', () => {
-      expectAbsent(atCollection(L, point(0)));
+      expectNothingSelected(atCollection(L, point(0)));
     });
 
     test('out-of-range index selects nothing', () => {
-      expectAbsent(atCollection(L, point(4)));
-      expectAbsent(atCollection(L, point(-4)));
-      expectAbsent(atCollection(L, point(1e9)));
+      expectNothingSelected(atCollection(L, point(4)));
+      expectNothingSelected(atCollection(L, point(-4)));
+      expectNothingSelected(atCollection(L, point(1e9)));
     });
 
     test('non-integer point index selects nothing', () => {
       // The index interval [2.5, 2.5] straddles no integer.
-      expectAbsent(atCollection(L, point(2.5)));
+      expectNothingSelected(atCollection(L, point(2.5)));
     });
 
     test('wide index hulls the elements it spans', () => {
@@ -1231,8 +1236,8 @@ describe('INTERVAL COLLECTIONS', () => {
     });
 
     test('empty collection selects nothing', () => {
-      expectAbsent(atCollection([], point(1)));
-      expectAbsent(atCollection([], { lo: -5, hi: 5 }));
+      expectNothingSelected(atCollection([], point(1)));
+      expectNothingSelected(atCollection([], { lo: -5, hi: 5 }));
     });
   });
 
@@ -1473,10 +1478,12 @@ describe('OUTWARD ROUNDING', () => {
     const two = getValue(nthRoot({ lo: 2, hi: 2 }, 2))!;
     expect(two.lo).toBe(nextDown(Math.SQRT2));
     expect(two.hi).toBe(Math.SQRT2);
-    expect(exactly(two.lo).lt(new BigDecimal('1.414213562373095048801688724')))
-      .toBe(true);
-    expect(exactly(two.hi).gt(new BigDecimal('1.414213562373095048801688724')))
-      .toBe(true);
+    expect(
+      exactly(two.lo).lt(new BigDecimal('1.414213562373095048801688724'))
+    ).toBe(true);
+    expect(
+      exactly(two.hi).gt(new BigDecimal('1.414213562373095048801688724'))
+    ).toBe(true);
   });
 
   test('a root of a large operand encloses the value the rounded degree missed', () => {

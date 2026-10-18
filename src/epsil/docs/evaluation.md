@@ -237,6 +237,34 @@ that is not assigned (an argument, an operand) still reads program state
 **at materialization time**, like a generator in Python. An unbounded one
 that captures a variable reflects the later value of that variable.
 
+The test "reads a variable" looks at the expression as written, and does not
+look inside a named user function. An inline function that reads a variable
+makes the `map` read it, so the assignment stores the elements. A named
+function that reads the same variable does not: the `map` stays lazy, and
+its elements are computed when they are read, with the value the variable
+has then.
+
+```epsil
+let n = 1
+let v = map((k) => k * n, 1..3)
+n = 10
+v
+// ➔ [1, 2, 3]
+```
+
+```epsil
+let n = 1
+function scale(k) { k * n }
+let v = map(scale, 1..3)
+n = 10
+v
+// ➔ [10, 20, 30]
+```
+
+To get the elements with the value of `n` at the `let`, write the function
+inline, or make a list literal of the elements:
+`let v = [...map(scale, 1..3)]` gives `[1, 2, 3]` after `n = 10`.
+
 ## Errors are values
 
 Per [Principles](/epsil/principles/), "errors are values": a *runtime*

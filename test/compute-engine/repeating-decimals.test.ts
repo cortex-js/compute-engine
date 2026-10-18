@@ -1,4 +1,5 @@
 import { engine as ce } from '../utils';
+import { isNumber } from '../../src/compute-engine/boxed-expression/type-guards';
 
 /**
  * A repeating decimal denotes an exact rational. Per the exactness contract,
@@ -102,5 +103,120 @@ describe('TRUNCATION MARKER with an evident repetend is a repeating decimal', ()
   test('an explicit repetend takes precedence over the marker heuristic', () => {
     // `0.\overline{9}\ldots` — the vinculum wins; the marker is ignored.
     expect(ce.parse('0.\\overline{9}\\ldots').isSame(1)).toBe(true);
+  });
+});
+
+/**
+ * A repetend mark parses as an exact rational, so the LaTeX serializer does
+ * not write one for a FLOAT by default (`repeatingDecimal: 'auto'`): a float
+ * whose digits repeat is written with its digits, and a LaTeX round trip keeps
+ * it a float. An exact repeating decimal (the MathJSON number string
+ * `"0.(3)"`) keeps its overline, and an explicit notation still marks the
+ * repeating digits of a float.
+ */
+describe('A FLOAT WITH REPEATING DIGITS stays a float after a LaTeX round trip', () => {
+  test('\\frac{1.0}{3} is written with its digits, not 0.\\overline{3}', () => {
+    const value = ce.parse('\\frac{1.0}{3}').evaluate();
+    // The number of digits depends on the precision of the engine.
+    expect(value.latex).toMatch(/^0\.333(\\,333)+(\\,3+)?$/);
+    expect(value.toLatex()).toBe(value.latex);
+    const again = ce.parse(value.latex);
+    expect(isNumber(again) && again.isExact).toBe(false);
+    expect(again.json).toEqual(value.json);
+  });
+
+  test('\\frac{2.0}{7} keeps its float on the round trip', () => {
+    const value = ce.parse('\\frac{2.0}{7}').evaluate();
+    expect(value.latex).not.toContain('\\overline');
+    const again = ce.parse(value.latex);
+    expect(isNumber(again) && again.isExact).toBe(false);
+    expect(again.N().re).toBeCloseTo(2 / 7, 15);
+  });
+
+  test('.N() of an exact rational is a float on the round trip', () => {
+    const value = ce.parse('\\frac{1}{7}').N();
+    expect(value.latex).toMatch(/^0\.142\\,857\\,142\\,857(\\,[0-9]+)+$/);
+    const again = ce.parse(value.latex);
+    expect(isNumber(again) && again.isExact).toBe(false);
+  });
+
+  test('an exact rational still serializes as a fraction', () => {
+    expect(ce.parse('\\frac{1}{3}').latex).toBe('\\frac{1}{3}');
+    expect(ce.parse('0.\\overline{3}').latex).toBe('\\frac{1}{3}');
+  });
+
+  test('an exact repeating decimal in MathJSON keeps its overline', () => {
+    const syntax = ce._requireLatexSyntax();
+    expect(syntax.serialize({ num: '0.(3)' })).toBe('0.\\overline{3}');
+    expect(syntax.serialize({ num: '0.12(34)' })).toBe('0.12\\overline{34}');
+    expect(ce.parse(syntax.serialize({ num: '0.(3)' })).json).toEqual([
+      'Rational',
+      1,
+      3,
+    ]);
+  });
+
+  test('a float in MathJSON gets no overline', () => {
+    const syntax = ce._requireLatexSyntax();
+    expect(syntax.serialize({ num: '0.333333333333333333333333' })).toBe(
+      '0.333\\,333\\,333\\,333\\,333\\,333\\,333\\,333'
+    );
+  });
+
+  test('an explicit notation still marks the repeating digits of a float', () => {
+    const value = ce.parse('\\frac{1}{7}').N();
+    expect(value.toLatex({ repeatingDecimal: 'vinculum' })).toBe(
+      '0.\\overline{142857}'
+    );
+    expect(value.toLatex({ repeatingDecimal: 'none' })).toBe(value.latex);
+  });
+});
+
+/**
+ * In MathJSON, a number string with a repetend (`"0.(3)"`) is an exact
+ * rational. So `toMathJson()` does not mark the repeating digits of a FLOAT by
+ * default: a float keeps its digits, and a MathJSON round trip keeps it a
+ * float. The option `repeatingDecimal: true` still marks them.
+ */
+describe('A FLOAT WITH REPEATING DIGITS stays a float after a MathJSON round trip', () => {
+  test('toMathJson() of 1.0/3 keeps the digits of the float', () => {
+    const value = ce.parse('\\frac{1.0}{3}').evaluate();
+    const json = value.toMathJson();
+    expect(JSON.stringify(json)).toMatch(/^"0\.3333+"$/);
+    const again = ce.box(json);
+    expect(isNumber(again) && again.isExact).toBe(false);
+    expect(again.isSame(value)).toBe(true);
+  });
+
+  test('.json of 1.0/3 boxes back as the same float', () => {
+    const value = ce.parse('\\frac{1.0}{3}').evaluate();
+    const again = ce.box(value.json);
+    expect(isNumber(again) && again.isExact).toBe(false);
+    expect(again.isSame(value)).toBe(true);
+  });
+
+  test('a float inside a function keeps its digits', () => {
+    const json = ce.parse('x + \\frac{1.0}{3}').evaluate().toMathJson();
+    expect(JSON.stringify(json)).not.toContain('(3)');
+  });
+
+  test('repeatingDecimal: true still marks the repeating digits of a float', () => {
+    const value = ce.parse('\\frac{1.0}{3}').evaluate();
+    expect(value.toMathJson({ repeatingDecimal: true })).toBe('0.(3)');
+    expect(
+      ce.parse('\\frac{1}{7}').N().toMathJson({ repeatingDecimal: true })
+    ).toBe('0.(142857)');
+  });
+
+  test('the LaTeX of the MathJSON of a float has no overline', () => {
+    const syntax = ce._requireLatexSyntax();
+    const value = ce.parse('\\frac{1.0}{3}').evaluate();
+    expect(syntax.serialize(value.json)).not.toContain('\\overline');
+    expect(syntax.serialize(value.toMathJson())).not.toContain('\\overline');
+  });
+
+  test('an exact rational serializes as a Rational', () => {
+    expect(ce.parse('\\frac{1}{3}').toMathJson()).toEqual(['Rational', 1, 3]);
+    expect(ce.box({ num: '0.(3)' }).toMathJson()).toEqual(['Rational', 1, 3]);
   });
 });

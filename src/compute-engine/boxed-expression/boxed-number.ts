@@ -598,6 +598,29 @@ export class BoxedNumber
       )
         return indeterminateFormAnswer(ce, [this, other]);
     }
+    // A real infinity plus a finite complex number is that infinity, as in
+    // the `Add` fold: `(1 + i) + ∞` is `+∞` (the direction of `x + i` as
+    // `x → ∞` is the positive real axis). The numeric-value arithmetic below
+    // would answer the complex number `∞ + i`, and the `Sum` fold of a
+    // collection adds its terms with this method, so `Sum([1 + i, +∞])` was
+    // `∞ + i`. The finite complex number must have a finite real part: a
+    // value such as `∞ + πi` (the limit `Arcosh(−∞)`) reports
+    // `isFinite === true`, and `(∞ + πi) + (−∞)` must stay the arithmetic's
+    // answer.
+    const finiteComplex = (x: Expression) =>
+      isNumber(x) &&
+      x.isComplex &&
+      x.isFinite === true &&
+      Number.isFinite(x.re);
+    const realInfinity = (x: Expression) =>
+      isNumber(x) && x.isInfinity === true && !x.isComplex;
+    if (typeof rhs === 'number') {
+      if ((rhs === Infinity || rhs === -Infinity) && finiteComplex(this))
+        return ce.number(rhs);
+    } else if (isNumber(rhs)) {
+      if (realInfinity(this) && finiteComplex(rhs)) return this;
+      if (realInfinity(rhs) && finiteComplex(this)) return rhs;
+    }
     // `0 + x` is `x`, but `0 + Missing` is `NaN`, not the absent symbol:
     // arithmetic with an absent operand is `NaN` (user decision of
     // 2026-09-25). A negation or product of an absent value (`-Missing`,
@@ -1939,12 +1962,12 @@ export function canonicalNumber(
 
   // Is it a Complex?
   if (value instanceof Complex) {
-    if (value.im === 0) return canonicalNumber(ce, value.re);
     if (value.isNaN()) return NaN;
-    if (!value.isFinite() && value.im === 0)
-      return value.re > 0 ? +Infinity : -Infinity;
+    // A signed infinity is a value of the extended real line, not a float.
+    if (value.im === 0 && !Number.isFinite(value.re)) return value.re;
 
-    // Exact when both parts are safe integers (see `_numericValue()`)
+    // A float, also when both parts are integers: a `Complex` holds two
+    // doubles (see `_numericValue()`).
     return ce._numericValue(value);
   }
 

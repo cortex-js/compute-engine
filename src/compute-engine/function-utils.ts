@@ -57,7 +57,10 @@ import {
   restParameterSymbol,
   resolveFunctionLiteralTypes,
 } from './boxed-expression/function-literal.js';
-import { collectTuplePattern } from './boxed-expression/tuple-pattern.js';
+import {
+  collectTuplePattern,
+  tuplePatternNames,
+} from './boxed-expression/tuple-pattern.js';
 import { liveScopeOf } from './boxed-expression/ambient-chain.js';
 import { errorValue, withErrorFrames } from './boxed-expression/error-value.js';
 import { canonicalFailureOf } from './boxed-expression/canonical-failure.js';
@@ -113,6 +116,8 @@ import {
   signatureEffects,
 } from '../common/type/utils.js';
 import { journalCheckpointMapEntry } from './checkpoint-journal.js';
+import { _BoxedValueDefinition } from './boxed-expression/boxed-value-definition.js';
+import { noteScopeDeclaration } from './scope-declaration-count.js';
 
 // Lazy reference to `validateArguments` (from `boxed-expression/validate.ts`).
 // A static import would create a cycle: `validate.ts → utils.ts →
@@ -2110,6 +2115,7 @@ export function evaluateStatements(
   ops: ReadonlyArray<Expression>,
   lastStatementOptions?: { numericApproximation: true }
 ): Expression {
+  createBlockLocals(ce, ops);
   let result: Expression = ce.Nothing;
   const last = ops.length - 1;
   for (let i = 0; i <= last; i++) {
@@ -2156,6 +2162,87 @@ export function evaluateStatements(
 }
 
 /**
+ * When a run of a list of statements starts (a `Block`, `evaluateBlock` in
+ * `library/control-structures.ts`, or the body of a function application),
+ * create a new binding for each name that a `Declare` statement of the list
+ * declares (a `let` or `const` local), in the current lexical scope, where
+ * these statements run. The binding has no value yet and is marked
+ * `_uninitialized`. Called by `evaluateStatements` and
+ * `evaluateStatementsAsync`.
+ *
+ * This gives each run of the block (each iteration of a loop body, each
+ * call of a function body) its own bindings from the start, as in
+ * JavaScript. A closure created in the block before the `Declare` runs
+ * captures the binding of its own run (`captureNestedLocals` below, or
+ * `captureClosures` for a function body), and the `Declare` then writes the
+ * value into that
+ * same binding (`declareOne` in the `Declare` handler, `library/core.ts`).
+ * Without this, the binding was created only when the `Declare` ran, so a
+ * closure created before it captured the binding of the previous run, or no
+ * binding at all on the first run:
+ * `for i in [1, 2] { fs = [...fs, () => k]; let k = i }` made closures that
+ * gave `k` and `1`, not `1` and `2`.
+ *
+ * A read of the local before its `Declare` has run is an error
+ * (`read-before-declaration`, see `BoxedSymbol.evaluate`). While the
+ * initializer of the `Declare` is evaluated, the `Declare` handler hides the
+ * binding, so `let t = t * 2` still reads the `t` of an enclosing scope.
+ *
+ * Only a binding that no other statement holds is replaced: a binding that
+ * a `Declare` of a previous run made (`_declaredByStatement`), or none. A
+ * binding of another kind (a clause that a later `function` statement
+ * installed at canonicalization) is left to the `Declare` handler.
+ */
+function createBlockLocals(
+  ce: ComputeEngine,
+  ops: ReadonlyArray<Expression>
+): void {
+  const scope = ce.context.lexicalScope;
+  for (const op of ops) {
+    if (!isFunction(op, 'Declare')) continue;
+    const target = op.ops[0];
+    const names = isSymbol(target)
+      ? [target.symbol]
+      : isFunction(target, 'Tuple')
+        ? tuplePatternNames(target)
+        : [];
+    for (const name of names) {
+      if (name === 'Nothing') continue;
+      const existing = scope.bindings.get(name);
+      if (
+        existing !== undefined &&
+        (existing as { _declaredByStatement?: boolean })
+          ._declaredByStatement !== true
+      )
+        continue;
+      // The binding is installed by direct map surgery, not with
+      // `ce.declare()`, so that it makes no `declare` state event: the
+      // `Declare` statement makes the declaration, with its event, when it
+      // runs, as it did before this binding existed. A binding with no value
+      // that a read reports as an error holds nothing that a cache could
+      // have read. The map write and the new definition half are journaled
+      // for `checkpoint()`/`restore()`, as `ce.declare()` does. The binding
+      // changes what the name resolves to in this scope, so it is counted as
+      // a declaration of the scope (`noteScopeDeclaration`).
+      journalCheckpointMapEntry(ce, scope.bindings, name, name, 'declare');
+      const half = new _BoxedValueDefinition(ce, name, {
+        type: 'unknown',
+        inferred: true,
+      });
+      ce._checkpointWindow?.noteCreated(half);
+      const local: BoxedDefinition & {
+        _declaredByStatement?: boolean;
+        _uninitialized?: boolean;
+      } = { value: half };
+      local._declaredByStatement = true;
+      local._uninitialized = true;
+      scope.bindings.set(name, local);
+      noteScopeDeclaration(scope);
+    }
+  }
+}
+
+/**
  * The asynchronous twin of `evaluateStatements`: each statement is awaited
  * with `evaluateAsync`, so a statement holding an asynchronous-only
  * application (an operator with only an `evaluateAsync` handler) is
@@ -2174,6 +2261,9 @@ export async function evaluateStatementsAsync(
   numericApproximation?: true,
   precisionWindow?: EvaluateOptions['_precisionWindow']
 ): Promise<Expression> {
+  // Before the first `await`, so the current lexical scope is still the
+  // scope of these statements.
+  createBlockLocals(ce, ops);
   let result: Expression = ce.Nothing;
   const last = ops.length - 1;
   for (let i = 0; i <= last; i++) {
@@ -3899,7 +3989,11 @@ const CLOSURE_LOCALS_SCOPES = new WeakSet<Scope>();
  *   creation is visible. A local is not shared with the next run of the
  *   block, because each run of a `Declare` statement after the first creates
  *   a new definition (`declareOne` in the `Declare` handler, `library/
- *   core.ts`). So each call of a counter factory counts separately.
+ *   core.ts`). So each call of a counter factory counts separately. A local
+ *   whose `Declare` has not run yet in this run of the block is the binding
+ *   that `createBlockLocals` made for it when the run started; the closure
+ *   keeps it, and the `Declare` gives it its definition when it runs
+ *   (`initializeBlockLocal`, `library/core.ts`).
  * - A loop or big-operator index gets a new binding that holds its current
  *   value, because the loop writes each value into the same definition: a
  *   closure created in iteration `i` reads `i`, like a comprehension element

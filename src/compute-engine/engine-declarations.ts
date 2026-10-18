@@ -2396,6 +2396,48 @@ export function declareFn(
 
   scope ??= ce.context.lexicalScope;
 
+  // A declaration in the global scope must not shadow a constant of a library
+  // (`Pi`, `ExponentialE`, `GoldenRatio`, `True`, …), for the same reason that
+  // `ce.assign('Pi', 3)` is refused. Engine code builds results with the
+  // library constant, and the MathJSON of such a result is only the name
+  // (`"Pi"`). If a global binding shadows the name, boxing that MathJSON
+  // again reads the user binding: after `declare('Pi', { value: 3 })`, the
+  // closed form `π²/6` of `Sum(1/n², n, 1, ∞)` re-boxes to `1.5`.
+  //
+  // Two kinds of declaration are not refused:
+  // - A declaration in a nested scope: a function parameter, the index of a
+  //   `Sum`, a local of a `Block`. That binding exists only while its
+  //   expression is evaluated, and a result that leaves the scope is boxed
+  //   again where the name is the library constant.
+  //   A host that calls `ce.pushScope()` and declares `Pi` there also makes
+  //   a nested scope, so it is not refused either.
+  // - A constant whose name never occurs in the MathJSON of a result, because
+  //   the name boxes to another form: `e` boxes to the symbol `ExponentialE`,
+  //   `i` and `ImaginaryUnit` to the complex literal `0 + 1i`, `Half` to the
+  //   rational `1/2`, `NaN` to a number literal. A program that uses `i` or
+  //   `e` as a variable (`let i = 1`) keeps working.
+  //
+  // The library installs its constants in the system scope, or in the global
+  // scope for `loadLibrary()`.
+  const systemScope = ce.contextStack[0]?.lexicalScope;
+  const globalScope = ce.contextStack[1]?.lexicalScope;
+  if (scope === globalScope) {
+    const visible = lookup(id, scope);
+    if (
+      visible !== undefined &&
+      isValueDef(visible) &&
+      visible.value.isConstant &&
+      (systemScope?.bindings.get(id) === visible ||
+        ce._libraryProvenance.get(id)?.binding === visible)
+    ) {
+      const boxed = ce.symbol(id);
+      if (isSymbol(boxed) && boxed.symbol === id)
+        throw Error(
+          `Cannot declare "${id}" in the global scope: it is a library constant (declare it in a nested scope)`
+        );
+    }
+  }
+
   // Extend mode replaces a binding of the same scope on purpose, so it skips
   // the "already declared" check below.
   if (extend) {

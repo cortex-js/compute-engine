@@ -539,7 +539,7 @@ describe('GPU USER FUNCTIONS — fail closed', () => {
   it('an arity mismatch fails closed', () => {
     const ce = engineWithF();
     expect(() => glsl.compile(ce.expr(['f', 'u', 'v']))).toThrow(
-      /called with 2 argument\(s\) but declared with 1/
+      /the function is declared with 1 parameter but called with 2/
     );
   });
 

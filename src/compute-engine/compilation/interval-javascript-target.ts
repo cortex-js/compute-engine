@@ -970,12 +970,24 @@ function literalRootPointOps(
 }
 
 /**
- * The emitted spelling of this target's numeric absence marker: a whole-NaN
- * bare interval. Kept in step with the `absence` capability declared in
- * `createTarget`, whose `isAbsent` test reads `.lo` directly — so the marker
- * must be a bare `Interval`, never an `IntervalResult` wrapper.
+ * The emitted spelling of this target's numeric marker: a whole-NaN bare
+ * interval, for a position whose interpreter value is `NaN` (`Max` of an
+ * empty list) or that reads past the end of a point. `_IA.isAbsent` reads it
+ * as absent. An absent value proper (a written `Missing`, an `At` that
+ * selects nothing) is `INTERVAL_EMPTY` instead.
  */
 const INTERVAL_ABSENCE = '{ lo: NaN, hi: NaN }';
+
+/**
+ * The emitted spelling of an ABSENT value on this target: the `empty`
+ * result, the value a restriction whose condition fails (`_IA.restrict`)
+ * gives. A written absence symbol (`Missing`, `Undefined`) and an `At` whose
+ * index selects nothing compile to it, so that a host reads one spelling of
+ * "no value" (the interpreter fallback gives `empty` too). The whole-NaN bare
+ * interval `INTERVAL_ABSENCE` has no `kind`, and so is not an interval result.
+ * `_IA.isAbsent` and `_IA.coalesce` read both as absent.
+ */
+const INTERVAL_EMPTY = "{ kind: 'empty' }";
 
 /**
  * The type of the coordinate `k` (0-based) that a point accessor reads out of
@@ -2502,13 +2514,12 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
           `no lowering that builds that selection at run time.`
       );
     // A literal collection indexed by a literal integer folds to the selected
-    // element (or to the absence marker when the index selects nothing),
+    // element (or to `empty` when the index selects nothing),
     // applying the interpreter's 1-based / negative-from-the-end convention at
     // compile time.
     const ops = literalCollectionOps(coll, target);
     // The element the interpreter's 1-based, negative-from-the-end
-    // convention selects, or the absence marker when the index selects
-    // nothing. Every DISCARDED element must be pure and free of code the
+    // convention selects, or `empty` when the index selects nothing. Every DISCARDED element must be pure and free of code the
     // caller supplied (a symbol mapped to live source, a head the caller
     // overrode): the interpreter evaluates the whole list, so dropping an
     // element with an effect would change how many times that effect runs.
@@ -2533,7 +2544,7 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         )
       )
         return undefined;
-      return selected < 0 ? INTERVAL_ABSENCE : compile(elements[selected]);
+      return selected < 0 ? INTERVAL_EMPTY : compile(elements[selected]);
     };
     if (ops !== undefined && isNumber(index) && !index.isComplex) {
       const i = index.re;
@@ -4947,8 +4958,9 @@ function hasIntervalBounds(
 
 /**
  * Wrap an interpreter fallback result as a value honoring the interval-js
- * `run` contract (`IntervalValue`). A number becomes the degenerate interval
- * `{ lo: v, hi: v }`; a collection (materialized to an array, possibly
+ * `run` contract (`IntervalValue`). A number becomes the interval result of
+ * the degenerate interval, `{ kind: 'interval', value: { lo: v, hi: v } }`;
+ * a collection (materialized to an array, possibly
  * nested) becomes the array of its elements' wrappings — the same shape a
  * compiled comprehension returns; any other value (a boolean, text) has no
  * interval reading and is reported as `entire`, the same "cannot bound"
@@ -4965,7 +4977,11 @@ function toIntervalValue(value: unknown): IntervalValue {
   // a host could tell from the value which route ran.
   if (value === undefined || (typeof value === 'number' && Number.isNaN(value)))
     return { kind: 'empty' };
-  if (typeof value === 'number') return { lo: value, hi: value };
+  // A present number is the interval result of a point, the value compiled
+  // code of this target gives for a computed number (`_IA.add(_.t, _k1)`
+  // answers `{ kind: 'interval', value: { lo, hi } }`).
+  if (typeof value === 'number')
+    return { kind: 'interval', value: { lo: value, hi: value } };
   if (Array.isArray(value)) return value.map(toIntervalValue);
   return { kind: 'entire' };
 }
@@ -5161,10 +5177,13 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
       // an absent list is the marker too (every collection consumer
       // propagates a non-array operand), an absent condition is the verdict
       // `'false'` (`_IA.restrict` over a relation), so the object-domain
-      // gate does not apply (`coversValueModel`). No object axis.
+      // gate does not apply (`coversValueModel`). No object axis. A written
+      // absence symbol is spelled by `make`, and is the `empty` result
+      // (`INTERVAL_EMPTY`), as an absent value of this target is wherever it
+      // arises at run time.
       absence: {
         numeric: {
-          make: () => '{ lo: NaN, hi: NaN }',
+          make: () => INTERVAL_EMPTY,
           isAbsent: (x) => `_IA.isAbsent(${x})`,
           coalesce: (x, d) => `_IA.coalesce(${x}, () => ${d})`,
           coversValueModel: true,
@@ -5262,7 +5281,9 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
    *
    * `BaseCompiler.buildInterpreterFallback` produces a runner that returns plain
    * numbers (and nested arrays for collections), so its scalar output is wrapped
-   * as a degenerate interval `{ lo: v, hi: v }`, and interval-shaped *inputs*
+   * as the interval result of a degenerate interval
+   * (`{ kind: 'interval', value: { lo: v, hi: v } }`), an absent value as
+   * `{ kind: 'empty' }` (`toIntervalValue`), and interval-shaped *inputs*
    * (`{ lo, hi }`) are collapsed to their midpoint before interpretation. A
    * non-scalar result cannot be bounded as a single interval, so it is reported
    * as `{ kind: 'entire' }` — the same "cannot bound" signal the runtime proxy

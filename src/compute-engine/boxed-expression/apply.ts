@@ -54,11 +54,13 @@ function boxMachineNumber(
  *
  * A number's `isExact` getter is authoritative. `ExactNumericValue`
  * represents exact complex values directly (Gaussian rationals like `1+i`,
- * `1/2+i`; pure-imaginary radicals like `√2·i`), and a complex value from
- * the host with integer parts (`ce.number(new Complex(2, 3))`) is stored
- * exact when it is created. A complex float is inexact even when both its
- * parts are integers (`1.0+1.0i`, or the result `(0.5+0.5i)·2`): it is not
- * read as exact from the values of its parts.
+ * `1/2+i`; pure-imaginary radicals like `√2·i`), and a complex value given
+ * as plain data with integer parts (`ce.number({ re: 2, im: 3 })`) is stored
+ * exact when it is created. A `Complex` object from complex.js
+ * (`ce.number(new Complex(2, 3))`) is a float, even when its parts are
+ * integers. A complex float is inexact even when both its parts are
+ * integers (`1.0+1.0i`, or the result `(0.5+0.5i)·2`): it is not read as
+ * exact from the values of its parts.
  *
  * Non-number-literal expressions (symbols like `Pi`, unevaluated functions)
  * are treated as exact here: they have no float to lose, and any exact
@@ -138,9 +140,8 @@ function boxKernelResult(
  * Otherwise (every argument is exact) a real result (`im === 0`) that is a
  * safe integer is exact, as `boxMachineNumber()` makes a real result exact.
  * A result with a nonzero imaginary part is a float, even when both its
- * parts are integers: it is boxed from the plain data `{re, im}`, never from
- * a `Complex`, which `_numericValue()` reads as a value from the host and
- * makes exact when its parts are integers.
+ * parts are integers: it is boxed from the plain data `{re, im}`, which
+ * `_numericValue()` makes a float when the imaginary part is not zero.
  */
 export function boxComplexKernelResult(
   ce: IComputeEngine,

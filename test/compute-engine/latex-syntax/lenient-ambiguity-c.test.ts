@@ -285,9 +285,23 @@ describe('a name in parentheses is a factor, not a function head', () => {
   });
 
   test('a function inferred from an earlier use is still a factor', () => {
+    // The factor `h` is a function, not a number, so the product checks it
+    // against the signature of `Multiply` and makes it an `incompatible-type`
+    // error, as the explicit operator does (`(h)\times(x)`).
     const local = new ComputeEngine();
     local.parse('h(x)');
-    expect(local.parse('(h)(x)').json).toEqual(['Multiply', 'h', 'x']);
+    expect(local.parse('(h)(x)').json).toEqual([
+      'Multiply',
+      [
+        'Error',
+        ['ErrorCode', "'incompatible-type'", "'number'", "'function'"],
+        'h',
+      ],
+      'x',
+    ]);
+    expect(local.parse('(h)(x)').json).toEqual(
+      local.parse('(h)\\times(x)').json
+    );
   });
 
   test('a declared function in parentheses is still applied', () => {

@@ -445,6 +445,7 @@ describe('new integration reductions respect bindings and budgets', () => {
   });
   test('a shadowed output constant cannot enter a closed formula', () => {
     const engine = new ComputeEngine();
+    engine.pushScope();
     engine.declare('EulerGamma', { value: 100 });
     expect(
       integral(['Fract', ['Divide', 1, 'x']], 0, 1, engine).has('Integrate')

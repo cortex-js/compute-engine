@@ -79,6 +79,7 @@ import {
 import {
   asFloat,
   floatIfFloatOperand,
+  floatResultIfFloatOperand,
   hasFloatOperand,
 } from '../boxed-expression/float-result.js';
 import { flatten, flattenSequence } from '../boxed-expression/flatten.js';
@@ -1666,6 +1667,93 @@ function rationalTierOf(
 }
 
 /**
+ * The numeric type of one cell of a collection or tuple type: the element
+ * type with every collection rank unwrapped, and the join of the components
+ * for a tuple. A scalar type is its own cell.
+ */
+function numericCellTypeOf(t: Type): Type {
+  const cell = resolveTypeAlias(broadcastCellType(t));
+  if (typeof cell === 'object' && cell.kind === 'tuple')
+    return widenAll(cell.elements.map((e) => numericCellTypeOf(e.type)));
+  return cell;
+}
+
+/**
+ * Whether a cell of the element-wise sum or product of `ops` is a float
+ * whose type claims the `rational` tier, so that the cell must be typed
+ * `real` instead (the downgrade `rationalTierOf()` applies to a scalar).
+ *
+ * A float with an integer value inside a list or tuple LITERAL (`1.0` in
+ * `[1.0, 2]`) is typed `integer` in the type of the literal
+ * (`numberLiteralTierType`, `boxed-expression/literal-tier.ts`), so the type
+ * of the result cells cannot see it: `[1.0, 2] / 3` was typed
+ * `vector<rational^2>` and evaluates to `[0.333…, 2/3]`. The structural view
+ * of the literal can see it, and each element is read with its own
+ * descriptor.
+ *
+ * Each cell of a shaped operand (each element of a literal, at any depth, or
+ * the cell type of an operand that is not a literal) is checked together
+ * with the scalar operands and with the cell type of each other shaped
+ * operand. The cell is a float in the `rational` tier when the operands of
+ * the cell are all rational, not all integers, and one is a float literal.
+ * A float cell beside integers only is an integer-valued float, which the
+ * `integer` tier admits (`[1.0, 2] · 3` is `[3.0, 6]`).
+ */
+function hasFloatRationalCell(ops: ReadonlyArray<OperandDescriptor>): boolean {
+  const scalars = ops.filter((x) => isSubtype(x.type, 'number'));
+  const shaped = ops.filter((x) => !isSubtype(x.type, 'number'));
+  const cellIsFloatRational = (
+    cell: OperandDescriptor,
+    partners: ReadonlyArray<OperandDescriptor>
+  ): boolean => {
+    const structure = cell.structureOf?.();
+    if (structure?.kind === 'list-literal' || structure?.kind === 'tuple')
+      return structure.elements.some((e) => cellIsFloatRational(e, partners));
+    const operands = [
+      isSubtype(cell.type, 'number')
+        ? cell
+        : describeType(numericCellTypeOf(cell.type)),
+      ...partners,
+    ];
+    if (operands.every((x) => factsOf(x.type).integer)) return false;
+    return (
+      operands.every((x) => factsOf(x.type).rational) &&
+      rationalTierOf(operands) === 'real'
+    );
+  };
+  return shaped.some((x) =>
+    cellIsFloatRational(x, [
+      ...scalars,
+      ...shaped
+        .filter((y) => y !== x)
+        .map((y) => describeType(numericCellTypeOf(y.type))),
+    ])
+  );
+}
+
+/**
+ * The type `t` of an element-wise sum or product of `ops`, with each cell in
+ * the `rational` tier typed `real` when a cell of the result is a float (see
+ * `hasFloatRationalCell()`). The cells that are not floats are typed `real`
+ * too: the type of a list has one element type for all its elements.
+ */
+function withFloatRationalCellsAsReal(
+  ops: ReadonlyArray<OperandDescriptor>,
+  t: Type
+): Type {
+  // The cells are mapped first, and the operands are read only when a cell
+  // is in the `rational` tier: reading them walks each element of a literal.
+  let changed = false;
+  const mapped = mapProductCells(t, (cell) => {
+    if (!isSubtype(cell, 'rational') || isSubtype(cell, 'integer')) return cell;
+    changed = true;
+    return 'real';
+  });
+  if (mapped === undefined || !changed || !hasFloatRationalCell(ops)) return t;
+  return mapped;
+}
+
+/**
  * The parity of the numerator of a LITERAL rational exponent `p/q` in
  * lowest terms with an odd denominator `q > 1`, as `{ numeratorEven }`;
  * `undefined` for an integer, a float, a symbol or a compound exponent, and
@@ -3080,13 +3168,16 @@ function addTypeOnTypes(
       // beside a definite collection already has — so only its tuple shape
       // reaches the cell; a number it may hold sums with a point to an
       // error the value path reports per cell, which no static type spells.
-      return broadcastResultType(
-        widenAll(
-          args.map((x) =>
-            stripNumericRanges(
-              typeCouldBeNumericTuple(x.type)
-                ? numericTupleArms(x.type)
-                : pointListElementTypeOf(x.type)!
+      return withFloatRationalCellsAsReal(
+        args,
+        broadcastResultType(
+          widenAll(
+            args.map((x) =>
+              stripNumericRanges(
+                typeCouldBeNumericTuple(x.type)
+                  ? numericTupleArms(x.type)
+                  : pointListElementTypeOf(x.type)!
+              )
             )
           )
         )
@@ -3104,7 +3195,8 @@ function addTypeOnTypes(
     // integer>` plus `tuple<integer, integer, real>`), so every same-arity
     // tuple sum takes this branch; `tupleComponentwiseAddType` says why.
     const componentwise = tupleComponentwiseAddType(args);
-    if (componentwise !== undefined) return componentwise;
+    if (componentwise !== undefined)
+      return withFloatRationalCellsAsReal(args, componentwise);
     return widenAll(args.map((x) => stripNumericRanges(x.type)));
   }
   // Element-wise sum of a single tensor (vector/matrix) with scalars keeps
@@ -3121,9 +3213,12 @@ function addTypeOnTypes(
           !isBroadcastCollectionTypeOf(x.type)
       )
     )
-      return absorbScalarsIntoCells(
-        tensors[0].type,
-        others.map((x) => x.type)
+      return withFloatRationalCellsAsReal(
+        args,
+        absorbScalarsIntoCells(
+          tensors[0].type,
+          others.map((x) => x.type)
+        )
       );
   }
   // Collection-typed operands widen to the collection type. Handled before
@@ -3140,9 +3235,12 @@ function addTypeOnTypes(
         shaped.map((x) => stripNumericRanges(broadcastSiblingType(x.type)))
       );
       const scalars = args.filter((x) => !isBroadcastShaped(x));
-      return absorbScalarsIntoCells(
-        collected,
-        scalars.map((x) => x.type)
+      return withFloatRationalCellsAsReal(
+        args,
+        absorbScalarsIntoCells(
+          collected,
+          scalars.map((x) => x.type)
+        )
       );
     }
     return widenAll(args.map((x) => stripNumericRanges(x.type)));
@@ -6990,15 +7088,19 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           context.engine._typeResolver
         );
       },
-      evaluate: (ops, { numericApproximation, engine }) => {
-        if (ops.length !== 2) return undefined;
-        return evaluateHurwitzZeta(
-          engine,
-          ops[0],
-          ops[1],
-          numericApproximation
-        );
-      },
+      // A float operand gives a float result, also for the exact special
+      // values (`HurwitzZeta(0.0, 2)` is the float `-1.5`, not `-3/2`).
+      evaluate: floatResultIfFloatOperand(
+        (ops, { numericApproximation, engine }) => {
+          if (ops.length !== 2) return undefined;
+          return evaluateHurwitzZeta(
+            engine,
+            ops[0],
+            ops[1],
+            numericApproximation
+          );
+        }
+      ),
     },
 
     // Dirichlet eta η(s) = Σ_{n≥1} (−1)^(n−1) n^(−s), entire. Wolfram's
@@ -7071,17 +7173,21 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           context.engine._typeResolver
         );
       },
-      evaluate: (ops, { numericApproximation, engine, expression }) => {
-        if (ops.length !== 3) return undefined;
-        return evaluateLerchPhi(
-          engine,
-          ops[0],
-          ops[1],
-          ops[2],
-          numericApproximation,
-          expression
-        );
-      },
+      // A float operand gives a float result, also for the exact special
+      // values (`LerchPhi(0.0, 1, 1)` is the float `1`).
+      evaluate: floatResultIfFloatOperand(
+        (ops, { numericApproximation, engine, expression }) => {
+          if (ops.length !== 3) return undefined;
+          return evaluateLerchPhi(
+            engine,
+            ops[0],
+            ops[1],
+            ops[2],
+            numericApproximation,
+            expression
+          );
+        }
+      ),
     },
 
     // Beta function B(a,b) = Γ(a)Γ(b)/Γ(a+b) = ∫₀¹ t^(a-1)(1-t)^(b-1) dt
@@ -8343,11 +8449,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               : (resolveTypeAlias(tensor.type) as ListType).dimensions;
           if (dims !== undefined)
             return BoxedType.forResult(
-              { kind: 'list', elements: scaled, dimensions: dims },
+              withFloatRationalCellsAsReal(ops, {
+                kind: 'list',
+                elements: scaled,
+                dimensions: dims,
+              }),
               engine._typeResolver
             );
           return BoxedType.forResult(
-            broadcastResultType(scaled),
+            withFloatRationalCellsAsReal(ops, broadcastResultType(scaled)),
             engine._typeResolver
           );
         }
@@ -8373,9 +8483,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           const others = ops.filter((x) => x !== tupleOps[0]);
           if (others.every((x) => isDeclaredScalarNumberOperand(x, engine)))
             return BoxedType.forResult(
-              scaleTupleComponents(
-                tupleOps[0].type,
-                others.map((x) => x.type)
+              withFloatRationalCellsAsReal(
+                ops,
+                scaleTupleComponents(
+                  tupleOps[0].type,
+                  others.map((x) => x.type)
+                )
               ),
               engine._typeResolver
             );
@@ -8414,9 +8527,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             // declared type stays a sound upper bound (`x·[0,0,1,1]` has
             // `number` cells, not `integer`).
             return BoxedType.forResult(
-              absorbScalarsIntoCells(
-                tensorOps[0].type,
-                others.map((x) => x.type)
+              withFloatRationalCellsAsReal(
+                ops,
+                absorbScalarsIntoCells(
+                  tensorOps[0].type,
+                  others.map((x) => x.type)
+                )
               ),
               engine._typeResolver
             );
@@ -8468,9 +8584,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           );
           if (others.every((x) => isDeclaredScalarNumberOperand(x, engine)))
             return BoxedType.forResult(
-              absorbScalarsIntoCells(
-                collectionOps[0].type,
-                others.map((x) => x.type)
+              withFloatRationalCellsAsReal(
+                ops,
+                absorbScalarsIntoCells(
+                  collectionOps[0].type,
+                  others.map((x) => x.type)
+                )
               ),
               engine._typeResolver
             );
@@ -8523,18 +8642,41 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               scalarSiblings.push(el);
               return true;
             });
+          // The SCALAR factors beside the collections scale every cell too:
+          // `[1, 2]·[3, 4]·(1/3)` is `[1, 8/3]`, so they widen the cell type
+          // as in the single-collection branch above. Without them the
+          // product was typed `vector<integer^2>`. Only declared scalar
+          // numbers carry a tier to combine, as in that branch.
+          const scalarFactors = ops.filter((x) => !collectionOps.includes(x));
+          const scalarTypes = scalarFactors.every((x) =>
+            isDeclaredScalarNumberOperand(x, engine)
+          )
+            ? scalarFactors.map((x) => x.type)
+            : [];
           if (siblingsAreRank1Scalars)
             return BoxedType.forResult(
-              absorbScalarsIntoCells(tupleCollections[0].type, scalarSiblings),
+              withFloatRationalCellsAsReal(
+                ops,
+                absorbScalarsIntoCells(tupleCollections[0].type, [
+                  ...scalarSiblings,
+                  ...scalarTypes,
+                ])
+              ),
               engine._typeResolver
             );
           // Strip range decorations before the join: a product of two
           // `list<real<-1..>>` operands does not stay above −1
           // (see `stripNumericRanges`).
           return BoxedType.forResult(
-            widen(
-              ...collectionOps.map((x) =>
-                stripNumericRanges(broadcastSiblingType(x.type))
+            withFloatRationalCellsAsReal(
+              ops,
+              absorbScalarsIntoCells(
+                widen(
+                  ...collectionOps.map((x) =>
+                    stripNumericRanges(broadcastSiblingType(x.type))
+                  )
+                ),
+                scalarTypes
               )
             ),
             engine._typeResolver

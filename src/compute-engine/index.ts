@@ -111,6 +111,10 @@ import {
   _mapAutoCompileStats,
   type MapAutoCompileStats,
 } from './map-auto-compile-stats.js';
+import {
+  cacheStatsControl,
+  type CacheStatsControl,
+} from '../common/cache-stats.js';
 
 import { getStandardLibrary } from './library/library.js';
 import { pipeStageAsCall } from './library/core.js';
@@ -2139,6 +2143,17 @@ export class ComputeEngine implements IComputeEngine {
     return _mapAutoCompileStats;
   }
 
+  /** The statistics of the memoization caches, for a host that uses the
+   * published package: a module export of `common/cache-stats.ts` is not
+   * reachable there, and a browser has no `CE_CACHE_STATS` environment
+   * variable. The counters are process-global, so every engine returns the
+   * same object.
+   * @internal
+   */
+  get _cacheStats(): CacheStatsControl {
+    return cacheStatsControl;
+  }
+
   /** Throw `CancellationError` `iteration-limit-exceeded` when the iteration limit
    * in a loop or a lazy walk is exceeded. Default: 1024. A value of 0 or less
    * means no limit.
@@ -2498,10 +2513,11 @@ export class ComputeEngine implements IComputeEngine {
    *   `ce.box(["Complex", {num: "1e-800"}, {num: "2"}])`;
    * - LaTeX, for example `ce.parse("10^{-800} + 2i")`.
    *
-   * `ce.number()` and `ce.box()` read a `Complex` as a value from the host:
-   * when both its parts are safe integers, the boxed number is the EXACT
-   * Gaussian integer (`ce.number(ce.complex(2, 3))` is the exact `2+3i`, as
-   * `ce.number(2)` is the exact `2`); otherwise it is a float.
+   * A `Complex` holds two doubles, so `ce.number()` and `ce.box()` read it
+   * as a float, also when both its parts are integers:
+   * `ce.number(ce.complex(2, 3))` is the float `2.0 + 3.0i`. For the exact
+   * Gaussian integer `2+3i`, use `ce.number({ re: 2, im: 3 })` or
+   * `ce.box(["Complex", 2, 3])`.
    *
    * The return value is an object with methods to perform arithmetic
    * operations:
@@ -2620,22 +2636,13 @@ export class ComputeEngine implements IComputeEngine {
 
     if (value instanceof BigDecimal) return makeNumericValue(value);
 
-    // A complex value from the host follows the rule of a real double: when
-    // both parts are safe integers it is the exact Gaussian integer, as
-    // `ce.number(2)` is the exact `2`. Otherwise it is a float. A numeric
-    // computation that produces a complex double must not come through here,
-    // because its result is inexact even when both parts are integers: it
-    // uses `_inexactNumericValue()` (see `boxComplexKernelResult()`).
+    // A `Complex` object holds two doubles, so its value is a float, also
+    // when both parts are integers: `new Complex(2, 3)` is the float
+    // `2.0 + 3.0i` and `new Complex(2, 0)` is the float `2.0`. The exact
+    // Gaussian integer `2 + 3i` is `ce.number({ re: 2, im: 3 })` or the
+    // MathJSON `["Complex", 2, 3]`.
     if (value instanceof Complex) {
-      if (value.im === 0) return this._numericValue(value.re);
-      if (Number.isSafeInteger(value.re) && Number.isSafeInteger(value.im))
-        return new ExactNumericValue(
-          {
-            rational: [value.re === 0 ? 0 : value.re, 1],
-            imRational: [value.im, 1],
-          },
-          makeNumericValue
-        );
+      if (value.im === 0) return makeNumericValue(value.re);
       return makeNumericValue({ re: value.re, im: value.im });
     }
 
@@ -3291,6 +3298,15 @@ export class ComputeEngine implements IComputeEngine {
    *
    * Set the type to `unknown` if the type is not known yet: it will be
    * inferred based on usage. Use `any` for a very generic type.
+   *
+   * A declaration in the global scope cannot shadow a constant of the
+   * library whose name results carry in MathJSON (`Pi`, `ExponentialE`,
+   * `GoldenRatio`, `True`, ...): `ce.declare('Pi', { value: 3 })` throws, as
+   * `ce.assign('Pi', 3)` does. A result built with the library π serializes
+   * as the name `"Pi"`, and a global user binding of `Pi` would read that
+   * name with the user value. A declaration in a nested scope
+   * (`ce.pushScope()`, a function parameter, a `Block` local) is allowed, and
+   * so are the input spellings `e` and `i`, which no result carries by name.
    *
    * The third argument is the scope to declare in, or an options object
    * `{ scope?, extend? }` (see {@link DeclareOptions}).

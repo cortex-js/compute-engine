@@ -414,7 +414,9 @@ describe('Exact lane: division by zero and signed infinity', () => {
   });
 
   it('a complex n/0 is the complex infinity', () => {
-    const z = ce._numericValue(ce.complex(2, 3));
+    // The exact Gaussian integer 2 + 3i (a `Complex` object is a float)
+    const z = ce._numericValue({ rational: [2, 1], imRational: [3, 1] });
+    expect(z.isExact).toBe(true);
     expect(z.div(0).isComplexInfinity).toBe(true);
     expect(z.div(exact(0)).isComplexInfinity).toBe(true);
   });

@@ -431,9 +431,10 @@ function propagatePartial(args: unknown[], result: unknown): unknown {
  * - a point result (`floor(x)^0`) means the operation is constant over the
  *   whole enclosure, so there is no discontinuity to report;
  * - a non-finite bound is not a finite jump. It is returned untouched rather
- *   than degraded to a pole, so the collection accessors' absence marker (a
- *   bare `{ lo: NaN, hi: NaN }`, see `collections.ts`) survives an absent
- *   `at(list, floor(x))`, and a division that reaches an infinite bound
+ *   than degraded to a pole, so the collection accessors' numeric marker (a
+ *   bare `{ lo: NaN, hi: NaN }`, see `collections.ts`) survives
+ *   `at(v, floor(x))` over an operand `v` that is not a collection, and a
+ *   division that reaches an infinite bound
  *   keeps the `partial` shape `div` gives it.
  *
  * Every exported operation that takes interval operands and returns an

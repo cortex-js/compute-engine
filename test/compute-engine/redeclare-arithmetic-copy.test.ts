@@ -231,6 +231,93 @@ describe('the library canonical handler and the operator flags', () => {
   });
 });
 
+//
+// The library `Add` and `Multiply` are `lazy` because their numeric
+// `canonical` handler canonicalizes the held operands. When a definition
+// loses that handler, it also loses the `lazy` flag, so its operands are
+// canonicalized as those of a user operator (user decision 2026-10-17).
+// Before, the definition stayed lazy with no `canonical` handler: its
+// operands stayed unbound and a parse `Delimiter` stayed in the canonical
+// form, `["Add", ["Delimiter", ["Add", "a", "b"]], "c"]`.
+//
+describe('a definition that loses the library handler also loses `lazy`', () => {
+  test.each([
+    ['Add', '(a+b)+c', ['Add', ['Add', 'a', 'b'], 'c']],
+    ['Multiply', '(ab)c', ['Multiply', 'c', ['Multiply', 'a', 'b']]],
+  ] as const)(
+    '%s extended with `associative: false`',
+    (name, latex, expected) => {
+      const ce = new ComputeEngine();
+      ce.declare(name, { associative: false }, { extend: true });
+      const def = ce.lookupDefinition(name)!.operator!;
+      expect(def.canonical).toBeUndefined();
+      expect(def.lazy).toBe(false);
+      // Box route.
+      expect(
+        ce.box([name, ['Delimiter', [name, 'a', 'b']], 'c']).json
+      ).toEqual(expected);
+      // Parse route.
+      if (name === 'Add') expect(ce.parse(latex).json).toEqual(expected);
+    }
+  );
+
+  test('the copy route gives the same form as a definition from scratch', () => {
+    const copy = new ComputeEngine();
+    copy.declare('Add', {
+      ...copy.lookupDefinition('Add')!.operator!,
+      associative: false,
+    });
+    expect(copy.lookupDefinition('Add')!.operator!.lazy).toBe(false);
+
+    const scratch = new ComputeEngine();
+    scratch.declare('Add', {
+      signature: '(number*) -> number',
+      commutative: true,
+    });
+    const input: any = ['Add', ['Delimiter', ['Add', 'a', 'b']], 'c'];
+    expect(copy.box(input).json).toEqual(['Add', ['Add', 'a', 'b'], 'c']);
+    expect(copy.box(input).json).toEqual(scratch.box(input).json);
+    expect(copy.parse('(a+b)+c').json).toEqual(scratch.parse('(a+b)+c').json);
+  });
+
+  test('the copy still evaluates', () => {
+    const ce = new ComputeEngine();
+    ce.declare('Add', { associative: false }, { extend: true });
+    expect(ce.parse('(2+3)+4').evaluate().toString()).toBe('9');
+    ce.declare('Multiply', { associative: false }, { extend: true });
+    expect(ce.parse('(2\\cdot 3)\\cdot 4').evaluate().toString()).toBe('24');
+  });
+
+  test('a copy of `Add` under another name is not lazy', () => {
+    const ce = new ComputeEngine();
+    ce.declare('MyAdd', libraryDefinitionWithoutName(ce, 'Add'));
+    expect(ce.lookupDefinition('MyAdd')!.operator!.lazy).toBe(false);
+    expect(ce.box(['MyAdd', ['Delimiter', 'x'], 1]).json).toEqual([
+      'MyAdd',
+      'x',
+      1,
+    ]);
+  });
+
+  test('a `lazy` flag that the library definition does not have is kept', () => {
+    // `Ln` is not lazy in the library: here the `lazy` flag is the reason
+    // the handler is removed, and the author asked for it.
+    const ce = new ComputeEngine();
+    ce.declare('Ln', { ...ce.lookupDefinition('Ln')!.operator!, lazy: true });
+    const def = ce.lookupDefinition('Ln')!.operator!;
+    expect(def.canonical).toBeUndefined();
+    expect(def.lazy).toBe(true);
+  });
+
+  test('an unchanged copy keeps the handler and `lazy`', () => {
+    const ce = new ComputeEngine();
+    ce.declare('Add', { ...ce.lookupDefinition('Add')!.operator! });
+    const def = ce.lookupDefinition('Add')!.operator!;
+    expect(def.canonical).toBeDefined();
+    expect(def.lazy).toBe(true);
+  });
+});
+
 /** The library definition of `name`, without its `name` field, so that it
  * can be declared under another name. */
 function libraryDefinitionWithoutName(ce: ComputeEngine, name: string): any {

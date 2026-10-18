@@ -262,9 +262,17 @@ export type JsonSerializationOptions = {
   metadata: ('all' | 'wikidata' | 'latex' | 'sourceOffsets')[];
 
   /**
-   * If true, detect and serialize repeating decimals (for example `0.(3)`).
+   * If true, look for a repeating pattern in the digits of a float and
+   * write it as a repetend in parentheses (for example `0.(3)`).
    *
-   * **Default**: `true`
+   * A number string with a repetend is an exact rational in MathJSON:
+   * `ce.box({ num: "0.(3)" })` is the exact `1/3`. So with `true`, a float
+   * whose digits repeat is read back as an exact number. With `false`, a
+   * float keeps its digits (`"0.333333333333333333333"`), and a MathJSON
+   * round trip keeps it a float. An exact rational serializes as
+   * `["Rational", 1, 3]` with either value.
+   *
+   * **Default**: `false`
    */
   repeatingDecimal: boolean;
 

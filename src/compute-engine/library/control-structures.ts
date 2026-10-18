@@ -2483,8 +2483,8 @@ function evaluateBlock(
   // `k`, while the same function with a bare `k` returned the argument.
   // (Epsil wraps each `if` branch in a Block, which is why the conditional
   // shape surfaced it.) Locals from a previous evaluation of this block carry
-  // the marker and are still kept — reset by `Declare`'s statement-redeclare
-  // path, not here.
+  // the marker and are still kept — replaced when the statements start
+  // (`createBlockLocals`, called by `evaluateStatements`).
   sweepCanonicalizationBindings(ce);
 
   // If the block's final value is a bare symbol bound to a user-defined

@@ -31,10 +31,18 @@ describe('ce.number({ re, im })', () => {
   });
 
   test('double parts give the same value as ce.complex()', () => {
-    const a = ce.number({ re: 1, im: 2 });
-    const b = ce.number(ce.complex(1, 2));
+    const a = ce.number({ re: 1.5, im: 2.5 });
+    const b = ce.number(ce.complex(1.5, 2.5));
     expect(a.isSame(b)).toBe(true);
     expect(a.json).toEqual(b.json);
+  });
+
+  test('integer parts are exact in { re, im }, a float in ce.complex()', () => {
+    // A `Complex` object holds two doubles, so it is always a float
+    const a = ce.number({ re: 1, im: 2 });
+    const b = ce.number(ce.complex(1, 2));
+    expect(a.json).toEqual(['Complex', 1, 2]);
+    expect(b.json).toEqual(['Complex', { num: '1.0' }, { num: '2.0' }]);
   });
 
   test('a zero imaginary part gives a real number', () => {

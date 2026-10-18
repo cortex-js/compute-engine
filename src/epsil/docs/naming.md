@@ -110,13 +110,32 @@ The constants `e` and `i` are lowercase library values already: `e^2` is
 the exponential, `i^2` is `-1`, and `1 + 2i` is a complex number. They
 shadow like any other name — `let e = 3; e^2` is `9`.
 
-The capitalized spelling shadows the same way: `let Pi = 3` makes `Pi` the
-number `3` for the rest of its scope, and `function Square(x) { x + 100 }`
-makes `Square(3)` call that function. Shadowing a name that an operator
-builds changes the operator too: `+` is `Add`, so a user `Add` is what `+`
-calls in its scope, and a definition such as `function Add(x, y) { x + y }`
-calls itself without end. Compiled code does not use a shadowed library
-operator: the call is interpreted instead.
+The capitalized spelling shadows the same way in a nested scope: in a
+function body, `let Pi = 3` makes `Pi` the number `3` for the rest of the
+body, and `function Square(x) { x + 100 }` makes `Square(3)` call that
+function.
+
+At the top level of a program, a `let` or a `const` of a library constant
+that results carry by name (`Pi`, `ExponentialE`, `GoldenRatio`, `True`) is
+an error, as an assignment to it is. The engine writes a result built with
+the library π as the name `Pi` in MathJSON. A top-level binding of `Pi`
+would make that name read the user value when the result is read again.
+
+```epsil
+let Pi = 3
+// ➔ error: Cannot declare "Pi" in the global scope: it is a library constant
+Pi
+// ➔ pi
+```
+
+The constants `e` and `i` are not in this group. The engine never writes
+them by name in a result (it writes `ExponentialE` and a complex number), so
+`let e = 3` and `let i = 1` are correct at the top level.
+
+Shadowing a name that an operator builds changes the operator too: `+` is
+`Add`, so a user `Add` is what `+` calls in its scope, and a definition such
+as `function Add(x, y) { x + y }` calls itself without end. Compiled code
+does not use a shadowed library operator: the call is interpreted instead.
 
 The absence markers `Nothing`, `Missing` and `Undefined` are the exception:
 they cannot be rebound, and a binding of one of them is an error

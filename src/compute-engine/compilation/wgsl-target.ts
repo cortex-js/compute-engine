@@ -10,9 +10,10 @@ import {
   gpuAssertExpressionBody,
   type GPUShapeRules,
 } from './gpu-target.js';
-import { BaseCompiler } from './base-compiler.js';
+import { BaseCompiler, isTailAssignmentBlock } from './base-compiler.js';
 import { tryGetConstant } from './constant-folding.js';
 import { gpuAmplifiedTrigMod } from './gpu-exact-trig.js';
+import { isFunction, isSymbol } from '../boxed-expression/type-guards.js';
 
 /**
  * WGSL-specific function overrides.
@@ -195,6 +196,28 @@ function toWGSLType(type: string): string {
 }
 
 /**
+ * The first name of `params` that `expr` assigns (`Assign(x, …)` with `x` in
+ * `params`), at any depth, or `undefined` when it assigns none.
+ */
+function wgslAssignedParameter(
+  expr: Expression,
+  params: ReadonlySet<string>
+): string | undefined {
+  if (!isFunction(expr)) return undefined;
+  if (
+    expr.operator === 'Assign' &&
+    isSymbol(expr.ops[0]) &&
+    params.has(expr.ops[0].symbol)
+  )
+    return expr.ops[0].symbol;
+  for (const op of expr.ops) {
+    const found = wgslAssignedParameter(op, params);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
+
+/**
  * Where WGSL admits a SCALAR among otherwise-`vecN` operands — a much shorter
  * list than GLSL's.
  *
@@ -281,10 +304,51 @@ export class WGSLTarget extends GPUShaderTarget {
     // the block hook having done so. A body whose value statement is an
     // assignment or a declaration has neither emission (D6) — WGSL
     // assignment is a STATEMENT, unlike GLSL (see `gpuAssertExpressionBody`).
-    gpuAssertExpressionBody('compileFunction()', expr, this.languageId);
+    //
+    // A block whose last statement is an assignment to a name, or a
+    // `Declare` with an initializer (`isTailAssignmentBlock`), is not
+    // declined before it is compiled: the block hook emits that statement
+    // followed by `return <name>;` (`Block(s ≔ x; t ≔ s)` → `s = x;`,
+    // `t = s;`, `return t;`), so the multi-line branch below carries it, as
+    // `compile()` does for the same body. The emitted body is checked
+    // instead: a single-statement block with no local is unwrapped to its
+    // statement and emits the single line `s = x`, which stays declined.
+    const tailAssignment = isTailAssignmentBlock(expr);
+    if (!tailAssignment)
+      gpuAssertExpressionBody('compileFunction()', expr, this.languageId);
+    // A WGSL function parameter is an immutable value, so an assignment to it
+    // (`x = x + 1.0;` in `fn f(x: f32)`) is not valid source. GLSL passes a
+    // parameter as a copy that the body can write, so only WGSL declines. The
+    // test is conservative: an assignment to the same name inside a nested
+    // function literal that binds the name again also declines.
+    const assigned = wgslAssignedParameter(
+      expr,
+      new Set(parameters.map(([name]) => name))
+    );
+    if (assigned !== undefined)
+      throw new Error(
+        `Could not compile with \`compileFunction()\`: the body assigns the ` +
+          `parameter "${assigned}", and a WGSL function parameter is an ` +
+          `immutable value. Assign a local copy of it instead ` +
+          `(\`Block(y ≔ ${assigned}; y ≔ y + 1; y)\`).`
+      );
     // Compiled under the caller's declared parameter shapes, so the body
     // analysis agrees with the signature emitted below.
     const body = this.compileDeclaredFunctionBody(expr, parameters, options);
+    // The body is accepted only when its last line is `return <name>;` and
+    // the line before it is the assignment `<name> = …;`: when the block hook
+    // does not recognize the assignment target, it puts `return` in front of
+    // the whole assignment (`return a[0] = x;`), which is not valid WGSL.
+    if (tailAssignment) {
+      const lines = body.split('\n');
+      const returned = /^return\s+([^\s;]+);?$/.exec(lines[lines.length - 1]);
+      if (
+        lines.length < 2 ||
+        returned === null ||
+        !lines[lines.length - 2].startsWith(`${returned[1]} = `)
+      )
+        gpuAssertExpressionBody('compileFunction()', expr, this.languageId);
+    }
 
     const params = parameters
       .map(([name, type]) => `${name}: ${toWGSLType(type)}`)
@@ -313,6 +377,38 @@ export class WGSLTarget extends GPUShaderTarget {
     return `${userDefs}fn ${functionName}(${params}) -> ${toWGSLType(returnType)} {
   return ${body};
 }`;
+  }
+
+  /**
+   * Assemble the declaration of a user-defined function that the shader
+   * `userFunctions` registry of `compile()` emits (`h := x ↦ …` called as
+   * `h(u)`).
+   *
+   * A WGSL function parameter is an immutable value, so a body that assigns
+   * a parameter (`x = x + 1.0;` in `fn _fn_h(x: f32)`) is not valid source.
+   * `compileFunction()` checks the body expression for such an assignment
+   * (`wgslAssignedParameter`); this route receives only the compiled body, so
+   * it checks the emitted source: a line that starts with `<parameter> = `
+   * is an assignment to that parameter, since a WGSL comparison is spelled
+   * `==`. The test is conservative: a write to a block local that has the
+   * same name as a parameter also declines.
+   */
+  protected declareGPUFunction(
+    name: string,
+    returnType: string,
+    params: ReadonlyArray<[name: string, type: string]>,
+    body: string
+  ): string {
+    const lines = body.split('\n').map((l) => l.trimStart());
+    for (const [p] of params)
+      if (lines.some((l) => l.startsWith(`${p} = `)))
+        throw new Error(
+          `Could not compile \`${name}\`: the body assigns the parameter ` +
+            `"${p}", and a WGSL function parameter is an immutable value. ` +
+            `Assign a local copy of it instead ` +
+            `(\`Block(y ≔ ${p}; y ≔ y + 1; y)\`).`
+        );
+    return super.declareGPUFunction(name, returnType, params, body);
   }
 
   compileShader(options: {

@@ -59,6 +59,10 @@ describe('Compilation fallback: the spelling of an absent value', () => {
     ['a boolean', gated(['Less', 't', 1]), undefined],
     ['a string', gated({ str: 'abc' }), undefined],
     ['the written symbol', 'Missing', undefined],
+    // A bare `Undefined` is typed `unknown`, a type that says nothing about
+    // the kind of the position: the fallback spells it as compiled code
+    // spells the written symbol (it gave `NaN`).
+    ['the bare Undefined', 'Undefined', undefined],
     [
       'a number read from a list with a written absence',
       ['First', ['List', 'Missing', 1]],
@@ -142,11 +146,69 @@ describe('Compilation fallback: the spelling of an absent value', () => {
 });
 
 /**
+ * The Python target spells a WRITTEN absence symbol with its numeric marker
+ * (`math.nan`, since numpy raises on `None`), and an absent value in an
+ * object-domain position (a point, a boolean) with `None`. Its fallback gives
+ * the same answers (`NaN` and `undefined` in the JavaScript value of the
+ * runner): before, every absent value in a position whose type admits
+ * `missing` was `undefined`. The fallback is forced by a call of a user
+ * function, which the Python target does not lower; `g` is the identity.
+ */
+describe('Python fallback: the spelling of an absent value', () => {
+  let warn: jest.SpyInstance;
+  beforeAll(() => {
+    warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+  afterAll(() => warn.mockRestore());
+
+  const py = new ComputeEngine();
+  py.declare('P', 'list<tuple<number, number>>');
+  py.assign('P', py.box(['List', ['Tuple', 1, 2], ['Tuple', 3, 4]]));
+  py.assign('g', py.box(['Function', 'x', 'x']));
+
+  test.each([
+    // The compiled code of the argument, for the record of each spelling.
+    ['the written symbol (`math.nan`)', 'Missing', NaN],
+    ['the bare Undefined (`math.nan`)', 'Undefined', NaN],
+    [
+      'a number read from a list with a written absence (`math.nan`)',
+      ['First', ['List', 'Missing', 1]],
+      NaN,
+    ],
+    ['a number (`float(nan)`)', gated(['Add', 't', 1]), NaN],
+    ['a point (`None`)', gated(['Tuple', 't', 1]), undefined],
+    ['a point read from a list of points (`None`)', ['At', 'P', 5], undefined],
+    ['a boolean (`None`)', gated(['Less', 't', 1]), undefined],
+    [
+      'a list, written absence (`[1, math.nan]`)',
+      ['List', 1, 'Missing'],
+      [1, NaN],
+    ],
+    [
+      'a tuple, written absence (`(t, math.nan)`)',
+      ['Tuple', 't', 'Missing'],
+      [0, NaN],
+    ],
+  ])('%s', (_label, json, expected) => {
+    // The argument itself compiles on the Python target.
+    expect(
+      compile(py.box(json as never), { to: 'python' } as never).success
+    ).toBe(true);
+    const r = compile(py.box(['g', json] as never), { to: 'python' } as never);
+    expect(r.success).toBe(false);
+    expect(r.run!({ t: 0 } as never)).toStrictEqual(expected);
+  });
+});
+
+/**
  * The interval-js target has no object null. Its compiled code gives `empty`
  * where there is no value at run time — a restriction whose condition fails,
- * for a number, a point or a list alike — and its fallback now does the same
- * (it gave `{ lo: NaN, hi: NaN }`). The fallback is forced by `First`, which
- * the interval target does not lower: `First([v])` is `v`.
+ * for a number, a point or a list alike, a written `Missing`, an `At` whose
+ * index selects nothing — and its fallback does the same (it gave
+ * `{ lo: NaN, hi: NaN }`). A present number from the fallback is the interval
+ * result `{ kind: 'interval', value: { lo, hi } }`, as a computed number of the
+ * compiled code is (it was the bare `{ lo, hi }`). The fallback is forced by
+ * `First`, which the interval target does not lower: `First([v])` is `v`.
  */
 describe('Interval fallback: the spelling of an absent value', () => {
   let warn: jest.SpyInstance;
@@ -164,11 +226,17 @@ describe('Interval fallback: the spelling of an absent value', () => {
     ['a number', gated(['Add', 't', 1])],
     ['a point', gated(['Tuple', 't', 1])],
     ['a list of numbers', gated(['List', 't', 1])],
-    ['a list with an absent cell', ['List', 't', gated(2)]],
+    ['a list with an absent cell', ['List', ['Add', 't', 1], gated(2)]],
     [
       'a list of points with an absent point',
-      ['List', ['Tuple', 't', 1], gated(['Tuple', 2, 3])],
+      [
+        'List',
+        ['Tuple', ['Add', 't', 1], ['Add', 't', 2]],
+        gated(['Tuple', 2, 3]),
+      ],
     ],
+    ['a present number', ['Add', 't', 1]],
+    ['a present point', ['Tuple', ['Add', 't', 1], ['Add', 't', 2]]],
   ])('%s', (_label, json) => {
     const compiled = intervalRun(json, 0) as {
       success: boolean;
@@ -189,5 +257,47 @@ describe('Interval fallback: the spelling of an absent value', () => {
       0
     ) as { value: unknown };
     expect(value).toEqual({ kind: 'empty' });
+  });
+
+  test('a present number from the fallback is an interval result', () => {
+    const { success, value } = intervalRun(
+      ['First', ['List', ['Add', 't', 1]]],
+      2
+    ) as { success: boolean; value: unknown };
+    expect(success).toBe(false);
+    expect(value).toStrictEqual({ kind: 'interval', value: { lo: 3, hi: 3 } });
+  });
+
+  test.each([
+    ['the written Missing', 'Missing'],
+    ['the written Undefined', 'Undefined'],
+    ['an At past the end of a literal list', ['At', ['List', 't', 2], 5]],
+    ['an At with index 0', ['At', ['List', 't', 2], 0]],
+    ['an At past the end at run time', ['At', ['List', 't', 2], 'k']],
+  ])('%s compiles to empty', (_label, json) => {
+    const r = compile(ce.box(json as never), {
+      to: 'interval-js',
+      fallback: false,
+    } as never);
+    expect(r.success).toBe(true);
+    expect(
+      r.run!({ t: { lo: 0, hi: 0 }, k: { lo: 5, hi: 5 } } as never)
+    ).toStrictEqual({
+      kind: 'empty',
+    });
+  });
+
+  test('a written absence cell of a list compiles to empty', () => {
+    // `Undefined`: a list with a `Missing` cell is typed with a `missing`
+    // element, which this target declines.
+    const r = compile(ce.box(['List', 1, 'Undefined'] as never), {
+      to: 'interval-js',
+      fallback: false,
+    } as never);
+    expect(r.success).toBe(true);
+    expect(r.run!({} as never)).toStrictEqual([
+      { lo: 1, hi: 1 },
+      { kind: 'empty' },
+    ]);
   });
 });

@@ -13071,9 +13071,15 @@ function heldEagerSources(
   const sources: HeldEagerSource[] = [];
   if (isCollectionSourceOperator(expr.operator)) {
     ops.forEach((x, index) => {
-      if (!isHeldEagerSource(x)) return;
+      const held = isHeldEagerSource(x);
+      // A collection without positions (a set held by a symbol of a wider
+      // declared type) at a slot that reads its source by position is a
+      // source too: its value is refused by `settleHeldEagerSources()`.
+      if (!held && !(x.isCollection && !x.isIndexedCollection)) return;
       const expected = collectionSourceSlot(def.signature.type, index);
-      if (expected !== undefined) sources.push({ index, source: x, expected });
+      if (expected === undefined) return;
+      if (held || expected === 'indexed_collection')
+        sources.push({ index, source: x, expected });
     });
     return sources;
   }
@@ -13102,6 +13108,9 @@ function heldEagerSources(
  *
  * - A value that is an error is the value of the node, with a breadcrumb that
  *   names the operator and the position of the operand.
+ * - A collection value without positions (a set, a dictionary) at a slot
+ *   declared `indexed_collection` is an `incompatible-type` error, the error
+ *   that the boxing gives for such a literal operand (`ArgMax(Set(3, 1))`).
  * - A value that is a collection, or the absent value, replaces the source.
  *   The node is then evaluated again over the value, and the source is not
  *   evaluated again.
@@ -13123,6 +13132,20 @@ function settleHeldEagerSources(
     const value = values[k];
     const frame = { operator: expr.operator, index: index + 1 };
     if (!value.isValid) return { error: errorValue(value, frame) ?? value };
+    // A slot that reads its source by position (`ArgMax`, `Differences`)
+    // refuses a value without positions (a set, a dictionary). The boxing
+    // refuses such a literal operand, but a symbol of a wider declared type
+    // (`collection<integer>`, `unknown`) can hold one, and the operator then
+    // read the set in its iteration order: `ArgMax(c)` with `c := Set(3, 1)`
+    // gave `1`.
+    if (
+      expected === 'indexed_collection' &&
+      value.isCollection &&
+      !value.isIndexedCollection
+    ) {
+      const error = ce.typeError(expected, value.type, value);
+      return { error: errorValue(error, frame) ?? error };
+    }
     if (value === source || value.isSame(source)) continue;
     if (value.isCollection || isAbsentScalarSymbol(value)) {
       ops ??= [...expr.ops];

@@ -4,10 +4,14 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { isNumber } from '../../src/compute-engine/boxed-expression/type-guards';
 import type { Expression } from '../../src/compute-engine/global-types';
 
-// A complex value given by the host with integer parts is exact when it is
-// created, as `ce.number(2)` is. A complex float stays a float, and a float
-// operand makes a numeric result a float: exactness is never read from the
-// integer values of the parts of a float (user decision 2026-10-02).
+// A complex value given by the host as `{ re, im }` data with integer parts
+// is exact when it is created, as `ce.number(2)` is (user decision
+// 2026-10-02). A `complex.js` `Complex` object holds two doubles, so it is a
+// float, also when both its parts are integers (user decision 2026-10-17):
+// the exact Gaussian integer is `{ re: 2, im: 3 }` or `["Complex", 2, 3]`. A
+// complex float stays a float, and a float operand makes a numeric result a
+// float: exactness is never read from the integer values of the parts of a
+// float.
 
 const ce = new ComputeEngine();
 
@@ -16,9 +20,22 @@ function isExact(x: Expression): boolean | undefined {
 }
 
 describe('A COMPLEX VALUE FROM THE HOST', () => {
-  test('ce.number(new Complex(2, 3)) is the exact 2 + 3i', () => {
+  test('ce.number(new Complex(2, 3)) is the float 2.0 + 3.0i', () => {
     const z = ce.number(new Complex(2, 3));
+    expect(isExact(z)).toBe(false);
+    expect(z.json).toEqual(['Complex', { num: '2.0' }, { num: '3.0' }]);
+  });
+
+  test('ce.number(new Complex(2, 0)) is the float 2.0', () => {
+    const z = ce.number(new Complex(2, 0));
+    expect(isExact(z)).toBe(false);
+    expect(z.json).toEqual({ num: '2.0' });
+  });
+
+  test('ce.box(["Complex", 2, 3]) is the exact 2 + 3i', () => {
+    const z = ce.box(['Complex', 2, 3]);
     expect(isExact(z)).toBe(true);
+    expect(isExact(z.evaluate())).toBe(true);
     expect(z.json).toEqual(['Complex', 2, 3]);
   });
 
@@ -49,29 +66,58 @@ describe('A COMPLEX VALUE FROM THE HOST', () => {
     expect(isExact(z)).toBe(false);
   });
 
-  test('ce.box() of a Complex is exact', () => {
+  test('ce.box() of a Complex is a float', () => {
     const z = ce.box(new Complex(2, 3));
-    expect(isExact(z)).toBe(true);
-    expect(z.json).toEqual(['Complex', 2, 3]);
+    expect(isExact(z)).toBe(false);
+    expect([z.re, z.im]).toEqual([2, 3]);
   });
 
-  test('ce._numericValue() of a Complex is exact', () => {
-    expect(ce._numericValue(new Complex(2, 3)).isExact).toBe(true);
+  test('ce._numericValue() of a Complex is a float', () => {
+    expect(ce._numericValue(new Complex(2, 3)).isExact).toBe(false);
+    expect(ce._numericValue(new Complex(2, 0)).isExact).toBe(false);
     expect(ce._numericValue(new Complex(2.5, 3)).isExact).toBe(false);
   });
 
-  test('ce.number(new Complex(0, 1)) is the exact imaginary unit', () => {
+  test('ce.number(new Complex(0, 1)) is the float 1.0i', () => {
     const z = ce.number(new Complex(0, 1));
-    expect(isExact(z)).toBe(true);
-    expect(ce.box(['Multiply', ['Rational', 1, 3], z]).evaluate().json).toEqual(
-      ['Complex', 0, ['Rational', 1, 3]]
-    );
+    expect(isExact(z)).toBe(false);
+    const p = ce.box(['Multiply', ['Rational', 1, 3], z]).evaluate();
+    expect(isExact(p)).toBe(false);
+    expect(p.im).toBeCloseTo(1 / 3, 15);
   });
 
-  test('an exact host complex powers exactly', () => {
+  test('a host Complex powers as a float, an exact { re, im } exactly', () => {
     const z = ce.box(['Power', ce.number(new Complex(1, 1)), 2]).evaluate();
-    expect(isExact(z)).toBe(true);
-    expect(z.json).toEqual(['Complex', 0, 2]);
+    expect(isExact(z)).toBe(false);
+    expect([z.re, z.im]).toEqual([0, 2]);
+    const w = ce.box(['Power', ce.number({ re: 1, im: 1 }), 2]).evaluate();
+    expect(isExact(w)).toBe(true);
+    expect(w.json).toEqual(['Complex', 0, 2]);
+  });
+});
+
+describe('THE ELEMENTS OF AN ENUMERATED COMPLEX SET', () => {
+  const first = (name: string, n: number) => {
+    const elements: Expression[] = [];
+    for (const x of ce.symbol(name).each()) {
+      elements.push(x);
+      if (elements.length === n) break;
+    }
+    return elements;
+  };
+
+  test('the elements of ImaginaryNumbers are exact', () => {
+    const elements = first('ImaginaryNumbers', 12);
+    expect(elements.every((x) => isExact(x) === true)).toBe(true);
+    expect(elements.some((x) => x.im === 0.5)).toBe(true);
+  });
+
+  test('the Gaussian integers of ComplexNumbers are exact', () => {
+    const gaussian = first('ComplexNumbers', 40).filter(
+      (x) => Number.isInteger(x.re) && Number.isInteger(x.im)
+    );
+    expect(gaussian.some((x) => x.re !== 0 && x.im !== 0)).toBe(true);
+    expect(gaussian.every((x) => isExact(x) === true)).toBe(true);
   });
 });
 
@@ -148,20 +194,32 @@ describe('A COMPLEX FLOAT', () => {
 describe('BOUNDARY CASES OF A COMPLEX VALUE FROM THE HOST', () => {
   test('a part past the safe integers is a float', () => {
     expect(isExact(ce.number(new Complex(2 ** 53, 1)))).toBe(false);
+    expect(isExact(ce.number({ re: 2 ** 53, im: 1 }))).toBe(false);
   });
 
   test('the largest safe integer is exact', () => {
-    const z = ce.number(new Complex(2 ** 53 - 1, 1));
+    const z = ce.number({ re: 2 ** 53 - 1, im: 1 });
     expect(isExact(z)).toBe(true);
     expect(z.json).toEqual(['Complex', 2 ** 53 - 1, 1]);
   });
 
   test('a negative zero part is the exact zero', () => {
-    expect(ce.number(new Complex(-0, 1)).json).toEqual(['Complex', 0, 1]);
     expect(ce.number({ re: -0, im: 3 }).json).toEqual(['Complex', 0, 3]);
+  });
+
+  test('a Complex with a negative zero part is a float', () => {
     const z = ce.number(new Complex(2, -0));
-    expect(isExact(z)).toBe(true);
-    expect(z.json).toEqual(2);
+    expect(isExact(z)).toBe(false);
+    expect(z.json).toEqual({ num: '2.0' });
+  });
+
+  test('a Complex with an infinite real part and a zero imaginary part is a signed infinity', () => {
+    expect(ce.number(new Complex(Infinity, 0)).json).toEqual(
+      'PositiveInfinity'
+    );
+    expect(ce.number(new Complex(-Infinity, 0)).json).toEqual(
+      'NegativeInfinity'
+    );
   });
 
   test('a NaN part is NaN', () => {

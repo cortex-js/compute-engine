@@ -36,6 +36,7 @@ import {
   isProvablyTupleParticipant,
   shapeOperandRefusal,
   statementBodyHead,
+  isTailAssignmentBlock,
   unfaithfulComparisonAggregate,
 } from './base-compiler.js';
 import { rewriteAngularUnit } from './angular-unit.js';
@@ -187,14 +188,27 @@ function pythonCheckIdentifier(id: string): string {
  * also rejects the value keywords `True` and `False`: a READ of those names
  * is emitted as the Python boolean literal of the same name, but a binding
  * of them (`def True():`, `lambda False: 1`) is a syntax error.
+ *
+ * A name that is not a Python identifier at all (`a b`, `1x`) also fails
+ * closed: `def a b(1x):` does not parse. A Python identifier is a character
+ * with the Unicode property `XID_Start`, or `_`, followed by characters with
+ * the property `XID_Continue`, so `αβ` and `名前` are accepted, as Python
+ * accepts them.
  */
 function pythonCheckBindingName(id: string): string {
   if (PYTHON_KEYWORDS.has(id) || id in PYTHON_BOOLEANS)
     throw new Error(
       `"${id}" is a reserved word in python and cannot be used as a function, parameter or index name. Rename it before compiling to Python (fail closed, D6).`
     );
+  if (!PYTHON_IDENTIFIER.test(id))
+    throw new Error(
+      `"${id}" is not a Python identifier and cannot be used as a function, parameter or index name. Rename it before compiling to Python (fail closed, D6).`
+    );
   return id;
 }
+
+/** The syntax of a Python identifier (see `pythonCheckBindingName`). */
+const PYTHON_IDENTIFIER = /^[\p{XID_Start}_]\p{XID_Continue}*$/u;
 
 /**
  * Python mathematical constants, keyed by MathJSON symbol.
@@ -2596,6 +2610,15 @@ function pythonAssertExpressionBody(subject: string, expr: Expression): void {
  * The fix is on the caller's side and the message says so: a block whose value
  * statement is an EXPRESSION already compiles correctly through the multi-line
  * branch (`Block(s ≔ x; s)` → `def f(x):\n    s = x\n    return s\n`).
+ *
+ * A `Block` whose last statement is an assignment to a name, or a `Declare`
+ * with an initializer (`isTailAssignmentBlock`), is not declined here. The
+ * block hook emits such a last statement as the assignment followed by
+ * `return <name>` (`Block(s ≔ x; t ≔ s)` → `s = x`, `t = s`, `return t`), so
+ * the multi-line branch carries it, as `compile()` does for the same body.
+ * `compileFunction()` checks the emitted body after compiling it instead
+ * (`pythonAssertReturnedBlock`): a single-statement block with no local is
+ * unwrapped to the single line `s = x`, which stays declined.
  */
 function pythonAssertReturnableBody(subject: string, expr: Expression): void {
   // The third shape, which `statementBodyHead` does not report: a selection
@@ -2624,9 +2647,54 @@ function pythonAssertReturnableBody(subject: string, expr: Expression): void {
         `(\`Block(If(c, r ≔ 1, r ≔ 2); r)\`), which compiles to the \`if\` ` +
         `block followed by \`return r\`.`
     );
+  if (isTailAssignmentBlock(expr)) return;
   const head = statementBodyHead(expr);
   if (head === undefined) return;
-  throw new Error(
+  throw pythonStatementBodyError(subject, head);
+}
+
+/**
+ * Fail closed when `compileFunction()` was given a block whose last statement
+ * is an assignment (`isTailAssignmentBlock`, which `pythonAssertReturnableBody`
+ * lets through) and the emitted body is not a statement sequence that ends
+ * with `return <name>`. A single-statement block with no local is unwrapped to
+ * its statement and emits the single line `s = x`, which the single-line
+ * branch of `compileFunction()` would turn into `return s = x`.
+ *
+ * The body is accepted only when its last line is `return <name>` and the
+ * line before it is the assignment `<name> = …`. A last line that only starts
+ * with `return` is not enough: when the block hook does not recognize the
+ * assignment target, it puts `return` in front of the whole assignment
+ * (`return a[0] = x`), which does not parse; and a last assignment whose
+ * value is a nested block can emit a `return` of that block before
+ * `return <name>`.
+ */
+function pythonAssertReturnedBlock(
+  subject: string,
+  expr: Expression,
+  body: string
+): void {
+  if (!isTailAssignmentBlock(expr)) return;
+  const lines = body.split('\n');
+  const returned = /^return\s+([^\s;]+);?$/.exec(lines[lines.length - 1]);
+  if (
+    lines.length > 1 &&
+    returned !== null &&
+    lines[lines.length - 2].startsWith(`${returned[1]} = `)
+  )
+    return;
+  throw pythonStatementBodyError(subject, statementBodyHead(expr) ?? 'Assign');
+}
+
+/**
+ * The error of a `compileFunction()` body whose value statement is an
+ * assignment or a declaration that this route cannot return.
+ */
+function pythonStatementBodyError(
+  subject: string,
+  head: 'Assign' | 'Declare'
+): Error {
+  return new Error(
     `Could not compile ${compileSubject(subject)}: the body's value statement is ` +
       (head === 'Assign'
         ? 'an assignment'
@@ -5922,8 +5990,11 @@ export class PythonTarget implements LanguageTarget<Expression> {
   ): string {
     // Both branches below put the body in a position that requires a VALUE: the
     // single-line one wraps it in `return`, the multi-line one relies on the
-    // block hook having done so. A body whose value statement is an assignment
-    // or a declaration has neither emission (D6).
+    // block hook having done so. A root that is an assignment or a declaration
+    // has neither emission (D6). A block whose last statement is an
+    // assignment (`isTailAssignmentBlock`) takes the multi-line branch, since
+    // the block hook emits the assignment followed by `return <name>`; the
+    // emitted body is checked after it is compiled (`pythonAssertReturnedBlock`).
     pythonAssertReturnableBody('compileFunction()', expr);
     // The function name and the declared parameters are emitted as bare
     // Python identifiers, so a Python keyword fails closed, as it does for a
@@ -5942,6 +6013,7 @@ export class PythonTarget implements LanguageTarget<Expression> {
     // CSE is default-enabled; `options.cse` is the opt-out.
     BaseCompiler.openCseSession(expr, target, { enabled: options?.cse });
     const body = BaseCompiler.compileCseRoot(expr, target);
+    pythonAssertReturnedBlock('compileFunction()', expr, body);
 
     const params = parameters.join(', ');
     let code = '';

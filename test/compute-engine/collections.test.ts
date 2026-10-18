@@ -3286,7 +3286,7 @@ describe('LIST LITERAL EVALUATION', () => {
     // than truncated to a machine float.
     const ce = new ComputeEngine();
     expect(exprToString(ce.box(['List', ['Divide', 1, 3], 'Pi']).N())).toBe(
-      '["List", "0.(3)", "3.141592653589793238462643"]'
+      '["List", "0.333333333333333333333", "3.141592653589793238462643"]'
     );
   });
 

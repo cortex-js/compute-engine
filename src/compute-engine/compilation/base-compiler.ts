@@ -2203,6 +2203,33 @@ export function statementBodyHead(
 }
 
 /**
+ * Whether `expr` is a `Block` whose last statement is an assignment that the
+ * block hook of a target where assignment is a STATEMENT (Python, WGSL) can
+ * return: an `Assign` to a name, or a `Declare` with an initializer, which
+ * these targets emit as the same assignment. The hook keeps such a statement
+ * and adds `return <name>` after it, so `Block(s ≔ x; t ≔ s)` has a value on
+ * those targets (`s = x`, `t = s`, `return t`).
+ *
+ * Not such a block: a last statement that is a nested `Block` (its emission
+ * is a statement sequence the hook does not return), a `Declare` without an
+ * initializer (the block's value is `Nothing`), and an assignment to
+ * anything else than a name. A single-statement block with no local is
+ * unwrapped to its statement by `compileBlock` and emits the single line
+ * `s = x`; a caller must also check the emission for the final `return`.
+ */
+export function isTailAssignmentBlock(expr: Expression | undefined): boolean {
+  if (expr === undefined || !isFunction(expr, 'Block') || expr.nops === 0)
+    return false;
+  const last = expr.ops[expr.nops - 1];
+  if (isFunction(last, 'Assign')) return isSymbol(last.ops[0]);
+  return (
+    isFunction(last, 'Declare') &&
+    isSymbol(last.ops[0]) &&
+    BaseCompiler.declareValueOperand(last.ops) !== undefined
+  );
+}
+
+/**
  * The value shape a broadcast closure's parameter holds at run time for one
  * operand: `true` for a `{re, im}` object at every position, `false` for a
  * plain number at every position, `'mixed'` when the positions do not all
@@ -26181,6 +26208,52 @@ export class BaseCompiler {
   }
 
   /**
+   * Fail closed on a call of the user function `h` whose number of arguments
+   * does not match the parameters of its literal. The interpreter answers
+   * such a call with a value that the compiled call cannot reproduce: with
+   * fewer arguments than parameters it makes a partial application, whose
+   * value is a function (`a(3, 4)` for `a := (x, y, z) ↦ x + y + z` is
+   * `(_) => _ + 7`), and with more arguments it answers an error
+   * (`a(1, 2, 3, 4)` is `Error("unexpected-argument", "4")`). The compiled
+   * call passed `undefined` for each missing argument and computed `NaN`, or
+   * ignored the extra arguments and computed `6`. The arity is known when the
+   * call is compiled, so the call declines and the interpreter answers it.
+   *
+   * The rules are the interpreter's (`makeLambda`, `function-utils.ts`): a
+   * REST parameter (`(a, ...r) ↦ …`) takes any number of arguments after the
+   * fixed parameters before it, so only a call with fewer arguments than
+   * those fixed parameters is a mismatch; and a literal with NO parameter
+   * ignores its arguments, so any call of it is accepted. A multi-clause
+   * function (no single literal) is not checked here.
+   */
+  private static checkUserCallArity(
+    h: string,
+    literal: (Expression & FunctionInterface) | undefined,
+    args: ReadonlyArray<Expression>
+  ): void {
+    if (literal === undefined) return;
+    const params = literal.ops.slice(1);
+    if (params.length === 0) return;
+    const rest = params.findIndex((p) => isRestParameter(p));
+    const fixed = rest < 0 ? params.length : rest;
+    if (args.length < fixed)
+      throw new Error(
+        `Could not compile a call of \`${h}\`: the function is declared with ` +
+          `${fixed} parameter${fixed === 1 ? '' : 's'} but called with ` +
+          `${args.length}. The interpreter reads a call with fewer arguments ` +
+          `than parameters as a partial application, whose value is a ` +
+          `function, and the compiled call does not build that value.`
+      );
+    if (rest < 0 && args.length > fixed)
+      throw new Error(
+        `Could not compile a call of \`${h}\`: the function is declared with ` +
+          `${fixed} parameter${fixed === 1 ? '' : 's'} but called with ` +
+          `${args.length}. The interpreter reports an error for a call with ` +
+          `more arguments than parameters.`
+      );
+  }
+
+  /**
    * If head `h` names a user-defined function (see `userFunctionLiteral`),
    * ensure its definition is emitted once into `target.userFunctions.defs` as a
    * named local function and return the call-site source `_fn_h(arg, …)`.
@@ -26214,6 +26287,13 @@ export class BaseCompiler {
      * compiles as the ordinary call. */
     node?: Expression
   ): TargetSource | undefined {
+    // The callee's `Function` literal, when it has a single one (a
+    // multi-clause function does not). Read once here: the arity check just
+    // below, the strict-lane gate and the generic broadcast decision at the
+    // end all need it.
+    const literal = BaseCompiler.userFunctionLiteral(engine, h);
+    BaseCompiler.checkUserCallArity(h, literal, args);
+
     // A list of points at a parameter declared as a point maps over the
     // points, as the interpreter does (`pointListParamSlots`).
     const pointList = BaseCompiler.tryCompilePointListCall(
@@ -26251,11 +26331,6 @@ export class BaseCompiler {
     // whether the callee can be emitted is irrelevant to whether this call
     // is sound. A target with its own definition lowering (the shader
     // targets) checks the argument shapes against its static signature.
-    //
-    // The callee's `Function` literal, when it has a single one (a
-    // multi-clause function does not). Read once here: the strict-lane gate
-    // below and the generic broadcast decision at the end both need it.
-    const literal = BaseCompiler.userFunctionLiteral(engine, h);
     if (BaseCompiler.strictLanes && !target.userFunctions?.lowering) {
       if (literal !== undefined) {
         const i = BaseCompiler.laneMismatchAt(engine, h, literal, args);
@@ -34508,12 +34583,23 @@ export class BaseCompiler {
     // The kind is read from the static type `t` of the position. When that
     // type says nothing (`unknown`, `any`, or no type), `hint` gives the kind
     // of the present sibling cells of the same collection; with no hint the
-    // value is `NaN`. A target that declares an absence capability without an
-    // object axis (the shader targets, the interval target) spells every
-    // absent value with its numeric marker, so the fallback gives `NaN` there.
+    // value is the spelling of a WRITTEN absence symbol on the target, since
+    // a bare `Undefined` is typed `unknown` and compiles to that spelling
+    // (`undefined` on JavaScript). A target that declares an absence
+    // capability without an object axis (the shader targets, the interval
+    // target) spells every absent value with its numeric marker, so the
+    // fallback gives `NaN` there.
+    //
+    // A target that spells a written absence symbol with its NUMERIC marker
+    // (the Python target, where a written `Missing` is `math.nan`) uses the
+    // object null only for an absent value in an object-domain position (an
+    // absent point is `None` there): a position whose type admits `missing`
+    // gives `NaN` unless every other arm of the type is disjoint from
+    // `number`.
     const hasObjectNull =
       compileTarget?.absence === undefined ||
       compileTarget.absence.object !== undefined;
+    const writtenNumeric = compileTarget?.absence?.writtenSymbol === 'numeric';
     // Whether `t` admits `missing` as one of its own arms (not in a cell).
     const admitsMissing = (t: Readonly<Type>): boolean => {
       const r = resolveTypeForCompilation(t);
@@ -34529,15 +34615,28 @@ export class BaseCompiler {
       hint: 'number' | 'object' | undefined
     ): number | undefined => {
       if (!hasObjectNull) return NaN;
+      let typed = false;
       if (t !== undefined) {
         const r = resolveTypeForCompilation(t);
         if (r !== 'unknown' && r !== 'any') {
-          if (admitsMissing(r)) return undefined;
+          typed = true;
+          if (admitsMissing(r)) {
+            if (!writtenNumeric) return undefined;
+            const present =
+              typeof r !== 'string' && r.kind === 'union'
+                ? r.types.filter((x) => !admitsMissing(x))
+                : [];
+            return present.length > 0 &&
+              present.every((x) => provablyDisjoint(x, 'number'))
+              ? undefined
+              : NaN;
+          }
           if (isSubtype(r, 'number')) return NaN;
           if (provablyDisjoint(r, 'number')) return undefined;
         }
       }
-      return hint === 'object' ? undefined : NaN;
+      if (hint !== undefined) return hint === 'object' ? undefined : NaN;
+      return typed || writtenNumeric ? NaN : undefined;
     };
     // The static type of cell `i` of a collection whose type is `t`: the
     // positional type of a tuple, the element type of a list, `undefined`

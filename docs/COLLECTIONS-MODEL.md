@@ -80,6 +80,19 @@ as for an eager operator: `Dedup(5)` is `Dedup(Error(incompatible-type,
 collection, 5))`, an invalid call typed `error`
 (`refusedCollectionSourceOperands()` in `boxed-expression/validate.ts`).
 
+A source slot declared `indexed_collection` (`Differences`, `ArgMax`,
+`ArgMin`) reads its source by position, and refuses a collection without
+positions (a set, a dictionary, `Integers`). The boxing refuses a literal
+set: `Differences(Set(3, 1))` is `Differences(Error(incompatible-type,
+indexed_collection, set<integer>))`. A symbol of a wider declared type that
+holds a set is admitted by the boxing, and the evaluation gives the error as
+the value of the node, with the frame of the operator. The positional eager
+operators `DeleteAt`, `ReplaceAt` and `Insert` do the same: with
+`c: collection<integer>` assigned `Set(3, 1)`, `DeleteAt(c, 1)` is
+`Error(incompatible-type, indexed_collection, set<integer>)`, as `Sort(c)` is.
+Before, these operators read the set in its iteration order. Decision of the
+user, 2026-10-17.
+
 Memoized collection elements record their actual dependencies. A state event
 invalidates only entries whose dependency axes changed. Cyclic lazy views stay
 symbolic rather than recursing without bound.
@@ -196,6 +209,15 @@ Numeric tuples are point values only where the point contract applies; tuple
 structure in general remains structural data. `PointList` pairs its collection
 sources to the shortest source and lifts scalar components. Components are
 evaluated once in operand order.
+
+A coordinate is a number or a list of numbers, so a component that is a
+point is refused. A component whose type is a tuple (the bare `tuple`,
+`tuple<…>`, a union of tuples, possibly absent) is refused when the call is
+boxed: `PointList([1, 2], (5, 6))` is `PointList([1, 2],
+Error(incompatible-type, list<number> | number, tuple<integer, integer>))`.
+A component whose value is a tuple (a symbol declared `unknown`) is refused
+when the call is evaluated. Before, the whole point was put in each
+coordinate: `[(1, (5, 6)), (2, (5, 6))]`. Decision of the user, 2026-10-17.
 
 JavaScript compilation emits the same shortest zip. Point projections may
 compile directly when shape is known. GPU construction remains fail-closed;

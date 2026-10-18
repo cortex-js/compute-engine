@@ -4,7 +4,10 @@ import {
   toInteger,
   toIntegerOperand,
 } from '../boxed-expression/numerics.js';
-import { floatIfFloatOperand } from '../boxed-expression/float-result.js';
+import {
+  floatIfFloatOperand,
+  floatResultIfFloatOperand,
+} from '../boxed-expression/float-result.js';
 import type {
   Expression,
   OperandDescriptor,
@@ -642,7 +645,7 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
       description: 'Compute the nth Fibonacci number.',
       wikidata: 'Q47577',
       signature: '(integer) -> integer',
-      evaluate: ([n], { engine: ce }) => {
+      evaluate: floatResultIfFloatOperand(([n], { engine: ce }) => {
         const k = toBigint(n);
         if (k === null) return undefined;
 
@@ -675,7 +678,7 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
         // a malformed `Negate(Fibonacci, m)` (two operands) → an Error.
         if (k < 0n && m % 2n === 0n) result = -result;
         return ce.number(result);
-      },
+      }),
     },
 
     Binomial: {
@@ -954,7 +957,7 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
       description: 'Compute the multinomial coefficient for multiple integers.',
       wikidata: 'Q20820114',
       signature: '(integer+) -> integer',
-      evaluate: (ops, { engine: ce }) => {
+      evaluate: floatResultIfFloatOperand((ops, { engine: ce }) => {
         const ks = ops.map(toInteger);
         if (ks.some((k) => k === null || k < 0)) return undefined;
         const n = ks.reduce((a, b) => a! + (b ?? 0), 0)!;
@@ -981,7 +984,7 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
         let result = factorial(n);
         for (const k of ks) result /= factorial(k!);
         return ce.number(result);
-      },
+      }),
     },
 
     Subfactorial: {
@@ -989,7 +992,7 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
         'Compute the number of derangements (subfactorial) of n items.',
       wikidata: 'Q2361661',
       signature: '(integer) -> integer',
-      evaluate: ([n], { engine: ce }) => {
+      evaluate: floatResultIfFloatOperand(([n], { engine: ce }) => {
         // Derangements are defined only for non-negative integers; stay
         // symbolic for anything else rather than rounding the argument.
         if (n.isInteger !== true) return undefined;
@@ -1012,7 +1015,7 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
           result = BigInt(i) * result + sign;
         }
         return ce.number(result);
-      },
+      }),
     },
 
     BellNumber: {
@@ -1020,7 +1023,7 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
         'Compute the Bell number B(n), the number of partitions of a set of n elements.',
       wikidata: 'Q816063',
       signature: '(integer) -> integer',
-      evaluate: ([n], { engine: ce }) => {
+      evaluate: floatResultIfFloatOperand(([n], { engine: ce }) => {
         // Bell numbers count set partitions, defined only for non-negative
         // integers; stay symbolic rather than rounding the argument.
         if (n.isInteger !== true) return undefined;
@@ -1049,7 +1052,7 @@ export const COMBINATORICS_LIBRARY: SymbolDefinitions[] = [
           row = next;
         }
         return ce.number(row[0]);
-      },
+      }),
     },
   },
 ];

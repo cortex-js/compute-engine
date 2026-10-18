@@ -652,6 +652,7 @@ describe('descriptor reads that must match the value route', () => {
     expect(ce.box(['At', 'Integers', 2]).type.toString()).toBe('set<integer>');
     // A scope that shadows `Integers` with an ordinary set keeps the
     // ordinary indexing reading, as the canonical route does.
+    ce.pushScope();
     ce.declare('Integers', 'set<string>');
     expect(ce.box(['At', 'Integers', 2]).type.toString()).not.toBe(
       'set<integer>'

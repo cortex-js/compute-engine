@@ -382,8 +382,6 @@ export class TensorFieldExpression implements TensorField<Expression> {
  * A complex value in such a cell was computed in doubles or came from a
  * complex float entry (an exact complex entry uses the `expression` dtype),
  * so it is a float, even when both its parts are integers (`1.0 + 2.0i`).
- * `ce.number()` of a `Complex` would make such a value exact, as it does
- * for a value from the host.
  *
  * A cell with a zero imaginary part is real. In a float tensor
  * (`holdsFloat` is true, see `TensorData.holdsFloat`) it is a float, also
@@ -403,7 +401,7 @@ export function complexCellExpression(
   if (z.im === 0)
     return holdsFloat && Number.isInteger(z.re)
       ? ce.number(ce._inexactNumericValue(z.re + 0))
-      : ce.number(z);
+      : ce.number(z.re);
   return ce.number(ce._inexactNumericValue({ re: z.re + 0, im: z.im }));
 }
 

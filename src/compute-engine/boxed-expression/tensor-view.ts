@@ -45,9 +45,8 @@ import { isFunction, isNumber, isTensor } from './type-guards.js';
  *
  * A cell of a `complex128` tensor is a `Complex` computed in doubles: it is
  * a float, even when both its parts are integers
- * (`complexCellExpression()`). `ce.expr()` of a `Complex` would make such a
- * value exact, as it does for a value from the host. Any other cell (a
- * double, a boolean, an expression) is boxed by `ce.expr()`.
+ * (`complexCellExpression()`). Any other cell (a double, a boolean, an
+ * expression) is boxed by `ce.expr()`.
  *
  * `holdsFloat` is the flag of the tensor the cell comes from
  * (`TensorData.holdsFloat`). When it is true, a double or a real `Complex`

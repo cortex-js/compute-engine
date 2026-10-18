@@ -100,7 +100,12 @@ describe('a binding of an absence marker is an error', () => {
   });
 
   test('other capitalized library names still shadow', () => {
-    const r = executeEpsil(new ComputeEngine(), 'let Pi = 3\nPi');
+    // In a nested block: at the top level of a program, a `let` of `Pi` is
+    // refused (`test/compute-engine/library-name-shadowing.test.ts`).
+    const r = executeEpsil(
+      new ComputeEngine(),
+      'let x = 1\ndo { let Pi = 3; Pi }'
+    );
     expect(r.diagnostics).toEqual([]);
     expect(r.value.toString()).toBe('3');
   });

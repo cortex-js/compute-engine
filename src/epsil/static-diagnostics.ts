@@ -3075,6 +3075,14 @@ export function describeError(error: MathJsonExpression): string {
           : `a protocol function member is not a field (${payload.join(', ')})`;
       break;
     }
+    case 'read-before-declaration':
+      // Payload: [name]. A local of a block was read in a run of the block
+      // before its `let` or `const` statement ran in that run.
+      detail =
+        payload.length === 0
+          ? 'a local is used before its declaration has run'
+          : `\`${payload[0]}\` is used before its \`let\` or \`const\` has run in this block`;
+      break;
     case 'dot-call-not-a-protocol-function': {
       // Payload: [name, receiver type]. The dot reaches protocol members
       // only, so the message names the two spellings that call an ordinary

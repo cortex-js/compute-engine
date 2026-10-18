@@ -1,5 +1,5 @@
-import type { Expression } from '../global-types.js';
-import { isNumber } from './type-guards.js';
+import type { EvaluateHandlerOptions, Expression } from '../global-types.js';
+import { isFunction, isNumber } from './type-guards.js';
 
 /**
  * Is one of `ops` a float: a number literal that is not exact, such as the
@@ -60,4 +60,70 @@ export function floatIfFloatOperand(
 ): Expression | undefined {
   if (result === undefined || !hasFloatOperand(ops)) return result;
   return asFloat(result);
+}
+
+/**
+ * `result` with every exact number literal in it made a float when one of
+ * `ops` is a float ({@link hasFloatOperand}); `result` otherwise.
+ *
+ * As {@link floatIfFloatOperand}, but a `List` or a `Tuple` result is
+ * rebuilt with each of its elements made a float, at every depth. For an
+ * integer function whose result is a list or a tuple of integers: every
+ * number computed from a float argument is a float, so `Divisors(12.0)` is
+ * `[1.0, 2.0, 3.0, 4.0, 6.0, 12.0]` and `FactorInteger(12.0)` is
+ * `[(2.0, 2.0), (3.0, 1.0)]` (user decision 2026-10-18). An element that is
+ * not a number literal (a symbol, a string) is kept as it is.
+ */
+export function floatNumbersIfFloatOperand(
+  ops: ReadonlyArray<Expression | undefined>,
+  result: Expression | undefined
+): Expression | undefined {
+  if (result === undefined || !hasFloatOperand(ops)) return result;
+  return asFloatNumbers(result);
+}
+
+function asFloatNumbers(x: Expression): Expression {
+  if (isFunction(x) && (x.operator === 'List' || x.operator === 'Tuple'))
+    return x.engine.function(x.operator, x.ops.map(asFloatNumbers));
+  return asFloat(x);
+}
+
+/**
+ * The `evaluate` handler `evaluate`, changed so that its result is a float
+ * when one of its operands is a float ({@link floatIfFloatOperand}).
+ *
+ * For a function that is defined only on integers (`Fibonacci`, `Totient`,
+ * `NthPrime`, `BernoulliB`, ...). Its signature accepts a float with an
+ * integer value, such as `5.0`, because the type of that value is
+ * `integer`, and its exact algorithm computes the result from that value. A
+ * float operand makes the result a float, as for all the numeric functions
+ * of the engine: `Fibonacci(5.0)` is the float `5`, not the exact integer
+ * `5`, and `BernoulliB(4.0)` is the float `-0.0333…`. A list or a tuple
+ * result has each of its numbers made a float
+ * ({@link floatNumbersIfFloatOperand}): `Divisors(12.0)` is
+ * `[1.0, 2.0, 3.0, 4.0, 6.0, 12.0]`. Another result that is not an exact
+ * number literal (a boolean, a symbolic expression, an error) is returned
+ * as it is.
+ *
+ * Only the operands themselves are read: a float inside a list operand does
+ * not count, so a handler that reads the elements of a list calls
+ * {@link floatIfFloatOperand} with those elements itself.
+ *
+ * Do not use it for a `lazy` operator. On the synchronous route its handler
+ * gets the operands as they are written, not evaluated, so a symbol whose
+ * value is a float is not seen as a float here (`PowerMod(a, 10, 1000)` with
+ * `a := 2.0`). Such a handler calls {@link floatNumbersIfFloatOperand} with
+ * the operands it has evaluated.
+ */
+export function floatResultIfFloatOperand(
+  evaluate: (
+    ops: ReadonlyArray<Expression>,
+    options: EvaluateHandlerOptions
+  ) => Expression | undefined
+): (
+  ops: ReadonlyArray<Expression>,
+  options: EvaluateHandlerOptions
+) => Expression | undefined {
+  return (ops, options) =>
+    floatNumbersIfFloatOperand(ops, evaluate(ops, options));
 }

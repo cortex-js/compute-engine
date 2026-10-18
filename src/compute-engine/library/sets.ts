@@ -2240,7 +2240,11 @@ function imaginaryIterator(
       if (done) return { value: undefined, done: true };
       const [n, d] = value;
       return {
-        value: self.engine.number(new Complex(0, n / d)),
+        // The exact imaginary number `(n/d)·i`. A `Complex` object would be
+        // a float, as it holds two doubles.
+        value: self.engine.number(
+          self.engine._numericValue({ rational: [0, 1], imRational: [n, d] })
+        ),
         done: false,
       };
     },
@@ -2257,7 +2261,7 @@ function complexIterator(
       if (done) return { value: undefined, done: true };
       const [re, im] = value;
       return {
-        value: self.engine.number(new Complex(re, im)),
+        value: self.engine.number({ re, im }),
         done: false,
       };
     },

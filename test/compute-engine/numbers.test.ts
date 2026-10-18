@@ -681,11 +681,13 @@ describe('JSON round-trip fidelity (lossless .json contract)', () => {
     }
   });
 
-  // RT-P0-4: the bare-string repeating-decimal shorthand `0.(3)` (the default
-  // `toMathJson()` output) must re-box as a number, not a string.
+  // RT-P0-4: the bare-string repeating-decimal shorthand `0.(3)` (the
+  // `toMathJson({ repeatingDecimal: true })` output) must re-box as a number,
+  // not a string.
   test('RT-P0-4: repeating-decimal shorthand re-boxes as a number', () => {
     for (const src of ['1/3', '4/3']) {
-      const j = ce.parse(src).N().toMathJson();
+      const j = ce.parse(src).N().toMathJson({ repeatingDecimal: true });
+      expect(typeof j === 'string' && j.includes('(3)')).toBe(true);
       expect(ce.expr(j).type.toString()).not.toBe('string');
       expect(ce.expr(j).isNumber).toBe(true);
     }

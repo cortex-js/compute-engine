@@ -1,9 +1,10 @@
 /**
- * Opt-in instrumentation for the engine's memoization layers, gated on the
- * `CE_CACHE_STATS` environment variable (env-gated like `CE_DEBUG_BINDINGS`
- * and `CE_MEMO_PARANOID`). A measuring aid, not a semantic mode: with the
- * flag unset — the default — every hook is a single branch on the
- * `CACHE_STATS` module constant and nothing is recorded.
+ * Opt-in instrumentation for the engine's memoization layers. A host turns it
+ * on with the engine member `ce._cacheStats` (`enabled = true`), which works
+ * in the published bundle and in a browser; the repository's own Node runs
+ * can also set the `CE_CACHE_STATS` environment variable. A measuring aid,
+ * not a semantic mode: when it is off — the default — every hook is a single
+ * branch on the `CACHE_STATS` module binding and nothing is recorded.
  *
  * What it answers: how often does a `_anyVersion` bump invalidate a cache
  * entry SPURIOUSLY — the recompute returns the same answer, because the
@@ -73,17 +74,32 @@ export type BumpKind = (typeof BUMP_KINDS)[number];
 const SCOPE_POP_KINDS = ['clean', 'dirty'] as const;
 export type ScopePopKind = (typeof SCOPE_POP_KINDS)[number];
 
-/** True when `CE_CACHE_STATS` is set (and not `'0'`) in the environment at
- * module load. Hot-path hooks test this constant before recording. */
-export const CACHE_STATS: boolean = (() => {
+/** True while the statistics are recorded. Hot-path hooks test this binding
+ * before recording.
+ *
+ * The initial value is true when `CE_CACHE_STATS` is set (and not `'0'`) in
+ * the environment at module load. That is for the repository's own Node runs:
+ * a browser has no `process` object, so the flag is always off there. A
+ * host turns the recording on and off with the engine member
+ * `ce._cacheStats.enabled`, which calls {@link setCacheStatsEnabled}. The
+ * binding is a `let` export, and an ES-module export is a live binding, so
+ * every importer reads the current value. */
+export let CACHE_STATS: boolean = (() => {
   if (typeof process === 'undefined') return false;
   const flag = process.env?.CE_CACHE_STATS;
   return flag !== undefined && flag !== '0';
 })();
 
+/** Turn the recording of the statistics on or off. The counters keep their
+ * values: call {@link resetCacheStats} to start a new measurement. */
+export function setCacheStatsEnabled(enabled: boolean): void {
+  CACHE_STATS = enabled;
+}
+
 /** True under the test runner (`NODE_ENV=test`, which jest sets) or when
- * `CE_CACHE_STATS` is set. The plain call counters the cost pins read
- * (`subtypeStats` in `common/type/subtype.ts`, `descriptorStats` in
+ * `CE_CACHE_STATS` is set at module load. A later change of
+ * {@link CACHE_STATS} does not change it. The plain call counters the cost
+ * pins read (`subtypeStats` in `common/type/subtype.ts`, `descriptorStats` in
  * `boxed-expression/operand-descriptor.ts`) are incremented only when this
  * is true, so a production hot path pays nothing for them. A test reads
  * them through the module export because an ES-module export cannot be
@@ -214,3 +230,40 @@ export function formatCacheStats(): string {
   );
   return lines.join('\n');
 }
+
+/** The engine member `ce._cacheStats`: the host-facing control of these
+ * statistics. It is a member of the engine, not a module export, because a
+ * host that uses the published package cannot reach a module export of this
+ * file (there is no subpath export, and minification renames it) and cannot
+ * set an environment variable in a browser.
+ * @internal
+ */
+export interface CacheStatsControl {
+  /** True while the statistics are recorded. Set it to `true` to start
+   * recording and to `false` to stop. Recording is off by default. */
+  enabled: boolean;
+  /** A copy of the counters: per cache class, the hits, misses and
+   * declines; the counter bumps; the clean and dirty scope pops. */
+  snapshot(): CacheStatsSnapshot;
+  /** Set every counter to zero. */
+  reset(): void;
+  /** The counters as human-readable text, one cache class per group of
+   * lines. */
+  report(): string;
+}
+
+/** The counters are process-global, not per-engine: the caches they count
+ * are shared by every engine in the process. So every engine returns this
+ * same object, and a measurement takes the difference of two snapshots, or
+ * calls `reset()` first. */
+export const cacheStatsControl: CacheStatsControl = {
+  get enabled(): boolean {
+    return CACHE_STATS;
+  },
+  set enabled(value: boolean) {
+    setCacheStatsEnabled(value);
+  },
+  snapshot: cacheStatsSnapshot,
+  reset: resetCacheStats,
+  report: formatCacheStats,
+};

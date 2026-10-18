@@ -3377,20 +3377,23 @@ describe('ERROR-MODEL §1 — which non-collection operands stay unevaluated, an
     }
   });
 
-  test('Differences of a set is a lazy view, not a failure', () => {
-    // The signature of `Differences` is `(collection<any>) ->
-    // indexed_collection`, so a set is admitted. The answer is the lazy
-    // view, which is a value: it reads the set in its iteration order. This
-    // holds for the literal set and for a symbol that holds a set.
+  test('Differences of a set is refused: a set has no order', () => {
+    // The signature of `Differences` is `(indexed_collection<any>) ->
+    // indexed_collection`: the differences read the source in order, and a
+    // set has none. The literal set is refused when the call is boxed, with
+    // the error in place. A symbol that holds a set is admitted by the
+    // boxing, and the evaluation gives the bare error, as `Sort(c)` does.
     const ce = new ComputeEngine();
     ce.declare('c', 'unknown');
     ce.assign('c', ['Set', 3, 1]);
-    for (const source of [['Set', 3, 1], 'c']) {
-      const view = ce.box(['Differences', source]).evaluate();
-      expect(view.isValid).toBe(true);
-      expect(view.isCollection).toBe(true);
-      expect(view.count).toBe(1);
-    }
+    const literal = ce.box(['Differences', ['Set', 3, 1]]);
+    expect(literal.isValid).toBe(false);
+    expect(isFunction(literal) && literal.op1.operator).toBe('Error');
+    const held = ce.box(['Differences', 'c']);
+    expect(held.isValid).toBe(true);
+    const value = held.evaluate();
+    expect(value.operator).toBe('Error');
+    expect(value.toString()).toContain('indexed_collection');
   });
 });
 

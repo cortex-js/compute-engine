@@ -362,6 +362,7 @@ describe('host policy for ambiguous parenthesized application', () => {
 
   test('a known dictionary alias is not replaced by the name scanner', () => {
     const ce = new ComputeEngine();
+    ce.pushScope();
     ce.declare('Mu0', { signature: '(number) -> number' });
     const calls: string[] = [];
     const result = ce.parse(String.raw`\mu_0(x)`, {

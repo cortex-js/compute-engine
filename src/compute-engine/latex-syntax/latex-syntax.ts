@@ -155,7 +155,7 @@ function defaultSerializeOptions(
     endExponentMarker: '}',
 
     truncationMarker: '\\ldots',
-    repeatingDecimal: 'vinculum',
+    repeatingDecimal: 'auto',
 
     // NumberSerializationFormat fields
     fractionalDigits: opts.fractionalDigits ?? 'max',
