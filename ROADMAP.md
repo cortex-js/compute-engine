@@ -192,16 +192,10 @@ options today.
   that scope is popped, folds `Pi` by name in the current scope (the reverse of
   the case fixed on 2026-10-17, where a library-bound `Pi` compiled inside a
   declaring scope now keeps the constant).
-- `g := Floor` (a bare operator symbol as a value) is not seen by
-  `hasJumpFunction` in `library/map-auto-compile.ts`; whether such a body
-  auto-compiles at all is not checked.
 - At `precision = 'machine'`, the larger part of a complex inverse trigonometric
   argument is rounded to a double before the branch-point check runs, so
   `Arcoth(1 + 10⁻³⁰ + 10⁻⁴⁰⁰i).N()` gives the value at the branch point
   (`460.86`, mpmath `34.89`); at the default precision the case declines.
-- `Element(2^54 + 4, Range(0, +oo, 1))` with tolerance 0 evaluates to `True`
-  through a route other than `Range.contains`, which is undecided there since
-  2026-10-17.
 - `Max`/`Min` with an `Indeterminate` operand and a `Linspace` whose
   integer-valued samples exceed the safe integers (`Linspace(0, 10⁹−1, 10⁹)`)
   still reads the samples one by one (1.6 s; memory flat).
@@ -289,6 +283,26 @@ with cycle protection). Default A. (4) `Mean([1+i, +oo])` is `NaN` while
 `Sum([1+i, +oo])` is `Infinity + i` and `Mean([1, +oo])` is `+oo`: the engine
 has no settled answer for a complex value with an infinite real part.
 
+### A lazy operator in the body of a user function under `.N()` reads the approximated parameter in the operands it evaluates exactly (OPEN, design — found 2026-10-17 while making a jump in a body read the exact argument)
+
+A parameter of a user function is bound to the approximation the caller computed
+under `.N()`, and its activation records the written argument for the exact
+re-read of a jump (`exact-argument-source.ts`): `f((25! − 1)/24!).N()` for
+`f := x ↦ Floor(x)` is 24. The re-read happens in the handler of the jump under
+the numeric request. A lazy operator in the body that evaluates a held operand
+EXACTLY reads the parameter's approximation instead: with
+`c := x ↦ If(x < 25, 0, 1)`, `c((25! − 1)/24!).N()` is 1 (the condition `x < 25`
+is evaluated exactly, with `x` the float 25), where
+`If((25! − 1)/24! < 25, 0, 1).N()` is 0; with `g := x ↦ If(True, Floor(x), 0)`,
+`g((25! − 1)/24!).N()` is 25 (the branch is evaluated exactly), where
+`g := x ↦ Floor(x)` gives 24. Closing it: either the lazy operators forward the
+numeric request to the operands they evaluate (then the handler of the jump
+re-reads the argument), or an exact evaluation of a parameter inside such a body
+reads the recorded argument (then the cost of an exact evaluation of the
+argument is paid wherever the body reads the parameter exactly, which the
+recording was designed to avoid: `f(Sum(1/k, k, 1, 10000)).N()` takes 90 ms with
+the float, and 27 s with the exact sum).
+
 ### Small items from the 2026-10-17 re-review (OPEN, small)
 
 - `.N()` of `Floor`, `Ceil` or `Sign` whose operand's float is `~oo`
@@ -298,15 +312,13 @@ has no settled answer for a complex value with an infinite real part.
   operand (the refinement of 2026-10-17 fixes `evaluate()` and the comparisons
   for this input). What should `Floor(~oo)` give?
 - `\{x | x \ne 0\}` gives `unexpected-command` / `unexpected-delimiter` errors
-  in both grammars; only `\mid` works as the set-builder separator.
+  in both grammars; only `\mid` (and `:`) works as the set-builder separator.
+  `|` is also the absolute-value delimiter (`\{2|x|, 3\}`), so a separator role
+  for it needs a decision on the ambiguity before it is parsed.
 - `Filter([If(c, Random(), Nothing), 2], True)` (an impure literal under a lazy
   `Filter`) still gives an error element: the collection handlers do not
   evaluate an impure literal, and a lazy `Filter` does not go through the
   broadcast code that now lists a may-`Nothing` literal first.
-- The ASCII `toString()` still prints `Root(2, 2.0)` and `Power(2, 0.5)` as
-  `sqrt(2)` (`ascii-math.ts` maps an exponent of `0.5` to `sqrt` for `Power`);
-  the JSON, the LaTeX (`\sqrt[2.0]{2}` since 2026-10-17) and the values are
-  right.
 - A real radical product whose radicand is too large folds to a float in
   canonical `Multiply` (`√1009·√1013` gives `1010.998…`); the comment in
   `foldIntoCoefficient()` (`arithmetic-mul-div.ts`) records it as deliberate,

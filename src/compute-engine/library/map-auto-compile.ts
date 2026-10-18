@@ -19,6 +19,7 @@ import { checkDeadline } from '../../common/interruptible.js';
 import { _mapAutoCompileStats } from '../map-auto-compile-stats.js';
 import { exactTierShape, MIN_EXACT_COMPILE_COUNT } from './map-exact-proof.js';
 import { rangeCount } from '../numerics/range-count.js';
+import { appliesJumpFunction } from '../jump-functions.js';
 import type { ExactTierShape, Interval } from './map-exact-proof.js';
 
 /**
@@ -457,64 +458,30 @@ function isExactBody(
 }
 
 /**
- * The functions whose result jumps at a point. Under `.N()`, the interpreter
- * reads an exact operand of such a function exactly, and approximates only
- * the result (ARCHITECTURE.md, "What `.N()` promises"). The compiled code
- * reads the float of the operand, which can be on the other side of the
- * jump: `Floor(x)` at the exact `x = 1 − 10⁻³⁰` is `0`, but the float of `x`
- * is `1`, and so is its floor. `Floor(√x·√3)` at the exact `3` is `3`, but
- * the compiled product of the square roots is `2.9999999999999996`.
- * `Remainder` jumps where `x/m` is half an odd integer, and `Chop` jumps
- * where `|x|` is the tolerance.
- */
-const JUMP_FUNCTIONS: ReadonlySet<string> = new Set([
-  'Floor',
-  'Ceil',
-  'Round',
-  'Truncate',
-  'Fract',
-  'Mod',
-  'Remainder',
-  'Chop',
-  'Sign',
-  'Heaviside',
-  'Less',
-  'LessEqual',
-  'Greater',
-  'GreaterEqual',
-  'Equal',
-  'NotEqual',
-]);
-
-/** True if `e` applies a function of `JUMP_FUNCTIONS`. */
-function appliesJumpFunction(e: Expression): boolean {
-  if (!isFunction(e)) return false;
-  return JUMP_FUNCTIONS.has(e.operator) || e.ops.some(appliesJumpFunction);
-}
-
-/**
  * True if the lambda `fn`, the `Function` literal of a user function it
  * calls, or the value of a symbol it captures applies a function whose
- * result jumps at a point (`JUMP_FUNCTIONS`). A user function with no
- * `Function` literal is read as one that does. A symbol declared `function`
- * and assigned a literal (`g := x ↦ Floor(x)`) has a value, not an operator
- * definition, and the compiled code calls that value, so the value is
- * checked as `isExactBody()` checks it.
+ * result jumps at a point (`JUMP_FUNCTIONS`, `jump-functions.ts`). A user
+ * function with no `Function` literal is read as one that does. A symbol
+ * declared `function` and assigned a literal (`g := x ↦ Floor(x)`) or a
+ * bare function (`g := Floor`) has a value, not an operator definition, and
+ * the compiled code calls that value, so the value is checked as
+ * `isExactBody()` checks it (`appliesJumpFunction` reads a bare symbol as
+ * the function it names).
  */
 function hasJumpFunction(
   ce: ComputeEngine,
   fn: Expression,
   deps: MapCompileDep[]
 ): boolean {
-  if (appliesJumpFunction(fn)) return true;
+  if (appliesJumpFunction(ce, fn)) return true;
   for (const dep of deps) {
     if (dep.operatorDef === undefined) {
       const value = dep.valueDef?.value;
-      if (value !== undefined && appliesJumpFunction(value)) return true;
+      if (value !== undefined && appliesJumpFunction(ce, value)) return true;
       continue;
     }
     const literal = userFnLiteral(ce, dep.name);
-    if (literal === undefined || appliesJumpFunction(literal)) return true;
+    if (literal === undefined || appliesJumpFunction(ce, literal)) return true;
   }
   return false;
 }

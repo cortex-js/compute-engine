@@ -299,7 +299,11 @@ import {
 } from './object-deps.js';
 import { containsObject } from './object-walk.js';
 import { cycleDetectionCount } from './cycle-guard.js';
-import { apply, lookupApplicable } from '../function-utils.js';
+import {
+  apply,
+  exactArgumentSources,
+  lookupApplicable,
+} from '../function-utils.js';
 import { isInferredTypedParameter } from './inferred-annotations.js';
 import {
   absentScalarMarker,
@@ -10574,13 +10578,13 @@ async function applyFunctionLiteralAsync(
   // arguments.
   const value = calleeValue(expr, def);
   let ops: Expression[] | undefined;
-  // A lazy operator receives its operands unevaluated
-  // (`lazyOperatorCallee()`), so they are not evaluated here.
+  // An operator named by the value evaluates its operands itself
+  // (`operatorCallee()`), so they are not evaluated here.
   if (
     value &&
     value.type.matches('function') &&
     !value.type.isUnknown &&
-    lazyOperatorCallee(engine, value) === undefined
+    operatorCallee(engine, value) === undefined
   ) {
     ops = [];
     for (const x of expr.ops)
@@ -10596,21 +10600,19 @@ async function applyFunctionLiteralAsync(
 }
 
 /** The name of the operator that `value` names, when `value` is the symbol
- * of a `lazy` operator definition (`aliasH` holds `bob_H`, and `bob_H` is
- * lazy). A call through the variable then applies that operator to the
- * operands unevaluated, as the direct call `bob_H(y·z)` does: with
- * `y := 10`, both give `Hold(y·z)`, and not `Hold(10z)`. `undefined`
- * otherwise. */
-function lazyOperatorCallee(
+ * of an operator definition (`g` holds `Floor`; `aliasH` holds `bob_H`,
+ * and `bob_H` is lazy). A call through the variable then applies that
+ * operator to the operands as written, as the direct call does: with
+ * `y := 10`, `aliasH(y·z)` and `bob_H(y·z)` both give `Hold(y·z)`, and not
+ * `Hold(10z)`. `undefined` otherwise. */
+function operatorCallee(
   ce: ComputeEngine,
   value: Expression
 ): string | undefined {
   if (!isSymbol(value)) return undefined;
   const name = value.symbol;
   const def = ce.lookupDefinition(name);
-  return def !== undefined && isOperatorDef(def) && def.operator.lazy
-    ? name
-    : undefined;
+  return def !== undefined && isOperatorDef(def) ? name : undefined;
 }
 
 /** The function literal that an application of `expr` applies: the value
@@ -10657,12 +10659,18 @@ function applyFunctionLiteralWith(
     return expr.engine.typeError('function', value.type, value.toString());
   }
 
-  // The variable holds the name of a lazy operator: apply it to the
-  // operands as they were written, before any of them is evaluated.
-  const lazyName =
-    value === undefined ? undefined : lazyOperatorCallee(expr.engine, value);
-  if (lazyName !== undefined) {
-    const call = expr.engine.function(lazyName, expr.ops);
+  // The variable holds the name of an operator (`g := Floor`, or a lazy
+  // `aliasH := bob_H`): the operator is applied to the operands as they
+  // were written, and evaluates them itself, exactly as the direct call
+  // does. A lazy operator must not see them evaluated at all; an operator
+  // that uses the exact value of an exact operand under `.N()` (`Floor`,
+  // `exactRoundingOperand` in `library/arithmetic.ts`) does so through the
+  // variable too, where the approximated operands lost it: `g((25! −
+  // 1)/24!).N()` was 25.
+  const operatorName =
+    value === undefined ? undefined : operatorCallee(expr.engine, value);
+  if (operatorName !== undefined) {
+    const call = expr.engine.function(operatorName, expr.ops);
     return awaitBody ? call.evaluateAsync(options) : call.evaluate(options);
   }
 
@@ -11018,12 +11026,23 @@ function applyFunctionLiteralWith(
     // `Apply` of the literal.
     const nonconforming = scalarConformance(ops);
     if (nonconforming !== undefined) return nonconforming;
+    // Under `.N()`, the written operands are recorded behind the
+    // activations (`exactArgumentSources`), so that a jump in the body
+    // (`Floor(x)`) reads the exact value of `x` where the float is near the
+    // jump, as `Floor(y)` does for a global `y`: `f((25! − 1)/24!).N()` for
+    // `f := x ↦ Floor(x)` was 25 where `Floor((25! − 1)/24!).N()` is 24.
+    // The arguments themselves stay the approximations: nothing is
+    // evaluated twice, and the exact evaluation is paid only by a re-read.
+    const exactSources =
+      options?.numericApproximation === true && ops.length === expr.ops.length
+        ? exactArgumentSources(expr.engine, expr.ops)
+        : undefined;
     return apply(
       value,
       declaredArgs(ops),
       awaitBody
-        ? { ...options, awaitStatements: true, arityFrame }
-        : { ...options, arityFrame },
+        ? { ...options, awaitStatements: true, arityFrame, exactSources }
+        : { ...options, arityFrame, exactSources },
       'bubble',
       expr._withParseScope(() => expr.engine.function(expr.operator, ops))
     );

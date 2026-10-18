@@ -21,6 +21,7 @@ import { nextDown, nextUp } from '../numerics/numeric.js';
 import { isFunction, isSymbol, isNumber } from './type-guards.js';
 import { ExpressionMap } from './expression-map.js';
 import { isTransitivelyPure } from './transitive-purity.js';
+import { exactArgumentSourceOf } from './exact-argument-source.js';
 import { domainToType, SIGNED_NUMBER_SETS } from './number-set-types.js';
 
 /**
@@ -148,6 +149,13 @@ export function isExactRealLiteral(x: Expression): boolean {
  * is true, but an evaluation of `r` draws a new number. The caller does this
  * only when the float of the operand is near the point, because an exact
  * evaluation can cost much more than a numeric one.
+ *
+ * A parameter of a user function is bound to the approximation the caller
+ * computed, and its activation records the argument the caller wrote when
+ * that argument is pure and ground (`exact-argument-source.ts`): the exact
+ * value is then the value of that argument, evaluated here, exactly, for
+ * this re-read only. `f((25! − 1)/24!).N()` for `f := x ↦ Floor(x)` is 24,
+ * as `Floor((25! − 1)/24!).N()` is.
  */
 export function exactRealValueOf(
   original: Expression | undefined
@@ -155,6 +163,17 @@ export function exactRealValueOf(
   if (original === undefined) return undefined;
   if (isNumber(original))
     return isExactRealLiteral(original) ? original : undefined;
+  if (isSymbol(original)) {
+    const def = original.engine.lookupDefinition(original.symbol);
+    const source =
+      def !== undefined && 'value' in def
+        ? exactArgumentSourceOf(def.value)
+        : undefined;
+    if (source !== undefined) {
+      const value = source.evaluate();
+      return isExactRealLiteral(value) ? value : undefined;
+    }
+  }
   if (!isTransitivelyPure(original)) return undefined;
   const value = original.evaluate();
   return isExactRealLiteral(value) ? value : undefined;

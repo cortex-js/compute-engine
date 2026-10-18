@@ -57,7 +57,11 @@ import type {
   TypeProvenanceEntry,
 } from '../global-types.js';
 
-import { applicable, type ApplyOptions } from '../function-utils.js';
+import {
+  applicable,
+  exactArgumentSources,
+  type ApplyOptions,
+} from '../function-utils.js';
 import { runWithEvaluationEffects } from '../effects-registry.js';
 
 import { DEFAULT_COMPLEXITY } from './constants.js';
@@ -2352,12 +2356,34 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       // (`ApplyOptions.arityFrame`): `h(1, 2, 3)` for a two-parameter `h`
       // is `Error("unexpected-argument", "3")` with the frame `(h, 3)`.
       const arityFrame = { operator: this.name, firstArgumentIndex: 1 };
+      // Under `.N()`, the written operands (`options.expression`, the node
+      // being evaluated; `xs` holds their approximations) are recorded
+      // behind the activations (`exactArgumentSources`), so that a jump in
+      // the body reads the exact value of its operand where the float is
+      // near the jump: `f((25! − 1)/24!).N()` for `f(x) := Floor(x)` was
+      // 25 where `Floor((25! − 1)/24!).N()` is 24. A literal held as a
+      // VALUE takes the same rule in `applyFunctionLiteralWith`
+      // (`boxed-function.ts`). A lazy definition holds its operands.
+      const exactSources = (
+        xs: ReadonlyArray<Expression>,
+        options: { numericApproximation?: boolean; expression?: Expression }
+      ) =>
+        options.numericApproximation === true &&
+        options.expression !== undefined &&
+        isFunction(options.expression) &&
+        options.expression.nops === xs.length
+          ? exactArgumentSources(this.engine, options.expression.ops)
+          : undefined;
       evaluate = (xs, options) =>
         fn(
           xs,
           this.lazy
             ? { ...options, holdArguments: true, arityFrame }
-            : { ...options, arityFrame }
+            : {
+                ...options,
+                arityFrame,
+                exactSources: exactSources(xs, options),
+              }
         );
       Object.defineProperty(evaluate, 'toString', {
         value: () => boxedFn.toString(),
@@ -2382,6 +2408,15 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
             _contextStack: stack,
             awaitStatements: true,
             arityFrame,
+            exactSources: this.lazy
+              ? undefined
+              : exactSources(
+                  xs,
+                  options as {
+                    numericApproximation?: boolean;
+                    expression?: Expression;
+                  }
+                ),
           };
           return runWithEvaluationEffects(
             engine,

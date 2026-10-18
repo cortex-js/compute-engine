@@ -56,6 +56,7 @@ import {
   canonicalFunctionLiteralOperands,
   canonicalWithFreshPlaceholders,
   captureNestedLocals,
+  exactArgumentSources,
 } from '../function-utils.js';
 import { freeAnonymousSlots } from '../boxed-expression/function-literal.js';
 
@@ -4946,7 +4947,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             callArgs),
         ]);
       },
-      evaluate: (ops, { numericApproximation, engine }) => {
+      evaluate: (ops, { numericApproximation, engine, expression }) => {
         // A function literal with scalar parameters maps over a collection
         // argument, like a named user function (`applyLiteralMaps`). An
         // error callee or argument bubbles first, as `apply()` does; an
@@ -4990,10 +4991,30 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           numericApproximation
         );
         if (tupleMapped !== undefined) return tupleMapped;
+        // Under `.N()`, the written arguments (`expression`, the node being
+        // evaluated) are recorded behind the activations
+        // (`exactArgumentSources`), as a call of a named function records
+        // them (`applyFunctionLiteralWith`, `boxed-function.ts`), so that a
+        // jump in the body reads the exact value of its operand:
+        // `Apply(x ↦ Floor(x), (25! − 1)/24!).N()` was 25, for 24.
+        const exactSources =
+          numericApproximation &&
+          expression !== undefined &&
+          isFunction(expression) &&
+          expression.nops === ops.length
+            ? exactArgumentSources(engine, expression.ops.slice(1))
+            : undefined;
         // The breadcrumb of a surplus argument names this `Apply`, whose
         // first argument is its second operand (`ApplyOptions.arityFrame`).
+        // Under `.N()` the body runs with the numeric request, as the body
+        // of a named function does (`applyFunctionLiteralWith`): a jump in
+        // it then reads the recorded argument. Applied exactly, the body
+        // read the approximation bound to the parameter, and the numeric
+        // pass over the result below could not undo that.
         const result = apply(ops[0], ops.slice(1), {
           arityFrame: { operator: 'Apply', firstArgumentIndex: 2 },
+          exactSources,
+          ...(numericApproximation ? { numericApproximation: true } : {}),
         });
         // An argument that the literal refuses (a parameter declared `real`
         // and a string argument) is the value of the application, as for a

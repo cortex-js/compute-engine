@@ -7508,6 +7508,32 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (hasSymbolicRangeBounds(expr)) return undefined;
         const [lower, upper, step] = range(expr);
         if (step === 0) return false;
+        // An exact integer target on an integer grid is decided in `bigint`
+        // arithmetic, from the exact operands (`exactIntegerGrid`). Past the
+        // safe integers the machine grid index `(t − lower) / step` below
+        // keeps no fractional digit, so the tolerance test cannot tell a
+        // grid point from its neighbors, and the answer was `undefined` for
+        // `2⁵⁴ + 4` in `Range(0, +oo, 1)` (which the `Element` operator
+        // decided through its own route). A finite `upper` is a bound, not a
+        // grid point: `Range(1, 5, 3)` ends at 4. A step that runs away from
+        // `upper` (`Range(1, +oo, -1)`, `Range(1, -oo)`) is left to the
+        // count below, which makes such a range empty.
+        const exact = exactIntegerLiteral(target);
+        const grid =
+          exact === undefined
+            ? undefined
+            : exactIntegerGrid(expr, lower, upper, step);
+        if (exact !== undefined && grid !== undefined) {
+          const offset = exact - grid.lower;
+          if (offset % grid.step !== 0n || offset / grid.step < 0n)
+            return false;
+          if (
+            grid.upper !== undefined &&
+            (step > 0 ? exact > grid.upper : exact < grid.upper)
+          )
+            return false;
+          return true;
+        }
         // The element count of the `count` handler (`rangeElementCount()`):
         // the exact count for exact rational operands, which never counts
         // an element past `upper`, and otherwise the machine count. A count
@@ -15899,6 +15925,69 @@ export function literalCollectionEmptiness(
     return rangeCount(lower, upper, step) === 0;
   }
   return undefined;
+}
+
+/** The value of an exact integer number literal as a `bigint`, read from
+ * the exact value (`asBigint` on the expression; its big decimal is rounded
+ * to the working precision, and `10⁴⁰ + 1` read through it is `10⁴⁰`), or
+ * `undefined` for any other expression (a float, a rational, a complex
+ * number, a symbol). For the exact grid test of `Range.contains`. */
+function exactIntegerLiteral(x: Expression): bigint | undefined {
+  if (!isNumber(x) || !x.isExact || x.isComplex) return undefined;
+  if (x.isInteger !== true) return undefined;
+  const n = asBigint(x);
+  return n === null ? undefined : n;
+}
+
+/**
+ * The integer grid of a `Range` as `bigint`s, for the exact grid test of
+ * `Range.contains`, or `undefined` when the grid is not known exactly.
+ *
+ * Each bound and the step is read from its operand when that is an exact
+ * integer literal (`2⁵⁴ + 1`, whose double is `2⁵⁴`), and otherwise from
+ * its machine value when that is a safe integer (the default lower bound
+ * 1, the default step ±1, a small float bound `5.0`). A float bound past
+ * the safe integers (`Range(1e20, +oo)`) gives no exact grid: the elements
+ * of such a range are the machine sums `lower + step·i`
+ * (`rangeProducesMachineElement`), not the exact grid. `upper` is
+ * `undefined` for an infinite upper bound. A step that runs away from the
+ * upper bound gives no grid (the range is empty, which the count decides).
+ */
+function exactIntegerGrid(
+  expr: Expression,
+  lower: number,
+  upper: number,
+  step: number
+): { lower: bigint; step: bigint; upper: bigint | undefined } | undefined {
+  if (!isFunction(expr)) return undefined;
+  const ops = expr.ops;
+  const [lowerOp, upperOp, stepOp] =
+    ops.length === 1
+      ? [undefined, ops[0], undefined]
+      : ops.length === 2
+        ? [ops[0], ops[1], undefined]
+        : [ops[0], ops[1], ops[2]];
+  const exactOf = (
+    op: Expression | undefined,
+    machine: number
+  ): bigint | undefined => {
+    if (op !== undefined) {
+      const n = exactIntegerLiteral(op);
+      if (n !== undefined) return n;
+    }
+    return Number.isSafeInteger(machine) ? BigInt(machine) : undefined;
+  };
+  const lo = exactOf(lowerOp, lower);
+  const st = exactOf(stepOp, step);
+  if (lo === undefined || st === undefined || st === 0n) return undefined;
+  if (!Number.isFinite(upper)) {
+    if (st > 0n !== upper > 0) return undefined;
+    return { lower: lo, step: st, upper: undefined };
+  }
+  const up = exactOf(upperOp, upper);
+  if (up === undefined) return undefined;
+  if (st > 0n ? up < lo : up > lo) return undefined;
+  return { lower: lo, step: st, upper: up };
 }
 
 export function range(

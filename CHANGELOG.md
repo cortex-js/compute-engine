@@ -2,6 +2,44 @@
 
 ### Issues Resolved
 
+- **A jump in the body of a user function reads the exact argument under
+  `.N()`.** `.N()` promises a correct result: `Floor((25! − 1)/24!).N()` is 24,
+  where the float of the operand is 25. A user function received its arguments
+  approximated on every route (a literal held as a value, a one-step definition
+  `f(x) := ⌊x⌋`, a declared function, `Apply`, a bare function held as a value
+  `g := Floor`), so `f((25! − 1)/24!).N()` for `f := x ↦ Floor(x)` was 25, and
+  so was a call through another function. The parameter is still bound to the
+  approximation, and the activation now records the written argument when it is
+  pure and resolves the same from inside the function (an exact literal, an
+  expression with no free symbol, a global with an exact value, a parameter of
+  the caller passed on); the handler of a jump (`Floor`, `Round`, `Mod`, `Sign`,
+  a comparison) re-reads that argument exactly only when the float is near the
+  jump, as it does for a global (`exactRealValueOf`). Nothing is evaluated twice
+  and nothing is evaluated exactly far from a jump:
+  `f(Sum(1/k, k, 1, 10000)).N()` costs what `Floor(Sum(…)).N()` costs. The same
+  on the asynchronous routes, and `Apply` runs the body with the numeric request
+  as a named call does. A bare function held as a value is applied to the
+  written operands, as a lazy operator already was. The auto-compilation of a
+  `Map` (`library/map-auto-compile.ts`) now sees such a value too, so a body
+  that applies `g` with `g := Floor` computes an element with an exact input by
+  the interpreter, as a body that applies `Floor` does; it compiled it before,
+  and `Map(x ↦ g(x), [(25! − 1)/24!, …])` at machine precision gave 25.
+
+- **`Range.contains` decides an exact integer target on an integer grid
+  exactly.** The membership test read the target as a double and tested the grid
+  index `(t − lower) / step` within the tolerance: past the safe integers the
+  index keeps no fractional digit, so `2⁵⁴ + 4` in `Range(0, +oo, 1)` was
+  undecided (while the `Element` operator decided it through its own route). An
+  exact integer target on a grid with integer bounds and step is now tested in
+  `bigint` arithmetic, in either direction, with a finite upper bound read as a
+  bound and not as a grid point.
+
+- **The ASCII serializer prints a float exponent of one half as a power.**
+  `Power(2, 0.5)` and `Root(2, 2.0)` (the parse of `\sqrt[2.0]{2}`) printed
+  `sqrt(2)`, where the JSON, the LaTeX (`2^{0.5}`, `\sqrt[2.0]{2}`) and the
+  values keep the float. They print `2^(0.5)` and `root(2)(2)`; an exact half
+  and an exact two are still `sqrt`.
+
 - **`HurwitzZeta(s, a)` at a negative real `a` and an odd order answers the
   value, or declines, where it answered rounding noise.** The terms of ζ(s, a)
   left of the origin are large next to the value and cancel against the rest: at

@@ -72,6 +72,12 @@ import {
 } from './boxed-expression/provisional-application.js';
 import { activeRollbackFrame } from './inference-rollback.js';
 import { isScratchBinding } from './scratch-scopes.js';
+import { isTransitivelyPure } from './boxed-expression/transitive-purity.js';
+import { isExactRealLiteral } from './boxed-expression/constraint-subject.js';
+import {
+  exactArgumentSourceOf,
+  setExactArgumentSource,
+} from './boxed-expression/exact-argument-source.js';
 import {
   effectsContractStateOf,
   recordEffectsTransition,
@@ -1944,6 +1950,14 @@ function isQualifiedProtocolMember(e: Expression): boolean {
 export type ApplyOptions = Partial<EvaluateOptions> & {
   holdArguments?: boolean;
   /**
+   * Under `.N()`, the written arguments behind the (approximated) `args`,
+   * one per argument position, `undefined` where there is none to record
+   * (`exactArgumentSources`). The activation of a plain parameter records
+   * its entry (`exact-argument-source.ts`), and a jump in the body re-reads
+   * the exact value from it when the float is near the jump.
+   */
+  exactSources?: ReadonlyArray<Expression | undefined>;
+  /**
    * The names of the literal's BOUND-VARIABLE parameters (an Epsil `hold
    * mySum(body, bind i, n)`; `ClauseAttributes.bind` in `multi-clause.ts`).
    * Each must be applied to a SYMBOL — the variable the caller names — and is
@@ -1977,6 +1991,47 @@ export type ApplyOptions = Partial<EvaluateOptions> & {
    */
   arityFrame?: { operator: string; firstArgumentIndex: number };
 };
+
+/**
+ * The written arguments to record on the activations of a call under
+ * `.N()` (`ApplyOptions.exactSources`), one per operand of `ops`, or
+ * `undefined` at a position with nothing to record.
+ *
+ * A recorded argument is evaluated again, exactly, from inside the
+ * function, when a jump in the body needs its exact value
+ * (`exactRealValueOf`, `boxed-expression/constraint-subject.ts`). So it
+ * must be pure (the re-read repeats no effect) and must resolve the same
+ * from inside the function, where a name can be a parameter of the callee:
+ * - an exact number literal is itself;
+ * - a symbol is read now, in the caller's frame: the source its own
+ *   activation records (a parameter of the caller passed on, `f2 := x ↦
+ *   f(x) + 1`), or its exact value when it holds one (a global `y`);
+ * - an expression with no free symbol (`(25! − 1)/24!`, `Sum(1/k, k, 1,
+ *   n)` with a literal `n`) is itself when it is transitively pure;
+ * - anything else is not recorded: the body then reads the float.
+ * Nothing is evaluated here: the cost of an exact evaluation is paid only
+ * by a re-read near a jump.
+ */
+export function exactArgumentSources(
+  ce: ComputeEngine,
+  ops: ReadonlyArray<Expression>
+): ReadonlyArray<Expression | undefined> {
+  return ops.map((op) => {
+    if (isNumber(op)) return isExactRealLiteral(op) ? op : undefined;
+    if (isSymbol(op)) {
+      const def = ce.lookupDefinition(op.symbol);
+      if (def === undefined || !('value' in def)) return undefined;
+      const recorded = exactArgumentSourceOf(def.value);
+      if (recorded !== undefined) return recorded;
+      const value = ce._getSymbolValue(op.symbol);
+      return value !== undefined && isExactRealLiteral(value)
+        ? value
+        : undefined;
+    }
+    if (!isFunction(op) || containsFreeSymbol(op)) return undefined;
+    return isTransitivelyPure(op) ? op : undefined;
+  });
+}
 
 /**
  * Apply arguments to an expression which is either:
@@ -2246,6 +2301,16 @@ function declareParameterActivation(
   const activation = freshScope.bindings.get(name);
   if (activation !== undefined && 'value' in activation)
     markActivation(activation.value, staticBinding);
+}
+
+/** True when `binding` is a definition with a value half (`isValueDef`
+ * lives in `utils.ts`, which this module cannot import). */
+function isValueDefinitionHalf(binding: object): binding is { value: object } {
+  return (
+    'value' in binding &&
+    (binding as { value?: unknown }).value !== undefined &&
+    typeof (binding as { value?: unknown }).value === 'object'
+  );
 }
 
 /** One name a call frame binds for one parameter. */
@@ -4797,6 +4862,21 @@ function makeLambda(
         freshScope,
         bodyFn.localScope
       );
+    // The written argument behind a plain parameter's activation, for the
+    // exact re-read of a jump in the body (`ApplyOptions.exactSources`,
+    // `exact-argument-source.ts`). A destructured leaf has no argument of
+    // its own, and the rest parameter collects several.
+    const sources = options?.exactSources;
+    if (sources !== undefined)
+      for (const leaf of leaves) {
+        const i = params.indexOf(leaf.site);
+        if (i < 0 || i === restIndex) continue;
+        const source = sources[i];
+        if (source === undefined) continue;
+        const activation = freshScope.bindings.get(leaf.name);
+        if (activation !== undefined && isValueDefinitionHalf(activation))
+          setExactArgumentSource(activation.value, source);
+      }
 
     // Re-parent body scope to chain through freshScope, so nested
     // scoped expressions (Sum, Product) can find params by walking up:

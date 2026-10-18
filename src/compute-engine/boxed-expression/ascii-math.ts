@@ -368,9 +368,11 @@ const OPERATORS: Record<
       // of `Power`, so that a base with a lower precedence keeps its
       // parentheses in a product: `(a + b) * c`, not `a + b * c`.
       if (exponent === '1') return serialize(expr.op1, 15);
-      if (exponent === '(1/2)' || exponent === '1/2' || exponent === '0.5')
+      // An EXACT half: `Power(2, 0.5)` is a float power, printed as one
+      // (the LaTeX and the JSON keep it too), and its value is a float.
+      if (exponent === '(1/2)' || exponent === '1/2')
         return `sqrt(${serialize(expr.op1)})`;
-      if (exponent === '-0.5' || exponent === '-1/2' || exponent === '(-1/2)')
+      if (exponent === '-1/2' || exponent === '(-1/2)')
         return `1 / sqrt(${serialize(expr.op1)})`;
       const base = serializePowerBase(expr.op1, serialize);
       // Wrap the exponent in parentheses if longer than 1 character
@@ -503,7 +505,10 @@ const FUNCTIONS: Record<
     const expr = expr_ as FnExpr;
     const x = expr.op1;
     const n = expr.op2;
-    if (n.isSame(2)) return `sqrt${wrap(serialize(x))}`;
+    // An EXACT 2: `Root(2, 2.0)` (the parse of `\sqrt[2.0]{2}`) is a float
+    // root, printed as one.
+    if (isNumber(n) && n.isExact && n.isSame(2))
+      return `sqrt${wrap(serialize(x))}`;
     return `root${wrap(serialize(n))}${wrap(serialize(x))}`;
   },
   Square: (expr, serialize) =>
